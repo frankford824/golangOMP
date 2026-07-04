@@ -629,6 +629,8 @@ type AssetWorkbenchDriveFile struct {
 	SubmissionItemID    int64     `json:"submission_item_id" db:"submission_item_id"`
 	SubmissionNo        string    `json:"submission_no" db:"submission_no"`
 	OwnerUserID         int64     `json:"owner_user_id" db:"owner_user_id"`
+	OwnerName           string    `json:"owner_name" db:"owner_name"`
+	OwnerUsername       string    `json:"owner_username" db:"owner_username"`
 	UploadDirectoryID   *int64    `json:"upload_directory_id,omitempty" db:"upload_directory_id"`
 	UploadDirectoryName string    `json:"upload_directory_name" db:"upload_directory_name"`
 	DifficultyClass     string    `json:"difficulty_class,omitempty" db:"difficulty_class"`
@@ -646,6 +648,7 @@ type AssetWorkbenchDriveFile struct {
 	PricingStatus       string    `json:"pricing_status,omitempty" db:"pricing_status"`
 	SettlementStatus    string    `json:"settlement_status,omitempty" db:"settlement_status"`
 	PageCount           int       `json:"page_count,omitempty" db:"page_count"`
+	GrossAmount         float64   `json:"gross_amount" db:"gross_amount"`
 	BusinessMonth       string    `json:"business_month" db:"business_month"`
 	CreatedAt           time.Time `json:"created_at" db:"created_at"`
 	LocatePage          int       `json:"locate_page,omitempty" db:"-"`

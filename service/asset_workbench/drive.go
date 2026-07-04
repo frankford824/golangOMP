@@ -4,6 +4,7 @@ import (
 	"context"
 	"sort"
 	"strings"
+	"time"
 
 	"workflow/domain"
 	"workflow/repo"
@@ -76,7 +77,7 @@ func (s *Service) ListDriveOrders(ctx context.Context, actor domain.RequestActor
 	return items, nil
 }
 
-func (s *Service) ListDriveFiles(ctx context.Context, actor domain.RequestActor, directoryID *int64, unassigned bool, orderNo string, page, pageSize int) (*DriveFilesResult, *domain.AppError) {
+func (s *Service) ListDriveFiles(ctx context.Context, actor domain.RequestActor, directoryID *int64, unassigned bool, orderNo string, keyword string, ownerKeyword string, createdFrom *time.Time, createdTo *time.Time, page, pageSize int) (*DriveFilesResult, *domain.AppError) {
 	if err := s.requireRepo(); err != nil {
 		return nil, err
 	}
@@ -86,6 +87,10 @@ func (s *Service) ListDriveFiles(ctx context.Context, actor domain.RequestActor,
 		UploadDirectoryID: directoryID,
 		Unassigned:        unassigned,
 		OrderNo:           orderNo,
+		Keyword:           strings.TrimSpace(keyword),
+		OwnerKeyword:      strings.TrimSpace(ownerKeyword),
+		CreatedFrom:       createdFrom,
+		CreatedTo:         createdTo,
 		Page:              page,
 		PageSize:          pageSize,
 	})

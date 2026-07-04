@@ -2,6 +2,7 @@ package mysqlrepo
 
 import (
 	"context"
+	"database/sql/driver"
 	"fmt"
 	"strings"
 	"testing"
@@ -37,18 +38,20 @@ func TestDriveListFilesWithoutOrderListsDirectoryByUploadTime(t *testing.T) {
 		WithArgs(60, 0).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "submission_id", "submission_item_id", "submission_no", "owner_user_id",
+			"owner_name", "owner_username",
 			"upload_directory_id", "upload_directory_name", "difficulty_class", "order_no",
 			"original_filename", "display_name", "relative_path", "upload_batch_id", "is_folder_upload",
 			"file_type", "mime_type", "file_size", "preview_status",
 			"qc_status", "pricing_status", "settlement_status", "page_count",
-			"business_month", "created_at",
+			"gross_amount", "business_month", "created_at",
 		}).AddRow(
 			int64(42), int64(11), int64(21), "SUB-001", int64(7),
+			"张三", "zhangsan",
 			int64(3), "挂布", "A", "AWF20260703080000ABCDEF12",
 			"sample.jpg", "sample.jpg", "folder/sample.jpg", "batch-1", true,
 			"jpg", "image/jpeg", int64(1024), "ready",
 			"passed", "priced", "pending", 1,
-			"2026-07", now,
+			12.5, "2026-07", now,
 		))
 
 	workbenchRepo := NewAssetWorkbenchRepo(New(db))
@@ -58,6 +61,92 @@ func TestDriveListFilesWithoutOrderListsDirectoryByUploadTime(t *testing.T) {
 	}
 	if total != 1 || len(items) != 1 || items[0].ID != 42 {
 		t.Fatalf("DriveListFiles() total=%d items=%+v, want one file 42", total, items)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestDriveListFilesAppliesUploadOverviewFilters(t *testing.T) {
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherFunc(func(expectedSQL, actualSQL string) error {
+		switch expectedSQL {
+		case "drive-list-files-count", "drive-list-files-select":
+			checks := []string{
+				"f.owner_user_id = ?",
+				"f.original_filename LIKE ?",
+				"COALESCE(p.real_name, '') LIKE ?",
+				"COALESCE(u.display_name, '') LIKE ?",
+				"COALESCE(u.username, '') LIKE ?",
+				"f.created_at >= ?",
+				"f.created_at <= ?",
+				"LEFT JOIN users u ON u.id = f.owner_user_id",
+				"LEFT JOIN asset_workbench_profiles p ON p.user_id = f.owner_user_id",
+			}
+			for _, check := range checks {
+				if !strings.Contains(actualSQL, check) {
+					return fmt.Errorf("DriveListFiles query missing %q:\n%s", check, actualSQL)
+				}
+			}
+		}
+		return nil
+	})))
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	ownerID := int64(7)
+	createdFrom := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	createdTo := time.Date(2026, 7, 3, 23, 59, 59, 0, time.UTC)
+	args := []driver.Value{
+		ownerID,
+		"%海报%",
+		"%海报%",
+		"%海报%",
+		"%海报%",
+		"%海报%",
+		"%海报%",
+		"%海报%",
+		"%海报%",
+		"%海报%",
+		"%海报%",
+		"%海报%",
+		"%张三%",
+		"%张三%",
+		"%张三%",
+		createdFrom,
+		createdTo,
+	}
+	mock.ExpectQuery("drive-list-files-count").
+		WithArgs(args...).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(0)))
+	mock.ExpectQuery("drive-list-files-select").
+		WithArgs(append(args, 25, 25)...).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "submission_id", "submission_item_id", "submission_no", "owner_user_id",
+			"owner_name", "owner_username",
+			"upload_directory_id", "upload_directory_name", "difficulty_class", "order_no",
+			"original_filename", "display_name", "relative_path", "upload_batch_id", "is_folder_upload",
+			"file_type", "mime_type", "file_size", "preview_status",
+			"qc_status", "pricing_status", "settlement_status", "page_count",
+			"gross_amount", "business_month", "created_at",
+		}))
+
+	workbenchRepo := NewAssetWorkbenchRepo(New(db))
+	_, total, err := workbenchRepo.DriveListFiles(context.Background(), repo.AssetWorkbenchDriveFilter{
+		OwnerUserID:  &ownerID,
+		Keyword:      " 海报 ",
+		OwnerKeyword: " 张三 ",
+		CreatedFrom:  &createdFrom,
+		CreatedTo:    &createdTo,
+		Page:         2,
+		PageSize:     25,
+	})
+	if err != nil {
+		t.Fatalf("DriveListFiles() error = %v", err)
+	}
+	if total != 0 {
+		t.Fatalf("total = %d, want 0", total)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
@@ -90,11 +179,16 @@ func TestBuildDriveSearchBaseFallbackUsesContainsLike(t *testing.T) {
 	if strings.Contains(base, "MATCH(") {
 		t.Fatalf("fallback drive search should not use fulltext: %s", base)
 	}
-	if !strings.Contains(base, "f.original_filename LIKE ? OR f.display_name LIKE ? OR f.relative_path LIKE ? OR i.order_no LIKE ? OR s.submission_no LIKE ?") {
-		t.Fatalf("fallback drive search should use contains LIKE: %s", base)
+	if !strings.Contains(base, "f.original_filename LIKE ? OR f.display_name LIKE ? OR f.relative_path LIKE ? OR i.order_no LIKE ? OR s.submission_no LIKE ? OR COALESCE(p.real_name, '') LIKE ? OR COALESCE(u.display_name, '') LIKE ? OR COALESCE(u.username, '') LIKE ?") {
+		t.Fatalf("fallback drive search should use contains LIKE including uploader identity: %s", base)
 	}
-	if len(args) != 5 || args[0] != "%海报%" || args[1] != "%海报%" || args[2] != "%海报%" || args[3] != "%海报%" || args[4] != "%海报%" {
-		t.Fatalf("args = %#v, want five LIKE args", args)
+	if len(args) != 8 {
+		t.Fatalf("args = %#v, want eight LIKE args", args)
+	}
+	for i, arg := range args {
+		if arg != "%海报%" {
+			t.Fatalf("args[%d] = %#v, want LIKE keyword", i, arg)
+		}
 	}
 }
 
@@ -124,18 +218,20 @@ func TestDriveLocateFileFiltersVoidedItems(t *testing.T) {
 		WithArgs(int64(42)).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "submission_id", "submission_item_id", "submission_no", "owner_user_id",
+			"owner_name", "owner_username",
 			"upload_directory_id", "upload_directory_name", "difficulty_class", "order_no",
 			"original_filename", "display_name", "relative_path", "upload_batch_id", "is_folder_upload",
 			"file_type", "mime_type", "file_size", "preview_status",
 			"qc_status", "pricing_status", "settlement_status", "page_count",
-			"business_month", "created_at",
+			"gross_amount", "business_month", "created_at",
 		}).AddRow(
 			int64(42), int64(11), int64(21), "SUB-001", int64(7),
+			"张三", "zhangsan",
 			int64(3), "挂布", "A", "ORDER-001",
 			"sample.jpg", "sample.jpg", "folder/sample.jpg", "batch-1", true,
 			"jpg", "image/jpeg", int64(1024), "ready",
 			"passed", "priced", "pending", 1,
-			"2026-07", now,
+			12.5, "2026-07", now,
 		))
 	mock.ExpectQuery("drive-locate-page").
 		WithArgs(int64(3), now, now, int64(42)).

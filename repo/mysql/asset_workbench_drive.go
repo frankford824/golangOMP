@@ -150,6 +150,8 @@ func (r *assetWorkbenchRepo) hydrateDriveOrderItemIDs(ctx context.Context, filte
 
 func driveFileColumns() string {
 	return `f.id, f.submission_id, f.submission_item_id, s.submission_no, f.owner_user_id,
+		COALESCE(NULLIF(p.real_name, ''), NULLIF(u.display_name, ''), NULLIF(u.username, ''), CONCAT('用户 ', f.owner_user_id)) AS owner_name,
+		COALESCE(u.username, '') AS owner_username,
 		f.upload_directory_id,
 		COALESCE(NULLIF(f.upload_directory_name, ''), '未分类') AS upload_directory_name,
 		i.difficulty_class, i.order_no,
@@ -157,18 +159,19 @@ func driveFileColumns() string {
 		f.relative_path, f.upload_batch_id, f.is_folder_upload,
 		f.file_type, f.mime_type, f.file_size, f.preview_status,
 		i.qc_status, i.pricing_status, i.settlement_status, i.page_count,
-		i.business_month, f.created_at`
+		i.gross_amount, i.business_month, f.created_at`
 }
 
 func scanDriveFile(scanner interface{ Scan(...interface{}) error }) (*domain.AssetWorkbenchDriveFile, error) {
 	item := &domain.AssetWorkbenchDriveFile{}
 	if err := scanner.Scan(
 		&item.ID, &item.SubmissionID, &item.SubmissionItemID, &item.SubmissionNo, &item.OwnerUserID,
+		&item.OwnerName, &item.OwnerUsername,
 		&item.UploadDirectoryID, &item.UploadDirectoryName, &item.DifficultyClass, &item.OrderNo,
 		&item.OriginalFilename, &item.DisplayName, &item.RelativePath, &item.UploadBatchID, &item.IsFolderUpload,
 		&item.FileType, &item.MimeType, &item.FileSize, &item.PreviewStatus,
 		&item.QCStatus, &item.PricingStatus, &item.SettlementStatus, &item.PageCount,
-		&item.BusinessMonth, &item.CreatedAt,
+		&item.GrossAmount, &item.BusinessMonth, &item.CreatedAt,
 	); err != nil {
 		return nil, err
 	}
@@ -186,6 +189,24 @@ func (r *assetWorkbenchRepo) DriveListFiles(ctx context.Context, filter repo.Ass
 		where = ` AND i.order_no = ?`
 		args = append(args, orderNo)
 	}
+	if keyword := strings.TrimSpace(filter.Keyword); keyword != "" {
+		like := "%" + keyword + "%"
+		where += ` AND (f.original_filename LIKE ? OR f.display_name LIKE ? OR f.relative_path LIKE ? OR f.file_type LIKE ? OR f.mime_type LIKE ? OR COALESCE(f.upload_directory_name, '') LIKE ? OR COALESCE(p.real_name, '') LIKE ? OR COALESCE(u.display_name, '') LIKE ? OR COALESCE(u.username, '') LIKE ? OR i.order_no LIKE ? OR s.submission_no LIKE ?)`
+		args = append(args, like, like, like, like, like, like, like, like, like, like, like)
+	}
+	if owner := strings.TrimSpace(filter.OwnerKeyword); owner != "" {
+		like := "%" + owner + "%"
+		where += ` AND (COALESCE(p.real_name, '') LIKE ? OR COALESCE(u.display_name, '') LIKE ? OR COALESCE(u.username, '') LIKE ?)`
+		args = append(args, like, like, like)
+	}
+	if filter.CreatedFrom != nil {
+		where += ` AND f.created_at >= ?`
+		args = append(args, *filter.CreatedFrom)
+	}
+	if filter.CreatedTo != nil {
+		where += ` AND f.created_at <= ?`
+		args = append(args, *filter.CreatedTo)
+	}
 	orderBy := `f.created_at DESC, f.id DESC`
 	if orderNo != "" {
 		orderBy = `f.sort_order ASC, f.id ASC`
@@ -194,6 +215,8 @@ func (r *assetWorkbenchRepo) DriveListFiles(ctx context.Context, filter repo.Ass
 	base := `FROM asset_workbench_submission_files f
 	JOIN asset_workbench_submission_items i ON i.id = f.submission_item_id AND i.voided_at IS NULL
 	JOIN asset_workbench_submissions s ON s.id = f.submission_id
+	LEFT JOIN users u ON u.id = f.owner_user_id
+	LEFT JOIN asset_workbench_profiles p ON p.user_id = f.owner_user_id
 	WHERE f.deleted_at IS NULL` + ownerSQL + dirSQL + where
 
 	var total int64
@@ -274,18 +297,22 @@ func buildDriveSearchBase(filter repo.AssetWorkbenchDriveFilter, preferFullText 
 			base := `FROM asset_workbench_submission_files f
 	JOIN asset_workbench_submission_items i ON i.id = f.submission_item_id AND i.voided_at IS NULL
 	JOIN asset_workbench_submissions s ON s.id = f.submission_id
+	LEFT JOIN users u ON u.id = f.owner_user_id
+	LEFT JOIN asset_workbench_profiles p ON p.user_id = f.owner_user_id
 	WHERE f.id IN (` + idQuery + `)`
 			return base, idArgs
 		} else {
 			like := "%" + keyword + "%"
 			keywordSQL = `
-	  AND (f.original_filename LIKE ? OR f.display_name LIKE ? OR f.relative_path LIKE ? OR i.order_no LIKE ? OR s.submission_no LIKE ?)`
-			args = append(args, like, like, like, like, like)
+	  AND (f.original_filename LIKE ? OR f.display_name LIKE ? OR f.relative_path LIKE ? OR i.order_no LIKE ? OR s.submission_no LIKE ? OR COALESCE(p.real_name, '') LIKE ? OR COALESCE(u.display_name, '') LIKE ? OR COALESCE(u.username, '') LIKE ?)`
+			args = append(args, like, like, like, like, like, like, like, like)
 		}
 	}
 	base := `FROM asset_workbench_submission_files f
 	JOIN asset_workbench_submission_items i ON i.id = f.submission_item_id AND i.voided_at IS NULL
 	JOIN asset_workbench_submissions s ON s.id = f.submission_id
+	LEFT JOIN users u ON u.id = f.owner_user_id
+	LEFT JOIN asset_workbench_profiles p ON p.user_id = f.owner_user_id
 	WHERE f.deleted_at IS NULL` + ownerSQL + keywordSQL
 	return base, args
 }
@@ -327,6 +354,8 @@ func (r *assetWorkbenchRepo) DriveLocateFile(ctx context.Context, filter repo.As
 	FROM asset_workbench_submission_files f
 	JOIN asset_workbench_submission_items i ON i.id = f.submission_item_id AND i.voided_at IS NULL
 	JOIN asset_workbench_submissions s ON s.id = f.submission_id
+	LEFT JOIN users u ON u.id = f.owner_user_id
+	LEFT JOIN asset_workbench_profiles p ON p.user_id = f.owner_user_id
 	WHERE f.deleted_at IS NULL` + ownerSQL + `
 	  AND f.id = ?
 	LIMIT 1`

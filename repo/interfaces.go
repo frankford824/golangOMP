@@ -408,6 +408,9 @@ type AssetWorkbenchDriveFilter struct {
 	Unassigned        bool
 	OrderNo           string
 	Keyword           string
+	OwnerKeyword      string
+	CreatedFrom       *time.Time
+	CreatedTo         *time.Time
 	Page              int
 	PageSize          int
 }

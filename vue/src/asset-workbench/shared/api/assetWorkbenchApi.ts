@@ -810,6 +810,8 @@ export interface DriveFileRow {
   submission_item_id: number
   submission_no: string
   owner_user_id: number
+  owner_name?: string
+  owner_username?: string
   upload_directory_id?: number | null
   upload_directory_name: string
   difficulty_class?: string
@@ -827,6 +829,7 @@ export interface DriveFileRow {
   pricing_status?: string
   settlement_status?: string
   page_count?: number
+  gross_amount?: number
   business_month: string
   created_at: string
   locate_page?: number
@@ -1609,11 +1612,25 @@ export const assetWorkbenchApi = {
   },
 
   async driveFiles(
-    params: { dir_id?: number; unassigned?: boolean; order_no?: string; page?: number; page_size?: number },
+    params: {
+      dir_id?: number
+      unassigned?: boolean
+      order_no?: string
+      q?: string
+      owner?: string
+      created_from?: string
+      created_to?: string
+      page?: number
+      page_size?: number
+    },
     signal?: AbortSignal,
   ): Promise<PaginatedResult<DriveFileRow>> {
     const query: Record<string, unknown> = {}
     if (params.order_no) query.order_no = params.order_no
+    if (params.q) query.q = params.q
+    if (params.owner) query.owner = params.owner
+    if (params.created_from) query.created_from = params.created_from
+    if (params.created_to) query.created_to = params.created_to
     if (params.unassigned) query.unassigned = 1
     else if (params.dir_id) query.dir_id = params.dir_id
     if (params.page) query.page = params.page

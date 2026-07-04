@@ -38,6 +38,7 @@ import MaterialListThumb from '@aw/shared/materials/MaterialListThumb.vue'
 import IconfontActionIcon from '@aw/shared/icons/IconfontActionIcon.vue'
 import WorkbenchFolderIcon from '@aw/shared/icons/WorkbenchFolderIcon.vue'
 import WorkbenchPreviewDialog from '@aw/shared/preview/WorkbenchPreviewDialog.vue'
+import { formatMoney } from '@aw/shared/format/number'
 import SpreadsheetWorkbench from '@aw/shared/spreadsheet/SpreadsheetWorkbench.vue'
 import type {
   WorkbenchSpreadsheetActionPayload,
@@ -46,7 +47,7 @@ import type {
 } from '@aw/shared/spreadsheet/types'
 import { materialAssetKey, resolvedSystemAssetThumbnailUrl } from '@aw/shared/materials/systemAssetPreview'
 
-type DriveMode = 'directories' | 'operational'
+type DriveMode = 'uploads' | 'directories' | 'operational'
 type SearchScope = 'all' | 'operational' | 'files' | 'orders'
 type ClientMaterialFilter = 'all' | 'enabled' | 'disabled'
 type ContextMenuState =
@@ -123,6 +124,11 @@ const filePage = ref(1)
 const selectedFile = ref<DriveFileRow | null>(null)
 const selectedFileIds = ref<Set<number>>(new Set())
 const highlightFileId = ref<number | null>(null)
+const uploadOverviewQuery = ref('')
+const uploadOverviewOwner = ref('')
+const uploadOverviewFrom = ref('')
+const uploadOverviewTo = ref('')
+const uploadOverviewDirectory = ref('all')
 
 const searchQuery = ref('')
 const searchScope = ref<SearchScope>('all')
@@ -218,6 +224,10 @@ const currentDirRow = computed(() =>
 const directoryOptions = computed(() => uploadDirectories.value.filter((item) => item.enabled))
 const difficultyOptions = computed(() => difficultyClasses.value.filter((item) => item.enabled).map((item) => item.code))
 const totalPages = computed(() => Math.max(1, Math.ceil(fileTotal.value / pageSize)))
+const uploadOverviewTotal = computed(() => directories.value.reduce((sum, dir) => sum + Number(dir.file_count || 0), 0))
+const uploadOverviewFilterActive = computed(() =>
+  Boolean(uploadOverviewQuery.value.trim() || uploadOverviewOwner.value.trim() || uploadOverviewFrom.value || uploadOverviewTo.value || uploadOverviewDirectory.value !== 'all'),
+)
 const driveFolderBreadcrumbs = computed(() => {
   const parts = pathSegments(driveFolderPath.value)
   return [
@@ -379,21 +389,24 @@ const driveSpreadsheetSource = computed<WorkbenchSpreadsheetSource>(() =>
         ],
       }
     : {
-        id: 'asset-drive-file-spreadsheet',
-        revision: `files:${selectedDir.value?.key ?? 'home'}:${driveFolderPath.value}:${driveFolders.value.map((folder) => folder.path).join('|')}:${files.value.map((file) => file.id).join('|')}`,
+        id: activeMode.value === 'uploads' ? 'asset-drive-upload-overview-spreadsheet' : 'asset-drive-file-spreadsheet',
+        revision: `files:${activeMode.value}:${selectedDir.value?.key ?? 'all'}:${driveFolderPath.value}:${driveFolders.value.map((folder) => folder.path).join('|')}:${files.value.map((file) => file.id).join('|')}`,
         mode: 'drive',
-        title: '上传素材清单模式',
-        description: '用于批量核对当前目录文件、文件夹、相对路径、质检和计件状态；移动、删除和下载仍走原 Drive 操作。',
+        title: activeMode.value === 'uploads' ? '上传总览清单模式' : '上传素材清单模式',
+        description: activeMode.value === 'uploads'
+          ? '按上传人、时间、目录、格式、数量和计件金额核对全站上传记录；预览、下载和维护仍在右侧详情与操作栏完成。'
+          : '用于批量核对当前目录文件、文件夹、相对路径、质检和计件状态；移动、删除和下载仍走原 Drive 操作。',
         readonly: true,
         actions: [
-          { key: 'select_all_files', label: '全选当前文件', tone: 'neutral', disabled: !selectedDir.value || files.value.length === 0 },
+          { key: 'refresh_drive', label: '刷新', tone: 'neutral', disabled: filesLoading.value },
+          { key: 'select_all_files', label: activeMode.value === 'uploads' ? '全选当前页' : '全选当前文件', tone: 'neutral', disabled: activeMode.value !== 'uploads' && !selectedDir.value || files.value.length === 0 },
           { key: 'download_selected', label: '下载所选', tone: 'success', disabled: selectedFileActionIds.value.length === 0 },
-          { key: 'open_drive_upload', label: '上传到此处', tone: 'success', disabled: !selectedDir.value },
+          { key: 'open_drive_upload', label: '上传到此处', tone: 'success', disabled: activeMode.value === 'uploads' || !selectedDir.value },
         ],
         sheets: [
           {
             id: 'files',
-            name: selectedDir.value?.name ? `${selectedDir.value.name} 清单` : '目录清单',
+            name: activeMode.value === 'uploads' ? '上传总览' : selectedDir.value?.name ? `${selectedDir.value.name} 清单` : '目录清单',
             rowKey: 'row_id',
             readonly: true,
             freezeHeader: true,
@@ -403,9 +416,12 @@ const driveSpreadsheetSource = computed<WorkbenchSpreadsheetSource>(() =>
               { key: 'name', label: '名称', width: 260, readonly: true },
               { key: 'relative_path', label: '相对路径', width: 220, readonly: true },
               { key: 'directory', label: '上传目录', width: 160, readonly: true },
+              { key: 'owner_name', label: '上传人', width: 120, readonly: true },
               { key: 'format', label: '格式', width: 96, readonly: true },
               { key: 'business_month', label: '结算月', width: 104, readonly: true },
               { key: 'difficulty_class', label: '难度', width: 96, readonly: true },
+              { key: 'page_count', label: '数量', width: 88, readonly: true },
+              { key: 'gross_amount', label: '计件金额', width: 110, readonly: true },
               { key: 'qc_status', label: '质检', width: 96, kind: 'status', readonly: true },
               { key: 'pricing_status', label: '计件', width: 96, kind: 'status', readonly: true },
               { key: 'size', label: '大小', width: 110, readonly: true },
@@ -418,9 +434,12 @@ const driveSpreadsheetSource = computed<WorkbenchSpreadsheetSource>(() =>
                 name: folder.name,
                 relative_path: folder.path,
                 directory: selectedDir.value?.name || '',
+                owner_name: '',
                 format: '',
                 business_month: '',
                 difficulty_class: '',
+                page_count: '',
+                gross_amount: '',
                 qc_status: '',
                 pricing_status: '',
                 size: `${folder.file_count} 个文件`,
@@ -432,9 +451,12 @@ const driveSpreadsheetSource = computed<WorkbenchSpreadsheetSource>(() =>
                 name: filePathLabel(file),
                 relative_path: file.relative_path || '',
                 directory: file.upload_directory_name || selectedDir.value?.name || '',
+                owner_name: fileOwnerLabel(file),
                 format: fileFormatLabel(file),
                 business_month: file.business_month || '',
                 difficulty_class: file.difficulty_class || '',
+                page_count: file.page_count || '',
+                gross_amount: formatMoney(file.gross_amount || 0),
                 qc_status: statusText(file.qc_status),
                 pricing_status: statusText(file.pricing_status),
                 size: formatSize(file.file_size),
@@ -914,6 +936,10 @@ function filePathLabel(file: DriveFileRow): string {
   return file.relative_path || fileDisplayName(file)
 }
 
+function fileOwnerLabel(file: DriveFileRow): string {
+  return file.owner_name || file.owner_username || (file.owner_user_id ? `用户 ${file.owner_user_id}` : '—')
+}
+
 function statusText(value?: string) {
   const normalized = (value || '').trim()
   const map: Record<string, string> = {
@@ -1109,8 +1135,33 @@ async function selectDir(dir: DriveDirectoryRow, keepFile = false, initialPage =
   await loadFiles(directoryAbortController.signal, requestID)
 }
 
+function uploadOverviewDirectoryParams() {
+  if (uploadOverviewDirectory.value === 'unassigned') return { unassigned: true }
+  const directoryID = Number(uploadOverviewDirectory.value)
+  if (Number.isFinite(directoryID) && directoryID > 0) return { dir_id: directoryID }
+  return {}
+}
+
+async function loadUploadOverview(signal?: AbortSignal) {
+  const params = {
+    ...uploadOverviewDirectoryParams(),
+    q: uploadOverviewQuery.value.trim() || undefined,
+    owner: uploadOverviewOwner.value.trim() || undefined,
+    created_from: uploadOverviewFrom.value || undefined,
+    created_to: uploadOverviewTo.value || undefined,
+    page: filePage.value,
+    page_size: pageSize,
+  }
+  const result = await assetWorkbenchApi.driveFiles(params, signal)
+  driveFolderPath.value = ''
+  driveFolders.value = []
+  driveFolderTruncated.value = false
+  files.value = result.items
+  fileTotal.value = result.total
+}
+
 async function loadFiles(signal?: AbortSignal, parentRequestID?: number) {
-  if (!selectedDir.value) return
+  if (activeMode.value !== 'uploads' && !selectedDir.value) return
   const requestID = ++filesRequestSeq
   if (!signal) {
     filesAbortController?.abort()
@@ -1120,6 +1171,12 @@ async function loadFiles(signal?: AbortSignal, parentRequestID?: number) {
   filesLoading.value = true
   filesError.value = ''
   try {
+    if (activeMode.value === 'uploads') {
+      await loadUploadOverview(signal)
+      if (requestID !== filesRequestSeq) return
+      return
+    }
+    if (!selectedDir.value) return
     const result = await assetWorkbenchApi.driveFolder({
       dir_id: selectedDir.value.unassigned ? undefined : selectedDir.value.id ?? undefined,
       unassigned: selectedDir.value.unassigned,
@@ -1145,7 +1202,43 @@ async function loadFiles(signal?: AbortSignal, parentRequestID?: number) {
   }
 }
 
+async function openUploadOverview() {
+  activeMode.value = 'uploads'
+  closeArchiveView()
+  selectedDir.value = null
+  driveFolderPath.value = ''
+  driveFolders.value = []
+  driveFolderTruncated.value = false
+  selectedFile.value = null
+  selectedFileIds.value = new Set()
+  filePage.value = 1
+  await loadFiles()
+}
+
+async function applyUploadOverviewFilters() {
+  activeMode.value = 'uploads'
+  closeArchiveView()
+  selectedFile.value = null
+  selectedFileIds.value = new Set()
+  filePage.value = 1
+  await loadFiles()
+}
+
+async function clearUploadOverviewFilters() {
+  uploadOverviewQuery.value = ''
+  uploadOverviewOwner.value = ''
+  uploadOverviewFrom.value = ''
+  uploadOverviewTo.value = ''
+  uploadOverviewDirectory.value = 'all'
+  await applyUploadOverviewFilters()
+}
+
 async function refreshCurrentDrive() {
+  if (activeMode.value === 'uploads') {
+    await loadDirectories()
+    await loadFiles()
+    return
+  }
   const prevKey = selectedDir.value?.key ?? null
   const prevFolderPath = driveFolderPath.value
   await loadDirectories()
@@ -1458,10 +1551,13 @@ function filePreviewRows(file: DriveFileRow): Array<[string, string]> {
   return [
     ['所在目录', file.upload_directory_name],
     ['文件夹', file.relative_path || '—'],
+    ['上传人', fileOwnerLabel(file)],
     ['格式', fileFormatLabel(file)],
     ['上传时间', formatDateTime(file.created_at)],
     ['结算月份', file.business_month || '—'],
     ['难度', file.difficulty_class || '—'],
+    ['数量', file.page_count ? `${file.page_count}` : '—'],
+    ['计件金额', formatMoney(file.gross_amount || 0)],
     ['质检', statusText(file.qc_status)],
     ['计件', statusText(file.pricing_status)],
     ['大小', formatSize(file.file_size)],
@@ -1511,6 +1607,10 @@ function openUpload(files: File[] = []) {
 }
 
 async function handleDriveSpreadsheetAction(payload: WorkbenchSpreadsheetActionPayload) {
+  if (payload.action.key === 'refresh_drive') {
+    await loadFiles()
+    return
+  }
   if (payload.action.key === 'select_all_files') {
     selectAllFilesInDirectory()
     return
@@ -2421,6 +2521,23 @@ onBeforeUnmount(() => {
 
     <div v-show="!searchActive" class="aw-drive__shell" :class="{ 'has-drawer': detailOpen }">
       <nav class="aw-drive-side" aria-label="网盘导航">
+        <section v-if="canManageDrive" class="aw-drive-side__group">
+          <p class="aw-drive-side__label">
+            <FileDown :size="15" aria-hidden="true" />
+            <span>上传台账</span>
+          </p>
+          <button
+            class="aw-drive-side__item"
+            :class="{ 'is-active': activeMode === 'uploads' }"
+            type="button"
+            @click="openUploadOverview"
+          >
+            <FileDown :size="16" aria-hidden="true" />
+            <span class="aw-drive-side__name">上传总览</span>
+            <span class="aw-chip aw-chip--neutral aw-drive-column__count">{{ uploadOverviewTotal }}</span>
+          </button>
+        </section>
+
         <section class="aw-drive-side__group">
           <p class="aw-drive-side__label">
             <WorkbenchFolderIcon :size="15" variant="star" />
@@ -2511,7 +2628,10 @@ onBeforeUnmount(() => {
       <main class="aw-drive-main">
         <div class="aw-drive-main__bar">
           <nav class="aw-drive__breadcrumb" aria-label="路径">
-            <template v-if="activeMode === 'directories'">
+            <template v-if="activeMode === 'uploads'">
+              <button class="aw-drive__crumb" :class="{ 'is-active': true }" type="button" @click="openUploadOverview">上传总览</button>
+            </template>
+            <template v-else-if="activeMode === 'directories'">
               <button class="aw-drive__crumb" type="button" :class="{ 'is-active': !selectedDir }" @click="goDrivesHome">全部目录</button>
               <template v-if="selectedDir">
                 <template v-for="(crumb, index) in driveFolderBreadcrumbs" :key="crumb.path || '__drive_root__'">
@@ -2555,7 +2675,26 @@ onBeforeUnmount(() => {
             </template>
           </nav>
           <div class="aw-drive-main__tools">
-            <template v-if="activeMode === 'directories'">
+            <template v-if="activeMode === 'uploads'">
+              <form class="aw-upload-overview-filters" @submit.prevent="applyUploadOverviewFilters">
+                <input v-model.trim="uploadOverviewQuery" type="search" placeholder="文件名 / 格式 / 上传目录" aria-label="上传文件关键词" />
+                <input v-model.trim="uploadOverviewOwner" placeholder="上传人" aria-label="上传人" />
+                <input v-model="uploadOverviewFrom" type="date" aria-label="开始日期" />
+                <input v-model="uploadOverviewTo" type="date" aria-label="结束日期" />
+                <select v-model="uploadOverviewDirectory" aria-label="上传目录">
+                  <option value="all">全部目录</option>
+                  <option value="unassigned">未分类</option>
+                  <option v-for="dir in uploadDirectories" :key="dir.id" :value="String(dir.id)">{{ dir.name }}</option>
+                </select>
+                <button class="aw-drive__search-submit" type="submit">筛选</button>
+                <button v-if="uploadOverviewFilterActive" class="aw-grid-button" type="button" @click="clearUploadOverviewFilters">重置</button>
+              </form>
+              <button class="aw-secondary-button" type="button" @click="driveSpreadsheetOpen = !driveSpreadsheetOpen">
+                <Table2 :size="16" aria-hidden="true" />
+                {{ driveSpreadsheetOpen ? '收起清单模式' : '清单模式' }}
+              </button>
+            </template>
+            <template v-else-if="activeMode === 'directories'">
               <button v-if="selectedDir && files.length" class="aw-secondary-button" type="button" @click="selectAllFilesInDirectory">全选</button>
               <button class="aw-secondary-button" type="button" @click="driveSpreadsheetOpen = !driveSpreadsheetOpen">
                 <Table2 :size="16" aria-hidden="true" />
@@ -2593,7 +2732,7 @@ onBeforeUnmount(() => {
           </div>
         </div>
 
-        <div v-if="activeMode === 'directories' && selectedFileActionIds.length" class="aw-drive-batch-bar">
+        <div v-if="activeMode !== 'operational' && selectedFileActionIds.length" class="aw-drive-batch-bar">
           <strong>{{ selectedFileActionLabel }}</strong>
           <button class="aw-secondary-button" type="button" @click="downloadSelectedFiles">
             <Download :size="15" aria-hidden="true" />
@@ -2625,7 +2764,65 @@ onBeforeUnmount(() => {
         />
 
         <div class="aw-drive-main__content">
-          <template v-if="activeMode === 'directories'">
+          <template v-if="activeMode === 'uploads'">
+            <p v-if="filesLoading" class="aw-drive-empty">正在加载上传记录…</p>
+            <p v-else-if="filesError" class="aw-drive-empty">{{ filesError }}</p>
+            <p v-else-if="files.length === 0" class="aw-drive-empty">没有匹配的上传记录</p>
+            <template v-else>
+              <div class="aw-upload-overview-table" role="table" aria-label="上传总览">
+                <div class="aw-upload-overview-table__head" role="row">
+                  <span>文件</span>
+                  <span>上传人</span>
+                  <span>上传时间</span>
+                  <span>目录</span>
+                  <span>格式</span>
+                  <span>数量</span>
+                  <span>计件金额</span>
+                  <span>状态</span>
+                </div>
+                <article
+                  v-for="file in files"
+                  :key="file.id"
+                  class="aw-upload-overview-row"
+                  :class="{ 'is-selected': selectedFile?.id === file.id, 'is-highlight': highlightFileId === file.id }"
+                  role="row"
+                  @click="selectFile(file)"
+                  @contextmenu.prevent.stop="openContextMenu($event, { kind: 'file', file })"
+                >
+                  <label class="aw-upload-overview-row__check" @click.stop>
+                    <input
+                      type="checkbox"
+                      :checked="selectedFileIds.has(file.id)"
+                      :aria-label="`选择 ${fileDisplayName(file)}`"
+                      @change="toggleFile(file, ($event.target as HTMLInputElement).checked)"
+                    />
+                  </label>
+                  <button class="aw-upload-overview-row__file" type="button" @click.stop="selectFile(file)" @dblclick.stop="canOpenArchive(file) ? openArchiveFile(file) : openFilePreview(file)">
+                    <span class="aw-upload-overview-row__thumb">
+                      <DriveThumb :file-id="file.id" :filename="fileDisplayName(file)" :mime-type="file.mime_type" :preview-status="file.preview_status" />
+                    </span>
+                    <span>
+                      <strong :title="filePathLabel(file)">{{ filePathLabel(file) }}</strong>
+                      <small>{{ formatSize(file.file_size) }}</small>
+                    </span>
+                  </button>
+                  <span>{{ fileOwnerLabel(file) }}</span>
+                  <span>{{ formatDateTime(file.created_at) }}</span>
+                  <span>{{ file.upload_directory_name || '未分类' }}</span>
+                  <span>{{ fileFormatLabel(file) }}</span>
+                  <span>{{ file.page_count || '—' }}</span>
+                  <span>{{ formatMoney(file.gross_amount || 0) }}</span>
+                  <span>{{ statusText(file.pricing_status) }}</span>
+                </article>
+              </div>
+              <div v-if="fileTotal > 0" class="aw-drive-pager">
+                <button class="aw-grid-button" type="button" :disabled="filePage <= 1" @click="changePage(-1)">上一页</button>
+                <span>{{ filePage }} / {{ totalPages }} · 共 {{ fileTotal }} 个</span>
+                <button class="aw-grid-button" type="button" :disabled="filePage >= totalPages" @click="changePage(1)">下一页</button>
+              </div>
+            </template>
+          </template>
+          <template v-else-if="activeMode === 'directories'">
             <template v-if="!selectedDir">
               <p v-if="dirLoading" class="aw-drive-empty">加载中…</p>
               <p v-else-if="dirError" class="aw-drive-empty">{{ dirError }}</p>
@@ -2864,7 +3061,7 @@ onBeforeUnmount(() => {
       </main>
 
       <aside v-if="detailOpen" class="aw-drive-drawer" aria-label="详情">
-        <template v-if="activeMode === 'directories' && selectedFile">
+        <template v-if="activeMode !== 'operational' && selectedFile">
           <div class="aw-drive-drawer__head">
             <p class="aw-eyebrow">文件详情</p>
             <button class="aw-drive-mini-button" type="button" aria-label="关闭" @click="closeDetail">
@@ -2879,10 +3076,13 @@ onBeforeUnmount(() => {
           <dl class="aw-material-detail__list">
             <div><dt>目录</dt><dd>{{ selectedFile.upload_directory_name }}</dd></div>
             <div><dt>文件夹</dt><dd>{{ selectedFile.relative_path || '—' }}</dd></div>
+            <div><dt>上传人</dt><dd>{{ fileOwnerLabel(selectedFile) }}</dd></div>
             <div><dt>格式</dt><dd>{{ fileFormatLabel(selectedFile) }}</dd></div>
             <div><dt>上传时间</dt><dd>{{ formatDateTime(selectedFile.created_at) }}</dd></div>
             <div><dt>结算月份</dt><dd>{{ selectedFile.business_month || '—' }}</dd></div>
             <div><dt>难度</dt><dd>{{ selectedFile.difficulty_class || '—' }}</dd></div>
+            <div><dt>数量</dt><dd>{{ selectedFile.page_count || '—' }}</dd></div>
+            <div><dt>计件金额</dt><dd>{{ formatMoney(selectedFile.gross_amount || 0) }}</dd></div>
             <div><dt>质检</dt><dd>{{ statusText(selectedFile.qc_status) }}</dd></div>
             <div><dt>计件</dt><dd>{{ statusText(selectedFile.pricing_status) }}</dd></div>
             <div><dt>大小</dt><dd>{{ formatSize(selectedFile.file_size) }}</dd></div>

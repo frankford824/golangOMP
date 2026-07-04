@@ -43,13 +43,64 @@ function Test-CommandExists {
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 if ([string]::IsNullOrWhiteSpace($RepoRoot)) {
-    $RepoRoot = (Resolve-Path (Join-Path $ScriptDir "..")).Path
+    $RepoRoot = (Resolve-Path (Join-Path $ScriptDir "..")).ProviderPath
+} else {
+    $RepoRoot = (Resolve-Path $RepoRoot).ProviderPath
 }
 $FrontDir = Join-Path $RepoRoot "dist\front"
 $RemoteWebRoot = "/var/www/yongbo.cloud"
 $RemoteBackupParent = "/var/www/backups"
 
 function Write-Step { param([string]$Msg) Write-Host "[publish-front] $Msg" -ForegroundColor Cyan }
+
+function Invoke-ArtifactIdentityGuard {
+    Write-Step "Artifact identity guard: main-ops frontend ..."
+    if (-not (Test-Path $FrontDir -PathType Container)) {
+        throw "Missing directory: $FrontDir"
+    }
+    $indexPath = Join-Path $FrontDir "index.html"
+    $assetsDir = Join-Path $FrontDir "assets"
+    $assetEntryPath = Join-Path $FrontDir "asset.html"
+    $manifestPath = Join-Path $FrontDir "static-artifact-manifest.json"
+    if (-not (Test-Path $indexPath -PathType Leaf)) {
+        throw "Missing file: $indexPath"
+    }
+    if (-not (Test-Path $assetsDir -PathType Container)) {
+        throw "Missing directory: $assetsDir"
+    }
+    if (Test-Path $assetEntryPath -PathType Leaf) {
+        throw "dist/front contains asset.html; refusing to publish an asset-workbench bundle to yongbo.cloud"
+    }
+    if (-not (Test-Path $manifestPath -PathType Leaf)) {
+        throw "Missing file: $manifestPath"
+    }
+
+    $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ($manifest.schema -ne 1) { throw "Manifest schema must be 1" }
+    if ($manifest.app -ne "main-ops") { throw "Manifest app must be main-ops" }
+    if ($manifest.entry -ne "index.html") { throw "Manifest entry must be index.html" }
+    if ($manifest.targetHost -ne "yongbo.cloud") { throw "Manifest targetHost must be yongbo.cloud" }
+    if ($manifest.targetWebRoot -ne "/var/www/yongbo.cloud") { throw "Manifest targetWebRoot must be /var/www/yongbo.cloud" }
+    if ($manifest.buildCommand -ne "npm run build:prod") { throw "Manifest buildCommand must be npm run build:prod" }
+    if ($manifest.gitCommit -notmatch '^[0-9a-f]{40}$') { throw "Manifest gitCommit must be a 40-character commit hash" }
+    if ([string]::IsNullOrWhiteSpace($manifest.builtAt)) { throw "Manifest builtAt is required" }
+
+    $indexRaw = Get-Content -LiteralPath $indexPath -Raw -Encoding UTF8
+    if ($indexRaw -notmatch 'id="app"') {
+        throw "dist/front/index.html does not contain the main-ops mount node"
+    }
+    if ($indexRaw -match 'asset-workbench-app|src="/assets/asset-[^"]+\.js"') {
+        throw "dist/front/index.html looks like an asset-workbench entry; rebuild the main frontend before publishing yongbo.cloud"
+    }
+    $assetRefs = [regex]::Matches($indexRaw, '(?:src|href)="\/(assets\/[^"]+)"')
+    foreach ($match in $assetRefs) {
+        $assetRel = $match.Groups[1].Value -replace '/', [IO.Path]::DirectorySeparatorChar
+        $assetPath = Join-Path $FrontDir $assetRel
+        if (-not (Test-Path $assetPath -PathType Leaf)) {
+            throw "Referenced asset is missing: $assetPath"
+        }
+    }
+}
 
 function Invoke-LocalChecks {
     Write-Step "Local check: dist/front ..."
@@ -97,18 +148,20 @@ function Invoke-LocalChecks {
     Write-Step "Local checks passed"
 }
 
+Invoke-ArtifactIdentityGuard
+
 if (-not $SkipChecks) {
     Invoke-LocalChecks
-}
-
-if (-not (Test-CommandExists "ssh") -or -not (Test-CommandExists "scp")) {
-    throw "OpenSSH required: ssh and scp must be on PATH"
 }
 
 if ($DryRun) {
     Write-Step "DryRun: Host=$SshHost source=$FrontDir target=$RemoteWebRoot"
     Write-Step "DryRun: remote backup yongbo.cloud_<UTC> and staging /tmp/yongbo.cloud_dist_<UTC>"
     exit 0
+}
+
+if (-not (Test-CommandExists "ssh") -or -not (Test-CommandExists "scp")) {
+    throw "OpenSSH required: ssh and scp must be on PATH"
 }
 
 Write-Step "Fetch remote UTC timestamp ..."
@@ -132,6 +185,13 @@ $scpTarget = "${SshHost}:${stagingPath}/"
 & scp -r "$FrontDir\*" $scpTarget
 if ($LASTEXITCODE -ne 0) {
     throw "scp failed. Rollback: ssh $SshHost 'rsync -a --delete $backupPath/ $RemoteWebRoot/ && chmod -R a+rX $RemoteWebRoot && nginx -t && systemctl reload nginx'"
+}
+
+Write-Step "Remote artifact guard: main-ops staging ..."
+$remoteGuardCmd = "test -f `"$stagingPath/index.html`" && test -d `"$stagingPath/assets`" && test -f `"$stagingPath/static-artifact-manifest.json`" && test ! -f `"$stagingPath/asset.html`" && grep -q 'id=`"app`"' `"$stagingPath/index.html`" && ! grep -q 'asset-workbench-app' `"$stagingPath/index.html`" && ! grep -Eq 'src=`"/assets/asset-[^`"]+\.js`"' `"$stagingPath/index.html`" && grep -Eq '`"app`"[[:space:]]*:[[:space:]]*`"main-ops`"' `"$stagingPath/static-artifact-manifest.json`" && grep -Eq '`"entry`"[[:space:]]*:[[:space:]]*`"index.html`"' `"$stagingPath/static-artifact-manifest.json`" && grep -Eq '`"targetHost`"[[:space:]]*:[[:space:]]*`"yongbo.cloud`"' `"$stagingPath/static-artifact-manifest.json`" && grep -Eq '`"targetWebRoot`"[[:space:]]*:[[:space:]]*`"/var/www/yongbo.cloud`"' `"$stagingPath/static-artifact-manifest.json`""
+ssh $SshHost $remoteGuardCmd
+if ($LASTEXITCODE -ne 0) {
+    throw "staged artifact failed the main-ops identity guard"
 }
 
 Write-Step "Rsync to webroot, chmod, nginx reload ..."

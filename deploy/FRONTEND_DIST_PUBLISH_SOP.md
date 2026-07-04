@@ -74,12 +74,16 @@ mkdir -p dist/front
 cp -a vue/dist/. dist/front/
 ```
 
-The publish scripts intentionally read from `dist/front`. This keeps the static publish artifact outside `vue/dist` and makes the upload target explicit.
+`npm run build:prod` writes `vue/dist/static-artifact-manifest.json` with `app=main-ops`, `entry=index.html`, and `targetHost=yongbo.cloud`. Copy that manifest into `dist/front` with the rest of `vue/dist`.
+
+The publish scripts intentionally read from `dist/front`. This keeps the static publish artifact outside `vue/dist` and makes the upload target explicit. Do not copy `vue/dist-asset` into `dist/front`, and never copy `asset.html` to `index.html`; that is an asset-workbench artifact and must be published only with `deploy/publish-asset-front.sh`.
 
 Before publishing, confirm:
 
 - `dist/front/index.html` exists.
 - `dist/front/assets/` exists.
+- `dist/front/static-artifact-manifest.json` exists and says `app=main-ops`, `entry=index.html`, and `targetHost=yongbo.cloud`.
+- `dist/front/asset.html` does not exist.
 - production build does not hardcode `localhost` or `127.0.0.1`.
 - browser API traffic remains same-origin and reaches `/v1`.
 - relevant frontend tests have passed when the changed area has tests.
@@ -107,15 +111,16 @@ bash ./deploy/publish-front.sh --dry-run
 
 The script performs:
 
-1. local `dist/front` checks.
+1. local `dist/front` manifest and main-ops entry checks.
 2. remote backup of `/var/www/yongbo.cloud`.
 3. upload to a timestamped staging directory.
-4. `rsync -a --delete` into `/var/www/yongbo.cloud`.
-5. permission normalization.
-6. `nginx -t`.
-7. `systemctl reload nginx`.
-8. HTTP probes for `/`, `/login`, `/health`, and `/v1/auth/login`.
-9. WebSocket handshake probe for `/ws/v1` when notification or realtime pages are affected.
+4. remote staging manifest and main-ops entry checks.
+5. `rsync -a --delete` into `/var/www/yongbo.cloud`.
+6. permission normalization.
+7. `nginx -t`.
+8. `systemctl reload nginx`.
+9. HTTP probes for `/`, `/login`, `/health`, and `/v1/auth/login`.
+10. WebSocket handshake probe for `/ws/v1` when notification or realtime pages are affected.
 
 After publish, use a browser and a real account to smoke test the affected workflow.
 

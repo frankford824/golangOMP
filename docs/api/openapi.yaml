@@ -20096,6 +20096,22 @@ paths:
           name: order_no
           schema: { type: string }
         - in: query
+          name: q
+          description: Keyword filter across filename, relative path, format, upload directory, uploader, order number, and submission number.
+          schema: { type: string }
+        - in: query
+          name: owner
+          description: Uploader name/account filter.
+          schema: { type: string }
+        - in: query
+          name: created_from
+          description: Upload time lower bound. Accepts RFC3339 or YYYY-MM-DD.
+          schema: { type: string }
+        - in: query
+          name: created_to
+          description: Upload time upper bound. Accepts RFC3339 or YYYY-MM-DD.
+          schema: { type: string }
+        - in: query
           name: page
           schema: { type: integer, minimum: 1 }
         - in: query
@@ -20119,6 +20135,12 @@ paths:
                         submission_item_id: { type: integer }
                         submission_no: { type: string }
                         owner_user_id: { type: integer }
+                        owner_name:
+                          type: string
+                          description: Upload owner display name resolved from workbench profile, user display name, or username.
+                        owner_username:
+                          type: string
+                          description: Upload owner login username when available.
                         upload_directory_id: { type: integer, nullable: true }
                         upload_directory_name: { type: string }
                         difficulty_class: { type: string }
@@ -20136,6 +20158,7 @@ paths:
                         pricing_status: { type: string }
                         settlement_status: { type: string }
                         page_count: { type: integer }
+                        gross_amount: { type: number }
                         business_month: { type: string }
                         created_at: { type: string, format: date-time }
                         locate_page:

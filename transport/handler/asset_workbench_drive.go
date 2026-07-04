@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -22,6 +23,28 @@ func parseDriveDirectory(c *gin.Context) (*int64, bool) {
 		}
 	}
 	return nil, false
+}
+
+func parseDriveTimeQuery(c *gin.Context, name string, endOfDay bool) (*time.Time, *domain.AppError) {
+	raw := strings.TrimSpace(c.Query(name))
+	if raw == "" {
+		return nil, nil
+	}
+	if parsed, err := time.Parse(time.RFC3339, raw); err == nil {
+		return &parsed, nil
+	}
+	location, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		location = time.Local
+	}
+	day, err := time.ParseInLocation("2006-01-02", raw, location)
+	if err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid "+name, map[string]string{name: raw})
+	}
+	if endOfDay {
+		day = day.Add(24*time.Hour - time.Nanosecond)
+	}
+	return &day, nil
 }
 
 func (h *AssetWorkbenchHandler) DriveListDirectories(c *gin.Context) {
@@ -59,7 +82,17 @@ func (h *AssetWorkbenchHandler) DriveListFiles(c *gin.Context) {
 	dirID, unassigned := parseDriveDirectory(c)
 	page, _ := strconv.Atoi(c.Query("page"))
 	pageSize, _ := strconv.Atoi(c.Query("page_size"))
-	result, appErr := h.svc.ListDriveFiles(c.Request.Context(), actor, dirID, unassigned, c.Query("order_no"), page, pageSize)
+	createdFrom, appErr := parseDriveTimeQuery(c, "created_from", false)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	createdTo, appErr := parseDriveTimeQuery(c, "created_to", true)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	result, appErr := h.svc.ListDriveFiles(c.Request.Context(), actor, dirID, unassigned, c.Query("order_no"), c.Query("q"), c.Query("owner"), createdFrom, createdTo, page, pageSize)
 	if appErr != nil {
 		respondError(c, appErr)
 		return

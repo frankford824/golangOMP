@@ -7,6 +7,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 FRONT="$ROOT/vue/dist-asset"
+VERIFY_STATIC_ARTIFACT="$ROOT/deploy/verify-static-artifact.mjs"
 SSH_HOST="${SSH_HOST:-jst_ecs}"
 REMOTE_WEB="/var/www/assets.yongbo.cloud"
 REMOTE_BACKUP_PARENT="/var/www/backups"
@@ -36,6 +37,8 @@ die() { echo "[publish-asset-front] ERROR: $*" >&2; exit 1; }
 step() { echo "[publish-asset-front] $*"; }
 
 guard_asset_artifact() {
+  command -v node >/dev/null || die "node is required for static artifact manifest validation"
+  node "$VERIFY_STATIC_ARTIFACT" --app asset-workbench --dir "$FRONT" || die "static artifact manifest validation failed"
   [[ -d "$FRONT" ]] || die "Missing directory: $FRONT"
   [[ -f "$FRONT/asset.html" ]] || die "Missing file: $FRONT/asset.html"
   [[ -d "$FRONT/assets" ]] || die "Missing directory: $FRONT/assets"
@@ -62,13 +65,13 @@ if [[ "$SKIP_CHECKS" != "true" ]]; then
   step "Local checks passed"
 fi
 
-command -v ssh >/dev/null || die "ssh is required"
-command -v scp >/dev/null || die "scp is required"
-
 if [[ "$DRY_RUN" == "true" ]]; then
   step "DryRun: Host=$SSH_HOST source=$FRONT target=$REMOTE_WEB"
   exit 0
 fi
+
+command -v ssh >/dev/null || die "ssh is required"
+command -v scp >/dev/null || die "scp is required"
 
 TS="$(ssh "$SSH_HOST" 'date -u +%Y%m%dT%H%M%SZ' | tr -d '\r\n')"
 [[ -n "$TS" ]] || die "Could not read remote timestamp"
@@ -87,7 +90,7 @@ else
 fi
 
 step "Remote artifact guard: asset-workbench staging ..."
-ssh "$SSH_HOST" "test -f \"$STAGING/asset.html\" && test -d \"$STAGING/assets\" && test ! -f \"$STAGING/index.html\" && grep -q 'asset-workbench-app' \"$STAGING/asset.html\" && grep -Eq 'src=\"/assets/asset-[^\"]+\\.js\"' \"$STAGING/asset.html\" && ! grep -q '<title>永箔运营管理系统</title>' \"$STAGING/asset.html\" && ! grep -q 'id=\"app\"' \"$STAGING/asset.html\"" \
+ssh "$SSH_HOST" "test -f \"$STAGING/asset.html\" && test -d \"$STAGING/assets\" && test -f \"$STAGING/static-artifact-manifest.json\" && test ! -f \"$STAGING/index.html\" && grep -q 'asset-workbench-app' \"$STAGING/asset.html\" && grep -Eq 'src=\"/assets/asset-[^\"]+\\.js\"' \"$STAGING/asset.html\" && ! grep -q 'id=\"app\"' \"$STAGING/asset.html\" && grep -Eq '\"app\"[[:space:]]*:[[:space:]]*\"asset-workbench\"' \"$STAGING/static-artifact-manifest.json\" && grep -Eq '\"entry\"[[:space:]]*:[[:space:]]*\"asset.html\"' \"$STAGING/static-artifact-manifest.json\" && grep -Eq '\"targetHost\"[[:space:]]*:[[:space:]]*\"assets.yongbo.cloud\"' \"$STAGING/static-artifact-manifest.json\" && grep -Eq '\"targetWebRoot\"[[:space:]]*:[[:space:]]*\"/var/www/assets.yongbo.cloud\"' \"$STAGING/static-artifact-manifest.json\"" \
   || die "staged artifact failed the asset-workbench identity guard"
 
 step "Sync to web root, chmod, nginx reload"
