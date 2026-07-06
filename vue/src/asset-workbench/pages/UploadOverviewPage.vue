@@ -1,15 +1,18 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import { ArrowDownAZ, ArrowUpAZ, Download, Eye, FileDown, Inbox, Pencil, RefreshCw, Save, Trash2, X } from 'lucide-vue-next'
+import { ArrowDownAZ, ArrowUpAZ, Download, Eye, FileArchive, FileDown, FolderOpen, Inbox, Pencil, RefreshCw, Save, Trash2, X } from 'lucide-vue-next'
 
 import { buildTimestampedZipFilename, downloadBatchAsZip } from '@/utils/batchZipDownload'
 import { useAssetWorkbenchSessionStore } from '@aw/app/session.store'
 import {
   assetWorkbenchApi,
+  type ArchiveVirtualFile,
+  type ArchiveVirtualFolder,
   type DriveDirectoryRow,
   type DriveFileRow,
 } from '@aw/shared/api/assetWorkbenchApi'
+import { formatShanghaiDateTime } from '@aw/shared/format/dateTime'
 import { formatMoney } from '@aw/shared/format/number'
 import DriveThumb from '@aw/shared/drive/DriveThumb.vue'
 import WorkbenchPreviewDialog from '@aw/shared/preview/WorkbenchPreviewDialog.vue'
@@ -25,14 +28,6 @@ const canManageDrive = computed(() => capabilities.value.has('asset.workbench.ma
 const pageSize = 50
 const exportLimit = 5000
 const skeletonRowCount = 8
-const dateTimeFormatter = new Intl.DateTimeFormat('zh-CN', {
-  timeZone: 'Asia/Shanghai',
-  year: 'numeric',
-  month: '2-digit',
-  day: '2-digit',
-  hour: '2-digit',
-  minute: '2-digit',
-})
 
 const directories = ref<DriveDirectoryRow[]>([])
 const files = ref<DriveFileRow[]>([])
@@ -62,6 +57,14 @@ const previewEmptyLabel = ref('')
 const previewTitle = ref('')
 const previewMimeType = ref('')
 const previewRows = ref<Array<[string, string]>>([])
+const previewDownloadHandler = ref<(() => void) | null>(null)
+const archiveOpen = ref(false)
+const archiveSource = ref<DriveFileRow | null>(null)
+const archivePath = ref('')
+const archiveFolders = ref<ArchiveVirtualFolder[]>([])
+const archiveFiles = ref<ArchiveVirtualFile[]>([])
+const archiveLoading = ref(false)
+const archiveError = ref('')
 
 let requestSeq = 0
 let listAbortController: AbortController | null = null
@@ -80,6 +83,16 @@ const activeFilterCount = computed(() =>
   [query.value.trim(), owner.value.trim(), createdFrom.value, createdTo.value, directory.value !== 'all' ? directory.value : ''].filter(Boolean).length,
 )
 const directoryOptions = computed(() => directories.value.filter((dir) => Number(dir.directory_id || 0) > 0))
+const archiveBreadcrumbs = computed(() => {
+  const crumbs = [{ label: archiveSource.value ? fileDisplayName(archiveSource.value) : '压缩包', path: '' }]
+  const segments = archivePath.value.split('/').filter(Boolean)
+  let current = ''
+  for (const segment of segments) {
+    current = current ? `${current}/${segment}` : segment
+    crumbs.push({ label: segment, path: current })
+  }
+  return crumbs
+})
 
 function directoryParams() {
   if (directory.value === 'unassigned') return { unassigned: true }
@@ -89,10 +102,7 @@ function directoryParams() {
 }
 
 function formatDateTime(value?: string) {
-  if (!value) return '—'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return dateTimeFormatter.format(date).replace(/\//g, '-')
+  return formatShanghaiDateTime(value)
 }
 
 function formatSize(size?: number): string {
@@ -175,6 +185,26 @@ function fileFormatSecondary(file: DriveFileRow): string {
   const primary = fileExtLabel(file)
   const kind = fileFormatKind(file)
   return primary && primary !== kind ? kind : ''
+}
+
+function archiveFormatOf(file: DriveFileRow | null | undefined): string {
+  if (!file) return ''
+  const ext = filenameExt(file.original_filename) || filenameExt(file.display_name)
+  if (['zip', 'rar', '7z'].includes(ext.toLowerCase())) return ext.toLowerCase()
+  return file.file_type === 'archive' ? 'archive' : ''
+}
+
+function isArchiveFile(file: DriveFileRow | null | undefined): boolean {
+  return Boolean(archiveFormatOf(file))
+}
+
+function canOpenArchive(file: DriveFileRow | null | undefined): boolean {
+  return ['zip', 'rar'].includes(archiveFormatOf(file))
+}
+
+function archiveUnsupportedLabel(file: DriveFileRow): string {
+  const format = archiveFormatOf(file).toUpperCase()
+  return `${format || '压缩包'} 暂不能在线打开，可先下载后查看。`
 }
 
 function statusText(value?: string) {
@@ -376,6 +406,10 @@ async function saveDisplayName(file: DriveFileRow) {
 }
 
 async function openFilePreview(file: DriveFileRow) {
+  if (isArchiveFile(file)) {
+    await openArchiveFile(file)
+    return
+  }
   selectedFile.value = file
   previewOpen.value = true
   previewTitle.value = fileDisplayName(file)
@@ -383,6 +417,9 @@ async function openFilePreview(file: DriveFileRow) {
   previewRows.value = filePreviewRows(file)
   previewUrl.value = ''
   previewEmptyLabel.value = '正在加载预览…'
+  previewDownloadHandler.value = () => {
+    void downloadFile(file)
+  }
   try {
     const meta = await assetWorkbenchApi.getFilePreview(file.id)
     previewUrl.value = meta.preview_url || ''
@@ -390,6 +427,91 @@ async function openFilePreview(file: DriveFileRow) {
   } catch (err) {
     previewEmptyLabel.value = err instanceof Error ? err.message : '预览加载失败'
   }
+}
+
+async function openArchiveFile(file: DriveFileRow, path = '') {
+  selectedFile.value = file
+  archiveSource.value = file
+  archiveOpen.value = true
+  archivePath.value = path
+  archiveFolders.value = []
+  archiveFiles.value = []
+  archiveError.value = ''
+  if (!canOpenArchive(file)) {
+    archiveError.value = archiveUnsupportedLabel(file)
+    return
+  }
+  archiveLoading.value = true
+  try {
+    const result = await assetWorkbenchApi.browseArchiveFile(file.id, path)
+    archivePath.value = result.path || ''
+    archiveFolders.value = result.folders || []
+    archiveFiles.value = result.files || []
+  } catch (err) {
+    archiveError.value = err instanceof Error ? err.message : '压缩包打开失败'
+  } finally {
+    archiveLoading.value = false
+  }
+}
+
+function closeArchiveView() {
+  archiveOpen.value = false
+  archiveSource.value = null
+  archivePath.value = ''
+  archiveFolders.value = []
+  archiveFiles.value = []
+  archiveError.value = ''
+  archiveLoading.value = false
+}
+
+function openArchiveFolder(path: string) {
+  const source = archiveSource.value
+  if (!source) return
+  void openArchiveFile(source, path)
+}
+
+function canPreviewArchiveVirtualFile(file: ArchiveVirtualFile) {
+  if (!file.preview_url) return false
+  const mime = (file.mime_type || '').toLowerCase()
+  if (mime.startsWith('image/') || mime.startsWith('video/') || mime === 'application/pdf') return true
+  const ext = filenameExt(file.name).toLowerCase()
+  return ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'svg', 'tif', 'tiff', 'pdf', 'mp4', 'webm', 'mov', 'm4v'].includes(ext)
+}
+
+function archiveVirtualFileKind(file: ArchiveVirtualFile): string {
+  return fileFormatKind({
+    file_type: file.file_type,
+    mime_type: file.mime_type,
+    original_filename: file.name,
+    display_name: file.name,
+  } as DriveFileRow)
+}
+
+function openArchiveVirtualFile(file: ArchiveVirtualFile) {
+  const canPreview = canPreviewArchiveVirtualFile(file)
+  previewOpen.value = true
+  previewTitle.value = file.name
+  previewMimeType.value = file.mime_type || ''
+  previewRows.value = [
+    ['所在位置', archiveSource.value ? fileDisplayName(archiveSource.value) : '压缩包'],
+    ['内部路径', file.path],
+    ['格式', file.file_type || file.mime_type || '文件'],
+    ['文件大小', formatSize(file.file_size)],
+  ]
+  previewUrl.value = canPreview ? file.preview_url || '' : ''
+  previewEmptyLabel.value = canPreview ? '正在加载预览…' : '该格式暂不能在线预览，可下载后查看'
+  previewDownloadHandler.value = () => {
+    if (file.download_url) window.open(file.download_url, '_blank', 'noopener,noreferrer')
+  }
+}
+
+function handlePreviewDownload() {
+  const handler = previewDownloadHandler.value
+  if (handler) {
+    handler()
+    return
+  }
+  if (selectedFile.value) void downloadFile(selectedFile.value)
 }
 
 async function downloadFile(file: DriveFileRow) {
@@ -809,7 +931,78 @@ onBeforeUnmount(() => {
       :empty-label="previewEmptyLabel"
       :meta-rows="previewRows"
       @close="previewOpen = false"
-      @download="selectedFile && downloadFile(selectedFile)"
+      @download="handlePreviewDownload"
     />
+
+    <section v-if="archiveOpen" class="aw-token-scope aw-upload-ledger-archive" role="dialog" aria-modal="true" aria-label="压缩包内容">
+      <div class="aw-upload-ledger-archive__backdrop" @click="closeArchiveView" />
+      <article class="aw-upload-ledger-archive__panel">
+        <header class="aw-upload-ledger-archive__head">
+          <div>
+            <p class="aw-eyebrow">压缩包内容</p>
+            <h3 :title="archiveSource ? fileDisplayName(archiveSource) : '压缩包'">{{ archiveSource ? fileDisplayName(archiveSource) : '压缩包' }}</h3>
+          </div>
+          <button type="button" class="aw-upload-ledger__detail-close" aria-label="关闭压缩包内容" @click="closeArchiveView">
+            <X :size="15" aria-hidden="true" />
+          </button>
+        </header>
+        <nav class="aw-upload-ledger-archive__breadcrumbs" aria-label="压缩包路径">
+          <button
+            v-for="(crumb, index) in archiveBreadcrumbs"
+            :key="`${crumb.path || '__root__'}:${index}`"
+            type="button"
+            :class="{ 'is-active': index === archiveBreadcrumbs.length - 1 }"
+            @click="openArchiveFolder(crumb.path)"
+          >
+            {{ crumb.label }}
+          </button>
+        </nav>
+        <p v-if="archiveLoading" class="aw-drive-empty">正在读取压缩包…</p>
+        <div v-else-if="archiveError" class="aw-upload-ledger-archive__empty">
+          <FileArchive :size="34" aria-hidden="true" />
+          <strong>{{ archiveError }}</strong>
+          <button v-if="archiveSource" class="aw-secondary-button" type="button" @click="downloadFile(archiveSource)">下载压缩包</button>
+        </div>
+        <template v-else>
+          <div class="aw-drive-archive-head">
+            <div>
+              <strong>{{ archivePath || '根目录' }}</strong>
+              <span>{{ archiveFolders.length }} 个文件夹 · {{ archiveFiles.length }} 个文件</span>
+            </div>
+            <button v-if="archiveSource" class="aw-grid-button" type="button" @click="downloadFile(archiveSource)">下载压缩包</button>
+          </div>
+          <div v-if="archiveFolders.length" class="aw-upload-ledger-archive__grid">
+            <button
+              v-for="folder in archiveFolders"
+              :key="folder.path"
+              class="aw-upload-ledger-archive__folder"
+              type="button"
+              @click="openArchiveFolder(folder.path)"
+            >
+              <FolderOpen :size="34" aria-hidden="true" />
+              <strong :title="folder.name">{{ folder.name }}</strong>
+              <small>{{ folder.file_count }} 个文件</small>
+            </button>
+          </div>
+          <div v-if="archiveFiles.length" class="aw-upload-ledger-archive__grid">
+            <button
+              v-for="file in archiveFiles"
+              :key="file.path"
+              class="aw-upload-ledger-archive__file"
+              type="button"
+              @click="openArchiveVirtualFile(file)"
+            >
+              <span>
+                <img v-if="file.preview_url && file.mime_type.startsWith('image/')" :src="file.preview_url" :alt="file.name" loading="lazy" />
+                <FileArchive v-else :size="26" aria-hidden="true" />
+              </span>
+              <strong :title="file.name">{{ file.name }}</strong>
+              <small>{{ archiveVirtualFileKind(file) }} · {{ formatSize(file.file_size) }}</small>
+            </button>
+          </div>
+          <p v-if="archiveFolders.length === 0 && archiveFiles.length === 0" class="aw-drive-empty">压缩包内没有可显示的文件</p>
+        </template>
+      </article>
+    </section>
   </section>
 </template>

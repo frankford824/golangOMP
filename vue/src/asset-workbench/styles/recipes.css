@@ -5175,6 +5175,167 @@ body.aw-submission-dialog-locked {
   width: min(260px, 100%);
 }
 
+.aw-upload-ledger-archive {
+  position: fixed;
+  inset: 0;
+  z-index: var(--aw-z-modal, 1000);
+  display: grid;
+  place-items: center;
+  padding: var(--aw-space-5);
+}
+
+.aw-upload-ledger-archive__backdrop {
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--aw-ink) 34%, transparent);
+  backdrop-filter: blur(4px);
+}
+
+.aw-upload-ledger-archive__panel {
+  position: relative;
+  z-index: 1;
+  width: min(1120px, calc(100vw - 40px));
+  max-height: min(780px, calc(100vh - 40px));
+  display: flex;
+  flex-direction: column;
+  gap: var(--aw-space-3);
+  overflow: hidden;
+  border: 1px solid var(--aw-hairline);
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-paper);
+  box-shadow: var(--aw-shadow-popover);
+  padding: var(--aw-space-4);
+}
+
+.aw-upload-ledger-archive__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--aw-space-3);
+}
+
+.aw-upload-ledger-archive__head h3 {
+  margin: 0;
+  max-width: min(760px, 70vw);
+  overflow: hidden;
+  color: var(--aw-ink);
+  font-size: var(--aw-font-size-xl);
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aw-upload-ledger-archive__breadcrumbs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 34px;
+  overflow-x: auto;
+  padding: 4px;
+  border: 1px solid var(--aw-hairline);
+  border-radius: var(--aw-radius-sm);
+  background: var(--aw-surface);
+}
+
+.aw-upload-ledger-archive__breadcrumbs button {
+  flex: 0 0 auto;
+  min-height: 26px;
+  border: 0;
+  border-radius: var(--aw-radius-sm);
+  background: transparent;
+  color: var(--aw-muted);
+  padding: 0 var(--aw-space-2);
+  font-size: var(--aw-font-size-sm);
+  cursor: pointer;
+}
+
+.aw-upload-ledger-archive__breadcrumbs button:hover,
+.aw-upload-ledger-archive__breadcrumbs button.is-active {
+  background: var(--aw-paper);
+  color: var(--aw-text);
+}
+
+.aw-upload-ledger-archive__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: var(--aw-space-3);
+  overflow: auto;
+  min-height: 0;
+}
+
+.aw-upload-ledger-archive__folder,
+.aw-upload-ledger-archive__file {
+  min-width: 0;
+  min-height: 132px;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: var(--aw-space-2);
+  border: 1px solid var(--aw-hairline);
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-surface);
+  color: var(--aw-text);
+  padding: var(--aw-space-3);
+  text-align: center;
+  cursor: pointer;
+}
+
+.aw-upload-ledger-archive__folder:hover,
+.aw-upload-ledger-archive__file:hover {
+  border-color: color-mix(in srgb, var(--aw-accent) 36%, var(--aw-border));
+  background: color-mix(in srgb, var(--aw-accent) 7%, var(--aw-paper));
+}
+
+.aw-upload-ledger-archive__folder svg {
+  color: var(--aw-brand);
+}
+
+.aw-upload-ledger-archive__file > span {
+  display: grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  overflow: hidden;
+  border: 1px solid var(--aw-hairline);
+  border-radius: var(--aw-radius-sm);
+  background: var(--aw-paper);
+}
+
+.aw-upload-ledger-archive__file img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.aw-upload-ledger-archive__folder strong,
+.aw-upload-ledger-archive__file strong,
+.aw-upload-ledger-archive__folder small,
+.aw-upload-ledger-archive__file small {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aw-upload-ledger-archive__folder small,
+.aw-upload-ledger-archive__file small {
+  color: var(--aw-muted);
+  font-size: var(--aw-font-size-xs);
+}
+
+.aw-upload-ledger-archive__empty {
+  min-height: 260px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: var(--aw-space-3);
+  border: 1px dashed var(--aw-border);
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-surface);
+  color: var(--aw-muted);
+  text-align: center;
+}
+
 .aw-upload-ledger__content {
   flex: 1 1 auto;
   min-height: 0;

@@ -11828,7 +11828,7 @@ curl -X GET https://api.example.com/v1/asset-workbench/files/<file_id>/download 
 ### 简介
 支持方法: GET。
 
-- `GET`: Lists folders and files inside an uploaded archive without extracting it into the workbench drive. The first implementation supports ZIP virtual browsing.
+- `GET`: Lists folders and files inside an uploaded archive without extracting it into the workbench drive. Supports ZIP and RAR virtual browsing.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -11893,7 +11893,7 @@ curl -X GET https://api.example.com/v1/asset-workbench/files/<file_id>/archive \
 ### 简介
 支持方法: GET。
 
-- `GET`: Streams a single file entry from a ZIP archive for inline preview or download. This endpoint returns file bytes rather than the standard JSON envelope.
+- `GET`: Streams a single file entry from a ZIP or RAR archive for inline preview or download. This endpoint returns file bytes rather than the standard JSON envelope.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。

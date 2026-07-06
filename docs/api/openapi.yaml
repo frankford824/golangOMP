@@ -20869,7 +20869,7 @@ paths:
   /v1/asset-workbench/files/{file_id}/archive:
     get:
       summary: Browse uploaded archive as a virtual folder
-      description: Lists folders and files inside an uploaded archive without extracting it into the workbench drive. The first implementation supports ZIP virtual browsing.
+      description: Lists folders and files inside an uploaded archive without extracting it into the workbench drive. Supports ZIP and RAR virtual browsing.
       tags: [AssetWorkbench, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
@@ -20926,7 +20926,7 @@ paths:
   /v1/asset-workbench/files/{file_id}/archive/entry:
     get:
       summary: Stream one virtual file from an uploaded archive
-      description: Streams a single file entry from a ZIP archive for inline preview or download. This endpoint returns file bytes rather than the standard JSON envelope.
+      description: Streams a single file entry from a ZIP or RAR archive for inline preview or download. This endpoint returns file bytes rather than the standard JSON envelope.
       tags: [AssetWorkbench, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:

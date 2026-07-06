@@ -38,6 +38,7 @@ import MaterialListThumb from '@aw/shared/materials/MaterialListThumb.vue'
 import IconfontActionIcon from '@aw/shared/icons/IconfontActionIcon.vue'
 import WorkbenchFolderIcon from '@aw/shared/icons/WorkbenchFolderIcon.vue'
 import WorkbenchPreviewDialog from '@aw/shared/preview/WorkbenchPreviewDialog.vue'
+import { formatShanghaiDateTime } from '@aw/shared/format/dateTime'
 import { formatMoney } from '@aw/shared/format/number'
 import SpreadsheetWorkbench from '@aw/shared/spreadsheet/SpreadsheetWorkbench.vue'
 import type {
@@ -82,14 +83,6 @@ const UNASSIGNED_KEY = 'unassigned'
 const pageSize = 60
 const materialPageSize = 100
 const searchDebounceMs = 250
-const dateTimeFormatter = new Intl.DateTimeFormat('zh-CN', {
-  timeZone: 'Asia/Shanghai',
-  year: 'numeric',
-  month: '2-digit',
-  day: '2-digit',
-  hour: '2-digit',
-  minute: '2-digit',
-})
 
 const activeMode = ref<DriveMode>('directories')
 const driveSpreadsheetOpen = ref(false)
@@ -911,10 +904,7 @@ function formatSize(size?: number): string {
 }
 
 function formatDateTime(value?: string) {
-  if (!value) return '—'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return dateTimeFormatter.format(date)
+  return formatShanghaiDateTime(value)
 }
 
 function fileFormatLabel(file: DriveFileRow): string {
@@ -1800,7 +1790,7 @@ function archiveFormatOf(file: DriveFileRow | null | undefined) {
 }
 
 function canOpenArchive(file: DriveFileRow | null | undefined) {
-  return archiveFormatOf(file) === 'zip'
+  return ['zip', 'rar'].includes(archiveFormatOf(file))
 }
 
 async function openArchiveFile(file: DriveFileRow | null | undefined, path = '') {

@@ -1980,8 +1980,9 @@ func (r *assetWorkbenchRepo) CreateSubmissionFile(ctx context.Context, tx repo.T
 			upload_directory_id, upload_directory_name, upload_directory_prefix, upload_directory_difficulty_class,
 			upload_batch_id, relative_path, display_name, is_folder_upload,
 			object_key, preview_key,
-			preview_status, original_filename, file_ext, file_type, mime_type, file_size, file_hash, sort_order
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			preview_status, original_filename, file_ext, file_type, mime_type, file_size, file_hash, sort_order,
+			created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, UTC_TIMESTAMP()), COALESCE(?, UTC_TIMESTAMP()))`,
 		file.SubmissionID,
 		file.SubmissionItemID,
 		toNullInt64(file.UploadSessionID),
@@ -2004,6 +2005,8 @@ func (r *assetWorkbenchRepo) CreateSubmissionFile(ctx context.Context, tx repo.T
 		file.FileSize,
 		file.FileHash,
 		file.SortOrder,
+		toNullTime(nonZeroTimePtr(file.CreatedAt)),
+		toNullTime(nonZeroTimePtr(file.UpdatedAt)),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("insert asset workbench submission file: %w", err)

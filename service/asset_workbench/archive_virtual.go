@@ -16,6 +16,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nwaples/rardecode/v2"
+
 	"workflow/domain"
 )
 
@@ -84,20 +86,34 @@ func (s *Service) BrowseArchiveFile(ctx context.Context, actor domain.RequestAct
 		return nil, appErr
 	}
 	format := archiveFormatForFile(file)
-	if format != "zip" {
+	switch format {
+	case "zip":
+		lease, err := s.cachedArchiveObjectTemp(ctx, file)
+		if err != nil {
+			return nil, archiveErrorToAppError(err)
+		}
+		defer lease.Close()
+		reader, err := zip.OpenReader(lease.Path())
+		if err != nil {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "压缩包无法打开，请下载后检查文件是否完整", err.Error())
+		}
+		defer reader.Close()
+		return s.buildArchiveBrowseResult(file.ID, "zip", normalizeDriveFolderPath(folderPath), &reader.Reader)
+	case "rar":
+		lease, err := s.cachedArchiveObjectTemp(ctx, file)
+		if err != nil {
+			return nil, archiveErrorToAppError(err)
+		}
+		defer lease.Close()
+		reader, err := rardecode.OpenReader(lease.Path())
+		if err != nil {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "压缩包无法打开，请下载后检查文件是否完整", err.Error())
+		}
+		defer reader.Close()
+		return s.buildRarArchiveBrowseResult(file.ID, normalizeDriveFolderPath(folderPath), reader)
+	default:
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "该压缩包暂不支持在线打开，可下载后查看", map[string]interface{}{"archive_format": format})
 	}
-	lease, err := s.cachedArchiveObjectTemp(ctx, file)
-	if err != nil {
-		return nil, archiveErrorToAppError(err)
-	}
-	defer lease.Close()
-	reader, err := zip.OpenReader(lease.Path())
-	if err != nil {
-		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "压缩包无法打开，请下载后检查文件是否完整", err.Error())
-	}
-	defer reader.Close()
-	return s.buildArchiveBrowseResult(file.ID, "zip", normalizeDriveFolderPath(folderPath), &reader.Reader)
 }
 
 func (s *Service) OpenArchiveEntry(ctx context.Context, actor domain.RequestActor, fileID int64, entryPath string) (*ArchiveEntryStream, *domain.AppError) {
@@ -105,7 +121,8 @@ func (s *Service) OpenArchiveEntry(ctx context.Context, actor domain.RequestActo
 	if appErr != nil {
 		return nil, appErr
 	}
-	if archiveFormatForFile(file) != "zip" {
+	format := archiveFormatForFile(file)
+	if format != "zip" && format != "rar" {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "该压缩包暂不支持在线打开，可下载后查看", nil)
 	}
 	cleanEntryPath, skip, err := sanitizeArchiveEntryPath(entryPath, archiveVirtualMaxDepth)
@@ -115,6 +132,9 @@ func (s *Service) OpenArchiveEntry(ctx context.Context, actor domain.RequestActo
 	lease, err := s.cachedArchiveObjectTemp(ctx, file)
 	if err != nil {
 		return nil, archiveErrorToAppError(err)
+	}
+	if format == "rar" {
+		return s.openRarArchiveEntry(cleanEntryPath, lease)
 	}
 	reader, err := zip.OpenReader(lease.Path())
 	if err != nil {
@@ -249,6 +269,144 @@ func (s *Service) buildArchiveBrowseResult(fileID int64, format string, folderPa
 	sort.Slice(result.Folders, func(i, j int) bool { return result.Folders[i].Name < result.Folders[j].Name })
 	sort.Slice(result.Files, func(i, j int) bool { return result.Files[i].Name < result.Files[j].Name })
 	return result, nil
+}
+
+func (s *Service) buildRarArchiveBrowseResult(fileID int64, folderPath string, reader *rardecode.ReadCloser) (*ArchiveBrowseResult, *domain.AppError) {
+	result := &ArchiveBrowseResult{FileID: fileID, Format: "rar", Path: normalizeDriveFolderPath(folderPath), Folders: []ArchiveVirtualFolder{}, Files: []ArchiveVirtualFile{}}
+	folderByPath := map[string]*ArchiveVirtualFolder{}
+	var visibleFileCount int
+	var totalUncompressed int64
+	for {
+		header, err := reader.Next()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "压缩包无法打开，请下载后检查文件是否完整", err.Error())
+		}
+		if header == nil || header.IsDir {
+			continue
+		}
+		if header.Encrypted || header.HeaderEncrypted {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "加密压缩包暂不支持在线打开，可下载后查看", nil)
+		}
+		if header.UnKnownSize {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "压缩包内文件大小无法确认，暂不支持在线打开", nil)
+		}
+		visibleFileCount++
+		if visibleFileCount > archiveVirtualMaxVisibleFileCount {
+			return nil, archiveErrorToAppError(permanentArchiveVirtualErrorf("压缩包内文件过多，暂不支持在线打开"))
+		}
+		if header.UnPackedSize > archiveVirtualMaxUncompressedBytes {
+			return nil, archiveErrorToAppError(permanentArchiveVirtualErrorf("压缩包内容过大，暂不支持在线打开"))
+		}
+		entrySize := header.UnPackedSize
+		if entrySize > 0 {
+			if archiveVirtualMaxUncompressedBytes-totalUncompressed < entrySize {
+				return nil, archiveErrorToAppError(permanentArchiveVirtualErrorf("压缩包内容过大，暂不支持在线打开"))
+			}
+			totalUncompressed += entrySize
+		}
+		clean, skip, err := sanitizeArchiveEntryPath(header.Name, archiveVirtualMaxDepth)
+		if err != nil {
+			return nil, archiveErrorToAppError(err)
+		}
+		if skip {
+			continue
+		}
+		remainder, ok := driveFolderRemainder(clean, result.Path)
+		if !ok || remainder == "" {
+			continue
+		}
+		if idx := strings.Index(remainder, "/"); idx >= 0 {
+			childName := strings.TrimSpace(remainder[:idx])
+			if childName == "" {
+				continue
+			}
+			childPath := childName
+			if result.Path != "" {
+				childPath = result.Path + "/" + childName
+			}
+			folder := folderByPath[childPath]
+			if folder == nil {
+				folder = &ArchiveVirtualFolder{Name: childName, Path: childPath}
+				folderByPath[childPath] = folder
+			}
+			folder.FileCount++
+			continue
+		}
+		mimeType := archiveEntryMimeType(clean)
+		previewURL := ""
+		if archiveEntryPreviewable(clean, mimeType) {
+			previewURL = archiveEntryURL(fileID, clean, true)
+		}
+		result.Files = append(result.Files, ArchiveVirtualFile{
+			Name:        path.Base(clean),
+			Path:        clean,
+			MimeType:    mimeType,
+			FileType:    inferFileType(clean, mimeType),
+			FileSize:    entrySize,
+			PreviewURL:  previewURL,
+			DownloadURL: archiveEntryURL(fileID, clean, false),
+		})
+	}
+	for _, folder := range folderByPath {
+		result.Folders = append(result.Folders, *folder)
+	}
+	sort.Slice(result.Folders, func(i, j int) bool { return result.Folders[i].Name < result.Folders[j].Name })
+	sort.Slice(result.Files, func(i, j int) bool { return result.Files[i].Name < result.Files[j].Name })
+	return result, nil
+}
+
+func (s *Service) openRarArchiveEntry(cleanEntryPath string, lease *archiveTempCacheLease) (*ArchiveEntryStream, *domain.AppError) {
+	reader, err := rardecode.OpenReader(lease.Path())
+	if err != nil {
+		_ = lease.Close()
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "压缩包无法打开，请下载后检查文件是否完整", err.Error())
+	}
+	for {
+		header, err := reader.Next()
+		if errors.Is(err, io.EOF) {
+			_ = reader.Close()
+			_ = lease.Close()
+			return nil, domain.NewAppError(domain.ErrCodeNotFound, "压缩包内未找到该文件", nil)
+		}
+		if err != nil {
+			_ = reader.Close()
+			_ = lease.Close()
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "压缩包无法打开，请下载后检查文件是否完整", err.Error())
+		}
+		if header == nil || header.IsDir {
+			continue
+		}
+		if header.Encrypted || header.HeaderEncrypted {
+			_ = reader.Close()
+			_ = lease.Close()
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "加密压缩包暂不支持在线打开，可下载后查看", nil)
+		}
+		clean, skip, err := sanitizeArchiveEntryPath(header.Name, archiveVirtualMaxDepth)
+		if err != nil || skip || clean != cleanEntryPath {
+			continue
+		}
+		if header.UnKnownSize {
+			_ = reader.Close()
+			_ = lease.Close()
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "压缩包内文件大小无法确认，暂不支持在线打开", nil)
+		}
+		if header.UnPackedSize > archiveVirtualMaxUncompressedBytes {
+			_ = reader.Close()
+			_ = lease.Close()
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "压缩包内文件过大，暂不支持在线打开", nil)
+		}
+		return &ArchiveEntryStream{
+			Body:        io.NopCloser(reader),
+			Filename:    path.Base(clean),
+			MimeType:    archiveEntryMimeType(clean),
+			FileSize:    header.UnPackedSize,
+			ArchiveBody: reader,
+			CacheLease:  lease,
+		}, nil
+	}
 }
 
 func archiveEntryURL(fileID int64, entryPath string, preview bool) string {

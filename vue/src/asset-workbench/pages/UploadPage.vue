@@ -343,12 +343,17 @@ async function runAdminPrimaryAction() {
     await createSubmission()
     return
   }
-  const uploaded = await uploadQueuedItems()
-  if (!uploaded || queue.value.some((item) => item.status === 'failed')) {
-    error.value = '部分文件上传失败'
+  await uploadQueuedItems()
+  const successful = uploadedItems.value.length
+  const failed = queue.value.filter((item) => item.status === 'failed').length
+  if (!successful) {
+    error.value = '没有文件上传成功，请重试'
     return
   }
   await createSubmission()
+  if (failed > 0 && !error.value) {
+    notice.value = `已生成 ${formatInt(successful)} 个成功文件的提交记录；${formatInt(failed)} 个文件上传失败，已保留在列表里可继续重试。`
+  }
 }
 
 async function createSubmission() {
@@ -396,13 +401,18 @@ async function submitSimple() {
     item.difficultyClass = selectedUploadDirectory.value?.difficulty_class ?? item.difficultyClass
   }
   if (hasPendingUploads.value) {
-    const uploaded = await uploadQueuedItems()
-    if (!uploaded || queue.value.some((item) => item.status === 'failed')) {
-      error.value = '有文件没传成功，请点重试后再交。'
+    await uploadQueuedItems()
+    if (!uploadedItems.value.length) {
+      error.value = '没有文件上传成功，请重试。'
       return
     }
   }
+  const successful = uploadedItems.value.length
+  const failed = queue.value.filter((item) => item.status === 'failed').length
   await createSubmission()
+  if (failed > 0 && !error.value) {
+    notice.value = `已提交成功 ${formatInt(successful)} 个文件；${formatInt(failed)} 个文件上传失败，已保留在列表里可继续重试。`
+  }
 }
 
 async function retryAndSubmit() {

@@ -3013,6 +3013,10 @@ func (s *Service) CreateSubmission(ctx context.Context, actor domain.RequestActo
 			}
 			itemDetail := SubmissionItemDetail{Item: createdItem}
 			for index, session := range uploadSessions {
+				uploadedAt := now
+				if session.UploadedAt != nil && !session.UploadedAt.IsZero() {
+					uploadedAt = session.UploadedAt.UTC()
+				}
 				file := &domain.AssetWorkbenchSubmissionFile{
 					SubmissionID:                   createdSubmission.ID,
 					SubmissionItemID:               createdItem.ID,
@@ -3035,6 +3039,8 @@ func (s *Service) CreateSubmission(ctx context.Context, actor domain.RequestActo
 					FileSize:                       session.FileSize,
 					FileHash:                       session.FileHash,
 					SortOrder:                      index,
+					CreatedAt:                      uploadedAt,
+					UpdatedAt:                      uploadedAt,
 				}
 				createdFile, err := s.repo.CreateSubmissionFile(ctx, tx, file)
 				if err != nil {

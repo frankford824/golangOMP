@@ -2492,6 +2492,7 @@ func TestUploadDirectorySnapshotObjectKeyUsesDirectoryPrefix(t *testing.T) {
 func TestCreateSubmissionInfersDifficultyFromUploadDirectorySnapshot(t *testing.T) {
 	sessionID := "session-c"
 	directoryID := int64(11)
+	uploadedAt := time.Date(2026, 7, 3, 1, 58, 30, 0, time.UTC)
 	workbenchRepo := &submissionDirectoryDifficultyRepo{
 		profile: &domain.AssetWorkbenchProfile{
 			UserID:     77,
@@ -2519,6 +2520,7 @@ func TestCreateSubmissionInfersDifficultyFromUploadDirectorySnapshot(t *testing.
 			OriginalFilename:               "final.jpg",
 			MimeType:                       "image/jpeg",
 			FileSize:                       2048,
+			UploadedAt:                     &uploadedAt,
 		},
 	}
 	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}))
@@ -2549,6 +2551,9 @@ func TestCreateSubmissionInfersDifficultyFromUploadDirectorySnapshot(t *testing.
 	}
 	if workbenchRepo.files[0].UploadDirectoryDifficultyClass != "C" {
 		t.Fatalf("file directory difficulty = %q, want C", workbenchRepo.files[0].UploadDirectoryDifficultyClass)
+	}
+	if !workbenchRepo.files[0].CreatedAt.Equal(uploadedAt) {
+		t.Fatalf("file created_at = %s, want upload completion %s", workbenchRepo.files[0].CreatedAt, uploadedAt)
 	}
 	if workbenchRepo.sessionStatus != domain.AssetWorkbenchUploadStatusSubmitted {
 		t.Fatalf("session status = %q, want submitted", workbenchRepo.sessionStatus)
