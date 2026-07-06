@@ -156,33 +156,33 @@ func (r *productManagementRepo) refreshMainTaskRecords(ctx context.Context) erro
 		    ELSE erp_product_sync_records.sync_cooldown_until
 		  END,
 		  erp_sync_status = CASE
-		    WHEN VALUES(erp_sync_status) = 'synced' THEN 'synced'
 		    WHEN erp_product_sync_records.erp_sync_status IN ('queued', 'cooling_down', 'syncing') THEN erp_product_sync_records.erp_sync_status
-		    WHEN VALUES(erp_sync_status) = 'pending_sync'
-		      AND erp_product_sync_records.erp_sync_status = 'failed'
-		      AND VALUES(updated_at) > erp_product_sync_records.updated_at THEN 'pending_sync'
-		    WHEN erp_product_sync_records.erp_sync_status = 'synced'
+		    WHEN erp_product_sync_records.erp_sync_status IN ('synced', 'failed')
 		      AND (
 		        NOT (erp_product_sync_records.sku_code <=> VALUES(sku_code))
 		        OR NOT (erp_product_sync_records.product_i_id <=> VALUES(product_i_id))
 		        OR NOT (erp_product_sync_records.product_name <=> VALUES(product_name))
 		        OR NOT (erp_product_sync_records.cost_price <=> VALUES(cost_price))
 		      ) THEN 'pending_sync'
+		    WHEN VALUES(erp_sync_status) = 'synced' THEN 'synced'
+		    WHEN VALUES(erp_sync_status) = 'pending_sync'
+		      AND erp_product_sync_records.erp_sync_status = 'failed'
+		      AND VALUES(updated_at) > erp_product_sync_records.updated_at THEN 'pending_sync'
 		    ELSE erp_product_sync_records.erp_sync_status
 		  END,
 		  base_sync_status = CASE
-		    WHEN VALUES(base_sync_status) = 'synced' THEN 'synced'
 		    WHEN erp_product_sync_records.base_sync_status IN ('queued', 'cooling_down', 'syncing') THEN erp_product_sync_records.base_sync_status
-		    WHEN VALUES(base_sync_status) = 'pending_sync'
-		      AND erp_product_sync_records.base_sync_status = 'failed'
-		      AND VALUES(updated_at) > erp_product_sync_records.updated_at THEN 'pending_sync'
-		    WHEN erp_product_sync_records.base_sync_status = 'synced'
+		    WHEN erp_product_sync_records.base_sync_status IN ('synced', 'failed')
 		      AND (
 		        NOT (erp_product_sync_records.sku_code <=> VALUES(sku_code))
 		        OR NOT (erp_product_sync_records.erp_i_id <=> VALUES(erp_i_id))
 		        OR NOT (erp_product_sync_records.product_name <=> VALUES(product_name))
 		        OR NOT (erp_product_sync_records.cost_price <=> VALUES(cost_price))
 		      ) THEN 'pending_sync'
+		    WHEN VALUES(base_sync_status) = 'synced' THEN 'synced'
+		    WHEN VALUES(base_sync_status) = 'pending_sync'
+		      AND erp_product_sync_records.base_sync_status = 'failed'
+		      AND VALUES(updated_at) > erp_product_sync_records.updated_at THEN 'pending_sync'
 		    ELSE erp_product_sync_records.base_sync_status
 		  END,
 		  sku_code = VALUES(sku_code),
@@ -285,33 +285,33 @@ func (r *productManagementRepo) refreshSKUItemRecords(ctx context.Context) error
 		    ELSE erp_product_sync_records.sync_cooldown_until
 		  END,
 		  erp_sync_status = CASE
-		    WHEN VALUES(erp_sync_status) = 'synced' THEN 'synced'
 		    WHEN erp_product_sync_records.erp_sync_status IN ('queued', 'cooling_down', 'syncing') THEN erp_product_sync_records.erp_sync_status
-		    WHEN VALUES(erp_sync_status) = 'pending_sync'
-		      AND erp_product_sync_records.erp_sync_status = 'failed'
-		      AND VALUES(updated_at) > erp_product_sync_records.updated_at THEN 'pending_sync'
-		    WHEN erp_product_sync_records.erp_sync_status = 'synced'
+		    WHEN erp_product_sync_records.erp_sync_status IN ('synced', 'failed')
 		      AND (
 		        NOT (erp_product_sync_records.sku_code <=> VALUES(sku_code))
 		        OR NOT (erp_product_sync_records.product_i_id <=> VALUES(product_i_id))
 		        OR NOT (erp_product_sync_records.product_name <=> VALUES(product_name))
 		        OR NOT (erp_product_sync_records.cost_price <=> VALUES(cost_price))
 		      ) THEN 'pending_sync'
+		    WHEN VALUES(erp_sync_status) = 'synced' THEN 'synced'
+		    WHEN VALUES(erp_sync_status) = 'pending_sync'
+		      AND erp_product_sync_records.erp_sync_status = 'failed'
+		      AND VALUES(updated_at) > erp_product_sync_records.updated_at THEN 'pending_sync'
 		    ELSE erp_product_sync_records.erp_sync_status
 		  END,
 		  base_sync_status = CASE
-		    WHEN VALUES(base_sync_status) = 'synced' THEN 'synced'
 		    WHEN erp_product_sync_records.base_sync_status IN ('queued', 'cooling_down', 'syncing') THEN erp_product_sync_records.base_sync_status
-		    WHEN VALUES(base_sync_status) = 'pending_sync'
-		      AND erp_product_sync_records.base_sync_status = 'failed'
-		      AND VALUES(updated_at) > erp_product_sync_records.updated_at THEN 'pending_sync'
-		    WHEN erp_product_sync_records.base_sync_status = 'synced'
+		    WHEN erp_product_sync_records.base_sync_status IN ('synced', 'failed')
 		      AND (
 		        NOT (erp_product_sync_records.sku_code <=> VALUES(sku_code))
 		        OR NOT (erp_product_sync_records.erp_i_id <=> VALUES(erp_i_id))
 		        OR NOT (erp_product_sync_records.product_name <=> VALUES(product_name))
 		        OR NOT (erp_product_sync_records.cost_price <=> VALUES(cost_price))
 		      ) THEN 'pending_sync'
+		    WHEN VALUES(base_sync_status) = 'synced' THEN 'synced'
+		    WHEN VALUES(base_sync_status) = 'pending_sync'
+		      AND erp_product_sync_records.base_sync_status = 'failed'
+		      AND VALUES(updated_at) > erp_product_sync_records.updated_at THEN 'pending_sync'
 		    ELSE erp_product_sync_records.base_sync_status
 		  END,
 		  sku_code = VALUES(sku_code),

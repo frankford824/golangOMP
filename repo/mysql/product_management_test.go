@@ -25,9 +25,12 @@ func TestProductManagementRefreshReadModelPreservesProductSyncStatus(t *testing.
 			"VALUES(updated_at) > erp_product_sync_records.updated_at",
 			"WHEN VALUES(erp_sync_status) = 'pending_sync' AND erp_product_sync_records.erp_sync_status = 'failed'",
 			"WHEN VALUES(base_sync_status) = 'pending_sync' AND erp_product_sync_records.base_sync_status = 'failed'",
-			"WHEN erp_product_sync_records.erp_sync_status = 'synced'",
+			"WHEN erp_product_sync_records.erp_sync_status IN ('synced', 'failed')",
+			"WHEN erp_product_sync_records.base_sync_status IN ('synced', 'failed')",
 			"NOT (erp_product_sync_records.cost_price <=> VALUES(cost_price))",
 			"THEN 'pending_sync'",
+			"WHEN VALUES(erp_sync_status) = 'synced' THEN 'synced'",
+			"WHEN VALUES(base_sync_status) = 'synced' THEN 'synced'",
 			"ELSE erp_product_sync_records.erp_sync_status",
 		}
 		for _, fragment := range required {
@@ -47,6 +50,16 @@ func TestProductManagementRefreshReadModelPreservesProductSyncStatus(t *testing.
 		costIndex := strings.Index(duplicateClause, "cost_price = VALUES(cost_price)")
 		if statusIndex < 0 || costIndex < 0 || statusIndex > costIndex {
 			return fmt.Errorf("refresh SQL must evaluate sync status before overwriting cost_price")
+		}
+		erpDiffIndex := strings.Index(duplicateClause, "WHEN erp_product_sync_records.erp_sync_status IN ('synced', 'failed')")
+		erpSyncedIndex := strings.Index(duplicateClause, "WHEN VALUES(erp_sync_status) = 'synced' THEN 'synced'")
+		if erpDiffIndex < 0 || erpSyncedIndex < 0 || erpDiffIndex > erpSyncedIndex {
+			return fmt.Errorf("refresh SQL must mark changed ERP fields pending before preserving synced filing status")
+		}
+		baseDiffIndex := strings.Index(duplicateClause, "WHEN erp_product_sync_records.base_sync_status IN ('synced', 'failed')")
+		baseSyncedIndex := strings.Index(duplicateClause, "WHEN VALUES(base_sync_status) = 'synced' THEN 'synced'")
+		if baseDiffIndex < 0 || baseSyncedIndex < 0 || baseDiffIndex > baseSyncedIndex {
+			return fmt.Errorf("refresh SQL must mark changed base fields pending before preserving synced filing status")
 		}
 		return nil
 	})))
