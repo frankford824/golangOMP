@@ -58,6 +58,7 @@ function normalizeUniqueKeys(keys: unknown): string[] {
  * 新增后端 action 时若前端 `can(...)` 仍沿用旧命名，向本表追加一行即可。
  */
 const ACTION_SEMANTIC_ALIAS: Record<string, string[]> = {
+  'organization.manage': ['org.manage'],
   'task.asset_upload': ['design.upload'],
   'task.design_submit': ['design.submit'],
 }

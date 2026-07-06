@@ -60,7 +60,7 @@
     "SuperAdmin": {
       "menus": ["user_admin", "org_admin", "role_admin", "logs_center", "product_management"],
       "pages": ["admin_users", "admin_roles", "admin_permission_logs", "admin_operation_logs", "org_options", "product_management", "data_center_experience"],
-      "actions": ["user.manage", "role.assign", "role.remove", "permission_logs.read", "operation_logs.read", "organization.manage", "reports.experience.view"],
+      "actions": ["user.manage", "org.manage", "role.assign", "role.remove", "permission_logs.read", "operation_logs.read", "reports.experience.view"],
       "scopes": ["view_all", "identity_admin", "organization_admin"]
     },
     "HRAdmin": {
@@ -72,7 +72,7 @@
     "OrgAdmin": {
       "menus": ["user_admin"],
       "pages": ["admin_users"],
-      "actions": ["org.manage", "user.org.assign"],
+      "actions": ["user.org.assign"],
       "scopes": ["org_admin"]
     },
     "RoleAdmin": {
@@ -114,7 +114,7 @@
     "Admin": {
       "menus": ["user_admin", "logs_center", "product_management"],
       "pages": ["admin_users", "admin_permission_logs", "admin_operation_logs", "product_management"],
-      "actions": ["user.manage", "role.assign", "role.remove", "permission_logs.read", "operation_logs.read", "organization.manage"],
+      "actions": ["user.manage", "org.manage", "role.assign", "role.remove", "permission_logs.read", "operation_logs.read"],
       "scopes": ["view_all", "identity_admin"]
     },
     "Ops": {
@@ -176,7 +176,7 @@
     "super_admin": {
       "menus": ["user_admin", "org_admin", "role_admin", "logs_center", "product_management"],
       "pages": ["admin_users", "admin_roles", "admin_permission_logs", "admin_operation_logs", "org_options", "product_management", "data_center_experience"],
-      "actions": ["user.manage", "role.assign", "role.remove", "permission_logs.read", "operation_logs.read", "organization.manage", "reports.experience.view"],
+      "actions": ["user.manage", "org.manage", "role.assign", "role.remove", "permission_logs.read", "operation_logs.read", "reports.experience.view"],
       "scopes": ["view_all", "identity_admin", "organization_admin"]
     },
     "hr_admin": {

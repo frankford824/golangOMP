@@ -229,6 +229,29 @@ func TestHRAdminGetsFullMenuUnion(t *testing.T) {
 	assertStringSetEqual(t, hrView.Menus, superView.Menus, "menus")
 }
 
+func TestOrgManagementActionsUseCanonicalKeys(t *testing.T) {
+	settings := mustLoadFrontendAccessSettingsForRegression(t)
+
+	for _, role := range []string{"SuperAdmin", "Admin", "HRAdmin"} {
+		spec, ok := settings.Roles[role]
+		if !ok {
+			t.Fatalf("settings.Roles missing %q", role)
+		}
+		assertContainsAll(t, spec.normalizedActions(), []string{"org.manage"}, role+" actions")
+		assertNotContainsAny(t, spec.normalizedActions(), []string{"organization.manage"}, role+" actions")
+	}
+
+	orgAdmin := settings.Roles["OrgAdmin"]
+	assertStringSetEqual(t, orgAdmin.normalizedMenus(), []string{"user_admin"}, "OrgAdmin menus")
+	assertStringSetEqual(t, orgAdmin.normalizedPages(), []string{"admin_users"}, "OrgAdmin pages")
+	assertStringSetEqual(t, orgAdmin.normalizedActions(), []string{"user.org.assign"}, "OrgAdmin actions")
+
+	deptAdmin := settings.Roles["DepartmentAdmin"]
+	assertNotContainsAny(t, deptAdmin.normalizedMenus(), []string{"org_admin"}, "DepartmentAdmin menus")
+	assertNotContainsAny(t, deptAdmin.normalizedPages(), []string{"org_options"}, "DepartmentAdmin pages")
+	assertNotContainsAny(t, deptAdmin.normalizedActions(), []string{"org.manage", "organization.manage"}, "DepartmentAdmin actions")
+}
+
 func TestCustomizationOperatorMemberHidesCustomizationManagement(t *testing.T) {
 	settings := mustLoadFrontendAccessSettingsForRegression(t)
 

@@ -10,14 +10,6 @@
         </div>
         <div class="page-header-actions">
           <BaseButton
-            v-if="canManageOrg"
-            type="button"
-            variant="secondary"
-            @click="goOrgPermission"
-          >
-            组织主数据管理
-          </BaseButton>
-          <BaseButton
             v-if="canCreateUser"
             type="button"
             @click="showCreateModal = true"
@@ -27,73 +19,112 @@
         </div>
       </header>
     <div v-if="!canManage" class="mt-6">
-      <BaseEmptyState title="无管理权限" description="需要组织管理权限才能访问本页。" />
+      <BaseEmptyState title="无管理权限" description="需要用户、组织或角色管理权限才能访问本页。" />
     </div>
     <template v-else>
       <section class="content-card">
-        <h3 class="section-title">用户列表</h3>
-        <div class="toolbar">
-          <BaseInput
-            v-model="keyword"
-            class="toolbar-field"
-            placeholder="搜索用户名 / 姓名"
-            @keyup.enter="onSearch"
-          />
-          <BaseSelect
-            v-model="statusFilter"
-            class="toolbar-field"
-            placeholder="全部状态"
-            :options="statusFilterOptions"
-            clearable
-          />
-          <BaseSelect
-            v-model="roleFilter"
-            class="toolbar-field"
-            placeholder="全部角色"
-            :options="roleFilterOptions"
-            clearable
-          />
-          <BaseSelect
-            v-model="departmentFilter"
-            class="toolbar-field"
-            placeholder="全部部门"
-            :options="departmentFilterOptions"
-            clearable
-          />
-          <BaseSelect
-            v-model="teamFilter"
-            class="toolbar-field"
-            placeholder="全部小组"
-            :options="teamFilterOptions"
-            clearable
-          />
-          <BaseButton type="button" variant="primary" class="toolbar-query" @click="onSearch">查询</BaseButton>
+        <div class="directory-heading">
+          <h3 class="section-title">用户列表</h3>
+          <span class="directory-count">共 {{ pagination.total }} 人</span>
         </div>
-        <BaseErrorState v-if="listError" :title="listError" @retry="loadUsers" />
-        <template v-else>
-          <BaseDataTable
-            aria-label="用户列表"
-            :columns="userTableColumns"
-            :data="users"
-            :loading="listLoading"
-            :row-key="userRowKey"
-            :scroll-x="980"
-            density="compact"
-            empty-title="暂无用户"
-            empty-description="未获取到用户列表。"
-          />
-          <BaseTablePager
-            class="mt-4"
-            :page="page"
-            :page-size="pageSize"
-            :total="pagination.total"
-            :loading="listLoading"
-            show-page-size
-            :page-size-options="[20, 50, 100]"
-            @update:page="goPage"
-            @update:page-size="pageSize = $event"
-          />
-        </template>
+        <div class="management-layout">
+          <aside class="org-filter-panel" aria-label="组织筛选">
+            <button
+              type="button"
+              class="org-filter-item org-filter-item--all"
+              :class="{ 'is-active': isAllOrgFilterActive }"
+              @click="selectAllOrg"
+            >
+              <span>全部组织</span>
+            </button>
+            <div v-for="dept in orgTree" :key="dept.value" class="org-filter-dept">
+              <button
+                type="button"
+                class="org-filter-item org-filter-item--dept"
+                :class="{ 'is-active': isOrgDepartmentActive(dept.value) }"
+                @click="selectOrgDepartment(dept.value)"
+              >
+                <span>{{ dept.label }}</span>
+              </button>
+              <div v-if="dept.teams.length" class="org-filter-teams">
+                <button
+                  v-for="team in dept.teams"
+                  :key="`${dept.value}-${team.value}`"
+                  type="button"
+                  class="org-filter-item org-filter-item--team"
+                  :class="{ 'is-active': isOrgTeamActive(dept.value, team.value) }"
+                  @click="selectOrgTeam(dept.value, team.value)"
+                >
+                  <span>{{ team.label }}</span>
+                </button>
+              </div>
+            </div>
+          </aside>
+          <div class="user-list-panel">
+            <div class="toolbar">
+              <BaseInput
+                v-model="keyword"
+                class="toolbar-field"
+                placeholder="搜索用户名 / 姓名"
+                @keyup.enter="onSearch"
+              />
+              <BaseSelect
+                v-model="statusFilter"
+                class="toolbar-field"
+                placeholder="全部状态"
+                :options="statusFilterOptions"
+                clearable
+              />
+              <BaseSelect
+                v-model="roleFilter"
+                class="toolbar-field"
+                placeholder="全部角色"
+                :options="roleFilterOptions"
+                clearable
+              />
+              <BaseSelect
+                v-model="departmentFilter"
+                class="toolbar-field"
+                placeholder="全部部门"
+                :options="departmentFilterOptions"
+                clearable
+              />
+              <BaseSelect
+                v-model="teamFilter"
+                class="toolbar-field"
+                placeholder="全部小组"
+                :options="teamFilterOptions"
+                clearable
+              />
+              <BaseButton type="button" variant="primary" class="toolbar-query" @click="onSearch">查询</BaseButton>
+            </div>
+            <BaseErrorState v-if="listError" :title="listError" @retry="loadUsers" />
+            <template v-else>
+              <BaseDataTable
+                aria-label="用户列表"
+                :columns="userTableColumns"
+                :data="users"
+                :loading="listLoading"
+                :row-key="userRowKey"
+                :scroll-x="980"
+                density="compact"
+                empty-title="暂无用户"
+                empty-description="未获取到用户列表。"
+              />
+              <BaseTablePager
+                class="mt-4"
+                :page="page"
+                :page-size="pageSize"
+                :total="pagination.total"
+                :loading="listLoading"
+                show-page-size
+                :page-size-options="[20, 50, 100]"
+                @update:page="goPage"
+                @update:page-size="pageSize = $event"
+              />
+            </template>
+          </div>
+        </div>
       </section>
 
       <!-- 用户详情 / 角色管理 弹层 -->
@@ -235,7 +266,6 @@
 <script setup lang="ts">
 import { ref, computed, h, onBeforeUnmount, onMounted, watch } from 'vue'
 import type { DataTableColumns, DataTableRowKey } from 'naive-ui'
-import { useRouter } from 'vue-router'
 import { usersApi } from '@/services/api/usersApi'
 import {
   departmentsAndGroupsFromOrgOptions,
@@ -257,27 +287,25 @@ import BaseErrorState from '@/components/base/BaseErrorState.vue'
 import BaseDataTable from '@/components/base/BaseDataTable.vue'
 import BaseTablePager from '@/components/base/BaseTablePager.vue'
 
-const router = useRouter()
 const permissionsStore = usePermissionsStore()
 const { can } = usePermission()
 
 // v1.8 对齐：用户与角色页面同时向 HRAdmin / SuperAdmin 与 DepartmentAdmin 开放。
 // 以下 gate 全部走 action key，不再使用 `|| isDeptAdmin` 之类角色名兜底。
-const canManage = computed(() => can('user.manage') || can('department.manage'))
-// 与 OrgPermissionView 一致：仅持有 org.manage 的用户可进入组织主数据页。
-const canManageOrg = computed(() => can('org.manage'))
+const canManage = computed(
+  () =>
+    can('user.manage') ||
+    can('department.manage') ||
+    can('user.org.assign') ||
+    can('role.assign') ||
+    can('role.read'),
+)
 const canCreateUser = computed(() => can('user.manage') || can('department.users.create'))
 const canMoveTeam = computed(() => can('user.manage') || can('department.users.move_team'))
 const canDisableUser = computed(() => can('user.manage') || can('department.users.disable'))
 const canResetPassword = computed(
   () => can('user.manage') || can('department.users.reset_password'),
 )
-// 反向流程门控（「从未分配组分配到本部门」）。该按钮由 OrgPermissionView 渲染；
-// 此处保留 computed 以便后续在本视图重用反向流程，并与其他 canXxx 门控保持对称。
-const canAssignFromUnassigned = computed(
-  () => can('user.manage') || can('department.users.assign_from_unassigned'),
-)
-void canAssignFromUnassigned
 // Round I.f 热修复（F-1.1）：
 // 后端 `authorizeUserUpdate` 对「移出到未分配池」路径只放行 `identityActorCanManageAllUsers`
 // （Admin / SuperAdmin / HRAdmin）。DepartmentAdmin 即便持有 `department.users.move_team`，
@@ -291,10 +319,6 @@ const canClearMembership = computed(() => can('user.manage'))
 // 只读视图——复选框保留展示当前归属，但被 `:disabled` 并通过 `.roles-grid-readonly` 调灰，
 // 避免"能勾但无处提交"的误导。
 const canAssignRoles = computed(() => can('role.assign'))
-
-function goOrgPermission() {
-  void router.push({ name: 'OrgPermission' })
-}
 
 interface UserRow {
   id: string
@@ -310,6 +334,17 @@ interface UserRow {
 interface RoleOption {
   code: string
   display: string
+}
+
+interface OrgTreeTeam {
+  value: string
+  label: string
+}
+
+interface OrgTreeDepartment {
+  value: string
+  label: string
+  teams: OrgTreeTeam[]
 }
 
 const listLoading = ref(false)
@@ -342,6 +377,16 @@ const teamFilter = ref('')
 
 const departmentOptions = ref<Array<{ value: string; label: string }>>([])
 const teamOptions = ref<Array<{ value: string; label: string; department?: string }>>([])
+const orgTree = computed<OrgTreeDepartment[]>(() =>
+  departmentOptions.value.map((dept) => ({
+    value: dept.value,
+    label: dept.label,
+    teams: teamOptions.value
+      .filter((team) => team.department === dept.value)
+      .map((team) => ({ value: team.value, label: team.label })),
+  })),
+)
+const isAllOrgFilterActive = computed(() => !departmentFilter.value && !teamFilter.value)
 
 const showCreateModal = ref(false)
 const createSubmitting = ref(false)
@@ -481,6 +526,29 @@ function mapRawUser(raw: Record<string, unknown>): UserRow {
 
 function userRowKey(row: UserRow): DataTableRowKey {
   return row.id
+}
+
+function isOrgDepartmentActive(department: string): boolean {
+  return departmentFilter.value === department && !teamFilter.value
+}
+
+function isOrgTeamActive(department: string, team: string): boolean {
+  return departmentFilter.value === department && teamFilter.value === team
+}
+
+function selectAllOrg() {
+  departmentFilter.value = ''
+  teamFilter.value = ''
+}
+
+function selectOrgDepartment(department: string) {
+  departmentFilter.value = department
+  teamFilter.value = ''
+}
+
+function selectOrgTeam(department: string, team: string) {
+  departmentFilter.value = department
+  teamFilter.value = team
 }
 
 async function loadOrgOptions() {
@@ -761,6 +829,16 @@ function goPage(next: number) {
   void loadUsers()
 }
 
+watch(departmentFilter, () => {
+  if (!departmentFilter.value || !teamFilter.value) return
+  const ok = teamOptions.value.some(
+    (team) =>
+      team.value === teamFilter.value &&
+      (!team.department || team.department === departmentFilter.value),
+  )
+  if (!ok) teamFilter.value = ''
+})
+
 watch([statusFilter, roleFilter, departmentFilter, teamFilter], () => {
   page.value = 1
   void loadUsers()
@@ -921,6 +999,107 @@ onBeforeUnmount(() => {
   padding: 1.25rem 1.5rem;
 }
 
+.directory-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+
+.directory-heading .section-title {
+  margin-bottom: 0;
+}
+
+.directory-count {
+  font-size: 0.75rem;
+  color: rgb(var(--yb-text-zinc-soft));
+  font-variant-numeric: tabular-nums;
+}
+
+.management-layout {
+  display: grid;
+  grid-template-columns: minmax(10rem, 14rem) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+
+.org-filter-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  max-height: min(66dvh, 44rem);
+  overflow: auto;
+  padding-right: 0.75rem;
+  border-right: 1px solid rgb(var(--yb-border-zinc));
+}
+
+.org-filter-dept {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.org-filter-teams {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin-left: 0.65rem;
+  padding-left: 0.55rem;
+  border-left: 1px solid rgb(var(--yb-border-zinc));
+}
+
+.org-filter-item {
+  display: flex;
+  width: 100%;
+  min-height: 2rem;
+  align-items: center;
+  justify-content: flex-start;
+  border: 1px solid transparent;
+  border-radius: 0.45rem;
+  background: transparent;
+  color: rgb(var(--yb-text-zinc));
+  cursor: pointer;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  line-height: 1.35;
+  padding: 0.35rem 0.55rem;
+  text-align: left;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.org-filter-item span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.org-filter-item:hover {
+  background: rgb(var(--yb-surface-row-even));
+  border-color: rgb(var(--yb-border-zinc));
+}
+
+.org-filter-item.is-active {
+  background: rgb(var(--yb-success-soft));
+  border-color: rgb(var(--yb-success-border));
+  color: rgb(var(--yb-success-deep));
+}
+
+.org-filter-item--team {
+  min-height: 1.75rem;
+  font-size: 0.75rem;
+  color: rgb(var(--yb-text-zinc-soft));
+}
+
+.user-list-panel {
+  min-width: 0;
+}
+
 @media (min-width: 640px) {
   .content-card {
     padding: 1.5rem;
@@ -933,6 +1112,32 @@ onBeforeUnmount(() => {
   font-weight: 600;
   color: rgb(var(--yb-text-zinc-strong));
   letter-spacing: -0.01em;
+}
+
+@media (max-width: 960px) {
+  .management-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .org-filter-panel {
+    max-height: none;
+    overflow: visible;
+    padding-right: 0;
+    padding-bottom: 0.75rem;
+    border-right: 0;
+    border-bottom: 1px solid rgb(var(--yb-border-zinc));
+  }
+
+  .org-filter-dept,
+  .org-filter-teams {
+    display: contents;
+  }
+
+  .org-filter-panel {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+    gap: 0.35rem;
+  }
 }
 
 .toolbar {

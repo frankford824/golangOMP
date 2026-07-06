@@ -212,8 +212,8 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'org-permission',
         name: 'OrgPermission',
-        component: () => import('@/views/org-permission/OrgPermissionView.vue'),
-        meta: { requiresAuth: true, requiredMenuKey: 'org_admin' },
+        redirect: { name: 'UserManagement' },
+        meta: { requiresAuth: true, requiredMenuKey: 'user_admin' },
       },
       {
         path: 'users',

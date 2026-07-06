@@ -284,7 +284,11 @@ import { computed, ref, watch, onMounted } from 'vue'
 import { storeToRefs } from 'pinia'
 import { usePermissionsStore } from '@/stores/permissions'
 import { usePermission } from '@/composables/usePermission'
-import { useOrgPermissionData, patchUserMembership } from '@/composables/useOrgPermissionData'
+import {
+  useOrgPermissionData,
+  patchUserMembership,
+  clearUserMembership,
+} from '@/composables/useOrgPermissionData'
 import {
   createOrgDepartment,
   createOrgTeam,
@@ -696,6 +700,22 @@ async function runMembershipPatch(userId: string, department: string, team: stri
   }
 }
 
+async function runMembershipClear(userId: string, okMsg: string) {
+  actionBanner.value = ''
+  try {
+    await clearUserMembership(userId)
+    const unassignedDepartment =
+      orgOptions.value?.departmentOptions.find((item) => item.value === '未分配')?.value ?? '未分配'
+    const unassignedTeam =
+      orgOptions.value?.teamOptions.find((item) => item.department === unassignedDepartment)?.value ??
+      '未分配池'
+    applyLocalMembership(userId, unassignedDepartment, unassignedTeam)
+    actionBanner.value = okMsg
+  } catch (e) {
+    actionBanner.value = e instanceof Error ? e.message : '操作失败（请确认当前账号可移出到未分配池）'
+  }
+}
+
 const showMoveUserModal = ref(false)
 const moveUserTarget = ref<OrgUser | null>(null)
 const moveUserTargetGroupKey = ref('')
@@ -730,7 +750,7 @@ function openRemoveUser(u: OrgUser) {
 async function submitRemoveUser() {
   const u = removeUserTarget.value
   if (!u) return
-  await runMembershipPatch(u.id, '', '', '已移出当前组')
+  await runMembershipClear(u.id, '已移出当前组')
   showRemoveConfirm.value = false
 }
 

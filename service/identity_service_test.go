@@ -1335,12 +1335,37 @@ func TestIdentityServiceDepartmentAdminPasswordResetAndUnassignedAssignmentBound
 	if updated.Department != domain.DepartmentOperations || updated.Team != opsTeam {
 		t.Fatalf("UpdateUser(assign unassigned) user = %+v", updated)
 	}
+	ungroupedAlias := userTeamUngroupedAlias
+	if _, appErr := svc.UpdateUser(deptAdminCtx, UpdateUserParams{
+		UserID: opsUser.ID,
+		Team:   &ungroupedAlias,
+	}); appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
+		t.Fatalf("UpdateUser(clear own department as DeptAdmin) appErr = %+v", appErr)
+	}
 	if _, appErr := svc.UpdateUser(deptAdminCtx, UpdateUserParams{
 		UserID:     designUser.ID,
 		Department: ptrDepartment(domain.DepartmentOperations),
 		Team:       &opsTeam,
 	}); appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
 		t.Fatalf("UpdateUser(move other department) appErr = %+v", appErr)
+	}
+
+	superCtx := domain.WithRequestActor(context.Background(), domain.RequestActor{
+		ID:       4,
+		Username: "super_admin",
+		Roles:    []domain.Role{domain.RoleSuperAdmin},
+		Source:   domain.RequestActorSourceSessionToken,
+		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
+	})
+	cleared, appErr := svc.UpdateUser(superCtx, UpdateUserParams{
+		UserID: opsUser.ID,
+		Team:   &ungroupedAlias,
+	})
+	if appErr != nil {
+		t.Fatalf("UpdateUser(clear own department as SuperAdmin) error = %+v", appErr)
+	}
+	if cleared.Department != domain.DepartmentUnassigned || cleared.Team != "未分配池" {
+		t.Fatalf("UpdateUser(clear own department as SuperAdmin) user = %+v", cleared)
 	}
 }
 

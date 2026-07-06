@@ -360,9 +360,9 @@ func derivedFrontendSpec(role Role) FrontendAccessSpec {
 		return FrontendAccessSpec{
 			Roles:   []string{"org_admin"},
 			Scopes:  []string{"org_admin"},
-			Menus:   []string{"org_admin", "user_admin"},
-			Pages:   []string{"admin_users", "org_options"},
-			Actions: []string{"org.manage", "user.org.assign"},
+			Menus:   []string{"user_admin"},
+			Pages:   []string{"admin_users"},
+			Actions: []string{"user.org.assign"},
 		}
 	case RoleRoleAdmin:
 		return FrontendAccessSpec{
@@ -460,7 +460,7 @@ func derivedFrontendSpec(role Role) FrontendAccessSpec {
 			Scopes:  []string{"view_all", "identity_admin"},
 			Menus:   []string{"user_admin", "logs_center", "product_management"},
 			Pages:   []string{"admin_users", "admin_permission_logs", "admin_operation_logs", "product_management"},
-			Actions: []string{"user.manage", "role.assign", "role.remove", "permission_logs.read", "operation_logs.read", "organization.manage"},
+			Actions: []string{"user.manage", "org.manage", "role.assign", "role.remove", "permission_logs.read", "operation_logs.read"},
 		}
 	case RoleOps:
 		return FrontendAccessSpec{
