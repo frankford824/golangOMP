@@ -48,7 +48,7 @@ func (s *Service) SetExternalAssetService(externalSvc *externalassets.Service) {
 
 func (s *Service) Search(ctx context.Context, query domain.AssetSearchQuery) (*SearchResult, *domain.AppError) {
 	query = query.Normalized()
-	if query.UsableState != domain.AssetUsableStateFilterAll && query.Source == domain.AssetResourceSourceExternal {
+	if assetSearchHasSystemOnlyFilters(query) && query.Source == domain.AssetResourceSourceExternal {
 		return &SearchResult{Items: []*AssetDetail{}, Total: 0, Page: query.Page, Size: query.Size}, nil
 	}
 	if query.Source == domain.AssetResourceSourceExternal {
@@ -63,7 +63,7 @@ func (s *Service) Search(ctx context.Context, query domain.AssetSearchQuery) (*S
 		items = append(items, buildAssetDetail(row, nil))
 	}
 	if query.Source == domain.AssetResourceSourceAll &&
-		query.UsableState == domain.AssetUsableStateFilterAll &&
+		!assetSearchHasSystemOnlyFilters(query) &&
 		s.externalSvc != nil && s.externalSvc.Enabled() {
 		external, externalTotal, appErr := s.searchExternalRows(ctx, query)
 		if appErr != nil {
@@ -76,6 +76,12 @@ func (s *Service) Search(ctx context.Context, query domain.AssetSearchQuery) (*S
 		total += externalTotal
 	}
 	return &SearchResult{Items: items, Total: total, Page: query.Page, Size: query.Size}, nil
+}
+
+func assetSearchHasSystemOnlyFilters(query domain.AssetSearchQuery) bool {
+	return query.UsableState != domain.AssetUsableStateFilterAll ||
+		query.BusinessLane.Valid() ||
+		query.AssetType.Valid()
 }
 
 func (s *Service) BrowseMaterials(ctx context.Context, query MaterialBrowseQuery) (*MaterialBrowseResult, *domain.AppError) {

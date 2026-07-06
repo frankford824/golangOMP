@@ -116,6 +116,56 @@ func TestBuildTaskAssetSearchWhereFiltersUsableState(t *testing.T) {
 	}
 }
 
+func TestBuildTaskAssetSearchWhereFiltersBusinessLane(t *testing.T) {
+	where, args := buildTaskAssetSearchWhere(domain.AssetSearchQuery{
+		BusinessLane: domain.TaskBusinessLaneCustomization,
+	})
+
+	if !strings.Contains(where, "COALESCE(t.business_lane, '') = ?") {
+		t.Fatalf("where clause missing customization business lane filter: %s", where)
+	}
+	if !containsStringArg(args, string(domain.TaskBusinessLaneCustomization)) {
+		t.Fatalf("args missing customization business lane: %#v", args)
+	}
+
+	normalWhere, normalArgs := buildTaskAssetSearchWhere(domain.AssetSearchQuery{
+		BusinessLane: domain.TaskBusinessLaneNormal,
+	})
+	if !strings.Contains(normalWhere, "(COALESCE(t.business_lane, '') = '' OR t.business_lane = ?)") {
+		t.Fatalf("where clause missing normal business lane filter: %s", normalWhere)
+	}
+	if !containsStringArg(normalArgs, string(domain.TaskBusinessLaneNormal)) {
+		t.Fatalf("args missing normal business lane: %#v", normalArgs)
+	}
+}
+
+func TestBuildTaskAssetSearchWhereFiltersAssetTypeWithAliases(t *testing.T) {
+	where, args := buildTaskAssetSearchWhere(domain.AssetSearchQuery{
+		AssetType: domain.TaskAssetTypeDelivery,
+	})
+
+	if !strings.Contains(where, "ta.asset_type IN (?, ?, ?, ?, ?)") {
+		t.Fatalf("where clause missing delivery asset type filter: %s", where)
+	}
+	for _, expected := range []string{"delivery", "draft", "revised", "final", "outsource_return"} {
+		if !containsStringArg(args, expected) {
+			t.Fatalf("args missing delivery alias %q: %#v", expected, args)
+		}
+	}
+
+	sourceWhere, sourceArgs := buildTaskAssetSearchWhere(domain.AssetSearchQuery{
+		AssetType: domain.TaskAssetTypeSource,
+	})
+	if !strings.Contains(sourceWhere, "ta.asset_type IN (?, ?)") {
+		t.Fatalf("where clause missing source asset type filter: %s", sourceWhere)
+	}
+	for _, expected := range []string{"source", "original"} {
+		if !containsStringArg(sourceArgs, expected) {
+			t.Fatalf("args missing source alias %q: %#v", expected, sourceArgs)
+		}
+	}
+}
+
 func TestBuildTaskAssetSearchWhereFiltersFormatCategory(t *testing.T) {
 	where, args := buildTaskAssetSearchWhere(domain.AssetSearchQuery{
 		FormatCategory: domain.AssetFormatCategoryDesign,

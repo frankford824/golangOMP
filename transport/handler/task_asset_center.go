@@ -877,6 +877,8 @@ func parseAssetSearchQuery(c *gin.Context) (domain.AssetSearchQuery, *domain.App
 		Source:         domain.NormalizeAssetResourceSource(firstNonEmptyTrimmed(c.Query("source"), c.Query("resource_source"))),
 		UsableState:    domain.AssetUsableStateFilter(strings.TrimSpace(c.DefaultQuery("usable_state", string(domain.AssetUsableStateFilterAll)))),
 		FormatCategory: domain.AssetFormatCategoryFilter(strings.TrimSpace(c.DefaultQuery("format_category", string(domain.AssetFormatCategoryAll)))),
+		BusinessLane:   domain.TaskBusinessLane(firstNonEmptyTrimmed(c.Query("business_lane"), c.Query("workflow_lane"))),
+		AssetType:      domain.TaskAssetType(firstNonEmptyTrimmed(c.Query("asset_type"), c.Query("asset_kind"))),
 	}
 	if raw := strings.TrimSpace(c.Query("created_from")); raw != "" {
 		parsed, err := time.Parse(time.RFC3339, raw)

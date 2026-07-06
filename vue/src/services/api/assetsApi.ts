@@ -235,6 +235,10 @@ export interface AssetSearchQuery {
   owner_team_code?: string
   is_archived?: 'true' | 'false' | 'all'
   task_status?: 'open' | 'closed' | 'archived' | 'all'
+  business_lane?: 'normal' | 'customization'
+  workflow_lane?: 'normal' | 'customization'
+  asset_type?: 'delivery' | 'reference' | 'source' | 'preview' | 'design_thumb'
+  asset_kind?: 'delivery' | 'reference' | 'source' | 'preview' | 'design_thumb'
   created_from?: string
   created_to?: string
   format_category?: 'all' | 'image' | 'design' | 'pdf' | 'video' | 'archive'

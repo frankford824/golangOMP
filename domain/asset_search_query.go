@@ -56,6 +56,8 @@ type AssetSearchQuery struct {
 	Source         AssetResourceSource
 	UsableState    AssetUsableStateFilter
 	FormatCategory AssetFormatCategoryFilter
+	BusinessLane   TaskBusinessLane
+	AssetType      TaskAssetType
 }
 
 func (q AssetSearchQuery) Normalized() AssetSearchQuery {
@@ -103,5 +105,9 @@ func (q AssetSearchQuery) Normalized() AssetSearchQuery {
 	default:
 		q.FormatCategory = AssetFormatCategoryAll
 	}
+	if !q.BusinessLane.Valid() {
+		q.BusinessLane = ""
+	}
+	q.AssetType = q.AssetType.Canonical()
 	return q
 }

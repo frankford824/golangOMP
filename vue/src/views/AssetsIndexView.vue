@@ -92,9 +92,14 @@
             label="结束时间"
           />
           <BaseSelect
-            v-model="filters.usableState"
-            label="可用状态"
-            :options="assetUsableStateOptions"
+            v-model="filters.taskLane"
+            label="任务类型"
+            :options="assetTaskLaneOptions"
+          />
+          <BaseSelect
+            v-model="filters.assetKind"
+            label="图片类型"
+            :options="assetKindFilterOptions"
           />
           <BaseSelect
             v-model="filters.formatCategory"
@@ -796,16 +801,8 @@ const bulkSearchError = ref('')
 const assetPredictionSuggestions = ref<PredictionSuggestion[]>([])
 let assetPredictionAbort: AbortController | null = null
 
-type AssetUsableFilter =
-  | 'all'
-  | 'editable'
-  | 'ready_for_use'
-  | 'pending_review'
-  | 'rejected'
-  | 'history'
-  | 'cleaned'
-  | 'not_applicable'
-
+type AssetTaskLaneFilter = 'all' | 'normal' | 'customization'
+type AssetKindFilter = 'all' | 'delivery' | 'reference' | 'source'
 type AssetFormatFilter = 'all' | 'image' | 'design' | 'pdf' | 'video' | 'archive'
 type BulkSearchFormatFilter =
   | 'jpg_png'
@@ -831,7 +828,8 @@ const filters = reactive({
   resourceSource: 'all' as AssetResourceSource,
   createdFrom: '',
   createdTo: '',
-  usableState: 'all' as AssetUsableFilter,
+  taskLane: 'all' as AssetTaskLaneFilter,
+  assetKind: 'all' as AssetKindFilter,
   formatCategory: 'all' as AssetFormatFilter,
 })
 
@@ -846,15 +844,17 @@ const assetSourceOptions: BaseSelectOption[] = [
   { value: 'external', label: '外部资源' },
 ]
 
-const assetUsableStateOptions: BaseSelectOption[] = [
-  { value: 'all', label: '全部状态' },
-  { value: 'editable', label: '可修改资源' },
-  { value: 'ready_for_use', label: '可直接使用' },
-  { value: 'pending_review', label: '待审核' },
-  { value: 'rejected', label: '审核未通过' },
-  { value: 'history', label: '历史版本' },
-  { value: 'cleaned', label: '文件已清理' },
-  { value: 'not_applicable', label: '不进入审核流' },
+const assetTaskLaneOptions: BaseSelectOption[] = [
+  { value: 'all', label: '全部任务' },
+  { value: 'normal', label: '常规任务' },
+  { value: 'customization', label: '定制任务' },
+]
+
+const assetKindFilterOptions: BaseSelectOption[] = [
+  { value: 'all', label: '全部图片类型' },
+  { value: 'delivery', label: '成品图' },
+  { value: 'reference', label: '参考图' },
+  { value: 'source', label: '设计源文件' },
 ]
 
 const assetFormatCategoryOptions: BaseSelectOption[] = [
@@ -959,8 +959,11 @@ const bulkSearchMatchedCount = computed(() => bulkSearchMatchedResults.value.len
 const bulkSearchFailedCount = computed(() => bulkSearchResults.value.filter((item) => item.status !== 'matched').length)
 
 const effectiveSearchKeyword = computed(() => filters.keyword.trim())
-const effectiveUsableStateFilter = computed<AssetUsableFilter>(() =>
-  filters.resourceSource === 'external' ? 'all' : filters.usableState,
+const effectiveTaskLaneFilter = computed<AssetTaskLaneFilter>(() =>
+  filters.resourceSource === 'external' ? 'all' : filters.taskLane,
+)
+const effectiveAssetKindFilter = computed<AssetKindFilter>(() =>
+  filters.resourceSource === 'external' ? 'all' : filters.assetKind,
 )
 
 const listTotalPages = computed(() =>
@@ -974,7 +977,7 @@ watch(listTotalPages, (tp) => {
 })
 
 watch(
-  () => [filters.keyword, filters.resourceSource, filters.createdFrom, filters.createdTo, filters.usableState, filters.formatCategory],
+  () => [filters.keyword, filters.resourceSource, filters.createdFrom, filters.createdTo, filters.taskLane, filters.assetKind, filters.formatCategory],
   () => {
     listPage.value = 1
     scheduleReload()
@@ -984,8 +987,9 @@ watch(
 watch(
   () => filters.resourceSource,
   (source) => {
-    if (source === 'external' && filters.usableState !== 'all') {
-      filters.usableState = 'all'
+    if (source === 'external') {
+      if (filters.taskLane !== 'all') filters.taskLane = 'all'
+      if (filters.assetKind !== 'all') filters.assetKind = 'all'
     }
   },
 )
@@ -2180,7 +2184,8 @@ function scheduleReload() {
 function syncQuerySelection() {
   const nextQuery: Record<string, string> = {}
   if (filters.resourceSource !== 'all') nextQuery.source = filters.resourceSource
-  if (effectiveUsableStateFilter.value !== 'all') nextQuery.usable_state = effectiveUsableStateFilter.value
+  if (effectiveTaskLaneFilter.value !== 'all') nextQuery.business_lane = effectiveTaskLaneFilter.value
+  if (effectiveAssetKindFilter.value !== 'all') nextQuery.asset_type = effectiveAssetKindFilter.value
   if (filters.formatCategory !== 'all') nextQuery.format_category = filters.formatCategory
   if (filters.createdFrom) nextQuery.created_from = filters.createdFrom
   if (filters.createdTo) nextQuery.created_to = filters.createdTo
@@ -2192,7 +2197,8 @@ function openAssetDetail(assetId: string) {
   if (!canAccessPage('asset_detail')) return
   const query: Record<string, string> = {}
   if (filters.resourceSource !== 'all') query.source = filters.resourceSource
-  if (effectiveUsableStateFilter.value !== 'all') query.usable_state = effectiveUsableStateFilter.value
+  if (effectiveTaskLaneFilter.value !== 'all') query.business_lane = effectiveTaskLaneFilter.value
+  if (effectiveAssetKindFilter.value !== 'all') query.asset_type = effectiveAssetKindFilter.value
   if (filters.formatCategory !== 'all') query.format_category = filters.formatCategory
   if (filters.createdFrom) query.created_from = filters.createdFrom
   if (filters.createdTo) query.created_to = filters.createdTo
@@ -2218,7 +2224,8 @@ async function reload() {
       {
         keyword: effectiveSearchKeyword.value || undefined,
         source: effectiveAssetSearchSource.value,
-        usable_state: effectiveUsableStateFilter.value === 'all' ? undefined : effectiveUsableStateFilter.value,
+        business_lane: effectiveTaskLaneFilter.value === 'all' ? undefined : effectiveTaskLaneFilter.value,
+        asset_type: effectiveAssetKindFilter.value === 'all' ? undefined : effectiveAssetKindFilter.value,
         format_category: filters.formatCategory === 'all' ? undefined : filters.formatCategory,
         created_from: dateFilterToRFC3339(filters.createdFrom, 'start'),
         created_to: dateFilterToRFC3339(filters.createdTo, 'end'),
@@ -2339,9 +2346,13 @@ onMounted(() => {
   if (requestedSource === 'system' || requestedSource === 'external' || requestedSource === 'all') {
     filters.resourceSource = requestedSource
   }
-  const requestedUsableState = typeof route.query.usable_state === 'string' ? route.query.usable_state.trim() : ''
-  if (assetUsableStateOptions.some((option) => option.value === requestedUsableState)) {
-    filters.usableState = requestedUsableState as AssetUsableFilter
+  const requestedTaskLane = typeof route.query.business_lane === 'string' ? route.query.business_lane.trim() : ''
+  if (assetTaskLaneOptions.some((option) => option.value === requestedTaskLane)) {
+    filters.taskLane = requestedTaskLane as AssetTaskLaneFilter
+  }
+  const requestedAssetKind = typeof route.query.asset_type === 'string' ? route.query.asset_type.trim() : ''
+  if (assetKindFilterOptions.some((option) => option.value === requestedAssetKind)) {
+    filters.assetKind = requestedAssetKind as AssetKindFilter
   }
   const requestedFormat = typeof route.query.format_category === 'string' ? route.query.format_category.trim() : ''
   if (assetFormatCategoryOptions.some((option) => option.value === requestedFormat)) {

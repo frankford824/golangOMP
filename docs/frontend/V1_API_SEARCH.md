@@ -37,6 +37,8 @@
 | `owner_team_code` | query | string | 否 | Restrict to one owner team. |
 | `is_archived` | query | enum(true/false/all) | 否 | Archive filter. Default `false`. `all` returns active + archived. |
 | `task_status` | query | enum(open/closed/archived/all) | 否 | Task lifecycle filter. |
+| `business_lane` | query | enum(normal/customization) | 否 | System task lane filter for task-owned assets. `normal` includes legacy rows whose lane is empty; external resources are excluded when this filter is set. |
+| `asset_type` | query | enum(delivery/reference/source/preview/design_thumb) | 否 | System asset role filter. Use `delivery` for final product images, `reference` for reference images, and `source` for design source files; external resources are excluded when this filter is set. |
 | `created_from` | query | string | 否 | Inclusive lower bound for asset created_at. |
 | `created_to` | query | string | 否 | Inclusive upper bound for asset created_at. |
 | `page` | query | integer | 否 | - |

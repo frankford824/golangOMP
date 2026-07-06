@@ -159,6 +159,22 @@ func buildTaskAssetSearchWhere(query domain.AssetSearchQuery) (string, []interfa
 		clauses = append(clauses, `COALESCE(tm.claimed_team_code, tm.pool_team_code, '') = ?`)
 		args = append(args, strings.TrimSpace(query.OwnerTeamCode))
 	}
+	switch query.BusinessLane {
+	case domain.TaskBusinessLaneCustomization:
+		clauses = append(clauses, `COALESCE(t.business_lane, '') = ?`)
+		args = append(args, string(domain.TaskBusinessLaneCustomization))
+	case domain.TaskBusinessLaneNormal:
+		clauses = append(clauses, `(COALESCE(t.business_lane, '') = '' OR t.business_lane = ?)`)
+		args = append(args, string(domain.TaskBusinessLaneNormal))
+	}
+	if assetTypes := assetSearchSQLAssetTypes(query.AssetType); len(assetTypes) > 0 {
+		placeholders := make([]string, 0, len(assetTypes))
+		for _, assetType := range assetTypes {
+			placeholders = append(placeholders, "?")
+			args = append(args, string(assetType))
+		}
+		clauses = append(clauses, fmt.Sprintf(`ta.asset_type IN (%s)`, strings.Join(placeholders, ", ")))
+	}
 	if query.CreatedFrom != nil {
 		clauses = append(clauses, `ta.created_at >= ?`)
 		args = append(args, *query.CreatedFrom)
@@ -218,6 +234,31 @@ func buildTaskAssetSearchWhere(query domain.AssetSearchQuery) (string, []interfa
 		query.FormatCategory,
 	)
 	return " WHERE " + strings.Join(clauses, " AND "), args
+}
+
+func assetSearchSQLAssetTypes(assetType domain.TaskAssetType) []domain.TaskAssetType {
+	switch assetType.Canonical() {
+	case domain.TaskAssetTypeDelivery:
+		return []domain.TaskAssetType{
+			domain.TaskAssetTypeDelivery,
+			domain.TaskAssetTypeDraft,
+			domain.TaskAssetTypeRevised,
+			domain.TaskAssetTypeFinal,
+			domain.TaskAssetTypeOutsourceReturn,
+		}
+	case domain.TaskAssetTypeReference:
+		return []domain.TaskAssetType{domain.TaskAssetTypeReference}
+	case domain.TaskAssetTypeSource:
+		return []domain.TaskAssetType{domain.TaskAssetTypeSource, domain.TaskAssetTypeOriginal}
+	case domain.TaskAssetTypePreview:
+		return []domain.TaskAssetType{domain.TaskAssetTypePreview}
+	case domain.TaskAssetTypeDesignThumb:
+		return []domain.TaskAssetType{domain.TaskAssetTypeDesignThumb}
+	case domain.TaskAssetTypeERPProduct:
+		return []domain.TaskAssetType{domain.TaskAssetTypeERPProduct}
+	default:
+		return nil
+	}
 }
 
 func scanTaskAssetSearchRows(rows *sql.Rows) ([]*repo.TaskAssetSearchRow, error) {

@@ -16689,6 +16689,18 @@ paths:
             enum: [open, closed, archived, all]
             default: all
         - in: query
+          name: business_lane
+          description: System task lane filter for task-owned assets. `normal` includes legacy rows whose lane is empty; external resources are excluded when this filter is set.
+          schema:
+            type: string
+            enum: [normal, customization]
+        - in: query
+          name: asset_type
+          description: System asset role filter. Use `delivery` for final product images, `reference` for reference images, and `source` for design source files; external resources are excluded when this filter is set.
+          schema:
+            type: string
+            enum: [delivery, reference, source, preview, design_thumb]
+        - in: query
           name: created_from
           description: Inclusive lower bound for asset created_at.
           schema: { type: string, format: date-time }
