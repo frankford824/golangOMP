@@ -14,6 +14,8 @@ import {
 } from '@aw/shared/api/assetWorkbenchApi'
 import { formatShanghaiDateTime } from '@aw/shared/format/dateTime'
 import { formatMoney } from '@aw/shared/format/number'
+import ArchiveVirtualThumb from '@aw/shared/drive/ArchiveVirtualThumb.vue'
+import { createArchiveEntryObjectUrl, downloadArchiveEntryBlob } from '@aw/shared/drive/archiveEntryBlob'
 import DriveThumb from '@aw/shared/drive/DriveThumb.vue'
 import WorkbenchPreviewDialog from '@aw/shared/preview/WorkbenchPreviewDialog.vue'
 
@@ -57,7 +59,7 @@ const previewEmptyLabel = ref('')
 const previewTitle = ref('')
 const previewMimeType = ref('')
 const previewRows = ref<Array<[string, string]>>([])
-const previewDownloadHandler = ref<(() => void) | null>(null)
+const previewDownloadHandler = ref<(() => void | Promise<void>) | null>(null)
 const archiveOpen = ref(false)
 const archiveSource = ref<DriveFileRow | null>(null)
 const archivePath = ref('')
@@ -68,6 +70,22 @@ const archiveError = ref('')
 
 let requestSeq = 0
 let listAbortController: AbortController | null = null
+let archivePreviewObjectUrl = ''
+let archivePreviewRequestSeq = 0
+
+function revokeArchivePreviewObjectUrl() {
+  archivePreviewRequestSeq += 1
+  if (!archivePreviewObjectUrl) return
+  URL.revokeObjectURL(archivePreviewObjectUrl)
+  archivePreviewObjectUrl = ''
+}
+
+function closePreviewDialog() {
+  previewOpen.value = false
+  previewUrl.value = ''
+  previewDownloadHandler.value = null
+  revokeArchivePreviewObjectUrl()
+}
 
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / pageSize)))
 const allPageSelected = computed(() => files.value.length > 0 && files.value.every((file) => selectedIds.value.has(file.id)))
@@ -406,6 +424,7 @@ async function saveDisplayName(file: DriveFileRow) {
 }
 
 async function openFilePreview(file: DriveFileRow) {
+  revokeArchivePreviewObjectUrl()
   if (isArchiveFile(file)) {
     await openArchiveFile(file)
     return
@@ -487,7 +506,8 @@ function archiveVirtualFileKind(file: ArchiveVirtualFile): string {
   } as DriveFileRow)
 }
 
-function openArchiveVirtualFile(file: ArchiveVirtualFile) {
+async function openArchiveVirtualFile(file: ArchiveVirtualFile) {
+  revokeArchivePreviewObjectUrl()
   const canPreview = canPreviewArchiveVirtualFile(file)
   previewOpen.value = true
   previewTitle.value = file.name
@@ -498,10 +518,31 @@ function openArchiveVirtualFile(file: ArchiveVirtualFile) {
     ['格式', file.file_type || file.mime_type || '文件'],
     ['文件大小', formatSize(file.file_size)],
   ]
-  previewUrl.value = canPreview ? file.preview_url || '' : ''
+  previewUrl.value = ''
   previewEmptyLabel.value = canPreview ? '正在加载预览…' : '该格式暂不能在线预览，可下载后查看'
   previewDownloadHandler.value = () => {
-    if (file.download_url) window.open(file.download_url, '_blank', 'noopener,noreferrer')
+    const source = archiveSource.value
+    if (source) return downloadArchiveEntryBlob(source.id, file)
+    return undefined
+  }
+  if (!canPreview) return
+  const source = archiveSource.value
+  if (!source) {
+    previewEmptyLabel.value = '压缩包来源已关闭，请重新打开'
+    return
+  }
+  try {
+    const seq = ++archivePreviewRequestSeq
+    const objectUrl = await createArchiveEntryObjectUrl(source.id, file)
+    if (seq !== archivePreviewRequestSeq || !previewOpen.value) {
+      URL.revokeObjectURL(objectUrl)
+      return
+    }
+    archivePreviewObjectUrl = objectUrl
+    previewUrl.value = objectUrl
+    previewEmptyLabel.value = ''
+  } catch (err) {
+    previewEmptyLabel.value = err instanceof Error ? err.message : '预览加载失败'
   }
 }
 
@@ -640,6 +681,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   listAbortController?.abort()
+  revokeArchivePreviewObjectUrl()
 })
 </script>
 
@@ -833,7 +875,8 @@ onBeforeUnmount(() => {
                 </td>
                 <td>
                   <button class="aw-upload-ledger__thumb" type="button" :aria-label="`预览 ${fileDisplayName(file)}`" @click.stop="openFilePreview(file)">
-                    <DriveThumb :file-id="file.id" :filename="fileDisplayName(file)" :mime-type="file.mime_type" :preview-status="file.preview_status" size="sm" />
+                    <FileArchive v-if="canOpenArchive(file)" :size="22" aria-hidden="true" />
+                    <DriveThumb v-else :file-id="file.id" :filename="fileDisplayName(file)" :mime-type="file.mime_type" :preview-status="file.preview_status" size="sm" />
                   </button>
                 </td>
                 <td class="aw-upload-ledger__owner">
@@ -896,7 +939,17 @@ onBeforeUnmount(() => {
           </button>
         </div>
         <div class="aw-upload-ledger__detail-thumb">
-          <DriveThumb :file-id="selectedFile.id" :filename="fileDisplayName(selectedFile)" :mime-type="selectedFile.mime_type" :preview-status="selectedFile.preview_status" />
+          <button
+            v-if="canOpenArchive(selectedFile)"
+            class="aw-upload-ledger__archive-preview"
+            type="button"
+            @click="openArchiveFile(selectedFile)"
+          >
+            <FileArchive :size="42" aria-hidden="true" />
+            <strong>压缩包</strong>
+            <span>点击查看里面的文件</span>
+          </button>
+          <DriveThumb v-else :file-id="selectedFile.id" :filename="fileDisplayName(selectedFile)" :mime-type="selectedFile.mime_type" :preview-status="selectedFile.preview_status" />
         </div>
         <dl>
           <template v-for="[label, value] in filePreviewRows(selectedFile)" :key="label">
@@ -905,7 +958,7 @@ onBeforeUnmount(() => {
           </template>
         </dl>
         <div class="aw-upload-ledger__detail-actions">
-          <button class="aw-primary-button" type="button" @click="openFilePreview(selectedFile)">打开预览</button>
+          <button class="aw-primary-button" type="button" @click="openFilePreview(selectedFile)">{{ canOpenArchive(selectedFile) ? '查看内容' : '打开预览' }}</button>
           <button class="aw-secondary-button" type="button" :disabled="actionLoading" @click="downloadFile(selectedFile)">
             <Download :size="15" aria-hidden="true" />
             下载
@@ -930,7 +983,7 @@ onBeforeUnmount(() => {
       :mime-type="previewMimeType"
       :empty-label="previewEmptyLabel"
       :meta-rows="previewRows"
-      @close="previewOpen = false"
+      @close="closePreviewDialog"
       @download="handlePreviewDownload"
     />
 
@@ -993,7 +1046,7 @@ onBeforeUnmount(() => {
               @click="openArchiveVirtualFile(file)"
             >
               <span>
-                <img v-if="file.preview_url && file.mime_type.startsWith('image/')" :src="file.preview_url" :alt="file.name" loading="lazy" />
+                <ArchiveVirtualThumb v-if="archiveSource" :file-id="archiveSource.id" :file="file" />
                 <FileArchive v-else :size="26" aria-hidden="true" />
               </span>
               <strong :title="file.name">{{ file.name }}</strong>

@@ -5307,6 +5307,20 @@ body.aw-submission-dialog-locked {
   object-fit: cover;
 }
 
+.aw-archive-virtual-thumb {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  color: var(--aw-brand);
+}
+
+.aw-archive-virtual-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
 .aw-upload-ledger-archive__folder strong,
 .aw-upload-ledger-archive__file strong,
 .aw-upload-ledger-archive__folder small,
@@ -5708,6 +5722,30 @@ body.aw-submission-dialog-locked {
   border: 1px solid var(--aw-hairline);
   border-radius: var(--aw-radius-md);
   background: var(--aw-stage);
+}
+
+.aw-upload-ledger__archive-preview {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: var(--aw-space-1);
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--aw-brand) 10%, var(--aw-surface)), var(--aw-paper));
+  color: var(--aw-brand);
+  padding: var(--aw-space-3);
+  cursor: pointer;
+}
+
+.aw-upload-ledger__archive-preview strong {
+  color: var(--aw-ink);
+  font-size: var(--aw-font-size-sm);
+}
+
+.aw-upload-ledger__archive-preview span {
+  color: var(--aw-muted);
+  font-size: var(--aw-font-size-xs);
 }
 
 .aw-upload-ledger__detail-actions {
@@ -7051,6 +7089,19 @@ body.aw-submission-dialog-locked {
   color: var(--aw-on-console-2);
   cursor: zoom-in;
   padding: 0;
+}
+
+.aw-drive__detail-preview--archive {
+  align-content: center;
+  gap: var(--aw-space-2);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--aw-brand) 10%, var(--aw-surface)), var(--aw-paper));
+  color: var(--aw-brand);
+  cursor: pointer;
+}
+
+.aw-drive__detail-preview--archive strong {
+  color: var(--aw-ink);
+  font-size: var(--aw-font-size-md);
 }
 
 .aw-drive__detail-hint {

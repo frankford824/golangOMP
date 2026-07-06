@@ -1507,6 +1507,15 @@ export const assetWorkbenchApi = {
     return unwrap(res.data)
   },
 
+  async getArchiveEntryBlob(fileId: number, path: string, disposition: 'inline' | 'attachment' = 'inline', signal?: AbortSignal): Promise<Blob> {
+    const res = await http.get<Blob>(`/v1/asset-workbench/files/${fileId}/archive/entry`, {
+      params: { path, disposition },
+      responseType: 'blob',
+      signal,
+    })
+    return res.data
+  },
+
   async batchDownloadFiles(fileIds: number[], signal?: AbortSignal): Promise<FileBatchDownloadManifest> {
     const res = await http.post<ApiEnvelope<FileBatchDownloadManifest>>('/v1/asset-workbench/files/batch-download', { file_ids: fileIds }, { signal })
     return unwrap(res.data)
