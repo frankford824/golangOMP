@@ -293,7 +293,7 @@ func (s *identityService) refreshRuntimeOrgCatalog(ctx context.Context) *domain.
 
 func (s *identityService) buildOrgOptions(ctx context.Context, includeDisabled bool) (*domain.OrgOptions, *domain.AppError) {
 	if s.orgRepo == nil {
-		return s.buildConfigBackedOrgOptions(), nil
+		return s.buildConfigBackedOrgOptions(ctx), nil
 	}
 	departments, err := s.orgRepo.ListDepartments(ctx, includeDisabled)
 	if err != nil {
@@ -321,7 +321,7 @@ func (s *identityService) buildOrgOptions(ctx context.Context, includeDisabled b
 	options := &domain.OrgOptions{
 		Departments:           make([]domain.DepartmentOption, 0, len(departments)),
 		TeamsByDepartment:     make(map[string][]string, len(departments)),
-		RoleCatalogSummary:    s.ListRoles(context.Background()),
+		RoleCatalogSummary:    s.ListRoles(ctx),
 		UnassignedPoolEnabled: s.authSettings.UnassignedPoolEnabled,
 		ConfiguredAssignments: append([]domain.ConfiguredUserAssignment{}, s.authSettings.ConfiguredAssignments...),
 	}
@@ -344,11 +344,11 @@ func (s *identityService) buildOrgOptions(ctx context.Context, includeDisabled b
 	return options, nil
 }
 
-func (s *identityService) buildConfigBackedOrgOptions() *domain.OrgOptions {
+func (s *identityService) buildConfigBackedOrgOptions(ctx context.Context) *domain.OrgOptions {
 	options := &domain.OrgOptions{
 		Departments:           make([]domain.DepartmentOption, 0, len(s.authSettings.Departments)),
 		TeamsByDepartment:     make(map[string][]string, len(s.authSettings.DepartmentTeams)),
-		RoleCatalogSummary:    s.ListRoles(context.Background()),
+		RoleCatalogSummary:    s.ListRoles(ctx),
 		UnassignedPoolEnabled: s.authSettings.UnassignedPoolEnabled,
 		ConfiguredAssignments: append([]domain.ConfiguredUserAssignment{}, s.authSettings.ConfiguredAssignments...),
 	}

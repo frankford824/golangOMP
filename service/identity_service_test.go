@@ -39,8 +39,8 @@ func TestIdentityServiceRegisterLoginAndCurrentUserWithDepartmentAdmin(t *testin
 	if !containsRoleValue(registerResult.User.Roles, domain.RoleDeptAdmin) {
 		t.Fatalf("Register() roles = %+v, want DepartmentAdmin", registerResult.User.Roles)
 	}
-	if !containsRoleValue(registerResult.User.Roles, domain.RoleDesigner) || !containsRoleValue(registerResult.User.Roles, domain.RoleDesignReviewer) {
-		t.Fatalf("Register() roles = %+v, want design default business bundle", registerResult.User.Roles)
+	if !containsRoleValue(registerResult.User.Roles, domain.RoleDesigner) || containsRoleValue(registerResult.User.Roles, domain.RoleDesignReviewer) {
+		t.Fatalf("Register() roles = %+v, want design default business bundle without DesignReviewer", registerResult.User.Roles)
 	}
 	if registerResult.User.Account != "designer_admin" || registerResult.User.Name != "设计主管" {
 		t.Fatalf("Register() user aliases = %+v", registerResult.User)
@@ -83,8 +83,8 @@ func TestIdentityServiceRegisterLoginAndCurrentUserWithDepartmentAdmin(t *testin
 	if !containsString(currentUser.FrontendAccess.Pages, "department_users") {
 		t.Fatalf("GetCurrentUser() pages = %+v", currentUser.FrontendAccess.Pages)
 	}
-	if !containsString(currentUser.FrontendAccess.Menus, "design_workspace") || !containsString(currentUser.FrontendAccess.Pages, "audit_workspace") {
-		t.Fatalf("GetCurrentUser() frontend_access missing design workbench pages = %+v", currentUser.FrontendAccess)
+	if !containsString(currentUser.FrontendAccess.Menus, "design_workspace") || !containsString(currentUser.FrontendAccess.Pages, "design_workspace") {
+		t.Fatalf("GetCurrentUser() frontend_access missing design workspace pages = %+v", currentUser.FrontendAccess)
 	}
 }
 
@@ -508,7 +508,7 @@ func TestIdentityServiceResetUserPasswordAllowsReloginWithNewPassword(t *testing
 	created, appErr := svc.CreateManagedUser(domain.WithRequestActor(context.Background(), domain.RequestActor{
 		ID:       1,
 		Username: "admin",
-		Roles:    []domain.Role{domain.RoleAdmin},
+		Roles:    []domain.Role{domain.RoleSuperAdmin},
 		Source:   domain.RequestActorSourceSessionToken,
 		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
 	}), CreateManagedUserParams{
@@ -569,8 +569,8 @@ func TestIdentityServiceSyncConfiguredAuthSeedsDefaultAdmin(t *testing.T) {
 	if appErr != nil {
 		t.Fatalf("Login(admin) error = %+v", appErr)
 	}
-	if !containsRoleValue(loginResult.User.Roles, domain.RoleAdmin) {
-		t.Fatalf("Login(admin) roles = %+v", loginResult.User.Roles)
+	if !containsRoleValue(loginResult.User.Roles, domain.RoleSuperAdmin) || containsRoleValue(loginResult.User.Roles, domain.RoleAdmin) {
+		t.Fatalf("Login(admin) roles = %+v, want SuperAdmin without legacy Admin", loginResult.User.Roles)
 	}
 	if !loginResult.User.FrontendAccess.IsSuperAdmin {
 		t.Fatalf("Login(admin) frontend_access = %+v", loginResult.User.FrontendAccess)
@@ -670,6 +670,95 @@ func TestIdentityServiceAddAndRemoveUserRolesWriteLogs(t *testing.T) {
 	}
 }
 
+func TestIdentityServiceRoleWriteRejectsNonAssignableCompatibilityRoles(t *testing.T) {
+	userRepo := newIdentityUserRepo()
+	userRepo.users[42] = &domain.User{
+		ID:          42,
+		Username:    "role_target",
+		DisplayName: "Role Target",
+		Department:  domain.DepartmentOperations,
+		Team:        "运营组",
+		Status:      domain.UserStatusActive,
+	}
+	userRepo.roles[42] = []domain.Role{domain.RoleMember}
+	svc := NewIdentityService(userRepo, &identitySessionRepoStub{}, &identityPermissionLogRepoStub{}, identityTxRunner{})
+	superCtx := domain.WithRequestActor(context.Background(), domain.RequestActor{
+		ID:       1,
+		Username: "super_admin",
+		Roles:    []domain.Role{domain.RoleSuperAdmin},
+		Source:   domain.RequestActorSourceSessionToken,
+		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
+	})
+
+	if _, appErr := svc.SetUserRoles(superCtx, SetUserRolesParams{UserID: 42, Roles: []domain.Role{domain.RoleOutsource}}); appErr == nil || appErrorDenyCode(appErr) != "role_not_assignable" {
+		t.Fatalf("SetUserRoles(Outsource) appErr = %+v, want role_not_assignable", appErr)
+	}
+	if _, appErr := svc.AddUserRoles(superCtx, AddUserRolesParams{UserID: 42, Roles: []domain.Role{domain.RoleRoleAdmin}}); appErr == nil || appErrorDenyCode(appErr) != "role_not_assignable" {
+		t.Fatalf("AddUserRoles(RoleAdmin) appErr = %+v, want role_not_assignable", appErr)
+	}
+	options, appErr := svc.GetOrgOptions(superCtx)
+	if appErr != nil {
+		t.Fatalf("GetOrgOptions() error = %+v", appErr)
+	}
+	opsTeam, ok := findDepartmentTeam(options, string(domain.DepartmentOperations))
+	if !ok {
+		t.Fatalf("missing operations team in options: %+v", options.Departments)
+	}
+	if _, appErr := svc.CreateManagedUser(superCtx, CreateManagedUserParams{
+		Username:    "legacy_admin_target",
+		DisplayName: "Legacy Admin Target",
+		Department:  domain.DepartmentOperations,
+		Team:        opsTeam,
+		Mobile:      "13800009998",
+		Password:    "Init1234",
+		Roles:       []domain.Role{domain.RoleAdmin},
+	}); appErr == nil || appErrorDenyCode(appErr) != "role_not_assignable" {
+		t.Fatalf("CreateManagedUser(Admin) appErr = %+v, want role_not_assignable", appErr)
+	}
+}
+
+func TestIdentityServiceDeleteUserProtectsLastSuperAdminAndRejectsLegacyAdmin(t *testing.T) {
+	userRepo := newIdentityUserRepo()
+	userRepo.users[1] = &domain.User{
+		ID:          1,
+		Username:    "only_super",
+		DisplayName: "Only Super",
+		Status:      domain.UserStatusActive,
+	}
+	userRepo.roles[1] = []domain.Role{domain.RoleSuperAdmin}
+	svc := NewIdentityService(userRepo, &identitySessionRepoStub{}, &identityPermissionLogRepoStub{}, identityTxRunner{})
+
+	superCtx := domain.WithRequestActor(context.Background(), domain.RequestActor{
+		ID:       1,
+		Username: "only_super",
+		Roles:    []domain.Role{domain.RoleSuperAdmin},
+		Source:   domain.RequestActorSourceSessionToken,
+		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
+	})
+	appErr := svc.DeleteUser(superCtx, DeleteUserParams{UserID: 1, Reason: "governance test"})
+	if appErr == nil {
+		t.Fatal("DeleteUser(last SuperAdmin) appErr = nil, want deny")
+	}
+	if denyCode := appErrorDenyCode(appErr); denyCode != "last_super_admin_deactivate_denied" {
+		t.Fatalf("deny_code = %q, want last_super_admin_deactivate_denied", denyCode)
+	}
+
+	adminCtx := domain.WithRequestActor(context.Background(), domain.RequestActor{
+		ID:       2,
+		Username: "legacy_admin",
+		Roles:    []domain.Role{domain.RoleAdmin},
+		Source:   domain.RequestActorSourceSessionToken,
+		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
+	})
+	appErr = svc.DeleteUser(adminCtx, DeleteUserParams{UserID: 1, Reason: "governance test"})
+	if appErr == nil {
+		t.Fatal("DeleteUser(Admin actor) appErr = nil, want deny")
+	}
+	if denyCode := appErrorDenyCode(appErr); denyCode != "module_action_role_denied" {
+		t.Fatalf("deny_code = %q, want module_action_role_denied", denyCode)
+	}
+}
+
 func TestIdentityServiceGetOrgOptionsIncludesUnassignedPoolAndCatalog(t *testing.T) {
 	svc := NewIdentityService(newIdentityUserRepo(), &identitySessionRepoStub{}, &identityPermissionLogRepoStub{}, identityTxRunner{})
 
@@ -685,6 +774,53 @@ func TestIdentityServiceGetOrgOptionsIncludesUnassignedPoolAndCatalog(t *testing
 	}
 	if !containsRoleCatalogEntry(options.RoleCatalogSummary, domain.RoleHRAdmin) {
 		t.Fatalf("GetOrgOptions() role_catalog_summary = %+v", options.RoleCatalogSummary)
+	}
+}
+
+func TestIdentityServiceGetOrgOptionsRoleCatalogMatchesActorAssignable(t *testing.T) {
+	svc := NewIdentityService(newIdentityUserRepo(), &identitySessionRepoStub{}, &identityPermissionLogRepoStub{}, identityTxRunner{})
+
+	hrCtx := domain.WithRequestActor(context.Background(), domain.RequestActor{
+		ID:       11,
+		Username: "hr_admin",
+		Roles:    []domain.Role{domain.RoleHRAdmin},
+		Source:   domain.RequestActorSourceSessionToken,
+		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
+	})
+	hrOptions, appErr := svc.GetOrgOptions(hrCtx)
+	if appErr != nil {
+		t.Fatalf("GetOrgOptions(HRAdmin) error = %+v", appErr)
+	}
+	if roleCatalogEntryForTest(hrOptions.RoleCatalogSummary, domain.RoleHRAdmin).AssignableByCurrentActor {
+		t.Fatal("HRAdmin role assignable_by_current_actor = true for HRAdmin, want false")
+	}
+	if !roleCatalogEntryForTest(hrOptions.RoleCatalogSummary, domain.RoleCustomizationReviewer).AssignableByCurrentActor {
+		t.Fatal("CustomizationReviewer assignable_by_current_actor = false for HRAdmin, want true")
+	}
+	if roleCatalogEntryForTest(hrOptions.RoleCatalogSummary, domain.RoleOutsource).AssignableByCurrentActor {
+		t.Fatal("Outsource assignable_by_current_actor = true, want false")
+	}
+
+	deptCtx := domain.WithRequestActor(context.Background(), domain.RequestActor{
+		ID:         12,
+		Username:   "design_dept_admin",
+		Roles:      []domain.Role{domain.RoleDeptAdmin},
+		Department: string(domain.DepartmentDesign),
+		Source:     domain.RequestActorSourceSessionToken,
+		AuthMode:   domain.AuthModeSessionTokenRoleEnforced,
+	})
+	deptOptions, appErr := svc.GetOrgOptions(deptCtx)
+	if appErr != nil {
+		t.Fatalf("GetOrgOptions(DepartmentAdmin) error = %+v", appErr)
+	}
+	if !roleCatalogEntryForTest(deptOptions.RoleCatalogSummary, domain.RoleDesigner).AssignableByCurrentActor {
+		t.Fatal("Designer assignable_by_current_actor = false for design DepartmentAdmin, want true")
+	}
+	if roleCatalogEntryForTest(deptOptions.RoleCatalogSummary, domain.RoleDesignReviewer).AssignableByCurrentActor {
+		t.Fatal("DesignReviewer assignable_by_current_actor = true for DepartmentAdmin, want false")
+	}
+	if roleCatalogEntryForTest(deptOptions.RoleCatalogSummary, domain.RoleOps).AssignableByCurrentActor {
+		t.Fatal("Ops assignable_by_current_actor = true for design DepartmentAdmin, want false")
 	}
 }
 

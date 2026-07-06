@@ -900,6 +900,58 @@ func TestTaskActionAuthorizerAssetUploadStageScopeMatrix(t *testing.T) {
 			wantScopeSource: string(TaskActionScopeStage),
 		},
 		{
+			name:   "customization_reviewer_pending_review_upload_allowed_via_review_asset_scope",
+			action: TaskActionAssetUploadSessionCreate,
+			actor: domain.RequestActor{
+				ID:    501,
+				Roles: []domain.Role{domain.RoleCustomizationReviewer},
+			},
+			task: &domain.Task{
+				ID:                    501,
+				OwnerDepartment:       string(domain.DepartmentOperations),
+				OwnerOrgTeam:          "淘系一组",
+				TaskStatus:            domain.TaskStatusPendingCustomizationReview,
+				CustomizationRequired: true,
+			},
+			wantAllowed:     true,
+			wantScopeSource: string(TaskActionScopeStage),
+		},
+		{
+			name:   "customization_reviewer_pending_effect_review_upload_allowed_via_review_asset_scope",
+			action: TaskActionAssetUploadSessionCreate,
+			actor: domain.RequestActor{
+				ID:    502,
+				Roles: []domain.Role{domain.RoleCustomizationReviewer},
+			},
+			task: &domain.Task{
+				ID:                    502,
+				OwnerDepartment:       string(domain.DepartmentOperations),
+				OwnerOrgTeam:          "淘系一组",
+				TaskStatus:            domain.TaskStatusPendingEffectReview,
+				CustomizationRequired: true,
+			},
+			wantAllowed:     true,
+			wantScopeSource: string(TaskActionScopeStage),
+		},
+		{
+			name:   "customization_reviewer_in_progress_upload_denied_as_generic_upload",
+			action: TaskActionAssetUploadSessionCreate,
+			actor: domain.RequestActor{
+				ID:    503,
+				Roles: []domain.Role{domain.RoleCustomizationReviewer},
+			},
+			task: &domain.Task{
+				ID:                    503,
+				OwnerDepartment:       string(domain.DepartmentOperations),
+				OwnerOrgTeam:          "淘系一组",
+				TaskStatus:            domain.TaskStatusInProgress,
+				CustomizationRequired: true,
+			},
+			wantAllowed:    false,
+			wantDenyCode:   "missing_required_role",
+			wantDenyReason: "asset upload requires a design, audit, customization, operation, or management role",
+		},
+		{
 			name:   "case_b_f2_9_ops_owner_pending_assign_can_upload_reference",
 			action: TaskActionAssetUploadSessionCreate,
 			actor: domain.RequestActor{

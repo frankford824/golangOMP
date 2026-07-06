@@ -101,6 +101,59 @@ func TestBuildFrontendAccessRoleStillAddsBusinessMenus(t *testing.T) {
 	}
 }
 
+func TestBuildFrontendAccessLegacyAdminDoesNotGetRoleAssignmentActions(t *testing.T) {
+	settings := FrontendAccessSettings{
+		Defaults: FrontendAccessDefaults{
+			AllAuthenticated: FrontendAccessSpec{
+				Roles:   []string{"member"},
+				Scopes:  []string{"frontend_ready"},
+				Menus:   []string{"dashboard"},
+				Pages:   []string{"dashboard_home"},
+				Actions: []string{"profile.view"},
+			},
+		},
+		Identities: map[string]FrontendAccessSpec{
+			"super_admin": {
+				Actions: []string{"role.assign", "role.remove", "user.manage"},
+			},
+			"department_admin": {},
+		},
+		Roles: map[string]FrontendAccessSpec{
+			string(RoleAdmin): {
+				Roles:   []string{"admin"},
+				Scopes:  []string{"identity_admin"},
+				Actions: []string{"user.manage"},
+			},
+			string(RoleSuperAdmin): {
+				Roles:   []string{"super_admin"},
+				Actions: []string{"role.assign", "role.remove"},
+			},
+		},
+	}
+
+	adminView := BuildFrontendAccess(&User{
+		ID:    9,
+		Roles: []Role{RoleAdmin},
+	}, settings)
+	if adminView.IsSuperAdmin {
+		t.Fatalf("Admin IsSuperAdmin = true, want false")
+	}
+	if !adminView.ViewAll {
+		t.Fatalf("Admin ViewAll = false, want true compatibility visibility")
+	}
+	if containsStringValue(adminView.Actions, "role.assign") || containsStringValue(adminView.Actions, "role.remove") {
+		t.Fatalf("Admin actions = %+v, must not include role assignment actions", adminView.Actions)
+	}
+
+	superView := BuildFrontendAccess(&User{
+		ID:    10,
+		Roles: []Role{RoleSuperAdmin},
+	}, settings)
+	if !superView.IsSuperAdmin || !containsStringValue(superView.Actions, "role.assign") || !containsStringValue(superView.Actions, "role.remove") {
+		t.Fatalf("SuperAdmin frontend access = %+v, want role assignment actions", superView)
+	}
+}
+
 func containsStringValue(values []string, target string) bool {
 	for _, value := range values {
 		if value == target {

@@ -91,7 +91,7 @@ func DepartmentDefaultBusinessRoles(department Department) []Role {
 	case DepartmentDesignRD:
 		return []Role{RoleDesigner}
 	case DepartmentDesign:
-		return []Role{RoleDesigner, RoleDesignReviewer}
+		return []Role{RoleDesigner}
 	case DepartmentCustomizationArt:
 		return []Role{RoleCustomizationOperator}
 	case DepartmentAudit:
@@ -247,10 +247,16 @@ type RegistrationOptions struct {
 }
 
 type RoleCatalogEntry struct {
-	Role         Role     `json:"role"`
-	Name         string   `json:"name"`
-	Description  string   `json:"description"`
-	Capabilities []string `json:"capabilities,omitempty"`
+	Role                     Role     `json:"role"`
+	Name                     string   `json:"name"`
+	Description              string   `json:"description"`
+	Capabilities             []string `json:"capabilities,omitempty"`
+	Category                 string   `json:"category,omitempty"`
+	Assignable               bool     `json:"assignable"`
+	AssignableByCurrentActor bool     `json:"assignable_by_current_actor"`
+	Deprecated               bool     `json:"deprecated"`
+	HiddenByDefault          bool     `json:"hidden_by_default"`
+	AssignmentNote           string   `json:"assignment_note,omitempty"`
 }
 
 type ConfiguredSuperAdmin struct {
@@ -299,7 +305,7 @@ type OrgOptions struct {
 }
 
 func DefaultRoleCatalog() []RoleCatalogEntry {
-	return []RoleCatalogEntry{
+	entries := []RoleCatalogEntry{
 		{
 			Role:         RoleSuperAdmin,
 			Name:         "Super Admin",
@@ -322,13 +328,13 @@ func DefaultRoleCatalog() []RoleCatalogEntry {
 			Role:         RoleRoleAdmin,
 			Name:         "Role Admin",
 			Description:  "Legacy compatibility role for historical role-assignment flows; not a future-facing product role.",
-			Capabilities: []string{"role.assign", "role.remove", "role.read"},
+			Capabilities: []string{"role.read"},
 		},
 		{
 			Role:         RoleAdmin,
 			Name:         "Admin",
 			Description:  "Legacy compatibility management role kept for existing route guards during v1.0 convergence.",
-			Capabilities: []string{"user.manage", "role.assign", "permission_logs.read", "operation_logs.read", "task.full_access"},
+			Capabilities: []string{"user.manage", "permission_logs.read", "operation_logs.read", "task.full_access"},
 		},
 		{
 			Role:         RoleDeptAdmin,
@@ -423,14 +429,14 @@ func DefaultRoleCatalog() []RoleCatalogEntry {
 		{
 			Role:         RoleOutsource,
 			Name:         "Outsource",
-			Description:  "Handle outsource task creation and follow-up.",
+			Description:  "Legacy compatibility role for historical outsource records; no new assignment is allowed.",
 			Capabilities: []string{"outsource.manage"},
 		},
 		{
 			Role:         RoleCustomizationReviewer,
 			Name:         "Customization Audit",
 			Description:  "Technical compatibility role used to implement the product grouping 'Customization Audit' for review, revision, replacement, and return-upstream handling.",
-			Capabilities: []string{"task.customization.review", "task.customization.effect_review"},
+			Capabilities: []string{"task.customization.review", "task.customization.effect_review", "task.customization.review.asset_upload"},
 		},
 		{
 			Role:         RoleERP,
@@ -438,5 +444,35 @@ func DefaultRoleCatalog() []RoleCatalogEntry {
 			Description:  "Run internal ERP sync and ERP-facing placeholder routes.",
 			Capabilities: []string{"erp.sync"},
 		},
+	}
+	for i := range entries {
+		HydrateRoleCatalogEntryDefaults(&entries[i])
+	}
+	return entries
+}
+
+func HydrateRoleCatalogEntryDefaults(entry *RoleCatalogEntry) {
+	if entry == nil {
+		return
+	}
+	entry.Assignable = true
+	switch entry.Role {
+	case RoleSuperAdmin, RoleHRAdmin, RoleDeptAdmin, RoleTeamLead:
+		entry.Category = "management"
+	case RoleAssetSubmitter, RoleAssetManager, RoleAssetTemplateAdmin, RoleAssetSettlement:
+		entry.Category = "asset_workbench"
+	case RoleAdmin, RoleOrgAdmin, RoleRoleAdmin, RoleDesignDirector, RoleDesignReviewer, RoleOutsource, RoleERP:
+		entry.Category = "compatibility"
+		entry.Assignable = false
+		entry.Deprecated = true
+		entry.HiddenByDefault = true
+		if entry.AssignmentNote == "" {
+			entry.AssignmentNote = "历史兼容角色，不允许新增分配"
+		}
+	default:
+		entry.Category = "business"
+	}
+	if entry.Role == RoleMember {
+		entry.Category = "business"
 	}
 }

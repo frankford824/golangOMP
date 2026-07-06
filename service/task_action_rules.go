@@ -146,7 +146,7 @@ func taskActionRuleFor(action TaskAction) taskActionRule {
 	case TaskActionAssetUploadSessionCreate, TaskActionAssetUploadSessionComplete, TaskActionAssetUploadSessionCancel:
 		return taskActionRule{
 			Action:        action,
-			RequiredRoles: append([]domain.Role{domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB}, managerRoles...),
+			RequiredRoles: append([]domain.Role{domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB}, managerRoles...),
 			AllowedStatuses: []domain.TaskStatus{
 				domain.TaskStatusPendingAssign,
 				domain.TaskStatusInProgress,

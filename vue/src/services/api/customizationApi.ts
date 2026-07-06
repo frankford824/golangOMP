@@ -20,6 +20,7 @@ export interface CustomizationEffectPreviewPayload {
 
 export interface CustomizationEffectReviewPayload {
   reviewer_id?: number | string
+  current_asset_id?: number | string | null
   customization_review_decision?: 'approved' | 'return_to_designer' | 'reviewer_fixed' | string
   customization_level_code?: string
   customization_level_name?: string

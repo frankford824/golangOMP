@@ -6,8 +6,8 @@
  *   2. 审核工作台 `CustomizationReviewActionPanel` 的定制初审 / 二次效果审核入口。
  *
  * 组件职责：UI 门禁 + payload 组装；
- * 绝对禁止：推导 task_status、伪造成功、或在此处直接调用接口。
- * 调用方接 `submit` 事件自行决定 endpoint：
+ * 绝对禁止：推导 task_status、伪造成功。上传修改源文件仅走 canonical
+ * upload-session，调用方接 `submit` 事件自行决定审核 endpoint：
  *   - `initial` → POST /v1/tasks/:id/customization/review
  *   - `effect`  → POST /v1/customization-jobs/:jobId/effect-review
  *
@@ -35,12 +35,6 @@
           v-model="form.reviewerId"
           label="审核人 ID *"
           placeholder="请输入审核人 ID"
-        />
-        <BaseInput
-          v-if="mode === 'initial'"
-          v-model="form.sourceAssetId"
-          label="源资产 ID"
-          placeholder="可选，留空则按后端规则处理"
         />
         <label class="field">
           <span class="field-label">审核决策</span>
@@ -96,6 +90,27 @@
           placeholder="可选，填写订单编号"
         />
       </div>
+      <div v-if="showSourceUpload" class="source-upload-box">
+        <div class="source-upload-head">
+          <span class="field-label">上传修改源文件</span>
+          <input
+            type="file"
+            class="source-upload-input"
+            :disabled="uploading || loading || disabled"
+            @change="onSourceFileChange"
+          />
+        </div>
+        <p v-if="uploading" class="source-upload-status">
+          上传中 {{ uploadProgress }}%
+        </p>
+        <p v-else-if="uploadedSourceAssetId" class="source-upload-status">
+          已上传：{{ uploadedFileName }}，资产 ID：<span class="asset-id">{{ uploadedSourceAssetId }}</span>
+        </p>
+        <p v-else class="source-upload-status">
+          可选上传；上传成功后本次提交会绑定最新源文件。
+        </p>
+        <p v-if="uploadError" class="modal-error">{{ uploadError }}</p>
+      </div>
       <BaseTextarea
         v-model="form.note"
         label="审核说明"
@@ -118,7 +133,7 @@
         <BaseButton
           size="sm"
           :loading="loading"
-          :disabled="loading"
+          :disabled="loading || uploading || disabled"
           @click="onSubmit"
         >
           确认提交
@@ -134,6 +149,7 @@ import BaseButton from '@/components/base/BaseButton.vue'
 import BaseInput from '@/components/base/BaseInput.vue'
 import BaseModal from '@/components/base/BaseModal.vue'
 import BaseTextarea from '@/components/base/BaseTextarea.vue'
+import { uploadTaskFileViaAssetSession } from '@/services/upload/assetUploadFlow'
 
 export type CustomizationReviewMode = 'initial' | 'effect'
 
@@ -149,6 +165,7 @@ export type CustomizationReviewMode = 'initial' | 'effect'
 export interface CustomizationReviewPayload {
   reviewer_id: number | string
   source_asset_id?: number | string | null
+  current_asset_id?: number | string | null
   customization_review_decision: string
   customization_level_code?: string
   customization_level_name?: string
@@ -166,15 +183,23 @@ const props = withDefaults(
   defineProps<{
     modelValue: boolean
     mode?: CustomizationReviewMode
+    taskId?: string | number | null
     defaultReviewerId?: string | number | null
     loading?: boolean
     error?: string
+    canUploadSource?: boolean
+    targetSkuCode?: string | null
+    disabled?: boolean
   }>(),
   {
     mode: 'initial',
+    taskId: null,
     defaultReviewerId: null,
     loading: false,
     error: '',
+    canUploadSource: false,
+    targetSkuCode: null,
+    disabled: false,
   },
 )
 
@@ -186,7 +211,6 @@ const emit = defineEmits<{
 
 const form = reactive({
   reviewerId: '',
-  sourceAssetId: '',
   decision: 'approved',
   levelCode: '',
   levelName: '',
@@ -201,6 +225,12 @@ const form = reactive({
 })
 
 const localError = ref('')
+const uploading = ref(false)
+const uploadProgress = ref(0)
+const uploadedSourceAssetId = ref<number | string | null>(null)
+const uploadedFileName = ref('')
+const uploadError = ref('')
+let uploadAbortController: AbortController | null = null
 
 const dialogTitle = computed(() =>
   props.mode === 'effect' ? '提交效果审核（定制二次审核）' : '提交定制审核',
@@ -212,9 +242,10 @@ const hintText = computed(() =>
     : '打回美工处理后任务回到定制生产阶段，由美工继续改稿；通过后将进入仓库接收。',
 )
 
+const showSourceUpload = computed(() => props.canUploadSource && props.taskId != null)
+
 function resetForm() {
   form.reviewerId = props.defaultReviewerId != null ? String(props.defaultReviewerId) : ''
-  form.sourceAssetId = ''
   form.decision = 'approved'
   form.levelCode = ''
   form.levelName = ''
@@ -227,6 +258,7 @@ function resetForm() {
   form.refInventory = ''
   form.orderNo = ''
   localError.value = ''
+  resetUploadState()
 }
 
 /** 打开弹窗时回填默认值；关闭弹窗时清表，避免下次复用残留数据。 */
@@ -244,12 +276,6 @@ function toApiId(value: string): number | string | undefined {
   return /^\d+$/.test(trimmed) ? Number(trimmed) : trimmed
 }
 
-function toNullableApiId(value: string): number | string | null {
-  const trimmed = value.trim()
-  if (!trimmed) return null
-  return /^\d+$/.test(trimmed) ? Number(trimmed) : trimmed
-}
-
 function toNullableNumber(value: string): number | null {
   const trimmed = value.trim()
   if (!trimmed) return null
@@ -262,8 +288,83 @@ function nonEmpty(value: string): string | undefined {
   return t ? t : undefined
 }
 
+function resetUploadState() {
+  uploadAbortController?.abort()
+  uploadAbortController = null
+  uploading.value = false
+  uploadProgress.value = 0
+  uploadedSourceAssetId.value = null
+  uploadedFileName.value = ''
+  uploadError.value = ''
+}
+
+function extractUploadedAssetId(uploaded: unknown): number | string | null {
+  const roots = [
+    uploaded,
+    (uploaded as { asset?: unknown })?.asset,
+    (uploaded as { version?: unknown })?.version,
+    (uploaded as { session?: unknown })?.session,
+  ]
+  for (const root of roots) {
+    if (!root || typeof root !== 'object') continue
+    const r = root as Record<string, unknown>
+    const raw = r.asset_id ?? r.assetId ?? r.id
+    if (typeof raw === 'number' && Number.isFinite(raw)) return raw
+    if (typeof raw === 'string' && raw.trim()) return raw.trim()
+  }
+  return null
+}
+
+function errorMessage(err: unknown, fallback: string): string {
+  if (err instanceof Error && err.message.trim()) return err.message
+  return fallback
+}
+
+async function onSourceFileChange(event: Event) {
+  const input = event.target as HTMLInputElement | null
+  const file = input?.files?.[0]
+  if (input) input.value = ''
+  if (!file || !showSourceUpload.value || uploading.value || props.loading || props.disabled) return
+  uploading.value = true
+  uploadProgress.value = 0
+  uploadError.value = ''
+  try {
+    const taskId = String(props.taskId ?? '').trim()
+    if (!taskId) throw new Error('缺少任务 ID，无法上传源文件')
+    uploadAbortController = new AbortController()
+    const uploaded = await uploadTaskFileViaAssetSession(
+      taskId,
+      file,
+      {
+        asset_kind: 'source',
+        owner_module_key: 'customization',
+        target_sku_code: props.targetSkuCode?.trim() || undefined,
+        remark: `定制审核源文件：${file.name}`,
+      },
+      {
+        signal: uploadAbortController.signal,
+        onProgress: (progress) => {
+          uploadProgress.value = Math.max(0, Math.min(100, Math.round(progress.percent ?? 0)))
+        },
+      },
+    )
+    const assetId = extractUploadedAssetId(uploaded)
+    if (assetId == null) throw new Error('上传成功但未返回资产 ID')
+    uploadedSourceAssetId.value = assetId
+    uploadedFileName.value = file.name
+    uploadProgress.value = 100
+  } catch (err) {
+    uploadedSourceAssetId.value = null
+    uploadedFileName.value = ''
+    uploadError.value = errorMessage(err, '源文件上传失败')
+  } finally {
+    uploading.value = false
+    uploadAbortController = null
+  }
+}
+
 function onSubmit() {
-  if (props.loading) return
+  if (props.loading || uploading.value || props.disabled) return
   localError.value = ''
   const reviewerId = toApiId(form.reviewerId)
   if (reviewerId == null) {
@@ -284,13 +385,19 @@ function onSubmit() {
     ref_inventory: toNullableNumber(form.refInventory),
     order_no: nonEmpty(form.orderNo),
   }
-  if (props.mode === 'initial') {
-    payload.source_asset_id = toNullableApiId(form.sourceAssetId)
+  if (uploadedSourceAssetId.value != null) {
+    if (props.mode === 'effect') {
+      payload.current_asset_id = uploadedSourceAssetId.value
+    } else {
+      payload.source_asset_id = uploadedSourceAssetId.value
+    }
   }
   emit('submit', payload)
 }
 
 function onCancel() {
+  uploadAbortController?.abort()
+  uploadAbortController = null
   emit('update:modelValue', false)
   emit('cancel')
 }
@@ -347,6 +454,35 @@ function onCancel() {
   outline: none;
   border-color: rgb(var(--yb-brand-accent));
   box-shadow: 0 0 0 2px rgb(var(--yb-brand-accent) / 0.25);
+}
+.source-upload-box {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 0.75rem;
+  border: 1px solid rgb(var(--yb-brand-border));
+  border-radius: 6px;
+  background: rgb(var(--yb-surface-soft));
+}
+.source-upload-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.source-upload-input {
+  max-width: 100%;
+  font-size: 0.8125rem;
+}
+.source-upload-status {
+  margin: 0;
+  font-size: 0.75rem;
+  color: rgb(var(--yb-text-muted-strong));
+  line-height: 1.45;
+}
+.asset-id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', monospace;
 }
 .modal-error {
   margin: 0;

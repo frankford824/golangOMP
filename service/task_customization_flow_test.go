@@ -286,7 +286,8 @@ func TestCustomizationFlowAndPricingSnapshot(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			designerID := int64(33)
 			operatorID := int64(88)
-			currentAssetID := int64(9001)
+			designAssetRepo := newStep67DesignAssetRepo()
+			currentAssetID := createCustomizationReviewAssetForTest(t, designAssetRepo, 102, domain.TaskAssetTypeSource, domain.DesignAssetUploadStatusUploaded)
 			taskRepo := newStep04TaskRepo(&domain.Task{
 				ID:                    102,
 				TaskStatus:            domain.TaskStatusPendingCustomizationReview,
@@ -324,6 +325,7 @@ func TestCustomizationFlowAndPricingSnapshot(t *testing.T) {
 					},
 				},
 			}
+			svc.designAssetRepo = designAssetRepo
 
 			job, appErr := svc.SubmitCustomizationReview(customizationAdminContext(), SubmitCustomizationReviewParams{
 				TaskID:                 102,
@@ -509,7 +511,8 @@ func TestSubmitCustomizationEffectPreviewNotifiesCustomizationAuditPool(t *testi
 
 func TestReviewCustomizationEffectReturnToDesigner(t *testing.T) {
 	lastOperatorID := int64(66)
-	currentAssetID := int64(7001)
+	designAssetRepo := newStep67DesignAssetRepo()
+	currentAssetID := createCustomizationReviewAssetForTest(t, designAssetRepo, 103, domain.TaskAssetTypeSource, domain.DesignAssetUploadStatusUploaded)
 	taskRepo := newStep04TaskRepo(&domain.Task{
 		ID:                    103,
 		TaskStatus:            domain.TaskStatusPendingEffectReview,
@@ -531,6 +534,7 @@ func TestReviewCustomizationEffectReturnToDesigner(t *testing.T) {
 		taskRepo:             taskRepo,
 		taskEventRepo:        &step04TaskEventRepo{},
 		customizationJobRepo: jobRepo,
+		designAssetRepo:      designAssetRepo,
 		txRunner:             step04TxRunner{},
 	}
 
@@ -765,7 +769,6 @@ func TestSubmitCustomizationEffectPreviewFinalSkipsEffectReview(t *testing.T) {
 func TestReviewCustomizationEffectReviewerFixedReplacesCurrentAsset(t *testing.T) {
 	lastOperatorID := int64(266)
 	oldAssetID := int64(8101)
-	newAssetID := int64(8102)
 	taskRepo := newStep04TaskRepo(&domain.Task{
 		ID:                    108,
 		TaskStatus:            domain.TaskStatusPendingEffectReview,
@@ -782,11 +785,14 @@ func TestReviewCustomizationEffectReviewerFixedReplacesCurrentAsset(t *testing.T
 		Status:                 domain.CustomizationJobStatusPendingEffectReview,
 		LastOperatorID:         &lastOperatorID,
 	})
+	designAssetRepo := newStep67DesignAssetRepo()
+	newAssetID := createCustomizationReviewAssetForTest(t, designAssetRepo, 108, domain.TaskAssetTypeSource, domain.DesignAssetUploadStatusUploaded)
 	eventRepo := &step04TaskEventRepo{}
 	svc := &taskService{
 		taskRepo:             taskRepo,
 		taskEventRepo:        eventRepo,
 		customizationJobRepo: jobRepo,
+		designAssetRepo:      designAssetRepo,
 		txRunner:             step04TxRunner{},
 	}
 
@@ -887,7 +893,6 @@ func TestSubmitCustomizationEffectPreviewFinalSkipsEffectReview(t *testing.T) {
 func TestReviewCustomizationEffectReviewerFixedReplacesCurrentAsset(t *testing.T) {
 	lastOperatorID := int64(266)
 	oldAssetID := int64(8101)
-	newAssetID := int64(8102)
 	taskRepo := newStep04TaskRepo(&domain.Task{
 		ID:                    108,
 		TaskStatus:            domain.TaskStatusPendingEffectReview,
@@ -904,11 +909,14 @@ func TestReviewCustomizationEffectReviewerFixedReplacesCurrentAsset(t *testing.T
 		Status:                 domain.CustomizationJobStatusPendingEffectReview,
 		LastOperatorID:         &lastOperatorID,
 	})
+	designAssetRepo := newStep67DesignAssetRepo()
+	newAssetID := createCustomizationReviewAssetForTest(t, designAssetRepo, 108, domain.TaskAssetTypeSource, domain.DesignAssetUploadStatusUploaded)
 	eventRepo := &step04TaskEventRepo{}
 	svc := &taskService{
 		taskRepo:             taskRepo,
 		taskEventRepo:        eventRepo,
 		customizationJobRepo: jobRepo,
+		designAssetRepo:      designAssetRepo,
 		txRunner:             step04TxRunner{},
 	}
 
@@ -940,4 +948,173 @@ func TestReviewCustomizationEffectReviewerFixedReplacesCurrentAsset(t *testing.T
 	if payload["source_department"] != string(domain.DepartmentCustomizationArt) {
 		t.Fatalf("source_department payload = %v, want %q", payload["source_department"], domain.DepartmentCustomizationArt)
 	}
+}
+
+func TestSubmitCustomizationReviewBindsUploadedSourceAsset(t *testing.T) {
+	taskRepo := newStep04TaskRepo(&domain.Task{
+		ID:                    109,
+		TaskStatus:            domain.TaskStatusPendingCustomizationReview,
+		CustomizationRequired: true,
+		OwnerDepartment:       "design-dept",
+		OwnerOrgTeam:          "design-team",
+	})
+	jobRepo := newCustomizationFlowJobRepo(&domain.CustomizationJob{
+		ID:     407,
+		TaskID: 109,
+		Status: domain.CustomizationJobStatusPendingCustomizationReview,
+	})
+	designAssetRepo := newStep67DesignAssetRepo()
+	sourceAssetID := createCustomizationReviewAssetForTest(t, designAssetRepo, 109, domain.TaskAssetTypeSource, domain.DesignAssetUploadStatusUploaded)
+	eventRepo := &step04TaskEventRepo{}
+	svc := &taskService{
+		taskRepo:             taskRepo,
+		taskEventRepo:        eventRepo,
+		customizationJobRepo: jobRepo,
+		designAssetRepo:      designAssetRepo,
+		txRunner:             step04TxRunner{},
+	}
+
+	job, appErr := svc.SubmitCustomizationReview(customizationAdminContext(), SubmitCustomizationReviewParams{
+		TaskID:        109,
+		ReviewerID:    1,
+		Decision:      domain.CustomizationReviewDecisionReviewerFixed,
+		SourceAssetID: &sourceAssetID,
+	})
+	if appErr != nil {
+		t.Fatalf("SubmitCustomizationReview() appErr = %+v", appErr)
+	}
+	if job.SourceAssetID == nil || *job.SourceAssetID != sourceAssetID {
+		t.Fatalf("source_asset_id = %+v, want %d", job.SourceAssetID, sourceAssetID)
+	}
+	if job.CurrentAssetID == nil || *job.CurrentAssetID != sourceAssetID {
+		t.Fatalf("current_asset_id = %+v, want %d", job.CurrentAssetID, sourceAssetID)
+	}
+	if len(eventRepo.events) == 0 {
+		t.Fatal("eventRepo.events = 0, want customization reviewed event")
+	}
+	payload := map[string]interface{}{}
+	if err := json.Unmarshal(eventRepo.events[len(eventRepo.events)-1].Payload, &payload); err != nil {
+		t.Fatalf("json.Unmarshal(payload) error = %v", err)
+	}
+	if int64(payload["source_asset_id"].(float64)) != sourceAssetID {
+		t.Fatalf("source_asset_id payload = %v, want %d", payload["source_asset_id"], sourceAssetID)
+	}
+}
+
+func TestCustomizationReviewRejectsInvalidSourceAsset(t *testing.T) {
+	testCases := []struct {
+		name         string
+		assetTaskID  int64
+		assetType    domain.TaskAssetType
+		uploadStatus domain.DesignAssetUploadStatus
+	}{
+		{name: "other_task", assetTaskID: 999, assetType: domain.TaskAssetTypeSource, uploadStatus: domain.DesignAssetUploadStatusUploaded},
+		{name: "non_source", assetTaskID: 110, assetType: domain.TaskAssetTypeDelivery, uploadStatus: domain.DesignAssetUploadStatusUploaded},
+		{name: "not_uploaded", assetTaskID: 110, assetType: domain.TaskAssetTypeSource, uploadStatus: domain.DesignAssetUploadStatusPending},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			taskRepo := newStep04TaskRepo(&domain.Task{
+				ID:                    110,
+				TaskStatus:            domain.TaskStatusPendingCustomizationReview,
+				CustomizationRequired: true,
+			})
+			jobRepo := newCustomizationFlowJobRepo(&domain.CustomizationJob{
+				ID:     408,
+				TaskID: 110,
+				Status: domain.CustomizationJobStatusPendingCustomizationReview,
+			})
+			designAssetRepo := newStep67DesignAssetRepo()
+			assetID := createCustomizationReviewAssetForTest(t, designAssetRepo, tc.assetTaskID, tc.assetType, tc.uploadStatus)
+			svc := &taskService{
+				taskRepo:             taskRepo,
+				taskEventRepo:        &step04TaskEventRepo{},
+				customizationJobRepo: jobRepo,
+				designAssetRepo:      designAssetRepo,
+				txRunner:             step04TxRunner{},
+			}
+
+			_, appErr := svc.SubmitCustomizationReview(customizationAdminContext(), SubmitCustomizationReviewParams{
+				TaskID:        110,
+				ReviewerID:    1,
+				Decision:      domain.CustomizationReviewDecisionReviewerFixed,
+				SourceAssetID: &assetID,
+			})
+			if appErr == nil {
+				t.Fatal("SubmitCustomizationReview() appErr = nil, want deny")
+			}
+			if denyCode := appErrorDenyCode(appErr); denyCode != "customization_review_asset_invalid" {
+				t.Fatalf("deny_code = %q, want customization_review_asset_invalid", denyCode)
+			}
+		})
+	}
+}
+
+func TestReviewCustomizationEffectRejectsInvalidCurrentAsset(t *testing.T) {
+	lastOperatorID := int64(266)
+	testCases := []struct {
+		name         string
+		assetTaskID  int64
+		assetType    domain.TaskAssetType
+		uploadStatus domain.DesignAssetUploadStatus
+	}{
+		{name: "other_task", assetTaskID: 999, assetType: domain.TaskAssetTypeSource, uploadStatus: domain.DesignAssetUploadStatusUploaded},
+		{name: "non_source", assetTaskID: 111, assetType: domain.TaskAssetTypeDelivery, uploadStatus: domain.DesignAssetUploadStatusUploaded},
+		{name: "not_uploaded", assetTaskID: 111, assetType: domain.TaskAssetTypeSource, uploadStatus: domain.DesignAssetUploadStatusPending},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			taskRepo := newStep04TaskRepo(&domain.Task{
+				ID:                    111,
+				TaskStatus:            domain.TaskStatusPendingEffectReview,
+				CustomizationRequired: true,
+			})
+			jobRepo := newCustomizationFlowJobRepo(&domain.CustomizationJob{
+				ID:             409,
+				TaskID:         111,
+				Status:         domain.CustomizationJobStatusPendingEffectReview,
+				LastOperatorID: &lastOperatorID,
+			})
+			designAssetRepo := newStep67DesignAssetRepo()
+			assetID := createCustomizationReviewAssetForTest(t, designAssetRepo, tc.assetTaskID, tc.assetType, tc.uploadStatus)
+			svc := &taskService{
+				taskRepo:             taskRepo,
+				taskEventRepo:        &step04TaskEventRepo{},
+				customizationJobRepo: jobRepo,
+				designAssetRepo:      designAssetRepo,
+				txRunner:             step04TxRunner{},
+			}
+
+			_, appErr := svc.ReviewCustomizationEffect(customizationAdminContext(), ReviewCustomizationEffectParams{
+				JobID:          409,
+				ReviewerID:     1,
+				Decision:       domain.CustomizationReviewDecisionReviewerFixed,
+				CurrentAssetID: &assetID,
+			})
+			if appErr == nil {
+				t.Fatal("ReviewCustomizationEffect() appErr = nil, want deny")
+			}
+			if denyCode := appErrorDenyCode(appErr); denyCode != "customization_review_asset_invalid" {
+				t.Fatalf("deny_code = %q, want customization_review_asset_invalid", denyCode)
+			}
+		})
+	}
+}
+
+func createCustomizationReviewAssetForTest(t *testing.T, repo *step67DesignAssetRepo, taskID int64, assetType domain.TaskAssetType, uploadStatus domain.DesignAssetUploadStatus) int64 {
+	t.Helper()
+	assetID, err := repo.Create(context.Background(), step04Tx{}, &domain.DesignAsset{
+		TaskID:       taskID,
+		AssetType:    assetType,
+		UploadStatus: uploadStatus,
+		CreatedBy:    1,
+	})
+	if err != nil {
+		t.Fatalf("Create(design asset) error = %v", err)
+	}
+	return assetID
 }

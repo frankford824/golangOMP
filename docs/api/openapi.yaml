@@ -50,6 +50,7 @@ components:
   schemas:
     V7Role:
       type: string
+      description: Current assignable business roles plus compatibility-only historical roles. `Admin`, `OrgAdmin`, `RoleAdmin`, `DesignDirector`, `DesignReviewer`, `Outsource`, and `ERP` are compatibility entries and must not be newly assigned unless a future contract explicitly reclassifies them.
       enum: [Member, SuperAdmin, HRAdmin, OrgAdmin, RoleAdmin, TeamLead, DesignDirector, DesignReviewer, Ops, Designer, Audit_A, Audit_B, Warehouse, Outsource, ERP, Admin, DepartmentAdmin, CustomizationReviewer, CustomizationOperator, AssetSubmitter, AssetManager, AssetTemplateAdmin, AssetSettlement]
     Department:
       type: string
@@ -1013,6 +1014,22 @@ components:
           type: array
           items:
             type: string
+        category:
+          type: string
+          enum: [management, business, asset_workbench, compatibility]
+        assignable:
+          type: boolean
+          description: Whether this role is allowed to be newly assigned by service policy. Compatibility roles such as `Outsource` always return `false`.
+        assignable_by_current_actor:
+          type: boolean
+          description: Whether the current authenticated actor may newly assign this role.
+        deprecated:
+          type: boolean
+        hidden_by_default:
+          type: boolean
+          description: Whether clients should hide the role from normal role-picking UI unless already held historically.
+        assignment_note:
+          type: string
     PermissionLog:
       type: object
       properties:
@@ -9074,6 +9091,9 @@ paths:
       tags: [ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-owner-round: R4-SA-B
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [SuperAdmin]
       parameters:
         - in: path
           name: id
@@ -11446,12 +11466,15 @@ paths:
         to use single-part or multipart upload and returns the upload strategy plus
         completion/cancel endpoints. Reference uploads are allowed while a task is still
         `PendingAssign`, so operations users can fill in reference material before a
-        designer self-claims or is assigned.
+        designer self-claims or is assigned. `CustomizationReviewer` is not a generic
+        asset uploader; it may use this route only through
+        `task.customization.review.asset_upload` for uploaded `source` assets while the
+        task is in `PendingCustomizationReview` or `PendingEffectReview`.
       tags: [Assets, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
         auth_mode: session_token_role_enforced
-        required_roles: [Designer, CustomizationOperator, CustomizationReviewer, Ops, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector]
+        required_roles: [Designer, CustomizationOperator, Ops, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector]
       requestBody:
         required: true
         content:
@@ -11502,12 +11525,12 @@ paths:
   /v1/assets/upload-sessions/{session_id}/complete:
     post:
       summary: Complete asset upload session
-      description: Completes one asset upload session after the frontend uploads bytes to OSS using the returned plan.
+      description: Completes one asset upload session after the frontend uploads bytes to OSS using the returned plan. `CustomizationReviewer` completion is allowed only for the same restricted customization-review source upload flow documented on create.
       tags: [Assets, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
         auth_mode: session_token_role_enforced
-        required_roles: [Designer, CustomizationOperator, CustomizationReviewer, Ops, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector]
+        required_roles: [Designer, CustomizationOperator, Ops, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector]
       parameters:
         - in: path
           name: session_id
@@ -11539,12 +11562,12 @@ paths:
   /v1/assets/upload-sessions/{session_id}/cancel:
     post:
       summary: Cancel asset upload session
-      description: Cancels one asset upload session and aborts the remote OSS session when needed.
+      description: Cancels one asset upload session and aborts the remote OSS session when needed. `CustomizationReviewer` cancellation is allowed only for the same restricted customization-review source upload flow documented on create.
       tags: [Assets, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
         auth_mode: session_token_role_enforced
-        required_roles: [Designer, CustomizationOperator, CustomizationReviewer, Ops, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector]
+        required_roles: [Designer, CustomizationOperator, Ops, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector]
       parameters:
         - in: path
           name: session_id
@@ -15438,7 +15461,7 @@ paths:
   /v1/tasks/{id}/customization/review:
     post:
       summary: Submit customization review for task
-      description: "Dedicated customization reviewer entry. The primary `customization_job` is created at task creation. Review may optionally write business-entered review reference data on that record (`customization_level_code`, `customization_level_name`, `review_reference_unit_price`, `review_reference_weight_factor`, `customization_note`); approved decisions do not require level or pricing fields. Customization tasks reach this endpoint after `CustomizationOperator` submits design through `POST /v1/tasks/{id}/submit-design` and the task enters `PendingCustomizationReview`. `return_to_designer` returns the task to `PendingCustomizationProduction` for customization-operator rework, preferring `last_customization_operator_id` and falling back to `designer_id` for historical tasks. Approved customization reviews enter the warehouse chain through `PendingWarehouseReceive`. Review does not freeze execution settlement pricing."
+      description: "Dedicated customization reviewer entry. The primary `customization_job` is created at task creation. Review may optionally write business-entered review reference data on that record (`customization_level_code`, `customization_level_name`, `review_reference_unit_price`, `review_reference_weight_factor`, `customization_note`); approved decisions do not require level or pricing fields. `source_asset_id`, when provided, must point to an uploaded `source` asset owned by the current task and is written to both `source_asset_id` and `current_asset_id`. Customization tasks reach this endpoint after `CustomizationOperator` submits design through `POST /v1/tasks/{id}/submit-design` and the task enters `PendingCustomizationReview`. `return_to_designer` returns the task to `PendingCustomizationProduction` for customization-operator rework, preferring `last_customization_operator_id` and falling back to `designer_id` for historical tasks. Approved customization reviews enter the warehouse chain through `PendingWarehouseReceive`. Review does not freeze execution settlement pricing."
       tags: [Tasks, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
@@ -15457,7 +15480,10 @@ paths:
               type: object
               properties:
                 reviewer_id: { type: integer }
-                source_asset_id: { type: integer, nullable: true }
+                source_asset_id:
+                  type: integer
+                  nullable: true
+                  description: Optional reviewer-uploaded replacement source asset. Must be an uploaded `source` asset owned by this task.
                 customization_level_code:
                   type: string
                   description: Optional business-entered review reference level code. Omitted for lightweight approved reviews.
@@ -15608,7 +15634,7 @@ paths:
   /v1/customization-jobs/{id}/effect-review:
     post:
       summary: Review customization effect
-      description: "Effect review only accepts jobs in `pending_effect_review`; `return_to_designer` sends workflow back to effect revision, and `reviewer_fixed` may replace the effective working稿 through `current_asset_id` before advancing to production transfer."
+      description: "Effect review only accepts jobs in `pending_effect_review`; `return_to_designer` sends workflow back to effect revision, and `reviewer_fixed` may replace the effective working source through `current_asset_id` before advancing to production transfer. `current_asset_id`, when provided, must point to an uploaded `source` asset owned by the current task."
       tags: [Tasks, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
@@ -15627,7 +15653,10 @@ paths:
               type: object
               properties:
                 reviewer_id: { type: integer }
-                current_asset_id: { type: integer, nullable: true }
+                current_asset_id:
+                  type: integer
+                  nullable: true
+                  description: Optional reviewer-uploaded replacement source asset. Must be an uploaded `source` asset owned by this task.
                 customization_review_decision:
                   type: string
                   enum: [approved, return_to_designer, reviewer_fixed]

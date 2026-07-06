@@ -675,7 +675,7 @@ func v1R1OrgMoveReviewRoles() []domain.Role {
 }
 
 func v1R1SuperAdminRoles() []domain.Role {
-	return []domain.Role{domain.RoleSuperAdmin, domain.RoleAdmin}
+	return []domain.Role{domain.RoleSuperAdmin}
 }
 
 func registerOperationalRoutes(r *gin.Engine) {

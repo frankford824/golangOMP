@@ -592,6 +592,84 @@ func TestTaskAssetCenterServiceCreateMultipartAndCancel(t *testing.T) {
 	}
 }
 
+func TestTaskAssetCenterServiceCustomizationReviewerCannotCompleteNonSourceSession(t *testing.T) {
+	taskRepo := newStep04TaskRepo(&domain.Task{ID: 2098, TaskStatus: domain.TaskStatusInProgress, BusinessLane: domain.TaskBusinessLaneCustomization, CustomizationRequired: true})
+	uploadClient := newStubUploadServiceClient().(*stubUploadServiceClient)
+	svc := NewTaskAssetCenterService(taskRepo, newStep67DesignAssetRepo(), newStep04TaskAssetRepo(), newStep37UploadRequestRepo(), newStep37AssetStorageRefRepo(), &step04TaskEventRepo{}, step04TxRunner{}, uploadClient).(*taskAssetCenterService)
+
+	createResult, appErr := svc.CreateMultipartUploadSession(context.Background(), CreateTaskAssetUploadSessionParams{
+		TaskID:       2098,
+		CreatedBy:    502,
+		AssetType:    domain.TaskAssetTypeDelivery,
+		Filename:     "delivery.zip",
+		ExpectedSize: uploadRequestInt64Ptr(2048),
+		MimeType:     "application/zip",
+	})
+	if appErr != nil {
+		t.Fatalf("CreateMultipartUploadSession() unexpected error: %+v", appErr)
+	}
+	taskRepo.tasks[2098].TaskStatus = domain.TaskStatusPendingCustomizationReview
+	ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{
+		ID:       7001,
+		Username: "customization_reviewer",
+		Roles:    []domain.Role{domain.RoleCustomizationReviewer},
+		Source:   domain.RequestActorSourceSessionToken,
+		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
+	})
+
+	_, appErr = svc.CompleteUploadSession(ctx, CompleteTaskAssetUploadSessionParams{
+		TaskID:      2098,
+		SessionID:   createResult.Session.ID,
+		CompletedBy: 7001,
+	})
+	if appErr == nil {
+		t.Fatal("CompleteUploadSession() appErr = nil, want source-only deny")
+	}
+	if denyCode := appErrorDenyCode(appErr); denyCode != "customization_review_upload_session_asset_type_not_allowed" {
+		t.Fatalf("deny_code = %q, want customization_review_upload_session_asset_type_not_allowed", denyCode)
+	}
+	if uploadClient.completeCalls != 0 {
+		t.Fatalf("remote complete calls = %d, want 0", uploadClient.completeCalls)
+	}
+}
+
+func TestTaskAssetCenterServiceCustomizationReviewerCannotCancelNonSourceSession(t *testing.T) {
+	taskRepo := newStep04TaskRepo(&domain.Task{ID: 2099, TaskStatus: domain.TaskStatusInProgress, BusinessLane: domain.TaskBusinessLaneCustomization, CustomizationRequired: true})
+	svc := NewTaskAssetCenterService(taskRepo, newStep67DesignAssetRepo(), newStep04TaskAssetRepo(), newStep37UploadRequestRepo(), newStep37AssetStorageRefRepo(), &step04TaskEventRepo{}, step04TxRunner{}, newStubUploadServiceClient()).(*taskAssetCenterService)
+
+	createResult, appErr := svc.CreateMultipartUploadSession(context.Background(), CreateTaskAssetUploadSessionParams{
+		TaskID:       2099,
+		CreatedBy:    502,
+		AssetType:    domain.TaskAssetTypeDelivery,
+		Filename:     "delivery.zip",
+		ExpectedSize: uploadRequestInt64Ptr(2048),
+		MimeType:     "application/zip",
+	})
+	if appErr != nil {
+		t.Fatalf("CreateMultipartUploadSession() unexpected error: %+v", appErr)
+	}
+	taskRepo.tasks[2099].TaskStatus = domain.TaskStatusPendingEffectReview
+	ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{
+		ID:       7002,
+		Username: "customization_reviewer",
+		Roles:    []domain.Role{domain.RoleCustomizationReviewer},
+		Source:   domain.RequestActorSourceSessionToken,
+		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
+	})
+
+	_, appErr = svc.CancelUploadSession(ctx, CancelTaskAssetUploadSessionParams{
+		TaskID:      2099,
+		SessionID:   createResult.Session.ID,
+		CancelledBy: 7002,
+	})
+	if appErr == nil {
+		t.Fatal("CancelUploadSession() appErr = nil, want source-only deny")
+	}
+	if denyCode := appErrorDenyCode(appErr); denyCode != "customization_review_upload_session_asset_type_not_allowed" {
+		t.Fatalf("deny_code = %q, want customization_review_upload_session_asset_type_not_allowed", denyCode)
+	}
+}
+
 func TestTaskAssetCenterServiceRejectsSmallUploadForDeliverySourcePreview(t *testing.T) {
 	taskRepo := newStep04TaskRepo(&domain.Task{ID: 2004, TaskStatus: domain.TaskStatusInProgress})
 	svc := NewTaskAssetCenterService(taskRepo, newStep67DesignAssetRepo(), newStep04TaskAssetRepo(), newStep37UploadRequestRepo(), newStep37AssetStorageRefRepo(), &step04TaskEventRepo{}, step04TxRunner{}, newStubUploadServiceClient()).(*taskAssetCenterService)
@@ -2616,6 +2694,48 @@ func rawQueryHasFlag(rawQuery, key string) bool {
 		return true
 	}
 	return strings.HasPrefix(rawQuery, key+"&") || strings.Contains(rawQuery, "&"+key+"&") || strings.HasSuffix(rawQuery, "&"+key) || strings.Contains(rawQuery, "&"+key+"=")
+}
+
+func TestValidateAuditStageUploadAssetTypeCustomizationReviewSourceOnly(t *testing.T) {
+	for _, status := range []domain.TaskStatus{domain.TaskStatusPendingCustomizationReview, domain.TaskStatusPendingEffectReview} {
+		status := status
+		t.Run(string(status)+"_source_allowed", func(t *testing.T) {
+			appErr := validateAuditStageUploadAssetType(&domain.Task{TaskStatus: status}, domain.TaskAssetTypeSource, string(domain.ModuleKeyCustomization))
+			if appErr != nil {
+				t.Fatalf("validateAuditStageUploadAssetType(source) appErr = %+v", appErr)
+			}
+		})
+
+		t.Run(string(status)+"_delivery_denied", func(t *testing.T) {
+			appErr := validateAuditStageUploadAssetType(&domain.Task{TaskStatus: status}, domain.TaskAssetTypeDelivery, string(domain.ModuleKeyCustomization))
+			if appErr == nil {
+				t.Fatal("validateAuditStageUploadAssetType(delivery) appErr = nil, want deny")
+			}
+			if denyCode := appErrorDenyCode(appErr); denyCode != "customization_review_asset_type_not_allowed" {
+				t.Fatalf("deny_code = %q, want customization_review_asset_type_not_allowed", denyCode)
+			}
+		})
+
+		t.Run(string(status)+"_reference_denied", func(t *testing.T) {
+			appErr := validateAuditStageUploadAssetType(&domain.Task{TaskStatus: status}, domain.TaskAssetTypeReference, string(domain.ModuleKeyBasicInfo))
+			if appErr == nil {
+				t.Fatal("validateAuditStageUploadAssetType(reference) appErr = nil, want deny")
+			}
+			if denyCode := appErrorDenyCode(appErr); denyCode != "customization_review_asset_type_not_allowed" {
+				t.Fatalf("deny_code = %q, want customization_review_asset_type_not_allowed", denyCode)
+			}
+		})
+	}
+}
+
+func TestValidateAuditStageUploadAssetTypeNormalAuditStillAllowsDeliveryAndBasicInfoReference(t *testing.T) {
+	task := &domain.Task{TaskStatus: domain.TaskStatusPendingAuditA}
+	if appErr := validateAuditStageUploadAssetType(task, domain.TaskAssetTypeDelivery, string(domain.ModuleKeyAudit)); appErr != nil {
+		t.Fatalf("validateAuditStageUploadAssetType(delivery) appErr = %+v", appErr)
+	}
+	if appErr := validateAuditStageUploadAssetType(task, domain.TaskAssetTypeReference, string(domain.ModuleKeyBasicInfo)); appErr != nil {
+		t.Fatalf("validateAuditStageUploadAssetType(basic_info reference) appErr = %+v", appErr)
+	}
 }
 
 type testPreviewRenderer struct{}

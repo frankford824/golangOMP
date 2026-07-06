@@ -19,7 +19,7 @@ func TestDepartmentDefaultBusinessRoles(t *testing.T) {
 		{
 			name:       "design compatibility gets design bundle",
 			department: DepartmentDesign,
-			want:       []Role{RoleDesigner, RoleDesignReviewer},
+			want:       []Role{RoleDesigner},
 		},
 		{
 			name:       "design rd gets official designer bundle",

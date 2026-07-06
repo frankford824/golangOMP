@@ -145,6 +145,12 @@ func (a *taskActionAuthorizer) EvaluateTaskActionPolicyWithAttributes(
 		return decision
 	}
 
+	if scopeSource, ok := evaluateCustomizationReviewerAssetUploadScope(resolvedAction, actor, task, decision.OwnerDept, decision.OwnerOrgTeam); ok {
+		decision.Allowed = true
+		decision.ScopeSource = scopeSource
+		return decision
+	}
+
 	if !actorHasAllowedTaskActionRole(actor, rule.RequiredRoles) {
 		decision.DenyCode = "missing_required_role"
 		decision.DenyReason = authFirstNonEmpty(rule.RoleGateMessage, "task action denied because the actor role is insufficient")
@@ -249,6 +255,52 @@ func taskActionStatusAllowed(current domain.TaskStatus, allowed []domain.TaskSta
 		}
 	}
 	return false
+}
+
+func evaluateCustomizationReviewerAssetUploadScope(action TaskAction, actor *taskActionActor, task *domain.Task, ownerDepartment, ownerOrgTeam string) (string, bool) {
+	if action != TaskActionAssetUploadSessionCreate && action != TaskActionAssetUploadSessionComplete && action != TaskActionAssetUploadSessionCancel {
+		return "", false
+	}
+	if actorHasGenericAssetUploadRole(actor) {
+		return "", false
+	}
+	if actor == nil || task == nil || !hasRoleValue(actor.Roles, domain.RoleCustomizationReviewer) || !isCustomizationReviewTaskStatus(task.TaskStatus) {
+		return "", false
+	}
+	scopeEval := evaluateTaskActionScope(actor, task, ownerDepartment, ownerOrgTeam)
+	for _, scope := range []TaskActionScopeSource{
+		TaskActionScopeViewAll,
+		TaskActionScopeManagedDepartment,
+		TaskActionScopeManagedTeam,
+		TaskActionScopeDepartment,
+		TaskActionScopeTeam,
+		TaskActionScopeStage,
+	} {
+		if scopeEval.Has(scope) && taskActionActorCanUseScope(actor, scope) {
+			return string(scope), true
+		}
+	}
+	return "", false
+}
+
+func actorHasGenericAssetUploadRole(actor *taskActionActor) bool {
+	if actor == nil {
+		return false
+	}
+	return hasAnyRoleValue(actor.Roles,
+		domain.RoleDesigner,
+		domain.RoleCustomizationOperator,
+		domain.RoleOps,
+		domain.RoleAuditA,
+		domain.RoleAuditB,
+		domain.RoleAdmin,
+		domain.RoleSuperAdmin,
+		domain.RoleRoleAdmin,
+		domain.RoleHRAdmin,
+		domain.RoleDeptAdmin,
+		domain.RoleTeamLead,
+		domain.RoleDesignDirector,
+	)
 }
 
 func (a *taskActionAuthorizer) logDecision(action TaskAction, decision TaskActionDecision) {

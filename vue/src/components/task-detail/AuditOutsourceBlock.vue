@@ -264,7 +264,10 @@
     <CustomizationReviewForm
       v-model="customizationDialogOpen"
       mode="initial"
+      :task-id="task.id"
       :default-reviewer-id="currentUser?.id ?? null"
+      :can-upload-source="can('task.customization.review.asset_upload')"
+      :target-sku-code="task.sku ?? undefined"
       :loading="customizationSubmitting"
       :error="customizationError"
       @submit="submitCustomizationReview"

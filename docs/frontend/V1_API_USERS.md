@@ -345,7 +345,7 @@ curl -X GET https://api.example.com/v1/users/designers \
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
 - `GET` 允许角色: Admin, SuperAdmin, HRAdmin, DepartmentAdmin, TeamLead, OrgAdmin, RoleAdmin。
 - `PATCH` 允许角色: HRAdmin, SuperAdmin, DepartmentAdmin。
-- `DELETE` 允许角色: 已登录 / scope-aware。
+- `DELETE` 允许角色: SuperAdmin。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 #### GET 细节

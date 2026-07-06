@@ -418,11 +418,11 @@ curl -X GET https://api.example.com/v1/assets/<asset_id>/preview \
 ### 简介
 支持方法: POST。
 
-- `POST`: Canonical frontend entry for asset upload session creation. Backend decides whether to use single-part or multipart upload and returns the upload strategy plus completion/cancel endpoints. Reference uploads are allowed while a task is still `PendingAssign`, so operations users can fill in reference material before a designer self-claims or is assigned.
+- `POST`: Canonical frontend entry for asset upload session creation. Backend decides whether to use single-part or multipart upload and returns the upload strategy plus completion/cancel endpoints. Reference uploads are allowed while a task is still `PendingAssign`, so operations users can fill in reference material before a designer self-claims or is assigned. `CustomizationReviewer` is not a generic asset uploader; it may use this route only through `task.customization.review.asset_upload` for uploaded `source` assets while the task is in `PendingCustomizationReview` or `PendingEffectReview`.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `POST` 允许角色: Designer, CustomizationOperator, CustomizationReviewer, Ops, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector。
+- `POST` 允许角色: Designer, CustomizationOperator, Ops, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -545,11 +545,11 @@ curl -X GET https://api.example.com/v1/assets/upload-sessions/<session_id> \
 ### 简介
 支持方法: POST。
 
-- `POST`: Completes one asset upload session after the frontend uploads bytes to OSS using the returned plan.
+- `POST`: Completes one asset upload session after the frontend uploads bytes to OSS using the returned plan. `CustomizationReviewer` completion is allowed only for the same restricted customization-review source upload flow documented on create.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `POST` 允许角色: Designer, CustomizationOperator, CustomizationReviewer, Ops, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector。
+- `POST` 允许角色: Designer, CustomizationOperator, Ops, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -626,11 +626,11 @@ curl -X POST https://api.example.com/v1/assets/upload-sessions/<session_id>/comp
 ### 简介
 支持方法: POST。
 
-- `POST`: Cancels one asset upload session and aborts the remote OSS session when needed.
+- `POST`: Cancels one asset upload session and aborts the remote OSS session when needed. `CustomizationReviewer` cancellation is allowed only for the same restricted customization-review source upload flow documented on create.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `POST` 允许角色: Designer, CustomizationOperator, CustomizationReviewer, Ops, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector。
+- `POST` 允许角色: Designer, CustomizationOperator, Ops, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema

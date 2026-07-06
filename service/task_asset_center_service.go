@@ -535,6 +535,9 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 		}
 	}
 	authz.logDecision(TaskActionAssetUploadSessionComplete, decision)
+	if appErr := requireCustomizationReviewerUploadSessionSource(ctx, task, request); appErr != nil {
+		return nil, appErr
+	}
 	if request.Status == domain.UploadRequestStatusBound || (request.SessionStatus == domain.DesignAssetSessionStatusCompleted && request.BoundAssetID != nil) {
 		return s.buildCompletedUploadSessionResult(ctx, params.TaskID, request)
 	}
@@ -988,14 +991,17 @@ func (s *taskAssetCenterService) CancelUploadSession(ctx context.Context, params
 	if appErr != nil {
 		return nil, appErr
 	}
+	request, appErr := s.requireUploadRequest(ctx, params.TaskID, params.SessionID)
+	if appErr != nil {
+		return nil, appErr
+	}
 	authz := s.taskActionAuthorizer()
 	decision := authz.EvaluateTaskActionPolicy(ctx, TaskActionAssetUploadSessionCancel, task, "", "")
 	authz.logDecision(TaskActionAssetUploadSessionCancel, decision)
 	if !decision.Allowed {
 		return nil, taskActionDecisionAppError(TaskActionAssetUploadSessionCancel, decision)
 	}
-	request, appErr := s.requireUploadRequest(ctx, params.TaskID, params.SessionID)
-	if appErr != nil {
+	if appErr := requireCustomizationReviewerUploadSessionSource(ctx, task, request); appErr != nil {
 		return nil, appErr
 	}
 	if request.SessionStatus == domain.DesignAssetSessionStatusCompleted {
@@ -1602,10 +1608,24 @@ func inferTaskAssetUploadMode(assetType domain.TaskAssetType) (domain.DesignAsse
 }
 
 func validateAuditStageUploadAssetType(task *domain.Task, assetType domain.TaskAssetType, ownerModuleKey string) *domain.AppError {
-	if task == nil || !isAuditStageTaskStatus(task.TaskStatus) {
+	if task == nil {
 		return nil
 	}
 	normalized := domain.NormalizeTaskAssetType(assetType)
+	if isCustomizationReviewTaskStatus(task.TaskStatus) {
+		if normalized == domain.TaskAssetTypeSource {
+			return nil
+		}
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "customization review uploads only support source assets", map[string]interface{}{
+			"deny_code":           "customization_review_asset_type_not_allowed",
+			"task_status":         string(task.TaskStatus),
+			"asset_type":          string(assetType),
+			"allowed_asset_types": []string{string(domain.TaskAssetTypeSource)},
+		})
+	}
+	if !isAuditStageTaskStatus(task.TaskStatus) {
+		return nil
+	}
 	if normalized == domain.TaskAssetTypeSource || normalized == domain.TaskAssetTypeDelivery {
 		return nil
 	}
@@ -1632,6 +1652,41 @@ func isAuditStageTaskStatus(status domain.TaskStatus) bool {
 	default:
 		return false
 	}
+}
+
+func isCustomizationReviewTaskStatus(status domain.TaskStatus) bool {
+	switch status {
+	case domain.TaskStatusPendingCustomizationReview, domain.TaskStatusPendingEffectReview:
+		return true
+	default:
+		return false
+	}
+}
+
+func requireCustomizationReviewerUploadSessionSource(ctx context.Context, task *domain.Task, request *domain.UploadRequest) *domain.AppError {
+	if task == nil || request == nil || !isCustomizationReviewTaskStatus(task.TaskStatus) {
+		return nil
+	}
+	actor, ok := resolveTaskActionActor(ctx)
+	if !ok || !hasRoleValue(actor.Roles, domain.RoleCustomizationReviewer) || actorHasGenericAssetUploadRole(actor) {
+		return nil
+	}
+	if request.TaskAssetType != nil && domain.NormalizeTaskAssetType(*request.TaskAssetType) == domain.TaskAssetTypeSource {
+		return nil
+	}
+	assetType := ""
+	if request.TaskAssetType != nil {
+		assetType = string(*request.TaskAssetType)
+	}
+	return domain.NewAppError(domain.ErrCodePermissionDenied, "customization reviewer upload sessions only support source assets", map[string]interface{}{
+		"deny_code":         "customization_review_upload_session_asset_type_not_allowed",
+		"task_status":       string(task.TaskStatus),
+		"upload_session_id": request.RequestID,
+		"asset_type":        assetType,
+		"allowed_asset_types": []string{
+			string(domain.TaskAssetTypeSource),
+		},
+	})
 }
 
 func matchesAssetResourceFilters(asset *domain.DesignAsset, params ListAssetResourcesParams) bool {

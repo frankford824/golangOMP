@@ -226,10 +226,13 @@ func BuildFrontendAccess(user *User, settings FrontendAccessSettings) FrontendAc
 
 	for _, role := range roleValues {
 		roleNames.Add(frontendRoleName(role))
-		if role == RoleAdmin || role == RoleSuperAdmin || role == RoleHRAdmin {
+		if role == RoleSuperAdmin || role == RoleHRAdmin {
 			view.IsSuperAdmin = true
 			view.ViewAll = true
 			roleNames.Add(frontendRoleName(RoleSuperAdmin))
+		}
+		if role == RoleAdmin {
+			view.ViewAll = true
 		}
 		if role == RoleDeptAdmin {
 			view.IsDepartmentAdmin = true
@@ -346,7 +349,7 @@ func derivedFrontendSpec(role Role) FrontendAccessSpec {
 			Scopes:  []string{"view_all", "identity_admin", "organization_admin", "role_admin"},
 			Menus:   []string{"user_admin", "org_admin", "role_admin", "logs_center", "product_management"},
 			Pages:   []string{"admin_users", "admin_roles", "admin_permission_logs", "admin_operation_logs", "org_options", "product_management"},
-			Actions: []string{"user.manage", "org.manage", "role.assign", "permission_logs.read"},
+			Actions: []string{"user.manage", "org.manage", "role.assign", "role.remove", "permission_logs.read"},
 		}
 	case RoleHRAdmin:
 		return FrontendAccessSpec{
@@ -370,7 +373,7 @@ func derivedFrontendSpec(role Role) FrontendAccessSpec {
 			Scopes:  []string{"role_admin"},
 			Menus:   []string{"role_admin", "user_admin"},
 			Pages:   []string{"admin_users", "admin_roles"},
-			Actions: []string{"role.assign", "role.remove", "role.read"},
+			Actions: []string{"role.read"},
 		}
 	case RoleDeptAdmin:
 		// Round B convergence: DepartmentAdmin is department-scoped and must not
@@ -428,7 +431,7 @@ func derivedFrontendSpec(role Role) FrontendAccessSpec {
 			Scopes:  []string{"customization_review_scope", "department:审核部"},
 			Menus:   []string{"task_list", "customization_management", "audit_queue", "resource_management", "product_management"},
 			Pages:   []string{"customization_jobs", "customization_job_detail", "task_assets", "asset_detail", "assets_index", "product_management", "audit_workspace"},
-			Actions: []string{"task.customization.review", "task.customization.effect_review", "task.list", "warehouse_lane_filter"},
+			Actions: []string{"task.customization.review", "task.customization.effect_review", "task.customization.review.asset_upload", "task.list", "warehouse_lane_filter"},
 		}
 	case RoleCustomizationOperator:
 		return FrontendAccessSpec{
@@ -451,16 +454,15 @@ func derivedFrontendSpec(role Role) FrontendAccessSpec {
 	// config/frontend_access.json so that even when the JSON fails to load,
 	// role coverage is preserved. Content must be kept in sync with the JSON.
 	case RoleAdmin:
-		// Legacy Admin compatibility role. Mirrors config Admin entry. Note:
-		// BuildFrontendAccess also promotes Admin to IsSuperAdmin which pulls
-		// in the full settings-derived union via collectAllFrontendAccess. The
-		// explicit branch below is the fallback when JSON is missing.
+		// Legacy Admin compatibility role. It keeps broad read/manage
+		// compatibility, but must not inherit SuperAdmin role-assignment
+		// actions.
 		return FrontendAccessSpec{
 			Roles:   []string{"admin"},
 			Scopes:  []string{"view_all", "identity_admin"},
 			Menus:   []string{"user_admin", "logs_center", "product_management"},
 			Pages:   []string{"admin_users", "admin_permission_logs", "admin_operation_logs", "product_management"},
-			Actions: []string{"user.manage", "org.manage", "role.assign", "role.remove", "permission_logs.read", "operation_logs.read"},
+			Actions: []string{"user.manage", "org.manage", "permission_logs.read", "operation_logs.read"},
 		}
 	case RoleOps:
 		return FrontendAccessSpec{
@@ -537,10 +539,10 @@ func derivedFrontendSpec(role Role) FrontendAccessSpec {
 	case RoleOutsource:
 		return FrontendAccessSpec{
 			Roles:   []string{"outsource"},
-			Scopes:  []string{"outsource_workspace"},
-			Menus:   []string{"task_list"},
-			Pages:   []string{"outsource_orders", "task_list"},
-			Actions: []string{"outsource.manage", "task.list"},
+			Scopes:  []string{"compatibility_legacy"},
+			Menus:   []string{},
+			Pages:   []string{},
+			Actions: []string{},
 		}
 	case RoleERP:
 		return FrontendAccessSpec{

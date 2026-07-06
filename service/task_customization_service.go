@@ -53,6 +53,9 @@ func (s *taskService) SubmitCustomizationReview(ctx context.Context, p SubmitCus
 			Status:       domain.CustomizationJobStatusPendingCustomizationReview,
 		}
 	}
+	if appErr := s.validateCustomizationReviewSourceAsset(ctx, task.ID, p.SourceAssetID); appErr != nil {
+		return nil, appErr
+	}
 	currentJob.SourceAssetID = p.SourceAssetID
 	previousAssetID := cloneInt64Ptr(currentJob.CurrentAssetID)
 	currentJob.CurrentAssetID = p.SourceAssetID
@@ -104,6 +107,7 @@ func (s *taskService) SubmitCustomizationReview(ctx context.Context, p SubmitCus
 			"review_reference_weight_factor": p.CustomizationWeight,
 			"customization_note":             p.CustomizationNote,
 			"customization_job_id":           currentJob.ID,
+			"source_asset_id":                currentJob.SourceAssetID,
 			"previous_asset_id":              previousAssetID,
 			"current_asset_id":               currentJob.CurrentAssetID,
 			"replacement_actor_id":           p.ReviewerID,
@@ -271,6 +275,9 @@ func (s *taskService) ReviewCustomizationEffect(ctx context.Context, p ReviewCus
 		nextHandler = job.LastOperatorID
 	}
 	previousAssetID := cloneInt64Ptr(job.CurrentAssetID)
+	if appErr := s.validateCustomizationReviewSourceAsset(ctx, task.ID, p.CurrentAssetID); appErr != nil {
+		return nil, appErr
+	}
 	currentAssetID, appErr := resolveCustomizationAssetID(job.CurrentAssetID, p.CurrentAssetID)
 	if appErr != nil {
 		return nil, appErr
@@ -324,6 +331,38 @@ func (s *taskService) ReviewCustomizationEffect(ctx context.Context, p ReviewCus
 		return nil, infraError("customization effect review tx", txErr)
 	}
 	return s.GetCustomizationJob(ctx, p.JobID)
+}
+
+func (s *taskService) validateCustomizationReviewSourceAsset(ctx context.Context, taskID int64, assetID *int64) *domain.AppError {
+	if assetID == nil {
+		return nil
+	}
+	if s.designAssetRepo == nil {
+		return domain.NewAppError(domain.ErrCodeInternalError, "design asset repo is not configured", nil)
+	}
+	asset, err := s.designAssetRepo.GetByID(ctx, *assetID)
+	if err != nil {
+		return infraError("get customization review source asset", err)
+	}
+	if asset == nil || asset.TaskID != taskID || !domain.NormalizeTaskAssetType(asset.AssetType).IsSource() || asset.UploadStatus != domain.DesignAssetUploadStatusUploaded {
+		assetType := ""
+		uploadStatus := ""
+		assetTaskID := int64(0)
+		if asset != nil {
+			assetType = string(asset.AssetType)
+			uploadStatus = string(asset.UploadStatus)
+			assetTaskID = asset.TaskID
+		}
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "customization review asset must be an uploaded source asset owned by the current task", map[string]interface{}{
+			"deny_code":     "customization_review_asset_invalid",
+			"task_id":       taskID,
+			"asset_id":      *assetID,
+			"asset_task_id": assetTaskID,
+			"asset_type":    assetType,
+			"upload_status": uploadStatus,
+		})
+	}
+	return nil
 }
 
 func (s *taskService) TransferCustomizationProduction(ctx context.Context, p TransferCustomizationProductionParams) (*domain.CustomizationJob, *domain.AppError) {

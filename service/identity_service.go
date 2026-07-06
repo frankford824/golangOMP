@@ -1399,7 +1399,7 @@ func (s *identityService) DeleteUser(ctx context.Context, p DeleteUserParams) *d
 		return domain.NewAppError(domain.ErrCodeReasonRequired, "reason is required", map[string]string{"deny_code": "reason_required"})
 	}
 	actor, ok := domain.RequestActorFromContext(ctx)
-	if !ok || !identityActorHasAnyRole(actor, domain.RoleSuperAdmin, domain.RoleAdmin) {
+	if !ok || !identityActorHasAnyRole(actor, domain.RoleSuperAdmin) {
 		return identityPermissionDenied("module_action_role_denied", "only SuperAdmin can delete users")
 	}
 	user, err := s.userRepo.GetByID(ctx, p.UserID)
@@ -1411,6 +1411,9 @@ func (s *identityService) DeleteUser(ctx context.Context, p DeleteUserParams) *d
 	}
 	if err := s.attachRoles(ctx, user); err != nil {
 		return infraError("attach delete user roles", err)
+	}
+	if appErr := s.ensurePrivilegedUserStatusSafety(ctx, user, domain.UserStatusDeleted); appErr != nil {
+		return appErr
 	}
 	user.Status = domain.UserStatusDeleted
 	user.UpdatedAt = time.Now().UTC()
@@ -1533,8 +1536,13 @@ func (s *identityService) ListPermissionLogs(ctx context.Context, filter Permiss
 	return logs, buildPaginationMeta(filter.Page, filter.PageSize, total), nil
 }
 
-func (s *identityService) ListRoles(_ context.Context) []domain.RoleCatalogEntry {
-	return domain.DefaultRoleCatalog()
+func (s *identityService) ListRoles(ctx context.Context) []domain.RoleCatalogEntry {
+	entries := domain.DefaultRoleCatalog()
+	actor, ok := domain.RequestActorFromContext(ctx)
+	for i := range entries {
+		entries[i].AssignableByCurrentActor = ok && roleCatalogEntryAssignableByActor(actor, entries[i])
+	}
+	return entries
 }
 
 func (s *identityService) ResolveRequestActor(ctx context.Context, bearerToken string) (*domain.RequestActor, *domain.AppError) {
@@ -1842,7 +1850,11 @@ func (s *identityService) applyUserRoleChange(ctx context.Context, userID int64,
 	}
 	currentRoles := domain.NormalizeRoleValues(user.Roles)
 	nextRoles := domain.NormalizeRoleValues(roles)
+	addedRoles, removedRoles := diffRoles(currentRoles, nextRoles)
 	if appErr := s.authorizeUserRoleChange(ctx, user, nextRoles); appErr != nil {
+		return nil, appErr
+	}
+	if appErr := authorizeAssignableRoleAdditions(ctx, user.Department, addedRoles); appErr != nil {
 		return nil, appErr
 	}
 	if appErr := s.ensureAdminRoleSafety(ctx, currentRoles, nextRoles); appErr != nil {
@@ -1857,23 +1869,24 @@ func (s *identityService) applyUserRoleChange(ctx context.Context, userID int64,
 	if appErr != nil {
 		return nil, appErr
 	}
-	addedRoles, removedRoles := diffRoles(currentRoles, nextRoles)
 	s.recordRoleChangeLogs(ctx, updated, addedRoles, removedRoles, method, routePath)
 	return updated, nil
 }
 
 func (s *identityService) ensureAdminRoleSafety(ctx context.Context, currentRoles, nextRoles []domain.Role) *domain.AppError {
-	currentAdminClass := containsAnyRole(currentRoles, domain.RoleAdmin, domain.RoleSuperAdmin)
-	nextAdminClass := containsAnyRole(nextRoles, domain.RoleAdmin, domain.RoleSuperAdmin)
-	if !currentAdminClass || nextAdminClass {
+	currentSuperAdmin := containsRole(currentRoles, domain.RoleSuperAdmin)
+	nextSuperAdmin := containsRole(nextRoles, domain.RoleSuperAdmin)
+	if !currentSuperAdmin || nextSuperAdmin {
 		return nil
 	}
-	activeAdminUsers, err := s.activeUsersWithRoles(ctx, domain.RoleAdmin, domain.RoleSuperAdmin)
+	activeAdminUsers, err := s.activeUsersWithRoles(ctx, domain.RoleSuperAdmin)
 	if err != nil {
-		return infraError("list admin users", err)
+		return infraError("list super admin users", err)
 	}
 	if len(activeAdminUsers) <= 1 {
-		return domain.NewAppError(domain.ErrCodeInvalidRequest, "at least one admin user must remain", nil)
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "at least one SuperAdmin user must remain", map[string]interface{}{
+			"deny_code": "last_super_admin_removal_denied",
+		})
 	}
 	return nil
 }
@@ -2452,20 +2465,15 @@ func (s *identityService) authorizeCreateManagedUser(ctx context.Context, depart
 	}
 	switch {
 	case identityActorCanManageAllUsers(actor):
-		return nil
+		return authorizeAssignableRoleAdditions(ctx, department, roles)
 	case identityActorHasAnyRole(actor, domain.RoleDeptAdmin):
 		actorDepartment := identityActorDepartment(actor)
 		if actorDepartment == "" || !strings.EqualFold(actorDepartment, string(department)) {
 			return identityPermissionDenied("department_scope_only", "department admin can only create users in own department")
 		}
-		for _, role := range roles {
-			if !departmentAdminCanAssignRole(domain.Department(actorDepartment), role) {
-				return identityPermissionDenied("role_assignment_not_allowed", "department admin can only assign department business roles")
-			}
-		}
-		return nil
+		return authorizeAssignableRoleAdditions(ctx, department, roles)
 	default:
-		return identityPermissionDenied("account_create_not_allowed", "only HRAdmin, SuperAdmin, legacy admin compatibility, or DepartmentAdmin can create users")
+		return identityPermissionDenied("account_create_not_allowed", "only HRAdmin, SuperAdmin, or DepartmentAdmin can create users")
 	}
 }
 
@@ -2638,6 +2646,61 @@ func departmentAdminCanAssignRole(department domain.Department, role domain.Role
 	return false
 }
 
+func authorizeAssignableRoleAdditions(ctx context.Context, department domain.Department, roles []domain.Role) *domain.AppError {
+	actor, ok := domain.RequestActorFromContext(ctx)
+	if !ok || actor.ID <= 0 {
+		return nil
+	}
+	for _, role := range domain.NormalizeRoleValues(roles) {
+		entry := roleCatalogEntryForRole(role)
+		if roleCatalogEntryAssignableByActor(actor, entry) {
+			continue
+		}
+		return domain.NewAppError(domain.ErrCodePermissionDenied, "role is not assignable by current actor", map[string]interface{}{
+			"deny_code":  "role_not_assignable",
+			"role":       string(role),
+			"department": string(department),
+		})
+	}
+	return nil
+}
+
+func roleCatalogEntryForRole(role domain.Role) domain.RoleCatalogEntry {
+	for _, entry := range domain.DefaultRoleCatalog() {
+		if entry.Role == role {
+			return entry
+		}
+	}
+	entry := domain.RoleCatalogEntry{Role: role, Name: string(role)}
+	domain.HydrateRoleCatalogEntryDefaults(&entry)
+	return entry
+}
+
+func roleCatalogEntryAssignableByActor(actor domain.RequestActor, entry domain.RoleCatalogEntry) bool {
+	if !entry.Assignable || entry.Deprecated || entry.Category == "compatibility" {
+		return false
+	}
+	switch {
+	case identityActorHasAnyRole(actor, domain.RoleSuperAdmin):
+		return true
+	case identityActorHasAnyRole(actor, domain.RoleHRAdmin):
+		switch entry.Role {
+		case domain.RoleSuperAdmin, domain.RoleHRAdmin:
+			return false
+		default:
+			return true
+		}
+	case identityActorHasAnyRole(actor, domain.RoleDeptAdmin):
+		department := identityActorDepartment(actor)
+		if department == "" {
+			return false
+		}
+		return departmentAdminCanAssignRole(domain.Department(department), entry.Role)
+	default:
+		return false
+	}
+}
+
 func identityPermissionDenied(code, message string) *domain.AppError {
 	return domain.NewAppError(domain.ErrCodePermissionDenied, message, map[string]interface{}{
 		"deny_code": code,
@@ -2716,15 +2779,17 @@ func (s *identityService) ensurePrivilegedUserStatusSafety(ctx context.Context, 
 	if user == nil || nextStatus == domain.UserStatusActive || user.Status == nextStatus {
 		return nil
 	}
-	if !containsAnyRole(user.Roles, domain.RoleAdmin, domain.RoleSuperAdmin) {
+	if !containsRole(user.Roles, domain.RoleSuperAdmin) {
 		return nil
 	}
-	activeAdminUsers, err := s.activeUsersWithRoles(ctx, domain.RoleAdmin, domain.RoleSuperAdmin)
+	activeAdminUsers, err := s.activeUsersWithRoles(ctx, domain.RoleSuperAdmin)
 	if err != nil {
-		return infraError("list active admin users", err)
+		return infraError("list active super admin users", err)
 	}
 	if len(activeAdminUsers) <= 1 {
-		return domain.NewAppError(domain.ErrCodeInvalidRequest, "at least one active admin user must remain", nil)
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "at least one active SuperAdmin user must remain", map[string]interface{}{
+			"deny_code": "last_super_admin_deactivate_denied",
+		})
 	}
 	return nil
 }
@@ -2884,7 +2949,7 @@ func (s *identityService) upsertConfiguredSuperAdmin(ctx context.Context, entry 
 
 func (s *identityService) resolveConfiguredSuperAdminRoles(entry domain.ConfiguredSuperAdmin) ([]domain.Role, *domain.AppError) {
 	if len(entry.Roles) == 0 {
-		return []domain.Role{domain.RoleMember, domain.RoleAdmin, domain.RoleSuperAdmin}, nil
+		return []domain.Role{domain.RoleMember, domain.RoleSuperAdmin}, nil
 	}
 	return validateRoleInputs(entry.Roles)
 }
@@ -3182,14 +3247,14 @@ func defaultFrontendAccessSettings() domain.FrontendAccessSettings {
 			string(domain.RoleSuperAdmin):     {Roles: []string{"super_admin"}, Scopes: []string{"view_all", "identity_admin", "organization_admin"}, Menus: []string{"user_admin", "org_admin", "role_admin", "logs_center", "product_management"}, Pages: []string{"admin_users", "admin_roles", "admin_permission_logs", "admin_operation_logs", "org_options", "product_management"}, Actions: []string{"user.manage", "org.manage", "role.assign", "role.remove", "permission_logs.read", "operation_logs.read"}},
 			string(domain.RoleHRAdmin):        {Roles: []string{"hr_admin"}, Scopes: []string{"view_all", "hr_admin"}, Menus: []string{"user_admin", "org_admin", "role_admin", "logs_center"}, Pages: []string{"admin_users", "admin_roles", "admin_permission_logs", "admin_operation_logs", "org_options"}, Actions: []string{"user.manage", "org.assign", "org.manage", "role.assign", "role.read", "permission_logs.read", "operation_logs.read"}},
 			string(domain.RoleOrgAdmin):       {Roles: []string{"org_admin"}, Scopes: []string{"org_admin"}, Menus: []string{"user_admin"}, Pages: []string{"admin_users"}, Actions: []string{"user.org.assign"}},
-			string(domain.RoleRoleAdmin):      {Roles: []string{"role_admin"}, Scopes: []string{"role_admin"}, Menus: []string{"role_admin", "user_admin"}, Pages: []string{"admin_users", "admin_roles"}, Actions: []string{"role.assign", "role.remove", "role.read"}},
-			string(domain.RoleAdmin):          {Roles: []string{"admin"}, Scopes: []string{"workflow_admin", "identity_admin"}, Menus: []string{"user_admin", "role_admin", "logs_center", "product_management"}, Pages: []string{"admin_users", "admin_roles", "admin_permission_logs", "admin_operation_logs", "product_management"}, Actions: []string{"user.manage", "org.manage", "role.assign", "role.remove", "permission_logs.read", "operation_logs.read", "task.full_access"}},
+			string(domain.RoleRoleAdmin):      {Roles: []string{"role_admin"}, Scopes: []string{"role_admin"}, Menus: []string{"role_admin", "user_admin"}, Pages: []string{"admin_users", "admin_roles"}, Actions: []string{"role.read"}},
+			string(domain.RoleAdmin):          {Roles: []string{"admin"}, Scopes: []string{"workflow_admin", "identity_admin"}, Menus: []string{"user_admin", "logs_center", "product_management"}, Pages: []string{"admin_users", "admin_permission_logs", "admin_operation_logs", "product_management"}, Actions: []string{"user.manage", "org.manage", "permission_logs.read", "operation_logs.read", "task.full_access"}},
 			string(domain.RoleDeptAdmin):      {Roles: []string{"department_admin"}, Scopes: []string{"department_scope"}, Menus: []string{"user_admin"}, Pages: []string{"department_users"}, Actions: []string{"department.manage", "department.users.read"}},
 			string(domain.RoleTeamLead):       {Roles: []string{"team_lead"}, Scopes: []string{"team_scope"}, Pages: []string{"team_users"}, Actions: []string{"team.users.read"}},
 			string(domain.RoleDesignDirector): {Roles: []string{"design_director"}, Scopes: []string{"design_department_scope"}, Menus: []string{"design_workspace", "resource_management", "product_management", "user_admin"}, Pages: []string{"design_workspace", "department_users", "assets_index", "task_assets", "asset_detail", "product_management"}, Actions: []string{"design.review.read", "department.users.read"}},
 			string(domain.RoleDesignReviewer): {Roles: []string{"design_reviewer"}, Scopes: []string{"design_review_scope"}, Menus: []string{"design_workspace"}, Pages: []string{"design_workspace", "audit_workspace"}, Actions: []string{"design.review", "task.audit.review"}},
 			string(domain.RoleMember):         {Roles: []string{"member"}, Scopes: []string{"self_only"}, Actions: []string{"profile.view"}},
-			string(domain.RoleOps):            {Roles: []string{"ops"}, Scopes: []string{"workflow_ops"}, Menus: []string{"task_create", "business_info", "task_board", "task_list", "warehouse_receive", "warehouse_processing", "export_center", "resource_management", "product_management", "customization_management"}, Pages: []string{"task_board", "task_list", "task_create", "products", "categories", "cost_rules", "warehouse_receive", "warehouse_processing", "outsource_orders", "workbench", "export_jobs", "code_rules", "assets_index", "task_assets", "asset_detail", "product_management", "customization_jobs", "customization_job_detail"}, Actions: []string{"task.create", "task.business_info", "task.list", "warehouse.prepare", "task.close"}},
+			string(domain.RoleOps):            {Roles: []string{"ops"}, Scopes: []string{"workflow_ops"}, Menus: []string{"task_create", "business_info", "task_board", "task_list", "warehouse_receive", "warehouse_processing", "export_center", "resource_management", "product_management", "customization_management"}, Pages: []string{"task_board", "task_list", "task_create", "products", "categories", "cost_rules", "warehouse_receive", "warehouse_processing", "workbench", "export_jobs", "code_rules", "assets_index", "task_assets", "asset_detail", "product_management", "customization_jobs", "customization_job_detail"}, Actions: []string{"task.create", "task.business_info", "task.list", "warehouse.prepare", "task.close"}},
 			string(domain.RoleDesigner):       {Roles: []string{"designer"}, Scopes: []string{"design_workspace"}, Menus: []string{"design_workspace", "task_list", "export_center", "resource_management", "product_management"}, Pages: []string{"design_workspace", "my_tasks", "design_submit", "design_rework", "export_jobs", "assets_index", "task_assets", "asset_detail", "product_management"}, Actions: []string{"task.design_submit", "task.asset_upload", "task.list"}},
 			string(domain.RoleCustomizationOperator): {
 				Roles:   []string{"customization_operator"},
@@ -3201,13 +3266,13 @@ func defaultFrontendAccessSettings() domain.FrontendAccessSettings {
 			string(domain.RoleAuditA):    {Roles: []string{"audit_a"}, Scopes: []string{"audit_workspace"}, Menus: []string{"audit_queue", "task_board", "task_list", "export_center", "resource_management", "product_management"}, Pages: []string{"task_board", "task_list", "audit_workspace", "export_jobs", "assets_index", "task_assets", "asset_detail", "product_management"}, Actions: []string{"task.audit.claim", "task.audit.review", "task.list"}},
 			string(domain.RoleAuditB):    {Roles: []string{"audit_b"}, Scopes: []string{"audit_workspace"}, Menus: []string{"audit_queue", "task_board", "task_list", "export_center", "resource_management", "product_management"}, Pages: []string{"task_board", "task_list", "audit_workspace", "export_jobs", "assets_index", "task_assets", "asset_detail", "product_management"}, Actions: []string{"task.audit.claim", "task.audit.review", "task.audit.takeover", "task.list"}},
 			string(domain.RoleWarehouse): {Roles: []string{"warehouse"}, Scopes: []string{"warehouse_workspace"}, Menus: []string{"warehouse_receive", "warehouse_processing", "task_board", "task_list", "export_center", "resource_management", "product_management"}, Pages: []string{"warehouse_receive", "warehouse_processing", "task_list", "task_board", "export_jobs", "assets_index", "task_assets", "asset_detail", "product_management"}, Actions: []string{"warehouse.receive", "warehouse.reject", "warehouse.complete", "task.list"}},
-			string(domain.RoleOutsource): {Roles: []string{"outsource"}, Scopes: []string{"outsource_workspace"}, Menus: []string{"task_list"}, Pages: []string{"outsource_orders", "task_list"}, Actions: []string{"outsource.manage", "task.list"}},
+			string(domain.RoleOutsource): {Roles: []string{"outsource"}, Scopes: []string{"compatibility_legacy"}},
 			string(domain.RoleCustomizationReviewer): {
 				Roles:   []string{"customization_reviewer"},
 				Scopes:  []string{"customization_review_scope"},
 				Menus:   []string{"customization_management", "resource_management", "product_management", "task_list"},
 				Pages:   []string{"customization_jobs", "customization_job_detail", "task_assets", "asset_detail", "assets_index", "product_management", "task_list"},
-				Actions: []string{"task.customization.review", "task.customization.effect_review", "task.list"},
+				Actions: []string{"task.customization.review", "task.customization.effect_review", "task.customization.review.asset_upload", "task.list"},
 			},
 			string(domain.RoleERP): {Roles: []string{"erp"}, Scopes: []string{"erp_internal"}, Menus: []string{"integration_center", "product_management"}, Pages: []string{"erp_sync_console", "product_management"}, Actions: []string{"erp.sync"}},
 		},

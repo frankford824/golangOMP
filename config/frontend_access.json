@@ -78,7 +78,7 @@
     "RoleAdmin": {
       "menus": ["user_admin"],
       "pages": ["admin_users"],
-      "actions": ["role.assign", "role.remove", "role.read"],
+      "actions": ["role.read"],
       "scopes": ["role_admin"]
     },
     "DepartmentAdmin": {
@@ -114,7 +114,7 @@
     "Admin": {
       "menus": ["user_admin", "logs_center", "product_management"],
       "pages": ["admin_users", "admin_permission_logs", "admin_operation_logs", "product_management"],
-      "actions": ["user.manage", "org.manage", "role.assign", "role.remove", "permission_logs.read", "operation_logs.read"],
+      "actions": ["user.manage", "org.manage", "permission_logs.read", "operation_logs.read"],
       "scopes": ["view_all", "identity_admin"]
     },
     "Ops": {
@@ -154,15 +154,15 @@
       "scopes": ["warehouse_workspace"]
     },
     "Outsource": {
-      "menus": ["task_list"],
-      "pages": ["outsource_orders", "task_list"],
-      "actions": ["outsource.manage", "task.list"],
-      "scopes": ["outsource_workspace"]
+      "menus": [],
+      "pages": [],
+      "actions": [],
+      "scopes": ["compatibility_legacy"]
     },
     "CustomizationReviewer": {
       "menus": ["task_list", "customization_management", "audit_queue", "resource_management", "product_management"],
       "pages": ["customization_jobs", "customization_job_detail", "task_assets", "asset_detail", "assets_index", "product_management", "audit_workspace"],
-      "actions": ["task.customization.review", "task.customization.effect_review", "task.list", "warehouse_lane_filter"],
+      "actions": ["task.customization.review", "task.customization.effect_review", "task.customization.review.asset_upload", "task.list", "warehouse_lane_filter"],
       "scopes": ["customization_review_scope"]
     },
     "ERP": {

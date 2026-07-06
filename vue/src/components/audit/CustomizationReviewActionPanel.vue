@@ -64,7 +64,10 @@
     <CustomizationReviewForm
       v-model="dialogOpen"
       :mode="mode"
+      :task-id="task.id"
       :default-reviewer-id="currentUserId"
+      :can-upload-source="can('task.customization.review.asset_upload')"
+      :target-sku-code="task.sku ?? undefined"
       :loading="submitting"
       :error="actionError"
       @submit="onFormSubmit"
@@ -122,7 +125,7 @@ const emit = defineEmits<{
   takeover: []
 }>()
 
-const { currentUser } = usePermission()
+const { can, currentUser } = usePermission()
 const tasksStore = useTasksStore()
 
 const currentUserId = computed(() => currentUser.value?.id ?? null)
