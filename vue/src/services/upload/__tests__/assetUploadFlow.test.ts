@@ -320,7 +320,7 @@ describe('prepareTaskAssetUploadSession — transport fallback', () => {
     expect(assetsApi.createAssetUploadSession).not.toHaveBeenCalled()
   })
 
-  it('fx3: both absent -> throws user-friendly error with upload_transport_unavailable', async () => {
+  it('fx3: both absent -> throws business copy without technical error code', async () => {
     vi.mocked(assetsApi.createAssetUploadSession).mockResolvedValue({
       data: {
         data: {
@@ -335,7 +335,7 @@ describe('prepareTaskAssetUploadSession — transport fallback', () => {
         fakeFile(),
         { asset_kind: 'delivery', remark: 'test' },
       ),
-    ).rejects.toThrow('upload_transport_unavailable')
+    ).rejects.toThrow('上传入口未准备好')
   })
 })
 
@@ -390,6 +390,6 @@ describe('completePreparedTaskAssetUploadSession — remote transport', () => {
     }
     await expect(
       completePreparedTaskAssetUploadSession(prepared, fakeFile()),
-    ).rejects.toThrow('upload_transport_unavailable')
+    ).rejects.toThrow('上传入口未准备好')
   })
 })

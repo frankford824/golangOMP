@@ -18,7 +18,7 @@ describe('runOssDirectUploadPlan', () => {
     vi.clearAllMocks()
   })
 
-  it('throws a CORS-oriented error when multipart PUT does not expose ETag', async () => {
+  it('throws business copy when multipart PUT does not expose the uploaded part confirmation', async () => {
     vi.mocked(axios.request).mockResolvedValue({
       headers: {},
     } as never)
@@ -37,7 +37,7 @@ describe('runOssDirectUploadPlan', () => {
         },
         { mimeTypeForUpload: 'image/vnd.adobe.photoshop' },
       ),
-    ).rejects.toThrow('Expose-Headers 是否包含 ETag')
+    ).rejects.toThrow('浏览器无法确认上传结果')
 
     expect(axios.request).toHaveBeenCalledTimes(1)
   })

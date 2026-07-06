@@ -239,7 +239,7 @@ export async function prepareTaskAssetUploadSession(
     console.warn('[upload] oss_direct absent, falling back to remote', { session_id: sessionId })
     return { ...base, remote: parsedDirect.remote }
   }
-  throw new Error('上传通道未就绪，请联系管理员（错误码：upload_transport_unavailable）')
+  throw new Error('上传入口未准备好，请刷新后重试；如仍失败请联系管理员。')
 }
 
 export async function completePreparedTaskAssetUploadSession(
@@ -248,7 +248,7 @@ export async function completePreparedTaskAssetUploadSession(
   options?: { signal?: AbortSignal; onProgress?: (p: AssetUploadProgress) => void },
 ): Promise<ReturnType<typeof normalizeAssetCenterCompleteData>> {
   if (!prepared.ossDirect && !prepared.remote) {
-    throw new Error('上传通道未就绪，请联系管理员（错误码：upload_transport_unavailable）')
+    throw new Error('上传入口未准备好，请刷新后重试；如仍失败请联系管理员。')
   }
 
   const completePayload: CompleteAssetUploadSessionPayload = {
@@ -279,15 +279,15 @@ export async function completePreparedTaskAssetUploadSession(
         uploadResult?.upload_content_type?.trim() || prepared.sessionMime || resolveFileMimeType(file)
       if (!ossUploadId) {
         await cancelPreparedTaskAssetUploadSession(prepared.sessionId, options?.signal, prepared.taskId)
-        throw new Error('OSS multipart finalize 缺少 upload_id，已阻止 complete 请求')
+        throw new Error('上传结果不完整，请重新上传；如仍失败请联系管理员。')
       }
       if (!ossObjectKey) {
         await cancelPreparedTaskAssetUploadSession(prepared.sessionId, options?.signal, prepared.taskId)
-        throw new Error('OSS multipart finalize 缺少 object_key，已阻止 complete 请求')
+        throw new Error('上传结果不完整，请重新上传；如仍失败请联系管理员。')
       }
       if (!ossParts.length) {
         await cancelPreparedTaskAssetUploadSession(prepared.sessionId, options?.signal, prepared.taskId)
-        throw new Error('OSS multipart finalize 缺少分片 ETag 列表，已阻止 complete 请求')
+        throw new Error('上传结果不完整，请重新上传；如仍失败请联系管理员。')
       }
       completePayload.oss_upload_id = ossUploadId
       completePayload.oss_object_key = ossObjectKey

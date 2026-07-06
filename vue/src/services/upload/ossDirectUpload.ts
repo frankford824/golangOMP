@@ -286,9 +286,7 @@ export async function runOssDirectUploadPlan(
   const normalizedRequired = normalizeMimeType(requiredUploadContentType)
   const normalizedSessionMime = normalizeMimeType(sessionMimeType)
   if (normalizedRequired && normalizedSessionMime && normalizedRequired !== normalizedSessionMime) {
-    throw new Error(
-      `上传会话 Content-Type 不一致：create-session=${sessionMimeType}，oss_direct.required_upload_content_type=${requiredUploadContentType}`,
-    )
+    throw new Error('文件格式与上传入口不一致，请重新选择文件后上传。')
   }
   const byteTotal =
     options?.progressByteTotal != null && options.progressByteTotal > 0
@@ -322,7 +320,7 @@ export async function runOssDirectUploadPlan(
     (!isMultipartStrategy && singleUrl && !partUrls.length && !template)
   ) {
     if (!singleUrl) {
-      throw new Error('oss_direct.upload_strategy=single_part 但缺少 upload_url')
+      throw new Error('上传入口未准备好，请刷新后重试；如仍失败请联系管理员。')
     }
     await putBlob(singleUrl, wholeBlob, method, headers, options, byteTotal, 0, {
       completed: 0,
@@ -341,7 +339,7 @@ export async function runOssDirectUploadPlan(
     (partUrls.length ? partUrls.length : plan.parts_total) ??
     (plan.part_size_hint ? Math.max(1, Math.ceil(file.size / plan.part_size_hint)) : 0)
   if (!totalParts || totalParts <= 0) {
-    throw new Error('oss_direct multipart 缺少 part_urls/parts_total/part_size_hint')
+    throw new Error('上传入口未准备好，请刷新后重试；如仍失败请联系管理员。')
   }
 
   let uploaded = 0
@@ -349,7 +347,7 @@ export async function runOssDirectUploadPlan(
   for (let partNo = 1; partNo <= totalParts; partNo++) {
     const partUrl = partUrls[partNo - 1] ?? (template ? replacePartPlaceholder(template, partNo) : '')
     if (!partUrl) {
-      throw new Error(`oss_direct multipart 缺少第 ${partNo} 片上传 URL`)
+      throw new Error('上传入口未准备好，请刷新后重试；如仍失败请联系管理员。')
     }
     const blob = slicePart(file, partNo, totalParts, plan.part_size_hint, requiredMime)
     const etag = await putBlob(partUrl, blob, method, headers, options, byteTotal, uploaded, {
@@ -357,9 +355,7 @@ export async function runOssDirectUploadPlan(
       total: totalParts,
     })
     if (!etag) {
-      throw new Error(
-        `OSS multipart 第 ${partNo} 片上传已返回，但浏览器无法读取 ETag；请检查 OSS Bucket CORS Expose-Headers 是否包含 ETag`,
-      )
+      throw new Error('文件已上传，但浏览器无法确认上传结果，请重新上传；如仍失败请联系管理员。')
     }
     uploadedParts.push({ part_number: partNo, etag })
     uploaded += blob.size
