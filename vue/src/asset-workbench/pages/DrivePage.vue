@@ -48,7 +48,7 @@ import type {
   WorkbenchSpreadsheetSource,
   WorkbenchSpreadsheetValidation,
 } from '@aw/shared/spreadsheet/types'
-import { materialAssetKey, resolvedSystemAssetThumbnailUrl } from '@aw/shared/materials/systemAssetPreview'
+import { canAttemptSystemAssetPreview, materialAssetKey, resolvedSystemAssetThumbnailUrl } from '@aw/shared/materials/systemAssetPreview'
 
 type DriveMode = 'uploads' | 'directories' | 'operational'
 type SearchScope = 'all' | 'operational' | 'files' | 'orders'
@@ -85,6 +85,7 @@ const UNASSIGNED_KEY = 'unassigned'
 const pageSize = 60
 const materialPageSize = 100
 const searchDebounceMs = 250
+const searchPreviewPrefetchLimit = 12
 
 const activeMode = ref<DriveMode>('directories')
 const driveSpreadsheetOpen = ref(false)
@@ -194,6 +195,7 @@ let directoryClickTimer: number | null = null
 let searchDebounceTimer: number | null = null
 let archivePreviewObjectUrl = ''
 let archivePreviewRequestSeq = 0
+const searchPreviewLoadingKeys = new Set<string>()
 
 function revokeArchivePreviewObjectUrl() {
   archivePreviewRequestSeq += 1
@@ -864,6 +866,8 @@ function materialFromOverview(row: OverviewSearchRow): SystemAssetRow {
     mime_type: stringFromMeta(row, 'mime_type'),
     product_name: stringFromMeta(row, 'product_name') || row.title,
     task_no: stringFromMeta(row, 'task_no') || row.order_no || '',
+    preview_url: stringFromMeta(row, 'preview_url'),
+    download_url: stringFromMeta(row, 'download_url'),
     created_by_name: stringFromMeta(row, 'created_by_name'),
     created_by_username: stringFromMeta(row, 'created_by_username'),
     task_creator_name: stringFromMeta(row, 'task_creator_name'),
@@ -928,6 +932,134 @@ function fileFormatLabel(file: DriveFileRow): string {
   return extLabel || '—'
 }
 
+function extensionFromFilename(value?: string): string {
+  const name = fileNameFromPath(value || '')
+  const index = name.lastIndexOf('.')
+  if (index < 0 || index === name.length - 1) return ''
+  return name.slice(index + 1).trim().replace(/^\./, '').toLowerCase()
+}
+
+function normalizeExtensionLabel(value?: string): string {
+  const ext = (value || '').trim().replace(/^\./, '').toLowerCase()
+  if (!ext) return ''
+  const map: Record<string, string> = {
+    jpeg: 'JPG',
+    jpg: 'JPG',
+    tiff: 'TIF',
+    tif: 'TIF',
+    svgz: 'SVG',
+    psb: 'PSD',
+    ai: 'AI',
+    eps: 'EPS',
+    cdr: 'CDR',
+    zip: 'ZIP',
+    rar: 'RAR',
+    '7z': '7Z',
+  }
+  return map[ext] || ext.toUpperCase()
+}
+
+function formatLabelFromMimeType(value?: string): string {
+  const mime = (value || '').trim().toLowerCase()
+  if (!mime || mime === 'application/octet-stream') return ''
+  if (mime.includes('photoshop')) return 'PSD'
+  if (mime.includes('illustrator') || mime.includes('postscript')) return 'AI'
+  if (mime.includes('coreldraw')) return 'CDR'
+  if (mime.includes('pdf')) return 'PDF'
+  if (mime.includes('zip')) return 'ZIP'
+  if (mime.includes('rar')) return 'RAR'
+  if (mime.includes('7z') || mime.includes('7-zip')) return '7Z'
+  if (mime.startsWith('image/')) return normalizeExtensionLabel(mime.replace('image/', ''))
+  if (mime.startsWith('video/')) return normalizeExtensionLabel(mime.replace('video/', ''))
+  if (mime.startsWith('audio/')) return normalizeExtensionLabel(mime.replace('audio/', ''))
+  return ''
+}
+
+function searchHitFilename(row: OverviewSearchRow): string {
+  return (
+    stringFromMeta(row, 'display_name') ||
+    stringFromMeta(row, 'original_filename') ||
+    stringFromMeta(row, 'file_name') ||
+    stringFromMeta(row, 'filename') ||
+    fileNameFromPath(stringFromMeta(row, 'relative_path')) ||
+    fileNameFromPath(stringFromMeta(row, 'origin_path')) ||
+    ''
+  )
+}
+
+function searchHitFormatLabel(row: OverviewSearchRow): string {
+  const metaFileType = stringFromMeta(row, 'file_type')
+  const filename = searchHitFilename(row) || row.title || row.primary_code
+  return (
+    normalizeExtensionLabel(metaFileType) ||
+    formatLabelFromMimeType(stringFromMeta(row, 'mime_type')) ||
+    normalizeExtensionLabel(extensionFromFilename(filename)) ||
+    '文件'
+  )
+}
+
+function searchHitSourceLabel(row: OverviewSearchRow): string {
+  if (row.source_label) return row.source_label
+  if (row.source === 'system_asset') return '运营素材'
+  if (row.source === 'client_material') return '客户端素材'
+  if (row.source === 'submission_file') return '上传文件'
+  if (row.source === 'piecework_item') return '计件记录'
+  if (row.source === 'submission') return '提交记录'
+  return '搜索结果'
+}
+
+function searchHitContextLabel(row: OverviewSearchRow): string {
+  const parts = [searchHitSourceLabel(row)]
+  if (row.source === 'submission_file') {
+    const directory = stringFromMeta(row, 'upload_directory_name')
+    if (directory) parts.push(directory)
+    else if (row.business_month) parts.push(row.business_month)
+  } else if (row.scope === 'operational' || row.source === 'system_asset' || row.source === 'client_material') {
+    const sku = row.secondary_code || stringFromMeta(row, 'scope_sku_code') || stringFromMeta(row, 'sku_code') || stringFromMeta(row, 'primary_sku_code')
+    if (sku) parts.push(`SKU ${sku}`)
+  } else if (row.creator_name) {
+    parts.push(row.creator_name)
+  }
+  return parts.filter(Boolean).join(' · ')
+}
+
+function searchHitSecondaryLabel(row: OverviewSearchRow): string {
+  const filename = searchHitFilename(row)
+  const title = (row.title || '').trim()
+  const parts: string[] = []
+  if (filename && filename !== title) {
+    parts.push(`文件 ${filename}`)
+  } else if (row.primary_code && row.primary_code !== title) {
+    parts.push(`编码 ${row.primary_code}`)
+  }
+  if (row.creator_name) {
+    parts.push(row.source === 'submission_file' ? `上传人 ${row.creator_name}` : `创建人 ${row.creator_name}`)
+  }
+  return parts.join(' · ') || '可在网盘中定位'
+}
+
+function isOperationalSearchHit(row: OverviewSearchRow): boolean {
+  return row.scope === 'operational' || row.source === 'system_asset' || row.source === 'client_material'
+}
+
+function searchHitMaterial(row: OverviewSearchRow): SystemAssetRow {
+  return materialFromOverview(row)
+}
+
+function searchHitDriveFileID(row: OverviewSearchRow): number {
+  if (row.source !== 'submission_file') return 0
+  const fileID = Number(row.locate?.file_id || numberFromUnknown(row.meta_json?.file_id) || row.id || 0)
+  return Number.isFinite(fileID) && fileID > 0 ? fileID : 0
+}
+
+function searchHitMimeType(row: OverviewSearchRow): string {
+  return stringFromMeta(row, 'mime_type')
+}
+
+function searchHitPreviewStatus(row: OverviewSearchRow): string {
+  return stringFromMeta(row, 'preview_status') || row.status || ''
+}
+
 function fileDisplayName(file: DriveFileRow): string {
   return file.display_name || file.original_filename || `文件 ${file.id}`
 }
@@ -959,6 +1091,9 @@ function statusText(value?: string) {
     ready: '可预览',
     failed: '失败',
     not_applicable: '不适用',
+    ready_for_use: '可直接使用',
+    enabled: '上架中',
+    disabled: '已停用',
   }
   return map[normalized] || normalized || '—'
 }
@@ -1418,6 +1553,7 @@ async function runUnifiedSearch() {
     if (requestID !== searchRequestSeq) return
     searchResults.value = result.items
     searchTotal.value = result.total
+    void prefetchSearchResultPreviews(result.items)
   } catch (err) {
     if (requestID !== searchRequestSeq || isAbortError(err)) return
     searchResults.value = []
@@ -1425,6 +1561,35 @@ async function runUnifiedSearch() {
     searchError.value = err instanceof Error ? err.message : '统一检索失败'
   } finally {
     if (requestID === searchRequestSeq) searchLoading.value = false
+  }
+}
+
+async function prefetchSearchResultPreviews(rows: OverviewSearchRow[]) {
+  const candidates = rows
+    .filter(isOperationalSearchHit)
+    .map(searchHitMaterial)
+    .filter((asset) => canAttemptSystemAssetPreview(asset))
+    .slice(0, searchPreviewPrefetchLimit)
+  await Promise.allSettled(candidates.map((asset) => ensureSearchResultMaterialPreview(asset)))
+}
+
+async function ensureSearchResultMaterialPreview(asset: SystemAssetRow) {
+  const key = materialAssetKey(asset)
+  if (!key || materialPreviewUrls.value[key] || searchPreviewLoadingKeys.has(key)) return
+  const inline = resolvedSystemAssetThumbnailUrl(asset)
+  if (inline) {
+    cacheMaterialPreview(key, inline)
+    return
+  }
+  searchPreviewLoadingKeys.add(key)
+  try {
+    const meta = await previewMaterial(asset)
+    const url = meta.preview_url || ''
+    if (url) cacheMaterialPreview(key, url)
+  } catch {
+    /* Search thumbnails are opportunistic; detail preview still reports errors. */
+  } finally {
+    searchPreviewLoadingKeys.delete(key)
   }
 }
 
@@ -2527,15 +2692,30 @@ onBeforeUnmount(() => {
             :aria-label="`定位 ${hit.title || hit.primary_code || '搜索结果'}`"
             @click="locateSearchRow(hit)"
           >
-            <ImageDown v-if="hit.scope === 'operational'" :size="24" aria-hidden="true" />
+            <MaterialListThumb
+              v-if="isOperationalSearchHit(hit)"
+              :asset="searchHitMaterial(hit)"
+              :cached-url="materialPreviewUrls[materialAssetKey(searchHitMaterial(hit))]"
+            />
+            <DriveThumb
+              v-else-if="searchHitDriveFileID(hit)"
+              :file-id="searchHitDriveFileID(hit)"
+              :filename="searchHitFilename(hit) || hit.title || hit.primary_code"
+              :mime-type="searchHitMimeType(hit)"
+              :preview-status="searchHitPreviewStatus(hit)"
+            />
+            <ImageDown v-else-if="hit.scope === 'operational'" :size="24" aria-hidden="true" />
             <FileDown v-else :size="24" aria-hidden="true" />
           </button>
           <div class="aw-drive-hit__body">
-            <strong>{{ hit.title || hit.primary_code }}</strong>
+            <strong class="aw-drive-hit__title">
+              <span class="aw-drive-hit__title-text">{{ hit.title || hit.primary_code }}</span>
+              <span class="aw-drive-hit__format-chip">{{ searchHitFormatLabel(hit) }}</span>
+            </strong>
             <span class="aw-drive-hit__path">
-              {{ hit.source_label || hit.source }} <ChevronRight :size="12" /> {{ hit.primary_code || hit.business_month || '—' }}
+              {{ searchHitContextLabel(hit) }}
             </span>
-            <small>{{ hit.business_month || '—' }} · {{ statusText(hit.status) }}</small>
+            <small>{{ searchHitSecondaryLabel(hit) }}</small>
           </div>
           <div class="aw-drive-hit__actions">
             <button class="aw-secondary-button" type="button" @click="locateSearchRow(hit)">
