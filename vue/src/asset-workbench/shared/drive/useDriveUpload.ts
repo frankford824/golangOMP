@@ -22,6 +22,11 @@ export interface DriveUploadOptions {
   onItemChange?: (item: DriveUploadQueueItem) => void
 }
 
+type DriveUploadFile = File & {
+  assetWorkbenchRelativePath?: string
+  webkitRelativePath?: string
+}
+
 export function createDriveUploadQueue(files: FileList | File[] | null | undefined): DriveUploadQueueItem[] {
   if (!files) return []
   return Array.from(files).map((file) => ({
@@ -31,6 +36,20 @@ export function createDriveUploadQueue(files: FileList | File[] | null | undefin
     progress: 0,
     status: 'queued',
   }))
+}
+
+export function withDriveUploadRelativePath(file: File, relativePath: string): File {
+  const uploadFile = file as DriveUploadFile
+  const normalized = normalizeRelativePath(relativePath || file.name)
+  try {
+    Object.defineProperty(uploadFile, 'assetWorkbenchRelativePath', {
+      value: normalized,
+      configurable: true,
+    })
+  } catch {
+    uploadFile.assetWorkbenchRelativePath = normalized
+  }
+  return uploadFile
 }
 
 export async function uploadDriveQueue(queue: DriveUploadQueueItem[], options: DriveUploadOptions): Promise<number> {
@@ -88,8 +107,12 @@ export async function uploadDriveQueue(queue: DriveUploadQueueItem[], options: D
 }
 
 function fileRelativePath(file: File) {
-  const withPath = file as File & { webkitRelativePath?: string }
-  return (withPath.webkitRelativePath || file.name).replace(/\\/g, '/').replace(/^\/+/, '')
+  const withPath = file as DriveUploadFile
+  return normalizeRelativePath(withPath.assetWorkbenchRelativePath || withPath.webkitRelativePath || file.name)
+}
+
+function normalizeRelativePath(value: string) {
+  return value.replace(/\\/g, '/').replace(/^\/+/, '')
 }
 
 export function useDriveUpload() {
