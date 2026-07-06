@@ -8396,8 +8396,8 @@ components:
         asset_kind:
           type: string
           enum: [auto, all, delivery, reference, source, preview, other]
-          default: auto
-          description: UI-facing asset role filter. `auto` keeps all roles but ranks delivery assets first.
+          default: delivery
+          description: UI-facing asset role filter. Default bulk search only matches delivery assets; `auto` keeps all roles but ranks delivery assets first.
     AssetBatchSearchResult:
       type: object
       required: [term, status, message, candidates]

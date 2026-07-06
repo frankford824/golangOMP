@@ -1000,7 +1000,7 @@ Content-Type: `application/json`
 |---|---|---|---|
 | `terms` | array<string> | 是 | SKU codes or task numbers, one logical search term per item. |
 | `format_filter` | enum(jpg_png/jpg/png/webp/image/design/pdf/archive/all) | 否 | UI-facing format filter. The server maps this to a coarse DB format category first, then applies exact extension/MIME filtering. |
-| `asset_kind` | enum(auto/all/delivery/reference/source/preview/other) | 否 | UI-facing asset role filter. `auto` keeps all roles but ranks delivery assets first. |
+| `asset_kind` | enum(auto/all/delivery/reference/source/preview/other) | 否 | UI-facing asset role filter. Default bulk search only matches delivery assets; `auto` keeps all roles but ranks delivery assets first. |
 
 ### 响应体 schema
 成功响应: `200 application/json`

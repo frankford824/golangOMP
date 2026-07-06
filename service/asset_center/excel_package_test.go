@@ -110,7 +110,19 @@ type excelPackageRepoStub struct {
 
 func (s *excelPackageRepoStub) Search(_ context.Context, query domain.AssetSearchQuery) ([]*repo.TaskAssetSearchRow, int64, error) {
 	rows := s.rowsByKeyword[strings.ToUpper(strings.TrimSpace(query.Keyword))]
-	return rows, int64(len(rows)), nil
+	total := int64(len(rows))
+	if query.Page <= 0 || query.Size <= 0 {
+		return rows, total, nil
+	}
+	start := (query.Page - 1) * query.Size
+	if start >= len(rows) {
+		return []*repo.TaskAssetSearchRow{}, total, nil
+	}
+	end := start + query.Size
+	if end > len(rows) {
+		end = len(rows)
+	}
+	return rows[start:end], total, nil
 }
 
 func (s *excelPackageRepoStub) GetCurrentByAssetID(context.Context, int64) (*repo.TaskAssetSearchRow, error) {

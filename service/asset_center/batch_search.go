@@ -13,7 +13,7 @@ import (
 
 const (
 	MaxBatchSearchTerms       = 200
-	batchSearchPageSize       = 80
+	batchSearchPageSize       = 100
 	BatchSearchStatusMatched  = "matched"
 	BatchSearchStatusNotFound = "not_found"
 	BatchSearchStatusError    = "error"
@@ -71,15 +71,7 @@ func (s *Service) BatchSearch(ctx context.Context, req BatchSearchRequest) (*Bat
 }
 
 func (s *Service) batchSearchOne(ctx context.Context, term, formatFilter, assetKind string) BatchSearchResult {
-	rows, _, err := s.searchRepo.Search(ctx, domain.AssetSearchQuery{
-		Keyword:        term,
-		Source:         domain.AssetResourceSourceSystem,
-		Page:           1,
-		Size:           batchSearchPageSize,
-		IsArchived:     domain.AssetArchiveFilterFalse,
-		TaskStatus:     domain.AssetTaskStatusFilterAll,
-		FormatCategory: batchSearchFormatCategory(formatFilter),
-	})
+	rows, err := s.batchSearchRows(ctx, term, formatFilter)
 	if err != nil {
 		return BatchSearchResult{
 			Term:       term,
@@ -128,6 +120,28 @@ func (s *Service) batchSearchOne(ctx context.Context, term, formatFilter, assetK
 	}
 }
 
+func (s *Service) batchSearchRows(ctx context.Context, term, formatFilter string) ([]*repo.TaskAssetSearchRow, error) {
+	var allRows []*repo.TaskAssetSearchRow
+	for page := 1; ; page++ {
+		rows, total, err := s.searchRepo.Search(ctx, domain.AssetSearchQuery{
+			Keyword:        term,
+			Source:         domain.AssetResourceSourceSystem,
+			Page:           page,
+			Size:           batchSearchPageSize,
+			IsArchived:     domain.AssetArchiveFilterFalse,
+			TaskStatus:     domain.AssetTaskStatusFilterAll,
+			FormatCategory: batchSearchFormatCategory(formatFilter),
+		})
+		if err != nil {
+			return nil, err
+		}
+		allRows = append(allRows, rows...)
+		if len(rows) == 0 || int64(len(allRows)) >= total || len(rows) < batchSearchPageSize {
+			return allRows, nil
+		}
+	}
+}
+
 func normalizeBatchSearchTerms(raw []string) []string {
 	seen := make(map[string]struct{}, len(raw))
 	terms := make([]string, 0, len(raw))
@@ -159,7 +173,7 @@ func normalizeBatchSearchAssetKind(value string) string {
 	case "auto", "all", "delivery", "reference", "source", "preview", "other":
 		return strings.ToLower(strings.TrimSpace(value))
 	default:
-		return "auto"
+		return "delivery"
 	}
 }
 

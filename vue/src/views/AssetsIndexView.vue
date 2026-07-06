@@ -428,7 +428,7 @@
             </button>
           </div>
           <p class="bulk-search-hint">
-            支持粘贴多行 SKU 或任务单号，自动去重后按所选格式和资源类型筛选。默认搜索 JPG / PNG，优先选择最终成品图，其次预览图。
+            支持粘贴多行 SKU 或任务单号，自动去重后按所选格式和资源类型筛选。默认只搜索最终成品图 JPG / PNG；如需源文件、参考图或全部格式请手动切换。
           </p>
           <p v-if="bulkSearchStatus" class="ac-batch-status">{{ bulkSearchStatus }}</p>
           <p v-if="bulkSearchError" class="ac-batch-error">{{ bulkSearchError }}</p>
@@ -837,7 +837,7 @@ const filters = reactive({
 
 const bulkSearchFilters = reactive({
   format: 'jpg_png' as BulkSearchFormatFilter,
-  assetKind: 'auto' as BulkSearchAssetKindFilter,
+  assetKind: 'delivery' as BulkSearchAssetKindFilter,
 })
 
 const assetSourceOptions: BaseSelectOption[] = [
@@ -879,8 +879,8 @@ const bulkSearchFormatOptions: BaseSelectOption[] = [
 ]
 
 const bulkSearchAssetKindOptions: BaseSelectOption[] = [
-  { value: 'auto', label: '自动匹配（成品图优先）' },
   { value: 'delivery', label: '最终成品图' },
+  { value: 'auto', label: '自动匹配（成品图优先）' },
   { value: 'reference', label: '参考图' },
   { value: 'source', label: '源文件 / 修订源文件' },
   { value: 'preview', label: '预览辅助图' },
