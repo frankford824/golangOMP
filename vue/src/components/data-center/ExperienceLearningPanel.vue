@@ -6,7 +6,7 @@
         <p class="panel-subtitle">闭环健康、监督样本池、缺口队列与可复核样本</p>
       </div>
       <div class="panel-actions">
-        <span v-if="stats?.generated_at" class="panel-time">统计 {{ shortDateTime(stats.generated_at) }}</span>
+        <span v-if="stats?.generated_at" class="panel-time">统计 {{ shortDateTime(stats.generated_at) }}{{ statsStale ? '（上次成功）' : '' }}</span>
         <BaseButton variant="secondary" size="sm" :loading="loading" @click="load">
           <RefreshCw class="button-icon" aria-hidden="true" />
           刷新
@@ -14,12 +14,12 @@
       </div>
     </div>
 
-    <BaseErrorState v-if="error && !stats" :title="error" @retry="load" />
+    <BaseErrorState v-if="configRequestError && !stats" :title="error" @retry="load" />
 
     <template v-else>
-      <p v-if="error" class="block-note review-error" role="alert">{{ error }}</p>
+      <p v-if="panelNotice" class="block-note review-error" role="alert">{{ panelNotice }}</p>
 
-      <div v-if="loading" class="metric-grid">
+      <div v-if="initialLoading" class="metric-grid">
         <BaseSkeleton v-for="i in 8" :key="i" width="100%" height="4.75rem" />
       </div>
 
@@ -31,15 +31,15 @@
 
       <template v-else>
         <div class="flag-row" aria-label="经验开关">
-          <span :class="flagClass(runtimeFlags.capture_enabled)">采集 {{ flagLabel(runtimeFlags.capture_enabled) }}</span>
-          <span :class="flagClass(runtimeFlags.worker_enabled)">Worker {{ flagLabel(runtimeFlags.worker_enabled) }}</span>
-          <span :class="flagClass(runtimeFlags.ai_feedback_enabled)">AI 反馈 {{ flagLabel(runtimeFlags.ai_feedback_enabled) }}</span>
-          <span :class="flagClass(runtimeFlags.behavior_capture_enabled)">行为 {{ flagLabel(runtimeFlags.behavior_capture_enabled) }}</span>
-          <span :class="flagClass(runtimeFlags.micro_question_enabled)">微追问 {{ flagLabel(runtimeFlags.micro_question_enabled) }}</span>
+          <span :class="flagClass(runtimeFlags.capture_enabled)" :aria-label="`采集状态：${flagLabel(runtimeFlags.capture_enabled)}`">采集 {{ flagLabel(runtimeFlags.capture_enabled) }}</span>
+          <span :class="flagClass(runtimeFlags.worker_enabled)" :aria-label="`Worker 状态：${flagLabel(runtimeFlags.worker_enabled)}`">Worker {{ flagLabel(runtimeFlags.worker_enabled) }}</span>
+          <span :class="flagClass(runtimeFlags.ai_feedback_enabled)" :aria-label="`AI 反馈状态：${flagLabel(runtimeFlags.ai_feedback_enabled)}`">AI 反馈 {{ flagLabel(runtimeFlags.ai_feedback_enabled) }}</span>
+          <span :class="flagClass(runtimeFlags.behavior_capture_enabled)" :aria-label="`行为采集状态：${flagLabel(runtimeFlags.behavior_capture_enabled)}`">行为 {{ flagLabel(runtimeFlags.behavior_capture_enabled) }}</span>
+          <span :class="flagClass(runtimeFlags.micro_question_enabled)" :aria-label="`微追问状态：${flagLabel(runtimeFlags.micro_question_enabled)}`">微追问 {{ flagLabel(runtimeFlags.micro_question_enabled) }}</span>
           <span>采样 {{ percentLabel(runtimeFlags.behavior_sample_rate) }}</span>
           <span v-if="runtimeFlags.runtime_config_loaded" class="status-pill status-pill--on">运行配置 已加载</span>
           <span v-else-if="runtimeFlags.runtime_config_error" class="status-pill">运行配置 异常</span>
-          <span :class="flagClass(runtimeFlags.ui_enabled)">页面 {{ flagLabel(runtimeFlags.ui_enabled) }}</span>
+          <span :class="flagClass(runtimeFlags.ui_enabled)" :aria-label="`页面状态：${flagLabel(runtimeFlags.ui_enabled)}`">页面 {{ flagLabel(runtimeFlags.ui_enabled) }}</span>
         </div>
         <p v-if="runtimeFlags.runtime_config_error" class="block-note review-error" role="alert">
           运行配置未生效：{{ runtimeFlags.runtime_config_error }}
@@ -54,7 +54,7 @@
             <span>{{ workerHealthLabel }}</span>
           </div>
           <div v-if="workerRuns.length" class="worker-run-list">
-            <article v-for="run in workerRuns.slice(0, 6)" :key="`${run.worker_name}-${run.source_name || 'all'}-${run.started_at}`" class="worker-run-item">
+            <article v-for="run in workerRuns.slice(0, 6)" :key="run.id ?? `${run.worker_name}-${run.source_name || 'all'}-${run.started_at}`" class="worker-run-item">
               <div class="worker-run-main">
                 <strong>{{ workerNameLabel(run.worker_name) }}</strong>
                 <small>{{ run.source_name || 'all' }} · {{ shortDateTime(run.started_at) }}</small>
@@ -146,7 +146,27 @@
               <h4 id="experience-review-title">候选归因复核</h4>
               <p>Attribution 只生成候选；队列按 outcome 展示当前最佳候选，不代表全部候选。SuperAdmin 复核后才进入侧路经验候选治理。</p>
             </div>
-            <span>{{ integerLabel(reviewItemTotal) }} 个候选</span>
+            <span>{{ reviewCountLabel }}</span>
+          </div>
+          <div class="filter-row filter-row--compact" aria-label="复核队列筛选">
+            <label class="filter-field">
+              <span>状态</span>
+              <select v-model="reviewStatus" @change="applyReviewFilters">
+                <option value="">全部</option>
+                <option value="open">待复核</option>
+                <option value="approved">已确认</option>
+                <option value="rejected">已驳回</option>
+                <option value="needs_more_data">需更多数据</option>
+              </select>
+            </label>
+            <label class="filter-field filter-field--short">
+              <span>每页</span>
+              <select v-model.number="reviewPageSize" @change="applyReviewPageSize">
+                <option :value="8">8</option>
+                <option :value="20">20</option>
+                <option :value="50">50</option>
+              </select>
+            </label>
           </div>
           <div v-if="reviewItems.length" class="review-list">
             <article v-for="item in reviewItems" :key="item.item_key" class="review-item">
@@ -164,20 +184,25 @@
                   size="sm"
                   :loading="reviewBusyKey === `${item.item_key}:approve`"
                   :disabled="!reviewMaterializationEnabled"
-                  @click="submitReview(item, 'approve')"
+                  @click="requestReviewDecision(item, 'approve')"
                 >
                   {{ reviewMaterializationEnabled ? '确认归因（侧路）' : 'Shadow 观察中' }}
                 </BaseButton>
-                <BaseButton variant="secondary" size="sm" :loading="reviewBusyKey === `${item.item_key}:needs_more_data`" @click="submitReview(item, 'needs_more_data')">
+                <BaseButton variant="secondary" size="sm" :loading="reviewBusyKey === `${item.item_key}:needs_more_data`" @click="requestReviewDecision(item, 'needs_more_data')">
                   需更多数据
                 </BaseButton>
-                <BaseButton variant="secondary" size="sm" :loading="reviewBusyKey === `${item.item_key}:reject`" @click="submitReview(item, 'reject')">
+                <BaseButton variant="secondary" size="sm" :loading="reviewBusyKey === `${item.item_key}:reject`" @click="requestReviewDecision(item, 'reject')">
                   误报
                 </BaseButton>
               </div>
             </article>
           </div>
           <BaseEmptyState v-else :title="reviewEmptyTitle" :description="reviewEmptyDescription" />
+          <div class="pagination-row" aria-label="复核队列分页">
+            <BaseButton variant="secondary" size="sm" :disabled="reviewPage <= 1 || loading" @click="goReviewPage(-1)">上一页</BaseButton>
+            <span>{{ integerLabel(reviewPage) }} / {{ integerLabel(reviewTotalPages) }}</span>
+            <BaseButton variant="secondary" size="sm" :disabled="reviewPage >= reviewTotalPages || loading" @click="goReviewPage(1)">下一页</BaseButton>
+          </div>
           <p v-if="reviewActionError" class="block-note review-error" role="alert">{{ reviewActionError }}</p>
         </section>
 
@@ -188,6 +213,47 @@
               <p>按证据等级分组，避免把展示流水误读成可用经验。</p>
             </div>
             <span>{{ sampleCountLabel }}</span>
+          </div>
+          <div class="filter-row" aria-label="样本筛选">
+            <label class="filter-field">
+              <span>来源</span>
+              <input v-model.trim="sampleSourceType" type="text" placeholder="全部来源" @keydown.enter.prevent="applySampleFilters" />
+            </label>
+            <label class="filter-field filter-field--short">
+              <span>任务 ID</span>
+              <input v-model.trim="sampleTaskId" type="number" min="1" inputmode="numeric" placeholder="全部" @keydown.enter.prevent="applySampleFilters" />
+            </label>
+            <label class="filter-field filter-field--short">
+              <span>最低证据</span>
+              <select v-model="sampleMinEvidenceLevel" @change="applySampleFilters">
+                <option value="">全部</option>
+                <option value="L0">L0</option>
+                <option value="L1">L1</option>
+                <option value="L2">L2</option>
+                <option value="L3">L3</option>
+                <option value="L4">L4</option>
+              </select>
+            </label>
+            <label class="filter-field filter-field--short">
+              <span>从</span>
+              <input v-model="sampleFrom" type="date" @change="applySampleFilters" />
+            </label>
+            <label class="filter-field filter-field--short">
+              <span>到</span>
+              <input v-model="sampleTo" type="date" @change="applySampleFilters" />
+            </label>
+            <label class="filter-field filter-field--short">
+              <span>每页</span>
+              <select v-model.number="samplePageSize" @change="applySamplePageSize">
+                <option :value="20">20</option>
+                <option :value="50">50</option>
+                <option :value="100">100</option>
+              </select>
+            </label>
+            <div class="filter-actions">
+              <BaseButton variant="secondary" size="sm" :disabled="loading" @click="applySampleFilters">筛选</BaseButton>
+              <BaseButton variant="ghost" size="sm" :disabled="loading" @click="resetSampleFilters">清空</BaseButton>
+            </div>
           </div>
           <div v-if="groupedSamples.length" class="sample-groups">
             <section v-for="group in groupedSamples" :key="group.level" class="sample-group">
@@ -228,18 +294,43 @@
             </section>
           </div>
           <BaseEmptyState v-else :title="samplesEmptyTitle" :description="samplesEmptyDescription" />
+          <div class="pagination-row" aria-label="样本分页">
+            <BaseButton variant="secondary" size="sm" :disabled="samplePage <= 1 || loading" @click="goSamplePage(-1)">上一页</BaseButton>
+            <span>{{ integerLabel(samplePage) }} / {{ integerLabel(sampleTotalPages) }}</span>
+            <BaseButton variant="secondary" size="sm" :disabled="samplePage >= sampleTotalPages || loading" @click="goSamplePage(1)">下一页</BaseButton>
+          </div>
         </section>
       </template>
     </template>
+    <BaseModal
+      v-model="reviewConfirmOpen"
+      title="确认归因写入侧路？"
+      :show-confirm="false"
+      panel-class="max-w-xl"
+      @cancel="cancelReviewConfirmation"
+    >
+      <p class="review-confirm-copy">
+        确认后只写入侧路经验候选，不会修改任务、资产、ERP、审核状态或成本口径。
+      </p>
+      <template #footer>
+        <footer class="modal-footer">
+          <BaseButton variant="secondary" size="sm" @click="cancelReviewConfirmation">取消</BaseButton>
+          <BaseButton variant="primary" size="sm" :loading="Boolean(pendingReviewItem && reviewBusyKey === `${pendingReviewItem.item_key}:approve`)" @click="confirmReviewDecision">
+            确认写入侧路
+          </BaseButton>
+        </footer>
+      </template>
+    </BaseModal>
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RefreshCw } from 'lucide-vue-next'
 import BaseButton from '@/components/base/BaseButton.vue'
 import BaseEmptyState from '@/components/base/BaseEmptyState.vue'
 import BaseErrorState from '@/components/base/BaseErrorState.vue'
+import BaseModal from '@/components/base/BaseModal.vue'
 import BaseSkeleton from '@/components/base/BaseSkeleton.vue'
 import {
   experienceApi,
@@ -249,11 +340,22 @@ import {
   type ExperienceReasonTag,
   type ExperienceReviewDecisionValue,
   type ExperienceReviewItem,
+  type ExperienceReviewItemStatus,
   type ExperienceRuntimeFlags,
+  type ExperienceSamplesParams,
   type ExperienceStats,
   type ExperienceWorkerRunRecord,
   type PaginatedEnvelope,
 } from '@/services/api/experienceApi'
+
+const props = withDefaults(
+  defineProps<{
+    refreshToken?: number
+  }>(),
+  {
+    refreshToken: 0,
+  },
+)
 
 interface MetricItem {
   key: string
@@ -307,6 +409,9 @@ const reasonLabels: Record<string, string> = {
 
 const loading = ref(false)
 const error = ref('')
+const configRequestError = ref(false)
+const statsRequestError = ref(false)
+const statsStale = ref(false)
 const configFlags = ref<ExperienceRuntimeFlags>(emptyFlags)
 const stats = ref<ExperienceStats | null>(null)
 const samples = ref<ExperienceEvent[]>([])
@@ -316,11 +421,27 @@ const effectiveSampleTotal = ref(0)
 const sampleRequestError = ref(false)
 const effectiveSampleRequestError = ref(false)
 const tags = ref<ExperienceReasonTag[]>([])
+const reasonTagRequestError = ref(false)
 const reviewItems = ref<ExperienceReviewItem[]>([])
 const reviewItemTotal = ref(0)
 const reviewBusyKey = ref('')
 const reviewQueueError = ref(false)
 const reviewActionError = ref('')
+const reviewConfirmOpen = ref(false)
+const pendingReviewItem = ref<ExperienceReviewItem | null>(null)
+const sampleSourceType = ref('')
+const sampleTaskId = ref('')
+const sampleFrom = ref('')
+const sampleTo = ref('')
+const sampleMinEvidenceLevel = ref<ExperienceEvidenceLevel | ''>('')
+const samplePage = ref(1)
+const samplePageSize = ref(20)
+const reviewStatus = ref<ExperienceReviewItemStatus | ''>('open')
+const reviewPage = ref(1)
+const reviewPageSize = ref(8)
+
+let loadSequence = 0
+let loadController: AbortController | null = null
 
 const runtimeFlags = computed(() => stats.value?.flags ?? configFlags.value)
 const reviewMaterializationEnabled = computed(() => Boolean(runtimeFlags.value.review_materialization_enabled))
@@ -340,9 +461,15 @@ const healthSteps = computed<HealthStep[]>(() => {
   const reasonRequired = reasonRequiredFeedbackCount.value
   const reasoned = Math.min(reasonedCount.value, reasonRequired)
   const reusable = reusableCount.value
+  const locatableHint =
+    stats.value && stats.value.locatable_displayed_events === undefined
+      ? '后端未下发展示可定位精确数，当前用可定位/展示较小值近似'
+      : locatable
+        ? '展示建议能回到任务或资产'
+        : '无匹配数据'
   return [
     { key: 'displayed', level: 'L0', label: '建议展示', count: displayed, total: displayed, value: fractionLabel(displayed, displayed), hint: displayed ? '建议已展示' : '未采集或未配置' },
-    { key: 'locatable', level: 'L1', label: '展示可定位', count: locatable, total: displayed, value: fractionLabel(locatable, displayed), hint: locatable ? '展示建议能回到任务或资产' : '无匹配数据' },
+    { key: 'locatable', level: 'L1', label: '展示可定位', count: locatable, total: displayed, value: fractionLabel(locatable, displayed), hint: locatableHint },
     { key: 'feedback', level: 'L2', label: '正式反馈', count: feedback, total: displayed, value: fractionLabel(feedback, displayed), hint: feedback ? '已有有用/部分/无用判断' : '监督信号为 0' },
     { key: 'tagged', level: 'L3', label: '反馈原因', count: reasoned, total: reasonRequired, value: fractionLabel(reasoned, reasonRequired), hint: reasoned ? '部分/无用反馈已有原因' : '缺部分/无用反馈原因' },
     { key: 'reusable', level: 'L4', label: '侧路候选', count: reusable, total: displayed, value: `${integerLabel(reusable)} 条`, hint: reusable ? '侧路候选数；不是展示到成交或自动化的转化率' : '暂无候选沉淀' },
@@ -437,6 +564,8 @@ const gapQueue = computed<GapItem[]>(() => {
   const reasoned = Math.min(reasonedCount.value, reasonRequired)
   const profiles = count(stats.value?.task_profiles)
   const assetLabels = count(stats.value?.asset_quality_labels)
+  const profileGap = locatable - profiles
+  const assetQualityBase = locatable > 0 ? locatable : displayed
   return [
     {
       key: 'missing_feedback',
@@ -455,16 +584,21 @@ const gapQueue = computed<GapItem[]>(() => {
     {
       key: 'missing_profile',
       label: '缺画像',
-      count: Math.max(0, locatable - profiles),
+      count: Math.max(0, profileGap),
       total: locatable,
-      hint: locatable ? '可定位样本缺任务画像' : '还没有可定位样本',
+      hint:
+        profileGap < 0
+          ? '任务画像总数大于可定位样本，口径不同，需看后端细分'
+          : locatable
+            ? '可定位样本缺任务画像'
+            : '还没有可定位样本',
     },
     {
       key: 'missing_asset_quality',
       label: '缺资产质量',
-      count: assetLabels > 0 ? 0 : displayed,
-      total: displayed,
-      hint: assetLabels > 0 ? '已有资产质量标签' : '第一阶段未采到质量标签',
+      count: Math.max(0, assetQualityBase - assetLabels),
+      total: assetQualityBase,
+      hint: assetQualityBase ? '按可定位样本近似资产质量候选，不再使用有/无二值开关' : '还没有可定位样本',
     },
   ]
 })
@@ -501,10 +635,33 @@ const groupedSamples = computed(() => {
 })
 
 const effectiveSampleCountLabel = computed(() =>
-  effectiveSampleRequestError.value ? '接口暂不可用' : `${integerLabel(effectiveSampleTotal.value)} 条`,
+  effectiveSampleRequestError.value
+    ? '接口暂不可用'
+    : `${integerLabel(effectiveSampleTotal.value)} 条 · 显示 ${integerLabel(effectiveSamples.value.length)}`,
 )
-const sampleCountLabel = computed(() => (sampleRequestError.value ? '接口暂不可用' : `${integerLabel(sampleTotal.value)} 条`))
+const sampleTotalPages = computed(() => totalPages(sampleTotal.value, samplePageSize.value))
+const reviewTotalPages = computed(() => totalPages(reviewItemTotal.value, reviewPageSize.value))
+const sampleCountLabel = computed(() =>
+  sampleRequestError.value
+    ? '接口暂不可用'
+    : `${integerLabel(sampleTotal.value)} 条 · 第 ${integerLabel(samplePage.value)} / ${integerLabel(sampleTotalPages.value)} 页`,
+)
 const healthSampleCountLabel = computed(() => (sampleRequestError.value ? '样本接口暂不可用' : `${integerLabel(sampleTotal.value)} 条样本`))
+const reviewCountLabel = computed(() =>
+  reviewQueueError.value
+    ? '接口暂不可用'
+    : `${integerLabel(reviewItemTotal.value)} 个候选 · 第 ${integerLabel(reviewPage.value)} / ${integerLabel(reviewTotalPages.value)} 页`,
+)
+const initialLoading = computed(
+  () => loading.value && !stats.value && samples.value.length === 0 && effectiveSamples.value.length === 0 && reviewItems.value.length === 0,
+)
+const panelNotice = computed(() => {
+  if (configRequestError.value) return error.value
+  if (statsRequestError.value && statsStale.value) return '主指标刷新失败，当前主指标为上次成功结果；样本、标签、复核队列已按本次请求独立更新。'
+  if (statsRequestError.value) return '经验观测主指标暂不可用；样本、标签、复核队列已按本次请求独立更新。'
+  if (reasonTagRequestError.value) return '原因标签接口暂不可用，原因标签计数不使用上一轮陈旧数据。'
+  return ''
+})
 
 const effectiveEmptyTitle = computed(() => (effectiveSampleRequestError.value ? 'L2+ 样本暂不可用' : '暂无 L2+ 候选'))
 const effectiveEmptyDescription = computed(() => {
@@ -530,44 +687,70 @@ const reviewEmptyDescription = computed(() =>
 )
 
 async function load() {
+  const sequence = ++loadSequence
+  loadController?.abort()
+  const controller = new AbortController()
+  loadController = controller
+  const isCurrent = () => sequence === loadSequence && loadController === controller && !controller.signal.aborted
+
   loading.value = true
   error.value = ''
+  configRequestError.value = false
+  statsRequestError.value = false
+  sampleRequestError.value = false
+  effectiveSampleRequestError.value = false
+  reasonTagRequestError.value = false
+  reviewQueueError.value = false
+  reviewActionError.value = ''
+
   try {
-    const configRes = await experienceApi.config()
+    const configRes = await experienceApi.config(controller.signal)
+    if (!isCurrent()) return
     configFlags.value = configRes.data?.data ?? emptyFlags
-    reviewItems.value = []
-    reviewItemTotal.value = 0
-    reviewQueueError.value = false
-    reviewActionError.value = ''
-    sampleRequestError.value = false
-    effectiveSampleRequestError.value = false
+
     if (!configFlags.value.ui_enabled) {
       stats.value = null
+      statsStale.value = false
       samples.value = []
       effectiveSamples.value = []
       sampleTotal.value = 0
       effectiveSampleTotal.value = 0
-      sampleRequestError.value = false
-      effectiveSampleRequestError.value = false
       tags.value = []
+      reviewItems.value = []
+      reviewItemTotal.value = 0
       return
     }
 
-    const statsRes = await experienceApi.stats()
-    stats.value = statsRes.data?.data ?? null
-    const [samplesRes, effectiveSamplesRes] = await Promise.allSettled([
-      experienceApi.samples({ page: 1, page_size: 20 }),
-      experienceApi.samples({ page: 1, page_size: 20, min_evidence_level: 'L2' }),
+    const [statsRes, samplesRes, effectiveSamplesRes, tagsRes, reviewRes] = await Promise.allSettled([
+      experienceApi.stats(controller.signal),
+      experienceApi.samples(buildSampleParams(), controller.signal),
+      experienceApi.samples(buildEffectiveSampleParams(), controller.signal),
+      experienceApi.reasonTags({ scene: 'ai_suggestion_feedback' }, controller.signal),
+      experienceApi.reviewItems(buildReviewParams(), controller.signal),
     ])
+    if (!isCurrent()) return
+
+    if (statsRes.status === 'fulfilled') {
+      stats.value = statsRes.value.data?.data ?? null
+      statsRequestError.value = false
+      statsStale.value = false
+    } else {
+      statsRequestError.value = true
+      statsStale.value = Boolean(stats.value)
+      error.value = statsStale.value ? '经验观测主指标刷新失败' : '经验观测主指标暂不可用'
+    }
+
     if (samplesRes.status === 'fulfilled') {
       const parsedSamples = samplesRes.value.data as PaginatedEnvelope<ExperienceEvent>
       samples.value = parsedSamples.data ?? []
       sampleTotal.value = Number(parsedSamples.pagination?.total ?? samples.value.length)
+      samplePage.value = normalizePage(parsedSamples.pagination?.page, samplePage.value)
     } else {
       samples.value = []
       sampleTotal.value = 0
       sampleRequestError.value = true
     }
+
     if (effectiveSamplesRes.status === 'fulfilled') {
       const parsedEffectiveSamples = effectiveSamplesRes.value.data as PaginatedEnvelope<ExperienceEvent>
       effectiveSamples.value = parsedEffectiveSamples.data ?? []
@@ -577,42 +760,61 @@ async function load() {
       effectiveSampleTotal.value = 0
       effectiveSampleRequestError.value = true
     }
-    try {
-      const tagsRes = await experienceApi.reasonTags({ scene: 'ai_suggestion_feedback' })
-      tags.value = tagsRes.data?.data ?? []
-    } catch {
-      tags.value = tags.value.length ? tags.value : []
+
+    if (tagsRes.status === 'fulfilled') {
+      tags.value = tagsRes.value.data?.data ?? []
+      reasonTagRequestError.value = false
+    } else {
+      tags.value = []
+      reasonTagRequestError.value = true
     }
-    try {
-      const reviewRes = await experienceApi.reviewItems({
-        status: 'open',
-        item_type: 'attribution_candidate',
-        page: 1,
-        page_size: 8,
-      })
-      const parsedReviewItems = reviewRes.data as PaginatedEnvelope<ExperienceReviewItem>
+
+    if (reviewRes.status === 'fulfilled') {
+      const parsedReviewItems = reviewRes.value.data as PaginatedEnvelope<ExperienceReviewItem>
       reviewItems.value = parsedReviewItems.data ?? []
       reviewItemTotal.value = Number(parsedReviewItems.pagination?.total ?? reviewItems.value.length)
+      reviewPage.value = normalizePage(parsedReviewItems.pagination?.page, reviewPage.value)
       reviewQueueError.value = false
-    } catch {
+    } else {
       reviewItems.value = []
       reviewItemTotal.value = 0
       reviewQueueError.value = true
     }
-  } catch {
-    error.value = '经验观测主指标暂不可用'
+  } catch (err) {
+    if (isAbortError(err) || !isCurrent()) return
+    configRequestError.value = true
+    error.value = '经验观测配置暂不可用'
   } finally {
-    loading.value = false
+    if (isCurrent()) {
+      loading.value = false
+      loadController = null
+    }
   }
+}
+
+function requestReviewDecision(item: ExperienceReviewItem, decision: ExperienceReviewDecisionValue) {
+  if (decision === 'approve') {
+    pendingReviewItem.value = item
+    reviewConfirmOpen.value = true
+    return
+  }
+  void submitReview(item, decision)
+}
+
+function cancelReviewConfirmation() {
+  reviewConfirmOpen.value = false
+  pendingReviewItem.value = null
+}
+
+function confirmReviewDecision() {
+  const item = pendingReviewItem.value
+  cancelReviewConfirmation()
+  if (!item) return
+  void submitReview(item, 'approve')
 }
 
 async function submitReview(item: ExperienceReviewItem, decision: ExperienceReviewDecisionValue) {
   if (!item.item_key || reviewBusyKey.value) return
-  const confirmed =
-    decision !== 'approve' ||
-    (typeof window !== 'undefined' &&
-      window.confirm('确认后会写入侧路经验候选，不会修改任务、资产、ERP 或审核状态。是否继续？'))
-  if (!confirmed) return
   const busyKey = `${item.item_key}:${decision}`
   reviewBusyKey.value = busyKey
   reviewActionError.value = ''
@@ -626,7 +828,7 @@ async function submitReview(item: ExperienceReviewItem, decision: ExperienceRevi
         review_confirmation: decision === 'approve',
       },
     })
-    await load()
+    applyReviewDecisionLocally(item, decision)
   } catch {
     reviewActionError.value = '复核结果未保存，请稍后重试。'
   } finally {
@@ -634,6 +836,22 @@ async function submitReview(item: ExperienceReviewItem, decision: ExperienceRevi
       reviewBusyKey.value = ''
     }
   }
+}
+
+function applyReviewDecisionLocally(item: ExperienceReviewItem, decision: ExperienceReviewDecisionValue) {
+  reviewItems.value = reviewItems.value.filter((candidate) => candidate.item_key !== item.item_key)
+  reviewItemTotal.value = Math.max(0, reviewItemTotal.value - 1)
+  if (!stats.value) return
+  const nextStats: ExperienceStats = { ...stats.value }
+  nextStats.review_items_open = Math.max(0, count(nextStats.review_items_open) - 1)
+  if (decision === 'approve') {
+    nextStats.review_items_approved = count(nextStats.review_items_approved) + 1
+  } else if (decision === 'reject') {
+    nextStats.review_items_rejected = count(nextStats.review_items_rejected) + 1
+  } else {
+    nextStats.review_items_needs_more_data = count(nextStats.review_items_needs_more_data) + 1
+  }
+  stats.value = nextStats
 }
 
 function reviewDecisionReasonCode(decision: ExperienceReviewDecisionValue): string {
@@ -665,7 +883,8 @@ function percentFromCounts(numerator: unknown, denominator: unknown): string {
 function percentLabel(value: unknown): string {
   const n = Number(value ?? 0)
   if (!Number.isFinite(n) || n < 0) return '无样本'
-  return `${Math.round(n * 1000) / 10}%`
+  const clamped = Math.min(1, n)
+  return `${Math.round(clamped * 1000) / 10}%`
 }
 
 function metricRatioHint(numerator: unknown, denominator: unknown, base: string): string {
@@ -848,7 +1067,125 @@ function shortDateTime(value?: string): string {
   return `${d.toLocaleDateString('zh-CN')} ${d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}`
 }
 
+function buildSampleParams(): ExperienceSamplesParams {
+  const params: ExperienceSamplesParams = {
+    page: samplePage.value,
+    page_size: samplePageSize.value,
+  }
+  if (sampleMinEvidenceLevel.value) params.min_evidence_level = sampleMinEvidenceLevel.value
+  const sourceType = sampleSourceType.value.trim()
+  if (sourceType) params.source_type = sourceType
+  const taskId = parseOptionalPositiveInt(sampleTaskId.value)
+  if (taskId !== undefined) params.task_id = taskId
+  const from = sampleFrom.value.trim()
+  if (from) params.from = from
+  const to = sampleTo.value.trim()
+  if (to) params.to = to
+  return params
+}
+
+function buildEffectiveSampleParams(): ExperienceSamplesParams {
+  return {
+    ...buildSampleParams(),
+    page: 1,
+    page_size: 20,
+    min_evidence_level: minimumEvidenceAtLeastL2(sampleMinEvidenceLevel.value),
+  }
+}
+
+function buildReviewParams() {
+  return {
+    status: reviewStatus.value || undefined,
+    item_type: 'attribution_candidate',
+    page: reviewPage.value,
+    page_size: reviewPageSize.value,
+  }
+}
+
+function minimumEvidenceAtLeastL2(level: ExperienceEvidenceLevel | ''): ExperienceEvidenceLevel {
+  if (!level || evidenceRank[level] < evidenceRank.L2) return 'L2'
+  return level
+}
+
+function parseOptionalPositiveInt(value: string): number | undefined {
+  const trimmed = value.trim()
+  if (!trimmed) return undefined
+  const n = Number(trimmed)
+  if (!Number.isInteger(n) || n <= 0) return undefined
+  return n
+}
+
+function normalizePage(value: unknown, fallback: number): number {
+  const n = Number(value)
+  if (!Number.isInteger(n) || n <= 0) return fallback
+  return n
+}
+
+function totalPages(total: unknown, pageSize: unknown): number {
+  const size = Math.max(1, count(pageSize))
+  return Math.max(1, Math.ceil(count(total) / size))
+}
+
+function applySampleFilters() {
+  samplePage.value = 1
+  void load()
+}
+
+function resetSampleFilters() {
+  sampleSourceType.value = ''
+  sampleTaskId.value = ''
+  sampleFrom.value = ''
+  sampleTo.value = ''
+  sampleMinEvidenceLevel.value = ''
+  samplePage.value = 1
+  void load()
+}
+
+function goSamplePage(delta: number) {
+  samplePage.value = Math.min(sampleTotalPages.value, Math.max(1, samplePage.value + delta))
+  void load()
+}
+
+function applySamplePageSize() {
+  samplePage.value = 1
+  void load()
+}
+
+function applyReviewFilters() {
+  reviewPage.value = 1
+  void load()
+}
+
+function goReviewPage(delta: number) {
+  reviewPage.value = Math.min(reviewTotalPages.value, Math.max(1, reviewPage.value + delta))
+  void load()
+}
+
+function applyReviewPageSize() {
+  reviewPage.value = 1
+  void load()
+}
+
+function isAbortError(err: unknown): boolean {
+  const maybe = err as { name?: string; code?: string; message?: string } | undefined
+  return maybe?.name === 'AbortError' || maybe?.name === 'CanceledError' || maybe?.code === 'ERR_CANCELED'
+}
+
 onMounted(load)
+
+watch(
+  () => props.refreshToken,
+  (next, previous) => {
+    if (next === previous) return
+    void load()
+  },
+)
+
+onBeforeUnmount(() => {
+  loadSequence += 1
+  loadController?.abort()
+  loadController = null
+})
 </script>
 
 <style scoped>
@@ -1226,6 +1563,88 @@ onMounted(load)
   font-weight: 700;
 }
 
+.filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.5rem;
+  margin: 0 0 0.65rem;
+}
+
+.filter-row--compact {
+  margin-top: -0.15rem;
+}
+
+.filter-field {
+  display: grid;
+  flex: 1 1 10rem;
+  gap: 0.22rem;
+  min-width: 0;
+}
+
+.filter-field--short {
+  flex-basis: 7.5rem;
+}
+
+.filter-field span {
+  color: rgb(var(--yb-text-blue-gray));
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.filter-field input,
+.filter-field select {
+  width: 100%;
+  min-height: 2rem;
+  border: 1px solid rgb(var(--yb-border-blue));
+  border-radius: 0.45rem;
+  background: rgb(var(--yb-surface));
+  padding: 0.25rem 0.5rem;
+  color: rgb(var(--yb-text-deep));
+  font-size: 0.75rem;
+  outline: none;
+}
+
+.filter-field input:focus,
+.filter-field select:focus {
+  border-color: rgb(var(--yb-brand-border));
+  box-shadow: 0 0 0 2px rgb(var(--yb-brand-accent) / 0.14);
+}
+
+.filter-actions,
+.pagination-row,
+.modal-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.filter-actions {
+  flex: 0 0 auto;
+}
+
+.pagination-row {
+  justify-content: flex-end;
+  margin-top: 0.65rem;
+  color: rgb(var(--yb-text-blue-gray));
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.modal-footer {
+  justify-content: flex-end;
+  border-top: 1px solid rgb(var(--yb-border));
+  padding: 0.85rem 1.25rem;
+}
+
+.review-confirm-copy {
+  margin: 0 0 0.75rem;
+  color: rgb(var(--yb-text-muted-strong));
+  font-size: 0.82rem;
+  line-height: 1.6;
+}
+
 .evidence-badge {
   display: inline-flex;
   align-items: center;
@@ -1338,6 +1757,12 @@ onMounted(load)
   }
 
   .review-actions {
+    justify-content: flex-start;
+  }
+
+  .filter-actions,
+  .pagination-row,
+  .modal-footer {
     justify-content: flex-start;
   }
 }

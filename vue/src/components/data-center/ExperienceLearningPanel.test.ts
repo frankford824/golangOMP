@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { mount, flushPromises } from '@vue/test-utils'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import ExperienceLearningPanel from './ExperienceLearningPanel.vue'
 import { experienceApi } from '@/services/api/experienceApi'
@@ -110,6 +110,10 @@ describe('ExperienceLearningPanel', () => {
     setupExperiencePanelMocks()
   })
 
+  afterEach(() => {
+    document.body.innerHTML = ''
+  })
+
   it('keeps the main observation panel usable when the review queue fails', async () => {
     reviewItemsMock.mockRejectedValueOnce(new Error('review queue unavailable'))
 
@@ -119,6 +123,7 @@ describe('ExperienceLearningPanel', () => {
 
     expect(reviewItemsMock).toHaveBeenCalledWith(
       { status: 'open', item_type: 'attribution_candidate', page: 1, page_size: 8 },
+      expect.any(AbortSignal),
     )
     expect(wrapper.text()).toContain('闭环健康条')
     expect(wrapper.text()).toContain('反馈率')
@@ -236,7 +241,7 @@ describe('ExperienceLearningPanel', () => {
     await flushPromises()
     await flushPromises()
 
-    expect(reasonTagsMock).toHaveBeenCalledWith({ scene: 'ai_suggestion_feedback' })
+    expect(reasonTagsMock).toHaveBeenCalledWith({ scene: 'ai_suggestion_feedback' }, expect.any(AbortSignal))
     expect(wrapper.text()).toContain('闭环健康条')
     expect(wrapper.text()).toContain('反馈率')
     expect(wrapper.text()).not.toContain('reason tags unavailable')
@@ -421,6 +426,8 @@ describe('ExperienceLearningPanel', () => {
 
     await wrapper.findAll('button').find((button) => button.text().includes('确认归因（侧路）'))?.trigger('click')
     await flushPromises()
+    findBodyButton('确认写入侧路')?.click()
+    await flushPromises()
 
     expect(reviewDecisionMock).toHaveBeenCalledWith(
       'review-1',
@@ -438,7 +445,6 @@ describe('ExperienceLearningPanel', () => {
   })
 
   it('does not submit review approval when confirmation is cancelled', async () => {
-    vi.mocked(window.confirm).mockReturnValueOnce(false)
     statsMock.mockResolvedValueOnce({
       data: {
         data: {
@@ -504,8 +510,10 @@ describe('ExperienceLearningPanel', () => {
 
     await wrapper.findAll('button').find((button) => button.text().includes('确认归因（侧路）'))?.trigger('click')
     await flushPromises()
+    findBodyButton('取消')?.click()
+    await flushPromises()
 
-    expect(window.confirm).toHaveBeenCalled()
+    expect(document.body.textContent).not.toContain('确认归因写入侧路？')
     expect(reviewDecisionMock).not.toHaveBeenCalled()
   })
 
@@ -546,3 +554,9 @@ describe('ExperienceLearningPanel', () => {
     expect(reviewDecisionMock).not.toHaveBeenCalled()
   })
 })
+
+function findBodyButton(text: string): HTMLButtonElement | undefined {
+  return Array.from(document.body.querySelectorAll('button')).find((button) =>
+    button.textContent?.includes(text),
+  ) as HTMLButtonElement | undefined
+}

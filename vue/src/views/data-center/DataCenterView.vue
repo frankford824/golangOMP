@@ -21,23 +21,34 @@
     />
 
     <template v-else>
-      <div class="module-tabs" aria-label="数据中心模块">
+      <div class="module-tabs" role="tablist" aria-label="数据中心模块" aria-orientation="horizontal">
         <button
           v-for="tab in visibleTabs"
           :key="tab.key"
+          :id="tabButtonId(tab.key)"
           type="button"
+          role="tab"
           class="module-tab"
           :class="{ active: activeTab === tab.key }"
+          :aria-controls="tabPanelId(tab.key)"
+          :aria-selected="activeTab === tab.key"
+          :tabindex="activeTab === tab.key ? 0 : -1"
           @click="setActiveTab(tab.key)"
+          @keydown="handleTabKeydown($event, tab.key)"
         >
           <span>{{ tab.label }}</span>
           <small>{{ tab.hint }}</small>
         </button>
       </div>
 
-      <section class="module-body">
+      <section
+        class="module-body"
+        role="tabpanel"
+        :id="tabPanelId(activeTab)"
+        :aria-labelledby="tabButtonId(activeTab)"
+      >
         <KpiOverviewPanel v-if="activeTab === 'kpi'" :key="`kpi-${refreshToken}`" />
-        <ExperienceLearningPanel v-else-if="activeTab === 'experience'" :key="`experience-${refreshToken}`" />
+        <ExperienceLearningPanel v-else-if="activeTab === 'experience'" :refresh-token="refreshToken" />
         <ExportCenterView v-else-if="activeTab === 'export'" :key="`export-${refreshToken}`" embedded />
         <LogsManagementView
           v-else-if="activeTab === 'business'"
@@ -95,7 +106,7 @@ interface DataCenterTabItem {
 const route = useRoute()
 const router = useRouter()
 const permissionsStore = usePermissionsStore()
-const { can } = usePermission()
+const { can, canAccessModule, canAccessPage } = usePermission()
 
 const refreshToken = ref(0)
 const activeTab = ref<DataCenterTab>('kpi')
@@ -111,7 +122,12 @@ const canKpi = computed(
     permissionsStore.hasMenu('report_center') ||
     permissionsStore.hasMenu('finance'),
 )
-const canExperience = computed(() => permissionsStore.isSuperAdmin)
+const canExperience = computed(
+  () =>
+    can('reports.experience.view') ||
+    canAccessPage('data_center_experience') ||
+    canAccessModule('experience_learning'),
+)
 
 const visibleTabs = computed<DataCenterTabItem[]>(() => {
   const tabs: DataCenterTabItem[] = []
@@ -150,6 +166,43 @@ function setActiveTab(tab: DataCenterTab) {
   void router.replace({ path: route.path, query: nextQuery })
 }
 
+function tabButtonId(tab: DataCenterTab): string {
+  return `data-center-tab-${tab}`
+}
+
+function tabPanelId(tab: DataCenterTab): string {
+  return `data-center-panel-${tab}`
+}
+
+function focusTab(tab: DataCenterTab) {
+  if (typeof document === 'undefined') return
+  document.getElementById(tabButtonId(tab))?.focus()
+}
+
+function handleTabKeydown(event: KeyboardEvent, tab: DataCenterTab) {
+  const currentIndex = visibleTabs.value.findIndex((item) => item.key === tab)
+  if (currentIndex < 0) return
+
+  const lastIndex = visibleTabs.value.length - 1
+  let nextIndex = currentIndex
+  if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+    nextIndex = currentIndex === lastIndex ? 0 : currentIndex + 1
+  } else if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') {
+    nextIndex = currentIndex === 0 ? lastIndex : currentIndex - 1
+  } else if (event.key === 'Home') {
+    nextIndex = 0
+  } else if (event.key === 'End') {
+    nextIndex = lastIndex
+  } else {
+    return
+  }
+  event.preventDefault()
+  const nextTab = visibleTabs.value[nextIndex]?.key
+  if (!nextTab) return
+  setActiveTab(nextTab)
+  requestAnimationFrame(() => focusTab(nextTab))
+}
+
 watch(
   [() => route.query.tab, visibleTabs],
   () => {
@@ -158,7 +211,11 @@ watch(
       activeTab.value = requested
       return
     }
-    activeTab.value = firstVisibleTab()
+    const fallback = firstVisibleTab()
+    activeTab.value = fallback
+    if (visibleTabs.value.length > 0 && route.query.tab !== fallback) {
+      void router.replace({ path: route.path, query: { ...route.query, tab: fallback } })
+    }
   },
   { immediate: true },
 )
