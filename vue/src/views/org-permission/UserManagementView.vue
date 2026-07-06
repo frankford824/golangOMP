@@ -142,7 +142,7 @@
                 v-for="role in lockedDetailRoleOptions"
                 :key="'locked-' + role.code"
                 class="legacy-role-tag"
-                :title="role.assignmentNote || '历史兼容角色不可新增分配'"
+                :title="lockedRoleTooltip(role)"
               >
                 {{ role.display }}
               </span>
@@ -158,7 +158,7 @@
                 <span>{{ role.display }}</span>
               </label>
             </div>
-            <p v-else class="role-readonly-hint">当前账号没有服务端允许分配的角色，角色列表只读。</p>
+            <p v-else class="role-readonly-hint">当前账号没有可分配角色，角色信息仅可查看。</p>
             <div class="modal-actions-inline">
               <!-- 角色可写性同时依赖 frontend_access 与服务端角色目录 assignable_by_current_actor。 -->
               <button
@@ -170,7 +170,7 @@
               >
                 {{ roleSubmitting ? '提交中...' : '保存角色' }}
               </button>
-              <p v-else class="role-readonly-hint">当前账号无角色分派权限，角色列表只读。</p>
+              <p v-else class="role-readonly-hint">当前账号无角色分配权限，角色信息仅可查看。</p>
               <button
                 v-if="canDisableUser"
                 type="button"
@@ -262,7 +262,7 @@
               <span>{{ role.display }}</span>
             </label>
           </div>
-          <p v-else class="role-readonly-hint">当前账号没有可分配角色，新用户将由服务端按默认规则处理。</p>
+          <p v-else class="role-readonly-hint">当前账号没有可分配角色，新用户将使用系统默认角色。</p>
           <p v-if="createError" class="action-msg">{{ createError }}</p>
           <div class="modal-actions">
             <button type="button" class="um-btn um-btn--ghost" @click="showCreateModal = false">取消</button>
@@ -344,13 +344,11 @@ interface UserRow {
 interface RoleOption {
   code: string
   display: string
-  capabilities: string[]
   category: 'management' | 'business' | 'asset_workbench' | 'compatibility' | string
   assignable: boolean
   assignableByCurrentActor: boolean
   deprecated: boolean
   hiddenByDefault: boolean
-  assignmentNote: string
 }
 
 interface OrgTreeTeam {
@@ -623,22 +621,15 @@ function readBoolean(value: unknown, fallback: boolean): boolean {
   return fallback
 }
 
-function readStringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) return []
-  return value.map((item) => String(item ?? '').trim()).filter(Boolean)
-}
-
 function legacyRoleOption(code: string): RoleOption {
   return {
     code,
     display: workflowRoleApiToDisplay(code),
-    capabilities: [],
     category: 'compatibility',
     assignable: false,
     assignableByCurrentActor: false,
     deprecated: true,
     hiddenByDefault: true,
-    assignmentNote: '历史兼容角色不可新增分配',
   }
 }
 
@@ -657,10 +648,12 @@ function roleOptionFromRecord(code: string, raw: Record<string, unknown>): RoleO
     raw.display ?? raw.display_name ?? raw.label ?? raw.title ?? '',
   ).trim()
   const nameRaw = String(raw.name ?? '').trim()
+  const businessDisplay = workflowRoleApiToDisplay(code)
   return {
     code,
-    display: displayRaw || (nameRaw && nameRaw !== code ? nameRaw : workflowRoleApiToDisplay(code)),
-    capabilities: readStringArray(raw.capabilities),
+    display: businessDisplay && businessDisplay !== code
+      ? businessDisplay
+      : displayRaw || (nameRaw && nameRaw !== code ? nameRaw : code),
     category,
     assignable: readBoolean(raw.assignable, false),
     assignableByCurrentActor: readBoolean(
@@ -669,7 +662,6 @@ function roleOptionFromRecord(code: string, raw: Record<string, unknown>): RoleO
     ),
     deprecated,
     hiddenByDefault,
-    assignmentNote: String(raw.assignment_note ?? raw.assignmentNote ?? '').trim(),
   }
 }
 
@@ -687,6 +679,13 @@ function mergeRoleCodes(...groups: string[][]): string[] {
     }
   }
   return Array.from(out)
+}
+
+function lockedRoleTooltip(role: RoleOption): string {
+  if (role.category === 'compatibility' || role.deprecated) {
+    return '当前账号已持有历史保留角色；本页不再支持新增分配。'
+  }
+  return '当前账号已持有该角色；本页不支持由当前登录账号调整。'
 }
 
 function teamMatchesDepartment(
@@ -809,7 +808,7 @@ async function loadUsers() {
     if (isDeptScopedOnly.value && !currentDepartmentScope.value) {
       users.value = []
       pagination.value = { total: 0, page: page.value, page_size: pageSize.value }
-      listError.value = '当前账号缺少部门管理范围，请联系 HRAdmin 或 SuperAdmin 修正组织归属。'
+      listError.value = '当前账号缺少部门管理范围，请联系人事管理员或超级管理员修正组织归属。'
       return
     }
     const deptScope = isDeptScopedOnly.value ? currentDepartmentScope.value : undefined

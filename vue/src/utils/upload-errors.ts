@@ -1,4 +1,5 @@
 import axios, { type AxiosError } from 'axios'
+import { resolveApiUserMessage } from '@/utils/api-message-zh'
 
 export type UploadFailurePhase =
   | 'create_session'
@@ -10,21 +11,6 @@ export type UploadFailurePhase =
 
 export interface UploadFailureFormatOptions {
   transportLabel?: string
-}
-
-function pickBackendMessage(data: unknown): string | undefined {
-  if (data == null || typeof data !== 'object') return undefined
-  const o = data as Record<string, unknown>
-  const nested = o.error
-  if (nested && typeof nested === 'object') {
-    const m = (nested as { message?: string }).message
-    if (typeof m === 'string' && m.trim()) return m
-  }
-  for (const k of ['detail', 'message', 'msg'] as const) {
-    const v = o[k]
-    if (typeof v === 'string' && v.trim()) return v
-  }
-  return undefined
 }
 
 /** 解析后端 `error.code`（axios 响应体根或 `error` 嵌套） */
@@ -125,9 +111,19 @@ function pickBackendTraceId(data: unknown): string | undefined {
 
 function appendTraceId(base: string, traceId: string | undefined): string {
   if (!traceId) return base
-  // 若已包含相同 trace_id（极少场景：错误经多次拼接），避免重复追加。
+  // 若已包含相同问题编号（极少场景：错误经多次拼接），避免重复追加。
   if (base.includes(traceId)) return base
-  return `${base} (trace_id: ${traceId})`
+  return `${base}（问题编号：${traceId}）`
+}
+
+function uploadPhaseLabel(phase: UploadFailurePhase): string {
+  if (phase === 'create_session') return '创建上传入口失败'
+  if (phase === 'part_upload') return '文件上传失败'
+  if (phase === 'main_complete') return '确认上传结果失败'
+  if (phase === 'submit_design') return '提交审核失败'
+  if (phase === 'reference_upload') return '参考图上传失败'
+  if (phase === 'abort') return '取消上传失败'
+  return '上传失败'
 }
 
 export function formatSubmitDesignFailureMessage(err: unknown): string {
@@ -138,10 +134,12 @@ export function formatSubmitDesignFailureMessage(err: unknown): string {
     const joined = messages.join(' | ').toLowerCase()
     const hit = SUBMIT_DESIGN_ERROR_HINTS.find((item) => joined.includes(item.needle))
     if (hit) return hit.message
+    const userMessage = resolveApiUserMessage(err, { fallback: '' })
+    if (userMessage) return `提交审核失败：${userMessage}`
     if (messages.length > 0) {
-      return `提交审核失败${status ? `（HTTP ${status}）` : ''}：${messages[0]}`
+      return '提交审核失败，请检查填写内容后重试'
     }
-    if (status != null) return `提交审核失败（HTTP ${status}），请稍后重试`
+    if (status != null) return '提交审核失败，请稍后重试'
   }
   if (err instanceof Error && err.message) return err.message
   return '提交审核失败，请稍后重试'
@@ -157,9 +155,8 @@ export function formatUploadFailureMessage(
   options?: UploadFailureFormatOptions,
 ): string {
   const partHint = partNo != null ? `（分片 ${partNo}）` : ''
-  const transportHint = options?.transportLabel?.trim()
-    ? `，通道：${options.transportLabel.trim()}`
-    : ''
+  const transportHint = options?.transportLabel?.trim() ? '，请重新上传' : ''
+  const phaseLabel = uploadPhaseLabel(phase)
 
   if (axios.isAxiosError(err)) {
     const ax = err as AxiosError
@@ -167,55 +164,37 @@ export function formatUploadFailureMessage(
     const data = ax.response?.data
     const traceId = pickBackendTraceId(data)
     const byCode = messageForUploadErrorCode(pickBackendErrorCode(data))
-    if (byCode) return appendTraceId(`${byCode}（阶段：${phase}${transportHint}）`, traceId)
+    if (byCode) return appendTraceId(byCode, traceId)
 
     const backendCode = pickBackendErrorCode(data)
     const denyCode = pickBackendDetailString(data, 'deny_code')
     const action = pickBackendDetailString(data, 'action')
-    const taskStatus = pickBackendDetailString(data, 'task_status')
     if (
       backendCode === 'PERMISSION_DENIED' &&
       denyCode === 'task_status_not_actionable' &&
       (action === 'asset_upload_session_complete' || action === 'asset_upload_session_cancel')
     ) {
       return appendTraceId(
-        `上传会话处理失败：任务状态已切换为 ${taskStatus || '不可上传'}，当前阶段不再允许继续 complete/cancel（并非文件大小问题）`,
+        '任务状态已更新，当前不能继续上传，请刷新任务后重试',
         traceId,
       )
     }
 
-    const backend = pickBackendMessage(data)
+    const userMessage = resolveApiUserMessage(err, { fallback: '' })
 
     if (status != null) {
-      if (backend) {
-        const phaseLabel =
-          phase === 'create_session'
-            ? '创建上传会话'
-            : phase === 'part_upload'
-              ? '分片上传'
-              : phase === 'main_complete'
-                  ? '服务端确认完成'
-                  : phase === 'submit_design'
-                    ? '提交审核'
-                  : phase === 'abort'
-                    ? '取消上传会话'
-                    : phase === 'reference_upload'
-                      ? '参考图上传'
-                      : '上传'
-        return appendTraceId(
-          `${phaseLabel}失败（HTTP ${status}）${partHint}${transportHint}：${backend}`,
-          traceId,
-        )
+      if (userMessage) {
+        return appendTraceId(`${phaseLabel}${partHint}${transportHint}：${userMessage}`, traceId)
       }
       return appendTraceId(
-        `上传失败（HTTP ${status}）${partHint}，阶段：${phase}${transportHint}`,
+        `${phaseLabel}${partHint}，请稍后重试`,
         traceId,
       )
     }
 
     if (ax.code === 'ECONNABORTED' || ax.message?.toLowerCase().includes('timeout')) {
       return appendTraceId(
-        `上传超时${partHint}，阶段：${phase}${transportHint}，请检查网络后重试`,
+        `上传超时${partHint}，请检查网络后重试`,
         traceId,
       )
     }
@@ -225,18 +204,17 @@ export function formatUploadFailureMessage(
       ax.message === 'Network Error' ||
       (typeof ax.message === 'string' && ax.message.toLowerCase().includes('network'))
     ) {
-      const origin = typeof window !== 'undefined' ? window.location.origin : ''
       return appendTraceId(
-        `无法连接上传服务（网络/CORS/内网不可达）${partHint}，阶段：${phase}${transportHint}` +
-          (origin ? `。当前页面 Origin：${origin}` : ''),
+        `上传服务暂时无法连接${partHint}，请检查网络或稍后重试`,
         traceId,
       )
     }
   }
 
   if (err instanceof Error && err.message) {
-    return `${err.message}${partHint}（阶段：${phase}${transportHint}）`
+    const message = err.message.trim()
+    if (message) return `${phaseLabel}${partHint}：${message}`
   }
 
-  return `上传失败${partHint}，阶段：${phase}${transportHint}`
+  return `${phaseLabel}${partHint}，请稍后重试`
 }

@@ -133,7 +133,7 @@ describe('UserManagementView role governance', () => {
         data: [
           {
             role: 'Member',
-            name: '成员',
+            name: 'Member',
             category: 'business',
             assignable: true,
             assignable_by_current_actor: true,
@@ -142,7 +142,7 @@ describe('UserManagementView role governance', () => {
           },
           {
             role: 'Outsource',
-            name: '外协',
+            name: 'Outsource',
             category: 'compatibility',
             assignable: false,
             assignable_by_current_actor: false,
@@ -152,7 +152,7 @@ describe('UserManagementView role governance', () => {
           },
           {
             role: 'SuperAdmin',
-            name: '超级管理员',
+            name: 'Super Admin',
             category: 'management',
             assignable: true,
             assignable_by_current_actor: false,
@@ -206,6 +206,8 @@ describe('UserManagementView role governance', () => {
     expect(wrapper.text()).toContain('历史/不可编辑角色')
     expect(wrapper.text()).toContain('外协')
     expect(wrapper.text()).toContain('超级管理员')
+    expect(wrapper.text()).not.toContain('Super Admin')
+    expect(wrapper.text()).not.toContain('Outsource')
 
     await checkboxes[0].setValue(false)
     await wrapper.findAll('button').find((button) => button.text() === '保存角色')?.trigger('click')

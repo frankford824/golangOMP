@@ -16,6 +16,10 @@ export const WORKFLOW_ROLE_DISPLAY_TO_API: Record<string, string> = {
   普通审核B: 'Audit_B',
   定制审核: 'CustomizationReviewer',
   仓储: 'Warehouse',
+  交付人员: 'AssetSubmitter',
+  作品管理: 'AssetManager',
+  计价配置: 'AssetTemplateAdmin',
+  结算财务: 'AssetSettlement',
 }
 
 /**
@@ -36,6 +40,10 @@ export const WORKFLOW_ROLE_API_LABEL_ZH: Record<string, string> = {
   Audit_B: '普通审核B',
   CustomizationReviewer: '定制审核',
   Warehouse: '仓储',
+  AssetSubmitter: '交付人员',
+  AssetManager: '作品管理',
+  AssetTemplateAdmin: '计价配置',
+  AssetSettlement: '结算财务',
   Outsource: '外协',
   ERP: '企管(ERP)',
 }
@@ -74,6 +82,14 @@ const ROLE_SLUG_TO_ZH: Record<string, string> = {
   erp: '企管(ERP)',
   customization_reviewer: '定制审核',
   customizationreviewer: '定制审核',
+  asset_submitter: '交付人员',
+  assetsubmitter: '交付人员',
+  asset_manager: '作品管理',
+  assetmanager: '作品管理',
+  asset_template_admin: '计价配置',
+  assettemplateadmin: '计价配置',
+  asset_settlement: '结算财务',
+  assetsettlement: '结算财务',
 }
 
 function labelTableInsensitive(

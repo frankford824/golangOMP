@@ -58,4 +58,38 @@ describe('resolveApiUserMessage', () => {
 
     expect(message).toBe('与已有数据冲突，请更换后重试')
   })
+
+  it('maps deny_code from error.details before generic permission copy', () => {
+    const message = resolveApiUserMessage({
+      status: 403,
+      responseData: {
+        error: {
+          code: 'PERMISSION_DENIED',
+          message: 'role is not assignable by current actor',
+          details: {
+            deny_code: 'role_not_assignable',
+          },
+        },
+      },
+    })
+
+    expect(message).toBe('当前账号不能分配所选角色，请调整后重试')
+  })
+
+  it('maps customization upload deny codes to business copy', () => {
+    const message = resolveApiUserMessage({
+      status: 400,
+      responseData: {
+        error: {
+          code: 'INVALID_REQUEST',
+          message: 'customization review uploads only support source assets',
+          details: {
+            deny_code: 'customization_review_asset_type_not_allowed',
+          },
+        },
+      },
+    })
+
+    expect(message).toBe('定制审核阶段只能上传修改后的源文件')
+  })
 })

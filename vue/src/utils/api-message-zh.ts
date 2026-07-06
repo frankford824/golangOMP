@@ -54,6 +54,16 @@ export const API_DENY_CODE_ZH: Record<string, string> = {
   module_claim_conflict: '该任务已被他人领取',
   module_blueprint_missing_team: '池组配置缺失，请联系管理员',
   task_already_claimed: '任务已被接单，无法作废',
+  role_not_assignable: '当前账号不能分配所选角色，请调整后重试',
+  last_super_admin_removal_denied: '至少需要保留一个超级管理员，不能移除最后一个超级管理员角色',
+  last_super_admin_deactivate_denied: '至少需要保留一个启用中的超级管理员，不能禁用最后一个超级管理员',
+  customization_review_asset_invalid: '请选择当前任务下已上传完成的源文件',
+  customization_review_asset_type_not_allowed: '定制审核阶段只能上传修改后的源文件',
+  customization_review_upload_session_asset_type_not_allowed: '定制审核阶段只能上传修改后的源文件',
+  audit_stage_asset_type_not_allowed: '当前审核阶段不支持上传这种文件',
+  missing_customization_submit_role: '当前账号不能提交定制生产文件',
+  avatar_url_not_managed: '头像需要通过头像上传入口提交',
+  reason_required: '请填写原因',
 }
 
 /**
@@ -70,10 +80,65 @@ export const API_ERROR_MESSAGE_ZH: Record<string, string> = {
   'password must be at least 8 characters': '密码至少 8 个字符',
   'password must include letters and numbers': '密码必须包含字母和数字',
   'mobile format is invalid': '手机号格式不正确',
+  'mobile is required': '手机号必填',
   'invalid mobile': '手机号格式不正确',
   'invalid email': '邮箱格式不正确',
+  'email format is invalid': '邮箱格式不正确',
   'invalid department': '部门无效，请重新选择',
   'invalid team': '组无效，请重新选择',
+  'department is required': '请选择部门',
+  'department is invalid': '部门无效，请重新选择',
+  'team is required': '请选择小组',
+  'team is invalid for department': '小组不属于所选部门，请重新选择',
+  'team must belong to department': '小组不属于所选部门，请重新选择',
+  'team and group must be the same when both are provided': '小组信息不一致，请刷新后重试',
+  'unassigned pool team is not configured': '未分配池尚未配置，请联系管理员',
+  'unassigned pool is disabled': '未分配池当前不可用，请联系管理员',
+  'status must be active or disabled': '状态只能选择启用或已禁用',
+  'display_name is required': '姓名必填',
+  'username is required': '用户名必填',
+  'account is required': '账号必填',
+  'name is required': '姓名必填',
+  'account and password are required': '账号和密码必填',
+  'old password is incorrect': '旧密码不正确',
+  'new password confirmation does not match': '两次输入的新密码不一致',
+  'new password must be different from old password': '新密码不能与旧密码相同',
+  'user is disabled': '账号已被禁用，请联系管理员',
+  'account already exists': '账号已存在',
+  'mobile already exists': '手机号已被使用',
+  'one or more roles are invalid': '角色选择无效，请刷新后重试',
+  'role is invalid': '角色选择无效，请刷新后重试',
+  'role is not assignable by current actor': '当前账号不能分配所选角色，请调整后重试',
+  'at least one superadmin user must remain': '至少需要保留一个超级管理员',
+  'at least one active superadmin user must remain': '至少需要保留一个启用中的超级管理员',
+  'customization review uploads only support source assets': '定制审核阶段只能上传修改后的源文件',
+  'customization reviewer upload sessions only support source assets': '定制审核阶段只能上传修改后的源文件',
+  'customization review asset must be an uploaded source asset owned by the current task': '请选择当前任务下已上传完成的源文件',
+  'source_asset_id must point to source asset': '请选择源文件类型的资产',
+  'source_asset_id does not belong to task_id': '该源文件不属于当前任务，请重新上传',
+  'current_asset_id is required before customization delivery can advance': '请先上传并绑定定制源文件',
+  'upload_session does not belong to current task': '上传会话不属于当前任务，请重新上传',
+  'upload_session is already terminal': '上传会话已结束，请重新上传',
+  'upload_session asset_type is required': '请选择上传文件类型',
+  'upload_session is required': '缺少上传会话，请重新上传',
+  'upload_session already completed without bound asset version': '上传结果异常，请重新上传',
+  'upload_session bound asset version is missing': '上传结果异常，请重新上传',
+  'upload_session completed design asset is missing': '上传结果异常，请重新上传',
+  'completed upload_session cannot be cancelled': '上传已完成，无法取消',
+  'filename is required': '请选择文件',
+  'expected_size must be greater than or equal to zero': '文件大小异常，请重新选择文件',
+  'asset_type is required': '请选择上传文件类型',
+  'asset_type does not match existing asset': '文件类型与已有资产不一致，请重新上传',
+  'target_sku_code must belong to the task': '所选商品不属于当前任务，请刷新后重试',
+  'target_sku_code does not match existing asset scope': '文件归属商品与已有资产不一致，请重新上传',
+  'target_sku_code does not match upload session target_sku_code': '文件归属商品与上传会话不一致，请重新上传',
+  'retouch_requirement_id does not match existing asset scope': '文件归属需求与已有资产不一致，请重新上传',
+  'upload_content_type must match upload_session required content type': '文件格式与上传会话不一致，请重新上传',
+  'oss direct complete requires oss_parts, oss_upload_id, and oss_object_key together': '上传结果不完整，请重新上传',
+  'delivery/source/preview assets must use multipart upload mode': '上传入口异常，请刷新后重试',
+  'assets must use multipart upload mode': '上传入口异常，请刷新后重试',
+  'source_asset_id is only allowed for preview or design_thumb assets': '源文件关联方式不正确，请刷新后重试',
+  'asset version race detected; retry with a fresh upload session': '资产版本已更新，请重新上传',
   'admin key is invalid': '管理员密钥不正确',
   'invalid admin key': '管理员密钥不正确',
   'registration is disabled': '当前已关闭自助注册',
@@ -123,6 +188,13 @@ type UnwrappedBody = {
   deny_code?: string
   message?: string
   detail?: string
+  details?: unknown
+}
+
+function pickDetailString(details: unknown, key: string): string {
+  if (!details || typeof details !== 'object') return ''
+  const v = (details as Record<string, unknown>)[key]
+  return typeof v === 'string' ? v.trim() : ''
 }
 
 function unwrapResponseBody(data: unknown): UnwrappedBody | undefined {
@@ -167,12 +239,16 @@ export function parseApiErrorPayload(err: unknown): ParsedApiError {
 
   const rootCode = typeof root?.code === 'string' ? root.code : ''
   const code = (typeof apiErr?.code === 'string' ? apiErr.code : rootCode).trim().toUpperCase()
+  const errorDetails =
+    root?.error && typeof root.error === 'object'
+      ? (root.error as Record<string, unknown>).details
+      : undefined
   const denyCode = (
-    typeof apiErr?.deny_code === 'string'
-      ? apiErr.deny_code
-      : typeof root?.deny_code === 'string'
-        ? root.deny_code
-        : ''
+    (typeof apiErr?.deny_code === 'string' ? apiErr.deny_code : '') ||
+    pickDetailString(apiErr?.details, 'deny_code') ||
+    pickDetailString(errorDetails, 'deny_code') ||
+    pickDetailString(root?.details, 'deny_code') ||
+    (typeof root?.deny_code === 'string' ? root.deny_code : '')
   ).trim()
 
   let message = (typeof apiErr?.message === 'string' ? apiErr.message : '').trim()
