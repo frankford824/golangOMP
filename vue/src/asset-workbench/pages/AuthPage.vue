@@ -103,13 +103,16 @@ async function submitRegister() {
 </script>
 
 <template>
-  <main class="aw-auth" aria-labelledby="aw-auth-title">
-    <section class="aw-auth__panel">
-      <div class="aw-auth__brand" aria-hidden="true">
-        <span class="aw-shell__mark">AW</span>
-        <span>资产工作台</span>
+  <main class="aw-auth" :class="{ 'aw-auth--register': isRegister }" aria-labelledby="aw-auth-title">
+    <section class="aw-auth__intro" aria-label="资产工作台">
+      <div class="aw-auth__brandbar">
+        <span class="aw-auth__brandmark" aria-hidden="true">AW</span>
+        <strong>资产工作台</strong>
       </div>
+    </section>
 
+    <section class="aw-auth__panel">
+      <strong class="aw-auth__wordmark" aria-hidden="true">AW</strong>
       <div class="aw-auth__tabs" role="tablist" aria-label="资产工作台认证">
         <RouterLink to="/login" class="aw-auth__tab" :class="{ 'aw-auth__tab--active': !isRegister }">
           <LockKeyhole :size="16" aria-hidden="true" />
@@ -123,13 +126,14 @@ async function submitRegister() {
 
       <form v-if="!isRegister" class="aw-auth__form" @submit.prevent="submitLogin">
         <h1 id="aw-auth-title">{{ title }}</h1>
+        <p class="aw-auth__lead">使用已开通账号进入素材网盘。</p>
         <label class="aw-field">
           <span>账号</span>
-          <input v-model.trim="loginForm.account" autocomplete="username" required autofocus />
+          <input v-model.trim="loginForm.account" autocomplete="username" placeholder="请输入账号" required autofocus />
         </label>
         <label class="aw-field">
           <span>密码</span>
-          <input v-model="loginForm.password" type="password" autocomplete="current-password" required />
+          <input v-model="loginForm.password" type="password" autocomplete="current-password" placeholder="请输入密码" required />
         </label>
         <p v-if="error" class="aw-form-error">{{ error }}</p>
         <button class="aw-primary-button aw-auth__submit" type="submit" :disabled="loading">
@@ -140,22 +144,23 @@ async function submitRegister() {
 
       <form v-else class="aw-auth__form" @submit.prevent="submitRegister">
         <h1 id="aw-auth-title">{{ title }}</h1>
+        <p class="aw-auth__lead">提交后进入成员开通流程。</p>
         <div class="aw-form-grid">
           <label class="aw-field">
             <span>账号</span>
-            <input v-model.trim="registerForm.account" autocomplete="username" required autofocus />
+            <input v-model.trim="registerForm.account" autocomplete="username" placeholder="用于登录" required autofocus />
           </label>
           <label class="aw-field">
             <span>姓名</span>
-            <input v-model.trim="registerForm.name" autocomplete="name" required />
+            <input v-model.trim="registerForm.name" autocomplete="name" placeholder="真实姓名" required />
           </label>
           <label class="aw-field">
             <span>手机号</span>
-            <input v-model.trim="registerForm.phone" autocomplete="tel" inputmode="tel" required />
+            <input v-model.trim="registerForm.phone" autocomplete="tel" inputmode="tel" placeholder="手机号" required />
           </label>
           <label class="aw-field">
             <span>邮箱</span>
-            <input v-model.trim="registerForm.email" type="email" autocomplete="email" />
+            <input v-model.trim="registerForm.email" type="email" autocomplete="email" placeholder="选填" />
           </label>
           <label class="aw-field">
             <span>所属类型</span>
@@ -174,23 +179,23 @@ async function submitRegister() {
           </label>
           <label class="aw-field">
             <span>省份</span>
-            <input v-model.trim="registerForm.province" autocomplete="address-level1" />
+            <input v-model.trim="registerForm.province" autocomplete="address-level1" placeholder="选填" />
           </label>
           <label class="aw-field">
             <span>城市</span>
-            <input v-model.trim="registerForm.city" autocomplete="address-level2" />
+            <input v-model.trim="registerForm.city" autocomplete="address-level2" placeholder="选填" />
           </label>
           <label class="aw-field aw-form-grid__full">
             <span>身份证号</span>
-            <input v-model.trim="registerForm.id_card" autocomplete="off" />
+            <input v-model.trim="registerForm.id_card" autocomplete="off" placeholder="选填" />
           </label>
           <label class="aw-field aw-form-grid__full">
             <span>支付宝账号</span>
-            <input v-model.trim="registerForm.alipay_account" autocomplete="off" />
+            <input v-model.trim="registerForm.alipay_account" autocomplete="off" placeholder="选填" />
           </label>
           <label class="aw-field aw-form-grid__full">
             <span>密码</span>
-            <input v-model="registerForm.password" type="password" autocomplete="new-password" required />
+            <input v-model="registerForm.password" type="password" autocomplete="new-password" placeholder="设置登录密码" required />
           </label>
         </div>
         <p v-if="error" class="aw-form-error">{{ error }}</p>
