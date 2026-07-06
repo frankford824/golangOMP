@@ -58,6 +58,7 @@ const previewUrl = ref('')
 const previewEmptyLabel = ref('')
 const previewTitle = ref('')
 const previewMimeType = ref('')
+const previewIdentity = ref('')
 const previewRows = ref<Array<[string, string]>>([])
 const previewDownloadHandler = ref<(() => void | Promise<void>) | null>(null)
 const archiveOpen = ref(false)
@@ -82,6 +83,7 @@ function revokeArchivePreviewObjectUrl() {
 
 function closePreviewDialog() {
   previewOpen.value = false
+  previewIdentity.value = ''
   previewUrl.value = ''
   previewDownloadHandler.value = null
   revokeArchivePreviewObjectUrl()
@@ -431,6 +433,7 @@ async function openFilePreview(file: DriveFileRow) {
   }
   selectedFile.value = file
   previewOpen.value = true
+  previewIdentity.value = `file:${file.id}`
   previewTitle.value = fileDisplayName(file)
   previewMimeType.value = file.mime_type || ''
   previewRows.value = filePreviewRows(file)
@@ -509,24 +512,27 @@ function archiveVirtualFileKind(file: ArchiveVirtualFile): string {
 async function openArchiveVirtualFile(file: ArchiveVirtualFile) {
   revokeArchivePreviewObjectUrl()
   const canPreview = canPreviewArchiveVirtualFile(file)
+  const source = archiveSource.value
+  const sourceID = source?.id || 0
+  const entryPath = file.path
+  const previewKey = `archive:${sourceID}:${entryPath}`
   previewOpen.value = true
+  previewIdentity.value = previewKey
   previewTitle.value = file.name
   previewMimeType.value = file.mime_type || ''
   previewRows.value = [
-    ['所在位置', archiveSource.value ? fileDisplayName(archiveSource.value) : '压缩包'],
-    ['内部路径', file.path],
+    ['所在位置', source ? fileDisplayName(source) : '压缩包'],
+    ['内部路径', entryPath],
     ['格式', file.file_type || file.mime_type || '文件'],
     ['文件大小', formatSize(file.file_size)],
   ]
   previewUrl.value = ''
   previewEmptyLabel.value = canPreview ? '正在加载预览…' : '该格式暂不能在线预览，可下载后查看'
   previewDownloadHandler.value = () => {
-    const source = archiveSource.value
     if (source) return downloadArchiveEntryBlob(source.id, file)
     return undefined
   }
   if (!canPreview) return
-  const source = archiveSource.value
   if (!source) {
     previewEmptyLabel.value = '压缩包来源已关闭，请重新打开'
     return
@@ -534,7 +540,7 @@ async function openArchiveVirtualFile(file: ArchiveVirtualFile) {
   try {
     const seq = ++archivePreviewRequestSeq
     const objectUrl = await createArchiveEntryObjectUrl(source.id, file)
-    if (seq !== archivePreviewRequestSeq || !previewOpen.value) {
+    if (seq !== archivePreviewRequestSeq || !previewOpen.value || previewIdentity.value !== previewKey) {
       URL.revokeObjectURL(objectUrl)
       return
     }
@@ -976,6 +982,7 @@ onBeforeUnmount(() => {
     </footer>
 
     <WorkbenchPreviewDialog
+      :key="previewIdentity || previewTitle"
       :open="previewOpen"
       :title="previewTitle"
       eyebrow="上传作品预览"
@@ -987,7 +994,13 @@ onBeforeUnmount(() => {
       @download="handlePreviewDownload"
     />
 
-    <section v-if="archiveOpen" class="aw-token-scope aw-upload-ledger-archive" role="dialog" aria-modal="true" aria-label="压缩包内容">
+    <section
+      v-if="archiveOpen"
+      class="aw-token-scope aw-upload-ledger-archive"
+      role="dialog"
+      :aria-modal="previewOpen ? 'false' : 'true'"
+      aria-label="压缩包内容"
+    >
       <div class="aw-upload-ledger-archive__backdrop" @click="closeArchiveView" />
       <article class="aw-upload-ledger-archive__panel">
         <header class="aw-upload-ledger-archive__head">

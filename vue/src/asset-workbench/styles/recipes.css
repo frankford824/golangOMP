@@ -3541,7 +3541,7 @@ body.aw-submission-dialog-locked {
 .aw-material-preview {
   position: fixed;
   inset: 0;
-  z-index: 140;
+  z-index: var(--aw-z-preview, 1200);
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(280px, 360px);
   background: color-mix(in srgb, var(--aw-stage) 92%, transparent);
@@ -3682,7 +3682,7 @@ body.aw-submission-dialog-locked {
   position: fixed;
   left: 50%;
   bottom: var(--aw-space-4);
-  z-index: 141;
+  z-index: calc(var(--aw-z-preview, 1200) + 1);
   transform: translateX(-50%);
   min-width: min(420px, calc(100vw - 32px));
   min-height: var(--aw-row-md);
