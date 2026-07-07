@@ -141,6 +141,25 @@ describe('UserManagementView role governance', () => {
             hidden_by_default: false,
           },
           {
+            role: 'AssetSubmitter',
+            name: '素材工作台-交付人员',
+            category: 'asset_workbench',
+            assignable: true,
+            assignable_by_current_actor: true,
+            deprecated: false,
+            hidden_by_default: false,
+          },
+          {
+            role: 'Audit_B',
+            name: '历史兼容：常规审核旧编码',
+            category: 'compatibility',
+            assignable: false,
+            assignable_by_current_actor: false,
+            deprecated: true,
+            hidden_by_default: true,
+            assignment_note: '常规审核旧编码，不允许新增分配',
+          },
+          {
             role: 'Outsource',
             name: 'Outsource',
             category: 'compatibility',
@@ -173,7 +192,7 @@ describe('UserManagementView role governance', () => {
           display_name: '目标用户',
           department: 'Design',
           team: 'Design-A',
-          roles: ['Member', 'Outsource', 'SuperAdmin'],
+          roles: ['Member', 'Audit_B', 'Outsource', 'SuperAdmin'],
           status: 'active',
         },
       },
@@ -183,7 +202,7 @@ describe('UserManagementView role governance', () => {
         data: {
           id: '2',
           username: 'target',
-          roles: ['Outsource', 'SuperAdmin'],
+          roles: ['Audit_B', 'Outsource', 'SuperAdmin'],
           status: 'active',
         },
       },
@@ -202,19 +221,23 @@ describe('UserManagementView role governance', () => {
     await flushPromises()
 
     const checkboxes = wrapper.findAll('input[type="checkbox"]')
-    expect(checkboxes.map((item) => (item.element as HTMLInputElement).value)).toEqual(['Member'])
+    expect(checkboxes.map((item) => (item.element as HTMLInputElement).value)).toEqual(['Member', 'AssetSubmitter'])
     expect(wrapper.text()).toContain('历史/不可编辑角色')
+    expect(wrapper.text()).toContain('历史兼容：常规审核旧编码')
     expect(wrapper.text()).toContain('外协')
     expect(wrapper.text()).toContain('超级管理员')
+    expect(wrapper.text()).toContain('素材工作台角色')
+    expect(wrapper.text()).toContain('素材工作台-交付人员')
     expect(wrapper.text()).not.toContain('Super Admin')
     expect(wrapper.text()).not.toContain('Outsource')
+    expect(wrapper.text()).not.toContain('普通审核B')
 
     await checkboxes[0].setValue(false)
     await wrapper.findAll('button').find((button) => button.text() === '保存角色')?.trigger('click')
     await flushPromises()
 
     expect(usersApi.replaceRoles).toHaveBeenCalledWith('2', {
-      roles: ['Outsource', 'SuperAdmin'],
+      roles: ['Audit_B', 'Outsource', 'SuperAdmin'],
     })
   })
 

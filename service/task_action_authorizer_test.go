@@ -277,7 +277,7 @@ func TestTaskActionAuthorizerEvaluatePolicy(t *testing.T) {
 			wantDenyCode: "task_type_audit_not_supported",
 		},
 		{
-			name:   "audit_b_cannot_operate_a_stage",
+			name:   "legacy_audit_b_can_operate_a_stage",
 			action: TaskActionAuditApprove,
 			attrs:  TaskActionAttributes{AuditStage: domain.AuditRecordStageA},
 			actor: domain.RequestActor{
@@ -291,8 +291,8 @@ func TestTaskActionAuthorizerEvaluatePolicy(t *testing.T) {
 				OwnerOrgTeam:     "ops-team-1",
 				CurrentHandlerID: authzInt64Ptr(22),
 			},
-			wantAllowed:  false,
-			wantDenyCode: "missing_required_role",
+			wantAllowed:     true,
+			wantScopeSource: string(TaskActionScopeHandler),
 		},
 		{
 			name:   "audit_stage_mismatch_denied",

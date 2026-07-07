@@ -138,7 +138,7 @@
     "Audit_A": {
       "menus": ["audit_queue", "task_board", "task_list", "resource_management", "product_management"],
       "pages": ["task_board", "task_list", "audit_workspace", "assets_index", "task_assets", "asset_detail", "product_management"],
-      "actions": ["task.audit.claim", "task.audit.review", "task.asset_upload", "task.list"],
+      "actions": ["task.audit.claim", "task.audit.review", "task.audit.takeover", "task.asset_upload", "task.list"],
       "scopes": ["audit_workspace"]
     },
     "Audit_B": {

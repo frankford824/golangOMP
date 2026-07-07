@@ -625,7 +625,7 @@ function normalizeFlatTaskStatusFromApi(value: unknown): LegacyTaskStatus {
 }
 
 /**
- * 当扁平 task_status 仍为「设计中」但 workflow.sub_status.audit 已进入待审/复审时，
+ * 当扁平 task_status 仍为「设计中」但 workflow.sub_status.audit 已进入待审/交接复核时，
  * 对齐为 PendingAudit*，否则审核工作台左侧（仅看 tasksStore.list + isPendingAudit*）会漏单。
  * retouch_task 不进入审核轨，禁止根据 audit 子状态抬升为 PendingAudit*。
  */
@@ -2281,16 +2281,16 @@ export const useTasksStore = defineStore('tasks', () => {
     }
   }
 
-  /** 转复审（审核 B），调用审核通过接口，后端要求 stage、next_status 必填 */
+  /** 转交复核，进入常规审核交接/复核状态。后端要求 stage、next_status 必填。 */
   async function transferToAuditB(taskId: string, comment?: string) {
     const task = getById(taskId)
     if (!task) throw new Error('任务不存在')
-    if (isPurchaseTask(task)) throw new Error('采购任务不转复审')
-    if (!canTransferToAuditB(task)) throw new Error('当前状态不可转复审')
+    if (isPurchaseTask(task)) throw new Error('采购任务不转交复核')
+    if (!canTransferToAuditB(task)) throw new Error('当前状态不可转交复核')
     await tasksApi.auditApprove(taskId, {
       stage: 'A',
       next_status: 'PendingAuditB',
-      comment: comment ?? '转复审',
+      comment: comment ?? '转交复核',
     })
     await loadTaskById(taskId)
   }
@@ -2417,7 +2417,7 @@ export const useTasksStore = defineStore('tasks', () => {
     if (!task) return
     if (isPurchaseTask(task)) return
     if (!canResubmitAuditB(task)) return
-    // 复审打回后重新提交复审，同时清理仓库退回标记，允许后续再次进仓库
+    // 复核打回后重新提交交接复核，同时清理仓库退回标记，允许后续再次进仓库
     updateTask(taskId, { status: 'PendingAuditB', warehouseReceiveStatus: undefined, auditSubStatus: 'IN_PROGRESS' })
   }
 
@@ -2548,7 +2548,7 @@ export const useTasksStore = defineStore('tasks', () => {
       return
     }
 
-    // 设计类任务：退回仓库后回退到复审打回节点，由审核/设计侧整改后重新提交
+    // 设计类任务：退回仓库后回退到交接复核打回节点，由审核/设计侧整改后重新提交
     updateTask(taskId, {
       warehouseReceiveStatus: 'returned',
       warehouseSubStatus: 'RETURNED',

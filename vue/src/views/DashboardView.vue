@@ -506,7 +506,7 @@ const recentEvents = computed<RecentEvent[]>(() => {
           : 'handover'
     const title =
       type === 'audit_passed'
-        ? '初审/复审通过'
+        ? '审核通过'
         : type === 'audit_rejected'
           ? '审核打回'
           : '审核交班'

@@ -13,7 +13,6 @@ func OfficialProductRoles() []Role {
 		RoleDesigner,
 		RoleCustomizationOperator,
 		RoleAuditA,
-		RoleAuditB,
 		RoleCustomizationReviewer,
 		RoleWarehouse,
 	}
@@ -28,6 +27,7 @@ func CompatibilityRoles() []Role {
 		RoleRoleAdmin,
 		RoleDesignDirector,
 		RoleDesignReviewer,
+		RoleAuditB,
 		RoleOutsource,
 		RoleERP,
 	}
@@ -38,7 +38,7 @@ func IsOfficialProductRole(r Role) bool {
 	switch r {
 	case RoleMember, RoleSuperAdmin, RoleHRAdmin, RoleDeptAdmin, RoleTeamLead,
 		RoleOps, RoleDesigner, RoleCustomizationOperator,
-		RoleAuditA, RoleAuditB, RoleCustomizationReviewer, RoleWarehouse:
+		RoleAuditA, RoleCustomizationReviewer, RoleWarehouse:
 		return true
 	}
 	return false
@@ -48,7 +48,7 @@ func IsOfficialProductRole(r Role) bool {
 func IsCompatibilityRole(r Role) bool {
 	switch r {
 	case RoleAdmin, RoleOrgAdmin, RoleRoleAdmin, RoleDesignDirector,
-		RoleDesignReviewer, RoleOutsource, RoleERP:
+		RoleDesignReviewer, RoleAuditB, RoleOutsource, RoleERP:
 		return true
 	}
 	return false

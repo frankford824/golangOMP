@@ -147,16 +147,21 @@
                 {{ role.display }}
               </span>
             </div>
-            <div v-if="editableRoleOptions.length" class="roles-grid" :class="{ 'roles-grid-readonly': !canAssignRoles }">
-              <label v-for="role in editableRoleOptions" :key="role.code" class="role-check">
-                <input
-                  v-model="selectedRoleCodes"
-                  type="checkbox"
-                  :value="role.code"
-                  :disabled="!canAssignRoles"
-                />
-                <span>{{ role.display }}</span>
-              </label>
+            <div v-if="editableRoleGroups.length" class="role-groups" :class="{ 'roles-grid-readonly': !canAssignRoles }">
+              <section v-for="group in editableRoleGroups" :key="group.category" class="role-group">
+                <h4 class="role-group-title">{{ group.title }}</h4>
+                <div class="roles-grid">
+                  <label v-for="role in group.roles" :key="role.code" class="role-check">
+                    <input
+                      v-model="selectedRoleCodes"
+                      type="checkbox"
+                      :value="role.code"
+                      :disabled="!canAssignRoles"
+                    />
+                    <span>{{ role.display }}</span>
+                  </label>
+                </div>
+              </section>
             </div>
             <p v-else class="role-readonly-hint">当前账号没有可分配角色，角色信息仅可查看。</p>
             <div class="modal-actions-inline">
@@ -256,11 +261,16 @@
               <option value="disabled">已禁用</option>
             </select>
           </div>
-          <div v-if="editableRoleOptions.length" class="roles-grid mt-2">
-            <label v-for="role in editableRoleOptions" :key="'create-' + role.code" class="role-check">
-              <input v-model="createForm.roles" type="checkbox" :value="role.code" />
-              <span>{{ role.display }}</span>
-            </label>
+          <div v-if="editableRoleGroups.length" class="role-groups mt-2">
+            <section v-for="group in editableRoleGroups" :key="'create-' + group.category" class="role-group">
+              <h4 class="role-group-title">{{ group.title }}</h4>
+              <div class="roles-grid">
+                <label v-for="role in group.roles" :key="'create-' + role.code" class="role-check">
+                  <input v-model="createForm.roles" type="checkbox" :value="role.code" />
+                  <span>{{ role.display }}</span>
+                </label>
+              </div>
+            </section>
           </div>
           <p v-else class="role-readonly-hint">当前账号没有可分配角色，新用户将使用系统默认角色。</p>
           <p v-if="createError" class="action-msg">{{ createError }}</p>
@@ -349,6 +359,12 @@ interface RoleOption {
   assignableByCurrentActor: boolean
   deprecated: boolean
   hiddenByDefault: boolean
+}
+
+interface RoleOptionGroup {
+  category: string
+  title: string
+  roles: RoleOption[]
 }
 
 interface OrgTreeTeam {
@@ -476,6 +492,7 @@ const editableRoleOptions = computed(() =>
       role.category !== 'compatibility',
   ),
 )
+const editableRoleGroups = computed<RoleOptionGroup[]>(() => groupRoleOptions(editableRoleOptions.value))
 const editableRoleCodeSet = computed(() => new Set(editableRoleOptions.value.map((role) => role.code)))
 const roleOptionByCode = computed(() => {
   const out = new Map<string, RoleOption>()
@@ -635,6 +652,49 @@ function legacyRoleOption(code: string): RoleOption {
 
 function roleOptionFromString(code: string): RoleOption {
   return legacyRoleOption(code)
+}
+
+function roleCategoryTitle(category: string): string {
+  switch (category) {
+    case 'management':
+      return '管理角色'
+    case 'asset_workbench':
+      return '素材工作台角色'
+    case 'business':
+      return '主业务角色'
+    default:
+      return '其他角色'
+  }
+}
+
+function roleCategoryWeight(category: string): number {
+  switch (category) {
+    case 'management':
+      return 10
+    case 'business':
+      return 20
+    case 'asset_workbench':
+      return 30
+    default:
+      return 90
+  }
+}
+
+function groupRoleOptions(roles: RoleOption[]): RoleOptionGroup[] {
+  const groups = new Map<string, RoleOption[]>()
+  for (const role of roles) {
+    const category = role.category || 'business'
+    const existing = groups.get(category)
+    if (existing) existing.push(role)
+    else groups.set(category, [role])
+  }
+  return Array.from(groups.entries())
+    .sort(([a], [b]) => roleCategoryWeight(a) - roleCategoryWeight(b))
+    .map(([category, items]) => ({
+      category,
+      title: roleCategoryTitle(category),
+      roles: items,
+    }))
 }
 
 function roleOptionFromRecord(code: string, raw: Record<string, unknown>): RoleOption {
@@ -1480,15 +1540,35 @@ onBeforeUnmount(() => {
   gap: 0.6rem;
 }
 
-.um-modal .roles-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 0.5rem;
+.um-modal .role-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
   padding: 0.75rem;
   border-radius: 0.75rem;
   border: 1px solid rgb(var(--yb-border));
   background: rgb(var(--yb-surface-soft));
   box-shadow: none;
+}
+
+.um-modal .role-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.um-modal .role-group-title {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1.35;
+  color: rgb(var(--yb-text-muted));
+}
+
+.um-modal .roles-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.5rem;
 }
 
 .um-modal .roles-grid-readonly {

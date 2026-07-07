@@ -92,6 +92,12 @@ func TestListRolesMarksAssignableByCurrentActor(t *testing.T) {
 	if roleCatalogEntryForTest(entries, domain.RoleOutsource).Assignable {
 		t.Fatal("Outsource assignable = true, want false")
 	}
+	if roleCatalogEntryForTest(entries, domain.RoleAuditB).Assignable {
+		t.Fatal("Audit_B assignable = true, want false")
+	}
+	if roleCatalogEntryForTest(entries, domain.RoleAuditB).AssignableByCurrentActor {
+		t.Fatal("Audit_B assignable_by_current_actor = true, want false")
+	}
 	if roleCatalogEntryForTest(entries, domain.RoleOutsource).AssignableByCurrentActor {
 		t.Fatal("Outsource assignable_by_current_actor = true, want false")
 	}
@@ -117,6 +123,13 @@ func TestAuthorizeAssignableRoleAdditionsRejectsCompatibilityRoles(t *testing.T)
 	appErr := authorizeAssignableRoleAdditions(ctx, domain.DepartmentAudit, []domain.Role{domain.RoleOutsource})
 	if appErr == nil {
 		t.Fatal("authorizeAssignableRoleAdditions(Outsource) appErr = nil, want deny")
+	}
+	if denyCode := appErrorDenyCode(appErr); denyCode != "role_not_assignable" {
+		t.Fatalf("deny_code = %q, want role_not_assignable", denyCode)
+	}
+	appErr = authorizeAssignableRoleAdditions(ctx, domain.DepartmentAudit, []domain.Role{domain.RoleAuditB})
+	if appErr == nil {
+		t.Fatal("authorizeAssignableRoleAdditions(Audit_B) appErr = nil, want deny")
 	}
 	if denyCode := appErrorDenyCode(appErr); denyCode != "role_not_assignable" {
 		t.Fatalf("deny_code = %q, want role_not_assignable", denyCode)

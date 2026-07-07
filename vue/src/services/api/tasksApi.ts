@@ -383,7 +383,7 @@ export const tasksApi = {
    * 审核员领取审核任务
    * POST /v1/tasks/{id}/audit/claim
    * 权限：审核员
-   * 后端要求 stage 必填，与 openapi 一致：A=初审 / B=复审 / outsource_review=定制复核
+   * 后端要求 stage 必填，与 openapi 一致：A=常规审核 / B=常规审核交接复核 / outsource_review=历史外协复核
    */
   auditClaim: (id: string, payload: { stage: string }, signal?: AbortSignal) =>
     http.post(`/v1/tasks/${id}/audit/claim`, payload, { signal }),

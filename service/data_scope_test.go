@@ -17,7 +17,7 @@ func TestRoleBasedDataScopeResolverStageVisibilities(t *testing.T) {
 		want []stageVisibilitySnapshot
 	}{
 		{
-			name: "audit_a gets normal lane audit a stages",
+			name: "audit_a gets normal lane audit and handoff stages",
 			user: &domain.User{
 				ID:    1,
 				Roles: []domain.Role{domain.RoleAuditA},
@@ -27,11 +27,13 @@ func TestRoleBasedDataScopeResolverStageVisibilities(t *testing.T) {
 				Statuses: []domain.TaskStatus{
 					domain.TaskStatusPendingAuditA,
 					domain.TaskStatusRejectedByAuditA,
+					domain.TaskStatusPendingAuditB,
+					domain.TaskStatusRejectedByAuditB,
 				},
 			}},
 		},
 		{
-			name: "audit_b gets normal lane audit b stages",
+			name: "legacy audit_b gets normal lane audit and handoff stages",
 			user: &domain.User{
 				ID:    2,
 				Roles: []domain.Role{domain.RoleAuditB},
@@ -39,6 +41,8 @@ func TestRoleBasedDataScopeResolverStageVisibilities(t *testing.T) {
 			want: []stageVisibilitySnapshot{{
 				Lane: domain.WorkflowLaneNormal,
 				Statuses: []domain.TaskStatus{
+					domain.TaskStatusPendingAuditA,
+					domain.TaskStatusRejectedByAuditA,
 					domain.TaskStatusPendingAuditB,
 					domain.TaskStatusRejectedByAuditB,
 				},

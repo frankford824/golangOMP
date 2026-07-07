@@ -135,10 +135,14 @@ func buildRoleBasedStageVisibilities(roles []domain.Role, department string) []S
 		stageBuilder.Grant(domain.WorkflowLaneNormal,
 			domain.TaskStatusPendingAuditA,
 			domain.TaskStatusRejectedByAuditA,
+			domain.TaskStatusPendingAuditB,
+			domain.TaskStatusRejectedByAuditB,
 		)
 	}
 	if hasRoleValue(roles, domain.RoleAuditB) {
 		stageBuilder.Grant(domain.WorkflowLaneNormal,
+			domain.TaskStatusPendingAuditA,
+			domain.TaskStatusRejectedByAuditA,
 			domain.TaskStatusPendingAuditB,
 			domain.TaskStatusRejectedByAuditB,
 		)

@@ -181,30 +181,30 @@ func taskActionRuleFor(action TaskAction) taskActionRule {
 	case TaskActionAuditAClaim:
 		return taskActionRule{
 			Action:            action,
-			RequiredRoles:     append([]domain.Role{domain.RoleAuditA}, managerRoles...),
+			RequiredRoles:     append([]domain.Role{domain.RoleAuditA, domain.RoleAuditB}, managerRoles...),
 			AllowedStatuses:   []domain.TaskStatus{domain.TaskStatusPendingAuditA},
 			AllowedScopes:     []TaskActionScopeSource{TaskActionScopeViewAll, TaskActionScopeManagedDepartment, TaskActionScopeManagedTeam, TaskActionScopeDepartment, TaskActionScopeTeam, TaskActionScopeHandler, TaskActionScopeStage},
 			HandlerPolicy:     taskActionHandlerPolicyUnassignedOrCurrentActor,
 			StatusDenyCode:    "audit_stage_mismatch",
-			StatusGateMessage: "audit A claim requires PendingAuditA",
-			RoleGateMessage:   "audit A claim requires the Audit_A role or a management role",
-			ScopeGateMessage:  "audit A claim is outside the actor organization scope",
+			StatusGateMessage: "regular audit claim requires PendingAuditA",
+			RoleGateMessage:   "regular audit claim requires the Audit_A role, legacy Audit_B role, or a management role",
+			ScopeGateMessage:  "regular audit claim is outside the actor organization scope",
 			PreferHandlerDeny: true,
-			MatchedRule:       "audit_a_claim_scope",
+			MatchedRule:       "regular_audit_claim_scope",
 		}
 	case TaskActionAuditBClaim:
 		return taskActionRule{
 			Action:            action,
-			RequiredRoles:     append([]domain.Role{domain.RoleAuditB}, managerRoles...),
+			RequiredRoles:     append([]domain.Role{domain.RoleAuditA, domain.RoleAuditB}, managerRoles...),
 			AllowedStatuses:   []domain.TaskStatus{domain.TaskStatusPendingAuditB},
 			AllowedScopes:     []TaskActionScopeSource{TaskActionScopeViewAll, TaskActionScopeManagedDepartment, TaskActionScopeManagedTeam, TaskActionScopeDepartment, TaskActionScopeTeam, TaskActionScopeHandler, TaskActionScopeStage},
 			HandlerPolicy:     taskActionHandlerPolicyUnassignedOrCurrentActor,
 			StatusDenyCode:    "audit_stage_mismatch",
-			StatusGateMessage: "audit B claim requires PendingAuditB",
-			RoleGateMessage:   "audit B claim requires the Audit_B role or a management role",
-			ScopeGateMessage:  "audit B claim is outside the actor organization scope",
+			StatusGateMessage: "regular audit handoff claim requires PendingAuditB",
+			RoleGateMessage:   "regular audit handoff claim requires the Audit_A role, legacy Audit_B role, or a management role",
+			ScopeGateMessage:  "regular audit handoff claim is outside the actor organization scope",
 			PreferHandlerDeny: true,
-			MatchedRule:       "audit_b_claim_scope",
+			MatchedRule:       "regular_audit_handoff_claim_scope",
 		}
 	case TaskActionAuditOutsourceReviewClaim:
 		return taskActionRule{
@@ -234,58 +234,58 @@ func taskActionRuleFor(action TaskAction) taskActionRule {
 	case TaskActionAuditAApprove, TaskActionAuditAReject:
 		return taskActionRule{
 			Action:            action,
-			RequiredRoles:     append([]domain.Role{domain.RoleAuditA}, managerRoles...),
+			RequiredRoles:     append([]domain.Role{domain.RoleAuditA, domain.RoleAuditB}, managerRoles...),
 			AllowedStatuses:   []domain.TaskStatus{domain.TaskStatusPendingAuditA},
 			AllowedScopes:     []TaskActionScopeSource{TaskActionScopeViewAll, TaskActionScopeManagedDepartment, TaskActionScopeManagedTeam, TaskActionScopeDepartment, TaskActionScopeTeam, TaskActionScopeHandler, TaskActionScopeStage},
 			HandlerPolicy:     taskActionHandlerPolicyRequireCurrentHandler,
 			PreferHandlerDeny: true,
 			StatusDenyCode:    "audit_stage_mismatch",
-			StatusGateMessage: "audit A action requires PendingAuditA",
-			RoleGateMessage:   "audit A action requires the Audit_A role or a management role",
-			ScopeGateMessage:  "audit A action is outside the actor organization scope",
-			MatchedRule:       "audit_a_scope_or_handler",
+			StatusGateMessage: "regular audit action requires PendingAuditA",
+			RoleGateMessage:   "regular audit action requires the Audit_A role, legacy Audit_B role, or a management role",
+			ScopeGateMessage:  "regular audit action is outside the actor organization scope",
+			MatchedRule:       "regular_audit_scope_or_handler",
 		}
 	case TaskActionAuditATransfer, TaskActionAuditAHandover:
 		return taskActionRule{
 			Action:            action,
-			RequiredRoles:     append([]domain.Role{domain.RoleAuditA}, managerRoles...),
+			RequiredRoles:     append([]domain.Role{domain.RoleAuditA, domain.RoleAuditB}, managerRoles...),
 			AllowedStatuses:   []domain.TaskStatus{domain.TaskStatusPendingAuditA},
 			AllowedScopes:     []TaskActionScopeSource{TaskActionScopeViewAll, TaskActionScopeManagedDepartment, TaskActionScopeManagedTeam, TaskActionScopeDepartment, TaskActionScopeTeam, TaskActionScopeHandler},
 			HandlerPolicy:     taskActionHandlerPolicyRequireCurrentHandler,
 			PreferHandlerDeny: true,
 			StatusDenyCode:    "audit_stage_mismatch",
-			StatusGateMessage: "audit A action requires PendingAuditA",
-			RoleGateMessage:   "audit A action requires the Audit_A role or a management role",
-			ScopeGateMessage:  "audit A action is outside the actor organization scope",
-			MatchedRule:       "audit_a_scope_or_handler",
+			StatusGateMessage: "regular audit action requires PendingAuditA",
+			RoleGateMessage:   "regular audit action requires the Audit_A role, legacy Audit_B role, or a management role",
+			ScopeGateMessage:  "regular audit action is outside the actor organization scope",
+			MatchedRule:       "regular_audit_scope_or_handler",
 		}
 	case TaskActionAuditBApprove, TaskActionAuditBReject:
 		return taskActionRule{
 			Action:            action,
-			RequiredRoles:     append([]domain.Role{domain.RoleAuditB}, managerRoles...),
+			RequiredRoles:     append([]domain.Role{domain.RoleAuditA, domain.RoleAuditB}, managerRoles...),
 			AllowedStatuses:   []domain.TaskStatus{domain.TaskStatusPendingAuditB},
 			AllowedScopes:     []TaskActionScopeSource{TaskActionScopeViewAll, TaskActionScopeManagedDepartment, TaskActionScopeManagedTeam, TaskActionScopeDepartment, TaskActionScopeTeam, TaskActionScopeHandler, TaskActionScopeStage},
 			HandlerPolicy:     taskActionHandlerPolicyRequireCurrentHandler,
 			PreferHandlerDeny: true,
 			StatusDenyCode:    "audit_stage_mismatch",
-			StatusGateMessage: "audit B action requires PendingAuditB",
-			RoleGateMessage:   "audit B action requires the Audit_B role or a management role",
-			ScopeGateMessage:  "audit B action is outside the actor organization scope",
-			MatchedRule:       "audit_b_scope_or_handler",
+			StatusGateMessage: "regular audit handoff action requires PendingAuditB",
+			RoleGateMessage:   "regular audit handoff action requires the Audit_A role, legacy Audit_B role, or a management role",
+			ScopeGateMessage:  "regular audit handoff action is outside the actor organization scope",
+			MatchedRule:       "regular_audit_handoff_scope_or_handler",
 		}
 	case TaskActionAuditBTransfer, TaskActionAuditBHandover:
 		return taskActionRule{
 			Action:            action,
-			RequiredRoles:     append([]domain.Role{domain.RoleAuditB}, managerRoles...),
+			RequiredRoles:     append([]domain.Role{domain.RoleAuditA, domain.RoleAuditB}, managerRoles...),
 			AllowedStatuses:   []domain.TaskStatus{domain.TaskStatusPendingAuditB},
 			AllowedScopes:     []TaskActionScopeSource{TaskActionScopeViewAll, TaskActionScopeManagedDepartment, TaskActionScopeManagedTeam, TaskActionScopeDepartment, TaskActionScopeTeam, TaskActionScopeHandler},
 			HandlerPolicy:     taskActionHandlerPolicyRequireCurrentHandler,
 			PreferHandlerDeny: true,
 			StatusDenyCode:    "audit_stage_mismatch",
-			StatusGateMessage: "audit B action requires PendingAuditB",
-			RoleGateMessage:   "audit B action requires the Audit_B role or a management role",
-			ScopeGateMessage:  "audit B action is outside the actor organization scope",
-			MatchedRule:       "audit_b_scope_or_handler",
+			StatusGateMessage: "regular audit handoff action requires PendingAuditB",
+			RoleGateMessage:   "regular audit handoff action requires the Audit_A role, legacy Audit_B role, or a management role",
+			ScopeGateMessage:  "regular audit handoff action is outside the actor organization scope",
+			MatchedRule:       "regular_audit_handoff_scope_or_handler",
 		}
 	case TaskActionAuditOutsourceReviewApprove, TaskActionAuditOutsourceReviewReject:
 		return taskActionRule{
@@ -328,26 +328,26 @@ func taskActionRuleFor(action TaskAction) taskActionRule {
 	case TaskActionAuditATakeover:
 		return taskActionRule{
 			Action:            action,
-			RequiredRoles:     append([]domain.Role{domain.RoleAuditA}, managerRoles...),
+			RequiredRoles:     append([]domain.Role{domain.RoleAuditA, domain.RoleAuditB}, managerRoles...),
 			AllowedStatuses:   []domain.TaskStatus{domain.TaskStatusPendingAuditA},
 			AllowedScopes:     []TaskActionScopeSource{TaskActionScopeViewAll, TaskActionScopeManagedDepartment, TaskActionScopeManagedTeam, TaskActionScopeDepartment, TaskActionScopeTeam},
 			StatusDenyCode:    "audit_stage_mismatch",
-			StatusGateMessage: "audit A takeover requires PendingAuditA",
-			RoleGateMessage:   "audit A takeover requires the Audit_A role or a management role",
-			ScopeGateMessage:  "audit A takeover is outside the actor organization scope",
-			MatchedRule:       "audit_a_takeover_scope",
+			StatusGateMessage: "regular audit takeover requires PendingAuditA",
+			RoleGateMessage:   "regular audit takeover requires the Audit_A role, legacy Audit_B role, or a management role",
+			ScopeGateMessage:  "regular audit takeover is outside the actor organization scope",
+			MatchedRule:       "regular_audit_takeover_scope",
 		}
 	case TaskActionAuditBTakeover:
 		return taskActionRule{
 			Action:            action,
-			RequiredRoles:     append([]domain.Role{domain.RoleAuditB}, managerRoles...),
+			RequiredRoles:     append([]domain.Role{domain.RoleAuditA, domain.RoleAuditB}, managerRoles...),
 			AllowedStatuses:   []domain.TaskStatus{domain.TaskStatusPendingAuditB},
 			AllowedScopes:     []TaskActionScopeSource{TaskActionScopeViewAll, TaskActionScopeManagedDepartment, TaskActionScopeManagedTeam, TaskActionScopeDepartment, TaskActionScopeTeam},
 			StatusDenyCode:    "audit_stage_mismatch",
-			StatusGateMessage: "audit B takeover requires PendingAuditB",
-			RoleGateMessage:   "audit B takeover requires the Audit_B role or a management role",
-			ScopeGateMessage:  "audit B takeover is outside the actor organization scope",
-			MatchedRule:       "audit_b_takeover_scope",
+			StatusGateMessage: "regular audit handoff takeover requires PendingAuditB",
+			RoleGateMessage:   "regular audit handoff takeover requires the Audit_A role, legacy Audit_B role, or a management role",
+			ScopeGateMessage:  "regular audit handoff takeover is outside the actor organization scope",
+			MatchedRule:       "regular_audit_handoff_takeover_scope",
 		}
 	case TaskActionAuditOutsourceReviewTakeover:
 		return taskActionRule{

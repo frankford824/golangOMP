@@ -3122,7 +3122,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/close \
 ### 简介
 支持方法: POST。
 
-- `POST`: `auditor_id` is optional and defaults to the current authenticated actor. This action uses minimum role plus org scope gating over canonical task ownership. `Audit_A` may only claim `PendingAuditA`; `Audit_B` may only claim `PendingAuditB`; when a current handler already exists, non-management actors must match that handler instead of taking over globally.
+- `POST`: `auditor_id` is optional and defaults to the current authenticated actor. This action uses minimum role plus org scope gating over canonical task ownership. `Audit_A` is the canonical regular-audit role and can claim both `PendingAuditA` and `PendingAuditB`; `Audit_B` is accepted only as a compatibility role for existing accounts. `PendingAuditB` means regular-audit handoff/recheck, not an independent second-review role. When a current handler already exists, non-management actors must match that handler instead of taking over globally.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -3177,7 +3177,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/audit/claim \
 ### 简介
 支持方法: POST。
 
-- `POST`: `auditor_id` is optional and defaults to the current authenticated actor. Approval clears the current audit handler so the next audit or warehouse stage must be explicitly claimed or received. This action uses minimum role plus org or handler gating over canonical task ownership. `Audit_A` can only approve stage A (`PendingAuditA`), `Audit_B` can only approve stage B (`PendingAuditB`), and non-management actors must be the current handler.
+- `POST`: `auditor_id` is optional and defaults to the current authenticated actor. Approval clears the current audit handler so the next audit or warehouse stage must be explicitly claimed or received. This action uses minimum role plus org or handler gating over canonical task ownership. `Audit_A` is the canonical regular-audit role for both stage A (`PendingAuditA`) and handoff/recheck stage B (`PendingAuditB`); legacy `Audit_B` accounts remain accepted for compatibility. Normal approval from stage A should move directly to `PendingWarehouseReceive`; `PendingAuditB` is used only when a reviewer explicitly transfers the task into regular-audit handoff/recheck. Non-management actors must be the current handler.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -3227,7 +3227,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/audit/approve \
 ### 简介
 支持方法: POST。
 
-- `POST`: `auditor_id` is optional and defaults to the current authenticated actor. Audit rejection routes the task back to the designer handler so rework is explicit. This action uses minimum role plus org or handler gating over canonical task ownership. `Audit_A` can only reject stage A, `Audit_B` can only reject stage B, and non-management actors must be the current handler.
+- `POST`: `auditor_id` is optional and defaults to the current authenticated actor. Audit rejection routes the task back to the designer handler so rework is explicit. This action uses minimum role plus org or handler gating over canonical task ownership. `Audit_A` is the canonical regular-audit role for both stage A and handoff/recheck stage B; legacy `Audit_B` accounts remain accepted for compatibility. Non-management actors must be the current handler.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -3277,7 +3277,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/audit/reject \
 ### 简介
 支持方法: POST。
 
-- `POST`: `from_auditor_id` is optional and defaults to the current authenticated actor. This action uses minimum role plus org or handler gating over canonical task ownership. `Audit_A` can only transfer stage A, `Audit_B` can only transfer stage B, and non-management actors must currently own the handler slot.
+- `POST`: `from_auditor_id` is optional and defaults to the current authenticated actor. This action uses minimum role plus org or handler gating over canonical task ownership. `Audit_A` is the canonical regular-audit role for both stage A and handoff/recheck stage B; legacy `Audit_B` accounts remain accepted for compatibility. Non-management actors must currently own the handler slot.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -3458,7 +3458,7 @@ curl -X GET https://api.example.com/v1/tasks/<id>/audit/handovers \
 ### 简介
 支持方法: POST。
 
-- `POST`: `auditor_id` is optional and defaults to the current authenticated actor. Takeover restores explicit audit ownership by setting the task handler to the takeover auditor. This action uses minimum role plus org scope gating over canonical task ownership. `Audit_A` can only take over stage A handovers, `Audit_B` can only take over stage B handovers, and management roles remain state-gated.
+- `POST`: `auditor_id` is optional and defaults to the current authenticated actor. Takeover restores explicit audit ownership by setting the task handler to the takeover auditor. This action uses minimum role plus org scope gating over canonical task ownership. `Audit_A` is the canonical regular-audit role for both stage A handovers and handoff/recheck stage B handovers; legacy `Audit_B` accounts remain accepted for compatibility, and management roles remain state-gated.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。

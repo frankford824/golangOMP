@@ -61,10 +61,10 @@ export type DesignSubStatus =
   | 'APPROVED'       // 审核通过（中间状态）
   | 'FINALIZED'      // 终稿确认，流程结束
 
-// ─── 审核子状态：覆盖初审 / 复审 / 定制转派 / 交班等节点 ────────────────────────
+// ─── 审核子状态：覆盖常规审核 / 交接复核 / 定制转派 / 交班等节点 ────────────────────────
 export type AuditSubStatus =
   | 'NOT_REQUIRED'  // 采购任务默认；无需审核
-  | 'PENDING'       // 待审核（含初审 / 复审排队）
+  | 'PENDING'       // 待审核（含常规审核 / 交接复核排队）
   | 'IN_PROGRESS'   // 审核进行中（已领取审核单）
   | 'PASSED'        // 审核通过
   | 'REJECTED'      // 审核打回

@@ -44,7 +44,7 @@
           :loading="auditActionBusy"
           @click="transferToB"
         >
-          转交审核
+          转交复核
         </BaseButton>
       </div>
     </div>
@@ -338,7 +338,7 @@ const auditReferenceFileRefs = ref<(Record<string, unknown> | string)[]>([])
 const customizationDialogOpen = ref(false)
 const { submitting: customizationSubmitting, guard: customizationGuard } = useSubmitGuard()
 const customizationError = ref('')
-// 审核三连按钮（通过 / 打回 / 转复审）共用一个 guard，因为它们在 UI 上互斥，
+// 审核三连按钮（通过 / 打回 / 转交复核）共用一个 guard，因为它们在 UI 上互斥，
 // 任意一个进行中时其他按钮必须同时 disabled，避免绕过某个按钮 :disabled 再触发。
 const { submitting: auditActionBusy, guard: auditGuard } = useSubmitGuard()
 const customizationJobLoading = ref(false)
@@ -442,7 +442,7 @@ function getRejectStageFromTask(t: Task): 'A' | 'B' {
 
 /** 根据 stage 推导 next_status */
 function getNextStatusFromStage(stage: string): string {
-  if (stage === 'A') return 'PendingAuditB'
+  if (stage === 'A') return 'PendingWarehouseReceive'
   return 'PendingWarehouseReceive'
 }
 

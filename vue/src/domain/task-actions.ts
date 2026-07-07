@@ -328,7 +328,7 @@ export function canArchive(task: Task): boolean {
   return checkTaskCompletion(task).canComplete
 }
 
-/** 是否可执行「重新提交复审」 */
+/** 是否可执行「重新提交交接复核」 */
 export function canResubmitAuditB(task: Task): boolean {
   if (task.auditSubStatus != null) return task.auditSubStatus === AuditSubStatusEnum.REJECTED
   return task.status === 'RejectedByAuditB'
@@ -390,7 +390,7 @@ export function isCompletedOrArchived(task: Task): boolean {
 /**
  * 是否处于审核工作台应当消费的队列状态。
  *
- * 包含普通审核链路（A/B）与定制审核链路（初审 / 效果审核）两个 lane，
+ * 包含常规审核链路（含交接复核状态）与定制审核链路（初审 / 效果审核）两个 lane，
  * 供审核工作台的「待审核 / 我处理中」Tab 共享。Rejected 态不在队列内
  * （退回设计师处理），不纳入此谓词。
  */
@@ -421,7 +421,7 @@ export function isPendingAuditA(task: Task): boolean {
   return task.status === 'PendingAuditA'
 }
 
-/** 是否待审核（B 阶段） */
+/** 是否待常规审核交接/复核 */
 export function isPendingAuditB(task: Task): boolean {
   if (isRetouchTask(task)) return false
   return task.status === 'PendingAuditB'
@@ -442,7 +442,7 @@ export function isPendingEffectReview(task: Task): boolean {
  *
  * 前端门禁原则：仅基于后端下发的 `task_status` 选择对应的操作面板，
  * 不在此处做状态机推导或自愈。返回值直接映射到:
- *   - `audit_ab`             → 普通审核面板（通过 / 打回 / 交班 / 转交）
+ *   - `audit_ab`             → 常规审核面板（通过 / 打回 / 交班 / 转交复核）
  *   - `customization_review` → 定制初审面板（调 /v1/tasks/:id/customization/review）
  *   - `effect_review`        → 定制二次效果审核面板（调 /v1/customization-jobs/:jobId/effect-review）
  *   - `null`                 → 当前任务不在审核责任链内
@@ -473,7 +473,7 @@ export function isPendingOutsourceReview(task: Task): boolean {
 }
 
 /** 是否可执行 audit claim（按 task_status 判断，避免无效请求）
- * stage 与 POST /v1/tasks/{id}/audit/claim 一致：A | B */
+ * stage 与 POST /v1/tasks/{id}/audit/claim 一致：A 为常规审核，B 为常规审核交接/复核 */
 export function canClaimAudit(task: Task, stage: string): boolean {
   if (isPurchaseTask(task) || isRetouchTask(task)) return false
   switch (stage) {
@@ -486,7 +486,7 @@ export function canClaimAudit(task: Task, stage: string): boolean {
   }
 }
 
-/** 是否可执行「转交审核B」 */
+/** 是否可执行「转交复核」 */
 export function canTransferToAuditB(task: Task): boolean {
   if (isPurchaseTask(task) || isRetouchTask(task)) return false
   return task.status === 'PendingAuditA'

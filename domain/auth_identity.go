@@ -95,7 +95,7 @@ func DepartmentDefaultBusinessRoles(department Department) []Role {
 	case DepartmentCustomizationArt:
 		return []Role{RoleCustomizationOperator}
 	case DepartmentAudit:
-		return []Role{RoleAuditA, RoleAuditB, RoleCustomizationReviewer}
+		return []Role{RoleAuditA, RoleCustomizationReviewer}
 	default:
 		return []Role{}
 	}
@@ -386,43 +386,44 @@ func DefaultRoleCatalog() []RoleCatalogEntry {
 		},
 		{
 			Role:         RoleAuditA,
-			Name:         "普通审核A",
-			Description:  "处理普通任务的一审审核。",
-			Capabilities: []string{"task.audit.claim", "task.audit.review"},
-		},
-		{
-			Role:         RoleAuditB,
-			Name:         "普通审核B",
-			Description:  "处理普通任务的二审审核与接管。",
+			Name:         "常规审核",
+			Description:  "处理常规任务审核、交接复核与打回。",
 			Capabilities: []string{"task.audit.claim", "task.audit.review", "task.audit.takeover"},
 		},
 		{
+			Role:           RoleAuditB,
+			Name:           "历史兼容：常规审核旧编码",
+			Description:    "历史保留角色，仅兼容既有账号；常规审核新授权请使用 Audit_A。",
+			AssignmentNote: "常规审核旧编码，不允许新增分配",
+			Capabilities:   []string{"task.audit.claim", "task.audit.review", "task.audit.takeover"},
+		},
+		{
 			Role:         RoleWarehouse,
-			Name:         "仓储",
-			Description:  "处理仓储接收、退回与完成。",
+			Name:         "仓库人员",
+			Description:  "处理仓库接收、退回与完成。",
 			Capabilities: []string{"warehouse.receive", "warehouse.reject", "warehouse.complete"},
 		},
 		{
 			Role:         RoleAssetSubmitter,
-			Name:         "交付人员",
+			Name:         "素材工作台-交付人员",
 			Description:  "在素材工作台提交计件交付内容。",
 			Capabilities: []string{"asset.workbench.submit", "asset.workbench.profile", "asset.workbench.material.download"},
 		},
 		{
 			Role:         RoleAssetManager,
-			Name:         "作品管理",
+			Name:         "素材工作台-作品管理",
 			Description:  "管理素材工作台提交内容、审核作品并查询素材来源。",
 			Capabilities: []string{"asset.workbench.manage", "asset.workbench.system_search"},
 		},
 		{
 			Role:         RoleAssetTemplateAdmin,
-			Name:         "计价配置",
+			Name:         "素材工作台-计价配置",
 			Description:  "维护素材工作台计价、扣款、福利与活动价配置。",
 			Capabilities: []string{"asset.workbench.cost_center.manage"},
 		},
 		{
 			Role:         RoleAssetSettlement,
-			Name:         "结算财务",
+			Name:         "素材工作台-结算财务",
 			Description:  "处理素材工作台结算预览、生成、确认、取消与调整。",
 			Capabilities: []string{"asset.workbench.settlement", "asset.workbench.export"},
 		},
@@ -461,7 +462,7 @@ func HydrateRoleCatalogEntryDefaults(entry *RoleCatalogEntry) {
 		entry.Category = "management"
 	case RoleAssetSubmitter, RoleAssetManager, RoleAssetTemplateAdmin, RoleAssetSettlement:
 		entry.Category = "asset_workbench"
-	case RoleAdmin, RoleOrgAdmin, RoleRoleAdmin, RoleDesignDirector, RoleDesignReviewer, RoleOutsource, RoleERP:
+	case RoleAuditB, RoleAdmin, RoleOrgAdmin, RoleRoleAdmin, RoleDesignDirector, RoleDesignReviewer, RoleOutsource, RoleERP:
 		entry.Category = "compatibility"
 		entry.Assignable = false
 		entry.Deprecated = true

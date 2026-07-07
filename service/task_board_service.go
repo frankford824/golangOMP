@@ -384,7 +384,7 @@ func taskBoardPresetDefinitions() []taskBoardPresetDefinition {
 			description: "Tasks actively waiting for audit handling.",
 			boardView:   domain.TaskBoardViewAudit,
 			hints: domain.TaskBoardQueueOwnershipHints{
-				SuggestedRoles:     []domain.Role{domain.RoleAuditA, domain.RoleAuditB, domain.RoleAdmin},
+				SuggestedRoles:     []domain.Role{domain.RoleAuditA, domain.RoleAdmin},
 				SuggestedActorType: "shared_role_pool",
 				DefaultVisibility:  "board_view_default",
 				OwnershipHint:      "Advisory only. This queue suggests likely audit ownership but does not claim or lock tasks.",

@@ -34,7 +34,7 @@ func TestDepartmentDefaultBusinessRoles(t *testing.T) {
 		{
 			name:       "audit gets audit and customization review bundle",
 			department: DepartmentAudit,
-			want:       []Role{RoleAuditA, RoleAuditB, RoleCustomizationReviewer},
+			want:       []Role{RoleAuditA, RoleCustomizationReviewer},
 		},
 		{
 			name:       "cloud warehouse gets warehouse bundle",

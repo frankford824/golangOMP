@@ -9,9 +9,10 @@ export const RoleEnum = {
   OPS: 'ops',          // 运营：创建任务、指派、成本管控、结单
   DESIGNER: 'designer', // 设计师：资产上传、提交审核
   CUSTOMIZATION_OPERATOR: 'customization_operator', // 定制美工：作图、上传、效果产出
-  AUDIT_A: 'audit_a',   // 普通审核：常规设计审核
-  AUDIT_B: 'audit_b',   // 定制审核：定制流程审核 (亦称 CustomizationReviewer)
-  /** @deprecated 使用 AUDIT_A 或 AUDIT_B */
+  AUDIT_A: 'audit_a',   // 常规审核：覆盖常规审核与交接复核状态
+  /** @deprecated 常规审核旧编码，仅兼容历史账号；新授权使用 AUDIT_A */
+  AUDIT_B: 'audit_b',
+  /** @deprecated 使用 AUDIT_A */
   AUDITOR: 'auditor',
   WAREHOUSE: 'warehouse', // 仓库员：接收/退回/归档
 } as const

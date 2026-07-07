@@ -259,7 +259,7 @@ func TestTaskActionRouteAuthorizationRegression(t *testing.T) {
 		assertTaskPermissionDenied(t, rec, "audit_lane_forbidden")
 	})
 
-	t.Run("audit_stage_and_role_are_stage_specific", func(t *testing.T) {
+	t.Run("regular_audit_roles_cover_handoff_status_with_legacy_compatibility", func(t *testing.T) {
 		handlerID := int64(410)
 		taskRepo := &routeTaskRepo{
 			tasks: map[int64]*domain.Task{
@@ -279,6 +279,14 @@ func TestTaskActionRouteAuthorizationRegression(t *testing.T) {
 					OwnerOrgTeam:     "ops-team-1",
 					CurrentHandlerID: &handlerID,
 				},
+				43: {
+					ID:               43,
+					TaskType:         domain.TaskTypeNewProductDevelopment,
+					TaskStatus:       domain.TaskStatusPendingAuditB,
+					OwnerDepartment:  "ops",
+					OwnerOrgTeam:     "ops-team-1",
+					CurrentHandlerID: &handlerID,
+				},
 			},
 		}
 		h := NewAuditV7Handler(service.NewAuditV7Service(taskRepo, &routeAuditRepo{}, &routeTaskEventRepo{}, nil, routeTxRunner{}), nil)
@@ -287,20 +295,24 @@ func TestTaskActionRouteAuthorizationRegression(t *testing.T) {
 		router.Use(routeActor(domain.RequestActor{ID: 410, Roles: []domain.Role{domain.RoleAuditB}}))
 		router.POST("/v1/tasks/:id/audit/approve", h.Approve)
 		rec := performJSON(router, http.MethodPost, "/v1/tasks/41/audit/approve", `{"stage":"A","next_status":"PendingAuditB","auditor_id":410}`)
-		assertTaskPermissionDenied(t, rec, "missing_required_role")
+		if rec.Code != http.StatusOK {
+			t.Fatalf("legacy audit B can still approve stage A code=%d body=%s", rec.Code, rec.Body.String())
+		}
 
 		router = gin.New()
 		router.Use(routeActor(domain.RequestActor{ID: 410, Roles: []domain.Role{domain.RoleAuditA}}))
 		router.POST("/v1/tasks/:id/audit/approve", h.Approve)
-		rec = performJSON(router, http.MethodPost, "/v1/tasks/41/audit/approve", `{"stage":"B","next_status":"PendingAuditB","auditor_id":410}`)
-		assertTaskPermissionDenied(t, rec, "audit_stage_mismatch")
+		rec = performJSON(router, http.MethodPost, "/v1/tasks/42/audit/approve", `{"stage":"B","next_status":"PendingWarehouseReceive","auditor_id":410}`)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("regular audit role can approve handoff review code=%d body=%s", rec.Code, rec.Body.String())
+		}
 
 		router = gin.New()
 		router.Use(routeActor(domain.RequestActor{ID: 410, Roles: []domain.Role{domain.RoleAuditB}}))
 		router.POST("/v1/tasks/:id/audit/reject", h.Reject)
-		rec = performJSON(router, http.MethodPost, "/v1/tasks/42/audit/reject", `{"stage":"B","comment":"need rework","auditor_id":410}`)
+		rec = performJSON(router, http.MethodPost, "/v1/tasks/43/audit/reject", `{"stage":"B","comment":"need rework","auditor_id":410}`)
 		if rec.Code != http.StatusOK {
-			t.Fatalf("allow audit B reject code=%d body=%s", rec.Code, rec.Body.String())
+			t.Fatalf("legacy audit B can still reject handoff review code=%d body=%s", rec.Code, rec.Body.String())
 		}
 	})
 

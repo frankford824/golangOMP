@@ -539,7 +539,6 @@ const CUSTOMIZATION_REVIEWER_ROLES = [
   'customization_reviewer',
   'customizationreviewer',
 ] as const
-const NORMAL_AUDIT_ROLES = ['Audit_A', 'Audit_B', 'audit_a', 'audit_b', 'auditor'] as const
 const TASK_LIST_SCOPE_QUERY_KEYS = [
   'tab',
   'task_category',
@@ -566,7 +565,7 @@ function queryHasTaskListScope(query: Record<string, unknown>): boolean {
 function applyAuditRoleDefaultScope() {
   if (queryHasTaskListScope(route.query as Record<string, unknown>)) return
   const canReviewCustomization = permissionsStore.hasAnyRole(CUSTOMIZATION_REVIEWER_ROLES)
-  const canReviewNormal = permissionsStore.hasAnyRole(NORMAL_AUDIT_ROLES)
+  const canReviewNormal = permissionsStore.hasAction('task.audit.review')
   if (!canReviewCustomization && !canReviewNormal) return
 
   activeTab.value = 'all'

@@ -696,6 +696,9 @@ func TestIdentityServiceRoleWriteRejectsNonAssignableCompatibilityRoles(t *testi
 	if _, appErr := svc.AddUserRoles(superCtx, AddUserRolesParams{UserID: 42, Roles: []domain.Role{domain.RoleRoleAdmin}}); appErr == nil || appErrorDenyCode(appErr) != "role_not_assignable" {
 		t.Fatalf("AddUserRoles(RoleAdmin) appErr = %+v, want role_not_assignable", appErr)
 	}
+	if _, appErr := svc.AddUserRoles(superCtx, AddUserRolesParams{UserID: 42, Roles: []domain.Role{domain.RoleAuditB}}); appErr == nil || appErrorDenyCode(appErr) != "role_not_assignable" {
+		t.Fatalf("AddUserRoles(Audit_B) appErr = %+v, want role_not_assignable", appErr)
+	}
 	options, appErr := svc.GetOrgOptions(superCtx)
 	if appErr != nil {
 		t.Fatalf("GetOrgOptions() error = %+v", appErr)
@@ -799,6 +802,9 @@ func TestIdentityServiceGetOrgOptionsRoleCatalogMatchesActorAssignable(t *testin
 	}
 	if roleCatalogEntryForTest(hrOptions.RoleCatalogSummary, domain.RoleOutsource).AssignableByCurrentActor {
 		t.Fatal("Outsource assignable_by_current_actor = true, want false")
+	}
+	if roleCatalogEntryForTest(hrOptions.RoleCatalogSummary, domain.RoleAuditB).AssignableByCurrentActor {
+		t.Fatal("Audit_B assignable_by_current_actor = true, want false")
 	}
 
 	deptCtx := domain.WithRequestActor(context.Background(), domain.RequestActor{

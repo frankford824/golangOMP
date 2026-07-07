@@ -50,7 +50,7 @@ components:
   schemas:
     V7Role:
       type: string
-      description: Current assignable business roles plus compatibility-only historical roles. `Admin`, `OrgAdmin`, `RoleAdmin`, `DesignDirector`, `DesignReviewer`, `Outsource`, and `ERP` are compatibility entries and must not be newly assigned unless a future contract explicitly reclassifies them.
+      description: Current assignable business roles plus compatibility-only historical roles. `Audit_B` is a legacy regular-audit code kept only so existing accounts can keep operating during migration; new regular-audit assignment must use `Audit_A`. `Admin`, `OrgAdmin`, `RoleAdmin`, `DesignDirector`, `DesignReviewer`, `Outsource`, and `ERP` are also compatibility entries and must not be newly assigned unless a future contract explicitly reclassifies them.
       enum: [Member, SuperAdmin, HRAdmin, OrgAdmin, RoleAdmin, TeamLead, DesignDirector, DesignReviewer, Ops, Designer, Audit_A, Audit_B, Warehouse, Outsource, ERP, Admin, DepartmentAdmin, CustomizationReviewer, CustomizationOperator, AssetSubmitter, AssetManager, AssetTemplateAdmin, AssetSettlement]
     Department:
       type: string
@@ -1019,7 +1019,7 @@ components:
           enum: [management, business, asset_workbench, compatibility]
         assignable:
           type: boolean
-          description: Whether this role is allowed to be newly assigned by service policy. Compatibility roles such as `Outsource` always return `false`.
+          description: Whether this role is allowed to be newly assigned by service policy. Compatibility roles such as `Audit_B` and `Outsource` always return `false`.
         assignable_by_current_actor:
           type: boolean
           description: Whether the current authenticated actor may newly assign this role.
@@ -1030,6 +1030,7 @@ components:
           description: Whether clients should hide the role from normal role-picking UI unless already held historically.
         assignment_note:
           type: string
+          description: Optional user-facing reason explaining assignment restrictions.
     PermissionLog:
       type: object
       properties:
@@ -14017,7 +14018,7 @@ paths:
   /v1/tasks/{id}/audit/claim:
     post:
       summary: Claim task for audit
-      description: "`auditor_id` is optional and defaults to the current authenticated actor. This action uses minimum role plus org scope gating over canonical task ownership. `Audit_A` may only claim `PendingAuditA`; `Audit_B` may only claim `PendingAuditB`; when a current handler already exists, non-management actors must match that handler instead of taking over globally."
+      description: "`auditor_id` is optional and defaults to the current authenticated actor. This action uses minimum role plus org scope gating over canonical task ownership. `Audit_A` is the canonical regular-audit role and can claim both `PendingAuditA` and `PendingAuditB`; `Audit_B` is accepted only as a compatibility role for existing accounts. `PendingAuditB` means regular-audit handoff/recheck, not an independent second-review role. When a current handler already exists, non-management actors must match that handler instead of taking over globally."
       tags: [Audit, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
@@ -14054,7 +14055,7 @@ paths:
   /v1/tasks/{id}/audit/approve:
       post:
         summary: Approve audit and move task to next status
-        description: "`auditor_id` is optional and defaults to the current authenticated actor. Approval clears the current audit handler so the next audit or warehouse stage must be explicitly claimed or received. This action uses minimum role plus org or handler gating over canonical task ownership. `Audit_A` can only approve stage A (`PendingAuditA`), `Audit_B` can only approve stage B (`PendingAuditB`), and non-management actors must be the current handler."
+        description: "`auditor_id` is optional and defaults to the current authenticated actor. Approval clears the current audit handler so the next audit or warehouse stage must be explicitly claimed or received. This action uses minimum role plus org or handler gating over canonical task ownership. `Audit_A` is the canonical regular-audit role for both stage A (`PendingAuditA`) and handoff/recheck stage B (`PendingAuditB`); legacy `Audit_B` accounts remain accepted for compatibility. Normal approval from stage A should move directly to `PendingWarehouseReceive`; `PendingAuditB` is used only when a reviewer explicitly transfers the task into regular-audit handoff/recheck. Non-management actors must be the current handler."
       tags: [Audit, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
@@ -14100,7 +14101,7 @@ paths:
   /v1/tasks/{id}/audit/reject:
       post:
         summary: Reject audit
-        description: "`auditor_id` is optional and defaults to the current authenticated actor. Audit rejection routes the task back to the designer handler so rework is explicit. This action uses minimum role plus org or handler gating over canonical task ownership. `Audit_A` can only reject stage A, `Audit_B` can only reject stage B, and non-management actors must be the current handler."
+        description: "`auditor_id` is optional and defaults to the current authenticated actor. Audit rejection routes the task back to the designer handler so rework is explicit. This action uses minimum role plus org or handler gating over canonical task ownership. `Audit_A` is the canonical regular-audit role for both stage A and handoff/recheck stage B; legacy `Audit_B` accounts remain accepted for compatibility. Non-management actors must be the current handler."
       tags: [Audit, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
@@ -14144,7 +14145,7 @@ paths:
   /v1/tasks/{id}/audit/transfer:
     post:
       summary: Transfer audit responsibility
-      description: "`from_auditor_id` is optional and defaults to the current authenticated actor. This action uses minimum role plus org or handler gating over canonical task ownership. `Audit_A` can only transfer stage A, `Audit_B` can only transfer stage B, and non-management actors must currently own the handler slot."
+      description: "`from_auditor_id` is optional and defaults to the current authenticated actor. This action uses minimum role plus org or handler gating over canonical task ownership. `Audit_A` is the canonical regular-audit role for both stage A and handoff/recheck stage B; legacy `Audit_B` accounts remain accepted for compatibility. Non-management actors must currently own the handler slot."
       tags: [Audit, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
@@ -14231,7 +14232,7 @@ paths:
   /v1/tasks/{id}/audit/takeover:
       post:
         summary: Take over pending handover
-        description: "`auditor_id` is optional and defaults to the current authenticated actor. Takeover restores explicit audit ownership by setting the task handler to the takeover auditor. This action uses minimum role plus org scope gating over canonical task ownership. `Audit_A` can only take over stage A handovers, `Audit_B` can only take over stage B handovers, and management roles remain state-gated."
+        description: "`auditor_id` is optional and defaults to the current authenticated actor. Takeover restores explicit audit ownership by setting the task handler to the takeover auditor. This action uses minimum role plus org scope gating over canonical task ownership. `Audit_A` is the canonical regular-audit role for both stage A handovers and handoff/recheck stage B handovers; legacy `Audit_B` accounts remain accepted for compatibility, and management roles remain state-gated."
       tags: [Audit, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:

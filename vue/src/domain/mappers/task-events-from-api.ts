@@ -104,7 +104,7 @@ const MODULE_KEY_CN: Record<string, string> = {
   basic_info: '基础信息',
   design: '设计',
   audit: '审核',
-  warehouse: '仓储',
+  warehouse: '仓库人员',
   retouch: '修图',
   customization: '定制',
   procurement: '采购',
@@ -638,7 +638,7 @@ function buildTaskEventSummaryCn(
     const status = warehouseStatusDisplayCn(pickFirst(raw, payload, ['warehouse_status', 'status']))
     const remark = pickFirst(raw, payload, ['remark', 'reason'])
     const verb: Record<string, string> = {
-      'task.warehouse.prepared': '完成了仓储备货',
+      'task.warehouse.prepared': '完成了仓库备货',
       'task.warehouse.received': '接收了仓库任务',
       'task.warehouse.rejected': '退回了仓库任务',
       'task.warehouse.completed': '完成了仓库处理',

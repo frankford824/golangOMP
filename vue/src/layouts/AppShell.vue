@@ -301,13 +301,11 @@ const CUSTOMIZATION_REVIEWER_ROLES = [
   'customization_reviewer',
   'customizationreviewer',
 ] as const
-const NORMAL_AUDIT_ROLES = ['Audit_A', 'Audit_B', 'audit_a', 'audit_b', 'auditor'] as const
-
 function resolveMenuTo(menu: MenuConfig) {
   if (menu.key !== 'task_list') return menu.to
 
   const canReviewCustomization = permissionsStore.hasAnyRole(CUSTOMIZATION_REVIEWER_ROLES)
-  const canReviewNormal = permissionsStore.hasAnyRole(NORMAL_AUDIT_ROLES)
+  const canReviewNormal = permissionsStore.hasAction('task.audit.review')
   if (canReviewCustomization && !canReviewNormal) {
     return {
       path: '/tasks',
