@@ -222,6 +222,7 @@ func (r *costRuleBindingRepo) ListUnboundCandidates(ctx context.Context, filter 
 	}
 	keyword := strings.TrimSpace(filter.Keyword)
 	normalizedExpr := "UPPER(REPLACE(REPLACE(TRIM(COALESCE(NULLIF(pm.erp_i_id, ''), pm.product_i_id)), ' ', ''), '　', ''))"
+	groupByNormalizedExpr := normalizedExpr
 	where := []string{
 		"COALESCE(NULLIF(pm.erp_i_id, ''), pm.product_i_id, '') <> ''",
 		"b.id IS NULL",
@@ -246,7 +247,7 @@ func (r *costRuleBindingRepo) ListUnboundCandidates(ctx context.Context, filter 
 		      ON b.normalized_i_id = `+normalizedExpr+`
 		     AND b.is_active = 1
 		   WHERE `+whereSQL+`
-		   GROUP BY normalized_i_id
+		   GROUP BY `+groupByNormalizedExpr+`
 		) x`, args...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count unbound cost rule candidates: %w", err)
 	}
@@ -267,7 +268,7 @@ func (r *costRuleBindingRepo) ListUnboundCandidates(ctx context.Context, filter 
 		  ON b.normalized_i_id = `+normalizedExpr+`
 		 AND b.is_active = 1
 		WHERE `+whereSQL+`
-		GROUP BY normalized_i_id
+		GROUP BY `+groupByNormalizedExpr+`
 		ORDER BY match_count DESC, normalized_i_id ASC
 		LIMIT ?`, queryArgs...)
 	if err != nil {
