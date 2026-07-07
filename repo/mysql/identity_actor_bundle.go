@@ -20,7 +20,7 @@ func (r *userSessionRepo) ResolveActorBundle(ctx context.Context, tokenHash stri
 		SELECT session_id, user_id, token_hash, expires_at, last_seen_at, revoked_at, created_at
 		FROM user_sessions WHERE token_hash = '%[1]s';
 
-		SELECT id, username, display_name, department, team, managed_departments_json, managed_teams_json, mobile, email, password_hash, status, employment_type, is_config_super_admin, last_login_at, created_at, updated_at, jst_u_id, jst_raw_snapshot_json
+		SELECT %[3]s
 		FROM users
 		WHERE id = (SELECT user_id FROM user_sessions WHERE token_hash = '%[1]s');
 
@@ -33,7 +33,7 @@ func (r *userSessionRepo) ResolveActorBundle(ctx context.Context, tokenHash stri
 		SET last_seen_at = '%[2]s'
 		WHERE token_hash = '%[1]s'
 		  AND revoked_at IS NULL
-		  AND expires_at > UTC_TIMESTAMP(6)`, tokenHash, atLiteral)
+		  AND expires_at > UTC_TIMESTAMP(6)`, tokenHash, atLiteral, userSelectColumns)
 
 	rows, err := r.db.db.QueryContext(ctx, query)
 	if err != nil {

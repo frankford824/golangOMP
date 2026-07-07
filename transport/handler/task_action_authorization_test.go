@@ -870,6 +870,7 @@ func (r *routeUserRepo) GetByID(_ context.Context, id int64) (*domain.User, erro
 }
 func (r *routeUserRepo) GetByUsername(context.Context, string) (*domain.User, error) { return nil, nil }
 func (r *routeUserRepo) GetByMobile(context.Context, string) (*domain.User, error)   { return nil, nil }
+func (r *routeUserRepo) GetByEmployeeNo(context.Context, int) (*domain.User, error)  { return nil, nil }
 func (r *routeUserRepo) GetByJstUID(context.Context, int64) (*domain.User, error)    { return nil, nil }
 func (r *routeUserRepo) List(context.Context, repo.UserListFilter) ([]*domain.User, int64, error) {
 	return []*domain.User{}, 0, nil

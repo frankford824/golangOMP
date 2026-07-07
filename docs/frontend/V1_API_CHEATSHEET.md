@@ -24,7 +24,7 @@
 | GET | `/v1/access-rules` | List protected route access rules | GET:已登录 / scope-aware | [V1_API_USERS.md](V1_API_USERS.md) |
 | GET, POST | `/v1/users` | List workflow users；Create workflow user | GET:Admin, SuperAdmin, HRAdmin, DepartmentAdmin, TeamLead, OrgAdmin, RoleAdmin; POST:HRAdmin, SuperAdmin, DepartmentAdmin | [V1_API_USERS.md](V1_API_USERS.md) |
 | GET | `/v1/users/designers` | List designers | GET:Ops, Designer, CustomizationOperator, Audit_A, Audit_B, Admin, HRAdmin, SuperAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_USERS.md](V1_API_USERS.md) |
-| GET, PATCH, DELETE | `/v1/users/{id}` | Get workflow user；Update workflow user；Delete workflow user | GET:Admin, SuperAdmin, HRAdmin, DepartmentAdmin, TeamLead, OrgAdmin, RoleAdmin; PATCH:HRAdmin, SuperAdmin, DepartmentAdmin; DELETE:SuperAdmin | [V1_API_USERS.md](V1_API_USERS.md) |
+| GET, PATCH, DELETE | `/v1/users/{id}` | Get workflow user；Update workflow user；Deprecated compatibility delete workflow user | GET:Admin, SuperAdmin, HRAdmin, DepartmentAdmin, TeamLead, OrgAdmin, RoleAdmin; PATCH:HRAdmin, SuperAdmin, DepartmentAdmin; DELETE:SuperAdmin | [V1_API_USERS.md](V1_API_USERS.md) |
 | PUT | `/v1/users/{id}/password` | Reset workflow user password | PUT:HRAdmin, SuperAdmin, DepartmentAdmin | [V1_API_USERS.md](V1_API_USERS.md) |
 | POST, PUT | `/v1/users/{id}/roles` | Add workflow user roles；Replace workflow user roles | POST:HRAdmin, SuperAdmin; PUT:HRAdmin, SuperAdmin | [V1_API_USERS.md](V1_API_USERS.md) |
 | DELETE | `/v1/users/{id}/roles/{role}` | Remove one workflow user role | DELETE:HRAdmin, SuperAdmin | [V1_API_USERS.md](V1_API_USERS.md) |
@@ -36,8 +36,8 @@
 | GET | `/v1/admin/jst-users` | List JST users (Admin, via Bridge) | GET:已登录 / scope-aware | [V1_API_USERS.md](V1_API_USERS.md) |
 | POST | `/v1/admin/jst-users/import-preview` | Preview JST user import (Admin) | POST:已登录 / scope-aware | [V1_API_USERS.md](V1_API_USERS.md) |
 | POST | `/v1/admin/jst-users/import` | Import JST users (Admin) | POST:已登录 / scope-aware | [V1_API_USERS.md](V1_API_USERS.md) |
-| POST | `/v1/users/{id}/activate` | Activate a workflow user | POST:SuperAdmin, HRAdmin, DepartmentAdmin, TeamLead | [V1_API_USERS.md](V1_API_USERS.md) |
-| POST | `/v1/users/{id}/deactivate` | Deactivate a workflow user | POST:SuperAdmin, HRAdmin, DepartmentAdmin, TeamLead | [V1_API_USERS.md](V1_API_USERS.md) |
+| POST | `/v1/users/{id}/activate` | Activate a workflow user | POST:Admin, SuperAdmin, HRAdmin, DepartmentAdmin, TeamLead | [V1_API_USERS.md](V1_API_USERS.md) |
+| POST | `/v1/users/{id}/deactivate` | Deactivate a workflow user | POST:Admin, SuperAdmin, HRAdmin, DepartmentAdmin, TeamLead | [V1_API_USERS.md](V1_API_USERS.md) |
 | GET | `/v1/org/options` | Get organization options | GET:Admin, SuperAdmin, HRAdmin, DepartmentAdmin, OrgAdmin, RoleAdmin | [V1_API_ORG.md](V1_API_ORG.md) |
 | POST | `/v1/org/departments` | Create organization department | POST:HRAdmin, SuperAdmin | [V1_API_ORG.md](V1_API_ORG.md) |
 | PUT | `/v1/org/departments/{id}` | Update organization department | PUT:HRAdmin, SuperAdmin | [V1_API_ORG.md](V1_API_ORG.md) |

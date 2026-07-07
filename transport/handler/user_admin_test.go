@@ -58,7 +58,7 @@ func TestUserAdminHandlerCreateUserBindsManagedCreatePayload(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	body := `{"account":"new_user","name":"New User","department":"杩愯惀閮?","group":"杩愯惀涓€缁?","phone":"13800001030","password":"Init1234","roles":["Ops"],"status":"active"}`
+	body := `{"account":"new_user","employee_no":1030,"name":"New User","department":"杩愯惀閮?","group":"杩愯惀涓€缁?","phone":"13800001030","password":"Init1234","roles":["Ops"],"status":"active"}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/users", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	c.Request = req
@@ -75,6 +75,9 @@ func TestUserAdminHandlerCreateUserBindsManagedCreatePayload(t *testing.T) {
 	}
 	if svc.lastCreateParams.Username != "new_user" || svc.lastCreateParams.DisplayName != "New User" {
 		t.Fatalf("CreateUser() params = %+v", svc.lastCreateParams)
+	}
+	if svc.lastCreateParams.EmployeeNo == nil || *svc.lastCreateParams.EmployeeNo != 1030 {
+		t.Fatalf("CreateUser() employee_no = %+v", svc.lastCreateParams.EmployeeNo)
 	}
 	if svc.lastCreateParams.Team != "杩愯惀涓€缁?" || svc.lastCreateParams.Mobile != "13800001030" {
 		t.Fatalf("CreateUser() org/contact = %+v", svc.lastCreateParams)

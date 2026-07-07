@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"regexp"
 	"strings"
 	"sync"
@@ -23,6 +24,8 @@ var (
 	emailPattern            = regexp.MustCompile(`^[^@\s]+@[^@\s]+\.[^@\s]+$`)
 	managedAvatarURLPattern = regexp.MustCompile(`^/v1/me/avatar-files/avatar-[0-9a-f]{32}\.(jpg|jpeg|png|webp)$`)
 )
+
+const maxEmployeeNo = 9999
 
 type RegisterUserParams struct {
 	Username           string
@@ -57,6 +60,7 @@ type ChangePasswordParams struct {
 
 type CreateManagedUserParams struct {
 	Username           string
+	EmployeeNo         *int
 	DisplayName        string
 	Department         domain.Department
 	Team               string
@@ -99,6 +103,7 @@ const (
 
 type UpdateUserParams struct {
 	UserID             int64
+	EmployeeNo         *int
 	DisplayName        *string
 	Status             *domain.UserStatus
 	EmploymentType     *domain.EmploymentType
@@ -886,6 +891,10 @@ func (s *identityService) CreateManagedUser(ctx context.Context, p CreateManaged
 	team := strings.TrimSpace(p.Team)
 	mobile := strings.TrimSpace(p.Mobile)
 	email := strings.TrimSpace(p.Email)
+	employeeNo, appErr := requiredEmployeeNo(p.EmployeeNo)
+	if appErr != nil {
+		return nil, appErr
+	}
 
 	if username == "" {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "username is required", nil)
@@ -911,14 +920,15 @@ func (s *identityService) CreateManagedUser(ctx context.Context, p CreateManaged
 	if appErr := s.ensureUniqueIdentity(ctx, username, mobile, 0); appErr != nil {
 		return nil, appErr
 	}
+	if appErr := s.ensureUniqueEmployeeNo(ctx, employeeNo, 0); appErr != nil {
+		return nil, appErr
+	}
 
 	roles, appErr := validateRoleInputs(p.Roles)
 	if appErr != nil {
 		return nil, appErr
 	}
-	if len(roles) == 0 {
-		roles = []domain.Role{domain.RoleMember}
-	}
+	roles = ensureMemberRole(roles)
 	if appErr := s.authorizeCreateManagedUser(ctx, p.Department, roles); appErr != nil {
 		return nil, appErr
 	}
@@ -950,6 +960,7 @@ func (s *identityService) CreateManagedUser(ctx context.Context, p CreateManaged
 	now := time.Now().UTC()
 	user := &domain.User{
 		Username:           username,
+		EmployeeNo:         &employeeNo,
 		DisplayName:        displayName,
 		Department:         p.Department,
 		Team:               team,
@@ -970,6 +981,9 @@ func (s *identityService) CreateManagedUser(ctx context.Context, p CreateManaged
 		user.ID = userID
 		return s.userRepo.ReplaceRoles(ctx, tx, userID, roles)
 	}); err != nil {
+		if appErr := s.employeeNoWriteConflict(ctx, err, employeeNo, 0); appErr != nil {
+			return nil, appErr
+		}
 		return nil, infraError("create managed user tx", err)
 	}
 
@@ -1189,6 +1203,19 @@ func (s *identityService) UpdateUser(ctx context.Context, p UpdateUserParams) (*
 	}
 
 	changes := make([]string, 0, 6)
+	if p.EmployeeNo != nil {
+		employeeNo, appErr := optionalEmployeeNo(p.EmployeeNo)
+		if appErr != nil {
+			return nil, appErr
+		}
+		if appErr := s.ensureUniqueEmployeeNo(ctx, employeeNo, user.ID); appErr != nil {
+			return nil, appErr
+		}
+		if user.EmployeeNo == nil || *user.EmployeeNo != employeeNo {
+			user.EmployeeNo = &employeeNo
+			changes = append(changes, "employee_no")
+		}
+	}
 	if p.DisplayName != nil {
 		displayName := strings.TrimSpace(*p.DisplayName)
 		if displayName == "" {
@@ -1323,6 +1350,11 @@ func (s *identityService) UpdateUser(ctx context.Context, p UpdateUserParams) (*
 	if err := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
 		return s.userRepo.Update(ctx, tx, user)
 	}); err != nil {
+		if p.EmployeeNo != nil {
+			if appErr := s.employeeNoWriteConflict(ctx, err, *p.EmployeeNo, user.ID); appErr != nil {
+				return nil, appErr
+			}
+		}
 		return nil, infraError("update user tx", err)
 	}
 	updated, appErr := s.GetUser(ctx, p.UserID)
@@ -1464,6 +1496,9 @@ func (s *identityService) setUserStatusFromEndpoint(ctx context.Context, userID 
 	}
 	if appErr := s.authorizeUserStatusEndpoint(ctx, user); appErr != nil {
 		return appErr
+	}
+	if actor, ok := domain.RequestActorFromContext(ctx); ok && actor.ID == user.ID && status != domain.UserStatusActive {
+		return domain.NewAppError(domain.ErrCodePermissionDenied, "不能停用当前登录账号。", map[string]interface{}{"deny_code": "self_deactivate_denied"})
 	}
 	if appErr := s.ensurePrivilegedUserStatusSafety(ctx, user, status); appErr != nil {
 		return appErr
@@ -1861,6 +1896,12 @@ func (s *identityService) applyUserRoleChange(ctx context.Context, userID int64,
 	}
 	currentRoles := domain.NormalizeRoleValues(user.Roles)
 	nextRoles := domain.NormalizeRoleValues(roles)
+	if containsRole(currentRoles, domain.RoleMember) && !containsRole(nextRoles, domain.RoleMember) {
+		if method == "DELETE" {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "成员是基础身份，不能移除。", map[string]interface{}{"deny_code": "member_role_required"})
+		}
+		nextRoles = ensureMemberRole(nextRoles)
+	}
 	addedRoles, removedRoles := diffRoles(currentRoles, nextRoles)
 	if appErr := s.authorizeUserRoleChange(ctx, user, nextRoles); appErr != nil {
 		return nil, appErr
@@ -2518,11 +2559,14 @@ func (s *identityService) authorizeUserUpdate(ctx context.Context, current *doma
 		}
 		return nil
 	case identityActorHasAnyRole(actor, domain.RoleOrgAdmin):
-		if p.Status != nil || p.DisplayName != nil || p.Email != nil || p.Mobile != nil || p.EmploymentType != nil {
+		if p.EmployeeNo != nil || p.Status != nil || p.DisplayName != nil || p.Email != nil || p.Mobile != nil || p.EmploymentType != nil {
 			return identityPermissionDenied("org_admin_scope_only", "legacy OrgAdmin compatibility is limited to organization scope updates")
 		}
 		return nil
 	case identityActorHasAnyRole(actor, domain.RoleDeptAdmin):
+		if p.EmployeeNo != nil {
+			return fieldDenied("user_update_field_denied_by_scope", "DepartmentAdmin 不能修改工号。")
+		}
 		if p.ManagedDepartments != nil || p.ManagedTeams != nil {
 			return fieldDenied("user_update_field_denied_by_scope", "department admin cannot change managed scope settings")
 		}
@@ -2757,6 +2801,74 @@ func validateOptionalEmail(email string) *domain.AppError {
 		return domain.NewAppError(domain.ErrCodeInvalidRequest, "email format is invalid", nil)
 	}
 	return nil
+}
+
+func requiredEmployeeNo(employeeNo *int) (int, *domain.AppError) {
+	if employeeNo == nil {
+		return 0, domain.NewAppError(domain.ErrCodeInvalidRequest, "工号必填。", map[string]interface{}{"deny_code": "employee_no_required"})
+	}
+	return optionalEmployeeNo(employeeNo)
+}
+
+func optionalEmployeeNo(employeeNo *int) (int, *domain.AppError) {
+	if employeeNo == nil {
+		return 0, domain.NewAppError(domain.ErrCodeInvalidRequest, "工号不能为空。", map[string]interface{}{"deny_code": "employee_no_required"})
+	}
+	if *employeeNo < 0 || *employeeNo > maxEmployeeNo {
+		return 0, domain.NewAppError(domain.ErrCodeInvalidRequest, "工号必须是 0 到 9999 之间的纯数字。", map[string]interface{}{"deny_code": "employee_no_invalid"})
+	}
+	return *employeeNo, nil
+}
+
+func (s *identityService) ensureUniqueEmployeeNo(ctx context.Context, employeeNo int, excludeUserID int64) *domain.AppError {
+	existing, err := s.userRepo.GetByEmployeeNo(ctx, employeeNo)
+	if err != nil {
+		return infraError("get user by employee_no", err)
+	}
+	if existing == nil || existing.ID == excludeUserID {
+		return nil
+	}
+	return employeeNoConflictError(employeeNo, existing)
+}
+
+func (s *identityService) employeeNoWriteConflict(ctx context.Context, err error, employeeNo int, excludeUserID int64) *domain.AppError {
+	if err == nil {
+		return nil
+	}
+	message := err.Error()
+	if !strings.Contains(message, "uq_users_employee_no") && !strings.Contains(message, "employee_no") {
+		return nil
+	}
+	if appErr := s.ensureUniqueEmployeeNo(ctx, employeeNo, excludeUserID); appErr != nil {
+		return appErr
+	}
+	return domain.NewAppError(domain.ErrCodeInvalidRequest, fmt.Sprintf("工号 %d 已被其他账号使用，请核对后再保存。", employeeNo), map[string]interface{}{
+		"deny_code":   "employee_no_conflict",
+		"employee_no": employeeNo,
+	})
+}
+
+func employeeNoConflictError(employeeNo int, existing *domain.User) *domain.AppError {
+	name := strings.TrimSpace(existing.DisplayName)
+	if name == "" {
+		name = existing.Username
+	}
+	return domain.NewAppError(
+		domain.ErrCodeInvalidRequest,
+		fmt.Sprintf("工号 %d 已被 %s（登录账号 %s）使用，请核对后再保存。", employeeNo, name, existing.Username),
+		map[string]interface{}{
+			"deny_code":        "employee_no_conflict",
+			"employee_no":      employeeNo,
+			"existing_user_id": existing.ID,
+		},
+	)
+}
+
+func ensureMemberRole(roles []domain.Role) []domain.Role {
+	if containsRole(roles, domain.RoleMember) {
+		return domain.NormalizeRoleValues(roles)
+	}
+	return mergeRoles(roles, []domain.Role{domain.RoleMember})
 }
 
 func normalizeManagedAvatarURLForService(raw string) (string, *domain.AppError) {

@@ -343,6 +343,10 @@ func (r *broadcastUserRepo) GetByMobile(ctx context.Context, mobile string) (*do
 	return nil, errors.New("not implemented")
 }
 
+func (r *broadcastUserRepo) GetByEmployeeNo(ctx context.Context, employeeNo int) (*domain.User, error) {
+	return nil, errors.New("not implemented")
+}
+
 func (r *broadcastUserRepo) GetByJstUID(ctx context.Context, jstUID int64) (*domain.User, error) {
 	return nil, errors.New("not implemented")
 }

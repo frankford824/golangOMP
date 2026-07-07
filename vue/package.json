@@ -12,6 +12,7 @@
     "build:test": "vue-tsc -b && vite build --mode test",
     "preview": "vite preview",
     "test": "vitest run",
+    "test:unit": "vitest run",
     "test:watch": "vitest",
     "a11y:audit": "node scripts/accessibility-audit.mjs",
     "asset:a11y": "node scripts/asset-workbench-a11y-audit.mjs",

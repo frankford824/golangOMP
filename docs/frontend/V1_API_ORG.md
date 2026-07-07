@@ -137,7 +137,7 @@ curl -X POST https://api.example.com/v1/org/departments \
 ### 简介
 支持方法: PUT。
 
-- `PUT`: Updates one backend org department. Current runtime semantic is enable/disable only; disabling is rejected while users are still assigned or enabled child teams still exist.
+- `PUT`: Updates one backend org department. Supports renaming (`name`) and stopping use (`enabled=false`). When a department is stopped, the department and its child teams disappear from enabled org options, child teams are disabled, and existing assigned users are moved to the system `未分配/未分配池`. The system unassigned department cannot be deleted. Historical task snapshots are not rewritten.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -155,7 +155,8 @@ Content-Type: `application/json`
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `enabled` | boolean | 是 | Current backend update semantic is enable/disable only. |
+| `name` | string | 否 | Rename the department. Must be unique among org departments. Cannot be combined with deleting the same department. |
+| `enabled` | boolean | 否 | Set to false to stop using the department. Existing assigned users are moved to the system unassigned pool, and child teams are disabled. System unassigned department cannot be deleted. |
 
 ### 响应体 schema
 成功响应: `200 application/json`
@@ -178,7 +179,7 @@ Content-Type: `application/json`
 ### 错误码
 | HTTP | code | deny_code | 说明 |
 |---|---|---|---|
-| 400 | 见 `error.code` | 见 `deny_code` | Invalid request payload or department cannot be disabled yet |
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid request payload, duplicate department name, or protected system department |
 | 403 | 见 `error.code` | 见 `deny_code` | Permission denied |
 | 404 | 见 `error.code` | 见 `deny_code` | Department not found |
 
@@ -219,7 +220,7 @@ Content-Type: `application/json`
 |---|---|---|---|
 | `department_id` | integer | 否 | Backend org department id. Optional when `department` is provided. |
 | `department` | string | 否 | Backend org department name. Optional when `department_id` is provided. |
-| `name` | string | 是 | Globally unique team name in backend org master. |
+| `name` | string | 是 | Unique team name under the selected department in backend org master. |
 
 ### 响应体 schema
 成功响应: `201 application/json`
@@ -264,7 +265,7 @@ curl -X POST https://api.example.com/v1/org/teams \
 ### 简介
 支持方法: PUT。
 
-- `PUT`: Updates one backend org team. Current runtime semantic is enable/disable only; disabling is rejected while users are still assigned to that team.
+- `PUT`: Updates one backend org team. Supports renaming (`name`) and stopping use (`enabled=false`). When a team is stopped, it disappears from enabled org options and existing assigned users are moved to the system `未分配/未分配池`. The system unassigned pool team cannot be deleted. Historical task snapshots are not rewritten.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -282,7 +283,8 @@ Content-Type: `application/json`
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `enabled` | boolean | 是 | Current backend update semantic is enable/disable only. |
+| `name` | string | 否 | Rename the team inside its department. Cannot be combined with deleting the same team. |
+| `enabled` | boolean | 否 | Set to false to stop using the team. Existing assigned users are moved to the system unassigned pool. System unassigned pool team cannot be deleted. |
 
 ### 响应体 schema
 成功响应: `200 application/json`
@@ -305,7 +307,7 @@ Content-Type: `application/json`
 ### 错误码
 | HTTP | code | deny_code | 说明 |
 |---|---|---|---|
-| 400 | 见 `error.code` | 见 `deny_code` | Invalid request payload or team cannot be disabled yet |
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid request payload, duplicate team name under department, or protected system team |
 | 403 | 见 `error.code` | 见 `deny_code` | Permission denied |
 | 404 | 见 `error.code` | 见 `deny_code` | Team not found |
 

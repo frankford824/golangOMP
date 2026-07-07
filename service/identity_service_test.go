@@ -4,6 +4,7 @@ import (
 	"context"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -457,6 +458,7 @@ func TestIdentityServiceCreateManagedUserSupportsInitialPasswordOrgAndRoles(t *t
 	})
 	user, appErr := svc.CreateManagedUser(adminCtx, CreateManagedUserParams{
 		Username:    "ops_new",
+		EmployeeNo:  intPtr(1020),
 		DisplayName: "Ops New",
 		Department:  domain.DepartmentOperations,
 		Team:        opsTeam,
@@ -492,6 +494,66 @@ func TestIdentityServiceCreateManagedUserSupportsInitialPasswordOrgAndRoles(t *t
 	}
 }
 
+func TestIdentityServiceEmployeeNoMustBeUniqueWithBusinessMessage(t *testing.T) {
+	userRepo := newIdentityUserRepo()
+	svc := NewIdentityService(userRepo, &identitySessionRepoStub{}, &identityPermissionLogRepoStub{}, identityTxRunner{})
+	options, appErr := svc.GetOrgOptions(context.Background())
+	if appErr != nil {
+		t.Fatalf("GetOrgOptions() error = %+v", appErr)
+	}
+	opsTeam, ok := findDepartmentTeam(options, string(domain.DepartmentOperations))
+	if !ok {
+		t.Fatalf("missing operations team in options: %+v", options.Departments)
+	}
+
+	adminCtx := domain.WithRequestActor(context.Background(), domain.RequestActor{
+		ID:       1,
+		Username: "admin",
+		Roles:    []domain.Role{domain.RoleSuperAdmin},
+		Source:   domain.RequestActorSourceSessionToken,
+		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
+	})
+	first, appErr := svc.CreateManagedUser(adminCtx, CreateManagedUserParams{
+		Username:    "employee_no_owner",
+		EmployeeNo:  intPtr(88),
+		DisplayName: "工号占用人",
+		Department:  domain.DepartmentOperations,
+		Team:        opsTeam,
+		Mobile:      "13800001880",
+		Password:    "Init1234",
+		Roles:       []domain.Role{domain.RoleOps},
+	})
+	if appErr != nil {
+		t.Fatalf("CreateManagedUser(first) error = %+v", appErr)
+	}
+
+	_, appErr = svc.CreateManagedUser(adminCtx, CreateManagedUserParams{
+		Username:    "employee_no_conflict",
+		EmployeeNo:  intPtr(88),
+		DisplayName: "重复工号",
+		Department:  domain.DepartmentOperations,
+		Team:        opsTeam,
+		Mobile:      "13800001881",
+		Password:    "Init1234",
+		Roles:       []domain.Role{domain.RoleOps},
+	})
+	if appErr == nil || appErrorDenyCode(appErr) != "employee_no_conflict" {
+		t.Fatalf("CreateManagedUser(duplicate employee_no) appErr = %+v, want employee_no_conflict", appErr)
+	}
+	if !strings.Contains(appErr.Message, "工号 88 已被 工号占用人") {
+		t.Fatalf("duplicate employee_no message = %q", appErr.Message)
+	}
+
+	updateNo := 88
+	_, appErr = svc.UpdateUser(adminCtx, UpdateUserParams{
+		UserID:     first.ID,
+		EmployeeNo: &updateNo,
+	})
+	if appErr != nil {
+		t.Fatalf("UpdateUser(same employee_no) error = %+v", appErr)
+	}
+}
+
 func TestIdentityServiceResetUserPasswordAllowsReloginWithNewPassword(t *testing.T) {
 	userRepo := newIdentityUserRepo()
 	logRepo := &identityPermissionLogRepoStub{}
@@ -513,6 +575,7 @@ func TestIdentityServiceResetUserPasswordAllowsReloginWithNewPassword(t *testing
 		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
 	}), CreateManagedUserParams{
 		Username:    "reset_user",
+		EmployeeNo:  intPtr(1021),
 		DisplayName: "Reset User",
 		Department:  domain.DepartmentProcurement,
 		Team:        procurementTeam,
@@ -668,6 +731,13 @@ func TestIdentityServiceAddAndRemoveUserRolesWriteLogs(t *testing.T) {
 	if !hasPermissionLog(logRepo.logs, domain.PermissionActionRoleRemoved, userResult.User.ID, []domain.Role{domain.RoleWarehouse}) {
 		t.Fatalf("permission logs = %+v, want role_removed entry", logRepo.logs)
 	}
+
+	if _, appErr := svc.RemoveUserRole(adminCtx, RemoveUserRoleParams{
+		UserID: userResult.User.ID,
+		Role:   domain.RoleMember,
+	}); appErr == nil || appErrorDenyCode(appErr) != "member_role_required" {
+		t.Fatalf("RemoveUserRole(Member) appErr = %+v, want member_role_required", appErr)
+	}
 }
 
 func TestIdentityServiceRoleWriteRejectsNonAssignableCompatibilityRoles(t *testing.T) {
@@ -709,6 +779,7 @@ func TestIdentityServiceRoleWriteRejectsNonAssignableCompatibilityRoles(t *testi
 	}
 	if _, appErr := svc.CreateManagedUser(superCtx, CreateManagedUserParams{
 		Username:    "legacy_admin_target",
+		EmployeeNo:  intPtr(9998),
 		DisplayName: "Legacy Admin Target",
 		Department:  domain.DepartmentOperations,
 		Team:        opsTeam,
@@ -961,6 +1032,7 @@ func TestIdentityServiceListUsersSupportsDepartmentTeamRoleAndKeywordFilters(t *
 
 	if _, appErr := svc.CreateManagedUser(context.Background(), CreateManagedUserParams{
 		Username:    "ops_filter",
+		EmployeeNo:  intPtr(1022),
 		DisplayName: "Ops Filter",
 		Department:  domain.DepartmentOperations,
 		Team:        opsTeam,
@@ -972,6 +1044,7 @@ func TestIdentityServiceListUsersSupportsDepartmentTeamRoleAndKeywordFilters(t *
 	}
 	if _, appErr := svc.CreateManagedUser(context.Background(), CreateManagedUserParams{
 		Username:    "warehouse_filter",
+		EmployeeNo:  intPtr(1023),
 		DisplayName: "Warehouse Filter",
 		Department:  domain.DepartmentWarehouse,
 		Team:        warehouseTeam,
@@ -1083,6 +1156,7 @@ func TestIdentityServiceUpdateUserPatchKeepsUnspecifiedFields(t *testing.T) {
 
 	user, appErr := svc.CreateManagedUser(context.Background(), CreateManagedUserParams{
 		Username:    "patch_preserve_user",
+		EmployeeNo:  intPtr(1080),
 		DisplayName: "Patch Preserve User",
 		Department:  domain.Department(originDepartment),
 		Team:        originTeams[0],
@@ -1247,6 +1321,7 @@ func TestIdentityServiceUpdateUserDisableBlocksLogin(t *testing.T) {
 
 	user, appErr := svc.CreateManagedUser(context.Background(), CreateManagedUserParams{
 		Username:    "disabled_user",
+		EmployeeNo:  intPtr(1024),
 		DisplayName: "Disabled User",
 		Department:  domain.DepartmentDesign,
 		Team:        designTeam,
@@ -1343,6 +1418,7 @@ func TestIdentityServiceDepartmentAdminCannotCreateUserOutsideOwnDepartment(t *t
 	})
 	_, appErr = svc.CreateManagedUser(ctx, CreateManagedUserParams{
 		Username:    "ops_member_by_design_admin",
+		EmployeeNo:  intPtr(1026),
 		DisplayName: "Ops Member",
 		Department:  domain.DepartmentOperations,
 		Team:        opsTeam,
@@ -1378,6 +1454,7 @@ func TestIdentityServiceTeamLeadCannotCreateManagedUser(t *testing.T) {
 	})
 	_, appErr = svc.CreateManagedUser(ctx, CreateManagedUserParams{
 		Username:    "ops_member_by_lead",
+		EmployeeNo:  intPtr(1027),
 		DisplayName: "Ops Member By Lead",
 		Department:  domain.DepartmentOperations,
 		Team:        opsTeam,
@@ -1409,6 +1486,7 @@ func TestIdentityServiceDepartmentAdminPasswordResetAndUnassignedAssignmentBound
 
 	opsUser, appErr := svc.CreateManagedUser(context.Background(), CreateManagedUserParams{
 		Username:    "ops_member_resettable",
+		EmployeeNo:  intPtr(1028),
 		DisplayName: "Ops Member Resettable",
 		Department:  domain.DepartmentOperations,
 		Team:        opsTeam,
@@ -1421,6 +1499,7 @@ func TestIdentityServiceDepartmentAdminPasswordResetAndUnassignedAssignmentBound
 	}
 	designUser, appErr := svc.CreateManagedUser(context.Background(), CreateManagedUserParams{
 		Username:    "design_member_protected",
+		EmployeeNo:  intPtr(1029),
 		DisplayName: "Design Member Protected",
 		Department:  domain.DepartmentDesignRD,
 		Team:        designTeam,
@@ -1525,6 +1604,7 @@ func TestIdentityServiceHRAdminAndSuperAdminCanChangeRoles(t *testing.T) {
 
 	user, appErr := svc.CreateManagedUser(context.Background(), CreateManagedUserParams{
 		Username:    "role_change_target",
+		EmployeeNo:  intPtr(1031),
 		DisplayName: "Role Change Target",
 		Department:  domain.DepartmentOperations,
 		Team:        opsTeam,
@@ -1550,7 +1630,7 @@ func TestIdentityServiceHRAdminAndSuperAdminCanChangeRoles(t *testing.T) {
 	if appErr != nil {
 		t.Fatalf("SetUserRoles(HRAdmin) error = %+v", appErr)
 	}
-	if len(updated.Roles) != 1 || updated.Roles[0] != domain.RoleWarehouse {
+	if !containsRoleValue(updated.Roles, domain.RoleWarehouse) || !containsRoleValue(updated.Roles, domain.RoleMember) {
 		t.Fatalf("SetUserRoles(HRAdmin) roles = %+v", updated.Roles)
 	}
 
@@ -1696,6 +1776,16 @@ func (r *identityUserRepoStub) GetByMobile(_ context.Context, mobile string) (*d
 	return r.GetByID(context.Background(), id)
 }
 
+func (r *identityUserRepoStub) GetByEmployeeNo(_ context.Context, employeeNo int) (*domain.User, error) {
+	for _, user := range r.users {
+		if user == nil || user.EmployeeNo == nil || *user.EmployeeNo != employeeNo {
+			continue
+		}
+		return r.GetByID(context.Background(), user.ID)
+	}
+	return nil, nil
+}
+
 func (r *identityUserRepoStub) GetByJstUID(_ context.Context, jstUID int64) (*domain.User, error) {
 	for _, user := range r.users {
 		if user.JstUID != nil && *user.JstUID == jstUID {
@@ -1761,7 +1851,13 @@ func (r *identityUserRepoStub) listWithFilter(filter repo.UserListFilter) ([]*do
 			continue
 		}
 		if keyword != "" {
-			nameMatch := strings.Contains(strings.ToLower(user.Username), keyword) || strings.Contains(strings.ToLower(user.DisplayName), keyword)
+			employeeNo := ""
+			if user.EmployeeNo != nil {
+				employeeNo = strconv.Itoa(*user.EmployeeNo)
+			}
+			nameMatch := strings.Contains(strings.ToLower(user.Username), keyword) ||
+				strings.Contains(strings.ToLower(user.DisplayName), keyword) ||
+				strings.Contains(employeeNo, keyword)
 			if !nameMatch {
 				continue
 			}

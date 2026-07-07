@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"strconv"
 	"strings"
 	"time"
 
@@ -31,38 +32,40 @@ func NewUserAdminHandler(svc service.IdentityService, routeRules routeAccessRule
 }
 
 type patchUserReq struct {
-	DisplayName        *string        `json:"display_name"`
-	Status             *string        `json:"status"`
-	EmploymentType     *string        `json:"employment_type"`
-	Department         *string        `json:"department"`
-	Team               *string        `json:"team"`
-	Group              *string        `json:"group"`
-	Email              *string        `json:"email"`
-	Mobile             *string        `json:"mobile"`
-	ManagedDepartments *[]string      `json:"managed_departments"`
-	ManagedTeams       *[]string      `json:"managed_teams"`
-	Roles              *[]domain.Role `json:"roles"`
-	Avatar             *string        `json:"avatar"`
-	TeamCodes          *[]string      `json:"team_codes"`
-	PrimaryTeamCode    *string        `json:"primary_team_code"`
+	EmployeeNo         json.RawMessage `json:"employee_no"`
+	DisplayName        *string         `json:"display_name"`
+	Status             *string         `json:"status"`
+	EmploymentType     *string         `json:"employment_type"`
+	Department         *string         `json:"department"`
+	Team               *string         `json:"team"`
+	Group              *string         `json:"group"`
+	Email              *string         `json:"email"`
+	Mobile             *string         `json:"mobile"`
+	ManagedDepartments *[]string       `json:"managed_departments"`
+	ManagedTeams       *[]string       `json:"managed_teams"`
+	Roles              *[]domain.Role  `json:"roles"`
+	Avatar             *string         `json:"avatar"`
+	TeamCodes          *[]string       `json:"team_codes"`
+	PrimaryTeamCode    *string         `json:"primary_team_code"`
 }
 
 type createUserReq struct {
-	Username           string        `json:"username"`
-	Account            string        `json:"account"`
-	DisplayName        string        `json:"display_name"`
-	Name               string        `json:"name"`
-	Department         string        `json:"department"`
-	Team               string        `json:"team"`
-	Group              string        `json:"group"`
-	Mobile             string        `json:"mobile"`
-	Phone              string        `json:"phone"`
-	Email              string        `json:"email"`
-	Password           string        `json:"password"`
-	Roles              []domain.Role `json:"roles"`
-	Status             *string       `json:"status"`
-	EmploymentType     *string       `json:"employment_type"`
-	ManagedDepartments *[]string     `json:"managed_departments"`
+	Username           string          `json:"username"`
+	EmployeeNo         json.RawMessage `json:"employee_no"`
+	Account            string          `json:"account"`
+	DisplayName        string          `json:"display_name"`
+	Name               string          `json:"name"`
+	Department         string          `json:"department"`
+	Team               string          `json:"team"`
+	Group              string          `json:"group"`
+	Mobile             string          `json:"mobile"`
+	Phone              string          `json:"phone"`
+	Email              string          `json:"email"`
+	Password           string          `json:"password"`
+	Roles              []domain.Role   `json:"roles"`
+	Status             *string         `json:"status"`
+	EmploymentType     *string         `json:"employment_type"`
+	ManagedDepartments *[]string       `json:"managed_departments"`
 }
 
 type createDepartmentReq struct {
@@ -70,7 +73,8 @@ type createDepartmentReq struct {
 }
 
 type updateDepartmentReq struct {
-	Enabled *bool `json:"enabled"`
+	Name    *string `json:"name"`
+	Enabled *bool   `json:"enabled"`
 }
 
 type createTeamReq struct {
@@ -80,7 +84,8 @@ type createTeamReq struct {
 }
 
 type updateTeamReq struct {
-	Enabled *bool `json:"enabled"`
+	Name    *string `json:"name"`
+	Enabled *bool   `json:"enabled"`
 }
 
 type setUserRolesReq struct {
@@ -219,6 +224,11 @@ func (h *UserAdminHandler) CreateUser(c *gin.Context) {
 		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
 		return
 	}
+	employeeNo, appErr := parseEmployeeNoRequestField(req.EmployeeNo, true)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
 	var status *domain.UserStatus
 	if req.Status != nil {
 		value := domain.UserStatus(*req.Status)
@@ -231,6 +241,7 @@ func (h *UserAdminHandler) CreateUser(c *gin.Context) {
 	}
 	user, appErr := h.svc.CreateManagedUser(c.Request.Context(), service.CreateManagedUserParams{
 		Username:           firstNonEmpty(req.Account, req.Username),
+		EmployeeNo:         employeeNo,
 		DisplayName:        firstNonEmpty(req.Name, req.DisplayName),
 		Department:         domain.Department(req.Department),
 		Team:               firstNonEmpty(req.Group, req.Team),
@@ -260,6 +271,11 @@ func (h *UserAdminHandler) PatchUser(c *gin.Context) {
 		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
 		return
 	}
+	employeeNo, appErr := parseEmployeeNoRequestField(req.EmployeeNo, false)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
 	var status *domain.UserStatus
 	if req.Status != nil {
 		value := domain.UserStatus(*req.Status)
@@ -277,6 +293,7 @@ func (h *UserAdminHandler) PatchUser(c *gin.Context) {
 	}
 	user, appErr := h.svc.UpdateUser(c.Request.Context(), service.UpdateUserParams{
 		UserID:             id,
+		EmployeeNo:         employeeNo,
 		DisplayName:        req.DisplayName,
 		Status:             status,
 		EmploymentType:     employmentType,
@@ -437,6 +454,7 @@ func (h *UserAdminHandler) UpdateDepartment(c *gin.Context) {
 	}
 	item, appErr := h.svc.UpdateDepartment(c.Request.Context(), service.UpdateOrgDepartmentParams{
 		ID:      id,
+		Name:    req.Name,
 		Enabled: req.Enabled,
 	})
 	if appErr != nil {
@@ -477,6 +495,7 @@ func (h *UserAdminHandler) UpdateTeam(c *gin.Context) {
 	}
 	item, appErr := h.svc.UpdateTeam(c.Request.Context(), service.UpdateOrgTeamParams{
 		ID:      id,
+		Name:    req.Name,
 		Enabled: req.Enabled,
 	})
 	if appErr != nil {
@@ -840,6 +859,29 @@ func firstNonEmptyTraceQuery(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func parseEmployeeNoRequestField(raw json.RawMessage, required bool) (*int, *domain.AppError) {
+	if len(raw) == 0 {
+		if required {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "工号必填。", map[string]interface{}{"deny_code": "employee_no_required"})
+		}
+		return nil, nil
+	}
+	text := strings.TrimSpace(string(raw))
+	if text == "" || text == "null" {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "工号不能为空。", map[string]interface{}{"deny_code": "employee_no_required"})
+	}
+	for _, r := range text {
+		if r < '0' || r > '9' {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "工号必须是 0 到 9999 之间的纯数字。", map[string]interface{}{"deny_code": "employee_no_invalid"})
+		}
+	}
+	value, err := strconv.Atoi(text)
+	if err != nil || value < 0 || value > 9999 {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "工号必须是 0 到 9999 之间的纯数字。", map[string]interface{}{"deny_code": "employee_no_invalid"})
+	}
+	return &value, nil
 }
 
 func parseTraceBool(raw string) bool {

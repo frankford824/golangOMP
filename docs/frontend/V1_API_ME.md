@@ -109,7 +109,7 @@ curl -X GET https://api.example.com/v1/me/task-drafts \
     "id": 123,
     "username": "string",
     "account": "string",
-    "display_name": "string"
+    "employee_no": 123
   }
 }
 ```
@@ -157,7 +157,7 @@ Content-Type: `application/json`
     "id": 123,
     "username": "string",
     "account": "string",
-    "display_name": "string"
+    "employee_no": 123
   }
 }
 ```
@@ -222,7 +222,7 @@ Content-Type: `multipart/form-data`
     "id": 123,
     "username": "string",
     "account": "string",
-    "display_name": "string"
+    "employee_no": 123
   }
 }
 ```
@@ -262,7 +262,7 @@ curl -X POST https://api.example.com/v1/me/avatar \
     "id": 123,
     "username": "string",
     "account": "string",
-    "display_name": "string"
+    "employee_no": 123
   }
 }
 ```

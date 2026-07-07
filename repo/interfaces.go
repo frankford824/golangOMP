@@ -803,6 +803,7 @@ type UserRepo interface {
 	GetByID(ctx context.Context, id int64) (*domain.User, error)
 	GetByUsername(ctx context.Context, username string) (*domain.User, error)
 	GetByMobile(ctx context.Context, mobile string) (*domain.User, error)
+	GetByEmployeeNo(ctx context.Context, employeeNo int) (*domain.User, error)
 	GetByJstUID(ctx context.Context, jstUID int64) (*domain.User, error)
 	List(ctx context.Context, filter UserListFilter) ([]*domain.User, int64, error)
 	// ListActiveByRole returns every user with status=active that carries the

@@ -29,6 +29,17 @@
         </div>
         <div class="management-layout">
           <aside class="org-filter-panel" aria-label="组织筛选">
+            <div class="org-filter-header">
+              <span>组织列表</span>
+              <button
+                v-if="canManageOrgMaster"
+                type="button"
+                class="org-action-btn"
+                @click="openCreateDepartment"
+              >
+                新增部门
+              </button>
+            </div>
             <button
               v-if="!isDeptScopedOnly"
               type="button"
@@ -39,25 +50,36 @@
               <span>全部组织</span>
             </button>
             <div v-for="dept in visibleOrgTree" :key="dept.value" class="org-filter-dept">
-              <button
-                type="button"
-                class="org-filter-item org-filter-item--dept"
-                :class="{ 'is-active': isOrgDepartmentActive(dept.value) }"
-                @click="selectOrgDepartment(dept.value)"
-              >
-                <span>{{ dept.label }}</span>
-              </button>
-              <div v-if="dept.teams.length" class="org-filter-teams">
+              <div class="org-filter-row">
                 <button
-                  v-for="team in dept.teams"
-                  :key="`${dept.value}-${team.value}`"
                   type="button"
-                  class="org-filter-item org-filter-item--team"
-                  :class="{ 'is-active': isOrgTeamActive(dept.value, team.value) }"
-                  @click="selectOrgTeam(dept.value, team.value)"
+                  class="org-filter-item org-filter-item--dept"
+                  :class="{ 'is-active': isOrgDepartmentActive(dept.value) }"
+                  @click="selectOrgDepartment(dept.value)"
                 >
-                  <span>{{ team.label }}</span>
+                  <span>{{ dept.label }}</span>
                 </button>
+                <div v-if="canManageOrgMaster && dept.id" class="org-row-actions">
+                  <button type="button" class="org-icon-btn" @click.stop="openCreateTeam(dept)">新增组</button>
+                  <button type="button" class="org-icon-btn" @click.stop="openEditDepartment(dept)">改名</button>
+                  <button type="button" class="org-icon-btn org-icon-btn--danger" @click.stop="openDeleteDepartment(dept)">删除</button>
+                </div>
+              </div>
+              <div v-if="dept.teams.length" class="org-filter-teams">
+                <div v-for="team in dept.teams" :key="`${dept.value}-${team.value}`" class="org-filter-row">
+                  <button
+                    type="button"
+                    class="org-filter-item org-filter-item--team"
+                    :class="{ 'is-active': isOrgTeamActive(dept.value, team.value) }"
+                    @click="selectOrgTeam(dept.value, team.value)"
+                  >
+                    <span>{{ team.label }}</span>
+                  </button>
+                  <div v-if="canManageOrgMaster && team.id" class="org-row-actions">
+                    <button type="button" class="org-icon-btn" @click.stop="openEditTeam(team)">改名</button>
+                    <button type="button" class="org-icon-btn org-icon-btn--danger" @click.stop="openDeleteTeam(team)">删除</button>
+                  </div>
+                </div>
               </div>
             </div>
           </aside>
@@ -66,7 +88,7 @@
               <BaseInput
                 v-model="keyword"
                 class="toolbar-field"
-                placeholder="搜索用户名 / 姓名"
+                placeholder="搜索姓名 / 工号 / 登录账号"
                 @keyup.enter="onSearch"
               />
               <BaseSelect
@@ -134,9 +156,11 @@
         <div class="modal-panel um-modal um-modal--wide">
           <header class="modal-header">
             <div class="modal-heading">
-              <h3 class="section-title">角色管理：{{ detailUser.display_name || detailUser.username }}</h3>
+              <h3 class="section-title">用户详情：{{ detailUser.display_name || detailUser.username }}</h3>
+              <p class="modal-subtitle">
+                {{ formatEmployeeNo(detailUser.employee_no) }} · {{ detailUser.username }} · {{ formatUserStatusForDisplay(detailUser.status) }}
+              </p>
               <p class="modal-subtitle">当前角色：{{ formatWorkflowRolesForDisplay(detailUser.roles) }}</p>
-              <p class="modal-subtitle">状态：{{ formatUserStatusForDisplay(detailUser.status) }}</p>
             </div>
             <button type="button" class="modal-close" aria-label="关闭角色管理" @click="detailUser = null">
               ×
@@ -145,72 +169,49 @@
           <div class="modal-body">
             <div v-if="detailLoading" class="py-4"><BaseSkeleton width="100%" height="4rem" /></div>
             <div v-else class="modal-stack">
-              <div v-if="lockedDetailRoleOptions.length" class="legacy-role-box">
-                <span class="legacy-role-title">{{ lockedDetailRoleTitle }}</span>
-                <span
-                  v-for="role in lockedDetailRoleOptions"
-                  :key="'locked-' + role.code"
-                  class="legacy-role-tag"
-                  :title="lockedRoleTooltip(role)"
-                >
-                  {{ role.display }}
-                </span>
-              </div>
-              <div v-if="editableRoleGroups.length" class="role-groups" :class="{ 'roles-grid-readonly': !canAssignRoles }">
-                <section v-for="group in editableRoleGroups" :key="group.category" class="role-group">
-                  <h4 class="role-group-title">{{ group.title }}</h4>
-                  <div class="roles-grid">
-                    <label v-for="role in group.roles" :key="role.code" class="role-check">
-                      <input
-                        v-model="selectedRoleCodes"
-                        type="checkbox"
-                        :value="role.code"
-                        :disabled="!canAssignRoles"
-                      />
-                      <span>{{ role.display }}</span>
-                    </label>
+              <section class="detail-section">
+                <header class="detail-section-header">
+                  <h4>基本信息</h4>
+                  <button
+                    v-if="canEditBasicInfo"
+                    type="button"
+                    class="um-btn um-btn--primary um-btn--sm"
+                    :disabled="basicSubmitting"
+                    @click="submitBasicInfo"
+                  >
+                    {{ basicSubmitting ? '保存中...' : '保存基本信息' }}
+                  </button>
+                </header>
+                <div class="detail-grid">
+                  <label class="field-label">
+                    <span>姓名</span>
+                    <input v-model.trim="basicForm.display_name" class="input" :disabled="!canEditBasicInfo" />
+                  </label>
+                  <label class="field-label">
+                    <span>工号</span>
+                    <input
+                      v-model.trim="basicForm.employee_no"
+                      class="input"
+                      inputmode="numeric"
+                      placeholder="0-9999"
+                      :disabled="!canEditBasicInfo"
+                    />
+                  </label>
+                  <div class="readonly-field">
+                    <span>登录账号</span>
+                    <strong>{{ detailUser.username }}</strong>
                   </div>
-                </section>
-              </div>
-              <p v-else class="role-readonly-hint">当前账号没有可分配角色，角色信息仅可查看。</p>
-              <div class="modal-actions-inline">
-                <!-- 角色可写性同时依赖 frontend_access 与服务端角色目录 assignable_by_current_actor。 -->
-                <button
-                  v-if="canAssignRoles"
-                  type="button"
-                  class="um-btn um-btn--primary um-btn--sm"
-                  :disabled="roleSubmitting"
-                  @click="submitRoleReplace"
-                >
-                  {{ roleSubmitting ? '提交中...' : '保存角色' }}
-                </button>
-                <p v-else class="role-readonly-hint">当前账号无角色分配权限，角色信息仅可查看。</p>
-                <button
-                  v-if="canDisableUser"
-                  type="button"
-                  class="um-btn um-btn--ghost um-btn--sm"
-                  :disabled="statusSubmitting || detailUser.status === 'disabled'"
-                  @click="setUserStatus('disabled')"
-                >
-                  {{ statusSubmitting ? '处理中...' : '禁用用户' }}
-                </button>
-                <button
-                  v-if="canDisableUser"
-                  type="button"
-                  class="um-btn um-btn--ghost um-btn--sm"
-                  :disabled="statusSubmitting || detailUser.status === 'active'"
-                  @click="setUserStatus('active')"
-                >
-                  {{ statusSubmitting ? '处理中...' : '启用用户' }}
-                </button>
-              </div>
-              <div v-if="canResetPassword" class="password-row">
-                <input v-model="resetPasswordValue" class="input" placeholder="输入新密码" />
-                <button type="button" class="um-btn um-btn--primary um-btn--sm" :disabled="passwordSubmitting" @click="resetPassword">
-                  {{ passwordSubmitting ? '重置中...' : '重置密码' }}
-                </button>
-              </div>
-              <div v-if="canMoveTeam" class="membership-row">
+                  <div class="readonly-field">
+                    <span>账号状态</span>
+                    <strong>{{ formatUserStatusForDisplay(detailUser.status) }}</strong>
+                  </div>
+                </div>
+              </section>
+
+              <section v-if="canMoveTeam" class="detail-section">
+                <header class="detail-section-header">
+                  <h4>组织归属</h4>
+                </header>
                 <div class="membership-grid">
                   <select v-model="membershipForm.department" class="input">
                     <option value="">选择部门</option>
@@ -238,15 +239,91 @@
                     移出到未分组
                   </button>
                 </div>
-              </div>
+              </section>
+
+              <section class="detail-section">
+                <header class="detail-section-header">
+                  <h4>角色权限</h4>
+                  <button
+                    v-if="canAssignRoles"
+                    type="button"
+                    class="um-btn um-btn--primary um-btn--sm"
+                    :disabled="roleSubmitting"
+                    @click="submitRoleReplace"
+                  >
+                    {{ roleSubmitting ? '提交中...' : '保存角色' }}
+                  </button>
+                </header>
+                <div v-if="lockedDetailRoleOptions.length" class="legacy-role-box">
+                  <span class="legacy-role-title">{{ lockedDetailRoleTitle }}</span>
+                  <span
+                    v-for="role in lockedDetailRoleOptions"
+                    :key="'locked-' + role.code"
+                    class="legacy-role-tag"
+                    :title="lockedRoleTooltip(role)"
+                  >
+                    {{ role.display }}
+                  </span>
+                </div>
+                <div v-if="editableRoleGroups.length" class="role-groups" :class="{ 'roles-grid-readonly': !canAssignRoles }">
+                  <section v-for="group in editableRoleGroups" :key="group.category" class="role-group">
+                    <h4 class="role-group-title">{{ group.title }}</h4>
+                    <div class="roles-grid">
+                      <label v-for="role in group.roles" :key="role.code" class="role-check">
+                        <input
+                          v-model="selectedRoleCodes"
+                          type="checkbox"
+                          :value="role.code"
+                          :disabled="!canAssignRoles || role.code === 'Member'"
+                        />
+                        <span>{{ role.display }}</span>
+                        <em v-if="role.code === 'Member'">基础身份，不能移除</em>
+                      </label>
+                    </div>
+                  </section>
+                </div>
+                <p v-else class="role-readonly-hint">当前账号没有可分配角色，角色信息仅可查看。</p>
+              </section>
+
+              <section v-if="canResetPassword" class="detail-section">
+                <header class="detail-section-header">
+                  <h4>账号安全</h4>
+                </header>
+                <div class="password-row">
+                  <input v-model="resetPasswordValue" class="input" placeholder="输入新密码" />
+                  <button type="button" class="um-btn um-btn--primary um-btn--sm" :disabled="passwordSubmitting" @click="resetPassword">
+                    {{ passwordSubmitting ? '重置中...' : '重置密码' }}
+                  </button>
+                </div>
+              </section>
+
+              <section v-if="canDisableUser" class="detail-section detail-section--danger">
+                <header class="detail-section-header">
+                  <h4>账号状态</h4>
+                  <button
+                    v-if="detailUser.status !== 'disabled'"
+                    type="button"
+                    class="um-btn um-btn--ghost um-btn--sm"
+                    :disabled="statusSubmitting"
+                    @click="setUserStatus('disabled')"
+                  >
+                    {{ statusSubmitting ? '处理中...' : '停用账号' }}
+                  </button>
+                  <button
+                    v-else
+                    type="button"
+                    class="um-btn um-btn--primary um-btn--sm"
+                    :disabled="statusSubmitting"
+                    @click="setUserStatus('active')"
+                  >
+                    {{ statusSubmitting ? '处理中...' : '启用账号' }}
+                  </button>
+                </header>
+                <p class="role-readonly-hint">停用后该账号不能登录，历史任务、角色、工号和组织归属会保留。</p>
+              </section>
               <p v-if="detailActionMessage" class="action-msg">{{ detailActionMessage }}</p>
             </div>
           </div>
-          <footer class="modal-footer">
-            <div class="modal-footer-actions">
-              <button type="button" class="um-btn um-btn--ghost" @click="detailUser = null">关闭</button>
-            </div>
-          </footer>
         </div>
       </div>
 
@@ -265,6 +342,7 @@
           <div class="modal-body">
             <div class="form-grid">
               <input v-model.trim="createForm.username" class="input" placeholder="请输入用户名" />
+              <input v-model.trim="createForm.employee_no" class="input" inputmode="numeric" placeholder="工号（0-9999）" />
               <input v-model.trim="createForm.display_name" class="input" placeholder="请输入姓名" />
               <select v-model="createForm.department" class="input">
                 <option value="">选择部门</option>
@@ -287,8 +365,9 @@
                 <h4 class="role-group-title">{{ group.title }}</h4>
                 <div class="roles-grid">
                   <label v-for="role in group.roles" :key="'create-' + role.code" class="role-check">
-                    <input v-model="createForm.roles" type="checkbox" :value="role.code" />
+                    <input v-model="createForm.roles" type="checkbox" :value="role.code" :disabled="role.code === 'Member'" />
                     <span>{{ role.display }}</span>
+                    <em v-if="role.code === 'Member'">基础身份，不能移除</em>
                   </label>
                 </div>
               </section>
@@ -306,6 +385,48 @@
           </footer>
         </div>
       </div>
+
+      <!-- 组织维护 -->
+      <div v-if="orgAction" class="modal-mask" @click.self="closeOrgAction">
+        <div class="modal-panel um-modal org-action-modal">
+          <header class="modal-header">
+            <div class="modal-heading">
+              <h3 class="section-title">{{ orgActionTitle }}</h3>
+              <p class="modal-subtitle">{{ orgActionSubtitle }}</p>
+            </div>
+            <button type="button" class="modal-close" aria-label="关闭组织维护" @click="closeOrgAction">
+              ×
+            </button>
+          </header>
+          <div class="modal-body">
+            <div v-if="orgActionIsDelete" class="delete-confirm-box">
+              <p>{{ orgActionDeleteCopy }}</p>
+            </div>
+            <div v-else class="form-grid form-grid--single">
+              <select v-if="orgAction?.mode === 'createTeam'" v-model="orgActionDepartmentId" class="input">
+                <option value="">选择部门</option>
+                <option v-for="dept in orgTree" :key="'org-action-' + dept.value" :value="dept.id">{{ dept.label }}</option>
+              </select>
+              <input v-model.trim="orgActionName" class="input" :placeholder="orgActionNamePlaceholder" />
+            </div>
+            <p v-if="orgActionError" class="action-msg">{{ orgActionError }}</p>
+          </div>
+          <footer class="modal-footer">
+            <div class="modal-footer-actions">
+              <button type="button" class="um-btn um-btn--ghost" @click="closeOrgAction">取消</button>
+              <button
+                type="button"
+                class="um-btn"
+                :class="orgActionIsDelete ? 'um-btn--ghost' : 'um-btn--primary'"
+                :disabled="orgActionSubmitting"
+                @click="submitOrgAction"
+              >
+                {{ orgActionSubmitting ? '处理中...' : orgActionConfirmText }}
+              </button>
+            </div>
+          </footer>
+        </div>
+      </div>
       </Teleport>
     </template>
     </div>
@@ -317,8 +438,14 @@ import { ref, computed, h, onBeforeUnmount, onMounted, watch } from 'vue'
 import type { DataTableColumns, DataTableRowKey } from 'naive-ui'
 import { usersApi } from '@/services/api/usersApi'
 import {
+  createOrgDepartment,
+  createOrgTeam,
   departmentsAndGroupsFromOrgOptions,
   fetchOrgOwnershipOptions,
+  updateOrgDepartment,
+  updateOrgTeam,
+  type OrgDepartmentRecord,
+  type OrgTeamRecord,
 } from '@/services/api/orgApi'
 import { usePermissionsStore } from '@/stores/permissions'
 import { usePermission } from '@/composables/usePermission'
@@ -364,10 +491,13 @@ const canClearMembership = computed(() => can('user.manage'))
 // 角色写入必须同时满足 frontend_access 与 `/v1/roles.assignable_by_current_actor`。
 // Admin / RoleAdmin 即便仍是历史角色，也不能靠旧前端动作绕过服务端 assignable 合同。
 const canAssignRoles = computed(() => can('role.assign') && editableRoleOptions.value.length > 0)
+const canManageOrgMaster = computed(() => can('org.manage'))
+const canEditBasicInfo = computed(() => can('user.manage'))
 
 interface UserRow {
   id: string
   username: string
+  employee_no?: number | null
   display_name?: string
   department?: string
   team?: string
@@ -393,14 +523,31 @@ interface RoleOptionGroup {
 }
 
 interface OrgTreeTeam {
+  id?: string
   value: string
   label: string
+  department: string
 }
 
 interface OrgTreeDepartment {
+  id?: string
   value: string
   label: string
   teams: OrgTreeTeam[]
+}
+
+type OrgActionMode =
+  | 'createDepartment'
+  | 'editDepartment'
+  | 'deleteDepartment'
+  | 'createTeam'
+  | 'editTeam'
+  | 'deleteTeam'
+
+interface OrgActionState {
+  mode: OrgActionMode
+  department?: OrgTreeDepartment
+  team?: OrgTreeTeam
 }
 
 const listLoading = ref(false)
@@ -411,8 +558,10 @@ const detailLoading = ref(false)
 const roleSubmitting = ref(false)
 const statusSubmitting = ref(false)
 const passwordSubmitting = ref(false)
+const basicSubmitting = ref(false)
 const detailActionMessage = ref('')
 const resetPasswordValue = ref('')
+const basicForm = ref<{ display_name: string; employee_no: string }>({ display_name: '', employee_no: '' })
 const selectedRoleCodes = ref<string[]>([])
 const membershipForm = ref<{ department: string; team: string }>({ department: '', team: '' })
 const membershipSubmitting = ref(false)
@@ -433,6 +582,13 @@ const teamFilter = ref('')
 
 const departmentOptions = ref<Array<{ value: string; label: string }>>([])
 const teamOptions = ref<Array<{ value: string; label: string; department?: string }>>([])
+const departmentRecords = ref<OrgDepartmentRecord[]>([])
+const teamRecords = ref<OrgTeamRecord[]>([])
+const orgAction = ref<OrgActionState | null>(null)
+const orgActionName = ref('')
+const orgActionDepartmentId = ref('')
+const orgActionSubmitting = ref(false)
+const orgActionError = ref('')
 const currentDepartmentScope = computed(() =>
   String(
     permissionsStore.currentUser?.departmentId ||
@@ -451,11 +607,17 @@ const scopedDepartmentOptions = computed(() =>
 )
 const orgTree = computed<OrgTreeDepartment[]>(() =>
   departmentOptions.value.map((dept) => ({
+    id: departmentRecords.value.find((item) => item.name === dept.value)?.id,
     value: dept.value,
     label: dept.label,
     teams: teamOptions.value
       .filter((team) => team.department === dept.value)
-      .map((team) => ({ value: team.value, label: team.label })),
+      .map((team) => ({
+        id: teamRecords.value.find((item) => item.name === team.value && item.departmentName === dept.value)?.id,
+        value: team.value,
+        label: team.label,
+        department: dept.value,
+      })),
   })),
 )
 const visibleOrgTree = computed<OrgTreeDepartment[]>(() =>
@@ -472,6 +634,7 @@ const createSubmitting = ref(false)
 const createError = ref('')
 const createForm = ref({
   username: '',
+  employee_no: '',
   display_name: '',
   department: '',
   team: '',
@@ -538,18 +701,69 @@ const lockedDetailRoleTitle = computed(() =>
     ? '历史/不可编辑角色'
     : '不可编辑角色',
 )
+const orgActionIsDelete = computed(() =>
+  orgAction.value?.mode === 'deleteDepartment' || orgAction.value?.mode === 'deleteTeam',
+)
+const orgActionTitle = computed(() => {
+  switch (orgAction.value?.mode) {
+    case 'createDepartment':
+      return '新增部门'
+    case 'editDepartment':
+      return '编辑部门名称'
+    case 'deleteDepartment':
+      return '删除部门'
+    case 'createTeam':
+      return '新增小组'
+    case 'editTeam':
+      return '编辑小组名称'
+    case 'deleteTeam':
+      return '删除小组'
+    default:
+      return '组织维护'
+  }
+})
+const orgActionSubtitle = computed(() => {
+  if (!orgAction.value) return ''
+  if (orgAction.value.mode === 'deleteDepartment') return '部门删除后不再可选，部门内人员会自动进入未分配池。'
+  if (orgAction.value.mode === 'deleteTeam') return '小组删除后不再可选，组内人员会自动进入未分配池。'
+  return '组织名称会立即用于用户归属选择。'
+})
+const orgActionDeleteCopy = computed(() => {
+  if (orgAction.value?.mode === 'deleteDepartment') {
+    return `确认删除部门「${orgAction.value.department?.label ?? ''}」？该部门及其小组会停止使用，原有人员会自动进入未分配池。`
+  }
+  if (orgAction.value?.mode === 'deleteTeam') {
+    return `确认删除小组「${orgAction.value.team?.label ?? ''}」？原有人员会自动进入未分配池。`
+  }
+  return ''
+})
+const orgActionNamePlaceholder = computed(() =>
+  orgAction.value?.mode === 'createTeam' || orgAction.value?.mode === 'editTeam'
+    ? '请输入小组名称'
+    : '请输入部门名称',
+)
+const orgActionConfirmText = computed(() => (orgActionIsDelete.value ? '确认删除' : '保存'))
 const userTableColumns = computed<DataTableColumns<UserRow>>(() => [
-  {
-    title: '用户名',
-    key: 'username',
-    width: 150,
-    render: (row) => h('span', { class: 'td-mono' }, row.username || '-'),
-  },
   {
     title: '姓名',
     key: 'display_name',
     width: 150,
     render: (row) => row.display_name || '-',
+  },
+  {
+    title: '工号',
+    key: 'employee_no',
+    width: 120,
+    render: (row) =>
+      row.employee_no == null
+        ? h('span', { class: 'employee-missing' }, '待维护工号')
+        : h('span', { class: 'td-mono' }, String(row.employee_no)),
+  },
+  {
+    title: '登录账号',
+    key: 'username',
+    width: 150,
+    render: (row) => h('span', { class: 'td-mono' }, row.username || '-'),
   },
   {
     title: '部门',
@@ -595,7 +809,7 @@ const userTableColumns = computed<DataTableColumns<UserRow>>(() => [
           class: 'link-btn',
           onClick: () => openDetail(row),
         },
-        '角色管理',
+        '管理',
       ),
   },
 ])
@@ -641,9 +855,15 @@ function formatUserStatusForDisplay(status: string | undefined): string {
 }
 
 function mapRawUser(raw: Record<string, unknown>): UserRow {
+  const rawEmployeeNo = raw.employee_no ?? raw.employeeNo
+  let employeeNo: number | null | undefined
+  if (typeof rawEmployeeNo === 'number' && Number.isInteger(rawEmployeeNo)) employeeNo = rawEmployeeNo
+  else if (typeof rawEmployeeNo === 'string' && /^\d+$/.test(rawEmployeeNo.trim())) employeeNo = Number(rawEmployeeNo.trim())
+  else if (rawEmployeeNo === null) employeeNo = null
   return {
     id: String(raw.id ?? ''),
     username: String(raw.username ?? ''),
+    employee_no: employeeNo,
     display_name: typeof raw.display_name === 'string' ? raw.display_name : undefined,
     department: typeof raw.department === 'string' ? raw.department : undefined,
     team: typeof raw.team === 'string' ? raw.team : (typeof raw.group === 'string' ? raw.group : undefined),
@@ -766,6 +986,32 @@ function mergeRoleCodes(...groups: string[][]): string[] {
   return Array.from(out)
 }
 
+function ensureMemberRoleCodes(roles: string[]): string[] {
+  return mergeRoleCodes(['Member'], roles)
+}
+
+function formatEmployeeNo(value: number | null | undefined): string {
+  return value == null ? '待维护工号' : `工号 ${value}`
+}
+
+function parseEmployeeNoInput(raw: string): number | null {
+  const value = raw.trim()
+  if (!value) return null
+  if (!/^\d+$/.test(value)) return null
+  const parsed = Number(value)
+  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 9999) return null
+  return parsed
+}
+
+function validateEmployeeNoInput(raw: string, required: boolean): string | null {
+  const value = raw.trim()
+  if (!value) return required ? '工号必填。' : null
+  if (!/^\d+$/.test(value)) return '工号必须是 0 到 9999 之间的纯数字。'
+  const parsed = Number(value)
+  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 9999) return '工号必须是 0 到 9999 之间的纯数字。'
+  return null
+}
+
 function lockedRoleTooltip(role: RoleOption): string {
   if (role.category === 'compatibility' || role.deprecated) {
     return '当前账号已持有历史保留角色；本页不再支持新增分配。'
@@ -789,6 +1035,7 @@ function defaultCreateRoles(): string[] {
 function emptyCreateForm() {
   return {
     username: '',
+    employee_no: '',
     display_name: '',
     department: isDeptScopedOnly.value ? currentDepartmentScope.value : '',
     team: '',
@@ -830,8 +1077,10 @@ function selectOrgTeam(department: string, team: string) {
 
 async function loadOrgOptions() {
   const org = await fetchOrgOwnershipOptions()
-  departmentOptions.value = org.departmentOptions
-  teamOptions.value = org.teamOptions
+  departmentOptions.value = org.departmentOptions ?? []
+  teamOptions.value = org.teamOptions ?? []
+  departmentRecords.value = org.departmentRecords ?? []
+  teamRecords.value = org.teamRecords ?? []
   const hydrated = departmentsAndGroupsFromOrgOptions(org)
   if (hydrated) {
     usePermissionsStore().hydrateOrgFromServer(hydrated.departments, hydrated.groups)
@@ -945,6 +1194,10 @@ async function openDetail(u: UserRow) {
     if (!raw) throw new Error('用户详情数据异常')
     detailUser.value = mapRawUser(raw)
     selectedRoleCodes.value = editableRoleCodesForUserRoles(detailUser.value.roles)
+    basicForm.value = {
+      display_name: detailUser.value.display_name ?? '',
+      employee_no: detailUser.value.employee_no == null ? '' : String(detailUser.value.employee_no),
+    }
     membershipForm.value = {
       department: detailUser.value.department ?? '',
       team: detailUser.value.team ?? '',
@@ -972,7 +1225,7 @@ async function submitRoleReplace() {
     const selectedEditableRoles = selectedRoleCodes.value.filter((role) =>
       editableRoleCodeSet.value.has(role),
     )
-    const roles = mergeRoleCodes(selectedEditableRoles, lockedDetailRoleCodes.value)
+    const roles = ensureMemberRoleCodes(mergeRoleCodes(selectedEditableRoles, lockedDetailRoleCodes.value))
     const res = await usersApi.replaceRoles(detailUser.value.id, { roles })
     const data = res?.data
     const body = data?.data ?? data
@@ -987,6 +1240,39 @@ async function submitRoleReplace() {
     detailActionMessage.value = e instanceof Error ? e.message : '角色更新失败'
   } finally {
     roleSubmitting.value = false
+  }
+}
+
+async function submitBasicInfo() {
+  if (!detailUser.value) return
+  const employeeNoError = validateEmployeeNoInput(basicForm.value.employee_no, true)
+  if (employeeNoError) {
+    detailActionMessage.value = employeeNoError
+    return
+  }
+  const employeeNo = parseEmployeeNoInput(basicForm.value.employee_no)
+  if (employeeNo == null) {
+    detailActionMessage.value = '工号必须是 0 到 9999 之间的纯数字。'
+    return
+  }
+  const displayName = basicForm.value.display_name.trim()
+  if (!displayName) {
+    detailActionMessage.value = '姓名必填。'
+    return
+  }
+  basicSubmitting.value = true
+  detailActionMessage.value = ''
+  try {
+    await usersApi.patch(detailUser.value.id, {
+      display_name: displayName,
+      employee_no: employeeNo,
+    })
+    await refreshDetailAndList(detailUser.value.id)
+    detailActionMessage.value = '基本信息已保存'
+  } catch (e) {
+    detailActionMessage.value = e instanceof Error ? e.message : '基本信息保存失败'
+  } finally {
+    basicSubmitting.value = false
   }
 }
 
@@ -1071,6 +1357,8 @@ async function resetPassword() {
 function validateCreateForm(): string | null {
   const f = createForm.value
   if (!f.username.trim()) return '用户名必填'
+  const employeeNoError = validateEmployeeNoInput(f.employee_no, true)
+  if (employeeNoError) return employeeNoError
   if (!f.display_name.trim()) return '姓名必填'
   if (!f.department) return '部门必选'
   if (!f.team) return '小组必选'
@@ -1089,15 +1377,18 @@ async function createUser() {
   createError.value = ''
   try {
     const f = createForm.value
+    const employeeNo = parseEmployeeNoInput(f.employee_no)
+    if (employeeNo == null) throw new Error('工号必须是 0 到 9999 之间的纯数字。')
     await usersApi.create({
       username: f.username.trim(),
+      employee_no: employeeNo,
       display_name: f.display_name.trim(),
       department: f.department,
       team: f.team,
       mobile: f.mobile.trim(),
       email: f.email.trim() || undefined,
       password: f.password,
-      roles: f.roles.filter((role) => editableRoleCodeSet.value.has(role)),
+      roles: ensureMemberRoleCodes(f.roles.filter((role) => editableRoleCodeSet.value.has(role))),
       status: f.status,
     })
     showCreateModal.value = false
@@ -1108,6 +1399,121 @@ async function createUser() {
     createError.value = e instanceof Error ? e.message : '创建用户失败'
   } finally {
     createSubmitting.value = false
+  }
+}
+
+function openCreateDepartment() {
+  orgAction.value = { mode: 'createDepartment' }
+  orgActionName.value = ''
+  orgActionDepartmentId.value = ''
+  orgActionError.value = ''
+}
+
+function openEditDepartment(department: OrgTreeDepartment) {
+  orgAction.value = { mode: 'editDepartment', department }
+  orgActionName.value = department.label
+  orgActionDepartmentId.value = ''
+  orgActionError.value = ''
+}
+
+function openDeleteDepartment(department: OrgTreeDepartment) {
+  orgAction.value = { mode: 'deleteDepartment', department }
+  orgActionName.value = ''
+  orgActionDepartmentId.value = ''
+  orgActionError.value = ''
+}
+
+function openCreateTeam(department?: OrgTreeDepartment) {
+  orgAction.value = { mode: 'createTeam', department }
+  orgActionName.value = ''
+  orgActionDepartmentId.value = department?.id ?? ''
+  orgActionError.value = ''
+}
+
+function openEditTeam(team: OrgTreeTeam) {
+  orgAction.value = { mode: 'editTeam', team }
+  orgActionName.value = team.label
+  orgActionDepartmentId.value = ''
+  orgActionError.value = ''
+}
+
+function openDeleteTeam(team: OrgTreeTeam) {
+  orgAction.value = { mode: 'deleteTeam', team }
+  orgActionName.value = ''
+  orgActionDepartmentId.value = ''
+  orgActionError.value = ''
+}
+
+function closeOrgAction() {
+  if (orgActionSubmitting.value) return
+  resetOrgAction()
+}
+
+function resetOrgAction() {
+  orgAction.value = null
+  orgActionName.value = ''
+  orgActionDepartmentId.value = ''
+  orgActionError.value = ''
+}
+
+async function submitOrgAction() {
+  const action = orgAction.value
+  if (!action) return
+  orgActionError.value = ''
+  const name = orgActionName.value.trim()
+  if (!orgActionIsDelete.value && !name) {
+    orgActionError.value = orgActionNamePlaceholder.value
+    return
+  }
+  orgActionSubmitting.value = true
+  try {
+    switch (action.mode) {
+      case 'createDepartment':
+        await createOrgDepartment({ name })
+        break
+      case 'editDepartment':
+        if (!action.department?.id) throw new Error('未找到部门编号，无法保存。')
+        await updateOrgDepartment(action.department.id, { name })
+        break
+      case 'deleteDepartment':
+        if (!action.department?.id) throw new Error('未找到部门编号，无法删除。')
+        await updateOrgDepartment(action.department.id, { enabled: false })
+        break
+      case 'createTeam': {
+        const departmentId = orgActionDepartmentId.value || action.department?.id
+        if (!departmentId) throw new Error('请选择部门。')
+        await createOrgTeam({ department_id: departmentId, name })
+        break
+      }
+      case 'editTeam':
+        if (!action.team?.id) throw new Error('未找到小组编号，无法保存。')
+        await updateOrgTeam(action.team.id, { name })
+        break
+      case 'deleteTeam':
+        if (!action.team?.id) throw new Error('未找到小组编号，无法删除。')
+        await updateOrgTeam(action.team.id, { enabled: false })
+        break
+    }
+    const shouldResetDepartment =
+      action.mode === 'deleteDepartment' &&
+      action.department?.value &&
+      departmentFilter.value === action.department.value
+    const shouldResetTeam =
+      action.mode === 'deleteTeam' &&
+      action.team?.value &&
+      teamFilter.value === action.team.value &&
+      departmentFilter.value === action.team.department
+    resetOrgAction()
+    await loadOrgOptions()
+    if (shouldResetDepartment || shouldResetTeam) {
+      departmentFilter.value = isDeptScopedOnly.value ? currentDepartmentScope.value : ''
+      teamFilter.value = ''
+    }
+    await loadUsers()
+  } catch (e) {
+    orgActionError.value = e instanceof Error ? e.message : '组织维护失败'
+  } finally {
+    orgActionSubmitting.value = false
   }
 }
 
@@ -1125,11 +1531,11 @@ function goPage(next: number) {
 
 watch(departmentFilter, () => {
   if (!departmentFilter.value || !teamFilter.value) return
-	  const ok = teamOptions.value.some(
-	    (team) =>
-	      team.value === teamFilter.value &&
-	      teamMatchesDepartment(team, departmentFilter.value, isDeptScopedOnly.value),
-	  )
+  const ok = teamOptions.value.some(
+    (team) =>
+      team.value === teamFilter.value &&
+      teamMatchesDepartment(team, departmentFilter.value, isDeptScopedOnly.value),
+  )
   if (!ok) teamFilter.value = ''
 })
 
@@ -1145,13 +1551,13 @@ watch(pageSize, () => {
 
 watch(
   () => createForm.value.department,
-	  () => {
-	    if (!createForm.value.department) return
-	    const ok = teamOptions.value.some(
-	      (t) =>
-	        t.value === createForm.value.team &&
-	        teamMatchesDepartment(t, createForm.value.department, isDeptScopedOnly.value),
-	    )
+  () => {
+    if (!createForm.value.department) return
+    const ok = teamOptions.value.some(
+      (t) =>
+        t.value === createForm.value.team &&
+        teamMatchesDepartment(t, createForm.value.department, isDeptScopedOnly.value),
+    )
     if (!ok) createForm.value.team = ''
   },
 )
@@ -1314,6 +1720,12 @@ onBeforeUnmount(() => {
   font-variant-numeric: tabular-nums;
 }
 
+.employee-missing {
+  color: rgb(var(--yb-warning-dark));
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
 .management-layout {
   display: grid;
   grid-template-columns: minmax(10rem, 14rem) minmax(0, 1fr);
@@ -1331,6 +1743,17 @@ onBeforeUnmount(() => {
   border-right: 1px solid rgb(var(--yb-border-zinc));
 }
 
+.org-filter-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.25rem;
+  color: rgb(var(--yb-text-zinc-strong));
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
 .org-filter-dept {
   display: flex;
   flex-direction: column;
@@ -1344,6 +1767,13 @@ onBeforeUnmount(() => {
   margin-left: 0.65rem;
   padding-left: 0.55rem;
   border-left: 1px solid rgb(var(--yb-border-zinc));
+}
+
+.org-filter-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.25rem;
+  align-items: center;
 }
 
 .org-filter-item {
@@ -1392,6 +1822,47 @@ onBeforeUnmount(() => {
   color: rgb(var(--yb-text-zinc-soft));
 }
 
+.org-row-actions {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  gap: 0.2rem;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.org-filter-row:hover .org-row-actions,
+.org-row-actions:focus-within {
+  opacity: 1;
+}
+
+.org-action-btn,
+.org-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 1.55rem;
+  padding: 0.15rem 0.45rem;
+  border-radius: 9999px;
+  border: 1px solid rgb(var(--yb-border-zinc));
+  background: rgb(var(--yb-surface));
+  color: rgb(var(--yb-text-zinc));
+  cursor: pointer;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.org-action-btn:hover,
+.org-icon-btn:hover {
+  background: rgb(var(--yb-surface-row-even));
+  border-color: rgb(var(--yb-text-zinc-faint));
+}
+
+.org-icon-btn--danger {
+  color: rgb(var(--yb-danger));
+  border-color: rgb(var(--yb-danger-border-soft));
+}
+
 .user-list-panel {
   min-width: 0;
 }
@@ -1427,6 +1898,22 @@ onBeforeUnmount(() => {
   .org-filter-dept,
   .org-filter-teams {
     display: contents;
+  }
+
+  .org-filter-header {
+    grid-column: 1 / -1;
+  }
+
+  .org-filter-row {
+    grid-template-columns: minmax(0, 1fr);
+    align-content: start;
+  }
+
+  .org-row-actions {
+    opacity: 1;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    padding-left: 0.2rem;
   }
 
   .org-filter-panel {
@@ -1626,6 +2113,74 @@ onBeforeUnmount(() => {
   gap: 0.6rem;
 }
 
+.um-modal .form-grid--single {
+  grid-template-columns: 1fr;
+}
+
+.um-modal .detail-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.75rem;
+  border: 1px solid rgb(var(--yb-border));
+  border-radius: 0.75rem;
+  background: rgb(var(--yb-surface));
+}
+
+.um-modal .detail-section--danger {
+  border-color: rgb(var(--yb-warning-border-soft));
+  background: rgb(var(--yb-warning-soft));
+}
+
+.um-modal .detail-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.um-modal .detail-section-header h4 {
+  margin: 0;
+  color: rgb(var(--yb-text));
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+
+.um-modal .detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.6rem;
+}
+
+.um-modal .field-label,
+.um-modal .readonly-field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.um-modal .field-label span,
+.um-modal .readonly-field span {
+  color: rgb(var(--yb-text-muted));
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.um-modal .readonly-field strong {
+  display: flex;
+  align-items: center;
+  min-height: 2.5rem;
+  padding: 0.45rem 0.7rem;
+  border: 1px solid rgb(var(--yb-border));
+  border-radius: 0.625rem;
+  background: rgb(var(--yb-surface-soft));
+  color: rgb(var(--yb-text));
+  font-size: 0.8125rem;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
 .um-modal .role-groups {
   display: flex;
   flex-direction: column;
@@ -1731,6 +2286,14 @@ onBeforeUnmount(() => {
 .um-modal .role-check span {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.um-modal .role-check em {
+  margin-left: auto;
+  color: rgb(var(--yb-text-muted));
+  font-size: 0.6875rem;
+  font-style: normal;
+  white-space: nowrap;
 }
 
 .um-modal .role-check:hover {
@@ -1893,6 +2456,20 @@ onBeforeUnmount(() => {
   background: rgb(var(--yb-brand-soft));
 }
 
+.um-modal .delete-confirm-box {
+  padding: 0.8rem;
+  border-radius: 0.75rem;
+  border: 1px solid rgb(var(--yb-warning-border-soft));
+  background: rgb(var(--yb-warning-soft));
+  color: rgb(var(--yb-text));
+  font-size: 0.8125rem;
+  line-height: 1.6;
+}
+
+.um-modal .delete-confirm-box p {
+  margin: 0;
+}
+
 :global(#app .um-modal .role-check:has(input:checked)) {
   border-color: rgb(var(--yb-brand));
   background: rgb(var(--yb-brand-soft));
@@ -1955,6 +2532,15 @@ onBeforeUnmount(() => {
 @media (max-width: 980px) {
   .um-modal .form-grid {
     grid-template-columns: 1fr;
+  }
+
+  .um-modal .detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .um-modal .detail-section-header {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .um-modal .membership-grid {

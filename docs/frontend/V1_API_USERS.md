@@ -130,8 +130,8 @@ curl -X GET https://api.example.com/v1/access-rules \
 ### 简介
 支持方法: GET, POST。
 
-- `GET`: Management-scoped user-management read endpoint. Returns user department, team, role, and frontend access state for frontend integration, with server-side pagination and filtering. `DepartmentAdmin` reads are forced to own department. `TeamLead` reads are forced to own team inside own department.
-- `POST`: Managed user creation endpoint. Validates org fields against `/v1/org/options`, validates roles against the workflow role catalog, sets the initial password hash, and returns the created user with `frontend_access`. If `status` is omitted the user is created as `active`. `DepartmentAdmin` can create users only inside own department and only with department-compatible business roles.
+- `GET`: Management-scoped user-management read endpoint. Returns user employee number, department, team, role, and frontend access state for frontend integration, with server-side pagination and filtering. `keyword` matches username, display name, and employee number. `DepartmentAdmin` reads are forced to own department. `TeamLead` reads are forced to own team inside own department.
+- `POST`: Managed user creation endpoint. Validates org fields against `/v1/org/options`, validates roles against the workflow role catalog, requires a globally unique numeric `employee_no` in range 0-9999, sets the initial password hash, and returns the created user with `frontend_access`. If `status` is omitted the user is created as `active`. `Member` is the base identity and is retained by the server even if omitted from the incoming role list. `DepartmentAdmin` can create users only inside own department and only with department-compatible business roles.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -166,7 +166,7 @@ curl -X GET https://api.example.com/v1/access-rules \
       "id": "...",
       "username": "...",
       "account": "...",
-      "display_name": "..."
+      "employee_no": "..."
     }
   ],
   "pagination": {
@@ -210,6 +210,7 @@ Content-Type: `application/json`
 |---|---|---|---|
 | `username` | string | 是 | - |
 | `account` | string | 否 | Compatibility alias of username. |
+| `employee_no` | integer | 是 | 管理员维护的员工工号；纯数字，范围 0-9999，全局唯一。重复时服务端返回中文业务提示。 |
 | `display_name` | string | 是 | - |
 | `name` | string | 否 | Compatibility alias of display_name. |
 | `department` | string | 是 | Must match one enabled department from backend org master exposed by `/v1/org/options`. |
@@ -232,7 +233,7 @@ Content-Type: `application/json`
     "id": 123,
     "username": "string",
     "account": "string",
-    "display_name": "string"
+    "employee_no": 123
   }
 }
 ```
@@ -338,8 +339,8 @@ curl -X GET https://api.example.com/v1/users/designers \
 支持方法: GET, PATCH, DELETE。
 
 - `GET`: Management-scoped user detail read endpoint. `DepartmentAdmin` can read only users in own department. `TeamLead` can read only users in own team.
-- `PATCH`: Partial update for user profile and org affiliation. Org-field contract: - `department` + `team` are the canonical write fields. - `group` is a compatibility alias of `team` (when both are provided they must be equal). - To remove a user from a formal group, use the unassigned-pool semantic: - set `department` to the unassigned department from `/v1/org/options` - set `team` (or `group`) to its unassigned pool team. - Compatibility alias: `team/group = "ungrouped"` is normalized by backend into the configured unassigned pool. `DepartmentAdmin` can move users across teams inside own department and assign unassigned users into own department, but cannot move users across departments or mutate managed scope.
-- `DELETE`: Delete workflow user
+- `PATCH`: Partial update for user profile and org affiliation. `employee_no` can be maintained by company-level user managers. It must be a pure numeric value in range 0-9999 and globally unique. Org-field contract: - `department` + `team` are the canonical write fields. - `group` is a compatibility alias of `team` (when both are provided they must be equal). - To remove a user from a formal group, use the unassigned-pool semantic: - set `department` to the unassigned department from `/v1/org/options` - set `team` (or `group`) to its unassigned pool team. - Compatibility alias: `team/group = "ungrouped"` is normalized by backend into the configured unassigned pool. `DepartmentAdmin` can move users across teams inside own department and assign unassigned users into own department, but cannot move users across departments or mutate managed scope.
+- `DELETE`: Compatibility-only legacy endpoint. Do not expose this operation in frontend user management. Current business lifecycle uses `POST /v1/users/{id}/deactivate` and `POST /v1/users/{id}/activate`. Physical deletion is intentionally not provided.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -368,7 +369,7 @@ curl -X GET https://api.example.com/v1/users/designers \
     "id": 123,
     "username": "string",
     "account": "string",
-    "display_name": "string"
+    "employee_no": 123
   }
 }
 ```
@@ -401,6 +402,7 @@ Content-Type: `application/json`
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
+| `employee_no` | integer | 否 | 管理员维护的员工工号；纯数字，范围 0-9999，全局唯一。传 `null` 会被拒绝，省略表示不修改。 |
 | `display_name` | string | 否 | - |
 | `status` | enum(active/disabled) | 否 | - |
 | `employment_type` | enum(full_time/part_time) | 否 | - |
@@ -425,7 +427,7 @@ Content-Type: `application/json`
     "id": 123,
     "username": "string",
     "account": "string",
-    "display_name": "string"
+    "employee_no": 123
   }
 }
 ```
@@ -486,7 +488,7 @@ curl -X DELETE https://api.example.com/v1/users/<id> \
 ### 简介
 支持方法: PUT。
 
-- `PUT`: Managed password reset endpoint. Replaces the target user's local password hash and returns the user record. `DepartmentAdmin` can reset passwords only for users in own department. Existing session tokens are not revoked by this minimal reset operation.
+- `PUT`: Managed password reset endpoint. Replaces the target user's local password hash and returns the user record. `DepartmentAdmin` can reset passwords only for users in own department. `HRAdmin` / `SuperAdmin` can reset globally. Existing session tokens are not revoked by this minimal reset operation.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -515,7 +517,7 @@ Content-Type: `application/json`
     "id": 123,
     "username": "string",
     "account": "string",
-    "display_name": "string"
+    "employee_no": 123
   }
 }
 ```
@@ -585,7 +587,7 @@ Content-Type: `application/json`
     "id": 123,
     "username": "string",
     "account": "string",
-    "display_name": "string"
+    "employee_no": 123
   }
 }
 ```
@@ -635,7 +637,7 @@ Content-Type: `application/json`
     "id": 123,
     "username": "string",
     "account": "string",
-    "display_name": "string"
+    "employee_no": 123
   }
 }
 ```
@@ -698,7 +700,7 @@ curl -X PUT https://api.example.com/v1/users/<id>/roles \
     "id": 123,
     "username": "string",
     "account": "string",
-    "display_name": "string"
+    "employee_no": 123
   }
 }
 ```
@@ -1259,11 +1261,11 @@ curl -X POST https://api.example.com/v1/admin/jst-users/import \
 ### 简介
 支持方法: POST。
 
-- `POST`: Enable the target user's account. Source: V1_INFORMATION_ARCHITECTURE §5.3 / §5.4 (`is_active` field). `TeamLead` may activate only members of own team; `DeptAdmin` only users in own department; `HRAdmin` / `SuperAdmin` global.
+- `POST`: Enable the target user's account. Source: V1_INFORMATION_ARCHITECTURE §5.3 / §5.4 (`is_active` field). `TeamLead` may activate only members of own team; `DeptAdmin` only users in own department; `Admin` / `HRAdmin` / `SuperAdmin` global.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `POST` 允许角色: SuperAdmin, HRAdmin, DepartmentAdmin, TeamLead。
+- `POST` 允许角色: Admin, SuperAdmin, HRAdmin, DepartmentAdmin, TeamLead。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -1303,11 +1305,11 @@ curl -X POST https://api.example.com/v1/users/<id>/activate \
 ### 简介
 支持方法: POST。
 
-- `POST`: Disable the target user's account. Scope rules identical to `activate`. Source: V1_INFORMATION_ARCHITECTURE §5.3 / §5.4.
+- `POST`: Disable the target user's account. Scope rules identical to `activate`; self-deactivation is rejected. Source: V1_INFORMATION_ARCHITECTURE §5.3 / §5.4.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `POST` 允许角色: SuperAdmin, HRAdmin, DepartmentAdmin, TeamLead。
+- `POST` 允许角色: Admin, SuperAdmin, HRAdmin, DepartmentAdmin, TeamLead。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema

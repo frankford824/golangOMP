@@ -674,6 +674,12 @@ components:
         id: { type: integer }
         username: { type: string }
         account: { type: string }
+        employee_no:
+          type: integer
+          minimum: 0
+          maximum: 9999
+          nullable: true
+          description: 管理员维护的员工工号；纯数字，范围 0-9999，全局唯一。历史用户可能为空。
         display_name: { type: string }
         name: { type: string }
         real_name: { type: string }
@@ -719,13 +725,18 @@ components:
           $ref: '#/components/schemas/FrontendAccess'
     CreateManagedUserRequest:
       type: object
-      required: [username, display_name, department, team, mobile, password]
+      required: [username, employee_no, display_name, department, team, mobile, password]
       properties:
         username:
           type: string
         account:
           type: string
           description: Compatibility alias of username.
+        employee_no:
+          type: integer
+          minimum: 0
+          maximum: 9999
+          description: 管理员维护的员工工号；纯数字，范围 0-9999，全局唯一。重复时服务端返回中文业务提示。
         display_name:
           type: string
         name:
@@ -897,11 +908,13 @@ components:
           description: Unique department name in backend org master.
     UpdateOrgDepartmentRequest:
       type: object
-      required: [enabled]
       properties:
+        name:
+          type: string
+          description: Rename the department. Must be unique among org departments. Cannot be combined with deleting the same department.
         enabled:
           type: boolean
-          description: Current backend update semantic is enable/disable only.
+          description: Set to false to stop using the department. Existing assigned users are moved to the system unassigned pool, and child teams are disabled. System unassigned department cannot be deleted.
     CreateOrgTeamRequest:
       type: object
       required: [name]
@@ -918,14 +931,16 @@ components:
           description: Backend org department name. Optional when `department_id` is provided.
         name:
           type: string
-          description: Globally unique team name in backend org master.
+          description: Unique team name under the selected department in backend org master.
     UpdateOrgTeamRequest:
       type: object
-      required: [enabled]
       properties:
+        name:
+          type: string
+          description: Rename the team inside its department. Cannot be combined with deleting the same team.
         enabled:
           type: boolean
-          description: Current backend update semantic is enable/disable only.
+          description: Set to false to stop using the team. Existing assigned users are moved to the system unassigned pool. System unassigned pool team cannot be deleted.
     RegistrationOptions:
       type: object
       properties:
@@ -8697,7 +8712,11 @@ paths:
   /v1/org/departments/{id}:
     put:
       summary: Update organization department
-      description: Updates one backend org department. Current runtime semantic is enable/disable only; disabling is rejected while users are still assigned or enabled child teams still exist.
+      description: |
+        Updates one backend org department. Supports renaming (`name`) and stopping use (`enabled=false`).
+        When a department is stopped, the department and its child teams disappear from enabled org options,
+        child teams are disabled, and existing assigned users are moved to the system `未分配/未分配池`.
+        The system unassigned department cannot be deleted. Historical task snapshots are not rewritten.
       tags: [ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
@@ -8725,7 +8744,7 @@ paths:
                   data:
                     $ref: '#/components/schemas/OrgDepartment'
         '400':
-          description: Invalid request payload or department cannot be disabled yet
+          description: Invalid request payload, duplicate department name, or protected system department
         '403':
           description: Permission denied
         '404':
@@ -8762,7 +8781,11 @@ paths:
   /v1/org/teams/{id}:
     put:
       summary: Update organization team
-      description: Updates one backend org team. Current runtime semantic is enable/disable only; disabling is rejected while users are still assigned to that team.
+      description: |
+        Updates one backend org team. Supports renaming (`name`) and stopping use (`enabled=false`).
+        When a team is stopped, it disappears from enabled org options and existing assigned users are moved
+        to the system `未分配/未分配池`. The system unassigned pool team cannot be deleted.
+        Historical task snapshots are not rewritten.
       tags: [ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
@@ -8790,7 +8813,7 @@ paths:
                   data:
                     $ref: '#/components/schemas/OrgTeam'
         '400':
-          description: Invalid request payload or team cannot be disabled yet
+          description: Invalid request payload, duplicate team name under department, or protected system team
         '403':
           description: Permission denied
         '404':
@@ -8942,7 +8965,8 @@ paths:
     get:
       summary: List workflow users
       description: |
-        Management-scoped user-management read endpoint. Returns user department, team, role, and frontend access state for frontend integration, with server-side pagination and filtering.
+        Management-scoped user-management read endpoint. Returns user employee number, department, team, role, and frontend access state for frontend integration, with server-side pagination and filtering.
+        `keyword` matches username, display name, and employee number.
         `DepartmentAdmin` reads are forced to own department.
         `TeamLead` reads are forced to own team inside own department.
       tags: [ReadyForFrontend]
@@ -8997,7 +9021,8 @@ paths:
       summary: Create workflow user
       description: |
         Managed user creation endpoint. Validates org fields against `/v1/org/options`, validates roles against the workflow role catalog,
-        sets the initial password hash, and returns the created user with `frontend_access`. If `status` is omitted the user is created as `active`.
+        requires a globally unique numeric `employee_no` in range 0-9999, sets the initial password hash, and returns the created user with `frontend_access`. If `status` is omitted the user is created as `active`.
+        `Member` is the base identity and is retained by the server even if omitted from the incoming role list.
         `DepartmentAdmin` can create users only inside own department and only with department-compatible business roles.
       tags: [ReadyForFrontend]
       x-api-readiness: ready_for_frontend
@@ -9099,6 +9124,7 @@ paths:
       summary: Update workflow user
       description: |
         Partial update for user profile and org affiliation.
+        `employee_no` can be maintained by company-level user managers. It must be a pure numeric value in range 0-9999 and globally unique.
         Org-field contract:
         - `department` + `team` are the canonical write fields.
         - `group` is a compatibility alias of `team` (when both are provided they must be equal).
@@ -9127,6 +9153,11 @@ paths:
               description: |
                 Partial user update. Field-level authorization is enforced per V1_INFORMATION_ARCHITECTURE §5.4.
               properties:
+                employee_no:
+                  type: integer
+                  minimum: 0
+                  maximum: 9999
+                  description: 管理员维护的员工工号；纯数字，范围 0-9999，全局唯一。传 `null` 会被拒绝，省略表示不修改。
                 display_name: { type: string }
                 status:
                   $ref: '#/components/schemas/UserStatus'
@@ -9197,8 +9228,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
     delete:
-      summary: Delete workflow user
-      tags: [ReadyForFrontend]
+      summary: Deprecated compatibility delete workflow user
+      deprecated: true
+      description: |
+        Compatibility-only legacy endpoint. Do not expose this operation in frontend user management.
+        Current business lifecycle uses `POST /v1/users/{id}/deactivate` and `POST /v1/users/{id}/activate`.
+        Physical deletion is intentionally not provided.
+      tags: [Deprecated]
       x-api-readiness: ready_for_frontend
       x-owner-round: R4-SA-B
       x-rbac-placeholder:
@@ -9210,7 +9246,7 @@ paths:
           required: true
           schema: { type: integer }
       responses:
-        '204': { description: User deleted }
+        '204': { description: Legacy soft-delete compatibility path completed; prefer deactivate }
         '404':
           description: User not found
           content:
@@ -9222,7 +9258,7 @@ paths:
       summary: Reset workflow user password
       description: |
         Managed password reset endpoint. Replaces the target user's local password hash and returns the user record.
-        `DepartmentAdmin` can reset passwords only for users in own department.
+        `DepartmentAdmin` can reset passwords only for users in own department. `HRAdmin` / `SuperAdmin` can reset globally.
         Existing session tokens are not revoked by this minimal reset operation.
       tags: [ReadyForFrontend]
       x-api-readiness: ready_for_frontend
@@ -18516,13 +18552,13 @@ paths:
       summary: Activate a workflow user
       description: |
         Enable the target user's account. Source: V1_INFORMATION_ARCHITECTURE §5.3 / §5.4 (`is_active` field).
-        `TeamLead` may activate only members of own team; `DeptAdmin` only users in own department; `HRAdmin` / `SuperAdmin` global.
+        `TeamLead` may activate only members of own team; `DeptAdmin` only users in own department; `Admin` / `HRAdmin` / `SuperAdmin` global.
       tags: [ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-owner-round: R4-SA-B
       x-rbac-placeholder:
         auth_mode: session_token_role_enforced
-        required_roles: [SuperAdmin, HRAdmin, DepartmentAdmin, TeamLead]
+        required_roles: [Admin, SuperAdmin, HRAdmin, DepartmentAdmin, TeamLead]
       parameters:
         - in: path
           name: id
@@ -18546,13 +18582,13 @@ paths:
     post:
       summary: Deactivate a workflow user
       description: |
-        Disable the target user's account. Scope rules identical to `activate`. Source: V1_INFORMATION_ARCHITECTURE §5.3 / §5.4.
+        Disable the target user's account. Scope rules identical to `activate`; self-deactivation is rejected. Source: V1_INFORMATION_ARCHITECTURE §5.3 / §5.4.
       tags: [ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-owner-round: R4-SA-B
       x-rbac-placeholder:
         auth_mode: session_token_role_enforced
-        required_roles: [SuperAdmin, HRAdmin, DepartmentAdmin, TeamLead]
+        required_roles: [Admin, SuperAdmin, HRAdmin, DepartmentAdmin, TeamLead]
       parameters:
         - in: path
           name: id

@@ -53,6 +53,7 @@ func TestIdentityServiceOrgMasterBackendizesOptionsUsersAndTaskCatalog(t *testin
 	})
 	user, appErr := svc.CreateManagedUser(adminCtx, CreateManagedUserParams{
 		Username:    "brand_user",
+		EmployeeNo:  intPtr(2101),
 		DisplayName: "Brand User",
 		Department:  domain.Department("品牌部"),
 		Team:        "品牌一组",
@@ -82,7 +83,7 @@ func TestIdentityServiceOrgMasterBackendizesOptionsUsersAndTaskCatalog(t *testin
 	}
 }
 
-func TestIdentityServiceDisableTeamAndDepartmentRequiresUnassignedUsers(t *testing.T) {
+func TestIdentityServiceDisableTeamAndDepartmentMovesUsersToUnassignedPool(t *testing.T) {
 	ConfigureTaskOrgCatalog(domain.AuthSettings{})
 	defer ConfigureTaskOrgCatalog(domain.AuthSettings{})
 
@@ -95,28 +96,74 @@ func TestIdentityServiceDisableTeamAndDepartmentRequiresUnassignedUsers(t *testi
 	}
 	department, _ := svc.CreateDepartment(context.Background(), CreateOrgDepartmentParams{Name: "品牌二部"})
 	team, _ := svc.CreateTeam(context.Background(), CreateOrgTeamParams{DepartmentID: &department.ID, Name: "品牌二组"})
+	options, appErr := svc.GetOrgOptions(context.Background())
+	if appErr != nil {
+		t.Fatalf("GetOrgOptions() unexpected error: %+v", appErr)
+	}
+	opsTeam, ok := findDepartmentTeam(options, string(domain.DepartmentOperations))
+	if !ok {
+		t.Fatalf("missing operations team in options: %+v", options.Departments)
+	}
 	adminCtx := domain.WithRequestActor(context.Background(), domain.RequestActor{
 		ID:    1,
 		Roles: []domain.Role{domain.RoleAdmin, domain.RoleHRAdmin},
 	})
-	if _, appErr := svc.CreateManagedUser(adminCtx, CreateManagedUserParams{
+	user, appErr := svc.CreateManagedUser(adminCtx, CreateManagedUserParams{
 		Username:    "brand_user_2",
+		EmployeeNo:  intPtr(2102),
 		DisplayName: "Brand User 2",
 		Department:  domain.Department("品牌二部"),
 		Team:        "品牌二组",
 		Mobile:      "13800009902",
 		Password:    "Init12345",
 		Roles:       []domain.Role{domain.RoleOps},
-	}); appErr != nil {
+	})
+	if appErr != nil {
 		t.Fatalf("CreateManagedUser() unexpected error: %+v", appErr)
 	}
+	manager, appErr := svc.CreateManagedUser(adminCtx, CreateManagedUserParams{
+		Username:    "brand_scope_manager",
+		EmployeeNo:  intPtr(2103),
+		DisplayName: "Brand Scope Manager",
+		Department:  domain.DepartmentOperations,
+		Team:        opsTeam,
+		Mobile:      "13800009903",
+		Password:    "Init12345",
+		Roles:       []domain.Role{domain.RoleDeptAdmin},
+	})
+	if appErr != nil {
+		t.Fatalf("CreateManagedUser(manager) unexpected error: %+v", appErr)
+	}
+	userRepo.users[manager.ID].ManagedDepartments = []string{"品牌二部", string(domain.DepartmentOperations)}
+	userRepo.users[manager.ID].ManagedTeams = []string{"品牌二组", opsTeam}
 
 	disabled := false
-	if _, appErr := svc.UpdateTeam(context.Background(), UpdateOrgTeamParams{ID: team.ID, Enabled: &disabled}); appErr == nil || appErr.Message != "team still has assigned users" {
+	if _, appErr := svc.UpdateTeam(context.Background(), UpdateOrgTeamParams{ID: team.ID, Enabled: &disabled}); appErr != nil {
 		t.Fatalf("UpdateTeam(disable) appErr = %+v", appErr)
 	}
-	if _, appErr := svc.UpdateDepartment(context.Background(), UpdateOrgDepartmentParams{ID: department.ID, Enabled: &disabled}); appErr == nil || appErr.Message != "department still has assigned users" {
+	moved, appErr := svc.GetUser(context.Background(), user.ID)
+	if appErr != nil {
+		t.Fatalf("GetUser(after team disable) appErr = %+v", appErr)
+	}
+	if moved.Department != domain.DepartmentUnassigned || moved.Team != "未分配池" {
+		t.Fatalf("UpdateTeam(disable) user = %+v, want unassigned pool", moved)
+	}
+	managerAfterTeamDisable, appErr := svc.GetUser(context.Background(), manager.ID)
+	if appErr != nil {
+		t.Fatalf("GetUser(manager after team disable) appErr = %+v", appErr)
+	}
+	if containsString(managerAfterTeamDisable.ManagedTeams, "品牌二组") {
+		t.Fatalf("UpdateTeam(disable) manager scopes = %+v, want removed 品牌二组", managerAfterTeamDisable.ManagedTeams)
+	}
+	if _, appErr := svc.UpdateDepartment(context.Background(), UpdateOrgDepartmentParams{ID: department.ID, Enabled: &disabled}); appErr != nil {
 		t.Fatalf("UpdateDepartment(disable) appErr = %+v", appErr)
+	}
+	managerAfterDepartmentDisable, appErr := svc.GetUser(context.Background(), manager.ID)
+	if appErr != nil {
+		t.Fatalf("GetUser(manager after department disable) appErr = %+v", appErr)
+	}
+	if containsString(managerAfterDepartmentDisable.ManagedDepartments, "品牌二部") {
+		t.Fatalf("UpdateDepartment(disable) manager scopes = %+v, want removed 品牌二部", managerAfterDepartmentDisable.ManagedDepartments)
 	}
 }
 

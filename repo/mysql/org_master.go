@@ -120,8 +120,9 @@ func (r *orgRepo) CreateDepartment(ctx context.Context, tx repo.Tx, department *
 func (r *orgRepo) UpdateDepartment(ctx context.Context, tx repo.Tx, department *domain.OrgDepartment) error {
 	_, err := Unwrap(tx).ExecContext(ctx, `
 		UPDATE org_departments
-		SET enabled = ?
+		SET name = ?, enabled = ?
 		WHERE id = ?`,
+		strings.TrimSpace(department.Name),
 		department.Enabled,
 		department.ID,
 	)
@@ -152,8 +153,9 @@ func (r *orgRepo) CreateTeam(ctx context.Context, tx repo.Tx, team *domain.OrgTe
 func (r *orgRepo) UpdateTeam(ctx context.Context, tx repo.Tx, team *domain.OrgTeam) error {
 	_, err := Unwrap(tx).ExecContext(ctx, `
 		UPDATE org_teams
-		SET enabled = ?
+		SET name = ?, enabled = ?
 		WHERE id = ?`,
+		strings.TrimSpace(team.Name),
 		team.Enabled,
 		team.ID,
 	)

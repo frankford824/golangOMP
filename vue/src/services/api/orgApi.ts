@@ -14,6 +14,7 @@ export interface OrgTeamRecord {
   id: string
   name: string
   departmentId: string
+  departmentName?: string
   enabled?: boolean
 }
 
@@ -118,14 +119,30 @@ export async function createOrgTeam(payload: {
   return { id, name, department_id: did }
 }
 
-/** PUT /v1/org/departments/{id} — v0.9 仅 enabled */
-export async function updateOrgDepartment(id: string | number, enabled: boolean): Promise<void> {
-  await http.put(`/v1/org/departments/${id}`, { enabled })
+export interface UpdateOrgDepartmentPayload {
+  name?: string
+  enabled?: boolean
 }
 
-/** PUT /v1/org/teams/{id} — v0.9 仅 enabled */
-export async function updateOrgTeam(id: string | number, enabled: boolean): Promise<void> {
-  await http.put(`/v1/org/teams/${id}`, { enabled })
+export interface UpdateOrgTeamPayload {
+  name?: string
+  enabled?: boolean
+}
+
+/** PUT /v1/org/departments/{id} */
+export async function updateOrgDepartment(
+  id: string | number,
+  payload: UpdateOrgDepartmentPayload | boolean,
+): Promise<void> {
+  await http.put(`/v1/org/departments/${id}`, typeof payload === 'boolean' ? { enabled: payload } : payload)
+}
+
+/** PUT /v1/org/teams/{id} */
+export async function updateOrgTeam(
+  id: string | number,
+  payload: UpdateOrgTeamPayload | boolean,
+): Promise<void> {
+  await http.put(`/v1/org/teams/${id}`, typeof payload === 'boolean' ? { enabled: payload } : payload)
 }
 
 export const orgMoveRequestsApi = {
@@ -301,6 +318,7 @@ export async function fetchOrgOwnershipOptions(signal?: AbortSignal): Promise<Or
             id: tid,
             name: tname,
             departmentId: did,
+            departmentName: dname,
             enabled: tr.enabled === false ? false : undefined,
           })
         }

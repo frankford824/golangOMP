@@ -4,6 +4,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import UserManagementView from './UserManagementView.vue'
 import { usersApi } from '@/services/api/usersApi'
+import {
+  createOrgDepartment,
+  createOrgTeam,
+  updateOrgDepartment,
+  updateOrgTeam,
+} from '@/services/api/orgApi'
+import { patchUserMembership } from '@/composables/useOrgPermissionData'
 import { usePermissionsStore } from '@/stores/permissions'
 import { DataScopeEnum, RoleEnum, type PermissionUser } from '@/types'
 
@@ -29,6 +36,7 @@ vi.mock('@/services/api/usersApi', () => ({
     listRoles: vi.fn(),
     list: vi.fn(),
     getById: vi.fn(),
+    patch: vi.fn(),
     replaceRoles: vi.fn(),
     create: vi.fn(),
     deactivate: vi.fn(),
@@ -44,7 +52,13 @@ vi.mock('@/services/api/orgApi', () => ({
       { value: 'Design-A', label: '设计一组', department: 'Design' },
       { value: 'legacy-floating', label: '旧无部门组' },
     ],
+    departmentRecords: [{ id: '1', name: 'Design', enabled: true }],
+    teamRecords: [{ id: '2', name: 'Design-A', departmentId: '1', departmentName: 'Design', enabled: true }],
   })),
+  createOrgDepartment: vi.fn(),
+  createOrgTeam: vi.fn(),
+  updateOrgDepartment: vi.fn(),
+  updateOrgTeam: vi.fn(),
   departmentsAndGroupsFromOrgOptions: vi.fn(() => ({
     departments: [{ id: 'Design', name: '设计部' }],
     groups: [{ id: 'Design-A', name: '设计一组', departmentId: 'Design' }],
@@ -129,6 +143,7 @@ describe('UserManagementView role governance', () => {
     permissionMock.allowedActions.add('role.assign')
     permissionMock.allowedActions.add('role.read')
     permissionMock.allowedActions.add('user.manage')
+    permissionMock.allowedActions.add('org.manage')
     vi.mocked(usersApi.listRoles).mockResolvedValue({
       data: {
         data: [
@@ -203,11 +218,21 @@ describe('UserManagementView role governance', () => {
         data: {
           id: '2',
           username: 'target',
-          roles: ['Audit_B', 'Outsource', 'SuperAdmin'],
+          roles: ['Member', 'Audit_B', 'Outsource', 'SuperAdmin'],
           status: 'active',
         },
       },
     } as never)
+    vi.mocked(usersApi.patch).mockResolvedValue({ data: { data: {} } } as never)
+    vi.mocked(usersApi.create).mockResolvedValue({ data: { data: {} } } as never)
+    vi.mocked(usersApi.resetPassword).mockResolvedValue({ data: { data: {} } } as never)
+    vi.mocked(usersApi.deactivate).mockResolvedValue({ data: {} } as never)
+    vi.mocked(usersApi.activate).mockResolvedValue({ data: {} } as never)
+    vi.mocked(createOrgDepartment).mockResolvedValue({ id: '3', name: '内容部' } as never)
+    vi.mocked(createOrgTeam).mockResolvedValue({ id: '4', name: '内容一组', department_id: '1' } as never)
+    vi.mocked(updateOrgDepartment).mockResolvedValue(undefined as never)
+    vi.mocked(updateOrgTeam).mockResolvedValue(undefined as never)
+    vi.mocked(patchUserMembership).mockResolvedValue(undefined as never)
   })
 
   afterEach(() => {
@@ -231,6 +256,8 @@ describe('UserManagementView role governance', () => {
       document.body.querySelectorAll<HTMLInputElement>('.um-modal input[type="checkbox"]'),
     )
     expect(checkboxes.map((item) => item.value)).toEqual(['Member', 'AssetSubmitter'])
+    expect(checkboxes[0]?.disabled).toBe(true)
+    expect(checkboxes[1]?.disabled).toBe(false)
     const modalText = modal?.textContent ?? ''
     expect(modalText).toContain('历史/不可编辑角色')
     expect(modalText).toContain('历史兼容：常规审核旧编码')
@@ -251,8 +278,154 @@ describe('UserManagementView role governance', () => {
     await flushPromises()
 
     expect(usersApi.replaceRoles).toHaveBeenCalledWith('2', {
-      roles: ['Audit_B', 'Outsource', 'SuperAdmin'],
+      roles: ['Member', 'Audit_B', 'Outsource', 'SuperAdmin'],
     })
+  })
+
+  it('saves employee number and validates employee number in Chinese copy', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    const vm = wrapper.vm as unknown as {
+      openDetail: (row: unknown) => Promise<void>
+      basicForm: { display_name: string; employee_no: string }
+      submitBasicInfo: () => Promise<void>
+    }
+
+    await vm.openDetail({ id: '2', username: 'target', roles: [] })
+    await flushPromises()
+
+    vm.basicForm.display_name = '目标用户改名'
+    vm.basicForm.employee_no = '88'
+    await vm.submitBasicInfo()
+    await flushPromises()
+
+    expect(usersApi.patch).toHaveBeenCalledWith('2', {
+      display_name: '目标用户改名',
+      employee_no: 88,
+    })
+
+    vi.mocked(usersApi.patch).mockClear()
+    vm.basicForm.employee_no = '10000'
+    await vm.submitBasicInfo()
+    await flushPromises()
+
+    expect(usersApi.patch).not.toHaveBeenCalled()
+    expect(document.body.textContent).toContain('工号必须是 0 到 9999 之间的纯数字。')
+  })
+
+  it('creates users with employee number and preserves Member role', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    const vm = wrapper.vm as unknown as {
+      createForm: {
+        username: string
+        employee_no: string
+        display_name: string
+        department: string
+        team: string
+        mobile: string
+        email: string
+        password: string
+        roles: string[]
+        status: 'active' | 'disabled'
+      }
+      createUser: () => Promise<void>
+    }
+
+    Object.assign(vm.createForm, {
+      username: 'new_user',
+      employee_no: '99',
+      display_name: '新员工',
+      department: 'Design',
+      team: 'Design-A',
+      mobile: '13800009999',
+      email: '',
+      password: 'Init1234',
+      roles: ['AssetSubmitter'],
+      status: 'active',
+    })
+    await vm.createUser()
+    await flushPromises()
+
+    expect(usersApi.create).toHaveBeenCalledWith({
+      username: 'new_user',
+      employee_no: 99,
+      display_name: '新员工',
+      department: 'Design',
+      team: 'Design-A',
+      mobile: '13800009999',
+      email: undefined,
+      password: 'Init1234',
+      roles: ['Member', 'AssetSubmitter'],
+      status: 'active',
+    })
+  })
+
+  it('calls real org master APIs for create rename and delete actions', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    const vm = wrapper.vm as unknown as {
+      orgActionName: string
+      openCreateDepartment: () => void
+      openCreateTeam: (department: unknown) => void
+      openEditDepartment: (department: unknown) => void
+      openDeleteTeam: (team: unknown) => void
+      submitOrgAction: () => Promise<void>
+    }
+
+    vm.openCreateDepartment()
+    vm.orgActionName = '内容部'
+    await vm.submitOrgAction()
+    await flushPromises()
+    expect(createOrgDepartment).toHaveBeenCalledWith({ name: '内容部' })
+
+    vm.openCreateTeam({ id: '1', value: 'Design', label: '设计部', teams: [] })
+    vm.orgActionName = '设计二组'
+    await vm.submitOrgAction()
+    await flushPromises()
+    expect(createOrgTeam).toHaveBeenCalledWith({ department_id: '1', name: '设计二组' })
+
+    vm.openEditDepartment({ id: '1', value: 'Design', label: '设计部', teams: [] })
+    vm.orgActionName = '设计中心'
+    await vm.submitOrgAction()
+    await flushPromises()
+    expect(updateOrgDepartment).toHaveBeenCalledWith('1', { name: '设计中心' })
+
+    vm.openDeleteTeam({ id: '2', value: 'Design-A', label: '设计一组', department: 'Design' })
+    await vm.submitOrgAction()
+    await flushPromises()
+    expect(updateOrgTeam).toHaveBeenCalledWith('2', { enabled: false })
+  })
+
+  it('keeps membership and account operations bound to their scoped endpoints', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    const vm = wrapper.vm as unknown as {
+      openDetail: (row: unknown) => Promise<void>
+      membershipForm: { department: string; team: string }
+      resetPasswordValue: string
+      submitMembership: () => Promise<void>
+      resetPassword: () => Promise<void>
+      setUserStatus: (status: 'active' | 'disabled') => Promise<void>
+    }
+
+    await vm.openDetail({ id: '2', username: 'target', roles: [] })
+    await flushPromises()
+
+    vm.membershipForm.department = 'Design'
+    vm.membershipForm.team = 'Design-B'
+    await vm.submitMembership()
+    await flushPromises()
+    expect(patchUserMembership).toHaveBeenCalledWith('2', 'Design', 'Design-B')
+
+    vm.resetPasswordValue = 'NewPass123'
+    await vm.resetPassword()
+    await flushPromises()
+    expect(usersApi.resetPassword).toHaveBeenCalledWith('2', { password: 'NewPass123' })
+
+    await vm.setUserStatus('disabled')
+    await flushPromises()
+    expect(usersApi.deactivate).toHaveBeenCalledWith('2')
   })
 
   it('fails closed for DepartmentAdmin without a department scope', async () => {

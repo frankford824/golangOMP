@@ -163,6 +163,7 @@ func (t EmploymentType) Valid() bool {
 type User struct {
 	ID                 int64              `db:"id"                     json:"id"`
 	Username           string             `db:"username"               json:"username"`
+	EmployeeNo         *int               `db:"employee_no"            json:"employee_no,omitempty"`
 	Account            string             `db:"-"                      json:"account"`
 	DisplayName        string             `db:"display_name"           json:"display_name"`
 	Name               string             `db:"-"                      json:"name"`

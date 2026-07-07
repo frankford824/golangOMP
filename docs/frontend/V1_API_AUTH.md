@@ -58,7 +58,7 @@ Content-Type: `application/json`
       "id": "...",
       "username": "...",
       "account": "...",
-      "display_name": "..."
+      "employee_no": "..."
     },
     "session": {
       "session_id": "...",
@@ -185,7 +185,7 @@ Content-Type: `application/json`
       "id": "...",
       "username": "...",
       "account": "...",
-      "display_name": "..."
+      "employee_no": "..."
     },
     "session": {
       "session_id": "...",
@@ -248,7 +248,7 @@ curl -X POST https://api.example.com/v1/auth/login \
     "id": 123,
     "username": "string",
     "account": "string",
-    "display_name": "string"
+    "employee_no": 123
   }
 }
 ```
