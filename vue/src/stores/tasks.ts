@@ -2214,8 +2214,7 @@ export const useTasksStore = defineStore('tasks', () => {
     await loadTaskById(taskId)
   }
 
-  /** 审核通过，调用 POST /v1/tasks/{id}/audit/approve */
-  /** 审核领取，调用 POST /v1/tasks/{id}/audit/claim（后端要求 stage 必填） */
+  /** 审核领取兼容入口；审核通过/驳回不再要求先领取。 */
   async function claimAudit(taskId: string, stage: string = 'A') {
     await tasksApi.auditClaim(taskId, { stage })
     await loadTaskById(taskId)

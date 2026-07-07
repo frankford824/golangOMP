@@ -123,6 +123,8 @@ const (
 	taskAssetVersionUniqueKey        = "uq_task_assets_task_version"
 	assetVersionRaceRetryDenyCode    = "asset_version_race_retry"
 	assetVersionReplacementRetention = 15 * 24 * time.Hour
+	taskAssetUploadMaxFileSizeBytes  = int64(1024 * 1024 * 1024)
+	taskAssetUploadMaxFileSizeLabel  = "1GB"
 )
 
 type taskAssetVersionSupersedeRepo interface {
@@ -1061,6 +1063,12 @@ func (s *taskAssetCenterService) createUploadSession(ctx context.Context, params
 	}
 	if params.ExpectedSize != nil && *params.ExpectedSize < 0 {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "expected_size must be greater than or equal to zero", nil)
+	}
+	if params.ExpectedSize != nil && *params.ExpectedSize > taskAssetUploadMaxFileSizeBytes {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "expected_size exceeds upload limit", map[string]interface{}{
+			"max_bytes": taskAssetUploadMaxFileSizeBytes,
+			"max_label": taskAssetUploadMaxFileSizeLabel,
+		})
 	}
 	task, appErr := s.requireTask(ctx, params.TaskID)
 	if appErr != nil {

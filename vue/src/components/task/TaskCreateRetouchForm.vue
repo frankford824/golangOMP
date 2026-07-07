@@ -172,7 +172,10 @@ import {
   referenceFileTooLargeMessage,
 } from '@/domain/constants/reference-upload'
 import { UPLOAD_ACCEPT_ATTRIBUTE, isAllowedUploadFile } from '@/domain/constants/upload-types'
-import { DESIGN_UPLOAD_MAX_FILE_SIZE_BYTES } from '@/domain/copy/design-upload'
+import {
+  DESIGN_UPLOAD_MAX_FILE_SIZE_BYTES,
+  designUploadTooLargeMessage,
+} from '@/domain/copy/design-upload'
 import BaseTextarea from '@/components/base/BaseTextarea.vue'
 import {
   getFilesFromClipboardEvent,
@@ -355,7 +358,7 @@ function addSourceFiles(index: number, files: FileList | File[]) {
       continue
     }
     if (file.size > DESIGN_UPLOAD_MAX_FILE_SIZE_BYTES) {
-      pickError.value = `${file.name} 超过单文件大小上限，已跳过`
+      pickError.value = designUploadTooLargeMessage(file.name)
       continue
     }
     if (existing.some((f) => f.name === file.name && f.size === file.size && f.lastModified === file.lastModified)) {

@@ -72,6 +72,30 @@ func TestTaskCreateReferenceUploadServiceCreateAndComplete(t *testing.T) {
 	}
 }
 
+func TestTaskCreateReferenceUploadServiceCreateRejectsExpectedSizeAboveLimit(t *testing.T) {
+	uploadRequestRepo := newStep37UploadRequestRepo()
+	assetStorageRefRepo := newStep37AssetStorageRefRepo()
+	uploadClient := newStubUploadServiceClient().(*stubUploadServiceClient)
+	svc := NewTaskCreateReferenceUploadService(uploadRequestRepo, assetStorageRefRepo, step04TxRunner{}, uploadClient).(*taskCreateReferenceUploadService)
+
+	tooLarge := TaskCreateReferenceUploadMaxFileSizeBytes + 1
+	_, appErr := svc.CreateUploadSession(context.Background(), CreateTaskReferenceUploadSessionParams{
+		CreatedBy:    501,
+		Filename:     "reference-too-large.png",
+		ExpectedSize: &tooLarge,
+		MimeType:     "image/png",
+	})
+	if appErr == nil || appErr.Code != domain.ErrCodeInvalidRequest {
+		t.Fatalf("CreateUploadSession() appErr = %+v, want invalid request", appErr)
+	}
+	if appErr.Message != "expected_size exceeds upload limit" {
+		t.Fatalf("CreateUploadSession() message = %q, want expected_size exceeds upload limit", appErr.Message)
+	}
+	if len(uploadClient.createRequests) != 0 {
+		t.Fatalf("remote create calls = %d, want 0", len(uploadClient.createRequests))
+	}
+}
+
 func TestTaskCreateReferenceUploadServiceUploadFile(t *testing.T) {
 	uploadRequestRepo := newStep37UploadRequestRepo()
 	assetStorageRefRepo := newStep37AssetStorageRefRepo()
@@ -106,6 +130,31 @@ func TestTaskCreateReferenceUploadServiceUploadFile(t *testing.T) {
 	}
 	if stub.completeCalls != 0 {
 		t.Fatalf("UploadFile() completeCalls = %d, want 0 for small reference", stub.completeCalls)
+	}
+}
+
+func TestTaskCreateReferenceUploadServiceUploadFileRejectsExpectedSizeAboveLimitBeforeRead(t *testing.T) {
+	uploadRequestRepo := newStep37UploadRequestRepo()
+	assetStorageRefRepo := newStep37AssetStorageRefRepo()
+	uploadClient := newStubUploadServiceClient().(*stubUploadServiceClient)
+	svc := NewTaskCreateReferenceUploadService(uploadRequestRepo, assetStorageRefRepo, step04TxRunner{}, uploadClient).(*taskCreateReferenceUploadService)
+
+	tooLarge := TaskCreateReferenceUploadMaxFileSizeBytes + 1
+	_, appErr := svc.UploadFile(context.Background(), UploadTaskReferenceFileParams{
+		CreatedBy:    501,
+		Filename:     "reference-too-large.png",
+		ExpectedSize: &tooLarge,
+		MimeType:     "image/png",
+		File:         bytes.NewReader([]byte("small")),
+	})
+	if appErr == nil || appErr.Code != domain.ErrCodeInvalidRequest {
+		t.Fatalf("UploadFile() appErr = %+v, want invalid request", appErr)
+	}
+	if appErr.Message != "expected_size exceeds upload limit" {
+		t.Fatalf("UploadFile() message = %q, want expected_size exceeds upload limit", appErr.Message)
+	}
+	if len(uploadClient.createRequests) != 0 {
+		t.Fatalf("remote create calls = %d, want 0", len(uploadClient.createRequests))
 	}
 }
 

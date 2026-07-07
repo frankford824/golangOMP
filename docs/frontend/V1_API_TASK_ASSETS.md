@@ -36,7 +36,7 @@ Content-Type: `application/json`
 |---|---|---|---|
 | `created_by` | integer | 否 | - |
 | `filename` | string | 是 | - |
-| `expected_size` | integer | 否 | - |
+| `expected_size` | integer | 否 | Optional size hint in bytes. Pre-task reference upload sessions reject values above 300 MB. |
 | `mime_type` | string | 否 | - |
 | `file_hash` | string | 否 | - |
 | `remark` | string | 否 | - |
@@ -613,8 +613,8 @@ Content-Type: `application/json`
 | `upload_mode` | enum(small/multipart) | 否 | Compatibility-only input. New frontend integrations must not send this field. |
 | `filename` | string | 否 | Compatibility alias of `file_name`. At least one of `file_name` or `filename` must be provided. |
 | `file_name` | string | 否 | Canonical file name field for new frontend integrations. At least one of `file_name` or `filename` must be provided. |
-| `expected_size` | integer | 否 | Optional size hint in bytes. |
-| `file_size` | integer | 否 | Optional compatibility alias of `expected_size`. |
+| `expected_size` | integer | 否 | Optional size hint in bytes. Task asset upload sessions reject values above 1 GiB. |
+| `file_size` | integer | 否 | Optional compatibility alias of `expected_size`. Task asset upload sessions reject values above 1 GiB. |
 | `mime_type` | string | 否 | Optional MIME hint. |
 | `file_hash` | string | 否 | - |
 | `remark` | string | 否 | - |
@@ -702,8 +702,8 @@ Content-Type: `application/json`
 | `upload_mode` | enum(small/multipart) | 否 | Compatibility-only input. New frontend integrations must not send this field. |
 | `filename` | string | 否 | Compatibility alias of `file_name`. At least one of `file_name` or `filename` must be provided. |
 | `file_name` | string | 否 | Canonical file name field for new frontend integrations. At least one of `file_name` or `filename` must be provided. |
-| `expected_size` | integer | 否 | Optional size hint in bytes. |
-| `file_size` | integer | 否 | Optional compatibility alias of `expected_size`. |
+| `expected_size` | integer | 否 | Optional size hint in bytes. Task asset upload sessions reject values above 1 GiB. |
+| `file_size` | integer | 否 | Optional compatibility alias of `expected_size`. Task asset upload sessions reject values above 1 GiB. |
 | `mime_type` | string | 否 | Optional MIME hint. |
 | `file_hash` | string | 否 | - |
 | `remark` | string | 否 | - |
@@ -791,8 +791,8 @@ Content-Type: `application/json`
 | `upload_mode` | enum(small/multipart) | 否 | Compatibility-only input. New frontend integrations must not send this field. |
 | `filename` | string | 否 | Compatibility alias of `file_name`. At least one of `file_name` or `filename` must be provided. |
 | `file_name` | string | 否 | Canonical file name field for new frontend integrations. At least one of `file_name` or `filename` must be provided. |
-| `expected_size` | integer | 否 | Optional size hint in bytes. |
-| `file_size` | integer | 否 | Optional compatibility alias of `expected_size`. |
+| `expected_size` | integer | 否 | Optional size hint in bytes. Task asset upload sessions reject values above 1 GiB. |
+| `file_size` | integer | 否 | Optional compatibility alias of `expected_size`. Task asset upload sessions reject values above 1 GiB. |
 | `mime_type` | string | 否 | Optional MIME hint. |
 | `file_hash` | string | 否 | - |
 | `remark` | string | 否 | - |

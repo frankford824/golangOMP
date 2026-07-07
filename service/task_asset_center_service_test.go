@@ -1221,6 +1221,31 @@ func TestTaskAssetCenterServiceCreateUploadSessionInfersModeByAssetType(t *testi
 	}
 }
 
+func TestTaskAssetCenterServiceCreateUploadSessionRejectsExpectedSizeAboveLimit(t *testing.T) {
+	taskRepo := newStep04TaskRepo(&domain.Task{ID: 2031, TaskStatus: domain.TaskStatusInProgress})
+	uploadClient := newStubUploadServiceClient().(*stubUploadServiceClient)
+	svc := NewTaskAssetCenterService(taskRepo, newStep67DesignAssetRepo(), newStep04TaskAssetRepo(), newStep37UploadRequestRepo(), newStep37AssetStorageRefRepo(), &step04TaskEventRepo{}, step04TxRunner{}, uploadClient).(*taskAssetCenterService)
+
+	tooLarge := taskAssetUploadMaxFileSizeBytes + 1
+	_, appErr := svc.CreateUploadSession(context.Background(), CreateTaskAssetUploadSessionParams{
+		TaskID:       2031,
+		CreatedBy:    540,
+		AssetType:    domain.TaskAssetTypeDelivery,
+		Filename:     "delivery-too-large.zip",
+		ExpectedSize: &tooLarge,
+		MimeType:     "application/zip",
+	})
+	if appErr == nil || appErr.Code != domain.ErrCodeInvalidRequest {
+		t.Fatalf("CreateUploadSession() appErr = %+v, want invalid request", appErr)
+	}
+	if appErr.Message != "expected_size exceeds upload limit" {
+		t.Fatalf("CreateUploadSession() message = %q, want expected_size exceeds upload limit", appErr.Message)
+	}
+	if len(uploadClient.createRequests) != 0 {
+		t.Fatalf("remote create calls = %d, want 0", len(uploadClient.createRequests))
+	}
+}
+
 func TestTaskAssetCenterServiceUploadContentTypeContractDefaultsAndRejectsMismatch(t *testing.T) {
 	taskRepo := newStep04TaskRepo(&domain.Task{ID: 2032, TaskStatus: domain.TaskStatusInProgress})
 	designAssetRepo := newStep67DesignAssetRepo()

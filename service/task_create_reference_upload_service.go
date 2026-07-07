@@ -58,6 +58,11 @@ type UploadTaskReferenceFileParams struct {
 	File         io.Reader
 }
 
+const (
+	TaskCreateReferenceUploadMaxFileSizeBytes = int64(300 * 1024 * 1024)
+	TaskCreateReferenceUploadMaxFileSizeLabel = "300MB"
+)
+
 type CompleteTaskReferenceUploadSessionResult struct {
 	Session          *domain.UploadSession    `json:"session"`
 	ReferenceFileRef string                   `json:"reference_file_ref"`
@@ -128,6 +133,12 @@ func (s *taskCreateReferenceUploadService) CreateUploadSession(ctx context.Conte
 	}
 	if params.ExpectedSize != nil && *params.ExpectedSize < 0 {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "expected_size must be greater than or equal to zero", nil)
+	}
+	if params.ExpectedSize != nil && *params.ExpectedSize > TaskCreateReferenceUploadMaxFileSizeBytes {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "expected_size exceeds upload limit", map[string]interface{}{
+			"max_bytes": TaskCreateReferenceUploadMaxFileSizeBytes,
+			"max_label": TaskCreateReferenceUploadMaxFileSizeLabel,
+		})
 	}
 
 	remote, err := s.uploadClient.CreateUploadSession(ctx, RemoteCreateUploadSessionRequest{
@@ -207,7 +218,13 @@ func (s *taskCreateReferenceUploadService) UploadFile(ctx context.Context, param
 	if params.File == nil {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "file is required", nil)
 	}
-	fileBytes, err := io.ReadAll(params.File)
+	if params.ExpectedSize != nil && *params.ExpectedSize > TaskCreateReferenceUploadMaxFileSizeBytes {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "expected_size exceeds upload limit", map[string]interface{}{
+			"max_bytes": TaskCreateReferenceUploadMaxFileSizeBytes,
+			"max_label": TaskCreateReferenceUploadMaxFileSizeLabel,
+		})
+	}
+	fileBytes, err := io.ReadAll(io.LimitReader(params.File, TaskCreateReferenceUploadMaxFileSizeBytes+1))
 	if err != nil {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "read uploaded file bytes", nil)
 	}
@@ -215,6 +232,12 @@ func (s *taskCreateReferenceUploadService) UploadFile(ctx context.Context, param
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "uploaded file bytes are empty", nil)
 	}
 	actualSize := int64(len(fileBytes))
+	if actualSize > TaskCreateReferenceUploadMaxFileSizeBytes {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "uploaded file exceeds upload limit", map[string]interface{}{
+			"max_bytes": TaskCreateReferenceUploadMaxFileSizeBytes,
+			"max_label": TaskCreateReferenceUploadMaxFileSizeLabel,
+		})
+	}
 	if params.ExpectedSize != nil && *params.ExpectedSize != actualSize {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "uploaded file size does not match multipart header size", map[string]interface{}{
 			"expected_size": *params.ExpectedSize,

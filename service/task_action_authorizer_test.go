@@ -258,6 +258,24 @@ func TestTaskActionAuthorizerEvaluatePolicy(t *testing.T) {
 			wantScopeSource: string(TaskActionScopeHandler),
 		},
 		{
+			name:   "audit_a_allow_for_stage_scope_without_current_handler_claim",
+			action: TaskActionAuditApprove,
+			attrs:  TaskActionAttributes{AuditStage: domain.AuditRecordStageA},
+			actor: domain.RequestActor{
+				ID:    2101,
+				Roles: []domain.Role{domain.RoleAuditA},
+			},
+			task: &domain.Task{
+				ID:               1201,
+				TaskStatus:       domain.TaskStatusPendingAuditA,
+				OwnerDepartment:  "ops",
+				OwnerOrgTeam:     "ops-team-1",
+				CurrentHandlerID: authzInt64Ptr(2100),
+			},
+			wantAllowed:     true,
+			wantScopeSource: string(TaskActionScopeStage),
+		},
+		{
 			name:   "audit_deny_for_retouch_even_if_legacy_status_pending_audit",
 			action: TaskActionAuditApprove,
 			attrs:  TaskActionAttributes{AuditStage: domain.AuditRecordStageA},

@@ -89,7 +89,7 @@
                 </button>
               </div>
               <p class="source-upload-hint">
-                创建后按 `source` 资产链路上传（单文件上限 {{ maxSourceFileMb }}MB）。
+                创建后按 `source` 资产链路上传（单文件上限 {{ maxSourceFileSizeLabel }}）。
               </p>
               <input
                 ref="sourceInputRef"
@@ -328,7 +328,10 @@ import type { Product } from '@/types'
 import BaseModal from '@/components/base/BaseModal.vue'
 import ProductPickerDialog from '@/components/products/ProductPickerDialog.vue'
 import ReferenceUploadPanel from '@/components/task/ReferenceUploadPanel.vue'
-import { DESIGN_UPLOAD_MAX_FILE_SIZE_BYTES, DESIGN_UPLOAD_MAX_FILE_SIZE_MB } from '@/domain/copy/design-upload'
+import {
+  DESIGN_UPLOAD_MAX_FILE_SIZE_BYTES,
+  DESIGN_UPLOAD_MAX_FILE_SIZE_LABEL,
+} from '@/domain/copy/design-upload'
 import { useCategoryOptions } from '@/composables/useCategoryOptions'
 import { useDesignerOptions } from '@/composables/useDesignerOptions'
 import { useTeamOptions } from '@/composables/useTeamOptions'
@@ -448,7 +451,7 @@ const priorityOptions = [
   { value: 'critical', label: '加急' },
 ]
 
-const maxSourceFileMb = DESIGN_UPLOAD_MAX_FILE_SIZE_MB
+const maxSourceFileSizeLabel = DESIGN_UPLOAD_MAX_FILE_SIZE_LABEL
 
 function stringValue(value: string | number | null | undefined): string {
   return value == null ? '' : String(value)
@@ -682,7 +685,7 @@ function addSourceFiles(files: FileList | File[]) {
       continue
     }
     if (file.size > DESIGN_UPLOAD_MAX_FILE_SIZE_BYTES) {
-      submitError.value = `${file.name} 超过 ${maxSourceFileMb}MB，已跳过`
+      submitError.value = `${file.name} 超过 ${maxSourceFileSizeLabel}，已跳过`
       continue
     }
     const key = buildSourceFileKey(file)

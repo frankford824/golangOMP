@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -64,9 +65,17 @@ func (h *TaskCreateReferenceUploadHandler) CreateUploadSession(c *gin.Context) {
 }
 
 func (h *TaskCreateReferenceUploadHandler) UploadFile(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, service.TaskCreateReferenceUploadMaxFileSizeBytes+(1<<20))
 	fileHeader, err := c.FormFile("file")
 	if err != nil {
 		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "file is required", nil))
+		return
+	}
+	if fileHeader.Size > service.TaskCreateReferenceUploadMaxFileSizeBytes {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "uploaded file exceeds upload limit", map[string]interface{}{
+			"max_bytes": service.TaskCreateReferenceUploadMaxFileSizeBytes,
+			"max_label": service.TaskCreateReferenceUploadMaxFileSizeLabel,
+		}))
 		return
 	}
 	file, err := fileHeader.Open()

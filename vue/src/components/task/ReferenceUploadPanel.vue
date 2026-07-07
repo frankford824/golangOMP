@@ -26,14 +26,14 @@
         @change="onFileChange"
       />
       <span class="upload-plus">+</span>
-      <p>{{ compact ? '上传参考图/附件' : `点击、拖拽或粘贴上传参考图（任意格式，单文件不超过 ${REFERENCE_UPLOAD_MAX_FILE_SIZE_MB}MB）` }}</p>
+      <p>{{ compact ? '上传参考图/附件' : `点击、拖拽或粘贴上传参考图（任意格式，单文件不超过 ${REFERENCE_UPLOAD_MAX_FILE_SIZE_LABEL}）` }}</p>
       <p class="upload-hint">
         {{ uploadHintText }}
       </p>
     </div>
     <div v-if="compact" class="compact-upload-summary">
       <span>已上传 {{ fileRefs.length }} 个</span>
-      <span>单文件 ≤{{ REFERENCE_UPLOAD_MAX_FILE_SIZE_MB }}MB</span>
+      <span>单文件 ≤{{ REFERENCE_UPLOAD_MAX_FILE_SIZE_LABEL }}</span>
     </div>
     <p v-if="limitError" class="limit-error">{{ limitError }}</p>
     <p v-if="uploadError" class="limit-error">{{ uploadError }}</p>
@@ -83,7 +83,7 @@ import {
 } from '@/composables/useFileDropPasteReceiver'
 import {
   REFERENCE_UPLOAD_MAX_FILE_SIZE_BYTES,
-  REFERENCE_UPLOAD_MAX_FILE_SIZE_MB,
+  REFERENCE_UPLOAD_MAX_FILE_SIZE_LABEL,
   isAcceptableReferenceFile,
   referenceFileTooLargeMessage,
 } from '@/domain/constants/reference-upload'
@@ -256,7 +256,7 @@ async function processFiles(files: FileList | File[]) {
     errors.push(
       oversized.length === 1
         ? referenceFileTooLargeMessage(oversized[0]?.name)
-        : `有 ${oversized.length} 个文件超过 ${REFERENCE_UPLOAD_MAX_FILE_SIZE_MB}MB，已拒绝上传`,
+        : `有 ${oversized.length} 个文件超过 ${REFERENCE_UPLOAD_MAX_FILE_SIZE_LABEL}，已拒绝上传`,
     )
   }
   if (unsupported.length > 0) {

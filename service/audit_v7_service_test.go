@@ -211,7 +211,7 @@ func TestAuditV7ServiceRejectExperienceFailureDoesNotBlockAudit(t *testing.T) {
 	}
 }
 
-func TestAuditV7ServiceApproveRejectsNonHandlerStageScope(t *testing.T) {
+func TestAuditV7ServiceApproveAllowsNonHandlerStageScope(t *testing.T) {
 	currentHandlerID := int64(231)
 	nonHandlerID := int64(235)
 	taskRepo := &prdTaskRepo{
@@ -249,17 +249,16 @@ func TestAuditV7ServiceApproveRejectsNonHandlerStageScope(t *testing.T) {
 		AuditorID:  nonHandlerID,
 		Stage:      domain.AuditRecordStageA,
 		NextStatus: domain.TaskStatusPendingWarehouseReceive,
-		Comment:    "not current handler",
+		Comment:    "direct audit without claim",
 	})
-	if appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
-		t.Fatalf("Approve() appErr = %+v, want permission denied", appErr)
+	if appErr != nil {
+		t.Fatalf("Approve() unexpected error: %+v", appErr)
 	}
-	details, _ := appErr.Details.(map[string]interface{})
-	if got := details["deny_code"]; got != "task_not_assigned_to_actor" {
-		t.Fatalf("Approve() deny_code = %v, want task_not_assigned_to_actor", got)
+	if taskRepo.tasks[28].TaskStatus != domain.TaskStatusPendingWarehouseReceive {
+		t.Fatalf("Approve() task status = %s, want PendingWarehouseReceive", taskRepo.tasks[28].TaskStatus)
 	}
-	if taskRepo.tasks[28].TaskStatus != domain.TaskStatusPendingAuditA {
-		t.Fatalf("Approve() task status = %s, want unchanged PendingAuditA", taskRepo.tasks[28].TaskStatus)
+	if taskRepo.tasks[28].CurrentHandlerID != nil {
+		t.Fatalf("Approve() current_handler_id = %+v, want cleared", taskRepo.tasks[28].CurrentHandlerID)
 	}
 }
 

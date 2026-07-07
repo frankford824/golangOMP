@@ -237,7 +237,7 @@ import {
   DESIGN_UPLOAD_COPY,
   DESIGN_UPLOAD_TIMING,
   DESIGN_UPLOAD_MAX_FILE_SIZE_BYTES,
-  DESIGN_UPLOAD_MAX_FILE_SIZE_MB,
+  DESIGN_UPLOAD_MAX_FILE_SIZE_LABEL,
   designUploadTooLargeMessage,
 } from '@/domain/copy/design-upload'
 import { formatFileSizeBytes } from '@/domain/formatters/file-size'
@@ -522,7 +522,7 @@ function readIntoPending(files: FileList | File[]) {
     errors.push(
       oversizedFiles.length === 1
         ? designUploadTooLargeMessage(oversizedFiles[0]?.name)
-        : `有 ${oversizedFiles.length} 个文件超过 ${DESIGN_UPLOAD_MAX_FILE_SIZE_MB}MB，已拒绝上传`,
+        : `有 ${oversizedFiles.length} 个文件超过 ${DESIGN_UPLOAD_MAX_FILE_SIZE_LABEL}，已拒绝上传`,
     )
   }
   if (unsupportedFiles.length > 0) {

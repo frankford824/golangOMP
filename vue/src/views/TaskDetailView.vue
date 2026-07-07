@@ -840,16 +840,6 @@
                           转交复核
                         </button>
                       </div>
-                      <div v-else-if="showAuditClaimButton" class="detail-v3-inline-actions">
-                        <button
-                          type="button"
-                          class="detail-v3-dark-btn"
-                          :disabled="actionLoading === 'audit-claim'"
-                          @click="claimAuditFromDetail"
-                        >
-                          {{ actionLoading === 'audit-claim' ? '领取中...' : '领取审核任务' }}
-                        </button>
-                      </div>
                       <div v-else-if="showAuditTakeoverButton" class="detail-v3-inline-actions">
                         <button
                           type="button"
@@ -1343,12 +1333,16 @@ import type { Task, TaskSkuItem } from '@/domain/types/task'
 import { formatUploadFailureMessage } from '@/utils/upload-errors'
 import {
   REFERENCE_UPLOAD_MAX_FILE_SIZE_BYTES,
-  REFERENCE_UPLOAD_MAX_FILE_SIZE_MB,
+  REFERENCE_UPLOAD_MAX_FILE_SIZE_LABEL,
   isAcceptableReferenceFile,
   referenceFileTooLargeMessage,
 } from '@/domain/constants/reference-upload'
 import { UPLOAD_ACCEPT_ATTRIBUTE, isAllowedUploadFile, isBitmapDeliveryFile } from '@/domain/constants/upload-types'
-import { DESIGN_UPLOAD_MAX_FILE_SIZE_BYTES, designUploadTooLargeMessage } from '@/domain/copy/design-upload'
+import {
+  DESIGN_UPLOAD_MAX_FILE_SIZE_BYTES,
+  DESIGN_UPLOAD_MAX_FILE_SIZE_LABEL,
+  designUploadTooLargeMessage,
+} from '@/domain/copy/design-upload'
 import {
   ArrowLeft,
   CheckCircle2,
@@ -1398,11 +1392,10 @@ import { warehouseBlockingReasonLine } from '@/utils/warehouse-blocking'
 import type { TaskAiSummaryResponse } from '@/services/api/tasksApi'
 // v0.5 对齐：FRONTEND_ALIGNMENT_v0.5.md 第 D 节，任务详情内指派弹窗使用 GET /v1/users/designers
 
-/** 与 /me `frontend_access.actions` 对齐：审核岗可能仅有细粒度 key（如 task.audit.review），未带历史 PermissionEnum `task:audit`。 */
+/** 与 /me `frontend_access.actions` 对齐：审核决策不再以 claim 作为前置能力。 */
 const AUDIT_PRIMARY_TOOLBAR_PERMISSION_KEYS = [
   'task.audit',
   'task.audit.review',
-  'task.audit.claim',
   'task.audit.approve',
   'task.audit.reject',
 ] as const
@@ -1964,7 +1957,7 @@ const replaceableOpsReferenceAssetID = computed((): string | undefined => {
 
 const detailReferenceLabel = computed(() => {
   const total = motherTaskOpsReferenceRefs.value.length
-  return total > 0 ? `${total} 张图片 · 单文件 <= 300MB` : '暂无参考附件'
+  return total > 0 ? `${total} 张图片 · 单文件 <= ${REFERENCE_UPLOAD_MAX_FILE_SIZE_LABEL}` : '暂无参考附件'
 })
 const totalReferenceCount = computed(() => motherTaskOpsReferenceRefs.value.length)
 const RETOUCH_MODULE_STATE_LABELS: Record<string, string> = {
@@ -2351,7 +2344,7 @@ const showCustomizationReviewActionButtons = computed(() => {
   )
 })
 const showAuditReviewButtons = computed(
-  () => showAuditActionButtons.value && isAuditAssignedToCurrentUser.value,
+  () => showAuditActionButtons.value && !hasPendingAuditHandover.value,
 )
 const showActiveAuditActionButtons = computed(
   () => showAuditReviewButtons.value || showCustomizationReviewActionButtons.value,
@@ -2389,16 +2382,8 @@ const pendingAuditHandoverForMe = computed(() =>
     return String(handover.to_auditor_id ?? '').trim() === currentUserIdText.value
   }) ?? null,
 )
-const showAuditClaimButton = computed(
-  () =>
-    showAuditActionButtons.value &&
-    isAuditUnassigned.value &&
-    (!canReadAuditHandovers.value || (!auditHandoversLoading.value && !auditHandoversError.value)) &&
-    !hasPendingAuditHandover.value &&
-    can('task.audit.claim'),
-)
 const showAuditHandoverButton = computed(
-  () => showAuditReviewButtons.value && can('task.audit.takeover'),
+  () => showAuditActionButtons.value && isAuditAssignedToCurrentUser.value && can('task.audit.takeover'),
 )
 const showAuditTransferToBButton = computed(
   () => !!task.value && showAuditReviewButtons.value && canTransferToAuditB(task.value),
@@ -2425,9 +2410,9 @@ const auditActionNoticeText = computed(() => {
   if (!showAuditActionButtons.value) return ''
   if (isAuditAssignedToOther.value) {
     const name = task.value?.currentHandlerName?.trim() || `ID ${auditCurrentHandlerId.value}`
-    return `该任务当前由 ${name} 处理，其他常规审核不能直接审核。`
+    return `该任务当前显示由 ${name} 处理；你可以直接审核。`
   }
-  if (isAuditUnassigned.value) return '该任务尚未领取，请先领取后再审核。'
+  if (isAuditUnassigned.value) return '该任务无需先领取，可直接审核。'
   return ''
 })
 const purchaseWorkflowCanClose = computed(() => {
@@ -2876,7 +2861,7 @@ async function handleOpsReferenceFiles(files: FileList | File[]) {
     errors.push(
       oversized.length === 1
         ? referenceFileTooLargeMessage(oversized[0]?.name)
-        : `有 ${oversized.length} 个文件超过 ${REFERENCE_UPLOAD_MAX_FILE_SIZE_MB}MB，已拒绝上传`,
+        : `有 ${oversized.length} 个文件超过 ${REFERENCE_UPLOAD_MAX_FILE_SIZE_LABEL}，已拒绝上传`,
     )
   }
   if (unsupported.length > 0) {
@@ -3048,7 +3033,7 @@ function validateAuditUploadFiles(files: File[], kind: AssetKind): { validFiles:
     errors.push(
       oversized.length === 1
         ? designUploadTooLargeMessage(oversized[0]?.name)
-        : `有 ${oversized.length} 个文件超过上传上限，已拒绝上传`,
+        : `有 ${oversized.length} 个文件超过 ${DESIGN_UPLOAD_MAX_FILE_SIZE_LABEL}，已拒绝上传`,
     )
   }
   const unsupported = files.filter((file) => !isAllowedUploadFile(file.name))
@@ -3505,7 +3490,6 @@ const actionLoading = ref<
   | ''
   | 'claim-retouch'
   | 'submit-retouch'
-  | 'audit-claim'
   | 'audit-pass'
   | 'audit-reject'
   | 'audit-upload'
@@ -3922,16 +3906,6 @@ async function runDetailAction(
   } finally {
     actionLoading.value = ''
   }
-}
-
-async function claimAuditFromDetail(): Promise<void> {
-  if (!task.value || !showAuditClaimButton.value) return
-  await runDetailAction('audit-claim', '领取审核任务失败', async () => {
-    await tasksStore.claimAudit(task.value!.id, auditStageForTask())
-    flashSuccess('已领取审核任务')
-    await loadAuditHandovers()
-    void loadSideEvents()
-  })
 }
 
 async function takeoverAuditFromDetail(): Promise<void> {

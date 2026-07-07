@@ -12,8 +12,7 @@
       <div
         v-if="
           hasTaskScopeAccess &&
-          isCurrentHandler &&
-          can(['task.audit.review', 'task.audit.claim', 'task.audit.takeover']) &&
+          can(['task.audit.review', 'task.audit.approve', 'task.audit.reject']) &&
           canAuditTask &&
           (showAuditA || showAuditB)
         "
@@ -37,7 +36,7 @@
           审核打回
         </BaseButton>
         <BaseButton
-          v-if="can(['task.audit.review', 'task.audit.claim', 'task.audit.takeover']) && showAuditA"
+          v-if="can(['task.audit.review', 'task.audit.approve', 'task.audit.reject']) && showAuditA"
           size="sm"
           variant="secondary"
           :disabled="auditActionBusy"
@@ -222,8 +221,7 @@
     <div
       v-if="
         hasTaskScopeAccess &&
-        isCurrentHandler &&
-        can(['task.audit.review', 'task.audit.claim', 'task.audit.takeover'])
+        can(['task.audit.review', 'task.audit.approve', 'task.audit.reject'])
       "
       class="audit-reference-box"
     >
@@ -331,12 +329,6 @@ const actionAvailability = computed(() => getTaskActionAvailability(task.value))
 const showAuditA = computed(() => actionAvailability.value.canShowAuditA)
 const showAuditB = computed(() => actionAvailability.value.canShowAuditB)
 const hasTaskScopeAccess = computed(() => canAccessTask(task.value))
-const isCurrentHandler = computed(() => {
-  const handlerId = String(task.value.currentHandlerId ?? '').trim()
-  if (!handlerId) return true
-  return String(currentUser.value?.id ?? '').trim() === handlerId
-})
-
 const showRejectInput = ref(false)
 const rejectReason = ref('')
 const blockError = ref('')

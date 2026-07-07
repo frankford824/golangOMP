@@ -444,7 +444,7 @@ export const tasksApi = {
   // ─── 审核流程 ──────────────────────────────────────────────────────────────
 
   /**
-   * 审核员领取审核任务
+   * 审核员领取审核任务（兼容入口；审核通过/驳回不再要求先领取）
    * POST /v1/tasks/{id}/audit/claim
    * 权限：审核员
    * 后端要求 stage 必填，与 openapi 一致：A=常规审核 / B=常规审核交接复核 / outsource_review=历史外协复核
@@ -455,7 +455,7 @@ export const tasksApi = {
   /**
    * 审核通过
    * POST /v1/tasks/{id}/audit/approve
-   * 权限：审核员（已领取该任务）
+   * 权限：审核员（不要求先领取）
    * 后端要求 stage、next_status 必填（openapi required）
    */
   auditApprove: (
@@ -467,7 +467,7 @@ export const tasksApi = {
   /**
    * 审核驳回
    * POST /v1/tasks/{id}/audit/reject
-   * 权限：审核员（已领取该任务）
+   * 权限：审核员（不要求先领取）
    * 后端要求 stage（问题分类）、comment（审核说明）必填
    */
   auditReject: (id: string, payload: { stage: string; comment: string }, signal?: AbortSignal) =>
