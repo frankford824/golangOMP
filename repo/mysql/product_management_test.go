@@ -80,6 +80,53 @@ func TestProductManagementRefreshReadModelPreservesProductSyncStatus(t *testing.
 	}
 }
 
+func TestProductManagementRefreshReadModelFallsBackSingleSKUItemIIDToTaskPayload(t *testing.T) {
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherFunc(func(expectedSQL, actualSQL string) error {
+		if expectedSQL != "product-management-refresh" {
+			return fmt.Errorf("unexpected SQL expectation %q", expectedSQL)
+		}
+		normalized := strings.Join(strings.Fields(actualSQL), " ")
+		if !strings.Contains(normalized, "FROM task_sku_items tsi JOIN tasks t ON t.id = tsi.task_id") {
+			return nil
+		}
+		required := []string{
+			"JSON_EXTRACT(tsi.variant_json, '$.product_i_id')",
+			"JSON_EXTRACT(tsi.variant_json, '$.i_id')",
+			"COALESCE(t.is_batch_task, 0) = 0 AND JSON_VALID(td.product_selection_snapshot_json)",
+			"JSON_EXTRACT(td.product_selection_snapshot_json, '$.erp_product.i_id')",
+			"COALESCE(t.is_batch_task, 0) = 0 AND JSON_VALID(td.last_filing_payload_json)",
+			"JSON_EXTRACT(td.last_filing_payload_json, '$.product.i_id')",
+			"JSON_EXTRACT(td.last_filing_payload_json, '$.i_id')",
+		}
+		for _, fragment := range required {
+			if !strings.Contains(normalized, fragment) {
+				return fmt.Errorf("sku item refresh SQL missing %q", fragment)
+			}
+		}
+		productIIDIndex := strings.Index(normalized, "JSON_EXTRACT(tsi.variant_json, '$.product_i_id')")
+		taskPayloadIndex := strings.Index(normalized, "JSON_EXTRACT(td.last_filing_payload_json, '$.i_id')")
+		if productIIDIndex < 0 || taskPayloadIndex < 0 || productIIDIndex > taskPayloadIndex {
+			return fmt.Errorf("sku item refresh must prefer row product_i_id before task-level filing payload")
+		}
+		return nil
+	})))
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectExec("product-management-refresh").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("product-management-refresh").WillReturnResult(sqlmock.NewResult(0, 1))
+
+	repo := NewProductManagementRepo(New(db))
+	if err := repo.RefreshReadModel(context.Background()); err != nil {
+		t.Fatalf("RefreshReadModel() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
 func TestProductManagementClaimQueuedSyncRecordsClaimsChildSyncStatuses(t *testing.T) {
 	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherFunc(func(expectedSQL, actualSQL string) error {
 		normalized := strings.Join(strings.Fields(actualSQL), " ")

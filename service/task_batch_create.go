@@ -575,6 +575,8 @@ func buildSingleTaskSKUItems(task *domain.Task, detail *domain.TaskDetail) []*ta
 	if task.TaskType != domain.TaskTypeNewProductDevelopment && task.TaskType != domain.TaskTypePurchaseTask {
 		return nil
 	}
+	productIID := strings.TrimSpace(firstNonEmptyString(detail.CategoryName, detail.Category))
+	variantJSON, _ := mergeBatchItemProductIIDIntoVariantJSON(nil, productIID)
 	item := &domain.TaskSKUItem{
 		SequenceNo:               1,
 		SKUCode:                  task.SKUCode,
@@ -582,6 +584,7 @@ func buildSingleTaskSKUItems(task *domain.Task, detail *domain.TaskDetail) []*ta
 		SKUStatus:                domain.TaskSKUStatusGenerated,
 		ProductNameSnapshot:      task.ProductNameSnapshot,
 		ProductShortName:         detail.ProductShortName,
+		ProductIID:               productIID,
 		CategoryCode:             detail.CategoryCode,
 		MaterialMode:             detail.MaterialMode,
 		CostPriceMode:            detail.CostPriceMode,
@@ -601,6 +604,7 @@ func buildSingleTaskSKUItems(task *domain.Task, detail *domain.TaskDetail) []*ta
 		Quantity:                 cloneInt64Ptr(detail.Quantity),
 		BaseSalePrice:            cloneFloat64Ptr(detail.BaseSalePrice),
 		DesignRequirement:        detail.DesignRequirement,
+		VariantJSON:              variantJSON,
 		ReferenceFileRefs:        domain.ParseReferenceFileRefsJSON(detail.ReferenceFileRefsJSON),
 		DedupeKey:                buildSingleTaskDedupeKey(task, detail),
 	}

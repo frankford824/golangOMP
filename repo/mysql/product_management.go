@@ -220,16 +220,22 @@ func (r *productManagementRepo) refreshSKUItemRecords(ctx context.Context) error
 		  COALESCE(t.task_type, ''),
 		  COALESCE(t.source_mode, ''),
 		  COALESCE(tsi.sku_code, ''),
-		  COALESCE(
-		    NULLIF(CASE WHEN JSON_VALID(tsi.variant_json) THEN JSON_UNQUOTE(JSON_EXTRACT(tsi.variant_json, '$.product_i_id')) ELSE '' END, ''),
-		    NULLIF(CASE WHEN JSON_VALID(tsi.variant_json) THEN JSON_UNQUOTE(JSON_EXTRACT(tsi.variant_json, '$.i_id')) ELSE '' END, ''),
-		    ''
-		  ),
-		  COALESCE(
-		    NULLIF(CASE WHEN JSON_VALID(tsi.variant_json) THEN JSON_UNQUOTE(JSON_EXTRACT(tsi.variant_json, '$.product_i_id')) ELSE '' END, ''),
-		    NULLIF(CASE WHEN JSON_VALID(tsi.variant_json) THEN JSON_UNQUOTE(JSON_EXTRACT(tsi.variant_json, '$.i_id')) ELSE '' END, ''),
-		    ''
-		  ),
+			  COALESCE(
+			    NULLIF(CASE WHEN JSON_VALID(tsi.variant_json) THEN JSON_UNQUOTE(JSON_EXTRACT(tsi.variant_json, '$.product_i_id')) ELSE '' END, ''),
+			    NULLIF(CASE WHEN JSON_VALID(tsi.variant_json) THEN JSON_UNQUOTE(JSON_EXTRACT(tsi.variant_json, '$.i_id')) ELSE '' END, ''),
+			    NULLIF(CASE WHEN COALESCE(t.is_batch_task, 0) = 0 AND JSON_VALID(td.product_selection_snapshot_json) THEN JSON_UNQUOTE(JSON_EXTRACT(td.product_selection_snapshot_json, '$.erp_product.i_id')) ELSE '' END, ''),
+			    NULLIF(CASE WHEN COALESCE(t.is_batch_task, 0) = 0 AND JSON_VALID(td.last_filing_payload_json) THEN JSON_UNQUOTE(JSON_EXTRACT(td.last_filing_payload_json, '$.product.i_id')) ELSE '' END, ''),
+			    NULLIF(CASE WHEN COALESCE(t.is_batch_task, 0) = 0 AND JSON_VALID(td.last_filing_payload_json) THEN JSON_UNQUOTE(JSON_EXTRACT(td.last_filing_payload_json, '$.i_id')) ELSE '' END, ''),
+			    ''
+			  ),
+			  COALESCE(
+			    NULLIF(CASE WHEN JSON_VALID(tsi.variant_json) THEN JSON_UNQUOTE(JSON_EXTRACT(tsi.variant_json, '$.product_i_id')) ELSE '' END, ''),
+			    NULLIF(CASE WHEN JSON_VALID(tsi.variant_json) THEN JSON_UNQUOTE(JSON_EXTRACT(tsi.variant_json, '$.i_id')) ELSE '' END, ''),
+			    NULLIF(CASE WHEN COALESCE(t.is_batch_task, 0) = 0 AND JSON_VALID(td.product_selection_snapshot_json) THEN JSON_UNQUOTE(JSON_EXTRACT(td.product_selection_snapshot_json, '$.erp_product.i_id')) ELSE '' END, ''),
+			    NULLIF(CASE WHEN COALESCE(t.is_batch_task, 0) = 0 AND JSON_VALID(td.last_filing_payload_json) THEN JSON_UNQUOTE(JSON_EXTRACT(td.last_filing_payload_json, '$.product.i_id')) ELSE '' END, ''),
+			    NULLIF(CASE WHEN COALESCE(t.is_batch_task, 0) = 0 AND JSON_VALID(td.last_filing_payload_json) THEN JSON_UNQUOTE(JSON_EXTRACT(td.last_filing_payload_json, '$.i_id')) ELSE '' END, ''),
+			    ''
+			  ),
 		  COALESCE(NULLIF(td.category_name, ''), NULLIF(td.category, ''), ''),
 		  COALESCE(NULLIF(CASE WHEN JSON_VALID(tsi.variant_json) THEN JSON_UNQUOTE(JSON_EXTRACT(tsi.variant_json, '$.product_family')) ELSE '' END, ''), NULLIF(td.category_name, ''), NULLIF(td.category, ''), ''),
 		  COALESCE(NULLIF(tsi.product_short_name, ''), NULLIF(tsi.product_name_snapshot, ''), NULLIF(t.product_name_snapshot, ''), ''),
