@@ -120,6 +120,15 @@
         >
           {{ batchReceiving ? '接收中...' : '批量接收' }}
         </BaseButton>
+        <BaseButton
+          v-if="canUseBatchAuditHandover"
+          size="sm"
+          variant="secondary"
+          :disabled="batchAuditHandoverSubmitting || batchAuditHandoverTasks.length === 0"
+          @click="openBatchAuditHandover"
+        >
+          {{ batchAuditHandoverSubmitting ? '交班中...' : '批量交班' }}
+        </BaseButton>
         <BaseButton size="sm" variant="ghost" @click="selectedIds.clear()">
           取消选中
         </BaseButton>
@@ -271,6 +280,83 @@
     />
 
     <BaseModal
+      v-model="showBatchAuditHandover"
+      title="批量审核交班"
+      :show-confirm="false"
+      panel-class="max-w-xl"
+    >
+      <section class="batch-audit-handover-dialog">
+        <p class="batch-audit-handover-hint">
+          将对符合条件的 {{ batchAuditHandoverTasks.length }} 条待审核任务发起交班，接手人确认后继续审核。
+        </p>
+        <p v-if="batchAuditHandoverSkippedCount > 0" class="batch-audit-handover-warning">
+          已选任务中有 {{ batchAuditHandoverSkippedCount }} 条不是本人当前处理的常规待审核任务，本次不会提交。
+        </p>
+        <p v-if="batchAuditHandoverTaskNoPreview" class="batch-audit-handover-preview">
+          {{ batchAuditHandoverTaskNoPreview }}
+        </p>
+        <BaseSelect
+          v-model="batchAuditHandoverToId"
+          label="接手审核人"
+          placeholder="请选择常规审核人员"
+          :options="batchAuditAssigneeOptions"
+          :disabled="batchAuditAssigneesLoading || batchAuditHandoverSubmitting"
+          filterable
+          filter-placeholder="输入姓名或账号筛选"
+        />
+        <p v-if="batchAuditAssigneesLoading" class="batch-audit-handover-hint">正在加载审核人员...</p>
+        <p v-else-if="!batchAuditAssigneeOptions.length" class="batch-audit-handover-error">
+          暂无可选常规审核人员，请先在用户管理中配置常规审核角色。
+        </p>
+        <BaseTextarea
+          v-model="batchAuditHandoverReason"
+          label="原因"
+          :rows="3"
+          placeholder="例如：当前审核人休息，需交由其他常规审核继续处理"
+          :disabled="batchAuditHandoverSubmitting"
+        />
+        <BaseTextarea
+          v-model="batchAuditHandoverJudgement"
+          label="当前判断"
+          :rows="2"
+          placeholder="可填写已发现的问题或当前审核判断"
+          :disabled="batchAuditHandoverSubmitting"
+        />
+        <BaseTextarea
+          v-model="batchAuditHandoverRisk"
+          label="风险备注"
+          :rows="2"
+          placeholder="可填写接手人需要注意的风险"
+          :disabled="batchAuditHandoverSubmitting"
+        />
+        <p v-if="batchAuditHandoverError" class="batch-audit-handover-error">
+          {{ batchAuditHandoverError }}
+        </p>
+      </section>
+      <template #footer>
+        <footer class="batch-audit-handover-footer">
+          <BaseButton
+            size="sm"
+            variant="secondary"
+            :disabled="batchAuditHandoverSubmitting"
+            @click="closeBatchAuditHandover"
+          >
+            取消
+          </BaseButton>
+          <BaseButton
+            size="sm"
+            variant="primary"
+            :loading="batchAuditHandoverSubmitting"
+            :disabled="batchAuditAssigneesLoading || batchAuditHandoverTasks.length === 0"
+            @click="submitBatchAuditHandover"
+          >
+            确认交班
+          </BaseButton>
+        </footer>
+      </template>
+    </BaseModal>
+
+    <BaseModal
       v-model="batchItemsModalOpen"
       title="批量任务明细"
       :show-confirm="false"
@@ -317,6 +403,7 @@ import BaseButton from '@/components/base/BaseButton.vue'
 import BaseInput from '@/components/base/BaseInput.vue'
 import BaseModal from '@/components/base/BaseModal.vue'
 import BaseSelect, { type BaseSelectOption } from '@/components/base/BaseSelect.vue'
+import BaseTextarea from '@/components/base/BaseTextarea.vue'
 import TaskCreateModal from '@/components/task/TaskCreateModal.vue'
 import DesignerSelectDialog from '@/components/task/DesignerSelectDialog.vue'
 import { tasksApi } from '@/services/api/tasksApi'
@@ -435,8 +522,15 @@ const page = ref((saved.page as number) ?? 1)
 const pageSize = ref((saved.pageSize as number) ?? 20)
 const showCreateModal = ref(false)
 const showBatchAssign = ref(false)
+const showBatchAuditHandover = ref(false)
 const batchReminding = ref(false)
 const batchReceiving = ref(false)
+const batchAuditHandoverSubmitting = ref(false)
+const batchAuditHandoverToId = ref<string | number>('')
+const batchAuditHandoverReason = ref('')
+const batchAuditHandoverJudgement = ref('')
+const batchAuditHandoverRisk = ref('')
+const batchAuditHandoverError = ref('')
 const refreshingList = ref(false)
 const advancedFilterOpen = ref(false)
 const claimingTaskId = ref<string | null>(null)
@@ -458,6 +552,16 @@ const {
   autoLoad: false,
   requiredActions: ['task.assign', 'task.assign.team', 'task.assign.department'],
 })
+const {
+  assigneeOptions: batchAuditAssigneeOptions,
+  loading: batchAuditAssigneesLoading,
+  loadDesigners: loadBatchAuditAssignees,
+} = useDesignerOptions({
+  includeEmpty: false,
+  autoLoad: false,
+  workflowLane: 'audit',
+  requiredActions: ['task.audit.review', 'task.audit.takeover'],
+})
 const listActionError = ref('')
 const listActionSuccess = ref('')
 let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null
@@ -475,6 +579,15 @@ const canBatchAssign = computed(
     canAccessAction('task.assign.department') ||
     canAccessAction('task.assign.team'),
 )
+const AUDIT_REVIEW_PERMISSION_KEYS = [
+  'task.audit',
+  'task.audit.review',
+  'task.audit.approve',
+  'task.audit.reject',
+] as const
+const canUseBatchAuditHandover = computed(
+  () => can([...AUDIT_REVIEW_PERMISSION_KEYS]) && can('task.audit.takeover'),
+)
 
 /** 方案 B：搜索防抖，300ms 后触发服务端检索 */
 function debouncedSearch() {
@@ -488,6 +601,33 @@ function debouncedSearch() {
 }
 
 const selectedIds = reactive(new Set<string>())
+const selectedTasks = computed(() => tasksStore.list.filter((task) => selectedIds.has(task.id)))
+const currentUserIdForBatchAuditHandover = computed(() =>
+  String(permissionsStore.currentUser?.id ?? '').trim(),
+)
+const REGULAR_AUDIT_HANDOVER_STATUSES = new Set<LegacyTaskStatus>([
+  'PendingAuditA',
+  'PendingAuditB',
+])
+const batchAuditHandoverTasks = computed(() =>
+  selectedTasks.value.filter((task) => {
+    if (!REGULAR_AUDIT_HANDOVER_STATUSES.has(task.status)) return false
+    if (isCustomizationTask(task)) return false
+    const currentUserId = currentUserIdForBatchAuditHandover.value
+    if (!currentUserId) return false
+    return String(task.currentHandlerId ?? '').trim() === currentUserId
+  }),
+)
+const batchAuditHandoverSkippedCount = computed(() =>
+  Math.max(0, selectedIds.size - batchAuditHandoverTasks.value.length),
+)
+const batchAuditHandoverTaskNoPreview = computed(() => {
+  const taskNos = batchAuditHandoverTasks.value.map((task) => task.taskNo).filter(Boolean)
+  if (!taskNos.length) return ''
+  const preview = taskNos.slice(0, 5).join('、')
+  const rest = taskNos.length > 5 ? ` 等 ${taskNos.length} 条` : ''
+  return `本次交班：${preview}${rest}`
+})
 
 /** 后端 batch 接口要求 task_ids 为 JSON 数字数组 ([]int64)，不能为字符串 */
 function selectedIdsAsNumericOrError(): number[] | null {
@@ -841,6 +981,102 @@ async function batchReceive() {
       : firstMessage
   }
   batchReceiving.value = false
+}
+
+function resetBatchAuditHandoverForm() {
+  batchAuditHandoverToId.value = ''
+  batchAuditHandoverReason.value = ''
+  batchAuditHandoverJudgement.value = ''
+  batchAuditHandoverRisk.value = ''
+  batchAuditHandoverError.value = ''
+}
+
+function openBatchAuditHandover() {
+  listActionError.value = ''
+  if (batchAuditHandoverTasks.value.length === 0) {
+    listActionError.value = '请选择本人当前处理的常规待审核任务后再批量交班'
+    return
+  }
+  resetBatchAuditHandoverForm()
+  showBatchAuditHandover.value = true
+  if (batchAuditAssigneeOptions.value.length === 0) {
+    void loadBatchAuditAssignees()
+  }
+}
+
+function closeBatchAuditHandover() {
+  if (batchAuditHandoverSubmitting.value) return
+  showBatchAuditHandover.value = false
+  batchAuditHandoverError.value = ''
+}
+
+async function submitBatchAuditHandover() {
+  if (batchAuditHandoverSubmitting.value) return
+  const toAuditorID = Number.parseInt(String(batchAuditHandoverToId.value), 10)
+  if (!Number.isSafeInteger(toAuditorID) || toAuditorID <= 0) {
+    batchAuditHandoverError.value = '请选择接手审核人'
+    return
+  }
+  const currentUserId = currentUserIdForBatchAuditHandover.value
+  if (currentUserId && String(toAuditorID) === currentUserId) {
+    batchAuditHandoverError.value = '接手人不能与当前审核人相同'
+    return
+  }
+  const reason = batchAuditHandoverReason.value.trim()
+  if (!reason) {
+    batchAuditHandoverError.value = '请填写原因'
+    return
+  }
+  const targets = [...batchAuditHandoverTasks.value]
+  if (targets.length === 0) {
+    batchAuditHandoverError.value = '没有可交班的任务，请刷新列表后重试'
+    return
+  }
+
+  batchAuditHandoverSubmitting.value = true
+  batchAuditHandoverError.value = ''
+  listActionError.value = ''
+  const payload = {
+    to_auditor_id: toAuditorID,
+    reason,
+    current_judgement: batchAuditHandoverJudgement.value.trim(),
+    risk_remark: batchAuditHandoverRisk.value.trim(),
+  }
+  try {
+    const results = await Promise.allSettled(
+      targets.map((task) => tasksApi.auditHandover(task.id, payload)),
+    )
+    const failures: PromiseRejectedResult[] = []
+    results.forEach((result, index) => {
+      if (result.status === 'fulfilled') {
+        selectedIds.delete(targets[index].id)
+      } else {
+        failures.push(result)
+      }
+    })
+    const successCount = results.length - failures.length
+    if (successCount > 0) {
+      await refreshList(true)
+      showBatchAuditHandover.value = false
+      flashListActionSuccess(`已发起 ${successCount} 条审核交班`)
+    }
+    if (failures.length > 0) {
+      const firstMessage = formatTaskActionDenyMessage(
+        failures[0].reason,
+        '批量审核交班失败，请检查任务状态与当前处理人',
+      )
+      const message = successCount > 0
+        ? `已发起 ${successCount} 条，另有 ${failures.length} 条失败：${firstMessage}`
+        : firstMessage
+      if (successCount > 0) {
+        listActionError.value = message
+      } else {
+        batchAuditHandoverError.value = message
+      }
+    }
+  } finally {
+    batchAuditHandoverSubmitting.value = false
+  }
 }
 
 // ── 工具函数 ────────────────────────────────────────────────────────────────
@@ -1478,6 +1714,40 @@ watch(totalPages, (value) => {
   color: var(--tc-green-deep);
   font-size: 0.8125rem;
   font-weight: 700;
+}
+.batch-audit-handover-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.batch-audit-handover-hint,
+.batch-audit-handover-preview,
+.batch-audit-handover-warning,
+.batch-audit-handover-error {
+  margin: 0;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+.batch-audit-handover-hint,
+.batch-audit-handover-preview {
+  color: rgb(var(--yb-text-muted));
+}
+.batch-audit-handover-warning {
+  padding: 0.5rem 0.625rem;
+  border-radius: 0.625rem;
+  border: 1px solid var(--tc-amber-border);
+  background: var(--tc-amber-soft);
+  color: var(--tc-amber);
+}
+.batch-audit-handover-error {
+  color: rgb(var(--yb-danger));
+}
+.batch-audit-handover-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 1rem 1.25rem;
+  border-top: 1px solid rgb(var(--yb-border-quiet));
 }
 .batch-bar-slide-enter-active,
 .batch-bar-slide-leave-active {
