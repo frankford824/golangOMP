@@ -317,6 +317,154 @@ func TestCostRulePreviewExtractsSizeFromNotes(t *testing.T) {
 	}
 }
 
+func TestCostRulePreviewPrefersTextDimensionsOverStaleNumericPayload(t *testing.T) {
+	rules := []*domain.CostRule{
+		{
+			RuleID:       31,
+			RuleVersion:  1,
+			RuleName:     "常规覆膜KT板小面积保底",
+			CategoryCode: "KT_STANDARD_FILM",
+			RuleType:     domain.CostRuleTypeMinimumBillableArea,
+			MinArea:      costRuleFloat64Ptr(0.15),
+			Priority:     5,
+			IsActive:     true,
+			Source:       "test",
+		},
+		{
+			RuleID:        32,
+			RuleVersion:   1,
+			RuleName:      "常规覆膜KT板基础单价",
+			CategoryCode:  "KT_STANDARD_FILM",
+			RuleType:      domain.CostRuleTypeFixedUnitPrice,
+			BasePrice:     costRuleFloat64Ptr(13),
+			TaxMultiplier: costRuleFloat64Ptr(1.1),
+			Priority:      10,
+			IsActive:      true,
+			Source:        "test",
+		},
+	}
+
+	result := previewCostRules(domain.CostRulePreviewRequest{
+		CategoryCode: "KT_STANDARD_FILM",
+		Width:        costRuleFloat64Ptr(0.56),
+		Height:       costRuleFloat64Ptr(1.2),
+		Area:         costRuleFloat64Ptr(1.224),
+		Process:      "历史商品名 汪敏/常规KT板/覆膜/帕恰狗黄色圆点/56*120cm",
+		Notes:        "汪敏/常规KT板/覆膜/帕恰狗黄色圆点/46*120cm",
+	}, rules).Response
+
+	if result.EstimatedCost == nil || math.Abs(*result.EstimatedCost-7.894) > 0.000001 {
+		t.Fatalf("estimated_cost = %+v, want 7.894", result.EstimatedCost)
+	}
+}
+
+func TestTaskCostPreviewDimensionsPrefersTextOverStaleDetailArea(t *testing.T) {
+	width := 0.56
+	height := 1.2
+	area := 1.224
+	detail := &domain.TaskDetail{
+		SpecText: "46*120cm",
+		Width:    &width,
+		Height:   &height,
+		Area:     &area,
+	}
+
+	applyTextDerivedCostDimensions(detail, true, false)
+
+	if detail.Width == nil || math.Abs(*detail.Width-0.46) > 0.000001 {
+		t.Fatalf("width = %+v, want 0.46", detail.Width)
+	}
+	if detail.Height == nil || math.Abs(*detail.Height-1.2) > 0.000001 {
+		t.Fatalf("height = %+v, want 1.2", detail.Height)
+	}
+	if detail.Area == nil || math.Abs(*detail.Area-0.552) > 0.000001 {
+		t.Fatalf("area = %+v, want 0.552", detail.Area)
+	}
+}
+
+func TestCostRulePreviewRegularFilmKTSlotSurcharge(t *testing.T) {
+	categoryRepo := newCategoryRepoStub()
+	costRuleRepo := newCostRuleRepoStub()
+	categoryRepo.mustCreate(&domain.Category{
+		CategoryID:   31,
+		CategoryCode: "KT_STANDARD_FILM",
+		CategoryName: "常规kt板(覆膜)",
+		DisplayName:  "常规kt板(覆膜)",
+		CategoryType: domain.CategoryTypeBoard,
+		IsActive:     true,
+		Level:        1,
+	})
+	costRuleRepo.rules = []*domain.CostRule{
+		{
+			RuleID:       31,
+			RuleVersion:  1,
+			RuleName:     "常规覆膜KT板小面积保底",
+			CategoryCode: "KT_STANDARD_FILM",
+			RuleType:     domain.CostRuleTypeMinimumBillableArea,
+			MinArea:      costRuleFloat64Ptr(0.15),
+			Priority:     5,
+			IsActive:     true,
+			Source:       "test",
+		},
+		{
+			RuleID:        32,
+			RuleVersion:   1,
+			RuleName:      "常规覆膜KT板基础单价",
+			CategoryCode:  "KT_STANDARD_FILM",
+			RuleType:      domain.CostRuleTypeFixedUnitPrice,
+			BasePrice:     costRuleFloat64Ptr(13),
+			TaxMultiplier: costRuleFloat64Ptr(1.1),
+			Priority:      10,
+			IsActive:      true,
+			Source:        "test",
+		},
+	}
+	svc := NewCostRuleService(costRuleRepo, categoryRepo, noopTxRunner{}).(*costRuleService)
+
+	result, appErr := svc.Preview(context.Background(), domain.CostRulePreviewRequest{
+		CategoryCode: "KT_STANDARD_FILM",
+		Notes:        "常规kt板(覆膜) 需要开槽 46*120cm",
+	})
+	if appErr != nil {
+		t.Fatalf("Preview() unexpected error: %+v", appErr)
+	}
+	if result.EstimatedCost == nil || math.Abs(*result.EstimatedCost-8.894) > 0.000001 {
+		t.Fatalf("estimated_cost = %+v, want 8.894", result.EstimatedCost)
+	}
+	if len(result.AppliedRules) != 2 {
+		t.Fatalf("applied_rules len = %d, want 2", len(result.AppliedRules))
+	}
+	if got := result.AppliedRules[1].RuleName; got != "常规覆膜KT板开槽加价" {
+		t.Fatalf("slot surcharge rule = %q", got)
+	}
+
+	costRuleRepo.rules = append(costRuleRepo.rules, &domain.CostRule{
+		RuleID:                33,
+		RuleVersion:           1,
+		RuleName:              "数据库常规覆膜KT板开槽加价",
+		CategoryCode:          "KT_STANDARD_FILM",
+		RuleType:              domain.CostRuleTypeSpecialProcessPrice,
+		SpecialProcessKeyword: "开槽",
+		SpecialProcessPrice:   costRuleFloat64Ptr(1),
+		Priority:              30,
+		IsActive:              true,
+		Source:                "test",
+	})
+	result, appErr = svc.Preview(context.Background(), domain.CostRulePreviewRequest{
+		CategoryCode: "KT_STANDARD_FILM",
+		Notes:        "常规kt板(覆膜) 需要开槽 46*120cm",
+	})
+	if appErr != nil {
+		t.Fatalf("Preview(with persisted slot rule) unexpected error: %+v", appErr)
+	}
+	if result.EstimatedCost == nil || math.Abs(*result.EstimatedCost-8.894) > 0.000001 {
+		t.Fatalf("estimated_cost with persisted rule = %+v, want 8.894", result.EstimatedCost)
+	}
+	if len(result.AppliedRules) != 2 {
+		t.Fatalf("applied_rules with persisted rule len = %d, want 2", len(result.AppliedRules))
+	}
+}
+
 func TestCostRulePreviewRegularKTUsesTaxedStandardUnitPrice(t *testing.T) {
 	categoryRepo := newCategoryRepoStub()
 	costRuleRepo := newCostRuleRepoStub()
@@ -505,6 +653,18 @@ func TestCostCategoryAliasesFromTextPrefersOneSpecificNameMatch(t *testing.T) {
 			categoryCode: "GENERAL",
 			notes:        "定制覆膜kt板 30*40cm",
 			want:         []string{"KT_CUSTOM_FILM"},
+		},
+		{
+			name:         "custom film kt split by slash still keeps film",
+			categoryCode: "GENERAL",
+			notes:        "汪敏/定制KT板/覆膜/帕恰狗黄色圆点/46*120cm",
+			want:         []string{"KT_CUSTOM_FILM"},
+		},
+		{
+			name:         "regular film kt split by slash still keeps film",
+			categoryCode: "GENERAL",
+			notes:        "汪敏/常规KT板/覆膜/帕恰狗黄色圆点/46*120cm",
+			want:         []string{"KT_STANDARD_FILM"},
 		},
 		{
 			name:         "regular kt keeps material when variant name has red",

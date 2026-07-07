@@ -286,6 +286,7 @@ func (s *costRuleService) Preview(ctx context.Context, req domain.CostRulePrevie
 	if err != nil {
 		return nil, infraError("list preview cost rules", err)
 	}
+	rules = appendVirtualCostRules(rules, categoryCode, req.Notes)
 	return previewCostRules(req, rules).Response, nil
 }
 

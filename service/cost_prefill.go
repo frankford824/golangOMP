@@ -108,7 +108,7 @@ func previewCostRules(req domain.CostRulePreviewRequest, rules []*domain.CostRul
 				explanations = append(explanations, fmt.Sprintf("%s increased unit price by %.3f and applied %.3f because threshold area %.4f < %.4f", rule.RuleName, *rule.SurchargeAmount, extra, areaThresholdBasis, *rule.AreaThreshold))
 			}
 		case domain.CostRuleTypeSpecialProcessPrice:
-			if rule.SpecialProcessPrice != nil && containsProcessKeyword(req.Process, req.Notes, rule.SpecialProcessKeyword) {
+			if rule.SpecialProcessPrice != nil && containsProcessKeyword(req.Process, strings.Join(nonEmptyStrings(req.CategoryCode, req.Notes), " "), rule.SpecialProcessKeyword) {
 				extra := (*rule.SpecialProcessPrice) * float64(quantity)
 				estimated += extra
 				applied = append(applied, match)
@@ -170,17 +170,14 @@ func taxMultiplierOrOne(value *float64) float64 {
 }
 
 func withTextDerivedCostRuleDimensions(req domain.CostRulePreviewRequest) domain.CostRulePreviewRequest {
-	if req.Area != nil || (req.Width != nil && req.Height != nil) {
-		return req
-	}
-	extracted := extractCostDimensionsFromText(strings.Join(nonEmptyStrings(req.Process, req.Notes), " "))
-	if req.Width == nil {
+	extracted := extractCostDimensionsFromText(req.Notes)
+	if extracted.WidthM != nil {
 		req.Width = cloneFloat64Ptr(extracted.WidthM)
 	}
-	if req.Height == nil {
+	if extracted.HeightM != nil {
 		req.Height = cloneFloat64Ptr(extracted.HeightM)
 	}
-	if req.Area == nil {
+	if extracted.AreaM2 != nil {
 		req.Area = cloneFloat64Ptr(extracted.AreaM2)
 	}
 	return req

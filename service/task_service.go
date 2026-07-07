@@ -2375,9 +2375,9 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 				"reference_file_refs":         p.ReferenceFileRefs,
 				"reference_link":              detail.ReferenceLink,
 				"craft_text":                  p.CraftText,
-				"width":                       p.Width,
-				"height":                      p.Height,
-				"area":                        p.Area,
+				"width":                       detail.Width,
+				"height":                      detail.Height,
+				"area":                        detail.Area,
 				"quantity":                    p.Quantity,
 				"process":                     detail.Process,
 				"cost_price":                  detail.CostPrice,
@@ -2576,15 +2576,16 @@ func (s *taskService) previewTaskCost(ctx context.Context, task *domain.Task, de
 	if categoryID == nil && strings.TrimSpace(ruleCategoryCode) == "" {
 		return costPreviewComputation{}, nil
 	}
-	notes := taskCostPreviewTextWithTask(task, detail)
-	rules, err := s.listActiveCostRulesForText(ctx, categoryID, ruleCategoryCode, notes)
+	ruleMatchText := taskCostPreviewTextWithTask(task, detail)
+	rules, err := s.listActiveCostRulesForText(ctx, categoryID, ruleCategoryCode, ruleMatchText)
 	if err != nil {
 		return costPreviewComputation{}, infraError("list active cost rules for task business info", err)
 	}
 	if len(rules) == 0 {
 		return costPreviewComputation{}, nil
 	}
-	width, height, area := taskCostPreviewDimensions(detail, notes)
+	dimensionText := taskCostDimensionText(taskCostPreviewText(detail), ruleMatchText)
+	width, height, area := taskCostPreviewDimensions(detail, dimensionText)
 	return previewCostRules(domain.CostRulePreviewRequest{
 		CategoryID:   categoryID,
 		CategoryCode: ruleCategoryCode,
@@ -2592,8 +2593,8 @@ func (s *taskService) previewTaskCost(ctx context.Context, task *domain.Task, de
 		Height:       height,
 		Area:         area,
 		Quantity:     detail.Quantity,
-		Process:      detail.Process,
-		Notes:        notes,
+		Process:      strings.Join(nonEmptyStrings(detail.Process, ruleMatchText), " "),
+		Notes:        dimensionText,
 	}, rules), nil
 }
 
@@ -3156,7 +3157,7 @@ func (s *taskService) previewTaskSKUItemCost(ctx context.Context, detail *domain
 	if categoryID == nil && categoryCode == "" {
 		return costPreviewComputation{}, nil
 	}
-	notes := strings.Join(uniqueNonEmptyStrings(
+	ruleMatchText := strings.Join(uniqueNonEmptyStrings(
 		taskCostPreviewText(detail),
 		taskSKUItemVariantCostNotes(item),
 		item.ProductNameSnapshot,
@@ -3165,14 +3166,20 @@ func (s *taskService) previewTaskSKUItemCost(ctx context.Context, detail *domain
 		item.CategoryCode,
 		taskSKUItemProductIID(item),
 	), " ")
-	rules, err := s.listActiveCostRulesForText(ctx, categoryID, categoryCode, notes)
+	rules, err := s.listActiveCostRulesForText(ctx, categoryID, categoryCode, ruleMatchText)
 	if err != nil {
 		return costPreviewComputation{}, infraError("list active cost rules for task sku item", err)
 	}
 	if len(rules) == 0 {
 		return costPreviewComputation{}, nil
 	}
-	width, height, area := taskSKUItemCostPreviewDimensions(detail, item, notes)
+	primaryDimensionText := strings.Join(uniqueNonEmptyStrings(
+		taskSKUItemVariantCostNotes(item),
+		taskCostPreviewText(detail),
+		item.DesignRequirement,
+	), " ")
+	dimensionText := taskCostDimensionText(primaryDimensionText, ruleMatchText)
+	width, height, area := taskSKUItemCostPreviewDimensions(detail, item, dimensionText)
 	quantity := cloneInt64Ptr(item.Quantity)
 	if quantity == nil {
 		quantity = taskSKUItemVariantQuantity(item)
@@ -3187,13 +3194,20 @@ func (s *taskService) previewTaskSKUItemCost(ctx context.Context, detail *domain
 		Height:       height,
 		Area:         area,
 		Quantity:     quantity,
-		Process:      firstNonEmptyString(taskSKUItemVariantString(item, "process", "craft_text"), detail.Process),
-		Notes:        notes,
+		Process:      strings.Join(nonEmptyStrings(firstNonEmptyString(taskSKUItemVariantString(item, "process", "craft_text"), detail.Process), ruleMatchText), " "),
+		Notes:        dimensionText,
 	}, rules), nil
 }
 
 func taskSKUItemCostPreviewDimensions(detail *domain.TaskDetail, item *domain.TaskSKUItem, text string) (*float64, *float64, *float64) {
 	width, height, area := taskSKUItemVariantDimensions(item)
+	itemDimensions := withTextDerivedCostRuleDimensions(domain.CostRulePreviewRequest{
+		Width:  width,
+		Height: height,
+		Area:   area,
+		Notes:  text,
+	})
+	width, height, area = itemDimensions.Width, itemDimensions.Height, itemDimensions.Area
 	hasSKUItemDimension := width != nil || height != nil || area != nil
 	detailWidth, detailHeight, detailArea := taskCostPreviewDimensions(detail, text)
 	if width == nil {
@@ -3482,7 +3496,7 @@ func (s *taskService) listActiveCostRulesForText(ctx context.Context, categoryID
 		}
 	}
 	if len(rules) > 0 {
-		return append(rules, virtualCostRulesFromText(categoryCode, notes)...), nil
+		return appendVirtualCostRules(rules, categoryCode, notes), nil
 	}
 	var err error
 	rules, err = s.costRuleRepo.ListActiveByCategory(ctx, categoryID, categoryCode, asOf)
@@ -3490,13 +3504,9 @@ func (s *taskService) listActiveCostRulesForText(ctx context.Context, categoryID
 		return nil, err
 	}
 	if len(rules) == 0 {
-		if virtual := virtualCostRulesFromText(categoryCode, notes); len(virtual) > 0 {
-			rules = append(rules, virtual...)
-		}
-		return rules, nil
+		return appendVirtualCostRules(rules, categoryCode, notes), nil
 	}
-	rules = append(rules, virtualCostRulesFromText(categoryCode, notes)...)
-	return rules, nil
+	return appendVirtualCostRules(rules, categoryCode, notes), nil
 }
 
 func costCategoryAliasesFromText(categoryCode, notes string) []string {
@@ -3574,6 +3584,13 @@ func costCategoryAliasesFromText(categoryCode, notes string) []string {
 }
 
 func costKTCategoryAliasFromText(categoryCode, notes string) string {
+	combined := compactCostAliasText(categoryCode + " " + notes)
+	if strings.Contains(combined, "kt") && strings.Contains(combined, "覆膜") {
+		if strings.Contains(combined, "定制") {
+			return "KT_CUSTOM_FILM"
+		}
+		return "KT_STANDARD_FILM"
+	}
 	for _, fragment := range costCategoryAliasFragments(categoryCode, notes) {
 		text := strings.ToLower(strings.TrimSpace(fragment))
 		if !strings.Contains(text, "kt") {
@@ -3661,8 +3678,63 @@ func isCostAliasASCIIAlphaNum(value byte) bool {
 	return (value >= 'a' && value <= 'z') || (value >= '0' && value <= '9')
 }
 
+func appendVirtualCostRules(rules []*domain.CostRule, categoryCode, notes string) []*domain.CostRule {
+	for _, virtual := range virtualCostRulesFromText(categoryCode, notes) {
+		if virtual == nil || hasEquivalentCostRule(rules, virtual) {
+			continue
+		}
+		rules = append(rules, virtual)
+	}
+	return rules
+}
+
+func hasEquivalentCostRule(rules []*domain.CostRule, target *domain.CostRule) bool {
+	if target == nil {
+		return false
+	}
+	for _, rule := range rules {
+		if rule == nil {
+			continue
+		}
+		if !strings.EqualFold(rule.CategoryCode, target.CategoryCode) ||
+			rule.RuleType != target.RuleType ||
+			!strings.EqualFold(strings.TrimSpace(rule.SpecialProcessKeyword), strings.TrimSpace(target.SpecialProcessKeyword)) {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
 func virtualCostRulesFromText(categoryCode, notes string) []*domain.CostRule {
-	return nil
+	hasStandardFilm := strings.EqualFold(strings.TrimSpace(categoryCode), "KT_STANDARD_FILM")
+	if !hasStandardFilm {
+		for _, alias := range costCategoryAliasesFromText(categoryCode, notes) {
+			if alias == "KT_STANDARD_FILM" {
+				hasStandardFilm = true
+				break
+			}
+		}
+	}
+	if !hasStandardFilm {
+		return nil
+	}
+	slotPrice := 1.0
+	return []*domain.CostRule{
+		{
+			RuleName:              "常规覆膜KT板开槽加价",
+			RuleVersion:           1,
+			CategoryCode:          "KT_STANDARD_FILM",
+			ProductFamily:         "board",
+			RuleType:              domain.CostRuleTypeSpecialProcessPrice,
+			SpecialProcessKeyword: "开槽",
+			SpecialProcessPrice:   &slotPrice,
+			Priority:              30,
+			IsActive:              true,
+			Source:                "builtin_cost_rule",
+			Remark:                "常规KT板(覆膜)开槽工艺加价",
+		},
+	}
 }
 
 func (s *taskService) resolveTaskCostRuleCategory(ctx context.Context, detail *domain.TaskDetail) (*int64, string, *domain.AppError) {
@@ -3693,7 +3765,7 @@ func applyTextDerivedCostDimensions(detail *domain.TaskDetail, refreshFromText b
 	if detail == nil {
 		return
 	}
-	if refreshAreaFromWidthHeight && detail.Width != nil && detail.Height != nil && *detail.Width > 0 && *detail.Height > 0 {
+	if refreshAreaFromWidthHeight && !refreshFromText && detail.Width != nil && detail.Height != nil && *detail.Width > 0 && *detail.Height > 0 {
 		area := (*detail.Width) * (*detail.Height)
 		detail.Area = &area
 		return
@@ -3713,13 +3785,13 @@ func applyTextDerivedCostDimensions(detail *domain.TaskDetail, refreshFromText b
 		return
 	}
 	width, height, area := taskCostPreviewDimensions(detail, notes)
-	if detail.Width == nil && width != nil {
+	if width != nil {
 		detail.Width = cloneFloat64Ptr(width)
 	}
-	if detail.Height == nil && height != nil {
+	if height != nil {
 		detail.Height = cloneFloat64Ptr(height)
 	}
-	if detail.Area == nil && area != nil {
+	if area != nil {
 		detail.Area = cloneFloat64Ptr(area)
 	}
 }
@@ -3753,26 +3825,34 @@ func taskCostPreviewTextWithTask(task *domain.Task, detail *domain.TaskDetail) s
 	), " ")
 }
 
+func taskCostDimensionText(primary, fallback string) string {
+	primary = strings.TrimSpace(primary)
+	if hasCostDimensions(primary) {
+		return primary
+	}
+	fallback = strings.TrimSpace(fallback)
+	if fallback == "" {
+		return primary
+	}
+	return strings.Join(uniqueNonEmptyStrings(primary, fallback), " ")
+}
+
+func hasCostDimensions(text string) bool {
+	extracted := extractCostDimensionsFromText(text)
+	return extracted.WidthM != nil || extracted.HeightM != nil || extracted.AreaM2 != nil
+}
+
 func taskCostPreviewDimensions(detail *domain.TaskDetail, text string) (*float64, *float64, *float64) {
 	if detail == nil {
 		return nil, nil, nil
 	}
-	width := cloneFloat64Ptr(detail.Width)
-	height := cloneFloat64Ptr(detail.Height)
-	area := cloneFloat64Ptr(detail.Area)
-	if area == nil && (width == nil || height == nil) {
-		extracted := extractCostDimensionsFromText(text)
-		if width == nil {
-			width = cloneFloat64Ptr(extracted.WidthM)
-		}
-		if height == nil {
-			height = cloneFloat64Ptr(extracted.HeightM)
-		}
-		if area == nil {
-			area = cloneFloat64Ptr(extracted.AreaM2)
-		}
-	}
-	return width, height, area
+	req := withTextDerivedCostRuleDimensions(domain.CostRulePreviewRequest{
+		Width:  cloneFloat64Ptr(detail.Width),
+		Height: cloneFloat64Ptr(detail.Height),
+		Area:   cloneFloat64Ptr(detail.Area),
+		Notes:  text,
+	})
+	return req.Width, req.Height, req.Area
 }
 
 func cloneFloat64Ptr(value *float64) *float64 {
