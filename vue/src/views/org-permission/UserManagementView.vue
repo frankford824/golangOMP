@@ -128,160 +128,185 @@
         </div>
       </section>
 
+      <Teleport to="body">
       <!-- 用户详情 / 角色管理 弹层 -->
       <div v-if="detailUser" class="modal-mask" @click.self="detailUser = null">
-        <div class="modal-panel um-modal">
-          <h3 class="section-title">角色管理：{{ detailUser.display_name || detailUser.username }}</h3>
-          <div v-if="detailLoading" class="py-4"><BaseSkeleton width="100%" height="4rem" /></div>
-          <div v-else class="space-y-3">
-            <p class="text-xs text-[rgb(var(--yb-text-muted))]">当前角色：{{ formatWorkflowRolesForDisplay(detailUser.roles) }}</p>
-            <p class="text-xs text-[rgb(var(--yb-text-muted))]">状态：{{ formatUserStatusForDisplay(detailUser.status) }}</p>
-            <div v-if="lockedDetailRoleOptions.length" class="legacy-role-box">
-              <span class="legacy-role-title">{{ lockedDetailRoleTitle }}</span>
-              <span
-                v-for="role in lockedDetailRoleOptions"
-                :key="'locked-' + role.code"
-                class="legacy-role-tag"
-                :title="lockedRoleTooltip(role)"
-              >
-                {{ role.display }}
-              </span>
+        <div class="modal-panel um-modal um-modal--wide">
+          <header class="modal-header">
+            <div class="modal-heading">
+              <h3 class="section-title">角色管理：{{ detailUser.display_name || detailUser.username }}</h3>
+              <p class="modal-subtitle">当前角色：{{ formatWorkflowRolesForDisplay(detailUser.roles) }}</p>
+              <p class="modal-subtitle">状态：{{ formatUserStatusForDisplay(detailUser.status) }}</p>
             </div>
-            <div v-if="editableRoleGroups.length" class="role-groups" :class="{ 'roles-grid-readonly': !canAssignRoles }">
-              <section v-for="group in editableRoleGroups" :key="group.category" class="role-group">
-                <h4 class="role-group-title">{{ group.title }}</h4>
-                <div class="roles-grid">
-                  <label v-for="role in group.roles" :key="role.code" class="role-check">
-                    <input
-                      v-model="selectedRoleCodes"
-                      type="checkbox"
-                      :value="role.code"
-                      :disabled="!canAssignRoles"
-                    />
-                    <span>{{ role.display }}</span>
-                  </label>
-                </div>
-              </section>
-            </div>
-            <p v-else class="role-readonly-hint">当前账号没有可分配角色，角色信息仅可查看。</p>
-            <div class="modal-actions-inline">
-              <!-- 角色可写性同时依赖 frontend_access 与服务端角色目录 assignable_by_current_actor。 -->
-              <button
-                v-if="canAssignRoles"
-                type="button"
-                class="um-btn um-btn--primary um-btn--sm"
-                :disabled="roleSubmitting"
-                @click="submitRoleReplace"
-              >
-                {{ roleSubmitting ? '提交中...' : '保存角色' }}
-              </button>
-              <p v-else class="role-readonly-hint">当前账号无角色分配权限，角色信息仅可查看。</p>
-              <button
-                v-if="canDisableUser"
-                type="button"
-                class="um-btn um-btn--ghost um-btn--sm"
-                :disabled="statusSubmitting || detailUser.status === 'disabled'"
-                @click="setUserStatus('disabled')"
-              >
-                {{ statusSubmitting ? '处理中...' : '禁用用户' }}
-              </button>
-              <button
-                v-if="canDisableUser"
-                type="button"
-                class="um-btn um-btn--ghost um-btn--sm"
-                :disabled="statusSubmitting || detailUser.status === 'active'"
-                @click="setUserStatus('active')"
-              >
-                {{ statusSubmitting ? '处理中...' : '启用用户' }}
-              </button>
-            </div>
-            <div v-if="canResetPassword" class="password-row">
-              <input v-model="resetPasswordValue" class="input" placeholder="输入新密码" />
-              <button type="button" class="um-btn um-btn--primary um-btn--sm" :disabled="passwordSubmitting" @click="resetPassword">
-                {{ passwordSubmitting ? '重置中...' : '重置密码' }}
-              </button>
-            </div>
-            <div v-if="canMoveTeam" class="membership-row">
-              <div class="membership-grid">
-                <select v-model="membershipForm.department" class="input">
-                  <option value="">选择部门</option>
-                  <option v-for="d in membershipDepartmentOptions" :key="d.value" :value="d.value">{{ d.label }}</option>
-                </select>
-                <select v-model="membershipForm.team" class="input">
-                  <option value="">选择小组</option>
-                  <option v-for="t in membershipTeamOptions" :key="t.value" :value="t.value">{{ t.label }}</option>
-                </select>
+            <button type="button" class="modal-close" aria-label="关闭角色管理" @click="detailUser = null">
+              ×
+            </button>
+          </header>
+          <div class="modal-body">
+            <div v-if="detailLoading" class="py-4"><BaseSkeleton width="100%" height="4rem" /></div>
+            <div v-else class="modal-stack">
+              <div v-if="lockedDetailRoleOptions.length" class="legacy-role-box">
+                <span class="legacy-role-title">{{ lockedDetailRoleTitle }}</span>
+                <span
+                  v-for="role in lockedDetailRoleOptions"
+                  :key="'locked-' + role.code"
+                  class="legacy-role-tag"
+                  :title="lockedRoleTooltip(role)"
+                >
+                  {{ role.display }}
+                </span>
+              </div>
+              <div v-if="editableRoleGroups.length" class="role-groups" :class="{ 'roles-grid-readonly': !canAssignRoles }">
+                <section v-for="group in editableRoleGroups" :key="group.category" class="role-group">
+                  <h4 class="role-group-title">{{ group.title }}</h4>
+                  <div class="roles-grid">
+                    <label v-for="role in group.roles" :key="role.code" class="role-check">
+                      <input
+                        v-model="selectedRoleCodes"
+                        type="checkbox"
+                        :value="role.code"
+                        :disabled="!canAssignRoles"
+                      />
+                      <span>{{ role.display }}</span>
+                    </label>
+                  </div>
+                </section>
+              </div>
+              <p v-else class="role-readonly-hint">当前账号没有可分配角色，角色信息仅可查看。</p>
+              <div class="modal-actions-inline">
+                <!-- 角色可写性同时依赖 frontend_access 与服务端角色目录 assignable_by_current_actor。 -->
                 <button
+                  v-if="canAssignRoles"
                   type="button"
                   class="um-btn um-btn--primary um-btn--sm"
-                  :disabled="membershipSubmitting || !isMembershipDirty"
-                  @click="submitMembership"
+                  :disabled="roleSubmitting"
+                  @click="submitRoleReplace"
                 >
-                  {{ membershipSubmitting ? '保存中...' : '保存归属' }}
+                  {{ roleSubmitting ? '提交中...' : '保存角色' }}
                 </button>
+                <p v-else class="role-readonly-hint">当前账号无角色分配权限，角色信息仅可查看。</p>
                 <button
-                  v-if="canClearMembership && (detailUser.department || detailUser.team)"
+                  v-if="canDisableUser"
                   type="button"
                   class="um-btn um-btn--ghost um-btn--sm"
-                  :disabled="membershipSubmitting"
-                  @click="clearMembership"
+                  :disabled="statusSubmitting || detailUser.status === 'disabled'"
+                  @click="setUserStatus('disabled')"
                 >
-                  移出到未分组
+                  {{ statusSubmitting ? '处理中...' : '禁用用户' }}
+                </button>
+                <button
+                  v-if="canDisableUser"
+                  type="button"
+                  class="um-btn um-btn--ghost um-btn--sm"
+                  :disabled="statusSubmitting || detailUser.status === 'active'"
+                  @click="setUserStatus('active')"
+                >
+                  {{ statusSubmitting ? '处理中...' : '启用用户' }}
                 </button>
               </div>
+              <div v-if="canResetPassword" class="password-row">
+                <input v-model="resetPasswordValue" class="input" placeholder="输入新密码" />
+                <button type="button" class="um-btn um-btn--primary um-btn--sm" :disabled="passwordSubmitting" @click="resetPassword">
+                  {{ passwordSubmitting ? '重置中...' : '重置密码' }}
+                </button>
+              </div>
+              <div v-if="canMoveTeam" class="membership-row">
+                <div class="membership-grid">
+                  <select v-model="membershipForm.department" class="input">
+                    <option value="">选择部门</option>
+                    <option v-for="d in membershipDepartmentOptions" :key="d.value" :value="d.value">{{ d.label }}</option>
+                  </select>
+                  <select v-model="membershipForm.team" class="input">
+                    <option value="">选择小组</option>
+                    <option v-for="t in membershipTeamOptions" :key="t.value" :value="t.value">{{ t.label }}</option>
+                  </select>
+                  <button
+                    type="button"
+                    class="um-btn um-btn--primary um-btn--sm"
+                    :disabled="membershipSubmitting || !isMembershipDirty"
+                    @click="submitMembership"
+                  >
+                    {{ membershipSubmitting ? '保存中...' : '保存归属' }}
+                  </button>
+                  <button
+                    v-if="canClearMembership && (detailUser.department || detailUser.team)"
+                    type="button"
+                    class="um-btn um-btn--ghost um-btn--sm"
+                    :disabled="membershipSubmitting"
+                    @click="clearMembership"
+                  >
+                    移出到未分组
+                  </button>
+                </div>
+              </div>
+              <p v-if="detailActionMessage" class="action-msg">{{ detailActionMessage }}</p>
             </div>
-            <p v-if="detailActionMessage" class="action-msg">{{ detailActionMessage }}</p>
           </div>
-          <div class="modal-actions">
-            <button type="button" class="um-btn um-btn--ghost" @click="detailUser = null">关闭</button>
-          </div>
+          <footer class="modal-footer">
+            <div class="modal-footer-actions">
+              <button type="button" class="um-btn um-btn--ghost" @click="detailUser = null">关闭</button>
+            </div>
+          </footer>
         </div>
       </div>
 
       <!-- 新增用户 -->
       <div v-if="showCreateModal" class="modal-mask" @click.self="showCreateModal = false">
-        <div class="modal-panel um-modal">
-          <h3 class="section-title">新增用户</h3>
-          <div class="form-grid">
-            <input v-model.trim="createForm.username" class="input" placeholder="请输入用户名" />
-            <input v-model.trim="createForm.display_name" class="input" placeholder="请输入姓名" />
-            <select v-model="createForm.department" class="input">
-              <option value="">选择部门</option>
-              <option v-for="d in createDepartmentOptions" :key="d.value" :value="d.value">{{ d.label }}</option>
-            </select>
-            <select v-model="createForm.team" class="input">
-              <option value="">选择小组</option>
-              <option v-for="t in createTeamOptions" :key="t.value" :value="t.value">{{ t.label }}</option>
-            </select>
-            <input v-model.trim="createForm.mobile" class="input" placeholder="手机号" />
-            <input v-model.trim="createForm.email" class="input" placeholder="邮箱(可选)" />
-            <input v-model="createForm.password" class="input" type="password" placeholder="初始密码" />
-            <select v-model="createForm.status" class="input">
-              <option value="active">启用</option>
-              <option value="disabled">已禁用</option>
-            </select>
-          </div>
-          <div v-if="editableRoleGroups.length" class="role-groups mt-2">
-            <section v-for="group in editableRoleGroups" :key="'create-' + group.category" class="role-group">
-              <h4 class="role-group-title">{{ group.title }}</h4>
-              <div class="roles-grid">
-                <label v-for="role in group.roles" :key="'create-' + role.code" class="role-check">
-                  <input v-model="createForm.roles" type="checkbox" :value="role.code" />
-                  <span>{{ role.display }}</span>
-                </label>
-              </div>
-            </section>
-          </div>
-          <p v-else class="role-readonly-hint">当前账号没有可分配角色，新用户将使用系统默认角色。</p>
-          <p v-if="createError" class="action-msg">{{ createError }}</p>
-          <div class="modal-actions">
-            <button type="button" class="um-btn um-btn--ghost" @click="showCreateModal = false">取消</button>
-            <button type="button" class="um-btn um-btn--primary" :disabled="createSubmitting" @click="createUser">
-              {{ createSubmitting ? '创建中...' : '创建用户' }}
+        <div class="modal-panel um-modal um-modal--wide">
+          <header class="modal-header">
+            <div class="modal-heading">
+              <h3 class="section-title">新增用户</h3>
+              <p class="modal-subtitle">创建账号、组织归属与初始工作角色</p>
+            </div>
+            <button type="button" class="modal-close" aria-label="关闭新增用户" @click="showCreateModal = false">
+              ×
             </button>
+          </header>
+          <div class="modal-body">
+            <div class="form-grid">
+              <input v-model.trim="createForm.username" class="input" placeholder="请输入用户名" />
+              <input v-model.trim="createForm.display_name" class="input" placeholder="请输入姓名" />
+              <select v-model="createForm.department" class="input">
+                <option value="">选择部门</option>
+                <option v-for="d in createDepartmentOptions" :key="d.value" :value="d.value">{{ d.label }}</option>
+              </select>
+              <select v-model="createForm.team" class="input">
+                <option value="">选择小组</option>
+                <option v-for="t in createTeamOptions" :key="t.value" :value="t.value">{{ t.label }}</option>
+              </select>
+              <input v-model.trim="createForm.mobile" class="input" placeholder="手机号" />
+              <input v-model.trim="createForm.email" class="input" placeholder="邮箱(可选)" />
+              <input v-model="createForm.password" class="input" type="password" placeholder="初始密码" />
+              <select v-model="createForm.status" class="input">
+                <option value="active">启用</option>
+                <option value="disabled">已禁用</option>
+              </select>
+            </div>
+            <div v-if="editableRoleGroups.length" class="role-groups mt-2">
+              <section v-for="group in editableRoleGroups" :key="'create-' + group.category" class="role-group">
+                <h4 class="role-group-title">{{ group.title }}</h4>
+                <div class="roles-grid">
+                  <label v-for="role in group.roles" :key="'create-' + role.code" class="role-check">
+                    <input v-model="createForm.roles" type="checkbox" :value="role.code" />
+                    <span>{{ role.display }}</span>
+                  </label>
+                </div>
+              </section>
+            </div>
+            <p v-else class="role-readonly-hint">当前账号没有可分配角色，新用户将使用系统默认角色。</p>
+            <p v-if="createError" class="action-msg">{{ createError }}</p>
           </div>
+          <footer class="modal-footer">
+            <div class="modal-footer-actions">
+              <button type="button" class="um-btn um-btn--ghost" @click="showCreateModal = false">取消</button>
+              <button type="button" class="um-btn um-btn--primary" :disabled="createSubmitting" @click="createUser">
+                {{ createSubmitting ? '创建中...' : '创建用户' }}
+              </button>
+            </div>
+          </footer>
         </div>
       </div>
+      </Teleport>
     </template>
     </div>
   </div>
@@ -1498,24 +1523,24 @@ onBeforeUnmount(() => {
 .modal-mask {
   position: fixed;
   inset: 0;
-  z-index: 50;
+  z-index: 1000;
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 1rem;
+  padding: clamp(0.75rem, 2vw, 1.5rem);
   background: rgb(var(--yb-shadow) / 0.45);
 }
 
 .modal-panel {
   min-width: 320px;
-  max-width: 92vw;
-  width: 640px;
-  max-height: min(90dvh, 900px);
-  overflow-y: auto;
+  width: min(760px, calc(100vw - 2rem));
+  max-height: min(88dvh, 820px);
+  overflow: hidden;
 }
 
 .modal-panel.um-modal {
-  padding: 1.35rem 1.5rem 1.2rem;
+  display: flex;
+  flex-direction: column;
   border-radius: 0.875rem;
   border: 1px solid rgb(var(--yb-border));
   background: rgb(var(--yb-surface));
@@ -1523,15 +1548,76 @@ onBeforeUnmount(() => {
   box-shadow: 0 10px 40px rgb(var(--yb-shadow) / 0.12);
 }
 
-.um-modal .section-title {
-  margin: 0 0 1.1rem;
-  padding-bottom: 0.75rem;
+.um-modal--wide {
+  width: min(780px, calc(100vw - 2rem));
+}
+
+.um-modal .modal-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 1rem;
+  align-items: start;
+  padding: 0.95rem 1.35rem 0.8rem;
   border-bottom: 1px solid rgb(var(--yb-border));
+  background: rgb(var(--yb-surface));
+}
+
+.um-modal .modal-heading {
+  min-width: 0;
+}
+
+.um-modal .section-title {
+  margin: 0;
   font-size: 1rem;
   font-weight: 700;
-  letter-spacing: -0.02em;
+  letter-spacing: 0;
   color: rgb(var(--yb-text));
   line-height: 1.3;
+}
+
+.um-modal .modal-subtitle {
+  margin: 0.25rem 0 0;
+  font-size: 0.75rem;
+  line-height: 1.35;
+  color: rgb(var(--yb-text-muted));
+}
+
+.um-modal .modal-close {
+  width: 2rem;
+  height: 2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgb(var(--yb-border));
+  border-radius: 9999px;
+  background: rgb(var(--yb-surface));
+  color: rgb(var(--yb-text-muted));
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: none;
+  transition:
+    border-color 0.15s ease,
+    background-color 0.15s ease,
+    color 0.15s ease;
+}
+
+.um-modal .modal-close:hover {
+  border-color: rgb(var(--yb-brand-border-strong));
+  background: rgb(var(--yb-surface-soft));
+  color: rgb(var(--yb-text));
+}
+
+.um-modal .modal-body {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0.8rem 1.35rem;
+}
+
+.um-modal .modal-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
 }
 
 .um-modal .form-grid {
@@ -1543,8 +1629,8 @@ onBeforeUnmount(() => {
 .um-modal .role-groups {
   display: flex;
   flex-direction: column;
-  gap: 0.65rem;
-  padding: 0.75rem;
+  gap: 0.55rem;
+  padding: 0.65rem;
   border-radius: 0.75rem;
   border: 1px solid rgb(var(--yb-border));
   background: rgb(var(--yb-surface-soft));
@@ -1554,7 +1640,7 @@ onBeforeUnmount(() => {
 .um-modal .role-group {
   display: flex;
   flex-direction: column;
-  gap: 0.45rem;
+  gap: 0.35rem;
 }
 
 .um-modal .role-group-title {
@@ -1567,7 +1653,7 @@ onBeforeUnmount(() => {
 
 .um-modal .roles-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(10.75rem, 1fr));
   gap: 0.5rem;
 }
 
@@ -1624,8 +1710,9 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  min-height: 2.25rem;
-  padding: 0.45rem 0.65rem;
+  min-width: 0;
+  min-height: 2.05rem;
+  padding: 0.35rem 0.65rem;
   margin: 0;
   border-radius: 0.5rem;
   border: 1px solid rgb(var(--yb-border));
@@ -1639,6 +1726,11 @@ onBeforeUnmount(() => {
     border-color 0.15s ease,
     background-color 0.15s ease,
     box-shadow 0.15s ease;
+}
+
+.um-modal .role-check span {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .um-modal .role-check:hover {
@@ -1714,15 +1806,18 @@ onBeforeUnmount(() => {
   flex-wrap: wrap;
   gap: 0.5rem;
   align-items: center;
-  margin-top: 0.35rem;
-  padding-top: 0.85rem;
+  padding-top: 0.7rem;
   border-top: 1px solid rgb(var(--yb-border));
 }
 
-.um-modal .modal-actions {
-  margin-top: 1.15rem;
-  padding-top: 1rem;
+.um-modal .modal-footer {
+  flex-shrink: 0;
+  padding: 0.7rem 1.35rem;
   border-top: 1px solid rgb(var(--yb-border));
+  background: rgb(var(--yb-surface));
+}
+
+.um-modal .modal-footer-actions {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
@@ -1758,19 +1853,17 @@ onBeforeUnmount(() => {
 
 .um-modal .password-row {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 0.5rem;
   align-items: center;
-  margin-top: 0.35rem;
-  padding: 0.75rem;
+  padding: 0.6rem;
   border-radius: 0.625rem;
   border: 1px solid rgb(var(--yb-border));
   background: rgb(var(--yb-surface-soft));
 }
 
 .um-modal .membership-row {
-  margin-top: 0.5rem;
-  padding: 0.75rem;
+  padding: 0.6rem;
   border-radius: 0.625rem;
   border: 1px solid rgb(var(--yb-border));
   background: rgb(var(--yb-surface-soft));
@@ -1778,7 +1871,7 @@ onBeforeUnmount(() => {
 
 .um-modal .membership-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr auto auto;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto auto;
   gap: 0.5rem;
   align-items: center;
 }
@@ -1860,13 +1953,45 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 980px) {
-  .um-modal .roles-grid,
   .um-modal .form-grid {
     grid-template-columns: 1fr;
   }
 
   .um-modal .membership-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .modal-mask {
+    align-items: stretch;
+    padding: 0.75rem;
+  }
+
+  .modal-panel,
+  .um-modal--wide {
+    width: 100%;
+    max-height: calc(100dvh - 1.5rem);
+  }
+
+  .um-modal .modal-header,
+  .um-modal .modal-body,
+  .um-modal .modal-footer {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+
+  .um-modal .password-row,
+  .um-modal .modal-actions-inline,
+  .um-modal .modal-footer-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .um-modal .modal-actions-inline .um-btn,
+  .um-modal .modal-footer-actions .um-btn,
+  .um-modal .password-row .um-btn {
+    width: 100%;
   }
 }
 </style>

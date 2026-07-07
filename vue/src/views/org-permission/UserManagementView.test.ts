@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { mount, flushPromises } from '@vue/test-utils'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 import UserManagementView from './UserManagementView.vue'
 import { usersApi } from '@/services/api/usersApi'
@@ -123,6 +123,7 @@ function mountView(user: PermissionUser = {
 
 describe('UserManagementView role governance', () => {
   beforeEach(() => {
+    document.body.innerHTML = ''
     vi.clearAllMocks()
     permissionMock.allowedActions.clear()
     permissionMock.allowedActions.add('role.assign')
@@ -209,6 +210,10 @@ describe('UserManagementView role governance', () => {
     } as never)
   })
 
+  afterEach(() => {
+    document.body.innerHTML = ''
+  })
+
   it('renders only actor-assignable roles as checkboxes and preserves locked roles on save', async () => {
     const wrapper = mountView()
     await flushPromises()
@@ -220,20 +225,29 @@ describe('UserManagementView role governance', () => {
     })
     await flushPromises()
 
-    const checkboxes = wrapper.findAll('input[type="checkbox"]')
-    expect(checkboxes.map((item) => (item.element as HTMLInputElement).value)).toEqual(['Member', 'AssetSubmitter'])
-    expect(wrapper.text()).toContain('历史/不可编辑角色')
-    expect(wrapper.text()).toContain('历史兼容：常规审核旧编码')
-    expect(wrapper.text()).toContain('外协')
-    expect(wrapper.text()).toContain('超级管理员')
-    expect(wrapper.text()).toContain('素材工作台角色')
-    expect(wrapper.text()).toContain('素材工作台-交付人员')
-    expect(wrapper.text()).not.toContain('Super Admin')
-    expect(wrapper.text()).not.toContain('Outsource')
-    expect(wrapper.text()).not.toContain('普通审核B')
+    const modal = document.body.querySelector('.um-modal')
+    expect(modal).not.toBeNull()
+    const checkboxes = Array.from(
+      document.body.querySelectorAll<HTMLInputElement>('.um-modal input[type="checkbox"]'),
+    )
+    expect(checkboxes.map((item) => item.value)).toEqual(['Member', 'AssetSubmitter'])
+    const modalText = modal?.textContent ?? ''
+    expect(modalText).toContain('历史/不可编辑角色')
+    expect(modalText).toContain('历史兼容：常规审核旧编码')
+    expect(modalText).toContain('外协')
+    expect(modalText).toContain('超级管理员')
+    expect(modalText).toContain('素材工作台角色')
+    expect(modalText).toContain('素材工作台-交付人员')
+    expect(modalText).not.toContain('Super Admin')
+    expect(modalText).not.toContain('Outsource')
+    expect(modalText).not.toContain('普通审核B')
 
-    await checkboxes[0].setValue(false)
-    await wrapper.findAll('button').find((button) => button.text() === '保存角色')?.trigger('click')
+    checkboxes[0]?.click()
+    await flushPromises()
+    const saveButton = Array.from(document.body.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === '保存角色',
+    )
+    saveButton?.click()
     await flushPromises()
 
     expect(usersApi.replaceRoles).toHaveBeenCalledWith('2', {
