@@ -1674,6 +1674,7 @@ type identityUserRepoStub struct {
 	roles                   map[int64][]domain.Role
 	rawRoles                map[int64][]string
 	nextID                  int64
+	listFilters             []repo.UserListFilter
 	listRolesCalls          int
 	listRolesRawCalls       int
 	listRolesByUserIDsCalls int
@@ -1798,6 +1799,7 @@ func (r *identityUserRepoStub) GetByJstUID(_ context.Context, jstUID int64) (*do
 }
 
 func (r *identityUserRepoStub) List(_ context.Context, filter repo.UserListFilter) ([]*domain.User, int64, error) {
+	r.listFilters = append(r.listFilters, filter)
 	return r.listWithFilter(filter)
 }
 

@@ -387,35 +387,50 @@ func (s *identityService) teamNamesForDepartment(ctx context.Context, department
 }
 
 func (s *identityService) rewriteUsersByOrg(ctx context.Context, tx repo.Tx, department, team string, mutate func(*domain.User)) error {
+	users, err := s.listUsersByOrgSnapshot(ctx, department, team)
+	if err != nil {
+		return err
+	}
+	for _, user := range users {
+		if user == nil {
+			continue
+		}
+		mutate(user)
+		user.UpdatedAt = time.Now().UTC()
+		if err := s.userRepo.Update(ctx, tx, user); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *identityService) listUsersByOrgSnapshot(ctx context.Context, department, team string) ([]*domain.User, error) {
 	dept := domain.Department(department)
-	for {
+	const pageSize = 500
+	out := make([]*domain.User, 0)
+	for page := 1; ; page++ {
 		users, _, err := s.userRepo.List(ctx, repo.UserListFilter{
 			Department: &dept,
 			Team:       team,
-			Page:       1,
-			PageSize:   500,
+			Page:       page,
+			PageSize:   pageSize,
 		})
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if len(users) == 0 {
-			return nil
+			return out, nil
 		}
-		for _, user := range users {
-			if user == nil {
-				continue
-			}
-			mutate(user)
-			user.UpdatedAt = time.Now().UTC()
-			if err := s.userRepo.Update(ctx, tx, user); err != nil {
-				return err
-			}
+		out = append(out, users...)
+		if len(users) < pageSize {
+			return out, nil
 		}
 	}
 }
 
 func (s *identityService) rewriteAllUserManagedScopes(ctx context.Context, tx repo.Tx, mutate func(*domain.User) bool) error {
 	const pageSize = 500
+	allUsers := make([]*domain.User, 0)
 	for page := 1; ; page++ {
 		users, _, err := s.userRepo.List(ctx, repo.UserListFilter{
 			Page:     page,
@@ -425,21 +440,23 @@ func (s *identityService) rewriteAllUserManagedScopes(ctx context.Context, tx re
 			return err
 		}
 		if len(users) == 0 {
-			return nil
+			break
 		}
-		for _, user := range users {
-			if user == nil || !mutate(user) {
-				continue
-			}
-			user.UpdatedAt = time.Now().UTC()
-			if err := s.userRepo.Update(ctx, tx, user); err != nil {
-				return err
-			}
-		}
+		allUsers = append(allUsers, users...)
 		if len(users) < pageSize {
-			return nil
+			break
 		}
 	}
+	for _, user := range allUsers {
+		if user == nil || !mutate(user) {
+			continue
+		}
+		user.UpdatedAt = time.Now().UTC()
+		if err := s.userRepo.Update(ctx, tx, user); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func stringSlicesEqual(a, b []string) bool {
