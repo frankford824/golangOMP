@@ -167,6 +167,81 @@ func TestIdentityServiceDisableTeamAndDepartmentMovesUsersToUnassignedPool(t *te
 	}
 }
 
+func TestIdentityServiceRenameDepartmentWithAssignedUsersUsesSnapshot(t *testing.T) {
+	ConfigureTaskOrgCatalog(domain.AuthSettings{})
+	defer ConfigureTaskOrgCatalog(domain.AuthSettings{})
+
+	userRepo := newIdentityUserRepo()
+	orgRepo := newIdentityOrgRepo()
+	svc := NewIdentityService(userRepo, &identitySessionRepoStub{}, &identityPermissionLogRepoStub{}, identityTxRunner{}, WithOrgRepo(orgRepo))
+
+	if appErr := svc.SyncConfiguredAuth(context.Background()); appErr != nil {
+		t.Fatalf("SyncConfiguredAuth() unexpected error: %+v", appErr)
+	}
+	department, appErr := svc.CreateDepartment(context.Background(), CreateOrgDepartmentParams{Name: "云仓测试部"})
+	if appErr != nil {
+		t.Fatalf("CreateDepartment() unexpected error: %+v", appErr)
+	}
+	team, appErr := svc.CreateTeam(context.Background(), CreateOrgTeamParams{DepartmentID: &department.ID, Name: "默认组"})
+	if appErr != nil {
+		t.Fatalf("CreateTeam() unexpected error: %+v", appErr)
+	}
+	adminCtx := domain.WithRequestActor(context.Background(), domain.RequestActor{
+		ID:    1,
+		Roles: []domain.Role{domain.RoleAdmin, domain.RoleHRAdmin},
+	})
+	user, appErr := svc.CreateManagedUser(adminCtx, CreateManagedUserParams{
+		Username:    "warehouse_rename_user",
+		EmployeeNo:  intPtr(2110),
+		DisplayName: "Warehouse Rename User",
+		Department:  domain.Department("云仓测试部"),
+		Team:        team.Name,
+		Mobile:      "13800009910",
+		Password:    "Init12345",
+		Roles:       []domain.Role{domain.RoleWarehouse},
+	})
+	if appErr != nil {
+		t.Fatalf("CreateManagedUser(user) unexpected error: %+v", appErr)
+	}
+	manager, appErr := svc.CreateManagedUser(adminCtx, CreateManagedUserParams{
+		Username:    "warehouse_rename_manager",
+		EmployeeNo:  intPtr(2111),
+		DisplayName: "Warehouse Rename Manager",
+		Department:  domain.Department("云仓测试部"),
+		Team:        team.Name,
+		Mobile:      "13800009911",
+		Password:    "Init12345",
+		Roles:       []domain.Role{domain.RoleDeptAdmin},
+	})
+	if appErr != nil {
+		t.Fatalf("CreateManagedUser(manager) unexpected error: %+v", appErr)
+	}
+	userRepo.users[manager.ID].ManagedDepartments = []string{"云仓测试部"}
+	userRepo.listFilters = nil
+
+	nextName := "定制中心"
+	if _, appErr := svc.UpdateDepartment(context.Background(), UpdateOrgDepartmentParams{ID: department.ID, Name: &nextName}); appErr != nil {
+		t.Fatalf("UpdateDepartment(rename) appErr = %+v", appErr)
+	}
+	renamed, appErr := svc.GetUser(context.Background(), user.ID)
+	if appErr != nil {
+		t.Fatalf("GetUser(user after rename) appErr = %+v", appErr)
+	}
+	if renamed.Department != domain.Department("定制中心") || renamed.Team != team.Name {
+		t.Fatalf("renamed user = %+v, want department 定制中心 and same team", renamed)
+	}
+	managerAfterRename, appErr := svc.GetUser(context.Background(), manager.ID)
+	if appErr != nil {
+		t.Fatalf("GetUser(manager after rename) appErr = %+v", appErr)
+	}
+	if !containsString(managerAfterRename.ManagedDepartments, "定制中心") || containsString(managerAfterRename.ManagedDepartments, "云仓测试部") {
+		t.Fatalf("manager scopes after rename = %+v, want replaced department scope", managerAfterRename.ManagedDepartments)
+	}
+	if got := countListCallsForDepartment(userRepo.listFilters, "云仓测试部"); got != 1 {
+		t.Fatalf("department-scoped user list calls = %d, want 1 snapshot call", got)
+	}
+}
+
 func TestIdentityServiceCreateTeamAllowsSameNameAcrossDepartments(t *testing.T) {
 	userRepo := newIdentityUserRepo()
 	orgRepo := newIdentityOrgRepo()
@@ -382,6 +457,7 @@ func (r *identityOrgRepo) CreateDepartment(_ context.Context, _ repo.Tx, departm
 
 func (r *identityOrgRepo) UpdateDepartment(_ context.Context, _ repo.Tx, department *domain.OrgDepartment) error {
 	if current := r.departments[department.ID]; current != nil {
+		current.Name = strings.TrimSpace(department.Name)
 		current.Enabled = department.Enabled
 		current.UpdatedAt = time.Now().UTC()
 	}
@@ -409,10 +485,22 @@ func (r *identityOrgRepo) CreateTeam(_ context.Context, _ repo.Tx, team *domain.
 
 func (r *identityOrgRepo) UpdateTeam(_ context.Context, _ repo.Tx, team *domain.OrgTeam) error {
 	if current := r.teams[team.ID]; current != nil {
+		current.Name = strings.TrimSpace(team.Name)
 		current.Enabled = team.Enabled
 		current.UpdatedAt = time.Now().UTC()
 	}
 	return nil
+}
+
+func countListCallsForDepartment(filters []repo.UserListFilter, department string) int {
+	count := 0
+	for _, filter := range filters {
+		if filter.Department == nil || string(*filter.Department) != department {
+			continue
+		}
+		count++
+	}
+	return count
 }
 
 func orgOptionsContainDepartmentTeam(options *domain.OrgOptions, department, team string) bool {

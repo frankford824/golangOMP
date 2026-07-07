@@ -60,9 +60,9 @@
                   <span>{{ dept.label }}</span>
                 </button>
                 <div v-if="canManageOrgMaster && dept.id" class="org-row-actions">
-                  <button type="button" class="org-icon-btn" @click.stop="openCreateTeam(dept)">新增组</button>
-                  <button type="button" class="org-icon-btn" @click.stop="openEditDepartment(dept)">改名</button>
-                  <button type="button" class="org-icon-btn org-icon-btn--danger" @click.stop="openDeleteDepartment(dept)">删除</button>
+                  <button type="button" class="org-icon-btn" title="在该部门下新增小组" @click.stop="openCreateTeam(dept)">新增小组</button>
+                  <button type="button" class="org-icon-btn" title="编辑部门名称" @click.stop="openEditDepartment(dept)">部门改名</button>
+                  <button type="button" class="org-icon-btn org-icon-btn--danger" title="停用该部门" @click.stop="openDeleteDepartment(dept)">停用部门</button>
                 </div>
               </div>
               <div v-if="dept.teams.length" class="org-filter-teams">
@@ -76,8 +76,8 @@
                     <span>{{ team.label }}</span>
                   </button>
                   <div v-if="canManageOrgMaster && team.id" class="org-row-actions">
-                    <button type="button" class="org-icon-btn" @click.stop="openEditTeam(team)">改名</button>
-                    <button type="button" class="org-icon-btn org-icon-btn--danger" @click.stop="openDeleteTeam(team)">删除</button>
+                    <button type="button" class="org-icon-btn" title="编辑小组名称" @click.stop="openEditTeam(team)">小组改名</button>
+                    <button type="button" class="org-icon-btn org-icon-btn--danger" title="停用该小组" @click.stop="openDeleteTeam(team)">停用小组</button>
                   </div>
                 </div>
               </div>
@@ -1824,14 +1824,9 @@ onBeforeUnmount(() => {
 
 .org-row-actions {
   display: inline-flex;
-  flex-wrap: nowrap;
-  gap: 0.2rem;
-  opacity: 0;
-  transition: opacity 0.15s ease;
-}
-
-.org-filter-row:hover .org-row-actions,
-.org-row-actions:focus-within {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.25rem;
   opacity: 1;
 }
 
@@ -1841,8 +1836,8 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   min-height: 1.55rem;
-  padding: 0.15rem 0.45rem;
-  border-radius: 9999px;
+  padding: 0.18rem 0.5rem;
+  border-radius: 0.35rem;
   border: 1px solid rgb(var(--yb-border-zinc));
   background: rgb(var(--yb-surface));
   color: rgb(var(--yb-text-zinc));
