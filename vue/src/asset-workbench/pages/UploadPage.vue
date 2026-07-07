@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { storeToRefs } from 'pinia'
 import { CheckCircle2, ChevronDown, ChevronUp, FileUp, LoaderCircle, Table2, XCircle } from 'lucide-vue-next'
 
 import { useAssetWorkbenchBootstrap } from '@aw/app/useAssetWorkbenchBootstrap'
@@ -7,6 +8,7 @@ import { uploadWorkbenchFile } from '@aw/features/upload/uploadFlow'
 import { assetWorkbenchApi, type DifficultyClassRow, type FilePreviewMeta, type SubmissionFileRow, type UploadDirectoryRow } from '@aw/shared/api/assetWorkbenchApi'
 import { usePageRequest } from '@aw/shared/composables/usePageRequest'
 import { driveUploadRelativePath, filesFromDriveDrop, isSafeDriveUploadPath } from '@aw/shared/drive/useDriveUpload'
+import { useUploadCenterStore, type UploadCenterItem, type UploadCenterStatus } from '@aw/shared/drive/uploadCenter.store'
 import { currentBusinessMonth } from '@aw/shared/format/businessMonth'
 import { difficultyCodes, firstDifficultyCode } from '@aw/shared/format/difficulty'
 import { formatFileSize, formatInt } from '@aw/shared/format/number'
@@ -21,22 +23,10 @@ import type {
 import AsyncBoundary from '@aw/shared/ui/AsyncBoundary.vue'
 import { parseApiErrorPayload, resolveApiUserMessage } from '@/utils/api-message-zh'
 
-type QueueStatus = 'queued' | 'uploading' | 'uploaded' | 'failed'
+defineOptions({ name: 'AssetUploadPage' })
 
-interface QueueItem {
-  id: string
-  file: File
-  relativePath: string
-  difficultyClass: string
-  finalized: boolean
-  pageCount: number
-  progress: number
-  status: QueueStatus
-  sessionId?: string
-  uploadDirectoryId?: number
-  uploadDirectoryName?: string
-  error?: string
-}
+type QueueItem = UploadCenterItem
+type QueueStatus = UploadCenterStatus
 
 interface UploadContext {
   directories: UploadDirectoryRow[]
@@ -49,7 +39,8 @@ interface UploadBatchResult {
   failed: number
 }
 
-const queue = ref<QueueItem[]>([])
+const uploadCenter = useUploadCenterStore()
+const { uploadPageItems: queue } = storeToRefs(uploadCenter)
 const inputRef = ref<HTMLInputElement | null>(null)
 const folderInputRef = ref<HTMLInputElement | null>(null)
 const uploading = ref(false)
@@ -108,7 +99,7 @@ const canSubmit = computed(() => {
 const canSimpleSubmit = computed(() => {
   if (!isSimpleUser.value) return false
   if (!queue.value.length || uploading.value || submitting.value) return false
-  return canUseUploadDirectory.value && queue.value.every((item) => item.status !== 'uploading')
+  return canUseUploadDirectory.value && queue.value.every((item) => item.status !== 'uploading' && item.status !== 'submitting')
 })
 const totalPages = computed(() => queue.value.reduce((sum, item) => sum + item.pageCount, 0))
 const difficultyOptions = computed(() => difficultyCodes(difficultyRows.value))
@@ -120,11 +111,12 @@ const selectedAcceptString = computed(() => {
 })
 const uploadStats = computed(() => {
   const total = queue.value.length
-  const uploaded = queue.value.filter((item) => item.status === 'uploaded').length
+  const uploaded = queue.value.filter((item) => item.status === 'uploaded' || item.status === 'submitted').length
   const failed = queue.value.filter((item) => item.status === 'failed').length
-  const uploadingCount = queue.value.filter((item) => item.status === 'uploading').length
+  const uploadingCount = queue.value.filter((item) => item.status === 'uploading' || item.status === 'submitting').length
   const progressTotal = queue.value.reduce((sum, item) => {
-    if (item.status === 'uploaded') return sum + 100
+    if (item.status === 'uploaded' || item.status === 'submitted') return sum + 100
+    if (item.status === 'submitting') return sum + 96
     if (item.status === 'failed') return sum + item.progress
     if (item.status === 'uploading') return sum + item.progress
     return sum
@@ -163,6 +155,13 @@ const adminUploadHint = computed(() => {
   if (queue.value.some((item) => item.status === 'failed')) return '会重试失败文件，成功后自动生成提交记录'
   if (uploadedItems.value.length > 0 && !hasPendingUploads.value) return '将生成提交记录，生成后进入上传记录'
   return `将上传并生成 ${formatInt(queue.value.length)} 个提交记录`
+})
+const uploadContinuityHint = computed(() => {
+  if (uploading.value) return '正在上传。你可以切到看收入或网盘，回到本页仍能看到进度。请不要关闭浏览器窗口。'
+  if (submitting.value) return '正在生成上传记录。你可以先切到其他页面，回到本页仍能看到结果。'
+  if (queue.value.some((item) => item.status === 'failed')) return '有文件上传失败，失败项会保留在这里，可回来重试。'
+  if (queue.value.some((item) => item.status === 'uploaded')) return '文件已上传，回到本页可以继续生成上传记录。'
+  return ''
 })
 const submitButtonLabel = computed(() => {
   if (submitting.value) return isSimpleUser.value ? '正在交作品' : '正在创建提交'
@@ -311,18 +310,14 @@ function enqueueFiles(files: FileList | File[] | null | undefined) {
   submittedFiles.value = []
   lastUploadResult.value = null
   lastSubmissionResult.value = null
-  for (const file of accepted) {
-    queue.value.push({
-      id: crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`,
-      file,
-      relativePath: driveUploadRelativePath(file),
-      difficultyClass: selectedUploadDirectory.value?.difficulty_class ?? firstDifficultyCode(difficultyRows.value),
-      finalized: true,
-      pageCount: 1,
-      progress: 0,
-      status: 'queued',
-    })
-  }
+  uploadCenter.addItems(accepted, {
+    source: 'upload-page',
+    uploadDirectoryId: selectedUploadDirectoryId.value || undefined,
+    uploadDirectoryName: selectedUploadDirectory.value?.name ?? '',
+    difficultyClass: selectedUploadDirectory.value?.difficulty_class ?? firstDifficultyCode(difficultyRows.value),
+    finalized: true,
+    pageCount: 1,
+  })
 }
 
 function filterUploadFiles(files: File[]) {
@@ -372,6 +367,7 @@ async function uploadQueuedItems() {
     if (!uploadFileAllowed(item.file, allowed) || !uploadFilePathAllowed(item.file)) {
       item.status = 'failed'
       item.error = `当前目录不允许上传这个文件。请确认格式或文件夹路径（允许：${selectedAllowedLabel.value}）。`
+      uploadCenter.updateItem(item.id, { status: item.status, error: item.error })
       continue
     }
     item.status = 'uploading'
@@ -389,14 +385,17 @@ async function uploadQueuedItems() {
         expectedBusinessMonth: pageBusinessMonth,
         onProgress: (progress) => {
           item.progress = progress.percent
+          uploadCenter.updateItem(item.id, { progress: progress.percent, status: 'uploading' })
         },
       })
       item.sessionId = uploaded.sessionId
       item.progress = 100
       item.status = 'uploaded'
+      uploadCenter.updateItem(item.id, { sessionId: item.sessionId, progress: 100, status: 'uploaded', error: '' })
     } catch (err) {
       item.status = 'failed'
       item.error = resolveApiUserMessage(err, { fallback: '上传失败，请重试' })
+      uploadCenter.updateItem(item.id, { status: 'failed', error: item.error, progress: item.progress })
     }
   }
   uploading.value = false
@@ -434,12 +433,15 @@ async function createSubmission() {
   submitting.value = true
   error.value = ''
   notice.value = ''
+  const submittingItems = [...uploadedItems.value]
+  const submittingIds = submittingItems.map((item) => item.id)
+  uploadCenter.updateItems(submittingIds, { status: 'submitting', error: '' })
   try {
     const detail = await assetWorkbenchApi.createSubmission({
       notes: '',
       expected_business_month: pageBusinessMonth,
       month_rollover_ack: false,
-      items: uploadedItems.value.map((item) => ({
+      items: submittingItems.map((item) => ({
         difficulty_class: item.difficultyClass || selectedUploadDirectory.value?.difficulty_class || undefined,
         finalized: item.finalized,
         page_count: item.pageCount,
@@ -448,12 +450,13 @@ async function createSubmission() {
       })),
     })
     submittedFiles.value = detail.items.flatMap((item) => item.files)
-    lastSubmissionResult.value = { total: uploadedItems.value.length, success: submittedFiles.value.length, failed: 0 }
+    lastSubmissionResult.value = { total: submittingItems.length, success: submittedFiles.value.length, failed: 0 }
     notice.value = isSimpleUser.value
       ? `作品已交上去：${formatInt(submittedFiles.value.length)} 个文件，可在上传记录里查看。`
       : `提交记录已生成：${formatInt(submittedFiles.value.length)} 个文件，可在查改作品里查看。`
-    queue.value = queue.value.filter((item) => item.status !== 'uploaded')
+    uploadCenter.updateItems(submittingIds, { status: 'submitted', progress: 100, error: '' })
   } catch (err) {
+    uploadCenter.updateItems(submittingIds, { status: 'uploaded' })
     error.value = submissionErrorMessage(err)
   } finally {
     submitting.value = false
@@ -520,7 +523,7 @@ function queueItemDisplayName(item: QueueItem) {
 }
 
 function removeItem(id: string) {
-  queue.value = queue.value.filter((item) => item.id !== id)
+  uploadCenter.removeItem(id)
   const next = new Set(expandedItemIds.value)
   next.delete(id)
   expandedItemIds.value = next
@@ -544,7 +547,7 @@ async function handleUploadSpreadsheetAction(payload: WorkbenchSpreadsheetAction
   const rowByID = new Map(rows.map((row) => [String(row.id), row]))
   for (const item of queue.value) {
     const row = rowByID.get(item.id)
-    if (!row || item.status === 'uploading') continue
+    if (!row || item.status === 'uploading' || item.status === 'submitting') continue
     const pageCount = Number(row.pageCount)
     item.difficultyClass = String(row.difficultyClass ?? item.difficultyClass).trim() || item.difficultyClass
     item.pageCount = Number.isFinite(pageCount) && pageCount > 0 ? Math.floor(pageCount) : item.pageCount
@@ -566,6 +569,8 @@ function statusLabel(status: QueueStatus) {
     queued: '待上传',
     uploading: '上传中',
     uploaded: '已上传',
+    submitting: '生成记录中',
+    submitted: '已完成',
     failed: '上传失败',
   }
   return labels[status]
@@ -576,15 +581,17 @@ function statusTone(status: QueueStatus) {
     queued: 'aw-chip--neutral',
     uploading: 'aw-chip--info',
     uploaded: 'aw-chip--success',
+    submitting: 'aw-chip--info',
+    submitted: 'aw-chip--success',
     failed: 'aw-chip--danger',
   }
   return tones[status]
 }
 
 function statusIcon(status: QueueStatus) {
-  if (status === 'uploaded') return CheckCircle2
+  if (status === 'uploaded' || status === 'submitted') return CheckCircle2
   if (status === 'failed') return XCircle
-  if (status === 'uploading') return LoaderCircle
+  if (status === 'uploading' || status === 'submitting') return LoaderCircle
   return FileUp
 }
 
@@ -725,6 +732,7 @@ onMounted(() => {
 
     <p v-if="error" class="aw-inline-alert">{{ error }}</p>
     <p v-else-if="notice" class="aw-inline-alert">{{ notice }}</p>
+    <p v-if="uploadContinuityHint" class="aw-inline-alert aw-inline-alert--info">{{ uploadContinuityHint }}</p>
 
     <SpreadsheetWorkbench
       v-if="uploadSpreadsheetOpen"
@@ -759,12 +767,12 @@ onMounted(() => {
             <span :style="{ width: `${item.progress}%` }" />
           </div>
           <div class="aw-simple-upload-item__actions">
-            <button class="aw-secondary-button" type="button" :disabled="item.status === 'uploading'" @click="toggleItemDetails(item.id)">
+            <button class="aw-secondary-button" type="button" :disabled="item.status === 'uploading' || item.status === 'submitting'" @click="toggleItemDetails(item.id)">
               <span>{{ expandedItemIds.has(item.id) ? '收起信息' : '更多信息' }}</span>
               <ChevronUp v-if="expandedItemIds.has(item.id)" :size="16" aria-hidden="true" />
               <ChevronDown v-else :size="16" aria-hidden="true" />
             </button>
-            <button class="aw-secondary-button" type="button" :disabled="item.status === 'uploading'" @click="removeItem(item.id)">移除</button>
+            <button class="aw-secondary-button" type="button" :disabled="item.status === 'uploading' || item.status === 'submitting'" @click="removeItem(item.id)">移除</button>
           </div>
           <div v-if="expandedItemIds.has(item.id)" class="aw-simple-upload-item__details">
             <label class="aw-field">
@@ -792,7 +800,7 @@ onMounted(() => {
           </label>
           <strong>{{ item.status === 'uploading' ? `${item.progress}%` : statusLabel(item.status) }}</strong>
           <span class="aw-cell-text">{{ item.uploadDirectoryName || selectedUploadDirectory?.name || '默认目录' }}</span>
-          <button type="button" :disabled="item.status === 'uploading'" @click="removeItem(item.id)">移除</button>
+          <button type="button" :disabled="item.status === 'uploading' || item.status === 'submitting'" @click="removeItem(item.id)">移除</button>
           <span v-if="item.error" class="aw-upload-row__error">{{ item.error }}</span>
         </div>
       </div>

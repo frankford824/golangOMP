@@ -4,6 +4,7 @@ import { RouterLink, RouterView, useRoute } from 'vue-router'
 import { HandCoins, HardDrive, ImagePlus, UserRound } from 'lucide-vue-next'
 
 import type { AssetWorkbenchBootstrap } from '@aw/shared/api/assetWorkbenchApi'
+import GlobalUploadCenter from '../shared/drive/GlobalUploadCenter.vue'
 import MotionReveal from '../shared/ui/MotionReveal.vue'
 
 const props = defineProps<{
@@ -65,10 +66,15 @@ const visibleNavItems = computed(() => {
 
     <main class="aw-simple">
       <RouterView v-slot="{ Component, route: activeRoute }">
-        <MotionReveal :key="activeRoute.path" class="aw-route-view">
+        <KeepAlive>
+          <component v-if="activeRoute.meta.keepAlive" :is="Component" class="aw-route-view" />
+        </KeepAlive>
+        <MotionReveal v-if="!activeRoute.meta.keepAlive" :key="activeRoute.path" class="aw-route-view">
           <component :is="Component" />
         </MotionReveal>
       </RouterView>
     </main>
+
+    <GlobalUploadCenter />
   </div>
 </template>

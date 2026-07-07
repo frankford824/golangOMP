@@ -135,13 +135,13 @@ export async function uploadDriveQueue(queue: DriveUploadQueueItem[], options: D
       notes: '',
       expected_business_month: expectedBusinessMonth,
       month_rollover_ack: false,
-      items: [{
+      items: uploadedItems.map((item) => ({
         difficulty_class: options.difficultyClass || undefined,
         finalized: true,
-        page_count: uploadedItems.length,
-        item_count: uploadedItems.length,
-        upload_session_ids: uploadedItems.map((item) => item.sessionId).filter(Boolean) as string[],
-      }],
+        page_count: 1,
+        item_count: 1,
+        upload_session_ids: item.sessionId ? [item.sessionId] : [],
+      })),
     })
   } catch (err) {
     throw new Error(resolveApiUserMessage(err, { fallback: '上传完成，但提交记录生成失败' }))

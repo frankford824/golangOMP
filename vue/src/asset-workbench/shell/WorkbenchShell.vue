@@ -17,6 +17,7 @@ import { useWorkbenchSession } from '../app/useWorkbenchSession'
 import { assetWorkbenchApi } from '@aw/shared/api/assetWorkbenchApi'
 import { notificationsApi } from '@/services/api/notificationsApi'
 import { currentBusinessMonth } from '../shared/format/businessMonth'
+import GlobalUploadCenter from '../shared/drive/GlobalUploadCenter.vue'
 import IconfontActionIcon from '../shared/icons/IconfontActionIcon.vue'
 import MotionReveal from '../shared/ui/MotionReveal.vue'
 
@@ -321,12 +322,17 @@ watch(commandQuery, () => {
           <span class="aw-statusline__item">{{ permissionSummary }}</span>
         </div>
         <RouterView v-slot="{ Component, route: activeRoute }">
-          <MotionReveal :key="activeRoute.path" class="aw-route-view">
+          <KeepAlive>
+            <component v-if="activeRoute.meta.keepAlive" :is="Component" class="aw-route-view" />
+          </KeepAlive>
+          <MotionReveal v-if="!activeRoute.meta.keepAlive" :key="activeRoute.path" class="aw-route-view">
             <component :is="Component" />
           </MotionReveal>
         </RouterView>
       </main>
     </section>
+
+    <GlobalUploadCenter />
 
     <div v-if="commandOpen" class="aw-command" role="dialog" aria-modal="true" aria-label="命令面板" @keydown="handleCommandKeydown">
       <div class="aw-command__panel">

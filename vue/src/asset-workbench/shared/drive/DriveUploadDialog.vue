@@ -11,6 +11,7 @@ import {
   type DriveUploadQueueItem,
   type DriveUploadQueueStatus,
 } from '@aw/shared/drive/useDriveUpload'
+import { useUploadCenterStore } from '@aw/shared/drive/uploadCenter.store'
 import IconfontActionIcon from '@aw/shared/icons/IconfontActionIcon.vue'
 
 const props = defineProps<{
@@ -33,6 +34,7 @@ const folderInputRef = ref<HTMLInputElement | null>(null)
 const dragging = ref(false)
 const busy = ref(false)
 const error = ref('')
+const uploadCenter = useUploadCenterStore()
 
 const allowedFileTypes = computed(() =>
   (props.allowedFileTypes ?? [])
@@ -142,17 +144,42 @@ async function runUpload() {
   if (!canUpload.value) return
   busy.value = true
   error.value = ''
+  const uploadableItems = queue.value.filter((item) => item.status === 'queued' || item.status === 'failed')
+  uploadCenter.addItems(uploadableItems.map((item) => item.file), {
+    source: 'drive-dialog',
+    uploadDirectoryId: props.directoryId,
+    uploadDirectoryName: props.directoryName,
+    difficultyClass: props.difficultyClass,
+    preserveIds: uploadableItems.map((item) => item.id),
+  })
   try {
     const uploadedCount = await uploadDriveQueue(queue.value, {
       directoryId: props.directoryId,
       difficultyClass: props.difficultyClass,
-      onItemChange: () => {
+      onItemChange: (item) => {
         queue.value = [...queue.value]
+        uploadCenter.updateItem(item.id, {
+          status: item.status,
+          progress: item.progress,
+          sessionId: item.sessionId,
+          error: item.error || '',
+          uploadDirectoryId: props.directoryId,
+          uploadDirectoryName: props.directoryName,
+          difficultyClass: props.difficultyClass,
+        })
       },
     })
+    uploadCenter.updateItems(
+      queue.value.filter((item) => item.status === 'uploaded').map((item) => item.id),
+      { status: 'submitted', progress: 100, error: '' },
+    )
     emit('uploaded', uploadedCount)
   } catch (err) {
     error.value = err instanceof Error ? err.message : '上传完成但归档失败'
+    uploadCenter.updateItems(
+      queue.value.filter((item) => item.status === 'uploaded').map((item) => item.id),
+      { status: 'uploaded', error: error.value },
+    )
   } finally {
     busy.value = false
   }

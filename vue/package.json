@@ -33,6 +33,7 @@
     "@fontsource/jetbrains-mono": "^5.2.8",
     "@fontsource/material-symbols-outlined": "^5.2.45",
     "@formatjs/intl-segmenter": "^12.2.10",
+    "@formkit/auto-animate": "^0.9.0",
     "@univerjs/preset-sheets-core": "^0.25.1",
     "axios": "^1.18.1",
     "echarts": "^6.1.0",

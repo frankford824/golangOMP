@@ -18,6 +18,7 @@ declare module 'vue-router' {
     simple?: boolean
     requiresAnyCapability?: readonly string[]
     settings?: boolean
+    keepAlive?: boolean
   }
 }
 
@@ -57,7 +58,7 @@ const routes: RouteRecordRaw[] = [
     path: '/upload',
     name: 'asset-upload',
     component: () => import('./pages/UploadPage.vue'),
-    meta: accessMeta('/upload'),
+    meta: { ...accessMeta('/upload'), keepAlive: true },
   },
   {
     path: '/my-settlement',
