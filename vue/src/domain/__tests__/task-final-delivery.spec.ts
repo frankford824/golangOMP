@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  currentDeliveryVersionsForTask,
   latestDeliveryBatchVersionsForSelection,
   latestDeliveryVersionForSelection,
 } from '../task-final-delivery'
@@ -123,5 +124,49 @@ describe('latestDeliveryVersionForSelection', () => {
     )
 
     expect(result?.id).toBe('a')
+  })
+
+  it('returns current delivery versions across every batch SKU for audit handover', () => {
+    const result = currentDeliveryVersionsForTask(
+      task({
+        isBatchTask: true,
+        batchMode: 'multiple',
+        skuItems: [
+          { id: 1, skuCode: 'SKU-A', referenceFileRefs: [] },
+          { id: 2, skuCode: 'SKU-B', referenceFileRefs: [] },
+        ],
+        assetVersions: [
+          version({
+            id: 'a-old',
+            assetKind: 'delivery',
+            assetNo: 'AST-A',
+            rootVersionNo: 1,
+            fileRefs: ['/a-old.jpg'],
+            scopeSkuCode: 'SKU-A',
+            uploadedAt: '2026-04-28T10:00:00Z',
+          }),
+          version({
+            id: 'a-new',
+            assetKind: 'delivery',
+            assetNo: 'AST-A',
+            rootVersionNo: 2,
+            fileRefs: ['/a-new.jpg'],
+            scopeSkuCode: 'SKU-A',
+            uploadedAt: '2026-04-29T10:00:00Z',
+          }),
+          version({
+            id: 'b',
+            assetKind: 'delivery',
+            assetNo: 'AST-B',
+            fileRefs: ['/b.jpg'],
+            scopeSkuCode: 'SKU-B',
+            uploadedAt: '2026-04-27T10:00:00Z',
+          }),
+          version({ id: 'source', assetKind: 'source', nonPreviewFiles: [{ label: 'source.psd', url: '/source.psd' }] }),
+        ],
+      }),
+    )
+
+    expect(result.map((row) => row.id)).toEqual(['a-new', 'b'])
   })
 })

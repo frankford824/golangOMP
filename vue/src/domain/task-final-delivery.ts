@@ -81,3 +81,20 @@ export function latestDeliveryBatchVersionsForSelection(
   const batch = collapsed.filter((version) => isInLatestBatch(version, latestScore))
   return (batch.length ? batch : [latest]).sort((a, b) => versionSortScore(b) - versionSortScore(a))
 }
+
+export function currentDeliveryVersionsForTask(task: Task): TaskAssetVersion[] {
+  const candidates = (task.assetVersions ?? []).filter(
+    (version) => isDeliveryAssetVersion(version) && hasDisplayableFile(version),
+  )
+  if (!candidates.length) return []
+
+  const latestPerRoot = new Map<string, TaskAssetVersion>()
+  for (const version of candidates) {
+    const key = versionRootKey(version)
+    const prev = latestPerRoot.get(key)
+    if (!prev || compareByNewest(version, prev) < 0) {
+      latestPerRoot.set(key, version)
+    }
+  }
+  return [...latestPerRoot.values()].sort(compareByNewest)
+}

@@ -1316,7 +1316,7 @@ import {
   taskHasSkuItemsForBatchUi,
 } from '@/domain/task-batch-assets'
 import { selectRetouchRequirementForReferenceSupplement } from '@/domain/retouch-requirements'
-import { latestDeliveryBatchVersionsForSelection } from '@/domain/task-final-delivery'
+import { currentDeliveryVersionsForTask } from '@/domain/task-final-delivery'
 import { taskCreatorDisplayName, taskDesignerDisplayName } from '@/domain/task-actors'
 import { formatDateOnlyBeijing, formatMonthDayTimeBeijingOffsetAware, formatTaskDueAtDisplay } from '@/utils/date'
 import {
@@ -2079,15 +2079,12 @@ const warehouseStatusText = computed(() => {
 const auditPendingThumbItems = computed((): AssetThumbItem[] => {
   const currentTask = task.value
   if (!currentTask) return []
-  const latestDeliveryVersions = latestDeliveryBatchVersionsForSelection(
-    currentTask,
-    selectionFromProductIndex(currentTask, detailProductIndex.value),
-  )
+  const latestDeliveryVersions = currentDeliveryVersionsForTask(currentTask)
   if (!latestDeliveryVersions.length) return []
 
   const items: AssetThumbItem[] = []
   for (const version of latestDeliveryVersions) {
-    const versionPrefix = version.assetNo?.trim() || `版本 ${version.id}`
+    const versionPrefix = auditDeliveryVersionLabel(version)
     const previewItems = (version.fileRefs ?? [])
       .filter((src) => String(src ?? '').trim().length > 0)
       .map((src, index) => ({
@@ -2109,6 +2106,12 @@ const auditPendingThumbItems = computed((): AssetThumbItem[] => {
   }
   return items
 })
+
+function auditDeliveryVersionLabel(version: { assetNo?: string; id: string; scopeSkuCode?: string }): string {
+  const assetNo = version.assetNo?.trim() || `版本 ${version.id}`
+  const scope = version.scopeSkuCode?.trim()
+  return scope ? `${scope} · ${assetNo}` : assetNo
+}
 
 const warehouseProofThumbItems = computed((): AssetThumbItem[] => {
   // 后端尚未提供入库凭证附件字段，先保留统一缩略图容器占位，后续仅替换数据源即可。
@@ -2303,6 +2306,20 @@ const canManageAuditAssignment = computed(() =>
   permissionsStore.hasAnyRole([...AUDIT_MANAGER_REASSIGN_ROLES]),
 )
 
+const isRegularAuditHandoverStatus = computed(() => {
+  if (!task.value || isCustomizationTask.value || isRetouchTask.value) return false
+  return task.value.status === 'PendingAuditA' || task.value.status === 'PendingAuditB'
+})
+
+const canReadAuditHandovers = computed(() => {
+  if (!isRegularAuditHandoverStatus.value) return false
+  return (
+    canManageAuditAssignment.value ||
+    can([...AUDIT_PRIMARY_TOOLBAR_PERMISSION_KEYS]) ||
+    can('task.audit.takeover')
+  )
+})
+
 const showAuditActionButtons = computed(
   () => {
     // 不因 hasTaskScopeAccess（owner_org_team / owner_department）拦截审核按钮：
@@ -2376,6 +2393,7 @@ const showAuditClaimButton = computed(
   () =>
     showAuditActionButtons.value &&
     isAuditUnassigned.value &&
+    (!canReadAuditHandovers.value || (!auditHandoversLoading.value && !auditHandoversError.value)) &&
     !hasPendingAuditHandover.value &&
     can('task.audit.claim'),
 )
@@ -2386,7 +2404,10 @@ const showAuditTransferToBButton = computed(
   () => !!task.value && showAuditReviewButtons.value && canTransferToAuditB(task.value),
 )
 const showAuditTakeoverButton = computed(
-  () => showAuditActionButtons.value && Boolean(pendingAuditHandoverForMe.value),
+  () =>
+    canReadAuditHandovers.value &&
+    can('task.audit.takeover') &&
+    Boolean(pendingAuditHandoverForMe.value),
 )
 const showAuditManagerTransferButton = computed(
   () =>
@@ -2395,11 +2416,13 @@ const showAuditManagerTransferButton = computed(
     canManageAuditAssignment.value,
 )
 const auditActionNoticeText = computed(() => {
+  if (canReadAuditHandovers.value) {
+    if (auditHandoversLoading.value) return '正在读取审核交班状态...'
+    if (auditHandoversError.value) return auditHandoversError.value
+    if (showAuditTakeoverButton.value) return '该任务已交班给你，请先接手后再审核。'
+    if (hasPendingAuditHandover.value) return '该任务存在待接手的交班记录，需由指定审核人接手后继续处理。'
+  }
   if (!showAuditActionButtons.value) return ''
-  if (auditHandoversLoading.value) return '正在读取审核交班状态...'
-  if (auditHandoversError.value) return auditHandoversError.value
-  if (showAuditTakeoverButton.value) return '该任务已交班给你，请先接手后再审核。'
-  if (hasPendingAuditHandover.value) return '该任务存在待接手的交班记录，需由指定审核人接手后继续处理。'
   if (isAuditAssignedToOther.value) {
     const name = task.value?.currentHandlerName?.trim() || `ID ${auditCurrentHandlerId.value}`
     return `该任务当前由 ${name} 处理，其他常规审核不能直接审核。`
@@ -3585,7 +3608,7 @@ async function loadSideEvents() {
 
 async function loadAuditHandovers() {
   const id = taskId.value
-  if (!id || isTempId.value || !showAuditActionButtons.value) {
+  if (!id || isTempId.value || !canReadAuditHandovers.value) {
     auditHandovers.value = []
     auditHandoversError.value = ''
     auditHandoversLoading.value = false
