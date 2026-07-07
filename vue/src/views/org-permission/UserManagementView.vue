@@ -40,6 +40,19 @@
                 新增部门
               </button>
             </div>
+            <div v-if="canManageOrgMaster && selectedOrgDepartment" class="org-selected-actions">
+              <div class="org-selected-current">
+                <span class="org-selected-label">当前组织</span>
+                <strong>{{ selectedOrgTeam ? selectedOrgTeam.label : selectedOrgDepartment.label }}</strong>
+              </div>
+              <div class="org-selected-buttons">
+                <button type="button" class="org-icon-btn" @click.stop="openCreateTeam(selectedOrgDepartment)">新增小组</button>
+                <button type="button" class="org-icon-btn" @click.stop="openEditDepartment(selectedOrgDepartment)">部门改名</button>
+                <button type="button" class="org-icon-btn org-icon-btn--danger" @click.stop="openDeleteDepartment(selectedOrgDepartment)">停用部门</button>
+                <button v-if="selectedOrgTeam" type="button" class="org-icon-btn" @click.stop="openEditTeam(selectedOrgTeam)">小组改名</button>
+                <button v-if="selectedOrgTeam" type="button" class="org-icon-btn org-icon-btn--danger" @click.stop="openDeleteTeam(selectedOrgTeam)">停用小组</button>
+              </div>
+            </div>
             <button
               v-if="!isDeptScopedOnly"
               type="button"
@@ -59,11 +72,6 @@
                 >
                   <span>{{ dept.label }}</span>
                 </button>
-                <div v-if="canManageOrgMaster && dept.id" class="org-row-actions">
-                  <button type="button" class="org-icon-btn" title="在该部门下新增小组" @click.stop="openCreateTeam(dept)">新增小组</button>
-                  <button type="button" class="org-icon-btn" title="编辑部门名称" @click.stop="openEditDepartment(dept)">部门改名</button>
-                  <button type="button" class="org-icon-btn org-icon-btn--danger" title="停用该部门" @click.stop="openDeleteDepartment(dept)">停用部门</button>
-                </div>
               </div>
               <div v-if="dept.teams.length" class="org-filter-teams">
                 <div v-for="team in dept.teams" :key="`${dept.value}-${team.value}`" class="org-filter-row">
@@ -75,10 +83,6 @@
                   >
                     <span>{{ team.label }}</span>
                   </button>
-                  <div v-if="canManageOrgMaster && team.id" class="org-row-actions">
-                    <button type="button" class="org-icon-btn" title="编辑小组名称" @click.stop="openEditTeam(team)">小组改名</button>
-                    <button type="button" class="org-icon-btn org-icon-btn--danger" title="停用该小组" @click.stop="openDeleteTeam(team)">停用小组</button>
-                  </div>
                 </div>
               </div>
             </div>
@@ -628,6 +632,13 @@ const visibleOrgTree = computed<OrgTreeDepartment[]>(() =>
 const isAllOrgFilterActive = computed(
   () => !isDeptScopedOnly.value && !departmentFilter.value && !teamFilter.value,
 )
+const selectedOrgDepartment = computed<OrgTreeDepartment | null>(() =>
+  visibleOrgTree.value.find((dept) => dept.value === departmentFilter.value) ?? null,
+)
+const selectedOrgTeam = computed<OrgTreeTeam | null>(() => {
+  if (!selectedOrgDepartment.value || !teamFilter.value) return null
+  return selectedOrgDepartment.value.teams.find((team) => team.value === teamFilter.value) ?? null
+})
 
 const showCreateModal = ref(false)
 const createSubmitting = ref(false)
@@ -1754,6 +1765,46 @@ onBeforeUnmount(() => {
   font-weight: 700;
 }
 
+.org-selected-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  margin-bottom: 0.35rem;
+  padding: 0.55rem;
+  border: 1px solid rgb(var(--yb-border-zinc));
+  border-radius: 0.5rem;
+  background: rgb(var(--yb-surface-row-even));
+}
+
+.org-selected-current {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.org-selected-label {
+  color: rgb(var(--yb-text-zinc-faint));
+  font-size: 0.6875rem;
+  font-weight: 600;
+}
+
+.org-selected-current strong {
+  min-width: 0;
+  overflow: hidden;
+  color: rgb(var(--yb-text-zinc-strong));
+  font-size: 0.8125rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.org-selected-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
 .org-filter-dept {
   display: flex;
   flex-direction: column;
@@ -1770,10 +1821,7 @@ onBeforeUnmount(() => {
 }
 
 .org-filter-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 0.25rem;
-  align-items: center;
+  display: block;
 }
 
 .org-filter-item {
@@ -1820,14 +1868,6 @@ onBeforeUnmount(() => {
   min-height: 1.75rem;
   font-size: 0.75rem;
   color: rgb(var(--yb-text-zinc-soft));
-}
-
-.org-row-actions {
-  display: inline-flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 0.25rem;
-  opacity: 1;
 }
 
 .org-action-btn,
@@ -1899,16 +1939,12 @@ onBeforeUnmount(() => {
     grid-column: 1 / -1;
   }
 
-  .org-filter-row {
-    grid-template-columns: minmax(0, 1fr);
-    align-content: start;
+  .org-selected-actions {
+    grid-column: 1 / -1;
   }
 
-  .org-row-actions {
-    opacity: 1;
-    flex-wrap: wrap;
-    justify-content: flex-start;
-    padding-left: 0.2rem;
+  .org-filter-row {
+    display: block;
   }
 
   .org-filter-panel {
