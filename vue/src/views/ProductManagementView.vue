@@ -160,12 +160,12 @@
           <div class="pm-cost-panel-head">
             <div>
               <h3>未关联款式</h3>
-              <p>这些 SKU 目前是按名称猜价，建议关联到定价规则。</p>
+              <p>{{ unboundPanelHint }}</p>
             </div>
             <button type="button" class="pm-btn pm-btn--small" @click="openCostBinding()">新增关联</button>
           </div>
           <div v-if="unboundLoading" class="pm-cost-mini-empty">未关联款式加载中...</div>
-          <div v-else-if="unboundCandidates.length === 0" class="pm-cost-mini-empty">暂无未关联款式。</div>
+          <div v-else-if="unboundCandidates.length === 0" class="pm-cost-mini-empty">{{ unboundEmptyText }}</div>
           <div v-else class="pm-unbound-list">
             <div
               v-for="candidate in unboundCandidates"
@@ -203,6 +203,7 @@
           </div>
           <p v-if="bulkAllMatching" class="pm-cost-note">将按当前筛选条件创建批量修复预览，后端会重新圈选符合条件的 SKU。</p>
           <p v-else class="pm-cost-note">已选择 {{ selectedRecordCount }} 条当前页 SKU。</p>
+          <p class="pm-cost-note">{{ activeCostFilterHint }}</p>
         </section>
 
         <section class="pm-cost-panel pm-cost-panel--calculator">
@@ -848,7 +849,7 @@ const costIssueTotal = computed(() => {
 const costDashboardHint = computed(() => {
   if (costDashboardLoading.value) return '正在读取产品中心成本问题。'
   if (costIssueTotal.value <= 0) return '当前没有需要集中处理的成本问题。'
-  return `当前共有 ${costIssueTotal.value} 条成本问题，先处理差额大或未关联款式的 SKU。`
+  return `当前有 ${costIssueTotal.value} 个 SKU 命中成本问题；同一个 SKU 可能同时命中多个标签，分组数字不要相加。`
 })
 const costFallbackPolicyText = computed(() => {
   const dashboard = costDashboard.value
@@ -872,6 +873,26 @@ const costUnboundTrendText = computed(() => {
   }
   const direction = delta > 0 ? '上升' : '下降'
   return `较上次${direction} ${formatRatioPercent(Math.abs(delta))}（当前 ${formatRatioPercent(latestRatio)}）`
+})
+const unboundIssueCount = computed(() => dashboardCount('unbound_iid', 'tags'))
+const unboundPanelHint = computed(() => {
+  if (unboundIssueCount.value <= 0) {
+    return '未关联款式已清零；当前可能算错的 SKU 主要来自 ERP 不一致等其他问题。'
+  }
+  return '这些 SKU 目前是按名称猜价，建议先把款式关联到定价规则。'
+})
+const unboundEmptyText = computed(() => {
+  if (unboundIssueCount.value <= 0) return '未关联款式已清零。'
+  return '暂无可创建关联草稿的未关联款式。'
+})
+const activeCostFilterHint = computed(() => {
+  if (activeCostTag.value) {
+    const tag = costIssueTags.value.find((item) => item.code === activeCostTag.value)
+    if (tag) return `当前筛选：${tag.label} ${tag.count} 个标签；可全选全部符合条件后生成批量修复预览。`
+  }
+  const group = costIssueGroups.value.find((item) => item.code === activeCostGroup.value)
+  if (group) return `当前分组：${group.label} ${group.count} 个标签；下方列表仍按当前产品筛选展示。`
+  return '请选择问题标签或勾选 SKU 后再批量修复。'
 })
 const selectedRecordCount = computed(() => Object.values(selectedRecordIds.value).filter(Boolean).length)
 const canCreateBulkRun = computed(() => bulkAllMatching.value || selectedRecordCount.value > 0)
