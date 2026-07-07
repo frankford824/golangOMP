@@ -1695,6 +1695,10 @@ func buildTaskListQuerySpec(filter repo.TaskListFilter, candidateFilters []domai
 		where = append(where, "t.creator_id = ?")
 		args = append(args, *filter.CreatorID)
 	}
+	if filter.CurrentHandlerID != nil {
+		where = append(where, "t.current_handler_id = ?")
+		args = append(args, *filter.CurrentHandlerID)
+	}
 	if filter.DesignerID != nil {
 		where = append(where, "t.designer_id = ?")
 		args = append(args, *filter.DesignerID)
@@ -1780,6 +1784,15 @@ func buildTaskListQuerySpec(filter repo.TaskListFilter, candidateFilters []domai
 		}
 		where = append(where, "("+strings.Join(keywordClauses, " OR ")+")")
 		args = append(args, keywordArgs...)
+	}
+	if filter.ExcludePendingAuditHandover {
+		where = append(where, `NOT EXISTS (
+			SELECT 1
+			  FROM audit_handovers ah_pending
+			 WHERE ah_pending.task_id = t.id
+			   AND ah_pending.status = ?
+		)`)
+		args = append(args, string(domain.HandoverStatusPendingTakeover))
 	}
 	appendTaskDataScopeWhere(&where, &args, filter)
 

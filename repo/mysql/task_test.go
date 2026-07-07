@@ -347,6 +347,36 @@ func TestBuildTaskListQuerySpecMineActorOwnership(t *testing.T) {
 	}
 }
 
+func TestBuildTaskListQuerySpecCurrentHandlerOwnership(t *testing.T) {
+	handlerID := int64(331)
+	spec, err := buildTaskListQuerySpec(repo.TaskListFilter{CurrentHandlerID: &handlerID}, nil)
+	if err != nil {
+		t.Fatalf("buildTaskListQuerySpec() error = %v", err)
+	}
+	want := "t.current_handler_id = ?"
+	if !strings.Contains(spec.whereSQL, want) {
+		t.Fatalf("whereSQL missing %q: %s", want, spec.whereSQL)
+	}
+	if len(spec.args) == 0 || spec.args[len(spec.args)-1] != handlerID {
+		t.Fatalf("last arg = %v, want %d", spec.args, handlerID)
+	}
+}
+
+func TestBuildTaskListQuerySpecExcludesPendingAuditHandover(t *testing.T) {
+	spec, err := buildTaskListQuerySpec(repo.TaskListFilter{ExcludePendingAuditHandover: true}, nil)
+	if err != nil {
+		t.Fatalf("buildTaskListQuerySpec() error = %v", err)
+	}
+	for _, want := range []string{"NOT EXISTS", "audit_handovers ah_pending", "ah_pending.status = ?"} {
+		if !strings.Contains(spec.whereSQL, want) {
+			t.Fatalf("whereSQL missing %q: %s", want, spec.whereSQL)
+		}
+	}
+	if len(spec.args) == 0 || spec.args[len(spec.args)-1] != string(domain.HandoverStatusPendingTakeover) {
+		t.Fatalf("last arg = %v, want pending_takeover", spec.args)
+	}
+}
+
 func TestBuildTaskListQuerySpecDesignerEmpty(t *testing.T) {
 	designerEmpty := true
 	spec, err := buildTaskListQuerySpec(repo.TaskListFilter{DesignerEmpty: &designerEmpty}, nil)

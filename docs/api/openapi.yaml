@@ -3162,6 +3162,90 @@ components:
           enum: [pending_takeover, taken_over, cancelled]
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    AuditHandoverCandidateItem:
+      type: object
+      required: [task_id, task_no, task_status, updated_at]
+      properties:
+        task_id: { type: integer }
+        task_no: { type: string }
+        sku_code: { type: string }
+        primary_sku_code: { type: string }
+        product_name: { type: string }
+        task_status:
+          type: string
+          enum: [PendingAuditA, PendingAuditB]
+        owner_org_team: { type: string }
+        current_handler_id:
+          type: integer
+          nullable: true
+        current_handler_name: { type: string }
+        updated_at: { type: string, format: date-time }
+    AuditHandoverCandidateListResponse:
+      type: object
+      required: [items, pagination, eligible_count, selected_limit]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/AuditHandoverCandidateItem'
+        pagination:
+          $ref: '#/components/schemas/PaginationMeta'
+        eligible_count:
+          type: integer
+          description: Total service-side eligible task count for the current actor and filters.
+        selected_limit:
+          type: integer
+          description: Maximum task count allowed in a single batch handover submission.
+    BatchAuditHandoverRequest:
+      type: object
+      required: [mode, to_auditor_id, reason]
+      properties:
+        mode:
+          type: string
+          enum: [explicit, all_matching]
+        task_ids:
+          type: array
+          items:
+            type: integer
+          description: Required when `mode=explicit`.
+        filters:
+          type: object
+          description: Candidate filters reused by `mode=all_matching`; the backend recomputes candidates and ignores frontend list state.
+          properties:
+            keyword: { type: string }
+            status:
+              type: string
+              enum: [PendingAuditA, PendingAuditB]
+            owner_org_team: { type: string }
+            page: { type: integer }
+            page_size: { type: integer }
+        to_auditor_id: { type: integer }
+        reason: { type: string }
+        current_judgement: { type: string }
+        risk_remark: { type: string }
+    BatchAuditHandoverResultItem:
+      type: object
+      required: [task_id, status]
+      properties:
+        task_id: { type: integer }
+        task_no: { type: string }
+        status:
+          type: string
+          enum: [success, failed]
+        message: { type: string }
+        handover_id:
+          type: integer
+          nullable: true
+    BatchAuditHandoverResponse:
+      type: object
+      required: [success_count, failure_count, results]
+      properties:
+        success_count: { type: integer }
+        failure_count: { type: integer }
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/BatchAuditHandoverResultItem'
     OutsourceOrder:
       type: object
       properties:
@@ -14206,6 +14290,76 @@ paths:
           description: Task not found
         '409':
           description: Invalid task state
+  /v1/tasks/audit/handover-candidates:
+    get:
+      summary: List audit handover candidates for current actor
+      description: Returns only the authenticated actor's current regular audit tasks that can be handed over. The frontend cannot query another handler; the backend enforces `current_handler_id = actor_id`, `PendingAuditA/PendingAuditB`, regular lane, and no pending handover.
+      tags: [Audit, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Audit_A, Audit_B, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector]
+      parameters:
+        - in: query
+          name: keyword
+          schema: { type: string }
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [PendingAuditA, PendingAuditB]
+        - in: query
+          name: owner_org_team
+          schema: { type: string }
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 1 }
+        - in: query
+          name: page_size
+          schema: { type: integer, minimum: 1, maximum: 100 }
+      responses:
+        '200':
+          description: Candidate list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/AuditHandoverCandidateListResponse'
+        '400':
+          description: Invalid filter
+        '403':
+          description: Missing audit handover capability.
+  /v1/tasks/audit/handover-batch:
+    post:
+      summary: Create batch audit handovers
+      description: Creates independent pending audit handovers for explicit task ids or all currently matching service-side candidates. The backend recomputes candidates and reuses the single-task handover validation for every task. `BATCH_LIMIT_EXCEEDED` is returned in error details when the selection is over the configured limit.
+      tags: [Audit, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Audit_A, Audit_B, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchAuditHandoverRequest'
+      responses:
+        '200':
+          description: Batch result with per-task success/failure details.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/BatchAuditHandoverResponse'
+        '400':
+          description: Invalid request. `details.deny_code=BATCH_LIMIT_EXCEEDED` when more than `selected_limit` tasks match.
+        '403':
+          description: Missing audit handover capability.
   /v1/tasks/{id}/audit/handover:
     post:
       summary: Create audit handover

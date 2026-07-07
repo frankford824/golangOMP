@@ -1,6 +1,9 @@
 package handler
 
 import (
+	"strconv"
+	"strings"
+
 	"github.com/gin-gonic/gin"
 
 	"workflow/domain"
@@ -184,6 +187,68 @@ func (h *AuditV7Handler) Transfer(c *gin.Context) {
 		return
 	}
 	respondOK(c, gin.H{"task_id": taskID, "action": "transferred"})
+}
+
+// ── GET /v1/tasks/audit/handover-candidates ─────────────────────────────────
+
+func (h *AuditV7Handler) ListHandoverCandidates(c *gin.Context) {
+	filter, appErr := parseAuditHandoverCandidateQuery(c)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	result, appErr := h.auditSvc.ListHandoverCandidates(c.Request.Context(), filter)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
+// ── POST /v1/tasks/audit/handover-batch ─────────────────────────────────────
+
+func (h *AuditV7Handler) BatchHandover(c *gin.Context) {
+	var req service.BatchAuditHandoverParams
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	result, appErr := h.auditSvc.BatchHandover(c.Request.Context(), req)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
+func parseAuditHandoverCandidateQuery(c *gin.Context) (service.AuditHandoverCandidateFilter, *domain.AppError) {
+	page, appErr := parseAuditHandoverCandidateIntQuery(c, "page")
+	if appErr != nil {
+		return service.AuditHandoverCandidateFilter{}, appErr
+	}
+	pageSize, appErr := parseAuditHandoverCandidateIntQuery(c, "page_size")
+	if appErr != nil {
+		return service.AuditHandoverCandidateFilter{}, appErr
+	}
+	return service.AuditHandoverCandidateFilter{
+		Keyword:      strings.TrimSpace(c.Query("keyword")),
+		Status:       domain.TaskStatus(strings.TrimSpace(c.Query("status"))),
+		OwnerOrgTeam: strings.TrimSpace(c.Query("owner_org_team")),
+		Page:         page,
+		PageSize:     pageSize,
+	}, nil
+}
+
+func parseAuditHandoverCandidateIntQuery(c *gin.Context, name string) (int, *domain.AppError) {
+	raw := strings.TrimSpace(c.Query(name))
+	if raw == "" {
+		return 0, nil
+	}
+	value, err := strconv.Atoi(raw)
+	if err != nil || value < 1 {
+		return 0, domain.NewAppError(domain.ErrCodeInvalidRequest, name+" must be a positive integer", nil)
+	}
+	return value, nil
 }
 
 // ── POST /v1/tasks/:id/audit/handover ────────────────────────────────────────

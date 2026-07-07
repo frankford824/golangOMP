@@ -312,6 +312,105 @@ func TestAuditV7ServiceHandoverRequiresTakeoverBeforeFurtherAuditActions(t *test
 	}
 }
 
+func TestAuditV7ServiceListHandoverCandidatesScopesToCurrentActor(t *testing.T) {
+	actorID := int64(331)
+	otherHandlerID := int64(332)
+	now := time.Now().UTC()
+	taskRepo := &prdTaskRepo{
+		listItems: []*domain.TaskListItem{
+			auditHandoverCandidateListItem(41, "RW-41", actorID, domain.TaskStatusPendingAuditA, domain.TaskBusinessLaneNormal, now),
+			auditHandoverCandidateListItem(42, "RW-42", actorID, domain.TaskStatusPendingAuditB, domain.TaskBusinessLaneNormal, now),
+			auditHandoverCandidateListItem(43, "RW-43", otherHandlerID, domain.TaskStatusPendingAuditA, domain.TaskBusinessLaneNormal, now),
+			auditHandoverCandidateListItem(44, "RW-44", actorID, domain.TaskStatusPendingCustomizationReview, domain.TaskBusinessLaneCustomization, now),
+		},
+	}
+	svc := NewAuditV7Service(taskRepo, &auditV7RepoStub{}, &prdTaskEventRepo{}, prdCodeRuleService{}, step04TxRunner{})
+
+	resp, appErr := svc.ListHandoverCandidates(auditHandoverTestActorContext(actorID, domain.RoleAuditA), AuditHandoverCandidateFilter{})
+	if appErr != nil {
+		t.Fatalf("ListHandoverCandidates() unexpected error: %+v", appErr)
+	}
+	if resp.EligibleCount != 2 || len(resp.Items) != 2 {
+		t.Fatalf("candidate count = eligible %d len %d, want 2", resp.EligibleCount, len(resp.Items))
+	}
+	if taskRepo.lastListFilter.CurrentHandlerID == nil || *taskRepo.lastListFilter.CurrentHandlerID != actorID {
+		t.Fatalf("CurrentHandlerID filter = %+v, want %d", taskRepo.lastListFilter.CurrentHandlerID, actorID)
+	}
+	if !taskRepo.lastListFilter.ExcludePendingAuditHandover {
+		t.Fatalf("ExcludePendingAuditHandover = false, want true")
+	}
+	if resp.SelectedLimit != AuditHandoverBatchDefaultLimit {
+		t.Fatalf("SelectedLimit = %d, want %d", resp.SelectedLimit, AuditHandoverBatchDefaultLimit)
+	}
+}
+
+func TestAuditV7ServiceListHandoverCandidatesRejectsNonAuditRole(t *testing.T) {
+	svc := NewAuditV7Service(&prdTaskRepo{}, &auditV7RepoStub{}, &prdTaskEventRepo{}, prdCodeRuleService{}, step04TxRunner{})
+
+	_, appErr := svc.ListHandoverCandidates(auditHandoverTestActorContext(331, domain.RoleMember), AuditHandoverCandidateFilter{})
+	if appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
+		t.Fatalf("ListHandoverCandidates() appErr = %+v, want permission denied", appErr)
+	}
+}
+
+func TestAuditV7ServiceBatchHandoverRejectsOverLimit(t *testing.T) {
+	svc := NewAuditV7Service(&prdTaskRepo{}, &auditV7RepoStub{}, &prdTaskEventRepo{}, prdCodeRuleService{}, step04TxRunner{})
+	taskIDs := make([]int64, AuditHandoverBatchDefaultLimit+1)
+	for i := range taskIDs {
+		taskIDs[i] = int64(i + 1)
+	}
+
+	_, appErr := svc.BatchHandover(auditHandoverTestActorContext(331, domain.RoleAuditA), BatchAuditHandoverParams{
+		Mode:        BatchAuditHandoverModeExplicit,
+		TaskIDs:     taskIDs,
+		ToAuditorID: 442,
+		Reason:      "调班",
+	})
+	if appErr == nil || appErr.Code != domain.ErrCodeInvalidRequest {
+		t.Fatalf("BatchHandover() appErr = %+v, want invalid request", appErr)
+	}
+	details, ok := appErr.Details.(map[string]interface{})
+	if !ok || details["deny_code"] != "BATCH_LIMIT_EXCEEDED" {
+		t.Fatalf("BatchHandover() details = %#v, want BATCH_LIMIT_EXCEEDED", appErr.Details)
+	}
+}
+
+func TestAuditV7ServiceBatchHandoverAllMatchingAllowsPartialFailures(t *testing.T) {
+	actorID := int64(331)
+	toAuditorID := int64(442)
+	now := time.Now().UTC()
+	taskRepo := &prdTaskRepo{
+		tasks: map[int64]*domain.Task{
+			41: auditHandoverTask(41, "RW-41", actorID, domain.TaskStatusPendingAuditA),
+			42: auditHandoverTask(42, "RW-42", actorID, domain.TaskStatusInProgress),
+		},
+		listItems: []*domain.TaskListItem{
+			auditHandoverCandidateListItem(41, "RW-41", actorID, domain.TaskStatusPendingAuditA, domain.TaskBusinessLaneNormal, now),
+			auditHandoverCandidateListItem(42, "RW-42", actorID, domain.TaskStatusPendingAuditA, domain.TaskBusinessLaneNormal, now),
+		},
+	}
+	auditRepo := &auditV7RepoStub{}
+	svc := NewAuditV7Service(taskRepo, auditRepo, &prdTaskEventRepo{}, prdCodeRuleService{}, step04TxRunner{})
+
+	resp, appErr := svc.BatchHandover(auditHandoverTestActorContext(actorID, domain.RoleAuditA), BatchAuditHandoverParams{
+		Mode:        BatchAuditHandoverModeAllMatching,
+		ToAuditorID: toAuditorID,
+		Reason:      "调班",
+	})
+	if appErr != nil {
+		t.Fatalf("BatchHandover() unexpected error: %+v", appErr)
+	}
+	if resp.SuccessCount != 1 || resp.FailureCount != 1 || len(resp.Results) != 2 {
+		t.Fatalf("BatchHandover() result = %+v, want 1 success and 1 failure", resp)
+	}
+	if len(auditRepo.handovers) != 1 || auditRepo.handovers[0].TaskID != 41 {
+		t.Fatalf("handovers = %+v, want only task 41 handover", auditRepo.handovers)
+	}
+	if taskRepo.tasks[41].CurrentHandlerID != nil {
+		t.Fatalf("task 41 handler = %+v, want nil after handover", taskRepo.tasks[41].CurrentHandlerID)
+	}
+}
+
 func TestAuditV7ServiceClaimDeniesDepartmentManagerOutsideScope(t *testing.T) {
 	taskRepo := &prdTaskRepo{
 		tasks: map[int64]*domain.Task{
@@ -802,6 +901,51 @@ func TestAuditV7ServiceTakeoverRejectsCrossLaneHandover(t *testing.T) {
 	appErr := svc.Takeover(context.Background(), 24, 2401, 242)
 	if appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
 		t.Fatalf("Takeover() appErr = %+v, want permission denied", appErr)
+	}
+}
+
+func auditHandoverTestActorContext(actorID int64, role domain.Role) context.Context {
+	return domain.WithRequestActor(context.Background(), domain.RequestActor{
+		ID:       actorID,
+		Roles:    []domain.Role{role},
+		Source:   domain.RequestActorSourceSessionToken,
+		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
+	})
+}
+
+func auditHandoverTask(id int64, taskNo string, handlerID int64, status domain.TaskStatus) *domain.Task {
+	return &domain.Task{
+		ID:                  id,
+		TaskNo:              taskNo,
+		SKUCode:             "SKU",
+		TaskType:            domain.TaskTypeOriginalProductDevelopment,
+		SourceMode:          domain.TaskSourceModeNewProduct,
+		ProductNameSnapshot: "候选任务",
+		TaskStatus:          status,
+		CurrentHandlerID:    int64Ptr(handlerID),
+		BusinessLane:        domain.TaskBusinessLaneNormal,
+		Priority:            domain.TaskPriorityNormal,
+		CreatedAt:           time.Now().UTC(),
+		UpdatedAt:           time.Now().UTC(),
+	}
+}
+
+func auditHandoverCandidateListItem(id int64, taskNo string, handlerID int64, status domain.TaskStatus, lane domain.TaskBusinessLane, updatedAt time.Time) *domain.TaskListItem {
+	return &domain.TaskListItem{
+		ID:                  id,
+		TaskNo:              taskNo,
+		SKUCode:             "SKU",
+		PrimarySKUCode:      "SKU",
+		ProductNameSnapshot: "候选任务",
+		TaskType:            domain.TaskTypeOriginalProductDevelopment,
+		SourceMode:          domain.TaskSourceModeNewProduct,
+		TaskStatus:          status,
+		CurrentHandlerID:    int64Ptr(handlerID),
+		CurrentHandlerName:  "当前审核",
+		BusinessLane:        lane,
+		WorkflowLane:        lane.WorkflowLane(),
+		Priority:            domain.TaskPriorityNormal,
+		UpdatedAt:           updatedAt,
 	}
 }
 

@@ -679,6 +679,299 @@ func (s *auditV7Service) Handover(ctx context.Context, p HandoverAuditParams) (*
 	return handover, nil
 }
 
+func (s *auditV7Service) ListHandoverCandidates(ctx context.Context, filter AuditHandoverCandidateFilter) (*AuditHandoverCandidateListResponse, *domain.AppError) {
+	actor, appErr := auditHandoverActorFromContext(ctx)
+	if appErr != nil {
+		return nil, appErr
+	}
+	if appErr := authorizeAuditHandoverBatchActor(actor); appErr != nil {
+		return nil, appErr
+	}
+	return s.listHandoverCandidatesForActor(ctx, actor, filter)
+}
+
+func (s *auditV7Service) BatchHandover(ctx context.Context, p BatchAuditHandoverParams) (*BatchAuditHandoverResponse, *domain.AppError) {
+	actor, appErr := auditHandoverActorFromContext(ctx)
+	if appErr != nil {
+		return nil, appErr
+	}
+	if appErr := authorizeAuditHandoverBatchActor(actor); appErr != nil {
+		return nil, appErr
+	}
+
+	p.Mode = BatchAuditHandoverMode(strings.TrimSpace(string(p.Mode)))
+	if p.Mode == "" && len(p.TaskIDs) > 0 {
+		p.Mode = BatchAuditHandoverModeExplicit
+	}
+	if p.Mode != BatchAuditHandoverModeExplicit && p.Mode != BatchAuditHandoverModeAllMatching {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "mode must be explicit or all_matching", nil)
+	}
+	if p.ToAuditorID <= 0 {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "to_auditor_id is required", nil)
+	}
+	if p.ToAuditorID == actor.ID {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "to_auditor_id must be different from current auditor", nil)
+	}
+	p.Reason = strings.TrimSpace(p.Reason)
+	if p.Reason == "" {
+		return nil, domain.ErrReasonRequired
+	}
+	p.CurrentJudgement = strings.TrimSpace(p.CurrentJudgement)
+	p.RiskRemark = strings.TrimSpace(p.RiskRemark)
+
+	targets, appErr := s.resolveBatchHandoverTargets(ctx, actor, p)
+	if appErr != nil {
+		return nil, appErr
+	}
+	if len(targets) == 0 {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "no audit handover candidates match the request", nil)
+	}
+
+	resp := &BatchAuditHandoverResponse{
+		Results: make([]BatchAuditHandoverResultItem, 0, len(targets)),
+	}
+	for _, target := range targets {
+		item := BatchAuditHandoverResultItem{
+			TaskID: target.TaskID,
+			TaskNo: target.TaskNo,
+			Status: "failed",
+		}
+		if target.TaskNo == "" {
+			task, appErr := s.getTask(ctx, target.TaskID)
+			if appErr != nil {
+				item.Message = auditBatchErrorMessage(appErr)
+				resp.FailureCount++
+				resp.Results = append(resp.Results, item)
+				continue
+			}
+			item.TaskNo = task.TaskNo
+		}
+
+		handover, appErr := s.Handover(ctx, HandoverAuditParams{
+			TaskID:           target.TaskID,
+			FromAuditorID:    actor.ID,
+			ToAuditorID:      p.ToAuditorID,
+			Reason:           p.Reason,
+			CurrentJudgement: p.CurrentJudgement,
+			RiskRemark:       p.RiskRemark,
+		})
+		if appErr != nil {
+			item.Message = auditBatchErrorMessage(appErr)
+			resp.FailureCount++
+			resp.Results = append(resp.Results, item)
+			continue
+		}
+		item.Status = "success"
+		item.Message = "created"
+		if handover != nil {
+			item.HandoverID = &handover.ID
+		}
+		resp.SuccessCount++
+		resp.Results = append(resp.Results, item)
+	}
+	return resp, nil
+}
+
+type batchAuditHandoverTarget struct {
+	TaskID int64
+	TaskNo string
+}
+
+func (s *auditV7Service) resolveBatchHandoverTargets(ctx context.Context, actor domain.RequestActor, p BatchAuditHandoverParams) ([]batchAuditHandoverTarget, *domain.AppError) {
+	switch p.Mode {
+	case BatchAuditHandoverModeExplicit:
+		taskIDs := dedupePositiveTaskIDs(p.TaskIDs)
+		if len(taskIDs) == 0 {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "task_ids is required for explicit mode", nil)
+		}
+		if len(taskIDs) > AuditHandoverBatchDefaultLimit {
+			return nil, auditHandoverBatchLimitExceeded(int64(len(taskIDs)))
+		}
+		targets := make([]batchAuditHandoverTarget, 0, len(taskIDs))
+		for _, taskID := range taskIDs {
+			targets = append(targets, batchAuditHandoverTarget{TaskID: taskID})
+		}
+		return targets, nil
+	case BatchAuditHandoverModeAllMatching:
+		filter := p.Filters
+		filter.Page = 1
+		filter.PageSize = 100
+		first, appErr := s.listHandoverCandidatesForActor(ctx, actor, filter)
+		if appErr != nil {
+			return nil, appErr
+		}
+		if first.EligibleCount > int64(AuditHandoverBatchDefaultLimit) {
+			return nil, auditHandoverBatchLimitExceeded(first.EligibleCount)
+		}
+		targets := candidateItemsToBatchTargets(first.Items)
+		for page := 2; int64(len(targets)) < first.EligibleCount; page++ {
+			filter.Page = page
+			next, appErr := s.listHandoverCandidatesForActor(ctx, actor, filter)
+			if appErr != nil {
+				return nil, appErr
+			}
+			if len(next.Items) == 0 {
+				break
+			}
+			targets = append(targets, candidateItemsToBatchTargets(next.Items)...)
+		}
+		return targets, nil
+	default:
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "mode must be explicit or all_matching", nil)
+	}
+}
+
+func (s *auditV7Service) listHandoverCandidatesForActor(ctx context.Context, actor domain.RequestActor, filter AuditHandoverCandidateFilter) (*AuditHandoverCandidateListResponse, *domain.AppError) {
+	normalized, appErr := normalizeAuditHandoverCandidateFilter(filter)
+	if appErr != nil {
+		return nil, appErr
+	}
+	statuses := []domain.TaskStatus{domain.TaskStatusPendingAuditA, domain.TaskStatusPendingAuditB}
+	if normalized.Status != "" {
+		statuses = []domain.TaskStatus{normalized.Status}
+	}
+	ownerOrgTeams := []string{}
+	if normalized.OwnerOrgTeam != "" {
+		ownerOrgTeams = []string{normalized.OwnerOrgTeam}
+	}
+	handlerID := actor.ID
+	items, total, err := s.taskRepo.List(ctx, repo.TaskListFilter{
+		TaskQueryFilterDefinition: domain.TaskQueryFilterDefinition{
+			Statuses:      statuses,
+			BusinessLanes: []domain.TaskBusinessLane{domain.TaskBusinessLaneNormal},
+			WorkflowLanes: []domain.WorkflowLane{domain.WorkflowLaneNormal},
+			OwnerOrgTeams: ownerOrgTeams,
+		},
+		CurrentHandlerID:            &handlerID,
+		Keyword:                     normalized.Keyword,
+		ExcludePendingAuditHandover: true,
+		ScopeViewAll:                true,
+		Page:                        normalized.Page,
+		PageSize:                    normalized.PageSize,
+	})
+	if err != nil {
+		return nil, infraError("list audit handover candidates", err)
+	}
+	items = hydrateTaskListItems(items)
+	responseItems := make([]AuditHandoverCandidateItem, 0, len(items))
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		responseItems = append(responseItems, AuditHandoverCandidateItem{
+			TaskID:             item.ID,
+			TaskNo:             item.TaskNo,
+			SKUCode:            item.SKUCode,
+			PrimarySKUCode:     item.PrimarySKUCode,
+			ProductName:        item.ProductNameSnapshot,
+			TaskStatus:         item.TaskStatus,
+			OwnerOrgTeam:       item.OwnerOrgTeam,
+			CurrentHandlerID:   item.CurrentHandlerID,
+			CurrentHandlerName: item.CurrentHandlerName,
+			UpdatedAt:          item.UpdatedAt,
+		})
+	}
+	return &AuditHandoverCandidateListResponse{
+		Items:         responseItems,
+		Pagination:    buildPaginationMeta(normalized.Page, normalized.PageSize, total),
+		EligibleCount: total,
+		SelectedLimit: AuditHandoverBatchDefaultLimit,
+	}, nil
+}
+
+func normalizeAuditHandoverCandidateFilter(filter AuditHandoverCandidateFilter) (AuditHandoverCandidateFilter, *domain.AppError) {
+	filter.Keyword = strings.TrimSpace(filter.Keyword)
+	filter.OwnerOrgTeam = strings.TrimSpace(filter.OwnerOrgTeam)
+	filter.Status = domain.TaskStatus(strings.TrimSpace(string(filter.Status)))
+	if filter.Page < 1 {
+		filter.Page = 1
+	}
+	if filter.PageSize < 1 {
+		filter.PageSize = 20
+	}
+	if filter.PageSize > 100 {
+		filter.PageSize = 100
+	}
+	switch filter.Status {
+	case "", domain.TaskStatusPendingAuditA, domain.TaskStatusPendingAuditB:
+		return filter, nil
+	default:
+		return AuditHandoverCandidateFilter{}, domain.NewAppError(domain.ErrCodeInvalidRequest, "status must be PendingAuditA or PendingAuditB", nil)
+	}
+}
+
+func auditHandoverActorFromContext(ctx context.Context) (domain.RequestActor, *domain.AppError) {
+	actor, ok := domain.RequestActorFromContext(ctx)
+	if !ok || actor.ID <= 0 {
+		return domain.RequestActor{}, domain.ErrUnauthorized
+	}
+	actor.Roles = domain.NormalizeRoleValues(actor.Roles)
+	return actor, nil
+}
+
+func authorizeAuditHandoverBatchActor(actor domain.RequestActor) *domain.AppError {
+	rule := taskActionRuleFor(TaskActionAuditHandover)
+	if domain.ActorHasAnyRole(actor, rule.RequiredRoles) {
+		return nil
+	}
+	return domain.NewAppError(domain.ErrCodePermissionDenied, rule.RoleGateMessage, map[string]interface{}{
+		"action":       string(TaskActionAuditHandover),
+		"deny_code":    "missing_required_role",
+		"deny_reason":  "missing_required_role",
+		"matched_rule": rule.MatchedRule,
+		"actor_id":     actor.ID,
+		"actor_roles":  actor.Roles,
+	})
+}
+
+func dedupePositiveTaskIDs(taskIDs []int64) []int64 {
+	if len(taskIDs) == 0 {
+		return nil
+	}
+	seen := map[int64]struct{}{}
+	out := make([]int64, 0, len(taskIDs))
+	for _, taskID := range taskIDs {
+		if taskID <= 0 {
+			continue
+		}
+		if _, exists := seen[taskID]; exists {
+			continue
+		}
+		seen[taskID] = struct{}{}
+		out = append(out, taskID)
+	}
+	return out
+}
+
+func candidateItemsToBatchTargets(items []AuditHandoverCandidateItem) []batchAuditHandoverTarget {
+	targets := make([]batchAuditHandoverTarget, 0, len(items))
+	for _, item := range items {
+		targets = append(targets, batchAuditHandoverTarget{
+			TaskID: item.TaskID,
+			TaskNo: item.TaskNo,
+		})
+	}
+	return targets
+}
+
+func auditHandoverBatchLimitExceeded(eligibleCount int64) *domain.AppError {
+	return domain.NewAppError(domain.ErrCodeInvalidRequest, "audit handover batch exceeds selected limit", map[string]interface{}{
+		"deny_code":      "BATCH_LIMIT_EXCEEDED",
+		"eligible_count": eligibleCount,
+		"selected_limit": AuditHandoverBatchDefaultLimit,
+	})
+}
+
+func auditBatchErrorMessage(appErr *domain.AppError) string {
+	if appErr == nil {
+		return ""
+	}
+	if appErr.Message != "" {
+		return appErr.Message
+	}
+	return appErr.Code
+}
+
 func (s *auditV7Service) Takeover(ctx context.Context, taskID, handoverID, auditorID int64) *domain.AppError {
 	handover, err := s.auditV7Repo.GetHandoverByID(ctx, handoverID)
 	if err != nil {

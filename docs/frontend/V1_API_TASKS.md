@@ -14,7 +14,7 @@
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
-- 本文件覆盖 `188` 个 `/v1` path；同一路径多 method 合并在同一节。
+- 本文件覆盖 `190` 个 `/v1` path；同一路径多 method 合并在同一节。
 
 ## GET /v1/trace-events
 
@@ -3315,6 +3315,147 @@ Content-Type: `application/json`
 ### curl 示例
 ```bash
 curl -X POST https://api.example.com/v1/tasks/<id>/audit/transfer \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"example":"value"}'
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## GET /v1/tasks/audit/handover-candidates
+
+### 简介
+支持方法: GET。
+
+- `GET`: Returns only the authenticated actor's current regular audit tasks that can be handed over. The frontend cannot query another handler; the backend enforces `current_handler_id = actor_id`, `PendingAuditA/PendingAuditB`, regular lane, and no pending handover.
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `GET` 允许角色: Audit_A, Audit_B, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `keyword` | query | string | 否 | - |
+| `status` | query | enum(PendingAuditA/PendingAuditB) | 否 | - |
+| `owner_org_team` | query | string | 否 | - |
+| `page` | query | integer | 否 | - |
+| `page_size` | query | integer | 否 | - |
+
+请求体: 无请求体。
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "items": [
+      "..."
+    ],
+    "pagination": {
+      "page": "...",
+      "page_size": "...",
+      "total": "..."
+    },
+    "eligible_count": 123,
+    "selected_limit": 123
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | AuditHandoverCandidateListResponse | 否 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid filter |
+| 403 | 见 `error.code` | 见 `deny_code` | Missing audit handover capability. |
+
+### curl 示例
+```bash
+curl -X GET https://api.example.com/v1/tasks/audit/handover-candidates \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## POST /v1/tasks/audit/handover-batch
+
+### 简介
+支持方法: POST。
+
+- `POST`: Creates independent pending audit handovers for explicit task ids or all currently matching service-side candidates. The backend recomputes candidates and reuses the single-task handover validation for every task. `BATCH_LIMIT_EXCEEDED` is returned in error details when the selection is over the configured limit.
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `POST` 允许角色: Audit_A, Audit_B, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+无 path/query/header 参数。
+
+Content-Type: `application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `mode` | enum(explicit/all_matching) | 是 | - |
+| `task_ids` | array<integer> | 否 | Required when `mode=explicit`. |
+| `filters` | object | 否 | Candidate filters reused by `mode=all_matching`; the backend recomputes candidates and ignores frontend list state. |
+| `to_auditor_id` | integer | 是 | - |
+| `reason` | string | 是 | - |
+| `current_judgement` | string | 否 | - |
+| `risk_remark` | string | 否 | - |
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "success_count": 123,
+    "failure_count": 123,
+    "results": [
+      "..."
+    ]
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | BatchAuditHandoverResponse | 否 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid request. `details.deny_code=BATCH_LIMIT_EXCEEDED` when more than `selected_limit` tasks match. |
+| 403 | 见 `error.code` | 见 `deny_code` | Missing audit handover capability. |
+
+### curl 示例
+```bash
+curl -X POST https://api.example.com/v1/tasks/audit/handover-batch \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"example":"value"}'

@@ -49,6 +49,70 @@ export interface TaskReferenceBatchDownloadResponse {
   data?: TaskReferenceBatchDownloadManifest
 }
 
+export interface AuditHandoverCandidateFilters {
+  keyword?: string
+  status?: 'PendingAuditA' | 'PendingAuditB' | ''
+  owner_org_team?: string
+  page?: number
+  page_size?: number
+}
+
+export interface AuditHandoverCandidateItem {
+  task_id: number
+  task_no: string
+  sku_code?: string
+  primary_sku_code?: string
+  product_name?: string
+  task_status: 'PendingAuditA' | 'PendingAuditB' | string
+  owner_org_team?: string
+  current_handler_id?: number | null
+  current_handler_name?: string
+  updated_at: string
+}
+
+export interface AuditHandoverCandidateListData {
+  items: AuditHandoverCandidateItem[]
+  pagination: {
+    page: number
+    page_size: number
+    total: number
+  }
+  eligible_count: number
+  selected_limit: number
+}
+
+export interface AuditHandoverCandidateListResponse {
+  data?: AuditHandoverCandidateListData
+}
+
+export interface BatchAuditHandoverPayload {
+  mode: 'explicit' | 'all_matching'
+  task_ids?: number[]
+  filters?: AuditHandoverCandidateFilters
+  to_auditor_id: number
+  reason: string
+  current_judgement?: string
+  risk_remark?: string
+}
+
+export interface BatchAuditHandoverResultItem {
+  task_id: number
+  task_no?: string
+  status: 'success' | 'failed'
+  message?: string
+  handover_id?: number | null
+}
+
+export interface BatchAuditHandoverData {
+  success_count: number
+  failure_count: number
+  results: BatchAuditHandoverResultItem[]
+}
+
+export interface BatchAuditHandoverResponse {
+  data?: BatchAuditHandoverData
+}
+
 export interface TaskAiSummaryPerson {
   role: string
   name: string
@@ -423,6 +487,23 @@ export const tasksApi = {
     },
     signal?: AbortSignal,
   ) => http.post(`/v1/tasks/${id}/audit/handover`, payload, { signal }),
+
+  /**
+   * 统一审核交班候选列表
+   * GET /v1/tasks/audit/handover-candidates
+   */
+  listAuditHandoverCandidates: (params?: AuditHandoverCandidateFilters, signal?: AbortSignal) =>
+    http.get<AuditHandoverCandidateListResponse>('/v1/tasks/audit/handover-candidates', {
+      params,
+      signal,
+    }),
+
+  /**
+   * 统一审核交班批量提交
+   * POST /v1/tasks/audit/handover-batch
+   */
+  batchAuditHandover: (payload: BatchAuditHandoverPayload, signal?: AbortSignal) =>
+    http.post<BatchAuditHandoverResponse>('/v1/tasks/audit/handover-batch', payload, { signal }),
 
   /**
    * 任务交班记录列表

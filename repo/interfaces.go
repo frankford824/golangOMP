@@ -758,11 +758,13 @@ type TaskListFilter struct {
 	domain.TaskQueryFilterDefinition
 	CreatorID                   *int64
 	MineActorID                 *int64
+	CurrentHandlerID            *int64
 	DesignerID                  *int64
 	DesignerEmpty               *bool
 	NeedOutsource               *bool
 	Overdue                     *bool
 	Keyword                     string
+	ExcludePendingAuditHandover bool
 	ScopeViewAll                bool
 	ScopeDepartmentCodes        []string
 	ScopeTeamCodes              []string

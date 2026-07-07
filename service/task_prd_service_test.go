@@ -4747,9 +4747,15 @@ func (r *prdTaskRepo) List(_ context.Context, filter repo.TaskListFilter) ([]*do
 			copied := *item
 			copied.Workflow = buildTaskWorkflowSnapshotFromListItem(&copied)
 			copied.ProcurementSummary = buildProcurementSummaryFromListItem(&copied)
-			if matchesTaskFilter(&copied, taskFilter) {
-				filtered = append(filtered, &copied)
+			if !matchesTaskFilter(&copied, taskFilter) {
+				continue
 			}
+			if filter.CurrentHandlerID != nil {
+				if copied.CurrentHandlerID == nil || *copied.CurrentHandlerID != *filter.CurrentHandlerID {
+					continue
+				}
+			}
+			filtered = append(filtered, &copied)
 		}
 		pagination := buildPaginationMeta(filter.Page, filter.PageSize, int64(len(filtered)))
 		start := (pagination.Page - 1) * pagination.PageSize
