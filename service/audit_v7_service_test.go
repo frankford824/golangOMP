@@ -211,6 +211,58 @@ func TestAuditV7ServiceRejectExperienceFailureDoesNotBlockAudit(t *testing.T) {
 	}
 }
 
+func TestAuditV7ServiceApproveRejectsNonHandlerStageScope(t *testing.T) {
+	currentHandlerID := int64(231)
+	nonHandlerID := int64(235)
+	taskRepo := &prdTaskRepo{
+		tasks: map[int64]*domain.Task{
+			28: {
+				ID:               28,
+				TaskNo:           "RW-028",
+				TaskType:         domain.TaskTypeOriginalProductDevelopment,
+				TaskStatus:       domain.TaskStatusPendingAuditA,
+				BusinessLane:     domain.TaskBusinessLaneNormal,
+				OwnerDepartment:  "设计研发部",
+				OwnerOrgTeam:     "设计审核组",
+				CurrentHandlerID: &currentHandlerID,
+			},
+		},
+	}
+	userRepo := newIdentityUserRepo()
+	userRepo.users[currentHandlerID] = &domain.User{ID: currentHandlerID, DisplayName: "马雨琪", Team: "设计审核组", Status: domain.UserStatusActive}
+	userRepo.roles[currentHandlerID] = []domain.Role{domain.RoleAuditA}
+	userRepo.users[nonHandlerID] = &domain.User{ID: nonHandlerID, DisplayName: "同组普通审核", Team: "设计审核组", Status: domain.UserStatusActive}
+	userRepo.roles[nonHandlerID] = []domain.Role{domain.RoleAuditA}
+	svc := NewAuditV7Service(taskRepo, &auditV7RepoStub{}, &prdTaskEventRepo{}, prdCodeRuleService{}, step04TxRunner{},
+		WithAuditV7ScopeUserRepo(userRepo))
+	ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{
+		ID:       nonHandlerID,
+		Username: "same_team_auditor",
+		Roles:    []domain.Role{domain.RoleAuditA},
+		Team:     "设计审核组",
+		Source:   domain.RequestActorSourceSessionToken,
+		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
+	})
+
+	appErr := svc.Approve(ctx, ApproveAuditParams{
+		TaskID:     28,
+		AuditorID:  nonHandlerID,
+		Stage:      domain.AuditRecordStageA,
+		NextStatus: domain.TaskStatusPendingWarehouseReceive,
+		Comment:    "not current handler",
+	})
+	if appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
+		t.Fatalf("Approve() appErr = %+v, want permission denied", appErr)
+	}
+	details, _ := appErr.Details.(map[string]interface{})
+	if got := details["deny_code"]; got != "task_not_assigned_to_actor" {
+		t.Fatalf("Approve() deny_code = %v, want task_not_assigned_to_actor", got)
+	}
+	if taskRepo.tasks[28].TaskStatus != domain.TaskStatusPendingAuditA {
+		t.Fatalf("Approve() task status = %s, want unchanged PendingAuditA", taskRepo.tasks[28].TaskStatus)
+	}
+}
+
 func TestAuditV7ServiceHandoverRequiresTakeoverBeforeFurtherAuditActions(t *testing.T) {
 	currentHandlerID := int64(71)
 	taskRepo := &prdTaskRepo{
@@ -400,6 +452,319 @@ func TestAuditV7ServiceTransferRejectsCrossLaneAuditor(t *testing.T) {
 	})
 	if appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
 		t.Fatalf("Transfer() appErr = %+v, want permission denied", appErr)
+	}
+}
+
+func TestAuditV7ServiceTransferAllowsScopedManagerReassignCurrentHandler(t *testing.T) {
+	fromAuditorID := int64(231)
+	toAuditorID := int64(233)
+	managerID := int64(999)
+	taskRepo := &prdTaskRepo{
+		tasks: map[int64]*domain.Task{
+			25: {
+				ID:               25,
+				TaskNo:           "RW-025",
+				TaskType:         domain.TaskTypeOriginalProductDevelopment,
+				TaskStatus:       domain.TaskStatusPendingAuditA,
+				BusinessLane:     domain.TaskBusinessLaneNormal,
+				OwnerDepartment:  "设计研发部",
+				OwnerOrgTeam:     "设计审核组",
+				CurrentHandlerID: &fromAuditorID,
+			},
+		},
+	}
+	userRepo := newIdentityUserRepo()
+	userRepo.users[fromAuditorID] = &domain.User{ID: fromAuditorID, DisplayName: "马雨琪", Team: "设计审核组", Status: domain.UserStatusActive}
+	userRepo.roles[fromAuditorID] = []domain.Role{domain.RoleAuditA}
+	userRepo.users[toAuditorID] = &domain.User{ID: toAuditorID, DisplayName: "常规审核B", Team: "设计审核组", Status: domain.UserStatusActive}
+	userRepo.roles[toAuditorID] = []domain.Role{domain.RoleAuditA}
+	userRepo.users[managerID] = &domain.User{ID: managerID, DisplayName: "审核主管", Team: "设计审核组", Status: domain.UserStatusActive}
+	userRepo.roles[managerID] = []domain.Role{domain.RoleSuperAdmin}
+	auditRepo := &auditV7RepoStub{}
+	eventRepo := &prdTaskEventRepo{}
+	svc := NewAuditV7Service(taskRepo, auditRepo, eventRepo, prdCodeRuleService{}, step04TxRunner{},
+		WithAuditV7ScopeUserRepo(userRepo))
+	ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{
+		ID:       managerID,
+		Username: "audit_manager",
+		Roles:    []domain.Role{domain.RoleSuperAdmin},
+		Team:     "设计审核组",
+		Source:   domain.RequestActorSourceSessionToken,
+		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
+	})
+
+	appErr := svc.Transfer(ctx, TransferAuditParams{
+		TaskID:        25,
+		ActorID:       managerID,
+		FromAuditorID: fromAuditorID,
+		ToAuditorID:   toAuditorID,
+		Stage:         domain.AuditRecordStageA,
+		Comment:       "A 休息，主管改派",
+	})
+	if appErr != nil {
+		t.Fatalf("Transfer() unexpected error: %+v", appErr)
+	}
+	if taskRepo.tasks[25].CurrentHandlerID == nil || *taskRepo.tasks[25].CurrentHandlerID != toAuditorID {
+		t.Fatalf("Transfer() current_handler_id = %+v, want %d", taskRepo.tasks[25].CurrentHandlerID, toAuditorID)
+	}
+	if len(auditRepo.records) != 1 || auditRepo.records[0].AuditorID != managerID {
+		t.Fatalf("Transfer() audit record actor = %+v, want manager %d", auditRepo.records, managerID)
+	}
+	if len(eventRepo.events) != 1 || eventRepo.events[0].OperatorID == nil || *eventRepo.events[0].OperatorID != managerID {
+		t.Fatalf("Transfer() event operator = %+v, want manager %d", eventRepo.events, managerID)
+	}
+	var payload map[string]interface{}
+	if err := json.Unmarshal(eventRepo.events[0].Payload, &payload); err != nil {
+		t.Fatalf("unmarshal transfer payload: %v", err)
+	}
+	if payload["transfer_actor_id"] == nil || payload["from_auditor_id"] == nil || payload["to_auditor_id"] == nil {
+		t.Fatalf("Transfer() payload missing actor/from/to fields: %v", payload)
+	}
+}
+
+func TestAuditV7ServiceTransferRejectsFromAuditorMismatch(t *testing.T) {
+	currentHandlerID := int64(231)
+	incorrectFromID := int64(999)
+	toAuditorID := int64(233)
+	taskRepo := &prdTaskRepo{
+		tasks: map[int64]*domain.Task{
+			26: {
+				ID:               26,
+				TaskNo:           "RW-026",
+				TaskType:         domain.TaskTypeOriginalProductDevelopment,
+				TaskStatus:       domain.TaskStatusPendingAuditA,
+				BusinessLane:     domain.TaskBusinessLaneNormal,
+				OwnerDepartment:  "设计研发部",
+				OwnerOrgTeam:     "设计审核组",
+				CurrentHandlerID: &currentHandlerID,
+			},
+		},
+	}
+	userRepo := newIdentityUserRepo()
+	userRepo.users[currentHandlerID] = &domain.User{ID: currentHandlerID, DisplayName: "马雨琪", Team: "设计审核组", Status: domain.UserStatusActive}
+	userRepo.roles[currentHandlerID] = []domain.Role{domain.RoleAuditA}
+	userRepo.users[toAuditorID] = &domain.User{ID: toAuditorID, DisplayName: "常规审核B", Team: "设计审核组", Status: domain.UserStatusActive}
+	userRepo.roles[toAuditorID] = []domain.Role{domain.RoleAuditA}
+	userRepo.users[incorrectFromID] = &domain.User{ID: incorrectFromID, DisplayName: "审核主管", Team: "设计审核组", Status: domain.UserStatusActive}
+	userRepo.roles[incorrectFromID] = []domain.Role{domain.RoleSuperAdmin}
+	svc := NewAuditV7Service(taskRepo, &auditV7RepoStub{}, &prdTaskEventRepo{}, prdCodeRuleService{}, step04TxRunner{},
+		WithAuditV7ScopeUserRepo(userRepo))
+	ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{
+		ID:       incorrectFromID,
+		Username: "audit_manager",
+		Roles:    []domain.Role{domain.RoleSuperAdmin},
+		Team:     "设计审核组",
+		Source:   domain.RequestActorSourceSessionToken,
+		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
+	})
+
+	appErr := svc.Transfer(ctx, TransferAuditParams{
+		TaskID:        26,
+		ActorID:       incorrectFromID,
+		FromAuditorID: incorrectFromID,
+		ToAuditorID:   toAuditorID,
+		Stage:         domain.AuditRecordStageA,
+		Comment:       "bad from",
+	})
+	if appErr == nil || appErr.Code != domain.ErrCodeInvalidRequest {
+		t.Fatalf("Transfer() appErr = %+v, want invalid request", appErr)
+	}
+	details, _ := appErr.Details.(map[string]interface{})
+	if got := details["deny_code"]; got != "audit_transfer_from_mismatch" {
+		t.Fatalf("Transfer() deny_code = %v, want audit_transfer_from_mismatch", got)
+	}
+}
+
+func TestAuditV7ServiceTransferRejectsNonHandlerSpoofingCurrentHandler(t *testing.T) {
+	currentHandlerID := int64(231)
+	toAuditorID := int64(233)
+	nonHandlerID := int64(235)
+	taskRepo := &prdTaskRepo{
+		tasks: map[int64]*domain.Task{
+			27: {
+				ID:               27,
+				TaskNo:           "RW-027",
+				TaskType:         domain.TaskTypeOriginalProductDevelopment,
+				TaskStatus:       domain.TaskStatusPendingAuditA,
+				BusinessLane:     domain.TaskBusinessLaneNormal,
+				OwnerDepartment:  "设计研发部",
+				OwnerOrgTeam:     "设计审核组",
+				CurrentHandlerID: &currentHandlerID,
+			},
+		},
+	}
+	userRepo := newIdentityUserRepo()
+	userRepo.users[currentHandlerID] = &domain.User{ID: currentHandlerID, DisplayName: "马雨琪", Team: "设计审核组", Status: domain.UserStatusActive}
+	userRepo.roles[currentHandlerID] = []domain.Role{domain.RoleAuditA}
+	userRepo.users[toAuditorID] = &domain.User{ID: toAuditorID, DisplayName: "常规审核B", Team: "设计审核组", Status: domain.UserStatusActive}
+	userRepo.roles[toAuditorID] = []domain.Role{domain.RoleAuditA}
+	userRepo.users[nonHandlerID] = &domain.User{ID: nonHandlerID, DisplayName: "同组普通审核", Team: "设计审核组", Status: domain.UserStatusActive}
+	userRepo.roles[nonHandlerID] = []domain.Role{domain.RoleAuditA}
+	svc := NewAuditV7Service(taskRepo, &auditV7RepoStub{}, &prdTaskEventRepo{}, prdCodeRuleService{}, step04TxRunner{},
+		WithAuditV7ScopeUserRepo(userRepo))
+	ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{
+		ID:       nonHandlerID,
+		Username: "same_team_auditor",
+		Roles:    []domain.Role{domain.RoleAuditA},
+		Team:     "设计审核组",
+		Source:   domain.RequestActorSourceSessionToken,
+		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
+	})
+
+	appErr := svc.Transfer(ctx, TransferAuditParams{
+		TaskID:        27,
+		ActorID:       nonHandlerID,
+		FromAuditorID: currentHandlerID,
+		ToAuditorID:   toAuditorID,
+		Stage:         domain.AuditRecordStageA,
+		Comment:       "spoof current handler",
+	})
+	if appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
+		t.Fatalf("Transfer() appErr = %+v, want permission denied", appErr)
+	}
+	details, _ := appErr.Details.(map[string]interface{})
+	if got := details["deny_code"]; got != "task_not_assigned_to_actor" {
+		t.Fatalf("Transfer() deny_code = %v, want task_not_assigned_to_actor", got)
+	}
+	if taskRepo.tasks[27].CurrentHandlerID == nil || *taskRepo.tasks[27].CurrentHandlerID != currentHandlerID {
+		t.Fatalf("Transfer() current_handler_id = %+v, want unchanged %d", taskRepo.tasks[27].CurrentHandlerID, currentHandlerID)
+	}
+}
+
+func TestAuditV7ServiceListHandoversAllowsRegularAuditorByStage(t *testing.T) {
+	taskRepo := &prdTaskRepo{
+		tasks: map[int64]*domain.Task{
+			29: {
+				ID:              29,
+				TaskNo:          "RW-029",
+				TaskType:        domain.TaskTypeOriginalProductDevelopment,
+				TaskStatus:      domain.TaskStatusPendingAuditA,
+				BusinessLane:    domain.TaskBusinessLaneNormal,
+				OwnerDepartment: string(domain.DepartmentOperations),
+				OwnerOrgTeam:    "淘系一组",
+			},
+		},
+	}
+	auditRepo := &auditV7RepoStub{
+		handovers: []*domain.AuditHandover{
+			{ID: 2901, TaskID: 29, FromAuditorID: 231, ToAuditorID: 232, Status: domain.HandoverStatusPendingTakeover},
+		},
+	}
+	svc := NewAuditV7Service(taskRepo, auditRepo, &prdTaskEventRepo{}, prdCodeRuleService{}, step04TxRunner{},
+		WithAuditV7DataScopeResolver(NewRoleBasedDataScopeResolver()))
+	ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{
+		ID:       231,
+		Username: "audit_a",
+		Roles:    []domain.Role{domain.RoleAuditA},
+		Source:   domain.RequestActorSourceSessionToken,
+		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
+	})
+
+	handovers, appErr := svc.ListHandovers(ctx, 29)
+	if appErr != nil {
+		t.Fatalf("ListHandovers() unexpected error: %+v", appErr)
+	}
+	if len(handovers) != 1 || handovers[0].ID != 2901 {
+		t.Fatalf("ListHandovers() = %+v, want handover 2901", handovers)
+	}
+}
+
+func TestAuditV7ServiceListHandoversAllowsScopedDepartmentManager(t *testing.T) {
+	taskRepo := &prdTaskRepo{
+		tasks: map[int64]*domain.Task{
+			30: {
+				ID:              30,
+				TaskNo:          "RW-030",
+				TaskType:        domain.TaskTypeOriginalProductDevelopment,
+				TaskStatus:      domain.TaskStatusPendingAuditA,
+				BusinessLane:    domain.TaskBusinessLaneNormal,
+				OwnerDepartment: string(domain.DepartmentDesignRD),
+				OwnerOrgTeam:    "设计审核组",
+			},
+		},
+	}
+	auditRepo := &auditV7RepoStub{
+		handovers: []*domain.AuditHandover{
+			{ID: 3001, TaskID: 30, FromAuditorID: 231, ToAuditorID: 232, Status: domain.HandoverStatusPendingTakeover},
+		},
+	}
+	userRepo := newIdentityUserRepo()
+	userRepo.users[301] = &domain.User{
+		ID:                 301,
+		Username:           "design_dept_admin",
+		DisplayName:        "设计部门管理员",
+		Department:         domain.DepartmentDesignRD,
+		ManagedDepartments: []string{string(domain.DepartmentDesignRD)},
+		Status:             domain.UserStatusActive,
+	}
+	userRepo.roles[301] = []domain.Role{domain.RoleDeptAdmin}
+	svc := NewAuditV7Service(taskRepo, auditRepo, &prdTaskEventRepo{}, prdCodeRuleService{}, step04TxRunner{},
+		WithAuditV7DataScopeResolver(NewRoleBasedDataScopeResolver()),
+		WithAuditV7ScopeUserRepo(userRepo))
+	ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{
+		ID:       301,
+		Username: "design_dept_admin",
+		Roles:    []domain.Role{domain.RoleDeptAdmin},
+		Source:   domain.RequestActorSourceSessionToken,
+		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
+	})
+
+	handovers, appErr := svc.ListHandovers(ctx, 30)
+	if appErr != nil {
+		t.Fatalf("ListHandovers() unexpected error: %+v", appErr)
+	}
+	if len(handovers) != 1 || handovers[0].ID != 3001 {
+		t.Fatalf("ListHandovers() = %+v, want handover 3001", handovers)
+	}
+}
+
+func TestAuditV7ServiceListHandoversRejectsScopedDepartmentManagerOutsideScope(t *testing.T) {
+	taskRepo := &prdTaskRepo{
+		tasks: map[int64]*domain.Task{
+			31: {
+				ID:              31,
+				TaskNo:          "RW-031",
+				TaskType:        domain.TaskTypeOriginalProductDevelopment,
+				TaskStatus:      domain.TaskStatusPendingAuditA,
+				BusinessLane:    domain.TaskBusinessLaneNormal,
+				OwnerDepartment: string(domain.DepartmentOperations),
+				OwnerOrgTeam:    "淘系一组",
+			},
+		},
+	}
+	auditRepo := &auditV7RepoStub{
+		handovers: []*domain.AuditHandover{
+			{ID: 3101, TaskID: 31, FromAuditorID: 231, ToAuditorID: 232, Status: domain.HandoverStatusPendingTakeover},
+		},
+	}
+	userRepo := newIdentityUserRepo()
+	userRepo.users[311] = &domain.User{
+		ID:                 311,
+		Username:           "design_dept_admin",
+		DisplayName:        "设计部门管理员",
+		Department:         domain.DepartmentDesignRD,
+		ManagedDepartments: []string{string(domain.DepartmentDesignRD)},
+		Status:             domain.UserStatusActive,
+	}
+	userRepo.roles[311] = []domain.Role{domain.RoleDeptAdmin}
+	svc := NewAuditV7Service(taskRepo, auditRepo, &prdTaskEventRepo{}, prdCodeRuleService{}, step04TxRunner{},
+		WithAuditV7DataScopeResolver(NewRoleBasedDataScopeResolver()),
+		WithAuditV7ScopeUserRepo(userRepo))
+	ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{
+		ID:       311,
+		Username: "design_dept_admin",
+		Roles:    []domain.Role{domain.RoleDeptAdmin},
+		Source:   domain.RequestActorSourceSessionToken,
+		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
+	})
+
+	_, appErr := svc.ListHandovers(ctx, 31)
+	if appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
+		t.Fatalf("ListHandovers() appErr = %+v, want permission denied", appErr)
+	}
+	details, _ := appErr.Details.(map[string]interface{})
+	if got := details["deny_code"]; got != "audit_handover_list_out_of_scope" {
+		t.Fatalf("ListHandovers() deny_code = %v, want audit_handover_list_out_of_scope", got)
 	}
 }
 

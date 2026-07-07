@@ -23,7 +23,7 @@
 | GET | `/v1/roles` | List role catalog | GET:Admin, SuperAdmin, HRAdmin, DepartmentAdmin, OrgAdmin, RoleAdmin | [V1_API_USERS.md](V1_API_USERS.md) |
 | GET | `/v1/access-rules` | List protected route access rules | GET:已登录 / scope-aware | [V1_API_USERS.md](V1_API_USERS.md) |
 | GET, POST | `/v1/users` | List workflow users；Create workflow user | GET:Admin, SuperAdmin, HRAdmin, DepartmentAdmin, TeamLead, OrgAdmin, RoleAdmin; POST:HRAdmin, SuperAdmin, DepartmentAdmin | [V1_API_USERS.md](V1_API_USERS.md) |
-| GET | `/v1/users/designers` | List designers | GET:Ops, Designer, CustomizationOperator, Admin, HRAdmin, SuperAdmin | [V1_API_USERS.md](V1_API_USERS.md) |
+| GET | `/v1/users/designers` | List designers | GET:Ops, Designer, CustomizationOperator, Audit_A, Audit_B, Admin, HRAdmin, SuperAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_USERS.md](V1_API_USERS.md) |
 | GET, PATCH, DELETE | `/v1/users/{id}` | Get workflow user；Update workflow user；Delete workflow user | GET:Admin, SuperAdmin, HRAdmin, DepartmentAdmin, TeamLead, OrgAdmin, RoleAdmin; PATCH:HRAdmin, SuperAdmin, DepartmentAdmin; DELETE:SuperAdmin | [V1_API_USERS.md](V1_API_USERS.md) |
 | PUT | `/v1/users/{id}/password` | Reset workflow user password | PUT:HRAdmin, SuperAdmin, DepartmentAdmin | [V1_API_USERS.md](V1_API_USERS.md) |
 | POST, PUT | `/v1/users/{id}/roles` | Add workflow user roles；Replace workflow user roles | POST:HRAdmin, SuperAdmin; PUT:HRAdmin, SuperAdmin | [V1_API_USERS.md](V1_API_USERS.md) |
@@ -91,8 +91,8 @@
 | POST | `/v1/tasks/{id}/audit/approve` | Approve audit and move task to next status | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/tasks/{id}/audit/reject` | Reject audit | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/tasks/{id}/audit/transfer` | Transfer audit responsibility | POST:Audit_A, Audit_B, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| POST | `/v1/tasks/{id}/audit/handover` | Create audit handover | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| GET | `/v1/tasks/{id}/audit/handovers` | List audit handovers for task | GET:Audit_A, Audit_B, Admin | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/tasks/{id}/audit/handover` | Create audit handover | POST:Audit_A, Audit_B, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/tasks/{id}/audit/handovers` | List audit handovers for task | GET:Audit_A, Audit_B, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/tasks/{id}/audit/takeover` | Take over pending handover | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/tasks/{id}/outsource` | Create outsource order for task | POST:Outsource, Ops, Admin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/outsource-orders` | List outsource orders | GET:Outsource, Ops, Admin | [V1_API_TASKS.md](V1_API_TASKS.md) |

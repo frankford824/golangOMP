@@ -136,8 +136,9 @@ func (h *UserAdminHandler) ListUsers(c *gin.Context) {
 // `authorizeUserListFilter` management-scope filter and returns every active
 // candidate for the requested workflow_lane regardless of the actor's
 // department/team. The default lane is normal, preserving Round D Designer
-// behavior; customization selects CustomizationOperator; all returns the
-// deduped union. Access control for this route is enforced exclusively by
+// behavior; customization selects CustomizationOperator; audit selects regular
+// auditors; all returns the deduped design/customization union. Access control
+// for this route is enforced exclusively by
 // the route guard registered in transport/http.go (`/v1/users/designers`).
 //
 // This endpoint intentionally accepts no keyword/department/team/pagination
@@ -179,6 +180,8 @@ func parseAssignableLane(raw string) (service.AssignableLane, *domain.AppError) 
 		return service.AssignableLaneNormal, nil
 	case string(service.AssignableLaneCustomization):
 		return service.AssignableLaneCustomization, nil
+	case string(service.AssignableLaneAudit):
+		return service.AssignableLaneAudit, nil
 	case string(service.AssignableLaneAll):
 		return service.AssignableLaneAll, nil
 	default:

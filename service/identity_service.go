@@ -93,6 +93,7 @@ type AssignableLane string
 const (
 	AssignableLaneNormal        AssignableLane = "normal"
 	AssignableLaneCustomization AssignableLane = "customization"
+	AssignableLaneAudit         AssignableLane = "audit"
 	AssignableLaneAll           AssignableLane = "all"
 )
 
@@ -1107,6 +1108,16 @@ func (s *identityService) ListAssignableDesigners(ctx context.Context, actor *do
 			return nil, infraError("list assignable customization operators", err)
 		}
 		users = customizationUsers
+	case AssignableLaneAudit:
+		regularAuditors, err := s.userRepo.ListActiveByRole(ctx, domain.RoleAuditA)
+		if err != nil {
+			return nil, infraError("list assignable regular auditors", err)
+		}
+		legacyAuditors, err := s.userRepo.ListActiveByRole(ctx, domain.RoleAuditB)
+		if err != nil {
+			return nil, infraError("list assignable legacy regular auditors", err)
+		}
+		users = dedupeAssignableUsersByID(regularAuditors, legacyAuditors)
 	case AssignableLaneAll:
 		normalUsers, err := s.userRepo.ListActiveByRole(ctx, domain.RoleDesigner)
 		if err != nil {

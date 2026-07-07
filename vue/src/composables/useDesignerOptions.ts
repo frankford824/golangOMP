@@ -18,16 +18,22 @@ import type { Designer } from '@/mock/designers'
 import { usePermissionsStore } from '@/stores/permissions'
 
 /**
- * 后端 `GET /v1/users/designers` 的守卫白名单（v1.5/v1.6，见 docs/V0_9_MODEL_HANDOFF_MANIFEST.md）。
- * 其他角色（CustomizationOperator / DepartmentAdmin / Auditor / Warehouse / Member 等）
- * 请求必 403；前端在发起前先短路，避免 Network 面板每次路由切换都红一片。
+ * 后端 `GET /v1/users/designers` 的候选池守卫白名单。
+ * 该接口仍保留历史 path，但已经承载 normal/customization/audit 多个候选池；
+ * 前端在发起前先短路，避免无权限角色每次打开弹窗都产生 403。
  */
 const DESIGNERS_ALLOWED_ROLES = [
   'Ops',
   'Designer',
+  'CustomizationOperator',
+  'Audit_A',
+  'Audit_B',
   'Admin',
   'HRAdmin',
   'SuperAdmin',
+  'DepartmentAdmin',
+  'TeamLead',
+  'DesignDirector',
 ] as const
 
 export type UseDesignerOptionsOpts = {
@@ -50,7 +56,7 @@ export type UseDesignerOptionsOpts = {
   /**
    * 工作流泳道（N-F-1）。
    * - undefined / 'normal'：请求 `/v1/users/designers`，与迭代前完全一致。
-   * - 'customization' / 'all'：追加 `?workflow_lane=<value>`，返回对应泳道人员。
+   * - 'customization' / 'audit' / 'all'：追加 `?workflow_lane=<value>`，返回对应泳道人员。
    * 支持传 Ref，便于将来在同一下拉随表单 lane 切换。
    */
   workflowLane?: DesignersLane | Ref<DesignersLane | undefined>

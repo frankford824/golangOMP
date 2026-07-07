@@ -80,6 +80,10 @@ func seedAssignableLaneUsers(t *testing.T, repo *identityUserRepoStub) {
 	seedAssignableDesignerUser(t, repo, "custom_operator_a", "定制A", domain.DepartmentCustomizationArt, "定制默认组", domain.UserStatusActive, domain.RoleCustomizationOperator)
 	seedAssignableDesignerUser(t, repo, "custom_operator_b", "定制B", domain.DepartmentCustomizationArt, "定制默认组", domain.UserStatusActive, domain.RoleCustomizationOperator)
 	seedAssignableDesignerUser(t, repo, "custom_operator_disabled", "定制停用", domain.DepartmentCustomizationArt, "定制默认组", domain.UserStatusDisabled, domain.RoleCustomizationOperator)
+	seedAssignableDesignerUser(t, repo, "regular_auditor_a", "常规审核A", domain.DepartmentDesignRD, "设计审核组", domain.UserStatusActive, domain.RoleAuditA)
+	seedAssignableDesignerUser(t, repo, "regular_auditor_b", "常规审核B", domain.DepartmentDesignRD, "设计审核组", domain.UserStatusActive, domain.RoleAuditA)
+	seedAssignableDesignerUser(t, repo, "legacy_audit_b", "常规审核旧账号", domain.DepartmentDesignRD, "设计审核组", domain.UserStatusActive, domain.RoleAuditB)
+	seedAssignableDesignerUser(t, repo, "audit_disabled", "审核停用", domain.DepartmentDesignRD, "设计审核组", domain.UserStatusDisabled, domain.RoleAuditA)
 }
 
 func TestListAssignableDesigners_CustomizationLaneReturnsOperators(t *testing.T) {
@@ -110,6 +114,19 @@ func TestListAssignableDesigners_NormalLaneBackwardCompatible(t *testing.T) {
 		t.Fatalf("ListAssignableDesigners(default) error = %+v", appErr)
 	}
 	assertUsernamesExact(t, defaultUsers, []string{"designer_b", "designer_a"})
+}
+
+func TestListAssignableDesigners_AuditLaneReturnsRegularAuditors(t *testing.T) {
+	userRepo := newIdentityUserRepo()
+	svc := NewIdentityService(userRepo, &identitySessionRepoStub{}, &identityPermissionLogRepoStub{}, identityTxRunner{})
+	seedAssignableLaneUsers(t, userRepo)
+	seedAssignableDesignerUser(t, userRepo, "dual_audit_user", "双审核角色", domain.DepartmentDesignRD, "设计审核组", domain.UserStatusActive, domain.RoleAuditA, domain.RoleAuditB)
+
+	users, appErr := svc.ListAssignableDesigners(context.Background(), assignableDesignersOpsActor(), AssignableLaneAudit)
+	if appErr != nil {
+		t.Fatalf("ListAssignableDesigners(audit) error = %+v", appErr)
+	}
+	assertUsernamesExact(t, users, []string{"dual_audit_user", "regular_auditor_b", "regular_auditor_a", "legacy_audit_b"})
 }
 
 func TestListAssignableDesigners_AllLaneReturnsUnionDeduped(t *testing.T) {

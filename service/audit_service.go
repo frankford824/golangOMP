@@ -42,6 +42,7 @@ type RejectAuditParams struct {
 
 type TransferAuditParams struct {
 	TaskID        int64
+	ActorID       int64
 	FromAuditorID int64
 	ToAuditorID   int64
 	Stage         domain.AuditRecordStage

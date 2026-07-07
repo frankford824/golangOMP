@@ -13,10 +13,9 @@ import (
 
 // TestUsersDesignersRouteGuardRoundC verifies the Round C widening of the
 // `/v1/users/designers` route guard. Ops (the canonical task-creator role)
-// must pass the guard, as do HRAdmin and SuperAdmin. DepartmentAdmin remains
-// intentionally excluded at the route layer — cross-department designer
-// lookup is an Ops-style capability and DepartmentAdmin scope belongs to the
-// canonical `/v1/users` path governed by authorizeUserListFilter.
+// must pass the guard, as do HRAdmin and SuperAdmin. The endpoint also backs
+// lane-scoped candidate pickers such as audit handover/reassignment, so audit
+// and scoped management roles are allowed by the route guard.
 func TestUsersDesignersRouteGuardRoundC(t *testing.T) {
 	const (
 		pattern = "/v1/users/designers"
@@ -27,9 +26,14 @@ func TestUsersDesignersRouteGuardRoundC(t *testing.T) {
 		domain.RoleOps,
 		domain.RoleDesigner,
 		domain.RoleCustomizationOperator,
+		domain.RoleAuditA,
+		domain.RoleAuditB,
 		domain.RoleAdmin,
 		domain.RoleHRAdmin,
 		domain.RoleSuperAdmin,
+		domain.RoleDeptAdmin,
+		domain.RoleTeamLead,
+		domain.RoleDesignDirector,
 	}
 
 	cases := []struct {
@@ -58,6 +62,16 @@ func TestUsersDesignersRouteGuardRoundC(t *testing.T) {
 			want:  http.StatusNoContent,
 		},
 		{
+			name:  "audit_a_passes_guard",
+			roles: []domain.Role{domain.RoleAuditA},
+			want:  http.StatusNoContent,
+		},
+		{
+			name:  "legacy_audit_b_passes_guard",
+			roles: []domain.Role{domain.RoleAuditB},
+			want:  http.StatusNoContent,
+		},
+		{
 			name:  "hradmin_passes_guard",
 			roles: []domain.Role{domain.RoleHRAdmin},
 			want:  http.StatusNoContent,
@@ -68,14 +82,14 @@ func TestUsersDesignersRouteGuardRoundC(t *testing.T) {
 			want:  http.StatusNoContent,
 		},
 		{
-			name:  "department_admin_blocked_by_route_guard",
+			name:  "department_admin_passes_guard",
 			roles: []domain.Role{domain.RoleDeptAdmin},
-			want:  http.StatusForbidden,
+			want:  http.StatusNoContent,
 		},
 		{
-			name:  "team_lead_blocked_by_route_guard",
+			name:  "team_lead_passes_guard",
 			roles: []domain.Role{domain.RoleTeamLead},
-			want:  http.StatusForbidden,
+			want:  http.StatusNoContent,
 		},
 		{
 			name:  "member_only_blocked_by_route_guard",
@@ -135,9 +149,14 @@ func TestUsersDesignersRouteGuardCustomizationOperatorReceivesCustomizationPool(
 		domain.RoleOps,
 		domain.RoleDesigner,
 		domain.RoleCustomizationOperator,
+		domain.RoleAuditA,
+		domain.RoleAuditB,
 		domain.RoleAdmin,
 		domain.RoleHRAdmin,
 		domain.RoleSuperAdmin,
+		domain.RoleDeptAdmin,
+		domain.RoleTeamLead,
+		domain.RoleDesignDirector,
 	}
 
 	gin.SetMode(gin.TestMode)

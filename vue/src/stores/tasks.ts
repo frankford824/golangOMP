@@ -2251,11 +2251,39 @@ export const useTasksStore = defineStore('tasks', () => {
   /** 审核转交，调用 POST /v1/tasks/{id}/audit/transfer */
   async function transferAudit(
     taskId: string,
-    payload: { to_auditor_id: number; reason?: string },
+    payload: { to_auditor_id: number; stage: string; from_auditor_id?: number; comment?: string; reason?: string },
   ) {
     const task = getById(taskId)
     if (!task) throw new Error('任务不存在')
     await tasksApi.auditTransfer(taskId, payload)
+    await loadTaskById(taskId)
+  }
+
+  async function handoverAudit(
+    taskId: string,
+    payload: {
+      to_auditor_id: number
+      reason: string
+      current_judgement?: string
+      risk_remark?: string
+    },
+  ) {
+    const task = getById(taskId)
+    if (!task) throw new Error('任务不存在')
+    await tasksApi.auditHandover(taskId, payload)
+    await loadTaskById(taskId)
+  }
+
+  async function listAuditHandovers(taskId: string) {
+    const res = await tasksApi.listAuditHandovers(taskId)
+    const body = res?.data?.data ?? res?.data
+    return Array.isArray(body) ? body : []
+  }
+
+  async function takeoverAudit(taskId: string, handoverId: number) {
+    const task = getById(taskId)
+    if (!task) throw new Error('任务不存在')
+    await tasksApi.auditTakeover(taskId, { handover_id: handoverId })
     await loadTaskById(taskId)
   }
 
@@ -2600,6 +2628,9 @@ export const useTasksStore = defineStore('tasks', () => {
     passAudit,
     rejectAudit,
     transferAudit,
+    handoverAudit,
+    listAuditHandovers,
+    takeoverAudit,
     markPendingWarehouse,
     transferToAuditB,
     submitCustomizationReview,

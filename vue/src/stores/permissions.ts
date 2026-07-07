@@ -48,6 +48,22 @@ function normalizeUniqueKeys(keys: unknown): string[] {
   return Array.from(out)
 }
 
+const ROLE_COMPARE_ALIASES: Record<string, readonly string[]> = {
+  deptadmin: ['departmentadmin'],
+  departmentadmin: ['deptadmin'],
+  groupleader: ['teamlead'],
+  teamlead: ['groupleader'],
+}
+
+export function roleCodeCompareKeys(raw: unknown): string[] {
+  const base = String(raw ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+  if (!base) return []
+  return [base, ...(ROLE_COMPARE_ALIASES[base] ?? [])]
+}
+
 /**
  * 语义别名（后端动作 key → 前端 PermissionEnum key）。
  *
@@ -536,8 +552,8 @@ export const usePermissionsStore = defineStore('permissions', () => {
   function hasAnyRole(codes: readonly string[]): boolean {
     if (!currentUser.value) return false
     if (!codes.length) return false
-    const lowered = codes.map((c) => String(c).toLowerCase())
-    return roles.value.some((r) => lowered.includes(String(r).toLowerCase()))
+    const requested = new Set(codes.flatMap((code) => roleCodeCompareKeys(code)))
+    return roles.value.some((role) => roleCodeCompareKeys(role).some((key) => requested.has(key)))
   }
 
   function addDepartment(name: string): string | null {

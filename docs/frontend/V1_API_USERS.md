@@ -269,11 +269,11 @@ curl -X POST https://api.example.com/v1/users \
 ### 简介
 支持方法: GET。
 
-- `GET`: Returns users with Designer role for task creation/assignment dropdowns. Prefer this over filtering the full user list. Round C (v1.5) widens the route guard so Ops task creators plus HR/SuperAdmin can look up designers cross-department. `DepartmentAdmin` is intentionally NOT in the guard list: cross-department designer lookup is an Ops-style capability only. DepartmentAdmin remains scoped by `authorizeUserListFilter` on the canonical `/v1/users` path. As of v1.6 (Round D), this endpoint uses a dedicated assignment-candidate-pool service path (`IdentityService.ListAssignableDesigners`) that bypasses the standard user-list authorization filter. By default it remains restricted to `role=Designer` + `status=active` and does NOT accept department/team/keyword or pagination parameters. Round N adds `workflow_lane` to select the candidate-pool lane while preserving no-parameter backward compatibility. The route guard listed in `x-rbac-placeholder.required_roles` is the sole access control for this method; the service path performs no additional department/team scoping. Response envelope is `{data, pagination}` where `pagination.page_size` and `pagination.total` both reflect the full returned list length (no server-side pagination).
+- `GET`: Returns assignment candidates for task dropdowns. The historical path is still `/users/designers`, but `workflow_lane` now selects the actual candidate pool. Round C (v1.5) widens the route guard so Ops task creators plus HR/SuperAdmin can look up designers cross-department. As of v1.6 (Round D), this endpoint uses a dedicated assignment-candidate-pool service path (`IdentityService.ListAssignableDesigners`) that bypasses the standard user-list authorization filter. By default it remains restricted to `role=Designer` + `status=active` and does NOT accept department/team/keyword or pagination parameters. Round N adds `workflow_lane` to select the candidate-pool lane while preserving no-parameter backward compatibility. `workflow_lane=audit` returns active regular-audit candidates (`Audit_A` plus legacy `Audit_B`) for audit handover and scoped management reassignment. The route guard listed in `x-rbac-placeholder.required_roles` is the sole access control for this method; the service path performs no additional department/team scoping. Response envelope is `{data, pagination}` where `pagination.page_size` and `pagination.total` both reflect the full returned list length (no server-side pagination).
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `GET` 允许角色: Ops, Designer, CustomizationOperator, Admin, HRAdmin, SuperAdmin。
+- `GET` 允许角色: Ops, Designer, CustomizationOperator, Audit_A, Audit_B, Admin, HRAdmin, SuperAdmin, DepartmentAdmin, TeamLead, DesignDirector。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -281,7 +281,7 @@ curl -X POST https://api.example.com/v1/users \
 
 | 参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---|---|
-| `workflow_lane` | query | enum(normal/customization/all) | 否 | Selects the assignment candidate pool lane. `normal` (default, back-compat) returns active users with role=Designer. `customization` returns active users with role=CustomizationOperator. `all` returns the union. |
+| `workflow_lane` | query | enum(normal/customization/audit/all) | 否 | Selects the assignment candidate pool lane. `normal` (default, back-compat) returns active users with role=Designer. `customization` returns active users with role=CustomizationOperator. `audit` returns active users with role=Audit_A plus legacy Audit_B. `all` returns the design/customization union. |
 
 请求体: 无请求体。
 

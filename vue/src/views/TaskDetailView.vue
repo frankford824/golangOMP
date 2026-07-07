@@ -821,8 +821,57 @@
                         >
                           {{ actionLoading === 'audit-reject' ? '打回中...' : rejectButtonLabel }}
                         </button>
+                        <button
+                          v-if="showAuditHandoverButton"
+                          type="button"
+                          class="detail-v3-light-btn"
+                          :disabled="Boolean(actionLoading)"
+                          @click="openAuditAssigneeDialog('handover')"
+                        >
+                          发起交班
+                        </button>
+                        <button
+                          v-if="showAuditTransferToBButton"
+                          type="button"
+                          class="detail-v3-light-btn"
+                          :disabled="actionLoading === 'audit-pass'"
+                          @click="transferToBFromDetail"
+                        >
+                          转交复核
+                        </button>
                       </div>
-                      <p v-else class="detail-v3-card-muted">当前不在审核处理阶段，仅展示审核结果与稿件。</p>
+                      <div v-else-if="showAuditClaimButton" class="detail-v3-inline-actions">
+                        <button
+                          type="button"
+                          class="detail-v3-dark-btn"
+                          :disabled="actionLoading === 'audit-claim'"
+                          @click="claimAuditFromDetail"
+                        >
+                          {{ actionLoading === 'audit-claim' ? '领取中...' : '领取审核任务' }}
+                        </button>
+                      </div>
+                      <div v-else-if="showAuditTakeoverButton" class="detail-v3-inline-actions">
+                        <button
+                          type="button"
+                          class="detail-v3-dark-btn"
+                          :disabled="actionLoading === 'audit-takeover'"
+                          @click="takeoverAuditFromDetail"
+                        >
+                          {{ actionLoading === 'audit-takeover' ? '接手中...' : '接手交班任务' }}
+                        </button>
+                      </div>
+                      <div v-else-if="showAuditManagerTransferButton" class="detail-v3-inline-actions">
+                        <button
+                          type="button"
+                          class="detail-v3-light-btn"
+                          :disabled="actionLoading === 'audit-transfer'"
+                          @click="openAuditAssigneeDialog('manager-transfer')"
+                        >
+                          改派审核人
+                        </button>
+                      </div>
+                      <p v-if="auditActionNoticeText" class="detail-v3-card-muted">{{ auditActionNoticeText }}</p>
+                      <p v-else-if="!showActiveAuditActionButtons" class="detail-v3-card-muted">当前不在审核处理阶段，仅展示审核结果与稿件。</p>
                       <div v-if="canUploadAuditAssets" class="detail-v3-audit-upload">
                         <p class="detail-v3-card-muted">审核上传仅允许 source 修订源文件或 delivery 最终成品图。</p>
                         <input
@@ -1092,6 +1141,70 @@
       @confirm="onReassignConfirm"
     />
 
+    <BaseModal
+      v-model="auditAssigneeDialogVisible"
+      :title="auditAssigneeDialogTitle"
+      :show-confirm="false"
+      panel-class="max-w-xl"
+    >
+      <section class="audit-assignee-dialog">
+        <p class="audit-assignee-hint">{{ auditAssigneeDialogDescription }}</p>
+        <BaseSelect
+          v-model="selectedAuditAssigneeId"
+          label="接手审核人"
+          placeholder="请选择常规审核人员"
+          :options="auditAssigneeOptions"
+          :disabled="auditAssigneesLoading || Boolean(actionLoading)"
+          filterable
+          filter-placeholder="输入姓名或账号筛选"
+        />
+        <p v-if="auditAssigneesLoading" class="audit-assignee-hint">正在加载审核人员...</p>
+        <p v-else-if="!auditAssigneeOptions.length" class="audit-assignee-error">暂无可选常规审核人员，请先在用户管理中配置常规审核角色。</p>
+        <BaseTextarea
+          v-model="auditTransferReason"
+          label="原因"
+          :rows="3"
+          placeholder="例如：当前审核人休息，需交由其他常规审核继续处理"
+          :disabled="Boolean(actionLoading)"
+        />
+        <BaseTextarea
+          v-if="auditAssigneeDialogMode === 'handover'"
+          v-model="auditTransferJudgement"
+          label="当前判断"
+          :rows="2"
+          placeholder="可填写已发现的问题或当前审核判断"
+          :disabled="Boolean(actionLoading)"
+        />
+        <BaseTextarea
+          v-if="auditAssigneeDialogMode === 'handover'"
+          v-model="auditTransferRisk"
+          label="风险备注"
+          :rows="2"
+          placeholder="可填写接手人需要注意的风险"
+          :disabled="Boolean(actionLoading)"
+        />
+        <p v-if="auditTransferError || actionError" class="audit-assignee-error">
+          {{ auditTransferError || actionError }}
+        </p>
+      </section>
+      <template #footer>
+        <footer class="audit-assignee-footer">
+          <BaseButton size="sm" variant="secondary" :disabled="Boolean(actionLoading)" @click="closeAuditAssigneeDialog">
+            取消
+          </BaseButton>
+          <BaseButton
+            size="sm"
+            variant="primary"
+            :loading="actionLoading === 'audit-handover' || actionLoading === 'audit-transfer'"
+            :disabled="auditAssigneesLoading || Boolean(actionLoading)"
+            @click="submitAuditAssigneeDialog"
+          >
+            {{ auditAssigneeDialogConfirmLabel }}
+          </BaseButton>
+        </footer>
+      </template>
+    </BaseModal>
+
     <CancelReasonModal
       v-if="openCancel"
       :error-text="cancelErrorText"
@@ -1141,6 +1254,7 @@ import {
   canSubmitAudit,
   canUploadDesignDelivery,
   canReassignDesigner,
+  canTransferToAuditB,
   isInCustomizationArtReassignmentPhase,
   isInDesignerReassignmentPhase,
   isCustomizationTask as isCustomizationTaskByDomain,
@@ -1397,7 +1511,7 @@ const showCostInDetail = computed(
       t.taskType === 'PURCHASE_TASK'
     ) {
       return true
-    }
+}
     return Boolean(t.costPrice || t.costOverrideSummary || t.governanceAuditSummary || t.procurementSummary)
   },
 )
@@ -2160,6 +2274,17 @@ const isCurrentHandler = computed(() => {
   return String(currentUser.value?.id ?? '').trim() === handlerId
 })
 
+const auditCurrentHandlerId = computed(() => String(task.value?.currentHandlerId ?? '').trim())
+const currentUserIdText = computed(() => String(currentUser.value?.id ?? '').trim())
+const auditHasCurrentHandler = computed(() => auditCurrentHandlerId.value !== '')
+const isAuditAssignedToCurrentUser = computed(
+  () => auditHasCurrentHandler.value && auditCurrentHandlerId.value === currentUserIdText.value,
+)
+const isAuditUnassigned = computed(() => !auditHasCurrentHandler.value)
+const isAuditAssignedToOther = computed(
+  () => auditHasCurrentHandler.value && !isAuditAssignedToCurrentUser.value,
+)
+
 const canOperateTaskActions = computed(
   () => hasTaskScopeAccess.value && isCurrentHandler.value,
 )
@@ -2168,13 +2293,28 @@ const designModuleAllowsAssign = computed(() =>
   hasModuleAction(designModuleSummary.value, ['assign', 'task.assign']),
 )
 
+const AUDIT_MANAGER_REASSIGN_ROLES = [
+  'super_admin',
+  'hr_admin',
+  'department_admin',
+  'team_lead',
+] as const
+const canManageAuditAssignment = computed(() =>
+  permissionsStore.hasAnyRole([...AUDIT_MANAGER_REASSIGN_ROLES]),
+)
+
 const showAuditActionButtons = computed(
   () => {
     // 不因 hasTaskScopeAccess（owner_org_team / owner_department）拦截审核按钮：
     // 跨组发起的任务常被审核账号处理，但若审核员既非责任人又非同组，`canAccessTask` 为 false，
     // 会误藏「通过/打回」；门禁以 RBAC + 模块 allowed_actions / 任务状态兜底为准，与 showReassignDesignerButton 口径一致。
-    if (!task.value || !can([...AUDIT_PRIMARY_TOOLBAR_PERMISSION_KEYS])) return false
+    if (!task.value) return false
+    const hasAuditActionPermission = can([...AUDIT_PRIMARY_TOOLBAR_PERMISSION_KEYS])
+    if (!hasAuditActionPermission && !canManageAuditAssignment.value) return false
     if (isCustomizationTask.value) return false
+    if (canManageAuditAssignment.value) {
+      return Boolean(actionAvailability.value?.canShowAuditActions)
+    }
     if (hasModuleActionProjection(auditModuleSummary.value)) {
       return hasModuleAction(auditModuleSummary.value, ['approve', 'reject'])
     }
@@ -2193,8 +2333,11 @@ const showCustomizationReviewActionButtons = computed(() => {
     ])
   )
 })
+const showAuditReviewButtons = computed(
+  () => showAuditActionButtons.value && isAuditAssignedToCurrentUser.value,
+)
 const showActiveAuditActionButtons = computed(
-  () => showAuditActionButtons.value || showCustomizationReviewActionButtons.value,
+  () => showAuditReviewButtons.value || showCustomizationReviewActionButtons.value,
 )
 const retouchModuleState = computed(() => retouchModuleSummary.value?.state ?? '')
 
@@ -2219,7 +2362,51 @@ const showRetouchSubmitAction = computed(() => {
   if (retouchTaskHasDesigner.value) return true
   return false
 })
-const canUploadAuditAssets = computed(() => showAuditActionButtons.value)
+const canUploadAuditAssets = computed(() => showAuditReviewButtons.value)
+const hasPendingAuditHandover = computed(() =>
+  auditHandovers.value.some((handover) => handover?.status === 'pending_takeover'),
+)
+const pendingAuditHandoverForMe = computed(() =>
+  auditHandovers.value.find((handover) => {
+    if (handover?.status !== 'pending_takeover') return false
+    return String(handover.to_auditor_id ?? '').trim() === currentUserIdText.value
+  }) ?? null,
+)
+const showAuditClaimButton = computed(
+  () =>
+    showAuditActionButtons.value &&
+    isAuditUnassigned.value &&
+    !hasPendingAuditHandover.value &&
+    can('task.audit.claim'),
+)
+const showAuditHandoverButton = computed(
+  () => showAuditReviewButtons.value && can('task.audit.takeover'),
+)
+const showAuditTransferToBButton = computed(
+  () => !!task.value && showAuditReviewButtons.value && canTransferToAuditB(task.value),
+)
+const showAuditTakeoverButton = computed(
+  () => showAuditActionButtons.value && Boolean(pendingAuditHandoverForMe.value),
+)
+const showAuditManagerTransferButton = computed(
+  () =>
+    showAuditActionButtons.value &&
+    isAuditAssignedToOther.value &&
+    canManageAuditAssignment.value,
+)
+const auditActionNoticeText = computed(() => {
+  if (!showAuditActionButtons.value) return ''
+  if (auditHandoversLoading.value) return '正在读取审核交班状态...'
+  if (auditHandoversError.value) return auditHandoversError.value
+  if (showAuditTakeoverButton.value) return '该任务已交班给你，请先接手后再审核。'
+  if (hasPendingAuditHandover.value) return '该任务存在待接手的交班记录，需由指定审核人接手后继续处理。'
+  if (isAuditAssignedToOther.value) {
+    const name = task.value?.currentHandlerName?.trim() || `ID ${auditCurrentHandlerId.value}`
+    return `该任务当前由 ${name} 处理，其他常规审核不能直接审核。`
+  }
+  if (isAuditUnassigned.value) return '该任务尚未领取，请先领取后再审核。'
+  return ''
+})
 const purchaseWorkflowCanClose = computed(() => {
   if (!isPurchaseTask.value || !task.value) return false
   return task.value.workflowCanClose === true
@@ -3189,12 +3376,14 @@ async function loadTask() {
     void loadOpsReferenceBackendAssets()
     void loadTaskPredictions()
     void loadProductManagementRecords()
+    void loadAuditHandovers()
   } else {
     opsReferenceBackendAssets.value = []
     taskPredictionSuggestions.value = []
     productManagementRecords.value = []
+    auditHandovers.value = []
   }
-}
+	}
 
 async function loadTaskPredictions(): Promise<void> {
   taskPredictionAbort?.abort()
@@ -3293,15 +3482,29 @@ const actionLoading = ref<
   | ''
   | 'claim-retouch'
   | 'submit-retouch'
+  | 'audit-claim'
   | 'audit-pass'
   | 'audit-reject'
   | 'audit-upload'
+  | 'audit-handover'
+  | 'audit-takeover'
+  | 'audit-transfer'
   | 'warehouse-receive'
   | 'warehouse-reject'
   | 'warehouse-archive'
 >('')
 const assignDialogVisible = ref(false)
 const reassignDialogVisible = ref(false)
+const auditAssigneeDialogVisible = ref(false)
+const auditAssigneeDialogMode = ref<'handover' | 'manager-transfer'>('handover')
+const selectedAuditAssigneeId = ref<string | number>('')
+const auditTransferReason = ref('')
+const auditTransferJudgement = ref('')
+const auditTransferRisk = ref('')
+const auditTransferError = ref('')
+const auditHandovers = ref<Array<Record<string, unknown>>>([])
+const auditHandoversLoading = ref(false)
+const auditHandoversError = ref('')
 const eventLogOpen = ref(false)
 const aiSummaryOpen = ref(false)
 const aiSummaryLoading = ref(false)
@@ -3377,6 +3580,28 @@ async function loadSideEvents() {
     sideEventsError.value = e instanceof Error ? e.message : '事件加载失败'
   } finally {
     sideEventsLoading.value = false
+  }
+}
+
+async function loadAuditHandovers() {
+  const id = taskId.value
+  if (!id || isTempId.value || !showAuditActionButtons.value) {
+    auditHandovers.value = []
+    auditHandoversError.value = ''
+    auditHandoversLoading.value = false
+    return
+  }
+  auditHandoversLoading.value = true
+  auditHandoversError.value = ''
+  try {
+    auditHandovers.value = await tasksStore.listAuditHandovers(id)
+  } catch (err) {
+    auditHandovers.value = []
+    auditHandoversError.value = resolveApiUserMessage(err, {
+      fallback: '审核交班状态读取失败，请刷新后重试',
+    })
+  } finally {
+    auditHandoversLoading.value = false
   }
 }
 
@@ -3513,6 +3738,16 @@ const {
   workflowLane: assignDesignerWorkflowLane,
 })
 
+const {
+  assigneeOptions: auditAssigneeOptions,
+  loading: auditAssigneesLoading,
+  loadDesigners: loadAuditAssignees,
+} = useDesignerOptions({
+  includeEmpty: false,
+  autoLoad: false,
+  workflowLane: 'audit',
+})
+
 function flashSuccess(message: string) {
   actionError.value = ''
   actionSuccess.value = message
@@ -3566,6 +3801,88 @@ function auditStageForTask(): string {
   return 'A'
 }
 
+function openAuditAssigneeDialog(mode: 'handover' | 'manager-transfer') {
+  if (!task.value) return
+  auditAssigneeDialogMode.value = mode
+  selectedAuditAssigneeId.value = ''
+  auditTransferReason.value = ''
+  auditTransferJudgement.value = ''
+  auditTransferRisk.value = ''
+  auditTransferError.value = ''
+  actionError.value = ''
+  actionSuccess.value = ''
+  auditAssigneeDialogVisible.value = true
+  void loadAuditAssignees()
+}
+
+function closeAuditAssigneeDialog() {
+  auditAssigneeDialogVisible.value = false
+  auditTransferError.value = ''
+}
+
+const auditAssigneeDialogTitle = computed(() =>
+  auditAssigneeDialogMode.value === 'handover' ? '发起审核交班' : '改派审核人',
+)
+const auditAssigneeDialogDescription = computed(() =>
+  auditAssigneeDialogMode.value === 'handover'
+    ? '选择接手的常规审核人员，并填写交班原因。接手人确认后才能继续审核。'
+    : '当前审核人无法处理时，由管理人员把任务改派给其他常规审核人员。',
+)
+const auditAssigneeDialogConfirmLabel = computed(() =>
+  auditAssigneeDialogMode.value === 'handover' ? '确认交班' : '确认改派',
+)
+
+async function submitAuditAssigneeDialog() {
+  if (!task.value) return
+  const toAuditorID = Number.parseInt(String(selectedAuditAssigneeId.value), 10)
+  if (!Number.isSafeInteger(toAuditorID) || toAuditorID <= 0) {
+    auditTransferError.value = '请选择接手审核人'
+    return
+  }
+  const reason = auditTransferReason.value.trim()
+  if (!reason) {
+    auditTransferError.value = '请填写原因'
+    return
+  }
+  if (String(toAuditorID) === auditCurrentHandlerId.value) {
+    auditTransferError.value = '接手人不能与当前审核人相同'
+    return
+  }
+  const mode = auditAssigneeDialogMode.value
+  await runDetailAction(
+    mode === 'handover' ? 'audit-handover' : 'audit-transfer',
+    mode === 'handover' ? '审核交班失败' : '审核改派失败',
+    async () => {
+      if (mode === 'handover') {
+        await tasksStore.handoverAudit(task.value!.id, {
+          to_auditor_id: toAuditorID,
+          reason,
+          current_judgement: auditTransferJudgement.value.trim(),
+          risk_remark: auditTransferRisk.value.trim(),
+        })
+        flashSuccess('已发起审核交班，等待接手人确认')
+      } else {
+        const fromAuditorID = Number.parseInt(auditCurrentHandlerId.value, 10)
+        if (!Number.isSafeInteger(fromAuditorID) || fromAuditorID <= 0) {
+          throw new Error('当前任务没有可改派的审核人')
+        }
+        await tasksStore.transferAudit(task.value!.id, {
+          from_auditor_id: fromAuditorID,
+          to_auditor_id: toAuditorID,
+          stage: auditStageForTask(),
+          comment: reason,
+        })
+        flashSuccess('已改派审核人')
+      }
+      closeAuditAssigneeDialog()
+      auditRejectReasonCategory.value = ''
+      auditComment.value = ''
+      await loadAuditHandovers()
+      void loadSideEvents()
+    },
+  )
+}
+
 async function runDetailAction(
   key: Exclude<typeof actionLoading.value, ''>,
   fallback: string,
@@ -3582,6 +3899,31 @@ async function runDetailAction(
   } finally {
     actionLoading.value = ''
   }
+}
+
+async function claimAuditFromDetail(): Promise<void> {
+  if (!task.value || !showAuditClaimButton.value) return
+  await runDetailAction('audit-claim', '领取审核任务失败', async () => {
+    await tasksStore.claimAudit(task.value!.id, auditStageForTask())
+    flashSuccess('已领取审核任务')
+    await loadAuditHandovers()
+    void loadSideEvents()
+  })
+}
+
+async function takeoverAuditFromDetail(): Promise<void> {
+  if (!task.value || !pendingAuditHandoverForMe.value) return
+  const handoverID = Number.parseInt(String(pendingAuditHandoverForMe.value.id ?? ''), 10)
+  if (!Number.isSafeInteger(handoverID) || handoverID <= 0) {
+    actionError.value = '交班记录异常，请刷新后重试'
+    return
+  }
+  await runDetailAction('audit-takeover', '接手审核任务失败', async () => {
+    await tasksStore.takeoverAudit(task.value!.id, handoverID)
+    flashSuccess('已接手审核任务')
+    await loadAuditHandovers()
+    void loadSideEvents()
+  })
 }
 
 async function claimRetouchFromDetail(): Promise<void> {
@@ -3674,6 +4016,18 @@ async function rejectAuditFromDetail(): Promise<void> {
     auditRejectReasonCategory.value = ''
     auditComment.value = ''
     flashSuccess('已打回设计处理')
+    void loadSideEvents()
+  })
+}
+
+async function transferToBFromDetail(): Promise<void> {
+  if (!task.value || !showAuditReviewButtons.value || !canTransferToAuditB(task.value)) return
+  await runDetailAction('audit-pass', '转交复核失败', async () => {
+    await tasksStore.transferToAuditB(task.value!.id, auditComment.value.trim() || '转交复核')
+    auditRejectReasonCategory.value = ''
+    auditComment.value = ''
+    flashSuccess('已转交复核')
+    await loadAuditHandovers()
     void loadSideEvents()
   })
 }
@@ -5121,6 +5475,28 @@ watch(taskId, (id) => {
   margin: 0.45rem 0 0;
   font-size: 0.75rem;
   color: rgb(var(--yb-danger));
+}
+.audit-assignee-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+}
+.audit-assignee-hint {
+  margin: 0;
+  font-size: 0.875rem;
+  color: rgb(var(--yb-text-muted));
+}
+.audit-assignee-error {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: rgb(var(--yb-danger));
+}
+.audit-assignee-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  padding: 1rem 1.25rem;
+  border-top: 1px solid rgb(var(--yb-border-quiet));
 }
 .detail-v3-summary-fold {
   margin-top: 0.55rem;

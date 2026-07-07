@@ -8915,23 +8915,22 @@ paths:
     get:
       summary: List designers
       description: |
-        Returns users with Designer role for task creation/assignment dropdowns. Prefer this over filtering the full user list.
+        Returns assignment candidates for task dropdowns. The historical path is still `/users/designers`, but `workflow_lane` now selects the actual candidate pool.
         Round C (v1.5) widens the route guard so Ops task creators plus HR/SuperAdmin can look up designers cross-department.
-        `DepartmentAdmin` is intentionally NOT in the guard list: cross-department designer lookup is an Ops-style capability only. DepartmentAdmin remains scoped by `authorizeUserListFilter` on the canonical `/v1/users` path.
-        As of v1.6 (Round D), this endpoint uses a dedicated assignment-candidate-pool service path (`IdentityService.ListAssignableDesigners`) that bypasses the standard user-list authorization filter. By default it remains restricted to `role=Designer` + `status=active` and does NOT accept department/team/keyword or pagination parameters. Round N adds `workflow_lane` to select the candidate-pool lane while preserving no-parameter backward compatibility. The route guard listed in `x-rbac-placeholder.required_roles` is the sole access control for this method; the service path performs no additional department/team scoping. Response envelope is `{data, pagination}` where `pagination.page_size` and `pagination.total` both reflect the full returned list length (no server-side pagination).
+        As of v1.6 (Round D), this endpoint uses a dedicated assignment-candidate-pool service path (`IdentityService.ListAssignableDesigners`) that bypasses the standard user-list authorization filter. By default it remains restricted to `role=Designer` + `status=active` and does NOT accept department/team/keyword or pagination parameters. Round N adds `workflow_lane` to select the candidate-pool lane while preserving no-parameter backward compatibility. `workflow_lane=audit` returns active regular-audit candidates (`Audit_A` plus legacy `Audit_B`) for audit handover and scoped management reassignment. The route guard listed in `x-rbac-placeholder.required_roles` is the sole access control for this method; the service path performs no additional department/team scoping. Response envelope is `{data, pagination}` where `pagination.page_size` and `pagination.total` both reflect the full returned list length (no server-side pagination).
       tags: [ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
         auth_mode: session_token_role_enforced
-        required_roles: [Ops, Designer, CustomizationOperator, Admin, HRAdmin, SuperAdmin]
+        required_roles: [Ops, Designer, CustomizationOperator, Audit_A, Audit_B, Admin, HRAdmin, SuperAdmin, DepartmentAdmin, TeamLead, DesignDirector]
       parameters:
         - in: query
           name: workflow_lane
           required: false
-          description: "Selects the assignment candidate pool lane. `normal` (default, back-compat) returns active users with role=Designer. `customization` returns active users with role=CustomizationOperator. `all` returns the union."
+          description: "Selects the assignment candidate pool lane. `normal` (default, back-compat) returns active users with role=Designer. `customization` returns active users with role=CustomizationOperator. `audit` returns active users with role=Audit_A plus legacy Audit_B. `all` returns the design/customization union."
           schema:
             type: string
-            enum: [normal, customization, all]
+            enum: [normal, customization, audit, all]
             default: normal
       responses:
         '200':
@@ -14145,7 +14144,7 @@ paths:
   /v1/tasks/{id}/audit/transfer:
     post:
       summary: Transfer audit responsibility
-      description: "`from_auditor_id` is optional and defaults to the current authenticated actor. This action uses minimum role plus org or handler gating over canonical task ownership. `Audit_A` is the canonical regular-audit role for both stage A and handoff/recheck stage B; legacy `Audit_B` accounts remain accepted for compatibility. Non-management actors must currently own the handler slot."
+      description: "`from_auditor_id` identifies the task's current audit handler and, when supplied, must match `current_handler_id`. It defaults to the current authenticated actor for ordinary self-transfer. The authenticated actor is recorded separately as the transfer actor, so scoped management roles can reassign a task when the current handler is unavailable. This action uses minimum role plus org or handler gating over canonical task ownership. `Audit_A` is the canonical regular-audit role for both stage A and handoff/recheck stage B; legacy `Audit_B` accounts remain accepted for compatibility. Non-management actors must currently own the handler slot."
       tags: [Audit, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
@@ -14166,7 +14165,7 @@ paths:
               properties:
                 from_auditor_id:
                   type: integer
-                  description: Optional override for compatibility. Defaults to the current authenticated actor.
+                  description: Optional current-handler id. Defaults to the current authenticated actor and must match the task current_handler_id when provided.
                 to_auditor_id: { type: integer }
                 stage:
                   type: string
@@ -14184,13 +14183,32 @@ paths:
   /v1/tasks/{id}/audit/handover:
     post:
       summary: Create audit handover
+      description: Creates a pending audit handover from the current audit handler to another audit candidate. The task handler is cleared until the target auditor calls takeover with the returned handover id.
       tags: [Audit, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Audit_A, Audit_B, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector]
       parameters:
         - in: path
           name: id
           required: true
           schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to_auditor_id, reason]
+              properties:
+                from_auditor_id:
+                  type: integer
+                  description: Optional current handler override. Defaults to the authenticated actor.
+                to_auditor_id: { type: integer }
+                reason: { type: string }
+                current_judgement: { type: string }
+                risk_remark: { type: string }
       responses:
         '200':
           description: Audit handover
@@ -14209,7 +14227,7 @@ paths:
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
         auth_mode: session_token_role_enforced
-        required_roles: [Audit_A, Audit_B, Admin]
+        required_roles: [Audit_A, Audit_B, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector]
       parameters:
         - in: path
           name: id
@@ -14227,6 +14245,8 @@ paths:
                     type: array
                     items:
                       $ref: '#/components/schemas/AuditHandover'
+        '403':
+          description: "`PERMISSION_DENIED` with `deny_code=audit_handover_list_out_of_scope` when a scoped management actor reads a task outside their organization scope."
         '404':
           description: Task not found
   /v1/tasks/{id}/audit/takeover:

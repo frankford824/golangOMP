@@ -1,12 +1,12 @@
 import http from '@/services/http'
 
-export type DesignersLane = 'normal' | 'customization' | 'all'
+export type DesignersLane = 'normal' | 'customization' | 'audit' | 'all'
 
 export interface GetDesignersOptions {
   /**
    * 工作流泳道。
    * - undefined / 'normal'：不拼查询串，保留与迭代前一致的 URL、缓存键与遥测数据。
-   * - 'customization' / 'all'：追加 `?workflow_lane=<value>`，由后端返回对应泳道用户。
+   * - 'customization' / 'audit' / 'all'：追加 `?workflow_lane=<value>`，由后端返回对应泳道用户。
    */
   workflowLane?: DesignersLane
 }

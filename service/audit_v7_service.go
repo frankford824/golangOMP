@@ -500,7 +500,12 @@ func (s *auditV7Service) Transfer(ctx context.Context, p TransferAuditParams) *d
 	if appErr != nil {
 		return appErr
 	}
+	transferActorID := p.ActorID
+	if transferActorID <= 0 {
+		transferActorID = p.FromAuditorID
+	}
 	if appErr := s.ensureAuditLanePolicy(ctx, task, string(TaskActionAuditTransfer), []auditLaneAccessSubject{
+		{UserID: transferActorID, Label: "transfer_actor_id"},
 		{UserID: p.FromAuditorID, Label: "from_auditor_id"},
 		{UserID: p.ToAuditorID, Label: "to_auditor_id"},
 	}); appErr != nil {
@@ -513,6 +518,31 @@ func (s *auditV7Service) Transfer(ctx context.Context, p TransferAuditParams) *d
 	authz.logDecision(TaskActionAuditTransfer, decision)
 	if !decision.Allowed {
 		return taskActionDecisionAppError(TaskActionAuditTransfer, decision)
+	}
+	if task.CurrentHandlerID == nil || *task.CurrentHandlerID <= 0 {
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "audit transfer requires a current audit handler", map[string]interface{}{
+			"deny_code":       "audit_transfer_requires_current_handler",
+			"task_id":         p.TaskID,
+			"task_status":     string(task.TaskStatus),
+			"from_auditor_id": p.FromAuditorID,
+		})
+	}
+	if p.FromAuditorID <= 0 || p.FromAuditorID != *task.CurrentHandlerID {
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "from_auditor_id must match current audit handler", map[string]interface{}{
+			"deny_code":          "audit_transfer_from_mismatch",
+			"task_id":            p.TaskID,
+			"task_status":        string(task.TaskStatus),
+			"current_handler_id": *task.CurrentHandlerID,
+			"from_auditor_id":    p.FromAuditorID,
+		})
+	}
+	if p.ToAuditorID == p.FromAuditorID {
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "to_auditor_id must be different from current audit handler", map[string]interface{}{
+			"deny_code":       "audit_transfer_target_same_as_current_handler",
+			"task_id":         p.TaskID,
+			"from_auditor_id": p.FromAuditorID,
+			"to_auditor_id":   p.ToAuditorID,
+		})
 	}
 	stage, ok := activeAuditStageFromStatus(task.TaskStatus)
 	if !ok {
@@ -534,7 +564,7 @@ func (s *auditV7Service) Transfer(ctx context.Context, p TransferAuditParams) *d
 			TaskID:         p.TaskID,
 			Stage:          p.Stage,
 			Action:         domain.AuditActionTypeTransfer,
-			AuditorID:      p.FromAuditorID,
+			AuditorID:      transferActorID,
 			IssueTypesJSON: "[]",
 			Comment:        p.Comment,
 		}); err != nil {
@@ -543,12 +573,13 @@ func (s *auditV7Service) Transfer(ctx context.Context, p TransferAuditParams) *d
 		if err := s.taskRepo.UpdateHandler(ctx, tx, p.TaskID, &p.ToAuditorID); err != nil {
 			return err
 		}
-		_, err := s.taskEventRepo.Append(ctx, tx, p.TaskID, domain.TaskEventAuditTransferred, &p.FromAuditorID,
+		_, err := s.taskEventRepo.Append(ctx, tx, p.TaskID, domain.TaskEventAuditTransferred, &transferActorID,
 			taskTransitionEventPayload(task, task.TaskStatus, task.TaskStatus, task.CurrentHandlerID, &p.ToAuditorID, map[string]interface{}{
-				"from_auditor_id": p.FromAuditorID,
-				"to_auditor_id":   p.ToAuditorID,
-				"stage":           string(p.Stage),
-				"comment":         p.Comment,
+				"transfer_actor_id": transferActorID,
+				"from_auditor_id":   p.FromAuditorID,
+				"to_auditor_id":     p.ToAuditorID,
+				"stage":             string(p.Stage),
+				"comment":           p.Comment,
 			}))
 		return err
 	})
@@ -722,7 +753,11 @@ func (s *auditV7Service) Takeover(ctx context.Context, taskID, handoverID, audit
 }
 
 func (s *auditV7Service) ListHandovers(ctx context.Context, taskID int64) ([]*domain.AuditHandover, *domain.AppError) {
-	if _, appErr := s.getTask(ctx, taskID); appErr != nil {
+	task, appErr := s.getTask(ctx, taskID)
+	if appErr != nil {
+		return nil, appErr
+	}
+	if appErr := s.authorizeListHandovers(ctx, task); appErr != nil {
 		return nil, appErr
 	}
 
@@ -731,6 +766,61 @@ func (s *auditV7Service) ListHandovers(ctx context.Context, taskID int64) ([]*do
 		return nil, infraError("list handovers", err)
 	}
 	return handovers, nil
+}
+
+func (s *auditV7Service) authorizeListHandovers(ctx context.Context, task *domain.Task) *domain.AppError {
+	actor, ok := domain.RequestActorFromContext(ctx)
+	if !ok || actor.ID <= 0 {
+		return nil
+	}
+	scope, appErr := resolveDataScopeForActor(ctx, s.dataScopeResolver, s.scopeUserRepo)
+	if appErr != nil {
+		return appErr
+	}
+	if scope == nil || scope.ViewAll {
+		return nil
+	}
+	if hasAnyRoleValue(actor.Roles, domain.RoleAuditA, domain.RoleAuditB) && matchesAnyStageVisibility(task, scope.StageVisibilities) {
+		return nil
+	}
+	if auditHandoverListOrgScopeAllows(task, scope) {
+		return nil
+	}
+	return domain.NewAppError(domain.ErrCodePermissionDenied, "audit handover list is outside the actor organization scope", map[string]interface{}{
+		"deny_code":        "audit_handover_list_out_of_scope",
+		"task_id":          task.ID,
+		"task_status":      string(task.TaskStatus),
+		"owner_department": task.OwnerDepartment,
+		"owner_org_team":   task.OwnerOrgTeam,
+		"actor_id":         actor.ID,
+		"actor_roles":      actor.Roles,
+	})
+}
+
+func auditHandoverListOrgScopeAllows(task *domain.Task, scope *DataScope) bool {
+	if task == nil || scope == nil {
+		return false
+	}
+	applyTaskReadModelOrgOwnership(task)
+	for _, uid := range scope.UserIDs {
+		if uid <= 0 {
+			continue
+		}
+		if task.CurrentHandlerID != nil && *task.CurrentHandlerID == uid {
+			return true
+		}
+	}
+	for _, department := range append(append([]string{}, scope.DepartmentCodes...), scope.ManagedDepartmentCodes...) {
+		if department != "" && department == task.OwnerDepartment {
+			return true
+		}
+	}
+	for _, team := range append(append([]string{}, scope.TeamCodes...), scope.ManagedTeamCodes...) {
+		if team != "" && team == task.OwnerOrgTeam {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *auditV7Service) getTask(ctx context.Context, taskID int64) (*domain.Task, *domain.AppError) {

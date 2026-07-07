@@ -444,7 +444,7 @@ export const tasksApi = {
    */
   auditTransfer: (
     id: string,
-    payload: { to_auditor_id: number; reason?: string },
+    payload: { to_auditor_id: number; stage: string; from_auditor_id?: number; comment?: string; reason?: string },
     signal?: AbortSignal,
   ) => http.post(`/v1/tasks/${id}/audit/transfer`, payload, { signal }),
 

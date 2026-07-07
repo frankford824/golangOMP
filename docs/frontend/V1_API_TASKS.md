@@ -3277,7 +3277,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/audit/reject \
 ### 简介
 支持方法: POST。
 
-- `POST`: `from_auditor_id` is optional and defaults to the current authenticated actor. This action uses minimum role plus org or handler gating over canonical task ownership. `Audit_A` is the canonical regular-audit role for both stage A and handoff/recheck stage B; legacy `Audit_B` accounts remain accepted for compatibility. Non-management actors must currently own the handler slot.
+- `POST`: `from_auditor_id` identifies the task's current audit handler and, when supplied, must match `current_handler_id`. It defaults to the current authenticated actor for ordinary self-transfer. The authenticated actor is recorded separately as the transfer actor, so scoped management roles can reassign a task when the current handler is unavailable. This action uses minimum role plus org or handler gating over canonical task ownership. `Audit_A` is the canonical regular-audit role for both stage A and handoff/recheck stage B; legacy `Audit_B` accounts remain accepted for compatibility. Non-management actors must currently own the handler slot.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -3295,7 +3295,7 @@ Content-Type: `application/json`
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `from_auditor_id` | integer | 否 | Optional override for compatibility. Defaults to the current authenticated actor. |
+| `from_auditor_id` | integer | 否 | Optional current-handler id. Defaults to the current authenticated actor and must match the task current_handler_id when provided. |
 | `to_auditor_id` | integer | 是 | - |
 | `stage` | enum(A/B/outsource_review) | 是 | - |
 | `comment` | string | 否 | - |
@@ -3334,11 +3334,11 @@ curl -X POST https://api.example.com/v1/tasks/<id>/audit/transfer \
 ### 简介
 支持方法: POST。
 
-- `POST`: Create audit handover
+- `POST`: Creates a pending audit handover from the current audit handler to another audit candidate. The task handler is cleared until the target auditor calls takeover with the returned handover id.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `POST` 允许角色: 已登录 / scope-aware。
+- `POST` 允许角色: Audit_A, Audit_B, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -3348,7 +3348,15 @@ curl -X POST https://api.example.com/v1/tasks/<id>/audit/transfer \
 |---|---|---|---|---|
 | `id` | path | integer | 是 | - |
 
-请求体: 无请求体。
+Content-Type: `application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `from_auditor_id` | integer | 否 | Optional current handler override. Defaults to the authenticated actor. |
+| `to_auditor_id` | integer | 是 | - |
+| `reason` | string | 是 | - |
+| `current_judgement` | string | 否 | - |
+| `risk_remark` | string | 否 | - |
 
 ### 响应体 schema
 成功响应: `200 application/json`
@@ -3380,7 +3388,9 @@ curl -X POST https://api.example.com/v1/tasks/<id>/audit/transfer \
 ### curl 示例
 ```bash
 curl -X POST https://api.example.com/v1/tasks/<id>/audit/handover \
-  -H "Authorization: Bearer $TOKEN"
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"example":"value"}'
 ```
 
 ### 前端最佳实践
@@ -3401,7 +3411,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/audit/handover \
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `GET` 允许角色: Audit_A, Audit_B, Admin。
+- `GET` 允许角色: Audit_A, Audit_B, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -3436,6 +3446,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/audit/handover \
 ### 错误码
 | HTTP | code | deny_code | 说明 |
 |---|---|---|---|
+| 403 | 见 `error.code` | 见 `deny_code` | `PERMISSION_DENIED` with `deny_code=audit_handover_list_out_of_scope` when a scoped management actor reads a task outside their organization scope. |
 | 404 | 见 `error.code` | 见 `deny_code` | Task not found |
 
 ### curl 示例

@@ -219,7 +219,14 @@
     <p v-if="blockSuccess" class="block-success">{{ blockSuccess }}</p>
     <p v-if="blockError" class="block-error">{{ blockError }}</p>
 
-    <div v-if="can(['task.audit.review', 'task.audit.claim', 'task.audit.takeover'])" class="audit-reference-box">
+    <div
+      v-if="
+        hasTaskScopeAccess &&
+        isCurrentHandler &&
+        can(['task.audit.review', 'task.audit.claim', 'task.audit.takeover'])
+      "
+      class="audit-reference-box"
+    >
       <p class="customization-review-title">审核参考图区</p>
       <p class="customization-review-hint">
         仅绑定 owner_module_key=audit，使用 replace 策略，不会创建或覆盖设计资产版本链。

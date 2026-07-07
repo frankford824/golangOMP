@@ -143,36 +143,60 @@ func TestListDesignersHandler_InvokesAssignableMethod(t *testing.T) {
 }
 
 func TestListDesignersHandler_ParsesWorkflowLane(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	rec := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(rec)
-	req := httptest.NewRequest(http.MethodGet, "/v1/users/designers?workflow_lane=customization", nil)
-	ctx := domain.WithRequestActor(req.Context(), domain.RequestActor{
-		ID:       42,
-		Username: "ops_user",
-		Roles:    []domain.Role{domain.RoleOps},
-		Source:   domain.RequestActorSourceSessionToken,
-		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
-	})
-	c.Request = req.WithContext(ctx)
-
-	svc := &userAdminServiceStub{
-		listAssignableDesignersResp: []*domain.User{
-			{ID: 20, Username: "custom_operator_a", DisplayName: "定制A"},
+	cases := []struct {
+		name     string
+		query    string
+		wantLane service.AssignableLane
+		username string
+	}{
+		{
+			name:     "customization",
+			query:    "customization",
+			wantLane: service.AssignableLaneCustomization,
+			username: "custom_operator_a",
+		},
+		{
+			name:     "audit",
+			query:    "audit",
+			wantLane: service.AssignableLaneAudit,
+			username: "regular_auditor_a",
 		},
 	}
-	h := NewUserAdminHandler(svc, nil, nil)
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			req := httptest.NewRequest(http.MethodGet, "/v1/users/designers?workflow_lane="+tc.query, nil)
+			ctx := domain.WithRequestActor(req.Context(), domain.RequestActor{
+				ID:       42,
+				Username: "ops_user",
+				Roles:    []domain.Role{domain.RoleOps},
+				Source:   domain.RequestActorSourceSessionToken,
+				AuthMode: domain.AuthModeSessionTokenRoleEnforced,
+			})
+			c.Request = req.WithContext(ctx)
 
-	h.ListDesigners(c)
+			svc := &userAdminServiceStub{
+				listAssignableDesignersResp: []*domain.User{
+					{ID: 20, Username: tc.username, DisplayName: "候选人"},
+				},
+			}
+			h := NewUserAdminHandler(svc, nil, nil)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("ListDesigners(customization) status = %d, want 200 (body=%s)", rec.Code, rec.Body.String())
-	}
-	if svc.lastAssignableLane != service.AssignableLaneCustomization {
-		t.Fatalf("ListDesigners(customization) lane = %q, want customization", svc.lastAssignableLane)
-	}
-	if !bytes.Contains(rec.Body.Bytes(), []byte(`"custom_operator_a"`)) {
-		t.Fatalf("ListDesigners(customization) body missing customization payload: %s", rec.Body.String())
+			h.ListDesigners(c)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("ListDesigners(%s) status = %d, want 200 (body=%s)", tc.query, rec.Code, rec.Body.String())
+			}
+			if svc.lastAssignableLane != tc.wantLane {
+				t.Fatalf("ListDesigners(%s) lane = %q, want %q", tc.query, svc.lastAssignableLane, tc.wantLane)
+			}
+			if !bytes.Contains(rec.Body.Bytes(), []byte(tc.username)) {
+				t.Fatalf("ListDesigners(%s) body missing payload: %s", tc.query, rec.Body.String())
+			}
+		})
 	}
 }
 

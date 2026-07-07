@@ -226,7 +226,7 @@ func (a *taskActionAuthorizer) EvaluateTaskActionPolicyWithAttributes(
 		return decision
 	}
 
-	if task != nil && !taskActionScopeHasElevatedMatch(actor, scopeEval) {
+	if task != nil && !taskActionScopeHasElevatedMatch(resolvedAction, actor, scopeEval) {
 		if handlerDenyCode, handlerDenyReason := evaluateHandlerPolicy(rule.HandlerPolicy, task, scopeEval); handlerDenyCode != "" {
 			decision.DenyCode = handlerDenyCode
 			decision.DenyReason = handlerDenyReason
@@ -576,11 +576,14 @@ func resolveAuditStageAction(action TaskAction, stage domain.AuditRecordStage) T
 	return action
 }
 
-func taskActionScopeHasElevatedMatch(actor *taskActionActor, scopeEval taskActionScopeEvaluation) bool {
+func taskActionScopeHasElevatedMatch(action TaskAction, actor *taskActionActor, scopeEval taskActionScopeEvaluation) bool {
 	if actor == nil {
 		return false
 	}
-	if scopeEval.Has(TaskActionScopeViewAll) || scopeEval.Has(TaskActionScopeManagedDepartment) || scopeEval.Has(TaskActionScopeManagedTeam) || scopeEval.Has(TaskActionScopeStage) {
+	if scopeEval.Has(TaskActionScopeViewAll) || scopeEval.Has(TaskActionScopeManagedDepartment) || scopeEval.Has(TaskActionScopeManagedTeam) {
+		return true
+	}
+	if scopeEval.Has(TaskActionScopeStage) && (!taskActionIsAuditAction(action) || taskActionActorHasManagementScopeRole(actor)) {
 		return true
 	}
 	if scopeEval.Has(TaskActionScopeDepartment) && taskActionActorHasDepartmentManagementRole(actor) {
@@ -590,6 +593,10 @@ func taskActionScopeHasElevatedMatch(actor *taskActionActor, scopeEval taskActio
 		return true
 	}
 	return false
+}
+
+func taskActionIsAuditAction(action TaskAction) bool {
+	return strings.HasPrefix(string(action), "audit_")
 }
 
 func ruleAllowsScope(rule taskActionRule, target TaskActionScopeSource) bool {

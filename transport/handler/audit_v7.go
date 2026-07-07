@@ -163,13 +163,18 @@ func (h *AuditV7Handler) Transfer(c *gin.Context) {
 		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
 		return
 	}
-	fromAuditorID, appErr := actorIDOrRequestValue(c, req.FromAuditorID, "from_auditor_id")
+	actorID, appErr := actorIDOrRequestValue(c, nil, "actor_id")
 	if appErr != nil {
 		respondError(c, appErr)
 		return
 	}
+	fromAuditorID := actorID
+	if req.FromAuditorID != nil && *req.FromAuditorID > 0 {
+		fromAuditorID = *req.FromAuditorID
+	}
 	if appErr := h.auditSvc.Transfer(c.Request.Context(), service.TransferAuditParams{
 		TaskID:        taskID,
+		ActorID:       actorID,
 		FromAuditorID: fromAuditorID,
 		ToAuditorID:   req.ToAuditorID,
 		Stage:         domain.AuditRecordStage(req.Stage),
