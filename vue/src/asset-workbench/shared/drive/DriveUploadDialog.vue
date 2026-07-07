@@ -4,32 +4,14 @@ import { CheckCircle2, FileUp, LoaderCircle, Upload, XCircle } from 'lucide-vue-
 
 import {
   createDriveUploadQueue,
+  driveUploadRelativePath,
+  filesFromDriveDrop,
+  isSafeDriveUploadPath,
   uploadDriveQueue,
-  withDriveUploadRelativePath,
   type DriveUploadQueueItem,
   type DriveUploadQueueStatus,
 } from '@aw/shared/drive/useDriveUpload'
 import IconfontActionIcon from '@aw/shared/icons/IconfontActionIcon.vue'
-
-interface DroppedFileSystemEntry {
-  name: string
-  isFile: boolean
-  isDirectory: boolean
-}
-
-interface DroppedFileEntry extends DroppedFileSystemEntry {
-  file: (success: (file: File) => void, failure?: (error: DOMException) => void) => void
-}
-
-interface DroppedDirectoryEntry extends DroppedFileSystemEntry {
-  createReader: () => {
-    readEntries: (success: (entries: DroppedFileSystemEntry[]) => void, failure?: (error: DOMException) => void) => void
-  }
-}
-
-type DropItemWithEntry = DataTransferItem & {
-  webkitGetAsEntry?: () => unknown
-}
 
 const props = defineProps<{
   open: boolean
@@ -110,7 +92,7 @@ function handleFolderInput(event: Event) {
 async function handleDrop(event: DragEvent) {
   dragging.value = false
   try {
-    enqueue(await filesFromDrop(event.dataTransfer))
+    enqueue(await filesFromDriveDrop(event.dataTransfer))
   } catch {
     error.value = '文件夹读取失败，请改用“选择文件夹”'
   }
@@ -149,66 +131,7 @@ function fileAllowed(file: File) {
 }
 
 function filePathAllowed(file: File) {
-  const relativePath = fileUploadRelativePath(file)
-  if (!relativePath || relativePath.includes('\x00') || relativePath.includes(':')) return false
-  return relativePath.split('/').every((part) => {
-    const value = part.trim()
-    return value && value !== '.' && value !== '..' && !value.startsWith('.') && value !== '@eaDir' && value !== '#recycle' && value !== '__MACOSX'
-  })
-}
-
-function fileUploadRelativePath(file: File) {
-  const withPath = file as File & {
-    assetWorkbenchRelativePath?: string
-    webkitRelativePath?: string
-  }
-  return (withPath.assetWorkbenchRelativePath || withPath.webkitRelativePath || file.name).replace(/\\/g, '/').replace(/^\/+/, '')
-}
-
-async function filesFromDrop(dataTransfer: DataTransfer | null): Promise<File[]> {
-  if (!dataTransfer) return []
-  const entries = Array.from(dataTransfer.items || [])
-    .map(entryFromDropItem)
-    .filter((entry): entry is DroppedFileSystemEntry => !!entry)
-  if (!entries.length) return Array.from(dataTransfer.files ?? [])
-  const groups = await Promise.all(entries.map((entry) => filesFromEntry(entry)))
-  return groups.flat()
-}
-
-function entryFromDropItem(item: DataTransferItem): DroppedFileSystemEntry | null {
-  const entry = (item as DropItemWithEntry).webkitGetAsEntry?.()
-  return entry ? (entry as DroppedFileSystemEntry) : null
-}
-
-async function filesFromEntry(entry: DroppedFileSystemEntry, parentPath = ''): Promise<File[]> {
-  const relativePath = normalizeDroppedPath(parentPath ? `${parentPath}/${entry.name}` : entry.name)
-  if (entry.isFile) {
-    const file = await fileFromEntry(entry as DroppedFileEntry)
-    return file.size > 0 ? [withDriveUploadRelativePath(file, relativePath)] : []
-  }
-  if (!entry.isDirectory) return []
-  const children = await readDirectoryEntries(entry as DroppedDirectoryEntry)
-  const groups = await Promise.all(children.map((child) => filesFromEntry(child, relativePath)))
-  return groups.flat()
-}
-
-function fileFromEntry(entry: DroppedFileEntry): Promise<File> {
-  return new Promise((resolve, reject) => entry.file(resolve, reject))
-}
-
-async function readDirectoryEntries(entry: DroppedDirectoryEntry): Promise<DroppedFileSystemEntry[]> {
-  const reader = entry.createReader()
-  const entries: DroppedFileSystemEntry[] = []
-  while (true) {
-    const batch = await new Promise<DroppedFileSystemEntry[]>((resolve, reject) => reader.readEntries(resolve, reject))
-    if (!batch.length) break
-    entries.push(...batch)
-  }
-  return entries
-}
-
-function normalizeDroppedPath(value: string) {
-  return value.replace(/\\/g, '/').replace(/^\/+/, '')
+  return isSafeDriveUploadPath(driveUploadRelativePath(file))
 }
 
 function removeItem(id: string) {

@@ -6,6 +6,7 @@ import { useAssetWorkbenchBootstrap } from '@aw/app/useAssetWorkbenchBootstrap'
 import { uploadWorkbenchFile } from '@aw/features/upload/uploadFlow'
 import { assetWorkbenchApi, type DifficultyClassRow, type FilePreviewMeta, type SubmissionFileRow, type UploadDirectoryRow } from '@aw/shared/api/assetWorkbenchApi'
 import { usePageRequest } from '@aw/shared/composables/usePageRequest'
+import { driveUploadRelativePath, filesFromDriveDrop, isSafeDriveUploadPath } from '@aw/shared/drive/useDriveUpload'
 import { currentBusinessMonth } from '@aw/shared/format/businessMonth'
 import { difficultyCodes, firstDifficultyCode } from '@aw/shared/format/difficulty'
 import { formatFileSize, formatInt } from '@aw/shared/format/number'
@@ -25,6 +26,7 @@ type QueueStatus = 'queued' | 'uploading' | 'uploaded' | 'failed'
 interface QueueItem {
   id: string
   file: File
+  relativePath: string
   difficultyClass: string
   finalized: boolean
   pageCount: number
@@ -49,6 +51,7 @@ interface UploadBatchResult {
 
 const queue = ref<QueueItem[]>([])
 const inputRef = ref<HTMLInputElement | null>(null)
+const folderInputRef = ref<HTMLInputElement | null>(null)
 const uploading = ref(false)
 const submitting = ref(false)
 const error = ref('')
@@ -109,6 +112,12 @@ const canSimpleSubmit = computed(() => {
 })
 const totalPages = computed(() => queue.value.reduce((sum, item) => sum + item.pageCount, 0))
 const difficultyOptions = computed(() => difficultyCodes(difficultyRows.value))
+const selectedAllowedFileTypes = computed(() => normalizedAllowedFileTypes(selectedUploadDirectory.value?.allowed_file_types ?? []))
+const selectedAllowedLabel = computed(() => (selectedAllowedFileTypes.value.length ? selectedAllowedFileTypes.value.join('、') : '全部格式'))
+const selectedAcceptString = computed(() => {
+  if (!selectedAllowedFileTypes.value.length) return ''
+  return selectedAllowedFileTypes.value.map((value) => (value.includes('/') ? value : `.${value}`)).join(',')
+})
 const uploadStats = computed(() => {
   const total = queue.value.length
   const uploaded = queue.value.filter((item) => item.status === 'uploaded').length
@@ -183,7 +192,7 @@ const uploadSpreadsheetValidations = computed<WorkbenchSpreadsheetValidation[]>(
 const uploadSpreadsheetSource = computed<WorkbenchSpreadsheetSource>(() => ({
   id: 'asset-upload-queue-spreadsheet',
   revision: queue.value
-    .map((item) => `${item.id}:${item.status}:${item.difficultyClass}:${item.pageCount}:${item.finalized}:${item.error ?? ''}`)
+    .map((item) => `${item.id}:${item.relativePath}:${item.status}:${item.difficultyClass}:${item.pageCount}:${item.finalized}:${item.error ?? ''}`)
     .join('|'),
   mode: 'import-review',
   title: '上传队列表格校对',
@@ -219,7 +228,7 @@ const uploadSpreadsheetSource = computed<WorkbenchSpreadsheetSource>(() => ({
       ],
       rows: queue.value.map((item) => ({
         id: item.id,
-        file_name: item.file.name,
+        file_name: queueItemDisplayName(item),
         directory: item.uploadDirectoryName || selectedUploadDirectory.value?.name || '默认目录',
         difficultyClass: item.difficultyClass || uploadDirectoryDifficulty(selectedUploadDirectory.value),
         pageCount: item.pageCount,
@@ -237,15 +246,29 @@ function openFilePicker() {
   inputRef.value?.click()
 }
 
+function openFolderPicker() {
+  folderInputRef.value?.click()
+}
+
 function handleInput(event: Event) {
   const target = event.target as HTMLInputElement
   enqueueFiles(target.files)
   target.value = ''
 }
 
-function handleDrop(event: DragEvent) {
+function handleFolderInput(event: Event) {
+  const target = event.target as HTMLInputElement
+  enqueueFiles(target.files)
+  target.value = ''
+}
+
+async function handleDrop(event: DragEvent) {
   draggingFiles.value = false
-  enqueueFiles(event.dataTransfer?.files)
+  try {
+    enqueueFiles(await filesFromDriveDrop(event.dataTransfer))
+  } catch {
+    error.value = '文件夹读取失败，请改用“选择文件夹”'
+  }
 }
 
 function handleDragEnter(event: DragEvent) {
@@ -270,17 +293,29 @@ function isFileDrag(event: DragEvent) {
   return Array.from(event.dataTransfer?.types ?? []).includes('Files')
 }
 
-function enqueueFiles(files: FileList | null | undefined) {
-  if (!files?.length) return
-  notice.value = ''
+function enqueueFiles(files: FileList | File[] | null | undefined) {
+  const values = Array.from(files ?? [])
+  if (!values.length) {
+    error.value = '没有读取到可上传文件'
+    return
+  }
+  const { accepted, rejected } = filterUploadFiles(values)
+  if (!accepted.length) {
+    error.value = `没有读取到可上传文件。请确认文件夹内有文件，且格式符合当前目录要求（允许：${selectedAllowedLabel.value}）。`
+    return
+  }
+  notice.value = rejected > 0
+    ? `已跳过 ${formatInt(rejected)} 个空文件、系统隐藏文件或不符合目录格式限制的文件（允许：${selectedAllowedLabel.value}）。`
+    : ''
   error.value = ''
   submittedFiles.value = []
   lastUploadResult.value = null
   lastSubmissionResult.value = null
-  for (const file of Array.from(files)) {
+  for (const file of accepted) {
     queue.value.push({
       id: crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`,
       file,
+      relativePath: driveUploadRelativePath(file),
       difficultyClass: selectedUploadDirectory.value?.difficulty_class ?? firstDifficultyCode(difficultyRows.value),
       finalized: true,
       pageCount: 1,
@@ -288,6 +323,34 @@ function enqueueFiles(files: FileList | null | undefined) {
       status: 'queued',
     })
   }
+}
+
+function filterUploadFiles(files: File[]) {
+  const allowed = selectedAllowedFileTypes.value
+  const accepted = files.filter((file) => file.size > 0 && uploadFileAllowed(file, allowed) && uploadFilePathAllowed(file))
+  return { accepted, rejected: files.length - accepted.length }
+}
+
+function uploadFilePathAllowed(file: File) {
+  return isSafeDriveUploadPath(driveUploadRelativePath(file))
+}
+
+function uploadFileAllowed(file: File, allowed: string[]) {
+  if (!allowed.length) return true
+  const ext = file.name.includes('.') ? file.name.split('.').pop()?.toLowerCase() || '' : ''
+  const mimeType = file.type.trim().toLowerCase()
+  return allowed.some((value) => {
+    if (ext && value === ext) return true
+    if (mimeType && value === mimeType) return true
+    if (mimeType && value.endsWith('/*')) return mimeType.startsWith(value.slice(0, -1))
+    return false
+  })
+}
+
+function normalizedAllowedFileTypes(values: string[]) {
+  return values
+    .map((value) => value.trim().toLowerCase().replace(/^\.+/, ''))
+    .filter(Boolean)
 }
 
 async function uploadQueuedItems() {
@@ -302,8 +365,15 @@ async function uploadQueuedItems() {
   const uploadDirectoryId = selectedUploadDirectoryId.value || undefined
   const uploadDirectoryName = selectedUploadDirectory.value?.name ?? ''
   const uploadDirectoryDifficulty = selectedUploadDirectory.value?.difficulty_class ?? firstDifficultyCode(difficultyRows.value)
+  const uploadBatchId = crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`
   for (const item of queue.value) {
     if (item.status !== 'queued' && item.status !== 'failed') continue
+    const allowed = selectedAllowedFileTypes.value
+    if (!uploadFileAllowed(item.file, allowed) || !uploadFilePathAllowed(item.file)) {
+      item.status = 'failed'
+      item.error = `当前目录不允许上传这个文件。请确认格式或文件夹路径（允许：${selectedAllowedLabel.value}）。`
+      continue
+    }
     item.status = 'uploading'
     item.error = ''
     item.progress = 0
@@ -313,6 +383,9 @@ async function uploadQueuedItems() {
     try {
       const uploaded = await uploadWorkbenchFile(item.file, {
         uploadDirectoryId,
+        uploadBatchId,
+        relativePath: item.relativePath,
+        isFolderUpload: item.relativePath.includes('/'),
         expectedBusinessMonth: pageBusinessMonth,
         onProgress: (progress) => {
           item.progress = progress.percent
@@ -442,6 +515,10 @@ function uploadDirectoryDifficulty(directory?: UploadDirectoryRow) {
   return directory?.difficulty_class || firstDifficultyCode(difficultyRows.value)
 }
 
+function queueItemDisplayName(item: QueueItem) {
+  return item.relativePath || item.file.name
+}
+
 function removeItem(id: string) {
   queue.value = queue.value.filter((item) => item.id !== id)
   const next = new Set(expandedItemIds.value)
@@ -552,6 +629,7 @@ onMounted(() => {
       </div>
       <div class="aw-page-bar__actions">
         <button class="aw-secondary-button" type="button" @click="openFilePicker">选择文件</button>
+        <button class="aw-secondary-button" type="button" @click="openFolderPicker">选择文件夹</button>
         <button class="aw-secondary-button" type="button" @click="uploadSpreadsheetOpen = !uploadSpreadsheetOpen">
           <Table2 :size="16" aria-hidden="true" />
           {{ uploadSpreadsheetOpen ? '收起表格校对' : '表格校对' }}
@@ -570,7 +648,18 @@ onMounted(() => {
       </div>
     </div>
 
-    <input ref="inputRef" class="aw-visually-hidden" type="file" multiple aria-label="选择作品文件" @change="handleInput" />
+    <input ref="inputRef" class="aw-visually-hidden" type="file" multiple :accept="selectedAcceptString" aria-label="选择作品文件" @change="handleInput" />
+    <input
+      ref="folderInputRef"
+      class="aw-visually-hidden"
+      type="file"
+      multiple
+      webkitdirectory
+      directory
+      :accept="selectedAcceptString"
+      aria-label="选择作品文件夹"
+      @change="handleFolderInput"
+    />
 
     <div class="aw-panel">
       <div class="aw-panel__head">
@@ -619,10 +708,11 @@ onMounted(() => {
       @keydown="handleDropzoneKeydown"
     >
       <FileUp :size="30" aria-hidden="true" />
-      <strong>{{ queue.length ? '继续拖拽文件到这里' : '拖拽文件到这里' }}</strong>
-      <span>{{ isSimpleUser ? '拖入或选择文件后，点击提交上传会自动完成上传和提交。' : '拖入或选择文件后，点击一次即可上传并生成提交记录。' }}</span>
+      <strong>{{ queue.length ? '继续拖拽文件或文件夹到这里' : '拖拽文件或文件夹到这里' }}</strong>
+      <span>{{ isSimpleUser ? '拖入或选择文件夹后，点击提交上传会自动完成上传和提交。' : '拖入或选择文件夹后，点击一次即可上传并生成提交记录。' }}允许：{{ selectedAllowedLabel }}</span>
       <div class="aw-dropzone__actions">
         <button class="aw-secondary-button" type="button" @click="openFilePicker">选择文件</button>
+        <button class="aw-secondary-button" type="button" @click="openFolderPicker">选择文件夹</button>
         <button v-if="isSimpleUser" class="aw-primary-button" type="button" :disabled="!canSimpleSubmit" @click="submitSimple">
           {{ simpleSubmitLabel }}
         </button>
@@ -658,7 +748,7 @@ onMounted(() => {
           <div class="aw-simple-upload-item__main">
             <component :is="statusIcon(item.status)" :size="22" aria-hidden="true" />
             <div>
-              <strong>{{ item.file.name }}</strong>
+              <strong :title="queueItemDisplayName(item)">{{ queueItemDisplayName(item) }}</strong>
               <span>{{ item.uploadDirectoryName || selectedUploadDirectory?.name || '默认目录' }} · 计价 {{ item.difficultyClass || uploadDirectoryDifficulty(selectedUploadDirectory) }} · {{ formatFileSize(item.file.size) }}</span>
             </div>
             <span class="aw-chip" :class="statusTone(item.status)">
@@ -691,7 +781,7 @@ onMounted(() => {
       </div>
       <div v-else-if="queue.length" class="aw-upload-list">
         <div v-for="item in queue" :key="item.id" class="aw-upload-row">
-          <span class="aw-cell-text">{{ item.file.name }}</span>
+          <span class="aw-cell-text" :title="queueItemDisplayName(item)">{{ queueItemDisplayName(item) }}</span>
           <select v-model="item.difficultyClass" aria-label="难度类">
             <option v-for="option in difficultyOptions" :key="option" :value="option">{{ option }}</option>
           </select>
@@ -725,7 +815,7 @@ onMounted(() => {
       </div>
       <ul v-if="queue.some((item) => item.status === 'failed')" class="aw-upload-result-list">
         <li v-for="item in queue.filter((entry) => entry.status === 'failed')" :key="item.id">
-          <strong>{{ item.file.name }}</strong>
+          <strong>{{ queueItemDisplayName(item) }}</strong>
           <span>{{ item.error || '上传失败' }}</span>
         </li>
       </ul>

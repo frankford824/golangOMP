@@ -22,9 +22,29 @@ export interface DriveUploadOptions {
   onItemChange?: (item: DriveUploadQueueItem) => void
 }
 
-type DriveUploadFile = File & {
+export type DriveUploadFile = File & {
   assetWorkbenchRelativePath?: string
   webkitRelativePath?: string
+}
+
+interface DroppedFileSystemEntry {
+  name: string
+  isFile: boolean
+  isDirectory: boolean
+}
+
+interface DroppedFileEntry extends DroppedFileSystemEntry {
+  file: (success: (file: File) => void, failure?: (error: DOMException) => void) => void
+}
+
+interface DroppedDirectoryEntry extends DroppedFileSystemEntry {
+  createReader: () => {
+    readEntries: (success: (entries: DroppedFileSystemEntry[]) => void, failure?: (error: DOMException) => void) => void
+  }
+}
+
+type DropItemWithEntry = DataTransferItem & {
+  webkitGetAsEntry?: () => unknown
 }
 
 export function createDriveUploadQueue(files: FileList | File[] | null | undefined): DriveUploadQueueItem[] {
@@ -32,7 +52,7 @@ export function createDriveUploadQueue(files: FileList | File[] | null | undefin
   return Array.from(files).map((file) => ({
     id: crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`,
     file,
-    relativePath: fileRelativePath(file),
+    relativePath: driveUploadRelativePath(file),
     progress: 0,
     status: 'queued',
   }))
@@ -50,6 +70,29 @@ export function withDriveUploadRelativePath(file: File, relativePath: string): F
     uploadFile.assetWorkbenchRelativePath = normalized
   }
   return uploadFile
+}
+
+export async function filesFromDriveDrop(dataTransfer: DataTransfer | null): Promise<File[]> {
+  if (!dataTransfer) return []
+  const entries = Array.from(dataTransfer.items || [])
+    .map(entryFromDropItem)
+    .filter((entry): entry is DroppedFileSystemEntry => !!entry)
+  if (!entries.length) return Array.from(dataTransfer.files ?? [])
+  const groups = await Promise.all(entries.map((entry) => filesFromEntry(entry)))
+  return groups.flat()
+}
+
+export function driveUploadRelativePath(file: File) {
+  const withPath = file as DriveUploadFile
+  return normalizeRelativePath(withPath.assetWorkbenchRelativePath || withPath.webkitRelativePath || file.name)
+}
+
+export function isSafeDriveUploadPath(relativePath: string) {
+  if (!relativePath || relativePath.includes('\x00') || relativePath.includes(':')) return false
+  return relativePath.split('/').every((part) => {
+    const value = part.trim()
+    return value && value !== '.' && value !== '..' && !value.startsWith('.') && value !== '@eaDir' && value !== '#recycle' && value !== '__MACOSX'
+  })
 }
 
 export async function uploadDriveQueue(queue: DriveUploadQueueItem[], options: DriveUploadOptions): Promise<number> {
@@ -106,13 +149,40 @@ export async function uploadDriveQueue(queue: DriveUploadQueueItem[], options: D
   return uploadedItems.length
 }
 
-function fileRelativePath(file: File) {
-  const withPath = file as DriveUploadFile
-  return normalizeRelativePath(withPath.assetWorkbenchRelativePath || withPath.webkitRelativePath || file.name)
-}
-
 function normalizeRelativePath(value: string) {
   return value.replace(/\\/g, '/').replace(/^\/+/, '')
+}
+
+function entryFromDropItem(item: DataTransferItem): DroppedFileSystemEntry | null {
+  const entry = (item as DropItemWithEntry).webkitGetAsEntry?.()
+  return entry ? (entry as DroppedFileSystemEntry) : null
+}
+
+async function filesFromEntry(entry: DroppedFileSystemEntry, parentPath = ''): Promise<File[]> {
+  const relativePath = normalizeRelativePath(parentPath ? `${parentPath}/${entry.name}` : entry.name)
+  if (entry.isFile) {
+    const file = await fileFromEntry(entry as DroppedFileEntry)
+    return file.size > 0 ? [withDriveUploadRelativePath(file, relativePath)] : []
+  }
+  if (!entry.isDirectory) return []
+  const children = await readDirectoryEntries(entry as DroppedDirectoryEntry)
+  const groups = await Promise.all(children.map((child) => filesFromEntry(child, relativePath)))
+  return groups.flat()
+}
+
+function fileFromEntry(entry: DroppedFileEntry): Promise<File> {
+  return new Promise((resolve, reject) => entry.file(resolve, reject))
+}
+
+async function readDirectoryEntries(entry: DroppedDirectoryEntry): Promise<DroppedFileSystemEntry[]> {
+  const reader = entry.createReader()
+  const entries: DroppedFileSystemEntry[] = []
+  while (true) {
+    const batch = await new Promise<DroppedFileSystemEntry[]>((resolve, reject) => reader.readEntries(resolve, reject))
+    if (!batch.length) break
+    entries.push(...batch)
+  }
+  return entries
 }
 
 export function useDriveUpload() {
