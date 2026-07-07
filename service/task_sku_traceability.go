@@ -214,11 +214,26 @@ func buildOMPSKUCostSnapshotFromTask(task *domain.Task, detail *domain.TaskDetai
 	matchedRuleVersion := cloneIntPtr(detail.MatchedRuleVersion)
 	prefillSource := detail.PrefillSource
 	manualReason := detail.ManualCostOverrideReason
+	matchTrace := detail.CostRuleMatchTrace.Clone()
 	if item != nil {
 		taskSKUItemID = positiveInt64Ptr(item.ID)
 		matchedRuleVersion = cloneIntPtr(item.MatchedRuleVersion)
 		prefillSource = item.PrefillSource
 		manualReason = item.ManualCostOverrideReason
+		matchTrace = item.CostRuleMatchTrace.Clone()
+	}
+	if matchTrace == nil {
+		productIID := record.ProductIID
+		matchTrace = &domain.CostRuleMatchTrace{
+			MatchMode:           domain.CostRuleMatchModeLegacyAlias,
+			ProductIID:          productIID,
+			NormalizedIID:       domain.NormalizeIID(productIID),
+			RuleGroup:           record.CategoryCode,
+			LegacyAliasFallback: false,
+		}
+		if record.CostRuleID == nil {
+			matchTrace.MatchMode = domain.CostRuleMatchModeNoMatch
+		}
 	}
 	inputSnapshot := marshalJSONBestEffort(map[string]interface{}{
 		"task_id":            task.ID,
@@ -240,6 +255,8 @@ func buildOMPSKUCostSnapshotFromTask(task *domain.Task, detail *domain.TaskDetai
 		"area":               detail.Area,
 		"quantity":           firstInt64Ptr(taskSKUItemQuantity(item), detail.Quantity),
 		"design_requirement": firstNonEmptyString(taskSKUItemDesignRequirement(item), detail.DesignRequirement),
+		"erp_i_id":           matchTrace.ERPIID,
+		"normalized_i_id":    matchTrace.NormalizedIID,
 	})
 	calculationSnapshot := marshalJSONBestEffort(map[string]interface{}{
 		"cost_price":                  record.CostPrice,
@@ -252,6 +269,12 @@ func buildOMPSKUCostSnapshotFromTask(task *domain.Task, detail *domain.TaskDetai
 		"requires_manual_review":      record.RequiresManualReview,
 		"manual_cost_override":        record.ManualCostOverride,
 		"manual_cost_override_reason": manualReason,
+		"match_mode":                  string(matchTrace.MatchMode),
+		"erp_i_id":                    matchTrace.ERPIID,
+		"product_i_id":                firstNonEmptyString(matchTrace.ProductIID, record.ProductIID),
+		"normalized_i_id":             matchTrace.NormalizedIID,
+		"rule_group":                  matchTrace.RuleGroup,
+		"legacy_alias_fallback":       matchTrace.LegacyAliasFallback,
 	})
 	return &domain.OMPSKUCostSnapshot{
 		SKUCode:                  record.SKUCode,

@@ -73,6 +73,10 @@ func (productManagementServiceStub) ListComboTree(context.Context, repo.ProductM
 	return &domain.ProductManagementComboTreeResponse{}, nil
 }
 
+func (productManagementServiceStub) CostDashboard(context.Context) (*domain.ProductCostDashboardResponse, *domain.AppError) {
+	return &domain.ProductCostDashboardResponse{}, nil
+}
+
 func (productManagementServiceStub) GetByTaskID(context.Context, int64) ([]*domain.ProductManagementRecord, *domain.AppError) {
 	return nil, nil
 }

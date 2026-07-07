@@ -122,6 +122,8 @@ type CostRulePreviewRequest struct {
 	Quantity     *int64   `json:"quantity,omitempty"`
 	Process      string   `json:"process,omitempty"`
 	Notes        string   `json:"notes,omitempty"`
+	ERPIID       string   `json:"erp_i_id,omitempty"`
+	ProductIID   string   `json:"product_i_id,omitempty"`
 }
 
 type CostRulePreviewMatch struct {
@@ -144,4 +146,10 @@ type CostRulePreviewResponse struct {
 	GovernanceStatus     CostRuleGovernanceStatus `json:"governance_status"`
 	RequiresManualReview bool                     `json:"requires_manual_review"`
 	Explanation          string                   `json:"explanation"`
+	MatchMode            string                   `json:"match_mode,omitempty"`
+	ERPIID               string                   `json:"erp_i_id,omitempty"`
+	ProductIID           string                   `json:"product_i_id,omitempty"`
+	RuleGroup            string                   `json:"rule_group,omitempty"`
+	NormalizedIID        string                   `json:"normalized_i_id,omitempty"`
+	LegacyAliasFallback  bool                     `json:"legacy_alias_fallback,omitempty"`
 }

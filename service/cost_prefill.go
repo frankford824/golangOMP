@@ -13,6 +13,7 @@ import (
 type costPreviewComputation struct {
 	Response    *domain.CostRulePreviewResponse
 	MatchedRule *domain.CostRule
+	MatchTrace  *domain.CostRuleMatchTrace
 }
 
 func previewCostRules(req domain.CostRulePreviewRequest, rules []*domain.CostRule) costPreviewComputation {
@@ -153,6 +154,8 @@ func previewCostRules(req domain.CostRulePreviewRequest, rules []*domain.CostRul
 			GovernanceStatus:     previewGovernanceStatus(matchedRule),
 			RequiresManualReview: manualReview,
 			Explanation:          strings.Join(explanations, " "),
+			ERPIID:               strings.TrimSpace(req.ERPIID),
+			ProductIID:           strings.TrimSpace(req.ProductIID),
 		},
 		MatchedRule: matchedRule,
 	}

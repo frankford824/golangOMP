@@ -219,6 +219,7 @@ type TaskDetail struct {
 	FiledAt                      *time.Time                   `db:"filed_at"                    json:"filed_at,omitempty"`
 	MissingFields                []string                     `db:"-"                           json:"missing_fields,omitempty"`
 	MissingFieldsSummaryCN       string                       `db:"-"                           json:"missing_fields_summary_cn,omitempty"`
+	CostRuleMatchTrace           *CostRuleMatchTrace          `db:"-"                           json:"-"`
 	CreatedAt                    time.Time                    `db:"created_at"                  json:"created_at"`
 	UpdatedAt                    time.Time                    `db:"updated_at"                  json:"updated_at"`
 }

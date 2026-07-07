@@ -145,6 +145,36 @@ type ProductManagementListFilter struct {
 	PageSize        int
 }
 
+type CostRuleBindingListFilter struct {
+	Keyword   string
+	RuleGroup string
+	IsActive  *bool
+	Page      int
+	PageSize  int
+}
+
+type UnboundCostRuleCandidateFilter struct {
+	Keyword  string
+	Limit    int
+	Page     int
+	PageSize int
+}
+
+type CostRecalculationRunFilter struct {
+	Status    string
+	Mode      string
+	CreatedBy *int64
+	Page      int
+	PageSize  int
+}
+
+type CostRecalculationRunItemFilter struct {
+	RunID    int64
+	Status   string
+	Page     int
+	PageSize int
+}
+
 type ProductManagementImagePatch struct {
 	ImageSource         domain.ProductManagementImageSource
 	ImageSelectionMode  domain.ProductManagementImageSelectionMode
@@ -174,6 +204,7 @@ type ProductManagementSyncPatch struct {
 type ProductManagementRepo interface {
 	RefreshReadModel(ctx context.Context) error
 	List(ctx context.Context, filter ProductManagementListFilter) ([]*domain.ProductManagementRecord, int64, error)
+	CostDashboard(ctx context.Context) (*domain.ProductCostDashboardResponse, error)
 	GetByID(ctx context.Context, id int64) (*domain.ProductManagementRecord, error)
 	GetByTaskID(ctx context.Context, taskID int64) ([]*domain.ProductManagementRecord, error)
 	ClaimQueuedSyncRecords(ctx context.Context, limit int, claimToken string, now time.Time) ([]*domain.ProductManagementRecord, error)
@@ -183,6 +214,33 @@ type ProductManagementRepo interface {
 	UpdateBaseSyncStatus(ctx context.Context, tx Tx, id int64, patch ProductManagementSyncPatch) error
 	UpdateImageSyncStatus(ctx context.Context, tx Tx, id int64, patch ProductManagementSyncPatch) error
 	MarkBaseSyncProjectionSynced(ctx context.Context, tx Tx, taskID int64, taskSKUItemID *int64, now time.Time) error
+}
+
+type CostRuleBindingRepo interface {
+	GetByID(ctx context.Context, id int64) (*domain.CostRuleBinding, error)
+	GetActiveByNormalizedIID(ctx context.Context, normalizedIID string) (*domain.CostRuleBinding, error)
+	List(ctx context.Context, filter CostRuleBindingListFilter) ([]*domain.CostRuleBinding, int64, error)
+	Create(ctx context.Context, tx Tx, binding *domain.CostRuleBinding) (int64, error)
+	Update(ctx context.Context, tx Tx, binding *domain.CostRuleBinding) error
+	Patch(ctx context.Context, tx Tx, patch domain.CostRuleBindingPatch) error
+	RuleGroupExists(ctx context.Context, ruleGroup string) (bool, error)
+	ListUnboundCandidates(ctx context.Context, filter UnboundCostRuleCandidateFilter) ([]*domain.UnboundCostRuleCandidate, int64, error)
+}
+
+type CostRecalculationRunRepo interface {
+	CreateRun(ctx context.Context, tx Tx, run *domain.CostRecalculationRun) (int64, error)
+	GetRun(ctx context.Context, id int64) (*domain.CostRecalculationRun, error)
+	ListRuns(ctx context.Context, filter CostRecalculationRunFilter) ([]*domain.CostRecalculationRun, int64, error)
+	UpdateRun(ctx context.Context, tx Tx, run *domain.CostRecalculationRun) error
+	MarkRunApplying(ctx context.Context, tx Tx, runID int64) (bool, error)
+	DeleteRunItems(ctx context.Context, tx Tx, runID int64) error
+	InsertRunItems(ctx context.Context, tx Tx, items []*domain.CostRecalculationRunItem) error
+	ListRunItems(ctx context.Context, filter CostRecalculationRunItemFilter) ([]*domain.CostRecalculationRunItem, int64, error)
+	ListRunItemsForUpdate(ctx context.Context, tx Tx, runID int64) ([]*domain.CostRecalculationRunItem, error)
+	UpdateRunItem(ctx context.Context, tx Tx, item *domain.CostRecalculationRunItem) error
+	HasOpenRunForRecord(ctx context.Context, tx Tx, excludingRunID int64, productManagementRecordID int64) (bool, error)
+	MarkERPQueuedItemsForRun(ctx context.Context, tx Tx, runID int64, recordIDs []int64) (int64, error)
+	MarkERPResultForProductManagementRecord(ctx context.Context, tx Tx, productManagementRecordID int64, status domain.CostRecalculationRunItemStatus, message string) error
 }
 
 type SKUComboRepo interface {

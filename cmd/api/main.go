@@ -96,6 +96,8 @@ func main() {
 	categoryRepo := mysqlrepo.NewCategoryRepo(mdb)
 	categoryERPMappingRepo := mysqlrepo.NewCategoryERPMappingRepo(mdb)
 	costRuleRepo := mysqlrepo.NewCostRuleRepo(mdb)
+	costRuleBindingRepo := mysqlrepo.NewCostRuleBindingRepo(mdb)
+	costRecalculationRunRepo := mysqlrepo.NewCostRecalculationRunRepo(mdb)
 	erpSyncRunRepo := mysqlrepo.NewERPSyncRunRepo(mdb)
 	taskRepo := mysqlrepo.NewTaskRepo(mdb)
 	taskCreateRequestRepo := mysqlrepo.NewTaskCreateRequestRepo(mdb)
@@ -162,6 +164,7 @@ func main() {
 	categorySvc := service.NewCategoryService(categoryRepo, mdb)
 	categoryMappingSvc := service.NewCategoryERPMappingService(categoryERPMappingRepo, categoryRepo, mdb)
 	costRuleSvc := service.NewCostRuleService(costRuleRepo, categoryRepo, mdb)
+	costRuleBindingSvc := service.NewCostRuleBindingService(costRuleBindingRepo, costRuleRepo, mdb)
 	productSvc := service.NewProductService(productRepo, categoryRepo, categoryERPMappingRepo)
 	var erpBridgeClient service.ERPBridgeClient
 	if service.ShouldUseLocalERPBridgeClient(cfg.Server.Port, cfg.ERPBridge.BaseURL) {
@@ -250,7 +253,9 @@ func main() {
 		service.WithProductManagementERPImageProxy(erpImageProxySigner),
 		service.WithProductManagementTaskEventRepo(taskEventRepo),
 		service.WithProductManagementSKUComboRepo(skuComboRepo),
+		service.WithProductManagementCostRecalculationRunRepo(costRecalculationRunRepo),
 		service.WithProductManagementNotificationService(notificationSvc))
+	costRecalculationSvc := service.NewCostRecalculationService(productManagementRepo, costRecalculationRunRepo, taskRepo, costRuleRepo, skuTraceRepo, mdb)
 	skuComboSyncSvc := service.NewSKUComboSyncService(erpBridgeSvc, skuComboRepo, mdb)
 	taskSvc := service.NewTaskServiceWithCatalog(taskRepo, procurementRepo, taskAssetRepo, taskEventRepo, taskCostOverrideEventRepo, warehouseRepo, categoryRepo, costRuleRepo, codeRuleSvc, mdb,
 		service.WithTaskCostOverridePlaceholderRepos(taskCostOverrideReviewRepo, taskCostFinanceFlagRepo),
@@ -263,6 +268,7 @@ func main() {
 		service.WithTaskReferenceFileRefsOSSDirectService(ossDirectSvc),
 		service.WithTaskDesignAssetReadModel(designAssetRepo),
 		service.WithTaskProductCodeSequenceRepo(productCodeSeqRepo),
+		service.WithTaskCostRuleBindingRepo(costRuleBindingRepo),
 		service.WithTaskCreateRequestRepo(taskCreateRequestRepo),
 		service.WithTaskCreateFilingAsync(),
 		service.WithTaskCustomizationJobRepo(customizationJobRepo),
@@ -416,10 +422,11 @@ func main() {
 
 	erpBridgeH := handler.NewERPBridgeHandler(erpBridgeSvc)
 	productH := handler.NewProductHandler(productSvc)
-	productManagementH := handler.NewProductManagementHandler(productManagementSvc)
+	productManagementH := handler.NewProductManagementHandler(productManagementSvc, costRecalculationSvc)
 	categoryH := handler.NewCategoryHandler(categorySvc)
 	categoryMappingH := handler.NewCategoryERPMappingHandler(categoryMappingSvc)
 	costRuleH := handler.NewCostRuleHandler(costRuleSvc)
+	costRuleBindingH := handler.NewCostRuleBindingHandler(costRuleBindingSvc)
 	erpSyncH := handler.NewERPSyncHandler(erpSyncSvc)
 	taskH := handler.NewTaskHandler(taskSvc, costRuleSvc, taskDetailSvc)
 	taskH.SetR3Services(r3PoolQuerySvc, r3ClaimSvc, r3ModuleSvc, r3CancelSvc)
@@ -473,7 +480,7 @@ func main() {
 	predictionH.SetExperienceService(experienceSvc)
 	wsH := transportws.NewHandler(identitySvc, wsHub)
 
-	router := transport.NewRouter(skuH, auditH, agentH, incidentH, policyH, authH, userAdminH, erpBridgeH, productH, productManagementH, categoryH, categoryMappingH, costRuleH, erpSyncH, taskH, taskAssignmentH, taskAssetH, taskAssetCenterH, taskCreateReferenceUploadH, assetUploadH, assetFilesH, designSubmissionH, taskDetailH, taskAISummaryH, taskCostOverrideH, taskBoardH, taskBatchExcelH, taskSingleExcelH, workbenchH, nil, exportCenterH, integrationCenterH, codeRuleH, ruleTemplateH, auditV7H, auditLogH, outsourceH, warehouseH, jstUserAdminH, serverLogH, orgMoveH, taskDraftH, notificationH, erpProductH, designSourceH, searchH, reportL1H, experienceH, predictionH, wsH, routeAccessCatalog, identitySvc, identitySvc, logger, workflowTraceEventSvc)
+	router := transport.NewRouter(skuH, auditH, agentH, incidentH, policyH, authH, userAdminH, erpBridgeH, productH, productManagementH, categoryH, categoryMappingH, costRuleH, costRuleBindingH, erpSyncH, taskH, taskAssignmentH, taskAssetH, taskAssetCenterH, taskCreateReferenceUploadH, assetUploadH, assetFilesH, designSubmissionH, taskDetailH, taskAISummaryH, taskCostOverrideH, taskBoardH, taskBatchExcelH, taskSingleExcelH, workbenchH, nil, exportCenterH, integrationCenterH, codeRuleH, ruleTemplateH, auditV7H, auditLogH, outsourceH, warehouseH, jstUserAdminH, serverLogH, orgMoveH, taskDraftH, notificationH, erpProductH, designSourceH, searchH, reportL1H, experienceH, predictionH, wsH, routeAccessCatalog, identitySvc, identitySvc, logger, workflowTraceEventSvc)
 
 	workerCtx, cancelWorkers := context.WithCancel(context.Background())
 	defer cancelWorkers()

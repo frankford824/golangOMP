@@ -290,6 +290,10 @@ func (f *productManagementRecordRepoFake) List(_ context.Context, filter repo.Pr
 	return f.items[start:end], int64(len(f.items)), nil
 }
 
+func (f *productManagementRecordRepoFake) CostDashboard(context.Context) (*domain.ProductCostDashboardResponse, error) {
+	return &domain.ProductCostDashboardResponse{}, nil
+}
+
 func (f *productManagementRecordRepoFake) GetByID(_ context.Context, id int64) (*domain.ProductManagementRecord, error) {
 	for _, item := range f.items {
 		if item != nil && item.ID == id {

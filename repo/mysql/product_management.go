@@ -357,6 +357,118 @@ func (r *productManagementRepo) List(ctx context.Context, filter repo.ProductMan
 	return scanProductManagementRows(rows, total)
 }
 
+func (r *productManagementRepo) CostDashboard(ctx context.Context) (*domain.ProductCostDashboardResponse, error) {
+	row := r.db.db.QueryRowContext(ctx, `
+		SELECT
+		  COUNT(*) AS total_records,
+		  COALESCE(SUM(cost_missing), 0) AS cost_missing,
+		  COALESCE(SUM(manual_quote), 0) AS manual_quote,
+		  COALESCE(SUM(erp_mismatch), 0) AS erp_mismatch,
+		  COALESCE(SUM(rule_version_outdated), 0) AS rule_version_outdated,
+		  COALESCE(SUM(legacy_alias_fallback), 0) AS legacy_alias_fallback,
+		  COALESCE(SUM(area_spec_abnormal), 0) AS area_spec_abnormal,
+		  COALESCE(SUM(CASE WHEN cost_missing = 1 OR manual_quote = 1 OR erp_mismatch = 1
+		                      OR rule_version_outdated = 1 OR legacy_alias_fallback = 1
+		                      OR area_spec_abnormal = 1 THEN 1 ELSE 0 END), 0) AS issue_total
+		FROM (
+		  SELECT
+		    pm.id,
+		    CASE WHEN pm.cost_price IS NULL OR pm.cost_price <= 0 THEN 1 ELSE 0 END AS cost_missing,
+		    CASE WHEN COALESCE(cost_snapshot.requires_manual_review, 0) = 1 THEN 1 ELSE 0 END AS manual_quote,
+		    CASE
+		      WHEN pm.erp_sync_status = 'failed' OR pm.base_sync_status = 'failed'
+		        OR latest_erp_trace.status = 'failed'
+		        OR (
+		          JSON_VALID(latest_erp_trace.response_payload_json)
+		          AND JSON_UNQUOTE(JSON_EXTRACT(latest_erp_trace.response_payload_json, '$.cost_verification.status')) = 'mismatched'
+		        )
+		      THEN 1 ELSE 0
+		    END AS erp_mismatch,
+		    CASE
+		      WHEN cost_snapshot.matched_rule_version IS NOT NULL
+		       AND latest_rule.latest_rule_version IS NOT NULL
+		       AND cost_snapshot.matched_rule_version < latest_rule.latest_rule_version
+		      THEN 1 ELSE 0
+		    END AS rule_version_outdated,
+		    CASE
+		      WHEN JSON_VALID(cost_snapshot.calculation_snapshot_json)
+		       AND JSON_UNQUOTE(JSON_EXTRACT(cost_snapshot.calculation_snapshot_json, '$.legacy_alias_fallback')) = 'true'
+		      THEN 1 ELSE 0
+		    END AS legacy_alias_fallback,
+		    CASE
+		      WHEN pm.cost_price IS NOT NULL AND pm.cost_price > 0
+		       AND COALESCE(pm_td.area, 0) <= 0
+		       AND (COALESCE(pm_td.width, 0) <= 0 OR COALESCE(pm_td.height, 0) <= 0)
+		       AND (
+		         pm.task_sku_item_id IS NULL
+		         OR NOT JSON_VALID(pm_tsi.variant_json)
+		         OR (
+		              COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(pm_tsi.variant_json, '$.area')) AS DECIMAL(12,4)), 0) <= 0
+		          AND COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(pm_tsi.variant_json, '$.width')) AS DECIMAL(12,4)), 0) <= 0
+		          AND COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(pm_tsi.variant_json, '$.height')) AS DECIMAL(12,4)), 0) <= 0
+		         )
+		       )
+		      THEN 1 ELSE 0
+		    END AS area_spec_abnormal
+		  FROM erp_product_sync_records pm
+		  `+productManagementCostTraceJoin+`
+		  `+productManagementDimensionJoin+`
+		  LEFT JOIN cost_rules snapshot_rule ON snapshot_rule.id = cost_snapshot.cost_rule_id
+		  LEFT JOIN (
+		    SELECT category_code, MAX(rule_version) AS latest_rule_version
+		      FROM cost_rules
+		     WHERE is_active = 1
+		     GROUP BY category_code
+		  ) latest_rule ON latest_rule.category_code = COALESCE(
+		    NULLIF(CASE WHEN JSON_VALID(cost_snapshot.calculation_snapshot_json)
+		      THEN JSON_UNQUOTE(JSON_EXTRACT(cost_snapshot.calculation_snapshot_json, '$.rule_group')) ELSE '' END, ''),
+		    snapshot_rule.category_code
+		  )
+		  LEFT JOIN omp_sku_erp_trace_logs latest_erp_trace
+		    ON latest_erp_trace.id = (
+		      SELECT l.id
+		        FROM omp_sku_erp_trace_logs l
+		       WHERE l.sku_code = pm.sku_code
+		         AND (
+		           (pm.task_sku_item_id IS NOT NULL AND l.task_sku_item_id = pm.task_sku_item_id)
+		           OR (pm.task_sku_item_id IS NULL AND l.task_id = pm.task_id AND l.task_sku_item_id IS NULL)
+		           OR l.task_id = pm.task_id
+		           OR l.task_id IS NULL
+		         )
+		       ORDER BY l.created_at DESC, l.id DESC
+		       LIMIT 1
+		    )
+		) flags`)
+	var totalRecords, costMissing, manualQuote, erpMismatch, ruleVersionOutdated, legacyAliasFallback, areaSpecAbnormal, issueTotal int64
+	if err := row.Scan(&totalRecords, &costMissing, &manualQuote, &erpMismatch, &ruleVersionOutdated, &legacyAliasFallback, &areaSpecAbnormal, &issueTotal); err != nil {
+		return nil, fmt.Errorf("get product cost dashboard: %w", err)
+	}
+	ratio := 0.0
+	if totalRecords > 0 {
+		ratio = float64(legacyAliasFallback) / float64(totalRecords)
+	}
+	return &domain.ProductCostDashboardResponse{
+		TotalRecords:        totalRecords,
+		IssueTotal:          issueTotal,
+		LegacyFallbackCount: legacyAliasFallback,
+		LegacyFallbackRatio: ratio,
+		Groups: []domain.ProductCostIssueGroup{
+			{Key: "cannot_calculate", Label: "算不出来的", Count: costMissing + manualQuote},
+			{Key: "possibly_wrong", Label: "可能算错的", Count: erpMismatch + ruleVersionOutdated + legacyAliasFallback},
+			{Key: "looks_abnormal", Label: "看着不对劲的", Count: areaSpecAbnormal},
+		},
+		Tags: []domain.ProductCostIssueTag{
+			{Key: "cost_missing", Label: "成本缺失", Group: "cannot_calculate", Count: costMissing},
+			{Key: "manual_quote", Label: "需人工报价", Group: "cannot_calculate", Count: manualQuote},
+			{Key: "erp_mismatch", Label: "ERP 不一致", Group: "possibly_wrong", Count: erpMismatch},
+			{Key: "rule_version_outdated", Label: "规则版本过旧", Group: "possibly_wrong", Count: ruleVersionOutdated, Tooltip: "最新成本快照版本低于当前命中规则组的最新版本"},
+			{Key: "unbound_iid", Label: "未关联款式", Group: "possibly_wrong", Count: legacyAliasFallback, Tooltip: "当前成本由名称或文本猜测规则产生"},
+			{Key: "area_spec_abnormal", Label: "面积/规格异常", Group: "looks_abnormal", Count: areaSpecAbnormal},
+		},
+		GeneratedAt: time.Now().UTC(),
+	}, nil
+}
+
 func (r *productManagementRepo) GetByID(ctx context.Context, id int64) (*domain.ProductManagementRecord, error) {
 	row := r.db.db.QueryRowContext(ctx, `SELECT `+productManagementSelectCols+` FROM erp_product_sync_records pm `+productManagementCostTraceJoin+productManagementDimensionJoin+` WHERE pm.id = ?`, id)
 	return scanProductManagementRecord(row)

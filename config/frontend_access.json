@@ -60,7 +60,7 @@
     "SuperAdmin": {
       "menus": ["user_admin", "org_admin", "role_admin", "logs_center", "product_management"],
       "pages": ["admin_users", "admin_roles", "admin_permission_logs", "admin_operation_logs", "org_options", "product_management", "data_center_experience"],
-      "actions": ["user.manage", "org.manage", "role.assign", "role.remove", "permission_logs.read", "operation_logs.read", "reports.experience.view"],
+      "actions": ["user.manage", "org.manage", "role.assign", "role.remove", "permission_logs.read", "operation_logs.read", "reports.experience.view", "product.cost.read", "product.cost.binding.manage", "product.cost.recalculate", "product.cost.erp_sync"],
       "scopes": ["view_all", "identity_admin", "organization_admin"]
     },
     "HRAdmin": {
@@ -114,13 +114,13 @@
     "Admin": {
       "menus": ["user_admin", "logs_center", "product_management"],
       "pages": ["admin_users", "admin_permission_logs", "admin_operation_logs", "product_management"],
-      "actions": ["user.manage", "org.manage", "permission_logs.read", "operation_logs.read"],
+      "actions": ["user.manage", "org.manage", "permission_logs.read", "operation_logs.read", "product.cost.read", "product.cost.binding.manage", "product.cost.recalculate", "product.cost.erp_sync"],
       "scopes": ["view_all", "identity_admin"]
     },
     "Ops": {
       "menus": ["task_create", "business_info", "task_board", "task_list", "warehouse_receive", "warehouse_processing", "resource_management", "product_management", "customization_management"],
       "pages": ["task_board", "task_list", "task_create", "assets_index", "task_assets", "asset_detail", "product_management", "customization_jobs", "customization_job_detail"],
-      "actions": ["task.create", "task.business_info", "task.list", "warehouse.prepare", "task.close"],
+      "actions": ["task.create", "task.business_info", "task.list", "warehouse.prepare", "task.close", "product.cost.read", "product.cost.binding.manage", "product.cost.recalculate", "product.cost.erp_sync"],
       "scopes": ["workflow_ops"]
     },
     "Designer": {
@@ -168,7 +168,7 @@
     "ERP": {
       "menus": ["integration_center", "product_management"],
       "pages": ["erp_sync_console", "product_management"],
-      "actions": ["erp.sync"],
+      "actions": ["erp.sync", "product.cost.read", "product.cost.binding.manage", "product.cost.recalculate", "product.cost.erp_sync"],
       "scopes": ["erp_internal"]
     }
   },
@@ -176,7 +176,7 @@
     "super_admin": {
       "menus": ["user_admin", "org_admin", "role_admin", "logs_center", "product_management"],
       "pages": ["admin_users", "admin_roles", "admin_permission_logs", "admin_operation_logs", "org_options", "product_management", "data_center_experience"],
-      "actions": ["user.manage", "org.manage", "role.assign", "role.remove", "permission_logs.read", "operation_logs.read", "reports.experience.view"],
+      "actions": ["user.manage", "org.manage", "role.assign", "role.remove", "permission_logs.read", "operation_logs.read", "reports.experience.view", "product.cost.read", "product.cost.binding.manage", "product.cost.recalculate", "product.cost.erp_sync"],
       "scopes": ["view_all", "identity_admin", "organization_admin"]
     },
     "hr_admin": {

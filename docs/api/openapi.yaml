@@ -5581,6 +5581,19 @@ components:
           $ref: '#/components/schemas/CostRuleGovernanceStatus'
         requires_manual_review: { type: boolean }
         explanation: { type: string }
+        match_mode:
+          type: string
+          enum: [binding_erp_i_id, binding_product_i_id, legacy_alias, no_match]
+          description: Server-side cost rule match path. Binding modes are exact i_id matches; legacy_alias means the old text alias fallback was used.
+        erp_i_id: { type: string }
+        product_i_id: { type: string }
+        normalized_i_id: { type: string }
+        rule_group:
+          type: string
+          description: Internal cost rule group resolved for this preview. This replaces category_code as an operational concept but remains an internal rule grouping key.
+        legacy_alias_fallback:
+          type: boolean
+          description: True when the cost rule was found by text alias fallback rather than an explicit i_id binding.
     AssetDownloadInfo:
       type: object
       properties:
@@ -6140,6 +6153,251 @@ components:
         combo_sync_summary:
           type: object
           additionalProperties: true
+    CostRuleBinding:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        i_id_raw: { type: string }
+        normalized_i_id: { type: string }
+        rule_group:
+          type: string
+          description: Internal cost-rule group resolved from active cost_rules.category_code.
+        display_name: { type: string }
+        source: { type: string }
+        is_active: { type: boolean }
+        created_by:
+          type: integer
+          format: int64
+          nullable: true
+        updated_by:
+          type: integer
+          format: int64
+          nullable: true
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        active_rule_count:
+          type: integer
+          format: int64
+    CostRuleBindingListResponse:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/CostRuleBinding'
+        pagination:
+          $ref: '#/components/schemas/PaginationMeta'
+    UnboundCostRuleCandidate:
+      type: object
+      properties:
+        erp_i_id: { type: string }
+        product_i_id: { type: string }
+        normalized_i_id: { type: string }
+        suggested_rule_group:
+          type: string
+          description: Rule group seen in the legacy text-fallback cost snapshot, if available.
+        suggested_display_name: { type: string }
+        match_count:
+          type: integer
+          format: int64
+        example_sku_code: { type: string }
+        example_task_no: { type: string }
+        average_cost_price:
+          type: number
+          format: double
+          nullable: true
+    ProductCostDashboardResponse:
+      type: object
+      properties:
+        total_records:
+          type: integer
+          format: int64
+        total_count:
+          type: integer
+          format: int64
+          description: Number of product-center records currently carrying at least one cost issue flag.
+        unbound_iid_count:
+          type: integer
+          format: int64
+        legacy_fallback_ratio:
+          type: number
+          format: double
+        groups:
+          type: array
+          description: Three operator-facing cost problem buckets.
+          items:
+            type: object
+            properties:
+              code: { type: string, enum: [cannot_calculate, possibly_wrong, looks_abnormal] }
+              label: { type: string }
+              count: { type: integer, format: int64 }
+        tags:
+          type: array
+          description: Fine-grained cost problem chips under the three buckets.
+          items:
+            type: object
+            properties:
+              code:
+                type: string
+                enum: [cost_missing, manual_quote, erp_mismatch, rule_version_outdated, unbound_iid, area_spec_abnormal]
+              label: { type: string }
+              group: { type: string, enum: [cannot_calculate, possibly_wrong, looks_abnormal] }
+              count: { type: integer, format: int64 }
+              tooltip: { type: string }
+        generated_at:
+          type: string
+          format: date-time
+    CreateCostRecalculationRunRequest:
+      type: object
+      required: [mode]
+      properties:
+        mode:
+          type: string
+          enum: [single, explicit, all_matching]
+        product_management_record_id:
+          type: integer
+          format: int64
+          description: Required for single mode unless the first `record_ids` entry is used.
+        record_ids:
+          type: array
+          items: { type: integer, format: int64 }
+        filters:
+          type: object
+          description: Server-side selection filter used by all_matching mode.
+          properties:
+            keyword: { type: string }
+            group_key: { type: string }
+            tag_key: { type: string }
+            rule_group: { type: string }
+            page_size: { type: integer }
+        issue_group: { type: string }
+        issue_tag: { type: string }
+        sync_erp:
+          type: boolean
+          description: Frontend hint for the quick-fix flow; ERP queueing still requires calling sync-erp after apply.
+        force_manual:
+          type: boolean
+          description: Reserved. Current apply flow skips manual override and manual-quote rows by default.
+        reason: { type: string }
+        description: { type: string }
+    CostRecalculationRun:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        run_no: { type: string }
+        status:
+          type: string
+          enum: [previewing, previewed, preview_failed, applying, applied, partially_applied, apply_failed, erp_syncing, erp_synced, partially_erp_synced, cancelled]
+        mode:
+          type: string
+          enum: [single, explicit, all_matching]
+        filters_json:
+          type: object
+          additionalProperties: true
+          nullable: true
+        summary_json:
+          type: object
+          additionalProperties: true
+          nullable: true
+        created_by:
+          type: integer
+          format: int64
+          nullable: true
+        applied_by:
+          type: integer
+          format: int64
+          nullable: true
+        erp_synced_by:
+          type: integer
+          format: int64
+          nullable: true
+        created_at: { type: string, format: date-time }
+        previewed_at: { type: string, format: date-time, nullable: true }
+        applied_at: { type: string, format: date-time, nullable: true }
+        erp_synced_at: { type: string, format: date-time, nullable: true }
+        cancelled_at: { type: string, format: date-time, nullable: true }
+        updated_at: { type: string, format: date-time }
+        summary:
+          allOf: [{ $ref: '#/components/schemas/CostRecalculationRunSummary' }]
+          nullable: true
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/CostRecalculationRunItem'
+    CostRecalculationRunSummary:
+      type: object
+      properties:
+        total_count: { type: integer, format: int64 }
+        previewed_count: { type: integer, format: int64 }
+        applied_count: { type: integer, format: int64 }
+        skipped_count: { type: integer, format: int64 }
+        conflict_count: { type: integer, format: int64 }
+        failed_count: { type: integer, format: int64 }
+        erp_queued_count: { type: integer, format: int64 }
+        erp_synced_count: { type: integer, format: int64 }
+        erp_failed_count: { type: integer, format: int64 }
+        erp_syncable_count: { type: integer, format: int64 }
+        task_count: { type: integer, format: int64 }
+        confirm_message: { type: string }
+        confirmation_text: { type: string }
+        erp_sync_message: { type: string }
+    CostRecalculationRunItem:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        run_id: { type: integer, format: int64 }
+        product_management_record_id: { type: integer, format: int64 }
+        task_id:
+          type: integer
+          format: int64
+          nullable: true
+        task_no: { type: string }
+        task_sku_item_id:
+          type: integer
+          format: int64
+          nullable: true
+        sku_code: { type: string }
+        erp_i_id: { type: string }
+        product_i_id: { type: string }
+        normalized_i_id: { type: string }
+        old_cost_price: { type: number, format: double, nullable: true }
+        new_cost_price: { type: number, format: double, nullable: true }
+        cost_delta: { type: number, format: double, nullable: true }
+        old_rule_id: { type: integer, format: int64, nullable: true }
+        new_rule_id: { type: integer, format: int64, nullable: true }
+        new_rule_version: { type: integer, nullable: true }
+        match_mode:
+          type: string
+          enum: [binding_erp_i_id, binding_product_i_id, legacy_alias, no_match, ""]
+        status:
+          type: string
+          enum: [previewed, applied, skipped, conflict, failed, erp_queued, erp_synced, erp_failed]
+        skip_reason: { type: string }
+        conflict_reason: { type: string }
+        preview_snapshot_json:
+          type: object
+          additionalProperties: true
+          nullable: true
+        apply_snapshot_json:
+          type: object
+          additionalProperties: true
+          nullable: true
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    ApplyCostRecalculationRunResponse:
+      type: object
+      properties:
+        run:
+          $ref: '#/components/schemas/CostRecalculationRun'
+        summary:
+          $ref: '#/components/schemas/CostRecalculationRunSummary'
+    SyncCostRecalculationRunERPResponse:
+      type: object
+      properties:
+        run:
+          $ref: '#/components/schemas/CostRecalculationRun'
+        summary:
+          $ref: '#/components/schemas/CostRecalculationRunSummary'
     ERPSyncRun:
       type: object
       properties:
@@ -9884,6 +10142,607 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         '403':
           description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/product-management/cost-dashboard:
+    get:
+      summary: Get product cost issue dashboard
+      description: |
+        Aggregates product-center cost issues into three operator-facing buckets and six fine-grained chips. The dashboard reads the local product-management read model, latest cost snapshots, and latest ERP cost verification trace; it does not mutate costs.
+      tags: [ERPBridge, CostRules, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Ops, ERP, Admin, SuperAdmin]
+      responses:
+        '200':
+          description: Product cost issue dashboard
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ProductCostDashboardResponse'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/product-management/cost-recalculation-runs:
+    post:
+      summary: Create a product cost recalculation run
+      description: |
+        Creates a persistent cost recalculation run. Single mode previews synchronously; bulk modes may start in `previewing` and are polled through the run detail endpoint. The server re-reads product records and enforces the 300 item batch limit.
+      tags: [ERPBridge, CostRules, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Ops, ERP, Admin, SuperAdmin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCostRecalculationRunRequest'
+      responses:
+        '200':
+          description: Cost recalculation run
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/CostRecalculationRun'
+        '400':
+          description: Invalid selection or batch limit exceeded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    get:
+      summary: List product cost recalculation runs
+      tags: [ERPBridge, CostRules, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Ops, ERP, Admin, SuperAdmin]
+      parameters:
+        - in: query
+          name: status
+          schema:
+            type: string
+        - in: query
+          name: mode
+          schema:
+            type: string
+            enum: [single, explicit, all_matching]
+        - in: query
+          name: created_by
+          schema: { type: integer, format: int64 }
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 1 }
+        - in: query
+          name: page_size
+          schema: { type: integer, minimum: 1, maximum: 100 }
+      responses:
+        '200':
+          description: Cost recalculation runs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CostRecalculationRun'
+                  pagination:
+                    $ref: '#/components/schemas/PaginationMeta'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/product-management/cost-recalculation-runs/{run_id}:
+    get:
+      summary: Get a product cost recalculation run with preview items
+      tags: [ERPBridge, CostRules, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Ops, ERP, Admin, SuperAdmin]
+      parameters:
+        - in: path
+          name: run_id
+          required: true
+          schema: { type: integer, format: int64 }
+        - in: query
+          name: item_status
+          schema:
+            type: string
+            enum: [previewed, applied, skipped, conflict, failed, erp_queued, erp_synced, erp_failed]
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 1 }
+        - in: query
+          name: page_size
+          schema: { type: integer, minimum: 1, maximum: 100 }
+      responses:
+        '200':
+          description: Cost recalculation run detail
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/CostRecalculationRun'
+                  pagination:
+                    $ref: '#/components/schemas/PaginationMeta'
+        '404':
+          description: Run not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/product-management/cost-recalculation-runs/{run_id}/apply:
+    post:
+      summary: Apply a previewed product cost recalculation run
+      description: Idempotently applies previewed run items. Rows are marked conflict when current cost drifted or another open run owns the same product record.
+      tags: [ERPBridge, CostRules, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Ops, ERP, Admin, SuperAdmin]
+      parameters:
+        - in: path
+          name: run_id
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: Apply result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ApplyCostRecalculationRunResponse'
+  /v1/product-management/cost-recalculation-runs/{run_id}/sync-erp:
+    post:
+      summary: Queue applied recalculation items for ERP base-data sync
+      description: Reuses the existing product-management base sync queue; run items move from `applied` to `erp_queued` and are completed by the base-sync worker callback.
+      tags: [ERPBridge, CostRules, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Ops, ERP, Admin, SuperAdmin]
+      parameters:
+        - in: path
+          name: run_id
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: ERP queue result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/SyncCostRecalculationRunERPResponse'
+  /v1/product-management/cost-recalculation-runs/{run_id}/cancel:
+    post:
+      summary: Cancel an open product cost recalculation run
+      tags: [ERPBridge, CostRules, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Ops, ERP, Admin, SuperAdmin]
+      parameters:
+        - in: path
+          name: run_id
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: Cancelled or unchanged run
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/CostRecalculationRun'
+  /v1/product-management/{id}/reparse-image:
+    post:
+      summary: Reparse the managed image for one product-center record
+      description: Re-runs the backend product-image selection logic for a product-center record and returns the updated read-model row.
+      tags: [ERPBridge, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, Warehouse, ERP, Admin, SuperAdmin]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: Updated product management record
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ProductManagementRecord'
+        '400':
+          description: Invalid record id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Product management record not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/product-management/{id}/image:
+    post:
+      summary: Set a manual image for one product-center record
+      description: Binds an existing task asset as the managed product image and returns the updated read-model row.
+      tags: [ERPBridge, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, Warehouse, ERP, Admin, SuperAdmin]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer, format: int64 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [asset_id]
+              properties:
+                asset_id:
+                  type: integer
+                  format: int64
+      responses:
+        '200':
+          description: Updated product management record
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ProductManagementRecord'
+        '400':
+          description: Invalid image payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/product-management/{id}/sync-request:
+    post:
+      summary: Queue full ERP sync for one product-center record
+      description: Queues both base data and image synchronization when applicable, honoring backend cooldown and force rules.
+      tags: [ERPBridge, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, Warehouse, ERP, Admin, SuperAdmin]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer, format: int64 }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                force: { type: boolean }
+      responses:
+        '200':
+          description: Queued product management record
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ProductManagementRecord'
+  /v1/product-management/{id}/base-sync-request:
+    post:
+      summary: Queue ERP base-data sync for one product-center record
+      description: Queues only product base data synchronization, including cost price when available.
+      tags: [ERPBridge, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, Warehouse, ERP, Admin, SuperAdmin]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer, format: int64 }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                force: { type: boolean }
+      responses:
+        '200':
+          description: Queued product management record
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ProductManagementRecord'
+  /v1/product-management/{id}/image-sync-request:
+    post:
+      summary: Queue ERP image sync for one product-center record
+      description: Queues only ERP image synchronization for the managed product image.
+      tags: [ERPBridge, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, Warehouse, ERP, Admin, SuperAdmin]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer, format: int64 }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                force: { type: boolean }
+      responses:
+        '200':
+          description: Queued product management record
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/ProductManagementRecord'
+  /v1/cost-rule-bindings:
+    get:
+      summary: List cost rule i_id bindings
+      description: Lists active or inactive mappings from normalized ERP style i_id values to internal cost rule groups. Matching order in the pricing path is ERP i_id, then task product_i_id, then legacy text alias fallback.
+      tags: [CostRules, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Ops, ERP, Admin, SuperAdmin]
+      parameters:
+        - in: query
+          name: keyword
+          schema: { type: string }
+        - in: query
+          name: q
+          schema: { type: string }
+        - in: query
+          name: rule_group
+          schema: { type: string }
+        - in: query
+          name: is_active
+          schema: { type: boolean }
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 1, default: 1 }
+        - in: query
+          name: page_size
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        '200':
+          description: Paginated cost rule bindings
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CostRuleBindingListResponse'
+        '401':
+          description: Unauthenticated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      summary: Create cost rule i_id binding
+      description: Creates one binding. The backend normalizes `i_id_raw`, requires the target rule group to exist as an active `cost_rules.category_code`, and enforces active normalized i_id uniqueness.
+      tags: [CostRules, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Ops, ERP, Admin, SuperAdmin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [i_id_raw, rule_group]
+              properties:
+                i_id_raw: { type: string }
+                rule_group: { type: string }
+                display_name: { type: string }
+                source: { type: string }
+                is_active:
+                  type: boolean
+                  nullable: true
+      responses:
+        '201':
+          description: Cost rule binding created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/CostRuleBinding'
+        '400':
+          description: Invalid binding payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Active normalized i_id already has a binding
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/cost-rule-bindings/unbound-candidates:
+    get:
+      summary: List unbound i_id candidates from legacy pricing fallback
+      description: Returns normalized i_id values that currently have no active binding and whose latest cost snapshot was produced by legacy text alias fallback. This powers the "unassociated style" migration list.
+      tags: [CostRules, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Ops, ERP, Admin, SuperAdmin]
+      parameters:
+        - in: query
+          name: keyword
+          schema: { type: string }
+        - in: query
+          name: q
+          schema: { type: string }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 1, default: 1 }
+        - in: query
+          name: page_size
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        '200':
+          description: Paginated unbound i_id candidates
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/UnboundCostRuleCandidate'
+                  pagination:
+                    $ref: '#/components/schemas/PaginationMeta'
+  /v1/cost-rule-bindings/{id}:
+    patch:
+      summary: Patch cost rule i_id binding
+      description: Updates a binding. If `i_id_raw` changes, the backend recomputes `normalized_i_id`; active uniqueness and active rule-group validation are enforced again.
+      tags: [CostRules, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Ops, ERP, Admin, SuperAdmin]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer, format: int64 }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                i_id_raw: { type: string }
+                rule_group: { type: string }
+                display_name: { type: string }
+                source: { type: string }
+                is_active:
+                  type: boolean
+                  nullable: true
+      responses:
+        '200':
+          description: Cost rule binding updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/CostRuleBinding'
+        '400':
+          description: Invalid binding payload
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Binding not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Active normalized i_id already has a binding
           content:
             application/json:
               schema:

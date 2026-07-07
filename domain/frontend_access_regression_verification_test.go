@@ -267,6 +267,27 @@ func TestCustomizationOperatorMemberHidesCustomizationManagement(t *testing.T) {
 	assertNotContainsAny(t, view.Menus, []string{"customization_management"}, "menus")
 }
 
+func TestProductCostActionsAreLimitedToCostRoles(t *testing.T) {
+	settings := mustLoadFrontendAccessSettingsForRegression(t)
+	costActions := []string{"product.cost.read", "product.cost.binding.manage", "product.cost.recalculate", "product.cost.erp_sync"}
+
+	for _, role := range []string{"SuperAdmin", "Admin", "Ops", "ERP"} {
+		spec, ok := settings.Roles[role]
+		if !ok {
+			t.Fatalf("settings.Roles missing %q", role)
+		}
+		assertContainsAll(t, spec.normalizedActions(), costActions, role+" actions")
+	}
+
+	for _, role := range []string{"Designer", "Audit_A", "Audit_B", "CustomizationReviewer", "Warehouse"} {
+		spec, ok := settings.Roles[role]
+		if !ok {
+			t.Fatalf("settings.Roles missing %q", role)
+		}
+		assertNotContainsAny(t, spec.normalizedActions(), costActions, role+" actions")
+	}
+}
+
 func TestBareMemberLandsOnDashboardOnly(t *testing.T) {
 	settings := mustLoadFrontendAccessSettingsForRegression(t)
 

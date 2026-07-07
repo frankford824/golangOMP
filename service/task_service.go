@@ -335,6 +335,7 @@ type taskService struct {
 	customizationPricingRuleRepo repo.CustomizationPricingRuleRepo
 	categoryRepo                 repo.CategoryRepo
 	costRuleRepo                 repo.CostRuleRepo
+	costRuleBindingRepo          repo.CostRuleBindingRepo
 	integrationCallLogRepo       repo.IntegrationCallLogRepo
 	skuTraceRepo                 repo.SKUTraceRepo
 	uploadRequestRepo            repo.UploadRequestRepo
@@ -399,6 +400,12 @@ func WithTaskERPBridgeFilingTrace(callLogRepo repo.IntegrationCallLogRepo) TaskS
 func WithTaskSKUTraceRepo(skuTraceRepo repo.SKUTraceRepo) TaskServiceOption {
 	return func(s *taskService) {
 		s.skuTraceRepo = skuTraceRepo
+	}
+}
+
+func WithTaskCostRuleBindingRepo(bindingRepo repo.CostRuleBindingRepo) TaskServiceOption {
+	return func(s *taskService) {
+		s.costRuleBindingRepo = bindingRepo
 	}
 }
 
@@ -2176,6 +2183,7 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 		detail.RequiresManualReview = prefill.Response.RequiresManualReview
 		detail.MatchedRuleVersion = cloneIntPtr(prefill.Response.MatchedRuleVersion)
 		detail.PrefillSource = taskCostPrefillSourcePreview
+		detail.CostRuleMatchTrace = costRuleMatchTraceFromPreview(prefill, taskDetailERPIID(detail), taskBusinessInfoEventProductIID(detail, ""))
 		now := time.Now().UTC()
 		detail.PrefillAt = &now
 	}
@@ -2544,6 +2552,59 @@ func taskBusinessInfoEventProductIID(detail *domain.TaskDetail, requested string
 	return firstNonEmptyString(strings.TrimSpace(detail.Category), strings.TrimSpace(detail.CategoryName))
 }
 
+func taskDetailERPIID(detail *domain.TaskDetail) string {
+	if detail == nil {
+		return ""
+	}
+	for _, raw := range []string{detail.ProductSelectionSnapshotJSON, detail.LastFilingPayloadJSON} {
+		if value := jsonStringFromRawPaths(raw,
+			[]string{"erp_product", "i_id"},
+			[]string{"product", "i_id"},
+			[]string{"erp_i_id"},
+			[]string{"i_id"},
+		); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func taskSKUItemERPIID(item *domain.TaskSKUItem) string {
+	return taskSKUItemVariantString(item, "erp_i_id", "erp_product_i_id")
+}
+
+func jsonStringFromRawPaths(raw string, paths ...[]string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	var obj map[string]interface{}
+	if err := json.Unmarshal([]byte(raw), &obj); err != nil {
+		return ""
+	}
+	for _, path := range paths {
+		if value := jsonStringAtPath(obj, path...); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func jsonStringAtPath(obj map[string]interface{}, path ...string) string {
+	var current interface{} = obj
+	for _, key := range path {
+		asMap, ok := current.(map[string]interface{})
+		if !ok {
+			return ""
+		}
+		current = asMap[key]
+	}
+	if text, ok := current.(string); ok {
+		return strings.TrimSpace(text)
+	}
+	return ""
+}
+
 func applyTaskDetailDemandTextEdit(task *domain.Task, detail *domain.TaskDetail, changeRequest, designRequirement string) {
 	if detail == nil {
 		return
@@ -2573,11 +2634,13 @@ func (s *taskService) previewTaskCost(ctx context.Context, task *domain.Task, de
 	if appErr != nil {
 		return costPreviewComputation{}, appErr
 	}
-	if categoryID == nil && strings.TrimSpace(ruleCategoryCode) == "" {
+	ruleMatchText := taskCostPreviewTextWithTask(task, detail)
+	erpIID := taskDetailERPIID(detail)
+	productIID := taskBusinessInfoEventProductIID(detail, "")
+	if categoryID == nil && strings.TrimSpace(ruleCategoryCode) == "" && strings.TrimSpace(productIID) == "" {
 		return costPreviewComputation{}, nil
 	}
-	ruleMatchText := taskCostPreviewTextWithTask(task, detail)
-	rules, err := s.listActiveCostRulesForText(ctx, categoryID, ruleCategoryCode, ruleMatchText)
+	rules, matchMeta, err := s.listActiveCostRulesForBindingOrText(ctx, categoryID, ruleCategoryCode, erpIID, productIID, ruleMatchText)
 	if err != nil {
 		return costPreviewComputation{}, infraError("list active cost rules for task business info", err)
 	}
@@ -2586,16 +2649,17 @@ func (s *taskService) previewTaskCost(ctx context.Context, task *domain.Task, de
 	}
 	dimensionText := taskCostDimensionText(taskCostDetailDimensionText(detail), ruleMatchText)
 	width, height, area := taskCostPreviewDimensions(detail, dimensionText)
-	return previewCostRules(domain.CostRulePreviewRequest{
+	result := previewCostRules(domain.CostRulePreviewRequest{
 		CategoryID:   categoryID,
-		CategoryCode: ruleCategoryCode,
+		CategoryCode: firstNonEmptyString(matchMeta.RuleGroup, ruleCategoryCode),
 		Width:        width,
 		Height:       height,
 		Area:         area,
 		Quantity:     detail.Quantity,
 		Process:      strings.Join(nonEmptyStrings(detail.Process, ruleMatchText), " "),
 		Notes:        dimensionText,
-	}, rules), nil
+	}, rules)
+	return applyCostRuleMatchMetadata(result, matchMeta), nil
 }
 
 type taskSKUItemCostInfoUpdater interface {
@@ -3122,6 +3186,7 @@ func (s *taskService) applyTaskSKUItemCostPreview(ctx context.Context, detail *d
 		item.RequiresManualReview = prefill.Response.RequiresManualReview
 		item.MatchedRuleVersion = cloneIntPtr(prefill.Response.MatchedRuleVersion)
 		item.PrefillSource = taskCostPrefillSourcePreview
+		item.CostRuleMatchTrace = costRuleMatchTraceFromPreview(prefill, taskSKUItemERPIID(item), taskSKUItemProductIID(item))
 		now := time.Now().UTC()
 		item.PrefillAt = &now
 	}
@@ -3155,7 +3220,9 @@ func (s *taskService) previewTaskSKUItemCost(ctx context.Context, detail *domain
 		categoryCode = strings.TrimSpace(resolvedCategoryCode)
 	}
 	if categoryID == nil && categoryCode == "" {
-		return costPreviewComputation{}, nil
+		if strings.TrimSpace(taskSKUItemProductIID(item)) == "" {
+			return costPreviewComputation{}, nil
+		}
 	}
 	ruleMatchText := strings.Join(uniqueNonEmptyStrings(
 		taskCostPreviewText(detail),
@@ -3166,7 +3233,9 @@ func (s *taskService) previewTaskSKUItemCost(ctx context.Context, detail *domain
 		item.CategoryCode,
 		taskSKUItemProductIID(item),
 	), " ")
-	rules, err := s.listActiveCostRulesForText(ctx, categoryID, categoryCode, ruleMatchText)
+	erpIID := taskSKUItemERPIID(item)
+	productIID := taskSKUItemProductIID(item)
+	rules, matchMeta, err := s.listActiveCostRulesForBindingOrText(ctx, categoryID, categoryCode, erpIID, productIID, ruleMatchText)
 	if err != nil {
 		return costPreviewComputation{}, infraError("list active cost rules for task sku item", err)
 	}
@@ -3187,16 +3256,17 @@ func (s *taskService) previewTaskSKUItemCost(ctx context.Context, detail *domain
 	if quantity == nil {
 		quantity = cloneInt64Ptr(detail.Quantity)
 	}
-	return previewCostRules(domain.CostRulePreviewRequest{
+	result := previewCostRules(domain.CostRulePreviewRequest{
 		CategoryID:   categoryID,
-		CategoryCode: categoryCode,
+		CategoryCode: firstNonEmptyString(matchMeta.RuleGroup, categoryCode),
 		Width:        width,
 		Height:       height,
 		Area:         area,
 		Quantity:     quantity,
 		Process:      strings.Join(nonEmptyStrings(firstNonEmptyString(taskSKUItemVariantString(item, "process", "craft_text"), detail.Process), ruleMatchText), " "),
 		Notes:        dimensionText,
-	}, rules), nil
+	}, rules)
+	return applyCostRuleMatchMetadata(result, matchMeta), nil
 }
 
 func taskSKUItemCostPreviewDimensions(detail *domain.TaskDetail, item *domain.TaskSKUItem, text string) (*float64, *float64, *float64) {
@@ -3479,13 +3549,76 @@ func syncSKUItemProjectionFromTaskDetail(item *domain.TaskSKUItem, task *domain.
 }
 
 func (s *taskService) listActiveCostRulesForText(ctx context.Context, categoryID *int64, categoryCode, notes string) ([]*domain.CostRule, error) {
+	rules, _, err := s.listActiveCostRulesForTextWithTrace(ctx, categoryID, categoryCode, notes)
+	return rules, err
+}
+
+func (s *taskService) listActiveCostRulesForBindingOrText(ctx context.Context, categoryID *int64, categoryCode, erpIID, productIID, notes string) ([]*domain.CostRule, domain.CostRuleMatchTrace, error) {
+	trace := domain.CostRuleMatchTrace{
+		ERPIID:     strings.TrimSpace(erpIID),
+		ProductIID: strings.TrimSpace(productIID),
+	}
+	asOf := time.Now()
+	if s.costRuleBindingRepo != nil {
+		candidates := []struct {
+			raw  string
+			mode domain.CostRuleMatchMode
+		}{
+			{raw: erpIID, mode: domain.CostRuleMatchModeBindingERPIID},
+			{raw: productIID, mode: domain.CostRuleMatchModeBindingProductIID},
+		}
+		for _, candidate := range candidates {
+			normalized := domain.NormalizeIID(candidate.raw)
+			if normalized == "" {
+				continue
+			}
+			binding, err := s.costRuleBindingRepo.GetActiveByNormalizedIID(ctx, normalized)
+			if err != nil {
+				return nil, trace, err
+			}
+			if binding == nil || strings.TrimSpace(binding.RuleGroup) == "" {
+				continue
+			}
+			rules, err := s.costRuleRepo.ListActiveByCategory(ctx, nil, binding.RuleGroup, asOf)
+			if err != nil {
+				return nil, trace, err
+			}
+			if len(rules) == 0 {
+				continue
+			}
+			trace.MatchMode = candidate.mode
+			trace.NormalizedIID = normalized
+			trace.RuleGroup = strings.TrimSpace(binding.RuleGroup)
+			trace.LegacyAliasFallback = false
+			return appendVirtualCostRules(rules, trace.RuleGroup, notes), trace, nil
+		}
+	}
+	rules, fallbackTrace, err := s.listActiveCostRulesForTextWithTrace(ctx, categoryID, categoryCode, notes)
+	if fallbackTrace.ERPIID == "" {
+		fallbackTrace.ERPIID = trace.ERPIID
+	}
+	if fallbackTrace.ProductIID == "" {
+		fallbackTrace.ProductIID = trace.ProductIID
+	}
+	if fallbackTrace.NormalizedIID == "" {
+		fallbackTrace.NormalizedIID = firstNonEmptyString(domain.NormalizeIID(erpIID), domain.NormalizeIID(productIID))
+	}
+	return rules, fallbackTrace, err
+}
+
+func (s *taskService) listActiveCostRulesForTextWithTrace(ctx context.Context, categoryID *int64, categoryCode, notes string) ([]*domain.CostRule, domain.CostRuleMatchTrace, error) {
 	asOf := time.Now()
 	rules := make([]*domain.CostRule, 0, 4)
 	seen := make(map[int64]bool)
+	trace := domain.CostRuleMatchTrace{
+		MatchMode:           domain.CostRuleMatchModeNoMatch,
+		RuleGroup:           strings.TrimSpace(categoryCode),
+		LegacyAliasFallback: false,
+	}
 	for _, alias := range costCategoryAliasesFromText(categoryCode, notes) {
 		aliasRules, err := s.costRuleRepo.ListActiveByCategory(ctx, nil, alias, asOf)
 		if err != nil {
-			return nil, err
+			return nil, trace, err
 		}
 		for _, rule := range aliasRules {
 			if rule == nil || seen[rule.RuleID] {
@@ -3494,19 +3627,64 @@ func (s *taskService) listActiveCostRulesForText(ctx context.Context, categoryID
 			rules = append(rules, rule)
 			seen[rule.RuleID] = true
 		}
+		if len(aliasRules) > 0 && trace.RuleGroup == strings.TrimSpace(categoryCode) {
+			trace.RuleGroup = alias
+		}
 	}
 	if len(rules) > 0 {
-		return appendVirtualCostRules(rules, categoryCode, notes), nil
+		trace.MatchMode = domain.CostRuleMatchModeLegacyAlias
+		trace.LegacyAliasFallback = true
+		return appendVirtualCostRules(rules, trace.RuleGroup, notes), trace, nil
 	}
 	var err error
 	rules, err = s.costRuleRepo.ListActiveByCategory(ctx, categoryID, categoryCode, asOf)
 	if err != nil {
-		return nil, err
+		return nil, trace, err
 	}
 	if len(rules) == 0 {
-		return appendVirtualCostRules(rules, categoryCode, notes), nil
+		return appendVirtualCostRules(rules, categoryCode, notes), trace, nil
 	}
-	return appendVirtualCostRules(rules, categoryCode, notes), nil
+	trace.MatchMode = domain.CostRuleMatchModeLegacyAlias
+	trace.LegacyAliasFallback = false
+	return appendVirtualCostRules(rules, categoryCode, notes), trace, nil
+}
+
+func applyCostRuleMatchMetadata(result costPreviewComputation, trace domain.CostRuleMatchTrace) costPreviewComputation {
+	if trace.RuleGroup == "" && result.MatchedRule != nil {
+		trace.RuleGroup = strings.TrimSpace(result.MatchedRule.CategoryCode)
+	}
+	if trace.MatchMode == "" {
+		if result.MatchedRule == nil {
+			trace.MatchMode = domain.CostRuleMatchModeNoMatch
+		} else {
+			trace.MatchMode = domain.CostRuleMatchModeLegacyAlias
+		}
+	}
+	result.MatchTrace = trace.Clone()
+	if result.Response != nil {
+		result.Response.MatchMode = string(trace.MatchMode)
+		result.Response.RuleGroup = trace.RuleGroup
+		result.Response.NormalizedIID = trace.NormalizedIID
+		result.Response.LegacyAliasFallback = trace.LegacyAliasFallback
+	}
+	return result
+}
+
+func costRuleMatchTraceFromPreview(prefill costPreviewComputation, erpIID, productIID string) *domain.CostRuleMatchTrace {
+	trace := prefill.MatchTrace.Clone()
+	if trace == nil {
+		trace = &domain.CostRuleMatchTrace{MatchMode: domain.CostRuleMatchModeNoMatch}
+	}
+	if trace.ERPIID == "" {
+		trace.ERPIID = strings.TrimSpace(erpIID)
+	}
+	if trace.ProductIID == "" {
+		trace.ProductIID = strings.TrimSpace(productIID)
+	}
+	if trace.NormalizedIID == "" {
+		trace.NormalizedIID = firstNonEmptyString(domain.NormalizeIID(trace.ERPIID), domain.NormalizeIID(trace.ProductIID))
+	}
+	return trace
 }
 
 func costCategoryAliasesFromText(categoryCode, notes string) []string {

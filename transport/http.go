@@ -34,6 +34,7 @@ func NewRouter(
 	categoryH *handler.CategoryHandler,
 	categoryMappingH *handler.CategoryERPMappingHandler,
 	costRuleH *handler.CostRuleHandler,
+	costRuleBindingH *handler.CostRuleBindingHandler,
 	erpSyncH *handler.ERPSyncHandler,
 	taskH *handler.TaskHandler,
 	taskAssignmentH *handler.TaskAssignmentHandler,
@@ -205,6 +206,13 @@ func NewRouter(
 		{
 			productManagementGroup.GET("", access(productManagementGroup, http.MethodGet, "", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleERP, domain.RoleAdmin, domain.RoleSuperAdmin), productManagementH.List)
 			productManagementGroup.GET("/combo-tree", access(productManagementGroup, http.MethodGet, "/combo-tree", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleERP, domain.RoleAdmin, domain.RoleSuperAdmin), productManagementH.ListComboTree)
+			productManagementGroup.GET("/cost-dashboard", access(productManagementGroup, http.MethodGet, "/cost-dashboard", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleERP, domain.RoleAdmin, domain.RoleSuperAdmin), productManagementH.CostDashboard)
+			productManagementGroup.POST("/cost-recalculation-runs", access(productManagementGroup, http.MethodPost, "/cost-recalculation-runs", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleERP, domain.RoleAdmin, domain.RoleSuperAdmin), productManagementH.CreateCostRecalculationRun)
+			productManagementGroup.GET("/cost-recalculation-runs", access(productManagementGroup, http.MethodGet, "/cost-recalculation-runs", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleERP, domain.RoleAdmin, domain.RoleSuperAdmin), productManagementH.ListCostRecalculationRuns)
+			productManagementGroup.GET("/cost-recalculation-runs/:run_id", access(productManagementGroup, http.MethodGet, "/cost-recalculation-runs/{run_id}", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleERP, domain.RoleAdmin, domain.RoleSuperAdmin), productManagementH.GetCostRecalculationRun)
+			productManagementGroup.POST("/cost-recalculation-runs/:run_id/apply", access(productManagementGroup, http.MethodPost, "/cost-recalculation-runs/{run_id}/apply", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleERP, domain.RoleAdmin, domain.RoleSuperAdmin), productManagementH.ApplyCostRecalculationRun)
+			productManagementGroup.POST("/cost-recalculation-runs/:run_id/sync-erp", access(productManagementGroup, http.MethodPost, "/cost-recalculation-runs/{run_id}/sync-erp", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleERP, domain.RoleAdmin, domain.RoleSuperAdmin), productManagementH.SyncERPCostRecalculationRun)
+			productManagementGroup.POST("/cost-recalculation-runs/:run_id/cancel", access(productManagementGroup, http.MethodPost, "/cost-recalculation-runs/{run_id}/cancel", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleERP, domain.RoleAdmin, domain.RoleSuperAdmin), productManagementH.CancelCostRecalculationRun)
 			productManagementGroup.GET("/:id/image-candidates", access(productManagementGroup, http.MethodGet, "/:id/image-candidates", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleERP, domain.RoleAdmin, domain.RoleSuperAdmin), productManagementH.ListImageCandidates)
 			productManagementGroup.POST("/:id/reparse-image", access(productManagementGroup, http.MethodPost, "/:id/reparse-image", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleERP, domain.RoleAdmin, domain.RoleSuperAdmin), productManagementH.ReparseImage)
 			productManagementGroup.POST("/:id/image", access(productManagementGroup, http.MethodPost, "/:id/image", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleERP, domain.RoleAdmin, domain.RoleSuperAdmin), productManagementH.SetManualImage)
@@ -265,6 +273,16 @@ func NewRouter(
 		costRuleGroup.POST("", access(costRuleGroup, http.MethodPost, "", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleWarehouse, domain.RoleAdmin), costRuleH.Create)
 		costRuleGroup.PATCH("/:id", access(costRuleGroup, http.MethodPatch, "/:id", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleWarehouse, domain.RoleAdmin), costRuleH.Patch)
 		costRuleGroup.POST("/preview", access(costRuleGroup, http.MethodPost, "/preview", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleWarehouse, domain.RoleAdmin), costRuleH.Preview)
+	}
+
+	if costRuleBindingH != nil {
+		costRuleBindingGroup := v1.Group("/cost-rule-bindings")
+		{
+			costRuleBindingGroup.GET("", access(costRuleBindingGroup, http.MethodGet, "", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleERP, domain.RoleAdmin, domain.RoleSuperAdmin), costRuleBindingH.List)
+			costRuleBindingGroup.POST("", access(costRuleBindingGroup, http.MethodPost, "", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleERP, domain.RoleAdmin, domain.RoleSuperAdmin), costRuleBindingH.Create)
+			costRuleBindingGroup.GET("/unbound-candidates", access(costRuleBindingGroup, http.MethodGet, "/unbound-candidates", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleERP, domain.RoleAdmin, domain.RoleSuperAdmin), costRuleBindingH.ListUnboundCandidates)
+			costRuleBindingGroup.PATCH("/:id", access(costRuleBindingGroup, http.MethodPatch, "/:id", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleERP, domain.RoleAdmin, domain.RoleSuperAdmin), costRuleBindingH.Patch)
+		}
 	}
 
 	taskCreateAssetCenterGroup := v1.Group("/task-create/asset-center")

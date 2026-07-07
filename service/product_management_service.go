@@ -18,6 +18,7 @@ import (
 type ProductManagementService interface {
 	List(ctx context.Context, filter repo.ProductManagementListFilter) ([]*domain.ProductManagementRecord, domain.PaginationMeta, *domain.AppError)
 	ListComboTree(ctx context.Context, filter repo.ProductManagementListFilter) (*domain.ProductManagementComboTreeResponse, *domain.AppError)
+	CostDashboard(ctx context.Context) (*domain.ProductCostDashboardResponse, *domain.AppError)
 	GetByTaskID(ctx context.Context, taskID int64) ([]*domain.ProductManagementRecord, *domain.AppError)
 	ListImageCandidates(ctx context.Context, actor domain.RequestActor, recordID int64) ([]*domain.ProductManagementImageCandidate, *domain.AppError)
 	ReparseImage(ctx context.Context, actor domain.RequestActor, recordID int64) (*domain.ProductManagementRecord, *domain.AppError)
@@ -39,6 +40,7 @@ type productManagementService struct {
 	assetSearch   repo.TaskAssetSearchRepo
 	taskEvents    repo.TaskEventRepo
 	skuCombos     repo.SKUComboRepo
+	costRuns      repo.CostRecalculationRunRepo
 	txRunner      repo.TxRunner
 	erpBridge     ERPBridgeService
 	ossDirect     *OSSDirectService
@@ -105,6 +107,12 @@ func WithProductManagementNotificationService(notifications taskNotificationServ
 	}
 }
 
+func WithProductManagementCostRecalculationRunRepo(costRuns repo.CostRecalculationRunRepo) ProductManagementServiceOption {
+	return func(s *productManagementService) {
+		s.costRuns = costRuns
+	}
+}
+
 func (s *productManagementService) List(ctx context.Context, filter repo.ProductManagementListFilter) ([]*domain.ProductManagementRecord, domain.PaginationMeta, *domain.AppError) {
 	if appErr := s.refreshReadModel(ctx); appErr != nil {
 		return nil, domain.PaginationMeta{}, appErr
@@ -142,6 +150,17 @@ func (s *productManagementService) ListComboTree(ctx context.Context, filter rep
 		Pagination:  meta,
 		SyncSummary: summary,
 	}, nil
+}
+
+func (s *productManagementService) CostDashboard(ctx context.Context) (*domain.ProductCostDashboardResponse, *domain.AppError) {
+	if appErr := s.refreshReadModel(ctx); appErr != nil {
+		return nil, appErr
+	}
+	result, err := s.records.CostDashboard(ctx)
+	if err != nil {
+		return nil, infraAppError("get product cost dashboard", err)
+	}
+	return result, nil
 }
 
 func (s *productManagementService) listComboTreeByComboGroups(ctx context.Context, filter repo.ProductManagementListFilter) (*domain.ProductManagementComboTreeResponse, *domain.AppError) {
@@ -948,7 +967,15 @@ func (s *productManagementService) markProductManagementBaseSyncSucceeded(ctx co
 		}); err != nil {
 			return err
 		}
-		return s.records.MarkBaseSyncProjectionSynced(ctx, tx, record.TaskID, record.TaskSKUItemID, now)
+		if err := s.records.MarkBaseSyncProjectionSynced(ctx, tx, record.TaskID, record.TaskSKUItemID, now); err != nil {
+			return err
+		}
+		if s.costRuns != nil {
+			if err := s.costRuns.MarkERPResultForProductManagementRecord(ctx, tx, record.ID, domain.CostRunItemStatusERPSynced, ""); err != nil {
+				return err
+			}
+		}
+		return nil
 	}); err != nil {
 		return
 	}
@@ -967,14 +994,22 @@ func (s *productManagementService) markProductManagementBaseSyncFailed(ctx conte
 	}
 	msg := truncateProductManagementSyncError(message)
 	if err := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
-		return s.records.UpdateBaseSyncStatus(ctx, tx, record.ID, repo.ProductManagementSyncPatch{
+		if err := s.records.UpdateBaseSyncStatus(ctx, tx, record.ID, repo.ProductManagementSyncPatch{
 			Status:            domain.ProductManagementERPSyncStatusFailed,
 			BaseStatus:        domain.ProductManagementERPSyncStatusFailed,
 			LastERPCheckedAt:  &now,
 			SyncCooldownUntil: cooldown,
 			LastSyncError:     msg,
 			BaseSyncError:     msg,
-		})
+		}); err != nil {
+			return err
+		}
+		if s.costRuns != nil {
+			if err := s.costRuns.MarkERPResultForProductManagementRecord(ctx, tx, record.ID, domain.CostRunItemStatusERPFailed, msg); err != nil {
+				return err
+			}
+		}
+		return nil
 	}); err != nil {
 		return
 	}

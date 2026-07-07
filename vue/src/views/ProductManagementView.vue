@@ -6,9 +6,21 @@
         <h1>产品管理</h1>
         <p class="pm-subtitle">按 SKU 维护 ERP 图片、成本与同步状态，默认聚焦缺图、成本异常、待同步和失败项。</p>
       </div>
-      <button type="button" class="pm-btn pm-btn--ghost" :disabled="loading" @click="loadRecords">
-        {{ loading ? '刷新中' : '刷新' }}
-      </button>
+      <div class="pm-header-actions">
+        <button
+          v-if="canUseCostTools"
+          type="button"
+          class="pm-btn pm-btn--cost"
+          :class="{ 'has-issues': costIssueTotal > 0 }"
+          :disabled="costDashboardLoading"
+          @click="toggleCostTools"
+        >
+          成本问题 {{ costIssueTotal }}
+        </button>
+        <button type="button" class="pm-btn pm-btn--ghost" :disabled="loading" @click="loadRecords">
+          {{ loading ? '刷新中' : '刷新' }}
+        </button>
+      </div>
     </header>
 
     <section class="pm-filters">
@@ -86,6 +98,153 @@
       <button type="button" class="pm-btn pm-btn--ghost" :disabled="batchSyncing || syncableRecords.length === 0" @click="syncCurrentPage">
         {{ batchSyncing ? '同步中' : '同步当前页' }}
       </button>
+    </section>
+
+    <section v-if="canUseCostTools && costToolsOpen" class="pm-cost-console">
+      <header class="pm-cost-console-head">
+        <div>
+          <p class="pm-eyebrow">成本问题</p>
+          <h2>按问题清理 SKU 成本</h2>
+          <p>{{ costDashboardHint }}</p>
+        </div>
+        <div class="pm-cost-console-actions">
+          <button type="button" class="pm-btn pm-btn--ghost" :disabled="costDashboardLoading" @click="loadCostDashboard">
+            {{ costDashboardLoading ? '加载中' : '刷新问题数' }}
+          </button>
+          <button type="button" class="pm-btn pm-btn--ghost" @click="costToolsOpen = false">收起</button>
+        </div>
+      </header>
+
+      <div class="pm-cost-groups">
+        <button
+          v-for="group in costIssueGroups"
+          :key="group.code"
+          type="button"
+          class="pm-cost-group"
+          :class="{ 'is-active': activeCostGroup === group.code }"
+          @click="selectCostGroup(group.code)"
+        >
+          <span>{{ group.label }}</span>
+          <strong>{{ group.count }}</strong>
+        </button>
+      </div>
+
+      <div class="pm-cost-chips">
+        <button
+          type="button"
+          class="pm-cost-chip"
+          :class="{ 'is-active': activeCostTag === '' }"
+          @click="selectCostTag('')"
+        >
+          全部问题
+        </button>
+        <button
+          v-for="tag in costIssueTags"
+          :key="tag.code"
+          type="button"
+          class="pm-cost-chip"
+          :class="{ 'is-active': activeCostTag === tag.code }"
+          @click="selectCostTag(tag.code)"
+        >
+          {{ tag.label }} {{ tag.count }}
+        </button>
+      </div>
+
+      <div class="pm-cost-console-grid">
+        <section class="pm-cost-panel">
+          <div class="pm-cost-panel-head">
+            <div>
+              <h3>未关联款式</h3>
+              <p>这些 SKU 目前是按名称猜价，建议关联到定价规则。</p>
+            </div>
+            <button type="button" class="pm-btn pm-btn--small" @click="openCostBinding()">新增关联</button>
+          </div>
+          <div v-if="unboundLoading" class="pm-cost-mini-empty">未关联款式加载中...</div>
+          <div v-else-if="unboundCandidates.length === 0" class="pm-cost-mini-empty">暂无未关联款式。</div>
+          <div v-else class="pm-unbound-list">
+            <button
+              v-for="candidate in unboundCandidates"
+              :key="candidate.normalized_i_id"
+              type="button"
+              class="pm-unbound-item"
+              @click="openCostBinding(candidate)"
+            >
+              <strong>{{ candidateDisplayIId(candidate) }}</strong>
+              <span>{{ candidate.suggested_display_name || '待选择定价规则' }}</span>
+              <small>{{ candidateImpactText(candidate) }}</small>
+            </button>
+          </div>
+        </section>
+
+        <section class="pm-cost-panel">
+          <div class="pm-cost-panel-head">
+            <div>
+              <h3>批量修复</h3>
+              <p>{{ bulkSelectionHint }}</p>
+            </div>
+            <button type="button" class="pm-btn pm-btn--small pm-btn--primary" :disabled="!canCreateBulkRun" @click="createBulkRun">
+              批量修复
+            </button>
+          </div>
+          <div class="pm-bulk-actions">
+            <button type="button" class="pm-btn pm-btn--small" @click="selectCurrentPageRecords">全选当前页</button>
+            <button type="button" class="pm-btn pm-btn--small" @click="selectAllMatchingRecords">
+              全选全部符合条件
+            </button>
+            <button type="button" class="pm-btn pm-btn--small" :disabled="selectedRecordCount === 0 && !bulkAllMatching" @click="clearCostSelection">
+              清空选择
+            </button>
+          </div>
+          <p v-if="bulkAllMatching" class="pm-cost-note">将按当前筛选条件创建批量修复预览，后端会重新圈选符合条件的 SKU。</p>
+          <p v-else class="pm-cost-note">已选择 {{ selectedRecordCount }} 条当前页 SKU。</p>
+        </section>
+
+        <section class="pm-cost-panel pm-cost-panel--calculator">
+          <div class="pm-cost-panel-head">
+            <div>
+              <h3>规则试算器</h3>
+              <p>输入尺寸和数量，查看含税倍率、有效单价与最终成本。</p>
+            </div>
+          </div>
+          <div class="pm-calculator-grid">
+            <label class="pm-field">
+              <span>定价规则</span>
+              <select v-model="calculator.rule_group" @change="scheduleCostRulePreview">
+                <option value="">请选择</option>
+                <option v-for="option in ruleGroupOptions" :key="option.rule_group" :value="option.rule_group">
+                  {{ option.display_name }}
+                </option>
+              </select>
+            </label>
+            <label class="pm-field">
+              <span>宽（米）</span>
+              <input v-model.number="calculator.width" inputmode="decimal" type="number" min="0" step="0.001" @input="scheduleCostRulePreview" />
+            </label>
+            <label class="pm-field">
+              <span>高（米）</span>
+              <input v-model.number="calculator.height" inputmode="decimal" type="number" min="0" step="0.001" @input="scheduleCostRulePreview" />
+            </label>
+            <label class="pm-field">
+              <span>数量</span>
+              <input v-model.number="calculator.quantity" inputmode="numeric" type="number" min="1" step="1" @input="scheduleCostRulePreview" />
+            </label>
+            <label class="pm-field pm-field--wide">
+              <span>工艺</span>
+              <input v-model.trim="calculator.process" placeholder="如 开槽、覆膜" @input="scheduleCostRulePreview" />
+            </label>
+          </div>
+          <div class="pm-calculator-result">
+            <span v-if="calculatorLoading">试算中...</span>
+            <span v-else-if="calculatorError" class="pm-error-text">{{ calculatorError }}</span>
+            <template v-else-if="calculatorPreview">
+              <strong>{{ formatCost(calculatorPreview.estimated_cost) }}</strong>
+              <small>{{ calculatorPreviewText }}</small>
+            </template>
+            <span v-else>选择规则后输入尺寸自动试算。</span>
+          </div>
+        </section>
+      </div>
+      <p v-if="costDashboardError" class="pm-error">{{ costDashboardError }}</p>
     </section>
 
     <div class="pm-summary">
@@ -167,6 +326,14 @@
             </div>
 
             <div class="pm-main-cell">
+              <label v-if="canUseCostTools && costToolsOpen" class="pm-record-select">
+                <input
+                  type="checkbox"
+                  :checked="isRecordSelected(child.record.id)"
+                  @change="toggleRecordSelected(child.record.id)"
+                />
+                <span>批量修复</span>
+              </label>
               <strong class="pm-mono">{{ child.record.sku_code || '-' }}</strong>
               <small>款式 {{ productIIDLabel(child.record) }}</small>
               <small v-if="group.group_type === 'combo'">组合数量 {{ formatQuantity(child.quantity) }}</small>
@@ -234,6 +401,9 @@
 
             <div class="pm-actions">
               <button type="button" class="pm-btn pm-btn--small" @click="openTask(child.record.task_id)">打开任务</button>
+              <button v-if="canUseCostTools" type="button" class="pm-btn pm-btn--small" @click="openQuickFix(child.record)">
+                修复
+              </button>
               <button type="button" class="pm-btn pm-btn--small" :disabled="!child.record.can_maintain_image" @click="openCandidates(child.record)">
                 选图
               </button>
@@ -289,6 +459,127 @@
       </div>
     </footer>
 
+    <div v-if="costBindingModalOpen" class="pm-modal-mask" @click.self="closeCostBinding">
+      <section class="pm-modal pm-cost-modal">
+        <header>
+          <div>
+            <p class="pm-eyebrow">款式关联定价规则</p>
+            <h2>{{ bindingForm.i_id_raw || '新增关联' }}</h2>
+          </div>
+          <button type="button" class="pm-btn pm-btn--ghost" @click="closeCostBinding">关闭</button>
+        </header>
+        <div class="pm-binding-form">
+          <IIdSelector v-model="bindingForm.i_id_raw" label="产品款式编码" placeholder="搜索或选择款式编码" />
+          <label class="pm-field">
+            <span>定价规则</span>
+            <select v-model="bindingForm.rule_group">
+              <option value="">请选择定价规则</option>
+              <option v-for="option in ruleGroupOptions" :key="option.rule_group" :value="option.rule_group">
+                {{ option.display_name }}
+              </option>
+            </select>
+          </label>
+          <label class="pm-field pm-field--wide">
+            <span>显示名称</span>
+            <input v-model.trim="bindingForm.display_name" placeholder="如 常规覆膜 KT 板" />
+          </label>
+        </div>
+        <p v-if="bindingError" class="pm-error">{{ bindingError }}</p>
+        <div class="pm-modal-actions">
+          <button type="button" class="pm-btn pm-btn--ghost" @click="closeCostBinding">取消</button>
+          <button type="button" class="pm-btn pm-btn--primary" :disabled="bindingSaving || !bindingForm.i_id_raw || !bindingForm.rule_group" @click="saveCostBinding">
+            {{ bindingSaving ? '保存中' : '保存关联' }}
+          </button>
+        </div>
+      </section>
+    </div>
+
+    <div v-if="quickFixModalOpen" class="pm-modal-mask" @click.self="closeCostRunModals">
+      <section class="pm-modal pm-cost-modal">
+        <header>
+          <div>
+            <p class="pm-eyebrow">单条快速修复</p>
+            <h2>{{ quickFixRecord?.sku_code || 'SKU 成本修复' }}</h2>
+          </div>
+          <button type="button" class="pm-btn pm-btn--ghost" @click="closeCostRunModals">关闭</button>
+        </header>
+        <div class="pm-quick-summary">
+          <span>
+            <b>旧成本</b>
+            {{ formatCost(quickFixItem?.old_cost_price ?? quickFixRecord?.cost_price) }}
+          </span>
+          <span>
+            <b>新成本</b>
+            {{ formatCost(quickFixItem?.new_cost_price) }}
+          </span>
+          <span>
+            <b>差额</b>
+            {{ formatSignedCost(quickFixItem?.cost_delta) }}
+          </span>
+        </div>
+        <p class="pm-cost-note">{{ costRunStatusText }}</p>
+        <p v-if="quickFixItemReason" class="pm-error-text">{{ quickFixItemReason }}</p>
+        <label class="pm-checkline">
+          <input v-model="quickFixSyncERP" type="checkbox" />
+          <span>同时更新聚水潭成本</span>
+        </label>
+        <p v-if="costRunError" class="pm-error">{{ costRunError }}</p>
+        <div class="pm-modal-actions">
+          <button type="button" class="pm-btn pm-btn--ghost" @click="closeCostRunModals">取消</button>
+          <button type="button" class="pm-btn pm-btn--primary" :disabled="!canApplyActiveRun" @click="applyActiveCostRun">
+            {{ costRunWorking ? '处理中' : '确认修改' }}
+          </button>
+        </div>
+      </section>
+    </div>
+
+    <div v-if="bulkRunModalOpen" class="pm-modal-mask" @click.self="closeCostRunModals">
+      <section class="pm-modal pm-cost-modal pm-cost-modal--wide">
+        <header>
+          <div>
+            <p class="pm-eyebrow">批量修复预览</p>
+            <h2>{{ activeCostRun?.run_no || `修复单 ${activeCostRun?.id ?? ''}` }}</h2>
+          </div>
+          <button type="button" class="pm-btn pm-btn--ghost" @click="closeCostRunModals">关闭</button>
+        </header>
+        <div class="pm-run-summary">
+          <span>预览 {{ runSummary.previewed_count ?? runItems.length }}</span>
+          <span>跳过 {{ runSummary.skipped_count ?? skippedRunItemCount }}</span>
+          <span>冲突 {{ runSummary.conflict_count ?? conflictRunItemCount }}</span>
+          <span>可同步 ERP {{ runSummary.erp_syncable_count ?? appliedRunItemCount }}</span>
+        </div>
+        <p class="pm-cost-note">{{ runConfirmationText }}</p>
+        <div class="pm-run-table">
+          <div class="pm-run-table-head">
+            <span>SKU</span>
+            <span>旧成本</span>
+            <span>新成本</span>
+            <span>差额</span>
+            <span>状态</span>
+          </div>
+          <div v-if="costRunLoading" class="pm-empty">正在生成预览...</div>
+          <div v-else-if="runItems.length === 0" class="pm-empty">暂无预览明细。</div>
+          <div v-for="item in runItems" v-else :key="item.id" class="pm-run-row">
+            <span>{{ item.sku_code || `记录 ${item.product_management_record_id}` }}</span>
+            <span>{{ formatCost(item.old_cost_price) }}</span>
+            <span>{{ formatCost(item.new_cost_price) }}</span>
+            <span>{{ formatSignedCost(item.cost_delta) }}</span>
+            <span>{{ runItemStatusText(item) }}</span>
+          </div>
+        </div>
+        <p v-if="costRunError" class="pm-error">{{ costRunError }}</p>
+        <div class="pm-modal-actions">
+          <button type="button" class="pm-btn pm-btn--ghost" @click="closeCostRunModals">关闭</button>
+          <button type="button" class="pm-btn pm-btn--primary" :disabled="!canApplyActiveRun" @click="applyActiveCostRun">
+            确认修改
+          </button>
+          <button type="button" class="pm-btn pm-btn--primary" :disabled="!canSyncActiveRunERP" @click="syncActiveCostRunERP">
+            同步 ERP
+          </button>
+        </div>
+      </section>
+    </div>
+
     <div v-if="candidateModalOpen" class="pm-modal-mask" @click.self="closeCandidates">
       <section class="pm-modal">
         <header>
@@ -342,6 +633,14 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   productManagementApi,
+  type CostRecalculationRun,
+  type CostRecalculationRunItem,
+  type CostRuleGroupOption,
+  type CostRulePreviewResponse,
+  type ProductCostDashboardResponse,
+  type ProductCostIssueGroupCode,
+  type ProductCostIssueTagCode,
+  type UnboundCostRuleCandidate,
   type ProductManagementCostTrace,
   type ProductImageCandidate,
   type ProductManagementComboGroup,
@@ -352,6 +651,8 @@ import {
 } from '@/services/api/productManagementApi'
 import { fetchAssetPreviewMeta } from '@/domain/asset-access'
 import AssetPreviewMedia from '@/components/media/AssetPreviewMedia.vue'
+import IIdSelector from '@/components/task-create/IIdSelector.vue'
+import { usePermission } from '@/composables/usePermission'
 import { mapWithConcurrency } from '@/utils/batchZipDownload'
 
 type ProductSyncScope = 'all' | 'base' | 'image'
@@ -367,6 +668,29 @@ type ProductManagementLocalFilters = Required<
 
 const router = useRouter()
 const route = useRoute()
+const { can } = usePermission()
+
+const COST_TOOL_ACTIONS = [
+  'product.cost.read',
+  'product.cost.binding.manage',
+  'product.cost.recalculate',
+  'product.cost.erp_sync',
+]
+
+const COST_ISSUE_GROUP_LABELS: Record<ProductCostIssueGroupCode, string> = {
+  cannot_calculate: '算不出来的',
+  possibly_wrong: '可能算错的',
+  looks_abnormal: '看着不对劲的',
+}
+
+const COST_ISSUE_TAG_LABELS: Record<ProductCostIssueTagCode, string> = {
+  cost_missing: '成本缺失',
+  manual_quote: '需人工报价',
+  erp_mismatch: 'ERP 不一致',
+  rule_version_outdated: '规则版本过旧',
+  unbound_iid: '未关联款式',
+  area_spec_abnormal: '面积/规格异常',
+}
 
 const filters = reactive<ProductManagementLocalFilters>({
   keyword: '',
@@ -398,13 +722,54 @@ const candidatePreviewURLs = ref<Record<number, string>>({})
 const syncingRecordScopes = ref<Record<number, ProductSyncScope>>({})
 const syncMessages = ref<Record<number, string>>({})
 const expandedComboGroups = ref<Record<string, boolean>>({})
+const costToolsOpen = ref(false)
+const costDashboard = ref<ProductCostDashboardResponse | null>(null)
+const costDashboardLoading = ref(false)
+const costDashboardError = ref('')
+const activeCostGroup = ref<ProductCostIssueGroupCode>('possibly_wrong')
+const activeCostTag = ref<ProductCostIssueTagCode | ''>('')
+const unboundCandidates = ref<UnboundCostRuleCandidate[]>([])
+const unboundLoading = ref(false)
+const ruleGroupOptions = ref<CostRuleGroupOption[]>([])
+const selectedRecordIds = ref<Record<number, boolean>>({})
+const bulkAllMatching = ref(false)
+const costBindingModalOpen = ref(false)
+const bindingSaving = ref(false)
+const bindingError = ref('')
+const bindingForm = reactive({
+  i_id_raw: '',
+  rule_group: '',
+  display_name: '',
+})
+const quickFixModalOpen = ref(false)
+const bulkRunModalOpen = ref(false)
+const quickFixRecord = ref<ProductManagementRecord | null>(null)
+const quickFixSyncERP = ref(false)
+const activeCostRun = ref<CostRecalculationRun | null>(null)
+const costRunLoading = ref(false)
+const costRunWorking = ref(false)
+const costRunError = ref('')
+const calculator = reactive({
+  rule_group: '',
+  width: undefined as number | undefined,
+  height: undefined as number | undefined,
+  quantity: 1,
+  process: '',
+})
+const calculatorPreview = ref<CostRulePreviewResponse | null>(null)
+const calculatorLoading = ref(false)
+const calculatorError = ref('')
 const syncPollTokens = new Map<number, number>()
 const PREVIEW_RESOLVE_CONCURRENCY = 4
+const COST_RUN_POLL_INTERVAL = 1800
 let loadRecordsAbort: AbortController | null = null
 let loadRecordsSeq = 0
 let recordPreviewResolveSeq = 0
 let candidatePreviewResolveSeq = 0
+let costRunPollTimer: ReturnType<typeof setTimeout> | null = null
+let costRulePreviewTimer: ReturnType<typeof setTimeout> | null = null
 const syncableRecords = computed(() => records.value.filter((item) => item.can_sync_erp))
+const canUseCostTools = computed(() => COST_TOOL_ACTIONS.some((action) => can(action)))
 const totalPages = computed(() => Math.max(1, Math.ceil((pagination.total || 0) / Math.max(1, pagination.page_size || filters.page_size))))
 const remainingPages = computed(() => Math.max(0, totalPages.value - pagination.page))
 const hasPreviousPage = computed(() => pagination.page > 1)
@@ -453,6 +818,79 @@ const comboSyncSummaryText = computed(() => {
   }
   return '组合关系正在建立本地缓存'
 })
+const costIssueGroups = computed(() => {
+  return (Object.keys(COST_ISSUE_GROUP_LABELS) as ProductCostIssueGroupCode[]).map((code) => ({
+    code,
+    label: COST_ISSUE_GROUP_LABELS[code],
+    count: dashboardCount(code, 'groups'),
+  }))
+})
+const costIssueTags = computed(() => {
+  return (Object.keys(COST_ISSUE_TAG_LABELS) as ProductCostIssueTagCode[]).map((code) => ({
+    code,
+    label: COST_ISSUE_TAG_LABELS[code],
+    count: dashboardCount(code, 'tags'),
+  }))
+})
+const costIssueTotal = computed(() => {
+  const total = Number(costDashboard.value?.total_count)
+  if (Number.isFinite(total) && total >= 0) return Math.floor(total)
+  const groupSum = costIssueGroups.value.reduce((sum, item) => sum + item.count, 0)
+  if (groupSum > 0) return groupSum
+  return costIssueTags.value.reduce((sum, item) => sum + item.count, 0)
+})
+const costDashboardHint = computed(() => {
+  if (costDashboardLoading.value) return '正在读取产品中心成本问题。'
+  if (costIssueTotal.value <= 0) return '当前没有需要集中处理的成本问题。'
+  return `当前共有 ${costIssueTotal.value} 条成本问题，先处理差额大或未关联款式的 SKU。`
+})
+const selectedRecordCount = computed(() => Object.values(selectedRecordIds.value).filter(Boolean).length)
+const canCreateBulkRun = computed(() => bulkAllMatching.value || selectedRecordCount.value > 0)
+const bulkSelectionHint = computed(() => {
+  if (bulkAllMatching.value) return `已选择全部符合条件的 SKU，预计 ${costIssueTotal.value || pagination.total} 条。`
+  return selectedRecordCount.value > 0 ? `已选择 ${selectedRecordCount.value} 条 SKU。` : '先勾选当前页 SKU，或选择全部符合当前筛选条件。'
+})
+const runItems = computed<CostRecalculationRunItem[]>(() => activeCostRun.value?.items ?? [])
+const runSummary = computed(() => activeCostRun.value?.summary ?? {})
+const quickFixItem = computed(() => runItems.value[0] ?? null)
+const quickFixItemReason = computed(() => {
+  const item = quickFixItem.value
+  return firstNonEmptyString(item?.skip_reason, item?.conflict_reason)
+})
+const skippedRunItemCount = computed(() => runItems.value.filter((item) => item.status === 'skipped').length)
+const conflictRunItemCount = computed(() => runItems.value.filter((item) => item.status === 'conflict').length)
+const appliedRunItemCount = computed(() => runItems.value.filter((item) => item.status === 'applied').length)
+const canApplyActiveRun = computed(() => {
+  if (costRunWorking.value || costRunLoading.value) return false
+  const status = activeCostRun.value?.status
+  return status === 'previewed' || status === 'partially_applied'
+})
+const canSyncActiveRunERP = computed(() => {
+  if (costRunWorking.value || costRunLoading.value) return false
+  const status = activeCostRun.value?.status
+  return status === 'applied' || status === 'partially_applied'
+})
+const costRunStatusText = computed(() => {
+  const run = activeCostRun.value
+  if (!run) return '正在创建修复预览。'
+  return costRunStatusLabel(run.status)
+})
+const runConfirmationText = computed(() => {
+  return firstNonEmptyString(
+    runSummary.value.confirmation_text,
+    `将按预览结果修改 ${runSummary.value.previewed_count ?? runItems.value.length} 条 SKU，接着可按需同步 ERP。`,
+  )
+})
+const calculatorPreviewText = computed(() => {
+  const preview = calculatorPreview.value
+  if (!preview) return ''
+  const parts = [
+    preview.explanation ? `公式：${preview.explanation}` : '',
+    preview.matched_rule_version ? `规则版本 v${preview.matched_rule_version}` : '',
+    preview.requires_manual_review ? '需要人工复核' : '',
+  ].filter(Boolean)
+  return parts.join(' · ') || '已按当前定价规则试算。'
+})
 
 onMounted(() => {
   const keyword = route.query.keyword
@@ -464,6 +902,10 @@ onMounted(() => {
     filters.issue_scope = issueScope
   }
   void loadRecords()
+  if (canUseCostTools.value) {
+    void loadCostDashboard()
+    void loadRuleGroups()
+  }
 })
 
 onBeforeUnmount(() => {
@@ -472,6 +914,11 @@ onBeforeUnmount(() => {
   recordPreviewResolveSeq += 1
   candidatePreviewResolveSeq += 1
   syncPollTokens.clear()
+  clearCostRunPoll()
+  if (costRulePreviewTimer) {
+    clearTimeout(costRulePreviewTimer)
+    costRulePreviewTimer = null
+  }
 })
 
 async function loadRecords(): Promise<void> {
@@ -504,6 +951,9 @@ async function loadRecords(): Promise<void> {
     pagination.page_size = result.pagination?.page_size ?? filters.page_size
     pagination.total = result.pagination?.total ?? records.value.length
     void resolveRecordPreviewURLs(records.value)
+    if (canUseCostTools.value) {
+      void loadCostDashboard()
+    }
   } catch (err) {
     if (abortController.signal.aborted || requestSeq !== loadRecordsSeq) return
     error.value = errorMessage(err)
@@ -517,8 +967,91 @@ async function loadRecords(): Promise<void> {
   }
 }
 
+function costDashboardParams(): Record<string, unknown> {
+  return {
+    keyword: filters.keyword,
+    display_scope: filters.display_scope,
+    issue_scope: filters.issue_scope,
+    image_source: filters.image_source,
+    cost_status: filters.cost_status,
+    sync_status: filters.sync_status,
+    base_sync_status: filters.base_sync_status,
+    image_sync_status: filters.image_sync_status,
+    cost_issue_group: activeCostGroup.value,
+    cost_issue_tag: activeCostTag.value || undefined,
+  }
+}
+
+async function loadCostDashboard(): Promise<void> {
+  if (!canUseCostTools.value) return
+  costDashboardLoading.value = true
+  costDashboardError.value = ''
+  try {
+    costDashboard.value = await productManagementApi.getCostDashboard(costDashboardParams())
+    if (costToolsOpen.value) {
+      void loadUnboundCandidates()
+    }
+  } catch (err) {
+    costDashboardError.value = errorMessage(err)
+  } finally {
+    costDashboardLoading.value = false
+  }
+}
+
+async function loadUnboundCandidates(): Promise<void> {
+  unboundLoading.value = true
+  try {
+    const result = await productManagementApi.listUnboundCostRuleCandidates({
+      page: 1,
+      page_size: 8,
+    })
+    unboundCandidates.value = result.data ?? []
+  } catch (err) {
+    costDashboardError.value = errorMessage(err)
+  } finally {
+    unboundLoading.value = false
+  }
+}
+
+async function loadRuleGroups(): Promise<void> {
+  try {
+    ruleGroupOptions.value = await productManagementApi.listCostRuleGroups()
+  } catch (err) {
+    costDashboardError.value = errorMessage(err)
+  }
+}
+
+function toggleCostTools(): void {
+  costToolsOpen.value = !costToolsOpen.value
+  if (!costToolsOpen.value) return
+  void loadCostDashboard()
+  void loadUnboundCandidates()
+  void loadRuleGroups()
+}
+
+function selectCostGroup(code: ProductCostIssueGroupCode): void {
+  activeCostGroup.value = code
+  activeCostTag.value = ''
+  clearCostSelection()
+  void loadCostDashboard()
+}
+
+function selectCostTag(code: ProductCostIssueTagCode | ''): void {
+  activeCostTag.value = code
+  clearCostSelection()
+  void loadCostDashboard()
+}
+
+function dashboardCount(code: string, scope: 'groups' | 'tags'): number {
+  const rows = costDashboard.value?.[scope] ?? []
+  const match = rows.find((item) => item.code === code)
+  const value = Number(match?.count)
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : 0
+}
+
 function applyFilters(): void {
   filters.page = 1
+  clearCostSelection()
   void loadRecords()
 }
 
@@ -567,6 +1100,333 @@ function toggleComboGroup(group: ProductManagementComboGroup): void {
     ...expandedComboGroups.value,
     [group.group_key]: !expandedComboGroups.value[group.group_key],
   }
+}
+
+function isRecordSelected(recordId: number): boolean {
+  return Boolean(selectedRecordIds.value[recordId])
+}
+
+function toggleRecordSelected(recordId: number): void {
+  const next = { ...selectedRecordIds.value }
+  if (next[recordId]) delete next[recordId]
+  else next[recordId] = true
+  selectedRecordIds.value = next
+  bulkAllMatching.value = false
+}
+
+function selectCurrentPageRecords(): void {
+  const next: Record<number, boolean> = {}
+  for (const record of records.value) {
+    next[record.id] = true
+  }
+  selectedRecordIds.value = next
+  bulkAllMatching.value = false
+}
+
+function selectAllMatchingRecords(): void {
+  selectedRecordIds.value = {}
+  bulkAllMatching.value = true
+}
+
+function clearCostSelection(): void {
+  selectedRecordIds.value = {}
+  bulkAllMatching.value = false
+}
+
+function openCostBinding(candidate?: UnboundCostRuleCandidate): void {
+  bindingError.value = ''
+  bindingForm.i_id_raw = firstNonEmptyString(candidate?.display_i_id, candidate?.i_id_raw, candidate?.erp_i_id, candidate?.product_i_id, candidate?.normalized_i_id)
+  bindingForm.rule_group = candidate?.suggested_rule_group ?? ''
+  bindingForm.display_name = candidate?.suggested_display_name ?? ''
+  costBindingModalOpen.value = true
+  void loadRuleGroups()
+}
+
+function closeCostBinding(): void {
+  costBindingModalOpen.value = false
+  bindingError.value = ''
+  bindingForm.i_id_raw = ''
+  bindingForm.rule_group = ''
+  bindingForm.display_name = ''
+}
+
+async function saveCostBinding(): Promise<void> {
+  if (!bindingForm.i_id_raw || !bindingForm.rule_group || bindingSaving.value) return
+  bindingSaving.value = true
+  bindingError.value = ''
+  try {
+    const selected = ruleGroupOptions.value.find((item) => item.rule_group === bindingForm.rule_group)
+    await productManagementApi.createCostRuleBinding({
+      i_id_raw: bindingForm.i_id_raw,
+      rule_group: bindingForm.rule_group,
+      display_name: bindingForm.display_name || selected?.display_name || bindingForm.i_id_raw,
+      source: 'product_management',
+      is_active: true,
+    })
+    closeCostBinding()
+    await Promise.all([loadCostDashboard(), loadUnboundCandidates()])
+  } catch (err) {
+    bindingError.value = errorMessage(err)
+  } finally {
+    bindingSaving.value = false
+  }
+}
+
+function candidateDisplayIId(candidate: UnboundCostRuleCandidate): string {
+  return firstNonEmptyString(candidate.display_i_id, candidate.i_id_raw, candidate.erp_i_id, candidate.product_i_id, candidate.normalized_i_id, '未知款式')
+}
+
+function candidateImpactText(candidate: UnboundCostRuleCandidate): string {
+  const skuCount = Number(candidate.sku_count ?? candidate.match_count ?? 0)
+  const taskCount = Number(candidate.task_count ?? 0)
+  const parts = [
+    Number.isFinite(skuCount) && skuCount > 0 ? `${Math.floor(skuCount)} 个 SKU` : '',
+    Number.isFinite(taskCount) && taskCount > 0 ? `${Math.floor(taskCount)} 个任务` : '',
+  ].filter(Boolean)
+  return parts.join(' · ') || '点击后创建关联'
+}
+
+function costRunFilters(): Record<string, unknown> {
+  return {
+    ...costDashboardParams(),
+    page: filters.page,
+    page_size: filters.page_size,
+  }
+}
+
+async function openQuickFix(record: ProductManagementRecord): Promise<void> {
+  quickFixRecord.value = record
+  quickFixSyncERP.value = false
+  quickFixModalOpen.value = true
+  bulkRunModalOpen.value = false
+  activeCostRun.value = null
+  costRunError.value = ''
+  await createCostRun({
+    mode: 'single',
+    product_management_record_id: record.id,
+    record_ids: [record.id],
+    filters: {
+      sku_code: record.sku_code,
+      task_no: record.task_no,
+    },
+    issue_group: activeCostGroup.value,
+    issue_tag: activeCostTag.value,
+  })
+}
+
+async function createBulkRun(): Promise<void> {
+  if (!canCreateBulkRun.value) return
+  bulkRunModalOpen.value = true
+  quickFixModalOpen.value = false
+  quickFixRecord.value = null
+  activeCostRun.value = null
+  costRunError.value = ''
+  const recordIDs = Object.entries(selectedRecordIds.value)
+    .filter(([, selected]) => selected)
+    .map(([id]) => Number(id))
+    .filter((id) => Number.isSafeInteger(id) && id > 0)
+  await createCostRun({
+    mode: bulkAllMatching.value ? 'all_matching' : 'explicit',
+    record_ids: bulkAllMatching.value ? undefined : recordIDs,
+    filters: costRunFilters(),
+    issue_group: activeCostGroup.value,
+    issue_tag: activeCostTag.value,
+  })
+}
+
+async function createCostRun(payload: Parameters<typeof productManagementApi.createCostRecalculationRun>[0]): Promise<void> {
+  clearCostRunPoll()
+  costRunLoading.value = true
+  costRunWorking.value = true
+  try {
+    const run = await productManagementApi.createCostRecalculationRun(payload)
+    activeCostRun.value = run
+    if (isCostRunBusy(run.status)) {
+      scheduleCostRunPoll(run.id)
+    }
+  } catch (err) {
+    costRunError.value = errorMessage(err)
+  } finally {
+    costRunLoading.value = false
+    costRunWorking.value = false
+  }
+}
+
+async function applyActiveCostRun(): Promise<void> {
+  const run = activeCostRun.value
+  if (!run || !canApplyActiveRun.value) return
+  costRunWorking.value = true
+  costRunError.value = ''
+  try {
+    const result = await productManagementApi.applyCostRecalculationRun(run.id)
+    activeCostRun.value = result.run
+    const shouldSyncQuickRun =
+      quickFixModalOpen.value &&
+      quickFixSyncERP.value &&
+      (result.run.status === 'applied' || result.run.status === 'partially_applied')
+    if (shouldSyncQuickRun) {
+      costRunWorking.value = false
+      await syncActiveCostRunERP()
+      return
+    }
+    await afterCostRunChanged()
+  } catch (err) {
+    costRunError.value = errorMessage(err)
+  } finally {
+    costRunWorking.value = false
+  }
+}
+
+async function syncActiveCostRunERP(): Promise<void> {
+  const run = activeCostRun.value
+  if (!run || !canSyncActiveRunERP.value) return
+  costRunWorking.value = true
+  costRunError.value = ''
+  try {
+    const result = await productManagementApi.syncCostRecalculationRunERP(run.id)
+    activeCostRun.value = result.run
+    if (isCostRunBusy(result.run.status)) {
+      scheduleCostRunPoll(result.run.id)
+    }
+    await afterCostRunChanged()
+  } catch (err) {
+    costRunError.value = errorMessage(err)
+  } finally {
+    costRunWorking.value = false
+  }
+}
+
+async function afterCostRunChanged(): Promise<void> {
+  await Promise.all([loadRecords(), loadCostDashboard()])
+}
+
+function closeCostRunModals(): void {
+  clearCostRunPoll()
+  quickFixModalOpen.value = false
+  bulkRunModalOpen.value = false
+  quickFixRecord.value = null
+  activeCostRun.value = null
+  costRunError.value = ''
+}
+
+function scheduleCostRunPoll(runId: number): void {
+  clearCostRunPoll()
+  costRunPollTimer = setTimeout(() => {
+    void pollCostRun(runId)
+  }, COST_RUN_POLL_INTERVAL)
+}
+
+async function pollCostRun(runId: number): Promise<void> {
+  try {
+    const run = await productManagementApi.getCostRecalculationRun(runId, { page: 1, page_size: 80 })
+    activeCostRun.value = run
+    if (isCostRunBusy(run.status) && (quickFixModalOpen.value || bulkRunModalOpen.value)) {
+      scheduleCostRunPoll(run.id)
+    }
+  } catch (err) {
+    costRunError.value = errorMessage(err)
+  }
+}
+
+function clearCostRunPoll(): void {
+  if (!costRunPollTimer) return
+  clearTimeout(costRunPollTimer)
+  costRunPollTimer = null
+}
+
+function isCostRunBusy(status?: string): boolean {
+  return status === 'previewing' || status === 'applying' || status === 'erp_syncing'
+}
+
+function costRunStatusLabel(status?: string): string {
+  switch (status) {
+    case 'previewing':
+      return '正在生成修复预览。'
+    case 'previewed':
+      return '预览已生成，请确认修改。'
+    case 'preview_failed':
+      return '预览失败，请检查筛选条件后重试。'
+    case 'applying':
+      return '正在修改成本。'
+    case 'applied':
+      return '成本已修改。'
+    case 'partially_applied':
+      return '部分成本已修改，其余条目需查看冲突或跳过原因。'
+    case 'erp_syncing':
+      return '正在同步 ERP。'
+    case 'erp_synced':
+      return 'ERP 成本已同步。'
+    case 'partially_erp_synced':
+      return '部分 ERP 成本已同步，失败项请查看明细。'
+    case 'cancelled':
+      return '已取消。'
+    default:
+      return '等待后台返回预览。'
+  }
+}
+
+function runItemStatusText(item: CostRecalculationRunItem): string {
+  const reason = firstNonEmptyString(item.skip_reason, item.conflict_reason)
+  const suffix = reason ? `：${reason}` : ''
+  switch (item.status) {
+    case 'previewed':
+      return `待确认${suffix}`
+    case 'applied':
+      return `已修改${suffix}`
+    case 'skipped':
+      return `已跳过${suffix}`
+    case 'conflict':
+      return `有冲突${suffix}`
+    case 'failed':
+      return `失败${suffix}`
+    case 'erp_queued':
+      return `ERP 已入队${suffix}`
+    case 'erp_synced':
+      return `ERP 已同步${suffix}`
+    case 'erp_failed':
+      return `ERP 失败${suffix}`
+    default:
+      return `${item.status}${suffix}`
+  }
+}
+
+function scheduleCostRulePreview(): void {
+  if (costRulePreviewTimer) {
+    clearTimeout(costRulePreviewTimer)
+  }
+  costRulePreviewTimer = setTimeout(() => {
+    void runCostRulePreview()
+  }, 350)
+}
+
+async function runCostRulePreview(): Promise<void> {
+  calculatorError.value = ''
+  calculatorPreview.value = null
+  if (!calculator.rule_group) return
+  calculatorLoading.value = true
+  try {
+    const width = validPositiveNumber(calculator.width)
+    const height = validPositiveNumber(calculator.height)
+    const quantity = validPositiveNumber(calculator.quantity) ?? 1
+    const area = width && height ? Number((width * height).toFixed(6)) : undefined
+    calculatorPreview.value = await productManagementApi.previewCostRule({
+      rule_group: calculator.rule_group,
+      width,
+      height,
+      area,
+      quantity,
+      process: calculator.process,
+    })
+  } catch (err) {
+    calculatorError.value = errorMessage(err)
+  } finally {
+    calculatorLoading.value = false
+  }
+}
+
+function validPositiveNumber(value: unknown): number | undefined {
+  const num = Number(value)
+  return Number.isFinite(num) && num > 0 ? num : undefined
 }
 
 function openTask(taskId: number): void {
@@ -844,6 +1704,11 @@ function costTraceLines(record: ProductManagementRecord): string[] {
     lines.push(`输入：${inputLine}`)
   }
 
+  const matchLine = costTraceMatchLine(input, calculation)
+  if (matchLine) {
+    lines.push(matchLine)
+  }
+
   const explanation = firstTraceString(
     traceString(calculation, 'explanation'),
     traceString(calculation, 'formula'),
@@ -886,7 +1751,7 @@ function costTraceInputLine(input: Record<string, unknown>): string {
   const height = traceNumber(input, 'height')
   const area = traceNumber(input, 'area')
   const quantity = traceNumber(input, 'quantity')
-  const category = firstTraceString(traceString(input, 'category_name'), traceString(input, 'category_code'), traceString(input, 'product_i_id'))
+  const category = firstTraceString(traceString(input, 'category_name'), traceString(input, 'product_i_id'), traceString(input, 'normalized_i_id'))
   const parts = [
     category ? `品类 ${category}` : '',
     sizeText ? `尺寸 ${sizeText}` : width !== undefined && height !== undefined ? `尺寸 ${formatTraceNumber(width)}x${formatTraceNumber(height)}` : '',
@@ -894,6 +1759,24 @@ function costTraceInputLine(input: Record<string, unknown>): string {
     quantity !== undefined ? `数量 ${formatTraceNumber(quantity)}` : '',
   ].filter(Boolean)
   return parts.join('，')
+}
+
+function costTraceMatchLine(input: Record<string, unknown>, calculation: Record<string, unknown>): string {
+  const matchMode = firstTraceString(traceString(calculation, 'match_mode'), traceString(input, 'match_mode'))
+  const fallback = traceBoolean(calculation, 'legacy_alias_fallback') || traceBoolean(input, 'legacy_alias_fallback')
+  if (fallback || matchMode === 'legacy_alias') {
+    return '匹配：未关联款式（按名称猜的价）'
+  }
+  if (matchMode === 'binding_erp_i_id') {
+    return '匹配：按 ERP 款式关联定价规则'
+  }
+  if (matchMode === 'binding_product_i_id') {
+    return '匹配：按任务款式关联定价规则'
+  }
+  if (matchMode === 'no_match') {
+    return '匹配：未找到可用定价规则'
+  }
+  return ''
 }
 
 function traceObject(value: unknown): Record<string, unknown> {
@@ -1122,6 +2005,14 @@ function formatCost(value?: number | null): string {
   return `￥${value.toFixed(3).replace(/0+$/, '').replace(/\.$/, '')}`
 }
 
+function formatSignedCost(value?: number | null): string {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '-'
+  const abs = Math.abs(value).toFixed(3).replace(/0+$/, '').replace(/\.$/, '')
+  if (value > 0) return `+￥${abs}`
+  if (value < 0) return `-￥${abs}`
+  return '￥0'
+}
+
 function formatDate(value?: string): string {
   if (!value) return '-'
   const date = new Date(value)
@@ -1232,6 +2123,17 @@ function errorMessage(err: unknown): string {
   border-radius: 1rem;
 }
 
+.pm-header-actions,
+.pm-cost-console-actions,
+.pm-modal-actions,
+.pm-bulk-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.55rem;
+  flex-wrap: wrap;
+}
+
 .pm-eyebrow {
   margin: 0 0 8px;
   color: rgb(var(--yb-brand));
@@ -1338,10 +2240,278 @@ function errorMessage(err: unknown): string {
   background: rgb(var(--yb-surface-soft));
 }
 
+.pm-btn--cost {
+  position: relative;
+  border-color: rgb(var(--yb-border-strong));
+  background: rgb(var(--yb-surface));
+}
+
+.pm-btn--cost.has-issues {
+  border-color: rgb(var(--yb-danger-border));
+  color: rgb(var(--yb-danger-text));
+  background: rgb(var(--yb-danger-wash));
+}
+
+.pm-btn--cost.has-issues::after {
+  content: "";
+  position: absolute;
+  top: 0.45rem;
+  right: 0.45rem;
+  width: 0.46rem;
+  height: 0.46rem;
+  border-radius: 999px;
+  background: rgb(var(--yb-danger));
+  box-shadow: 0 0 0 3px rgb(var(--yb-danger) / 0.16);
+}
+
 .pm-btn--small {
   min-height: 1.9rem;
   padding: 0 10px;
   font-size: 12px;
+}
+
+.pm-cost-console {
+  display: grid;
+  gap: 0.9rem;
+  margin-top: 0.85rem;
+  padding: 1rem;
+  border: 1px solid rgb(var(--yb-border));
+  border-radius: 1rem;
+  background: rgb(var(--yb-surface));
+  box-shadow: 0 8px 24px rgb(var(--yb-shadow) / 0.06);
+}
+
+.pm-cost-console-head,
+.pm-cost-panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.pm-cost-console-head h2,
+.pm-cost-panel h3 {
+  margin: 0;
+  color: rgb(var(--yb-text));
+  font-size: 1.05rem;
+  font-weight: 900;
+}
+
+.pm-cost-console-head p,
+.pm-cost-panel-head p,
+.pm-cost-note {
+  margin: 0.25rem 0 0;
+  color: rgb(var(--yb-text-muted));
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.pm-cost-groups,
+.pm-cost-chips {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.pm-cost-group,
+.pm-cost-chip {
+  border: 1px solid rgb(var(--yb-border-strong));
+  color: rgb(var(--yb-text-body));
+  background: rgb(var(--yb-surface));
+  cursor: pointer;
+  font-weight: 850;
+}
+
+.pm-cost-group {
+  display: grid;
+  min-width: 10rem;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 0.8rem;
+  border-radius: 0.75rem;
+  padding: 0.7rem 0.85rem;
+  text-align: left;
+}
+
+.pm-cost-group strong {
+  color: rgb(var(--yb-brand-strong));
+  font-family: var(--yb-font-data);
+  font-size: 1.18rem;
+}
+
+.pm-cost-chip {
+  border-radius: 999px;
+  padding: 0.38rem 0.72rem;
+  font-size: 12px;
+}
+
+.pm-cost-group:hover,
+.pm-cost-chip:hover,
+.pm-cost-group.is-active,
+.pm-cost-chip.is-active {
+  border-color: rgb(var(--yb-brand-border-strong));
+  color: rgb(var(--yb-brand-strong));
+  background: rgb(var(--yb-brand-soft));
+}
+
+.pm-cost-console-grid {
+  display: grid;
+  grid-template-columns: minmax(18rem, 1fr) minmax(16rem, 0.9fr) minmax(22rem, 1.25fr);
+  gap: 0.85rem;
+  align-items: stretch;
+}
+
+.pm-cost-panel {
+  display: grid;
+  align-content: start;
+  gap: 0.75rem;
+  min-width: 0;
+  border: 1px solid rgb(var(--yb-border-page-soft));
+  border-radius: 0.85rem;
+  padding: 0.85rem;
+  background: rgb(var(--yb-surface-subtle));
+}
+
+.pm-cost-panel--calculator {
+  background: rgb(var(--yb-surface-blue-subtle));
+}
+
+.pm-cost-mini-empty {
+  border: 1px dashed rgb(var(--yb-border-strong));
+  border-radius: 0.75rem;
+  padding: 1rem;
+  color: rgb(var(--yb-text-muted));
+  text-align: center;
+}
+
+.pm-unbound-list {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.pm-unbound-item {
+  display: grid;
+  gap: 0.25rem;
+  border: 1px solid rgb(var(--yb-border-strong));
+  border-radius: 0.75rem;
+  padding: 0.7rem;
+  color: rgb(var(--yb-text));
+  background: rgb(var(--yb-surface));
+  text-align: left;
+  cursor: pointer;
+}
+
+.pm-unbound-item:hover {
+  border-color: rgb(var(--yb-brand-border-strong));
+  background: rgb(var(--yb-surface-brand-panel));
+}
+
+.pm-unbound-item span,
+.pm-unbound-item small {
+  color: rgb(var(--yb-text-muted));
+}
+
+.pm-calculator-grid,
+.pm-binding-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+
+.pm-calculator-result,
+.pm-quick-summary,
+.pm-run-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+  border: 1px solid rgb(var(--yb-brand-border));
+  border-radius: 0.75rem;
+  padding: 0.7rem;
+  color: rgb(var(--yb-text-muted-strong));
+  background: rgb(var(--yb-surface));
+}
+
+.pm-calculator-result strong {
+  color: rgb(var(--yb-brand-strong));
+  font-family: var(--yb-font-data);
+  font-size: 1.2rem;
+}
+
+.pm-calculator-result small {
+  color: rgb(var(--yb-text-muted));
+}
+
+.pm-record-select,
+.pm-checkline {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  gap: 0.35rem;
+  color: rgb(var(--yb-text-muted-strong));
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.pm-record-select input,
+.pm-checkline input {
+  width: 1rem;
+  height: 1rem;
+  accent-color: rgb(var(--yb-brand));
+}
+
+.pm-cost-modal {
+  width: min(720px, 100%);
+}
+
+.pm-cost-modal--wide {
+  width: min(1080px, 100%);
+}
+
+.pm-quick-summary span,
+.pm-run-summary span {
+  display: grid;
+  gap: 0.18rem;
+  min-width: 7rem;
+  color: rgb(var(--yb-text));
+  font-family: var(--yb-font-data);
+  font-weight: 900;
+}
+
+.pm-quick-summary b {
+  color: rgb(var(--yb-text-muted));
+  font-family: var(--yb-font-text);
+  font-size: 12px;
+}
+
+.pm-run-table {
+  display: grid;
+  overflow: hidden;
+  border: 1px solid rgb(var(--yb-border));
+  border-radius: 0.75rem;
+}
+
+.pm-run-table-head,
+.pm-run-row {
+  display: grid;
+  grid-template-columns: minmax(9rem, 1.3fr) repeat(4, minmax(6.5rem, 0.8fr));
+  gap: 0.65rem;
+  align-items: center;
+  padding: 0.65rem 0.75rem;
+}
+
+.pm-run-table-head {
+  color: rgb(var(--yb-text-muted-strong));
+  background: rgb(var(--yb-surface-subtle));
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.pm-run-row {
+  border-top: 1px solid rgb(var(--yb-border-page-soft));
+  color: rgb(var(--yb-text));
+  background: rgb(var(--yb-surface));
+  font-size: 13px;
 }
 
 .pm-summary {

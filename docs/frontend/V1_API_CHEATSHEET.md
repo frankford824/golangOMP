@@ -1,10 +1,10 @@
-# V1 API 速查表(314 path · 一行一条)
+# V1 API 速查表(328 path · 一行一条)
 
 > Revision: V1.3-A2 i_id-first task/ERP/search integration (2026-04-27)
 > Source: docs/api/openapi.yaml (post V1.3-A2)
 
 > 本表一行对应一个 `/v1` path；同一路径多 method 合并到 `Methods` 列。
-> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 314 个 `/v1` path。
+> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 328 个 `/v1` path。
 > 新前端只接 canonical 路径；compatibility/deprecated 路径仅作迁移兜底。
 
 | Methods | Path | Summary | RBAC | family doc |
@@ -50,6 +50,20 @@
 | GET, POST | `/v1/trace-events` | List business trace events；Record frontend business trace event | GET:Admin, SuperAdmin, HRAdmin; POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/product-management` | List product management records | GET:Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, Warehouse, ERP, Admin, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/product-management/combo-tree` | List product management records grouped by ERP combo SKU | GET:Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, Warehouse, ERP, Admin, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/product-management/cost-dashboard` | Get product cost issue dashboard | GET:Ops, ERP, Admin, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET, POST | `/v1/product-management/cost-recalculation-runs` | List product cost recalculation runs；Create a product cost recalculation run | GET:Ops, ERP, Admin, SuperAdmin; POST:Ops, ERP, Admin, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/product-management/cost-recalculation-runs/{run_id}` | Get a product cost recalculation run with preview items | GET:Ops, ERP, Admin, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/product-management/cost-recalculation-runs/{run_id}/apply` | Apply a previewed product cost recalculation run | POST:Ops, ERP, Admin, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/product-management/cost-recalculation-runs/{run_id}/sync-erp` | Queue applied recalculation items for ERP base-data sync | POST:Ops, ERP, Admin, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/product-management/cost-recalculation-runs/{run_id}/cancel` | Cancel an open product cost recalculation run | POST:Ops, ERP, Admin, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/product-management/{id}/reparse-image` | Reparse the managed image for one product-center record | POST:Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, Warehouse, ERP, Admin, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/product-management/{id}/image` | Set a manual image for one product-center record | POST:Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, Warehouse, ERP, Admin, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/product-management/{id}/sync-request` | Queue full ERP sync for one product-center record | POST:Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, Warehouse, ERP, Admin, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/product-management/{id}/base-sync-request` | Queue ERP base-data sync for one product-center record | POST:Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, Warehouse, ERP, Admin, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/product-management/{id}/image-sync-request` | Queue ERP image sync for one product-center record | POST:Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, Warehouse, ERP, Admin, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET, POST | `/v1/cost-rule-bindings` | List cost rule i_id bindings；Create cost rule i_id binding | GET:Ops, ERP, Admin, SuperAdmin; POST:Ops, ERP, Admin, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/cost-rule-bindings/unbound-candidates` | List unbound i_id candidates from legacy pricing fallback | GET:Ops, ERP, Admin, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| PATCH | `/v1/cost-rule-bindings/{id}` | Patch cost rule i_id binding | PATCH:Ops, ERP, Admin, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/tasks/prepare-product-codes` | Prepare task product codes | POST:Ops, Admin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET, POST | `/v1/tasks` | List tasks；Create task | GET:已登录 / 主流程读全量可见; POST:Ops | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/tasks/filter-options` | Get task center filter options | GET:Ops, Designer, CustomizationOperator, CustomizationReviewer, Audit_A, Audit_B, Warehouse, Outsource, Admin, SuperAdmin, HRAdmin, OrgAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_TASKS.md](V1_API_TASKS.md) |

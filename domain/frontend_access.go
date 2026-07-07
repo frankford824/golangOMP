@@ -349,7 +349,7 @@ func derivedFrontendSpec(role Role) FrontendAccessSpec {
 			Scopes:  []string{"view_all", "identity_admin", "organization_admin", "role_admin"},
 			Menus:   []string{"user_admin", "org_admin", "role_admin", "logs_center", "product_management"},
 			Pages:   []string{"admin_users", "admin_roles", "admin_permission_logs", "admin_operation_logs", "org_options", "product_management"},
-			Actions: []string{"user.manage", "org.manage", "role.assign", "role.remove", "permission_logs.read"},
+			Actions: []string{"user.manage", "org.manage", "role.assign", "role.remove", "permission_logs.read", "operation_logs.read", "product.cost.read", "product.cost.binding.manage", "product.cost.recalculate", "product.cost.erp_sync"},
 		}
 	case RoleHRAdmin:
 		return FrontendAccessSpec{
@@ -462,7 +462,7 @@ func derivedFrontendSpec(role Role) FrontendAccessSpec {
 			Scopes:  []string{"view_all", "identity_admin"},
 			Menus:   []string{"user_admin", "logs_center", "product_management"},
 			Pages:   []string{"admin_users", "admin_permission_logs", "admin_operation_logs", "product_management"},
-			Actions: []string{"user.manage", "org.manage", "permission_logs.read", "operation_logs.read"},
+			Actions: []string{"user.manage", "org.manage", "permission_logs.read", "operation_logs.read", "product.cost.read", "product.cost.binding.manage", "product.cost.recalculate", "product.cost.erp_sync"},
 		}
 	case RoleOps:
 		return FrontendAccessSpec{
@@ -470,7 +470,7 @@ func derivedFrontendSpec(role Role) FrontendAccessSpec {
 			Scopes:  []string{"workflow_ops"},
 			Menus:   []string{"task_create", "business_info", "task_board", "task_list", "warehouse_receive", "warehouse_processing", "resource_management", "product_management", "customization_management"},
 			Pages:   []string{"task_board", "task_list", "task_create", "assets_index", "task_assets", "asset_detail", "product_management", "customization_jobs", "customization_job_detail"},
-			Actions: []string{"task.create", "task.business_info", "task.list", "warehouse.prepare", "task.close"},
+			Actions: []string{"task.create", "task.business_info", "task.list", "warehouse.prepare", "task.close", "product.cost.read", "product.cost.binding.manage", "product.cost.recalculate", "product.cost.erp_sync"},
 		}
 	case RoleDesigner:
 		return FrontendAccessSpec{
@@ -550,7 +550,7 @@ func derivedFrontendSpec(role Role) FrontendAccessSpec {
 			Scopes:  []string{"erp_internal"},
 			Menus:   []string{"integration_center", "product_management"},
 			Pages:   []string{"erp_sync_console", "product_management"},
-			Actions: []string{"erp.sync"},
+			Actions: []string{"erp.sync", "product.cost.read", "product.cost.binding.manage", "product.cost.recalculate", "product.cost.erp_sync"},
 		}
 	default:
 		return FrontendAccessSpec{}
