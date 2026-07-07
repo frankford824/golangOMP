@@ -267,6 +267,7 @@ export interface AssetBatchSearchResult {
   message: string
   candidates: number
   asset?: BackendAsset
+  assets?: BackendAsset[]
 }
 
 export interface AssetBatchSearchManifest {

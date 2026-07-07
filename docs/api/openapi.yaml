@@ -8451,7 +8451,13 @@ components:
           type: integer
           description: Number of assets matching the requested format and role filters for this term.
         asset:
+          description: First ranked asset retained for compatibility. New bulk-download clients should consume `assets`.
           $ref: '#/components/schemas/AssetDetail'
+        assets:
+          type: array
+          description: All assets matching the requested term, format filter, and asset role filter, ordered by the same ranking used by `asset`.
+          items:
+            $ref: '#/components/schemas/AssetDetail'
     AssetBatchSearchResponse:
       type: object
       required: [results, matched_count, failed_count]

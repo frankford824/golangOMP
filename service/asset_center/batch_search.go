@@ -32,11 +32,12 @@ type BatchSearchResponse struct {
 }
 
 type BatchSearchResult struct {
-	Term       string       `json:"term"`
-	Status     string       `json:"status"`
-	Message    string       `json:"message"`
-	Candidates int          `json:"candidates"`
-	Asset      *AssetDetail `json:"asset,omitempty"`
+	Term       string        `json:"term"`
+	Status     string        `json:"status"`
+	Message    string        `json:"message"`
+	Candidates int           `json:"candidates"`
+	Asset      *AssetDetail  `json:"asset,omitempty"`
+	Assets     []AssetDetail `json:"assets,omitempty"`
 }
 
 type scoredBatchSearchAsset struct {
@@ -111,12 +112,32 @@ func (s *Service) batchSearchOne(ctx context.Context, term, formatFilter, assetK
 		}
 		return ai.CreatedAt.After(aj.CreatedAt)
 	})
+	assets := make([]AssetDetail, 0, len(candidates))
+	for _, candidate := range candidates {
+		if candidate.row == nil {
+			continue
+		}
+		detail := buildAssetDetail(candidate.row, nil)
+		if detail == nil {
+			continue
+		}
+		assets = append(assets, *detail)
+	}
+	if len(assets) == 0 {
+		return BatchSearchResult{
+			Term:       term,
+			Status:     BatchSearchStatusNotFound,
+			Message:    batchSearchNoMatchMessage(len(rows), formatFilter, assetKind),
+			Candidates: 0,
+		}
+	}
 	return BatchSearchResult{
 		Term:       term,
 		Status:     BatchSearchStatusMatched,
 		Message:    "已匹配",
-		Candidates: len(candidates),
-		Asset:      buildAssetDetail(candidates[0].row, nil),
+		Candidates: len(assets),
+		Asset:      &assets[0],
+		Assets:     assets,
 	}
 }
 

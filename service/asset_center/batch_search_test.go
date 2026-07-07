@@ -75,6 +75,93 @@ func TestBatchSearchMatchesDeliveryImageBySKU(t *testing.T) {
 	if item.Candidates != 1 {
 		t.Fatalf("candidates = %d, want 1", item.Candidates)
 	}
+	if len(item.Assets) != 1 || item.Assets[0].ID != 102 {
+		t.Fatalf("assets = %+v, want one delivery jpg 102", item.Assets)
+	}
+}
+
+func TestBatchSearchReturnsAllMatchingDeliveryImagesForTerm(t *testing.T) {
+	uploaded := string(domain.DesignAssetUploadStatusUploaded)
+	scopeSKU := "CGP000155"
+	jpgMime := "image/jpeg"
+	psdMime := "image/vnd.adobe.photoshop"
+	now := time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC)
+	rows := []*repo.TaskAssetSearchRow{
+		{
+			Asset: &domain.TaskAsset{
+				ID:           11697,
+				TaskID:       2113,
+				AssetID:      int64PtrExcelPkg(11697),
+				ScopeSKUCode: &scopeSKU,
+				AssetType:    domain.TaskAssetTypeDelivery,
+				FileName:     "万事顺意【30x170cm】.jpg",
+				MimeType:     &jpgMime,
+				UploadStatus: &uploaded,
+				CreatedAt:    now.Add(3 * time.Minute),
+			},
+			Task: &domain.Task{ID: 2113, TaskNo: "RW-20260706-A-002110", SKUCode: scopeSKU, ProductNameSnapshot: "露素常规海报"},
+		},
+		{
+			Asset: &domain.TaskAsset{
+				ID:           11696,
+				TaskID:       2113,
+				AssetID:      int64PtrExcelPkg(11696),
+				ScopeSKUCode: &scopeSKU,
+				AssetType:    domain.TaskAssetTypeDelivery,
+				FileName:     "生日快乐【30x130cm】.jpg",
+				MimeType:     &jpgMime,
+				UploadStatus: &uploaded,
+				CreatedAt:    now.Add(2 * time.Minute),
+			},
+			Task: &domain.Task{ID: 2113, TaskNo: "RW-20260706-A-002110", SKUCode: scopeSKU, ProductNameSnapshot: "露素常规海报"},
+		},
+		{
+			Asset: &domain.TaskAsset{
+				ID:           11631,
+				TaskID:       2113,
+				AssetID:      int64PtrExcelPkg(11631),
+				ScopeSKUCode: &scopeSKU,
+				AssetType:    domain.TaskAssetTypeDelivery,
+				FileName:     "CGP000155露素常规海报-源文件.psd",
+				MimeType:     &psdMime,
+				UploadStatus: &uploaded,
+				CreatedAt:    now.Add(time.Minute),
+			},
+			Task: &domain.Task{ID: 2113, TaskNo: "RW-20260706-A-002110", SKUCode: scopeSKU, ProductNameSnapshot: "露素常规海报"},
+		},
+	}
+	svc := NewService(
+		&excelPackageRepoStub{
+			rowsByKeyword: map[string][]*repo.TaskAssetSearchRow{scopeSKU: rows},
+		},
+		excelPackagePresignerStub{},
+		nil,
+	)
+
+	result, appErr := svc.BatchSearch(context.Background(), BatchSearchRequest{
+		Terms:        []string{scopeSKU},
+		FormatFilter: "jpg_png",
+		AssetKind:    "delivery",
+	})
+	if appErr != nil {
+		t.Fatalf("BatchSearch error = %+v", appErr)
+	}
+	if len(result.Results) != 1 {
+		t.Fatalf("results len = %d, want 1", len(result.Results))
+	}
+	item := result.Results[0]
+	if item.Status != BatchSearchStatusMatched || item.Asset == nil {
+		t.Fatalf("item = %+v, want matched assets", item)
+	}
+	if item.Candidates != 2 {
+		t.Fatalf("candidates = %d, want 2", item.Candidates)
+	}
+	if len(item.Assets) != 2 {
+		t.Fatalf("assets len = %d, want 2", len(item.Assets))
+	}
+	if item.Asset.ID != 11697 || item.Assets[0].ID != 11697 || item.Assets[1].ID != 11696 {
+		t.Fatalf("asset ordering = primary %+v assets %+v, want all matching JPG deliveries newest first", item.Asset, item.Assets)
+	}
 }
 
 func TestBatchSearchFiltersAssetKind(t *testing.T) {

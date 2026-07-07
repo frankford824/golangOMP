@@ -445,7 +445,7 @@
               {{ bulkSearchRunning ? '搜索中...' : '生成下载明细' }}
             </button>
             <button type="button" class="ac-batch-btn" :disabled="bulkSearchDownloading || !bulkSearchMatchedCount" @click="downloadBulkSearchResults">
-              {{ bulkSearchDownloading ? '打包中...' : `一键下载 ${bulkSearchMatchedCount} 项` }}
+              {{ bulkSearchDownloading ? '打包中...' : `一键下载 ${bulkSearchMatchedCount} 个文件` }}
             </button>
             <button type="button" class="ac-batch-btn ac-batch-btn--ghost" :disabled="bulkSearchRunning || bulkSearchDownloading" @click="clearBulkSearch">
               清空
@@ -460,7 +460,7 @@
 
         <div v-if="bulkSearchResults.length" class="bulk-search-summary">
           <span>输入 {{ bulkSearchTermCount }} 项</span>
-          <span>命中 {{ bulkSearchMatchedCount }} 项</span>
+          <span>命中文件 {{ bulkSearchMatchedCount }} 个</span>
           <span>未命中 {{ bulkSearchFailedCount }} 项</span>
           <span>格式：{{ bulkSearchFormatFilterLabel }}</span>
           <span>类型：{{ bulkSearchAssetKindFilterLabel }}</span>
@@ -518,8 +518,20 @@
               </template>
               <p v-else class="bulk-result-message">{{ result.message }}</p>
               <p v-if="result.asset && result.candidates > 1" class="bulk-result-message">
-                共找到 {{ result.candidates }} 个符合筛选的候选资源，已按当前规则选择最新匹配项。
+                共找到 {{ result.candidates }} 个符合筛选的资源，将全部加入下载。
               </p>
+              <ul v-if="bulkSearchResultAssets(result).length > 1" class="bulk-result-files">
+                <li
+                  v-for="asset in bulkSearchResultAssets(result).slice(0, 6)"
+                  :key="assetResourceId(asset)"
+                  :title="cardTitle(asset)"
+                >
+                  {{ cardTitle(asset) }}
+                </li>
+                <li v-if="bulkSearchResultAssets(result).length > 6">
+                  另有 {{ bulkSearchResultAssets(result).length - 6 }} 个文件
+                </li>
+              </ul>
             </div>
           </article>
         </div>
@@ -992,6 +1004,7 @@ interface BulkSearchResult {
   message: string
   candidates: number
   asset?: BackendAsset
+  assets?: BackendAsset[]
 }
 
 const selectedAssetMap = reactive(new Map<string, SelectedAssetSummary>())
@@ -1010,9 +1023,9 @@ let bulkSearchRunSeq = 0
 let bulkSearchAbort: AbortController | null = null
 const bulkSearchTermCache = new Map<string, BulkSearchResult>()
 const bulkSearchTermCount = computed(() => parseBulkSearchTerms(bulkSearchInput.value).length)
-const bulkSearchMatchedResults = computed(() => bulkSearchResults.value.filter((item) => item.status === 'matched' && item.asset))
-const bulkSearchMatchedAssets = computed(() => bulkSearchMatchedResults.value.map((item) => item.asset!).filter(Boolean))
-const bulkSearchMatchedCount = computed(() => bulkSearchMatchedResults.value.length)
+const bulkSearchMatchedResults = computed(() => bulkSearchResults.value.filter((item) => item.status === 'matched' && bulkSearchResultAssets(item).length > 0))
+const bulkSearchMatchedAssets = computed(() => uniqueBulkSearchAssets(bulkSearchMatchedResults.value.flatMap(bulkSearchResultAssets)))
+const bulkSearchMatchedCount = computed(() => bulkSearchMatchedAssets.value.length)
 const bulkSearchFailedCount = computed(() => bulkSearchResults.value.filter((item) => item.status !== 'matched').length)
 
 const effectiveSearchKeyword = computed(() => filters.keyword.trim())
@@ -1604,18 +1617,40 @@ function bulkSearchCacheKey(term: string): string {
   return `${bulkSearchFilters.format}|${bulkSearchFilters.assetKind}|${term}`
 }
 
+function bulkSearchResultAssets(result: BulkSearchResult): BackendAsset[] {
+  if (Array.isArray(result.assets) && result.assets.length > 0) return result.assets
+  return result.asset ? [result.asset] : []
+}
+
+function uniqueBulkSearchAssets(items: BackendAsset[]): BackendAsset[] {
+  const byID = new Map<string, BackendAsset>()
+  for (const asset of items) {
+    const id = assetResourceId(asset)
+    if (!id || byID.has(id)) continue
+    byID.set(id, asset)
+  }
+  return Array.from(byID.values())
+}
+
 function normalizeBulkSearchResult(term: string, raw: unknown): BulkSearchResult {
   const record = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
   const status = String(record.status ?? '').trim() as BulkSearchResultStatus
   const safeStatus: BulkSearchResultStatus =
     status === 'matched' || status === 'not_found' || status === 'error' ? status : 'error'
-  const asset = record.asset && typeof record.asset === 'object' ? (record.asset as BackendAsset) : undefined
+  const rawAssets = Array.isArray(record.assets)
+    ? record.assets.filter((item): item is BackendAsset => Boolean(item && typeof item === 'object'))
+    : []
+  const legacyAsset = record.asset && typeof record.asset === 'object' ? (record.asset as BackendAsset) : undefined
+  const assets = rawAssets.length > 0 ? rawAssets : legacyAsset ? [legacyAsset] : []
+  const asset = assets[0] ?? legacyAsset
+  const candidateCount = Number(record.candidates ?? assets.length) || assets.length
   return {
     term,
     status: safeStatus,
     message: String(record.message ?? (safeStatus === 'matched' ? '已匹配' : '未找到匹配资产')),
-    candidates: Number(record.candidates ?? 0) || 0,
+    candidates: candidateCount,
     ...(asset ? { asset } : {}),
+    ...(assets.length ? { assets } : {}),
   }
 }
 
@@ -1683,7 +1718,8 @@ async function runBulkAssetSearch() {
     const results = await searchBulkAssetTerms(terms, abortController.signal)
     if (abortController.signal.aborted || runSeq !== bulkSearchRunSeq) return
     bulkSearchResults.value = results
-    bulkSearchStatus.value = `已生成明细：命中 ${results.filter((item) => item.status === 'matched').length} 项，未命中 ${results.filter((item) => item.status !== 'matched').length} 项`
+    const matchedFiles = uniqueBulkSearchAssets(results.flatMap(bulkSearchResultAssets)).length
+    bulkSearchStatus.value = `已生成明细：命中文件 ${matchedFiles} 个，未命中 ${results.filter((item) => item.status !== 'matched').length} 项`
   } catch (err) {
     if (abortController.signal.aborted || runSeq !== bulkSearchRunSeq) return
     bulkSearchError.value = resolveApiUserMessage(err, { fallback: '批量搜索失败，请稍后重试' })
@@ -1699,7 +1735,8 @@ async function runBulkAssetSearch() {
 
 function normalizeBulkSearchAssetIDs(): number[] {
   const ids = bulkSearchMatchedResults.value
-    .map((item) => Number(item.asset?.id))
+    .flatMap(bulkSearchResultAssets)
+    .map((item) => Number(item.id))
     .filter((id) => Number.isInteger(id) && id > 0)
   return Array.from(new Set(ids))
 }
@@ -3674,6 +3711,23 @@ onBeforeUnmount(() => {
   color: var(--ac-sec, rgb(var(--yb-text-apple-muted)));
   font-size: 0.78rem;
   line-height: 1.55;
+}
+
+.bulk-result-files {
+  display: grid;
+  gap: 0.3rem;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  list-style: none;
+  color: rgb(var(--yb-text-body));
+  font-size: 0.76rem;
+}
+
+.bulk-result-files li {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 @media (max-width: 720px) {
