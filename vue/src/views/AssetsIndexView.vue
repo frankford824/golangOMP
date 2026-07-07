@@ -81,15 +81,20 @@
             label="资源来源"
             :options="assetSourceOptions"
           />
+          <BaseSelect
+            v-model="filters.timeBasis"
+            label="时间口径"
+            :options="assetTimeBasisOptions"
+          />
           <BaseInput
             v-model="filters.createdFrom"
             type="date"
-            label="开始时间"
+            label="时间范围开始"
           />
           <BaseInput
             v-model="filters.createdTo"
             type="date"
-            label="结束时间"
+            label="时间范围结束"
           />
           <BaseSelect
             v-model="filters.taskLane"
@@ -98,8 +103,15 @@
           />
           <BaseSelect
             v-model="filters.assetKind"
-            label="图片类型"
+            label="文件类型"
             :options="assetKindFilterOptions"
+            :disabled="filters.resourceSource === 'external'"
+          />
+          <BaseSelect
+            v-model="filters.moduleKey"
+            label="产生环节"
+            :options="assetSourceModuleOptions"
+            :disabled="filters.resourceSource === 'external'"
           />
           <BaseSelect
             v-model="filters.formatCategory"
@@ -246,6 +258,13 @@
                 :title="imageBusinessTypeLabel(asset)"
               >
                 {{ compactImageBusinessTypeLabel(asset) }}
+              </span>
+              <span
+                v-if="!isExternalAsset(asset)"
+                class="ac-format-pill ac-format-pill--module"
+                :title="assetSourceModuleLabel(asset)"
+              >
+                {{ assetSourceModuleLabel(asset) }}
               </span>
             </div>
             <div class="ac-card-meta">
@@ -579,8 +598,20 @@
             <dd>{{ displayTime(selectedAsset.cleanup_after_at) }}</dd>
           </div>
           <div class="detail-row">
-            <dt>图片类型</dt>
+            <dt>文件类型</dt>
             <dd>{{ imageBusinessTypeLabel(selectedAsset) }}</dd>
+          </div>
+          <div v-if="!isExternalAsset(selectedAsset)" class="detail-row">
+            <dt>产生环节</dt>
+            <dd>{{ assetSourceModuleLabel(selectedAsset) }}</dd>
+          </div>
+          <div v-if="!isExternalAsset(selectedAsset)" class="detail-row">
+            <dt>上传时间</dt>
+            <dd>{{ displayTime(selectedAsset.uploaded_at ?? selectedAsset.created_at) }}</dd>
+          </div>
+          <div v-if="!isExternalAsset(selectedAsset)" class="detail-row">
+            <dt>任务创建时间</dt>
+            <dd>{{ displayTime(selectedAsset.task_created_at) }}</dd>
           </div>
           <div class="detail-row">
             <dt>文件名</dt>
@@ -714,7 +745,6 @@ import { usePermission } from '@/composables/usePermission'
 import {
   assetArchiveStatusLabelCn,
   assetDownloadModeLabelCn,
-  assetKindLabelCn,
   assetUploadStatusLabelCn,
 } from '@/domain/mappers/read-model-labels-cn'
 import PredictionFeedbackControl from '@/components/experience/PredictionFeedbackControl.vue'
@@ -804,6 +834,17 @@ let assetPredictionAbort: AbortController | null = null
 type AssetTaskLaneFilter = 'all' | 'normal' | 'customization'
 type AssetKindFilter = 'all' | 'delivery' | 'reference' | 'source'
 type AssetFormatFilter = 'all' | 'image' | 'design' | 'pdf' | 'video' | 'archive'
+type AssetTimeBasisFilter = 'asset_uploaded_at' | 'task_created_at'
+type AssetSourceModuleFilter = 'all' | 'basic_info' | 'design' | 'audit' | 'customization' | 'retouch'
+
+const ASSET_CENTER_FILE_TYPE_LABELS: Record<string, string> = {
+  delivery: '成品图',
+  reference: '参考图',
+  source: '源文件',
+  preview: '预览图',
+  design_thumb: '预览图',
+}
+
 type BulkSearchFormatFilter =
   | 'jpg_png'
   | 'jpg'
@@ -826,10 +867,12 @@ type BulkSearchAssetKindFilter =
 const filters = reactive({
   keyword: '',
   resourceSource: 'all' as AssetResourceSource,
+  timeBasis: 'asset_uploaded_at' as AssetTimeBasisFilter,
   createdFrom: '',
   createdTo: '',
   taskLane: 'all' as AssetTaskLaneFilter,
   assetKind: 'all' as AssetKindFilter,
+  moduleKey: 'all' as AssetSourceModuleFilter,
   formatCategory: 'all' as AssetFormatFilter,
 })
 
@@ -844,6 +887,11 @@ const assetSourceOptions: BaseSelectOption[] = [
   { value: 'external', label: '外部资源' },
 ]
 
+const assetTimeBasisOptions: BaseSelectOption[] = [
+  { value: 'asset_uploaded_at', label: '文件上传时间' },
+  { value: 'task_created_at', label: '任务创建时间' },
+]
+
 const assetTaskLaneOptions: BaseSelectOption[] = [
   { value: 'all', label: '全部任务' },
   { value: 'normal', label: '常规任务' },
@@ -851,10 +899,19 @@ const assetTaskLaneOptions: BaseSelectOption[] = [
 ]
 
 const assetKindFilterOptions: BaseSelectOption[] = [
-  { value: 'all', label: '全部图片类型' },
+  { value: 'all', label: '全部文件类型' },
   { value: 'delivery', label: '成品图' },
   { value: 'reference', label: '参考图' },
-  { value: 'source', label: '设计源文件' },
+  { value: 'source', label: '源文件' },
+]
+
+const assetSourceModuleOptions: BaseSelectOption[] = [
+  { value: 'all', label: '全部产生环节' },
+  { value: 'basic_info', label: '基础信息参考' },
+  { value: 'design', label: '设计提交' },
+  { value: 'audit', label: '常规审核修订' },
+  { value: 'customization', label: '定制链路上传' },
+  { value: 'retouch', label: '精修需求素材' },
 ]
 
 const assetFormatCategoryOptions: BaseSelectOption[] = [
@@ -965,6 +1022,9 @@ const effectiveTaskLaneFilter = computed<AssetTaskLaneFilter>(() =>
 const effectiveAssetKindFilter = computed<AssetKindFilter>(() =>
   filters.resourceSource === 'external' ? 'all' : filters.assetKind,
 )
+const effectiveSourceModuleFilter = computed<AssetSourceModuleFilter>(() =>
+  filters.resourceSource === 'external' ? 'all' : filters.moduleKey,
+)
 
 const listTotalPages = computed(() =>
   Math.max(1, Math.ceil(listTotal.value / listPageSize.value)),
@@ -977,7 +1037,17 @@ watch(listTotalPages, (tp) => {
 })
 
 watch(
-  () => [filters.keyword, filters.resourceSource, filters.createdFrom, filters.createdTo, filters.taskLane, filters.assetKind, filters.formatCategory],
+  () => [
+    filters.keyword,
+    filters.resourceSource,
+    filters.timeBasis,
+    filters.createdFrom,
+    filters.createdTo,
+    filters.taskLane,
+    filters.assetKind,
+    filters.moduleKey,
+    filters.formatCategory,
+  ],
   () => {
     listPage.value = 1
     scheduleReload()
@@ -988,8 +1058,10 @@ watch(
   () => filters.resourceSource,
   (source) => {
     if (source === 'external') {
+      if (filters.timeBasis !== 'asset_uploaded_at') filters.timeBasis = 'asset_uploaded_at'
       if (filters.taskLane !== 'all') filters.taskLane = 'all'
       if (filters.assetKind !== 'all') filters.assetKind = 'all'
+      if (filters.moduleKey !== 'all') filters.moduleKey = 'all'
     }
   },
 )
@@ -1304,6 +1376,35 @@ function assetFileName(asset: BackendAsset): string {
   return cardTitle(asset)
 }
 
+function assetSourceModuleKey(asset: BackendAsset | null | undefined): string {
+  if (!asset) return ''
+  const r = asset as Record<string, unknown>
+  return String(r.source_module_key ?? r.module_key ?? '').trim().toLowerCase()
+}
+
+function assetSourceModuleLabel(asset: BackendAsset | null | undefined): string {
+  if (!asset) return '—'
+  if (isExternalAsset(asset)) return '外部资源'
+  switch (assetSourceModuleKey(asset)) {
+    case 'basic_info':
+      return '基础信息参考'
+    case 'design':
+      return '设计提交'
+    case 'audit':
+      return '常规审核修订'
+    case 'customization':
+      return '定制链路上传'
+    case 'retouch':
+      return '精修需求素材'
+    case 'warehouse':
+      return '仓库处理'
+    case 'procurement':
+      return '采购资料'
+    default:
+      return '历史资产'
+  }
+}
+
 function businessSku(asset: BackendAsset): string {
   const r = asset as Record<string, unknown>
   for (const key of ['scope_sku_code', 'sku_code', 'primary_sku_code', 'target_sku_code'] as const) {
@@ -1613,7 +1714,7 @@ async function downloadBulkSearchResults() {
   }
   bulkSearchDownloading.value = true
   try {
-    const res = await assetsApi.batchDownload(assetIDs, { namingMode: 'original' })
+    const res = await assetsApi.batchDownload(assetIDs, { namingMode: 'business' })
     const manifest = res.data?.data
     const items = Array.isArray(manifest?.items) ? manifest.items : []
     if (!items.length) {
@@ -2139,10 +2240,16 @@ function dateFilterFromQuery(value: unknown): string {
 }
 
 function assetKind(asset: BackendAsset | string | null | undefined): string {
-  if (typeof asset === 'string') return assetKindLabelCn(asset)
+  if (typeof asset === 'string') return assetFileTypeLabel(asset)
   if (!asset) return '—'
   const record = asset as Record<string, unknown>
-  return assetKindLabelCn(String(record.asset_kind ?? record.asset_type ?? asset.file_role ?? ''))
+  return assetFileTypeLabel(record.asset_kind ?? record.asset_type ?? asset.file_role)
+}
+
+function assetFileTypeLabel(value: unknown): string {
+  const key = String(value ?? '').trim().toLowerCase()
+  if (!key) return '—'
+  return ASSET_CENTER_FILE_TYPE_LABELS[key] ?? String(value ?? '').trim()
 }
 
 function assetUploadStatus(value: unknown): string {
@@ -2186,6 +2293,8 @@ function syncQuerySelection() {
   if (filters.resourceSource !== 'all') nextQuery.source = filters.resourceSource
   if (effectiveTaskLaneFilter.value !== 'all') nextQuery.business_lane = effectiveTaskLaneFilter.value
   if (effectiveAssetKindFilter.value !== 'all') nextQuery.asset_type = effectiveAssetKindFilter.value
+  if (filters.timeBasis !== 'asset_uploaded_at') nextQuery.time_basis = filters.timeBasis
+  if (effectiveSourceModuleFilter.value !== 'all') nextQuery.module_key = effectiveSourceModuleFilter.value
   if (filters.formatCategory !== 'all') nextQuery.format_category = filters.formatCategory
   if (filters.createdFrom) nextQuery.created_from = filters.createdFrom
   if (filters.createdTo) nextQuery.created_to = filters.createdTo
@@ -2199,6 +2308,8 @@ function openAssetDetail(assetId: string) {
   if (filters.resourceSource !== 'all') query.source = filters.resourceSource
   if (effectiveTaskLaneFilter.value !== 'all') query.business_lane = effectiveTaskLaneFilter.value
   if (effectiveAssetKindFilter.value !== 'all') query.asset_type = effectiveAssetKindFilter.value
+  if (filters.timeBasis !== 'asset_uploaded_at') query.time_basis = filters.timeBasis
+  if (effectiveSourceModuleFilter.value !== 'all') query.module_key = effectiveSourceModuleFilter.value
   if (filters.formatCategory !== 'all') query.format_category = filters.formatCategory
   if (filters.createdFrom) query.created_from = filters.createdFrom
   if (filters.createdTo) query.created_to = filters.createdTo
@@ -2226,6 +2337,8 @@ async function reload() {
         source: effectiveAssetSearchSource.value,
         business_lane: effectiveTaskLaneFilter.value === 'all' ? undefined : effectiveTaskLaneFilter.value,
         asset_type: effectiveAssetKindFilter.value === 'all' ? undefined : effectiveAssetKindFilter.value,
+        module_key: effectiveSourceModuleFilter.value === 'all' ? undefined : effectiveSourceModuleFilter.value,
+        time_basis: filters.timeBasis,
         format_category: filters.formatCategory === 'all' ? undefined : filters.formatCategory,
         created_from: dateFilterToRFC3339(filters.createdFrom, 'start'),
         created_to: dateFilterToRFC3339(filters.createdTo, 'end'),
@@ -2346,6 +2459,10 @@ onMounted(() => {
   if (requestedSource === 'system' || requestedSource === 'external' || requestedSource === 'all') {
     filters.resourceSource = requestedSource
   }
+  const requestedTimeBasis = typeof route.query.time_basis === 'string' ? route.query.time_basis.trim() : ''
+  if (assetTimeBasisOptions.some((option) => option.value === requestedTimeBasis)) {
+    filters.timeBasis = requestedTimeBasis as AssetTimeBasisFilter
+  }
   const requestedTaskLane = typeof route.query.business_lane === 'string' ? route.query.business_lane.trim() : ''
   if (assetTaskLaneOptions.some((option) => option.value === requestedTaskLane)) {
     filters.taskLane = requestedTaskLane as AssetTaskLaneFilter
@@ -2354,12 +2471,22 @@ onMounted(() => {
   if (assetKindFilterOptions.some((option) => option.value === requestedAssetKind)) {
     filters.assetKind = requestedAssetKind as AssetKindFilter
   }
+  const requestedModuleKey = typeof route.query.module_key === 'string' ? route.query.module_key.trim() : ''
+  if (assetSourceModuleOptions.some((option) => option.value === requestedModuleKey)) {
+    filters.moduleKey = requestedModuleKey as AssetSourceModuleFilter
+  }
   const requestedFormat = typeof route.query.format_category === 'string' ? route.query.format_category.trim() : ''
   if (assetFormatCategoryOptions.some((option) => option.value === requestedFormat)) {
     filters.formatCategory = requestedFormat as AssetFormatFilter
   }
   filters.createdFrom = dateFilterFromQuery(route.query.created_from)
   filters.createdTo = dateFilterFromQuery(route.query.created_to)
+  if (filters.resourceSource === 'external') {
+    filters.timeBasis = 'asset_uploaded_at'
+    filters.taskLane = 'all'
+    filters.assetKind = 'all'
+    filters.moduleKey = 'all'
+  }
   void reload()
 })
 
@@ -3995,6 +4122,12 @@ onBeforeUnmount(() => {
   border-color: rgb(var(--yb-text-disabled)) ;
   background: rgb(var(--yb-surface-subtle)) ;
   color: rgb(var(--yb-text-soft)) ;
+}
+
+.ac-format-pill--module {
+  border-color: rgb(var(--yb-border-strong)) ;
+  background: rgb(var(--yb-surface-muted)) ;
+  color: rgb(var(--yb-text-muted-strong)) ;
 }
 
 .ac-card-meta,

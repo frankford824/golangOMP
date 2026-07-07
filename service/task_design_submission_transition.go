@@ -52,6 +52,12 @@ func designAssetSourceModuleKeyForTask(task *domain.Task, assetType domain.TaskA
 		(assetType.IsSource() || assetType.IsDelivery() || assetType.IsPreview() || assetType.IsDesignThumb()) {
 		return domain.ModuleKeyRetouch
 	}
+	if task != nil && (task.TaskStatus == domain.TaskStatusPendingAuditA ||
+		task.TaskStatus == domain.TaskStatusPendingAuditB ||
+		task.TaskStatus == domain.TaskStatusPendingOutsourceReview) &&
+		(assetType.IsSource() || assetType.IsDelivery()) {
+		return domain.ModuleKeyAudit
+	}
 	if task != nil && task.CustomizationRequired &&
 		(assetType.IsSource() || assetType.IsDelivery() || assetType.IsPreview() || assetType.IsDesignThumb()) {
 		return domain.ModuleKeyCustomization

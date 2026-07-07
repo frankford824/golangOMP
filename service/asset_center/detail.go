@@ -3,6 +3,7 @@ package asset_center
 import (
 	"context"
 	"strconv"
+	"time"
 
 	"workflow/domain"
 	"workflow/repo"
@@ -52,6 +53,16 @@ func buildAssetDetail(row *repo.TaskAssetSearchRow, versions []*repo.TaskAssetSe
 	state := domain.DeriveLifecycleState(*a, *t)
 	usableState := domain.DeriveTaskAssetUsableState(*a)
 	currentVersionID := a.ID
+	uploadedAt := a.UploadedAt
+	if uploadedAt == nil && !a.CreatedAt.IsZero() {
+		v := a.CreatedAt
+		uploadedAt = &v
+	}
+	var taskCreatedAt *time.Time
+	if !t.CreatedAt.IsZero() {
+		v := t.CreatedAt
+		taskCreatedAt = &v
+	}
 	detail := &AssetDetail{
 		ID:                    valueInt64(a.AssetID, a.ID),
 		ResourceID:            strconv.FormatInt(valueInt64(a.AssetID, a.ID), 10),
@@ -81,6 +92,8 @@ func buildAssetDetail(row *repo.TaskAssetSearchRow, versions []*repo.TaskAssetSe
 		TaskCreatorID:         t.CreatorID,
 		TaskCreatorUsername:   row.TaskCreatorUsername,
 		TaskCreatorName:       row.TaskCreatorName,
+		UploadedAt:            uploadedAt,
+		TaskCreatedAt:         taskCreatedAt,
 		CreatedAt:             row.DesignCreatedAt,
 		UpdatedAt:             row.DesignUpdatedAt,
 		ArchivedAt:            a.ArchivedAt,

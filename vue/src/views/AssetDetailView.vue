@@ -113,8 +113,20 @@
             <dd>{{ displayTime(asset.cleanup_after_at) }}</dd>
           </div>
           <div class="detail-row">
-            <dt>图片类型</dt>
+            <dt>文件类型</dt>
             <dd>{{ imageBusinessTypeLabel(asset) }}</dd>
+          </div>
+          <div v-if="!isExternalAsset(asset)" class="detail-row">
+            <dt>产生环节</dt>
+            <dd>{{ assetSourceModuleLabel(asset) }}</dd>
+          </div>
+          <div v-if="!isExternalAsset(asset)" class="detail-row">
+            <dt>上传时间</dt>
+            <dd>{{ displayTime(asset.uploaded_at ?? asset.created_at) }}</dd>
+          </div>
+          <div v-if="!isExternalAsset(asset)" class="detail-row">
+            <dt>任务创建时间</dt>
+            <dd>{{ displayTime(asset.task_created_at) }}</dd>
           </div>
           <div class="detail-row">
             <dt>文件名</dt>
@@ -237,7 +249,6 @@ import { usePermission } from '@/composables/usePermission'
 import {
   assetArchiveStatusLabelCn,
   assetDownloadModeLabelCn,
-  assetKindLabelCn,
   assetUploadStatusLabelCn,
 } from '@/domain/mappers/read-model-labels-cn'
 import { normalizeAssetDetailFromApi } from '@/domain/mappers/asset-detail-from-api'
@@ -256,6 +267,14 @@ import { uploadTaskFileViaAssetSession } from '@/services/upload/assetUploadFlow
 const route = useRoute()
 const router = useRouter()
 const { canAccessPage } = usePermission()
+
+const ASSET_CENTER_FILE_TYPE_LABELS: Record<string, string> = {
+  delivery: '成品图',
+  reference: '参考图',
+  source: '源文件',
+  preview: '预览图',
+  design_thumb: '预览图',
+}
 
 const assetId = computed(() => String(route.params.id ?? '').trim())
 const taskId = computed(() => {
@@ -494,6 +513,35 @@ function imageBusinessTypeLabel(row: BackendAsset): string {
   return `${assetKind(row)} / ${fileFormatLabel(row)}`
 }
 
+function assetSourceModuleKey(row: BackendAsset | null | undefined): string {
+  if (!row) return ''
+  const record = row as Record<string, unknown>
+  return String(record.source_module_key ?? record.module_key ?? '').trim().toLowerCase()
+}
+
+function assetSourceModuleLabel(row: BackendAsset | null | undefined): string {
+  if (!row) return '—'
+  if (isExternalAsset(row)) return '外部资源'
+  switch (assetSourceModuleKey(row)) {
+    case 'basic_info':
+      return '基础信息参考'
+    case 'design':
+      return '设计提交'
+    case 'audit':
+      return '常规审核修订'
+    case 'customization':
+      return '定制链路上传'
+    case 'retouch':
+      return '精修需求素材'
+    case 'warehouse':
+      return '仓库处理'
+    case 'procurement':
+      return '采购资料'
+    default:
+      return '历史资产'
+  }
+}
+
 function assetProductLabel(row: BackendAsset): string {
   const record = row as Record<string, unknown>
   const product = String(record.product_name ?? record.product_name_snapshot ?? '').trim()
@@ -509,10 +557,16 @@ function versionCreatorLabel(version: BackendAssetVersion): string {
 }
 
 function assetKind(input: BackendAsset | string | null | undefined): string {
-  if (typeof input === 'string') return assetKindLabelCn(input)
+  if (typeof input === 'string') return assetFileTypeLabel(input)
   if (!input) return '—'
   const record = input as Record<string, unknown>
-  return assetKindLabelCn(String(record.asset_kind ?? record.asset_type ?? input.file_role ?? ''))
+  return assetFileTypeLabel(record.asset_kind ?? record.asset_type ?? input.file_role)
+}
+
+function assetFileTypeLabel(value: unknown): string {
+  const key = String(value ?? '').trim().toLowerCase()
+  if (!key) return '—'
+  return ASSET_CENTER_FILE_TYPE_LABELS[key] ?? String(value ?? '').trim()
 }
 
 function assetUploadStatus(value: unknown): string {

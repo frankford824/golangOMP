@@ -76,6 +76,8 @@ type AssetDetail struct {
 	TaskCreatorID         int64                            `json:"task_creator_id,omitempty"`
 	TaskCreatorUsername   string                           `json:"task_creator_username,omitempty"`
 	TaskCreatorName       string                           `json:"task_creator_name,omitempty"`
+	UploadedAt            *time.Time                       `json:"uploaded_at,omitempty"`
+	TaskCreatedAt         *time.Time                       `json:"task_created_at,omitempty"`
 	CreatedAt             time.Time                        `json:"created_at"`
 	UpdatedAt             time.Time                        `json:"updated_at"`
 	Versions              []AssetVersion                   `json:"versions,omitempty"`

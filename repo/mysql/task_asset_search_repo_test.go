@@ -3,6 +3,7 @@ package mysqlrepo
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"workflow/domain"
 )
@@ -163,6 +164,49 @@ func TestBuildTaskAssetSearchWhereFiltersAssetTypeWithAliases(t *testing.T) {
 		if !containsStringArg(sourceArgs, expected) {
 			t.Fatalf("args missing source alias %q: %#v", expected, sourceArgs)
 		}
+	}
+}
+
+func TestBuildTaskAssetSearchWhereFiltersByUploadedTimeByDefault(t *testing.T) {
+	from := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	to := time.Date(2026, 7, 2, 0, 0, 0, 0, time.UTC)
+	where, args := buildTaskAssetSearchWhere(domain.AssetSearchQuery{
+		CreatedFrom: &from,
+		CreatedTo:   &to,
+	})
+
+	if !strings.Contains(where, "COALESCE(ta.uploaded_at, ta.created_at) >= ?") {
+		t.Fatalf("where clause missing uploaded time lower bound: %s", where)
+	}
+	if !strings.Contains(where, "COALESCE(ta.uploaded_at, ta.created_at) <= ?") {
+		t.Fatalf("where clause missing uploaded time upper bound: %s", where)
+	}
+	if containsStringArg(args, "t.created_at") {
+		t.Fatalf("args should contain values only: %#v", args)
+	}
+}
+
+func TestBuildTaskAssetSearchWhereFiltersByTaskCreatedTime(t *testing.T) {
+	from := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	where, _ := buildTaskAssetSearchWhere(domain.AssetSearchQuery{
+		TimeBasis:   domain.AssetSearchTimeBasisTaskCreatedAt,
+		CreatedFrom: &from,
+	})
+
+	if !strings.Contains(where, "t.created_at >= ?") {
+		t.Fatalf("where clause missing task created time lower bound: %s", where)
+	}
+	if strings.Contains(where, "COALESCE(ta.uploaded_at, ta.created_at) >= ?") {
+		t.Fatalf("where clause should not use uploaded time for task_created_at: %s", where)
+	}
+}
+
+func TestTaskAssetSearchOrderByFollowsTimeBasis(t *testing.T) {
+	if got := taskAssetSearchOrderBy(domain.AssetSearchQuery{}); !strings.Contains(got, "COALESCE(ta.uploaded_at, ta.created_at) DESC") {
+		t.Fatalf("default order by = %q, want uploaded time", got)
+	}
+	if got := taskAssetSearchOrderBy(domain.AssetSearchQuery{TimeBasis: domain.AssetSearchTimeBasisTaskCreatedAt}); !strings.Contains(got, "t.created_at DESC") {
+		t.Fatalf("task-created order by = %q, want task created time", got)
 	}
 }
 

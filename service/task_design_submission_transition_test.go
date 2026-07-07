@@ -79,6 +79,13 @@ func TestDesignAssetSourceModuleKeyForTask(t *testing.T) {
 	if got := designAssetSourceModuleKeyForTask(regular, domain.TaskAssetTypeDelivery); got != domain.ModuleKeyDesign {
 		t.Fatalf("delivery source_module_key = %q, want %q", got, domain.ModuleKeyDesign)
 	}
+	audit := &domain.Task{CustomizationRequired: false, TaskStatus: domain.TaskStatusPendingAuditA}
+	if got := designAssetSourceModuleKeyForTask(audit, domain.TaskAssetTypeSource); got != domain.ModuleKeyAudit {
+		t.Fatalf("audit source source_module_key = %q, want %q", got, domain.ModuleKeyAudit)
+	}
+	if got := designAssetSourceModuleKeyForTask(audit, domain.TaskAssetTypeDelivery); got != domain.ModuleKeyAudit {
+		t.Fatalf("audit delivery source_module_key = %q, want %q", got, domain.ModuleKeyAudit)
+	}
 	custom := &domain.Task{CustomizationRequired: true}
 	if got := designAssetSourceModuleKeyForTask(custom, domain.TaskAssetTypeSource); got != domain.ModuleKeyCustomization {
 		t.Fatalf("customization source source_module_key = %q, want %q", got, domain.ModuleKeyCustomization)

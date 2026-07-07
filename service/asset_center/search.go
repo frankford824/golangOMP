@@ -81,7 +81,10 @@ func (s *Service) Search(ctx context.Context, query domain.AssetSearchQuery) (*S
 func assetSearchHasSystemOnlyFilters(query domain.AssetSearchQuery) bool {
 	return query.UsableState != domain.AssetUsableStateFilterAll ||
 		query.BusinessLane.Valid() ||
-		query.AssetType.Valid()
+		query.AssetType.Valid() ||
+		strings.TrimSpace(query.ModuleKey) != "" ||
+		strings.TrimSpace(query.OwnerTeamCode) != "" ||
+		query.TimeBasis == domain.AssetSearchTimeBasisTaskCreatedAt
 }
 
 func (s *Service) BrowseMaterials(ctx context.Context, query MaterialBrowseQuery) (*MaterialBrowseResult, *domain.AppError) {

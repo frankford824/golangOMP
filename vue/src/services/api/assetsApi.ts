@@ -239,6 +239,7 @@ export interface AssetSearchQuery {
   workflow_lane?: 'normal' | 'customization'
   asset_type?: 'delivery' | 'reference' | 'source' | 'preview' | 'design_thumb'
   asset_kind?: 'delivery' | 'reference' | 'source' | 'preview' | 'design_thumb'
+  time_basis?: 'asset_uploaded_at' | 'task_created_at'
   created_from?: string
   created_to?: string
   format_category?: 'all' | 'image' | 'design' | 'pdf' | 'video' | 'archive'

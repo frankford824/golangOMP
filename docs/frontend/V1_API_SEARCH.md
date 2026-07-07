@@ -33,14 +33,15 @@
 |---|---|---|---|---|
 | `keyword` | query | string | 否 | Fuzzy match system asset fields and indexed external resource paths/names. |
 | `source` | query | enum(all/system/external) | 否 | Resource source bucket. `all` returns system + external; external resources are read-only and prepared for preview/download on demand. |
-| `module_key` | query | enum(basic_info/design/audit/warehouse/customization/procurement/retouch) | 否 | Restrict to one source module. |
+| `module_key` | query | enum(basic_info/design/audit/warehouse/customization/procurement/retouch) | 否 | Business origin filter for system task-owned assets. UI labels this as the asset production stage, e.g. `design` = 设计提交, `audit` = 常规审核修订, `customization` = 定制链路上传, `basic_info` = 基础信息参考, `retouch` = 精修需求素材. External resources are excluded when this filter is set. |
 | `owner_team_code` | query | string | 否 | Restrict to one owner team. |
 | `is_archived` | query | enum(true/false/all) | 否 | Archive filter. Default `false`. `all` returns active + archived. |
 | `task_status` | query | enum(open/closed/archived/all) | 否 | Task lifecycle filter. |
 | `business_lane` | query | enum(normal/customization) | 否 | System task lane filter for task-owned assets. `normal` includes legacy rows whose lane is empty; external resources are excluded when this filter is set. |
-| `asset_type` | query | enum(delivery/reference/source/preview/design_thumb) | 否 | System asset role filter. Use `delivery` for final product images, `reference` for reference images, and `source` for design source files; external resources are excluded when this filter is set. |
-| `created_from` | query | string | 否 | Inclusive lower bound for asset created_at. |
-| `created_to` | query | string | 否 | Inclusive upper bound for asset created_at. |
+| `asset_type` | query | enum(delivery/reference/source/preview/design_thumb) | 否 | System asset file-type filter. Use `delivery` for product images, `reference` for reference/material images, and `source` for source files; use `module_key` to distinguish which workflow stage produced the file. External resources are excluded when this filter is set. |
+| `time_basis` | query | enum(asset_uploaded_at/task_created_at) | 否 | Time field used by `created_from` / `created_to`. Default `asset_uploaded_at` filters by the current asset version upload/ingest time; `task_created_at` filters by the owning task creation time. |
+| `created_from` | query | string | 否 | Inclusive lower bound for the selected `time_basis`. |
+| `created_to` | query | string | 否 | Inclusive upper bound for the selected `time_basis`. |
 | `page` | query | integer | 否 | - |
 | `size` | query | integer | 否 | - |
 

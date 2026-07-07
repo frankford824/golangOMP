@@ -49,3 +49,15 @@ func TestExternalSearchDisabledReturnsEmpty(t *testing.T) {
 		t.Fatalf("Search external result = %#v, want empty", result)
 	}
 }
+
+func TestAssetSearchHasSystemOnlyFiltersIncludesTaskCreatedTimeBasisAndModule(t *testing.T) {
+	if !assetSearchHasSystemOnlyFilters(domain.AssetSearchQuery{TimeBasis: domain.AssetSearchTimeBasisTaskCreatedAt}) {
+		t.Fatal("task_created_at time basis should be system-only")
+	}
+	if !assetSearchHasSystemOnlyFilters(domain.AssetSearchQuery{ModuleKey: domain.ModuleKeyAudit}) {
+		t.Fatal("module_key should be system-only")
+	}
+	if assetSearchHasSystemOnlyFilters(domain.AssetSearchQuery{TimeBasis: domain.AssetSearchTimeBasisUploadedAt}.Normalized()) {
+		t.Fatal("asset_uploaded_at alone should not be system-only")
+	}
+}

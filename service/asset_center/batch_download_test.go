@@ -131,6 +131,7 @@ func TestBuildBatchDownloadManifestBusinessNamingModeUsesSKUAndProductName(t *te
 				AssetID:      int64PtrBatchSvc(205),
 				TaskID:       9105,
 				ScopeSKUCode: &scopeSKU,
+				AssetType:    domain.TaskAssetTypeDelivery,
 				FileName:     "opaque-storage-name.jpg",
 				OriginalName: strPtr("原始稿.jpg"),
 				StorageKey:   strPtr("k-205"),
@@ -149,6 +150,10 @@ func TestBuildBatchDownloadManifestBusinessNamingModeUsesSKUAndProductName(t *te
 		urlByKey: map[string]string{"k-205": "https://oss.example/k-205"},
 	}, nil)
 
+	if got := resolveBatchFilenameForMode(repoRows[0], 205, BatchDownloadNamingBusiness); got != "NSKT000277-端午节保龄球_10.5x15.5cm.jpg" {
+		t.Fatalf("resolveBatchFilenameForMode() = %q, want business filename", got)
+	}
+
 	result, appErr := svc.BuildBatchDownloadManifest(
 		context.Background(),
 		[]int64{205},
@@ -159,6 +164,48 @@ func TestBuildBatchDownloadManifestBusinessNamingModeUsesSKUAndProductName(t *te
 	}
 	if result.Items[0].Filename != "NSKT000277-端午节保龄球_10.5x15.5cm.jpg" {
 		t.Fatalf("filename = %q", result.Items[0].Filename)
+	}
+}
+
+func TestBuildBatchDownloadManifestBusinessNamingModeKeepsReferenceOriginalName(t *testing.T) {
+	uploaded := string(domain.DesignAssetUploadStatusUploaded)
+	scopeSKU := "NSKT000277"
+	repoRows := []*repo.TaskAssetSearchRow{
+		{
+			Asset: &domain.TaskAsset{
+				ID:           26,
+				AssetID:      int64PtrBatchSvc(206),
+				TaskID:       9106,
+				ScopeSKUCode: &scopeSKU,
+				AssetType:    domain.TaskAssetTypeReference,
+				FileName:     "stored-reference.jpg",
+				OriginalName: strPtr("运营参考原图.jpg"),
+				StorageKey:   strPtr("k-206"),
+				FileSize:     int64PtrBatchSvc(1),
+				UploadStatus: &uploaded,
+			},
+			Task: &domain.Task{
+				ID:                  9106,
+				SKUCode:             "TASK-SKU",
+				ProductNameSnapshot: "端午节保龄球",
+			},
+		},
+	}
+	svc := NewService(&batchRepoStub{rowsByIDs: repoRows}, &batchPresignerStub{
+		enabled:  true,
+		urlByKey: map[string]string{"k-206": "https://oss.example/k-206"},
+	}, nil)
+
+	result, appErr := svc.BuildBatchDownloadManifest(
+		context.Background(),
+		[]int64{206},
+		WithBatchDownloadNamingMode(BatchDownloadNamingBusiness),
+	)
+	if appErr != nil {
+		t.Fatalf("BuildBatchDownloadManifest error = %+v", appErr)
+	}
+	if result.Items[0].Filename != "运营参考原图.jpg" {
+		t.Fatalf("filename = %q, want reference original name", result.Items[0].Filename)
 	}
 }
 

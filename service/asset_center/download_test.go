@@ -49,11 +49,13 @@ func TestDownloadLatestAppendsProxyDownloadFilename(t *testing.T) {
 			Asset: &domain.TaskAsset{
 				ID:           10,
 				AssetID:      int64Ptr(5),
+				AssetType:    domain.TaskAssetTypeSource,
 				FileName:     "source.psd",
 				OriginalName: &originalName,
+				ScopeSKUCode: strPtrDownload("NSKT000277"),
 				StorageKey:   &storageKey,
 			},
-			Task: &domain.Task{TaskStatus: domain.TaskStatusCompleted},
+			Task: &domain.Task{TaskStatus: domain.TaskStatusCompleted, ProductNameSnapshot: "端午节保龄球/10.5x15.5cm"},
 		},
 	}, nil, fakeBrowserURLBuilder{baseURL: "/v1/assets/files/"})
 
@@ -68,27 +70,31 @@ func TestDownloadLatestAppendsProxyDownloadFilename(t *testing.T) {
 	if err != nil {
 		t.Fatalf("download_url parse error: %v", err)
 	}
-	if got := parsed.Query().Get(baseservice.DownloadFilenameQueryParam); got != originalName {
-		t.Fatalf("download_filename = %q, want %q", got, originalName)
+	want := "NSKT000277-端午节保龄球_10.5x15.5cm.psd"
+	if got := parsed.Query().Get(baseservice.DownloadFilenameQueryParam); got != want {
+		t.Fatalf("download_filename = %q, want %q", got, want)
 	}
-	if got := info.Filename; got != originalName {
-		t.Fatalf("Filename = %q, want %q", got, originalName)
+	if got := info.Filename; got != want {
+		t.Fatalf("Filename = %q, want %q", got, want)
 	}
 }
 
-func TestDownloadLatestFallsBackToSKUAndFileNameWhenOriginalMissing(t *testing.T) {
+func TestDownloadLatestKeepsOriginalNameForReferenceAssets(t *testing.T) {
 	storageKey := "tasks/x/source.psd"
+	originalName := "运营参考图.jpg"
 	scopeSKU := "NSKT000277"
 	svc := NewService(&fakeSearchRepo{
 		current: &repo.TaskAssetSearchRow{
 			Asset: &domain.TaskAsset{
 				ID:           10,
 				AssetID:      int64Ptr(5),
-				FileName:     "source.psd",
+				AssetType:    domain.TaskAssetTypeReference,
+				FileName:     "reference.jpg",
+				OriginalName: &originalName,
 				ScopeSKUCode: &scopeSKU,
 				StorageKey:   &storageKey,
 			},
-			Task: &domain.Task{TaskStatus: domain.TaskStatusCompleted},
+			Task: &domain.Task{TaskStatus: domain.TaskStatusCompleted, ProductNameSnapshot: "端午节保龄球"},
 		},
 	}, nil, fakeBrowserURLBuilder{baseURL: "/v1/assets/files/"})
 
@@ -96,8 +102,8 @@ func TestDownloadLatestFallsBackToSKUAndFileNameWhenOriginalMissing(t *testing.T
 	if appErr != nil {
 		t.Fatalf("DownloadLatest error = %#v", appErr)
 	}
-	if got := info.Filename; got != "NSKT000277-source.psd" {
-		t.Fatalf("Filename = %q, want SKU-prefixed fallback", got)
+	if got := info.Filename; got != originalName {
+		t.Fatalf("Filename = %q, want original reference name", got)
 	}
 }
 
@@ -156,3 +162,5 @@ func (f *fakeSearchRepo) GetVersion(context.Context, int64, int64) (*repo.TaskAs
 }
 
 func int64Ptr(v int64) *int64 { return &v }
+
+func strPtrDownload(v string) *string { return &v }

@@ -1024,6 +1024,14 @@ func TestTaskAssetCenterServiceCompletePrecreatedSessionAllowedInPendingAuditAWi
 	}); appErr != nil {
 		t.Fatalf("CompleteUploadSession() unexpected error in PendingAuditA window: %+v", appErr)
 	}
+	if len(taskAssetRepo.assets) != 1 {
+		t.Fatalf("created task assets = %+v, want one", taskAssetRepo.assets)
+	}
+	for _, asset := range taskAssetRepo.assets {
+		if asset.SourceModuleKey != domain.ModuleKeyAudit {
+			t.Fatalf("completed audit upload source_module_key = %q, want %q", asset.SourceModuleKey, domain.ModuleKeyAudit)
+		}
+	}
 }
 
 func TestTaskAssetCenterServiceAuditStageAllowsSourceDeliveryAndBasicInfoReference(t *testing.T) {

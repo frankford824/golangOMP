@@ -57,7 +57,7 @@ func (r *taskAssetSearchRepo) Search(ctx context.Context, query domain.AssetSear
 	}
 	args = append(args, (query.Page-1)*query.Size, query.Size)
 	rows, err := r.db.db.QueryContext(ctx, taskAssetSearchSelect+taskAssetSearchFrom+where+`
-		ORDER BY da.updated_at DESC, ta.created_at DESC, ta.id DESC
+		ORDER BY `+taskAssetSearchOrderBy(query)+`
 		LIMIT ?, ?`, args...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("search task assets: %w", err)
@@ -176,11 +176,11 @@ func buildTaskAssetSearchWhere(query domain.AssetSearchQuery) (string, []interfa
 		clauses = append(clauses, fmt.Sprintf(`ta.asset_type IN (%s)`, strings.Join(placeholders, ", ")))
 	}
 	if query.CreatedFrom != nil {
-		clauses = append(clauses, `ta.created_at >= ?`)
+		clauses = append(clauses, taskAssetSearchTimeColumn(query)+` >= ?`)
 		args = append(args, *query.CreatedFrom)
 	}
 	if query.CreatedTo != nil {
-		clauses = append(clauses, `ta.created_at <= ?`)
+		clauses = append(clauses, taskAssetSearchTimeColumn(query)+` <= ?`)
 		args = append(args, *query.CreatedTo)
 	}
 	switch query.IsArchived {
@@ -234,6 +234,19 @@ func buildTaskAssetSearchWhere(query domain.AssetSearchQuery) (string, []interfa
 		query.FormatCategory,
 	)
 	return " WHERE " + strings.Join(clauses, " AND "), args
+}
+
+func taskAssetSearchTimeColumn(query domain.AssetSearchQuery) string {
+	switch query.Normalized().TimeBasis {
+	case domain.AssetSearchTimeBasisTaskCreatedAt:
+		return `t.created_at`
+	default:
+		return `COALESCE(ta.uploaded_at, ta.created_at)`
+	}
+}
+
+func taskAssetSearchOrderBy(query domain.AssetSearchQuery) string {
+	return taskAssetSearchTimeColumn(query) + ` DESC, ta.id DESC`
 }
 
 func assetSearchSQLAssetTypes(assetType domain.TaskAssetType) []domain.TaskAssetType {

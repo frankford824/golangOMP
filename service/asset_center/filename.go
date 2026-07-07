@@ -52,17 +52,12 @@ func resolveSingleDownloadFilename(row *repo.TaskAssetSearchRow) string {
 		return "asset"
 	}
 	assetID := valueInt64(row.Asset.AssetID, row.Asset.ID)
-	return baseservice.ResolveAssetDownloadFilenameForSingle(
-		taskAssetOriginalName(row.Asset),
-		row.Asset.FileName,
-		assetID,
-		rowSKUCode(row),
-	)
+	return resolveUnifiedAssetDownloadFilename(row, assetID)
 }
 
 func resolveBatchFilenameForMode(row *repo.TaskAssetSearchRow, assetID int64, mode BatchDownloadNamingMode) string {
 	if mode == BatchDownloadNamingBusiness {
-		return resolveBusinessBatchFilename(row, assetID)
+		return sanitizeBatchFilename(resolveUnifiedAssetDownloadFilename(row, assetID))
 	}
 	if row == nil {
 		return sanitizeBatchFilename(baseservice.ResolveAssetDownloadFilename("", "", assetID))
@@ -70,18 +65,35 @@ func resolveBatchFilenameForMode(row *repo.TaskAssetSearchRow, assetID int64, mo
 	return resolveBatchFilename(row.Asset, assetID)
 }
 
-func resolveBusinessBatchFilename(row *repo.TaskAssetSearchRow, assetID int64) string {
+func resolveUnifiedAssetDownloadFilename(row *repo.TaskAssetSearchRow, assetID int64) string {
 	if row == nil || row.Asset == nil {
-		return sanitizeBatchFilename(baseservice.ResolveAssetDownloadFilename("", "", assetID))
+		return baseservice.ResolveAssetDownloadFilename("", "", assetID)
 	}
-	filename := baseservice.ResolveAssetDownloadFilenameForBusiness(
-		taskAssetOriginalName(row.Asset),
-		row.Asset.FileName,
-		assetID,
-		rowSKUCode(row),
-		rowBusinessName(row),
-	)
-	return sanitizeBatchFilename(filename)
+	if isBusinessNamedAsset(row.Asset) && rowSKUCode(row) != "" && rowProductName(row) != "" {
+		return baseservice.ResolveAssetDownloadFilenameForBusiness(
+			taskAssetOriginalName(row.Asset),
+			row.Asset.FileName,
+			assetID,
+			rowSKUCode(row),
+			rowProductName(row),
+		)
+	}
+	return baseservice.ResolveAssetDownloadFilename(taskAssetOriginalName(row.Asset), row.Asset.FileName, assetID)
+}
+
+func isBusinessNamedAsset(asset *domain.TaskAsset) bool {
+	if asset == nil {
+		return false
+	}
+	assetType := asset.AssetType.Canonical()
+	return assetType == domain.TaskAssetTypeSource || assetType == domain.TaskAssetTypeDelivery
+}
+
+func rowProductName(row *repo.TaskAssetSearchRow) string {
+	if row == nil || row.Task == nil {
+		return ""
+	}
+	return strings.TrimSpace(row.Task.ProductNameSnapshot)
 }
 
 func taskAssetOriginalName(asset *domain.TaskAsset) string {
@@ -109,14 +121,4 @@ func rowSKUCode(row *repo.TaskAssetSearchRow) string {
 		}
 	}
 	return ""
-}
-
-func rowBusinessName(row *repo.TaskAssetSearchRow) string {
-	if row == nil || row.Task == nil {
-		return ""
-	}
-	if value := strings.TrimSpace(row.Task.ProductNameSnapshot); value != "" {
-		return value
-	}
-	return strings.TrimSpace(row.Task.TaskNo)
 }

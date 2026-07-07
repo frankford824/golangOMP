@@ -99,7 +99,7 @@ export async function downloadAssetFileWithOriginalFilename(
         return { ok: false, message: meta.message ?? '获取下载地址失败' }
       }
     } else {
-      const saveName = resolveAssetSaveFilename(preferredFilename, meta.filename ?? '')
+      const saveName = resolveAssetSaveFilename(meta.filename ?? '', preferredFilename)
       try {
         const blob = await fetchBlobFromUrl(meta.downloadUrl, options.signal)
         triggerBrowserFileDownload(blob, saveName)

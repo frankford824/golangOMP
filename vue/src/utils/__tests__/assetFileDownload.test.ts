@@ -26,6 +26,10 @@ describe('resolveAssetSaveFilename', () => {
     expect(resolveAssetSaveFilename('', '运营上传图.jpg')).toBe('运营上传图.jpg')
   })
 
+  it('uses server filename when caller passes it first', () => {
+    expect(resolveAssetSaveFilename('SKU-商品名称.jpg', '卡片标题.jpg')).toBe('SKU-商品名称.jpg')
+  })
+
   it('sanitizes unsafe characters', () => {
     expect(resolveAssetSaveFilename('a/b:c?.png', '')).toBe('a_b_c_.png')
   })

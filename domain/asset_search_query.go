@@ -43,12 +43,20 @@ const (
 	AssetFormatCategoryArchive AssetFormatCategoryFilter = "archive"
 )
 
+type AssetSearchTimeBasis string
+
+const (
+	AssetSearchTimeBasisUploadedAt    AssetSearchTimeBasis = "asset_uploaded_at"
+	AssetSearchTimeBasisTaskCreatedAt AssetSearchTimeBasis = "task_created_at"
+)
+
 type AssetSearchQuery struct {
 	Keyword        string
 	ModuleKey      string
 	OwnerTeamCode  string
 	CreatedFrom    *time.Time
 	CreatedTo      *time.Time
+	TimeBasis      AssetSearchTimeBasis
 	Page           int
 	Size           int
 	IsArchived     AssetArchiveFilter
@@ -104,6 +112,11 @@ func (q AssetSearchQuery) Normalized() AssetSearchQuery {
 		AssetFormatCategoryArchive:
 	default:
 		q.FormatCategory = AssetFormatCategoryAll
+	}
+	switch q.TimeBasis {
+	case AssetSearchTimeBasisTaskCreatedAt:
+	default:
+		q.TimeBasis = AssetSearchTimeBasisUploadedAt
 	}
 	if !q.BusinessLane.Valid() {
 		q.BusinessLane = ""

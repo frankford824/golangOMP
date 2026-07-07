@@ -452,6 +452,8 @@ export interface BackendAsset {
   task_creator_name?: string
   created_by_username?: string
   created_by_name?: string
+  uploaded_at?: string
+  task_created_at?: string
   mime_type?: string
   file_name?: string
   original_filename?: string

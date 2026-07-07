@@ -7732,6 +7732,16 @@ components:
               description: UI bucket label, currently `系统资源` or `外部资源`.
             source_module_key:
               type: string
+            uploaded_at:
+              type: string
+              format: date-time
+              nullable: true
+              description: Current asset version upload/ingest time used by `time_basis=asset_uploaded_at`.
+            task_created_at:
+              type: string
+              format: date-time
+              nullable: true
+              description: Owning task creation time used by `time_basis=task_created_at`.
             external_kind:
               type: string
               enum: [netdisk, nas_local]
@@ -8370,6 +8380,16 @@ components:
           type: string
         created_by:
           type: integer
+        uploaded_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Current asset version upload/ingest time used by `time_basis=asset_uploaded_at`.
+        task_created_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Owning task creation time used by `time_basis=task_created_at`.
         created_at:
           type: string
           format: date-time
@@ -16716,7 +16736,7 @@ paths:
             default: all
         - in: query
           name: module_key
-          description: Restrict to one source module.
+          description: Business origin filter for system task-owned assets. UI labels this as the asset production stage, e.g. `design` = 设计提交, `audit` = 常规审核修订, `customization` = 定制链路上传, `basic_info` = 基础信息参考, `retouch` = 精修需求素材. External resources are excluded when this filter is set.
           schema:
             type: string
             enum: [basic_info, design, audit, warehouse, customization, procurement, retouch]
@@ -16746,17 +16766,24 @@ paths:
             enum: [normal, customization]
         - in: query
           name: asset_type
-          description: System asset role filter. Use `delivery` for final product images, `reference` for reference images, and `source` for design source files; external resources are excluded when this filter is set.
+          description: System asset file-type filter. Use `delivery` for product images, `reference` for reference/material images, and `source` for source files; use `module_key` to distinguish which workflow stage produced the file. External resources are excluded when this filter is set.
           schema:
             type: string
             enum: [delivery, reference, source, preview, design_thumb]
         - in: query
+          name: time_basis
+          description: Time field used by `created_from` / `created_to`. Default `asset_uploaded_at` filters by the current asset version upload/ingest time; `task_created_at` filters by the owning task creation time.
+          schema:
+            type: string
+            enum: [asset_uploaded_at, task_created_at]
+            default: asset_uploaded_at
+        - in: query
           name: created_from
-          description: Inclusive lower bound for asset created_at.
+          description: Inclusive lower bound for the selected `time_basis`.
           schema: { type: string, format: date-time }
         - in: query
           name: created_to
-          description: Inclusive upper bound for asset created_at.
+          description: Inclusive upper bound for the selected `time_basis`.
           schema: { type: string, format: date-time }
         - in: query
           name: page
