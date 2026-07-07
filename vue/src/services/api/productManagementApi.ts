@@ -279,6 +279,41 @@ export interface CostRuleGroupOption {
   active_rule_count?: number
 }
 
+function normalizeCostRuleGroupName(ruleName: string): string {
+  let label = ruleName.trim()
+  if (!label) return ''
+  label = label.replace(/(?:基础单价|小面积保底|小面积附加|开槽拼接加价|开槽加价|特殊工艺加价|工艺加价|保底|附加|加价)$/u, '')
+  return label.trim()
+}
+
+function isReadableCostRuleGroupName(label: string): boolean {
+  const text = label.trim()
+  if (!text) return false
+  const normalized = text.toLowerCase()
+  if (['board', 'cloth', 'material', 'paper'].includes(normalized)) return false
+  return true
+}
+
+function costRuleGroupNameScore(label: string): number {
+  const text = label.trim()
+  if (!isReadableCostRuleGroupName(text)) return 0
+  let score = 1
+  if (/[\u4e00-\u9fa5]/u.test(text)) score += 4
+  if (/(KT|喷绘|写真|覆膜|布|板|纸|灯片|背胶)/iu.test(text)) score += 2
+  return score
+}
+
+function costRuleGroupDisplayName(rule: Record<string, unknown>, ruleGroup: string): string {
+  const candidates = [
+    normalizeCostRuleGroupName(String(rule.rule_name ?? '')),
+    String(rule.display_name ?? '').trim(),
+    normalizeCostRuleGroupName(String(rule.remark ?? '')),
+    String(rule.product_family ?? '').trim(),
+    ruleGroup,
+  ]
+  return candidates.find(isReadableCostRuleGroupName) ?? ruleGroup
+}
+
 export type CostRecalculationRunMode = 'single' | 'explicit' | 'all_matching'
 
 export type CostRecalculationRunStatus =
@@ -522,10 +557,12 @@ export const productManagementApi = {
       const ruleGroup = String(rule.category_code ?? '').trim()
       if (!ruleGroup) continue
       const existing = groups.get(ruleGroup)
-      const ruleName = String(rule.rule_name ?? '').trim()
-      const displayName = String(rule.product_family ?? rule.display_name ?? ruleName ?? '').trim() || '未命名定价规则'
+      const displayName = costRuleGroupDisplayName(rule, ruleGroup)
       if (existing) {
         existing.active_rule_count = (existing.active_rule_count ?? 0) + 1
+        if (costRuleGroupNameScore(displayName) > costRuleGroupNameScore(existing.display_name)) {
+          existing.display_name = displayName
+        }
       } else {
         groups.set(ruleGroup, {
           rule_group: ruleGroup,
