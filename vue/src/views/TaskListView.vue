@@ -714,8 +714,8 @@ const auditHandoverFilters = reactive({
 })
 const auditHandoverStatusOptions: BaseSelectOption[] = [
   { label: '全部', value: '' },
-  { label: '审核 A', value: 'PendingAuditA' },
-  { label: '审核 B', value: 'PendingAuditB' },
+  { label: '待一审', value: 'PendingAuditA' },
+  { label: '待二审', value: 'PendingAuditB' },
 ]
 const auditHandoverCandidates = ref<AuditHandoverCandidateItem[]>([])
 const auditHandoverCandidateLoading = ref(false)
@@ -1370,8 +1370,8 @@ function goAuditHandoverCandidatePage(nextPage: number) {
 }
 
 function formatAuditHandoverCandidateStatus(status: string): string {
-  if (status === 'PendingAuditA') return '待审核 A'
-  if (status === 'PendingAuditB') return '待审核 B'
+  if (status === 'PendingAuditA') return '待一审'
+  if (status === 'PendingAuditB') return '待二审'
   return status || '-'
 }
 
