@@ -254,8 +254,10 @@ func main() {
 		service.WithProductManagementTaskEventRepo(taskEventRepo),
 		service.WithProductManagementSKUComboRepo(skuComboRepo),
 		service.WithProductManagementCostRecalculationRunRepo(costRecalculationRunRepo),
+		service.WithProductManagementCostLegacyAliasFallbackEnabled(cfg.CostGovernance.LegacyAliasFallbackEnabled),
 		service.WithProductManagementNotificationService(notificationSvc))
-	costRecalculationSvc := service.NewCostRecalculationService(productManagementRepo, costRecalculationRunRepo, taskRepo, costRuleRepo, skuTraceRepo, mdb)
+	costRecalculationSvc := service.NewCostRecalculationService(productManagementRepo, costRecalculationRunRepo, taskRepo, costRuleRepo, skuTraceRepo, mdb,
+		service.WithCostRecalculationLegacyAliasFallbackEnabled(cfg.CostGovernance.LegacyAliasFallbackEnabled))
 	skuComboSyncSvc := service.NewSKUComboSyncService(erpBridgeSvc, skuComboRepo, mdb)
 	taskSvc := service.NewTaskServiceWithCatalog(taskRepo, procurementRepo, taskAssetRepo, taskEventRepo, taskCostOverrideEventRepo, warehouseRepo, categoryRepo, costRuleRepo, codeRuleSvc, mdb,
 		service.WithTaskCostOverridePlaceholderRepos(taskCostOverrideReviewRepo, taskCostFinanceFlagRepo),
@@ -269,6 +271,7 @@ func main() {
 		service.WithTaskDesignAssetReadModel(designAssetRepo),
 		service.WithTaskProductCodeSequenceRepo(productCodeSeqRepo),
 		service.WithTaskCostRuleBindingRepo(costRuleBindingRepo),
+		service.WithTaskCostLegacyAliasFallbackEnabled(cfg.CostGovernance.LegacyAliasFallbackEnabled),
 		service.WithTaskCreateRequestRepo(taskCreateRequestRepo),
 		service.WithTaskCreateFilingAsync(),
 		service.WithTaskCustomizationJobRepo(customizationJobRepo),

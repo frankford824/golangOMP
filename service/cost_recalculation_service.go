@@ -28,25 +28,41 @@ type CostRecalculationService interface {
 	Cancel(ctx context.Context, actor domain.RequestActor, runID int64) (*domain.CostRecalculationRun, *domain.AppError)
 }
 
+type CostRecalculationServiceOption func(*costRecalculationService)
+
 type costRecalculationService struct {
-	records   repo.ProductManagementRepo
-	runs      repo.CostRecalculationRunRepo
-	tasks     repo.TaskRepo
-	costRules repo.CostRuleRepo
-	skuTrace  repo.SKUTraceRepo
-	txRunner  repo.TxRunner
-	now       func() time.Time
+	records                    repo.ProductManagementRepo
+	runs                       repo.CostRecalculationRunRepo
+	tasks                      repo.TaskRepo
+	costRules                  repo.CostRuleRepo
+	skuTrace                   repo.SKUTraceRepo
+	txRunner                   repo.TxRunner
+	now                        func() time.Time
+	legacyAliasFallbackEnabled bool
 }
 
-func NewCostRecalculationService(records repo.ProductManagementRepo, runs repo.CostRecalculationRunRepo, tasks repo.TaskRepo, costRules repo.CostRuleRepo, skuTrace repo.SKUTraceRepo, txRunner repo.TxRunner) CostRecalculationService {
-	return &costRecalculationService{
-		records:   records,
-		runs:      runs,
-		tasks:     tasks,
-		costRules: costRules,
-		skuTrace:  skuTrace,
-		txRunner:  txRunner,
-		now:       time.Now,
+func NewCostRecalculationService(records repo.ProductManagementRepo, runs repo.CostRecalculationRunRepo, tasks repo.TaskRepo, costRules repo.CostRuleRepo, skuTrace repo.SKUTraceRepo, txRunner repo.TxRunner, opts ...CostRecalculationServiceOption) CostRecalculationService {
+	svc := &costRecalculationService{
+		records:                    records,
+		runs:                       runs,
+		tasks:                      tasks,
+		costRules:                  costRules,
+		skuTrace:                   skuTrace,
+		txRunner:                   txRunner,
+		now:                        time.Now,
+		legacyAliasFallbackEnabled: true,
+	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(svc)
+		}
+	}
+	return svc
+}
+
+func WithCostRecalculationLegacyAliasFallbackEnabled(enabled bool) CostRecalculationServiceOption {
+	return func(s *costRecalculationService) {
+		s.legacyAliasFallbackEnabled = enabled
 	}
 }
 
@@ -573,6 +589,9 @@ func (s *costRecalculationService) listActiveRunCostRules(ctx context.Context, c
 	rules, err := s.costRules.ListActiveByCategory(ctx, categoryID, categoryCode, s.now())
 	if err != nil || len(rules) == 0 {
 		return rules, err
+	}
+	if !s.legacyAliasFallbackEnabled {
+		return rules, nil
 	}
 	aliases := costCategoryAliasesFromText(categoryCode, matchText)
 	if len(aliases) == 0 {

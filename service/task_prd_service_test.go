@@ -2416,6 +2416,62 @@ func TestTaskServiceBatchSKUItemCostPrefillUsesProductIIDForSprayCloth(t *testin
 	}
 }
 
+func TestTaskServiceBatchSKUItemCostPrefillCanDisableTextAliasFallback(t *testing.T) {
+	costRuleRepo := newCostRuleRepoStub()
+	costRuleRepo.rules = []*domain.CostRule{
+		{
+			RuleID:        27,
+			RuleVersion:   1,
+			RuleName:      "常规喷绘布基础单价",
+			CategoryCode:  "SPRAY_CLOTH_STANDARD",
+			RuleType:      domain.CostRuleTypeFixedUnitPrice,
+			BasePrice:     float64Ptr(4),
+			TaxMultiplier: float64Ptr(1.1),
+			Priority:      10,
+			IsActive:      true,
+			Source:        "phase_021_test",
+		},
+	}
+	svc := NewTaskServiceWithCatalog(
+		&prdTaskRepo{},
+		&prdProcurementRepo{},
+		&prdTaskAssetRepo{},
+		&prdTaskEventRepo{},
+		nil,
+		&prdWarehouseRepo{},
+		nil,
+		costRuleRepo,
+		prdCodeRuleService{},
+		step04TxRunner{},
+		WithTaskCostLegacyAliasFallbackEnabled(false),
+	).(*taskService)
+
+	detail := &domain.TaskDetail{TaskID: 986, CategoryCode: "GENERAL"}
+	item := &domain.TaskSKUItem{
+		TaskID:              986,
+		SKUCode:             "CGG000070",
+		CategoryCode:        "GENERAL",
+		ProductNameSnapshot: "CPT-常规喷绘布/端午保龄球游戏地垫粽子大号/130*240cm",
+		VariantJSON:         json.RawMessage(`{"product_i_id":"常规喷绘布"}`),
+	}
+
+	if appErr := svc.applyTaskSKUItemCostPrefill(context.Background(), detail, item); appErr != nil {
+		t.Fatalf("applyTaskSKUItemCostPrefill() unexpected error: %+v", appErr)
+	}
+	if item.CostPrice != nil || item.EstimatedCost != nil {
+		t.Fatalf("costs = %+v/%+v, want no guessed cost", item.CostPrice, item.EstimatedCost)
+	}
+	if item.CostRuleName != "" {
+		t.Fatalf("cost_rule_name = %q, want empty when text alias fallback is disabled", item.CostRuleName)
+	}
+	if item.CostRuleMatchTrace == nil || item.CostRuleMatchTrace.MatchMode != domain.CostRuleMatchModeNoMatch {
+		t.Fatalf("trace = %#v, want no_match trace", item.CostRuleMatchTrace)
+	}
+	if item.CostRuleMatchTrace.LegacyAliasFallback {
+		t.Fatal("legacy alias fallback trace = true, want false when disabled")
+	}
+}
+
 func TestTaskServiceUpdateBusinessInfoIgnoresStaleImplicitCostRuleIDMismatch(t *testing.T) {
 	costRuleRepo := newCostRuleRepoStub()
 	costRuleRepo.rules = []*domain.CostRule{

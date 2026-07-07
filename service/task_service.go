@@ -322,41 +322,42 @@ type ProductManagementBaseSyncQueuer interface {
 }
 
 type taskService struct {
-	taskRepo                     repo.TaskRepo
-	procurementRepo              repo.ProcurementRepo
-	taskAssetRepo                repo.TaskAssetRepo
-	designAssetRepo              repo.DesignAssetRepo
-	taskEventRepo                repo.TaskEventRepo
-	costOverrideEventRepo        repo.TaskCostOverrideEventRepo
-	costOverrideReviewRepo       repo.TaskCostOverrideReviewRepo
-	costFinanceFlagRepo          repo.TaskCostFinanceFlagRepo
-	warehouseRepo                repo.WarehouseRepo
-	customizationJobRepo         repo.CustomizationJobRepo
-	customizationPricingRuleRepo repo.CustomizationPricingRuleRepo
-	categoryRepo                 repo.CategoryRepo
-	costRuleRepo                 repo.CostRuleRepo
-	costRuleBindingRepo          repo.CostRuleBindingRepo
-	integrationCallLogRepo       repo.IntegrationCallLogRepo
-	skuTraceRepo                 repo.SKUTraceRepo
-	uploadRequestRepo            repo.UploadRequestRepo
-	assetStorageRefRepo          repo.AssetStorageRefRepo
-	referenceFileRefFlatRepo     repo.ReferenceFileRefFlatRepo
-	retouchRequirementRepo       repo.TaskRetouchRequirementRepo
-	taskCreateRequestRepo        repo.TaskCreateRequestRepo
-	taskReferenceAssetFormalizer TaskReferenceAssetFormalizer
-	productCodeSeqRepo           repo.ProductCodeSequenceRepo
-	erpBridgeSvc                 ERPBridgeService
-	codeRuleSvc                  CodeRuleService
-	txRunner                     repo.TxRunner
-	userDisplayNameResolver      UserDisplayNameResolver
-	dataScopeResolver            DataScopeResolver
-	scopeUserRepo                repo.UserRepo
-	customizationPricingUserRepo customizationPricingUserReader
-	referenceFileRefsEnricher    *ReferenceFileRefsEnricher
-	blueprintRuleEngine          *blueprint.RuleEngine
-	productManagementCloseSyncer ProductManagementCloseSyncer
-	notifications                taskNotificationService
-	createFilingAsync            bool
+	taskRepo                       repo.TaskRepo
+	procurementRepo                repo.ProcurementRepo
+	taskAssetRepo                  repo.TaskAssetRepo
+	designAssetRepo                repo.DesignAssetRepo
+	taskEventRepo                  repo.TaskEventRepo
+	costOverrideEventRepo          repo.TaskCostOverrideEventRepo
+	costOverrideReviewRepo         repo.TaskCostOverrideReviewRepo
+	costFinanceFlagRepo            repo.TaskCostFinanceFlagRepo
+	warehouseRepo                  repo.WarehouseRepo
+	customizationJobRepo           repo.CustomizationJobRepo
+	customizationPricingRuleRepo   repo.CustomizationPricingRuleRepo
+	categoryRepo                   repo.CategoryRepo
+	costRuleRepo                   repo.CostRuleRepo
+	costRuleBindingRepo            repo.CostRuleBindingRepo
+	costLegacyAliasFallbackEnabled bool
+	integrationCallLogRepo         repo.IntegrationCallLogRepo
+	skuTraceRepo                   repo.SKUTraceRepo
+	uploadRequestRepo              repo.UploadRequestRepo
+	assetStorageRefRepo            repo.AssetStorageRefRepo
+	referenceFileRefFlatRepo       repo.ReferenceFileRefFlatRepo
+	retouchRequirementRepo         repo.TaskRetouchRequirementRepo
+	taskCreateRequestRepo          repo.TaskCreateRequestRepo
+	taskReferenceAssetFormalizer   TaskReferenceAssetFormalizer
+	productCodeSeqRepo             repo.ProductCodeSequenceRepo
+	erpBridgeSvc                   ERPBridgeService
+	codeRuleSvc                    CodeRuleService
+	txRunner                       repo.TxRunner
+	userDisplayNameResolver        UserDisplayNameResolver
+	dataScopeResolver              DataScopeResolver
+	scopeUserRepo                  repo.UserRepo
+	customizationPricingUserRepo   customizationPricingUserReader
+	referenceFileRefsEnricher      *ReferenceFileRefsEnricher
+	blueprintRuleEngine            *blueprint.RuleEngine
+	productManagementCloseSyncer   ProductManagementCloseSyncer
+	notifications                  taskNotificationService
+	createFilingAsync              bool
 }
 
 type customizationPricingUserReader interface {
@@ -406,6 +407,12 @@ func WithTaskSKUTraceRepo(skuTraceRepo repo.SKUTraceRepo) TaskServiceOption {
 func WithTaskCostRuleBindingRepo(bindingRepo repo.CostRuleBindingRepo) TaskServiceOption {
 	return func(s *taskService) {
 		s.costRuleBindingRepo = bindingRepo
+	}
+}
+
+func WithTaskCostLegacyAliasFallbackEnabled(enabled bool) TaskServiceOption {
+	return func(s *taskService) {
+		s.costLegacyAliasFallbackEnabled = enabled
 	}
 }
 
@@ -598,17 +605,18 @@ func NewTaskServiceWithCatalog(
 	opts ...TaskServiceOption,
 ) TaskService {
 	svc := &taskService{
-		taskRepo:              taskRepo,
-		procurementRepo:       procurementRepo,
-		taskAssetRepo:         taskAssetRepo,
-		taskEventRepo:         taskEventRepo,
-		costOverrideEventRepo: costOverrideEventRepo,
-		warehouseRepo:         warehouseRepo,
-		categoryRepo:          categoryRepo,
-		costRuleRepo:          costRuleRepo,
-		codeRuleSvc:           codeRuleSvc,
-		txRunner:              txRunner,
-		dataScopeResolver:     NewRoleBasedDataScopeResolver(),
+		taskRepo:                       taskRepo,
+		procurementRepo:                procurementRepo,
+		taskAssetRepo:                  taskAssetRepo,
+		taskEventRepo:                  taskEventRepo,
+		costOverrideEventRepo:          costOverrideEventRepo,
+		warehouseRepo:                  warehouseRepo,
+		categoryRepo:                   categoryRepo,
+		costRuleRepo:                   costRuleRepo,
+		codeRuleSvc:                    codeRuleSvc,
+		txRunner:                       txRunner,
+		dataScopeResolver:              NewRoleBasedDataScopeResolver(),
+		costLegacyAliasFallbackEnabled: true,
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -2178,12 +2186,14 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 	detail.MatchedRuleVersion = nil
 	detail.PrefillSource = ""
 	detail.PrefillAt = nil
+	if prefill.MatchTrace != nil {
+		detail.CostRuleMatchTrace = costRuleMatchTraceFromPreview(prefill, taskDetailERPIID(detail), taskBusinessInfoEventProductIID(detail, ""))
+	}
 	if prefill.Response != nil {
 		detail.EstimatedCost = cloneFloat64Ptr(prefill.Response.EstimatedCost)
 		detail.RequiresManualReview = prefill.Response.RequiresManualReview
 		detail.MatchedRuleVersion = cloneIntPtr(prefill.Response.MatchedRuleVersion)
 		detail.PrefillSource = taskCostPrefillSourcePreview
-		detail.CostRuleMatchTrace = costRuleMatchTraceFromPreview(prefill, taskDetailERPIID(detail), taskBusinessInfoEventProductIID(detail, ""))
 		now := time.Now().UTC()
 		detail.PrefillAt = &now
 	}
@@ -2645,7 +2655,7 @@ func (s *taskService) previewTaskCost(ctx context.Context, task *domain.Task, de
 		return costPreviewComputation{}, infraError("list active cost rules for task business info", err)
 	}
 	if len(rules) == 0 {
-		return costPreviewComputation{}, nil
+		return costPreviewComputation{MatchTrace: matchMeta.Clone()}, nil
 	}
 	dimensionText := taskCostDimensionText(taskCostDetailDimensionText(detail), ruleMatchText)
 	width, height, area := taskCostPreviewDimensions(detail, dimensionText)
@@ -3181,12 +3191,14 @@ func (s *taskService) applyTaskSKUItemCostPreview(ctx context.Context, detail *d
 	item.MatchedRuleVersion = nil
 	item.PrefillSource = ""
 	item.PrefillAt = nil
+	if prefill.MatchTrace != nil {
+		item.CostRuleMatchTrace = costRuleMatchTraceFromPreview(prefill, taskSKUItemERPIID(item), taskSKUItemProductIID(item))
+	}
 	if prefill.Response != nil {
 		item.EstimatedCost = cloneFloat64Ptr(prefill.Response.EstimatedCost)
 		item.RequiresManualReview = prefill.Response.RequiresManualReview
 		item.MatchedRuleVersion = cloneIntPtr(prefill.Response.MatchedRuleVersion)
 		item.PrefillSource = taskCostPrefillSourcePreview
-		item.CostRuleMatchTrace = costRuleMatchTraceFromPreview(prefill, taskSKUItemERPIID(item), taskSKUItemProductIID(item))
 		now := time.Now().UTC()
 		item.PrefillAt = &now
 	}
@@ -3240,7 +3252,7 @@ func (s *taskService) previewTaskSKUItemCost(ctx context.Context, detail *domain
 		return costPreviewComputation{}, infraError("list active cost rules for task sku item", err)
 	}
 	if len(rules) == 0 {
-		return costPreviewComputation{}, nil
+		return costPreviewComputation{MatchTrace: matchMeta.Clone()}, nil
 	}
 	primaryDimensionText := firstCostDimensionText(
 		taskSKUItemVariantCostNotes(item),
@@ -3615,20 +3627,22 @@ func (s *taskService) listActiveCostRulesForTextWithTrace(ctx context.Context, c
 		RuleGroup:           strings.TrimSpace(categoryCode),
 		LegacyAliasFallback: false,
 	}
-	for _, alias := range costCategoryAliasesFromText(categoryCode, notes) {
-		aliasRules, err := s.costRuleRepo.ListActiveByCategory(ctx, nil, alias, asOf)
-		if err != nil {
-			return nil, trace, err
-		}
-		for _, rule := range aliasRules {
-			if rule == nil || seen[rule.RuleID] {
-				continue
+	if s.costLegacyAliasFallbackEnabled {
+		for _, alias := range costCategoryAliasesFromText(categoryCode, notes) {
+			aliasRules, err := s.costRuleRepo.ListActiveByCategory(ctx, nil, alias, asOf)
+			if err != nil {
+				return nil, trace, err
 			}
-			rules = append(rules, rule)
-			seen[rule.RuleID] = true
-		}
-		if len(aliasRules) > 0 && trace.RuleGroup == strings.TrimSpace(categoryCode) {
-			trace.RuleGroup = alias
+			for _, rule := range aliasRules {
+				if rule == nil || seen[rule.RuleID] {
+					continue
+				}
+				rules = append(rules, rule)
+				seen[rule.RuleID] = true
+			}
+			if len(aliasRules) > 0 && trace.RuleGroup == strings.TrimSpace(categoryCode) {
+				trace.RuleGroup = alias
+			}
 		}
 	}
 	if len(rules) > 0 {

@@ -48,13 +48,24 @@ type UnboundCostRuleCandidate struct {
 }
 
 type ProductCostDashboardResponse struct {
-	TotalRecords        int64                   `json:"total_records,omitempty"`
-	IssueTotal          int64                   `json:"total_count"`
-	LegacyFallbackCount int64                   `json:"unbound_iid_count,omitempty"`
-	LegacyFallbackRatio float64                 `json:"legacy_fallback_ratio,omitempty"`
-	Groups              []ProductCostIssueGroup `json:"groups"`
-	Tags                []ProductCostIssueTag   `json:"tags"`
-	GeneratedAt         time.Time               `json:"generated_at"`
+	TotalRecords          int64                                `json:"total_records,omitempty"`
+	IssueTotal            int64                                `json:"total_count"`
+	LegacyFallbackCount   int64                                `json:"unbound_iid_count,omitempty"`
+	LegacyFallbackRatio   float64                              `json:"legacy_fallback_ratio,omitempty"`
+	LegacyFallbackEnabled bool                                 `json:"legacy_fallback_enabled"`
+	LegacyFallbackMode    string                               `json:"legacy_fallback_mode,omitempty"`
+	LegacyFallbackWarning string                               `json:"legacy_fallback_warning,omitempty"`
+	LegacyFallbackTrend   []ProductCostLegacyFallbackTrendItem `json:"legacy_fallback_trend,omitempty"`
+	Groups                []ProductCostIssueGroup              `json:"groups"`
+	Tags                  []ProductCostIssueTag                `json:"tags"`
+	GeneratedAt           time.Time                            `json:"generated_at"`
+}
+
+type ProductCostLegacyFallbackTrendItem struct {
+	Date                string  `json:"date"`
+	TotalRecords        int64   `json:"total_records"`
+	LegacyFallbackCount int64   `json:"unbound_iid_count"`
+	LegacyFallbackRatio float64 `json:"legacy_fallback_ratio"`
 }
 
 type ProductCostIssueGroup struct {

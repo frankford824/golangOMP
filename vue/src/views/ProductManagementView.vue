@@ -149,6 +149,11 @@
           {{ tag.label }} {{ tag.count }}
         </button>
       </div>
+      <div class="pm-cost-policy">
+        <span>{{ costFallbackPolicyText }}</span>
+        <span>未关联款式占比 {{ costUnboundRatioText }}</span>
+        <span>{{ costUnboundTrendText }}</span>
+      </div>
 
       <div class="pm-cost-console-grid">
         <section class="pm-cost-panel">
@@ -162,17 +167,18 @@
           <div v-if="unboundLoading" class="pm-cost-mini-empty">未关联款式加载中...</div>
           <div v-else-if="unboundCandidates.length === 0" class="pm-cost-mini-empty">暂无未关联款式。</div>
           <div v-else class="pm-unbound-list">
-            <button
+            <div
               v-for="candidate in unboundCandidates"
               :key="candidate.normalized_i_id"
-              type="button"
               class="pm-unbound-item"
-              @click="openCostBinding(candidate)"
             >
-              <strong>{{ candidateDisplayIId(candidate) }}</strong>
-              <span>{{ candidate.suggested_display_name || '待选择定价规则' }}</span>
-              <small>{{ candidateImpactText(candidate) }}</small>
-            </button>
+              <button type="button" class="pm-unbound-main" @click="openCostBinding(candidate)">
+                <strong>{{ candidateDisplayIId(candidate) }}</strong>
+                <span>{{ candidate.suggested_display_name || '待选择定价规则' }}</span>
+                <small>{{ candidateImpactText(candidate) }}</small>
+              </button>
+              <button type="button" class="pm-btn pm-btn--small" @click="openCostBinding(candidate)">生成关联草稿</button>
+            </div>
           </div>
         </section>
 
@@ -538,7 +544,7 @@
         <header>
           <div>
             <p class="pm-eyebrow">批量修复预览</p>
-            <h2>{{ activeCostRun?.run_no || `修复单 ${activeCostRun?.id ?? ''}` }}</h2>
+            <h2>修复单 {{ activeCostRun?.id ?? '' }}</h2>
           </div>
           <button type="button" class="pm-btn pm-btn--ghost" @click="closeCostRunModals">关闭</button>
         </header>
@@ -843,6 +849,29 @@ const costDashboardHint = computed(() => {
   if (costDashboardLoading.value) return '正在读取产品中心成本问题。'
   if (costIssueTotal.value <= 0) return '当前没有需要集中处理的成本问题。'
   return `当前共有 ${costIssueTotal.value} 条成本问题，先处理差额大或未关联款式的 SKU。`
+})
+const costFallbackPolicyText = computed(() => {
+  const dashboard = costDashboard.value
+  if (!dashboard) return '猜价策略读取中'
+  if (dashboard.legacy_fallback_enabled === false || dashboard.legacy_fallback_mode === 'disabled') {
+    return dashboard.legacy_fallback_warning || '未关联款式猜价已关闭'
+  }
+  return dashboard.legacy_fallback_warning || '未关联款式仍会按名称猜价'
+})
+const costUnboundRatioText = computed(() => formatRatioPercent(costDashboard.value?.legacy_fallback_ratio))
+const costUnboundTrendText = computed(() => {
+  const trend = costDashboard.value?.legacy_fallback_trend ?? []
+  if (trend.length < 2) return '趋势数据累积中'
+  const latest = trend[trend.length - 1]
+  const previous = trend[trend.length - 2]
+  const latestRatio = Number(latest?.legacy_fallback_ratio ?? 0)
+  const previousRatio = Number(previous?.legacy_fallback_ratio ?? 0)
+  const delta = latestRatio - previousRatio
+  if (Math.abs(delta) < 0.0001) {
+    return `较上次持平（${formatRatioPercent(latestRatio)}）`
+  }
+  const direction = delta > 0 ? '上升' : '下降'
+  return `较上次${direction} ${formatRatioPercent(Math.abs(delta))}（当前 ${formatRatioPercent(latestRatio)}）`
 })
 const selectedRecordCount = computed(() => Object.values(selectedRecordIds.value).filter(Boolean).length)
 const canCreateBulkRun = computed(() => bulkAllMatching.value || selectedRecordCount.value > 0)
@@ -1386,7 +1415,7 @@ function runItemStatusText(item: CostRecalculationRunItem): string {
     case 'erp_failed':
       return `ERP 失败${suffix}`
     default:
-      return `${item.status}${suffix}`
+      return `状态待确认${suffix}`
   }
 }
 
@@ -1696,7 +1725,7 @@ function costTraceLines(record: ProductManagementRecord): string[] {
 
   const source = firstTraceString(trace.rule_source, trace.prefill_source, traceString(calculation, 'cost_rule_source'), traceString(calculation, 'prefill_source'))
   if (source) {
-    lines.push(`来源：${source}`)
+    lines.push(`来源：${costTraceSourceLabel(source)}`)
   }
 
   const inputLine = costTraceInputLine(input)
@@ -1743,6 +1772,23 @@ function costTraceLines(record: ProductManagementRecord): string[] {
     lines.push(`快照：${formatDate(trace.snapshot_at)}`)
   }
   return lines
+}
+
+function costTraceSourceLabel(source: string): string {
+  switch (source) {
+    case 'cost_rule_preview':
+    case 'system_auto':
+    case 'governed_rule':
+      return '系统计算'
+    case 'cost_recalculation_run':
+      return '批量修复'
+    case 'manual_rule_reference':
+      return '人工参考'
+    case 'manual_override':
+      return '人工维护'
+    default:
+      return source.includes('_') ? '系统计算' : source
+  }
 }
 
 function costTraceInputLine(input: Record<string, unknown>): string {
@@ -2011,6 +2057,11 @@ function formatSignedCost(value?: number | null): string {
   if (value > 0) return `+￥${abs}`
   if (value < 0) return `-￥${abs}`
   return '￥0'
+}
+
+function formatRatioPercent(value?: number | null): string {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '0%'
+  return `${(value * 100).toFixed(value > 0 && value < 0.01 ? 2 : 1).replace(/\.0$/, '')}%`
 }
 
 function formatDate(value?: string): string {
@@ -2313,6 +2364,22 @@ function errorMessage(err: unknown): string {
   flex-wrap: wrap;
 }
 
+.pm-cost-policy {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.pm-cost-policy span {
+  border: 1px solid rgb(var(--yb-border-strong));
+  border-radius: 999px;
+  padding: 0.34rem 0.65rem;
+  color: rgb(var(--yb-text-muted-strong));
+  background: rgb(var(--yb-surface-muted));
+  font-size: 12px;
+  font-weight: 850;
+}
+
 .pm-cost-group,
 .pm-cost-chip {
   border: 1px solid rgb(var(--yb-border-strong));
@@ -2391,14 +2458,14 @@ function errorMessage(err: unknown): string {
 
 .pm-unbound-item {
   display: grid;
-  gap: 0.25rem;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.55rem;
   border: 1px solid rgb(var(--yb-border-strong));
   border-radius: 0.75rem;
   padding: 0.7rem;
   color: rgb(var(--yb-text));
   background: rgb(var(--yb-surface));
-  text-align: left;
-  cursor: pointer;
 }
 
 .pm-unbound-item:hover {
@@ -2406,8 +2473,20 @@ function errorMessage(err: unknown): string {
   background: rgb(var(--yb-surface-brand-panel));
 }
 
-.pm-unbound-item span,
-.pm-unbound-item small {
+.pm-unbound-main {
+  display: grid;
+  min-width: 0;
+  gap: 0.25rem;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.pm-unbound-main span,
+.pm-unbound-main small {
   color: rgb(var(--yb-text-muted));
 }
 
@@ -3405,6 +3484,10 @@ function errorMessage(err: unknown): string {
     grid-column: 2 / -1;
     grid-template-columns: repeat(4, minmax(86px, max-content));
   }
+
+  .pm-cost-console-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 760px) {
@@ -3459,6 +3542,10 @@ function errorMessage(err: unknown): string {
   .pm-preview {
     width: 100%;
     height: 160px;
+  }
+
+  .pm-unbound-item {
+    grid-template-columns: 1fr;
   }
 }
 </style>

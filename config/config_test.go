@@ -34,6 +34,29 @@ func TestLoadDefaultsERPBridgeToLoopback(t *testing.T) {
 	}
 }
 
+func TestLoadCostGovernanceLegacyAliasFallbackDefaultAndOverride(t *testing.T) {
+	t.Setenv("MYSQL_DSN", "root:password@tcp(127.0.0.1:3306)/workflow?charset=utf8mb4&parseTime=True&loc=Local")
+	t.Setenv("AUTH_ALLOW_EMBEDDED_SETTINGS", "true")
+	t.Setenv("AUTH_ALLOW_INSECURE_BOOTSTRAP_CREDENTIALS", "true")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if !cfg.CostGovernance.LegacyAliasFallbackEnabled {
+		t.Fatal("LegacyAliasFallbackEnabled = false, want default true")
+	}
+
+	t.Setenv("COST_RULE_LEGACY_ALIAS_FALLBACK_ENABLED", "false")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatalf("Load() with override error = %v", err)
+	}
+	if cfg.CostGovernance.LegacyAliasFallbackEnabled {
+		t.Fatal("LegacyAliasFallbackEnabled = true, want false override")
+	}
+}
+
 func TestLoadUsesExplicitERPBridgeBaseURL(t *testing.T) {
 	t.Setenv("MYSQL_DSN", "root:password@tcp(127.0.0.1:3306)/workflow?charset=utf8mb4&parseTime=True&loc=Local")
 	t.Setenv("AUTH_ALLOW_EMBEDDED_SETTINGS", "true")

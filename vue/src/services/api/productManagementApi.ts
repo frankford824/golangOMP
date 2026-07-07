@@ -196,12 +196,24 @@ export interface ProductCostIssueCount {
   count: number
 }
 
+export interface ProductCostLegacyFallbackTrendItem {
+  date: string
+  total_records: number
+  unbound_iid_count: number
+  legacy_fallback_ratio: number
+}
+
 export interface ProductCostDashboardResponse {
   total_count: number
+  total_records?: number
   groups: ProductCostIssueCount[]
   tags: ProductCostIssueCount[]
   legacy_fallback_ratio?: number
   unbound_iid_count?: number
+  legacy_fallback_enabled?: boolean
+  legacy_fallback_mode?: 'warn' | 'disabled' | string
+  legacy_fallback_warning?: string
+  legacy_fallback_trend?: ProductCostLegacyFallbackTrendItem[]
   generated_at?: string
 }
 
@@ -511,7 +523,7 @@ export const productManagementApi = {
       if (!ruleGroup) continue
       const existing = groups.get(ruleGroup)
       const ruleName = String(rule.rule_name ?? '').trim()
-      const displayName = String(rule.product_family ?? rule.display_name ?? ruleName ?? ruleGroup).trim() || ruleGroup
+      const displayName = String(rule.product_family ?? rule.display_name ?? ruleName ?? '').trim() || '未命名定价规则'
       if (existing) {
         existing.active_rule_count = (existing.active_rule_count ?? 0) + 1
       } else {

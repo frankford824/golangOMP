@@ -35,32 +35,34 @@ type ProductManagementService interface {
 type ProductManagementServiceOption func(*productManagementService)
 
 type productManagementService struct {
-	records       repo.ProductManagementRepo
-	taskAssets    repo.TaskAssetRepo
-	assetSearch   repo.TaskAssetSearchRepo
-	taskEvents    repo.TaskEventRepo
-	skuCombos     repo.SKUComboRepo
-	costRuns      repo.CostRecalculationRunRepo
-	txRunner      repo.TxRunner
-	erpBridge     ERPBridgeService
-	ossDirect     *OSSDirectService
-	uploadClient  UploadServiceClient
-	imageProxy    *ERPImageProxySigner
-	notifications taskNotificationService
-	now           func() time.Time
-	refreshEvery  time.Duration
-	refreshMu     sync.Mutex
-	lastRefresh   time.Time
+	records                        repo.ProductManagementRepo
+	taskAssets                     repo.TaskAssetRepo
+	assetSearch                    repo.TaskAssetSearchRepo
+	taskEvents                     repo.TaskEventRepo
+	skuCombos                      repo.SKUComboRepo
+	costRuns                       repo.CostRecalculationRunRepo
+	txRunner                       repo.TxRunner
+	erpBridge                      ERPBridgeService
+	ossDirect                      *OSSDirectService
+	uploadClient                   UploadServiceClient
+	imageProxy                     *ERPImageProxySigner
+	notifications                  taskNotificationService
+	now                            func() time.Time
+	refreshEvery                   time.Duration
+	costLegacyAliasFallbackEnabled bool
+	refreshMu                      sync.Mutex
+	lastRefresh                    time.Time
 }
 
 func NewProductManagementService(records repo.ProductManagementRepo, taskAssets repo.TaskAssetRepo, assetSearch repo.TaskAssetSearchRepo, txRunner repo.TxRunner, opts ...ProductManagementServiceOption) ProductManagementService {
 	s := &productManagementService{
-		records:      records,
-		taskAssets:   taskAssets,
-		assetSearch:  assetSearch,
-		txRunner:     txRunner,
-		now:          time.Now,
-		refreshEvery: 30 * time.Second,
+		records:                        records,
+		taskAssets:                     taskAssets,
+		assetSearch:                    assetSearch,
+		txRunner:                       txRunner,
+		now:                            time.Now,
+		refreshEvery:                   30 * time.Second,
+		costLegacyAliasFallbackEnabled: true,
 	}
 	for _, opt := range opts {
 		if opt != nil {
@@ -113,6 +115,12 @@ func WithProductManagementCostRecalculationRunRepo(costRuns repo.CostRecalculati
 	}
 }
 
+func WithProductManagementCostLegacyAliasFallbackEnabled(enabled bool) ProductManagementServiceOption {
+	return func(s *productManagementService) {
+		s.costLegacyAliasFallbackEnabled = enabled
+	}
+}
+
 func (s *productManagementService) List(ctx context.Context, filter repo.ProductManagementListFilter) ([]*domain.ProductManagementRecord, domain.PaginationMeta, *domain.AppError) {
 	if appErr := s.refreshReadModel(ctx); appErr != nil {
 		return nil, domain.PaginationMeta{}, appErr
@@ -159,6 +167,14 @@ func (s *productManagementService) CostDashboard(ctx context.Context) (*domain.P
 	result, err := s.records.CostDashboard(ctx)
 	if err != nil {
 		return nil, infraAppError("get product cost dashboard", err)
+	}
+	result.LegacyFallbackEnabled = s.costLegacyAliasFallbackEnabled
+	if s.costLegacyAliasFallbackEnabled {
+		result.LegacyFallbackMode = "warn"
+		result.LegacyFallbackWarning = "未关联款式仍会按名称猜价，请优先把款式关联到定价规则，降低后续成本偏差。"
+	} else {
+		result.LegacyFallbackMode = "disabled"
+		result.LegacyFallbackWarning = "未关联款式猜价已关闭，未关联记录会进入算不出来的成本问题。"
 	}
 	return result, nil
 }

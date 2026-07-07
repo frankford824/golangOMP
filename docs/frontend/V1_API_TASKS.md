@@ -8535,8 +8535,8 @@ curl -X GET https://api.example.com/v1/rule-templates \
 ### 简介
 支持方法: GET, PUT。
 
-- `GET`: [V6] Get rule template by type
-- `PUT`: [V6] Upsert rule template by type
+- `GET`: Compatibility endpoint. `type=cost-pricing` is deprecated; product cost governance uses `/v1/cost-rule-bindings` and `/v1/cost-rules` instead.
+- `PUT`: Compatibility endpoint. `type=cost-pricing` is deprecated; product cost governance uses `/v1/cost-rule-bindings` and `/v1/cost-rules` instead.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -8551,7 +8551,7 @@ curl -X GET https://api.example.com/v1/rule-templates \
 
 | 参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---|---|
-| `type` | path | string | 是 | - |
+| `type` | path | enum(cost-pricing/product-code/short-name) | 是 | - |
 
 请求体: 无请求体。
 
@@ -8595,7 +8595,7 @@ curl -X GET https://api.example.com/v1/rule-templates/<type> \
 
 | 参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---|---|
-| `type` | path | string | 是 | - |
+| `type` | path | enum(cost-pricing/product-code/short-name) | 是 | - |
 
 Content-Type: `application/json`
 

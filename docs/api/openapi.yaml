@@ -6222,6 +6222,33 @@ components:
         legacy_fallback_ratio:
           type: number
           format: double
+        legacy_fallback_enabled:
+          type: boolean
+          description: Whether unbound i_id records are still allowed to use name-based cost-rule guessing.
+        legacy_fallback_mode:
+          type: string
+          enum: [warn, disabled]
+        legacy_fallback_warning:
+          type: string
+          description: Operator-facing warning text for the current name-based guessing policy.
+        legacy_fallback_trend:
+          type: array
+          description: Daily ratio of records whose latest cost snapshot used name-based guessing.
+          items:
+            type: object
+            properties:
+              date:
+                type: string
+                format: date
+              total_records:
+                type: integer
+                format: int64
+              unbound_iid_count:
+                type: integer
+                format: int64
+              legacy_fallback_ratio:
+                type: number
+                format: double
         groups:
           type: array
           description: Three operator-facing cost problem buckets.
@@ -17161,12 +17188,14 @@ paths:
   /v1/rule-templates/{type}:
     get:
       summary: "[V6] Get rule template by type"
+      description: "Compatibility endpoint. `type=cost-pricing` is deprecated; product cost governance uses `/v1/cost-rule-bindings` and `/v1/cost-rules` instead."
+      x-deprecated-types: [cost-pricing]
       tags: [V6-Legacy]
       parameters:
         - in: path
           name: type
           required: true
-          schema: { type: string }
+          schema: { type: string, enum: [cost-pricing, product-code, short-name] }
       responses:
         '200':
           description: Rule template
@@ -17179,12 +17208,14 @@ paths:
                     $ref: '#/components/schemas/RuleTemplate'
     put:
       summary: "[V6] Upsert rule template by type"
+      description: "Compatibility endpoint. `type=cost-pricing` is deprecated; product cost governance uses `/v1/cost-rule-bindings` and `/v1/cost-rules` instead."
+      x-deprecated-types: [cost-pricing]
       tags: [V6-Legacy]
       parameters:
         - in: path
           name: type
           required: true
-          schema: { type: string }
+          schema: { type: string, enum: [cost-pricing, product-code, short-name] }
       requestBody:
         required: true
         content:

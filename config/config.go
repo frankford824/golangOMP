@@ -34,6 +34,7 @@ type Config struct {
 	AI             AIConfig
 	Experience     ExperienceConfig
 	BusinessTrend  BusinessTrendConfig
+	CostGovernance CostGovernanceConfig
 	WeCom          WeComConfig
 	WebPush        WebPushConfig
 	Log            LogConfig
@@ -106,6 +107,10 @@ type BusinessTrendConfig struct {
 	Timeout             time.Duration
 	MaxExternalKeywords int
 	MaxExternalItems    int
+}
+
+type CostGovernanceConfig struct {
+	LegacyAliasFallbackEnabled bool
 }
 
 type OSSDirectConfig struct {
@@ -426,6 +431,9 @@ func Load() (*Config, error) {
 			Timeout:             mustParseDuration(getEnv("BUSINESS_TREND_EXTERNAL_TIMEOUT", "20s")),
 			MaxExternalKeywords: mustParseInt(getEnv("BUSINESS_TREND_MAX_EXTERNAL_KEYWORDS", "8")),
 			MaxExternalItems:    mustParseInt(getEnv("BUSINESS_TREND_MAX_EXTERNAL_ITEMS", "24")),
+		},
+		CostGovernance: CostGovernanceConfig{
+			LegacyAliasFallbackEnabled: mustParseBool(getEnv("COST_RULE_LEGACY_ALIAS_FALLBACK_ENABLED", "true")),
 		},
 		WeCom: WeComConfig{
 			AiBotEnabled:       mustParseBool(getEnv("WECOM_AIBOT_ENABLED", "false")),

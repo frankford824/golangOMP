@@ -443,6 +443,10 @@ func (r *productManagementRepo) CostDashboard(ctx context.Context) (*domain.Prod
 	if err := row.Scan(&totalRecords, &costMissing, &manualQuote, &erpMismatch, &ruleVersionOutdated, &legacyAliasFallback, &areaSpecAbnormal, &issueTotal); err != nil {
 		return nil, fmt.Errorf("get product cost dashboard: %w", err)
 	}
+	trend, err := r.costLegacyFallbackTrend(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get product cost legacy fallback trend: %w", err)
+	}
 	ratio := 0.0
 	if totalRecords > 0 {
 		ratio = float64(legacyAliasFallback) / float64(totalRecords)
@@ -452,6 +456,7 @@ func (r *productManagementRepo) CostDashboard(ctx context.Context) (*domain.Prod
 		IssueTotal:          issueTotal,
 		LegacyFallbackCount: legacyAliasFallback,
 		LegacyFallbackRatio: ratio,
+		LegacyFallbackTrend: trend,
 		Groups: []domain.ProductCostIssueGroup{
 			{Key: "cannot_calculate", Label: "算不出来的", Count: costMissing + manualQuote},
 			{Key: "possibly_wrong", Label: "可能算错的", Count: erpMismatch + ruleVersionOutdated + legacyAliasFallback},
@@ -467,6 +472,46 @@ func (r *productManagementRepo) CostDashboard(ctx context.Context) (*domain.Prod
 		},
 		GeneratedAt: time.Now().UTC(),
 	}, nil
+}
+
+func (r *productManagementRepo) costLegacyFallbackTrend(ctx context.Context) ([]domain.ProductCostLegacyFallbackTrendItem, error) {
+	rows, err := r.db.db.QueryContext(ctx, `
+		SELECT
+		  DATE(cost_snapshot.created_at) AS snapshot_date,
+		  COUNT(*) AS total_records,
+		  COALESCE(SUM(CASE
+		    WHEN JSON_VALID(cost_snapshot.calculation_snapshot_json)
+		     AND JSON_UNQUOTE(JSON_EXTRACT(cost_snapshot.calculation_snapshot_json, '$.legacy_alias_fallback')) = 'true'
+		    THEN 1 ELSE 0 END), 0) AS legacy_alias_fallback
+		FROM erp_product_sync_records pm
+		`+productManagementCostTraceJoin+`
+		WHERE cost_snapshot.created_at IS NOT NULL
+		  AND cost_snapshot.created_at >= DATE_SUB(CURRENT_DATE, INTERVAL 29 DAY)
+		GROUP BY DATE(cost_snapshot.created_at)
+		ORDER BY snapshot_date ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	trend := make([]domain.ProductCostLegacyFallbackTrendItem, 0, 30)
+	for rows.Next() {
+		var snapshotDate sql.NullTime
+		var item domain.ProductCostLegacyFallbackTrendItem
+		if err := rows.Scan(&snapshotDate, &item.TotalRecords, &item.LegacyFallbackCount); err != nil {
+			return nil, err
+		}
+		if snapshotDate.Valid {
+			item.Date = snapshotDate.Time.Format("2006-01-02")
+		}
+		if item.TotalRecords > 0 {
+			item.LegacyFallbackRatio = float64(item.LegacyFallbackCount) / float64(item.TotalRecords)
+		}
+		trend = append(trend, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return trend, nil
 }
 
 func (r *productManagementRepo) GetByID(ctx context.Context, id int64) (*domain.ProductManagementRecord, error) {

@@ -114,6 +114,38 @@ func TestProductManagementComboScopePaginatesComboGroups(t *testing.T) {
 	}
 }
 
+func TestProductManagementCostDashboardAddsLegacyFallbackPolicyState(t *testing.T) {
+	svc := NewProductManagementService(
+		&productManagementRecordRepoFake{},
+		nil,
+		nil,
+		nil,
+		WithProductManagementCostLegacyAliasFallbackEnabled(false),
+	)
+	result, appErr := svc.CostDashboard(context.Background())
+	if appErr != nil {
+		t.Fatalf("CostDashboard() appErr = %+v", appErr)
+	}
+	if result.LegacyFallbackEnabled {
+		t.Fatal("LegacyFallbackEnabled = true, want false")
+	}
+	if result.LegacyFallbackMode != "disabled" {
+		t.Fatalf("LegacyFallbackMode = %q, want disabled", result.LegacyFallbackMode)
+	}
+	if !strings.Contains(result.LegacyFallbackWarning, "已关闭") {
+		t.Fatalf("LegacyFallbackWarning = %q, want disabled warning", result.LegacyFallbackWarning)
+	}
+
+	defaultSvc := NewProductManagementService(&productManagementRecordRepoFake{}, nil, nil, nil)
+	defaultResult, appErr := defaultSvc.CostDashboard(context.Background())
+	if appErr != nil {
+		t.Fatalf("default CostDashboard() appErr = %+v", appErr)
+	}
+	if !defaultResult.LegacyFallbackEnabled || defaultResult.LegacyFallbackMode != "warn" {
+		t.Fatalf("default fallback policy = enabled %t mode %q, want enabled warn", defaultResult.LegacyFallbackEnabled, defaultResult.LegacyFallbackMode)
+	}
+}
+
 func TestProductManagementAreaTraceUsesSKUItemVariant(t *testing.T) {
 	record := productManagementTestRecord(11, "CGK000011", time.Now())
 	record.DimensionVariantJSON = json.RawMessage(`{"spec_text":"单个 160*125cm","size_text":"160*125cm","width":1.6,"height":1.25,"quantity":3}`)
