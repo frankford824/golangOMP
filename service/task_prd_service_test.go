@@ -2948,6 +2948,7 @@ func TestTaskServiceUpdateBusinessInfoRefreshesStoredDimensionsWhenSpecSizeChang
 			672: {
 				TaskID:   672,
 				Category: "常规kt板",
+				Remark:   "旧规格：56*120cm",
 				Width:    float64Ptr(0.3),
 				Height:   float64Ptr(0.42),
 				Area:     float64Ptr(0.126),

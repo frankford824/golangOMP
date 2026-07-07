@@ -2584,7 +2584,7 @@ func (s *taskService) previewTaskCost(ctx context.Context, task *domain.Task, de
 	if len(rules) == 0 {
 		return costPreviewComputation{}, nil
 	}
-	dimensionText := taskCostDimensionText(taskCostPreviewText(detail), ruleMatchText)
+	dimensionText := taskCostDimensionText(taskCostDetailDimensionText(detail), ruleMatchText)
 	width, height, area := taskCostPreviewDimensions(detail, dimensionText)
 	return previewCostRules(domain.CostRulePreviewRequest{
 		CategoryID:   categoryID,
@@ -3173,11 +3173,11 @@ func (s *taskService) previewTaskSKUItemCost(ctx context.Context, detail *domain
 	if len(rules) == 0 {
 		return costPreviewComputation{}, nil
 	}
-	primaryDimensionText := strings.Join(uniqueNonEmptyStrings(
+	primaryDimensionText := firstCostDimensionText(
 		taskSKUItemVariantCostNotes(item),
-		taskCostPreviewText(detail),
 		item.DesignRequirement,
-	), " ")
+		taskCostDetailDimensionText(detail),
+	)
 	dimensionText := taskCostDimensionText(primaryDimensionText, ruleMatchText)
 	width, height, area := taskSKUItemCostPreviewDimensions(detail, item, dimensionText)
 	quantity := cloneInt64Ptr(item.Quantity)
@@ -3770,7 +3770,7 @@ func applyTextDerivedCostDimensions(detail *domain.TaskDetail, refreshFromText b
 		detail.Area = &area
 		return
 	}
-	notes := taskCostPreviewText(detail)
+	notes := taskCostDetailDimensionText(detail)
 	if refreshFromText {
 		extracted := extractCostDimensionsFromText(notes)
 		if extracted.WidthM != nil {
@@ -3812,6 +3812,39 @@ func taskCostPreviewText(detail *domain.TaskDetail) string {
 		detail.Remark,
 		detail.DemandText,
 	), " ")
+}
+
+func taskCostDetailDimensionText(detail *domain.TaskDetail) string {
+	if detail == nil {
+		return ""
+	}
+	return firstCostDimensionText(
+		detail.SizeText,
+		detail.SpecText,
+		detail.CraftText,
+		detail.Process,
+		detail.DesignRequirement,
+		detail.ChangeRequest,
+		detail.Note,
+		detail.Remark,
+		detail.DemandText,
+		detail.Material,
+	)
+}
+
+func firstCostDimensionText(candidates ...string) string {
+	fallback := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		if hasCostDimensions(candidate) {
+			return candidate
+		}
+		fallback = append(fallback, candidate)
+	}
+	return strings.Join(uniqueNonEmptyStrings(fallback...), " ")
 }
 
 func taskCostPreviewTextWithTask(task *domain.Task, detail *domain.TaskDetail) string {

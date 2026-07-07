@@ -364,6 +364,7 @@ func TestTaskCostPreviewDimensionsPrefersTextOverStaleDetailArea(t *testing.T) {
 	area := 1.224
 	detail := &domain.TaskDetail{
 		SpecText: "46*120cm",
+		Remark:   "历史备注 汪敏/定制KT板/覆膜/帕恰狗黄色圆点/56*120cm",
 		Width:    &width,
 		Height:   &height,
 		Area:     &area,
