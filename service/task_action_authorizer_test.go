@@ -595,6 +595,26 @@ func TestTaskActionAuthorizerStageScopeWriteMatrix(t *testing.T) {
 			wantScopeSource: string(TaskActionScopeStage),
 		},
 		{
+			name:   "audit_a_can_takeover_pending_audit_a_via_stage_scope",
+			action: TaskActionAuditTakeover,
+			attrs:  TaskActionAttributes{AuditStage: domain.AuditRecordStageA},
+			actor: domain.RequestActor{
+				ID:         331,
+				Roles:      []domain.Role{domain.RoleAuditA, domain.RoleCustomizationReviewer, domain.RoleMember},
+				Department: string(domain.DepartmentAudit),
+				Team:       "普通审核组",
+			},
+			task: &domain.Task{
+				ID:                    2123,
+				TaskStatus:            domain.TaskStatusPendingAuditA,
+				OwnerDepartment:       string(domain.DepartmentOperations),
+				OwnerOrgTeam:          "天猫二组",
+				CustomizationRequired: false,
+			},
+			wantAllowed:     true,
+			wantScopeSource: string(TaskActionScopeStage),
+		},
+		{
 			name:   "warehouse_dept_admin_can_reject_foreign_pending_qc_via_stage_scope",
 			action: TaskActionWarehouseReject,
 			actor: domain.RequestActor{

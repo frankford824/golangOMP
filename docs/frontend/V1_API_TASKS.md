@@ -3469,7 +3469,7 @@ curl -X GET https://api.example.com/v1/tasks/<id>/audit/handovers \
 ### 简介
 支持方法: POST。
 
-- `POST`: `auditor_id` is optional and defaults to the current authenticated actor. Takeover restores explicit audit ownership by setting the task handler to the takeover auditor. This action uses minimum role plus org scope gating over canonical task ownership. `Audit_A` is the canonical regular-audit role for both stage A handovers and handoff/recheck stage B handovers; legacy `Audit_B` accounts remain accepted for compatibility, and management roles remain state-gated.
+- `POST`: `auditor_id` is optional and defaults to the current authenticated actor. Takeover restores explicit audit ownership by setting the task handler to the takeover auditor. This action uses minimum role plus audit-stage or org scope gating over canonical task ownership. `Audit_A` is the canonical regular-audit role for both stage A handovers and handoff/recheck stage B handovers; legacy `Audit_B` accounts remain accepted for compatibility, and management roles remain state-gated.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。

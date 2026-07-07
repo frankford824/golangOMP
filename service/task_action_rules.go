@@ -320,9 +320,9 @@ func taskActionRuleFor(action TaskAction) taskActionRule {
 			Action:           action,
 			RequiredRoles:    append([]domain.Role{domain.RoleAuditA, domain.RoleAuditB}, managerRoles...),
 			AllowedStatuses:  []domain.TaskStatus{domain.TaskStatusPendingAuditA, domain.TaskStatusPendingAuditB, domain.TaskStatusPendingOutsourceReview},
-			AllowedScopes:    []TaskActionScopeSource{TaskActionScopeViewAll, TaskActionScopeManagedDepartment, TaskActionScopeManagedTeam, TaskActionScopeDepartment, TaskActionScopeTeam},
+			AllowedScopes:    []TaskActionScopeSource{TaskActionScopeViewAll, TaskActionScopeManagedDepartment, TaskActionScopeManagedTeam, TaskActionScopeDepartment, TaskActionScopeTeam, TaskActionScopeStage},
 			RoleGateMessage:  "audit takeover requires an audit or management role",
-			ScopeGateMessage: "audit takeover is outside the actor organization scope",
+			ScopeGateMessage: "audit takeover is outside the actor audit stage or organization scope",
 			MatchedRule:      "role_plus_audit_takeover_scope",
 		}
 	case TaskActionAuditATakeover:
@@ -330,11 +330,11 @@ func taskActionRuleFor(action TaskAction) taskActionRule {
 			Action:            action,
 			RequiredRoles:     append([]domain.Role{domain.RoleAuditA, domain.RoleAuditB}, managerRoles...),
 			AllowedStatuses:   []domain.TaskStatus{domain.TaskStatusPendingAuditA},
-			AllowedScopes:     []TaskActionScopeSource{TaskActionScopeViewAll, TaskActionScopeManagedDepartment, TaskActionScopeManagedTeam, TaskActionScopeDepartment, TaskActionScopeTeam},
+			AllowedScopes:     []TaskActionScopeSource{TaskActionScopeViewAll, TaskActionScopeManagedDepartment, TaskActionScopeManagedTeam, TaskActionScopeDepartment, TaskActionScopeTeam, TaskActionScopeStage},
 			StatusDenyCode:    "audit_stage_mismatch",
 			StatusGateMessage: "regular audit takeover requires PendingAuditA",
 			RoleGateMessage:   "regular audit takeover requires the Audit_A role, legacy Audit_B role, or a management role",
-			ScopeGateMessage:  "regular audit takeover is outside the actor organization scope",
+			ScopeGateMessage:  "regular audit takeover is outside the actor audit stage or organization scope",
 			MatchedRule:       "regular_audit_takeover_scope",
 		}
 	case TaskActionAuditBTakeover:
@@ -342,11 +342,11 @@ func taskActionRuleFor(action TaskAction) taskActionRule {
 			Action:            action,
 			RequiredRoles:     append([]domain.Role{domain.RoleAuditA, domain.RoleAuditB}, managerRoles...),
 			AllowedStatuses:   []domain.TaskStatus{domain.TaskStatusPendingAuditB},
-			AllowedScopes:     []TaskActionScopeSource{TaskActionScopeViewAll, TaskActionScopeManagedDepartment, TaskActionScopeManagedTeam, TaskActionScopeDepartment, TaskActionScopeTeam},
+			AllowedScopes:     []TaskActionScopeSource{TaskActionScopeViewAll, TaskActionScopeManagedDepartment, TaskActionScopeManagedTeam, TaskActionScopeDepartment, TaskActionScopeTeam, TaskActionScopeStage},
 			StatusDenyCode:    "audit_stage_mismatch",
 			StatusGateMessage: "regular audit handoff takeover requires PendingAuditB",
 			RoleGateMessage:   "regular audit handoff takeover requires the Audit_A role, legacy Audit_B role, or a management role",
-			ScopeGateMessage:  "regular audit handoff takeover is outside the actor organization scope",
+			ScopeGateMessage:  "regular audit handoff takeover is outside the actor audit stage or organization scope",
 			MatchedRule:       "regular_audit_handoff_takeover_scope",
 		}
 	case TaskActionAuditOutsourceReviewTakeover:
@@ -354,11 +354,11 @@ func taskActionRuleFor(action TaskAction) taskActionRule {
 			Action:            action,
 			RequiredRoles:     append([]domain.Role{domain.RoleAuditA, domain.RoleAuditB}, managerRoles...),
 			AllowedStatuses:   []domain.TaskStatus{domain.TaskStatusPendingOutsourceReview},
-			AllowedScopes:     []TaskActionScopeSource{TaskActionScopeViewAll, TaskActionScopeManagedDepartment, TaskActionScopeManagedTeam, TaskActionScopeDepartment, TaskActionScopeTeam},
+			AllowedScopes:     []TaskActionScopeSource{TaskActionScopeViewAll, TaskActionScopeManagedDepartment, TaskActionScopeManagedTeam, TaskActionScopeDepartment, TaskActionScopeTeam, TaskActionScopeStage},
 			StatusDenyCode:    "audit_stage_mismatch",
 			StatusGateMessage: "outsource review takeover requires PendingOutsourceReview",
 			RoleGateMessage:   "outsource review takeover requires an audit or management role",
-			ScopeGateMessage:  "outsource review takeover is outside the actor organization scope",
+			ScopeGateMessage:  "outsource review takeover is outside the actor audit stage or organization scope",
 			MatchedRule:       "audit_outsource_review_takeover_scope",
 		}
 	case TaskActionWarehousePrepare:

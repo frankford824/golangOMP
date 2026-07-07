@@ -14272,7 +14272,7 @@ paths:
   /v1/tasks/{id}/audit/takeover:
       post:
         summary: Take over pending handover
-        description: "`auditor_id` is optional and defaults to the current authenticated actor. Takeover restores explicit audit ownership by setting the task handler to the takeover auditor. This action uses minimum role plus org scope gating over canonical task ownership. `Audit_A` is the canonical regular-audit role for both stage A handovers and handoff/recheck stage B handovers; legacy `Audit_B` accounts remain accepted for compatibility, and management roles remain state-gated."
+        description: "`auditor_id` is optional and defaults to the current authenticated actor. Takeover restores explicit audit ownership by setting the task handler to the takeover auditor. This action uses minimum role plus audit-stage or org scope gating over canonical task ownership. `Audit_A` is the canonical regular-audit role for both stage A handovers and handoff/recheck stage B handovers; legacy `Audit_B` accounts remain accepted for compatibility, and management roles remain state-gated."
       tags: [Audit, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
