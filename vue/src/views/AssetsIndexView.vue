@@ -206,8 +206,6 @@
               type="checkbox"
               class="ac-card-checkbox"
               :aria-label="`选择资产 ${assetDisplayTitle(asset)}`"
-              :disabled="isExternalAsset(asset)"
-              :title="isExternalAsset(asset) ? '外部资源请单个下载' : ''"
               :checked="isAssetSelected(asset)"
               @change.stop="onAssetSelectionChange(asset, $event)"
             />
@@ -452,7 +450,7 @@
             </button>
           </div>
           <p class="bulk-search-hint">
-            支持粘贴多行 SKU 或任务单号，自动去重后按所选格式和资源类型筛选。默认只搜索最终成品图 JPG / PNG；如需源文件、参考图或全部格式请手动切换。
+            支持粘贴多行 SKU 或任务单号，自动去重后按所选格式和资源类型筛选。默认按最终成品图 JPG / PNG 匹配系统资源，外部资源按文件格式一并纳入。
           </p>
           <p v-if="bulkSearchStatus" class="ac-batch-status">{{ bulkSearchStatus }}</p>
           <p v-if="bulkSearchError" class="ac-batch-error">{{ bulkSearchError }}</p>
@@ -1522,10 +1520,6 @@ function isAssetSelected(asset: BackendAsset): boolean {
 }
 
 function toggleAssetSelection(asset: BackendAsset, checked?: boolean) {
-  if (isExternalAsset(asset)) {
-    batchDownloadError.value = '外部资源请在卡片上单个下载'
-    return
-  }
   const id = assetResourceId(asset)
   const nextChecked = typeof checked === 'boolean' ? checked : !selectedAssetMap.has(id)
   if (!nextChecked) {
@@ -1556,10 +1550,10 @@ function onAssetSelectionChange(asset: BackendAsset, event: Event) {
   toggleAssetSelection(asset, checked)
 }
 
-function normalizeSelectedAssetIDs(): number[] {
+function normalizeSelectedAssetResourceIDs(): string[] {
   const ids = selectedAssets.value
-    .map((item) => Number(item.id))
-    .filter((id) => Number.isInteger(id) && id > 0)
+    .map((item) => String(item.id ?? '').trim())
+    .filter(Boolean)
   return Array.from(new Set(ids))
 }
 
@@ -1751,25 +1745,29 @@ async function runBulkAssetSearch() {
   }
 }
 
-function normalizeBulkSearchAssetIDs(): number[] {
+function normalizeBulkSearchAssetResourceIDs(): string[] {
   const ids = bulkSearchMatchedResults.value
     .flatMap(bulkSearchResultAssets)
-    .map((item) => Number(item.id))
-    .filter((id) => Number.isInteger(id) && id > 0)
+    .map((item) => assetResourceId(item))
+    .filter(Boolean)
   return Array.from(new Set(ids))
 }
 
 async function downloadBulkSearchResults() {
   if (bulkSearchDownloading.value) return
   bulkSearchError.value = ''
-  const assetIDs = normalizeBulkSearchAssetIDs()
-  if (!assetIDs.length) {
+  const resourceIDs = normalizeBulkSearchAssetResourceIDs()
+  if (!resourceIDs.length) {
     bulkSearchError.value = '当前没有可下载的命中资产'
+    return
+  }
+  if (resourceIDs.length > MAX_BATCH_DOWNLOAD_ASSETS) {
+    bulkSearchError.value = `最多一次下载 ${MAX_BATCH_DOWNLOAD_ASSETS} 个资源，请减少搜索项或分批下载`
     return
   }
   bulkSearchDownloading.value = true
   try {
-    const res = await assetsApi.batchDownload(assetIDs, { namingMode: 'business' })
+    const res = await assetsApi.batchDownload(resourceIDs, { namingMode: 'business' })
     const manifest = res.data?.data
     const items = Array.isArray(manifest?.items) ? manifest.items : []
     if (!items.length) {
@@ -1779,11 +1777,11 @@ async function downloadBulkSearchResults() {
     const serverFailures = Array.isArray(manifest?.failures) ? manifest.failures : []
     const result = await downloadBatchAsZip({
       items: items.map((item) => ({
-        key: `asset-${item.asset_id}`,
+        key: item.resource_id || `asset-${item.asset_id}`,
         filename: item.filename,
         downloadURL: item.download_url,
-        fallbackName: `asset-${item.asset_id}`,
-        failureHint: `asset_id=${item.asset_id} filename=${item.filename || `asset-${item.asset_id}`} reason=fetch_failed`,
+        fallbackName: item.resource_id || `asset-${item.asset_id}`,
+        failureHint: `resource_id=${item.resource_id || item.asset_id} filename=${item.filename || item.resource_id || `asset-${item.asset_id}`} reason=fetch_failed`,
       })),
       zipFilename: resolveBulkSearchZipFilename(),
       serverFailures: serverFailures.map(formatServerBatchDownloadFailure),
@@ -2085,7 +2083,8 @@ async function handleExcelPackageFile(event: Event) {
 
 function formatServerBatchDownloadFailure(item: AssetBatchDownloadFailure): string {
   return [
-    `asset_id=${item.asset_id}`,
+    item.resource_id ? `resource_id=${item.resource_id}` : `asset_id=${item.asset_id}`,
+    item.source_type ? `source=${item.source_type}` : '',
     item.task_id != null ? `task_id=${item.task_id}` : '',
     item.filename ? `filename=${item.filename}` : '',
     `reason=${item.reason || 'unavailable'}`,
@@ -2100,11 +2099,11 @@ async function downloadBatchAsClientZip(
 ) {
   const result = await downloadBatchAsZip({
     items: items.map((item) => ({
-      key: `asset-${item.asset_id}`,
+      key: item.resource_id || `asset-${item.asset_id}`,
       filename: item.filename,
       downloadURL: item.download_url,
-      fallbackName: `asset-${item.asset_id}`,
-      failureHint: `asset_id=${item.asset_id} filename=${item.filename || `asset-${item.asset_id}`} reason=fetch_failed`,
+      fallbackName: item.resource_id || `asset-${item.asset_id}`,
+      failureHint: `resource_id=${item.resource_id || item.asset_id} filename=${item.filename || item.resource_id || `asset-${item.asset_id}`} reason=fetch_failed`,
     })),
     zipFilename: resolveBatchZipFilename(),
     serverFailures: serverFailures.map(formatServerBatchDownloadFailure),
@@ -2120,19 +2119,19 @@ async function handleBatchDownload() {
   batchDownloadStatus.value = ''
   batchDownloadError.value = ''
 
-  const assetIDs = normalizeSelectedAssetIDs()
-  if (!assetIDs.length) {
-    batchDownloadError.value = '未找到可下载的资产 ID，请重新勾选后重试'
+  const resourceIDs = normalizeSelectedAssetResourceIDs()
+  if (!resourceIDs.length) {
+    batchDownloadError.value = '未找到可下载的资源 ID，请重新勾选后重试'
     return
   }
-  if (assetIDs.length > MAX_BATCH_DOWNLOAD_ASSETS) {
+  if (resourceIDs.length > MAX_BATCH_DOWNLOAD_ASSETS) {
     batchDownloadError.value = `最多一次下载 ${MAX_BATCH_DOWNLOAD_ASSETS} 个资产`
     return
   }
 
   batchDownloading.value = true
   try {
-    const res = await assetsApi.batchDownload(assetIDs, { namingMode: 'business' })
+    const res = await assetsApi.batchDownload(resourceIDs, { namingMode: 'business' })
     const manifest = res.data?.data
     const items = Array.isArray(manifest?.items) ? manifest.items : []
     if (!items.length) {

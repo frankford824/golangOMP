@@ -368,41 +368,41 @@ type closeTaskReq struct {
 }
 
 type submitCustomizationReviewReq struct {
-	ReviewerID             *int64   `json:"reviewer_id"`
-	SourceAssetID          *int64   `json:"source_asset_id"`
-	CustomizationLevelCode string   `json:"customization_level_code"`
-	CustomizationLevelName string   `json:"customization_level_name"`
-	CustomizationPrice     *float64 `json:"customization_price"`
-	CustomizationWeight    *float64 `json:"customization_weight_factor"`
-	CustomizationNote      string   `json:"customization_note"`
-	Decision               string   `json:"customization_review_decision"`
+	ReviewerID             optionalInt64JSONField `json:"reviewer_id"`
+	SourceAssetID          optionalInt64JSONField `json:"source_asset_id"`
+	CustomizationLevelCode string                 `json:"customization_level_code"`
+	CustomizationLevelName string                 `json:"customization_level_name"`
+	CustomizationPrice     *float64               `json:"customization_price"`
+	CustomizationWeight    *float64               `json:"customization_weight_factor"`
+	CustomizationNote      string                 `json:"customization_note"`
+	Decision               string                 `json:"customization_review_decision"`
 }
 
 type submitCustomizationEffectPreviewReq struct {
-	OperatorID     *int64 `json:"operator_id"`
-	OrderNo        string `json:"order_no"`
-	CurrentAssetID *int64 `json:"current_asset_id"`
-	DecisionType   string `json:"decision_type"`
-	Note           string `json:"note"`
+	OperatorID     optionalInt64JSONField `json:"operator_id"`
+	OrderNo        string                 `json:"order_no"`
+	CurrentAssetID optionalInt64JSONField `json:"current_asset_id"`
+	DecisionType   string                 `json:"decision_type"`
+	Note           string                 `json:"note"`
 }
 
 type reviewCustomizationEffectReq struct {
-	ReviewerID             *int64   `json:"reviewer_id"`
-	Decision               string   `json:"customization_review_decision"`
-	CurrentAssetID         *int64   `json:"current_asset_id"`
-	CustomizationLevelCode string   `json:"customization_level_code"`
-	CustomizationLevelName string   `json:"customization_level_name"`
-	CustomizationPrice     *float64 `json:"customization_price"`
-	CustomizationWeight    *float64 `json:"customization_weight_factor"`
-	CustomizationNote      string   `json:"customization_note"`
+	ReviewerID             optionalInt64JSONField `json:"reviewer_id"`
+	Decision               string                 `json:"customization_review_decision"`
+	CurrentAssetID         optionalInt64JSONField `json:"current_asset_id"`
+	CustomizationLevelCode string                 `json:"customization_level_code"`
+	CustomizationLevelName string                 `json:"customization_level_name"`
+	CustomizationPrice     *float64               `json:"customization_price"`
+	CustomizationWeight    *float64               `json:"customization_weight_factor"`
+	CustomizationNote      string                 `json:"customization_note"`
 }
 
 type transferCustomizationProductionReq struct {
-	OperatorID        *int64 `json:"operator_id"`
-	CurrentAssetID    *int64 `json:"current_asset_id"`
-	TransferChannel   string `json:"transfer_channel"`
-	TransferReference string `json:"transfer_reference"`
-	Note              string `json:"note"`
+	OperatorID        optionalInt64JSONField `json:"operator_id"`
+	CurrentAssetID    optionalInt64JSONField `json:"current_asset_id"`
+	TransferChannel   string                 `json:"transfer_channel"`
+	TransferReference string                 `json:"transfer_reference"`
+	Note              string                 `json:"note"`
 }
 
 type taskProductSelectionReq struct {
@@ -1407,7 +1407,7 @@ func (h *TaskHandler) SubmitCustomizationReview(c *gin.Context) {
 		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
 		return
 	}
-	reviewerID, appErr := actorIDOrRequestValue(c, req.ReviewerID, "reviewer_id")
+	reviewerID, appErr := actorIDOrRequestValue(c, req.ReviewerID.Ptr(), "reviewer_id")
 	if appErr != nil {
 		respondError(c, appErr)
 		return
@@ -1415,7 +1415,7 @@ func (h *TaskHandler) SubmitCustomizationReview(c *gin.Context) {
 	item, appErr := h.svc.SubmitCustomizationReview(c.Request.Context(), service.SubmitCustomizationReviewParams{
 		TaskID:                 taskID,
 		ReviewerID:             reviewerID,
-		SourceAssetID:          req.SourceAssetID,
+		SourceAssetID:          req.SourceAssetID.Ptr(),
 		CustomizationLevelCode: strings.TrimSpace(req.CustomizationLevelCode),
 		CustomizationLevelName: strings.TrimSpace(req.CustomizationLevelName),
 		CustomizationPrice:     req.CustomizationPrice,
@@ -1441,7 +1441,7 @@ func (h *TaskHandler) SubmitCustomizationEffectPreview(c *gin.Context) {
 		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
 		return
 	}
-	operatorID, appErr := actorIDOrRequestValue(c, req.OperatorID, "operator_id")
+	operatorID, appErr := actorIDOrRequestValue(c, req.OperatorID.Ptr(), "operator_id")
 	if appErr != nil {
 		respondError(c, appErr)
 		return
@@ -1450,7 +1450,7 @@ func (h *TaskHandler) SubmitCustomizationEffectPreview(c *gin.Context) {
 		JobID:          jobID,
 		OperatorID:     operatorID,
 		OrderNo:        strings.TrimSpace(req.OrderNo),
-		CurrentAssetID: req.CurrentAssetID,
+		CurrentAssetID: req.CurrentAssetID.Ptr(),
 		DecisionType:   domain.CustomizationJobDecisionType(strings.TrimSpace(req.DecisionType)),
 		Note:           strings.TrimSpace(req.Note),
 	})
@@ -1472,7 +1472,7 @@ func (h *TaskHandler) ReviewCustomizationEffect(c *gin.Context) {
 		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
 		return
 	}
-	reviewerID, appErr := actorIDOrRequestValue(c, req.ReviewerID, "reviewer_id")
+	reviewerID, appErr := actorIDOrRequestValue(c, req.ReviewerID.Ptr(), "reviewer_id")
 	if appErr != nil {
 		respondError(c, appErr)
 		return
@@ -1481,7 +1481,7 @@ func (h *TaskHandler) ReviewCustomizationEffect(c *gin.Context) {
 		JobID:                  jobID,
 		ReviewerID:             reviewerID,
 		Decision:               domain.CustomizationReviewDecision(strings.TrimSpace(req.Decision)),
-		CurrentAssetID:         req.CurrentAssetID,
+		CurrentAssetID:         req.CurrentAssetID.Ptr(),
 		CustomizationLevelCode: strings.TrimSpace(req.CustomizationLevelCode),
 		CustomizationLevelName: strings.TrimSpace(req.CustomizationLevelName),
 		CustomizationPrice:     req.CustomizationPrice,
@@ -1506,7 +1506,7 @@ func (h *TaskHandler) TransferCustomizationProduction(c *gin.Context) {
 		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
 		return
 	}
-	operatorID, appErr := actorIDOrRequestValue(c, req.OperatorID, "operator_id")
+	operatorID, appErr := actorIDOrRequestValue(c, req.OperatorID.Ptr(), "operator_id")
 	if appErr != nil {
 		respondError(c, appErr)
 		return
@@ -1514,7 +1514,7 @@ func (h *TaskHandler) TransferCustomizationProduction(c *gin.Context) {
 	item, appErr := h.svc.TransferCustomizationProduction(c.Request.Context(), service.TransferCustomizationProductionParams{
 		JobID:             jobID,
 		OperatorID:        operatorID,
-		CurrentAssetID:    req.CurrentAssetID,
+		CurrentAssetID:    req.CurrentAssetID.Ptr(),
 		TransferChannel:   strings.TrimSpace(req.TransferChannel),
 		TransferReference: strings.TrimSpace(req.TransferReference),
 		Note:              strings.TrimSpace(req.Note),

@@ -1014,6 +1014,26 @@ func (s *Service) DownloadInfo(ctx context.Context, id int64) (*domain.AssetDown
 	return s.netdiskDownloadInfo(ctx, row, false)
 }
 
+func (s *Service) BatchDownloadInfo(ctx context.Context, id int64) (*domain.AssetDownloadInfo, *domain.AppError) {
+	row, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)
+	}
+	if row == nil || row.Status == domain.ExternalAssetStatusMissing {
+		return nil, domain.ErrNotFound
+	}
+	if row.IsDir {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "文件夹暂不支持下载", nil)
+	}
+	if row.OSSOriginalKey != "" && row.OSSSyncStatus == domain.ExternalAssetOSSStatusReady {
+		return s.ossDownloadInfo(row, row.OSSOriginalKey, false, "external_batch_oss")
+	}
+	if err := s.repo.MarkOSSPreparePending(ctx, row.ID); err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)
+	}
+	return prepareInfo(row, "external_batch_prepare_required"), nil
+}
+
 func (s *Service) PreviewInfo(ctx context.Context, id int64) (*domain.AssetDownloadInfo, *domain.AppError) {
 	row, err := s.repo.GetByID(ctx, id)
 	if err != nil {

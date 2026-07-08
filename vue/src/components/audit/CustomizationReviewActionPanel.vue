@@ -65,7 +65,6 @@
       v-model="dialogOpen"
       :mode="mode"
       :task-id="task.id"
-      :default-reviewer-id="currentUserId"
       :can-upload-source="can('task.customization.review.asset_upload')"
       :target-sku-code="task.sku ?? undefined"
       :loading="submitting"
@@ -125,10 +124,9 @@ const emit = defineEmits<{
   takeover: []
 }>()
 
-const { can, currentUser } = usePermission()
+const { can } = usePermission()
 const tasksStore = useTasksStore()
 
-const currentUserId = computed(() => currentUser.value?.id ?? null)
 const dialogOpen = ref(false)
 const { submitting, guard: submitGuard } = useSubmitGuard()
 const actionError = ref('')

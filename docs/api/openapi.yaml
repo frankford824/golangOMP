@@ -5617,14 +5617,31 @@ components:
           description: Expiry time for signed direct URL when present.
     AssetBatchDownloadRequest:
       type: object
-      required: [asset_ids]
+      description: Provide at least one system asset ID in `asset_ids` or resource ID in `resource_ids`. External resources use `ext-{id}` or `external:{id}` resource IDs.
+      anyOf:
+        - required: [asset_ids]
+          properties:
+            asset_ids:
+              type: array
+              minItems: 1
+        - required: [resource_ids]
+          properties:
+            resource_ids:
+              type: array
+              minItems: 1
       properties:
         asset_ids:
           type: array
-          minItems: 1
           maxItems: 100
+          description: System asset IDs retained for compatibility with earlier clients.
           items:
             type: integer
+        resource_ids:
+          type: array
+          maxItems: 100
+          description: Mixed resource IDs accepted by the asset center. System resources may use a numeric string; external resources use `ext-{id}` or `external:{id}`.
+          items:
+            type: string
         naming_mode:
           type: string
           enum: [original, business]
@@ -5636,8 +5653,16 @@ components:
       properties:
         asset_id:
           type: integer
+          description: Numeric source record ID. For external resources this is the external asset record ID.
+        resource_id:
+          type: string
+          description: Stable mixed resource ID used by the asset center. System resources return their numeric ID as a string; external resources return `ext-{id}`.
+        source_type:
+          type: string
+          enum: [system, external]
         task_id:
           type: integer
+          description: System task ID. External resources return 0.
         filename:
           type: string
         file_size:
@@ -5648,7 +5673,7 @@ components:
         download_url:
           type: string
           format: uri
-          description: Presigned OSS direct download URL. The backend does not proxy file bytes.
+          description: Direct URL that the browser can fetch for ZIP packaging. System resources use OSS presigned URLs; external resources are returned only when prepared as OSS-ready URLs, not as arbitrary netdisk raw URLs.
         expires_at:
           type: string
           format: date-time
@@ -5659,6 +5684,12 @@ components:
       properties:
         asset_id:
           type: integer
+          description: Numeric source record ID when parseable.
+        resource_id:
+          type: string
+        source_type:
+          type: string
+          enum: [system, external]
         task_id:
           type: integer
         filename:
@@ -8810,7 +8841,7 @@ components:
           maxItems: 200
           items:
             type: string
-          description: SKU codes or task numbers, one logical search term per item.
+          description: SKU codes, task numbers, or external-resource filename/path keywords, one logical search term per item.
         format_filter:
           type: string
           enum: [jpg_png, jpg, png, webp, image, design, pdf, archive, all]
@@ -8820,7 +8851,7 @@ components:
           type: string
           enum: [auto, all, delivery, reference, source, preview, other]
           default: delivery
-          description: UI-facing asset role filter. Default bulk search only matches delivery assets; `auto` keeps all roles but ranks delivery assets first.
+          description: UI-facing asset role filter. System resources use task asset roles; external resources do not have system roles and are included for auto/all/delivery/source searches by filename/path format.
     AssetBatchSearchResult:
       type: object
       required: [term, status, message, candidates]
@@ -8840,7 +8871,7 @@ components:
           $ref: '#/components/schemas/AssetDetail'
         assets:
           type: array
-          description: All assets matching the requested term, format filter, and asset role filter, ordered by the same ranking used by `asset`.
+          description: All system and external resources matching the requested term, format filter, and asset role filter, ordered by the same ranking used by `asset`.
           items:
             $ref: '#/components/schemas/AssetDetail'
     AssetBatchSearchResponse:
@@ -9266,6 +9297,7 @@ paths:
         `keyword` matches username, display name, and employee number.
         `DepartmentAdmin` reads are forced to own department.
         `TeamLead` reads are forced to own team inside own department.
+        Stale or disabled department/team filter values on this read endpoint are treated as no-match filters and return an empty page instead of failing the whole user-management shell; user create/update inputs still reject invalid org values.
       tags: [ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-owner-round: R4-SA-B
@@ -9288,12 +9320,12 @@ paths:
           name: department
           schema:
             type: string
-          description: Must match `/v1/org/options`.
+          description: Must match an enabled department from `/v1/org/options`; stale or disabled values return an empty page.
         - in: query
           name: team
           schema:
             type: string
-          description: Must match the selected department in `/v1/org/options`.
+          description: Must match an enabled team under the selected department in `/v1/org/options`; stale or disabled values return an empty page.
         - in: query
           name: page
           schema: { type: integer }
@@ -12294,7 +12326,7 @@ paths:
   /v1/assets/batch-download:
     post:
       summary: Batch download asset direct URL manifest
-      description: Return presigned OSS direct download URLs for current versions of the requested assets. The backend does not proxy file bytes or build ZIP packages.
+      description: Return direct download URLs for requested system and external asset-center resources. System assets use presigned OSS URLs for current versions; external resources are returned only when an OSS-ready URL is available. The backend does not proxy file bytes or build ZIP packages.
       tags: [Assets, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
@@ -17910,7 +17942,7 @@ paths:
   /v1/assets/search/batch:
     post:
       summary: Batch search assets by SKU or task number
-      description: Batch asset search for the asset management bulk-download dialog. It returns one ranked asset candidate per input term and avoids issuing one HTTP request per SKU/task number.
+      description: Batch asset search for the asset management bulk-download dialog. It returns ranked system and external resource candidates per input term and avoids issuing one HTTP request per SKU/task number.
       tags: [Assets, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-owner-round: R4-SA-A

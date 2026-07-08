@@ -8,8 +8,9 @@ import (
 )
 
 type assetBatchDownloadReq struct {
-	AssetIDs   []int64 `json:"asset_ids"`
-	NamingMode string  `json:"naming_mode,omitempty"`
+	AssetIDs    []int64  `json:"asset_ids"`
+	ResourceIDs []string `json:"resource_ids,omitempty"`
+	NamingMode  string   `json:"naming_mode,omitempty"`
 }
 
 type assetExcelPackagePreviewReq struct {
@@ -37,9 +38,9 @@ func (h *TaskAssetCenterHandler) BatchDownloadGlobalAssets(c *gin.Context) {
 		return
 	}
 
-	manifest, appErr := h.globalSvc.BuildBatchDownloadManifest(
+	manifest, appErr := h.globalSvc.BuildBatchDownloadManifestForResources(
 		c.Request.Context(),
-		req.AssetIDs,
+		assetcenter.BatchDownloadResourceRequest{AssetIDs: req.AssetIDs, ResourceIDs: req.ResourceIDs},
 		assetcenter.WithBatchDownloadNamingMode(assetcenter.NormalizeBatchDownloadNamingMode(req.NamingMode)),
 	)
 	if appErr != nil {

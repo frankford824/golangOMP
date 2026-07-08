@@ -9,6 +9,7 @@ import (
 	"workflow/domain"
 	"workflow/repo"
 	baseservice "workflow/service"
+	externalassets "workflow/service/external_assets"
 )
 
 func TestBuildBatchDownloadManifestReturnsDirectOSSURLs(t *testing.T) {
@@ -336,6 +337,136 @@ func TestBuildBatchDownloadManifestSizeLimitUsesMetadata(t *testing.T) {
 	}
 	if result.Failures[0].AssetID != 502 || result.Failures[0].Reason != "total_size_limit_exceeded" {
 		t.Fatalf("failure = %+v", result.Failures[0])
+	}
+}
+
+func TestBuildBatchDownloadManifestForResourcesSupportsExternalAssets(t *testing.T) {
+	now := time.Date(2026, 7, 7, 11, 0, 0, 0, time.UTC)
+	ossDirect := baseservice.NewOSSDirectService(baseservice.OSSDirectConfig{
+		Enabled:         true,
+		Endpoint:        "oss-cn-hangzhou.aliyuncs.com",
+		PublicEndpoint:  "oss-cn-hangzhou.aliyuncs.com",
+		Bucket:          "test-bucket",
+		AccessKeyID:     "test-key",
+		AccessKeySecret: "test-secret",
+		PresignExpiry:   15 * time.Minute,
+	})
+	externalRepo := &assetCenterExternalRepoStub{
+		searchRows: []*domain.ExternalAssetRecord{
+			{
+				ID:             77,
+				ResourceID:     domain.ExternalAssetResourceID(77),
+				Provider:       "alist",
+				Kind:           domain.ExternalAssetKindNetdisk,
+				MountPath:      "/quark",
+				OriginPath:     "/quark/HSC12654/HSC12654主图.jpg",
+				ParentPath:     "/quark/HSC12654",
+				FileName:       "HSC12654主图.jpg",
+				FileExt:        ".jpg",
+				MimeType:       "image/jpeg",
+				FileSize:       4096,
+				Status:         domain.ExternalAssetStatusIndexed,
+				RawURL:         "https://files.example/HSC12654.jpg",
+				OSSOriginalKey: "external-assets/alist/original/quark/HSC12654/HSC12654主图.jpg",
+				OSSSyncStatus:  domain.ExternalAssetOSSStatusReady,
+				PreviewStatus:  domain.ExternalAssetPreviewStatusNone,
+				CreatedAt:      now,
+				UpdatedAt:      now,
+			},
+		},
+	}
+	svc := NewService(&batchRepoStub{}, nil, nil)
+	svc.SetExternalAssetService(externalassets.NewService(externalRepo, externalassets.Config{
+		Enabled: true,
+		Mounts:  externalassets.ParseMounts("/quark:netdisk"),
+	}, ossDirect))
+
+	result, appErr := svc.BuildBatchDownloadManifestForResources(context.Background(), BatchDownloadResourceRequest{
+		ResourceIDs: []string{"ext-77"},
+	})
+	if appErr != nil {
+		t.Fatalf("BuildBatchDownloadManifestForResources error = %+v", appErr)
+	}
+	if result.SuccessCount != 1 || result.FailureCount != 0 || result.TotalSize != 4096 {
+		t.Fatalf("manifest summary = %+v", result)
+	}
+	if len(result.Items) != 1 {
+		t.Fatalf("items len = %d, want 1", len(result.Items))
+	}
+	item := result.Items[0]
+	if item.AssetID != 77 || item.ResourceID != "ext-77" || item.SourceType != string(domain.AssetResourceSourceExternal) {
+		t.Fatalf("item identity = %+v, want external ext-77", item)
+	}
+	if item.TaskID != 0 || item.Filename != "HSC12654主图.jpg" ||
+		!strings.Contains(item.DownloadURL, "external-assets/alist/original/quark/HSC12654/") ||
+		strings.Contains(item.DownloadURL, "files.example") {
+		t.Fatalf("item download fields = %+v", item)
+	}
+}
+
+func TestBuildBatchDownloadManifestForResourcesDoesNotReturnExternalRawURLForZip(t *testing.T) {
+	uploaded := string(domain.DesignAssetUploadStatusUploaded)
+	now := time.Date(2026, 7, 7, 11, 30, 0, 0, time.UTC)
+	externalRepo := &assetCenterExternalRepoStub{
+		searchRows: []*domain.ExternalAssetRecord{
+			{
+				ID:            77,
+				ResourceID:    domain.ExternalAssetResourceID(77),
+				Provider:      "alist",
+				Kind:          domain.ExternalAssetKindNetdisk,
+				MountPath:     "/quark",
+				OriginPath:    "/quark/HSC12654/HSC12654主图.jpg",
+				ParentPath:    "/quark/HSC12654",
+				FileName:      "HSC12654主图.jpg",
+				FileExt:       ".jpg",
+				MimeType:      "image/jpeg",
+				FileSize:      4096,
+				Status:        domain.ExternalAssetStatusIndexed,
+				RawURL:        "https://files.example/HSC12654.jpg",
+				OSSSyncStatus: domain.ExternalAssetOSSStatusNone,
+				PreviewStatus: domain.ExternalAssetPreviewStatusNone,
+				CreatedAt:     now,
+				UpdatedAt:     now,
+			},
+		},
+	}
+	svc := NewService(&batchRepoStub{rowsByIDs: []*repo.TaskAssetSearchRow{
+		{
+			Asset: &domain.TaskAsset{
+				ID:           11,
+				AssetID:      int64PtrBatchSvc(101),
+				TaskID:       9001,
+				FileName:     "系统图.jpg",
+				StorageKey:   strPtr("k-101"),
+				FileSize:     int64PtrBatchSvc(4),
+				UploadStatus: &uploaded,
+			},
+			Task: &domain.Task{ID: 9001},
+		},
+	}}, &batchPresignerStub{
+		enabled:  true,
+		urlByKey: map[string]string{"k-101": "https://oss.example/k-101"},
+	}, nil)
+	svc.SetExternalAssetService(externalassets.NewService(externalRepo, externalassets.Config{
+		Enabled: true,
+		Mounts:  externalassets.ParseMounts("/quark:netdisk"),
+	}, nil))
+
+	result, appErr := svc.BuildBatchDownloadManifestForResources(context.Background(), BatchDownloadResourceRequest{
+		AssetIDs:    []int64{101},
+		ResourceIDs: []string{"ext-77"},
+	})
+	if appErr != nil {
+		t.Fatalf("BuildBatchDownloadManifestForResources error = %+v", appErr)
+	}
+	if result.SuccessCount != 1 || result.FailureCount != 1 {
+		t.Fatalf("manifest summary = %+v, want one success and one external failure", result)
+	}
+	if len(result.Failures) != 1 || result.Failures[0].ResourceID != "ext-77" || result.Failures[0].Reason != "external_batch_prepare_required" {
+		t.Fatalf("failures = %+v, want prepare-required external failure", result.Failures)
+	}
+	if len(externalRepo.ossPendingIDs) != 1 || externalRepo.ossPendingIDs[0] != 77 {
+		t.Fatalf("oss pending ids = %+v, want [77]", externalRepo.ossPendingIDs)
 	}
 }
 

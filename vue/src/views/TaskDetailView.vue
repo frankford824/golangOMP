@@ -3994,7 +3994,6 @@ async function rejectAuditFromDetail(): Promise<void> {
   if (showCustomizationReviewActionButtons.value) {
     await runDetailAction('audit-reject', '定制审核打回失败', async () => {
       await tasksStore.submitCustomizationReview(task.value!.id, {
-        reviewer_id: currentUser.value?.id ?? '',
         customization_review_decision: 'return_to_designer',
         customization_note: rejectComment,
       })

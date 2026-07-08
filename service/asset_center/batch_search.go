@@ -2,10 +2,12 @@ package asset_center
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"workflow/domain"
 	"workflow/repo"
@@ -41,8 +43,9 @@ type BatchSearchResult struct {
 }
 
 type scoredBatchSearchAsset struct {
-	row   *repo.TaskAssetSearchRow
-	score int
+	detail    *AssetDetail
+	score     int
+	createdAt time.Time
 }
 
 func (s *Service) BatchSearch(ctx context.Context, req BatchSearchRequest) (*BatchSearchResponse, *domain.AppError) {
@@ -91,13 +94,38 @@ func (s *Service) batchSearchOne(ctx context.Context, term, formatFilter, assetK
 		if score <= 0 {
 			continue
 		}
-		candidates = append(candidates, scoredBatchSearchAsset{row: row, score: score})
+		detail := buildAssetDetail(row, nil)
+		if detail == nil {
+			continue
+		}
+		candidates = append(candidates, scoredBatchSearchAsset{detail: detail, score: score, createdAt: detail.CreatedAt})
+	}
+	externalRows, externalErr := s.batchSearchExternalRows(ctx, term, formatFilter)
+	if externalErr != nil {
+		return BatchSearchResult{
+			Term:       term,
+			Status:     BatchSearchStatusError,
+			Message:    "搜索失败",
+			Candidates: 0,
+		}
+	}
+	if matchesBatchSearchExternalAssetKind(assetKind) {
+		for _, detail := range externalRows {
+			if !matchesBatchSearchDetailFormat(detail, formatFilter) {
+				continue
+			}
+			score := scoreBatchSearchDetail(detail, term)
+			if score <= 0 {
+				continue
+			}
+			candidates = append(candidates, scoredBatchSearchAsset{detail: detail, score: score, createdAt: detail.UpdatedAt})
+		}
 	}
 	if len(candidates) == 0 {
 		return BatchSearchResult{
 			Term:       term,
 			Status:     BatchSearchStatusNotFound,
-			Message:    batchSearchNoMatchMessage(len(rows), formatFilter, assetKind),
+			Message:    batchSearchNoMatchMessage(len(rows)+len(externalRows), formatFilter, assetKind),
 			Candidates: 0,
 		}
 	}
@@ -105,23 +133,14 @@ func (s *Service) batchSearchOne(ctx context.Context, term, formatFilter, assetK
 		if candidates[i].score != candidates[j].score {
 			return candidates[i].score > candidates[j].score
 		}
-		ai := candidates[i].row.Asset
-		aj := candidates[j].row.Asset
-		if ai == nil || aj == nil {
-			return ai != nil
-		}
-		return ai.CreatedAt.After(aj.CreatedAt)
+		return candidates[i].createdAt.After(candidates[j].createdAt)
 	})
 	assets := make([]AssetDetail, 0, len(candidates))
 	for _, candidate := range candidates {
-		if candidate.row == nil {
+		if candidate.detail == nil {
 			continue
 		}
-		detail := buildAssetDetail(candidate.row, nil)
-		if detail == nil {
-			continue
-		}
-		assets = append(assets, *detail)
+		assets = append(assets, *candidate.detail)
 	}
 	if len(assets) == 0 {
 		return BatchSearchResult{
@@ -155,6 +174,29 @@ func (s *Service) batchSearchRows(ctx context.Context, term, formatFilter string
 		})
 		if err != nil {
 			return nil, err
+		}
+		allRows = append(allRows, rows...)
+		if len(rows) == 0 || int64(len(allRows)) >= total || len(rows) < batchSearchPageSize {
+			return allRows, nil
+		}
+	}
+}
+
+func (s *Service) batchSearchExternalRows(ctx context.Context, term, formatFilter string) ([]*AssetDetail, error) {
+	if s == nil || s.externalSvc == nil || !s.externalSvc.Enabled() {
+		return []*AssetDetail{}, nil
+	}
+	var allRows []*AssetDetail
+	for page := 1; ; page++ {
+		rows, total, appErr := s.searchExternalRows(ctx, domain.AssetSearchQuery{
+			Keyword:        term,
+			Source:         domain.AssetResourceSourceExternal,
+			Page:           page,
+			Size:           batchSearchPageSize,
+			FormatCategory: batchSearchFormatCategory(formatFilter),
+		})
+		if appErr != nil {
+			return nil, fmt.Errorf("%s: %s", appErr.Code, appErr.Message)
 		}
 		allRows = append(allRows, rows...)
 		if len(rows) == 0 || int64(len(allRows)) >= total || len(rows) < batchSearchPageSize {
@@ -268,6 +310,15 @@ func matchesBatchSearchAssetKind(row *repo.TaskAssetSearchRow, assetKind string)
 	}
 }
 
+func matchesBatchSearchExternalAssetKind(assetKind string) bool {
+	switch assetKind {
+	case "reference", "preview", "other":
+		return false
+	default:
+		return true
+	}
+}
+
 func scoreBatchSearchAsset(row *repo.TaskAssetSearchRow, term string) int {
 	if row == nil || row.Asset == nil || row.Task == nil {
 		return 0
@@ -321,11 +372,78 @@ func scoreBatchSearchAsset(row *repo.TaskAssetSearchRow, term string) int {
 	return score
 }
 
+func scoreBatchSearchDetail(asset *AssetDetail, term string) int {
+	if asset == nil {
+		return 0
+	}
+	normalizedTerm := strings.ToUpper(strings.TrimSpace(term))
+	if normalizedTerm == "" {
+		return 0
+	}
+	resourceID := strings.ToUpper(strings.TrimSpace(asset.ResourceID))
+	fileName := strings.ToUpper(strings.TrimSpace(asset.FileName + " " + asset.OriginalFilename))
+	originPath := strings.ToUpper(strings.TrimSpace(asset.OriginPath + " " + asset.ProductName))
+
+	score := 0
+	if resourceID == normalizedTerm {
+		score += 110
+	}
+	if fileName != "" && strings.Contains(fileName, normalizedTerm) {
+		score += 100
+		if strings.HasPrefix(fileName, normalizedTerm) {
+			score += 20
+		}
+	}
+	if originPath != "" && strings.Contains(originPath, normalizedTerm) {
+		score += 45
+	}
+	if asset.SourceType == string(domain.AssetResourceSourceExternal) {
+		score += 30
+	}
+	if score == 0 && fileName != "" {
+		score = 1
+	}
+	return score
+}
+
 func batchSearchNoMatchMessage(totalRows int, formatFilter, assetKind string) string {
 	if totalRows == 0 {
 		return "未找到匹配资产"
 	}
 	return "找到了资产，但没有符合当前格式或资源类型筛选的可下载资源"
+}
+
+func matchesBatchSearchDetailFormat(asset *AssetDetail, formatFilter string) bool {
+	if asset == nil {
+		return false
+	}
+	ext := strings.TrimPrefix(strings.ToLower(filepath.Ext(firstNonEmptyExcelPackage(asset.FileName, asset.OriginalFilename))), ".")
+	if ext == "jpeg" {
+		ext = "jpg"
+	}
+	mimeType := strings.ToLower(strings.TrimSpace(asset.MimeType))
+	switch formatFilter {
+	case "all":
+		return true
+	case "jpg_png":
+		return ext == "jpg" || ext == "png" || mimeType == "image/jpeg" || mimeType == "image/png"
+	case "jpg":
+		return ext == "jpg" || mimeType == "image/jpeg"
+	case "png":
+		return ext == "png" || mimeType == "image/png"
+	case "webp":
+		return ext == "webp" || mimeType == "image/webp"
+	case "image":
+		return batchSearchImageExt(ext) || strings.HasPrefix(mimeType, "image/")
+	case "design":
+		return batchSearchDesignExt(ext)
+	case "pdf":
+		return ext == "pdf" || mimeType == "application/pdf"
+	case "archive":
+		return batchSearchArchiveExt(ext) || strings.Contains(mimeType, "zip") || strings.Contains(mimeType, "rar") || strings.Contains(mimeType, "7z")
+	default:
+		return true
+	}
 }
 
 func batchSearchImageExt(ext string) bool {

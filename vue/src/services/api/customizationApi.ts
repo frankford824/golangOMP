@@ -2,6 +2,7 @@ import http from '@/services/http'
 import type { CustomizationJobRaw } from '@/services/apiTypes'
 import { normalizePriorityForApi, type TaskPriorityApi } from '@/domain/task-priority'
 import { sanitizeCreateTaskPayload } from '@/domain/task-create-fields'
+import { sanitizeCustomizationPayload } from '@/domain/customization-payload'
 import { toRelativeAssetUrl } from '@/utils/url'
 
 export interface CustomizationJobQuery {
@@ -282,7 +283,7 @@ export async function submitCustomizationEffectPreview(
   payload: CustomizationEffectPreviewPayload,
   signal?: AbortSignal,
 ) {
-  const res = await http.post<unknown>(`/v1/customization-jobs/${id}/effect-preview`, payload, { signal })
+  const res = await http.post<unknown>(`/v1/customization-jobs/${id}/effect-preview`, sanitizeCustomizationPayload(payload as Record<string, unknown>), { signal })
   return res.data
 }
 
@@ -291,7 +292,7 @@ export async function submitCustomizationEffectReview(
   payload: CustomizationEffectReviewPayload,
   signal?: AbortSignal,
 ) {
-  const res = await http.post<unknown>(`/v1/customization-jobs/${id}/effect-review`, payload, { signal })
+  const res = await http.post<unknown>(`/v1/customization-jobs/${id}/effect-review`, sanitizeCustomizationPayload(payload as Record<string, unknown>), { signal })
   return res.data
 }
 
@@ -300,6 +301,6 @@ export async function submitCustomizationProductionTransfer(
   payload: CustomizationProductionTransferPayload,
   signal?: AbortSignal,
 ) {
-  const res = await http.post<unknown>(`/v1/customization-jobs/${id}/production-transfer`, payload, { signal })
+  const res = await http.post<unknown>(`/v1/customization-jobs/${id}/production-transfer`, sanitizeCustomizationPayload(payload as Record<string, unknown>), { signal })
   return res.data
 }

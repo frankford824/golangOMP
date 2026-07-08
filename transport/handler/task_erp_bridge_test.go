@@ -757,12 +757,16 @@ func TestTaskCreateOriginalProductDevelopmentResponseEchoesChangeRequest(t *test
 }
 
 type taskServiceCaptureStub struct {
-	createParams             service.CreateTaskParams
-	updateBusinessInfoParams service.UpdateTaskBusinessInfoParams
-	createResult             *domain.Task
-	readResult               *domain.TaskReadModel
-	listFilter               service.TaskFilter
-	appErr                   *domain.AppError
+	createParams              service.CreateTaskParams
+	updateBusinessInfoParams  service.UpdateTaskBusinessInfoParams
+	customizationReviewParams service.SubmitCustomizationReviewParams
+	effectPreviewParams       service.SubmitCustomizationEffectPreviewParams
+	effectReviewParams        service.ReviewCustomizationEffectParams
+	productionTransferParams  service.TransferCustomizationProductionParams
+	createResult              *domain.Task
+	readResult                *domain.TaskReadModel
+	listFilter                service.TaskFilter
+	appErr                    *domain.AppError
 }
 
 func (s *taskServiceCaptureStub) Create(_ context.Context, p service.CreateTaskParams) (*domain.Task, *domain.AppError) {
@@ -820,20 +824,24 @@ func (s *taskServiceCaptureStub) Close(context.Context, service.CloseTaskParams)
 	return nil, nil
 }
 
-func (s *taskServiceCaptureStub) SubmitCustomizationReview(context.Context, service.SubmitCustomizationReviewParams) (*domain.CustomizationJob, *domain.AppError) {
-	return nil, nil
+func (s *taskServiceCaptureStub) SubmitCustomizationReview(_ context.Context, p service.SubmitCustomizationReviewParams) (*domain.CustomizationJob, *domain.AppError) {
+	s.customizationReviewParams = p
+	return &domain.CustomizationJob{ID: 1, TaskID: p.TaskID}, nil
 }
 
-func (s *taskServiceCaptureStub) SubmitCustomizationEffectPreview(context.Context, service.SubmitCustomizationEffectPreviewParams) (*domain.CustomizationJob, *domain.AppError) {
-	return nil, nil
+func (s *taskServiceCaptureStub) SubmitCustomizationEffectPreview(_ context.Context, p service.SubmitCustomizationEffectPreviewParams) (*domain.CustomizationJob, *domain.AppError) {
+	s.effectPreviewParams = p
+	return &domain.CustomizationJob{ID: p.JobID}, nil
 }
 
-func (s *taskServiceCaptureStub) ReviewCustomizationEffect(context.Context, service.ReviewCustomizationEffectParams) (*domain.CustomizationJob, *domain.AppError) {
-	return nil, nil
+func (s *taskServiceCaptureStub) ReviewCustomizationEffect(_ context.Context, p service.ReviewCustomizationEffectParams) (*domain.CustomizationJob, *domain.AppError) {
+	s.effectReviewParams = p
+	return &domain.CustomizationJob{ID: p.JobID}, nil
 }
 
-func (s *taskServiceCaptureStub) TransferCustomizationProduction(context.Context, service.TransferCustomizationProductionParams) (*domain.CustomizationJob, *domain.AppError) {
-	return nil, nil
+func (s *taskServiceCaptureStub) TransferCustomizationProduction(_ context.Context, p service.TransferCustomizationProductionParams) (*domain.CustomizationJob, *domain.AppError) {
+	s.productionTransferParams = p
+	return &domain.CustomizationJob{ID: p.JobID}, nil
 }
 
 func (s *taskServiceCaptureStub) ListCustomizationJobs(context.Context, service.CustomizationJobFilter) ([]*domain.CustomizationJob, domain.PaginationMeta, *domain.AppError) {

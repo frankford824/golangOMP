@@ -1076,6 +1076,36 @@ func TestIdentityServiceListUsersSupportsDepartmentTeamRoleAndKeywordFilters(t *
 	}
 }
 
+func TestIdentityServiceListUsersInvalidOrgFilterReturnsEmptyPage(t *testing.T) {
+	userRepo := newIdentityUserRepo()
+	orgRepo := newIdentityOrgRepo()
+	orgRepo.departments[1] = &domain.OrgDepartment{ID: 1, Name: "设计部", Enabled: false}
+	svc := NewIdentityService(
+		userRepo,
+		&identitySessionRepoStub{},
+		&identityPermissionLogRepoStub{},
+		identityTxRunner{},
+		WithOrgRepo(orgRepo),
+	)
+
+	department := domain.Department("设计部")
+	users, pagination, appErr := svc.ListUsers(context.Background(), UserFilter{
+		Department: &department,
+		Team:       "定制美工组",
+		Page:       1,
+		PageSize:   20,
+	})
+	if appErr != nil {
+		t.Fatalf("ListUsers() error = %+v", appErr)
+	}
+	if len(users) != 0 || pagination.Total != 0 {
+		t.Fatalf("ListUsers() data = %+v pagination = %+v, want empty page", users, pagination)
+	}
+	if len(userRepo.listFilters) != 0 {
+		t.Fatalf("ListUsers() should not hit user repo for invalid org filter, got filters %+v", userRepo.listFilters)
+	}
+}
+
 func TestIdentityServiceUpdateUserSupportsOrgAndManagedScopes(t *testing.T) {
 	userRepo := newIdentityUserRepo()
 	logRepo := &identityPermissionLogRepoStub{}

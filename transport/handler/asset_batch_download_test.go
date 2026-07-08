@@ -82,6 +82,64 @@ func TestBatchDownloadGlobalAssetsReturnsDirectURLManifest(t *testing.T) {
 	}
 }
 
+func TestBatchDownloadGlobalAssetsAcceptsResourceIDs(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	uploaded := string(domain.DesignAssetUploadStatusUploaded)
+	globalSvc := assetcenter.NewService(&batchDownloadRepoStub{
+		rows: []*repo.TaskAssetSearchRow{
+			{
+				Asset: &domain.TaskAsset{
+					ID:           1,
+					AssetID:      int64PtrBatch(1001),
+					TaskID:       7001,
+					FileName:     "design.psd",
+					OriginalName: strPtrBatch("原始稿.psd"),
+					StorageKey:   strPtrBatch("k-1001"),
+					FileSize:     int64PtrBatch(8),
+					UploadStatus: &uploaded,
+				},
+				Task: &domain.Task{ID: 7001},
+			},
+		},
+	}, batchDownloadPresignerStub{
+		urlByKey: map[string]string{"k-1001": "https://oss.example/k-1001"},
+	}, nil)
+
+	h := NewTaskAssetCenterHandler(&taskAssetCenterServiceStub{})
+	h.SetGlobalAssetServices(globalSvc, nil)
+
+	router := gin.New()
+	group := router.Group("/v1/assets")
+	group.POST("/batch-download", h.BatchDownloadGlobalAssets)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/assets/batch-download", bytes.NewBufferString(`{"resource_ids":["1001"]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		Data struct {
+			Items []struct {
+				ResourceID string `json:"resource_id"`
+				SourceType string `json:"source_type"`
+			} `json:"items"`
+			SuccessCount int `json:"success_count"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("invalid manifest json: %v body=%s", err, rec.Body.String())
+	}
+	if payload.Data.SuccessCount != 1 || len(payload.Data.Items) != 1 {
+		t.Fatalf("payload = %+v", payload)
+	}
+	if payload.Data.Items[0].ResourceID != "1001" || payload.Data.Items[0].SourceType != "system" {
+		t.Fatalf("item = %+v, want system resource id 1001", payload.Data.Items[0])
+	}
+}
+
 func TestBatchDownloadGlobalAssetsInvalidBodyAndRoutePriority(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	globalSvc := assetcenter.NewService(&batchDownloadRepoStub{}, batchDownloadPresignerStub{}, nil)

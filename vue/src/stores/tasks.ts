@@ -47,6 +47,7 @@ import { DesignSubStatusEnum } from '@/domain/enums/task-status'
 import { toRelativeAssetUrl } from '@/utils/url'
 import { normalizePriorityForApi, normalizePriorityFromApi } from '@/domain/task-priority'
 import { hasModuleAction } from '@/domain/module-actions'
+import { sanitizeCustomizationPayload } from '@/domain/customization-payload'
 
 const BACKEND_TASK_TYPE_TO_FRONTEND: Record<string, Task['taskType']> = {
   original_product_development: 'ORIGINAL_PRODUCT_DEV',
@@ -2343,7 +2344,7 @@ export const useTasksStore = defineStore('tasks', () => {
   ) {
     const task = getById(taskId)
     if (!task) throw new Error('任务不存在')
-    await tasksApi.submitCustomizationReview(taskId, payload)
+    await tasksApi.submitCustomizationReview(taskId, sanitizeCustomizationPayload(payload))
     await loadTaskById(taskId)
   }
 

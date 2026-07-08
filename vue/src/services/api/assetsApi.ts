@@ -281,12 +281,15 @@ export interface AssetBatchSearchResponse {
 }
 
 export interface AssetBatchDownloadPayload {
-  asset_ids: number[]
+  asset_ids?: number[]
+  resource_ids?: string[]
   naming_mode?: 'original' | 'business'
 }
 
 export interface AssetBatchDownloadItem {
   asset_id: number
+  resource_id?: string
+  source_type?: 'system' | 'external' | string
   task_id: number
   filename: string
   file_size: number
@@ -297,6 +300,8 @@ export interface AssetBatchDownloadItem {
 
 export interface AssetBatchDownloadFailure {
   asset_id: number
+  resource_id?: string
+  source_type?: 'system' | 'external' | string
   task_id?: number
   filename?: string
   reason: string
@@ -430,14 +435,29 @@ export const assetsApi = {
     }),
 
   batchDownload: (
-    assetIds: number[],
+    assetRefs: Array<number | string>,
     options?: { namingMode?: 'original' | 'business'; signal?: AbortSignal },
-  ) =>
-    http.post<AssetBatchDownloadResponse>(
+  ) => {
+    const assetIds: number[] = []
+    const resourceIds: string[] = []
+    for (const ref of assetRefs) {
+      if (typeof ref === 'number' && Number.isInteger(ref) && ref > 0) {
+        assetIds.push(ref)
+        continue
+      }
+      const value = String(ref ?? '').trim()
+      if (value) resourceIds.push(value)
+    }
+    return http.post<AssetBatchDownloadResponse>(
       '/v1/assets/batch-download',
-      { asset_ids: assetIds, naming_mode: options?.namingMode } as AssetBatchDownloadPayload,
+      {
+        ...(assetIds.length ? { asset_ids: assetIds } : {}),
+        ...(resourceIds.length ? { resource_ids: resourceIds } : {}),
+        naming_mode: options?.namingMode,
+      } as AssetBatchDownloadPayload,
       { signal: options?.signal },
-    ),
+    )
+  },
 
   excelPackagePreview: (rows: AssetExcelPackageRow[], signal?: AbortSignal) =>
     http.post<AssetExcelPackagePreviewResponse>(

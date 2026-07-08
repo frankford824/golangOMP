@@ -270,7 +270,6 @@
       v-model="customizationDialogOpen"
       mode="initial"
       :task-id="task.id"
-      :default-reviewer-id="currentUser?.id ?? null"
       :can-upload-source="can('task.customization.review.asset_upload')"
       :target-sku-code="task.sku ?? undefined"
       :loading="customizationSubmitting"
@@ -312,7 +311,7 @@ const injected = inject<ComputedRef<Task | null>>(TASK_DETAIL_KEY)
 if (!injected) throw new Error('[AuditOutsourceBlock] 必须在 TaskDetailView 内使用')
 
 const task = computed(() => injected.value!)
-const { can, currentUser, canAccessTask } = usePermission()
+const { can, canAccessTask } = usePermission()
 const tasksStore = useTasksStore()
 
 const isPurchase = computed(() => task.value.businessType === 'PURCHASE_TASK')

@@ -130,7 +130,7 @@ curl -X GET https://api.example.com/v1/access-rules \
 ### 简介
 支持方法: GET, POST。
 
-- `GET`: Management-scoped user-management read endpoint. Returns user employee number, department, team, role, and frontend access state for frontend integration, with server-side pagination and filtering. `keyword` matches username, display name, and employee number. `DepartmentAdmin` reads are forced to own department. `TeamLead` reads are forced to own team inside own department.
+- `GET`: Management-scoped user-management read endpoint. Returns user employee number, department, team, role, and frontend access state for frontend integration, with server-side pagination and filtering. `keyword` matches username, display name, and employee number. `DepartmentAdmin` reads are forced to own department. `TeamLead` reads are forced to own team inside own department. Stale or disabled department/team filter values on this read endpoint are treated as no-match filters and return an empty page instead of failing the whole user-management shell; user create/update inputs still reject invalid org values.
 - `POST`: Managed user creation endpoint. Validates org fields against `/v1/org/options`, validates roles against the workflow role catalog, requires a globally unique numeric `employee_no` in range 0-9999, sets the initial password hash, and returns the created user with `frontend_access`. If `status` is omitted the user is created as `active`. `Member` is the base identity and is retained by the server even if omitted from the incoming role list. `DepartmentAdmin` can create users only inside own department and only with department-compatible business roles.
 
 ### 鉴权与 RBAC
@@ -149,8 +149,8 @@ curl -X GET https://api.example.com/v1/access-rules \
 | `keyword` | query | string | 否 | - |
 | `status` | query | enum(active/disabled) | 否 | - |
 | `role` | query | enum(Member/SuperAdmin/HRAdmin/OrgAdmin/RoleAdmin/TeamLead/DesignDirector/DesignReviewer/Ops/Designer/Audit_A/Audit_B...) | 否 | - |
-| `department` | query | string | 否 | Must match `/v1/org/options`. |
-| `team` | query | string | 否 | Must match the selected department in `/v1/org/options`. |
+| `department` | query | string | 否 | Must match an enabled department from `/v1/org/options`; stale or disabled values return an empty page. |
+| `team` | query | string | 否 | Must match an enabled team under the selected department in `/v1/org/options`; stale or disabled values return an empty page. |
 | `page` | query | integer | 否 | - |
 | `page_size` | query | integer | 否 | - |
 

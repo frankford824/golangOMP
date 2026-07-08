@@ -1077,8 +1077,11 @@ func (s *identityService) ListUsers(ctx context.Context, filter UserFilter) ([]*
 	if filter.Role != nil && *filter.Role != "" && !domain.IsKnownRole(*filter.Role) {
 		return nil, domain.PaginationMeta{}, domain.NewAppError(domain.ErrCodeInvalidRequest, "role is invalid", nil)
 	}
-	if filter.Department != nil {
+	if filter.Department != nil && strings.TrimSpace(string(*filter.Department)) != "" {
 		if appErr := s.validateDepartment(*filter.Department); appErr != nil {
+			if appErr.Code == domain.ErrCodeInvalidRequest {
+				return []*domain.User{}, buildPaginationMeta(filter.Page, filter.PageSize, 0), nil
+			}
 			return nil, domain.PaginationMeta{}, appErr
 		}
 	}

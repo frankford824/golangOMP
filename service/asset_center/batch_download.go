@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -28,6 +29,8 @@ type BatchDownloadManifest struct {
 
 type BatchDownloadItem struct {
 	AssetID     int64      `json:"asset_id"`
+	ResourceID  string     `json:"resource_id,omitempty"`
+	SourceType  string     `json:"source_type,omitempty"`
 	TaskID      int64      `json:"task_id"`
 	Filename    string     `json:"filename"`
 	FileSize    int64      `json:"file_size"`
@@ -37,29 +40,58 @@ type BatchDownloadItem struct {
 }
 
 type BatchDownloadFailure struct {
-	AssetID  int64  `json:"asset_id"`
-	TaskID   int64  `json:"task_id,omitempty"`
-	Filename string `json:"filename,omitempty"`
-	Reason   string `json:"reason"`
+	AssetID    int64  `json:"asset_id"`
+	ResourceID string `json:"resource_id,omitempty"`
+	SourceType string `json:"source_type,omitempty"`
+	TaskID     int64  `json:"task_id,omitempty"`
+	Filename   string `json:"filename,omitempty"`
+	Reason     string `json:"reason"`
+}
+
+type BatchDownloadResourceRequest struct {
+	AssetIDs    []int64
+	ResourceIDs []string
+}
+
+type batchDownloadResourceRef struct {
+	ResourceID      string
+	SourceType      string
+	SystemAssetID   int64
+	ExternalAssetID int64
 }
 
 func (s *Service) BuildBatchDownloadManifest(ctx context.Context, assetIDs []int64, opts ...BatchDownloadOption) (*BatchDownloadManifest, *domain.AppError) {
-	if len(assetIDs) == 0 {
-		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "asset_ids must not be empty", nil)
+	return s.BuildBatchDownloadManifestForResources(ctx, BatchDownloadResourceRequest{AssetIDs: assetIDs}, opts...)
+}
+
+func (s *Service) BuildBatchDownloadManifestForResources(ctx context.Context, req BatchDownloadResourceRequest, opts ...BatchDownloadOption) (*BatchDownloadManifest, *domain.AppError) {
+	refs := normalizeBatchDownloadResourceRefs(req.AssetIDs, req.ResourceIDs)
+	if len(refs) == 0 {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "asset_ids or resource_ids must not be empty", nil)
 	}
-	if len(assetIDs) > MaxBatchDownloadAssets {
-		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "asset_ids exceed batch download limit", map[string]interface{}{
+	if len(refs) > MaxBatchDownloadAssets {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "asset_ids/resource_ids exceed batch download limit", map[string]interface{}{
 			"limit": MaxBatchDownloadAssets,
 		})
 	}
-	if s.presigner == nil || !s.presigner.Enabled() {
+	systemAssetIDs := make([]int64, 0, len(refs))
+	for _, ref := range refs {
+		if ref.SystemAssetID > 0 {
+			systemAssetIDs = append(systemAssetIDs, ref.SystemAssetID)
+		}
+	}
+	if len(systemAssetIDs) > 0 && (s.presigner == nil || !s.presigner.Enabled()) {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "oss direct download presigner is not configured", nil)
 	}
 	options := normalizeBatchDownloadOptions(opts)
 
-	rows, err := s.searchRepo.ListCurrentByAssetIDs(ctx, assetIDs)
-	if err != nil {
-		return nil, domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)
+	var rows []*repo.TaskAssetSearchRow
+	if len(systemAssetIDs) > 0 {
+		var err error
+		rows, err = s.searchRepo.ListCurrentByAssetIDs(ctx, systemAssetIDs)
+		if err != nil {
+			return nil, domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)
+		}
 	}
 
 	rowMap := make(map[int64]*repo.TaskAssetSearchRow, len(rows))
@@ -74,24 +106,35 @@ func (s *Service) BuildBatchDownloadManifest(ctx context.Context, assetIDs []int
 	}
 
 	manifest := &BatchDownloadManifest{
-		Items:    make([]BatchDownloadItem, 0, len(assetIDs)),
+		Items:    make([]BatchDownloadItem, 0, len(refs)),
 		Failures: make([]BatchDownloadFailure, 0),
 	}
 	usedNames := map[string]int{}
 	var totalSize int64
 
-	for _, requestedAssetID := range assetIDs {
-		item, failure := s.buildBatchDownloadItem(rowMap[requestedAssetID], requestedAssetID, totalSize, usedNames, options.NamingMode)
+	for _, ref := range refs {
+		var item BatchDownloadItem
+		var failure *BatchDownloadFailure
+		switch {
+		case ref.SystemAssetID > 0:
+			item, failure = s.buildBatchDownloadItem(rowMap[ref.SystemAssetID], ref.SystemAssetID, totalSize, usedNames, options.NamingMode)
+		case ref.ExternalAssetID > 0:
+			item, failure = s.buildExternalBatchDownloadItem(ctx, ref, totalSize, usedNames)
+		default:
+			failure = &BatchDownloadFailure{ResourceID: ref.ResourceID, Reason: "invalid_resource_id"}
+		}
 		if failure != nil {
 			manifest.Failures = append(manifest.Failures, *failure)
 			continue
 		}
 		if item.DownloadURL == "" {
 			manifest.Failures = append(manifest.Failures, BatchDownloadFailure{
-				AssetID:  item.AssetID,
-				TaskID:   item.TaskID,
-				Filename: item.Filename,
-				Reason:   "download_url_unavailable",
+				AssetID:    item.AssetID,
+				ResourceID: item.ResourceID,
+				SourceType: item.SourceType,
+				TaskID:     item.TaskID,
+				Filename:   item.Filename,
+				Reason:     "download_url_unavailable",
 			})
 			continue
 		}
@@ -104,7 +147,8 @@ func (s *Service) BuildBatchDownloadManifest(ctx context.Context, assetIDs []int
 
 	if len(manifest.Items) == 0 {
 		return nil, domain.NewAppError(domain.ErrCodeAssetMissing, "all requested assets are unavailable for download", map[string]interface{}{
-			"asset_ids":      assetIDs,
+			"asset_ids":      req.AssetIDs,
+			"resource_ids":   req.ResourceIDs,
 			"failure_count":  len(manifest.Failures),
 			"total_size_max": MaxBatchDownloadTotalBytes,
 		})
@@ -117,7 +161,7 @@ func (s *Service) BuildBatchDownloadManifest(ctx context.Context, assetIDs []int
 
 func (s *Service) buildBatchDownloadItem(row *repo.TaskAssetSearchRow, requestedAssetID int64, currentTotal int64, usedNames map[string]int, namingMode BatchDownloadNamingMode) (BatchDownloadItem, *BatchDownloadFailure) {
 	if row == nil || row.Asset == nil || row.Task == nil {
-		return BatchDownloadItem{}, &BatchDownloadFailure{AssetID: requestedAssetID, Reason: "asset_not_found"}
+		return BatchDownloadItem{}, &BatchDownloadFailure{AssetID: requestedAssetID, ResourceID: strconv.FormatInt(requestedAssetID, 10), SourceType: string(domain.AssetResourceSourceSystem), Reason: "asset_not_found"}
 	}
 	asset := row.Asset
 	taskID := asset.TaskID
@@ -125,20 +169,20 @@ func (s *Service) buildBatchDownloadItem(row *repo.TaskAssetSearchRow, requested
 	filename := resolveBatchFilenameForMode(row, assetID, namingMode)
 
 	if asset.DeletedAt != nil {
-		return BatchDownloadItem{}, &BatchDownloadFailure{AssetID: assetID, TaskID: taskID, Filename: filename, Reason: "deleted"}
+		return BatchDownloadItem{}, &BatchDownloadFailure{AssetID: assetID, ResourceID: strconv.FormatInt(assetID, 10), SourceType: string(domain.AssetResourceSourceSystem), TaskID: taskID, Filename: filename, Reason: "deleted"}
 	}
 	if asset.CleanedAt != nil {
-		return BatchDownloadItem{}, &BatchDownloadFailure{AssetID: assetID, TaskID: taskID, Filename: filename, Reason: "cleaned"}
+		return BatchDownloadItem{}, &BatchDownloadFailure{AssetID: assetID, ResourceID: strconv.FormatInt(assetID, 10), SourceType: string(domain.AssetResourceSourceSystem), TaskID: taskID, Filename: filename, Reason: "cleaned"}
 	}
 	storageKey := ""
 	if asset.StorageKey != nil {
 		storageKey = strings.TrimSpace(*asset.StorageKey)
 	}
 	if storageKey == "" {
-		return BatchDownloadItem{}, &BatchDownloadFailure{AssetID: assetID, TaskID: taskID, Filename: filename, Reason: "missing_storage_key"}
+		return BatchDownloadItem{}, &BatchDownloadFailure{AssetID: assetID, ResourceID: strconv.FormatInt(assetID, 10), SourceType: string(domain.AssetResourceSourceSystem), TaskID: taskID, Filename: filename, Reason: "missing_storage_key"}
 	}
 	if asset.UploadStatus == nil || domain.DesignAssetUploadStatus(strings.TrimSpace(*asset.UploadStatus)) != domain.DesignAssetUploadStatusUploaded {
-		return BatchDownloadItem{}, &BatchDownloadFailure{AssetID: assetID, TaskID: taskID, Filename: filename, Reason: "upload_status_not_uploaded"}
+		return BatchDownloadItem{}, &BatchDownloadFailure{AssetID: assetID, ResourceID: strconv.FormatInt(assetID, 10), SourceType: string(domain.AssetResourceSourceSystem), TaskID: taskID, Filename: filename, Reason: "upload_status_not_uploaded"}
 	}
 
 	fileSize := int64(0)
@@ -146,7 +190,7 @@ func (s *Service) buildBatchDownloadItem(row *repo.TaskAssetSearchRow, requested
 		fileSize = *asset.FileSize
 	}
 	if fileSize > 0 && currentTotal+fileSize > MaxBatchDownloadTotalBytes {
-		return BatchDownloadItem{}, &BatchDownloadFailure{AssetID: assetID, TaskID: taskID, Filename: filename, Reason: "total_size_limit_exceeded"}
+		return BatchDownloadItem{}, &BatchDownloadFailure{AssetID: assetID, ResourceID: strconv.FormatInt(assetID, 10), SourceType: string(domain.AssetResourceSourceSystem), TaskID: taskID, Filename: filename, Reason: "total_size_limit_exceeded"}
 	}
 
 	filename = ensureUniqueBatchFilename(filename, usedNames)
@@ -155,7 +199,7 @@ func (s *Service) buildBatchDownloadItem(row *repo.TaskAssetSearchRow, requested
 		signed = filenamePresigner.PresignDownloadURLWithFilename(storageKey, filename)
 	}
 	if signed == nil || strings.TrimSpace(signed.DownloadURL) == "" {
-		return BatchDownloadItem{}, &BatchDownloadFailure{AssetID: assetID, TaskID: taskID, Filename: filename, Reason: "download_url_unavailable"}
+		return BatchDownloadItem{}, &BatchDownloadFailure{AssetID: assetID, ResourceID: strconv.FormatInt(assetID, 10), SourceType: string(domain.AssetResourceSourceSystem), TaskID: taskID, Filename: filename, Reason: "download_url_unavailable"}
 	}
 
 	mimeType := ""
@@ -165,6 +209,8 @@ func (s *Service) buildBatchDownloadItem(row *repo.TaskAssetSearchRow, requested
 	expiresAt := signed.ExpiresAt
 	return BatchDownloadItem{
 		AssetID:     assetID,
+		ResourceID:  strconv.FormatInt(assetID, 10),
+		SourceType:  string(domain.AssetResourceSourceSystem),
 		TaskID:      taskID,
 		Filename:    filename,
 		FileSize:    fileSize,
@@ -172,6 +218,107 @@ func (s *Service) buildBatchDownloadItem(row *repo.TaskAssetSearchRow, requested
 		DownloadURL: strings.TrimSpace(signed.DownloadURL),
 		ExpiresAt:   &expiresAt,
 	}, nil
+}
+
+func (s *Service) buildExternalBatchDownloadItem(ctx context.Context, ref batchDownloadResourceRef, currentTotal int64, usedNames map[string]int) (BatchDownloadItem, *BatchDownloadFailure) {
+	if s == nil || s.externalSvc == nil || !s.externalSvc.Enabled() {
+		return BatchDownloadItem{}, &BatchDownloadFailure{AssetID: ref.ExternalAssetID, ResourceID: ref.ResourceID, SourceType: string(domain.AssetResourceSourceExternal), Reason: "external_asset_service_unavailable"}
+	}
+	info, appErr := s.externalSvc.BatchDownloadInfo(ctx, ref.ExternalAssetID)
+	if appErr != nil {
+		return BatchDownloadItem{}, &BatchDownloadFailure{AssetID: ref.ExternalAssetID, ResourceID: ref.ResourceID, SourceType: string(domain.AssetResourceSourceExternal), Reason: normalizeBatchFailureReason(appErr.Code)}
+	}
+	if info == nil {
+		return BatchDownloadItem{}, &BatchDownloadFailure{AssetID: ref.ExternalAssetID, ResourceID: ref.ResourceID, SourceType: string(domain.AssetResourceSourceExternal), Reason: "asset_not_found"}
+	}
+	filename := sanitizeBatchFilename(info.Filename)
+	if filename == "" {
+		filename = "external-" + strconv.FormatInt(ref.ExternalAssetID, 10)
+	}
+	if info.FileSize > 0 && currentTotal+info.FileSize > MaxBatchDownloadTotalBytes {
+		return BatchDownloadItem{}, &BatchDownloadFailure{AssetID: ref.ExternalAssetID, ResourceID: ref.ResourceID, SourceType: string(domain.AssetResourceSourceExternal), Filename: filename, Reason: "total_size_limit_exceeded"}
+	}
+	if info.DownloadURL == nil || strings.TrimSpace(*info.DownloadURL) == "" {
+		reason := strings.TrimSpace(info.AccessHint)
+		if reason == "" {
+			reason = "download_url_unavailable"
+		}
+		return BatchDownloadItem{}, &BatchDownloadFailure{AssetID: ref.ExternalAssetID, ResourceID: ref.ResourceID, SourceType: string(domain.AssetResourceSourceExternal), Filename: filename, Reason: reason}
+	}
+	filename = ensureUniqueBatchFilename(filename, usedNames)
+	return BatchDownloadItem{
+		AssetID:     ref.ExternalAssetID,
+		ResourceID:  ref.ResourceID,
+		SourceType:  string(domain.AssetResourceSourceExternal),
+		Filename:    filename,
+		FileSize:    info.FileSize,
+		MimeType:    strings.TrimSpace(info.MimeType),
+		DownloadURL: strings.TrimSpace(*info.DownloadURL),
+		ExpiresAt:   info.ExpiresAt,
+	}, nil
+}
+
+func normalizeBatchFailureReason(code string) string {
+	code = strings.ToLower(strings.TrimSpace(code))
+	if code == "" {
+		return "unavailable"
+	}
+	return code
+}
+
+func normalizeBatchDownloadResourceRefs(assetIDs []int64, resourceIDs []string) []batchDownloadResourceRef {
+	refs := make([]batchDownloadResourceRef, 0, len(assetIDs)+len(resourceIDs))
+	seen := map[string]struct{}{}
+	add := func(ref batchDownloadResourceRef) {
+		key := strings.TrimSpace(ref.ResourceID)
+		if key == "" {
+			return
+		}
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		ref.ResourceID = key
+		refs = append(refs, ref)
+	}
+	for _, id := range assetIDs {
+		if id <= 0 {
+			continue
+		}
+		add(batchDownloadResourceRef{
+			ResourceID:    strconv.FormatInt(id, 10),
+			SourceType:    string(domain.AssetResourceSourceSystem),
+			SystemAssetID: id,
+		})
+	}
+	for _, raw := range resourceIDs {
+		ref := parseBatchDownloadResourceRef(raw)
+		add(ref)
+	}
+	return refs
+}
+
+func parseBatchDownloadResourceRef(raw string) batchDownloadResourceRef {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return batchDownloadResourceRef{}
+	}
+	if id, ok := domain.ParseExternalAssetResourceID(value); ok {
+		return batchDownloadResourceRef{
+			ResourceID:      domain.ExternalAssetResourceID(id),
+			SourceType:      string(domain.AssetResourceSourceExternal),
+			ExternalAssetID: id,
+		}
+	}
+	systemValue := strings.TrimPrefix(value, "system:")
+	if id, err := strconv.ParseInt(systemValue, 10, 64); err == nil && id > 0 {
+		return batchDownloadResourceRef{
+			ResourceID:    strconv.FormatInt(id, 10),
+			SourceType:    string(domain.AssetResourceSourceSystem),
+			SystemAssetID: id,
+		}
+	}
+	return batchDownloadResourceRef{ResourceID: value}
 }
 
 func resolveBatchFilename(asset *domain.TaskAsset, assetID int64) string {

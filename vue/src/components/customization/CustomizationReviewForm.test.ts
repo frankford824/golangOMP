@@ -45,7 +45,6 @@ function mountForm(props: Record<string, unknown>) {
   return mount(CustomizationReviewForm, {
     props: {
       modelValue: true,
-      defaultReviewerId: '7',
       ...props,
     },
     global: {
@@ -101,10 +100,10 @@ describe('CustomizationReviewForm', () => {
     await wrapper.findAll('button').find((button) => button.text() === '确认提交')?.trigger('click')
 
     expect(wrapper.emitted('submit')?.[0]?.[0]).toMatchObject({
-      reviewer_id: 7,
       customization_review_decision: 'approved',
       source_asset_id: '42',
     })
+    expect(wrapper.emitted('submit')?.[0]?.[0]).not.toHaveProperty('reviewer_id')
   })
 
   it('emits current_asset_id for effect review uploads', async () => {
@@ -139,5 +138,16 @@ describe('CustomizationReviewForm', () => {
 
     await wrapper.findAll('button').find((button) => button.text() === '确认提交')?.trigger('click')
     expect(wrapper.emitted('submit')?.[0]?.[0]).not.toHaveProperty('source_asset_id')
+  })
+
+  it('does not render the reviewer id technical field', async () => {
+    const wrapper = mountForm({
+      mode: 'initial',
+      taskId: '1004',
+    })
+
+    expect(wrapper.text()).not.toContain('审核人 ID')
+    await wrapper.findAll('button').find((button) => button.text() === '确认提交')?.trigger('click')
+    expect(wrapper.emitted('submit')?.[0]?.[0]).not.toHaveProperty('reviewer_id')
   })
 })

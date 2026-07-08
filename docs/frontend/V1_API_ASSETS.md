@@ -85,7 +85,7 @@ curl -X GET https://api.example.com/v1/assets \
 ### 简介
 支持方法: POST。
 
-- `POST`: Return presigned OSS direct download URLs for current versions of the requested assets. The backend does not proxy file bytes or build ZIP packages.
+- `POST`: Return direct download URLs for requested system and external asset-center resources. System assets use presigned OSS URLs for current versions; external resources are returned only when an OSS-ready URL is available. The backend does not proxy file bytes or build ZIP packages.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -101,7 +101,8 @@ Content-Type: `application/json`
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `asset_ids` | array<integer> | 是 | - |
+| `asset_ids` | array<integer> | 否 | System asset IDs retained for compatibility with earlier clients. |
+| `resource_ids` | array<string> | 否 | Mixed resource IDs accepted by the asset center. System resources may use a numeric string; external resources use `ext-{id}` or `external:{id}`. |
 | `naming_mode` | enum(original/business) | 否 | Download filename mode. original keeps original upload/file_name; business uses SKU plus task product name for batch business downloads. |
 
 ### 响应体 schema
@@ -982,7 +983,7 @@ curl -X POST https://api.example.com/v1/assets/upload-requests/<id>/advance \
 ### 简介
 支持方法: POST。
 
-- `POST`: Batch asset search for the asset management bulk-download dialog. It returns one ranked asset candidate per input term and avoids issuing one HTTP request per SKU/task number.
+- `POST`: Batch asset search for the asset management bulk-download dialog. It returns ranked system and external resource candidates per input term and avoids issuing one HTTP request per SKU/task number.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -998,9 +999,9 @@ Content-Type: `application/json`
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `terms` | array<string> | 是 | SKU codes or task numbers, one logical search term per item. |
+| `terms` | array<string> | 是 | SKU codes, task numbers, or external-resource filename/path keywords, one logical search term per item. |
 | `format_filter` | enum(jpg_png/jpg/png/webp/image/design/pdf/archive/all) | 否 | UI-facing format filter. The server maps this to a coarse DB format category first, then applies exact extension/MIME filtering. |
-| `asset_kind` | enum(auto/all/delivery/reference/source/preview/other) | 否 | UI-facing asset role filter. Default bulk search only matches delivery assets; `auto` keeps all roles but ranks delivery assets first. |
+| `asset_kind` | enum(auto/all/delivery/reference/source/preview/other) | 否 | UI-facing asset role filter. System resources use task asset roles; external resources do not have system roles and are included for auto/all/delivery/source searches by filename/path format. |
 
 ### 响应体 schema
 成功响应: `200 application/json`

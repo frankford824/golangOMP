@@ -11,8 +11,8 @@
  *   - `initial` → POST /v1/tasks/:id/customization/review
  *   - `effect`  → POST /v1/customization-jobs/:jobId/effect-review
  *
- * v7.0 规范一致：payload 字段保留既有契约（reviewer_id / source_asset_id /
- * customization_review_decision / customization_level_* / customization_price /
+ * v7.0 规范一致：payload 字段保留既有契约（source_asset_id /
+ * current_asset_id / customization_review_decision / customization_level_* / customization_price /
  * customization_weight_factor / customization_note），另追加子表字段
  * `market_tier / price_tier / ref_price / ref_inventory / order_no`
  * （customization_reviews 子表空位），后端按需消费，不破坏现有契约。
@@ -31,11 +31,6 @@
         {{ hintText }}
       </p>
       <div class="customization-modal-grid">
-        <BaseInput
-          v-model="form.reviewerId"
-          label="审核人 ID *"
-          placeholder="请输入审核人 ID"
-        />
         <label class="field">
           <span class="field-label">审核决策</span>
           <select v-model="form.decision" class="reason-textarea">
@@ -163,7 +158,7 @@ export type CustomizationReviewMode = 'initial' | 'effect'
  * 对应 customization_reviews 子表的空位，后端按需消费、不破坏既有契约。
  */
 export interface CustomizationReviewPayload {
-  reviewer_id: number | string
+  reviewer_id?: number | string
   source_asset_id?: number | string | null
   current_asset_id?: number | string | null
   customization_review_decision: string
@@ -184,7 +179,6 @@ const props = withDefaults(
     modelValue: boolean
     mode?: CustomizationReviewMode
     taskId?: string | number | null
-    defaultReviewerId?: string | number | null
     loading?: boolean
     error?: string
     canUploadSource?: boolean
@@ -194,7 +188,6 @@ const props = withDefaults(
   {
     mode: 'initial',
     taskId: null,
-    defaultReviewerId: null,
     loading: false,
     error: '',
     canUploadSource: false,
@@ -210,7 +203,6 @@ const emit = defineEmits<{
 }>()
 
 const form = reactive({
-  reviewerId: '',
   decision: 'approved',
   levelCode: '',
   levelName: '',
@@ -245,7 +237,6 @@ const hintText = computed(() =>
 const showSourceUpload = computed(() => props.canUploadSource && props.taskId != null)
 
 function resetForm() {
-  form.reviewerId = props.defaultReviewerId != null ? String(props.defaultReviewerId) : ''
   form.decision = 'approved'
   form.levelCode = ''
   form.levelName = ''
@@ -269,12 +260,6 @@ watch(
   },
   { immediate: true },
 )
-
-function toApiId(value: string): number | string | undefined {
-  const trimmed = value.trim()
-  if (!trimmed) return undefined
-  return /^\d+$/.test(trimmed) ? Number(trimmed) : trimmed
-}
 
 function toNullableNumber(value: string): number | null {
   const trimmed = value.trim()
@@ -366,13 +351,7 @@ async function onSourceFileChange(event: Event) {
 function onSubmit() {
   if (props.loading || uploading.value || props.disabled) return
   localError.value = ''
-  const reviewerId = toApiId(form.reviewerId)
-  if (reviewerId == null) {
-    localError.value = '请填写审核人 ID'
-    return
-  }
   const payload: CustomizationReviewPayload = {
-    reviewer_id: reviewerId,
     customization_review_decision: form.decision,
     customization_level_code: nonEmpty(form.levelCode),
     customization_level_name: nonEmpty(form.levelName),

@@ -1181,6 +1181,44 @@ function teamMatchesDepartment(
   return strictDepartment ? team.department === department : !team.department || team.department === department
 }
 
+const invalidDepartmentScopeMessage = '当前账号部门范围已停用或不存在，请联系人事管理员或超级管理员修正组织归属。'
+
+function isAssignableDepartment(department: string): boolean {
+  const value = department.trim()
+  return value !== '' && departmentOptions.value.some((item) => item.value === value)
+}
+
+function isAssignableTeam(department: string, team: string): boolean {
+  const value = team.trim()
+  if (!value) return true
+  return teamOptions.value.some(
+    (item) =>
+      item.value === value &&
+      (department ? teamMatchesDepartment(item, department, true) : true),
+  )
+}
+
+function resetUsersForScopeError(message: string) {
+  users.value = []
+  pagination.value = { total: 0, page: page.value, page_size: pageSize.value }
+  listError.value = message
+}
+
+function sanitizeListOrgFilters() {
+  const department = departmentFilter.value.trim()
+  const team = teamFilter.value.trim()
+  if (department !== departmentFilter.value) departmentFilter.value = department
+  if (team !== teamFilter.value) teamFilter.value = team
+  if (department && !isAssignableDepartment(department)) {
+    departmentFilter.value = ''
+    teamFilter.value = ''
+    return
+  }
+  if (team && !isAssignableTeam(department, team)) {
+    teamFilter.value = ''
+  }
+}
+
 function defaultCreateRoles(): string[] {
   return editableRoleCodeSet.value.has('Member') ? ['Member'] : []
 }
@@ -1281,6 +1319,7 @@ async function loadOrgOptions() {
   if (hydrated) {
     usePermissionsStore().hydrateOrgFromServer(hydrated.departments, hydrated.groups)
   }
+  sanitizeListOrgFilters()
   if (orgMasterDepartmentFilter.value && !findVisibleOrgDepartment(orgMasterDepartmentFilter.value)) {
     orgMasterDepartmentFilter.value = ''
     orgMasterTeamFilter.value = ''
@@ -1298,6 +1337,15 @@ async function loadOrgOptions() {
       orgMasterDepartmentFilter.value = ''
       orgMasterTeamFilter.value = ''
       createForm.value.department = ''
+      return
+    }
+    if (!isAssignableDepartment(currentDepartmentScope.value)) {
+      departmentFilter.value = ''
+      teamFilter.value = ''
+      orgMasterDepartmentFilter.value = ''
+      orgMasterTeamFilter.value = ''
+      createForm.value.department = ''
+      resetUsersForScopeError(invalidDepartmentScopeMessage)
       return
     }
     departmentFilter.value = currentDepartmentScope.value
@@ -1354,15 +1402,25 @@ async function loadUsers() {
       listError.value = '当前账号缺少部门管理范围，请联系人事管理员或超级管理员修正组织归属。'
       return
     }
+    if (isDeptScopedOnly.value && !isAssignableDepartment(currentDepartmentScope.value)) {
+      resetUsersForScopeError(invalidDepartmentScopeMessage)
+      return
+    }
+    sanitizeListOrgFilters()
     const deptScope = isDeptScopedOnly.value ? currentDepartmentScope.value : undefined
+    const requestDepartment = deptScope || departmentFilter.value.trim()
+    const requestTeam =
+      teamFilter.value && isAssignableTeam(requestDepartment, teamFilter.value)
+        ? teamFilter.value.trim()
+        : ''
     const res = await usersApi.list({
       page: page.value,
       page_size: pageSize.value,
       ...(trimmedKeyword ? { keyword: trimmedKeyword } : {}),
       ...(statusFilter.value ? { status: statusFilter.value as 'active' | 'disabled' } : {}),
       ...(roleFilter.value ? { role: roleFilter.value } : {}),
-      ...(deptScope ? { department: deptScope } : departmentFilter.value ? { department: departmentFilter.value } : {}),
-      ...(teamFilter.value ? { team: teamFilter.value } : {}),
+      ...(requestDepartment ? { department: requestDepartment } : {}),
+      ...(requestTeam ? { team: requestTeam } : {}),
     }, abortController.signal)
     if (abortController.signal.aborted || seq !== listSeq) return
     const data = res?.data

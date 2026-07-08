@@ -7,6 +7,7 @@ import (
 
 	"workflow/domain"
 	"workflow/repo"
+	externalassets "workflow/service/external_assets"
 )
 
 func TestBatchSearchMatchesDeliveryImageBySKU(t *testing.T) {
@@ -161,6 +162,62 @@ func TestBatchSearchReturnsAllMatchingDeliveryImagesForTerm(t *testing.T) {
 	}
 	if item.Asset.ID != 11697 || item.Assets[0].ID != 11697 || item.Assets[1].ID != 11696 {
 		t.Fatalf("asset ordering = primary %+v assets %+v, want all matching JPG deliveries newest first", item.Asset, item.Assets)
+	}
+}
+
+func TestBatchSearchMatchesExternalAssetsBySKU(t *testing.T) {
+	now := time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC)
+	externalRepo := &assetCenterExternalRepoStub{
+		searchRows: []*domain.ExternalAssetRecord{
+			{
+				ID:            77,
+				ResourceID:    domain.ExternalAssetResourceID(77),
+				Provider:      "alist",
+				Kind:          domain.ExternalAssetKindNASLocal,
+				MountPath:     "/p3",
+				OriginPath:    "/p3/HSC12654/HSC12654主图.jpg",
+				ParentPath:    "/p3/HSC12654",
+				FileName:      "HSC12654主图.jpg",
+				FileExt:       ".jpg",
+				MimeType:      "image/jpeg",
+				FileSize:      12345,
+				Status:        domain.ExternalAssetStatusIndexed,
+				OSSSyncStatus: domain.ExternalAssetOSSStatusNone,
+				PreviewStatus: domain.ExternalAssetPreviewStatusNone,
+				CreatedAt:     now,
+				UpdatedAt:     now.Add(time.Minute),
+			},
+		},
+	}
+	svc := NewService(&excelPackageRepoStub{}, excelPackagePresignerStub{}, nil)
+	svc.SetExternalAssetService(externalassets.NewService(externalRepo, externalassets.Config{
+		Enabled: true,
+		Mounts:  externalassets.ParseMounts("/p3:nas_local"),
+	}, nil))
+
+	result, appErr := svc.BatchSearch(context.Background(), BatchSearchRequest{
+		Terms:        []string{"HSC12654"},
+		FormatFilter: "jpg_png",
+		AssetKind:    "delivery",
+	})
+	if appErr != nil {
+		t.Fatalf("BatchSearch error = %+v", appErr)
+	}
+	if len(result.Results) != 1 {
+		t.Fatalf("results len = %d, want 1", len(result.Results))
+	}
+	item := result.Results[0]
+	if item.Status != BatchSearchStatusMatched || item.Asset == nil {
+		t.Fatalf("item = %+v, want matched external asset", item)
+	}
+	if item.Asset.ResourceID != "ext-77" || item.Asset.SourceType != string(domain.AssetResourceSourceExternal) {
+		t.Fatalf("asset = %+v, want external ext-77", item.Asset)
+	}
+	if item.Candidates != 1 || len(item.Assets) != 1 || item.Assets[0].ResourceID != "ext-77" {
+		t.Fatalf("candidates/assets = %d/%+v, want one external candidate", item.Candidates, item.Assets)
+	}
+	if len(externalRepo.searchQueries) != 1 || externalRepo.searchQueries[0].Keyword != "HSC12654" {
+		t.Fatalf("external search queries = %+v, want keyword HSC12654", externalRepo.searchQueries)
 	}
 }
 

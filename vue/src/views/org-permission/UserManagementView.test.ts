@@ -448,4 +448,50 @@ describe('UserManagementView role governance', () => {
     expect(wrapper.text()).toContain('当前账号缺少部门管理范围')
     expect(usersApi.list).not.toHaveBeenCalled()
   })
+
+  it('fails closed when DepartmentAdmin scope is no longer an active org option', async () => {
+    permissionMock.allowedActions.clear()
+    permissionMock.allowedActions.add('department.manage')
+    vi.mocked(fetchOrgOwnershipOptions).mockResolvedValueOnce({
+      departmentOptions: [{ value: '定制美工部', label: '定制美工部' }],
+      teamOptions: [{ value: '默认组', label: '默认组', department: '定制美工部' }],
+      departmentRecords: [{ id: '8', name: '定制美工部', enabled: true }],
+      teamRecords: [{ id: '18', name: '默认组', departmentId: '8', departmentName: '定制美工部', enabled: true }],
+    })
+
+    const wrapper = mountView({
+      id: '4',
+      name: 'Legacy DeptAdmin',
+      role: RoleEnum.DEPT_ADMIN,
+      departmentId: '设计部',
+      groupId: '定制美工组',
+      dataScope: DataScopeEnum.DEPARTMENT,
+      permissions: [],
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('当前账号部门范围已停用或不存在')
+    expect(usersApi.list).not.toHaveBeenCalled()
+  })
+
+  it('drops stale legacy department and team filters before listing users', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    vi.mocked(usersApi.list).mockClear()
+
+    const vm = wrapper.vm as unknown as {
+      departmentFilter: string
+      teamFilter: string
+    }
+    vm.departmentFilter = '设计部'
+    vm.teamFilter = '定制美工组'
+    await flushPromises()
+
+    expect(vm.departmentFilter).toBe('')
+    expect(vm.teamFilter).toBe('')
+    for (const [params] of vi.mocked(usersApi.list).mock.calls) {
+      expect(params).not.toMatchObject({ department: '设计部' })
+      expect(params).not.toMatchObject({ team: '定制美工组' })
+    }
+  })
 })
