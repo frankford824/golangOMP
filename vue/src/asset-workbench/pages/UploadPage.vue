@@ -87,6 +87,8 @@ const contextLoading = contextRequest.loading
 const contextError = contextRequest.error
 
 const uploadedItems = computed(() => queue.value.filter((item) => item.status === 'uploaded'))
+const uploadPieceworkGroups = computed(() => groupDriveUploadPieceworkItems(queue.value))
+const uploadedPieceworkGroups = computed(() => groupDriveUploadPieceworkItems(uploadedItems.value))
 const isSimpleUser = computed(() => bootstrap.value?.is_admin === false)
 const requiresUploadDirectory = computed(() => uploadDirectories.value.length > 0)
 const selectedUploadDirectory = computed(() => uploadDirectories.value.find((item) => item.id === selectedUploadDirectoryId.value))
@@ -101,7 +103,11 @@ const canSimpleSubmit = computed(() => {
   if (!queue.value.length || uploading.value || submitting.value) return false
   return canUseUploadDirectory.value && queue.value.every((item) => item.status !== 'uploading' && item.status !== 'submitting')
 })
-const totalPages = computed(() => queue.value.reduce((sum, item) => sum + item.pageCount, 0))
+const totalPieceworkPages = computed(() =>
+  uploadPieceworkGroups.value.reduce((sum, group) => sum + (group.isFolder ? 1 : group.items[0]?.pageCount || 1), 0),
+)
+const uploadUnitLabel = computed(() => pieceworkFileLabel(uploadPieceworkGroups.value.length, queue.value.length))
+const uploadedUnitLabel = computed(() => pieceworkFileLabel(uploadedPieceworkGroups.value.length, uploadedItems.value.length))
 const difficultyOptions = computed(() => difficultyCodes(difficultyRows.value))
 const selectedAllowedFileTypes = computed(() => normalizedAllowedFileTypes(selectedUploadDirectory.value?.allowed_file_types ?? []))
 const selectedAllowedLabel = computed(() => (selectedAllowedFileTypes.value.length ? selectedAllowedFileTypes.value.join('、') : '全部格式'))
@@ -139,13 +145,13 @@ const simpleSubmitHint = computed(() => {
   if (!queue.value.length) return '先选择文件，或把文件拖到上传区'
   if (!canUseUploadDirectory.value) return '先选择这批文件进入的上传目录'
   if (queue.value.some((item) => item.status === 'failed')) return '会先重试失败文件，再提交作品'
-  if (queue.value.some((item) => item.status === 'uploaded')) return `将提交 ${formatInt(uploadedItems.value.length)} 个已上传文件`
-  return `将上传并提交 ${formatInt(queue.value.length)} 个文件`
+  if (queue.value.some((item) => item.status === 'uploaded')) return `将提交 ${uploadedUnitLabel.value}`
+  return `将上传并提交 ${uploadUnitLabel.value}`
 })
 const adminUploadLabel = computed(() => {
   if (uploading.value) return '正在上传'
   if (submitting.value) return '正在生成记录'
-  if (uploadedItems.value.length > 0 && !hasPendingUploads.value) return `生成提交记录 ${uploadedItems.value.length} 个`
+  if (uploadedItems.value.length > 0 && !hasPendingUploads.value) return `生成提交记录 ${uploadedPieceworkGroups.value.length} 个`
   if (queue.value.some((item) => item.status === 'failed')) return '重试并生成记录'
   return '上传并生成记录'
 })
@@ -153,8 +159,8 @@ const adminUploadHint = computed(() => {
   if (!queue.value.length) return '先选择文件，或把文件拖到上传区'
   if (!canUseUploadDirectory.value) return '先选择这批文件进入的上传目录'
   if (queue.value.some((item) => item.status === 'failed')) return '会重试失败文件，成功后自动生成提交记录'
-  if (uploadedItems.value.length > 0 && !hasPendingUploads.value) return '将生成提交记录，生成后进入上传记录'
-  return `将上传并生成 ${formatInt(queue.value.length)} 个提交记录`
+  if (uploadedItems.value.length > 0 && !hasPendingUploads.value) return `将为 ${uploadedUnitLabel.value} 生成提交记录，生成后进入上传记录`
+  return `将上传并生成 ${uploadUnitLabel.value} 的提交记录`
 })
 const uploadContinuityHint = computed(() => {
   if (uploading.value) return '正在上传。你可以切到看收入或网盘，回到本页仍能看到进度。请不要关闭浏览器窗口。'
@@ -166,7 +172,7 @@ const uploadContinuityHint = computed(() => {
 const submitButtonLabel = computed(() => {
   if (submitting.value) return isSimpleUser.value ? '正在交作品' : '正在创建提交'
   if (uploadedItems.value.length === 0) return '先上传文件'
-  return isSimpleUser.value ? `交作品 ${uploadedItems.value.length} 个` : `生成提交记录 ${uploadedItems.value.length} 个`
+  return isSimpleUser.value ? `交作品 ${uploadedPieceworkGroups.value.length} 个` : `生成提交记录 ${uploadedPieceworkGroups.value.length} 个`
 })
 const canUseAdminPrimaryAction = computed(() => {
   if (uploading.value || submitting.value || queue.value.length === 0) return false
@@ -348,6 +354,12 @@ function normalizedAllowedFileTypes(values: string[]) {
     .filter(Boolean)
 }
 
+function pieceworkFileLabel(pieceworkCount: number, fileCount: number) {
+  if (fileCount <= 0) return '0 个作品'
+  if (pieceworkCount === fileCount) return `${formatInt(pieceworkCount)} 个作品`
+  return `${formatInt(pieceworkCount)} 个作品 · ${formatInt(fileCount)} 个文件`
+}
+
 async function uploadQueuedItems() {
   if (!canUseUploadDirectory.value) {
     error.value = '先选择这次上传要进入的目录'
@@ -404,8 +416,8 @@ async function uploadQueuedItems() {
   lastUploadResult.value = { total: queue.value.length, success, failed }
   if (failed === 0 && queue.value.length > 0) {
     notice.value = isSimpleUser.value
-      ? `上传完成：成功 ${formatInt(success)} 个，失败 0 个`
-      : `文件已上传：成功 ${formatInt(success)} 个。请继续生成提交记录，生成后才会进入上传记录。`
+      ? `上传完成：成功 ${formatInt(success)} 个文件，失败 0 个`
+      : `文件已上传：成功 ${formatInt(success)} 个文件。请继续生成提交记录，生成后才会进入上传记录。`
   }
   return failed === 0
 }
@@ -422,9 +434,10 @@ async function runAdminPrimaryAction() {
     error.value = '没有文件上传成功，请重试'
     return
   }
+  const successfulPieces = uploadedPieceworkGroups.value.length
   await createSubmission()
   if (failed > 0 && !error.value) {
-    notice.value = `已生成 ${formatInt(successful)} 个成功文件的提交记录；${formatInt(failed)} 个文件上传失败，已保留在列表里可继续重试。`
+    notice.value = `已为 ${formatInt(successfulPieces)} 个作品生成提交记录，包含 ${formatInt(successful)} 个文件；${formatInt(failed)} 个文件上传失败，已保留在列表里可继续重试。`
   }
 }
 
@@ -456,8 +469,8 @@ async function createSubmission() {
     submittedFiles.value = detail.items.flatMap((item) => item.files)
     lastSubmissionResult.value = { total: pieceworkGroups.length, success: submittedFiles.value.length, failed: 0 }
     notice.value = isSimpleUser.value
-      ? `作品已交上去：${formatInt(submittedFiles.value.length)} 个文件，可在上传记录里查看。`
-      : `提交记录已生成：${formatInt(submittedFiles.value.length)} 个文件，可在查改作品里查看。`
+      ? `作品已交上去：${formatInt(pieceworkGroups.length)} 个作品，包含 ${formatInt(submittedFiles.value.length)} 个文件，可在上传记录里查看。`
+      : `提交记录已生成：${formatInt(pieceworkGroups.length)} 个作品，包含 ${formatInt(submittedFiles.value.length)} 个文件，可在查改作品里查看。`
     uploadCenter.updateItems(submittingIds, { status: 'submitted', progress: 100, error: '' })
   } catch (err) {
     uploadCenter.updateItems(submittingIds, { status: 'uploaded' })
@@ -488,10 +501,11 @@ async function submitSimple() {
     }
   }
   const successful = uploadedItems.value.length
+  const successfulPieces = uploadedPieceworkGroups.value.length
   const failed = queue.value.filter((item) => item.status === 'failed').length
   await createSubmission()
   if (failed > 0 && !error.value) {
-    notice.value = `已提交成功 ${formatInt(successful)} 个文件；${formatInt(failed)} 个文件上传失败，已保留在列表里可继续重试。`
+    notice.value = `已提交成功 ${formatInt(successfulPieces)} 个作品，包含 ${formatInt(successful)} 个文件；${formatInt(failed)} 个文件上传失败，已保留在列表里可继续重试。`
   }
 }
 
@@ -748,10 +762,10 @@ onMounted(() => {
 
     <div class="aw-data-surface">
       <div class="aw-grid-toolbar">
-        <span>{{ formatInt(queue.length) }} 个文件</span>
+        <span>{{ uploadUnitLabel }}</span>
         <span v-if="queue.length">{{ formatInt(uploadStats.percent) }}%</span>
-        <span v-if="queue.length">成功 {{ formatInt(uploadStats.uploaded) }} · 失败 {{ formatInt(uploadStats.failed) }}</span>
-        <span v-if="!isSimpleUser">{{ formatInt(totalPages) }} 页</span>
+        <span v-if="queue.length">文件成功 {{ formatInt(uploadStats.uploaded) }} · 失败 {{ formatInt(uploadStats.failed) }}</span>
+        <span v-if="!isSimpleUser">{{ formatInt(totalPieceworkPages) }} 页</span>
         <button v-if="isSimpleUser" type="button" :disabled="!canSimpleSubmit" @click="submitSimple">{{ simpleSubmitLabel }}</button>
         <button v-else type="button" :disabled="!canSubmit" @click="createSubmission">{{ submitButtonLabel }}</button>
       </div>
@@ -817,10 +831,10 @@ onMounted(() => {
     <div v-if="lastUploadResult || lastSubmissionResult" class="aw-panel aw-panel--stage">
       <h3>本次上传结论</h3>
       <p v-if="lastUploadResult" class="aw-copy">
-        上传：共 {{ formatInt(lastUploadResult.total) }} 个，成功 {{ formatInt(lastUploadResult.success) }} 个，失败 {{ formatInt(lastUploadResult.failed) }} 个。
+        上传：共 {{ formatInt(lastUploadResult.total) }} 个文件，成功 {{ formatInt(lastUploadResult.success) }} 个，失败 {{ formatInt(lastUploadResult.failed) }} 个。
       </p>
       <p v-if="lastSubmissionResult" class="aw-copy">
-        提交：已生成 {{ formatInt(lastSubmissionResult.success) }} 个文件记录。
+        提交：已生成 {{ formatInt(lastSubmissionResult.total) }} 个作品，包含 {{ formatInt(lastSubmissionResult.success) }} 个文件记录。
       </p>
       <div v-if="queue.some((item) => item.status === 'failed')" class="aw-inline-actions">
         <button class="aw-primary-button" type="button" :disabled="uploading || submitting || !canUseUploadDirectory" @click="retryAndSubmit">重试并提交</button>
