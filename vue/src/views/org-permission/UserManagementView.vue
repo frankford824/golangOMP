@@ -23,17 +23,10 @@
     </div>
     <template v-else>
       <section class="content-card">
-        <div class="directory-heading">
-          <h3 class="section-title">用户列表</h3>
-          <span class="directory-count">共 {{ pagination.total }} 人</span>
-        </div>
         <div class="management-layout">
           <aside class="org-filter-panel" aria-label="组织列表与筛选">
             <div class="org-filter-header">
-              <div>
-                <span>组织列表</span>
-                <small v-if="canManageOrgMaster">含停用组织</small>
-              </div>
+              <span>组织</span>
               <button
                 v-if="canManageOrgMaster"
                 type="button"
@@ -47,32 +40,23 @@
               <p>{{ orgOptionsError }}</p>
               <button type="button" class="org-action-btn" @click="retryLoadOrgOptions">重试</button>
             </div>
-            <button
-              v-if="canManageOrgMaster && emptyDisabledOrgCount > 0"
-              type="button"
-              class="org-cleanup-btn"
-              @click="openPurgeAllEmpty"
-            >
-              一键清理空停用组织（{{ emptyDisabledOrgCount }} 项）
-            </button>
             <div v-if="canManageOrgMaster && selectedOrgDepartment" class="org-selected-actions">
               <div class="org-selected-current">
-                <span class="org-selected-label">当前组织</span>
-                <strong>{{ selectedOrgTeam ? selectedOrgTeam.label : selectedOrgDepartment.label }}</strong>
-                <span class="org-selected-path">
-                  {{ selectedOrgTeam ? selectedOrgDepartment.label : '部门' }}
-                  <span
-                    class="org-state-pill"
-                    :class="{ 'org-state-pill--off': selectedOrgTeam ? !selectedOrgTeam.enabled : !selectedOrgDepartment.enabled }"
-                  >
-                    {{ (selectedOrgTeam ? selectedOrgTeam.enabled : selectedOrgDepartment.enabled) ? '启用' : '停用' }}
-                  </span>
-                  <span v-if="selectedOrgMemberCount != null" class="org-selected-member-count">
-                    {{ selectedOrgMemberCount }} 人
-                  </span>
+                <strong>
+                  {{ selectedOrgTeam ? `${selectedOrgDepartment.label} / ${selectedOrgTeam.label}` : selectedOrgDepartment.label }}
+                </strong>
+                <span
+                  class="org-state-pill"
+                  :class="{ 'org-state-pill--off': selectedOrgTeam ? !selectedOrgTeam.enabled : !selectedOrgDepartment.enabled }"
+                >
+                  {{ (selectedOrgTeam ? selectedOrgTeam.enabled : selectedOrgDepartment.enabled) ? '启用' : '停用' }}
+                </span>
+                <span v-if="selectedOrgMemberCount != null" class="org-selected-member-count">
+                  {{ selectedOrgMemberCount }} 人
                 </span>
               </div>
-              <div class="org-selected-buttons">
+              <!-- 选中部门只显示部门操作,选中小组只显示小组操作,避免按钮堆叠 -->
+              <div v-if="!selectedOrgTeam" class="org-selected-buttons">
                 <button
                   v-if="selectedOrgDepartment.enabled"
                   type="button"
@@ -81,17 +65,17 @@
                 >
                   新增小组
                 </button>
-                <button type="button" class="org-icon-btn" @click.stop="openEditDepartment(selectedOrgDepartment)">部门改名</button>
+                <button type="button" class="org-icon-btn" @click.stop="openEditDepartment(selectedOrgDepartment)">改名</button>
                 <button
                   type="button"
                   class="org-icon-btn"
                   :class="{ 'org-icon-btn--danger': selectedOrgDepartment.enabled }"
                   @click.stop="openDeleteDepartment(selectedOrgDepartment)"
                 >
-                  {{ selectedOrgDepartment.enabled ? '停用部门' : '恢复部门' }}
+                  {{ selectedOrgDepartment.enabled ? '停用' : '恢复' }}
                 </button>
                 <button
-                  v-if="!selectedOrgTeam && !isSystemDepartment(selectedOrgDepartment)"
+                  v-if="!isSystemDepartment(selectedOrgDepartment)"
                   type="button"
                   class="org-icon-btn"
                   @click.stop="openMergeDepartment(selectedOrgDepartment)"
@@ -99,7 +83,7 @@
                   合并到…
                 </button>
                 <button
-                  v-if="!selectedOrgTeam && !selectedOrgDepartment.enabled && !isSystemDepartment(selectedOrgDepartment)"
+                  v-if="!selectedOrgDepartment.enabled && !isSystemDepartment(selectedOrgDepartment)"
                   type="button"
                   class="org-icon-btn org-icon-btn--danger"
                   :disabled="(selectedOrgMemberCount ?? 1) > 0"
@@ -108,9 +92,10 @@
                 >
                   彻底删除
                 </button>
-                <button v-if="selectedOrgTeam" type="button" class="org-icon-btn" @click.stop="openEditTeam(selectedOrgTeam)">小组改名</button>
+              </div>
+              <div v-else class="org-selected-buttons">
+                <button type="button" class="org-icon-btn" @click.stop="openEditTeam(selectedOrgTeam)">改名</button>
                 <button
-                  v-if="selectedOrgTeam"
                   type="button"
                   class="org-icon-btn"
                   :class="{ 'org-icon-btn--danger': selectedOrgTeam.enabled }"
@@ -118,10 +103,10 @@
                   :title="!selectedOrgDepartment.enabled && !selectedOrgTeam.enabled ? '请先恢复部门' : undefined"
                   @click.stop="openDeleteTeam(selectedOrgTeam)"
                 >
-                  {{ selectedOrgTeam.enabled ? '停用小组' : '恢复小组' }}
+                  {{ selectedOrgTeam.enabled ? '停用' : '恢复' }}
                 </button>
                 <button
-                  v-if="selectedOrgTeam && !isSystemDepartment(selectedOrgDepartment)"
+                  v-if="!isSystemDepartment(selectedOrgDepartment)"
                   type="button"
                   class="org-icon-btn"
                   @click.stop="openMergeTeam(selectedOrgTeam)"
@@ -129,7 +114,7 @@
                   合并到…
                 </button>
                 <button
-                  v-if="selectedOrgTeam && !selectedOrgTeam.enabled && !isSystemDepartment(selectedOrgDepartment)"
+                  v-if="!selectedOrgTeam.enabled && !isSystemDepartment(selectedOrgDepartment)"
                   type="button"
                   class="org-icon-btn org-icon-btn--danger"
                   :disabled="(selectedOrgMemberCount ?? 1) > 0"
@@ -151,8 +136,30 @@
               @select-department="selectOrgDepartment"
               @select-team="selectOrgTeam"
             />
+            <button
+              v-if="canManageOrgMaster && emptyDisabledOrgCount > 0"
+              type="button"
+              class="org-cleanup-btn"
+              @click="openPurgeAllEmpty"
+            >
+              一键清理空停用组织（{{ emptyDisabledOrgCount }} 项）
+            </button>
           </aside>
           <div class="user-list-panel">
+            <div class="list-heading">
+              <div class="list-heading-scope">
+                <h3 class="section-title">{{ orgFilterBreadcrumb || '全部用户' }}</h3>
+                <button
+                  v-if="orgFilterBreadcrumb && !isDeptScopedOnly"
+                  type="button"
+                  class="org-scope-clear"
+                  @click="selectAllOrg"
+                >
+                  清除组织筛选
+                </button>
+              </div>
+              <span class="directory-count">共 {{ pagination.total }} 人</span>
+            </div>
             <div class="toolbar">
               <BaseInput
                 v-model="keyword"
@@ -175,18 +182,6 @@
                 clearable
               />
               <BaseButton type="button" variant="primary" class="toolbar-query" @click="onSearch">查询</BaseButton>
-            </div>
-            <div v-if="orgFilterBreadcrumb" class="org-filter-breadcrumb">
-              <span class="org-filter-breadcrumb-label">组织筛选</span>
-              <strong>{{ orgFilterBreadcrumb }}</strong>
-              <button
-                v-if="!isDeptScopedOnly"
-                type="button"
-                class="org-action-btn"
-                @click="selectAllOrg"
-              >
-                清除
-              </button>
             </div>
             <BaseErrorState v-if="listError" :title="listError" @retry="loadUsers" />
             <template v-else>
@@ -1947,17 +1942,45 @@ onBeforeUnmount(() => {
   padding: 1.25rem 1.5rem;
 }
 
-.directory-heading {
+.list-heading {
   display: flex;
   flex-wrap: wrap;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
-  gap: 0.75rem;
-  margin-bottom: 1rem;
+  gap: 0.5rem 0.75rem;
+  margin-bottom: 0.75rem;
 }
 
-.directory-heading .section-title {
-  margin-bottom: 0;
+.list-heading-scope {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.list-heading .section-title {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.org-scope-clear {
+  padding: 0.15rem 0.5rem;
+  border: 1px solid rgb(var(--yb-border-zinc));
+  border-radius: 9999px;
+  background: rgb(var(--yb-surface));
+  color: rgb(var(--yb-text-zinc-soft));
+  cursor: pointer;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: color 0.12s ease, border-color 0.12s ease, background-color 0.12s ease;
+}
+
+.org-scope-clear:hover {
+  color: rgb(var(--yb-text-zinc));
+  border-color: rgb(var(--yb-text-zinc-faint));
+  background: rgb(var(--yb-surface-row-even));
 }
 
 .directory-count {
@@ -1974,16 +1997,19 @@ onBeforeUnmount(() => {
 
 .management-layout {
   display: grid;
-  grid-template-columns: minmax(18rem, clamp(20rem, 26vw, 24rem)) minmax(0, 1fr);
-  gap: 1.15rem;
+  grid-template-columns: minmax(16.5rem, clamp(18rem, 23vw, 21.5rem)) minmax(0, 1fr);
+  gap: 1.25rem;
   align-items: start;
 }
 
 .org-filter-panel {
+  /* 跟随页面滚动吸顶:表格再长,组织树也一直在视野内 */
+  position: sticky;
+  top: 0.75rem;
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-  max-height: min(66dvh, 44rem);
+  max-height: calc(100dvh - 1.5rem);
   overflow: auto;
   padding-right: 0.9rem;
   border-right: 1px solid rgb(var(--yb-border-zinc));
@@ -1998,19 +2024,6 @@ onBeforeUnmount(() => {
   color: rgb(var(--yb-text-zinc-strong));
   font-size: 0.75rem;
   font-weight: 700;
-}
-
-.org-filter-header > div {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 0.12rem;
-}
-
-.org-filter-header small {
-  color: rgb(var(--yb-text-zinc-faint));
-  font-size: 0.6875rem;
-  font-weight: 500;
 }
 
 .org-selected-actions {
@@ -2073,14 +2086,9 @@ onBeforeUnmount(() => {
 .org-selected-current {
   display: flex;
   min-width: 0;
-  flex-direction: column;
-  gap: 0.1rem;
-}
-
-.org-selected-label {
-  color: rgb(var(--yb-text-zinc-faint));
-  font-size: 0.6875rem;
-  font-weight: 600;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
 }
 
 .org-selected-current strong {
@@ -2091,19 +2099,9 @@ onBeforeUnmount(() => {
   overflow-wrap: anywhere;
 }
 
-.org-selected-path {
+.org-selected-buttons {
   display: flex;
   flex-wrap: wrap;
-  min-width: 0;
-  align-items: center;
-  gap: 0.35rem;
-  color: rgb(var(--yb-text-zinc-soft));
-  font-size: 0.6875rem;
-}
-
-.org-selected-buttons {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(4.75rem, 1fr));
   gap: 0.3rem;
 }
 
@@ -2177,6 +2175,7 @@ onBeforeUnmount(() => {
   }
 
   .org-filter-panel {
+    position: static;
     display: flex;
     flex-direction: column;
     gap: 0.5rem;
@@ -2207,30 +2206,6 @@ onBeforeUnmount(() => {
 
 .toolbar-field {
   min-width: 0;
-}
-
-/* UX2:列表侧面包屑,明确"表格正被哪个组织过滤",与树选中互为镜像 */
-.org-filter-breadcrumb {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.45rem;
-  margin-bottom: 0.85rem;
-  padding: 0.35rem 0.55rem;
-  border: 1px solid rgb(var(--yb-success-border));
-  border-radius: 0.5rem;
-  background: rgb(var(--yb-success-soft));
-  font-size: 0.75rem;
-}
-
-.org-filter-breadcrumb-label {
-  color: rgb(var(--yb-success-deep));
-  font-weight: 600;
-}
-
-.org-filter-breadcrumb strong {
-  color: rgb(var(--yb-success-deep));
-  font-weight: 700;
 }
 
 .merge-hint {
