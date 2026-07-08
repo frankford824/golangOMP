@@ -836,6 +836,7 @@ components:
             type: string
     DepartmentOption:
       type: object
+      required: [name, enabled, member_count]
       properties:
         id:
           type: integer
@@ -852,11 +853,13 @@ components:
             $ref: '#/components/schemas/OrgTeamOption'
         enabled:
           type: boolean
+          description: Always emitted, including `false` for disabled org-master rows when `include_disabled=true`.
         member_count:
           type: integer
           description: Number of users currently assigned to this department (any team, active or disabled accounts). Always emitted so zero-member legacy departments are visible to org-maintenance clients.
     OrgTeamOption:
       type: object
+      required: [name, enabled, member_count]
       properties:
         id:
           type: integer
@@ -865,6 +868,7 @@ components:
           type: string
         enabled:
           type: boolean
+          description: Always emitted, including `false` for disabled org-master rows when `include_disabled=true`.
         member_count:
           type: integer
           description: Number of users currently assigned to this team (active or disabled accounts).

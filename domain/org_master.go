@@ -23,7 +23,7 @@ type OrgTeam struct {
 type OrgTeamOption struct {
 	ID      int64  `json:"id,omitempty"`
 	Name    string `json:"name"`
-	Enabled bool   `json:"enabled,omitempty"`
+	Enabled bool   `json:"enabled"`
 	// MemberCount is the number of users currently assigned to this team
 	// (active or disabled accounts). Always emitted so zero-member legacy
 	// teams are visible to org-maintenance clients.

@@ -280,7 +280,7 @@ func TestUserAdminHandlerGetOrgOptionsSetsDeprecationHeaderForCompatibilityShape
 		},
 		orgOptions: &domain.OrgOptions{
 			Departments: []domain.DepartmentOption{
-				{Name: "运营部", Teams: []string{"淘系一组"}},
+				{Name: "运营部", Teams: []string{"淘系一组"}, Enabled: true},
 			},
 			TeamsByDepartment: map[string][]string{
 				"运营部": {"淘系一组"},
@@ -349,7 +349,14 @@ func TestUserAdminHandlerGetOrgOptionsIncludingDisabledCallsServiceForHRAdmin(t 
 		},
 		orgOptionsIncludingDisabled: &domain.OrgOptions{
 			Departments: []domain.DepartmentOption{
-				{ID: 7, Name: "采购部", Enabled: false},
+				{
+					ID:      7,
+					Name:    "采购部",
+					Enabled: false,
+					TeamItems: []domain.OrgTeamOption{
+						{ID: 11, Name: "采购组", Enabled: false},
+					},
+				},
 			},
 		},
 	}
@@ -365,6 +372,9 @@ func TestUserAdminHandlerGetOrgOptionsIncludingDisabledCallsServiceForHRAdmin(t 
 	}
 	if body := rec.Body.String(); !bytes.Contains([]byte(body), []byte(`"name":"采购部"`)) {
 		t.Fatalf("GetOrgOptions(include_disabled) body missing disabled department: %s", body)
+	}
+	if body := rec.Body.Bytes(); bytes.Count(body, []byte(`"enabled":false`)) < 2 {
+		t.Fatalf("GetOrgOptions(include_disabled) body must explicitly emit disabled department/team enabled=false: %s", string(body))
 	}
 }
 

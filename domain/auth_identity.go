@@ -283,7 +283,7 @@ type DepartmentOption struct {
 	Name      string          `json:"name"`
 	Teams     []string        `json:"teams,omitempty"`
 	TeamItems []OrgTeamOption `json:"team_items,omitempty"`
-	Enabled   bool            `json:"enabled,omitempty"`
+	Enabled   bool            `json:"enabled"`
 	// MemberCount is the number of users currently assigned to this
 	// department (any team, active or disabled accounts). Always emitted so
 	// zero-member legacy departments are visible to org-maintenance clients.
