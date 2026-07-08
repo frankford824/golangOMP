@@ -216,7 +216,7 @@ func (s *Service) PrepareLimit() int {
 }
 
 func (s *Service) FullSyncReady() bool {
-	return s != nil && s.Enabled() && !s.bffSourceReady() && s.cfg.FullSyncEnabled && s.alist != nil && s.alist.Enabled()
+	return s != nil && s.Enabled() && s.cfg.FullSyncEnabled && s.alist != nil && s.alist.Enabled()
 }
 
 func (s *Service) LegacyIndexRefreshReady() bool {

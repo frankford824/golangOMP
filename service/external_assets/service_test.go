@@ -240,6 +240,64 @@ func TestSyncFullIndexSkipsBrokenSubdirectory(t *testing.T) {
 	}
 }
 
+func TestSyncFullIndexHonorsMountFilter(t *testing.T) {
+	visited := []string{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		listPath, _ := req["path"].(string)
+		visited = append(visited, listPath)
+		if listPath != "/p3" {
+			t.Fatalf("unexpected list path %q, want only /p3", listPath)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"code":    200,
+			"message": "success",
+			"data": map[string]interface{}{
+				"total": 1,
+				"content": []map[string]interface{}{
+					{"name": "root.tif", "is_dir": false, "size": 11},
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	repo := &externalAssetRepoStub{}
+	svc := NewService(repo, Config{
+		Enabled:             true,
+		AListBaseURL:        server.URL,
+		AListToken:          "token",
+		Mounts:              ParseMounts("/quark:netdisk,/p3:nas_local"),
+		FullSyncEnabled:     true,
+		FullSyncMounts:      ParseMountPaths("/p3"),
+		FullSyncPageSize:    100,
+		FullSyncMaxDepth:    8,
+		FullSyncMaxFiles:    100,
+		FullSyncMaxDirs:     100,
+		LinkRefreshInterval: time.Hour,
+	}, nil)
+
+	result, err := svc.SyncFullIndex(context.Background())
+	if err != nil {
+		t.Fatalf("SyncFullIndex() error = %v", err)
+	}
+	if result.ScannedCount != 1 || result.UpsertedCount != 1 {
+		t.Fatalf("SyncFullIndex() counts = scanned %d upserted %d, want 1/1", result.ScannedCount, result.UpsertedCount)
+	}
+	if len(result.Mounts) != 1 || result.Mounts[0].MountPath != "/p3" {
+		t.Fatalf("mounts = %+v, want only /p3", result.Mounts)
+	}
+	if strings.Join(visited, ",") != "/p3" {
+		t.Fatalf("visited paths = %v, want only /p3", visited)
+	}
+	if len(repo.upserts) != 1 || repo.upserts[0].MountPath != "/p3" {
+		t.Fatalf("upserts = %+v, want one /p3 row", repo.upserts)
+	}
+}
+
 func TestNetdiskBrowserURLsDoNotExposeBFFProxyWhenDirectURLMissing(t *testing.T) {
 	svc := NewService(&externalAssetRepoStub{}, Config{
 		Enabled:           true,
@@ -605,7 +663,7 @@ func TestSearchDoesNotRefreshVeryShortASCIIKeyword(t *testing.T) {
 	}
 }
 
-func TestFullSyncDisabledWhenBFFSourceIsConfigured(t *testing.T) {
+func TestFullSyncReadyWhenBFFAndAListAreConfigured(t *testing.T) {
 	svc := NewService(&externalAssetRepoStub{}, Config{
 		Enabled:         true,
 		BFFBaseURL:      "http://bff",
@@ -614,11 +672,32 @@ func TestFullSyncDisabledWhenBFFSourceIsConfigured(t *testing.T) {
 		FullSyncEnabled: true,
 		Mounts:          ParseMounts("/p3:nas_local"),
 	}, nil)
-	if svc.FullSyncReady() {
-		t.Fatal("FullSyncReady() = true, want false when BFF is source")
+	if !svc.FullSyncReady() {
+		t.Fatal("FullSyncReady() = false, want true when BFF search and AList full sync are both configured")
 	}
 	if svc.LegacyIndexRefreshReady() {
-		t.Fatal("LegacyIndexRefreshReady() = true, want false when BFF is source")
+		t.Fatal("LegacyIndexRefreshReady() = true, want false when BFF remains the search source")
+	}
+}
+
+func TestFullSyncIntervalFallsBackToSyncInterval(t *testing.T) {
+	svc := NewService(&externalAssetRepoStub{}, Config{
+		Enabled:      true,
+		SyncInterval: 2 * time.Hour,
+		Mounts:       ParseMounts("/p3:nas_local"),
+	}, nil)
+	if got := svc.FullSyncInterval(); got != 2*time.Hour {
+		t.Fatalf("FullSyncInterval() = %s, want SyncInterval fallback", got)
+	}
+
+	svc = NewService(&externalAssetRepoStub{}, Config{
+		Enabled:          true,
+		SyncInterval:     time.Hour,
+		FullSyncInterval: 6 * time.Hour,
+		Mounts:           ParseMounts("/p3:nas_local"),
+	}, nil)
+	if got := svc.FullSyncInterval(); got != 6*time.Hour {
+		t.Fatalf("FullSyncInterval() = %s, want configured interval", got)
 	}
 }
 
