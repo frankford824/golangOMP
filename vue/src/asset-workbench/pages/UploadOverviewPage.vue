@@ -21,6 +21,10 @@ import WorkbenchPreviewDialog from '@aw/shared/preview/WorkbenchPreviewDialog.vu
 
 type SortBy = 'created_at' | 'owner' | 'directory' | 'name' | 'format'
 type SortDir = 'asc' | 'desc'
+interface PieceworkDisplayState {
+  isPrimary: boolean
+  siblingCount: number
+}
 
 const session = useAssetWorkbenchSessionStore()
 const route = useRoute()
@@ -98,6 +102,7 @@ const filteredDirectoryLabel = computed(() => {
   return item?.name || '指定分类'
 })
 const pieceworkRows = computed(() => uniqueSubmissionItemRows(files.value))
+const pieceworkDisplayByFileID = computed(() => buildPieceworkDisplayByFileID(files.value))
 const totalAmount = computed(() => pieceworkRows.value.reduce((sum, file) => sum + Number(file.gross_amount || 0), 0))
 const totalCount = computed(() => pieceworkRows.value.reduce((sum, file) => sum + Number(file.page_count || 0), 0))
 const activeFilterCount = computed(() =>
@@ -256,18 +261,21 @@ function statusToneClass(value?: string) {
 }
 
 function filePreviewRows(file: DriveFileRow): Array<[string, string]> {
-  return [
+  const rows: Array<[string, string]> = [
     ['上传人', fileOwnerLabel(file)],
     ['上传时间', formatDateTime(file.created_at)],
     ['分类', file.upload_directory_name || '未分类'],
     ['作品名称', fileDisplayName(file)],
     ['原始文件名', file.original_filename || '—'],
     ['格式', fileFormatLabel(file)],
-    ['数量', file.page_count ? `${file.page_count}` : '—'],
-    ['计件金额', formatMoney(file.gross_amount || 0)],
+    ['数量', fileQuantityLabel(file)],
+    ['计件金额', fileAmountLabel(file)],
     ['计件状态', statusText(file.pricing_status)],
     ['文件大小', formatSize(file.file_size)],
   ]
+  const note = filePieceworkNote(file)
+  if (note) rows.splice(8, 0, ['计价说明', note])
+  return rows
 }
 
 function uniqueSubmissionItemRows(rows: DriveFileRow[]) {
@@ -280,13 +288,67 @@ function uniqueSubmissionItemRows(rows: DriveFileRow[]) {
   })
 }
 
+function buildPieceworkDisplayByFileID(rows: DriveFileRow[]) {
+  const groups = new Map<string, DriveFileRow[]>()
+  for (const file of rows) {
+    const key = file.submission_item_id ? `item:${file.submission_item_id}` : `file:${file.id}`
+    const group = groups.get(key) ?? []
+    group.push(file)
+    groups.set(key, group)
+  }
+  const result = new Map<number, PieceworkDisplayState>()
+  for (const group of groups.values()) {
+    group.forEach((file, index) => {
+      result.set(file.id, { isPrimary: index === 0, siblingCount: group.length })
+    })
+  }
+  return result
+}
+
+function filePieceworkState(file: DriveFileRow, lookup = pieceworkDisplayByFileID.value): PieceworkDisplayState {
+  return lookup.get(file.id) ?? { isPrimary: true, siblingCount: 1 }
+}
+
+function filePieceworkRepeated(file: DriveFileRow, lookup = pieceworkDisplayByFileID.value) {
+  const state = filePieceworkState(file, lookup)
+  return state.siblingCount > 1 && !state.isPrimary
+}
+
+function fileQuantityLabel(file: DriveFileRow, lookup = pieceworkDisplayByFileID.value) {
+  return filePieceworkRepeated(file, lookup) ? '—' : file.page_count ? `${file.page_count}` : '—'
+}
+
+function fileQuantitySecondary(file: DriveFileRow) {
+  const state = filePieceworkState(file)
+  if (state.siblingCount <= 1) return ''
+  return state.isPrimary ? `同作品 ${state.siblingCount} 个文件` : '同一作品'
+}
+
+function fileAmountLabel(file: DriveFileRow, lookup = pieceworkDisplayByFileID.value) {
+  return filePieceworkRepeated(file, lookup) ? '—' : formatMoney(file.gross_amount || 0)
+}
+
+function fileAmountSecondary(file: DriveFileRow) {
+  const state = filePieceworkState(file)
+  if (state.siblingCount <= 1) return ''
+  return state.isPrimary ? '本作品金额' : '已计入同作品'
+}
+
+function filePieceworkNote(file: DriveFileRow, lookup = pieceworkDisplayByFileID.value) {
+  const state = filePieceworkState(file, lookup)
+  if (state.siblingCount <= 1) return ''
+  return state.isPrimary
+    ? `同一作品包含 ${state.siblingCount} 个文件，数量和金额只统计一次。`
+    : '该文件属于同一作品，数量和金额已计入同作品记录。'
+}
+
 function csvEscape(value: unknown) {
   const text = String(value ?? '')
   if (/[",\n\r]/.test(text)) return `"${text.replace(/"/g, '""')}"`
   return text
 }
 
-function fileToExportRow(file: DriveFileRow) {
+function fileToExportRow(file: DriveFileRow, lookup: Map<number, PieceworkDisplayState>) {
   return [
     fileOwnerLabel(file),
     formatDateTime(file.created_at),
@@ -294,10 +356,11 @@ function fileToExportRow(file: DriveFileRow) {
     fileDisplayName(file),
     file.original_filename || '',
     fileFormatLabel(file),
-    file.page_count || '',
-    formatMoney(file.gross_amount || 0),
+    fileQuantityLabel(file, lookup),
+    fileAmountLabel(file, lookup),
     statusText(file.pricing_status),
     formatSize(file.file_size),
+    filePieceworkNote(file, lookup),
   ]
 }
 
@@ -672,8 +735,9 @@ async function exportCurrentFilter() {
       if (rows.length >= result.total || rows.length >= exportLimit || result.items.length === 0) break
       nextPage += 1
     }
-    const header = ['创建人', '创建日期', '分类', '作品名称', '原始文件名', '格式', '数量', '计件金额', '状态', '文件大小']
-    const csv = [header, ...rows.map(fileToExportRow)].map((row) => row.map(csvEscape).join(',')).join('\n')
+    const header = ['创建人', '创建日期', '分类', '作品名称', '原始文件名', '格式', '数量', '计件金额', '状态', '文件大小', '计价说明']
+    const exportPieceworkLookup = buildPieceworkDisplayByFileID(rows)
+    const csv = [header, ...rows.map((file) => fileToExportRow(file, exportPieceworkLookup))].map((row) => row.map(csvEscape).join(',')).join('\n')
     const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' })
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
@@ -712,15 +776,15 @@ onBeforeUnmount(() => {
       </div>
       <dl class="aw-upload-ledger__summary" aria-label="当前筛选汇总">
         <div>
-          <dt>匹配记录</dt>
+          <dt>匹配文件</dt>
           <dd>{{ total }}</dd>
         </div>
         <div>
-          <dt>本页数量</dt>
+          <dt>本页计价数量</dt>
           <dd>{{ totalCount }}</dd>
         </div>
         <div>
-          <dt>本页金额</dt>
+          <dt>本页计价金额</dt>
           <dd>{{ formatMoney(totalAmount) }}</dd>
         </div>
       </dl>
@@ -877,7 +941,7 @@ onBeforeUnmount(() => {
               <tr
                 v-for="file in files"
                 :key="file.id"
-                :class="{ 'is-selected': selectedFile?.id === file.id }"
+                :class="{ 'is-selected': selectedFile?.id === file.id, 'is-piecework-child': filePieceworkRepeated(file) }"
                 @click="selectFile(file)"
                 @dblclick="openFilePreview(file)"
               >
@@ -926,8 +990,14 @@ onBeforeUnmount(() => {
                   <strong :title="fileFormatLabel(file)">{{ fileExtLabel(file) }}</strong>
                   <small v-if="fileFormatSecondary(file)" :title="file.mime_type || fileFormatSecondary(file)">{{ fileFormatSecondary(file) }}</small>
                 </td>
-                <td class="aw-upload-ledger__num">{{ file.page_count || '—' }}</td>
-                <td class="aw-upload-ledger__num">{{ formatMoney(file.gross_amount || 0) }}</td>
+                <td class="aw-upload-ledger__num">
+                  <strong>{{ fileQuantityLabel(file) }}</strong>
+                  <small v-if="fileQuantitySecondary(file)" :title="filePieceworkNote(file)">{{ fileQuantitySecondary(file) }}</small>
+                </td>
+                <td class="aw-upload-ledger__num">
+                  <strong>{{ fileAmountLabel(file) }}</strong>
+                  <small v-if="fileAmountSecondary(file)" :title="filePieceworkNote(file)">{{ fileAmountSecondary(file) }}</small>
+                </td>
                 <td>
                   <span class="aw-chip" :class="statusToneClass(file.pricing_status)">{{ statusText(file.pricing_status) }}</span>
                 </td>
