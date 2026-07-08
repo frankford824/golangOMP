@@ -84,6 +84,219 @@ func TestIdentityServiceOrgMasterBackendizesOptionsUsersAndTaskCatalog(t *testin
 	}
 }
 
+func TestIdentityServiceRenameTeamRewritesAllPagedUsers(t *testing.T) {
+	ConfigureTaskOrgCatalog(domain.AuthSettings{})
+	defer ConfigureTaskOrgCatalog(domain.AuthSettings{})
+
+	userRepo := newIdentityUserRepo()
+	orgRepo := newIdentityOrgRepo()
+	svc := NewIdentityService(userRepo, &identitySessionRepoStub{}, &identityPermissionLogRepoStub{}, identityTxRunner{}, WithOrgRepo(orgRepo))
+
+	if appErr := svc.SyncConfiguredAuth(context.Background()); appErr != nil {
+		t.Fatalf("SyncConfiguredAuth() unexpected error: %+v", appErr)
+	}
+	department, appErr := svc.CreateDepartment(context.Background(), CreateOrgDepartmentParams{Name: "分页运营部"})
+	if appErr != nil {
+		t.Fatalf("CreateDepartment() unexpected error: %+v", appErr)
+	}
+	team, appErr := svc.CreateTeam(context.Background(), CreateOrgTeamParams{DepartmentID: &department.ID, Name: "淘系二组"})
+	if appErr != nil {
+		t.Fatalf("CreateTeam() unexpected error: %+v", appErr)
+	}
+
+	adminCtx := domain.WithRequestActor(context.Background(), domain.RequestActor{
+		ID:    1,
+		Roles: []domain.Role{domain.RoleAdmin, domain.RoleHRAdmin},
+	})
+	const memberTotal = 125
+	for i := 0; i < memberTotal; i++ {
+		_, appErr := svc.CreateManagedUser(adminCtx, CreateManagedUserParams{
+			Username:    fmt.Sprintf("paged_team_member_%03d", i),
+			EmployeeNo:  intPtr(3000 + i),
+			DisplayName: fmt.Sprintf("Paged Team Member %03d", i),
+			Department:  domain.Department("分页运营部"),
+			Team:        "淘系二组",
+			Mobile:      fmt.Sprintf("13877%06d", i),
+			Password:    "Init12345",
+			Roles:       []domain.Role{domain.RoleOps},
+		})
+		if appErr != nil {
+			t.Fatalf("CreateManagedUser(%d) unexpected error: %+v", i, appErr)
+		}
+	}
+
+	userRepo.listFilters = nil
+	nextName := "淘系运营二部"
+	updated, appErr := svc.UpdateTeam(context.Background(), UpdateOrgTeamParams{
+		ID:   team.ID,
+		Name: &nextName,
+	})
+	if appErr != nil {
+		t.Fatalf("UpdateTeam(rename) unexpected error: %+v", appErr)
+	}
+	if updated.Name != nextName {
+		t.Fatalf("UpdateTeam(rename) name = %q, want %q", updated.Name, nextName)
+	}
+
+	oldCount := 0
+	newCount := 0
+	for _, user := range userRepo.users {
+		if user == nil || user.Department != domain.Department("分页运营部") {
+			continue
+		}
+		switch user.Team {
+		case "淘系二组":
+			oldCount++
+		case nextName:
+			newCount++
+		}
+	}
+	if oldCount != 0 || newCount != memberTotal {
+		t.Fatalf("renamed users old=%d new=%d, want old=0 new=%d", oldCount, newCount, memberTotal)
+	}
+	if len(userRepo.listFilters) < 2 {
+		t.Fatalf("rewriteAllUsers list calls = %d, want multiple pages", len(userRepo.listFilters))
+	}
+}
+
+func TestIdentityServiceRenameTeamReclaimsDisabledEmptyConflict(t *testing.T) {
+	ConfigureTaskOrgCatalog(domain.AuthSettings{})
+	defer ConfigureTaskOrgCatalog(domain.AuthSettings{})
+
+	userRepo := newIdentityUserRepo()
+	orgRepo := newIdentityOrgRepo()
+	svc := NewIdentityService(userRepo, &identitySessionRepoStub{}, &identityPermissionLogRepoStub{}, identityTxRunner{}, WithOrgRepo(orgRepo))
+
+	if appErr := svc.SyncConfiguredAuth(context.Background()); appErr != nil {
+		t.Fatalf("SyncConfiguredAuth() unexpected error: %+v", appErr)
+	}
+	department, appErr := svc.CreateDepartment(context.Background(), CreateOrgDepartmentParams{Name: "回收运营部"})
+	if appErr != nil {
+		t.Fatalf("CreateDepartment() unexpected error: %+v", appErr)
+	}
+	current, appErr := svc.CreateTeam(context.Background(), CreateOrgTeamParams{DepartmentID: &department.ID, Name: "淘系二组"})
+	if appErr != nil {
+		t.Fatalf("CreateTeam(current) unexpected error: %+v", appErr)
+	}
+	stale, appErr := svc.CreateTeam(context.Background(), CreateOrgTeamParams{DepartmentID: &department.ID, Name: "淘系运营二部"})
+	if appErr != nil {
+		t.Fatalf("CreateTeam(stale) unexpected error: %+v", appErr)
+	}
+	orgRepo.teams[stale.ID].Enabled = false
+
+	adminCtx := domain.WithRequestActor(context.Background(), domain.RequestActor{
+		ID:    1,
+		Roles: []domain.Role{domain.RoleAdmin, domain.RoleHRAdmin},
+	})
+	for i := 0; i < 3; i++ {
+		_, appErr := svc.CreateManagedUser(adminCtx, CreateManagedUserParams{
+			Username:    fmt.Sprintf("reclaim_team_member_%d", i),
+			EmployeeNo:  intPtr(3300 + i),
+			DisplayName: fmt.Sprintf("Reclaim Team Member %d", i),
+			Department:  domain.Department("回收运营部"),
+			Team:        "淘系二组",
+			Mobile:      fmt.Sprintf("13878%06d", i),
+			Password:    "Init12345",
+			Roles:       []domain.Role{domain.RoleOps},
+		})
+		if appErr != nil {
+			t.Fatalf("CreateManagedUser(%d) unexpected error: %+v", i, appErr)
+		}
+	}
+
+	nextName := "淘系运营二部"
+	updated, appErr := svc.UpdateTeam(context.Background(), UpdateOrgTeamParams{
+		ID:   current.ID,
+		Name: &nextName,
+	})
+	if appErr != nil {
+		t.Fatalf("UpdateTeam(rename into disabled empty conflict) unexpected error: %+v", appErr)
+	}
+	if updated.ID != current.ID || updated.Name != nextName {
+		t.Fatalf("UpdateTeam(rename) updated = %+v, want id=%d name=%q", updated, current.ID, nextName)
+	}
+	if _, ok := orgRepo.teams[stale.ID]; ok {
+		t.Fatalf("disabled empty conflict team id=%d still exists", stale.ID)
+	}
+	for _, user := range userRepo.users {
+		if user == nil || user.Department != domain.Department("回收运营部") {
+			continue
+		}
+		if user.Team != nextName {
+			t.Fatalf("user %d team = %q, want %q", user.ID, user.Team, nextName)
+		}
+	}
+}
+
+func TestIdentityServiceRenameTeamRejectsDisabledConflictWithMembers(t *testing.T) {
+	ConfigureTaskOrgCatalog(domain.AuthSettings{})
+	defer ConfigureTaskOrgCatalog(domain.AuthSettings{})
+
+	userRepo := newIdentityUserRepo()
+	orgRepo := newIdentityOrgRepo()
+	svc := NewIdentityService(userRepo, &identitySessionRepoStub{}, &identityPermissionLogRepoStub{}, identityTxRunner{}, WithOrgRepo(orgRepo))
+
+	if appErr := svc.SyncConfiguredAuth(context.Background()); appErr != nil {
+		t.Fatalf("SyncConfiguredAuth() unexpected error: %+v", appErr)
+	}
+	department, appErr := svc.CreateDepartment(context.Background(), CreateOrgDepartmentParams{Name: "占用运营部"})
+	if appErr != nil {
+		t.Fatalf("CreateDepartment() unexpected error: %+v", appErr)
+	}
+	current, appErr := svc.CreateTeam(context.Background(), CreateOrgTeamParams{DepartmentID: &department.ID, Name: "淘系二组"})
+	if appErr != nil {
+		t.Fatalf("CreateTeam(current) unexpected error: %+v", appErr)
+	}
+	conflict, appErr := svc.CreateTeam(context.Background(), CreateOrgTeamParams{DepartmentID: &department.ID, Name: "淘系运营二部"})
+	if appErr != nil {
+		t.Fatalf("CreateTeam(conflict) unexpected error: %+v", appErr)
+	}
+
+	adminCtx := domain.WithRequestActor(context.Background(), domain.RequestActor{
+		ID:    1,
+		Roles: []domain.Role{domain.RoleAdmin, domain.RoleHRAdmin},
+	})
+	_, appErr = svc.CreateManagedUser(adminCtx, CreateManagedUserParams{
+		Username:    "occupied_team_member",
+		EmployeeNo:  intPtr(3400),
+		DisplayName: "Occupied Team Member",
+		Department:  domain.Department("占用运营部"),
+		Team:        "淘系运营二部",
+		Mobile:      "13879000000",
+		Password:    "Init12345",
+		Roles:       []domain.Role{domain.RoleOps},
+	})
+	if appErr != nil {
+		t.Fatalf("CreateManagedUser(conflict member) unexpected error: %+v", appErr)
+	}
+	orgRepo.teams[conflict.ID].Enabled = false
+
+	nextName := "淘系运营二部"
+	updated, appErr := svc.UpdateTeam(context.Background(), UpdateOrgTeamParams{
+		ID:   current.ID,
+		Name: &nextName,
+	})
+	if appErr == nil {
+		t.Fatalf("UpdateTeam(rename into occupied disabled conflict) appErr = nil, updated = %+v", updated)
+	}
+	if appErr.Code != domain.ErrCodeInvalidRequest {
+		t.Fatalf("UpdateTeam(rename) code = %s, want %s", appErr.Code, domain.ErrCodeInvalidRequest)
+	}
+	details, ok := appErr.Details.(map[string]interface{})
+	if !ok {
+		t.Fatalf("UpdateTeam(rename) details = %#v, want map", appErr.Details)
+	}
+	if details["deny_code"] != "team_name_conflict" {
+		t.Fatalf("UpdateTeam(rename) deny_code = %v, want team_name_conflict", details["deny_code"])
+	}
+	if got := orgRepo.teams[current.ID].Name; got != "淘系二组" {
+		t.Fatalf("current team name = %q, want unchanged", got)
+	}
+	if _, ok := orgRepo.teams[conflict.ID]; !ok {
+		t.Fatalf("occupied disabled conflict team id=%d was deleted", conflict.ID)
+	}
+}
+
 func TestIdentityServiceDisableTeamAndDepartmentMovesUsersToUnassignedPool(t *testing.T) {
 	ConfigureTaskOrgCatalog(domain.AuthSettings{})
 	defer ConfigureTaskOrgCatalog(domain.AuthSettings{})

@@ -213,6 +213,7 @@ func (s *identityService) UpdateTeam(ctx context.Context, p UpdateOrgTeamParams)
 	}
 	originalName := current.Name
 	disableRequested := p.Enabled != nil && !*p.Enabled
+	var staleNameConflict *domain.OrgTeam
 	if p.Name != nil {
 		name := strings.TrimSpace(*p.Name)
 		if name == "" {
@@ -222,9 +223,11 @@ func (s *identityService) UpdateTeam(ctx context.Context, p UpdateOrgTeamParams)
 			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "停用小组时不能同时修改名称。", map[string]interface{}{"deny_code": "org_delete_rename_conflict"})
 		}
 		if name != current.Name {
-			if appErr := s.ensureTeamNameAvailable(ctx, current.DepartmentID, name, current.ID); appErr != nil {
+			conflict, appErr := s.resolveTeamRenameConflict(ctx, current, name)
+			if appErr != nil {
 				return nil, appErr
 			}
+			staleNameConflict = conflict
 			current.Name = name
 		}
 	}
@@ -262,6 +265,11 @@ func (s *identityService) UpdateTeam(ctx context.Context, p UpdateOrgTeamParams)
 	}
 	current.Enabled = nextEnabled
 	if err := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
+		if staleNameConflict != nil {
+			if err := s.orgRepo.DeleteTeam(ctx, tx, staleNameConflict.ID); err != nil {
+				return err
+			}
+		}
 		if current.Name != originalName {
 			if err := s.rewriteUsersForTeamRename(ctx, tx, current.Department, originalName, current.Name); err != nil {
 				return err
@@ -503,15 +511,28 @@ func (s *identityService) DeleteTeam(ctx context.Context, id int64) *domain.AppE
 	return nil
 }
 
-func (s *identityService) ensureTeamNameAvailable(ctx context.Context, departmentID int64, name string, excludeTeamID int64) *domain.AppError {
-	existing, err := s.orgRepo.GetTeamByDepartmentAndName(ctx, departmentID, strings.TrimSpace(name))
+func (s *identityService) resolveTeamRenameConflict(ctx context.Context, current *domain.OrgTeam, name string) (*domain.OrgTeam, *domain.AppError) {
+	if current == nil {
+		return nil, nil
+	}
+	name = strings.TrimSpace(name)
+	existing, err := s.orgRepo.GetTeamByDepartmentAndName(ctx, current.DepartmentID, name)
 	if err != nil {
-		return infraError("get org team by department and name", err)
+		return nil, infraError("get org team by department and name", err)
 	}
-	if existing != nil && existing.ID != excludeTeamID {
-		return domain.NewAppError(domain.ErrCodeInvalidRequest, "该部门下已存在同名小组，请换一个名称。", map[string]interface{}{"deny_code": "team_name_conflict", "team": name})
+	if existing == nil || existing.ID == current.ID {
+		return nil, nil
 	}
-	return nil
+	if !existing.Enabled {
+		counts, appErr := s.collectOrgMemberCounts(ctx)
+		if appErr != nil {
+			return nil, appErr
+		}
+		if counts.teams[orgMemberCountKey(current.Department, existing.Name)] == 0 {
+			return existing, nil
+		}
+	}
+	return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "该部门下已存在同名小组，请换一个名称。", map[string]interface{}{"deny_code": "team_name_conflict", "team": name})
 }
 
 func (s *identityService) rewriteUsersForDepartmentRename(ctx context.Context, tx repo.Tx, oldName, newName string) error {
@@ -658,10 +679,11 @@ func userReferencesDepartmentName(user *domain.User, department string) bool {
 // inside a single transaction; one combined pass keeps every row's update
 // atomic and halves the transaction's write volume.
 func (s *identityService) rewriteAllUsers(ctx context.Context, tx repo.Tx, mutate func(*domain.User) bool) error {
-	const pageSize = 500
+	const pageSize = 100
 	allUsers := make([]*domain.User, 0)
+	seen := 0
 	for page := 1; ; page++ {
-		users, _, err := s.userRepo.List(ctx, repo.UserListFilter{
+		users, total, err := s.userRepo.List(ctx, repo.UserListFilter{
 			Page:     page,
 			PageSize: pageSize,
 		})
@@ -672,7 +694,8 @@ func (s *identityService) rewriteAllUsers(ctx context.Context, tx repo.Tx, mutat
 			break
 		}
 		allUsers = append(allUsers, users...)
-		if len(users) < pageSize {
+		seen += len(users)
+		if seen >= int(total) {
 			break
 		}
 	}

@@ -364,7 +364,7 @@ curl -X POST https://api.example.com/v1/org/teams \
 ### 简介
 支持方法: PUT, DELETE。
 
-- `PUT`: Updates one backend org team. Supports renaming (`name`) and stopping use (`enabled=false`). When a team is stopped, it disappears from enabled org options and existing assigned users are moved to the system `未分配/未分配池`. The system unassigned pool team cannot be deleted. Historical task snapshots are not rewritten.
+- `PUT`: Updates one backend org team. Supports renaming (`name`) and stopping use (`enabled=false`). When renaming into a name held only by a disabled, zero-member team in the same department, the stale disabled row is reclaimed and the active team takes that name. When a team is stopped, it disappears from enabled org options and existing assigned users are moved to the system `未分配/未分配池`. The system unassigned pool team cannot be deleted. Historical task snapshots are not rewritten.
 - `DELETE`: Permanently removes one non-system team from backend org master. Existing assigned users are moved to the system `未分配/未分配池` before the org row is deleted, and managed-team scope references to the removed team are cleared. Historical task snapshots are not rewritten. The system unassigned pool team is rejected with 400.
 
 ### 鉴权与 RBAC

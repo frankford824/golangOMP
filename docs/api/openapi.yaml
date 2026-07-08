@@ -9221,6 +9221,8 @@ paths:
       summary: Update organization team
       description: |
         Updates one backend org team. Supports renaming (`name`) and stopping use (`enabled=false`).
+        When renaming into a name held only by a disabled, zero-member team in the same department,
+        the stale disabled row is reclaimed and the active team takes that name.
         When a team is stopped, it disappears from enabled org options and existing assigned users are moved
         to the system `未分配/未分配池`. The system unassigned pool team cannot be deleted.
         Historical task snapshots are not rewritten.
