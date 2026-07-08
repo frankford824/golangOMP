@@ -76,6 +76,7 @@ func main() {
 		AccessKeyID:     cfg.OSSDirect.AccessKeyID,
 		AccessKeySecret: cfg.OSSDirect.AccessKeySecret,
 		PresignExpiry:   cfg.OSSDirect.PresignExpiry,
+		HTTPTimeout:     cfg.OSSDirect.HTTPTimeout,
 		PublicEndpoint:  cfg.OSSDirect.PublicEndpoint,
 		PartSize:        cfg.OSSDirect.PartSize,
 	})

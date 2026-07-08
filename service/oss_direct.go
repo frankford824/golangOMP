@@ -31,6 +31,7 @@ type OSSDirectConfig struct {
 	AccessKeyID     string
 	AccessKeySecret string
 	PresignExpiry   time.Duration
+	HTTPTimeout     time.Duration
 	PublicEndpoint  string
 	PartSize        int64
 }
@@ -47,6 +48,9 @@ func NewOSSDirectService(cfg OSSDirectConfig) *OSSDirectService {
 	if cfg.PresignExpiry <= 0 {
 		cfg.PresignExpiry = 15 * time.Minute
 	}
+	if cfg.HTTPTimeout <= 0 {
+		cfg.HTTPTimeout = 5 * time.Minute
+	}
 	if cfg.PublicEndpoint == "" {
 		cfg.PublicEndpoint = cfg.Endpoint
 	}
@@ -55,7 +59,7 @@ func NewOSSDirectService(cfg OSSDirectConfig) *OSSDirectService {
 	}
 	return &OSSDirectService{
 		cfg:        cfg,
-		httpClient: &http.Client{Timeout: 30 * time.Second},
+		httpClient: &http.Client{Timeout: cfg.HTTPTimeout},
 		nowFn:      time.Now,
 	}
 }

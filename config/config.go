@@ -120,6 +120,7 @@ type OSSDirectConfig struct {
 	AccessKeyID     string
 	AccessKeySecret string
 	PresignExpiry   time.Duration
+	HTTPTimeout     time.Duration
 	PublicEndpoint  string
 	PartSize        int64
 }
@@ -353,6 +354,7 @@ func Load() (*Config, error) {
 			AccessKeyID:     getEnv("OSS_ACCESS_KEY_ID", ""),
 			AccessKeySecret: getEnv("OSS_ACCESS_KEY_SECRET", ""),
 			PresignExpiry:   mustParseDuration(getEnv("OSS_PRESIGN_EXPIRY", "15m")),
+			HTTPTimeout:     mustParseDuration(getEnv("OSS_HTTP_TIMEOUT", "5m")),
 			PublicEndpoint:  getEnv("OSS_PUBLIC_ENDPOINT", ""),
 			PartSize:        mustParseInt64(getEnv("OSS_PART_SIZE", "10485760")),
 		},

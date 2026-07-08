@@ -36,6 +36,7 @@ Environment variables for OSS direct:
 - `OSS_ACCESS_KEY_ID`: access key ID (short-lived or scoped recommended)
 - `OSS_ACCESS_KEY_SECRET`: access key secret
 - `OSS_PRESIGN_EXPIRY`: presigned URL lifetime (default: `15m`)
+- `OSS_HTTP_TIMEOUT`: server-side OSS HTTP request timeout (default: `5m`)
 - `OSS_PART_SIZE`: multipart part size in bytes (default: `10485760` = 10MB)
 
 OSS bucket CORS requirement: the bucket must allow `PUT` and `GET` from the frontend origin(s) with `ETag` exposed in `Access-Control-Expose-Headers`.
