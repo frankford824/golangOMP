@@ -313,6 +313,7 @@ type ExternalAssetRepo interface {
 	GetByID(ctx context.Context, id int64) (*domain.ExternalAssetRecord, error)
 	CreateSyncRun(ctx context.Context, run *domain.ExternalAssetSyncRun) (int64, error)
 	FinishSyncRun(ctx context.Context, id int64, status string, scannedCount, upsertedCount int, errorMessage string) error
+	MarkOriginPathMissing(ctx context.Context, provider, mountPath, originPath string) error
 	MarkMountMissingBefore(ctx context.Context, mountPath string, scannedBefore time.Time) error
 	UpdateDirectURL(ctx context.Context, id int64, rawURL string, expiresAt *time.Time, status string) error
 	MarkOSSPreparePending(ctx context.Context, id int64) error

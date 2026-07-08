@@ -92,6 +92,36 @@ func TestBFFSearchPrefersParentAndNameWhenFullPathLosesLeadingSpace(t *testing.T
 	}
 }
 
+func TestBFFFetchAvailableChecksPathWithoutFollowingBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/fetch" {
+			t.Fatalf("path=%s, want /api/fetch", r.URL.Path)
+		}
+		if got := r.Header.Get("Range"); got != "bytes=0-0" {
+			t.Fatalf("Range=%q, want bytes=0-0", got)
+		}
+		switch r.URL.Query().Get("path") {
+		case "/p3/exists.jpg":
+			w.WriteHeader(http.StatusOK)
+		case "/p3/missing.jpg":
+			http.Error(w, "file not found", http.StatusNotFound)
+		default:
+			t.Fatalf("unexpected path query %q", r.URL.Query().Get("path"))
+		}
+	}))
+	defer server.Close()
+
+	client := NewBFFClient(server.URL, "", time.Second)
+	ok, err := client.FetchAvailable(context.Background(), "/p3/exists.jpg")
+	if err != nil || !ok {
+		t.Fatalf("FetchAvailable exists = %v, %v; want true nil", ok, err)
+	}
+	ok, err = client.FetchAvailable(context.Background(), "/p3/missing.jpg")
+	if err != nil || ok {
+		t.Fatalf("FetchAvailable missing = %v, %v; want false nil", ok, err)
+	}
+}
+
 func TestSyncFullIndexWalksMountAndFiltersSystemFiles(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req map[string]interface{}
@@ -527,39 +557,46 @@ func TestPreviewInfoQueuesDerivedPreviewInsteadOfReturningBFFURL(t *testing.T) {
 
 func TestSearchReturnsCacheAndSchedulesKeywordRefresh(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/search" {
-			t.Fatalf("path=%s, want /api/search", r.URL.Path)
-		}
-		if got := r.URL.Query().Get("q"); got != "png" {
-			t.Fatalf("q=%q, want png", got)
-		}
-		if got := r.URL.Query().Get("mounts"); got != "/p3" {
-			t.Fatalf("mounts=%q, want /p3", got)
-		}
-		if got := r.URL.Query().Get("match"); got != "contains" {
-			t.Fatalf("match=%q, want contains", got)
-		}
-		if got := r.URL.Query().Get("only_files"); got != "1" {
-			t.Fatalf("only_files=%q, want 1", got)
-		}
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"items": []map[string]interface{}{
-				{
-					"parent":    "/p3/#recycle",
-					"name":      "old.png",
-					"is_dir":    false,
-					"size":      11,
-					"full_path": "/p3/#recycle/old.png",
+		switch r.URL.Path {
+		case "/api/search":
+			if got := r.URL.Query().Get("q"); got != "png" {
+				t.Fatalf("q=%q, want png", got)
+			}
+			if got := r.URL.Query().Get("mounts"); got != "/p3" {
+				t.Fatalf("mounts=%q, want /p3", got)
+			}
+			if got := r.URL.Query().Get("match"); got != "contains" {
+				t.Fatalf("match=%q, want contains", got)
+			}
+			if got := r.URL.Query().Get("only_files"); got != "1" {
+				t.Fatalf("only_files=%q, want 1", got)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"items": []map[string]interface{}{
+					{
+						"parent":    "/p3/#recycle",
+						"name":      "old.png",
+						"is_dir":    false,
+						"size":      11,
+						"full_path": "/p3/#recycle/old.png",
+					},
+					{
+						"parent":    "/p3/designs",
+						"name":      "fresh.png",
+						"is_dir":    false,
+						"size":      22,
+						"full_path": "/p3/designs/fresh.png",
+					},
 				},
-				{
-					"parent":    "/p3/designs",
-					"name":      "fresh.png",
-					"is_dir":    false,
-					"size":      22,
-					"full_path": "/p3/designs/fresh.png",
-				},
-			},
-		})
+			})
+		case "/api/fetch":
+			if r.URL.Query().Get("path") != "/p3/designs/fresh.png" {
+				t.Fatalf("unexpected fetch path %q", r.URL.Query().Get("path"))
+			}
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Fatalf("path=%s, want /api/search or /api/fetch", r.URL.Path)
+		}
 	}))
 	defer server.Close()
 
@@ -594,19 +631,87 @@ func TestSearchReturnsCacheAndSchedulesKeywordRefresh(t *testing.T) {
 	}
 }
 
+func TestKeywordRefreshSkipsAndMarksMissingNASLocalStaleSearchItems(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/search":
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"items": []map[string]interface{}{
+					{
+						"parent":    "/p3/KT/designs",
+						"name":      "HSC12654.jpg",
+						"is_dir":    false,
+						"size":      22,
+						"full_path": "/p3/KT/designs/HSC12654.jpg",
+					},
+					{
+						"parent":    "/p3/designs",
+						"name":      "HSC12654.jpg",
+						"is_dir":    false,
+						"size":      22,
+						"full_path": "/p3/designs/HSC12654.jpg",
+					},
+				},
+			})
+		case "/api/fetch":
+			switch r.URL.Query().Get("path") {
+			case "/p3/KT/designs/HSC12654.jpg":
+				w.WriteHeader(http.StatusOK)
+			case "/p3/designs/HSC12654.jpg":
+				http.Error(w, "file not found", http.StatusNotFound)
+			default:
+				t.Fatalf("unexpected fetch path %q", r.URL.Query().Get("path"))
+			}
+		default:
+			t.Fatalf("path=%s, want /api/search or /api/fetch", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	repo := &externalAssetRepoStub{}
+	svc := NewService(repo, Config{
+		Enabled:    true,
+		BFFBaseURL: server.URL,
+		Mounts:     ParseMounts("/p3:nas_local"),
+	}, nil)
+
+	if err := svc.SyncKeyword(context.Background(), "HSC12654", 20); err != nil {
+		t.Fatalf("SyncKeyword() error = %v", err)
+	}
+	if len(repo.upserts) != 1 || repo.upserts[0].OriginPath != "/p3/KT/designs/HSC12654.jpg" {
+		t.Fatalf("upserts=%+v, want only verified KT path", repo.upserts)
+	}
+	if len(repo.missingOrigins) != 1 || repo.missingOrigins[0] != "/p3/designs/HSC12654.jpg" {
+		t.Fatalf("missing origins=%+v, want stale path marked missing", repo.missingOrigins)
+	}
+	if len(repo.finishedRuns) != 1 || repo.finishedRuns[0].scanned != 2 || repo.finishedRuns[0].upserted != 1 || repo.finishedRuns[0].status != domain.ExternalAssetSyncRunStatusCompleted {
+		t.Fatalf("finishedRuns=%+v, want completed scanned=2 upserted=1", repo.finishedRuns)
+	}
+}
+
 func TestKeywordRefreshFallsBackToAListWhenBFFOnlyReturnsSystemFiles(t *testing.T) {
 	bff := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]interface{}{
-			"items": []map[string]interface{}{
-				{
-					"parent":    "/p3/#recycle",
-					"name":      "old.png",
-					"is_dir":    false,
-					"size":      11,
-					"full_path": "/p3/#recycle/old.png",
+		switch r.URL.Path {
+		case "/api/search":
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"items": []map[string]interface{}{
+					{
+						"parent":    "/p3/#recycle",
+						"name":      "old.png",
+						"is_dir":    false,
+						"size":      11,
+						"full_path": "/p3/#recycle/old.png",
+					},
 				},
-			},
-		})
+			})
+		case "/api/fetch":
+			if r.URL.Query().Get("path") != "/p3/designs/fresh.png" {
+				t.Fatalf("unexpected fetch path %q", r.URL.Query().Get("path"))
+			}
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Fatalf("path=%s, want /api/search or /api/fetch", r.URL.Path)
+		}
 	}))
 	defer bff.Close()
 	alist := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -789,6 +894,7 @@ type externalAssetRepoStub struct {
 		message  string
 	}
 	missingMount      string
+	missingOrigins    []string
 	searchRows        []*domain.ExternalAssetRecord
 	searchTotal       int64
 	searchQueries     []domain.ExternalAssetSearchQuery
@@ -869,6 +975,11 @@ func (r *externalAssetRepoStub) FinishSyncRun(_ context.Context, id int64, statu
 
 func (r *externalAssetRepoStub) MarkMountMissingBefore(_ context.Context, mountPath string, _ time.Time) error {
 	r.missingMount = mountPath
+	return nil
+}
+
+func (r *externalAssetRepoStub) MarkOriginPathMissing(_ context.Context, _, _, originPath string) error {
+	r.missingOrigins = append(r.missingOrigins, originPath)
 	return nil
 }
 

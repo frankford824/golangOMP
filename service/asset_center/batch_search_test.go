@@ -221,6 +221,71 @@ func TestBatchSearchMatchesExternalAssetsBySKU(t *testing.T) {
 	}
 }
 
+func TestBatchSearchDedupesExternalExactFileDuplicates(t *testing.T) {
+	now := time.Date(2026, 7, 8, 10, 0, 0, 0, time.UTC)
+	externalRepo := &assetCenterExternalRepoStub{
+		searchRows: []*domain.ExternalAssetRecord{
+			{
+				ID:            77,
+				ResourceID:    domain.ExternalAssetResourceID(77),
+				Provider:      "alist",
+				Kind:          domain.ExternalAssetKindNASLocal,
+				MountPath:     "/p3",
+				OriginPath:    "/p3/KT/designs/HSC12654.jpg",
+				ParentPath:    "/p3/KT/designs",
+				FileName:      "HSC12654.jpg",
+				FileExt:       ".jpg",
+				MimeType:      "image/jpeg",
+				FileSize:      12345,
+				Status:        domain.ExternalAssetStatusIndexed,
+				OSSSyncStatus: domain.ExternalAssetOSSStatusNone,
+				PreviewStatus: domain.ExternalAssetPreviewStatusNone,
+				CreatedAt:     now,
+				UpdatedAt:     now.Add(time.Minute),
+			},
+			{
+				ID:            78,
+				ResourceID:    domain.ExternalAssetResourceID(78),
+				Provider:      "alist",
+				Kind:          domain.ExternalAssetKindNASLocal,
+				MountPath:     "/p3",
+				OriginPath:    "/p3/designs/HSC12654.jpg",
+				ParentPath:    "/p3/designs",
+				FileName:      "HSC12654.jpg",
+				FileExt:       ".jpg",
+				MimeType:      "image/jpeg",
+				FileSize:      12345,
+				Status:        domain.ExternalAssetStatusIndexed,
+				OSSSyncStatus: domain.ExternalAssetOSSStatusNone,
+				PreviewStatus: domain.ExternalAssetPreviewStatusNone,
+				CreatedAt:     now,
+				UpdatedAt:     now,
+			},
+		},
+	}
+	svc := NewService(&excelPackageRepoStub{}, excelPackagePresignerStub{}, nil)
+	svc.SetExternalAssetService(externalassets.NewService(externalRepo, externalassets.Config{
+		Enabled: true,
+		Mounts:  externalassets.ParseMounts("/p3:nas_local"),
+	}, nil))
+
+	result, appErr := svc.BatchSearch(context.Background(), BatchSearchRequest{
+		Terms:        []string{"HSC12654"},
+		FormatFilter: "jpg_png",
+		AssetKind:    "delivery",
+	})
+	if appErr != nil {
+		t.Fatalf("BatchSearch error = %+v", appErr)
+	}
+	item := result.Results[0]
+	if item.Candidates != 1 || len(item.Assets) != 1 {
+		t.Fatalf("candidates/assets = %d/%+v, want exact duplicate collapsed", item.Candidates, item.Assets)
+	}
+	if item.Assets[0].ResourceID != "ext-77" {
+		t.Fatalf("asset = %+v, want first ranked duplicate ext-77", item.Assets[0])
+	}
+}
+
 func TestBatchSearchFiltersAssetKind(t *testing.T) {
 	uploaded := string(domain.DesignAssetUploadStatusUploaded)
 	scopeSKU := "NSKT000262"

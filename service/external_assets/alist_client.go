@@ -296,6 +296,40 @@ func (c *BFFClient) DirectURL(ctx context.Context, filePath string, inline bool)
 	return "", fmt.Errorf("external asset bff direct link unavailable: status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(raw)))
 }
 
+func (c *BFFClient) FetchAvailable(ctx context.Context, filePath string) (bool, error) {
+	if !c.Enabled() {
+		return false, fmt.Errorf("external asset bff is not configured")
+	}
+	q := url.Values{}
+	q.Set("path", cleanAListPath(filePath))
+	q.Set("proxy", "0")
+	client := *c.httpClient
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/fetch?"+q.Encode(), nil)
+	if err != nil {
+		return false, err
+	}
+	req.Header.Set("Range", "bytes=0-0")
+	resp, err := client.Do(req)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+	switch {
+	case resp.StatusCode >= 200 && resp.StatusCode < 300:
+		return true, nil
+	case resp.StatusCode == http.StatusFound || resp.StatusCode == http.StatusTemporaryRedirect || resp.StatusCode == http.StatusSeeOther || resp.StatusCode == http.StatusPermanentRedirect:
+		return strings.TrimSpace(resp.Header.Get("Location")) != "", nil
+	case resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusGone:
+		return false, nil
+	default:
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		return false, fmt.Errorf("external asset bff fetch probe status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(raw)))
+	}
+}
+
 func (c *BFFClient) BrowserFetchURL(filePath string, inline bool, proxy bool) string {
 	if !c.Enabled() || strings.TrimSpace(c.browserBaseURL) == "" {
 		return ""

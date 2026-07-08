@@ -96,6 +96,10 @@ func (r *assetCenterExternalRepoStub) MarkMountMissingBefore(context.Context, st
 	return nil
 }
 
+func (r *assetCenterExternalRepoStub) MarkOriginPathMissing(context.Context, string, string, string) error {
+	return nil
+}
+
 func (r *assetCenterExternalRepoStub) UpdateDirectURL(_ context.Context, id int64, rawURL string, expiresAt *time.Time, status string) error {
 	row, err := r.GetByID(context.Background(), id)
 	if err != nil || row == nil {

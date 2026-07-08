@@ -550,6 +550,48 @@ func (r *externalAssetRepo) GetByID(ctx context.Context, id int64) (*domain.Exte
 	return scanExternalAssetRow(row)
 }
 
+func (r *externalAssetRepo) MarkOriginPathMissing(ctx context.Context, provider, mountPath, originPath string) error {
+	item := domain.ExternalAssetUpsert{
+		Provider:   provider,
+		MountPath:  mountPath,
+		OriginPath: originPath,
+	}.Normalized()
+	if item.OriginPath == "" {
+		return nil
+	}
+	hash := domain.ExternalAssetOriginHash(item.Provider, item.MountPath, item.OriginPath)
+	tx, err := r.db.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin external origin missing update: %w", err)
+	}
+	defer tx.Rollback()
+	existing, err := getExternalAssetCountStateForUpdate(ctx, tx, hash)
+	if err != nil {
+		return err
+	}
+	if existing == nil || existing.Status == domain.ExternalAssetStatusMissing {
+		return nil
+	}
+	_, err = tx.ExecContext(ctx, `
+		UPDATE external_asset_records
+		   SET status = 'missing'
+		 WHERE origin_path_hash = ?
+		   AND status <> 'missing'`,
+		hash)
+	if err != nil {
+		return fmt.Errorf("mark external origin missing: %w", err)
+	}
+	if !existing.IsDir {
+		if err := applyExternalAssetDirectoryCountDelta(ctx, tx, existing.Provider, existing.Kind, existing.Driver, existing.MountPath, existing.ParentPath, time.Now().UTC(), -1); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit external origin missing update: %w", err)
+	}
+	return nil
+}
+
 func (r *externalAssetRepo) CreateSyncRun(ctx context.Context, run *domain.ExternalAssetSyncRun) (int64, error) {
 	if run == nil {
 		return 0, fmt.Errorf("external asset sync run is required")

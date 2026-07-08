@@ -135,6 +135,7 @@ func (s *Service) batchSearchOne(ctx context.Context, term, formatFilter, assetK
 		}
 		return candidates[i].createdAt.After(candidates[j].createdAt)
 	})
+	candidates = dedupeBatchSearchExternalFileCandidates(candidates)
 	assets := make([]AssetDetail, 0, len(candidates))
 	for _, candidate := range candidates {
 		if candidate.detail == nil {
@@ -220,6 +221,40 @@ func normalizeBatchSearchTerms(raw []string) []string {
 		terms = append(terms, term)
 	}
 	return terms
+}
+
+func dedupeBatchSearchExternalFileCandidates(candidates []scoredBatchSearchAsset) []scoredBatchSearchAsset {
+	if len(candidates) < 2 {
+		return candidates
+	}
+	seen := map[string]struct{}{}
+	out := make([]scoredBatchSearchAsset, 0, len(candidates))
+	for _, candidate := range candidates {
+		key := batchSearchExternalFileFingerprint(candidate.detail)
+		if key != "" {
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+		}
+		out = append(out, candidate)
+	}
+	return out
+}
+
+func batchSearchExternalFileFingerprint(asset *AssetDetail) string {
+	if asset == nil || asset.SourceType != string(domain.AssetResourceSourceExternal) {
+		return ""
+	}
+	size := int64(0)
+	if asset.FileSize != nil {
+		size = *asset.FileSize
+	}
+	name := strings.ToLower(strings.TrimSpace(firstNonEmptyExcelPackage(asset.FileName, asset.OriginalFilename)))
+	if name == "" || size <= 0 {
+		return ""
+	}
+	return name + "|" + strconv.FormatInt(size, 10)
 }
 
 func normalizeBatchSearchFormat(value string) string {

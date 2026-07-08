@@ -679,6 +679,27 @@ func (s *Service) SyncKeyword(ctx context.Context, keyword string, perMountLimit
 			}
 			scanned++
 			upsert := s.upsertFromSearchItem(mount, item)
+			available, err := s.keywordSearchItemAvailable(ctx, mount, upsert)
+			if err != nil {
+				if firstErr == nil {
+					firstErr = err
+				}
+				if mountErr == nil {
+					mountErr = err
+				}
+				continue
+			}
+			if !available {
+				if err := s.repo.MarkOriginPathMissing(ctx, upsert.Provider, upsert.MountPath, upsert.OriginPath); err != nil {
+					if firstErr == nil {
+						firstErr = err
+					}
+					if mountErr == nil {
+						mountErr = err
+					}
+				}
+				continue
+			}
 			if _, err := s.repo.Upsert(ctx, upsert); err != nil {
 				if firstErr == nil {
 					firstErr = err
@@ -699,6 +720,35 @@ func (s *Service) SyncKeyword(ctx context.Context, keyword string, perMountLimit
 		s.finishSyncRun(ctx, runID, status, scanned, upserted, errMessage)
 	}
 	return firstErr
+}
+
+func (s *Service) keywordSearchItemAvailable(ctx context.Context, mount MountConfig, item domain.ExternalAssetUpsert) (bool, error) {
+	if item.IsDir || mount.Kind != domain.ExternalAssetKindNASLocal {
+		return true, nil
+	}
+	if base := strings.TrimSpace(s.cfg.LocalPathMappings[item.MountPath]); base != "" {
+		if _, err := os.Stat(base); err == nil {
+			rel := strings.TrimLeft(strings.TrimPrefix(item.OriginPath, item.MountPath), "/")
+			localPath := filepath.Join(base, filepath.FromSlash(rel))
+			if _, err := os.Stat(localPath); err == nil {
+				return true, nil
+			} else if os.IsNotExist(err) {
+				return false, nil
+			} else {
+				return false, fmt.Errorf("verify external asset local path %s: %w", item.OriginPath, err)
+			}
+		} else if err != nil && !os.IsNotExist(err) {
+			return false, fmt.Errorf("verify external asset local mount %s: %w", item.MountPath, err)
+		}
+	}
+	if s.bff != nil && s.bff.Enabled() {
+		ok, err := s.bff.FetchAvailable(ctx, item.OriginPath)
+		if err != nil {
+			return false, fmt.Errorf("verify external asset bff path %s: %w", item.OriginPath, err)
+		}
+		return ok, nil
+	}
+	return false, fmt.Errorf("nas local keyword result cannot be verified: %s", item.OriginPath)
 }
 
 func (s *Service) SyncFullIndex(ctx context.Context) (*FullSyncResult, error) {
