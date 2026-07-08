@@ -170,6 +170,54 @@ func TestTaskServiceCreateLegacyOwnerTeamBackfillsCanonicalDepartmentWhenUnique(
 	}
 }
 
+func TestTaskServiceCreateDerivesOwnershipFromSessionActorWhenOwnerFieldsOmitted(t *testing.T) {
+	taskRepo := &prdTaskRepo{}
+	svc := NewTaskService(
+		taskRepo,
+		&prdProcurementRepo{},
+		&prdTaskAssetRepo{},
+		&prdTaskEventRepo{},
+		nil,
+		&prdWarehouseRepo{},
+		prdCodeRuleService{},
+		step04TxRunner{},
+	)
+	ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{
+		ID:         291,
+		Username:   "ops-user",
+		Roles:      []domain.Role{domain.RoleMember, domain.RoleOps},
+		Department: string(domain.DepartmentOperations),
+		Team:       "淘系一组",
+		Source:     domain.RequestActorSourceSessionToken,
+		AuthMode:   domain.AuthModeSessionTokenRoleEnforced,
+	})
+
+	task, appErr := svc.Create(ctx, CreateTaskParams{
+		TaskType:            domain.TaskTypeNewProductDevelopment,
+		SourceMode:          domain.TaskSourceModeNewProduct,
+		CreatorID:           291,
+		DeadlineAt:          timePtr(),
+		CategoryCode:        "LIGHTBOX",
+		MaterialMode:        string(domain.MaterialModePreset),
+		Material:            "铝型材",
+		ProductNameSnapshot: "Actor Owned Lightbox",
+		ProductShortName:    "ActorOwned",
+		DesignRequirement:   "need design",
+	})
+	if appErr != nil {
+		t.Fatalf("Create() unexpected error: %+v", appErr)
+	}
+	if task.OwnerTeam != "内贸运营组" {
+		t.Fatalf("Create() owner_team = %q, want 内贸运营组", task.OwnerTeam)
+	}
+	if task.OwnerDepartment != string(domain.DepartmentOperations) {
+		t.Fatalf("Create() owner_department = %q, want %q", task.OwnerDepartment, domain.DepartmentOperations)
+	}
+	if task.OwnerOrgTeam != "淘系一组" {
+		t.Fatalf("Create() owner_org_team = %q, want 淘系一组", task.OwnerOrgTeam)
+	}
+}
+
 func TestTaskServiceListHydratesCanonicalOwnershipFields(t *testing.T) {
 	taskRepo := &prdTaskRepo{
 		listItems: []*domain.TaskListItem{

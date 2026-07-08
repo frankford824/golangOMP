@@ -4883,8 +4883,8 @@ components:
         remark: { type: string }
     CreateTaskRequest:
       type: object
-      description: Task creation payload for `original_product_development`, `new_product_development`, `purchase_task`, and `retouch_task`. Canonical task ownership is `owner_department` plus `owner_org_team`. `owner_team` remains accepted as a compatibility field. `original_product_development` does not support batch SKU creation. `new_product_development` and `purchase_task` accept `batch_sku_mode=multiple` with `batch_items`.
-      required: [task_type, owner_team]
+      description: Task creation payload for `original_product_development`, `new_product_development`, `purchase_task`, and `retouch_task`. Canonical task ownership is `owner_department` plus `owner_org_team`. `owner_team` remains accepted as a compatibility field. When all owner fields are omitted by a session-backed actor, backend derives task ownership from the actor's current department and team before create authorization. `original_product_development` does not support batch SKU creation. `new_product_development` and `purchase_task` accept `batch_sku_mode=multiple` with `batch_items`.
+      required: [task_type]
       properties:
         client_create_id:
           type: string
@@ -4907,7 +4907,7 @@ components:
           nullable: true
         owner_team:
           type: string
-          description: Required compatibility owner-team input. Supported `/v1/org/options` org-team values with deterministic task mappings may be normalized before validation and persisted into canonical ownership fields. Unsupported values return `invalid_owner_team`.
+          description: Compatibility owner-team input. Supported `/v1/org/options` org-team values with deterministic task mappings may be normalized before validation and persisted into canonical ownership fields. Required unless ownership can be derived from a session-backed actor's current organization. Unsupported values return `invalid_owner_team`.
         owner_department:
           type: string
           description: Optional canonical task owner department hint. When provided with `owner_org_team` or a compatible org-team `owner_team`, backend validates consistency before create.

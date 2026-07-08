@@ -635,6 +635,7 @@ func (s *taskService) taskActionAuthorizer() *taskActionAuthorizer {
 
 func (s *taskService) Create(ctx context.Context, p CreateTaskParams) (created *domain.Task, appErr *domain.AppError) {
 	p = normalizeCreateTaskRequest(p)
+	applyActorOrgOwnershipFallbackForTaskCreate(ctx, &p)
 	var reservation taskCreateIdempotencyReservation
 	defer func() {
 		if appErr != nil {

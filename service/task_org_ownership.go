@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"strings"
 
 	"workflow/domain"
@@ -11,6 +12,36 @@ type taskCanonicalOrgOwnership struct {
 	OwnerDepartment string
 	OwnerOrgTeam    string
 	LegacyOwnerTeam string
+}
+
+func applyActorOrgOwnershipFallbackForTaskCreate(ctx context.Context, p *CreateTaskParams) {
+	if p == nil ||
+		strings.TrimSpace(p.rawOwnerTeam) != "" ||
+		strings.TrimSpace(p.rawOwnerDepartment) != "" ||
+		strings.TrimSpace(p.rawOwnerOrgTeam) != "" {
+		return
+	}
+	actor, ok := domain.RequestActorFromContext(ctx)
+	if !ok || !domain.IsSessionBackedRequestActor(actor) {
+		return
+	}
+
+	department := normalizeTaskDepartmentCode(firstNonEmptyString(actor.Department, actor.FrontendAccess.Department))
+	team := strings.TrimSpace(firstNonEmptyString(actor.Team, actor.FrontendAccess.Team))
+	if department == "" && team == "" {
+		return
+	}
+
+	if department != "" {
+		p.OwnerDepartment = department
+		p.rawOwnerDepartment = department
+	}
+	if team != "" {
+		p.OwnerOrgTeam = team
+		p.rawOwnerOrgTeam = team
+		p.OwnerTeam = team
+		p.rawOwnerTeam = team
+	}
 }
 
 func resolveTaskCanonicalOrgOwnership(p CreateTaskParams) (taskCanonicalOrgOwnership, *domain.AppError) {

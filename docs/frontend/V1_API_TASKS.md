@@ -1577,7 +1577,7 @@ Content-Type: `application/json`
 | `business_lane` | enum(normal/customization) | 否 | Canonical task lane selector (`normal` or `customization`). Drives audit-domain routing. |
 | `workflow_lane` | enum(normal/customization) | 否 | Compatibility alias of `business_lane`. |
 | `source_mode` | enum(existing_product/new_product) | 否 | - |
-| `owner_team` | string | 是 | Required compatibility owner-team input. Supported `/v1/org/options` org-team values with deterministic task mappings may be normalized before validation and persisted into canonical ownership fields. Unsupported values return `invalid_owner_team`. |
+| `owner_team` | string | 否 | Compatibility owner-team input. Supported `/v1/org/options` org-team values with deterministic task mappings may be normalized before validation and persisted into canonical ownership fields. Required unless ownership can be derived from a session-backed actor's current organization. Unsupported values return `invalid_owner_team`. |
 | `owner_department` | string | 否 | Optional canonical task owner department hint. When provided with `owner_org_team` or a compatible org-team `owner_team`, backend validates consistency before create. |
 | `owner_org_team` | string | 否 | Optional canonical task owner org-team hint. When omitted, backend may resolve it from `owner_team` when the mapping is deterministic. |
 | `due_at` | string | 否 | - |
