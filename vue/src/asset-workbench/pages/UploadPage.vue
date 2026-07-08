@@ -7,7 +7,7 @@ import { useAssetWorkbenchBootstrap } from '@aw/app/useAssetWorkbenchBootstrap'
 import { uploadWorkbenchFile } from '@aw/features/upload/uploadFlow'
 import { assetWorkbenchApi, type DifficultyClassRow, type FilePreviewMeta, type SubmissionFileRow, type UploadDirectoryRow } from '@aw/shared/api/assetWorkbenchApi'
 import { usePageRequest } from '@aw/shared/composables/usePageRequest'
-import { driveUploadRelativePath, filesFromDriveDrop, isSafeDriveUploadPath } from '@aw/shared/drive/useDriveUpload'
+import { driveUploadRelativePath, filesFromDriveDrop, groupDriveUploadPieceworkItems, isSafeDriveUploadPath } from '@aw/shared/drive/useDriveUpload'
 import { useUploadCenterStore, type UploadCenterItem, type UploadCenterStatus } from '@aw/shared/drive/uploadCenter.store'
 import { currentBusinessMonth } from '@aw/shared/format/businessMonth'
 import { difficultyCodes, firstDifficultyCode } from '@aw/shared/format/difficulty'
@@ -435,22 +435,26 @@ async function createSubmission() {
   notice.value = ''
   const submittingItems = [...uploadedItems.value]
   const submittingIds = submittingItems.map((item) => item.id)
+  const pieceworkGroups = groupDriveUploadPieceworkItems(submittingItems)
   uploadCenter.updateItems(submittingIds, { status: 'submitting', error: '' })
   try {
     const detail = await assetWorkbenchApi.createSubmission({
       notes: '',
       expected_business_month: pageBusinessMonth,
       month_rollover_ack: false,
-      items: submittingItems.map((item) => ({
-        difficulty_class: item.difficultyClass || selectedUploadDirectory.value?.difficulty_class || undefined,
-        finalized: item.finalized,
-        page_count: item.pageCount,
-        item_count: 1,
-        upload_session_ids: item.sessionId ? [item.sessionId] : [],
-      })),
+      items: pieceworkGroups.map((group) => {
+        const firstItem = group.items[0]
+        return {
+          difficulty_class: firstItem?.difficultyClass || selectedUploadDirectory.value?.difficulty_class || undefined,
+          finalized: group.items.every((item) => item.finalized),
+          page_count: group.isFolder ? 1 : firstItem?.pageCount || 1,
+          item_count: 1,
+          upload_session_ids: group.items.map((item) => item.sessionId).filter(Boolean) as string[],
+        }
+      }),
     })
     submittedFiles.value = detail.items.flatMap((item) => item.files)
-    lastSubmissionResult.value = { total: submittingItems.length, success: submittedFiles.value.length, failed: 0 }
+    lastSubmissionResult.value = { total: pieceworkGroups.length, success: submittedFiles.value.length, failed: 0 }
     notice.value = isSimpleUser.value
       ? `作品已交上去：${formatInt(submittedFiles.value.length)} 个文件，可在上传记录里查看。`
       : `提交记录已生成：${formatInt(submittedFiles.value.length)} 个文件，可在查改作品里查看。`

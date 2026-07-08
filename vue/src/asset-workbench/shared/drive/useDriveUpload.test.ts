@@ -17,6 +17,7 @@ import {
   createDriveUploadQueue,
   driveUploadRelativePath,
   filesFromDriveDrop,
+  groupDriveUploadPieceworkItems,
   isSafeDriveUploadPath,
   uploadDriveQueue,
   withDriveUploadRelativePath,
@@ -88,7 +89,7 @@ describe('drive upload queue', () => {
     expect(isSafeDriveUploadPath('Folder/@eaDir/cover.jpg')).toBe(false)
   })
 
-  it('creates one piecework item per uploaded folder file', async () => {
+  it('groups uploaded folder files as one piecework item', async () => {
     const files = [
       withDriveUploadRelativePath(new File(['a'], 'a.jpg', { type: 'image/jpeg' }), 'Folder/a.jpg'),
       withDriveUploadRelativePath(new File(['b'], 'b.jpg', { type: 'image/jpeg' }), 'Folder/b.jpg'),
@@ -110,15 +111,22 @@ describe('drive upload queue', () => {
         finalized: true,
         page_count: 1,
         item_count: 1,
-        upload_session_ids: ['session:Folder/a.jpg'],
-      },
-      {
-        difficulty_class: 'A',
-        finalized: true,
-        page_count: 1,
-        item_count: 1,
-        upload_session_ids: ['session:Folder/b.jpg'],
+        upload_session_ids: ['session:Folder/a.jpg', 'session:Folder/b.jpg'],
       },
     ])
+  })
+
+  it('keeps loose files as separate piecework items', () => {
+    const groups = groupDriveUploadPieceworkItems([
+      { id: 'a', relativePath: 'a.jpg', sessionId: 'session:a.jpg' },
+      { id: 'b', relativePath: 'b.zip', sessionId: 'session:b.zip' },
+    ])
+
+    expect(groups).toHaveLength(2)
+    expect(groups.map((group) => group.items.map((item) => item.sessionId))).toEqual([
+      ['session:a.jpg'],
+      ['session:b.zip'],
+    ])
+    expect(groups.every((group) => !group.isFolder)).toBe(true)
   })
 })

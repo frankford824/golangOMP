@@ -22,6 +22,18 @@ export interface DriveUploadOptions {
   onItemChange?: (item: DriveUploadQueueItem) => void
 }
 
+export interface DriveUploadPieceworkSource {
+  id?: string
+  relativePath: string
+  sessionId?: string
+}
+
+export interface DriveUploadPieceworkGroup<T extends DriveUploadPieceworkSource> {
+  key: string
+  isFolder: boolean
+  items: T[]
+}
+
 export type DriveUploadFile = File & {
   assetWorkbenchRelativePath?: string
   webkitRelativePath?: string
@@ -95,6 +107,27 @@ export function isSafeDriveUploadPath(relativePath: string) {
   })
 }
 
+export function groupDriveUploadPieceworkItems<T extends DriveUploadPieceworkSource>(items: T[]): DriveUploadPieceworkGroup<T>[] {
+  const groups: DriveUploadPieceworkGroup<T>[] = []
+  const byKey = new Map<string, DriveUploadPieceworkGroup<T>>()
+  items.forEach((item, index) => {
+    const normalized = normalizeRelativePath(item.relativePath)
+    const slashIndex = normalized.indexOf('/')
+    const isFolder = slashIndex > 0
+    const key = isFolder
+      ? `folder:${normalized.slice(0, slashIndex).toLowerCase()}`
+      : `file:${item.sessionId || item.id || index}`
+    let group = byKey.get(key)
+    if (!group) {
+      group = { key, isFolder, items: [] }
+      byKey.set(key, group)
+      groups.push(group)
+    }
+    group.items.push(item)
+  })
+  return groups
+}
+
 export async function uploadDriveQueue(queue: DriveUploadQueueItem[], options: DriveUploadOptions): Promise<number> {
   const uploadBatchId = crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`
   const expectedBusinessMonth = options.expectedBusinessMonth || currentBusinessMonth()
@@ -129,18 +162,19 @@ export async function uploadDriveQueue(queue: DriveUploadQueueItem[], options: D
 
   const uploadedItems = queue.filter((item) => item.status === 'uploaded' && item.sessionId)
   if (!uploadedItems.length) throw new Error('没有文件上传成功，请重试')
+  const pieceworkGroups = groupDriveUploadPieceworkItems(uploadedItems)
 
   try {
     await assetWorkbenchApi.createSubmission({
       notes: '',
       expected_business_month: expectedBusinessMonth,
       month_rollover_ack: false,
-      items: uploadedItems.map((item) => ({
+      items: pieceworkGroups.map((group) => ({
         difficulty_class: options.difficultyClass || undefined,
         finalized: true,
         page_count: 1,
         item_count: 1,
-        upload_session_ids: item.sessionId ? [item.sessionId] : [],
+        upload_session_ids: group.items.map((item) => item.sessionId).filter(Boolean) as string[],
       })),
     })
   } catch (err) {

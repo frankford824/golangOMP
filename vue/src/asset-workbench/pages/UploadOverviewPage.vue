@@ -97,8 +97,9 @@ const filteredDirectoryLabel = computed(() => {
   const item = directories.value.find((dir) => String(dir.directory_id || '') === directory.value)
   return item?.name || '指定分类'
 })
-const totalAmount = computed(() => files.value.reduce((sum, file) => sum + Number(file.gross_amount || 0), 0))
-const totalCount = computed(() => files.value.reduce((sum, file) => sum + Number(file.page_count || 0), 0))
+const pieceworkRows = computed(() => uniqueSubmissionItemRows(files.value))
+const totalAmount = computed(() => pieceworkRows.value.reduce((sum, file) => sum + Number(file.gross_amount || 0), 0))
+const totalCount = computed(() => pieceworkRows.value.reduce((sum, file) => sum + Number(file.page_count || 0), 0))
 const activeFilterCount = computed(() =>
   [query.value.trim(), owner.value.trim(), createdFrom.value, createdTo.value, directory.value !== 'all' ? directory.value : ''].filter(Boolean).length,
 )
@@ -267,6 +268,16 @@ function filePreviewRows(file: DriveFileRow): Array<[string, string]> {
     ['计件状态', statusText(file.pricing_status)],
     ['文件大小', formatSize(file.file_size)],
   ]
+}
+
+function uniqueSubmissionItemRows(rows: DriveFileRow[]) {
+  const seen = new Set<string>()
+  return rows.filter((file) => {
+    const key = file.submission_item_id ? `item:${file.submission_item_id}` : `file:${file.id}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
 }
 
 function csvEscape(value: unknown) {
