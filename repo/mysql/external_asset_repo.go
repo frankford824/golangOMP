@@ -1015,8 +1015,8 @@ func externalAssetPrepareLimit(limit int) int {
 	if limit <= 0 {
 		return 20
 	}
-	if limit > 200 {
-		return 200
+	if limit > 1000 {
+		return 1000
 	}
 	return limit
 }

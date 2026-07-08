@@ -85,8 +85,9 @@ func TestExternalAssetPrepareLimitAllowsServiceBatchSize(t *testing.T) {
 	}{
 		{name: "default", limit: 0, want: 20},
 		{name: "normal", limit: 100, want: 100},
-		{name: "service max", limit: 200, want: 200},
-		{name: "cap", limit: 500, want: 200},
+		{name: "service batch", limit: 200, want: 200},
+		{name: "larger backfill", limit: 1000, want: 1000},
+		{name: "cap", limit: 1500, want: 1000},
 	}
 
 	for _, tt := range tests {
