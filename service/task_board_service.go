@@ -538,11 +538,11 @@ func mergeTaskBoardFilter(base TaskFilter, preset domain.TaskQueryFilterDefiniti
 	if !ok {
 		return TaskFilter{}, false
 	}
-	merged.OwnerDepartments, ok = intersectComparableSlice(base.OwnerDepartments, preset.OwnerDepartments)
+	merged.OwnerDepartments, ok = intersectOrgDepartmentSlice(base.OwnerDepartments, preset.OwnerDepartments)
 	if !ok {
 		return TaskFilter{}, false
 	}
-	merged.OwnerOrgTeams, ok = intersectComparableSlice(base.OwnerOrgTeams, preset.OwnerOrgTeams)
+	merged.OwnerOrgTeams, ok = intersectOrgTeamSlice(base.OwnerOrgTeams, preset.OwnerOrgTeams)
 	if !ok {
 		return TaskFilter{}, false
 	}
@@ -626,6 +626,55 @@ func intersectComparableSlice[T comparable](base []T, preset []T) ([]T, bool) {
 		return nil, false
 	}
 	return out, true
+}
+
+func intersectOrgDepartmentSlice(base []string, preset []string) ([]string, bool) {
+	return intersectOrgAliasSlice(base, preset, domain.OrgDepartmentsEquivalent)
+}
+
+func intersectOrgTeamSlice(base []string, preset []string) ([]string, bool) {
+	return intersectOrgAliasSlice(base, preset, domain.OrgTeamsEquivalent)
+}
+
+func intersectOrgAliasSlice(base []string, preset []string, equivalent func(string, string) bool) ([]string, bool) {
+	if len(base) == 0 && len(preset) == 0 {
+		return nil, true
+	}
+	if len(base) == 0 {
+		return append([]string(nil), preset...), true
+	}
+	if len(preset) == 0 {
+		return append([]string(nil), base...), true
+	}
+	out := make([]string, 0, len(preset))
+	seen := make(map[string]struct{}, len(preset))
+	for _, value := range preset {
+		if !orgAliasSliceContains(base, value, equivalent) {
+			continue
+		}
+		key := strings.ToLower(strings.TrimSpace(value))
+		if key == "" {
+			continue
+		}
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, value)
+	}
+	if len(out) == 0 {
+		return nil, false
+	}
+	return out, true
+}
+
+func orgAliasSliceContains(values []string, target string, equivalent func(string, string) bool) bool {
+	for _, value := range values {
+		if strings.EqualFold(strings.TrimSpace(value), strings.TrimSpace(target)) || equivalent(value, target) {
+			return true
+		}
+	}
+	return false
 }
 
 func mergeOptionalComparable[T comparable](base, preset *T) (*T, bool) {

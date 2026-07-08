@@ -130,12 +130,16 @@ func (r *userRepo) List(ctx context.Context, filter repo.UserListFilter) ([]*dom
 		args = append(args, *filter.Status)
 	}
 	if filter.Department != nil && strings.TrimSpace(string(*filter.Department)) != "" {
-		where = append(where, "users.department = ?")
-		args = append(args, *filter.Department)
+		if clause, clauseArgs := buildInClause("users.department", domain.ExpandOrgDepartmentAliases([]string{string(*filter.Department)})); clause != "" {
+			where = append(where, clause)
+			args = append(args, clauseArgs...)
+		}
 	}
 	if team := strings.TrimSpace(filter.Team); team != "" {
-		where = append(where, "users.team = ?")
-		args = append(args, team)
+		if clause, clauseArgs := buildInClause("users.team", domain.ExpandOrgTeamAliases([]string{team})); clause != "" {
+			where = append(where, clause)
+			args = append(args, clauseArgs...)
+		}
 	}
 
 	countQuery := `SELECT COUNT(*) FROM users WHERE ` + strings.Join(where, " AND ")

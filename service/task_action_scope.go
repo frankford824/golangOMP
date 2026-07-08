@@ -100,11 +100,11 @@ func evaluateTaskActionScope(actor *taskActionActor, task *domain.Task, ownerDep
 		out.MatchedSources = append(out.MatchedSources, TaskActionScopeViewAll)
 	}
 	if ownerDepartment != "" {
-		if strings.EqualFold(strings.TrimSpace(actor.Department), ownerDepartment) {
+		if domain.OrgDepartmentsEquivalent(actor.Department, ownerDepartment) {
 			out.MatchedSources = appendIfMissingScope(out.MatchedSources, TaskActionScopeDepartment)
 		}
 		for _, department := range actor.ManagedDepartments {
-			if strings.EqualFold(strings.TrimSpace(department), ownerDepartment) {
+			if domain.OrgDepartmentsEquivalent(department, ownerDepartment) {
 				out.MatchedSources = appendIfMissingScope(out.MatchedSources, TaskActionScopeManagedDepartment)
 				out.MatchedSources = appendIfMissingScope(out.MatchedSources, TaskActionScopeDepartment)
 				break
@@ -112,11 +112,11 @@ func evaluateTaskActionScope(actor *taskActionActor, task *domain.Task, ownerDep
 		}
 	}
 	if ownerOrgTeam != "" {
-		if strings.EqualFold(strings.TrimSpace(actor.Team), ownerOrgTeam) {
+		if domain.OrgTeamsEquivalent(actor.Team, ownerOrgTeam) {
 			out.MatchedSources = appendIfMissingScope(out.MatchedSources, TaskActionScopeTeam)
 		}
 		for _, team := range actor.ManagedTeams {
-			if strings.EqualFold(strings.TrimSpace(team), ownerOrgTeam) {
+			if domain.OrgTeamsEquivalent(team, ownerOrgTeam) {
 				out.MatchedSources = appendIfMissingScope(out.MatchedSources, TaskActionScopeManagedTeam)
 				out.MatchedSources = appendIfMissingScope(out.MatchedSources, TaskActionScopeTeam)
 				break

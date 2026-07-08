@@ -85,7 +85,7 @@ func canViewTaskWithScopeAndActorOrg(task *domain.Task, scope *DataScope, actorO
 			continue
 		}
 		for _, managed := range scope.ManagedDepartmentCodes {
-			if managed != "" && managed == department {
+			if domain.OrgDepartmentsEquivalent(managed, department) {
 				return true
 			}
 		}
@@ -95,7 +95,7 @@ func canViewTaskWithScopeAndActorOrg(task *domain.Task, scope *DataScope, actorO
 			continue
 		}
 		for _, managed := range scope.ManagedTeamCodes {
-			if managed != "" && managed == team {
+			if domain.OrgTeamsEquivalent(managed, team) {
 				return true
 			}
 		}
@@ -128,14 +128,14 @@ func canViewTaskWithPrimaryScope(task *domain.Task, scope *DataScope) bool {
 	}
 	if len(scope.DepartmentCodes) > 0 {
 		for _, department := range scope.DepartmentCodes {
-			if department != "" && department == task.OwnerDepartment {
+			if domain.OrgDepartmentsEquivalent(department, task.OwnerDepartment) {
 				return true
 			}
 		}
 	}
 	if len(scope.TeamCodes) > 0 {
 		for _, team := range scope.TeamCodes {
-			if team != "" && team == task.OwnerOrgTeam {
+			if domain.OrgTeamsEquivalent(team, task.OwnerOrgTeam) {
 				return true
 			}
 		}

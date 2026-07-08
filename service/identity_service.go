@@ -1084,9 +1084,12 @@ func (s *identityService) ListUsers(ctx context.Context, filter UserFilter) ([]*
 	if filter.Department != nil && strings.TrimSpace(string(*filter.Department)) != "" {
 		if appErr := s.validateDepartment(*filter.Department); appErr != nil {
 			if appErr.Code == domain.ErrCodeInvalidRequest {
-				return []*domain.User{}, buildPaginationMeta(filter.Page, filter.PageSize, 0), nil
+				if len(domain.OrgDepartmentAliases(string(*filter.Department))) <= 1 {
+					return []*domain.User{}, buildPaginationMeta(filter.Page, filter.PageSize, 0), nil
+				}
+			} else {
+				return nil, domain.PaginationMeta{}, appErr
 			}
-			return nil, domain.PaginationMeta{}, appErr
 		}
 	}
 	if appErr := s.authorizeUserListFilter(ctx, &filter); appErr != nil {
@@ -2395,7 +2398,7 @@ func (s *identityService) authorizeUserListFilter(ctx context.Context, filter *U
 			return identityPermissionDenied("department_admin_scope_missing", "department admin scope is not configured")
 		}
 		if filter.Department != nil &&
-			*filter.Department != domain.Department(department) &&
+			!domain.OrgDepartmentsEquivalent(string(*filter.Department), department) &&
 			*filter.Department != domain.DepartmentUnassigned {
 			return identityPermissionDenied("department_scope_only", "department admin can only view users in own department")
 		}
@@ -2411,10 +2414,10 @@ func (s *identityService) authorizeUserListFilter(ctx context.Context, filter *U
 		if department == "" || team == "" {
 			return identityPermissionDenied("team_scope_missing", "team lead scope is not configured")
 		}
-		if filter.Department != nil && *filter.Department != domain.Department(department) {
+		if filter.Department != nil && !domain.OrgDepartmentsEquivalent(string(*filter.Department), department) {
 			return identityPermissionDenied("team_scope_only", "team lead can only view users in own team")
 		}
-		if trimmedTeam := strings.TrimSpace(filter.Team); trimmedTeam != "" && !strings.EqualFold(trimmedTeam, team) {
+		if trimmedTeam := strings.TrimSpace(filter.Team); trimmedTeam != "" && !domain.OrgTeamsEquivalent(trimmedTeam, team) {
 			return identityPermissionDenied("team_scope_only", "team lead can only view users in own team")
 		}
 		dept := domain.Department(department)
@@ -2436,14 +2439,14 @@ func (s *identityService) authorizeUserRead(ctx context.Context, user *domain.Us
 	case identityActorCanManageAllUsers(actor), identityActorHasAnyRole(actor, domain.RoleOrgAdmin, domain.RoleRoleAdmin):
 		return nil
 	case identityActorHasAnyRole(actor, domain.RoleDeptAdmin):
-		if strings.EqualFold(identityActorDepartment(actor), string(user.Department)) ||
+		if domain.OrgDepartmentsEquivalent(identityActorDepartment(actor), string(user.Department)) ||
 			user.Department == domain.DepartmentUnassigned {
 			return nil
 		}
 		return identityPermissionDenied("department_scope_only", "department admin can only access users in own department")
 	case identityActorHasAnyRole(actor, domain.RoleTeamLead):
-		if strings.EqualFold(identityActorDepartment(actor), string(user.Department)) &&
-			strings.EqualFold(identityActorTeam(actor), user.Team) {
+		if domain.OrgDepartmentsEquivalent(identityActorDepartment(actor), string(user.Department)) &&
+			domain.OrgTeamsEquivalent(identityActorTeam(actor), user.Team) {
 			return nil
 		}
 		return identityPermissionDenied("team_scope_only", "team lead can only access users in own team")
@@ -2538,7 +2541,7 @@ func (s *identityService) authorizeCreateManagedUser(ctx context.Context, depart
 		return authorizeAssignableRoleAdditions(ctx, department, roles)
 	case identityActorHasAnyRole(actor, domain.RoleDeptAdmin):
 		actorDepartment := identityActorDepartment(actor)
-		if actorDepartment == "" || !strings.EqualFold(actorDepartment, string(department)) {
+		if actorDepartment == "" || !domain.OrgDepartmentsEquivalent(actorDepartment, string(department)) {
 			return identityPermissionDenied("department_scope_only", "department admin can only create users in own department")
 		}
 		return authorizeAssignableRoleAdditions(ctx, department, roles)
@@ -2556,7 +2559,7 @@ func (s *identityService) authorizeResetUserPassword(ctx context.Context, user *
 	case identityActorCanManageAllUsers(actor):
 		return nil
 	case identityActorHasAnyRole(actor, domain.RoleDeptAdmin):
-		if strings.EqualFold(identityActorDepartment(actor), string(user.Department)) {
+		if domain.OrgDepartmentsEquivalent(identityActorDepartment(actor), string(user.Department)) {
 			return nil
 		}
 		return identityPermissionDenied("department_scope_only", "department admin can only reset passwords in own department")
@@ -2594,12 +2597,12 @@ func (s *identityService) authorizeUserUpdate(ctx context.Context, current *doma
 		}
 		targetDepartment := string(current.Department)
 		if strings.EqualFold(targetDepartment, string(domain.DepartmentUnassigned)) {
-			if !strings.EqualFold(string(nextDepartment), actorDepartment) {
+			if !domain.OrgDepartmentsEquivalent(string(nextDepartment), actorDepartment) {
 				return fieldDenied("user_update_field_denied_by_scope", "department admin can only assign unassigned users into own department")
 			}
 			return nil
 		}
-		if !strings.EqualFold(targetDepartment, actorDepartment) || !strings.EqualFold(string(nextDepartment), actorDepartment) {
+		if !domain.OrgDepartmentsEquivalent(targetDepartment, actorDepartment) || !domain.OrgDepartmentsEquivalent(string(nextDepartment), actorDepartment) {
 			return fieldDenied("user_update_field_denied_by_scope", "department admin can only manage users within own department")
 		}
 		return nil
@@ -2624,7 +2627,7 @@ func (s *identityService) authorizeUserRoleChange(ctx context.Context, user *dom
 		}
 		return nil
 	case identityActorHasAnyRole(actor, domain.RoleDeptAdmin):
-		if !strings.EqualFold(identityActorDepartment(actor), string(user.Department)) {
+		if !domain.OrgDepartmentsEquivalent(identityActorDepartment(actor), string(user.Department)) {
 			return roleDenied("role_assignment_denied_by_scope", "DepartmentAdmin can only assign roles in own department")
 		}
 		for _, role := range nextRoles {
@@ -2647,12 +2650,12 @@ func (s *identityService) authorizeUserStatusEndpoint(ctx context.Context, user 
 	case identityActorHasAnyRole(actor, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleAdmin):
 		return nil
 	case identityActorHasAnyRole(actor, domain.RoleDeptAdmin):
-		if strings.EqualFold(identityActorDepartment(actor), string(user.Department)) {
+		if domain.OrgDepartmentsEquivalent(identityActorDepartment(actor), string(user.Department)) {
 			return nil
 		}
 		return fieldDenied("user_update_field_denied_by_scope", "DepartmentAdmin can only change status in own department")
 	case identityActorHasAnyRole(actor, domain.RoleTeamLead):
-		if strings.EqualFold(identityActorDepartment(actor), string(user.Department)) && strings.EqualFold(identityActorTeam(actor), user.Team) {
+		if domain.OrgDepartmentsEquivalent(identityActorDepartment(actor), string(user.Department)) && domain.OrgTeamsEquivalent(identityActorTeam(actor), user.Team) {
 			return nil
 		}
 		return fieldDenied("user_update_field_denied_by_scope", "TeamLead can only change status in own team")

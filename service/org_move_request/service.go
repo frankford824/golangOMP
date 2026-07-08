@@ -68,7 +68,7 @@ func (s *service) Create(ctx context.Context, actor domain.RequestActor, sourceD
 	if user == nil {
 		return nil, domain.ErrNotFound
 	}
-	if !strings.EqualFold(string(user.Department), source.Name) {
+	if !domain.OrgDepartmentsEquivalent(string(user.Department), source.Name) {
 		return nil, scopeDenied("org_move_source_department_mismatch", "target user does not belong to source department")
 	}
 	targetName := ""
@@ -129,7 +129,7 @@ func (s *service) List(ctx context.Context, actor domain.RequestActor, filter Li
 		if len(departments) == 0 {
 			return nil, domain.PaginationMeta{}, scopeDenied("department_admin_scope_missing", "department admin scope is not configured")
 		}
-		repoFilter.SourceDepartments = departments
+		repoFilter.SourceDepartments = domain.ExpandOrgDepartmentAliases(departments)
 		repoFilter.SourceDepartmentID = nil
 	default:
 		return nil, domain.PaginationMeta{}, scopeDenied("org_move_list_denied", "org move requests require organization management role")
@@ -327,11 +327,11 @@ func hasAnyRole(actor domain.RequestActor, roles ...domain.Role) bool {
 
 func actorManagesDepartment(actor domain.RequestActor, department string) bool {
 	for _, managed := range actor.ManagedDepartments {
-		if strings.EqualFold(strings.TrimSpace(managed), strings.TrimSpace(department)) {
+		if domain.OrgDepartmentsEquivalent(managed, department) {
 			return true
 		}
 	}
-	return strings.EqualFold(strings.TrimSpace(actor.Department), strings.TrimSpace(department))
+	return domain.OrgDepartmentsEquivalent(actor.Department, department)
 }
 
 func pagination(page, pageSize int, total int64) domain.PaginationMeta {

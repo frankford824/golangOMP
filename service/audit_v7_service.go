@@ -1104,12 +1104,12 @@ func auditHandoverListOrgScopeAllows(task *domain.Task, scope *DataScope) bool {
 		}
 	}
 	for _, department := range append(append([]string{}, scope.DepartmentCodes...), scope.ManagedDepartmentCodes...) {
-		if department != "" && department == task.OwnerDepartment {
+		if domain.OrgDepartmentsEquivalent(department, task.OwnerDepartment) {
 			return true
 		}
 	}
 	for _, team := range append(append([]string{}, scope.TeamCodes...), scope.ManagedTeamCodes...) {
-		if team != "" && team == task.OwnerOrgTeam {
+		if domain.OrgTeamsEquivalent(team, task.OwnerOrgTeam) {
 			return true
 		}
 	}

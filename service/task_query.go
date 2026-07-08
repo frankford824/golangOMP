@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"sort"
+	"strings"
 
 	"workflow/domain"
 	"workflow/repo"
@@ -138,10 +139,10 @@ func matchesTaskFilter(item *domain.TaskListItem, filter TaskFilter) bool {
 			return false
 		}
 	}
-	if len(filter.OwnerDepartments) > 0 && !containsStringValue(filter.OwnerDepartments, item.OwnerDepartment) {
+	if len(filter.OwnerDepartments) > 0 && !containsTaskOwnerDepartment(filter.OwnerDepartments, item.OwnerDepartment) {
 		return false
 	}
-	if len(filter.OwnerOrgTeams) > 0 && !containsStringValue(filter.OwnerOrgTeams, item.OwnerOrgTeam) {
+	if len(filter.OwnerOrgTeams) > 0 && !containsTaskOwnerOrgTeam(filter.OwnerOrgTeams, item.OwnerOrgTeam) {
 		return false
 	}
 	if filter.DesignerEmpty != nil && *filter.DesignerEmpty {
@@ -163,6 +164,24 @@ func matchesTaskFilter(item *domain.TaskListItem, filter TaskFilter) bool {
 		return false
 	}
 	return true
+}
+
+func containsTaskOwnerDepartment(values []string, target string) bool {
+	for _, value := range values {
+		if domain.OrgDepartmentsEquivalent(value, target) || strings.EqualFold(strings.TrimSpace(value), strings.TrimSpace(target)) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsTaskOwnerOrgTeam(values []string, target string) bool {
+	for _, value := range values {
+		if domain.OrgTeamsEquivalent(value, target) || strings.EqualFold(strings.TrimSpace(value), strings.TrimSpace(target)) {
+			return true
+		}
+	}
+	return false
 }
 
 func taskSubStatusCodeByScope(item *domain.TaskListItem, scope domain.TaskSubStatusScope) domain.TaskSubStatusCode {

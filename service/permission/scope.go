@@ -57,7 +57,7 @@ func teamInActor(team string, actor domain.RequestActor) bool {
 	if team == "" {
 		return false
 	}
-	if strings.EqualFold(team, strings.TrimSpace(actor.Team)) {
+	if domain.OrgTeamsEquivalent(team, actor.Team) {
 		return true
 	}
 	if stringIn(team, actor.ManagedTeams, actor.FrontendAccess.ManagedTeams, actor.FrontendAccess.TeamCodes) {
@@ -67,7 +67,7 @@ func teamInActor(team string, actor domain.RequestActor) bool {
 		if !actorDepartmentMatches(actor, target.Department) {
 			continue
 		}
-		if strings.EqualFold(target.Team, strings.TrimSpace(actor.Team)) ||
+		if domain.OrgTeamsEquivalent(target.Team, actor.Team) ||
 			stringIn(target.Team, actor.ManagedTeams, actor.FrontendAccess.ManagedTeams, actor.FrontendAccess.TeamCodes) {
 			return true
 		}
@@ -80,7 +80,7 @@ func teamManagedByActor(team string, actor domain.RequestActor) bool {
 	if team == "" {
 		return false
 	}
-	if strings.EqualFold(team, strings.TrimSpace(actor.Team)) {
+	if domain.OrgTeamsEquivalent(team, actor.Team) {
 		return true
 	}
 	if stringIn(team, actor.ManagedTeams, actor.FrontendAccess.ManagedTeams, actor.FrontendAccess.TeamCodes) {
@@ -96,7 +96,7 @@ func teamManagedByActor(team string, actor domain.RequestActor) bool {
 }
 
 func actorDepartmentMatches(actor domain.RequestActor, department string) bool {
-	return strings.EqualFold(strings.TrimSpace(actor.Department), department) ||
+	return domain.OrgDepartmentsEquivalent(actor.Department, department) ||
 		stringIn(department, actor.ManagedDepartments, actor.FrontendAccess.ManagedDepartments, actor.FrontendAccess.DepartmentCodes)
 }
 
@@ -118,7 +118,9 @@ func stringIn(value string, groups ...[]string) bool {
 	value = strings.TrimSpace(value)
 	for _, group := range groups {
 		for _, item := range group {
-			if strings.EqualFold(value, strings.TrimSpace(item)) {
+			if strings.EqualFold(value, strings.TrimSpace(item)) ||
+				domain.OrgDepartmentsEquivalent(value, item) ||
+				domain.OrgTeamsEquivalent(value, item) {
 				return true
 			}
 		}

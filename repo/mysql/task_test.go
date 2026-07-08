@@ -294,16 +294,16 @@ func TestAppendTaskDataScopeWhereIncludesManagedDepartmentUserTies(t *testing.T)
 		t.Fatalf("buildTaskListQuerySpec() error = %v", err)
 	}
 	for _, want := range []string{
-		"t.owner_department IN (?)",
-		"(SELECT department FROM users WHERE id = t.creator_id) IN (?)",
-		"(SELECT department FROM users WHERE id = t.designer_id) IN (?)",
-		"(SELECT department FROM users WHERE id = t.current_handler_id) IN (?)",
+		"t.owner_department IN (?, ?, ?)",
+		"(SELECT department FROM users WHERE id = t.creator_id) IN (?, ?, ?)",
+		"(SELECT department FROM users WHERE id = t.designer_id) IN (?, ?, ?)",
+		"(SELECT department FROM users WHERE id = t.current_handler_id) IN (?, ?, ?)",
 	} {
 		if !strings.Contains(spec.whereSQL, want) {
 			t.Fatalf("whereSQL missing %q: %s", want, spec.whereSQL)
 		}
 	}
-	if got, want := len(spec.args), 4; got != want {
+	if got, want := len(spec.args), 12; got != want {
 		t.Fatalf("args len = %d, want %d; args=%+v", got, want, spec.args)
 	}
 }
@@ -588,14 +588,14 @@ func newTaskListSKUItemSQLMockRows() *sqlmock.Rows {
 		AddRow(int64(1002), int64(100), 2, "CGG000026", string(domain.TaskSKUStatusGenerated), "寿比南山 B", "寿比南山 B", "升学宴副视觉", string(domain.FilingStatusFilingFailed), string(domain.FilingStatusFilingFailed), true, int64(2), nil, "ERP失败", now, now)
 }
 
-func TestAppendTaskDataScopeWhereKeepsPlainDepartmentScopeNarrow(t *testing.T) {
+func TestAppendTaskDataScopeWhereExpandsPlainDepartmentAliasesWithoutUserTies(t *testing.T) {
 	spec, err := buildTaskListQuerySpec(repo.TaskListFilter{
 		ScopeDepartmentCodes: []string{"设计研发部"},
 	}, nil)
 	if err != nil {
 		t.Fatalf("buildTaskListQuerySpec() error = %v", err)
 	}
-	if !strings.Contains(spec.whereSQL, "t.owner_department IN (?)") {
+	if !strings.Contains(spec.whereSQL, "t.owner_department IN (?, ?, ?)") {
 		t.Fatalf("whereSQL missing owner department scope: %s", spec.whereSQL)
 	}
 	if strings.Contains(spec.whereSQL, "SELECT department FROM users") {
@@ -603,6 +603,35 @@ func TestAppendTaskDataScopeWhereKeepsPlainDepartmentScopeNarrow(t *testing.T) {
 	}
 }
 
+func TestBuildTaskListQuerySpecExpandsRenamedOwnerOrgTeamFilter(t *testing.T) {
+	spec, err := buildTaskListQuerySpec(repo.TaskListFilter{
+		TaskQueryFilterDefinition: domain.TaskQueryFilterDefinition{
+			OwnerOrgTeams: []string{"淘系运营三部"},
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("buildTaskListQuerySpec() error = %v", err)
+	}
+	if !strings.Contains(spec.whereSQL, "t.owner_org_team IN (?, ?)") {
+		t.Fatalf("whereSQL missing expanded owner org team filter: %s", spec.whereSQL)
+	}
+	if got, want := len(spec.args), 2; got != want {
+		t.Fatalf("args len = %d, want %d; args=%+v", got, want, spec.args)
+	}
+	if !taskTestArgsContain(spec.args, "淘系运营三部") || !taskTestArgsContain(spec.args, "淘系三组") {
+		t.Fatalf("args = %+v, want current and historical org team aliases", spec.args)
+	}
+}
+
 func workflowLanePtr(lane domain.WorkflowLane) *domain.WorkflowLane {
 	return &lane
+}
+
+func taskTestArgsContain(args []interface{}, target string) bool {
+	for _, arg := range args {
+		if value, ok := arg.(string); ok && value == target {
+			return true
+		}
+	}
+	return false
 }

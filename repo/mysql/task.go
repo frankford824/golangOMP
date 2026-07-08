@@ -1829,14 +1829,14 @@ func appendTaskDataScopeWhere(where *[]string, args *[]interface{}, filter repo.
 		}
 	}
 	if len(filter.ScopeDepartmentCodes) > 0 {
-		clause, clauseArgs := buildInClause("t.owner_department", stringsToSlice(filter.ScopeDepartmentCodes))
+		clause, clauseArgs := buildInClause("t.owner_department", domain.ExpandOrgDepartmentAliases(stringsToSlice(filter.ScopeDepartmentCodes)))
 		if clause != "" {
 			scopeClauses = append(scopeClauses, clause)
 			scopeArgs = append(scopeArgs, clauseArgs...)
 		}
 	}
 	if len(filter.ScopeTeamCodes) > 0 {
-		clause, clauseArgs := buildInClause("t.owner_org_team", stringsToSlice(filter.ScopeTeamCodes))
+		clause, clauseArgs := buildInClause("t.owner_org_team", domain.ExpandOrgTeamAliases(stringsToSlice(filter.ScopeTeamCodes)))
 		if clause != "" {
 			scopeClauses = append(scopeClauses, clause)
 			scopeArgs = append(scopeArgs, clauseArgs...)
@@ -1884,11 +1884,11 @@ func appendTaskDataScopeWhere(where *[]string, args *[]interface{}, filter repo.
 }
 
 func buildManagedDepartmentScopeClause(departments []string) (string, []interface{}) {
-	return buildManagedUserScopeClause("department", "t.owner_department", departments)
+	return buildManagedUserScopeClause("department", "t.owner_department", domain.ExpandOrgDepartmentAliases(departments))
 }
 
 func buildManagedTeamScopeClause(teams []string) (string, []interface{}) {
-	return buildManagedUserScopeClause("team", "t.owner_org_team", teams)
+	return buildManagedUserScopeClause("team", "t.owner_org_team", domain.ExpandOrgTeamAliases(teams))
 }
 
 func buildManagedUserScopeClause(userColumn, ownerExpr string, values []string) (string, []interface{}) {
@@ -1968,8 +1968,8 @@ func appendTaskQueryDefinitionWhere(where *[]string, args *[]interface{}, filter
 	appendInClause(where, args, "t.source_mode", comparableValuesToStrings(filter.SourceModes))
 	appendBusinessLaneClause(where, args, filter.BusinessLanes)
 	appendWorkflowLaneClause(where, args, filter.WorkflowLanes)
-	appendInClause(where, args, "t.owner_department", stringsToSlice(filter.OwnerDepartments))
-	appendInClause(where, args, "t.owner_org_team", stringsToSlice(filter.OwnerOrgTeams))
+	appendInClause(where, args, "t.owner_department", domain.ExpandOrgDepartmentAliases(stringsToSlice(filter.OwnerDepartments)))
+	appendInClause(where, args, "t.owner_org_team", domain.ExpandOrgTeamAliases(stringsToSlice(filter.OwnerOrgTeams)))
 	appendInClause(where, args, exprs.mainStatusExpr, comparableValuesToStrings(filter.MainStatuses))
 
 	if len(filter.SubStatusCodes) > 0 {

@@ -625,7 +625,7 @@ func (s *taskAssignmentService) validateManagedDepartmentTarget(ctx context.Cont
 	}
 	targetDepartment := normalizeTaskDepartmentCode(string(target.Department))
 	for _, department := range managedDepartments {
-		if department == targetDepartment {
+		if domain.OrgDepartmentsEquivalent(department, targetDepartment) {
 			return nil
 		}
 	}
@@ -734,7 +734,7 @@ func (s *taskAssignmentService) validateDesignManagerTargetScope(ctx context.Con
 		}
 		targetDepartment := normalizeTaskDepartmentCode(string(target.Department))
 		for _, department := range managedDepartments {
-			if strings.EqualFold(department, targetDepartment) {
+			if domain.OrgDepartmentsEquivalent(department, targetDepartment) {
 				return TaskActionScopeManagedDepartment, nil
 			}
 		}
@@ -768,7 +768,7 @@ func (s *taskAssignmentService) validateDesignManagerTargetScope(ctx context.Con
 		}
 		targetTeam := strings.TrimSpace(target.Team)
 		for _, team := range managedTeams {
-			if strings.EqualFold(team, targetTeam) {
+			if domain.OrgTeamsEquivalent(team, targetTeam) {
 				return TaskActionScopeManagedTeam, nil
 			}
 		}

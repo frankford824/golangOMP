@@ -37,3 +37,19 @@ func TestCustomizationAuditBusinessTeamMatchesTechnicalPoolCode(t *testing.T) {
 		t.Fatal("actorMatchesPool() = false, want true for 定制审核组 -> audit_customization")
 	}
 }
+
+func TestRenamedDesignDepartmentMatchesDesignPoolCode(t *testing.T) {
+	actor := domain.RequestActor{
+		ID:         200,
+		Department: "视觉研创部",
+		Team:       "默认组",
+		Roles:      []domain.Role{domain.RoleDesigner},
+	}
+
+	if !actorMatchesPool(actor, domain.TeamDesignStandard) {
+		t.Fatal("actorMatchesPool() = false, want true for 视觉研创部/默认组 -> design_standard")
+	}
+	if got := matchedTeam(actor, domain.TeamDesignStandard); got != "默认组" {
+		t.Fatalf("matchedTeam() = %q, want 默认组", got)
+	}
+}

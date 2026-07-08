@@ -31,11 +31,21 @@ func (r *moduleNotificationRepo) GetTaskModuleByID(ctx context.Context, tx repo.
 }
 
 func (r *moduleNotificationRepo) ListActiveUserIDsByTeam(ctx context.Context, tx repo.Tx, teamCode string, excludeUserID *int64) ([]int64, error) {
-	query := `SELECT id FROM users WHERE status = 'active' AND (team = ?`
-	args := []interface{}{teamCode}
+	directTeamClause, directTeamArgs := buildInClause("team", domain.ExpandOrgTeamAliases([]string{teamCode}))
+	if directTeamClause == "" {
+		directTeamClause = "1=0"
+	}
+	query := `SELECT id FROM users WHERE status = 'active' AND (` + directTeamClause
+	args := append([]interface{}{}, directTeamArgs...)
 	for _, target := range domain.PoolTeamTargets(teamCode) {
-		query += ` OR (department = ? AND team = ?)`
-		args = append(args, target.Department, target.Team)
+		departmentClause, departmentArgs := buildInClause("department", domain.ExpandOrgDepartmentAliases([]string{target.Department}))
+		teamClause, teamArgs := buildInClause("team", domain.ExpandOrgTeamAliases([]string{target.Team}))
+		if departmentClause == "" || teamClause == "" {
+			continue
+		}
+		query += ` OR (` + departmentClause + ` AND ` + teamClause + `)`
+		args = append(args, departmentArgs...)
+		args = append(args, teamArgs...)
 	}
 	query += `)`
 	if excludeUserID != nil {

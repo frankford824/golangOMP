@@ -54,12 +54,16 @@ func resolveTaskCanonicalOrgOwnership(p CreateTaskParams) (taskCanonicalOrgOwner
 		LegacyOwnerTeam: legacyOwnerTeam,
 	}
 
-	if rawOwnerDepartment != "" && !validConfiguredTaskDepartment(rawOwnerDepartment) {
-		return taskCanonicalOrgOwnership{}, taskCreateValidationError(
-			"owner_department must be a valid configured department",
-			p,
-			taskCreateViolation("owner_department", "invalid_owner_department", "owner_department must be one of the configured departments"),
-		)
+	if rawOwnerDepartment != "" {
+		configuredDepartment, ok := configuredTaskDepartmentName(rawOwnerDepartment)
+		if !ok {
+			return taskCanonicalOrgOwnership{}, taskCreateValidationError(
+				"owner_department must be a valid configured department",
+				p,
+				taskCreateViolation("owner_department", "invalid_owner_department", "owner_department must be one of the configured departments"),
+			)
+		}
+		rawOwnerDepartment = configuredDepartment
 	}
 
 	if rawOwnerOrgTeam != "" {
@@ -218,9 +222,30 @@ func canonicalDepartmentForTaskOrgTeam(team string) (string, bool) {
 }
 
 func validConfiguredTaskDepartment(department string) bool {
-	catalog := getTaskOrgCatalog()
-	_, ok := catalog.configuredDepartments[normalizeTaskDepartmentCode(department)]
+	_, ok := configuredTaskDepartmentName(department)
 	return ok
+}
+
+func configuredTaskDepartmentName(department string) (string, bool) {
+	catalog := getTaskOrgCatalog()
+	normalized := normalizeTaskDepartmentCode(department)
+	if normalized == "" {
+		return "", false
+	}
+	if _, ok := catalog.configuredDepartments[normalized]; ok {
+		return normalized, true
+	}
+	matched := ""
+	for configured := range catalog.configuredDepartments {
+		if !domain.OrgDepartmentsEquivalent(configured, normalized) {
+			continue
+		}
+		if matched != "" && matched != configured {
+			return "", false
+		}
+		matched = configured
+	}
+	return matched, matched != ""
 }
 
 func inferCanonicalDepartmentFromLegacyOwnerTeam(legacyOwnerTeam string) (string, bool) {

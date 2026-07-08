@@ -339,14 +339,14 @@ func inferReadScopeSource(task *domain.Task, scope *DataScope, actorOrg *taskAct
 	if task != nil {
 		if task.OwnerDepartment != "" {
 			for _, department := range scope.DepartmentCodes {
-				if department == task.OwnerDepartment {
+				if domain.OrgDepartmentsEquivalent(department, task.OwnerDepartment) {
 					return string(TaskActionScopeDepartment)
 				}
 			}
 		}
 		if task.OwnerOrgTeam != "" {
 			for _, team := range scope.TeamCodes {
-				if team == task.OwnerOrgTeam {
+				if domain.OrgTeamsEquivalent(team, task.OwnerOrgTeam) {
 					return string(TaskActionScopeTeam)
 				}
 			}
@@ -371,14 +371,14 @@ func inferReadScopeSource(task *domain.Task, scope *DataScope, actorOrg *taskAct
 		if actorOrg != nil {
 			for _, department := range actorOrg.Departments {
 				for _, managed := range scope.ManagedDepartmentCodes {
-					if managed != "" && managed == department {
+					if domain.OrgDepartmentsEquivalent(managed, department) {
 						return string(TaskActionScopeManagedDepartment)
 					}
 				}
 			}
 			for _, team := range actorOrg.Teams {
 				for _, managed := range scope.ManagedTeamCodes {
-					if managed != "" && managed == team {
+					if domain.OrgTeamsEquivalent(managed, team) {
 						return string(TaskActionScopeManagedTeam)
 					}
 				}

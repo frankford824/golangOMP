@@ -172,7 +172,7 @@ func actorDepartmentMatches(actor domain.RequestActor, department string) bool {
 	if department == "" {
 		return false
 	}
-	if strings.EqualFold(strings.TrimSpace(actor.Department), department) {
+	if domain.OrgDepartmentsEquivalent(actor.Department, department) {
 		return true
 	}
 	return contains(actor.ManagedDepartments, department) ||
@@ -182,7 +182,9 @@ func actorDepartmentMatches(actor domain.RequestActor, department string) bool {
 
 func contains(values []string, target string) bool {
 	for _, value := range values {
-		if strings.EqualFold(value, target) {
+		if strings.EqualFold(value, target) ||
+			domain.OrgDepartmentsEquivalent(value, target) ||
+			domain.OrgTeamsEquivalent(value, target) {
 			return true
 		}
 	}

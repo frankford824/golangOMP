@@ -10,6 +10,25 @@ import (
 	"workflow/repo"
 )
 
+func TestResolveTaskCanonicalOrgOwnershipUsesConfiguredDepartmentAlias(t *testing.T) {
+	ConfigureTaskOrgCatalog(domain.AuthSettings{
+		DepartmentTeams: map[string][]string{
+			"视觉研创部": {"默认组"},
+		},
+	})
+	defer ConfigureTaskOrgCatalog(domain.AuthSettings{})
+
+	ownership, appErr := resolveTaskCanonicalOrgOwnership(CreateTaskParams{
+		rawOwnerDepartment: string(domain.DepartmentDesignRD),
+	})
+	if appErr != nil {
+		t.Fatalf("resolveTaskCanonicalOrgOwnership() unexpected error: %+v", appErr)
+	}
+	if ownership.OwnerDepartment != "视觉研创部" {
+		t.Fatalf("OwnerDepartment = %q, want 视觉研创部", ownership.OwnerDepartment)
+	}
+}
+
 func TestTaskServiceCreateOriginalProductWithOrgTeamCompatWritesCanonicalOwnership(t *testing.T) {
 	taskRepo := &prdTaskRepo{}
 	svc := NewTaskService(

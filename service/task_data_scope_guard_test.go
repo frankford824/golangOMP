@@ -121,3 +121,35 @@ func TestCanViewTaskWithScope_ManagedScope_Empty_PreservesOldBehavior(t *testing
 		t.Fatalf("canViewTaskWithScopeAndActorOrg() = %v, want %v when managed scope is empty", newResult, oldResult)
 	}
 }
+
+func TestCanViewTaskWithScopeMatchesRenamedDesignDepartment(t *testing.T) {
+	task := &domain.Task{
+		ID:              5,
+		CreatorID:       600,
+		OwnerDepartment: string(domain.DepartmentDesignRD),
+		OwnerOrgTeam:    "默认组",
+	}
+	scope := &DataScope{
+		DepartmentCodes: []string{"视觉研创部"},
+	}
+
+	if !canViewTaskWithScope(task, scope) {
+		t.Fatal("canViewTaskWithScope() = false, want true for renamed design department alias")
+	}
+}
+
+func TestCanViewTaskWithScopeMatchesRenamedOperationTeam(t *testing.T) {
+	task := &domain.Task{
+		ID:              6,
+		CreatorID:       601,
+		OwnerDepartment: string(domain.DepartmentOperations),
+		OwnerOrgTeam:    "淘系三组",
+	}
+	scope := &DataScope{
+		TeamCodes: []string{"淘系运营三部"},
+	}
+
+	if !canViewTaskWithScope(task, scope) {
+		t.Fatal("canViewTaskWithScope() = false, want true for renamed operation team alias")
+	}
+}

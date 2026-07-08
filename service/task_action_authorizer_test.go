@@ -1148,6 +1148,56 @@ func (r *countingIdentityUserRepoStub) GetByID(ctx context.Context, id int64) (*
 	return r.identityUserRepoStub.GetByID(ctx, id)
 }
 
+func TestTaskActionAuthorizerTeamLeadMatchesRenamedOperationTeam(t *testing.T) {
+	authz := newTaskActionAuthorizer(nil, nil)
+	ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{
+		ID:         901,
+		Username:   "ops_lead",
+		Roles:      []domain.Role{domain.RoleTeamLead},
+		Department: string(domain.DepartmentOperations),
+		Team:       "淘系运营三部",
+	})
+	task := &domain.Task{
+		ID:              902,
+		TaskStatus:      domain.TaskStatusPendingAssign,
+		OwnerDepartment: string(domain.DepartmentOperations),
+		OwnerOrgTeam:    "淘系三组",
+	}
+
+	decision := authz.EvaluateTaskActionPolicy(ctx, TaskActionAssign, task, "", "")
+	if !decision.Allowed {
+		t.Fatalf("EvaluateTaskActionPolicy() allowed = false, want true for renamed team alias, decision=%+v", decision)
+	}
+	if decision.ScopeSource != string(TaskActionScopeTeam) {
+		t.Fatalf("ScopeSource = %q, want %q", decision.ScopeSource, TaskActionScopeTeam)
+	}
+}
+
+func TestTaskActionAuthorizerTeamLeadDoesNotMatchDifferentRenamedOperationTeam(t *testing.T) {
+	authz := newTaskActionAuthorizer(nil, nil)
+	ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{
+		ID:         903,
+		Username:   "ops_lead",
+		Roles:      []domain.Role{domain.RoleTeamLead},
+		Department: string(domain.DepartmentOperations),
+		Team:       "淘系运营二部",
+	})
+	task := &domain.Task{
+		ID:              904,
+		TaskStatus:      domain.TaskStatusPendingAssign,
+		OwnerDepartment: string(domain.DepartmentOperations),
+		OwnerOrgTeam:    "淘系三组",
+	}
+
+	decision := authz.EvaluateTaskActionPolicy(ctx, TaskActionAssign, task, "", "")
+	if decision.Allowed {
+		t.Fatalf("EvaluateTaskActionPolicy() allowed = true, want false for different team alias, decision=%+v", decision)
+	}
+	if decision.DenyCode != "task_out_of_team_scope" {
+		t.Fatalf("DenyCode = %q, want task_out_of_team_scope", decision.DenyCode)
+	}
+}
+
 func authzInt64Ptr(v int64) *int64 {
 	return &v
 }

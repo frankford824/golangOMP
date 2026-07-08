@@ -1079,7 +1079,7 @@ func TestIdentityServiceListUsersSupportsDepartmentTeamRoleAndKeywordFilters(t *
 func TestIdentityServiceListUsersInvalidOrgFilterReturnsEmptyPage(t *testing.T) {
 	userRepo := newIdentityUserRepo()
 	orgRepo := newIdentityOrgRepo()
-	orgRepo.departments[1] = &domain.OrgDepartment{ID: 1, Name: "设计部", Enabled: false}
+	orgRepo.departments[1] = &domain.OrgDepartment{ID: 1, Name: "不存在部门", Enabled: false}
 	svc := NewIdentityService(
 		userRepo,
 		&identitySessionRepoStub{},
@@ -1088,10 +1088,10 @@ func TestIdentityServiceListUsersInvalidOrgFilterReturnsEmptyPage(t *testing.T) 
 		WithOrgRepo(orgRepo),
 	)
 
-	department := domain.Department("设计部")
+	department := domain.Department("不存在部门")
 	users, pagination, appErr := svc.ListUsers(context.Background(), UserFilter{
 		Department: &department,
-		Team:       "定制美工组",
+		Team:       "不存在小组",
 		Page:       1,
 		PageSize:   20,
 	})

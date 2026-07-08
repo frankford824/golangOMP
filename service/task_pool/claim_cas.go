@@ -211,7 +211,7 @@ func matchedTeam(actor domain.RequestActor, pool string) string {
 			continue
 		}
 		for _, team := range actorTeams(actor) {
-			if strings.EqualFold(team, target.Team) {
+			if domain.OrgTeamsEquivalent(team, target.Team) {
 				return team
 			}
 		}
