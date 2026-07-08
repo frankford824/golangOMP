@@ -1925,7 +1925,7 @@ onBeforeUnmount(() => {
 
 .management-layout {
   display: grid;
-  grid-template-columns: minmax(15rem, 18rem) minmax(0, 1fr);
+  grid-template-columns: minmax(18rem, clamp(20rem, 26vw, 24rem)) minmax(0, 1fr);
   gap: 1.15rem;
   align-items: start;
 }
@@ -2036,16 +2036,15 @@ onBeforeUnmount(() => {
 
 .org-selected-current strong {
   min-width: 0;
-  overflow: hidden;
   color: rgb(var(--yb-text-zinc-strong));
   font-size: 0.8125rem;
   font-weight: 700;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .org-selected-path {
   display: flex;
+  flex-wrap: wrap;
   min-width: 0;
   align-items: center;
   gap: 0.35rem;
@@ -2054,8 +2053,8 @@ onBeforeUnmount(() => {
 }
 
 .org-selected-buttons {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(4.75rem, 1fr));
   gap: 0.3rem;
 }
 
@@ -2081,6 +2080,7 @@ onBeforeUnmount(() => {
 .org-action-btn,
 .org-icon-btn {
   display: inline-flex;
+  min-width: 0;
   align-items: center;
   justify-content: center;
   min-height: 1.55rem;
@@ -2092,7 +2092,8 @@ onBeforeUnmount(() => {
   cursor: pointer;
   font-size: 0.6875rem;
   font-weight: 600;
-  white-space: nowrap;
+  text-align: center;
+  white-space: normal;
 }
 
 .org-action-btn:hover,

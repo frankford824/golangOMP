@@ -154,16 +154,13 @@ const disabledEntryCount = computed(() =>
 
 function isExpanded(department: string): boolean {
   if (isSearching.value) return true
-  return expandedDepartments.value.has(department) || props.selectedDepartment === department
+  return expandedDepartments.value.has(department)
 }
 
 function toggleExpanded(department: string) {
   const next = new Set(expandedDepartments.value)
   if (isExpanded(department)) {
     next.delete(department)
-    // 选中态本身会强制展开;折叠已选中的部门时记录一个显式排除无意义,
-    // 直接忽略即可(保持选中部门始终可见其小组)。
-    if (props.selectedDepartment === department) return
   } else {
     next.add(department)
   }
@@ -179,11 +176,31 @@ function isTeamActive(department: string, team: string): boolean {
 }
 
 function onSelectDepartment(dept: OrgTreeDepartment) {
+  const shouldCollapse =
+    props.selectedDepartment === dept.value &&
+    !props.selectedTeam &&
+    !isSearching.value &&
+    expandedDepartments.value.has(dept.value)
   emit('select-department', dept.value)
   const next = new Set(expandedDepartments.value)
-  next.add(dept.value)
+  if (shouldCollapse) {
+    next.delete(dept.value)
+  } else {
+    next.add(dept.value)
+  }
   expandedDepartments.value = next
 }
+
+watch(
+  () => props.selectedDepartment,
+  (department) => {
+    if (!department) return
+    const next = new Set(expandedDepartments.value)
+    next.add(department)
+    expandedDepartments.value = next
+  },
+  { immediate: true },
+)
 
 watch(searchKeyword, () => {
   if (isSearching.value) showDisabledSection.value = true
@@ -289,6 +306,7 @@ watch(searchKeyword, () => {
   display: flex;
   align-items: center;
   gap: 0.15rem;
+  min-width: 0;
 }
 
 .org-tree-toggle {
@@ -312,8 +330,9 @@ watch(searchKeyword, () => {
 .org-filter-item {
   display: flex;
   width: 100%;
+  min-width: 0;
   min-height: 2rem;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 0.35rem;
   border: 1px solid transparent;
@@ -335,9 +354,8 @@ watch(searchKeyword, () => {
 .org-filter-item .org-item-name {
   min-width: 0;
   flex: 1 1 auto;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .org-filter-item.is-disabled {
