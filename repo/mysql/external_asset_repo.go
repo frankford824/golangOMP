@@ -30,7 +30,7 @@ func NewExternalAssetRepo(db *DB) repo.ExternalAssetRepo { return &externalAsset
 
 const externalAssetSelectColumns = `
 	SELECT id, provider, kind, driver, mount_path, origin_path_hash, origin_path, parent_path,
-	       file_name, file_ext, mime_type, file_size, is_dir, status, raw_url, raw_url_expires_at,
+	       file_name, file_ext, mime_type, file_size, source_modified_at, is_dir, status, raw_url, raw_url_expires_at,
 	       direct_url_status, oss_original_key, oss_preview_key, oss_thumb_key, oss_sync_status,
 	       preview_status, last_seen_at, last_scanned_at, last_link_checked_at, last_prepare_error,
 	       searchable_text, created_at, updated_at`
@@ -395,25 +395,39 @@ func joinExternalAssetBrowsePath(parentPath, name string) string {
 }
 
 type externalAssetCountState struct {
-	Provider   string
-	Kind       domain.ExternalAssetKind
-	Driver     string
-	MountPath  string
-	ParentPath string
-	IsDir      bool
-	Status     domain.ExternalAssetStatus
+	Provider         string
+	Kind             domain.ExternalAssetKind
+	Driver           string
+	MountPath        string
+	ParentPath       string
+	FileSize         int64
+	SourceModifiedAt *time.Time
+	IsDir            bool
+	Status           domain.ExternalAssetStatus
+	OSSSyncStatus    domain.ExternalAssetOSSStatus
+	PreviewStatus    domain.ExternalAssetPreviewStatus
+	OSSOriginalKey   string
+	OSSPreviewKey    string
+	OSSThumbKey      string
 }
 
 func getExternalAssetCountStateForUpdate(ctx context.Context, q sqlQueryRowContext, hash string) (*externalAssetCountState, error) {
 	row := q.QueryRowContext(ctx, `
-		SELECT provider, kind, driver, mount_path, parent_path, is_dir, status
+		SELECT provider, kind, driver, mount_path, parent_path, file_size, source_modified_at, is_dir, status,
+		       oss_sync_status, preview_status, oss_original_key, oss_preview_key, oss_thumb_key
 		  FROM external_asset_records
 		 WHERE origin_path_hash = ?
 		 FOR UPDATE`, hash)
 	var state externalAssetCountState
 	var kind string
 	var status string
-	if err := row.Scan(&state.Provider, &kind, &state.Driver, &state.MountPath, &state.ParentPath, &state.IsDir, &status); err != nil {
+	var ossStatus string
+	var previewStatus string
+	var sourceModifiedAt sql.NullTime
+	if err := row.Scan(
+		&state.Provider, &kind, &state.Driver, &state.MountPath, &state.ParentPath, &state.FileSize, &sourceModifiedAt,
+		&state.IsDir, &status, &ossStatus, &previewStatus, &state.OSSOriginalKey, &state.OSSPreviewKey, &state.OSSThumbKey,
+	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
@@ -421,6 +435,9 @@ func getExternalAssetCountStateForUpdate(ctx context.Context, q sqlQueryRowConte
 	}
 	state.Kind = domain.ExternalAssetKind(kind)
 	state.Status = domain.ExternalAssetStatus(status)
+	state.OSSSyncStatus = domain.ExternalAssetOSSStatus(ossStatus)
+	state.PreviewStatus = domain.ExternalAssetPreviewStatus(previewStatus)
+	state.SourceModifiedAt = fromNullTime(sourceModifiedAt)
 	return &state, nil
 }
 
@@ -550,9 +567,9 @@ func (r *externalAssetRepo) Upsert(ctx context.Context, item domain.ExternalAsse
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO external_asset_records (
 		  provider, kind, driver, mount_path, origin_path_hash, origin_path, parent_path,
-		  file_name, file_ext, mime_type, file_size, is_dir, status, raw_url,
+		  file_name, file_ext, mime_type, file_size, source_modified_at, is_dir, status, raw_url,
 		  oss_sync_status, preview_status, last_seen_at, last_scanned_at, searchable_text
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'indexed', ?, 'none', 'none', ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'indexed', ?, 'none', 'none', ?, ?, ?)
 		ON DUPLICATE KEY UPDATE
 		  kind = VALUES(kind),
 		  driver = VALUES(driver),
@@ -563,6 +580,7 @@ func (r *externalAssetRepo) Upsert(ctx context.Context, item domain.ExternalAsse
 		  file_ext = VALUES(file_ext),
 		  mime_type = VALUES(mime_type),
 		  file_size = VALUES(file_size),
+		  source_modified_at = VALUES(source_modified_at),
 		  is_dir = VALUES(is_dir),
 		  status = 'indexed',
 		  raw_url = CASE WHEN VALUES(raw_url) <> '' THEN VALUES(raw_url) ELSE raw_url END,
@@ -570,7 +588,7 @@ func (r *externalAssetRepo) Upsert(ctx context.Context, item domain.ExternalAsse
 		  last_scanned_at = VALUES(last_scanned_at),
 		  searchable_text = VALUES(searchable_text)`,
 		item.Provider, string(item.Kind), item.Driver, item.MountPath, hash, item.OriginPath, item.ParentPath,
-		item.FileName, item.FileExt, item.MimeType, item.FileSize, item.IsDir, item.RawURL,
+		item.FileName, item.FileExt, item.MimeType, item.FileSize, item.SourceModifiedAt, item.IsDir, item.RawURL,
 		item.ScannedAt, item.ScannedAt, item.SearchableText)
 	if err != nil {
 		return nil, fmt.Errorf("upsert external asset: %w", err)
@@ -578,10 +596,56 @@ func (r *externalAssetRepo) Upsert(ctx context.Context, item domain.ExternalAsse
 	if err := maintainExternalAssetDirectoryIndex(ctx, tx, existing, item); err != nil {
 		return nil, err
 	}
+	if externalAssetNeedsOSSRealignment(existing, item) {
+		if err := resetExternalAssetOSSStateForRealignment(ctx, tx, hash); err != nil {
+			return nil, err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit external asset upsert: %w", err)
 	}
 	return r.getByHash(ctx, hash)
+}
+
+func externalAssetNeedsOSSRealignment(existing *externalAssetCountState, item domain.ExternalAssetUpsert) bool {
+	if existing == nil || item.Kind != domain.ExternalAssetKindNASLocal || item.IsDir || existing.IsDir {
+		return false
+	}
+	if existing.Status == domain.ExternalAssetStatusMissing {
+		return false
+	}
+	if existing.FileSize == item.FileSize && externalAssetSameSourceModifiedAt(existing.SourceModifiedAt, item.SourceModifiedAt) {
+		return false
+	}
+	return existing.OSSOriginalKey != "" ||
+		existing.OSSPreviewKey != "" ||
+		existing.OSSThumbKey != "" ||
+		existing.OSSSyncStatus == domain.ExternalAssetOSSStatusReady ||
+		existing.OSSSyncStatus == domain.ExternalAssetOSSStatusUploading ||
+		existing.PreviewStatus == domain.ExternalAssetPreviewStatusReady
+}
+
+func externalAssetSameSourceModifiedAt(left, right *time.Time) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return left.UTC().Truncate(time.Second).Equal(right.UTC().Truncate(time.Second))
+}
+
+func resetExternalAssetOSSStateForRealignment(ctx context.Context, exec sqlExecContext, hash string) error {
+	_, err := exec.ExecContext(ctx, `
+		UPDATE external_asset_records
+		   SET oss_original_key = '',
+		       oss_preview_key = '',
+		       oss_thumb_key = '',
+		       oss_sync_status = 'pending',
+		       preview_status = CASE WHEN preview_status = 'ready' THEN 'pending' ELSE preview_status END,
+		       last_prepare_error = NULL
+		 WHERE origin_path_hash = ?`, hash)
+	if err != nil {
+		return fmt.Errorf("reset external asset oss state for realignment: %w", err)
+	}
+	return nil
 }
 
 func (r *externalAssetRepo) getByHash(ctx context.Context, hash string) (*domain.ExternalAssetRecord, error) {
@@ -969,11 +1033,11 @@ type externalAssetScanner interface {
 func scanExternalAssetScanner(s externalAssetScanner) (*domain.ExternalAssetRecord, error) {
 	var item domain.ExternalAssetRecord
 	var parentPath, rawURL, directStatus, ossOriginal, ossPreview, ossThumb, lastErr, searchable sql.NullString
-	var rawExpires, lastSeen, lastScanned, lastLink sql.NullTime
+	var sourceModifiedAt, rawExpires, lastSeen, lastScanned, lastLink sql.NullTime
 	var isDir bool
 	if err := s.Scan(
 		&item.ID, &item.Provider, &item.Kind, &item.Driver, &item.MountPath, &item.OriginPathHash, &item.OriginPath, &parentPath,
-		&item.FileName, &item.FileExt, &item.MimeType, &item.FileSize, &isDir, &item.Status, &rawURL, &rawExpires,
+		&item.FileName, &item.FileExt, &item.MimeType, &item.FileSize, &sourceModifiedAt, &isDir, &item.Status, &rawURL, &rawExpires,
 		&directStatus, &ossOriginal, &ossPreview, &ossThumb, &item.OSSSyncStatus,
 		&item.PreviewStatus, &lastSeen, &lastScanned, &lastLink, &lastErr,
 		&searchable, &item.CreatedAt, &item.UpdatedAt,
@@ -983,6 +1047,7 @@ func scanExternalAssetScanner(s externalAssetScanner) (*domain.ExternalAssetReco
 	item.ResourceID = domain.ExternalAssetResourceID(item.ID)
 	item.ParentPath = fromNullStringValue(parentPath)
 	item.RawURL = fromNullStringValue(rawURL)
+	item.SourceModifiedAt = fromNullTime(sourceModifiedAt)
 	item.RawURLExpiresAt = fromNullTime(rawExpires)
 	item.DirectURLStatus = fromNullStringValue(directStatus)
 	item.OSSOriginalKey = fromNullStringValue(ossOriginal)

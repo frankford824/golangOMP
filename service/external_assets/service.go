@@ -1665,20 +1665,29 @@ func (s *Service) upsertFromSearchItem(mount MountConfig, item AListSearchItem) 
 		driver = driverForMountKind(mount.Kind, mount.Path)
 	}
 	return domain.ExternalAssetUpsert{
-		Provider:       "alist",
-		Kind:           mount.Kind,
-		Driver:         driver,
-		MountPath:      mount.Path,
-		OriginPath:     originPath,
-		ParentPath:     item.Parent,
-		FileName:       item.Name,
-		FileExt:        ext,
-		MimeType:       mimeType,
-		FileSize:       item.Size,
-		IsDir:          item.IsDir,
-		SearchableText: strings.Join([]string{originPath, item.Parent, item.Name, driver, string(mount.Kind)}, " "),
-		ScannedAt:      s.nowFn().UTC(),
+		Provider:         "alist",
+		Kind:             mount.Kind,
+		Driver:           driver,
+		MountPath:        mount.Path,
+		OriginPath:       originPath,
+		ParentPath:       item.Parent,
+		FileName:         item.Name,
+		FileExt:          ext,
+		MimeType:         mimeType,
+		FileSize:         item.Size,
+		SourceModifiedAt: sourceModifiedTimePtr(item.Modified),
+		IsDir:            item.IsDir,
+		SearchableText:   strings.Join([]string{originPath, item.Parent, item.Name, driver, string(mount.Kind)}, " "),
+		ScannedAt:        s.nowFn().UTC(),
 	}
+}
+
+func sourceModifiedTimePtr(value time.Time) *time.Time {
+	if value.IsZero() {
+		return nil
+	}
+	normalized := value.UTC().Truncate(time.Second)
+	return &normalized
 }
 
 func isSkippableExternalSearchItem(item AListSearchItem) bool {

@@ -61,11 +61,12 @@ func (c *BFFClient) Enabled() bool {
 }
 
 type AListSearchItem struct {
-	Parent string `json:"parent"`
-	Name   string `json:"name"`
-	IsDir  bool   `json:"is_dir"`
-	Size   int64  `json:"size"`
-	Type   int    `json:"type"`
+	Parent   string    `json:"parent"`
+	Name     string    `json:"name"`
+	IsDir    bool      `json:"is_dir"`
+	Size     int64     `json:"size"`
+	Type     int       `json:"type"`
+	Modified time.Time `json:"modified"`
 }
 
 type AListSearchResponse struct {
@@ -140,10 +141,11 @@ func (c *AListClient) List(ctx context.Context, parent string, page, perPage int
 		Message string `json:"message"`
 		Data    struct {
 			Content []struct {
-				Name  string `json:"name"`
-				IsDir bool   `json:"is_dir"`
-				Size  int64  `json:"size"`
-				Type  int    `json:"type"`
+				Name     string    `json:"name"`
+				IsDir    bool      `json:"is_dir"`
+				Size     int64     `json:"size"`
+				Type     int       `json:"type"`
+				Modified time.Time `json:"modified"`
 			} `json:"content"`
 			Total int64 `json:"total"`
 		} `json:"data"`
@@ -167,11 +169,12 @@ func (c *AListClient) List(ctx context.Context, parent string, page, perPage int
 			continue
 		}
 		items = append(items, AListSearchItem{
-			Parent: parent,
-			Name:   name,
-			IsDir:  item.IsDir,
-			Size:   item.Size,
-			Type:   item.Type,
+			Parent:   parent,
+			Name:     name,
+			IsDir:    item.IsDir,
+			Size:     item.Size,
+			Type:     item.Type,
+			Modified: item.Modified,
 		})
 	}
 	return &AListListResponse{Content: items, Total: out.Data.Total}, nil
@@ -210,11 +213,12 @@ func (c *BFFClient) Search(ctx context.Context, parent, keyword string, page, pe
 	}
 	var out struct {
 		Items []struct {
-			Parent   string `json:"parent"`
-			Name     string `json:"name"`
-			IsDir    bool   `json:"is_dir"`
-			Size     int64  `json:"size"`
-			FullPath string `json:"full_path"`
+			Parent   string    `json:"parent"`
+			Name     string    `json:"name"`
+			IsDir    bool      `json:"is_dir"`
+			Size     int64     `json:"size"`
+			Modified time.Time `json:"modified"`
+			FullPath string    `json:"full_path"`
 		} `json:"items"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
@@ -232,10 +236,11 @@ func (c *BFFClient) Search(ctx context.Context, parent, keyword string, page, pe
 			continue
 		}
 		items = append(items, AListSearchItem{
-			Parent: parentPath,
-			Name:   name,
-			IsDir:  item.IsDir,
-			Size:   item.Size,
+			Parent:   parentPath,
+			Name:     name,
+			IsDir:    item.IsDir,
+			Size:     item.Size,
+			Modified: item.Modified,
 		})
 	}
 	return &AListSearchResponse{Content: items, Total: int64(len(items))}, nil

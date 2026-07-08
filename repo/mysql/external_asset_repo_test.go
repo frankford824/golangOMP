@@ -3,6 +3,7 @@ package mysqlrepo
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"workflow/domain"
 )
@@ -94,5 +95,50 @@ func TestExternalAssetPrepareLimitAllowsServiceBatchSize(t *testing.T) {
 				t.Fatalf("externalAssetPrepareLimit(%d) = %d, want %d", tt.limit, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestExternalAssetNeedsOSSRealignmentOnSourceFingerprintChange(t *testing.T) {
+	oldModified := time.Date(2026, 7, 8, 8, 0, 0, 0, time.UTC)
+	newModified := oldModified.Add(time.Hour)
+	existing := &externalAssetCountState{
+		Kind:             domain.ExternalAssetKindNASLocal,
+		FileSize:         1024,
+		SourceModifiedAt: &oldModified,
+		IsDir:            false,
+		Status:           domain.ExternalAssetStatusIndexed,
+		OSSSyncStatus:    domain.ExternalAssetOSSStatusReady,
+		PreviewStatus:    domain.ExternalAssetPreviewStatusReady,
+		OSSOriginalKey:   "external-assets/alist/original/p3/hash/file.png",
+		OSSPreviewKey:    "external-assets/alist/preview/p3/hash/file.webp",
+	}
+
+	if !externalAssetNeedsOSSRealignment(existing, domain.ExternalAssetUpsert{
+		Kind:             domain.ExternalAssetKindNASLocal,
+		FileSize:         1024,
+		SourceModifiedAt: &newModified,
+	}) {
+		t.Fatal("modified timestamp change should re-queue NAS OSS copy")
+	}
+	if !externalAssetNeedsOSSRealignment(existing, domain.ExternalAssetUpsert{
+		Kind:             domain.ExternalAssetKindNASLocal,
+		FileSize:         2048,
+		SourceModifiedAt: &oldModified,
+	}) {
+		t.Fatal("file size change should re-queue NAS OSS copy")
+	}
+	if externalAssetNeedsOSSRealignment(existing, domain.ExternalAssetUpsert{
+		Kind:             domain.ExternalAssetKindNASLocal,
+		FileSize:         1024,
+		SourceModifiedAt: &oldModified,
+	}) {
+		t.Fatal("same source fingerprint should not re-queue OSS copy")
+	}
+	if externalAssetNeedsOSSRealignment(existing, domain.ExternalAssetUpsert{
+		Kind:             domain.ExternalAssetKindNetdisk,
+		FileSize:         2048,
+		SourceModifiedAt: &newModified,
+	}) {
+		t.Fatal("netdisk rows should not use NAS OSS realignment")
 	}
 }

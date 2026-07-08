@@ -75,6 +75,7 @@ type ExternalAssetRecord struct {
 	FileExt           string                     `json:"file_ext,omitempty"`
 	MimeType          string                     `json:"mime_type,omitempty"`
 	FileSize          int64                      `json:"file_size"`
+	SourceModifiedAt  *time.Time                 `json:"source_modified_at,omitempty"`
 	IsDir             bool                       `json:"is_dir"`
 	Status            ExternalAssetStatus        `json:"status"`
 	RawURL            string                     `json:"-"`
@@ -142,20 +143,21 @@ func (q ExternalAssetSearchQuery) Normalized() ExternalAssetSearchQuery {
 }
 
 type ExternalAssetUpsert struct {
-	Provider       string
-	Kind           ExternalAssetKind
-	Driver         string
-	MountPath      string
-	OriginPath     string
-	ParentPath     string
-	FileName       string
-	FileExt        string
-	MimeType       string
-	FileSize       int64
-	IsDir          bool
-	RawURL         string
-	SearchableText string
-	ScannedAt      time.Time
+	Provider         string
+	Kind             ExternalAssetKind
+	Driver           string
+	MountPath        string
+	OriginPath       string
+	ParentPath       string
+	FileName         string
+	FileExt          string
+	MimeType         string
+	FileSize         int64
+	SourceModifiedAt *time.Time
+	IsDir            bool
+	RawURL           string
+	SearchableText   string
+	ScannedAt        time.Time
 }
 
 func (u ExternalAssetUpsert) Normalized() ExternalAssetUpsert {
@@ -171,6 +173,10 @@ func (u ExternalAssetUpsert) Normalized() ExternalAssetUpsert {
 	u.FileExt = strings.ToLower(strings.TrimSpace(u.FileExt))
 	u.MimeType = strings.TrimSpace(u.MimeType)
 	u.RawURL = strings.TrimSpace(u.RawURL)
+	if u.SourceModifiedAt != nil {
+		normalized := u.SourceModifiedAt.UTC().Truncate(time.Second)
+		u.SourceModifiedAt = &normalized
+	}
 	if u.SearchableText == "" {
 		u.SearchableText = strings.Join([]string{u.OriginPath, u.ParentPath, u.FileName, u.Driver, string(u.Kind)}, " ")
 	}
