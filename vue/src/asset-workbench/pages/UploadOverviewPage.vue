@@ -318,20 +318,8 @@ function fileQuantityLabel(file: DriveFileRow, lookup = pieceworkDisplayByFileID
   return filePieceworkRepeated(file, lookup) ? '—' : file.page_count ? `${file.page_count}` : '—'
 }
 
-function fileQuantitySecondary(file: DriveFileRow) {
-  const state = filePieceworkState(file)
-  if (state.siblingCount <= 1) return ''
-  return state.isPrimary ? `同作品 ${state.siblingCount} 个文件` : '同一作品'
-}
-
 function fileAmountLabel(file: DriveFileRow, lookup = pieceworkDisplayByFileID.value) {
   return filePieceworkRepeated(file, lookup) ? '—' : formatMoney(file.gross_amount || 0)
-}
-
-function fileAmountSecondary(file: DriveFileRow) {
-  const state = filePieceworkState(file)
-  if (state.siblingCount <= 1) return ''
-  return state.isPrimary ? '本作品金额' : '已计入同作品'
 }
 
 function filePieceworkNote(file: DriveFileRow, lookup = pieceworkDisplayByFileID.value) {
@@ -340,6 +328,12 @@ function filePieceworkNote(file: DriveFileRow, lookup = pieceworkDisplayByFileID
   return state.isPrimary
     ? `同一作品包含 ${state.siblingCount} 个文件，数量和金额只统计一次。`
     : '该文件属于同一作品，数量和金额已计入同作品记录。'
+}
+
+function filePieceworkInlineNote(file: DriveFileRow) {
+  const state = filePieceworkState(file)
+  if (state.siblingCount <= 1) return ''
+  return state.isPrimary ? `文件夹作品 · 共 ${state.siblingCount} 个文件 · 只计 1 件` : '同一文件夹作品 · 金额已计入同作品'
 }
 
 function csvEscape(value: unknown) {
@@ -982,6 +976,9 @@ onBeforeUnmount(() => {
                     <span>
                       <strong :title="fileDisplayName(file)">{{ fileDisplayName(file) }}</strong>
                       <small v-if="secondaryFilename(file)" :title="secondaryFilename(file)">{{ secondaryFilename(file) }}</small>
+                      <small v-if="filePieceworkInlineNote(file)" class="aw-upload-ledger__piecework-note" :title="filePieceworkNote(file)">
+                        {{ filePieceworkInlineNote(file) }}
+                      </small>
                     </span>
                     <Pencil :size="14" aria-hidden="true" />
                   </button>
@@ -992,11 +989,9 @@ onBeforeUnmount(() => {
                 </td>
                 <td class="aw-upload-ledger__num">
                   <strong>{{ fileQuantityLabel(file) }}</strong>
-                  <small v-if="fileQuantitySecondary(file)" :title="filePieceworkNote(file)">{{ fileQuantitySecondary(file) }}</small>
                 </td>
                 <td class="aw-upload-ledger__num">
                   <strong>{{ fileAmountLabel(file) }}</strong>
-                  <small v-if="fileAmountSecondary(file)" :title="filePieceworkNote(file)">{{ fileAmountSecondary(file) }}</small>
                 </td>
                 <td>
                   <span class="aw-chip" :class="statusToneClass(file.pricing_status)">{{ statusText(file.pricing_status) }}</span>
