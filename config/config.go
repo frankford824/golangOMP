@@ -147,6 +147,7 @@ type ExternalAssetsConfig struct {
 	FullSyncMaxDirs     int
 	OSSOriginalPrefix   string
 	OSSPreviewPrefix    string
+	OSSRequiredPrefixes string
 	LocalPathMappings   string
 	PrepareInterval     time.Duration
 	PrepareLimit        int
@@ -374,6 +375,7 @@ func Load() (*Config, error) {
 			FullSyncMaxDirs:     mustParseInt(getEnv("EXTERNAL_ASSETS_FULL_SYNC_MAX_DIRS_PER_MOUNT", "5000")),
 			OSSOriginalPrefix:   getEnv("EXTERNAL_ASSETS_OSS_ORIGINAL_PREFIX", "external-assets/alist/original"),
 			OSSPreviewPrefix:    getEnv("EXTERNAL_ASSETS_OSS_PREVIEW_PREFIX", "external-assets/alist/preview"),
+			OSSRequiredPrefixes: getEnv("EXTERNAL_ASSETS_OSS_REQUIRED_PREFIXES", "/p3/仓库素材区/徐凯"),
 			LocalPathMappings:   getEnv("EXTERNAL_ASSETS_LOCAL_PATH_MAPPINGS", "/p3=/volume1/image_lib"),
 			PrepareInterval:     mustParseDuration(getEnv("EXTERNAL_ASSETS_PREPARE_INTERVAL", "30s")),
 			PrepareLimit:        mustParseInt(getEnv("EXTERNAL_ASSETS_PREPARE_LIMIT", "50")),

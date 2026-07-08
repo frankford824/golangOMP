@@ -10,6 +10,7 @@ import (
 	"workflow/domain"
 	"workflow/repo"
 	baseservice "workflow/service"
+	externalassets "workflow/service/external_assets"
 )
 
 func TestBuildExcelPackageManifestMatchesOnlyJPGPNG(t *testing.T) {
@@ -96,20 +97,132 @@ func TestBuildExcelPackageManifestMatchesOnlyJPGPNG(t *testing.T) {
 
 func TestBuildExcelPackageManifestRequiresSuccessfulRows(t *testing.T) {
 	svc := NewService(&excelPackageRepoStub{}, excelPackagePresignerStub{}, nil)
-	_, appErr := svc.BuildExcelPackageManifest(context.Background(), []ExcelPackageRow{
+	manifest, appErr := svc.BuildExcelPackageManifest(context.Background(), []ExcelPackageRow{
 		{RowNumber: 2, OrderNo: "DD001", SKUCode: "", Quantity: 1},
 	})
-	if appErr == nil {
-		t.Fatal("BuildExcelPackageManifest appErr = nil, want all rows unavailable")
+	if appErr != nil {
+		t.Fatalf("BuildExcelPackageManifest error = %+v", appErr)
+	}
+	if manifest.SuccessCount != 0 || manifest.FailureCount != 1 || len(manifest.Failures) != 1 {
+		t.Fatalf("manifest = %+v, want failure-only manifest", manifest)
+	}
+}
+
+func TestBuildExcelPackageManifestMatchesExternalP3Image(t *testing.T) {
+	now := time.Date(2026, 7, 8, 15, 30, 0, 0, time.UTC)
+	ossDirect := baseservice.NewOSSDirectService(baseservice.OSSDirectConfig{
+		Enabled:         true,
+		Endpoint:        "oss-cn-hangzhou.aliyuncs.com",
+		PublicEndpoint:  "oss-cn-hangzhou.aliyuncs.com",
+		Bucket:          "test-bucket",
+		AccessKeyID:     "test-key",
+		AccessKeySecret: "test-secret",
+		PresignExpiry:   15 * time.Minute,
+	})
+	externalRepo := &assetCenterExternalRepoStub{
+		searchRows: []*domain.ExternalAssetRecord{
+			{
+				ID:             77,
+				ResourceID:     domain.ExternalAssetResourceID(77),
+				Provider:       "alist",
+				Kind:           domain.ExternalAssetKindNASLocal,
+				MountPath:      "/p3",
+				OriginPath:     "/p3/仓库素材区/徐凯/KT/HSC12654.jpg",
+				ParentPath:     "/p3/仓库素材区/徐凯/KT",
+				FileName:       "HSC12654.jpg",
+				FileExt:        ".jpg",
+				MimeType:       "image/jpeg",
+				FileSize:       2048,
+				Status:         domain.ExternalAssetStatusIndexed,
+				OSSOriginalKey: "external-assets/alist/original/p3/HSC12654.jpg",
+				OSSSyncStatus:  domain.ExternalAssetOSSStatusReady,
+				CreatedAt:      now,
+				UpdatedAt:      now,
+			},
+		},
+	}
+	svc := NewService(&excelPackageRepoStub{}, excelPackagePresignerStub{}, nil)
+	svc.SetExternalAssetService(externalassets.NewService(externalRepo, externalassets.Config{
+		Enabled: true,
+		Mounts:  externalassets.ParseMounts("/p3:nas_local"),
+	}, ossDirect))
+
+	manifest, appErr := svc.BuildExcelPackageManifest(context.Background(), []ExcelPackageRow{
+		{RowNumber: 2, OrderNo: "SO-1", SKUCode: "HSC12654", Quantity: 2, Address: "张三*敏感地址"},
+	})
+	if appErr != nil {
+		t.Fatalf("BuildExcelPackageManifest error = %+v", appErr)
+	}
+	if manifest.SuccessCount != 1 || manifest.TotalFiles != 2 || manifest.TotalSize != 4096 {
+		t.Fatalf("manifest summary = %+v", manifest)
+	}
+	item := manifest.Items[0]
+	if item.ResourceID != "ext-77" || item.SourceType != string(domain.AssetResourceSourceExternal) || item.AssetID != 77 {
+		t.Fatalf("item identity = %+v, want external ext-77", item)
+	}
+	if item.Address != "张三*敏感地址" || item.OriginPath == "" || !strings.Contains(item.DownloadURL, "external-assets/alist/original/p3/") {
+		t.Fatalf("item fields = %+v", item)
+	}
+}
+
+func TestBuildExcelPackageManifestReusesDuplicateSKUMatch(t *testing.T) {
+	jpgKey := "tasks/RW-1/assets/AST-1/v1/delivery/HSC12654.jpg"
+	uploaded := string(domain.DesignAssetUploadStatusUploaded)
+	scope := "HSC12654"
+	jpgMime := "image/jpeg"
+	jpgSize := int64(10)
+	now := time.Date(2026, 7, 8, 16, 0, 0, 0, time.UTC)
+	repoStub := &excelPackageRepoStub{
+		rowsByKeyword: map[string][]*repo.TaskAssetSearchRow{
+			"HSC12654": {
+				{
+					Asset: &domain.TaskAsset{
+						ID:           1001,
+						TaskID:       501,
+						AssetID:      int64PtrExcelPkg(101),
+						ScopeSKUCode: &scope,
+						AssetType:    domain.TaskAssetTypeDelivery,
+						FileName:     "HSC12654.jpg",
+						MimeType:     &jpgMime,
+						FileSize:     &jpgSize,
+						StorageKey:   &jpgKey,
+						UploadStatus: &uploaded,
+						CreatedAt:    now,
+					},
+					Task: &domain.Task{ID: 501, TaskNo: "RW-1", SKUCode: "HSC12654", ProductNameSnapshot: "商品"},
+				},
+			},
+		},
+	}
+	svc := NewService(repoStub, excelPackagePresignerStub{}, nil)
+
+	manifest, appErr := svc.BuildExcelPackageManifest(context.Background(), []ExcelPackageRow{
+		{RowNumber: 2, OrderNo: "SO-1", SKUCode: "HSC12654", Quantity: 1},
+		{RowNumber: 3, OrderNo: "SO-2", SKUCode: "HSC12654", Quantity: 2},
+	})
+	if appErr != nil {
+		t.Fatalf("BuildExcelPackageManifest error = %+v", appErr)
+	}
+	if manifest.SuccessCount != 2 || manifest.TotalFiles != 3 {
+		t.Fatalf("manifest summary = %+v", manifest)
+	}
+	if got := repoStub.callsByKeyword["HSC12654"]; got != 1 {
+		t.Fatalf("Search calls for duplicate SKU = %d, want 1", got)
 	}
 }
 
 type excelPackageRepoStub struct {
-	rowsByKeyword map[string][]*repo.TaskAssetSearchRow
+	rowsByKeyword  map[string][]*repo.TaskAssetSearchRow
+	callsByKeyword map[string]int
 }
 
 func (s *excelPackageRepoStub) Search(_ context.Context, query domain.AssetSearchQuery) ([]*repo.TaskAssetSearchRow, int64, error) {
-	rows := s.rowsByKeyword[strings.ToUpper(strings.TrimSpace(query.Keyword))]
+	keyword := strings.ToUpper(strings.TrimSpace(query.Keyword))
+	if s.callsByKeyword == nil {
+		s.callsByKeyword = map[string]int{}
+	}
+	s.callsByKeyword[keyword]++
+	rows := s.rowsByKeyword[keyword]
 	total := int64(len(rows))
 	if query.Page <= 0 || query.Size <= 0 {
 		return rows, total, nil

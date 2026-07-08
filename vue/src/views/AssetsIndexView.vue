@@ -53,7 +53,7 @@
             ref="excelFileInput"
             type="file"
             class="ac-hidden-file"
-            accept=".xlsx"
+            accept=".xlsx,.xls"
             aria-label="选择 Excel 图片分拣文件"
             @change="handleExcelPackageFile"
           />
@@ -407,6 +407,75 @@
           </button>
         </article>
       </div>
+    </BaseModal>
+
+    <BaseModal
+      v-model="excelPackageModalOpen"
+      title="Excel 图片分拣下载"
+      :show-confirm="false"
+      cancel-text="关闭"
+      panel-class="max-w-3xl"
+    >
+      <section class="excel-package-modal">
+        <div class="excel-package-progress-card">
+          <div class="excel-package-progress-top">
+            <span class="excel-package-stage" :class="`excel-package-stage--${excelPackagePhase}`">
+              {{ excelPackagePhaseLabel }}
+            </span>
+            <strong>{{ excelPackageProgressPercent }}%</strong>
+          </div>
+          <p class="excel-package-progress-text">{{ excelPackageModalMessage }}</p>
+          <div class="excel-package-progress-track">
+            <div class="excel-package-progress-bar" :style="{ width: `${excelPackageProgressPercent}%` }"></div>
+          </div>
+        </div>
+
+        <div class="excel-package-summary-grid">
+          <div>
+            <span>解析行</span>
+            <strong>{{ excelPackageResult.parsedRows }}</strong>
+          </div>
+          <div>
+            <span>匹配成功</span>
+            <strong>{{ excelPackageResult.matchedRows }}</strong>
+          </div>
+          <div>
+            <span>已写入</span>
+            <strong>{{ excelPackageResult.copiedFiles }}</strong>
+          </div>
+          <div>
+            <span>失败行</span>
+            <strong>{{ excelPackageFailureCount }}</strong>
+          </div>
+        </div>
+
+        <div class="excel-package-source-grid">
+          <span>系统资源 {{ excelPackageResult.systemRows }}</span>
+          <span>外部资源 {{ excelPackageResult.externalRows }}</span>
+          <span>待 OSS 准备 {{ excelPackageResult.pendingRows }}</span>
+          <span>计划文件 {{ excelPackageResult.totalFiles }}</span>
+        </div>
+
+        <div v-if="excelPackageFailureItems.length" class="excel-package-detail-list">
+          <div class="excel-package-detail-head">
+            <strong>失败明细</strong>
+            <span>显示前 {{ excelPackageFailureItems.length }} 条</span>
+          </div>
+          <article
+            v-for="(failure, index) in excelPackageFailureItems"
+            :key="`${failure.row_number || index}-${failure.sku_code || failure.sku_name || failure.reason}-${index}`"
+            class="excel-package-detail-item"
+          >
+            <div>
+              <strong>{{ failure.sku_code || failure.sku_name || '未知 SKU' }}</strong>
+              <span>订单 {{ failure.order_no || '未知' }} · 行 {{ failure.row_number || '-' }}</span>
+            </div>
+            <p>{{ failure.message || failure.reason }}</p>
+          </article>
+        </div>
+
+        <p v-if="excelPackageError" class="ac-batch-error">{{ excelPackageError }}</p>
+      </section>
     </BaseModal>
 
     <BaseModal
@@ -764,7 +833,6 @@ import {
   type AssetBatchDownloadItem,
   type AssetExcelPackageFailure,
   type AssetExcelPackageItem,
-  type AssetExcelPackageRow,
   type AssetKind,
 } from '@/services/api/assetsApi'
 import { predictionsApi, type PredictionSuggestion } from '@/services/api/predictionsApi'
@@ -825,6 +893,7 @@ const batchDownloadStatus = ref('')
 const batchDownloadError = ref('')
 const excelFileInput = ref<HTMLInputElement | null>(null)
 const excelPackaging = ref(false)
+const excelPackageModalOpen = ref(false)
 const excelPackageStatus = ref('')
 const excelPackageError = ref('')
 const replacementFileInput = ref<HTMLInputElement | null>(null)
@@ -873,6 +942,35 @@ type BulkSearchAssetKindFilter =
   | 'source'
   | 'preview'
   | 'other'
+
+type ExcelPackagePhase = 'idle' | 'parsing' | 'matching' | 'downloading' | 'zipping' | 'done' | 'failed'
+
+type ExcelPackageResultState = {
+  parsedRows: number
+  matchedRows: number
+  systemRows: number
+  externalRows: number
+  pendingRows: number
+  failedRows: number
+  totalFiles: number
+  copiedFiles: number
+  failures: AssetExcelPackageFailure[]
+  downloadFailures: AssetExcelPackageFailure[]
+}
+
+const excelPackagePhase = ref<ExcelPackagePhase>('idle')
+const excelPackageResult = reactive<ExcelPackageResultState>({
+  parsedRows: 0,
+  matchedRows: 0,
+  systemRows: 0,
+  externalRows: 0,
+  pendingRows: 0,
+  failedRows: 0,
+  totalFiles: 0,
+  copiedFiles: 0,
+  failures: [],
+  downloadFailures: [],
+})
 
 const filters = reactive({
   keyword: '',
@@ -962,6 +1060,49 @@ const bulkSearchFormatFilterLabel = computed(() =>
 const bulkSearchAssetKindFilterLabel = computed(() =>
   bulkSearchAssetKindOptions.find((item) => item.value === bulkSearchFilters.assetKind)?.label ?? '全部类型',
 )
+
+const excelPackagePhaseLabel = computed(() => {
+  switch (excelPackagePhase.value) {
+    case 'parsing':
+      return '解析中'
+    case 'matching':
+      return '匹配中'
+    case 'downloading':
+      return '下载中'
+    case 'zipping':
+      return '生成中'
+    case 'done':
+      return '已完成'
+    case 'failed':
+      return '失败'
+    default:
+      return '待开始'
+  }
+})
+
+const excelPackageFailureItems = computed(() =>
+  [...excelPackageResult.failures, ...excelPackageResult.downloadFailures].slice(0, 30),
+)
+
+const excelPackageFailureCount = computed(() => excelPackageResult.failedRows + excelPackageResult.downloadFailures.length)
+
+const excelPackageProgressPercent = computed(() => {
+  if (excelPackagePhase.value === 'done') return 100
+  if (excelPackagePhase.value === 'failed') return Math.max(5, excelPackageResult.parsedRows ? 20 : 5)
+  if (excelPackagePhase.value === 'parsing') return 10
+  if (excelPackagePhase.value === 'matching') return 35
+  if (excelPackagePhase.value === 'zipping') return 92
+  if (excelPackagePhase.value === 'downloading') {
+    const total = Math.max(1, excelPackageResult.totalFiles || excelPackageResult.matchedRows)
+    return Math.max(45, Math.min(90, Math.round((excelPackageResult.copiedFiles / total) * 70) + 20))
+  }
+  return 0
+})
+
+const excelPackageModalMessage = computed(() => {
+  if (excelPackageError.value && excelPackagePhase.value === 'failed') return excelPackageError.value
+  return excelPackageStatus.value || '选择 Excel 后开始解析、匹配并生成下载包。'
+})
 
 const effectiveAssetSearchSource = computed<AssetResourceSource>(() => filters.resourceSource)
 
@@ -1812,6 +1953,7 @@ function downloadBlob(blob: Blob, filename: string) {
 
 function openExcelPicker() {
   if (excelPackaging.value) return
+  resetExcelPackageResult()
   excelPackageStatus.value = ''
   excelPackageError.value = ''
   if (excelFileInput.value) {
@@ -1884,90 +2026,39 @@ async function handleReplacementFile(event: Event) {
   }
 }
 
-function normalizeExcelCell(value: unknown): string {
-  if (value == null) return ''
-  if (value instanceof Date) return value.toISOString()
-  if (typeof value === 'object') {
-    const record = value as Record<string, unknown>
-    if (typeof record.text === 'string') return record.text.trim()
-    if (typeof record.result === 'string' || typeof record.result === 'number') return normalizeExcelCell(record.result)
-    if (Array.isArray(record.richText)) {
-      return record.richText
-        .map((item) => (item && typeof item === 'object' ? String((item as Record<string, unknown>).text ?? '') : ''))
-        .join('')
-        .trim()
-    }
-  }
-  const text = String(value).trim()
-  if (/^\d+\.0$/.test(text)) return String(Math.trunc(Number(text)))
-  return text
+function resetExcelPackageResult() {
+  excelPackagePhase.value = 'idle'
+  excelPackageResult.parsedRows = 0
+  excelPackageResult.matchedRows = 0
+  excelPackageResult.systemRows = 0
+  excelPackageResult.externalRows = 0
+  excelPackageResult.pendingRows = 0
+  excelPackageResult.failedRows = 0
+  excelPackageResult.totalFiles = 0
+  excelPackageResult.copiedFiles = 0
+  excelPackageResult.failures = []
+  excelPackageResult.downloadFailures = []
 }
 
-function normalizeExcelQuantity(value: unknown): number {
-  const text = normalizeExcelCell(value)
-  if (!text) return 1
-  const n = Number(text)
-  if (!Number.isFinite(n)) return 1
-  return Math.max(1, Math.trunc(n))
+function excelPackageOrderKey(orderNo: string | undefined): string {
+  return String(orderNo ?? '').trim() || '未知订单'
 }
 
-function normalizeExcelHeader(value: unknown): string {
-  return normalizeExcelCell(value).replace(/\s+/g, '').toLowerCase()
+function resolveExcelPackageFolder(orderNo: string | undefined, address: string | undefined, incomplete: boolean): string {
+  const base = sanitizeZipEntryName(excelPackageOrderKey(orderNo), '未知订单')
+  const sensitiveSuffix = String(address ?? '').includes('*') ? '_【敏感】' : ''
+  const incompleteSuffix = incomplete ? '_未找全' : ''
+  return `${base}${sensitiveSuffix}${incompleteSuffix}`
 }
 
-function resolveExcelColumn(headers: string[], candidates: string[], fallbackIndex: number): number {
-  const normalizedCandidates = candidates.map((item) => normalizeExcelHeader(item))
-  const found = headers.findIndex((header) => normalizedCandidates.includes(header))
-  return found >= 0 ? found : fallbackIndex
-}
-
-async function parseExcelPackageRows(file: File): Promise<AssetExcelPackageRow[]> {
-  if (!/\.xlsx$/i.test(file.name)) throw new Error('当前仅支持 .xlsx 模板，请将 .xls 另存为 .xlsx 后再上传')
-  const ExcelJS = await import('exceljs')
-  const data = await file.arrayBuffer()
-  const workbook = new ExcelJS.Workbook()
-  await workbook.xlsx.load(data)
-  const worksheet = workbook.worksheets[0]
-  if (!worksheet) throw new Error('Excel 文件没有工作表')
-  const table: unknown[][] = []
-  worksheet.eachRow({ includeEmpty: true }, (row) => {
-    const values = Array.isArray(row.values) ? row.values.slice(1) : []
-    table.push(values)
-  })
-  if (table.length < 2) throw new Error('Excel 至少需要表头和一行数据')
-
-  const headers = (table[0] ?? []).map(normalizeExcelHeader)
-  const orderCol = resolveExcelColumn(headers, ['订单号', '订单编号', 'order_no', 'order'], 0)
-  const skuCol = resolveExcelColumn(headers, ['SKU编码', 'SKU', 'sku_code', '商品编码'], 1)
-  const skuNameCol = resolveExcelColumn(headers, ['SKU名称', '商品名称', 'sku_name', '名称'], 2)
-  const quantityCol = resolveExcelColumn(headers, ['数量', 'qty', 'quantity', 'num'], 3)
-  const keywordCol = resolveExcelColumn(headers, ['匹配关键词', '关键词', 'keyword', 'kw'], 4)
-
-  return table
-    .slice(1)
-    .map((row, index): AssetExcelPackageRow => {
-      const values = Array.isArray(row) ? row : []
-      return {
-        row_number: index + 2,
-        order_no: normalizeExcelCell(values[orderCol]),
-        sku_code: normalizeExcelCell(values[skuCol]).toUpperCase(),
-        sku_name: normalizeExcelCell(values[skuNameCol]),
-        quantity: normalizeExcelQuantity(values[quantityCol]),
-        keyword: normalizeExcelCell(values[keywordCol]),
-      }
-    })
-    .filter((row) => row.order_no || row.sku_code || row.sku_name)
-}
-
-function resolveExcelPackageFilename(item: AssetExcelPackageItem, copyIndex: number): string {
+function resolveExcelPackageFilename(item: AssetExcelPackageItem, sequence: number): string {
   const ext = (() => {
     const i = item.filename.lastIndexOf('.')
     return i > 0 ? item.filename.slice(i) : '.jpg'
   })()
   const rawSku = item.sku_code || item.sku_name || `asset-${item.asset_id}`
-  const rowSuffix = item.row_number ? `_row${item.row_number}` : ''
-  const base = sanitizeZipEntryName(`${rawSku}${rowSuffix}`, `asset-${item.asset_id}`)
-  return `${base}_${copyIndex}${ext}`
+  const base = sanitizeZipEntryName(rawSku, `asset-${item.asset_id}`)
+  return `${base}_${sequence}${ext}`
 }
 
 function formatExcelFailure(item: AssetExcelPackageFailure): string {
@@ -1976,6 +2067,7 @@ function formatExcelFailure(item: AssetExcelPackageFailure): string {
     item.order_no ? `order=${item.order_no}` : '',
     item.sku_code ? `sku=${item.sku_code}` : '',
     item.quantity ? `qty=${item.quantity}` : '',
+    item.address ? `address=${item.address}` : '',
     `reason=${item.reason}`,
     item.message ? `message=${item.message}` : '',
   ]
@@ -1983,9 +2075,18 @@ function formatExcelFailure(item: AssetExcelPackageFailure): string {
     .join(' ')
 }
 
-async function downloadExcelPackageAsZip(items: AssetExcelPackageItem[], failures: AssetExcelPackageFailure[]): Promise<number> {
+function isExcelPackagePendingFailure(failure: AssetExcelPackageFailure): boolean {
+  const reason = String(failure.reason ?? '')
+  return reason.includes('prepare_required') || reason.includes('preparing')
+}
+
+async function downloadExcelPackageAsZip(
+  items: AssetExcelPackageItem[],
+  failures: AssetExcelPackageFailure[],
+): Promise<{ copied: number; downloadFailures: AssetExcelPackageFailure[] }> {
   const { default: JSZip } = await import('jszip')
   const zip = new JSZip()
+  const downloadFailures: AssetExcelPackageFailure[] = []
   const reportLines: string[] = [
     'Excel 图片分拣下载报告',
     `生成时间：${formatDateTimeBeijing(new Date().toISOString())}`,
@@ -1998,29 +2099,61 @@ async function downloadExcelPackageAsZip(items: AssetExcelPackageItem[], failure
   ]
   let completed = 0
   let copied = 0
+  const incompleteOrders = new Set(failures.map((item) => excelPackageOrderKey(item.order_no)))
+  const addressByOrder = new Map<string, string>()
+  const failedLinesByOrder = new Map<string, string[]>()
+  const skuCountersByFolder = new Map<string, number>()
+
+  for (const item of [...items, ...failures]) {
+    const order = excelPackageOrderKey(item.order_no)
+    const address = String(item.address ?? '').trim()
+    if (address && !addressByOrder.has(order)) addressByOrder.set(order, address)
+  }
+  for (const failure of failures) {
+    const order = excelPackageOrderKey(failure.order_no)
+    const lines = failedLinesByOrder.get(order) ?? []
+    lines.push(`SKU: ${failure.sku_code || failure.sku_name || ''} | ${failure.message || failure.reason}`)
+    failedLinesByOrder.set(order, lines)
+  }
 
   await mapWithConcurrency(items, EXCEL_PACKAGE_CONCURRENCY, async (item) => {
     const url = String(item.download_url ?? '').trim()
+    const order = excelPackageOrderKey(item.order_no)
+    const address = String(item.address ?? addressByOrder.get(order) ?? '').trim()
+    const folder = resolveExcelPackageFolder(item.order_no, address, incompleteOrders.has(order))
     if (!url) {
       reportLines.push(formatExcelFailure({
         row_number: item.row_number,
         order_no: item.order_no,
         sku_code: item.sku_code,
         quantity: item.quantity,
+        address: item.address,
         reason: 'missing_download_url',
         message: '下载地址为空',
       }))
+      downloadFailures.push({
+        row_number: item.row_number,
+        order_no: item.order_no,
+        sku_code: item.sku_code,
+        quantity: item.quantity,
+        address: item.address,
+        reason: 'missing_download_url',
+        message: '下载地址为空',
+      })
       return
     }
     try {
       const response = await fetch(url, { credentials: 'omit', mode: 'cors' })
       if (!response.ok) throw new Error(`http_${response.status}`)
       const blob = await response.blob()
-      const folder = sanitizeZipEntryName(item.order_no, '未知订单')
+      const counterKey = `${folder}\n${item.sku_code || item.sku_name || item.asset_id}`
+      let sequence = skuCountersByFolder.get(counterKey) ?? 0
       for (let i = 1; i <= item.quantity; i += 1) {
-        zip.file(`${folder}/${resolveExcelPackageFilename(item, i)}`, blob, { binary: true, compression: 'STORE' })
+        sequence += 1
+        zip.file(`${folder}/${resolveExcelPackageFilename(item, sequence)}`, blob, { binary: true, compression: 'STORE' })
         copied += 1
       }
+      skuCountersByFolder.set(counterKey, sequence)
     } catch (err) {
       const reason = err instanceof Error ? err.message : 'fetch_failed'
       reportLines.push(formatExcelFailure({
@@ -2028,17 +2161,42 @@ async function downloadExcelPackageAsZip(items: AssetExcelPackageItem[], failure
         order_no: item.order_no,
         sku_code: item.sku_code,
         quantity: item.quantity,
+        address: item.address,
         reason,
         message: '文件下载失败',
       }))
+      downloadFailures.push({
+        row_number: item.row_number,
+        order_no: item.order_no,
+        sku_code: item.sku_code,
+        quantity: item.quantity,
+        address: item.address,
+        reason,
+        message: '文件下载失败',
+      })
     } finally {
       completed += 1
+      excelPackageResult.copiedFiles = copied
       excelPackageStatus.value = `正在下载并分拣 ${completed}/${items.length} 行，已写入 ${copied} 个文件`
     }
   })
 
+  const seenOrderFolders = new Set<string>()
+  for (const [order, address] of addressByOrder) {
+    const folder = resolveExcelPackageFolder(order, address, incompleteOrders.has(order))
+    if (seenOrderFolders.has(folder)) continue
+    seenOrderFolders.add(folder)
+    zip.file(`${folder}/地址.txt`, address)
+  }
+  for (const [order, lines] of failedLinesByOrder) {
+    const address = addressByOrder.get(order) ?? ''
+    const folder = resolveExcelPackageFolder(order, address, true)
+    zip.file(`${folder}/未找到编码.txt`, lines.join('\n') + '\n')
+  }
+
   zip.file('打包报告.txt', reportLines.join('\n') + '\n')
 
+  excelPackagePhase.value = 'zipping'
   excelPackageStatus.value = '正在生成 ZIP'
   const blob = await zip.generateAsync(
     { type: 'blob', compression: 'STORE', streamFiles: true },
@@ -2047,32 +2205,48 @@ async function downloadExcelPackageAsZip(items: AssetExcelPackageItem[], failure
     },
   )
   downloadBlob(blob, buildTimestampedZipFilename('Excel图片分拣包'))
-  return copied
+  return { copied, downloadFailures }
 }
 
 async function handleExcelPackageFile(event: Event) {
   const file = (event.target as HTMLInputElement | null)?.files?.[0]
   if (!file || excelPackaging.value) return
   excelPackaging.value = true
+  excelPackageModalOpen.value = true
+  resetExcelPackageResult()
+  excelPackagePhase.value = 'parsing'
   excelPackageStatus.value = '正在解析 Excel 模板'
   excelPackageError.value = ''
   try {
-    const rows = await parseExcelPackageRows(file)
-    if (!rows.length) throw new Error('Excel 中没有可处理的数据行')
-    excelPackageStatus.value = `已解析 ${rows.length} 行，正在匹配资产`
-    const res = await assetsApi.excelPackagePreview(rows)
+    if (!/\.(xlsx|xls)$/i.test(file.name)) throw new Error('仅支持 .xlsx 或 .xls 模板')
+    excelPackagePhase.value = 'matching'
+    excelPackageStatus.value = '正在上传、解析并匹配资产'
+    const res = await assetsApi.excelPackagePreviewFile(file)
     const manifest = res.data?.data
     const items = Array.isArray(manifest?.items) ? manifest.items : []
     const failures = Array.isArray(manifest?.failures) ? manifest.failures : []
-    if (!items.length) throw new Error('没有匹配到可下载的 JPG/PNG 资产')
+    if (!items.length && !failures.length) throw new Error('没有匹配到可下载的 JPG/PNG 资产')
+    excelPackageResult.parsedRows = items.length + failures.length
+    excelPackageResult.matchedRows = items.length
+    excelPackageResult.failedRows = failures.length
+    excelPackageResult.totalFiles = manifest?.total_files ?? 0
+    excelPackageResult.systemRows = items.filter((item) => item.source_type === 'system').length
+    excelPackageResult.externalRows = items.filter((item) => item.source_type === 'external').length
+    excelPackageResult.pendingRows = failures.filter(isExcelPackagePendingFailure).length
+    excelPackageResult.failures = failures
+    excelPackagePhase.value = 'downloading'
     excelPackageStatus.value = `匹配成功 ${items.length} 行，准备生成 ${manifest?.total_files ?? 0} 个文件`
-    const copied = await downloadExcelPackageAsZip(items, failures)
+    const { copied, downloadFailures } = await downloadExcelPackageAsZip(items, failures)
+    excelPackageResult.downloadFailures = downloadFailures
+    excelPackagePhase.value = 'done'
     excelPackageStatus.value = `已生成 ZIP，共写入 ${copied} 个文件`
     const errors: string[] = []
     if (failures.length > 0) errors.push(`${failures.length} 行未匹配`)
+    if (downloadFailures.length > 0) errors.push(`${downloadFailures.length} 行下载失败`)
     if (copied <= 0) errors.push('没有图片文件下载成功')
     excelPackageError.value = errors.length > 0 ? `${errors.join('；')}，详情见 ZIP 内打包报告.txt` : ''
   } catch (err) {
+    excelPackagePhase.value = 'failed'
     excelPackageStatus.value = ''
     excelPackageError.value = resolveApiUserMessage(err, { fallback: 'Excel 图片分拣下载失败' })
   } finally {
@@ -3510,6 +3684,160 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 
+.excel-package-modal {
+  display: grid;
+  gap: 0.9rem;
+  color: rgb(var(--yb-text));
+}
+
+.excel-package-progress-card {
+  border: 1px solid rgb(var(--yb-border));
+  border-radius: 10px;
+  background: rgb(var(--yb-surface-soft));
+  padding: 0.85rem;
+}
+
+.excel-package-progress-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.excel-package-stage {
+  border: 1px solid rgb(var(--yb-border-strong));
+  border-radius: 999px;
+  background: rgb(var(--yb-surface));
+  color: rgb(var(--yb-text-body));
+  font-size: 0.75rem;
+  font-weight: 750;
+  padding: 0.2rem 0.55rem;
+}
+
+.excel-package-stage--done {
+  border-color: rgb(var(--yb-success) / 0.32);
+  background: rgb(var(--yb-success) / 0.1);
+  color: rgb(var(--yb-success-text));
+}
+
+.excel-package-stage--failed {
+  border-color: rgb(var(--yb-danger) / 0.32);
+  background: rgb(var(--yb-danger) / 0.08);
+  color: rgb(var(--yb-danger-text));
+}
+
+.excel-package-progress-text {
+  margin: 0.65rem 0 0;
+  color: rgb(var(--yb-text-muted));
+  font-size: 0.82rem;
+}
+
+.excel-package-progress-track {
+  height: 0.45rem;
+  margin-top: 0.75rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgb(var(--yb-border));
+}
+
+.excel-package-progress-bar {
+  height: 100%;
+  border-radius: inherit;
+  background: rgb(var(--yb-brand));
+  transition: width 0.18s ease;
+}
+
+.excel-package-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.excel-package-summary-grid > div {
+  border: 1px solid rgb(var(--yb-border));
+  border-radius: 9px;
+  background: rgb(var(--yb-surface));
+  padding: 0.7rem;
+}
+
+.excel-package-summary-grid span,
+.excel-package-source-grid {
+  color: rgb(var(--yb-text-muted));
+  font-size: 0.75rem;
+}
+
+.excel-package-summary-grid strong {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 1.15rem;
+  color: rgb(var(--yb-text));
+}
+
+.excel-package-source-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.excel-package-source-grid span {
+  border: 1px solid rgb(var(--yb-border));
+  border-radius: 999px;
+  background: rgb(var(--yb-surface-soft));
+  padding: 0.25rem 0.6rem;
+}
+
+.excel-package-detail-list {
+  display: grid;
+  gap: 0.5rem;
+  max-height: 18rem;
+  overflow: auto;
+}
+
+.excel-package-detail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  color: rgb(var(--yb-text));
+  font-size: 0.82rem;
+}
+
+.excel-package-detail-head span {
+  color: rgb(var(--yb-text-muted));
+  font-size: 0.75rem;
+}
+
+.excel-package-detail-item {
+  border: 1px solid rgb(var(--yb-border));
+  border-radius: 9px;
+  background: rgb(var(--yb-surface-soft));
+  padding: 0.65rem;
+}
+
+.excel-package-detail-item div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.excel-package-detail-item strong {
+  min-width: 0;
+  color: rgb(var(--yb-text));
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+}
+
+.excel-package-detail-item span,
+.excel-package-detail-item p {
+  color: rgb(var(--yb-text-muted));
+  font-size: 0.75rem;
+}
+
+.excel-package-detail-item p {
+  margin: 0.4rem 0 0;
+}
+
 .bulk-search-panel {
   display: grid;
   gap: 1rem;
@@ -3748,6 +4076,15 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 720px) {
+  .excel-package-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .excel-package-detail-item div {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
   .bulk-result-card,
   .bulk-result-card--failed {
     grid-template-columns: minmax(0, 1fr);

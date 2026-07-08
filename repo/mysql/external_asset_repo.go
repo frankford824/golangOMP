@@ -295,6 +295,50 @@ func cleanExternalAssetBrowsePath(value string) string {
 	return cleaned
 }
 
+func normalizeExternalAssetOriginPrefixes(prefixes []repo.ExternalAssetOriginPrefix) []repo.ExternalAssetOriginPrefix {
+	out := make([]repo.ExternalAssetOriginPrefix, 0, len(prefixes))
+	seen := map[string]struct{}{}
+	for _, prefix := range prefixes {
+		mountPath := cleanExternalAssetBrowsePath(prefix.MountPath)
+		originPath := cleanExternalAssetBrowsePath(prefix.OriginPath)
+		if mountPath == "" || originPath == "" {
+			continue
+		}
+		if originPath != mountPath && !strings.HasPrefix(originPath, mountPath+"/") {
+			continue
+		}
+		key := mountPath + "\x00" + originPath
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, repo.ExternalAssetOriginPrefix{MountPath: mountPath, OriginPath: originPath})
+	}
+	return out
+}
+
+func externalAssetOriginPrefixWhere(prefixes []repo.ExternalAssetOriginPrefix) (string, []interface{}) {
+	prefixes = normalizeExternalAssetOriginPrefixes(prefixes)
+	if len(prefixes) == 0 {
+		return "", nil
+	}
+	clauses := make([]string, 0, len(prefixes))
+	args := make([]interface{}, 0, len(prefixes)*3)
+	for _, prefix := range prefixes {
+		clauses = append(clauses, `(mount_path = ? AND (origin_path = ? OR origin_path LIKE ?))`)
+		args = append(args, prefix.MountPath, prefix.OriginPath, prefix.OriginPath+"/%")
+	}
+	return strings.Join(clauses, " OR "), args
+}
+
+func externalAssetOriginPrefixPriorityOrder(prefixes []repo.ExternalAssetOriginPrefix) (string, []interface{}) {
+	where, args := externalAssetOriginPrefixWhere(prefixes)
+	if where == "" {
+		return "", nil
+	}
+	return "CASE WHEN (" + where + ") THEN 0 ELSE 1 END, ", args
+}
+
 func parentExternalAssetBrowsePath(value string) string {
 	value = cleanExternalAssetBrowsePath(value)
 	if value == "" {
@@ -764,6 +808,27 @@ func (r *externalAssetRepo) MarkOSSPreparePending(ctx context.Context, id int64)
 	return wrapExternalAssetUpdate(err, "mark external oss pending")
 }
 
+func (r *externalAssetRepo) MarkOSSPendingByOriginPrefixes(ctx context.Context, prefixes []repo.ExternalAssetOriginPrefix) (int64, error) {
+	where, args := externalAssetOriginPrefixWhere(prefixes)
+	if where == "" {
+		return 0, nil
+	}
+	result, err := r.db.db.ExecContext(ctx, `
+		UPDATE external_asset_records
+		   SET oss_sync_status = 'pending',
+		       last_prepare_error = NULL
+		 WHERE kind = 'nas_local'
+		   AND is_dir = 0
+		   AND status <> 'missing'
+		   AND oss_sync_status NOT IN ('ready', 'uploading')
+		   AND (`+where+`)`, args...)
+	if err != nil {
+		return 0, fmt.Errorf("mark external oss pending by origin prefixes: %w", err)
+	}
+	affected, _ := result.RowsAffected()
+	return affected, nil
+}
+
 func (r *externalAssetRepo) MarkPreviewPreparePending(ctx context.Context, id int64) error {
 	_, err := r.db.db.ExecContext(ctx, `
 		UPDATE external_asset_records
@@ -797,15 +862,19 @@ func (r *externalAssetRepo) ListDirectURLRefreshCandidates(ctx context.Context, 
 }
 
 func (r *externalAssetRepo) ListPendingOSS(ctx context.Context, limit int) ([]*domain.ExternalAssetRecord, error) {
-	if limit <= 0 || limit > 100 {
-		limit = 20
-	}
+	return r.ListPendingOSSPrioritized(ctx, nil, limit)
+}
+
+func (r *externalAssetRepo) ListPendingOSSPrioritized(ctx context.Context, prefixes []repo.ExternalAssetOriginPrefix, limit int) ([]*domain.ExternalAssetRecord, error) {
+	limit = externalAssetPrepareLimit(limit)
+	priorityOrder, priorityArgs := externalAssetOriginPrefixPriorityOrder(prefixes)
+	args := append(priorityArgs, limit)
 	rows, err := r.db.db.QueryContext(ctx, externalAssetSelect+`
 		WHERE kind = 'nas_local'
 		  AND is_dir = 0
 		  AND oss_sync_status IN ('pending', 'failed')
-		ORDER BY CASE oss_sync_status WHEN 'pending' THEN 0 ELSE 1 END, updated_at DESC, id DESC
-		LIMIT ?`, limit)
+		ORDER BY `+priorityOrder+`CASE oss_sync_status WHEN 'pending' THEN 0 ELSE 1 END, updated_at DESC, id DESC
+		LIMIT ?`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list external oss pending: %w", err)
 	}
@@ -814,9 +883,7 @@ func (r *externalAssetRepo) ListPendingOSS(ctx context.Context, limit int) ([]*d
 }
 
 func (r *externalAssetRepo) ListPendingPreview(ctx context.Context, limit int) ([]*domain.ExternalAssetRecord, error) {
-	if limit <= 0 || limit > 100 {
-		limit = 20
-	}
+	limit = externalAssetPrepareLimit(limit)
 	rows, err := r.db.db.QueryContext(ctx, externalAssetSelect+`
 		WHERE is_dir = 0
 		  AND preview_status IN ('pending', 'failed')
@@ -827,6 +894,16 @@ func (r *externalAssetRepo) ListPendingPreview(ctx context.Context, limit int) (
 	}
 	defer rows.Close()
 	return scanExternalAssetRows(rows)
+}
+
+func externalAssetPrepareLimit(limit int) int {
+	if limit <= 0 {
+		return 20
+	}
+	if limit > 200 {
+		return 200
+	}
+	return limit
 }
 
 func (r *externalAssetRepo) MarkOSSReady(ctx context.Context, id int64, objectKey string) error {

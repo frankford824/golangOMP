@@ -326,6 +326,7 @@ export interface AssetExcelPackageRow {
   sku_code: string
   sku_name?: string
   quantity: number
+  address?: string
   keyword?: string
 }
 
@@ -336,12 +337,16 @@ export interface AssetExcelPackageItem {
   sku_name?: string
   quantity: number
   asset_id: number
+  resource_id?: string
+  source_type?: string
   task_id: number
   task_no?: string
   filename: string
   file_size: number
   mime_type?: string
   download_url: string
+  address?: string
+  origin_path?: string
   expires_at?: string | null
 }
 
@@ -351,6 +356,7 @@ export interface AssetExcelPackageFailure {
   sku_code?: string
   sku_name?: string
   quantity?: number
+  address?: string
   reason: string
   message: string
 }
@@ -465,6 +471,19 @@ export const assetsApi = {
       { rows },
       { signal },
     ),
+
+  excelPackagePreviewFile: (file: File, signal?: AbortSignal) => {
+    const form = new FormData()
+    form.append('file', file)
+    return http.post<AssetExcelPackagePreviewResponse>(
+      '/v1/assets/excel-package/preview-file',
+      form,
+      {
+        signal,
+        headers: { 'Content-Type': 'multipart/form-data' },
+      },
+    )
+  },
 
   /** GET /v1/assets/{id} */
   getAsset: (assetId: string, signal?: AbortSignal) =>

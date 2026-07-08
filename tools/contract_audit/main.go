@@ -272,6 +272,7 @@ var knownGapReasons = map[string]string{
 	knownGapKey("PATCH", "/v1/users/:id"):                                               "tool-deref-limit-inline-route",
 	knownGapKey("POST", "/v1/assets/batch-download"):                                    "tool-deref-limit-dynamic-payload-documented",
 	knownGapKey("POST", "/v1/assets/excel-package/preview"):                             "tool-deref-limit-dynamic-payload-documented",
+	knownGapKey("POST", "/v1/assets/excel-package/preview-file"):                        "tool-deref-limit-dynamic-payload-documented",
 	knownGapKey("POST", "/v1/assets/search/batch"):                                      "tool-deref-limit-dynamic-payload-documented",
 	knownGapKey("POST", "/v1/assets/upload-sessions"):                                   "tool-deref-limit-delegated-handler",
 	knownGapKey("POST", "/v1/assets/:asset_id/archive"):                                 "tool-deref-limit-dynamic-payload-documented",

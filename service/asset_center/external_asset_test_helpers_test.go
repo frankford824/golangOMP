@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"workflow/domain"
+	"workflow/repo"
 )
 
 type assetCenterExternalRepoStub struct {
@@ -120,6 +121,10 @@ func (r *assetCenterExternalRepoStub) MarkOSSPreparePending(_ context.Context, i
 	return nil
 }
 
+func (r *assetCenterExternalRepoStub) MarkOSSPendingByOriginPrefixes(context.Context, []repo.ExternalAssetOriginPrefix) (int64, error) {
+	return 0, nil
+}
+
 func (r *assetCenterExternalRepoStub) MarkPreviewPreparePending(_ context.Context, id int64) error {
 	r.previewIDs = append(r.previewIDs, id)
 	return nil
@@ -130,6 +135,10 @@ func (r *assetCenterExternalRepoStub) ListDirectURLRefreshCandidates(context.Con
 }
 
 func (r *assetCenterExternalRepoStub) ListPendingOSS(context.Context, int) ([]*domain.ExternalAssetRecord, error) {
+	return nil, nil
+}
+
+func (r *assetCenterExternalRepoStub) ListPendingOSSPrioritized(context.Context, []repo.ExternalAssetOriginPrefix, int) ([]*domain.ExternalAssetRecord, error) {
 	return nil, nil
 }
 

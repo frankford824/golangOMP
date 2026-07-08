@@ -20,6 +20,7 @@ import (
 
 type summary struct {
 	OSSProcessed        int                            `json:"oss_processed"`
+	OSSRequiredQueued   int64                          `json:"oss_required_queued,omitempty"`
 	PreviewProcessed    int                            `json:"preview_processed"`
 	DirectURLReady      int                            `json:"direct_url_ready"`
 	DirectURLFailed     int                            `json:"direct_url_failed"`
@@ -52,7 +53,14 @@ func main() {
 		log.Fatalf("open mysql: %v", err)
 	}
 	defer db.Close()
-	db.SetMaxOpenConns(3)
+	dbConns := cfg.ExternalAssets.PrepareConcurrency + 2
+	if dbConns < 3 {
+		dbConns = 3
+	}
+	if dbConns > 20 {
+		dbConns = 20
+	}
+	db.SetMaxOpenConns(dbConns)
 	db.SetMaxIdleConns(1)
 	db.SetConnMaxLifetime(cfg.MySQL.ConnMaxLifetime)
 	if err := db.PingContext(ctx); err != nil {
@@ -92,6 +100,15 @@ func main() {
 	if fullSync {
 		full, err := svc.SyncFullIndex(ctx)
 		out := summary{FullSync: full}
+		if queued, queueErr := svc.EnsureOSSRequiredPrefixesPending(ctx); queueErr != nil {
+			if err == nil {
+				err = queueErr
+			} else {
+				out.Message = err.Error()
+			}
+		} else {
+			out.OSSRequiredQueued = queued
+		}
 		if err != nil {
 			out.Message = err.Error()
 		}

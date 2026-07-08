@@ -75,3 +75,24 @@ func TestExternalAssetDirectoryClausesUseParentHash(t *testing.T) {
 		t.Fatalf("args = %#v, want parent hash and /quark", args)
 	}
 }
+
+func TestExternalAssetPrepareLimitAllowsServiceBatchSize(t *testing.T) {
+	tests := []struct {
+		name  string
+		limit int
+		want  int
+	}{
+		{name: "default", limit: 0, want: 20},
+		{name: "normal", limit: 100, want: 100},
+		{name: "service max", limit: 200, want: 200},
+		{name: "cap", limit: 500, want: 200},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := externalAssetPrepareLimit(tt.limit); got != tt.want {
+				t.Fatalf("externalAssetPrepareLimit(%d) = %d, want %d", tt.limit, got, tt.want)
+			}
+		})
+	}
+}

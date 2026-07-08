@@ -317,13 +317,20 @@ type ExternalAssetRepo interface {
 	MarkMountMissingBefore(ctx context.Context, mountPath string, scannedBefore time.Time) error
 	UpdateDirectURL(ctx context.Context, id int64, rawURL string, expiresAt *time.Time, status string) error
 	MarkOSSPreparePending(ctx context.Context, id int64) error
+	MarkOSSPendingByOriginPrefixes(ctx context.Context, prefixes []ExternalAssetOriginPrefix) (int64, error)
 	MarkPreviewPreparePending(ctx context.Context, id int64) error
 	ListDirectURLRefreshCandidates(ctx context.Context, limit int, staleBefore time.Time) ([]*domain.ExternalAssetRecord, error)
 	ListPendingOSS(ctx context.Context, limit int) ([]*domain.ExternalAssetRecord, error)
+	ListPendingOSSPrioritized(ctx context.Context, prefixes []ExternalAssetOriginPrefix, limit int) ([]*domain.ExternalAssetRecord, error)
 	ListPendingPreview(ctx context.Context, limit int) ([]*domain.ExternalAssetRecord, error)
 	MarkOSSReady(ctx context.Context, id int64, objectKey string) error
 	MarkPreviewReady(ctx context.Context, id int64, previewKey string) error
 	MarkPrepareFailed(ctx context.Context, id int64, target, message string) error
+}
+
+type ExternalAssetOriginPrefix struct {
+	MountPath  string
+	OriginPath string
 }
 
 type AssetWorkbenchProfileFilter struct {

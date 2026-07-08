@@ -11,7 +11,7 @@
 
 - 资产上传建议走 upload session；下载与预览 URL 以接口返回为准。
 - 删除、归档、恢复动作需按返回错误处理竞态和权限失败。
-- 本文件覆盖 `18` 个 `/v1` path；同一路径多 method 合并在同一节。
+- 本文件覆盖 `19` 个 `/v1` path；同一路径多 method 合并在同一节。
 
 ## GET /v1/assets
 
@@ -150,7 +150,7 @@ curl -X POST https://api.example.com/v1/assets/batch-download \
 ### 简介
 支持方法: POST。
 
-- `POST`: Matches uploaded Excel rows to current JPG/PNG assets only, returns presigned download URLs and per-row failures. The frontend builds the ZIP with order-number folders and quantity-based image copies.
+- `POST`: Matches uploaded Excel rows to current JPG/PNG system assets and OSS-ready external assets, returns direct download URLs and per-row failures. The frontend builds the ZIP with order-number folders, address files, missing-SKU reports, and quantity-based image copies.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -192,7 +192,7 @@ Content-Type: `application/json`
 ### 错误码
 | HTTP | code | deny_code | 说明 |
 |---|---|---|---|
-| 400 | 见 `error.code` | 见 `deny_code` | Invalid rows or no rows matched |
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid request |
 | 500 | 见 `error.code` | 见 `deny_code` | Internal error while matching assets |
 
 ### curl 示例
@@ -201,6 +201,69 @@ curl -X POST https://api.example.com/v1/assets/excel-package/preview \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"example":"value"}'
+```
+
+### 前端最佳实践
+- 资产上传建议走 upload session；下载与预览 URL 以接口返回为准。
+- 删除、归档、恢复动作需按返回错误处理竞态和权限失败。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## POST /v1/assets/excel-package/preview-file
+
+### 简介
+支持方法: POST。
+
+- `POST`: Uploads an Eve-compatible .xlsx or .xls template, parses order number, SKU, quantity, address, and keyword columns on the backend, then returns the same Excel image package manifest as /v1/assets/excel-package/preview.
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `POST` 允许角色: Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, Warehouse, Admin。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+无 path/query/header 参数。
+
+Content-Type: `multipart/form-data`
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `file` | string | 是 | Eve-compatible .xlsx or .xls template, max 10 MiB. |
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "items": [
+      "..."
+    ],
+    "success_count": 123,
+    "failure_count": 123,
+    "total_files": 123,
+    "total_size": 123
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | AssetExcelPackageManifest | 否 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid file or unsupported template |
+| 500 | 见 `error.code` | 见 `deny_code` | Internal error while matching assets |
+
+### curl 示例
+```bash
+curl -X POST https://api.example.com/v1/assets/excel-package/preview-file \
+  -H "Authorization: Bearer $TOKEN" \
+  -F "file=@example.xlsx"
 ```
 
 ### 前端最佳实践

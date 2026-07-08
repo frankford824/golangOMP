@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"workflow/domain"
+	"workflow/repo"
 	baseservice "workflow/service"
 )
 
@@ -883,6 +884,46 @@ func TestFullSyncIntervalFallsBackToSyncInterval(t *testing.T) {
 	}
 }
 
+func TestEnsureOSSRequiredPrefixesPendingUsesConfiguredMount(t *testing.T) {
+	repo := &externalAssetRepoStub{}
+	svc := NewService(repo, Config{
+		Enabled:             true,
+		Mounts:              ParseMounts("/p3:nas_local,/p2:netdisk"),
+		OSSRequiredPrefixes: ParseOSSPrefixes("/p3/仓库素材区/徐凯,/p3/仓库素材区/徐凯/"),
+	}, nil)
+
+	queued, err := svc.EnsureOSSRequiredPrefixesPending(context.Background())
+	if err != nil {
+		t.Fatalf("EnsureOSSRequiredPrefixesPending() error = %v", err)
+	}
+	if queued != 1 {
+		t.Fatalf("queued=%d, want 1 deduped prefix", queued)
+	}
+	if len(repo.ossPrefixMarks) != 1 {
+		t.Fatalf("ossPrefixMarks=%+v, want one mark", repo.ossPrefixMarks)
+	}
+	got := repo.ossPrefixMarks[0]
+	if got.MountPath != "/p3" || got.OriginPath != "/p3/仓库素材区/徐凯" {
+		t.Fatalf("prefix=%+v, want /p3 徐凯", got)
+	}
+}
+
+func TestProcessPendingOSSPrioritizesRequiredPrefixes(t *testing.T) {
+	repo := &externalAssetRepoStub{}
+	svc := NewService(repo, Config{
+		Enabled:             true,
+		Mounts:              ParseMounts("/p3:nas_local"),
+		OSSRequiredPrefixes: ParseOSSPrefixes("/p3/仓库素材区/徐凯"),
+	}, nil)
+
+	if _, err := svc.ProcessPendingOSS(context.Background(), 20); err != nil {
+		t.Fatalf("ProcessPendingOSS() error = %v", err)
+	}
+	if len(repo.ossPrefixMarks) != 1 || len(repo.ossPriorityReads) != 1 {
+		t.Fatalf("marks=%+v priorityReads=%+v, want required prefix used", repo.ossPrefixMarks, repo.ossPriorityReads)
+	}
+}
+
 type externalAssetRepoStub struct {
 	upserts      []domain.ExternalAssetUpsert
 	nextRunID    int64
@@ -900,6 +941,8 @@ type externalAssetRepoStub struct {
 	searchQueries     []domain.ExternalAssetSearchQuery
 	getRow            *domain.ExternalAssetRecord
 	previewPendingIDs []int64
+	ossPrefixMarks    []repo.ExternalAssetOriginPrefix
+	ossPriorityReads  []repo.ExternalAssetOriginPrefix
 }
 
 func (r *externalAssetRepoStub) Search(_ context.Context, query domain.ExternalAssetSearchQuery) ([]*domain.ExternalAssetRecord, int64, error) {
@@ -991,6 +1034,11 @@ func (r *externalAssetRepoStub) MarkOSSPreparePending(context.Context, int64) er
 	return nil
 }
 
+func (r *externalAssetRepoStub) MarkOSSPendingByOriginPrefixes(_ context.Context, prefixes []repo.ExternalAssetOriginPrefix) (int64, error) {
+	r.ossPrefixMarks = append(r.ossPrefixMarks, prefixes...)
+	return int64(len(prefixes)), nil
+}
+
 func (r *externalAssetRepoStub) MarkPreviewPreparePending(_ context.Context, id int64) error {
 	r.previewPendingIDs = append(r.previewPendingIDs, id)
 	return nil
@@ -1001,6 +1049,11 @@ func (r *externalAssetRepoStub) ListDirectURLRefreshCandidates(context.Context, 
 }
 
 func (r *externalAssetRepoStub) ListPendingOSS(context.Context, int) ([]*domain.ExternalAssetRecord, error) {
+	return nil, nil
+}
+
+func (r *externalAssetRepoStub) ListPendingOSSPrioritized(_ context.Context, prefixes []repo.ExternalAssetOriginPrefix, _ int) ([]*domain.ExternalAssetRecord, error) {
+	r.ossPriorityReads = append(r.ossPriorityReads, prefixes...)
 	return nil, nil
 }
 

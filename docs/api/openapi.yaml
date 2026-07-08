@@ -5765,6 +5765,9 @@ components:
           type: integer
           minimum: 1
           description: Number of image copies to place under the order folder.
+        address:
+          type: string
+          description: Optional recipient/address column copied into the order folder as address metadata by the frontend ZIP builder.
         keyword:
           type: string
           description: Optional filename/product keyword for disambiguation.
@@ -5787,7 +5790,15 @@ components:
         sku_code: { type: string }
         sku_name: { type: string }
         quantity: { type: integer }
-        asset_id: { type: integer }
+        asset_id:
+          type: integer
+          description: Numeric source record ID. For external resources this is the external asset record ID.
+        resource_id:
+          type: string
+          description: Stable mixed resource ID. System resources use the numeric asset ID; external resources use `ext-{id}`.
+        source_type:
+          type: string
+          enum: [system, external]
         task_id: { type: integer }
         task_no: { type: string }
         filename: { type: string }
@@ -5798,7 +5809,12 @@ components:
         download_url:
           type: string
           format: uri
-          description: Presigned OSS direct download URL for a JPG/PNG asset.
+          description: Direct download URL for a matched JPG/PNG asset. System resources use OSS presign; external resources are returned only when OSS-ready.
+        address:
+          type: string
+        origin_path:
+          type: string
+          description: External asset origin path when the match comes from an external source.
         expires_at:
           type: string
           format: date-time
@@ -5888,6 +5904,7 @@ components:
         sku_code: { type: string }
         sku_name: { type: string }
         quantity: { type: integer }
+        address: { type: string }
         reason: { type: string }
         message: { type: string }
     AssetExcelPackageManifest:
@@ -12522,7 +12539,7 @@ paths:
   /v1/assets/excel-package/preview:
     post:
       summary: Preview Excel image package manifest
-      description: Matches uploaded Excel rows to current JPG/PNG assets only, returns presigned download URLs and per-row failures. The frontend builds the ZIP with order-number folders and quantity-based image copies.
+      description: Matches uploaded Excel rows to current JPG/PNG system assets and OSS-ready external assets, returns direct download URLs and per-row failures. The frontend builds the ZIP with order-number folders, address files, missing-SKU reports, and quantity-based image copies.
       tags: [Assets, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
@@ -12545,7 +12562,50 @@ paths:
                   data:
                     $ref: '#/components/schemas/AssetExcelPackageManifest'
         '400':
-          description: Invalid rows or no rows matched
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: Internal error while matching assets
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /v1/assets/excel-package/preview-file:
+    post:
+      summary: Preview Excel image package manifest from uploaded file
+      description: Uploads an Eve-compatible .xlsx or .xls template, parses order number, SKU, quantity, address, and keyword columns on the backend, then returns the same Excel image package manifest as /v1/assets/excel-package/preview.
+      tags: [Assets, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, Warehouse, Admin]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Eve-compatible .xlsx or .xls template, max 10 MiB.
+      responses:
+        '200':
+          description: Excel image package manifest
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/AssetExcelPackageManifest'
+        '400':
+          description: Invalid file or unsupported template
           content:
             application/json:
               schema:

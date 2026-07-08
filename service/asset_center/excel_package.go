@@ -25,6 +25,7 @@ type ExcelPackageRow struct {
 	SKUCode   string `json:"sku_code"`
 	SKUName   string `json:"sku_name,omitempty"`
 	Quantity  int    `json:"quantity"`
+	Address   string `json:"address,omitempty"`
 	Keyword   string `json:"keyword,omitempty"`
 }
 
@@ -45,12 +46,16 @@ type ExcelPackageItem struct {
 	SKUName     string     `json:"sku_name,omitempty"`
 	Quantity    int        `json:"quantity"`
 	AssetID     int64      `json:"asset_id"`
+	ResourceID  string     `json:"resource_id,omitempty"`
+	SourceType  string     `json:"source_type,omitempty"`
 	TaskID      int64      `json:"task_id"`
 	TaskNo      string     `json:"task_no,omitempty"`
 	Filename    string     `json:"filename"`
 	FileSize    int64      `json:"file_size"`
 	MimeType    string     `json:"mime_type,omitempty"`
 	DownloadURL string     `json:"download_url"`
+	Address     string     `json:"address,omitempty"`
+	OriginPath  string     `json:"origin_path,omitempty"`
 	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
 }
 
@@ -60,13 +65,16 @@ type ExcelPackageFailure struct {
 	SKUCode   string `json:"sku_code,omitempty"`
 	SKUName   string `json:"sku_name,omitempty"`
 	Quantity  int    `json:"quantity,omitempty"`
+	Address   string `json:"address,omitempty"`
 	Reason    string `json:"reason"`
 	Message   string `json:"message"`
 }
 
 type scoredExcelAsset struct {
-	row   *repo.TaskAssetSearchRow
-	score int
+	system   *repo.TaskAssetSearchRow
+	external *AssetDetail
+	score    int
+	updated  time.Time
 }
 
 func (s *Service) BuildExcelPackageManifest(ctx context.Context, rows []ExcelPackageRow) (*ExcelPackageManifest, *domain.AppError) {
@@ -88,6 +96,7 @@ func (s *Service) BuildExcelPackageManifest(ctx context.Context, rows []ExcelPac
 	}
 	var totalBytes int64
 	var totalFiles int
+	matchCache := map[string]scoredExcelAsset{}
 
 	for idx, raw := range rows {
 		row := normalizeExcelPackageRow(raw, idx+2)
@@ -108,16 +117,22 @@ func (s *Service) BuildExcelPackageManifest(ctx context.Context, rows []ExcelPac
 			continue
 		}
 
-		match, appErr := s.matchExcelPackageAsset(ctx, row)
-		if appErr != nil {
-			return nil, appErr
+		cacheKey := excelPackageMatchCacheKey(row)
+		match, ok := matchCache[cacheKey]
+		if !ok {
+			var appErr *domain.AppError
+			match, appErr = s.matchExcelPackageAsset(ctx, row)
+			if appErr != nil {
+				return nil, appErr
+			}
+			matchCache[cacheKey] = match
 		}
-		if match == nil {
+		if match.system == nil && match.external == nil {
 			manifest.Failures = append(manifest.Failures, row.failure("asset_not_found", "未找到匹配的 JPG/PNG 资产"))
 			continue
 		}
 
-		item, failure := s.buildExcelPackageItem(match, row, totalBytes)
+		item, failure := s.buildExcelPackageItem(ctx, match, row, totalBytes)
 		if failure != nil {
 			manifest.Failures = append(manifest.Failures, *failure)
 			continue
@@ -139,11 +154,6 @@ func (s *Service) BuildExcelPackageManifest(ctx context.Context, rows []ExcelPac
 	manifest.FailureCount = len(manifest.Failures)
 	manifest.TotalFiles = totalFiles
 	manifest.TotalSize = totalBytes
-	if manifest.SuccessCount == 0 {
-		return nil, domain.NewAppError(domain.ErrCodeAssetMissing, "all excel package rows are unavailable", map[string]interface{}{
-			"failure_count": manifest.FailureCount,
-		})
-	}
 	return manifest, nil
 }
 
@@ -151,11 +161,20 @@ func normalizeExcelPackageRow(row ExcelPackageRow, fallbackRowNumber int) ExcelP
 	row.OrderNo = strings.TrimSpace(row.OrderNo)
 	row.SKUCode = strings.ToUpper(strings.TrimSpace(row.SKUCode))
 	row.SKUName = strings.TrimSpace(row.SKUName)
+	row.Address = strings.TrimSpace(row.Address)
 	row.Keyword = strings.TrimSpace(row.Keyword)
 	if row.RowNumber <= 0 {
 		row.RowNumber = fallbackRowNumber
 	}
 	return row
+}
+
+func excelPackageMatchCacheKey(row ExcelPackageRow) string {
+	return strings.Join([]string{
+		strings.ToUpper(strings.TrimSpace(row.SKUCode)),
+		strings.ToLower(strings.TrimSpace(row.SKUName)),
+		strings.ToLower(strings.TrimSpace(row.Keyword)),
+	}, "\x00")
 }
 
 func (r ExcelPackageRow) failure(reason, message string) ExcelPackageFailure {
@@ -165,12 +184,13 @@ func (r ExcelPackageRow) failure(reason, message string) ExcelPackageFailure {
 		SKUCode:   r.SKUCode,
 		SKUName:   r.SKUName,
 		Quantity:  r.Quantity,
+		Address:   r.Address,
 		Reason:    reason,
 		Message:   message,
 	}
 }
 
-func (s *Service) matchExcelPackageAsset(ctx context.Context, row ExcelPackageRow) (*repo.TaskAssetSearchRow, *domain.AppError) {
+func (s *Service) matchExcelPackageAsset(ctx context.Context, row ExcelPackageRow) (scoredExcelAsset, *domain.AppError) {
 	keyword := firstExcelPackageKeyword(row.SKUCode, row.SKUName)
 	resultRows, _, err := s.searchRepo.Search(ctx, domain.AssetSearchQuery{
 		Keyword:    keyword,
@@ -180,7 +200,7 @@ func (s *Service) matchExcelPackageAsset(ctx context.Context, row ExcelPackageRo
 		TaskStatus: domain.AssetTaskStatusFilterAll,
 	})
 	if err != nil {
-		return nil, domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)
+		return scoredExcelAsset{}, domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)
 	}
 
 	candidates := make([]scoredExcelAsset, 0, len(resultRows))
@@ -189,23 +209,34 @@ func (s *Service) matchExcelPackageAsset(ctx context.Context, row ExcelPackageRo
 		if score <= 0 {
 			continue
 		}
-		candidates = append(candidates, scoredExcelAsset{row: candidate, score: score})
+		updated := time.Time{}
+		if candidate != nil && candidate.Asset != nil {
+			updated = candidate.Asset.CreatedAt
+		}
+		candidates = append(candidates, scoredExcelAsset{system: candidate, score: score, updated: updated})
+	}
+	externalRows, externalErr := s.batchSearchExternalRows(ctx, keyword, "jpg_png")
+	if externalErr != nil {
+		return scoredExcelAsset{}, domain.NewAppError(domain.ErrCodeInternalError, externalErr.Error(), nil)
+	}
+	for _, candidate := range externalRows {
+		score := scoreExcelPackageExternalAsset(candidate, row)
+		if score <= 0 {
+			continue
+		}
+		candidates = append(candidates, scoredExcelAsset{external: candidate, score: score, updated: candidate.UpdatedAt})
 	}
 	if len(candidates) == 0 {
-		return nil, nil
+		return scoredExcelAsset{}, nil
 	}
 	sort.SliceStable(candidates, func(i, j int) bool {
 		if candidates[i].score != candidates[j].score {
 			return candidates[i].score > candidates[j].score
 		}
-		ai := candidates[i].row.Asset
-		aj := candidates[j].row.Asset
-		if ai == nil || aj == nil {
-			return ai != nil
-		}
-		return ai.CreatedAt.After(aj.CreatedAt)
+		return candidates[i].updated.After(candidates[j].updated)
 	})
-	return candidates[0].row, nil
+	candidates = dedupeExcelPackageExternalFileCandidates(candidates)
+	return candidates[0], nil
 }
 
 func firstExcelPackageKeyword(skuCode, skuName string) string {
@@ -280,7 +311,83 @@ func scoreExcelPackageAsset(row *repo.TaskAssetSearchRow, req ExcelPackageRow) i
 	return score
 }
 
-func (s *Service) buildExcelPackageItem(row *repo.TaskAssetSearchRow, req ExcelPackageRow, currentTotal int64) (ExcelPackageItem, *ExcelPackageFailure) {
+func scoreExcelPackageExternalAsset(asset *AssetDetail, req ExcelPackageRow) int {
+	if asset == nil || asset.SourceType != string(domain.AssetResourceSourceExternal) {
+		return 0
+	}
+	if !isExcelPackageExternalImage(asset) {
+		return 0
+	}
+	sku := strings.ToUpper(strings.TrimSpace(req.SKUCode))
+	skuName := strings.TrimSpace(req.SKUName)
+	keyword := strings.TrimSpace(req.Keyword)
+	fileName := strings.ToUpper(strings.TrimSpace(asset.FileName + " " + asset.OriginalFilename))
+	originPath := strings.ToUpper(strings.TrimSpace(asset.OriginPath + " " + asset.ProductName))
+
+	score := 35
+	if sku != "" {
+		switch {
+		case strings.HasPrefix(fileName, sku):
+			score += 120
+		case strings.Contains(fileName, sku):
+			score += 100
+		case strings.Contains(originPath, sku):
+			score += 70
+		default:
+			return 0
+		}
+	}
+	if skuName != "" {
+		if strings.Contains(strings.ToLower(fileName), strings.ToLower(skuName)) ||
+			strings.Contains(strings.ToLower(originPath), strings.ToLower(skuName)) {
+			score += 20
+		}
+	}
+	if keyword != "" {
+		if strings.Contains(strings.ToLower(fileName), strings.ToLower(keyword)) ||
+			strings.Contains(strings.ToLower(originPath), strings.ToLower(keyword)) {
+			score += 35
+		} else {
+			return 0
+		}
+	}
+	return score
+}
+
+func dedupeExcelPackageExternalFileCandidates(candidates []scoredExcelAsset) []scoredExcelAsset {
+	if len(candidates) < 2 {
+		return candidates
+	}
+	seen := map[string]struct{}{}
+	out := make([]scoredExcelAsset, 0, len(candidates))
+	for _, candidate := range candidates {
+		key := ""
+		if candidate.external != nil {
+			key = batchSearchExternalFileFingerprint(candidate.external)
+		}
+		if key != "" {
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+		}
+		out = append(out, candidate)
+	}
+	return out
+}
+
+func (s *Service) buildExcelPackageItem(ctx context.Context, match scoredExcelAsset, req ExcelPackageRow, currentTotal int64) (ExcelPackageItem, *ExcelPackageFailure) {
+	if match.external != nil {
+		return s.buildExternalExcelPackageItem(ctx, match.external, req, currentTotal)
+	}
+	return s.buildSystemExcelPackageItem(match.system, req, currentTotal)
+}
+
+func (s *Service) buildSystemExcelPackageItem(row *repo.TaskAssetSearchRow, req ExcelPackageRow, currentTotal int64) (ExcelPackageItem, *ExcelPackageFailure) {
+	if row == nil || row.Asset == nil || row.Task == nil {
+		f := req.failure("asset_not_found", "未找到匹配的 JPG/PNG 资产")
+		return ExcelPackageItem{}, &f
+	}
 	asset := row.Asset
 	assetID := valueInt64(asset.AssetID, asset.ID)
 	filename := resolveBatchFilename(asset, assetID)
@@ -314,13 +421,60 @@ func (s *Service) buildExcelPackageItem(row *repo.TaskAssetSearchRow, req ExcelP
 		SKUName:     req.SKUName,
 		Quantity:    req.Quantity,
 		AssetID:     assetID,
+		ResourceID:  strconv.FormatInt(assetID, 10),
+		SourceType:  string(domain.AssetResourceSourceSystem),
 		TaskID:      asset.TaskID,
 		TaskNo:      row.Task.TaskNo,
 		Filename:    sanitizeBatchFilename(filename),
 		FileSize:    fileSize,
 		MimeType:    mimeType,
 		DownloadURL: strings.TrimSpace(signed.DownloadURL),
+		Address:     req.Address,
 		ExpiresAt:   &expiresAt,
+	}, nil
+}
+
+func (s *Service) buildExternalExcelPackageItem(ctx context.Context, asset *AssetDetail, req ExcelPackageRow, currentTotal int64) (ExcelPackageItem, *ExcelPackageFailure) {
+	if asset == nil {
+		f := req.failure("asset_not_found", "未找到匹配的 JPG/PNG 资产")
+		return ExcelPackageItem{}, &f
+	}
+	info, appErr := s.externalSvc.BatchDownloadInfo(ctx, asset.ID)
+	if appErr != nil {
+		f := req.failure(normalizeBatchFailureReason(appErr.Code), appErr.Message)
+		return ExcelPackageItem{}, &f
+	}
+	if info == nil || info.DownloadURL == nil || strings.TrimSpace(*info.DownloadURL) == "" {
+		reason := "download_url_unavailable"
+		if info != nil && strings.TrimSpace(info.AccessHint) != "" {
+			reason = strings.TrimSpace(info.AccessHint)
+		}
+		f := req.failure(reason, "外部素材正在准备下载，请稍后重试")
+		return ExcelPackageItem{}, &f
+	}
+	fileSize := info.FileSize
+	if fileSize > 0 && currentTotal+fileSize*int64(req.Quantity) > MaxExcelPackageTotalBytes {
+		f := req.failure("total_size_limit_exceeded", "总大小超过限制")
+		return ExcelPackageItem{}, &f
+	}
+	expiresAt := info.ExpiresAt
+	return ExcelPackageItem{
+		RowNumber:   req.RowNumber,
+		OrderNo:     req.OrderNo,
+		SKUCode:     req.SKUCode,
+		SKUName:     req.SKUName,
+		Quantity:    req.Quantity,
+		AssetID:     asset.ID,
+		ResourceID:  asset.ResourceID,
+		SourceType:  string(domain.AssetResourceSourceExternal),
+		TaskID:      0,
+		Filename:    sanitizeBatchFilename(info.Filename),
+		FileSize:    fileSize,
+		MimeType:    strings.TrimSpace(info.MimeType),
+		DownloadURL: strings.TrimSpace(*info.DownloadURL),
+		Address:     req.Address,
+		OriginPath:  asset.OriginPath,
+		ExpiresAt:   expiresAt,
 	}, nil
 }
 
@@ -333,6 +487,18 @@ func isExcelPackageImage(asset *domain.TaskAsset) bool {
 		return true
 	}
 	ext := strings.ToLower(filepath.Ext(firstNonEmptyExcelPackage(asset.FileName, stringPtrValue(asset.OriginalName))))
+	return ext == ".jpg" || ext == ".jpeg" || ext == ".png"
+}
+
+func isExcelPackageExternalImage(asset *AssetDetail) bool {
+	if asset == nil {
+		return false
+	}
+	mimeType := strings.ToLower(strings.TrimSpace(asset.MimeType))
+	if mimeType == "image/jpeg" || mimeType == "image/png" {
+		return true
+	}
+	ext := strings.ToLower(filepath.Ext(firstNonEmptyExcelPackage(asset.FileName, asset.OriginalFilename)))
 	return ext == ".jpg" || ext == ".jpeg" || ext == ".png"
 }
 

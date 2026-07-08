@@ -50,6 +50,7 @@ type Config struct {
 	FullSyncMaxDirs     int
 	OSSOriginalPrefix   string
 	OSSPreviewPrefix    string
+	OSSRequiredPrefixes []string
 	LocalPathMappings   map[string]string
 	PrepareInterval     time.Duration
 	PrepareLimit        int
@@ -115,6 +116,7 @@ func ConfigFromApp(cfg config.ExternalAssetsConfig) Config {
 		FullSyncMaxDirs:     cfg.FullSyncMaxDirs,
 		OSSOriginalPrefix:   strings.Trim(strings.TrimSpace(cfg.OSSOriginalPrefix), "/"),
 		OSSPreviewPrefix:    strings.Trim(strings.TrimSpace(cfg.OSSPreviewPrefix), "/"),
+		OSSRequiredPrefixes: ParseOSSPrefixes(cfg.OSSRequiredPrefixes),
 		LocalPathMappings:   ParseLocalPathMappings(cfg.LocalPathMappings),
 		PrepareInterval:     cfg.PrepareInterval,
 		PrepareLimit:        cfg.PrepareLimit,
@@ -264,6 +266,23 @@ func ParseMountPaths(raw string) []string {
 		}
 		seen[mount] = struct{}{}
 		out = append(out, mount)
+	}
+	return out
+}
+
+func ParseOSSPrefixes(raw string) []string {
+	var out []string
+	seen := map[string]struct{}{}
+	for _, part := range strings.Split(raw, ",") {
+		prefix := cleanAListPath(part)
+		if prefix == "/" {
+			continue
+		}
+		if _, ok := seen[prefix]; ok {
+			continue
+		}
+		seen[prefix] = struct{}{}
+		out = append(out, prefix)
 	}
 	return out
 }
@@ -1373,8 +1392,78 @@ func (s *Service) LocalFilesystemPath(row *domain.ExternalAssetRecord) (string, 
 	return filepath.Join(base, filepath.FromSlash(rel)), true
 }
 
+func (s *Service) EnsureOSSRequiredPrefixesPending(ctx context.Context) (int64, error) {
+	if !s.Enabled() {
+		return 0, nil
+	}
+	prefixes := s.ossRequiredOriginPrefixes()
+	if len(prefixes) == 0 {
+		return 0, nil
+	}
+	return s.repo.MarkOSSPendingByOriginPrefixes(ctx, prefixes)
+}
+
+func (s *Service) ossRequiredOriginPrefixes() []repo.ExternalAssetOriginPrefix {
+	if s == nil {
+		return nil
+	}
+	out := make([]repo.ExternalAssetOriginPrefix, 0, len(s.cfg.OSSRequiredPrefixes))
+	seen := map[string]struct{}{}
+	for _, raw := range s.cfg.OSSRequiredPrefixes {
+		origin := cleanAListPath(raw)
+		if origin == "/" {
+			continue
+		}
+		mount := s.mountPathForOrigin(origin)
+		if mount == "" {
+			continue
+		}
+		key := mount + "\x00" + origin
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, repo.ExternalAssetOriginPrefix{MountPath: mount, OriginPath: origin})
+	}
+	return out
+}
+
+func (s *Service) mountPathForOrigin(origin string) string {
+	origin = cleanAListPath(origin)
+	if origin == "/" {
+		return ""
+	}
+	best := ""
+	for _, mount := range s.cfg.Mounts {
+		mountPath := cleanAListPath(mount.Path)
+		if mountPath == "/" {
+			continue
+		}
+		if origin == mountPath || strings.HasPrefix(origin, mountPath+"/") {
+			if len(mountPath) > len(best) {
+				best = mountPath
+			}
+		}
+	}
+	if best != "" {
+		return best
+	}
+	trimmed := strings.Trim(origin, "/")
+	if trimmed == "" {
+		return ""
+	}
+	first, _, _ := strings.Cut(trimmed, "/")
+	return cleanAListPath(first)
+}
+
 func (s *Service) ProcessPendingOSS(ctx context.Context, limit int) (int, error) {
-	rows, err := s.repo.ListPendingOSS(ctx, limit)
+	priorityPrefixes := s.ossRequiredOriginPrefixes()
+	if len(priorityPrefixes) > 0 {
+		if _, err := s.repo.MarkOSSPendingByOriginPrefixes(ctx, priorityPrefixes); err != nil {
+			return 0, err
+		}
+	}
+	rows, err := s.repo.ListPendingOSSPrioritized(ctx, priorityPrefixes, limit)
 	if err != nil {
 		return 0, err
 	}
