@@ -886,10 +886,19 @@ type OrgRepo interface {
 	GetDepartmentByName(ctx context.Context, name string) (*domain.OrgDepartment, error)
 	GetTeamByID(ctx context.Context, id int64) (*domain.OrgTeam, error)
 	GetTeamByName(ctx context.Context, name string) (*domain.OrgTeam, error)
+	// GetTeamByDepartmentAndName resolves one team by its department-scoped
+	// unique name (backed by uq_org_teams_department_name). Returns nil when
+	// no team matches.
+	GetTeamByDepartmentAndName(ctx context.Context, departmentID int64, name string) (*domain.OrgTeam, error)
 	CreateDepartment(ctx context.Context, tx Tx, department *domain.OrgDepartment) (int64, error)
 	UpdateDepartment(ctx context.Context, tx Tx, department *domain.OrgDepartment) error
 	CreateTeam(ctx context.Context, tx Tx, team *domain.OrgTeam) (int64, error)
 	UpdateTeam(ctx context.Context, tx Tx, team *domain.OrgTeam) error
+	// DeleteDepartment / DeleteTeam are hard deletes used by org-master
+	// governance for retired rows that have no remaining member references.
+	DeleteDepartment(ctx context.Context, tx Tx, id int64) error
+	DeleteTeam(ctx context.Context, tx Tx, id int64) error
+	DeleteTeamsByDepartment(ctx context.Context, tx Tx, departmentID int64) error
 }
 
 type UserSessionRepo interface {

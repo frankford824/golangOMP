@@ -100,6 +100,15 @@ func (r *orgRepo) GetTeamByName(ctx context.Context, name string) (*domain.OrgTe
 	return scanOrgTeam(row)
 }
 
+func (r *orgRepo) GetTeamByDepartmentAndName(ctx context.Context, departmentID int64, name string) (*domain.OrgTeam, error) {
+	row := r.db.db.QueryRowContext(ctx, `
+		SELECT t.id, t.department_id, d.name AS department, t.name, t.enabled, t.created_at, t.updated_at
+		FROM org_teams t
+		INNER JOIN org_departments d ON d.id = t.department_id
+		WHERE t.department_id = ? AND t.name = ?`, departmentID, strings.TrimSpace(name))
+	return scanOrgTeam(row)
+}
+
 func (r *orgRepo) CreateDepartment(ctx context.Context, tx repo.Tx, department *domain.OrgDepartment) (int64, error) {
 	result, err := Unwrap(tx).ExecContext(ctx, `
 		INSERT INTO org_departments (name, enabled)
@@ -161,6 +170,27 @@ func (r *orgRepo) UpdateTeam(ctx context.Context, tx repo.Tx, team *domain.OrgTe
 	)
 	if err != nil {
 		return fmt.Errorf("update org_team: %w", err)
+	}
+	return nil
+}
+
+func (r *orgRepo) DeleteDepartment(ctx context.Context, tx repo.Tx, id int64) error {
+	if _, err := Unwrap(tx).ExecContext(ctx, `DELETE FROM org_departments WHERE id = ?`, id); err != nil {
+		return fmt.Errorf("delete org_department: %w", err)
+	}
+	return nil
+}
+
+func (r *orgRepo) DeleteTeam(ctx context.Context, tx repo.Tx, id int64) error {
+	if _, err := Unwrap(tx).ExecContext(ctx, `DELETE FROM org_teams WHERE id = ?`, id); err != nil {
+		return fmt.Errorf("delete org_team: %w", err)
+	}
+	return nil
+}
+
+func (r *orgRepo) DeleteTeamsByDepartment(ctx context.Context, tx repo.Tx, departmentID int64) error {
+	if _, err := Unwrap(tx).ExecContext(ctx, `DELETE FROM org_teams WHERE department_id = ?`, departmentID); err != nil {
+		return fmt.Errorf("delete org_teams by department: %w", err)
 	}
 	return nil
 }

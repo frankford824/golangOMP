@@ -7,6 +7,8 @@ import { usersApi } from '@/services/api/usersApi'
 import {
   createOrgDepartment,
   createOrgTeam,
+  deleteOrgDepartment,
+  deleteOrgTeam,
   fetchOrgOwnershipOptions,
   updateOrgDepartment,
   updateOrgTeam,
@@ -60,6 +62,10 @@ vi.mock('@/services/api/orgApi', () => ({
   createOrgTeam: vi.fn(),
   updateOrgDepartment: vi.fn(),
   updateOrgTeam: vi.fn(),
+  mergeOrgDepartment: vi.fn(),
+  mergeOrgTeam: vi.fn(),
+  deleteOrgDepartment: vi.fn(),
+  deleteOrgTeam: vi.fn(),
   departmentsAndGroupsFromOrgOptions: vi.fn(() => ({
     departments: [{ id: 'Design', name: '设计部' }],
     groups: [{ id: 'Design-A', name: '设计一组', departmentId: 'Design' }],
@@ -362,6 +368,24 @@ describe('UserManagementView role governance', () => {
     })
   })
 
+  it('requires a department before exposing create-user team options', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    const vm = wrapper.vm as unknown as {
+      createForm: { department: string; team: string }
+      createTeamOptions: Array<{ value: string; department?: string }>
+    }
+
+    vm.createForm.department = ''
+    await flushPromises()
+    expect(vm.createTeamOptions).toEqual([])
+
+    vm.createForm.department = 'Design'
+    await flushPromises()
+    expect(vm.createTeamOptions.map((option) => option.value)).toEqual(['Design-A'])
+    expect(vm.createTeamOptions.every((option) => option.department === 'Design')).toBe(true)
+  })
+
   it('calls real org master APIs for create rename and delete actions', async () => {
     const wrapper = mountView()
     await flushPromises()
@@ -378,7 +402,7 @@ describe('UserManagementView role governance', () => {
     vm.orgActionName = '内容部'
     await vm.submitOrgAction()
     await flushPromises()
-    expect(fetchOrgOwnershipOptions).toHaveBeenCalledWith({ includeDisabled: true })
+    expect(fetchOrgOwnershipOptions).toHaveBeenCalledWith({ includeDisabled: true, throwOnError: true })
     expect(createOrgDepartment).toHaveBeenCalledWith({ name: '内容部' })
 
     vm.openCreateTeam({ id: '1', value: 'Design', label: '设计部', teams: [] })
@@ -472,6 +496,40 @@ describe('UserManagementView role governance', () => {
 
     expect(wrapper.text()).toContain('当前账号部门范围已停用或不存在')
     expect(usersApi.list).not.toHaveBeenCalled()
+  })
+
+  it('bulk purges empty disabled orgs via one-click cleanup', async () => {
+    vi.mocked(fetchOrgOwnershipOptions).mockResolvedValue({
+      departmentOptions: [{ value: 'Design', label: '设计部' }],
+      teamOptions: [{ value: 'Design-A', label: '设计一组', department: 'Design' }],
+      departmentRecords: [
+        { id: '1', name: 'Design', enabled: true, memberCount: 3 },
+        { id: '9', name: 'OldDept', enabled: false, memberCount: 0 },
+      ],
+      teamRecords: [
+        { id: '2', name: 'Design-A', departmentId: '1', departmentName: 'Design', enabled: true, memberCount: 3 },
+        { id: '7', name: 'OldTeam', departmentId: '1', departmentName: 'Design', enabled: false, memberCount: 0 },
+        { id: '8', name: 'OldDeptTeam', departmentId: '9', departmentName: 'OldDept', enabled: false, memberCount: 0 },
+      ],
+    } as never)
+    const wrapper = mountView()
+    await flushPromises()
+    const vm = wrapper.vm as unknown as {
+      emptyDisabledOrgCount: number
+      openPurgeAllEmpty: () => void
+      submitOrgAction: () => Promise<void>
+    }
+
+    // OldDept 与 OldTeam 各计 1 项;OldDeptTeam 随部门级联删除,不单独计数。
+    expect(vm.emptyDisabledOrgCount).toBe(2)
+
+    vm.openPurgeAllEmpty()
+    await vm.submitOrgAction()
+    await flushPromises()
+
+    expect(deleteOrgTeam).toHaveBeenCalledWith('7')
+    expect(deleteOrgTeam).not.toHaveBeenCalledWith('8')
+    expect(deleteOrgDepartment).toHaveBeenCalledWith('9')
   })
 
   it('drops stale legacy department and team filters before listing users', async () => {

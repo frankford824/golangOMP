@@ -43,6 +43,18 @@
                 新增部门
               </button>
             </div>
+            <div v-if="orgOptionsError" class="org-load-error" role="alert">
+              <p>{{ orgOptionsError }}</p>
+              <button type="button" class="org-action-btn" @click="retryLoadOrgOptions">重试</button>
+            </div>
+            <button
+              v-if="canManageOrgMaster && emptyDisabledOrgCount > 0"
+              type="button"
+              class="org-cleanup-btn"
+              @click="openPurgeAllEmpty"
+            >
+              一键清理空停用组织（{{ emptyDisabledOrgCount }} 项）
+            </button>
             <div v-if="canManageOrgMaster && selectedOrgDepartment" class="org-selected-actions">
               <div class="org-selected-current">
                 <span class="org-selected-label">当前组织</span>
@@ -54,6 +66,9 @@
                     :class="{ 'org-state-pill--off': selectedOrgTeam ? !selectedOrgTeam.enabled : !selectedOrgDepartment.enabled }"
                   >
                     {{ (selectedOrgTeam ? selectedOrgTeam.enabled : selectedOrgDepartment.enabled) ? '启用' : '停用' }}
+                  </span>
+                  <span v-if="selectedOrgMemberCount != null" class="org-selected-member-count">
+                    {{ selectedOrgMemberCount }} 人
                   </span>
                 </span>
               </div>
@@ -75,6 +90,24 @@
                 >
                   {{ selectedOrgDepartment.enabled ? '停用部门' : '恢复部门' }}
                 </button>
+                <button
+                  v-if="!selectedOrgTeam && !isSystemDepartment(selectedOrgDepartment)"
+                  type="button"
+                  class="org-icon-btn"
+                  @click.stop="openMergeDepartment(selectedOrgDepartment)"
+                >
+                  合并到…
+                </button>
+                <button
+                  v-if="!selectedOrgTeam && !selectedOrgDepartment.enabled && !isSystemDepartment(selectedOrgDepartment)"
+                  type="button"
+                  class="org-icon-btn org-icon-btn--danger"
+                  :disabled="(selectedOrgMemberCount ?? 1) > 0"
+                  :title="(selectedOrgMemberCount ?? 1) > 0 ? '仍有成员，请先迁移或合并成员' : undefined"
+                  @click.stop="openPurgeDepartment(selectedOrgDepartment)"
+                >
+                  彻底删除
+                </button>
                 <button v-if="selectedOrgTeam" type="button" class="org-icon-btn" @click.stop="openEditTeam(selectedOrgTeam)">小组改名</button>
                 <button
                   v-if="selectedOrgTeam"
@@ -87,75 +120,37 @@
                 >
                   {{ selectedOrgTeam.enabled ? '停用小组' : '恢复小组' }}
                 </button>
+                <button
+                  v-if="selectedOrgTeam && !isSystemDepartment(selectedOrgDepartment)"
+                  type="button"
+                  class="org-icon-btn"
+                  @click.stop="openMergeTeam(selectedOrgTeam)"
+                >
+                  合并到…
+                </button>
+                <button
+                  v-if="selectedOrgTeam && !selectedOrgTeam.enabled && !isSystemDepartment(selectedOrgDepartment)"
+                  type="button"
+                  class="org-icon-btn org-icon-btn--danger"
+                  :disabled="(selectedOrgMemberCount ?? 1) > 0"
+                  :title="(selectedOrgMemberCount ?? 1) > 0 ? '仍有成员，请先迁移或合并成员' : undefined"
+                  @click.stop="openPurgeTeam(selectedOrgTeam)"
+                >
+                  彻底删除
+                </button>
               </div>
             </div>
-            <div class="org-tree-scroll">
-              <button
-                v-if="!isDeptScopedOnly"
-                type="button"
-                class="org-filter-item org-filter-item--all"
-                :class="{ 'is-active': isAllOrgFilterActive }"
-                @click="selectAllOrg"
-              >
-                <span class="org-item-name">全部组织</span>
-              </button>
-              <div v-if="enabledOrgTree.length" class="org-tree-section">
-                <div class="org-tree-section-title">启用组织</div>
-                <div v-for="dept in enabledOrgTree" :key="'enabled-' + dept.value" class="org-filter-dept">
-                  <div class="org-filter-row">
-                    <button
-                      type="button"
-                      class="org-filter-item org-filter-item--dept"
-                      :class="{ 'is-active': isOrgDepartmentActive(dept.value) }"
-                      @click="selectOrgDepartment(dept.value)"
-                    >
-                      <span class="org-item-name">{{ dept.label }}</span>
-                    </button>
-                  </div>
-                  <div v-if="dept.teams.length" class="org-filter-teams">
-                    <div v-for="team in dept.teams" :key="`enabled-${dept.value}-${team.value}`" class="org-filter-row">
-                      <button
-                        type="button"
-                        class="org-filter-item org-filter-item--team"
-                        :class="{ 'is-active': isOrgTeamActive(dept.value, team.value) }"
-                        @click="selectOrgTeam(dept.value, team.value)"
-                      >
-                        <span class="org-item-name">{{ team.label }}</span>
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <div v-if="disabledOrgTree.length" class="org-tree-section org-tree-section--disabled">
-                <div class="org-tree-section-title">停用组织</div>
-                <div v-for="dept in disabledOrgTree" :key="'disabled-' + dept.value" class="org-filter-dept">
-                  <div class="org-filter-row">
-                    <button
-                      type="button"
-                      class="org-filter-item org-filter-item--dept"
-                      :class="{ 'is-active': isOrgDepartmentActive(dept.value), 'is-disabled': !dept.enabled }"
-                      @click="selectOrgDepartment(dept.value)"
-                    >
-                      <span class="org-item-name">{{ dept.label }}</span>
-                      <span v-if="!dept.enabled" class="org-state-pill org-state-pill--off">停用</span>
-                    </button>
-                  </div>
-                  <div v-if="dept.teams.length" class="org-filter-teams">
-                    <div v-for="team in dept.teams" :key="`disabled-${dept.value}-${team.value}`" class="org-filter-row">
-                      <button
-                        type="button"
-                        class="org-filter-item org-filter-item--team"
-                        :class="{ 'is-active': isOrgTeamActive(dept.value, team.value), 'is-disabled': !team.enabled }"
-                        @click="selectOrgTeam(dept.value, team.value)"
-                      >
-                        <span class="org-item-name">{{ team.label }}</span>
-                        <span v-if="!team.enabled" class="org-state-pill org-state-pill--off">停用</span>
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
+            <OrgTreePanel
+              :enabled-tree="enabledOrgTree"
+              :disabled-tree="disabledOrgTree"
+              :selected-department="departmentFilter"
+              :selected-team="teamFilter"
+              :show-all-entry="!isDeptScopedOnly"
+              :all-active="isAllOrgFilterActive"
+              @select-all="selectAllOrg"
+              @select-department="selectOrgDepartment"
+              @select-team="selectOrgTeam"
+            />
           </aside>
           <div class="user-list-panel">
             <div class="toolbar">
@@ -179,21 +174,19 @@
                 :options="roleFilterOptions"
                 clearable
               />
-              <BaseSelect
-                v-model="departmentFilter"
-                class="toolbar-field"
-                placeholder="全部部门"
-                :options="departmentFilterOptions"
-                clearable
-              />
-              <BaseSelect
-                v-model="teamFilter"
-                class="toolbar-field"
-                placeholder="全部小组"
-                :options="teamFilterOptions"
-                clearable
-              />
               <BaseButton type="button" variant="primary" class="toolbar-query" @click="onSearch">查询</BaseButton>
+            </div>
+            <div v-if="orgFilterBreadcrumb" class="org-filter-breadcrumb">
+              <span class="org-filter-breadcrumb-label">组织筛选</span>
+              <strong>{{ orgFilterBreadcrumb }}</strong>
+              <button
+                v-if="!isDeptScopedOnly"
+                type="button"
+                class="org-action-btn"
+                @click="selectAllOrg"
+              >
+                清除
+              </button>
             </div>
             <BaseErrorState v-if="listError" :title="listError" @retry="loadUsers" />
             <template v-else>
@@ -226,239 +219,53 @@
 
       <Teleport to="body">
       <!-- 用户详情 / 角色管理 弹层 -->
-      <div v-if="detailUser" class="modal-mask" @click.self="detailUser = null">
-        <div class="modal-panel um-modal um-modal--wide">
-          <header class="modal-header">
-            <div class="modal-heading">
-              <h3 class="section-title">用户详情：{{ detailUser.display_name || detailUser.username }}</h3>
-              <p class="modal-subtitle">
-                {{ formatEmployeeNo(detailUser.employee_no) }} · {{ detailUser.username }} · {{ formatUserStatusForDisplay(detailUser.status) }}
-              </p>
-              <p class="modal-subtitle">当前角色：{{ formatWorkflowRolesForDisplay(detailUser.roles) }}</p>
-            </div>
-            <button type="button" class="modal-close" aria-label="关闭角色管理" @click="detailUser = null">
-              ×
-            </button>
-          </header>
-          <div class="modal-body">
-            <div v-if="detailLoading" class="py-4"><BaseSkeleton width="100%" height="4rem" /></div>
-            <div v-else class="modal-stack">
-              <section class="detail-section">
-                <header class="detail-section-header">
-                  <h4>基本信息</h4>
-                  <button
-                    v-if="canEditBasicInfo"
-                    type="button"
-                    class="um-btn um-btn--primary um-btn--sm"
-                    :disabled="basicSubmitting"
-                    @click="submitBasicInfo"
-                  >
-                    {{ basicSubmitting ? '保存中...' : '保存基本信息' }}
-                  </button>
-                </header>
-                <div class="detail-grid">
-                  <label class="field-label">
-                    <span>姓名</span>
-                    <input v-model.trim="basicForm.display_name" class="input" :disabled="!canEditBasicInfo" />
-                  </label>
-                  <label class="field-label">
-                    <span>工号</span>
-                    <input
-                      v-model.trim="basicForm.employee_no"
-                      class="input"
-                      inputmode="numeric"
-                      placeholder="0-9999"
-                      :disabled="!canEditBasicInfo"
-                    />
-                  </label>
-                  <div class="readonly-field">
-                    <span>登录账号</span>
-                    <strong>{{ detailUser.username }}</strong>
-                  </div>
-                  <div class="readonly-field">
-                    <span>账号状态</span>
-                    <strong>{{ formatUserStatusForDisplay(detailUser.status) }}</strong>
-                  </div>
-                </div>
-              </section>
-
-              <section v-if="canMoveTeam" class="detail-section">
-                <header class="detail-section-header">
-                  <h4>组织归属</h4>
-                </header>
-                <div class="membership-grid">
-                  <select v-model="membershipForm.department" class="input">
-                    <option value="">选择部门</option>
-                    <option v-for="d in membershipDepartmentOptions" :key="d.value" :value="d.value">{{ d.label }}</option>
-                  </select>
-                  <select v-model="membershipForm.team" class="input">
-                    <option value="">选择小组</option>
-                    <option v-for="t in membershipTeamOptions" :key="t.value" :value="t.value">{{ t.label }}</option>
-                  </select>
-                  <button
-                    type="button"
-                    class="um-btn um-btn--primary um-btn--sm"
-                    :disabled="membershipSubmitting || !isMembershipDirty"
-                    @click="submitMembership"
-                  >
-                    {{ membershipSubmitting ? '保存中...' : '保存归属' }}
-                  </button>
-                  <button
-                    v-if="canClearMembership && (detailUser.department || detailUser.team)"
-                    type="button"
-                    class="um-btn um-btn--ghost um-btn--sm"
-                    :disabled="membershipSubmitting"
-                    @click="clearMembership"
-                  >
-                    移出到未分组
-                  </button>
-                </div>
-              </section>
-
-              <section class="detail-section">
-                <header class="detail-section-header">
-                  <h4>角色权限</h4>
-                  <button
-                    v-if="canAssignRoles"
-                    type="button"
-                    class="um-btn um-btn--primary um-btn--sm"
-                    :disabled="roleSubmitting"
-                    @click="submitRoleReplace"
-                  >
-                    {{ roleSubmitting ? '提交中...' : '保存角色' }}
-                  </button>
-                </header>
-                <div v-if="lockedDetailRoleOptions.length" class="legacy-role-box">
-                  <span class="legacy-role-title">{{ lockedDetailRoleTitle }}</span>
-                  <span
-                    v-for="role in lockedDetailRoleOptions"
-                    :key="'locked-' + role.code"
-                    class="legacy-role-tag"
-                    :title="lockedRoleTooltip(role)"
-                  >
-                    {{ role.display }}
-                  </span>
-                </div>
-                <div v-if="editableRoleGroups.length" class="role-groups" :class="{ 'roles-grid-readonly': !canAssignRoles }">
-                  <section v-for="group in editableRoleGroups" :key="group.category" class="role-group">
-                    <h4 class="role-group-title">{{ group.title }}</h4>
-                    <div class="roles-grid">
-                      <label v-for="role in group.roles" :key="role.code" class="role-check">
-                        <input
-                          v-model="selectedRoleCodes"
-                          type="checkbox"
-                          :value="role.code"
-                          :disabled="!canAssignRoles || role.code === 'Member'"
-                        />
-                        <span>{{ role.display }}</span>
-                        <em v-if="role.code === 'Member'">基础身份，不能移除</em>
-                      </label>
-                    </div>
-                  </section>
-                </div>
-                <p v-else class="role-readonly-hint">当前账号没有可分配角色，角色信息仅可查看。</p>
-              </section>
-
-              <section v-if="canResetPassword" class="detail-section">
-                <header class="detail-section-header">
-                  <h4>账号安全</h4>
-                </header>
-                <div class="password-row">
-                  <input v-model="resetPasswordValue" class="input" placeholder="输入新密码" />
-                  <button type="button" class="um-btn um-btn--primary um-btn--sm" :disabled="passwordSubmitting" @click="resetPassword">
-                    {{ passwordSubmitting ? '重置中...' : '重置密码' }}
-                  </button>
-                </div>
-              </section>
-
-              <section v-if="canDisableUser" class="detail-section detail-section--danger">
-                <header class="detail-section-header">
-                  <h4>账号状态</h4>
-                  <button
-                    v-if="detailUser.status !== 'disabled'"
-                    type="button"
-                    class="um-btn um-btn--ghost um-btn--sm"
-                    :disabled="statusSubmitting"
-                    @click="setUserStatus('disabled')"
-                  >
-                    {{ statusSubmitting ? '处理中...' : '停用账号' }}
-                  </button>
-                  <button
-                    v-else
-                    type="button"
-                    class="um-btn um-btn--primary um-btn--sm"
-                    :disabled="statusSubmitting"
-                    @click="setUserStatus('active')"
-                  >
-                    {{ statusSubmitting ? '处理中...' : '启用账号' }}
-                  </button>
-                </header>
-                <p class="role-readonly-hint">停用后该账号不能登录，历史任务、角色、工号和组织归属会保留。</p>
-              </section>
-              <p v-if="detailActionMessage" class="action-msg">{{ detailActionMessage }}</p>
-            </div>
-          </div>
-        </div>
-      </div>
+      <UserDetailModal
+        v-if="detailUser"
+        :user="detailUser"
+        :loading="detailLoading"
+        :can-edit-basic-info="canEditBasicInfo"
+        :can-move-team="canMoveTeam"
+        :can-clear-membership="canClearMembership"
+        :can-assign-roles="canAssignRoles"
+        :can-reset-password="canResetPassword"
+        :can-disable-user="canDisableUser"
+        :basic-form="basicForm"
+        :membership-form="membershipForm"
+        :membership-department-options="membershipDepartmentOptions"
+        :membership-team-options="membershipTeamOptions"
+        :is-membership-dirty="isMembershipDirty"
+        :editable-role-groups="editableRoleGroups"
+        :locked-role-options="lockedDetailRoleOptions"
+        :locked-role-title="lockedDetailRoleTitle"
+        :basic-submitting="basicSubmitting"
+        :membership-submitting="membershipSubmitting"
+        :role-submitting="roleSubmitting"
+        :password-submitting="passwordSubmitting"
+        :status-submitting="statusSubmitting"
+        :action-message="detailActionMessage"
+        v-model:selected-roles="selectedRoleCodes"
+        v-model:new-password="resetPasswordValue"
+        @close="detailUser = null"
+        @submit-basic="submitBasicInfo"
+        @submit-membership="submitMembership"
+        @clear-membership="clearMembership"
+        @submit-roles="submitRoleReplace"
+        @reset-password="resetPassword"
+        @set-status="setUserStatus"
+      />
 
       <!-- 新增用户 -->
-      <div v-if="showCreateModal" class="modal-mask" @click.self="showCreateModal = false">
-        <div class="modal-panel um-modal um-modal--wide">
-          <header class="modal-header">
-            <div class="modal-heading">
-              <h3 class="section-title">新增用户</h3>
-              <p class="modal-subtitle">创建账号、组织归属与初始工作角色</p>
-            </div>
-            <button type="button" class="modal-close" aria-label="关闭新增用户" @click="showCreateModal = false">
-              ×
-            </button>
-          </header>
-          <div class="modal-body">
-            <div class="form-grid">
-              <input v-model.trim="createForm.username" class="input" placeholder="请输入用户名" />
-              <input v-model.trim="createForm.employee_no" class="input" inputmode="numeric" placeholder="工号（0-9999）" />
-              <input v-model.trim="createForm.display_name" class="input" placeholder="请输入姓名" />
-              <select v-model="createForm.department" class="input">
-                <option value="">选择部门</option>
-                <option v-for="d in createDepartmentOptions" :key="d.value" :value="d.value">{{ d.label }}</option>
-              </select>
-              <select v-model="createForm.team" class="input">
-                <option value="">选择小组</option>
-                <option v-for="t in createTeamOptions" :key="t.value" :value="t.value">{{ t.label }}</option>
-              </select>
-              <input v-model.trim="createForm.mobile" class="input" placeholder="手机号" />
-              <input v-model.trim="createForm.email" class="input" placeholder="邮箱(可选)" />
-              <input v-model="createForm.password" class="input" type="password" placeholder="初始密码" />
-              <select v-model="createForm.status" class="input">
-                <option value="active">启用</option>
-                <option value="disabled">已禁用</option>
-              </select>
-            </div>
-            <div v-if="editableRoleGroups.length" class="role-groups mt-2">
-              <section v-for="group in editableRoleGroups" :key="'create-' + group.category" class="role-group">
-                <h4 class="role-group-title">{{ group.title }}</h4>
-                <div class="roles-grid">
-                  <label v-for="role in group.roles" :key="'create-' + role.code" class="role-check">
-                    <input v-model="createForm.roles" type="checkbox" :value="role.code" :disabled="role.code === 'Member'" />
-                    <span>{{ role.display }}</span>
-                    <em v-if="role.code === 'Member'">基础身份，不能移除</em>
-                  </label>
-                </div>
-              </section>
-            </div>
-            <p v-else class="role-readonly-hint">当前账号没有可分配角色，新用户将使用系统默认角色。</p>
-            <p v-if="createError" class="action-msg">{{ createError }}</p>
-          </div>
-          <footer class="modal-footer">
-            <div class="modal-footer-actions">
-              <button type="button" class="um-btn um-btn--ghost" @click="showCreateModal = false">取消</button>
-              <button type="button" class="um-btn um-btn--primary" :disabled="createSubmitting" @click="createUser">
-                {{ createSubmitting ? '创建中...' : '创建用户' }}
-              </button>
-            </div>
-          </footer>
-        </div>
-      </div>
+      <UserCreateModal
+        v-if="showCreateModal"
+        :form="createForm"
+        :department-options="createDepartmentOptions"
+        :team-options="createTeamOptions"
+        :editable-role-groups="editableRoleGroups"
+        :error="createError"
+        :submitting="createSubmitting"
+        @close="showCreateModal = false"
+        @submit="createUser"
+      />
 
       <!-- 组织维护 -->
       <div v-if="orgAction" class="modal-mask" @click.self="closeOrgAction">
@@ -475,6 +282,18 @@
           <div class="modal-body">
             <div v-if="orgActionIsDelete" class="delete-confirm-box">
               <p>{{ orgActionDeleteCopy }}</p>
+              <ul v-if="orgAction?.mode === 'purgeAllEmpty'" class="purge-list">
+                <li v-for="name in emptyDisabledOrgNames" :key="name">{{ name }}</li>
+              </ul>
+            </div>
+            <div v-else-if="orgActionIsMerge" class="form-grid form-grid--single">
+              <p class="merge-hint">{{ orgActionMergeCopy }}</p>
+              <select v-model="orgActionTargetId" class="input">
+                <option value="">选择合并目标</option>
+                <option v-for="target in orgMergeTargetOptions" :key="'merge-' + target.id" :value="target.id">
+                  {{ target.label }}
+                </option>
+              </select>
             </div>
             <div v-else class="form-grid form-grid--single">
               <select v-if="orgAction?.mode === 'createTeam'" v-model="orgActionDepartmentId" class="input">
@@ -514,14 +333,29 @@ import { usersApi } from '@/services/api/usersApi'
 import {
   createOrgDepartment,
   createOrgTeam,
+  deleteOrgDepartment,
+  deleteOrgTeam,
   departmentsAndGroupsFromOrgOptions,
   fetchOrgOwnershipOptions,
+  mergeOrgDepartment,
+  mergeOrgTeam,
   updateOrgDepartment,
   updateOrgTeam,
   type OrgDepartmentRecord,
   type OrgOwnershipOptionsParsed,
   type OrgTeamRecord,
 } from '@/services/api/orgApi'
+import OrgTreePanel from './OrgTreePanel.vue'
+import UserDetailModal from './UserDetailModal.vue'
+import UserCreateModal from './UserCreateModal.vue'
+import type { OrgTreeDepartment, OrgTreeTeam } from './orgTreeTypes'
+import {
+  formatUserStatusForDisplay,
+  type CreateUserForm,
+  type RoleOption,
+  type RoleOptionGroup,
+  type UserRow,
+} from './userManagementTypes'
 import { usePermissionsStore } from '@/stores/permissions'
 import { usePermission } from '@/composables/usePermission'
 import { patchUserMembership, clearUserMembership } from '@/composables/useOrgPermissionData'
@@ -532,7 +366,6 @@ import {
 import BaseButton from '@/components/base/BaseButton.vue'
 import BaseInput from '@/components/base/BaseInput.vue'
 import BaseSelect, { type BaseSelectOption } from '@/components/base/BaseSelect.vue'
-import BaseSkeleton from '@/components/base/BaseSkeleton.vue'
 import BaseEmptyState from '@/components/base/BaseEmptyState.vue'
 import BaseErrorState from '@/components/base/BaseErrorState.vue'
 import BaseDataTable from '@/components/base/BaseDataTable.vue'
@@ -578,50 +411,6 @@ const canManageOrgMaster = computed(
 )
 const canEditBasicInfo = computed(() => can('user.manage'))
 
-interface UserRow {
-  id: string
-  username: string
-  employee_no?: number | null
-  display_name?: string
-  department?: string
-  team?: string
-  roles: string[]
-  status?: 'active' | 'disabled' | string
-  frontend_access?: unknown
-}
-
-interface RoleOption {
-  code: string
-  display: string
-  category: 'management' | 'business' | 'asset_workbench' | 'compatibility' | string
-  assignable: boolean
-  assignableByCurrentActor: boolean
-  deprecated: boolean
-  hiddenByDefault: boolean
-}
-
-interface RoleOptionGroup {
-  category: string
-  title: string
-  roles: RoleOption[]
-}
-
-interface OrgTreeTeam {
-  id?: string
-  value: string
-  label: string
-  department: string
-  enabled: boolean
-}
-
-interface OrgTreeDepartment {
-  id?: string
-  value: string
-  label: string
-  enabled: boolean
-  teams: OrgTreeTeam[]
-}
-
 type OrgActionMode =
   | 'createDepartment'
   | 'editDepartment'
@@ -629,6 +418,11 @@ type OrgActionMode =
   | 'createTeam'
   | 'editTeam'
   | 'deleteTeam'
+  | 'mergeDepartment'
+  | 'mergeTeam'
+  | 'purgeDepartment'
+  | 'purgeTeam'
+  | 'purgeAllEmpty'
 
 interface OrgActionState {
   mode: OrgActionMode
@@ -663,10 +457,9 @@ const pagination = ref({ total: 0, page: 1, page_size: defaultPageSize })
 const keyword = ref('')
 const statusFilter = ref('')
 const roleFilter = ref('')
+// 单一组织选中态:左侧树的选中即列表筛选,不再维护"树选中"与"下拉筛选"两套状态。
 const departmentFilter = ref('')
 const teamFilter = ref('')
-const orgMasterDepartmentFilter = ref('')
-const orgMasterTeamFilter = ref('')
 
 const departmentOptions = ref<Array<{ value: string; label: string }>>([])
 const teamOptions = ref<Array<{ value: string; label: string; department?: string }>>([])
@@ -675,8 +468,10 @@ const teamRecords = ref<OrgTeamRecord[]>([])
 const orgAction = ref<OrgActionState | null>(null)
 const orgActionName = ref('')
 const orgActionDepartmentId = ref('')
+const orgActionTargetId = ref('')
 const orgActionSubmitting = ref(false)
 const orgActionError = ref('')
+const orgOptionsError = ref('')
 const currentDepartmentScope = computed(() =>
   String(
     permissionsStore.currentUser?.departmentId ||
@@ -700,6 +495,7 @@ const orgTree = computed<OrgTreeDepartment[]>(() => {
       value: dept.name,
       label: dept.name,
       enabled: dept.enabled !== false,
+      memberCount: dept.memberCount,
       teams: teamRecords.value
         .filter((team) => team.departmentId === dept.id || team.departmentName === dept.name)
         .map((team) => ({
@@ -708,6 +504,7 @@ const orgTree = computed<OrgTreeDepartment[]>(() => {
           label: team.name,
           department: dept.name,
           enabled: team.enabled !== false,
+          memberCount: team.memberCount,
         })),
     }))
   }
@@ -755,20 +552,65 @@ const disabledOrgTree = computed<OrgTreeDepartment[]>(() => {
   return out
 })
 const selectedOrgDepartment = computed<OrgTreeDepartment | null>(() =>
-  visibleOrgTree.value.find((dept) => dept.value === orgMasterDepartmentFilter.value) ?? null,
+  visibleOrgTree.value.find((dept) => dept.value === departmentFilter.value) ?? null,
 )
 const selectedOrgTeam = computed<OrgTreeTeam | null>(() => {
-  if (!selectedOrgDepartment.value || !orgMasterTeamFilter.value) return null
-  return selectedOrgDepartment.value.teams.find((team) => team.value === orgMasterTeamFilter.value) ?? null
+  if (!selectedOrgDepartment.value || !teamFilter.value) return null
+  return selectedOrgDepartment.value.teams.find((team) => team.value === teamFilter.value) ?? null
+})
+const hasNonOrgListFilters = computed(
+  () => keyword.value.trim() !== '' || statusFilter.value !== '' || roleFilter.value !== '',
+)
+const selectedOrgMemberCount = computed<number | undefined>(() => {
+  const known = selectedOrgTeam.value
+    ? selectedOrgTeam.value.memberCount
+    : selectedOrgDepartment.value?.memberCount
+  if (known != null) return known
+  // 兼容不返回 member_count 的旧后端:选中组织时,用户列表就是按该组织过滤的,
+  // 没有其它筛选条件时 pagination.total 即成员数。
+  if (!hasNonOrgListFilters.value && !listLoading.value && !listError.value) {
+    return pagination.value.total
+  }
+  return undefined
 })
 const isAllOrgFilterActive = computed(
-  () => !isDeptScopedOnly.value && !departmentFilter.value && !teamFilter.value && !orgMasterDepartmentFilter.value,
+  () => !isDeptScopedOnly.value && !departmentFilter.value && !teamFilter.value,
 )
+const orgFilterBreadcrumb = computed(() => {
+  if (!departmentFilter.value) return ''
+  return teamFilter.value ? `${departmentFilter.value} / ${teamFilter.value}` : departmentFilter.value
+})
+// 一键治理候选:已停用且确认无成员(member_count 明确为 0)的部门与小组。
+// 部门删除会级联其小组,因此小组列表排除待删部门下的小组。
+const emptyDisabledOrgCleanup = computed<{ departments: OrgTreeDepartment[]; teams: OrgTreeTeam[] }>(() => {
+  if (!canManageOrgMaster.value) return { departments: [], teams: [] }
+  const departments = orgTree.value.filter(
+    (dept) => !dept.enabled && !!dept.id && dept.memberCount === 0 && !isSystemDepartment(dept),
+  )
+  const purgedDeptIds = new Set(departments.map((dept) => dept.id))
+  const teams: OrgTreeTeam[] = []
+  for (const dept of orgTree.value) {
+    if (isSystemDepartment(dept) || purgedDeptIds.has(dept.id)) continue
+    for (const team of dept.teams) {
+      if (!team.enabled && !!team.id && team.memberCount === 0) teams.push(team)
+    }
+  }
+  return { departments, teams }
+})
+const emptyDisabledOrgCount = computed(
+  () => emptyDisabledOrgCleanup.value.departments.length + emptyDisabledOrgCleanup.value.teams.length,
+)
+const emptyDisabledOrgNames = computed(() => {
+  const parts: string[] = []
+  for (const dept of emptyDisabledOrgCleanup.value.departments) parts.push(`部门「${dept.label}」`)
+  for (const team of emptyDisabledOrgCleanup.value.teams) parts.push(`小组「${team.department} / ${team.label}」`)
+  return parts
+})
 
 const showCreateModal = ref(false)
 const createSubmitting = ref(false)
 const createError = ref('')
-const createForm = ref({
+const createForm = ref<CreateUserForm>({
   username: '',
   employee_no: '',
   display_name: '',
@@ -777,8 +619,8 @@ const createForm = ref({
   mobile: '',
   email: '',
   password: 'Init1234',
-  roles: [] as string[],
-  status: 'active' as 'active' | 'disabled',
+  roles: [],
+  status: 'active',
 })
 
 const totalPages = computed(() => Math.max(1, Math.ceil((pagination.value.total || 0) / pageSize.value)))
@@ -794,19 +636,6 @@ const roleFilterOptions = computed<BaseSelectOption[]>(() =>
       label: role.display,
     })),
 )
-const departmentFilterOptions = computed<BaseSelectOption[]>(() => scopedDepartmentOptions.value)
-const teamOptionsFiltered = computed(() =>
-  departmentFilter.value
-    ? teamOptions.value.filter((t) =>
-        teamMatchesDepartment(t, departmentFilter.value, isDeptScopedOnly.value),
-      )
-    : isDeptScopedOnly.value
-      ? teamOptions.value.filter((t) =>
-          teamMatchesDepartment(t, currentDepartmentScope.value, true),
-        )
-      : teamOptions.value,
-)
-const teamFilterOptions = computed<BaseSelectOption[]>(() => teamOptionsFiltered.value)
 const editableRoleOptions = computed(() =>
   roleOptions.value.filter(
     (role) =>
@@ -838,7 +667,14 @@ const lockedDetailRoleTitle = computed(() =>
     : '不可编辑角色',
 )
 const orgActionIsDelete = computed(() =>
-  orgAction.value?.mode === 'deleteDepartment' || orgAction.value?.mode === 'deleteTeam',
+  orgAction.value?.mode === 'deleteDepartment' ||
+  orgAction.value?.mode === 'deleteTeam' ||
+  orgAction.value?.mode === 'purgeDepartment' ||
+  orgAction.value?.mode === 'purgeTeam' ||
+  orgAction.value?.mode === 'purgeAllEmpty',
+)
+const orgActionIsMerge = computed(
+  () => orgAction.value?.mode === 'mergeDepartment' || orgAction.value?.mode === 'mergeTeam',
 )
 const orgActionTitle = computed(() => {
   switch (orgAction.value?.mode) {
@@ -854,6 +690,16 @@ const orgActionTitle = computed(() => {
       return '编辑小组名称'
     case 'deleteTeam':
       return orgAction.value.team?.enabled === false ? '恢复小组' : '停用小组'
+    case 'mergeDepartment':
+      return '合并部门'
+    case 'mergeTeam':
+      return '合并小组'
+    case 'purgeDepartment':
+      return '彻底删除部门'
+    case 'purgeTeam':
+      return '彻底删除小组'
+    case 'purgeAllEmpty':
+      return '清理空停用组织'
     default:
       return '组织维护'
   }
@@ -870,6 +716,18 @@ const orgActionSubtitle = computed(() => {
       ? '恢复后该小组会重新出现在组织归属选择中。'
       : '停用后该小组不再可选，组内人员会自动进入未分配池。'
   }
+  if (orgAction.value.mode === 'mergeDepartment') {
+    return '成员与管理范围会迁入目标部门，本部门随后自动停用。'
+  }
+  if (orgAction.value.mode === 'mergeTeam') {
+    return '组内成员会迁入目标小组，本小组随后自动停用。'
+  }
+  if (orgAction.value.mode === 'purgeDepartment' || orgAction.value.mode === 'purgeTeam') {
+    return '彻底删除会从组织树中永久移除该记录，仅允许删除已停用且无成员的组织。'
+  }
+  if (orgAction.value.mode === 'purgeAllEmpty') {
+    return '批量彻底删除所有已停用且无成员的部门与小组，用于清理历史遗留脏数据。'
+  }
   return '组织名称会立即用于用户归属选择。'
 })
 const orgActionDeleteCopy = computed(() => {
@@ -883,7 +741,46 @@ const orgActionDeleteCopy = computed(() => {
       ? `确认恢复小组「${orgAction.value.team?.label ?? ''}」？`
       : `确认停用小组「${orgAction.value.team?.label ?? ''}」？原有人员会自动进入未分配池。`
   }
+  if (orgAction.value?.mode === 'purgeDepartment') {
+    return `确认彻底删除部门「${orgAction.value.department?.label ?? ''}」？该操作不可恢复，历史遗留记录将从组织树中消失。`
+  }
+  if (orgAction.value?.mode === 'purgeTeam') {
+    return `确认彻底删除小组「${orgAction.value.team?.label ?? ''}」？该操作不可恢复。`
+  }
+  if (orgAction.value?.mode === 'purgeAllEmpty') {
+    return `确认批量彻底删除以下 ${emptyDisabledOrgCount.value} 项空停用组织？该操作不可恢复。`
+  }
   return ''
+})
+const orgActionMergeCopy = computed(() => {
+  if (orgAction.value?.mode === 'mergeDepartment') {
+    return `把部门「${orgAction.value.department?.label ?? ''}」的成员与小组并入以下目标部门：`
+  }
+  if (orgAction.value?.mode === 'mergeTeam') {
+    return `把小组「${orgAction.value.team?.label ?? ''}」的成员并入以下目标小组：`
+  }
+  return ''
+})
+const orgMergeTargetOptions = computed<Array<{ id: string; label: string }>>(() => {
+  if (orgAction.value?.mode === 'mergeDepartment') {
+    const sourceId = orgAction.value.department?.id
+    return orgTree.value
+      .filter((dept) => dept.enabled && dept.id && dept.id !== sourceId && !isSystemDepartment(dept))
+      .map((dept) => ({ id: dept.id as string, label: dept.label }))
+  }
+  if (orgAction.value?.mode === 'mergeTeam') {
+    const sourceId = orgAction.value.team?.id
+    const out: Array<{ id: string; label: string }> = []
+    for (const dept of orgTree.value) {
+      if (!dept.enabled || isSystemDepartment(dept)) continue
+      for (const team of dept.teams) {
+        if (!team.enabled || !team.id || team.id === sourceId) continue
+        out.push({ id: team.id, label: `${dept.label} / ${team.label}` })
+      }
+    }
+    return out
+  }
+  return []
 })
 const orgActionNamePlaceholder = computed(() =>
   orgAction.value?.mode === 'createTeam' || orgAction.value?.mode === 'editTeam'
@@ -891,7 +788,10 @@ const orgActionNamePlaceholder = computed(() =>
     : '请输入部门名称',
 )
 const orgActionConfirmText = computed(() => {
+  if (orgActionIsMerge.value) return '确认合并'
   if (!orgActionIsDelete.value) return '保存'
+  if (orgAction.value?.mode === 'purgeAllEmpty') return '确认清理'
+  if (orgAction.value?.mode === 'purgeDepartment' || orgAction.value?.mode === 'purgeTeam') return '确认删除'
   if (orgAction.value?.mode === 'deleteDepartment' && orgAction.value.department?.enabled === false) return '确认恢复'
   if (orgAction.value?.mode === 'deleteTeam' && orgAction.value.team?.enabled === false) return '确认恢复'
   return '确认停用'
@@ -969,26 +869,26 @@ const userTableColumns = computed<DataTableColumns<UserRow>>(() => [
 const createTeamOptions = computed(() =>
   createForm.value.department
     ? teamOptions.value.filter((t) =>
-        teamMatchesDepartment(t, createForm.value.department, isDeptScopedOnly.value),
+        teamMatchesDepartment(t, createForm.value.department, true),
       )
     : isDeptScopedOnly.value
       ? teamOptions.value.filter((t) =>
           teamMatchesDepartment(t, currentDepartmentScope.value, true),
         )
-      : teamOptions.value,
+      : [],
 )
 const createDepartmentOptions = computed(() => scopedDepartmentOptions.value)
 const membershipDepartmentOptions = computed(() => scopedDepartmentOptions.value)
 const membershipTeamOptions = computed(() =>
   membershipForm.value.department
     ? teamOptions.value.filter(
-        (t) => teamMatchesDepartment(t, membershipForm.value.department, isDeptScopedOnly.value),
+        (t) => teamMatchesDepartment(t, membershipForm.value.department, true),
       )
     : isDeptScopedOnly.value
       ? teamOptions.value.filter((t) =>
           teamMatchesDepartment(t, currentDepartmentScope.value, true),
         )
-      : teamOptions.value,
+      : [],
 )
 const isMembershipDirty = computed(() => {
   const current = detailUser.value
@@ -998,14 +898,6 @@ const isMembershipDirty = computed(() => {
     membershipForm.value.team !== (current.team ?? '')
   )
 })
-
-/** 仅展示；查询/提交仍用 active、disabled */
-function formatUserStatusForDisplay(status: string | undefined): string {
-  if (status == null || status === '') return '—'
-  if (status === 'active') return '启用'
-  if (status === 'disabled') return '已禁用'
-  return status
-}
 
 function mapRawUser(raw: Record<string, unknown>): UserRow {
   const rawEmployeeNo = raw.employee_no ?? raw.employeeNo
@@ -1143,10 +1035,6 @@ function ensureMemberRoleCodes(roles: string[]): string[] {
   return mergeRoleCodes(['Member'], roles)
 }
 
-function formatEmployeeNo(value: number | null | undefined): string {
-  return value == null ? '待维护工号' : `工号 ${value}`
-}
-
 function parseEmployeeNoInput(raw: string): number | null {
   const value = raw.trim()
   if (!value) return null
@@ -1165,13 +1053,6 @@ function validateEmployeeNoInput(raw: string, required: boolean): string | null 
   return null
 }
 
-function lockedRoleTooltip(role: RoleOption): string {
-  if (role.category === 'compatibility' || role.deprecated) {
-    return '当前账号已持有历史保留角色；本页不再支持新增分配。'
-  }
-  return '当前账号已持有该角色；本页不支持由当前登录账号调整。'
-}
-
 function teamMatchesDepartment(
   team: { department?: string },
   department: string,
@@ -1182,6 +1063,12 @@ function teamMatchesDepartment(
 }
 
 const invalidDepartmentScopeMessage = '当前账号部门范围已停用或不存在，请联系人事管理员或超级管理员修正组织归属。'
+
+const systemDepartmentName = '未分配'
+
+function isSystemDepartment(dept: Pick<OrgTreeDepartment, 'value'> | null | undefined): boolean {
+  return dept?.value === systemDepartmentName
+}
 
 function isAssignableDepartment(department: string): boolean {
   const value = department.trim()
@@ -1198,6 +1085,18 @@ function isAssignableTeam(department: string, team: string): boolean {
   )
 }
 
+// 列表筛选比"可分配"更宽:组织管理员可以点选停用组织,查看其中残留成员
+// 以便治理(合并/删除前迁移人员)。
+function isFilterableDepartment(department: string): boolean {
+  if (isAssignableDepartment(department)) return true
+  return canManageOrgMaster.value && !!findVisibleOrgDepartment(department)
+}
+
+function isFilterableTeam(department: string, team: string): boolean {
+  if (isAssignableTeam(department, team)) return true
+  return canManageOrgMaster.value && !!findVisibleOrgTeam(department, team)
+}
+
 function resetUsersForScopeError(message: string) {
   users.value = []
   pagination.value = { total: 0, page: page.value, page_size: pageSize.value }
@@ -1209,12 +1108,12 @@ function sanitizeListOrgFilters() {
   const team = teamFilter.value.trim()
   if (department !== departmentFilter.value) departmentFilter.value = department
   if (team !== teamFilter.value) teamFilter.value = team
-  if (department && !isAssignableDepartment(department)) {
+  if (department && !isFilterableDepartment(department)) {
     departmentFilter.value = ''
     teamFilter.value = ''
     return
   }
-  if (team && !isAssignableTeam(department, team)) {
+  if (team && !isFilterableTeam(department, team)) {
     teamFilter.value = ''
   }
 }
@@ -1250,37 +1149,18 @@ function findVisibleOrgTeam(department: string, team: string): OrgTreeTeam | und
   return findVisibleOrgDepartment(department)?.teams.find((item) => item.value === team)
 }
 
-function isOrgDepartmentActive(department: string): boolean {
-  return orgMasterDepartmentFilter.value === department && !orgMasterTeamFilter.value
-}
-
-function isOrgTeamActive(department: string, team: string): boolean {
-  return orgMasterDepartmentFilter.value === department && orgMasterTeamFilter.value === team
-}
-
 function selectAllOrg() {
   if (isDeptScopedOnly.value) return
-  orgMasterDepartmentFilter.value = ''
-  orgMasterTeamFilter.value = ''
   departmentFilter.value = ''
   teamFilter.value = ''
 }
 
 function selectOrgDepartment(department: string) {
-  const dept = findVisibleOrgDepartment(department)
-  orgMasterDepartmentFilter.value = department
-  orgMasterTeamFilter.value = ''
-  if (!dept || !dept.enabled) return
   departmentFilter.value = department
   teamFilter.value = ''
 }
 
 function selectOrgTeam(department: string, team: string) {
-  const dept = findVisibleOrgDepartment(department)
-  const orgTeam = findVisibleOrgTeam(department, team)
-  orgMasterDepartmentFilter.value = department
-  orgMasterTeamFilter.value = team
-  if (!dept?.enabled || !orgTeam?.enabled) return
   departmentFilter.value = department
   teamFilter.value = team
 }
@@ -1309,7 +1189,19 @@ function activeOnlyOrgOptions(org: OrgOwnershipOptionsParsed): OrgOwnershipOptio
 }
 
 async function loadOrgOptions() {
-  const org = await fetchOrgOwnershipOptions({ includeDisabled: canManageOrgMaster.value })
+  let org: OrgOwnershipOptionsParsed
+  try {
+    org = await fetchOrgOwnershipOptions({
+      includeDisabled: canManageOrgMaster.value,
+      throwOnError: true,
+    })
+    orgOptionsError.value = ''
+  } catch (e) {
+    // 组织目录加载失败必须显式可见:静默空列表会让树和筛选凭空消失,
+    // 管理员误以为组织被删除。
+    orgOptionsError.value = e instanceof Error && e.message ? `组织列表加载失败：${e.message}` : '组织列表加载失败，请重试。'
+    return
+  }
   const activeOrg = activeOnlyOrgOptions(org)
   departmentOptions.value = activeOrg.departmentOptions ?? []
   teamOptions.value = activeOrg.teamOptions ?? []
@@ -1320,36 +1212,21 @@ async function loadOrgOptions() {
     usePermissionsStore().hydrateOrgFromServer(hydrated.departments, hydrated.groups)
   }
   sanitizeListOrgFilters()
-  if (orgMasterDepartmentFilter.value && !findVisibleOrgDepartment(orgMasterDepartmentFilter.value)) {
-    orgMasterDepartmentFilter.value = ''
-    orgMasterTeamFilter.value = ''
-  } else if (
-    orgMasterDepartmentFilter.value &&
-    orgMasterTeamFilter.value &&
-    !findVisibleOrgTeam(orgMasterDepartmentFilter.value, orgMasterTeamFilter.value)
-  ) {
-    orgMasterTeamFilter.value = ''
-  }
   if (isDeptScopedOnly.value) {
     if (!currentDepartmentScope.value) {
       departmentFilter.value = ''
       teamFilter.value = ''
-      orgMasterDepartmentFilter.value = ''
-      orgMasterTeamFilter.value = ''
       createForm.value.department = ''
       return
     }
     if (!isAssignableDepartment(currentDepartmentScope.value)) {
       departmentFilter.value = ''
       teamFilter.value = ''
-      orgMasterDepartmentFilter.value = ''
-      orgMasterTeamFilter.value = ''
       createForm.value.department = ''
       resetUsersForScopeError(invalidDepartmentScopeMessage)
       return
     }
     departmentFilter.value = currentDepartmentScope.value
-    orgMasterDepartmentFilter.value = currentDepartmentScope.value
     if (teamFilter.value) {
       const ok = teamOptions.value.some(
         (team) =>
@@ -1360,6 +1237,11 @@ async function loadOrgOptions() {
     }
     if (!createForm.value.department) createForm.value.department = currentDepartmentScope.value
   }
+}
+
+async function retryLoadOrgOptions() {
+  await loadOrgOptions()
+  if (!orgOptionsError.value) await loadUsers()
 }
 
 async function loadRoleOptions() {
@@ -1410,7 +1292,7 @@ async function loadUsers() {
     const deptScope = isDeptScopedOnly.value ? currentDepartmentScope.value : undefined
     const requestDepartment = deptScope || departmentFilter.value.trim()
     const requestTeam =
-      teamFilter.value && isAssignableTeam(requestDepartment, teamFilter.value)
+      teamFilter.value && isFilterableTeam(requestDepartment, teamFilter.value)
         ? teamFilter.value.trim()
         : ''
     const res = await usersApi.list({
@@ -1711,6 +1593,44 @@ function openDeleteTeam(team: OrgTreeTeam) {
   orgActionError.value = ''
 }
 
+function openMergeDepartment(department: OrgTreeDepartment) {
+  orgAction.value = { mode: 'mergeDepartment', department }
+  orgActionName.value = ''
+  orgActionDepartmentId.value = ''
+  orgActionTargetId.value = ''
+  orgActionError.value = ''
+}
+
+function openMergeTeam(team: OrgTreeTeam) {
+  orgAction.value = { mode: 'mergeTeam', department: selectedOrgDepartment.value ?? undefined, team }
+  orgActionName.value = ''
+  orgActionDepartmentId.value = ''
+  orgActionTargetId.value = ''
+  orgActionError.value = ''
+}
+
+function openPurgeDepartment(department: OrgTreeDepartment) {
+  orgAction.value = { mode: 'purgeDepartment', department }
+  orgActionName.value = ''
+  orgActionDepartmentId.value = ''
+  orgActionError.value = ''
+}
+
+function openPurgeTeam(team: OrgTreeTeam) {
+  orgAction.value = { mode: 'purgeTeam', department: selectedOrgDepartment.value ?? undefined, team }
+  orgActionName.value = ''
+  orgActionDepartmentId.value = ''
+  orgActionError.value = ''
+}
+
+function openPurgeAllEmpty() {
+  orgAction.value = { mode: 'purgeAllEmpty' }
+  orgActionName.value = ''
+  orgActionDepartmentId.value = ''
+  orgActionTargetId.value = ''
+  orgActionError.value = ''
+}
+
 function closeOrgAction() {
   if (orgActionSubmitting.value) return
   resetOrgAction()
@@ -1720,6 +1640,7 @@ function resetOrgAction() {
   orgAction.value = null
   orgActionName.value = ''
   orgActionDepartmentId.value = ''
+  orgActionTargetId.value = ''
   orgActionError.value = ''
 }
 
@@ -1728,11 +1649,48 @@ async function submitOrgAction() {
   if (!action) return
   orgActionError.value = ''
   const name = orgActionName.value.trim()
-  if (!orgActionIsDelete.value && !name) {
+  if (!orgActionIsDelete.value && !orgActionIsMerge.value && !name) {
     orgActionError.value = orgActionNamePlaceholder.value
     return
   }
+  if (orgActionIsMerge.value && !orgActionTargetId.value) {
+    orgActionError.value = '请选择合并目标。'
+    return
+  }
   orgActionSubmitting.value = true
+  if (action.mode === 'purgeAllEmpty') {
+    // 批量清理:逐项删除并收集失败原因;无论成败都刷新组织树,
+    // 已删除的项立即从树中消失,失败项保留并在弹窗中给出原因。
+    const { departments, teams } = emptyDisabledOrgCleanup.value
+    const failures: string[] = []
+    try {
+      for (const team of teams) {
+        try {
+          await deleteOrgTeam(team.id as string)
+        } catch (e) {
+          failures.push(`小组「${team.department} / ${team.label}」：${e instanceof Error ? e.message : '删除失败'}`)
+        }
+      }
+      for (const dept of departments) {
+        try {
+          await deleteOrgDepartment(dept.id as string)
+        } catch (e) {
+          failures.push(`部门「${dept.label}」：${e instanceof Error ? e.message : '删除失败'}`)
+        }
+      }
+      await loadOrgOptions()
+      sanitizeListOrgFilters()
+      await loadUsers()
+      if (failures.length) {
+        orgActionError.value = `部分组织未能删除：${failures.join('；')}`
+        return
+      }
+      resetOrgAction()
+    } finally {
+      orgActionSubmitting.value = false
+    }
+    return
+  }
   try {
     switch (action.mode) {
       case 'createDepartment':
@@ -1763,19 +1721,35 @@ async function submitOrgAction() {
         }
         await updateOrgTeam(action.team.id, { enabled: action.team.enabled === false })
         break
+      case 'mergeDepartment':
+        if (!action.department?.id) throw new Error('未找到部门编号，无法处理。')
+        await mergeOrgDepartment(action.department.id, orgActionTargetId.value)
+        break
+      case 'mergeTeam':
+        if (!action.team?.id) throw new Error('未找到小组编号，无法处理。')
+        await mergeOrgTeam(action.team.id, orgActionTargetId.value)
+        break
+      case 'purgeDepartment':
+        if (!action.department?.id) throw new Error('未找到部门编号，无法处理。')
+        await deleteOrgDepartment(action.department.id)
+        break
+      case 'purgeTeam':
+        if (!action.team?.id) throw new Error('未找到小组编号，无法处理。')
+        await deleteOrgTeam(action.team.id)
+        break
     }
-    const shouldResetDepartment =
-      action.mode === 'deleteDepartment' &&
+    const departmentGone =
+      (action.mode === 'deleteDepartment' || action.mode === 'mergeDepartment' || action.mode === 'purgeDepartment') &&
       action.department?.value &&
       departmentFilter.value === action.department.value
-    const shouldResetTeam =
-      action.mode === 'deleteTeam' &&
+    const teamGone =
+      (action.mode === 'deleteTeam' || action.mode === 'mergeTeam' || action.mode === 'purgeTeam') &&
       action.team?.value &&
       teamFilter.value === action.team.value &&
       departmentFilter.value === action.team.department
     resetOrgAction()
     await loadOrgOptions()
-    if (shouldResetDepartment || shouldResetTeam) {
+    if (departmentGone || teamGone) {
       departmentFilter.value = isDeptScopedOnly.value ? currentDepartmentScope.value : ''
       teamFilter.value = ''
     }
@@ -1801,6 +1775,9 @@ function goPage(next: number) {
 
 watch(departmentFilter, () => {
   if (!departmentFilter.value || !teamFilter.value) return
+  // 树中的停用小组也允许保留(治理场景);仅当小组既不在活跃选项、
+  // 也不在树里时才清空。
+  if (findVisibleOrgTeam(departmentFilter.value, teamFilter.value)) return
   const ok = teamOptions.value.some(
     (team) =>
       team.value === teamFilter.value &&
@@ -1822,13 +1799,32 @@ watch(pageSize, () => {
 watch(
   () => createForm.value.department,
   () => {
-    if (!createForm.value.department) return
+    if (!createForm.value.department) {
+      createForm.value.team = ''
+      return
+    }
     const ok = teamOptions.value.some(
       (t) =>
         t.value === createForm.value.team &&
-        teamMatchesDepartment(t, createForm.value.department, isDeptScopedOnly.value),
+        teamMatchesDepartment(t, createForm.value.department, true),
     )
     if (!ok) createForm.value.team = ''
+  },
+)
+
+watch(
+  () => membershipForm.value.department,
+  () => {
+    if (!membershipForm.value.department) {
+      membershipForm.value.team = ''
+      return
+    }
+    const ok = teamOptions.value.some(
+      (t) =>
+        t.value === membershipForm.value.team &&
+        teamMatchesDepartment(t, membershipForm.value.department, true),
+    )
+    if (!ok) membershipForm.value.team = ''
   },
 )
 
@@ -1845,6 +1841,9 @@ onBeforeUnmount(() => {
   listAbort = null
 })
 </script>
+
+<!-- 弹窗共用样式:与 UserDetailModal / UserCreateModal 共享同一份 scoped 规则 -->
+<style scoped src="./userManagementModal.css"></style>
 
 <style scoped>
 /* 页画布：与看板页一致的浅灰底 */
@@ -1882,78 +1881,6 @@ onBeforeUnmount(() => {
   font-size: 0.8125rem;
   color: rgb(var(--yb-text-zinc-soft));
   font-weight: 500;
-}
-
-/* 小黑盒式主按钮：深底、圆角胶囊 */
-.um-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 2.25rem;
-  padding: 0.45rem 1.1rem;
-  font-size: 0.8125rem;
-  font-weight: 500;
-  border-radius: 9999px;
-  border: 1px solid transparent;
-  cursor: pointer;
-  transition:
-    background-color 0.15s ease,
-    border-color 0.15s ease,
-    box-shadow 0.15s ease,
-    opacity 0.15s ease;
-  white-space: nowrap;
-}
-
-.um-btn:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-.um-btn--primary {
-  color: rgb(var(--yb-surface-row-even));
-  background: rgb(var(--yb-surface-neutral-inverse));
-  border-color: rgb(var(--yb-border-inverse));
-  box-shadow: 0 1px 2px rgb(var(--yb-black) / 0.12);
-}
-
-.um-btn--primary:hover:not(:disabled) {
-  background: rgb(var(--yb-surface-neutral-inverse-hover));
-  border-color: rgb(var(--yb-border-inverse-soft));
-  box-shadow: 0 2px 6px rgb(var(--yb-black) / 0.15);
-}
-
-.um-btn--primary:active:not(:disabled) {
-  background: rgb(var(--yb-surface-neutral-inverse-deep));
-}
-
-.um-btn--ghost {
-  color: rgb(var(--yb-text-zinc));
-  background: rgb(var(--yb-surface));
-  border-color: rgb(var(--yb-border-zinc-strong));
-  box-shadow: 0 1px 0 rgb(var(--yb-shadow) / 0.04);
-}
-
-.um-btn--ghost:hover:not(:disabled) {
-  background: rgb(var(--yb-surface-row-even));
-  border-color: rgb(var(--yb-text-zinc-faint));
-}
-
-.um-btn--sm {
-  min-height: 1.75rem;
-  padding: 0.2rem 0.7rem;
-  font-size: 0.75rem;
-}
-
-.um-btn--md {
-  min-height: 2.25rem;
-  padding: 0.4rem 1rem;
-  font-size: 0.8125rem;
-}
-
-.um-btn--primary:not(.um-btn--sm):not(.um-btn--md) {
-  min-height: 2.5rem;
-  padding: 0.5rem 1.25rem;
-  font-size: 0.875rem;
 }
 
 /* 与工具栏行高对齐的查询按钮，不全宽 */
@@ -2038,6 +1965,10 @@ onBeforeUnmount(() => {
 }
 
 .org-selected-actions {
+  /* UX2:操作条吸顶,树滚到任何位置都能直接编辑当前选中组织 */
+  position: sticky;
+  top: 0;
+  z-index: 5;
   display: flex;
   flex-direction: column;
   gap: 0.45rem;
@@ -2046,6 +1977,48 @@ onBeforeUnmount(() => {
   border: 1px solid rgb(var(--yb-border-zinc));
   border-radius: 0.5rem;
   background: rgb(var(--yb-surface-row-even));
+  box-shadow: 0 2px 6px rgb(var(--yb-shadow) / 0.08);
+}
+
+.org-load-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0.55rem;
+  border: 1px solid rgb(var(--yb-danger-border-soft));
+  border-radius: 0.5rem;
+  background: rgb(var(--yb-danger) / 0.06);
+}
+
+.org-load-error p {
+  margin: 0;
+  color: rgb(var(--yb-danger));
+  font-size: 0.75rem;
+}
+
+.org-cleanup-btn {
+  width: 100%;
+  padding: 0.4rem 0.55rem;
+  border: 1px dashed rgb(var(--yb-danger-border-soft));
+  border-radius: 0.5rem;
+  background: rgb(var(--yb-danger) / 0.04);
+  color: rgb(var(--yb-danger));
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 0.12s ease, border-color 0.12s ease;
+}
+
+.org-cleanup-btn:hover {
+  background: rgb(var(--yb-danger) / 0.1);
+  border-color: rgb(var(--yb-danger));
+}
+
+.org-selected-member-count {
+  color: rgb(var(--yb-text-zinc-faint));
+  font-variant-numeric: tabular-nums;
 }
 
 .org-selected-current {
@@ -2084,102 +2057,6 @@ onBeforeUnmount(() => {
   display: flex;
   flex-wrap: wrap;
   gap: 0.3rem;
-}
-
-.org-tree-scroll {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 0.45rem;
-}
-
-.org-tree-section {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 0.25rem;
-}
-
-.org-tree-section-title {
-  margin: 0.2rem 0 0.05rem;
-  color: rgb(var(--yb-text-zinc-faint));
-  font-size: 0.6875rem;
-  font-weight: 700;
-}
-
-.org-tree-section--disabled {
-  padding-top: 0.35rem;
-  border-top: 1px dashed rgb(var(--yb-border-zinc));
-}
-
-.org-filter-dept {
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-}
-
-.org-filter-teams {
-  display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
-  margin-left: 0.65rem;
-  padding-left: 0.55rem;
-  border-left: 1px solid rgb(var(--yb-border-zinc));
-}
-
-.org-filter-row {
-  display: block;
-}
-
-.org-filter-item {
-  display: flex;
-  width: 100%;
-  min-height: 2rem;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.35rem;
-  border: 1px solid transparent;
-  border-radius: 0.45rem;
-  background: transparent;
-  color: rgb(var(--yb-text-zinc));
-  cursor: pointer;
-  font-size: 0.8125rem;
-  font-weight: 500;
-  line-height: 1.35;
-  padding: 0.35rem 0.55rem;
-  text-align: left;
-  transition:
-    background-color 0.15s ease,
-    border-color 0.15s ease,
-    color 0.15s ease;
-}
-
-.org-filter-item .org-item-name {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.org-filter-item.is-disabled {
-  color: rgb(var(--yb-text-zinc-faint));
-}
-
-.org-filter-item:hover {
-  background: rgb(var(--yb-surface-row-even));
-  border-color: rgb(var(--yb-border-zinc));
-}
-
-.org-filter-item.is-active {
-  background: rgb(var(--yb-success-soft));
-  border-color: rgb(var(--yb-success-border));
-  color: rgb(var(--yb-success-deep));
-}
-
-.org-filter-item--team {
-  min-height: 1.75rem;
-  font-size: 0.75rem;
-  color: rgb(var(--yb-text-zinc-soft));
 }
 
 .org-state-pill {
@@ -2244,14 +2121,6 @@ onBeforeUnmount(() => {
   }
 }
 
-.section-title {
-  margin: 0 0 1rem;
-  font-size: 0.9375rem;
-  font-weight: 600;
-  color: rgb(var(--yb-text-zinc-strong));
-  letter-spacing: -0.01em;
-}
-
 @media (max-width: 960px) {
   .management-layout {
     grid-template-columns: 1fr;
@@ -2269,37 +2138,55 @@ onBeforeUnmount(() => {
     border-bottom: 1px solid rgb(var(--yb-border-zinc));
   }
 
-  .org-filter-dept,
-  .org-filter-teams,
-  .org-tree-scroll,
-  .org-tree-section {
-    display: flex;
-  }
-
   .org-filter-header {
     grid-column: auto;
   }
 
-  .org-selected-actions,
-  .org-tree-section-title {
+  .org-selected-actions {
     grid-column: auto;
-  }
-
-  .org-filter-row {
-    display: block;
   }
 }
 
 .toolbar {
   display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 2fr) repeat(2, minmax(0, 1fr)) auto;
   gap: 0.75rem;
-  margin-bottom: 1rem;
+  margin-bottom: 0.6rem;
   align-items: end;
 }
 
 .toolbar-field {
   min-width: 0;
+}
+
+/* UX2:列表侧面包屑,明确"表格正被哪个组织过滤",与树选中互为镜像 */
+.org-filter-breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+  margin-bottom: 0.85rem;
+  padding: 0.35rem 0.55rem;
+  border: 1px solid rgb(var(--yb-success-border));
+  border-radius: 0.5rem;
+  background: rgb(var(--yb-success-soft));
+  font-size: 0.75rem;
+}
+
+.org-filter-breadcrumb-label {
+  color: rgb(var(--yb-success-deep));
+  font-weight: 600;
+}
+
+.org-filter-breadcrumb strong {
+  color: rgb(var(--yb-success-deep));
+  font-weight: 700;
+}
+
+.merge-hint {
+  margin: 0;
+  color: rgb(var(--yb-text-zinc-soft));
+  font-size: 0.8125rem;
 }
 
 .input {
@@ -2373,515 +2260,13 @@ onBeforeUnmount(() => {
   background: rgb(var(--yb-success-soft));
 }
 
-/* —— 弹窗可读性层：浅色后台风格，仅作用于新增用户 / 角色管理 —— */
-.modal-mask {
-  position: fixed;
-  inset: 0;
-  z-index: 1000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: clamp(0.75rem, 2vw, 1.5rem);
-  background: rgb(var(--yb-shadow) / 0.45);
-}
-
-.modal-panel {
-  min-width: 320px;
-  width: min(760px, calc(100vw - 2rem));
-  max-height: min(88dvh, 820px);
-  overflow: hidden;
-}
-
-.modal-panel.um-modal {
-  display: flex;
-  flex-direction: column;
-  border-radius: 0.875rem;
-  border: 1px solid rgb(var(--yb-border));
-  background: rgb(var(--yb-surface));
-  color: rgb(var(--yb-text));
-  box-shadow: 0 10px 40px rgb(var(--yb-shadow) / 0.12);
-}
-
-.um-modal--wide {
-  width: min(780px, calc(100vw - 2rem));
-}
-
-.um-modal .modal-header {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 1rem;
-  align-items: start;
-  padding: 0.95rem 1.35rem 0.8rem;
-  border-bottom: 1px solid rgb(var(--yb-border));
-  background: rgb(var(--yb-surface));
-}
-
-.um-modal .modal-heading {
-  min-width: 0;
-}
-
-.um-modal .section-title {
-  margin: 0;
-  font-size: 1rem;
-  font-weight: 700;
-  letter-spacing: 0;
-  color: rgb(var(--yb-text));
-  line-height: 1.3;
-}
-
-.um-modal .modal-subtitle {
-  margin: 0.25rem 0 0;
-  font-size: 0.75rem;
-  line-height: 1.35;
-  color: rgb(var(--yb-text-muted));
-}
-
-.um-modal .modal-close {
-  width: 2rem;
-  height: 2rem;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid rgb(var(--yb-border));
-  border-radius: 9999px;
-  background: rgb(var(--yb-surface));
-  color: rgb(var(--yb-text-muted));
-  font-size: 1.25rem;
-  line-height: 1;
-  cursor: pointer;
-  box-shadow: none;
-  transition:
-    border-color 0.15s ease,
-    background-color 0.15s ease,
-    color 0.15s ease;
-}
-
-.um-modal .modal-close:hover {
-  border-color: rgb(var(--yb-brand-border-strong));
-  background: rgb(var(--yb-surface-soft));
-  color: rgb(var(--yb-text));
-}
-
-.um-modal .modal-body {
-  min-height: 0;
-  overflow-y: auto;
-  padding: 0.8rem 1.35rem;
-}
-
-.um-modal .modal-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
-}
-
-.um-modal .form-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.6rem;
-}
-
-.um-modal .form-grid--single {
-  grid-template-columns: 1fr;
-}
-
-.um-modal .detail-section {
-  display: flex;
-  flex-direction: column;
-  gap: 0.6rem;
-  padding: 0.75rem;
-  border: 1px solid rgb(var(--yb-border));
-  border-radius: 0.75rem;
-  background: rgb(var(--yb-surface));
-}
-
-.um-modal .detail-section--danger {
-  border-color: rgb(var(--yb-warning-border-soft));
-  background: rgb(var(--yb-warning-soft));
-}
-
-.um-modal .detail-section-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-}
-
-.um-modal .detail-section-header h4 {
-  margin: 0;
-  color: rgb(var(--yb-text));
-  font-size: 0.875rem;
-  font-weight: 700;
-}
-
-.um-modal .detail-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.6rem;
-}
-
-.um-modal .field-label,
-.um-modal .readonly-field {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 0.3rem;
-}
-
-.um-modal .field-label span,
-.um-modal .readonly-field span {
-  color: rgb(var(--yb-text-muted));
-  font-size: 0.75rem;
-  font-weight: 600;
-}
-
-.um-modal .readonly-field strong {
-  display: flex;
-  align-items: center;
-  min-height: 2.5rem;
-  padding: 0.45rem 0.7rem;
-  border: 1px solid rgb(var(--yb-border));
-  border-radius: 0.625rem;
-  background: rgb(var(--yb-surface-soft));
-  color: rgb(var(--yb-text));
-  font-size: 0.8125rem;
-  font-weight: 600;
-  overflow-wrap: anywhere;
-}
-
-.um-modal .role-groups {
-  display: flex;
-  flex-direction: column;
-  gap: 0.55rem;
-  padding: 0.65rem;
-  border-radius: 0.75rem;
-  border: 1px solid rgb(var(--yb-border));
-  background: rgb(var(--yb-surface-soft));
-  box-shadow: none;
-}
-
-.um-modal .role-group {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-}
-
-.um-modal .role-group-title {
-  margin: 0;
-  font-size: 0.75rem;
-  font-weight: 700;
-  line-height: 1.35;
-  color: rgb(var(--yb-text-muted));
-}
-
-.um-modal .roles-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(10.75rem, 1fr));
-  gap: 0.5rem;
-}
-
-.um-modal .roles-grid-readonly {
-  opacity: 0.72;
-}
-
-.um-modal .roles-grid-readonly .role-check {
-  cursor: not-allowed;
-  background: rgb(var(--yb-surface-muted));
-  border-color: rgb(var(--yb-border));
-}
-
-.um-modal .roles-grid-readonly .role-check:hover {
-  border-color: rgb(var(--yb-border));
-  background: rgb(var(--yb-surface-muted));
-}
-
-.um-modal .roles-grid-readonly .role-check input {
-  cursor: not-allowed;
-}
-
-.um-modal .legacy-role-box {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem;
-  align-items: center;
-  padding: 0.65rem 0.75rem;
-  border-radius: 0.65rem;
-  border: 1px solid rgb(var(--yb-warning-border-soft));
-  background: rgb(var(--yb-warning-soft));
-}
-
-.um-modal .legacy-role-title {
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: rgb(var(--yb-warning-dark));
-}
-
-.um-modal .legacy-role-tag {
-  display: inline-flex;
-  align-items: center;
-  min-height: 1.5rem;
-  padding: 0.15rem 0.55rem;
-  border-radius: 9999px;
-  border: 1px solid rgb(var(--yb-warning-border-soft));
-  background: rgb(var(--yb-surface));
-  color: rgb(var(--yb-text-body));
-  font-size: 0.75rem;
-  font-weight: 500;
-}
-
-.um-modal .role-check {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  min-width: 0;
-  min-height: 2.05rem;
-  padding: 0.35rem 0.65rem;
-  margin: 0;
-  border-radius: 0.5rem;
-  border: 1px solid rgb(var(--yb-border));
-  background: rgb(var(--yb-surface));
-  color: rgb(var(--yb-text-body));
-  font-size: 0.8125rem;
-  font-weight: 500;
-  line-height: 1.35;
-  cursor: pointer;
-  transition:
-    border-color 0.15s ease,
-    background-color 0.15s ease,
-    box-shadow 0.15s ease;
-}
-
-.um-modal .role-check span {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.um-modal .role-check em {
-  margin-left: auto;
-  color: rgb(var(--yb-text-muted));
-  font-size: 0.6875rem;
-  font-style: normal;
-  white-space: nowrap;
-}
-
-.um-modal .role-check:hover {
-  border-color: rgb(var(--yb-brand-border-strong));
-  background: rgb(var(--yb-surface-soft));
-}
-
-.um-modal .role-check:has(input:checked) {
-  border-color: rgb(var(--yb-brand));
-  background: rgb(var(--yb-brand-soft));
-  box-shadow: 0 0 0 1px rgb(var(--yb-brand) / 0.12);
-}
-
-.um-modal .role-check:has(input:disabled) {
-  cursor: not-allowed;
-  opacity: 0.55;
-}
-
-.um-modal .role-check input[type='checkbox'] {
-  width: 1rem;
-  height: 1rem;
-  flex-shrink: 0;
-  margin: 0;
-  accent-color: rgb(var(--yb-brand));
-  cursor: pointer;
-}
-
-.um-modal .input {
-  width: 100%;
-  min-height: 2.5rem;
-  border: 1px solid rgb(var(--yb-border-strong));
-  border-radius: 0.625rem;
-  padding: 0.45rem 0.7rem;
-  font-size: 0.8125rem;
-  color: rgb(var(--yb-text));
-  background: rgb(var(--yb-surface));
-  color-scheme: light;
-  box-shadow: none;
-  transition:
-    border-color 0.15s ease,
-    box-shadow 0.15s ease;
-}
-
-.um-modal .input::placeholder {
-  color: rgb(var(--yb-text-faint));
-}
-
-.um-modal .input:focus {
-  outline: none;
-  border-color: rgb(var(--yb-brand));
-  box-shadow: 0 0 0 3px rgb(var(--yb-brand) / 0.12);
-}
-
-.um-modal select.input {
-  cursor: pointer;
-  appearance: none;
-  background-color: rgb(var(--yb-surface));
-  background-image:
-    linear-gradient(45deg, transparent 50%, rgb(var(--yb-text-muted)) 50%),
-    linear-gradient(135deg, rgb(var(--yb-text-muted)) 50%, transparent 50%);
-  background-position:
-    calc(100% - 1.1rem) calc(50% + 0.12rem),
-    calc(100% - 0.75rem) calc(50% + 0.12rem);
-  background-size:
-    0.35rem 0.35rem,
-    0.35rem 0.35rem;
-  background-repeat: no-repeat;
-  padding-right: 2rem;
-}
-
-.um-modal .modal-actions-inline {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  align-items: center;
-  padding-top: 0.7rem;
-  border-top: 1px solid rgb(var(--yb-border));
-}
-
-.um-modal .modal-footer {
-  flex-shrink: 0;
-  padding: 0.7rem 1.35rem;
-  border-top: 1px solid rgb(var(--yb-border));
-  background: rgb(var(--yb-surface));
-}
-
-.um-modal .modal-footer-actions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.um-modal .um-btn--ghost {
-  color: rgb(var(--yb-text-body));
-  background: rgb(var(--yb-surface));
-  border-color: rgb(var(--yb-border-strong));
-  box-shadow: none;
-}
-
-.um-modal .um-btn--ghost:hover:not(:disabled) {
-  color: rgb(var(--yb-text));
-  background: rgb(var(--yb-surface-soft));
-  border-color: rgb(var(--yb-text-faint));
-}
-
-.um-modal .um-btn--primary {
-  background: rgb(var(--yb-brand));
-  border-color: rgb(var(--yb-brand));
-  color: rgb(var(--yb-text-inverse));
-  box-shadow: none;
-}
-
-.um-modal .um-btn--primary:hover:not(:disabled) {
-  background: rgb(var(--yb-brand-strong));
-  border-color: rgb(var(--yb-brand-strong));
-  box-shadow: none;
-}
-
-.um-modal .password-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 0.5rem;
-  align-items: center;
-  padding: 0.6rem;
-  border-radius: 0.625rem;
-  border: 1px solid rgb(var(--yb-border));
-  background: rgb(var(--yb-surface-soft));
-}
-
-.um-modal .membership-row {
-  padding: 0.6rem;
-  border-radius: 0.625rem;
-  border: 1px solid rgb(var(--yb-border));
-  background: rgb(var(--yb-surface-soft));
-}
-
-.um-modal .membership-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto auto;
-  gap: 0.5rem;
-  align-items: center;
-}
-
-.um-modal .role-readonly-hint {
-  font-size: 0.75rem;
-  color: rgb(var(--yb-text-muted));
-  margin: 0;
-}
-
-.um-modal .action-msg {
+/* 批量清理弹窗内的组织清单 */
+.um-modal .purge-list {
   margin: 0.5rem 0 0;
-  padding: 0.45rem 0.65rem;
-  font-size: 0.75rem;
-  font-weight: 500;
-  color: rgb(var(--yb-brand-strong));
-  border-radius: 0.5rem;
-  border: 1px solid rgb(var(--yb-brand-border));
-  background: rgb(var(--yb-brand-soft));
-}
-
-.um-modal .delete-confirm-box {
-  padding: 0.8rem;
-  border-radius: 0.75rem;
-  border: 1px solid rgb(var(--yb-warning-border-soft));
-  background: rgb(var(--yb-warning-soft));
-  color: rgb(var(--yb-text));
-  font-size: 0.8125rem;
-  line-height: 1.6;
-}
-
-.um-modal .delete-confirm-box p {
-  margin: 0;
-}
-
-:global(#app .um-modal .role-check:has(input:checked)) {
-  border-color: rgb(var(--yb-brand));
-  background: rgb(var(--yb-brand-soft));
-}
-
-:global(#app .um-modal .input) {
-  border-color: rgb(var(--yb-border-strong));
-  background: rgb(var(--yb-surface));
-  color: rgb(var(--yb-text));
-  box-shadow: none;
-}
-
-:global(#app .um-modal .input:focus) {
-  border-color: rgb(var(--yb-brand));
-  box-shadow: 0 0 0 3px rgb(var(--yb-brand) / 0.12);
-}
-
-:global(#app .um-modal select.input) {
-  background-color: rgb(var(--yb-surface));
-}
-
-:global(#app .um-modal .um-btn--ghost) {
-  border-color: rgb(var(--yb-border-strong));
-  background: rgb(var(--yb-surface));
-  color: rgb(var(--yb-text-body));
-  box-shadow: none;
-}
-
-:global(#app .um-modal .um-btn--ghost:hover:not(:disabled)) {
-  border-color: rgb(var(--yb-text-faint));
-  background: rgb(var(--yb-surface-soft));
-  color: rgb(var(--yb-text));
-}
-
-:global(#app .um-modal .um-btn--primary) {
-  border-color: rgb(var(--yb-brand));
-  background: rgb(var(--yb-brand));
-  color: rgb(var(--yb-text-inverse));
-  box-shadow: none;
-}
-
-:global(#app .um-modal .um-btn--primary:hover:not(:disabled)) {
-  border-color: rgb(var(--yb-brand-strong));
-  background: rgb(var(--yb-brand-strong));
-  box-shadow: none;
+  padding-left: 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
 }
 
 @media (max-width: 1024px) {
@@ -2893,58 +2278,6 @@ onBeforeUnmount(() => {
 @media (max-width: 640px) {
   .toolbar {
     grid-template-columns: 1fr;
-  }
-}
-
-@media (max-width: 980px) {
-  .um-modal .form-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .um-modal .detail-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .um-modal .detail-section-header {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .um-modal .membership-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
-@media (max-width: 640px) {
-  .modal-mask {
-    align-items: stretch;
-    padding: 0.75rem;
-  }
-
-  .modal-panel,
-  .um-modal--wide {
-    width: 100%;
-    max-height: calc(100dvh - 1.5rem);
-  }
-
-  .um-modal .modal-header,
-  .um-modal .modal-body,
-  .um-modal .modal-footer {
-    padding-left: 1rem;
-    padding-right: 1rem;
-  }
-
-  .um-modal .password-row,
-  .um-modal .modal-actions-inline,
-  .um-modal .modal-footer-actions {
-    display: grid;
-    grid-template-columns: 1fr;
-  }
-
-  .um-modal .modal-actions-inline .um-btn,
-  .um-modal .modal-footer-actions .um-btn,
-  .um-modal .password-row .um-btn {
-    width: 100%;
   }
 }
 </style>

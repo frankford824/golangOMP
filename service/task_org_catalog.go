@@ -35,7 +35,10 @@ func ConfigureTaskOrgCatalog(settings domain.AuthSettings) {
 func buildTaskOrgCatalog(settings domain.AuthSettings) taskOrgCatalog {
 	departmentTeams := cloneStringSliceMap(settings.DepartmentTeams)
 	if len(departmentTeams) == 0 {
-		departmentTeams = cloneStringSliceMap(domain.DefaultOrgDepartmentTeams())
+		// The fallback must include compatibility teams so historical
+		// owner_team values (运营一组, 采购组, ...) keep normalizing to the
+		// legacy task team enum.
+		departmentTeams = cloneStringSliceMap(domain.MergedOrgDepartmentTeamsWithCompatibility())
 	}
 	taskTeamMappings := cloneStringSliceMap(domain.DefaultDepartmentTeams())
 	configuredTaskMappings := cloneStringSliceMap(settings.TaskTeamMappings)

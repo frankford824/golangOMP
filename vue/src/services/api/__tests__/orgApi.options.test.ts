@@ -22,12 +22,15 @@ describe('fetchOrgOwnershipOptions', () => {
               id: 7,
               name: '采购部',
               enabled: false,
+              member_count: 0,
               teams: ['旧采购组'],
               team_items: [
                 {
-                  id: 13,
+                  department_id: 7,
+                  team_id: 13,
                   name: '旧采购组',
                   enabled: false,
+                  member_count: 0,
                 },
               ],
             },
@@ -44,7 +47,7 @@ describe('fetchOrgOwnershipOptions', () => {
       params: { include_disabled: true },
     })
     expect(parsed.departmentRecords).toEqual([
-      { id: '7', name: '采购部', enabled: false },
+      { id: '7', name: '采购部', enabled: false, memberCount: 0 },
     ])
     expect(parsed.teamOptions).toEqual([
       { value: '旧采购组', label: '旧采购组', department: '采购部' },
@@ -56,6 +59,7 @@ describe('fetchOrgOwnershipOptions', () => {
         departmentId: '7',
         departmentName: '采购部',
         enabled: false,
+        memberCount: 0,
       },
     ])
   })

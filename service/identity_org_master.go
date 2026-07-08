@@ -9,6 +9,8 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
+
 	"workflow/domain"
 	"workflow/repo"
 )
@@ -33,6 +35,16 @@ type UpdateOrgTeamParams struct {
 	ID      int64
 	Name    *string
 	Enabled *bool
+}
+
+type MergeOrgDepartmentParams struct {
+	SourceID int64
+	TargetID int64
+}
+
+type MergeOrgTeamParams struct {
+	SourceID int64
+	TargetID int64
 }
 
 func WithOrgRepo(orgRepo repo.OrgRepo) IdentityServiceOption {
@@ -66,7 +78,7 @@ func (s *identityService) CreateDepartment(ctx context.Context, p CreateOrgDepar
 	}); err != nil {
 		return nil, infraError("create org department", err)
 	}
-	_ = s.refreshRuntimeOrgCatalog(ctx)
+	s.refreshRuntimeOrgCatalogLogged(ctx, "create_department")
 	return s.getDepartmentByID(ctx, item.ID)
 }
 
@@ -92,7 +104,7 @@ func (s *identityService) UpdateDepartment(ctx context.Context, p UpdateOrgDepar
 			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "部门名称不能为空。", map[string]interface{}{"deny_code": "department_name_required"})
 		}
 		if disableRequested && name != current.Name {
-			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "删除部门时不能同时修改名称。", map[string]interface{}{"deny_code": "org_delete_rename_conflict"})
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "停用部门时不能同时修改名称。", map[string]interface{}{"deny_code": "org_delete_rename_conflict"})
 		}
 		if !strings.EqualFold(name, current.Name) {
 			if existing, err := s.orgRepo.GetDepartmentByName(ctx, name); err != nil {
@@ -111,7 +123,7 @@ func (s *identityService) UpdateDepartment(ctx context.Context, p UpdateOrgDepar
 		return current, nil
 	}
 	if !nextEnabled && current.Name == string(domain.DepartmentUnassigned) {
-		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "未分配是系统归属，不能删除。", map[string]interface{}{"deny_code": "system_org_delete_denied"})
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "未分配是系统归属，不能停用。", map[string]interface{}{"deny_code": "system_org_delete_denied"})
 	}
 	var unassignedTeam string
 	if !nextEnabled {
@@ -140,7 +152,7 @@ func (s *identityService) UpdateDepartment(ctx context.Context, p UpdateOrgDepar
 	}); err != nil {
 		return nil, infraError("update org department", err)
 	}
-	_ = s.refreshRuntimeOrgCatalog(ctx)
+	s.refreshRuntimeOrgCatalogLogged(ctx, "update_department")
 	return s.getDepartmentByID(ctx, current.ID)
 }
 
@@ -156,20 +168,15 @@ func (s *identityService) CreateTeam(ctx context.Context, p CreateOrgTeamParams)
 	if appErr != nil {
 		return nil, appErr
 	}
-	existingTeams, err := s.orgRepo.ListTeams(ctx, true)
-	if err != nil {
-		return nil, infraError("list org teams for create", err)
-	}
-	for _, existing := range existingTeams {
-		if existing == nil {
-			continue
-		}
-		if existing.DepartmentID == department.ID && strings.TrimSpace(existing.Name) == name {
-			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "team already exists", map[string]interface{}{
-				"department": department.Name,
-				"team":       name,
-			})
-		}
+	// Department-scoped lookup backed by uq_org_teams_department_name; the DB
+	// unique key remains the concurrency backstop.
+	if existing, err := s.orgRepo.GetTeamByDepartmentAndName(ctx, department.ID, name); err != nil {
+		return nil, infraError("get org team by department and name", err)
+	} else if existing != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "team already exists", map[string]interface{}{
+			"department": department.Name,
+			"team":       name,
+		})
 	}
 	item := &domain.OrgTeam{
 		DepartmentID: department.ID,
@@ -186,7 +193,7 @@ func (s *identityService) CreateTeam(ctx context.Context, p CreateOrgTeamParams)
 	}); err != nil {
 		return nil, infraError("create org team", err)
 	}
-	_ = s.refreshRuntimeOrgCatalog(ctx)
+	s.refreshRuntimeOrgCatalogLogged(ctx, "create_team")
 	return s.getTeamByID(ctx, item.ID)
 }
 
@@ -212,7 +219,7 @@ func (s *identityService) UpdateTeam(ctx context.Context, p UpdateOrgTeamParams)
 			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "小组名称不能为空。", map[string]interface{}{"deny_code": "team_name_required"})
 		}
 		if disableRequested && name != current.Name {
-			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "删除小组时不能同时修改名称。", map[string]interface{}{"deny_code": "org_delete_rename_conflict"})
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "停用小组时不能同时修改名称。", map[string]interface{}{"deny_code": "org_delete_rename_conflict"})
 		}
 		if name != current.Name {
 			if appErr := s.ensureTeamNameAvailable(ctx, current.DepartmentID, name, current.ID); appErr != nil {
@@ -228,6 +235,20 @@ func (s *identityService) UpdateTeam(ctx context.Context, p UpdateOrgTeamParams)
 	if current.Name == originalName && current.Enabled == nextEnabled {
 		return current, nil
 	}
+	if nextEnabled && !current.Enabled {
+		// Restoring a team must not produce an enabled team under a disabled
+		// department; the same rule the frontend enforces is validated here.
+		department, appErr := s.getDepartmentByID(ctx, current.DepartmentID)
+		if appErr != nil {
+			return nil, appErr
+		}
+		if !department.Enabled {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "所属部门已停用，请先恢复部门再恢复小组。", map[string]interface{}{
+				"deny_code":  "team_restore_department_disabled",
+				"department": department.Name,
+			})
+		}
+	}
 	var unassignedTeam string
 	if !nextEnabled {
 		unassigned, appErr := s.defaultUnassignedPoolTeam()
@@ -236,7 +257,7 @@ func (s *identityService) UpdateTeam(ctx context.Context, p UpdateOrgTeamParams)
 		}
 		unassignedTeam = unassigned
 		if current.Department == string(domain.DepartmentUnassigned) && current.Name == unassignedTeam {
-			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "未分配池是系统归属，不能删除。", map[string]interface{}{"deny_code": "system_org_delete_denied"})
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "未分配池是系统归属，不能停用。", map[string]interface{}{"deny_code": "system_org_delete_denied"})
 		}
 	}
 	current.Enabled = nextEnabled
@@ -255,57 +276,294 @@ func (s *identityService) UpdateTeam(ctx context.Context, p UpdateOrgTeamParams)
 	}); err != nil {
 		return nil, infraError("update org team", err)
 	}
-	_ = s.refreshRuntimeOrgCatalog(ctx)
+	s.refreshRuntimeOrgCatalogLogged(ctx, "update_team")
 	return s.getTeamByID(ctx, current.ID)
 }
 
-func (s *identityService) ensureTeamNameAvailable(ctx context.Context, departmentID int64, name string, excludeTeamID int64) *domain.AppError {
-	teams, err := s.orgRepo.ListTeams(ctx, true)
-	if err != nil {
-		return infraError("list org teams for name check", err)
+// MergeDepartment moves every member and managed-scope reference of the
+// source department onto the target department, then disables the source.
+// Members whose team has no enabled same-name team under the target become
+// ungrouped inside the target department.
+func (s *identityService) MergeDepartment(ctx context.Context, p MergeOrgDepartmentParams) (*domain.OrgDepartment, *domain.AppError) {
+	if s.orgRepo == nil {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidStateTransition, "org master backend is not configured", nil)
 	}
-	for _, team := range teams {
-		if team == nil || team.ID == excludeTeamID || team.DepartmentID != departmentID {
+	if p.SourceID <= 0 || p.TargetID <= 0 {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "请选择要合并的部门与目标部门。", map[string]interface{}{"deny_code": "org_merge_target_required"})
+	}
+	if p.SourceID == p.TargetID {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "合并的源部门与目标部门不能相同。", map[string]interface{}{"deny_code": "org_merge_same_target"})
+	}
+	source, appErr := s.getDepartmentByID(ctx, p.SourceID)
+	if appErr != nil {
+		return nil, appErr
+	}
+	target, appErr := s.getDepartmentByID(ctx, p.TargetID)
+	if appErr != nil {
+		return nil, appErr
+	}
+	if source.Name == string(domain.DepartmentUnassigned) {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "未分配是系统归属，不能合并。", map[string]interface{}{"deny_code": "system_org_merge_denied"})
+	}
+	if !target.Enabled {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "目标部门已停用，请先恢复目标部门再合并。", map[string]interface{}{"deny_code": "org_merge_target_disabled", "department": target.Name})
+	}
+	sourceTeams, err := s.teamNamesForDepartment(ctx, source.ID)
+	if err != nil {
+		return nil, infraError("list source department teams for merge", err)
+	}
+	enabledTeams, err := s.orgRepo.ListTeams(ctx, false)
+	if err != nil {
+		return nil, infraError("list org teams for merge", err)
+	}
+	targetEnabledTeams := map[string]struct{}{}
+	for _, team := range enabledTeams {
+		if team == nil || team.DepartmentID != target.ID {
 			continue
 		}
-		if strings.TrimSpace(team.Name) == strings.TrimSpace(name) {
-			return domain.NewAppError(domain.ErrCodeInvalidRequest, "该部门下已存在同名小组，请换一个名称。", map[string]interface{}{"deny_code": "team_name_conflict", "team": name})
+		if name := strings.TrimSpace(team.Name); name != "" {
+			targetEnabledTeams[name] = struct{}{}
 		}
+	}
+	// Source-only teams disappear with the merge; drop them from managed scopes.
+	removedTeams := map[string]struct{}{}
+	for name := range sourceTeams {
+		if _, ok := targetEnabledTeams[name]; !ok {
+			removedTeams[name] = struct{}{}
+		}
+	}
+	if err := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
+		if err := s.rewriteAllUsers(ctx, tx, func(user *domain.User) bool {
+			changed := false
+			sourceDepartmentScoped := userReferencesDepartmentName(user, source.Name)
+			if strings.TrimSpace(string(user.Department)) == source.Name {
+				user.Department = domain.Department(target.Name)
+				if _, ok := targetEnabledTeams[strings.TrimSpace(user.Team)]; !ok {
+					user.Team = ""
+				}
+				changed = true
+			}
+			if next := replaceStringValue(user.ManagedDepartments, source.Name, target.Name); !stringSlicesEqual(next, user.ManagedDepartments) {
+				user.ManagedDepartments = next
+				changed = true
+			}
+			if sourceDepartmentScoped {
+				next := removeStringValues(user.ManagedTeams, removedTeams)
+				if stringSlicesEqual(next, user.ManagedTeams) {
+					return changed
+				}
+				user.ManagedTeams = next
+				changed = true
+			}
+			return changed
+		}); err != nil {
+			return err
+		}
+		if err := s.disableTeamsForDepartment(ctx, tx, source.ID); err != nil {
+			return err
+		}
+		source.Enabled = false
+		return s.orgRepo.UpdateDepartment(ctx, tx, source)
+	}); err != nil {
+		return nil, infraError("merge org department", err)
+	}
+	s.refreshRuntimeOrgCatalogLogged(ctx, "merge_department")
+	return s.getDepartmentByID(ctx, target.ID)
+}
+
+// MergeTeam moves every member of the source team into the target team, then
+// disables the source team. Managed-scope team references follow the rename.
+func (s *identityService) MergeTeam(ctx context.Context, p MergeOrgTeamParams) (*domain.OrgTeam, *domain.AppError) {
+	if s.orgRepo == nil {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidStateTransition, "org master backend is not configured", nil)
+	}
+	if p.SourceID <= 0 || p.TargetID <= 0 {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "请选择要合并的小组与目标小组。", map[string]interface{}{"deny_code": "org_merge_target_required"})
+	}
+	if p.SourceID == p.TargetID {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "合并的源小组与目标小组不能相同。", map[string]interface{}{"deny_code": "org_merge_same_target"})
+	}
+	source, appErr := s.getTeamByID(ctx, p.SourceID)
+	if appErr != nil {
+		return nil, appErr
+	}
+	target, appErr := s.getTeamByID(ctx, p.TargetID)
+	if appErr != nil {
+		return nil, appErr
+	}
+	if source.Department == string(domain.DepartmentUnassigned) {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "未分配池是系统归属，不能合并。", map[string]interface{}{"deny_code": "system_org_merge_denied"})
+	}
+	if !target.Enabled {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "目标小组已停用，请先恢复目标小组再合并。", map[string]interface{}{"deny_code": "org_merge_target_disabled", "team": target.Name})
+	}
+	targetDepartment, appErr := s.getDepartmentByID(ctx, target.DepartmentID)
+	if appErr != nil {
+		return nil, appErr
+	}
+	if !targetDepartment.Enabled {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "目标小组所属部门已停用，请先恢复部门再合并。", map[string]interface{}{"deny_code": "org_merge_target_disabled", "department": targetDepartment.Name})
+	}
+	if err := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
+		if err := s.rewriteAllUsers(ctx, tx, func(user *domain.User) bool {
+			changed := false
+			sourceDepartmentScoped := userReferencesDepartmentName(user, source.Department)
+			if strings.TrimSpace(string(user.Department)) == source.Department && strings.TrimSpace(user.Team) == source.Name {
+				user.Department = domain.Department(target.Department)
+				user.Team = target.Name
+				changed = true
+			}
+			if sourceDepartmentScoped {
+				next := replaceStringValue(user.ManagedTeams, source.Name, target.Name)
+				if stringSlicesEqual(next, user.ManagedTeams) {
+					return changed
+				}
+				user.ManagedTeams = next
+				changed = true
+			}
+			return changed
+		}); err != nil {
+			return err
+		}
+		source.Enabled = false
+		return s.orgRepo.UpdateTeam(ctx, tx, source)
+	}); err != nil {
+		return nil, infraError("merge org team", err)
+	}
+	s.refreshRuntimeOrgCatalogLogged(ctx, "merge_team")
+	return s.getTeamByID(ctx, target.ID)
+}
+
+// DeleteDepartment hard-deletes one disabled, zero-member department together
+// with its (already disabled) child teams. It is the governance path for
+// clearing retired legacy records out of the org tree for good.
+func (s *identityService) DeleteDepartment(ctx context.Context, id int64) *domain.AppError {
+	if s.orgRepo == nil {
+		return domain.NewAppError(domain.ErrCodeInvalidStateTransition, "org master backend is not configured", nil)
+	}
+	if id <= 0 {
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "department id is required", nil)
+	}
+	current, appErr := s.getDepartmentByID(ctx, id)
+	if appErr != nil {
+		return appErr
+	}
+	if current.Name == string(domain.DepartmentUnassigned) {
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "未分配是系统归属，不能删除。", map[string]interface{}{"deny_code": "system_org_delete_denied"})
+	}
+	if current.Enabled {
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "请先停用部门，再执行删除。", map[string]interface{}{"deny_code": "org_delete_requires_disabled"})
+	}
+	memberCount, appErr := s.countUsersByOrg(ctx, current.Name, "")
+	if appErr != nil {
+		return appErr
+	}
+	if memberCount > 0 {
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, fmt.Sprintf("该部门下仍有 %d 名成员，请先迁移或合并成员后再删除。", memberCount), map[string]interface{}{"deny_code": "org_delete_has_members", "member_count": memberCount})
+	}
+	if err := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
+		if err := s.orgRepo.DeleteTeamsByDepartment(ctx, tx, current.ID); err != nil {
+			return err
+		}
+		return s.orgRepo.DeleteDepartment(ctx, tx, current.ID)
+	}); err != nil {
+		return infraError("delete org department", err)
+	}
+	s.refreshRuntimeOrgCatalogLogged(ctx, "delete_department")
+	return nil
+}
+
+// DeleteTeam hard-deletes one disabled, zero-member team.
+func (s *identityService) DeleteTeam(ctx context.Context, id int64) *domain.AppError {
+	if s.orgRepo == nil {
+		return domain.NewAppError(domain.ErrCodeInvalidStateTransition, "org master backend is not configured", nil)
+	}
+	if id <= 0 {
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "team id is required", nil)
+	}
+	current, appErr := s.getTeamByID(ctx, id)
+	if appErr != nil {
+		return appErr
+	}
+	if current.Department == string(domain.DepartmentUnassigned) {
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "未分配池是系统归属，不能删除。", map[string]interface{}{"deny_code": "system_org_delete_denied"})
+	}
+	if current.Enabled {
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "请先停用小组，再执行删除。", map[string]interface{}{"deny_code": "org_delete_requires_disabled"})
+	}
+	memberCount, appErr := s.countUsersByOrg(ctx, current.Department, current.Name)
+	if appErr != nil {
+		return appErr
+	}
+	if memberCount > 0 {
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, fmt.Sprintf("该小组下仍有 %d 名成员，请先迁移或合并成员后再删除。", memberCount), map[string]interface{}{"deny_code": "org_delete_has_members", "member_count": memberCount})
+	}
+	if err := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
+		return s.orgRepo.DeleteTeam(ctx, tx, current.ID)
+	}); err != nil {
+		return infraError("delete org team", err)
+	}
+	s.refreshRuntimeOrgCatalogLogged(ctx, "delete_team")
+	return nil
+}
+
+func (s *identityService) countUsersByOrg(ctx context.Context, department, team string) (int64, *domain.AppError) {
+	dept := domain.Department(strings.TrimSpace(department))
+	_, total, err := s.userRepo.List(ctx, repo.UserListFilter{
+		Department: &dept,
+		Team:       strings.TrimSpace(team),
+		Page:       1,
+		PageSize:   1,
+	})
+	if err != nil {
+		return 0, infraError("count users by org", err)
+	}
+	return total, nil
+}
+
+func (s *identityService) ensureTeamNameAvailable(ctx context.Context, departmentID int64, name string, excludeTeamID int64) *domain.AppError {
+	existing, err := s.orgRepo.GetTeamByDepartmentAndName(ctx, departmentID, strings.TrimSpace(name))
+	if err != nil {
+		return infraError("get org team by department and name", err)
+	}
+	if existing != nil && existing.ID != excludeTeamID {
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "该部门下已存在同名小组，请换一个名称。", map[string]interface{}{"deny_code": "team_name_conflict", "team": name})
 	}
 	return nil
 }
 
 func (s *identityService) rewriteUsersForDepartmentRename(ctx context.Context, tx repo.Tx, oldName, newName string) error {
-	if err := s.rewriteUsersByOrg(ctx, tx, oldName, "", func(user *domain.User) {
-		user.Department = domain.Department(newName)
-		user.ManagedDepartments = replaceStringValue(user.ManagedDepartments, oldName, newName)
-	}); err != nil {
-		return err
-	}
-	return s.rewriteAllUserManagedScopes(ctx, tx, func(user *domain.User) bool {
-		next := replaceStringValue(user.ManagedDepartments, oldName, newName)
-		if stringSlicesEqual(next, user.ManagedDepartments) {
-			return false
+	return s.rewriteAllUsers(ctx, tx, func(user *domain.User) bool {
+		changed := false
+		if strings.TrimSpace(string(user.Department)) == oldName {
+			user.Department = domain.Department(newName)
+			changed = true
 		}
-		user.ManagedDepartments = next
-		return true
+		if next := replaceStringValue(user.ManagedDepartments, oldName, newName); !stringSlicesEqual(next, user.ManagedDepartments) {
+			user.ManagedDepartments = next
+			changed = true
+		}
+		return changed
 	})
 }
 
 func (s *identityService) rewriteUsersForTeamRename(ctx context.Context, tx repo.Tx, department, oldName, newName string) error {
-	if err := s.rewriteUsersByOrg(ctx, tx, department, oldName, func(user *domain.User) {
-		user.Team = newName
-		user.ManagedTeams = replaceStringValue(user.ManagedTeams, oldName, newName)
-	}); err != nil {
-		return err
-	}
-	return s.rewriteAllUserManagedScopes(ctx, tx, func(user *domain.User) bool {
-		next := replaceStringValue(user.ManagedTeams, oldName, newName)
-		if stringSlicesEqual(next, user.ManagedTeams) {
-			return false
+	return s.rewriteAllUsers(ctx, tx, func(user *domain.User) bool {
+		changed := false
+		sourceDepartmentScoped := userReferencesDepartmentName(user, department)
+		if strings.TrimSpace(string(user.Department)) == department && strings.TrimSpace(user.Team) == oldName {
+			user.Team = newName
+			changed = true
 		}
-		user.ManagedTeams = next
-		return true
+		if sourceDepartmentScoped {
+			next := replaceStringValue(user.ManagedTeams, oldName, newName)
+			if stringSlicesEqual(next, user.ManagedTeams) {
+				return changed
+			}
+			user.ManagedTeams = next
+			changed = true
+		}
+		return changed
 	})
 }
 
@@ -314,41 +572,48 @@ func (s *identityService) moveDepartmentUsersToUnassigned(ctx context.Context, t
 	if err != nil {
 		return err
 	}
-	if err := s.rewriteUsersByOrg(ctx, tx, departmentName, "", func(user *domain.User) {
-		user.Department = domain.DepartmentUnassigned
-		user.Team = unassignedTeam
-		user.ManagedDepartments = removeStringValue(user.ManagedDepartments, departmentName)
-		user.ManagedTeams = removeStringValues(user.ManagedTeams, teamNames)
-	}); err != nil {
-		return err
-	}
-	return s.rewriteAllUserManagedScopes(ctx, tx, func(user *domain.User) bool {
-		nextDepartments := removeStringValue(user.ManagedDepartments, departmentName)
-		nextTeams := removeStringValues(user.ManagedTeams, teamNames)
-		if stringSlicesEqual(nextDepartments, user.ManagedDepartments) && stringSlicesEqual(nextTeams, user.ManagedTeams) {
-			return false
+	return s.rewriteAllUsers(ctx, tx, func(user *domain.User) bool {
+		changed := false
+		sourceDepartmentScoped := userReferencesDepartmentName(user, departmentName)
+		if strings.TrimSpace(string(user.Department)) == departmentName {
+			user.Department = domain.DepartmentUnassigned
+			user.Team = unassignedTeam
+			changed = true
 		}
-		user.ManagedDepartments = nextDepartments
-		user.ManagedTeams = nextTeams
-		return true
+		if next := removeStringValue(user.ManagedDepartments, departmentName); !stringSlicesEqual(next, user.ManagedDepartments) {
+			user.ManagedDepartments = next
+			changed = true
+		}
+		if sourceDepartmentScoped {
+			next := removeStringValues(user.ManagedTeams, teamNames)
+			if stringSlicesEqual(next, user.ManagedTeams) {
+				return changed
+			}
+			user.ManagedTeams = next
+			changed = true
+		}
+		return changed
 	})
 }
 
 func (s *identityService) moveTeamUsersToUnassigned(ctx context.Context, tx repo.Tx, department, team, unassignedTeam string) error {
-	if err := s.rewriteUsersByOrg(ctx, tx, department, team, func(user *domain.User) {
-		user.Department = domain.DepartmentUnassigned
-		user.Team = unassignedTeam
-		user.ManagedTeams = removeStringValue(user.ManagedTeams, team)
-	}); err != nil {
-		return err
-	}
-	return s.rewriteAllUserManagedScopes(ctx, tx, func(user *domain.User) bool {
-		next := removeStringValue(user.ManagedTeams, team)
-		if stringSlicesEqual(next, user.ManagedTeams) {
-			return false
+	return s.rewriteAllUsers(ctx, tx, func(user *domain.User) bool {
+		changed := false
+		sourceDepartmentScoped := userReferencesDepartmentName(user, department)
+		if strings.TrimSpace(string(user.Department)) == department && strings.TrimSpace(user.Team) == team {
+			user.Department = domain.DepartmentUnassigned
+			user.Team = unassignedTeam
+			changed = true
 		}
-		user.ManagedTeams = next
-		return true
+		if sourceDepartmentScoped {
+			next := removeStringValue(user.ManagedTeams, team)
+			if stringSlicesEqual(next, user.ManagedTeams) {
+				return changed
+			}
+			user.ManagedTeams = next
+			changed = true
+		}
+		return changed
 	})
 }
 
@@ -386,49 +651,31 @@ func (s *identityService) teamNamesForDepartment(ctx context.Context, department
 	return out, nil
 }
 
-func (s *identityService) rewriteUsersByOrg(ctx context.Context, tx repo.Tx, department, team string, mutate func(*domain.User)) error {
-	users, err := s.listUsersByOrgSnapshot(ctx, department, team)
-	if err != nil {
-		return err
+func userReferencesDepartmentName(user *domain.User, department string) bool {
+	if user == nil {
+		return false
 	}
-	for _, user := range users {
-		if user == nil {
-			continue
-		}
-		mutate(user)
-		user.UpdatedAt = time.Now().UTC()
-		if err := s.userRepo.Update(ctx, tx, user); err != nil {
-			return err
+	department = strings.TrimSpace(department)
+	if department == "" {
+		return false
+	}
+	if strings.TrimSpace(string(user.Department)) == department {
+		return true
+	}
+	for _, managed := range user.ManagedDepartments {
+		if strings.TrimSpace(managed) == department {
+			return true
 		}
 	}
-	return nil
+	return false
 }
 
-func (s *identityService) listUsersByOrgSnapshot(ctx context.Context, department, team string) ([]*domain.User, error) {
-	dept := domain.Department(department)
-	const pageSize = 500
-	out := make([]*domain.User, 0)
-	for page := 1; ; page++ {
-		users, _, err := s.userRepo.List(ctx, repo.UserListFilter{
-			Department: &dept,
-			Team:       team,
-			Page:       page,
-			PageSize:   pageSize,
-		})
-		if err != nil {
-			return nil, err
-		}
-		if len(users) == 0 {
-			return out, nil
-		}
-		out = append(out, users...)
-		if len(users) < pageSize {
-			return out, nil
-		}
-	}
-}
-
-func (s *identityService) rewriteAllUserManagedScopes(ctx context.Context, tx repo.Tx, mutate func(*domain.User) bool) error {
+// rewriteAllUsers snapshots the full user table once and rewrites only the
+// rows the mutate callback reports as changed. Org writes previously ran two
+// passes (org members, then managed scopes) which updated the same row twice
+// inside a single transaction; one combined pass keeps every row's update
+// atomic and halves the transaction's write volume.
+func (s *identityService) rewriteAllUsers(ctx context.Context, tx repo.Tx, mutate func(*domain.User) bool) error {
 	const pageSize = 500
 	allUsers := make([]*domain.User, 0)
 	for page := 1; ; page++ {
@@ -543,7 +790,34 @@ func (s *identityService) syncOrgMasterData(ctx context.Context) *domain.AppErro
 			}
 		}
 
-		for _, name := range s.seedOrgDepartmentNames() {
+		// First-time initialization seeds the full configured baseline. Once
+		// org master holds any department, startup sync stops re-creating
+		// rows from static seeds (which used to resurrect renamed or retired
+		// legacy departments/teams on every restart) and only guarantees the
+		// system unassigned bucket plus org references required by configured
+		// accounts.
+		var seedDepartmentNames []string
+		var seedDepartmentTeams map[string][]string
+		if len(departmentsByName) > 0 {
+			seedDepartmentNames, seedDepartmentTeams = s.requiredOrgSeedReferences()
+		} else {
+			// First-time initialization: seed the configured layout minus
+			// compatibility entries, then union with the references required
+			// by configured accounts so a config that intentionally places an
+			// account in a retired department still boots.
+			seedDepartmentNames, seedDepartmentTeams = filterCompatibilityOrgSeeds(s.seedOrgDepartmentNames(), s.authSettings.DepartmentTeams)
+			requiredNames, requiredTeams := s.requiredOrgSeedReferences()
+			for _, name := range requiredNames {
+				seedDepartmentNames = appendUniqueString(seedDepartmentNames, name)
+			}
+			for department, teams := range requiredTeams {
+				for _, team := range teams {
+					seedDepartmentTeams[department] = appendUniqueString(seedDepartmentTeams[department], team)
+				}
+			}
+		}
+
+		for _, name := range seedDepartmentNames {
 			if _, ok := departmentsByName[name]; ok {
 				continue
 			}
@@ -556,7 +830,7 @@ func (s *identityService) syncOrgMasterData(ctx context.Context) *domain.AppErro
 			departmentsByName[name] = item
 		}
 
-		for departmentName, teams := range s.authSettings.DepartmentTeams {
+		for departmentName, teams := range seedDepartmentTeams {
 			departmentName = strings.TrimSpace(departmentName)
 			if departmentName == "" {
 				continue
@@ -589,6 +863,123 @@ func (s *identityService) syncOrgMasterData(ctx context.Context) *domain.AppErro
 		return infraError("sync org master data", err)
 	}
 	return s.refreshRuntimeOrgCatalog(ctx)
+}
+
+// requiredOrgSeedReferences returns the minimum org rows startup sync must
+// guarantee on an already-initialized installation: the system unassigned
+// bucket and any department/team referenced by configured super admins or
+// configured assignments (so config-driven account upsert cannot fail).
+func (s *identityService) requiredOrgSeedReferences() ([]string, map[string][]string) {
+	departments := []string{string(domain.DepartmentUnassigned)}
+	seen := map[string]struct{}{string(domain.DepartmentUnassigned): {}}
+	poolTeams := make([]string, 0, 1)
+	for _, team := range s.authSettings.DepartmentTeams[string(domain.DepartmentUnassigned)] {
+		if trimmed := strings.TrimSpace(team); trimmed != "" {
+			poolTeams = appendUniqueString(poolTeams, trimmed)
+		}
+	}
+	if len(poolTeams) == 0 {
+		poolTeams = []string{"未分配池"}
+	}
+	teams := map[string][]string{string(domain.DepartmentUnassigned): poolTeams}
+	addReference := func(department domain.Department, team string) {
+		name := strings.TrimSpace(string(department))
+		if name == "" {
+			return
+		}
+		if _, ok := seen[name]; !ok {
+			seen[name] = struct{}{}
+			departments = append(departments, name)
+		}
+		if trimmed := strings.TrimSpace(team); trimmed != "" {
+			teams[name] = appendUniqueString(teams[name], trimmed)
+		}
+	}
+	for _, entry := range s.authSettings.SuperAdmins {
+		addReference(entry.Department, entry.Team)
+	}
+	for _, entry := range s.authSettings.ConfiguredAssignments {
+		addReference(entry.Department, entry.Team)
+	}
+	return departments, teams
+}
+
+// filterCompatibilityOrgSeeds strips retired departments and retired team
+// names from a first-init seeding plan so a fresh installation never starts
+// out with legacy dirty data, even when the runtime auth settings still list
+// those entries for validation compatibility.
+func filterCompatibilityOrgSeeds(departmentNames []string, departmentTeams map[string][]string) ([]string, map[string][]string) {
+	retiredDepartments := map[string]struct{}{}
+	for _, department := range domain.CompatibilityDepartments() {
+		retiredDepartments[strings.TrimSpace(string(department))] = struct{}{}
+	}
+	retiredTeams := map[string]map[string]struct{}{}
+	for department, teams := range domain.CompatibilityOrgDepartmentTeams() {
+		set := make(map[string]struct{}, len(teams))
+		for _, team := range teams {
+			set[strings.TrimSpace(team)] = struct{}{}
+		}
+		retiredTeams[strings.TrimSpace(department)] = set
+	}
+
+	filteredNames := make([]string, 0, len(departmentNames))
+	for _, name := range departmentNames {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		if _, retired := retiredDepartments[name]; retired {
+			continue
+		}
+		filteredNames = append(filteredNames, name)
+	}
+
+	filteredTeams := make(map[string][]string, len(departmentTeams))
+	for department, teams := range departmentTeams {
+		department = strings.TrimSpace(department)
+		if _, retired := retiredDepartments[department]; retired {
+			continue
+		}
+		retiredSet := retiredTeams[department]
+		kept := make([]string, 0, len(teams))
+		for _, team := range teams {
+			team = strings.TrimSpace(team)
+			if team == "" {
+				continue
+			}
+			if retiredSet != nil {
+				if _, retired := retiredSet[team]; retired {
+					continue
+				}
+			}
+			kept = appendUniqueString(kept, team)
+		}
+		if len(kept) > 0 {
+			filteredTeams[department] = kept
+		}
+	}
+	return filteredNames, filteredTeams
+}
+
+func appendUniqueString(values []string, value string) []string {
+	for _, existing := range values {
+		if existing == value {
+			return values
+		}
+	}
+	return append(values, value)
+}
+
+// refreshRuntimeOrgCatalogLogged refreshes the runtime org catalog after an
+// org-master write and logs (instead of silently discarding) any failure so a
+// stale runtime catalog is observable.
+func (s *identityService) refreshRuntimeOrgCatalogLogged(ctx context.Context, op string) {
+	if appErr := s.refreshRuntimeOrgCatalog(ctx); appErr != nil {
+		s.logger.Warn("refresh runtime org catalog failed; runtime catalog may be stale until the next org write",
+			zap.String("op", op),
+			zap.Error(appErr),
+		)
+	}
 }
 
 func (s *identityService) refreshRuntimeOrgCatalog(ctx context.Context) *domain.AppError {
@@ -625,6 +1016,10 @@ func (s *identityService) buildOrgOptions(ctx context.Context, includeDisabled b
 	if err != nil {
 		return nil, infraError("list org teams", err)
 	}
+	memberCounts, appErr := s.collectOrgMemberCounts(ctx)
+	if appErr != nil {
+		return nil, appErr
+	}
 
 	teamsByDepartmentID := map[int64][]domain.OrgTeamOption{}
 	teamsByDepartmentName := map[string][]string{}
@@ -633,9 +1028,10 @@ func (s *identityService) buildOrgOptions(ctx context.Context, includeDisabled b
 			continue
 		}
 		teamsByDepartmentID[team.DepartmentID] = append(teamsByDepartmentID[team.DepartmentID], domain.OrgTeamOption{
-			ID:      team.ID,
-			Name:    team.Name,
-			Enabled: team.Enabled,
+			ID:          team.ID,
+			Name:        team.Name,
+			Enabled:     team.Enabled,
+			MemberCount: memberCounts.teams[orgMemberCountKey(team.Department, team.Name)],
 		})
 		teamsByDepartmentName[team.Department] = append(teamsByDepartmentName[team.Department], team.Name)
 	}
@@ -655,15 +1051,62 @@ func (s *identityService) buildOrgOptions(ctx context.Context, includeDisabled b
 		sort.Slice(teamItems, func(i, j int) bool { return teamItems[i].ID < teamItems[j].ID })
 		teamNames := append([]string{}, teamsByDepartmentName[department.Name]...)
 		options.Departments = append(options.Departments, domain.DepartmentOption{
-			ID:        department.ID,
-			Name:      department.Name,
-			Teams:     teamNames,
-			TeamItems: teamItems,
-			Enabled:   department.Enabled,
+			ID:          department.ID,
+			Name:        department.Name,
+			Teams:       teamNames,
+			TeamItems:   teamItems,
+			Enabled:     department.Enabled,
+			MemberCount: memberCounts.departments[strings.TrimSpace(department.Name)],
 		})
 		options.TeamsByDepartment[department.Name] = teamNames
 	}
 	return options, nil
+}
+
+type orgMemberCounts struct {
+	departments map[string]int
+	teams       map[string]int
+}
+
+func orgMemberCountKey(department, team string) string {
+	return strings.TrimSpace(department) + "\x00" + strings.TrimSpace(team)
+}
+
+// collectOrgMemberCounts aggregates user membership per department and per
+// department-scoped team in one pass over the user table, so org options can
+// expose member_count badges (and make zero-member legacy orgs obvious).
+func (s *identityService) collectOrgMemberCounts(ctx context.Context) (orgMemberCounts, *domain.AppError) {
+	counts := orgMemberCounts{
+		departments: map[string]int{},
+		teams:       map[string]int{},
+	}
+	const pageSize = 500
+	for page := 1; ; page++ {
+		users, _, err := s.userRepo.List(ctx, repo.UserListFilter{
+			Page:     page,
+			PageSize: pageSize,
+		})
+		if err != nil {
+			return counts, infraError("list users for org member counts", err)
+		}
+		for _, user := range users {
+			if user == nil {
+				continue
+			}
+			department := strings.TrimSpace(string(user.Department))
+			if department == "" {
+				continue
+			}
+			counts.departments[department]++
+			if team := strings.TrimSpace(user.Team); team != "" {
+				counts.teams[orgMemberCountKey(department, team)]++
+			}
+		}
+		if len(users) < pageSize {
+			break
+		}
+	}
+	return counts, nil
 }
 
 func (s *identityService) buildConfigBackedOrgOptions(ctx context.Context) *domain.OrgOptions {

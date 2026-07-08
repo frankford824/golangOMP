@@ -1,10 +1,10 @@
-# V1 API 速查表(328 path · 一行一条)
+# V1 API 速查表(330 path · 一行一条)
 
 > Revision: V1.3-A2 i_id-first task/ERP/search integration (2026-04-27)
 > Source: docs/api/openapi.yaml (post V1.3-A2)
 
 > 本表一行对应一个 `/v1` path；同一路径多 method 合并到 `Methods` 列。
-> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 328 个 `/v1` path。
+> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 330 个 `/v1` path。
 > 新前端只接 canonical 路径；compatibility/deprecated 路径仅作迁移兜底。
 
 | Methods | Path | Summary | RBAC | family doc |
@@ -40,9 +40,11 @@
 | POST | `/v1/users/{id}/deactivate` | Deactivate a workflow user | POST:Admin, SuperAdmin, HRAdmin, DepartmentAdmin, TeamLead | [V1_API_USERS.md](V1_API_USERS.md) |
 | GET | `/v1/org/options` | Get organization options | GET:Admin, SuperAdmin, HRAdmin, DepartmentAdmin, OrgAdmin, RoleAdmin | [V1_API_ORG.md](V1_API_ORG.md) |
 | POST | `/v1/org/departments` | Create organization department | POST:HRAdmin, SuperAdmin | [V1_API_ORG.md](V1_API_ORG.md) |
-| PUT | `/v1/org/departments/{id}` | Update organization department | PUT:HRAdmin, SuperAdmin | [V1_API_ORG.md](V1_API_ORG.md) |
+| PUT, DELETE | `/v1/org/departments/{id}` | Update organization department；Hard-delete organization department | PUT:HRAdmin, SuperAdmin; DELETE:HRAdmin, SuperAdmin | [V1_API_ORG.md](V1_API_ORG.md) |
+| POST | `/v1/org/departments/{id}/merge` | Merge organization department into another department | POST:HRAdmin, SuperAdmin | [V1_API_ORG.md](V1_API_ORG.md) |
 | POST | `/v1/org/teams` | Create organization team | POST:HRAdmin, SuperAdmin | [V1_API_ORG.md](V1_API_ORG.md) |
-| PUT | `/v1/org/teams/{id}` | Update organization team | PUT:HRAdmin, SuperAdmin | [V1_API_ORG.md](V1_API_ORG.md) |
+| PUT, DELETE | `/v1/org/teams/{id}` | Update organization team；Hard-delete organization team | PUT:HRAdmin, SuperAdmin; DELETE:HRAdmin, SuperAdmin | [V1_API_ORG.md](V1_API_ORG.md) |
+| POST | `/v1/org/teams/{id}/merge` | Merge organization team into another team | POST:HRAdmin, SuperAdmin | [V1_API_ORG.md](V1_API_ORG.md) |
 | POST | `/v1/departments/{id}/org-move-requests` | Create an org move request | POST:DepartmentAdmin, HRAdmin, SuperAdmin | [V1_API_ORG.md](V1_API_ORG.md) |
 | GET | `/v1/org-move-requests` | List org move requests | GET:SuperAdmin, HRAdmin, DepartmentAdmin | [V1_API_ORG.md](V1_API_ORG.md) |
 | POST | `/v1/org-move-requests/{id}/approve` | Approve an org move request | POST:SuperAdmin | [V1_API_ORG.md](V1_API_ORG.md) |

@@ -573,6 +573,11 @@ func validateAuthSettings(settings domain.AuthSettings) error {
 	for _, department := range domain.DefaultDepartments() {
 		validDepartments[department] = struct{}{}
 	}
+	// Existing auth settings files may still reference retired departments;
+	// keep accepting them for config load while seeding stays baseline-only.
+	for _, department := range domain.CompatibilityDepartments() {
+		validDepartments[department] = struct{}{}
+	}
 	for _, department := range settings.Departments {
 		if _, ok := validDepartments[department]; !ok {
 			return fmt.Errorf("unknown department %q in auth settings", department)

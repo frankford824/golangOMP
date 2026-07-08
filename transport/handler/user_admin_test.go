@@ -425,6 +425,22 @@ func (s *userAdminServiceStub) UpdateTeam(context.Context, service.UpdateOrgTeam
 	return s.updateTeam, nil
 }
 
+func (s *userAdminServiceStub) MergeDepartment(context.Context, service.MergeOrgDepartmentParams) (*domain.OrgDepartment, *domain.AppError) {
+	return s.updateDepartment, nil
+}
+
+func (s *userAdminServiceStub) MergeTeam(context.Context, service.MergeOrgTeamParams) (*domain.OrgTeam, *domain.AppError) {
+	return s.updateTeam, nil
+}
+
+func (s *userAdminServiceStub) DeleteDepartment(context.Context, int64) *domain.AppError {
+	return nil
+}
+
+func (s *userAdminServiceStub) DeleteTeam(context.Context, int64) *domain.AppError {
+	return nil
+}
+
 func (s *userAdminServiceStub) Register(context.Context, service.RegisterUserParams) (*domain.AuthResult, *domain.AppError) {
 	return nil, nil
 }

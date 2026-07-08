@@ -852,6 +852,9 @@ components:
             $ref: '#/components/schemas/OrgTeamOption'
         enabled:
           type: boolean
+        member_count:
+          type: integer
+          description: Number of users currently assigned to this department (any team, active or disabled accounts). Always emitted so zero-member legacy departments are visible to org-maintenance clients.
     OrgTeamOption:
       type: object
       properties:
@@ -862,6 +865,9 @@ components:
           type: string
         enabled:
           type: boolean
+        member_count:
+          type: integer
+          description: Number of users currently assigned to this team (active or disabled accounts).
     OrgDepartment:
       type: object
       properties:
@@ -941,6 +947,22 @@ components:
         enabled:
           type: boolean
           description: Set to false to stop using the team. Existing assigned users are moved to the system unassigned pool. System unassigned pool team cannot be deleted.
+    MergeOrgDepartmentRequest:
+      type: object
+      required: [target_department_id]
+      properties:
+        target_department_id:
+          type: integer
+          format: int64
+          description: Enabled department that receives every member and managed-department scope of the source department. Must differ from the source department.
+    MergeOrgTeamRequest:
+      type: object
+      required: [target_team_id]
+      properties:
+        target_team_id:
+          type: integer
+          format: int64
+          description: Enabled team (under an enabled department) that receives every member of the source team. Must differ from the source team.
     RegistrationOptions:
       type: object
       properties:
@@ -9077,6 +9099,72 @@ paths:
           description: Permission denied
         '404':
           description: Department not found
+    delete:
+      summary: Hard-delete organization department
+      description: |
+        Permanently removes one disabled, zero-member department together with its (already disabled)
+        child teams from backend org master. This is the governance path for clearing retired legacy
+        records out of the org tree. Enabled departments, departments that still have members, and the
+        system `未分配` department are rejected with 400.
+      tags: [ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [HRAdmin, SuperAdmin]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        '204':
+          description: Department deleted
+        '400':
+          description: Department still enabled, still has members, or is the protected system department
+        '403':
+          description: Permission denied
+        '404':
+          description: Department not found
+  /v1/org/departments/{id}/merge:
+    post:
+      summary: Merge organization department into another department
+      description: |
+        Moves every member (and managed-department scope reference) of the source department into the
+        target department, disables the source department and its teams, then returns the target
+        department. Members whose team does not exist in the target department keep an empty team.
+        The system `未分配` department cannot be merged; the target must be enabled.
+      tags: [ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [HRAdmin, SuperAdmin]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MergeOrgDepartmentRequest'
+      responses:
+        '200':
+          description: Departments merged; returns the target department
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/OrgDepartment'
+        '400':
+          description: Missing/identical target, disabled target, or protected system department
+        '403':
+          description: Permission denied
+        '404':
+          description: Source or target department not found
   /v1/org/teams:
     post:
       summary: Create organization team
@@ -9146,6 +9234,70 @@ paths:
           description: Permission denied
         '404':
           description: Team not found
+    delete:
+      summary: Hard-delete organization team
+      description: |
+        Permanently removes one disabled, zero-member team from backend org master. Enabled teams,
+        teams that still have members, and the system unassigned pool team are rejected with 400.
+      tags: [ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [HRAdmin, SuperAdmin]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        '204':
+          description: Team deleted
+        '400':
+          description: Team still enabled, still has members, or is the protected system team
+        '403':
+          description: Permission denied
+        '404':
+          description: Team not found
+  /v1/org/teams/{id}/merge:
+    post:
+      summary: Merge organization team into another team
+      description: |
+        Moves every member of the source team into the target team (which may belong to a different
+        department), updates managed-team scope references, disables the source team, then returns the
+        target team. The system unassigned pool team cannot be merged; the target team and its
+        department must be enabled.
+      tags: [ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [HRAdmin, SuperAdmin]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MergeOrgTeamRequest'
+      responses:
+        '200':
+          description: Teams merged; returns the target team
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/OrgTeam'
+        '400':
+          description: Missing/identical target, disabled target, or protected system team
+        '403':
+          description: Permission denied
+        '404':
+          description: Source or target team not found
   /v1/auth/login:
     post:
       summary: Login workflow user

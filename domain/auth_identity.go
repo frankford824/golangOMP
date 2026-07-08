@@ -21,6 +21,10 @@ const (
 	DepartmentBakeryWH    Department = "烘焙仓储部"
 )
 
+// DefaultDepartments returns the v1.0 official org baseline only. Legacy
+// compatibility departments (设计部 / 采购部 / 仓储部 / 烘焙仓储部) are intentionally
+// excluded so that org-master seeding can never resurrect retired rows; use
+// CompatibilityDepartments when validating historical config/data inputs.
 func DefaultDepartments() []Department {
 	return []Department{
 		DepartmentHR,
@@ -30,7 +34,15 @@ func DefaultDepartments() []Department {
 		DepartmentOperations,
 		DepartmentCloudWarehouse,
 		DepartmentUnassigned,
-		// Compatibility values.
+	}
+}
+
+// CompatibilityDepartments lists retired department names that may still
+// appear in persisted user rows, historical task snapshots, or existing
+// auth_identity.json files. They are accepted as historical inputs but are
+// never seeded into org master again.
+func CompatibilityDepartments() []Department {
+	return []Department{
 		DepartmentDesign,
 		DepartmentProcurement,
 		DepartmentWarehouse,
@@ -38,15 +50,34 @@ func DefaultDepartments() []Department {
 	}
 }
 
+// DefaultOrgDepartmentTeams returns the v1.0 official baseline team layout.
+// Legacy operations groups (运营一组~运营七组) and compatibility departments are
+// intentionally excluded: they only exist as historical rows in org master
+// and must not be re-created by startup seeding.
 func DefaultOrgDepartmentTeams() map[string][]string {
 	return map[string][]string{
-		string(DepartmentHR):               {"默认组", "人事管理组"},
-		string(DepartmentDesignRD):         {"默认组", "研发默认组"},
-		string(DepartmentCustomizationArt): {"默认组", "定制默认组"},
-		string(DepartmentAudit):            {"普通审核组", "定制美工审核组", "常规审核组", "定制审核组"},
-		string(DepartmentOperations):       {"淘系一组", "淘系二组", "天猫一组", "天猫二组", "拼多多南京组", "拼多多池州组", "运营一组", "运营二组", "运营三组", "运营四组", "运营五组", "运营六组", "运营七组"},
-		string(DepartmentCloudWarehouse):   {"默认组", "云仓默认组"},
+		string(DepartmentHR):               {"人事管理组"},
+		string(DepartmentDesignRD):         {"默认组"},
+		string(DepartmentCustomizationArt): {"默认组"},
+		string(DepartmentAudit):            {"普通审核组", "定制审核组"},
+		string(DepartmentOperations):       {"淘系一组", "淘系二组", "天猫一组", "天猫二组", "拼多多南京组", "拼多多池州组"},
+		string(DepartmentCloudWarehouse):   {"默认组"},
 		string(DepartmentUnassigned):       {"未分配池"},
+	}
+}
+
+// CompatibilityOrgDepartmentTeams lists retired org-team rows (keyed by
+// department name) that may still exist in persisted users, historical task
+// snapshots, or legacy org-master rows. They stay accepted for validation and
+// task owner_team compatibility mapping, but are never seeded again.
+func CompatibilityOrgDepartmentTeams() map[string][]string {
+	return map[string][]string{
+		string(DepartmentHR):               {"默认组"},
+		string(DepartmentDesignRD):         {"研发默认组"},
+		string(DepartmentCustomizationArt): {"定制默认组"},
+		string(DepartmentAudit):            {"定制美工审核组", "常规审核组"},
+		string(DepartmentOperations):       {"运营一组", "运营二组", "运营三组", "运营四组", "运营五组", "运营六组", "运营七组"},
+		string(DepartmentCloudWarehouse):   {"云仓默认组"},
 
 		// Compatibility departments.
 		string(DepartmentDesign):      {"设计组", "定制美工组", "设计审核组"},
@@ -54,6 +85,18 @@ func DefaultOrgDepartmentTeams() map[string][]string {
 		string(DepartmentWarehouse):   {"仓储组"},
 		string(DepartmentBakeryWH):    {"烘焙仓储组"},
 	}
+}
+
+// MergedOrgDepartmentTeamsWithCompatibility returns the baseline layout plus
+// every compatibility entry. Use it wherever historical inputs must still be
+// recognized (runtime validation fallback, task owner_team compat mapping);
+// never use it as a seeding source.
+func MergedOrgDepartmentTeamsWithCompatibility() map[string][]string {
+	merged := DefaultOrgDepartmentTeams()
+	for department, teams := range CompatibilityOrgDepartmentTeams() {
+		merged[department] = append(merged[department], teams...)
+	}
+	return merged
 }
 
 // DefaultDepartmentTeams is kept as the task owner_team compatibility source.
@@ -241,6 +284,10 @@ type DepartmentOption struct {
 	Teams     []string        `json:"teams,omitempty"`
 	TeamItems []OrgTeamOption `json:"team_items,omitempty"`
 	Enabled   bool            `json:"enabled,omitempty"`
+	// MemberCount is the number of users currently assigned to this
+	// department (any team, active or disabled accounts). Always emitted so
+	// zero-member legacy departments are visible to org-maintenance clients.
+	MemberCount int `json:"member_count"`
 }
 
 type RegistrationOptions struct {

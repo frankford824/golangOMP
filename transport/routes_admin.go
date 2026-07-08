@@ -41,8 +41,12 @@ func registerV1AdminRoutes(
 	v1.GET("/org/options", access(v1, http.MethodGet, "/org/options", domain.APIReadinessReadyForFrontend, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleDeptAdmin, domain.RoleOrgAdmin, domain.RoleRoleAdmin), userAdminH.GetOrgOptions)
 	v1.POST("/org/departments", append(legacyRoleConvergedAccess(v1, http.MethodPost, "/org/departments", domain.APIReadinessReadyForFrontend, domain.RoleHRAdmin, domain.RoleSuperAdmin), userAdminH.CreateDepartment)...)
 	v1.PUT("/org/departments/:id", append(legacyRoleConvergedAccess(v1, http.MethodPut, "/org/departments/:id", domain.APIReadinessReadyForFrontend, domain.RoleHRAdmin, domain.RoleSuperAdmin), userAdminH.UpdateDepartment)...)
+	v1.POST("/org/departments/:id/merge", append(legacyRoleConvergedAccess(v1, http.MethodPost, "/org/departments/:id/merge", domain.APIReadinessReadyForFrontend, domain.RoleHRAdmin, domain.RoleSuperAdmin), userAdminH.MergeDepartment)...)
+	v1.DELETE("/org/departments/:id", append(legacyRoleConvergedAccess(v1, http.MethodDelete, "/org/departments/:id", domain.APIReadinessReadyForFrontend, domain.RoleHRAdmin, domain.RoleSuperAdmin), userAdminH.DeleteDepartment)...)
 	v1.POST("/org/teams", append(legacyRoleConvergedAccess(v1, http.MethodPost, "/org/teams", domain.APIReadinessReadyForFrontend, domain.RoleHRAdmin, domain.RoleSuperAdmin), userAdminH.CreateTeam)...)
 	v1.PUT("/org/teams/:id", append(legacyRoleConvergedAccess(v1, http.MethodPut, "/org/teams/:id", domain.APIReadinessReadyForFrontend, domain.RoleHRAdmin, domain.RoleSuperAdmin), userAdminH.UpdateTeam)...)
+	v1.POST("/org/teams/:id/merge", append(legacyRoleConvergedAccess(v1, http.MethodPost, "/org/teams/:id/merge", domain.APIReadinessReadyForFrontend, domain.RoleHRAdmin, domain.RoleSuperAdmin), userAdminH.MergeTeam)...)
+	v1.DELETE("/org/teams/:id", append(legacyRoleConvergedAccess(v1, http.MethodDelete, "/org/teams/:id", domain.APIReadinessReadyForFrontend, domain.RoleHRAdmin, domain.RoleSuperAdmin), userAdminH.DeleteTeam)...)
 	if orgMoveH != nil {
 		v1.POST("/departments/:id/org-move-requests", access(v1, http.MethodPost, "/departments/:id/org-move-requests", domain.APIReadinessReadyForFrontend, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleDeptAdmin, domain.RoleAdmin), orgMoveH.Create)
 		v1.GET("/org-move-requests", access(v1, http.MethodGet, "/org-move-requests", domain.APIReadinessReadyForFrontend, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleDeptAdmin, domain.RoleAdmin), orgMoveH.List)

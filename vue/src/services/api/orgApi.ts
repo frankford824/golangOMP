@@ -8,6 +8,8 @@ export interface OrgDepartmentRecord {
   id: string
   name: string
   enabled?: boolean
+  /** 后端 member_count:该部门当前人数(含停用账号),用于树上人数徽标与治理判断 */
+  memberCount?: number
 }
 
 export interface OrgTeamRecord {
@@ -16,6 +18,8 @@ export interface OrgTeamRecord {
   departmentId: string
   departmentName?: string
   enabled?: boolean
+  /** 后端 member_count:该小组当前人数(含停用账号) */
+  memberCount?: number
 }
 
 export interface OrgOwnershipOptionsParsed {
@@ -30,6 +34,8 @@ export interface OrgOwnershipOptionsParsed {
 export interface FetchOrgOwnershipOptionsOptions {
   signal?: AbortSignal
   includeDisabled?: boolean
+  /** 默认失败时静默返回空列表;置 true 时把网络/解析错误抛给调用方显式提示 */
+  throwOnError?: boolean
 }
 
 function asString(v: unknown): string | undefined {
@@ -37,11 +43,21 @@ function asString(v: unknown): string | undefined {
   return undefined
 }
 
-function recordEntityId(rec: Record<string, unknown>): string | undefined {
-  const v = rec.id ?? rec.department_id ?? rec.team_id
-  if (typeof v === 'number' && Number.isFinite(v)) return String(v)
-  if (typeof v === 'string' && v.trim()) return v.trim()
+function recordEntityId(rec: Record<string, unknown>, keys: string[]): string | undefined {
+  for (const key of keys) {
+    const v = rec[key]
+    if (typeof v === 'number' && Number.isFinite(v)) return String(v)
+    if (typeof v === 'string' && v.trim()) return v.trim()
+  }
   return undefined
+}
+
+function recordDepartmentId(rec: Record<string, unknown>): string | undefined {
+  return recordEntityId(rec, ['id', 'department_id', 'departmentId'])
+}
+
+function recordTeamId(rec: Record<string, unknown>): string | undefined {
+  return recordEntityId(rec, ['id', 'team_id', 'teamId'])
 }
 
 function unwrapCreatedRow(body: unknown): Record<string, unknown> {
@@ -97,7 +113,7 @@ export async function createOrgDepartment(payload: {
     enabled: payload.enabled ?? true,
   })
   const row = unwrapCreatedRow(res.data)
-  const id = recordEntityId(row) ?? ''
+  const id = recordDepartmentId(row) ?? ''
   const name = asString(row.name) ?? payload.name.trim()
   if (!id) throw new Error('创建部门成功但未返回 id')
   return { id, name }
@@ -121,7 +137,7 @@ export async function createOrgTeam(payload: {
     enabled: payload.enabled ?? true,
   })
   const row = unwrapCreatedRow(res.data)
-  const id = recordEntityId(row) ?? ''
+  const id = recordTeamId(row) ?? ''
   const name = asString(row.name) ?? payload.name.trim()
   const did = asString(row.department_id ?? row.departmentId) ?? String(payload.department_id)
   if (!id) throw new Error('创建小组成功但未返回 id')
@@ -154,6 +170,36 @@ export async function updateOrgTeam(
   await http.put(`/v1/org/teams/${id}`, typeof payload === 'boolean' ? { enabled: payload } : payload)
 }
 
+/** POST /v1/org/departments/{id}/merge — 把 source 部门的用户/小组并入 target 后停用 source */
+export async function mergeOrgDepartment(
+  sourceId: string | number,
+  targetDepartmentId: string | number,
+): Promise<void> {
+  await http.post(`/v1/org/departments/${sourceId}/merge`, {
+    target_department_id: Number(targetDepartmentId),
+  })
+}
+
+/** POST /v1/org/teams/{id}/merge — 把 source 小组的用户并入 target 小组后停用 source */
+export async function mergeOrgTeam(
+  sourceId: string | number,
+  targetTeamId: string | number,
+): Promise<void> {
+  await http.post(`/v1/org/teams/${sourceId}/merge`, {
+    target_team_id: Number(targetTeamId),
+  })
+}
+
+/** DELETE /v1/org/departments/{id} — 仅允许删除已停用且无成员的部门(硬删除,含其小组) */
+export async function deleteOrgDepartment(id: string | number): Promise<void> {
+  await http.delete(`/v1/org/departments/${id}`)
+}
+
+/** DELETE /v1/org/teams/{id} — 仅允许删除已停用且无成员的小组(硬删除) */
+export async function deleteOrgTeam(id: string | number): Promise<void> {
+  await http.delete(`/v1/org/teams/${id}`)
+}
+
 export const orgMoveRequestsApi = {
   list: (params?: Record<string, unknown>, signal?: AbortSignal) =>
     http.get('/v1/org-move-requests', { params, signal }),
@@ -184,10 +230,10 @@ export async function fetchOrgOwnershipOptions(
     departmentRecords: [],
     teamRecords: [],
   }
+  const requestOptions: FetchOrgOwnershipOptionsOptions = isAbortSignalLike(signalOrOptions)
+    ? { signal: signalOrOptions }
+    : (signalOrOptions ?? {})
   try {
-    const requestOptions: FetchOrgOwnershipOptionsOptions = isAbortSignalLike(signalOrOptions)
-      ? { signal: signalOrOptions }
-      : (signalOrOptions ?? {})
     const res = await http.get<unknown>('/v1/org/options', {
       signal: requestOptions.signal,
       params: requestOptions.includeDisabled ? { include_disabled: true } : undefined,
@@ -314,13 +360,14 @@ export async function fetchOrgOwnershipOptions(
       for (const d of rawDepts) {
         if (typeof d !== 'object' || !d) continue
         const rec = d as Record<string, unknown>
-        const did = recordEntityId(rec)
+        const did = recordDepartmentId(rec)
         const dname = asString(rec.name ?? rec.label ?? rec.title)
         if (did && dname) {
           departmentRecords.push({
             id: did,
             name: dname,
             enabled: rec.enabled === false ? false : true,
+            memberCount: typeof rec.member_count === 'number' ? rec.member_count : undefined,
           })
         }
         const teams = Array.isArray(rec.team_items) ? rec.team_items : rec.teams
@@ -328,7 +375,7 @@ export async function fetchOrgOwnershipOptions(
         for (const t of teams) {
           if (typeof t !== 'object' || !t) continue
           const tr = t as Record<string, unknown>
-          const tid = recordEntityId(tr)
+          const tid = recordTeamId(tr)
           const tname = asString(tr.name ?? tr.label ?? tr.team ?? tr.value)
           if (!tid || !tname) continue
           teamRecords.push({
@@ -337,13 +384,15 @@ export async function fetchOrgOwnershipOptions(
             departmentId: did,
             departmentName: dname,
             enabled: tr.enabled === false ? false : true,
+            memberCount: typeof tr.member_count === 'number' ? tr.member_count : undefined,
           })
         }
       }
     }
 
     return { departmentOptions, teamOptions, departmentRecords, teamRecords }
-  } catch {
+  } catch (error) {
+    if (requestOptions.throwOnError) throw error
     return empty
   }
 }

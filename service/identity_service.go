@@ -169,6 +169,10 @@ type IdentityService interface {
 	UpdateDepartment(ctx context.Context, p UpdateOrgDepartmentParams) (*domain.OrgDepartment, *domain.AppError)
 	CreateTeam(ctx context.Context, p CreateOrgTeamParams) (*domain.OrgTeam, *domain.AppError)
 	UpdateTeam(ctx context.Context, p UpdateOrgTeamParams) (*domain.OrgTeam, *domain.AppError)
+	MergeDepartment(ctx context.Context, p MergeOrgDepartmentParams) (*domain.OrgDepartment, *domain.AppError)
+	MergeTeam(ctx context.Context, p MergeOrgTeamParams) (*domain.OrgTeam, *domain.AppError)
+	DeleteDepartment(ctx context.Context, id int64) *domain.AppError
+	DeleteTeam(ctx context.Context, id int64) *domain.AppError
 	Register(ctx context.Context, p RegisterUserParams) (*domain.AuthResult, *domain.AppError)
 	RegisterAssetWorkbenchUser(ctx context.Context, p RegisterAssetWorkbenchUserParams) (*domain.AuthResult, *domain.AppError)
 	Login(ctx context.Context, p LoginParams) (*domain.AuthResult, *domain.AppError)
@@ -3262,8 +3266,11 @@ func normalizeUsername(raw string) string {
 // baseline; this Go fallback is not served as production data.
 func defaultAuthSettings() domain.AuthSettings {
 	return domain.AuthSettings{
-		Departments:     domain.DefaultDepartments(),
-		DepartmentTeams: domain.DefaultOrgDepartmentTeams(),
+		// The in-code fallback must keep recognizing retired departments and
+		// teams because persisted users/tasks may still reference them; the
+		// org-master seeding path filters compatibility entries separately.
+		Departments:     append(domain.DefaultDepartments(), domain.CompatibilityDepartments()...),
+		DepartmentTeams: domain.MergedOrgDepartmentTeamsWithCompatibility(),
 		PhoneUnique:     true,
 		DepartmentAdminKeys: map[string][]string{
 			string(domain.DepartmentHR):               {"superAdmin"},

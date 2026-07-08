@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -86,6 +87,14 @@ type createTeamReq struct {
 type updateTeamReq struct {
 	Name    *string `json:"name"`
 	Enabled *bool   `json:"enabled"`
+}
+
+type mergeDepartmentReq struct {
+	TargetDepartmentID int64 `json:"target_department_id"`
+}
+
+type mergeTeamReq struct {
+	TargetTeamID int64 `json:"target_team_id"`
 }
 
 type setUserRolesReq struct {
@@ -518,6 +527,76 @@ func (h *UserAdminHandler) UpdateTeam(c *gin.Context) {
 		return
 	}
 	respondOK(c, item)
+}
+
+func (h *UserAdminHandler) MergeDepartment(c *gin.Context) {
+	id, err := parseID(c)
+	if err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid department id", nil))
+		return
+	}
+	var req mergeDepartmentReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	item, appErr := h.svc.MergeDepartment(c.Request.Context(), service.MergeOrgDepartmentParams{
+		SourceID: id,
+		TargetID: req.TargetDepartmentID,
+	})
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, item)
+}
+
+func (h *UserAdminHandler) MergeTeam(c *gin.Context) {
+	id, err := parseID(c)
+	if err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid team id", nil))
+		return
+	}
+	var req mergeTeamReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	item, appErr := h.svc.MergeTeam(c.Request.Context(), service.MergeOrgTeamParams{
+		SourceID: id,
+		TargetID: req.TargetTeamID,
+	})
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, item)
+}
+
+func (h *UserAdminHandler) DeleteDepartment(c *gin.Context) {
+	id, err := parseID(c)
+	if err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid department id", nil))
+		return
+	}
+	if appErr := h.svc.DeleteDepartment(c.Request.Context(), id); appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+func (h *UserAdminHandler) DeleteTeam(c *gin.Context) {
+	id, err := parseID(c)
+	if err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid team id", nil))
+		return
+	}
+	if appErr := h.svc.DeleteTeam(c.Request.Context(), id); appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 func (h *UserAdminHandler) ListPermissionLogs(c *gin.Context) {

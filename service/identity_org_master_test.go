@@ -237,8 +237,214 @@ func TestIdentityServiceRenameDepartmentWithAssignedUsersUsesSnapshot(t *testing
 	if !containsString(managerAfterRename.ManagedDepartments, "定制中心") || containsString(managerAfterRename.ManagedDepartments, "云仓测试部") {
 		t.Fatalf("manager scopes after rename = %+v, want replaced department scope", managerAfterRename.ManagedDepartments)
 	}
-	if got := countListCallsForDepartment(userRepo.listFilters, "云仓测试部"); got != 1 {
-		t.Fatalf("department-scoped user list calls = %d, want 1 snapshot call", got)
+	if got := countListCallsForDepartment(userRepo.listFilters, "云仓测试部"); got != 0 {
+		t.Fatalf("department-scoped user list calls = %d, want 0 (rename runs a single full-table snapshot pass)", got)
+	}
+}
+
+func TestIdentityServiceMergeDepartmentDoesNotRemoveSameNameManagedTeamOutsideSourceDepartment(t *testing.T) {
+	ConfigureTaskOrgCatalog(domain.AuthSettings{})
+	defer ConfigureTaskOrgCatalog(domain.AuthSettings{})
+
+	userRepo := newIdentityUserRepo()
+	orgRepo := newIdentityOrgRepo()
+	svc := NewIdentityService(userRepo, &identitySessionRepoStub{}, &identityPermissionLogRepoStub{}, identityTxRunner{}, WithOrgRepo(orgRepo))
+
+	if appErr := svc.SyncConfiguredAuth(context.Background()); appErr != nil {
+		t.Fatalf("SyncConfiguredAuth() unexpected error: %+v", appErr)
+	}
+	sourceDept, _ := svc.CreateDepartment(context.Background(), CreateOrgDepartmentParams{Name: "源部门"})
+	targetDept, _ := svc.CreateDepartment(context.Background(), CreateOrgDepartmentParams{Name: "目标部门"})
+	otherDept, _ := svc.CreateDepartment(context.Background(), CreateOrgDepartmentParams{Name: "其他部门"})
+	sourceTeam, _ := svc.CreateTeam(context.Background(), CreateOrgTeamParams{DepartmentID: &sourceDept.ID, Name: "默认组"})
+	if _, appErr := svc.CreateTeam(context.Background(), CreateOrgTeamParams{DepartmentID: &targetDept.ID, Name: "接收组"}); appErr != nil {
+		t.Fatalf("CreateTeam(target) unexpected error: %+v", appErr)
+	}
+	if _, appErr := svc.CreateTeam(context.Background(), CreateOrgTeamParams{DepartmentID: &otherDept.ID, Name: "默认组"}); appErr != nil {
+		t.Fatalf("CreateTeam(other) unexpected error: %+v", appErr)
+	}
+	adminCtx := domain.WithRequestActor(context.Background(), domain.RequestActor{ID: 1, Roles: []domain.Role{domain.RoleAdmin, domain.RoleHRAdmin}})
+	sourceUser, appErr := svc.CreateManagedUser(adminCtx, CreateManagedUserParams{
+		Username:    "merge_dept_source_user",
+		EmployeeNo:  intPtr(2120),
+		DisplayName: "Merge Dept Source User",
+		Department:  domain.Department("源部门"),
+		Team:        "默认组",
+		Mobile:      "13800009920",
+		Password:    "Init12345",
+		Roles:       []domain.Role{domain.RoleOps},
+	})
+	if appErr != nil {
+		t.Fatalf("CreateManagedUser(sourceUser) unexpected error: %+v", appErr)
+	}
+	sourceManager, appErr := svc.CreateManagedUser(adminCtx, CreateManagedUserParams{
+		Username:    "merge_dept_source_manager",
+		EmployeeNo:  intPtr(2121),
+		DisplayName: "Merge Dept Source Manager",
+		Department:  domain.Department("源部门"),
+		Team:        "默认组",
+		Mobile:      "13800009921",
+		Password:    "Init12345",
+		Roles:       []domain.Role{domain.RoleDeptAdmin, domain.RoleTeamLead},
+	})
+	if appErr != nil {
+		t.Fatalf("CreateManagedUser(sourceManager) unexpected error: %+v", appErr)
+	}
+	otherManager, appErr := svc.CreateManagedUser(adminCtx, CreateManagedUserParams{
+		Username:    "merge_dept_other_manager",
+		EmployeeNo:  intPtr(2122),
+		DisplayName: "Merge Dept Other Manager",
+		Department:  domain.Department("其他部门"),
+		Team:        "默认组",
+		Mobile:      "13800009922",
+		Password:    "Init12345",
+		Roles:       []domain.Role{domain.RoleDeptAdmin, domain.RoleTeamLead},
+	})
+	if appErr != nil {
+		t.Fatalf("CreateManagedUser(otherManager) unexpected error: %+v", appErr)
+	}
+	userRepo.users[sourceManager.ID].ManagedDepartments = []string{"源部门"}
+	userRepo.users[sourceManager.ID].ManagedTeams = []string{"默认组"}
+	userRepo.users[otherManager.ID].ManagedDepartments = []string{"其他部门"}
+	userRepo.users[otherManager.ID].ManagedTeams = []string{"默认组"}
+
+	if _, appErr := svc.MergeDepartment(context.Background(), MergeOrgDepartmentParams{SourceID: sourceDept.ID, TargetID: targetDept.ID}); appErr != nil {
+		t.Fatalf("MergeDepartment() unexpected error: %+v", appErr)
+	}
+	moved, _ := svc.GetUser(context.Background(), sourceUser.ID)
+	if moved.Department != domain.Department("目标部门") || moved.Team != "" {
+		t.Fatalf("source user after merge = %+v, want target department and empty team", moved)
+	}
+	sourceManagerAfter, _ := svc.GetUser(context.Background(), sourceManager.ID)
+	if !containsString(sourceManagerAfter.ManagedDepartments, "目标部门") || containsString(sourceManagerAfter.ManagedDepartments, "源部门") {
+		t.Fatalf("source manager departments = %+v, want source replaced with target", sourceManagerAfter.ManagedDepartments)
+	}
+	if containsString(sourceManagerAfter.ManagedTeams, "默认组") {
+		t.Fatalf("source manager teams = %+v, want source-only team removed", sourceManagerAfter.ManagedTeams)
+	}
+	otherManagerAfter, _ := svc.GetUser(context.Background(), otherManager.ID)
+	if otherManagerAfter.Department != domain.Department("其他部门") || !containsString(otherManagerAfter.ManagedTeams, "默认组") {
+		t.Fatalf("other manager after merge = %+v, want unrelated same-name team preserved", otherManagerAfter)
+	}
+	sourceAfter, _ := orgRepo.GetDepartmentByID(context.Background(), sourceDept.ID)
+	if sourceAfter == nil || sourceAfter.Enabled {
+		t.Fatalf("source department after merge = %+v, want disabled", sourceAfter)
+	}
+	sourceTeamAfter, _ := orgRepo.GetTeamByID(context.Background(), sourceTeam.ID)
+	if sourceTeamAfter == nil || sourceTeamAfter.Enabled {
+		t.Fatalf("source team after merge = %+v, want disabled", sourceTeamAfter)
+	}
+}
+
+func TestIdentityServiceMergeTeamDoesNotRewriteSameNameManagedTeamOutsideSourceDepartment(t *testing.T) {
+	ConfigureTaskOrgCatalog(domain.AuthSettings{})
+	defer ConfigureTaskOrgCatalog(domain.AuthSettings{})
+
+	userRepo := newIdentityUserRepo()
+	orgRepo := newIdentityOrgRepo()
+	svc := NewIdentityService(userRepo, &identitySessionRepoStub{}, &identityPermissionLogRepoStub{}, identityTxRunner{}, WithOrgRepo(orgRepo))
+
+	if appErr := svc.SyncConfiguredAuth(context.Background()); appErr != nil {
+		t.Fatalf("SyncConfiguredAuth() unexpected error: %+v", appErr)
+	}
+	sourceDept, _ := svc.CreateDepartment(context.Background(), CreateOrgDepartmentParams{Name: "源小组部门"})
+	targetDept, _ := svc.CreateDepartment(context.Background(), CreateOrgDepartmentParams{Name: "目标小组部门"})
+	otherDept, _ := svc.CreateDepartment(context.Background(), CreateOrgDepartmentParams{Name: "其他小组部门"})
+	sourceTeam, _ := svc.CreateTeam(context.Background(), CreateOrgTeamParams{DepartmentID: &sourceDept.ID, Name: "默认组"})
+	targetTeam, _ := svc.CreateTeam(context.Background(), CreateOrgTeamParams{DepartmentID: &targetDept.ID, Name: "接收组"})
+	if _, appErr := svc.CreateTeam(context.Background(), CreateOrgTeamParams{DepartmentID: &otherDept.ID, Name: "默认组"}); appErr != nil {
+		t.Fatalf("CreateTeam(other) unexpected error: %+v", appErr)
+	}
+	adminCtx := domain.WithRequestActor(context.Background(), domain.RequestActor{ID: 1, Roles: []domain.Role{domain.RoleAdmin, domain.RoleHRAdmin}})
+	sourceLead, appErr := svc.CreateManagedUser(adminCtx, CreateManagedUserParams{
+		Username:    "merge_team_source_lead",
+		EmployeeNo:  intPtr(2130),
+		DisplayName: "Merge Team Source Lead",
+		Department:  domain.Department("源小组部门"),
+		Team:        "默认组",
+		Mobile:      "13800009930",
+		Password:    "Init12345",
+		Roles:       []domain.Role{domain.RoleTeamLead},
+	})
+	if appErr != nil {
+		t.Fatalf("CreateManagedUser(sourceLead) unexpected error: %+v", appErr)
+	}
+	otherLead, appErr := svc.CreateManagedUser(adminCtx, CreateManagedUserParams{
+		Username:    "merge_team_other_lead",
+		EmployeeNo:  intPtr(2131),
+		DisplayName: "Merge Team Other Lead",
+		Department:  domain.Department("其他小组部门"),
+		Team:        "默认组",
+		Mobile:      "13800009931",
+		Password:    "Init12345",
+		Roles:       []domain.Role{domain.RoleTeamLead},
+	})
+	if appErr != nil {
+		t.Fatalf("CreateManagedUser(otherLead) unexpected error: %+v", appErr)
+	}
+	userRepo.users[sourceLead.ID].ManagedTeams = []string{"默认组"}
+	userRepo.users[otherLead.ID].ManagedTeams = []string{"默认组"}
+
+	if _, appErr := svc.MergeTeam(context.Background(), MergeOrgTeamParams{SourceID: sourceTeam.ID, TargetID: targetTeam.ID}); appErr != nil {
+		t.Fatalf("MergeTeam() unexpected error: %+v", appErr)
+	}
+	sourceLeadAfter, _ := svc.GetUser(context.Background(), sourceLead.ID)
+	if sourceLeadAfter.Department != domain.Department("目标小组部门") || sourceLeadAfter.Team != "接收组" {
+		t.Fatalf("source lead after merge = %+v, want target team", sourceLeadAfter)
+	}
+	if !containsString(sourceLeadAfter.ManagedTeams, "接收组") || containsString(sourceLeadAfter.ManagedTeams, "默认组") {
+		t.Fatalf("source lead managed teams = %+v, want source team replaced", sourceLeadAfter.ManagedTeams)
+	}
+	otherLeadAfter, _ := svc.GetUser(context.Background(), otherLead.ID)
+	if otherLeadAfter.Department != domain.Department("其他小组部门") || !containsString(otherLeadAfter.ManagedTeams, "默认组") {
+		t.Fatalf("other lead after merge = %+v, want unrelated same-name team preserved", otherLeadAfter)
+	}
+	sourceTeamAfter, _ := orgRepo.GetTeamByID(context.Background(), sourceTeam.ID)
+	if sourceTeamAfter == nil || sourceTeamAfter.Enabled {
+		t.Fatalf("source team after merge = %+v, want disabled", sourceTeamAfter)
+	}
+}
+
+func TestIdentityServiceDeleteDisabledZeroMemberOrgRows(t *testing.T) {
+	ConfigureTaskOrgCatalog(domain.AuthSettings{})
+	defer ConfigureTaskOrgCatalog(domain.AuthSettings{})
+
+	userRepo := newIdentityUserRepo()
+	orgRepo := newIdentityOrgRepo()
+	svc := NewIdentityService(userRepo, &identitySessionRepoStub{}, &identityPermissionLogRepoStub{}, identityTxRunner{}, WithOrgRepo(orgRepo))
+
+	if appErr := svc.SyncConfiguredAuth(context.Background()); appErr != nil {
+		t.Fatalf("SyncConfiguredAuth() unexpected error: %+v", appErr)
+	}
+	department, _ := svc.CreateDepartment(context.Background(), CreateOrgDepartmentParams{Name: "待清理部门"})
+	team, _ := svc.CreateTeam(context.Background(), CreateOrgTeamParams{DepartmentID: &department.ID, Name: "待清理小组"})
+	if appErr := svc.DeleteTeam(context.Background(), team.ID); appErr == nil {
+		t.Fatal("DeleteTeam(enabled) expected validation error")
+	}
+	disabled := false
+	if _, appErr := svc.UpdateTeam(context.Background(), UpdateOrgTeamParams{ID: team.ID, Enabled: &disabled}); appErr != nil {
+		t.Fatalf("UpdateTeam(disable) unexpected error: %+v", appErr)
+	}
+	if appErr := svc.DeleteTeam(context.Background(), team.ID); appErr != nil {
+		t.Fatalf("DeleteTeam(disabled empty) unexpected error: %+v", appErr)
+	}
+	if got, _ := orgRepo.GetTeamByID(context.Background(), team.ID); got != nil {
+		t.Fatalf("team after delete = %+v, want nil", got)
+	}
+
+	departmentWithChildren, _ := svc.CreateDepartment(context.Background(), CreateOrgDepartmentParams{Name: "待清理部门二"})
+	childTeam, _ := svc.CreateTeam(context.Background(), CreateOrgTeamParams{DepartmentID: &departmentWithChildren.ID, Name: "待级联小组"})
+	if _, appErr := svc.UpdateDepartment(context.Background(), UpdateOrgDepartmentParams{ID: departmentWithChildren.ID, Enabled: &disabled}); appErr != nil {
+		t.Fatalf("UpdateDepartment(disable) unexpected error: %+v", appErr)
+	}
+	if appErr := svc.DeleteDepartment(context.Background(), departmentWithChildren.ID); appErr != nil {
+		t.Fatalf("DeleteDepartment(disabled empty) unexpected error: %+v", appErr)
+	}
+	if got, _ := orgRepo.GetDepartmentByID(context.Background(), departmentWithChildren.ID); got != nil {
+		t.Fatalf("department after delete = %+v, want nil", got)
+	}
+	if got, _ := orgRepo.GetTeamByID(context.Background(), childTeam.ID); got != nil {
+		t.Fatalf("child team after department delete = %+v, want nil", got)
 	}
 }
 
@@ -440,6 +646,20 @@ func (r *identityOrgRepo) GetTeamByName(_ context.Context, name string) (*domain
 	return nil, nil
 }
 
+func (r *identityOrgRepo) GetTeamByDepartmentAndName(_ context.Context, departmentID int64, name string) (*domain.OrgTeam, error) {
+	name = strings.TrimSpace(name)
+	for _, item := range r.teams {
+		if item != nil && item.DepartmentID == departmentID && item.Name == name {
+			copyItem := *item
+			if department := r.departments[item.DepartmentID]; department != nil {
+				copyItem.Department = department.Name
+			}
+			return &copyItem, nil
+		}
+	}
+	return nil, nil
+}
+
 func (r *identityOrgRepo) CreateDepartment(_ context.Context, _ repo.Tx, department *domain.OrgDepartment) (int64, error) {
 	id := r.nextDepartmentID
 	r.nextDepartmentID++
@@ -488,6 +708,25 @@ func (r *identityOrgRepo) UpdateTeam(_ context.Context, _ repo.Tx, team *domain.
 		current.Name = strings.TrimSpace(team.Name)
 		current.Enabled = team.Enabled
 		current.UpdatedAt = time.Now().UTC()
+	}
+	return nil
+}
+
+func (r *identityOrgRepo) DeleteDepartment(_ context.Context, _ repo.Tx, id int64) error {
+	delete(r.departments, id)
+	return nil
+}
+
+func (r *identityOrgRepo) DeleteTeam(_ context.Context, _ repo.Tx, id int64) error {
+	delete(r.teams, id)
+	return nil
+}
+
+func (r *identityOrgRepo) DeleteTeamsByDepartment(_ context.Context, _ repo.Tx, departmentID int64) error {
+	for id, team := range r.teams {
+		if team != nil && team.DepartmentID == departmentID {
+			delete(r.teams, id)
+		}
 	}
 	return nil
 }
