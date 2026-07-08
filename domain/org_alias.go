@@ -14,6 +14,10 @@ var orgDepartmentAliasGroups = map[string][]string{
 		string(DepartmentWarehouse),
 		string(DepartmentBakeryWH),
 	},
+	string(DepartmentCustomizationArt): {
+		string(DepartmentCustomizationArt),
+		"定制中心",
+	},
 }
 
 var orgDepartmentAliasIndex = buildOrgAliasIndex(orgDepartmentAliasGroups)

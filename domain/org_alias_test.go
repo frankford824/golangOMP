@@ -9,6 +9,9 @@ func TestOrgDepartmentAliasesMatchCurrentAndHistoricalNames(t *testing.T) {
 	if !OrgDepartmentsEquivalent(string(DepartmentProcurement), string(DepartmentCloudWarehouse)) {
 		t.Fatal("采购部 should match 云仓部")
 	}
+	if !OrgDepartmentsEquivalent("定制中心", string(DepartmentCustomizationArt)) {
+		t.Fatal("定制中心 should match 定制美工部")
+	}
 	if OrgDepartmentsEquivalent(string(DepartmentAudit), string(DepartmentOperations)) {
 		t.Fatal("审核部 should not match 运营部")
 	}

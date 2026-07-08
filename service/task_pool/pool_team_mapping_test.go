@@ -53,3 +53,19 @@ func TestRenamedDesignDepartmentMatchesDesignPoolCode(t *testing.T) {
 		t.Fatalf("matchedTeam() = %q, want 默认组", got)
 	}
 }
+
+func TestRenamedCustomizationDepartmentMatchesCustomizationPoolCode(t *testing.T) {
+	actor := domain.RequestActor{
+		ID:         201,
+		Department: "定制中心",
+		Team:       "默认组",
+		Roles:      []domain.Role{domain.RoleCustomizationOperator},
+	}
+
+	if !actorMatchesPool(actor, domain.TeamCustomizationArt) {
+		t.Fatal("actorMatchesPool() = false, want true for 定制中心/默认组 -> customization_art")
+	}
+	if got := matchedTeam(actor, domain.TeamCustomizationArt); got != "默认组" {
+		t.Fatalf("matchedTeam() = %q, want 默认组", got)
+	}
+}
