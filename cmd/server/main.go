@@ -770,26 +770,29 @@ func startExternalAssetRefresh(ctx context.Context, svc *externalassets.Service,
 	}
 	go func() {
 		interval := svc.SyncInterval()
+		fullSyncInterval := svc.FullSyncInterval()
+		var lastFullSync time.Time
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
-		logger.Info("external asset refresh worker started", zap.Duration("interval", interval))
+		logger.Info("external asset refresh worker started", zap.Duration("interval", interval), zap.Duration("full_sync_interval", fullSyncInterval))
 		runRefresh := func() {
 			refreshCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 			defer cancel()
-			if svc.LegacyIndexRefreshReady() {
-				if svc.FullSyncReady() {
-					full, err := svc.SyncFullIndex(refreshCtx)
-					if err != nil {
-						logger.Warn("external full index refresh finished with error", zap.Error(err))
-					}
-					if full != nil && (len(full.Mounts) > 0 || full.ScannedCount > 0 || full.UpsertedCount > 0) {
-						logger.Info("external full index refresh finished",
-							zap.Int("mounts", len(full.Mounts)),
-							zap.Int("scanned", full.ScannedCount),
-							zap.Int("upserted", full.UpsertedCount),
-						)
-					}
+			if svc.FullSyncReady() && (lastFullSync.IsZero() || time.Since(lastFullSync) >= fullSyncInterval) {
+				lastFullSync = time.Now()
+				full, err := svc.SyncFullIndex(refreshCtx)
+				if err != nil {
+					logger.Warn("external full index refresh finished with error", zap.Error(err))
 				}
+				if full != nil && (len(full.Mounts) > 0 || full.ScannedCount > 0 || full.UpsertedCount > 0) {
+					logger.Info("external full index refresh finished",
+						zap.Int("mounts", len(full.Mounts)),
+						zap.Int("scanned", full.ScannedCount),
+						zap.Int("upserted", full.UpsertedCount),
+					)
+				}
+			}
+			if svc.LegacyIndexRefreshReady() {
 				keywords := []string{"jpg", "jpeg", "png", "webp", "psd", "psb", "ai", "pdf", "tif", "tiff", "2026", "2025"}
 				seen := map[string]struct{}{}
 				for _, keyword := range keywords {

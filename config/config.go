@@ -138,6 +138,8 @@ type ExternalAssetsConfig struct {
 	SyncInterval        time.Duration
 	LinkRefreshInterval time.Duration
 	FullSyncEnabled     bool
+	FullSyncInterval    time.Duration
+	FullSyncMounts      string
 	FullSyncPageSize    int
 	FullSyncMaxDepth    int
 	FullSyncMaxFiles    int
@@ -362,6 +364,8 @@ func Load() (*Config, error) {
 			SyncInterval:        mustParseDuration(getEnv("EXTERNAL_ASSETS_SYNC_INTERVAL", "1h")),
 			LinkRefreshInterval: mustParseDuration(getEnv("EXTERNAL_ASSETS_LINK_REFRESH_INTERVAL", "1h")),
 			FullSyncEnabled:     mustParseBool(getEnv("EXTERNAL_ASSETS_FULL_SYNC_ENABLED", "false")),
+			FullSyncInterval:    mustParseDuration(getEnv("EXTERNAL_ASSETS_FULL_SYNC_INTERVAL", "")),
+			FullSyncMounts:      getEnv("EXTERNAL_ASSETS_FULL_SYNC_MOUNTS", ""),
 			FullSyncPageSize:    mustParseInt(getEnv("EXTERNAL_ASSETS_FULL_SYNC_PAGE_SIZE", "100")),
 			FullSyncMaxDepth:    mustParseInt(getEnv("EXTERNAL_ASSETS_FULL_SYNC_MAX_DEPTH", "16")),
 			FullSyncMaxFiles:    mustParseInt(getEnv("EXTERNAL_ASSETS_FULL_SYNC_MAX_FILES_PER_MOUNT", "20000")),

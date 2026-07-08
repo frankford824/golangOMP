@@ -41,6 +41,8 @@ type Config struct {
 	SyncInterval        time.Duration
 	LinkRefreshInterval time.Duration
 	FullSyncEnabled     bool
+	FullSyncInterval    time.Duration
+	FullSyncMounts      []string
 	FullSyncPageSize    int
 	FullSyncMaxDepth    int
 	FullSyncMaxFiles    int
@@ -103,6 +105,8 @@ func ConfigFromApp(cfg config.ExternalAssetsConfig) Config {
 		SyncInterval:        cfg.SyncInterval,
 		LinkRefreshInterval: cfg.LinkRefreshInterval,
 		FullSyncEnabled:     cfg.FullSyncEnabled,
+		FullSyncInterval:    cfg.FullSyncInterval,
+		FullSyncMounts:      ParseMountPaths(cfg.FullSyncMounts),
 		FullSyncPageSize:    cfg.FullSyncPageSize,
 		FullSyncMaxDepth:    cfg.FullSyncMaxDepth,
 		FullSyncMaxFiles:    cfg.FullSyncMaxFiles,
@@ -187,6 +191,16 @@ func (s *Service) SyncInterval() time.Duration {
 	return s.cfg.SyncInterval
 }
 
+func (s *Service) FullSyncInterval() time.Duration {
+	if s == nil {
+		return time.Hour
+	}
+	if s.cfg.FullSyncInterval > 0 {
+		return s.cfg.FullSyncInterval
+	}
+	return s.SyncInterval()
+}
+
 func (s *Service) PrepareInterval() time.Duration {
 	if s == nil || s.cfg.PrepareInterval <= 0 {
 		return 30 * time.Second
@@ -229,6 +243,23 @@ func ParseMounts(raw string) []MountConfig {
 		out = append(out, MountConfig{Path: mount, Kind: kind, Driver: driver})
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].Path < out[j].Path })
+	return out
+}
+
+func ParseMountPaths(raw string) []string {
+	var out []string
+	seen := map[string]struct{}{}
+	for _, part := range strings.Split(raw, ",") {
+		mount := cleanAListPath(part)
+		if mount == "" {
+			continue
+		}
+		if _, ok := seen[mount]; ok {
+			continue
+		}
+		seen[mount] = struct{}{}
+		out = append(out, mount)
+	}
 	return out
 }
 
@@ -676,8 +707,12 @@ func (s *Service) SyncFullIndex(ctx context.Context) (*FullSyncResult, error) {
 	if s.alist == nil || !s.alist.Enabled() {
 		return result, fmt.Errorf("alist client is required for full external asset sync")
 	}
+	mounts := s.fullSyncMountConfigs()
+	if len(mounts) == 0 {
+		return result, fmt.Errorf("no configured external asset full sync mounts matched filter")
+	}
 	var firstErr error
-	for _, mount := range s.cfg.Mounts {
+	for _, mount := range mounts {
 		mountResult, err := s.syncFullMount(ctx, mount)
 		result.Mounts = append(result.Mounts, mountResult)
 		result.ScannedCount += mountResult.ScannedCount
@@ -687,6 +722,29 @@ func (s *Service) SyncFullIndex(ctx context.Context) (*FullSyncResult, error) {
 		}
 	}
 	return result, firstErr
+}
+
+func (s *Service) fullSyncMountConfigs() []MountConfig {
+	if s == nil {
+		return nil
+	}
+	if len(s.cfg.FullSyncMounts) == 0 {
+		return s.cfg.Mounts
+	}
+	allowed := map[string]struct{}{}
+	for _, mount := range s.cfg.FullSyncMounts {
+		mount = cleanAListPath(mount)
+		if mount != "" {
+			allowed[mount] = struct{}{}
+		}
+	}
+	out := make([]MountConfig, 0, len(s.cfg.Mounts))
+	for _, mount := range s.cfg.Mounts {
+		if _, ok := allowed[mount.Path]; ok {
+			out = append(out, mount)
+		}
+	}
+	return out
 }
 
 type fullSyncQueueItem struct {
