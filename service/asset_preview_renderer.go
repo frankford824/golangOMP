@@ -113,8 +113,12 @@ func shouldReadFirstRenderableFrame(filename, mimeType string) bool {
 		mimeType = strings.TrimSpace(mimeType[:idx])
 	}
 	switch ext {
-	case ".psd", ".psb", ".pdf", ".ai":
+	case ".psd", ".psb", ".pdf", ".ai", ".tiff":
 		return true
 	}
-	return strings.Contains(mimeType, "photoshop") || mimeType == "application/pdf" || strings.Contains(mimeType, "illustrator")
+	return strings.Contains(mimeType, "photoshop") ||
+		mimeType == "application/pdf" ||
+		strings.Contains(mimeType, "illustrator") ||
+		mimeType == "image/tiff" ||
+		mimeType == "image/x-tiff"
 }
