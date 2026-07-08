@@ -27,6 +27,11 @@ export interface OrgOwnershipOptionsParsed {
   teamRecords: OrgTeamRecord[]
 }
 
+export interface FetchOrgOwnershipOptionsOptions {
+  signal?: AbortSignal
+  includeDisabled?: boolean
+}
+
 function asString(v: unknown): string | undefined {
   if (typeof v === 'string' && v.trim() !== '') return v.trim()
   return undefined
@@ -43,6 +48,10 @@ function unwrapCreatedRow(body: unknown): Record<string, unknown> {
   const root = (body && typeof body === 'object' ? body : {}) as Record<string, unknown>
   const inner = (root.data && typeof root.data === 'object' ? root.data : root) as Record<string, unknown>
   return inner
+}
+
+function isAbortSignalLike(value: unknown): value is AbortSignal {
+  return !!value && typeof value === 'object' && 'aborted' in value && 'addEventListener' in value
 }
 
 /** 将 GET /v1/org/options 中带 id 的读模型同步为任务侧 / 小组管理用的 Department[]、Group[] */
@@ -166,7 +175,9 @@ export const orgMoveRequestsApi = {
  * GET /v1/org/options
  * 响应结构兼容多种后端形态；失败时返回空列表，不抛错。
  */
-export async function fetchOrgOwnershipOptions(signal?: AbortSignal): Promise<OrgOwnershipOptionsParsed> {
+export async function fetchOrgOwnershipOptions(
+  signalOrOptions?: AbortSignal | FetchOrgOwnershipOptionsOptions,
+): Promise<OrgOwnershipOptionsParsed> {
   const empty: OrgOwnershipOptionsParsed = {
     departmentOptions: [],
     teamOptions: [],
@@ -174,7 +185,13 @@ export async function fetchOrgOwnershipOptions(signal?: AbortSignal): Promise<Or
     teamRecords: [],
   }
   try {
-    const res = await http.get<unknown>('/v1/org/options', { signal })
+    const requestOptions: FetchOrgOwnershipOptionsOptions = isAbortSignalLike(signalOrOptions)
+      ? { signal: signalOrOptions }
+      : (signalOrOptions ?? {})
+    const res = await http.get<unknown>('/v1/org/options', {
+      signal: requestOptions.signal,
+      params: requestOptions.includeDisabled ? { include_disabled: true } : undefined,
+    })
     const body = (res.data as { data?: unknown })?.data ?? res.data
     if (!body || typeof body !== 'object') return empty
     const o = body as Record<string, unknown>
@@ -217,7 +234,7 @@ export async function fetchOrgOwnershipOptions(signal?: AbortSignal): Promise<Or
         if (!d || typeof d !== 'object') continue
         const rec = d as Record<string, unknown>
         const deptName = asString(rec.name ?? rec.label ?? rec.title)
-        const teams = rec.teams
+        const teams = Array.isArray(rec.team_items) ? rec.team_items : rec.teams
         if (!Array.isArray(teams)) continue
         for (const t of teams) {
           if (typeof t === 'string') {
@@ -303,10 +320,10 @@ export async function fetchOrgOwnershipOptions(signal?: AbortSignal): Promise<Or
           departmentRecords.push({
             id: did,
             name: dname,
-            enabled: rec.enabled === false ? false : undefined,
+            enabled: rec.enabled === false ? false : true,
           })
         }
-        const teams = rec.teams
+        const teams = Array.isArray(rec.team_items) ? rec.team_items : rec.teams
         if (!Array.isArray(teams) || !did) continue
         for (const t of teams) {
           if (typeof t !== 'object' || !t) continue
@@ -319,7 +336,7 @@ export async function fetchOrgOwnershipOptions(signal?: AbortSignal): Promise<Or
             name: tname,
             departmentId: did,
             departmentName: dname,
-            enabled: tr.enabled === false ? false : undefined,
+            enabled: tr.enabled === false ? false : true,
           })
         }
       }

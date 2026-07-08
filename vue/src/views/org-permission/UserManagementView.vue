@@ -28,9 +28,12 @@
           <span class="directory-count">共 {{ pagination.total }} 人</span>
         </div>
         <div class="management-layout">
-          <aside class="org-filter-panel" aria-label="组织筛选">
+          <aside class="org-filter-panel" aria-label="组织列表与筛选">
             <div class="org-filter-header">
-              <span>组织列表</span>
+              <div>
+                <span>组织列表</span>
+                <small v-if="canManageOrgMaster">含停用组织</small>
+              </div>
               <button
                 v-if="canManageOrgMaster"
                 type="button"
@@ -44,45 +47,112 @@
               <div class="org-selected-current">
                 <span class="org-selected-label">当前组织</span>
                 <strong>{{ selectedOrgTeam ? selectedOrgTeam.label : selectedOrgDepartment.label }}</strong>
+                <span class="org-selected-path">
+                  {{ selectedOrgTeam ? selectedOrgDepartment.label : '部门' }}
+                  <span
+                    class="org-state-pill"
+                    :class="{ 'org-state-pill--off': selectedOrgTeam ? !selectedOrgTeam.enabled : !selectedOrgDepartment.enabled }"
+                  >
+                    {{ (selectedOrgTeam ? selectedOrgTeam.enabled : selectedOrgDepartment.enabled) ? '启用' : '停用' }}
+                  </span>
+                </span>
               </div>
               <div class="org-selected-buttons">
-                <button type="button" class="org-icon-btn" @click.stop="openCreateTeam(selectedOrgDepartment)">新增小组</button>
+                <button
+                  v-if="selectedOrgDepartment.enabled"
+                  type="button"
+                  class="org-icon-btn"
+                  @click.stop="openCreateTeam(selectedOrgDepartment)"
+                >
+                  新增小组
+                </button>
                 <button type="button" class="org-icon-btn" @click.stop="openEditDepartment(selectedOrgDepartment)">部门改名</button>
-                <button type="button" class="org-icon-btn org-icon-btn--danger" @click.stop="openDeleteDepartment(selectedOrgDepartment)">停用部门</button>
-                <button v-if="selectedOrgTeam" type="button" class="org-icon-btn" @click.stop="openEditTeam(selectedOrgTeam)">小组改名</button>
-                <button v-if="selectedOrgTeam" type="button" class="org-icon-btn org-icon-btn--danger" @click.stop="openDeleteTeam(selectedOrgTeam)">停用小组</button>
-              </div>
-            </div>
-            <button
-              v-if="!isDeptScopedOnly"
-              type="button"
-              class="org-filter-item org-filter-item--all"
-              :class="{ 'is-active': isAllOrgFilterActive }"
-              @click="selectAllOrg"
-            >
-              <span>全部组织</span>
-            </button>
-            <div v-for="dept in visibleOrgTree" :key="dept.value" class="org-filter-dept">
-              <div class="org-filter-row">
                 <button
                   type="button"
-                  class="org-filter-item org-filter-item--dept"
-                  :class="{ 'is-active': isOrgDepartmentActive(dept.value) }"
-                  @click="selectOrgDepartment(dept.value)"
+                  class="org-icon-btn"
+                  :class="{ 'org-icon-btn--danger': selectedOrgDepartment.enabled }"
+                  @click.stop="openDeleteDepartment(selectedOrgDepartment)"
                 >
-                  <span>{{ dept.label }}</span>
+                  {{ selectedOrgDepartment.enabled ? '停用部门' : '恢复部门' }}
+                </button>
+                <button v-if="selectedOrgTeam" type="button" class="org-icon-btn" @click.stop="openEditTeam(selectedOrgTeam)">小组改名</button>
+                <button
+                  v-if="selectedOrgTeam"
+                  type="button"
+                  class="org-icon-btn"
+                  :class="{ 'org-icon-btn--danger': selectedOrgTeam.enabled }"
+                  :disabled="!selectedOrgDepartment.enabled && !selectedOrgTeam.enabled"
+                  :title="!selectedOrgDepartment.enabled && !selectedOrgTeam.enabled ? '请先恢复部门' : undefined"
+                  @click.stop="openDeleteTeam(selectedOrgTeam)"
+                >
+                  {{ selectedOrgTeam.enabled ? '停用小组' : '恢复小组' }}
                 </button>
               </div>
-              <div v-if="dept.teams.length" class="org-filter-teams">
-                <div v-for="team in dept.teams" :key="`${dept.value}-${team.value}`" class="org-filter-row">
-                  <button
-                    type="button"
-                    class="org-filter-item org-filter-item--team"
-                    :class="{ 'is-active': isOrgTeamActive(dept.value, team.value) }"
-                    @click="selectOrgTeam(dept.value, team.value)"
-                  >
-                    <span>{{ team.label }}</span>
-                  </button>
+            </div>
+            <div class="org-tree-scroll">
+              <button
+                v-if="!isDeptScopedOnly"
+                type="button"
+                class="org-filter-item org-filter-item--all"
+                :class="{ 'is-active': isAllOrgFilterActive }"
+                @click="selectAllOrg"
+              >
+                <span class="org-item-name">全部组织</span>
+              </button>
+              <div v-if="enabledOrgTree.length" class="org-tree-section">
+                <div class="org-tree-section-title">启用组织</div>
+                <div v-for="dept in enabledOrgTree" :key="'enabled-' + dept.value" class="org-filter-dept">
+                  <div class="org-filter-row">
+                    <button
+                      type="button"
+                      class="org-filter-item org-filter-item--dept"
+                      :class="{ 'is-active': isOrgDepartmentActive(dept.value) }"
+                      @click="selectOrgDepartment(dept.value)"
+                    >
+                      <span class="org-item-name">{{ dept.label }}</span>
+                    </button>
+                  </div>
+                  <div v-if="dept.teams.length" class="org-filter-teams">
+                    <div v-for="team in dept.teams" :key="`enabled-${dept.value}-${team.value}`" class="org-filter-row">
+                      <button
+                        type="button"
+                        class="org-filter-item org-filter-item--team"
+                        :class="{ 'is-active': isOrgTeamActive(dept.value, team.value) }"
+                        @click="selectOrgTeam(dept.value, team.value)"
+                      >
+                        <span class="org-item-name">{{ team.label }}</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div v-if="disabledOrgTree.length" class="org-tree-section org-tree-section--disabled">
+                <div class="org-tree-section-title">停用组织</div>
+                <div v-for="dept in disabledOrgTree" :key="'disabled-' + dept.value" class="org-filter-dept">
+                  <div class="org-filter-row">
+                    <button
+                      type="button"
+                      class="org-filter-item org-filter-item--dept"
+                      :class="{ 'is-active': isOrgDepartmentActive(dept.value), 'is-disabled': !dept.enabled }"
+                      @click="selectOrgDepartment(dept.value)"
+                    >
+                      <span class="org-item-name">{{ dept.label }}</span>
+                      <span v-if="!dept.enabled" class="org-state-pill org-state-pill--off">停用</span>
+                    </button>
+                  </div>
+                  <div v-if="dept.teams.length" class="org-filter-teams">
+                    <div v-for="team in dept.teams" :key="`disabled-${dept.value}-${team.value}`" class="org-filter-row">
+                      <button
+                        type="button"
+                        class="org-filter-item org-filter-item--team"
+                        :class="{ 'is-active': isOrgTeamActive(dept.value, team.value), 'is-disabled': !team.enabled }"
+                        @click="selectOrgTeam(dept.value, team.value)"
+                      >
+                        <span class="org-item-name">{{ team.label }}</span>
+                        <span v-if="!team.enabled" class="org-state-pill org-state-pill--off">停用</span>
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -409,7 +479,7 @@
             <div v-else class="form-grid form-grid--single">
               <select v-if="orgAction?.mode === 'createTeam'" v-model="orgActionDepartmentId" class="input">
                 <option value="">选择部门</option>
-                <option v-for="dept in orgTree" :key="'org-action-' + dept.value" :value="dept.id">{{ dept.label }}</option>
+                <option v-for="dept in enabledOrgTree" :key="'org-action-' + dept.value" :value="dept.id">{{ dept.label }}</option>
               </select>
               <input v-model.trim="orgActionName" class="input" :placeholder="orgActionNamePlaceholder" />
             </div>
@@ -449,6 +519,7 @@ import {
   updateOrgDepartment,
   updateOrgTeam,
   type OrgDepartmentRecord,
+  type OrgOwnershipOptionsParsed,
   type OrgTeamRecord,
 } from '@/services/api/orgApi'
 import { usePermissionsStore } from '@/stores/permissions'
@@ -466,6 +537,7 @@ import BaseEmptyState from '@/components/base/BaseEmptyState.vue'
 import BaseErrorState from '@/components/base/BaseErrorState.vue'
 import BaseDataTable from '@/components/base/BaseDataTable.vue'
 import BaseTablePager from '@/components/base/BaseTablePager.vue'
+import { RoleEnum } from '@/types'
 
 const permissionsStore = usePermissionsStore()
 const { can } = usePermission()
@@ -495,7 +567,15 @@ const canClearMembership = computed(() => can('user.manage'))
 // 角色写入必须同时满足 frontend_access 与 `/v1/roles.assignable_by_current_actor`。
 // Admin / RoleAdmin 即便仍是历史角色，也不能靠旧前端动作绕过服务端 assignable 合同。
 const canAssignRoles = computed(() => can('role.assign') && editableRoleOptions.value.length > 0)
-const canManageOrgMaster = computed(() => can('org.manage'))
+const hasOrgMasterRole = computed(
+  () =>
+    permissionsStore.hasAnyRole(['SuperAdmin', 'HRAdmin']) ||
+    permissionsStore.currentUser?.role === RoleEnum.SUPER_ADMIN ||
+    permissionsStore.currentUser?.role === RoleEnum.HR_ADMIN,
+)
+const canManageOrgMaster = computed(
+  () => can('org.manage') && hasOrgMasterRole.value,
+)
 const canEditBasicInfo = computed(() => can('user.manage'))
 
 interface UserRow {
@@ -531,12 +611,14 @@ interface OrgTreeTeam {
   value: string
   label: string
   department: string
+  enabled: boolean
 }
 
 interface OrgTreeDepartment {
   id?: string
   value: string
   label: string
+  enabled: boolean
   teams: OrgTreeTeam[]
 }
 
@@ -583,6 +665,8 @@ const statusFilter = ref('')
 const roleFilter = ref('')
 const departmentFilter = ref('')
 const teamFilter = ref('')
+const orgMasterDepartmentFilter = ref('')
+const orgMasterTeamFilter = ref('')
 
 const departmentOptions = ref<Array<{ value: string; label: string }>>([])
 const teamOptions = ref<Array<{ value: string; label: string; department?: string }>>([])
@@ -609,36 +693,77 @@ const scopedDepartmentOptions = computed(() =>
     ? departmentOptions.value.filter((dept) => dept.value === currentDepartmentScope.value)
     : departmentOptions.value,
 )
-const orgTree = computed<OrgTreeDepartment[]>(() =>
-  departmentOptions.value.map((dept) => ({
-    id: departmentRecords.value.find((item) => item.name === dept.value)?.id,
+const orgTree = computed<OrgTreeDepartment[]>(() => {
+  if (departmentRecords.value.length) {
+    return departmentRecords.value.map((dept) => ({
+      id: dept.id,
+      value: dept.name,
+      label: dept.name,
+      enabled: dept.enabled !== false,
+      teams: teamRecords.value
+        .filter((team) => team.departmentId === dept.id || team.departmentName === dept.name)
+        .map((team) => ({
+          id: team.id,
+          value: team.name,
+          label: team.name,
+          department: dept.name,
+          enabled: team.enabled !== false,
+        })),
+    }))
+  }
+  return departmentOptions.value.map((dept) => ({
+    id: undefined,
     value: dept.value,
     label: dept.label,
+    enabled: true,
     teams: teamOptions.value
       .filter((team) => team.department === dept.value)
       .map((team) => ({
-        id: teamRecords.value.find((item) => item.name === team.value && item.departmentName === dept.value)?.id,
+        id: undefined,
         value: team.value,
         label: team.label,
         department: dept.value,
+        enabled: true,
       })),
-  })),
-)
+  }))
+})
 const visibleOrgTree = computed<OrgTreeDepartment[]>(() =>
   isDeptScopedOnly.value
     ? orgTree.value.filter((dept) => dept.value === currentDepartmentScope.value)
-    : orgTree.value,
+    : canManageOrgMaster.value
+      ? orgTree.value
+      : orgTree.value
+          .filter((dept) => dept.enabled)
+          .map((dept) => ({ ...dept, teams: dept.teams.filter((team) => team.enabled) })),
 )
-const isAllOrgFilterActive = computed(
-  () => !isDeptScopedOnly.value && !departmentFilter.value && !teamFilter.value,
+const enabledOrgTree = computed<OrgTreeDepartment[]>(() =>
+  visibleOrgTree.value
+    .filter((dept) => dept.enabled)
+    .map((dept) => ({ ...dept, teams: dept.teams.filter((team) => team.enabled) })),
 )
+const disabledOrgTree = computed<OrgTreeDepartment[]>(() => {
+  if (!canManageOrgMaster.value) return []
+  const out: OrgTreeDepartment[] = []
+  for (const dept of visibleOrgTree.value) {
+    if (!dept.enabled) {
+      out.push(dept)
+      continue
+    }
+    const disabledTeams = dept.teams.filter((team) => !team.enabled)
+    if (disabledTeams.length) out.push({ ...dept, teams: disabledTeams })
+  }
+  return out
+})
 const selectedOrgDepartment = computed<OrgTreeDepartment | null>(() =>
-  visibleOrgTree.value.find((dept) => dept.value === departmentFilter.value) ?? null,
+  visibleOrgTree.value.find((dept) => dept.value === orgMasterDepartmentFilter.value) ?? null,
 )
 const selectedOrgTeam = computed<OrgTreeTeam | null>(() => {
-  if (!selectedOrgDepartment.value || !teamFilter.value) return null
-  return selectedOrgDepartment.value.teams.find((team) => team.value === teamFilter.value) ?? null
+  if (!selectedOrgDepartment.value || !orgMasterTeamFilter.value) return null
+  return selectedOrgDepartment.value.teams.find((team) => team.value === orgMasterTeamFilter.value) ?? null
 })
+const isAllOrgFilterActive = computed(
+  () => !isDeptScopedOnly.value && !departmentFilter.value && !teamFilter.value && !orgMasterDepartmentFilter.value,
+)
 
 const showCreateModal = ref(false)
 const createSubmitting = ref(false)
@@ -722,29 +847,41 @@ const orgActionTitle = computed(() => {
     case 'editDepartment':
       return '编辑部门名称'
     case 'deleteDepartment':
-      return '删除部门'
+      return orgAction.value.department?.enabled === false ? '恢复部门' : '停用部门'
     case 'createTeam':
       return '新增小组'
     case 'editTeam':
       return '编辑小组名称'
     case 'deleteTeam':
-      return '删除小组'
+      return orgAction.value.team?.enabled === false ? '恢复小组' : '停用小组'
     default:
       return '组织维护'
   }
 })
 const orgActionSubtitle = computed(() => {
   if (!orgAction.value) return ''
-  if (orgAction.value.mode === 'deleteDepartment') return '部门删除后不再可选，部门内人员会自动进入未分配池。'
-  if (orgAction.value.mode === 'deleteTeam') return '小组删除后不再可选，组内人员会自动进入未分配池。'
+  if (orgAction.value.mode === 'deleteDepartment') {
+    return orgAction.value.department?.enabled === false
+      ? '恢复后该部门会重新出现在组织归属选择中。'
+      : '停用后该部门不再可选，部门内人员会自动进入未分配池。'
+  }
+  if (orgAction.value.mode === 'deleteTeam') {
+    return orgAction.value.team?.enabled === false
+      ? '恢复后该小组会重新出现在组织归属选择中。'
+      : '停用后该小组不再可选，组内人员会自动进入未分配池。'
+  }
   return '组织名称会立即用于用户归属选择。'
 })
 const orgActionDeleteCopy = computed(() => {
   if (orgAction.value?.mode === 'deleteDepartment') {
-    return `确认删除部门「${orgAction.value.department?.label ?? ''}」？该部门及其小组会停止使用，原有人员会自动进入未分配池。`
+    return orgAction.value.department?.enabled === false
+      ? `确认恢复部门「${orgAction.value.department?.label ?? ''}」？`
+      : `确认停用部门「${orgAction.value.department?.label ?? ''}」？该部门及其小组会停止使用，原有人员会自动进入未分配池。`
   }
   if (orgAction.value?.mode === 'deleteTeam') {
-    return `确认删除小组「${orgAction.value.team?.label ?? ''}」？原有人员会自动进入未分配池。`
+    return orgAction.value.team?.enabled === false
+      ? `确认恢复小组「${orgAction.value.team?.label ?? ''}」？`
+      : `确认停用小组「${orgAction.value.team?.label ?? ''}」？原有人员会自动进入未分配池。`
   }
   return ''
 })
@@ -753,7 +890,12 @@ const orgActionNamePlaceholder = computed(() =>
     ? '请输入小组名称'
     : '请输入部门名称',
 )
-const orgActionConfirmText = computed(() => (orgActionIsDelete.value ? '确认删除' : '保存'))
+const orgActionConfirmText = computed(() => {
+  if (!orgActionIsDelete.value) return '保存'
+  if (orgAction.value?.mode === 'deleteDepartment' && orgAction.value.department?.enabled === false) return '确认恢复'
+  if (orgAction.value?.mode === 'deleteTeam' && orgAction.value.team?.enabled === false) return '确认恢复'
+  return '确认停用'
+})
 const userTableColumns = computed<DataTableColumns<UserRow>>(() => [
   {
     title: '姓名',
@@ -1062,48 +1204,104 @@ function userRowKey(row: UserRow): DataTableRowKey {
   return row.id
 }
 
+function findVisibleOrgDepartment(department: string): OrgTreeDepartment | undefined {
+  return visibleOrgTree.value.find((dept) => dept.value === department)
+}
+
+function findVisibleOrgTeam(department: string, team: string): OrgTreeTeam | undefined {
+  return findVisibleOrgDepartment(department)?.teams.find((item) => item.value === team)
+}
+
 function isOrgDepartmentActive(department: string): boolean {
-  return departmentFilter.value === department && !teamFilter.value
+  return orgMasterDepartmentFilter.value === department && !orgMasterTeamFilter.value
 }
 
 function isOrgTeamActive(department: string, team: string): boolean {
-  return departmentFilter.value === department && teamFilter.value === team
+  return orgMasterDepartmentFilter.value === department && orgMasterTeamFilter.value === team
 }
 
 function selectAllOrg() {
   if (isDeptScopedOnly.value) return
+  orgMasterDepartmentFilter.value = ''
+  orgMasterTeamFilter.value = ''
   departmentFilter.value = ''
   teamFilter.value = ''
 }
 
 function selectOrgDepartment(department: string) {
+  const dept = findVisibleOrgDepartment(department)
+  orgMasterDepartmentFilter.value = department
+  orgMasterTeamFilter.value = ''
+  if (!dept || !dept.enabled) return
   departmentFilter.value = department
   teamFilter.value = ''
 }
 
 function selectOrgTeam(department: string, team: string) {
+  const dept = findVisibleOrgDepartment(department)
+  const orgTeam = findVisibleOrgTeam(department, team)
+  orgMasterDepartmentFilter.value = department
+  orgMasterTeamFilter.value = team
+  if (!dept?.enabled || !orgTeam?.enabled) return
   departmentFilter.value = department
   teamFilter.value = team
 }
 
+function activeOnlyOrgOptions(org: OrgOwnershipOptionsParsed): OrgOwnershipOptionsParsed {
+  const departmentRecordsActive = (org.departmentRecords ?? []).filter((dept) => dept.enabled !== false)
+  const activeDepartmentNames = new Set(departmentRecordsActive.map((dept) => dept.name))
+  const activeDepartmentIds = new Set(departmentRecordsActive.map((dept) => dept.id))
+  const teamRecordsActive = (org.teamRecords ?? []).filter(
+    (team) => team.enabled !== false && activeDepartmentIds.has(team.departmentId),
+  )
+  const activeTeamKeys = new Set(
+    teamRecordsActive.map((team) => `${team.departmentName ?? ''}@@${team.name}`),
+  )
+  const hasStructuredRecords = departmentRecordsActive.length > 0 || (org.departmentRecords ?? []).length > 0
+  if (!hasStructuredRecords) return org
+  return {
+    departmentOptions: (org.departmentOptions ?? []).filter((dept) => activeDepartmentNames.has(dept.value)),
+    teamOptions: (org.teamOptions ?? []).filter((team) => {
+      if (!team.department) return false
+      return activeTeamKeys.has(`${team.department}@@${team.value}`)
+    }),
+    departmentRecords: departmentRecordsActive,
+    teamRecords: teamRecordsActive,
+  }
+}
+
 async function loadOrgOptions() {
-  const org = await fetchOrgOwnershipOptions()
-  departmentOptions.value = org.departmentOptions ?? []
-  teamOptions.value = org.teamOptions ?? []
+  const org = await fetchOrgOwnershipOptions({ includeDisabled: canManageOrgMaster.value })
+  const activeOrg = activeOnlyOrgOptions(org)
+  departmentOptions.value = activeOrg.departmentOptions ?? []
+  teamOptions.value = activeOrg.teamOptions ?? []
   departmentRecords.value = org.departmentRecords ?? []
   teamRecords.value = org.teamRecords ?? []
-  const hydrated = departmentsAndGroupsFromOrgOptions(org)
+  const hydrated = departmentsAndGroupsFromOrgOptions(activeOrg)
   if (hydrated) {
     usePermissionsStore().hydrateOrgFromServer(hydrated.departments, hydrated.groups)
+  }
+  if (orgMasterDepartmentFilter.value && !findVisibleOrgDepartment(orgMasterDepartmentFilter.value)) {
+    orgMasterDepartmentFilter.value = ''
+    orgMasterTeamFilter.value = ''
+  } else if (
+    orgMasterDepartmentFilter.value &&
+    orgMasterTeamFilter.value &&
+    !findVisibleOrgTeam(orgMasterDepartmentFilter.value, orgMasterTeamFilter.value)
+  ) {
+    orgMasterTeamFilter.value = ''
   }
   if (isDeptScopedOnly.value) {
     if (!currentDepartmentScope.value) {
       departmentFilter.value = ''
       teamFilter.value = ''
+      orgMasterDepartmentFilter.value = ''
+      orgMasterTeamFilter.value = ''
       createForm.value.department = ''
       return
     }
     departmentFilter.value = currentDepartmentScope.value
+    orgMasterDepartmentFilter.value = currentDepartmentScope.value
     if (teamFilter.value) {
       const ok = teamOptions.value.some(
         (team) =>
@@ -1442,14 +1640,14 @@ function openCreateTeam(department?: OrgTreeDepartment) {
 }
 
 function openEditTeam(team: OrgTreeTeam) {
-  orgAction.value = { mode: 'editTeam', team }
+  orgAction.value = { mode: 'editTeam', department: selectedOrgDepartment.value ?? undefined, team }
   orgActionName.value = team.label
   orgActionDepartmentId.value = ''
   orgActionError.value = ''
 }
 
 function openDeleteTeam(team: OrgTreeTeam) {
-  orgAction.value = { mode: 'deleteTeam', team }
+  orgAction.value = { mode: 'deleteTeam', department: selectedOrgDepartment.value ?? undefined, team }
   orgActionName.value = ''
   orgActionDepartmentId.value = ''
   orgActionError.value = ''
@@ -1487,8 +1685,8 @@ async function submitOrgAction() {
         await updateOrgDepartment(action.department.id, { name })
         break
       case 'deleteDepartment':
-        if (!action.department?.id) throw new Error('未找到部门编号，无法删除。')
-        await updateOrgDepartment(action.department.id, { enabled: false })
+        if (!action.department?.id) throw new Error('未找到部门编号，无法处理。')
+        await updateOrgDepartment(action.department.id, { enabled: action.department.enabled === false })
         break
       case 'createTeam': {
         const departmentId = orgActionDepartmentId.value || action.department?.id
@@ -1501,8 +1699,11 @@ async function submitOrgAction() {
         await updateOrgTeam(action.team.id, { name })
         break
       case 'deleteTeam':
-        if (!action.team?.id) throw new Error('未找到小组编号，无法删除。')
-        await updateOrgTeam(action.team.id, { enabled: false })
+        if (!action.team?.id) throw new Error('未找到小组编号，无法处理。')
+        if (action.team.enabled === false && action.department?.enabled === false) {
+          throw new Error('请先恢复部门，再恢复小组。')
+        }
+        await updateOrgTeam(action.team.id, { enabled: action.team.enabled === false })
         break
     }
     const shouldResetDepartment =
@@ -1739,18 +1940,18 @@ onBeforeUnmount(() => {
 
 .management-layout {
   display: grid;
-  grid-template-columns: minmax(10rem, 14rem) minmax(0, 1fr);
-  gap: 1rem;
+  grid-template-columns: minmax(15rem, 18rem) minmax(0, 1fr);
+  gap: 1.15rem;
   align-items: start;
 }
 
 .org-filter-panel {
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
+  gap: 0.5rem;
   max-height: min(66dvh, 44rem);
   overflow: auto;
-  padding-right: 0.75rem;
+  padding-right: 0.9rem;
   border-right: 1px solid rgb(var(--yb-border-zinc));
 }
 
@@ -1763,6 +1964,19 @@ onBeforeUnmount(() => {
   color: rgb(var(--yb-text-zinc-strong));
   font-size: 0.75rem;
   font-weight: 700;
+}
+
+.org-filter-header > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.12rem;
+}
+
+.org-filter-header small {
+  color: rgb(var(--yb-text-zinc-faint));
+  font-size: 0.6875rem;
+  font-weight: 500;
 }
 
 .org-selected-actions {
@@ -1799,10 +2013,45 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
+.org-selected-path {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.35rem;
+  color: rgb(var(--yb-text-zinc-soft));
+  font-size: 0.6875rem;
+}
+
 .org-selected-buttons {
   display: flex;
   flex-wrap: wrap;
   gap: 0.3rem;
+}
+
+.org-tree-scroll {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.org-tree-section {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.org-tree-section-title {
+  margin: 0.2rem 0 0.05rem;
+  color: rgb(var(--yb-text-zinc-faint));
+  font-size: 0.6875rem;
+  font-weight: 700;
+}
+
+.org-tree-section--disabled {
+  padding-top: 0.35rem;
+  border-top: 1px dashed rgb(var(--yb-border-zinc));
 }
 
 .org-filter-dept {
@@ -1829,7 +2078,8 @@ onBeforeUnmount(() => {
   width: 100%;
   min-height: 2rem;
   align-items: center;
-  justify-content: flex-start;
+  justify-content: space-between;
+  gap: 0.35rem;
   border: 1px solid transparent;
   border-radius: 0.45rem;
   background: transparent;
@@ -1846,11 +2096,15 @@ onBeforeUnmount(() => {
     color 0.15s ease;
 }
 
-.org-filter-item span {
+.org-filter-item .org-item-name {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.org-filter-item.is-disabled {
+  color: rgb(var(--yb-text-zinc-faint));
 }
 
 .org-filter-item:hover {
@@ -1867,6 +2121,25 @@ onBeforeUnmount(() => {
 .org-filter-item--team {
   min-height: 1.75rem;
   font-size: 0.75rem;
+  color: rgb(var(--yb-text-zinc-soft));
+}
+
+.org-state-pill {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  min-height: 1rem;
+  padding: 0.05rem 0.35rem;
+  border-radius: 9999px;
+  background: rgb(var(--yb-success-soft));
+  color: rgb(var(--yb-success-deep));
+  font-size: 0.625rem;
+  font-weight: 700;
+}
+
+.org-state-pill--off {
+  background: rgb(var(--yb-surface-neutral-muted));
   color: rgb(var(--yb-text-zinc-soft));
 }
 
@@ -1891,6 +2164,11 @@ onBeforeUnmount(() => {
 .org-icon-btn:hover {
   background: rgb(var(--yb-surface-row-even));
   border-color: rgb(var(--yb-text-zinc-faint));
+}
+
+.org-icon-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .org-icon-btn--danger {
@@ -1922,6 +2200,9 @@ onBeforeUnmount(() => {
   }
 
   .org-filter-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
     max-height: none;
     overflow: visible;
     padding-right: 0;
@@ -1931,26 +2212,23 @@ onBeforeUnmount(() => {
   }
 
   .org-filter-dept,
-  .org-filter-teams {
-    display: contents;
+  .org-filter-teams,
+  .org-tree-scroll,
+  .org-tree-section {
+    display: flex;
   }
 
   .org-filter-header {
-    grid-column: 1 / -1;
+    grid-column: auto;
   }
 
-  .org-selected-actions {
-    grid-column: 1 / -1;
+  .org-selected-actions,
+  .org-tree-section-title {
+    grid-column: auto;
   }
 
   .org-filter-row {
     display: block;
-  }
-
-  .org-filter-panel {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
-    gap: 0.35rem;
   }
 }
 

@@ -54,7 +54,7 @@ components:
       enum: [Member, SuperAdmin, HRAdmin, OrgAdmin, RoleAdmin, TeamLead, DesignDirector, DesignReviewer, Ops, Designer, Audit_A, Audit_B, Warehouse, Outsource, ERP, Admin, DepartmentAdmin, CustomizationReviewer, CustomizationOperator, AssetSubmitter, AssetManager, AssetTemplateAdmin, AssetSettlement]
     Department:
       type: string
-      description: Dynamic backend org-master department name. Values come from enabled `org_departments` rows exposed by `/v1/org/options`; this is no longer a fixed frontend enum. v1.0 business baseline is exactly `人事部`, `运营部`, `设计研发部`, `定制美工部`, `审核部`, `云仓部` (plus the system bucket `未分配`). Legacy names (`设计部`, `采购部`, `仓储部`, `烘焙仓储部`) remain only as disabled compatibility rows for historical integrity and are not returned by `/v1/org/options` nor accepted by registration / user admin / task create inputs.
+      description: Dynamic backend org-master department name. Values come from enabled `org_departments` rows exposed by default from `/v1/org/options`; this is no longer a fixed frontend enum. v1.0 business baseline is exactly `人事部`, `运营部`, `设计研发部`, `定制美工部`, `审核部`, `云仓部` (plus the system bucket `未分配`). Legacy names (`设计部`, `采购部`, `仓储部`, `烘焙仓储部`) remain only as disabled compatibility rows for historical integrity; they are hidden from the default `/v1/org/options` projection and are not accepted by registration / user admin / task create inputs. Organization master maintenance clients may request `/v1/org/options?include_disabled=true` to display and restore disabled rows when authorized.
     PlaceholderAuthMode:
       type: string
       enum: [debug_header_role_enforced, session_token_role_enforced]
@@ -8936,6 +8936,9 @@ paths:
         The canonical response shape is top-level `departments[]`, where each department carries a nested `teams[]`
         array. That nested department tree is authoritative for `PATCH /v1/users/{id}` department/team updates and for
         org values accepted by task create.
+        By default this endpoint returns only enabled departments and teams for assignment and validation. Authorized
+        organization-master maintenance clients may pass `include_disabled=true` to return disabled departments/teams
+        as well, so the frontend can display, restore, or keep maintaining rows that are no longer assignable.
         `teams_by_department` remains a deprecated compatibility mirror in v1.8 only; responses that still include it
         emit `Deprecation: version="v1.8"`.
         User responses return both `team` and compatibility alias `group` with the same value.
@@ -8948,12 +8951,20 @@ paths:
         `审核部` -> `普通审核组`, `定制审核组`;
         `云仓部` -> `默认组`;
         plus the `未分配` / `未分配池` system bucket.
-        Legacy operations groups 1-7 and legacy compatibility departments are intentionally filtered out by the `enabled=1` projection.
+        Legacy operations groups 1-7 and legacy compatibility departments are intentionally filtered out by the default `enabled=1` projection.
       tags: [ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
         auth_mode: session_token_role_enforced
         required_roles: [Admin, SuperAdmin, HRAdmin, DepartmentAdmin, OrgAdmin, RoleAdmin]
+      parameters:
+        - in: query
+          name: include_disabled
+          required: false
+          schema:
+            type: boolean
+            default: false
+          description: When `true`, returns disabled departments and teams for organization master maintenance. This expanded projection is restricted to HRAdmin/SuperAdmin level organization-maintenance access.
       responses:
         '200':
           description: Organization options

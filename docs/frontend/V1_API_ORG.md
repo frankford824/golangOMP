@@ -18,7 +18,7 @@
 ### 简介
 支持方法: GET。
 
-- `GET`: Returns the backend org master source used by user-management, task org validation, owner-team compatibility bridging, and frontend org-assignment flows. The canonical response shape is top-level `departments[]`, where each department carries a nested `teams[]` array. That nested department tree is authoritative for `PATCH /v1/users/{id}` department/team updates and for org values accepted by task create. `teams_by_department` remains a deprecated compatibility mirror in v1.8 only; responses that still include it emit `Deprecation: version="v1.8"`. User responses return both `team` and compatibility alias `group` with the same value. Read access is available to company-level managers, department managers, and legacy org/role compatibility admins. The v1.0 official baseline exposed here is exactly: `人事部` -> `人事管理组`; `运营部` -> `淘系一组`, `淘系二组`, `天猫一组`, `天猫二组`, `拼多多南京组`, `拼多多池州组`; `设计研发部` -> `默认组`; `定制美工部` -> `默认组`; `审核部` -> `普通审核组`, `定制审核组`; `云仓部` -> `默认组`; plus the `未分配` / `未分配池` system bucket. Legacy operations groups 1-7 and legacy compatibility departments are intentionally filtered out by the `enabled=1` projection.
+- `GET`: Returns the backend org master source used by user-management, task org validation, owner-team compatibility bridging, and frontend org-assignment flows. The canonical response shape is top-level `departments[]`, where each department carries a nested `teams[]` array. That nested department tree is authoritative for `PATCH /v1/users/{id}` department/team updates and for org values accepted by task create. By default this endpoint returns only enabled departments and teams for assignment and validation. Authorized organization-master maintenance clients may pass `include_disabled=true` to return disabled departments/teams as well, so the frontend can display, restore, or keep maintaining rows that are no longer assignable. `teams_by_department` remains a deprecated compatibility mirror in v1.8 only; responses that still include it emit `Deprecation: version="v1.8"`. User responses return both `team` and compatibility alias `group` with the same value. Read access is available to company-level managers, department managers, and legacy org/role compatibility admins. The v1.0 official baseline exposed here is exactly: `人事部` -> `人事管理组`; `运营部` -> `淘系一组`, `淘系二组`, `天猫一组`, `天猫二组`, `拼多多南京组`, `拼多多池州组`; `设计研发部` -> `默认组`; `定制美工部` -> `默认组`; `审核部` -> `普通审核组`, `定制审核组`; `云仓部` -> `默认组`; plus the `未分配` / `未分配池` system bucket. Legacy operations groups 1-7 and legacy compatibility departments are intentionally filtered out by the default `enabled=1` projection.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -28,7 +28,9 @@
 ### 请求体 schema
 参数:
 
-无 path/query/header 参数。
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `include_disabled` | query | boolean | 否 | When `true`, returns disabled departments and teams for organization master maintenance. This expanded projection is restricted to HRAdmin/SuperAdmin level organization-maintenance access. |
 
 请求体: 无请求体。
 

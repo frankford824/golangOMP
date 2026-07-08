@@ -302,12 +302,79 @@ func TestUserAdminHandlerGetOrgOptionsSetsDeprecationHeaderForCompatibilityShape
 	}
 }
 
+func TestUserAdminHandlerGetOrgOptionsIncludingDisabledRequiresOrgMasterWriteRole(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	req := httptest.NewRequest(http.MethodGet, "/v1/org/options?include_disabled=true", nil)
+	c.Request = req
+
+	svc := &userAdminServiceStub{
+		currentUser: &domain.User{
+			ID:    2,
+			Roles: []domain.Role{domain.RoleDeptAdmin},
+			FrontendAccess: domain.FrontendAccessView{
+				IsDepartmentAdmin: true,
+				Roles:             []string{"department_admin"},
+			},
+		},
+	}
+	h := NewUserAdminHandler(svc, nil, nil)
+
+	h.GetOrgOptions(c)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("GetOrgOptions(include_disabled) status = %d, want 403; body=%s", rec.Code, rec.Body.String())
+	}
+	if svc.getOrgOptionsIncludingDisabledCalls != 0 {
+		t.Fatalf("GetOrgOptionsIncludingDisabled() calls = %d, want 0", svc.getOrgOptionsIncludingDisabledCalls)
+	}
+}
+
+func TestUserAdminHandlerGetOrgOptionsIncludingDisabledCallsServiceForHRAdmin(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	req := httptest.NewRequest(http.MethodGet, "/v1/org/options?include_disabled=true", nil)
+	c.Request = req
+
+	svc := &userAdminServiceStub{
+		currentUser: &domain.User{
+			ID:    3,
+			Roles: []domain.Role{domain.RoleHRAdmin},
+			FrontendAccess: domain.FrontendAccessView{
+				IsSuperAdmin: true,
+				Roles:        []string{"hr_admin"},
+			},
+		},
+		orgOptionsIncludingDisabled: &domain.OrgOptions{
+			Departments: []domain.DepartmentOption{
+				{ID: 7, Name: "采购部", Enabled: false},
+			},
+		},
+	}
+	h := NewUserAdminHandler(svc, nil, nil)
+
+	h.GetOrgOptions(c)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GetOrgOptions(include_disabled) status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if svc.getOrgOptionsIncludingDisabledCalls != 1 {
+		t.Fatalf("GetOrgOptionsIncludingDisabled() calls = %d, want 1", svc.getOrgOptionsIncludingDisabledCalls)
+	}
+	if body := rec.Body.String(); !bytes.Contains([]byte(body), []byte(`"name":"采购部"`)) {
+		t.Fatalf("GetOrgOptions(include_disabled) body missing disabled department: %s", body)
+	}
+}
+
 type userAdminServiceStub struct {
 	currentUser                 *domain.User
 	listUsersResp               []*domain.User
 	listUsersMeta               domain.PaginationMeta
 	listAssignableDesignersResp []*domain.User
 	orgOptions                  *domain.OrgOptions
+	orgOptionsIncludingDisabled *domain.OrgOptions
 	createUserResp              *domain.User
 	resetPasswordResp           *domain.User
 	createDepartment            *domain.OrgDepartment
@@ -315,13 +382,14 @@ type userAdminServiceStub struct {
 	createTeam                  *domain.OrgTeam
 	updateTeam                  *domain.OrgTeam
 
-	lastListFilter               service.UserFilter
-	lastCreateParams             service.CreateManagedUserParams
-	lastResetParams              service.ResetUserPasswordParams
-	lastAssignableActor          domain.RequestActor
-	lastAssignableLane           service.AssignableLane
-	listUsersCalls               int
-	listAssignableDesignersCalls int
+	lastListFilter                      service.UserFilter
+	lastCreateParams                    service.CreateManagedUserParams
+	lastResetParams                     service.ResetUserPasswordParams
+	lastAssignableActor                 domain.RequestActor
+	lastAssignableLane                  service.AssignableLane
+	listUsersCalls                      int
+	listAssignableDesignersCalls        int
+	getOrgOptionsIncludingDisabledCalls int
 }
 
 func (s *userAdminServiceStub) SyncConfiguredAuth(context.Context) *domain.AppError {
@@ -334,6 +402,11 @@ func (s *userAdminServiceStub) GetRegistrationOptions(context.Context) (*domain.
 
 func (s *userAdminServiceStub) GetOrgOptions(context.Context) (*domain.OrgOptions, *domain.AppError) {
 	return s.orgOptions, nil
+}
+
+func (s *userAdminServiceStub) GetOrgOptionsIncludingDisabled(context.Context) (*domain.OrgOptions, *domain.AppError) {
+	s.getOrgOptionsIncludingDisabledCalls++
+	return s.orgOptionsIncludingDisabled, nil
 }
 
 func (s *userAdminServiceStub) CreateDepartment(context.Context, service.CreateOrgDepartmentParams) (*domain.OrgDepartment, *domain.AppError) {

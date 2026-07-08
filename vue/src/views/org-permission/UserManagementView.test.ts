@@ -7,6 +7,7 @@ import { usersApi } from '@/services/api/usersApi'
 import {
   createOrgDepartment,
   createOrgTeam,
+  fetchOrgOwnershipOptions,
   updateOrgDepartment,
   updateOrgTeam,
 } from '@/services/api/orgApi'
@@ -377,6 +378,7 @@ describe('UserManagementView role governance', () => {
     vm.orgActionName = '内容部'
     await vm.submitOrgAction()
     await flushPromises()
+    expect(fetchOrgOwnershipOptions).toHaveBeenCalledWith({ includeDisabled: true })
     expect(createOrgDepartment).toHaveBeenCalledWith({ name: '内容部' })
 
     vm.openCreateTeam({ id: '1', value: 'Design', label: '设计部', teams: [] })

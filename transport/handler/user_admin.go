@@ -413,10 +413,25 @@ func (h *UserAdminHandler) ListRoles(c *gin.Context) {
 }
 
 func (h *UserAdminHandler) GetOrgOptions(c *gin.Context) {
-	if !h.ensureOrgOptionsAccess(c) {
+	user, ok := h.loadOrgOptionsUser(c)
+	if !ok {
 		return
 	}
-	options, appErr := h.svc.GetOrgOptions(c.Request.Context())
+	includeDisabled, appErr := parseIncludeDisabledOrgOptions(c.Query("include_disabled"))
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	if includeDisabled && !hasOrgMasterWriteRole(user.Roles) && !user.FrontendAccess.IsSuperAdmin {
+		respondError(c, domain.NewAppError(domain.ErrCodePermissionDenied, "组织维护权限不足，不能查看已停用组织。", nil))
+		return
+	}
+	var options *domain.OrgOptions
+	if includeDisabled {
+		options, appErr = h.svc.GetOrgOptionsIncludingDisabled(c.Request.Context())
+	} else {
+		options, appErr = h.svc.GetOrgOptions(c.Request.Context())
+	}
 	if appErr != nil {
 		respondError(c, appErr)
 		return
@@ -771,21 +786,26 @@ func (h *UserAdminHandler) ensureRoleCatalogAccess(c *gin.Context) bool {
 	return false
 }
 
-func (h *UserAdminHandler) ensureOrgOptionsAccess(c *gin.Context) bool {
+func (h *UserAdminHandler) loadOrgOptionsUser(c *gin.Context) (*domain.User, bool) {
 	user, appErr := h.svc.GetCurrentUser(c.Request.Context())
 	if appErr != nil {
 		respondError(c, appErr)
-		return false
+		return nil, false
 	}
 	if user == nil {
 		respondError(c, domain.ErrUnauthorized)
-		return false
+		return nil, false
 	}
 	if hasOrgOptionsAccess(user.Roles) || user.FrontendAccess.IsSuperAdmin {
-		return true
+		return user, true
 	}
 	respondError(c, domain.NewAppError(domain.ErrCodePermissionDenied, "organization access requires department management or higher", nil))
-	return false
+	return nil, false
+}
+
+func (h *UserAdminHandler) ensureOrgOptionsAccess(c *gin.Context) bool {
+	_, ok := h.loadOrgOptionsUser(c)
+	return ok
 }
 
 func (h *UserAdminHandler) ensureOperationLogAccess(c *gin.Context) bool {
@@ -833,6 +853,30 @@ func hasOrgOptionsAccess(roles []domain.Role) bool {
 		}
 	}
 	return false
+}
+
+func hasOrgMasterWriteRole(roles []domain.Role) bool {
+	for _, role := range domain.NormalizeRoleValues(roles) {
+		switch role {
+		case domain.RoleSuperAdmin, domain.RoleHRAdmin:
+			return true
+		}
+	}
+	return false
+}
+
+func parseIncludeDisabledOrgOptions(raw string) (bool, *domain.AppError) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return false, nil
+	}
+	value, err := strconv.ParseBool(trimmed)
+	if err != nil {
+		return false, domain.NewAppError(domain.ErrCodeInvalidRequest, "include_disabled 参数必须为 true 或 false。", map[string]interface{}{
+			"field": "include_disabled",
+		})
+	}
+	return value, nil
 }
 
 func hasOperationLogAccess(roles []domain.Role) bool {

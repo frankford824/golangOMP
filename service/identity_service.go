@@ -164,6 +164,7 @@ type IdentityService interface {
 	SyncConfiguredAuth(ctx context.Context) *domain.AppError
 	GetRegistrationOptions(ctx context.Context) (*domain.RegistrationOptions, *domain.AppError)
 	GetOrgOptions(ctx context.Context) (*domain.OrgOptions, *domain.AppError)
+	GetOrgOptionsIncludingDisabled(ctx context.Context) (*domain.OrgOptions, *domain.AppError)
 	CreateDepartment(ctx context.Context, p CreateOrgDepartmentParams) (*domain.OrgDepartment, *domain.AppError)
 	UpdateDepartment(ctx context.Context, p UpdateOrgDepartmentParams) (*domain.OrgDepartment, *domain.AppError)
 	CreateTeam(ctx context.Context, p CreateOrgTeamParams) (*domain.OrgTeam, *domain.AppError)
@@ -400,6 +401,14 @@ func (s *identityService) GetRegistrationOptions(_ context.Context) (*domain.Reg
 
 func (s *identityService) GetOrgOptions(ctx context.Context) (*domain.OrgOptions, *domain.AppError) {
 	options, appErr := s.buildOrgOptions(ctx, false)
+	if appErr != nil {
+		return nil, appErr
+	}
+	return cloneOrgOptions(options), nil
+}
+
+func (s *identityService) GetOrgOptionsIncludingDisabled(ctx context.Context) (*domain.OrgOptions, *domain.AppError) {
+	options, appErr := s.buildOrgOptions(ctx, true)
 	if appErr != nil {
 		return nil, appErr
 	}
