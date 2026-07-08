@@ -111,6 +111,21 @@ func TestLoadIncludesUploadServiceDefaults(t *testing.T) {
 	}
 }
 
+func TestLoadExternalAssetsAListTimeoutOverride(t *testing.T) {
+	t.Setenv("MYSQL_DSN", "root:password@tcp(127.0.0.1:3306)/workflow?charset=utf8mb4&parseTime=True&loc=Local")
+	t.Setenv("AUTH_ALLOW_EMBEDDED_SETTINGS", "true")
+	t.Setenv("AUTH_ALLOW_INSECURE_BOOTSTRAP_CREDENTIALS", "true")
+	t.Setenv("EXTERNAL_ASSETS_ALIST_TIMEOUT", "90s")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.ExternalAssets.AListTimeout != 90*time.Second {
+		t.Fatalf("ExternalAssets.AListTimeout = %s, want 90s", cfg.ExternalAssets.AListTimeout)
+	}
+}
+
 func TestLoadRejectsEnabledWebPushWithoutVAPIDConfig(t *testing.T) {
 	t.Setenv("MYSQL_DSN", "root:password@tcp(127.0.0.1:3306)/workflow?charset=utf8mb4&parseTime=True&loc=Local")
 	t.Setenv("AUTH_ALLOW_EMBEDDED_SETTINGS", "true")

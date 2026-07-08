@@ -135,6 +135,7 @@ type ExternalAssetsConfig struct {
 	AListBaseURL        string
 	AListToken          string
 	AListMounts         string
+	AListTimeout        time.Duration
 	SyncInterval        time.Duration
 	LinkRefreshInterval time.Duration
 	FullSyncEnabled     bool
@@ -361,6 +362,7 @@ func Load() (*Config, error) {
 			AListBaseURL:        getEnv("EXTERNAL_ASSETS_ALIST_BASE_URL", ""),
 			AListToken:          getEnv("EXTERNAL_ASSETS_ALIST_TOKEN", ""),
 			AListMounts:         getEnv("EXTERNAL_ASSETS_ALIST_MOUNTS", "/quark:netdisk,/p1:netdisk,/p2:netdisk,/p3:nas_local"),
+			AListTimeout:        mustParseDuration(getEnv("EXTERNAL_ASSETS_ALIST_TIMEOUT", "30s")),
 			SyncInterval:        mustParseDuration(getEnv("EXTERNAL_ASSETS_SYNC_INTERVAL", "1h")),
 			LinkRefreshInterval: mustParseDuration(getEnv("EXTERNAL_ASSETS_LINK_REFRESH_INTERVAL", "1h")),
 			FullSyncEnabled:     mustParseBool(getEnv("EXTERNAL_ASSETS_FULL_SYNC_ENABLED", "false")),

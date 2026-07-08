@@ -9,7 +9,7 @@
         aria-label="搜索组织"
       />
     </div>
-    <div class="org-tree-scroll">
+    <div ref="scrollEl" class="org-tree-scroll">
       <button
         v-if="showAllEntry"
         type="button"
@@ -109,7 +109,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import type { OrgTreeDepartment } from './orgTreeTypes'
 
 const props = defineProps<{
@@ -131,6 +131,7 @@ const searchKeyword = ref('')
 const showDisabledSection = ref(false)
 // 默认全部折叠只看部门行,点选或搜索时展开,解决"树太长要拉很久"的问题。
 const expandedDepartments = ref(new Set<string>())
+const scrollEl = ref<HTMLElement | null>(null)
 
 const isSearching = computed(() => searchKeyword.value !== '')
 
@@ -191,13 +192,31 @@ function onSelectDepartment(dept: OrgTreeDepartment) {
   expandedDepartments.value = next
 }
 
+// 选中项是否落在"停用组织"区(停用部门本身,或启用部门下的停用小组)。
+const selectionInDisabledSection = computed(() => {
+  if (!props.selectedDepartment) return false
+  const dept = props.disabledTree.find((item) => item.value === props.selectedDepartment)
+  if (!dept) return false
+  if (!dept.enabled) return true
+  return !!props.selectedTeam && dept.teams.some((team) => team.value === props.selectedTeam)
+})
+
+// 选中变化(无论来自树内点击、列表联动还是数据刷新)时:
+// 自动展开所属部门、必要时展开停用区,并把选中项滚动进可视区,
+// 避免"选完还要手动把树拉到对应位置"。
 watch(
-  () => props.selectedDepartment,
-  (department) => {
+  () => [props.selectedDepartment, props.selectedTeam] as const,
+  async ([department]) => {
     if (!department) return
     const next = new Set(expandedDepartments.value)
     next.add(department)
     expandedDepartments.value = next
+    if (selectionInDisabledSection.value) showDisabledSection.value = true
+    await nextTick()
+    const active = scrollEl.value?.querySelector('.org-filter-item.is-active')
+    if (active && typeof active.scrollIntoView === 'function') {
+      active.scrollIntoView({ block: 'nearest' })
+    }
   },
   { immediate: true },
 )

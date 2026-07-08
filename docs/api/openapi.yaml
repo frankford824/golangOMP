@@ -5654,13 +5654,13 @@ components:
       properties:
         asset_ids:
           type: array
-          maxItems: 100
+          maxItems: 500
           description: System asset IDs retained for compatibility with earlier clients.
           items:
             type: integer
         resource_ids:
           type: array
-          maxItems: 100
+          maxItems: 500
           description: Mixed resource IDs accepted by the asset center. System resources may use a numeric string; external resources use `ext-{id}` or `external:{id}`.
           items:
             type: string

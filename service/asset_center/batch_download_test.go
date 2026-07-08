@@ -2,6 +2,8 @@ package asset_center
 
 import (
 	"context"
+	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -276,9 +278,44 @@ func TestBuildBatchDownloadManifestAllFailedReturnsError(t *testing.T) {
 	}
 }
 
-func TestBuildBatchDownloadManifestAssetCountLimit(t *testing.T) {
+func TestBuildBatchDownloadManifestDoesNotFailOnCountOnly(t *testing.T) {
+	const count = 125
+	uploaded := string(domain.DesignAssetUploadStatusUploaded)
+	repoRows := make([]*repo.TaskAssetSearchRow, 0, count)
+	urlByKey := make(map[string]string, count)
+	assetIDs := make([]int64, 0, count)
+	for i := 0; i < count; i++ {
+		assetID := int64(i + 1)
+		storageKey := "k-" + strconv.FormatInt(assetID, 10)
+		assetIDs = append(assetIDs, assetID)
+		repoRows = append(repoRows, &repo.TaskAssetSearchRow{
+			Asset: &domain.TaskAsset{
+				ID:           assetID,
+				AssetID:      int64PtrBatchSvc(assetID),
+				TaskID:       9800,
+				FileName:     fmt.Sprintf("asset-%03d.jpg", assetID),
+				StorageKey:   strPtr(storageKey),
+				FileSize:     int64PtrBatchSvc(1),
+				UploadStatus: &uploaded,
+			},
+			Task: &domain.Task{ID: 9800},
+		})
+		urlByKey[storageKey] = "https://oss.example/" + storageKey
+	}
+	svc := NewService(&batchRepoStub{rowsByIDs: repoRows}, &batchPresignerStub{enabled: true, urlByKey: urlByKey}, nil)
+
+	result, appErr := svc.BuildBatchDownloadManifest(context.Background(), assetIDs)
+	if appErr != nil {
+		t.Fatalf("BuildBatchDownloadManifest error = %+v", appErr)
+	}
+	if result.SuccessCount != count || result.FailureCount != 0 {
+		t.Fatalf("manifest counts = %+v, want %d successes", result, count)
+	}
+}
+
+func TestBuildBatchDownloadManifestResourceCountLimit(t *testing.T) {
 	svc := NewService(&batchRepoStub{}, &batchPresignerStub{enabled: true}, nil)
-	assetIDs := make([]int64, MaxBatchDownloadAssets+1)
+	assetIDs := make([]int64, MaxBatchDownloadResources+1)
 	for i := range assetIDs {
 		assetIDs[i] = int64(i + 1)
 	}
@@ -289,6 +326,13 @@ func TestBuildBatchDownloadManifestAssetCountLimit(t *testing.T) {
 	}
 	if appErr.Code != domain.ErrCodeInvalidRequest {
 		t.Fatalf("error code = %s, want %s", appErr.Code, domain.ErrCodeInvalidRequest)
+	}
+	details, ok := appErr.Details.(map[string]interface{})
+	if !ok {
+		t.Fatalf("details = %#v, want map", appErr.Details)
+	}
+	if got := details["limit"]; got != MaxBatchDownloadResources {
+		t.Fatalf("limit detail = %v, want %d", got, MaxBatchDownloadResources)
 	}
 }
 

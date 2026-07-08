@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	MaxBatchDownloadAssets     = 100
+	MaxBatchDownloadResources  = 500
 	MaxBatchDownloadTotalBytes = int64(512 * 1024 * 1024)
 )
 
@@ -69,9 +69,9 @@ func (s *Service) BuildBatchDownloadManifestForResources(ctx context.Context, re
 	if len(refs) == 0 {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "asset_ids or resource_ids must not be empty", nil)
 	}
-	if len(refs) > MaxBatchDownloadAssets {
+	if len(refs) > MaxBatchDownloadResources {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "asset_ids/resource_ids exceed batch download limit", map[string]interface{}{
-			"limit": MaxBatchDownloadAssets,
+			"limit": MaxBatchDownloadResources,
 		})
 	}
 	systemAssetIDs := make([]int64, 0, len(refs))

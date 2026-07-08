@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 	"testing"
@@ -445,6 +446,68 @@ func TestIdentityServiceDeleteDisabledZeroMemberOrgRows(t *testing.T) {
 	}
 	if got, _ := orgRepo.GetTeamByID(context.Background(), childTeam.ID); got != nil {
 		t.Fatalf("child team after department delete = %+v, want nil", got)
+	}
+}
+
+func TestIdentityServiceOrgOptionsExposeMemberCounts(t *testing.T) {
+	ConfigureTaskOrgCatalog(domain.AuthSettings{})
+	defer ConfigureTaskOrgCatalog(domain.AuthSettings{})
+
+	userRepo := newIdentityUserRepo()
+	orgRepo := newIdentityOrgRepo()
+	svc := NewIdentityService(userRepo, &identitySessionRepoStub{}, &identityPermissionLogRepoStub{}, identityTxRunner{}, WithOrgRepo(orgRepo))
+
+	if appErr := svc.SyncConfiguredAuth(context.Background()); appErr != nil {
+		t.Fatalf("SyncConfiguredAuth() unexpected error: %+v", appErr)
+	}
+	department, appErr := svc.CreateDepartment(context.Background(), CreateOrgDepartmentParams{Name: "品牌计数部"})
+	if appErr != nil {
+		t.Fatalf("CreateDepartment() unexpected error: %+v", appErr)
+	}
+	if _, appErr := svc.CreateTeam(context.Background(), CreateOrgTeamParams{DepartmentID: &department.ID, Name: "品牌计数一组"}); appErr != nil {
+		t.Fatalf("CreateTeam() unexpected error: %+v", appErr)
+	}
+
+	// 120 人跨越两页(仓储分页上限 100),回归两处历史缺陷:
+	// 1. collectOrgMemberCounts 只统计第一页;2. cloneOrgOptions 丢失 MemberCount。
+	const memberTotal = 120
+	for i := 1; i <= memberTotal; i++ {
+		id := int64(9000 + i)
+		userRepo.users[id] = &domain.User{
+			ID:          id,
+			Username:    fmt.Sprintf("count_user_%d", i),
+			DisplayName: fmt.Sprintf("计数用户%d", i),
+			Department:  domain.Department("品牌计数部"),
+			Team:        "品牌计数一组",
+			Status:      domain.UserStatusActive,
+		}
+	}
+
+	options, appErr := svc.GetOrgOptionsIncludingDisabled(context.Background())
+	if appErr != nil {
+		t.Fatalf("GetOrgOptionsIncludingDisabled() unexpected error: %+v", appErr)
+	}
+	var deptFound, teamFound bool
+	for _, dept := range options.Departments {
+		if dept.Name != "品牌计数部" {
+			continue
+		}
+		deptFound = true
+		if dept.MemberCount != memberTotal {
+			t.Fatalf("department member_count = %d, want %d", dept.MemberCount, memberTotal)
+		}
+		for _, item := range dept.TeamItems {
+			if item.Name != "品牌计数一组" {
+				continue
+			}
+			teamFound = true
+			if item.MemberCount != memberTotal {
+				t.Fatalf("team member_count = %d, want %d", item.MemberCount, memberTotal)
+			}
+		}
+	}
+	if !deptFound || !teamFound {
+		t.Fatalf("options missing 品牌计数部/品牌计数一组: %+v", options.Departments)
 	}
 }
 

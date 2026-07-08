@@ -38,6 +38,7 @@ type Config struct {
 	AListBaseURL        string
 	AListToken          string
 	Mounts              []MountConfig
+	AListTimeout        time.Duration
 	SyncInterval        time.Duration
 	LinkRefreshInterval time.Duration
 	FullSyncEnabled     bool
@@ -102,6 +103,7 @@ func ConfigFromApp(cfg config.ExternalAssetsConfig) Config {
 		AListBaseURL:        strings.TrimSpace(cfg.AListBaseURL),
 		AListToken:          strings.TrimSpace(cfg.AListToken),
 		Mounts:              ParseMounts(cfg.AListMounts),
+		AListTimeout:        cfg.AListTimeout,
 		SyncInterval:        cfg.SyncInterval,
 		LinkRefreshInterval: cfg.LinkRefreshInterval,
 		FullSyncEnabled:     cfg.FullSyncEnabled,
@@ -139,6 +141,9 @@ func NewService(repo repo.ExternalAssetRepo, cfg Config, ossDirect *baseservice.
 	if cfg.FullSyncPageSize <= 0 || cfg.FullSyncPageSize > 200 {
 		cfg.FullSyncPageSize = 100
 	}
+	if cfg.AListTimeout <= 0 {
+		cfg.AListTimeout = 30 * time.Second
+	}
 	if cfg.FullSyncMaxDepth <= 0 {
 		cfg.FullSyncMaxDepth = 16
 	}
@@ -161,7 +166,7 @@ func NewService(repo repo.ExternalAssetRepo, cfg Config, ossDirect *baseservice.
 		cfg:       cfg,
 		repo:      repo,
 		bff:       NewBFFClient(cfg.BFFBaseURL, cfg.BFFBrowserBaseURL, 30*time.Second),
-		alist:     NewAListClient(cfg.AListBaseURL, cfg.AListToken, 30*time.Second),
+		alist:     NewAListClient(cfg.AListBaseURL, cfg.AListToken, cfg.AListTimeout),
 		ossDirect: ossDirect,
 		renderer:  baseservice.NewExternalAssetPreviewRenderer(),
 		nowFn:     time.Now,
@@ -781,7 +786,7 @@ func (s *Service) syncFullMount(ctx context.Context, mount MountConfig) (MountSy
 		dirsRead++
 		page := 1
 		for {
-			resp, err := s.alist.List(ctx, next.path, page, s.cfg.FullSyncPageSize)
+			resp, err := s.listFullSyncPage(ctx, next.path, page)
 			if err != nil {
 				if next.path != mount.Path {
 					skippedDirs++
@@ -862,6 +867,44 @@ func (s *Service) syncFullMount(ctx context.Context, mount MountConfig) (MountSy
 	}
 	s.finishSyncRun(ctx, runID, result.Status, result.ScannedCount, result.UpsertedCount, result.ErrorMessage)
 	return result, firstErr
+}
+
+func (s *Service) listFullSyncPage(ctx context.Context, listPath string, page int) (*AListListResponse, error) {
+	const maxAttempts = 3
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		resp, err := s.alist.List(ctx, listPath, page, s.cfg.FullSyncPageSize)
+		if err == nil {
+			return resp, nil
+		}
+		lastErr = err
+		if attempt == maxAttempts || ctx.Err() != nil || !isRetryableAListListError(err) {
+			break
+		}
+		delay := time.Duration(attempt) * 500 * time.Millisecond
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return nil, lastErr
+}
+
+func isRetryableAListListError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "timeout") ||
+		strings.Contains(msg, "deadline exceeded") ||
+		strings.Contains(msg, "connection refused") ||
+		strings.Contains(msg, "connection reset") ||
+		strings.Contains(msg, "temporary") ||
+		strings.Contains(msg, "unexpected eof") ||
+		strings.Contains(msg, "server closed idle connection")
 }
 
 func (s *Service) startSyncRun(ctx context.Context, runType, mountPath, keyword string) int64 {
@@ -1506,7 +1549,17 @@ func isSkippableExternalSearchItem(item AListSearchItem) bool {
 		strings.HasSuffix(originPath, "/@eadir") ||
 		strings.Contains(originPath, "/#recycle/") ||
 		strings.HasSuffix(originPath, "/#recycle") ||
-		strings.Contains(fileName, "@syno")
+		strings.Contains(fileName, "@syno") ||
+		isExternalSystemNoiseFile(fileName)
+}
+
+func isExternalSystemNoiseFile(fileName string) bool {
+	switch strings.ToLower(strings.TrimSpace(fileName)) {
+	case "thumbs.db", "desktop.ini", ".ds_store":
+		return true
+	default:
+		return false
+	}
 }
 
 func driverForMountKind(kind domain.ExternalAssetKind, mountPath string) string {

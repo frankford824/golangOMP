@@ -532,6 +532,63 @@ describe('UserManagementView role governance', () => {
     expect(deleteOrgDepartment).toHaveBeenCalledWith('9')
   })
 
+  it('applies keyword only after explicit search and clears it with the input', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    vi.mocked(usersApi.list).mockClear()
+    const vm = wrapper.vm as unknown as {
+      keyword: string
+      departmentFilter: string
+      onSearch: () => void
+    }
+
+    // 输入到一半、未点查询:切换组织不应把半截关键词带进请求。
+    vm.keyword = '张三'
+    vm.departmentFilter = 'Design'
+    await flushPromises()
+    for (const [params] of vi.mocked(usersApi.list).mock.calls) {
+      expect(params).not.toMatchObject({ keyword: '张三' })
+    }
+
+    vi.mocked(usersApi.list).mockClear()
+    vm.onSearch()
+    await flushPromises()
+    expect(usersApi.list).toHaveBeenCalledWith(
+      expect.objectContaining({ keyword: '张三' }),
+      expect.anything(),
+    )
+
+    // 清空输入框即取消关键词过滤,无需再点一次查询。
+    vi.mocked(usersApi.list).mockClear()
+    vm.keyword = ''
+    await flushPromises()
+    expect(usersApi.list).toHaveBeenCalled()
+    for (const [params] of vi.mocked(usersApi.list).mock.calls) {
+      expect(params).not.toMatchObject({ keyword: '张三' })
+    }
+  })
+
+  it('refreshes org member counts after membership changes', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    const vm = wrapper.vm as unknown as {
+      openDetail: (row: unknown) => Promise<void>
+      membershipForm: { department: string; team: string }
+      submitMembership: () => Promise<void>
+    }
+
+    await vm.openDetail({ id: '2', username: 'target', roles: [] })
+    await flushPromises()
+    vi.mocked(fetchOrgOwnershipOptions).mockClear()
+
+    vm.membershipForm.department = 'Design'
+    vm.membershipForm.team = 'Design-B'
+    await vm.submitMembership()
+    await flushPromises()
+
+    expect(fetchOrgOwnershipOptions).toHaveBeenCalled()
+  })
+
   it('drops stale legacy department and team filters before listing users', async () => {
     const wrapper = mountView()
     await flushPromises()

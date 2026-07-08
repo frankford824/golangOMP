@@ -454,7 +454,11 @@ const defaultPageSize = import.meta.env.VITE_LARGE_SURFACE_AUDIT === 'true' ? au
 const page = ref(1)
 const pageSize = ref(defaultPageSize)
 const pagination = ref({ total: 0, page: 1, page_size: defaultPageSize })
+// keyword 是输入框实时值;appliedKeyword 才是列表实际生效的关键词。
+// 分开维护是为了避免"输入到一半、还没点查询,切换组织/翻页时半截关键词
+// 被悄悄带进请求"的联动怪象。
 const keyword = ref('')
+const appliedKeyword = ref('')
 const statusFilter = ref('')
 const roleFilter = ref('')
 // 单一组织选中态:左侧树的选中即列表筛选,不再维护"树选中"与"下拉筛选"两套状态。
@@ -559,7 +563,7 @@ const selectedOrgTeam = computed<OrgTreeTeam | null>(() => {
   return selectedOrgDepartment.value.teams.find((team) => team.value === teamFilter.value) ?? null
 })
 const hasNonOrgListFilters = computed(
-  () => keyword.value.trim() !== '' || statusFilter.value !== '' || roleFilter.value !== '',
+  () => appliedKeyword.value.trim() !== '' || statusFilter.value !== '' || roleFilter.value !== '',
 )
 const selectedOrgMemberCount = computed<number | undefined>(() => {
   const known = selectedOrgTeam.value
@@ -822,13 +826,43 @@ const userTableColumns = computed<DataTableColumns<UserRow>>(() => [
     title: '部门',
     key: 'department',
     minWidth: 140,
-    render: (row) => row.department ?? '-',
+    // 列表 → 树的反向联动:点部门名即选中左侧树对应部门并过滤列表。
+    render: (row) => {
+      const department = row.department ?? ''
+      if (!department) return '-'
+      if (!isFilterableDepartment(department)) return department
+      return h(
+        'button',
+        {
+          type: 'button',
+          class: 'org-link-btn',
+          title: `按部门「${department}」筛选`,
+          onClick: () => selectOrgDepartment(department),
+        },
+        department,
+      )
+    },
   },
   {
     title: '组',
     key: 'team',
     minWidth: 140,
-    render: (row) => row.team ?? '-',
+    render: (row) => {
+      const team = row.team ?? ''
+      const department = row.department ?? ''
+      if (!team) return '-'
+      if (!department || !isFilterableTeam(department, team)) return team
+      return h(
+        'button',
+        {
+          type: 'button',
+          class: 'org-link-btn',
+          title: `按小组「${department} / ${team}」筛选`,
+          onClick: () => selectOrgTeam(department, team),
+        },
+        team,
+      )
+    },
   },
   {
     title: '角色',
@@ -1274,7 +1308,7 @@ async function loadUsers() {
   listLoading.value = true
   listError.value = ''
   try {
-    const trimmedKeyword = keyword.value.trim()
+    const trimmedKeyword = appliedKeyword.value.trim()
     // 部门范围过滤：当前用户仅具备 `department.manage`（DeptAdmin）而无 `user.manage`
     // （HRAdmin/SuperAdmin）时，前端主动带上本部门 scope，避免后端因 scope 计算偏差
     // 泄漏跨部门列表。`user.manage` 持有者不附带 scope，保持全局视图。
@@ -1456,6 +1490,8 @@ async function submitMembership() {
       membershipForm.value.team,
     )
     await refreshDetailAndList(detailUser.value.id)
+    // 归属变化会改变组织人数,同步刷新树上的人数徽标。
+    void loadOrgOptions()
     detailActionMessage.value = '归属已更新'
   } catch (e) {
     detailActionMessage.value = e instanceof Error ? e.message : '归属更新失败'
@@ -1476,6 +1512,7 @@ async function clearMembership() {
     await clearUserMembership(detailUser.value.id)
     membershipForm.value = { department: '', team: '' }
     await refreshDetailAndList(detailUser.value.id)
+    void loadOrgOptions()
     detailActionMessage.value = '已移出到未分组'
   } catch (e) {
     detailActionMessage.value = e instanceof Error ? e.message : '移除归属失败'
@@ -1544,6 +1581,8 @@ async function createUser() {
     createForm.value = emptyCreateForm()
     page.value = 1
     await loadUsers()
+    // 新用户入组后同步刷新树上的人数徽标。
+    void loadOrgOptions()
   } catch (e) {
     createError.value = e instanceof Error ? e.message : '创建用户失败'
   } finally {
@@ -1762,9 +1801,19 @@ async function submitOrgAction() {
 }
 
 function onSearch() {
+  appliedKeyword.value = keyword.value.trim()
   page.value = 1
   void loadUsers()
 }
+
+// 清空输入框即恢复全量:不必再点一次"查询"才能取消关键词过滤。
+watch(keyword, () => {
+  if (keyword.value.trim() === '' && appliedKeyword.value !== '') {
+    appliedKeyword.value = ''
+    page.value = 1
+    void loadUsers()
+  }
+})
 
 function goPage(next: number) {
   const target = Math.max(1, Math.min(totalPages.value, next))
@@ -2259,6 +2308,25 @@ onBeforeUnmount(() => {
 .link-btn:hover {
   color: rgb(var(--yb-success-teal));
   background: rgb(var(--yb-success-soft));
+}
+
+/* 表格内部门/组名:可点击反向联动左侧组织树 */
+.org-link-btn {
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: transparent;
+  text-underline-offset: 0.2em;
+  transition: color 0.12s ease, text-decoration-color 0.12s ease;
+}
+
+.org-link-btn:hover {
+  color: rgb(var(--yb-success-emerald));
+  text-decoration-color: currentColor;
 }
 
 /* 批量清理弹窗内的组织清单 */

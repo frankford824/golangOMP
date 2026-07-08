@@ -36,7 +36,10 @@ type Config struct {
 
 type Option func(*Service)
 
-const assetWorkbenchProfileAutoRepriceBatchSize = 200
+const (
+	assetWorkbenchProfileAutoRepriceBatchSize      = 200
+	assetWorkbenchClientMaterialBatchDownloadLimit = 100
+)
 
 type Service struct {
 	cfg             Config
@@ -5694,9 +5697,9 @@ func (s *Service) ClientMaterialBatchDownloadManifest(ctx context.Context, actor
 	if len(materialIDs) == 0 {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "material_ids is required.", nil)
 	}
-	if len(materialIDs) > assetcenter.MaxBatchDownloadAssets {
+	if len(materialIDs) > assetWorkbenchClientMaterialBatchDownloadLimit {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "material_ids exceed batch download limit", map[string]interface{}{
-			"limit": assetcenter.MaxBatchDownloadAssets,
+			"limit": assetWorkbenchClientMaterialBatchDownloadLimit,
 		})
 	}
 	manifest := &ClientMaterialBatchDownloadManifest{

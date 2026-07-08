@@ -802,7 +802,7 @@ const listJumpPage = ref(1)
 const listPageSize = ref(20)
 const listTotal = ref(0)
 const AUTO_RELOAD_DELAY_MS = 400
-const MAX_BATCH_DOWNLOAD_ASSETS = 100
+const MAX_BATCH_DOWNLOAD_RESOURCES = 500
 const MAX_BULK_SEARCH_TERMS = 200
 let reloadTimer: ReturnType<typeof setTimeout> | null = null
 let reloadAbort: AbortController | null = null
@@ -1009,7 +1009,7 @@ const selectedAssetMap = reactive(new Map<string, SelectedAssetSummary>())
 const selectedCount = computed(() => selectedAssetMap.size)
 const selectedAssets = computed(() => Array.from(selectedAssetMap.values()))
 const canBatchDownload = computed(
-  () => selectedCount.value > 0 && selectedCount.value <= MAX_BATCH_DOWNLOAD_ASSETS && !batchDownloading.value,
+  () => selectedCount.value > 0 && selectedCount.value <= MAX_BATCH_DOWNLOAD_RESOURCES && !batchDownloading.value,
 )
 const replacementTargetId = computed(() =>
   replacementTargetAsset.value ? assetResourceId(replacementTargetAsset.value) : '',
@@ -1524,11 +1524,11 @@ function toggleAssetSelection(asset: BackendAsset, checked?: boolean) {
   const nextChecked = typeof checked === 'boolean' ? checked : !selectedAssetMap.has(id)
   if (!nextChecked) {
     selectedAssetMap.delete(id)
-    if (selectedAssetMap.size <= MAX_BATCH_DOWNLOAD_ASSETS) batchDownloadError.value = ''
+    if (selectedAssetMap.size <= MAX_BATCH_DOWNLOAD_RESOURCES) batchDownloadError.value = ''
     return
   }
-  if (!selectedAssetMap.has(id) && selectedAssetMap.size >= MAX_BATCH_DOWNLOAD_ASSETS) {
-    batchDownloadError.value = `最多一次选择 ${MAX_BATCH_DOWNLOAD_ASSETS} 个资产`
+  if (!selectedAssetMap.has(id) && selectedAssetMap.size >= MAX_BATCH_DOWNLOAD_RESOURCES) {
+    batchDownloadError.value = `最多一次选择 ${MAX_BATCH_DOWNLOAD_RESOURCES} 个资源`
     return
   }
   batchDownloadError.value = ''
@@ -1542,7 +1542,7 @@ function clearSelectedAssets() {
 
 function removeSelectedAsset(assetId: string) {
   selectedAssetMap.delete(assetId)
-  if (selectedAssetMap.size <= MAX_BATCH_DOWNLOAD_ASSETS) batchDownloadError.value = ''
+  batchDownloadError.value = ''
 }
 
 function onAssetSelectionChange(asset: BackendAsset, event: Event) {
@@ -1761,8 +1761,8 @@ async function downloadBulkSearchResults() {
     bulkSearchError.value = '当前没有可下载的命中资产'
     return
   }
-  if (resourceIDs.length > MAX_BATCH_DOWNLOAD_ASSETS) {
-    bulkSearchError.value = `最多一次下载 ${MAX_BATCH_DOWNLOAD_ASSETS} 个资源，请减少搜索项或分批下载`
+  if (resourceIDs.length > MAX_BATCH_DOWNLOAD_RESOURCES) {
+    bulkSearchError.value = `最多一次下载 ${MAX_BATCH_DOWNLOAD_RESOURCES} 个资源，请减少搜索项或分批下载`
     return
   }
   bulkSearchDownloading.value = true
@@ -2124,8 +2124,8 @@ async function handleBatchDownload() {
     batchDownloadError.value = '未找到可下载的资源 ID，请重新勾选后重试'
     return
   }
-  if (resourceIDs.length > MAX_BATCH_DOWNLOAD_ASSETS) {
-    batchDownloadError.value = `最多一次下载 ${MAX_BATCH_DOWNLOAD_ASSETS} 个资产`
+  if (resourceIDs.length > MAX_BATCH_DOWNLOAD_RESOURCES) {
+    batchDownloadError.value = `最多一次下载 ${MAX_BATCH_DOWNLOAD_RESOURCES} 个资源`
     return
   }
 

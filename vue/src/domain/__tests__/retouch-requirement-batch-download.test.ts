@@ -5,8 +5,9 @@ import {
   formatRetouchRequirementFolderLabel,
   resolveRetouchBatchZipPrefix,
   resolveRetouchSingleAttachmentFilename,
+  RETOUCH_ZIP_REFERENCE_DIR,
   validateRetouchBatchDownloadPlan,
-  MAX_RETouch_BATCH_DOWNLOAD_ASSETS,
+  MAX_RETOUCH_BATCH_DOWNLOAD_ASSETS,
 } from '@/domain/retouch-requirement-batch-download'
 import type { RetouchRequirement } from '@/domain/types/retouch-requirement'
 
@@ -113,8 +114,8 @@ describe('buildRetouchBatchDownloadPlan', () => {
 })
 
 describe('validateRetouchBatchDownloadPlan', () => {
-  it('rejects when asset id count exceeds batch limit', () => {
-    const entries = Array.from({ length: MAX_RETouch_BATCH_DOWNLOAD_ASSETS + 1 }, (_, i) => ({
+  it('allows more than the old 100 asset id limit', () => {
+    const entries = Array.from({ length: 125 }, (_, i) => ({
       key: `a-${i}`,
       assetId: i + 1,
       preferredFilename: `f-${i}.jpg`,
@@ -126,8 +127,27 @@ describe('validateRetouchBatchDownloadPlan', () => {
       legacyCount: 0,
       skippedUnavailableCount: 0,
     })
+    expect(validation.ok).toBe(true)
+    expect(validation.assetIdCount).toBe(125)
+  })
+
+  it('rejects when asset id count exceeds the endpoint safety limit', () => {
+    const entries = Array.from({ length: MAX_RETOUCH_BATCH_DOWNLOAD_ASSETS + 1 }, (_, i) => ({
+      key: `a-${i}`,
+      assetId: i + 1,
+      preferredFilename: `f-${i}.jpg`,
+      directory: RETOUCH_ZIP_REFERENCE_DIR,
+      zipPath: `${RETOUCH_ZIP_REFERENCE_DIR}/f-${i}.jpg`,
+    }))
+    const validation = validateRetouchBatchDownloadPlan({
+      entries,
+      assetIdCount: entries.length,
+      legacyCount: 0,
+      skippedUnavailableCount: 0,
+    })
+
     expect(validation.ok).toBe(false)
-    expect(validation.message).toContain('100')
+    expect(validation.message).toContain(String(MAX_RETOUCH_BATCH_DOWNLOAD_ASSETS))
   })
 })
 

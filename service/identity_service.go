@@ -1883,17 +1883,19 @@ func cloneOrgOptions(options *domain.OrgOptions) *domain.OrgOptions {
 		teamItems := make([]domain.OrgTeamOption, 0, len(department.TeamItems))
 		for _, item := range department.TeamItems {
 			teamItems = append(teamItems, domain.OrgTeamOption{
-				ID:      item.ID,
-				Name:    item.Name,
-				Enabled: item.Enabled,
+				ID:          item.ID,
+				Name:        item.Name,
+				Enabled:     item.Enabled,
+				MemberCount: item.MemberCount,
 			})
 		}
 		cloned.Departments = append(cloned.Departments, domain.DepartmentOption{
-			ID:        department.ID,
-			Name:      department.Name,
-			Teams:     append([]string{}, department.Teams...),
-			TeamItems: teamItems,
-			Enabled:   department.Enabled,
+			ID:          department.ID,
+			Name:        department.Name,
+			Teams:       append([]string{}, department.Teams...),
+			TeamItems:   teamItems,
+			Enabled:     department.Enabled,
+			MemberCount: department.MemberCount,
 		})
 	}
 	for department, teams := range options.TeamsByDepartment {

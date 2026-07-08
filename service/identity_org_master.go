@@ -1080,9 +1080,13 @@ func (s *identityService) collectOrgMemberCounts(ctx context.Context) (orgMember
 		departments: map[string]int{},
 		teams:       map[string]int{},
 	}
-	const pageSize = 500
+	// 注意:MySQL 仓储层 normalizePage 会把 >100 的 page_size 钳到 20,
+	// 因此这里必须用仓储允许的最大页宽,并以返回的 total 作为终止条件,
+	// 否则只会统计到第一页,人数徽标恒为 0/偏小。
+	const pageSize = 100
+	seen := 0
 	for page := 1; ; page++ {
-		users, _, err := s.userRepo.List(ctx, repo.UserListFilter{
+		users, total, err := s.userRepo.List(ctx, repo.UserListFilter{
 			Page:     page,
 			PageSize: pageSize,
 		})
@@ -1102,7 +1106,8 @@ func (s *identityService) collectOrgMemberCounts(ctx context.Context) (orgMember
 				counts.teams[orgMemberCountKey(department, team)]++
 			}
 		}
-		if len(users) < pageSize {
+		seen += len(users)
+		if len(users) == 0 || seen >= int(total) {
 			break
 		}
 	}

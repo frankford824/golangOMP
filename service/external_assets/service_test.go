@@ -105,11 +105,14 @@ func TestSyncFullIndexWalksMountAndFiltersSystemFiles(t *testing.T) {
 				{"name": "keep", "is_dir": true, "size": 0},
 				{"name": "#recycle", "is_dir": true, "size": 0},
 				{"name": "root.jpg", "is_dir": false, "size": 11},
+				{"name": "Thumbs.db", "is_dir": false, "size": 12},
+				{"name": "desktop.ini", "is_dir": false, "size": 13},
 			}
 		case "/p3/keep":
 			content = []map[string]interface{}{
 				{"name": "design.psd", "is_dir": false, "size": 22},
 				{"name": "design.psd@SynoEAStream", "is_dir": false, "size": 33},
+				{"name": ".DS_Store", "is_dir": false, "size": 44},
 				{"name": "@eaDir", "is_dir": true, "size": 0},
 			}
 		default:
@@ -150,7 +153,7 @@ func TestSyncFullIndexWalksMountAndFiltersSystemFiles(t *testing.T) {
 	names := make([]string, 0, len(repo.upserts))
 	for _, item := range repo.upserts {
 		names = append(names, item.FileName)
-		if strings.Contains(item.OriginPath, "#recycle") || strings.Contains(item.OriginPath, "@eaDir") || strings.Contains(item.FileName, "@Syno") {
+		if strings.Contains(item.OriginPath, "#recycle") || strings.Contains(item.OriginPath, "@eaDir") || strings.Contains(item.FileName, "@Syno") || isExternalSystemNoiseFile(item.FileName) {
 			t.Fatalf("system file was indexed: %+v", item)
 		}
 	}
@@ -163,6 +166,80 @@ func TestSyncFullIndexWalksMountAndFiltersSystemFiles(t *testing.T) {
 	}
 	if len(repo.finishedRuns) != 1 || repo.finishedRuns[0].status != domain.ExternalAssetSyncRunStatusCompleted {
 		t.Fatalf("finished runs=%+v, want one completed run", repo.finishedRuns)
+	}
+}
+
+func TestSyncFullIndexRetriesTransientListFailure(t *testing.T) {
+	flakyAttempts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		listPath, _ := req["path"].(string)
+		if listPath == "/p3/flaky" {
+			flakyAttempts++
+			if flakyAttempts == 1 {
+				_ = json.NewEncoder(w).Encode(map[string]interface{}{
+					"code":    500,
+					"message": "context deadline exceeded while awaiting headers",
+				})
+				return
+			}
+		}
+		content := []map[string]interface{}{}
+		switch listPath {
+		case "/p3":
+			content = []map[string]interface{}{
+				{"name": "flaky", "is_dir": true, "size": 0},
+			}
+		case "/p3/flaky":
+			content = []map[string]interface{}{
+				{"name": "ok.jpg", "is_dir": false, "size": 22},
+			}
+		default:
+			t.Fatalf("unexpected list path %v", req["path"])
+		}
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"code":    200,
+			"message": "success",
+			"data": map[string]interface{}{
+				"total":   len(content),
+				"content": content,
+			},
+		})
+	}))
+	defer server.Close()
+
+	repo := &externalAssetRepoStub{}
+	svc := NewService(repo, Config{
+		Enabled:             true,
+		AListBaseURL:        server.URL,
+		AListToken:          "token",
+		Mounts:              ParseMounts("/p3:nas_local"),
+		FullSyncEnabled:     true,
+		FullSyncPageSize:    100,
+		FullSyncMaxDepth:    8,
+		FullSyncMaxFiles:    100,
+		FullSyncMaxDirs:     100,
+		LinkRefreshInterval: time.Hour,
+	}, nil)
+
+	result, err := svc.SyncFullIndex(context.Background())
+	if err != nil {
+		t.Fatalf("SyncFullIndex() error = %v", err)
+	}
+	if flakyAttempts != 2 {
+		t.Fatalf("flaky attempts = %d, want 2", flakyAttempts)
+	}
+	if result.ScannedCount != 1 || result.UpsertedCount != 1 {
+		t.Fatalf("SyncFullIndex() counts = scanned %d upserted %d, want 1/1", result.ScannedCount, result.UpsertedCount)
+	}
+	if len(result.Mounts) != 1 || result.Mounts[0].Status != domain.ExternalAssetSyncRunStatusCompleted {
+		t.Fatalf("mounts = %+v, want completed mount", result.Mounts)
+	}
+	if repo.missingMount != "/p3" {
+		t.Fatalf("MarkMountMissingBefore mount=%q, want /p3 after retry success", repo.missingMount)
 	}
 }
 

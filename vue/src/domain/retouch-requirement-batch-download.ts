@@ -15,8 +15,8 @@ import {
 } from '@/utils/batchZipDownload'
 import { resolveApiUserMessage } from '@/utils/api-message-zh'
 
-/** Align with POST /v1/assets/batch-download limit (OpenAPI maxItems: 100). */
-export const MAX_RETouch_BATCH_DOWNLOAD_ASSETS = 100
+/** Align with POST /v1/assets/batch-download maxItems. */
+export const MAX_RETOUCH_BATCH_DOWNLOAD_ASSETS = 500
 
 export const RETOUCH_ZIP_REFERENCE_DIR = '参考图'
 export const RETOUCH_ZIP_SOURCE_DIR = '素材文件'
@@ -288,10 +288,10 @@ export function validateRetouchBatchDownloadPlan(plan: RetouchBatchDownloadPlan)
       totalEntryCount: 0,
     }
   }
-  if (plan.assetIdCount > MAX_RETouch_BATCH_DOWNLOAD_ASSETS) {
+  if (plan.assetIdCount > MAX_RETOUCH_BATCH_DOWNLOAD_ASSETS) {
     return {
       ok: false,
-      message: `当前批量下载最多支持 ${MAX_RETouch_BATCH_DOWNLOAD_ASSETS} 个附件，请分需求下载。`,
+      message: `当前批量下载最多支持 ${MAX_RETOUCH_BATCH_DOWNLOAD_ASSETS} 个附件，请分需求下载。`,
       assetIdCount: plan.assetIdCount,
       totalEntryCount,
     }

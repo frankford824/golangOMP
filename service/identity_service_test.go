@@ -1896,6 +1896,18 @@ func (r *identityUserRepoStub) listWithFilter(filter repo.UserListFilter) ([]*do
 		}
 		users = append(users, user)
 	}
+	// 与 MySQL 仓储的 ORDER BY id DESC 对齐:map 迭代无序,不排序会导致
+	// 跨页读取时同一用户重复/漏计(collectOrgMemberCounts 等分页消费方依赖稳定顺序)。
+	slices.SortFunc(users, func(a, b *domain.User) int {
+		switch {
+		case a.ID > b.ID:
+			return -1
+		case a.ID < b.ID:
+			return 1
+		default:
+			return 0
+		}
+	})
 	total := int64(len(users))
 	start := (page - 1) * pageSize
 	if start >= len(users) {
