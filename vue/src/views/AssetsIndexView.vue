@@ -1565,8 +1565,8 @@ function normalizeSelectedAssetIDs(): number[] {
 
 function resolveBatchZipFilename(): string {
   const businessName = sharedSelectedBusinessName()
-  if (businessName) return buildTimestampedZipFilename(sanitizeZipEntryName(`assets-${businessName}`, 'assets'))
-  return buildTimestampedZipFilename('assets')
+  if (businessName) return buildTimestampedZipFilename(sanitizeZipEntryName(`${businessName}-资产包`, '资产包'))
+  return buildTimestampedZipFilename('资产中心批量下载')
 }
 
 function sharedSelectedBusinessName(): string {
@@ -1578,6 +1578,24 @@ function sharedSelectedBusinessName(): string {
   const allSame = selected.every((item) => `${item.sku}__${item.productName}` === firstKey)
   if (!allSame) return ''
   return `${first.sku}-${first.productName}`
+}
+
+function sharedBulkSearchBusinessName(): string {
+  const matched = bulkSearchMatchedAssets.value
+  if (!matched.length) return ''
+  const firstSku = businessSku(matched[0])
+  const firstProductName = assetProductLabel(matched[0])
+  if (!firstSku || firstSku === '未绑定 SKU' || !firstProductName) return ''
+  const firstKey = `${firstSku}__${firstProductName}`
+  const allSame = matched.every((asset) => `${businessSku(asset)}__${assetProductLabel(asset)}` === firstKey)
+  if (!allSame) return ''
+  return `${firstSku}-${firstProductName}`
+}
+
+function resolveBulkSearchZipFilename(): string {
+  const businessName = sharedBulkSearchBusinessName()
+  if (businessName) return buildTimestampedZipFilename(sanitizeZipEntryName(`${businessName}-批量搜索资产`, '批量搜索资产'))
+  return buildTimestampedZipFilename('资产中心批量搜索下载')
 }
 
 function openBulkSearchModal() {
@@ -1767,7 +1785,7 @@ async function downloadBulkSearchResults() {
         fallbackName: `asset-${item.asset_id}`,
         failureHint: `asset_id=${item.asset_id} filename=${item.filename || `asset-${item.asset_id}`} reason=fetch_failed`,
       })),
-      zipFilename: buildTimestampedZipFilename('bulk-assets'),
+      zipFilename: resolveBulkSearchZipFilename(),
       serverFailures: serverFailures.map(formatServerBatchDownloadFailure),
       onStatus: (message) => {
         bulkSearchStatus.value = message
@@ -2030,7 +2048,7 @@ async function downloadExcelPackageAsZip(items: AssetExcelPackageItem[], failure
       excelPackageStatus.value = `正在生成 ZIP ${Math.floor(metadata.percent)}%`
     },
   )
-  downloadBlob(blob, buildTimestampedZipFilename('excel-image-package'))
+  downloadBlob(blob, buildTimestampedZipFilename('Excel图片分拣包'))
   return copied
 }
 
