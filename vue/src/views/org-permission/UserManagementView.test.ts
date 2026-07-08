@@ -498,30 +498,32 @@ describe('UserManagementView role governance', () => {
     expect(usersApi.list).not.toHaveBeenCalled()
   })
 
-  it('bulk purges empty disabled orgs via one-click cleanup', async () => {
+  it('bulk purges disabled orgs even when member counts remain', async () => {
     vi.mocked(fetchOrgOwnershipOptions).mockResolvedValue({
       departmentOptions: [{ value: 'Design', label: '设计部' }],
       teamOptions: [{ value: 'Design-A', label: '设计一组', department: 'Design' }],
       departmentRecords: [
         { id: '1', name: 'Design', enabled: true, memberCount: 3 },
-        { id: '9', name: 'OldDept', enabled: false, memberCount: 0 },
+        { id: '9', name: 'OldDept', enabled: false, memberCount: 4 },
       ],
       teamRecords: [
         { id: '2', name: 'Design-A', departmentId: '1', departmentName: 'Design', enabled: true, memberCount: 3 },
-        { id: '7', name: 'OldTeam', departmentId: '1', departmentName: 'Design', enabled: false, memberCount: 0 },
-        { id: '8', name: 'OldDeptTeam', departmentId: '9', departmentName: 'OldDept', enabled: false, memberCount: 0 },
+        { id: '7', name: 'OldTeam', departmentId: '1', departmentName: 'Design', enabled: false, memberCount: 2 },
+        { id: '8', name: 'OldDeptTeam', departmentId: '9', departmentName: 'OldDept', enabled: false, memberCount: 1 },
       ],
     } as never)
     const wrapper = mountView()
     await flushPromises()
     const vm = wrapper.vm as unknown as {
-      emptyDisabledOrgCount: number
       openPurgeAllEmpty: () => void
       submitOrgAction: () => Promise<void>
+      removableDisabledOrgCount: number
     }
 
     // OldDept 与 OldTeam 各计 1 项;OldDeptTeam 随部门级联删除,不单独计数。
-    expect(vm.emptyDisabledOrgCount).toBe(2)
+    // memberCount 不再阻断删除,后端会把相关账号归入未分配池。
+    expect(vm.removableDisabledOrgCount).toBe(2)
+    expect(wrapper.text()).toContain('一键清理停用组织（2 项）')
 
     vm.openPurgeAllEmpty()
     await vm.submitOrgAction()

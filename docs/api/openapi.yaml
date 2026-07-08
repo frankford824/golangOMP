@@ -917,7 +917,7 @@ components:
       properties:
         name:
           type: string
-          description: Rename the department. Must be unique among org departments. Cannot be combined with deleting the same department.
+          description: Rename the department. Must be unique among org departments. Cannot be combined with stopping use of the same department.
         enabled:
           type: boolean
           description: Set to false to stop using the department. Existing assigned users are moved to the system unassigned pool, and child teams are disabled. System unassigned department cannot be deleted.
@@ -9102,10 +9102,11 @@ paths:
     delete:
       summary: Hard-delete organization department
       description: |
-        Permanently removes one disabled, zero-member department together with its (already disabled)
-        child teams from backend org master. This is the governance path for clearing retired legacy
-        records out of the org tree. Enabled departments, departments that still have members, and the
-        system `未分配` department are rejected with 400.
+        Permanently removes one non-system department together with its child teams from backend org
+        master. Existing assigned users are moved to the system `未分配/未分配池` before the org rows
+        are deleted, and managed-department / managed-team scope references to the removed org are
+        cleared. Historical task snapshots are not rewritten. The system `未分配` department is
+        rejected with 400.
       tags: [ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
@@ -9120,7 +9121,7 @@ paths:
         '204':
           description: Department deleted
         '400':
-          description: Department still enabled, still has members, or is the protected system department
+          description: Protected system department or unassigned pool unavailable
         '403':
           description: Permission denied
         '404':
@@ -9237,8 +9238,10 @@ paths:
     delete:
       summary: Hard-delete organization team
       description: |
-        Permanently removes one disabled, zero-member team from backend org master. Enabled teams,
-        teams that still have members, and the system unassigned pool team are rejected with 400.
+        Permanently removes one non-system team from backend org master. Existing assigned users are
+        moved to the system `未分配/未分配池` before the org row is deleted, and managed-team scope
+        references to the removed team are cleared. Historical task snapshots are not rewritten.
+        The system unassigned pool team is rejected with 400.
       tags: [ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
@@ -9253,7 +9256,7 @@ paths:
         '204':
           description: Team deleted
         '400':
-          description: Team still enabled, still has members, or is the protected system team
+          description: Protected system team or unassigned pool unavailable
         '403':
           description: Permission denied
         '404':

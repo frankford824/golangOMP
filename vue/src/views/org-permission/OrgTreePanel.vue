@@ -81,7 +81,7 @@
               >
                 <span class="org-item-name">{{ dept.label }}</span>
                 <span v-if="dept.memberCount != null" class="org-count-badge">{{ dept.memberCount }}</span>
-                <span v-if="!dept.enabled" class="org-state-pill org-state-pill--off">停用</span>
+                <span v-if="!dept.enabled" class="org-state-pill org-state-pill--off">已停用</span>
               </button>
             </div>
             <div v-if="dept.teams.length" class="org-filter-teams">
@@ -94,7 +94,7 @@
                 >
                   <span class="org-item-name">{{ team.label }}</span>
                   <span v-if="team.memberCount != null" class="org-count-badge">{{ team.memberCount }}</span>
-                  <span v-if="!team.enabled" class="org-state-pill org-state-pill--off">停用</span>
+                  <span v-if="!team.enabled" class="org-state-pill org-state-pill--off">已停用</span>
                 </button>
               </div>
             </div>
@@ -434,8 +434,8 @@ watch(searchKeyword, () => {
 }
 
 .org-state-pill--off {
-  background: rgb(var(--yb-surface-neutral-muted));
-  color: rgb(var(--yb-text-zinc-soft));
+  background: rgb(var(--yb-danger) / 0.1);
+  color: rgb(var(--yb-danger));
 }
 
 .org-tree-empty {

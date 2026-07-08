@@ -406,7 +406,7 @@ func TestIdentityServiceMergeTeamDoesNotRewriteSameNameManagedTeamOutsideSourceD
 	}
 }
 
-func TestIdentityServiceDeleteDisabledZeroMemberOrgRows(t *testing.T) {
+func TestIdentityServiceDeleteOrgRowsMovesMembersToUnassignedPool(t *testing.T) {
 	ConfigureTaskOrgCatalog(domain.AuthSettings{})
 	defer ConfigureTaskOrgCatalog(domain.AuthSettings{})
 
@@ -419,33 +419,79 @@ func TestIdentityServiceDeleteDisabledZeroMemberOrgRows(t *testing.T) {
 	}
 	department, _ := svc.CreateDepartment(context.Background(), CreateOrgDepartmentParams{Name: "待清理部门"})
 	team, _ := svc.CreateTeam(context.Background(), CreateOrgTeamParams{DepartmentID: &department.ID, Name: "待清理小组"})
-	if appErr := svc.DeleteTeam(context.Background(), team.ID); appErr == nil {
-		t.Fatal("DeleteTeam(enabled) expected validation error")
+	adminCtx := domain.WithRequestActor(context.Background(), domain.RequestActor{
+		ID:    1,
+		Roles: []domain.Role{domain.RoleAdmin, domain.RoleHRAdmin},
+	})
+	teamMember, appErr := svc.CreateManagedUser(adminCtx, CreateManagedUserParams{
+		Username:    "cleanup_team_member",
+		EmployeeNo:  intPtr(2210),
+		DisplayName: "Cleanup Team Member",
+		Department:  domain.Department("待清理部门"),
+		Team:        "待清理小组",
+		Mobile:      "13800002210",
+		Password:    "Init12345",
+		Roles:       []domain.Role{domain.RoleDeptAdmin},
+	})
+	if appErr != nil {
+		t.Fatalf("CreateManagedUser(team member) unexpected error: %+v", appErr)
 	}
-	disabled := false
-	if _, appErr := svc.UpdateTeam(context.Background(), UpdateOrgTeamParams{ID: team.ID, Enabled: &disabled}); appErr != nil {
-		t.Fatalf("UpdateTeam(disable) unexpected error: %+v", appErr)
-	}
+	userRepo.users[teamMember.ID].ManagedTeams = []string{"待清理小组", "其他小组"}
 	if appErr := svc.DeleteTeam(context.Background(), team.ID); appErr != nil {
-		t.Fatalf("DeleteTeam(disabled empty) unexpected error: %+v", appErr)
+		t.Fatalf("DeleteTeam(enabled with members) unexpected error: %+v", appErr)
 	}
 	if got, _ := orgRepo.GetTeamByID(context.Background(), team.ID); got != nil {
 		t.Fatalf("team after delete = %+v, want nil", got)
 	}
+	movedTeamMember, appErr := svc.GetUser(context.Background(), teamMember.ID)
+	if appErr != nil {
+		t.Fatalf("GetUser(team member after delete) appErr = %+v", appErr)
+	}
+	if movedTeamMember.Department != domain.DepartmentUnassigned || movedTeamMember.Team != "未分配池" {
+		t.Fatalf("DeleteTeam moved user = %+v, want unassigned pool", movedTeamMember)
+	}
+	if containsString(movedTeamMember.ManagedTeams, "待清理小组") {
+		t.Fatalf("DeleteTeam managed teams = %+v, want removed 待清理小组", movedTeamMember.ManagedTeams)
+	}
 
 	departmentWithChildren, _ := svc.CreateDepartment(context.Background(), CreateOrgDepartmentParams{Name: "待清理部门二"})
 	childTeam, _ := svc.CreateTeam(context.Background(), CreateOrgTeamParams{DepartmentID: &departmentWithChildren.ID, Name: "待级联小组"})
-	if _, appErr := svc.UpdateDepartment(context.Background(), UpdateOrgDepartmentParams{ID: departmentWithChildren.ID, Enabled: &disabled}); appErr != nil {
-		t.Fatalf("UpdateDepartment(disable) unexpected error: %+v", appErr)
+	departmentMember, appErr := svc.CreateManagedUser(adminCtx, CreateManagedUserParams{
+		Username:    "cleanup_department_member",
+		EmployeeNo:  intPtr(2211),
+		DisplayName: "Cleanup Department Member",
+		Department:  domain.Department("待清理部门二"),
+		Team:        "待级联小组",
+		Mobile:      "13800002211",
+		Password:    "Init12345",
+		Roles:       []domain.Role{domain.RoleDeptAdmin},
+	})
+	if appErr != nil {
+		t.Fatalf("CreateManagedUser(department member) unexpected error: %+v", appErr)
 	}
+	userRepo.users[departmentMember.ID].ManagedDepartments = []string{"待清理部门二", "其他部门"}
+	userRepo.users[departmentMember.ID].ManagedTeams = []string{"待级联小组", "其他小组"}
 	if appErr := svc.DeleteDepartment(context.Background(), departmentWithChildren.ID); appErr != nil {
-		t.Fatalf("DeleteDepartment(disabled empty) unexpected error: %+v", appErr)
+		t.Fatalf("DeleteDepartment(enabled with members) unexpected error: %+v", appErr)
 	}
 	if got, _ := orgRepo.GetDepartmentByID(context.Background(), departmentWithChildren.ID); got != nil {
 		t.Fatalf("department after delete = %+v, want nil", got)
 	}
 	if got, _ := orgRepo.GetTeamByID(context.Background(), childTeam.ID); got != nil {
 		t.Fatalf("child team after department delete = %+v, want nil", got)
+	}
+	movedDepartmentMember, appErr := svc.GetUser(context.Background(), departmentMember.ID)
+	if appErr != nil {
+		t.Fatalf("GetUser(department member after delete) appErr = %+v", appErr)
+	}
+	if movedDepartmentMember.Department != domain.DepartmentUnassigned || movedDepartmentMember.Team != "未分配池" {
+		t.Fatalf("DeleteDepartment moved user = %+v, want unassigned pool", movedDepartmentMember)
+	}
+	if containsString(movedDepartmentMember.ManagedDepartments, "待清理部门二") {
+		t.Fatalf("DeleteDepartment managed departments = %+v, want removed 待清理部门二", movedDepartmentMember.ManagedDepartments)
+	}
+	if containsString(movedDepartmentMember.ManagedTeams, "待级联小组") {
+		t.Fatalf("DeleteDepartment managed teams = %+v, want removed 待级联小组", movedDepartmentMember.ManagedTeams)
 	}
 }
 

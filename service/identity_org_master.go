@@ -434,9 +434,9 @@ func (s *identityService) MergeTeam(ctx context.Context, p MergeOrgTeamParams) (
 	return s.getTeamByID(ctx, target.ID)
 }
 
-// DeleteDepartment hard-deletes one disabled, zero-member department together
-// with its (already disabled) child teams. It is the governance path for
-// clearing retired legacy records out of the org tree for good.
+// DeleteDepartment hard-deletes one non-system department together with its
+// child teams. Assigned users are moved to the system unassigned pool first, so
+// organization cleanup never depends on manual member migration.
 func (s *identityService) DeleteDepartment(ctx context.Context, id int64) *domain.AppError {
 	if s.orgRepo == nil {
 		return domain.NewAppError(domain.ErrCodeInvalidStateTransition, "org master backend is not configured", nil)
@@ -451,17 +451,14 @@ func (s *identityService) DeleteDepartment(ctx context.Context, id int64) *domai
 	if current.Name == string(domain.DepartmentUnassigned) {
 		return domain.NewAppError(domain.ErrCodeInvalidRequest, "未分配是系统归属，不能删除。", map[string]interface{}{"deny_code": "system_org_delete_denied"})
 	}
-	if current.Enabled {
-		return domain.NewAppError(domain.ErrCodeInvalidRequest, "请先停用部门，再执行删除。", map[string]interface{}{"deny_code": "org_delete_requires_disabled"})
-	}
-	memberCount, appErr := s.countUsersByOrg(ctx, current.Name, "")
+	unassignedTeam, appErr := s.defaultUnassignedPoolTeam()
 	if appErr != nil {
 		return appErr
 	}
-	if memberCount > 0 {
-		return domain.NewAppError(domain.ErrCodeInvalidRequest, fmt.Sprintf("该部门下仍有 %d 名成员，请先迁移或合并成员后再删除。", memberCount), map[string]interface{}{"deny_code": "org_delete_has_members", "member_count": memberCount})
-	}
 	if err := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
+		if err := s.moveDepartmentUsersToUnassigned(ctx, tx, current.ID, current.Name, unassignedTeam); err != nil {
+			return err
+		}
 		if err := s.orgRepo.DeleteTeamsByDepartment(ctx, tx, current.ID); err != nil {
 			return err
 		}
@@ -473,7 +470,9 @@ func (s *identityService) DeleteDepartment(ctx context.Context, id int64) *domai
 	return nil
 }
 
-// DeleteTeam hard-deletes one disabled, zero-member team.
+// DeleteTeam hard-deletes one non-system team. Assigned users are moved to the
+// system unassigned pool first, so organization cleanup never depends on manual
+// member migration.
 func (s *identityService) DeleteTeam(ctx context.Context, id int64) *domain.AppError {
 	if s.orgRepo == nil {
 		return domain.NewAppError(domain.ErrCodeInvalidStateTransition, "org master backend is not configured", nil)
@@ -488,37 +487,20 @@ func (s *identityService) DeleteTeam(ctx context.Context, id int64) *domain.AppE
 	if current.Department == string(domain.DepartmentUnassigned) {
 		return domain.NewAppError(domain.ErrCodeInvalidRequest, "未分配池是系统归属，不能删除。", map[string]interface{}{"deny_code": "system_org_delete_denied"})
 	}
-	if current.Enabled {
-		return domain.NewAppError(domain.ErrCodeInvalidRequest, "请先停用小组，再执行删除。", map[string]interface{}{"deny_code": "org_delete_requires_disabled"})
-	}
-	memberCount, appErr := s.countUsersByOrg(ctx, current.Department, current.Name)
+	unassignedTeam, appErr := s.defaultUnassignedPoolTeam()
 	if appErr != nil {
 		return appErr
 	}
-	if memberCount > 0 {
-		return domain.NewAppError(domain.ErrCodeInvalidRequest, fmt.Sprintf("该小组下仍有 %d 名成员，请先迁移或合并成员后再删除。", memberCount), map[string]interface{}{"deny_code": "org_delete_has_members", "member_count": memberCount})
-	}
 	if err := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
+		if err := s.moveTeamUsersToUnassigned(ctx, tx, current.Department, current.Name, unassignedTeam); err != nil {
+			return err
+		}
 		return s.orgRepo.DeleteTeam(ctx, tx, current.ID)
 	}); err != nil {
 		return infraError("delete org team", err)
 	}
 	s.refreshRuntimeOrgCatalogLogged(ctx, "delete_team")
 	return nil
-}
-
-func (s *identityService) countUsersByOrg(ctx context.Context, department, team string) (int64, *domain.AppError) {
-	dept := domain.Department(strings.TrimSpace(department))
-	_, total, err := s.userRepo.List(ctx, repo.UserListFilter{
-		Department: &dept,
-		Team:       strings.TrimSpace(team),
-		Page:       1,
-		PageSize:   1,
-	})
-	if err != nil {
-		return 0, infraError("count users by org", err)
-	}
-	return total, nil
 }
 
 func (s *identityService) ensureTeamNameAvailable(ctx context.Context, departmentID int64, name string, excludeTeamID int64) *domain.AppError {

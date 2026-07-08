@@ -49,7 +49,7 @@
                   class="org-state-pill"
                   :class="{ 'org-state-pill--off': selectedOrgTeam ? !selectedOrgTeam.enabled : !selectedOrgDepartment.enabled }"
                 >
-                  {{ (selectedOrgTeam ? selectedOrgTeam.enabled : selectedOrgDepartment.enabled) ? '启用' : '停用' }}
+                  {{ (selectedOrgTeam ? selectedOrgTeam.enabled : selectedOrgDepartment.enabled) ? '已启用' : '已停用' }}
                 </span>
                 <span v-if="selectedOrgMemberCount != null" class="org-selected-member-count">
                   {{ selectedOrgMemberCount }} 人
@@ -83,11 +83,9 @@
                   合并到…
                 </button>
                 <button
-                  v-if="!selectedOrgDepartment.enabled && !isSystemDepartment(selectedOrgDepartment)"
+                  v-if="!isSystemDepartment(selectedOrgDepartment)"
                   type="button"
                   class="org-icon-btn org-icon-btn--danger"
-                  :disabled="(selectedOrgMemberCount ?? 1) > 0"
-                  :title="(selectedOrgMemberCount ?? 1) > 0 ? '仍有成员，请先迁移或合并成员' : undefined"
                   @click.stop="openPurgeDepartment(selectedOrgDepartment)"
                 >
                   彻底删除
@@ -114,11 +112,9 @@
                   合并到…
                 </button>
                 <button
-                  v-if="!selectedOrgTeam.enabled && !isSystemDepartment(selectedOrgDepartment)"
+                  v-if="!isSystemDepartment(selectedOrgDepartment)"
                   type="button"
                   class="org-icon-btn org-icon-btn--danger"
-                  :disabled="(selectedOrgMemberCount ?? 1) > 0"
-                  :title="(selectedOrgMemberCount ?? 1) > 0 ? '仍有成员，请先迁移或合并成员' : undefined"
                   @click.stop="openPurgeTeam(selectedOrgTeam)"
                 >
                   彻底删除
@@ -137,12 +133,12 @@
               @select-team="selectOrgTeam"
             />
             <button
-              v-if="canManageOrgMaster && emptyDisabledOrgCount > 0"
+              v-if="canManageOrgMaster && removableDisabledOrgCount > 0"
               type="button"
               class="org-cleanup-btn"
               @click="openPurgeAllEmpty"
             >
-              一键清理空停用组织（{{ emptyDisabledOrgCount }} 项）
+              一键清理停用组织（{{ removableDisabledOrgCount }} 项）
             </button>
           </aside>
           <div class="user-list-panel">
@@ -191,6 +187,7 @@
                 :data="users"
                 :loading="listLoading"
                 :row-key="userRowKey"
+                :row-class-name="userRowClassName"
                 :scroll-x="980"
                 density="compact"
                 empty-title="暂无用户"
@@ -278,7 +275,7 @@
             <div v-if="orgActionIsDelete" class="delete-confirm-box">
               <p>{{ orgActionDeleteCopy }}</p>
               <ul v-if="orgAction?.mode === 'purgeAllEmpty'" class="purge-list">
-                <li v-for="name in emptyDisabledOrgNames" :key="name">{{ name }}</li>
+                <li v-for="name in removableDisabledOrgNames" :key="name">{{ name }}</li>
               </ul>
             </div>
             <div v-else-if="orgActionIsMerge" class="form-grid form-grid--single">
@@ -579,30 +576,31 @@ const orgFilterBreadcrumb = computed(() => {
   if (!departmentFilter.value) return ''
   return teamFilter.value ? `${departmentFilter.value} / ${teamFilter.value}` : departmentFilter.value
 })
-// 一键治理候选:已停用且确认无成员(member_count 明确为 0)的部门与小组。
+// 一键治理候选:所有已停用的非系统部门与小组。删除时后端会把仍在该
+// 组织内的账号归入未分配池,因此不再用 member_count 阻断治理。
 // 部门删除会级联其小组,因此小组列表排除待删部门下的小组。
-const emptyDisabledOrgCleanup = computed<{ departments: OrgTreeDepartment[]; teams: OrgTreeTeam[] }>(() => {
+const removableDisabledOrgCleanup = computed<{ departments: OrgTreeDepartment[]; teams: OrgTreeTeam[] }>(() => {
   if (!canManageOrgMaster.value) return { departments: [], teams: [] }
   const departments = orgTree.value.filter(
-    (dept) => !dept.enabled && !!dept.id && dept.memberCount === 0 && !isSystemDepartment(dept),
+    (dept) => !dept.enabled && !!dept.id && !isSystemDepartment(dept),
   )
   const purgedDeptIds = new Set(departments.map((dept) => dept.id))
   const teams: OrgTreeTeam[] = []
   for (const dept of orgTree.value) {
     if (isSystemDepartment(dept) || purgedDeptIds.has(dept.id)) continue
     for (const team of dept.teams) {
-      if (!team.enabled && !!team.id && team.memberCount === 0) teams.push(team)
+      if (!team.enabled && !!team.id) teams.push(team)
     }
   }
   return { departments, teams }
 })
-const emptyDisabledOrgCount = computed(
-  () => emptyDisabledOrgCleanup.value.departments.length + emptyDisabledOrgCleanup.value.teams.length,
+const removableDisabledOrgCount = computed(
+  () => removableDisabledOrgCleanup.value.departments.length + removableDisabledOrgCleanup.value.teams.length,
 )
-const emptyDisabledOrgNames = computed(() => {
+const removableDisabledOrgNames = computed(() => {
   const parts: string[] = []
-  for (const dept of emptyDisabledOrgCleanup.value.departments) parts.push(`部门「${dept.label}」`)
-  for (const team of emptyDisabledOrgCleanup.value.teams) parts.push(`小组「${team.department} / ${team.label}」`)
+  for (const dept of removableDisabledOrgCleanup.value.departments) parts.push(`部门「${dept.label}」`)
+  for (const team of removableDisabledOrgCleanup.value.teams) parts.push(`小组「${team.department} / ${team.label}」`)
   return parts
 })
 
@@ -698,7 +696,7 @@ const orgActionTitle = computed(() => {
     case 'purgeTeam':
       return '彻底删除小组'
     case 'purgeAllEmpty':
-      return '清理空停用组织'
+      return '清理停用组织'
     default:
       return '组织维护'
   }
@@ -722,10 +720,10 @@ const orgActionSubtitle = computed(() => {
     return '组内成员会迁入目标小组，本小组随后自动停用。'
   }
   if (orgAction.value.mode === 'purgeDepartment' || orgAction.value.mode === 'purgeTeam') {
-    return '彻底删除会从组织树中永久移除该记录，仅允许删除已停用且无成员的组织。'
+    return '彻底删除会从组织树中永久移除该记录；当前仍在该组织内的账号会自动进入未分配池。'
   }
   if (orgAction.value.mode === 'purgeAllEmpty') {
-    return '批量彻底删除所有已停用且无成员的部门与小组，用于清理历史遗留脏数据。'
+    return '批量彻底删除所有停用部门与小组；相关账号会自动进入未分配池。'
   }
   return '组织名称会立即用于用户归属选择。'
 })
@@ -741,13 +739,13 @@ const orgActionDeleteCopy = computed(() => {
       : `确认停用小组「${orgAction.value.team?.label ?? ''}」？原有人员会自动进入未分配池。`
   }
   if (orgAction.value?.mode === 'purgeDepartment') {
-    return `确认彻底删除部门「${orgAction.value.department?.label ?? ''}」？该操作不可恢复，历史遗留记录将从组织树中消失。`
+    return `确认彻底删除部门「${orgAction.value.department?.label ?? ''}」？该操作不可恢复，该部门下账号会自动进入未分配池。`
   }
   if (orgAction.value?.mode === 'purgeTeam') {
-    return `确认彻底删除小组「${orgAction.value.team?.label ?? ''}」？该操作不可恢复。`
+    return `确认彻底删除小组「${orgAction.value.team?.label ?? ''}」？该操作不可恢复，该小组下账号会自动进入未分配池。`
   }
   if (orgAction.value?.mode === 'purgeAllEmpty') {
-    return `确认批量彻底删除以下 ${emptyDisabledOrgCount.value} 项空停用组织？该操作不可恢复。`
+    return `确认批量彻底删除以下 ${removableDisabledOrgCount.value} 项停用组织？该操作不可恢复，相关账号会自动进入未分配池。`
   }
   return ''
 })
@@ -799,8 +797,12 @@ const userTableColumns = computed<DataTableColumns<UserRow>>(() => [
   {
     title: '姓名',
     key: 'display_name',
-    width: 150,
-    render: (row) => row.display_name || '-',
+    minWidth: 170,
+    render: (row) =>
+      h('div', { class: 'user-name-cell' }, [
+        h('span', { class: 'user-name-text' }, row.display_name || '-'),
+        renderUserStatusPill(row.status, 'status-pill--inline'),
+      ]),
   },
   {
     title: '工号',
@@ -866,17 +868,10 @@ const userTableColumns = computed<DataTableColumns<UserRow>>(() => [
     render: (row) => formatWorkflowRolesForDisplay(row.roles),
   },
   {
-    title: '状态',
+    title: '账号状态',
     key: 'status',
-    width: 110,
-    render: (row) =>
-      h(
-        'span',
-        {
-          class: ['status-pill', row.status === 'active' ? 'status-pill--on' : 'status-pill--off'],
-        },
-        formatUserStatusForDisplay(row.status),
-      ),
+    width: 116,
+    render: (row) => renderUserStatusPill(row.status),
   },
   {
     title: '操作',
@@ -1168,6 +1163,24 @@ function emptyCreateForm() {
 
 function userRowKey(row: UserRow): DataTableRowKey {
   return row.id
+}
+
+function userRowClassName(row: UserRow): string {
+  return row.status === 'disabled' ? 'user-row--disabled' : ''
+}
+
+function renderUserStatusPill(status: string | undefined, extraClass = '') {
+  return h(
+    'span',
+    {
+      class: [
+        'status-pill',
+        status === 'active' ? 'status-pill--on' : 'status-pill--off',
+        extraClass,
+      ].filter(Boolean),
+    },
+    formatUserStatusForDisplay(status),
+  )
 }
 
 function findVisibleOrgDepartment(department: string): OrgTreeDepartment | undefined {
@@ -1695,7 +1708,7 @@ async function submitOrgAction() {
   if (action.mode === 'purgeAllEmpty') {
     // 批量清理:逐项删除并收集失败原因;无论成败都刷新组织树,
     // 已删除的项立即从树中消失,失败项保留并在弹窗中给出原因。
-    const { departments, teams } = emptyDisabledOrgCleanup.value
+    const { departments, teams } = removableDisabledOrgCleanup.value
     const failures: string[] = []
     try {
       for (const team of teams) {
@@ -2120,8 +2133,8 @@ onBeforeUnmount(() => {
 }
 
 .org-state-pill--off {
-  background: rgb(var(--yb-surface-neutral-muted));
-  color: rgb(var(--yb-text-zinc-soft));
+  background: rgb(var(--yb-danger) / 0.1);
+  color: rgb(var(--yb-danger));
 }
 
 .org-action-btn,
@@ -2247,23 +2260,54 @@ onBeforeUnmount(() => {
   color: rgb(var(--yb-text-zinc-deep));
 }
 
+.user-name-cell {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.user-name-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: rgb(var(--yb-text-zinc-strong));
+  font-weight: 650;
+}
+
 .status-pill {
   display: inline-flex;
+  flex: 0 0 auto;
   align-items: center;
+  justify-content: center;
+  min-width: 3.2rem;
   padding: 0.12rem 0.5rem;
+  border: 1px solid transparent;
   border-radius: 9999px;
   font-size: 0.6875rem;
-  font-weight: 600;
+  font-weight: 750;
+  line-height: 1.2;
+}
+
+.status-pill--inline {
+  min-width: 0;
+  padding-inline: 0.42rem;
 }
 
 .status-pill--on {
   background: rgb(var(--yb-success-soft));
+  border-color: rgb(var(--yb-success-border));
   color: rgb(var(--yb-success-deep));
 }
 
 .status-pill--off {
-  background: rgb(var(--yb-surface-neutral-muted));
-  color: rgb(var(--yb-text-zinc-soft));
+  background: rgb(var(--yb-danger) / 0.14);
+  border-color: rgb(var(--yb-danger-border-soft));
+  color: rgb(var(--yb-danger));
+}
+
+:deep(.user-row--disabled .n-data-table-td) {
+  background: rgb(var(--yb-danger) / 0.025);
 }
 
 .link-btn {

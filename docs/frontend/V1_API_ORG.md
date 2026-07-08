@@ -140,7 +140,7 @@ curl -X POST https://api.example.com/v1/org/departments \
 支持方法: PUT, DELETE。
 
 - `PUT`: Updates one backend org department. Supports renaming (`name`) and stopping use (`enabled=false`). When a department is stopped, the department and its child teams disappear from enabled org options, child teams are disabled, and existing assigned users are moved to the system `未分配/未分配池`. The system unassigned department cannot be deleted. Historical task snapshots are not rewritten.
-- `DELETE`: Permanently removes one disabled, zero-member department together with its (already disabled) child teams from backend org master. This is the governance path for clearing retired legacy records out of the org tree. Enabled departments, departments that still have members, and the system `未分配` department are rejected with 400.
+- `DELETE`: Permanently removes one non-system department together with its child teams from backend org master. Existing assigned users are moved to the system `未分配/未分配池` before the org rows are deleted, and managed-department / managed-team scope references to the removed org are cleared. Historical task snapshots are not rewritten. The system `未分配` department is rejected with 400.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -161,7 +161,7 @@ Content-Type: `application/json`
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `name` | string | 否 | Rename the department. Must be unique among org departments. Cannot be combined with deleting the same department. |
+| `name` | string | 否 | Rename the department. Must be unique among org departments. Cannot be combined with stopping use of the same department. |
 | `enabled` | boolean | 否 | Set to false to stop using the department. Existing assigned users are moved to the system unassigned pool, and child teams are disabled. System unassigned department cannot be deleted. |
 
 ##### 响应体 schema
@@ -216,7 +216,7 @@ curl -X PUT https://api.example.com/v1/org/departments/<id> \
 ##### 错误码
 | HTTP | code | deny_code | 说明 |
 |---|---|---|---|
-| 400 | 见 `error.code` | 见 `deny_code` | Department still enabled, still has members, or is the protected system department |
+| 400 | 见 `error.code` | 见 `deny_code` | Protected system department or unassigned pool unavailable |
 | 403 | 见 `error.code` | 见 `deny_code` | Permission denied |
 | 404 | 见 `error.code` | 见 `deny_code` | Department not found |
 
@@ -365,7 +365,7 @@ curl -X POST https://api.example.com/v1/org/teams \
 支持方法: PUT, DELETE。
 
 - `PUT`: Updates one backend org team. Supports renaming (`name`) and stopping use (`enabled=false`). When a team is stopped, it disappears from enabled org options and existing assigned users are moved to the system `未分配/未分配池`. The system unassigned pool team cannot be deleted. Historical task snapshots are not rewritten.
-- `DELETE`: Permanently removes one disabled, zero-member team from backend org master. Enabled teams, teams that still have members, and the system unassigned pool team are rejected with 400.
+- `DELETE`: Permanently removes one non-system team from backend org master. Existing assigned users are moved to the system `未分配/未分配池` before the org row is deleted, and managed-team scope references to the removed team are cleared. Historical task snapshots are not rewritten. The system unassigned pool team is rejected with 400.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -441,7 +441,7 @@ curl -X PUT https://api.example.com/v1/org/teams/<id> \
 ##### 错误码
 | HTTP | code | deny_code | 说明 |
 |---|---|---|---|
-| 400 | 见 `error.code` | 见 `deny_code` | Team still enabled, still has members, or is the protected system team |
+| 400 | 见 `error.code` | 见 `deny_code` | Protected system team or unassigned pool unavailable |
 | 403 | 见 `error.code` | 见 `deny_code` | Permission denied |
 | 404 | 见 `error.code` | 见 `deny_code` | Team not found |
 
