@@ -2179,7 +2179,8 @@ func taskLatestAssetTypeExpr() string {
 }
 
 func taskLatestAssetJoinSQL() string {
-	return `LEFT JOIN (
+	return `
+		LEFT JOIN (
 			SELECT ta.task_id,
 			       CASE
 			         WHEN SUM(CASE WHEN ta.asset_type IN ('delivery', 'draft', 'revised', 'final', 'outsource_return') THEN 1 ELSE 0 END) > 0 THEN 'delivery'

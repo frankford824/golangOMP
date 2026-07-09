@@ -35,6 +35,9 @@ func TestBuildTaskListQuerySpecUsesJoinedLatestAssetProjection(t *testing.T) {
 	if !strings.Contains(spec.fromSQL, "la ON la.task_id = t.id") {
 		t.Fatalf("fromSQL missing latest asset alias join: %s", spec.fromSQL)
 	}
+	if strings.Contains(spec.fromSQL, "t.idLEFT") {
+		t.Fatalf("fromSQL concatenated warehouse and latest asset joins without whitespace: %s", spec.fromSQL)
+	}
 	if strings.Contains(spec.countFromSQL, "task_assets ta") {
 		t.Fatalf("countFromSQL should not include latest asset join for plain list: %s", spec.countFromSQL)
 	}
