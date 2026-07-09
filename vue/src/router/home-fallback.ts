@@ -44,42 +44,6 @@ export function resolveFirstAccessibleHomeRoute(
   permissionsStore: PermissionStoreLike,
 ): RouteLocationRaw | null {
   for (const candidate of HOME_ROUTE_CANDIDATES) {
-    if (candidate.name === 'TaskList') {
-      const canReviewCustomization =
-        permissionsStore.hasAction?.('task.customization.review') === true ||
-        permissionsStore.hasAction?.('task.customization.effect_review') === true ||
-        permissionsStore.hasMenu('customization_management')
-      const canReviewNormal =
-        permissionsStore.hasAction?.('task.audit.review') === true ||
-        permissionsStore.hasAction?.('task.audit.claim') === true
-      if (canReviewCustomization && !canReviewNormal) {
-        return {
-          name: candidate.name,
-          query: {
-            task_category: 'customization',
-            status: 'PendingCustomizationReview,PendingEffectReview',
-          },
-        }
-      }
-      if (canReviewNormal && !canReviewCustomization) {
-        return {
-          name: candidate.name,
-          query: {
-            task_category: 'normal',
-            status: 'PendingAuditA,PendingAuditB',
-          },
-        }
-      }
-      if (canReviewCustomization && canReviewNormal) {
-        return {
-          name: candidate.name,
-          query: {
-            status: 'PendingAuditA,PendingAuditB,PendingCustomizationReview,PendingEffectReview',
-          },
-        }
-      }
-      return { name: candidate.name }
-    }
     if (permissionsStore.hasMenu(candidate.menuKey)) {
       return { name: candidate.name }
     }
@@ -127,6 +91,13 @@ export function resolvePostLoginLandingRoute(
   if (redirect) {
     const resolvedRedirect = router.resolve(redirect)
     if (resolvedRedirect.matched.length > 0 && canAccessRouteByMeta(resolvedRedirect, permissionsStore)) {
+      const isCreateRedirect =
+        resolvedRedirect.name === 'TaskCreate' ||
+        (resolvedRedirect.name === 'TaskList' && String(resolvedRedirect.query.create ?? '') === '1')
+      const hasDraftID = String(resolvedRedirect.query.draft_id ?? '').trim() !== ''
+      if (isCreateRedirect && !hasDraftID) {
+        return { name: 'TaskList' }
+      }
       return redirect
     }
   }

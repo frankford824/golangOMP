@@ -299,8 +299,11 @@
         <div class="batch-audit-handover-section">
           <div class="batch-audit-handover-section-head">
             <h3>筛选</h3>
-            <span>可交班 {{ auditHandoverEligibleCount }} 条</span>
+            <span>我的可交班 {{ auditHandoverEligibleCount }} 条</span>
           </div>
+          <p class="batch-audit-handover-hint">
+            仅显示当前由我处理、尚未发起交班的常规待审核任务；未认领待审任务不属于交班范围。
+          </p>
           <div class="batch-audit-handover-filters">
             <BaseInput
               v-model="auditHandoverFilters.keyword"
@@ -363,10 +366,10 @@
             <BaseButton
               size="sm"
               variant="secondary"
-              :disabled="auditHandoverCandidates.length === 0 || batchAuditHandoverSubmitting"
+              :disabled="auditHandoverPreviewCandidates.length === 0 || batchAuditHandoverSubmitting"
               @click="selectAuditHandoverCurrentPage"
             >
-              只选当前页
+              选中当前显示
             </BaseButton>
             <BaseButton
               size="sm"
@@ -399,12 +402,12 @@
                 <tr v-if="auditHandoverCandidateLoading">
                   <td colspan="6">正在加载可交班任务...</td>
                 </tr>
-                <tr v-else-if="auditHandoverCandidates.length === 0">
+                <tr v-else-if="auditHandoverPreviewCandidates.length === 0">
                   <td colspan="6">当前没有符合条件的可交班任务</td>
                 </tr>
                 <template v-else>
                   <tr
-                    v-for="candidate in auditHandoverCandidates"
+                    v-for="candidate in auditHandoverPreviewCandidates"
                     :key="candidate.task_id"
                   >
                     <td>
@@ -435,7 +438,8 @@
               上一页
             </BaseButton>
             <span>
-              第 {{ auditHandoverCandidatePagination.page }} / {{ auditHandoverCandidateTotalPages }} 页
+              第 {{ auditHandoverCandidatePagination.page }} / {{ auditHandoverCandidateTotalPages }} 页，
+              当前显示 {{ auditHandoverPreviewCandidates.length }} / {{ auditHandoverCandidatePagination.total }} 条
             </span>
             <BaseButton
               size="sm"
@@ -659,6 +663,29 @@ function parseTaskTab(value: unknown): TaskListTab {
     : 'all'
 }
 
+const TASK_LIST_SCOPE_QUERY_KEYS = [
+  'tab',
+  'task_category',
+  'status',
+  'q',
+  'task_type',
+  'priority',
+  'creator_id',
+  'owner_department',
+  'owner_org_team',
+  'warehouse_status',
+  'date_from',
+  'date_to',
+  'overdue',
+] as const
+
+function queryHasTaskListScope(query: Record<string, unknown>): boolean {
+  return TASK_LIST_SCOPE_QUERY_KEYS.some((key) => {
+    if (!(key in query) || query[key] == null) return false
+    return queryString(query[key]).trim() !== ''
+  })
+}
+
 function restoreState() {
   try {
     const raw = sessionStorage.getItem(STORAGE_KEY)
@@ -688,7 +715,7 @@ function saveState() {
   }
 }
 
-const saved = restoreState()
+const saved = queryHasTaskListScope(route.query as Record<string, unknown>) ? restoreState() : {}
 
 const searchKeyword = ref((route.query.q as string) || (saved.searchKeyword as string) || '')
 const activeTab = ref<TaskListTab>(parseTaskTab(route.query.tab ?? saved.activeTab))
@@ -722,7 +749,7 @@ const auditHandoverCandidateLoading = ref(false)
 const auditHandoverCandidateError = ref('')
 const auditHandoverCandidatePagination = reactive({
   page: 1,
-  page_size: 20,
+  page_size: 100,
   total: 0,
 })
 const auditHandoverEntryEligibleCount = ref(0)
@@ -821,6 +848,35 @@ const batchAuditHandoverTasks = computed(() =>
     return String(task.currentHandlerId ?? '').trim() === currentUserId
   }),
 )
+function taskToAuditHandoverCandidate(task: Task): AuditHandoverCandidateItem | null {
+  const taskID = Number.parseInt(String(task.id), 10)
+  if (!Number.isSafeInteger(taskID) || taskID <= 0) return null
+  const handlerIDRaw = String(task.currentHandlerId ?? '').trim()
+  const handlerID = handlerIDRaw ? Number.parseInt(handlerIDRaw, 10) : null
+  return {
+    task_id: taskID,
+    task_no: task.taskNo,
+    sku_code: displaySku(task) || undefined,
+    primary_sku_code: task.sku ?? undefined,
+    product_name: taskCardTitle(task),
+    task_status: task.status,
+    owner_org_team: task.ownerOrgTeam || task.groupName || undefined,
+    current_handler_id: Number.isSafeInteger(handlerID) ? handlerID : null,
+    current_handler_name: task.currentHandlerName ?? undefined,
+    updated_at: task.updatedAt,
+  }
+}
+const auditHandoverPreviewCandidates = computed(() => {
+  const merged = new Map<number, AuditHandoverCandidateItem>()
+  for (const task of batchAuditHandoverTasks.value) {
+    const item = taskToAuditHandoverCandidate(task)
+    if (item) merged.set(item.task_id, item)
+  }
+  for (const item of auditHandoverCandidates.value) {
+    merged.set(item.task_id, item)
+  }
+  return Array.from(merged.values())
+})
 const auditHandoverCandidateTotalPages = computed(() =>
   Math.max(1, Math.ceil(auditHandoverCandidatePagination.total / auditHandoverCandidatePagination.page_size)),
 )
@@ -899,66 +955,6 @@ const filters = ref<TaskListFilters>({
   ...defaultTaskFilters,
   ...(savedFiltersRaw as Partial<TaskListFilters>),
 })
-
-const CUSTOMIZATION_REVIEWER_ROLES = [
-  'CustomizationReviewer',
-  'customization_reviewer',
-  'customizationreviewer',
-] as const
-const TASK_LIST_SCOPE_QUERY_KEYS = [
-  'tab',
-  'task_category',
-  'status',
-  'q',
-  'task_type',
-  'priority',
-  'creator_id',
-  'owner_department',
-  'owner_org_team',
-  'warehouse_status',
-  'date_from',
-  'date_to',
-  'overdue',
-] as const
-
-function queryHasTaskListScope(query: Record<string, unknown>): boolean {
-  return TASK_LIST_SCOPE_QUERY_KEYS.some((key) => {
-    if (!(key in query) || query[key] == null) return false
-    return queryString(query[key]).trim() !== ''
-  })
-}
-
-function applyAuditRoleDefaultScope() {
-  if (queryHasTaskListScope(route.query as Record<string, unknown>)) return
-  const canReviewCustomization = permissionsStore.hasAnyRole(CUSTOMIZATION_REVIEWER_ROLES)
-  const canReviewNormal = permissionsStore.hasAction('task.audit.review')
-  if (!canReviewCustomization && !canReviewNormal) return
-
-  activeTab.value = 'all'
-  if (canReviewCustomization && !canReviewNormal) {
-    filters.value = {
-      ...filters.value,
-      taskCategory: 'customization',
-      status: ['PendingCustomizationReview', 'PendingEffectReview'],
-    }
-    return
-  }
-  if (canReviewNormal && !canReviewCustomization) {
-    filters.value = {
-      ...filters.value,
-      taskCategory: 'normal',
-      status: ['PendingAuditA', 'PendingAuditB'],
-    }
-    return
-  }
-  filters.value = {
-    ...filters.value,
-    taskCategory: '',
-    status: ['PendingAuditA', 'PendingAuditB', 'PendingCustomizationReview', 'PendingEffectReview'],
-  }
-}
-
-applyAuditRoleDefaultScope()
 
 const activeAdvancedFilterCount = computed(() => {
   const f = filters.value
@@ -1343,7 +1339,7 @@ function selectAllAuditHandoverMatching() {
 function selectAuditHandoverCurrentPage() {
   auditHandoverSelectionMode.value = 'explicit'
   auditHandoverSelectedCandidateIds.clear()
-  for (const candidate of auditHandoverCandidates.value) {
+  for (const candidate of auditHandoverPreviewCandidates.value) {
     auditHandoverSelectedCandidateIds.add(candidate.task_id)
   }
 }
