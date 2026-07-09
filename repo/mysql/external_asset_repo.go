@@ -26,6 +26,28 @@ type sqlQueryRowContext interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
+func retryExternalAssetLockConflict(ctx context.Context, run func() error) error {
+	const maxAttempts = 4
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		lastErr = run()
+		if lastErr == nil {
+			return nil
+		}
+		if !isMySQLLockConflict(lastErr) || attempt == maxAttempts || ctx.Err() != nil {
+			return lastErr
+		}
+		timer := time.NewTimer(time.Duration(attempt) * 150 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return lastErr
+}
+
 func NewExternalAssetRepo(db *DB) repo.ExternalAssetRepo { return &externalAssetRepo{db: db} }
 
 const externalAssetSelectColumns = `
@@ -594,18 +616,27 @@ func (r *externalAssetRepo) Upsert(ctx context.Context, item domain.ExternalAsse
 		return nil, fmt.Errorf("external asset origin_path and file_name are required")
 	}
 	hash := domain.ExternalAssetOriginHash(item.Provider, item.MountPath, item.OriginPath)
+	if err := retryExternalAssetLockConflict(ctx, func() error {
+		return r.upsertExternalAsset(ctx, item, hash)
+	}); err != nil {
+		return nil, err
+	}
+	return r.getByHash(ctx, hash)
+}
+
+func (r *externalAssetRepo) upsertExternalAsset(ctx context.Context, item domain.ExternalAssetUpsert, hash string) error {
 	tx, err := r.db.db.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, fmt.Errorf("begin external asset upsert: %w", err)
+		return fmt.Errorf("begin external asset upsert: %w", err)
 	}
 	defer tx.Rollback()
 	existing, err := getExternalAssetCountStateForUpdate(ctx, tx, hash)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	sourceFingerprint, err := getExternalAssetSourceFingerprintForUpdate(ctx, tx, hash)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO external_asset_records (
@@ -633,23 +664,23 @@ func (r *externalAssetRepo) Upsert(ctx context.Context, item domain.ExternalAsse
 		item.FileName, item.FileExt, item.MimeType, item.FileSize, item.IsDir, item.RawURL,
 		item.ScannedAt, item.ScannedAt, item.SearchableText)
 	if err != nil {
-		return nil, fmt.Errorf("upsert external asset: %w", err)
+		return fmt.Errorf("upsert external asset: %w", err)
 	}
 	if err := maintainExternalAssetDirectoryIndex(ctx, tx, existing, item); err != nil {
-		return nil, err
+		return err
 	}
 	if externalAssetNeedsOSSRealignment(existing, sourceFingerprint, item) {
 		if err := resetExternalAssetOSSStateForRealignment(ctx, tx, hash); err != nil {
-			return nil, err
+			return err
 		}
 	}
 	if err := upsertExternalAssetSourceFingerprint(ctx, tx, hash, item); err != nil {
-		return nil, err
+		return err
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("commit external asset upsert: %w", err)
+		return fmt.Errorf("commit external asset upsert: %w", err)
 	}
-	return r.getByHash(ctx, hash)
+	return nil
 }
 
 func externalAssetNeedsOSSRealignment(existing *externalAssetCountState, sourceFingerprint *externalAssetSourceFingerprintState, item domain.ExternalAssetUpsert) bool {
@@ -799,6 +830,12 @@ func (r *externalAssetRepo) FinishSyncRun(ctx context.Context, id int64, status 
 }
 
 func (r *externalAssetRepo) MarkMountMissingBefore(ctx context.Context, mountPath string, scannedBefore time.Time) error {
+	return retryExternalAssetLockConflict(ctx, func() error {
+		return r.markMountMissingBefore(ctx, mountPath, scannedBefore)
+	})
+}
+
+func (r *externalAssetRepo) markMountMissingBefore(ctx context.Context, mountPath string, scannedBefore time.Time) error {
 	mountPath = strings.TrimSpace(mountPath)
 	if mountPath == "" || scannedBefore.IsZero() {
 		return nil
@@ -828,6 +865,12 @@ func (r *externalAssetRepo) MarkMountMissingBefore(ctx context.Context, mountPat
 }
 
 func (r *externalAssetRepo) MarkOriginPrefixesMissingBefore(ctx context.Context, prefixes []repo.ExternalAssetOriginPrefix, scannedBefore time.Time) error {
+	return retryExternalAssetLockConflict(ctx, func() error {
+		return r.markOriginPrefixesMissingBefore(ctx, prefixes, scannedBefore)
+	})
+}
+
+func (r *externalAssetRepo) markOriginPrefixesMissingBefore(ctx context.Context, prefixes []repo.ExternalAssetOriginPrefix, scannedBefore time.Time) error {
 	prefixes = normalizeExternalAssetOriginPrefixes(prefixes)
 	if len(prefixes) == 0 || scannedBefore.IsZero() {
 		return nil

@@ -1,9 +1,12 @@
 package mysqlrepo
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/go-sql-driver/mysql"
 
 	"workflow/domain"
 )
@@ -22,6 +25,22 @@ func TestBuildExternalAssetWhereUsesFullTextForKeyword(t *testing.T) {
 	}
 	if !strings.Contains(orderBy, "updated_at DESC") {
 		t.Fatalf("orderBy = %q, want updated_at order", orderBy)
+	}
+}
+
+func TestIsMySQLLockConflictRecognizesRetryableWriteConflicts(t *testing.T) {
+	cases := []struct {
+		err  error
+		want bool
+	}{
+		{err: fmt.Errorf("wrapped: %w", &mysql.MySQLError{Number: 1213}), want: true},
+		{err: fmt.Errorf("wrapped: %w", &mysql.MySQLError{Number: 1205}), want: true},
+		{err: fmt.Errorf("wrapped: %w", &mysql.MySQLError{Number: 1062}), want: false},
+	}
+	for _, tc := range cases {
+		if got := isMySQLLockConflict(tc.err); got != tc.want {
+			t.Fatalf("isMySQLLockConflict(%v) = %v, want %v", tc.err, got, tc.want)
+		}
 	}
 }
 
