@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { Download, RefreshCw } from 'lucide-vue-next'
 
 import SettlementHubTabs from '@aw/shared/console/SettlementHubTabs.vue'
@@ -23,6 +23,7 @@ type ReportGridRow = Record<string, unknown> & {
   row_type: SettlementReportRow['row_type']
 }
 type ReportSectionKey = 'overview' | 'difficulty' | 'daily' | 'supplements'
+type ReportRangeMode = 'single' | 'last3' | 'last12' | 'available'
 
 interface ReportNavItem {
   key: ReportSectionKey
@@ -34,6 +35,11 @@ interface ReportNavItem {
 const month = ref(defaultBusinessMonth())
 const exporting = ref(false)
 const activeReportSection = ref<ReportSectionKey>('overview')
+const reportRangeMode = ref<ReportRangeMode>('single')
+const availableReportMonths = ref<string[]>([])
+const availableMonthsLoading = ref(false)
+const exportError = ref('')
+const reportNotice = ref('')
 
 const reportRequest = usePageRequest<SettlementReport>(
   (signal) => assetWorkbenchApi.settlementReport(month.value, signal),
@@ -43,6 +49,7 @@ const reportRequest = usePageRequest<SettlementReport>(
 const loading = reportRequest.loading
 const error = reportRequest.error
 const report = computed(() => reportRequest.data.value)
+const reportError = computed(() => error.value || exportError.value)
 const totals = computed(() => report.value?.totals)
 const difficultyClasses = computed(() => report.value?.difficulty_classes ?? [])
 const normalRows = computed(() => buildGridRows(domainRows.value.filter((row) => row.row_type === 'normal_piecework')))
@@ -94,6 +101,37 @@ const reportNavGroups = computed<{ label: string; items: ReportNavItem[] }[]>(()
     ],
   },
 ])
+const reportRangeOptions: Array<{ value: ReportRangeMode; label: string }> = [
+  { value: 'single', label: '当前月' },
+  { value: 'last3', label: '近 3 个月' },
+  { value: 'last12', label: '近 12 个月' },
+  { value: 'available', label: '全部已有月份' },
+]
+const reportLoadedForSelectedMonth = computed(() => report.value?.business_month === month.value)
+const currentReportHasData = computed(() => reportLoadedForSelectedMonth.value && reportHasData(report.value))
+const selectedExportMonths = computed(() => {
+  if (reportRangeMode.value === 'last3') return previousBusinessMonths(month.value, 3)
+  if (reportRangeMode.value === 'last12') return previousBusinessMonths(month.value, 12)
+  if (reportRangeMode.value === 'available') {
+    const known = mergeBusinessMonths([month.value, ...availableReportMonths.value, report.value?.business_month || ''])
+    return known.length ? known : [month.value]
+  }
+  return [month.value]
+})
+const canExportReport = computed(() => {
+  if (exporting.value || loading.value || availableMonthsLoading.value) return false
+  if (reportRangeMode.value === 'single') return currentReportHasData.value
+  return selectedExportMonths.value.length > 0
+})
+const exportDisabledReason = computed(() => {
+  if (exporting.value) return '正在生成导出文件'
+  if (loading.value) return '当前月份正在加载'
+  if (availableMonthsLoading.value) return '正在读取可导出月份'
+  if (reportRangeMode.value !== 'single') return ''
+  if (!reportLoadedForSelectedMonth.value) return '请先加载当前选择月份的数据'
+  if (!currentReportHasData.value) return '当前月份没有可导出的计件统计'
+  return ''
+})
 
 const baseColumns: GridColumn[] = [
   { key: 'creator_name', label: '创建人', width: 132 },
@@ -122,17 +160,80 @@ const intColumns = new Set(['order_count', 'item_count', 'page_count', 'error_co
 const percentColumns = new Set(['error_rate', 'page_count_share', 'error_count_share', 'month_amount_share'])
 
 function loadReport() {
+  exportError.value = ''
+  reportNotice.value = ''
+  reportRequest.reset(null)
   void reportRequest.run()
 }
 
 async function exportReport() {
-  if (!report.value) return
+  if (!canExportReport.value) {
+    exportError.value = exportDisabledReason.value || '没有可导出的计件统计'
+    return
+  }
+  exportError.value = ''
+  reportNotice.value = ''
   exporting.value = true
   try {
-    await exportSettlementReportWorkbook({ businessMonth: month.value, report: report.value })
+    const reports: Array<{ businessMonth: string; report: SettlementReport }> = []
+    for (const businessMonth of selectedExportMonths.value) {
+      const current = report.value?.business_month === businessMonth ? report.value : null
+      const next = current ?? await assetWorkbenchApi.settlementReport(businessMonth)
+      if (reportHasData(next)) {
+        reports.push({ businessMonth, report: next })
+      }
+    }
+    if (!reports.length) {
+      exportError.value = '选择范围内没有可导出的计件统计'
+      return
+    }
+    await exportSettlementReportWorkbook({ businessMonth: exportFileRangeLabel(), reports })
+    reportNotice.value = reports.length === 1 ? `已导出 ${reports[0].businessMonth} 计件统计` : `已导出 ${formatInt(reports.length)} 个月计件统计`
+    void refreshAvailableReportMonths()
+  } catch (err) {
+    exportError.value = err instanceof Error ? err.message : '计件统计导出失败'
   } finally {
     exporting.value = false
   }
+}
+
+async function refreshAvailableReportMonths() {
+  availableMonthsLoading.value = true
+  try {
+    const result = await assetWorkbenchApi.listSettlementBatches({ page: 1, page_size: 200 })
+    availableReportMonths.value = mergeBusinessMonths(result.items.map((item) => item.business_month))
+  } finally {
+    availableMonthsLoading.value = false
+  }
+}
+
+function reportHasData(value?: SettlementReport | null) {
+  if (!value) return false
+  return (value.rows?.length ?? 0) > 0 || (value.totals?.item_count ?? 0) > 0 || Math.abs(value.totals?.net_amount ?? 0) > 0
+}
+
+function previousBusinessMonths(value: string, count: number): string[] {
+  const match = /^(\d{4})-(\d{2})$/.exec(value)
+  if (!match) return [value]
+  const year = Number(match[1])
+  const monthIndex = Number(match[2]) - 1
+  const output: string[] = []
+  for (let index = 0; index < count; index += 1) {
+    const date = new Date(year, monthIndex - index, 1)
+    output.push(`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`)
+  }
+  return output
+}
+
+function mergeBusinessMonths(values: string[]): string[] {
+  return Array.from(new Set(values.filter((value) => /^\d{4}-\d{2}$/.test(value)))).sort((a, b) => b.localeCompare(a))
+}
+
+function exportFileRangeLabel() {
+  if (reportRangeMode.value === 'single') return month.value
+  if (reportRangeMode.value === 'last3') return `${month.value}-last3`
+  if (reportRangeMode.value === 'last12') return `${month.value}-last12`
+  return 'available-months'
 }
 
 function buildGridRows(rows: SettlementReportRow[]): ReportGridRow[] {
@@ -206,7 +307,14 @@ function defaultBusinessMonth() {
   return currentBusinessMonth()
 }
 
-onMounted(loadReport)
+watch(month, () => {
+  loadReport()
+})
+
+onMounted(() => {
+  loadReport()
+  void refreshAvailableReportMonths()
+})
 </script>
 
 <template>
@@ -223,16 +331,24 @@ onMounted(loadReport)
           <span>结算月</span>
           <input v-model="month" type="month" />
         </label>
+        <label class="aw-month-control">
+          <span>导出范围</span>
+          <select v-model="reportRangeMode">
+            <option v-for="option in reportRangeOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+          </select>
+        </label>
         <button class="aw-secondary-button" type="button" :disabled="loading" @click="loadReport">
           <RefreshCw :size="16" aria-hidden="true" />
           刷新
         </button>
-        <button class="aw-primary-button" type="button" :disabled="exporting || !report" @click="exportReport">
+        <button class="aw-primary-button" type="button" :disabled="!canExportReport" @click="exportReport">
           <Download :size="16" aria-hidden="true" />
-          导出表格
+          {{ exporting ? '导出中…' : '导出表格' }}
         </button>
       </div>
     </div>
+    <p v-if="reportNotice" class="aw-inline-alert">{{ reportNotice }}</p>
+    <p v-if="exportDisabledReason && reportRangeMode === 'single'" class="aw-copy">{{ exportDisabledReason }}</p>
 
     <div class="aw-settlement-workbench aw-report-workbench">
       <aside class="aw-settlement-nav" aria-label="计件统计导航">
@@ -272,7 +388,7 @@ onMounted(loadReport)
               <span class="aw-chip aw-chip--info">包含待结算作品和已批准补录</span>
             </div>
           </div>
-          <AsyncBoundary :loading="loading" :error="error" :empty="!report" loading-label="正在加载计件统计" empty-label="暂无统计数据" @retry="loadReport">
+          <AsyncBoundary :loading="loading" :error="reportError" :empty="!report" loading-label="正在加载计件统计" empty-label="暂无统计数据" @retry="loadReport">
             <div class="aw-metric-grid">
               <article v-for="card in summaryCards" :key="card.label" class="aw-metric-card">
                 <span>{{ card.label }}</span>
@@ -290,7 +406,7 @@ onMounted(loadReport)
               <p>按全月作图量拆分，金额为对应难度的小计金额。</p>
             </div>
           </div>
-          <AsyncBoundary :loading="loading" :error="error" :empty="!report" loading-label="正在加载难度构成" empty-label="暂无统计数据" @retry="loadReport">
+          <AsyncBoundary :loading="loading" :error="reportError" :empty="!report" loading-label="正在加载难度构成" empty-label="暂无统计数据" @retry="loadReport">
             <div v-if="difficultySummary.length" class="aw-metric-grid">
               <article v-for="metric in difficultySummary" :key="metric.difficulty_class" class="aw-metric-card">
                 <span>{{ difficultyLabel(metric.difficulty_class) }}</span>
@@ -312,7 +428,7 @@ onMounted(loadReport)
               <p>日常上传作品产生的计件明细，包含质检扣款、福利和难度分列。</p>
             </div>
           </div>
-          <AsyncBoundary :loading="loading" :error="error" :empty="!report" loading-label="正在加载日常计件" empty-label="暂无统计数据" @retry="loadReport">
+          <AsyncBoundary :loading="loading" :error="reportError" :empty="!report" loading-label="正在加载日常计件" empty-label="暂无统计数据" @retry="loadReport">
             <WorkbenchDataGrid
               v-if="normalRows.length"
               :columns="columns"
@@ -343,7 +459,7 @@ onMounted(loadReport)
               <p>补录计件单独成行，方便和日常计件分开核对。</p>
             </div>
           </div>
-          <AsyncBoundary :loading="loading" :error="error" :empty="!report" loading-label="正在加载补录计件" empty-label="暂无统计数据" @retry="loadReport">
+          <AsyncBoundary :loading="loading" :error="reportError" :empty="!report" loading-label="正在加载补录计件" empty-label="暂无统计数据" @retry="loadReport">
             <WorkbenchDataGrid
               v-if="supplementRows.length"
               :columns="columns"

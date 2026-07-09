@@ -280,6 +280,8 @@ export interface SubmissionDetail {
 
 export interface SettlementPreviewRow {
   payee_user_id: number
+  payee_name?: string
+  worker_type?: string
   item_count: number
   page_count: number
   gross_amount: number
@@ -292,6 +294,8 @@ export interface SettlementPreviewRow {
 
 export interface SettlementPayrollRow {
   payee_user_id: number
+  payee_name?: string
+  worker_type?: string
   business_month: string
   row_type: 'normal_piecework' | 'supplement_piecework'
   item_count: number
@@ -433,6 +437,7 @@ export interface SettlementSupplementRow {
   linked_batch_id?: number
   status: string
   order_no: string
+  supplement_date?: string
   difficulty_class: string
   finalized: boolean
   page_count: number
@@ -441,6 +446,10 @@ export interface SettlementSupplementRow {
     has_duplicates?: boolean
     submission_item_ids?: number[]
     supplement_ids?: number[]
+    order_no?: string
+    supplement_date?: string
+    business_month?: string
+    payee_user_id?: number
   }
 }
 
@@ -1042,6 +1051,7 @@ export interface CreateSettlementSupplementPayload {
   payee_user_id: number
   business_month: string
   order_no: string
+  supplement_date?: string
   difficulty_class: string
   finalized: boolean
   page_count: number

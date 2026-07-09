@@ -1062,9 +1062,12 @@ func (h *AssetWorkbenchHandler) ListSubmissions(c *gin.Context) {
 	}
 	var payeeID *int64
 	if raw := strings.TrimSpace(c.Query("payee_user_id")); raw != "" {
-		if value, err := strconv.ParseInt(raw, 10, 64); err == nil && value > 0 {
-			payeeID = &value
+		value, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || value <= 0 {
+			respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "payee_user_id must be a positive integer.", nil))
+			return
 		}
+		payeeID = &value
 	}
 	items, total, appErr := h.svc.ListSubmissions(c.Request.Context(), actor, repo.AssetWorkbenchSubmissionFilter{
 		SubmitterUserID:  submitterID,
@@ -1634,6 +1637,15 @@ func (h *AssetWorkbenchHandler) ListSupplementPermissions(c *gin.Context) {
 	}
 	page, _ := strconv.Atoi(c.Query("page"))
 	pageSize, _ := strconv.Atoi(c.Query("page_size"))
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = 20
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
 	var payeeID *int64
 	if raw := strings.TrimSpace(c.Query("payee_user_id")); raw != "" {
 		if value, err := strconv.ParseInt(raw, 10, 64); err == nil && value > 0 {
@@ -1710,12 +1722,17 @@ func (h *AssetWorkbenchHandler) ListSettlementSupplements(c *gin.Context) {
 		}
 	}
 	items, total, appErr := h.svc.ListSettlementSupplements(c.Request.Context(), actor, repo.AssetWorkbenchSettlementSupplementFilter{
-		PayeeUserID:   payeeID,
-		BusinessMonth: c.Query("business_month"),
-		OrderNo:       c.Query("order_no"),
-		Status:        c.Query("status"),
-		Page:          page,
-		PageSize:      pageSize,
+		PayeeUserID:        payeeID,
+		BusinessMonth:      c.Query("business_month"),
+		OrderNo:            c.Query("order_no"),
+		Status:             c.Query("status"),
+		SupplementDate:     c.Query("supplement_date"),
+		SupplementDateFrom: c.Query("supplement_date_from"),
+		SupplementDateTo:   c.Query("supplement_date_to"),
+		SortBy:             c.Query("sort_by"),
+		SortDir:            c.Query("sort_dir"),
+		Page:               page,
+		PageSize:           pageSize,
 	})
 	if appErr != nil {
 		respondError(c, appErr)

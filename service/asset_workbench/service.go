@@ -813,6 +813,8 @@ type SettlementPreview struct {
 
 type SettlementPreviewRow struct {
 	PayeeUserID      int64   `json:"payee_user_id"`
+	PayeeName        string  `json:"payee_name,omitempty"`
+	WorkerType       string  `json:"worker_type,omitempty"`
 	ItemCount        int     `json:"item_count"`
 	PageCount        int     `json:"page_count"`
 	GrossAmount      float64 `json:"gross_amount"`
@@ -825,6 +827,8 @@ type SettlementPreviewRow struct {
 
 type SettlementPayrollRow struct {
 	PayeeUserID      int64   `json:"payee_user_id"`
+	PayeeName        string  `json:"payee_name,omitempty"`
+	WorkerType       string  `json:"worker_type,omitempty"`
 	BusinessMonth    string  `json:"business_month"`
 	RowType          string  `json:"row_type"`
 	ItemCount        int     `json:"item_count"`
@@ -924,6 +928,7 @@ type CreateSettlementSupplementParams struct {
 	PayeeUserID     int64   `json:"payee_user_id"`
 	BusinessMonth   string  `json:"business_month"`
 	OrderNo         string  `json:"order_no"`
+	SupplementDate  string  `json:"supplement_date,omitempty"`
 	DifficultyClass string  `json:"difficulty_class"`
 	Finalized       bool    `json:"finalized"`
 	PageCount       int     `json:"page_count"`
@@ -4823,7 +4828,11 @@ func (s *Service) GetSettlementBatchDetail(ctx context.Context, actor domain.Req
 	if err != nil {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to list settlement batch items.", err.Error())
 	}
-	return &SettlementBatchDetail{Batch: batch, Items: items, PayrollRows: buildSettlementPayrollRowsFromItems(batch.BusinessMonth, items)}, nil
+	payrollRows, appErr := s.buildSettlementPayrollRowsFromItems(ctx, batch.BusinessMonth, items)
+	if appErr != nil {
+		return nil, appErr
+	}
+	return &SettlementBatchDetail{Batch: batch, Items: items, PayrollRows: payrollRows}, nil
 }
 
 func (s *Service) ListSupplementPermissions(ctx context.Context, actor domain.RequestActor, filter repo.AssetWorkbenchSupplementPermissionFilter) ([]*domain.AssetWorkbenchSupplementPermission, int64, *domain.AppError) {
@@ -4901,7 +4910,11 @@ func (s *Service) ListSettlementSupplements(ctx context.Context, actor domain.Re
 	if !actorHasAny(actor, domain.RoleAssetSettlement, domain.RoleSuperAdmin) {
 		return nil, 0, domain.NewAppError(domain.ErrCodePermissionDenied, "Only settlement roles can list settlement supplements.", nil)
 	}
-	items, total, err := s.repo.ListSettlementSupplements(ctx, filter)
+	normalizedFilter, appErr := normalizeSettlementSupplementFilter(filter)
+	if appErr != nil {
+		return nil, 0, appErr
+	}
+	items, total, err := s.repo.ListSettlementSupplements(ctx, normalizedFilter)
 	if err != nil {
 		return nil, 0, domain.NewAppError(domain.ErrCodeInternalError, "Failed to list settlement supplements.", err.Error())
 	}
@@ -7161,7 +7174,13 @@ func (s *Service) buildSettlementPreview(ctx context.Context, businessMonth stri
 		return rows[i].PayeeUserID < rows[j].PayeeUserID
 	})
 	payrollRows := make([]SettlementPayrollRow, 0, len(rowsByPayee)*2)
-	for _, row := range rows {
+	for index := range rows {
+		row := &rows[index]
+		profile, appErr := s.settlementReportProfile(ctx, row.PayeeUserID, profiles)
+		if appErr != nil {
+			return nil, appErr
+		}
+		applySettlementPreviewProfile(row, profile)
 		normalPayrollRow := normalPayrollRowsByPayee[row.PayeeUserID]
 		if normalPayrollRow == nil {
 			normalPayrollRow = &SettlementPayrollRow{
@@ -7178,6 +7197,8 @@ func (s *Service) buildSettlementPreview(ctx context.Context, businessMonth stri
 				RowType:       domain.AssetWorkbenchPayrollRowTypeSupplementPiecework,
 			}
 		}
+		applySettlementPayrollProfile(normalPayrollRow, profile)
+		applySettlementPayrollProfile(supplementPayrollRow, profile)
 		payrollRows = append(payrollRows, *normalPayrollRow, *supplementPayrollRow)
 	}
 	return &SettlementPreview{BusinessMonth: businessMonth, Rows: rows, Totals: total, PayrollRows: payrollRows}, nil
@@ -7444,6 +7465,19 @@ func (s *Service) buildSettlementReport(ctx context.Context, businessMonth strin
 	}, nil
 }
 
+func (s *Service) buildSettlementPayrollRowsFromItems(ctx context.Context, businessMonth string, items []*domain.AssetWorkbenchSettlementItem) ([]SettlementPayrollRow, *domain.AppError) {
+	rows := buildSettlementPayrollRowsFromItems(businessMonth, items)
+	profiles := map[int64]*domain.AssetWorkbenchProfile{}
+	for index := range rows {
+		profile, appErr := s.settlementReportProfile(ctx, rows[index].PayeeUserID, profiles)
+		if appErr != nil {
+			return nil, appErr
+		}
+		applySettlementPayrollProfile(&rows[index], profile)
+	}
+	return rows, nil
+}
+
 func buildSettlementPayrollRowsFromItems(businessMonth string, items []*domain.AssetWorkbenchSettlementItem) []SettlementPayrollRow {
 	normalRowsByPayee := map[int64]*SettlementPayrollRow{}
 	supplementRowsByPayee := map[int64]*SettlementPayrollRow{}
@@ -7542,9 +7576,29 @@ func buildSettlementPayrollRowsFromItems(businessMonth string, items []*domain.A
 	return rows
 }
 
+func applySettlementPreviewProfile(row *SettlementPreviewRow, profile *domain.AssetWorkbenchProfile) {
+	if row == nil || profile == nil {
+		return
+	}
+	row.PayeeName = strings.TrimSpace(profile.RealName)
+	row.WorkerType = strings.TrimSpace(profile.WorkerType)
+}
+
+func applySettlementPayrollProfile(row *SettlementPayrollRow, profile *domain.AssetWorkbenchProfile) {
+	if row == nil || profile == nil {
+		return
+	}
+	row.PayeeName = strings.TrimSpace(profile.RealName)
+	row.WorkerType = strings.TrimSpace(profile.WorkerType)
+}
+
 func (s *Service) settlementReportProfile(ctx context.Context, payeeUserID int64, cache map[int64]*domain.AssetWorkbenchProfile) (*domain.AssetWorkbenchProfile, *domain.AppError) {
 	if profile, ok := cache[payeeUserID]; ok {
 		return profile, nil
+	}
+	if s.repo == nil {
+		cache[payeeUserID] = nil
+		return nil, nil
 	}
 	profile, err := s.repo.GetProfileByUserID(ctx, payeeUserID)
 	if err != nil {
@@ -7737,6 +7791,7 @@ func (s *Service) buildSettlementSupplementDuplicateHint(ctx context.Context, su
 		"submission_item_ids": submissionItemIDs,
 		"supplement_ids":      supplementIDs,
 		"order_no":            orderNo,
+		"supplement_date":     strings.TrimSpace(supplement.SupplementDate),
 		"business_month":      supplement.BusinessMonth,
 		"payee_user_id":       supplement.PayeeUserID,
 	}), nil
@@ -9671,6 +9726,24 @@ func normalizePromoCoupon(actorID int64, params CreatePromoCouponParams) (*domai
 
 func normalizeSettlementSupplement(actorID int64, params CreateSettlementSupplementParams) (*domain.AssetWorkbenchSettlementSupplement, *domain.AppError) {
 	businessMonth := strings.TrimSpace(params.BusinessMonth)
+	supplementDate := strings.TrimSpace(params.SupplementDate)
+	if supplementDate != "" {
+		normalizedDate, parsedDate, ok := normalizeSupplementDate(supplementDate)
+		if !ok {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "supplement_date must use YYYY-MM-DD.", nil)
+		}
+		supplementDate = normalizedDate
+		derivedMonth := parsedDate.Format("2006-01")
+		if businessMonth == "" {
+			businessMonth = derivedMonth
+		}
+		if businessMonth != derivedMonth {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "supplement_date must belong to business_month.", map[string]string{
+				"supplement_date": supplementDate,
+				"business_month":  businessMonth,
+			})
+		}
+	}
 	if _, err := time.Parse("2006-01", businessMonth); err != nil {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "business_month must use YYYY-MM.", nil)
 	}
@@ -9700,13 +9773,91 @@ func normalizeSettlementSupplement(actorID int64, params CreateSettlementSupplem
 		BusinessMonth:   businessMonth,
 		Status:          status,
 		OrderNo:         orderNo,
+		SupplementDate:  supplementDate,
 		DifficultyClass: difficulty,
 		Finalized:       params.Finalized,
 		PageCount:       params.PageCount,
 		GrossAmount:     params.GrossAmount,
-		DuplicateHint:   mustJSON(map[string]interface{}{"dedupe_scope": "payee_user_id + business_month + order_no", "strength": "hint"}),
-		CreatedBy:       actorID,
+		DuplicateHint: mustJSON(map[string]interface{}{
+			"dedupe_scope":    "payee_user_id + business_month + order_no",
+			"strength":        "hint",
+			"supplement_date": supplementDate,
+		}),
+		CreatedBy: actorID,
 	}, nil
+}
+
+func normalizeSettlementSupplementFilter(filter repo.AssetWorkbenchSettlementSupplementFilter) (repo.AssetWorkbenchSettlementSupplementFilter, *domain.AppError) {
+	filter.BusinessMonth = strings.TrimSpace(filter.BusinessMonth)
+	filter.OrderNo = strings.TrimSpace(filter.OrderNo)
+	filter.Status = strings.TrimSpace(filter.Status)
+	filter.SupplementDate = strings.TrimSpace(filter.SupplementDate)
+	filter.SupplementDateFrom = strings.TrimSpace(filter.SupplementDateFrom)
+	filter.SupplementDateTo = strings.TrimSpace(filter.SupplementDateTo)
+	filter.SortBy = strings.TrimSpace(filter.SortBy)
+	filter.SortDir = strings.TrimSpace(strings.ToLower(filter.SortDir))
+	if filter.BusinessMonth != "" {
+		if _, err := time.Parse("2006-01", filter.BusinessMonth); err != nil {
+			return filter, domain.NewAppError(domain.ErrCodeInvalidRequest, "business_month must use YYYY-MM.", nil)
+		}
+	}
+	for _, item := range []struct {
+		name  string
+		value string
+	}{
+		{name: "supplement_date", value: filter.SupplementDate},
+		{name: "supplement_date_from", value: filter.SupplementDateFrom},
+		{name: "supplement_date_to", value: filter.SupplementDateTo},
+	} {
+		if item.value == "" {
+			continue
+		}
+		normalized, _, ok := normalizeSupplementDate(item.value)
+		if !ok {
+			return filter, domain.NewAppError(domain.ErrCodeInvalidRequest, item.name+" must use YYYY-MM-DD.", nil)
+		}
+		switch item.name {
+		case "supplement_date":
+			filter.SupplementDate = normalized
+		case "supplement_date_from":
+			filter.SupplementDateFrom = normalized
+		case "supplement_date_to":
+			filter.SupplementDateTo = normalized
+		}
+	}
+	if filter.SupplementDateFrom != "" && filter.SupplementDateTo != "" && filter.SupplementDateFrom > filter.SupplementDateTo {
+		return filter, domain.NewAppError(domain.ErrCodeInvalidRequest, "supplement_date_from must not be after supplement_date_to.", nil)
+	}
+	if filter.SortDir != "" && filter.SortDir != "asc" && filter.SortDir != "desc" {
+		return filter, domain.NewAppError(domain.ErrCodeInvalidRequest, "sort_dir must be asc or desc.", nil)
+	}
+	if filter.SortBy != "" && !allowedSettlementSupplementSorts[filter.SortBy] {
+		return filter, domain.NewAppError(domain.ErrCodeInvalidRequest, "sort_by is not supported.", map[string][]string{
+			"allowed": settlementSupplementSortKeys(),
+		})
+	}
+	return filter, nil
+}
+
+var allowedSettlementSupplementSorts = map[string]bool{
+	"id":              true,
+	"business_month":  true,
+	"payee_user_id":   true,
+	"order_no":        true,
+	"supplement_date": true,
+	"status":          true,
+	"gross_amount":    true,
+	"created_at":      true,
+	"updated_at":      true,
+}
+
+func settlementSupplementSortKeys() []string {
+	keys := make([]string, 0, len(allowedSettlementSupplementSorts))
+	for key := range allowedSettlementSupplementSorts {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func normalizeSupplementPermission(actorID int64, params UpsertSupplementPermissionParams, now time.Time) (*domain.AssetWorkbenchSupplementPermission, *domain.AppError) {
@@ -9729,6 +9880,21 @@ func normalizeSupplementPermission(actorID int64, params UpsertSupplementPermiss
 		item.RevokedAt = &now
 	}
 	return item, nil
+}
+
+func normalizeSupplementDate(raw string) (string, time.Time, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", time.Time{}, true
+	}
+	layouts := []string{"2006-01-02", "2006/01/02", "2006.01.02", "2006-1-2", "2006/1/2", "2006.1.2"}
+	for _, layout := range layouts {
+		parsed, err := time.Parse(layout, raw)
+		if err == nil {
+			return parsed.Format("2006-01-02"), parsed, true
+		}
+	}
+	return "", time.Time{}, false
 }
 
 func normalizeSettlementAdjustmentType(raw string) string {
@@ -10319,6 +10485,7 @@ func parseSettlementSupplementExcel(businessMonth string, reader io.Reader) ([]s
 	if !ok {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Excel file is missing gross_amount column.", nil)
 	}
+	supplementDateIndex, hasSupplementDate := firstExcelColumn(headers, "supplement_date", "supplementdate", "补录日期", "想补日期", "日期")
 	finalizedIndex, hasFinalized := firstExcelColumn(headers, "finalized", "定稿", "是否定稿")
 	parsed := make([]settlementSupplementExcelRow, 0, len(rows)-1)
 	for rowIndex, row := range rows[1:] {
@@ -10350,12 +10517,17 @@ func parseSettlementSupplementExcel(businessMonth string, reader io.Reader) ([]s
 		if hasFinalized {
 			finalized = parseExcelBoolDefault(excelCell(row, finalizedIndex), true)
 		}
+		supplementDate := ""
+		if hasSupplementDate {
+			supplementDate = strings.TrimSpace(excelCell(row, supplementDateIndex))
+		}
 		parsed = append(parsed, settlementSupplementExcelRow{
 			row: currentRow,
 			params: CreateSettlementSupplementParams{
 				PayeeUserID:     payeeUserID,
 				BusinessMonth:   businessMonth,
 				OrderNo:         orderNo,
+				SupplementDate:  supplementDate,
 				DifficultyClass: difficulty,
 				Finalized:       finalized,
 				PageCount:       pageCount,

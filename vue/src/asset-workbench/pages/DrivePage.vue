@@ -868,6 +868,41 @@ function overviewMaterialIdentityKeys(row: OverviewSearchRow): Set<string> {
   return keys
 }
 
+function clientMaterialForAsset(asset: SystemAssetRow): ClientMaterialRow | null {
+  const assetKeys = materialIdentityKeys(asset)
+  return clientMaterials.value.find((material) => hasSharedIdentity(assetKeys, clientMaterialIdentityKeys(material))) || null
+}
+
+function materialWithCurrentClientPublication(asset: SystemAssetRow): SystemAssetRow {
+  const material = clientMaterialForAsset(asset)
+  if (material) return materialWithClientPublication(asset, material)
+  return { ...asset, material_id: undefined }
+}
+
+function syncActiveMaterialPublication() {
+  if (!activeMaterial.value) return
+  activeMaterial.value = materialWithCurrentClientPublication(activeMaterial.value)
+}
+
+function materialClientStatus(asset: SystemAssetRow) {
+  const material = clientMaterialForAsset(asset)
+  if (!material) {
+    return { label: '未上架到客户端', chipClass: 'aw-chip aw-chip--neutral' }
+  }
+  if (material.enabled) {
+    return { label: '客户端已上架', chipClass: 'aw-chip aw-chip--success' }
+  }
+  return { label: '客户端已停用', chipClass: 'aw-chip aw-chip--warn' }
+}
+
+function materialClientStatusLabel(asset: SystemAssetRow) {
+  return materialClientStatus(asset).label
+}
+
+function materialClientStatusClass(asset: SystemAssetRow) {
+  return materialClientStatus(asset).chipClass
+}
+
 function hasSharedIdentity(left: Set<string>, right: Set<string>): boolean {
   for (const key of left) {
     if (right.has(key)) return true
@@ -1229,8 +1264,7 @@ function materialWithClientPublication(asset: SystemAssetRow, row: ClientMateria
 const activeClientMaterial = computed(() => {
   const asset = activeMaterial.value
   if (!asset) return null
-  const assetKeys = materialIdentityKeys(asset)
-  return clientMaterials.value.find((material) => hasSharedIdentity(assetKeys, clientMaterialIdentityKeys(material))) || null
+  return clientMaterialForAsset(asset)
 })
 const enabledClientMaterialCount = computed(() => clientMaterials.value.filter((material) => material.enabled).length)
 const disabledClientMaterialCount = computed(() => clientMaterials.value.length - enabledClientMaterialCount.value)
@@ -2332,16 +2366,17 @@ function selectClientMaterial(material: ClientMaterialRow) {
   selectMaterial(existing ? materialWithClientPublication(existing, material) : materialFromClient(material))
 }
 
-async function refreshClientMaterials() {
-  if (!canManageDrive.value || clientMaterialLoading.value) return
-  clientMaterialLoading.value = true
+async function refreshClientMaterials(options: { silent?: boolean } = {}) {
+  if (!canManageDrive.value || (clientMaterialLoading.value && !options.silent)) return
+  if (!options.silent) clientMaterialLoading.value = true
   clientMaterialError.value = ''
   try {
     clientMaterials.value = await assetWorkbenchApi.listClientMaterials(true)
+    syncActiveMaterialPublication()
   } catch (err) {
     clientMaterialError.value = err instanceof Error ? err.message : '客户端素材加载失败'
   } finally {
-    clientMaterialLoading.value = false
+    if (!options.silent) clientMaterialLoading.value = false
   }
 }
 
@@ -2401,11 +2436,17 @@ async function refreshBatchJobs(silent = false) {
   if (!canManageDrive.value) return
   if (!silent) batchJobsLoading.value = true
   batchJobsError.value = ''
+  const hadActiveJobs = activeBatchJobCount.value > 0
   try {
     const result = await assetWorkbenchApi.listBatchJobs({ page: 1, page_size: 20 })
     batchJobs.value = result.items || []
     if (activeBatchJobCount.value > 0) scheduleBatchJobPolling()
-    else stopBatchJobPolling()
+    else {
+      stopBatchJobPolling()
+      if (hadActiveJobs) {
+        await refreshClientMaterials({ silent: true })
+      }
+    }
   } catch (err) {
     batchJobsError.value = err instanceof Error ? err.message : '批量任务加载失败'
   } finally {
@@ -2590,8 +2631,11 @@ async function finishClientMaterialBatch(action: 'publish' | 'disable' | 'remove
     return
   }
   clientMaterials.value = await assetWorkbenchApi.listClientMaterials(true)
+  syncActiveMaterialPublication()
   if (action === 'remove') {
     activeMaterial.value = activeMaterial.value ? { ...activeMaterial.value, material_id: undefined } : null
+  } else {
+    syncActiveMaterialPublication()
   }
   const actionLabel = action === 'publish' ? '上架' : action === 'disable' ? '停用' : '下架'
   notice.value = `${actionLabel}完成：请求 ${result.requested} 项，成功 ${result.created + result.updated + result.removed} 项，跳过 ${result.skipped} 项，失败 ${result.failed} 项。`
@@ -2904,7 +2948,7 @@ onBeforeUnmount(() => {
               已停用 {{ disabledClientMaterialCount }}
             </button>
           </div>
-          <button class="aw-grid-button" type="button" :disabled="clientMaterialLoading" @click="refreshClientMaterials">
+          <button class="aw-grid-button" type="button" :disabled="clientMaterialLoading" @click="() => refreshClientMaterials()">
             {{ clientMaterialLoading ? '刷新中…' : '刷新' }}
           </button>
         </div>
@@ -3508,7 +3552,10 @@ onBeforeUnmount(() => {
                         <strong :title="titleOf(asset)">{{ materialFolderFileName(asset) }}</strong>
                         <small>{{ materialCodeOf(asset) }} · {{ materialTypeLabel(asset) }}</small>
                       </span>
-                      <span class="aw-chip aw-chip--subtle aw-material-row__source">{{ sourceLabelOf(asset) }}</span>
+                      <span class="aw-material-row__badges">
+                        <span class="aw-chip aw-chip--subtle aw-material-row__source">{{ sourceLabelOf(asset) }}</span>
+                        <span :class="materialClientStatusClass(asset)">{{ materialClientStatusLabel(asset) }}</span>
+                      </span>
                     </button>
                   </div>
                 </div>
@@ -3650,7 +3697,7 @@ onBeforeUnmount(() => {
             <div><dt>文件</dt><dd>{{ activeMaterial.original_filename || activeMaterial.file_name || '—' }}</dd></div>
             <div><dt>类型</dt><dd>{{ materialTypeLabel(activeMaterial) }}</dd></div>
             <div><dt>路径</dt><dd>{{ materialVirtualFilePath(activeMaterial) || '—' }}</dd></div>
-            <div><dt>客户端</dt><dd>{{ activeClientMaterial ? (activeClientMaterial.enabled ? '已上架' : '已停用') : '未上架' }}</dd></div>
+            <div><dt>客户端</dt><dd>{{ materialClientStatusLabel(activeMaterial) }}</dd></div>
           </dl>
           <div class="aw-drive__detail-actions">
             <button class="aw-primary-button" type="button" @click="openMaterialPreview(activeMaterial)">

@@ -14,7 +14,7 @@
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
-- 本文件覆盖 `210` 个 `/v1` path；同一路径多 method 合并在同一节。
+- 本文件覆盖 `211` 个 `/v1` path；同一路径多 method 合并在同一节。
 
 ## GET /v1/trace-events
 
@@ -13992,12 +13992,149 @@ curl -X GET https://api.example.com/v1/asset-workbench/settlement/report \
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
 
+## GET /v1/asset-workbench/settlement/supplements
+
+### 简介
+支持方法: GET, POST。
+
+- `GET`: Lists manual settlement supplement rows. Settlement roles can page, sort, and exact-filter by payee, month, file/work name, status, and supplement date.
+- `POST`: Creates one manual supplement row. `supplement_date`, when provided, must be in `business_month`; settlement calculation remains grouped by natural business month.
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `GET` 允许角色: AssetSettlement, SuperAdmin。
+- `POST` 允许角色: AssetSettlement, SuperAdmin。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+#### GET 细节
+
+##### 请求体 schema
+参数:
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `business_month` | query | string | 否 | - |
+| `payee_user_id` | query | integer | 否 | - |
+| `order_no` | query | string | 否 | - |
+| `status` | query | enum(draft/approved/in_batch/settled/voided) | 否 | - |
+| `supplement_date` | query | string | 否 | Exact supplement date filter. |
+| `supplement_date_from` | query | string | 否 | Inclusive supplement date lower bound. |
+| `supplement_date_to` | query | string | 否 | Inclusive supplement date upper bound. |
+| `sort_by` | query | enum(id/business_month/payee_user_id/order_no/supplement_date/status/gross_amount/created_at/updated_at) | 否 | - |
+| `sort_dir` | query | enum(asc/desc) | 否 | - |
+| `page` | query | integer | 否 | - |
+| `page_size` | query | integer | 否 | - |
+
+请求体: 无请求体。
+
+##### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": [
+    {
+      "id": "...",
+      "payee_user_id": "...",
+      "business_month": "...",
+      "linked_batch_id": "..."
+    }
+  ],
+  "pagination": {
+    "total": 123,
+    "page": 123,
+    "page_size": 123
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | array<object> | 否 | - |
+| `pagination` | object | 否 | - |
+
+##### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid request |
+| 401 | 见 `error.code` | 见 `deny_code` | Unauthenticated |
+| 403 | 见 `error.code` | 见 `deny_code` | Forbidden |
+
+##### curl 示例
+```bash
+curl -X GET https://api.example.com/v1/asset-workbench/settlement/supplements \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+#### POST 细节
+
+##### 请求体 schema
+参数:
+
+无 path/query/header 参数。
+
+Content-Type: `application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `payee_user_id` | integer | 是 | - |
+| `business_month` | string | 是 | - |
+| `order_no` | string | 是 | File/work display name used for duplicate hints. |
+| `supplement_date` | string | 否 | - |
+| `difficulty_class` | string | 是 | - |
+| `finalized` | boolean | 否 | - |
+| `page_count` | integer | 是 | - |
+| `gross_amount` | number | 是 | - |
+| `status` | enum(draft/approved) | 否 | - |
+
+##### 响应体 schema
+成功响应: `201 application/json`
+
+```json
+{
+  "data": {
+    "id": 123,
+    "payee_user_id": 123,
+    "business_month": "string",
+    "linked_batch_id": 123
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | object | 否 | - |
+
+##### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid request |
+| 401 | 见 `error.code` | 见 `deny_code` | Unauthenticated |
+| 403 | 见 `error.code` | 见 `deny_code` | Forbidden |
+
+##### curl 示例
+```bash
+curl -X POST https://api.example.com/v1/asset-workbench/settlement/supplements \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"example":"value"}'
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
 ## POST /v1/asset-workbench/settlement/supplements/excel
 
 ### 简介
 支持方法: POST。
 
-- `POST`: Batch-creates approved supplement rows for a business month. Each row still checks payee/month supplement permission and duplicate hints.
+- `POST`: Batch-creates approved supplement rows for a business month. Optional `supplement_date` cells must belong to that natural month. Each row still checks payee/month supplement permission and duplicate hints.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。

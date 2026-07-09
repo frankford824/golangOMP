@@ -91,6 +91,10 @@ func (r *deductionOnlyRepo) FindActiveWelfareRules(context.Context, string, stri
 	return r.welfareRules, nil
 }
 
+func (r *deductionOnlyRepo) GetProfileByUserID(context.Context, int64) (*domain.AssetWorkbenchProfile, error) {
+	return nil, sql.ErrNoRows
+}
+
 type settlementReportRepo struct {
 	repo.AssetWorkbenchRepo
 	rule           *domain.AssetWorkbenchDeductionRule
@@ -204,6 +208,7 @@ type supplementRepo struct {
 	permissions     []*domain.AssetWorkbenchSupplementPermission
 	confirmedMonths map[int64][]string
 	created         *domain.AssetWorkbenchSettlementSupplement
+	lastListFilter  repo.AssetWorkbenchSettlementSupplementFilter
 	events          []*domain.AssetWorkbenchEvent
 }
 
@@ -216,6 +221,7 @@ func (r *supplementRepo) ListSubmissionItemsByMonth(context.Context, string) ([]
 }
 
 func (r *supplementRepo) ListSettlementSupplements(_ context.Context, filter repo.AssetWorkbenchSettlementSupplementFilter) ([]*domain.AssetWorkbenchSettlementSupplement, int64, error) {
+	r.lastListFilter = filter
 	items := make([]*domain.AssetWorkbenchSettlementSupplement, 0, len(r.supplements))
 	for _, item := range r.supplements {
 		if item == nil {
@@ -228,6 +234,18 @@ func (r *supplementRepo) ListSettlementSupplements(_ context.Context, filter rep
 			continue
 		}
 		if filter.OrderNo != "" && item.OrderNo != filter.OrderNo {
+			continue
+		}
+		if filter.Status != "" && item.Status != filter.Status {
+			continue
+		}
+		if filter.SupplementDate != "" && item.SupplementDate != filter.SupplementDate {
+			continue
+		}
+		if filter.SupplementDateFrom != "" && item.SupplementDate < filter.SupplementDateFrom {
+			continue
+		}
+		if filter.SupplementDateTo != "" && item.SupplementDate > filter.SupplementDateTo {
 			continue
 		}
 		items = append(items, item)
@@ -2052,6 +2070,7 @@ func TestCreateSettlementSupplementWritesDuplicateHintWithoutBlocking(t *testing
 		PayeeUserID:     1001,
 		BusinessMonth:   "2026-06",
 		OrderNo:         "ORD-1",
+		SupplementDate:  "2026-06-15",
 		DifficultyClass: "A",
 		PageCount:       1,
 		GrossAmount:     12,
@@ -2067,8 +2086,90 @@ func TestCreateSettlementSupplementWritesDuplicateHintWithoutBlocking(t *testing
 	if hint["has_duplicates"] != true {
 		t.Fatalf("duplicate hint = %#v", hint)
 	}
+	if hint["supplement_date"] != "2026-06-15" {
+		t.Fatalf("supplement_date hint = %#v, want 2026-06-15", hint["supplement_date"])
+	}
 	if len(workbenchRepo.events) != 1 || workbenchRepo.events[0].EventType != domain.AssetWorkbenchEventSupplementCreated {
 		t.Fatalf("events = %+v", workbenchRepo.events)
+	}
+}
+
+func TestCreateSettlementSupplementRejectsDateOutsideBusinessMonth(t *testing.T) {
+	workbenchRepo := &supplementRepo{
+		permissions: []*domain.AssetWorkbenchSupplementPermission{
+			{ID: 1, PayeeUserID: 1001, BusinessMonth: "2026-06", Enabled: true, GrantedBy: 99},
+		},
+	}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}))
+	actor := domain.RequestActor{ID: 99, Roles: []domain.Role{domain.RoleAssetSettlement}}
+
+	_, appErr := svc.CreateSettlementSupplement(context.Background(), actor, CreateSettlementSupplementParams{
+		PayeeUserID:     1001,
+		BusinessMonth:   "2026-06",
+		OrderNo:         "ORD-1",
+		SupplementDate:  "2026-07-01",
+		DifficultyClass: "A",
+		PageCount:       1,
+		GrossAmount:     12,
+		Status:          domain.AssetWorkbenchSupplementStatusApproved,
+	})
+	if appErr == nil || appErr.Code != domain.ErrCodeInvalidRequest {
+		t.Fatalf("CreateSettlementSupplement() error = %+v, want invalid request", appErr)
+	}
+}
+
+func TestListSettlementSupplementsNormalizesDateFilterAndSort(t *testing.T) {
+	workbenchRepo := &supplementRepo{
+		supplements: []*domain.AssetWorkbenchSettlementSupplement{
+			{ID: 601, PayeeUserID: 1001, BusinessMonth: "2026-06", OrderNo: "海报.jpg", SupplementDate: "2026-06-15", Status: domain.AssetWorkbenchSupplementStatusApproved},
+			{ID: 602, PayeeUserID: 1001, BusinessMonth: "2026-06", OrderNo: "挂布.jpg", SupplementDate: "2026-06-16", Status: domain.AssetWorkbenchSupplementStatusApproved},
+			{ID: 603, PayeeUserID: 1002, BusinessMonth: "2026-06", OrderNo: "海报.jpg", SupplementDate: "2026-06-15", Status: domain.AssetWorkbenchSupplementStatusVoided},
+		},
+	}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}))
+	actor := domain.RequestActor{ID: 99, Roles: []domain.Role{domain.RoleAssetSettlement}}
+
+	items, total, appErr := svc.ListSettlementSupplements(context.Background(), actor, repo.AssetWorkbenchSettlementSupplementFilter{
+		BusinessMonth:      "2026-06",
+		SupplementDateFrom: "2026/06/15",
+		SupplementDateTo:   "2026.06.15",
+		Status:             domain.AssetWorkbenchSupplementStatusApproved,
+		SortBy:             "supplement_date",
+		SortDir:            "asc",
+		Page:               1,
+		PageSize:           20,
+	})
+	if appErr != nil {
+		t.Fatalf("ListSettlementSupplements() error = %+v", appErr)
+	}
+	if total != 1 || len(items) != 1 || items[0].ID != 601 {
+		t.Fatalf("items=%+v total=%d, want only approved 2026-06-15 row", items, total)
+	}
+	if workbenchRepo.lastListFilter.SupplementDateFrom != "2026-06-15" ||
+		workbenchRepo.lastListFilter.SupplementDateTo != "2026-06-15" ||
+		workbenchRepo.lastListFilter.SortBy != "supplement_date" ||
+		workbenchRepo.lastListFilter.SortDir != "asc" {
+		t.Fatalf("repo filter = %+v, want normalized date range and sort", workbenchRepo.lastListFilter)
+	}
+}
+
+func TestListSettlementSupplementsRejectsInvalidDateAndSort(t *testing.T) {
+	workbenchRepo := &supplementRepo{}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}))
+	actor := domain.RequestActor{ID: 99, Roles: []domain.Role{domain.RoleAssetSettlement}}
+
+	_, _, appErr := svc.ListSettlementSupplements(context.Background(), actor, repo.AssetWorkbenchSettlementSupplementFilter{
+		SupplementDate: "2026-13-01",
+	})
+	if appErr == nil || appErr.Code != domain.ErrCodeInvalidRequest {
+		t.Fatalf("ListSettlementSupplements(invalid date) error = %+v, want invalid request", appErr)
+	}
+
+	_, _, appErr = svc.ListSettlementSupplements(context.Background(), actor, repo.AssetWorkbenchSettlementSupplementFilter{
+		SortBy: "gross_amount; DROP TABLE asset_workbench_settlement_supplements",
+	})
+	if appErr == nil || appErr.Code != domain.ErrCodeInvalidRequest {
+		t.Fatalf("ListSettlementSupplements(invalid sort) error = %+v, want invalid request", appErr)
 	}
 }
 

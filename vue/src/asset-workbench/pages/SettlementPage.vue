@@ -27,6 +27,7 @@ import {
   enabledMeta,
   itemTypeMeta,
   supplementStatusMeta,
+  workerTypeMeta,
 } from '@aw/shared/format/status'
 import WorkbenchDataGrid from '@aw/shared/grid/WorkbenchDataGrid.vue'
 import SpreadsheetWorkbench from '@aw/shared/spreadsheet/SpreadsheetWorkbench.vue'
@@ -38,6 +39,7 @@ import type {
   WorkbenchSpreadsheetValidation,
 } from '@aw/shared/spreadsheet/types'
 import AsyncBoundary from '@aw/shared/ui/AsyncBoundary.vue'
+import { resolveApiUserMessage } from '@/utils/api-message-zh'
 
 interface GridColumn {
   key: string
@@ -46,7 +48,7 @@ interface GridColumn {
   align?: 'left' | 'right' | 'center'
 }
 
-type PayrollGridRow = SettlementPayrollRow & { grid_id: string; row_label: string }
+type PayrollGridRow = SettlementPayrollRow & { grid_id: string; row_label: string; payee_name_label: string; worker_type_label: string }
 type BatchGridRow = SettlementBatchRow & { status_label: string }
 type BatchItemGridRow = {
   id: number
@@ -59,7 +61,7 @@ type BatchItemGridRow = {
   amount: number
 }
 type PermissionGridRow = SupplementPermissionRow & { status_label: string; reason_label: string }
-type SupplementGridRow = SettlementSupplementRow & { status_label: string; duplicate_label: string; action: string }
+type SupplementGridRow = SettlementSupplementRow & { status_label: string; duplicate_label: string; supplement_date_label: string; action: string }
 type SettlementSectionKey = 'preview' | 'batches' | 'supplements' | 'adjustments'
 
 const month = ref(defaultBusinessMonth())
@@ -78,6 +80,8 @@ const pendingDeleteSupplement = ref<SettlementSupplementRow | null>(null)
 const cancelReason = ref('')
 const supplementDeleteReason = ref('')
 const exporting = ref(false)
+const generatingBatch = ref(false)
+const confirmingBatchId = ref<number | null>(null)
 const eligibleMonthsLoading = ref(false)
 const entryEligibleMonthsLoading = ref(false)
 const activeSettlementSection = ref<SettlementSectionKey>('preview')
@@ -89,12 +93,21 @@ const importReviewSource = ref<WorkbenchSpreadsheetSource | null>(null)
 const importReviewLoading = ref(false)
 const pendingImportKind = ref<'error-deduction' | 'supplement' | ''>('')
 const importReviewRevision = ref(0)
+const supplementPage = ref(1)
+const supplementPageSize = ref(20)
+const supplementTotal = ref(0)
+const supplementSearch = ref('')
+const supplementPayeeFilter = ref('')
+const supplementStatusFilter = ref('')
+const supplementDateFilter = ref('')
+const supplementSortBy = ref('supplement_date')
+const supplementSortDir = ref<'asc' | 'desc'>('desc')
 const settlementRequest = usePageRequest(
   async () => {
     const [previewResult, batchResult, supplementResult, permissionResult, difficultyResult] = await Promise.all([
       assetWorkbenchApi.previewSettlement(month.value),
       assetWorkbenchApi.listSettlementBatches({ business_month: month.value, page: 1, page_size: 20 }),
-      assetWorkbenchApi.listSettlementSupplements({ business_month: month.value, page: 1, page_size: 20 }),
+      assetWorkbenchApi.listSettlementSupplements(buildSupplementListParams()),
       assetWorkbenchApi.listSupplementPermissions({ business_month: month.value, page: 1, page_size: 50 }),
       assetWorkbenchApi.listDifficultyClasses(),
     ])
@@ -102,6 +115,7 @@ const settlementRequest = usePageRequest(
       preview: previewResult,
       batches: batchResult.items,
       supplements: supplementResult.items,
+      supplementTotal: supplementResult.total,
       supplementPermissions: permissionResult.items,
       difficulties: difficultyResult,
     }
@@ -114,6 +128,7 @@ const error = settlementRequest.error
 const supplementForm = ref({
   payee_user_id: 0,
   order_no: '',
+  supplement_date: todayDate(),
   difficulty_class: '',
   page_count: 1,
   gross_amount: 0,
@@ -155,7 +170,7 @@ const ledgerSegments = computed(() => {
     ]
   }
   return [
-    { key: 'gross', label: '日常计件', value: formatMoney(value.gross_amount), hint: `${formatInt(value.item_count)} 单 · ${formatInt(value.page_count)} 页`, expandable: true },
+    { key: 'gross', label: '日常计件', value: formatMoney(value.gross_amount), hint: `${formatInt(value.item_count)} 单`, expandable: true },
     { key: 'deduction', label: '质检扣款', value: formatMoney(value.deduction_amount), hint: `${formatInt(value.error_count)} 个出错`, expandable: true },
     { key: 'supplement', label: '补录计件', value: formatMoney(value.supplement_amount), hint: '单独工资行', expandable: true },
     { key: 'net', label: '应结净额', value: formatMoney(value.net_amount), hint: '正常工资行 + 补录工资行', money: true, expandable: true },
@@ -171,14 +186,32 @@ const supplementRowsWithLabels = computed<SupplementGridRow[]>(() =>
     ...row,
     status_label: supplementStatusMeta(row.status).label,
     duplicate_label: duplicateMeta(row.duplicate_hint_json?.has_duplicates).label,
+    supplement_date_label: supplementDateOf(row) || '未填写',
     action: 'actions',
   })),
 )
-const supplementGridRows = computed(() => supplementRowsWithLabels.value as unknown as Record<string, unknown>[])
+const filteredSupplementRows = computed(() => supplementRowsWithLabels.value)
+const supplementGridRows = computed(() => filteredSupplementRows.value as unknown as Record<string, unknown>[])
+const supplementCanPrev = computed(() => supplementPage.value > 1)
+const supplementCanNext = computed(() => supplementPage.value * supplementPageSize.value < supplementTotal.value)
+const manualSupplementDuplicateWarning = computed(() => {
+  const name = supplementForm.value.order_no.trim().toLowerCase()
+  const payeeID = Number(supplementForm.value.payee_user_id || 0)
+  if (!name || !payeeID) return ''
+  const matches = supplements.value.filter((row) =>
+    row.payee_user_id === payeeID &&
+    row.business_month === supplementMonth.value &&
+    row.status !== 'voided' &&
+    row.order_no.trim().toLowerCase() === name,
+  )
+  if (!matches.length) return ''
+  return `已有 ${formatInt(matches.length)} 条同名补录记录，请确认是否重复上传。`
+})
 const entryEligibleReady = computed(() =>
   entryEligiblePayeeUserId.value === supplementForm.value.payee_user_id && entryEligibleSupplementMonths.value.length > 0,
 )
 const selectedBatchConfirmed = computed(() => selectedBatch.value?.batch.status === 'confirmed')
+const hasGeneratedBatch = computed(() => batches.value.some((batch) => batch.status === 'generated'))
 const settlementNavGroups = computed(() => [
   {
     label: '结算流程',
@@ -216,10 +249,11 @@ const settlementNavGroups = computed(() => [
   },
 ])
 const payrollGridColumns = computed<GridColumn[]>(() => [
-  { key: 'payee_user_id', label: '人员', width: 96 },
+  { key: 'payee_name_label', label: '姓名', width: 116 },
+  { key: 'worker_type_label', label: '人员类型', width: 96 },
+  { key: 'payee_user_id', label: '人员编号', width: 96 },
   { key: 'row_label', label: '工资条', width: 140 },
   { key: 'item_count', label: '单数', width: 88, align: 'right' },
-  { key: 'page_count', label: '页数', width: 88, align: 'right' },
   { key: 'gross_amount', label: '毛额', width: 100, align: 'right' },
   { key: 'deduction_amount', label: '质检扣款', width: 112, align: 'right' },
   { key: 'welfare_amount', label: '福利', width: 100, align: 'right' },
@@ -249,7 +283,8 @@ const permissionGridColumns = computed<GridColumn[]>(() => [
 ])
 const supplementGridColumns = computed<GridColumn[]>(() => [
   { key: 'payee_user_id', label: '人员', width: 96 },
-  { key: 'order_no', label: '订单号', width: 150 },
+  { key: 'order_no', label: '文件/作品名称', width: 170 },
+  { key: 'supplement_date_label', label: '补录日期', width: 110 },
   { key: 'status_label', label: '状态', width: 96 },
   { key: 'duplicate_label', label: '查重', width: 108 },
   { key: 'gross_amount', label: '补录金额', width: 112, align: 'right' },
@@ -319,6 +354,8 @@ function toPayrollGridRow(row: SettlementPayrollRow): PayrollGridRow {
     ...row,
     grid_id: `${row.payee_user_id}-${row.row_type}`,
     row_label: payrollRowLabel(row),
+    payee_name_label: row.payee_name || `用户 ${row.payee_user_id}`,
+    worker_type_label: workerTypeMeta(row.worker_type || '').label,
   }
 }
 
@@ -391,6 +428,64 @@ function defaultBusinessMonth() {
   return currentBusinessMonth()
 }
 
+function todayDate() {
+  const value = new Date()
+  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`
+}
+
+function businessMonthFromDate(value: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value.slice(0, 7) : ''
+}
+
+function supplementDateOf(row: SettlementSupplementRow) {
+  return String(row.supplement_date || row.duplicate_hint_json?.supplement_date || '')
+}
+
+function settlementActionError(err: unknown, fallback: string) {
+  return resolveApiUserMessage(err, { fallback })
+}
+
+function buildSupplementListParams() {
+  const params: Record<string, unknown> = {
+    business_month: month.value,
+    page: supplementPage.value,
+    page_size: supplementPageSize.value,
+    sort_by: supplementSortBy.value,
+    sort_dir: supplementSortDir.value,
+  }
+  const name = supplementSearch.value.trim()
+  if (name) params.order_no = name
+  const payeeID = Number(supplementPayeeFilter.value)
+  if (Number.isInteger(payeeID) && payeeID > 0) params.payee_user_id = payeeID
+  if (supplementStatusFilter.value) params.status = supplementStatusFilter.value
+  if (supplementDateFilter.value) params.supplement_date = supplementDateFilter.value
+  return params
+}
+
+async function querySupplements() {
+  supplementPage.value = 1
+  await loadSettlement({ keepNotice: true })
+}
+
+async function resetSupplementQuery() {
+  supplementSearch.value = ''
+  supplementPayeeFilter.value = ''
+  supplementStatusFilter.value = ''
+  supplementDateFilter.value = ''
+  supplementSortBy.value = 'supplement_date'
+  supplementSortDir.value = 'desc'
+  supplementPage.value = 1
+  supplementPageSize.value = 20
+  await loadSettlement({ keepNotice: true })
+}
+
+async function changeSupplementPage(delta: number) {
+  const nextPage = Math.max(1, supplementPage.value + delta)
+  if (nextPage === supplementPage.value) return
+  supplementPage.value = nextPage
+  await loadSettlement({ keepNotice: true })
+}
+
 async function loadSettlement(options: { keepNotice?: boolean } = {}) {
   error.value = ''
   if (!options.keepNotice) notice.value = ''
@@ -399,6 +494,7 @@ async function loadSettlement(options: { keepNotice?: boolean } = {}) {
   preview.value = data.preview
   batches.value = data.batches
   supplements.value = data.supplements
+  supplementTotal.value = data.supplementTotal
   supplementPermissions.value = data.supplementPermissions
   difficultyRows.value = data.difficulties
   if (!difficultyOptions.value.includes(supplementForm.value.difficulty_class)) {
@@ -408,27 +504,35 @@ async function loadSettlement(options: { keepNotice?: boolean } = {}) {
 }
 
 async function generateBatch() {
+  if (generatingBatch.value) return
   error.value = ''
   notice.value = ''
+  generatingBatch.value = true
   try {
     const batch = await assetWorkbenchApi.generateSettlementBatch(month.value)
     notice.value = `已生成批次：${batch.batch_no}`
     activeSettlementSection.value = 'batches'
     await loadSettlement({ keepNotice: true })
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '生成批次失败'
+    error.value = settlementActionError(err, '生成批次失败，请确认本月是否还有待结算明细。')
+  } finally {
+    generatingBatch.value = false
   }
 }
 
 async function confirmBatch(batch: SettlementBatchRow) {
+  if (confirmingBatchId.value) return
   error.value = ''
   notice.value = ''
+  confirmingBatchId.value = batch.id
   try {
     await assetWorkbenchApi.confirmSettlementBatch(batch.id)
     notice.value = `已确认批次：${batch.batch_no}`
     await loadSettlement({ keepNotice: true })
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '确认批次失败'
+    error.value = settlementActionError(err, '确认批次失败，请检查人员工资资料是否完整。')
+  } finally {
+    confirmingBatchId.value = null
   }
 }
 
@@ -454,7 +558,7 @@ async function cancelBatch() {
     cancelReason.value = ''
     await loadSettlement({ keepNotice: true })
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '取消批次失败'
+    error.value = settlementActionError(err, '取消批次失败')
   }
 }
 
@@ -464,7 +568,7 @@ async function openBatch(batch: SettlementBatchRow) {
     selectedBatch.value = await assetWorkbenchApi.getSettlementBatchDetail(batch.id)
     activeSettlementSection.value = 'batches'
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '批次明细加载失败'
+    error.value = settlementActionError(err, '批次明细加载失败')
   }
 }
 
@@ -720,6 +824,12 @@ function requireEntrySupplementMonth() {
 async function createSupplement() {
   error.value = ''
   notice.value = ''
+  const dateMonth = businessMonthFromDate(supplementForm.value.supplement_date)
+  if (!dateMonth) {
+    error.value = '请选择补录日期'
+    return
+  }
+  supplementMonth.value = dateMonth
   const selectedMonth = requireEntrySupplementMonth()
   if (!selectedMonth) return
   try {
@@ -731,6 +841,7 @@ async function createSupplement() {
     await assetWorkbenchApi.createSettlementSupplement(payload)
     notice.value = '月度补录已创建'
     supplementForm.value.order_no = ''
+    supplementForm.value.supplement_date = todayDate()
     supplementForm.value.page_count = 1
     supplementForm.value.gross_amount = 0
     await loadSettlement({ keepNotice: true })
@@ -809,10 +920,21 @@ async function exportSettlement() {
 }
 
 watch(month, (value) => {
+  supplementPage.value = 1
   if (!entryEligibleSupplementMonths.value.length) {
     supplementMonth.value = value
   }
 })
+
+watch(
+  () => supplementForm.value.supplement_date,
+  (value) => {
+    const nextMonth = businessMonthFromDate(value)
+    if (nextMonth) {
+      supplementMonth.value = nextMonth
+    }
+  },
+)
 
 onMounted(() => {
   void loadSettlement()
@@ -991,7 +1113,9 @@ onMounted(() => {
               <h3>批次确认</h3>
               <p>生成批次会锁定本月可结算明细；未确认前可以取消后重新生成。</p>
             </div>
-            <button class="aw-primary-button" type="button" @click="generateBatch">生成批次</button>
+            <button class="aw-primary-button" type="button" :disabled="generatingBatch || loading || hasGeneratedBatch" @click="generateBatch">
+              {{ generatingBatch ? '生成中…' : hasGeneratedBatch ? '已有待确认批次' : '生成批次' }}
+            </button>
           </div>
 
           <div class="aw-data-surface">
@@ -1012,8 +1136,13 @@ onMounted(() => {
               <template #cell="{ row, column, value }">
                 <div v-if="column.key === 'actions'" class="aw-inline-actions">
                   <button type="button" @click="openBatch(gridRowAsBatch(row))">明细</button>
-                  <button v-if="gridRowAsBatch(row).status === 'generated'" type="button" @click="confirmBatch(gridRowAsBatch(row))">
-                    确认
+                  <button
+                    v-if="gridRowAsBatch(row).status === 'generated'"
+                    type="button"
+                    :disabled="confirmingBatchId === gridRowAsBatch(row).id"
+                    @click="confirmBatch(gridRowAsBatch(row))"
+                  >
+                    {{ confirmingBatchId === gridRowAsBatch(row).id ? '确认中…' : '确认' }}
                   </button>
                   <button v-if="gridRowAsBatch(row).status === 'generated'" type="button" @click="startCancelBatch(gridRowAsBatch(row))">
                     取消
@@ -1063,6 +1192,16 @@ onMounted(() => {
               <div class="aw-inline-actions">
                 <span :class="chipClass(batchStatusMeta(selectedBatch.batch.status).tone)">{{ batchStatusMeta(selectedBatch.batch.status).label }}</span>
                 <strong class="aw-cell-money">{{ formatMoney(selectedBatch.batch.net_amount) }}</strong>
+                <button
+                  v-if="selectedBatch.batch.status === 'generated'"
+                  class="aw-primary-button"
+                  type="button"
+                  :disabled="confirmingBatchId === selectedBatch.batch.id"
+                  @click="confirmBatch(selectedBatch.batch)"
+                >
+                  {{ confirmingBatchId === selectedBatch.batch.id ? '确认中…' : '确认批次' }}
+                </button>
+                <button v-if="selectedBatch.batch.status === 'generated'" class="aw-secondary-button" type="button" @click="startCancelBatch(selectedBatch.batch)">取消批次</button>
                 <button v-if="selectedBatch.batch.status === 'confirmed'" class="aw-secondary-button" type="button" @click="activeSettlementSection = 'adjustments'">去记录工资调整</button>
               </div>
             </div>
@@ -1106,7 +1245,7 @@ onMounted(() => {
           <div class="aw-settlement-section__head">
             <div>
               <h3>补录管理</h3>
-              <p>补录先按人员开放月份，再录入或导入补录明细，工资条会单独形成补录行。</p>
+              <p>员工先申请，管理员按自然月开放补录权限；权限可随时关闭。补录金额在工资条中单独成行。</p>
             </div>
             <div class="aw-inline-actions">
               <button class="aw-secondary-button" type="button" @click="downloadSupplementTemplate">补录模板</button>
@@ -1119,7 +1258,7 @@ onMounted(() => {
               <div class="aw-panel__head">
                 <div>
                   <h3>补录开放</h3>
-                  <p class="aw-copy">补录按人员 + 结算月手动开放。</p>
+                  <p class="aw-copy">收到申请后，按人员和自然月开放；关闭后该人员不能再提交该月补录。</p>
                 </div>
                 <span :class="chipClass(enabledMeta(permissionForm.enabled).tone)">{{ enabledMeta(permissionForm.enabled).label }}</span>
               </div>
@@ -1176,8 +1315,12 @@ onMounted(() => {
                   </select>
                 </label>
                 <label>
-                  订单号
-                  <input v-model="supplementForm.order_no" />
+                  补录日期
+                  <input v-model="supplementForm.supplement_date" type="date" />
+                </label>
+                <label>
+                  文件/作品名称
+                  <input v-model="supplementForm.order_no" placeholder="填写文件名或作品名" />
                 </label>
                 <label>
                   难度
@@ -1204,6 +1347,10 @@ onMounted(() => {
                 </button>
                 <button class="aw-primary-button" type="button" @click="createSupplement">创建补录</button>
               </div>
+              <p v-if="manualSupplementDuplicateWarning" class="aw-inline-alert aw-inline-alert--warning">
+                {{ manualSupplementDuplicateWarning }}
+              </p>
+              <p class="aw-copy">补录日期只用于说明想补哪一天，结算按该日期所在自然月进入“补录计件工资”。上传图片和分类仍按上传文件模块的目录规则执行。</p>
               <div class="aw-inline-alert" @dragover.prevent @drop.prevent="handleSupplementDrop">
                 <span>补录 Excel 批量导入</span>
                 <button class="aw-secondary-button" type="button" @click="openSupplementImport">选择文件</button>
@@ -1242,11 +1389,66 @@ onMounted(() => {
 
           <div class="aw-data-surface">
             <div class="aw-grid-toolbar">
-              <span>补录明细</span>
-              <span>{{ formatInt(supplements.length) }} 条</span>
+              <span>补录查询</span>
+              <span>第 {{ formatInt(supplementPage) }} 页 · {{ formatInt(filteredSupplementRows.length) }} / {{ formatInt(supplementTotal) }} 条</span>
+            </div>
+            <div class="aw-form-grid aw-form-grid--compact">
+              <label>
+                文件/作品名称（精确）
+                <input v-model.trim="supplementSearch" placeholder="完整文件名或作品名" @keydown.enter.prevent="querySupplements" />
+              </label>
+              <label>
+                人员编号（精确）
+                <input v-model.trim="supplementPayeeFilter" inputmode="numeric" placeholder="例如 1001" @keydown.enter.prevent="querySupplements" />
+              </label>
+              <label>
+                状态
+                <select v-model="supplementStatusFilter">
+                  <option value="">全部状态</option>
+                  <option value="draft">草稿</option>
+                  <option value="approved">已批准</option>
+                  <option value="in_batch">批次中</option>
+                  <option value="settled">已结算</option>
+                  <option value="voided">已作废</option>
+                </select>
+              </label>
+              <label>
+                补录日期
+                <input v-model="supplementDateFilter" type="date" />
+              </label>
+              <label>
+                排序字段
+                <select v-model="supplementSortBy">
+                  <option value="supplement_date">补录日期</option>
+                  <option value="payee_user_id">人员编号</option>
+                  <option value="order_no">作品名称</option>
+                  <option value="gross_amount">补录金额</option>
+                  <option value="created_at">创建时间</option>
+                  <option value="updated_at">更新时间</option>
+                </select>
+              </label>
+              <label>
+                排序方向
+                <select v-model="supplementSortDir">
+                  <option value="desc">从新到旧 / 从大到小</option>
+                  <option value="asc">从旧到新 / 从小到大</option>
+                </select>
+              </label>
+              <label>
+                每页
+                <select v-model.number="supplementPageSize" @change="querySupplements">
+                  <option :value="20">20 条</option>
+                  <option :value="50">50 条</option>
+                  <option :value="100">100 条</option>
+                </select>
+              </label>
+            </div>
+            <div class="aw-inline-actions">
+              <button class="aw-primary-button" type="button" @click="querySupplements">查询补录</button>
+              <button class="aw-secondary-button" type="button" @click="resetSupplementQuery">重置条件</button>
             </div>
             <WorkbenchDataGrid
-              v-if="supplements.length"
+              v-if="filteredSupplementRows.length"
               :columns="supplementGridColumns"
               :rows="supplementGridRows"
               row-key="id"
@@ -1281,6 +1483,15 @@ onMounted(() => {
                 <span v-else>{{ gridValue(column.key, value) }}</span>
               </template>
             </WorkbenchDataGrid>
+            <div v-if="supplementTotal > 0" class="aw-drive-pager">
+              <button class="aw-secondary-button" type="button" :disabled="!supplementCanPrev || loading" @click="changeSupplementPage(-1)">
+                上一页
+              </button>
+              <span>第 {{ formatInt(supplementPage) }} 页</span>
+              <button class="aw-secondary-button" type="button" :disabled="!supplementCanNext || loading" @click="changeSupplementPage(1)">
+                下一页
+              </button>
+            </div>
             <div v-if="pendingDeleteSupplement" class="aw-panel">
               <div class="aw-panel__head">
                 <div>
@@ -1300,7 +1511,8 @@ onMounted(() => {
                 <button class="aw-secondary-button" type="button" @click="pendingDeleteSupplement = null">取消</button>
               </div>
             </div>
-            <p v-else-if="!supplements.length" class="aw-copy">当前月份没有补录记录</p>
+            <p v-else-if="supplements.length" class="aw-copy">没有匹配当前查询条件的补录记录</p>
+            <p v-else class="aw-copy">当前月份没有补录记录</p>
           </div>
         </section>
 

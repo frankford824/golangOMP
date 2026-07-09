@@ -7,6 +7,8 @@ describe('asset workbench settlement export', () => {
     const rows = buildSettlementPayrollExportRows([
       {
         payee_user_id: 1001,
+        payee_name: '张三',
+        worker_type: 'parttime',
         business_month: '2026-06',
         row_type: 'normal_piecework',
         item_count: 2,
@@ -21,6 +23,8 @@ describe('asset workbench settlement export', () => {
       },
       {
         payee_user_id: 1001,
+        payee_name: '张三',
+        worker_type: 'parttime',
         business_month: '2026-06',
         row_type: 'supplement_piecework',
         item_count: 0,
@@ -37,7 +41,10 @@ describe('asset workbench settlement export', () => {
 
     expect(rows).toEqual([
       expect.objectContaining({
+        payeeName: '张三',
+        workerTypeLabel: '兼职',
         rowTypeLabel: '日常计件工资',
+        itemCount: 2,
         grossAmount: 120,
         deductionAmount: 4,
         welfareAmount: 30,
@@ -45,11 +52,13 @@ describe('asset workbench settlement export', () => {
         netAmount: 140,
       }),
       expect.objectContaining({
+        payeeName: '张三',
         rowTypeLabel: '补录计件工资',
         supplementAmount: 0,
         netAmount: 0,
       }),
     ])
+    expect(rows[0]).not.toHaveProperty('pageCount')
   })
 
   it('keeps unknown row types on the normal payroll side', () => {

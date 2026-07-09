@@ -7474,7 +7474,7 @@ body.aw-submission-dialog-locked {
 
 .aw-material-row__button {
   display: grid;
-  grid-template-columns: 44px minmax(0, 1fr) auto;
+  grid-template-columns: 44px minmax(0, 1fr) minmax(112px, auto);
   align-items: center;
   gap: var(--aw-space-2);
   min-width: 0;
@@ -7544,6 +7544,14 @@ body.aw-submission-dialog-locked {
   white-space: nowrap;
   color: var(--aw-ink-muted);
   font-size: var(--aw-font-size-xs);
+}
+
+.aw-material-row__badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+  min-width: 112px;
 }
 
 .aw-material-row__source {

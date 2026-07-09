@@ -3434,13 +3434,26 @@ func (r *assetWorkbenchRepo) ListSettlementSupplements(ctx context.Context, filt
 		where = append(where, "status = ?")
 		args = append(args, v)
 	}
+	if v := strings.TrimSpace(filter.SupplementDate); v != "" {
+		where = append(where, "supplement_date = ?")
+		args = append(args, v)
+	}
+	if v := strings.TrimSpace(filter.SupplementDateFrom); v != "" {
+		where = append(where, "supplement_date >= ?")
+		args = append(args, v)
+	}
+	if v := strings.TrimSpace(filter.SupplementDateTo); v != "" {
+		where = append(where, "supplement_date <= ?")
+		args = append(args, v)
+	}
 	var total int64
 	if err := r.db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM asset_workbench_settlement_supplements WHERE `+strings.Join(where, " AND "), args...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count asset workbench settlement supplements: %w", err)
 	}
 	page, pageSize := normalizePage(filter.Page, filter.PageSize)
+	orderBy := assetWorkbenchSettlementSupplementOrderBy(filter.SortBy, filter.SortDir)
 	rows, err := r.db.db.QueryContext(ctx, assetWorkbenchSettlementSupplementSelect()+` WHERE `+strings.Join(where, " AND ")+`
-		ORDER BY business_month DESC, payee_user_id ASC, id DESC
+		ORDER BY `+orderBy+`
 		LIMIT ? OFFSET ?`, append(args, pageSize, (page-1)*pageSize)...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list asset workbench settlement supplements: %w", err)
@@ -3457,17 +3470,47 @@ func (r *assetWorkbenchRepo) ListSettlementSupplements(ctx context.Context, filt
 	return items, total, rows.Err()
 }
 
+func assetWorkbenchSettlementSupplementOrderBy(sortBy, sortDir string) string {
+	dir := "DESC"
+	if strings.EqualFold(strings.TrimSpace(sortDir), "asc") {
+		dir = "ASC"
+	}
+	switch strings.TrimSpace(sortBy) {
+	case "id":
+		return "id " + dir
+	case "business_month":
+		return "business_month " + dir + ", supplement_date DESC, payee_user_id ASC, id DESC"
+	case "payee_user_id":
+		return "payee_user_id " + dir + ", supplement_date DESC, id DESC"
+	case "order_no":
+		return "order_no " + dir + ", supplement_date DESC, id DESC"
+	case "supplement_date":
+		return "supplement_date " + dir + ", payee_user_id ASC, id DESC"
+	case "status":
+		return "status " + dir + ", supplement_date DESC, id DESC"
+	case "gross_amount":
+		return "gross_amount " + dir + ", supplement_date DESC, id DESC"
+	case "created_at":
+		return "created_at " + dir + ", id DESC"
+	case "updated_at":
+		return "updated_at " + dir + ", id DESC"
+	default:
+		return "business_month DESC, supplement_date DESC, payee_user_id ASC, id DESC"
+	}
+}
+
 func (r *assetWorkbenchRepo) CreateSettlementSupplement(ctx context.Context, tx repo.Tx, item *domain.AssetWorkbenchSettlementSupplement) (*domain.AssetWorkbenchSettlementSupplement, error) {
 	res, err := Unwrap(tx).ExecContext(ctx, `
 		INSERT INTO asset_workbench_settlement_supplements (
-			payee_user_id, business_month, linked_batch_id, status, order_no, difficulty_class,
+			payee_user_id, business_month, linked_batch_id, status, order_no, supplement_date, difficulty_class,
 			finalized, page_count, gross_amount, duplicate_hint_json, created_by
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		item.PayeeUserID,
 		item.BusinessMonth,
 		toNullInt64(item.LinkedBatchID),
 		item.Status,
 		item.OrderNo,
+		nullableDateString(item.SupplementDate),
 		item.DifficultyClass,
 		item.Finalized,
 		item.PageCount,
@@ -4430,7 +4473,7 @@ func assetWorkbenchSettlementAdjustmentSelect() string {
 }
 
 func assetWorkbenchSettlementSupplementSelect() string {
-	return `SELECT id, payee_user_id, business_month, linked_batch_id, status, order_no, difficulty_class,
+	return `SELECT id, payee_user_id, business_month, linked_batch_id, status, order_no, supplement_date, difficulty_class,
 		finalized, page_count, gross_amount, duplicate_hint_json, created_by, created_at, updated_at
 		FROM asset_workbench_settlement_supplements`
 }
@@ -5066,15 +5109,19 @@ func scanAssetWorkbenchSettlementAdjustment(scanner interface{ Scan(...interface
 func scanAssetWorkbenchSettlementSupplement(scanner interface{ Scan(...interface{}) error }) (*domain.AssetWorkbenchSettlementSupplement, error) {
 	var item domain.AssetWorkbenchSettlementSupplement
 	var linkedBatchID sql.NullInt64
+	var supplementDate sql.NullTime
 	var duplicateHint sql.NullString
 	if err := scanner.Scan(
 		&item.ID, &item.PayeeUserID, &item.BusinessMonth, &linkedBatchID, &item.Status,
-		&item.OrderNo, &item.DifficultyClass, &item.Finalized, &item.PageCount, &item.GrossAmount,
+		&item.OrderNo, &supplementDate, &item.DifficultyClass, &item.Finalized, &item.PageCount, &item.GrossAmount,
 		&duplicateHint, &item.CreatedBy, &item.CreatedAt, &item.UpdatedAt,
 	); err != nil {
 		return nil, err
 	}
 	item.LinkedBatchID = fromNullInt64(linkedBatchID)
+	if supplementDate.Valid {
+		item.SupplementDate = supplementDate.Time.Format("2006-01-02")
+	}
 	item.DuplicateHint = cloneValidJSON(duplicateHint)
 	return &item, nil
 }
@@ -5132,6 +5179,14 @@ func nullableJSON(raw json.RawMessage) sql.NullString {
 		return sql.NullString{}
 	}
 	return sql.NullString{String: string(raw), Valid: true}
+}
+
+func nullableDateString(value string) sql.NullString {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return sql.NullString{}
+	}
+	return sql.NullString{String: value, Valid: true}
 }
 
 func int64SliceToInterfaces(values []int64) []interface{} {

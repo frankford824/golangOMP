@@ -498,12 +498,17 @@ type AssetWorkbenchSettlementBatchFilter struct {
 }
 
 type AssetWorkbenchSettlementSupplementFilter struct {
-	PayeeUserID   *int64
-	BusinessMonth string
-	OrderNo       string
-	Status        string
-	Page          int
-	PageSize      int
+	PayeeUserID        *int64
+	BusinessMonth      string
+	OrderNo            string
+	Status             string
+	SupplementDate     string
+	SupplementDateFrom string
+	SupplementDateTo   string
+	SortBy             string
+	SortDir            string
+	Page               int
+	PageSize           int
 }
 
 type AssetWorkbenchSupplementPermissionFilter struct {

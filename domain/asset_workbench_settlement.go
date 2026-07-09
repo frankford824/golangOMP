@@ -91,6 +91,7 @@ type AssetWorkbenchSettlementSupplement struct {
 	LinkedBatchID   *int64          `json:"linked_batch_id,omitempty" db:"linked_batch_id"`
 	Status          string          `json:"status" db:"status"`
 	OrderNo         string          `json:"order_no" db:"order_no"`
+	SupplementDate  string          `json:"supplement_date,omitempty" db:"supplement_date"`
 	DifficultyClass string          `json:"difficulty_class" db:"difficulty_class"`
 	Finalized       bool            `json:"finalized" db:"finalized"`
 	PageCount       int             `json:"page_count" db:"page_count"`
