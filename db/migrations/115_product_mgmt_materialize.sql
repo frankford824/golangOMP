@@ -163,7 +163,7 @@ LEFT JOIN (
             SELECT
               rel.child_sku_code,
               LEFT(CONCAT_WS(' ', rel.combo_sku_code, rec.erp_i_id, rec.name, rec.short_name), 256) AS search_token,
-              ROW_NUMBER() OVER (PARTITION BY rel.child_sku_code ORDER BY rel.combo_sku_code, COALESCE(rec.id, 0)) AS rn
+              ROW_NUMBER() OVER (PARTITION BY rel.child_sku_code ORDER BY rel.combo_sku_code, COALESCE(rec.erp_i_id, '')) AS rn
               FROM omp_sku_combo_relations rel
               LEFT JOIN omp_sku_combo_records rec ON rec.combo_sku_code = rel.combo_sku_code
           ) ranked
