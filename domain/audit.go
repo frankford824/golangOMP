@@ -14,6 +14,7 @@ const (
 	TaskEventAuditTransferred            = "task.audit.transferred"
 	TaskEventAuditHandedOver             = "task.audit.handed_over"
 	TaskEventAuditTakenOver              = "task.audit.taken_over"
+	TaskEventAuditSupplementUploaded     = "task.audit.supplement_uploaded"
 	TaskEventAssigned                    = "task.assigned"
 	TaskEventReassigned                  = "task.reassigned"
 	TaskEventBusinessInfoUpdated         = "task.business_info.updated"

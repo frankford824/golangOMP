@@ -81,6 +81,7 @@ vi.mock('@/services/api/assetsApi', () => ({
   assetsApi: {
     createAssetUploadSession: vi.fn(),
     completeAssetUploadSession: vi.fn(),
+    completeAssetUploadSessionAtEndpoint: vi.fn(),
     cancelAssetUploadSession: vi.fn(),
     uploadToRemoteUrl: vi.fn(),
   },
@@ -197,6 +198,7 @@ describe('prepareTaskAssetUploadSession — transport fallback', () => {
     expect(result.ossDirect).toBeUndefined()
     expect(result.remote).toBeDefined()
     expect(result.remote!.upload_url).toBe('https://proxy.internal/presigned/xyz')
+    expect(result.completeEndpoint).toBe('/v1/assets/upload-sessions/sess-remote/complete')
     expect(warnSpy).toHaveBeenCalledWith(
       '[upload] oss_direct absent, falling back to remote',
       expect.objectContaining({ session_id: 'sess-remote' }),
@@ -380,6 +382,38 @@ describe('completePreparedTaskAssetUploadSession — remote transport', () => {
       expect.objectContaining({ upload_content_type: 'image/png' }),
       undefined,
     )
+  })
+
+  it('remote transport: completes with returned endpoint when present', async () => {
+    vi.mocked(assetsApi.uploadToRemoteUrl).mockResolvedValue({} as never)
+    vi.mocked(assetsApi.completeAssetUploadSessionAtEndpoint).mockResolvedValue({
+      data: {
+        data: {
+          session: { id: 'sess-supp', session_status: 'completed', upload_status: 'uploaded' },
+          asset: { id: 'a2', file_role: 'delivery' },
+        },
+      },
+    } as never)
+
+    const prepared = {
+      sessionId: 'sess-supp',
+      remote: {
+        upload_url: 'https://proxy.internal/supplement',
+        required_upload_content_type: 'image/png',
+      },
+      assetKind: 'delivery' as const,
+      remark: '漏传补传',
+      sessionMime: 'image/png',
+      completeEndpoint: '/v1/tasks/789/audit-supplements/upload-sessions/sess-supp/complete',
+    }
+    await completePreparedTaskAssetUploadSession(prepared, fakeFile())
+
+    expect(assetsApi.completeAssetUploadSessionAtEndpoint).toHaveBeenCalledWith(
+      '/v1/tasks/789/audit-supplements/upload-sessions/sess-supp/complete',
+      expect.objectContaining({ upload_content_type: 'image/png' }),
+      undefined,
+    )
+    expect(assetsApi.completeAssetUploadSession).not.toHaveBeenCalled()
   })
 
   it('throws when both ossDirect and remote are absent', async () => {

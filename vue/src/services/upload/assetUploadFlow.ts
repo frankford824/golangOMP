@@ -21,6 +21,11 @@ import {
 import { resolveFileMimeType } from '@/utils/mime'
 import { formatUploadFailureMessage } from '@/utils/upload-errors'
 
+type AssetUploadSessionCreateFn = (
+  payload: CreateAssetUploadSessionPayload,
+  signal?: AbortSignal,
+) => ReturnType<typeof assetsApi.createAssetUploadSession>
+
 export interface TaskAssetUploadFlowOptions {
   signal?: AbortSignal
   onProgress?: (p: AssetUploadProgress) => void
@@ -28,6 +33,8 @@ export interface TaskAssetUploadFlowOptions {
   remarkSuffix?: string
   /** P 图需求明细 ID；写入 create upload-session 的 retouch_requirement_id */
   retouchRequirementId?: number
+  /** 特殊任务内上传入口，例如已结单审核补传。 */
+  createSession?: AssetUploadSessionCreateFn
 }
 
 export interface ReferenceUploadFlowOptions {
@@ -52,6 +59,7 @@ export interface PreparedTaskAssetUploadSession {
   remark: string
   fileHash?: string
   sessionMime?: string
+  completeEndpoint?: string
 }
 
 function readUploadDenyDetail(err: unknown, key: string): string | undefined {
@@ -164,6 +172,7 @@ async function uploadFileViaAssetSession(
     signal: options?.signal,
     remarkSuffix: options?.remarkSuffix,
     retouchRequirementId: options?.retouchRequirementId,
+    createSession: options?.createSession,
   })
   return completePreparedTaskAssetUploadSession(prepared, file, {
     signal: options?.signal,
@@ -177,7 +186,7 @@ export async function prepareTaskAssetUploadSession(
   intent: Omit<CreateAssetUploadSessionPayload, 'task_id' | 'file_name'> & {
     file_name?: string
   },
-  options?: Pick<TaskAssetUploadFlowOptions, 'signal' | 'remarkSuffix' | 'retouchRequirementId'>,
+  options?: Pick<TaskAssetUploadFlowOptions, 'signal' | 'remarkSuffix' | 'retouchRequirementId' | 'createSession'>,
 ): Promise<PreparedTaskAssetUploadSession> {
   const remarkBase = intent.remark ?? file.name
   const remark = remarkBase + (options?.remarkSuffix ?? '')
@@ -192,6 +201,7 @@ export async function prepareTaskAssetUploadSession(
     mime_type: intent.mime_type ?? resolveFileMimeType(file),
     file_hash: intent.file_hash,
     remark,
+    reason: intent.reason,
     source_asset_id: sourceAssetId,
     target_sku_code: intent.target_sku_code,
     owner_module_key: intent.owner_module_key,
@@ -208,7 +218,9 @@ export async function prepareTaskAssetUploadSession(
 
   let sessionRes
   try {
-    if (sessionTaskId) {
+    if (options?.createSession) {
+      sessionRes = await options.createSession(payload, options?.signal)
+    } else if (sessionTaskId) {
       sessionRes = await assetsApi.createAssetUploadSession(payload, options?.signal)
     } else {
       sessionRes = await taskAssetsApi.createTaskCreateUploadSession(payload, options?.signal)
@@ -231,6 +243,7 @@ export async function prepareTaskAssetUploadSession(
     remark,
     fileHash: intent.file_hash,
     sessionMime: (payload.mime_type ?? '').trim() || undefined,
+    completeEndpoint: parsedDirect.completeEndpoint ?? undefined,
   } as const
   if (parsedDirect.ossDirect) {
     return { ...base, ossDirect: parsedDirect.ossDirect }
@@ -317,11 +330,17 @@ export async function completePreparedTaskAssetUploadSession(
   const transportLabel = prepared.ossDirect ? 'oss_direct（主通道）' : 'remote（备用通道）'
   let completeRes
   try {
-    completeRes = await assetsApi.completeAssetUploadSession(
-      prepared.sessionId,
-      completePayload,
-      options?.signal,
-    )
+    completeRes = prepared.completeEndpoint
+      ? await assetsApi.completeAssetUploadSessionAtEndpoint(
+          prepared.completeEndpoint,
+          completePayload,
+          options?.signal,
+        )
+      : await assetsApi.completeAssetUploadSession(
+          prepared.sessionId,
+          completePayload,
+          options?.signal,
+        )
   } catch (err) {
     if (isAssetVersionRaceRetryError(err)) {
       throw err
@@ -424,6 +443,32 @@ export async function uploadTaskFileViaAssetSession(
   options?: TaskAssetUploadFlowOptions,
 ): Promise<ReturnType<typeof normalizeAssetCenterCompleteData>> {
   return uploadFileViaAssetSession(taskId, file, intent, options)
+}
+
+export async function uploadAuditSupplementFileViaAssetSession(
+  taskId: string,
+  file: File,
+  payload: { reason: string; targetSkuCode?: string },
+  options?: TaskAssetUploadFlowOptions,
+): Promise<ReturnType<typeof normalizeAssetCenterCompleteData>> {
+  const reason = payload.reason.trim()
+  return uploadFileViaAssetSession(
+    taskId,
+    file,
+    {
+      asset_kind: 'delivery',
+      target_sku_code: payload.targetSkuCode?.trim() || undefined,
+      owner_module_key: 'audit',
+      upload_policy: 'audit_post_close_supplement',
+      remark: reason,
+      reason,
+    },
+    {
+      ...options,
+      createSession: (sessionPayload, signal) =>
+        assetsApi.createAuditSupplementUploadSession(taskId, sessionPayload, signal),
+    },
+  )
 }
 
 function toReferenceFileRef(

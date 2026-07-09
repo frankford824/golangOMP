@@ -406,7 +406,8 @@ func main() {
 		service.WithTaskAssetCenterScopeUserRepo(userRepo),
 		service.WithTaskAssetCenterUserDisplayNameResolver(service.NewUserRepoDisplayNameResolver(userRepo)),
 		service.WithTaskAssetCenterRetouchRequirementRepo(taskRetouchRequirementRepo),
-		service.WithTaskAssetCenterReferenceFileRefFlatRepo(referenceFileRefFlatRepo))
+		service.WithTaskAssetCenterReferenceFileRefFlatRepo(referenceFileRefFlatRepo),
+		service.WithTaskAssetCenterAuditRepo(auditV7Repo))
 	globalAssetCenterSvc := assetcenter.NewService(taskAssetSearchRepo, ossDirectSvc, uploadClient)
 	globalAssetCenterSvc.SetStorageStreamOpener(service.NewStorageStreamOpener(ossDirectSvc, uploadClient))
 	globalAssetCenterSvc.SetExternalAssetService(externalAssetSvc)

@@ -618,6 +618,7 @@ Content-Type: `application/json`
 | `mime_type` | string | 否 | Optional MIME hint. |
 | `file_hash` | string | 否 | - |
 | `remark` | string | 否 | - |
+| `reason` | string | 否 | Business reason. Required by the audit post-close supplement upload route. |
 | `target_sku_code` | string | 否 | Required for multi-SKU batch-task non-reference uploads. Backend validates that the SKU belongs to the task, returns it on the upload-session business view as `target_sku_code`, and persists the completed asset scope on `scope_sku_code` for the asset root and asset version. |
 | `retouch_requirement_id` | integer | 否 | Optional P图需求明细 scope for `retouch_task`. Mutually exclusive with `target_sku_code`. Backend validates ownership and persists the scope on upload session, `design_assets`, and `task_assets`. |
 
@@ -707,6 +708,7 @@ Content-Type: `application/json`
 | `mime_type` | string | 否 | Optional MIME hint. |
 | `file_hash` | string | 否 | - |
 | `remark` | string | 否 | - |
+| `reason` | string | 否 | Business reason. Required by the audit post-close supplement upload route. |
 | `target_sku_code` | string | 否 | Required for multi-SKU batch-task non-reference uploads. Backend validates that the SKU belongs to the task, returns it on the upload-session business view as `target_sku_code`, and persists the completed asset scope on `scope_sku_code` for the asset root and asset version. |
 | `retouch_requirement_id` | integer | 否 | Optional P图需求明细 scope for `retouch_task`. Mutually exclusive with `target_sku_code`. Backend validates ownership and persists the scope on upload session, `design_assets`, and `task_assets`. |
 
@@ -796,6 +798,7 @@ Content-Type: `application/json`
 | `mime_type` | string | 否 | Optional MIME hint. |
 | `file_hash` | string | 否 | - |
 | `remark` | string | 否 | - |
+| `reason` | string | 否 | Business reason. Required by the audit post-close supplement upload route. |
 | `target_sku_code` | string | 否 | Required for multi-SKU batch-task non-reference uploads. Backend validates that the SKU belongs to the task, returns it on the upload-session business view as `target_sku_code`, and persists the completed asset scope on `scope_sku_code` for the asset root and asset version. |
 | `retouch_requirement_id` | integer | 否 | Optional P图需求明细 scope for `retouch_task`. Mutually exclusive with `target_sku_code`. Backend validates ownership and persists the scope on upload session, `design_assets`, and `task_assets`. |
 
@@ -933,6 +936,7 @@ Content-Type: `application/json`
 | `file_hash` | string | 否 | - |
 | `upload_content_type` | string | 否 | Exact `required_upload_content_type` echoed back by the client when finalizing an OSS direct upload. |
 | `remark` | string | 否 | - |
+| `reason` | string | 否 | Optional reason override for audit post-close supplement completion. When omitted, the reason captured during create-session is used. |
 
 ### 响应体 schema
 成功响应: `200 application/json`

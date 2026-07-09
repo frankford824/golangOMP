@@ -50,6 +50,7 @@ type createTaskAssetUploadSessionReq struct {
 	OwnerModuleKey       string `json:"owner_module_key"`
 	UploadPolicy         string `json:"upload_policy"`
 	RetouchRequirementID *int64 `json:"retouch_requirement_id"`
+	Reason               string `json:"reason"`
 }
 
 type optionalInt64JSONField struct {
@@ -108,6 +109,7 @@ type createTaskAssetUploadSessionPayload struct {
 	OwnerModuleKey       string                 `json:"owner_module_key"`
 	UploadPolicy         string                 `json:"upload_policy"`
 	RetouchRequirementID optionalInt64JSONField `json:"retouch_requirement_id"`
+	Reason               string                 `json:"reason"`
 }
 
 func (p createTaskAssetUploadSessionPayload) toRequest() createTaskAssetUploadSessionReq {
@@ -130,6 +132,7 @@ func (p createTaskAssetUploadSessionPayload) toRequest() createTaskAssetUploadSe
 		OwnerModuleKey:       p.OwnerModuleKey,
 		UploadPolicy:         p.UploadPolicy,
 		RetouchRequirementID: p.RetouchRequirementID.Ptr(),
+		Reason:               p.Reason,
 	}
 }
 
@@ -145,6 +148,7 @@ type completeTaskAssetUploadSessionReq struct {
 	CompletedBy       *int64                    `json:"completed_by"`
 	FileHash          string                    `json:"file_hash"`
 	Remark            string                    `json:"remark"`
+	Reason            string                    `json:"reason"`
 	UploadContentType string                    `json:"upload_content_type,omitempty"`
 	OSSParts          []service.OSSCompletePart `json:"oss_parts,omitempty"`
 	OSSUploadID       string                    `json:"oss_upload_id,omitempty"`
@@ -193,6 +197,102 @@ func (h *TaskAssetCenterHandler) ListAssets(c *gin.Context) {
 		return
 	}
 	respondOK(c, assets)
+}
+
+func (h *TaskAssetCenterHandler) ListAuditSupplements(c *gin.Context) {
+	taskID, err := parseID(c)
+	if err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid task id", nil))
+		return
+	}
+	items, appErr := h.svc.ListAuditSupplements(c.Request.Context(), taskID)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, items)
+}
+
+func (h *TaskAssetCenterHandler) CreateAuditSupplementUploadSession(c *gin.Context) {
+	taskID, err := parseID(c)
+	if err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid task id", nil))
+		return
+	}
+	req, bindErr := bindCreateTaskAssetUploadSessionReq(c)
+	if bindErr != nil {
+		respondError(c, bindErr)
+		return
+	}
+	createdBy, appErr := actorIDOrRequestValue(c, req.CreatedBy, "created_by")
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	assetType := normalizeAssetTypeInput(req.AssetKind, req.AssetType)
+	if assetType != "" && assetType != string(domain.TaskAssetTypeDelivery) {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "audit supplement only supports delivery assets", map[string]interface{}{
+			"allowed_asset_types": []string{string(domain.TaskAssetTypeDelivery)},
+			"asset_type":          assetType,
+		}))
+		return
+	}
+	filename := firstNonEmptyTrimmed(req.FileName, req.Filename)
+	expectedSize := req.ExpectedSize
+	if expectedSize == nil {
+		expectedSize = req.FileSize
+	}
+	result, appErr := h.svc.CreateAuditSupplementUploadSession(c.Request.Context(), service.CreateAuditSupplementUploadSessionParams{
+		TaskID:        taskID,
+		CreatedBy:     createdBy,
+		AssetID:       req.AssetID,
+		Filename:      filename,
+		ExpectedSize:  expectedSize,
+		MimeType:      strings.TrimSpace(req.MimeType),
+		FileHash:      strings.TrimSpace(req.FileHash),
+		Reason:        strings.TrimSpace(firstNonEmptyTrimmed(req.Reason, req.Remark)),
+		TargetSKUCode: strings.TrimSpace(req.TargetSKUCode),
+	})
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondCreated(c, buildCreateAuditSupplementUploadSessionResponse(result))
+}
+
+func (h *TaskAssetCenterHandler) CompleteAuditSupplementUploadSession(c *gin.Context) {
+	taskID, err := parseID(c)
+	if err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid task id", nil))
+		return
+	}
+	var req completeTaskAssetUploadSessionReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	completedBy, appErr := actorIDOrRequestValue(c, req.CompletedBy, "completed_by")
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	result, appErr := h.svc.CompleteAuditSupplementUploadSession(c.Request.Context(), service.CompleteAuditSupplementUploadSessionParams{
+		TaskID:            taskID,
+		SessionID:         strings.TrimSpace(c.Param("session_id")),
+		CompletedBy:       completedBy,
+		Reason:            strings.TrimSpace(firstNonEmptyTrimmed(req.Reason, req.Remark)),
+		Remark:            strings.TrimSpace(req.Remark),
+		FileHash:          strings.TrimSpace(req.FileHash),
+		UploadContentType: strings.TrimSpace(req.UploadContentType),
+		OSSParts:          req.OSSParts,
+		OSSUploadID:       strings.TrimSpace(req.OSSUploadID),
+		OSSObjectKey:      strings.TrimSpace(req.OSSObjectKey),
+	})
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
 }
 
 func (h *TaskAssetCenterHandler) ListAssetResources(c *gin.Context) {
@@ -853,6 +953,17 @@ func buildCreateUploadSessionResponse(result *service.CreateTaskAssetUploadSessi
 	if result.OSSDirect != nil {
 		resp["oss_direct"] = result.OSSDirect
 	}
+	return resp
+}
+
+func buildCreateAuditSupplementUploadSessionResponse(result *service.CreateTaskAssetUploadSessionResult) gin.H {
+	resp := buildCreateUploadSessionResponse(result, false)
+	if result == nil || result.Session == nil {
+		return resp
+	}
+	taskID := result.Session.TaskID
+	sessionID := result.Session.ID
+	resp["complete_endpoint"] = "/v1/tasks/" + int64ToString(taskID) + "/audit-supplements/upload-sessions/" + sessionID + "/complete"
 	return resp
 }
 

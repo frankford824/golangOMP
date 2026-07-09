@@ -106,6 +106,9 @@ type ResponseShape struct {
 }
 
 var knownGapReasons = map[string]string{
+	knownGapKey("GET", "/v1/tasks/:id/audit-supplements"):                                       "task-audit-supplement-contract-pending",
+	knownGapKey("POST", "/v1/tasks/:id/audit-supplements/upload-sessions"):                      "task-audit-supplement-contract-pending",
+	knownGapKey("POST", "/v1/tasks/:id/audit-supplements/upload-sessions/:session_id/complete"): "task-audit-supplement-contract-pending",
 	knownGapKey("DELETE", "/v1/asset-workbench/groups/:group_id"):                       "asset-workbench-mounted-route-contract-pending",
 	knownGapKey("DELETE", "/v1/asset-workbench/groups/:group_id/members"):               "asset-workbench-mounted-route-contract-pending",
 	knownGapKey("DELETE", "/v1/asset-workbench/client-materials/:material_id"):          "asset-workbench-mounted-route-contract-pending",

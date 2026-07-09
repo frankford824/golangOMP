@@ -913,6 +913,53 @@
                         <p v-if="auditAssetUploadStatus" class="detail-v3-ref-status">{{ auditAssetUploadStatus }}</p>
                         <p v-if="auditAssetUploadError" class="detail-v3-ref-error">{{ auditAssetUploadError }}</p>
                       </div>
+                      <div
+                        v-if="canUploadAuditSupplement"
+                        class="detail-v3-audit-upload detail-v3-audit-supplement"
+                      >
+                        <p class="detail-v3-card-muted">已结单补传仅追加最终成品图。</p>
+                        <BaseTextarea
+                          v-model="auditSupplementReason"
+                          placeholder="填写补传原因..."
+                          :rows="2"
+                          :disabled="actionLoading === 'audit-supplement-upload'"
+                        />
+                        <input
+                          ref="auditSupplementUploadInputRef"
+                          type="file"
+                          accept="image/*,.jpg,.jpeg,.png,.webp"
+                          multiple
+                          class="detail-v3-hidden-file-input"
+                          aria-label="已结单审核补传最终成品图"
+                          @change="handleAuditSupplementUpload"
+                        />
+                        <div class="detail-v3-inline-actions">
+                          <button
+                            type="button"
+                            class="detail-v3-dark-btn"
+                            :disabled="actionLoading === 'audit-supplement-upload'"
+                            @focusin="activateDetailFileReceiver('audit-supplement')"
+                            @pointerenter="activateDetailFileReceiver('audit-supplement')"
+                            @dragover.prevent="onDetailUploadDragOver('audit-supplement', $event)"
+                            @drop.prevent="onDetailUploadDrop('audit-supplement', $event)"
+                            @paste="onDetailUploadPaste('audit-supplement', $event)"
+                            @click="auditSupplementUploadInputRef?.click()"
+                          >
+                            {{ actionLoading === 'audit-supplement-upload' ? '补传中...' : '上传/拖拽/粘贴补传成品图' }}
+                          </button>
+                        </div>
+                        <p v-if="auditSupplementUploadStatus" class="detail-v3-ref-status">{{ auditSupplementUploadStatus }}</p>
+                        <p v-if="auditSupplementUploadError" class="detail-v3-ref-error">{{ auditSupplementUploadError }}</p>
+                        <ul v-if="auditSupplements.length" class="detail-v3-audit-supplement-list">
+                          <li
+                            v-for="item in auditSupplements"
+                            :key="item.event_id || item.upload_session_id || item.asset_version_id"
+                          >
+                            <span>{{ item.filename || '补传成品图' }}</span>
+                            <small>{{ formatAuditSupplementMeta(item) }}</small>
+                          </li>
+                        </ul>
+                      </div>
                     </article>
                   </div>
                 </section>
@@ -1283,7 +1330,7 @@ import { tasksApi } from '@/services/api/tasksApi'
 import { predictionsApi, type PredictionSuggestion } from '@/services/api/predictionsApi'
 import { recordExperienceBehavior } from '@/services/experienceBehavior'
 import { uploadTaskReferenceFileViaAssetSession } from '@/services/api/design'
-import { assetsApi, type AssetKind } from '@/services/api/assetsApi'
+import { assetsApi, type AssetKind, type AuditSupplementItem } from '@/services/api/assetsApi'
 import {
   productManagementApi,
   type ProductManagementRecord,
@@ -1291,7 +1338,11 @@ import {
 } from '@/services/api/productManagementApi'
 import { fetchAssetPreviewMeta } from '@/domain/asset-access'
 import type { BackendAsset } from '@/services/apiTypes'
-import { uploadReferenceFileRef, uploadTaskFileViaAssetSession } from '@/services/upload/assetUploadFlow'
+import {
+  uploadAuditSupplementFileViaAssetSession,
+  uploadReferenceFileRef,
+  uploadTaskFileViaAssetSession,
+} from '@/services/upload/assetUploadFlow'
 import { buildTimestampedZipFilename, downloadBatchAsZip, sanitizeZipEntryName } from '@/utils/batchZipDownload'
 import { resolveApiUserMessage } from '@/utils/api-message-zh'
 import { formatErpSyncFailureMessage } from '@/utils/business-copy'
@@ -2122,9 +2173,14 @@ const referenceBatchDownloadStatus = ref('')
 const referenceBatchDownloadError = ref('')
 const auditSourceUploadInputRef = ref<HTMLInputElement | null>(null)
 const auditDeliveryUploadInputRef = ref<HTMLInputElement | null>(null)
+const auditSupplementUploadInputRef = ref<HTMLInputElement | null>(null)
 const auditAssetUploadError = ref('')
 const auditAssetUploadStatus = ref('')
-type DetailUploadTarget = 'reference' | 'audit-source' | 'audit-delivery'
+const auditSupplementReason = ref('')
+const auditSupplementUploadError = ref('')
+const auditSupplementUploadStatus = ref('')
+const auditSupplements = ref<AuditSupplementItem[]>([])
+type DetailUploadTarget = 'reference' | 'audit-source' | 'audit-delivery' | 'audit-supplement'
 const activeDetailUploadTarget = ref<DetailUploadTarget | null>(null)
 
 // provide：让所有子区块无需 props 直接注入 task
@@ -2297,6 +2353,28 @@ const AUDIT_MANAGER_REASSIGN_ROLES = [
   'department_admin',
   'team_lead',
 ] as const
+const AUDIT_SUPPLEMENT_ROLES = [
+  'Audit_A',
+  'Audit_B',
+  'Admin',
+  'SuperAdmin',
+  'HRAdmin',
+  'RoleAdmin',
+  'DepartmentAdmin',
+  'DeptAdmin',
+  'TeamLead',
+  'DesignDirector',
+  'audit_a',
+  'audit_b',
+  'admin',
+  'super_admin',
+  'hr_admin',
+  'role_admin',
+  'department_admin',
+  'dept_admin',
+  'team_lead',
+  'design_director',
+] as const
 const canManageAuditAssignment = computed(() =>
   permissionsStore.hasAnyRole([...AUDIT_MANAGER_REASSIGN_ROLES]),
 )
@@ -2375,6 +2453,10 @@ const showRetouchSubmitAction = computed(() => {
   return false
 })
 const canUploadAuditAssets = computed(() => showAuditReviewButtons.value)
+const canUploadAuditSupplement = computed(() => {
+  if (!task.value || task.value.status !== 'Completed') return false
+  return permissionsStore.hasAnyRole([...AUDIT_SUPPLEMENT_ROLES])
+})
 const hasPendingAuditHandover = computed(() =>
   auditHandovers.value.some((handover) => handover?.status === 'pending_takeover'),
 )
@@ -2564,6 +2646,9 @@ function detailUploadTargetEnabled(target: DetailUploadTarget | null): boolean {
   if (target === 'audit-source' || target === 'audit-delivery') {
     return canUploadAuditAssets.value && actionLoading.value !== 'audit-upload'
   }
+  if (target === 'audit-supplement') {
+    return canUploadAuditSupplement.value && actionLoading.value !== 'audit-supplement-upload'
+  }
   return false
 }
 
@@ -2581,6 +2666,10 @@ const { activateFileReceiver: activateDetailGlobalFileReceiver } = useFileDropPa
     }
     if (target === 'audit-delivery') {
       void handleAuditAssetFiles(files, 'delivery')
+      return
+    }
+    if (target === 'audit-supplement') {
+      void handleAuditSupplementFiles(files)
     }
   },
 })
@@ -2608,6 +2697,8 @@ function onDetailUploadDrop(target: DetailUploadTarget, event: DragEvent) {
   activateDetailFileReceiver(target)
   if (target === 'reference') {
     void handleOpsReferenceFiles(files)
+  } else if (target === 'audit-supplement') {
+    void handleAuditSupplementFiles(files)
   } else {
     void handleAuditAssetFiles(files, target === 'audit-delivery' ? 'delivery' : 'source')
   }
@@ -2621,6 +2712,8 @@ function onDetailUploadPaste(target: DetailUploadTarget, event: ClipboardEvent) 
   activateDetailFileReceiver(target)
   if (target === 'reference') {
     void handleOpsReferenceFiles(files)
+  } else if (target === 'audit-supplement') {
+    void handleAuditSupplementFiles(files)
   } else {
     void handleAuditAssetFiles(files, target === 'audit-delivery' ? 'delivery' : 'source')
   }
@@ -3114,6 +3207,102 @@ async function handleAuditAssetFiles(files: FileList | File[], kind: AssetKind) 
   }
 }
 
+function unwrapAuditSupplementItems(payload: unknown): AuditSupplementItem[] {
+  const root = payload && typeof payload === 'object' ? (payload as Record<string, unknown>) : {}
+  const data = root.data
+  if (Array.isArray(data)) return data as AuditSupplementItem[]
+  if (Array.isArray(payload)) return payload as AuditSupplementItem[]
+  return []
+}
+
+async function loadAuditSupplements() {
+  const currentTask = task.value
+  if (!currentTask?.id || !canUploadAuditSupplement.value) {
+    auditSupplements.value = []
+    auditSupplementUploadError.value = ''
+    return
+  }
+  try {
+    const res = await assetsApi.listAuditSupplements(currentTask.id)
+    auditSupplements.value = unwrapAuditSupplementItems(res.data)
+  } catch (err) {
+    auditSupplements.value = []
+    auditSupplementUploadError.value = resolveApiUserMessage(err, {
+      fallback: '读取审核补传记录失败',
+    })
+  }
+}
+
+function formatAuditSupplementMeta(item: AuditSupplementItem): string {
+  const parts = [
+    item.target_sku_code?.trim(),
+    item.uploaded_by_name?.trim() || (item.uploaded_by ? `用户 ${item.uploaded_by}` : ''),
+    item.created_at ? formatMonthDayTimeBeijingOffsetAware(item.created_at) : '',
+    item.reason?.trim(),
+  ].filter(Boolean)
+  return parts.join(' · ')
+}
+
+async function handleAuditSupplementUpload(e: Event) {
+  const input = e.target as HTMLInputElement
+  const files = snapshotAndResetFileInput(input)
+  await handleAuditSupplementFiles(files)
+}
+
+async function handleAuditSupplementFiles(files: FileList | File[]) {
+  const currentTask = task.value
+  if (!files.length || !currentTask?.id) return
+  const picked = Array.from(files)
+  const reason = auditSupplementReason.value.trim()
+  auditSupplementUploadError.value = ''
+  auditSupplementUploadStatus.value = ''
+
+  if (!canUploadAuditSupplement.value) {
+    auditSupplementUploadError.value = '当前任务不可补传审核成品图'
+    return
+  }
+  if (!reason) {
+    auditSupplementUploadError.value = '请填写补传原因'
+    return
+  }
+
+  const { validFiles, errors } = validateAuditUploadFiles(picked, 'delivery')
+  auditSupplementUploadError.value = errors.join('；')
+  if (!validFiles.length) return
+
+  actionLoading.value = 'audit-supplement-upload'
+  const targetSku = targetSkuCodeForUpload(
+    currentTask,
+    selectionFromProductIndex(currentTask, detailProductIndex.value),
+    { isPurchase: isPurchaseTask.value },
+  )
+  auditSupplementUploadStatus.value = `补传中 0/${validFiles.length}`
+  try {
+    for (let index = 0; index < validFiles.length; index += 1) {
+      const file = validFiles[index]!
+      auditSupplementUploadStatus.value = `补传中 ${index + 1}/${validFiles.length}：${file.name}`
+      await uploadAuditSupplementFileViaAssetSession(
+        currentTask.id,
+        file,
+        {
+          reason,
+          targetSkuCode: targetSku || undefined,
+        },
+      )
+    }
+    await tasksStore.loadTaskById(currentTask.id)
+    await loadAuditSupplements()
+    auditSupplementUploadStatus.value = `审核补传已完成（${validFiles.length} 个）`
+    auditSupplementReason.value = ''
+    flashSuccess(auditSupplementUploadStatus.value)
+  } catch (err) {
+    auditSupplementUploadError.value = formatUploadFailureMessage('part_upload', err)
+    auditSupplementUploadStatus.value = ''
+  } finally {
+    actionLoading.value = ''
+  }
+}
+
 function navigateBackToTaskList() {
   void router.push('/tasks')
 }
@@ -3387,11 +3576,13 @@ async function loadTask() {
     void loadTaskPredictions()
     void loadProductManagementRecords()
     void loadAuditHandovers()
+    void loadAuditSupplements()
   } else {
     opsReferenceBackendAssets.value = []
     taskPredictionSuggestions.value = []
     productManagementRecords.value = []
     auditHandovers.value = []
+    auditSupplements.value = []
   }
 	}
 
@@ -3495,6 +3686,7 @@ const actionLoading = ref<
   | 'audit-pass'
   | 'audit-reject'
   | 'audit-upload'
+  | 'audit-supplement-upload'
   | 'audit-handover'
   | 'audit-takeover'
   | 'audit-transfer'
@@ -3720,6 +3912,10 @@ watch(taskId, () => {
   auditRejectReasonCategory.value = ''
   auditComment.value = ''
   auditCommentError.value = ''
+  auditSupplementReason.value = ''
+  auditSupplementUploadError.value = ''
+  auditSupplementUploadStatus.value = ''
+  auditSupplements.value = []
   void loadSideEvents()
 })
 
@@ -5568,6 +5764,36 @@ watch(taskId, (id) => {
   margin-top: 0.75rem;
   padding-top: 0.65rem;
   border-top: 1px solid rgb(var(--yb-border-control));
+}
+.detail-v3-audit-supplement :deep(.base-textarea) {
+  margin-top: 0.55rem;
+}
+.detail-v3-audit-supplement-list {
+  display: grid;
+  gap: 0.4rem;
+  padding: 0;
+  margin: 0.65rem 0 0;
+  list-style: none;
+}
+.detail-v3-audit-supplement-list li {
+  display: grid;
+  gap: 0.15rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid rgb(var(--yb-border-control));
+  border-radius: var(--dv-r-control, 0.625rem);
+  background: var(--td-panel);
+}
+.detail-v3-audit-supplement-list span {
+  color: rgb(var(--yb-text-body-strong));
+  font-size: 0.8125rem;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+.detail-v3-audit-supplement-list small {
+  color: rgb(var(--yb-text-muted));
+  font-size: 0.75rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
 }
 .detail-v3-requirement-box span {
   display: block;

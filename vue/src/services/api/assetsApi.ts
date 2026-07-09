@@ -23,6 +23,7 @@ export interface CreateAssetUploadSessionPayload {
   mime_type?: string
   file_hash?: string
   remark?: string
+  reason?: string
   source_asset_id?: string | number
   /** P 图需求明细 ID；非空表示资产绑定到该条 retouch requirement */
   retouch_requirement_id?: number
@@ -129,6 +130,7 @@ export interface AssetUploadCompleteOssPart {
 export interface CompleteAssetUploadSessionPayload {
   file_hash?: string
   remark?: string
+  reason?: string
   /** OSS multipart finalize 字段 */
   oss_upload_id?: string
   oss_object_key?: string
@@ -320,6 +322,26 @@ export interface AssetBatchDownloadResponse {
   data?: AssetBatchDownloadManifest
 }
 
+export interface AuditSupplementItem {
+  event_id?: string
+  sequence?: number
+  task_id?: number
+  asset_id?: number
+  asset_version_id?: number
+  asset_version_no?: number
+  timeline_version?: number
+  upload_session_id?: string
+  filename?: string
+  reason?: string
+  target_sku_code?: string
+  uploaded_by?: number
+  uploaded_by_name?: string
+  audit_delivery_count_before?: number
+  audit_delivery_count_after?: number
+  design_delivery_count?: number
+  created_at?: string
+}
+
 export interface AssetExcelPackageRow {
   row_number?: number
   order_no: string
@@ -407,6 +429,35 @@ export const assetsApi = {
     http.post<AssetCenterUploadCompleteResponse>(
       `/v1/assets/upload-sessions/${sessionId}/complete`,
       payload ?? {},
+      { signal },
+    ),
+
+  completeAssetUploadSessionAtEndpoint: (
+    endpoint: string,
+    payload?: CompleteAssetUploadSessionPayload,
+    signal?: AbortSignal,
+  ) => http.post<AssetCenterUploadCompleteResponse>(endpoint, payload ?? {}, { signal }),
+
+  /**
+   * GET /v1/tasks/{id}/audit-supplements
+   */
+  listAuditSupplements: (taskId: string | number, signal?: AbortSignal) =>
+    http.get<{ data?: AuditSupplementItem[] } | AuditSupplementItem[]>(
+      `/v1/tasks/${taskId}/audit-supplements`,
+      { signal },
+    ),
+
+  /**
+   * POST /v1/tasks/{id}/audit-supplements/upload-sessions
+   */
+  createAuditSupplementUploadSession: (
+    taskId: string | number,
+    payload: CreateAssetUploadSessionPayload,
+    signal?: AbortSignal,
+  ) =>
+    http.post<AssetUploadSessionCreateResponse>(
+      `/v1/tasks/${taskId}/audit-supplements/upload-sessions`,
+      payload,
       { signal },
     ),
 

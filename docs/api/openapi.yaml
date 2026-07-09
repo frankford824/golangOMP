@@ -4251,6 +4251,9 @@ components:
           type: string
         remark:
           type: string
+        reason:
+          type: string
+          description: Business reason. Required by the audit post-close supplement upload route.
         target_sku_code:
           type: string
           description: Required for multi-SKU batch-task non-reference uploads. Backend validates that the SKU belongs to the task, returns it on the upload-session business view as `target_sku_code`, and persists the completed asset scope on `scope_sku_code` for the asset root and asset version.
@@ -4311,6 +4314,90 @@ components:
           description: Exact `required_upload_content_type` echoed back by the client when finalizing an OSS direct upload.
         remark:
           type: string
+        reason:
+          type: string
+          description: Optional reason override for audit post-close supplement completion. When omitted, the reason captured during create-session is used.
+    AuditSupplementUploadSessionCreateRequest:
+      allOf:
+        - $ref: '#/components/schemas/CreateTaskAssetUploadSessionRequest'
+        - type: object
+          required: [reason]
+          properties:
+            reason:
+              type: string
+              minLength: 1
+              description: Why this delivery asset is being appended after task completion.
+            asset_kind:
+              type: string
+              enum: [delivery]
+              description: Audit supplements append delivery assets only.
+            asset_type:
+              type: string
+              enum: [delivery]
+              description: Compatibility alias of `asset_kind`.
+            owner_module_key:
+              type: string
+              enum: [audit]
+            upload_policy:
+              type: string
+              enum: [audit_post_close_supplement]
+            target_sku_code:
+              type: string
+              description: Required when the completed task is a multi-SKU batch task.
+          anyOf:
+            - required: [file_name]
+            - required: [filename]
+    AuditSupplementUploadSessionCompleteRequest:
+      allOf:
+        - $ref: '#/components/schemas/CompleteTaskAssetUploadSessionRequest'
+        - type: object
+          properties:
+            reason:
+              type: string
+              description: Optional reason override. The create-session reason is retained when this is empty.
+    AuditSupplementItem:
+      type: object
+      properties:
+        event_id:
+          type: string
+        sequence:
+          type: integer
+          format: int64
+        task_id:
+          type: integer
+          format: int64
+        asset_id:
+          type: integer
+          format: int64
+        asset_version_id:
+          type: integer
+          format: int64
+        asset_version_no:
+          type: integer
+        timeline_version:
+          type: integer
+        upload_session_id:
+          type: string
+        filename:
+          type: string
+        reason:
+          type: string
+        target_sku_code:
+          type: string
+        uploaded_by:
+          type: integer
+          format: int64
+        uploaded_by_name:
+          type: string
+        audit_delivery_count_before:
+          type: integer
+        audit_delivery_count_after:
+          type: integer
+        design_delivery_count:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
     CompleteTaskAssetUploadSessionResponseData:
       type: object
       properties:
@@ -14032,6 +14119,124 @@ paths:
           description: Task not found
         '409':
           description: Missing designer assignment or invalid task state
+  /v1/tasks/{id}/audit-supplements:
+    get:
+      summary: List audit post-close supplement uploads
+      description: |
+        Returns append-only audit supplement records created after a task is already `Completed`.
+        Each record corresponds to one delivery asset appended by an audit or management role, with
+        event metadata for operator traceability. This is not a settlement recalculation endpoint.
+      tags: [TaskAssetCenter, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Audit_A, Audit_B, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Audit supplement records
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/AuditSupplementItem'
+        '403':
+          description: Forbidden
+        '404':
+          description: Task not found
+  /v1/tasks/{id}/audit-supplements/upload-sessions:
+    post:
+      summary: Create audit supplement upload session
+      description: |
+        Creates an OSS-backed upload session for a post-close audit supplement. This route is only
+        valid after the task is `Completed`, only appends a new `delivery` asset, and requires a
+        business `reason`. The response `complete_endpoint` must be used to finalize the upload.
+      tags: [TaskAssetCenter, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Audit_A, Audit_B, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuditSupplementUploadSessionCreateRequest'
+      responses:
+        '201':
+          description: Upload session created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/CreateTaskAssetUploadSessionResponseData'
+        '400':
+          description: Invalid request payload
+        '403':
+          description: "`PERMISSION_DENIED` with `audit_supplement_*` deny details."
+        '404':
+          description: Task not found
+        '409':
+          description: Task is not completed or upload state is invalid
+  /v1/tasks/{id}/audit-supplements/upload-sessions/{session_id}/complete:
+    post:
+      summary: Complete audit supplement upload session
+      description: |
+        Finalizes the audit supplement upload session, creates an approved delivery design asset
+        owned by the audit module, and appends `task.audit.supplement_uploaded` to the task event log.
+      tags: [TaskAssetCenter, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Audit_A, Audit_B, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+        - in: path
+          name: session_id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuditSupplementUploadSessionCompleteRequest'
+      responses:
+        '200':
+          description: Upload session completed and supplement asset recorded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/CompleteTaskAssetUploadSessionResponseData'
+        '400':
+          description: Invalid request payload
+        '403':
+          description: "`PERMISSION_DENIED` with `audit_supplement_*` deny details."
+        '404':
+          description: Task or upload session not found
+        '409':
+          description: Upload session already terminal or task is no longer completed
   /v1/tasks/{id}/assets:
     get:
       summary: List task-linked design assets

@@ -14,7 +14,7 @@
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
-- 本文件覆盖 `204` 个 `/v1` path；同一路径多 method 合并在同一节。
+- 本文件覆盖 `207` 个 `/v1` path；同一路径多 method 合并在同一节。
 
 ## GET /v1/trace-events
 
@@ -3189,6 +3189,229 @@ curl -X POST https://api.example.com/v1/tasks/<id>/submit-design \
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
 
+## GET /v1/tasks/{id}/audit-supplements
+
+### 简介
+支持方法: GET。
+
+- `GET`: Returns append-only audit supplement records created after a task is already `Completed`. Each record corresponds to one delivery asset appended by an audit or management role, with event metadata for operator traceability. This is not a settlement recalculation endpoint.
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `GET` 允许角色: Audit_A, Audit_B, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `id` | path | integer | 是 | - |
+
+请求体: 无请求体。
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": [
+    {
+      "event_id": "...",
+      "sequence": "...",
+      "task_id": "...",
+      "asset_id": "..."
+    }
+  ]
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | array<AuditSupplementItem> | 否 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 403 | 见 `error.code` | 见 `deny_code` | Forbidden |
+| 404 | 见 `error.code` | 见 `deny_code` | Task not found |
+
+### curl 示例
+```bash
+curl -X GET https://api.example.com/v1/tasks/<id>/audit-supplements \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## POST /v1/tasks/{id}/audit-supplements/upload-sessions
+
+### 简介
+支持方法: POST。
+
+- `POST`: Creates an OSS-backed upload session for a post-close audit supplement. This route is only valid after the task is `Completed`, only appends a new `delivery` asset, and requires a business `reason`. The response `complete_endpoint` must be used to finalize the upload.
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `POST` 允许角色: Audit_A, Audit_B, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `id` | path | integer | 是 | - |
+
+Content-Type: `application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `body` | AuditSupplementUploadSessionCreateRequest | 视接口 | OpenAPI 声明的整体对象。 |
+
+### 响应体 schema
+成功响应: `201 application/json`
+
+```json
+{
+  "data": {
+    "session": {
+      "id": "...",
+      "task_id": "...",
+      "asset_id": "...",
+      "asset_type": "..."
+    },
+    "remote": {
+      "upload_id": "...",
+      "file_id": "...",
+      "base_url": "...",
+      "upload_url": "..."
+    },
+    "upload_strategy": "string",
+    "required_upload_content_type": "string"
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | CreateTaskAssetUploadSessionResponseData | 否 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid request payload |
+| 403 | 见 `error.code` | 见 `deny_code` | `PERMISSION_DENIED` with `audit_supplement_*` deny details. |
+| 404 | 见 `error.code` | 见 `deny_code` | Task not found |
+| 409 | 见 `error.code` | 见 `deny_code` | Task is not completed or upload state is invalid |
+
+### curl 示例
+```bash
+curl -X POST https://api.example.com/v1/tasks/<id>/audit-supplements/upload-sessions \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"example":"value"}'
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## POST /v1/tasks/{id}/audit-supplements/upload-sessions/{session_id}/complete
+
+### 简介
+支持方法: POST。
+
+- `POST`: Finalizes the audit supplement upload session, creates an approved delivery design asset owned by the audit module, and appends `task.audit.supplement_uploaded` to the task event log.
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `POST` 允许角色: Audit_A, Audit_B, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `id` | path | integer | 是 | - |
+| `session_id` | path | string | 是 | - |
+
+Content-Type: `application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `body` | AuditSupplementUploadSessionCompleteRequest | 视接口 | OpenAPI 声明的整体对象。 |
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "session": {
+      "id": "...",
+      "task_id": "...",
+      "asset_id": "...",
+      "asset_type": "..."
+    },
+    "asset": {
+      "id": "...",
+      "task_id": "...",
+      "asset_no": "...",
+      "source_asset_id": "..."
+    },
+    "version": {
+      "id": "...",
+      "task_id": "...",
+      "task_no": "...",
+      "asset_id": "..."
+    }
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | CompleteTaskAssetUploadSessionResponseData | 否 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid request payload |
+| 403 | 见 `error.code` | 见 `deny_code` | `PERMISSION_DENIED` with `audit_supplement_*` deny details. |
+| 404 | 见 `error.code` | 见 `deny_code` | Task or upload session not found |
+| 409 | 见 `error.code` | 见 `deny_code` | Upload session already terminal or task is no longer completed |
+
+### curl 示例
+```bash
+curl -X POST https://api.example.com/v1/tasks/<id>/audit-supplements/upload-sessions/<session_id>/complete \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"example":"value"}'
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
 ## GET /v1/tasks/{id}/assets
 
 ### 简介
@@ -3615,6 +3838,7 @@ Content-Type: `application/json`
 | `mime_type` | string | 否 | Optional MIME hint. |
 | `file_hash` | string | 否 | - |
 | `remark` | string | 否 | - |
+| `reason` | string | 否 | Business reason. Required by the audit post-close supplement upload route. |
 | `target_sku_code` | string | 否 | Required for multi-SKU batch-task non-reference uploads. Backend validates that the SKU belongs to the task, returns it on the upload-session business view as `target_sku_code`, and persists the completed asset scope on `scope_sku_code` for the asset root and asset version. |
 | `retouch_requirement_id` | integer | 否 | Optional P图需求明细 scope for `retouch_task`. Mutually exclusive with `target_sku_code`. Backend validates ownership and persists the scope on upload session, `design_assets`, and `task_assets`. |
 
@@ -3758,6 +3982,7 @@ Content-Type: `application/json`
 | `file_hash` | string | 否 | - |
 | `upload_content_type` | string | 否 | Exact `required_upload_content_type` echoed back by the client when finalizing an OSS direct upload. |
 | `remark` | string | 否 | - |
+| `reason` | string | 否 | Optional reason override for audit post-close supplement completion. When omitted, the reason captured during create-session is used. |
 
 ### 响应体 schema
 成功响应: `200 application/json`
@@ -3923,6 +4148,7 @@ Content-Type: `application/json`
 | `mime_type` | string | 否 | Optional MIME hint. |
 | `file_hash` | string | 否 | - |
 | `remark` | string | 否 | - |
+| `reason` | string | 否 | Business reason. Required by the audit post-close supplement upload route. |
 | `target_sku_code` | string | 否 | Required for multi-SKU batch-task non-reference uploads. Backend validates that the SKU belongs to the task, returns it on the upload-session business view as `target_sku_code`, and persists the completed asset scope on `scope_sku_code` for the asset root and asset version. |
 | `retouch_requirement_id` | integer | 否 | Optional P图需求明细 scope for `retouch_task`. Mutually exclusive with `target_sku_code`. Backend validates ownership and persists the scope on upload session, `design_assets`, and `task_assets`. |
 

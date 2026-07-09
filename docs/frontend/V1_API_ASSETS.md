@@ -631,6 +631,7 @@ Content-Type: `application/json`
 | `file_hash` | string | 否 | - |
 | `upload_content_type` | string | 否 | Exact `required_upload_content_type` echoed back by the client when finalizing an OSS direct upload. |
 | `remark` | string | 否 | - |
+| `reason` | string | 否 | Optional reason override for audit post-close supplement completion. When omitted, the reason captured during create-session is used. |
 
 ### 响应体 schema
 成功响应: `200 application/json`
