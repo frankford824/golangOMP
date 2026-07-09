@@ -605,7 +605,11 @@ func (s *productManagementService) refreshReadModel(ctx context.Context) *domain
 		return infraAppError("refresh product management read model", err)
 	}
 	s.lastRefresh = now
-	s.invalidateCostDashboardCache(ctx)
+	// Intentionally do NOT invalidate the cost dashboard cache here. This is the
+	// throttled (30s) background refresh triggered by ordinary product-center
+	// traffic; invalidating on every refresh would defeat the 5-minute weakly
+	// consistent cache. Cache invalidation stays on cost recalculation apply,
+	// where the underlying dashboard facts actually change.
 	return nil
 }
 
@@ -617,7 +621,6 @@ func (s *productManagementService) RefreshReadModelNow(ctx context.Context) *dom
 		return infraAppError("refresh product management read model", err)
 	}
 	s.lastRefresh = s.now()
-	s.invalidateCostDashboardCache(ctx)
 	return nil
 }
 

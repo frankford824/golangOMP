@@ -42,7 +42,7 @@ func TestSearchAssetsFromDocumentsUsesFullTextForCodeKeyword(t *testing.T) {
 	}
 }
 
-func TestSearchProductsFromDocumentsCombinesPrefixAndFullTextForCodeKeyword(t *testing.T) {
+func TestSearchProductsFromDocumentsCodeKeywordUsesUnionWithoutFullText(t *testing.T) {
 	mysqlSchemaPresenceCache = sync.Map{}
 	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(searchRepoQueryMatcher(t)))
 	if err != nil {
@@ -53,11 +53,8 @@ func TestSearchProductsFromDocumentsCombinesPrefixAndFullTextForCodeKeyword(t *t
 	mock.ExpectQuery("schema-table").
 		WithArgs("product_search_documents").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
-	mock.ExpectQuery("schema-column").
-		WithArgs("product_search_documents", "semantic_text").
-		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
-	mock.ExpectQuery("product-doc-search").
-		WithArgs("CGK000181", "CGK000181", "CGK000181%", "CGK000181%", "CGK000181", "CGK000181", "CGK000181", "CGK000181%", 20).
+	mock.ExpectQuery("product-doc-code").
+		WithArgs("CGK000181", "CGK000181", "CGK000181%", "CGK000181%", 20).
 		WillReturnRows(sqlmock.NewRows([]string{"erp_code", "product_name", "i_id", "category"}).
 			AddRow("CGK000181", "测试产品", "IID-1", "KT板"))
 
@@ -72,6 +69,113 @@ func TestSearchProductsFromDocumentsCombinesPrefixAndFullTextForCodeKeyword(t *t
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
 	}
+}
+
+func TestSearchProductsFromDocumentsTextKeywordUsesFullText(t *testing.T) {
+	mysqlSchemaPresenceCache = sync.Map{}
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(searchRepoQueryMatcher(t)))
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectQuery("schema-table").
+		WithArgs("product_search_documents").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectQuery("schema-column").
+		WithArgs("product_search_documents", "semantic_text").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectQuery("product-doc-text").
+		WithArgs("常规kt板", 20).
+		WillReturnRows(sqlmock.NewRows([]string{"erp_code", "product_name", "i_id", "category"}).
+			AddRow("CGK000181", "常规kt板", "IID-1", "KT板"))
+
+	repo := NewSearchRepo(New(db))
+	items, err := repo.SearchProducts(context.Background(), "常规kt板", 20)
+	if err != nil {
+		t.Fatalf("SearchProducts() error = %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("items=%+v", items)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestSearchTasksFromDocumentsCodeKeywordUsesUnionRecall(t *testing.T) {
+	mysqlSchemaPresenceCache = sync.Map{}
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(searchRepoQueryMatcher(t)))
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectQuery("schema-table").
+		WithArgs("task_search_documents").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	// 4 exact + 4 prefix branches, then LIMIT.
+	mock.ExpectQuery("task-doc-code").
+		WithArgs("CGK000181", "CGK000181", "CGK000181", "CGK000181", "CGK000181%", "CGK000181%", "CGK000181%", "CGK000181%", 20).
+		WillReturnRows(searchTaskDocumentRows().AddRow(
+			int64(3), "T-0003", "常规kt板", "InProgress", "high",
+			"custom", "CGK000181", "CGK000181", "IID-1",
+			"dept", "team", "org", int64(1), "creator", int64(2), "designer",
+			nil, nil))
+
+	repo := NewSearchRepo(New(db))
+	items, err := repo.SearchTasks(context.Background(), "CGK000181", 20)
+	if err != nil {
+		t.Fatalf("SearchTasks() error = %v", err)
+	}
+	if len(items) != 1 || items[0].ID != 3 {
+		t.Fatalf("items=%+v", items)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestSearchTasksFromDocumentsTextKeywordUsesFullText(t *testing.T) {
+	mysqlSchemaPresenceCache = sync.Map{}
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(searchRepoQueryMatcher(t)))
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectQuery("schema-table").
+		WithArgs("task_search_documents").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectQuery("task-doc-text").
+		WithArgs("常规kt板", 20).
+		WillReturnRows(searchTaskDocumentRows().AddRow(
+			int64(3), "T-0003", "常规kt板", "InProgress", "high",
+			"custom", "CGK000181", "CGK000181", "IID-1",
+			"dept", "team", "org", int64(1), "creator", int64(2), "designer",
+			nil, nil))
+
+	repo := NewSearchRepo(New(db))
+	items, err := repo.SearchTasks(context.Background(), "常规kt板", 20)
+	if err != nil {
+		t.Fatalf("SearchTasks() error = %v", err)
+	}
+	if len(items) != 1 || items[0].ID != 3 {
+		t.Fatalf("items=%+v", items)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func searchTaskDocumentRows() *sqlmock.Rows {
+	return sqlmock.NewRows([]string{
+		"task_id", "task_no", "product_name_snapshot", "task_status", "priority",
+		"task_type", "sku_code", "primary_sku_code", "product_i_id",
+		"owner_department", "owner_team", "owner_org_team",
+		"creator_id", "creator_name", "designer_id", "designer_name",
+		"created_at", "deadline_at",
+	})
 }
 
 func searchRepoQueryMatcher(t *testing.T) sqlmock.QueryMatcher {
@@ -97,16 +201,39 @@ func searchRepoQueryMatcher(t *testing.T) sqlmock.QueryMatcher {
 			if !strings.Contains(normalized, "MATCH(d.search_text) AGAINST (? IN NATURAL LANGUAGE MODE)") {
 				return fmt.Errorf("asset document query missing fulltext match: %s", normalized)
 			}
-		case "product-doc-search":
-			for _, fragment := range []string{
-				"FROM product_search_documents",
-				"sku_code = ?",
-				"sku_code LIKE ?",
-				"MATCH(search_text) AGAINST (? IN NATURAL LANGUAGE MODE)",
-			} {
-				if !strings.Contains(normalized, fragment) {
-					return fmt.Errorf("product document query missing %q: %s", fragment, normalized)
-				}
+		case "product-doc-code":
+			if !strings.Contains(normalized, "FROM product_search_documents") {
+				return fmt.Errorf("product code query missing document table: %s", normalized)
+			}
+			if !strings.Contains(normalized, "UNION ALL") {
+				return fmt.Errorf("product code query must use UNION ALL recall: %s", normalized)
+			}
+			if strings.Contains(normalized, "MATCH(") {
+				return fmt.Errorf("product code query must not use fulltext match: %s", normalized)
+			}
+		case "product-doc-text":
+			if !strings.Contains(normalized, "MATCH(search_text) AGAINST (? IN NATURAL LANGUAGE MODE)") {
+				return fmt.Errorf("product text query missing fulltext match: %s", normalized)
+			}
+			if strings.Contains(normalized, "UNION ALL") {
+				return fmt.Errorf("product text query must not use code union: %s", normalized)
+			}
+		case "task-doc-code":
+			if !strings.Contains(normalized, "FROM task_search_documents d") {
+				return fmt.Errorf("task code query missing hydrate table: %s", normalized)
+			}
+			if !strings.Contains(normalized, "UNION ALL") {
+				return fmt.Errorf("task code query must use UNION ALL recall: %s", normalized)
+			}
+			if strings.Contains(normalized, "MATCH(") {
+				return fmt.Errorf("task code query must not use fulltext match: %s", normalized)
+			}
+		case "task-doc-text":
+			if !strings.Contains(normalized, "MATCH(d.search_text) AGAINST (? IN NATURAL LANGUAGE MODE)") {
+				return fmt.Errorf("task text query missing fulltext match: %s", normalized)
+			}
+			if strings.Contains(normalized, "UNION ALL") {
+				return fmt.Errorf("task text query must not use code union: %s", normalized)
 			}
 		default:
 			return fmt.Errorf("unexpected SQL expectation %q", expectedSQL)

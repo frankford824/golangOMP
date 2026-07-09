@@ -1698,7 +1698,6 @@ func buildTaskListQuerySpecWithOptions(filter repo.TaskListFilter, candidateFilt
 
 	where := []string{"1=1"}
 	args := []interface{}{}
-	searchDocumentJoin := ""
 
 	if err := appendTaskQueryDefinitionWhere(&where, &args, filter.TaskQueryFilterDefinition, exprs); err != nil {
 		return taskListQuerySpec{}, err
@@ -1746,34 +1745,15 @@ func buildTaskListQuerySpecWithOptions(filter repo.TaskListFilter, candidateFilt
 	if filter.Keyword != "" {
 		kw := normalizeSearchKeyword(filter.Keyword)
 		if options.UseSearchDocumentKeyword {
-			searchDocumentJoin = `
-		JOIN task_search_documents tsd_kw ON tsd_kw.task_id = t.id`
-			keywordClauses := make([]string, 0, 8)
-			keywordArgs := make([]interface{}, 0, 12)
-			if kw.HasInt64 {
-				keywordClauses = append(keywordClauses, "tsd_kw.task_id = ?")
-				keywordArgs = append(keywordArgs, kw.Int64)
-			}
-			if kw.IsCode {
-				keywordClauses = append(keywordClauses,
-					"tsd_kw.task_no = ?",
-					"tsd_kw.sku_code = ?",
-					"tsd_kw.primary_sku_code = ?",
-					"tsd_kw.product_i_id = ?",
-					"tsd_kw.task_no LIKE ?",
-					"tsd_kw.sku_code LIKE ?",
-					"tsd_kw.primary_sku_code LIKE ?",
-					"tsd_kw.product_i_id LIKE ?",
-				)
-				keywordArgs = append(keywordArgs, kw.Upper, kw.Upper, kw.Upper, kw.Upper, kw.Upper+"%", kw.Upper+"%", kw.Upper+"%", kw.Upper+"%")
-			}
-			if !kw.IsCode && len([]rune(kw.Raw)) >= 2 {
-				keywordClauses = append(keywordClauses, "MATCH(tsd_kw.search_text) AGAINST (? IN NATURAL LANGUAGE MODE)")
-				keywordArgs = append(keywordArgs, kw.Raw)
-			}
-			if len(keywordClauses) > 0 {
-				where = append(where, "("+strings.Join(keywordClauses, " OR ")+")")
-				args = append(args, keywordArgs...)
+			// Recall matching task ids from the search-document read model via a
+			// UNION ALL of indexed lookups, then semi-join with t.id IN (...).
+			// Keeping the union inside an IN subquery lets each branch use its own
+			// BTREE / FULLTEXT index and keeps every placeholder in WHERE order,
+			// instead of an OR predicate that scans the whole document table.
+			recallSQL, recallArgs := taskSearchDocumentKeywordRecall(kw)
+			if recallSQL != "" {
+				where = append(where, "t.id IN ("+recallSQL+")")
+				args = append(args, recallArgs...)
 			} else {
 				where = append(where, "1 = 0")
 			}
@@ -1854,7 +1834,7 @@ func buildTaskListQuerySpecWithOptions(filter repo.TaskListFilter, candidateFilt
 	appendTaskDataScopeWhere(&where, &args, filter)
 
 	whereSQL := strings.Join(where, " AND ")
-	baseFromSQL := taskListBaseFromSQL() + searchDocumentJoin
+	baseFromSQL := taskListBaseFromSQL()
 	fromSQL := baseFromSQL + taskLatestAssetJoinSQL()
 	countFromSQL := baseFromSQL
 	if taskListWhereUsesLatestAsset(whereSQL) {
@@ -1884,6 +1864,41 @@ func taskListWhereUsesLatestAsset(whereSQL string) bool {
 func taskListSearchDocumentKeywordSupported(keyword string) bool {
 	kw := normalizeSearchKeyword(keyword)
 	return kw.HasInt64 || kw.IsCode || len([]rune(kw.Raw)) >= 2
+}
+
+// taskSearchDocumentKeywordRecall returns a subquery selecting matching task ids
+// from task_search_documents plus its ordered args, for use as
+// `t.id IN (<recall>)`. Code / numeric keywords recall through a UNION ALL of
+// indexed exact and prefix lookups; non-code keywords use the ngram FULLTEXT
+// index. Returns an empty string when the keyword cannot be recalled.
+func taskSearchDocumentKeywordRecall(kw normalizedSearchKeyword) (string, []interface{}) {
+	if kw.HasInt64 || kw.IsCode {
+		branches := make([]string, 0, 9)
+		args := make([]interface{}, 0, 9)
+		if kw.HasInt64 {
+			branches = append(branches, "SELECT task_id FROM task_search_documents WHERE task_id = ?")
+			args = append(args, kw.Int64)
+		}
+		if kw.IsCode {
+			exact := []string{"task_no", "sku_code", "primary_sku_code", "product_i_id"}
+			for _, col := range exact {
+				branches = append(branches, "SELECT task_id FROM task_search_documents WHERE "+col+" = ?")
+				args = append(args, kw.Upper)
+			}
+			for _, col := range exact {
+				branches = append(branches, "SELECT task_id FROM task_search_documents WHERE "+col+" LIKE ?")
+				args = append(args, kw.Upper+"%")
+			}
+		}
+		if len(branches) == 0 {
+			return "", nil
+		}
+		return "SELECT task_id FROM (" + strings.Join(branches, " UNION ALL ") + ") tsd_kw", args
+	}
+	if len([]rune(kw.Raw)) >= 2 {
+		return "SELECT task_id FROM task_search_documents WHERE MATCH(search_text) AGAINST (? IN NATURAL LANGUAGE MODE)", []interface{}{kw.Raw}
+	}
+	return "", nil
 }
 
 func appendTaskDataScopeWhere(where *[]string, args *[]interface{}, filter repo.TaskListFilter) {

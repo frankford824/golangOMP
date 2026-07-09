@@ -29,50 +29,81 @@ func (r *searchRepo) searchTasksFromDocuments(ctx context.Context, q string, lim
 }
 
 func (r *searchRepo) searchTasksFromDocumentsPrimary(ctx context.Context, kw normalizedSearchKeyword, limit int) ([]domain.SearchTask, error) {
-	clauses := make([]string, 0, 4)
-	args := make([]interface{}, 0, 16)
 	if kw.Raw == "" {
 		return []domain.SearchTask{}, nil
 	}
+	if kw.HasInt64 || kw.IsCode {
+		return r.searchTaskDocumentsByCode(ctx, kw, limit)
+	}
+	if len([]rune(kw.Raw)) >= 2 {
+		return r.searchTaskDocumentsByText(ctx, kw, limit)
+	}
+	return []domain.SearchTask{}, nil
+}
+
+const taskSearchDocumentSelectCols = `d.task_id, d.task_no, d.product_name_snapshot, d.task_status, d.priority,
+		       d.task_type, d.sku_code, d.primary_sku_code, d.product_i_id,
+		       d.owner_department, d.owner_team, d.owner_org_team,
+		       d.creator_id, d.creator_name, d.designer_id, d.designer_name,
+		       d.created_at, d.deadline_at`
+
+// searchTaskDocumentsByCode recalls task ids through a UNION ALL of per-column
+// exact and prefix predicates so each branch uses a BTREE index, then hydrates
+// full document columns for the recalled ids. This avoids the previous OR
+// predicate that reverse-scanned idx_task_search_updated across the whole table.
+func (r *searchRepo) searchTaskDocumentsByCode(ctx context.Context, kw normalizedSearchKeyword, limit int) ([]domain.SearchTask, error) {
+	branches := make([]string, 0, 9)
+	args := make([]interface{}, 0, 9)
 	if kw.HasInt64 {
-		clauses = append(clauses, "task_id = ?")
+		branches = append(branches, "SELECT task_id, 0 AS match_rank FROM task_search_documents WHERE task_id = ?")
 		args = append(args, kw.Int64)
 	}
 	if kw.IsCode {
-		clauses = appendAnyClause(clauses,
-			"task_no = ?",
-			"sku_code = ?",
-			"primary_sku_code = ?",
-			"product_i_id = ?",
-			"task_no LIKE ?",
-			"sku_code LIKE ?",
-			"primary_sku_code LIKE ?",
-			"product_i_id LIKE ?",
-		)
-		args = append(args, kw.Upper, kw.Upper, kw.Upper, kw.Upper, kw.Upper+"%", kw.Upper+"%", kw.Upper+"%", kw.Upper+"%")
+		exact := []string{"task_no", "sku_code", "primary_sku_code", "product_i_id"}
+		for i, col := range exact {
+			branches = append(branches, fmt.Sprintf("SELECT task_id, %d AS match_rank FROM task_search_documents WHERE %s = ?", i+1, col))
+			args = append(args, kw.Upper)
+		}
+		for i, col := range exact {
+			branches = append(branches, fmt.Sprintf("SELECT task_id, %d AS match_rank FROM task_search_documents WHERE %s LIKE ?", i+5, col))
+			args = append(args, kw.Upper+"%")
+		}
 	}
-	if !kw.IsCode && len([]rune(kw.Raw)) >= 2 {
-		clauses = append(clauses, "MATCH(search_text) AGAINST (? IN NATURAL LANGUAGE MODE)")
-		args = append(args, kw.Raw)
-	}
-	if len(clauses) == 0 {
+	if len(branches) == 0 {
 		return []domain.SearchTask{}, nil
 	}
 	args = append(args, limit)
 	qctx, cancel := mysqlReadQueryContext(ctx)
 	defer cancel()
 	rows, err := r.db.db.QueryContext(qctx, `
-		SELECT task_id, task_no, product_name_snapshot, task_status, priority,
-		       task_type, sku_code, primary_sku_code, product_i_id,
-		       owner_department, owner_team, owner_org_team,
-		       creator_id, creator_name, designer_id, designer_name,
-		       created_at, deadline_at
-		  FROM task_search_documents
-		 WHERE `+strings.Join(clauses, " OR ")+`
-		 ORDER BY updated_at DESC, task_id DESC
+		SELECT `+taskSearchDocumentSelectCols+`
+		  FROM task_search_documents d
+		  JOIN (
+		    SELECT task_id, MIN(match_rank) AS match_rank
+		      FROM (
+		        `+strings.Join(branches, "\n		        UNION ALL\n		        ")+`
+		      ) u
+		     GROUP BY task_id
+		  ) m ON m.task_id = d.task_id
+		 ORDER BY m.match_rank ASC, d.updated_at DESC, d.task_id DESC
 		 LIMIT ?`, args...)
 	if err != nil {
-		return nil, fmt.Errorf("search task documents primary: %w", err)
+		return nil, fmt.Errorf("search task documents by code: %w", err)
+	}
+	return scanSearchTasks(rows)
+}
+
+func (r *searchRepo) searchTaskDocumentsByText(ctx context.Context, kw normalizedSearchKeyword, limit int) ([]domain.SearchTask, error) {
+	qctx, cancel := mysqlReadQueryContext(ctx)
+	defer cancel()
+	rows, err := r.db.db.QueryContext(qctx, `
+		SELECT `+taskSearchDocumentSelectCols+`
+		  FROM task_search_documents d
+		 WHERE MATCH(d.search_text) AGAINST (? IN NATURAL LANGUAGE MODE)
+		 ORDER BY d.updated_at DESC, d.task_id DESC
+		 LIMIT ?`, kw.Raw, limit)
+	if err != nil {
+		return nil, fmt.Errorf("search task documents by text: %w", err)
 	}
 	return scanSearchTasks(rows)
 }
@@ -414,47 +445,72 @@ func (r *searchRepo) SearchProducts(ctx context.Context, q string, limit int) ([
 func (r *searchRepo) searchProductsFromDocuments(ctx context.Context, q string, limit int) ([]domain.SearchProduct, error) {
 	limit = normalizeSearchLimit(limit)
 	kw := normalizeSearchKeyword(q)
-	hasSemanticText := productSearchDocumentsSemanticTextExists(ctx, r.db.db)
-	clauses := make([]string, 0, 8)
-	args := make([]interface{}, 0, 16)
 	if kw.IsCode {
-		clauses = appendAnyClause(clauses,
-			"sku_code = ?",
-			"i_id = ?",
-			"sku_code LIKE ?",
-			"i_id LIKE ?",
-		)
-		args = append(args, kw.Upper, kw.Upper, kw.Upper+"%", kw.Upper+"%")
+		return r.searchProductDocumentsByCode(ctx, kw, limit)
 	}
 	if len([]rune(kw.Raw)) >= 2 {
-		clauses = append(clauses, "MATCH(search_text) AGAINST (? IN NATURAL LANGUAGE MODE)")
+		return r.searchProductDocumentsByText(ctx, kw, limit)
+	}
+	return []domain.SearchProduct{}, nil
+}
+
+// searchProductDocumentsByCode recalls exact and prefix matches on the indexed
+// sku_code / i_id columns via UNION ALL so each branch uses its own BTREE index
+// instead of an OR table scan. Rows matched by multiple branches (e.g. exact +
+// prefix) are de-duplicated by the outer GROUP BY, keeping the strongest match
+// rank. FULLTEXT/semantic recall is intentionally excluded for code keywords to
+// avoid full-table natural-language noise.
+func (r *searchRepo) searchProductDocumentsByCode(ctx context.Context, kw normalizedSearchKeyword, limit int) ([]domain.SearchProduct, error) {
+	qctx, cancel := mysqlReadQueryContext(ctx)
+	defer cancel()
+	rows, err := r.db.db.QueryContext(qctx, `
+		SELECT erp_code, product_name, i_id, category
+		  FROM (
+		    SELECT sku_code AS erp_code, product_name, i_id, category,
+		           MIN(match_rank) AS match_rank,
+		           MAX(source_updated_at) AS source_updated_at
+		      FROM (
+		        SELECT sku_code, product_name, i_id, category, source_updated_at, 0 AS match_rank
+		          FROM product_search_documents WHERE sku_code = ?
+		        UNION ALL
+		        SELECT sku_code, product_name, i_id, category, source_updated_at, 1 AS match_rank
+		          FROM product_search_documents WHERE i_id = ?
+		        UNION ALL
+		        SELECT sku_code, product_name, i_id, category, source_updated_at, 2 AS match_rank
+		          FROM product_search_documents WHERE sku_code LIKE ?
+		        UNION ALL
+		        SELECT sku_code, product_name, i_id, category, source_updated_at, 3 AS match_rank
+		          FROM product_search_documents WHERE i_id LIKE ?
+		      ) u
+		     GROUP BY sku_code, product_name, i_id, category
+		  ) g
+		 ORDER BY match_rank ASC, source_updated_at DESC, erp_code DESC
+		 LIMIT ?`,
+		kw.Upper, kw.Upper, kw.Upper+"%", kw.Upper+"%", limit)
+	if err != nil {
+		return nil, fmt.Errorf("search product documents by code: %w", err)
+	}
+	return scanSearchProducts(rows)
+}
+
+func (r *searchRepo) searchProductDocumentsByText(ctx context.Context, kw normalizedSearchKeyword, limit int) ([]domain.SearchProduct, error) {
+	clauses := []string{"MATCH(search_text) AGAINST (? IN NATURAL LANGUAGE MODE)"}
+	args := []interface{}{kw.Raw}
+	if productSearchDocumentsSemanticTextExists(ctx, r.db.db) {
+		clauses = append(clauses, "MATCH(semantic_text) AGAINST (? IN NATURAL LANGUAGE MODE)")
 		args = append(args, kw.Raw)
-		if hasSemanticText {
-			clauses = append(clauses, "MATCH(semantic_text) AGAINST (? IN NATURAL LANGUAGE MODE)")
-			args = append(args, kw.Raw)
-		}
 	}
-	if len(clauses) == 0 {
-		return []domain.SearchProduct{}, nil
-	}
-	args = append(args, kw.Upper, kw.Upper, kw.Upper+"%", limit)
+	args = append(args, limit)
 	qctx, cancel := mysqlReadQueryContext(ctx)
 	defer cancel()
 	rows, err := r.db.db.QueryContext(qctx, `
 		SELECT sku_code AS erp_code, product_name, i_id, category
 		  FROM product_search_documents
 		 WHERE `+strings.Join(clauses, " OR ")+`
-		 ORDER BY CASE
-		            WHEN sku_code = ? THEN 0
-		            WHEN i_id = ? THEN 1
-		            WHEN sku_code LIKE ? THEN 2
-		            ELSE 3
-		          END,
-		          source_updated_at DESC,
-		          sku_code DESC
+		 ORDER BY source_updated_at DESC, sku_code DESC
 		 LIMIT ?`, args...)
 	if err != nil {
-		return nil, fmt.Errorf("search product documents: %w", err)
+		return nil, fmt.Errorf("search product documents by text: %w", err)
 	}
 	return scanSearchProducts(rows)
 }

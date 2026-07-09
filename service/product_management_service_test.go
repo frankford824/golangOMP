@@ -175,6 +175,61 @@ func TestProductManagementCostDashboardUsesRedisCacheBeforeRefresh(t *testing.T)
 	}
 }
 
+func TestProductManagementThrottledRefreshKeepsCostDashboardCache(t *testing.T) {
+	records := &productManagementRecordRepoFake{}
+	cache := newFakeProductManagementCache()
+	svc := NewProductManagementService(records, nil, nil, nil, WithProductManagementRedis(cache)).(*productManagementService)
+
+	if _, appErr := svc.CostDashboard(context.Background()); appErr != nil {
+		t.Fatalf("CostDashboard() appErr = %+v", appErr)
+	}
+	if _, ok := cache.values["omp:perf:product-management:cost-dashboard:v1:legacy=true"]; !ok {
+		t.Fatal("cost dashboard cache not populated after first read")
+	}
+
+	// Simulate ordinary product-center traffic expiring the throttle window; the
+	// background read-model refresh must not wipe the 5-minute dashboard cache.
+	svc.lastRefresh = svc.now().Add(-svc.refreshEvery - time.Second)
+	if appErr := svc.refreshReadModel(context.Background()); appErr != nil {
+		t.Fatalf("refreshReadModel() appErr = %+v", appErr)
+	}
+	if _, ok := cache.values["omp:perf:product-management:cost-dashboard:v1:legacy=true"]; !ok {
+		t.Fatal("throttled refresh must not invalidate cost dashboard cache")
+	}
+
+	if _, appErr := svc.CostDashboard(context.Background()); appErr != nil {
+		t.Fatalf("CostDashboard() appErr = %+v", appErr)
+	}
+	if records.dashboardCalls != 1 {
+		t.Fatalf("dashboard repo calls = %d, want 1 (second read served from cache)", records.dashboardCalls)
+	}
+}
+
+func TestProductManagementExplicitRefreshKeepsCostDashboardCache(t *testing.T) {
+	records := &productManagementRecordRepoFake{}
+	cache := newFakeProductManagementCache()
+	svc := NewProductManagementService(records, nil, nil, nil, WithProductManagementRedis(cache)).(*productManagementService)
+
+	if _, appErr := svc.CostDashboard(context.Background()); appErr != nil {
+		t.Fatalf("CostDashboard() appErr = %+v", appErr)
+	}
+	if len(cache.values) == 0 {
+		t.Fatal("cost dashboard cache not populated after first read")
+	}
+	if appErr := svc.RefreshReadModelNow(context.Background()); appErr != nil {
+		t.Fatalf("RefreshReadModelNow() appErr = %+v", appErr)
+	}
+	if _, ok := cache.values["omp:perf:product-management:cost-dashboard:v1:legacy=true"]; !ok {
+		t.Fatal("explicit refresh must not invalidate cost dashboard cache")
+	}
+	if _, appErr := svc.CostDashboard(context.Background()); appErr != nil {
+		t.Fatalf("CostDashboard() appErr = %+v", appErr)
+	}
+	if records.dashboardCalls != 1 {
+		t.Fatalf("dashboard repo calls = %d, want 1 (second read served from cache)", records.dashboardCalls)
+	}
+}
+
 func TestInvalidateProductManagementCostDashboardCacheDeletesPolicyKeys(t *testing.T) {
 	cache := newFakeProductManagementCache()
 	cache.values["omp:perf:product-management:cost-dashboard:v1:legacy=true"] = `{}`
