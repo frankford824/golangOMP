@@ -29,6 +29,50 @@ func TestBuildExcelPackageRowsFromEveTable(t *testing.T) {
 	}
 }
 
+func TestBuildExcelPackageRowsExpandsMultiSKUCell(t *testing.T) {
+	rows, err := buildExcelPackageRowsFromTable([][]string{
+		{"仓库外发模板"},
+		{"订单编号", "商家编码", "商品数量", "收货地址", "匹配关键词"},
+		{"SO-2", "HSC34425\nHSC34426\nHSC34427", "1\n2\n3", "王五地址", "KT"},
+	})
+	if err != nil {
+		t.Fatalf("buildExcelPackageRowsFromTable() error = %v", err)
+	}
+	if len(rows) != 3 {
+		t.Fatalf("len(rows)=%d, want 3", len(rows))
+	}
+	want := []struct {
+		sku      string
+		quantity int
+	}{
+		{sku: "HSC34425", quantity: 1},
+		{sku: "HSC34426", quantity: 2},
+		{sku: "HSC34427", quantity: 3},
+	}
+	for idx, item := range want {
+		got := rows[idx]
+		if got.RowNumber != 3 || got.OrderNo != "SO-2" || got.SKUCode != item.sku || got.Quantity != item.quantity || got.Address != "王五地址" || got.Keyword != "KT" {
+			t.Fatalf("rows[%d]=%+v, want sku=%s quantity=%d", idx, got, item.sku, item.quantity)
+		}
+	}
+}
+
+func TestBuildExcelPackageRowsExtractsSKUAndInlineQuantity(t *testing.T) {
+	rows, err := buildExcelPackageRowsFromTable([][]string{
+		{"订单号", "商品SKU", "数量", "地址"},
+		{"SO-3", "HSC04325*2，HSC06122×3", "", "赵六地址"},
+	})
+	if err != nil {
+		t.Fatalf("buildExcelPackageRowsFromTable() error = %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("len(rows)=%d, want 2", len(rows))
+	}
+	if rows[0].SKUCode != "HSC04325" || rows[0].Quantity != 2 || rows[1].SKUCode != "HSC06122" || rows[1].Quantity != 3 {
+		t.Fatalf("rows=%+v", rows)
+	}
+}
+
 func TestParseExcelPackageRowsXLSX(t *testing.T) {
 	f := excelize.NewFile()
 	defer func() { _ = f.Close() }()
