@@ -34,15 +34,16 @@ func (r *productRepo) GetByERPProductID(ctx context.Context, erpProductID string
 func (r *productRepo) Search(ctx context.Context, filter repo.ProductSearchFilter) ([]*domain.Product, int64, error) {
 	where := []string{"1=1"}
 	args := []interface{}{}
+	iidExpr := productIIDSearchExpr(ctx, r.db.db, "")
 
 	if filter.Keyword != "" {
 		kw := normalizeSearchKeyword(filter.Keyword)
 		if kw.IsCode {
-			where = append(where, "(sku_code = ? OR sku_code LIKE ? OR product_name LIKE ?)")
-			args = append(args, kw.Upper, kw.Upper+"%", kw.Like)
+			where = append(where, fmt.Sprintf("(sku_code = ? OR %s = ? OR sku_code LIKE ? OR %s LIKE ? OR product_name LIKE ?)", iidExpr, iidExpr))
+			args = append(args, kw.Upper, kw.Upper, kw.Upper+"%", kw.Upper+"%", kw.Like)
 		} else {
-			where = append(where, "(product_name LIKE ? OR sku_code LIKE ?)")
-			args = append(args, kw.Like, kw.Like)
+			where = append(where, fmt.Sprintf("(product_name LIKE ? OR sku_code LIKE ? OR %s LIKE ?)", iidExpr))
+			args = append(args, kw.Like, kw.Like, kw.Like)
 		}
 	}
 	if filter.Category != "" {
@@ -54,7 +55,10 @@ func (r *productRepo) Search(ctx context.Context, filter repo.ProductSearchFilte
 	whereSQL := strings.Join(where, " AND ")
 	countQuery := fmt.Sprintf(`SELECT COUNT(*) FROM products WHERE %s`, whereSQL)
 	var total int64
-	if err := r.db.db.QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
+	countCtx, cancelCount := mysqlReadQueryContext(ctx)
+	err := r.db.db.QueryRowContext(countCtx, countQuery, args...).Scan(&total)
+	cancelCount()
+	if err != nil {
 		return nil, 0, fmt.Errorf("count products: %w", err)
 	}
 
@@ -68,10 +72,13 @@ func (r *productRepo) Search(ctx context.Context, filter repo.ProductSearchFilte
 		whereSQL)
 	args = append(args, pageSize, offset)
 
-	rows, err := r.db.db.QueryContext(ctx, query, args...)
+	queryCtx, cancelQuery := mysqlReadQueryContext(ctx)
+	rows, err := r.db.db.QueryContext(queryCtx, query, args...)
 	if err != nil {
+		cancelQuery()
 		return nil, 0, fmt.Errorf("products search: %w", err)
 	}
+	defer cancelQuery()
 	defer rows.Close()
 
 	var products []*domain.Product
@@ -89,9 +96,9 @@ func (r *productRepo) Search(ctx context.Context, filter repo.ProductSearchFilte
 }
 
 func (r *productRepo) ListIIDs(ctx context.Context, filter repo.ProductIIDListFilter) ([]*domain.ERPIIDOption, int64, error) {
-	iidExpr := `TRIM(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(spec_json, '$.i_id')), ''))`
-	categoryNameExpr := `TRIM(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(spec_json, '$.category_name')), ''))`
-	where := []string{fmt.Sprintf("%s <> ''", iidExpr)}
+	iidExpr := productIIDSearchExpr(ctx, r.db.db, "")
+	categoryNameExpr := productCategoryNameSearchExpr("")
+	where := []string{fmt.Sprintf("%s IS NOT NULL", iidExpr)}
 	args := []interface{}{}
 	if q := strings.TrimSpace(filter.Q); q != "" {
 		kw := normalizeSearchKeyword(q)
@@ -109,7 +116,10 @@ func (r *productRepo) ListIIDs(ctx context.Context, filter repo.ProductIIDListFi
 		SELECT %s AS i_id FROM products WHERE %s GROUP BY i_id
 	) t`, iidExpr, whereSQL)
 	var total int64
-	if err := r.db.db.QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
+	countCtx, cancelCount := mysqlReadQueryContext(ctx)
+	err := r.db.db.QueryRowContext(countCtx, countQuery, args...).Scan(&total)
+	cancelCount()
+	if err != nil {
 		return nil, 0, fmt.Errorf("count product i_id options: %w", err)
 	}
 
@@ -121,17 +131,20 @@ func (r *productRepo) ListIIDs(ctx context.Context, filter repo.ProductIIDListFi
 		SELECT
 			%s AS i_id,
 			MIN(NULLIF(TRIM(category), '')) AS category,
-			MIN(NULLIF(%s, '')) AS category_name,
+			MIN(%s) AS category_name,
 			COUNT(*) AS product_count
 		FROM products
 		WHERE %s
 		GROUP BY i_id
 		ORDER BY product_count DESC, i_id ASC
 		LIMIT ? OFFSET ?`, iidExpr, categoryNameExpr, whereSQL)
-	rows, err := r.db.db.QueryContext(ctx, query, queryArgs...)
+	queryCtx, cancelQuery := mysqlReadQueryContext(ctx)
+	rows, err := r.db.db.QueryContext(queryCtx, query, queryArgs...)
 	if err != nil {
+		cancelQuery()
 		return nil, 0, fmt.Errorf("list product i_id options: %w", err)
 	}
+	defer cancelQuery()
 	defer rows.Close()
 
 	items := make([]*domain.ERPIIDOption, 0, pageSize)
@@ -240,6 +253,9 @@ func (r *productRepo) UpsertBatch(ctx context.Context, tx repo.Tx, products []*d
 			now,
 		); err != nil {
 			return 0, fmt.Errorf("upsert product %s: %w", product.ERPProductID, err)
+		}
+		if err := reindexProductSearchDocument(ctx, sqlTx, product.SKUCode); err != nil {
+			return 0, err
 		}
 	}
 	return int64(len(products)), nil

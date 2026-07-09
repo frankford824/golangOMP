@@ -4,6 +4,9 @@ import (
 	"context"
 	"strings"
 	"sync"
+	"time"
+
+	"go.uber.org/zap"
 
 	"workflow/domain"
 	"workflow/repo"
@@ -16,10 +19,11 @@ const (
 type Service struct {
 	repo     repo.SearchRepo
 	external ExternalAssetSearchProvider
+	logger   *zap.Logger
 }
 
 func NewService(repo repo.SearchRepo) *Service {
-	return &Service{repo: repo}
+	return &Service{repo: repo, logger: zap.NewNop()}
 }
 
 type ExternalAssetSearchProvider interface {
@@ -28,6 +32,14 @@ type ExternalAssetSearchProvider interface {
 
 func (s *Service) SetExternalAssetSearchProvider(provider ExternalAssetSearchProvider) {
 	s.external = provider
+}
+
+func (s *Service) SetLogger(logger *zap.Logger) {
+	if logger == nil {
+		s.logger = zap.NewNop()
+		return
+	}
+	s.logger = logger
 }
 
 func (s *Service) Search(ctx context.Context, actor domain.RequestActor, q string, scope string, limit int) (*domain.SearchResultGroup, *domain.AppError) {
@@ -57,31 +69,32 @@ func (s *Service) Search(ctx context.Context, actor domain.RequestActor, q strin
 	case "all":
 		var externalAssets []domain.SearchAsset
 		if err = runSearchJobs(
-			func() error {
+			s.logger,
+			searchJob{name: "tasks", run: func() error {
 				rows, err := s.repo.SearchTasks(ctx, q, limit)
 				result.Tasks = rows
 				return err
-			},
-			func() error {
+			}},
+			searchJob{name: "assets", run: func() error {
 				rows, err := s.repo.SearchAssets(ctx, q, limit)
 				result.Assets = rows
 				return err
-			},
-			func() error {
+			}},
+			searchJob{name: "external", run: func() error {
 				rows, err := s.searchExternalAssets(ctx, q, limit)
 				externalAssets = rows
 				return err
-			},
-			func() error {
+			}},
+			searchJob{name: "products", run: func() error {
 				rows, err := s.repo.SearchProducts(ctx, q, limit)
 				result.Products = rows
 				return err
-			},
-			func() error {
+			}},
+			searchJob{name: "users", run: func() error {
 				rows, err := s.searchUsers(ctx, actor, q, limit)
 				result.Users = rows
 				return err
-			},
+			}},
 		); err != nil {
 			return nil, internalErr(err)
 		}
@@ -94,16 +107,17 @@ func (s *Service) Search(ctx context.Context, actor domain.RequestActor, q strin
 		var systemAssets []domain.SearchAsset
 		var externalAssets []domain.SearchAsset
 		if err = runSearchJobs(
-			func() error {
+			s.logger,
+			searchJob{name: "assets", run: func() error {
 				rows, err := s.repo.SearchAssets(ctx, q, limit)
 				systemAssets = rows
 				return err
-			},
-			func() error {
+			}},
+			searchJob{name: "external", run: func() error {
 				rows, err := s.searchExternalAssets(ctx, q, limit)
 				externalAssets = rows
 				return err
-			},
+			}},
 		); err != nil {
 			return nil, internalErr(err)
 		}
@@ -135,7 +149,15 @@ func (s *Service) searchExternalAssets(ctx context.Context, q string, limit int)
 	return items, nil
 }
 
-func runSearchJobs(jobs ...func() error) error {
+type searchJob struct {
+	name string
+	run  func() error
+}
+
+func runSearchJobs(logger *zap.Logger, jobs ...searchJob) error {
+	if logger == nil {
+		logger = zap.NewNop()
+	}
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	var firstErr error
@@ -144,7 +166,17 @@ func runSearchJobs(jobs ...func() error) error {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if err := job(); err != nil {
+			started := time.Now()
+			err := job.run()
+			duration := time.Since(started)
+			if err != nil || duration >= 200*time.Millisecond {
+				logger.Warn("global search branch slow or failed",
+					zap.String("branch", job.name),
+					zap.Int64("duration_ms", duration.Milliseconds()),
+					zap.Bool("error", err != nil),
+				)
+			}
+			if err != nil {
 				mu.Lock()
 				if firstErr == nil {
 					firstErr = err

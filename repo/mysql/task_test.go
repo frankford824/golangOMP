@@ -26,11 +26,17 @@ func TestBuildTaskListQuerySpecUsesJoinedLatestAssetProjection(t *testing.T) {
 	if !strings.Contains(spec.fromSQL, "LEFT JOIN (") {
 		t.Fatalf("fromSQL missing latest asset join: %s", spec.fromSQL)
 	}
-	if !strings.Contains(spec.fromSQL, "WHEN SUM(CASE WHEN asset_type IN ('delivery'") {
+	if !strings.Contains(spec.fromSQL, "WHEN SUM(CASE WHEN ta.asset_type IN ('delivery'") {
 		t.Fatalf("fromSQL missing delivery-priority asset projection: %s", spec.fromSQL)
+	}
+	if !strings.Contains(spec.fromSQL, "ta.id = da.current_version_id") {
+		t.Fatalf("fromSQL missing current-version guard: %s", spec.fromSQL)
 	}
 	if !strings.Contains(spec.fromSQL, "la ON la.task_id = t.id") {
 		t.Fatalf("fromSQL missing latest asset alias join: %s", spec.fromSQL)
+	}
+	if strings.Contains(spec.countFromSQL, "task_assets ta") {
+		t.Fatalf("countFromSQL should not include latest asset join for plain list: %s", spec.countFromSQL)
 	}
 }
 
@@ -51,6 +57,25 @@ func TestBuildTaskListQuerySpecWarehouseBlockingUsesJoinedLatestAssetAlias(t *te
 	}
 	if strings.Contains(spec.whereSQL, "SELECT ta.asset_type") {
 		t.Fatalf("whereSQL should not contain repeated latest-asset scalar subquery: %s", spec.whereSQL)
+	}
+	if !strings.Contains(spec.countFromSQL, "task_assets ta") {
+		t.Fatalf("countFromSQL should keep latest asset join when where depends on la: %s", spec.countFromSQL)
+	}
+}
+
+func TestBuildTaskListQuerySpecUsesSearchDocumentsForKeywordWhenEnabled(t *testing.T) {
+	spec, err := buildTaskListQuerySpecWithOptions(repo.TaskListFilter{Keyword: "海报"}, nil, taskListQueryBuildOptions{UseSearchDocumentKeyword: true})
+	if err != nil {
+		t.Fatalf("buildTaskListQuerySpecWithOptions() error = %v", err)
+	}
+	if !strings.Contains(spec.fromSQL, "JOIN task_search_documents tsd_kw ON tsd_kw.task_id = t.id") {
+		t.Fatalf("fromSQL missing task_search_documents join: %s", spec.fromSQL)
+	}
+	if !strings.Contains(spec.whereSQL, "MATCH(tsd_kw.search_text) AGAINST (? IN NATURAL LANGUAGE MODE)") {
+		t.Fatalf("whereSQL missing task_search_documents fulltext: %s", spec.whereSQL)
+	}
+	if strings.Contains(spec.whereSQL, "task_keyword_actor") || strings.Contains(spec.whereSQL, "tsi_text") {
+		t.Fatalf("whereSQL should not use legacy keyword EXISTS on document path: %s", spec.whereSQL)
 	}
 }
 
@@ -462,6 +487,11 @@ func TestTaskRepoListKeywordBatchSkuItemSearch(t *testing.T) {
 
 func runTaskRepoListKeywordSearchCase(t *testing.T, keyword string, wantTotal int64, wantItems int) {
 	t.Helper()
+
+	mysqlSchemaPresenceCache.Store(
+		mysqlSchemaCacheKey{kind: "table", table: "task_search_documents"},
+		mysqlSchemaCacheEntry{exists: false, expiresAt: time.Now().Add(time.Minute)},
+	)
 
 	db, mock, err := sqlmock.New()
 	if err != nil {

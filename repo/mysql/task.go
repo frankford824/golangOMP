@@ -507,16 +507,21 @@ func (r *taskRepo) UpdateSKUItemCostInfo(ctx context.Context, tx repo.Tx, item *
 }
 
 func (r *taskRepo) List(ctx context.Context, filter repo.TaskListFilter) ([]*domain.TaskListItem, int64, error) {
-	spec, err := buildTaskListQuerySpec(filter, nil)
+	spec, err := buildTaskListQuerySpecWithOptions(filter, nil, taskListQueryBuildOptions{
+		UseSearchDocumentKeyword: taskListSearchDocumentKeywordSupported(filter.Keyword) && taskSearchDocumentsTableExists(ctx, r.db.db),
+	})
 	if err != nil {
 		return nil, 0, err
 	}
 
-	countQuery := fmt.Sprintf(`SELECT COUNT(*) %s WHERE %s`, spec.fromSQL, spec.whereSQL)
+	countQuery := fmt.Sprintf(`SELECT COUNT(*) %s WHERE %s`, spec.countFromSQL, spec.whereSQL)
 	var total int64
-	if err := r.db.db.QueryRowContext(ctx, countQuery, spec.args...).Scan(&total); err != nil {
+	countCtx, cancelCount := mysqlReadQueryContext(ctx)
+	if err := r.db.db.QueryRowContext(countCtx, countQuery, spec.args...).Scan(&total); err != nil {
+		cancelCount()
 		return nil, 0, fmt.Errorf("count tasks: %w", err)
 	}
+	cancelCount()
 
 	page, pageSize := normalizePage(filter.Page, filter.PageSize)
 	offset := (page - 1) * pageSize
@@ -548,10 +553,13 @@ func (r *taskRepo) List(ctx context.Context, filter repo.TaskListFilter) ([]*dom
 		LIMIT ? OFFSET ?`, spec.latestAssetExpr, spec.fromSQL, taskActorNameJoins(), spec.whereSQL)
 	pageArgs := append(append([]interface{}{}, spec.args...), pageSize, offset)
 
-	rows, err := r.db.db.QueryContext(ctx, query, pageArgs...)
+	queryCtx, cancelQuery := mysqlReadQueryContext(ctx)
+	rows, err := r.db.db.QueryContext(queryCtx, query, pageArgs...)
 	if err != nil {
+		cancelQuery()
 		return nil, 0, fmt.Errorf("list tasks: %w", err)
 	}
+	defer cancelQuery()
 	defer rows.Close()
 
 	var items []*domain.TaskListItem
@@ -658,7 +666,9 @@ func (r *taskRepo) ListBoardCandidates(ctx context.Context, filter repo.TaskBoar
 		return []*domain.TaskListItem{}, nil
 	}
 
-	spec, err := buildTaskListQuerySpec(filter.TaskListFilter, filter.CandidateFilters)
+	spec, err := buildTaskListQuerySpecWithOptions(filter.TaskListFilter, filter.CandidateFilters, taskListQueryBuildOptions{
+		UseSearchDocumentKeyword: taskListSearchDocumentKeywordSupported(filter.TaskListFilter.Keyword) && taskSearchDocumentsTableExists(ctx, r.db.db),
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -688,10 +698,13 @@ func (r *taskRepo) ListBoardCandidates(ctx context.Context, filter repo.TaskBoar
 		WHERE %s
 		ORDER BY t.updated_at DESC, t.id DESC`, spec.latestAssetExpr, spec.fromSQL, taskActorNameJoins(), spec.whereSQL)
 
-	rows, err := r.db.db.QueryContext(ctx, query, spec.args...)
+	queryCtx, cancelQuery := mysqlReadQueryContext(ctx)
+	rows, err := r.db.db.QueryContext(queryCtx, query, spec.args...)
 	if err != nil {
+		cancelQuery()
 		return nil, fmt.Errorf("list board candidates: %w", err)
 	}
+	defer cancelQuery()
 	defer rows.Close()
 
 	var items []*domain.TaskListItem
@@ -1659,12 +1672,21 @@ type taskListQueryExpressions struct {
 
 type taskListQuerySpec struct {
 	fromSQL         string
+	countFromSQL    string
 	whereSQL        string
 	args            []interface{}
 	latestAssetExpr string
 }
 
+type taskListQueryBuildOptions struct {
+	UseSearchDocumentKeyword bool
+}
+
 func buildTaskListQuerySpec(filter repo.TaskListFilter, candidateFilters []domain.TaskQueryFilterDefinition) (taskListQuerySpec, error) {
+	return buildTaskListQuerySpecWithOptions(filter, candidateFilters, taskListQueryBuildOptions{})
+}
+
+func buildTaskListQuerySpecWithOptions(filter repo.TaskListFilter, candidateFilters []domain.TaskQueryFilterDefinition, options taskListQueryBuildOptions) (taskListQuerySpec, error) {
 	exprs := taskListQueryExpressions{
 		mainStatusExpr:            taskMainStatusExpr(),
 		latestAssetExpr:           taskLatestAssetTypeExpr(),
@@ -1676,6 +1698,7 @@ func buildTaskListQuerySpec(filter repo.TaskListFilter, candidateFilters []domai
 
 	where := []string{"1=1"}
 	args := []interface{}{}
+	searchDocumentJoin := ""
 
 	if err := appendTaskQueryDefinitionWhere(&where, &args, filter.TaskQueryFilterDefinition, exprs); err != nil {
 		return taskListQuerySpec{}, err
@@ -1722,12 +1745,45 @@ func buildTaskListQuerySpec(filter repo.TaskListFilter, candidateFilters []domai
 	}
 	if filter.Keyword != "" {
 		kw := normalizeSearchKeyword(filter.Keyword)
-		keywordClauses := []string{
-			"t.product_name_snapshot LIKE ?",
-			"t.owner_team LIKE ?",
-			"COALESCE(t.owner_department, '') LIKE ?",
-			"COALESCE(t.owner_org_team, '') LIKE ?",
-			`EXISTS (
+		if options.UseSearchDocumentKeyword {
+			searchDocumentJoin = `
+		JOIN task_search_documents tsd_kw ON tsd_kw.task_id = t.id`
+			keywordClauses := make([]string, 0, 8)
+			keywordArgs := make([]interface{}, 0, 12)
+			if kw.HasInt64 {
+				keywordClauses = append(keywordClauses, "tsd_kw.task_id = ?")
+				keywordArgs = append(keywordArgs, kw.Int64)
+			}
+			if kw.IsCode {
+				keywordClauses = append(keywordClauses,
+					"tsd_kw.task_no = ?",
+					"tsd_kw.sku_code = ?",
+					"tsd_kw.primary_sku_code = ?",
+					"tsd_kw.product_i_id = ?",
+					"tsd_kw.task_no LIKE ?",
+					"tsd_kw.sku_code LIKE ?",
+					"tsd_kw.primary_sku_code LIKE ?",
+					"tsd_kw.product_i_id LIKE ?",
+				)
+				keywordArgs = append(keywordArgs, kw.Upper, kw.Upper, kw.Upper, kw.Upper, kw.Upper+"%", kw.Upper+"%", kw.Upper+"%", kw.Upper+"%")
+			}
+			if !kw.IsCode && len([]rune(kw.Raw)) >= 2 {
+				keywordClauses = append(keywordClauses, "MATCH(tsd_kw.search_text) AGAINST (? IN NATURAL LANGUAGE MODE)")
+				keywordArgs = append(keywordArgs, kw.Raw)
+			}
+			if len(keywordClauses) > 0 {
+				where = append(where, "("+strings.Join(keywordClauses, " OR ")+")")
+				args = append(args, keywordArgs...)
+			} else {
+				where = append(where, "1 = 0")
+			}
+		} else {
+			keywordClauses := []string{
+				"t.product_name_snapshot LIKE ?",
+				"t.owner_team LIKE ?",
+				"COALESCE(t.owner_department, '') LIKE ?",
+				"COALESCE(t.owner_org_team, '') LIKE ?",
+				`EXISTS (
 				SELECT 1
 				  FROM users task_keyword_actor
 				 WHERE task_keyword_actor.id IN (t.creator_id, t.requester_id, t.designer_id, t.current_handler_id)
@@ -1736,7 +1792,7 @@ func buildTaskListQuerySpec(filter repo.TaskListFilter, candidateFilters []domai
 						OR task_keyword_actor.username LIKE ?
 					   )
 			)`,
-			`EXISTS (
+				`EXISTS (
 				SELECT 1
 				  FROM task_sku_items tsi_text
 				 WHERE tsi_text.task_id = t.id
@@ -1746,44 +1802,45 @@ func buildTaskListQuerySpec(filter repo.TaskListFilter, candidateFilters []domai
 					OR tsi_text.design_requirement LIKE ?
 				   )
 			)`,
-		}
-		keywordArgs := []interface{}{kw.Like, kw.Like, kw.Like, kw.Like, kw.Like, kw.Like, kw.Like, kw.Like, kw.Like}
-		if kw.HasInt64 {
-			keywordClauses = append(keywordClauses, "t.id = ?")
-			keywordArgs = append(keywordArgs, kw.Int64)
-		}
-		if kw.IsCode {
-			keywordClauses = append(keywordClauses,
-				"t.task_no = ?",
-				"t.sku_code = ?",
-				"t.primary_sku_code = ?",
-				"t.task_no LIKE ?",
-				"t.sku_code LIKE ?",
-				"t.primary_sku_code LIKE ?",
-				`EXISTS (
+			}
+			keywordArgs := []interface{}{kw.Like, kw.Like, kw.Like, kw.Like, kw.Like, kw.Like, kw.Like, kw.Like, kw.Like}
+			if kw.HasInt64 {
+				keywordClauses = append(keywordClauses, "t.id = ?")
+				keywordArgs = append(keywordArgs, kw.Int64)
+			}
+			if kw.IsCode {
+				keywordClauses = append(keywordClauses,
+					"t.task_no = ?",
+					"t.sku_code = ?",
+					"t.primary_sku_code = ?",
+					"t.task_no LIKE ?",
+					"t.sku_code LIKE ?",
+					"t.primary_sku_code LIKE ?",
+					`EXISTS (
 					SELECT 1
 					  FROM task_sku_items tsi
 					 WHERE tsi.task_id = t.id
 					   AND (tsi.sku_code = ? OR tsi.sku_code LIKE ?)
 				)`,
-			)
-			keywordArgs = append(keywordArgs, kw.Upper, kw.Upper, kw.Upper, kw.Upper+"%", kw.Upper+"%", kw.Upper+"%", kw.Upper, kw.Upper+"%")
-		} else {
-			keywordClauses = append(keywordClauses,
-				"t.task_no LIKE ?",
-				"t.sku_code LIKE ?",
-				"t.primary_sku_code LIKE ?",
-				`EXISTS (
+				)
+				keywordArgs = append(keywordArgs, kw.Upper, kw.Upper, kw.Upper, kw.Upper+"%", kw.Upper+"%", kw.Upper+"%", kw.Upper, kw.Upper+"%")
+			} else {
+				keywordClauses = append(keywordClauses,
+					"t.task_no LIKE ?",
+					"t.sku_code LIKE ?",
+					"t.primary_sku_code LIKE ?",
+					`EXISTS (
 					SELECT 1
 					  FROM task_sku_items tsi
 					 WHERE tsi.task_id = t.id
 					   AND tsi.sku_code LIKE ?
 				)`,
-			)
-			keywordArgs = append(keywordArgs, kw.Like, kw.Like, kw.Like, kw.Like)
+				)
+				keywordArgs = append(keywordArgs, kw.Like, kw.Like, kw.Like, kw.Like)
+			}
+			where = append(where, "("+strings.Join(keywordClauses, " OR ")+")")
+			args = append(args, keywordArgs...)
 		}
-		where = append(where, "("+strings.Join(keywordClauses, " OR ")+")")
-		args = append(args, keywordArgs...)
 	}
 	if filter.ExcludePendingAuditHandover {
 		where = append(where, `NOT EXISTS (
@@ -1796,17 +1853,37 @@ func buildTaskListQuerySpec(filter repo.TaskListFilter, candidateFilters []domai
 	}
 	appendTaskDataScopeWhere(&where, &args, filter)
 
+	whereSQL := strings.Join(where, " AND ")
+	baseFromSQL := taskListBaseFromSQL() + searchDocumentJoin
+	fromSQL := baseFromSQL + taskLatestAssetJoinSQL()
+	countFromSQL := baseFromSQL
+	if taskListWhereUsesLatestAsset(whereSQL) {
+		countFromSQL = fromSQL
+	}
 	return taskListQuerySpec{
-		fromSQL: `
-		FROM tasks t
-		LEFT JOIN task_details td ON td.task_id = t.id
-		LEFT JOIN procurement_records pr ON pr.task_id = t.id
-		LEFT JOIN warehouse_receipts wr ON wr.task_id = t.id
-		` + taskLatestAssetJoinSQL(),
-		whereSQL:        strings.Join(where, " AND "),
+		fromSQL:         fromSQL,
+		countFromSQL:    countFromSQL,
+		whereSQL:        whereSQL,
 		args:            args,
 		latestAssetExpr: exprs.latestAssetExpr,
 	}, nil
+}
+
+func taskListBaseFromSQL() string {
+	return `
+		FROM tasks t
+		LEFT JOIN task_details td ON td.task_id = t.id
+		LEFT JOIN procurement_records pr ON pr.task_id = t.id
+		LEFT JOIN warehouse_receipts wr ON wr.task_id = t.id`
+}
+
+func taskListWhereUsesLatestAsset(whereSQL string) bool {
+	return strings.Contains(whereSQL, "la.asset_type")
+}
+
+func taskListSearchDocumentKeywordSupported(keyword string) bool {
+	kw := normalizeSearchKeyword(keyword)
+	return kw.HasInt64 || kw.IsCode || len([]rune(kw.Raw)) >= 2
 }
 
 func appendTaskDataScopeWhere(where *[]string, args *[]interface{}, filter repo.TaskListFilter) {
@@ -2103,17 +2180,19 @@ func taskLatestAssetTypeExpr() string {
 
 func taskLatestAssetJoinSQL() string {
 	return `LEFT JOIN (
-			SELECT task_id,
+			SELECT ta.task_id,
 			       CASE
-			         WHEN SUM(CASE WHEN asset_type IN ('delivery', 'draft', 'revised', 'final', 'outsource_return') THEN 1 ELSE 0 END) > 0 THEN 'delivery'
-			         WHEN SUM(CASE WHEN asset_type IN ('source', 'original') THEN 1 ELSE 0 END) > 0 THEN 'source'
-			         WHEN SUM(CASE WHEN asset_type = 'preview' THEN 1 ELSE 0 END) > 0 THEN 'preview'
-			         WHEN SUM(CASE WHEN asset_type = 'design_thumb' THEN 1 ELSE 0 END) > 0 THEN 'design_thumb'
-			         WHEN SUM(CASE WHEN asset_type = 'reference' THEN 1 ELSE 0 END) > 0 THEN 'reference'
-			         ELSE MAX(asset_type)
+			         WHEN SUM(CASE WHEN ta.asset_type IN ('delivery', 'draft', 'revised', 'final', 'outsource_return') THEN 1 ELSE 0 END) > 0 THEN 'delivery'
+			         WHEN SUM(CASE WHEN ta.asset_type IN ('source', 'original') THEN 1 ELSE 0 END) > 0 THEN 'source'
+			         WHEN SUM(CASE WHEN ta.asset_type = 'preview' THEN 1 ELSE 0 END) > 0 THEN 'preview'
+			         WHEN SUM(CASE WHEN ta.asset_type = 'design_thumb' THEN 1 ELSE 0 END) > 0 THEN 'design_thumb'
+			         WHEN SUM(CASE WHEN ta.asset_type = 'reference' THEN 1 ELSE 0 END) > 0 THEN 'reference'
+			         ELSE MAX(ta.asset_type)
 			       END AS asset_type
-			FROM task_assets
-			GROUP BY task_id
+			FROM task_assets ta
+			LEFT JOIN design_assets da ON da.id = ta.asset_id
+			WHERE ta.asset_id IS NULL OR ta.id = da.current_version_id
+			GROUP BY ta.task_id
 		) la ON la.task_id = t.id`
 }
 

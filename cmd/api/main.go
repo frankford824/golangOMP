@@ -256,9 +256,11 @@ func main() {
 		service.WithProductManagementSKUComboRepo(skuComboRepo),
 		service.WithProductManagementCostRecalculationRunRepo(costRecalculationRunRepo),
 		service.WithProductManagementCostLegacyAliasFallbackEnabled(cfg.CostGovernance.LegacyAliasFallbackEnabled),
+		service.WithProductManagementRedis(rdb),
 		service.WithProductManagementNotificationService(notificationSvc))
 	costRecalculationSvc := service.NewCostRecalculationService(productManagementRepo, costRecalculationRunRepo, taskRepo, costRuleRepo, skuTraceRepo, mdb,
-		service.WithCostRecalculationLegacyAliasFallbackEnabled(cfg.CostGovernance.LegacyAliasFallbackEnabled))
+		service.WithCostRecalculationLegacyAliasFallbackEnabled(cfg.CostGovernance.LegacyAliasFallbackEnabled),
+		service.WithCostRecalculationProductManagementRedis(rdb))
 	skuComboSyncSvc := service.NewSKUComboSyncService(erpBridgeSvc, skuComboRepo, mdb)
 	taskSvc := service.NewTaskServiceWithCatalog(taskRepo, procurementRepo, taskAssetRepo, taskEventRepo, taskCostOverrideEventRepo, warehouseRepo, categoryRepo, costRuleRepo, codeRuleSvc, mdb,
 		service.WithTaskCostOverridePlaceholderRepos(taskCostOverrideReviewRepo, taskCostFinanceFlagRepo),
@@ -371,6 +373,7 @@ func main() {
 	erpProductSvc := erpproductsvc.NewService(erpBridgeSvc)
 	designSourceSvc := designsourcesvc.NewService(designSourceRepo)
 	searchSvc := searchsvc.NewService(searchRepo)
+	searchSvc.SetLogger(logger.Named("global_search"))
 	searchSvc.SetExternalAssetSearchProvider(externalAssetSvc)
 	predictionSvc := predictionsvc.NewService(predictionRepo)
 	workflowTraceEventSvc := service.NewWorkflowTraceEventService(workflowTraceEventRepo)
@@ -409,6 +412,7 @@ func main() {
 	}, logger.Named("business_trends"))
 	reportL1Svc := reportl1svc.NewService(reportL1Repo,
 		reportl1svc.WithPermissionLogRepo(permissionLogRepo),
+		reportl1svc.WithReportL1Redis(rdb),
 		reportl1svc.WithKPIAnalysisRepo(kpiAnalysisRepo),
 		reportl1svc.WithKPIAnalysisGenerator(aiSummaryClient),
 		reportl1svc.WithBusinessTrendRepo(businessTrendRepo),

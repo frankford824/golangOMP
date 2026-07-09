@@ -50,6 +50,20 @@ func TestExternalSearchDisabledReturnsEmpty(t *testing.T) {
 	}
 }
 
+func TestSearchRejectsDeepPaginationWindow(t *testing.T) {
+	svc := NewService(&fakeSearchRepo{}, nil, nil)
+	result, appErr := svc.Search(context.Background(), domain.AssetSearchQuery{
+		Page: 101,
+		Size: 100,
+	})
+	if result != nil {
+		t.Fatalf("Search result = %#v, want nil", result)
+	}
+	if appErr == nil || appErr.Code != domain.ErrCodeInvalidRequest {
+		t.Fatalf("Search appErr = %#v, want %s", appErr, domain.ErrCodeInvalidRequest)
+	}
+}
+
 func TestAssetSearchHasSystemOnlyFiltersIncludesTaskCreatedTimeBasisAndModule(t *testing.T) {
 	if !assetSearchHasSystemOnlyFilters(domain.AssetSearchQuery{TimeBasis: domain.AssetSearchTimeBasisTaskCreatedAt}) {
 		t.Fatal("task_created_at time basis should be system-only")

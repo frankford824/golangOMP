@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -47,33 +48,46 @@ const taskAssetSearchFrom = `
 	  LEFT JOIN users asset_creator ON asset_creator.id = da.created_by
 	  LEFT JOIN users uploaded_user ON uploaded_user.id = ta.uploaded_by`
 
+const taskAssetSearchCountFrom = `
+	  FROM task_assets ta
+	  JOIN design_assets da ON da.id = ta.asset_id
+	  JOIN tasks t ON t.id = ta.task_id
+	  LEFT JOIN task_modules tm ON tm.id = ta.source_task_module_id`
+
 func (r *taskAssetSearchRepo) Search(ctx context.Context, query domain.AssetSearchQuery) ([]*repo.TaskAssetSearchRow, int64, error) {
 	query = query.Normalized()
 	where, args := buildTaskAssetSearchWhere(query)
-	countSQL := `SELECT COUNT(*) ` + taskAssetSearchFrom + where
+	countSQL := `SELECT COUNT(*) ` + taskAssetSearchCountFrom + where
 	var total int64
-	if err := r.db.db.QueryRowContext(ctx, countSQL, args...).Scan(&total); err != nil {
+	countCtx, cancelCount := mysqlReadQueryContext(ctx)
+	err := r.db.db.QueryRowContext(countCtx, countSQL, args...).Scan(&total)
+	cancelCount()
+	if err != nil {
 		return nil, 0, fmt.Errorf("count asset search: %w", err)
 	}
 	args = append(args, (query.Page-1)*query.Size, query.Size)
-	rows, err := r.db.db.QueryContext(ctx, taskAssetSearchSelect+taskAssetSearchFrom+where+`
+	queryCtx, cancelQuery := mysqlReadQueryContext(ctx)
+	rows, err := r.db.db.QueryContext(queryCtx, taskAssetSearchSelect+taskAssetSearchFrom+where+`
 		ORDER BY `+taskAssetSearchOrderBy(query)+`
 		LIMIT ?, ?`, args...)
 	if err != nil {
+		cancelQuery()
 		return nil, 0, fmt.Errorf("search task assets: %w", err)
 	}
+	defer cancelQuery()
 	defer rows.Close()
 	items, err := scanTaskAssetSearchRows(rows)
 	return items, total, err
 }
 
 func (r *taskAssetSearchRepo) GetCurrentByAssetID(ctx context.Context, assetID int64) (*repo.TaskAssetSearchRow, error) {
-	row := r.db.db.QueryRowContext(ctx, taskAssetSearchSelect+taskAssetSearchFrom+`
+	queryCtx, cancelQuery := mysqlReadQueryContext(ctx)
+	row := r.db.db.QueryRowContext(queryCtx, taskAssetSearchSelect+taskAssetSearchFrom+`
 		WHERE da.id = ?
-		  AND ta.id = COALESCE(da.current_version_id, (
-		      SELECT ta2.id FROM task_assets ta2 WHERE ta2.asset_id = da.id ORDER BY ta2.asset_version_no DESC, ta2.id DESC LIMIT 1
-		  ))`, assetID)
-	return scanTaskAssetSearchRow(row)
+		  AND `+taskAssetCurrentVersionPredicate(), assetID)
+	item, err := scanTaskAssetSearchRow(row)
+	cancelQuery()
+	return item, err
 }
 
 func (r *taskAssetSearchRepo) ListCurrentByAssetIDs(ctx context.Context, assetIDs []int64) ([]*repo.TaskAssetSearchRow, error) {
@@ -81,35 +95,42 @@ func (r *taskAssetSearchRepo) ListCurrentByAssetIDs(ctx context.Context, assetID
 	if query == "" {
 		return []*repo.TaskAssetSearchRow{}, nil
 	}
-	rows, err := r.db.db.QueryContext(ctx, query, args...)
+	queryCtx, cancelQuery := mysqlReadQueryContext(ctx)
+	rows, err := r.db.db.QueryContext(queryCtx, query, args...)
 	if err != nil {
+		cancelQuery()
 		return nil, fmt.Errorf("list current assets by ids: %w", err)
 	}
+	defer cancelQuery()
 	defer rows.Close()
 	return scanTaskAssetSearchRows(rows)
 }
 
 func (r *taskAssetSearchRepo) ListVersionsByAssetID(ctx context.Context, assetID int64) ([]*repo.TaskAssetSearchRow, error) {
-	rows, err := r.db.db.QueryContext(ctx, taskAssetSearchSelect+taskAssetSearchFrom+`
+	queryCtx, cancelQuery := mysqlReadQueryContext(ctx)
+	rows, err := r.db.db.QueryContext(queryCtx, taskAssetSearchSelect+taskAssetSearchFrom+`
 		WHERE da.id = ?
 		ORDER BY ta.asset_version_no ASC, ta.id ASC`, assetID)
 	if err != nil {
+		cancelQuery()
 		return nil, fmt.Errorf("list asset versions: %w", err)
 	}
+	defer cancelQuery()
 	defer rows.Close()
 	return scanTaskAssetSearchRows(rows)
 }
 
 func (r *taskAssetSearchRepo) GetVersion(ctx context.Context, assetID, versionID int64) (*repo.TaskAssetSearchRow, error) {
-	row := r.db.db.QueryRowContext(ctx, taskAssetSearchSelect+taskAssetSearchFrom+`
+	queryCtx, cancelQuery := mysqlReadQueryContext(ctx)
+	row := r.db.db.QueryRowContext(queryCtx, taskAssetSearchSelect+taskAssetSearchFrom+`
 		WHERE da.id = ? AND ta.id = ?`, assetID, versionID)
-	return scanTaskAssetSearchRow(row)
+	item, err := scanTaskAssetSearchRow(row)
+	cancelQuery()
+	return item, err
 }
 
 func buildTaskAssetSearchWhere(query domain.AssetSearchQuery) (string, []interface{}) {
-	clauses := []string{`ta.id = COALESCE(da.current_version_id, (
-		SELECT ta2.id FROM task_assets ta2 WHERE ta2.asset_id = da.id ORDER BY ta2.asset_version_no DESC, ta2.id DESC LIMIT 1
-	))`, `ta.deleted_at IS NULL`, `NOT (
+	clauses := []string{taskAssetCurrentVersionPredicate(), `ta.deleted_at IS NULL`, `NOT (
 		da.source_asset_id IS NOT NULL
 		AND da.asset_type IN ('preview', 'design_thumb')
 		AND COALESCE(ta.remark, '') IN ('async-derived-preview', 'async-derived-preview:webp')
@@ -241,7 +262,7 @@ func taskAssetSearchTimeColumn(query domain.AssetSearchQuery) string {
 	case domain.AssetSearchTimeBasisTaskCreatedAt:
 		return `t.created_at`
 	default:
-		return `COALESCE(ta.uploaded_at, ta.created_at)`
+		return `ta.sort_time`
 	}
 }
 
@@ -428,9 +449,21 @@ func buildListCurrentByAssetIDsQuery(assetIDs []int64) (string, []interface{}) {
 	}
 	query := taskAssetSearchSelect + taskAssetSearchFrom + `
 		WHERE da.id IN (` + strings.Join(placeholders, ", ") + `)
-		  AND ta.id = COALESCE(da.current_version_id, (
-		      SELECT ta2.id FROM task_assets ta2 WHERE ta2.asset_id = da.id ORDER BY ta2.asset_version_no DESC, ta2.id DESC LIMIT 1
-		  ))
-		ORDER BY ta.created_at DESC, ta.id DESC`
+		  AND ` + taskAssetCurrentVersionPredicate() + `
+		ORDER BY ta.sort_time DESC, ta.id DESC`
 	return query, args
+}
+
+func taskAssetCurrentVersionPredicate() string {
+	if taskAssetLegacyCurrentVersionEnabled() {
+		return `ta.id = COALESCE(da.current_version_id, (
+		      SELECT ta2.id FROM task_assets ta2 WHERE ta2.asset_id = da.id ORDER BY ta2.asset_version_no DESC, ta2.id DESC LIMIT 1
+		  ))`
+	}
+	return `ta.id = da.current_version_id`
+}
+
+func taskAssetLegacyCurrentVersionEnabled() bool {
+	value := strings.TrimSpace(strings.ToLower(os.Getenv("ASSET_SEARCH_LEGACY_CURRENT_VERSION")))
+	return value == "1" || value == "true" || value == "yes"
 }

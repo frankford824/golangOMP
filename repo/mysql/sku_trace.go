@@ -130,6 +130,11 @@ func (r *skuTraceRepo) AppendCostSnapshot(ctx context.Context, tx repo.Tx, snaps
 		return 0, fmt.Errorf("append omp sku cost snapshot: %w", err)
 	}
 	id, _ := res.LastInsertId()
+	if id > 0 {
+		if err := r.syncLatestCostSnapshotToProductManagement(ctx, sqlTx, id); err != nil {
+			return 0, err
+		}
+	}
 	return id, nil
 }
 
@@ -167,6 +172,11 @@ func (r *skuTraceRepo) AppendERPTraceLog(ctx context.Context, tx repo.Tx, log *d
 		return 0, fmt.Errorf("append omp sku erp trace log: %w", err)
 	}
 	id, _ := res.LastInsertId()
+	if id > 0 {
+		if err := r.syncLatestERPTraceToProductManagement(ctx, sqlTx, id); err != nil {
+			return 0, err
+		}
+	}
 	return id, nil
 }
 
@@ -200,7 +210,7 @@ func (r *skuTraceRepo) UpsertComboRelation(ctx context.Context, tx repo.Tx, rela
 	if err != nil {
 		return fmt.Errorf("upsert omp sku combo relation: %w", err)
 	}
-	return nil
+	return r.refreshProductManagementComboSearchTextByChildSKUs(ctx, sqlTx, []string{relation.ChildSKUCode})
 }
 
 func (r *skuTraceRepo) DeleteStaleComboRelations(ctx context.Context, tx repo.Tx, comboSKUCode string, source string, currentChildSKUs []string) error {
@@ -210,6 +220,10 @@ func (r *skuTraceRepo) DeleteStaleComboRelations(ctx context.Context, tx repo.Tx
 	}
 	source = firstNonEmptySQLString(source, "jst_openweb_combine_sku_query")
 	sqlTx := Unwrap(tx)
+	existingChildSKUs, err := r.comboRelationChildSKUs(ctx, sqlTx, comboSKUCode, source)
+	if err != nil {
+		return err
+	}
 	normalized := make([]string, 0, len(currentChildSKUs))
 	seen := map[string]struct{}{}
 	for _, sku := range currentChildSKUs {
@@ -232,7 +246,7 @@ func (r *skuTraceRepo) DeleteStaleComboRelations(ctx context.Context, tx repo.Tx
 		); err != nil {
 			return fmt.Errorf("delete stale omp sku combo relations: %w", err)
 		}
-		return nil
+		return r.refreshProductManagementComboSearchTextByChildSKUs(ctx, sqlTx, existingChildSKUs)
 	}
 	placeholders := strings.TrimRight(strings.Repeat("?,", len(normalized)), ",")
 	args := make([]interface{}, 0, 2+len(normalized))
@@ -246,7 +260,7 @@ func (r *skuTraceRepo) DeleteStaleComboRelations(ctx context.Context, tx repo.Tx
 		   AND child_sku_code NOT IN (`+placeholders+`)`, args...); err != nil {
 		return fmt.Errorf("delete stale omp sku combo relations except current children: %w", err)
 	}
-	return nil
+	return r.refreshProductManagementComboSearchTextByChildSKUs(ctx, sqlTx, append(existingChildSKUs, normalized...))
 }
 
 func (r *skuTraceRepo) UpsertComboRecord(ctx context.Context, tx repo.Tx, record *domain.OMPSKUComboRecord) error {
@@ -284,6 +298,186 @@ func (r *skuTraceRepo) UpsertComboRecord(ctx context.Context, tx repo.Tx, record
 	)
 	if err != nil {
 		return fmt.Errorf("upsert omp sku combo record: %w", err)
+	}
+	return r.refreshProductManagementComboSearchTextByComboSKU(ctx, sqlTx, record.ComboSKUCode)
+}
+
+func (r *skuTraceRepo) syncLatestCostSnapshotToProductManagement(ctx context.Context, tx *sql.Tx, snapshotID int64) error {
+	_, err := tx.ExecContext(ctx, `
+		UPDATE erp_product_sync_records pm
+		JOIN omp_sku_cost_snapshots cost_snapshot ON cost_snapshot.id = ?
+		LEFT JOIN omp_sku_cost_snapshots current_snapshot ON current_snapshot.id = pm.latest_cost_snapshot_id
+		LEFT JOIN task_details pm_td ON pm_td.task_id = pm.task_id
+		LEFT JOIN task_sku_items pm_tsi ON pm.task_sku_item_id IS NOT NULL AND pm_tsi.id = pm.task_sku_item_id
+		   SET pm.latest_cost_snapshot_id = cost_snapshot.id,
+		       pm.cost_legacy_alias_fallback = CASE
+		         WHEN JSON_VALID(cost_snapshot.calculation_snapshot_json)
+		          AND JSON_UNQUOTE(JSON_EXTRACT(cost_snapshot.calculation_snapshot_json, '$.legacy_alias_fallback')) = 'true'
+		         THEN 1 ELSE 0 END,
+		       pm.cost_area_spec_abnormal = CASE
+		         WHEN pm.cost_price IS NOT NULL AND pm.cost_price > 0
+		          AND COALESCE(pm_td.area, 0) <= 0
+		          AND (COALESCE(pm_td.width, 0) <= 0 OR COALESCE(pm_td.height, 0) <= 0)
+		          AND (
+		            pm.task_sku_item_id IS NULL
+		            OR NOT JSON_VALID(pm_tsi.variant_json)
+		            OR (
+		                 COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(pm_tsi.variant_json, '$.area')) AS DECIMAL(12,4)), 0) <= 0
+		             AND COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(pm_tsi.variant_json, '$.width')) AS DECIMAL(12,4)), 0) <= 0
+		             AND COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(pm_tsi.variant_json, '$.height')) AS DECIMAL(12,4)), 0) <= 0
+		            )
+		          )
+		         THEN 1 ELSE 0 END
+		 WHERE pm.sku_code = cost_snapshot.sku_code
+		   AND (
+		     (cost_snapshot.task_sku_item_id IS NOT NULL AND pm.task_sku_item_id = cost_snapshot.task_sku_item_id)
+		     OR (cost_snapshot.task_sku_item_id IS NULL AND cost_snapshot.task_id IS NOT NULL AND pm.task_id = cost_snapshot.task_id AND pm.task_sku_item_id IS NULL)
+		     OR (cost_snapshot.task_id IS NOT NULL AND pm.task_id = cost_snapshot.task_id)
+		     OR cost_snapshot.task_id IS NULL
+		   )
+		   AND (
+		     pm.latest_cost_snapshot_id IS NULL
+		     OR current_snapshot.id IS NULL
+		     OR (
+		       CASE
+		         WHEN pm.task_sku_item_id IS NOT NULL AND cost_snapshot.task_sku_item_id = pm.task_sku_item_id THEN 0
+		         WHEN pm.task_sku_item_id IS NULL AND cost_snapshot.task_id = pm.task_id AND cost_snapshot.task_sku_item_id IS NULL THEN 1
+		         WHEN cost_snapshot.task_id = pm.task_id THEN 2
+		         ELSE 3
+		       END
+		     ) < (
+		       CASE
+		         WHEN pm.task_sku_item_id IS NOT NULL AND current_snapshot.task_sku_item_id = pm.task_sku_item_id THEN 0
+		         WHEN pm.task_sku_item_id IS NULL AND current_snapshot.task_id = pm.task_id AND current_snapshot.task_sku_item_id IS NULL THEN 1
+		         WHEN current_snapshot.task_id = pm.task_id THEN 2
+		         ELSE 3
+		       END
+		     )
+		     OR (
+		       (
+		         CASE
+		           WHEN pm.task_sku_item_id IS NOT NULL AND cost_snapshot.task_sku_item_id = pm.task_sku_item_id THEN 0
+		           WHEN pm.task_sku_item_id IS NULL AND cost_snapshot.task_id = pm.task_id AND cost_snapshot.task_sku_item_id IS NULL THEN 1
+		           WHEN cost_snapshot.task_id = pm.task_id THEN 2
+		           ELSE 3
+		         END
+		       ) = (
+		         CASE
+		           WHEN pm.task_sku_item_id IS NOT NULL AND current_snapshot.task_sku_item_id = pm.task_sku_item_id THEN 0
+		           WHEN pm.task_sku_item_id IS NULL AND current_snapshot.task_id = pm.task_id AND current_snapshot.task_sku_item_id IS NULL THEN 1
+		           WHEN current_snapshot.task_id = pm.task_id THEN 2
+		           ELSE 3
+		         END
+		       )
+		       AND (
+		         cost_snapshot.created_at > current_snapshot.created_at
+		         OR (cost_snapshot.created_at = current_snapshot.created_at AND cost_snapshot.id > current_snapshot.id)
+		       )
+		     )
+		   )`, snapshotID)
+	if err != nil {
+		return fmt.Errorf("sync product management latest cost snapshot: %w", err)
+	}
+	return nil
+}
+
+func (r *skuTraceRepo) syncLatestERPTraceToProductManagement(ctx context.Context, tx *sql.Tx, traceID int64) error {
+	_, err := tx.ExecContext(ctx, `
+		UPDATE erp_product_sync_records pm
+		JOIN omp_sku_erp_trace_logs latest_erp_trace ON latest_erp_trace.id = ?
+		   SET pm.latest_erp_trace_id = latest_erp_trace.id
+		 WHERE pm.sku_code = latest_erp_trace.sku_code
+		   AND (
+		     (latest_erp_trace.task_sku_item_id IS NOT NULL AND pm.task_sku_item_id = latest_erp_trace.task_sku_item_id)
+		     OR (latest_erp_trace.task_sku_item_id IS NULL AND latest_erp_trace.task_id IS NOT NULL AND pm.task_id = latest_erp_trace.task_id AND pm.task_sku_item_id IS NULL)
+		     OR (latest_erp_trace.task_id IS NOT NULL AND pm.task_id = latest_erp_trace.task_id)
+		     OR latest_erp_trace.task_id IS NULL
+		   )`, traceID)
+	if err != nil {
+		return fmt.Errorf("sync product management latest erp trace: %w", err)
+	}
+	return nil
+}
+
+func (r *skuTraceRepo) refreshProductManagementComboSearchTextByComboSKU(ctx context.Context, tx *sql.Tx, comboSKUCode string) error {
+	childSKUs, err := r.comboRelationChildSKUs(ctx, tx, comboSKUCode, "")
+	if err != nil {
+		return err
+	}
+	return r.refreshProductManagementComboSearchTextByChildSKUs(ctx, tx, childSKUs)
+}
+
+func (r *skuTraceRepo) comboRelationChildSKUs(ctx context.Context, tx *sql.Tx, comboSKUCode string, source string) ([]string, error) {
+	comboSKUCode = strings.TrimSpace(comboSKUCode)
+	if comboSKUCode == "" {
+		return nil, nil
+	}
+	clauses := []string{"combo_sku_code = ?"}
+	args := []interface{}{comboSKUCode}
+	if source = strings.TrimSpace(source); source != "" {
+		clauses = append(clauses, "source = ?")
+		args = append(args, source)
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT child_sku_code FROM omp_sku_combo_relations WHERE `+strings.Join(clauses, " AND "), args...)
+	if err != nil {
+		return nil, fmt.Errorf("list combo relation child skus: %w", err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var sku string
+		if err := rows.Scan(&sku); err != nil {
+			return nil, fmt.Errorf("scan combo relation child sku: %w", err)
+		}
+		out = append(out, sku)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate combo relation child skus: %w", err)
+	}
+	return out, nil
+}
+
+func (r *skuTraceRepo) refreshProductManagementComboSearchTextByChildSKUs(ctx context.Context, tx *sql.Tx, childSKUs []string) error {
+	normalized := make([]string, 0, len(childSKUs))
+	seen := map[string]struct{}{}
+	for _, sku := range childSKUs {
+		sku = strings.TrimSpace(sku)
+		if sku == "" {
+			continue
+		}
+		key := strings.ToUpper(sku)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		normalized = append(normalized, sku)
+	}
+	if len(normalized) == 0 {
+		return nil
+	}
+	placeholders := strings.TrimRight(strings.Repeat("?,", len(normalized)), ",")
+	args := make([]interface{}, 0, len(normalized)*2)
+	for _, sku := range normalized {
+		args = append(args, sku)
+	}
+	for _, sku := range normalized {
+		args = append(args, sku)
+	}
+	_, err := tx.ExecContext(ctx, `
+		UPDATE erp_product_sync_records pm
+		LEFT JOIN (
+		    SELECT
+		      rel.child_sku_code,
+		      GROUP_CONCAT(DISTINCT CONCAT_WS(' ', rel.combo_sku_code, rec.erp_i_id, rec.name, rec.short_name) SEPARATOR ' ') AS combo_search_text
+		      FROM omp_sku_combo_relations rel
+		      LEFT JOIN omp_sku_combo_records rec ON rec.combo_sku_code = rel.combo_sku_code
+		     WHERE rel.child_sku_code IN (`+placeholders+`)
+		     GROUP BY rel.child_sku_code
+		) combo ON combo.child_sku_code = pm.sku_code
+		   SET pm.combo_search_text = COALESCE(combo.combo_search_text, '')
+		 WHERE pm.sku_code IN (`+placeholders+`)`, args...)
+	if err != nil {
+		return fmt.Errorf("refresh product management combo search text: %w", err)
 	}
 	return nil
 }

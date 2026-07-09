@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/redis/go-redis/v9"
+
 	"workflow/domain"
 	"workflow/repo"
 )
@@ -143,6 +145,43 @@ func TestProductManagementCostDashboardAddsLegacyFallbackPolicyState(t *testing.
 	}
 	if !defaultResult.LegacyFallbackEnabled || defaultResult.LegacyFallbackMode != "warn" {
 		t.Fatalf("default fallback policy = enabled %t mode %q, want enabled warn", defaultResult.LegacyFallbackEnabled, defaultResult.LegacyFallbackMode)
+	}
+}
+
+func TestProductManagementCostDashboardUsesRedisCacheBeforeRefresh(t *testing.T) {
+	records := &productManagementRecordRepoFake{}
+	cache := newFakeProductManagementCache()
+	svc := NewProductManagementService(
+		records,
+		nil,
+		nil,
+		nil,
+		WithProductManagementRedis(cache),
+	)
+	for i := 0; i < 2; i++ {
+		result, appErr := svc.CostDashboard(context.Background())
+		if appErr != nil {
+			t.Fatalf("CostDashboard() appErr = %+v", appErr)
+		}
+		if result == nil || !result.LegacyFallbackEnabled {
+			t.Fatalf("dashboard policy not decorated: %+v", result)
+		}
+	}
+	if records.refreshCalls != 1 || records.dashboardCalls != 1 {
+		t.Fatalf("repo calls refresh=%d dashboard=%d", records.refreshCalls, records.dashboardCalls)
+	}
+	if cache.ttls["omp:perf:product-management:cost-dashboard:v1:legacy=true"] != 5*time.Minute {
+		t.Fatalf("dashboard ttl=%s", cache.ttls["omp:perf:product-management:cost-dashboard:v1:legacy=true"])
+	}
+}
+
+func TestInvalidateProductManagementCostDashboardCacheDeletesPolicyKeys(t *testing.T) {
+	cache := newFakeProductManagementCache()
+	cache.values["omp:perf:product-management:cost-dashboard:v1:legacy=true"] = `{}`
+	cache.values["omp:perf:product-management:cost-dashboard:v1:legacy=false"] = `{}`
+	invalidateProductManagementCostDashboardCache(context.Background(), cache)
+	if len(cache.values) != 0 {
+		t.Fatalf("cache values after invalidation = %+v", cache.values)
 	}
 }
 
@@ -298,8 +337,53 @@ func productManagementTestRecord(id int64, sku string, now time.Time) *domain.Pr
 	}
 }
 
+type fakeProductManagementCache struct {
+	values map[string]string
+	ttls   map[string]time.Duration
+}
+
+func newFakeProductManagementCache() *fakeProductManagementCache {
+	return &fakeProductManagementCache{
+		values: map[string]string{},
+		ttls:   map[string]time.Duration{},
+	}
+}
+
+func (f *fakeProductManagementCache) Get(_ context.Context, key string) *redis.StringCmd {
+	if value, ok := f.values[key]; ok {
+		return redis.NewStringResult(value, nil)
+	}
+	return redis.NewStringResult("", redis.Nil)
+}
+
+func (f *fakeProductManagementCache) Set(_ context.Context, key string, value interface{}, ttl time.Duration) *redis.StatusCmd {
+	switch raw := value.(type) {
+	case []byte:
+		f.values[key] = string(raw)
+	case string:
+		f.values[key] = raw
+	default:
+		f.values[key] = ""
+	}
+	f.ttls[key] = ttl
+	return redis.NewStatusResult("OK", nil)
+}
+
+func (f *fakeProductManagementCache) Del(_ context.Context, keys ...string) *redis.IntCmd {
+	var deleted int64
+	for _, key := range keys {
+		if _, ok := f.values[key]; ok {
+			delete(f.values, key)
+			deleted++
+		}
+	}
+	return redis.NewIntResult(deleted, nil)
+}
+
 type productManagementRecordRepoFake struct {
 	items               []*domain.ProductManagementRecord
+	refreshCalls        int
+	dashboardCalls      int
 	updatedBaseID       int64
 	updatedBasePatch    repo.ProductManagementSyncPatch
 	projectionTaskID    int64
@@ -307,7 +391,10 @@ type productManagementRecordRepoFake struct {
 	projectionNow       time.Time
 }
 
-func (f *productManagementRecordRepoFake) RefreshReadModel(context.Context) error { return nil }
+func (f *productManagementRecordRepoFake) RefreshReadModel(context.Context) error {
+	f.refreshCalls++
+	return nil
+}
 
 func (f *productManagementRecordRepoFake) List(_ context.Context, filter repo.ProductManagementListFilter) ([]*domain.ProductManagementRecord, int64, error) {
 	page, pageSize := normalizeProductManagementPage(filter.Page, filter.PageSize)
@@ -323,6 +410,7 @@ func (f *productManagementRecordRepoFake) List(_ context.Context, filter repo.Pr
 }
 
 func (f *productManagementRecordRepoFake) CostDashboard(context.Context) (*domain.ProductCostDashboardResponse, error) {
+	f.dashboardCalls++
 	return &domain.ProductCostDashboardResponse{}, nil
 }
 

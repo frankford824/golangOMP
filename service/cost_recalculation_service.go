@@ -37,6 +37,7 @@ type costRecalculationService struct {
 	costRules                  repo.CostRuleRepo
 	skuTrace                   repo.SKUTraceRepo
 	txRunner                   repo.TxRunner
+	productManagementCache     productManagementCache
 	now                        func() time.Time
 	legacyAliasFallbackEnabled bool
 }
@@ -63,6 +64,12 @@ func NewCostRecalculationService(records repo.ProductManagementRepo, runs repo.C
 func WithCostRecalculationLegacyAliasFallbackEnabled(enabled bool) CostRecalculationServiceOption {
 	return func(s *costRecalculationService) {
 		s.legacyAliasFallbackEnabled = enabled
+	}
+}
+
+func WithCostRecalculationProductManagementRedis(cache productManagementCache) CostRecalculationServiceOption {
+	return func(s *costRecalculationService) {
+		s.productManagementCache = cache
 	}
 }
 
@@ -258,6 +265,7 @@ func (s *costRecalculationService) Apply(ctx context.Context, actor domain.Reque
 		return nil, infraAppError("apply cost recalculation run", err)
 	}
 	_ = s.records.RefreshReadModel(ctx)
+	invalidateProductManagementCostDashboardCache(ctx, s.productManagementCache)
 	updated, appErr := s.getRunWithItems(ctx, runID, 1, 50)
 	if appErr != nil {
 		return nil, appErr

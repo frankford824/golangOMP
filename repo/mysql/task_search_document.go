@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"sync"
+	"time"
 )
 
 type taskSearchDocumentSQL interface {
@@ -13,14 +15,51 @@ type taskSearchDocumentSQL interface {
 	QueryRowContext(context.Context, string, ...interface{}) *sql.Row
 }
 
+type mysqlSchemaCacheKey struct {
+	kind   string
+	table  string
+	column string
+}
+
+type mysqlSchemaCacheEntry struct {
+	exists    bool
+	expiresAt time.Time
+}
+
+const (
+	mysqlSchemaPresencePositiveTTL = 10 * time.Minute
+	mysqlSchemaPresenceNegativeTTL = 30 * time.Second
+)
+
+var mysqlSchemaPresenceCache sync.Map
+
 func taskSearchDocumentsTableExists(ctx context.Context, q taskSearchDocumentSQL) bool {
+	return mysqlTableExists(ctx, q, "task_search_documents")
+}
+
+func mysqlTableExists(ctx context.Context, q taskSearchDocumentSQL, table string) bool {
+	table = strings.TrimSpace(table)
+	if table == "" {
+		return false
+	}
+	key := mysqlSchemaCacheKey{kind: "table", table: table}
+	if exists, ok := loadMySQLSchemaPresenceCache(key); ok {
+		return exists
+	}
+	queryCtx, cancelQuery := mysqlReadQueryContext(ctx)
+	defer cancelQuery()
 	var n int
-	err := q.QueryRowContext(ctx, `
+	err := q.QueryRowContext(queryCtx, `
 		SELECT COUNT(*)
 		  FROM information_schema.tables
 		 WHERE table_schema = DATABASE()
-		   AND table_name = 'task_search_documents'`).Scan(&n)
-	return err == nil && n > 0
+		   AND table_name = ?`, table).Scan(&n)
+	if err != nil {
+		return false
+	}
+	exists := n > 0
+	storeMySQLSchemaPresenceCache(key, exists)
+	return exists
 }
 
 func mysqlColumnExists(ctx context.Context, q taskSearchDocumentSQL, table, column string) bool {
@@ -29,14 +68,53 @@ func mysqlColumnExists(ctx context.Context, q taskSearchDocumentSQL, table, colu
 	if table == "" || column == "" {
 		return false
 	}
+	key := mysqlSchemaCacheKey{kind: "column", table: table, column: column}
+	if exists, ok := loadMySQLSchemaPresenceCache(key); ok {
+		return exists
+	}
+	queryCtx, cancelQuery := mysqlReadQueryContext(ctx)
+	defer cancelQuery()
 	var n int
-	err := q.QueryRowContext(ctx, `
+	err := q.QueryRowContext(queryCtx, `
 		SELECT COUNT(*)
 		  FROM information_schema.columns
 		 WHERE table_schema = DATABASE()
 		   AND table_name = ?
 		   AND column_name = ?`, table, column).Scan(&n)
-	return err == nil && n > 0
+	if err != nil {
+		return false
+	}
+	exists := n > 0
+	storeMySQLSchemaPresenceCache(key, exists)
+	return exists
+}
+
+func loadMySQLSchemaPresenceCache(key mysqlSchemaCacheKey) (bool, bool) {
+	cached, ok := mysqlSchemaPresenceCache.Load(key)
+	if !ok {
+		return false, false
+	}
+	entry, ok := cached.(mysqlSchemaCacheEntry)
+	if !ok {
+		mysqlSchemaPresenceCache.Delete(key)
+		return false, false
+	}
+	if time.Now().After(entry.expiresAt) {
+		mysqlSchemaPresenceCache.Delete(key)
+		return false, false
+	}
+	return entry.exists, true
+}
+
+func storeMySQLSchemaPresenceCache(key mysqlSchemaCacheKey, exists bool) {
+	ttl := mysqlSchemaPresenceNegativeTTL
+	if exists {
+		ttl = mysqlSchemaPresencePositiveTTL
+	}
+	mysqlSchemaPresenceCache.Store(key, mysqlSchemaCacheEntry{
+		exists:    exists,
+		expiresAt: time.Now().Add(ttl),
+	})
 }
 
 func taskAssetsActiveSQL(ctx context.Context, q taskSearchDocumentSQL, alias string) string {
@@ -59,8 +137,11 @@ func taskAssetsActiveSQL(ctx context.Context, q taskSearchDocumentSQL, alias str
 }
 
 func reindexTaskSearchDocument(ctx context.Context, q taskSearchDocumentSQL, taskID int64) error {
-	if taskID <= 0 || !taskSearchDocumentsTableExists(ctx, q) {
+	if taskID <= 0 {
 		return nil
+	}
+	if !taskSearchDocumentsTableExists(ctx, q) {
+		return reindexAssetSearchDocumentsByTaskID(ctx, q, taskID)
 	}
 	if _, err := q.ExecContext(ctx, `SET SESSION group_concat_max_len = 1048576`); err != nil {
 		return fmt.Errorf("set task search group_concat_max_len: %w", err)
@@ -164,7 +245,7 @@ func reindexTaskSearchDocument(ctx context.Context, q taskSearchDocumentSQL, tas
 	if err != nil {
 		return fmt.Errorf("reindex task search document: %w", err)
 	}
-	return nil
+	return reindexAssetSearchDocumentsByTaskID(ctx, q, taskID)
 }
 
 func reindexTaskSearchDocuments(ctx context.Context, q taskSearchDocumentSQL, taskIDs []int64) error {
@@ -211,4 +292,57 @@ func taskIDByAssetVersionID(ctx context.Context, q taskSearchDocumentSQL, versio
 		return 0, fmt.Errorf("get task id by asset version id: %w", err)
 	}
 	return taskID, nil
+}
+
+func assetIDByAssetVersionID(ctx context.Context, q taskSearchDocumentSQL, versionID int64) (int64, error) {
+	var assetID sql.NullInt64
+	err := q.QueryRowContext(ctx, `SELECT asset_id FROM task_assets WHERE id = ?`, versionID).Scan(&assetID)
+	if err == sql.ErrNoRows {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("get asset id by asset version id: %w", err)
+	}
+	if !assetID.Valid {
+		return 0, nil
+	}
+	return assetID.Int64, nil
+}
+
+func assetIDsByAssetVersionOrSourceID(ctx context.Context, q taskSearchDocumentSQL, versionID int64) ([]int64, error) {
+	rows, err := q.QueryContext(ctx, `
+		SELECT DISTINCT asset_id
+		  FROM task_assets
+		 WHERE (id = ? OR source_asset_version_id = ?)
+		   AND asset_id IS NOT NULL`, versionID, versionID)
+	if err != nil {
+		return nil, fmt.Errorf("list asset ids by asset version/source id: %w", err)
+	}
+	defer rows.Close()
+	var out []int64
+	for rows.Next() {
+		var assetID int64
+		if err := rows.Scan(&assetID); err != nil {
+			return nil, fmt.Errorf("scan asset id by asset version/source id: %w", err)
+		}
+		out = append(out, assetID)
+	}
+	return out, rows.Err()
+}
+
+func reindexAssetSearchDocuments(ctx context.Context, q taskSearchDocumentSQL, assetIDs []int64) error {
+	seen := map[int64]struct{}{}
+	for _, assetID := range assetIDs {
+		if assetID <= 0 {
+			continue
+		}
+		if _, ok := seen[assetID]; ok {
+			continue
+		}
+		seen[assetID] = struct{}{}
+		if err := reindexAssetSearchDocument(ctx, q, assetID); err != nil {
+			return err
+		}
+	}
+	return nil
 }

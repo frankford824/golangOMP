@@ -212,6 +212,12 @@ Copy `deploy/deploy.env.example` to another local-only shell snippet if needed, 
 - Requires: `main.env` (or `shared/main.env`) with DB_HOST, DB_USER, DB_NAME; mysql client on server
 - From local IDE: `ssh user@host "cd /root/ecommerce_ai/current && bash deploy/check-remote-db.sh"`
 
+## Performance Migration Release Checklist
+- Apply pending database migrations before starting the new `cmd/server` binary. Migrations 114-119 add columns and read-model tables used by hot read paths; starting the binary first can produce `unknown column` errors on product management, asset center, search, and report endpoints.
+- After migrations 117 and 119, run `cmd/tools/search-reindex` to rebuild `asset_search_documents` and `product_search_documents`; run `cmd/tools/search-semantic-enrich` only when AI enrichment is intentionally enabled.
+- After migration 118, keep `ENABLE_CRON_REPORT_L1_DAILY=true` in `shared/main.env`. The default `CRON_SCHEDULE_REPORT_L1_DAILY="*/10 * * * *"` and `REPORT_L1_DAILY_REFRESH_DAYS=3` keep recent L1 throughput aggregates fresh. If `report_task_daily.updated_at` is more than 2 hours stale, the runtime falls back to realtime throughput SQL instead of serving old aggregates.
+- Capture pre/post `EXPLAIN` and `performance_schema.events_statements_summary_by_digest` snapshots for the changed hot queries before claiming the performance rollout complete.
+
 ## v1.0 Org-Master-Data Release Flow
 - The org-master-data convergence is not part of the generic deploy auto-start path; run it explicitly before claiming the v1.0 org baseline is live.
 - Server-side helper:

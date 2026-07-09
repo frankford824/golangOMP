@@ -18,4 +18,5 @@ type ReportL1Repo interface {
 	GetCards(ctx context.Context) ([]domain.L1Card, error)
 	GetThroughput(ctx context.Context, filter ReportL1Filter) ([]domain.L1ThroughputPoint, error)
 	GetModuleDwell(ctx context.Context, filter ReportL1Filter) ([]domain.L1ModuleDwellPoint, error)
+	RefreshDailyAggregates(ctx context.Context, from, to time.Time) error
 }

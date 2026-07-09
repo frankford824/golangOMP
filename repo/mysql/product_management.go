@@ -37,27 +37,7 @@ const productManagementSelectCols = `
 
 const productManagementCostTraceJoin = `
 	LEFT JOIN omp_sku_cost_snapshots cost_snapshot
-	  ON cost_snapshot.id = (
-	    SELECT s.id
-	      FROM omp_sku_cost_snapshots s
-	     WHERE s.sku_code = pm.sku_code
-	       AND (
-	         (pm.task_sku_item_id IS NOT NULL AND s.task_sku_item_id = pm.task_sku_item_id)
-	         OR (pm.task_sku_item_id IS NULL AND s.task_id = pm.task_id AND s.task_sku_item_id IS NULL)
-	         OR s.task_id = pm.task_id
-	         OR s.task_id IS NULL
-	       )
-	     ORDER BY
-	       CASE
-	         WHEN pm.task_sku_item_id IS NOT NULL AND s.task_sku_item_id = pm.task_sku_item_id THEN 0
-	         WHEN pm.task_sku_item_id IS NULL AND s.task_id = pm.task_id AND s.task_sku_item_id IS NULL THEN 1
-	         WHEN s.task_id = pm.task_id THEN 2
-	         ELSE 3
-	       END,
-	       s.created_at DESC,
-	       s.id DESC
-	     LIMIT 1
-	  )`
+	  ON cost_snapshot.id = pm.latest_cost_snapshot_id`
 
 const productManagementDimensionJoin = `
 	LEFT JOIN task_details pm_td ON pm_td.task_id = pm.task_id
@@ -67,7 +47,10 @@ func (r *productManagementRepo) RefreshReadModel(ctx context.Context) error {
 	if err := r.refreshMainTaskRecords(ctx); err != nil {
 		return err
 	}
-	return r.refreshSKUItemRecords(ctx)
+	if err := r.refreshSKUItemRecords(ctx); err != nil {
+		return err
+	}
+	return r.refreshMaterializedFields(ctx)
 }
 
 func (r *productManagementRepo) refreshMainTaskRecords(ctx context.Context) error {
@@ -154,6 +137,34 @@ func (r *productManagementRepo) refreshMainTaskRecords(ctx context.Context) erro
 		      AND VALUES(updated_at) > erp_product_sync_records.updated_at
 		    ) THEN NULL
 		    ELSE erp_product_sync_records.sync_cooldown_until
+		  END,
+		  latest_cost_snapshot_id = CASE
+		    WHEN NOT (erp_product_sync_records.sku_code <=> VALUES(sku_code))
+		      OR NOT (erp_product_sync_records.task_id <=> VALUES(task_id))
+		      OR NOT (erp_product_sync_records.task_sku_item_id <=> VALUES(task_sku_item_id))
+		    THEN NULL ELSE erp_product_sync_records.latest_cost_snapshot_id
+		  END,
+		  latest_erp_trace_id = CASE
+		    WHEN NOT (erp_product_sync_records.sku_code <=> VALUES(sku_code))
+		      OR NOT (erp_product_sync_records.task_id <=> VALUES(task_id))
+		      OR NOT (erp_product_sync_records.task_sku_item_id <=> VALUES(task_sku_item_id))
+		    THEN NULL ELSE erp_product_sync_records.latest_erp_trace_id
+		  END,
+		  combo_search_text = CASE
+		    WHEN NOT (erp_product_sync_records.sku_code <=> VALUES(sku_code))
+		    THEN NULL ELSE erp_product_sync_records.combo_search_text
+		  END,
+		  cost_legacy_alias_fallback = CASE
+		    WHEN NOT (erp_product_sync_records.sku_code <=> VALUES(sku_code))
+		      OR NOT (erp_product_sync_records.task_id <=> VALUES(task_id))
+		      OR NOT (erp_product_sync_records.task_sku_item_id <=> VALUES(task_sku_item_id))
+		    THEN 0 ELSE erp_product_sync_records.cost_legacy_alias_fallback
+		  END,
+		  cost_area_spec_abnormal = CASE
+		    WHEN NOT (erp_product_sync_records.sku_code <=> VALUES(sku_code))
+		      OR NOT (erp_product_sync_records.task_id <=> VALUES(task_id))
+		      OR NOT (erp_product_sync_records.task_sku_item_id <=> VALUES(task_sku_item_id))
+		    THEN 0 ELSE erp_product_sync_records.cost_area_spec_abnormal
 		  END,
 		  erp_sync_status = CASE
 		    WHEN erp_product_sync_records.erp_sync_status IN ('queued', 'cooling_down', 'syncing') THEN erp_product_sync_records.erp_sync_status
@@ -290,6 +301,34 @@ func (r *productManagementRepo) refreshSKUItemRecords(ctx context.Context) error
 		    ) THEN NULL
 		    ELSE erp_product_sync_records.sync_cooldown_until
 		  END,
+		  latest_cost_snapshot_id = CASE
+		    WHEN NOT (erp_product_sync_records.sku_code <=> VALUES(sku_code))
+		      OR NOT (erp_product_sync_records.task_id <=> VALUES(task_id))
+		      OR NOT (erp_product_sync_records.task_sku_item_id <=> VALUES(task_sku_item_id))
+		    THEN NULL ELSE erp_product_sync_records.latest_cost_snapshot_id
+		  END,
+		  latest_erp_trace_id = CASE
+		    WHEN NOT (erp_product_sync_records.sku_code <=> VALUES(sku_code))
+		      OR NOT (erp_product_sync_records.task_id <=> VALUES(task_id))
+		      OR NOT (erp_product_sync_records.task_sku_item_id <=> VALUES(task_sku_item_id))
+		    THEN NULL ELSE erp_product_sync_records.latest_erp_trace_id
+		  END,
+		  combo_search_text = CASE
+		    WHEN NOT (erp_product_sync_records.sku_code <=> VALUES(sku_code))
+		    THEN NULL ELSE erp_product_sync_records.combo_search_text
+		  END,
+		  cost_legacy_alias_fallback = CASE
+		    WHEN NOT (erp_product_sync_records.sku_code <=> VALUES(sku_code))
+		      OR NOT (erp_product_sync_records.task_id <=> VALUES(task_id))
+		      OR NOT (erp_product_sync_records.task_sku_item_id <=> VALUES(task_sku_item_id))
+		    THEN 0 ELSE erp_product_sync_records.cost_legacy_alias_fallback
+		  END,
+		  cost_area_spec_abnormal = CASE
+		    WHEN NOT (erp_product_sync_records.sku_code <=> VALUES(sku_code))
+		      OR NOT (erp_product_sync_records.task_id <=> VALUES(task_id))
+		      OR NOT (erp_product_sync_records.task_sku_item_id <=> VALUES(task_sku_item_id))
+		    THEN 0 ELSE erp_product_sync_records.cost_area_spec_abnormal
+		  END,
 		  erp_sync_status = CASE
 		    WHEN erp_product_sync_records.erp_sync_status IN ('queued', 'cooling_down', 'syncing') THEN erp_product_sync_records.erp_sync_status
 		    WHEN erp_product_sync_records.erp_sync_status IN ('synced', 'failed')
@@ -338,27 +377,138 @@ func (r *productManagementRepo) refreshSKUItemRecords(ctx context.Context) error
 	return nil
 }
 
+func (r *productManagementRepo) refreshMaterializedFields(ctx context.Context) error {
+	if _, err := r.db.db.ExecContext(ctx, `SET SESSION group_concat_max_len = 1048576`); err != nil {
+		return fmt.Errorf("prepare product management materialized fields: %w", err)
+	}
+	if _, err := r.db.db.ExecContext(ctx, `
+		UPDATE erp_product_sync_records pm
+		   SET pm.latest_cost_snapshot_id = (
+		         SELECT s.id
+		           FROM omp_sku_cost_snapshots s
+		          WHERE s.sku_code = pm.sku_code
+		            AND (
+		              (pm.task_sku_item_id IS NOT NULL AND s.task_sku_item_id = pm.task_sku_item_id)
+		              OR (pm.task_sku_item_id IS NULL AND s.task_id = pm.task_id AND s.task_sku_item_id IS NULL)
+		              OR s.task_id = pm.task_id
+		              OR s.task_id IS NULL
+		            )
+		          ORDER BY
+		            CASE
+		              WHEN pm.task_sku_item_id IS NOT NULL AND s.task_sku_item_id = pm.task_sku_item_id THEN 0
+		              WHEN pm.task_sku_item_id IS NULL AND s.task_id = pm.task_id AND s.task_sku_item_id IS NULL THEN 1
+		              WHEN s.task_id = pm.task_id THEN 2
+		              ELSE 3
+		            END,
+		            s.created_at DESC,
+		            s.id DESC
+		          LIMIT 1
+		       )
+		 WHERE pm.latest_cost_snapshot_id IS NULL`); err != nil {
+		return fmt.Errorf("refresh product management latest cost snapshot: %w", err)
+	}
+	if _, err := r.db.db.ExecContext(ctx, `
+		UPDATE erp_product_sync_records pm
+		   SET pm.latest_erp_trace_id = (
+		         SELECT l.id
+		           FROM omp_sku_erp_trace_logs l
+		          WHERE l.sku_code = pm.sku_code
+		            AND (
+		              (pm.task_sku_item_id IS NOT NULL AND l.task_sku_item_id = pm.task_sku_item_id)
+		              OR (pm.task_sku_item_id IS NULL AND l.task_id = pm.task_id AND l.task_sku_item_id IS NULL)
+		              OR l.task_id = pm.task_id
+		              OR l.task_id IS NULL
+		            )
+		          ORDER BY l.created_at DESC, l.id DESC
+		          LIMIT 1
+		       )
+		 WHERE pm.latest_erp_trace_id IS NULL`); err != nil {
+		return fmt.Errorf("refresh product management latest erp trace: %w", err)
+	}
+	if _, err := r.db.db.ExecContext(ctx, `
+		UPDATE erp_product_sync_records pm
+		LEFT JOIN (
+		    SELECT
+		      rel.child_sku_code,
+		      GROUP_CONCAT(DISTINCT CONCAT_WS(' ', rel.combo_sku_code, rec.erp_i_id, rec.name, rec.short_name) SEPARATOR ' ') AS combo_search_text
+		      FROM omp_sku_combo_relations rel
+		      LEFT JOIN omp_sku_combo_records rec ON rec.combo_sku_code = rel.combo_sku_code
+		     GROUP BY rel.child_sku_code
+		) combo ON combo.child_sku_code = pm.sku_code
+		   SET pm.combo_search_text = COALESCE(combo.combo_search_text, '')
+		 WHERE pm.combo_search_text IS NULL`); err != nil {
+		return fmt.Errorf("refresh product management combo search text: %w", err)
+	}
+	if _, err := r.db.db.ExecContext(ctx, productManagementRefreshCostFlagsSQL()); err != nil {
+		return fmt.Errorf("refresh product management cost flags: %w", err)
+	}
+	return nil
+}
+
+func productManagementRefreshCostFlagsSQL() string {
+	return `
+		UPDATE erp_product_sync_records pm
+		LEFT JOIN omp_sku_cost_snapshots cost_snapshot ON cost_snapshot.id = pm.latest_cost_snapshot_id
+		LEFT JOIN task_details pm_td ON pm_td.task_id = pm.task_id
+		LEFT JOIN task_sku_items pm_tsi ON pm.task_sku_item_id IS NOT NULL AND pm_tsi.id = pm.task_sku_item_id
+		   SET pm.cost_legacy_alias_fallback = CASE
+		         WHEN JSON_VALID(cost_snapshot.calculation_snapshot_json)
+		          AND JSON_UNQUOTE(JSON_EXTRACT(cost_snapshot.calculation_snapshot_json, '$.legacy_alias_fallback')) = 'true'
+		         THEN 1 ELSE 0 END,
+		       pm.cost_area_spec_abnormal = CASE
+		         WHEN pm.cost_price IS NOT NULL AND pm.cost_price > 0
+		          AND COALESCE(pm_td.area, 0) <= 0
+		          AND (COALESCE(pm_td.width, 0) <= 0 OR COALESCE(pm_td.height, 0) <= 0)
+		          AND (
+		            pm.task_sku_item_id IS NULL
+		            OR NOT JSON_VALID(pm_tsi.variant_json)
+		            OR (
+		                 COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(pm_tsi.variant_json, '$.area')) AS DECIMAL(12,4)), 0) <= 0
+		             AND COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(pm_tsi.variant_json, '$.width')) AS DECIMAL(12,4)), 0) <= 0
+		             AND COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(pm_tsi.variant_json, '$.height')) AS DECIMAL(12,4)), 0) <= 0
+		            )
+		          )
+		         THEN 1 ELSE 0 END`
+}
+
 func (r *productManagementRepo) List(ctx context.Context, filter repo.ProductManagementListFilter) ([]*domain.ProductManagementRecord, int64, error) {
 	filter.Page, filter.PageSize = normalizePage(filter.Page, filter.PageSize)
-	where, args := buildProductManagementWhere(filter)
+	useComboFullText := strings.TrimSpace(filter.Keyword) != "" && mysqlColumnExists(ctx, r.db.db, "erp_product_sync_records", "combo_search_text")
+	where, args := buildProductManagementWhereWithOptions(filter, productManagementWhereOptions{UseComboFullText: useComboFullText})
+	items, total, err := r.listWithProductManagementWhere(ctx, filter, where, args)
+	if err != nil && strings.TrimSpace(filter.Keyword) != "" && isMySQLFullTextIndexMissing(err) {
+		where, args = buildProductManagementWhere(filter)
+		return r.listWithProductManagementWhere(ctx, filter, where, args)
+	}
+	return items, total, err
+}
 
+func (r *productManagementRepo) listWithProductManagementWhere(ctx context.Context, filter repo.ProductManagementListFilter, where string, args []interface{}) ([]*domain.ProductManagementRecord, int64, error) {
 	var total int64
-	if err := r.db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM erp_product_sync_records pm `+where, args...).Scan(&total); err != nil {
+	countCtx, cancelCount := mysqlReadQueryContext(ctx)
+	err := r.db.db.QueryRowContext(countCtx, `SELECT COUNT(*) FROM erp_product_sync_records pm `+where, args...).Scan(&total)
+	cancelCount()
+	if err != nil {
 		return nil, 0, fmt.Errorf("count product management records: %w", err)
 	}
-	args = append(args, (filter.Page-1)*filter.PageSize, filter.PageSize)
-	rows, err := r.db.db.QueryContext(ctx, `SELECT `+productManagementSelectCols+` FROM erp_product_sync_records pm `+productManagementCostTraceJoin+productManagementDimensionJoin+` `+where+`
+	listArgs := append([]interface{}{}, args...)
+	listArgs = append(listArgs, (filter.Page-1)*filter.PageSize, filter.PageSize)
+	queryCtx, cancelQuery := mysqlReadQueryContext(ctx)
+	rows, err := r.db.db.QueryContext(queryCtx, `SELECT `+productManagementSelectCols+` FROM erp_product_sync_records pm `+productManagementCostTraceJoin+productManagementDimensionJoin+` `+where+`
 		ORDER BY pm.updated_at DESC, pm.task_created_at DESC, pm.id DESC
-		LIMIT ?, ?`, args...)
+		LIMIT ?, ?`, listArgs...)
 	if err != nil {
+		cancelQuery()
 		return nil, 0, fmt.Errorf("list product management records: %w", err)
 	}
+	defer cancelQuery()
 	defer rows.Close()
 	return scanProductManagementRows(rows, total)
 }
 
 func (r *productManagementRepo) CostDashboard(ctx context.Context) (*domain.ProductCostDashboardResponse, error) {
-	row := r.db.db.QueryRowContext(ctx, `
+	queryCtx, cancelQuery := mysqlReadQueryContext(ctx)
+	row := r.db.db.QueryRowContext(queryCtx, `
 		SELECT
 		  COUNT(*) AS total_records,
 		  COALESCE(SUM(cost_missing), 0) AS cost_missing,
@@ -390,29 +540,10 @@ func (r *productManagementRepo) CostDashboard(ctx context.Context) (*domain.Prod
 		       AND cost_snapshot.matched_rule_version < latest_rule.latest_rule_version
 		      THEN 1 ELSE 0
 		    END AS rule_version_outdated,
-		    CASE
-		      WHEN JSON_VALID(cost_snapshot.calculation_snapshot_json)
-		       AND JSON_UNQUOTE(JSON_EXTRACT(cost_snapshot.calculation_snapshot_json, '$.legacy_alias_fallback')) = 'true'
-		      THEN 1 ELSE 0
-		    END AS legacy_alias_fallback,
-		    CASE
-		      WHEN pm.cost_price IS NOT NULL AND pm.cost_price > 0
-		       AND COALESCE(pm_td.area, 0) <= 0
-		       AND (COALESCE(pm_td.width, 0) <= 0 OR COALESCE(pm_td.height, 0) <= 0)
-		       AND (
-		         pm.task_sku_item_id IS NULL
-		         OR NOT JSON_VALID(pm_tsi.variant_json)
-		         OR (
-		              COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(pm_tsi.variant_json, '$.area')) AS DECIMAL(12,4)), 0) <= 0
-		          AND COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(pm_tsi.variant_json, '$.width')) AS DECIMAL(12,4)), 0) <= 0
-		          AND COALESCE(CAST(JSON_UNQUOTE(JSON_EXTRACT(pm_tsi.variant_json, '$.height')) AS DECIMAL(12,4)), 0) <= 0
-		         )
-		       )
-		      THEN 1 ELSE 0
-		    END AS area_spec_abnormal
+		    CASE WHEN COALESCE(pm.cost_legacy_alias_fallback, 0) = 1 THEN 1 ELSE 0 END AS legacy_alias_fallback,
+		    CASE WHEN COALESCE(pm.cost_area_spec_abnormal, 0) = 1 THEN 1 ELSE 0 END AS area_spec_abnormal
 		  FROM erp_product_sync_records pm
 		  `+productManagementCostTraceJoin+`
-		  `+productManagementDimensionJoin+`
 		  LEFT JOIN cost_rules snapshot_rule ON snapshot_rule.id = cost_snapshot.cost_rule_id
 		  LEFT JOIN (
 		    SELECT category_code, MAX(rule_version) AS latest_rule_version
@@ -425,22 +556,12 @@ func (r *productManagementRepo) CostDashboard(ctx context.Context) (*domain.Prod
 		    snapshot_rule.category_code
 		  )
 		  LEFT JOIN omp_sku_erp_trace_logs latest_erp_trace
-		    ON latest_erp_trace.id = (
-		      SELECT l.id
-		        FROM omp_sku_erp_trace_logs l
-		       WHERE l.sku_code = pm.sku_code
-		         AND (
-		           (pm.task_sku_item_id IS NOT NULL AND l.task_sku_item_id = pm.task_sku_item_id)
-		           OR (pm.task_sku_item_id IS NULL AND l.task_id = pm.task_id AND l.task_sku_item_id IS NULL)
-		           OR l.task_id = pm.task_id
-		           OR l.task_id IS NULL
-		         )
-		       ORDER BY l.created_at DESC, l.id DESC
-		       LIMIT 1
-		    )
+		    ON latest_erp_trace.id = pm.latest_erp_trace_id
 		) flags`)
 	var totalRecords, costMissing, manualQuote, erpMismatch, ruleVersionOutdated, legacyAliasFallback, areaSpecAbnormal, issueTotal int64
-	if err := row.Scan(&totalRecords, &costMissing, &manualQuote, &erpMismatch, &ruleVersionOutdated, &legacyAliasFallback, &areaSpecAbnormal, &issueTotal); err != nil {
+	err := row.Scan(&totalRecords, &costMissing, &manualQuote, &erpMismatch, &ruleVersionOutdated, &legacyAliasFallback, &areaSpecAbnormal, &issueTotal)
+	cancelQuery()
+	if err != nil {
 		return nil, fmt.Errorf("get product cost dashboard: %w", err)
 	}
 	trend, err := r.costLegacyFallbackTrend(ctx)
@@ -475,14 +596,12 @@ func (r *productManagementRepo) CostDashboard(ctx context.Context) (*domain.Prod
 }
 
 func (r *productManagementRepo) costLegacyFallbackTrend(ctx context.Context) ([]domain.ProductCostLegacyFallbackTrendItem, error) {
-	rows, err := r.db.db.QueryContext(ctx, `
+	queryCtx, cancelQuery := mysqlReadQueryContext(ctx)
+	rows, err := r.db.db.QueryContext(queryCtx, `
 		SELECT
 		  DATE(cost_snapshot.created_at) AS snapshot_date,
 		  COUNT(*) AS total_records,
-		  COALESCE(SUM(CASE
-		    WHEN JSON_VALID(cost_snapshot.calculation_snapshot_json)
-		     AND JSON_UNQUOTE(JSON_EXTRACT(cost_snapshot.calculation_snapshot_json, '$.legacy_alias_fallback')) = 'true'
-		    THEN 1 ELSE 0 END), 0) AS legacy_alias_fallback
+		  COALESCE(SUM(CASE WHEN COALESCE(pm.cost_legacy_alias_fallback, 0) = 1 THEN 1 ELSE 0 END), 0) AS legacy_alias_fallback
 		FROM erp_product_sync_records pm
 		`+productManagementCostTraceJoin+`
 		WHERE cost_snapshot.created_at IS NOT NULL
@@ -490,8 +609,10 @@ func (r *productManagementRepo) costLegacyFallbackTrend(ctx context.Context) ([]
 		GROUP BY DATE(cost_snapshot.created_at)
 		ORDER BY snapshot_date ASC`)
 	if err != nil {
+		cancelQuery()
 		return nil, err
 	}
+	defer cancelQuery()
 	defer rows.Close()
 	trend := make([]domain.ProductCostLegacyFallbackTrendItem, 0, 30)
 	for rows.Next() {
@@ -515,15 +636,21 @@ func (r *productManagementRepo) costLegacyFallbackTrend(ctx context.Context) ([]
 }
 
 func (r *productManagementRepo) GetByID(ctx context.Context, id int64) (*domain.ProductManagementRecord, error) {
-	row := r.db.db.QueryRowContext(ctx, `SELECT `+productManagementSelectCols+` FROM erp_product_sync_records pm `+productManagementCostTraceJoin+productManagementDimensionJoin+` WHERE pm.id = ?`, id)
-	return scanProductManagementRecord(row)
+	queryCtx, cancelQuery := mysqlReadQueryContext(ctx)
+	row := r.db.db.QueryRowContext(queryCtx, `SELECT `+productManagementSelectCols+` FROM erp_product_sync_records pm `+productManagementCostTraceJoin+productManagementDimensionJoin+` WHERE pm.id = ?`, id)
+	item, err := scanProductManagementRecord(row)
+	cancelQuery()
+	return item, err
 }
 
 func (r *productManagementRepo) GetByTaskID(ctx context.Context, taskID int64) ([]*domain.ProductManagementRecord, error) {
-	rows, err := r.db.db.QueryContext(ctx, `SELECT `+productManagementSelectCols+` FROM erp_product_sync_records pm `+productManagementCostTraceJoin+productManagementDimensionJoin+` WHERE pm.task_id = ? ORDER BY pm.task_sku_item_id IS NULL DESC, pm.id ASC`, taskID)
+	queryCtx, cancelQuery := mysqlReadQueryContext(ctx)
+	rows, err := r.db.db.QueryContext(queryCtx, `SELECT `+productManagementSelectCols+` FROM erp_product_sync_records pm `+productManagementCostTraceJoin+productManagementDimensionJoin+` WHERE pm.task_id = ? ORDER BY pm.task_sku_item_id IS NULL DESC, pm.id ASC`, taskID)
 	if err != nil {
+		cancelQuery()
 		return nil, fmt.Errorf("list product management records by task: %w", err)
 	}
+	defer cancelQuery()
 	defer rows.Close()
 	items, _, err := scanProductManagementRows(rows, 0)
 	return items, err
@@ -895,7 +1022,15 @@ func normalizeProductManagementClaimLimit(limit int) int {
 	return limit
 }
 
+type productManagementWhereOptions struct {
+	UseComboFullText bool
+}
+
 func buildProductManagementWhere(filter repo.ProductManagementListFilter) (string, []interface{}) {
+	return buildProductManagementWhereWithOptions(filter, productManagementWhereOptions{})
+}
+
+func buildProductManagementWhereWithOptions(filter repo.ProductManagementListFilter, options productManagementWhereOptions) (string, []interface{}) {
 	clauses := []string{"1 = 1"}
 	args := make([]interface{}, 0, 12)
 	keyword := strings.TrimSpace(filter.Keyword)
@@ -932,7 +1067,11 @@ func buildProductManagementWhere(filter repo.ProductManagementListFilter) (strin
 			)
 			keywordArgs = append(keywordArgs, kw.Like, kw.Like, kw.Like, kw.Like)
 		}
-		keywordClauses = append(keywordClauses, `EXISTS (
+		if options.UseComboFullText {
+			keywordClauses = append(keywordClauses, `MATCH(pm.combo_search_text) AGAINST (? IN NATURAL LANGUAGE MODE)`)
+			keywordArgs = append(keywordArgs, keyword)
+		} else {
+			keywordClauses = append(keywordClauses, `EXISTS (
 			  SELECT 1
 			    FROM omp_sku_combo_relations rel
 				    LEFT JOIN omp_sku_combo_records rec ON rec.combo_sku_code = rel.combo_sku_code
@@ -946,7 +1085,8 @@ func buildProductManagementWhere(filter repo.ProductManagementListFilter) (strin
 			       OR rec.short_name LIKE ?
 			     )
 			)`)
-		keywordArgs = append(keywordArgs, kw.Upper, kw.Upper, kw.Upper+"%", kw.Upper+"%", kw.Like, kw.Like)
+			keywordArgs = append(keywordArgs, kw.Upper, kw.Upper, kw.Upper+"%", kw.Upper+"%", kw.Like, kw.Like)
+		}
 		clauses = append(clauses, "("+strings.Join(keywordClauses, " OR ")+")")
 		args = append(args, keywordArgs...)
 	}

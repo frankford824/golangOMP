@@ -14,6 +14,9 @@ import (
 
 func TestProductManagementRefreshReadModelPreservesProductSyncStatus(t *testing.T) {
 	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherFunc(func(expectedSQL, actualSQL string) error {
+		if expectedSQL == "product-management-materialize" {
+			return nil
+		}
 		if expectedSQL != "product-management-refresh" {
 			return fmt.Errorf("unexpected SQL expectation %q", expectedSQL)
 		}
@@ -28,6 +31,13 @@ func TestProductManagementRefreshReadModelPreservesProductSyncStatus(t *testing.
 			"WHEN erp_product_sync_records.erp_sync_status IN ('synced', 'failed')",
 			"WHEN erp_product_sync_records.base_sync_status IN ('synced', 'failed')",
 			"NOT (erp_product_sync_records.cost_price <=> VALUES(cost_price))",
+			"latest_cost_snapshot_id = CASE",
+			"latest_erp_trace_id = CASE",
+			"combo_search_text = CASE",
+			"cost_legacy_alias_fallback = CASE",
+			"cost_area_spec_abnormal = CASE",
+			"NOT (erp_product_sync_records.task_sku_item_id <=> VALUES(task_sku_item_id)) THEN NULL",
+			"NOT (erp_product_sync_records.task_sku_item_id <=> VALUES(task_sku_item_id)) THEN 0",
 			"THEN 'pending_sync'",
 			"WHEN VALUES(erp_sync_status) = 'synced' THEN 'synced'",
 			"WHEN VALUES(base_sync_status) = 'synced' THEN 'synced'",
@@ -51,6 +61,11 @@ func TestProductManagementRefreshReadModelPreservesProductSyncStatus(t *testing.
 		if statusIndex < 0 || costIndex < 0 || statusIndex > costIndex {
 			return fmt.Errorf("refresh SQL must evaluate sync status before overwriting cost_price")
 		}
+		latestIndex := strings.Index(duplicateClause, "latest_cost_snapshot_id = CASE")
+		skuUpdateIndex := strings.Index(duplicateClause, "sku_code = VALUES(sku_code)")
+		if latestIndex < 0 || skuUpdateIndex < 0 || latestIndex > skuUpdateIndex {
+			return fmt.Errorf("refresh SQL must invalidate materialized trace pointers before overwriting sku_code")
+		}
 		erpDiffIndex := strings.Index(duplicateClause, "WHEN erp_product_sync_records.erp_sync_status IN ('synced', 'failed')")
 		erpSyncedIndex := strings.Index(duplicateClause, "WHEN VALUES(erp_sync_status) = 'synced' THEN 'synced'")
 		if erpDiffIndex < 0 || erpSyncedIndex < 0 || erpDiffIndex > erpSyncedIndex {
@@ -68,8 +83,7 @@ func TestProductManagementRefreshReadModelPreservesProductSyncStatus(t *testing.
 	}
 	defer db.Close()
 
-	mock.ExpectExec("product-management-refresh").WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec("product-management-refresh").WillReturnResult(sqlmock.NewResult(0, 1))
+	expectProductManagementRefreshReadModel(mock)
 
 	repo := NewProductManagementRepo(New(db))
 	if err := repo.RefreshReadModel(context.Background()); err != nil {
@@ -82,6 +96,9 @@ func TestProductManagementRefreshReadModelPreservesProductSyncStatus(t *testing.
 
 func TestProductManagementRefreshReadModelFallsBackSingleSKUItemIIDToTaskPayload(t *testing.T) {
 	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherFunc(func(expectedSQL, actualSQL string) error {
+		if expectedSQL == "product-management-materialize" {
+			return nil
+		}
 		if expectedSQL != "product-management-refresh" {
 			return fmt.Errorf("unexpected SQL expectation %q", expectedSQL)
 		}
@@ -115,8 +132,7 @@ func TestProductManagementRefreshReadModelFallsBackSingleSKUItemIIDToTaskPayload
 	}
 	defer db.Close()
 
-	mock.ExpectExec("product-management-refresh").WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectExec("product-management-refresh").WillReturnResult(sqlmock.NewResult(0, 1))
+	expectProductManagementRefreshReadModel(mock)
 
 	repo := NewProductManagementRepo(New(db))
 	if err := repo.RefreshReadModel(context.Background()); err != nil {
@@ -303,6 +319,14 @@ func testProductManagementNow() time.Time {
 	return time.Date(2026, 6, 6, 10, 0, 0, 0, time.UTC)
 }
 
+func expectProductManagementRefreshReadModel(mock sqlmock.Sqlmock) {
+	mock.ExpectExec("product-management-refresh").WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("product-management-refresh").WillReturnResult(sqlmock.NewResult(0, 1))
+	for i := 0; i < 5; i++ {
+		mock.ExpectExec("product-management-materialize").WillReturnResult(sqlmock.NewResult(0, 1))
+	}
+}
+
 func TestProductManagementWhereTreatsUnverifiedImageSyncedAsPending(t *testing.T) {
 	where, args := buildProductManagementWhere(repo.ProductManagementListFilter{ImageSyncStatus: "synced"})
 	if !strings.Contains(where, "pm.image_sync_status = ? AND pm.last_image_synced_at IS NOT NULL") {
@@ -323,6 +347,19 @@ func TestProductManagementWhereTreatsUnverifiedImageSyncedAsPending(t *testing.T
 	where, _ = buildProductManagementWhere(repo.ProductManagementListFilter{IssueScope: "attention"})
 	if !strings.Contains(where, "OR (pm.image_sync_status = 'synced' AND pm.last_image_synced_at IS NULL)") {
 		t.Fatalf("attention filter where = %s", where)
+	}
+}
+
+func TestProductManagementWhereUsesComboFullTextWhenEnabled(t *testing.T) {
+	where, args := buildProductManagementWhereWithOptions(repo.ProductManagementListFilter{Keyword: "COMBO001"}, productManagementWhereOptions{UseComboFullText: true})
+	if !strings.Contains(where, "MATCH(pm.combo_search_text) AGAINST (? IN NATURAL LANGUAGE MODE)") {
+		t.Fatalf("where missing combo fulltext: %s", where)
+	}
+	if strings.Contains(where, "FROM omp_sku_combo_relations rel") {
+		t.Fatalf("where must not use combo relation EXISTS on fulltext path: %s", where)
+	}
+	if !containsStringArg(args, "COMBO001") {
+		t.Fatalf("args missing fulltext keyword: %#v", args)
 	}
 }
 

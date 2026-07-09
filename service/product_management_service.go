@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/go-sql-driver/mysql"
+	"github.com/redis/go-redis/v9"
 
 	"workflow/domain"
 	"workflow/repo"
@@ -47,8 +49,10 @@ type productManagementService struct {
 	uploadClient                   UploadServiceClient
 	imageProxy                     *ERPImageProxySigner
 	notifications                  taskNotificationService
+	cache                          productManagementCache
 	now                            func() time.Time
 	refreshEvery                   time.Duration
+	costDashboardCacheTTL          time.Duration
 	costLegacyAliasFallbackEnabled bool
 	refreshMu                      sync.Mutex
 	lastRefresh                    time.Time
@@ -62,6 +66,7 @@ func NewProductManagementService(records repo.ProductManagementRepo, taskAssets 
 		txRunner:                       txRunner,
 		now:                            time.Now,
 		refreshEvery:                   30 * time.Second,
+		costDashboardCacheTTL:          5 * time.Minute,
 		costLegacyAliasFallbackEnabled: true,
 	}
 	for _, opt := range opts {
@@ -106,6 +111,18 @@ func WithProductManagementSKUComboRepo(skuCombos repo.SKUComboRepo) ProductManag
 func WithProductManagementNotificationService(notifications taskNotificationService) ProductManagementServiceOption {
 	return func(s *productManagementService) {
 		s.notifications = notifications
+	}
+}
+
+type productManagementCache interface {
+	Get(context.Context, string) *redis.StringCmd
+	Set(context.Context, string, interface{}, time.Duration) *redis.StatusCmd
+	Del(context.Context, ...string) *redis.IntCmd
+}
+
+func WithProductManagementRedis(cache productManagementCache) ProductManagementServiceOption {
+	return func(s *productManagementService) {
+		s.cache = cache
 	}
 }
 
@@ -161,12 +178,24 @@ func (s *productManagementService) ListComboTree(ctx context.Context, filter rep
 }
 
 func (s *productManagementService) CostDashboard(ctx context.Context) (*domain.ProductCostDashboardResponse, *domain.AppError) {
+	if cached, ok := s.getCostDashboardCache(ctx); ok {
+		return cached, nil
+	}
 	if appErr := s.refreshReadModel(ctx); appErr != nil {
 		return nil, appErr
 	}
 	result, err := s.records.CostDashboard(ctx)
 	if err != nil {
 		return nil, infraAppError("get product cost dashboard", err)
+	}
+	s.decorateCostDashboardPolicy(result)
+	s.setCostDashboardCache(ctx, result)
+	return result, nil
+}
+
+func (s *productManagementService) decorateCostDashboardPolicy(result *domain.ProductCostDashboardResponse) {
+	if result == nil {
+		return
 	}
 	result.LegacyFallbackEnabled = s.costLegacyAliasFallbackEnabled
 	if s.costLegacyAliasFallbackEnabled {
@@ -176,7 +205,53 @@ func (s *productManagementService) CostDashboard(ctx context.Context) (*domain.P
 		result.LegacyFallbackMode = "disabled"
 		result.LegacyFallbackWarning = "未关联款式猜价已关闭，未关联记录会进入算不出来的成本问题。"
 	}
-	return result, nil
+}
+
+func (s *productManagementService) getCostDashboardCache(ctx context.Context) (*domain.ProductCostDashboardResponse, bool) {
+	if s.cache == nil {
+		return nil, false
+	}
+	raw, err := s.cache.Get(ctx, s.costDashboardCacheKey()).Bytes()
+	if err != nil {
+		return nil, false
+	}
+	var cached domain.ProductCostDashboardResponse
+	if err := json.Unmarshal(raw, &cached); err != nil {
+		return nil, false
+	}
+	return &cached, true
+}
+
+func (s *productManagementService) setCostDashboardCache(ctx context.Context, result *domain.ProductCostDashboardResponse) {
+	if s.cache == nil || result == nil || s.costDashboardCacheTTL <= 0 {
+		return
+	}
+	raw, err := json.Marshal(result)
+	if err != nil {
+		return
+	}
+	_ = s.cache.Set(ctx, s.costDashboardCacheKey(), raw, s.costDashboardCacheTTL).Err()
+}
+
+func (s *productManagementService) invalidateCostDashboardCache(ctx context.Context) {
+	invalidateProductManagementCostDashboardCache(ctx, s.cache)
+}
+
+func invalidateProductManagementCostDashboardCache(ctx context.Context, cache productManagementCache) {
+	if cache == nil {
+		return
+	}
+	_ = cache.Del(ctx,
+		"omp:perf:product-management:cost-dashboard:v1:legacy=true",
+		"omp:perf:product-management:cost-dashboard:v1:legacy=false",
+	).Err()
+}
+
+func (s *productManagementService) costDashboardCacheKey() string {
+	if s.costLegacyAliasFallbackEnabled {
+		return "omp:perf:product-management:cost-dashboard:v1:legacy=true"
+	}
+	return "omp:perf:product-management:cost-dashboard:v1:legacy=false"
 }
 
 func (s *productManagementService) listComboTreeByComboGroups(ctx context.Context, filter repo.ProductManagementListFilter) (*domain.ProductManagementComboTreeResponse, *domain.AppError) {
@@ -530,6 +605,7 @@ func (s *productManagementService) refreshReadModel(ctx context.Context) *domain
 		return infraAppError("refresh product management read model", err)
 	}
 	s.lastRefresh = now
+	s.invalidateCostDashboardCache(ctx)
 	return nil
 }
 
@@ -541,6 +617,7 @@ func (s *productManagementService) RefreshReadModelNow(ctx context.Context) *dom
 		return infraAppError("refresh product management read model", err)
 	}
 	s.lastRefresh = s.now()
+	s.invalidateCostDashboardCache(ctx)
 	return nil
 }
 

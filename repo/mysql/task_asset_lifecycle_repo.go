@@ -80,6 +80,10 @@ func (r *taskAssetLifecycleRepo) MarkSupersededAutoCleaned(ctx context.Context, 
 	if err != nil {
 		return err
 	}
+	assetIDs, err := assetIDsByAssetVersionOrSourceID(ctx, sqlTx, versionID)
+	if err != nil {
+		return err
+	}
 	res, err := sqlTx.ExecContext(ctx, `
 		UPDATE task_assets
 		   SET is_archived = 1,
@@ -97,9 +101,11 @@ func (r *taskAssetLifecycleRepo) MarkSupersededAutoCleaned(ctx context.Context, 
 		return err
 	}
 	if taskID > 0 {
-		return reindexTaskSearchDocument(ctx, sqlTx, taskID)
+		if err := reindexTaskSearchDocument(ctx, sqlTx, taskID); err != nil {
+			return err
+		}
 	}
-	return nil
+	return reindexAssetSearchDocuments(ctx, sqlTx, assetIDs)
 }
 
 func splitCleanupStorageKeys(raw string) []string {
@@ -137,7 +143,10 @@ func (r *taskAssetLifecycleRepo) Archive(ctx context.Context, tx repo.Tx, update
 	if err := requireAffected(res, "archive task asset"); err != nil {
 		return err
 	}
-	return reindexTaskSearchDocuments(ctx, sqlTx, taskIDs)
+	if err := reindexTaskSearchDocuments(ctx, sqlTx, taskIDs); err != nil {
+		return err
+	}
+	return reindexAssetSearchDocument(ctx, sqlTx, update.AssetID)
 }
 
 func (r *taskAssetLifecycleRepo) Restore(ctx context.Context, tx repo.Tx, update repo.TaskAssetLifecycleUpdate) error {
@@ -157,7 +166,10 @@ func (r *taskAssetLifecycleRepo) Restore(ctx context.Context, tx repo.Tx, update
 	if err := requireAffected(res, "restore task asset"); err != nil {
 		return err
 	}
-	return reindexTaskSearchDocuments(ctx, sqlTx, taskIDs)
+	if err := reindexTaskSearchDocuments(ctx, sqlTx, taskIDs); err != nil {
+		return err
+	}
+	return reindexAssetSearchDocument(ctx, sqlTx, update.AssetID)
 }
 
 func (r *taskAssetLifecycleRepo) SoftDelete(ctx context.Context, tx repo.Tx, update repo.TaskAssetLifecycleUpdate) error {
@@ -177,12 +189,19 @@ func (r *taskAssetLifecycleRepo) SoftDelete(ctx context.Context, tx repo.Tx, upd
 	if err := requireAffected(res, "soft delete task asset"); err != nil {
 		return err
 	}
-	return reindexTaskSearchDocuments(ctx, sqlTx, taskIDs)
+	if err := reindexTaskSearchDocuments(ctx, sqlTx, taskIDs); err != nil {
+		return err
+	}
+	return reindexAssetSearchDocument(ctx, sqlTx, update.AssetID)
 }
 
 func (r *taskAssetLifecycleRepo) MarkAutoCleaned(ctx context.Context, tx repo.Tx, versionID int64, cleanedAt time.Time) error {
 	sqlTx := Unwrap(tx)
 	taskID, err := taskIDByAssetVersionID(ctx, sqlTx, versionID)
+	if err != nil {
+		return err
+	}
+	assetID, err := assetIDByAssetVersionID(ctx, sqlTx, versionID)
 	if err != nil {
 		return err
 	}
@@ -198,9 +217,11 @@ func (r *taskAssetLifecycleRepo) MarkAutoCleaned(ctx context.Context, tx repo.Tx
 		return err
 	}
 	if taskID > 0 {
-		return reindexTaskSearchDocument(ctx, sqlTx, taskID)
+		if err := reindexTaskSearchDocument(ctx, sqlTx, taskID); err != nil {
+			return err
+		}
 	}
-	return nil
+	return reindexAssetSearchDocument(ctx, sqlTx, assetID)
 }
 
 func (r *taskAssetLifecycleRepo) ListEligibleForCleanup(ctx context.Context, cutoff time.Time, limit int) ([]*repo.TaskAssetCleanupCandidate, error) {

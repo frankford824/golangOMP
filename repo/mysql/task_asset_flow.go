@@ -14,7 +14,12 @@ func (r *taskAssetRepo) MarkAssetVersionSuperseded(ctx context.Context, tx repo.
 	if versionID <= 0 || supersededByVersionID <= 0 || versionID == supersededByVersionID {
 		return nil
 	}
-	res, err := Unwrap(tx).ExecContext(ctx, `
+	sqlTx := Unwrap(tx)
+	assetID, err := assetIDByAssetVersionID(ctx, sqlTx, versionID)
+	if err != nil {
+		return err
+	}
+	res, err := sqlTx.ExecContext(ctx, `
 		UPDATE task_assets
 		   SET flow_review_status = ?,
 		       superseded_by_version_id = ?,
@@ -30,11 +35,16 @@ func (r *taskAssetRepo) MarkAssetVersionSuperseded(ctx context.Context, tx repo.
 	if _, err := res.RowsAffected(); err != nil {
 		return err
 	}
-	return nil
+	return reindexAssetSearchDocument(ctx, sqlTx, assetID)
 }
 
 func (r *taskAssetRepo) MarkCurrentDeliveryVersionsApprovedForTask(ctx context.Context, tx repo.Tx, taskID, actorID int64, approvedAt time.Time) (int64, error) {
-	res, err := Unwrap(tx).ExecContext(ctx, `
+	sqlTx := Unwrap(tx)
+	assetIDs, err := currentDeliveryAssetIDsByTaskID(ctx, sqlTx, taskID)
+	if err != nil {
+		return 0, err
+	}
+	res, err := sqlTx.ExecContext(ctx, `
 		UPDATE task_assets ta
 		JOIN design_assets da ON da.id = ta.asset_id AND da.current_version_id = ta.id
 		   SET ta.flow_review_status = ?,
@@ -50,11 +60,23 @@ func (r *taskAssetRepo) MarkCurrentDeliveryVersionsApprovedForTask(ctx context.C
 	if err != nil {
 		return 0, fmt.Errorf("mark current delivery versions approved: %w", err)
 	}
-	return res.RowsAffected()
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	if err := reindexAssetSearchDocuments(ctx, sqlTx, assetIDs); err != nil {
+		return 0, err
+	}
+	return n, nil
 }
 
 func (r *taskAssetRepo) MarkCurrentDeliveryVersionsRejectedForTask(ctx context.Context, tx repo.Tx, taskID, actorID int64, rejectedAt time.Time) (int64, error) {
-	res, err := Unwrap(tx).ExecContext(ctx, `
+	sqlTx := Unwrap(tx)
+	assetIDs, err := currentDeliveryAssetIDsByTaskID(ctx, sqlTx, taskID)
+	if err != nil {
+		return 0, err
+	}
+	res, err := sqlTx.ExecContext(ctx, `
 		UPDATE task_assets ta
 		JOIN design_assets da ON da.id = ta.asset_id AND da.current_version_id = ta.id
 		   SET ta.flow_review_status = ?,
@@ -68,7 +90,39 @@ func (r *taskAssetRepo) MarkCurrentDeliveryVersionsRejectedForTask(ctx context.C
 	if err != nil {
 		return 0, fmt.Errorf("mark current delivery versions rejected: %w", err)
 	}
-	return res.RowsAffected()
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	if err := reindexAssetSearchDocuments(ctx, sqlTx, assetIDs); err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+func currentDeliveryAssetIDsByTaskID(ctx context.Context, q taskSearchDocumentSQL, taskID int64) ([]int64, error) {
+	rows, err := q.QueryContext(ctx, `
+		SELECT DISTINCT da.id
+		  FROM task_assets ta
+		  JOIN design_assets da ON da.id = ta.asset_id AND da.current_version_id = ta.id
+		 WHERE ta.task_id = ?
+		   AND ta.asset_type = ?
+		   AND ta.deleted_at IS NULL
+		   AND ta.cleaned_at IS NULL`,
+		taskID, string(domain.TaskAssetTypeDelivery))
+	if err != nil {
+		return nil, fmt.Errorf("list current delivery asset ids by task: %w", err)
+	}
+	defer rows.Close()
+	var out []int64
+	for rows.Next() {
+		var assetID int64
+		if err := rows.Scan(&assetID); err != nil {
+			return nil, fmt.Errorf("scan current delivery asset id by task: %w", err)
+		}
+		out = append(out, assetID)
+	}
+	return out, rows.Err()
 }
 
 func (r *taskRepo) CASUpdateStatus(ctx context.Context, tx repo.Tx, id int64, expected, next domain.TaskStatus) (bool, error) {

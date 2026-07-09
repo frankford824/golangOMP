@@ -48,6 +48,9 @@ func (s *Service) SetExternalAssetService(externalSvc *externalassets.Service) {
 
 func (s *Service) Search(ctx context.Context, query domain.AssetSearchQuery) (*SearchResult, *domain.AppError) {
 	query = query.Normalized()
+	if query.Page*query.Size > 10000 {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "asset search pagination window exceeds 10000", nil)
+	}
 	if assetSearchHasSystemOnlyFilters(query) && query.Source == domain.AssetResourceSourceExternal {
 		return &SearchResult{Items: []*AssetDetail{}, Total: 0, Page: query.Page, Size: query.Size}, nil
 	}

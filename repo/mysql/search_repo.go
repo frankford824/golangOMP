@@ -25,26 +25,14 @@ func (r *searchRepo) SearchTasks(ctx context.Context, q string, limit int) ([]do
 func (r *searchRepo) searchTasksFromDocuments(ctx context.Context, q string, limit int) ([]domain.SearchTask, error) {
 	limit = normalizeSearchLimit(limit)
 	kw := normalizeSearchKeyword(q)
-	items, seen, err := r.searchTasksFromDocumentsPrimary(ctx, kw, limit)
-	if err != nil {
-		return nil, err
-	}
-	if len(items) >= limit {
-		return items, nil
-	}
-	fallback, err := r.searchTasksFromDocumentsLike(ctx, kw, limit-len(items), seen)
-	if err != nil {
-		return nil, err
-	}
-	items = append(items, fallback...)
-	return items, nil
+	return r.searchTasksFromDocumentsPrimary(ctx, kw, limit)
 }
 
-func (r *searchRepo) searchTasksFromDocumentsPrimary(ctx context.Context, kw normalizedSearchKeyword, limit int) ([]domain.SearchTask, map[int64]struct{}, error) {
+func (r *searchRepo) searchTasksFromDocumentsPrimary(ctx context.Context, kw normalizedSearchKeyword, limit int) ([]domain.SearchTask, error) {
 	clauses := make([]string, 0, 4)
 	args := make([]interface{}, 0, 16)
 	if kw.Raw == "" {
-		return []domain.SearchTask{}, map[int64]struct{}{}, nil
+		return []domain.SearchTask{}, nil
 	}
 	if kw.HasInt64 {
 		clauses = append(clauses, "task_id = ?")
@@ -68,10 +56,12 @@ func (r *searchRepo) searchTasksFromDocumentsPrimary(ctx context.Context, kw nor
 		args = append(args, kw.Raw)
 	}
 	if len(clauses) == 0 {
-		return []domain.SearchTask{}, map[int64]struct{}{}, nil
+		return []domain.SearchTask{}, nil
 	}
 	args = append(args, limit)
-	rows, err := r.db.db.QueryContext(ctx, `
+	qctx, cancel := mysqlReadQueryContext(ctx)
+	defer cancel()
+	rows, err := r.db.db.QueryContext(qctx, `
 		SELECT task_id, task_no, product_name_snapshot, task_status, priority,
 		       task_type, sku_code, primary_sku_code, product_i_id,
 		       owner_department, owner_team, owner_org_team,
@@ -82,51 +72,9 @@ func (r *searchRepo) searchTasksFromDocumentsPrimary(ctx context.Context, kw nor
 		 ORDER BY updated_at DESC, task_id DESC
 		 LIMIT ?`, args...)
 	if err != nil {
-		return nil, nil, fmt.Errorf("search task documents primary: %w", err)
+		return nil, fmt.Errorf("search task documents primary: %w", err)
 	}
-	items, err := scanSearchTasks(rows)
-	if err != nil {
-		return nil, nil, err
-	}
-	seen := make(map[int64]struct{}, len(items))
-	for _, item := range items {
-		seen[item.ID] = struct{}{}
-	}
-	return items, seen, nil
-}
-
-func (r *searchRepo) searchTasksFromDocumentsLike(ctx context.Context, kw normalizedSearchKeyword, limit int, seen map[int64]struct{}) ([]domain.SearchTask, error) {
-	if limit <= 0 || kw.Raw == "" {
-		return []domain.SearchTask{}, nil
-	}
-	rows, err := r.db.db.QueryContext(ctx, `
-		SELECT task_id, task_no, product_name_snapshot, task_status, priority,
-		       task_type, sku_code, primary_sku_code, product_i_id,
-		       owner_department, owner_team, owner_org_team,
-		       creator_id, creator_name, designer_id, designer_name,
-		       created_at, deadline_at
-		  FROM task_search_documents
-		 WHERE search_text LIKE ?
-		 ORDER BY updated_at DESC, task_id DESC
-		 LIMIT ?`, kw.Like, limit+len(seen))
-	if err != nil {
-		return nil, fmt.Errorf("search task documents fallback: %w", err)
-	}
-	items, err := scanSearchTasks(rows)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]domain.SearchTask, 0, limit)
-	for _, item := range items {
-		if _, ok := seen[item.ID]; ok {
-			continue
-		}
-		out = append(out, item)
-		if len(out) >= limit {
-			break
-		}
-	}
-	return out, nil
+	return scanSearchTasks(rows)
 }
 
 func (r *searchRepo) searchTasksLegacy(ctx context.Context, q string, limit int) ([]domain.SearchTask, error) {
@@ -198,7 +146,9 @@ func (r *searchRepo) searchTasksLegacy(ctx context.Context, q string, limit int)
 			    )
 			 ORDER BY t.id DESC
 			 LIMIT ?`, "{{active_asset_where}}", activeAssetWhere, 1)
-	rows, err := r.db.db.QueryContext(ctx, query, repeatArgs(like, 42, limit)...)
+	qctx, cancel := mysqlReadQueryContext(ctx)
+	defer cancel()
+	rows, err := r.db.db.QueryContext(qctx, query, repeatArgs(like, 42, limit)...)
 	if err != nil {
 		return nil, fmt.Errorf("search tasks: %w", err)
 	}
@@ -247,6 +197,79 @@ func scanSearchTasks(rows *sql.Rows) ([]domain.SearchTask, error) {
 }
 
 func (r *searchRepo) SearchAssets(ctx context.Context, q string, limit int) ([]domain.SearchAsset, error) {
+	if assetSearchDocumentsTableExists(ctx, r.db.db) {
+		items, err := r.searchAssetsFromDocuments(ctx, q, limit)
+		if err == nil {
+			return items, nil
+		}
+		if !isMySQLFullTextIndexMissing(err) {
+			return nil, err
+		}
+	}
+	return r.searchAssetsLegacy(ctx, q, limit)
+}
+
+func (r *searchRepo) searchAssetsFromDocuments(ctx context.Context, q string, limit int) ([]domain.SearchAsset, error) {
+	limit = normalizeSearchLimit(limit)
+	kw := normalizeSearchKeyword(q)
+	hasSemanticText := assetSearchDocumentsSemanticTextExists(ctx, r.db.db)
+	clauses := make([]string, 0, 8)
+	args := make([]interface{}, 0, 16)
+	if kw.HasInt64 {
+		clauses = appendAnyClause(clauses, "d.asset_id = ?", "d.task_asset_id = ?", "d.task_id = ?")
+		args = append(args, kw.Int64, kw.Int64, kw.Int64)
+	}
+	if len([]rune(kw.Raw)) >= 2 {
+		clauses = append(clauses, "MATCH(d.search_text) AGAINST (? IN NATURAL LANGUAGE MODE)")
+		args = append(args, kw.Raw)
+		if hasSemanticText {
+			clauses = append(clauses, "MATCH(d.semantic_text) AGAINST (? IN NATURAL LANGUAGE MODE)")
+			args = append(args, kw.Raw)
+		}
+	}
+	if len(clauses) == 0 {
+		return []domain.SearchAsset{}, nil
+	}
+	args = append(args, limit)
+	qctx, cancel := mysqlReadQueryContext(ctx)
+	defer cancel()
+	rows, err := r.db.db.QueryContext(qctx, `
+		SELECT d.asset_id, ta.file_name, ta.source_module_key, d.task_id,
+		       d.asset_type, d.flow_review_status
+		  FROM asset_search_documents d
+		  JOIN task_assets ta ON ta.id = d.task_asset_id
+		 WHERE `+strings.Join(clauses, " OR ")+`
+		 ORDER BY d.sort_time DESC, d.asset_id DESC
+		 LIMIT ?`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("search asset documents: %w", err)
+	}
+	defer rows.Close()
+
+	var out []domain.SearchAsset
+	for rows.Next() {
+		var item domain.SearchAsset
+		var module sql.NullString
+		var taskID sql.NullInt64
+		var assetType, flowReviewStatus sql.NullString
+		if err := rows.Scan(&item.AssetID, &item.FileName, &module, &taskID, &assetType, &flowReviewStatus); err != nil {
+			return nil, fmt.Errorf("scan search asset document: %w", err)
+		}
+		item.SourceModuleKey = nullStringPtr(module)
+		item.TaskID = nullInt64Ptr(taskID)
+		item.ResourceID = fmt.Sprintf("%d", item.AssetID)
+		item.SourceType = string(domain.AssetResourceSourceSystem)
+		item.SourceLabel = "系统资源"
+		status := domain.NormalizeTaskAssetFlowReviewStatus(domain.TaskAssetFlowReviewStatus(nullStringValue(flowReviewStatus)), domain.TaskAssetType(nullStringValue(assetType)))
+		item.FlowReviewStatus = string(status)
+		item.UsableState = string(usableStateFromFlowStatus(status))
+		item.UsableLabel = usableLabelFromState(usableStateFromFlowStatus(status))
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func (r *searchRepo) searchAssetsLegacy(ctx context.Context, q string, limit int) ([]domain.SearchAsset, error) {
 	limit = normalizeSearchLimit(limit)
 	kw := normalizeSearchKeyword(q)
 	activeAssetWhere := taskAssetsActiveSQL(ctx, r.db.db, "ta")
@@ -303,7 +326,9 @@ func (r *searchRepo) SearchAssets(ctx context.Context, q string, limit int) ([]d
 			 ORDER BY COALESCE(ta.asset_id, ta.id) DESC
 			 LIMIT ?`, "{{active_asset_where}}", activeAssetWhere, 1)
 	searchArgs = append(searchArgs, limit)
-	rows, err := r.db.db.QueryContext(ctx, query, searchArgs...)
+	qctx, cancel := mysqlReadQueryContext(ctx)
+	defer cancel()
+	rows, err := r.db.db.QueryContext(qctx, query, searchArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("search assets: %w", err)
 	}
@@ -374,39 +399,109 @@ func usableLabelFromState(state domain.TaskAssetUsableState) string {
 }
 
 func (r *searchRepo) SearchProducts(ctx context.Context, q string, limit int) ([]domain.SearchProduct, error) {
+	if productSearchDocumentsTableExists(ctx, r.db.db) {
+		items, err := r.searchProductsFromDocuments(ctx, q, limit)
+		if err == nil {
+			return items, nil
+		}
+		if !isMySQLFullTextIndexMissing(err) {
+			return nil, err
+		}
+	}
+	return r.searchProductsLegacy(ctx, q, limit)
+}
+
+func (r *searchRepo) searchProductsFromDocuments(ctx context.Context, q string, limit int) ([]domain.SearchProduct, error) {
+	limit = normalizeSearchLimit(limit)
+	kw := normalizeSearchKeyword(q)
+	hasSemanticText := productSearchDocumentsSemanticTextExists(ctx, r.db.db)
+	clauses := make([]string, 0, 8)
+	args := make([]interface{}, 0, 16)
+	if kw.IsCode {
+		clauses = appendAnyClause(clauses,
+			"sku_code = ?",
+			"i_id = ?",
+			"sku_code LIKE ?",
+			"i_id LIKE ?",
+		)
+		args = append(args, kw.Upper, kw.Upper, kw.Upper+"%", kw.Upper+"%")
+	}
+	if len([]rune(kw.Raw)) >= 2 {
+		clauses = append(clauses, "MATCH(search_text) AGAINST (? IN NATURAL LANGUAGE MODE)")
+		args = append(args, kw.Raw)
+		if hasSemanticText {
+			clauses = append(clauses, "MATCH(semantic_text) AGAINST (? IN NATURAL LANGUAGE MODE)")
+			args = append(args, kw.Raw)
+		}
+	}
+	if len(clauses) == 0 {
+		return []domain.SearchProduct{}, nil
+	}
+	args = append(args, kw.Upper, kw.Upper, kw.Upper+"%", limit)
+	qctx, cancel := mysqlReadQueryContext(ctx)
+	defer cancel()
+	rows, err := r.db.db.QueryContext(qctx, `
+		SELECT sku_code AS erp_code, product_name, i_id, category
+		  FROM product_search_documents
+		 WHERE `+strings.Join(clauses, " OR ")+`
+		 ORDER BY CASE
+		            WHEN sku_code = ? THEN 0
+		            WHEN i_id = ? THEN 1
+		            WHEN sku_code LIKE ? THEN 2
+		            ELSE 3
+		          END,
+		          source_updated_at DESC,
+		          sku_code DESC
+		 LIMIT ?`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("search product documents: %w", err)
+	}
+	return scanSearchProducts(rows)
+}
+
+func (r *searchRepo) searchProductsLegacy(ctx context.Context, q string, limit int) ([]domain.SearchProduct, error) {
 	limit = normalizeSearchLimit(limit)
 	kw := normalizeSearchKeyword(q)
 	if r.tableExists(ctx, "products") {
-		rows, err := r.db.db.QueryContext(ctx, `
+		iidExpr := productIIDSearchExpr(ctx, r.db.db, "")
+		categoryNameExpr := productCategoryNameSearchExpr("")
+		query := fmt.Sprintf(`
 			SELECT sku_code AS erp_code,
 			       product_name,
-			       COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(spec_json, '$.i_id')), ''), '') AS i_id,
-			       COALESCE(NULLIF(JSON_UNQUOTE(JSON_EXTRACT(spec_json, '$.category_name')), ''), NULLIF(category, '')) AS category
+			       COALESCE(NULLIF(%[1]s, ''), '') AS i_id,
+			       COALESCE(NULLIF(%[2]s, ''), NULLIF(category, '')) AS category
 			  FROM products
 			 WHERE sku_code = ?
-			    OR COALESCE(JSON_UNQUOTE(JSON_EXTRACT(spec_json, '$.i_id')), '') = ?
+			    OR %[1]s = ?
 			    OR sku_code LIKE ?
-			    OR COALESCE(JSON_UNQUOTE(JSON_EXTRACT(spec_json, '$.i_id')), '') LIKE ?
+			    OR %[1]s LIKE ?
 			    OR sku_code LIKE ?
 			    OR product_name LIKE ?
 			    OR category LIKE ?
-			    OR (JSON_VALID(spec_json) AND JSON_UNQUOTE(JSON_EXTRACT(spec_json, '$.i_id')) LIKE ?)
-			    OR (JSON_VALID(spec_json) AND JSON_UNQUOTE(JSON_EXTRACT(spec_json, '$.category_name')) LIKE ?)
+			    OR %[1]s LIKE ?
+			    OR %[2]s LIKE ?
 			 ORDER BY CASE
 			            WHEN sku_code = ? THEN 0
-			            WHEN COALESCE(JSON_UNQUOTE(JSON_EXTRACT(spec_json, '$.i_id')), '') = ? THEN 1
+			            WHEN %[1]s = ? THEN 1
 			            WHEN sku_code LIKE ? THEN 2
 			            ELSE 3
 			          END,
 			          id DESC
-			 LIMIT ?`,
+			 LIMIT ?`, iidExpr, categoryNameExpr)
+		qctx, cancel := mysqlReadQueryContext(ctx)
+		rows, err := r.db.db.QueryContext(qctx, query,
 			kw.Upper, kw.Upper, kw.Upper+"%", kw.Upper+"%", kw.Like, kw.Like, kw.Like, kw.Like, kw.Like,
 			kw.Upper, kw.Upper, kw.Upper+"%", limit)
 		if err == nil {
-			return scanSearchProducts(rows)
+			items, scanErr := scanSearchProducts(rows)
+			cancel()
+			return items, scanErr
 		}
+		cancel()
 	}
-	rows, err := r.db.db.QueryContext(ctx, `
+	qctx, cancel := mysqlReadQueryContext(ctx)
+	defer cancel()
+	rows, err := r.db.db.QueryContext(qctx, `
 		SELECT sku_code AS erp_code, MAX(product_name_snapshot) AS product_name, NULL AS i_id, NULL AS category
 		  FROM tasks
 		 WHERE sku_code = ?
@@ -433,7 +528,9 @@ func (r *searchRepo) SearchProducts(ctx context.Context, q string, limit int) ([
 
 func (r *searchRepo) SearchUsers(ctx context.Context, q string, limit int) ([]domain.SearchUser, error) {
 	limit = normalizeSearchLimit(limit)
-	rows, err := r.db.db.QueryContext(ctx, `
+	qctx, cancel := mysqlReadQueryContext(ctx)
+	defer cancel()
+	rows, err := r.db.db.QueryContext(qctx, `
 		SELECT id, username, department
 		  FROM users
 		 WHERE status = 'active'
@@ -477,18 +574,7 @@ func scanSearchProducts(rows *sql.Rows) ([]domain.SearchProduct, error) {
 }
 
 func (r *searchRepo) tableExists(ctx context.Context, table string) bool {
-	table = strings.TrimSpace(table)
-	if table == "" {
-		return false
-	}
-	var found string
-	err := r.db.db.QueryRowContext(ctx, `
-		SELECT table_name
-		  FROM information_schema.tables
-		 WHERE table_schema = DATABASE()
-		   AND table_name = ?
-		 LIMIT 1`, table).Scan(&found)
-	return err == nil
+	return mysqlTableExists(ctx, r.db.db, table)
 }
 
 func normalizeSearchLimit(limit int) int {

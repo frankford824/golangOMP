@@ -344,9 +344,11 @@ func main() {
 		service.WithProductManagementSKUComboRepo(skuComboRepo),
 		service.WithProductManagementCostRecalculationRunRepo(costRecalculationRunRepo),
 		service.WithProductManagementCostLegacyAliasFallbackEnabled(cfg.CostGovernance.LegacyAliasFallbackEnabled),
+		service.WithProductManagementRedis(rdb),
 		service.WithProductManagementNotificationService(notificationSvc))
 	costRecalculationSvc := service.NewCostRecalculationService(productManagementRepo, costRecalculationRunRepo, taskRepo, costRuleRepo, skuTraceRepo, mdb,
-		service.WithCostRecalculationLegacyAliasFallbackEnabled(cfg.CostGovernance.LegacyAliasFallbackEnabled))
+		service.WithCostRecalculationLegacyAliasFallbackEnabled(cfg.CostGovernance.LegacyAliasFallbackEnabled),
+		service.WithCostRecalculationProductManagementRedis(rdb))
 	skuComboSyncSvc := service.NewSKUComboSyncService(productManagementERPBridgeSvc, skuComboRepo, mdb)
 	taskSvc := service.NewTaskServiceWithCatalog(taskRepo, procurementRepo, taskAssetRepo, taskEventRepo, taskCostOverrideEventRepo, warehouseRepo, categoryRepo, costRuleRepo, codeRuleSvc, mdb,
 		service.WithTaskCostOverridePlaceholderRepos(taskCostOverrideReviewRepo, taskCostFinanceFlagRepo),
@@ -460,6 +462,7 @@ func main() {
 	erpProductSvc := erpproductsvc.NewService(erpBridgeSvc)
 	designSourceSvc := designsourcesvc.NewService(designSourceRepo)
 	searchSvc := searchsvc.NewService(searchRepo)
+	searchSvc.SetLogger(logger.Named("global_search"))
 	searchSvc.SetExternalAssetSearchProvider(externalAssetSvc)
 	predictionSvc := predictionsvc.NewService(predictionRepo)
 	workflowTraceEventSvc := service.NewWorkflowTraceEventService(workflowTraceEventRepo)
@@ -499,6 +502,7 @@ func main() {
 	}, logger.Named("business_trends"))
 	reportL1Svc := reportl1svc.NewService(reportL1Repo,
 		reportl1svc.WithPermissionLogRepo(permissionLogRepo),
+		reportl1svc.WithReportL1Redis(rdb),
 		reportl1svc.WithKPIAnalysisRepo(kpiAnalysisRepo),
 		reportl1svc.WithKPIAnalysisGenerator(aiSummaryClient),
 		reportl1svc.WithBusinessTrendRepo(businessTrendRepo),
@@ -635,7 +639,7 @@ func main() {
 
 	// ── 7.1 Cron(R6.A.2) ─────────────────────────────────────────────────────
 	cronInst := scheduler.New(workerCtx, log.New(os.Stderr, "", log.LstdFlags))
-	if os.Getenv("ENABLE_CRON_OSS_365") == "1" {
+	if envFlag("ENABLE_CRON_OSS_365") {
 		ossSpec := envOr("CRON_SCHEDULE_OSS_365", "0 3 * * *")
 		cleanupJob := assetlifecycle.NewCleanupJob(taskAssetLifecycleRepo, mdb, ossDirectSvc, log.New(os.Stderr, "[ASSET-CLEANUP-CRON] ", log.LstdFlags))
 		if err := cronInst.Add("oss-365", ossSpec, func(ctx context.Context) error {
@@ -649,7 +653,7 @@ func main() {
 		}
 		logger.Info("cron oss-365 enabled", zap.String("spec", ossSpec))
 	}
-	if os.Getenv("ENABLE_CRON_DRAFTS_7D") == "1" {
+	if envFlag("ENABLE_CRON_DRAFTS_7D") {
 		draftSpec := envOr("CRON_SCHEDULE_DRAFTS_7D", "0 4 * * *")
 		if err := cronInst.Add("drafts-7d", draftSpec, func(ctx context.Context) error {
 			_, err := taskDraftSvc.CleanupExpired(ctx)
@@ -659,7 +663,7 @@ func main() {
 		}
 		logger.Info("cron drafts-7d enabled", zap.String("spec", draftSpec))
 	}
-	if os.Getenv("ENABLE_CRON_AUTO_ARCHIVE") == "1" {
+	if envFlag("ENABLE_CRON_AUTO_ARCHIVE") {
 		archiveSpec := envOr("CRON_SCHEDULE_AUTO_ARCHIVE", "0 5 * * *")
 		autoArchiveJob := tasklifecycle.NewAutoArchiveJob(taskAutoArchiveRepo, mdb, log.New(os.Stderr, "[TASK-AUTO-ARCHIVE-CRON] ", log.LstdFlags))
 		if err := cronInst.Add("auto-archive", archiveSpec, func(ctx context.Context) error {
@@ -673,7 +677,7 @@ func main() {
 		}
 		logger.Info("cron auto-archive enabled", zap.String("spec", archiveSpec))
 	}
-	if os.Getenv("ENABLE_CRON_WAREHOUSE_AUTO_RELEASE") == "1" {
+	if envFlag("ENABLE_CRON_WAREHOUSE_AUTO_RELEASE") {
 		releaseSpec := envOr("CRON_SCHEDULE_WAREHOUSE_AUTO_RELEASE", "*/5 * * * *")
 		autoReleaseCandidateRepo, ok := taskAssetRepo.(service.WarehouseAutoReleaseCandidateRepo)
 		if !ok {
@@ -710,6 +714,29 @@ func main() {
 			logger.Fatal("cron warehouse-auto-release add failed", zap.Error(err))
 		}
 		logger.Info("cron warehouse-auto-release enabled", zap.String("spec", releaseSpec))
+	}
+	if envFlag("ENABLE_CRON_REPORT_L1_DAILY") {
+		reportSpec := envOr("CRON_SCHEDULE_REPORT_L1_DAILY", "*/10 * * * *")
+		if err := cronInst.Add("report-l1-daily", reportSpec, func(ctx context.Context) error {
+			days := envInt("REPORT_L1_DAILY_REFRESH_DAYS", 3)
+			if days < 1 {
+				days = 1
+			}
+			to := time.Now().UTC().Truncate(24 * time.Hour)
+			from := to.AddDate(0, 0, -(days - 1))
+			if err := reportL1Repo.RefreshDailyAggregates(ctx, from, to); err != nil {
+				return err
+			}
+			logger.Info("cron report-l1-daily run",
+				zap.Time("from", from),
+				zap.Time("to", to),
+				zap.Int("days", days),
+			)
+			return nil
+		}); err != nil {
+			logger.Fatal("cron report-l1-daily add failed", zap.Error(err))
+		}
+		logger.Info("cron report-l1-daily enabled", zap.String("spec", reportSpec))
 	}
 	cronInst.Start()
 	logger.Info("cron started", zap.Int("entries", len(cronInst.Entries())))
@@ -992,6 +1019,15 @@ func envOr(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func envFlag(key string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(key))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }
 
 func envInt(key string, fallback int) int {

@@ -121,6 +121,9 @@ func (r *designAssetRepo) UpdateCurrentVersionID(ctx context.Context, tx repo.Tx
 	if rowsAffected == 0 {
 		return sql.ErrNoRows
 	}
+	if err := reindexAssetSearchDocument(ctx, sqlTx, id); err != nil {
+		return err
+	}
 	return nil
 }
 

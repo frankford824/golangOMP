@@ -8,15 +8,20 @@ import (
 	"testing"
 	"time"
 
+	"github.com/redis/go-redis/v9"
+
 	"workflow/domain"
 	"workflow/repo"
 	"workflow/service/aiagent"
 )
 
 type stubReportRepo struct {
-	cards      []domain.L1Card
-	throughput []domain.L1ThroughputPoint
-	dwell      []domain.L1ModuleDwellPoint
+	cards           []domain.L1Card
+	throughput      []domain.L1ThroughputPoint
+	dwell           []domain.L1ModuleDwellPoint
+	cardCalls       int
+	throughputCalls int
+	dwellCalls      int
 }
 
 type stubKPIAnalysisRepo struct {
@@ -41,12 +46,53 @@ type successfulBusinessTrendGenerator struct {
 	calls int32
 }
 
-func (s *stubReportRepo) GetCards(context.Context) ([]domain.L1Card, error) { return s.cards, nil }
+func (s *stubReportRepo) GetCards(context.Context) ([]domain.L1Card, error) {
+	s.cardCalls++
+	return s.cards, nil
+}
 func (s *stubReportRepo) GetThroughput(context.Context, repo.ReportL1Filter) ([]domain.L1ThroughputPoint, error) {
+	s.throughputCalls++
 	return s.throughput, nil
 }
 func (s *stubReportRepo) GetModuleDwell(context.Context, repo.ReportL1Filter) ([]domain.L1ModuleDwellPoint, error) {
+	s.dwellCalls++
 	return s.dwell, nil
+}
+
+func (s *stubReportRepo) RefreshDailyAggregates(context.Context, time.Time, time.Time) error {
+	return nil
+}
+
+type fakeReportL1Cache struct {
+	values map[string]string
+	ttls   map[string]time.Duration
+}
+
+func newFakeReportL1Cache() *fakeReportL1Cache {
+	return &fakeReportL1Cache{
+		values: map[string]string{},
+		ttls:   map[string]time.Duration{},
+	}
+}
+
+func (f *fakeReportL1Cache) Get(_ context.Context, key string) *redis.StringCmd {
+	if value, ok := f.values[key]; ok {
+		return redis.NewStringResult(value, nil)
+	}
+	return redis.NewStringResult("", redis.Nil)
+}
+
+func (f *fakeReportL1Cache) Set(_ context.Context, key string, value interface{}, ttl time.Duration) *redis.StatusCmd {
+	switch raw := value.(type) {
+	case []byte:
+		f.values[key] = string(raw)
+	case string:
+		f.values[key] = raw
+	default:
+		f.values[key] = ""
+	}
+	f.ttls[key] = ttl
+	return redis.NewStatusResult("OK", nil)
 }
 
 func (s *stubKPIAnalysisRepo) ListTaskEvents(context.Context, repo.KPIAnalysisFilter) ([]domain.KPIAnalysisEvent, error) {
@@ -152,6 +198,51 @@ func TestReportL1ServicePassThrough(t *testing.T) {
 	dwell, appErr := svc.ModuleDwell(context.Background(), reportActor(domain.RoleSuperAdmin), from, from, nil, nil)
 	if appErr != nil || len(dwell) != 1 || dwell[0].Samples != 2 {
 		t.Fatalf("dwell=%+v err=%+v", dwell, appErr)
+	}
+}
+
+func TestReportL1ServiceCachesReportResponses(t *testing.T) {
+	from := time.Date(2026, 4, 20, 0, 0, 0, 0, time.UTC)
+	repo := &stubReportRepo{
+		cards:      []domain.L1Card{{Key: "tasks_in_progress", Title: "Tasks in progress", Value: 1}},
+		throughput: []domain.L1ThroughputPoint{{Date: "2026-04-20", Created: 3}},
+		dwell:      []domain.L1ModuleDwellPoint{{ModuleKey: "design", AvgDwellSeconds: 10, P95DwellSeconds: 20, Samples: 2}},
+	}
+	cache := newFakeReportL1Cache()
+	svc := NewService(repo, WithReportL1Redis(cache))
+	actor := reportActor(domain.RoleSuperAdmin)
+
+	for i := 0; i < 2; i++ {
+		cards, appErr := svc.Cards(context.Background(), actor)
+		if appErr != nil || len(cards) != 1 {
+			t.Fatalf("cards=%+v err=%+v", cards, appErr)
+		}
+		points, appErr := svc.Throughput(context.Background(), actor, from, from, nil, nil)
+		if appErr != nil || len(points) != 1 {
+			t.Fatalf("throughput=%+v err=%+v", points, appErr)
+		}
+		dwell, appErr := svc.ModuleDwell(context.Background(), actor, from, from, nil, nil)
+		if appErr != nil || len(dwell) != 1 {
+			t.Fatalf("dwell=%+v err=%+v", dwell, appErr)
+		}
+	}
+	if repo.cardCalls != 1 || repo.throughputCalls != 1 || repo.dwellCalls != 1 {
+		t.Fatalf("repo calls cards=%d throughput=%d dwell=%d", repo.cardCalls, repo.throughputCalls, repo.dwellCalls)
+	}
+	if cache.ttls["omp:perf:report-l1:cards:v1"] != time.Minute {
+		t.Fatalf("cards ttl=%s", cache.ttls["omp:perf:report-l1:cards:v1"])
+	}
+	var sawTenMinuteTTL bool
+	for key, ttl := range cache.ttls {
+		if strings.Contains(key, "throughput") || strings.Contains(key, "module-dwell") {
+			if ttl != 10*time.Minute {
+				t.Fatalf("%s ttl=%s", key, ttl)
+			}
+			sawTenMinuteTTL = true
+		}
+	}
+	if !sawTenMinuteTTL {
+		t.Fatalf("expected parameterized report cache keys, got %+v", cache.ttls)
 	}
 }
 

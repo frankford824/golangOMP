@@ -175,10 +175,10 @@ func TestBuildTaskAssetSearchWhereFiltersByUploadedTimeByDefault(t *testing.T) {
 		CreatedTo:   &to,
 	})
 
-	if !strings.Contains(where, "COALESCE(ta.uploaded_at, ta.created_at) >= ?") {
+	if !strings.Contains(where, "ta.sort_time >= ?") {
 		t.Fatalf("where clause missing uploaded time lower bound: %s", where)
 	}
-	if !strings.Contains(where, "COALESCE(ta.uploaded_at, ta.created_at) <= ?") {
+	if !strings.Contains(where, "ta.sort_time <= ?") {
 		t.Fatalf("where clause missing uploaded time upper bound: %s", where)
 	}
 	if containsStringArg(args, "t.created_at") {
@@ -196,13 +196,13 @@ func TestBuildTaskAssetSearchWhereFiltersByTaskCreatedTime(t *testing.T) {
 	if !strings.Contains(where, "t.created_at >= ?") {
 		t.Fatalf("where clause missing task created time lower bound: %s", where)
 	}
-	if strings.Contains(where, "COALESCE(ta.uploaded_at, ta.created_at) >= ?") {
+	if strings.Contains(where, "ta.sort_time >= ?") {
 		t.Fatalf("where clause should not use uploaded time for task_created_at: %s", where)
 	}
 }
 
 func TestTaskAssetSearchOrderByFollowsTimeBasis(t *testing.T) {
-	if got := taskAssetSearchOrderBy(domain.AssetSearchQuery{}); !strings.Contains(got, "COALESCE(ta.uploaded_at, ta.created_at) DESC") {
+	if got := taskAssetSearchOrderBy(domain.AssetSearchQuery{}); !strings.Contains(got, "ta.sort_time DESC") {
 		t.Fatalf("default order by = %q, want uploaded time", got)
 	}
 	if got := taskAssetSearchOrderBy(domain.AssetSearchQuery{TimeBasis: domain.AssetSearchTimeBasisTaskCreatedAt}); !strings.Contains(got, "t.created_at DESC") {
@@ -255,7 +255,7 @@ func TestBuildListCurrentByAssetIDsQueryBuildsParameterizedINClause(t *testing.T
 	if strings.Contains(query, "IN (101") {
 		t.Fatalf("query should be parameterized, got: %s", query)
 	}
-	if !strings.Contains(query, "ta.id = COALESCE(da.current_version_id") {
+	if !strings.Contains(query, "ta.id = da.current_version_id") {
 		t.Fatalf("query missing current-version guard: %s", query)
 	}
 	if got, want := strings.Count(query, "?"), len(args); got != want {
@@ -266,6 +266,14 @@ func TestBuildListCurrentByAssetIDsQueryBuildsParameterizedINClause(t *testing.T
 	}
 	if args[0] != int64(101) || args[1] != int64(202) || args[2] != int64(303) {
 		t.Fatalf("args = %#v, want [101 202 303]", args)
+	}
+}
+
+func TestBuildListCurrentByAssetIDsQueryUsesLegacyCurrentVersionWhenEnabled(t *testing.T) {
+	t.Setenv("ASSET_SEARCH_LEGACY_CURRENT_VERSION", "true")
+	query, _ := buildListCurrentByAssetIDsQuery([]int64{101})
+	if !strings.Contains(query, "ta.id = COALESCE(da.current_version_id") {
+		t.Fatalf("query missing legacy current-version fallback: %s", query)
 	}
 }
 
