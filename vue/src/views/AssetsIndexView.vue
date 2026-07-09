@@ -2091,9 +2091,15 @@ function resolveExcelPackageFilename(item: AssetExcelPackageItem, sequence: numb
     const i = item.filename.lastIndexOf('.')
     return i > 0 ? item.filename.slice(i) : '.jpg'
   })()
-  const order = sanitizeZipEntryName(excelPackageOrderKey(item.order_no), '未知订单')
   const rawSku = item.sku_code || item.sku_name || `asset-${item.asset_id}`
+  const rawOrder = excelPackageOrderKey(item.order_no)
+  const normalizedOrder = rawOrder.toUpperCase()
+  const normalizedSku = String(rawSku).trim().toUpperCase()
   const sku = sanitizeZipEntryName(rawSku, `asset-${item.asset_id}`)
+  if (!normalizedOrder || normalizedOrder === '未知订单' || normalizedOrder === normalizedSku) {
+    return `${sku}_${sequence}${ext}`
+  }
+  const order = sanitizeZipEntryName(rawOrder, '未知订单')
   return `${order}_${sku}_${sequence}${ext}`
 }
 
