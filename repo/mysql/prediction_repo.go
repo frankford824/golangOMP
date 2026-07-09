@@ -82,18 +82,29 @@ func (r *predictionRepo) TaskCreateSuggestions(ctx context.Context, actor domain
 	args = append(args, limit)
 	rows, err := r.db.db.QueryContext(ctx, `
 		SELECT
-		  COALESCE(NULLIF(td.category_name, ''), NULLIF(td.category, ''), '未分类') AS category_name,
-		  COALESCE(td.category_code, '') AS category_code,
-		  COALESCE(td.material, '') AS material,
-		  COALESCE(td.spec_text, '') AS spec_text,
-		  COALESCE(td.size_text, '') AS size_text,
-		  COALESCE(td.process, '') AS process_text,
-		  COALESCE(t.task_type, '') AS task_type,
+		  category_name,
+		  category_code,
+		  material,
+		  spec_text,
+		  size_text,
+		  process_text,
+		  task_type,
 		  COUNT(*) AS use_count,
-		  MAX(t.created_at) AS last_used_at
-		FROM tasks t
-		LEFT JOIN task_details td ON td.task_id = t.id
-		WHERE `+strings.Join(where, " AND ")+`
+		  MAX(created_at) AS last_used_at
+		FROM (
+		  SELECT
+		    COALESCE(NULLIF(td.category_name, ''), NULLIF(td.category, ''), '未分类') AS category_name,
+		    COALESCE(td.category_code, '') AS category_code,
+		    COALESCE(td.material, '') AS material,
+		    COALESCE(td.spec_text, '') AS spec_text,
+		    COALESCE(td.size_text, '') AS size_text,
+		    COALESCE(td.process, '') AS process_text,
+		    COALESCE(t.task_type, '') AS task_type,
+		    t.created_at AS created_at
+		  FROM tasks t
+		  LEFT JOIN task_details td ON td.task_id = t.id
+		  WHERE `+strings.Join(where, " AND ")+`
+		) task_create_candidates
 		GROUP BY category_name, category_code, material, spec_text, size_text, process_text, task_type
 		ORDER BY use_count DESC, last_used_at DESC
 		LIMIT ?`, args...)

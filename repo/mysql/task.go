@@ -1896,7 +1896,7 @@ func taskSearchDocumentKeywordRecall(kw normalizedSearchKeyword) (string, []inte
 		return "SELECT task_id FROM (" + strings.Join(branches, " UNION ALL ") + ") tsd_kw", args
 	}
 	if len([]rune(kw.Raw)) >= 2 {
-		return "SELECT task_id FROM task_search_documents WHERE MATCH(search_text) AGAINST (? IN NATURAL LANGUAGE MODE)", []interface{}{kw.Raw}
+		return "SELECT task_id FROM task_search_documents WHERE MATCH(search_text) AGAINST (? IN BOOLEAN MODE)", []interface{}{booleanPhraseSearchQuery(kw.Raw)}
 	}
 	return "", nil
 }

@@ -74,8 +74,11 @@ func TestBuildTaskListQuerySpecUsesSearchDocumentsForKeywordWhenEnabled(t *testi
 	if strings.Contains(spec.fromSQL, "task_search_documents") {
 		t.Fatalf("fromSQL should recall via IN subquery, not a document join: %s", spec.fromSQL)
 	}
-	if !strings.Contains(spec.whereSQL, "t.id IN (SELECT task_id FROM task_search_documents WHERE MATCH(search_text) AGAINST (? IN NATURAL LANGUAGE MODE))") {
-		t.Fatalf("whereSQL missing task_search_documents fulltext recall: %s", spec.whereSQL)
+	if !strings.Contains(spec.whereSQL, "t.id IN (SELECT task_id FROM task_search_documents WHERE MATCH(search_text) AGAINST (? IN BOOLEAN MODE))") {
+		t.Fatalf("whereSQL missing task_search_documents boolean phrase recall: %s", spec.whereSQL)
+	}
+	if strings.Contains(spec.whereSQL, "IN NATURAL LANGUAGE MODE") {
+		t.Fatalf("whereSQL should not use natural-language fallback for task list filtering: %s", spec.whereSQL)
 	}
 	if strings.Contains(spec.whereSQL, "task_keyword_actor") || strings.Contains(spec.whereSQL, "tsi_text") {
 		t.Fatalf("whereSQL should not use legacy keyword EXISTS on document path: %s", spec.whereSQL)

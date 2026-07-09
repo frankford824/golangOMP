@@ -65,19 +65,29 @@ func (r *taskAssetSearchRepo) Search(ctx context.Context, query domain.AssetSear
 	if err != nil {
 		return nil, 0, fmt.Errorf("count asset search: %w", err)
 	}
+	items, err := r.searchRows(ctx, query, where, args)
+	return items, total, err
+}
+
+func (r *taskAssetSearchRepo) SearchRows(ctx context.Context, query domain.AssetSearchQuery) ([]*repo.TaskAssetSearchRow, error) {
+	query = query.Normalized()
+	where, args := buildTaskAssetSearchWhere(query)
+	return r.searchRows(ctx, query, where, args)
+}
+
+func (r *taskAssetSearchRepo) searchRows(ctx context.Context, query domain.AssetSearchQuery, where string, args []interface{}) ([]*repo.TaskAssetSearchRow, error) {
 	args = append(args, (query.Page-1)*query.Size, query.Size)
 	queryCtx, cancelQuery := mysqlReadQueryContext(ctx)
 	rows, err := r.db.db.QueryContext(queryCtx, taskAssetSearchSelect+taskAssetSearchFrom+where+`
-		ORDER BY `+taskAssetSearchOrderBy(query)+`
-		LIMIT ?, ?`, args...)
+			ORDER BY `+taskAssetSearchOrderBy(query)+`
+			LIMIT ?, ?`, args...)
 	if err != nil {
 		cancelQuery()
-		return nil, 0, fmt.Errorf("search task assets: %w", err)
+		return nil, fmt.Errorf("search task assets: %w", err)
 	}
 	defer cancelQuery()
 	defer rows.Close()
-	items, err := scanTaskAssetSearchRows(rows)
-	return items, total, err
+	return scanTaskAssetSearchRows(rows)
 }
 
 func (r *taskAssetSearchRepo) GetCurrentByAssetID(ctx context.Context, assetID int64) (*repo.TaskAssetSearchRow, error) {

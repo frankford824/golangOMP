@@ -2,8 +2,14 @@ package asset_center
 
 import (
 	"context"
+	"crypto/sha1"
+	"encoding/hex"
 	pathpkg "path"
+	"strconv"
 	"strings"
+	"time"
+
+	"github.com/redis/go-redis/v9"
 
 	"workflow/domain"
 	"workflow/repo"
@@ -12,6 +18,7 @@ import (
 )
 
 const materialSystemRoot = "/系统资源"
+const assetSearchTotalCacheTTL = 30 * time.Second
 
 type Service struct {
 	searchRepo   repo.TaskAssetSearchRepo
@@ -19,6 +26,14 @@ type Service struct {
 	urlBuilder   BrowserURLBuilder
 	streamOpener baseservice.StorageStreamOpener
 	externalSvc  *externalassets.Service
+	cache        AssetCenterCache
+}
+
+type Option func(*Service)
+
+type AssetCenterCache interface {
+	Get(context.Context, string) *redis.StringCmd
+	Set(context.Context, string, interface{}, time.Duration) *redis.StatusCmd
 }
 
 type DownloadPresigner interface {
@@ -34,8 +49,18 @@ type BrowserURLBuilder interface {
 	BuildBrowserFileURL(storageKey string) *string
 }
 
-func NewService(searchRepo repo.TaskAssetSearchRepo, presigner DownloadPresigner, urlBuilder BrowserURLBuilder) *Service {
-	return &Service{searchRepo: searchRepo, presigner: presigner, urlBuilder: urlBuilder}
+func NewService(searchRepo repo.TaskAssetSearchRepo, presigner DownloadPresigner, urlBuilder BrowserURLBuilder, opts ...Option) *Service {
+	s := &Service{searchRepo: searchRepo, presigner: presigner, urlBuilder: urlBuilder}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
+}
+
+func WithAssetCenterRedis(cache AssetCenterCache) Option {
+	return func(s *Service) {
+		s.cache = cache
+	}
 }
 
 func (s *Service) SetStorageStreamOpener(opener baseservice.StorageStreamOpener) {
@@ -57,7 +82,7 @@ func (s *Service) Search(ctx context.Context, query domain.AssetSearchQuery) (*S
 	if query.Source == domain.AssetResourceSourceExternal {
 		return s.searchExternal(ctx, query)
 	}
-	rows, total, err := s.searchRepo.Search(ctx, query)
+	rows, total, err := s.searchSystemRows(ctx, query)
 	if err != nil {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)
 	}
@@ -79,6 +104,78 @@ func (s *Service) Search(ctx context.Context, query domain.AssetSearchQuery) (*S
 		total += externalTotal
 	}
 	return &SearchResult{Items: items, Total: total, Page: query.Page, Size: query.Size}, nil
+}
+
+type assetSearchRowsRepo interface {
+	SearchRows(ctx context.Context, query domain.AssetSearchQuery) ([]*repo.TaskAssetSearchRow, error)
+}
+
+func (s *Service) searchSystemRows(ctx context.Context, query domain.AssetSearchQuery) ([]*repo.TaskAssetSearchRow, int64, error) {
+	if total, ok := s.getAssetSearchTotalCache(ctx, query); ok {
+		if rowsRepo, ok := s.searchRepo.(assetSearchRowsRepo); ok {
+			rows, err := rowsRepo.SearchRows(ctx, query)
+			return rows, total, err
+		}
+	}
+	rows, total, err := s.searchRepo.Search(ctx, query)
+	if err == nil {
+		s.setAssetSearchTotalCache(ctx, query, total)
+	}
+	return rows, total, err
+}
+
+func (s *Service) getAssetSearchTotalCache(ctx context.Context, query domain.AssetSearchQuery) (int64, bool) {
+	if s == nil || s.cache == nil {
+		return 0, false
+	}
+	raw, err := s.cache.Get(ctx, assetSearchTotalCacheKey(query)).Result()
+	if err != nil {
+		return 0, false
+	}
+	total, err := strconv.ParseInt(strings.TrimSpace(raw), 10, 64)
+	if err != nil || total < 0 {
+		return 0, false
+	}
+	return total, true
+}
+
+func (s *Service) setAssetSearchTotalCache(ctx context.Context, query domain.AssetSearchQuery, total int64) {
+	if s == nil || s.cache == nil || total < 0 {
+		return
+	}
+	_ = s.cache.Set(ctx, assetSearchTotalCacheKey(query), strconv.FormatInt(total, 10), assetSearchTotalCacheTTL).Err()
+}
+
+func assetSearchTotalCacheKey(query domain.AssetSearchQuery) string {
+	query = query.Normalized()
+	source := query.Source
+	if source == domain.AssetResourceSourceAll {
+		source = domain.AssetResourceSourceSystem
+	}
+	parts := []string{
+		strings.TrimSpace(query.Keyword),
+		strings.TrimSpace(query.ModuleKey),
+		strings.TrimSpace(query.OwnerTeamCode),
+		assetSearchTimeKey(query.CreatedFrom),
+		assetSearchTimeKey(query.CreatedTo),
+		string(query.TimeBasis),
+		string(query.IsArchived),
+		string(query.TaskStatus),
+		string(source),
+		string(query.UsableState),
+		string(query.FormatCategory),
+		string(query.BusinessLane),
+		string(query.AssetType.Canonical()),
+	}
+	sum := sha1.Sum([]byte(strings.Join(parts, "\x00")))
+	return "omp:perf:asset-center:search-total:v1:" + hex.EncodeToString(sum[:])
+}
+
+func assetSearchTimeKey(value *time.Time) string {
+	if value == nil {
+		return ""
+	}
+	return value.UTC().Format(time.RFC3339Nano)
 }
 
 func assetSearchHasSystemOnlyFilters(query domain.AssetSearchQuery) bool {

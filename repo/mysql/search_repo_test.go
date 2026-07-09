@@ -25,7 +25,7 @@ func TestSearchAssetsFromDocumentsUsesFullTextForCodeKeyword(t *testing.T) {
 		WithArgs("asset_search_documents", "semantic_text").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 	mock.ExpectQuery("asset-doc-search").
-		WithArgs("CGK000181", 20).
+		WithArgs(`"CGK000181"`, `"CGK000181"`, 20).
 		WillReturnRows(sqlmock.NewRows([]string{"asset_id", "file_name", "source_module_key", "task_id", "asset_type", "flow_review_status"}).
 			AddRow(int64(7), "delivery.jpg", "design", int64(3), "delivery", "approved"))
 
@@ -86,7 +86,7 @@ func TestSearchProductsFromDocumentsTextKeywordUsesFullText(t *testing.T) {
 		WithArgs("product_search_documents", "semantic_text").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 	mock.ExpectQuery("product-doc-text").
-		WithArgs("常规kt板", 20).
+		WithArgs(`"常规kt板"`, `"常规kt板"`, 20).
 		WillReturnRows(sqlmock.NewRows([]string{"erp_code", "product_name", "i_id", "category"}).
 			AddRow("CGK000181", "常规kt板", "IID-1", "KT板"))
 
@@ -96,6 +96,41 @@ func TestSearchProductsFromDocumentsTextKeywordUsesFullText(t *testing.T) {
 		t.Fatalf("SearchProducts() error = %v", err)
 	}
 	if len(items) != 1 {
+		t.Fatalf("items=%+v", items)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestSearchProductsFromDocumentsTextKeywordFallsBackToNaturalWhenPhraseEmpty(t *testing.T) {
+	mysqlSchemaPresenceCache = sync.Map{}
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(searchRepoQueryMatcher(t)))
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectQuery("schema-table").
+		WithArgs("product_search_documents").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectQuery("schema-column").
+		WithArgs("product_search_documents", "semantic_text").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectQuery("product-doc-text").
+		WithArgs(`"冷门词"`, `"冷门词"`, 20).
+		WillReturnRows(sqlmock.NewRows([]string{"erp_code", "product_name", "i_id", "category"}))
+	mock.ExpectQuery("product-doc-text-natural").
+		WithArgs("冷门词", "冷门词", 20).
+		WillReturnRows(sqlmock.NewRows([]string{"erp_code", "product_name", "i_id", "category"}).
+			AddRow("CGK000999", "冷门词产品", "IID-999", "其他"))
+
+	repo := NewSearchRepo(New(db))
+	items, err := repo.SearchProducts(context.Background(), "冷门词", 20)
+	if err != nil {
+		t.Fatalf("SearchProducts() error = %v", err)
+	}
+	if len(items) != 1 || items[0].ERPCode != "CGK000999" {
 		t.Fatalf("items=%+v", items)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -148,7 +183,7 @@ func TestSearchTasksFromDocumentsTextKeywordUsesFullText(t *testing.T) {
 		WithArgs("task_search_documents").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 	mock.ExpectQuery("task-doc-text").
-		WithArgs("常规kt板", 20).
+		WithArgs(`"常规kt板"`, `"常规kt板"`, 20).
 		WillReturnRows(searchTaskDocumentRows().AddRow(
 			int64(3), "T-0003", "常规kt板", "InProgress", "high",
 			"custom", "CGK000181", "CGK000181", "IID-1",
@@ -198,8 +233,15 @@ func searchRepoQueryMatcher(t *testing.T) sqlmock.QueryMatcher {
 			if strings.Contains(normalized, "d.asset_id = ?") {
 				return fmt.Errorf("asset code keyword must not add numeric id predicates: %s", normalized)
 			}
-			if !strings.Contains(normalized, "MATCH(d.search_text) AGAINST (? IN NATURAL LANGUAGE MODE)") {
-				return fmt.Errorf("asset document query missing fulltext match: %s", normalized)
+			for _, fragment := range []string{
+				"MATCH(search_text) AGAINST (? IN BOOLEAN MODE)",
+			} {
+				if !strings.Contains(normalized, fragment) {
+					return fmt.Errorf("asset document query missing %q: %s", fragment, normalized)
+				}
+			}
+			if strings.Contains(normalized, "IN NATURAL LANGUAGE MODE") {
+				return fmt.Errorf("asset phrase query must not run natural fallback in same SQL: %s", normalized)
 			}
 		case "product-doc-code":
 			if !strings.Contains(normalized, "FROM product_search_documents") {
@@ -212,11 +254,22 @@ func searchRepoQueryMatcher(t *testing.T) sqlmock.QueryMatcher {
 				return fmt.Errorf("product code query must not use fulltext match: %s", normalized)
 			}
 		case "product-doc-text":
-			if !strings.Contains(normalized, "MATCH(search_text) AGAINST (? IN NATURAL LANGUAGE MODE)") {
-				return fmt.Errorf("product text query missing fulltext match: %s", normalized)
+			for _, fragment := range []string{
+				"MATCH(search_text) AGAINST (? IN BOOLEAN MODE)",
+			} {
+				if !strings.Contains(normalized, fragment) {
+					return fmt.Errorf("product text query missing %q: %s", fragment, normalized)
+				}
 			}
-			if strings.Contains(normalized, "UNION ALL") {
-				return fmt.Errorf("product text query must not use code union: %s", normalized)
+			if strings.Contains(normalized, "IN NATURAL LANGUAGE MODE") {
+				return fmt.Errorf("product phrase query must not run natural fallback in same SQL: %s", normalized)
+			}
+		case "product-doc-text-natural":
+			if !strings.Contains(normalized, "MATCH(search_text) AGAINST (? IN NATURAL LANGUAGE MODE)") {
+				return fmt.Errorf("product natural fallback query missing fulltext match: %s", normalized)
+			}
+			if strings.Contains(normalized, "IN BOOLEAN MODE") {
+				return fmt.Errorf("product natural fallback query must not run boolean phrase in same SQL: %s", normalized)
 			}
 		case "task-doc-code":
 			if !strings.Contains(normalized, "FROM task_search_documents d") {
@@ -229,11 +282,15 @@ func searchRepoQueryMatcher(t *testing.T) sqlmock.QueryMatcher {
 				return fmt.Errorf("task code query must not use fulltext match: %s", normalized)
 			}
 		case "task-doc-text":
-			if !strings.Contains(normalized, "MATCH(d.search_text) AGAINST (? IN NATURAL LANGUAGE MODE)") {
-				return fmt.Errorf("task text query missing fulltext match: %s", normalized)
+			for _, fragment := range []string{
+				"MATCH(search_text) AGAINST (? IN BOOLEAN MODE)",
+			} {
+				if !strings.Contains(normalized, fragment) {
+					return fmt.Errorf("task text query missing %q: %s", fragment, normalized)
+				}
 			}
-			if strings.Contains(normalized, "UNION ALL") {
-				return fmt.Errorf("task text query must not use code union: %s", normalized)
+			if strings.Contains(normalized, "IN NATURAL LANGUAGE MODE") {
+				return fmt.Errorf("task phrase query must not run natural fallback in same SQL: %s", normalized)
 			}
 		default:
 			return fmt.Errorf("unexpected SQL expectation %q", expectedSQL)

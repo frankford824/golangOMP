@@ -47,6 +47,8 @@ const taskSearchDocumentSelectCols = `d.task_id, d.task_no, d.product_name_snaps
 		       d.creator_id, d.creator_name, d.designer_id, d.designer_name,
 		       d.created_at, d.deadline_at`
 
+const searchNaturalFallbackThreshold = 1
+
 // searchTaskDocumentsByCode recalls task ids through a UNION ALL of per-column
 // exact and prefix predicates so each branch uses a BTREE index, then hydrates
 // full document columns for the recalled ids. This avoids the previous OR
@@ -94,14 +96,57 @@ func (r *searchRepo) searchTaskDocumentsByCode(ctx context.Context, kw normalize
 }
 
 func (r *searchRepo) searchTaskDocumentsByText(ctx context.Context, kw normalizedSearchKeyword, limit int) ([]domain.SearchTask, error) {
+	items, err := r.searchTaskDocumentsByTextMode(ctx, kw, limit, true, nil)
+	if err != nil {
+		return nil, err
+	}
+	if len(items) >= limit || len(items) >= searchNaturalFallbackThreshold {
+		return items, nil
+	}
+	fallback, err := r.searchTaskDocumentsByTextMode(ctx, kw, limit-len(items), false, searchTaskResultIDs(items))
+	if err != nil {
+		return nil, err
+	}
+	return appendSearchTasksUnique(items, fallback, limit), nil
+}
+
+func (r *searchRepo) searchTaskDocumentsByTextMode(ctx context.Context, kw normalizedSearchKeyword, limit int, booleanMode bool, excludeTaskIDs []int64) ([]domain.SearchTask, error) {
+	if limit <= 0 {
+		return []domain.SearchTask{}, nil
+	}
+	matchQuery := kw.Raw
+	matchMode := "NATURAL LANGUAGE"
+	matchRank := 20
+	if booleanMode {
+		matchQuery = booleanPhraseSearchQuery(kw.Raw)
+		matchMode = "BOOLEAN"
+		matchRank = 10
+	}
+	excludeSQL := ""
+	args := []interface{}{matchQuery, matchQuery}
+	if len(excludeTaskIDs) > 0 {
+		excludeSQL = " AND task_id NOT IN (" + searchPlaceholders(len(excludeTaskIDs)) + ")"
+		for _, id := range excludeTaskIDs {
+			args = append(args, id)
+		}
+	}
+	args = append(args, limit)
 	qctx, cancel := mysqlReadQueryContext(ctx)
 	defer cancel()
 	rows, err := r.db.db.QueryContext(qctx, `
 		SELECT `+taskSearchDocumentSelectCols+`
 		  FROM task_search_documents d
-		 WHERE MATCH(d.search_text) AGAINST (? IN NATURAL LANGUAGE MODE)
-		 ORDER BY d.updated_at DESC, d.task_id DESC
-		 LIMIT ?`, kw.Raw, limit)
+		  JOIN (
+		    SELECT task_id, `+fmt.Sprintf("%d", matchRank)+` AS match_rank,
+		           MATCH(search_text) AGAINST (? IN `+matchMode+` MODE) AS match_score,
+		           updated_at
+		      FROM task_search_documents
+		     WHERE MATCH(search_text) AGAINST (? IN `+matchMode+` MODE)`+excludeSQL+`
+		     ORDER BY match_score DESC, updated_at DESC, task_id DESC
+		     LIMIT ?
+		  ) m ON m.task_id = d.task_id
+		 ORDER BY m.match_rank ASC, m.match_score DESC, d.updated_at DESC, d.task_id DESC
+		`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("search task documents by text: %w", err)
 	}
@@ -243,22 +288,75 @@ func (r *searchRepo) SearchAssets(ctx context.Context, q string, limit int) ([]d
 func (r *searchRepo) searchAssetsFromDocuments(ctx context.Context, q string, limit int) ([]domain.SearchAsset, error) {
 	limit = normalizeSearchLimit(limit)
 	kw := normalizeSearchKeyword(q)
-	hasSemanticText := assetSearchDocumentsSemanticTextExists(ctx, r.db.db)
-	clauses := make([]string, 0, 8)
-	args := make([]interface{}, 0, 16)
-	if kw.HasInt64 {
-		clauses = appendAnyClause(clauses, "d.asset_id = ?", "d.task_asset_id = ?", "d.task_id = ?")
-		args = append(args, kw.Int64, kw.Int64, kw.Int64)
+	items, err := r.searchAssetDocumentsByMode(ctx, kw, limit, true, nil, true)
+	if err != nil {
+		return nil, err
 	}
-	if len([]rune(kw.Raw)) >= 2 {
-		clauses = append(clauses, "MATCH(d.search_text) AGAINST (? IN NATURAL LANGUAGE MODE)")
-		args = append(args, kw.Raw)
-		if hasSemanticText {
-			clauses = append(clauses, "MATCH(d.semantic_text) AGAINST (? IN NATURAL LANGUAGE MODE)")
-			args = append(args, kw.Raw)
+	if len(items) >= limit || len(items) >= searchNaturalFallbackThreshold {
+		return items, nil
+	}
+	fallback, err := r.searchAssetDocumentsByMode(ctx, kw, limit-len(items), false, searchAssetResultIDs(items), false)
+	if err != nil {
+		return nil, err
+	}
+	return appendSearchAssetsUnique(items, fallback, limit), nil
+}
+
+func (r *searchRepo) searchAssetDocumentsByMode(ctx context.Context, kw normalizedSearchKeyword, limit int, booleanMode bool, excludeAssetIDs []int64, includeNumeric bool) ([]domain.SearchAsset, error) {
+	if limit <= 0 {
+		return []domain.SearchAsset{}, nil
+	}
+	hasSemanticText := assetSearchDocumentsSemanticTextExists(ctx, r.db.db)
+	branches := make([]string, 0, 8)
+	args := make([]interface{}, 0, 16)
+	excludePredicate := ""
+	excludeArgs := make([]interface{}, 0, len(excludeAssetIDs))
+	if len(excludeAssetIDs) > 0 {
+		excludePredicate = " AND asset_id NOT IN (" + searchPlaceholders(len(excludeAssetIDs)) + ")"
+		for _, id := range excludeAssetIDs {
+			excludeArgs = append(excludeArgs, id)
 		}
 	}
-	if len(clauses) == 0 {
+	if includeNumeric && kw.HasInt64 {
+		branches = append(branches,
+			"SELECT asset_id, 0 AS match_rank, 1.0 AS match_score, sort_time FROM asset_search_documents WHERE asset_id = ?"+excludePredicate,
+			"SELECT asset_id, 1 AS match_rank, 1.0 AS match_score, sort_time FROM asset_search_documents WHERE task_asset_id = ?"+excludePredicate,
+			"SELECT asset_id, 2 AS match_rank, 1.0 AS match_score, sort_time FROM asset_search_documents WHERE task_id = ?"+excludePredicate,
+		)
+		for i := 0; i < 3; i++ {
+			args = append(args, kw.Int64)
+			args = append(args, excludeArgs...)
+		}
+	}
+	if len([]rune(kw.Raw)) >= 2 {
+		matchQuery := kw.Raw
+		matchMode := "NATURAL LANGUAGE"
+		searchRank := 20
+		semanticRank := 40
+		if booleanMode {
+			matchQuery = booleanPhraseSearchQuery(kw.Raw)
+			matchMode = "BOOLEAN"
+			searchRank = 10
+			semanticRank = 30
+		}
+		branches = append(branches, fmt.Sprintf(`SELECT asset_id, %d AS match_rank,
+		               MATCH(search_text) AGAINST (? IN %s MODE) AS match_score,
+		               sort_time
+		          FROM asset_search_documents
+		         WHERE MATCH(search_text) AGAINST (? IN %s MODE)%s`, searchRank, matchMode, matchMode, excludePredicate))
+		args = append(args, matchQuery, matchQuery)
+		args = append(args, excludeArgs...)
+		if hasSemanticText {
+			branches = append(branches, fmt.Sprintf(`SELECT asset_id, %d AS match_rank,
+			               MATCH(semantic_text) AGAINST (? IN %s MODE) AS match_score,
+			               sort_time
+			          FROM asset_search_documents
+			         WHERE MATCH(semantic_text) AGAINST (? IN %s MODE)%s`, semanticRank, matchMode, matchMode, excludePredicate))
+			args = append(args, matchQuery, matchQuery)
+			args = append(args, excludeArgs...)
+		}
+	}
+	if len(branches) == 0 {
 		return []domain.SearchAsset{}, nil
 	}
 	args = append(args, limit)
@@ -269,9 +367,18 @@ func (r *searchRepo) searchAssetsFromDocuments(ctx context.Context, q string, li
 		       d.asset_type, d.flow_review_status
 		  FROM asset_search_documents d
 		  JOIN task_assets ta ON ta.id = d.task_asset_id
-		 WHERE `+strings.Join(clauses, " OR ")+`
-		 ORDER BY d.sort_time DESC, d.asset_id DESC
-		 LIMIT ?`, args...)
+		  JOIN (
+		    SELECT asset_id, MIN(match_rank) AS match_rank, MAX(match_score) AS match_score,
+		           MAX(sort_time) AS sort_time
+		      FROM (
+		        `+strings.Join(branches, "\n		        UNION ALL\n		        ")+`
+		      ) u
+		     GROUP BY asset_id
+		     ORDER BY match_rank ASC, match_score DESC, sort_time DESC, asset_id DESC
+		     LIMIT ?
+		  ) m ON m.asset_id = d.asset_id
+		 ORDER BY m.match_rank ASC, m.match_score DESC, d.sort_time DESC, d.asset_id DESC
+		`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("search asset documents: %w", err)
 	}
@@ -494,21 +601,76 @@ func (r *searchRepo) searchProductDocumentsByCode(ctx context.Context, kw normal
 }
 
 func (r *searchRepo) searchProductDocumentsByText(ctx context.Context, kw normalizedSearchKeyword, limit int) ([]domain.SearchProduct, error) {
-	clauses := []string{"MATCH(search_text) AGAINST (? IN NATURAL LANGUAGE MODE)"}
-	args := []interface{}{kw.Raw}
+	items, err := r.searchProductDocumentsByTextMode(ctx, kw, limit, true, nil)
+	if err != nil {
+		return nil, err
+	}
+	if len(items) >= limit || len(items) >= searchNaturalFallbackThreshold {
+		return items, nil
+	}
+	fallback, err := r.searchProductDocumentsByTextMode(ctx, kw, limit-len(items), false, searchProductResultCodes(items))
+	if err != nil {
+		return nil, err
+	}
+	return appendSearchProductsUnique(items, fallback, limit), nil
+}
+
+func (r *searchRepo) searchProductDocumentsByTextMode(ctx context.Context, kw normalizedSearchKeyword, limit int, booleanMode bool, excludeSKUs []string) ([]domain.SearchProduct, error) {
+	if limit <= 0 {
+		return []domain.SearchProduct{}, nil
+	}
+	matchQuery := kw.Raw
+	matchMode := "NATURAL LANGUAGE"
+	searchRank := 20
+	semanticRank := 40
+	if booleanMode {
+		matchQuery = booleanPhraseSearchQuery(kw.Raw)
+		matchMode = "BOOLEAN"
+		searchRank = 10
+		semanticRank = 30
+	}
+	excludePredicate := ""
+	excludeArgs := make([]interface{}, 0, len(excludeSKUs))
+	if len(excludeSKUs) > 0 {
+		excludePredicate = " AND sku_code NOT IN (" + searchPlaceholders(len(excludeSKUs)) + ")"
+		for _, sku := range excludeSKUs {
+			excludeArgs = append(excludeArgs, sku)
+		}
+	}
+	branches := []string{fmt.Sprintf(`SELECT sku_code, %d AS match_rank,
+		               MATCH(search_text) AGAINST (? IN %s MODE) AS match_score,
+		               source_updated_at
+		          FROM product_search_documents
+		         WHERE MATCH(search_text) AGAINST (? IN %s MODE)%s`, searchRank, matchMode, matchMode, excludePredicate)}
+	args := []interface{}{matchQuery, matchQuery}
+	args = append(args, excludeArgs...)
 	if productSearchDocumentsSemanticTextExists(ctx, r.db.db) {
-		clauses = append(clauses, "MATCH(semantic_text) AGAINST (? IN NATURAL LANGUAGE MODE)")
-		args = append(args, kw.Raw)
+		branches = append(branches, fmt.Sprintf(`SELECT sku_code, %d AS match_rank,
+			               MATCH(semantic_text) AGAINST (? IN %s MODE) AS match_score,
+			               source_updated_at
+			          FROM product_search_documents
+			         WHERE MATCH(semantic_text) AGAINST (? IN %s MODE)%s`, semanticRank, matchMode, matchMode, excludePredicate))
+		args = append(args, matchQuery, matchQuery)
+		args = append(args, excludeArgs...)
 	}
 	args = append(args, limit)
 	qctx, cancel := mysqlReadQueryContext(ctx)
 	defer cancel()
 	rows, err := r.db.db.QueryContext(qctx, `
-		SELECT sku_code AS erp_code, product_name, i_id, category
-		  FROM product_search_documents
-		 WHERE `+strings.Join(clauses, " OR ")+`
-		 ORDER BY source_updated_at DESC, sku_code DESC
-		 LIMIT ?`, args...)
+		SELECT d.sku_code AS erp_code, d.product_name, d.i_id, d.category
+		  FROM product_search_documents d
+		  JOIN (
+		    SELECT sku_code, MIN(match_rank) AS match_rank, MAX(match_score) AS match_score,
+		           MAX(source_updated_at) AS source_updated_at
+		      FROM (
+		        `+strings.Join(branches, "\n		        UNION ALL\n		        ")+`
+		      ) u
+		     GROUP BY sku_code
+		     ORDER BY match_rank ASC, match_score DESC, source_updated_at DESC, sku_code DESC
+		     LIMIT ?
+		  ) m ON m.sku_code = d.sku_code
+		 ORDER BY m.match_rank ASC, m.match_score DESC, d.source_updated_at DESC, d.sku_code DESC
+		`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("search product documents by text: %w", err)
 	}
@@ -641,6 +803,97 @@ func normalizeSearchLimit(limit int) int {
 		return 50
 	}
 	return limit
+}
+
+func searchPlaceholders(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	return strings.TrimRight(strings.Repeat("?,", n), ",")
+}
+
+func searchTaskResultIDs(items []domain.SearchTask) []int64 {
+	out := make([]int64, 0, len(items))
+	for _, item := range items {
+		if item.ID > 0 {
+			out = append(out, item.ID)
+		}
+	}
+	return out
+}
+
+func searchAssetResultIDs(items []domain.SearchAsset) []int64 {
+	out := make([]int64, 0, len(items))
+	for _, item := range items {
+		if item.AssetID > 0 {
+			out = append(out, item.AssetID)
+		}
+	}
+	return out
+}
+
+func searchProductResultCodes(items []domain.SearchProduct) []string {
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		if strings.TrimSpace(item.ERPCode) != "" {
+			out = append(out, item.ERPCode)
+		}
+	}
+	return out
+}
+
+func appendSearchTasksUnique(dst []domain.SearchTask, src []domain.SearchTask, limit int) []domain.SearchTask {
+	seen := make(map[int64]struct{}, len(dst)+len(src))
+	for _, item := range dst {
+		seen[item.ID] = struct{}{}
+	}
+	for _, item := range src {
+		if len(dst) >= limit {
+			break
+		}
+		if _, ok := seen[item.ID]; ok {
+			continue
+		}
+		seen[item.ID] = struct{}{}
+		dst = append(dst, item)
+	}
+	return dst
+}
+
+func appendSearchAssetsUnique(dst []domain.SearchAsset, src []domain.SearchAsset, limit int) []domain.SearchAsset {
+	seen := make(map[int64]struct{}, len(dst)+len(src))
+	for _, item := range dst {
+		seen[item.AssetID] = struct{}{}
+	}
+	for _, item := range src {
+		if len(dst) >= limit {
+			break
+		}
+		if _, ok := seen[item.AssetID]; ok {
+			continue
+		}
+		seen[item.AssetID] = struct{}{}
+		dst = append(dst, item)
+	}
+	return dst
+}
+
+func appendSearchProductsUnique(dst []domain.SearchProduct, src []domain.SearchProduct, limit int) []domain.SearchProduct {
+	seen := make(map[string]struct{}, len(dst)+len(src))
+	for _, item := range dst {
+		seen[item.ERPCode] = struct{}{}
+	}
+	for _, item := range src {
+		if len(dst) >= limit {
+			break
+		}
+		if _, ok := seen[item.ERPCode]; ok {
+			continue
+		}
+		seen[item.ERPCode] = struct{}{}
+		dst = append(dst, item)
+	}
+	return dst
 }
 
 func nullStringPtr(v sql.NullString) *string {

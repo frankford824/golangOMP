@@ -319,7 +319,7 @@ func main() {
 		service.WithTaskAssetCenterRetouchRequirementRepo(taskRetouchRequirementRepo),
 		service.WithTaskAssetCenterReferenceFileRefFlatRepo(referenceFileRefFlatRepo),
 		service.WithTaskAssetCenterAuditRepo(auditV7Repo))
-	globalAssetCenterSvc := assetcenter.NewService(taskAssetSearchRepo, ossDirectSvc, uploadClient)
+	globalAssetCenterSvc := assetcenter.NewService(taskAssetSearchRepo, ossDirectSvc, uploadClient, assetcenter.WithAssetCenterRedis(rdb))
 	globalAssetCenterSvc.SetStorageStreamOpener(service.NewStorageStreamOpener(ossDirectSvc, uploadClient))
 	globalAssetCenterSvc.SetExternalAssetService(externalAssetSvc)
 	globalAssetLifecycleSvc := assetlifecycle.NewService(taskAssetSearchRepo, taskAssetLifecycleRepo, mdb, ossDirectSvc)

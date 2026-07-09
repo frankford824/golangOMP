@@ -1,0 +1,34 @@
+[
+  {
+    "name": "task_code_exact",
+    "query": "RW-GOLD-50021",
+    "scope": "tasks",
+    "expected_tasks": [50021]
+  },
+  {
+    "name": "product_code_exact",
+    "query": "CGK000733",
+    "scope": "products",
+    "expected_products": ["CGK000733"]
+  },
+  {
+    "name": "product_iid_exact",
+    "query": "IID-GOLD-733",
+    "scope": "products",
+    "expected_products": ["CGK000733"]
+  },
+  {
+    "name": "chinese_phrase_all",
+    "query": "常规kt板",
+    "scope": "all",
+    "expected_tasks": [50022],
+    "expected_products": ["CGK000734"],
+    "expected_assets": [50023]
+  },
+  {
+    "name": "asset_filename_phrase",
+    "query": "交付图常规kt板",
+    "scope": "assets",
+    "expected_assets": [50023]
+  }
+]

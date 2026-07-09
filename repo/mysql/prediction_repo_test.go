@@ -87,3 +87,58 @@ func TestPredictionRepoAssetSuggestionsRequireCanonicalAssetID(t *testing.T) {
 		t.Fatalf("unmet sql expectations: %v", err)
 	}
 }
+
+func TestPredictionRepoTaskCreateSuggestionsGroupsDerivedColumns(t *testing.T) {
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherFunc(func(expectedSQL, actualSQL string) error {
+		normalized := strings.Join(strings.Fields(actualSQL), " ")
+		if expectedSQL != "task-create-suggestions" {
+			return fmt.Errorf("unexpected SQL expectation %q", expectedSQL)
+		}
+		for _, fragment := range []string{
+			"FROM ( SELECT COALESCE(NULLIF(td.category_name, ''), NULLIF(td.category, ''), '未分类') AS category_name",
+			"t.created_at AS created_at FROM tasks t LEFT JOIN task_details td ON td.task_id = t.id WHERE",
+			") task_create_candidates GROUP BY category_name, category_code, material, spec_text, size_text, process_text, task_type",
+		} {
+			if !strings.Contains(normalized, fragment) {
+				return fmt.Errorf("task-create SQL missing %q: %s", fragment, normalized)
+			}
+		}
+		return nil
+	})))
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	lastUsed := time.Date(2026, 7, 9, 7, 0, 0, 0, time.UTC)
+	mock.ExpectQuery("task-create-suggestions").
+		WithArgs(8).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"category_name", "category_code", "material", "spec_text", "size_text", "process_text", "task_type", "use_count", "last_used_at",
+		}).AddRow(
+			"常规KT板",
+			"KT",
+			"KT板",
+			"单面",
+			"20x30cm",
+			"覆膜",
+			"normal",
+			3,
+			lastUsed,
+		))
+
+	repo := NewPredictionRepo(New(db))
+	suggestions, err := repo.TaskCreateSuggestions(context.Background(), domain.RequestActor{ID: 291}, "", "", 8)
+	if err != nil {
+		t.Fatalf("TaskCreateSuggestions() error = %v", err)
+	}
+	if len(suggestions) != 1 {
+		t.Fatalf("suggestions = %d, want 1", len(suggestions))
+	}
+	if suggestions[0].Title != "常规KT板 / KT板 / 20x30cm / 覆膜" {
+		t.Fatalf("title = %q", suggestions[0].Title)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}

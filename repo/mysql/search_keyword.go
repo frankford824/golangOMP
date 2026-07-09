@@ -40,6 +40,19 @@ func normalizeSearchKeyword(raw string) normalizedSearchKeyword {
 	return kw
 }
 
+func booleanPhraseSearchQuery(raw string) string {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return value
+	}
+	replacer := strings.NewReplacer(`"`, " ", `\`, " ")
+	value = strings.Join(strings.Fields(replacer.Replace(value)), " ")
+	if value == "" {
+		return strings.TrimSpace(raw)
+	}
+	return `"` + value + `"`
+}
+
 func looksLikeTaskNo(value string) bool {
 	return strings.HasPrefix(value, "RW-") || strings.HasPrefix(value, "RW")
 }
