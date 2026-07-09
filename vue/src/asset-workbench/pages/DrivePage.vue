@@ -26,7 +26,9 @@ import {
   type DriveDirectoryRow,
   type DriveFileRow,
   type DriveFolderRow,
+  type MaterialFormatCategory,
   type MaterialFolderRow,
+  type MaterialSourceFilter,
   type OverviewSearchRow,
   type SystemAssetRow,
   type SystemAssetPreviewMeta,
@@ -138,6 +140,8 @@ const searchResults = ref<OverviewSearchRow[]>([])
 const searchTotal = ref(0)
 
 const materialQuery = ref('')
+const materialSourceFilter = ref<MaterialSourceFilter>('all')
+const materialFormatFilter = ref<MaterialFormatCategory>('all')
 const materialLoading = ref(false)
 const materialLoadingMore = ref(false)
 const materialError = ref('')
@@ -164,6 +168,20 @@ const selectedMaterialFolderPath = ref('')
 const expandedMaterialFolderPaths = ref<Set<string>>(new Set(['']))
 const clientMaterialFilter = ref<ClientMaterialFilter>('all')
 let batchJobPollTimer: number | null = null
+
+const materialSourceOptions: Array<{ value: MaterialSourceFilter; label: string }> = [
+  { value: 'all', label: '全部来源' },
+  { value: 'system', label: '系统资源' },
+  { value: 'external', label: '外部资源' },
+]
+const materialFormatOptions: Array<{ value: MaterialFormatCategory; label: string }> = [
+  { value: 'all', label: '全部格式' },
+  { value: 'image', label: '图片' },
+  { value: 'design', label: '设计源文件' },
+  { value: 'pdf', label: 'PDF' },
+  { value: 'video', label: '视频' },
+  { value: 'archive', label: '压缩包' },
+]
 
 const previewOpen = ref(false)
 const previewTitle = ref('')
@@ -288,7 +306,7 @@ const allMaterialDirectoryNodes = computed<MaterialDirectoryNode[]>(() => {
   }
   ensure('')
   for (const folder of Object.values(materialKnownFolders.value)) {
-    if (!operationalMaterialPathVisible(folder.path)) continue
+    if (!operationalMaterialPathVisible(folder.path) || !materialPathMatchesSourceFilter(folder.path)) continue
     const node = ensure(folder.path)
     node.name = folder.name || materialFolderLabel(folder.path)
     node.file_count = folder.file_count
@@ -300,7 +318,7 @@ const allMaterialDirectoryNodes = computed<MaterialDirectoryNode[]>(() => {
   }
   if (materialQuery.value.trim()) {
     for (const asset of materialItems.value) {
-      if (!operationalMaterialAssetVisible(asset)) continue
+      if (!materialMatchesActiveFilters(asset)) continue
       const dirParts = pathSegments(materialDirectoryPath(asset))
       ensure('').file_count += 1
       for (let index = 1; index <= dirParts.length; index += 1) {
@@ -348,11 +366,18 @@ const materialFolderBreadcrumbs = computed(() => {
 const selectedMaterialFolderNode = computed(() =>
   allMaterialDirectoryNodes.value.find((node) => node.path === selectedMaterialFolderPath.value) ?? allMaterialDirectoryNodes.value[0] ?? null,
 )
+const materialFilterSummary = computed(() => {
+  const source = materialSourceOptions.find((option) => option.value === materialSourceFilter.value)?.label || '全部来源'
+  const format = materialFormatOptions.find((option) => option.value === materialFormatFilter.value)?.label || '全部格式'
+  if (materialSourceFilter.value === 'all' && materialFormatFilter.value === 'all') return '全部素材'
+  return `${source} / ${format}`
+})
 const visibleMaterialFolders = computed<MaterialFolderEntry[]>(() => {
   const selectedParts = pathSegments(selectedMaterialFolderPath.value)
   return allMaterialDirectoryNodes.value
     .filter((node) => {
       if (!operationalMaterialPathVisible(node.path)) return false
+      if (!materialPathMatchesSourceFilter(node.path)) return false
       if (!node.path || node.path === selectedMaterialFolderPath.value) return false
       const parts = pathSegments(node.path)
       return parts.length === selectedParts.length + 1 && selectedParts.every((part, index) => parts[index] === part)
@@ -361,8 +386,8 @@ const visibleMaterialFolders = computed<MaterialFolderEntry[]>(() => {
 })
 const visibleMaterialFiles = computed(() =>
   materialQuery.value.trim()
-    ? materialItems.value.filter(operationalMaterialAssetVisible)
-    : materialItems.value.filter((asset) => operationalMaterialAssetVisible(asset) && materialDirectoryPath(asset) === selectedMaterialFolderPath.value),
+    ? materialItems.value.filter(materialMatchesActiveFilters)
+    : materialItems.value.filter((asset) => materialMatchesActiveFilters(asset) && materialDirectoryPath(asset) === selectedMaterialFolderPath.value),
 )
 const selectedMaterialAssets = computed(() => visibleMaterialFiles.value.filter((asset) => selectedMaterialIds.value.has(materialAssetKey(asset))))
 const selectedMaterialCount = computed(() => selectedMaterialAssets.value.length)
@@ -595,6 +620,66 @@ function operationalMaterialPathVisible(path?: string): boolean {
 
 function operationalMaterialAssetVisible(asset: SystemAssetRow): boolean {
   return operationalMaterialPathVisible(materialVirtualFilePath(asset))
+}
+
+function normalizeMaterialSourceFilter(value: unknown): MaterialSourceFilter {
+  return value === 'system' || value === 'external' ? value : 'all'
+}
+
+function normalizeMaterialFormatFilter(value: unknown): MaterialFormatCategory {
+  return value === 'image' || value === 'design' || value === 'pdf' || value === 'video' || value === 'archive' ? value : 'all'
+}
+
+function materialSourceForPath(path?: string): MaterialSourceFilter | '' {
+  const parts = pathSegments(path || '')
+  if (parts.length === 0) return ''
+  if (parts[0] === '系统资源') return 'system'
+  return 'external'
+}
+
+function materialDefaultFolderPathForSource(source = materialSourceFilter.value): string {
+  if (source === 'system') return '/系统资源'
+  if (source === 'external') return '/quark'
+  return ''
+}
+
+function materialRequestSourceForPath(path?: string): MaterialSourceFilter {
+  return normalizeMaterialSourceFilter(materialSourceForPath(path) || materialSourceFilter.value)
+}
+
+function materialPathMatchesSourceFilter(path?: string): boolean {
+  if (materialSourceFilter.value === 'all') return true
+  const source = materialSourceForPath(path)
+  return source === '' || source === materialSourceFilter.value
+}
+
+function materialAssetSource(asset: SystemAssetRow): MaterialSourceFilter {
+  return asset.source_type === 'external' ? 'external' : 'system'
+}
+
+function materialAssetFilenameForFormat(asset: SystemAssetRow): string {
+  return [asset.original_filename, asset.file_name, asset.origin_path, asset.product_name]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase()
+}
+
+function materialFormatCategoryOf(asset: SystemAssetRow): MaterialFormatCategory | 'other' {
+  const mime = (asset.mime_type || '').toLowerCase()
+  const name = materialAssetFilenameForFormat(asset)
+  if (mime.includes('photoshop') || mime.includes('illustrator') || mime.includes('postscript') || /\.(psd|psb|ai|cdr|eps|indd)\b/i.test(name)) return 'design'
+  if (mime.includes('pdf') || /\.pdf\b/i.test(name)) return 'pdf'
+  if (mime.startsWith('video/') || /\.(mp4|mov|m4v|avi|mkv|webm)\b/i.test(name)) return 'video'
+  if (mime.includes('zip') || mime.includes('rar') || mime.includes('7z') || mime.includes('tar') || mime.includes('gzip') || /\.(zip|rar|7z|tar|gz|tgz)\b/i.test(name)) return 'archive'
+  if (mime.startsWith('image/') || /\.(jpe?g|png|webp|gif|bmp|svg|tiff?)\b/i.test(name)) return 'image'
+  return 'other'
+}
+
+function materialMatchesActiveFilters(asset: SystemAssetRow): boolean {
+  if (!operationalMaterialAssetVisible(asset)) return false
+  if (materialSourceFilter.value !== 'all' && materialAssetSource(asset) !== materialSourceFilter.value) return false
+  if (materialFormatFilter.value !== 'all' && materialFormatCategoryOf(asset) !== materialFormatFilter.value) return false
+  return true
 }
 
 function materialDisplayTitle(asset: SystemAssetRow): string {
@@ -2146,7 +2231,7 @@ async function loadMaterials(query = materialQuery.value, options: { append?: bo
   if (!canUseOperational.value) return
   const nextQuery = query.trim()
   if (canManageDrive.value && !nextQuery) {
-    await loadMaterialFolder('')
+    await loadMaterialFolder(materialDefaultFolderPathForSource())
     return
   }
   const append = options.append === true
@@ -2161,15 +2246,22 @@ async function loadMaterials(query = materialQuery.value, options: { append?: bo
   if (!append) {
     selectedMaterialFolderPath.value = ''
     activeMaterial.value = null
+    selectedMaterialIds.value = new Set()
   }
   try {
     if (canManageDrive.value) {
       const [systemResult, published] = await Promise.all([
-        assetWorkbenchApi.systemSearch({ q: materialQuery.value, source: 'all', page, page_size: materialPageSize }, materialAbortController.signal),
+        assetWorkbenchApi.systemSearch({
+          q: materialQuery.value,
+          source: materialSourceFilter.value,
+          format_category: materialFormatFilter.value,
+          page,
+          page_size: materialPageSize,
+        }, materialAbortController.signal),
         assetWorkbenchApi.listClientMaterials(true, materialAbortController.signal),
       ])
       if (requestID !== materialRequestSeq) return
-      const visibleItems = systemResult.items.filter(operationalMaterialAssetVisible)
+      const visibleItems = systemResult.items.filter(materialMatchesActiveFilters)
       materialItems.value = append ? mergeMaterialItems(materialItems.value, visibleItems) : visibleItems
       materialFileTotal.value = Number(systemResult.total || visibleItems.length)
       materialPage.value = systemResult.page || page
@@ -2182,7 +2274,7 @@ async function loadMaterials(query = materialQuery.value, options: { append?: bo
       clientMaterials.value = published
       const q = materialQuery.value.toLowerCase()
       materialItems.value = published.map(materialFromClient).filter((asset) => {
-        if (!operationalMaterialAssetVisible(asset)) return false
+        if (!materialMatchesActiveFilters(asset)) return false
         if (!q) return true
         return [titleOf(asset), asset.original_filename, asset.resource_id, asset.scope_sku_code, asset.source_label]
           .filter(Boolean)
@@ -2230,13 +2322,22 @@ async function loadMaterialFolder(path = selectedMaterialFolderPath.value, optio
     materialQuery.value = ''
     selectedMaterialFolderPath.value = normalized
     activeMaterial.value = null
+    selectedMaterialIds.value = new Set()
+    materialSourceFilter.value = materialRequestSourceForPath(normalized)
   }
   rememberMaterialPath(normalized)
   if (expandTree) expandMaterialFolderTreePath(normalized)
   try {
     if (canManageDrive.value) {
+      const source = materialRequestSourceForPath(normalized)
       const [browse, published] = await Promise.all([
-        assetWorkbenchApi.browseMaterials({ path: normalized, source: 'all', page, page_size: materialPageSize }, materialAbortController.signal),
+        assetWorkbenchApi.browseMaterials({
+          path: normalized,
+          source,
+          format_category: materialFormatFilter.value,
+          page,
+          page_size: materialPageSize,
+        }, materialAbortController.signal),
         assetWorkbenchApi.listClientMaterials(true, materialAbortController.signal),
       ])
       if (requestID !== materialRequestSeq) return
@@ -2252,7 +2353,7 @@ async function loadMaterialFolder(path = selectedMaterialFolderPath.value, optio
           direct_file_count: Number(browse.total || 0),
         })
       }
-      const visibleFiles = (browse.files || []).filter(operationalMaterialAssetVisible)
+      const visibleFiles = (browse.files || []).filter(materialMatchesActiveFilters)
       materialItems.value = append ? mergeMaterialItems(materialItems.value, visibleFiles) : visibleFiles
       materialFileTotal.value = Number(browse.total || visibleFiles.length)
       materialPage.value = browse.page || page
@@ -2261,7 +2362,7 @@ async function loadMaterialFolder(path = selectedMaterialFolderPath.value, optio
       const published = await assetWorkbenchApi.listClientMaterials(false, materialAbortController.signal)
       if (requestID !== materialRequestSeq) return
       clientMaterials.value = published
-      materialItems.value = published.map(materialFromClient).filter(operationalMaterialAssetVisible)
+      materialItems.value = published.map(materialFromClient).filter(materialMatchesActiveFilters)
       materialFileTotal.value = materialItems.value.length
       materialPage.value = 1
     }
@@ -2289,6 +2390,24 @@ function loadMoreMaterials() {
     return
   }
   void loadMaterialFolder(selectedMaterialFolderPath.value, { expandTree: false, append: true })
+}
+
+function refreshMaterialsForFilters() {
+  selectedMaterialIds.value = new Set()
+  activeMaterial.value = null
+  materialSourceFilter.value = normalizeMaterialSourceFilter(materialSourceFilter.value)
+  materialFormatFilter.value = normalizeMaterialFormatFilter(materialFormatFilter.value)
+  if (materialQuery.value.trim()) {
+    void loadMaterials(materialQuery.value)
+    return
+  }
+  void loadMaterialFolder(materialDefaultFolderPathForSource())
+}
+
+function clearMaterialSearch() {
+  materialQuery.value = ''
+  selectedMaterialIds.value = new Set()
+  void loadMaterialFolder(materialDefaultFolderPathForSource())
 }
 
 async function openMaterialPreview(asset: SystemAssetRow) {
@@ -2605,9 +2724,11 @@ async function batchPublishCurrentMaterialFolder(includeChildren: boolean) {
       action: 'publish',
       folders: [{
         path: selectedMaterialFolderPath.value,
-        source: 'all',
+        source: materialRequestSourceForPath(selectedMaterialFolderPath.value),
+        format_category: materialFormatFilter.value,
         include_children: includeChildren,
       }],
+      format_category: materialFormatFilter.value,
       selection_scope: includeChildren ? 'current_folder_recursive' : 'current_folder',
     })
     await finishClientMaterialBatch('publish', result)
@@ -3206,10 +3327,22 @@ onBeforeUnmount(() => {
                 <span class="aw-drive__search-icon" aria-hidden="true">
                   <IconfontActionIcon name="search" :size="17" />
                 </span>
-                <span class="aw-drive__search-context">全部素材</span>
+                <span class="aw-drive__search-context">{{ materialFilterSummary }}</span>
                 <span class="aw-drive__search-divider" aria-hidden="true"></span>
+                <label class="aw-drive__material-filter">
+                  <span>来源</span>
+                  <select v-model="materialSourceFilter" aria-label="素材来源" @change="refreshMaterialsForFilters">
+                    <option v-for="option in materialSourceOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+                  </select>
+                </label>
+                <label class="aw-drive__material-filter">
+                  <span>格式</span>
+                  <select v-model="materialFormatFilter" aria-label="素材格式" @change="refreshMaterialsForFilters">
+                    <option v-for="option in materialFormatOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+                  </select>
+                </label>
                 <input v-model="materialQuery" type="search" placeholder="按文件名 / SKU / 外部路径过滤" />
-                <button v-if="materialQuery" class="aw-drive__search-clear" type="button" aria-label="清除" @click="materialQuery = ''; loadMaterials()">
+                <button v-if="materialQuery" class="aw-drive__search-clear" type="button" aria-label="清除" @click="clearMaterialSearch">
                   <IconfontActionIcon name="close" :size="14" />
                 </button>
                 <button class="aw-drive__search-submit" type="submit">搜索</button>

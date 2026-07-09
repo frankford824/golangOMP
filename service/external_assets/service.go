@@ -80,8 +80,8 @@ type fullSyncMountPlan struct {
 }
 
 type directoryBrowserRepo interface {
-	ListDirectoryChildren(ctx context.Context, parentPath string, mountPaths []string, limit int) ([]domain.ExternalAssetDirectoryEntry, error)
-	ListDirectoryFiles(ctx context.Context, parentPath string, mountPaths []string, page int, size int) ([]*domain.ExternalAssetRecord, int64, error)
+	ListDirectoryChildren(ctx context.Context, parentPath string, mountPaths []string, limit int, formatCategory domain.AssetFormatCategoryFilter) ([]domain.ExternalAssetDirectoryEntry, error)
+	ListDirectoryFiles(ctx context.Context, parentPath string, mountPaths []string, page int, size int, formatCategory domain.AssetFormatCategoryFilter) ([]*domain.ExternalAssetRecord, int64, error)
 }
 
 type Service struct {
@@ -346,7 +346,7 @@ func (s *Service) Search(ctx context.Context, query domain.ExternalAssetSearchQu
 	return rows, total, err
 }
 
-func (s *Service) ListDirectoryChildren(ctx context.Context, parentPath string, limit int) ([]domain.ExternalAssetDirectoryEntry, error) {
+func (s *Service) ListDirectoryChildren(ctx context.Context, parentPath string, limit int, formatCategory domain.AssetFormatCategoryFilter) ([]domain.ExternalAssetDirectoryEntry, error) {
 	if !s.Enabled() {
 		return []domain.ExternalAssetDirectoryEntry{}, nil
 	}
@@ -359,10 +359,10 @@ func (s *Service) ListDirectoryChildren(ctx context.Context, parentPath string, 
 	if parentPath != "" && len(mounts) == 0 {
 		return []domain.ExternalAssetDirectoryEntry{}, nil
 	}
-	return browser.ListDirectoryChildren(ctx, parentPath, mounts, limit)
+	return browser.ListDirectoryChildren(ctx, parentPath, mounts, limit, formatCategory)
 }
 
-func (s *Service) ListDirectoryFiles(ctx context.Context, parentPath string, page int, size int) ([]*domain.ExternalAssetRecord, int64, error) {
+func (s *Service) ListDirectoryFiles(ctx context.Context, parentPath string, page int, size int, formatCategory domain.AssetFormatCategoryFilter) ([]*domain.ExternalAssetRecord, int64, error) {
 	if !s.Enabled() {
 		return []*domain.ExternalAssetRecord{}, 0, nil
 	}
@@ -375,7 +375,7 @@ func (s *Service) ListDirectoryFiles(ctx context.Context, parentPath string, pag
 	if parentPath == "" || len(mounts) == 0 {
 		return []*domain.ExternalAssetRecord{}, 0, nil
 	}
-	rows, total, err := browser.ListDirectoryFiles(ctx, parentPath, mounts, page, size)
+	rows, total, err := browser.ListDirectoryFiles(ctx, parentPath, mounts, page, size, formatCategory)
 	if err == nil {
 		s.schedulePreviewPrepare(rows)
 	}

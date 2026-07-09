@@ -5,10 +5,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { assetWorkbenchApi, type AssetWorkbenchProfile } from '@aw/shared/api/assetWorkbenchApi'
 import { useRoutePageCopy } from '@aw/app/useRoutePageCopy'
 import { usePageRequest } from '@aw/shared/composables/usePageRequest'
-import { maskAlipay, maskIdCard, maskPhone } from '@aw/shared/format/pii'
+import { maskPhone } from '@aw/shared/format/pii'
 import { chipClass, profileStatusMeta, workerTypeMeta } from '@aw/shared/format/status'
-import WorkbenchDataGrid from '@aw/shared/grid/WorkbenchDataGrid.vue'
-import AsyncBoundary from '@aw/shared/ui/AsyncBoundary.vue'
 
 const parttimeGrades = ['J1', 'J2', 'J3']
 const fulltimeGrades = ['P1', 'P2', 'P3', 'P4', 'S1', 'S2', 'M1', 'M2']
@@ -69,39 +67,6 @@ const focusedUserID = computed(() => Number(route.query.user_id || 0))
 const pendingProfiles = computed(() => profiles.value.filter((profile) => profileNeedsGrade(profile)))
 const readyProfiles = computed(() => profiles.value.filter((profile) => !profileNeedsGrade(profile)))
 const selectedProfileNeedsGrade = computed(() => selectedProfile.value ? profileNeedsGrade(selectedProfile.value) : false)
-const profileGridRows = computed(() =>
-  profiles.value.map((profile) => ({
-    ...profile,
-    worker_type_label: workerTypeMeta(profile.worker_type).label,
-    pricing_label: profilePricingLabel(profile),
-    status_label: profileStatusMeta(profile.status).label,
-    phone_label: maskPhone(profile.phone),
-    id_card_label: maskIdCard(profile.id_card),
-    alipay_label: maskAlipay(profile.alipay_account),
-    onboarded_label: formatDateInput(profile.onboarded_at),
-    grade_hidden_label: profile.grade_hidden ? '隐藏' : '展示',
-  })) as unknown as Record<string, unknown>[],
-)
-const profileGridColumns = computed<Array<{ key: string; label: string; width: number; align?: 'left' | 'right' | 'center' }>>(() => [
-  { key: 'real_name', label: '姓名', width: 128 },
-  { key: 'pricing_label', label: '计价状态', width: 108, align: 'center' },
-  { key: 'worker_type_label', label: '类型', width: 96 },
-  { key: 'job_grade', label: '岗级', width: 96 },
-  { key: 'phone_label', label: '手机', width: 132 },
-  { key: 'id_card_label', label: '证件', width: 150 },
-  { key: 'alipay_label', label: '支付账号', width: 140 },
-  { key: 'onboarded_label', label: '入职时间', width: 112 },
-  { key: 'grade_hidden_label', label: '定级展示', width: 104 },
-  { key: 'province', label: '省份', width: 96 },
-  { key: 'city', label: '城市', width: 96 },
-  { key: 'status_label', label: '状态', width: 100 },
-  { key: 'action', label: '操作', width: 96, align: 'center' },
-])
-
-function gridRowAsProfile(row: Record<string, unknown>) {
-  return row as unknown as AssetWorkbenchProfile
-}
-
 function profileNeedsGrade(profile: AssetWorkbenchProfile) {
   return profile.status !== 'active' || !profile.worker_type || !profile.job_grade
 }
@@ -157,12 +122,6 @@ async function saveProfile() {
   } finally {
     saving.value = false
   }
-}
-
-function selectProfile(row: Record<string, unknown>) {
-  const profile = profiles.value.find((item) => item.id === Number(row.id))
-  if (!profile) return
-  selectProfileRecord(profile)
 }
 
 function selectProfileRecord(profile: AssetWorkbenchProfile) {
@@ -257,7 +216,9 @@ onMounted(() => {
         <p>{{ pageSubtitle }}。工作台资料只服务资产交付和计件结算。岗级变化只影响新的提交快照。</p>
       </div>
       <div class="aw-page-bar__actions">
-        <button class="aw-secondary-button" type="button" @click="loadPeople">刷新</button>
+        <button class="aw-secondary-button" type="button" :disabled="loading" @click="loadPeople">
+          {{ loading ? '刷新中' : '刷新' }}
+        </button>
         <button class="aw-primary-button" type="button" :disabled="saving" @click="saveProfile">保存资料</button>
       </div>
     </div>
@@ -277,27 +238,34 @@ onMounted(() => {
       <div class="aw-grade-console__body">
         <div class="aw-grade-queue">
           <div class="aw-grade-queue__head">
-            <span>待处理人员</span>
+            <span>人员名单</span>
             <button v-if="focusedUserID > 0" class="aw-secondary-button" type="button" @click="clearFocusedProfile">
               查看全部
             </button>
           </div>
-          <div v-if="pendingProfiles.length" class="aw-grade-queue__list">
+          <div class="aw-inline-actions aw-inline-actions--compact">
+            <span class="aw-chip aw-chip--warn">待定级 {{ pendingProfiles.length }}</span>
+            <span class="aw-chip aw-chip--success">可计价 {{ readyProfiles.length }}</span>
+          </div>
+          <div v-if="profiles.length" class="aw-grade-queue__list aw-grade-queue__list--scroll">
             <button
-              v-for="profile in pendingProfiles.slice(0, 8)"
+              v-for="profile in profiles"
               :key="profile.id"
               type="button"
               class="aw-grade-queue__item"
               :class="{ 'aw-grade-queue__item--active': selectedProfile?.id === profile.id }"
               @click="selectProfileRecord(profile)"
             >
-              <strong>{{ profile.real_name || `用户 ${profile.user_id}` }}</strong>
-              <span>{{ workerTypeMeta(profile.worker_type).label }} · {{ profile.job_grade || '未定级' }}</span>
+              <span class="aw-grade-queue__item-head">
+                <strong>{{ profile.real_name || `用户 ${profile.user_id}` }}</strong>
+                <span :class="chipClass(profilePricingTone(profile))">{{ profilePricingLabel(profile) }}</span>
+              </span>
+              <span>{{ workerTypeMeta(profile.worker_type).label }} · {{ profile.job_grade || '未定级' }} · {{ maskPhone(profile.phone) }}</span>
             </button>
           </div>
           <div v-else class="aw-grade-queue__empty">
-            <strong>当前加载范围内没有待定级人员</strong>
-            <span>如作品仍显示待定级，可从作品行点击“去定级”直接定位。</span>
+            <strong>当前没有可维护人员</strong>
+            <span>刷新后仍为空时，请先在成员管理中开通资产工作台账号。</span>
           </div>
           <button class="aw-secondary-button" type="button" @click="goToPendingSubmissions">查看待定级作品</button>
         </div>
@@ -382,10 +350,14 @@ onMounted(() => {
           </div>
           <div class="aw-inline-actions">
             <button class="aw-primary-button" type="button" :disabled="hrSaving || !hrForm.job_grade" @click="saveHRProfile">
-              {{ hrSaving ? '保存中' : '保存定级' }}
+              {{ hrSaving ? '保存中' : '保存人员资料' }}
             </button>
             <button class="aw-secondary-button" type="button" @click="selectedProfile = null">取消选择</button>
           </div>
+        </div>
+        <div v-else class="aw-grade-editor aw-grade-editor--empty">
+          <strong>请选择人员</strong>
+          <span>从左侧人员名单选择姓名后，再维护人员类型、岗级、证件和支付资料。</span>
         </div>
       </div>
     </div>
@@ -458,72 +430,5 @@ onMounted(() => {
       </div>
     </div>
 
-    <div class="aw-data-surface">
-      <div class="aw-grid-toolbar">
-        <span>管理视图</span>
-        <span>{{ profiles.length }} 人</span>
-      </div>
-      <AsyncBoundary
-        :loading="loading"
-        :error="error"
-        loading-label="正在加载人员资料"
-        @retry="loadPeople"
-      >
-        <WorkbenchDataGrid
-          v-if="profiles.length"
-          :columns="profileGridColumns"
-          :rows="profileGridRows"
-          row-key="id"
-          storage-key="people-profiles"
-          group-by="worker_type_label"
-          row-clickable
-          :selected-row-key="selectedProfile?.id"
-          @row-click="selectProfile"
-        >
-          <template #cell="{ row, column, value }">
-            <button
-              v-if="column.key === 'real_name'"
-              type="button"
-              class="aw-link-button"
-              @click="selectProfile(row)"
-            >
-              {{ value || row.user_id }}
-            </button>
-            <span
-              v-else-if="column.key === 'worker_type_label'"
-              :class="chipClass(workerTypeMeta(gridRowAsProfile(row).worker_type).tone)"
-            >
-              {{ value }}
-            </span>
-            <span
-              v-else-if="column.key === 'pricing_label'"
-              :class="chipClass(profilePricingTone(gridRowAsProfile(row)))"
-            >
-              {{ value }}
-            </span>
-            <span v-else-if="column.key === 'job_grade'">{{ value || '未定级' }}</span>
-            <span
-              v-else-if="column.key === 'status_label'"
-              :class="chipClass(profileStatusMeta(gridRowAsProfile(row).status).tone)"
-            >
-              {{ value }}
-            </span>
-            <button
-              v-else-if="column.key === 'action'"
-              type="button"
-              class="aw-grid-button aw-grid-button--strong"
-              @click.stop="selectProfile(row)"
-            >
-              定级
-            </button>
-            <span v-else>{{ value || '—' }}</span>
-          </template>
-        </WorkbenchDataGrid>
-        <div v-else class="aw-empty-state">
-          <h3>没有可见资料</h3>
-          <p>普通提交人只维护自己的资料；管理和结算角色可查看人员列表。</p>
-        </div>
-      </AsyncBoundary>
-    </div>
   </section>
 </template>

@@ -202,7 +202,7 @@ func (s *Service) BrowseMaterials(ctx context.Context, query MaterialBrowseQuery
 
 	if query.Path == "" {
 		if includeSystem {
-			total, appErr := s.countSystemMaterials(ctx)
+			total, appErr := s.countSystemMaterials(ctx, query.FormatCategory)
 			if appErr != nil {
 				return nil, appErr
 			}
@@ -214,7 +214,7 @@ func (s *Service) BrowseMaterials(ctx context.Context, query MaterialBrowseQuery
 			})
 		}
 		if includeExternal && s.externalSvc != nil && s.externalSvc.Enabled() {
-			folders, err := s.externalSvc.ListDirectoryChildren(ctx, "", 2000)
+			folders, err := s.externalSvc.ListDirectoryChildren(ctx, "", 2000, query.FormatCategory)
 			if err != nil {
 				return nil, domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)
 			}
@@ -227,7 +227,7 @@ func (s *Service) BrowseMaterials(ctx context.Context, query MaterialBrowseQuery
 		if !includeSystem || query.Path != materialSystemRoot {
 			return result, nil
 		}
-		search, appErr := s.Search(ctx, materialSystemSearchQuery(query.Page, query.Size))
+		search, appErr := s.Search(ctx, materialSystemSearchQuery(query.Page, query.Size, query.FormatCategory))
 		if appErr != nil {
 			return nil, appErr
 		}
@@ -239,11 +239,11 @@ func (s *Service) BrowseMaterials(ctx context.Context, query MaterialBrowseQuery
 	}
 
 	if includeExternal && s.externalSvc != nil && s.externalSvc.Enabled() {
-		folders, err := s.externalSvc.ListDirectoryChildren(ctx, query.Path, 2000)
+		folders, err := s.externalSvc.ListDirectoryChildren(ctx, query.Path, 2000, query.FormatCategory)
 		if err != nil {
 			return nil, domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)
 		}
-		files, total, err := s.externalSvc.ListDirectoryFiles(ctx, query.Path, query.Page, query.Size)
+		files, total, err := s.externalSvc.ListDirectoryFiles(ctx, query.Path, query.Page, query.Size, query.FormatCategory)
 		if err != nil {
 			return nil, domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)
 		}
@@ -263,6 +263,15 @@ func normalizeMaterialBrowseQuery(query MaterialBrowseQuery) MaterialBrowseQuery
 	case domain.AssetResourceSourceSystem, domain.AssetResourceSourceExternal:
 	default:
 		query.Source = domain.AssetResourceSourceAll
+	}
+	switch query.FormatCategory {
+	case domain.AssetFormatCategoryImage,
+		domain.AssetFormatCategoryDesign,
+		domain.AssetFormatCategoryPDF,
+		domain.AssetFormatCategoryVideo,
+		domain.AssetFormatCategoryArchive:
+	default:
+		query.FormatCategory = domain.AssetFormatCategoryAll
 	}
 	if query.Page <= 0 {
 		query.Page = 1
@@ -288,20 +297,20 @@ func normalizeMaterialBrowsePath(raw string) string {
 	return cleaned
 }
 
-func materialSystemSearchQuery(page, size int) domain.AssetSearchQuery {
+func materialSystemSearchQuery(page, size int, formatCategory domain.AssetFormatCategoryFilter) domain.AssetSearchQuery {
 	return domain.AssetSearchQuery{
 		Page:           page,
 		Size:           size,
 		Source:         domain.AssetResourceSourceSystem,
 		UsableState:    domain.AssetUsableStateFilterAll,
-		FormatCategory: domain.AssetFormatCategoryAll,
+		FormatCategory: formatCategory,
 		IsArchived:     domain.AssetArchiveFilterFalse,
 		TaskStatus:     domain.AssetTaskStatusFilterAll,
 	}
 }
 
-func (s *Service) countSystemMaterials(ctx context.Context) (int64, *domain.AppError) {
-	search, appErr := s.Search(ctx, materialSystemSearchQuery(1, 1))
+func (s *Service) countSystemMaterials(ctx context.Context, formatCategory domain.AssetFormatCategoryFilter) (int64, *domain.AppError) {
+	search, appErr := s.Search(ctx, materialSystemSearchQuery(1, 1, formatCategory))
 	if appErr != nil {
 		return 0, appErr
 	}

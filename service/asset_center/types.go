@@ -102,10 +102,11 @@ type SearchResult struct {
 }
 
 type MaterialBrowseQuery struct {
-	Path   string
-	Source domain.AssetResourceSource
-	Page   int
-	Size   int
+	Path           string
+	Source         domain.AssetResourceSource
+	FormatCategory domain.AssetFormatCategoryFilter
+	Page           int
+	Size           int
 }
 
 type MaterialFolder struct {

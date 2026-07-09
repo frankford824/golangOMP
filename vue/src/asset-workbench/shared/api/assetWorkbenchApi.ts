@@ -772,17 +772,21 @@ export interface ClientMaterialSearchResult {
 }
 
 export type ClientMaterialBatchAction = 'publish' | 'enable' | 'disable' | 'remove'
+export type MaterialFormatCategory = 'all' | 'image' | 'design' | 'pdf' | 'video' | 'archive'
+export type MaterialSourceFilter = 'all' | 'system' | 'external'
 
 export interface ClientMaterialBatchUpdatePayload {
   action: ClientMaterialBatchAction
   items?: UpsertClientMaterialPayload[]
   folders?: Array<{
     path: string
-    source?: 'all' | 'system' | 'external'
+    source?: MaterialSourceFilter
+    format_category?: MaterialFormatCategory
     include_children?: boolean
   }>
   query?: string
-  source?: 'all' | 'system' | 'external'
+  source?: MaterialSourceFilter
+  format_category?: MaterialFormatCategory
   selection_scope?: 'selected' | 'current_page' | 'current_folder' | 'current_folder_recursive' | 'current_filter'
 }
 
@@ -1649,12 +1653,12 @@ export const assetWorkbenchApi = {
     return unwrap(res.data)
   },
 
-  async systemSearch(params: { q?: string; source?: 'all' | 'system' | 'external'; limit?: number; page?: number; page_size?: number } = {}, signal?: AbortSignal): Promise<SystemSearchResult> {
+  async systemSearch(params: { q?: string; source?: MaterialSourceFilter; format_category?: MaterialFormatCategory; limit?: number; page?: number; page_size?: number } = {}, signal?: AbortSignal): Promise<SystemSearchResult> {
     const res = await http.get<ApiEnvelope<SystemSearchResult>>('/v1/asset-workbench/system-search', { params, signal })
     return unwrap(res.data)
   },
 
-  async browseMaterials(params: { path?: string; source?: 'all' | 'system' | 'external'; limit?: number; page?: number; page_size?: number } = {}, signal?: AbortSignal): Promise<MaterialBrowseResult> {
+  async browseMaterials(params: { path?: string; source?: MaterialSourceFilter; format_category?: MaterialFormatCategory; limit?: number; page?: number; page_size?: number } = {}, signal?: AbortSignal): Promise<MaterialBrowseResult> {
     const res = await http.get<ApiEnvelope<MaterialBrowseResult>>('/v1/asset-workbench/materials/browse', { params, signal })
     return unwrap(res.data)
   },
@@ -1853,7 +1857,7 @@ export const assetWorkbenchApi = {
     return unwrap(res.data)
   },
 
-  async materialGroups(params: { q?: string; source?: 'all' | 'system' | 'external'; page?: number; page_size?: number } = {}, signal?: AbortSignal): Promise<MaterialGroupSearchResult> {
+  async materialGroups(params: { q?: string; source?: MaterialSourceFilter; format_category?: MaterialFormatCategory; page?: number; page_size?: number } = {}, signal?: AbortSignal): Promise<MaterialGroupSearchResult> {
     const res = await http.get<ApiEnvelope<MaterialGroupSearchResult>>('/v1/asset-workbench/materials/groups', { params, signal })
     return unwrap(res.data)
   },

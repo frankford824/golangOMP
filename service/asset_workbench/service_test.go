@@ -565,6 +565,38 @@ func (r *bootstrapAccessRepo) GetProfileByUserID(context.Context, int64) (*domai
 	return nil, sql.ErrNoRows
 }
 
+type roleBackfillAccessRepo struct {
+	repo.AssetWorkbenchRepo
+	membership *domain.AppMembership
+	event      *domain.AppIdentityEvent
+}
+
+func (r *roleBackfillAccessRepo) GetMembership(_ context.Context, appCode string, userID int64) (*domain.AppMembership, error) {
+	if appCode != domain.AssetWorkbenchAppCode || userID != 303 || r.membership == nil {
+		return nil, sql.ErrNoRows
+	}
+	copyMembership := *r.membership
+	return &copyMembership, nil
+}
+
+func (r *roleBackfillAccessRepo) UpsertMembership(_ context.Context, _ repo.Tx, membership *domain.AppMembership) (*domain.AppMembership, error) {
+	copyMembership := *membership
+	copyMembership.ID = 1
+	r.membership = &copyMembership
+	return &copyMembership, nil
+}
+
+func (r *roleBackfillAccessRepo) CreateAppIdentityEvent(_ context.Context, _ repo.Tx, event *domain.AppIdentityEvent) (*domain.AppIdentityEvent, error) {
+	copyEvent := *event
+	copyEvent.ID = 1
+	r.event = &copyEvent
+	return &copyEvent, nil
+}
+
+func (r *roleBackfillAccessRepo) GetProfileByUserID(context.Context, int64) (*domain.AssetWorkbenchProfile, error) {
+	return nil, sql.ErrNoRows
+}
+
 type memberRoleUpdateRepo struct {
 	repo.AssetWorkbenchRepo
 	listFilters []repo.AssetWorkbenchMemberFilter
@@ -2241,6 +2273,34 @@ func TestBootstrapDerivesWorkbenchCapabilitiesForHRAndSuperAdmin(t *testing.T) {
 		if !containsString(superResult.Capabilities, capability) {
 			t.Fatalf("super admin capabilities = %+v, missing %s", superResult.Capabilities, capability)
 		}
+	}
+}
+
+func TestEntryAutoOpensMembershipForExistingAssetRoles(t *testing.T) {
+	workbenchRepo := &roleBackfillAccessRepo{}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}))
+
+	result, appErr := svc.Entry(context.Background(), domain.RequestActor{
+		ID:    303,
+		Roles: []domain.Role{domain.RoleAssetSubmitter, domain.RoleAssetManager},
+	})
+	if appErr != nil {
+		t.Fatalf("Entry() error = %+v", appErr)
+	}
+	if result == nil || result.State != "ready" {
+		t.Fatalf("entry result = %+v, want ready", result)
+	}
+	if workbenchRepo.membership == nil || workbenchRepo.membership.Status != domain.AppMembershipStatusActive {
+		t.Fatalf("membership = %+v, want active", workbenchRepo.membership)
+	}
+	if workbenchRepo.membership.Source != domain.AppMembershipSourceMainOpsOpened {
+		t.Fatalf("membership source = %q, want %q", workbenchRepo.membership.Source, domain.AppMembershipSourceMainOpsOpened)
+	}
+	if workbenchRepo.membership.IdentityType != domain.AppMembershipIdentityStaff {
+		t.Fatalf("membership identity = %q, want %q", workbenchRepo.membership.IdentityType, domain.AppMembershipIdentityStaff)
+	}
+	if workbenchRepo.event == nil || workbenchRepo.event.Action != domain.AppIdentityActionAccessOpened {
+		t.Fatalf("identity event = %+v, want access opened", workbenchRepo.event)
 	}
 }
 
@@ -4080,7 +4140,7 @@ func TestBrowseMaterialsVirtualQuarkRootUsesVisibleFolderCounts(t *testing.T) {
 	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithSystemAssetSearcher(provider))
 	actor := domain.RequestActor{ID: 1, Roles: []domain.Role{domain.RoleAssetManager}}
 
-	root, appErr := svc.BrowseMaterials(context.Background(), actor, "", 1, 100, "all")
+	root, appErr := svc.BrowseMaterials(context.Background(), actor, "", 1, 100, "all", "all")
 	if appErr != nil {
 		t.Fatalf("BrowseMaterials(root) error = %+v", appErr)
 	}
@@ -4088,7 +4148,7 @@ func TestBrowseMaterialsVirtualQuarkRootUsesVisibleFolderCounts(t *testing.T) {
 		t.Fatalf("root folders = %+v, want /quark count from visible roots", root.Folders)
 	}
 
-	quark, appErr := svc.BrowseMaterials(context.Background(), actor, "/quark", 1, 100, "all")
+	quark, appErr := svc.BrowseMaterials(context.Background(), actor, "/quark", 1, 100, "all", "all")
 	if appErr != nil {
 		t.Fatalf("BrowseMaterials(/quark) error = %+v", appErr)
 	}

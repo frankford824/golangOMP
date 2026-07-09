@@ -13677,6 +13677,7 @@ curl -X POST https://api.example.com/v1/asset-workbench/files/batch-delete \
 |---|---|---|---|---|
 | `q` | query | string | 否 | - |
 | `source` | query | enum(all/system/external) | 否 | Source bucket for publishable material search. Defaults to `all`. |
+| `format_category` | query | enum(all/image/design/pdf/video/archive) | 否 | Optional coarse file format category for narrowing batchable material search results. |
 | `page` | query | integer | 否 | - |
 | `page_size` | query | integer | 否 | - |
 | `limit` | query | integer | 否 | - |
@@ -13743,6 +13744,7 @@ curl -X GET https://api.example.com/v1/asset-workbench/system-search \
 |---|---|---|---|---|
 | `q` | query | string | 否 | - |
 | `source` | query | enum(all/system/external) | 否 | - |
+| `format_category` | query | enum(all/image/design/pdf/video/archive) | 否 | Optional coarse file format category applied before grouping. |
 | `page` | query | integer | 否 | - |
 | `page_size` | query | integer | 否 | - |
 
@@ -13873,6 +13875,7 @@ curl -X GET https://api.example.com/v1/asset-workbench/materials/group-files \
 |---|---|---|---|---|
 | `path` | query | string | 否 | Virtual folder path. Empty string means root; examples include `/系统资源`, `/quark`, and `/p3/仓库素材区`. |
 | `source` | query | enum(all/system/external) | 否 | Source bucket to browse. Defaults to `all`. |
+| `format_category` | query | enum(all/image/design/pdf/video/archive) | 否 | Optional coarse file format category for direct files returned from the current folder. |
 | `page` | query | integer | 否 | - |
 | `page_size` | query | integer | 否 | - |
 | `limit` | query | integer | 否 | - |
@@ -14803,6 +14806,7 @@ Content-Type: `application/json`
 | `folders` | array<object> | 否 | Folder scopes resolved by backend. `include_children=true` recursively includes visible child folders up to the synchronous limit. |
 | `query` | string | 否 | Optional current search keyword scope. |
 | `source` | enum(all/system/external) | 否 | - |
+| `format_category` | enum(all/image/design/pdf/video/archive) | 否 | - |
 | `selection_scope` | enum(selected/current_page/current_folder/current_folder_recursive/current_filter) | 否 | - |
 
 ### 响应体 schema

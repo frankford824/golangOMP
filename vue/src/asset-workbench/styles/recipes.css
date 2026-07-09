@@ -213,6 +213,32 @@
   font-weight: var(--aw-weight-strong);
 }
 
+.aw-field__label {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--aw-space-2);
+}
+
+.aw-field__mark {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid color-mix(in srgb, var(--aw-danger) 26%, var(--aw-hairline));
+  border-radius: var(--aw-radius-xs);
+  background: color-mix(in srgb, var(--aw-danger) 8%, var(--aw-surface));
+  color: var(--aw-danger);
+  padding: 1px 5px;
+  font-size: 11px;
+  font-weight: var(--aw-weight-strong);
+  line-height: 1.35;
+}
+
+.aw-field__mark--optional {
+  border-color: var(--aw-hairline);
+  background: var(--aw-paper);
+  color: var(--aw-ink-muted);
+}
+
 .aw-form-error {
   margin: 0;
   color: var(--aw-danger);
@@ -2574,6 +2600,12 @@ body.aw-submission-dialog-locked {
   gap: var(--aw-space-2);
 }
 
+.aw-grade-queue__list--scroll {
+  max-height: min(520px, 58vh);
+  overflow: auto;
+  padding-right: 2px;
+}
+
 .aw-grade-queue__item {
   display: grid;
   min-width: 0;
@@ -2586,13 +2618,28 @@ body.aw-submission-dialog-locked {
   text-align: left;
 }
 
+.aw-grade-queue__item-head {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--aw-space-2);
+}
+
+.aw-grade-queue__item-head strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .aw-grade-queue__item:hover,
 .aw-grade-queue__item--active {
   border-color: color-mix(in srgb, var(--aw-accent) 46%, var(--aw-hairline));
   background: color-mix(in srgb, var(--aw-accent) 8%, var(--aw-surface));
 }
 
-.aw-grade-queue__item span,
+.aw-grade-queue__item > span:not(.aw-grade-queue__item-head),
 .aw-grade-queue__empty span {
   color: var(--aw-ink-muted);
   font-size: var(--aw-font-size-xs);
@@ -2616,6 +2663,18 @@ body.aw-submission-dialog-locked {
 
 .aw-grade-editor__head h3 {
   margin: 0;
+}
+
+.aw-grade-editor--empty {
+  min-height: 280px;
+  place-content: center;
+  text-align: center;
+  color: var(--aw-ink-muted);
+}
+
+.aw-grade-editor--empty strong {
+  color: var(--aw-ink);
+  font-size: var(--aw-font-size-lg);
 }
 
 .aw-panel--stage {
@@ -6155,9 +6214,9 @@ body.aw-submission-dialog-locked {
 }
 
 .aw-drive__search--inline {
-  flex: 1 1 430px;
+  flex: 1 1 720px;
   min-width: 320px;
-  max-width: 620px;
+  max-width: 920px;
   min-height: 44px;
 }
 
@@ -6815,10 +6874,55 @@ body.aw-submission-dialog-locked {
   color: var(--aw-ink-2);
 }
 
+.aw-drive__material-filter {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  min-height: 34px;
+  margin-left: 4px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--aw-accent) 18%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--aw-accent) 7%, var(--aw-surface));
+  color: var(--aw-ink);
+  gap: 6px;
+}
+
+.aw-drive__material-filter span {
+  color: var(--aw-ink-muted);
+  font-size: var(--aw-font-size-xs);
+  white-space: nowrap;
+}
+
+.aw-root .aw-drive__material-filter select {
+  min-width: 74px;
+  min-height: 30px;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  appearance: auto;
+  border-radius: 0;
+  background: transparent;
+  color: var(--aw-ink);
+  font: inherit;
+  font-size: var(--aw-font-size-sm);
+  font-weight: var(--aw-weight-strong);
+  cursor: pointer;
+  box-shadow: none;
+}
+
+.aw-root .aw-drive__material-filter select:hover,
+.aw-root .aw-drive__material-filter select:focus {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
 .aw-drive__search-context {
   display: inline-flex;
   align-items: center;
   flex: 0 0 auto;
+  max-width: 180px;
   min-height: 34px;
   margin-left: 4px;
   padding: 0 13px;
@@ -6827,6 +6931,8 @@ body.aw-submission-dialog-locked {
   color: var(--aw-ink);
   font-size: var(--aw-font-size-sm);
   font-weight: var(--aw-weight-strong);
+  overflow: hidden;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -8152,7 +8258,8 @@ body.aw-submission-dialog-locked {
   }
 
   .aw-drive__search-context,
-  .aw-drive__scope-select {
+  .aw-drive__scope-select,
+  .aw-drive__material-filter {
     min-width: auto;
   }
 
@@ -8270,6 +8377,19 @@ body.aw-submission-dialog-locked {
   .aw-drive__search-context,
   .aw-drive__scope-select {
     max-width: 88px;
+  }
+
+  .aw-drive__material-filter {
+    padding-inline: 8px;
+  }
+
+  .aw-drive__material-filter span {
+    display: none;
+  }
+
+  .aw-root .aw-drive__material-filter select {
+    min-width: 58px;
+    font-size: var(--aw-font-size-xs);
   }
 
   .aw-root .aw-drive__scope-select select {

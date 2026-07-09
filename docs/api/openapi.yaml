@@ -22819,6 +22819,13 @@ paths:
             enum: [all, system, external]
             default: all
         - in: query
+          name: format_category
+          description: Optional coarse file format category for narrowing batchable material search results.
+          schema: &AssetWorkbenchMaterialFormatCategory
+            type: string
+            enum: [all, image, design, pdf, video, archive]
+            default: all
+        - in: query
           name: page
           schema: { type: integer, minimum: 1 }
         - in: query
@@ -22888,6 +22895,10 @@ paths:
         - in: query
           name: source
           schema: { type: string, enum: [all, system, external] }
+        - in: query
+          name: format_category
+          description: Optional coarse file format category applied before grouping.
+          schema: *AssetWorkbenchMaterialFormatCategory
         - in: query
           name: page
           schema: { type: integer, minimum: 1 }
@@ -22989,6 +23000,10 @@ paths:
             type: string
             enum: [all, system, external]
             default: all
+        - in: query
+          name: format_category
+          description: Optional coarse file format category for direct files returned from the current folder.
+          schema: *AssetWorkbenchMaterialFormatCategory
         - in: query
           name: page
           schema: { type: integer, minimum: 1 }
@@ -23717,9 +23732,11 @@ paths:
                     properties:
                       path: { type: string }
                       source: { type: string, enum: [all, system, external] }
+                      format_category: *AssetWorkbenchMaterialFormatCategory
                       include_children: { type: boolean }
                 query: { type: string, description: Optional current search keyword scope. }
                 source: { type: string, enum: [all, system, external] }
+                format_category: *AssetWorkbenchMaterialFormatCategory
                 selection_scope: { type: string, enum: [selected, current_page, current_folder, current_folder_recursive, current_filter] }
       responses:
         '200':

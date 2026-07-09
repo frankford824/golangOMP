@@ -95,11 +95,12 @@ func (r *externalAssetRepo) Search(ctx context.Context, query domain.ExternalAss
 	return items, total, err
 }
 
-func (r *externalAssetRepo) ListDirectoryChildren(ctx context.Context, parentPath string, mountPaths []string, limit int) ([]domain.ExternalAssetDirectoryEntry, error) {
+func (r *externalAssetRepo) ListDirectoryChildren(ctx context.Context, parentPath string, mountPaths []string, limit int, formatCategory domain.AssetFormatCategoryFilter) ([]domain.ExternalAssetDirectoryEntry, error) {
 	parentPath = cleanExternalAssetBrowsePath(parentPath)
 	if limit <= 0 || limit > 2000 {
 		limit = 1000
 	}
+	normalizedFormat := (domain.ExternalAssetSearchQuery{FormatCategory: formatCategory}).Normalized().FormatCategory
 	clauses, args := externalAssetDirectoryClauses(parentPath, mountPaths)
 	args = append(args, limit)
 	rows, err := r.db.db.QueryContext(ctx, `
@@ -131,10 +132,75 @@ func (r *externalAssetRepo) ListDirectoryChildren(ctx context.Context, parentPat
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate external asset directory children: %w", err)
 	}
+	if normalizedFormat != domain.AssetFormatCategoryAll {
+		counts, err := r.countDirectoryChildrenByFormat(ctx, parentPath, mountPaths, normalizedFormat)
+		if err != nil {
+			return nil, err
+		}
+		for idx := range out {
+			count := counts[out[idx].Path]
+			out[idx].FileCount = count.FileCount
+			out[idx].DirectFileCount = count.DirectFileCount
+		}
+	}
 	return out, nil
 }
 
-func (r *externalAssetRepo) ListDirectoryFiles(ctx context.Context, parentPath string, mountPaths []string, page int, size int) ([]*domain.ExternalAssetRecord, int64, error) {
+type externalAssetDirectoryChildCount struct {
+	FileCount       int64
+	DirectFileCount int64
+}
+
+func (r *externalAssetRepo) countDirectoryChildrenByFormat(ctx context.Context, parentPath string, mountPaths []string, formatCategory domain.AssetFormatCategoryFilter) (map[string]externalAssetDirectoryChildCount, error) {
+	parentPath = cleanExternalAssetBrowsePath(parentPath)
+	clauses, args := externalAssetVisibleClauses(mountPaths)
+	if parentPath != "" {
+		clauses = append(clauses, `origin_path LIKE ?`)
+		args = append(args, parentPath+"/%")
+	}
+	clauses, args = appendAssetFormatCategoryWhere(
+		clauses,
+		args,
+		[]string{`LOWER(file_name)`, `LOWER(COALESCE(file_ext, ''))`},
+		`LOWER(COALESCE(mime_type, ''))`,
+		formatCategory,
+	)
+	childExpr := `CONCAT('/', SUBSTRING_INDEX(TRIM(LEADING '/' FROM origin_path), '/', 1))`
+	queryArgs := []interface{}{}
+	if parentPath != "" {
+		childExpr = `CONCAT(?, '/', SUBSTRING_INDEX(SUBSTRING(origin_path, CHAR_LENGTH(?) + 2), '/', 1))`
+		queryArgs = append(queryArgs, parentPath, parentPath)
+	}
+	queryArgs = append(queryArgs, args...)
+	rows, err := r.db.db.QueryContext(ctx, `
+		SELECT child_path, COUNT(*) AS file_count, COALESCE(SUM(CASE WHEN parent_path = child_path THEN 1 ELSE 0 END), 0) AS direct_file_count
+		  FROM (
+			SELECT `+childExpr+` AS child_path, parent_path
+			  FROM external_asset_records
+			 WHERE `+strings.Join(clauses, " AND ")+`
+		  ) filtered
+		 WHERE child_path <> ''
+		 GROUP BY child_path`, queryArgs...)
+	if err != nil {
+		return nil, fmt.Errorf("count external asset directory children by format: %w", err)
+	}
+	defer rows.Close()
+	counts := map[string]externalAssetDirectoryChildCount{}
+	for rows.Next() {
+		var childPath string
+		var count externalAssetDirectoryChildCount
+		if err := rows.Scan(&childPath, &count.FileCount, &count.DirectFileCount); err != nil {
+			return nil, fmt.Errorf("scan external asset directory child format count: %w", err)
+		}
+		counts[cleanExternalAssetBrowsePath(childPath)] = count
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate external asset directory child format counts: %w", err)
+	}
+	return counts, nil
+}
+
+func (r *externalAssetRepo) ListDirectoryFiles(ctx context.Context, parentPath string, mountPaths []string, page int, size int, formatCategory domain.AssetFormatCategoryFilter) ([]*domain.ExternalAssetRecord, int64, error) {
 	parentPath = cleanExternalAssetBrowsePath(parentPath)
 	if page <= 0 {
 		page = 1
@@ -148,6 +214,15 @@ func (r *externalAssetRepo) ListDirectoryFiles(ctx context.Context, parentPath s
 	clauses, args := externalAssetVisibleClauses(mountPaths)
 	clauses = append(clauses, `parent_path = ?`)
 	args = append(args, parentPath)
+	if normalizedFormat := (domain.ExternalAssetSearchQuery{FormatCategory: formatCategory}).Normalized().FormatCategory; normalizedFormat != domain.AssetFormatCategoryAll {
+		clauses, args = appendAssetFormatCategoryWhere(
+			clauses,
+			args,
+			[]string{`LOWER(file_name)`, `LOWER(COALESCE(file_ext, ''))`},
+			`LOWER(COALESCE(mime_type, ''))`,
+			normalizedFormat,
+		)
+	}
 	where := ` WHERE ` + strings.Join(clauses, " AND ")
 	var total int64
 	if err := r.db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM external_asset_records FORCE INDEX (idx_external_asset_browse_parent)`+where, args...).Scan(&total); err != nil {

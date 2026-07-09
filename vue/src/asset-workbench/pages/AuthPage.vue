@@ -147,30 +147,30 @@ async function submitRegister() {
         <p class="aw-auth__lead">提交后进入成员开通流程。</p>
         <div class="aw-form-grid">
           <label class="aw-field">
-            <span>账号</span>
+            <span class="aw-field__label">账号 <small class="aw-field__mark">必填</small></span>
             <input v-model.trim="registerForm.account" autocomplete="username" placeholder="用于登录" required autofocus />
           </label>
           <label class="aw-field">
-            <span>姓名</span>
+            <span class="aw-field__label">姓名 <small class="aw-field__mark">必填</small></span>
             <input v-model.trim="registerForm.name" autocomplete="name" placeholder="真实姓名" required />
           </label>
           <label class="aw-field">
-            <span>手机号</span>
+            <span class="aw-field__label">手机号 <small class="aw-field__mark">必填</small></span>
             <input v-model.trim="registerForm.phone" autocomplete="tel" inputmode="tel" placeholder="手机号" required />
           </label>
           <label class="aw-field">
-            <span>邮箱</span>
+            <span class="aw-field__label">邮箱 <small class="aw-field__mark aw-field__mark--optional">选填</small></span>
             <input v-model.trim="registerForm.email" type="email" autocomplete="email" placeholder="选填" />
           </label>
           <label class="aw-field">
-            <span>所属类型</span>
-            <select v-model="registerForm.worker_type" required>
+            <span class="aw-field__label">人员类型 <small class="aw-field__mark aw-field__mark--optional">选填</small></span>
+            <select v-model="registerForm.worker_type">
               <option value="parttime">兼职</option>
               <option value="fulltime">全职</option>
             </select>
           </label>
           <label class="aw-field">
-            <span>性别</span>
+            <span class="aw-field__label">性别 <small class="aw-field__mark aw-field__mark--optional">选填</small></span>
             <select v-model="registerForm.gender">
               <option value="">不填写</option>
               <option value="female">女</option>
@@ -178,23 +178,23 @@ async function submitRegister() {
             </select>
           </label>
           <label class="aw-field">
-            <span>省份</span>
+            <span class="aw-field__label">省份 <small class="aw-field__mark aw-field__mark--optional">选填</small></span>
             <input v-model.trim="registerForm.province" autocomplete="address-level1" placeholder="选填" />
           </label>
           <label class="aw-field">
-            <span>城市</span>
+            <span class="aw-field__label">城市 <small class="aw-field__mark aw-field__mark--optional">选填</small></span>
             <input v-model.trim="registerForm.city" autocomplete="address-level2" placeholder="选填" />
           </label>
           <label class="aw-field aw-form-grid__full">
-            <span>身份证号</span>
+            <span class="aw-field__label">身份证号 <small class="aw-field__mark aw-field__mark--optional">选填</small></span>
             <input v-model.trim="registerForm.id_card" autocomplete="off" placeholder="选填" />
           </label>
           <label class="aw-field aw-form-grid__full">
-            <span>支付宝账号</span>
+            <span class="aw-field__label">支付宝账号 <small class="aw-field__mark aw-field__mark--optional">选填</small></span>
             <input v-model.trim="registerForm.alipay_account" autocomplete="off" placeholder="选填" />
           </label>
           <label class="aw-field aw-form-grid__full">
-            <span>密码</span>
+            <span class="aw-field__label">密码 <small class="aw-field__mark">必填</small></span>
             <input v-model="registerForm.password" type="password" autocomplete="new-password" placeholder="设置登录密码" required />
           </label>
         </div>

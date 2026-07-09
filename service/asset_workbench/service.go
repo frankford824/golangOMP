@@ -467,12 +467,14 @@ type BatchUpdateClientMaterialsParams struct {
 	Folders        []ClientMaterialBatchFolderParams `json:"folders"`
 	Query          string                            `json:"query"`
 	Source         string                            `json:"source"`
+	FormatCategory string                            `json:"format_category"`
 	SelectionScope string                            `json:"selection_scope"`
 }
 
 type ClientMaterialBatchFolderParams struct {
 	Path            string `json:"path"`
 	Source          string `json:"source"`
+	FormatCategory  string `json:"format_category"`
 	IncludeChildren bool   `json:"include_children"`
 }
 
@@ -556,10 +558,11 @@ type ClientMaterialSearchResult struct {
 }
 
 type MaterialGroupSearchParams struct {
-	Query    string `json:"q"`
-	Source   string `json:"source"`
-	Page     int    `json:"page"`
-	PageSize int    `json:"page_size"`
+	Query          string `json:"q"`
+	Source         string `json:"source"`
+	FormatCategory string `json:"format_category"`
+	Page           int    `json:"page"`
+	PageSize       int    `json:"page_size"`
 }
 
 type MaterialGroupRow struct {
@@ -1152,22 +1155,40 @@ func (s *Service) ResolveAssetWorkbenchAccess(ctx context.Context, actor domain.
 		return &AssetWorkbenchAccessState{MembershipStatus: "not_member", DeniedReason: "Authentication required."}, nil
 	}
 	membership, err := s.repo.GetMembership(ctx, domain.AssetWorkbenchAppCode, actor.ID)
-	if errors.Is(err, sql.ErrNoRows) && actorHasAny(actor, domain.RoleSuperAdmin, domain.RoleHRAdmin) && s.tx != nil {
-		if txErr := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
-			openedBy := actor.ID
-			_, err := s.repo.UpsertMembership(ctx, tx, &domain.AppMembership{
-				AppCode:      domain.AssetWorkbenchAppCode,
-				UserID:       actor.ID,
-				Status:       domain.AppMembershipStatusActive,
-				IdentityType: domain.AppMembershipIdentityStaff,
-				Source:       domain.AppMembershipSourceGlobalAdminAuto,
-				OpenedBy:     &openedBy,
-			})
-			return err
-		}); txErr != nil {
-			return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to auto-open asset workbench access.", txErr.Error())
+	if errors.Is(err, sql.ErrNoRows) && s.tx != nil {
+		source := ""
+		reason := ""
+		identityType := domain.AppMembershipIdentityStaff
+		switch {
+		case actorHasAny(actor, domain.RoleSuperAdmin, domain.RoleHRAdmin):
+			source = domain.AppMembershipSourceGlobalAdminAuto
+			reason = "全局管理角色自动开通资产工作台"
+		case actorHasAny(actor, domain.RoleAssetSubmitter, domain.RoleAssetManager, domain.RoleAssetTemplateAdmin, domain.RoleAssetSettlement):
+			source = domain.AppMembershipSourceMainOpsOpened
+			reason = "已有资产工作台角色，自动补齐开通状态"
 		}
-		membership, err = s.repo.GetMembership(ctx, domain.AssetWorkbenchAppCode, actor.ID)
+		if source != "" {
+			var opened *domain.AppMembership
+			if txErr := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+				openedBy := actor.ID
+				var upsertErr error
+				opened, upsertErr = s.repo.UpsertMembership(ctx, tx, &domain.AppMembership{
+					AppCode:      domain.AssetWorkbenchAppCode,
+					UserID:       actor.ID,
+					Status:       domain.AppMembershipStatusActive,
+					IdentityType: identityType,
+					Source:       source,
+					OpenedBy:     &openedBy,
+				})
+				if upsertErr != nil {
+					return upsertErr
+				}
+				return s.appendIdentityEvent(ctx, tx, actor.ID, actor.ID, domain.AppIdentityActionAccessOpened, nil, opened, reason)
+			}); txErr != nil {
+				return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to auto-open asset workbench access.", txErr.Error())
+			}
+			membership, err = s.repo.GetMembership(ctx, domain.AssetWorkbenchAppCode, actor.ID)
+		}
 	}
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to resolve asset workbench access.", err.Error())
@@ -5224,7 +5245,7 @@ func (s *Service) OverviewSearch(ctx context.Context, actor domain.RequestActor,
 	return &OverviewSearchResult{Items: items, Total: total, Page: page, Size: pageSize}, nil
 }
 
-func (s *Service) SystemSearch(ctx context.Context, actor domain.RequestActor, query string, page int, pageSize int, source string) (*SystemSearchResult, *domain.AppError) {
+func (s *Service) SystemSearch(ctx context.Context, actor domain.RequestActor, query string, page int, pageSize int, source string, formatCategory string) (*SystemSearchResult, *domain.AppError) {
 	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleSuperAdmin) {
 		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset managers can search system assets from workbench.", nil)
 	}
@@ -5245,7 +5266,7 @@ func (s *Service) SystemSearch(ctx context.Context, actor domain.RequestActor, q
 		Size:           pageSize,
 		Source:         sourceFilter,
 		UsableState:    domain.AssetUsableStateFilterAll,
-		FormatCategory: domain.AssetFormatCategoryAll,
+		FormatCategory: domain.AssetFormatCategoryFilter(strings.TrimSpace(formatCategory)),
 		IsArchived:     domain.AssetArchiveFilterFalse,
 		TaskStatus:     domain.AssetTaskStatusFilterAll,
 	})
@@ -5260,7 +5281,7 @@ func (s *Service) SystemSearch(ctx context.Context, actor domain.RequestActor, q
 	return &SystemSearchResult{Items: items, Total: total, Page: result.Page, Size: result.Size}, nil
 }
 
-func (s *Service) BrowseMaterials(ctx context.Context, actor domain.RequestActor, path string, page int, pageSize int, source string) (*assetcenter.MaterialBrowseResult, *domain.AppError) {
+func (s *Service) BrowseMaterials(ctx context.Context, actor domain.RequestActor, path string, page int, pageSize int, source string, formatCategory string) (*assetcenter.MaterialBrowseResult, *domain.AppError) {
 	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleSuperAdmin) {
 		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset managers can browse material assets from workbench.", nil)
 	}
@@ -5286,14 +5307,15 @@ func (s *Service) BrowseMaterials(ctx context.Context, actor domain.RequestActor
 		}, nil
 	}
 	if workbenchIsVirtualQuarkRoot(publicPath) {
-		return s.browseWorkbenchVirtualQuarkRoot(ctx, browser, page, pageSize, source)
+		return s.browseWorkbenchVirtualQuarkRoot(ctx, browser, page, pageSize, source, formatCategory)
 	}
 	actualPath := workbenchMaterialActualPath(publicPath)
 	result, appErr := browser.BrowseMaterials(ctx, assetcenter.MaterialBrowseQuery{
-		Path:   actualPath,
-		Source: domain.NormalizeAssetResourceSource(source),
-		Page:   page,
-		Size:   pageSize,
+		Path:           actualPath,
+		Source:         domain.NormalizeAssetResourceSource(source),
+		FormatCategory: domain.AssetFormatCategoryFilter(strings.TrimSpace(formatCategory)),
+		Page:           page,
+		Size:           pageSize,
 	})
 	if appErr != nil {
 		return nil, appErr
@@ -5304,7 +5326,7 @@ func (s *Service) BrowseMaterials(ctx context.Context, actor domain.RequestActor
 	result.Folders = rewriteWorkbenchVirtualQuarkFolders(result.Folders)
 	if publicPath == "" {
 		var hydrateErr *domain.AppError
-		result.Folders, hydrateErr = s.hydrateWorkbenchVirtualQuarkRootFolder(ctx, browser, result.Folders, source)
+		result.Folders, hydrateErr = s.hydrateWorkbenchVirtualQuarkRootFolder(ctx, browser, result.Folders, source, formatCategory)
 		if hydrateErr != nil {
 			return nil, hydrateErr
 		}
@@ -5317,12 +5339,13 @@ func (s *Service) BrowseMaterials(ctx context.Context, actor domain.RequestActor
 	return result, nil
 }
 
-func (s *Service) browseWorkbenchVirtualQuarkRoot(ctx context.Context, browser SystemMaterialBrowser, page int, pageSize int, source string) (*assetcenter.MaterialBrowseResult, *domain.AppError) {
+func (s *Service) browseWorkbenchVirtualQuarkRoot(ctx context.Context, browser SystemMaterialBrowser, page int, pageSize int, source string, formatCategory string) (*assetcenter.MaterialBrowseResult, *domain.AppError) {
 	result, appErr := browser.BrowseMaterials(ctx, assetcenter.MaterialBrowseQuery{
-		Path:   workbenchQuarkMaterialActualBase,
-		Source: domain.NormalizeAssetResourceSource(source),
-		Page:   page,
-		Size:   pageSize,
+		Path:           workbenchQuarkMaterialActualBase,
+		Source:         domain.NormalizeAssetResourceSource(source),
+		FormatCategory: domain.AssetFormatCategoryFilter(strings.TrimSpace(formatCategory)),
+		Page:           page,
+		Size:           pageSize,
 	})
 	if appErr != nil {
 		return nil, appErr
@@ -5354,7 +5377,7 @@ func (s *Service) browseWorkbenchVirtualQuarkRoot(ctx context.Context, browser S
 	}, nil
 }
 
-func (s *Service) hydrateWorkbenchVirtualQuarkRootFolder(ctx context.Context, browser SystemMaterialBrowser, folders []assetcenter.MaterialFolder, source string) ([]assetcenter.MaterialFolder, *domain.AppError) {
+func (s *Service) hydrateWorkbenchVirtualQuarkRootFolder(ctx context.Context, browser SystemMaterialBrowser, folders []assetcenter.MaterialFolder, source string, formatCategory string) ([]assetcenter.MaterialFolder, *domain.AppError) {
 	quarkIndex := -1
 	for index := range folders {
 		if workbenchIsVirtualQuarkRoot(folders[index].Path) {
@@ -5365,7 +5388,7 @@ func (s *Service) hydrateWorkbenchVirtualQuarkRootFolder(ctx context.Context, br
 	if quarkIndex < 0 {
 		return folders, nil
 	}
-	virtualRoot, appErr := s.browseWorkbenchVirtualQuarkRoot(ctx, browser, 1, 100, source)
+	virtualRoot, appErr := s.browseWorkbenchVirtualQuarkRoot(ctx, browser, 1, 100, source, formatCategory)
 	if appErr != nil {
 		return nil, appErr
 	}
@@ -5433,7 +5456,7 @@ func (s *Service) MaterialGroups(ctx context.Context, actor domain.RequestActor,
 		Size:           500,
 		Source:         sourceFilter,
 		UsableState:    domain.AssetUsableStateFilterAll,
-		FormatCategory: domain.AssetFormatCategoryAll,
+		FormatCategory: domain.AssetFormatCategoryFilter(strings.TrimSpace(params.FormatCategory)),
 		IsArchived:     domain.AssetArchiveFilterFalse,
 		TaskStatus:     domain.AssetTaskStatusFilterAll,
 	})
@@ -6178,7 +6201,7 @@ func (s *Service) resolveClientMaterialBatchCandidates(ctx context.Context, acto
 	if strings.TrimSpace(params.Query) != "" {
 		page := 1
 		for {
-			search, appErr := s.SystemSearch(ctx, actor, params.Query, page, 100, params.Source)
+			search, appErr := s.SystemSearch(ctx, actor, params.Query, page, 100, params.Source, params.FormatCategory)
 			if appErr != nil {
 				return nil, false, appErr
 			}
@@ -6194,6 +6217,9 @@ func (s *Service) resolveClientMaterialBatchCandidates(ctx context.Context, acto
 		}
 	}
 	for _, folder := range params.Folders {
+		if strings.TrimSpace(folder.FormatCategory) == "" {
+			folder.FormatCategory = params.FormatCategory
+		}
 		asyncRequired, appErr := s.appendClientMaterialBatchFolderCandidates(ctx, actor, folder, limit, &candidates)
 		if appErr != nil || asyncRequired {
 			return candidates, asyncRequired, appErr
@@ -6204,6 +6230,7 @@ func (s *Service) resolveClientMaterialBatchCandidates(ctx context.Context, acto
 
 func (s *Service) appendClientMaterialBatchFolderCandidates(ctx context.Context, actor domain.RequestActor, folder ClientMaterialBatchFolderParams, limit int, candidates *[]CreateClientMaterialParams) (bool, *domain.AppError) {
 	source := firstNonEmpty(folder.Source, string(domain.AssetResourceSourceAll))
+	formatCategory := strings.TrimSpace(folder.FormatCategory)
 	queue := []string{folder.Path}
 	visited := map[string]bool{}
 	for len(queue) > 0 {
@@ -6219,7 +6246,7 @@ func (s *Service) appendClientMaterialBatchFolderCandidates(ctx context.Context,
 		}
 		page := 1
 		for {
-			browse, appErr := s.BrowseMaterials(ctx, actor, normalized, page, 100, source)
+			browse, appErr := s.BrowseMaterials(ctx, actor, normalized, page, 100, source, formatCategory)
 			if appErr != nil {
 				return false, appErr
 			}
