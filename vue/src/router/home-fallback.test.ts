@@ -60,6 +60,30 @@ describe('home fallback', () => {
     expect(route).toEqual({ name: 'TaskList' })
   })
 
+  it('does not preserve task-list filter redirects as the login landing page', () => {
+    const router = {
+      resolve: (path: string) => ({
+        matched: [{}],
+        meta: { requiresAuth: true },
+        path,
+        name: 'TaskList',
+        query: {
+          tab: 'mine',
+          task_category: 'normal',
+          status: 'PendingAuditA,PendingAuditB',
+        },
+      }),
+    } as unknown as Router
+
+    const route = resolvePostLoginLandingRoute(
+      router,
+      makePermissionsStore({ menus: ['task_list'] }),
+      '/tasks?tab=mine&task_category=normal&status=PendingAuditA,PendingAuditB',
+    )
+
+    expect(route).toEqual({ name: 'TaskList' })
+  })
+
   it('keeps draft restore redirects on the create-task route', () => {
     const router = {
       resolve: (path: string) => ({

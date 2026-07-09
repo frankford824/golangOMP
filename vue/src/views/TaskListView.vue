@@ -613,7 +613,7 @@ const tasksStore = useTasksStore()
 const permissionsStore = usePermissionsStore()
 const { can, canAccessAction } = usePermission()
 
-// ── 状态记忆：从路由 query 或 sessionStorage 恢复 ──────────────────────────
+// ── 列表初始状态：只接受当前路由 query；避免登录落地页恢复旧筛选 ─────────────
 const STORAGE_KEY = 'task-list-state'
 type TaskListTab = 'all' | 'pool' | 'mine' | 'archived' | 'terminated'
 
@@ -663,39 +663,6 @@ function parseTaskTab(value: unknown): TaskListTab {
     : 'all'
 }
 
-const TASK_LIST_SCOPE_QUERY_KEYS = [
-  'tab',
-  'task_category',
-  'status',
-  'q',
-  'task_type',
-  'priority',
-  'creator_id',
-  'owner_department',
-  'owner_org_team',
-  'warehouse_status',
-  'date_from',
-  'date_to',
-  'overdue',
-] as const
-
-function queryHasTaskListScope(query: Record<string, unknown>): boolean {
-  return TASK_LIST_SCOPE_QUERY_KEYS.some((key) => {
-    if (!(key in query) || query[key] == null) return false
-    return queryString(query[key]).trim() !== ''
-  })
-}
-
-function restoreState() {
-  try {
-    const raw = sessionStorage.getItem(STORAGE_KEY)
-    if (raw) return JSON.parse(raw) as Record<string, unknown>
-  } catch {
-    // ignore
-  }
-  return {}
-}
-
 function saveState() {
   try {
     sessionStorage.setItem(
@@ -715,14 +682,12 @@ function saveState() {
   }
 }
 
-const saved = queryHasTaskListScope(route.query as Record<string, unknown>) ? restoreState() : {}
-
-const searchKeyword = ref((route.query.q as string) || (saved.searchKeyword as string) || '')
-const activeTab = ref<TaskListTab>(parseTaskTab(route.query.tab ?? saved.activeTab))
-const sortKey = ref<'taskNo' | 'updatedAt' | 'dueAt'>((saved.sortKey as 'taskNo' | 'updatedAt' | 'dueAt') ?? 'updatedAt')
-const sortOrder = ref<'asc' | 'desc'>((saved.sortOrder as 'asc' | 'desc') ?? 'desc')
-const page = ref((saved.page as number) ?? 1)
-const pageSize = ref((saved.pageSize as number) ?? 20)
+const searchKeyword = ref((route.query.q as string) || '')
+const activeTab = ref<TaskListTab>(parseTaskTab(route.query.tab))
+const sortKey = ref<'taskNo' | 'updatedAt' | 'dueAt'>('updatedAt')
+const sortOrder = ref<'asc' | 'desc'>('desc')
+const page = ref(1)
+const pageSize = ref(20)
 const showCreateModal = ref(false)
 const showBatchAssign = ref(false)
 const showBatchAuditHandover = ref(false)
@@ -949,11 +914,8 @@ const ARCHIVED_TAB_DEFAULT_STATUSES: LegacyTaskStatus[] = [
   'Archived',
   'Cancelled',
 ]
-const savedFiltersRaw = saved.filters && typeof saved.filters === 'object' ? { ...saved.filters } : {}
-delete (savedFiltersRaw as { productSource?: unknown }).productSource
 const filters = ref<TaskListFilters>({
   ...defaultTaskFilters,
-  ...(savedFiltersRaw as Partial<TaskListFilters>),
 })
 
 const activeAdvancedFilterCount = computed(() => {

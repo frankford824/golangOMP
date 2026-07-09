@@ -36,6 +36,33 @@ const HOME_ROUTE_CANDIDATES: HomeRouteCandidate[] = [
   { name: 'UserManagement', menuKey: 'user_admin' },
 ]
 
+const TASK_LIST_LANDING_QUERY_KEYS = [
+  'tab',
+  'task_category',
+  'status',
+  'q',
+  'task_type',
+  'priority',
+  'creator_id',
+  'owner_department',
+  'owner_org_team',
+  'warehouse_status',
+  'date_from',
+  'date_to',
+  'overdue',
+] as const
+
+function queryString(value: unknown): string {
+  return Array.isArray(value) ? String(value[0] ?? '') : String(value ?? '')
+}
+
+function hasTaskListLandingScope(query: Record<string, unknown>): boolean {
+  return TASK_LIST_LANDING_QUERY_KEYS.some((key) => {
+    if (!(key in query) || query[key] == null) return false
+    return queryString(query[key]).trim() !== ''
+  })
+}
+
 export function isDashboardEntryRoute(to: RouteLocationNormalizedLoaded): boolean {
   return to.name === 'Dashboard' || to.path === '/'
 }
@@ -96,6 +123,12 @@ export function resolvePostLoginLandingRoute(
         (resolvedRedirect.name === 'TaskList' && String(resolvedRedirect.query.create ?? '') === '1')
       const hasDraftID = String(resolvedRedirect.query.draft_id ?? '').trim() !== ''
       if (isCreateRedirect && !hasDraftID) {
+        return { name: 'TaskList' }
+      }
+      if (
+        resolvedRedirect.name === 'TaskList' &&
+        hasTaskListLandingScope(resolvedRedirect.query as Record<string, unknown>)
+      ) {
         return { name: 'TaskList' }
       }
       return redirect
