@@ -2171,7 +2171,7 @@ async function loadMaterials(query = materialQuery.value, options: { append?: bo
       if (requestID !== materialRequestSeq) return
       const visibleItems = systemResult.items.filter(operationalMaterialAssetVisible)
       materialItems.value = append ? mergeMaterialItems(materialItems.value, visibleItems) : visibleItems
-      materialFileTotal.value = materialQuery.value.startsWith('/quark') ? visibleItems.length : systemResult.total
+      materialFileTotal.value = Number(systemResult.total || visibleItems.length)
       materialPage.value = systemResult.page || page
       clientMaterials.value = published
       for (const asset of visibleItems) {
@@ -2254,7 +2254,7 @@ async function loadMaterialFolder(path = selectedMaterialFolderPath.value, optio
       }
       const visibleFiles = (browse.files || []).filter(operationalMaterialAssetVisible)
       materialItems.value = append ? mergeMaterialItems(materialItems.value, visibleFiles) : visibleFiles
-      materialFileTotal.value = selectedMaterialFolderPath.value === '/quark' ? visibleFiles.length : browse.total || 0
+      materialFileTotal.value = Number(browse.total || visibleFiles.length)
       materialPage.value = browse.page || page
       clientMaterials.value = published
     } else {

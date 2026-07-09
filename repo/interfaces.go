@@ -315,6 +315,7 @@ type ExternalAssetRepo interface {
 	FinishSyncRun(ctx context.Context, id int64, status string, scannedCount, upsertedCount int, errorMessage string) error
 	MarkOriginPathMissing(ctx context.Context, provider, mountPath, originPath string) error
 	MarkMountMissingBefore(ctx context.Context, mountPath string, scannedBefore time.Time) error
+	MarkOriginPrefixesMissingBefore(ctx context.Context, prefixes []ExternalAssetOriginPrefix, scannedBefore time.Time) error
 	UpdateDirectURL(ctx context.Context, id int64, rawURL string, expiresAt *time.Time, status string) error
 	MarkOSSPreparePending(ctx context.Context, id int64) error
 	MarkOSSPendingByOriginPrefixes(ctx context.Context, prefixes []ExternalAssetOriginPrefix) (int64, error)

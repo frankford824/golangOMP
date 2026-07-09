@@ -406,6 +406,80 @@ func TestSyncFullIndexHonorsMountFilter(t *testing.T) {
 	}
 }
 
+func TestSyncFullIndexHonorsRootFilter(t *testing.T) {
+	visited := []string{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		listPath, _ := req["path"].(string)
+		visited = append(visited, listPath)
+		var content []map[string]interface{}
+		switch listPath {
+		case "/quark/我的备份/来自：ASUS Administrator 电脑备份/海报":
+			content = []map[string]interface{}{
+				{"name": "2026", "is_dir": true, "size": 0},
+				{"name": "poster.jpg", "is_dir": false, "size": 11},
+			}
+		case "/quark/我的备份/来自：ASUS Administrator 电脑备份/海报/2026":
+			content = []map[string]interface{}{
+				{"name": "spring.png", "is_dir": false, "size": 22},
+			}
+		default:
+			t.Fatalf("unexpected list path %q", listPath)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"code":    200,
+			"message": "success",
+			"data": map[string]interface{}{
+				"total":   len(content),
+				"content": content,
+			},
+		})
+	}))
+	defer server.Close()
+
+	repo := &externalAssetRepoStub{}
+	root := "/quark/我的备份/来自：ASUS Administrator 电脑备份/海报"
+	svc := NewService(repo, Config{
+		Enabled:             true,
+		AListBaseURL:        server.URL,
+		AListToken:          "token",
+		Mounts:              ParseMounts("/quark:netdisk,/p3:nas_local"),
+		FullSyncEnabled:     true,
+		FullSyncMounts:      ParseMountPaths("/quark"),
+		FullSyncRoots:       ParseMountPaths(root),
+		FullSyncPageSize:    100,
+		FullSyncMaxDepth:    8,
+		FullSyncMaxFiles:    100,
+		FullSyncMaxDirs:     100,
+		LinkRefreshInterval: time.Hour,
+	}, nil)
+
+	result, err := svc.SyncFullIndex(context.Background())
+	if err != nil {
+		t.Fatalf("SyncFullIndex() error = %v", err)
+	}
+	if result.ScannedCount != 2 || result.UpsertedCount != 2 {
+		t.Fatalf("SyncFullIndex() counts = scanned %d upserted %d, want 2/2", result.ScannedCount, result.UpsertedCount)
+	}
+	if strings.Join(visited, ",") != root+","+root+"/2026" {
+		t.Fatalf("visited paths = %v, want only configured root and child", visited)
+	}
+	if repo.missingMount != "" {
+		t.Fatalf("MarkMountMissingBefore mount=%q, want root-scoped missing", repo.missingMount)
+	}
+	if len(repo.missingPrefixes) != 1 || repo.missingPrefixes[0].MountPath != "/quark" || repo.missingPrefixes[0].OriginPath != root {
+		t.Fatalf("missing prefixes = %+v, want /quark root prefix", repo.missingPrefixes)
+	}
+	for _, upsert := range repo.upserts {
+		if upsert.MountPath != "/quark" || !strings.HasPrefix(upsert.OriginPath, root+"/") {
+			t.Fatalf("upsert = %+v, want /quark record under configured root", upsert)
+		}
+	}
+}
+
 func TestNetdiskBrowserURLsDoNotExposeBFFProxyWhenDirectURLMissing(t *testing.T) {
 	svc := NewService(&externalAssetRepoStub{}, Config{
 		Enabled:           true,
@@ -935,6 +1009,7 @@ type externalAssetRepoStub struct {
 		message  string
 	}
 	missingMount      string
+	missingPrefixes   []repo.ExternalAssetOriginPrefix
 	missingOrigins    []string
 	searchRows        []*domain.ExternalAssetRecord
 	searchTotal       int64
@@ -1018,6 +1093,11 @@ func (r *externalAssetRepoStub) FinishSyncRun(_ context.Context, id int64, statu
 
 func (r *externalAssetRepoStub) MarkMountMissingBefore(_ context.Context, mountPath string, _ time.Time) error {
 	r.missingMount = mountPath
+	return nil
+}
+
+func (r *externalAssetRepoStub) MarkOriginPrefixesMissingBefore(_ context.Context, prefixes []repo.ExternalAssetOriginPrefix, _ time.Time) error {
+	r.missingPrefixes = append(r.missingPrefixes, prefixes...)
 	return nil
 }
 

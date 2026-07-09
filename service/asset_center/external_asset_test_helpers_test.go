@@ -97,6 +97,10 @@ func (r *assetCenterExternalRepoStub) MarkMountMissingBefore(context.Context, st
 	return nil
 }
 
+func (r *assetCenterExternalRepoStub) MarkOriginPrefixesMissingBefore(context.Context, []repo.ExternalAssetOriginPrefix, time.Time) error {
+	return nil
+}
+
 func (r *assetCenterExternalRepoStub) MarkOriginPathMissing(context.Context, string, string, string) error {
 	return nil
 }

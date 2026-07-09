@@ -142,6 +142,7 @@ type ExternalAssetsConfig struct {
 	FullSyncEnabled     bool
 	FullSyncInterval    time.Duration
 	FullSyncMounts      string
+	FullSyncRoots       string
 	FullSyncPageSize    int
 	FullSyncMaxDepth    int
 	FullSyncMaxFiles    int
@@ -375,6 +376,7 @@ func Load() (*Config, error) {
 			FullSyncEnabled:     mustParseBool(getEnv("EXTERNAL_ASSETS_FULL_SYNC_ENABLED", "false")),
 			FullSyncInterval:    mustParseDuration(getEnv("EXTERNAL_ASSETS_FULL_SYNC_INTERVAL", "")),
 			FullSyncMounts:      getEnv("EXTERNAL_ASSETS_FULL_SYNC_MOUNTS", ""),
+			FullSyncRoots:       getEnv("EXTERNAL_ASSETS_FULL_SYNC_ROOTS", ""),
 			FullSyncPageSize:    mustParseInt(getEnv("EXTERNAL_ASSETS_FULL_SYNC_PAGE_SIZE", "100")),
 			FullSyncMaxDepth:    mustParseInt(getEnv("EXTERNAL_ASSETS_FULL_SYNC_MAX_DEPTH", "16")),
 			FullSyncMaxFiles:    mustParseInt(getEnv("EXTERNAL_ASSETS_FULL_SYNC_MAX_FILES_PER_MOUNT", "20000")),

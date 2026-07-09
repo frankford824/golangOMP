@@ -44,6 +44,7 @@ type Config struct {
 	FullSyncEnabled     bool
 	FullSyncInterval    time.Duration
 	FullSyncMounts      []string
+	FullSyncRoots       []string
 	FullSyncPageSize    int
 	FullSyncMaxDepth    int
 	FullSyncMaxFiles    int
@@ -64,11 +65,18 @@ type FullSyncResult struct {
 }
 
 type MountSyncResult struct {
-	MountPath     string `json:"mount_path"`
-	Status        string `json:"status"`
-	ScannedCount  int    `json:"scanned_count"`
-	UpsertedCount int    `json:"upserted_count"`
-	ErrorMessage  string `json:"error_message,omitempty"`
+	MountPath     string   `json:"mount_path"`
+	RootPaths     []string `json:"root_paths,omitempty"`
+	Status        string   `json:"status"`
+	ScannedCount  int      `json:"scanned_count"`
+	UpsertedCount int      `json:"upserted_count"`
+	ErrorMessage  string   `json:"error_message,omitempty"`
+}
+
+type fullSyncMountPlan struct {
+	mount      MountConfig
+	roots      []string
+	rootScoped bool
 }
 
 type directoryBrowserRepo interface {
@@ -110,6 +118,7 @@ func ConfigFromApp(cfg config.ExternalAssetsConfig) Config {
 		FullSyncEnabled:     cfg.FullSyncEnabled,
 		FullSyncInterval:    cfg.FullSyncInterval,
 		FullSyncMounts:      ParseMountPaths(cfg.FullSyncMounts),
+		FullSyncRoots:       ParseMountPaths(cfg.FullSyncRoots),
 		FullSyncPageSize:    cfg.FullSyncPageSize,
 		FullSyncMaxDepth:    cfg.FullSyncMaxDepth,
 		FullSyncMaxFiles:    cfg.FullSyncMaxFiles,
@@ -781,13 +790,13 @@ func (s *Service) SyncFullIndex(ctx context.Context) (*FullSyncResult, error) {
 	if s.alist == nil || !s.alist.Enabled() {
 		return result, fmt.Errorf("alist client is required for full external asset sync")
 	}
-	mounts := s.fullSyncMountConfigs()
-	if len(mounts) == 0 {
+	plans := s.fullSyncMountPlans()
+	if len(plans) == 0 {
 		return result, fmt.Errorf("no configured external asset full sync mounts matched filter")
 	}
 	var firstErr error
-	for _, mount := range mounts {
-		mountResult, err := s.syncFullMount(ctx, mount)
+	for _, plan := range plans {
+		mountResult, err := s.syncFullMount(ctx, plan)
 		result.Mounts = append(result.Mounts, mountResult)
 		result.ScannedCount += mountResult.ScannedCount
 		result.UpsertedCount += mountResult.UpsertedCount
@@ -798,12 +807,9 @@ func (s *Service) SyncFullIndex(ctx context.Context) (*FullSyncResult, error) {
 	return result, firstErr
 }
 
-func (s *Service) fullSyncMountConfigs() []MountConfig {
+func (s *Service) fullSyncMountPlans() []fullSyncMountPlan {
 	if s == nil {
 		return nil
-	}
-	if len(s.cfg.FullSyncMounts) == 0 {
-		return s.cfg.Mounts
 	}
 	allowed := map[string]struct{}{}
 	for _, mount := range s.cfg.FullSyncMounts {
@@ -812,12 +818,73 @@ func (s *Service) fullSyncMountConfigs() []MountConfig {
 			allowed[mount] = struct{}{}
 		}
 	}
-	out := make([]MountConfig, 0, len(s.cfg.Mounts))
+	rootsByMount := map[string][]string{}
+	for _, rawRoot := range s.cfg.FullSyncRoots {
+		root := cleanAListPath(rawRoot)
+		mount, ok := matchFullSyncRootMount(root, s.cfg.Mounts)
+		if !ok {
+			continue
+		}
+		if len(allowed) > 0 {
+			if _, ok := allowed[mount.Path]; !ok {
+				continue
+			}
+		}
+		rootsByMount[mount.Path] = append(rootsByMount[mount.Path], root)
+	}
+	out := make([]fullSyncMountPlan, 0, len(s.cfg.Mounts))
 	for _, mount := range s.cfg.Mounts {
-		if _, ok := allowed[mount.Path]; ok {
-			out = append(out, mount)
+		if len(allowed) > 0 {
+			if _, ok := allowed[mount.Path]; !ok {
+				continue
+			}
+		}
+		roots := dedupeFullSyncRoots(rootsByMount[mount.Path])
+		if len(s.cfg.FullSyncRoots) > 0 && len(allowed) == 0 && len(roots) == 0 {
+			continue
+		}
+		if len(roots) == 0 {
+			roots = []string{mount.Path}
+		}
+		out = append(out, fullSyncMountPlan{
+			mount:      mount,
+			roots:      roots,
+			rootScoped: !(len(roots) == 1 && roots[0] == mount.Path),
+		})
+	}
+	return out
+}
+
+func matchFullSyncRootMount(root string, mounts []MountConfig) (MountConfig, bool) {
+	root = cleanAListPath(root)
+	var best MountConfig
+	bestLen := -1
+	for _, mount := range mounts {
+		if root == mount.Path || strings.HasPrefix(root, mount.Path+"/") {
+			if len(mount.Path) > bestLen {
+				best = mount
+				bestLen = len(mount.Path)
+			}
 		}
 	}
+	return best, bestLen >= 0
+}
+
+func dedupeFullSyncRoots(roots []string) []string {
+	out := make([]string, 0, len(roots))
+	seen := map[string]struct{}{}
+	for _, root := range roots {
+		root = cleanAListPath(root)
+		if root == "" {
+			continue
+		}
+		if _, ok := seen[root]; ok {
+			continue
+		}
+		seen[root] = struct{}{}
+		out = append(out, root)
+	}
+	sort.Strings(out)
 	return out
 }
 
@@ -826,15 +893,34 @@ type fullSyncQueueItem struct {
 	depth int
 }
 
-func (s *Service) syncFullMount(ctx context.Context, mount MountConfig) (MountSyncResult, error) {
+func (s *Service) syncFullMount(ctx context.Context, plan fullSyncMountPlan) (MountSyncResult, error) {
+	mount := plan.mount
 	startedAt := s.nowFn().UTC().Truncate(time.Second)
 	runID := s.startSyncRun(ctx, domain.ExternalAssetSyncRunTypeFull, mount.Path, "")
 	result := MountSyncResult{
 		MountPath: mount.Path,
+		RootPaths: append([]string(nil), plan.roots...),
 		Status:    domain.ExternalAssetSyncRunStatusCompleted,
 	}
-	queue := []fullSyncQueueItem{{path: mount.Path, depth: 0}}
-	seenDirs := map[string]struct{}{mount.Path: {}}
+	queue := make([]fullSyncQueueItem, 0, len(plan.roots))
+	seenDirs := map[string]struct{}{}
+	for _, root := range plan.roots {
+		root = cleanAListPath(root)
+		if root == "" || (root != mount.Path && !strings.HasPrefix(root, mount.Path+"/")) {
+			continue
+		}
+		if _, ok := seenDirs[root]; ok {
+			continue
+		}
+		seenDirs[root] = struct{}{}
+		queue = append(queue, fullSyncQueueItem{path: root, depth: 0})
+	}
+	if len(queue) == 0 {
+		result.Status = domain.ExternalAssetSyncRunStatusFailed
+		result.ErrorMessage = fmt.Sprintf("no valid full sync roots for %s", mount.Path)
+		s.finishSyncRun(ctx, runID, result.Status, result.ScannedCount, result.UpsertedCount, result.ErrorMessage)
+		return result, fmt.Errorf("%s", result.ErrorMessage)
+	}
 	dirsRead := 0
 	limited := false
 	var firstErr error
@@ -926,6 +1012,18 @@ func (s *Service) syncFullMount(ctx context.Context, mount MountConfig) (MountSy
 		result.ErrorMessage = partialErr.Error()
 		if skippedDirs > 1 {
 			result.ErrorMessage = fmt.Sprintf("%s; skipped_dirs=%d", result.ErrorMessage, skippedDirs)
+		}
+	} else if plan.rootScoped {
+		prefixes := make([]repo.ExternalAssetOriginPrefix, 0, len(plan.roots))
+		for _, root := range plan.roots {
+			prefixes = append(prefixes, repo.ExternalAssetOriginPrefix{MountPath: mount.Path, OriginPath: root})
+		}
+		if err := s.repo.MarkOriginPrefixesMissingBefore(ctx, prefixes, startedAt); err != nil {
+			result.Status = domain.ExternalAssetSyncRunStatusPartial
+			result.ErrorMessage = err.Error()
+			if firstErr == nil {
+				firstErr = err
+			}
 		}
 	} else if err := s.repo.MarkMountMissingBefore(ctx, mount.Path, startedAt); err != nil {
 		result.Status = domain.ExternalAssetSyncRunStatusPartial

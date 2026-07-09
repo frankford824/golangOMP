@@ -827,6 +827,48 @@ func (r *externalAssetRepo) MarkMountMissingBefore(ctx context.Context, mountPat
 	return nil
 }
 
+func (r *externalAssetRepo) MarkOriginPrefixesMissingBefore(ctx context.Context, prefixes []repo.ExternalAssetOriginPrefix, scannedBefore time.Time) error {
+	prefixes = normalizeExternalAssetOriginPrefixes(prefixes)
+	if len(prefixes) == 0 || scannedBefore.IsZero() {
+		return nil
+	}
+	where, args := externalAssetOriginPrefixWhere(prefixes)
+	if where == "" {
+		return nil
+	}
+	tx, err := r.db.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin external prefix missing update: %w", err)
+	}
+	defer tx.Rollback()
+	updateArgs := append([]interface{}{}, args...)
+	updateArgs = append(updateArgs, scannedBefore)
+	_, err = tx.ExecContext(ctx, `
+		UPDATE external_asset_records
+		   SET status = 'missing'
+		 WHERE status <> 'missing'
+		   AND (`+where+`)
+		   AND (last_scanned_at IS NULL OR last_scanned_at < ?)`,
+		updateArgs...)
+	if err != nil {
+		return fmt.Errorf("mark external prefixes missing: %w", err)
+	}
+	seenMounts := map[string]struct{}{}
+	for _, prefix := range prefixes {
+		if _, ok := seenMounts[prefix.MountPath]; ok {
+			continue
+		}
+		seenMounts[prefix.MountPath] = struct{}{}
+		if err := rebuildExternalAssetDirectoryIndexForMount(ctx, tx, prefix.MountPath); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit external prefix missing update: %w", err)
+	}
+	return nil
+}
+
 func rebuildExternalAssetDirectoryIndexForMount(ctx context.Context, exec sqlExecContext, mountPath string) error {
 	mountPath = cleanExternalAssetBrowsePath(mountPath)
 	if mountPath == "" {

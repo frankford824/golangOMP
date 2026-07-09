@@ -5302,6 +5302,13 @@ func (s *Service) BrowseMaterials(ctx context.Context, actor domain.RequestActor
 	originalFileCount := len(result.Files)
 	result.Folders = filterVisibleWorkbenchMaterialFolders(result.Folders)
 	result.Folders = rewriteWorkbenchVirtualQuarkFolders(result.Folders)
+	if publicPath == "" {
+		var hydrateErr *domain.AppError
+		result.Folders, hydrateErr = s.hydrateWorkbenchVirtualQuarkRootFolder(ctx, browser, result.Folders, source)
+		if hydrateErr != nil {
+			return nil, hydrateErr
+		}
+	}
 	result.Files = filterVisibleWorkbenchMaterialAssets(result.Files)
 	result.Path = publicPath
 	if len(result.Folders) != originalFolderCount || len(result.Files) != originalFileCount {
@@ -5325,8 +5332,10 @@ func (s *Service) browseWorkbenchVirtualQuarkRoot(ctx context.Context, browser S
 		byName[strings.ToLower(strings.TrimSpace(folder.Name))] = folder
 	}
 	folders := make([]assetcenter.MaterialFolder, 0, len(workbenchQuarkMaterialVirtualFolders))
+	var total int64
 	for _, virtual := range workbenchQuarkMaterialVirtualFolders {
 		folder := byName[strings.ToLower(virtual)]
+		total += folder.FileCount
 		folders = append(folders, assetcenter.MaterialFolder{
 			Path:            workbenchQuarkMaterialVirtualRoot + "/" + virtual,
 			Name:            virtual,
@@ -5339,10 +5348,30 @@ func (s *Service) browseWorkbenchVirtualQuarkRoot(ctx context.Context, browser S
 		Path:    workbenchQuarkMaterialVirtualRoot,
 		Folders: folders,
 		Files:   []*assetcenter.AssetDetail{},
-		Total:   0,
+		Total:   total,
 		Page:    page,
 		Size:    pageSize,
 	}, nil
+}
+
+func (s *Service) hydrateWorkbenchVirtualQuarkRootFolder(ctx context.Context, browser SystemMaterialBrowser, folders []assetcenter.MaterialFolder, source string) ([]assetcenter.MaterialFolder, *domain.AppError) {
+	quarkIndex := -1
+	for index := range folders {
+		if workbenchIsVirtualQuarkRoot(folders[index].Path) {
+			quarkIndex = index
+			break
+		}
+	}
+	if quarkIndex < 0 {
+		return folders, nil
+	}
+	virtualRoot, appErr := s.browseWorkbenchVirtualQuarkRoot(ctx, browser, 1, 100, source)
+	if appErr != nil {
+		return nil, appErr
+	}
+	folders[quarkIndex].FileCount = virtualRoot.Total
+	folders[quarkIndex].DirectFileCount = 0
+	return folders, nil
 }
 
 func (s *Service) SearchClientMaterials(ctx context.Context, actor domain.RequestActor, params ClientMaterialSearchParams) (*ClientMaterialSearchResult, *domain.AppError) {

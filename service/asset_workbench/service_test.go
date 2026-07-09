@@ -1166,9 +1166,11 @@ func (s *systemAssetDownloaderStub) BuildBatchDownloadManifest(_ context.Context
 
 type externalMaterialProviderStub struct {
 	searchCalls   int
+	browseCalls   []assetcenter.MaterialBrowseQuery
 	detailCalls   []int64
 	downloadCalls []int64
 	previewCalls  []int64
+	browseResults map[string]*assetcenter.MaterialBrowseResult
 	details       map[int64]*assetcenter.AssetDetail
 	downloadInfo  *domain.AssetDownloadInfo
 	previewInfo   *domain.AssetDownloadInfo
@@ -1177,6 +1179,24 @@ type externalMaterialProviderStub struct {
 func (s *externalMaterialProviderStub) Search(_ context.Context, _ domain.AssetSearchQuery) (*assetcenter.SearchResult, *domain.AppError) {
 	s.searchCalls++
 	return &assetcenter.SearchResult{}, nil
+}
+
+func (s *externalMaterialProviderStub) BrowseMaterials(_ context.Context, query assetcenter.MaterialBrowseQuery) (*assetcenter.MaterialBrowseResult, *domain.AppError) {
+	s.browseCalls = append(s.browseCalls, query)
+	if s.browseResults != nil && s.browseResults[query.Path] != nil {
+		result := *s.browseResults[query.Path]
+		result.Folders = append([]assetcenter.MaterialFolder(nil), result.Folders...)
+		result.Files = append([]*assetcenter.AssetDetail(nil), result.Files...)
+		return &result, nil
+	}
+	return &assetcenter.MaterialBrowseResult{
+		Path:    query.Path,
+		Folders: []assetcenter.MaterialFolder{},
+		Files:   []*assetcenter.AssetDetail{},
+		Total:   0,
+		Page:    query.Page,
+		Size:    query.Size,
+	}, nil
 }
 
 func (s *externalMaterialProviderStub) GetExternalDetail(_ context.Context, externalID int64) (*assetcenter.AssetDetail, *domain.AppError) {
@@ -4031,6 +4051,56 @@ func TestWorkbenchOperationalMaterialVisibilityRestrictsQuarkRoots(t *testing.T)
 	for _, tc := range cases {
 		if got := assetWorkbenchOperationalMaterialPathVisible(tc.path); got != tc.want {
 			t.Fatalf("assetWorkbenchOperationalMaterialPathVisible(%q) = %v, want %v", tc.path, got, tc.want)
+		}
+	}
+}
+
+func TestBrowseMaterialsVirtualQuarkRootUsesVisibleFolderCounts(t *testing.T) {
+	provider := &externalMaterialProviderStub{browseResults: map[string]*assetcenter.MaterialBrowseResult{
+		"": {
+			Path: "",
+			Folders: []assetcenter.MaterialFolder{
+				{Path: "/quark", Name: "quark", SourceType: string(domain.AssetResourceSourceExternal), FileCount: 106351},
+			},
+			Page: 1,
+			Size: 100,
+		},
+		workbenchQuarkMaterialActualBase: {
+			Path: workbenchQuarkMaterialActualBase,
+			Folders: []assetcenter.MaterialFolder{
+				{Path: workbenchQuarkMaterialActualBase + "/电视投屏", Name: "电视投屏", SourceType: string(domain.AssetResourceSourceExternal), FileCount: 620, DirectFileCount: 56},
+				{Path: workbenchQuarkMaterialActualBase + "/海报", Name: "海报", SourceType: string(domain.AssetResourceSourceExternal), FileCount: 512, DirectFileCount: 15},
+				{Path: workbenchQuarkMaterialActualBase + "/kt板", Name: "kt板", SourceType: string(domain.AssetResourceSourceExternal), FileCount: 1770, DirectFileCount: 21},
+				{Path: workbenchQuarkMaterialActualBase + "/闲置kt板", Name: "闲置kt板", SourceType: string(domain.AssetResourceSourceExternal), FileCount: 162, DirectFileCount: 1},
+			},
+			Page: 1,
+			Size: 100,
+		},
+	}}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithSystemAssetSearcher(provider))
+	actor := domain.RequestActor{ID: 1, Roles: []domain.Role{domain.RoleAssetManager}}
+
+	root, appErr := svc.BrowseMaterials(context.Background(), actor, "", 1, 100, "all")
+	if appErr != nil {
+		t.Fatalf("BrowseMaterials(root) error = %+v", appErr)
+	}
+	if len(root.Folders) != 1 || root.Folders[0].Path != "/quark" || root.Folders[0].FileCount != 3064 || root.Folders[0].DirectFileCount != 0 {
+		t.Fatalf("root folders = %+v, want /quark count from visible roots", root.Folders)
+	}
+
+	quark, appErr := svc.BrowseMaterials(context.Background(), actor, "/quark", 1, 100, "all")
+	if appErr != nil {
+		t.Fatalf("BrowseMaterials(/quark) error = %+v", appErr)
+	}
+	if quark.Total != 3064 {
+		t.Fatalf("/quark total = %d, want visible folder total 3064", quark.Total)
+	}
+	if len(quark.Folders) != 4 {
+		t.Fatalf("/quark folders = %+v, want four virtual folders", quark.Folders)
+	}
+	for _, folder := range quark.Folders {
+		if !strings.HasPrefix(folder.Path, "/quark/") {
+			t.Fatalf("folder path = %q, want virtual /quark path", folder.Path)
 		}
 	}
 }
