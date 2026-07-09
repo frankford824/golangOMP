@@ -18,6 +18,10 @@ var orgDepartmentAliasGroups = map[string][]string{
 		string(DepartmentCustomizationArt),
 		"定制中心",
 	},
+	"人力行政中心": {
+		"人力行政中心",
+		string(DepartmentHR),
+	},
 }
 
 var orgDepartmentAliasIndex = buildOrgAliasIndex(orgDepartmentAliasGroups)
@@ -51,6 +55,10 @@ var orgTeamAliasGroups = map[string][]string{
 		"天猫运营一部（池州)",
 		"天猫运营一部（池州）",
 		"天猫运营一部(池州)",
+	},
+	"人力行政组": {
+		"人力行政组",
+		"人事管理组",
 	},
 }
 

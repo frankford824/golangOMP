@@ -293,6 +293,7 @@ func (s *identityService) SyncConfiguredAuth(ctx context.Context) *domain.AppErr
 	}
 	configured := make(map[string]domain.ConfiguredSuperAdmin, len(s.authSettings.SuperAdmins))
 	for _, entry := range s.authSettings.SuperAdmins {
+		entry = s.normalizeConfiguredSuperAdminOrg(entry)
 		username := normalizeUsername(entry.Username)
 		if username == "" {
 			return domain.NewAppError(domain.ErrCodeInvalidRequest, "configured super admin username is required", nil)
@@ -2967,6 +2968,85 @@ func (s *identityService) matchesDepartmentAdminKey(department domain.Department
 	}
 	for _, candidate := range s.authSettings.DepartmentAdminKeys[string(department)] {
 		if strings.TrimSpace(candidate) != "" && providedKey == strings.TrimSpace(candidate) {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *identityService) normalizeConfiguredSuperAdminOrg(entry domain.ConfiguredSuperAdmin) domain.ConfiguredSuperAdmin {
+	if s.orgRepo == nil {
+		return entry
+	}
+	entry.Department = domain.Department(s.normalizeConfiguredDepartment(string(entry.Department)))
+	entry.Team = s.normalizeConfiguredTeam(entry.Department, entry.Team)
+	entry.ManagedDepartments = s.normalizeConfiguredDepartments(entry.ManagedDepartments)
+	entry.ManagedTeams = s.normalizeConfiguredTeams(entry.Department, entry.ManagedTeams)
+	return entry
+}
+
+func (s *identityService) normalizeConfiguredDepartments(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		normalized := s.normalizeConfiguredDepartment(value)
+		if normalized != "" {
+			out = append(out, normalized)
+		}
+	}
+	return out
+}
+
+func (s *identityService) normalizeConfiguredTeams(department domain.Department, values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		normalized := s.normalizeConfiguredTeam(department, value)
+		if normalized != "" {
+			out = append(out, normalized)
+		}
+	}
+	return out
+}
+
+func (s *identityService) normalizeConfiguredDepartment(value string) string {
+	raw := strings.TrimSpace(value)
+	normalized := domain.NormalizeOrgDepartmentAlias(raw)
+	if normalized != "" && s.orgDepartmentExists(normalized) {
+		return normalized
+	}
+	return raw
+}
+
+func (s *identityService) normalizeConfiguredTeam(department domain.Department, value string) string {
+	raw := strings.TrimSpace(value)
+	normalized := domain.NormalizeOrgTeamAlias(raw)
+	if normalized != "" && s.orgTeamExists(department, normalized) {
+		return normalized
+	}
+	return raw
+}
+
+func (s *identityService) orgDepartmentExists(department string) bool {
+	item, err := s.orgRepo.GetDepartmentByName(context.Background(), strings.TrimSpace(department))
+	return err == nil && item != nil && item.Enabled
+}
+
+func (s *identityService) orgTeamExists(department domain.Department, team string) bool {
+	departmentItem, err := s.orgRepo.GetDepartmentByName(context.Background(), strings.TrimSpace(string(department)))
+	if err != nil || departmentItem == nil || !departmentItem.Enabled {
+		return false
+	}
+	teams, err := s.orgRepo.ListTeams(context.Background(), false)
+	if err != nil {
+		return false
+	}
+	for _, candidate := range teams {
+		if candidate != nil && candidate.DepartmentID == departmentItem.ID && candidate.Enabled && candidate.Name == strings.TrimSpace(team) {
 			return true
 		}
 	}

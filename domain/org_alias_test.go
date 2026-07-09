@@ -12,6 +12,9 @@ func TestOrgDepartmentAliasesMatchCurrentAndHistoricalNames(t *testing.T) {
 	if !OrgDepartmentsEquivalent("定制中心", string(DepartmentCustomizationArt)) {
 		t.Fatal("定制中心 should match 定制美工部")
 	}
+	if !OrgDepartmentsEquivalent(string(DepartmentHR), "人力行政中心") {
+		t.Fatal("人事部 should match 人力行政中心")
+	}
 	if OrgDepartmentsEquivalent(string(DepartmentAudit), string(DepartmentOperations)) {
 		t.Fatal("审核部 should not match 运营部")
 	}
@@ -26,6 +29,9 @@ func TestOrgTeamAliasesMatchRenamedOperationTeams(t *testing.T) {
 	}
 	if !OrgTeamsEquivalent("拼多多池州组", "天猫运营一部（池州)") {
 		t.Fatal("拼多多池州组 should match 天猫运营一部（池州)")
+	}
+	if !OrgTeamsEquivalent("人事管理组", "人力行政组") {
+		t.Fatal("人事管理组 should match 人力行政组")
 	}
 	if OrgTeamsEquivalent("淘系二组", "淘系运营三部") {
 		t.Fatal("淘系二组 should not match 淘系运营三部")
