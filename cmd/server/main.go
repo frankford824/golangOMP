@@ -528,6 +528,7 @@ func main() {
 		UploadSessionTTL:         cfg.AssetWorkbench.UploadSessionTTL,
 		PreviewWorkerLeaseTTL:    cfg.AssetWorkbench.PreviewWorkerLeaseTTL,
 		PreviewWorkerMaxAttempts: cfg.AssetWorkbench.PreviewWorkerMaxAttempts,
+		BatchJobWorkerLeaseTTL:   cfg.AssetWorkbench.BatchJobWorkerLeaseTTL,
 	}, assetWorkbenchOptions...)
 
 	skuH := handler.NewSKUHandler(skuSvc)
@@ -630,6 +631,10 @@ func main() {
 		AssetWorkbenchExpiryEnabled:     cfg.AssetWorkbench.UploadExpiryWorkerEnabled,
 		AssetWorkbenchExpiryInterval:    cfg.AssetWorkbench.UploadExpiryWorkerInterval,
 		AssetWorkbenchExpiryLimit:       cfg.AssetWorkbench.UploadExpiryWorkerLimit,
+		AssetWorkbenchBatchJob:          assetWorkbenchSvc,
+		AssetWorkbenchBatchJobEnabled:   cfg.AssetWorkbench.BatchJobWorkerEnabled,
+		AssetWorkbenchBatchJobInterval:  cfg.AssetWorkbench.BatchJobWorkerInterval,
+		AssetWorkbenchBatchJobLimit:     cfg.AssetWorkbench.BatchJobWorkerLimit,
 	}).Start(workerCtx)
 	startExperienceWorker(workerCtx, experienceSvc, cfg.Experience, logger.Named("experience_worker"))
 	if wecomSender.Start(workerCtx) {

@@ -1,10 +1,10 @@
-# V1 API 速查表(334 path · 一行一条)
+# V1 API 速查表(337 path · 一行一条)
 
 > Revision: V1.3-A2 i_id-first task/ERP/search integration (2026-04-27)
 > Source: docs/api/openapi.yaml (post V1.3-A2)
 
 > 本表一行对应一个 `/v1` path；同一路径多 method 合并到 `Methods` 列。
-> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 334 个 `/v1` path。
+> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 337 个 `/v1` path。
 > 新前端只接 canonical 路径；compatibility/deprecated 路径仅作迁移兜底。
 
 | Methods | Path | Summary | RBAC | family doc |
@@ -192,6 +192,8 @@
 | POST | `/v1/ai-suggestions/{suggestion_event_id}/feedback` | Record AI suggestion feedback | POST:Ops, Designer, CustomizationOperator, CustomizationReviewer, Audit_A, Audit_B, Warehouse, Outsource, Admin, SuperAdmin, HRAdmin, OrgAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/notifications/broadcast` | Broadcast a notification to one, many, or all users | POST:Admin, SuperAdmin, HRAdmin, DepartmentAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/asset-workbench/entry` | Resolve asset workbench entry state | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/asset-workbench/batch-jobs` | List asset workbench batch jobs | GET:AssetManager, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/asset-workbench/batch-jobs/{job_id}` | Get one asset workbench batch job | GET:AssetManager, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/asset-workbench/access/request` | Request asset workbench access | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/asset-workbench/access/open` | Open or restore asset workbench access | POST:AssetManager, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/asset-workbench/access/disable` | Disable asset workbench access | POST:SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
@@ -250,6 +252,7 @@
 | GET | `/v1/asset-workbench/upload-directories/admin` | List all asset workbench upload directories for administration | GET:AssetManager, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | PATCH | `/v1/asset-workbench/upload-directories/{directory_id}` | Update asset workbench upload directory | PATCH:AssetManager, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET, POST | `/v1/asset-workbench/client-materials` | List client-downloadable materials；Publish an asset to client materials | GET:AssetSubmitter, AssetManager, SuperAdmin; POST:AssetManager, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/asset-workbench/client-materials/batch-update` | Batch publish or update client materials | POST:AssetManager, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/asset-workbench/client-materials/search` | Search client-downloadable materials | GET:AssetSubmitter, AssetManager, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | PATCH, DELETE | `/v1/asset-workbench/client-materials/{material_id}` | Update client material publication；Delete client material publication | PATCH:AssetManager, SuperAdmin; DELETE:AssetManager, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/asset-workbench/client-materials/{material_id}/download` | Get client material download info | GET:AssetSubmitter, AssetManager, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |

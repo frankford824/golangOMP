@@ -1338,6 +1338,49 @@
   color: var(--aw-ink-2);
 }
 
+.aw-upload-failure-callout,
+.aw-upload-center__failed-callout,
+.aw-drive-upload__failed-callout {
+  display: grid;
+  gap: var(--aw-space-3);
+  border: 1px solid color-mix(in srgb, var(--aw-danger) 42%, var(--aw-hairline));
+  border-left: 4px solid var(--aw-danger);
+  border-radius: var(--aw-radius-sm);
+  background: color-mix(in srgb, var(--aw-danger) 9%, var(--aw-surface-raised));
+  padding: var(--aw-space-4);
+  color: var(--aw-ink);
+}
+
+.aw-upload-failure-callout {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  margin-bottom: var(--aw-space-5);
+}
+
+.aw-upload-failure-callout strong,
+.aw-upload-center__failed-callout strong,
+.aw-drive-upload__failed-callout strong {
+  color: var(--aw-danger);
+  font-size: var(--aw-font-size-base);
+}
+
+.aw-upload-failure-callout p,
+.aw-upload-center__failed-callout span,
+.aw-drive-upload__failed-callout span {
+  margin: var(--aw-space-1) 0 0;
+  color: var(--aw-ink-2);
+  font-size: var(--aw-font-size-sm);
+  line-height: 1.55;
+}
+
+.aw-upload-failure-callout__actions,
+.aw-upload-center__failed-callout > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--aw-space-2);
+  justify-content: flex-end;
+}
+
 .aw-page-stack {
   display: grid;
   min-width: 0;
@@ -6301,6 +6344,43 @@ body.aw-submission-dialog-locked {
   min-width: 0;
 }
 
+.aw-material-batch-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--aw-space-3);
+  margin-bottom: var(--aw-space-3);
+  border: 1px solid var(--aw-hairline);
+  border-radius: var(--aw-radius-sm);
+  background: var(--aw-surface-raised);
+  padding: var(--aw-space-3);
+}
+
+.aw-material-batch-toolbar > div:first-child {
+  display: grid;
+  gap: 2px;
+  min-width: 220px;
+}
+
+.aw-material-batch-toolbar strong {
+  color: var(--aw-ink);
+  font-size: var(--aw-font-size-sm);
+}
+
+.aw-material-batch-toolbar span {
+  color: var(--aw-ink-2);
+  font-size: var(--aw-font-size-sm);
+  line-height: 1.45;
+}
+
+.aw-material-batch-toolbar__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--aw-space-2);
+  justify-content: flex-end;
+}
+
 .aw-material-drive__tree {
   display: grid;
   align-content: start;
@@ -6884,6 +6964,33 @@ body.aw-submission-dialog-locked {
 .aw-client-material-manager__head span {
   color: var(--aw-ink-muted);
   font-size: var(--aw-font-size-sm);
+}
+
+.aw-client-material-manager__tools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--aw-space-3);
+  min-width: 0;
+  border: 1px solid var(--aw-hairline);
+  border-radius: var(--aw-radius-sm);
+  background: var(--aw-surface-muted);
+  padding: var(--aw-space-3);
+}
+
+.aw-client-material-manager__tools p {
+  margin: 0;
+  color: var(--aw-ink-muted);
+  font-size: var(--aw-font-size-sm);
+  line-height: 1.5;
+}
+
+.aw-client-material-manager__list {
+  display: grid;
+  gap: var(--aw-space-2);
+  max-height: min(58vh, 560px);
+  overflow: auto;
+  padding-right: 2px;
 }
 
 .aw-client-material-manager .aw-client-materials-list {

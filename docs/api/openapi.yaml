@@ -20422,6 +20422,100 @@ paths:
                       bootstrap:
                         type: object
         '401': { description: Unauthenticated }
+  /v1/asset-workbench/batch-jobs:
+    get:
+      summary: List asset workbench batch jobs
+      description: Manager-only task center for long-running asset workbench operations, including recursive client-material publish/disable/remove jobs.
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetManager, SuperAdmin]
+      parameters:
+        - in: query
+          name: status
+          schema: { type: string, enum: [queued, running, succeeded, failed, cancelled] }
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 1 }
+        - in: query
+          name: page_size
+          schema: { type: integer, minimum: 1, maximum: 100 }
+      responses:
+        '200':
+          description: Batch jobs
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      items:
+                        type: array
+                        items: &AssetWorkbenchBatchJob
+                          type: object
+                          properties:
+                            id: { type: integer }
+                            job_id: { type: string }
+                            job_type: { type: string, enum: [client_material_batch_update] }
+                            status: { type: string, enum: [queued, running, succeeded, failed, cancelled] }
+                            action: { type: string }
+                            selection_scope: { type: string }
+                            requested_by: { type: integer }
+                            total_count: { type: integer }
+                            processed_count: { type: integer }
+                            created_count: { type: integer }
+                            updated_count: { type: integer }
+                            enabled_count: { type: integer }
+                            disabled_count: { type: integer }
+                            removed_count: { type: integer }
+                            skipped_count: { type: integer }
+                            failed_count: { type: integer }
+                            error_message: { type: string }
+                            lease_owner: { type: string }
+                            lease_expires_at: { type: string, format: date-time, nullable: true }
+                            started_at: { type: string, format: date-time, nullable: true }
+                            finished_at: { type: string, format: date-time, nullable: true }
+                            created_at: { type: string, format: date-time }
+                            updated_at: { type: string, format: date-time }
+                            request_payload:
+                              type: object
+                              additionalProperties: true
+                            result_payload:
+                              type: object
+                              additionalProperties: true
+                      total: { type: integer }
+                      page: { type: integer }
+                      size: { type: integer }
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
+  /v1/asset-workbench/batch-jobs/{job_id}:
+    get:
+      summary: Get one asset workbench batch job
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetManager, SuperAdmin]
+      parameters:
+        - in: path
+          name: job_id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Batch job
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: *AssetWorkbenchBatchJob
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
+        '404': { description: Not found }
   /v1/asset-workbench/access/request:
     post:
       summary: Request asset workbench access
@@ -23444,6 +23538,90 @@ paths:
                 type: object
                 properties:
                   data: *AssetWorkbenchClientMaterial
+        '400': { description: Invalid request }
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
+  /v1/asset-workbench/client-materials/batch-update:
+    post:
+      summary: Batch publish or update client materials
+      description: Batch publishes selected system/external assets to client materials, or enables, disables, or removes existing client material publications. This synchronous endpoint is capped for selected-item operations; large folder-recursive operations should be promoted to an async task.
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetManager, SuperAdmin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action: { type: string, enum: [publish, enable, disable, remove] }
+                items:
+                  type: array
+                  maxItems: 500
+                  items:
+                    type: object
+                    properties:
+                      asset_id: { type: integer }
+                      source_type: { type: string, enum: [system, external] }
+                      source_ref: { type: string }
+                      resource_id: { type: string }
+                      title: { type: string }
+                      description: { type: string }
+                      enabled: { type: boolean }
+                      sort_order: { type: integer }
+                folders:
+                  type: array
+                  description: Folder scopes resolved by backend. `include_children=true` recursively includes visible child folders up to the synchronous limit.
+                  items:
+                    type: object
+                    properties:
+                      path: { type: string }
+                      source: { type: string, enum: [all, system, external] }
+                      include_children: { type: boolean }
+                query: { type: string, description: Optional current search keyword scope. }
+                source: { type: string, enum: [all, system, external] }
+                selection_scope: { type: string, enum: [selected, current_page, current_folder, current_folder_recursive, current_filter] }
+      responses:
+        '200':
+          description: Batch update result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      requested: { type: integer }
+                      created: { type: integer }
+                      updated: { type: integer }
+                      enabled: { type: integer }
+                      disabled: { type: integer }
+                      removed: { type: integer }
+                      skipped: { type: integer }
+                      failed: { type: integer }
+                      async_required: { type: boolean }
+                      job_id: { type: string }
+                      job: *AssetWorkbenchBatchJob
+                      message: { type: string }
+                      items:
+                        type: array
+                        items: *AssetWorkbenchClientMaterial
+                      failures:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            index: { type: integer }
+                            asset_id: { type: integer }
+                            source_type: { type: string, enum: [system, external] }
+                            source_ref: { type: string }
+                            resource_id: { type: string }
+                            reason: { type: string }
         '400': { description: Invalid request }
         '401': { description: Unauthenticated }
         '403': { description: Forbidden }

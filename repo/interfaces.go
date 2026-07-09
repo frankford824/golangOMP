@@ -536,6 +536,14 @@ type AssetWorkbenchClientMaterialFilter struct {
 	Enabled *bool
 }
 
+type AssetWorkbenchBatchJobFilter struct {
+	JobType     string
+	Status      string
+	RequestedBy *int64
+	Page        int
+	PageSize    int
+}
+
 type AssetWorkbenchRepo interface {
 	GetProfileByUserID(ctx context.Context, userID int64) (*domain.AssetWorkbenchProfile, error)
 	ListProfiles(ctx context.Context, filter AssetWorkbenchProfileFilter) ([]*domain.AssetWorkbenchProfile, int64, error)
@@ -616,6 +624,13 @@ type AssetWorkbenchRepo interface {
 	CreateClientMaterial(ctx context.Context, tx Tx, material *domain.AssetWorkbenchClientMaterial) (*domain.AssetWorkbenchClientMaterial, error)
 	UpdateClientMaterial(ctx context.Context, tx Tx, material *domain.AssetWorkbenchClientMaterial) (*domain.AssetWorkbenchClientMaterial, error)
 	DeleteClientMaterial(ctx context.Context, tx Tx, materialID int64) error
+	CreateBatchJob(ctx context.Context, tx Tx, job *domain.AssetWorkbenchBatchJob) (*domain.AssetWorkbenchBatchJob, error)
+	GetBatchJob(ctx context.Context, jobID string) (*domain.AssetWorkbenchBatchJob, error)
+	ListBatchJobs(ctx context.Context, filter AssetWorkbenchBatchJobFilter) ([]*domain.AssetWorkbenchBatchJob, int64, error)
+	ClaimQueuedBatchJobs(ctx context.Context, tx Tx, workerID string, limit int, leaseUntil time.Time) ([]*domain.AssetWorkbenchBatchJob, error)
+	MarkBatchJobRunning(ctx context.Context, tx Tx, jobID string, startedAt time.Time) error
+	UpdateBatchJobProgress(ctx context.Context, tx Tx, job *domain.AssetWorkbenchBatchJob) error
+	CompleteBatchJob(ctx context.Context, tx Tx, job *domain.AssetWorkbenchBatchJob) error
 
 	CreateUploadSession(ctx context.Context, tx Tx, session *domain.AssetWorkbenchUploadSession) (*domain.AssetWorkbenchUploadSession, error)
 	GetUploadSession(ctx context.Context, sessionID string) (*domain.AssetWorkbenchUploadSession, error)

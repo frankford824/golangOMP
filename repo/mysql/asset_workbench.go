@@ -1603,6 +1603,237 @@ func (r *assetWorkbenchRepo) DeleteClientMaterial(ctx context.Context, tx repo.T
 	return nil
 }
 
+func (r *assetWorkbenchRepo) CreateBatchJob(ctx context.Context, tx repo.Tx, job *domain.AssetWorkbenchBatchJob) (*domain.AssetWorkbenchBatchJob, error) {
+	if job == nil {
+		return nil, fmt.Errorf("asset workbench batch job is required")
+	}
+	res, err := Unwrap(tx).ExecContext(ctx, `
+		INSERT INTO asset_workbench_batch_jobs (
+			job_id, job_type, status, action, selection_scope, requested_by, request_payload_json,
+			total_count, processed_count, created_count, updated_count, enabled_count, disabled_count,
+			removed_count, skipped_count, failed_count, error_message
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		job.JobID,
+		job.JobType,
+		job.Status,
+		job.Action,
+		job.SelectionScope,
+		job.RequestedBy,
+		nullableJSON(job.RequestPayload),
+		job.TotalCount,
+		job.ProcessedCount,
+		job.CreatedCount,
+		job.UpdatedCount,
+		job.EnabledCount,
+		job.DisabledCount,
+		job.RemovedCount,
+		job.SkippedCount,
+		job.FailedCount,
+		job.ErrorMessage,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("insert asset workbench batch job: %w", err)
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return nil, fmt.Errorf("asset workbench batch job last insert id: %w", err)
+	}
+	row := Unwrap(tx).QueryRowContext(ctx, assetWorkbenchBatchJobSelect()+` WHERE id = ?`, id)
+	return scanAssetWorkbenchBatchJob(row)
+}
+
+func (r *assetWorkbenchRepo) GetBatchJob(ctx context.Context, jobID string) (*domain.AssetWorkbenchBatchJob, error) {
+	row := r.db.db.QueryRowContext(ctx, assetWorkbenchBatchJobSelect()+` WHERE job_id = ?`, strings.TrimSpace(jobID))
+	return scanAssetWorkbenchBatchJob(row)
+}
+
+func (r *assetWorkbenchRepo) ListBatchJobs(ctx context.Context, filter repo.AssetWorkbenchBatchJobFilter) ([]*domain.AssetWorkbenchBatchJob, int64, error) {
+	where := []string{"1=1"}
+	args := []interface{}{}
+	if strings.TrimSpace(filter.JobType) != "" {
+		where = append(where, "job_type = ?")
+		args = append(args, strings.TrimSpace(filter.JobType))
+	}
+	if strings.TrimSpace(filter.Status) != "" {
+		where = append(where, "status = ?")
+		args = append(args, strings.TrimSpace(filter.Status))
+	}
+	if filter.RequestedBy != nil && *filter.RequestedBy > 0 {
+		where = append(where, "requested_by = ?")
+		args = append(args, *filter.RequestedBy)
+	}
+	page := filter.Page
+	pageSize := filter.PageSize
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 50
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	whereSQL := strings.Join(where, " AND ")
+	var total int64
+	if err := r.db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM asset_workbench_batch_jobs WHERE `+whereSQL, args...).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("count asset workbench batch jobs: %w", err)
+	}
+	queryArgs := append([]interface{}{}, args...)
+	queryArgs = append(queryArgs, pageSize, (page-1)*pageSize)
+	rows, err := r.db.db.QueryContext(ctx, assetWorkbenchBatchJobSelect()+` WHERE `+whereSQL+` ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`, queryArgs...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("list asset workbench batch jobs: %w", err)
+	}
+	defer rows.Close()
+	items := []*domain.AssetWorkbenchBatchJob{}
+	for rows.Next() {
+		item, err := scanAssetWorkbenchBatchJob(rows)
+		if err != nil {
+			return nil, 0, err
+		}
+		items = append(items, item)
+	}
+	return items, total, rows.Err()
+}
+
+func (r *assetWorkbenchRepo) ClaimQueuedBatchJobs(ctx context.Context, tx repo.Tx, workerID string, limit int, leaseUntil time.Time) ([]*domain.AssetWorkbenchBatchJob, error) {
+	if limit <= 0 {
+		limit = 1
+	}
+	if limit > 20 {
+		limit = 20
+	}
+	rows, err := Unwrap(tx).QueryContext(ctx, `
+		SELECT id
+		  FROM asset_workbench_batch_jobs
+		 WHERE status = 'queued'
+		    OR (status = 'running' AND lease_expires_at IS NOT NULL AND lease_expires_at <= UTC_TIMESTAMP())
+		 ORDER BY created_at ASC, id ASC
+		 LIMIT ?
+		 FOR UPDATE`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("claim asset workbench batch jobs ids: %w", err)
+	}
+	ids := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if len(ids) == 0 {
+		return []*domain.AssetWorkbenchBatchJob{}, nil
+	}
+	idArgs := int64SliceToInterfaces(ids)
+	clause, idArgs := simpleInClause("id IN (", ")", idArgs...)
+	updateArgs := []interface{}{strings.TrimSpace(workerID), leaseUntil.UTC()}
+	updateArgs = append(updateArgs, idArgs...)
+	if _, err := Unwrap(tx).ExecContext(ctx, `
+		UPDATE asset_workbench_batch_jobs
+		   SET status = 'running',
+		       lease_owner = ?,
+		       lease_expires_at = ?,
+		       started_at = COALESCE(started_at, UTC_TIMESTAMP())
+		 WHERE `+clause, updateArgs...); err != nil {
+		return nil, fmt.Errorf("claim asset workbench batch jobs update: %w", err)
+	}
+	selectArgs := int64SliceToInterfaces(ids)
+	selectClause, selectArgs := simpleInClause("id IN (", ")", selectArgs...)
+	rows, err = Unwrap(tx).QueryContext(ctx, assetWorkbenchBatchJobSelect()+` WHERE `+selectClause+` ORDER BY created_at ASC, id ASC`, selectArgs...)
+	if err != nil {
+		return nil, fmt.Errorf("claim asset workbench batch jobs rows: %w", err)
+	}
+	defer rows.Close()
+	jobs := []*domain.AssetWorkbenchBatchJob{}
+	for rows.Next() {
+		job, err := scanAssetWorkbenchBatchJob(rows)
+		if err != nil {
+			return nil, err
+		}
+		jobs = append(jobs, job)
+	}
+	return jobs, rows.Err()
+}
+
+func (r *assetWorkbenchRepo) MarkBatchJobRunning(ctx context.Context, tx repo.Tx, jobID string, startedAt time.Time) error {
+	_, err := Unwrap(tx).ExecContext(ctx, `
+		UPDATE asset_workbench_batch_jobs
+		   SET status = 'running',
+		       started_at = COALESCE(started_at, ?),
+		       updated_at = CURRENT_TIMESTAMP
+		 WHERE job_id = ?`, startedAt.UTC(), strings.TrimSpace(jobID))
+	if err != nil {
+		return fmt.Errorf("mark asset workbench batch job running: %w", err)
+	}
+	return nil
+}
+
+func (r *assetWorkbenchRepo) UpdateBatchJobProgress(ctx context.Context, tx repo.Tx, job *domain.AssetWorkbenchBatchJob) error {
+	if job == nil {
+		return fmt.Errorf("asset workbench batch job is required")
+	}
+	_, err := Unwrap(tx).ExecContext(ctx, `
+		UPDATE asset_workbench_batch_jobs
+		   SET total_count = ?, processed_count = ?, created_count = ?, updated_count = ?, enabled_count = ?,
+		       disabled_count = ?, removed_count = ?, skipped_count = ?, failed_count = ?, result_payload_json = ?,
+		       error_message = ?, updated_at = CURRENT_TIMESTAMP
+		 WHERE job_id = ?`,
+		job.TotalCount,
+		job.ProcessedCount,
+		job.CreatedCount,
+		job.UpdatedCount,
+		job.EnabledCount,
+		job.DisabledCount,
+		job.RemovedCount,
+		job.SkippedCount,
+		job.FailedCount,
+		nullableJSON(job.ResultPayload),
+		job.ErrorMessage,
+		job.JobID,
+	)
+	if err != nil {
+		return fmt.Errorf("update asset workbench batch job progress: %w", err)
+	}
+	return nil
+}
+
+func (r *assetWorkbenchRepo) CompleteBatchJob(ctx context.Context, tx repo.Tx, job *domain.AssetWorkbenchBatchJob) error {
+	if job == nil {
+		return fmt.Errorf("asset workbench batch job is required")
+	}
+	_, err := Unwrap(tx).ExecContext(ctx, `
+		UPDATE asset_workbench_batch_jobs
+		   SET status = ?, total_count = ?, processed_count = ?, created_count = ?, updated_count = ?, enabled_count = ?,
+		       disabled_count = ?, removed_count = ?, skipped_count = ?, failed_count = ?, result_payload_json = ?,
+		       error_message = ?, lease_owner = '', lease_expires_at = NULL, finished_at = COALESCE(?, UTC_TIMESTAMP()),
+		       updated_at = CURRENT_TIMESTAMP
+		 WHERE job_id = ?`,
+		job.Status,
+		job.TotalCount,
+		job.ProcessedCount,
+		job.CreatedCount,
+		job.UpdatedCount,
+		job.EnabledCount,
+		job.DisabledCount,
+		job.RemovedCount,
+		job.SkippedCount,
+		job.FailedCount,
+		nullableJSON(job.ResultPayload),
+		job.ErrorMessage,
+		toNullTime(job.FinishedAt),
+		job.JobID,
+	)
+	if err != nil {
+		return fmt.Errorf("complete asset workbench batch job: %w", err)
+	}
+	return nil
+}
+
 func (r *assetWorkbenchRepo) CreateUploadSession(ctx context.Context, tx repo.Tx, session *domain.AssetWorkbenchUploadSession) (*domain.AssetWorkbenchUploadSession, error) {
 	res, err := Unwrap(tx).ExecContext(ctx, `
 		INSERT INTO asset_workbench_upload_sessions (
@@ -4105,6 +4336,14 @@ func assetWorkbenchClientMaterialSelect() string {
 		FROM asset_workbench_client_materials`
 }
 
+func assetWorkbenchBatchJobSelect() string {
+	return `SELECT id, job_id, job_type, status, action, selection_scope, requested_by,
+		request_payload_json, result_payload_json, total_count, processed_count, created_count,
+		updated_count, enabled_count, disabled_count, removed_count, skipped_count, failed_count,
+		error_message, lease_owner, lease_expires_at, started_at, finished_at, created_at, updated_at
+		FROM asset_workbench_batch_jobs`
+}
+
 func assetWorkbenchDeductionRuleSelect() string {
 	return `SELECT id, worker_type, job_grade, difficulty_class, deduction_amount, effective_from, effective_to,
 		enabled, revision_no, created_by, remark, created_at, updated_at
@@ -4453,6 +4692,50 @@ func scanAssetWorkbenchClientMaterial(scanner interface{ Scan(...interface{}) er
 		return nil, err
 	}
 	item.UpdatedBy = fromNullInt64(updatedBy)
+	return &item, nil
+}
+
+func scanAssetWorkbenchBatchJob(scanner interface{ Scan(...interface{}) error }) (*domain.AssetWorkbenchBatchJob, error) {
+	var item domain.AssetWorkbenchBatchJob
+	var requestPayload sql.NullString
+	var resultPayload sql.NullString
+	var leaseExpiresAt sql.NullTime
+	var startedAt sql.NullTime
+	var finishedAt sql.NullTime
+	if err := scanner.Scan(
+		&item.ID,
+		&item.JobID,
+		&item.JobType,
+		&item.Status,
+		&item.Action,
+		&item.SelectionScope,
+		&item.RequestedBy,
+		&requestPayload,
+		&resultPayload,
+		&item.TotalCount,
+		&item.ProcessedCount,
+		&item.CreatedCount,
+		&item.UpdatedCount,
+		&item.EnabledCount,
+		&item.DisabledCount,
+		&item.RemovedCount,
+		&item.SkippedCount,
+		&item.FailedCount,
+		&item.ErrorMessage,
+		&item.LeaseOwner,
+		&leaseExpiresAt,
+		&startedAt,
+		&finishedAt,
+		&item.CreatedAt,
+		&item.UpdatedAt,
+	); err != nil {
+		return nil, err
+	}
+	item.RequestPayload = cloneValidJSON(requestPayload)
+	item.ResultPayload = cloneValidJSON(resultPayload)
+	item.LeaseExpiresAt = fromNullTime(leaseExpiresAt)
+	item.StartedAt = fromNullTime(startedAt)
+	item.FinishedAt = fromNullTime(finishedAt)
 	return &item, nil
 }
 

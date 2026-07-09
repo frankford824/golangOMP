@@ -116,6 +116,39 @@ describe('drive upload queue', () => {
     ])
   })
 
+  it('does not retry failed files during a normal upload run', async () => {
+    const files = [
+      new File(['a'], 'new.jpg', { type: 'image/jpeg' }),
+      new File(['b'], 'failed.jpg', { type: 'image/jpeg' }),
+    ]
+    const queue = createDriveUploadQueue(files)
+    queue[1].status = 'failed'
+    queue[1].error = '上次上传失败'
+    uploadWorkbenchFileMock.mockImplementation(async (file: File) => ({ sessionId: `session:${file.name}` }))
+    createSubmissionMock.mockResolvedValue({ items: [] })
+
+    const count = await uploadDriveQueue(queue, { directoryId: 11, difficultyClass: 'A' })
+
+    expect(count).toBe(1)
+    expect(uploadWorkbenchFileMock).toHaveBeenCalledTimes(1)
+    expect(uploadWorkbenchFileMock.mock.calls[0][0].name).toBe('new.jpg')
+    expect(queue[1].status).toBe('failed')
+  })
+
+  it('retries failed files only when includeFailed is explicit', async () => {
+    const queue = createDriveUploadQueue([new File(['a'], 'failed.jpg', { type: 'image/jpeg' })])
+    queue[0].status = 'failed'
+    queue[0].error = '上次上传失败'
+    uploadWorkbenchFileMock.mockImplementation(async (file: File) => ({ sessionId: `session:${file.name}` }))
+    createSubmissionMock.mockResolvedValue({ items: [] })
+
+    const count = await uploadDriveQueue(queue, { directoryId: 11, difficultyClass: 'A', includeFailed: true })
+
+    expect(count).toBe(1)
+    expect(uploadWorkbenchFileMock).toHaveBeenCalledTimes(1)
+    expect(queue[0].status).toBe('uploaded')
+  })
+
   it('keeps loose files as separate piecework items', () => {
     const groups = groupDriveUploadPieceworkItems([
       { id: 'a', relativePath: 'a.jpg', sessionId: 'session:a.jpg' },

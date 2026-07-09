@@ -171,9 +171,9 @@ export const API_ERROR_MESSAGE_ZH: Record<string, string> = {
   'unit_price must be non-negative.': '单价不能小于 0',
   'deduction_amount must be non-negative.': '质检扣款金额不能小于 0',
   'job_grade is not valid for worker_type.': '当前等级不适用于所选用工类型',
-  'network error': '网络异常，请检查连接后重试',
-  timeout: '请求超时，请稍后重试',
-  'network timeout': '请求超时，请稍后重试',
+  'network error': '连接中断，本次操作没有完成。请恢复网络后重试，不要重复点击提交。',
+  timeout: '请求超时，本次操作没有完成。请稍后重试，不要重复点击提交。',
+  'network timeout': '请求超时，本次操作没有完成。请稍后重试，不要重复点击提交。',
 }
 
 type NestedApiError = {

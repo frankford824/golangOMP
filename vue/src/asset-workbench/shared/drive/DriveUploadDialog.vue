@@ -66,9 +66,20 @@ const targetLabel = computed(() => {
   return dir
 })
 
+const queuedCount = computed(() => queue.value.filter((item) => item.status === 'queued').length)
+const failedCount = computed(() => queue.value.filter((item) => item.status === 'failed').length)
 const canUpload = computed(() => {
   if (busy.value) return false
-  return queue.value.some((item) => item.status === 'queued' || item.status === 'failed')
+  return queuedCount.value > 0
+})
+const canRetryFailed = computed(() => {
+  if (busy.value) return false
+  return failedCount.value > 0
+})
+const primaryUploadLabel = computed(() => {
+  if (busy.value) return '上传中…'
+  if (queuedCount.value > 0) return `上传新文件 ${queuedCount.value} 个`
+  return '等待选择文件'
 })
 
 function openPicker() {
@@ -140,11 +151,11 @@ function removeItem(id: string) {
   queue.value = queue.value.filter((item) => item.id !== id)
 }
 
-async function runUpload() {
-  if (!canUpload.value) return
+async function runUpload(includeFailed = false) {
+  if (includeFailed ? !canRetryFailed.value : !canUpload.value) return
   busy.value = true
   error.value = ''
-  const uploadableItems = queue.value.filter((item) => item.status === 'queued' || item.status === 'failed')
+  const uploadableItems = queue.value.filter((item) => item.status === 'queued' || (includeFailed && item.status === 'failed'))
   uploadCenter.addItems(uploadableItems.map((item) => item.file), {
     source: 'drive-dialog',
     uploadDirectoryId: props.directoryId,
@@ -153,9 +164,10 @@ async function runUpload() {
     preserveIds: uploadableItems.map((item) => item.id),
   })
   try {
-    const uploadedCount = await uploadDriveQueue(queue.value, {
+    const uploadedCount = await uploadDriveQueue(uploadableItems, {
       directoryId: props.directoryId,
       difficultyClass: props.difficultyClass,
+      includeFailed,
       onItemChange: (item) => {
         queue.value = [...queue.value]
         uploadCenter.updateItem(item.id, {
@@ -242,6 +254,11 @@ function statusIcon(status: DriveUploadQueueStatus) {
         />
 
         <div v-if="queue.length" class="aw-drive-upload__queue">
+          <div v-if="failedCount" class="aw-drive-upload__failed-callout">
+            <strong>有 {{ failedCount }} 个文件上传失败</strong>
+            <span>继续上传只会处理新选择的文件；失败文件不会自动重复上传，需要手动重试。</span>
+            <button class="aw-secondary-button" type="button" :disabled="!canRetryFailed" @click="runUpload(true)">重试失败文件</button>
+          </div>
           <article v-for="item in queue" :key="item.id" class="aw-drive-upload__row">
             <component :is="statusIcon(item.status)" :size="18" aria-hidden="true" />
             <div class="aw-drive-upload__row-body">
@@ -258,9 +275,9 @@ function statusIcon(status: DriveUploadQueueStatus) {
 
         <footer class="aw-drive-upload__foot">
           <button class="aw-secondary-button" type="button" :disabled="busy" @click="emit('close')">取消</button>
-          <button class="aw-primary-button" type="button" :disabled="!canUpload" @click="runUpload">
+          <button class="aw-primary-button" type="button" :disabled="!canUpload" @click="runUpload(false)">
             <Upload :size="16" aria-hidden="true" />
-            {{ busy ? '上传中…' : '上传并归档' }}
+            {{ primaryUploadLabel }}
           </button>
         </footer>
       </div>

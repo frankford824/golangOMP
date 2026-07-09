@@ -40,4 +40,17 @@ describe('asset workbench upload center store', () => {
     expect(store.uploadPageItems).toHaveLength(0)
     expect(store.summaryText).toBe('已完成 1 个')
   })
+
+  it('clears failed tasks without touching active uploads', () => {
+    const store = useUploadCenterStore()
+    const failed = store.addItems([new File(['a'], 'failed.jpg', { type: 'image/jpeg' })], { source: 'upload-page' })[0]
+    const active = store.addItems([new File(['b'], 'active.jpg', { type: 'image/jpeg' })], { source: 'upload-page' })[0]
+
+    store.updateItem(failed.id, { status: 'failed', error: '连接中断' })
+    store.updateItem(active.id, { status: 'uploading', progress: 20 })
+    store.clearFailed()
+
+    expect(store.failedItems).toHaveLength(0)
+    expect(store.items.map((item) => item.id)).toEqual([active.id])
+  })
 })

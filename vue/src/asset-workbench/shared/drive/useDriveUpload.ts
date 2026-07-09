@@ -19,6 +19,7 @@ export interface DriveUploadOptions {
   directoryId?: number
   difficultyClass?: string
   expectedBusinessMonth?: string
+  includeFailed?: boolean
   onItemChange?: (item: DriveUploadQueueItem) => void
 }
 
@@ -54,6 +55,8 @@ interface DroppedDirectoryEntry extends DroppedFileSystemEntry {
     readEntries: (success: (entries: DroppedFileSystemEntry[]) => void, failure?: (error: DOMException) => void) => void
   }
 }
+
+const DRIVE_UPLOAD_FILE_CONCURRENCY = 3
 
 type DropItemWithEntry = DataTransferItem & {
   webkitGetAsEntry?: () => unknown
@@ -128,11 +131,28 @@ export function groupDriveUploadPieceworkItems<T extends DriveUploadPieceworkSou
   return groups
 }
 
+export async function runDriveUploadPool<T>(
+  items: T[],
+  worker: (item: T, index: number) => Promise<void>,
+  concurrency = DRIVE_UPLOAD_FILE_CONCURRENCY,
+): Promise<void> {
+  if (!items.length) return
+  const workerCount = Math.max(1, Math.min(concurrency, items.length))
+  let nextIndex = 0
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (nextIndex < items.length) {
+      const currentIndex = nextIndex
+      nextIndex += 1
+      await worker(items[currentIndex], currentIndex)
+    }
+  }))
+}
+
 export async function uploadDriveQueue(queue: DriveUploadQueueItem[], options: DriveUploadOptions): Promise<number> {
   const uploadBatchId = crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`
   const expectedBusinessMonth = options.expectedBusinessMonth || currentBusinessMonth()
-  for (const item of queue) {
-    if (item.status !== 'queued' && item.status !== 'failed') continue
+  const uploadTargets = queue.filter((item) => item.status === 'queued' || (options.includeFailed && item.status === 'failed'))
+  await runDriveUploadPool(uploadTargets, async (item) => {
     item.status = 'uploading'
     item.progress = 0
     item.error = ''
@@ -155,10 +175,10 @@ export async function uploadDriveQueue(queue: DriveUploadQueueItem[], options: D
       options.onItemChange?.(item)
     } catch (err) {
       item.status = 'failed'
-      item.error = resolveApiUserMessage(err, { fallback: '上传失败，请重试' })
+      item.error = resolveDriveUploadFailureMessage(err)
       options.onItemChange?.(item)
     }
-  }
+  })
 
   const uploadedItems = queue.filter((item) => item.status === 'uploaded' && item.sessionId)
   if (!uploadedItems.length) throw new Error('没有文件上传成功，请重试')
@@ -181,6 +201,24 @@ export async function uploadDriveQueue(queue: DriveUploadQueueItem[], options: D
     throw new Error(resolveApiUserMessage(err, { fallback: '上传完成，但提交记录生成失败' }))
   }
   return uploadedItems.length
+}
+
+export function resolveDriveUploadFailureMessage(err: unknown) {
+  const raw = [resolveApiUserMessage(err, { fallback: '' }), rawErrorText(err)].filter(Boolean).join(' ')
+  if (/(网络异常|network|failed to fetch|load failed|timeout|timed out|连接中断|连接失败|断开|offline)/i.test(raw)) {
+    return '上传连接中断，失败文件已保留。恢复网络后请点击“重试失败文件”，系统不会自动重复上传。'
+  }
+  return resolveApiUserMessage(err, { fallback: '上传失败，失败文件已保留，请检查后重试。' })
+}
+
+function rawErrorText(err: unknown) {
+  if (err instanceof Error) return err.message
+  if (typeof err === 'string') return err
+  try {
+    return JSON.stringify(err)
+  } catch {
+    return ''
+  }
 }
 
 function normalizeRelativePath(value: string) {

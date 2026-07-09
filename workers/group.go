@@ -14,28 +14,32 @@ import (
 
 // Group manages all background workers (spec §4.1).
 type Group struct {
-	db                            *sql.DB
-	rdb                           *redis.Client
-	logger                        *zap.Logger
-	erpSyncSvc                    service.ERPSyncService
-	productMgmt                   service.ProductManagementService
-	skuComboSync                  service.SKUComboSyncService
-	notificationProcessor         NotificationProcessor
-	assetWorkbenchPreview         AssetWorkbenchPreviewProcessor
-	assetWorkbenchMaintenance     AssetWorkbenchMaintenanceProcessor
-	erpEnabled                    bool
-	erpInterval                   time.Duration
-	webPushEnabled                bool
-	webPushInterval               time.Duration
-	webPushLimit                  int
-	skuFailureReconcileInterval   time.Duration
-	skuFailureReconcileLimit      int
-	assetWorkbenchPreviewEnabled  bool
-	assetWorkbenchPreviewInterval time.Duration
-	assetWorkbenchPreviewLimit    int
-	assetWorkbenchExpiryEnabled   bool
-	assetWorkbenchExpiryInterval  time.Duration
-	assetWorkbenchExpiryLimit     int
+	db                             *sql.DB
+	rdb                            *redis.Client
+	logger                         *zap.Logger
+	erpSyncSvc                     service.ERPSyncService
+	productMgmt                    service.ProductManagementService
+	skuComboSync                   service.SKUComboSyncService
+	notificationProcessor          NotificationProcessor
+	assetWorkbenchPreview          AssetWorkbenchPreviewProcessor
+	assetWorkbenchMaintenance      AssetWorkbenchMaintenanceProcessor
+	assetWorkbenchBatchJob         AssetWorkbenchBatchJobProcessor
+	erpEnabled                     bool
+	erpInterval                    time.Duration
+	webPushEnabled                 bool
+	webPushInterval                time.Duration
+	webPushLimit                   int
+	skuFailureReconcileInterval    time.Duration
+	skuFailureReconcileLimit       int
+	assetWorkbenchPreviewEnabled   bool
+	assetWorkbenchPreviewInterval  time.Duration
+	assetWorkbenchPreviewLimit     int
+	assetWorkbenchExpiryEnabled    bool
+	assetWorkbenchExpiryInterval   time.Duration
+	assetWorkbenchExpiryLimit      int
+	assetWorkbenchBatchJobEnabled  bool
+	assetWorkbenchBatchJobInterval time.Duration
+	assetWorkbenchBatchJobLimit    int
 }
 
 type GroupDeps struct {
@@ -48,6 +52,7 @@ type GroupDeps struct {
 	Notification                    NotificationProcessor
 	AssetWorkbenchPreview           AssetWorkbenchPreviewProcessor
 	AssetWorkbenchMaintenance       AssetWorkbenchMaintenanceProcessor
+	AssetWorkbenchBatchJob          AssetWorkbenchBatchJobProcessor
 	ERPEnabled                      bool
 	ERPInterval                     time.Duration
 	WebPushEnabled                  bool
@@ -61,6 +66,9 @@ type GroupDeps struct {
 	AssetWorkbenchExpiryEnabled     bool
 	AssetWorkbenchExpiryInterval    time.Duration
 	AssetWorkbenchExpiryLimit       int
+	AssetWorkbenchBatchJobEnabled   bool
+	AssetWorkbenchBatchJobInterval  time.Duration
+	AssetWorkbenchBatchJobLimit     int
 }
 
 type AssetWorkbenchPreviewProcessor interface {
@@ -71,30 +79,38 @@ type AssetWorkbenchMaintenanceProcessor interface {
 	ExpireUploadSessions(ctx context.Context, limit int) (int, *domain.AppError)
 }
 
+type AssetWorkbenchBatchJobProcessor interface {
+	ProcessPendingBatchJobs(ctx context.Context, workerID string, limit int) (int, *domain.AppError)
+}
+
 func NewGroup(deps GroupDeps) *Group {
 	return &Group{
-		db:                            deps.DB,
-		rdb:                           deps.Redis,
-		logger:                        deps.Logger,
-		erpSyncSvc:                    deps.ERPSync,
-		productMgmt:                   deps.ProductManagement,
-		skuComboSync:                  deps.SKUComboSync,
-		notificationProcessor:         deps.Notification,
-		assetWorkbenchPreview:         deps.AssetWorkbenchPreview,
-		assetWorkbenchMaintenance:     deps.AssetWorkbenchMaintenance,
-		erpEnabled:                    deps.ERPEnabled,
-		erpInterval:                   deps.ERPInterval,
-		webPushEnabled:                deps.WebPushEnabled,
-		webPushInterval:               deps.WebPushInterval,
-		webPushLimit:                  deps.WebPushLimit,
-		skuFailureReconcileInterval:   deps.SKUSyncFailureReconcileInterval,
-		skuFailureReconcileLimit:      deps.SKUSyncFailureReconcileLimit,
-		assetWorkbenchPreviewEnabled:  deps.AssetWorkbenchPreviewEnabled,
-		assetWorkbenchPreviewInterval: deps.AssetWorkbenchPreviewInterval,
-		assetWorkbenchPreviewLimit:    deps.AssetWorkbenchPreviewLimit,
-		assetWorkbenchExpiryEnabled:   deps.AssetWorkbenchExpiryEnabled,
-		assetWorkbenchExpiryInterval:  deps.AssetWorkbenchExpiryInterval,
-		assetWorkbenchExpiryLimit:     deps.AssetWorkbenchExpiryLimit,
+		db:                             deps.DB,
+		rdb:                            deps.Redis,
+		logger:                         deps.Logger,
+		erpSyncSvc:                     deps.ERPSync,
+		productMgmt:                    deps.ProductManagement,
+		skuComboSync:                   deps.SKUComboSync,
+		notificationProcessor:          deps.Notification,
+		assetWorkbenchPreview:          deps.AssetWorkbenchPreview,
+		assetWorkbenchMaintenance:      deps.AssetWorkbenchMaintenance,
+		assetWorkbenchBatchJob:         deps.AssetWorkbenchBatchJob,
+		erpEnabled:                     deps.ERPEnabled,
+		erpInterval:                    deps.ERPInterval,
+		webPushEnabled:                 deps.WebPushEnabled,
+		webPushInterval:                deps.WebPushInterval,
+		webPushLimit:                   deps.WebPushLimit,
+		skuFailureReconcileInterval:    deps.SKUSyncFailureReconcileInterval,
+		skuFailureReconcileLimit:       deps.SKUSyncFailureReconcileLimit,
+		assetWorkbenchPreviewEnabled:   deps.AssetWorkbenchPreviewEnabled,
+		assetWorkbenchPreviewInterval:  deps.AssetWorkbenchPreviewInterval,
+		assetWorkbenchPreviewLimit:     deps.AssetWorkbenchPreviewLimit,
+		assetWorkbenchExpiryEnabled:    deps.AssetWorkbenchExpiryEnabled,
+		assetWorkbenchExpiryInterval:   deps.AssetWorkbenchExpiryInterval,
+		assetWorkbenchExpiryLimit:      deps.AssetWorkbenchExpiryLimit,
+		assetWorkbenchBatchJobEnabled:  deps.AssetWorkbenchBatchJobEnabled,
+		assetWorkbenchBatchJobInterval: deps.AssetWorkbenchBatchJobInterval,
+		assetWorkbenchBatchJobLimit:    deps.AssetWorkbenchBatchJobLimit,
 	}
 }
 
@@ -125,6 +141,9 @@ func (g *Group) Start(ctx context.Context) {
 	if g.shouldStartAssetWorkbenchUploadExpiryWorker() {
 		go NewAssetWorkbenchUploadExpiryWorker(g.assetWorkbenchMaintenance, g.logger, g.assetWorkbenchExpiryInterval, g.assetWorkbenchExpiryLimit).Run(ctx)
 	}
+	if g.shouldStartAssetWorkbenchBatchJobWorker() {
+		go NewAssetWorkbenchBatchJobWorker(g.assetWorkbenchBatchJob, g.logger, g.assetWorkbenchBatchJobInterval, g.assetWorkbenchBatchJobLimit).Run(ctx)
+	}
 }
 
 func (g *Group) shouldStartProductManagementSyncWorker() bool {
@@ -149,4 +168,8 @@ func (g *Group) shouldStartAssetWorkbenchPreviewWorker() bool {
 
 func (g *Group) shouldStartAssetWorkbenchUploadExpiryWorker() bool {
 	return g.assetWorkbenchExpiryEnabled && g.assetWorkbenchMaintenance != nil
+}
+
+func (g *Group) shouldStartAssetWorkbenchBatchJobWorker() bool {
+	return g.assetWorkbenchBatchJobEnabled && g.assetWorkbenchBatchJob != nil
 }

@@ -99,6 +99,14 @@ const (
 	AssetWorkbenchBatchStatusCancelled = "cancelled"
 	AssetWorkbenchBatchStatusReversed  = "reversed"
 
+	AssetWorkbenchAsyncJobTypeClientMaterialBatchUpdate = "client_material_batch_update"
+
+	AssetWorkbenchAsyncJobStatusQueued    = "queued"
+	AssetWorkbenchAsyncJobStatusRunning   = "running"
+	AssetWorkbenchAsyncJobStatusSucceeded = "succeeded"
+	AssetWorkbenchAsyncJobStatusFailed    = "failed"
+	AssetWorkbenchAsyncJobStatusCancelled = "cancelled"
+
 	AssetWorkbenchPromoModeFixedPrice   = "fixed_price"
 	AssetWorkbenchPromoModeMarkupAmount = "markup_amount"
 	AssetWorkbenchPromoModeMarkupRate   = "markup_rate"
@@ -151,6 +159,9 @@ const (
 	AssetWorkbenchEventUploadDirectoryUpserted     = "upload_directory.upserted"
 	AssetWorkbenchEventClientMaterialUpserted      = "client_material.upserted"
 	AssetWorkbenchEventClientMaterialDeleted       = "client_material.deleted"
+	AssetWorkbenchEventClientMaterialBatchUpdated  = "client_material.batch_updated"
+	AssetWorkbenchEventBatchJobCreated             = "batch_job.created"
+	AssetWorkbenchEventBatchJobCompleted           = "batch_job.completed"
 	AssetWorkbenchEventClientMaterialDownloaded    = "client_material.downloaded"
 	AssetWorkbenchEventClientMaterialBatchDownload = "client_material.batch_downloaded"
 	AssetWorkbenchEventItemQCUpdated               = "item.qc_updated"
@@ -180,6 +191,7 @@ const (
 	AssetWorkbenchEntitySystemAsset          = "system_asset"
 	AssetWorkbenchEntityUploadDirectory      = "upload_directory"
 	AssetWorkbenchEntityClientMaterial       = "client_material"
+	AssetWorkbenchEntityBatchJob             = "batch_job"
 	AssetWorkbenchEntityErrorImport          = "error_import"
 	AssetWorkbenchEntitySettlement           = "settlement_batch"
 	AssetWorkbenchEntityAdjustment           = "settlement_adjustment"
@@ -399,6 +411,34 @@ type AssetWorkbenchClientMaterial struct {
 	PublishedAt      time.Time `json:"published_at" db:"published_at"`
 	CreatedAt        time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt        time.Time `json:"updated_at" db:"updated_at"`
+}
+
+type AssetWorkbenchBatchJob struct {
+	ID             int64           `json:"id" db:"id"`
+	JobID          string          `json:"job_id" db:"job_id"`
+	JobType        string          `json:"job_type" db:"job_type"`
+	Status         string          `json:"status" db:"status"`
+	Action         string          `json:"action" db:"action"`
+	SelectionScope string          `json:"selection_scope" db:"selection_scope"`
+	RequestedBy    int64           `json:"requested_by" db:"requested_by"`
+	RequestPayload json.RawMessage `json:"request_payload,omitempty" db:"request_payload_json"`
+	ResultPayload  json.RawMessage `json:"result_payload,omitempty" db:"result_payload_json"`
+	TotalCount     int             `json:"total_count" db:"total_count"`
+	ProcessedCount int             `json:"processed_count" db:"processed_count"`
+	CreatedCount   int             `json:"created_count" db:"created_count"`
+	UpdatedCount   int             `json:"updated_count" db:"updated_count"`
+	EnabledCount   int             `json:"enabled_count" db:"enabled_count"`
+	DisabledCount  int             `json:"disabled_count" db:"disabled_count"`
+	RemovedCount   int             `json:"removed_count" db:"removed_count"`
+	SkippedCount   int             `json:"skipped_count" db:"skipped_count"`
+	FailedCount    int             `json:"failed_count" db:"failed_count"`
+	ErrorMessage   string          `json:"error_message,omitempty" db:"error_message"`
+	LeaseOwner     string          `json:"lease_owner,omitempty" db:"lease_owner"`
+	LeaseExpiresAt *time.Time      `json:"lease_expires_at,omitempty" db:"lease_expires_at"`
+	StartedAt      *time.Time      `json:"started_at,omitempty" db:"started_at"`
+	FinishedAt     *time.Time      `json:"finished_at,omitempty" db:"finished_at"`
+	CreatedAt      time.Time       `json:"created_at" db:"created_at"`
+	UpdatedAt      time.Time       `json:"updated_at" db:"updated_at"`
 }
 
 type AssetWorkbenchMember struct {

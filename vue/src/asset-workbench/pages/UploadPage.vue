@@ -7,7 +7,14 @@ import { useAssetWorkbenchBootstrap } from '@aw/app/useAssetWorkbenchBootstrap'
 import { uploadWorkbenchFile } from '@aw/features/upload/uploadFlow'
 import { assetWorkbenchApi, type DifficultyClassRow, type FilePreviewMeta, type SubmissionFileRow, type UploadDirectoryRow } from '@aw/shared/api/assetWorkbenchApi'
 import { usePageRequest } from '@aw/shared/composables/usePageRequest'
-import { driveUploadRelativePath, filesFromDriveDrop, groupDriveUploadPieceworkItems, isSafeDriveUploadPath } from '@aw/shared/drive/useDriveUpload'
+import {
+  driveUploadRelativePath,
+  filesFromDriveDrop,
+  groupDriveUploadPieceworkItems,
+  isSafeDriveUploadPath,
+  resolveDriveUploadFailureMessage,
+  runDriveUploadPool,
+} from '@aw/shared/drive/useDriveUpload'
 import { useUploadCenterStore, type UploadCenterItem, type UploadCenterStatus } from '@aw/shared/drive/uploadCenter.store'
 import { currentBusinessMonth } from '@aw/shared/format/businessMonth'
 import { difficultyCodes, firstDifficultyCode } from '@aw/shared/format/difficulty'
@@ -87,13 +94,15 @@ const contextLoading = contextRequest.loading
 const contextError = contextRequest.error
 
 const uploadedItems = computed(() => queue.value.filter((item) => item.status === 'uploaded'))
+const queuedItems = computed(() => queue.value.filter((item) => item.status === 'queued'))
+const failedItems = computed(() => queue.value.filter((item) => item.status === 'failed'))
 const uploadPieceworkGroups = computed(() => groupDriveUploadPieceworkItems(queue.value))
 const uploadedPieceworkGroups = computed(() => groupDriveUploadPieceworkItems(uploadedItems.value))
 const isSimpleUser = computed(() => bootstrap.value?.is_admin === false)
 const requiresUploadDirectory = computed(() => uploadDirectories.value.length > 0)
 const selectedUploadDirectory = computed(() => uploadDirectories.value.find((item) => item.id === selectedUploadDirectoryId.value))
 const canUseUploadDirectory = computed(() => !requiresUploadDirectory.value || selectedUploadDirectoryId.value > 0)
-const hasPendingUploads = computed(() => queue.value.some((item) => item.status === 'queued' || item.status === 'failed'))
+const hasPendingUploads = computed(() => queuedItems.value.length > 0)
 const canSubmit = computed(() => {
   if (uploadedItems.value.length === 0 || uploading.value || submitting.value) return false
   return true
@@ -101,8 +110,9 @@ const canSubmit = computed(() => {
 const canSimpleSubmit = computed(() => {
   if (!isSimpleUser.value) return false
   if (!queue.value.length || uploading.value || submitting.value) return false
-  return canUseUploadDirectory.value && queue.value.every((item) => item.status !== 'uploading' && item.status !== 'submitting')
+  return canUseUploadDirectory.value && queue.value.every((item) => item.status !== 'uploading' && item.status !== 'submitting') && (queuedItems.value.length > 0 || uploadedItems.value.length > 0)
 })
+const canRetryFailedUploads = computed(() => !uploading.value && !submitting.value && canUseUploadDirectory.value && failedItems.value.length > 0)
 const totalPieceworkPages = computed(() =>
   uploadPieceworkGroups.value.reduce((sum, group) => sum + (group.isFolder ? 1 : group.items[0]?.pageCount || 1), 0),
 )
@@ -144,7 +154,8 @@ const simpleSubmitHint = computed(() => {
   if (contextLoading.value) return '正在加载上传目录'
   if (!queue.value.length) return '先选择文件，或把文件拖到上传区'
   if (!canUseUploadDirectory.value) return '先选择这批文件进入的上传目录'
-  if (queue.value.some((item) => item.status === 'failed')) return '会先重试失败文件，再提交作品'
+  if (failedItems.value.length && !queuedItems.value.length && !uploadedItems.value.length) return '失败文件不会自动重传，请点击“重试失败文件”'
+  if (failedItems.value.length && queuedItems.value.length) return `将只上传新文件 ${formatInt(queuedItems.value.length)} 个，失败文件需单独重试`
   if (queue.value.some((item) => item.status === 'uploaded')) return `将提交 ${uploadedUnitLabel.value}`
   return `将上传并提交 ${uploadUnitLabel.value}`
 })
@@ -152,20 +163,21 @@ const adminUploadLabel = computed(() => {
   if (uploading.value) return '正在上传'
   if (submitting.value) return '正在生成记录'
   if (uploadedItems.value.length > 0 && !hasPendingUploads.value) return `生成提交记录 ${uploadedPieceworkGroups.value.length} 个`
-  if (queue.value.some((item) => item.status === 'failed')) return '重试并生成记录'
+  if (queuedItems.value.length > 0) return `上传新文件 ${queuedItems.value.length} 个并生成记录`
   return '上传并生成记录'
 })
 const adminUploadHint = computed(() => {
   if (!queue.value.length) return '先选择文件，或把文件拖到上传区'
   if (!canUseUploadDirectory.value) return '先选择这批文件进入的上传目录'
-  if (queue.value.some((item) => item.status === 'failed')) return '会重试失败文件，成功后自动生成提交记录'
+  if (failedItems.value.length && !queuedItems.value.length && !uploadedItems.value.length) return '失败文件不会自动重传，请点击“重试失败文件”'
+  if (failedItems.value.length && queuedItems.value.length) return `将只上传新文件 ${formatInt(queuedItems.value.length)} 个，失败文件需单独重试`
   if (uploadedItems.value.length > 0 && !hasPendingUploads.value) return `将为 ${uploadedUnitLabel.value} 生成提交记录，生成后进入上传记录`
   return `将上传并生成 ${uploadUnitLabel.value} 的提交记录`
 })
 const uploadContinuityHint = computed(() => {
   if (uploading.value) return '正在上传。你可以切到看收入或网盘，回到本页仍能看到进度。请不要关闭浏览器窗口。'
   if (submitting.value) return '正在生成上传记录。你可以先切到其他页面，回到本页仍能看到结果。'
-  if (queue.value.some((item) => item.status === 'failed')) return '有文件上传失败，失败项会保留在这里，可回来重试。'
+  if (failedItems.value.length) return '有文件上传失败，失败项已保留，但不会自动重复上传。需要重传时请点击“重试失败文件”。'
   if (queue.value.some((item) => item.status === 'uploaded')) return '文件已上传，回到本页可以继续生成上传记录。'
   return ''
 })
@@ -177,7 +189,7 @@ const submitButtonLabel = computed(() => {
 const canUseAdminPrimaryAction = computed(() => {
   if (uploading.value || submitting.value || queue.value.length === 0) return false
   if (uploadedItems.value.length > 0 && !hasPendingUploads.value) return canSubmit.value
-  return canUseUploadDirectory.value
+  return canUseUploadDirectory.value && queuedItems.value.length > 0
 })
 const uploadSpreadsheetValidations = computed<WorkbenchSpreadsheetValidation[]>(() =>
   queue.value.flatMap((item) => {
@@ -360,9 +372,14 @@ function pieceworkFileLabel(pieceworkCount: number, fileCount: number) {
   return `${formatInt(pieceworkCount)} 个作品 · ${formatInt(fileCount)} 个文件`
 }
 
-async function uploadQueuedItems() {
+async function uploadQueuedItems(includeFailed = false) {
   if (!canUseUploadDirectory.value) {
     error.value = '先选择这次上传要进入的目录'
+    return false
+  }
+  const uploadTargets = queue.value.filter((item) => item.status === 'queued' || (includeFailed && item.status === 'failed'))
+  if (!uploadTargets.length) {
+    error.value = includeFailed ? '没有需要重试的失败文件' : '没有新的待上传文件'
     return false
   }
   uploading.value = true
@@ -373,8 +390,8 @@ async function uploadQueuedItems() {
   const uploadDirectoryName = selectedUploadDirectory.value?.name ?? ''
   const uploadDirectoryDifficulty = selectedUploadDirectory.value?.difficulty_class ?? firstDifficultyCode(difficultyRows.value)
   const uploadBatchId = crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`
-  for (const item of queue.value) {
-    if (item.status !== 'queued' && item.status !== 'failed') continue
+  const validTargets: QueueItem[] = []
+  for (const item of uploadTargets) {
     const allowed = selectedAllowedFileTypes.value
     if (!uploadFileAllowed(item.file, allowed) || !uploadFilePathAllowed(item.file)) {
       item.status = 'failed'
@@ -382,39 +399,45 @@ async function uploadQueuedItems() {
       uploadCenter.updateItem(item.id, { status: item.status, error: item.error })
       continue
     }
-    item.status = 'uploading'
-    item.error = ''
-    item.progress = 0
-    item.uploadDirectoryId = uploadDirectoryId
-    item.uploadDirectoryName = uploadDirectoryName
-    item.difficultyClass = uploadDirectoryDifficulty
-    try {
-      const uploaded = await uploadWorkbenchFile(item.file, {
-        uploadDirectoryId,
-        uploadBatchId,
-        relativePath: item.relativePath,
-        isFolderUpload: item.relativePath.includes('/'),
-        expectedBusinessMonth: pageBusinessMonth,
-        onProgress: (progress) => {
-          item.progress = progress.percent
-          uploadCenter.updateItem(item.id, { progress: progress.percent, status: 'uploading' })
-        },
-      })
-      item.sessionId = uploaded.sessionId
-      item.progress = 100
-      item.status = 'uploaded'
-      uploadCenter.updateItem(item.id, { sessionId: item.sessionId, progress: 100, status: 'uploaded', error: '' })
-    } catch (err) {
-      item.status = 'failed'
-      item.error = resolveApiUserMessage(err, { fallback: '上传失败，请重试' })
-      uploadCenter.updateItem(item.id, { status: 'failed', error: item.error, progress: item.progress })
-    }
+    validTargets.push(item)
   }
-  uploading.value = false
-  const failed = queue.value.filter((item) => item.status === 'failed').length
-  const success = queue.value.filter((item) => item.status === 'uploaded').length
-  lastUploadResult.value = { total: queue.value.length, success, failed }
-  if (failed === 0 && queue.value.length > 0) {
+  try {
+    await runDriveUploadPool(validTargets, async (item) => {
+      item.status = 'uploading'
+      item.error = ''
+      item.progress = 0
+      item.uploadDirectoryId = uploadDirectoryId
+      item.uploadDirectoryName = uploadDirectoryName
+      item.difficultyClass = uploadDirectoryDifficulty
+      try {
+        const uploaded = await uploadWorkbenchFile(item.file, {
+          uploadDirectoryId,
+          uploadBatchId,
+          relativePath: item.relativePath,
+          isFolderUpload: item.relativePath.includes('/'),
+          expectedBusinessMonth: pageBusinessMonth,
+          onProgress: (progress) => {
+            item.progress = progress.percent
+            uploadCenter.updateItem(item.id, { progress: progress.percent, status: 'uploading' })
+          },
+        })
+        item.sessionId = uploaded.sessionId
+        item.progress = 100
+        item.status = 'uploaded'
+        uploadCenter.updateItem(item.id, { sessionId: item.sessionId, progress: 100, status: 'uploaded', error: '' })
+      } catch (err) {
+        item.status = 'failed'
+        item.error = resolveDriveUploadFailureMessage(err)
+        uploadCenter.updateItem(item.id, { status: 'failed', error: item.error, progress: item.progress })
+      }
+    })
+  } finally {
+    uploading.value = false
+  }
+  const failed = uploadTargets.filter((item) => item.status === 'failed').length
+  const success = uploadTargets.filter((item) => item.status === 'uploaded').length
+  lastUploadResult.value = { total: uploadTargets.length, success, failed }
+  if (failed === 0 && uploadTargets.length > 0) {
     notice.value = isSimpleUser.value
       ? `上传完成：成功 ${formatInt(success)} 个文件，失败 0 个`
       : `文件已上传：成功 ${formatInt(success)} 个文件。请继续生成提交记录，生成后才会进入上传记录。`
@@ -427,9 +450,9 @@ async function runAdminPrimaryAction() {
     await createSubmission()
     return
   }
-  await uploadQueuedItems()
+  await uploadQueuedItems(false)
   const successful = uploadedItems.value.length
-  const failed = queue.value.filter((item) => item.status === 'failed').length
+  const failed = failedItems.value.length
   if (!successful) {
     error.value = '没有文件上传成功，请重试'
     return
@@ -494,7 +517,7 @@ async function submitSimple() {
     item.difficultyClass = selectedUploadDirectory.value?.difficulty_class ?? item.difficultyClass
   }
   if (hasPendingUploads.value) {
-    await uploadQueuedItems()
+    await uploadQueuedItems(false)
     if (!uploadedItems.value.length) {
       error.value = '没有文件上传成功，请重试。'
       return
@@ -510,11 +533,18 @@ async function submitSimple() {
 }
 
 async function retryAndSubmit() {
-  if (isSimpleUser.value) {
-    await submitSimple()
+  if (!canRetryFailedUploads.value) return
+  for (const item of queue.value) {
+    if (item.status === 'failed') {
+      item.difficultyClass = selectedUploadDirectory.value?.difficulty_class ?? item.difficultyClass
+    }
+  }
+  await uploadQueuedItems(true)
+  if (!uploadedItems.value.length) {
+    error.value = '没有文件上传成功，请重试。'
     return
   }
-  await runAdminPrimaryAction()
+  await createSubmission()
 }
 
 function selectUploadDirectory(directory: UploadDirectoryRow) {
@@ -752,6 +782,19 @@ onMounted(() => {
     <p v-else-if="notice" class="aw-inline-alert">{{ notice }}</p>
     <p v-if="uploadContinuityHint" class="aw-inline-alert aw-inline-alert--info">{{ uploadContinuityHint }}</p>
 
+    <section v-if="failedItems.length" class="aw-upload-failure-callout" aria-live="polite">
+      <div>
+        <strong>{{ formatInt(failedItems.length) }} 个文件上传失败</strong>
+        <p>继续选择新文件后，普通上传只会处理新文件；失败文件不会自动重复上传，需要你手动点击重试。</p>
+      </div>
+      <div class="aw-upload-failure-callout__actions">
+        <button class="aw-primary-button" type="button" :disabled="!canRetryFailedUploads" @click="retryAndSubmit">重试失败文件</button>
+        <button class="aw-secondary-button" type="button" :disabled="uploading || submitting" @click="uploadCenter.removeItems(failedItems.map((item) => item.id))">
+          清除失败记录
+        </button>
+      </div>
+    </section>
+
     <SpreadsheetWorkbench
       v-if="uploadSpreadsheetOpen"
       :source="uploadSpreadsheetSource"
@@ -836,11 +879,11 @@ onMounted(() => {
       <p v-if="lastSubmissionResult" class="aw-copy">
         提交：已生成 {{ formatInt(lastSubmissionResult.total) }} 个作品，包含 {{ formatInt(lastSubmissionResult.success) }} 个文件记录。
       </p>
-      <div v-if="queue.some((item) => item.status === 'failed')" class="aw-inline-actions">
-        <button class="aw-primary-button" type="button" :disabled="uploading || submitting || !canUseUploadDirectory" @click="retryAndSubmit">重试并提交</button>
+      <div v-if="failedItems.length" class="aw-inline-actions">
+        <button class="aw-primary-button" type="button" :disabled="!canRetryFailedUploads" @click="retryAndSubmit">重试失败文件</button>
       </div>
-      <ul v-if="queue.some((item) => item.status === 'failed')" class="aw-upload-result-list">
-        <li v-for="item in queue.filter((entry) => entry.status === 'failed')" :key="item.id">
+      <ul v-if="failedItems.length" class="aw-upload-result-list">
+        <li v-for="item in failedItems" :key="item.id">
           <strong>{{ queueItemDisplayName(item) }}</strong>
           <span>{{ item.error || '上传失败' }}</span>
         </li>

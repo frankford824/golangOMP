@@ -96,6 +96,15 @@ async function goUploadPage() {
               </button>
             </header>
 
+            <div v-if="uploadCenter.failedItems.length" class="aw-upload-center__failed-callout">
+              <strong>{{ formatInt(uploadCenter.failedItems.length) }} 个文件上传失败</strong>
+              <span>失败文件已保留，但不会自动重复上传。恢复网络后请回到上传页手动重试。</span>
+              <div>
+                <button class="aw-secondary-button" type="button" @click="goUploadPage">去上传页处理</button>
+                <button class="aw-secondary-button" type="button" @click="uploadCenter.clearFailed">清除失败记录</button>
+              </div>
+            </div>
+
             <div ref="listRef" class="aw-upload-center__list">
               <article
                 v-for="item in uploadCenter.visibleItems"

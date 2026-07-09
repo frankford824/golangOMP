@@ -169,6 +169,10 @@ type AssetWorkbenchConfig struct {
 	UploadExpiryWorkerEnabled   bool
 	UploadExpiryWorkerInterval  time.Duration
 	UploadExpiryWorkerLimit     int
+	BatchJobWorkerEnabled       bool
+	BatchJobWorkerInterval      time.Duration
+	BatchJobWorkerLimit         int
+	BatchJobWorkerLeaseTTL      time.Duration
 }
 
 type ServerConfig struct {
@@ -397,6 +401,10 @@ func Load() (*Config, error) {
 			UploadExpiryWorkerEnabled:   mustParseBool(getEnv("ASSET_WORKBENCH_UPLOAD_EXPIRY_WORKER_ENABLED", "true")),
 			UploadExpiryWorkerInterval:  mustParseDuration(getEnv("ASSET_WORKBENCH_UPLOAD_EXPIRY_WORKER_INTERVAL", "10m")),
 			UploadExpiryWorkerLimit:     mustParseInt(getEnv("ASSET_WORKBENCH_UPLOAD_EXPIRY_WORKER_LIMIT", "100")),
+			BatchJobWorkerEnabled:       mustParseBool(getEnv("ASSET_WORKBENCH_BATCH_JOB_WORKER_ENABLED", "true")),
+			BatchJobWorkerInterval:      mustParseDuration(getEnv("ASSET_WORKBENCH_BATCH_JOB_WORKER_INTERVAL", "5s")),
+			BatchJobWorkerLimit:         mustParseInt(getEnv("ASSET_WORKBENCH_BATCH_JOB_WORKER_LIMIT", "2")),
+			BatchJobWorkerLeaseTTL:      mustParseDuration(getEnv("ASSET_WORKBENCH_BATCH_JOB_WORKER_LEASE_TTL", "10m")),
 		},
 		AssetCleanup: AssetCleanupConfig{
 			Enabled: mustParseBool(getEnv("ASSET_CLEANUP_ENABLED", "false")),

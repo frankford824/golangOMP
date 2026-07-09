@@ -143,6 +143,11 @@ export const useUploadCenterStore = defineStore('assetWorkbenchUploadCenter', ()
     if (!items.value.length) closePanel()
   }
 
+  function clearFailed() {
+    items.value = items.value.filter((item) => item.status !== 'failed')
+    if (!items.value.length) closePanel()
+  }
+
   function clearIdle() {
     items.value = items.value.filter((item) => item.status === 'uploading' || item.status === 'submitting')
     if (!items.value.length) closePanel()
@@ -170,6 +175,7 @@ export const useUploadCenterStore = defineStore('assetWorkbenchUploadCenter', ()
     removeItem,
     removeItems,
     clearFinished,
+    clearFailed,
     clearIdle,
   }
 })

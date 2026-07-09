@@ -3912,3 +3912,33 @@ func TestParseErrorRecordsExcelSupportsFormalTemplateWithoutOrderColumn(t *testi
 		t.Fatalf("records = %+v, want one quality row without order_no", records)
 	}
 }
+
+func TestWorkbenchOperationalMaterialVisibilityRestrictsQuarkRoots(t *testing.T) {
+	cases := []struct {
+		path string
+		want bool
+	}{
+		{path: "/quark", want: true},
+		{path: "/quark/海报/2026/a.jpg", want: true},
+		{path: "/quark/kt板/a.jpg", want: true},
+		{path: "/quark/电视投屏/a.jpg", want: true},
+		{path: "/quark/闲置kt板/a.jpg", want: true},
+		{path: "/quark/其他目录/a.jpg", want: false},
+		{path: "/p3/仓库素材区/a.jpg", want: true},
+		{path: "/系统资源/a.jpg", want: true},
+	}
+	for _, tc := range cases {
+		if got := assetWorkbenchOperationalMaterialPathVisible(tc.path); got != tc.want {
+			t.Fatalf("assetWorkbenchOperationalMaterialPathVisible(%q) = %v, want %v", tc.path, got, tc.want)
+		}
+	}
+}
+
+func TestWorkbenchMaterialAssetVisibilityKeepsSystemAssets(t *testing.T) {
+	if !assetWorkbenchMaterialAssetVisible(&assetcenter.AssetDetail{SourceType: string(domain.AssetResourceSourceSystem), OriginPath: "/quark/其他目录/a.jpg"}) {
+		t.Fatalf("system asset should remain visible even when filename resembles a hidden quark path")
+	}
+	if assetWorkbenchMaterialAssetVisible(&assetcenter.AssetDetail{SourceType: string(domain.AssetResourceSourceExternal), OriginPath: "/quark/其他目录/a.jpg"}) {
+		t.Fatalf("external asset under hidden quark root should be filtered")
+	}
+}

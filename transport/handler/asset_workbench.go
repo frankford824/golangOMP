@@ -1916,6 +1916,34 @@ func (h *AssetWorkbenchHandler) SearchClientMaterials(c *gin.Context) {
 	respondOK(c, result)
 }
 
+func (h *AssetWorkbenchHandler) ListBatchJobs(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	page, _ := strconv.Atoi(c.Query("page"))
+	pageSize, _ := strconv.Atoi(c.Query("page_size"))
+	result, appErr := h.svc.ListBatchJobs(c.Request.Context(), actor, c.Query("status"), page, pageSize)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
+func (h *AssetWorkbenchHandler) GetBatchJob(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	result, appErr := h.svc.GetBatchJob(c.Request.Context(), actor, c.Param("job_id"))
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
 func (h *AssetWorkbenchHandler) CreateClientMaterial(c *gin.Context) {
 	actor, ok := h.sessionActor(c)
 	if !ok {
@@ -1932,6 +1960,24 @@ func (h *AssetWorkbenchHandler) CreateClientMaterial(c *gin.Context) {
 		return
 	}
 	respondCreated(c, result)
+}
+
+func (h *AssetWorkbenchHandler) BatchUpdateClientMaterials(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	var req assetworkbench.BatchUpdateClientMaterialsParams
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	result, appErr := h.svc.BatchUpdateClientMaterials(c.Request.Context(), actor, req)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
 }
 
 func (h *AssetWorkbenchHandler) UpdateClientMaterial(c *gin.Context) {

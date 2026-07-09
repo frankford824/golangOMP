@@ -18,6 +18,7 @@ import {
 import { buildTimestampedZipFilename, downloadBatchAsZip } from '@/utils/batchZipDownload'
 import {
   assetWorkbenchApi,
+  type AssetWorkbenchBatchJob,
   type ArchiveVirtualFile,
   type ArchiveVirtualFolder,
   type ClientMaterialRow,
@@ -86,6 +87,8 @@ const pageSize = 60
 const materialPageSize = 100
 const searchDebounceMs = 250
 const searchPreviewPrefetchLimit = 12
+const QUARK_VISIBLE_ROOTS = new Set(['电视投屏', '海报', 'kt板', '闲置kt板'].map((item) => item.toLowerCase()))
+const QUARK_VISIBLE_ACTUAL_BASE = '/quark/我的备份/来自：ASUS Administrator 电脑备份'
 
 const activeMode = ref<DriveMode>('directories')
 const driveSpreadsheetOpen = ref(false)
@@ -146,15 +149,21 @@ const clientMaterials = ref<ClientMaterialRow[]>([])
 const clientMaterialManagerOpen = ref(false)
 const clientMaterialLoading = ref(false)
 const clientMaterialError = ref('')
+const batchJobPanelOpen = ref(false)
+const batchJobs = ref<AssetWorkbenchBatchJob[]>([])
+const batchJobsLoading = ref(false)
+const batchJobsError = ref('')
 const selectedMaterialIds = ref<Set<string>>(new Set())
 const materialPreviewUrls = ref<Record<string, string>>({})
 const materialPreviewLoadingIds = ref<Set<string>>(new Set())
 const activeMaterial = shallowRef<SystemAssetRow | null>(null)
 const publishingClientMaterial = ref(false)
+const batchUpdatingClientMaterials = ref(false)
 const suppressMaterialAutoload = ref(false)
 const selectedMaterialFolderPath = ref('')
 const expandedMaterialFolderPaths = ref<Set<string>>(new Set(['']))
 const clientMaterialFilter = ref<ClientMaterialFilter>('all')
+let batchJobPollTimer: number | null = null
 
 const previewOpen = ref(false)
 const previewTitle = ref('')
@@ -279,6 +288,7 @@ const allMaterialDirectoryNodes = computed<MaterialDirectoryNode[]>(() => {
   }
   ensure('')
   for (const folder of Object.values(materialKnownFolders.value)) {
+    if (!operationalMaterialPathVisible(folder.path)) continue
     const node = ensure(folder.path)
     node.name = folder.name || materialFolderLabel(folder.path)
     node.file_count = folder.file_count
@@ -290,6 +300,7 @@ const allMaterialDirectoryNodes = computed<MaterialDirectoryNode[]>(() => {
   }
   if (materialQuery.value.trim()) {
     for (const asset of materialItems.value) {
+      if (!operationalMaterialAssetVisible(asset)) continue
       const dirParts = pathSegments(materialDirectoryPath(asset))
       ensure('').file_count += 1
       for (let index = 1; index <= dirParts.length; index += 1) {
@@ -341,6 +352,7 @@ const visibleMaterialFolders = computed<MaterialFolderEntry[]>(() => {
   const selectedParts = pathSegments(selectedMaterialFolderPath.value)
   return allMaterialDirectoryNodes.value
     .filter((node) => {
+      if (!operationalMaterialPathVisible(node.path)) return false
       if (!node.path || node.path === selectedMaterialFolderPath.value) return false
       const parts = pathSegments(node.path)
       return parts.length === selectedParts.length + 1 && selectedParts.every((part, index) => parts[index] === part)
@@ -349,9 +361,11 @@ const visibleMaterialFolders = computed<MaterialFolderEntry[]>(() => {
 })
 const visibleMaterialFiles = computed(() =>
   materialQuery.value.trim()
-    ? materialItems.value
-    : materialItems.value.filter((asset) => materialDirectoryPath(asset) === selectedMaterialFolderPath.value),
+    ? materialItems.value.filter(operationalMaterialAssetVisible)
+    : materialItems.value.filter((asset) => operationalMaterialAssetVisible(asset) && materialDirectoryPath(asset) === selectedMaterialFolderPath.value),
 )
+const selectedMaterialAssets = computed(() => visibleMaterialFiles.value.filter((asset) => selectedMaterialIds.value.has(materialAssetKey(asset))))
+const selectedMaterialCount = computed(() => selectedMaterialAssets.value.length)
 const driveSpreadsheetSource = computed<WorkbenchSpreadsheetSource>(() =>
   activeMode.value === 'operational'
     ? {
@@ -558,6 +572,31 @@ function normalizeVirtualPath(path?: string): string {
   return pathFromSegments(parts)
 }
 
+function materialPathActualToVirtual(path?: string): string {
+  const normalized = normalizeVirtualPath(path)
+  if (!normalized) return ''
+  const baseParts = pathSegments(QUARK_VISIBLE_ACTUAL_BASE)
+  const parts = pathSegments(normalized)
+  if (parts.length <= baseParts.length) return normalized
+  const underBase = baseParts.every((part, index) => part.toLowerCase() === parts[index]?.toLowerCase())
+  if (!underBase) return normalized
+  const folder = parts[baseParts.length]
+  if (!QUARK_VISIBLE_ROOTS.has(folder.toLowerCase())) return normalized
+  return pathFromSegments(['quark', folder, ...parts.slice(baseParts.length + 1)])
+}
+
+function operationalMaterialPathVisible(path?: string): boolean {
+  const parts = pathSegments(materialPathActualToVirtual(path))
+  if (parts.length === 0) return true
+  if (parts[0].toLowerCase() !== 'quark') return true
+  if (parts.length === 1) return true
+  return QUARK_VISIBLE_ROOTS.has(parts[1].toLowerCase())
+}
+
+function operationalMaterialAssetVisible(asset: SystemAssetRow): boolean {
+  return operationalMaterialPathVisible(materialVirtualFilePath(asset))
+}
+
 function materialDisplayTitle(asset: SystemAssetRow): string {
   const title = titleOf(asset)
   if (asset.source_type === 'external') {
@@ -568,7 +607,7 @@ function materialDisplayTitle(asset: SystemAssetRow): string {
 
 function materialVirtualFilePath(asset: SystemAssetRow): string {
   const externalPath = normalizeVirtualPath(asset.origin_path || (asset.source_type === 'external' ? titleOf(asset) : ''))
-  if (asset.source_type === 'external' && externalPath) return externalPath
+  if (asset.source_type === 'external' && externalPath) return materialPathActualToVirtual(externalPath)
   return normalizeVirtualPath(`/系统资源/${asset.original_filename || asset.file_name || titleOf(asset)}`)
 }
 
@@ -589,6 +628,7 @@ function materialFolderLabel(path: string): string {
 function rememberMaterialFolder(folder: MaterialFolderRow | MaterialFolderEntry) {
   const path = normalizeVirtualPath(folder.path)
   if (!path) return
+  if (!operationalMaterialPathVisible(path)) return
   materialKnownFolders.value = {
     ...materialKnownFolders.value,
     [path]: {
@@ -604,6 +644,7 @@ function rememberMaterialFolder(folder: MaterialFolderRow | MaterialFolderEntry)
 
 function rememberMaterialPath(path: string) {
   const parts = pathSegments(path)
+  if (!operationalMaterialPathVisible(pathFromSegments(parts))) return
   const next = { ...materialKnownFolders.value }
   for (let index = 1; index <= parts.length; index += 1) {
     const current = pathFromSegments(parts.slice(0, index))
@@ -624,6 +665,7 @@ function rememberMaterialFolders(folders: MaterialFolderRow[]) {
   for (const folder of folders) {
     const path = normalizeVirtualPath(folder.path)
     if (!path) continue
+    if (!operationalMaterialPathVisible(path)) continue
     next[path] = {
       path,
       name: folder.name || materialFolderLabel(path),
@@ -634,6 +676,7 @@ function rememberMaterialFolders(folders: MaterialFolderRow[]) {
     const parts = pathSegments(path)
     for (let index = 1; index < parts.length; index += 1) {
       const ancestor = pathFromSegments(parts.slice(0, index))
+      if (!operationalMaterialPathVisible(ancestor)) continue
       if (!next[ancestor]) {
         next[ancestor] = {
           path: ancestor,
@@ -872,7 +915,7 @@ function materialFromOverview(row: OverviewSearchRow): SystemAssetRow {
     created_by_username: stringFromMeta(row, 'created_by_username'),
     task_creator_name: stringFromMeta(row, 'task_creator_name'),
     preview_available: boolFromMeta(row, 'preview_available') ?? false,
-    origin_path: stringFromMeta(row, 'origin_path') || (row.title.startsWith('/') ? row.title : ''),
+    origin_path: materialPathActualToVirtual(stringFromMeta(row, 'origin_path') || (row.title.startsWith('/') ? row.title : '')),
     created_at: row.created_at,
     updated_at: row.updated_at,
   }
@@ -1191,6 +1234,7 @@ const activeClientMaterial = computed(() => {
 })
 const enabledClientMaterialCount = computed(() => clientMaterials.value.filter((material) => material.enabled).length)
 const disabledClientMaterialCount = computed(() => clientMaterials.value.length - enabledClientMaterialCount.value)
+const activeBatchJobCount = computed(() => batchJobs.value.filter((job) => job.status === 'queued' || job.status === 'running').length)
 const visibleClientMaterials = computed(() => {
   switch (clientMaterialFilter.value) {
     case 'enabled':
@@ -2091,11 +2135,12 @@ async function loadMaterials(query = materialQuery.value, options: { append?: bo
         assetWorkbenchApi.listClientMaterials(true, materialAbortController.signal),
       ])
       if (requestID !== materialRequestSeq) return
-      materialItems.value = append ? mergeMaterialItems(materialItems.value, systemResult.items) : systemResult.items
-      materialFileTotal.value = systemResult.total
+      const visibleItems = systemResult.items.filter(operationalMaterialAssetVisible)
+      materialItems.value = append ? mergeMaterialItems(materialItems.value, visibleItems) : visibleItems
+      materialFileTotal.value = materialQuery.value.startsWith('/quark') ? visibleItems.length : systemResult.total
       materialPage.value = systemResult.page || page
       clientMaterials.value = published
-      for (const asset of systemResult.items) {
+      for (const asset of visibleItems) {
         rememberMaterialPath(materialDirectoryPath(asset))
       }
     } else {
@@ -2103,6 +2148,7 @@ async function loadMaterials(query = materialQuery.value, options: { append?: bo
       clientMaterials.value = published
       const q = materialQuery.value.toLowerCase()
       materialItems.value = published.map(materialFromClient).filter((asset) => {
+        if (!operationalMaterialAssetVisible(asset)) return false
         if (!q) return true
         return [titleOf(asset), asset.original_filename, asset.resource_id, asset.scope_sku_code, asset.source_label]
           .filter(Boolean)
@@ -2135,6 +2181,10 @@ async function loadMaterialFolder(path = selectedMaterialFolderPath.value, optio
   const expandTree = options.expandTree !== false
   const append = options.append === true
   const normalized = normalizeVirtualPath(path)
+  if (!operationalMaterialPathVisible(normalized)) {
+    await loadMaterialFolder('/quark', { expandTree, append: false })
+    return
+  }
   const requestID = ++materialRequestSeq
   materialAbortController?.abort()
   materialAbortController = new AbortController()
@@ -2168,15 +2218,16 @@ async function loadMaterialFolder(path = selectedMaterialFolderPath.value, optio
           direct_file_count: Number(browse.total || 0),
         })
       }
-      materialItems.value = append ? mergeMaterialItems(materialItems.value, browse.files || []) : browse.files || []
-      materialFileTotal.value = browse.total || 0
+      const visibleFiles = (browse.files || []).filter(operationalMaterialAssetVisible)
+      materialItems.value = append ? mergeMaterialItems(materialItems.value, visibleFiles) : visibleFiles
+      materialFileTotal.value = selectedMaterialFolderPath.value === '/quark' ? visibleFiles.length : browse.total || 0
       materialPage.value = browse.page || page
       clientMaterials.value = published
     } else {
       const published = await assetWorkbenchApi.listClientMaterials(false, materialAbortController.signal)
       if (requestID !== materialRequestSeq) return
       clientMaterials.value = published
-      materialItems.value = published.map(materialFromClient)
+      materialItems.value = published.map(materialFromClient).filter(operationalMaterialAssetVisible)
       materialFileTotal.value = materialItems.value.length
       materialPage.value = 1
     }
@@ -2299,6 +2350,89 @@ function openClientMaterialManager() {
   void refreshClientMaterials()
 }
 
+function batchJobStatusLabel(status?: string): string {
+  switch (status) {
+    case 'queued':
+      return '排队中'
+    case 'running':
+      return '处理中'
+    case 'succeeded':
+      return '已完成'
+    case 'failed':
+      return '处理失败'
+    case 'cancelled':
+      return '已取消'
+    default:
+      return '未知状态'
+  }
+}
+
+function batchJobActionLabel(action?: string): string {
+  switch (action) {
+    case 'publish':
+      return '批量上架'
+    case 'enable':
+      return '批量启用'
+    case 'disable':
+      return '批量停用'
+    case 'remove':
+      return '批量下架'
+    default:
+      return '批量任务'
+  }
+}
+
+function batchJobProgressLabel(job: AssetWorkbenchBatchJob): string {
+  const total = job.total_count || job.processed_count || 0
+  const processed = job.processed_count || (job.status === 'succeeded' ? total : 0)
+  if (!total) return batchJobStatusLabel(job.status)
+  return `${processed}/${total}`
+}
+
+function batchJobSummary(job: AssetWorkbenchBatchJob): string {
+  if (job.status === 'queued') return '任务已提交，等待后台处理'
+  if (job.status === 'running') return `正在处理 ${batchJobProgressLabel(job)}`
+  if (job.status === 'failed') return job.error_message || '处理失败，请稍后重试'
+  const success = (job.created_count || 0) + (job.updated_count || 0) + (job.removed_count || 0)
+  return `成功 ${success} 项，跳过 ${job.skipped_count || 0} 项，失败 ${job.failed_count || 0} 项`
+}
+
+async function refreshBatchJobs(silent = false) {
+  if (!canManageDrive.value) return
+  if (!silent) batchJobsLoading.value = true
+  batchJobsError.value = ''
+  try {
+    const result = await assetWorkbenchApi.listBatchJobs({ page: 1, page_size: 20 })
+    batchJobs.value = result.items || []
+    if (activeBatchJobCount.value > 0) scheduleBatchJobPolling()
+    else stopBatchJobPolling()
+  } catch (err) {
+    batchJobsError.value = err instanceof Error ? err.message : '批量任务加载失败'
+  } finally {
+    if (!silent) batchJobsLoading.value = false
+  }
+}
+
+function openBatchJobPanel() {
+  batchJobPanelOpen.value = true
+  void refreshBatchJobs(false)
+}
+
+function scheduleBatchJobPolling() {
+  if (batchJobPollTimer !== null) return
+  batchJobPollTimer = window.setTimeout(async () => {
+    batchJobPollTimer = null
+    if (!batchJobPanelOpen.value && activeBatchJobCount.value === 0) return
+    await refreshBatchJobs(true)
+  }, 3000)
+}
+
+function stopBatchJobPolling() {
+  if (batchJobPollTimer === null) return
+  window.clearTimeout(batchJobPollTimer)
+  batchJobPollTimer = null
+}
+
 function cacheMaterialPreview(key: string, url: string) {
   if (!key || !url || materialPreviewUrls.value[key]) return
   materialPreviewUrls.value = { ...materialPreviewUrls.value, [key]: url }
@@ -2393,6 +2527,78 @@ async function publishClientMaterial(asset: SystemAssetRow) {
   } finally {
     publishingClientMaterial.value = false
   }
+}
+
+function selectAllVisibleMaterials() {
+  selectedMaterialIds.value = new Set(visibleMaterialFiles.value.map((asset) => materialAssetKey(asset)))
+}
+
+function clearSelectedMaterials() {
+  selectedMaterialIds.value = new Set()
+}
+
+async function batchUpdateSelectedClientMaterials(action: 'publish' | 'disable' | 'remove') {
+  if (batchUpdatingClientMaterials.value || selectedMaterialAssets.value.length === 0) return
+  batchUpdatingClientMaterials.value = true
+  actionError.value = ''
+  try {
+    const result = await assetWorkbenchApi.batchUpdateClientMaterials({
+      action,
+      items: selectedMaterialAssets.value.map(publishPayloadForMaterial),
+      selection_scope: 'selected',
+    })
+    await finishClientMaterialBatch(action, result)
+  } catch (err) {
+    actionError.value = err instanceof Error ? err.message : '批量处理客户端素材失败'
+  } finally {
+    batchUpdatingClientMaterials.value = false
+  }
+}
+
+async function batchPublishCurrentMaterialFolder(includeChildren: boolean) {
+  if (batchUpdatingClientMaterials.value) return
+  batchUpdatingClientMaterials.value = true
+  actionError.value = ''
+  try {
+    const result = await assetWorkbenchApi.batchUpdateClientMaterials({
+      action: 'publish',
+      folders: [{
+        path: selectedMaterialFolderPath.value,
+        source: 'all',
+        include_children: includeChildren,
+      }],
+      selection_scope: includeChildren ? 'current_folder_recursive' : 'current_folder',
+    })
+    await finishClientMaterialBatch('publish', result)
+  } catch (err) {
+    actionError.value = err instanceof Error ? err.message : '批量上架当前目录失败'
+  } finally {
+    batchUpdatingClientMaterials.value = false
+  }
+}
+
+async function finishClientMaterialBatch(action: 'publish' | 'disable' | 'remove', result: Awaited<ReturnType<typeof assetWorkbenchApi.batchUpdateClientMaterials>>) {
+  if (result.async_required) {
+    if (result.job) {
+      batchJobs.value = [result.job, ...batchJobs.value.filter((job) => job.job_id !== result.job?.job_id)]
+    }
+    batchJobPanelOpen.value = true
+    notice.value = result.message || '选择范围较大，已转入批量任务中心后台处理。'
+    actionError.value = ''
+    await refreshBatchJobs(true)
+    scheduleBatchJobPolling()
+    return
+  }
+  clientMaterials.value = await assetWorkbenchApi.listClientMaterials(true)
+  if (action === 'remove') {
+    activeMaterial.value = activeMaterial.value ? { ...activeMaterial.value, material_id: undefined } : null
+  }
+  const actionLabel = action === 'publish' ? '上架' : action === 'disable' ? '停用' : '下架'
+  notice.value = `${actionLabel}完成：请求 ${result.requested} 项，成功 ${result.created + result.updated + result.removed} 项，跳过 ${result.skipped} 项，失败 ${result.failed} 项。`
+  if (result.failed > 0) {
+    actionError.value = `有 ${result.failed} 项未处理成功，请检查素材是否仍存在或是否已经上架。`
+  }
+  clearSelectedMaterials()
 }
 
 async function toggleClientMaterial(material: ClientMaterialRow) {
@@ -2551,6 +2757,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   abortDriveRequests()
   cancelSearchDebounce()
+  stopBatchJobPolling()
   revokeArchivePreviewObjectUrl()
   if (directoryClickTimer) {
     window.clearTimeout(directoryClickTimer)
@@ -2595,6 +2802,11 @@ onBeforeUnmount(() => {
         </button>
       </form>
       <div v-if="canManageDrive" class="aw-drive__toolbar-actions">
+        <button class="aw-secondary-button aw-client-material-button" type="button" @click="openBatchJobPanel">
+          <HardDrive :size="16" aria-hidden="true" />
+          <span>批量任务</span>
+          <span v-if="activeBatchJobCount" class="aw-client-material-button__count">{{ activeBatchJobCount }} 处理中</span>
+        </button>
         <button class="aw-secondary-button aw-client-material-button" type="button" @click="openClientMaterialManager">
           <ImageDown :size="16" aria-hidden="true" />
           <span>客户端素材</span>
@@ -2605,6 +2817,49 @@ onBeforeUnmount(() => {
 
     <p v-if="notice" class="aw-inline-alert">{{ notice }}</p>
     <p v-if="actionError" class="aw-inline-alert aw-inline-alert--error">{{ actionError }}</p>
+
+    <div
+      v-if="batchJobPanelOpen"
+      class="aw-client-material-manager"
+      role="dialog"
+      aria-modal="true"
+      aria-label="批量任务"
+      @click.self="batchJobPanelOpen = false"
+    >
+      <section class="aw-client-material-manager__panel">
+        <header class="aw-client-material-manager__head">
+          <div>
+            <p class="aw-eyebrow">批量任务</p>
+            <h3>后台处理进度</h3>
+            <span>{{ activeBatchJobCount ? `${activeBatchJobCount} 个任务正在处理` : '暂无正在处理的任务' }}</span>
+          </div>
+          <button class="aw-drive-mini-button" type="button" aria-label="关闭批量任务" @click="batchJobPanelOpen = false">
+            <IconfontActionIcon name="close" :size="14" />
+          </button>
+        </header>
+        <div class="aw-client-material-manager__tools">
+          <p>大批量上架、停用或下架会在这里持续更新，完成后可刷新客户端素材查看结果。</p>
+          <button class="aw-grid-button" type="button" :disabled="batchJobsLoading" @click="refreshBatchJobs(false)">
+            {{ batchJobsLoading ? '刷新中…' : '刷新' }}
+          </button>
+        </div>
+        <p v-if="batchJobsError" class="aw-inline-alert aw-inline-alert--error">{{ batchJobsError }}</p>
+        <p v-else-if="batchJobsLoading && batchJobs.length === 0" class="aw-drive-empty">正在加载批量任务…</p>
+        <div v-else-if="batchJobs.length" class="aw-client-material-manager__list">
+          <article v-for="job in batchJobs" :key="job.job_id" class="aw-client-material-row">
+            <div class="aw-client-material-row__main">
+              <strong>{{ batchJobActionLabel(job.action) }}</strong>
+              <span>{{ batchJobSummary(job) }}</span>
+              <small>{{ batchJobProgressLabel(job) }} · {{ formatDateTime(job.created_at) }}</small>
+            </div>
+            <span class="aw-chip" :class="{ 'aw-chip--success': job.status === 'succeeded', 'aw-chip--danger': job.status === 'failed' }">
+              {{ batchJobStatusLabel(job.status) }}
+            </span>
+          </article>
+        </div>
+        <p v-else class="aw-drive-empty">暂无批量任务。</p>
+      </section>
+    </div>
 
     <div
       v-if="clientMaterialManagerOpen"
@@ -3194,6 +3449,24 @@ onBeforeUnmount(() => {
                   </button>
                 </div>
 
+                <div v-if="canManageDrive && visibleMaterialFiles.length" class="aw-material-batch-toolbar">
+                  <div>
+                    <strong>已选 {{ selectedMaterialCount }} 个素材</strong>
+                    <span>批量操作只处理当前列表中勾选的文件，不会包含隐藏目录或失败任务。</span>
+                  </div>
+                  <div class="aw-material-batch-toolbar__actions">
+                    <button class="aw-grid-button" type="button" :disabled="batchUpdatingClientMaterials" @click="selectAllVisibleMaterials">选择当前列表</button>
+                    <button class="aw-grid-button" type="button" :disabled="batchUpdatingClientMaterials || selectedMaterialCount === 0" @click="clearSelectedMaterials">清空选择</button>
+                    <button class="aw-primary-button" type="button" :disabled="batchUpdatingClientMaterials || selectedMaterialCount === 0" @click="batchUpdateSelectedClientMaterials('publish')">
+                      {{ batchUpdatingClientMaterials ? '处理中…' : '上架到客户端' }}
+                    </button>
+                    <button class="aw-secondary-button" type="button" :disabled="batchUpdatingClientMaterials || selectedMaterialCount === 0" @click="batchUpdateSelectedClientMaterials('disable')">停用客户端可见</button>
+                    <button class="aw-secondary-button" type="button" :disabled="batchUpdatingClientMaterials || selectedMaterialCount === 0" @click="batchUpdateSelectedClientMaterials('remove')">从客户端下架</button>
+                    <button class="aw-secondary-button" type="button" :disabled="batchUpdatingClientMaterials" @click="batchPublishCurrentMaterialFolder(false)">上架当前目录</button>
+                    <button class="aw-secondary-button" type="button" :disabled="batchUpdatingClientMaterials" @click="batchPublishCurrentMaterialFolder(true)">上架当前目录及子目录</button>
+                  </div>
+                </div>
+
                 <div v-if="visibleMaterialFolders.length" class="aw-material-folder-grid">
                   <button
                     v-for="folder in visibleMaterialFolders"
@@ -3376,7 +3649,7 @@ onBeforeUnmount(() => {
             <div><dt>SKU</dt><dd>{{ activeMaterial.scope_sku_code || activeMaterial.sku_code || activeMaterial.primary_sku_code || '—' }}</dd></div>
             <div><dt>文件</dt><dd>{{ activeMaterial.original_filename || activeMaterial.file_name || '—' }}</dd></div>
             <div><dt>类型</dt><dd>{{ materialTypeLabel(activeMaterial) }}</dd></div>
-            <div><dt>路径</dt><dd>{{ activeMaterial.origin_path || '—' }}</dd></div>
+            <div><dt>路径</dt><dd>{{ materialVirtualFilePath(activeMaterial) || '—' }}</dd></div>
             <div><dt>客户端</dt><dd>{{ activeClientMaterial ? (activeClientMaterial.enabled ? '已上架' : '已停用') : '未上架' }}</dd></div>
           </dl>
           <div class="aw-drive__detail-actions">

@@ -32,6 +32,7 @@ type Config struct {
 	UploadSessionTTL         time.Duration
 	PreviewWorkerLeaseTTL    time.Duration
 	PreviewWorkerMaxAttempts int
+	BatchJobWorkerLeaseTTL   time.Duration
 }
 
 type Option func(*Service)
@@ -39,6 +40,8 @@ type Option func(*Service)
 const (
 	assetWorkbenchProfileAutoRepriceBatchSize      = 200
 	assetWorkbenchClientMaterialBatchDownloadLimit = 100
+	assetWorkbenchClientMaterialBatchUpdateLimit   = 500
+	assetWorkbenchClientMaterialBatchAsyncLimit    = 20000
 )
 
 type Service struct {
@@ -117,6 +120,9 @@ func NewService(cfg Config, opts ...Option) *Service {
 	}
 	if cfg.PreviewWorkerMaxAttempts <= 0 {
 		cfg.PreviewWorkerMaxAttempts = 5
+	}
+	if cfg.BatchJobWorkerLeaseTTL <= 0 {
+		cfg.BatchJobWorkerLeaseTTL = 10 * time.Minute
 	}
 	loc, err := time.LoadLocation(cfg.Timezone)
 	if err != nil {
@@ -453,6 +459,54 @@ type UpdateClientMaterialParams struct {
 type ClientMaterialBatchDownloadParams struct {
 	MaterialIDs []int64 `json:"material_ids"`
 	NamingMode  string  `json:"naming_mode,omitempty"`
+}
+
+type BatchUpdateClientMaterialsParams struct {
+	Action         string                            `json:"action"`
+	Items          []CreateClientMaterialParams      `json:"items"`
+	Folders        []ClientMaterialBatchFolderParams `json:"folders"`
+	Query          string                            `json:"query"`
+	Source         string                            `json:"source"`
+	SelectionScope string                            `json:"selection_scope"`
+}
+
+type ClientMaterialBatchFolderParams struct {
+	Path            string `json:"path"`
+	Source          string `json:"source"`
+	IncludeChildren bool   `json:"include_children"`
+}
+
+type ClientMaterialBatchUpdateResult struct {
+	Requested     int                                    `json:"requested"`
+	Created       int                                    `json:"created"`
+	Updated       int                                    `json:"updated"`
+	Enabled       int                                    `json:"enabled"`
+	Disabled      int                                    `json:"disabled"`
+	Removed       int                                    `json:"removed"`
+	Skipped       int                                    `json:"skipped"`
+	Failed        int                                    `json:"failed"`
+	AsyncRequired bool                                   `json:"async_required,omitempty"`
+	JobID         string                                 `json:"job_id,omitempty"`
+	Job           *domain.AssetWorkbenchBatchJob         `json:"job,omitempty"`
+	Message       string                                 `json:"message,omitempty"`
+	Items         []*domain.AssetWorkbenchClientMaterial `json:"items,omitempty"`
+	Failures      []ClientMaterialBatchUpdateFailure     `json:"failures,omitempty"`
+}
+
+type ClientMaterialBatchUpdateFailure struct {
+	Index      int    `json:"index"`
+	AssetID    int64  `json:"asset_id,omitempty"`
+	SourceType string `json:"source_type,omitempty"`
+	SourceRef  string `json:"source_ref,omitempty"`
+	ResourceID string `json:"resource_id,omitempty"`
+	Reason     string `json:"reason"`
+}
+
+type BatchJobListResult struct {
+	Items []*domain.AssetWorkbenchBatchJob `json:"items"`
+	Total int64                            `json:"total"`
+	Page  int                              `json:"page"`
+	Size  int                              `json:"size"`
 }
 
 type ClientMaterialBatchDownloadManifest struct {
@@ -5185,7 +5239,12 @@ func (s *Service) SystemSearch(ctx context.Context, actor domain.RequestActor, q
 	if appErr != nil {
 		return nil, appErr
 	}
-	return &SystemSearchResult{Items: result.Items, Total: result.Total, Page: result.Page, Size: result.Size}, nil
+	items := filterVisibleWorkbenchMaterialAssets(result.Items)
+	total := result.Total
+	if len(items) != len(result.Items) {
+		total = int64(len(items))
+	}
+	return &SystemSearchResult{Items: items, Total: total, Page: result.Page, Size: result.Size}, nil
 }
 
 func (s *Service) BrowseMaterials(ctx context.Context, actor domain.RequestActor, path string, page int, pageSize int, source string) (*assetcenter.MaterialBrowseResult, *domain.AppError) {
@@ -5202,12 +5261,75 @@ func (s *Service) BrowseMaterials(ctx context.Context, actor domain.RequestActor
 	if pageSize <= 0 || pageSize > 100 {
 		pageSize = 50
 	}
-	return browser.BrowseMaterials(ctx, assetcenter.MaterialBrowseQuery{
-		Path:   path,
+	publicPath := normalizeWorkbenchMaterialPath(path)
+	if !assetWorkbenchOperationalMaterialPathVisible(publicPath) {
+		return &assetcenter.MaterialBrowseResult{
+			Path:    publicPath,
+			Folders: []assetcenter.MaterialFolder{},
+			Files:   []*assetcenter.AssetDetail{},
+			Total:   0,
+			Page:    page,
+			Size:    pageSize,
+		}, nil
+	}
+	if workbenchIsVirtualQuarkRoot(publicPath) {
+		return s.browseWorkbenchVirtualQuarkRoot(ctx, browser, page, pageSize, source)
+	}
+	actualPath := workbenchMaterialActualPath(publicPath)
+	result, appErr := browser.BrowseMaterials(ctx, assetcenter.MaterialBrowseQuery{
+		Path:   actualPath,
 		Source: domain.NormalizeAssetResourceSource(source),
 		Page:   page,
 		Size:   pageSize,
 	})
+	if appErr != nil {
+		return nil, appErr
+	}
+	originalFolderCount := len(result.Folders)
+	originalFileCount := len(result.Files)
+	result.Folders = filterVisibleWorkbenchMaterialFolders(result.Folders)
+	result.Folders = rewriteWorkbenchVirtualQuarkFolders(result.Folders)
+	result.Files = filterVisibleWorkbenchMaterialAssets(result.Files)
+	result.Path = publicPath
+	if len(result.Folders) != originalFolderCount || len(result.Files) != originalFileCount {
+		result.Total = int64(len(result.Files))
+	}
+	return result, nil
+}
+
+func (s *Service) browseWorkbenchVirtualQuarkRoot(ctx context.Context, browser SystemMaterialBrowser, page int, pageSize int, source string) (*assetcenter.MaterialBrowseResult, *domain.AppError) {
+	result, appErr := browser.BrowseMaterials(ctx, assetcenter.MaterialBrowseQuery{
+		Path:   workbenchQuarkMaterialActualBase,
+		Source: domain.NormalizeAssetResourceSource(source),
+		Page:   page,
+		Size:   pageSize,
+	})
+	if appErr != nil {
+		return nil, appErr
+	}
+	byName := map[string]assetcenter.MaterialFolder{}
+	for _, folder := range result.Folders {
+		byName[strings.ToLower(strings.TrimSpace(folder.Name))] = folder
+	}
+	folders := make([]assetcenter.MaterialFolder, 0, len(workbenchQuarkMaterialVirtualFolders))
+	for _, virtual := range workbenchQuarkMaterialVirtualFolders {
+		folder := byName[strings.ToLower(virtual)]
+		folders = append(folders, assetcenter.MaterialFolder{
+			Path:            workbenchQuarkMaterialVirtualRoot + "/" + virtual,
+			Name:            virtual,
+			SourceType:      string(domain.AssetResourceSourceExternal),
+			FileCount:       folder.FileCount,
+			DirectFileCount: folder.DirectFileCount,
+		})
+	}
+	return &assetcenter.MaterialBrowseResult{
+		Path:    workbenchQuarkMaterialVirtualRoot,
+		Folders: folders,
+		Files:   []*assetcenter.AssetDetail{},
+		Total:   0,
+		Page:    page,
+		Size:    pageSize,
+	}, nil
 }
 
 func (s *Service) SearchClientMaterials(ctx context.Context, actor domain.RequestActor, params ClientMaterialSearchParams) (*ClientMaterialSearchResult, *domain.AppError) {
@@ -5276,7 +5398,7 @@ func (s *Service) MaterialGroups(ctx context.Context, actor domain.RequestActor,
 	if appErr != nil {
 		return nil, appErr
 	}
-	grouped := groupMaterialAssets(result.Items)
+	grouped := groupMaterialAssets(filterVisibleWorkbenchMaterialAssets(result.Items))
 	start := (page - 1) * pageSize
 	if start > len(grouped) {
 		start = len(grouped)
@@ -5315,6 +5437,9 @@ func (s *Service) MaterialGroupFiles(ctx context.Context, actor domain.RequestAc
 	}
 	matches := make([]*assetcenter.AssetDetail, 0)
 	for _, asset := range result.Items {
+		if !assetWorkbenchMaterialAssetVisible(asset) {
+			continue
+		}
 		if assetMaterialGroupKey(asset) == groupKey {
 			matches = append(matches, asset)
 		}
@@ -5644,6 +5769,469 @@ func (s *Service) DeleteClientMaterial(ctx context.Context, actor domain.Request
 		return mapRepoReadError(err, "Client material not found.", "Failed to delete asset workbench client material.")
 	}
 	return nil
+}
+
+func (s *Service) BatchUpdateClientMaterials(ctx context.Context, actor domain.RequestActor, params BatchUpdateClientMaterialsParams) (*ClientMaterialBatchUpdateResult, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset managers can batch update client materials.", nil)
+	}
+	action := strings.TrimSpace(strings.ToLower(params.Action))
+	switch action {
+	case "publish", "enable", "disable", "remove":
+	default:
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "action must be publish, enable, disable or remove.", nil)
+	}
+	items, asyncRequired, appErr := s.resolveClientMaterialBatchCandidates(ctx, actor, params, assetWorkbenchClientMaterialBatchUpdateLimit)
+	if appErr != nil {
+		return nil, appErr
+	}
+	if asyncRequired {
+		job, appErr := s.createClientMaterialBatchJob(ctx, actor, action, params, len(items))
+		if appErr != nil {
+			return nil, appErr
+		}
+		return &ClientMaterialBatchUpdateResult{
+			Requested:     len(items),
+			AsyncRequired: true,
+			JobID:         job.JobID,
+			Job:           job,
+			Message:       fmt.Sprintf("选择范围超过同步处理上限 %d 项，已转入批量任务中心后台处理。", assetWorkbenchClientMaterialBatchUpdateLimit),
+		}, nil
+	}
+	if len(items) == 0 {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "items or folders is required.", nil)
+	}
+	return s.applyClientMaterialBatchUpdate(ctx, actor, action, items, true)
+}
+
+func (s *Service) createClientMaterialBatchJob(ctx context.Context, actor domain.RequestActor, action string, params BatchUpdateClientMaterialsParams, requested int) (*domain.AssetWorkbenchBatchJob, *domain.AppError) {
+	payload, err := json.Marshal(params)
+	if err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "batch request payload is invalid.", err.Error())
+	}
+	job := &domain.AssetWorkbenchBatchJob{
+		JobID:          "awbjob-" + uuid.NewString(),
+		JobType:        domain.AssetWorkbenchAsyncJobTypeClientMaterialBatchUpdate,
+		Status:         domain.AssetWorkbenchAsyncJobStatusQueued,
+		Action:         strings.TrimSpace(strings.ToLower(action)),
+		SelectionScope: strings.TrimSpace(params.SelectionScope),
+		RequestedBy:    actor.ID,
+		RequestPayload: payload,
+		TotalCount:     requested,
+	}
+	if job.SelectionScope == "" {
+		switch {
+		case len(params.Folders) > 0:
+			job.SelectionScope = "folders"
+		case strings.TrimSpace(params.Query) != "":
+			job.SelectionScope = "query"
+		default:
+			job.SelectionScope = "items"
+		}
+	}
+	var created *domain.AssetWorkbenchBatchJob
+	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+		var err error
+		created, err = s.repo.CreateBatchJob(ctx, tx, job)
+		if err != nil {
+			return err
+		}
+		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventBatchJobCreated, domain.AssetWorkbenchEntityBatchJob, &created.ID, nil, created, "create asset workbench batch job")
+	}); err != nil {
+		if appErr := asAppError(err); appErr != nil {
+			return nil, appErr
+		}
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to create asset workbench batch job.", err.Error())
+	}
+	return created, nil
+}
+
+func (s *Service) applyClientMaterialBatchUpdate(ctx context.Context, actor domain.RequestActor, action string, items []CreateClientMaterialParams, recordEvent bool) (*ClientMaterialBatchUpdateResult, *domain.AppError) {
+	existingRows, err := s.repo.ListClientMaterials(ctx, repo.AssetWorkbenchClientMaterialFilter{})
+	if err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to list asset workbench client materials.", err.Error())
+	}
+	existingBySource := map[string]*domain.AssetWorkbenchClientMaterial{}
+	for _, row := range existingRows {
+		normalizeClientMaterialRow(row)
+		existingBySource[clientMaterialSourceKey(row.SourceType, row.SourceRef)] = row
+	}
+
+	result := &ClientMaterialBatchUpdateResult{
+		Requested: len(items),
+		Items:     []*domain.AssetWorkbenchClientMaterial{},
+		Failures:  []ClientMaterialBatchUpdateFailure{},
+	}
+	seen := map[string]bool{}
+	for index, item := range items {
+		source, appErr := resolveClientMaterialSourceInput(item.AssetID, item.SourceType, item.SourceRef, item.ResourceID)
+		if appErr != nil {
+			result.addClientMaterialBatchFailure(index, item, appErr.Message)
+			continue
+		}
+		key := clientMaterialSourceKey(source.SourceType, source.SourceRef)
+		if seen[key] {
+			result.Skipped++
+			continue
+		}
+		seen[key] = true
+		existing := existingBySource[key]
+		switch action {
+		case "publish":
+			if existing != nil {
+				if existing.Enabled {
+					result.Skipped++
+					continue
+				}
+				enabled := true
+				updated, appErr := s.UpdateClientMaterial(ctx, actor, existing.ID, UpdateClientMaterialParams{Enabled: &enabled})
+				if appErr != nil {
+					result.addClientMaterialBatchFailure(index, item, appErr.Message)
+					continue
+				}
+				result.Updated++
+				result.Enabled++
+				result.Items = append(result.Items, updated)
+				existingBySource[key] = updated
+				continue
+			}
+			enabled := true
+			item.Enabled = &enabled
+			created, appErr := s.CreateClientMaterial(ctx, actor, item)
+			if appErr != nil {
+				result.addClientMaterialBatchFailure(index, item, appErr.Message)
+				continue
+			}
+			result.Created++
+			result.Enabled++
+			result.Items = append(result.Items, created)
+			existingBySource[key] = created
+		case "enable", "disable":
+			if existing == nil {
+				result.Skipped++
+				continue
+			}
+			nextEnabled := action == "enable"
+			if existing.Enabled == nextEnabled {
+				result.Skipped++
+				continue
+			}
+			updated, appErr := s.UpdateClientMaterial(ctx, actor, existing.ID, UpdateClientMaterialParams{Enabled: &nextEnabled})
+			if appErr != nil {
+				result.addClientMaterialBatchFailure(index, item, appErr.Message)
+				continue
+			}
+			result.Updated++
+			if nextEnabled {
+				result.Enabled++
+			} else {
+				result.Disabled++
+			}
+			result.Items = append(result.Items, updated)
+			existingBySource[key] = updated
+		case "remove":
+			if existing == nil {
+				result.Skipped++
+				continue
+			}
+			if appErr := s.DeleteClientMaterial(ctx, actor, existing.ID); appErr != nil {
+				result.addClientMaterialBatchFailure(index, item, appErr.Message)
+				continue
+			}
+			result.Removed++
+			delete(existingBySource, key)
+		}
+	}
+	result.Failed = len(result.Failures)
+	if result.Failed == 0 {
+		result.Failures = nil
+	}
+	if len(result.Items) == 0 {
+		result.Items = nil
+	}
+	if recordEvent {
+		_ = s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+			return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventClientMaterialBatchUpdated, domain.AssetWorkbenchEntityClientMaterial, nil, nil, result, "batch update client materials")
+		})
+	}
+	return result, nil
+}
+
+func (s *Service) ListBatchJobs(ctx context.Context, actor domain.RequestActor, status string, page int, pageSize int) (*BatchJobListResult, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset managers can view batch jobs.", nil)
+	}
+	page, pageSize = normalizeServicePage(page, pageSize, 50, 100)
+	items, total, err := s.repo.ListBatchJobs(ctx, repo.AssetWorkbenchBatchJobFilter{
+		JobType:  domain.AssetWorkbenchAsyncJobTypeClientMaterialBatchUpdate,
+		Status:   strings.TrimSpace(status),
+		Page:     page,
+		PageSize: pageSize,
+	})
+	if err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to list asset workbench batch jobs.", err.Error())
+	}
+	return &BatchJobListResult{Items: items, Total: total, Page: page, Size: pageSize}, nil
+}
+
+func (s *Service) GetBatchJob(ctx context.Context, actor domain.RequestActor, jobID string) (*domain.AssetWorkbenchBatchJob, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset managers can view batch jobs.", nil)
+	}
+	jobID = strings.TrimSpace(jobID)
+	if jobID == "" {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "job_id is required.", nil)
+	}
+	job, err := s.repo.GetBatchJob(ctx, jobID)
+	if err != nil {
+		return nil, mapRepoReadError(err, "Batch job not found.", "Failed to load asset workbench batch job.")
+	}
+	return job, nil
+}
+
+func (s *Service) ProcessPendingBatchJobs(ctx context.Context, workerID string, limit int) (int, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return 0, err
+	}
+	workerID = strings.TrimSpace(workerID)
+	if workerID == "" {
+		workerID = "asset-workbench-batch-" + uuid.NewString()
+	}
+	if limit <= 0 {
+		limit = 1
+	}
+	var jobs []*domain.AssetWorkbenchBatchJob
+	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+		var err error
+		jobs, err = s.repo.ClaimQueuedBatchJobs(ctx, tx, workerID, limit, s.nowFn().UTC().Add(s.cfg.BatchJobWorkerLeaseTTL))
+		return err
+	}); err != nil {
+		return 0, domain.NewAppError(domain.ErrCodeInternalError, "Failed to claim asset workbench batch jobs.", err.Error())
+	}
+	processed := 0
+	for _, job := range jobs {
+		if job == nil {
+			continue
+		}
+		if appErr := s.processBatchJob(ctx, job); appErr != nil {
+			return processed, appErr
+		}
+		processed++
+	}
+	return processed, nil
+}
+
+func (s *Service) processBatchJob(ctx context.Context, job *domain.AssetWorkbenchBatchJob) *domain.AppError {
+	if job.JobType != domain.AssetWorkbenchAsyncJobTypeClientMaterialBatchUpdate {
+		return s.failBatchJob(ctx, job, "unsupported batch job type: "+job.JobType)
+	}
+	var params BatchUpdateClientMaterialsParams
+	if len(job.RequestPayload) == 0 || !json.Valid(job.RequestPayload) {
+		return s.failBatchJob(ctx, job, "batch job request payload is invalid")
+	}
+	if err := json.Unmarshal(job.RequestPayload, &params); err != nil {
+		return s.failBatchJob(ctx, job, "decode batch job request payload: "+err.Error())
+	}
+	action := strings.TrimSpace(strings.ToLower(firstNonEmpty(job.Action, params.Action)))
+	actor := domain.RequestActor{
+		ID:       job.RequestedBy,
+		Roles:    []domain.Role{domain.RoleAssetManager},
+		Source:   "asset_workbench_batch_worker",
+		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
+	}
+	items, asyncRequired, appErr := s.resolveClientMaterialBatchCandidates(ctx, actor, params, assetWorkbenchClientMaterialBatchAsyncLimit)
+	if appErr != nil {
+		return s.failBatchJob(ctx, job, appErr.Message)
+	}
+	if asyncRequired {
+		return s.failBatchJob(ctx, job, fmt.Sprintf("选择范围超过异步处理上限 %d 项，请缩小目录或筛选条件。", assetWorkbenchClientMaterialBatchAsyncLimit))
+	}
+	job.TotalCount = len(items)
+	job.ProcessedCount = 0
+	job.ResultPayload = mustJSON(map[string]interface{}{"message": "批量任务已开始处理", "total": len(items)})
+	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+		return s.repo.UpdateBatchJobProgress(ctx, tx, job)
+	}); err != nil {
+		return domain.NewAppError(domain.ErrCodeInternalError, "Failed to update batch job progress.", err.Error())
+	}
+	result, appErr := s.applyClientMaterialBatchUpdate(ctx, actor, action, items, true)
+	if appErr != nil {
+		return s.failBatchJob(ctx, job, appErr.Message)
+	}
+	now := s.nowFn().UTC()
+	job.Status = domain.AssetWorkbenchAsyncJobStatusSucceeded
+	job.ProcessedCount = len(items)
+	job.CreatedCount = result.Created
+	job.UpdatedCount = result.Updated
+	job.EnabledCount = result.Enabled
+	job.DisabledCount = result.Disabled
+	job.RemovedCount = result.Removed
+	job.SkippedCount = result.Skipped
+	job.FailedCount = result.Failed
+	job.ErrorMessage = ""
+	job.FinishedAt = &now
+	job.ResultPayload = mustJSON(result)
+	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+		if err := s.repo.CompleteBatchJob(ctx, tx, job); err != nil {
+			return err
+		}
+		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventBatchJobCompleted, domain.AssetWorkbenchEntityBatchJob, &job.ID, nil, job, "complete asset workbench batch job")
+	}); err != nil {
+		return domain.NewAppError(domain.ErrCodeInternalError, "Failed to complete asset workbench batch job.", err.Error())
+	}
+	return nil
+}
+
+func (s *Service) failBatchJob(ctx context.Context, job *domain.AssetWorkbenchBatchJob, message string) *domain.AppError {
+	if job == nil {
+		return domain.NewAppError(domain.ErrCodeInternalError, "Batch job is nil.", message)
+	}
+	now := s.nowFn().UTC()
+	job.Status = domain.AssetWorkbenchAsyncJobStatusFailed
+	job.ErrorMessage = trimString(message, 1000)
+	job.FinishedAt = &now
+	job.ResultPayload = mustJSON(map[string]interface{}{
+		"message": job.ErrorMessage,
+		"status":  domain.AssetWorkbenchAsyncJobStatusFailed,
+	})
+	actor := domain.RequestActor{
+		ID:       job.RequestedBy,
+		Roles:    []domain.Role{domain.RoleAssetManager},
+		Source:   "asset_workbench_batch_worker",
+		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
+	}
+	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+		if err := s.repo.CompleteBatchJob(ctx, tx, job); err != nil {
+			return err
+		}
+		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventBatchJobCompleted, domain.AssetWorkbenchEntityBatchJob, &job.ID, nil, job, "fail asset workbench batch job")
+	}); err != nil {
+		return domain.NewAppError(domain.ErrCodeInternalError, "Failed to mark asset workbench batch job failed.", err.Error())
+	}
+	return domain.NewAppError(domain.ErrCodeInternalError, "Asset workbench batch job failed.", job.ErrorMessage)
+}
+
+func (s *Service) resolveClientMaterialBatchCandidates(ctx context.Context, actor domain.RequestActor, params BatchUpdateClientMaterialsParams, limit int) ([]CreateClientMaterialParams, bool, *domain.AppError) {
+	candidates := make([]CreateClientMaterialParams, 0, len(params.Items))
+	candidates = append(candidates, params.Items...)
+	if len(candidates) > limit {
+		return candidates, true, nil
+	}
+	addAsset := func(asset *assetcenter.AssetDetail) bool {
+		if asset == nil || !assetWorkbenchMaterialAssetVisible(asset) {
+			return false
+		}
+		candidates = append(candidates, clientMaterialParamsFromAssetDetail(asset))
+		return len(candidates) > limit
+	}
+	if strings.TrimSpace(params.Query) != "" {
+		page := 1
+		for {
+			search, appErr := s.SystemSearch(ctx, actor, params.Query, page, 100, params.Source)
+			if appErr != nil {
+				return nil, false, appErr
+			}
+			for _, asset := range search.Items {
+				if addAsset(asset) {
+					return candidates, true, nil
+				}
+			}
+			if len(search.Items) == 0 || int64(page*search.Size) >= search.Total {
+				break
+			}
+			page++
+		}
+	}
+	for _, folder := range params.Folders {
+		asyncRequired, appErr := s.appendClientMaterialBatchFolderCandidates(ctx, actor, folder, limit, &candidates)
+		if appErr != nil || asyncRequired {
+			return candidates, asyncRequired, appErr
+		}
+	}
+	return candidates, false, nil
+}
+
+func (s *Service) appendClientMaterialBatchFolderCandidates(ctx context.Context, actor domain.RequestActor, folder ClientMaterialBatchFolderParams, limit int, candidates *[]CreateClientMaterialParams) (bool, *domain.AppError) {
+	source := firstNonEmpty(folder.Source, string(domain.AssetResourceSourceAll))
+	queue := []string{folder.Path}
+	visited := map[string]bool{}
+	for len(queue) > 0 {
+		current := strings.TrimSpace(queue[0])
+		queue = queue[1:]
+		normalized := normalizeWorkbenchMaterialPath(current)
+		if visited[normalized] {
+			continue
+		}
+		visited[normalized] = true
+		if !assetWorkbenchOperationalMaterialPathVisible(normalized) {
+			continue
+		}
+		page := 1
+		for {
+			browse, appErr := s.BrowseMaterials(ctx, actor, normalized, page, 100, source)
+			if appErr != nil {
+				return false, appErr
+			}
+			if folder.IncludeChildren && page == 1 {
+				for _, child := range browse.Folders {
+					if assetWorkbenchOperationalMaterialPathVisible(child.Path) {
+						queue = append(queue, child.Path)
+					}
+				}
+			}
+			for _, asset := range browse.Files {
+				if !assetWorkbenchMaterialAssetVisible(asset) {
+					continue
+				}
+				*candidates = append(*candidates, clientMaterialParamsFromAssetDetail(asset))
+				if len(*candidates) > limit {
+					return true, nil
+				}
+			}
+			if len(browse.Files) == 0 || int64(page*browse.Size) >= browse.Total {
+				break
+			}
+			page++
+		}
+	}
+	return false, nil
+}
+
+func clientMaterialParamsFromAssetDetail(asset *assetcenter.AssetDetail) CreateClientMaterialParams {
+	if asset == nil {
+		return CreateClientMaterialParams{}
+	}
+	source := domain.NormalizeAssetResourceSource(asset.SourceType)
+	if source == domain.AssetResourceSourceAll {
+		source = domain.AssetResourceSourceSystem
+	}
+	sourceRef := strings.TrimSpace(asset.ResourceID)
+	if source == domain.AssetResourceSourceExternal {
+		if sourceRef == "" {
+			sourceRef = domain.ExternalAssetResourceID(asset.ID)
+		}
+	} else {
+		sourceRef = strconv.FormatInt(asset.ID, 10)
+	}
+	enabled := true
+	return CreateClientMaterialParams{
+		AssetID:     asset.ID,
+		SourceType:  string(source),
+		SourceRef:   sourceRef,
+		ResourceID:  sourceRef,
+		Title:       firstNonEmpty(asset.ProductName, asset.OriginalFilename, asset.FileName, sourceRef),
+		Description: "",
+		Enabled:     &enabled,
+	}
 }
 
 func (s *Service) ClientMaterialDownload(ctx context.Context, actor domain.RequestActor, materialID int64) (*domain.AssetDownloadInfo, *domain.AppError) {
@@ -7786,6 +8374,14 @@ func boolValueDefault(value *bool, fallback bool) bool {
 	return *value
 }
 
+func trimString(value string, max int) string {
+	value = strings.TrimSpace(value)
+	if max <= 0 || len(value) <= max {
+		return value
+	}
+	return value[:max]
+}
+
 func normalizeServicePage(page int, pageSize int, defaultPageSize int, maxPageSize int) (int, int) {
 	if page <= 0 {
 		page = 1
@@ -7970,6 +8566,187 @@ func normalizeExternalMaterialParent(originPath string) string {
 	return "/" + strings.Trim(parent, "/")
 }
 
+func filterVisibleWorkbenchMaterialAssets(items []*assetcenter.AssetDetail) []*assetcenter.AssetDetail {
+	out := make([]*assetcenter.AssetDetail, 0, len(items))
+	for _, item := range items {
+		if assetWorkbenchMaterialAssetVisible(item) {
+			out = append(out, rewriteWorkbenchVirtualQuarkAsset(item))
+		}
+	}
+	return out
+}
+
+func filterVisibleWorkbenchMaterialFolders(folders []assetcenter.MaterialFolder) []assetcenter.MaterialFolder {
+	out := make([]assetcenter.MaterialFolder, 0, len(folders))
+	for _, folder := range folders {
+		if assetWorkbenchOperationalMaterialPathVisible(folder.Path) {
+			out = append(out, folder)
+		}
+	}
+	return out
+}
+
+const (
+	workbenchQuarkMaterialVirtualRoot = "/quark"
+	workbenchQuarkMaterialActualBase  = "/quark/我的备份/来自：ASUS Administrator 电脑备份"
+)
+
+var workbenchQuarkMaterialVirtualFolders = []string{"电视投屏", "海报", "kt板", "闲置kt板"}
+
+func assetWorkbenchMaterialAssetVisible(asset *assetcenter.AssetDetail) bool {
+	if asset == nil {
+		return false
+	}
+	if domain.NormalizeAssetResourceSource(asset.SourceType) != domain.AssetResourceSourceExternal {
+		return true
+	}
+	return assetWorkbenchOperationalMaterialPathVisible(asset.OriginPath)
+}
+
+func assetWorkbenchOperationalMaterialPathVisible(raw string) bool {
+	pathValue := normalizeWorkbenchMaterialPath(raw)
+	if pathValue == "" {
+		return true
+	}
+	parts := workbenchMaterialPathParts(pathValue)
+	if len(parts) == 0 || !strings.EqualFold(parts[0], "quark") {
+		return true
+	}
+	if workbenchIsVirtualQuarkRoot(pathValue) {
+		return true
+	}
+	for _, virtual := range workbenchQuarkMaterialVirtualFolders {
+		if pathValue == workbenchQuarkMaterialVirtualRoot+"/"+virtual || strings.HasPrefix(pathValue, workbenchQuarkMaterialVirtualRoot+"/"+virtual+"/") {
+			return true
+		}
+		actualPrefix := workbenchQuarkMaterialActualBase + "/" + virtual
+		if pathValue == actualPrefix || strings.HasPrefix(pathValue, actualPrefix+"/") {
+			return true
+		}
+	}
+	return false
+}
+
+func workbenchIsVirtualQuarkRoot(pathValue string) bool {
+	return strings.EqualFold(normalizeWorkbenchMaterialPath(pathValue), workbenchQuarkMaterialVirtualRoot)
+}
+
+func workbenchMaterialActualPath(pathValue string) string {
+	pathValue = normalizeWorkbenchMaterialPath(pathValue)
+	for _, virtual := range workbenchQuarkMaterialVirtualFolders {
+		virtualPrefix := workbenchQuarkMaterialVirtualRoot + "/" + virtual
+		if pathValue == virtualPrefix {
+			return workbenchQuarkMaterialActualBase + "/" + virtual
+		}
+		if strings.HasPrefix(pathValue, virtualPrefix+"/") {
+			return workbenchQuarkMaterialActualBase + "/" + virtual + strings.TrimPrefix(pathValue, virtualPrefix)
+		}
+	}
+	return pathValue
+}
+
+func workbenchMaterialVirtualPath(pathValue string) string {
+	pathValue = normalizeWorkbenchMaterialPath(pathValue)
+	for _, virtual := range workbenchQuarkMaterialVirtualFolders {
+		actualPrefix := workbenchQuarkMaterialActualBase + "/" + virtual
+		if pathValue == actualPrefix {
+			return workbenchQuarkMaterialVirtualRoot + "/" + virtual
+		}
+		if strings.HasPrefix(pathValue, actualPrefix+"/") {
+			return workbenchQuarkMaterialVirtualRoot + "/" + virtual + strings.TrimPrefix(pathValue, actualPrefix)
+		}
+	}
+	return pathValue
+}
+
+func rewriteWorkbenchVirtualQuarkFolders(folders []assetcenter.MaterialFolder) []assetcenter.MaterialFolder {
+	for i := range folders {
+		folders[i].Path = workbenchMaterialVirtualPath(folders[i].Path)
+		if strings.TrimSpace(folders[i].Name) == "" {
+			folders[i].Name = path.Base(folders[i].Path)
+		}
+	}
+	return folders
+}
+
+func rewriteWorkbenchVirtualQuarkAsset(asset *assetcenter.AssetDetail) *assetcenter.AssetDetail {
+	if asset == nil {
+		return nil
+	}
+	virtualPath := workbenchMaterialVirtualPath(asset.OriginPath)
+	if virtualPath == asset.OriginPath {
+		return asset
+	}
+	copy := *asset
+	copy.OriginPath = virtualPath
+	return &copy
+}
+
+func workbenchQuarkVirtualFolderName(pathValue string) (string, bool) {
+	pathValue = normalizeWorkbenchMaterialPath(pathValue)
+	for _, virtual := range workbenchQuarkMaterialVirtualFolders {
+		if pathValue == workbenchQuarkMaterialVirtualRoot+"/"+virtual || strings.HasPrefix(pathValue, workbenchQuarkMaterialVirtualRoot+"/"+virtual+"/") ||
+			pathValue == workbenchQuarkMaterialActualBase+"/"+virtual || strings.HasPrefix(pathValue, workbenchQuarkMaterialActualBase+"/"+virtual+"/") {
+			return virtual, true
+		}
+	}
+	return "", false
+}
+
+func workbenchQuarkVirtualFoldersSet() map[string]struct{} {
+	out := make(map[string]struct{}, len(workbenchQuarkMaterialVirtualFolders))
+	for _, folder := range workbenchQuarkMaterialVirtualFolders {
+		out[strings.ToLower(folder)] = struct{}{}
+	}
+	return out
+}
+
+func assetWorkbenchOperationalMaterialRootName(pathValue string) string {
+	if name, ok := workbenchQuarkVirtualFolderName(pathValue); ok {
+		return name
+	}
+	parts := workbenchMaterialPathParts(pathValue)
+	if len(parts) > 1 {
+		return parts[1]
+	}
+	return ""
+}
+
+func assetWorkbenchOperationalMaterialPathNameAllowed(name string) bool {
+	_, ok := workbenchQuarkVirtualFoldersSet()[strings.ToLower(strings.TrimSpace(name))]
+	return ok
+}
+
+func assetWorkbenchOperationalMaterialPathUnderAllowedRoot(pathValue string) bool {
+	name := assetWorkbenchOperationalMaterialRootName(pathValue)
+	if name == "" {
+		return true
+	}
+	return assetWorkbenchOperationalMaterialPathNameAllowed(name)
+}
+
+func normalizeWorkbenchMaterialPath(raw string) string {
+	parts := workbenchMaterialPathParts(raw)
+	if len(parts) == 0 {
+		return ""
+	}
+	return "/" + strings.Join(parts, "/")
+}
+
+func workbenchMaterialPathParts(raw string) []string {
+	value := strings.ReplaceAll(strings.TrimSpace(raw), "\\", "/")
+	rawParts := strings.Split(value, "/")
+	parts := make([]string, 0, len(rawParts))
+	for _, part := range rawParts {
+		part = strings.TrimSpace(part)
+		if part == "" || part == "." {
+			continue
+		}
+		parts = append(parts, part)
+	}
+	return parts
+}
+
 func (s *Service) systemDownloadSnapshot(ctx context.Context, assetID int64) (*domain.AssetDownloadInfo, *domain.AppError) {
 	if s.systemDownloads == nil {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "System asset downloader is not configured.", nil)
@@ -8086,6 +8863,25 @@ func normalizeClientMaterialRow(material *domain.AssetWorkbenchClientMaterial) {
 		}
 		material.SourceLabel = "系统资源"
 	}
+}
+
+func clientMaterialSourceKey(sourceType, sourceRef string) string {
+	normalized := domain.NormalizeAssetResourceSource(sourceType)
+	if normalized == domain.AssetResourceSourceAll {
+		normalized = domain.AssetResourceSourceSystem
+	}
+	return string(normalized) + ":" + strings.TrimSpace(sourceRef)
+}
+
+func (r *ClientMaterialBatchUpdateResult) addClientMaterialBatchFailure(index int, item CreateClientMaterialParams, reason string) {
+	r.Failures = append(r.Failures, ClientMaterialBatchUpdateFailure{
+		Index:      index,
+		AssetID:    item.AssetID,
+		SourceType: strings.TrimSpace(item.SourceType),
+		SourceRef:  strings.TrimSpace(item.SourceRef),
+		ResourceID: strings.TrimSpace(item.ResourceID),
+		Reason:     strings.TrimSpace(reason),
+	})
 }
 
 func (s *Service) clientMaterialSourceSnapshot(ctx context.Context, source clientMaterialSourceRef) (*clientMaterialSourceSnapshot, *domain.AppError) {

@@ -762,6 +762,82 @@ export interface ClientMaterialSearchResult {
   size: number
 }
 
+export type ClientMaterialBatchAction = 'publish' | 'enable' | 'disable' | 'remove'
+
+export interface ClientMaterialBatchUpdatePayload {
+  action: ClientMaterialBatchAction
+  items?: UpsertClientMaterialPayload[]
+  folders?: Array<{
+    path: string
+    source?: 'all' | 'system' | 'external'
+    include_children?: boolean
+  }>
+  query?: string
+  source?: 'all' | 'system' | 'external'
+  selection_scope?: 'selected' | 'current_page' | 'current_folder' | 'current_folder_recursive' | 'current_filter'
+}
+
+export interface ClientMaterialBatchUpdateResult {
+  requested: number
+  created: number
+  updated: number
+  enabled: number
+  disabled: number
+  removed: number
+  skipped: number
+  failed: number
+  async_required?: boolean
+  job_id?: string
+  job?: AssetWorkbenchBatchJob
+  message?: string
+  items?: ClientMaterialRow[]
+  failures?: Array<{
+    index: number
+    asset_id?: number
+    source_type?: string
+    source_ref?: string
+    resource_id?: string
+    reason: string
+  }>
+}
+
+export type AssetWorkbenchBatchJobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
+
+export interface AssetWorkbenchBatchJob {
+  id: number
+  job_id: string
+  job_type: string
+  status: AssetWorkbenchBatchJobStatus
+  action: string
+  selection_scope: string
+  requested_by: number
+  request_payload?: Record<string, unknown>
+  result_payload?: Record<string, unknown>
+  total_count: number
+  processed_count: number
+  created_count: number
+  updated_count: number
+  enabled_count: number
+  disabled_count: number
+  removed_count: number
+  skipped_count: number
+  failed_count: number
+  error_message?: string
+  lease_owner?: string
+  lease_expires_at?: string | null
+  started_at?: string | null
+  finished_at?: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface AssetWorkbenchBatchJobListResult {
+  items: AssetWorkbenchBatchJob[]
+  total: number
+  page: number
+  size: number
+}
+
 export interface MaterialGroupRow {
   group_key: string
   group_code: string
@@ -1731,6 +1807,21 @@ export const assetWorkbenchApi = {
 
   async deleteClientMaterial(materialId: number, signal?: AbortSignal): Promise<unknown> {
     const res = await http.delete<ApiEnvelope<unknown>>(`/v1/asset-workbench/client-materials/${materialId}`, { signal })
+    return unwrap(res.data)
+  },
+
+  async batchUpdateClientMaterials(payload: ClientMaterialBatchUpdatePayload, signal?: AbortSignal): Promise<ClientMaterialBatchUpdateResult> {
+    const res = await http.post<ApiEnvelope<ClientMaterialBatchUpdateResult>>('/v1/asset-workbench/client-materials/batch-update', payload, { signal })
+    return unwrap(res.data)
+  },
+
+  async listBatchJobs(params: { status?: AssetWorkbenchBatchJobStatus | ''; page?: number; page_size?: number } = {}, signal?: AbortSignal): Promise<AssetWorkbenchBatchJobListResult> {
+    const res = await http.get<ApiEnvelope<AssetWorkbenchBatchJobListResult>>('/v1/asset-workbench/batch-jobs', { params, signal })
+    return unwrap(res.data)
+  },
+
+  async getBatchJob(jobId: string, signal?: AbortSignal): Promise<AssetWorkbenchBatchJob> {
+    const res = await http.get<ApiEnvelope<AssetWorkbenchBatchJob>>(`/v1/asset-workbench/batch-jobs/${encodeURIComponent(jobId)}`, { signal })
     return unwrap(res.data)
   },
 

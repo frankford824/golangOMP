@@ -92,4 +92,10 @@ describe('resolveApiUserMessage', () => {
 
     expect(message).toBe('定制审核阶段只能上传修改后的源文件')
   })
+
+  it('maps network failures to anti-repeat action copy', () => {
+    const message = resolveApiUserMessage(new Error('Network Error'))
+
+    expect(message).toBe('连接中断，本次操作没有完成。请恢复网络后重试，不要重复点击提交。')
+  })
 })
