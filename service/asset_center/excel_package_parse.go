@@ -59,7 +59,13 @@ func parseExcelPackageXLSX(data []byte) ([][]string, error) {
 	return rows, nil
 }
 
-func parseExcelPackageXLS(data []byte) ([][]string, error) {
+func parseExcelPackageXLS(data []byte) (table [][]string, err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			table = nil
+			err = fmt.Errorf("解析 .xls 工作表失败")
+		}
+	}()
 	wb, err := xls.OpenReader(bytes.NewReader(data), "utf-8")
 	if err != nil {
 		return nil, err
@@ -73,19 +79,36 @@ func parseExcelPackageXLS(data []byte) ([][]string, error) {
 	}
 	out := make([][]string, 0, int(sheet.MaxRow)+1)
 	for i := 0; i <= int(sheet.MaxRow); i++ {
-		row := sheet.Row(i)
-		if row == nil {
+		values, ok := readExcelPackageXLSRowValues(sheet, i)
+		if !ok {
 			out = append(out, nil)
 			continue
-		}
-		last := row.LastCol()
-		values := make([]string, 0, last+1)
-		for j := 0; j <= last; j++ {
-			values = append(values, strings.TrimSpace(row.Col(j)))
 		}
 		out = append(out, values)
 	}
 	return out, nil
+}
+
+func readExcelPackageXLSRowValues(sheet *xls.WorkSheet, index int) (values []string, ok bool) {
+	if sheet == nil {
+		return nil, false
+	}
+	defer func() {
+		if recover() != nil {
+			values = nil
+			ok = false
+		}
+	}()
+	row := sheet.Row(index)
+	if row == nil {
+		return nil, false
+	}
+	last := row.LastCol()
+	values = make([]string, 0, last+1)
+	for j := 0; j <= last; j++ {
+		values = append(values, strings.TrimSpace(row.Col(j)))
+	}
+	return values, true
 }
 
 func buildExcelPackageRowsFromTable(table [][]string) ([]ExcelPackageRow, error) {

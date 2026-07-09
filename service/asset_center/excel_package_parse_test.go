@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"testing"
 
+	"github.com/extrame/xls"
 	"github.com/xuri/excelize/v2"
 )
 
@@ -62,5 +63,12 @@ func TestParseExcelPackageRowsXLSX(t *testing.T) {
 	got := rows[0]
 	if got.OrderNo != "SO-9" || got.SKUCode != "HQT12119" || got.Quantity != 3 || got.Keyword != "白底" {
 		t.Fatalf("row=%+v", got)
+	}
+}
+
+func TestReadExcelPackageXLSRowValuesSkipsMissingRows(t *testing.T) {
+	values, ok := readExcelPackageXLSRowValues(&xls.WorkSheet{MaxRow: 3}, 1)
+	if ok || values != nil {
+		t.Fatalf("readExcelPackageXLSRowValues() = (%v, %v), want missing row", values, ok)
 	}
 }
