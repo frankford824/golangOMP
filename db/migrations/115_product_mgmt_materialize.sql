@@ -155,11 +155,21 @@ UPDATE erp_product_sync_records pm
 UPDATE erp_product_sync_records pm
 LEFT JOIN (
     SELECT
-      rel.child_sku_code,
-      GROUP_CONCAT(DISTINCT CONCAT_WS(' ', rel.combo_sku_code, rec.erp_i_id, rec.name, rec.short_name) SEPARATOR ' ') AS combo_search_text
-      FROM omp_sku_combo_relations rel
-      LEFT JOIN omp_sku_combo_records rec ON rec.combo_sku_code = rel.combo_sku_code
-     GROUP BY rel.child_sku_code
+      limited.child_sku_code,
+      GROUP_CONCAT(DISTINCT limited.search_token ORDER BY limited.search_token SEPARATOR ' ') AS combo_search_text
+      FROM (
+        SELECT ranked.child_sku_code, ranked.search_token
+          FROM (
+            SELECT
+              rel.child_sku_code,
+              LEFT(CONCAT_WS(' ', rel.combo_sku_code, rec.erp_i_id, rec.name, rec.short_name), 256) AS search_token,
+              ROW_NUMBER() OVER (PARTITION BY rel.child_sku_code ORDER BY rel.combo_sku_code, COALESCE(rec.id, 0)) AS rn
+              FROM omp_sku_combo_relations rel
+              LEFT JOIN omp_sku_combo_records rec ON rec.combo_sku_code = rel.combo_sku_code
+          ) ranked
+         WHERE ranked.rn <= 200
+      ) limited
+     GROUP BY limited.child_sku_code
 ) combo ON combo.child_sku_code = pm.sku_code
    SET pm.combo_search_text = COALESCE(combo.combo_search_text, '');
 
