@@ -274,10 +274,10 @@ const productReindexSQL = `
 	INSERT INTO product_search_documents (
 	  sku_code, product_name, i_id, category, search_text, source_updated_at
 	)
-	SELECT
-	  p.sku_code,
-	  COALESCE(p.product_name, ''),
-	  COALESCE(p.i_id_gen, ''),
+SELECT
+  p.sku_code,
+  COALESCE(p.product_name, ''),
+  COALESCE(p.i_id_gen, ''),
 	  COALESCE(NULLIF(CASE WHEN JSON_VALID(p.spec_json) THEN JSON_UNQUOTE(JSON_EXTRACT(p.spec_json, '$.category_name')) ELSE '' END, ''), NULLIF(p.category, ''), ''),
 	  CONCAT_WS(' ',
 	    p.sku_code,
@@ -285,7 +285,21 @@ const productReindexSQL = `
 	    p.category,
 	    p.i_id_gen,
 	    CASE WHEN JSON_VALID(p.spec_json) THEN JSON_UNQUOTE(JSON_EXTRACT(p.spec_json, '$.category_name')) ELSE '' END
-	  ),
-	  p.updated_at
-	FROM products p
-	WHERE COALESCE(p.sku_code, '') <> ''`
+  ),
+  p.updated_at
+	FROM (
+	  SELECT ranked.*
+	    FROM (
+	      SELECT p.*,
+	             ROW_NUMBER() OVER (PARTITION BY p.sku_code ORDER BY p.updated_at DESC, p.id DESC) AS rn
+	        FROM products p
+	       WHERE COALESCE(p.sku_code, '') <> ''
+	    ) ranked
+	   WHERE ranked.rn = 1
+	) p
+	ON DUPLICATE KEY UPDATE
+	  product_name = VALUES(product_name),
+	  i_id = VALUES(i_id),
+	  category = VALUES(category),
+	  search_text = VALUES(search_text),
+	  source_updated_at = VALUES(source_updated_at)`
