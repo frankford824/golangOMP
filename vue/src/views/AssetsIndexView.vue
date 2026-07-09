@@ -46,8 +46,8 @@
           <button type="button" class="ac-icon-btn ac-icon-btn--primary" @click="openBulkSearchModal">
             批量搜索下载
           </button>
-          <button type="button" class="ac-icon-btn ac-icon-btn--primary" :disabled="excelPackaging" @click="openExcelPicker">
-            {{ excelPackaging ? '模板打包中' : 'Excel 图片分拣下载' }}
+          <button type="button" class="ac-icon-btn ac-icon-btn--primary" @click="openExcelPackageModal">
+            {{ excelPackaging ? '查看打包进度' : '仓库外发打包' }}
           </button>
           <input
             ref="excelFileInput"
@@ -411,12 +411,31 @@
 
     <BaseModal
       v-model="excelPackageModalOpen"
-      title="Excel 图片分拣下载"
+      title="仓库外发打包"
       :show-confirm="false"
       cancel-text="关闭"
       panel-class="max-w-3xl"
     >
       <section class="excel-package-modal">
+        <div class="excel-package-pick-card">
+          <div class="excel-package-pick-main">
+            <span class="excel-package-kicker">Excel 模板</span>
+            <strong>{{ excelPackageSelectedFileName || '未选择文件' }}</strong>
+            <p>系统资源和外部资源会按订单拆分，生成仓库外发 ZIP。</p>
+          </div>
+          <button type="button" class="ac-batch-btn ac-batch-btn--primary" :disabled="excelPackaging" @click="openExcelPicker">
+            {{ excelPackageSelectedFileName ? '重新选择 Excel' : '选择 Excel' }}
+          </button>
+        </div>
+
+        <div class="excel-package-template-row" aria-label="模板字段">
+          <span>订单号</span>
+          <span>SKU 编码</span>
+          <span>数量</span>
+          <span>地址</span>
+          <span>匹配关键词</span>
+        </div>
+
         <div class="excel-package-progress-card">
           <div class="excel-package-progress-top">
             <span class="excel-package-stage" :class="`excel-package-stage--${excelPackagePhase}`">
@@ -896,6 +915,7 @@ const excelPackaging = ref(false)
 const excelPackageModalOpen = ref(false)
 const excelPackageStatus = ref('')
 const excelPackageError = ref('')
+const excelPackageSelectedFileName = ref('')
 const replacementFileInput = ref<HTMLInputElement | null>(null)
 const replacementTargetAsset = ref<BackendAsset | null>(null)
 const replacementUploading = ref(false)
@@ -1101,7 +1121,7 @@ const excelPackageProgressPercent = computed(() => {
 
 const excelPackageModalMessage = computed(() => {
   if (excelPackageError.value && excelPackagePhase.value === 'failed') return excelPackageError.value
-  return excelPackageStatus.value || '选择 Excel 后开始解析、匹配并生成下载包。'
+  return excelPackageStatus.value || '选择 Excel 后生成仓库外发 ZIP。'
 })
 
 const effectiveAssetSearchSource = computed<AssetResourceSource>(() => filters.resourceSource)
@@ -1951,11 +1971,20 @@ function downloadBlob(blob: Blob, filename: string) {
   window.setTimeout(() => URL.revokeObjectURL(objectURL), 1000)
 }
 
-function openExcelPicker() {
-  if (excelPackaging.value) return
+function openExcelPackageModal() {
+  if (excelPackaging.value) {
+    excelPackageModalOpen.value = true
+    return
+  }
   resetExcelPackageResult()
   excelPackageStatus.value = ''
   excelPackageError.value = ''
+  excelPackageSelectedFileName.value = ''
+  excelPackageModalOpen.value = true
+}
+
+function openExcelPicker() {
+  if (excelPackaging.value) return
   if (excelFileInput.value) {
     excelFileInput.value.value = ''
     excelFileInput.value.click()
@@ -2088,7 +2117,7 @@ async function downloadExcelPackageAsZip(
   const zip = new JSZip()
   const downloadFailures: AssetExcelPackageFailure[] = []
   const reportLines: string[] = [
-    'Excel 图片分拣下载报告',
+    '仓库外发打包报告',
     `生成时间：${formatDateTimeBeijing(new Date().toISOString())}`,
     `成功行数：${items.length}`,
     `失败行数：${failures.length}`,
@@ -2204,7 +2233,7 @@ async function downloadExcelPackageAsZip(
       excelPackageStatus.value = `正在生成 ZIP ${Math.floor(metadata.percent)}%`
     },
   )
-  downloadBlob(blob, buildTimestampedZipFilename('Excel图片分拣包'))
+  downloadBlob(blob, buildTimestampedZipFilename('仓库外发打包'))
   return { copied, downloadFailures }
 }
 
@@ -2214,6 +2243,7 @@ async function handleExcelPackageFile(event: Event) {
   excelPackaging.value = true
   excelPackageModalOpen.value = true
   resetExcelPackageResult()
+  excelPackageSelectedFileName.value = file.name
   excelPackagePhase.value = 'parsing'
   excelPackageStatus.value = '正在解析 Excel 模板'
   excelPackageError.value = ''
@@ -2248,7 +2278,7 @@ async function handleExcelPackageFile(event: Event) {
   } catch (err) {
     excelPackagePhase.value = 'failed'
     excelPackageStatus.value = ''
-    excelPackageError.value = resolveApiUserMessage(err, { fallback: 'Excel 图片分拣下载失败' })
+    excelPackageError.value = resolveApiUserMessage(err, { fallback: '仓库外发打包失败' })
   } finally {
     excelPackaging.value = false
     if (excelFileInput.value) excelFileInput.value.value = ''
@@ -3690,6 +3720,59 @@ onBeforeUnmount(() => {
   color: rgb(var(--yb-text));
 }
 
+.excel-package-pick-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border: 1px solid rgb(var(--yb-border));
+  border-radius: 10px;
+  background: rgb(var(--yb-surface));
+  padding: 0.85rem;
+}
+
+.excel-package-pick-main {
+  min-width: 0;
+}
+
+.excel-package-kicker {
+  display: block;
+  color: rgb(var(--yb-text-muted));
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.excel-package-pick-main strong {
+  display: block;
+  min-width: 0;
+  margin-top: 0.2rem;
+  color: rgb(var(--yb-text));
+  font-size: 0.95rem;
+  overflow-wrap: anywhere;
+}
+
+.excel-package-pick-main p {
+  margin: 0.3rem 0 0;
+  color: rgb(var(--yb-text-muted));
+  font-size: 0.78rem;
+}
+
+.excel-package-template-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.excel-package-template-row span {
+  border: 1px solid rgb(var(--yb-border));
+  border-radius: 999px;
+  background: rgb(var(--yb-surface-soft));
+  color: rgb(var(--yb-text-body));
+  font-size: 0.74rem;
+  font-weight: 650;
+  padding: 0.25rem 0.6rem;
+}
+
 .excel-package-progress-card {
   border: 1px solid rgb(var(--yb-border));
   border-radius: 10px;
@@ -4076,6 +4159,11 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 720px) {
+  .excel-package-pick-card {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
   .excel-package-summary-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
