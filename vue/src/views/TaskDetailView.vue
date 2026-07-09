@@ -1119,6 +1119,8 @@
       v-model="reassignDialogVisible"
       :designers="designerOptions"
       :loading="designersLoading"
+      :submitting="reassignSubmitting"
+      :submit-error="reassignSubmitError"
       :current-assignee-id="
         task?.designerId != null
           ? String(task.designerId)
@@ -3502,6 +3504,8 @@ const actionLoading = ref<
 >('')
 const assignDialogVisible = ref(false)
 const reassignDialogVisible = ref(false)
+const reassignSubmitting = ref(false)
+const reassignSubmitError = ref('')
 const auditAssigneeDialogVisible = ref(false)
 const auditAssigneeDialogMode = ref<'handover' | 'manager-transfer'>('handover')
 const selectedAuditAssigneeId = ref<string | number>('')
@@ -3798,6 +3802,7 @@ function doReassign() {
   if (!task.value || !showReassignDesignerButton.value) return
   actionError.value = ''
   actionSuccess.value = ''
+  reassignSubmitError.value = ''
   reassignDialogVisible.value = true
   if (designerOptions.value.length === 0) loadDesigners()
 }
@@ -4257,7 +4262,14 @@ async function onReassignConfirm(payload: {
   reasonLabel: string
   reasonNote: string
 }) {
-  if (!task.value || !showReassignDesignerButton.value) return
+  if (!task.value || !showReassignDesignerButton.value) {
+    reassignSubmitError.value = '当前任务状态已变化，请刷新后重试'
+    actionError.value = reassignSubmitError.value
+    return
+  }
+  if (reassignSubmitting.value) return
+  reassignSubmitting.value = true
+  reassignSubmitError.value = ''
   try {
     if (payload.mode === 'clear') {
       await tasksStore.clearDesignerAssignee(task.value.id, payload.reasonNote || '清空指派')
@@ -4276,11 +4288,15 @@ async function onReassignConfirm(payload: {
     } else {
       flashSuccess(`已重新指派给 ${payload.assigneeName} ${note}`)
     }
+    reassignDialogVisible.value = false
   } catch (e) {
-    actionError.value = formatTaskActionDenyMessage(
+    reassignSubmitError.value = formatTaskActionDenyMessage(
       e,
       payload.mode === 'clear' ? '清空指派失败' : '重新指派失败',
     )
+    actionError.value = reassignSubmitError.value
+  } finally {
+    reassignSubmitting.value = false
   }
 }
 

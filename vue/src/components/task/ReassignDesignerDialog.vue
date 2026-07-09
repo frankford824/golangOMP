@@ -86,27 +86,28 @@
             · {{ pendingConfirm.reasonNote }}
           </template>
         </p>
+        <p v-if="submitError" class="form-error">{{ submitError }}</p>
       </div>
     </template>
     <template #footer>
       <footer class="reassign-footer">
         <template v-if="step === 'form'">
-          <BaseButton size="sm" variant="secondary" @click="close">取消</BaseButton>
+          <BaseButton size="sm" variant="secondary" :disabled="submitting" @click="close">取消</BaseButton>
           <BaseButton
             size="sm"
             variant="ghost"
-            :disabled="loading || !currentAssigneeId"
+            :disabled="loading || submitting || !currentAssigneeId"
             @click="goConfirmClear"
           >
             清空指派（退回待指派）
           </BaseButton>
-          <BaseButton size="sm" variant="primary" :disabled="loading" @click="goConfirm">
+          <BaseButton size="sm" variant="primary" :disabled="loading || submitting" @click="goConfirm">
             下一步：确认
           </BaseButton>
         </template>
         <template v-else>
-          <BaseButton size="sm" variant="secondary" @click="step = 'form'">上一步</BaseButton>
-          <BaseButton size="sm" variant="primary" @click="submitConfirm">
+          <BaseButton size="sm" variant="secondary" :disabled="submitting" @click="step = 'form'">上一步</BaseButton>
+          <BaseButton size="sm" variant="primary" :loading="submitting" :disabled="submitting" @click="submitConfirm">
             {{ pendingConfirm?.mode === 'clear' ? '确认清空指派' : '确认重新指派' }}
           </BaseButton>
         </template>
@@ -138,12 +139,16 @@ const props = withDefaults(
     modelValue: boolean
     designers: Designer[]
     loading?: boolean
+    submitting?: boolean
+    submitError?: string
     currentAssigneeId?: string | null
     currentAssigneeName?: string | null
     hasDesignOutputHint?: boolean
   }>(),
   {
     loading: false,
+    submitting: false,
+    submitError: '',
     hasDesignOutputHint: false,
   },
 )
@@ -175,11 +180,11 @@ const selectableDesigners = computed(() => {
 })
 
 const designerSelectOptions = computed(() =>
-  selectableDesigners.value.map((d) => ({ value: d.id, label: d.name })),
+  selectableDesigners.value.map((d) => ({ value: String(d.id), label: d.name })),
 )
 
 const selectedDesigner = computed(() =>
-  selectableDesigners.value.find((d) => d.id === String(selectedId.value)) ?? null,
+  selectableDesigners.value.find((d) => String(d.id) === String(selectedId.value)) ?? null,
 )
 
 const pendingConfirm = ref<{
@@ -207,6 +212,7 @@ watch(
 )
 
 function close() {
+  if (props.submitting) return
   emit('update:modelValue', false)
 }
 
@@ -228,7 +234,7 @@ function goConfirm() {
     reasonOptions.find((o) => o.value === reasonCode.value)?.label ?? reasonCode.value
   pendingConfirm.value = {
     mode: 'reassign',
-    assigneeId: selectedDesigner.value.id,
+    assigneeId: String(selectedDesigner.value.id),
     assigneeName: selectedDesigner.value.name,
     reasonLabel: label,
     reasonNote: reasonNote.value.trim(),
@@ -263,6 +269,7 @@ function goConfirmClear() {
 }
 
 function submitConfirm() {
+  if (props.submitting) return
   const p = pendingConfirm.value
   if (!p) return
   emit('confirm', {
@@ -273,7 +280,6 @@ function submitConfirm() {
     reasonLabel: p.reasonLabel,
     reasonNote: p.reasonNote,
   })
-  emit('update:modelValue', false)
 }
 </script>
 
