@@ -443,6 +443,7 @@ export interface BackendAsset {
   workflow_lane?: 'normal' | 'customization' | string
   source_department?: string | null
   task_no?: string
+  task_status?: string
   sku_code?: string
   primary_sku_code?: string
   scope_sku_code?: string

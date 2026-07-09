@@ -857,6 +857,7 @@ import {
 import { predictionsApi, type PredictionSuggestion } from '@/services/api/predictionsApi'
 import { recordExperienceBehavior } from '@/services/experienceBehavior'
 import type { AssetResourceSource, BackendAsset, BackendAssetVersion } from '@/services/apiTypes'
+import { assetReplacementUnavailableReason, canReplaceAssetResource } from '@/domain/asset-replacement'
 import { formatDateTimeBeijing } from '@/utils/date'
 import { resolveApiUserMessage } from '@/utils/api-message-zh'
 import { userAccountDisplay } from '@/domain/user-display'
@@ -1524,12 +1525,23 @@ function assetScopeSkuCode(asset: BackendAsset | null | undefined): string {
 }
 
 function assetCanBeReplaced(asset: BackendAsset | null | undefined): boolean {
-  if (!asset || isExternalAsset(asset)) return false
-  if (!assetTaskId(asset) || !positiveID(assetResourceId(asset))) return false
-  const kind = rawAssetKind(asset)
-  if (kind !== 'delivery' && kind !== 'source' && kind !== 'reference') return false
-  const state = rawUsableState(asset as Record<string, unknown>)
-  return state !== 'history' && state !== 'cleaned'
+  return canReplaceAssetResource(assetReplacementGate(asset))
+}
+
+function assetReplacementGate(asset: BackendAsset | null | undefined) {
+  const record = (asset ?? {}) as Record<string, unknown>
+  return {
+    isExternal: Boolean(asset && isExternalAsset(asset)),
+    taskId: assetTaskId(asset),
+    assetId: asset ? assetResourceId(asset) : '',
+    assetKind: rawAssetKind(asset),
+    usableState: rawUsableState(record),
+    taskStatus: record.task_status ?? record.taskStatus,
+  }
+}
+
+function assetReplacementUnavailableMessage(asset: BackendAsset | null | undefined): string {
+  return assetReplacementUnavailableReason(assetReplacementGate(asset))
 }
 
 function cardTitle(asset: BackendAsset): string {
@@ -1994,7 +2006,7 @@ function openExcelPicker() {
 function startReplaceAsset(asset: BackendAsset | null | undefined) {
   if (!asset || !assetCanBeReplaced(asset)) {
     replacementStatus.value = ''
-    replacementError.value = '当前资源不可修改；只有系统内的参考图、源文件、最终成品图可替换'
+    replacementError.value = assetReplacementUnavailableMessage(asset)
     return
   }
   replacementTargetAsset.value = asset
@@ -2015,9 +2027,10 @@ async function handleReplacementFile(event: Event) {
   const taskId = assetTaskId(asset)
   const assetId = positiveID(assetResourceId(asset))
   const kind = rawAssetKind(asset)
-  if (!taskId || !assetId || (kind !== 'delivery' && kind !== 'source' && kind !== 'reference')) {
+  const unavailableMessage = assetReplacementUnavailableMessage(asset)
+  if (unavailableMessage || !taskId || !assetId || (kind !== 'delivery' && kind !== 'source' && kind !== 'reference')) {
     replacementStatus.value = ''
-    replacementError.value = '当前资源缺少任务或资产信息，不能在资产中心直接修改'
+    replacementError.value = unavailableMessage || '当前资源缺少任务或资产信息，不能在资产中心直接修改'
     if (input) input.value = ''
     return
   }

@@ -259,6 +259,7 @@ import {
 } from '@/domain/asset-access'
 import { assetsApi, type AssetKind } from '@/services/api/assetsApi'
 import type { BackendAsset, BackendAssetVersion } from '@/services/apiTypes'
+import { assetReplacementUnavailableReason, canReplaceAssetResource } from '@/domain/asset-replacement'
 import { formatDateTimeBeijing } from '@/utils/date'
 import { userAccountDisplay } from '@/domain/user-display'
 import { resolveApiUserMessage } from '@/utils/api-message-zh'
@@ -442,12 +443,23 @@ function assetScopeSkuCode(row: BackendAsset | null | undefined): string {
 }
 
 function assetCanBeReplaced(row: BackendAsset | null | undefined): boolean {
-  if (!row || isExternalAsset(row)) return false
-  if (!assetTaskId.value || !positiveID(assetResourceId(row))) return false
-  const kind = rawAssetKind(row)
-  if (kind !== 'delivery' && kind !== 'source' && kind !== 'reference') return false
-  const state = rawUsableState(row as Record<string, unknown>)
-  return state !== 'history' && state !== 'cleaned'
+  return canReplaceAssetResource(assetReplacementGate(row))
+}
+
+function assetReplacementGate(row: BackendAsset | null | undefined) {
+  const record = (row ?? {}) as Record<string, unknown>
+  return {
+    isExternal: Boolean(row && isExternalAsset(row)),
+    taskId: assetTaskId.value,
+    assetId: row ? assetResourceId(row) : '',
+    assetKind: rawAssetKind(row),
+    usableState: rawUsableState(record),
+    taskStatus: record.task_status ?? record.taskStatus,
+  }
+}
+
+function assetReplacementUnavailableMessage(row: BackendAsset | null | undefined): string {
+  return assetReplacementUnavailableReason(assetReplacementGate(row))
 }
 
 function externalOriginPath(row: BackendAsset): string {
@@ -610,7 +622,7 @@ function goTaskDetail() {
 function startReplaceAsset() {
   if (!assetCanBeReplaced(asset.value)) {
     replacementStatus.value = ''
-    replacementError.value = '当前资源不可修改；只有系统内的参考图、源文件、最终成品图可替换'
+    replacementError.value = assetReplacementUnavailableMessage(asset.value)
     return
   }
   replacementStatus.value = ''
@@ -629,9 +641,10 @@ async function handleReplacementFile(event: Event) {
 
   const assetID = positiveID(assetResourceId(row))
   const kind = rawAssetKind(row)
-  if (!assetTaskId.value || !assetID || (kind !== 'delivery' && kind !== 'source' && kind !== 'reference')) {
+  const unavailableMessage = assetReplacementUnavailableMessage(row)
+  if (unavailableMessage || !assetTaskId.value || !assetID || (kind !== 'delivery' && kind !== 'source' && kind !== 'reference')) {
     replacementStatus.value = ''
-    replacementError.value = '当前资源缺少任务或资产信息，不能直接修改'
+    replacementError.value = unavailableMessage || '当前资源缺少任务或资产信息，不能直接修改'
     if (input) input.value = ''
     return
   }

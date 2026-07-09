@@ -172,10 +172,14 @@ export function formatUploadFailureMessage(
     if (
       backendCode === 'PERMISSION_DENIED' &&
       denyCode === 'task_status_not_actionable' &&
-      (action === 'asset_upload_session_complete' || action === 'asset_upload_session_cancel')
+      (action === 'asset_upload_session_create' ||
+        action === 'asset_upload_session_complete' ||
+        action === 'asset_upload_session_cancel')
     ) {
       return appendTraceId(
-        '任务状态已更新，当前不能继续上传，请刷新任务后重试',
+        action === 'asset_upload_session_create'
+          ? '所属任务当前状态不允许修改资源，请刷新资产列表后重试'
+          : '任务状态已更新，当前不能继续上传，请刷新任务后重试',
         traceId,
       )
     }
