@@ -421,7 +421,7 @@
           <div class="excel-package-pick-main">
             <span class="excel-package-kicker">Excel 模板</span>
             <strong>{{ excelPackageSelectedFileName || '未选择文件' }}</strong>
-            <p>系统资源和外部资源会按订单拆分，生成仓库外发 ZIP。</p>
+            <p>系统资源和外部资源会生成扁平仓库外发 ZIP，不再按订单创建文件夹。</p>
           </div>
           <button type="button" class="ac-batch-btn ac-batch-btn--primary" :disabled="excelPackaging" @click="openExcelPicker">
             {{ excelPackageSelectedFileName ? '重新选择 Excel' : '选择 Excel' }}
@@ -2086,21 +2086,15 @@ function excelPackageOrderKey(orderNo: string | undefined): string {
   return String(orderNo ?? '').trim() || '未知订单'
 }
 
-function resolveExcelPackageFolder(orderNo: string | undefined, address: string | undefined, incomplete: boolean): string {
-  const base = sanitizeZipEntryName(excelPackageOrderKey(orderNo), '未知订单')
-  const sensitiveSuffix = String(address ?? '').includes('*') ? '_【敏感】' : ''
-  const incompleteSuffix = incomplete ? '_未找全' : ''
-  return `${base}${sensitiveSuffix}${incompleteSuffix}`
-}
-
 function resolveExcelPackageFilename(item: AssetExcelPackageItem, sequence: number): string {
   const ext = (() => {
     const i = item.filename.lastIndexOf('.')
     return i > 0 ? item.filename.slice(i) : '.jpg'
   })()
+  const order = sanitizeZipEntryName(excelPackageOrderKey(item.order_no), '未知订单')
   const rawSku = item.sku_code || item.sku_name || `asset-${item.asset_id}`
-  const base = sanitizeZipEntryName(rawSku, `asset-${item.asset_id}`)
-  return `${base}_${sequence}${ext}`
+  const sku = sanitizeZipEntryName(rawSku, `asset-${item.asset_id}`)
+  return `${order}_${sku}_${sequence}${ext}`
 }
 
 function formatExcelFailure(item: AssetExcelPackageFailure): string {
@@ -2141,10 +2135,9 @@ async function downloadExcelPackageAsZip(
   ]
   let completed = 0
   let copied = 0
-  const incompleteOrders = new Set(failures.map((item) => excelPackageOrderKey(item.order_no)))
   const addressByOrder = new Map<string, string>()
   const failedLinesByOrder = new Map<string, string[]>()
-  const skuCountersByFolder = new Map<string, number>()
+  const skuCountersByOrder = new Map<string, number>()
 
   for (const item of [...items, ...failures]) {
     const order = excelPackageOrderKey(item.order_no)
@@ -2161,8 +2154,6 @@ async function downloadExcelPackageAsZip(
   await mapWithConcurrency(items, EXCEL_PACKAGE_CONCURRENCY, async (item) => {
     const url = String(item.download_url ?? '').trim()
     const order = excelPackageOrderKey(item.order_no)
-    const address = String(item.address ?? addressByOrder.get(order) ?? '').trim()
-    const folder = resolveExcelPackageFolder(item.order_no, address, incompleteOrders.has(order))
     if (!url) {
       reportLines.push(formatExcelFailure({
         row_number: item.row_number,
@@ -2188,14 +2179,14 @@ async function downloadExcelPackageAsZip(
       const response = await fetch(url, { credentials: 'omit', mode: 'cors' })
       if (!response.ok) throw new Error(`http_${response.status}`)
       const blob = await response.blob()
-      const counterKey = `${folder}\n${item.sku_code || item.sku_name || item.asset_id}`
-      let sequence = skuCountersByFolder.get(counterKey) ?? 0
+      const counterKey = `${order}\n${item.sku_code || item.sku_name || item.asset_id}`
+      let sequence = skuCountersByOrder.get(counterKey) ?? 0
       for (let i = 1; i <= item.quantity; i += 1) {
         sequence += 1
-        zip.file(`${folder}/${resolveExcelPackageFilename(item, sequence)}`, blob, { binary: true, compression: 'STORE' })
+        zip.file(resolveExcelPackageFilename(item, sequence), blob, { binary: true, compression: 'STORE' })
         copied += 1
       }
-      skuCountersByFolder.set(counterKey, sequence)
+      skuCountersByOrder.set(counterKey, sequence)
     } catch (err) {
       const reason = err instanceof Error ? err.message : 'fetch_failed'
       reportLines.push(formatExcelFailure({
@@ -2223,18 +2214,19 @@ async function downloadExcelPackageAsZip(
     }
   })
 
-  const seenOrderFolders = new Set<string>()
+  const addressLines: string[] = []
   for (const [order, address] of addressByOrder) {
-    const folder = resolveExcelPackageFolder(order, address, incompleteOrders.has(order))
-    if (seenOrderFolders.has(folder)) continue
-    seenOrderFolders.add(folder)
-    zip.file(`${folder}/地址.txt`, address)
+    addressLines.push(`${order}\t${address}`)
   }
+  if (addressLines.length) zip.file('地址汇总.txt', addressLines.join('\n') + '\n')
+  const missingLines: string[] = []
   for (const [order, lines] of failedLinesByOrder) {
     const address = addressByOrder.get(order) ?? ''
-    const folder = resolveExcelPackageFolder(order, address, true)
-    zip.file(`${folder}/未找到编码.txt`, lines.join('\n') + '\n')
+    if (address) missingLines.push(`${order}\t${address}`)
+    missingLines.push(...lines)
+    missingLines.push('')
   }
+  if (missingLines.length) zip.file('未找到编码.txt', missingLines.join('\n'))
 
   zip.file('打包报告.txt', reportLines.join('\n') + '\n')
 
