@@ -468,6 +468,7 @@ type BatchUpdateClientMaterialsParams struct {
 	Query          string                            `json:"query"`
 	Source         string                            `json:"source"`
 	FormatCategory string                            `json:"format_category"`
+	BusinessLane   string                            `json:"business_lane"`
 	SelectionScope string                            `json:"selection_scope"`
 }
 
@@ -475,6 +476,7 @@ type ClientMaterialBatchFolderParams struct {
 	Path            string `json:"path"`
 	Source          string `json:"source"`
 	FormatCategory  string `json:"format_category"`
+	BusinessLane    string `json:"business_lane"`
 	IncludeChildren bool   `json:"include_children"`
 }
 
@@ -561,6 +563,7 @@ type MaterialGroupSearchParams struct {
 	Query          string `json:"q"`
 	Source         string `json:"source"`
 	FormatCategory string `json:"format_category"`
+	BusinessLane   string `json:"business_lane"`
 	Page           int    `json:"page"`
 	PageSize       int    `json:"page_size"`
 }
@@ -5245,7 +5248,7 @@ func (s *Service) OverviewSearch(ctx context.Context, actor domain.RequestActor,
 	return &OverviewSearchResult{Items: items, Total: total, Page: page, Size: pageSize}, nil
 }
 
-func (s *Service) SystemSearch(ctx context.Context, actor domain.RequestActor, query string, page int, pageSize int, source string, formatCategory string) (*SystemSearchResult, *domain.AppError) {
+func (s *Service) SystemSearch(ctx context.Context, actor domain.RequestActor, query string, page int, pageSize int, source string, formatCategory string, businessLane string) (*SystemSearchResult, *domain.AppError) {
 	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleSuperAdmin) {
 		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset managers can search system assets from workbench.", nil)
 	}
@@ -5260,6 +5263,7 @@ func (s *Service) SystemSearch(ctx context.Context, actor domain.RequestActor, q
 		pageSize = 50
 	}
 	sourceFilter := domain.NormalizeAssetResourceSource(source)
+	laneFilter := normalizeAssetWorkbenchBusinessLane(businessLane)
 	result, appErr := s.systemAssets.Search(ctx, domain.AssetSearchQuery{
 		Keyword:        query,
 		Page:           page,
@@ -5267,6 +5271,7 @@ func (s *Service) SystemSearch(ctx context.Context, actor domain.RequestActor, q
 		Source:         sourceFilter,
 		UsableState:    domain.AssetUsableStateFilterAll,
 		FormatCategory: domain.AssetFormatCategoryFilter(strings.TrimSpace(formatCategory)),
+		BusinessLane:   laneFilter,
 		IsArchived:     domain.AssetArchiveFilterFalse,
 		TaskStatus:     domain.AssetTaskStatusFilterAll,
 	})
@@ -5281,7 +5286,7 @@ func (s *Service) SystemSearch(ctx context.Context, actor domain.RequestActor, q
 	return &SystemSearchResult{Items: items, Total: total, Page: result.Page, Size: result.Size}, nil
 }
 
-func (s *Service) BrowseMaterials(ctx context.Context, actor domain.RequestActor, path string, page int, pageSize int, source string, formatCategory string) (*assetcenter.MaterialBrowseResult, *domain.AppError) {
+func (s *Service) BrowseMaterials(ctx context.Context, actor domain.RequestActor, path string, page int, pageSize int, source string, formatCategory string, businessLane string) (*assetcenter.MaterialBrowseResult, *domain.AppError) {
 	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleSuperAdmin) {
 		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset managers can browse material assets from workbench.", nil)
 	}
@@ -5295,6 +5300,7 @@ func (s *Service) BrowseMaterials(ctx context.Context, actor domain.RequestActor
 	if pageSize <= 0 || pageSize > 100 {
 		pageSize = 50
 	}
+	laneFilter := normalizeAssetWorkbenchBusinessLane(businessLane)
 	publicPath := normalizeWorkbenchMaterialPath(path)
 	if !assetWorkbenchOperationalMaterialPathVisible(publicPath) {
 		return &assetcenter.MaterialBrowseResult{
@@ -5307,13 +5313,14 @@ func (s *Service) BrowseMaterials(ctx context.Context, actor domain.RequestActor
 		}, nil
 	}
 	if workbenchIsVirtualQuarkRoot(publicPath) {
-		return s.browseWorkbenchVirtualQuarkRoot(ctx, browser, page, pageSize, source, formatCategory)
+		return s.browseWorkbenchVirtualQuarkRoot(ctx, browser, page, pageSize, source, formatCategory, laneFilter)
 	}
 	actualPath := workbenchMaterialActualPath(publicPath)
 	result, appErr := browser.BrowseMaterials(ctx, assetcenter.MaterialBrowseQuery{
 		Path:           actualPath,
 		Source:         domain.NormalizeAssetResourceSource(source),
 		FormatCategory: domain.AssetFormatCategoryFilter(strings.TrimSpace(formatCategory)),
+		BusinessLane:   laneFilter,
 		Page:           page,
 		Size:           pageSize,
 	})
@@ -5326,7 +5333,7 @@ func (s *Service) BrowseMaterials(ctx context.Context, actor domain.RequestActor
 	result.Folders = rewriteWorkbenchVirtualQuarkFolders(result.Folders)
 	if publicPath == "" {
 		var hydrateErr *domain.AppError
-		result.Folders, hydrateErr = s.hydrateWorkbenchVirtualQuarkRootFolder(ctx, browser, result.Folders, source, formatCategory)
+		result.Folders, hydrateErr = s.hydrateWorkbenchVirtualQuarkRootFolder(ctx, browser, result.Folders, source, formatCategory, laneFilter)
 		if hydrateErr != nil {
 			return nil, hydrateErr
 		}
@@ -5339,11 +5346,22 @@ func (s *Service) BrowseMaterials(ctx context.Context, actor domain.RequestActor
 	return result, nil
 }
 
-func (s *Service) browseWorkbenchVirtualQuarkRoot(ctx context.Context, browser SystemMaterialBrowser, page int, pageSize int, source string, formatCategory string) (*assetcenter.MaterialBrowseResult, *domain.AppError) {
+func (s *Service) browseWorkbenchVirtualQuarkRoot(ctx context.Context, browser SystemMaterialBrowser, page int, pageSize int, source string, formatCategory string, businessLane domain.TaskBusinessLane) (*assetcenter.MaterialBrowseResult, *domain.AppError) {
+	if businessLane.Valid() {
+		return &assetcenter.MaterialBrowseResult{
+			Path:    workbenchQuarkMaterialVirtualRoot,
+			Folders: []assetcenter.MaterialFolder{},
+			Files:   []*assetcenter.AssetDetail{},
+			Total:   0,
+			Page:    page,
+			Size:    pageSize,
+		}, nil
+	}
 	result, appErr := browser.BrowseMaterials(ctx, assetcenter.MaterialBrowseQuery{
 		Path:           workbenchQuarkMaterialActualBase,
 		Source:         domain.NormalizeAssetResourceSource(source),
 		FormatCategory: domain.AssetFormatCategoryFilter(strings.TrimSpace(formatCategory)),
+		BusinessLane:   businessLane,
 		Page:           page,
 		Size:           pageSize,
 	})
@@ -5377,7 +5395,10 @@ func (s *Service) browseWorkbenchVirtualQuarkRoot(ctx context.Context, browser S
 	}, nil
 }
 
-func (s *Service) hydrateWorkbenchVirtualQuarkRootFolder(ctx context.Context, browser SystemMaterialBrowser, folders []assetcenter.MaterialFolder, source string, formatCategory string) ([]assetcenter.MaterialFolder, *domain.AppError) {
+func (s *Service) hydrateWorkbenchVirtualQuarkRootFolder(ctx context.Context, browser SystemMaterialBrowser, folders []assetcenter.MaterialFolder, source string, formatCategory string, businessLane domain.TaskBusinessLane) ([]assetcenter.MaterialFolder, *domain.AppError) {
+	if businessLane.Valid() {
+		return folders, nil
+	}
 	quarkIndex := -1
 	for index := range folders {
 		if workbenchIsVirtualQuarkRoot(folders[index].Path) {
@@ -5388,7 +5409,7 @@ func (s *Service) hydrateWorkbenchVirtualQuarkRootFolder(ctx context.Context, br
 	if quarkIndex < 0 {
 		return folders, nil
 	}
-	virtualRoot, appErr := s.browseWorkbenchVirtualQuarkRoot(ctx, browser, 1, 100, source, formatCategory)
+	virtualRoot, appErr := s.browseWorkbenchVirtualQuarkRoot(ctx, browser, 1, 100, source, formatCategory, businessLane)
 	if appErr != nil {
 		return nil, appErr
 	}
@@ -5450,6 +5471,7 @@ func (s *Service) MaterialGroups(ctx context.Context, actor domain.RequestActor,
 	}
 	page, pageSize := normalizeServicePage(params.Page, params.PageSize, 50, 100)
 	sourceFilter := domain.NormalizeAssetResourceSource(params.Source)
+	laneFilter := normalizeAssetWorkbenchBusinessLane(params.BusinessLane)
 	result, appErr := s.systemAssets.Search(ctx, domain.AssetSearchQuery{
 		Keyword:        strings.TrimSpace(params.Query),
 		Page:           1,
@@ -5457,6 +5479,7 @@ func (s *Service) MaterialGroups(ctx context.Context, actor domain.RequestActor,
 		Source:         sourceFilter,
 		UsableState:    domain.AssetUsableStateFilterAll,
 		FormatCategory: domain.AssetFormatCategoryFilter(strings.TrimSpace(params.FormatCategory)),
+		BusinessLane:   laneFilter,
 		IsArchived:     domain.AssetArchiveFilterFalse,
 		TaskStatus:     domain.AssetTaskStatusFilterAll,
 	})
@@ -6201,7 +6224,7 @@ func (s *Service) resolveClientMaterialBatchCandidates(ctx context.Context, acto
 	if strings.TrimSpace(params.Query) != "" {
 		page := 1
 		for {
-			search, appErr := s.SystemSearch(ctx, actor, params.Query, page, 100, params.Source, params.FormatCategory)
+			search, appErr := s.SystemSearch(ctx, actor, params.Query, page, 100, params.Source, params.FormatCategory, params.BusinessLane)
 			if appErr != nil {
 				return nil, false, appErr
 			}
@@ -6220,6 +6243,9 @@ func (s *Service) resolveClientMaterialBatchCandidates(ctx context.Context, acto
 		if strings.TrimSpace(folder.FormatCategory) == "" {
 			folder.FormatCategory = params.FormatCategory
 		}
+		if strings.TrimSpace(folder.BusinessLane) == "" {
+			folder.BusinessLane = params.BusinessLane
+		}
 		asyncRequired, appErr := s.appendClientMaterialBatchFolderCandidates(ctx, actor, folder, limit, &candidates)
 		if appErr != nil || asyncRequired {
 			return candidates, asyncRequired, appErr
@@ -6231,6 +6257,7 @@ func (s *Service) resolveClientMaterialBatchCandidates(ctx context.Context, acto
 func (s *Service) appendClientMaterialBatchFolderCandidates(ctx context.Context, actor domain.RequestActor, folder ClientMaterialBatchFolderParams, limit int, candidates *[]CreateClientMaterialParams) (bool, *domain.AppError) {
 	source := firstNonEmpty(folder.Source, string(domain.AssetResourceSourceAll))
 	formatCategory := strings.TrimSpace(folder.FormatCategory)
+	businessLane := strings.TrimSpace(folder.BusinessLane)
 	queue := []string{folder.Path}
 	visited := map[string]bool{}
 	for len(queue) > 0 {
@@ -6246,7 +6273,7 @@ func (s *Service) appendClientMaterialBatchFolderCandidates(ctx context.Context,
 		}
 		page := 1
 		for {
-			browse, appErr := s.BrowseMaterials(ctx, actor, normalized, page, 100, source, formatCategory)
+			browse, appErr := s.BrowseMaterials(ctx, actor, normalized, page, 100, source, formatCategory, businessLane)
 			if appErr != nil {
 				return false, appErr
 			}
@@ -8685,6 +8712,14 @@ func filterVisibleWorkbenchMaterialAssets(items []*assetcenter.AssetDetail) []*a
 		}
 	}
 	return out
+}
+
+func normalizeAssetWorkbenchBusinessLane(value string) domain.TaskBusinessLane {
+	lane := domain.TaskBusinessLane(strings.TrimSpace(value))
+	if lane.Valid() {
+		return lane
+	}
+	return ""
 }
 
 func filterVisibleWorkbenchMaterialFolders(folders []assetcenter.MaterialFolder) []assetcenter.MaterialFolder {

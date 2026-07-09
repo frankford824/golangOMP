@@ -26,6 +26,7 @@ import {
   type DriveDirectoryRow,
   type DriveFileRow,
   type DriveFolderRow,
+  type MaterialBusinessLane,
   type MaterialFormatCategory,
   type MaterialFolderRow,
   type MaterialSourceFilter,
@@ -142,6 +143,7 @@ const searchTotal = ref(0)
 const materialQuery = ref('')
 const materialSourceFilter = ref<MaterialSourceFilter>('all')
 const materialFormatFilter = ref<MaterialFormatCategory>('all')
+const materialBusinessLaneFilter = ref<MaterialBusinessLane>('all')
 const materialLoading = ref(false)
 const materialLoadingMore = ref(false)
 const materialError = ref('')
@@ -181,6 +183,11 @@ const materialFormatOptions: Array<{ value: MaterialFormatCategory; label: strin
   { value: 'pdf', label: 'PDF' },
   { value: 'video', label: '视频' },
   { value: 'archive', label: '压缩包' },
+]
+const materialBusinessLaneOptions: Array<{ value: MaterialBusinessLane; label: string }> = [
+  { value: 'all', label: '全部分类' },
+  { value: 'customization', label: '定制' },
+  { value: 'normal', label: '常规' },
 ]
 
 const previewOpen = ref(false)
@@ -369,8 +376,13 @@ const selectedMaterialFolderNode = computed(() =>
 const materialFilterSummary = computed(() => {
   const source = materialSourceOptions.find((option) => option.value === materialSourceFilter.value)?.label || '全部来源'
   const format = materialFormatOptions.find((option) => option.value === materialFormatFilter.value)?.label || '全部格式'
-  if (materialSourceFilter.value === 'all' && materialFormatFilter.value === 'all') return '全部素材'
-  return `${source} / ${format}`
+  const businessLane = materialBusinessLaneOptions.find((option) => option.value === materialBusinessLaneFilter.value)?.label || '全部分类'
+  const parts = [
+    materialSourceFilter.value !== 'all' ? source : '',
+    materialBusinessLaneFilter.value !== 'all' ? businessLane : '',
+    materialFormatFilter.value !== 'all' ? format : '',
+  ].filter(Boolean)
+  return parts.length ? parts.join(' / ') : '全部素材'
 })
 const visibleMaterialFolders = computed<MaterialFolderEntry[]>(() => {
   const selectedParts = pathSegments(selectedMaterialFolderPath.value)
@@ -630,6 +642,10 @@ function normalizeMaterialFormatFilter(value: unknown): MaterialFormatCategory {
   return value === 'image' || value === 'design' || value === 'pdf' || value === 'video' || value === 'archive' ? value : 'all'
 }
 
+function normalizeMaterialBusinessLaneFilter(value: unknown): MaterialBusinessLane {
+  return value === 'customization' || value === 'normal' ? value : 'all'
+}
+
 function materialSourceForPath(path?: string): MaterialSourceFilter | '' {
   const parts = pathSegments(path || '')
   if (parts.length === 0) return ''
@@ -638,6 +654,7 @@ function materialSourceForPath(path?: string): MaterialSourceFilter | '' {
 }
 
 function materialDefaultFolderPathForSource(source = materialSourceFilter.value): string {
+  if (materialBusinessLaneFilter.value !== 'all') return '/系统资源'
   if (source === 'system') return '/系统资源'
   if (source === 'external') return '/quark'
   return ''
@@ -645,6 +662,10 @@ function materialDefaultFolderPathForSource(source = materialSourceFilter.value)
 
 function materialRequestSourceForPath(path?: string): MaterialSourceFilter {
   return normalizeMaterialSourceFilter(materialSourceForPath(path) || materialSourceFilter.value)
+}
+
+function materialRequestBusinessLane(): MaterialBusinessLane {
+  return normalizeMaterialBusinessLaneFilter(materialBusinessLaneFilter.value)
 }
 
 function materialPathMatchesSourceFilter(path?: string): boolean {
@@ -655,6 +676,18 @@ function materialPathMatchesSourceFilter(path?: string): boolean {
 
 function materialAssetSource(asset: SystemAssetRow): MaterialSourceFilter {
   return asset.source_type === 'external' ? 'external' : 'system'
+}
+
+function materialBusinessLaneOf(asset: SystemAssetRow): MaterialBusinessLane {
+  const lane = String(asset.business_lane || '').trim()
+  return lane === 'customization' || lane === 'normal' ? lane : 'all'
+}
+
+function materialBusinessLaneLabel(asset: SystemAssetRow): string {
+  const lane = materialBusinessLaneOf(asset)
+  if (lane === 'customization') return '定制'
+  if (lane === 'normal') return '常规'
+  return asset.source_type === 'external' ? '外部资源' : '未标记分类'
 }
 
 function materialAssetFilenameForFormat(asset: SystemAssetRow): string {
@@ -678,6 +711,10 @@ function materialFormatCategoryOf(asset: SystemAssetRow): MaterialFormatCategory
 function materialMatchesActiveFilters(asset: SystemAssetRow): boolean {
   if (!operationalMaterialAssetVisible(asset)) return false
   if (materialSourceFilter.value !== 'all' && materialAssetSource(asset) !== materialSourceFilter.value) return false
+  if (materialBusinessLaneFilter.value !== 'all') {
+    if (materialAssetSource(asset) !== 'system') return false
+    if (materialBusinessLaneOf(asset) !== materialBusinessLaneFilter.value) return false
+  }
   if (materialFormatFilter.value !== 'all' && materialFormatCategoryOf(asset) !== materialFormatFilter.value) return false
   return true
 }
@@ -2230,6 +2267,9 @@ function canPreviewArchiveVirtualFile(file: ArchiveVirtualFile) {
 async function loadMaterials(query = materialQuery.value, options: { append?: boolean } = {}) {
   if (!canUseOperational.value) return
   const nextQuery = query.trim()
+  if (materialBusinessLaneFilter.value !== 'all' && materialSourceFilter.value !== 'system') {
+    materialSourceFilter.value = 'system'
+  }
   if (canManageDrive.value && !nextQuery) {
     await loadMaterialFolder(materialDefaultFolderPathForSource())
     return
@@ -2255,6 +2295,7 @@ async function loadMaterials(query = materialQuery.value, options: { append?: bo
           q: materialQuery.value,
           source: materialSourceFilter.value,
           format_category: materialFormatFilter.value,
+          business_lane: materialRequestBusinessLane(),
           page,
           page_size: materialPageSize,
         }, materialAbortController.signal),
@@ -2335,6 +2376,7 @@ async function loadMaterialFolder(path = selectedMaterialFolderPath.value, optio
           path: normalized,
           source,
           format_category: materialFormatFilter.value,
+          business_lane: materialRequestBusinessLane(),
           page,
           page_size: materialPageSize,
         }, materialAbortController.signal),
@@ -2397,6 +2439,10 @@ function refreshMaterialsForFilters() {
   activeMaterial.value = null
   materialSourceFilter.value = normalizeMaterialSourceFilter(materialSourceFilter.value)
   materialFormatFilter.value = normalizeMaterialFormatFilter(materialFormatFilter.value)
+  materialBusinessLaneFilter.value = normalizeMaterialBusinessLaneFilter(materialBusinessLaneFilter.value)
+  if (materialBusinessLaneFilter.value !== 'all' && materialSourceFilter.value !== 'system') {
+    materialSourceFilter.value = 'system'
+  }
   if (materialQuery.value.trim()) {
     void loadMaterials(materialQuery.value)
     return
@@ -2726,9 +2772,11 @@ async function batchPublishCurrentMaterialFolder(includeChildren: boolean) {
         path: selectedMaterialFolderPath.value,
         source: materialRequestSourceForPath(selectedMaterialFolderPath.value),
         format_category: materialFormatFilter.value,
+        business_lane: materialRequestBusinessLane(),
         include_children: includeChildren,
       }],
       format_category: materialFormatFilter.value,
+      business_lane: materialRequestBusinessLane(),
       selection_scope: includeChildren ? 'current_folder_recursive' : 'current_folder',
     })
     await finishClientMaterialBatch('publish', result)
@@ -3335,13 +3383,19 @@ onBeforeUnmount(() => {
                     <option v-for="option in materialSourceOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
                   </select>
                 </label>
+                <label class="aw-drive__material-filter aw-drive__material-filter--business">
+                  <span>分类</span>
+                  <select v-model="materialBusinessLaneFilter" aria-label="素材分类" @change="refreshMaterialsForFilters">
+                    <option v-for="option in materialBusinessLaneOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+                  </select>
+                </label>
                 <label class="aw-drive__material-filter">
                   <span>格式</span>
                   <select v-model="materialFormatFilter" aria-label="素材格式" @change="refreshMaterialsForFilters">
                     <option v-for="option in materialFormatOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
                   </select>
                 </label>
-                <input v-model="materialQuery" type="search" placeholder="按文件名 / SKU / 外部路径过滤" />
+                <input v-model="materialQuery" type="search" placeholder="搜索名称、SKU、路径" />
                 <button v-if="materialQuery" class="aw-drive__search-clear" type="button" aria-label="清除" @click="clearMaterialSearch">
                   <IconfontActionIcon name="close" :size="14" />
                 </button>
@@ -3683,7 +3737,7 @@ onBeforeUnmount(() => {
                       </span>
                       <span class="aw-material-row__body">
                         <strong :title="titleOf(asset)">{{ materialFolderFileName(asset) }}</strong>
-                        <small>{{ materialCodeOf(asset) }} · {{ materialTypeLabel(asset) }}</small>
+                        <small>{{ materialCodeOf(asset) }} · {{ materialBusinessLaneLabel(asset) }} · {{ materialTypeLabel(asset) }}</small>
                       </span>
                       <span class="aw-material-row__badges">
                         <span class="aw-chip aw-chip--subtle aw-material-row__source">{{ sourceLabelOf(asset) }}</span>

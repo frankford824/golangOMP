@@ -22826,6 +22826,13 @@ paths:
             enum: [all, image, design, pdf, video, archive]
             default: all
         - in: query
+          name: business_lane
+          description: Optional system-resource business category. `customization` means 定制; `normal` means 常规. External resources are excluded when this filter is set.
+          schema: &AssetWorkbenchMaterialBusinessLane
+            type: string
+            enum: [all, customization, normal]
+            default: all
+        - in: query
           name: page
           schema: { type: integer, minimum: 1 }
         - in: query
@@ -22866,6 +22873,7 @@ paths:
                             mime_type: { type: string }
                             product_name: { type: string }
                             task_no: { type: string }
+                            business_lane: { type: string, enum: [normal, customization] }
                             created_by_name: { type: string }
                             created_by_username: { type: string }
                             task_creator_name: { type: string }
@@ -22899,6 +22907,10 @@ paths:
           name: format_category
           description: Optional coarse file format category applied before grouping.
           schema: *AssetWorkbenchMaterialFormatCategory
+        - in: query
+          name: business_lane
+          description: Optional system-resource business category. `customization` means 定制; `normal` means 常规.
+          schema: *AssetWorkbenchMaterialBusinessLane
         - in: query
           name: page
           schema: { type: integer, minimum: 1 }
@@ -23004,6 +23016,10 @@ paths:
           name: format_category
           description: Optional coarse file format category for direct files returned from the current folder.
           schema: *AssetWorkbenchMaterialFormatCategory
+        - in: query
+          name: business_lane
+          description: Optional system-resource business category. `customization` means 定制; `normal` means 常规. External folders are hidden when this filter is set.
+          schema: *AssetWorkbenchMaterialBusinessLane
         - in: query
           name: page
           schema: { type: integer, minimum: 1 }
@@ -23733,10 +23749,12 @@ paths:
                       path: { type: string }
                       source: { type: string, enum: [all, system, external] }
                       format_category: *AssetWorkbenchMaterialFormatCategory
+                      business_lane: *AssetWorkbenchMaterialBusinessLane
                       include_children: { type: boolean }
                 query: { type: string, description: Optional current search keyword scope. }
                 source: { type: string, enum: [all, system, external] }
                 format_category: *AssetWorkbenchMaterialFormatCategory
+                business_lane: *AssetWorkbenchMaterialBusinessLane
                 selection_scope: { type: string, enum: [selected, current_page, current_folder, current_folder_recursive, current_filter] }
       responses:
         '200':

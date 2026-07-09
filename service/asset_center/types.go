@@ -69,6 +69,7 @@ type AssetDetail struct {
 	PrimarySKUCode        string                           `json:"primary_sku_code,omitempty"`
 	ProductName           string                           `json:"product_name,omitempty"`
 	TaskStatus            domain.TaskStatus                `json:"task_status,omitempty"`
+	BusinessLane          domain.TaskBusinessLane          `json:"business_lane,omitempty"`
 	OwnerTeamCode         string                           `json:"owner_team_code,omitempty"`
 	CreatedBy             int64                            `json:"created_by,omitempty"`
 	CreatedByUsername     string                           `json:"created_by_username,omitempty"`
@@ -105,6 +106,7 @@ type MaterialBrowseQuery struct {
 	Path           string
 	Source         domain.AssetResourceSource
 	FormatCategory domain.AssetFormatCategoryFilter
+	BusinessLane   domain.TaskBusinessLane
 	Page           int
 	Size           int
 }

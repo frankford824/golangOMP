@@ -622,6 +622,7 @@ export interface SystemAssetRow {
   mime_type?: string
   product_name?: string
   task_no?: string
+  business_lane?: MaterialBusinessLane | string
   created_by_name?: string
   created_by_username?: string
   task_creator_name?: string
@@ -774,6 +775,7 @@ export interface ClientMaterialSearchResult {
 export type ClientMaterialBatchAction = 'publish' | 'enable' | 'disable' | 'remove'
 export type MaterialFormatCategory = 'all' | 'image' | 'design' | 'pdf' | 'video' | 'archive'
 export type MaterialSourceFilter = 'all' | 'system' | 'external'
+export type MaterialBusinessLane = 'all' | 'customization' | 'normal'
 
 export interface ClientMaterialBatchUpdatePayload {
   action: ClientMaterialBatchAction
@@ -782,11 +784,13 @@ export interface ClientMaterialBatchUpdatePayload {
     path: string
     source?: MaterialSourceFilter
     format_category?: MaterialFormatCategory
+    business_lane?: MaterialBusinessLane
     include_children?: boolean
   }>
   query?: string
   source?: MaterialSourceFilter
   format_category?: MaterialFormatCategory
+  business_lane?: MaterialBusinessLane
   selection_scope?: 'selected' | 'current_page' | 'current_folder' | 'current_folder_recursive' | 'current_filter'
 }
 
@@ -1653,12 +1657,12 @@ export const assetWorkbenchApi = {
     return unwrap(res.data)
   },
 
-  async systemSearch(params: { q?: string; source?: MaterialSourceFilter; format_category?: MaterialFormatCategory; limit?: number; page?: number; page_size?: number } = {}, signal?: AbortSignal): Promise<SystemSearchResult> {
+  async systemSearch(params: { q?: string; source?: MaterialSourceFilter; format_category?: MaterialFormatCategory; business_lane?: MaterialBusinessLane; limit?: number; page?: number; page_size?: number } = {}, signal?: AbortSignal): Promise<SystemSearchResult> {
     const res = await http.get<ApiEnvelope<SystemSearchResult>>('/v1/asset-workbench/system-search', { params, signal })
     return unwrap(res.data)
   },
 
-  async browseMaterials(params: { path?: string; source?: MaterialSourceFilter; format_category?: MaterialFormatCategory; limit?: number; page?: number; page_size?: number } = {}, signal?: AbortSignal): Promise<MaterialBrowseResult> {
+  async browseMaterials(params: { path?: string; source?: MaterialSourceFilter; format_category?: MaterialFormatCategory; business_lane?: MaterialBusinessLane; limit?: number; page?: number; page_size?: number } = {}, signal?: AbortSignal): Promise<MaterialBrowseResult> {
     const res = await http.get<ApiEnvelope<MaterialBrowseResult>>('/v1/asset-workbench/materials/browse', { params, signal })
     return unwrap(res.data)
   },
@@ -1857,7 +1861,7 @@ export const assetWorkbenchApi = {
     return unwrap(res.data)
   },
 
-  async materialGroups(params: { q?: string; source?: MaterialSourceFilter; format_category?: MaterialFormatCategory; page?: number; page_size?: number } = {}, signal?: AbortSignal): Promise<MaterialGroupSearchResult> {
+  async materialGroups(params: { q?: string; source?: MaterialSourceFilter; format_category?: MaterialFormatCategory; business_lane?: MaterialBusinessLane; page?: number; page_size?: number } = {}, signal?: AbortSignal): Promise<MaterialGroupSearchResult> {
     const res = await http.get<ApiEnvelope<MaterialGroupSearchResult>>('/v1/asset-workbench/materials/groups', { params, signal })
     return unwrap(res.data)
   },

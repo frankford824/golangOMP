@@ -199,10 +199,13 @@ func (s *Service) BrowseMaterials(ctx context.Context, query MaterialBrowseQuery
 	}
 	includeSystem := query.Source == domain.AssetResourceSourceAll || query.Source == domain.AssetResourceSourceSystem
 	includeExternal := query.Source == domain.AssetResourceSourceAll || query.Source == domain.AssetResourceSourceExternal
+	if query.BusinessLane.Valid() {
+		includeExternal = false
+	}
 
 	if query.Path == "" {
 		if includeSystem {
-			total, appErr := s.countSystemMaterials(ctx, query.FormatCategory)
+			total, appErr := s.countSystemMaterials(ctx, query.FormatCategory, query.BusinessLane)
 			if appErr != nil {
 				return nil, appErr
 			}
@@ -227,7 +230,7 @@ func (s *Service) BrowseMaterials(ctx context.Context, query MaterialBrowseQuery
 		if !includeSystem || query.Path != materialSystemRoot {
 			return result, nil
 		}
-		search, appErr := s.Search(ctx, materialSystemSearchQuery(query.Page, query.Size, query.FormatCategory))
+		search, appErr := s.Search(ctx, materialSystemSearchQuery(query.Page, query.Size, query.FormatCategory, query.BusinessLane))
 		if appErr != nil {
 			return nil, appErr
 		}
@@ -273,6 +276,9 @@ func normalizeMaterialBrowseQuery(query MaterialBrowseQuery) MaterialBrowseQuery
 	default:
 		query.FormatCategory = domain.AssetFormatCategoryAll
 	}
+	if !query.BusinessLane.Valid() {
+		query.BusinessLane = ""
+	}
 	if query.Page <= 0 {
 		query.Page = 1
 	}
@@ -297,20 +303,21 @@ func normalizeMaterialBrowsePath(raw string) string {
 	return cleaned
 }
 
-func materialSystemSearchQuery(page, size int, formatCategory domain.AssetFormatCategoryFilter) domain.AssetSearchQuery {
+func materialSystemSearchQuery(page, size int, formatCategory domain.AssetFormatCategoryFilter, businessLane domain.TaskBusinessLane) domain.AssetSearchQuery {
 	return domain.AssetSearchQuery{
 		Page:           page,
 		Size:           size,
 		Source:         domain.AssetResourceSourceSystem,
 		UsableState:    domain.AssetUsableStateFilterAll,
 		FormatCategory: formatCategory,
+		BusinessLane:   businessLane,
 		IsArchived:     domain.AssetArchiveFilterFalse,
 		TaskStatus:     domain.AssetTaskStatusFilterAll,
 	}
 }
 
-func (s *Service) countSystemMaterials(ctx context.Context, formatCategory domain.AssetFormatCategoryFilter) (int64, *domain.AppError) {
-	search, appErr := s.Search(ctx, materialSystemSearchQuery(1, 1, formatCategory))
+func (s *Service) countSystemMaterials(ctx context.Context, formatCategory domain.AssetFormatCategoryFilter, businessLane domain.TaskBusinessLane) (int64, *domain.AppError) {
+	search, appErr := s.Search(ctx, materialSystemSearchQuery(1, 1, formatCategory, businessLane))
 	if appErr != nil {
 		return 0, appErr
 	}

@@ -13678,6 +13678,7 @@ curl -X POST https://api.example.com/v1/asset-workbench/files/batch-delete \
 | `q` | query | string | 否 | - |
 | `source` | query | enum(all/system/external) | 否 | Source bucket for publishable material search. Defaults to `all`. |
 | `format_category` | query | enum(all/image/design/pdf/video/archive) | 否 | Optional coarse file format category for narrowing batchable material search results. |
+| `business_lane` | query | enum(all/customization/normal) | 否 | Optional system-resource business category. `customization` means 定制; `normal` means 常规. External resources are excluded when this filter is set. |
 | `page` | query | integer | 否 | - |
 | `page_size` | query | integer | 否 | - |
 | `limit` | query | integer | 否 | - |
@@ -13745,6 +13746,7 @@ curl -X GET https://api.example.com/v1/asset-workbench/system-search \
 | `q` | query | string | 否 | - |
 | `source` | query | enum(all/system/external) | 否 | - |
 | `format_category` | query | enum(all/image/design/pdf/video/archive) | 否 | Optional coarse file format category applied before grouping. |
+| `business_lane` | query | enum(all/customization/normal) | 否 | Optional system-resource business category. `customization` means 定制; `normal` means 常规. |
 | `page` | query | integer | 否 | - |
 | `page_size` | query | integer | 否 | - |
 
@@ -13876,6 +13878,7 @@ curl -X GET https://api.example.com/v1/asset-workbench/materials/group-files \
 | `path` | query | string | 否 | Virtual folder path. Empty string means root; examples include `/系统资源`, `/quark`, and `/p3/仓库素材区`. |
 | `source` | query | enum(all/system/external) | 否 | Source bucket to browse. Defaults to `all`. |
 | `format_category` | query | enum(all/image/design/pdf/video/archive) | 否 | Optional coarse file format category for direct files returned from the current folder. |
+| `business_lane` | query | enum(all/customization/normal) | 否 | Optional system-resource business category. `customization` means 定制; `normal` means 常规. External folders are hidden when this filter is set. |
 | `page` | query | integer | 否 | - |
 | `page_size` | query | integer | 否 | - |
 | `limit` | query | integer | 否 | - |
@@ -14807,6 +14810,7 @@ Content-Type: `application/json`
 | `query` | string | 否 | Optional current search keyword scope. |
 | `source` | enum(all/system/external) | 否 | - |
 | `format_category` | enum(all/image/design/pdf/video/archive) | 否 | - |
+| `business_lane` | enum(all/customization/normal) | 否 | - |
 | `selection_scope` | enum(selected/current_page/current_folder/current_folder_recursive/current_filter) | 否 | - |
 
 ### 响应体 schema

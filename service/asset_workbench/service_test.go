@@ -4140,7 +4140,7 @@ func TestBrowseMaterialsVirtualQuarkRootUsesVisibleFolderCounts(t *testing.T) {
 	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithSystemAssetSearcher(provider))
 	actor := domain.RequestActor{ID: 1, Roles: []domain.Role{domain.RoleAssetManager}}
 
-	root, appErr := svc.BrowseMaterials(context.Background(), actor, "", 1, 100, "all", "all")
+	root, appErr := svc.BrowseMaterials(context.Background(), actor, "", 1, 100, "all", "all", "")
 	if appErr != nil {
 		t.Fatalf("BrowseMaterials(root) error = %+v", appErr)
 	}
@@ -4148,7 +4148,7 @@ func TestBrowseMaterialsVirtualQuarkRootUsesVisibleFolderCounts(t *testing.T) {
 		t.Fatalf("root folders = %+v, want /quark count from visible roots", root.Folders)
 	}
 
-	quark, appErr := svc.BrowseMaterials(context.Background(), actor, "/quark", 1, 100, "all", "all")
+	quark, appErr := svc.BrowseMaterials(context.Background(), actor, "/quark", 1, 100, "all", "all", "")
 	if appErr != nil {
 		t.Fatalf("BrowseMaterials(/quark) error = %+v", appErr)
 	}

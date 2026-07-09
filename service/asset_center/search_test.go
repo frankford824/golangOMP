@@ -56,15 +56,41 @@ func TestSearchUsesCachedSystemTotalWithRowsOnlyRepo(t *testing.T) {
 	}
 }
 
-type assetSearchCacheRepoStub struct {
-	rows          []*repo.TaskAssetSearchRow
-	total         int64
-	searchCalls   int
-	rowsOnlyCalls int
+func TestBrowseMaterialsPassesBusinessLaneToSystemSearch(t *testing.T) {
+	searchRepo := &assetSearchCacheRepoStub{
+		rows:  []*repo.TaskAssetSearchRow{assetSearchCacheRow()},
+		total: 1,
+	}
+	svc := NewService(searchRepo, nil, nil)
+
+	result, appErr := svc.BrowseMaterials(context.Background(), MaterialBrowseQuery{
+		Path:         "/系统资源",
+		BusinessLane: domain.TaskBusinessLaneCustomization,
+		Page:         1,
+		Size:         20,
+	})
+	if appErr != nil {
+		t.Fatalf("BrowseMaterials() appErr = %+v", appErr)
+	}
+	if result.Total != 1 {
+		t.Fatalf("result total = %d, want 1", result.Total)
+	}
+	if searchRepo.lastSearchQuery.BusinessLane != domain.TaskBusinessLaneCustomization {
+		t.Fatalf("business lane = %q, want %q", searchRepo.lastSearchQuery.BusinessLane, domain.TaskBusinessLaneCustomization)
+	}
 }
 
-func (s *assetSearchCacheRepoStub) Search(context.Context, domain.AssetSearchQuery) ([]*repo.TaskAssetSearchRow, int64, error) {
+type assetSearchCacheRepoStub struct {
+	rows            []*repo.TaskAssetSearchRow
+	total           int64
+	lastSearchQuery domain.AssetSearchQuery
+	searchCalls     int
+	rowsOnlyCalls   int
+}
+
+func (s *assetSearchCacheRepoStub) Search(_ context.Context, query domain.AssetSearchQuery) ([]*repo.TaskAssetSearchRow, int64, error) {
 	s.searchCalls++
+	s.lastSearchQuery = query.Normalized()
 	return s.rows, s.total, nil
 }
 

@@ -85,6 +85,7 @@ func buildAssetDetail(row *repo.TaskAssetSearchRow, versions []*repo.TaskAssetSe
 		PrimarySKUCode:        t.PrimarySKUCode,
 		ProductName:           t.ProductNameSnapshot,
 		TaskStatus:            t.TaskStatus,
+		BusinessLane:          t.BusinessLane,
 		OwnerTeamCode:         row.OwnerTeamCode,
 		CreatedBy:             row.DesignCreatedBy,
 		CreatedByUsername:     row.AssetCreatorUsername,

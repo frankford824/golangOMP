@@ -2102,6 +2102,7 @@ func (h *AssetWorkbenchHandler) MaterialGroups(c *gin.Context) {
 		Query:          c.Query("q"),
 		Source:         c.Query("source"),
 		FormatCategory: c.Query("format_category"),
+		BusinessLane:   c.Query("business_lane"),
 		Page:           page,
 		PageSize:       pageSize,
 	})
@@ -2138,7 +2139,7 @@ func (h *AssetWorkbenchHandler) BrowseMaterials(c *gin.Context) {
 	if pageSize <= 0 {
 		pageSize = limit
 	}
-	result, appErr := h.svc.BrowseMaterials(c.Request.Context(), actor, c.Query("path"), page, pageSize, c.Query("source"), c.Query("format_category"))
+	result, appErr := h.svc.BrowseMaterials(c.Request.Context(), actor, c.Query("path"), page, pageSize, c.Query("source"), c.Query("format_category"), c.Query("business_lane"))
 	if appErr != nil {
 		respondError(c, appErr)
 		return
@@ -2157,7 +2158,7 @@ func (h *AssetWorkbenchHandler) SystemSearch(c *gin.Context) {
 	if pageSize <= 0 {
 		pageSize = limit
 	}
-	result, appErr := h.svc.SystemSearch(c.Request.Context(), actor, c.Query("q"), page, pageSize, c.Query("source"), c.Query("format_category"))
+	result, appErr := h.svc.SystemSearch(c.Request.Context(), actor, c.Query("q"), page, pageSize, c.Query("source"), c.Query("format_category"), c.Query("business_lane"))
 	if appErr != nil {
 		respondError(c, appErr)
 		return
