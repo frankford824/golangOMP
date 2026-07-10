@@ -85,21 +85,23 @@ type AssetWorkbenchSupplementPermission struct {
 }
 
 type AssetWorkbenchSettlementSupplement struct {
-	ID              int64           `json:"id" db:"id"`
-	PayeeUserID     int64           `json:"payee_user_id" db:"payee_user_id"`
-	BusinessMonth   string          `json:"business_month" db:"business_month"`
-	LinkedBatchID   *int64          `json:"linked_batch_id,omitempty" db:"linked_batch_id"`
-	Status          string          `json:"status" db:"status"`
-	OrderNo         string          `json:"order_no" db:"order_no"`
-	SupplementDate  string          `json:"supplement_date,omitempty" db:"supplement_date"`
-	DifficultyClass string          `json:"difficulty_class" db:"difficulty_class"`
-	Finalized       bool            `json:"finalized" db:"finalized"`
-	PageCount       int             `json:"page_count" db:"page_count"`
-	GrossAmount     float64         `json:"gross_amount" db:"gross_amount"`
-	DuplicateHint   json.RawMessage `json:"duplicate_hint_json,omitempty" db:"duplicate_hint_json"`
-	CreatedBy       int64           `json:"created_by" db:"created_by"`
-	CreatedAt       time.Time       `json:"created_at" db:"created_at"`
-	UpdatedAt       time.Time       `json:"updated_at" db:"updated_at"`
+	ID               int64                           `json:"id" db:"id"`
+	SubmissionItemID *int64                          `json:"submission_item_id,omitempty" db:"submission_item_id"`
+	PayeeUserID      int64                           `json:"payee_user_id" db:"payee_user_id"`
+	BusinessMonth    string                          `json:"business_month" db:"business_month"`
+	LinkedBatchID    *int64                          `json:"linked_batch_id,omitempty" db:"linked_batch_id"`
+	Status           string                          `json:"status" db:"status"`
+	OrderNo          string                          `json:"order_no" db:"order_no"`
+	SupplementDate   string                          `json:"supplement_date,omitempty" db:"supplement_date"`
+	DifficultyClass  string                          `json:"difficulty_class" db:"difficulty_class"`
+	Finalized        bool                            `json:"finalized" db:"finalized"`
+	PageCount        int                             `json:"page_count" db:"page_count"`
+	GrossAmount      float64                         `json:"gross_amount" db:"gross_amount"`
+	DuplicateHint    json.RawMessage                 `json:"duplicate_hint_json,omitempty" db:"duplicate_hint_json"`
+	CreatedBy        int64                           `json:"created_by" db:"created_by"`
+	CreatedAt        time.Time                       `json:"created_at" db:"created_at"`
+	UpdatedAt        time.Time                       `json:"updated_at" db:"updated_at"`
+	Files            []*AssetWorkbenchSubmissionFile `json:"files,omitempty" db:"-"`
 }
 
 type AssetWorkbenchEvent struct {

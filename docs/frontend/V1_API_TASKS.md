@@ -14,7 +14,7 @@
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
-- 本文件覆盖 `217` 个 `/v1` path；同一路径多 method 合并在同一节。
+- 本文件覆盖 `218` 个 `/v1` path；同一路径多 method 合并在同一节。
 
 ## GET /v1/trace-events
 
@@ -13180,7 +13180,7 @@ Content-Type: `application/json`
     "id": 123,
     "submission_id": 123,
     "payee_user_id": 123,
-    "order_no": "string"
+    "entry_kind": "normal"
   }
 }
 ```
@@ -14179,9 +14179,9 @@ curl -X GET https://api.example.com/v1/asset-workbench/materials/browse \
   "data": [
     {
       "id": "...",
+      "submission_item_id": "...",
       "payee_user_id": "...",
-      "business_month": "...",
-      "enabled": "..."
+      "business_month": "..."
     }
   ],
   "pagination": {
@@ -14232,9 +14232,9 @@ Content-Type: `application/json`
 {
   "data": {
     "id": 123,
+    "submission_item_id": 123,
     "payee_user_id": 123,
-    "business_month": "string",
-    "enabled": true
+    "business_month": "string"
   }
 }
 ```
@@ -14403,12 +14403,12 @@ curl -X GET https://api.example.com/v1/asset-workbench/settlement/report \
 支持方法: GET, POST。
 
 - `GET`: Lists manual settlement supplement rows. Settlement roles can page, sort, and exact-filter by payee, month, file/work name, status, and supplement date.
-- `POST`: Creates one manual supplement row in the current Asia/Shanghai natural month. `supplement_date` records which historical day is being supplemented and does not control `business_month`.
+- `POST`: Creates one supplement in the current Asia/Shanghai natural month. Settlement roles may create a manual row. Asset submitters may create only their own row, must supply uploaded `upload_session_ids`, and must still have an enabled current-month permission when the transaction locks the permission row. Uploaded supplements reuse normal upload directories, pricing, file query, and preview, but their linked submission item has `entry_kind=supplement` and is excluded from normal piecework settlement.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
 - `GET` 允许角色: AssetSettlement, SuperAdmin。
-- `POST` 允许角色: AssetSettlement, SuperAdmin。
+- `POST` 允许角色: AssetSubmitter, AssetManager, AssetSettlement, SuperAdmin。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 #### GET 细节
@@ -14491,6 +14491,7 @@ Content-Type: `application/json`
 | `page_count` | integer | 是 | - |
 | `gross_amount` | number | 是 | - |
 | `status` | enum(draft/approved) | 否 | - |
+| `upload_session_ids` | array<string> | 否 | Uploaded asset-workbench sessions. Required for a non-settlement actor; all sessions must belong to the actor and use one upload-directory difficulty. |
 
 ##### 响应体 schema
 成功响应: `201 application/json`
@@ -14523,6 +14524,71 @@ curl -X POST https://api.example.com/v1/asset-workbench/settlement/supplements \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"example":"value"}'
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## GET /v1/asset-workbench/settlement/my
+
+### 简介
+支持方法: GET。
+
+- `GET`: Returns only the authenticated user's income rows, current-month supplement permission, and current-month supplement records with linked files for query and preview.
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `GET` 允许角色: AssetSubmitter, AssetManager, AssetTemplateAdmin, AssetSettlement, HRAdmin, SuperAdmin。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+无 path/query/header 参数。
+
+请求体: 无请求体。
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "current_month": "string",
+    "estimated_net_amount": 12.3,
+    "months": [
+      "..."
+    ],
+    "supplement_permission": {
+      "id": "...",
+      "submission_item_id": "...",
+      "payee_user_id": "...",
+      "business_month": "..."
+    }
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | object | 否 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 401 | 见 `error.code` | 见 `deny_code` | Unauthenticated |
+| 403 | 见 `error.code` | 见 `deny_code` | Inactive membership or unsupported role |
+
+### curl 示例
+```bash
+curl -X GET https://api.example.com/v1/asset-workbench/settlement/my \
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 ### 前端最佳实践

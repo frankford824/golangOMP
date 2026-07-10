@@ -704,6 +704,7 @@ type AssetWorkbenchRepo interface {
 	GetSettlementSupplementForUpdate(ctx context.Context, tx Tx, id int64) (*domain.AssetWorkbenchSettlementSupplement, error)
 	VoidSettlementSupplement(ctx context.Context, tx Tx, id int64) (*domain.AssetWorkbenchSettlementSupplement, error)
 	GetSupplementPermission(ctx context.Context, payeeUserID int64, businessMonth string) (*domain.AssetWorkbenchSupplementPermission, error)
+	GetSupplementPermissionForUpdate(ctx context.Context, tx Tx, payeeUserID int64, businessMonth string) (*domain.AssetWorkbenchSupplementPermission, error)
 	ListSupplementPermissions(ctx context.Context, filter AssetWorkbenchSupplementPermissionFilter) ([]*domain.AssetWorkbenchSupplementPermission, int64, error)
 	UpsertSupplementPermission(ctx context.Context, tx Tx, item *domain.AssetWorkbenchSupplementPermission) (*domain.AssetWorkbenchSupplementPermission, error)
 

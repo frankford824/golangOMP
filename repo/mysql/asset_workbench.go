@@ -2021,16 +2021,21 @@ func (r *assetWorkbenchRepo) VoidSubmission(ctx context.Context, tx repo.Tx, sub
 }
 
 func (r *assetWorkbenchRepo) CreateSubmissionItem(ctx context.Context, tx repo.Tx, item *domain.AssetWorkbenchSubmissionItem) (*domain.AssetWorkbenchSubmissionItem, error) {
+	entryKind := strings.TrimSpace(item.EntryKind)
+	if entryKind == "" {
+		entryKind = domain.AssetWorkbenchSubmissionEntryKindNormal
+	}
 	res, err := Unwrap(tx).ExecContext(ctx, `
 		INSERT INTO asset_workbench_submission_items (
-			submission_id, payee_user_id, order_no, template_id, template_name_snapshot, category_snapshot,
+			submission_id, payee_user_id, entry_kind, order_no, template_id, template_name_snapshot, category_snapshot,
 			difficulty_class, finalized, page_count, item_count,
 			business_month, submitted_at, worker_type_snapshot, job_grade_snapshot, base_price_rule_id,
 			base_unit_price, promo_coupon_id, promo_snapshot_json, pricing_snapshot_json, gross_amount,
 			pricing_status, qc_status, settlement_status
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		item.SubmissionID,
 		item.PayeeUserID,
+		entryKind,
 		item.OrderNo,
 		toNullInt64(item.TemplateID),
 		item.TemplateNameSnapshot,
@@ -2586,7 +2591,8 @@ func (r *assetWorkbenchRepo) ListSubmissionItems(ctx context.Context, submission
 func (r *assetWorkbenchRepo) ListSubmissionItemsByMonth(ctx context.Context, businessMonth string) ([]*domain.AssetWorkbenchSubmissionItem, error) {
 	rows, err := r.db.db.QueryContext(ctx, assetWorkbenchSubmissionItemSelect()+`
 		WHERE business_month = ?
-		ORDER BY order_no ASC, payee_user_id ASC, id ASC`, businessMonth)
+		  AND entry_kind = ?
+		ORDER BY order_no ASC, payee_user_id ASC, id ASC`, businessMonth, domain.AssetWorkbenchSubmissionEntryKindNormal)
 	if err != nil {
 		return nil, fmt.Errorf("list asset workbench submission items by month: %w", err)
 	}
@@ -2611,6 +2617,7 @@ func (r *assetWorkbenchRepo) ListPendingGradeSubmissionItemsForPayee(ctx context
 	}
 	rows, err := Unwrap(tx).QueryContext(ctx, assetWorkbenchSubmissionItemSelect()+`
 		WHERE payee_user_id = ?
+		  AND entry_kind = ?
 		  AND pricing_status = ?
 		  AND settlement_status = ?
 		  AND current_settlement_batch_id IS NULL
@@ -2618,6 +2625,7 @@ func (r *assetWorkbenchRepo) ListPendingGradeSubmissionItemsForPayee(ctx context
 		ORDER BY submitted_at ASC, id ASC
 		LIMIT ? FOR UPDATE`,
 		payeeUserID,
+		domain.AssetWorkbenchSubmissionEntryKindNormal,
 		domain.AssetWorkbenchPricingStatusPendingGrade,
 		domain.AssetWorkbenchSettlementStatusUnsettled,
 		domain.AssetWorkbenchSubmissionStatusVoided,
@@ -2977,6 +2985,7 @@ func (r *assetWorkbenchRepo) FindActiveDeductionRule(ctx context.Context, worker
 func (r *assetWorkbenchRepo) LockSettleableItems(ctx context.Context, tx repo.Tx, businessMonth string) ([]*domain.AssetWorkbenchSubmissionItem, error) {
 	rows, err := Unwrap(tx).QueryContext(ctx, assetWorkbenchSubmissionItemSelect()+`
 		WHERE business_month = ?
+		  AND entry_kind = ?
 		  AND pricing_status = ?
 		  AND qc_status IN (?, ?)
 		  AND settlement_status = ?
@@ -2984,6 +2993,7 @@ func (r *assetWorkbenchRepo) LockSettleableItems(ctx context.Context, tx repo.Tx
 		ORDER BY payee_user_id ASC, id ASC
 		FOR UPDATE`,
 		businessMonth,
+		domain.AssetWorkbenchSubmissionEntryKindNormal,
 		domain.AssetWorkbenchPricingStatusPriced,
 		domain.AssetWorkbenchSubmissionStatusSubmitted,
 		domain.AssetWorkbenchSubmissionStatusChecked,
@@ -3502,9 +3512,10 @@ func assetWorkbenchSettlementSupplementOrderBy(sortBy, sortDir string) string {
 func (r *assetWorkbenchRepo) CreateSettlementSupplement(ctx context.Context, tx repo.Tx, item *domain.AssetWorkbenchSettlementSupplement) (*domain.AssetWorkbenchSettlementSupplement, error) {
 	res, err := Unwrap(tx).ExecContext(ctx, `
 		INSERT INTO asset_workbench_settlement_supplements (
-			payee_user_id, business_month, linked_batch_id, status, order_no, supplement_date, difficulty_class,
+			submission_item_id, payee_user_id, business_month, linked_batch_id, status, order_no, supplement_date, difficulty_class,
 			finalized, page_count, gross_amount, duplicate_hint_json, created_by
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		toNullInt64(item.SubmissionItemID),
 		item.PayeeUserID,
 		item.BusinessMonth,
 		toNullInt64(item.LinkedBatchID),
@@ -3547,6 +3558,11 @@ func (r *assetWorkbenchRepo) VoidSettlementSupplement(ctx context.Context, tx re
 
 func (r *assetWorkbenchRepo) GetSupplementPermission(ctx context.Context, payeeUserID int64, businessMonth string) (*domain.AssetWorkbenchSupplementPermission, error) {
 	row := r.db.db.QueryRowContext(ctx, assetWorkbenchSupplementPermissionSelect()+` WHERE payee_user_id = ? AND business_month = ?`, payeeUserID, businessMonth)
+	return scanAssetWorkbenchSupplementPermission(row)
+}
+
+func (r *assetWorkbenchRepo) GetSupplementPermissionForUpdate(ctx context.Context, tx repo.Tx, payeeUserID int64, businessMonth string) (*domain.AssetWorkbenchSupplementPermission, error) {
+	row := Unwrap(tx).QueryRowContext(ctx, assetWorkbenchSupplementPermissionSelect()+` WHERE payee_user_id = ? AND business_month = ? FOR UPDATE`, payeeUserID, businessMonth)
 	return scanAssetWorkbenchSupplementPermission(row)
 }
 
@@ -4345,7 +4361,7 @@ func assetWorkbenchOverviewFileSelect() string {
 }
 
 func assetWorkbenchSubmissionItemSelect() string {
-	return `SELECT id, submission_id, payee_user_id, order_no, template_id, template_name_snapshot, category_snapshot,
+	return `SELECT id, submission_id, payee_user_id, entry_kind, order_no, template_id, template_name_snapshot, category_snapshot,
 		difficulty_class, finalized, page_count, item_count, business_month, submitted_at, worker_type_snapshot,
 		job_grade_snapshot, base_price_rule_id, base_unit_price, promo_coupon_id, promo_snapshot_json,
 		pricing_snapshot_json, gross_amount, pricing_status, qc_status,
@@ -4473,7 +4489,7 @@ func assetWorkbenchSettlementAdjustmentSelect() string {
 }
 
 func assetWorkbenchSettlementSupplementSelect() string {
-	return `SELECT id, payee_user_id, business_month, linked_batch_id, status, order_no, supplement_date, difficulty_class,
+	return `SELECT id, submission_item_id, payee_user_id, business_month, linked_batch_id, status, order_no, supplement_date, difficulty_class,
 		finalized, page_count, gross_amount, duplicate_hint_json, created_by, created_at, updated_at
 		FROM asset_workbench_settlement_supplements`
 }
@@ -4813,7 +4829,7 @@ func scanAssetWorkbenchSubmissionItem(scanner interface{ Scan(...interface{}) er
 	var promoSnapshot, pricingSnapshot sql.NullString
 	var voidedAt sql.NullTime
 	if err := scanner.Scan(
-		&item.ID, &item.SubmissionID, &item.PayeeUserID, &item.OrderNo, &templateID,
+		&item.ID, &item.SubmissionID, &item.PayeeUserID, &item.EntryKind, &item.OrderNo, &templateID,
 		&item.TemplateNameSnapshot, &item.CategorySnapshot, &item.DifficultyClass,
 		&item.Finalized, &item.PageCount, &item.ItemCount, &item.BusinessMonth, &item.SubmittedAt,
 		&item.WorkerTypeSnapshot, &item.JobGradeSnapshot, &basePriceRuleID, &baseUnitPrice,
@@ -5108,16 +5124,17 @@ func scanAssetWorkbenchSettlementAdjustment(scanner interface{ Scan(...interface
 
 func scanAssetWorkbenchSettlementSupplement(scanner interface{ Scan(...interface{}) error }) (*domain.AssetWorkbenchSettlementSupplement, error) {
 	var item domain.AssetWorkbenchSettlementSupplement
-	var linkedBatchID sql.NullInt64
+	var submissionItemID, linkedBatchID sql.NullInt64
 	var supplementDate sql.NullTime
 	var duplicateHint sql.NullString
 	if err := scanner.Scan(
-		&item.ID, &item.PayeeUserID, &item.BusinessMonth, &linkedBatchID, &item.Status,
+		&item.ID, &submissionItemID, &item.PayeeUserID, &item.BusinessMonth, &linkedBatchID, &item.Status,
 		&item.OrderNo, &supplementDate, &item.DifficultyClass, &item.Finalized, &item.PageCount, &item.GrossAmount,
 		&duplicateHint, &item.CreatedBy, &item.CreatedAt, &item.UpdatedAt,
 	); err != nil {
 		return nil, err
 	}
+	item.SubmissionItemID = fromNullInt64(submissionItemID)
 	item.LinkedBatchID = fromNullInt64(linkedBatchID)
 	if supplementDate.Valid {
 		item.SupplementDate = supplementDate.Time.Format("2006-01-02")

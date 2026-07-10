@@ -272,6 +272,10 @@ func (r *supplementRepo) GetSupplementPermission(_ context.Context, payeeUserID 
 	return nil, sql.ErrNoRows
 }
 
+func (r *supplementRepo) GetSupplementPermissionForUpdate(ctx context.Context, _ repo.Tx, payeeUserID int64, businessMonth string) (*domain.AssetWorkbenchSupplementPermission, error) {
+	return r.GetSupplementPermission(ctx, payeeUserID, businessMonth)
+}
+
 func (r *supplementRepo) ListSupplementPermissions(_ context.Context, filter repo.AssetWorkbenchSupplementPermissionFilter) ([]*domain.AssetWorkbenchSupplementPermission, int64, error) {
 	items := make([]*domain.AssetWorkbenchSupplementPermission, 0, len(r.permissions))
 	for _, item := range r.permissions {
@@ -1075,15 +1079,19 @@ func (r *uploadDirectorySessionRepo) AppendEvent(_ context.Context, _ repo.Tx, e
 
 type submissionDirectoryDifficultyRepo struct {
 	repo.AssetWorkbenchRepo
-	profile       *domain.AssetWorkbenchProfile
-	price         *domain.AssetWorkbenchPriceMatrix
-	session       *domain.AssetWorkbenchUploadSession
-	submission    *domain.AssetWorkbenchSubmission
-	item          *domain.AssetWorkbenchSubmissionItem
-	files         []*domain.AssetWorkbenchSubmissionFile
-	sessionStatus string
-	events        []*domain.AssetWorkbenchEvent
-	members       []*domain.AssetWorkbenchMember
+	profile                 *domain.AssetWorkbenchProfile
+	price                   *domain.AssetWorkbenchPriceMatrix
+	session                 *domain.AssetWorkbenchUploadSession
+	submission              *domain.AssetWorkbenchSubmission
+	item                    *domain.AssetWorkbenchSubmissionItem
+	files                   []*domain.AssetWorkbenchSubmissionFile
+	sessionStatus           string
+	events                  []*domain.AssetWorkbenchEvent
+	members                 []*domain.AssetWorkbenchMember
+	permissions             []*domain.AssetWorkbenchSupplementPermission
+	lockedPermissionEnabled *bool
+	supplements             []*domain.AssetWorkbenchSettlementSupplement
+	createdSupplement       *domain.AssetWorkbenchSettlementSupplement
 }
 
 func (r *submissionDirectoryDifficultyRepo) ListMembers(_ context.Context, filter repo.AssetWorkbenchMemberFilter) ([]*domain.AssetWorkbenchMember, int64, error) {
@@ -1169,6 +1177,51 @@ func (r *submissionDirectoryDifficultyRepo) AppendEvent(_ context.Context, _ rep
 	copyEvent.ID = int64(len(r.events) + 1)
 	r.events = append(r.events, &copyEvent)
 	return &copyEvent, nil
+}
+
+func (r *submissionDirectoryDifficultyRepo) GetSupplementPermission(_ context.Context, payeeUserID int64, businessMonth string) (*domain.AssetWorkbenchSupplementPermission, error) {
+	for _, item := range r.permissions {
+		if item != nil && item.PayeeUserID == payeeUserID && item.BusinessMonth == businessMonth {
+			copyItem := *item
+			return &copyItem, nil
+		}
+	}
+	return nil, sql.ErrNoRows
+}
+
+func (r *submissionDirectoryDifficultyRepo) GetSupplementPermissionForUpdate(ctx context.Context, _ repo.Tx, payeeUserID int64, businessMonth string) (*domain.AssetWorkbenchSupplementPermission, error) {
+	item, err := r.GetSupplementPermission(ctx, payeeUserID, businessMonth)
+	if err != nil {
+		return nil, err
+	}
+	if r.lockedPermissionEnabled != nil {
+		item.Enabled = *r.lockedPermissionEnabled
+	}
+	return item, nil
+}
+
+func (r *submissionDirectoryDifficultyRepo) ListSettlementSupplements(_ context.Context, filter repo.AssetWorkbenchSettlementSupplementFilter) ([]*domain.AssetWorkbenchSettlementSupplement, int64, error) {
+	items := make([]*domain.AssetWorkbenchSettlementSupplement, 0, len(r.supplements))
+	for _, item := range r.supplements {
+		if item == nil || (filter.PayeeUserID != nil && item.PayeeUserID != *filter.PayeeUserID) || (filter.BusinessMonth != "" && item.BusinessMonth != filter.BusinessMonth) || (filter.OrderNo != "" && item.OrderNo != filter.OrderNo) {
+			continue
+		}
+		copyItem := *item
+		items = append(items, &copyItem)
+	}
+	return items, int64(len(items)), nil
+}
+
+func (r *submissionDirectoryDifficultyRepo) ListSubmissionItemsByMonth(_ context.Context, _ string) ([]*domain.AssetWorkbenchSubmissionItem, error) {
+	return nil, nil
+}
+
+func (r *submissionDirectoryDifficultyRepo) CreateSettlementSupplement(_ context.Context, _ repo.Tx, item *domain.AssetWorkbenchSettlementSupplement) (*domain.AssetWorkbenchSettlementSupplement, error) {
+	copyItem := *item
+	copyItem.ID = 8001
+	r.createdSupplement = &copyItem
+	r.supplements = append(r.supplements, &copyItem)
+	return &copyItem, nil
 }
 
 type clientMaterialRepo struct {
@@ -2336,6 +2389,87 @@ func TestCreateSettlementSupplementAllowsTargetDateOutsideCurrentBusinessMonth(t
 	}
 	if created.BusinessMonth != "2026-07" || created.SupplementDate != "2026-06-15" {
 		t.Fatalf("created = %+v, want July settlement with June target date", created)
+	}
+}
+
+func TestCreateSettlementSupplementLetsPayeeUploadPricedFileWithoutNormalPiecework(t *testing.T) {
+	permission := &domain.AssetWorkbenchSupplementPermission{ID: 1, PayeeUserID: 1001, BusinessMonth: "2026-07", Enabled: true, GrantedBy: 99}
+	workbenchRepo := &submissionDirectoryDifficultyRepo{
+		profile: &domain.AssetWorkbenchProfile{UserID: 1001, WorkerType: domain.AssetWorkbenchWorkerTypeParttime, JobGrade: "P1"},
+		price:   &domain.AssetWorkbenchPriceMatrix{ID: 88, WorkerType: domain.AssetWorkbenchWorkerTypeParttime, JobGrade: "P1", DifficultyClass: "A", UnitPrice: 12},
+		session: &domain.AssetWorkbenchUploadSession{
+			ID: 9101, SessionID: "supplement-upload-1", OwnerUserID: 1001, Status: domain.AssetWorkbenchUploadStatusUploaded,
+			ObjectKey: "asset-workbench/uploads/supplement/poster.jpg", OriginalFilename: "poster.jpg", MimeType: "image/jpeg", FileSize: 2048,
+			UploadDirectoryName: "A类成品", UploadDirectoryDifficultyClass: "A",
+		},
+		permissions: []*domain.AssetWorkbenchSupplementPermission{permission},
+	}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}))
+	svc.nowFn = func() time.Time { return time.Date(2026, 7, 10, 2, 0, 0, 0, time.UTC) }
+	actor := domain.RequestActor{ID: 1001, Roles: []domain.Role{domain.RoleAssetSubmitter}}
+
+	created, appErr := svc.CreateSettlementSupplement(context.Background(), actor, CreateSettlementSupplementParams{
+		PayeeUserID:      1001,
+		BusinessMonth:    "2026-07",
+		SupplementDate:   "2026-06-15",
+		Finalized:        true,
+		PageCount:        1,
+		UploadSessionIDs: []string{"supplement-upload-1"},
+	})
+	if appErr != nil {
+		t.Fatalf("CreateSettlementSupplement(upload) error = %+v", appErr)
+	}
+	if created.SubmissionItemID == nil || *created.SubmissionItemID != 6001 || created.OrderNo != "poster.jpg" || created.DifficultyClass != "A" || created.GrossAmount != 12 {
+		t.Fatalf("created supplement = %+v, want linked A-class item worth 12", created)
+	}
+	if workbenchRepo.item == nil || workbenchRepo.item.EntryKind != domain.AssetWorkbenchSubmissionEntryKindSupplement || workbenchRepo.item.GrossAmount != 12 {
+		t.Fatalf("submission item = %+v, want supplement entry kind and priced amount", workbenchRepo.item)
+	}
+	if len(created.Files) != 1 || created.Files[0].OriginalFilename != "poster.jpg" || created.Files[0].UploadDirectoryName != "A类成品" {
+		t.Fatalf("created files = %+v, want linked uploaded file", created.Files)
+	}
+	if workbenchRepo.sessionStatus != domain.AssetWorkbenchUploadStatusSubmitted {
+		t.Fatalf("upload session status = %q, want submitted", workbenchRepo.sessionStatus)
+	}
+	if len(workbenchRepo.events) != 2 || workbenchRepo.events[0].EventType != domain.AssetWorkbenchEventSubmissionCreated || workbenchRepo.events[1].EventType != domain.AssetWorkbenchEventSupplementCreated {
+		t.Fatalf("events = %+v, want submission and supplement events", workbenchRepo.events)
+	}
+}
+
+func TestCreateSettlementSupplementRejectsSelfUploadWhenPermissionClosesBeforeWrite(t *testing.T) {
+	closed := false
+	workbenchRepo := &submissionDirectoryDifficultyRepo{
+		profile: &domain.AssetWorkbenchProfile{UserID: 1001, WorkerType: domain.AssetWorkbenchWorkerTypeParttime, JobGrade: "P1"},
+		price:   &domain.AssetWorkbenchPriceMatrix{ID: 88, WorkerType: domain.AssetWorkbenchWorkerTypeParttime, JobGrade: "P1", DifficultyClass: "A", UnitPrice: 12},
+		session: &domain.AssetWorkbenchUploadSession{
+			ID: 9101, SessionID: "supplement-upload-closed", OwnerUserID: 1001, Status: domain.AssetWorkbenchUploadStatusUploaded,
+			OriginalFilename: "poster.jpg", UploadDirectoryDifficultyClass: "A",
+		},
+		permissions:             []*domain.AssetWorkbenchSupplementPermission{{ID: 1, PayeeUserID: 1001, BusinessMonth: "2026-07", Enabled: true}},
+		lockedPermissionEnabled: &closed,
+	}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}))
+	svc.nowFn = func() time.Time { return time.Date(2026, 7, 10, 2, 0, 0, 0, time.UTC) }
+
+	_, appErr := svc.CreateSettlementSupplement(context.Background(), domain.RequestActor{ID: 1001, Roles: []domain.Role{domain.RoleAssetSubmitter}}, CreateSettlementSupplementParams{
+		PayeeUserID: 1001, BusinessMonth: "2026-07", SupplementDate: "2026-06-15", PageCount: 1,
+		UploadSessionIDs: []string{"supplement-upload-closed"},
+	})
+	if appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
+		t.Fatalf("CreateSettlementSupplement(closed race) error = %+v, want permission denied", appErr)
+	}
+	if workbenchRepo.submission != nil || workbenchRepo.item != nil || workbenchRepo.createdSupplement != nil || len(workbenchRepo.files) != 0 {
+		t.Fatalf("closed permission must leave no database writes: submission=%+v item=%+v supplement=%+v files=%+v", workbenchRepo.submission, workbenchRepo.item, workbenchRepo.createdSupplement, workbenchRepo.files)
+	}
+}
+
+func TestCreateSettlementSupplementRejectsPayeeSpoofing(t *testing.T) {
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(&supplementRepo{}, assetWorkbenchTestTxRunner{}))
+	_, appErr := svc.CreateSettlementSupplement(context.Background(), domain.RequestActor{ID: 1001, Roles: []domain.Role{domain.RoleAssetSubmitter}}, CreateSettlementSupplementParams{
+		PayeeUserID: 2002, BusinessMonth: "2026-07", OrderNo: "poster.jpg", DifficultyClass: "A", UploadSessionIDs: []string{"session"},
+	})
+	if appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
+		t.Fatalf("CreateSettlementSupplement(other payee) error = %+v, want permission denied", appErr)
 	}
 }
 

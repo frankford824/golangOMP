@@ -9,6 +9,7 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 
+	"workflow/domain"
 	"workflow/repo"
 )
 
@@ -58,6 +59,53 @@ func TestLockPriceMatrixDimensionLocksParentDimensionBeforeExistingRules(t *test
 		return nil
 	}); err != nil {
 		t.Fatalf("LockPriceMatrixDimension() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestLockSettleableItemsExcludesSupplementSubmissionItems(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(assetWorkbenchSubmissionItemSelect()+`
+		WHERE business_month = ?
+		  AND entry_kind = ?
+		  AND pricing_status = ?
+		  AND qc_status IN (?, ?)
+		  AND settlement_status = ?
+		  AND current_settlement_batch_id IS NULL
+		ORDER BY payee_user_id ASC, id ASC
+		FOR UPDATE`)).
+		WithArgs(
+			"2026-07",
+			domain.AssetWorkbenchSubmissionEntryKindNormal,
+			domain.AssetWorkbenchPricingStatusPriced,
+			domain.AssetWorkbenchSubmissionStatusSubmitted,
+			domain.AssetWorkbenchSubmissionStatusChecked,
+			domain.AssetWorkbenchSettlementStatusUnsettled,
+		).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
+	mock.ExpectCommit()
+
+	mysqlDB := New(db)
+	workbenchRepo := NewAssetWorkbenchRepo(mysqlDB)
+	if err := mysqlDB.RunInTx(context.Background(), func(tx repo.Tx) error {
+		items, err := workbenchRepo.LockSettleableItems(context.Background(), tx, "2026-07")
+		if err != nil {
+			return err
+		}
+		if len(items) != 0 {
+			t.Fatalf("items = %+v, want empty", items)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("LockSettleableItems() error = %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)

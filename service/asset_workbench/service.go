@@ -897,9 +897,11 @@ type SettlementReportDifficultyMetric struct {
 }
 
 type MySettlementResponse struct {
-	CurrentMonth       string                 `json:"current_month"`
-	EstimatedNetAmount float64                `json:"estimated_net_amount"`
-	Months             []MySettlementMonthRow `json:"months"`
+	CurrentMonth         string                                       `json:"current_month"`
+	EstimatedNetAmount   float64                                      `json:"estimated_net_amount"`
+	Months               []MySettlementMonthRow                       `json:"months"`
+	SupplementPermission *domain.AssetWorkbenchSupplementPermission   `json:"supplement_permission,omitempty"`
+	Supplements          []*domain.AssetWorkbenchSettlementSupplement `json:"supplements"`
 }
 
 type MySettlementMonthRow struct {
@@ -932,15 +934,16 @@ type promoApplication struct {
 }
 
 type CreateSettlementSupplementParams struct {
-	PayeeUserID     int64   `json:"payee_user_id"`
-	BusinessMonth   string  `json:"business_month"`
-	OrderNo         string  `json:"order_no"`
-	SupplementDate  string  `json:"supplement_date,omitempty"`
-	DifficultyClass string  `json:"difficulty_class"`
-	Finalized       bool    `json:"finalized"`
-	PageCount       int     `json:"page_count"`
-	GrossAmount     float64 `json:"gross_amount"`
-	Status          string  `json:"status"`
+	PayeeUserID      int64    `json:"payee_user_id"`
+	BusinessMonth    string   `json:"business_month"`
+	OrderNo          string   `json:"order_no"`
+	SupplementDate   string   `json:"supplement_date,omitempty"`
+	DifficultyClass  string   `json:"difficulty_class"`
+	Finalized        bool     `json:"finalized"`
+	PageCount        int      `json:"page_count"`
+	GrossAmount      float64  `json:"gross_amount"`
+	Status           string   `json:"status"`
+	UploadSessionIDs []string `json:"upload_session_ids,omitempty"`
 }
 
 type SettlementSupplementImportResult struct {
@@ -3100,35 +3103,7 @@ func (s *Service) CreateSubmission(ctx context.Context, actor domain.RequestActo
 			}
 			itemDetail := SubmissionItemDetail{Item: createdItem}
 			for index, session := range uploadSessions {
-				uploadedAt := now
-				if session.UploadedAt != nil && !session.UploadedAt.IsZero() {
-					uploadedAt = session.UploadedAt.UTC()
-				}
-				file := &domain.AssetWorkbenchSubmissionFile{
-					SubmissionID:                   createdSubmission.ID,
-					SubmissionItemID:               createdItem.ID,
-					UploadSessionID:                &session.ID,
-					OwnerUserID:                    actor.ID,
-					UploadDirectoryID:              session.UploadDirectoryID,
-					UploadDirectoryName:            session.UploadDirectoryName,
-					UploadDirectoryPrefix:          session.UploadDirectoryPrefix,
-					UploadDirectoryDifficultyClass: session.UploadDirectoryDifficultyClass,
-					UploadBatchID:                  session.UploadBatchID,
-					RelativePath:                   session.RelativePath,
-					DisplayName:                    path.Base(firstNonEmpty(session.RelativePath, session.OriginalFilename)),
-					IsFolderUpload:                 session.IsFolderUpload,
-					ObjectKey:                      session.ObjectKey,
-					PreviewStatus:                  initialPreviewStatus(session.OriginalFilename, session.MimeType),
-					OriginalFilename:               session.OriginalFilename,
-					FileExt:                        strings.TrimPrefix(strings.ToLower(filepath.Ext(session.OriginalFilename)), "."),
-					FileType:                       inferFileType(session.OriginalFilename, session.MimeType),
-					MimeType:                       session.MimeType,
-					FileSize:                       session.FileSize,
-					FileHash:                       session.FileHash,
-					SortOrder:                      index,
-					CreatedAt:                      uploadedAt,
-					UpdatedAt:                      uploadedAt,
-				}
+				file := submissionFileFromUploadSession(createdSubmission.ID, createdItem.ID, actor.ID, session, index, now)
 				createdFile, err := s.repo.CreateSubmissionFile(ctx, tx, file)
 				if err != nil {
 					return err
@@ -3155,6 +3130,38 @@ func (s *Service) CreateSubmission(ctx context.Context, actor domain.RequestActo
 	}
 	s.notifySubmissionCreated(ctx, actor, profile, detail)
 	return detail, nil
+}
+
+func submissionFileFromUploadSession(submissionID, itemID, ownerUserID int64, session *domain.AssetWorkbenchUploadSession, sortOrder int, fallbackTime time.Time) *domain.AssetWorkbenchSubmissionFile {
+	uploadedAt := fallbackTime
+	if session.UploadedAt != nil && !session.UploadedAt.IsZero() {
+		uploadedAt = session.UploadedAt.UTC()
+	}
+	return &domain.AssetWorkbenchSubmissionFile{
+		SubmissionID:                   submissionID,
+		SubmissionItemID:               itemID,
+		UploadSessionID:                &session.ID,
+		OwnerUserID:                    ownerUserID,
+		UploadDirectoryID:              session.UploadDirectoryID,
+		UploadDirectoryName:            session.UploadDirectoryName,
+		UploadDirectoryPrefix:          session.UploadDirectoryPrefix,
+		UploadDirectoryDifficultyClass: session.UploadDirectoryDifficultyClass,
+		UploadBatchID:                  session.UploadBatchID,
+		RelativePath:                   session.RelativePath,
+		DisplayName:                    path.Base(firstNonEmpty(session.RelativePath, session.OriginalFilename)),
+		IsFolderUpload:                 session.IsFolderUpload,
+		ObjectKey:                      session.ObjectKey,
+		PreviewStatus:                  initialPreviewStatus(session.OriginalFilename, session.MimeType),
+		OriginalFilename:               session.OriginalFilename,
+		FileExt:                        strings.TrimPrefix(strings.ToLower(filepath.Ext(session.OriginalFilename)), "."),
+		FileType:                       inferFileType(session.OriginalFilename, session.MimeType),
+		MimeType:                       session.MimeType,
+		FileSize:                       session.FileSize,
+		FileHash:                       session.FileHash,
+		SortOrder:                      sortOrder,
+		CreatedAt:                      uploadedAt,
+		UpdatedAt:                      uploadedAt,
+	}
 }
 
 func (s *Service) loadSubmissionUploadSessions(ctx context.Context, actor domain.RequestActor, req CreateSubmissionItemParams) ([]*domain.AssetWorkbenchUploadSession, string, *domain.AppError) {
@@ -4426,6 +4433,16 @@ func (s *Service) MySettlement(ctx context.Context, actor domain.RequestActor) (
 	if err != nil {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load current month supplements.", err.Error())
 	}
+	if appErr := s.enrichSettlementSupplementFiles(ctx, currentSupplements); appErr != nil {
+		return nil, appErr
+	}
+	permission, err := s.repo.GetSupplementPermission(ctx, actor.ID, currentMonth)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load current supplement permission.", err.Error())
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		permission = nil
+	}
 	errorRecords, err := s.repo.ListErrorRecordsByMonth(ctx, currentMonth)
 	if err != nil {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load current month error records.", err.Error())
@@ -4461,9 +4478,11 @@ func (s *Service) MySettlement(ctx context.Context, actor domain.RequestActor) (
 		estimated = currentRow.NetAmount
 	}
 	return &MySettlementResponse{
-		CurrentMonth:       currentMonth,
-		EstimatedNetAmount: estimated,
-		Months:             months,
+		CurrentMonth:         currentMonth,
+		EstimatedNetAmount:   estimated,
+		Months:               months,
+		SupplementPermission: permission,
+		Supplements:          currentSupplements,
 	}, nil
 }
 
@@ -5107,19 +5126,76 @@ func (s *Service) ListSettlementSupplements(ctx context.Context, actor domain.Re
 	if err != nil {
 		return nil, 0, domain.NewAppError(domain.ErrCodeInternalError, "Failed to list settlement supplements.", err.Error())
 	}
+	if appErr := s.enrichSettlementSupplementFiles(ctx, items); appErr != nil {
+		return nil, 0, appErr
+	}
 	return items, total, nil
+}
+
+func (s *Service) enrichSettlementSupplementFiles(ctx context.Context, items []*domain.AssetWorkbenchSettlementSupplement) *domain.AppError {
+	for _, item := range items {
+		if item == nil || item.SubmissionItemID == nil || *item.SubmissionItemID <= 0 {
+			continue
+		}
+		files, err := s.repo.ListSubmissionFiles(ctx, *item.SubmissionItemID)
+		if err != nil {
+			return domain.NewAppError(domain.ErrCodeInternalError, "Failed to load settlement supplement files.", err.Error())
+		}
+		item.Files = files
+	}
+	return nil
 }
 
 func (s *Service) CreateSettlementSupplement(ctx context.Context, actor domain.RequestActor, params CreateSettlementSupplementParams) (*domain.AssetWorkbenchSettlementSupplement, *domain.AppError) {
 	if err := s.requireRepo(); err != nil {
 		return nil, err
 	}
-	if !actorHasAny(actor, domain.RoleAssetSettlement, domain.RoleSuperAdmin) {
-		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only settlement roles can create settlement supplements.", nil)
+	canManageSupplements := actorHasAny(actor, domain.RoleAssetSettlement, domain.RoleSuperAdmin)
+	if !canManageSupplements && !actorHasAny(actor, domain.RoleAssetSubmitter, domain.RoleAssetManager) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only settlement roles or the supplement payee can create settlement supplements.", nil)
+	}
+	if !canManageSupplements {
+		if params.PayeeUserID == 0 {
+			params.PayeeUserID = actor.ID
+		}
+		if params.PayeeUserID != actor.ID {
+			return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Supplement submitters can only upload their own supplement work.", map[string]interface{}{
+				"actor_user_id": actor.ID,
+				"payee_user_id": params.PayeeUserID,
+			})
+		}
+		if len(params.UploadSessionIDs) == 0 {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Self-service supplements require uploaded files.", nil)
+		}
+		params.Status = domain.AssetWorkbenchSupplementStatusApproved
 	}
 	currentBusinessMonth := s.businessMonth(s.nowFn().UTC())
 	if strings.TrimSpace(params.BusinessMonth) == "" {
 		params.BusinessMonth = currentBusinessMonth
+	}
+
+	var uploadSessions []*domain.AssetWorkbenchUploadSession
+	var profile *domain.AssetWorkbenchProfile
+	if len(params.UploadSessionIDs) > 0 {
+		var appErr *domain.AppError
+		uploadSessions, params.DifficultyClass, appErr = s.loadSubmissionUploadSessions(ctx, actor, CreateSubmissionItemParams{
+			DifficultyClass:  params.DifficultyClass,
+			UploadSessionIDs: params.UploadSessionIDs,
+		})
+		if appErr != nil {
+			return nil, appErr
+		}
+		if strings.TrimSpace(params.OrderNo) == "" && len(uploadSessions) > 0 {
+			params.OrderNo = path.Base(firstNonEmpty(uploadSessions[0].RelativePath, uploadSessions[0].OriginalFilename))
+		}
+		var err error
+		profile, err = s.repo.GetProfileByUserID(ctx, params.PayeeUserID)
+		if err != nil {
+			if !errors.Is(err, sql.ErrNoRows) {
+				return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load supplement payee profile.", err.Error())
+			}
+			profile = &domain.AssetWorkbenchProfile{UserID: params.PayeeUserID, Status: domain.AssetWorkbenchProfileStatusPending}
+		}
 	}
 	item, appErr := normalizeSettlementSupplement(actor.ID, params)
 	if appErr != nil {
@@ -5143,7 +5219,73 @@ func (s *Service) CreateSettlementSupplement(ctx context.Context, actor domain.R
 	}
 	item.DuplicateHint = duplicateHint
 	var created *domain.AssetWorkbenchSettlementSupplement
+	var createdFiles []*domain.AssetWorkbenchSubmissionFile
 	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+		if appErr := s.ensureSupplementPermissionOpenForUpdate(ctx, tx, item.PayeeUserID, item.BusinessMonth); appErr != nil {
+			return appErr
+		}
+		if len(uploadSessions) > 0 {
+			now := s.nowFn().UTC()
+			submission, err := s.repo.CreateSubmission(ctx, tx, &domain.AssetWorkbenchSubmission{
+				SubmissionNo:    "AWS" + now.Format("20060102150405") + strings.ToUpper(strings.ReplaceAll(uuid.NewString()[:8], "-", "")),
+				SubmitterUserID: actor.ID,
+				BusinessMonth:   item.BusinessMonth,
+				SubmittedAt:     now,
+				Status:          domain.AssetWorkbenchSubmissionStatusSubmitted,
+				Notes:           "self-service settlement supplement upload",
+			})
+			if err != nil {
+				return err
+			}
+			submissionItem, buildErr := s.buildSubmissionItem(ctx, item.PayeeUserID, submission.ID, now, item.BusinessMonth, profile, CreateSubmissionItemParams{
+				OrderNo:          item.OrderNo,
+				DifficultyClass:  item.DifficultyClass,
+				Finalized:        item.Finalized,
+				PageCount:        item.PageCount,
+				ItemCount:        1,
+				UploadSessionIDs: params.UploadSessionIDs,
+			})
+			if buildErr != nil {
+				return buildErr
+			}
+			if submissionItem.PricingStatus != domain.AssetWorkbenchPricingStatusPriced {
+				return domain.NewAppError(domain.ErrCodeInvalidStateTransition, "Supplement work cannot be submitted until its payee and upload category have an active price.", map[string]interface{}{
+					"payee_user_id":    item.PayeeUserID,
+					"difficulty_class": item.DifficultyClass,
+					"pricing_status":   submissionItem.PricingStatus,
+				})
+			}
+			submissionItem.EntryKind = domain.AssetWorkbenchSubmissionEntryKindSupplement
+			createdItem, err := s.repo.CreateSubmissionItem(ctx, tx, submissionItem)
+			if err != nil {
+				return err
+			}
+			for index, session := range uploadSessions {
+				file, err := s.repo.CreateSubmissionFile(ctx, tx, submissionFileFromUploadSession(submission.ID, createdItem.ID, actor.ID, session, index, now))
+				if err != nil {
+					return err
+				}
+				createdFiles = append(createdFiles, file)
+				if err := s.repo.UpdateUploadSessionStatus(ctx, tx, session.SessionID, domain.AssetWorkbenchUploadStatusSubmitted, nil, nil, &createdItem.ID); err != nil {
+					return err
+				}
+			}
+			if err := s.repo.RefreshSubmissionTotals(ctx, tx, submission.ID); err != nil {
+				return err
+			}
+			item.SubmissionItemID = &createdItem.ID
+			item.DifficultyClass = createdItem.DifficultyClass
+			item.PageCount = createdItem.PageCount
+			item.GrossAmount = createdItem.GrossAmount
+			item.Status = domain.AssetWorkbenchSupplementStatusApproved
+			if err := s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventSubmissionCreated, domain.AssetWorkbenchEntitySubmission, &submission.ID, nil, map[string]interface{}{
+				"submission": submission,
+				"item_count": 1,
+				"entry_kind": domain.AssetWorkbenchSubmissionEntryKindSupplement,
+			}, "self-service supplement upload"); err != nil {
+				return err
+			}
+		}
 		var err error
 		created, err = s.repo.CreateSettlementSupplement(ctx, tx, item)
 		if err != nil {
@@ -5151,8 +5293,12 @@ func (s *Service) CreateSettlementSupplement(ctx context.Context, actor domain.R
 		}
 		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventSupplementCreated, domain.AssetWorkbenchEntitySupplement, &created.ID, nil, created, params.OrderNo)
 	}); err != nil {
+		if appErr := asAppError(err); appErr != nil {
+			return nil, appErr
+		}
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to create settlement supplement.", err.Error())
 	}
+	created.Files = createdFiles
 	return created, nil
 }
 
@@ -5205,6 +5351,18 @@ func (s *Service) VoidSettlementSupplement(ctx context.Context, actor domain.Req
 		updated, err = s.repo.VoidSettlementSupplement(ctx, tx, supplementID)
 		if err != nil {
 			return err
+		}
+		if before.SubmissionItemID != nil && *before.SubmissionItemID > 0 {
+			voidedItem, err := s.repo.VoidSubmissionItem(ctx, tx, *before.SubmissionItemID, actor.ID, "linked supplement voided: "+reason, s.nowFn().UTC())
+			if err != nil {
+				return err
+			}
+			if err := s.repo.RefreshSubmissionTotals(ctx, tx, voidedItem.SubmissionID); err != nil {
+				return err
+			}
+			if err := s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventItemVoided, domain.AssetWorkbenchEntitySubmissionItem, &voidedItem.ID, nil, voidedItem, reason); err != nil {
+				return err
+			}
 		}
 		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventSupplementVoided, domain.AssetWorkbenchEntitySupplement, &updated.ID, before, updated, reason)
 	}); err != nil {
@@ -7001,6 +7159,12 @@ func (s *Service) loadMutableSubmissionItem(ctx context.Context, itemID int64) (
 			"settlement_status": item.SettlementStatus,
 		})
 	}
+	if item.EntryKind == domain.AssetWorkbenchSubmissionEntryKindSupplement {
+		return nil, domain.NewAppError(domain.ErrCodeConflict, "Supplement upload files must be managed through their supplement record.", map[string]interface{}{
+			"item_id":    item.ID,
+			"entry_kind": item.EntryKind,
+		})
+	}
 	if item.QCStatus == domain.AssetWorkbenchSubmissionStatusVoided {
 		return nil, domain.NewAppError(domain.ErrCodeConflict, "Submission item is already voided.", map[string]interface{}{"item_id": item.ID})
 	}
@@ -8136,6 +8300,26 @@ func (s *Service) ensureSupplementPermissionOpen(ctx context.Context, payeeUserI
 	}
 	if permission == nil || !permission.Enabled {
 		return domain.NewAppError(domain.ErrCodePermissionDenied, "Supplement upload is not open for this payee and business month.", map[string]interface{}{
+			"payee_user_id":  payeeUserID,
+			"business_month": businessMonth,
+		})
+	}
+	return nil
+}
+
+func (s *Service) ensureSupplementPermissionOpenForUpdate(ctx context.Context, tx repo.Tx, payeeUserID int64, businessMonth string) *domain.AppError {
+	permission, err := s.repo.GetSupplementPermissionForUpdate(ctx, tx, payeeUserID, businessMonth)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return domain.NewAppError(domain.ErrCodePermissionDenied, "Supplement upload was closed before submission completed.", map[string]interface{}{
+				"payee_user_id":  payeeUserID,
+				"business_month": businessMonth,
+			})
+		}
+		return domain.NewAppError(domain.ErrCodeInternalError, "Failed to lock supplement permission.", err.Error())
+	}
+	if permission == nil || !permission.Enabled {
+		return domain.NewAppError(domain.ErrCodePermissionDenied, "Supplement upload was closed before submission completed.", map[string]interface{}{
 			"payee_user_id":  payeeUserID,
 			"business_month": businessMonth,
 		})

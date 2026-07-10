@@ -529,6 +529,43 @@ export async function waitForServer(url) {
 
 export async function installAssetWorkbenchFixture(context, role = 'admin') {
   const bootstrap = bootstrapFor(role)
+  const supplementPermission = {
+    id: 31,
+    payee_user_id: bootstrap.profile.user_id,
+    business_month: '2026-06',
+    enabled: role === 'simple',
+    reason: role === 'simple' ? 'fixture supplement upload' : '',
+    granted_by: 1001,
+    granted_at: '2026-06-24T09:00:00+08:00',
+  }
+  const supplementUploads = new Map()
+  const fixtureSupplements = role === 'simple' ? [{
+    id: 701,
+    submission_item_id: 801,
+    payee_user_id: bootstrap.profile.user_id,
+    business_month: '2026-06',
+    status: 'approved',
+    order_no: '已补录海报.png',
+    supplement_date: '2026-06-18',
+    difficulty_class: 'A',
+    finalized: true,
+    page_count: 1,
+    gross_amount: 120,
+    files: [{
+      id: 901,
+      submission_id: 601,
+      submission_item_id: 801,
+      upload_directory_id: uploadDirectories[0].id,
+      upload_directory_name: uploadDirectories[0].name,
+      upload_directory_difficulty_class: uploadDirectories[0].difficulty_class,
+      display_name: '已补录海报.png',
+      original_filename: '已补录海报.png',
+      file_type: 'image',
+      mime_type: 'image/png',
+      file_size: 2048,
+      preview_status: 'ready',
+    }],
+  }] : []
   await context.addInitScript(
     ({ now }) => {
       const RealDate = Date
@@ -575,6 +612,22 @@ export async function installAssetWorkbenchFixture(context, role = 'admin') {
         },
       ])
     }
+    if (path.endsWith('/upload-sessions') && route.request().method() === 'POST') {
+      const payload = route.request().postDataJSON()
+      const sessionId = `fixture-supplement-${supplementUploads.size + 1}`
+      supplementUploads.set(sessionId, payload)
+      return json(route, {
+        session: { session_id: sessionId, status: 'created' },
+        plan: {
+          mode: 'single_part',
+          method: 'PUT',
+          upload_url: `https://fixture-upload.invalid/${sessionId}`,
+          object_key: `asset-workbench/fixture/${payload.original_filename}`,
+          required_upload_content_type: payload.mime_type,
+        },
+      })
+    }
+    if (/\/upload-sessions\/[^/]+\/(complete|cancel)$/.test(path)) return json(route, {})
     if (path.endsWith('/submissions')) return paginated(route, submissions)
     if (path.endsWith('/settlement/preview')) return json(route, settlementPreview)
     if (path.endsWith('/settlement/my')) {
@@ -595,6 +648,8 @@ export async function installAssetWorkbenchFixture(context, role = 'admin') {
             confirmed: false,
           },
         ],
+        supplement_permission: supplementPermission,
+        supplements: fixtureSupplements,
       })
     }
     if (path.endsWith('/settlement/batches')) {
@@ -614,7 +669,34 @@ export async function installAssetWorkbenchFixture(context, role = 'admin') {
         },
       ])
     }
-    if (path.endsWith('/settlement/supplements')) return paginated(route, [])
+    if (path.endsWith('/settlement/supplements') && route.request().method() === 'POST') {
+      const payload = route.request().postDataJSON()
+      const session = supplementUploads.get(payload.upload_session_ids?.[0]) ?? {}
+      const directory = uploadDirectories.find((item) => item.id === session.upload_directory_id) ?? uploadDirectories[0]
+      const created = {
+        id: 701 + fixtureSupplements.length,
+        submission_item_id: 801 + fixtureSupplements.length,
+        ...payload,
+        gross_amount: directory.difficulty_class === 'A' ? 120 : 80,
+        files: [{
+          id: 901 + fixtureSupplements.length,
+          submission_id: 601 + fixtureSupplements.length,
+          submission_item_id: 801 + fixtureSupplements.length,
+          upload_directory_id: directory.id,
+          upload_directory_name: directory.name,
+          upload_directory_difficulty_class: directory.difficulty_class,
+          display_name: payload.order_no,
+          original_filename: payload.order_no,
+          file_type: 'image',
+          mime_type: session.mime_type || 'image/png',
+          file_size: session.file_size || 1024,
+          preview_status: 'ready',
+        }],
+      }
+      fixtureSupplements.push(created)
+      return json(route, created)
+    }
+    if (path.endsWith('/settlement/supplements')) return paginated(route, fixtureSupplements)
     if (path.endsWith('/settlement/supplement-permissions')) return paginated(route, [])
     if (path.endsWith('/difficulty-classes') || path.endsWith('/difficulty-classes/admin')) return json(route, difficultyClasses)
     if (path.endsWith('/overview-search')) return json(route, overviewRows(url))
@@ -706,6 +788,10 @@ export async function installAssetWorkbenchFixture(context, role = 'admin') {
       })
     }
     return json(route, {})
+  })
+
+  await context.route('https://fixture-upload.invalid/**', async (route) => {
+    await route.fulfill({ status: 200, headers: { ETag: 'fixture-etag' }, body: '' })
   })
 }
 

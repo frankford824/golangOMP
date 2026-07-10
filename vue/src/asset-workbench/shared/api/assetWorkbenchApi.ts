@@ -233,6 +233,7 @@ export interface SubmissionItemRow {
   id: number
   submission_id: number
   payee_user_id: number
+  entry_kind: 'normal' | 'supplement' | string
   order_no: string
   template_id?: number
   template_name_snapshot?: string
@@ -416,6 +417,8 @@ export interface MySettlementResult {
   current_month: string
   estimated_net_amount: number
   months: MySettlementMonthRow[]
+  supplement_permission?: SupplementPermissionRow
+  supplements: SettlementSupplementRow[]
 }
 
 export interface SettlementAdjustmentRow {
@@ -433,6 +436,7 @@ export interface SettlementAdjustmentRow {
 
 export interface SettlementSupplementRow {
   id: number
+  submission_item_id?: number
   payee_user_id: number
   business_month: string
   linked_batch_id?: number
@@ -443,6 +447,7 @@ export interface SettlementSupplementRow {
   finalized: boolean
   page_count: number
   gross_amount: number
+  files?: SubmissionFileRow[]
   duplicate_hint_json?: {
     has_duplicates?: boolean
     submission_item_ids?: number[]
@@ -1066,6 +1071,7 @@ export interface CreateSettlementSupplementPayload {
   page_count: number
   gross_amount: number
   status?: string
+  upload_session_ids?: string[]
 }
 
 export interface UpsertSupplementPermissionPayload {

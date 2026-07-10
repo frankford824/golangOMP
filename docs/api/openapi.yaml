@@ -22433,6 +22433,7 @@ paths:
                       id: { type: integer }
                       submission_id: { type: integer }
                       payee_user_id: { type: integer }
+                      entry_kind: { type: string, enum: [normal, supplement], description: Supplement items reuse submission files but are excluded from normal piecework settlement. }
                       order_no: { type: string }
                       template_id: { type: integer, nullable: true }
                       template_name_snapshot: { type: string }
@@ -23222,6 +23223,7 @@ paths:
                       type: object
                       properties:
                         id: { type: integer }
+                        submission_item_id: { type: integer, nullable: true, description: Linked supplement upload item; null for administrator-created manual rows. }
                         payee_user_id: { type: integer }
                         business_month: { type: string }
                         enabled: { type: boolean }
@@ -23467,6 +23469,10 @@ paths:
                         finalized: { type: boolean }
                         page_count: { type: integer }
                         gross_amount: { type: number }
+                        files:
+                          type: array
+                          description: Files uploaded through the normal OSS upload-directory and preview pipeline for this supplement.
+                          items: *AssetWorkbenchSubmissionFileRow
                         duplicate_hint_json:
                           type: object
                           additionalProperties: true
@@ -23496,12 +23502,12 @@ paths:
         '403': { description: Forbidden }
     post:
       summary: Create asset workbench settlement supplement
-      description: Creates one manual supplement row in the current Asia/Shanghai natural month. `supplement_date` records which historical day is being supplemented and does not control `business_month`.
+      description: Creates one supplement in the current Asia/Shanghai natural month. Settlement roles may create a manual row. Asset submitters may create only their own row, must supply uploaded `upload_session_ids`, and must still have an enabled current-month permission when the transaction locks the permission row. Uploaded supplements reuse normal upload directories, pricing, file query, and preview, but their linked submission item has `entry_kind=supplement` and is excluded from normal piecework settlement.
       tags: [AssetWorkbench, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
         auth_mode: bearer_authenticated
-        required_roles: [AssetSettlement, SuperAdmin]
+        required_roles: [AssetSubmitter, AssetManager, AssetSettlement, SuperAdmin]
       requestBody:
         required: true
         content:
@@ -23526,6 +23532,10 @@ paths:
                 page_count: { type: integer, minimum: 1 }
                 gross_amount: { type: number, minimum: 0 }
                 status: { type: string, enum: [draft, approved] }
+                upload_session_ids:
+                  type: array
+                  description: Uploaded asset-workbench sessions. Required for a non-settlement actor; all sessions must belong to the actor and use one upload-directory difficulty.
+                  items: { type: string }
       responses:
         '201':
           description: Created supplement
@@ -23537,7 +23547,50 @@ paths:
                   data: *AssetWorkbenchSettlementSupplementRow
         '400': { description: Invalid request }
         '401': { description: Unauthenticated }
-        '403': { description: Forbidden }
+        '403': { description: Forbidden, including permission closed before the linked upload was recorded }
+  /v1/asset-workbench/settlement/my:
+    get:
+      summary: Get my asset-workbench settlement and supplement upload state
+      description: Returns only the authenticated user's income rows, current-month supplement permission, and current-month supplement records with linked files for query and preview.
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetSubmitter, AssetManager, AssetTemplateAdmin, AssetSettlement, HRAdmin, SuperAdmin]
+      responses:
+        '200':
+          description: Personal settlement summary and current supplement state
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      current_month: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' }
+                      estimated_net_amount: { type: number }
+                      months:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            business_month: { type: string }
+                            item_count: { type: integer }
+                            page_count: { type: integer }
+                            gross_amount: { type: number }
+                            deduction_amount: { type: number }
+                            welfare_amount: { type: number }
+                            supplement_amount: { type: number }
+                            adjustment_amount: { type: number }
+                            net_amount: { type: number }
+                            confirmed: { type: boolean }
+                      supplement_permission: *AssetWorkbenchSupplementPermissionRow
+                      supplements:
+                        type: array
+                        items: *AssetWorkbenchSettlementSupplementRow
+        '401': { description: Unauthenticated }
+        '403': { description: Inactive membership or unsupported role }
   /v1/asset-workbench/settlement/supplements/excel:
     post:
       summary: Import monthly settlement supplements from Excel

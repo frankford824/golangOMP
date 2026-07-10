@@ -79,6 +79,9 @@ const (
 	AssetWorkbenchSubmissionStatusNeedsFix  = "needs_fix"
 	AssetWorkbenchSubmissionStatusVoided    = "voided"
 
+	AssetWorkbenchSubmissionEntryKindNormal     = "normal"
+	AssetWorkbenchSubmissionEntryKindSupplement = "supplement"
+
 	AssetWorkbenchPricingStatusPriced       = "priced"
 	AssetWorkbenchPricingStatusUnpriced     = "unpriced"
 	AssetWorkbenchPricingStatusPendingGrade = "pending_grade"
@@ -545,6 +548,7 @@ type AssetWorkbenchSubmissionItem struct {
 	ID                       int64           `json:"id" db:"id"`
 	SubmissionID             int64           `json:"submission_id" db:"submission_id"`
 	PayeeUserID              int64           `json:"payee_user_id" db:"payee_user_id"`
+	EntryKind                string          `json:"entry_kind" db:"entry_kind"`
 	OrderNo                  string          `json:"order_no" db:"order_no"`
 	TemplateID               *int64          `json:"template_id,omitempty" db:"template_id"`
 	TemplateNameSnapshot     string          `json:"template_name_snapshot" db:"template_name_snapshot"`
