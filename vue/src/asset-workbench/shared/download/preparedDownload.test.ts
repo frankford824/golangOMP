@@ -40,6 +40,19 @@ describe('prepared external material download', () => {
     await expect(waitForPreparedDownload(downloadInfo(), vi.fn(), { delay: async () => undefined })).rejects.toThrow('暂时无法下载')
   })
 
+  it('stops polling when a global download task is cancelled', async () => {
+    const controller = new AbortController()
+    const refresh = vi.fn<() => Promise<SystemAssetDownloadInfo>>()
+    controller.abort()
+
+    await expect(waitForPreparedDownload(
+      downloadInfo({ access_hint: 'external_netdisk_prepare_required' }),
+      refresh,
+      { signal: controller.signal },
+    )).rejects.toMatchObject({ name: 'AbortError' })
+    expect(refresh).not.toHaveBeenCalled()
+  })
+
   it('polls a pending preview until its derived image is ready', async () => {
     const pending = { asset_id: 42, status: 'pending', preparing: true, preview_available: false }
     const ready = { asset_id: 42, status: 'ready', preparing: false, preview_available: true, preview_url: 'https://oss.example.com/poster.webp' }

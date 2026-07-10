@@ -5,6 +5,7 @@ export interface PreparedDownloadWaitOptions {
   intervalMs?: number
   delay?: (milliseconds: number) => Promise<void>
   onWaiting?: (attempt: number) => void
+  signal?: AbortSignal
 }
 
 export function downloadIsPreparing(info: SystemAssetDownloadInfo | null | undefined): boolean {
@@ -21,12 +22,14 @@ export async function waitForPreparedDownload(
 
   const attempts = Math.max(1, options.attempts ?? 90)
   const intervalMs = Math.max(0, options.intervalMs ?? 2_000)
-  const delay = options.delay ?? ((milliseconds: number) => new Promise<void>((resolve) => window.setTimeout(resolve, milliseconds)))
+  const delay = options.delay ?? ((milliseconds: number) => abortableDelay(milliseconds, options.signal))
   let lastError: unknown
 
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    throwIfAborted(options.signal)
     options.onWaiting?.(attempt)
     await delay(intervalMs)
+    throwIfAborted(options.signal)
     let current: SystemAssetDownloadInfo
     try {
       current = await refresh()
@@ -56,14 +59,38 @@ export async function waitForPreparedPreview(
 
   const attempts = Math.max(1, options.attempts ?? 60)
   const intervalMs = Math.max(0, options.intervalMs ?? 3_000)
-  const delay = options.delay ?? ((milliseconds: number) => new Promise<void>((resolve) => window.setTimeout(resolve, milliseconds)))
+  const delay = options.delay ?? ((milliseconds: number) => abortableDelay(milliseconds, options.signal))
 
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    throwIfAborted(options.signal)
     options.onWaiting?.(attempt)
     await delay(intervalMs)
+    throwIfAborted(options.signal)
     const current = await refresh()
     if (current.preview_url || current.download_url || !previewIsPreparing(current)) return current
   }
 
   throw new Error('预览仍在生成中，请稍后再试')
+}
+
+function throwIfAborted(signal?: AbortSignal) {
+  if (!signal?.aborted) return
+  if (signal.reason instanceof Error) throw signal.reason
+  throw new DOMException('操作已取消', 'AbortError')
+}
+
+function abortableDelay(milliseconds: number, signal?: AbortSignal): Promise<void> {
+  throwIfAborted(signal)
+  return new Promise<void>((resolve, reject) => {
+    const timer = window.setTimeout(() => {
+      signal?.removeEventListener('abort', handleAbort)
+      resolve()
+    }, milliseconds)
+    const handleAbort = () => {
+      window.clearTimeout(timer)
+      signal?.removeEventListener('abort', handleAbort)
+      reject(signal?.reason instanceof Error ? signal.reason : new DOMException('操作已取消', 'AbortError'))
+    }
+    signal?.addEventListener('abort', handleAbort, { once: true })
+  })
 }

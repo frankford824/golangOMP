@@ -1,15 +1,24 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAutoAnimate } from '@formkit/auto-animate/vue'
 import { AlertCircle, CheckCircle2, ChevronDown, FileUp, LoaderCircle, UploadCloud, X } from 'lucide-vue-next'
 
 import { formatFileSize, formatInt } from '@aw/shared/format/number'
+import { useDownloadCenterStore } from '@aw/shared/download/downloadCenter.store'
 import { useUploadCenterStore, type UploadCenterItem, type UploadCenterStatus } from './uploadCenter.store'
 
 const router = useRouter()
 const uploadCenter = useUploadCenterStore()
+const downloadCenter = useDownloadCenterStore()
 const [listRef] = useAutoAnimate({ duration: 180, easing: 'ease-out' })
+
+watch(
+  () => uploadCenter.panelOpen,
+  (open) => {
+    if (open) downloadCenter.closePanel()
+  },
+)
 
 const shellVisible = computed(() => uploadCenter.hasItems)
 const ringStyle = computed(() => ({

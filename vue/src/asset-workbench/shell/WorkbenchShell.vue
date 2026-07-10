@@ -17,6 +17,7 @@ import { useWorkbenchSession } from '../app/useWorkbenchSession'
 import { assetWorkbenchApi } from '@aw/shared/api/assetWorkbenchApi'
 import { assetWorkbenchNotificationUnreadCount } from '@aw/app/notificationRealtime'
 import { currentBusinessMonth } from '../shared/format/businessMonth'
+import GlobalDownloadCenter from '../shared/download/GlobalDownloadCenter.vue'
 import GlobalUploadCenter from '../shared/drive/GlobalUploadCenter.vue'
 import IconfontActionIcon from '../shared/icons/IconfontActionIcon.vue'
 import MotionReveal from '../shared/ui/MotionReveal.vue'
@@ -348,6 +349,7 @@ watch(commandQuery, () => {
     </section>
 
     <GlobalUploadCenter />
+    <GlobalDownloadCenter />
 
     <div v-if="commandOpen" class="aw-command" role="dialog" aria-modal="true" aria-label="命令面板" @keydown="handleCommandKeydown">
       <div class="aw-command__panel">

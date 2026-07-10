@@ -4,6 +4,7 @@ import { RouterLink, RouterView, useRoute } from 'vue-router'
 import { HandCoins, HardDrive, ImagePlus, UserRound } from 'lucide-vue-next'
 
 import type { AssetWorkbenchBootstrap } from '@aw/shared/api/assetWorkbenchApi'
+import GlobalDownloadCenter from '../shared/download/GlobalDownloadCenter.vue'
 import GlobalUploadCenter from '../shared/drive/GlobalUploadCenter.vue'
 import MotionReveal from '../shared/ui/MotionReveal.vue'
 
@@ -76,5 +77,6 @@ const visibleNavItems = computed(() => {
     </main>
 
     <GlobalUploadCenter />
+    <GlobalDownloadCenter />
   </div>
 </template>

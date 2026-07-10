@@ -31,7 +31,6 @@ import {
   type MaterialFolderRow,
   type MaterialSourceFilter,
   type OverviewSearchRow,
-  type SystemAssetDownloadInfo,
   type SystemAssetRow,
   type SystemAssetPreviewMeta,
   type UploadDirectoryRow,
@@ -48,7 +47,8 @@ import WorkbenchFolderIcon from '@aw/shared/icons/WorkbenchFolderIcon.vue'
 import WorkbenchPreviewDialog from '@aw/shared/preview/WorkbenchPreviewDialog.vue'
 import { formatShanghaiDateTime } from '@aw/shared/format/dateTime'
 import { formatMoney } from '@aw/shared/format/number'
-import { previewIsPreparing, waitForPreparedDownload, waitForPreparedPreview } from '@aw/shared/download/preparedDownload'
+import { previewIsPreparing, waitForPreparedPreview } from '@aw/shared/download/preparedDownload'
+import { useGlobalDownload } from '@aw/shared/download/useGlobalDownload'
 import SpreadsheetWorkbench from '@aw/shared/spreadsheet/SpreadsheetWorkbench.vue'
 import type {
   WorkbenchSpreadsheetActionPayload,
@@ -87,6 +87,7 @@ interface MaterialFolderEntry {
 
 const session = useAssetWorkbenchSessionStore()
 const route = useRoute()
+const { queueDriveFile, queueMaterial } = useGlobalDownload()
 
 const UNASSIGNED_KEY = 'unassigned'
 const pageSize = 60
@@ -166,7 +167,6 @@ const batchJobsError = ref('')
 const selectedMaterialIds = ref<Set<string>>(new Set())
 const materialPreviewUrls = ref<Record<string, string>>({})
 const materialPreviewLoadingIds = ref<Set<string>>(new Set())
-const materialDownloadActiveIds = ref<Set<string>>(new Set())
 const activeMaterial = shallowRef<SystemAssetRow | null>(null)
 const publishingClientMaterial = ref(false)
 const batchUpdatingClientMaterials = ref(false)
@@ -1929,13 +1929,12 @@ function filePreviewRows(file: DriveFileRow): Array<[string, string]> {
   ]
 }
 
-async function downloadFile(file: DriveFileRow) {
-  try {
-    const meta = await assetWorkbenchApi.getFileDownload(file.id)
-    if (meta.download_url) window.open(meta.download_url, '_blank', 'noopener,noreferrer')
-  } catch (err) {
-    actionError.value = err instanceof Error ? err.message : '下载链接生成失败'
-  }
+function downloadFile(file: DriveFileRow) {
+  actionError.value = ''
+  const result = queueDriveFile(file)
+  notice.value = result.duplicate
+    ? '这个文件已在下载中心，无需重复点击'
+    : '已加入下载中心，可以继续使用其他页面'
 }
 
 async function downloadSelectedFiles() {
@@ -2524,57 +2523,12 @@ async function previewMaterial(asset: SystemAssetRow): Promise<SystemAssetPrevie
   return assetWorkbenchApi.previewMaterialAsset(asset)
 }
 
-async function downloadMaterial(asset: SystemAssetRow) {
-  const key = materialAssetKey(asset)
-  if (materialDownloadActiveIds.value.has(key)) {
-    notice.value = '这个文件正在准备下载，请稍候'
-    return
-  }
-  materialDownloadActiveIds.value = new Set(materialDownloadActiveIds.value).add(key)
+function downloadMaterial(asset: SystemAssetRow) {
   actionError.value = ''
-  notice.value = '正在生成下载地址'
-  try {
-    let meta = asset.material_id
-      ? await assetWorkbenchApi.downloadClientMaterial(asset.material_id)
-      : await assetWorkbenchApi.downloadMaterialAsset(asset)
-    if (asset.material_id) {
-      meta = await waitForPreparedDownload(
-        meta,
-        () => assetWorkbenchApi.downloadClientMaterial(asset.material_id as number),
-        {
-          onWaiting: (attempt) => {
-            notice.value = attempt === 1
-              ? '首次下载需要准备源文件，完成后会自动开始，请保持页面打开'
-              : '正在准备源文件，完成后会自动开始下载'
-          },
-        },
-      )
-    }
-    startMaterialBrowserDownload(meta)
-    notice.value = `已开始下载：${meta.filename || materialDisplayTitle(asset)}`
-  } catch (err) {
-    actionError.value = err instanceof Error ? err.message : '素材下载失败'
-  } finally {
-    const active = new Set(materialDownloadActiveIds.value)
-    active.delete(key)
-    materialDownloadActiveIds.value = active
-  }
-}
-
-function startMaterialBrowserDownload(meta: SystemAssetDownloadInfo) {
-  const url = String(meta.download_url ?? '').trim()
-  if (!url) throw new Error('当前文件暂时无法下载，请稍后重试')
-  if (String(meta.access_hint ?? '').includes('oss')) {
-    const link = document.createElement('a')
-    link.href = url
-    link.download = meta.filename || 'download'
-    link.rel = 'noopener'
-    document.body.appendChild(link)
-    link.click()
-    link.remove()
-    return
-  }
-  window.open(url, '_blank', 'noopener,noreferrer')
+  const result = queueMaterial(asset)
+  notice.value = result.duplicate
+    ? '这个素材已在下载中心，无需重复点击'
+    : '已加入下载中心，准备完成后会自动下载'
 }
 
 function materialPreviewRows(asset: SystemAssetRow, meta: SystemAssetPreviewMeta | null): Array<[string, string]> {

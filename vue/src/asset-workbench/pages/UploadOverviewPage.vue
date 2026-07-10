@@ -14,6 +14,7 @@ import {
 } from '@aw/shared/api/assetWorkbenchApi'
 import { formatShanghaiDateTime } from '@aw/shared/format/dateTime'
 import { formatMoney } from '@aw/shared/format/number'
+import { useGlobalDownload } from '@aw/shared/download/useGlobalDownload'
 import ArchiveVirtualThumb from '@aw/shared/drive/ArchiveVirtualThumb.vue'
 import { batchMutationFailureMessage } from '@aw/shared/drive/batchMutationFeedback'
 import { createArchiveEntryObjectUrl, downloadArchiveEntryBlob } from '@aw/shared/drive/archiveEntryBlob'
@@ -29,6 +30,7 @@ interface PieceworkDisplayState {
 
 const session = useAssetWorkbenchSessionStore()
 const route = useRoute()
+const { queueDriveFile } = useGlobalDownload()
 const capabilities = computed(() => new Set(session.bootstrap?.capabilities ?? []))
 const canManageDrive = computed(() => capabilities.value.has('asset.workbench.manage'))
 
@@ -630,17 +632,12 @@ function handlePreviewDownload() {
   if (selectedFile.value) void downloadFile(selectedFile.value)
 }
 
-async function downloadFile(file: DriveFileRow) {
-  actionLoading.value = true
+function downloadFile(file: DriveFileRow) {
   error.value = ''
-  try {
-    const meta = await assetWorkbenchApi.getFileDownload(file.id)
-    if (meta.download_url) window.open(meta.download_url, '_blank', 'noopener,noreferrer')
-  } catch (err) {
-    error.value = err instanceof Error ? err.message : '下载链接生成失败'
-  } finally {
-    actionLoading.value = false
-  }
+  const result = queueDriveFile(file)
+  notice.value = result.duplicate
+    ? '这个文件已在下载中心，无需重复点击'
+    : '已加入下载中心，可以继续查看其他记录'
 }
 
 async function downloadSelectedFiles() {
