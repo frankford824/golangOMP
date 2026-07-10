@@ -116,3 +116,10 @@ export function assetReplacementUnavailableReason(input: AssetReplacementGateInp
 export function canReplaceAssetResource(input: AssetReplacementGateInput): boolean {
   return assetReplacementUnavailableReason(input) === ''
 }
+
+export function assetReplacementSuccessMessage(input: AssetReplacementGateInput): string {
+  if (normalizeTaskStatus(input.taskStatus) === 'Completed') {
+    return '资源已修改，新版本已生效，任务状态未改变'
+  }
+  return '资源已修改，新版本已进入对应审核状态'
+}

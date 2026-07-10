@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  assetReplacementSuccessMessage,
   assetReplacementUnavailableReason,
   canReplaceAssetResource,
   taskStatusBlocksAssetReplacement,
@@ -22,6 +23,9 @@ describe('asset replacement gate', () => {
   it('allows replacing current resources after close but still blocks cancelled tasks', () => {
     expect(canReplaceAssetResource({ ...baseAsset, taskStatus: 'Completed' })).toBe(true)
     expect(assetReplacementUnavailableReason({ ...baseAsset, taskStatus: 'Completed' })).toBe('')
+    expect(assetReplacementSuccessMessage({ ...baseAsset, taskStatus: 'Completed' })).toBe(
+      '资源已修改，新版本已生效，任务状态未改变',
+    )
     expect(assetReplacementUnavailableReason({ ...baseAsset, taskStatus: 'Cancelled' })).toContain('已取消')
   })
 

@@ -862,7 +862,7 @@ import {
 import { predictionsApi, type PredictionSuggestion } from '@/services/api/predictionsApi'
 import { recordExperienceBehavior } from '@/services/experienceBehavior'
 import type { AssetResourceSource, BackendAsset, BackendAssetVersion } from '@/services/apiTypes'
-import { assetReplacementUnavailableReason, canReplaceAssetResource } from '@/domain/asset-replacement'
+import { assetReplacementSuccessMessage, assetReplacementUnavailableReason, canReplaceAssetResource } from '@/domain/asset-replacement'
 import { formatDateTimeBeijing } from '@/utils/date'
 import { resolveApiUserMessage } from '@/utils/api-message-zh'
 import { userAccountDisplay } from '@/domain/user-display'
@@ -2075,7 +2075,7 @@ async function handleReplacementFile(event: Event) {
         },
       },
     )
-    replacementStatus.value = '资源已修改，新版本已进入对应审核状态'
+    replacementStatus.value = assetReplacementSuccessMessage(assetReplacementGate(asset))
     await reload()
   } catch (err) {
     replacementStatus.value = ''

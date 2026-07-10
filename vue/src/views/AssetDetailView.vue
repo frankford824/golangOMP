@@ -259,7 +259,7 @@ import {
 } from '@/domain/asset-access'
 import { assetsApi, type AssetKind } from '@/services/api/assetsApi'
 import type { BackendAsset, BackendAssetVersion } from '@/services/apiTypes'
-import { assetReplacementUnavailableReason, canReplaceAssetResource } from '@/domain/asset-replacement'
+import { assetReplacementSuccessMessage, assetReplacementUnavailableReason, canReplaceAssetResource } from '@/domain/asset-replacement'
 import { formatDateTimeBeijing } from '@/utils/date'
 import { userAccountDisplay } from '@/domain/user-display'
 import { resolveApiUserMessage } from '@/utils/api-message-zh'
@@ -673,7 +673,7 @@ async function handleReplacementFile(event: Event) {
         },
       },
     )
-    replacementStatus.value = '资源已修改，新版本已进入对应审核状态'
+    replacementStatus.value = assetReplacementSuccessMessage(assetReplacementGate(row))
     await loadAsset()
   } catch (err) {
     replacementStatus.value = ''
