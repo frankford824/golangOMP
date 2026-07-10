@@ -15,6 +15,7 @@ import {
 import { formatShanghaiDateTime } from '@aw/shared/format/dateTime'
 import { formatMoney } from '@aw/shared/format/number'
 import ArchiveVirtualThumb from '@aw/shared/drive/ArchiveVirtualThumb.vue'
+import { batchMutationFailureMessage } from '@aw/shared/drive/batchMutationFeedback'
 import { createArchiveEntryObjectUrl, downloadArchiveEntryBlob } from '@aw/shared/drive/archiveEntryBlob'
 import DriveThumb from '@aw/shared/drive/DriveThumb.vue'
 import WorkbenchPreviewDialog from '@aw/shared/preview/WorkbenchPreviewDialog.vue'
@@ -677,9 +678,12 @@ async function moveSelectedFiles() {
   notice.value = ''
   try {
     const result = await assetWorkbenchApi.batchMoveFiles(ids, moveTargetDirectoryId.value, actionReason.value || '上传总览移动文件')
-    notice.value = result.failures?.length ? `已移动 ${result.files?.length || 0} 个，${result.failures.length} 个失败` : `已移动 ${result.files?.length || 0} 个文件`
-    selectedIds.value = new Set()
+    const movedCount = result.files?.length || 0
+    const failureMessage = batchMutationFailureMessage('移动', result.failures)
+    notice.value = movedCount ? `已移动 ${movedCount} 个文件` : ''
+    selectedIds.value = new Set((result.failures ?? []).map((failure) => failure.file_id))
     await loadFiles()
+    error.value = failureMessage
   } catch (err) {
     error.value = err instanceof Error ? err.message : '移动失败'
   } finally {
@@ -696,9 +700,12 @@ async function deleteSelectedFiles() {
   notice.value = ''
   try {
     const result = await assetWorkbenchApi.batchDeleteFiles(ids, reason)
-    notice.value = result.failures?.length ? `已删除 ${result.deleted?.length || 0} 个，${result.failures.length} 个失败` : `已删除 ${result.deleted?.length || 0} 个文件`
-    selectedIds.value = new Set()
+    const deletedCount = result.deleted?.length || 0
+    const failureMessage = batchMutationFailureMessage('删除', result.failures)
+    notice.value = deletedCount ? `已删除 ${deletedCount} 个文件` : ''
+    selectedIds.value = new Set((result.failures ?? []).map((failure) => failure.file_id))
     await loadFiles()
+    error.value = failureMessage
   } catch (err) {
     error.value = err instanceof Error ? err.message : '删除失败'
   } finally {
@@ -833,7 +840,8 @@ onBeforeUnmount(() => {
     <p v-if="error" class="aw-inline-alert aw-inline-alert--error">{{ error }}</p>
 
     <section v-if="selectedIds.size" class="aw-upload-ledger__batch" aria-label="批量操作">
-      <strong>已选择 {{ selectedIds.size }} 个作品</strong>
+      <strong>已选择 {{ selectedIds.size }} 个文件</strong>
+      <span class="aw-copy">文件夹上传按一件作品计价，移动或删除时必须勾选文件夹内的全部文件。</span>
       <button class="aw-secondary-button" type="button" :disabled="actionLoading" @click="downloadSelectedFiles">
         <Download :size="15" aria-hidden="true" />
         下载

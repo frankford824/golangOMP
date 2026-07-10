@@ -15,11 +15,12 @@ import { refreshUnreadCountKey } from '@aw/app/useWorkbenchUnread'
 import { useAssetWorkbenchBootstrap } from '../app/useAssetWorkbenchBootstrap'
 import { useWorkbenchSession } from '../app/useWorkbenchSession'
 import { assetWorkbenchApi } from '@aw/shared/api/assetWorkbenchApi'
-import { notificationsApi } from '@/services/api/notificationsApi'
+import { assetWorkbenchNotificationUnreadCount } from '@aw/app/notificationRealtime'
 import { currentBusinessMonth } from '../shared/format/businessMonth'
 import GlobalUploadCenter from '../shared/drive/GlobalUploadCenter.vue'
 import IconfontActionIcon from '../shared/icons/IconfontActionIcon.vue'
 import MotionReveal from '../shared/ui/MotionReveal.vue'
+import { V1SocketClient } from '@/services/ws/v1Socket'
 
 const SETTLEMENT_HUB_TAB_KEY = 'aw-settlement-hub-tab'
 
@@ -33,6 +34,7 @@ const commandNotice = ref('')
 const unreadCount = ref(0)
 const { bootstrap, loading, error, refresh } = useAssetWorkbenchBootstrap()
 const { logout } = useWorkbenchSession()
+let notificationSocket: V1SocketClient | null = null
 
 const dailyNavItems = computed(() => visibleDailyNavItems(bootstrap.value))
 const showSettingsGear = computed(() => hasSettingsAccess(bootstrap.value))
@@ -143,14 +145,22 @@ function navAriaLabel(item: { label: string; subtitle?: string }) {
 
 async function refreshUnreadCount() {
   try {
-    const res = await notificationsApi.unreadCount()
-    const root = res.data && typeof res.data === 'object' ? (res.data as Record<string, unknown>) : {}
-    const body = root.data && typeof root.data === 'object' ? (root.data as Record<string, unknown>) : root
-    const count = body.unread_count ?? body.count ?? 0
-    unreadCount.value = Number.isFinite(Number(count)) ? Number(count) : 0
+    unreadCount.value = await assetWorkbenchApi.notificationUnreadCount()
   } catch {
     unreadCount.value = 0
   }
+}
+
+function startNotificationRealtime() {
+  notificationSocket?.disconnect()
+  notificationSocket = new V1SocketClient({
+    onMessage: (event) => {
+      const count = assetWorkbenchNotificationUnreadCount(event)
+      if (count !== null) unreadCount.value = count
+    },
+    onFallbackPoll: () => void refreshUnreadCount(),
+  })
+  notificationSocket.connect()
 }
 
 async function openCommand() {
@@ -229,9 +239,14 @@ onMounted(() => {
   window.addEventListener('keydown', handleKeydown)
   void refresh()
   void refreshUnreadCount()
+  startNotificationRealtime()
 })
 
-onBeforeUnmount(() => window.removeEventListener('keydown', handleKeydown))
+onBeforeUnmount(() => {
+  window.removeEventListener('keydown', handleKeydown)
+  notificationSocket?.disconnect()
+  notificationSocket = null
+})
 
 watch(
   () => route.path,

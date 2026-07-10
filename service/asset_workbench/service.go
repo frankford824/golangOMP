@@ -865,6 +865,7 @@ type SettlementReportRow struct {
 	CreatorName       string                             `json:"creator_name"`
 	JobGrade          string                             `json:"job_grade"`
 	CreatedDate       string                             `json:"created_date"`
+	CreatedDateEnd    string                             `json:"created_date_end"`
 	OrderCount        int                                `json:"order_count"`
 	ItemCount         int                                `json:"item_count"`
 	PageCount         int                                `json:"page_count"`
@@ -3152,6 +3153,7 @@ func (s *Service) CreateSubmission(ctx context.Context, actor domain.RequestActo
 		}
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to create asset workbench submission.", err.Error())
 	}
+	s.notifySubmissionCreated(ctx, actor, profile, detail)
 	return detail, nil
 }
 
@@ -3315,6 +3317,28 @@ func (s *Service) UpdateSubmissionItemQC(ctx context.Context, actor domain.Reque
 			return nil, appErr
 		}
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to update item QC status.", err.Error())
+	}
+	if s.notifications != nil && before.PayeeUserID > 0 {
+		notificationAt := s.nowFn().UTC()
+		payload := mustJSON(map[string]interface{}{
+			"source":          "asset_workbench",
+			"action":          "open_drive",
+			"item_id":         before.ID,
+			"submission_id":   before.SubmissionID,
+			"payee_user_id":   before.PayeeUserID,
+			"qc_status":       updated.QCStatus,
+			"reason":          reason,
+			"reviewed_by":     actor.ID,
+			"reviewed_at_utc": notificationAt,
+		})
+		_, _, _ = s.notifications.CreateDedupedNotification(
+			ctx,
+			before.PayeeUserID,
+			domain.NotificationTypeAssetWorkbenchQCUpdated,
+			payload,
+			"asset_workbench_qc_updated",
+			fmt.Sprintf("asset_workbench_qc_updated:%d:%s:%d", before.ID, updated.QCStatus, notificationAt.UnixNano()),
+		)
 	}
 	return updated, nil
 }
@@ -3750,19 +3774,16 @@ func (s *Service) BatchMoveFiles(ctx context.Context, actor domain.RequestActor,
 		byID[file.ID] = file
 	}
 	result := &BatchFileMutationResult{}
-	for _, fileID := range fileIDs {
-		file := byID[fileID]
-		if file == nil {
-			result.Failures = append(result.Failures, BatchFileMutationFailure{FileID: fileID, Reason: "file not found"})
-			continue
-		}
-		moved, appErr := s.moveSubmissionFile(ctx, actor, file, directory, strings.TrimSpace(params.Reason))
+	groups := s.completeSubmissionFileMutationGroups(ctx, fileIDs, byID, result)
+	for _, group := range groups {
+		moved, appErr := s.moveSubmissionFileGroup(ctx, actor, group, directory, strings.TrimSpace(params.Reason))
 		if appErr != nil {
-			result.Failures = append(result.Failures, BatchFileMutationFailure{FileID: fileID, Reason: appErr.Message})
+			appendBatchFileMutationFailures(result, group, appErr.Message)
 			continue
 		}
-		result.Files = append(result.Files, moved)
+		result.Files = append(result.Files, moved...)
 	}
+	orderBatchFileMutationFailures(result, fileIDs)
 	return result, nil
 }
 
@@ -3790,141 +3811,253 @@ func (s *Service) BatchDeleteFiles(ctx context.Context, actor domain.RequestActo
 		byID[file.ID] = file
 	}
 	result := &BatchFileMutationResult{}
+	groups := s.completeSubmissionFileMutationGroups(ctx, fileIDs, byID, result)
+	for _, group := range groups {
+		if appErr := s.deleteSubmissionFileGroup(ctx, actor, group, reason); appErr != nil {
+			appendBatchFileMutationFailures(result, group, appErr.Message)
+			continue
+		}
+		for _, file := range group {
+			result.Deleted = append(result.Deleted, file.ID)
+		}
+	}
+	orderBatchFileMutationFailures(result, fileIDs)
+	return result, nil
+}
+
+func (s *Service) completeSubmissionFileMutationGroups(ctx context.Context, fileIDs []int64, byID map[int64]*domain.AssetWorkbenchSubmissionFile, result *BatchFileMutationResult) [][]*domain.AssetWorkbenchSubmissionFile {
+	selectedByItem := map[int64][]*domain.AssetWorkbenchSubmissionFile{}
+	itemOrder := make([]int64, 0)
 	for _, fileID := range fileIDs {
 		file := byID[fileID]
 		if file == nil {
 			result.Failures = append(result.Failures, BatchFileMutationFailure{FileID: fileID, Reason: "file not found"})
 			continue
 		}
-		if appErr := s.deleteSubmissionFile(ctx, actor, file, reason); appErr != nil {
-			result.Failures = append(result.Failures, BatchFileMutationFailure{FileID: fileID, Reason: appErr.Message})
+		if _, exists := selectedByItem[file.SubmissionItemID]; !exists {
+			itemOrder = append(itemOrder, file.SubmissionItemID)
+		}
+		selectedByItem[file.SubmissionItemID] = append(selectedByItem[file.SubmissionItemID], file)
+	}
+
+	groups := make([][]*domain.AssetWorkbenchSubmissionFile, 0, len(itemOrder))
+	for _, itemID := range itemOrder {
+		selected := selectedByItem[itemID]
+		active, err := s.repo.ListSubmissionFiles(ctx, itemID)
+		if err != nil {
+			appendBatchFileMutationFailures(result, selected, "Failed to load all files in the priced work.")
 			continue
 		}
-		result.Deleted = append(result.Deleted, fileID)
+		selectedIDs := make(map[int64]struct{}, len(selected))
+		for _, file := range selected {
+			selectedIDs[file.ID] = struct{}{}
+		}
+		complete := len(active) > 0 && len(active) == len(selectedIDs)
+		if complete {
+			for _, file := range active {
+				if file == nil {
+					continue
+				}
+				if _, ok := selectedIDs[file.ID]; !ok {
+					complete = false
+					break
+				}
+			}
+		}
+		if !complete {
+			appendBatchFileMutationFailures(result, selected, "All files in one priced work must be selected together.")
+			continue
+		}
+		groups = append(groups, active)
 	}
-	return result, nil
+	return groups
 }
 
-func (s *Service) moveSubmissionFile(ctx context.Context, actor domain.RequestActor, file *domain.AssetWorkbenchSubmissionFile, directory *domain.AssetWorkbenchUploadDirectory, reason string) (*domain.AssetWorkbenchSubmissionFile, *domain.AppError) {
-	if file == nil || directory == nil {
-		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "file and upload directory are required.", nil)
+func appendBatchFileMutationFailures(result *BatchFileMutationResult, files []*domain.AssetWorkbenchSubmissionFile, reason string) {
+	for _, file := range files {
+		if file == nil {
+			continue
+		}
+		result.Failures = append(result.Failures, BatchFileMutationFailure{FileID: file.ID, Reason: reason})
+	}
+}
+
+func orderBatchFileMutationFailures(result *BatchFileMutationResult, fileIDs []int64) {
+	order := make(map[int64]int, len(fileIDs))
+	for index, fileID := range fileIDs {
+		if _, exists := order[fileID]; !exists {
+			order[fileID] = index
+		}
+	}
+	sort.SliceStable(result.Failures, func(i, j int) bool {
+		return order[result.Failures[i].FileID] < order[result.Failures[j].FileID]
+	})
+}
+
+func (s *Service) moveSubmissionFileGroup(ctx context.Context, actor domain.RequestActor, files []*domain.AssetWorkbenchSubmissionFile, directory *domain.AssetWorkbenchUploadDirectory, reason string) ([]*domain.AssetWorkbenchSubmissionFile, *domain.AppError) {
+	if len(files) == 0 || directory == nil {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "files and upload directory are required.", nil)
+	}
+	item, appErr := s.loadMutableSubmissionItem(ctx, files[0].SubmissionItemID)
+	if appErr != nil {
+		return nil, appErr
 	}
 	if s.oss == nil || !s.oss.Enabled() {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "OSS direct move is not enabled.", nil)
 	}
-	oldKey := strings.TrimSpace(file.ObjectKey)
-	if oldKey == "" {
-		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "submission file object key is empty.", map[string]interface{}{"file_id": file.ID})
+	repriced, appErr := s.buildSubmissionItemForDifficulty(ctx, item, directory.DifficultyClass)
+	if appErr != nil {
+		return nil, appErr
 	}
-	next := *file
-	directoryID := directory.ID
-	next.UploadDirectoryID = &directoryID
-	next.UploadDirectoryName = directory.Name
-	next.UploadDirectoryPrefix = directory.OSSPrefix
-	next.UploadDirectoryDifficultyClass = directory.DifficultyClass
-	next.ObjectKey = s.buildMovedFileObjectKey(s.nowFn().UTC(), file, directory)
-	if strings.TrimSpace(next.PreviewKey) == oldKey {
-		next.PreviewKey = next.ObjectKey
+
+	now := s.nowFn().UTC()
+	nextFiles := make([]*domain.AssetWorkbenchSubmissionFile, 0, len(files))
+	copiedKeys := make([]string, 0, len(files))
+	oldKeys := make([]string, 0, len(files))
+	cleanupCopied := func() {
+		for _, key := range copiedKeys {
+			_ = s.oss.DeleteObject(ctx, key)
+		}
 	}
-	if next.ObjectKey == oldKey {
-		return &next, nil
+	for _, file := range files {
+		if file == nil || file.SubmissionItemID != item.ID {
+			cleanupCopied()
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "All files must belong to the same priced work.", nil)
+		}
+		oldKey := strings.TrimSpace(file.ObjectKey)
+		if oldKey == "" {
+			cleanupCopied()
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "submission file object key is empty.", map[string]interface{}{"file_id": file.ID})
+		}
+		next := *file
+		directoryID := directory.ID
+		next.UploadDirectoryID = &directoryID
+		next.UploadDirectoryName = directory.Name
+		next.UploadDirectoryPrefix = directory.OSSPrefix
+		next.UploadDirectoryDifficultyClass = directory.DifficultyClass
+		next.ObjectKey = s.buildMovedFileObjectKey(now, file, directory)
+		if strings.TrimSpace(next.PreviewKey) == oldKey {
+			next.PreviewKey = next.ObjectKey
+		}
+		if next.ObjectKey != oldKey {
+			if err := s.oss.CopyObject(ctx, oldKey, next.ObjectKey); err != nil {
+				cleanupCopied()
+				return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Failed to copy file to target upload directory.", err.Error())
+			}
+			copiedKeys = append(copiedKeys, next.ObjectKey)
+			oldKeys = append(oldKeys, oldKey)
+		}
+		nextFiles = append(nextFiles, &next)
 	}
-	if err := s.oss.CopyObject(ctx, oldKey, next.ObjectKey); err != nil {
-		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Failed to copy file to target upload directory.", err.Error())
-	}
-	var updated *domain.AssetWorkbenchSubmissionFile
+
+	updatedFiles := make([]*domain.AssetWorkbenchSubmissionFile, 0, len(nextFiles))
 	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
-		var err error
-		updated, err = s.repo.UpdateSubmissionFileLocation(ctx, tx, &next)
+		for index, next := range nextFiles {
+			updated, err := s.repo.UpdateSubmissionFileLocation(ctx, tx, next)
+			if err != nil {
+				return err
+			}
+			updatedFiles = append(updatedFiles, updated)
+			if err := s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventFileMoved, domain.AssetWorkbenchEntitySubmissionFile, &next.ID, files[index], updated, reason); err != nil {
+				return err
+			}
+		}
+		updatedItem, err := s.repo.UpdateSubmissionItemEditableFields(ctx, tx, repriced)
 		if err != nil {
 			return err
 		}
-		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventFileMoved, domain.AssetWorkbenchEntitySubmissionFile, &file.ID, file, updated, reason)
+		if err := s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventItemRepriced, domain.AssetWorkbenchEntitySubmissionItem, &item.ID, item, updatedItem, reason); err != nil {
+			return err
+		}
+		return s.repo.RefreshSubmissionTotals(ctx, tx, item.SubmissionID)
 	}); err != nil {
+		cleanupCopied()
 		if appErr := asAppError(err); appErr != nil {
 			return nil, appErr
 		}
-		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to move submission file.", err.Error())
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to move submission files.", err.Error())
 	}
-	_ = s.oss.DeleteObject(ctx, oldKey)
-	return updated, nil
+	for _, oldKey := range oldKeys {
+		_ = s.oss.DeleteObject(ctx, oldKey)
+	}
+	return updatedFiles, nil
 }
 
-func (s *Service) deleteSubmissionFile(ctx context.Context, actor domain.RequestActor, file *domain.AssetWorkbenchSubmissionFile, reason string) *domain.AppError {
-	if file == nil {
-		return domain.NewAppError(domain.ErrCodeInvalidRequest, "file is required.", nil)
+func (s *Service) buildSubmissionItemForDifficulty(ctx context.Context, before *domain.AssetWorkbenchSubmissionItem, difficulty string) (*domain.AssetWorkbenchSubmissionItem, *domain.AppError) {
+	profile, appErr := s.pricingProfileForItem(ctx, before)
+	if appErr != nil {
+		return nil, appErr
 	}
-	if file.OwnerUserID != actor.ID && !actorHasAny(actor, domain.RoleAssetManager, domain.RoleSuperAdmin) {
-		return domain.NewAppError(domain.ErrCodePermissionDenied, "Submission file is not owned by current user.", nil)
+	templates := make([]*domain.AssetWorkbenchTemplate, 0, 1)
+	if before.TemplateID != nil {
+		templates = append(templates, &domain.AssetWorkbenchTemplate{
+			ID:              *before.TemplateID,
+			Name:            before.TemplateNameSnapshot,
+			Category:        before.CategorySnapshot,
+			DifficultyClass: difficulty,
+		})
 	}
-	item, appErr := s.loadMutableSubmissionItem(ctx, file.SubmissionItemID)
+	next, appErr := s.buildSubmissionItem(ctx, before.PayeeUserID, before.SubmissionID, before.SubmittedAt, before.BusinessMonth, profile, CreateSubmissionItemParams{
+		OrderNo:         before.OrderNo,
+		DifficultyClass: difficulty,
+		Finalized:       before.Finalized,
+		PageCount:       before.PageCount,
+		ItemCount:       before.ItemCount,
+	}, templates...)
+	if appErr != nil {
+		return nil, appErr
+	}
+	next.ID = before.ID
+	next.TemplateID = before.TemplateID
+	next.TemplateNameSnapshot = before.TemplateNameSnapshot
+	next.CategorySnapshot = before.CategorySnapshot
+	next.QCStatus = before.QCStatus
+	next.SettlementStatus = before.SettlementStatus
+	next.CurrentSettlementBatchID = before.CurrentSettlementBatchID
+	next.VoidedAt = before.VoidedAt
+	next.VoidedBy = before.VoidedBy
+	next.VoidReason = before.VoidReason
+	return next, nil
+}
+
+func (s *Service) deleteSubmissionFileGroup(ctx context.Context, actor domain.RequestActor, files []*domain.AssetWorkbenchSubmissionFile, reason string) *domain.AppError {
+	if len(files) == 0 {
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "files are required.", nil)
+	}
+	for _, file := range files {
+		if file == nil {
+			return domain.NewAppError(domain.ErrCodeInvalidRequest, "file is required.", nil)
+		}
+		if file.OwnerUserID != actor.ID && !actorHasAny(actor, domain.RoleAssetManager, domain.RoleSuperAdmin) {
+			return domain.NewAppError(domain.ErrCodePermissionDenied, "Submission file is not owned by current user.", nil)
+		}
+	}
+	item, appErr := s.loadMutableSubmissionItem(ctx, files[0].SubmissionItemID)
 	if appErr != nil {
 		return appErr
 	}
-	var err error
-	activeFiles, err := s.repo.ListSubmissionFiles(ctx, item.ID)
-	if err != nil {
-		return domain.NewAppError(domain.ErrCodeInternalError, "Failed to list remaining submission files.", err.Error())
-	}
-	remaining := make([]*domain.AssetWorkbenchSubmissionFile, 0, len(activeFiles))
-	for _, candidate := range activeFiles {
-		if candidate == nil || candidate.ID == file.ID {
-			continue
-		}
-		remaining = append(remaining, candidate)
-	}
 	before := *item
-	var repriced *domain.AssetWorkbenchSubmissionItem
-	if len(remaining) > 0 {
-		nextCount := len(remaining)
-		if item.PageCount != nextCount || item.ItemCount != nextCount {
-			profile, appErr := s.pricingProfileForItem(ctx, item)
-			if appErr != nil {
-				return appErr
-			}
-			req := CreateSubmissionItemParams{
-				OrderNo:         item.OrderNo,
-				DifficultyClass: item.DifficultyClass,
-				Finalized:       item.Finalized,
-				PageCount:       nextCount,
-				ItemCount:       nextCount,
-			}
-			if item.TemplateID != nil {
-				req.TemplateID = *item.TemplateID
-			}
-			repriced, appErr = s.buildSubmissionItem(ctx, item.PayeeUserID, item.SubmissionID, item.SubmittedAt, item.BusinessMonth, profile, req)
-			if appErr != nil {
-				return appErr
-			}
-			repriced.ID = item.ID
-		}
-	}
 	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
 		now := s.nowFn().UTC()
-		if err := s.repo.DeleteSubmissionFile(ctx, tx, file.ID, actor.ID, reason, now); err != nil {
+		for _, file := range files {
+			if file.SubmissionItemID != item.ID {
+				return domain.NewAppError(domain.ErrCodeInvalidRequest, "All files must belong to the same priced work.", nil)
+			}
+			if err := s.repo.DeleteSubmissionFile(ctx, tx, file.ID, actor.ID, reason, now); err != nil {
+				return err
+			}
+			if err := s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventFileDeleted, domain.AssetWorkbenchEntitySubmissionFile, &file.ID, file, nil, reason); err != nil {
+				return err
+			}
+		}
+		updated, err := s.repo.VoidSubmissionItem(ctx, tx, item.ID, actor.ID, "all files deleted: "+reason, now)
+		if err != nil {
 			return err
 		}
-		if err := s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventFileDeleted, domain.AssetWorkbenchEntitySubmissionFile, &file.ID, file, nil, reason); err != nil {
+		if err := s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventItemVoided, domain.AssetWorkbenchEntitySubmissionItem, &item.ID, &before, updated, reason); err != nil {
 			return err
 		}
-		if len(remaining) == 0 && item.VoidedAt == nil {
-			updated, err := s.repo.VoidSubmissionItem(ctx, tx, item.ID, actor.ID, "all files deleted: "+reason, now)
-			if err != nil {
-				return err
-			}
-			if err := s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventItemVoided, domain.AssetWorkbenchEntitySubmissionItem, &item.ID, &before, updated, reason); err != nil {
-				return err
-			}
-		} else if repriced != nil {
-			updated, err := s.repo.UpdateSubmissionItemEditableFields(ctx, tx, repriced)
-			if err != nil {
-				return err
-			}
-			if err := s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventItemRepriced, domain.AssetWorkbenchEntitySubmissionItem, &item.ID, &before, updated, reason); err != nil {
-				return err
-			}
-		}
-		return s.repo.RefreshSubmissionTotals(ctx, tx, file.SubmissionID)
+		return s.repo.RefreshSubmissionTotals(ctx, tx, item.SubmissionID)
 	}); err != nil {
 		if appErr := asAppError(err); appErr != nil {
 			return appErr
@@ -4628,6 +4761,27 @@ func (s *Service) ConfirmSettlementBatch(ctx context.Context, actor domain.Reque
 		}
 		return domain.NewAppError(domain.ErrCodeInternalError, "Failed to confirm settlement batch.", err.Error())
 	}
+	if s.notifications != nil {
+		for payeeID := range payoutSnapshots {
+			payload := mustJSON(map[string]interface{}{
+				"source":          "asset_workbench",
+				"action":          "open_settlement",
+				"batch_id":        batchID,
+				"payee_user_id":   payeeID,
+				"business_months": settlementItemMonthsForPayee(items, payeeID),
+				"status":          domain.AssetWorkbenchBatchStatusConfirmed,
+				"confirmed_at":    confirmedAt,
+			})
+			_, _, _ = s.notifications.CreateDedupedNotification(
+				ctx,
+				payeeID,
+				domain.NotificationTypeAssetWorkbenchSettlementUpdated,
+				payload,
+				"asset_workbench_settlement_updated",
+				fmt.Sprintf("asset_workbench_settlement_confirmed:%d:%d", batchID, payeeID),
+			)
+		}
+	}
 	return nil
 }
 
@@ -4883,11 +5037,7 @@ func (s *Service) ListSupplementEligibleMonths(ctx context.Context, actor domain
 	if payeeUserID <= 0 {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "payee_user_id is required.", nil)
 	}
-	months, err := s.repo.ListConfirmedSettlementMonthsByPayee(ctx, payeeUserID)
-	if err != nil {
-		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to list supplement eligible months.", err.Error())
-	}
-	return months, nil
+	return []string{s.businessMonth(s.nowFn().UTC())}, nil
 }
 
 func (s *Service) UpsertSupplementPermission(ctx context.Context, actor domain.RequestActor, params UpsertSupplementPermissionParams) (*domain.AssetWorkbenchSupplementPermission, *domain.AppError) {
@@ -4901,17 +5051,12 @@ func (s *Service) UpsertSupplementPermission(ctx context.Context, actor domain.R
 	if appErr != nil {
 		return nil, appErr
 	}
-	if item.Enabled {
-		hasSettlement, err := s.repo.HasConfirmedSettlementForPayeeMonth(ctx, item.PayeeUserID, item.BusinessMonth)
-		if err != nil {
-			return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to check supplement eligible month.", err.Error())
-		}
-		if !hasSettlement {
-			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Supplement permission can only be opened for a confirmed settlement month.", map[string]interface{}{
-				"payee_user_id":  item.PayeeUserID,
-				"business_month": item.BusinessMonth,
-			})
-		}
+	if item.Enabled && item.BusinessMonth != s.businessMonth(s.nowFn().UTC()) {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Supplement permission can only be opened for the current natural month.", map[string]interface{}{
+			"payee_user_id":          item.PayeeUserID,
+			"business_month":         item.BusinessMonth,
+			"current_business_month": s.businessMonth(s.nowFn().UTC()),
+		})
 	}
 	var saved *domain.AssetWorkbenchSupplementPermission
 	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
@@ -4923,6 +5068,26 @@ func (s *Service) UpsertSupplementPermission(ctx context.Context, actor domain.R
 		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventSupplementPermissionChanged, domain.AssetWorkbenchEntitySupplementPermission, &saved.ID, nil, saved, item.Reason)
 	}); err != nil {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to update supplement permission.", err.Error())
+	}
+	if s.notifications != nil && saved.PayeeUserID > 0 {
+		payload := mustJSON(map[string]interface{}{
+			"source":         "asset_workbench",
+			"action":         "open_settlement",
+			"permission_id":  saved.ID,
+			"payee_user_id":  saved.PayeeUserID,
+			"business_month": saved.BusinessMonth,
+			"enabled":        saved.Enabled,
+			"reason":         saved.Reason,
+			"updated_by":     actor.ID,
+		})
+		_, _, _ = s.notifications.CreateDedupedNotification(
+			ctx,
+			saved.PayeeUserID,
+			domain.NotificationTypeAssetWorkbenchSupplementAccess,
+			payload,
+			"asset_workbench_supplement_access",
+			fmt.Sprintf("asset_workbench_supplement_access:%d:%t:%d", saved.ID, saved.Enabled, s.nowFn().UTC().UnixNano()),
+		)
 	}
 	return saved, nil
 }
@@ -4952,9 +5117,19 @@ func (s *Service) CreateSettlementSupplement(ctx context.Context, actor domain.R
 	if !actorHasAny(actor, domain.RoleAssetSettlement, domain.RoleSuperAdmin) {
 		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only settlement roles can create settlement supplements.", nil)
 	}
+	currentBusinessMonth := s.businessMonth(s.nowFn().UTC())
+	if strings.TrimSpace(params.BusinessMonth) == "" {
+		params.BusinessMonth = currentBusinessMonth
+	}
 	item, appErr := normalizeSettlementSupplement(actor.ID, params)
 	if appErr != nil {
 		return nil, appErr
+	}
+	if item.BusinessMonth != currentBusinessMonth {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Settlement supplements must be recorded in the current natural month.", map[string]interface{}{
+			"business_month":         item.BusinessMonth,
+			"current_business_month": currentBusinessMonth,
+		})
 	}
 	if appErr := s.ensureDifficultyClass(ctx, item.DifficultyClass, false); appErr != nil {
 		return nil, appErr
@@ -7036,11 +7211,76 @@ func (s *Service) notifyProfileCompletionRequired(ctx context.Context, profile *
 	_, _, _ = s.notifications.CreateDedupedNotification(
 		ctx,
 		profile.UserID,
-		domain.NotificationTypeSystemBroadcast,
+		domain.NotificationTypeAssetWorkbenchProfileIncomplete,
 		payload,
 		"asset_workbench_profile_completion",
 		fmt.Sprintf("asset_workbench_profile_completion:%d", profile.UserID),
 	)
+}
+
+func (s *Service) notifySubmissionCreated(ctx context.Context, actor domain.RequestActor, profile *domain.AssetWorkbenchProfile, detail *SubmissionDetail) {
+	if s.notifications == nil || s.repo == nil || detail == nil || detail.Submission == nil {
+		return
+	}
+	fileCount := 0
+	for _, item := range detail.Items {
+		fileCount += len(item.Files)
+	}
+	uploaderName := strings.TrimSpace(actor.Username)
+	if profile != nil && strings.TrimSpace(profile.RealName) != "" {
+		uploaderName = strings.TrimSpace(profile.RealName)
+	}
+	if uploaderName == "" {
+		uploaderName = fmt.Sprintf("用户 %d", actor.ID)
+	}
+	payload := mustJSON(map[string]interface{}{
+		"source":         "asset_workbench",
+		"action":         "open_upload_overview",
+		"submission_id":  detail.Submission.ID,
+		"submission_no":  detail.Submission.SubmissionNo,
+		"business_month": detail.Submission.BusinessMonth,
+		"uploader_id":    actor.ID,
+		"uploader_name":  uploaderName,
+		"item_count":     len(detail.Items),
+		"file_count":     fileCount,
+	})
+	pageSize := 100
+	for page := 1; ; page++ {
+		members, total, err := s.repo.ListMembers(ctx, repo.AssetWorkbenchMemberFilter{
+			Status:   domain.AppMembershipStatusActive,
+			Page:     page,
+			PageSize: pageSize,
+		})
+		if err != nil {
+			return
+		}
+		for _, member := range members {
+			if member == nil || member.UserID <= 0 || member.UserID == actor.ID || !assetWorkbenchNotificationManager(member.Roles) {
+				continue
+			}
+			_, _, _ = s.notifications.CreateDedupedNotification(
+				ctx,
+				member.UserID,
+				domain.NotificationTypeAssetWorkbenchSubmissionCreated,
+				payload,
+				"asset_workbench_submission_created",
+				fmt.Sprintf("asset_workbench_submission_created:%d", detail.Submission.ID),
+			)
+		}
+		if int64(page*pageSize) >= total || len(members) == 0 {
+			return
+		}
+	}
+}
+
+func assetWorkbenchNotificationManager(roles []domain.Role) bool {
+	for _, role := range roles {
+		switch role {
+		case domain.RoleAssetManager, domain.RoleAssetSettlement, domain.RoleSuperAdmin:
+			return true
+		}
+	}
+	return false
 }
 
 func missingProfileFields(profile *domain.AssetWorkbenchProfile) []string {
@@ -7787,6 +8027,9 @@ func setSettlementReportCreatedDate(row *SettlementReportRow, value time.Time, l
 	date := value.In(loc).Format("2006-01-02")
 	if row.CreatedDate == "" || date < row.CreatedDate {
 		row.CreatedDate = date
+	}
+	if row.CreatedDateEnd == "" || date > row.CreatedDateEnd {
+		row.CreatedDateEnd = date
 	}
 }
 
@@ -9819,21 +10062,11 @@ func normalizeSettlementSupplement(actorID int64, params CreateSettlementSupplem
 	businessMonth := strings.TrimSpace(params.BusinessMonth)
 	supplementDate := strings.TrimSpace(params.SupplementDate)
 	if supplementDate != "" {
-		normalizedDate, parsedDate, ok := normalizeSupplementDate(supplementDate)
+		normalizedDate, _, ok := normalizeSupplementDate(supplementDate)
 		if !ok {
 			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "supplement_date must use YYYY-MM-DD.", nil)
 		}
 		supplementDate = normalizedDate
-		derivedMonth := parsedDate.Format("2006-01")
-		if businessMonth == "" {
-			businessMonth = derivedMonth
-		}
-		if businessMonth != derivedMonth {
-			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "supplement_date must belong to business_month.", map[string]string{
-				"supplement_date": supplementDate,
-				"business_month":  businessMonth,
-			})
-		}
 	}
 	if _, err := time.Parse("2006-01", businessMonth); err != nil {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "business_month must use YYYY-MM.", nil)

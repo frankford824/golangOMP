@@ -13,6 +13,7 @@ import (
 	"github.com/DATA-DOG/go-sqlmock"
 
 	"workflow/domain"
+	coreRepo "workflow/repo"
 )
 
 func TestNotificationRepoCreateWritesApplicationCreatedAt(t *testing.T) {
@@ -55,6 +56,57 @@ func TestNotificationRepoCreateWritesApplicationCreatedAt(t *testing.T) {
 	}
 	if err := sqlTx.Rollback(); err != nil {
 		t.Fatalf("Rollback() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("ExpectationsWereMet() error = %v", err)
+	}
+}
+
+func TestNotificationRepoScopesAssetWorkbenchRows(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	columns := []string{"id", "user_id", "notification_type", "payload", "is_read", "read_at", "created_at"}
+	createdAt := time.Date(2026, 7, 9, 10, 0, 0, 0, time.UTC)
+	prefix := domain.NotificationTypeAssetWorkbenchNotificationPrefix
+	mock.ExpectQuery(regexp.QuoteMeta(notificationSelectSQL()+` WHERE user_id = ? AND LEFT(notification_type, ?) = ?
+		ORDER BY created_at DESC, id DESC
+		LIMIT ?`)).
+		WithArgs(int64(77), len(prefix), prefix, 5).
+		WillReturnRows(sqlmock.NewRows(columns).AddRow(1, 77, string(domain.NotificationTypeAssetWorkbenchProfileIncomplete), []byte(`{"source":"asset_workbench"}`), false, nil, createdAt))
+	mock.ExpectQuery(regexp.QuoteMeta(notificationSelectSQL()+` WHERE user_id = ? AND LEFT(notification_type, ?) <> ?
+		ORDER BY created_at DESC, id DESC
+		LIMIT ?`)).
+		WithArgs(int64(77), len(prefix), prefix, 5).
+		WillReturnRows(sqlmock.NewRows(columns).AddRow(2, 77, string(domain.NotificationTypeTaskPendingAudit), []byte(`{"task_id":1}`), false, nil, createdAt))
+	mock.ExpectExec(regexp.QuoteMeta(`
+		UPDATE notifications
+		   SET is_read = 1, read_at = COALESCE(read_at, ?)
+		 WHERE user_id = ? AND is_read = 0 AND LEFT(notification_type, ?) = ?`)).
+		WithArgs(createdAt, int64(77), len(prefix), prefix).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*) FROM notifications WHERE user_id = ? AND is_read = 0 AND LEFT(notification_type, ?) <> ?`)).
+		WithArgs(int64(77), len(prefix), prefix).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(3))
+
+	notifications := NewNotificationRepo(New(db))
+	assetRows, err := notifications.List(context.Background(), coreRepo.NotificationListFilter{UserID: 77, Limit: 5, Scope: coreRepo.NotificationScope{TypePrefix: prefix}})
+	if err != nil || len(assetRows) != 1 || !assetRows[0].NotificationType.IsAssetWorkbench() {
+		t.Fatalf("asset scoped list = %+v err=%v", assetRows, err)
+	}
+	mainRows, err := notifications.List(context.Background(), coreRepo.NotificationListFilter{UserID: 77, Limit: 5, Scope: coreRepo.NotificationScope{TypePrefix: prefix, Exclude: true}})
+	if err != nil || len(mainRows) != 1 || mainRows[0].NotificationType.IsAssetWorkbench() {
+		t.Fatalf("main scoped list = %+v err=%v", mainRows, err)
+	}
+	if _, err := notifications.MarkAllReadScoped(context.Background(), 77, createdAt, coreRepo.NotificationScope{TypePrefix: prefix}); err != nil {
+		t.Fatalf("MarkAllReadScoped() error = %v", err)
+	}
+	count, err := notifications.UnreadCountScoped(context.Background(), 77, coreRepo.NotificationScope{TypePrefix: prefix, Exclude: true})
+	if err != nil || count != 3 {
+		t.Fatalf("UnreadCountScoped() = %d, %v", count, err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("ExpectationsWereMet() error = %v", err)

@@ -13,6 +13,7 @@ func registerAssetWorkbenchRoutes(
 	v1 *gin.RouterGroup,
 	access routeAccessRegistrar,
 	assetWorkbenchH *handler.AssetWorkbenchHandler,
+	notificationH *handler.NotificationHandler,
 ) {
 	if assetWorkbenchH == nil {
 		return
@@ -30,6 +31,12 @@ func registerAssetWorkbenchRoutes(
 		group.POST("/access/open", access(group, http.MethodPost, "/access/open", domain.APIReadinessReadyForFrontend, domain.RoleAssetManager, domain.RoleSuperAdmin), assetWorkbenchH.OpenAccess)
 		group.POST("/access/disable", access(group, http.MethodPost, "/access/disable", domain.APIReadinessReadyForFrontend, domain.RoleSuperAdmin), assetWorkbenchH.DisableAccess)
 		group.GET("/bootstrap", access(group, http.MethodGet, "/bootstrap", domain.APIReadinessReadyForFrontend, assetWorkbenchRoles()...), assetWorkbenchH.Bootstrap)
+		if notificationH != nil {
+			group.GET("/notifications", access(group, http.MethodGet, "/notifications", domain.APIReadinessReadyForFrontend, assetWorkbenchRoles()...), notificationH.AssetWorkbenchList)
+			group.POST("/notifications/:id/read", access(group, http.MethodPost, "/notifications/:id/read", domain.APIReadinessReadyForFrontend, assetWorkbenchRoles()...), notificationH.MarkAssetWorkbenchRead)
+			group.POST("/notifications/read-all", access(group, http.MethodPost, "/notifications/read-all", domain.APIReadinessReadyForFrontend, assetWorkbenchRoles()...), notificationH.MarkAllAssetWorkbenchRead)
+			group.GET("/notifications/unread-count", access(group, http.MethodGet, "/notifications/unread-count", domain.APIReadinessReadyForFrontend, assetWorkbenchRoles()...), notificationH.AssetWorkbenchUnreadCount)
+		}
 		group.GET("/batch-jobs", access(group, http.MethodGet, "/batch-jobs", domain.APIReadinessReadyForFrontend, domain.RoleAssetManager, domain.RoleSuperAdmin), assetWorkbenchH.ListBatchJobs)
 		group.GET("/batch-jobs/:job_id", access(group, http.MethodGet, "/batch-jobs/:job_id", domain.APIReadinessReadyForFrontend, domain.RoleAssetManager, domain.RoleSuperAdmin), assetWorkbenchH.GetBatchJob)
 		group.PATCH("/profile", access(group, http.MethodPatch, "/profile", domain.APIReadinessReadyForFrontend, assetWorkbenchRoles()...), assetWorkbenchH.UpsertMyProfile)

@@ -37,6 +37,7 @@ import {
 } from '@aw/shared/api/assetWorkbenchApi'
 import { useAssetWorkbenchSessionStore } from '@aw/app/session.store'
 import ArchiveVirtualThumb from '@aw/shared/drive/ArchiveVirtualThumb.vue'
+import { batchMutationFailureMessage } from '@aw/shared/drive/batchMutationFeedback'
 import { createArchiveEntryObjectUrl, downloadArchiveEntryBlob } from '@aw/shared/drive/archiveEntryBlob'
 import DriveThumb from '@aw/shared/drive/DriveThumb.vue'
 import DriveUploadDialog from '@aw/shared/drive/DriveUploadDialog.vue'
@@ -125,6 +126,7 @@ const fileTotal = ref(0)
 const filePage = ref(1)
 const selectedFile = ref<DriveFileRow | null>(null)
 const selectedFileIds = ref<Set<number>>(new Set())
+const fileMutationLoading = ref(false)
 const highlightFileId = ref<number | null>(null)
 const uploadOverviewQuery = ref('')
 const uploadOverviewOwner = ref('')
@@ -2123,31 +2125,43 @@ async function repriceSelectedItem() {
 }
 
 async function moveSelectedFiles() {
-  if (!canManageDrive.value) return
+  if (!canManageDrive.value || fileMutationLoading.value) return
   const ids = selectedFileActionIds.value
   if (!ids.length || !moveTargetDirectoryId.value) return
+  fileMutationLoading.value = true
+  actionError.value = ''
   try {
     const result = await assetWorkbenchApi.batchMoveFiles(ids, moveTargetDirectoryId.value, maintenanceReason.value || '素材网盘移动文件')
-    notice.value = `已移动 ${result.files?.length ?? 0} 个文件，失败 ${result.failures?.length ?? 0} 个`
-    selectedFileIds.value = new Set()
+    const movedCount = result.files?.length ?? 0
+    notice.value = movedCount ? `已移动 ${movedCount} 个文件` : ''
+    actionError.value = batchMutationFailureMessage('移动', result.failures)
+    selectedFileIds.value = new Set((result.failures ?? []).map((failure) => failure.file_id))
     await refreshCurrentDrive()
   } catch (err) {
     actionError.value = err instanceof Error ? err.message : '移动文件失败'
+  } finally {
+    fileMutationLoading.value = false
   }
 }
 
 async function deleteSelectedFiles() {
-  if (!canDeleteDriveFiles.value) return
+  if (!canDeleteDriveFiles.value || fileMutationLoading.value) return
   const ids = selectedFileActionIds.value
   if (!ids.length || !deleteReason.value.trim()) return
+  fileMutationLoading.value = true
+  actionError.value = ''
   try {
     const result = await assetWorkbenchApi.batchDeleteFiles(ids, deleteReason.value.trim())
-    notice.value = `已删除 ${result.deleted?.length ?? 0} 个文件，失败 ${result.failures?.length ?? 0} 个`
-    selectedFileIds.value = new Set()
-    deleteReason.value = ''
+    const deletedCount = result.deleted?.length ?? 0
+    notice.value = deletedCount ? `已删除 ${deletedCount} 个文件` : ''
+    actionError.value = batchMutationFailureMessage('删除', result.failures)
+    selectedFileIds.value = new Set((result.failures ?? []).map((failure) => failure.file_id))
+    if (!result.failures?.length) deleteReason.value = ''
     await refreshCurrentDrive()
   } catch (err) {
     actionError.value = err instanceof Error ? err.message : '删除文件失败'
+  } finally {
+    fileMutationLoading.value = false
   }
 }
 
@@ -3411,11 +3425,13 @@ onBeforeUnmount(() => {
               <option :value="0">移动到…</option>
               <option v-for="dir in directoryOptions" :key="dir.id" :value="dir.id">{{ dir.name }}</option>
             </select>
-            <button class="aw-secondary-button" type="button" :disabled="!moveTargetDirectoryId" @click="moveSelectedFiles">移动</button>
+            <button class="aw-secondary-button" type="button" :disabled="fileMutationLoading || !moveTargetDirectoryId" @click="moveSelectedFiles">
+              {{ fileMutationLoading ? '处理中…' : '移动' }}
+            </button>
           </template>
           <template v-if="canDeleteDriveFiles">
             <input v-model.trim="deleteReason" placeholder="删除原因" aria-label="删除原因" />
-            <button class="aw-secondary-button aw-secondary-button--danger" type="button" :disabled="!deleteReason.trim()" @click="deleteSelectedFiles">
+            <button class="aw-secondary-button aw-secondary-button--danger" type="button" :disabled="fileMutationLoading || !deleteReason.trim()" @click="deleteSelectedFiles">
               <IconfontActionIcon name="delete" :size="15" />
               删除
             </button>
@@ -3865,7 +3881,9 @@ onBeforeUnmount(() => {
                 </select>
               </label>
               <div class="aw-inline-actions">
-                <button class="aw-secondary-button" type="button" :disabled="!moveTargetDirectoryId" @click="moveSelectedFiles">移动文件</button>
+                <button class="aw-secondary-button" type="button" :disabled="fileMutationLoading || !moveTargetDirectoryId" @click="moveSelectedFiles">
+                  {{ fileMutationLoading ? '处理中…' : '移动文件' }}
+                </button>
               </div>
             </template>
             <template v-if="canDeleteDriveFiles">
@@ -3873,7 +3891,7 @@ onBeforeUnmount(() => {
                 <span>删除原因</span>
                 <input v-model.trim="deleteReason" placeholder="删除必须填写原因" />
               </label>
-              <button class="aw-secondary-button" type="button" :disabled="!deleteReason.trim()" @click="deleteSelectedFiles">
+              <button class="aw-secondary-button" type="button" :disabled="fileMutationLoading || !deleteReason.trim()" @click="deleteSelectedFiles">
                 <IconfontActionIcon name="delete" :size="15" />
                 删除文件
               </button>

@@ -260,7 +260,8 @@ function appendReportSheet(workbook: import('exceljs').Workbook, report: Settlem
     { header: '人员编号', key: 'payee_user_id', width: 12 },
     { header: '创建人', key: 'creator_name', width: 16 },
     { header: '岗级', key: 'job_grade', width: 10 },
-    { header: '创建日期', key: 'created_date', width: 12 },
+    { header: '首次上传/补录日期', key: 'created_date', width: 18 },
+    { header: '最近上传/补录日期', key: 'created_date_end', width: 18 },
     { header: '订单数', key: 'order_count', width: 10 },
     { header: '单数', key: 'item_count', width: 10 },
     { header: '毛额', key: 'gross_amount', width: 12 },
@@ -275,8 +276,8 @@ function appendReportSheet(workbook: import('exceljs').Workbook, report: Settlem
     { header: '月金额占比%', key: 'month_amount_share', width: 14 },
     ...difficultyColumns,
   ]
-  sheet.addRows(report.rows.map((row) => flattenReportRow(row, report.difficulty_classes)))
-  sheet.addRow(flattenReportRow({ ...report.totals, payee_user_id: 0, creator_name: '合计' }, report.difficulty_classes))
+  sheet.addRows(report.rows.map((row) => buildSettlementReportExportRow(row, report.difficulty_classes)))
+  sheet.addRow(buildSettlementReportExportRow({ ...report.totals, payee_user_id: 0, creator_name: '合计' }, report.difficulty_classes))
   formatSheet(sheet)
 }
 
@@ -357,7 +358,7 @@ function percentDisplay(value?: number | null): string {
   return `${(Number(value ?? 0) * 100).toFixed(2)}%`
 }
 
-function flattenReportRow(row: SettlementReportRow, difficultyClasses: string[]) {
+export function buildSettlementReportExportRow(row: SettlementReportRow, difficultyClasses: string[]) {
   const metrics = new Map(row.difficulty_metrics.map((metric) => [metric.difficulty_class, metric]))
   const output: Record<string, string | number> = {
     row_type_label: reportRowLabel(row.row_type),
@@ -365,6 +366,7 @@ function flattenReportRow(row: SettlementReportRow, difficultyClasses: string[])
     creator_name: row.creator_name,
     job_grade: row.job_grade,
     created_date: row.created_date,
+    created_date_end: row.created_date_end || row.created_date,
     order_count: row.order_count,
     item_count: row.item_count,
     gross_amount: row.gross_amount,

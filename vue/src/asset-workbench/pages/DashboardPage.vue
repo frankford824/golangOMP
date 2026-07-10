@@ -59,7 +59,7 @@ const capabilities = computed(() => new Set(bootstrap.value?.capabilities ?? [])
 const canViewUploadOverview = computed(() => capabilities.value.has('asset.workbench.manage') || capabilities.value.has('asset.workbench.settlement'))
 const ledgerSegments = computed(() => [
   { key: 'submitted', label: '成品单数', value: formatInt(submittedCount.value), hint: '本月已提交计件单', expandable: true },
-  { key: 'pending', label: '待处理', value: formatInt(pendingSubmissionCount.value), hint: '待质检 / 待修正', expandable: true },
+  { key: 'pending', label: '待质检提交', value: formatInt(pendingSubmissionCount.value), hint: '素材工作台提交 · 点击查看', expandable: true },
   { key: 'pages', label: '页数合计', value: formatInt(pagesCount.value), hint: '计价以页为单位', expandable: true },
   { key: 'net', label: '本月预估净额', value: formatMoney(netAmount.value), hint: '日常计件与补录分开结算', money: true, expandable: true },
 ])
@@ -140,7 +140,7 @@ onMounted(() => {
       </ol>
     </section>
 
-    <LedgerReadout :eyebrow="`本月台账 · ${month}`" title="今日先处理这些事" :segments="ledgerSegments">
+    <LedgerReadout :eyebrow="`本月台账 · ${month}`" title="今日素材工作台事项" :segments="ledgerSegments">
       <template #actions>
         <button class="aw-console-button" type="button" :disabled="loading" @click="loadDashboard">刷新</button>
       </template>

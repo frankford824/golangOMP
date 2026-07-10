@@ -337,6 +337,7 @@ export interface SettlementReportRow {
   creator_name: string
   job_grade: string
   created_date: string
+  created_date_end: string
   order_count: number
   item_count: number
   page_count: number
@@ -1877,16 +1878,21 @@ export const assetWorkbenchApi = {
   },
 
   async listNotifications(params: { is_read?: boolean; limit?: number; cursor?: string } = {}, signal?: AbortSignal): Promise<NotificationListResult> {
-    const res = await http.get<ApiEnvelope<NotificationRow[]> & { next_cursor?: string }>('/v1/me/notifications', { params, signal })
-    return { items: unwrap(res.data), next_cursor: res.data.next_cursor }
+	const res = await http.get<ApiEnvelope<NotificationRow[]> & { next_cursor?: string }>('/v1/asset-workbench/notifications', { params, signal })
+	return { items: unwrap(res.data), next_cursor: res.data.next_cursor }
   },
 
   async markNotificationRead(id: number, signal?: AbortSignal): Promise<void> {
-    await http.post(`/v1/me/notifications/${encodeURIComponent(id)}/read`, {}, { signal })
+	await http.post(`/v1/asset-workbench/notifications/${encodeURIComponent(id)}/read`, {}, { signal })
   },
 
   async markAllNotificationsRead(signal?: AbortSignal): Promise<void> {
-    await http.post('/v1/me/notifications/read-all', {}, { signal })
+	await http.post('/v1/asset-workbench/notifications/read-all', {}, { signal })
+  },
+
+  async notificationUnreadCount(signal?: AbortSignal): Promise<number> {
+	const res = await http.get<ApiEnvelope<{ unread_count: number }>>('/v1/asset-workbench/notifications/unread-count', { signal })
+	return Number(unwrap(res.data).unread_count || 0)
   },
 
   async listSavedViews(viewType: string, signal?: AbortSignal): Promise<AssetWorkbenchSavedView[]> {

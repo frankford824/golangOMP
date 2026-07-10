@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { CheckCheck, MailOpen, RefreshCw } from 'lucide-vue-next'
+import { ArrowRight, CheckCheck, MailOpen, RefreshCw } from 'lucide-vue-next'
+import { useRouter } from 'vue-router'
 
 import { assetWorkbenchApi, type NotificationRow } from '@aw/shared/api/assetWorkbenchApi'
 import { usePageRequest } from '@aw/shared/composables/usePageRequest'
@@ -12,6 +13,7 @@ import AsyncBoundary from '@aw/shared/ui/AsyncBoundary.vue'
 type NotificationFilter = 'all' | 'unread' | 'read'
 
 const filter = ref<NotificationFilter>('unread')
+const router = useRouter()
 const rows = ref<NotificationRow[]>([])
 const nextCursor = ref('')
 const notice = ref('')
@@ -70,13 +72,15 @@ function filterValue(value: NotificationFilter) {
 function notificationTitle(row: NotificationRow) {
   const payload = row.payload ?? {}
   if (typeof payload.title === 'string' && payload.title.trim()) return payload.title
-  if (row.notification_type === 'system_broadcast') return '系统通知'
-  if (row.notification_type === 'task_assigned_to_me') return '任务分配'
-  if (row.notification_type === 'task_rejected') return '任务驳回'
-  if (row.notification_type === 'task_pending_audit') return '待审核提醒'
-  if (row.notification_type === 'task_closed') return '任务已结单'
-  if (row.notification_type === 'task_sku_sync_failed') return 'SKU 同步异常'
-  return row.notification_type
+  if (row.notification_type === 'asset_workbench_profile_incomplete') return '个人资料待补全'
+  if (row.notification_type === 'asset_workbench_submission_created') return '收到新作品'
+  if (row.notification_type === 'asset_workbench_qc_updated') return '作品检查结果已更新'
+  if (row.notification_type === 'asset_workbench_settlement_updated') return '结算状态已更新'
+  if (row.notification_type === 'asset_workbench_supplement_access') return '补录权限已更新'
+  if (row.notification_type === 'asset_workbench_preview_failed') return '文件预览生成失败'
+  if (row.notification_type === 'asset_workbench_batch_job_completed') return '批量任务已完成'
+  if (row.notification_type === 'asset_workbench_batch_job_failed') return '批量任务未完成'
+  return '资产工作台通知'
 }
 
 function notificationContent(row: NotificationRow) {
@@ -86,7 +90,36 @@ function notificationContent(row: NotificationRow) {
   if (payload.reason === 'missing_pii' || payload.action === 'complete_profile') {
     return '请在个人中心补全联系、证件和收款资料。'
   }
-  return '查看并处理这条待办。'
+  if (row.notification_type === 'asset_workbench_submission_created') {
+    const uploader = typeof payload.uploader_name === 'string' && payload.uploader_name.trim() ? payload.uploader_name.trim() : '用户'
+    const count = Number(payload.file_count || 0)
+    return `${uploader} 已上传${count > 0 ? ` ${count} 个文件` : '新作品'}，请在上传总览中查看。`
+  }
+  if (row.notification_type === 'asset_workbench_qc_updated') {
+    return payload.qc_status === 'needs_fix' ? '作品需要修改，请进入素材网盘查看检查结果。' : '作品检查结果已更新，请进入素材网盘查看。'
+  }
+  if (row.notification_type === 'asset_workbench_settlement_updated') {
+    return '工资结算状态已更新，请进入结算页面查看。'
+  }
+  if (row.notification_type === 'asset_workbench_supplement_access') {
+    return payload.enabled === false ? '补录入口已关闭，请进入结算页面查看。' : '补录入口已开放，请进入结算页面查看可补录月份。'
+  }
+  return '资产工作台中的相关状态已更新，请进入对应页面查看。'
+}
+
+function notificationTarget(row: NotificationRow) {
+  if (row.notification_type === 'asset_workbench_profile_incomplete') return '/account'
+  if (row.notification_type === 'asset_workbench_submission_created') return '/upload-overview'
+  if (row.notification_type === 'asset_workbench_qc_updated' || row.notification_type === 'asset_workbench_preview_failed') return '/drive'
+  if (row.notification_type === 'asset_workbench_settlement_updated' || row.notification_type === 'asset_workbench_supplement_access') return '/settlement'
+  if (row.notification_type === 'asset_workbench_batch_job_completed' || row.notification_type === 'asset_workbench_batch_job_failed') return '/drive'
+  return ''
+}
+
+async function openNotification(row: NotificationRow) {
+  await markRead(row)
+  const target = notificationTarget(row)
+  if (target) await router.push(target)
 }
 
 function formatDateTime(value?: string) {
@@ -114,7 +147,7 @@ onMounted(() => {
       <div class="aw-page-bar__copy">
         <p class="aw-eyebrow">消息中心</p>
         <h2>{{ pageLabel }}</h2>
-        <p>{{ pageSubtitle }}。审核、分配与系统提醒集中在这里处理。</p>
+        <p>{{ pageSubtitle }}集中在这里处理。</p>
       </div>
       <div class="aw-page-bar__actions">
         <button class="aw-secondary-button" type="button" @click="loadNotifications">
@@ -147,10 +180,16 @@ onMounted(() => {
               <span>{{ notificationContent(row) }}</span>
               <span class="aw-copy">{{ formatDateTime(row.created_at) }}</span>
             </div>
-            <button class="aw-secondary-button" type="button" :disabled="row.is_read" @click="markRead(row)">
-              <MailOpen :size="15" aria-hidden="true" />
-              {{ row.is_read ? '已读' : '标为已读' }}
-            </button>
+            <div class="aw-inline-actions">
+              <button v-if="notificationTarget(row)" class="aw-primary-button" type="button" @click="openNotification(row)">
+                查看
+                <ArrowRight :size="15" aria-hidden="true" />
+              </button>
+              <button class="aw-secondary-button" type="button" :disabled="row.is_read" @click="markRead(row)">
+                <MailOpen :size="15" aria-hidden="true" />
+                {{ row.is_read ? '已读' : '标为已读' }}
+              </button>
+            </div>
             <span :class="chipClass(row.is_read ? 'neutral' : 'warn')">{{ row.is_read ? '已读' : '未读' }}</span>
           </article>
         </div>

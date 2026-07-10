@@ -2,6 +2,7 @@ package domain
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 )
 
@@ -17,6 +18,16 @@ const (
 	NotificationTypeTaskCancelled     NotificationType = "task_cancelled"
 	NotificationTypeSystemBroadcast   NotificationType = "system_broadcast"
 	NotificationTypeTaskSKUSyncFailed NotificationType = "task_sku_sync_failed"
+
+	NotificationTypeAssetWorkbenchProfileIncomplete  NotificationType = "asset_workbench_profile_incomplete"
+	NotificationTypeAssetWorkbenchSubmissionCreated  NotificationType = "asset_workbench_submission_created"
+	NotificationTypeAssetWorkbenchQCUpdated          NotificationType = "asset_workbench_qc_updated"
+	NotificationTypeAssetWorkbenchSettlementUpdated  NotificationType = "asset_workbench_settlement_updated"
+	NotificationTypeAssetWorkbenchSupplementAccess   NotificationType = "asset_workbench_supplement_access"
+	NotificationTypeAssetWorkbenchPreviewFailed      NotificationType = "asset_workbench_preview_failed"
+	NotificationTypeAssetWorkbenchBatchJobCompleted  NotificationType = "asset_workbench_batch_job_completed"
+	NotificationTypeAssetWorkbenchBatchJobFailed     NotificationType = "asset_workbench_batch_job_failed"
+	NotificationTypeAssetWorkbenchNotificationPrefix                  = "asset_workbench_"
 )
 
 func (t NotificationType) Valid() bool {
@@ -29,11 +40,23 @@ func (t NotificationType) Valid() bool {
 		NotificationTypePoolReassigned,
 		NotificationTypeTaskCancelled,
 		NotificationTypeSystemBroadcast,
-		NotificationTypeTaskSKUSyncFailed:
+		NotificationTypeTaskSKUSyncFailed,
+		NotificationTypeAssetWorkbenchProfileIncomplete,
+		NotificationTypeAssetWorkbenchSubmissionCreated,
+		NotificationTypeAssetWorkbenchQCUpdated,
+		NotificationTypeAssetWorkbenchSettlementUpdated,
+		NotificationTypeAssetWorkbenchSupplementAccess,
+		NotificationTypeAssetWorkbenchPreviewFailed,
+		NotificationTypeAssetWorkbenchBatchJobCompleted,
+		NotificationTypeAssetWorkbenchBatchJobFailed:
 		return true
 	default:
 		return false
 	}
+}
+
+func (t NotificationType) IsAssetWorkbench() bool {
+	return strings.HasPrefix(string(t), NotificationTypeAssetWorkbenchNotificationPrefix)
 }
 
 type Notification struct {

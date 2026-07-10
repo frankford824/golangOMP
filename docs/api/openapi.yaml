@@ -8507,8 +8507,8 @@ components:
                 nullable: true
     NotificationType:
       type: string
-      description: "Source: V1_INFORMATION_ARCHITECTURE §8.1 (`task_mentioned` excluded in v1). Current values include task workflow notifications, `system_broadcast`, and `task_sku_sync_failed`."
-      enum: [task_assigned_to_me, task_rejected, task_pending_audit, task_closed, claim_conflict, pool_reassigned, task_cancelled, system_broadcast, task_sku_sync_failed]
+      description: "Application-scoped notification type. Main operations types and `asset_workbench_*` types are exposed through separate route families and cannot be read or marked across scopes."
+      enum: [task_assigned_to_me, task_rejected, task_pending_audit, task_closed, claim_conflict, pool_reassigned, task_cancelled, system_broadcast, task_sku_sync_failed, asset_workbench_profile_incomplete, asset_workbench_submission_created, asset_workbench_qc_updated, asset_workbench_settlement_updated, asset_workbench_supplement_access, asset_workbench_preview_failed, asset_workbench_batch_job_completed, asset_workbench_batch_job_failed]
     Notification:
       type: object
       description: |
@@ -8541,6 +8541,19 @@ components:
           `broadcast_by_name`, `broadcast_audience`, `broadcast_recipient_count`.
         - `task_sku_sync_failed`: `task_id`, `failed_count`, `failed_items`; optional
           `task_no`, `source`, `record_id`, `erp_sync_version`, `summary`, `url`.
+        - `asset_workbench_profile_incomplete`: `source=asset_workbench`, `action=complete_profile`,
+          `profile_id`, `user_id`, `missing_fields`.
+        - `asset_workbench_submission_created`: `source=asset_workbench`, `action=open_upload_overview`,
+          `submission_id`, `submission_no`, `business_month`, `uploader_id`, `uploader_name`,
+          `item_count`, `file_count`.
+        - `asset_workbench_qc_updated`: `source=asset_workbench`, `action=open_drive`, `item_id`,
+          `submission_id`, `payee_user_id`, `qc_status`, `reason`, `reviewed_by`, `reviewed_at_utc`.
+        - `asset_workbench_settlement_updated`: `source=asset_workbench`, `action=open_settlement`,
+          `batch_id`, `payee_user_id`, `business_months`, `status`, `confirmed_at`.
+        - `asset_workbench_supplement_access`: `source=asset_workbench`, `action=open_settlement`,
+          `permission_id`, `payee_user_id`, `business_month`, `enabled`, `reason`, `updated_by`.
+        - Other `asset_workbench_*` values are reserved for their named asset-workbench lifecycle and
+          always remain in the asset-workbench notification scope.
       properties:
         id:
           type: integer
@@ -19348,13 +19361,105 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /v1/asset-workbench/notifications:
+    get:
+      summary: List my asset-workbench notifications
+      description: Returns only notification types prefixed with `asset_workbench_`. Main-operations task notifications are never returned by this route.
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetSubmitter, AssetManager, AssetTemplateAdmin, AssetSettlement, SuperAdmin]
+      parameters:
+        - in: query
+          name: is_read
+          schema: { type: boolean }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+        - in: query
+          name: cursor
+          schema: { type: string }
+      responses:
+        '200':
+          description: Asset-workbench notification list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Notification'
+                  next_cursor:
+                    type: string
+                    nullable: true
+        '401': { description: Unauthenticated }
+        '403': { description: Asset-workbench membership or role required }
+  /v1/asset-workbench/notifications/{id}/read:
+    post:
+      summary: Mark one asset-workbench notification as read
+      description: Only the owner may update the row, and the notification type must belong to the `asset_workbench_` scope.
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetSubmitter, AssetManager, AssetTemplateAdmin, AssetSettlement, SuperAdmin]
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer }
+      responses:
+        '204': { description: Asset-workbench notification marked read }
+        '401': { description: Unauthenticated }
+        '403': { description: Not the notification owner }
+        '404': { description: Notification does not exist in the asset-workbench scope }
+  /v1/asset-workbench/notifications/read-all:
+    post:
+      summary: Mark all my asset-workbench notifications as read
+      description: Updates only the authenticated user's unread `asset_workbench_*` notifications.
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetSubmitter, AssetManager, AssetTemplateAdmin, AssetSettlement, SuperAdmin]
+      responses:
+        '204': { description: Asset-workbench notifications marked read }
+        '401': { description: Unauthenticated }
+        '403': { description: Asset-workbench membership or role required }
+  /v1/asset-workbench/notifications/unread-count:
+    get:
+      summary: Get my asset-workbench unread notification count
+      description: Counts only the authenticated user's unread `asset_workbench_*` notifications.
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetSubmitter, AssetManager, AssetTemplateAdmin, AssetSettlement, SuperAdmin]
+      responses:
+        '200':
+          description: Asset-workbench unread count
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      unread_count: { type: integer }
+        '401': { description: Unauthenticated }
+        '403': { description: Asset-workbench membership or role required }
   /v1/me/notifications:
     get:
       summary: List my notifications
       description: |
         Source: V1_INFORMATION_ARCHITECTURE §8.3. Cursor-based pagination; optional `is_read` filter
         (omit for 'all'). Notifications are always scoped to the authenticated user; no cross-user
-        reads regardless of role.
+        reads regardless of role. This main-operations route excludes all `asset_workbench_*`
+        notification types; asset-workbench clients use `/v1/asset-workbench/notifications`.
       tags: [Me, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-owner-round: R4-SA-C
@@ -22715,7 +22820,7 @@ paths:
   /v1/asset-workbench/files/batch-move:
     post:
       summary: Batch move submission files to an upload directory
-      description: Manager-only file maintenance operation. The backend copies objects into the target upload directory prefix, updates directory snapshots, records an event, and best-effort removes old objects.
+      description: Manager-only priced-work maintenance operation. All active files belonging to the same submission item must be selected together. The backend rejects settlement-locked items, copies the complete work into the target directory, updates directory snapshots, reprices the item using the target directory difficulty while preserving its item/page count, refreshes submission totals, records events, and best-effort removes old objects.
       tags: [AssetWorkbench, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
@@ -22786,7 +22891,7 @@ paths:
   /v1/asset-workbench/files/batch-delete:
     post:
       summary: Batch delete submission files
-      description: Soft-deletes unsettled files, refreshes submission totals, and reprices or voids the related item. Submitters may delete only their own files; managers may delete any unlocked file.
+      description: Soft-deletes complete unsettled priced works. All active files belonging to the same submission item must be selected together; partial folder-work deletion and settlement-locked items are rejected. The related item is voided once and submission totals are refreshed. Submitters may delete only their own files; managers may delete any unlocked work.
       tags: [AssetWorkbench, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
@@ -23078,6 +23183,127 @@ paths:
                       size: { type: integer }
         '401': { description: Unauthenticated }
         '403': { description: Forbidden }
+  /v1/asset-workbench/settlement/supplement-permissions:
+    get:
+      summary: List asset workbench supplement permissions
+      description: Lists per-person supplement switches. An enabled permission is scoped to the current Asia/Shanghai natural month and can be closed at any time.
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetSettlement, SuperAdmin]
+      parameters:
+        - in: query
+          name: payee_user_id
+          schema: { type: integer }
+        - in: query
+          name: business_month
+          schema: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' }
+        - in: query
+          name: enabled
+          schema: { type: boolean }
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 1, default: 1 }
+        - in: query
+          name: page_size
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        '200':
+          description: Supplement permission rows
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: &AssetWorkbenchSupplementPermissionRow
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        payee_user_id: { type: integer }
+                        business_month: { type: string }
+                        enabled: { type: boolean }
+                        reason: { type: string }
+                        granted_by: { type: integer }
+                        revoked_by: { type: integer, nullable: true }
+                        granted_at: { type: string, format: date-time }
+                        revoked_at: { type: string, format: date-time, nullable: true }
+                        updated_at: { type: string, format: date-time }
+                  pagination:
+                    type: object
+                    properties:
+                      total: { type: integer }
+                      page: { type: integer }
+                      page_size: { type: integer }
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
+    put:
+      summary: Open or close supplement permission for one person
+      description: Opens supplement entry only for the current Asia/Shanghai natural month, or closes an existing month permission. The target supplement date does not control the payroll month.
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetSettlement, SuperAdmin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [payee_user_id, business_month, enabled]
+              properties:
+                payee_user_id: { type: integer }
+                business_month: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' }
+                enabled: { type: boolean }
+                reason: { type: string }
+      responses:
+        '200':
+          description: Saved supplement permission
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: *AssetWorkbenchSupplementPermissionRow
+        '400': { description: Invalid or non-current month }
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
+  /v1/asset-workbench/settlement/supplement-eligible-months:
+    get:
+      summary: Get the natural month currently eligible for supplement entry
+      description: Returns the current Asia/Shanghai natural month for the selected person. Historical target dates are allowed, but their month never replaces the returned payroll month.
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetSettlement, SuperAdmin]
+      parameters:
+        - in: query
+          name: payee_user_id
+          required: true
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: Eligible supplement payroll month
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      months:
+                        type: array
+                        minItems: 1
+                        maxItems: 1
+                        items: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' }
+        '400': { description: Invalid payee_user_id }
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
   /v1/asset-workbench/settlement/report:
     get:
       summary: Get asset workbench settlement report
@@ -23119,7 +23345,8 @@ paths:
                             row_type: { type: string, enum: [normal_piecework, supplement_piecework, total] }
                             creator_name: { type: string }
                             job_grade: { type: string }
-                            created_date: { type: string, format: date }
+                            created_date: { type: string, format: date, description: Earliest upload or supplement creation date included in this monthly aggregate row. }
+                            created_date_end: { type: string, format: date, description: Latest upload or supplement creation date included in this monthly aggregate row. }
                             order_count: { type: integer }
                             item_count: { type: integer }
                             page_count: { type: integer }
@@ -23269,7 +23496,7 @@ paths:
         '403': { description: Forbidden }
     post:
       summary: Create asset workbench settlement supplement
-      description: Creates one manual supplement row. `supplement_date`, when provided, must be in `business_month`; settlement calculation remains grouped by natural business month.
+      description: Creates one manual supplement row in the current Asia/Shanghai natural month. `supplement_date` records which historical day is being supplemented and does not control `business_month`.
       tags: [AssetWorkbench, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
@@ -23293,6 +23520,7 @@ paths:
                 supplement_date:
                   type: string
                   format: date
+                  description: Historical target date for display and duplicate checks; it may be outside business_month.
                 difficulty_class: { type: string }
                 finalized: { type: boolean }
                 page_count: { type: integer, minimum: 1 }
@@ -23313,7 +23541,7 @@ paths:
   /v1/asset-workbench/settlement/supplements/excel:
     post:
       summary: Import monthly settlement supplements from Excel
-      description: Batch-creates approved supplement rows for a business month. Optional `supplement_date` cells must belong to that natural month. Each row still checks payee/month supplement permission and duplicate hints.
+      description: Batch-creates approved supplement rows in the current Asia/Shanghai natural month. Optional `supplement_date` cells may point to historical days. Each row still checks payee/month supplement permission and duplicate hints.
       tags: [AssetWorkbench, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:

@@ -73,7 +73,7 @@ const difficultyRows = ref<DifficultyClassRow[]>([])
 const eligibleSupplementMonths = ref<string[]>([])
 const entryEligibleSupplementMonths = ref<string[]>([])
 const entryEligiblePayeeUserId = ref(0)
-const supplementMonth = ref(month.value)
+const supplementMonth = ref(currentBusinessMonth())
 const selectedBatch = ref<SettlementBatchDetail | null>(null)
 const pendingCancelBatch = ref<SettlementBatchRow | null>(null)
 const pendingDeleteSupplement = ref<SettlementSupplementRow | null>(null)
@@ -745,7 +745,7 @@ async function upsertSupplementPermission() {
   try {
     const saved = await assetWorkbenchApi.upsertSupplementPermission({
       payee_user_id: permissionForm.value.payee_user_id,
-      business_month: month.value,
+      business_month: supplementMonth.value,
       enabled: permissionForm.value.enabled,
       reason: permissionForm.value.reason,
     })
@@ -753,7 +753,7 @@ async function upsertSupplementPermission() {
     permissionForm.value.reason = ''
     await loadSettlement({ keepNotice: true })
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '保存补录开放设置失败'
+    error.value = settlementActionError(err, '保存补录开放设置失败')
   }
 }
 
@@ -767,12 +767,12 @@ async function loadSupplementEligibleMonths() {
   eligibleMonthsLoading.value = true
   try {
     eligibleSupplementMonths.value = await assetWorkbenchApi.listSupplementEligibleMonths(permissionForm.value.payee_user_id)
-    if (eligibleSupplementMonths.value.length && !eligibleSupplementMonths.value.includes(month.value)) {
-      month.value = eligibleSupplementMonths.value[0]
+    if (eligibleSupplementMonths.value.length) {
+      supplementMonth.value = eligibleSupplementMonths.value[0]
     }
-    notice.value = eligibleSupplementMonths.value.length ? '已读取可补录月份' : '该人员暂无已确认结算月份'
+    notice.value = eligibleSupplementMonths.value.length ? '已读取当前可开放月份' : '当前没有可开放的补录月份'
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '读取可补录月份失败'
+    error.value = settlementActionError(err, '读取可补录月份失败')
   } finally {
     eligibleMonthsLoading.value = false
   }
@@ -793,9 +793,9 @@ async function loadEntrySupplementEligibleMonths() {
     if (months.length && !months.includes(supplementMonth.value)) {
       supplementMonth.value = months[0]
     }
-    notice.value = months.length ? '已读取该人员可补录月份' : '该人员暂无已确认结算月份'
+    notice.value = months.length ? '已读取当前补录结算月' : '当前没有可录入的补录月份'
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '读取补录录入月份失败'
+    error.value = settlementActionError(err, '读取补录录入月份失败')
   } finally {
     entryEligibleMonthsLoading.value = false
   }
@@ -824,12 +824,10 @@ function requireEntrySupplementMonth() {
 async function createSupplement() {
   error.value = ''
   notice.value = ''
-  const dateMonth = businessMonthFromDate(supplementForm.value.supplement_date)
-  if (!dateMonth) {
+  if (!businessMonthFromDate(supplementForm.value.supplement_date)) {
     error.value = '请选择补录日期'
     return
   }
-  supplementMonth.value = dateMonth
   const selectedMonth = requireEntrySupplementMonth()
   if (!selectedMonth) return
   try {
@@ -839,14 +837,14 @@ async function createSupplement() {
       status: 'approved',
     }
     await assetWorkbenchApi.createSettlementSupplement(payload)
-    notice.value = '月度补录已创建'
+    notice.value = `补录已创建，计入 ${selectedMonth} 结算`
     supplementForm.value.order_no = ''
     supplementForm.value.supplement_date = todayDate()
     supplementForm.value.page_count = 1
     supplementForm.value.gross_amount = 0
     await loadSettlement({ keepNotice: true })
   } catch (err) {
-    error.value = err instanceof Error ? err.message : '创建补录失败'
+    error.value = settlementActionError(err, '创建补录失败')
   }
 }
 
@@ -919,22 +917,9 @@ async function exportSettlement() {
   }
 }
 
-watch(month, (value) => {
+watch(month, () => {
   supplementPage.value = 1
-  if (!entryEligibleSupplementMonths.value.length) {
-    supplementMonth.value = value
-  }
 })
-
-watch(
-  () => supplementForm.value.supplement_date,
-  (value) => {
-    const nextMonth = businessMonthFromDate(value)
-    if (nextMonth) {
-      supplementMonth.value = nextMonth
-    }
-  },
-)
 
 onMounted(() => {
   void loadSettlement()
@@ -1118,6 +1103,11 @@ onMounted(() => {
             </button>
           </div>
 
+          <p v-if="error" class="aw-inline-alert aw-inline-alert--error" role="alert">{{ error }}</p>
+          <p class="aw-inline-alert aw-inline-alert--info">
+            确认批次前，请确保批次内所有人员都已补全姓名、身份证和支付宝信息。待确认批次会锁定对应作品，取消批次后才能移动或删除。
+          </p>
+
           <div class="aw-data-surface">
             <div class="aw-grid-toolbar">
               <span>结算批次</span>
@@ -1268,9 +1258,9 @@ onMounted(() => {
                   <input v-model.number="permissionForm.payee_user_id" type="number" min="1" />
                 </label>
                 <label>
-                  可补录月份
-                  <select v-model="month" :disabled="eligibleSupplementMonths.length === 0">
-                    <option v-if="eligibleSupplementMonths.length === 0" :value="month">{{ month }}</option>
+                  开放结算月
+                  <select v-model="supplementMonth" :disabled="eligibleSupplementMonths.length === 0">
+                    <option v-if="eligibleSupplementMonths.length === 0" :value="supplementMonth">{{ supplementMonth }}</option>
                     <option v-for="item in eligibleSupplementMonths" :key="item" :value="item">{{ item }}</option>
                   </select>
                 </label>
@@ -1288,7 +1278,7 @@ onMounted(() => {
               </div>
               <div class="aw-inline-actions">
                 <button class="aw-secondary-button" type="button" :disabled="eligibleMonthsLoading" @click="loadSupplementEligibleMonths">
-                  读取可补录月份
+                  读取当前月份
                 </button>
                 <button class="aw-primary-button" type="button" @click="upsertSupplementPermission">保存开放设置</button>
               </div>
@@ -1308,7 +1298,7 @@ onMounted(() => {
                   <input v-model.number="supplementForm.payee_user_id" type="number" min="1" />
                 </label>
                 <label>
-                  补录月份
+                  计入结算月
                   <select v-model="supplementMonth" :disabled="!entryEligibleReady">
                     <option v-if="!entryEligibleReady" :value="supplementMonth">{{ supplementMonth }}</option>
                     <option v-for="item in entryEligibleSupplementMonths" :key="item" :value="item">{{ item }}</option>
@@ -1343,14 +1333,14 @@ onMounted(() => {
               </div>
               <div class="aw-inline-actions">
                 <button class="aw-secondary-button" type="button" :disabled="entryEligibleMonthsLoading" @click="loadEntrySupplementEligibleMonths">
-                  读取录入月份
+                  检查补录权限
                 </button>
                 <button class="aw-primary-button" type="button" @click="createSupplement">创建补录</button>
               </div>
               <p v-if="manualSupplementDuplicateWarning" class="aw-inline-alert aw-inline-alert--warning">
                 {{ manualSupplementDuplicateWarning }}
               </p>
-              <p class="aw-copy">补录日期只用于说明想补哪一天，结算按该日期所在自然月进入“补录计件工资”。上传图片和分类仍按上传文件模块的目录规则执行。</p>
+              <p class="aw-copy">补录日期只记录实际补的是哪一天；补录工资统一计入创建补录时所在的当前自然月，并在工资条中单独显示。</p>
               <div class="aw-inline-alert" @dragover.prevent @drop.prevent="handleSupplementDrop">
                 <span>补录 Excel 批量导入</span>
                 <button class="aw-secondary-button" type="button" @click="openSupplementImport">选择文件</button>

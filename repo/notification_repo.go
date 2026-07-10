@@ -13,6 +13,12 @@ type NotificationListFilter struct {
 	Limit      int
 	BeforeTime *time.Time
 	BeforeID   int64
+	Scope      NotificationScope
+}
+
+type NotificationScope struct {
+	TypePrefix string
+	Exclude    bool
 }
 
 type NotificationRepo interface {
@@ -20,8 +26,11 @@ type NotificationRepo interface {
 	Get(ctx context.Context, id int64) (*domain.Notification, error)
 	List(ctx context.Context, filter NotificationListFilter) ([]domain.Notification, error)
 	MarkRead(ctx context.Context, id, userID int64, at time.Time) (int64, error)
+	MarkReadScoped(ctx context.Context, id, userID int64, at time.Time, scope NotificationScope) (int64, error)
 	MarkAllRead(ctx context.Context, userID int64, at time.Time) (int64, error)
+	MarkAllReadScoped(ctx context.Context, userID int64, at time.Time, scope NotificationScope) (int64, error)
 	UnreadCount(ctx context.Context, userID int64) (int, error)
+	UnreadCountScoped(ctx context.Context, userID int64, scope NotificationScope) (int, error)
 
 	UpsertWebPushSubscription(ctx context.Context, tx Tx, sub *domain.WebPushSubscription) (*domain.WebPushSubscription, error)
 	DisableWebPushSubscriptionByEndpointHash(ctx context.Context, userID int64, endpointHash string, at time.Time, reason string) (int64, error)

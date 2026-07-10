@@ -488,6 +488,7 @@ export const assetAuditPages = [
   },
   { name: 'admin-drive', path: '/drive?q=poster&scope=all', ready: '.aw-drive', role: 'admin' },
   { name: 'admin-settlement', path: '/settlement', ready: '.aw-console-hero', role: 'admin' },
+  { name: 'admin-notifications', path: '/notifications', ready: '.aw-compact-list', role: 'admin' },
   { name: 'simple-home', path: '/', ready: '.aw-simple-home', role: 'simple' },
   { name: 'simple-upload', path: '/upload', ready: '.aw-dropzone', role: 'simple' },
   { name: 'simple-drive', path: '/drive?scope=operational', ready: '.aw-drive', role: 'simple' },
@@ -557,6 +558,23 @@ export async function installAssetWorkbenchFixture(context, role = 'admin') {
     const path = url.pathname
     if (path.endsWith('/entry')) return json(route, { state: 'ready', message: '', bootstrap })
     if (path.endsWith('/bootstrap')) return json(route, bootstrap)
+    if (path.endsWith('/notifications/unread-count')) return json(route, { unread_count: 1 })
+    if (path.endsWith('/notifications/read-all') || /\/notifications\/\d+\/read$/.test(path)) return json(route, {})
+    if (path.endsWith('/notifications')) {
+      return json(route, [
+        {
+          id: 801,
+          notification_type: 'asset_workbench_profile_incomplete',
+          payload: {
+            source: 'asset_workbench',
+            action: 'complete_profile',
+            missing_fields: ['id_card'],
+          },
+          is_read: false,
+          created_at: '2026-06-24T11:30:00+08:00',
+        },
+      ])
+    }
     if (path.endsWith('/submissions')) return paginated(route, submissions)
     if (path.endsWith('/settlement/preview')) return json(route, settlementPreview)
     if (path.endsWith('/settlement/my')) {

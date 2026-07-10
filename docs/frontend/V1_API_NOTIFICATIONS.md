@@ -26,7 +26,7 @@
 ### 简介
 支持方法: GET。
 
-- `GET`: Source: V1_INFORMATION_ARCHITECTURE §8.3. Cursor-based pagination; optional `is_read` filter (omit for 'all'). Notifications are always scoped to the authenticated user; no cross-user reads regardless of role.
+- `GET`: Source: V1_INFORMATION_ARCHITECTURE §8.3. Cursor-based pagination; optional `is_read` filter (omit for 'all'). Notifications are always scoped to the authenticated user; no cross-user reads regardless of role. This main-operations route excludes all `asset_workbench_*` notification types; asset-workbench clients use `/v1/asset-workbench/notifications`.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。

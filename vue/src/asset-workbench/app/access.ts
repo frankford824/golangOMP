@@ -61,7 +61,7 @@ export const assetWorkbenchRouteAccess = {
   },
   '/notifications': {
     label: '消息',
-    subtitle: '审核、分配与系统提醒',
+    subtitle: '上传、资料、作品检查与结算提醒',
     aliases: ['通知'],
     simple: true,
     anyAuthenticated: true,

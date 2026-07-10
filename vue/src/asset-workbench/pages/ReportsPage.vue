@@ -21,6 +21,7 @@ interface GridColumn {
 type ReportGridRow = Record<string, unknown> & {
   grid_id: string
   row_type: SettlementReportRow['row_type']
+  created_date_range: string
 }
 type ReportSectionKey = 'overview' | 'difficulty' | 'daily' | 'supplements'
 type ReportRangeMode = 'single' | 'last3' | 'last12' | 'available'
@@ -102,9 +103,9 @@ const reportNavGroups = computed<{ label: string; items: ReportNavItem[] }[]>(()
   },
 ])
 const reportRangeOptions: Array<{ value: ReportRangeMode; label: string }> = [
-  { value: 'single', label: '当前月' },
-  { value: 'last3', label: '近 3 个月' },
-  { value: 'last12', label: '近 12 个月' },
+  { value: 'single', label: '所选月' },
+  { value: 'last3', label: '所选月及前 2 个月' },
+  { value: 'last12', label: '所选月及前 11 个月' },
   { value: 'available', label: '全部已有月份' },
 ]
 const reportLoadedForSelectedMonth = computed(() => report.value?.business_month === month.value)
@@ -125,18 +126,24 @@ const canExportReport = computed(() => {
 })
 const exportDisabledReason = computed(() => {
   if (exporting.value) return '正在生成导出文件'
-  if (loading.value) return '当前月份正在加载'
+  if (loading.value) return '所选月份正在加载'
   if (availableMonthsLoading.value) return '正在读取可导出月份'
   if (reportRangeMode.value !== 'single') return ''
-  if (!reportLoadedForSelectedMonth.value) return '请先加载当前选择月份的数据'
-  if (!currentReportHasData.value) return '当前月份没有可导出的计件统计'
+  if (!reportLoadedForSelectedMonth.value) return '请先加载所选月份的数据'
+  if (!currentReportHasData.value) return `${month.value} 没有可导出的计件统计`
   return ''
+})
+const exportRangeHint = computed(() => {
+  if (reportRangeMode.value === 'single') return `仅导出 ${month.value}，不会合并系统当前月份`
+  if (reportRangeMode.value === 'last3') return `导出 ${selectedExportMonths.value.at(-1)} 至 ${month.value}`
+  if (reportRangeMode.value === 'last12') return `导出 ${selectedExportMonths.value.at(-1)} 至 ${month.value}`
+  return '导出所有已生成结算批次的月份，并包含当前所选月'
 })
 
 const baseColumns: GridColumn[] = [
   { key: 'creator_name', label: '创建人', width: 132 },
   { key: 'job_grade', label: '岗级', width: 84 },
-  { key: 'created_date', label: '创建日期', width: 112 },
+  { key: 'created_date_range', label: '上传/补录日期', width: 196 },
   { key: 'order_count', label: '订单数', width: 88, align: 'right' },
   { key: 'item_count', label: '单数', width: 80, align: 'right' },
   { key: 'page_count', label: '作图量', width: 88, align: 'right' },
@@ -242,6 +249,7 @@ function buildGridRows(rows: SettlementReportRow[]): ReportGridRow[] {
       ...row,
       grid_id: `${row.payee_user_id}-${row.row_type}`,
       row_type: row.row_type,
+      created_date_range: settlementReportDateRange(row),
     }
     const metrics = new Map(row.difficulty_metrics.map((metric) => [metric.difficulty_class, metric]))
     for (const difficulty of difficultyClasses.value) {
@@ -251,6 +259,13 @@ function buildGridRows(rows: SettlementReportRow[]): ReportGridRow[] {
     delete output.difficulty_metrics
     return output
   })
+}
+
+function settlementReportDateRange(row: SettlementReportRow): string {
+  const start = String(row.created_date || '').trim()
+  const end = String(row.created_date_end || start).trim()
+  if (!start) return '—'
+  return end && end !== start ? `${start} 至 ${end}` : start
 }
 
 function flattenDifficultyForGrid(difficulty: string, metric?: SettlementReportDifficultyMetric) {
@@ -347,6 +362,7 @@ onMounted(() => {
         </button>
       </div>
     </div>
+    <p class="aw-copy aw-report-range-hint">{{ exportRangeHint }}</p>
     <p v-if="reportNotice" class="aw-inline-alert">{{ reportNotice }}</p>
     <p v-if="exportDisabledReason && reportRangeMode === 'single'" class="aw-copy">{{ exportDisabledReason }}</p>
 
@@ -478,7 +494,8 @@ onMounted(() => {
             </WorkbenchDataGrid>
             <div v-else class="aw-empty-state">
               <h3>没有补录计件</h3>
-              <p>当前业务月没有已批准的补录计件。</p>
+              <p>{{ month }} 尚未创建已批准的补录记录。补录不会延迟同步，创建后刷新即可在这里单独核对。</p>
+              <RouterLink class="aw-secondary-button" to="/settlement">进入补录管理</RouterLink>
             </div>
           </AsyncBoundary>
         </section>

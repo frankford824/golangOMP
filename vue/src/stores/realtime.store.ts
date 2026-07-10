@@ -46,7 +46,7 @@ export const useRealtimeStore = defineStore('realtime', () => {
   }
 
   async function handleMessage(event: V1WsEventDetail): Promise<void> {
-    if (event.type !== 'notification_arrived') return
+    if (!isMainOpsNotificationArrival(event)) return
     const notificationsStore = useNotificationsStore()
     notificationsStore.applyUnreadCount(event.payload.unread_count)
     const notificationID = Number(event.payload.notification_id)
@@ -85,3 +85,12 @@ export const useRealtimeStore = defineStore('realtime', () => {
     requestBrowserPermission,
   }
 })
+
+export function isMainOpsNotificationArrival(event: V1WsEventDetail): boolean {
+  if (event.type !== 'notification_arrived') return false
+  const rawScope = event.payload.scope
+  if (rawScope === undefined || rawScope === null) return true
+  if (typeof rawScope !== 'string') return false
+  const scope = rawScope.trim()
+  return scope === '' || scope === 'main_ops'
+}

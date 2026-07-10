@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { resolveApiUserMessage } from '@/utils/api-message-zh'
+import { mapRawBackendMessageToZh, resolveApiUserMessage } from '@/utils/api-message-zh'
 
 describe('resolveApiUserMessage', () => {
   it('prefers backend conflict message over generic CONFLICT copy', () => {
@@ -97,5 +97,23 @@ describe('resolveApiUserMessage', () => {
     const message = resolveApiUserMessage(new Error('Network Error'))
 
     expect(message).toBe('连接中断，本次操作没有完成。请恢复网络后重试，不要重复点击提交。')
+  })
+
+  it('maps asset-workbench settlement and priced-work mutation messages', () => {
+    expect(mapRawBackendMessageToZh('Submission item cannot be changed after settlement batch attachment.')).toBe(
+      '当前作品已进入待确认的结算批次，暂时不能移动或删除。请先取消该批次后再操作。',
+    )
+    expect(mapRawBackendMessageToZh('All files in one priced work must be selected together.')).toBe(
+      '该作品由文件夹内的多个文件组成，请勾选整个文件夹作品后再移动或删除。',
+    )
+    expect(mapRawBackendMessageToZh('Payee payout profile is incomplete; confirm is blocked.')).toBe(
+      '无法确认批次：批次内有人员尚未补全姓名、身份证或支付宝信息。请先在人员资料中补齐后重试。',
+    )
+    expect(mapRawBackendMessageToZh('Supplement permission can only be opened for the current natural month.')).toBe(
+      '补录权限只能开放到当前自然月，请读取当前月份后重试。',
+    )
+    expect(mapRawBackendMessageToZh('Settlement supplements must be recorded in the current natural month.')).toBe(
+      '补录工资只能计入当前自然月，请刷新后重新提交。',
+    )
   })
 })

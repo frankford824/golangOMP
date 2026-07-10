@@ -51,6 +51,7 @@ func (r *notificationRepo) List(ctx context.Context, filter repo.NotificationLis
 		where = append(where, `is_read = ?`)
 		args = append(args, *filter.IsRead)
 	}
+	where, args = appendNotificationScope(where, args, filter.Scope)
 	if filter.BeforeTime != nil && filter.BeforeID > 0 {
 		where = append(where, `(created_at < ? OR (created_at = ? AND id < ?))`)
 		args = append(args, *filter.BeforeTime, *filter.BeforeTime, filter.BeforeID)
@@ -75,10 +76,18 @@ func (r *notificationRepo) List(ctx context.Context, filter repo.NotificationLis
 }
 
 func (r *notificationRepo) MarkRead(ctx context.Context, id, userID int64, at time.Time) (int64, error) {
+	return r.MarkReadScoped(ctx, id, userID, at, repo.NotificationScope{})
+}
+
+func (r *notificationRepo) MarkReadScoped(ctx context.Context, id, userID int64, at time.Time, scope repo.NotificationScope) (int64, error) {
+	where := []string{`id = ?`, `user_id = ?`, `is_read = 0`}
+	args := []interface{}{id, userID}
+	where, args = appendNotificationScope(where, args, scope)
+	args = append([]interface{}{at}, args...)
 	res, err := r.db.db.ExecContext(ctx, `
 		UPDATE notifications
 		   SET is_read = 1, read_at = COALESCE(read_at, ?)
-		 WHERE id = ? AND user_id = ? AND is_read = 0`, at, id, userID)
+		 WHERE `+strings.Join(where, ` AND `), args...)
 	if err != nil {
 		return 0, fmt.Errorf("mark notification read: %w", err)
 	}
@@ -86,10 +95,18 @@ func (r *notificationRepo) MarkRead(ctx context.Context, id, userID int64, at ti
 }
 
 func (r *notificationRepo) MarkAllRead(ctx context.Context, userID int64, at time.Time) (int64, error) {
+	return r.MarkAllReadScoped(ctx, userID, at, repo.NotificationScope{})
+}
+
+func (r *notificationRepo) MarkAllReadScoped(ctx context.Context, userID int64, at time.Time, scope repo.NotificationScope) (int64, error) {
+	where := []string{`user_id = ?`, `is_read = 0`}
+	args := []interface{}{userID}
+	where, args = appendNotificationScope(where, args, scope)
+	args = append([]interface{}{at}, args...)
 	res, err := r.db.db.ExecContext(ctx, `
 		UPDATE notifications
 		   SET is_read = 1, read_at = COALESCE(read_at, ?)
-		 WHERE user_id = ? AND is_read = 0`, at, userID)
+		 WHERE `+strings.Join(where, ` AND `), args...)
 	if err != nil {
 		return 0, fmt.Errorf("mark all notifications read: %w", err)
 	}
@@ -97,11 +114,32 @@ func (r *notificationRepo) MarkAllRead(ctx context.Context, userID int64, at tim
 }
 
 func (r *notificationRepo) UnreadCount(ctx context.Context, userID int64) (int, error) {
+	return r.UnreadCountScoped(ctx, userID, repo.NotificationScope{})
+}
+
+func (r *notificationRepo) UnreadCountScoped(ctx context.Context, userID int64, scope repo.NotificationScope) (int, error) {
+	where := []string{`user_id = ?`, `is_read = 0`}
+	args := []interface{}{userID}
+	where, args = appendNotificationScope(where, args, scope)
 	var count int
-	if err := r.db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM notifications WHERE user_id = ? AND is_read = 0`, userID).Scan(&count); err != nil {
+	if err := r.db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM notifications WHERE `+strings.Join(where, ` AND `), args...).Scan(&count); err != nil {
 		return 0, fmt.Errorf("count unread notifications: %w", err)
 	}
 	return count, nil
+}
+
+func appendNotificationScope(where []string, args []interface{}, scope repo.NotificationScope) ([]string, []interface{}) {
+	prefix := strings.TrimSpace(scope.TypePrefix)
+	if prefix == "" {
+		return where, args
+	}
+	operator := "="
+	if scope.Exclude {
+		operator = "<>"
+	}
+	where = append(where, `LEFT(notification_type, ?) `+operator+` ?`)
+	args = append(args, len(prefix), prefix)
+	return where, args
 }
 
 func (r *notificationRepo) UpsertWebPushSubscription(ctx context.Context, tx repo.Tx, sub *domain.WebPushSubscription) (*domain.WebPushSubscription, error) {

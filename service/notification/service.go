@@ -18,6 +18,16 @@ import (
 
 const CodeNotificationNotOwner = "notification_not_owner"
 
+var (
+	mainOpsNotificationScope = repo.NotificationScope{
+		TypePrefix: domain.NotificationTypeAssetWorkbenchNotificationPrefix,
+		Exclude:    true,
+	}
+	assetWorkbenchNotificationScope = repo.NotificationScope{
+		TypePrefix: domain.NotificationTypeAssetWorkbenchNotificationPrefix,
+	}
+)
+
 type Broadcaster interface {
 	BroadcastToUser(userID int64, event domain.WebSocketEvent)
 }
@@ -252,6 +262,14 @@ func (s *Service) activeUserIDsByIDs(ctx context.Context, ids []int64) ([]int64,
 }
 
 func (s *Service) List(ctx context.Context, actor domain.RequestActor, filter ListFilter) ([]domain.Notification, string, *domain.AppError) {
+	return s.listScoped(ctx, actor, filter, mainOpsNotificationScope)
+}
+
+func (s *Service) ListAssetWorkbench(ctx context.Context, actor domain.RequestActor, filter ListFilter) ([]domain.Notification, string, *domain.AppError) {
+	return s.listScoped(ctx, actor, filter, assetWorkbenchNotificationScope)
+}
+
+func (s *Service) listScoped(ctx context.Context, actor domain.RequestActor, filter ListFilter, scope repo.NotificationScope) ([]domain.Notification, string, *domain.AppError) {
 	beforeTime, beforeID, appErr := decodeCursor(filter.Cursor)
 	if appErr != nil {
 		return nil, "", appErr
@@ -266,6 +284,7 @@ func (s *Service) List(ctx context.Context, actor domain.RequestActor, filter Li
 		Limit:      limit + 1,
 		BeforeTime: beforeTime,
 		BeforeID:   beforeID,
+		Scope:      scope,
 	})
 	if err != nil {
 		return nil, "", domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)
@@ -280,7 +299,15 @@ func (s *Service) List(ctx context.Context, actor domain.RequestActor, filter Li
 }
 
 func (s *Service) MarkRead(ctx context.Context, actor domain.RequestActor, id int64) *domain.AppError {
-	affected, err := s.notifications.MarkRead(ctx, id, actor.ID, s.now().UTC())
+	return s.markReadScoped(ctx, actor, id, mainOpsNotificationScope)
+}
+
+func (s *Service) MarkAssetWorkbenchRead(ctx context.Context, actor domain.RequestActor, id int64) *domain.AppError {
+	return s.markReadScoped(ctx, actor, id, assetWorkbenchNotificationScope)
+}
+
+func (s *Service) markReadScoped(ctx context.Context, actor domain.RequestActor, id int64, scope repo.NotificationScope) *domain.AppError {
+	affected, err := s.notifications.MarkReadScoped(ctx, id, actor.ID, s.now().UTC(), scope)
 	if err != nil {
 		return domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)
 	}
@@ -298,22 +325,53 @@ func (s *Service) MarkRead(ctx context.Context, actor domain.RequestActor, id in
 		s.recordDenied(ctx, actor, id)
 		return domain.NewAppError(CodeNotificationNotOwner, "not the notification owner", nil)
 	}
+	if !notificationMatchesScope(n.NotificationType, scope) {
+		return domain.ErrNotFound
+	}
 	return nil
 }
 
 func (s *Service) MarkAllRead(ctx context.Context, actor domain.RequestActor) *domain.AppError {
-	if _, err := s.notifications.MarkAllRead(ctx, actor.ID, s.now().UTC()); err != nil {
+	return s.markAllReadScoped(ctx, actor, mainOpsNotificationScope)
+}
+
+func (s *Service) MarkAllAssetWorkbenchRead(ctx context.Context, actor domain.RequestActor) *domain.AppError {
+	return s.markAllReadScoped(ctx, actor, assetWorkbenchNotificationScope)
+}
+
+func (s *Service) markAllReadScoped(ctx context.Context, actor domain.RequestActor, scope repo.NotificationScope) *domain.AppError {
+	if _, err := s.notifications.MarkAllReadScoped(ctx, actor.ID, s.now().UTC(), scope); err != nil {
 		return domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)
 	}
 	return nil
 }
 
 func (s *Service) UnreadCount(ctx context.Context, actor domain.RequestActor) (int, *domain.AppError) {
-	count, err := s.notifications.UnreadCount(ctx, actor.ID)
+	return s.unreadCountScoped(ctx, actor, mainOpsNotificationScope)
+}
+
+func (s *Service) AssetWorkbenchUnreadCount(ctx context.Context, actor domain.RequestActor) (int, *domain.AppError) {
+	return s.unreadCountScoped(ctx, actor, assetWorkbenchNotificationScope)
+}
+
+func (s *Service) unreadCountScoped(ctx context.Context, actor domain.RequestActor, scope repo.NotificationScope) (int, *domain.AppError) {
+	count, err := s.notifications.UnreadCountScoped(ctx, actor.ID, scope)
 	if err != nil {
 		return 0, domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)
 	}
 	return count, nil
+}
+
+func notificationMatchesScope(ntype domain.NotificationType, scope repo.NotificationScope) bool {
+	prefix := strings.TrimSpace(scope.TypePrefix)
+	if prefix == "" {
+		return true
+	}
+	matches := strings.HasPrefix(string(ntype), prefix)
+	if scope.Exclude {
+		return !matches
+	}
+	return matches
 }
 
 func (s *Service) CreateNotification(ctx context.Context, tx repo.Tx, userID int64, ntype domain.NotificationType, payload json.RawMessage) (*domain.Notification, error) {
@@ -335,11 +393,16 @@ func (s *Service) CreateNotification(ctx context.Context, tx repo.Tx, userID int
 	if s.hub != nil || s.external != nil {
 		registerAfterCommit(tx, func() {
 			if s.hub != nil {
-				unread, _ := s.notifications.UnreadCount(context.Background(), userID)
+				scope := mainOpsNotificationScope
+				if n.NotificationType.IsAssetWorkbench() {
+					scope = assetWorkbenchNotificationScope
+				}
+				unread, _ := s.notifications.UnreadCountScoped(context.Background(), userID, scope)
 				s.hub.BroadcastToUser(userID, domain.NewWebSocketEvent(domain.WebSocketEventNotificationArrived, map[string]interface{}{
 					"notification_id":   n.ID,
 					"notification_type": string(n.NotificationType),
 					"unread_count":      unread,
+					"scope":             map[bool]string{true: "asset_workbench", false: "main_ops"}[n.NotificationType.IsAssetWorkbench()],
 				}))
 			}
 			if s.external != nil {

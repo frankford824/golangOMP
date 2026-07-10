@@ -144,6 +144,7 @@ var knownGapReasons = map[string]string{
 	knownGapKey("GET", "/v1/asset-workbench/materials/group-files"):                             "asset-workbench-mounted-route-contract-pending",
 	knownGapKey("GET", "/v1/asset-workbench/materials/groups"):                                  "asset-workbench-mounted-route-contract-pending",
 	knownGapKey("GET", "/v1/asset-workbench/members"):                                           "asset-workbench-mounted-route-contract-pending",
+	knownGapKey("GET", "/v1/asset-workbench/notifications"):                                     "tool-deref-limit-dynamic-payload-documented",
 	knownGapKey("GET", "/v1/asset-workbench/my-templates"):                                      "asset-workbench-mounted-route-contract-pending",
 	knownGapKey("GET", "/v1/asset-workbench/overview-search"):                                   "asset-workbench-mounted-route-contract-pending",
 	knownGapKey("GET", "/v1/asset-workbench/people-lookup"):                                     "asset-workbench-mounted-route-contract-pending",

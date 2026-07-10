@@ -32,18 +32,13 @@ func NewNotificationHandler(svc *notificationsvc.Service) *NotificationHandler {
 }
 
 func (h *NotificationHandler) MyList(c *gin.Context) {
-	limit, _ := strconv.Atoi(c.Query("limit"))
-	var isRead *bool
-	if raw := c.Query("is_read"); raw != "" {
-		value, err := strconv.ParseBool(raw)
-		if err != nil {
-			respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "is_read must be boolean", nil))
-			return
-		}
-		isRead = &value
+	filter, appErr := notificationListFilter(c)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
 	}
 	actor, _ := domain.RequestActorFromContext(c.Request.Context())
-	items, next, appErr := h.svc.List(c.Request.Context(), actor, notificationsvc.ListFilter{IsRead: isRead, Limit: limit, Cursor: c.Query("cursor")})
+	items, next, appErr := h.svc.List(c.Request.Context(), actor, filter)
 	if appErr != nil {
 		respondError(c, appErr)
 		return
@@ -51,14 +46,56 @@ func (h *NotificationHandler) MyList(c *gin.Context) {
 	c.JSON(200, gin.H{"data": items, "next_cursor": next})
 }
 
+func (h *NotificationHandler) AssetWorkbenchList(c *gin.Context) {
+	filter, appErr := notificationListFilter(c)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	actor, _ := domain.RequestActorFromContext(c.Request.Context())
+	items, next, appErr := h.svc.ListAssetWorkbench(c.Request.Context(), actor, filter)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	c.JSON(200, gin.H{"data": items, "next_cursor": next})
+}
+
+func notificationListFilter(c *gin.Context) (notificationsvc.ListFilter, *domain.AppError) {
+	limit, _ := strconv.Atoi(c.Query("limit"))
+	var isRead *bool
+	if raw := c.Query("is_read"); raw != "" {
+		value, err := strconv.ParseBool(raw)
+		if err != nil {
+			return notificationsvc.ListFilter{}, domain.NewAppError(domain.ErrCodeInvalidRequest, "is_read must be boolean", nil)
+		}
+		isRead = &value
+	}
+	return notificationsvc.ListFilter{IsRead: isRead, Limit: limit, Cursor: c.Query("cursor")}, nil
+}
+
 func (h *NotificationHandler) MarkRead(c *gin.Context) {
+	h.markRead(c, false)
+}
+
+func (h *NotificationHandler) MarkAssetWorkbenchRead(c *gin.Context) {
+	h.markRead(c, true)
+}
+
+func (h *NotificationHandler) markRead(c *gin.Context, assetWorkbench bool) {
 	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil || id <= 0 {
 		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid notification id", nil))
 		return
 	}
 	actor, _ := domain.RequestActorFromContext(c.Request.Context())
-	if appErr := h.svc.MarkRead(c.Request.Context(), actor, id); appErr != nil {
+	var appErr *domain.AppError
+	if assetWorkbench {
+		appErr = h.svc.MarkAssetWorkbenchRead(c.Request.Context(), actor, id)
+	} else {
+		appErr = h.svc.MarkRead(c.Request.Context(), actor, id)
+	}
+	if appErr != nil {
 		respondError(c, appErr)
 		return
 	}
@@ -66,8 +103,22 @@ func (h *NotificationHandler) MarkRead(c *gin.Context) {
 }
 
 func (h *NotificationHandler) MarkAllRead(c *gin.Context) {
+	h.markAllRead(c, false)
+}
+
+func (h *NotificationHandler) MarkAllAssetWorkbenchRead(c *gin.Context) {
+	h.markAllRead(c, true)
+}
+
+func (h *NotificationHandler) markAllRead(c *gin.Context, assetWorkbench bool) {
 	actor, _ := domain.RequestActorFromContext(c.Request.Context())
-	if appErr := h.svc.MarkAllRead(c.Request.Context(), actor); appErr != nil {
+	var appErr *domain.AppError
+	if assetWorkbench {
+		appErr = h.svc.MarkAllAssetWorkbenchRead(c.Request.Context(), actor)
+	} else {
+		appErr = h.svc.MarkAllRead(c.Request.Context(), actor)
+	}
+	if appErr != nil {
 		respondError(c, appErr)
 		return
 	}
@@ -75,8 +126,22 @@ func (h *NotificationHandler) MarkAllRead(c *gin.Context) {
 }
 
 func (h *NotificationHandler) UnreadCount(c *gin.Context) {
+	h.unreadCount(c, false)
+}
+
+func (h *NotificationHandler) AssetWorkbenchUnreadCount(c *gin.Context) {
+	h.unreadCount(c, true)
+}
+
+func (h *NotificationHandler) unreadCount(c *gin.Context, assetWorkbench bool) {
 	actor, _ := domain.RequestActorFromContext(c.Request.Context())
-	count, appErr := h.svc.UnreadCount(c.Request.Context(), actor)
+	var count int
+	var appErr *domain.AppError
+	if assetWorkbench {
+		count, appErr = h.svc.AssetWorkbenchUnreadCount(c.Request.Context(), actor)
+	} else {
+		count, appErr = h.svc.UnreadCount(c.Request.Context(), actor)
+	}
 	if appErr != nil {
 		respondError(c, appErr)
 		return

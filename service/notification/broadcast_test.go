@@ -195,12 +195,24 @@ func (r *broadcastNotificationRepo) MarkRead(ctx context.Context, id, userID int
 	return 0, errors.New("not implemented")
 }
 
+func (r *broadcastNotificationRepo) MarkReadScoped(ctx context.Context, id, userID int64, at time.Time, scope repo.NotificationScope) (int64, error) {
+	return r.MarkRead(ctx, id, userID, at)
+}
+
 func (r *broadcastNotificationRepo) MarkAllRead(ctx context.Context, userID int64, at time.Time) (int64, error) {
 	return 0, errors.New("not implemented")
 }
 
+func (r *broadcastNotificationRepo) MarkAllReadScoped(ctx context.Context, userID int64, at time.Time, scope repo.NotificationScope) (int64, error) {
+	return r.MarkAllRead(ctx, userID, at)
+}
+
 func (r *broadcastNotificationRepo) UnreadCount(ctx context.Context, userID int64) (int, error) {
 	return 0, nil
+}
+
+func (r *broadcastNotificationRepo) UnreadCountScoped(ctx context.Context, userID int64, scope repo.NotificationScope) (int, error) {
+	return r.UnreadCount(ctx, userID)
 }
 
 func (r *broadcastNotificationRepo) UpsertWebPushSubscription(ctx context.Context, tx repo.Tx, sub *domain.WebPushSubscription) (*domain.WebPushSubscription, error) {
