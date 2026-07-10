@@ -641,6 +641,7 @@ type AssetWorkbenchRepo interface {
 
 	CreateUploadSession(ctx context.Context, tx Tx, session *domain.AssetWorkbenchUploadSession) (*domain.AssetWorkbenchUploadSession, error)
 	GetUploadSession(ctx context.Context, sessionID string) (*domain.AssetWorkbenchUploadSession, error)
+	GetUploadSessionForUpdate(ctx context.Context, tx Tx, sessionID string) (*domain.AssetWorkbenchUploadSession, error)
 	UpdateUploadSessionStatus(ctx context.Context, tx Tx, sessionID, status string, uploadedAt *time.Time, cancelledAt *time.Time, submittedItemID *int64) error
 	ListExpiredUploadSessions(ctx context.Context, now time.Time, limit int) ([]*domain.AssetWorkbenchUploadSession, error)
 

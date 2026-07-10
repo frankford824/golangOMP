@@ -89,6 +89,14 @@ vi.mock('@/services/api/assetsApi', () => ({
   assertAssetCenterUploadCompleteOk: vi.fn(),
 }))
 
+vi.mock('@/services/api/taskAssetsApi', () => ({
+  taskAssetsApi: {
+    createTaskCreateUploadSession: vi.fn(),
+    completeTaskCreateUploadSession: vi.fn(),
+    abortTaskCreateUploadSession: vi.fn(),
+  },
+}))
+
 vi.mock('@/utils/mime', () => ({
   resolveFileMimeType: vi.fn(() => 'application/octet-stream'),
 }))
@@ -104,8 +112,10 @@ import {
   normalizeRetouchRequirementId,
   prepareTaskAssetUploadSession,
   completePreparedTaskAssetUploadSession,
+  cancelPreparedTaskAssetUploadSession,
 } from '../assetUploadFlow'
 import { assetsApi } from '@/services/api/assetsApi'
+import { taskAssetsApi } from '@/services/api/taskAssetsApi'
 
 describe('normalizeUploadSessionNumericID', () => {
   it('converts positive numeric strings to JSON numbers', () => {
@@ -414,6 +424,59 @@ describe('completePreparedTaskAssetUploadSession — remote transport', () => {
       undefined,
     )
     expect(assetsApi.completeAssetUploadSession).not.toHaveBeenCalled()
+  })
+
+  it('uses an independent request to cancel a session after the upload signal aborts', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    vi.mocked(assetsApi.uploadToRemoteUrl).mockRejectedValue(
+      new DOMException('Aborted', 'AbortError'),
+    )
+    vi.mocked(assetsApi.cancelAssetUploadSession).mockResolvedValue({} as never)
+
+    const prepared = {
+      sessionId: 'sess-aborted',
+      taskId: '123',
+      remote: {
+        upload_url: 'https://proxy.internal/upload',
+        required_upload_content_type: 'image/png',
+      },
+      assetKind: 'delivery' as const,
+      remark: 'test',
+      sessionMime: 'image/png',
+    }
+
+    await expect(
+      completePreparedTaskAssetUploadSession(prepared, fakeFile(), {
+        signal: controller.signal,
+      }),
+    ).rejects.toThrow('upload failed at part_upload')
+
+    expect(assetsApi.cancelAssetUploadSession).toHaveBeenCalledWith('sess-aborted', {})
+  })
+
+  it('uses the canonical pre-task abort route and forwards OSS cleanup identifiers', async () => {
+    vi.mocked(taskAssetsApi.abortTaskCreateUploadSession).mockResolvedValue({} as never)
+
+    await cancelPreparedTaskAssetUploadSession(
+      'sess-pretask',
+      undefined,
+      undefined,
+      {
+        mode: 'multipart',
+        object_key: 'tasks/task-create-reference/upload-sessions/sess-pretask/sess-pretask.png',
+        upload_id: 'oss-upload-1',
+      },
+    )
+
+    expect(taskAssetsApi.abortTaskCreateUploadSession).toHaveBeenCalledWith(
+      'sess-pretask',
+      {
+        oss_object_key: 'tasks/task-create-reference/upload-sessions/sess-pretask/sess-pretask.png',
+        oss_upload_id: 'oss-upload-1',
+      },
+    )
+    expect(assetsApi.cancelAssetUploadSession).not.toHaveBeenCalled()
   })
 
   it('throws when both ossDirect and remote are absent', async () => {

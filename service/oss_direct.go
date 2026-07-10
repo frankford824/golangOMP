@@ -111,6 +111,12 @@ type OSSDirectDownloadInfo struct {
 	ExpiresAt   time.Time `json:"expires_at"`
 }
 
+type OSSObjectInfo struct {
+	ContentLength int64
+	ContentType   string
+	ETag          string
+}
+
 type OSSCompletePart struct {
 	PartNumber int    `xml:"PartNumber" json:"part_number"`
 	ETag       string `xml:"ETag" json:"etag"`
@@ -122,6 +128,30 @@ func (s *OSSDirectService) BuildObjectKey(taskRef, assetNo string, versionNo int
 	roleSubdir := assetTypeToSubdir(assetType)
 	storageFilename := asciiStorageFilename(filename)
 	return fmt.Sprintf("tasks/%s/assets/%s/v%d/%s/%s", taskRef, assetNo, versionNo, roleSubdir, storageFilename)
+}
+
+func (s *OSSDirectService) BuildUploadSessionObjectKey(taskRef, sessionID, filename string) string {
+	taskRef = sanitizeOSSObjectKeySegment(taskRef, "task")
+	sessionID = sanitizeOSSObjectKeySegment(sessionID, "session")
+	storageFilename := sessionID
+	if ext := validObjectKeyExtension(filename); ext != "" {
+		storageFilename += "." + strings.ToLower(ext)
+	}
+	return fmt.Sprintf("tasks/%s/upload-sessions/%s/%s", taskRef, sessionID, storageFilename)
+}
+
+func (s *OSSDirectService) CreateUploadPlan(ctx context.Context, objectKey string, fileSize int64, contentType string) (*OSSDirectUploadPlan, error) {
+	if !s.Enabled() {
+		return nil, fmt.Errorf("oss direct service is not enabled")
+	}
+	if fileSize <= s.cfg.PartSize {
+		return s.CreateSingleUploadPlan(objectKey, contentType)
+	}
+	return s.CreateMultipartUploadPlan(ctx, objectKey, fileSize, contentType)
+}
+
+func (s *OSSDirectService) UsesMultipartUpload(fileSize int64) bool {
+	return s != nil && fileSize > s.cfg.PartSize
 }
 
 func normalizeRequiredUploadContentType(contentType string) string {
@@ -390,17 +420,22 @@ func (s *OSSDirectService) UploadObjectFromReader(ctx context.Context, objectKey
 }
 
 func (s *OSSDirectService) HeadObject(ctx context.Context, objectKey string) (bool, error) {
+	_, exists, err := s.StatObject(ctx, objectKey)
+	return exists, err
+}
+
+func (s *OSSDirectService) StatObject(ctx context.Context, objectKey string) (*OSSObjectInfo, bool, error) {
 	if !s.Enabled() {
-		return false, fmt.Errorf("oss direct service is not enabled")
+		return nil, false, fmt.Errorf("oss direct service is not enabled")
 	}
 	objectKey = strings.TrimSpace(objectKey)
 	if objectKey == "" {
-		return false, fmt.Errorf("oss direct head object_key is required")
+		return nil, false, fmt.Errorf("oss direct head object_key is required")
 	}
 	reqURL := s.bucketURL() + "/" + ossEscapePath(objectKey)
 	req, err := http.NewRequestWithContext(ctx, http.MethodHead, reqURL, nil)
 	if err != nil {
-		return false, fmt.Errorf("oss direct head build request: %w", err)
+		return nil, false, fmt.Errorf("oss direct head build request: %w", err)
 	}
 	date := time.Now().UTC().Format(http.TimeFormat)
 	req.Header.Set("Date", date)
@@ -411,17 +446,21 @@ func (s *OSSDirectService) HeadObject(ctx context.Context, objectKey string) (bo
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
-		return false, fmt.Errorf("oss direct head request: %w", err)
+		return nil, false, fmt.Errorf("oss direct head request: %w", err)
 	}
 	defer resp.Body.Close()
 	switch resp.StatusCode {
 	case http.StatusOK:
-		return true, nil
+		return &OSSObjectInfo{
+			ContentLength: resp.ContentLength,
+			ContentType:   strings.TrimSpace(resp.Header.Get("Content-Type")),
+			ETag:          strings.Trim(strings.TrimSpace(resp.Header.Get("ETag")), `"`),
+		}, true, nil
 	case http.StatusNotFound:
-		return false, nil
+		return nil, false, nil
 	default:
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return false, fmt.Errorf("oss direct head failed: status=%d body=%s", resp.StatusCode, string(raw))
+		return nil, false, fmt.Errorf("oss direct head failed: status=%d body=%s", resp.StatusCode, string(raw))
 	}
 }
 
@@ -917,6 +956,24 @@ func validObjectKeyExtension(filename string) string {
 		return ext
 	}
 	return ""
+}
+
+func sanitizeOSSObjectKeySegment(value, fallback string) string {
+	value = strings.TrimSpace(value)
+	var builder strings.Builder
+	for _, r := range value {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '-', r == '_', r == '.':
+			builder.WriteRune(r)
+		default:
+			builder.WriteByte('_')
+		}
+	}
+	result := strings.Trim(builder.String(), "._-")
+	if result == "" {
+		return fallback
+	}
+	return result
 }
 
 func randomHex8() string {

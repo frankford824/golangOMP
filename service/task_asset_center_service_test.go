@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -279,6 +280,7 @@ func TestTaskAssetCenterServiceCompletedTaskMutationRejectsAuditOnlyActors(t *te
 				case "create":
 					_, appErr = svc.CreateMultipartUploadSession(ctx, CreateTaskAssetUploadSessionParams{
 						TaskID: taskID, AssetID: &assetID, CreatedBy: actorID, AssetType: assetType, Filename: "replacement.psd",
+						ExpectedSize: uploadRequestInt64Ptr(1024),
 					})
 				case "complete":
 					_, appErr = svc.CompleteUploadSession(ctx, CompleteTaskAssetUploadSessionParams{TaskID: taskID, SessionID: "audit-only-session", CompletedBy: actorID})
@@ -620,6 +622,78 @@ func TestTaskAssetCenterServiceCompleteOSSDirectMultipartWithoutRemoteSync(t *te
 	}
 }
 
+func TestTaskAssetCenterServiceCompleteOSSDirectSinglePartWithoutRemoteSync(t *testing.T) {
+	ossServer := newFakeOSSDirectServer(t)
+	defer ossServer.Close()
+	uploadClient := newStubUploadServiceClient().(*stubUploadServiceClient)
+	ossDirect := NewOSSDirectService(OSSDirectConfig{
+		Enabled:         true,
+		Endpoint:        ossServer.EndpointHost(),
+		PublicEndpoint:  ossServer.EndpointHost(),
+		Bucket:          "test-bucket",
+		AccessKeyID:     "test-key",
+		AccessKeySecret: "test-secret",
+		PartSize:        10 * 1024 * 1024,
+	})
+	ossDirect.httpClient = ossServer.Client()
+	svc := NewTaskAssetCenterService(
+		newStep04TaskRepo(&domain.Task{ID: 2041, TaskNo: "T-2041", TaskStatus: domain.TaskStatusInProgress}),
+		newStep67DesignAssetRepo(),
+		newStep04TaskAssetRepo(),
+		newStep37UploadRequestRepo(),
+		newStep37AssetStorageRefRepo(),
+		&step04TaskEventRepo{},
+		step04TxRunner{},
+		uploadClient,
+		WithOSSDirectService(ossDirect),
+		WithTaskAssetCenterPreviewRenderer(testPreviewRenderer{}),
+	).(*taskAssetCenterService)
+	body := []byte("small direct asset")
+	created, appErr := svc.CreateUploadSession(context.Background(), CreateTaskAssetUploadSessionParams{
+		TaskID:       2041,
+		CreatedBy:    641,
+		AssetType:    domain.TaskAssetTypeReference,
+		Filename:     "reference.png",
+		ExpectedSize: uploadRequestInt64Ptr(int64(len(body))),
+		MimeType:     "image/png",
+	})
+	if appErr != nil {
+		t.Fatalf("CreateUploadSession() error = %+v", appErr)
+	}
+	if created.OSSDirect == nil || created.OSSDirect.Mode != "single_part" || created.OSSDirect.UploadURL == "" {
+		t.Fatalf("single-part plan = %+v", created.OSSDirect)
+	}
+	req, err := http.NewRequest(http.MethodPut, created.OSSDirect.UploadURL, bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("build direct PUT: %v", err)
+	}
+	req.Header.Set("Content-Type", created.OSSDirect.RequiredContentType)
+	resp, err := ossServer.Client().Do(req)
+	if err != nil {
+		t.Fatalf("direct PUT: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("direct PUT status = %d", resp.StatusCode)
+	}
+	completed, appErr := svc.CompleteUploadSession(context.Background(), CompleteTaskAssetUploadSessionParams{
+		TaskID:            2041,
+		SessionID:         created.Session.ID,
+		CompletedBy:       641,
+		UploadContentType: created.OSSDirect.RequiredContentType,
+		OSSObjectKey:      created.OSSDirect.ObjectKey,
+	})
+	if appErr != nil {
+		t.Fatalf("CompleteUploadSession() error = %+v", appErr)
+	}
+	if completed.Version == nil || completed.Version.StorageKey != created.OSSDirect.ObjectKey {
+		t.Fatalf("completed version = %+v", completed.Version)
+	}
+	if uploadClient.getUploadSessionCalls != 0 || uploadClient.completeCalls != 0 {
+		t.Fatalf("remote calls get=%d complete=%d", uploadClient.getUploadSessionCalls, uploadClient.completeCalls)
+	}
+}
+
 func TestTaskAssetCenterServiceCreateOSSDirectMultipartUsesASCIIObjectKeyAndPreservesOriginalFilename(t *testing.T) {
 	ossServer := newFakeOSSDirectServer(t)
 	defer ossServer.Close()
@@ -686,8 +760,8 @@ func TestTaskAssetCenterServiceCreateOSSDirectMultipartUsesASCIIObjectKeyAndPres
 	}
 
 	objectKey := createResult.OSSDirect.ObjectKey
-	if !regexp.MustCompile(`^tasks/T-2042/assets/AST-0001/v1/delivery/[A-Za-z0-9_]+\.jpg$`).MatchString(objectKey) {
-		t.Fatalf("object key = %q, want ASCII delivery jpg key", objectKey)
+	if !regexp.MustCompile(`^tasks/T-2042/upload-sessions/[A-Za-z0-9_-]+/[A-Za-z0-9_-]+\.jpg$`).MatchString(objectKey) {
+		t.Fatalf("object key = %q, want deterministic upload-session jpg key", objectKey)
 	}
 	for _, forbidden := range []string{"手淘", "+", "木架", " "} {
 		if strings.Contains(objectKey, forbidden) {
@@ -1035,11 +1109,11 @@ func TestResolveRejectedDeliveryRevisionAssetIDReusesMatchingRoot(t *testing.T) 
 	}
 }
 
-func TestTaskAssetCenterServiceRejectsSmallUploadForDeliverySourcePreview(t *testing.T) {
+func TestTaskAssetCenterServiceAllowsSmallUploadForDeliverySourcePreview(t *testing.T) {
 	taskRepo := newStep04TaskRepo(&domain.Task{ID: 2004, TaskStatus: domain.TaskStatusInProgress})
 	svc := NewTaskAssetCenterService(taskRepo, newStep67DesignAssetRepo(), newStep04TaskAssetRepo(), newStep37UploadRequestRepo(), newStep37AssetStorageRefRepo(), &step04TaskEventRepo{}, step04TxRunner{}, newStubUploadServiceClient()).(*taskAssetCenterService)
 
-	_, appErr := svc.CreateSmallUploadSession(context.Background(), CreateTaskAssetUploadSessionParams{
+	result, appErr := svc.CreateSmallUploadSession(context.Background(), CreateTaskAssetUploadSessionParams{
 		TaskID:       2004,
 		CreatedBy:    503,
 		AssetType:    domain.TaskAssetTypeDelivery,
@@ -1047,14 +1121,11 @@ func TestTaskAssetCenterServiceRejectsSmallUploadForDeliverySourcePreview(t *tes
 		ExpectedSize: uploadRequestInt64Ptr(1024),
 		MimeType:     "image/png",
 	})
-	if appErr == nil {
-		t.Fatal("CreateSmallUploadSession() appErr = nil, want invalid request")
+	if appErr != nil {
+		t.Fatalf("CreateSmallUploadSession() unexpected error: %+v", appErr)
 	}
-	if appErr.Code != domain.ErrCodeInvalidRequest {
-		t.Fatalf("CreateSmallUploadSession() code = %s, want INVALID_REQUEST", appErr.Code)
-	}
-	if appErr.Message != "delivery/source/preview assets must use multipart upload mode" {
-		t.Fatalf("CreateSmallUploadSession() message = %q", appErr.Message)
+	if result == nil || result.Session == nil || result.Session.UploadMode != domain.DesignAssetUploadModeSmall {
+		t.Fatalf("CreateSmallUploadSession() result = %+v", result)
 	}
 }
 
@@ -1551,7 +1622,7 @@ func TestTaskAssetCenterServiceCreateUploadSessionDeniesDepartmentManagerOutside
 	}
 }
 
-func TestTaskAssetCenterServiceCreateUploadSessionInfersModeByAssetType(t *testing.T) {
+func TestTaskAssetCenterServiceCreateUploadSessionInfersModeByFileSize(t *testing.T) {
 	taskRepo := newStep04TaskRepo(&domain.Task{ID: 2008, TaskStatus: domain.TaskStatusInProgress})
 	svc := NewTaskAssetCenterService(taskRepo, newStep67DesignAssetRepo(), newStep04TaskAssetRepo(), newStep37UploadRequestRepo(), newStep37AssetStorageRefRepo(), &step04TaskEventRepo{}, step04TxRunner{}, newStubUploadServiceClient()).(*taskAssetCenterService)
 
@@ -1566,7 +1637,7 @@ func TestTaskAssetCenterServiceCreateUploadSessionInfersModeByAssetType(t *testi
 	if appErr != nil {
 		t.Fatalf("CreateUploadSession(reference) unexpected error: %+v", appErr)
 	}
-	if referenceResult.Session == nil || referenceResult.Session.UploadMode != domain.DesignAssetUploadModeMultipart {
+	if referenceResult.Session == nil || referenceResult.Session.UploadMode != domain.DesignAssetUploadModeSmall {
 		t.Fatalf("CreateUploadSession(reference) session = %+v", referenceResult.Session)
 	}
 
@@ -1581,8 +1652,23 @@ func TestTaskAssetCenterServiceCreateUploadSessionInfersModeByAssetType(t *testi
 	if appErr != nil {
 		t.Fatalf("CreateUploadSession(delivery) unexpected error: %+v", appErr)
 	}
-	if deliveryResult.Session == nil || deliveryResult.Session.UploadMode != domain.DesignAssetUploadModeMultipart {
+	if deliveryResult.Session == nil || deliveryResult.Session.UploadMode != domain.DesignAssetUploadModeSmall {
 		t.Fatalf("CreateUploadSession(delivery) session = %+v", deliveryResult.Session)
+	}
+
+	largeResult, appErr := svc.CreateUploadSession(context.Background(), CreateTaskAssetUploadSessionParams{
+		TaskID:       2008,
+		CreatedBy:    540,
+		AssetType:    domain.TaskAssetTypeSource,
+		Filename:     "source.psd",
+		ExpectedSize: uploadRequestInt64Ptr(taskAssetSinglePartThreshold + 1),
+		MimeType:     "image/vnd.adobe.photoshop",
+	})
+	if appErr != nil {
+		t.Fatalf("CreateUploadSession(large) unexpected error: %+v", appErr)
+	}
+	if largeResult.Session == nil || largeResult.Session.UploadMode != domain.DesignAssetUploadModeMultipart {
+		t.Fatalf("CreateUploadSession(large) session = %+v", largeResult.Session)
 	}
 }
 
@@ -2461,11 +2547,36 @@ func TestTaskAssetCenterServiceCompleteSourceThenDeliverySeriallyWithout500(t *t
 	if appErr != nil {
 		t.Fatalf("CreateMultipartUploadSession(delivery) unexpected error: %+v", appErr)
 	}
+	deliveryBody := bytes.Repeat([]byte("d"), 2048)
+	deliveryParts := make([]OSSCompletePart, 0, len(deliverySession.OSSDirect.Parts))
+	for _, part := range deliverySession.OSSDirect.Parts {
+		req, err := http.NewRequest(part.Method, part.UploadURL, bytes.NewReader(deliveryBody))
+		if err != nil {
+			t.Fatalf("http.NewRequest(delivery part) error = %v", err)
+		}
+		req.Header.Set("Content-Type", deliverySession.OSSDirect.RequiredContentType)
+		resp, err := ossServer.Client().Do(req)
+		if err != nil {
+			t.Fatalf("direct PUT(delivery) error = %v", err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("direct PUT(delivery) status = %d", resp.StatusCode)
+		}
+		deliveryParts = append(deliveryParts, OSSCompletePart{
+			PartNumber: part.PartNumber,
+			ETag:       strings.TrimSpace(resp.Header.Get("ETag")),
+		})
+	}
 	deliveryResult, appErr := svc.CompleteUploadSession(context.Background(), CompleteTaskAssetUploadSessionParams{
-		TaskID:      2053,
-		SessionID:   deliverySession.Session.ID,
-		CompletedBy: 653,
-		FileHash:    "serial-delivery-hash",
+		TaskID:            2053,
+		SessionID:         deliverySession.Session.ID,
+		CompletedBy:       653,
+		FileHash:          "serial-delivery-hash",
+		UploadContentType: deliverySession.OSSDirect.RequiredContentType,
+		OSSParts:          deliveryParts,
+		OSSUploadID:       deliverySession.OSSDirect.UploadID,
+		OSSObjectKey:      deliverySession.OSSDirect.ObjectKey,
 	})
 	if appErr != nil {
 		t.Fatalf("CompleteUploadSession(delivery) unexpected error: %+v", appErr)
@@ -2708,6 +2819,7 @@ func TestTaskAssetCenterServiceCompletedReplacementRejectsCurrentChangedBeforeLo
 		AssetID: &assetID, TaskAssetType: &assetType, Status: domain.UploadRequestStatusRequested,
 		SessionStatus: domain.DesignAssetSessionStatusCreated, RemoteUploadID: "remote-replacement-race",
 		UploadMode: domain.DesignAssetUploadModeMultipart, StorageProvider: domain.DesignAssetStorageProviderOSS,
+		ExpectedSize: uploadRequestInt64Ptr(1024), FileSize: uploadRequestInt64Ptr(1024),
 	}
 	domain.HydrateUploadRequestDerived(uploadRequestRepo.requests["replacement-race"])
 	svc := NewTaskAssetCenterService(
@@ -2750,6 +2862,7 @@ func TestTaskAssetCenterServiceCompletedReplacementRejectsTaskArchivedBeforeLock
 		AssetID: &assetID, TaskAssetType: &assetType, Status: domain.UploadRequestStatusRequested,
 		SessionStatus: domain.DesignAssetSessionStatusCreated, RemoteUploadID: "remote-replacement-archive-race",
 		UploadMode: domain.DesignAssetUploadModeMultipart, StorageProvider: domain.DesignAssetStorageProviderOSS,
+		ExpectedSize: uploadRequestInt64Ptr(1024), FileSize: uploadRequestInt64Ptr(1024),
 	}
 	domain.HydrateUploadRequestDerived(uploadRequestRepo.requests["replacement-archive-race"])
 	svc := NewTaskAssetCenterService(
@@ -2787,6 +2900,7 @@ func TestTaskAssetCenterServiceConcurrentCompleteObservesWinnerWithoutSecondVers
 		AssetID: &assetID, TaskAssetType: &assetType, Status: domain.UploadRequestStatusRequested,
 		SessionStatus: domain.DesignAssetSessionStatusCreated, RemoteUploadID: "remote-same-session-race",
 		UploadMode: domain.DesignAssetUploadModeMultipart, StorageProvider: domain.DesignAssetStorageProviderOSS,
+		ExpectedSize: uploadRequestInt64Ptr(1024), FileSize: uploadRequestInt64Ptr(1024),
 	}
 	bound := *initial
 	bound.Status = domain.UploadRequestStatusBound
@@ -3307,6 +3421,16 @@ func (f *fakeOSSDirectServer) handle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		_, _ = w.Write(body)
+	case r.Method == http.MethodHead:
+		f.mu.Lock()
+		body, ok := f.objects[objectKey]
+		f.mu.Unlock()
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+		w.WriteHeader(http.StatusOK)
 	default:
 		http.NotFound(w, r)
 	}

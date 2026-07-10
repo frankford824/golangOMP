@@ -14,6 +14,7 @@ import {
 import { taskAssetsApi } from '@/services/api/taskAssetsApi'
 import {
   parseOssDirectPlan,
+  type OssDirectPlan,
   type OssDirectUploadResult,
   type RemoteUploadPlan,
   runOssDirectUploadPlan,
@@ -281,31 +282,31 @@ export async function completePreparedTaskAssetUploadSession(
         mimeTypeForUpload: prepared.sessionMime || undefined,
       })
     } catch (err) {
-      await cancelPreparedTaskAssetUploadSession(prepared.sessionId, options?.signal, prepared.taskId)
+      await cancelPreparedTaskAssetUploadSession(prepared.sessionId, options?.signal, prepared.taskId, prepared.ossDirect)
       throw new Error(formatUploadFailureMessage('part_upload', err, undefined, { transportLabel }))
     }
+    const ossObjectKey = uploadResult?.oss_object_key?.trim()
+    const uploadContentType =
+      uploadResult?.upload_content_type?.trim() || prepared.sessionMime || resolveFileMimeType(file)
+    if (!ossObjectKey) {
+      await cancelPreparedTaskAssetUploadSession(prepared.sessionId, options?.signal, prepared.taskId, prepared.ossDirect)
+      throw new Error('上传结果不完整，请重新上传；如仍失败请联系管理员。')
+    }
+    completePayload.oss_object_key = ossObjectKey
+    completePayload.upload_content_type = uploadContentType
     if (isMultipartOssPlan(prepared.ossDirect.mode, prepared.ossDirect.upload_strategy)) {
       const ossUploadId = uploadResult?.oss_upload_id?.trim()
-      const ossObjectKey = uploadResult?.oss_object_key?.trim()
       const ossParts = uploadResult?.oss_parts ?? []
-      const uploadContentType =
-        uploadResult?.upload_content_type?.trim() || prepared.sessionMime || resolveFileMimeType(file)
       if (!ossUploadId) {
-        await cancelPreparedTaskAssetUploadSession(prepared.sessionId, options?.signal, prepared.taskId)
-        throw new Error('上传结果不完整，请重新上传；如仍失败请联系管理员。')
-      }
-      if (!ossObjectKey) {
-        await cancelPreparedTaskAssetUploadSession(prepared.sessionId, options?.signal, prepared.taskId)
+        await cancelPreparedTaskAssetUploadSession(prepared.sessionId, options?.signal, prepared.taskId, prepared.ossDirect)
         throw new Error('上传结果不完整，请重新上传；如仍失败请联系管理员。')
       }
       if (!ossParts.length) {
-        await cancelPreparedTaskAssetUploadSession(prepared.sessionId, options?.signal, prepared.taskId)
+        await cancelPreparedTaskAssetUploadSession(prepared.sessionId, options?.signal, prepared.taskId, prepared.ossDirect)
         throw new Error('上传结果不完整，请重新上传；如仍失败请联系管理员。')
       }
       completePayload.oss_upload_id = ossUploadId
-      completePayload.oss_object_key = ossObjectKey
       completePayload.oss_parts = ossParts
-      completePayload.upload_content_type = uploadContentType
     }
   } else if (prepared.remote) {
     const transportLabel = 'remote（备用通道）'
@@ -319,7 +320,7 @@ export async function completePreparedTaskAssetUploadSession(
         extraHeaders: mimeForUpload ? { 'Content-Type': mimeForUpload } : undefined,
       })
     } catch (err) {
-      await cancelPreparedTaskAssetUploadSession(prepared.sessionId, options?.signal, prepared.taskId)
+      await cancelPreparedTaskAssetUploadSession(prepared.sessionId, options?.signal, prepared.taskId, prepared.ossDirect)
       throw new Error(formatUploadFailureMessage('part_upload', err, undefined, { transportLabel }))
     }
     if (mimeForUpload) {
@@ -346,7 +347,7 @@ export async function completePreparedTaskAssetUploadSession(
       throw err
     }
     if (!isTaskStatusNotActionableUploadError(err)) {
-      await cancelPreparedTaskAssetUploadSession(prepared.sessionId, options?.signal, prepared.taskId)
+      await cancelPreparedTaskAssetUploadSession(prepared.sessionId, options?.signal, prepared.taskId, prepared.ossDirect)
     }
     throw new Error(formatUploadFailureMessage('main_complete', err, undefined, { transportLabel }))
   }
@@ -397,7 +398,7 @@ export async function completeWithAssetVersionRaceRetry(
   } catch (err) {
     if (!isAssetVersionRaceRetryError(err)) throw err
     // 单次预算：取消旧 session → 重新 prepare → 再跑一次 oss_direct + complete。
-    await cancelPreparedTaskAssetUploadSession(prepared.sessionId, options?.signal, prepared.taskId)
+    await cancelPreparedTaskAssetUploadSession(prepared.sessionId, options?.signal, prepared.taskId, prepared.ossDirect)
     const retryPrepared = await prepareTaskAssetUploadSession(taskId, file, intent, {
       signal: options?.signal,
       remarkSuffix: options?.remarkSuffix,
@@ -424,11 +425,23 @@ export async function completeWithAssetVersionRaceRetry(
 
 export async function cancelPreparedTaskAssetUploadSession(
   sessionId: string,
-  signal?: AbortSignal,
-  _taskId?: string,
+  _signal?: AbortSignal,
+  taskId?: string,
+  ossDirect?: OssDirectPlan,
 ): Promise<void> {
   try {
-    await assetsApi.cancelAssetUploadSession(sessionId, {}, signal)
+    // Cleanup must outlive the upload signal. In the most important failure path
+    // that signal is already aborted, so reusing it would cancel this request
+    // before the backend can delete the single object or abort multipart state.
+    const payload = {
+      ...(ossDirect?.object_key ? { oss_object_key: ossDirect.object_key } : {}),
+      ...(ossDirect?.upload_id ? { oss_upload_id: ossDirect.upload_id } : {}),
+    }
+    if (taskId?.trim()) {
+      await assetsApi.cancelAssetUploadSession(sessionId, payload)
+    } else {
+      await taskAssetsApi.abortTaskCreateUploadSession(sessionId, payload)
+    }
   } catch {
     /* 尽力取消，不掩盖主错误 */
   }
@@ -500,7 +513,7 @@ function toReferenceFileRef(
 /**
  * 参考图上传统一入口：
  * - 已有 task_id：走 canonical `/v1/assets/upload-sessions`
- * - 创建前无 task_id：回退到 `/v1/tasks/reference-upload`（后端当前仍要求 create-session 必填 task_id）
+ * - 创建前无 task_id：走 canonical `/v1/tasks/reference-upload-sessions` OSS 直传会话
  */
 export async function uploadReferenceFileRef(
   file: File,
@@ -508,10 +521,67 @@ export async function uploadReferenceFileRef(
 ): Promise<ReferenceFileRef> {
   const taskId = options?.taskId?.trim()
   if (!taskId) {
-    const res = await assetsApi.uploadReferenceForNewTask(file, options?.signal)
-    const body = res?.data
-    const data = typeof body === 'object' && body !== null ? (body as Record<string, unknown>) : {}
-    return (data.data ?? data) as ReferenceFileRef
+    const sessionRes = await taskAssetsApi.createTaskCreateUploadSession(
+      {
+        asset_kind: 'reference',
+        file_name: file.name,
+        expected_size: file.size,
+        mime_type: resolveFileMimeType(file),
+        remark: file.name,
+      },
+      options?.signal,
+    )
+    const parsed = parseOssDirectPlan(sessionRes.data)
+    if (!parsed.sessionId) {
+      throw new Error('创建上传会话成功但未返回 session_id')
+    }
+    try {
+      const completePayload: CompleteAssetUploadSessionPayload = { remark: file.name }
+      if (parsed.ossDirect) {
+        const result = await runOssDirectUploadPlan(file, parsed.ossDirect, {
+          signal: options?.signal,
+          progressByteTotal: file.size,
+          mimeTypeForUpload: resolveFileMimeType(file),
+        })
+        const objectKey = result.oss_object_key?.trim()
+        if (!objectKey) throw new Error('上传结果缺少 OSS object key')
+        completePayload.oss_object_key = objectKey
+        completePayload.upload_content_type = result.upload_content_type || resolveFileMimeType(file)
+        if (result.mode === 'multipart') {
+          if (!result.oss_upload_id || !result.oss_parts?.length) {
+            throw new Error('上传结果不完整，请重新上传；如仍失败请联系管理员。')
+          }
+          completePayload.oss_upload_id = result.oss_upload_id
+          completePayload.oss_parts = result.oss_parts
+        }
+      } else if (parsed.remote) {
+        const mimeType = parsed.remote.required_upload_content_type || resolveFileMimeType(file)
+        await assetsApi.uploadToRemoteUrl(parsed.remote.upload_url, file, {
+          signal: options?.signal,
+          method: parsed.remote.method || 'PUT',
+          extraHeaders: { 'Content-Type': mimeType },
+        })
+        completePayload.upload_content_type = mimeType
+      } else {
+        throw new Error('上传入口未准备好，请刷新后重试；如仍失败请联系管理员。')
+      }
+      const completeRes = await taskAssetsApi.completeTaskCreateUploadSession(
+        parsed.sessionId,
+        completePayload,
+        options?.signal,
+      )
+      const body = completeRes.data as unknown as Record<string, unknown>
+      const data = (body?.data && typeof body.data === 'object' ? body.data : body) as Record<string, unknown>
+      const ref = data?.ref_object as ReferenceFileRef | undefined
+      if (!ref?.asset_id) throw new Error('参考图上传完成但未返回 ref_object')
+      return ref
+    } catch (err) {
+      await taskAssetsApi.abortTaskCreateUploadSession(parsed.sessionId, {
+        ...(parsed.ossDirect?.object_key ? { oss_object_key: parsed.ossDirect.object_key } : {}),
+        ...(parsed.ossDirect?.upload_id ? { oss_upload_id: parsed.ossDirect.upload_id } : {}),
+      }).catch(() => undefined)
+      throw err
+    }
   }
   const uploaded = await uploadFileViaAssetSession(
     taskId,

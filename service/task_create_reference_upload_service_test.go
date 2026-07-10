@@ -5,6 +5,9 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -69,6 +72,103 @@ func TestTaskCreateReferenceUploadServiceCreateAndComplete(t *testing.T) {
 	}
 	if request.BoundRefID != completeResult.ReferenceFileRef {
 		t.Fatalf("upload request bound_ref_id = %s, want %s", request.BoundRefID, completeResult.ReferenceFileRef)
+	}
+}
+
+func TestTaskCreateReferenceUploadServiceOSSDirectSessionCompletesWithoutBackendFileProxy(t *testing.T) {
+	const fileSize = int64(1024)
+	deleteCalls := 0
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodDelete {
+			deleteCalls++
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if r.Method != http.MethodHead {
+			t.Fatalf("method = %s, want HEAD or DELETE", r.Method)
+		}
+		w.Header().Set("Content-Type", "image/png")
+		w.Header().Set("Content-Length", "1024")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	baseURL, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatalf("parse OSS test server URL: %v", err)
+	}
+	ossDirect := NewOSSDirectService(OSSDirectConfig{
+		Enabled:         true,
+		Endpoint:        strings.TrimPrefix(server.URL, "https://"),
+		PublicEndpoint:  strings.TrimPrefix(server.URL, "https://"),
+		Bucket:          "test-bucket",
+		AccessKeyID:     "test-id",
+		AccessKeySecret: "test-secret",
+		PartSize:        10 * 1024 * 1024,
+	})
+	httpClient := server.Client()
+	httpClient.Transport = &rewriteHostTransport{base: baseURL, inner: httpClient.Transport}
+	ossDirect.httpClient = httpClient
+
+	uploadRequestRepo := newStep37UploadRequestRepo()
+	assetStorageRefRepo := newStep37AssetStorageRefRepo()
+	stub := newStubUploadServiceClient().(*stubUploadServiceClient)
+	svc := NewTaskCreateReferenceUploadService(
+		uploadRequestRepo,
+		assetStorageRefRepo,
+		step04TxRunner{},
+		stub,
+		WithTaskCreateReferenceOSSDirectService(ossDirect),
+	).(*taskCreateReferenceUploadService)
+
+	created, appErr := svc.CreateUploadSession(context.Background(), CreateTaskReferenceUploadSessionParams{
+		CreatedBy:    9,
+		Filename:     "reference.png",
+		ExpectedSize: uploadRequestInt64Ptr(fileSize),
+		MimeType:     "image/png",
+	})
+	if appErr != nil {
+		t.Fatalf("CreateUploadSession() error = %+v", appErr)
+	}
+	if created.OSSDirect == nil || created.OSSDirect.Mode != "single_part" || created.OSSDirect.UploadURL == "" {
+		t.Fatalf("OSS direct plan = %+v", created.OSSDirect)
+	}
+	if created.Remote != nil || len(stub.createRequests) != 0 {
+		t.Fatalf("remote fallback unexpectedly created: remote=%+v calls=%d", created.Remote, len(stub.createRequests))
+	}
+	completed, appErr := svc.CompleteUploadSession(context.Background(), CompleteTaskReferenceUploadSessionParams{
+		SessionID:         created.Session.ID,
+		CompletedBy:       9,
+		UploadContentType: "image/png",
+		OSSObjectKey:      created.OSSDirect.ObjectKey,
+	})
+	if appErr != nil {
+		t.Fatalf("CompleteUploadSession() error = %+v", appErr)
+	}
+	if completed.RefObject == nil || completed.RefObject.AssetID == "" || completed.RefObject.Source != domain.ReferenceFileRefSourceTaskReferenceUpload {
+		t.Fatalf("completed ref_object = %+v", completed.RefObject)
+	}
+	if stub.completeCalls != 0 {
+		t.Fatalf("remote complete calls = %d, want 0", stub.completeCalls)
+	}
+
+	cancelCreated, appErr := svc.CreateUploadSession(context.Background(), CreateTaskReferenceUploadSessionParams{
+		CreatedBy:    9,
+		Filename:     "cancel.png",
+		ExpectedSize: uploadRequestInt64Ptr(fileSize),
+		MimeType:     "image/png",
+	})
+	if appErr != nil {
+		t.Fatalf("CreateUploadSession(cancel) error = %+v", appErr)
+	}
+	cancelled, appErr := svc.CancelUploadSession(context.Background(), CancelTaskReferenceUploadSessionParams{
+		SessionID:   cancelCreated.Session.ID,
+		CancelledBy: 9,
+	})
+	if appErr != nil {
+		t.Fatalf("CancelUploadSession() error = %+v", appErr)
+	}
+	if cancelled.SessionStatus != domain.DesignAssetSessionStatusCancelled || deleteCalls != 1 {
+		t.Fatalf("cancelled session = %+v deleteCalls=%d", cancelled, deleteCalls)
 	}
 }
 
@@ -230,7 +330,7 @@ func TestTaskCreateReferenceUploadServiceBuildReferenceFileRefEscapesURLs(t *tes
 	if ref == nil {
 		t.Fatal("buildReferenceFileRef() = nil")
 	}
-	const wantDownloadURL = "/v1/assets/files/tasks/task-create-reference/assets/PRECREATE-REFERENCE/v1/derived/%F0%9F%92%9A97%25%20%E8%83%BD%E9%87%8F%E5%85%85%E6%BB%A1%E5%95%A6.jpg"
+	const wantDownloadURL = "/v1/assets/files/tasks/task-create-reference/assets/PRECREATE-REFERENCE/v1/derived/%F0%9F%92%9A97%25%20%E8%83%BD%E9%87%8F%E5%85%85%E6%BB%A1%E5%95%A6.jpg?download_filename=%F0%9F%92%9A97%25+%E8%83%BD%E9%87%8F%E5%85%85%E6%BB%A1%E5%95%A6.jpg"
 	if ref.DownloadURL == nil || *ref.DownloadURL != wantDownloadURL {
 		t.Fatalf("buildReferenceFileRef() download_url = %+v, want %q", ref.DownloadURL, wantDownloadURL)
 	}

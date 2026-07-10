@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"net/http"
 	"net/url"
@@ -30,22 +31,31 @@ type CreateTaskReferenceUploadSessionParams struct {
 }
 
 type CompleteTaskReferenceUploadSessionParams struct {
-	SessionID      string
-	CompletedBy    int64
-	Remark         string
-	FileHash       string
-	ExpectedSHA256 string
+	SessionID         string
+	CompletedBy       int64
+	Remark            string
+	FileHash          string
+	ExpectedSHA256    string
+	UploadContentType string
+	OSSParts          []OSSCompletePart
+	OSSUploadID       string
+	OSSObjectKey      string
 }
 
 type CancelTaskReferenceUploadSessionParams struct {
-	SessionID   string
-	CancelledBy int64
-	Remark      string
+	SessionID    string
+	CancelledBy  int64
+	Remark       string
+	OSSUploadID  string
+	OSSObjectKey string
 }
 
 type CreateTaskReferenceUploadSessionResult struct {
-	Session *domain.UploadSession    `json:"session"`
-	Remote  *RemoteUploadSessionPlan `json:"remote"`
+	Session          *domain.UploadSession    `json:"session"`
+	Remote           *RemoteUploadSessionPlan `json:"remote,omitempty"`
+	OSSDirect        *OSSDirectUploadPlan     `json:"oss_direct,omitempty"`
+	CompleteEndpoint string                   `json:"complete_endpoint,omitempty"`
+	CancelEndpoint   string                   `json:"cancel_endpoint,omitempty"`
 }
 
 type UploadTaskReferenceFileParams struct {
@@ -95,6 +105,17 @@ type uploadServiceBaseURLProvider interface {
 	UploadServiceBaseURL() string
 }
 
+type uploadRequestForUpdateReader interface {
+	GetByRequestIDForUpdate(ctx context.Context, tx repo.Tx, requestID string) (*domain.UploadRequest, error)
+}
+
+func (s *taskCreateReferenceUploadService) getUploadRequestForUpdate(ctx context.Context, tx repo.Tx, requestID string) (*domain.UploadRequest, error) {
+	if locker, ok := s.uploadRequestRepo.(uploadRequestForUpdateReader); ok {
+		return locker.GetByRequestIDForUpdate(ctx, tx, requestID)
+	}
+	return s.uploadRequestRepo.GetByRequestID(ctx, requestID)
+}
+
 func NewTaskCreateReferenceUploadService(
 	uploadRequestRepo repo.UploadRequestRepo,
 	assetStorageRefRepo repo.AssetStorageRefRepo,
@@ -131,54 +152,88 @@ func (s *taskCreateReferenceUploadService) CreateUploadSession(ctx context.Conte
 	if strings.TrimSpace(params.Filename) == "" {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "filename is required", nil)
 	}
-	if params.ExpectedSize != nil && *params.ExpectedSize < 0 {
-		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "expected_size must be greater than or equal to zero", nil)
+	if params.ExpectedSize == nil || *params.ExpectedSize <= 0 {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "expected_size must be greater than zero", nil)
 	}
-	if params.ExpectedSize != nil && *params.ExpectedSize > TaskCreateReferenceUploadMaxFileSizeBytes {
+	if *params.ExpectedSize > TaskCreateReferenceUploadMaxFileSizeBytes {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "expected_size exceeds upload limit", map[string]interface{}{
 			"max_bytes": TaskCreateReferenceUploadMaxFileSizeBytes,
 			"max_label": TaskCreateReferenceUploadMaxFileSizeLabel,
 		})
 	}
 
-	remote, err := s.uploadClient.CreateUploadSession(ctx, RemoteCreateUploadSessionRequest{
-		TaskRef:      "task-create-reference",
-		AssetNo:      "PRECREATE-REFERENCE",
-		AssetType:    domain.TaskAssetTypeReference,
-		VersionNo:    1,
-		UploadMode:   domain.DesignAssetUploadModeSmall,
-		Filename:     strings.TrimSpace(params.Filename),
-		ExpectedSize: params.ExpectedSize,
-		MimeType:     strings.TrimSpace(params.MimeType),
-		CreatedBy:    params.CreatedBy,
-	})
-	if err != nil {
-		return nil, infraError("create task-create reference upload session via upload service client", err)
-	}
-
 	referenceType := domain.TaskAssetTypeReference
 	now := s.nowFn().UTC()
+	requestID := uuid.NewString()
+	contentType := normalizeRequiredUploadContentType(params.MimeType)
+	var remote *RemoteUploadSessionPlan
+	var ossPlan *OSSDirectUploadPlan
+	uploadMode := domain.DesignAssetUploadModeSmall
+	var expiresAt *time.Time
+	if s.ossDirectService != nil && s.ossDirectService.Enabled() {
+		fileSize := *params.ExpectedSize
+		objectKey := s.ossDirectService.BuildUploadSessionObjectKey("task-create-reference", requestID, params.Filename)
+		plan, err := s.ossDirectService.CreateUploadPlan(ctx, objectKey, fileSize, contentType)
+		if err != nil {
+			log.Printf("task_reference_oss_direct_plan_fallback request_id=%s error=%v", requestID, err)
+		} else {
+			ossPlan = plan
+			expiresAt = &plan.ExpiresAt
+			if plan.Mode == "multipart" {
+				uploadMode = domain.DesignAssetUploadModeMultipart
+			}
+		}
+	}
+	if ossPlan == nil {
+		var err error
+		remote, err = s.uploadClient.CreateUploadSession(ctx, RemoteCreateUploadSessionRequest{
+			TaskRef:      "task-create-reference",
+			AssetNo:      "PRECREATE-REFERENCE",
+			AssetType:    domain.TaskAssetTypeReference,
+			VersionNo:    1,
+			UploadMode:   uploadMode,
+			Filename:     strings.TrimSpace(params.Filename),
+			ExpectedSize: params.ExpectedSize,
+			MimeType:     contentType,
+			CreatedBy:    params.CreatedBy,
+		})
+		if err != nil {
+			return nil, infraError("create task-create reference upload session via upload service client", err)
+		}
+		expiresAt = remote.ExpiresAt
+	}
+	remoteUploadID := ""
+	remoteFileID := ""
+	isPlaceholder := false
+	var lastSyncedAt *time.Time = &now
+	if remote != nil {
+		remoteUploadID = remote.UploadID
+		remoteFileID = valueOrEmpty(remote.FileID)
+		isPlaceholder = remote.IsStub
+		lastSyncedAt = firstNonNilTime(remote.LastSyncedAt, &now)
+	}
 	request := &domain.UploadRequest{
+		RequestID:       requestID,
 		OwnerType:       domain.AssetOwnerTypeTaskCreateReference,
 		OwnerID:         params.CreatedBy,
 		TaskAssetType:   &referenceType,
 		StorageAdapter:  domain.AssetStorageAdapterOSSUploadService,
-		UploadMode:      domain.DesignAssetUploadModeSmall,
+		UploadMode:      uploadMode,
 		RefType:         domain.AssetStorageRefTypeGenericObject,
 		FileName:        strings.TrimSpace(params.Filename),
-		MimeType:        strings.TrimSpace(params.MimeType),
+		MimeType:        contentType,
 		FileSize:        params.ExpectedSize,
 		ExpectedSize:    params.ExpectedSize,
 		ChecksumHint:    strings.TrimSpace(params.FileHash),
 		Status:          domain.UploadRequestStatusRequested,
 		StorageProvider: domain.DesignAssetStorageProviderOSS,
 		SessionStatus:   domain.DesignAssetSessionStatusCreated,
-		RemoteUploadID:  remote.UploadID,
-		RemoteFileID:    valueOrEmpty(remote.FileID),
-		IsPlaceholder:   remote.IsStub,
+		RemoteUploadID:  remoteUploadID,
+		RemoteFileID:    remoteFileID,
+		IsPlaceholder:   isPlaceholder,
 		CreatedBy:       params.CreatedBy,
-		ExpiresAt:       remote.ExpiresAt,
-		LastSyncedAt:    firstNonNilTime(remote.LastSyncedAt, &now),
+		ExpiresAt:       expiresAt,
+		LastSyncedAt:    lastSyncedAt,
 		Remark:          strings.TrimSpace(params.Remark),
 		CreatedAt:       now,
 		UpdatedAt:       now,
@@ -195,8 +250,11 @@ func (s *taskCreateReferenceUploadService) CreateUploadSession(ctx context.Conte
 	}
 
 	return &CreateTaskReferenceUploadSessionResult{
-		Session: domain.BuildUploadSession(request),
-		Remote:  remote,
+		Session:          domain.BuildUploadSession(request),
+		Remote:           remote,
+		OSSDirect:        ossPlan,
+		CompleteEndpoint: "/v1/tasks/reference-upload-sessions/" + request.RequestID + "/complete",
+		CancelEndpoint:   "/v1/tasks/reference-upload-sessions/" + request.RequestID + "/abort",
 	}, nil
 }
 
@@ -494,6 +552,14 @@ func (s *taskCreateReferenceUploadService) CompleteUploadSession(ctx context.Con
 	if request.SessionStatus == domain.DesignAssetSessionStatusCancelled || request.SessionStatus == domain.DesignAssetSessionStatusExpired {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidStateTransition, "upload_session is already terminal", nil)
 	}
+	hasOSSCompletion := strings.TrimSpace(params.OSSObjectKey) != "" || strings.TrimSpace(params.OSSUploadID) != "" || len(params.OSSParts) > 0
+	isDirectSession := strings.TrimSpace(request.RemoteUploadID) == "" && s.ossDirectService != nil && s.ossDirectService.Enabled()
+	if isDirectSession && strings.TrimSpace(params.OSSObjectKey) == "" {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "oss_object_key is required for OSS direct upload_session completion", nil)
+	}
+	if isDirectSession || hasOSSCompletion {
+		return s.completeOSSDirectReferenceUpload(ctx, request, params)
+	}
 
 	checksumHint := firstNonEmpty(strings.TrimSpace(params.FileHash), strings.TrimSpace(request.ChecksumHint))
 	if request.RemoteUploadID != "" && request.SessionStatus == domain.DesignAssetSessionStatusCreated {
@@ -526,23 +592,214 @@ func (s *taskCreateReferenceUploadService) CompleteUploadSession(ctx context.Con
 	return s.finalizeUploadedReference(ctx, request, params.CompletedBy, params.Remark, checksumHint, params.ExpectedSHA256, meta)
 }
 
+func (s *taskCreateReferenceUploadService) completeOSSDirectReferenceUpload(
+	ctx context.Context,
+	request *domain.UploadRequest,
+	params CompleteTaskReferenceUploadSessionParams,
+) (*CompleteTaskReferenceUploadSessionResult, *domain.AppError) {
+	if s.ossDirectService == nil || !s.ossDirectService.Enabled() {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "OSS direct upload is not enabled", nil)
+	}
+	var createdRef *domain.AssetStorageRef
+	var completedRefID string
+	if err := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
+		locked, err := s.getUploadRequestForUpdate(ctx, tx, request.RequestID)
+		if err != nil {
+			return err
+		}
+		if locked == nil {
+			return domain.ErrNotFound
+		}
+		request = locked
+		if request.OwnerType != domain.AssetOwnerTypeTaskCreateReference || request.OwnerID != params.CompletedBy {
+			return domain.NewAppError(domain.ErrCodeInvalidRequest, "upload_session does not belong to current actor", nil)
+		}
+		if request.Status == domain.UploadRequestStatusBound || request.SessionStatus == domain.DesignAssetSessionStatusCompleted {
+			completedRefID = strings.TrimSpace(request.BoundRefID)
+			if completedRefID == "" {
+				return domain.NewAppError(domain.ErrCodeInvalidStateTransition, "upload_session already completed without bound reference_file_ref", nil)
+			}
+			return nil
+		}
+		if request.Status == domain.UploadRequestStatusCancelled || request.Status == domain.UploadRequestStatusExpired ||
+			request.SessionStatus == domain.DesignAssetSessionStatusCancelled || request.SessionStatus == domain.DesignAssetSessionStatusExpired {
+			return domain.NewAppError(domain.ErrCodeInvalidStateTransition, "upload_session is already terminal", nil)
+		}
+		if request.ExpectedSize == nil || *request.ExpectedSize <= 0 || *request.ExpectedSize > TaskCreateReferenceUploadMaxFileSizeBytes {
+			return domain.NewAppError(domain.ErrCodeInvalidRequest, "upload_session expected_size is outside the allowed range", map[string]interface{}{
+				"max_bytes": TaskCreateReferenceUploadMaxFileSizeBytes,
+			})
+		}
+		expectedObjectKey := s.ossDirectService.BuildUploadSessionObjectKey("task-create-reference", request.RequestID, request.FileName)
+		objectKey := strings.TrimSpace(params.OSSObjectKey)
+		if objectKey != expectedObjectKey {
+			return domain.NewAppError(domain.ErrCodeInvalidRequest, "oss_object_key does not belong to upload_session", map[string]interface{}{
+				"upload_session_id": request.RequestID,
+			})
+		}
+		if contentType := strings.TrimSpace(params.UploadContentType); contentType != "" && contentType != normalizeRequiredUploadContentType(request.MimeType) {
+			return domain.NewAppError(domain.ErrCodeInvalidRequest, "upload_content_type must match upload_session required content type", nil)
+		}
+		hasUploadID := strings.TrimSpace(params.OSSUploadID) != ""
+		hasParts := len(params.OSSParts) > 0
+		if hasUploadID != hasParts {
+			return domain.NewAppError(domain.ErrCodeInvalidRequest, "multipart OSS completion requires upload_id and parts together", nil)
+		}
+		if request.UploadMode == domain.DesignAssetUploadModeMultipart && !hasUploadID {
+			return domain.NewAppError(domain.ErrCodeInvalidRequest, "multipart upload_session requires upload_id and parts", nil)
+		}
+		if request.UploadMode != domain.DesignAssetUploadModeMultipart && hasUploadID {
+			return domain.NewAppError(domain.ErrCodeInvalidRequest, "single-part upload_session cannot complete multipart parts", nil)
+		}
+		var multipartCompleteErr error
+		if hasUploadID {
+			multipartCompleteErr = s.ossDirectService.CompleteMultipartUpload(ctx, objectKey, strings.TrimSpace(params.OSSUploadID), params.OSSParts)
+		}
+		info, exists, statErr := s.ossDirectService.StatObject(ctx, objectKey)
+		if statErr != nil {
+			return fmt.Errorf("verify task reference OSS object: %w", statErr)
+		}
+		if !exists || info == nil {
+			if multipartCompleteErr != nil {
+				return fmt.Errorf("complete task reference OSS multipart upload: %w", multipartCompleteErr)
+			}
+			return domain.NewAppError(domain.ErrCodeInvalidRequest, "uploaded OSS object is missing", nil)
+		}
+		if info.ContentLength < 0 || info.ContentLength != *request.ExpectedSize {
+			return domain.NewAppError(domain.ErrCodeInvalidRequest, "uploaded OSS object size does not match upload_session", map[string]interface{}{
+				"expected_size": *request.ExpectedSize,
+				"actual_size":   info.ContentLength,
+			})
+		}
+		if multipartCompleteErr != nil {
+			log.Printf("task_reference_oss_complete_recovered request_id=%s object_key=%s error=%v", request.RequestID, objectKey, multipartCompleteErr)
+		}
+		now := s.nowFn().UTC()
+		fileSize := info.ContentLength
+		contentType := normalizeRequiredUploadContentType(request.MimeType)
+		if strings.TrimSpace(info.ContentType) != "" {
+			contentType = strings.TrimSpace(info.ContentType)
+		}
+		checksumHint := firstNonEmpty(strings.TrimSpace(params.FileHash), strings.TrimSpace(request.ChecksumHint))
+		ref, err := s.assetStorageRefRepo.Create(ctx, tx, &domain.AssetStorageRef{
+			RefID:           uuid.NewString(),
+			OwnerType:       domain.AssetOwnerTypeTaskCreateReference,
+			OwnerID:         request.OwnerID,
+			UploadRequestID: request.RequestID,
+			StorageAdapter:  domain.AssetStorageAdapterOSSUploadService,
+			RefType:         domain.AssetStorageRefTypeGenericObject,
+			RefKey:          objectKey,
+			FileName:        request.FileName,
+			MimeType:        contentType,
+			FileSize:        &fileSize,
+			ChecksumHint:    checksumHint,
+			Status:          domain.AssetStorageRefStatusRecorded,
+			CreatedAt:       now,
+		})
+		if err != nil {
+			return err
+		}
+		createdRef = ref
+		completedRefID = ref.RefID
+		remark := firstNonEmpty(strings.TrimSpace(params.Remark), strings.TrimSpace(request.Remark))
+		if err := s.uploadRequestRepo.UpdateBinding(ctx, tx, request.RequestID, nil, ref.RefID, domain.UploadRequestStatusBound, remark); err != nil {
+			return err
+		}
+		return s.uploadRequestRepo.UpdateSession(ctx, tx, repo.UploadRequestSessionUpdate{
+			RequestID:      request.RequestID,
+			SessionStatus:  domain.DesignAssetSessionStatusCompleted,
+			RemoteUploadID: request.RemoteUploadID,
+			RemoteFileID:   optionalStringPtr(request.RemoteFileID),
+			LastSyncedAt:   &now,
+			Remark:         remark,
+		})
+	}); err != nil {
+		if appErr, ok := err.(*domain.AppError); ok {
+			return nil, appErr
+		}
+		if errors.Is(err, domain.ErrNotFound) {
+			return nil, domain.ErrNotFound
+		}
+		return nil, infraError("record completed task reference OSS direct upload", err)
+	}
+	session, appErr := s.GetUploadSession(ctx, request.RequestID, params.CompletedBy)
+	if appErr != nil {
+		return nil, appErr
+	}
+	if createdRef == nil {
+		var err error
+		createdRef, err = s.assetStorageRefRepo.GetByRefID(ctx, completedRefID)
+		if err != nil {
+			return nil, infraError("get completed task reference_file_ref", err)
+		}
+		if createdRef == nil {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidStateTransition, "completed reference_file_ref is missing", nil)
+		}
+	}
+	return &CompleteTaskReferenceUploadSessionResult{
+		Session:          session,
+		ReferenceFileRef: completedRefID,
+		StorageRef:       createdRef,
+		RefObject:        s.buildReferenceFileRef(createdRef, domain.ReferenceFileRefSourceTaskReferenceUpload),
+	}, nil
+}
+
 func (s *taskCreateReferenceUploadService) CancelUploadSession(ctx context.Context, params CancelTaskReferenceUploadSessionParams) (*domain.UploadSession, *domain.AppError) {
 	request, appErr := s.requireUploadRequest(ctx, params.SessionID, params.CancelledBy)
 	if appErr != nil {
 		return nil, appErr
 	}
-	if request.SessionStatus == domain.DesignAssetSessionStatusCompleted || request.Status == domain.UploadRequestStatusBound {
-		return nil, domain.NewAppError(domain.ErrCodeInvalidStateTransition, "completed upload_session cannot be aborted", nil)
-	}
-	if request.SessionStatus == domain.DesignAssetSessionStatusCancelled {
-		return domain.BuildUploadSession(request), nil
-	}
-	if err := s.uploadClient.AbortUploadSession(ctx, RemoteAbortUploadRequest{RemoteUploadID: request.RemoteUploadID}); err != nil {
-		return nil, infraError("abort task-create reference upload session via upload service client", err)
-	}
-
-	lastSyncedAt := s.nowFn().UTC()
+	alreadyCancelled := false
 	if err := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
+		locked, err := s.getUploadRequestForUpdate(ctx, tx, request.RequestID)
+		if err != nil {
+			return err
+		}
+		if locked == nil {
+			return domain.ErrNotFound
+		}
+		request = locked
+		if request.OwnerType != domain.AssetOwnerTypeTaskCreateReference || request.OwnerID != params.CancelledBy {
+			return domain.NewAppError(domain.ErrCodeInvalidRequest, "upload_session does not belong to current actor", nil)
+		}
+		if request.SessionStatus == domain.DesignAssetSessionStatusCompleted || request.Status == domain.UploadRequestStatusBound {
+			return domain.NewAppError(domain.ErrCodeInvalidStateTransition, "completed upload_session cannot be aborted", nil)
+		}
+		if request.SessionStatus == domain.DesignAssetSessionStatusCancelled || request.Status == domain.UploadRequestStatusCancelled {
+			alreadyCancelled = true
+			return nil
+		}
+		if request.SessionStatus == domain.DesignAssetSessionStatusExpired || request.Status == domain.UploadRequestStatusExpired {
+			return domain.NewAppError(domain.ErrCodeInvalidStateTransition, "expired upload_session cannot be aborted", nil)
+		}
+		if strings.TrimSpace(request.RemoteUploadID) != "" {
+			if err := s.uploadClient.AbortUploadSession(ctx, RemoteAbortUploadRequest{RemoteUploadID: request.RemoteUploadID}); err != nil {
+				return fmt.Errorf("abort task-create reference upload session via upload service client: %w", err)
+			}
+		} else if s.ossDirectService != nil && s.ossDirectService.Enabled() {
+			expectedObjectKey := s.ossDirectService.BuildUploadSessionObjectKey("task-create-reference", request.RequestID, request.FileName)
+			objectKey := strings.TrimSpace(params.OSSObjectKey)
+			if objectKey == "" {
+				objectKey = expectedObjectKey
+			}
+			if objectKey != expectedObjectKey {
+				return domain.NewAppError(domain.ErrCodeInvalidRequest, "oss_object_key does not belong to upload_session", nil)
+			}
+			uploadID := strings.TrimSpace(params.OSSUploadID)
+			if request.UploadMode == domain.DesignAssetUploadModeMultipart && uploadID != "" {
+				if err := s.ossDirectService.AbortMultipartUpload(ctx, objectKey, uploadID); err != nil {
+					return fmt.Errorf("abort task reference OSS multipart upload: %w", err)
+				}
+			} else if request.UploadMode != domain.DesignAssetUploadModeMultipart {
+				if err := s.ossDirectService.DeleteObject(ctx, objectKey); err != nil {
+					return fmt.Errorf("delete task reference OSS single upload: %w", err)
+				}
+			} else {
+				log.Printf("task_reference_oss_direct_cancel_missing_upload_id request_id=%s", request.RequestID)
+			}
+		}
+
+		lastSyncedAt := s.nowFn().UTC()
 		if err := s.uploadRequestRepo.UpdateLifecycle(ctx, tx, repo.UploadRequestLifecycleUpdate{
 			RequestID: request.RequestID,
 			Status:    domain.UploadRequestStatusCancelled,
@@ -559,7 +816,13 @@ func (s *taskCreateReferenceUploadService) CancelUploadSession(ctx context.Conte
 			Remark:         strings.TrimSpace(params.Remark),
 		})
 	}); err != nil {
+		if appErr, ok := err.(*domain.AppError); ok {
+			return nil, appErr
+		}
 		return nil, infraError("cancel task-create reference upload session", err)
+	}
+	if alreadyCancelled {
+		return domain.BuildUploadSession(request), nil
 	}
 
 	return s.GetUploadSession(ctx, request.RequestID, params.CancelledBy)
@@ -631,7 +894,10 @@ func (s *taskCreateReferenceUploadService) buildReferenceFileRef(storageRef *dom
 	}
 	if storageKey := strings.TrimSpace(storageRef.RefKey); storageKey != "" {
 		ref.StorageKey = storageKey
-		downloadURL := domain.BuildRelativeEscapedURLPath("/v1/assets/files", storageKey)
+		downloadURL := AppendProxyDownloadFilenameQuery(
+			domain.BuildRelativeEscapedURLPath("/v1/assets/files", storageKey),
+			storageRef.FileName,
+		)
 		ref.DownloadURL = &downloadURL
 		ref.URL = &downloadURL
 	}
@@ -751,7 +1017,30 @@ func (s *taskCreateReferenceUploadService) finalizeUploadedReference(ctx context
 		"probe_status":            probe.StatusCode,
 	})
 	var createdRef *domain.AssetStorageRef
+	var completedRefID string
 	if err := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
+		locked, lockErr := s.getUploadRequestForUpdate(ctx, tx, request.RequestID)
+		if lockErr != nil {
+			return lockErr
+		}
+		if locked == nil {
+			return domain.ErrNotFound
+		}
+		request = locked
+		if request.OwnerType != domain.AssetOwnerTypeTaskCreateReference || request.OwnerID != completedBy {
+			return domain.NewAppError(domain.ErrCodeInvalidRequest, "upload_session does not belong to current actor", nil)
+		}
+		if request.Status == domain.UploadRequestStatusBound || request.SessionStatus == domain.DesignAssetSessionStatusCompleted {
+			completedRefID = strings.TrimSpace(request.BoundRefID)
+			if completedRefID == "" {
+				return domain.NewAppError(domain.ErrCodeInvalidStateTransition, "upload_session already completed without bound reference_file_ref", nil)
+			}
+			return nil
+		}
+		if request.Status == domain.UploadRequestStatusCancelled || request.Status == domain.UploadRequestStatusExpired ||
+			request.SessionStatus == domain.DesignAssetSessionStatusCancelled || request.SessionStatus == domain.DesignAssetSessionStatusExpired {
+			return domain.NewAppError(domain.ErrCodeConflict, "upload_session changed concurrently and is already terminal", nil)
+		}
 		ref, createErr := s.assetStorageRefRepo.Create(ctx, tx, &domain.AssetStorageRef{
 			RefID:           uuid.NewString(),
 			OwnerType:       domain.AssetOwnerTypeTaskCreateReference,
@@ -772,6 +1061,7 @@ func (s *taskCreateReferenceUploadService) finalizeUploadedReference(ctx context
 			return createErr
 		}
 		createdRef = ref
+		completedRefID = ref.RefID
 		if err := s.uploadRequestRepo.UpdateBinding(ctx, tx, request.RequestID, nil, createdRef.RefID, domain.UploadRequestStatusBound, firstNonEmpty(strings.TrimSpace(remark), strings.TrimSpace(request.Remark))); err != nil {
 			return err
 		}
@@ -784,6 +1074,12 @@ func (s *taskCreateReferenceUploadService) finalizeUploadedReference(ctx context
 			Remark:         firstNonEmpty(strings.TrimSpace(remark), strings.TrimSpace(request.Remark)),
 		})
 	}); err != nil {
+		if appErr, ok := err.(*domain.AppError); ok {
+			return nil, appErr
+		}
+		if errors.Is(err, domain.ErrNotFound) {
+			return nil, domain.ErrNotFound
+		}
 		return nil, infraError("complete task-create reference upload session", err)
 	}
 
@@ -791,9 +1087,19 @@ func (s *taskCreateReferenceUploadService) finalizeUploadedReference(ctx context
 	if appErr != nil {
 		return nil, appErr
 	}
+	if createdRef == nil {
+		var err error
+		createdRef, err = s.assetStorageRefRepo.GetByRefID(ctx, completedRefID)
+		if err != nil {
+			return nil, infraError("get completed task-create reference_file_ref", err)
+		}
+		if createdRef == nil {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidStateTransition, "completed reference_file_ref is missing", nil)
+		}
+	}
 	return &CompleteTaskReferenceUploadSessionResult{
 		Session:          session,
-		ReferenceFileRef: createdRef.RefID,
+		ReferenceFileRef: completedRefID,
 		StorageRef:       createdRef,
 		RefObject:        s.buildReferenceFileRef(createdRef, domain.ReferenceFileRefSourceTaskCreateAssetCenter),
 	}, nil

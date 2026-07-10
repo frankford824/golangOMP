@@ -3905,6 +3905,32 @@ components:
           nullable: true
         is_stub:
           type: boolean
+    OSSDirectUploadPlan:
+      type: object
+      required: [mode, object_key, expires_at, method, required_upload_content_type]
+      properties:
+        mode:
+          type: string
+          enum: [single_part, multipart]
+        object_key: { type: string }
+        upload_id: { type: string }
+        upload_url: { type: string }
+        parts:
+          type: array
+          items:
+            type: object
+            required: [part_number, upload_url]
+            properties:
+              part_number: { type: integer, minimum: 1 }
+              upload_url: { type: string }
+              method: { type: string }
+              expires_at: { type: string, format: date-time }
+        part_size: { type: integer, format: int64 }
+        expires_at: { type: string, format: date-time }
+        method: { type: string }
+        bucket: { type: string }
+        endpoint: { type: string }
+        required_upload_content_type: { type: string }
     AssetOwnerType:
       type: string
       enum: [task, task_asset, export_job, outsource_order, warehouse_receipt]
@@ -4197,12 +4223,12 @@ components:
         New frontend integrations should send one upload intent and let the backend choose `upload_strategy`.
         `asset_kind` and `asset_type` are equivalent inputs; `asset_kind` is the canonical frontend-facing name.
         `upload_mode` is compatibility-only and must not be used by new frontend integrations as strategy selector.
-        `reference` assets use single-part upload internally. `source`, `delivery`, `preview`, and `design_thumb` use multipart internally.
+        Files no larger than the configured OSS part size use single-part upload; larger files use multipart regardless of asset kind.
         `source_asset_id` is used for backend-owned preview/thumb derivatives and links them to a source asset.
         For multi-SKU batch tasks, non-reference uploads must pass `target_sku_code` to bind the uploaded
         design asset to one child SKU.
-        Asset-center upload sessions now return OSS-backed remote upload instructions.
-        Frontend uploads bytes using the returned remote plan, then calls `complete`.
+        Asset-center upload sessions prefer `oss_direct` instructions and return `remote` only as a fallback.
+        Frontend uploads bytes using the returned plan, then calls `complete`.
         Completed tasks accept replacement uploads only: `asset_id` must identify an existing
         active, non-archived task-owned current resource and `asset_kind` must be `reference`,
         `source`, or `delivery`.
@@ -4211,6 +4237,9 @@ components:
         During `PendingCustomizationReview` or `PendingEffectReview`, a customization reviewer
         may upload `source`, or replace an existing `delivery` by providing its `asset_id`.
         Creating a second delivery root from those review states is rejected.
+      anyOf:
+        - required: [expected_size]
+        - required: [file_size]
       properties:
         task_id:
           type: integer
@@ -4218,6 +4247,8 @@ components:
           description: Required on `POST /v1/assets/upload-sessions`; ignored on task-scoped compatibility routes where task context comes from path.
         created_by:
           type: integer
+          deprecated: true
+          description: Deprecated and ignored. The backend always uses the authenticated session actor.
         asset_id:
           type: integer
           nullable: true
@@ -4246,13 +4277,15 @@ components:
         expected_size:
           type: integer
           format: int64
-          nullable: true
-          description: Optional size hint in bytes. Task asset upload sessions reject values above 1 GiB.
+          minimum: 1
+          maximum: 1073741824
+          description: Required exact file size in bytes. Task asset upload sessions reject values above 1 GiB and completion verifies the OSS object length.
         file_size:
           type: integer
           format: int64
-          nullable: true
-          description: Optional compatibility alias of `expected_size`. Task asset upload sessions reject values above 1 GiB.
+          minimum: 1
+          maximum: 1073741824
+          description: Compatibility alias of `expected_size`; when used it must be the exact positive file size.
         mime_type:
           type: string
           description: Optional MIME hint.
@@ -4278,6 +4311,8 @@ components:
           $ref: '#/components/schemas/UploadSession'
         remote:
           $ref: '#/components/schemas/RemoteUploadSessionPlan'
+        oss_direct:
+          $ref: '#/components/schemas/OSSDirectUploadPlan'
         upload_strategy:
           type: string
           description: Canonical frontend-facing upload strategy label. Current runtime emits `single_part` or `multipart`; `single_part` corresponds to internal `upload_mode=small`.
@@ -4294,7 +4329,7 @@ components:
       allOf:
         - $ref: '#/components/schemas/CreateTaskAssetUploadSessionRequest'
         - type: object
-          required: [task_id, asset_kind]
+          required: [task_id, asset_kind, expected_size]
           properties:
             task_id:
               type: integer
@@ -4316,11 +4351,28 @@ components:
       properties:
         completed_by:
           type: integer
+          deprecated: true
+          description: Deprecated and ignored. The backend always uses the authenticated session actor.
         file_hash:
           type: string
         upload_content_type:
           type: string
           description: Exact `required_upload_content_type` echoed back by the client when finalizing an OSS direct upload.
+        oss_object_key:
+          type: string
+          description: Required for every OSS direct completion. The backend validates that it belongs to this upload session.
+        oss_upload_id:
+          type: string
+          description: Required together with `oss_parts` for multipart completion; omitted for single-part completion.
+        oss_parts:
+          type: array
+          description: Ordered multipart ETags; omitted for single-part completion.
+          items:
+            type: object
+            required: [part_number, etag]
+            properties:
+              part_number: { type: integer, minimum: 1 }
+              etag: { type: string }
         remark:
           type: string
         reason:
@@ -4421,22 +4473,33 @@ components:
       properties:
         cancelled_by:
           type: integer
+          deprecated: true
+          description: Deprecated and ignored. The backend always uses the authenticated session actor.
         remark:
           type: string
+        oss_object_key:
+          type: string
+          description: Direct-upload object key returned by the session plan. Used for validated cleanup.
+        oss_upload_id:
+          type: string
+          description: Multipart upload id returned by the session plan. Used to abort unfinished multipart data.
     CreateTaskReferenceUploadSessionRequest:
       type: object
-      required: [filename]
-      description: Creates one compatibility pre-task reference upload session. Prefer `POST /v1/tasks/reference-upload` for the formal frontend entry.
+      required: [filename, expected_size]
+      description: Creates one canonical pre-task reference upload session. The backend chooses single-part or multipart OSS direct upload from `expected_size`.
       properties:
         created_by:
           type: integer
+          deprecated: true
+          description: Deprecated and ignored. The backend always uses the authenticated session actor.
         filename:
           type: string
         expected_size:
           type: integer
           format: int64
-          nullable: true
-          description: Optional size hint in bytes. Pre-task reference upload sessions reject values above 300 MB.
+          minimum: 1
+          maximum: 314572800
+          description: Required exact file size in bytes. Pre-task reference uploads reject values above 300 MB and verify the final OSS object length.
         mime_type:
           type: string
         file_hash:
@@ -4450,13 +4513,35 @@ components:
           $ref: '#/components/schemas/UploadSession'
         remote:
           $ref: '#/components/schemas/RemoteUploadSessionPlan'
+        oss_direct:
+          $ref: '#/components/schemas/OSSDirectUploadPlan'
+        complete_endpoint:
+          type: string
+        cancel_endpoint:
+          type: string
     CompleteTaskReferenceUploadSessionRequest:
       type: object
       properties:
         completed_by:
           type: integer
+          deprecated: true
+          description: Deprecated and ignored. The backend always uses the authenticated session actor.
         file_hash:
           type: string
+        upload_content_type:
+          type: string
+        oss_upload_id:
+          type: string
+        oss_object_key:
+          type: string
+        oss_parts:
+          type: array
+          items:
+            type: object
+            required: [part_number, etag]
+            properties:
+              part_number: { type: integer, minimum: 1 }
+              etag: { type: string }
         remark:
           type: string
     CompleteTaskReferenceUploadSessionResponseData:
@@ -5042,7 +5127,7 @@ components:
           description: Business source classification inside the customization lane; it does not select the lane by itself.
         reference_file_refs:
           type: array
-          description: Reference file ref objects returned by `POST /v1/tasks/reference-upload` or the compatibility upload flow. Object arrays are the formal contract. `POST /v1/tasks` rejects direct `reference_images` payloads with `400 INVALID_REQUEST`.
+          description: Reference file ref objects returned by `POST /v1/tasks/reference-upload-sessions/{session_id}/complete` or a compatibility upload flow. Object arrays are the formal contract. `POST /v1/tasks` rejects direct `reference_images` payloads with `400 INVALID_REQUEST`.
           items:
             $ref: '#/components/schemas/ReferenceFileRef'
         remark:
@@ -12362,16 +12447,131 @@ paths:
                     $ref: '#/components/schemas/CostRulePreviewResponse'
         '400':
           description: Invalid preview request
+  /v1/tasks/reference-upload-sessions:
+    post:
+      summary: Create task reference upload session
+      description: Canonical pre-task reference upload entry. Returns an OSS direct single-part or multipart plan chosen from the configured part-size threshold; the remote plan is present only as fallback when OSS direct planning is unavailable.
+      tags: [Tasks, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Ops]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTaskReferenceUploadSessionRequest'
+      responses:
+        '201':
+          description: Upload session and browser upload plan created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/CreateTaskReferenceUploadSessionResponseData'
+        '400': { description: Invalid request payload }
+        '401': { description: Authentication required }
+  /v1/tasks/reference-upload-sessions/{session_id}:
+    get:
+      summary: Get task reference upload session
+      tags: [Tasks, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Ops]
+      parameters:
+        - in: path
+          name: session_id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Upload session
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/UploadSession'
+        '404': { description: Upload session not found }
+  /v1/tasks/reference-upload-sessions/{session_id}/complete:
+    post:
+      summary: Complete task reference upload session
+      description: Finalizes the returned OSS plan, verifies that the expected object exists and matches the declared size, then returns the normalized `ref_object` for `POST /v1/tasks`.
+      tags: [Tasks, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Ops]
+      parameters:
+        - in: path
+          name: session_id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CompleteTaskReferenceUploadSessionRequest'
+      responses:
+        '200':
+          description: Upload completed and reference object returned
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/CompleteTaskReferenceUploadSessionResponseData'
+        '400': { description: Invalid upload completion }
+        '404': { description: Upload session not found }
+        '409': { description: Upload session already terminal }
+  /v1/tasks/reference-upload-sessions/{session_id}/abort:
+    post:
+      summary: Abort task reference upload session
+      tags: [Tasks, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Ops]
+      parameters:
+        - in: path
+          name: session_id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CancelTaskAssetUploadSessionRequest'
+      responses:
+        '200':
+          description: Upload session aborted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/UploadSession'
+        '404': { description: Upload session not found }
+        '409': { description: Completed upload session cannot be aborted }
   /v1/task-create/asset-center/upload-sessions:
     post:
       summary: Create task-create reference upload session
       description: |
         Compatibility-only pre-task reference upload flow retained for rollback-safe migration.
-        Obsolete for frontend rollout. New frontend integration must use `POST /v1/tasks/reference-upload`.
+        Obsolete for frontend rollout. New frontend integration must use `POST /v1/tasks/reference-upload-sessions`.
       deprecated: true
       x-removed-at: v1.3
       x-workflow-api-status: compatibility
-      x-workflow-successor-path: /v1/tasks/reference-upload
+      x-workflow-successor-path: /v1/tasks/reference-upload-sessions
       x-workflow-new-usage-allowed: false
       x-workflow-target-removal-phase: remove_after_frontend_migration
       tags: [TaskAssetCenter, ReadyForFrontend]
@@ -12400,11 +12600,11 @@ paths:
   /v1/task-create/asset-center/upload-sessions/{session_id}:
     get:
       summary: Get task-create reference upload session
-      description: Compatibility-only status read for the old task-create upload-session flow. Obsolete for frontend rollout; new integration must use `POST /v1/tasks/reference-upload`.
+      description: Compatibility-only status read for the old task-create upload-session flow. Obsolete for frontend rollout; new integration must use `POST /v1/tasks/reference-upload-sessions`.
       deprecated: true
       x-removed-at: v1.3
       x-workflow-api-status: compatibility
-      x-workflow-successor-path: /v1/tasks/reference-upload
+      x-workflow-successor-path: /v1/tasks/reference-upload-sessions
       x-workflow-new-usage-allowed: false
       x-workflow-target-removal-phase: remove_after_frontend_migration
       tags: [TaskAssetCenter, ReadyForFrontend]
@@ -12439,7 +12639,7 @@ paths:
       deprecated: true
       x-removed-at: v1.3
       x-workflow-api-status: compatibility
-      x-workflow-successor-path: /v1/tasks/reference-upload
+      x-workflow-successor-path: /v1/tasks/reference-upload-sessions/{session_id}/complete
       x-workflow-new-usage-allowed: false
       x-workflow-target-removal-phase: remove_after_frontend_migration
       tags: [TaskAssetCenter, ReadyForFrontend]
@@ -12477,11 +12677,11 @@ paths:
   /v1/task-create/asset-center/upload-sessions/{session_id}/abort:
     post:
       summary: Abort task-create reference upload session
-      description: Compatibility-only abort for the old task-create upload-session flow. Obsolete for frontend rollout; new integration must use `POST /v1/tasks/reference-upload`.
+      description: Compatibility-only abort for the old task-create upload-session flow. Obsolete for frontend rollout; new integration must use `POST /v1/tasks/reference-upload-sessions/{session_id}/abort`.
       deprecated: true
       x-removed-at: v1.3
       x-workflow-api-status: compatibility
-      x-workflow-successor-path: /v1/tasks/reference-upload
+      x-workflow-successor-path: /v1/tasks/reference-upload-sessions/{session_id}/abort
       x-workflow-new-usage-allowed: false
       x-workflow-target-removal-phase: remove_after_frontend_migration
       tags: [TaskAssetCenter, ReadyForFrontend]
@@ -12518,13 +12718,16 @@ paths:
           description: Completed upload session cannot be aborted
   /v1/tasks/reference-upload:
     post:
-      summary: Upload task-create reference file
+      summary: Upload task-create reference file through backend compatibility proxy
       description: |
-        Canonical frontend entry for task-create reference upload.
+        Deprecated rollback-compatible multipart proxy. New clients must use `POST /v1/tasks/reference-upload-sessions`
+        so file bytes travel directly from the browser to OSS instead of through the application server.
         Accepts one `multipart/form-data` file field named `file`, writes it to OSS through backend-controlled direct storage flow when available
         (and uses upload-service proxy only as compatibility fallback),
         records a completed legal reference source, and returns one normalized `reference_file_ref` object.
         The returned object should be appended directly into `POST /v1/tasks.reference_file_refs`.
+      deprecated: true
+      x-workflow-successor-path: /v1/tasks/reference-upload-sessions
       tags: [Tasks, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
@@ -13113,7 +13316,7 @@ paths:
         - batch mode writes one mother task plus multiple `task_sku_items` in one transaction and keeps `sku_code` / `primary_sku_code` aligned to the first child SKU for compatibility.
         - create now also appends `task.created`, and multi-SKU creates additionally append `task.batch_items_created`.
         - `reference_images` is no longer accepted. If present, backend returns `400 INVALID_REQUEST` and requires the reference-upload flow.
-        - `reference_file_refs` must be objects returned by `POST /v1/tasks/reference-upload` or the compatibility task-create asset-center flow; forged, missing, incomplete, or unauthorized refs return `400 INVALID_REQUEST` with `invalid_reference_file_refs`.
+        - `reference_file_refs` must be objects returned by `POST /v1/tasks/reference-upload-sessions/{session_id}/complete` or the compatibility task-create asset-center flow; forged, missing, incomplete, or unauthorized refs return `400 INVALID_REQUEST` with `invalid_reference_file_refs`.
       tags: [Tasks, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-owner-round: R3
@@ -15380,9 +15583,9 @@ paths:
           description: Task not found
   /v1/assets/files/{path}:
     get:
-      summary: Proxy OSS-backed business file
+      summary: Authorize and redirect OSS-backed business file
       description: |
-        Compatibility-only proxy byte-serving route for OSS-backed business files. Canonical browser download should use the URL returned by `/v1/assets/{asset_id}/download` or `/v1/assets/{asset_id}/preview`.
+        Compatibility-only authorization route for OSS-backed business files. When OSS direct storage is configured, it signs the authorized object and responds with `302` without first probing the legacy upload service. Non-OSS deployments retain the upstream proxy fallback. Canonical browser download should use the URL returned by `/v1/assets/{asset_id}/download` or `/v1/assets/{asset_id}/preview`.
         Path is the storage_key (e.g. tasks/task-create-reference/assets/.../filename.png).
       tags: [ReadyForFrontend]
       parameters:
@@ -15392,8 +15595,10 @@ paths:
           schema: { type: string }
           description: Storage key (may contain slashes)
       responses:
+        '302':
+          description: Redirect to a short-lived signed OSS URL
         '200':
-          description: File bytes (Content-Type from upstream)
+          description: File bytes from the non-OSS compatibility upstream
         '404':
           description: File not found
         '502':
@@ -23794,7 +23999,7 @@ paths:
   /v1/asset-workbench/upload-sessions:
     post:
       summary: Create asset workbench upload session
-      description: Creates a direct-upload session. When upload directories are configured, `upload_directory_id` is required and the session stores the directory name, prefix, and difficulty snapshot.
+      description: Creates a direct-upload session. Files no larger than the configured OSS part size use a single PUT; larger files use multipart upload. When upload directories are configured, `upload_directory_id` is required and the session stores the directory name, prefix, and difficulty snapshot. `file_hash` is optional metadata and is not required before upload starts.
       tags: [AssetWorkbench, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
@@ -23809,7 +24014,7 @@ paths:
               required: [original_filename, file_size, mime_type]
               properties:
                 original_filename: { type: string }
-                file_size: { type: integer, minimum: 0 }
+                file_size: { type: integer, minimum: 1 }
                 mime_type: { type: string }
                 file_hash: { type: string }
                 upload_directory_id: { type: integer }
@@ -23854,6 +24059,7 @@ paths:
                           upload_id: { type: string }
                       plan:
                         type: object
+                        description: OSS direct plan. `mode=single_part` provides `upload_url`; `mode=multipart` provides `upload_id`, `part_size`, and ordered `parts`.
                         additionalProperties: true
         '400': { description: Invalid request }
         '401': { description: Unauthenticated }
@@ -23861,6 +24067,7 @@ paths:
   /v1/asset-workbench/upload-sessions/{session_id}/complete:
     post:
       summary: Complete asset workbench upload session
+      description: Completes multipart uploads with ordered ETags. For a single-part session, the body may be empty and the backend verifies that the signed PUT created the expected OSS object.
       tags: [AssetWorkbench, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:

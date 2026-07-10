@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-sql-driver/mysql"
@@ -72,10 +73,12 @@ type CompleteAuditSupplementUploadSessionParams struct {
 }
 
 type CancelTaskAssetUploadSessionParams struct {
-	TaskID      int64
-	SessionID   string
-	CancelledBy int64
-	Remark      string
+	TaskID       int64
+	SessionID    string
+	CancelledBy  int64
+	Remark       string
+	OSSUploadID  string
+	OSSObjectKey string
 }
 
 type ListAssetResourcesParams struct {
@@ -161,6 +164,9 @@ type taskAssetCenterService struct {
 	runAsyncFn                func(func())
 	derivedPreviewGracePeriod time.Duration
 	previewRenderer           AssetPreviewRenderer
+	derivedPreviewSlots       chan struct{}
+	derivedPreviewMu          sync.Mutex
+	derivedPreviewInflight    map[string]struct{}
 	dataScopeResolver         DataScopeResolver
 	scopeUserRepo             repo.UserRepo
 	userDisplayNameResolver   UserDisplayNameResolver
@@ -175,6 +181,7 @@ const (
 	assetVersionReplacementRetention = 15 * 24 * time.Hour
 	taskAssetUploadMaxFileSizeBytes  = int64(1024 * 1024 * 1024)
 	taskAssetUploadMaxFileSizeLabel  = "1GB"
+	taskAssetSinglePartThreshold     = int64(10 * 1024 * 1024)
 	auditSupplementUploadPolicy      = "audit_post_close_supplement"
 	auditSupplementRemarkPrefix      = "[audit_supplement]"
 )
@@ -231,6 +238,8 @@ func NewTaskAssetCenterService(
 		},
 		derivedPreviewGracePeriod: 3 * time.Second,
 		previewRenderer:           NewExternalAssetPreviewRenderer(),
+		derivedPreviewSlots:       make(chan struct{}, 2),
+		derivedPreviewInflight:    make(map[string]struct{}),
 	}
 	for _, opt := range options {
 		opt(svc)
@@ -439,7 +448,7 @@ func (s *taskAssetCenterService) GetAssetPreviewInfoByID(ctx context.Context, as
 	if asset.CurrentVersion == nil {
 		return nil, domain.ErrNotFound
 	}
-	if !asset.CurrentVersion.PreviewAvailable {
+	if !asset.AssetType.IsPreview() && !asset.AssetType.IsDesignThumb() {
 		info, resolveErr := s.resolveDerivedPreviewInfo(ctx, asset)
 		if resolveErr != nil {
 			return nil, resolveErr
@@ -452,18 +461,10 @@ func (s *taskAssetCenterService) GetAssetPreviewInfoByID(ctx context.Context, as
 			if actorID <= 0 {
 				actorID = asset.CreatedBy
 			}
-			if err := s.ensureDerivedPreviewAssets(ctx, asset.TaskID, asset.ID, actorID); err != nil {
-				log.Printf("source_preview_derive_on_demand_failed task_id=%d source_asset_id=%d error=%v", asset.TaskID, asset.ID, err)
-			} else {
-				info, resolveErr = s.resolveDerivedPreviewInfo(ctx, asset)
-				if resolveErr != nil {
-					return nil, resolveErr
-				}
-				if info != nil {
-					return info, nil
-				}
-			}
+			s.scheduleDerivedPreviewGeneration(asset.TaskID, asset.ID, actorID, asset.CurrentVersion)
 		}
+	}
+	if !asset.CurrentVersion.PreviewAvailable {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidStateTransition, "asset preview is not available", map[string]interface{}{
 			"asset_id": asset.ID,
 		})
@@ -483,7 +484,7 @@ func (s *taskAssetCenterService) GetUploadSessionByID(ctx context.Context, sessi
 }
 
 func (s *taskAssetCenterService) CreateUploadSession(ctx context.Context, params CreateTaskAssetUploadSessionParams) (*CreateTaskAssetUploadSessionResult, *domain.AppError) {
-	mode, appErr := inferTaskAssetUploadMode(params.AssetType)
+	mode, appErr := s.inferTaskAssetUploadMode(params.AssetType, params.ExpectedSize)
 	if appErr != nil {
 		return nil, appErr
 	}
@@ -810,6 +811,11 @@ func (s *taskAssetCenterService) CompleteAuditSupplementUploadSession(ctx contex
 			"deny_code": "audit_supplement_asset_type_not_allowed",
 		})
 	}
+	if request.ExpectedSize == nil || *request.ExpectedSize <= 0 || *request.ExpectedSize > taskAssetUploadMaxFileSizeBytes {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "upload_session expected_size is outside the allowed range", map[string]interface{}{
+			"max_bytes": taskAssetUploadMaxFileSizeBytes,
+		})
+	}
 	if appErr := validateUploadContentTypeContract(request, params.UploadContentType); appErr != nil {
 		return nil, appErr
 	}
@@ -845,8 +851,31 @@ func (s *taskAssetCenterService) CompleteAuditSupplementUploadSession(ctx contex
 	if ossDirectReady {
 		ossObjectKey := strings.TrimSpace(params.OSSObjectKey)
 		ossUploadID := strings.TrimSpace(params.OSSUploadID)
-		if err := s.ossDirectService.CompleteMultipartUpload(ctx, ossObjectKey, ossUploadID, params.OSSParts); err != nil {
-			return nil, infraError("complete audit supplement oss direct multipart upload", err)
+		legacyTaskPrefix := "tasks/" + strings.Trim(strings.TrimSpace(task.TaskNo), "/") + "/assets/"
+		if !strings.HasPrefix(ossObjectKey, legacyTaskPrefix) {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "oss_object_key does not belong to upload_session", map[string]interface{}{
+				"upload_session_id": request.RequestID,
+			})
+		}
+		multipartCompleteErr := s.ossDirectService.CompleteMultipartUpload(ctx, ossObjectKey, ossUploadID, params.OSSParts)
+		info, exists, statErr := s.ossDirectService.StatObject(ctx, ossObjectKey)
+		if statErr != nil {
+			return nil, infraError("verify completed audit supplement OSS object", statErr)
+		}
+		if !exists || info == nil {
+			if multipartCompleteErr != nil {
+				return nil, infraError("complete audit supplement oss direct multipart upload", multipartCompleteErr)
+			}
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "completed audit supplement OSS object is missing", nil)
+		}
+		if info.ContentLength < 0 || info.ContentLength != *request.ExpectedSize {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "completed audit supplement OSS object size does not match upload_session", map[string]interface{}{
+				"expected_size": *request.ExpectedSize,
+				"actual_size":   info.ContentLength,
+			})
+		}
+		if multipartCompleteErr != nil {
+			log.Printf("oss_direct_audit_supplement_complete_recovered session=%s object_key=%s error=%v", request.RequestID, ossObjectKey, multipartCompleteErr)
 		}
 		ossDirectFinalized = true
 		ossDirectObjectKey = ossObjectKey
@@ -870,8 +899,28 @@ func (s *taskAssetCenterService) CompleteAuditSupplementUploadSession(ctx contex
 	var versionID int64
 	var assetVersionNo int
 	var timelineVersionNo int
+	alreadyCompleted := false
 
 	txErr := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
+		lockedRequest, err := s.getUploadRequestForUpdate(ctx, tx, request.RequestID)
+		if err != nil {
+			return fmt.Errorf("lock audit supplement upload request before completion: %w", err)
+		}
+		if lockedRequest == nil || lockedRequest.TaskID != params.TaskID {
+			return domain.ErrNotFound
+		}
+		request = lockedRequest
+		if request.Status == domain.UploadRequestStatusBound || (request.SessionStatus == domain.DesignAssetSessionStatusCompleted && request.BoundAssetID != nil) {
+			alreadyCompleted = true
+			return nil
+		}
+		if request.Status == domain.UploadRequestStatusCancelled || request.Status == domain.UploadRequestStatusExpired ||
+			request.SessionStatus == domain.DesignAssetSessionStatusCancelled || request.SessionStatus == domain.DesignAssetSessionStatusExpired {
+			return domain.NewAppError(domain.ErrCodeConflict, "upload_session changed concurrently and is already terminal", map[string]interface{}{
+				"upload_session_id": request.RequestID,
+				"session_status":    request.SessionStatus,
+			})
+		}
 		if request.AssetID == nil || *request.AssetID <= 0 {
 			return domain.NewAppError(domain.ErrCodeInvalidStateTransition, "audit supplement upload_session is missing frozen asset identity", map[string]interface{}{
 				"upload_session_id": request.RequestID,
@@ -993,6 +1042,9 @@ func (s *taskAssetCenterService) CompleteAuditSupplementUploadSession(ctx contex
 		}
 		return nil, infraError("complete audit supplement upload session", txErr)
 	}
+	if alreadyCompleted {
+		return s.buildCompletedUploadSessionResult(ctx, params.TaskID, request)
+	}
 
 	request, appErr = s.requireUploadRequest(ctx, params.TaskID, request.RequestID)
 	if appErr != nil {
@@ -1059,6 +1111,11 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 	if request.TaskAssetType == nil {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "upload_session asset_type is required", nil)
 	}
+	if request.ExpectedSize == nil || *request.ExpectedSize <= 0 || *request.ExpectedSize > taskAssetUploadMaxFileSizeBytes {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "upload_session expected_size is outside the allowed range", map[string]interface{}{
+			"max_bytes": taskAssetUploadMaxFileSizeBytes,
+		})
+	}
 	if appErr := validateUploadContentTypeContract(request, params.UploadContentType); appErr != nil {
 		return nil, appErr
 	}
@@ -1072,6 +1129,10 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 	checksumHint := firstNonEmpty(strings.TrimSpace(params.FileHash), strings.TrimSpace(request.ChecksumHint))
 	var err error
 	ossDirectReady := s.canFinalizeOSSDirectUpload(params)
+	isOSSDirectSession := strings.TrimSpace(request.RemoteUploadID) == "" && s.ossDirectService != nil && s.ossDirectService.Enabled()
+	if isOSSDirectSession && !ossDirectReady {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "oss_object_key is required for OSS direct upload_session completion", nil)
+	}
 	if request.RemoteUploadID != "" && request.SessionStatus == domain.DesignAssetSessionStatusCreated && !ossDirectReady {
 		if request, err = s.syncUploadRequestFromRemote(ctx, request); err != nil {
 			return nil, infraError("sync upload session before completion", err)
@@ -1082,9 +1143,46 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 	ossDirectObjectKey := ""
 	if ossDirectReady {
 		ossObjectKey := strings.TrimSpace(params.OSSObjectKey)
-		ossUploadID := strings.TrimSpace(params.OSSUploadID)
-		if err := s.ossDirectService.CompleteMultipartUpload(ctx, ossObjectKey, ossUploadID, params.OSSParts); err != nil {
-			return nil, infraError("complete oss direct multipart upload", err)
+		expectedObjectKey := s.ossDirectService.BuildUploadSessionObjectKey(task.TaskNo, request.RequestID, request.FileName)
+		legacyTaskPrefix := "tasks/" + strings.Trim(strings.TrimSpace(task.TaskNo), "/") + "/assets/"
+		isExpectedObjectKey := ossObjectKey == expectedObjectKey
+		if request.UploadMode == domain.DesignAssetUploadModeMultipart && strings.HasPrefix(ossObjectKey, legacyTaskPrefix) {
+			isExpectedObjectKey = true
+		}
+		if !isExpectedObjectKey {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "oss_object_key does not belong to upload_session", map[string]interface{}{
+				"upload_session_id": request.RequestID,
+			})
+		}
+		hasMultipartParts := len(params.OSSParts) > 0 && strings.TrimSpace(params.OSSUploadID) != ""
+		if request.UploadMode == domain.DesignAssetUploadModeMultipart && !hasMultipartParts {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "multipart upload_session requires oss_parts and oss_upload_id", nil)
+		}
+		if request.UploadMode == domain.DesignAssetUploadModeSmall && hasMultipartParts {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "single-part upload_session cannot complete multipart parts", nil)
+		}
+		var multipartCompleteErr error
+		if hasMultipartParts {
+			multipartCompleteErr = s.ossDirectService.CompleteMultipartUpload(ctx, ossObjectKey, strings.TrimSpace(params.OSSUploadID), params.OSSParts)
+		}
+		info, exists, statErr := s.ossDirectService.StatObject(ctx, ossObjectKey)
+		if statErr != nil {
+			return nil, infraError("verify completed oss direct object", statErr)
+		}
+		if !exists || info == nil {
+			if multipartCompleteErr != nil {
+				return nil, infraError("complete oss direct multipart upload", multipartCompleteErr)
+			}
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "completed OSS direct object is missing", nil)
+		}
+		if info.ContentLength < 0 || info.ContentLength != *request.ExpectedSize {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "completed OSS direct object size does not match upload_session", map[string]interface{}{
+				"expected_size": *request.ExpectedSize,
+				"actual_size":   info.ContentLength,
+			})
+		}
+		if multipartCompleteErr != nil {
+			log.Printf("oss_direct_complete_recovered_from_existing_object session=%s object_key=%s error=%v", request.RequestID, ossObjectKey, multipartCompleteErr)
 		}
 		ossDirectFinalized = true
 		ossDirectObjectKey = ossObjectKey
@@ -1609,9 +1707,6 @@ func (s *taskAssetCenterService) CancelUploadSession(ctx context.Context, params
 	if request.SessionStatus == domain.DesignAssetSessionStatusCancelled {
 		return domain.BuildUploadSession(request), nil
 	}
-	if err := s.uploadClient.AbortUploadSession(ctx, RemoteAbortUploadRequest{RemoteUploadID: request.RemoteUploadID}); err != nil {
-		return nil, infraError("abort upload session via upload service client", err)
-	}
 	lastSyncedAt := s.nowFn().UTC()
 	alreadyCancelled := false
 	txErr := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
@@ -1641,6 +1736,40 @@ func (s *taskAssetCenterService) CancelUploadSession(ctx context.Context, params
 		}
 		if appErr := validateCompletedTaskReplacementRequest(task, request, false); appErr != nil {
 			return appErr
+		}
+		remoteUploadID := strings.TrimSpace(request.RemoteUploadID)
+		ossObjectKey := strings.TrimSpace(params.OSSObjectKey)
+		ossUploadID := strings.TrimSpace(params.OSSUploadID)
+		hasOSSCleanupIdentifiers := ossObjectKey != "" || ossUploadID != ""
+		if s.ossDirectService != nil && s.ossDirectService.Enabled() && (hasOSSCleanupIdentifiers || remoteUploadID == "") {
+			expectedObjectKey := s.ossDirectService.BuildUploadSessionObjectKey(task.TaskNo, request.RequestID, request.FileName)
+			if ossObjectKey == "" {
+				ossObjectKey = expectedObjectKey
+			}
+			legacyTaskPrefix := "tasks/" + strings.Trim(strings.TrimSpace(task.TaskNo), "/") + "/assets/"
+			isExpectedObjectKey := ossObjectKey == expectedObjectKey
+			if request.UploadMode == domain.DesignAssetUploadModeMultipart && strings.HasPrefix(ossObjectKey, legacyTaskPrefix) {
+				isExpectedObjectKey = true
+			}
+			if !isExpectedObjectKey {
+				return domain.NewAppError(domain.ErrCodeInvalidRequest, "oss_object_key does not belong to upload_session", nil)
+			}
+			if request.UploadMode == domain.DesignAssetUploadModeMultipart && ossUploadID != "" {
+				if err := s.ossDirectService.AbortMultipartUpload(ctx, ossObjectKey, ossUploadID); err != nil {
+					return fmt.Errorf("abort OSS direct multipart upload: %w", err)
+				}
+			} else if request.UploadMode != domain.DesignAssetUploadModeMultipart {
+				if err := s.ossDirectService.DeleteObject(ctx, ossObjectKey); err != nil {
+					return fmt.Errorf("delete OSS direct single upload: %w", err)
+				}
+			} else {
+				log.Printf("oss_direct_cancel_missing_upload_id session=%s", request.RequestID)
+			}
+		}
+		if remoteUploadID != "" {
+			if err := s.uploadClient.AbortUploadSession(ctx, RemoteAbortUploadRequest{RemoteUploadID: remoteUploadID}); err != nil {
+				return fmt.Errorf("abort upload session via upload service client: %w", err)
+			}
 		}
 		if err := s.uploadRequestRepo.UpdateLifecycle(ctx, tx, repo.UploadRequestLifecycleUpdate{
 			RequestID: request.RequestID,
@@ -1692,14 +1821,26 @@ func (s *taskAssetCenterService) createUploadSession(ctx context.Context, params
 	if strings.TrimSpace(params.Filename) == "" {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "filename is required", nil)
 	}
-	if params.ExpectedSize != nil && *params.ExpectedSize < 0 {
-		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "expected_size must be greater than or equal to zero", nil)
+	if params.ExpectedSize == nil || *params.ExpectedSize <= 0 {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "expected_size must be greater than zero", nil)
 	}
-	if params.ExpectedSize != nil && *params.ExpectedSize > taskAssetUploadMaxFileSizeBytes {
+	if *params.ExpectedSize > taskAssetUploadMaxFileSizeBytes {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "expected_size exceeds upload limit", map[string]interface{}{
 			"max_bytes": taskAssetUploadMaxFileSizeBytes,
 			"max_label": taskAssetUploadMaxFileSizeLabel,
 		})
+	}
+	inferredMode, modeErr := s.inferTaskAssetUploadMode(params.AssetType, params.ExpectedSize)
+	if modeErr != nil {
+		return nil, modeErr
+	}
+	// Keep the explicit multipart compatibility routes deterministic for small
+	// files, while never allowing the explicit small-file route to downgrade a
+	// payload that the backend requires to use multipart upload.
+	if inferredMode == domain.DesignAssetUploadModeMultipart {
+		mode = domain.DesignAssetUploadModeMultipart
+	} else if mode != domain.DesignAssetUploadModeMultipart {
+		mode = domain.DesignAssetUploadModeSmall
 	}
 	task, appErr := s.requireTask(ctx, params.TaskID)
 	if appErr != nil {
@@ -1757,12 +1898,6 @@ func (s *taskAssetCenterService) createUploadSession(ctx context.Context, params
 	if appErr != nil {
 		return nil, appErr
 	}
-	if mode != domain.DesignAssetUploadModeMultipart {
-		if params.AssetType.IsDelivery() || params.AssetType.IsSource() || params.AssetType.IsPreview() || params.AssetType.IsDesignThumb() {
-			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "delivery/source/preview assets must use multipart upload mode", nil)
-		}
-		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "assets must use multipart upload mode", nil)
-	}
 	if params.SourceAssetID != nil {
 		if !(params.AssetType.IsPreview() || params.AssetType.IsDesignThumb()) {
 			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "source_asset_id is only allowed for preview or design_thumb assets", nil)
@@ -1779,6 +1914,32 @@ func (s *taskAssetCenterService) createUploadSession(ctx context.Context, params
 		}
 	}
 
+	requiredContentType := normalizeRequiredUploadContentType(params.MimeType)
+	requestID := uuid.NewString()
+	fileSize := *params.ExpectedSize
+	var remote *RemoteUploadSessionPlan
+	var ossPlan *OSSDirectUploadPlan
+	if s.ossDirectService != nil && s.ossDirectService.Enabled() {
+		objectKey := s.ossDirectService.BuildUploadSessionObjectKey(taskRef, requestID, strings.TrimSpace(params.Filename))
+		var plan *OSSDirectUploadPlan
+		var ossErr error
+		if mode == domain.DesignAssetUploadModeMultipart {
+			plan, ossErr = s.ossDirectService.CreateMultipartUploadPlan(ctx, objectKey, fileSize, requiredContentType)
+		} else {
+			plan, ossErr = s.ossDirectService.CreateUploadPlan(ctx, objectKey, fileSize, requiredContentType)
+		}
+		if ossErr != nil {
+			log.Printf("oss_direct_upload_plan_fallback error=%v session=%s", ossErr, requestID)
+		} else {
+			ossPlan = plan
+			if plan.Mode == "multipart" {
+				mode = domain.DesignAssetUploadModeMultipart
+			} else {
+				mode = domain.DesignAssetUploadModeSmall
+			}
+		}
+	}
+
 	createReq := RemoteCreateUploadSessionRequest{
 		TaskID:       params.TaskID,
 		TaskRef:      taskRef,
@@ -1789,18 +1950,34 @@ func (s *taskAssetCenterService) createUploadSession(ctx context.Context, params
 		UploadMode:   mode,
 		Filename:     strings.TrimSpace(params.Filename),
 		ExpectedSize: params.ExpectedSize,
-		MimeType:     normalizeRequiredUploadContentType(params.MimeType),
+		MimeType:     requiredContentType,
 		CreatedBy:    params.CreatedBy,
 	}
-
-	remote, err := s.uploadClient.CreateUploadSession(ctx, createReq)
-	if err != nil {
-		return nil, infraError("create upload session via upload service client", err)
+	if ossPlan == nil {
+		var err error
+		remote, err = s.uploadClient.CreateUploadSession(ctx, createReq)
+		if err != nil {
+			return nil, infraError("create upload session via upload service client", err)
+		}
 	}
 
 	now := s.nowFn().UTC()
-	requiredContentType := normalizeRequiredUploadContentType(params.MimeType)
+	remoteUploadID := ""
+	remoteFileID := ""
+	isPlaceholder := false
+	var expiresAt *time.Time
+	lastSyncedAt := &now
+	if ossPlan != nil {
+		expiresAt = &ossPlan.ExpiresAt
+	} else if remote != nil {
+		remoteUploadID = remote.UploadID
+		remoteFileID = valueOrEmpty(remote.FileID)
+		isPlaceholder = remote.IsStub
+		expiresAt = remote.ExpiresAt
+		lastSyncedAt = firstNonNilTime(remote.LastSyncedAt, &now)
+	}
 	request := &domain.UploadRequest{
+		RequestID:            requestID,
 		OwnerType:            domain.AssetOwnerTypeTask,
 		OwnerID:              params.TaskID,
 		TaskID:               params.TaskID,
@@ -1820,12 +1997,12 @@ func (s *taskAssetCenterService) createUploadSession(ctx context.Context, params
 		Status:               domain.UploadRequestStatusRequested,
 		StorageProvider:      domain.DesignAssetStorageProviderOSS,
 		SessionStatus:        domain.DesignAssetSessionStatusCreated,
-		RemoteUploadID:       remote.UploadID,
-		RemoteFileID:         valueOrEmpty(remote.FileID),
-		IsPlaceholder:        remote.IsStub,
+		RemoteUploadID:       remoteUploadID,
+		RemoteFileID:         remoteFileID,
+		IsPlaceholder:        isPlaceholder,
 		CreatedBy:            params.CreatedBy,
-		ExpiresAt:            remote.ExpiresAt,
-		LastSyncedAt:         firstNonNilTime(remote.LastSyncedAt, &now),
+		ExpiresAt:            expiresAt,
+		LastSyncedAt:         lastSyncedAt,
 		Remark:               strings.TrimSpace(params.Remark),
 		CreatedAt:            now,
 		UpdatedAt:            now,
@@ -1859,34 +2036,10 @@ func (s *taskAssetCenterService) createUploadSession(ctx context.Context, params
 		return nil, infraError("create upload session", txErr)
 	}
 	result := &CreateTaskAssetUploadSessionResult{
-		Session: domain.BuildUploadSession(request),
-		Remote:  remote,
+		Session:   domain.BuildUploadSession(request),
+		Remote:    remote,
+		OSSDirect: ossPlan,
 	}
-
-	if s.ossDirectService != nil && s.ossDirectService.Enabled() {
-		objectKey := s.ossDirectService.BuildObjectKey(taskRef, identity.AssetNo, versionNo, params.AssetType, strings.TrimSpace(params.Filename))
-		fileSize := int64(0)
-		if params.ExpectedSize != nil {
-			fileSize = *params.ExpectedSize
-		}
-		contentType := requiredContentType
-		if mode == domain.DesignAssetUploadModeMultipart {
-			ossPlan, ossErr := s.ossDirectService.CreateMultipartUploadPlan(ctx, objectKey, fileSize, contentType)
-			if ossErr != nil {
-				log.Printf("oss_direct_upload_plan_fallback error=%v session=%s", ossErr, request.RequestID)
-			} else {
-				result.OSSDirect = ossPlan
-			}
-		} else {
-			ossPlan, ossErr := s.ossDirectService.CreateSingleUploadPlan(objectKey, contentType)
-			if ossErr != nil {
-				log.Printf("oss_direct_upload_plan_fallback error=%v session=%s", ossErr, request.RequestID)
-			} else {
-				result.OSSDirect = ossPlan
-			}
-		}
-	}
-
 	return result, nil
 }
 
@@ -2375,10 +2528,13 @@ func validateOSSDirectCompleteContract(params CompleteTaskAssetUploadSessionPara
 	if !hasParts && !hasUploadID && !hasObjectKey {
 		return nil
 	}
+	if !hasParts && !hasUploadID && hasObjectKey {
+		return nil
+	}
 	if hasParts && hasUploadID && hasObjectKey {
 		return nil
 	}
-	return domain.NewAppError(domain.ErrCodeInvalidRequest, "oss direct complete requires oss_parts, oss_upload_id, and oss_object_key together", map[string]interface{}{
+	return domain.NewAppError(domain.ErrCodeInvalidRequest, "oss direct complete requires object_key alone for single-part, or parts, upload_id, and object_key together for multipart", map[string]interface{}{
 		"has_oss_parts":      hasParts,
 		"has_oss_upload_id":  hasUploadID,
 		"has_oss_object_key": hasObjectKey,
@@ -2386,11 +2542,12 @@ func validateOSSDirectCompleteContract(params CompleteTaskAssetUploadSessionPara
 }
 
 func (s *taskAssetCenterService) canFinalizeOSSDirectUpload(params CompleteTaskAssetUploadSessionParams) bool {
-	return s.ossDirectService != nil &&
-		s.ossDirectService.Enabled() &&
-		len(params.OSSParts) > 0 &&
-		strings.TrimSpace(params.OSSUploadID) != "" &&
-		strings.TrimSpace(params.OSSObjectKey) != ""
+	if s.ossDirectService == nil || !s.ossDirectService.Enabled() || strings.TrimSpace(params.OSSObjectKey) == "" {
+		return false
+	}
+	hasParts := len(params.OSSParts) > 0
+	hasUploadID := strings.TrimSpace(params.OSSUploadID) != ""
+	return (!hasParts && !hasUploadID) || (hasParts && hasUploadID)
 }
 
 func validateAssetVersionObjectAvailable(version *domain.DesignAssetVersion) *domain.AppError {
@@ -2485,10 +2642,19 @@ func storedFileProbeMissing(probe *RemoteStoredFileProbe, err error) bool {
 	return errors.As(err, &httpErr) && httpErr.StatusCode == http.StatusNotFound
 }
 
-func inferTaskAssetUploadMode(assetType domain.TaskAssetType) (domain.DesignAssetUploadMode, *domain.AppError) {
+func (s *taskAssetCenterService) inferTaskAssetUploadMode(assetType domain.TaskAssetType, expectedSize *int64) (domain.DesignAssetUploadMode, *domain.AppError) {
 	normalized := domain.NormalizeTaskAssetType(assetType)
 	if normalized == "" {
 		return "", domain.NewAppError(domain.ErrCodeInvalidRequest, "asset_type is required", nil)
+	}
+	if expectedSize != nil && *expectedSize >= 0 {
+		if s.ossDirectService != nil && s.ossDirectService.Enabled() {
+			if !s.ossDirectService.UsesMultipartUpload(*expectedSize) {
+				return domain.DesignAssetUploadModeSmall, nil
+			}
+		} else if *expectedSize <= taskAssetSinglePartThreshold {
+			return domain.DesignAssetUploadModeSmall, nil
+		}
 	}
 	return domain.DesignAssetUploadModeMultipart, nil
 }

@@ -1,6 +1,66 @@
 import axios from 'axios'
 import type { AssetUploadOptions } from '@/services/api/assetsApi'
 
+const MULTIPART_UPLOAD_CONCURRENCY = 4
+const GLOBAL_OSS_PUT_CONCURRENCY = 6
+const OSS_PUT_MAX_ATTEMPTS = 3
+const OSS_PUT_RETRY_BASE_DELAY_MS = 250
+
+let activeOssPuts = 0
+const pendingOssPutAcquires: Array<{
+  signal?: AbortSignal
+  resolve: (release: () => void) => void
+  reject: (reason?: unknown) => void
+  onAbort?: () => void
+}> = []
+
+function releaseOssPutSlot() {
+  activeOssPuts = Math.max(0, activeOssPuts - 1)
+  while (pendingOssPutAcquires.length > 0 && activeOssPuts < GLOBAL_OSS_PUT_CONCURRENCY) {
+    const pending = pendingOssPutAcquires.shift()
+    if (!pending) return
+    if (pending.signal?.aborted) {
+      pending.reject(pending.signal.reason ?? new DOMException('Aborted', 'AbortError'))
+      continue
+    }
+    if (pending.onAbort) pending.signal?.removeEventListener('abort', pending.onAbort)
+    activeOssPuts += 1
+    let released = false
+    pending.resolve(() => {
+      if (released) return
+      released = true
+      releaseOssPutSlot()
+    })
+  }
+}
+
+function acquireOssPutSlot(signal?: AbortSignal): Promise<() => void> {
+  if (signal?.aborted) {
+    return Promise.reject(signal.reason ?? new DOMException('Aborted', 'AbortError'))
+  }
+  if (activeOssPuts < GLOBAL_OSS_PUT_CONCURRENCY) {
+    activeOssPuts += 1
+    let released = false
+    return Promise.resolve(() => {
+      if (released) return
+      released = true
+      releaseOssPutSlot()
+    })
+  }
+  return new Promise((resolve, reject) => {
+    const pending = { signal, resolve, reject } as (typeof pendingOssPutAcquires)[number]
+    if (signal) {
+      pending.onAbort = () => {
+        const index = pendingOssPutAcquires.indexOf(pending)
+        if (index >= 0) pendingOssPutAcquires.splice(index, 1)
+        reject(signal.reason ?? new DOMException('Aborted', 'AbortError'))
+      }
+      signal.addEventListener('abort', pending.onAbort, { once: true })
+    }
+    pendingOssPutAcquires.push(pending)
+  })
+}
+
 export interface OssDirectPlan {
   /** 与后端 `upload_strategy` 或 `mode`（如 single_part / multipart）对齐 */
   mode?: string | null
@@ -253,25 +313,75 @@ async function putBlob(
   blob: Blob,
   method: string,
   headers: Record<string, string> | undefined,
-  options: AssetUploadOptions | undefined,
-  byteTotal: number,
-  uploadedBefore: number,
-  parts?: { completed: number; total: number },
+  signal: AbortSignal | undefined,
+  onProgress?: (loaded: number) => void,
 ): Promise<string | undefined> {
-  const res = await axios.request({
-    method,
-    url,
-    data: blob,
-    headers,
-    signal: options?.signal,
-    onUploadProgress: (ev) => {
-      emitProgress(options, uploadedBefore + ev.loaded, byteTotal, parts)
-    },
-  })
+  const releaseSlot = await acquireOssPutSlot(signal)
+  let res
+  try {
+    res = await axios.request({
+      method,
+      url,
+      data: blob,
+      headers,
+      signal,
+      onUploadProgress: (ev) => onProgress?.(Math.min(blob.size, ev.loaded)),
+    })
+  } finally {
+    releaseSlot()
+  }
   const etagRaw = readResponseHeader(res.headers, 'ETag')
   if (etagRaw == null) return undefined
   const etag = String(etagRaw).trim().replace(/^"+|"+$/g, '')
   return etag || undefined
+}
+
+function isRetryableOssPutError(err: unknown): boolean {
+  if (!axios.isAxiosError(err)) return false
+  if (err.code === 'ERR_CANCELED' || err.name === 'CanceledError') return false
+  const status = err.response?.status
+  if (status == null) return true
+  return status === 408 || status === 425 || status === 429 || status >= 500
+}
+
+function waitForRetry(delayMs: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) {
+    return Promise.reject(signal.reason ?? new DOMException('Aborted', 'AbortError'))
+  }
+  return new Promise((resolve, reject) => {
+    const timer = globalThis.setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, delayMs)
+    const onAbort = () => {
+      globalThis.clearTimeout(timer)
+      reject(signal?.reason ?? new DOMException('Aborted', 'AbortError'))
+    }
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
+}
+
+async function putBlobWithRetry(
+  url: string,
+  blob: Blob,
+  method: string,
+  headers: Record<string, string> | undefined,
+  signal: AbortSignal | undefined,
+  onProgress?: (loaded: number) => void,
+): Promise<string | undefined> {
+  let lastError: unknown
+  for (let attempt = 1; attempt <= OSS_PUT_MAX_ATTEMPTS; attempt++) {
+    try {
+      return await putBlob(url, blob, method, headers, signal, onProgress)
+    } catch (err) {
+      lastError = err
+      if (attempt >= OSS_PUT_MAX_ATTEMPTS || !isRetryableOssPutError(err)) throw err
+      onProgress?.(0)
+      const jitterMs = Math.floor(Math.random() * 100)
+      await waitForRetry(OSS_PUT_RETRY_BASE_DELAY_MS * 2 ** (attempt - 1) + jitterMs, signal)
+    }
+  }
+  throw lastError
 }
 
 export async function runOssDirectUploadPlan(
@@ -322,10 +432,14 @@ export async function runOssDirectUploadPlan(
     if (!singleUrl) {
       throw new Error('上传入口未准备好，请刷新后重试；如仍失败请联系管理员。')
     }
-    await putBlob(singleUrl, wholeBlob, method, headers, options, byteTotal, 0, {
-      completed: 0,
-      total: 1,
-    })
+    await putBlobWithRetry(
+      singleUrl,
+      wholeBlob,
+      method,
+      headers,
+      options?.signal,
+      (loaded) => emitProgress(options, loaded, byteTotal, { completed: 0, total: 1 }),
+    )
     emitProgress(options, byteTotal, byteTotal, { completed: 1, total: 1 })
     return {
       mode: normalizedMode === 'unknown' ? 'single_part' : normalizedMode,
@@ -342,30 +456,84 @@ export async function runOssDirectUploadPlan(
     throw new Error('上传入口未准备好，请刷新后重试；如仍失败请联系管理员。')
   }
 
-  let uploaded = 0
-  const uploadedParts: OssUploadedPart[] = []
-  for (let partNo = 1; partNo <= totalParts; partNo++) {
+  const partLoaded = new Array<number>(totalParts).fill(0)
+  const uploadedParts = new Array<OssUploadedPart | undefined>(totalParts)
+  let completedParts = 0
+  let nextPartNo = 1
+  let firstError: unknown
+  const uploadController = new AbortController()
+  const abortFromCaller = () => uploadController.abort(options?.signal?.reason)
+  if (options?.signal?.aborted) abortFromCaller()
+  else options?.signal?.addEventListener('abort', abortFromCaller, { once: true })
+
+  const emitAggregateProgress = () => {
+    const loaded = partLoaded.reduce((sum, value) => sum + value, 0)
+    emitProgress(options, Math.min(byteTotal, loaded), byteTotal, {
+      completed: completedParts,
+      total: totalParts,
+    })
+  }
+
+  const uploadPart = async (partNo: number) => {
     const partUrl = partUrls[partNo - 1] ?? (template ? replacePartPlaceholder(template, partNo) : '')
     if (!partUrl) {
       throw new Error('上传入口未准备好，请刷新后重试；如仍失败请联系管理员。')
     }
     const blob = slicePart(file, partNo, totalParts, plan.part_size_hint, requiredMime)
-    const etag = await putBlob(partUrl, blob, method, headers, options, byteTotal, uploaded, {
-      completed: partNo - 1,
-      total: totalParts,
-    })
+    const etag = await putBlobWithRetry(
+      partUrl,
+      blob,
+      method,
+      headers,
+      uploadController.signal,
+      (loaded) => {
+        partLoaded[partNo - 1] = loaded
+        emitAggregateProgress()
+      },
+    )
     if (!etag) {
       throw new Error('文件已上传，但浏览器无法确认上传结果，请重新上传；如仍失败请联系管理员。')
     }
-    uploadedParts.push({ part_number: partNo, etag })
-    uploaded += blob.size
-    emitProgress(options, uploaded, byteTotal, { completed: partNo, total: totalParts })
+    uploadedParts[partNo - 1] = { part_number: partNo, etag }
+    partLoaded[partNo - 1] = blob.size
+    completedParts += 1
+    emitAggregateProgress()
+  }
+
+  const worker = async () => {
+    while (!uploadController.signal.aborted) {
+      const partNo = nextPartNo
+      nextPartNo += 1
+      if (partNo > totalParts) return
+      try {
+        await uploadPart(partNo)
+      } catch (err) {
+        if (firstError == null) firstError = err
+        uploadController.abort(err)
+        return
+      }
+    }
+  }
+
+  try {
+    const workerCount = Math.min(MULTIPART_UPLOAD_CONCURRENCY, totalParts)
+    await Promise.all(Array.from({ length: workerCount }, () => worker()))
+  } finally {
+    options?.signal?.removeEventListener('abort', abortFromCaller)
+  }
+  if (firstError != null) throw firstError
+  if (options?.signal?.aborted) {
+    throw options.signal.reason ?? new DOMException('Aborted', 'AbortError')
+  }
+  const confirmedParts = uploadedParts.filter((part): part is OssUploadedPart => part != null)
+  if (confirmedParts.length !== totalParts) {
+    throw new Error('文件分片未全部上传，请重新上传；如仍失败请联系管理员。')
   }
   return {
     mode: 'multipart',
     oss_upload_id: plan.upload_id?.trim() || undefined,
     oss_object_key: plan.object_key?.trim() || undefined,
     upload_content_type: requiredMime || undefined,
-    oss_parts: uploadedParts,
+    oss_parts: confirmedParts,
   }
 }

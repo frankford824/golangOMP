@@ -35,6 +35,20 @@ type Config struct {
 	BatchJobWorkerLeaseTTL   time.Duration
 }
 
+type objectStore interface {
+	Enabled() bool
+	CreateUploadPlan(context.Context, string, int64, string) (*baseservice.OSSDirectUploadPlan, error)
+	CompleteMultipartUpload(context.Context, string, string, []baseservice.OSSCompletePart) error
+	AbortMultipartUpload(context.Context, string, string) error
+	StatObject(context.Context, string) (*baseservice.OSSObjectInfo, bool, error)
+	DeleteObject(context.Context, string) error
+	CopyObject(context.Context, string, string) error
+	OpenObject(context.Context, string) (io.ReadCloser, error)
+	UploadObject(context.Context, string, string, []byte) error
+	PresignDownloadURLWithFilename(string, string) *baseservice.OSSDirectDownloadInfo
+	PresignPreviewURL(string) *baseservice.OSSDirectDownloadInfo
+}
+
 type Option func(*Service)
 
 const (
@@ -52,7 +66,7 @@ type Service struct {
 	notifications   ProfileCompletionNotifier
 	tx              repo.TxRunner
 	identity        WorkbenchIdentityRegistrar
-	oss             *baseservice.OSSDirectService
+	oss             objectStore
 	renderer        baseservice.AssetPreviewRenderer
 	systemAssets    SystemAssetSearcher
 	systemDownloads SystemAssetDownloader
@@ -2836,8 +2850,8 @@ func (s *Service) CreateUploadSession(ctx context.Context, actor domain.RequestA
 	if filename == "" {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "original_filename is required.", nil)
 	}
-	if params.FileSize < 0 {
-		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "file_size must be non-negative.", nil)
+	if params.FileSize <= 0 {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "file_size must be positive.", nil)
 	}
 	relativePath, appErr := normalizeUploadRelativePath(params.RelativePath, filename)
 	if appErr != nil {
@@ -2864,7 +2878,7 @@ func (s *Service) CreateUploadSession(ctx context.Context, actor domain.RequestA
 	now := s.nowFn().UTC()
 	sessionID := uuid.NewString()
 	objectKey := s.buildObjectKey(now, sessionID, filename, directory, relativePath)
-	plan, err := s.oss.CreateMultipartUploadPlan(ctx, objectKey, params.FileSize, params.MimeType)
+	plan, err := s.oss.CreateUploadPlan(ctx, objectKey, params.FileSize, params.MimeType)
 	if err != nil {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Failed to create OSS upload plan.", err.Error())
 	}
@@ -2914,31 +2928,32 @@ func (s *Service) CompleteUploadSession(ctx context.Context, actor domain.Reques
 	if err := s.requireRepo(); err != nil {
 		return nil, err
 	}
-	session, err := s.repo.GetUploadSession(ctx, strings.TrimSpace(sessionID))
-	if err != nil {
-		return nil, mapRepoReadError(err, "Upload session not found.", "Failed to load upload session.")
-	}
-	if session.OwnerUserID != actor.ID && !actorHasAny(actor, domain.RoleAssetManager, domain.RoleSuperAdmin) {
-		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Upload session is not owned by current user.", nil)
-	}
-	switch session.Status {
-	case domain.AssetWorkbenchUploadStatusUploaded:
-		return session, nil
-	case domain.AssetWorkbenchUploadStatusSubmitted:
-		return nil, domain.NewAppError(domain.ErrCodeInvalidStateTransition, "Upload session is already submitted.", nil)
-	case domain.AssetWorkbenchUploadStatusCancelled, domain.AssetWorkbenchUploadStatusExpired:
-		return nil, domain.NewAppError(domain.ErrCodeInvalidStateTransition, "Upload session is already terminal.", nil)
-	}
-	if s.oss != nil && s.oss.Enabled() && strings.TrimSpace(session.UploadID) != "" {
-		if len(params.Parts) == 0 {
-			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "multipart upload completion requires parts.", nil)
-		}
-		if err := s.oss.CompleteMultipartUpload(ctx, session.ObjectKey, session.UploadID, params.Parts); err != nil {
-			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Failed to complete OSS multipart upload.", err.Error())
-		}
-	}
-	now := s.nowFn().UTC()
+	lockedSessionID := strings.TrimSpace(sessionID)
+	var session *domain.AssetWorkbenchUploadSession
 	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+		locked, err := s.repo.GetUploadSessionForUpdate(ctx, tx, lockedSessionID)
+		if err != nil {
+			return err
+		}
+		if locked == nil {
+			return sql.ErrNoRows
+		}
+		session = locked
+		if session.OwnerUserID != actor.ID && !actorHasAny(actor, domain.RoleAssetManager, domain.RoleSuperAdmin) {
+			return domain.NewAppError(domain.ErrCodePermissionDenied, "Upload session is not owned by current user.", nil)
+		}
+		switch session.Status {
+		case domain.AssetWorkbenchUploadStatusUploaded:
+			return nil
+		case domain.AssetWorkbenchUploadStatusSubmitted:
+			return domain.NewAppError(domain.ErrCodeInvalidStateTransition, "Upload session is already submitted.", nil)
+		case domain.AssetWorkbenchUploadStatusCancelled, domain.AssetWorkbenchUploadStatusExpired:
+			return domain.NewAppError(domain.ErrCodeInvalidStateTransition, "Upload session is already terminal.", nil)
+		}
+		if appErr := s.completeAndVerifyUploadObject(ctx, session, params); appErr != nil {
+			return appErr
+		}
+		now := s.nowFn().UTC()
 		if err := s.repo.UpdateUploadSessionStatus(ctx, tx, session.SessionID, domain.AssetWorkbenchUploadStatusUploaded, &now, nil, nil); err != nil {
 			return err
 		}
@@ -2947,41 +2962,93 @@ func (s *Service) CompleteUploadSession(ctx context.Context, actor domain.Reques
 			"status":     domain.AssetWorkbenchUploadStatusUploaded,
 		}, "")
 	}); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, mapRepoReadError(err, "Upload session not found.", "Failed to load upload session.")
+		}
+		if appErr := asAppError(err); appErr != nil {
+			return nil, appErr
+		}
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to mark upload session uploaded.", err.Error())
 	}
-	updated, err := s.repo.GetUploadSession(ctx, session.SessionID)
+	updated, err := s.repo.GetUploadSession(ctx, lockedSessionID)
 	if err != nil {
 		return nil, mapRepoReadError(err, "Upload session not found.", "Failed to reload upload session.")
 	}
 	return updated, nil
 }
 
+func (s *Service) completeAndVerifyUploadObject(ctx context.Context, session *domain.AssetWorkbenchUploadSession, params CompleteUploadSessionParams) *domain.AppError {
+	if s.oss == nil || !s.oss.Enabled() || session == nil {
+		return nil
+	}
+	var completeErr error
+	if strings.TrimSpace(session.UploadID) != "" {
+		if len(params.Parts) == 0 {
+			return domain.NewAppError(domain.ErrCodeInvalidRequest, "multipart upload completion requires parts.", nil)
+		}
+		completeErr = s.oss.CompleteMultipartUpload(ctx, session.ObjectKey, session.UploadID, params.Parts)
+	}
+	info, exists, statErr := s.oss.StatObject(ctx, session.ObjectKey)
+	if statErr != nil {
+		details := statErr.Error()
+		if completeErr != nil {
+			details = completeErr.Error() + "; verify: " + details
+		}
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "Failed to verify completed OSS upload.", details)
+	}
+	if !exists || info == nil {
+		if completeErr != nil {
+			return domain.NewAppError(domain.ErrCodeInvalidRequest, "Failed to complete OSS multipart upload.", completeErr.Error())
+		}
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "Completed OSS upload is missing.", nil)
+	}
+	if info.ContentLength != session.FileSize {
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "Completed OSS upload size does not match upload session.", map[string]interface{}{
+			"expected_size": session.FileSize,
+			"actual_size":   info.ContentLength,
+		})
+	}
+	return nil
+}
+
 func (s *Service) CancelUploadSession(ctx context.Context, actor domain.RequestActor, sessionID string) (*domain.AssetWorkbenchUploadSession, *domain.AppError) {
 	if err := s.requireRepo(); err != nil {
 		return nil, err
 	}
-	session, err := s.repo.GetUploadSession(ctx, strings.TrimSpace(sessionID))
-	if err != nil {
-		return nil, mapRepoReadError(err, "Upload session not found.", "Failed to load upload session.")
-	}
-	if session.OwnerUserID != actor.ID && !actorHasAny(actor, domain.RoleAssetManager, domain.RoleSuperAdmin) {
-		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Upload session is not owned by current user.", nil)
-	}
-	switch session.Status {
-	case domain.AssetWorkbenchUploadStatusCancelled:
-		return session, nil
-	case domain.AssetWorkbenchUploadStatusSubmitted:
-		return nil, domain.NewAppError(domain.ErrCodeInvalidStateTransition, "Upload session is already submitted.", nil)
-	case domain.AssetWorkbenchUploadStatusExpired:
-		return nil, domain.NewAppError(domain.ErrCodeInvalidStateTransition, "Upload session is already expired.", nil)
-	}
-	if s.oss != nil && s.oss.Enabled() && strings.TrimSpace(session.UploadID) != "" && session.Status != domain.AssetWorkbenchUploadStatusUploaded {
-		if err := s.oss.AbortMultipartUpload(ctx, session.ObjectKey, session.UploadID); err != nil {
-			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Failed to abort OSS multipart upload.", err.Error())
-		}
-	}
-	now := s.nowFn().UTC()
+	lockedSessionID := strings.TrimSpace(sessionID)
+	var session *domain.AssetWorkbenchUploadSession
 	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+		locked, err := s.repo.GetUploadSessionForUpdate(ctx, tx, lockedSessionID)
+		if err != nil {
+			return err
+		}
+		if locked == nil {
+			return sql.ErrNoRows
+		}
+		session = locked
+		if session.OwnerUserID != actor.ID && !actorHasAny(actor, domain.RoleAssetManager, domain.RoleSuperAdmin) {
+			return domain.NewAppError(domain.ErrCodePermissionDenied, "Upload session is not owned by current user.", nil)
+		}
+		switch session.Status {
+		case domain.AssetWorkbenchUploadStatusCancelled:
+			return nil
+		case domain.AssetWorkbenchUploadStatusUploaded:
+			return domain.NewAppError(domain.ErrCodeInvalidStateTransition, "Upload session is already uploaded and cannot be cancelled.", nil)
+		case domain.AssetWorkbenchUploadStatusSubmitted:
+			return domain.NewAppError(domain.ErrCodeInvalidStateTransition, "Upload session is already submitted.", nil)
+		case domain.AssetWorkbenchUploadStatusExpired:
+			return domain.NewAppError(domain.ErrCodeInvalidStateTransition, "Upload session is already expired.", nil)
+		}
+		if s.oss != nil && s.oss.Enabled() {
+			if strings.TrimSpace(session.UploadID) != "" {
+				if err := s.oss.AbortMultipartUpload(ctx, session.ObjectKey, session.UploadID); err != nil {
+					return domain.NewAppError(domain.ErrCodeInvalidRequest, "Failed to abort OSS multipart upload.", err.Error())
+				}
+			} else if err := s.oss.DeleteObject(ctx, session.ObjectKey); err != nil {
+				return domain.NewAppError(domain.ErrCodeInvalidRequest, "Failed to delete OSS single-part upload.", err.Error())
+			}
+		}
+		now := s.nowFn().UTC()
 		if err := s.repo.UpdateUploadSessionStatus(ctx, tx, session.SessionID, domain.AssetWorkbenchUploadStatusCancelled, nil, &now, nil); err != nil {
 			return err
 		}
@@ -2990,9 +3057,15 @@ func (s *Service) CancelUploadSession(ctx context.Context, actor domain.RequestA
 			"status":     domain.AssetWorkbenchUploadStatusCancelled,
 		}, "cancelled by user")
 	}); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, mapRepoReadError(err, "Upload session not found.", "Failed to load upload session.")
+		}
+		if appErr := asAppError(err); appErr != nil {
+			return nil, appErr
+		}
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to cancel upload session.", err.Error())
 	}
-	updated, err := s.repo.GetUploadSession(ctx, session.SessionID)
+	updated, err := s.repo.GetUploadSession(ctx, lockedSessionID)
 	if err != nil {
 		return nil, mapRepoReadError(err, "Upload session not found.", "Failed to reload upload session.")
 	}
@@ -3009,24 +3082,48 @@ func (s *Service) ExpireUploadSessions(ctx context.Context, limit int) (int, *do
 		return 0, domain.NewAppError(domain.ErrCodeInternalError, "Failed to list expired upload sessions.", err.Error())
 	}
 	expired := 0
-	for _, session := range sessions {
-		if s.oss != nil && s.oss.Enabled() && strings.TrimSpace(session.UploadID) != "" {
-			if err := s.oss.AbortMultipartUpload(ctx, session.ObjectKey, session.UploadID); err != nil {
-				continue
-			}
+	for _, candidate := range sessions {
+		if candidate == nil {
+			continue
 		}
+		markedExpired := false
 		if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+			session, err := s.repo.GetUploadSessionForUpdate(ctx, tx, candidate.SessionID)
+			if err != nil {
+				return err
+			}
+			if session == nil {
+				return sql.ErrNoRows
+			}
+			if (session.Status != domain.AssetWorkbenchUploadStatusCreated && session.Status != domain.AssetWorkbenchUploadStatusUploading) || session.ExpiresAt.After(now) {
+				return nil
+			}
+			if s.oss != nil && s.oss.Enabled() {
+				if strings.TrimSpace(session.UploadID) != "" {
+					if err := s.oss.AbortMultipartUpload(ctx, session.ObjectKey, session.UploadID); err != nil {
+						return err
+					}
+				} else if err := s.oss.DeleteObject(ctx, session.ObjectKey); err != nil {
+					return err
+				}
+			}
 			if err := s.repo.UpdateUploadSessionStatus(ctx, tx, session.SessionID, domain.AssetWorkbenchUploadStatusExpired, nil, &now, nil); err != nil {
 				return err
 			}
-			return s.appendEvent(ctx, tx, domain.RequestActor{}, domain.AssetWorkbenchEventUploadSessionUpdated, domain.AssetWorkbenchEntityUploadSession, &session.ID, session, map[string]interface{}{
+			if err := s.appendEvent(ctx, tx, domain.RequestActor{}, domain.AssetWorkbenchEventUploadSessionUpdated, domain.AssetWorkbenchEntityUploadSession, &session.ID, session, map[string]interface{}{
 				"session_id": session.SessionID,
 				"status":     domain.AssetWorkbenchUploadStatusExpired,
-			}, "upload session expired")
+			}, "upload session expired"); err != nil {
+				return err
+			}
+			markedExpired = true
+			return nil
 		}); err != nil {
 			continue
 		}
-		expired++
+		if markedExpired {
+			expired++
+		}
 	}
 	return expired, nil
 }
@@ -6848,12 +6945,7 @@ func (s *Service) processPreviewFile(ctx context.Context, file *domain.AssetWork
 	if file == nil {
 		return nil
 	}
-	if file.FileType == "image" || file.FileType == "pdf" {
-		return s.tx.RunInTx(ctx, func(tx repo.Tx) error {
-			return s.repo.MarkPreviewReady(ctx, tx, file.ID, file.ObjectKey)
-		})
-	}
-	if file.FileType != "design" {
+	if file.FileType != "design" && file.FileType != "image" && file.FileType != "pdf" {
 		return s.tx.RunInTx(ctx, func(tx repo.Tx) error {
 			return s.repo.MarkPreviewReady(ctx, tx, file.ID, file.ObjectKey)
 		})

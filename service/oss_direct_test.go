@@ -305,6 +305,32 @@ func TestCreateSingleUploadPlan(t *testing.T) {
 	}
 }
 
+func TestBuildUploadSessionObjectKey_IsDeterministicAndSafe(t *testing.T) {
+	svc := newTestOSSDirectService()
+	key := svc.BuildUploadSessionObjectKey("RW-20260710-A-1", "session/unsafe", "参考图.PNG")
+	want := "tasks/RW-20260710-A-1/upload-sessions/session_unsafe/session_unsafe.png"
+	if key != want {
+		t.Fatalf("key = %q, want %q", key, want)
+	}
+	if key != svc.BuildUploadSessionObjectKey("RW-20260710-A-1", "session/unsafe", "参考图.PNG") {
+		t.Fatal("expected deterministic upload-session object key")
+	}
+}
+
+func TestCreateUploadPlan_UsesSinglePartAtConfiguredThreshold(t *testing.T) {
+	svc := newTestOSSDirectService()
+	plan, err := svc.CreateUploadPlan(context.Background(), "asset-workbench/uploads/test.png", 10*1024*1024, "image/png")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if plan.Mode != "single_part" {
+		t.Fatalf("expected mode=single_part, got %s", plan.Mode)
+	}
+	if plan.UploadURL == "" || len(plan.Parts) != 0 || plan.UploadID != "" {
+		t.Fatalf("unexpected single-part plan: %+v", plan)
+	}
+}
+
 func TestPresignPartUploadURL_SignsDeclaredContentType(t *testing.T) {
 	svc := newTestOSSDirectService()
 	part := svc.presignPartUploadURL("tasks/T1/assets/A1/v1/delivery/test.psd", "UPLOAD123", 7, "application/octet-stream")

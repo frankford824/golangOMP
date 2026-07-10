@@ -1,10 +1,10 @@
-# V1 API 速查表(347 path · 一行一条)
+# V1 API 速查表(351 path · 一行一条)
 
 > Revision: V1.3-A2 i_id-first task/ERP/search integration (2026-04-27)
 > Source: docs/api/openapi.yaml (post V1.3-A2)
 
 > 本表一行对应一个 `/v1` path；同一路径多 method 合并到 `Methods` 列。
-> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 347 个 `/v1` path。
+> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 351 个 `/v1` path。
 > 新前端只接 canonical 路径；compatibility/deprecated 路径仅作迁移兜底。
 
 | Methods | Path | Summary | RBAC | family doc |
@@ -66,6 +66,10 @@
 | GET, POST | `/v1/cost-rule-bindings` | List cost rule i_id bindings；Create cost rule i_id binding | GET:Ops, ERP, Admin, SuperAdmin; POST:Ops, ERP, Admin, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/cost-rule-bindings/unbound-candidates` | List unbound i_id candidates from legacy pricing fallback | GET:Ops, ERP, Admin, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | PATCH | `/v1/cost-rule-bindings/{id}` | Patch cost rule i_id binding | PATCH:Ops, ERP, Admin, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/tasks/reference-upload-sessions` | Create task reference upload session | POST:Ops | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/tasks/reference-upload-sessions/{session_id}` | Get task reference upload session | GET:Ops | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/tasks/reference-upload-sessions/{session_id}/complete` | Complete task reference upload session | POST:Ops | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/tasks/reference-upload-sessions/{session_id}/abort` | Abort task reference upload session | POST:Ops | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/tasks/prepare-product-codes` | Prepare task product codes | POST:Ops, Admin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET, POST | `/v1/tasks` | List tasks；Create task | GET:已登录 / 主流程读全量可见; POST:Ops | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/tasks/filter-options` | Get task center filter options | GET:Ops, Designer, CustomizationOperator, CustomizationReviewer, Audit_A, Audit_B, Warehouse, Outsource, Admin, SuperAdmin, HRAdmin, OrgAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_TASKS.md](V1_API_TASKS.md) |
@@ -272,7 +276,7 @@
 | GET | `/v1/task-create/asset-center/upload-sessions/{session_id}` | Get task-create reference upload session | GET:Ops | [V1_API_TASK_ASSETS.md](V1_API_TASK_ASSETS.md) |
 | POST | `/v1/task-create/asset-center/upload-sessions/{session_id}/complete` | Complete task-create reference upload session | POST:Ops | [V1_API_TASK_ASSETS.md](V1_API_TASK_ASSETS.md) |
 | POST | `/v1/task-create/asset-center/upload-sessions/{session_id}/abort` | Abort task-create reference upload session | POST:Ops | [V1_API_TASK_ASSETS.md](V1_API_TASK_ASSETS.md) |
-| POST | `/v1/tasks/reference-upload` | Upload task-create reference file | POST:Ops | [V1_API_TASK_ASSETS.md](V1_API_TASK_ASSETS.md) |
+| POST | `/v1/tasks/reference-upload` | Upload task-create reference file through backend compatibility proxy | POST:Ops | [V1_API_TASK_ASSETS.md](V1_API_TASK_ASSETS.md) |
 | GET | `/v1/tasks/{id}/asset-center/assets` | List design assets in task asset center | GET:Designer, Ops, Audit_A, Audit_B | [V1_API_TASK_ASSETS.md](V1_API_TASK_ASSETS.md) |
 | GET | `/v1/tasks/{id}/asset-center/assets/{asset_id}/versions` | List versions under one design asset | GET:Designer, Ops, Audit_A, Audit_B | [V1_API_TASK_ASSETS.md](V1_API_TASK_ASSETS.md) |
 | GET | `/v1/tasks/{id}/asset-center/assets/{asset_id}/download` | Get latest version download info for one design asset | GET:Designer, Ops, Audit_A, Audit_B | [V1_API_TASK_ASSETS.md](V1_API_TASK_ASSETS.md) |
@@ -296,7 +300,7 @@
 | GET | `/v1/assets/upload-sessions/{session_id}` | Get asset upload session | GET:Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, Warehouse, Admin | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
 | POST | `/v1/assets/upload-sessions/{session_id}/complete` | Complete asset upload session | POST:Designer, CustomizationOperator, Ops, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
 | POST | `/v1/assets/upload-sessions/{session_id}/cancel` | Cancel asset upload session | POST:Designer, CustomizationOperator, Ops, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
-| GET | `/v1/assets/files/{path}` | Proxy OSS-backed business file | GET:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
+| GET | `/v1/assets/files/{path}` | Authorize and redirect OSS-backed business file | GET:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
 | GET, POST | `/v1/assets/upload-requests` | List asset upload requests；Create asset upload request | GET:Ops, Designer, Audit_A, Audit_B, Warehouse, Outsource, Admin; POST:Ops, Designer, Audit_A, Audit_B, Warehouse, Outsource, Admin | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
 | GET | `/v1/assets/upload-requests/{id}` | Get asset upload request | GET:Ops, Designer, Audit_A, Audit_B, Warehouse, Outsource, Admin | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
 | POST | `/v1/assets/upload-requests/{id}/advance` | Advance asset upload request | POST:Ops, Designer, Audit_A, Audit_B, Warehouse, Outsource, Admin | [V1_API_ASSETS.md](V1_API_ASSETS.md) |

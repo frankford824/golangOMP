@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"errors"
+	"io"
 	"net/http"
 	"strings"
 
@@ -21,21 +23,27 @@ func NewTaskCreateReferenceUploadHandler(svc service.TaskCreateReferenceUploadSe
 type createTaskCreateReferenceUploadSessionReq struct {
 	CreatedBy    *int64 `json:"created_by"`
 	Filename     string `json:"filename" binding:"required"`
-	ExpectedSize *int64 `json:"expected_size"`
+	ExpectedSize *int64 `json:"expected_size" binding:"required"`
 	MimeType     string `json:"mime_type"`
 	FileHash     string `json:"file_hash"`
 	Remark       string `json:"remark"`
 }
 
 type completeTaskCreateReferenceUploadSessionReq struct {
-	CompletedBy *int64 `json:"completed_by"`
-	FileHash    string `json:"file_hash"`
-	Remark      string `json:"remark"`
+	CompletedBy       *int64                    `json:"completed_by"`
+	FileHash          string                    `json:"file_hash"`
+	Remark            string                    `json:"remark"`
+	UploadContentType string                    `json:"upload_content_type"`
+	OSSParts          []service.OSSCompletePart `json:"oss_parts"`
+	OSSUploadID       string                    `json:"oss_upload_id"`
+	OSSObjectKey      string                    `json:"oss_object_key"`
 }
 
 type cancelTaskCreateReferenceUploadSessionReq struct {
-	CancelledBy *int64 `json:"cancelled_by"`
-	Remark      string `json:"remark"`
+	CancelledBy  *int64 `json:"cancelled_by"`
+	Remark       string `json:"remark"`
+	OSSUploadID  string `json:"oss_upload_id"`
+	OSSObjectKey string `json:"oss_object_key"`
 }
 
 func (h *TaskCreateReferenceUploadHandler) CreateUploadSession(c *gin.Context) {
@@ -44,7 +52,7 @@ func (h *TaskCreateReferenceUploadHandler) CreateUploadSession(c *gin.Context) {
 		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
 		return
 	}
-	createdBy, appErr := actorIDOrRequestValue(c, req.CreatedBy, "created_by")
+	createdBy, appErr := actorIDOrRequestValue(c, nil, "created_by")
 	if appErr != nil {
 		respondError(c, appErr)
 		return
@@ -85,16 +93,7 @@ func (h *TaskCreateReferenceUploadHandler) UploadFile(c *gin.Context) {
 	}
 	defer file.Close()
 
-	var createdByValue *int64
-	if raw := strings.TrimSpace(c.PostForm("created_by")); raw != "" {
-		parsed, parseErr := parseInt64(raw)
-		if parseErr != nil {
-			respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "created_by must be an integer", nil))
-			return
-		}
-		createdByValue = &parsed
-	}
-	createdBy, appErr := actorIDOrRequestValue(c, createdByValue, "created_by")
+	createdBy, appErr := actorIDOrRequestValue(c, nil, "created_by")
 	if appErr != nil {
 		respondError(c, appErr)
 		return
@@ -147,16 +146,20 @@ func (h *TaskCreateReferenceUploadHandler) CompleteUploadSession(c *gin.Context)
 		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
 		return
 	}
-	completedBy, appErr := actorIDOrRequestValue(c, req.CompletedBy, "completed_by")
+	completedBy, appErr := actorIDOrRequestValue(c, nil, "completed_by")
 	if appErr != nil {
 		respondError(c, appErr)
 		return
 	}
 	result, appErr := h.svc.CompleteUploadSession(c.Request.Context(), service.CompleteTaskReferenceUploadSessionParams{
-		SessionID:   strings.TrimSpace(c.Param("session_id")),
-		CompletedBy: completedBy,
-		Remark:      strings.TrimSpace(req.Remark),
-		FileHash:    strings.TrimSpace(req.FileHash),
+		SessionID:         strings.TrimSpace(c.Param("session_id")),
+		CompletedBy:       completedBy,
+		Remark:            strings.TrimSpace(req.Remark),
+		FileHash:          strings.TrimSpace(req.FileHash),
+		UploadContentType: strings.TrimSpace(req.UploadContentType),
+		OSSParts:          req.OSSParts,
+		OSSUploadID:       strings.TrimSpace(req.OSSUploadID),
+		OSSObjectKey:      strings.TrimSpace(req.OSSObjectKey),
 	})
 	if appErr != nil {
 		respondError(c, appErr)
@@ -167,19 +170,21 @@ func (h *TaskCreateReferenceUploadHandler) CompleteUploadSession(c *gin.Context)
 
 func (h *TaskCreateReferenceUploadHandler) AbortUploadSession(c *gin.Context) {
 	var req cancelTaskCreateReferenceUploadSessionReq
-	if err := c.ShouldBindJSON(&req); err != nil {
+	if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
 		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
 		return
 	}
-	cancelledBy, appErr := actorIDOrRequestValue(c, req.CancelledBy, "cancelled_by")
+	cancelledBy, appErr := actorIDOrRequestValue(c, nil, "cancelled_by")
 	if appErr != nil {
 		respondError(c, appErr)
 		return
 	}
 	session, appErr := h.svc.CancelUploadSession(c.Request.Context(), service.CancelTaskReferenceUploadSessionParams{
-		SessionID:   strings.TrimSpace(c.Param("session_id")),
-		CancelledBy: cancelledBy,
-		Remark:      strings.TrimSpace(req.Remark),
+		SessionID:    strings.TrimSpace(c.Param("session_id")),
+		CancelledBy:  cancelledBy,
+		Remark:       strings.TrimSpace(req.Remark),
+		OSSUploadID:  strings.TrimSpace(req.OSSUploadID),
+		OSSObjectKey: strings.TrimSpace(req.OSSObjectKey),
 	})
 	if appErr != nil {
 		respondError(c, appErr)

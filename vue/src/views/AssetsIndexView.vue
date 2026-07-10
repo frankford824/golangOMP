@@ -2379,82 +2379,14 @@ async function handleBatchDownload() {
   }
 }
 
-function firstDisplayImageUrl(asset: BackendAsset): string {
-  const vers = asset.versions
-  if (!Array.isArray(vers)) return ''
-  const preferred = vers.find(
-    (v) =>
-      !assetVersionMustUsePreviewEndpoint(v) &&
-      v.preview_available === true &&
-      typeof v.download_url === 'string' &&
-      v.download_url.trim().length > 5,
-  )
-  if (preferred?.download_url) return preferred.download_url.trim()
-  const anyUrl = vers.find(
-    (v) =>
-      !assetVersionMustUsePreviewEndpoint(v) &&
-      typeof v.download_url === 'string' &&
-      v.download_url.trim().length > 5,
-  )
-  return anyUrl?.download_url?.trim() ?? ''
-}
-
-/** 列表 DTO 已带可展示 URL 时跳过 GET /preview */
+/** 只接受明确的 preview URL；列表卡片禁止用原始 download_url 代替缩略图。 */
 function listCardResolvedPreviewUrl(asset: BackendAsset): string | undefined {
-  if (assetMustUsePreviewEndpoint(asset)) return undefined
-  const fromVers = firstDisplayImageUrl(asset)
-  if (fromVers) return fromVers
   const r = asset as Record<string, unknown>
-  for (const key of ['download_url', 'downloadUrl', 'preview_url', 'previewUrl'] as const) {
+  for (const key of ['preview_url', 'previewUrl'] as const) {
     const v = r[key]
     if (typeof v === 'string' && v.trim().length > 5) return v.trim()
   }
   return undefined
-}
-
-function textField(record: Record<string, unknown>, keys: readonly string[]): string {
-  for (const key of keys) {
-    const value = record[key]
-    if (typeof value === 'string' && value.trim()) return value.trim()
-  }
-  return ''
-}
-
-function filenameOrUrlLooksTiff(value: string): boolean {
-  return /\.(?:tif|tiff)(?:$|[?#])/i.test(value.trim())
-}
-
-function recordLooksTiff(record: Record<string, unknown>): boolean {
-  const mimeType = textField(record, ['mime_type', 'mimeType', 'content_type', 'contentType']).toLowerCase()
-  if (mimeType === 'image/tiff' || mimeType === 'image/x-tiff') return true
-  const name = textField(record, [
-    'file_name',
-    'fileName',
-    'original_filename',
-    'originalFilename',
-    'filename',
-    'name',
-  ])
-  if (filenameOrUrlLooksTiff(name)) return true
-  const url = textField(record, [
-    'download_url',
-    'downloadUrl',
-    'preview_url',
-    'previewUrl',
-    'file_url',
-    'fileUrl',
-    'url',
-  ])
-  return filenameOrUrlLooksTiff(url)
-}
-
-function assetVersionMustUsePreviewEndpoint(version: BackendAssetVersion): boolean {
-  return recordLooksTiff(version as Record<string, unknown>)
-}
-
-function assetMustUsePreviewEndpoint(asset: BackendAsset): boolean {
-  if (recordLooksTiff(asset as Record<string, unknown>)) return true
-  return Array.isArray(asset.versions) && asset.versions.some(assetVersionMustUsePreviewEndpoint)
 }
 
 async function copyText(text: string, successMessage: string) {

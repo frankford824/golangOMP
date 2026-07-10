@@ -570,8 +570,14 @@ Content-Type: `application/json`
       "base_url": "...",
       "upload_url": "..."
     },
-    "upload_strategy": "string",
-    "required_upload_content_type": "string"
+    "oss_direct": {
+      "mode": "...",
+      "object_key": "...",
+      "expires_at": "...",
+      "method": "...",
+      "required_upload_content_type": "..."
+    },
+    "upload_strategy": "string"
   }
 }
 ```
@@ -680,9 +686,12 @@ Content-Type: `application/json`
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `completed_by` | integer | 否 | - |
+| `completed_by` | integer | 否 | Deprecated and ignored. The backend always uses the authenticated session actor. |
 | `file_hash` | string | 否 | - |
 | `upload_content_type` | string | 否 | Exact `required_upload_content_type` echoed back by the client when finalizing an OSS direct upload. |
+| `oss_object_key` | string | 否 | Required for every OSS direct completion. The backend validates that it belongs to this upload session. |
+| `oss_upload_id` | string | 否 | Required together with `oss_parts` for multipart completion; omitted for single-part completion. |
+| `oss_parts` | array<object> | 否 | Ordered multipart ETags; omitted for single-part completion. |
 | `remark` | string | 否 | - |
 | `reason` | string | 否 | Optional reason override for audit post-close supplement completion. When omitted, the reason captured during create-session is used. |
 
@@ -762,8 +771,10 @@ Content-Type: `application/json`
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `cancelled_by` | integer | 否 | - |
+| `cancelled_by` | integer | 否 | Deprecated and ignored. The backend always uses the authenticated session actor. |
 | `remark` | string | 否 | - |
+| `oss_object_key` | string | 否 | Direct-upload object key returned by the session plan. Used for validated cleanup. |
+| `oss_upload_id` | string | 否 | Multipart upload id returned by the session plan. Used to abort unfinished multipart data. |
 
 ### 响应体 schema
 成功响应: `200 application/json`
@@ -809,7 +820,7 @@ curl -X POST https://api.example.com/v1/assets/upload-sessions/<session_id>/canc
 ### 简介
 支持方法: GET。
 
-- `GET`: Compatibility-only proxy byte-serving route for OSS-backed business files. Canonical browser download should use the URL returned by `/v1/assets/{asset_id}/download` or `/v1/assets/{asset_id}/preview`. Path is the storage_key (e.g. tasks/task-create-reference/assets/.../filename.png).
+- `GET`: Compatibility-only authorization route for OSS-backed business files. When OSS direct storage is configured, it signs the authorized object and responds with `302` without first probing the legacy upload service. Non-OSS deployments retain the upstream proxy fallback. Canonical browser download should use the URL returned by `/v1/assets/{asset_id}/download` or `/v1/assets/{asset_id}/preview`. Path is the storage_key (e.g. tasks/task-create-reference/assets/.../filename.png).
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。

@@ -3,6 +3,7 @@ package mysqlrepo
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"regexp"
 	"testing"
 	"time"
@@ -12,6 +13,35 @@ import (
 	"workflow/domain"
 	"workflow/repo"
 )
+
+func TestGetUploadSessionForUpdateUsesRowLock(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(regexp.QuoteMeta(assetWorkbenchUploadSessionSelect() + ` WHERE session_id = ? FOR UPDATE`)).
+		WithArgs("upload-session-1").
+		WillReturnError(sql.ErrNoRows)
+	mock.ExpectCommit()
+
+	mysqlDB := New(db)
+	workbenchRepo := NewAssetWorkbenchRepo(mysqlDB)
+	if err := mysqlDB.RunInTx(context.Background(), func(tx repo.Tx) error {
+		item, err := workbenchRepo.GetUploadSessionForUpdate(context.Background(), tx, "upload-session-1")
+		if item != nil || !errors.Is(err, sql.ErrNoRows) {
+			t.Fatalf("GetUploadSessionForUpdate() = (%+v, %v), want (nil, sql.ErrNoRows)", item, err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("RunInTx() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
 
 func TestLockPriceMatrixDimensionLocksParentDimensionBeforeExistingRules(t *testing.T) {
 	db, mock, err := sqlmock.New()

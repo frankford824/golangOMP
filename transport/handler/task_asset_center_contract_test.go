@@ -31,8 +31,9 @@ func TestTaskAssetCenterHandlerCreateUploadSessionInfersStrategy(t *testing.T) {
 	handler := NewTaskAssetCenterHandler(svc)
 	router.POST("/v1/tasks/:id/asset-center/upload-sessions", handler.CreateUploadSession)
 
-	body := bytes.NewBufferString(`{"created_by":9,"asset_type":"delivery","filename":"delivery.zip","mime_type":"application/zip"}`)
+	body := bytes.NewBufferString(`{"created_by":999,"asset_type":"delivery","filename":"delivery.zip","mime_type":"application/zip"}`)
 	req := httptest.NewRequest(http.MethodPost, "/v1/tasks/123/asset-center/upload-sessions", body)
+	req = taskAssetCenterRequestWithSessionActor(req, 9)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
@@ -42,6 +43,9 @@ func TestTaskAssetCenterHandlerCreateUploadSessionInfersStrategy(t *testing.T) {
 	}
 	if svc.createCalls != 1 || svc.createSmallCalls != 0 || svc.createMultipartCalls != 0 {
 		t.Fatalf("create call routing = create:%d small:%d multipart:%d", svc.createCalls, svc.createSmallCalls, svc.createMultipartCalls)
+	}
+	if svc.lastCreateParams.CreatedBy != 9 {
+		t.Fatalf("CreatedBy = %d, want session actor 9 (body actor must not override)", svc.lastCreateParams.CreatedBy)
 	}
 
 	var resp struct {
@@ -87,6 +91,7 @@ func TestTaskAssetCenterHandlerCreateAssetUploadSessionReturnsCanonicalEndpoints
 
 	body := bytes.NewBufferString(`{"task_id":456,"created_by":9,"asset_kind":"reference","file_name":"reference.png","mime_type":"image/png"}`)
 	req := httptest.NewRequest(http.MethodPost, "/v1/assets/upload-sessions", body)
+	req = taskAssetCenterRequestWithSessionActor(req, 9)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
@@ -141,6 +146,7 @@ func TestTaskAssetCenterHandlerCreateAssetUploadSessionAcceptsNumericStringIDs(t
 
 	body := bytes.NewBufferString(`{"task_id":"456","created_by":"9","asset_kind":"reference","asset_id":"4477","source_asset_id":"4480","file_name":"reference.png","expected_size":"1024","mime_type":"image/png"}`)
 	req := httptest.NewRequest(http.MethodPost, "/v1/assets/upload-sessions", body)
+	req = taskAssetCenterRequestWithSessionActor(req, 9)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
@@ -177,6 +183,7 @@ func TestTaskAssetCenterHandlerCreateAssetUploadSessionRejectsLegacyUUIDAssetID(
 
 	body := bytes.NewBufferString(`{"task_id":456,"created_by":9,"asset_kind":"reference","asset_id":"0ec54522-98fb-4d66-a7af-74cafb59e088","file_name":"reference.png","mime_type":"image/png"}`)
 	req := httptest.NewRequest(http.MethodPost, "/v1/assets/upload-sessions", body)
+	req = taskAssetCenterRequestWithSessionActor(req, 9)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
@@ -208,8 +215,9 @@ func TestTaskAssetCenterHandlerCreateAuditSupplementUploadSessionReturnsSuppleme
 	handler := NewTaskAssetCenterHandler(svc)
 	router.POST("/v1/tasks/:id/audit-supplements/upload-sessions", handler.CreateAuditSupplementUploadSession)
 
-	body := bytes.NewBufferString(`{"created_by":9,"asset_kind":"delivery","file_name":"missing.png","mime_type":"image/png","reason":"漏传补传"}`)
+	body := bytes.NewBufferString(`{"created_by":999,"asset_kind":"delivery","file_name":"missing.png","mime_type":"image/png","reason":"漏传补传"}`)
 	req := httptest.NewRequest(http.MethodPost, "/v1/tasks/789/audit-supplements/upload-sessions", body)
+	req = taskAssetCenterRequestWithSessionActor(req, 9)
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
@@ -223,6 +231,9 @@ func TestTaskAssetCenterHandlerCreateAuditSupplementUploadSessionReturnsSuppleme
 	if svc.lastAuditSupplementCreateParams.Reason != "漏传补传" {
 		t.Fatalf("Reason = %q", svc.lastAuditSupplementCreateParams.Reason)
 	}
+	if svc.lastAuditSupplementCreateParams.CreatedBy != 9 {
+		t.Fatalf("CreatedBy = %d, want session actor 9 (body actor must not override)", svc.lastAuditSupplementCreateParams.CreatedBy)
+	}
 
 	var resp struct {
 		Data struct {
@@ -235,6 +246,16 @@ func TestTaskAssetCenterHandlerCreateAuditSupplementUploadSessionReturnsSuppleme
 	if resp.Data.CompleteEndpoint != "/v1/tasks/789/audit-supplements/upload-sessions/sess-supp-1/complete" {
 		t.Fatalf("complete_endpoint = %q", resp.Data.CompleteEndpoint)
 	}
+}
+
+func taskAssetCenterRequestWithSessionActor(req *http.Request, actorID int64) *http.Request {
+	return req.WithContext(domain.WithRequestActor(req.Context(), domain.RequestActor{
+		ID:       actorID,
+		Username: "contract-test-user",
+		Roles:    []domain.Role{domain.RoleSuperAdmin},
+		Source:   domain.RequestActorSourceSessionToken,
+		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
+	}))
 }
 
 type taskAssetCenterServiceStub struct {

@@ -71,7 +71,7 @@ func TestTaskHandlerCreateAcceptsReferenceFileRefObjects(t *testing.T) {
 func TestTaskCreateReferenceUploadHandlerUploadFileReturnsRefObject(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
-	handler := NewTaskCreateReferenceUploadHandler(&taskReferenceUploadServiceStub{
+	svc := &taskReferenceUploadServiceStub{
 		uploadResult: &domain.ReferenceFileRef{
 			AssetID:     "ref-upload-1",
 			RefID:       "ref-upload-1",
@@ -80,12 +80,13 @@ func TestTaskCreateReferenceUploadHandlerUploadFileReturnsRefObject(t *testing.T
 			DownloadURL: stringPtr("/v1/assets/files/objects/ref-upload-1"),
 			URL:         stringPtr("/v1/assets/files/objects/ref-upload-1"),
 		},
-	})
+	}
+	handler := NewTaskCreateReferenceUploadHandler(svc)
 	router.POST("/v1/tasks/reference-upload", handler.UploadFile)
 
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
-	if err := writer.WriteField("created_by", "9"); err != nil {
+	if err := writer.WriteField("created_by", "999"); err != nil {
 		t.Fatalf("writer.WriteField(created_by) error = %v", err)
 	}
 	fileWriter, err := writer.CreateFormFile("file", "reference.png")
@@ -100,6 +101,7 @@ func TestTaskCreateReferenceUploadHandlerUploadFileReturnsRefObject(t *testing.T
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/tasks/reference-upload", &body)
+	req = taskAssetCenterRequestWithSessionActor(req, 9)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
@@ -119,6 +121,9 @@ func TestTaskCreateReferenceUploadHandlerUploadFileReturnsRefObject(t *testing.T
 	}
 	if resp.Data.Source != domain.ReferenceFileRefSourceTaskReferenceUpload {
 		t.Fatalf("response source = %q", resp.Data.Source)
+	}
+	if svc.lastUploadParams.CreatedBy != 9 {
+		t.Fatalf("CreatedBy = %d, want session actor 9 (form actor must not override)", svc.lastUploadParams.CreatedBy)
 	}
 }
 
@@ -151,6 +156,7 @@ func TestTaskCreateReferenceUploadHandlerUploadFileReturnsInternalErrorWithTrace
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/tasks/reference-upload", &body)
+	req = taskAssetCenterRequestWithSessionActor(req, 9)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
@@ -227,6 +233,7 @@ func TestTaskReferenceUploadAndTaskDetailExposePresignedReferenceURL(t *testing.
 	}
 
 	uploadReq := httptest.NewRequest(http.MethodPost, "/v1/tasks/reference-upload", &uploadBody)
+	uploadReq = taskAssetCenterRequestWithSessionActor(uploadReq, 9)
 	uploadReq.Header.Set("Content-Type", writer.FormDataContentType())
 	uploadRec := httptest.NewRecorder()
 	router.ServeHTTP(uploadRec, uploadReq)
@@ -296,8 +303,9 @@ func TestTaskReferenceUploadAndTaskDetailExposePresignedReferenceURL(t *testing.
 }
 
 type taskReferenceUploadServiceStub struct {
-	uploadResult *domain.ReferenceFileRef
-	appErr       *domain.AppError
+	uploadResult     *domain.ReferenceFileRef
+	appErr           *domain.AppError
+	lastUploadParams service.UploadTaskReferenceFileParams
 }
 
 func (s *taskReferenceUploadServiceStub) CreateUploadSession(context.Context, service.CreateTaskReferenceUploadSessionParams) (*service.CreateTaskReferenceUploadSessionResult, *domain.AppError) {
@@ -308,7 +316,8 @@ func (s *taskReferenceUploadServiceStub) GetUploadSession(context.Context, strin
 	return nil, nil
 }
 
-func (s *taskReferenceUploadServiceStub) UploadFile(_ context.Context, _ service.UploadTaskReferenceFileParams) (*domain.ReferenceFileRef, *domain.AppError) {
+func (s *taskReferenceUploadServiceStub) UploadFile(_ context.Context, params service.UploadTaskReferenceFileParams) (*domain.ReferenceFileRef, *domain.AppError) {
+	s.lastUploadParams = params
 	return s.uploadResult, s.appErr
 }
 

@@ -215,6 +215,9 @@ func (h *AssetFilesHandler) ServeFile(c *gin.Context) {
 		respondError(c, appErr)
 		return
 	}
+	if strings.EqualFold(strings.TrimSpace(h.storageProvider), "oss") && h.redirectToOSSDirect(c, storageKey, downloadFilename, traceID) {
+		return
+	}
 	upstreamURL, err := domain.BuildAbsoluteEscapedURLPath(h.uploadServiceBaseURL, "/files", storageKey)
 	if err != nil {
 		h.logger.Warn("asset_files_proxy_upstream_url_invalid",
@@ -391,7 +394,7 @@ func (h *AssetFilesHandler) redirectToOSSDirect(c *gin.Context, storageKey, down
 	if info == nil || strings.TrimSpace(info.DownloadURL) == "" {
 		return false
 	}
-	h.logger.Info("asset_files_proxy_oss_direct_fallback",
+	h.logger.Info("asset_files_proxy_oss_direct_redirect",
 		zap.String("trace_id", traceID),
 		zap.String("storage_key", storageKey),
 	)

@@ -82,11 +82,12 @@ func (s *taskAssetCenterService) scheduleDerivedPreviewGeneration(taskID, source
 	if sourceVersion == nil || !isDerivedPreviewGenerationCandidate(sourceVersion) {
 		return
 	}
-	if isOSSIMGDirectPreviewSupported(sourceVersion.OriginalFilename, sourceVersion.MimeType) {
-		return
-	}
 	if s.ossDirectService == nil || !s.ossDirectService.Enabled() {
 		log.Printf("source_preview_derive_skipped task_id=%d source_asset_id=%d reason=oss_direct_disabled", taskID, sourceAssetID)
+		return
+	}
+	inflightKey := fmt.Sprintf("%d:%d:%d:%s", taskID, sourceAssetID, sourceVersion.ID, strings.TrimSpace(sourceVersion.StorageKey))
+	if !s.claimDerivedPreviewGeneration(inflightKey) {
 		return
 	}
 	runAsync := s.runAsyncFn
@@ -94,6 +95,7 @@ func (s *taskAssetCenterService) scheduleDerivedPreviewGeneration(taskID, source
 		runAsync = func(fn func()) { go fn() }
 	}
 	runAsync(func() {
+		defer s.releaseDerivedPreviewGeneration(inflightKey)
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 		defer cancel()
 		if s.derivedPreviewGracePeriod > 0 {
@@ -105,10 +107,43 @@ func (s *taskAssetCenterService) scheduleDerivedPreviewGeneration(taskID, source
 			case <-timer.C:
 			}
 		}
+		if s.derivedPreviewSlots != nil {
+			select {
+			case s.derivedPreviewSlots <- struct{}{}:
+				defer func() { <-s.derivedPreviewSlots }()
+			case <-ctx.Done():
+				return
+			}
+		}
 		if err := s.ensureDerivedPreviewAssets(ctx, taskID, sourceAssetID, completedBy); err != nil {
 			log.Printf("source_preview_derive_failed task_id=%d source_asset_id=%d error=%v", taskID, sourceAssetID, err)
 		}
 	})
+}
+
+func (s *taskAssetCenterService) claimDerivedPreviewGeneration(key string) bool {
+	if s == nil || strings.TrimSpace(key) == "" {
+		return false
+	}
+	s.derivedPreviewMu.Lock()
+	defer s.derivedPreviewMu.Unlock()
+	if s.derivedPreviewInflight == nil {
+		s.derivedPreviewInflight = make(map[string]struct{})
+	}
+	if _, exists := s.derivedPreviewInflight[key]; exists {
+		return false
+	}
+	s.derivedPreviewInflight[key] = struct{}{}
+	return true
+}
+
+func (s *taskAssetCenterService) releaseDerivedPreviewGeneration(key string) {
+	if s == nil {
+		return
+	}
+	s.derivedPreviewMu.Lock()
+	delete(s.derivedPreviewInflight, key)
+	s.derivedPreviewMu.Unlock()
 }
 
 func (s *taskAssetCenterService) EnsureDerivedPreviewAssets(ctx context.Context, taskID, sourceAssetID, actorID int64) *domain.AppError {
@@ -173,6 +208,8 @@ func isDerivedPreviewGenerationCandidate(version *domain.DesignAssetVersion) boo
 func isExternalRendererPreviewSupported(filename, mimeType string) bool {
 	ext := sourceAssetFormatExtension(filename, mimeType)
 	switch ext {
+	case ".jpg", ".png", ".bmp", ".gif", ".webp", ".tiff", ".heic", ".avif":
+		return true
 	case ".psd", ".psb", ".pdf", ".ai", ".eps", ".ps":
 		return true
 	default:

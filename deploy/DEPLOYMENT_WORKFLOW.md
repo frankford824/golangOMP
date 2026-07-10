@@ -138,8 +138,16 @@ Copy `deploy/deploy.env.example` to another local-only shell snippet if needed, 
     - pid: `/root/ecommerce_ai/run/ecommerce-api-<version>-parallel.pid`
     - log: `/root/ecommerce_ai/logs/ecommerce-api-<version>-parallel.log`
     - state: `/root/ecommerce_ai/releases/<version>/runtime/deploy-state.parallel.env`
+  - refuses to start when the candidate port is already listening; a stale or foreign listener is never accepted as the new candidate
+  - reports startup success only after the launched PID owns the listening socket and `GET /health` returns `200`
 - Purpose:
   - safe warm-up and verification before any manual cutover
+
+### Same-version Candidate Cleanup
+- Before replacing an existing `releases/<version>` directory, deploy reads only the version-qualified parallel pidfile and verifies that `/proc/<pid>/exe` is the candidate binary inside that exact release.
+- A verified candidate is stopped before the release directory is removed, and deploy waits for its candidate port to become free.
+- A malformed pidfile, a foreign/reused PID, a port that remains occupied, or an attempt to replace the current live release aborts deployment without deleting the release directory.
+- The stable live MAIN pidfile (`run/ecommerce-api.pid`) is not part of this cleanup path, so same-version candidate cleanup does not stop the live `8080` process.
 
 ## What `deploy.sh` Does
 1. Validates the explicit `--version` for remote deploys and records lifecycle steps in `deploy/release-history.log`
@@ -205,6 +213,11 @@ Copy `deploy/deploy.env.example` to another local-only shell snippet if needed, 
 - Side-by-side candidate example:
   - `bash /root/ecommerce_ai/releases/<version>/deploy/verify-runtime.sh --base-url http://127.0.0.1:18080`
 - If `curl` is installed, the helper also reports HTTP status codes for the auth/task checks.
+- `deploy/start-main.sh` requires `curl` plus either `ss` or `lsof`; it fails closed when listener ownership cannot be proven or `/health` cannot be confirmed as `200` within `START_MAIN_TIMEOUT_SECONDS` (default `30`).
+
+## Deploy Process Guard Tests
+- Run `bash deploy/tests/deploy-process-guards.test.sh` locally.
+- The test covers occupied-port rejection, exact listener ownership, unhealthy startup cleanup, same-version parallel candidate cleanup, and foreign pidfile refusal. It uses temporary directories and local ephemeral ports only; it does not connect to or modify production.
 
 ## Remote Database Integration Readiness Check (since v0.4)
 - After deploy, run on the server: `bash /root/ecommerce_ai/current/deploy/check-remote-db.sh`

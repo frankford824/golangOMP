@@ -143,10 +143,12 @@ func TestAssetFilesHandlerServeFilePassesThroughUpstream404(t *testing.T) {
 	}
 }
 
-func TestAssetFilesHandlerServeFileRedirectsToOSSDirectOnUpstream404(t *testing.T) {
+func TestAssetFilesHandlerServeFileRedirectsToOSSDirectWithoutProbingUpstream(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
+	upstreamCalled := false
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		upstreamCalled = true
 		w.WriteHeader(http.StatusNotFound)
 		_, _ = io.WriteString(w, "not found in upload service")
 	}))
@@ -169,6 +171,9 @@ func TestAssetFilesHandlerServeFileRedirectsToOSSDirectOnUpstream404(t *testing.
 	}
 	if got := rec.Header().Get("Location"); got != "https://oss.example/ref.jpeg?sig=1" {
 		t.Fatalf("Location = %q", got)
+	}
+	if upstreamCalled {
+		t.Fatal("legacy upload-service upstream must not be probed when OSS direct signing is available")
 	}
 }
 

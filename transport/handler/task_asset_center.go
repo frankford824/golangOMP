@@ -156,8 +156,10 @@ type completeTaskAssetUploadSessionReq struct {
 }
 
 type cancelTaskAssetUploadSessionReq struct {
-	CancelledBy *int64 `json:"cancelled_by"`
-	Remark      string `json:"remark"`
+	CancelledBy  *int64 `json:"cancelled_by"`
+	Remark       string `json:"remark"`
+	OSSUploadID  string `json:"oss_upload_id"`
+	OSSObjectKey string `json:"oss_object_key"`
 }
 
 type batchGlobalAssetSearchReq struct {
@@ -224,7 +226,7 @@ func (h *TaskAssetCenterHandler) CreateAuditSupplementUploadSession(c *gin.Conte
 		respondError(c, bindErr)
 		return
 	}
-	createdBy, appErr := actorIDOrRequestValue(c, req.CreatedBy, "created_by")
+	createdBy, appErr := actorIDOrRequestValue(c, nil, "created_by")
 	if appErr != nil {
 		respondError(c, appErr)
 		return
@@ -271,7 +273,7 @@ func (h *TaskAssetCenterHandler) CompleteAuditSupplementUploadSession(c *gin.Con
 		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
 		return
 	}
-	completedBy, appErr := actorIDOrRequestValue(c, req.CompletedBy, "completed_by")
+	completedBy, appErr := actorIDOrRequestValue(c, nil, "completed_by")
 	if appErr != nil {
 		respondError(c, appErr)
 		return
@@ -793,7 +795,7 @@ func (h *TaskAssetCenterHandler) CompleteUploadSession(c *gin.Context) {
 		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
 		return
 	}
-	completedBy, appErr := actorIDOrRequestValue(c, req.CompletedBy, "completed_by")
+	completedBy, appErr := actorIDOrRequestValue(c, nil, "completed_by")
 	if appErr != nil {
 		respondError(c, appErr)
 		return
@@ -822,7 +824,7 @@ func (h *TaskAssetCenterHandler) CompleteAssetUploadSession(c *gin.Context) {
 		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
 		return
 	}
-	completedBy, appErr := actorIDOrRequestValue(c, req.CompletedBy, "completed_by")
+	completedBy, appErr := actorIDOrRequestValue(c, nil, "completed_by")
 	if appErr != nil {
 		respondError(c, appErr)
 		return
@@ -855,16 +857,18 @@ func (h *TaskAssetCenterHandler) CancelUploadSession(c *gin.Context) {
 		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
 		return
 	}
-	cancelledBy, appErr := actorIDOrRequestValue(c, req.CancelledBy, "cancelled_by")
+	cancelledBy, appErr := actorIDOrRequestValue(c, nil, "cancelled_by")
 	if appErr != nil {
 		respondError(c, appErr)
 		return
 	}
 	session, appErr := h.svc.CancelUploadSession(c.Request.Context(), service.CancelTaskAssetUploadSessionParams{
-		TaskID:      taskID,
-		SessionID:   strings.TrimSpace(c.Param("session_id")),
-		CancelledBy: cancelledBy,
-		Remark:      strings.TrimSpace(req.Remark),
+		TaskID:       taskID,
+		SessionID:    strings.TrimSpace(c.Param("session_id")),
+		CancelledBy:  cancelledBy,
+		Remark:       strings.TrimSpace(req.Remark),
+		OSSUploadID:  strings.TrimSpace(req.OSSUploadID),
+		OSSObjectKey: strings.TrimSpace(req.OSSObjectKey),
 	})
 	if appErr != nil {
 		respondError(c, appErr)
@@ -879,15 +883,17 @@ func (h *TaskAssetCenterHandler) CancelAssetUploadSession(c *gin.Context) {
 		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
 		return
 	}
-	cancelledBy, appErr := actorIDOrRequestValue(c, req.CancelledBy, "cancelled_by")
+	cancelledBy, appErr := actorIDOrRequestValue(c, nil, "cancelled_by")
 	if appErr != nil {
 		respondError(c, appErr)
 		return
 	}
 	session, appErr := h.svc.CancelUploadSessionByID(c.Request.Context(), service.CancelTaskAssetUploadSessionParams{
-		SessionID:   strings.TrimSpace(c.Param("session_id")),
-		CancelledBy: cancelledBy,
-		Remark:      strings.TrimSpace(req.Remark),
+		SessionID:    strings.TrimSpace(c.Param("session_id")),
+		CancelledBy:  cancelledBy,
+		Remark:       strings.TrimSpace(req.Remark),
+		OSSUploadID:  strings.TrimSpace(req.OSSUploadID),
+		OSSObjectKey: strings.TrimSpace(req.OSSObjectKey),
 	})
 	if appErr != nil {
 		respondError(c, appErr)
@@ -910,7 +916,7 @@ func (h *TaskAssetCenterHandler) createUploadSession(c *gin.Context, taskID int6
 }
 
 func (h *TaskAssetCenterHandler) createUploadSessionWithRequest(c *gin.Context, taskID int64, mode domain.DesignAssetUploadMode, req createTaskAssetUploadSessionReq, topLevel bool) {
-	createdBy, appErr := actorIDOrRequestValue(c, req.CreatedBy, "created_by")
+	createdBy, appErr := actorIDOrRequestValue(c, nil, "created_by")
 	if appErr != nil {
 		respondError(c, appErr)
 		return

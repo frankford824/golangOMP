@@ -67,6 +67,109 @@ RUNTIME_ENV_PATH="${RUNTIME_ENV_PATH:-$REMOTE_BASE_DIR/shared/main.env}"
 BRIDGE_ENV_PATH="${BRIDGE_ENV_PATH:-$REMOTE_BASE_DIR/shared/bridge.env}"
 RELEASE_DIR="$REMOTE_BASE_DIR/releases/$VERSION"
 SHARED_AVATAR_DIR="$REMOTE_BASE_DIR/shared/avatars"
+PARALLEL_PID_FILE="$REMOTE_BASE_DIR/run/ecommerce-api-${VERSION}-parallel.pid"
+
+process_is_running() {
+  local pid="$1"
+  local state=""
+
+  kill -0 "$pid" >/dev/null 2>&1 || return 1
+  if [ -r "/proc/$pid/stat" ]; then
+    state="$(awk '{ print $3 }' "/proc/$pid/stat" 2>/dev/null || true)"
+    [ "$state" != "Z" ] || return 1
+  fi
+  return 0
+}
+
+port_is_listening() {
+  local port="$1"
+
+  if command -v ss >/dev/null 2>&1; then
+    ss -H -ltn "sport = :$port" 2>/dev/null | grep -q .
+    return
+  fi
+  if command -v lsof >/dev/null 2>&1; then
+    lsof -nP -iTCP:"$port" -sTCP:LISTEN -t 2>/dev/null | grep -q .
+    return
+  fi
+  tcp_ready 127.0.0.1 "$port"
+}
+
+wait_for_pid_exit() {
+  local pid="$1"
+  local attempt
+
+  for attempt in $(seq 1 20); do
+    if ! process_is_running "$pid"; then
+      return 0
+    fi
+    sleep 0.25
+  done
+  return 1
+}
+
+wait_for_port_release() {
+  local port="$1"
+  local attempt
+
+  for attempt in $(seq 1 20); do
+    if ! port_is_listening "$port"; then
+      return 0
+    fi
+    sleep 0.25
+  done
+  return 1
+}
+
+stop_existing_parallel_candidate() {
+  local candidate_binary="$RELEASE_DIR/ecommerce-api"
+  local candidate_env="$RELEASE_DIR/runtime/main.parallel.env"
+  local candidate_state="$RELEASE_DIR/runtime/deploy-state.parallel.env"
+  local candidate_port=""
+  local current_target=""
+  local release_target=""
+  local pid=""
+  local expected_exe=""
+  local actual_exe=""
+
+  [ -d "$RELEASE_DIR" ] || return 0
+
+  current_target="$(readlink -f "$REMOTE_BASE_DIR/current" 2>/dev/null || true)"
+  release_target="$(readlink -f "$RELEASE_DIR" 2>/dev/null || true)"
+  if [ -n "$current_target" ] && [ "$current_target" = "$release_target" ]; then
+    fail "Refusing to replace currently live release: $RELEASE_DIR"
+  fi
+
+  if [ -f "$candidate_env" ]; then
+    candidate_port="$(read_main_port_from_env "$candidate_env" "$PARALLEL_PORT")"
+  elif [ -f "$candidate_state" ]; then
+    candidate_port="$(read_env_value "$candidate_state" MAIN_PORT "$PARALLEL_PORT")"
+  fi
+
+  if [ -f "$PARALLEL_PID_FILE" ]; then
+    pid="$(tr -d '[:space:]' <"$PARALLEL_PID_FILE")"
+    [[ "$pid" =~ ^[1-9][0-9]*$ ]] || fail "Invalid parallel pidfile: $PARALLEL_PID_FILE"
+
+    if process_is_running "$pid"; then
+      [ -x "$candidate_binary" ] || fail "Parallel candidate binary is missing while pid $pid is running: $candidate_binary"
+      expected_exe="$(readlink -f "$candidate_binary" 2>/dev/null || true)"
+      actual_exe="$(readlink -f "/proc/$pid/exe" 2>/dev/null || true)"
+      [ -n "$expected_exe" ] && [ "$actual_exe" = "$expected_exe" ] ||
+        fail "Parallel pidfile $PARALLEL_PID_FILE points to pid $pid owned by $actual_exe, not $expected_exe"
+
+      kill "$pid"
+      if ! wait_for_pid_exit "$pid"; then
+        kill -9 "$pid" >/dev/null 2>&1 || true
+        wait_for_pid_exit "$pid" || fail "Parallel candidate pid $pid did not stop."
+      fi
+    fi
+    rm -f "$PARALLEL_PID_FILE"
+  fi
+
+  if [ -n "$candidate_port" ] && ! wait_for_port_release "$candidate_port"; then
+    fail "Parallel candidate port $candidate_port is still listening; release replacement aborted."
+  fi
+}
 
 mkdir -p \
   "$REMOTE_BASE_DIR/incoming" \
@@ -77,6 +180,7 @@ mkdir -p \
   "$REMOTE_BASE_DIR/run" \
   "$REMOTE_BASE_DIR/scripts"
 
+stop_existing_parallel_candidate
 rm -rf "$RELEASE_DIR"
 mkdir -p "$RELEASE_DIR"
 cp -R "$PACKAGE_ROOT"/. "$RELEASE_DIR/"
@@ -101,7 +205,7 @@ RESULT_LOG_FILE=""
 if [ "$PARALLEL" = "true" ]; then
   CANDIDATE_RUNTIME_DIR="$RELEASE_DIR/runtime"
   CANDIDATE_ENV_PATH="$CANDIDATE_RUNTIME_DIR/main.parallel.env"
-  CANDIDATE_PID_FILE="$REMOTE_BASE_DIR/run/ecommerce-api-${VERSION}-parallel.pid"
+  CANDIDATE_PID_FILE="$PARALLEL_PID_FILE"
   CANDIDATE_LOG_FILE="$REMOTE_BASE_DIR/logs/ecommerce-api-${VERSION}-parallel.log"
 
   mkdir -p "$CANDIDATE_RUNTIME_DIR"

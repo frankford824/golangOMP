@@ -2,8 +2,6 @@ import { runOssDirectUploadPlan, type OssDirectPlan } from '@/services/upload/os
 
 import { assetWorkbenchApi, type UploadPlan } from '@aw/shared/api/assetWorkbenchApi'
 
-import { computeWorkbenchFileHash } from './fileHash'
-
 export interface WorkbenchUploadProgress {
   loaded: number
   total: number
@@ -29,13 +27,11 @@ export async function uploadWorkbenchFile(
     expectedBusinessMonth?: string
   } = {},
 ): Promise<UploadedWorkbenchFile> {
-  const fileHash = await computeWorkbenchFileHash(file)
   const created = await assetWorkbenchApi.createUploadSession(
     {
       original_filename: file.name,
       file_size: file.size,
       mime_type: file.type || 'application/octet-stream',
-      file_hash: fileHash,
       upload_directory_id: options.uploadDirectoryId,
       upload_batch_id: options.uploadBatchId,
       relative_path: options.relativePath,
@@ -66,7 +62,9 @@ export async function uploadWorkbenchFile(
     )
     return { sessionId, filename: file.name }
   } catch (err) {
-    await assetWorkbenchApi.cancelUploadSession(sessionId, options.signal).catch(() => undefined)
+    // The upload signal is commonly already aborted here. Cleanup needs an
+    // independent request so OSS single objects / multipart state are removed.
+    await assetWorkbenchApi.cancelUploadSession(sessionId).catch(() => undefined)
     throw err
   }
 }

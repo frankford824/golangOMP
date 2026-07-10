@@ -18,7 +18,7 @@
 ### 简介
 支持方法: POST。
 
-- `POST`: Compatibility-only pre-task reference upload flow retained for rollback-safe migration. Obsolete for frontend rollout. New frontend integration must use `POST /v1/tasks/reference-upload`.
+- `POST`: Compatibility-only pre-task reference upload flow retained for rollback-safe migration. Obsolete for frontend rollout. New frontend integration must use `POST /v1/tasks/reference-upload-sessions`.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -34,9 +34,9 @@ Content-Type: `application/json`
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `created_by` | integer | 否 | - |
+| `created_by` | integer | 否 | Deprecated and ignored. The backend always uses the authenticated session actor. |
 | `filename` | string | 是 | - |
-| `expected_size` | integer | 否 | Optional size hint in bytes. Pre-task reference upload sessions reject values above 300 MB. |
+| `expected_size` | integer | 是 | Required exact file size in bytes. Pre-task reference uploads reject values above 300 MB and verify the final OSS object length. |
 | `mime_type` | string | 否 | - |
 | `file_hash` | string | 否 | - |
 | `remark` | string | 否 | - |
@@ -58,7 +58,15 @@ Content-Type: `application/json`
       "file_id": "...",
       "base_url": "...",
       "upload_url": "..."
-    }
+    },
+    "oss_direct": {
+      "mode": "...",
+      "object_key": "...",
+      "expires_at": "...",
+      "method": "...",
+      "required_upload_content_type": "..."
+    },
+    "complete_endpoint": "string"
   }
 }
 ```
@@ -91,7 +99,7 @@ curl -X POST https://api.example.com/v1/task-create/asset-center/upload-sessions
 ### 简介
 支持方法: GET。
 
-- `GET`: Compatibility-only status read for the old task-create upload-session flow. Obsolete for frontend rollout; new integration must use `POST /v1/tasks/reference-upload`.
+- `GET`: Compatibility-only status read for the old task-create upload-session flow. Obsolete for frontend rollout; new integration must use `POST /v1/tasks/reference-upload-sessions`.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -165,8 +173,12 @@ Content-Type: `application/json`
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `completed_by` | integer | 否 | - |
+| `completed_by` | integer | 否 | Deprecated and ignored. The backend always uses the authenticated session actor. |
 | `file_hash` | string | 否 | - |
+| `upload_content_type` | string | 否 | - |
+| `oss_upload_id` | string | 否 | - |
+| `oss_object_key` | string | 否 | - |
+| `oss_parts` | array<object> | 否 | - |
 | `remark` | string | 否 | - |
 
 ### 响应体 schema
@@ -226,7 +238,7 @@ curl -X POST https://api.example.com/v1/task-create/asset-center/upload-sessions
 ### 简介
 支持方法: POST。
 
-- `POST`: Compatibility-only abort for the old task-create upload-session flow. Obsolete for frontend rollout; new integration must use `POST /v1/tasks/reference-upload`.
+- `POST`: Compatibility-only abort for the old task-create upload-session flow. Obsolete for frontend rollout; new integration must use `POST /v1/tasks/reference-upload-sessions/{session_id}/abort`.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -244,8 +256,10 @@ Content-Type: `application/json`
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `cancelled_by` | integer | 否 | - |
+| `cancelled_by` | integer | 否 | Deprecated and ignored. The backend always uses the authenticated session actor. |
 | `remark` | string | 否 | - |
+| `oss_object_key` | string | 否 | Direct-upload object key returned by the session plan. Used for validated cleanup. |
+| `oss_upload_id` | string | 否 | Multipart upload id returned by the session plan. Used to abort unfinished multipart data. |
 
 ### 响应体 schema
 成功响应: `200 application/json`
@@ -291,7 +305,7 @@ curl -X POST https://api.example.com/v1/task-create/asset-center/upload-sessions
 ### 简介
 支持方法: POST。
 
-- `POST`: Canonical frontend entry for task-create reference upload. Accepts one `multipart/form-data` file field named `file`, writes it to OSS through backend-controlled direct storage flow when available (and uses upload-service proxy only as compatibility fallback), records a completed legal reference source, and returns one normalized `reference_file_ref` object. The returned object should be appended directly into `POST /v1/tasks.reference_file_refs`.
+- `POST`: Deprecated rollback-compatible multipart proxy. New clients must use `POST /v1/tasks/reference-upload-sessions` so file bytes travel directly from the browser to OSS instead of through the application server. Accepts one `multipart/form-data` file field named `file`, writes it to OSS through backend-controlled direct storage flow when available (and uses upload-service proxy only as compatibility fallback), records a completed legal reference source, and returns one normalized `reference_file_ref` object. The returned object should be appended directly into `POST /v1/tasks.reference_file_refs`.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -605,7 +619,7 @@ Content-Type: `application/json`
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `task_id` | integer | 否 | Required on `POST /v1/assets/upload-sessions`; ignored on task-scoped compatibility routes where task context comes from path. |
-| `created_by` | integer | 否 | - |
+| `created_by` | integer | 否 | Deprecated and ignored. The backend always uses the authenticated session actor. |
 | `asset_id` | integer | 否 | Existing design-asset id when replacing a current resource. Required for every upload against a `Completed` task and for delivery replacement during customization review. |
 | `source_asset_id` | integer | 否 | Optional linkage to a source asset. Allowed for `preview` and `design_thumb` intents. |
 | `asset_type` | enum(reference/source/delivery/preview/design_thumb) | 否 | Compatibility alias of `asset_kind` retained for migration safety. |
@@ -613,8 +627,8 @@ Content-Type: `application/json`
 | `upload_mode` | enum(small/multipart) | 否 | Compatibility-only input. New frontend integrations must not send this field. |
 | `filename` | string | 否 | Compatibility alias of `file_name`. At least one of `file_name` or `filename` must be provided. |
 | `file_name` | string | 否 | Canonical file name field for new frontend integrations. At least one of `file_name` or `filename` must be provided. |
-| `expected_size` | integer | 否 | Optional size hint in bytes. Task asset upload sessions reject values above 1 GiB. |
-| `file_size` | integer | 否 | Optional compatibility alias of `expected_size`. Task asset upload sessions reject values above 1 GiB. |
+| `expected_size` | integer | 否 | Required exact file size in bytes. Task asset upload sessions reject values above 1 GiB and completion verifies the OSS object length. |
+| `file_size` | integer | 否 | Compatibility alias of `expected_size`; when used it must be the exact positive file size. |
 | `mime_type` | string | 否 | Optional MIME hint. |
 | `file_hash` | string | 否 | - |
 | `remark` | string | 否 | - |
@@ -640,8 +654,14 @@ Content-Type: `application/json`
       "base_url": "...",
       "upload_url": "..."
     },
-    "upload_strategy": "string",
-    "required_upload_content_type": "string"
+    "oss_direct": {
+      "mode": "...",
+      "object_key": "...",
+      "expires_at": "...",
+      "method": "...",
+      "required_upload_content_type": "..."
+    },
+    "upload_strategy": "string"
   }
 }
 ```
@@ -695,7 +715,7 @@ Content-Type: `application/json`
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `task_id` | integer | 否 | Required on `POST /v1/assets/upload-sessions`; ignored on task-scoped compatibility routes where task context comes from path. |
-| `created_by` | integer | 否 | - |
+| `created_by` | integer | 否 | Deprecated and ignored. The backend always uses the authenticated session actor. |
 | `asset_id` | integer | 否 | Existing design-asset id when replacing a current resource. Required for every upload against a `Completed` task and for delivery replacement during customization review. |
 | `source_asset_id` | integer | 否 | Optional linkage to a source asset. Allowed for `preview` and `design_thumb` intents. |
 | `asset_type` | enum(reference/source/delivery/preview/design_thumb) | 否 | Compatibility alias of `asset_kind` retained for migration safety. |
@@ -703,8 +723,8 @@ Content-Type: `application/json`
 | `upload_mode` | enum(small/multipart) | 否 | Compatibility-only input. New frontend integrations must not send this field. |
 | `filename` | string | 否 | Compatibility alias of `file_name`. At least one of `file_name` or `filename` must be provided. |
 | `file_name` | string | 否 | Canonical file name field for new frontend integrations. At least one of `file_name` or `filename` must be provided. |
-| `expected_size` | integer | 否 | Optional size hint in bytes. Task asset upload sessions reject values above 1 GiB. |
-| `file_size` | integer | 否 | Optional compatibility alias of `expected_size`. Task asset upload sessions reject values above 1 GiB. |
+| `expected_size` | integer | 否 | Required exact file size in bytes. Task asset upload sessions reject values above 1 GiB and completion verifies the OSS object length. |
+| `file_size` | integer | 否 | Compatibility alias of `expected_size`; when used it must be the exact positive file size. |
 | `mime_type` | string | 否 | Optional MIME hint. |
 | `file_hash` | string | 否 | - |
 | `remark` | string | 否 | - |
@@ -730,8 +750,14 @@ Content-Type: `application/json`
       "base_url": "...",
       "upload_url": "..."
     },
-    "upload_strategy": "string",
-    "required_upload_content_type": "string"
+    "oss_direct": {
+      "mode": "...",
+      "object_key": "...",
+      "expires_at": "...",
+      "method": "...",
+      "required_upload_content_type": "..."
+    },
+    "upload_strategy": "string"
   }
 }
 ```
@@ -785,7 +811,7 @@ Content-Type: `application/json`
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `task_id` | integer | 否 | Required on `POST /v1/assets/upload-sessions`; ignored on task-scoped compatibility routes where task context comes from path. |
-| `created_by` | integer | 否 | - |
+| `created_by` | integer | 否 | Deprecated and ignored. The backend always uses the authenticated session actor. |
 | `asset_id` | integer | 否 | Existing design-asset id when replacing a current resource. Required for every upload against a `Completed` task and for delivery replacement during customization review. |
 | `source_asset_id` | integer | 否 | Optional linkage to a source asset. Allowed for `preview` and `design_thumb` intents. |
 | `asset_type` | enum(reference/source/delivery/preview/design_thumb) | 否 | Compatibility alias of `asset_kind` retained for migration safety. |
@@ -793,8 +819,8 @@ Content-Type: `application/json`
 | `upload_mode` | enum(small/multipart) | 否 | Compatibility-only input. New frontend integrations must not send this field. |
 | `filename` | string | 否 | Compatibility alias of `file_name`. At least one of `file_name` or `filename` must be provided. |
 | `file_name` | string | 否 | Canonical file name field for new frontend integrations. At least one of `file_name` or `filename` must be provided. |
-| `expected_size` | integer | 否 | Optional size hint in bytes. Task asset upload sessions reject values above 1 GiB. |
-| `file_size` | integer | 否 | Optional compatibility alias of `expected_size`. Task asset upload sessions reject values above 1 GiB. |
+| `expected_size` | integer | 否 | Required exact file size in bytes. Task asset upload sessions reject values above 1 GiB and completion verifies the OSS object length. |
+| `file_size` | integer | 否 | Compatibility alias of `expected_size`; when used it must be the exact positive file size. |
 | `mime_type` | string | 否 | Optional MIME hint. |
 | `file_hash` | string | 否 | - |
 | `remark` | string | 否 | - |
@@ -820,8 +846,14 @@ Content-Type: `application/json`
       "base_url": "...",
       "upload_url": "..."
     },
-    "upload_strategy": "string",
-    "required_upload_content_type": "string"
+    "oss_direct": {
+      "mode": "...",
+      "object_key": "...",
+      "expires_at": "...",
+      "method": "...",
+      "required_upload_content_type": "..."
+    },
+    "upload_strategy": "string"
   }
 }
 ```
@@ -932,9 +964,12 @@ Content-Type: `application/json`
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `completed_by` | integer | 否 | - |
+| `completed_by` | integer | 否 | Deprecated and ignored. The backend always uses the authenticated session actor. |
 | `file_hash` | string | 否 | - |
 | `upload_content_type` | string | 否 | Exact `required_upload_content_type` echoed back by the client when finalizing an OSS direct upload. |
+| `oss_object_key` | string | 否 | Required for every OSS direct completion. The backend validates that it belongs to this upload session. |
+| `oss_upload_id` | string | 否 | Required together with `oss_parts` for multipart completion; omitted for single-part completion. |
+| `oss_parts` | array<object> | 否 | Ordered multipart ETags; omitted for single-part completion. |
 | `remark` | string | 否 | - |
 | `reason` | string | 否 | Optional reason override for audit post-close supplement completion. When omitted, the reason captured during create-session is used. |
 
@@ -1016,8 +1051,10 @@ Content-Type: `application/json`
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `cancelled_by` | integer | 否 | - |
+| `cancelled_by` | integer | 否 | Deprecated and ignored. The backend always uses the authenticated session actor. |
 | `remark` | string | 否 | - |
+| `oss_object_key` | string | 否 | Direct-upload object key returned by the session plan. Used for validated cleanup. |
+| `oss_upload_id` | string | 否 | Multipart upload id returned by the session plan. Used to abort unfinished multipart data. |
 
 ### 响应体 schema
 成功响应: `200 application/json`
@@ -1083,8 +1120,10 @@ Content-Type: `application/json`
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `cancelled_by` | integer | 否 | - |
+| `cancelled_by` | integer | 否 | Deprecated and ignored. The backend always uses the authenticated session actor. |
 | `remark` | string | 否 | - |
+| `oss_object_key` | string | 否 | Direct-upload object key returned by the session plan. Used for validated cleanup. |
+| `oss_upload_id` | string | 否 | Multipart upload id returned by the session plan. Used to abort unfinished multipart data. |
 
 ### 响应体 schema
 成功响应: `200 application/json`

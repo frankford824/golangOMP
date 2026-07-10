@@ -1881,6 +1881,11 @@ func (r *assetWorkbenchRepo) GetUploadSession(ctx context.Context, sessionID str
 	return scanAssetWorkbenchUploadSession(row)
 }
 
+func (r *assetWorkbenchRepo) GetUploadSessionForUpdate(ctx context.Context, tx repo.Tx, sessionID string) (*domain.AssetWorkbenchUploadSession, error) {
+	row := Unwrap(tx).QueryRowContext(ctx, assetWorkbenchUploadSessionSelect()+` WHERE session_id = ? FOR UPDATE`, sessionID)
+	return scanAssetWorkbenchUploadSession(row)
+}
+
 func (r *assetWorkbenchRepo) UpdateUploadSessionStatus(ctx context.Context, tx repo.Tx, sessionID, status string, uploadedAt *time.Time, cancelledAt *time.Time, submittedItemID *int64) error {
 	_, err := Unwrap(tx).ExecContext(ctx, `
 		UPDATE asset_workbench_upload_sessions

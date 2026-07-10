@@ -287,15 +287,19 @@ func NewRouter(
 
 	taskCreateAssetCenterGroup := v1.Group("/task-create/asset-center")
 	{
-		taskCreateAssetCenterGroup.POST("/upload-sessions", access(taskCreateAssetCenterGroup, http.MethodPost, "/upload-sessions", domain.APIReadinessReadyForFrontend, domain.RoleOps), withCompatibilityRoute("/v1/tasks/reference-upload", "remove_after_frontend_migration"), taskCreateReferenceUploadH.CreateUploadSession)
-		taskCreateAssetCenterGroup.GET("/upload-sessions/:session_id", access(taskCreateAssetCenterGroup, http.MethodGet, "/upload-sessions/:session_id", domain.APIReadinessReadyForFrontend, domain.RoleOps), withCompatibilityRoute("/v1/tasks/reference-upload", "remove_after_frontend_migration"), taskCreateReferenceUploadH.GetUploadSession)
-		taskCreateAssetCenterGroup.POST("/upload-sessions/:session_id/complete", access(taskCreateAssetCenterGroup, http.MethodPost, "/upload-sessions/:session_id/complete", domain.APIReadinessReadyForFrontend, domain.RoleOps), withCompatibilityRoute("/v1/tasks/reference-upload", "remove_after_frontend_migration"), taskCreateReferenceUploadH.CompleteUploadSession)
-		taskCreateAssetCenterGroup.POST("/upload-sessions/:session_id/abort", access(taskCreateAssetCenterGroup, http.MethodPost, "/upload-sessions/:session_id/abort", domain.APIReadinessReadyForFrontend, domain.RoleOps), withCompatibilityRoute("/v1/tasks/reference-upload", "remove_after_frontend_migration"), taskCreateReferenceUploadH.AbortUploadSession)
+		taskCreateAssetCenterGroup.POST("/upload-sessions", access(taskCreateAssetCenterGroup, http.MethodPost, "/upload-sessions", domain.APIReadinessReadyForFrontend, domain.RoleOps), withCompatibilityRoute("/v1/tasks/reference-upload-sessions", "remove_after_frontend_migration"), taskCreateReferenceUploadH.CreateUploadSession)
+		taskCreateAssetCenterGroup.GET("/upload-sessions/:session_id", access(taskCreateAssetCenterGroup, http.MethodGet, "/upload-sessions/:session_id", domain.APIReadinessReadyForFrontend, domain.RoleOps), withCompatibilityRoute("/v1/tasks/reference-upload-sessions/{session_id}", "remove_after_frontend_migration"), taskCreateReferenceUploadH.GetUploadSession)
+		taskCreateAssetCenterGroup.POST("/upload-sessions/:session_id/complete", access(taskCreateAssetCenterGroup, http.MethodPost, "/upload-sessions/:session_id/complete", domain.APIReadinessReadyForFrontend, domain.RoleOps), withCompatibilityRoute("/v1/tasks/reference-upload-sessions/{session_id}/complete", "remove_after_frontend_migration"), taskCreateReferenceUploadH.CompleteUploadSession)
+		taskCreateAssetCenterGroup.POST("/upload-sessions/:session_id/abort", access(taskCreateAssetCenterGroup, http.MethodPost, "/upload-sessions/:session_id/abort", domain.APIReadinessReadyForFrontend, domain.RoleOps), withCompatibilityRoute("/v1/tasks/reference-upload-sessions/{session_id}/abort", "remove_after_frontend_migration"), taskCreateReferenceUploadH.AbortUploadSession)
 	}
 
 	// V7: Task (business aggregate root)
 	taskGroup := v1.Group("/tasks")
 	{
+		taskGroup.POST("/reference-upload-sessions", access(taskGroup, http.MethodPost, "/reference-upload-sessions", domain.APIReadinessReadyForFrontend, domain.RoleOps), taskCreateReferenceUploadH.CreateUploadSession)
+		taskGroup.GET("/reference-upload-sessions/:session_id", access(taskGroup, http.MethodGet, "/reference-upload-sessions/:session_id", domain.APIReadinessReadyForFrontend, domain.RoleOps), taskCreateReferenceUploadH.GetUploadSession)
+		taskGroup.POST("/reference-upload-sessions/:session_id/complete", access(taskGroup, http.MethodPost, "/reference-upload-sessions/:session_id/complete", domain.APIReadinessReadyForFrontend, domain.RoleOps), taskCreateReferenceUploadH.CompleteUploadSession)
+		taskGroup.POST("/reference-upload-sessions/:session_id/abort", access(taskGroup, http.MethodPost, "/reference-upload-sessions/:session_id/abort", domain.APIReadinessReadyForFrontend, domain.RoleOps), taskCreateReferenceUploadH.AbortUploadSession)
 		taskGroup.POST("/reference-upload", access(taskGroup, http.MethodPost, "/reference-upload", domain.APIReadinessReadyForFrontend, domain.RoleOps), taskCreateReferenceUploadH.UploadFile)
 		taskGroup.POST("/prepare-product-codes", access(taskGroup, http.MethodPost, "/prepare-product-codes", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleAdmin), taskH.PrepareProductCodes)
 		taskGroup.GET("/excel-assist/template.xlsx", access(taskGroup, http.MethodGet, "/excel-assist/template.xlsx", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskSingleExcelH.DownloadTemplate)

@@ -3,8 +3,6 @@
  * Reuses naming sanitization aligned with batch zip downloads.
  */
 import { fetchAssetDownloadMetaResolved } from '@/domain/asset-access'
-import { isSameOriginPreviewUrl } from '@/domain/asset-preview-image'
-import http from '@/services/http'
 import { sanitizeZipEntryName } from '@/utils/batchZipDownload'
 
 export interface DownloadAssetFileOptions {
@@ -52,32 +50,15 @@ export function resolveAssetSaveFilename(preferredFilename: string, metaFilename
   return 'download'
 }
 
-export function triggerBrowserFileDownload(blob: Blob, filename: string) {
-  const objectURL = URL.createObjectURL(blob)
+export function triggerBrowserURLDownload(downloadUrl: string, filename: string, signal?: AbortSignal) {
+  if (signal?.aborted) throw signal.reason ?? new DOMException('Aborted', 'AbortError')
   const link = document.createElement('a')
-  link.href = objectURL
+  link.href = downloadUrl
   link.download = filename
   link.rel = 'noopener'
   document.body.appendChild(link)
   link.click()
   link.remove()
-  window.setTimeout(() => URL.revokeObjectURL(objectURL), 1000)
-}
-
-async function fetchBlobFromUrl(downloadUrl: string, signal?: AbortSignal): Promise<Blob> {
-  if (isSameOriginPreviewUrl(downloadUrl)) {
-    const response = await http.get<Blob>(downloadUrl, { responseType: 'blob', signal })
-    const blob = response.data
-    if (!(blob instanceof Blob)) {
-      throw new Error('下载失败')
-    }
-    return blob
-  }
-  const response = await fetch(downloadUrl, { credentials: 'omit', mode: 'cors', signal })
-  if (!response.ok) {
-    throw new Error(`下载失败（HTTP ${response.status}）`)
-  }
-  return response.blob()
 }
 
 /**
@@ -101,8 +82,7 @@ export async function downloadAssetFileWithOriginalFilename(
     } else {
       const saveName = resolveAssetSaveFilename(meta.filename ?? '', preferredFilename)
       try {
-        const blob = await fetchBlobFromUrl(meta.downloadUrl, options.signal)
-        triggerBrowserFileDownload(blob, saveName)
+        triggerBrowserURLDownload(meta.downloadUrl, saveName, options.signal)
         return { ok: true }
       } catch (err) {
         const msg = err instanceof Error ? err.message : '下载失败'
@@ -125,8 +105,7 @@ export async function downloadAssetFileWithOriginalFilename(
     return { ok: false, message: '无法使用预览文件代替原始素材，请刷新页面后重试' }
   }
   try {
-    const blob = await fetchBlobFromUrl(fallbackUrl, options.signal)
-    triggerBrowserFileDownload(blob, saveName)
+    triggerBrowserURLDownload(fallbackUrl, saveName, options.signal)
     return { ok: true }
   } catch (err) {
     const msg = err instanceof Error ? err.message : '下载失败'

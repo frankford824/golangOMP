@@ -164,7 +164,7 @@ export async function fetchAssetPreviewMeta(
         if (st === 404) return { status: 'not_found', message: '资源不存在' }
         if (st === 403) return { status: 'error', message: '无权限预览该资源' }
         if (st === 409)
-          return { status: 'unavailable', message: '当前不可预览，仅可下载（源稿/PSD 常无直预览）' }
+          return { status: 'preparing', message: '正在生成预览，请稍后自动刷新' }
       }
       const msg = e instanceof Error ? e.message : '加载预览失败'
       return { status: 'error', message: msg }

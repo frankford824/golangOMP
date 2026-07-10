@@ -14,7 +14,7 @@
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
-- 本文件覆盖 `219` 个 `/v1` path；同一路径多 method 合并在同一节。
+- 本文件覆盖 `223` 个 `/v1` path；同一路径多 method 合并在同一节。
 
 ## GET /v1/trace-events
 
@@ -1406,6 +1406,305 @@ curl -X PATCH https://api.example.com/v1/cost-rule-bindings/<id> \
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
 
+## POST /v1/tasks/reference-upload-sessions
+
+### 简介
+支持方法: POST。
+
+- `POST`: Canonical pre-task reference upload entry. Returns an OSS direct single-part or multipart plan chosen from the configured part-size threshold; the remote plan is present only as fallback when OSS direct planning is unavailable.
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `POST` 允许角色: Ops。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+无 path/query/header 参数。
+
+Content-Type: `application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `created_by` | integer | 否 | Deprecated and ignored. The backend always uses the authenticated session actor. |
+| `filename` | string | 是 | - |
+| `expected_size` | integer | 是 | Required exact file size in bytes. Pre-task reference uploads reject values above 300 MB and verify the final OSS object length. |
+| `mime_type` | string | 否 | - |
+| `file_hash` | string | 否 | - |
+| `remark` | string | 否 | - |
+
+### 响应体 schema
+成功响应: `201 application/json`
+
+```json
+{
+  "data": {
+    "session": {
+      "id": "...",
+      "task_id": "...",
+      "asset_id": "...",
+      "asset_type": "..."
+    },
+    "remote": {
+      "upload_id": "...",
+      "file_id": "...",
+      "base_url": "...",
+      "upload_url": "..."
+    },
+    "oss_direct": {
+      "mode": "...",
+      "object_key": "...",
+      "expires_at": "...",
+      "method": "...",
+      "required_upload_content_type": "..."
+    },
+    "complete_endpoint": "string"
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | CreateTaskReferenceUploadSessionResponseData | 否 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid request payload |
+| 401 | 见 `error.code` | 见 `deny_code` | Authentication required |
+
+### curl 示例
+```bash
+curl -X POST https://api.example.com/v1/tasks/reference-upload-sessions \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"example":"value"}'
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## GET /v1/tasks/reference-upload-sessions/{session_id}
+
+### 简介
+支持方法: GET。
+
+- `GET`: Get task reference upload session
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `GET` 允许角色: Ops。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `session_id` | path | string | 是 | - |
+
+请求体: 无请求体。
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "id": "string",
+    "task_id": 123,
+    "asset_id": 123,
+    "asset_type": "reference"
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | UploadSession | 否 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 404 | 见 `error.code` | 见 `deny_code` | Upload session not found |
+
+### curl 示例
+```bash
+curl -X GET https://api.example.com/v1/tasks/reference-upload-sessions/<session_id> \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## POST /v1/tasks/reference-upload-sessions/{session_id}/complete
+
+### 简介
+支持方法: POST。
+
+- `POST`: Finalizes the returned OSS plan, verifies that the expected object exists and matches the declared size, then returns the normalized `ref_object` for `POST /v1/tasks`.
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `POST` 允许角色: Ops。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `session_id` | path | string | 是 | - |
+
+Content-Type: `application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `completed_by` | integer | 否 | Deprecated and ignored. The backend always uses the authenticated session actor. |
+| `file_hash` | string | 否 | - |
+| `upload_content_type` | string | 否 | - |
+| `oss_upload_id` | string | 否 | - |
+| `oss_object_key` | string | 否 | - |
+| `oss_parts` | array<object> | 否 | - |
+| `remark` | string | 否 | - |
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "session": {
+      "id": "...",
+      "task_id": "...",
+      "asset_id": "...",
+      "asset_type": "..."
+    },
+    "reference_file_ref": "string",
+    "storage_ref": {
+      "ref_id": "...",
+      "asset_id": "...",
+      "owner_type": "...",
+      "owner_id": "..."
+    },
+    "ref_object": {
+      "asset_id": "...",
+      "source": "..."
+    }
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | CompleteTaskReferenceUploadSessionResponseData | 否 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid upload completion |
+| 404 | 见 `error.code` | 见 `deny_code` | Upload session not found |
+| 409 | 见 `error.code` | 见 `deny_code` | Upload session already terminal |
+
+### curl 示例
+```bash
+curl -X POST https://api.example.com/v1/tasks/reference-upload-sessions/<session_id>/complete \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"example":"value"}'
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## POST /v1/tasks/reference-upload-sessions/{session_id}/abort
+
+### 简介
+支持方法: POST。
+
+- `POST`: Abort task reference upload session
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `POST` 允许角色: Ops。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `session_id` | path | string | 是 | - |
+
+Content-Type: `application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `cancelled_by` | integer | 否 | Deprecated and ignored. The backend always uses the authenticated session actor. |
+| `remark` | string | 否 | - |
+| `oss_object_key` | string | 否 | Direct-upload object key returned by the session plan. Used for validated cleanup. |
+| `oss_upload_id` | string | 否 | Multipart upload id returned by the session plan. Used to abort unfinished multipart data. |
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "id": "string",
+    "task_id": 123,
+    "asset_id": 123,
+    "asset_type": "reference"
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | UploadSession | 否 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 404 | 见 `error.code` | 见 `deny_code` | Upload session not found |
+| 409 | 见 `error.code` | 见 `deny_code` | Completed upload session cannot be aborted |
+
+### curl 示例
+```bash
+curl -X POST https://api.example.com/v1/tasks/reference-upload-sessions/<session_id>/abort \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"example":"value"}'
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
 ## POST /v1/tasks/prepare-product-codes
 
 ### 简介
@@ -1480,7 +1779,7 @@ curl -X POST https://api.example.com/v1/tasks/prepare-product-codes \
 支持方法: GET, POST。
 
 - `GET`: Returns the frontend-oriented task list with projected `workflow`, aggregated `warehouse_status`, stable `product_selection` summary, `procurement_summary`, canonical actor/source fields `requester_id/requester_name`, `creator_id/creator_name`, `designer_id/designer_name`, `current_handler_id/current_handler_name`, and task org ownership fields `owner_team`, `owner_department`, and `owner_org_team`. Default ordering is latest updated first (`updated_at DESC, id DESC`). For `purchase_task`, `procurement_summary` carries procurement-to-warehouse coordination state plus lightweight product-selection provenance. Board queue `query_template` payloads are designed to be consumed directly by this endpoint. `workflow_lane` is the canonical list/workbench split selector for distinguishing the normal lane from the customization lane. Main task-flow list reads are globally visible to task-facing authenticated roles; use query filters for workbench/pool/tab slicing. Mutating actions such as assign/reassign, upload, submit, audit, filing, procurement, warehouse, close, and cancel remain action-gated by role, status, handler/assignee, and organization scope.
-- `POST`: Creates one task. For `original_product_development`, narrow by category or `search_entry_code`, call `GET /v1/erp/products`, choose one product, and submit that result through `product_selection`. Legacy `product_id`, `sku_code`, and `product_name_snapshot` fields remain accepted for compatibility. Current create rules: - `original_product_development` is existing-product only. - when `product_id` is null, backend resolves ERP/local binding before create-tx using this priority: `product_id` -> `product_selection.erp_product.product_id` -> `product_selection.erp_product.sku_code` -> top-level `sku_code`. - ERP-side codes are treated as bridge binding keys and are normalized to a local `products.id`; they are not used as local primary keys directly. - frontend should not send `source_mode`; backend infers it from `task_type`. - `new_product_development` infers `source_mode=new_product` and auto-generates `sku_code` when omitted. - `purchase_task` no longer depends on design/audit assumptions at entry; creation initializes a draft procurement record so read models expose procurement state immediately. - `retouch_task` is a design-only image retouch task. It infers `source_mode=new_product`, does not require product binding, does not enter audit, and is completed immediately after the retouch/design worker submits the retouched image. - customization workflow is decoupled from ERP order-detail APIs; no ERP order-info matching/sync dependency is required at runtime. - `customization_required=true` is the canonical way to create a customization-lane task; that task enters `PendingCustomizationProduction` first as the compatible "waiting for customization operator design submission" state and does not pass through the normal design workbench. - legacy `is_outsource` / `need_outsource` create intent is folded into the same customization lane for compatibility, but new integrations must not use those fields as workflow selectors. - customization-lane create now also creates one primary `customization_job` immediately so `/v1/customization-jobs` visibility exists before review approval. - customization classification is business-configurable through `customization_level_code` and `customization_level_name`; do not assume fixed `A/B/C` levels. - default task product-code rule is backend-only: `sku_code_type=regular` generates `CG + category_short_code(1 uppercase letter) + 6-digit sequence`, while `sku_code_type=customization` generates `DZ + category_short_code(1 uppercase letter) + 6-digit sequence`; frontend no longer configures code-rules/rule-templates for task `sku_code` generation. - category short code generation priority is backend-owned: explicit map first (e.g. `KT_STANDARD -> K`), otherwise first alphabet letter from `category_code` (uppercased), then deterministic fallback to one letter. - sequence allocation for default task product-code uses `(prefix, category_short_code)` scope so different `category_code` values that collapse to one short code still remain unique. - `batch_sku_mode=multiple` is supported only for `new_product_development` and `purchase_task`; `original_product_development` returns `400 INVALID_REQUEST` with machine-readable `error.details.violations`. - batch Excel for `new_product_development` only requires each row's `产品名称` and `设计要求`; SKU/category internals are backend-owned. - batch mode writes one mother task plus multiple `task_sku_items` in one transaction and keeps `sku_code` / `primary_sku_code` aligned to the first child SKU for compatibility. - create now also appends `task.created`, and multi-SKU creates additionally append `task.batch_items_created`. - `reference_images` is no longer accepted. If present, backend returns `400 INVALID_REQUEST` and requires the reference-upload flow. - `reference_file_refs` must be objects returned by `POST /v1/tasks/reference-upload` or the compatibility task-create asset-center flow; forged, missing, incomplete, or unauthorized refs return `400 INVALID_REQUEST` with `invalid_reference_file_refs`.
+- `POST`: Creates one task. For `original_product_development`, narrow by category or `search_entry_code`, call `GET /v1/erp/products`, choose one product, and submit that result through `product_selection`. Legacy `product_id`, `sku_code`, and `product_name_snapshot` fields remain accepted for compatibility. Current create rules: - `original_product_development` is existing-product only. - when `product_id` is null, backend resolves ERP/local binding before create-tx using this priority: `product_id` -> `product_selection.erp_product.product_id` -> `product_selection.erp_product.sku_code` -> top-level `sku_code`. - ERP-side codes are treated as bridge binding keys and are normalized to a local `products.id`; they are not used as local primary keys directly. - frontend should not send `source_mode`; backend infers it from `task_type`. - `new_product_development` infers `source_mode=new_product` and auto-generates `sku_code` when omitted. - `purchase_task` no longer depends on design/audit assumptions at entry; creation initializes a draft procurement record so read models expose procurement state immediately. - `retouch_task` is a design-only image retouch task. It infers `source_mode=new_product`, does not require product binding, does not enter audit, and is completed immediately after the retouch/design worker submits the retouched image. - customization workflow is decoupled from ERP order-detail APIs; no ERP order-info matching/sync dependency is required at runtime. - `customization_required=true` is the canonical way to create a customization-lane task; that task enters `PendingCustomizationProduction` first as the compatible "waiting for customization operator design submission" state and does not pass through the normal design workbench. - legacy `is_outsource` / `need_outsource` create intent is folded into the same customization lane for compatibility, but new integrations must not use those fields as workflow selectors. - customization-lane create now also creates one primary `customization_job` immediately so `/v1/customization-jobs` visibility exists before review approval. - customization classification is business-configurable through `customization_level_code` and `customization_level_name`; do not assume fixed `A/B/C` levels. - default task product-code rule is backend-only: `sku_code_type=regular` generates `CG + category_short_code(1 uppercase letter) + 6-digit sequence`, while `sku_code_type=customization` generates `DZ + category_short_code(1 uppercase letter) + 6-digit sequence`; frontend no longer configures code-rules/rule-templates for task `sku_code` generation. - category short code generation priority is backend-owned: explicit map first (e.g. `KT_STANDARD -> K`), otherwise first alphabet letter from `category_code` (uppercased), then deterministic fallback to one letter. - sequence allocation for default task product-code uses `(prefix, category_short_code)` scope so different `category_code` values that collapse to one short code still remain unique. - `batch_sku_mode=multiple` is supported only for `new_product_development` and `purchase_task`; `original_product_development` returns `400 INVALID_REQUEST` with machine-readable `error.details.violations`. - batch Excel for `new_product_development` only requires each row's `产品名称` and `设计要求`; SKU/category internals are backend-owned. - batch mode writes one mother task plus multiple `task_sku_items` in one transaction and keeps `sku_code` / `primary_sku_code` aligned to the first child SKU for compatibility. - create now also appends `task.created`, and multi-SKU creates additionally append `task.batch_items_created`. - `reference_images` is no longer accepted. If present, backend returns `400 INVALID_REQUEST` and requires the reference-upload flow. - `reference_file_refs` must be objects returned by `POST /v1/tasks/reference-upload-sessions/{session_id}/complete` or the compatibility task-create asset-center flow; forged, missing, incomplete, or unauthorized refs return `400 INVALID_REQUEST` with `invalid_reference_file_refs`.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -1591,7 +1890,7 @@ Content-Type: `application/json`
 | `is_outsource` | boolean | 否 | Compatibility-only legacy create flag. When true, backend normalizes the request into `customization_required=true`. |
 | `customization_required` | boolean | 否 | Canonical creation-time customization lane selector. When true, task enters customization review directly, bypasses the normal design workbench, and immediately gets one primary `customization_job`. |
 | `customization_source_type` | enum(new_product/existing_product) | 否 | Business source classification inside the customization lane; it does not select the lane by itself. |
-| `reference_file_refs` | array<ReferenceFileRef> | 否 | Reference file ref objects returned by `POST /v1/tasks/reference-upload` or the compatibility upload flow. Object arrays are the formal contract. `POST /v1/tasks` rejects direct `reference_images` payloads with `400 INVALID_REQUEST`. |
+| `reference_file_refs` | array<ReferenceFileRef> | 否 | Reference file ref objects returned by `POST /v1/tasks/reference-upload-sessions/{session_id}/complete` or a compatibility upload flow. Object arrays are the formal contract. `POST /v1/tasks` rejects direct `reference_images` payloads with `400 INVALID_REQUEST`. |
 | `remark` | string | 否 | - |
 | `note` | string | 否 | - |
 | `batch_sku_mode` | enum(single/multiple) | 否 | - |
@@ -3296,8 +3595,14 @@ Content-Type: `application/json`
       "base_url": "...",
       "upload_url": "..."
     },
-    "upload_strategy": "string",
-    "required_upload_content_type": "string"
+    "oss_direct": {
+      "mode": "...",
+      "object_key": "...",
+      "expires_at": "...",
+      "method": "...",
+      "required_upload_content_type": "..."
+    },
+    "upload_strategy": "string"
   }
 }
 ```
@@ -3827,7 +4132,7 @@ Content-Type: `application/json`
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `task_id` | integer | 否 | Required on `POST /v1/assets/upload-sessions`; ignored on task-scoped compatibility routes where task context comes from path. |
-| `created_by` | integer | 否 | - |
+| `created_by` | integer | 否 | Deprecated and ignored. The backend always uses the authenticated session actor. |
 | `asset_id` | integer | 否 | Existing design-asset id when replacing a current resource. Required for every upload against a `Completed` task and for delivery replacement during customization review. |
 | `source_asset_id` | integer | 否 | Optional linkage to a source asset. Allowed for `preview` and `design_thumb` intents. |
 | `asset_type` | enum(reference/source/delivery/preview/design_thumb) | 否 | Compatibility alias of `asset_kind` retained for migration safety. |
@@ -3835,8 +4140,8 @@ Content-Type: `application/json`
 | `upload_mode` | enum(small/multipart) | 否 | Compatibility-only input. New frontend integrations must not send this field. |
 | `filename` | string | 否 | Compatibility alias of `file_name`. At least one of `file_name` or `filename` must be provided. |
 | `file_name` | string | 否 | Canonical file name field for new frontend integrations. At least one of `file_name` or `filename` must be provided. |
-| `expected_size` | integer | 否 | Optional size hint in bytes. Task asset upload sessions reject values above 1 GiB. |
-| `file_size` | integer | 否 | Optional compatibility alias of `expected_size`. Task asset upload sessions reject values above 1 GiB. |
+| `expected_size` | integer | 否 | Required exact file size in bytes. Task asset upload sessions reject values above 1 GiB and completion verifies the OSS object length. |
+| `file_size` | integer | 否 | Compatibility alias of `expected_size`; when used it must be the exact positive file size. |
 | `mime_type` | string | 否 | Optional MIME hint. |
 | `file_hash` | string | 否 | - |
 | `remark` | string | 否 | - |
@@ -3862,8 +4167,14 @@ Content-Type: `application/json`
       "base_url": "...",
       "upload_url": "..."
     },
-    "upload_strategy": "string",
-    "required_upload_content_type": "string"
+    "oss_direct": {
+      "mode": "...",
+      "object_key": "...",
+      "expires_at": "...",
+      "method": "...",
+      "required_upload_content_type": "..."
+    },
+    "upload_strategy": "string"
   }
 }
 ```
@@ -3980,9 +4291,12 @@ Content-Type: `application/json`
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `completed_by` | integer | 否 | - |
+| `completed_by` | integer | 否 | Deprecated and ignored. The backend always uses the authenticated session actor. |
 | `file_hash` | string | 否 | - |
 | `upload_content_type` | string | 否 | Exact `required_upload_content_type` echoed back by the client when finalizing an OSS direct upload. |
+| `oss_object_key` | string | 否 | Required for every OSS direct completion. The backend validates that it belongs to this upload session. |
+| `oss_upload_id` | string | 否 | Required together with `oss_parts` for multipart completion; omitted for single-part completion. |
+| `oss_parts` | array<object> | 否 | Ordered multipart ETags; omitted for single-part completion. |
 | `remark` | string | 否 | - |
 | `reason` | string | 否 | Optional reason override for audit post-close supplement completion. When omitted, the reason captured during create-session is used. |
 
@@ -4067,8 +4381,10 @@ Content-Type: `application/json`
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `cancelled_by` | integer | 否 | - |
+| `cancelled_by` | integer | 否 | Deprecated and ignored. The backend always uses the authenticated session actor. |
 | `remark` | string | 否 | - |
+| `oss_object_key` | string | 否 | Direct-upload object key returned by the session plan. Used for validated cleanup. |
+| `oss_upload_id` | string | 否 | Multipart upload id returned by the session plan. Used to abort unfinished multipart data. |
 
 ### 响应体 schema
 成功响应: `200 application/json`
@@ -4137,7 +4453,7 @@ Content-Type: `application/json`
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `task_id` | integer | 否 | Required on `POST /v1/assets/upload-sessions`; ignored on task-scoped compatibility routes where task context comes from path. |
-| `created_by` | integer | 否 | - |
+| `created_by` | integer | 否 | Deprecated and ignored. The backend always uses the authenticated session actor. |
 | `asset_id` | integer | 否 | Existing design-asset id when replacing a current resource. Required for every upload against a `Completed` task and for delivery replacement during customization review. |
 | `source_asset_id` | integer | 否 | Optional linkage to a source asset. Allowed for `preview` and `design_thumb` intents. |
 | `asset_type` | enum(reference/source/delivery/preview/design_thumb) | 否 | Compatibility alias of `asset_kind` retained for migration safety. |
@@ -4145,8 +4461,8 @@ Content-Type: `application/json`
 | `upload_mode` | enum(small/multipart) | 否 | Compatibility-only input. New frontend integrations must not send this field. |
 | `filename` | string | 否 | Compatibility alias of `file_name`. At least one of `file_name` or `filename` must be provided. |
 | `file_name` | string | 否 | Canonical file name field for new frontend integrations. At least one of `file_name` or `filename` must be provided. |
-| `expected_size` | integer | 否 | Optional size hint in bytes. Task asset upload sessions reject values above 1 GiB. |
-| `file_size` | integer | 否 | Optional compatibility alias of `expected_size`. Task asset upload sessions reject values above 1 GiB. |
+| `expected_size` | integer | 否 | Required exact file size in bytes. Task asset upload sessions reject values above 1 GiB and completion verifies the OSS object length. |
+| `file_size` | integer | 否 | Compatibility alias of `expected_size`; when used it must be the exact positive file size. |
 | `mime_type` | string | 否 | Optional MIME hint. |
 | `file_hash` | string | 否 | - |
 | `remark` | string | 否 | - |
@@ -4172,8 +4488,14 @@ Content-Type: `application/json`
       "base_url": "...",
       "upload_url": "..."
     },
-    "upload_strategy": "string",
-    "required_upload_content_type": "string"
+    "oss_direct": {
+      "mode": "...",
+      "object_key": "...",
+      "expires_at": "...",
+      "method": "...",
+      "required_upload_content_type": "..."
+    },
+    "upload_strategy": "string"
   }
 }
 ```
@@ -14815,7 +15137,7 @@ curl -X DELETE https://api.example.com/v1/asset-workbench/settlement/supplements
 ### 简介
 支持方法: POST。
 
-- `POST`: Creates a direct-upload session. When upload directories are configured, `upload_directory_id` is required and the session stores the directory name, prefix, and difficulty snapshot.
+- `POST`: Creates a direct-upload session. Files no larger than the configured OSS part size use a single PUT; larger files use multipart upload. When upload directories are configured, `upload_directory_id` is required and the session stores the directory name, prefix, and difficulty snapshot. `file_hash` is optional metadata and is not required before upload starts.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -14891,7 +15213,7 @@ curl -X POST https://api.example.com/v1/asset-workbench/upload-sessions \
 ### 简介
 支持方法: POST。
 
-- `POST`: Complete asset workbench upload session
+- `POST`: Completes multipart uploads with ordered ETags. For a single-part session, the body may be empty and the backend verifies that the signed PUT created the expected OSS object.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
