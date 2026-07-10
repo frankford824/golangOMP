@@ -3660,36 +3660,67 @@ func (r *assetWorkbenchRepo) ListEvents(ctx context.Context, filter repo.AssetWo
 	where := []string{"1=1"}
 	args := []interface{}{}
 	if v := strings.TrimSpace(filter.EventType); v != "" {
-		where = append(where, "event_type = ?")
+		where = append(where, "e.event_type = ?")
 		args = append(args, v)
 	}
 	if v := strings.TrimSpace(filter.EntityType); v != "" {
-		where = append(where, "entity_type = ?")
+		where = append(where, "e.entity_type = ?")
 		args = append(args, v)
 	}
 	if filter.EntityID != nil {
-		where = append(where, "entity_id = ?")
+		where = append(where, "e.entity_id = ?")
 		args = append(args, *filter.EntityID)
 	}
 	if filter.ActorID != nil {
-		where = append(where, "actor_user_id = ?")
+		where = append(where, "e.actor_user_id = ?")
 		args = append(args, *filter.ActorID)
 	}
 	var total int64
-	if err := r.db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM asset_workbench_events WHERE `+strings.Join(where, " AND "), args...).Scan(&total); err != nil {
+	if err := r.db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM asset_workbench_events e WHERE `+strings.Join(where, " AND "), args...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count asset workbench events: %w", err)
 	}
 	page, pageSize := normalizePage(filter.Page, filter.PageSize)
-	rows, err := r.db.db.QueryContext(ctx, assetWorkbenchEventSelect()+` WHERE `+strings.Join(where, " AND ")+`
-		ORDER BY created_at DESC, id DESC
+	idRows, err := r.db.db.QueryContext(ctx, `SELECT e.id FROM asset_workbench_events e WHERE `+strings.Join(where, " AND ")+`
+		ORDER BY e.id DESC
 		LIMIT ? OFFSET ?`, append(args, pageSize, (page-1)*pageSize)...)
 	if err != nil {
-		return nil, 0, fmt.Errorf("list asset workbench events: %w", err)
+		return nil, 0, fmt.Errorf("list asset workbench event ids: %w", err)
+	}
+	ids := make([]int64, 0, pageSize)
+	for idRows.Next() {
+		var id int64
+		if err := idRows.Scan(&id); err != nil {
+			_ = idRows.Close()
+			return nil, 0, fmt.Errorf("scan asset workbench event id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := idRows.Err(); err != nil {
+		_ = idRows.Close()
+		return nil, 0, fmt.Errorf("list asset workbench event ids: %w", err)
+	}
+	_ = idRows.Close()
+	if len(ids) == 0 {
+		return []*domain.AssetWorkbenchEvent{}, total, nil
+	}
+	placeholders := strings.TrimRight(strings.Repeat("?,", len(ids)), ",")
+	hydrateArgs := make([]interface{}, 0, len(ids)*2)
+	for _, id := range ids {
+		hydrateArgs = append(hydrateArgs, id)
+	}
+	for _, id := range ids {
+		hydrateArgs = append(hydrateArgs, id)
+	}
+	rows, err := r.db.db.QueryContext(ctx, assetWorkbenchEventListSelect()+`
+		WHERE e.id IN (`+placeholders+`)
+		ORDER BY FIELD(e.id, `+placeholders+`)`, hydrateArgs...)
+	if err != nil {
+		return nil, 0, fmt.Errorf("hydrate asset workbench events: %w", err)
 	}
 	defer rows.Close()
 	items := []*domain.AssetWorkbenchEvent{}
 	for rows.Next() {
-		item, err := scanAssetWorkbenchEvent(rows)
+		item, err := scanAssetWorkbenchEventList(rows)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -4504,6 +4535,16 @@ func assetWorkbenchEventSelect() string {
 		FROM asset_workbench_events`
 }
 
+func assetWorkbenchEventListSelect() string {
+	return `SELECT e.id, e.actor_user_id, e.event_type, e.entity_type, e.entity_id,
+		NULL AS before_json, NULL AS after_json, e.reason, e.created_at,
+		COALESCE(u.username, '') AS actor_username,
+		COALESCE(NULLIF(p.real_name, ''), NULLIF(u.display_name, ''), u.username, '') AS actor_display_name
+		FROM asset_workbench_events e
+		LEFT JOIN users u ON u.id = e.actor_user_id
+		LEFT JOIN asset_workbench_profiles p ON p.user_id = e.actor_user_id`
+}
+
 func assetWorkbenchSavedViewSelect() string {
 	return `SELECT id, user_id, view_type, view_name, config_json, is_default, created_at, updated_at
 		FROM asset_workbench_saved_views`
@@ -5165,6 +5206,32 @@ func scanAssetWorkbenchEvent(scanner interface{ Scan(...interface{}) error }) (*
 	if err := scanner.Scan(
 		&item.ID, &actorUserID, &item.EventType, &item.EntityType, &entityID,
 		&beforeJSON, &afterJSON, &item.Reason, &item.CreatedAt,
+	); err != nil {
+		return nil, err
+	}
+	item.ActorUserID = fromNullInt64(actorUserID)
+	item.EntityID = fromNullInt64(entityID)
+	item.Before = cloneValidJSON(beforeJSON)
+	item.After = cloneValidJSON(afterJSON)
+	return &item, nil
+}
+
+func scanAssetWorkbenchEventList(scanner interface{ Scan(...interface{}) error }) (*domain.AssetWorkbenchEvent, error) {
+	item, err := scanAssetWorkbenchEventWithActor(scanner)
+	if err != nil {
+		return nil, err
+	}
+	return item, nil
+}
+
+func scanAssetWorkbenchEventWithActor(scanner interface{ Scan(...interface{}) error }) (*domain.AssetWorkbenchEvent, error) {
+	var item domain.AssetWorkbenchEvent
+	var actorUserID, entityID sql.NullInt64
+	var beforeJSON, afterJSON sql.NullString
+	if err := scanner.Scan(
+		&item.ID, &actorUserID, &item.EventType, &item.EntityType, &entityID,
+		&beforeJSON, &afterJSON, &item.Reason, &item.CreatedAt,
+		&item.ActorUsername, &item.ActorDisplayName,
 	); err != nil {
 		return nil, err
 	}

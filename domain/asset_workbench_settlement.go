@@ -105,15 +105,17 @@ type AssetWorkbenchSettlementSupplement struct {
 }
 
 type AssetWorkbenchEvent struct {
-	ID          int64           `json:"id" db:"id"`
-	ActorUserID *int64          `json:"actor_user_id,omitempty" db:"actor_user_id"`
-	EventType   string          `json:"event_type" db:"event_type"`
-	EntityType  string          `json:"entity_type" db:"entity_type"`
-	EntityID    *int64          `json:"entity_id,omitempty" db:"entity_id"`
-	Before      json.RawMessage `json:"before_json,omitempty" db:"before_json"`
-	After       json.RawMessage `json:"after_json,omitempty" db:"after_json"`
-	Reason      string          `json:"reason" db:"reason"`
-	CreatedAt   time.Time       `json:"created_at" db:"created_at"`
+	ID               int64           `json:"id" db:"id"`
+	ActorUserID      *int64          `json:"actor_user_id,omitempty" db:"actor_user_id"`
+	ActorUsername    string          `json:"actor_username,omitempty" db:"-"`
+	ActorDisplayName string          `json:"actor_display_name,omitempty" db:"-"`
+	EventType        string          `json:"event_type" db:"event_type"`
+	EntityType       string          `json:"entity_type" db:"entity_type"`
+	EntityID         *int64          `json:"entity_id,omitempty" db:"entity_id"`
+	Before           json.RawMessage `json:"before_json,omitempty" db:"before_json"`
+	After            json.RawMessage `json:"after_json,omitempty" db:"after_json"`
+	Reason           string          `json:"reason" db:"reason"`
+	CreatedAt        time.Time       `json:"created_at" db:"created_at"`
 }
 
 type AssetWorkbenchSavedView struct {

@@ -195,3 +195,45 @@ func TestAssetWorkbenchSubmissionOrderBySupportsFileAndTimeSorts(t *testing.T) {
 		})
 	}
 }
+
+func TestListEventsPagesIDsBeforeHydratingLightweightRows(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	now := time.Date(2026, 7, 10, 11, 42, 37, 0, time.UTC)
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT COUNT(*) FROM asset_workbench_events e WHERE 1=1`)).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(int64(2)))
+	mock.ExpectQuery(regexp.QuoteMeta(`SELECT e.id FROM asset_workbench_events e WHERE 1=1
+		ORDER BY e.id DESC
+		LIMIT ? OFFSET ?`)).
+		WithArgs(50, 0).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(3902)).AddRow(int64(3901)))
+	mock.ExpectQuery(regexp.QuoteMeta(assetWorkbenchEventListSelect()+`
+		WHERE e.id IN (?,?)
+		ORDER BY FIELD(e.id, ?,?)`)).
+		WithArgs(int64(3902), int64(3901), int64(3902), int64(3901)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "actor_user_id", "event_type", "entity_type", "entity_id",
+			"before_json", "after_json", "reason", "created_at", "actor_username", "actor_display_name",
+		}).
+			AddRow(int64(3902), int64(302), domain.AssetWorkbenchEventFileMoved, domain.AssetWorkbenchEntitySubmissionFile, int64(564), nil, nil, "移动到 A 类", now, "test-admin", "测试管理员").
+			AddRow(int64(3901), int64(302), domain.AssetWorkbenchEventItemRepriced, domain.AssetWorkbenchEntitySubmissionItem, int64(450), nil, nil, "移动后重新计价", now.Add(-time.Second), "test-admin", "测试管理员"))
+
+	workbenchRepo := NewAssetWorkbenchRepo(New(db))
+	items, total, err := workbenchRepo.ListEvents(context.Background(), repo.AssetWorkbenchEventFilter{Page: 1, PageSize: 50})
+	if err != nil {
+		t.Fatalf("ListEvents() error = %v", err)
+	}
+	if total != 2 || len(items) != 2 {
+		t.Fatalf("ListEvents() total=%d items=%d, want 2", total, len(items))
+	}
+	if items[0].ID != 3902 || items[0].ActorDisplayName != "测试管理员" || len(items[0].Before) != 0 || len(items[0].After) != 0 {
+		t.Fatalf("first event = %+v, want lightweight moved event with actor", items[0])
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}

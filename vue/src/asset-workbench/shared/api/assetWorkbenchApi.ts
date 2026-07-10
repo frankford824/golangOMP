@@ -1554,7 +1554,10 @@ export const assetWorkbenchApi = {
     const form = new FormData()
     form.set('business_month', businessMonth)
     form.set('file', file)
-    const res = await http.post<ApiEnvelope<SettlementSupplementImportResult>>('/v1/asset-workbench/settlement/supplements/excel', form, { signal })
+    const res = await http.post<ApiEnvelope<SettlementSupplementImportResult>>('/v1/asset-workbench/settlement/supplements/excel', form, {
+      signal,
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
     return unwrap(res.data)
   },
 
@@ -1570,7 +1573,10 @@ export const assetWorkbenchApi = {
     const form = new FormData()
     form.set('business_month', businessMonth)
     form.set('file', file)
-    const res = await http.post<ApiEnvelope<ErrorImportBatchRow>>('/v1/asset-workbench/error-imports/excel', form, { signal })
+    const res = await http.post<ApiEnvelope<ErrorImportBatchRow>>('/v1/asset-workbench/error-imports/excel', form, {
+      signal,
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
     return unwrap(res.data)
   },
 
@@ -1654,7 +1660,10 @@ export const assetWorkbenchApi = {
     const form = new FormData()
     if (businessMonth) form.set('business_month', businessMonth)
     form.set('file', file)
-    const res = await http.post<ApiEnvelope<SubmissionItemQCImportResult>>('/v1/asset-workbench/items/qc/excel', form, { signal })
+    const res = await http.post<ApiEnvelope<SubmissionItemQCImportResult>>('/v1/asset-workbench/items/qc/excel', form, {
+      signal,
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
     return unwrap(res.data)
   },
 

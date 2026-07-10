@@ -1,10 +1,10 @@
-# V1 API 速查表(346 path · 一行一条)
+# V1 API 速查表(347 path · 一行一条)
 
 > Revision: V1.3-A2 i_id-first task/ERP/search integration (2026-04-27)
 > Source: docs/api/openapi.yaml (post V1.3-A2)
 
 > 本表一行对应一个 `/v1` path；同一路径多 method 合并到 `Methods` 列。
-> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 346 个 `/v1` path。
+> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 347 个 `/v1` path。
 > 新前端只接 canonical 路径；compatibility/deprecated 路径仅作迁移兜底。
 
 | Methods | Path | Summary | RBAC | family doc |
@@ -190,6 +190,7 @@
 | GET | `/v1/experience/micro-question-eligibility` | Check whether a micro-question can be shown | GET:Ops, Designer, CustomizationOperator, CustomizationReviewer, Audit_A, Audit_B, Warehouse, Outsource, Admin, SuperAdmin, HRAdmin, OrgAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/experience/micro-question-answers` | Record a micro-question answer | POST:Ops, Designer, CustomizationOperator, CustomizationReviewer, Audit_A, Audit_B, Warehouse, Outsource, Admin, SuperAdmin, HRAdmin, OrgAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/ai-suggestions/{suggestion_event_id}/feedback` | Record AI suggestion feedback | POST:Ops, Designer, CustomizationOperator, CustomizationReviewer, Audit_A, Audit_B, Warehouse, Outsource, Admin, SuperAdmin, HRAdmin, OrgAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/asset-workbench/events` | List asset-workbench operation records | GET:AssetManager, AssetTemplateAdmin, AssetSettlement, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/asset-workbench/notifications` | List my asset-workbench notifications | GET:AssetSubmitter, AssetManager, AssetTemplateAdmin, AssetSettlement, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/asset-workbench/notifications/{id}/read` | Mark one asset-workbench notification as read | POST:AssetSubmitter, AssetManager, AssetTemplateAdmin, AssetSettlement, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/asset-workbench/notifications/read-all` | Mark all my asset-workbench notifications as read | POST:AssetSubmitter, AssetManager, AssetTemplateAdmin, AssetSettlement, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
