@@ -60,9 +60,16 @@ func (r *ExternalAssetPreviewRenderer) Render(ctx context.Context, sourcePath st
 	defer os.Remove(outPath)
 
 	input := sourcePath
-	if shouldReadFirstRenderableFrame(source.Filename, source.MimeType) {
+	pdfCleanup := func() {}
+	if isPDFPreviewSource(source.Filename, source.MimeType) {
+		input, pdfCleanup, err = renderPDFPreviewInput(ctx, sourcePath, spec)
+		if err != nil {
+			return nil, err
+		}
+	} else if shouldReadFirstRenderableFrame(source.Filename, source.MimeType) {
 		input += "[0]"
 	}
+	defer pdfCleanup()
 	geometry := fmt.Sprintf("%dx%d>", spec.MaxWidth, spec.MaxHeight)
 	args := []string{input, "-auto-orient", "-thumbnail", geometry, "-background", "white", "-alpha", "remove", "-alpha", "off", "-strip", "-quality", fmt.Sprintf("%d", spec.Quality), outPath}
 	if mode == "magick" {
@@ -81,6 +88,46 @@ func (r *ExternalAssetPreviewRenderer) Render(ctx context.Context, sourcePath st
 		return nil, fmt.Errorf("preview renderer produced empty output")
 	}
 	return content, nil
+}
+
+func renderPDFPreviewInput(ctx context.Context, sourcePath string, spec AssetPreviewRenderSpec) (string, func(), error) {
+	bin, err := exec.LookPath("pdftoppm")
+	if err != nil {
+		return "", func() {}, fmt.Errorf("PDF preview renderer pdftoppm is not installed: %w", err)
+	}
+	tempDir, err := os.MkdirTemp("", "asset-preview-pdf-*")
+	if err != nil {
+		return "", func() {}, fmt.Errorf("create PDF preview temp directory: %w", err)
+	}
+	cleanup := func() { _ = os.RemoveAll(tempDir) }
+	outputPrefix := filepath.Join(tempDir, "page")
+	maxDimension := spec.MaxWidth
+	if spec.MaxHeight > maxDimension {
+		maxDimension = spec.MaxHeight
+	}
+	args := []string{
+		"-f", "1",
+		"-l", "1",
+		"-singlefile",
+		"-scale-to", fmt.Sprintf("%d", maxDimension),
+		"-png",
+		sourcePath,
+		outputPrefix,
+	}
+	output, err := exec.CommandContext(ctx, bin, args...).CombinedOutput()
+	if err != nil {
+		cleanup()
+		return "", func() {}, fmt.Errorf("pdftoppm preview render failed: %w output=%s", err, strings.TrimSpace(string(output)))
+	}
+	outputPath := outputPrefix + ".png"
+	if info, statErr := os.Stat(outputPath); statErr != nil || info.Size() == 0 {
+		cleanup()
+		if statErr != nil {
+			return "", func() {}, fmt.Errorf("read pdftoppm preview output: %w", statErr)
+		}
+		return "", func() {}, fmt.Errorf("pdftoppm preview renderer produced empty output")
+	}
+	return outputPath, cleanup, nil
 }
 
 func resolvePreviewRendererCommand(configured string) (string, string, error) {
@@ -121,4 +168,15 @@ func shouldReadFirstRenderableFrame(filename, mimeType string) bool {
 		strings.Contains(mimeType, "illustrator") ||
 		mimeType == "image/tiff" ||
 		mimeType == "image/x-tiff"
+}
+
+func isPDFPreviewSource(filename, mimeType string) bool {
+	if normalizePreviewFileExtension(filename) == ".pdf" {
+		return true
+	}
+	mimeType = strings.ToLower(strings.TrimSpace(mimeType))
+	if idx := strings.Index(mimeType, ";"); idx >= 0 {
+		mimeType = strings.TrimSpace(mimeType[:idx])
+	}
+	return mimeType == "application/pdf"
 }
