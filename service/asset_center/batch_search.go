@@ -94,7 +94,7 @@ func (s *Service) batchSearchOne(ctx context.Context, term, formatFilter, assetK
 		if score <= 0 {
 			continue
 		}
-		detail := buildAssetDetail(row, nil)
+		detail := s.buildAssetDetail(row, nil)
 		if detail == nil {
 			continue
 		}

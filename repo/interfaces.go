@@ -320,6 +320,7 @@ type ExternalAssetRepo interface {
 	MarkOSSPreparePending(ctx context.Context, id int64) error
 	MarkOSSPendingByOriginPrefixes(ctx context.Context, prefixes []ExternalAssetOriginPrefix) (int64, error)
 	MarkPreviewPreparePending(ctx context.Context, id int64) error
+	MarkPreviewPendingByOriginPrefixes(ctx context.Context, prefixes []ExternalAssetOriginPrefix) (int64, error)
 	ListDirectURLRefreshCandidates(ctx context.Context, mountPaths []string, limit int, staleBefore time.Time) ([]*domain.ExternalAssetRecord, error)
 	ListPendingOSS(ctx context.Context, mountPaths []string, limit int) ([]*domain.ExternalAssetRecord, error)
 	ListPendingOSSPrioritized(ctx context.Context, prefixes []ExternalAssetOriginPrefix, mountPaths []string, limit int) ([]*domain.ExternalAssetRecord, error)

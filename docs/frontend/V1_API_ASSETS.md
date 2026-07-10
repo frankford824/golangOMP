@@ -11,7 +11,7 @@
 
 - 资产上传建议走 upload session；下载与预览 URL 以接口返回为准。
 - 删除、归档、恢复动作需按返回错误处理竞态和权限失败。
-- 本文件覆盖 `19` 个 `/v1` path；同一路径多 method 合并在同一节。
+- 本文件覆盖 `20` 个 `/v1` path；同一路径多 method 合并在同一节。
 
 ## GET /v1/assets
 
@@ -411,6 +411,58 @@ curl -X DELETE https://api.example.com/v1/assets/<asset_id> \
 ### curl 示例
 ```bash
 curl -X GET https://api.example.com/v1/assets/<asset_id>/download \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### 前端最佳实践
+- 资产上传建议走 upload session；下载与预览 URL 以接口返回为准。
+- 删除、归档、恢复动作需按返回错误处理竞态和权限失败。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
+## GET /v1/assets/{asset_id}/content
+
+### 简介
+支持方法: GET。
+
+- `GET`: Authenticated byte-stream endpoint for external netdisk resources such as `/quark`. The backend authorizes and resolves the resource, then Nginx internally streams the signed AList `/p` source with HTTP Range support. Original bytes are not copied to OSS; derived thumbnails and previews remain OSS-backed.
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `GET` 允许角色: Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, Warehouse, Admin。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+| 参数 | 位置 | 类型 | 必填 | 说明 |
+|---|---|---|---|---|
+| `asset_id` | path | string | 是 | External resource id such as `ext-123`. |
+
+请求体: 无请求体。
+
+### 响应体 schema
+成功响应: `200 application/octet-stream`
+
+```json
+"string"
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `body` | string | 视接口 | OpenAPI 声明的整体对象。 |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | Resource id is not an external netdisk asset |
+| 401 | 见 `error.code` | 见 `deny_code` | Unauthenticated |
+| 403 | 见 `error.code` | 见 `deny_code` | Forbidden |
+| 404 | 见 `error.code` | 见 `deny_code` | Asset not found |
+
+### curl 示例
+```bash
+curl -X GET https://api.example.com/v1/assets/<asset_id>/content \
   -H "Authorization: Bearer $TOKEN"
 ```
 

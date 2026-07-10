@@ -1212,6 +1212,10 @@ function unwrapPaginated<T>(payload: ApiEnvelope<T[]> | T[]): PaginatedResult<T>
 }
 
 export const assetWorkbenchApi = {
+  async refreshDownloadCookie(signal?: AbortSignal): Promise<void> {
+    await http.post('/v1/auth/asset-cookie', undefined, { signal })
+  },
+
   async register(payload: AssetWorkbenchRegisterPayload, signal?: AbortSignal): Promise<AssetWorkbenchRegisterResult> {
     const res = await http.post<ApiEnvelope<AssetWorkbenchRegisterResult>>('/v1/asset-workbench/register', payload, { signal })
     return unwrap(res.data)

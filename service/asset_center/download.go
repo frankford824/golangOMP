@@ -8,6 +8,7 @@ import (
 	"workflow/domain"
 	"workflow/repo"
 	baseservice "workflow/service"
+	externalassets "workflow/service/external_assets"
 )
 
 func (s *Service) DownloadLatest(ctx context.Context, assetID int64) (*domain.AssetDownloadInfo, *domain.AppError) {
@@ -38,6 +39,13 @@ func (s *Service) PreviewExternal(ctx context.Context, externalID int64) (*domai
 		return nil, domain.ErrNotFound
 	}
 	return s.externalSvc.PreviewInfo(ctx, externalID)
+}
+
+func (s *Service) ResolveExternalStream(ctx context.Context, externalID int64) (*externalassets.NetdiskStreamTarget, *domain.AppError) {
+	if s.externalSvc == nil || !s.externalSvc.Enabled() {
+		return nil, domain.ErrNotFound
+	}
+	return s.externalSvc.ResolveNetdiskStream(ctx, externalID)
 }
 
 func (s *Service) downloadRow(row *repo.TaskAssetSearchRow) (*domain.AssetDownloadInfo, *domain.AppError) {

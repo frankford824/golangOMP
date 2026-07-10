@@ -435,6 +435,40 @@ func (h *TaskAssetCenterHandler) DownloadGlobalAsset(c *gin.Context) {
 	respondOK(c, info)
 }
 
+func (h *TaskAssetCenterHandler) StreamGlobalExternalAsset(c *gin.Context) {
+	if h.globalSvc == nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInternalError, "asset center service is not configured", nil))
+		return
+	}
+	externalID, ok := domain.ParseExternalAssetResourceID(c.Param("asset_id"))
+	if !ok {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "该下载入口仅支持外部网盘资源", nil))
+		return
+	}
+	target, appErr := h.globalSvc.ResolveExternalStream(c.Request.Context(), externalID)
+	if appErr != nil {
+		respondAssetCenterError(c, appErr)
+		return
+	}
+	if target == nil {
+		respondAssetCenterError(c, domain.ErrNotFound)
+		return
+	}
+	if target.RedirectURL != "" {
+		c.Redirect(http.StatusTemporaryRedirect, target.RedirectURL)
+		return
+	}
+	if target.InternalRedirect == "" {
+		respondError(c, domain.NewAppError(domain.ErrCodeAssetMissing, "外部网盘下载地址无效，请稍后重试", nil))
+		return
+	}
+	c.Header("Cache-Control", "private, no-store")
+	c.Header("Content-Disposition", service.ContentDispositionAttachment(target.Filename))
+	c.Header("X-Accel-Buffering", "no")
+	c.Header("X-Accel-Redirect", target.InternalRedirect)
+	c.Status(http.StatusOK)
+}
+
 func (h *TaskAssetCenterHandler) DownloadGlobalAssetVersion(c *gin.Context) {
 	if h.globalSvc == nil {
 		respondError(c, domain.NewAppError(domain.ErrCodeInternalError, "asset center service is not configured", nil))

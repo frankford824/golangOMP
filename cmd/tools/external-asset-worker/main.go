@@ -22,6 +22,7 @@ type summary struct {
 	OSSProcessed        int                            `json:"oss_processed"`
 	OSSRequiredQueued   int64                          `json:"oss_required_queued,omitempty"`
 	PreviewProcessed    int                            `json:"preview_processed"`
+	PreviewQueued       int64                          `json:"preview_queued,omitempty"`
 	DirectURLReady      int                            `json:"direct_url_ready"`
 	DirectURLFailed     int                            `json:"direct_url_failed"`
 	DirectURLCandidates int                            `json:"direct_url_candidates,omitempty"`
@@ -35,10 +36,16 @@ func main() {
 	var timeout time.Duration
 	var dryRun bool
 	var fullSync bool
+	var queueVisiblePreviews bool
+	var drainPreviews bool
+	var prepareMounts string
 	flag.IntVar(&limit, "limit", 20, "maximum jobs per queue to process")
 	flag.DurationVar(&timeout, "timeout", 30*time.Minute, "whole run timeout")
 	flag.BoolVar(&dryRun, "dry-run", false, "print pending counts without uploading")
 	flag.BoolVar(&fullSync, "full-sync", false, "scan configured AList mounts into the external asset index")
+	flag.BoolVar(&queueVisiblePreviews, "queue-visible-previews", false, "queue previews for every supported file inside configured visible roots")
+	flag.BoolVar(&drainPreviews, "drain-previews", false, "process preview jobs repeatedly until the queue is empty or timeout is reached")
+	flag.StringVar(&prepareMounts, "prepare-mounts", "", "optional comma-separated mount override for this worker run")
 	flag.Parse()
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
@@ -47,6 +54,9 @@ func main() {
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("load config: %v", err)
+	}
+	if prepareMounts != "" {
+		cfg.ExternalAssets.PrepareMounts = prepareMounts
 	}
 	db, err := sql.Open("mysql", cfg.MySQL.DSN)
 	if err != nil {
@@ -120,6 +130,35 @@ func main() {
 		}
 		return
 	}
+	previewQueued := int64(0)
+	if queueVisiblePreviews {
+		previewQueued, err = svc.EnsureVisiblePreviewsPending(ctx)
+		if err != nil {
+			log.Fatalf("queue visible previews: %v", err)
+		}
+	}
+	if drainPreviews {
+		processed := 0
+		for ctx.Err() == nil {
+			done, processErr := svc.ProcessPendingPreview(ctx, limit)
+			if processErr != nil {
+				log.Fatalf("process pending preview: %v", processErr)
+			}
+			processed += done
+			if done == 0 {
+				remaining, pendingErr := repo.ListPendingPreview(ctx, svc.PrepareMountPaths(), 1)
+				if pendingErr != nil {
+					log.Fatalf("check pending preview queue: %v", pendingErr)
+				}
+				if len(remaining) == 0 {
+					break
+				}
+				time.Sleep(time.Second)
+			}
+		}
+		writeSummary(summary{PreviewQueued: previewQueued, PreviewProcessed: processed})
+		return
+	}
 
 	directReady, directFailed, err := svc.RefreshDirectURLs(ctx, limit)
 	if err != nil {
@@ -136,6 +175,7 @@ func main() {
 	writeSummary(summary{
 		OSSProcessed:     ossProcessed,
 		PreviewProcessed: previewProcessed,
+		PreviewQueued:    previewQueued,
 		DirectURLReady:   directReady,
 		DirectURLFailed:  directFailed,
 	})

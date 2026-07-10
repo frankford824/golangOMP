@@ -53,6 +53,7 @@ type AssetDetail struct {
 	FileSize              *int64                           `json:"file_size,omitempty"`
 	MimeType              string                           `json:"mime_type,omitempty"`
 	DownloadURL           *string                          `json:"download_url,omitempty"`
+	PreviewURL            *string                          `json:"preview_url,omitempty"`
 	PreviewAvailable      bool                             `json:"preview_available,omitempty"`
 	FlowReviewStatus      domain.TaskAssetFlowReviewStatus `json:"flow_review_status,omitempty"`
 	UsableState           domain.TaskAssetUsableState      `json:"usable_state,omitempty"`

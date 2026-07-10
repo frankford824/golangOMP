@@ -51,6 +51,11 @@ func withAssetFileTokenFallback(resolver RequestActorResolver) gin.HandlerFunc {
 		if cookie, err := c.Cookie(handler.AssetFilesTokenCookie); err == nil {
 			token = strings.TrimSpace(cookie)
 		}
+		if token == "" {
+			if cookie, err := c.Cookie(handler.AssetStreamTokenCookie); err == nil {
+				token = strings.TrimSpace(cookie)
+			}
+		}
 		if token != "" && resolver != nil {
 			if actor, appErr := resolver.ResolveRequestActor(c.Request.Context(), token); appErr == nil && actor != nil && domain.IsSessionBackedRequestActor(*actor) {
 				ctx := domain.WithRequestActor(c.Request.Context(), *actor)

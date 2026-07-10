@@ -25,6 +25,16 @@ import (
 
 const ErrCodeExternalAssetPreparing = "EXTERNAL_ASSET_PREPARING"
 
+const externalNetdiskContentPath = "/v1/assets/%s/content"
+
+type NetdiskStreamTarget struct {
+	InternalRedirect string
+	RedirectURL      string
+	Filename         string
+	FileSize         int64
+	MimeType         string
+}
+
 type MountConfig struct {
 	Path   string
 	Kind   domain.ExternalAssetKind
@@ -45,6 +55,7 @@ type Config struct {
 	FullSyncInterval    time.Duration
 	FullSyncMounts      []string
 	FullSyncRoots       []string
+	VisibleRoots        []string
 	FullSyncPageSize    int
 	FullSyncMaxDepth    int
 	FullSyncMaxFiles    int
@@ -121,6 +132,7 @@ func ConfigFromApp(cfg config.ExternalAssetsConfig) Config {
 		FullSyncInterval:    cfg.FullSyncInterval,
 		FullSyncMounts:      ParseMountPaths(cfg.FullSyncMounts),
 		FullSyncRoots:       ParseMountPaths(cfg.FullSyncRoots),
+		VisibleRoots:        ParseMountPaths(cfg.VisibleRoots),
 		FullSyncPageSize:    cfg.FullSyncPageSize,
 		FullSyncMaxDepth:    cfg.FullSyncMaxDepth,
 		FullSyncMaxFiles:    cfg.FullSyncMaxFiles,
@@ -151,6 +163,9 @@ func NewService(repo repo.ExternalAssetRepo, cfg Config, ossDirect *baseservice.
 	}
 	if len(cfg.Mounts) == 0 {
 		cfg.Mounts = ParseMounts("/quark:netdisk,/p3:nas_local")
+	}
+	if len(cfg.VisibleRoots) == 0 && len(cfg.FullSyncRoots) > 0 {
+		cfg.VisibleRoots = append([]string(nil), cfg.FullSyncRoots...)
 	}
 	if cfg.FullSyncPageSize <= 0 || cfg.FullSyncPageSize > 200 {
 		cfg.FullSyncPageSize = 100
@@ -368,6 +383,11 @@ func (s *Service) Search(ctx context.Context, query domain.ExternalAssetSearchQu
 		return []*domain.ExternalAssetRecord{}, 0, nil
 	}
 	query = query.Normalized()
+	visiblePrefixes, matched := s.visibleOriginPrefixes(query.MountPath)
+	if !matched {
+		return []*domain.ExternalAssetRecord{}, 0, nil
+	}
+	query.OriginPrefixes = visiblePrefixes
 	if query.Keyword != "" && s.searchBackendReady() {
 		s.recordRecentKeyword(query.Keyword)
 		if shouldScheduleKeywordRefresh(query.Keyword) {
@@ -394,7 +414,38 @@ func (s *Service) ListDirectoryChildren(ctx context.Context, parentPath string, 
 	if parentPath != "" && len(mounts) == 0 {
 		return []domain.ExternalAssetDirectoryEntry{}, nil
 	}
-	return browser.ListDirectoryChildren(ctx, parentPath, mounts, limit, formatCategory)
+	if parentPath != "" && len(mounts) == 1 {
+		if _, narrowed := s.visibleRootsForMount(mounts[0]); narrowed && parentPath == mounts[0] {
+			return s.visibleRootDirectoryEntries(ctx, browser, mounts[0], formatCategory)
+		}
+	}
+	entries, err := browser.ListDirectoryChildren(ctx, parentPath, mounts, limit, formatCategory)
+	if err != nil {
+		return nil, err
+	}
+	if parentPath == "" {
+		for idx := range entries {
+			mountPath := cleanAListPath(entries[idx].Path)
+			if _, narrowed := s.visibleRootsForMount(mountPath); !narrowed {
+				continue
+			}
+			roots, rootErr := s.visibleRootDirectoryEntries(ctx, browser, mountPath, formatCategory)
+			if rootErr != nil {
+				return nil, rootErr
+			}
+			entries[idx].FileCount = 0
+			entries[idx].DirectFileCount = 0
+			for _, root := range roots {
+				entries[idx].FileCount += root.FileCount
+				entries[idx].DirectFileCount += root.DirectFileCount
+			}
+		}
+		return entries, nil
+	}
+	if len(mounts) == 1 {
+		entries = s.filterVisibleDirectoryEntries(parentPath, mounts[0], entries)
+	}
+	return entries, nil
 }
 
 func (s *Service) ListDirectoryFiles(ctx context.Context, parentPath string, page int, size int, formatCategory domain.AssetFormatCategoryFilter) ([]*domain.ExternalAssetRecord, int64, error) {
@@ -408,6 +459,9 @@ func (s *Service) ListDirectoryFiles(ctx context.Context, parentPath string, pag
 	parentPath = cleanExternalMaterialBrowsePath(parentPath)
 	mounts := s.mountPathsForBrowse(parentPath)
 	if parentPath == "" || len(mounts) == 0 {
+		return []*domain.ExternalAssetRecord{}, 0, nil
+	}
+	if len(mounts) == 1 && !s.browsePathInsideVisibleRoot(mounts[0], parentPath) {
 		return []*domain.ExternalAssetRecord{}, 0, nil
 	}
 	rows, total, err := browser.ListDirectoryFiles(ctx, parentPath, mounts, page, size, formatCategory)
@@ -428,7 +482,7 @@ func (s *Service) mountPathsForBrowse(parentPath string) []string {
 		if mountPath == "" {
 			continue
 		}
-		if parentPath == "" || parentPath == mountPath || strings.HasPrefix(parentPath, mountPath+"/") {
+		if (parentPath == "" || parentPath == mountPath || strings.HasPrefix(parentPath, mountPath+"/")) && s.browsePathVisible(mountPath, parentPath) {
 			out = append(out, mountPath)
 		}
 	}
@@ -454,20 +508,25 @@ func (s *Service) refreshSearchCache(ctx context.Context, query domain.ExternalA
 	limit := 200
 	var firstErr error
 	for _, mount := range s.mountsForQuery(query) {
-		resp, err := s.searchMount(ctx, mount.Path, query.Keyword, limit)
-		if err != nil {
-			if firstErr == nil {
-				firstErr = err
-			}
-			continue
-		}
-		for _, item := range resp.Content {
-			if isSkippableExternalSearchItem(item) {
+		for _, scope := range s.searchScopesForMount(mount) {
+			resp, err := s.searchMount(ctx, scope, query.Keyword, limit)
+			if err != nil {
+				if firstErr == nil {
+					firstErr = err
+				}
 				continue
 			}
-			upsert := s.upsertFromSearchItem(mount, item)
-			if _, err := s.repo.Upsert(ctx, upsert); err != nil && firstErr == nil {
-				firstErr = err
+			for _, item := range resp.Content {
+				if isSkippableExternalSearchItem(item) {
+					continue
+				}
+				upsert := s.upsertFromSearchItem(mount, item)
+				if !s.isOriginVisible(upsert.MountPath, upsert.OriginPath) {
+					continue
+				}
+				if _, err := s.repo.Upsert(ctx, upsert); err != nil && firstErr == nil {
+					firstErr = err
+				}
 			}
 		}
 	}
@@ -728,21 +787,8 @@ func (s *Service) SyncKeyword(ctx context.Context, keyword string, perMountLimit
 		scanned := 0
 		upserted := 0
 		var mountErr error
-		resp, err := s.searchMount(ctx, mount.Path, keyword, perMountLimit)
-		if err != nil {
-			s.finishSyncRun(ctx, runID, domain.ExternalAssetSyncRunStatusFailed, scanned, upserted, err.Error())
-			if firstErr == nil {
-				firstErr = err
-			}
-			continue
-		}
-		for _, item := range resp.Content {
-			if isSkippableExternalSearchItem(item) {
-				continue
-			}
-			scanned++
-			upsert := s.upsertFromSearchItem(mount, item)
-			available, err := s.keywordSearchItemAvailable(ctx, mount, upsert)
+		for _, scope := range s.searchScopesForMount(mount) {
+			resp, err := s.searchMount(ctx, scope, keyword, perMountLimit)
 			if err != nil {
 				if firstErr == nil {
 					firstErr = err
@@ -752,32 +798,55 @@ func (s *Service) SyncKeyword(ctx context.Context, keyword string, perMountLimit
 				}
 				continue
 			}
-			if !available {
-				if err := s.repo.MarkOriginPathMissing(ctx, upsert.Provider, upsert.MountPath, upsert.OriginPath); err != nil {
+			for _, item := range resp.Content {
+				if isSkippableExternalSearchItem(item) {
+					continue
+				}
+				upsert := s.upsertFromSearchItem(mount, item)
+				if !s.isOriginVisible(upsert.MountPath, upsert.OriginPath) {
+					continue
+				}
+				scanned++
+				available, availableErr := s.keywordSearchItemAvailable(ctx, mount, upsert)
+				if availableErr != nil {
+					if firstErr == nil {
+						firstErr = availableErr
+					}
+					if mountErr == nil {
+						mountErr = availableErr
+					}
+					continue
+				}
+				if !available {
+					if err := s.repo.MarkOriginPathMissing(ctx, upsert.Provider, upsert.MountPath, upsert.OriginPath); err != nil {
+						if firstErr == nil {
+							firstErr = err
+						}
+						if mountErr == nil {
+							mountErr = err
+						}
+					}
+					continue
+				}
+				if _, err := s.repo.Upsert(ctx, upsert); err != nil {
 					if firstErr == nil {
 						firstErr = err
 					}
 					if mountErr == nil {
 						mountErr = err
 					}
+					continue
 				}
-				continue
+				upserted++
 			}
-			if _, err := s.repo.Upsert(ctx, upsert); err != nil {
-				if firstErr == nil {
-					firstErr = err
-				}
-				if mountErr == nil {
-					mountErr = err
-				}
-				continue
-			}
-			upserted++
 		}
 		status := domain.ExternalAssetSyncRunStatusCompleted
 		errMessage := ""
 		if mountErr != nil {
 			status = domain.ExternalAssetSyncRunStatusPartial
+			if scanned == 0 && upserted == 0 {
+				status = domain.ExternalAssetSyncRunStatusFailed
+			}
 			errMessage = mountErr.Error()
 		}
 		s.finishSyncRun(ctx, runID, status, scanned, upserted, errMessage)
@@ -1228,7 +1297,14 @@ func (s *Service) Get(ctx context.Context, id int64) (*domain.ExternalAssetRecor
 	if !s.Enabled() {
 		return nil, nil
 	}
-	return s.repo.GetByID(ctx, id)
+	row, err := s.repo.GetByID(ctx, id)
+	if err != nil || row == nil {
+		return row, err
+	}
+	if !s.isOriginVisible(row.MountPath, row.OriginPath) {
+		return nil, nil
+	}
+	return row, nil
 }
 
 func (s *Service) DownloadInfo(ctx context.Context, id int64) (*domain.AssetDownloadInfo, *domain.AppError) {
@@ -1236,7 +1312,7 @@ func (s *Service) DownloadInfo(ctx context.Context, id int64) (*domain.AssetDown
 	if err != nil {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)
 	}
-	if row == nil || row.Status == domain.ExternalAssetStatusMissing {
+	if row == nil || row.Status == domain.ExternalAssetStatusMissing || !s.isOriginVisible(row.MountPath, row.OriginPath) {
 		return nil, domain.ErrNotFound
 	}
 	if row.IsDir {
@@ -1268,7 +1344,7 @@ func (s *Service) BatchDownloadInfo(ctx context.Context, id int64) (*domain.Asse
 	if err != nil {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)
 	}
-	if row == nil || row.Status == domain.ExternalAssetStatusMissing {
+	if row == nil || row.Status == domain.ExternalAssetStatusMissing || !s.isOriginVisible(row.MountPath, row.OriginPath) {
 		return nil, domain.ErrNotFound
 	}
 	if row.IsDir {
@@ -1276,6 +1352,9 @@ func (s *Service) BatchDownloadInfo(ctx context.Context, id int64) (*domain.Asse
 	}
 	if row.OSSOriginalKey != "" && row.OSSSyncStatus == domain.ExternalAssetOSSStatusReady {
 		return s.ossDownloadInfo(row, row.OSSOriginalKey, false, "external_batch_oss")
+	}
+	if row.Kind == domain.ExternalAssetKindNetdisk {
+		return netdiskStreamDownloadInfo(row), nil
 	}
 	if err := s.repo.MarkOSSPreparePending(ctx, row.ID); err != nil {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)
@@ -1288,7 +1367,7 @@ func (s *Service) PreviewInfo(ctx context.Context, id int64) (*domain.AssetDownl
 	if err != nil {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)
 	}
-	if row == nil || row.Status == domain.ExternalAssetStatusMissing {
+	if row == nil || row.Status == domain.ExternalAssetStatusMissing || !s.isOriginVisible(row.MountPath, row.OriginPath) {
 		return nil, domain.ErrNotFound
 	}
 	if row.IsDir {
@@ -1403,34 +1482,65 @@ func (s *Service) localDownloadInfo(ctx context.Context, row *domain.ExternalAss
 	return prepareInfo(row, "external_local_prepare_required"), nil
 }
 
-func (s *Service) netdiskDownloadInfo(ctx context.Context, row *domain.ExternalAssetRecord, preview bool) (*domain.AssetDownloadInfo, *domain.AppError) {
-	rawURL := strings.TrimSpace(row.RawURL)
-	if s.shouldRefreshDirectURL(row) {
-		nextURL, err := s.resolveNetdiskDirectURL(ctx, row, preview)
-		if err != nil {
-			_ = s.repo.UpdateDirectURL(ctx, row.ID, "", nil, "failed")
-			rawURL = ""
-		} else {
-			rawURL = strings.TrimSpace(nextURL)
-			_ = s.repo.UpdateDirectURL(ctx, row.ID, rawURL, nil, directURLStatus(rawURL))
-		}
-	}
-	if rawURL == "" || s.isInternalProviderURL(rawURL) {
-		if err := s.repo.MarkOSSPreparePending(ctx, row.ID); err != nil {
-			return nil, domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)
-		}
-		return prepareInfo(row, "external_netdisk_prepare_required"), nil
-	}
-	filename := row.FileName
+func (s *Service) netdiskDownloadInfo(_ context.Context, row *domain.ExternalAssetRecord, _ bool) (*domain.AssetDownloadInfo, *domain.AppError) {
+	return netdiskStreamDownloadInfo(row), nil
+}
+
+func netdiskStreamDownloadInfo(row *domain.ExternalAssetRecord) *domain.AssetDownloadInfo {
+	urlValue := fmt.Sprintf(externalNetdiskContentPath, url.PathEscape(domain.ExternalAssetResourceID(row.ID)))
 	return &domain.AssetDownloadInfo{
-		DownloadMode:     domain.AssetDownloadModeDirect,
-		DownloadURL:      &rawURL,
-		AccessHint:       "external_netdisk_direct",
-		PreviewAvailable: preview && canDirectBrowserPreview(row.FileName, row.MimeType),
-		Filename:         filename,
+		DownloadMode:     domain.AssetDownloadModeProxy,
+		DownloadURL:      &urlValue,
+		AccessHint:       "external_netdisk_alist_stream",
+		PreviewAvailable: false,
+		Filename:         row.FileName,
 		FileSize:         row.FileSize,
 		MimeType:         row.MimeType,
-	}, nil
+	}
+}
+
+func (s *Service) ResolveNetdiskStream(ctx context.Context, id int64) (*NetdiskStreamTarget, *domain.AppError) {
+	row, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)
+	}
+	if row == nil || row.Status == domain.ExternalAssetStatusMissing || !s.isOriginVisible(row.MountPath, row.OriginPath) {
+		return nil, domain.ErrNotFound
+	}
+	if row.IsDir || row.Kind != domain.ExternalAssetKindNetdisk {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "该资源不是可下载的外部网盘文件", nil)
+	}
+	rawURL := strings.TrimSpace(row.RawURL)
+	if s.shouldRefreshDirectURL(row) {
+		resolved, resolveErr := s.resolveNetdiskDirectURL(ctx, row, false)
+		if resolveErr != nil {
+			_ = s.repo.UpdateDirectURL(ctx, row.ID, "", nil, "failed")
+			return nil, domain.NewAppError(domain.ErrCodeAssetMissing, "外部网盘暂时无法连接，请稍后重试", nil)
+		}
+		rawURL = strings.TrimSpace(resolved)
+		_ = s.repo.UpdateDirectURL(ctx, row.ID, rawURL, nil, directURLStatus(rawURL))
+	}
+	if rawURL == "" {
+		return nil, domain.NewAppError(domain.ErrCodeAssetMissing, "外部网盘暂时无法连接，请稍后重试", nil)
+	}
+	target := &NetdiskStreamTarget{
+		Filename: row.FileName,
+		FileSize: row.FileSize,
+		MimeType: row.MimeType,
+	}
+	if !s.isInternalProviderURL(rawURL) {
+		target.RedirectURL = rawURL
+		return target, nil
+	}
+	parsed, parseErr := url.Parse(rawURL)
+	if parseErr != nil || !strings.HasPrefix(parsed.Path, "/p/") || strings.TrimSpace(parsed.Query().Get("sign")) == "" {
+		return nil, domain.NewAppError(domain.ErrCodeAssetMissing, "外部网盘下载地址无效，请稍后重试", nil)
+	}
+	target.InternalRedirect = "/_protected/external-alist" + parsed.EscapedPath()
+	if parsed.RawQuery != "" {
+		target.InternalRedirect += "?" + parsed.RawQuery
+	}
+	return target, nil
 }
 
 func (s *Service) shouldRefreshDirectURL(row *domain.ExternalAssetRecord) bool {
@@ -1542,6 +1652,25 @@ func (s *Service) EnsureOSSRequiredPrefixesPending(ctx context.Context) (int64, 
 		return 0, nil
 	}
 	return s.repo.MarkOSSPendingByOriginPrefixes(ctx, prefixes)
+}
+
+func (s *Service) EnsureVisiblePreviewsPending(ctx context.Context) (int64, error) {
+	if s == nil || s.repo == nil {
+		return 0, nil
+	}
+	prefixValues, matched := s.visibleOriginPrefixes("")
+	if !matched {
+		return 0, nil
+	}
+	prefixes := make([]repo.ExternalAssetOriginPrefix, 0, len(prefixValues))
+	for _, origin := range prefixValues {
+		mount := s.mountPathForOrigin(origin)
+		if mount == "" {
+			continue
+		}
+		prefixes = append(prefixes, repo.ExternalAssetOriginPrefix{MountPath: mount, OriginPath: origin})
+	}
+	return s.repo.MarkPreviewPendingByOriginPrefixes(ctx, prefixes)
 }
 
 func (s *Service) ossRequiredOriginPrefixes() []repo.ExternalAssetOriginPrefix {
@@ -1810,6 +1939,11 @@ func (s *Service) renderAndUploadPreview(ctx context.Context, row *domain.Extern
 func (s *Service) openSourceForUpload(ctx context.Context, row *domain.ExternalAssetRecord) (io.ReadCloser, error) {
 	if row == nil {
 		return nil, fmt.Errorf("external asset row is required")
+	}
+	if row.OSSOriginalKey != "" && row.OSSSyncStatus == domain.ExternalAssetOSSStatusReady && s.ossDirect != nil && s.ossDirect.Enabled() {
+		if reader, err := s.ossDirect.OpenObject(ctx, row.OSSOriginalKey); err == nil {
+			return reader, nil
+		}
 	}
 	if row.Kind == domain.ExternalAssetKindNASLocal {
 		if localPath, ok := s.LocalFilesystemPath(row); ok {

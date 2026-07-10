@@ -8920,6 +8920,9 @@ components:
         download_url:
           type: string
           nullable: true
+        preview_url:
+          type: string
+          nullable: true
         preview_available:
           type: boolean
         external_kind:
@@ -12821,6 +12824,38 @@ paths:
                     $ref: '#/components/schemas/AssetDownloadInfo'
         '404':
           description: Asset not found
+  /v1/assets/{asset_id}/content:
+    get:
+      summary: Stream external netdisk asset content
+      description: |
+        Authenticated byte-stream endpoint for external netdisk resources such as `/quark`.
+        The backend authorizes and resolves the resource, then Nginx internally streams the signed AList `/p` source with HTTP Range support.
+        Original bytes are not copied to OSS; derived thumbnails and previews remain OSS-backed.
+      tags: [Assets, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, Warehouse, Admin]
+      parameters:
+        - in: path
+          name: asset_id
+          required: true
+          schema: { type: string }
+          description: External resource id such as `ext-123`.
+      responses:
+        '200':
+          description: External file byte stream, including Range responses handled by the internal AList proxy.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '307':
+          description: Temporary redirect when AList resolves a provider URL that is already publicly reachable.
+        '400': { description: Resource id is not an external netdisk asset }
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
+        '404': { description: Asset not found }
   /v1/assets/{asset_id}/preview:
     get:
       summary: Get asset preview info

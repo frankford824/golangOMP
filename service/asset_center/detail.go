@@ -24,7 +24,7 @@ func (s *Service) GetDetail(ctx context.Context, assetID int64) (*AssetDetail, *
 	if err != nil {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)
 	}
-	return buildAssetDetail(current, versions), nil
+	return s.buildAssetDetail(current, versions), nil
 }
 
 func (s *Service) GetExternalDetail(ctx context.Context, externalID int64) (*AssetDetail, *domain.AppError) {
@@ -157,6 +157,12 @@ func buildAssetDetail(row *repo.TaskAssetSearchRow, versions []*repo.TaskAssetSe
 			})
 		}
 	}
+	return detail
+}
+
+func (s *Service) buildAssetDetail(row *repo.TaskAssetSearchRow, versions []*repo.TaskAssetSearchRow) *AssetDetail {
+	detail := buildAssetDetail(row, versions)
+	s.enrichSystemAssetPreview(detail, row)
 	return detail
 }
 

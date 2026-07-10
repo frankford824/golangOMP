@@ -14,11 +14,15 @@ import (
 )
 
 func TestPendingExternalAssetQueriesScopeMountsAndBackOffFailures(t *testing.T) {
-	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherFunc(func(_ string, actual string) error {
-		for _, required := range []string{
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherFunc(func(expected string, actual string) error {
+		requiredParts := []string{
 			"mount_path IN (?,?)",
 			"updated_at <= UTC_TIMESTAMP() - INTERVAL 10 MINUTE",
-		} {
+		}
+		if strings.Contains(expected, "OSS") {
+			requiredParts = append(requiredParts, "kind = 'nas_local'", "status <> 'missing'")
+		}
+		for _, required := range requiredParts {
 			if !strings.Contains(actual, required) {
 				return fmt.Errorf("query missing %q: %s", required, actual)
 			}
@@ -65,6 +69,29 @@ func TestBuildExternalAssetWhereUsesFullTextForKeyword(t *testing.T) {
 	if !strings.Contains(orderBy, "updated_at DESC") {
 		t.Fatalf("orderBy = %q, want updated_at order", orderBy)
 	}
+}
+
+func TestBuildExternalAssetWhereRestrictsVisibleOriginPrefixes(t *testing.T) {
+	where, args, _ := buildExternalAssetWhere(domain.ExternalAssetSearchQuery{
+		OriginPrefixes: []string{"/p3", "/quark/海报", "/quark/kt板"},
+	})
+	if got := strings.Count(where, "origin_path = ? OR origin_path LIKE ?"); got != 3 {
+		t.Fatalf("visible prefix clauses = %d, want 3: %s", got, where)
+	}
+	for _, expected := range []string{"/p3", "/p3/%", "/quark/海报", "/quark/海报/%"} {
+		if !containsExternalAssetArg(args, expected) {
+			t.Fatalf("args missing %q: %#v", expected, args)
+		}
+	}
+}
+
+func containsExternalAssetArg(args []interface{}, expected string) bool {
+	for _, arg := range args {
+		if value, ok := arg.(string); ok && value == expected {
+			return true
+		}
+	}
+	return false
 }
 
 func TestIsMySQLLockConflictRecognizesRetryableWriteConflicts(t *testing.T) {

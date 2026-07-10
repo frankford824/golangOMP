@@ -88,6 +88,7 @@ export const useAssetWorkbenchSessionStore = defineStore('assetWorkbenchSession'
     entryPromise = assetWorkbenchApi
       .entry(entryController.signal)
       .then((next) => {
+        void assetWorkbenchApi.refreshDownloadCookie().catch(() => undefined)
         entry.value = next
         lastEntryLoadedAt.value = Date.now()
         if (next.bootstrap) setBootstrap(next.bootstrap)

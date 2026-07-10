@@ -136,6 +136,10 @@ func (r *assetCenterExternalRepoStub) MarkPreviewPreparePending(_ context.Contex
 	return nil
 }
 
+func (r *assetCenterExternalRepoStub) MarkPreviewPendingByOriginPrefixes(_ context.Context, prefixes []repo.ExternalAssetOriginPrefix) (int64, error) {
+	return int64(len(prefixes)), nil
+}
+
 func (r *assetCenterExternalRepoStub) ListDirectURLRefreshCandidates(context.Context, []string, int, time.Time) ([]*domain.ExternalAssetRecord, error) {
 	return nil, nil
 }

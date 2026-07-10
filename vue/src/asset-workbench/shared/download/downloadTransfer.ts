@@ -52,7 +52,7 @@ export async function transferDownload(
   try {
     response = await fetcher(downloadUrl, {
       cache: 'no-store',
-      credentials: 'omit',
+      credentials: 'same-origin',
       signal,
     })
   } catch (error) {

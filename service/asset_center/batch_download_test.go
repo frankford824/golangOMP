@@ -448,7 +448,7 @@ func TestBuildBatchDownloadManifestForResourcesSupportsExternalAssets(t *testing
 	}
 }
 
-func TestBuildBatchDownloadManifestForResourcesDoesNotReturnExternalRawURLForZip(t *testing.T) {
+func TestBuildBatchDownloadManifestForResourcesUsesAuthenticatedNetdiskStream(t *testing.T) {
 	uploaded := string(domain.DesignAssetUploadStatusUploaded)
 	now := time.Date(2026, 7, 7, 11, 30, 0, 0, time.UTC)
 	externalRepo := &assetCenterExternalRepoStub{
@@ -503,14 +503,14 @@ func TestBuildBatchDownloadManifestForResourcesDoesNotReturnExternalRawURLForZip
 	if appErr != nil {
 		t.Fatalf("BuildBatchDownloadManifestForResources error = %+v", appErr)
 	}
-	if result.SuccessCount != 1 || result.FailureCount != 1 {
-		t.Fatalf("manifest summary = %+v, want one success and one external failure", result)
+	if result.SuccessCount != 2 || result.FailureCount != 0 {
+		t.Fatalf("manifest summary = %+v, want system and external successes", result)
 	}
-	if len(result.Failures) != 1 || result.Failures[0].ResourceID != "ext-77" || result.Failures[0].Reason != "external_batch_prepare_required" {
-		t.Fatalf("failures = %+v, want prepare-required external failure", result.Failures)
+	if len(result.Items) != 2 || result.Items[1].DownloadURL != "/v1/assets/ext-77/content" {
+		t.Fatalf("items = %+v, want authenticated external stream", result.Items)
 	}
-	if len(externalRepo.ossPendingIDs) != 1 || externalRepo.ossPendingIDs[0] != 77 {
-		t.Fatalf("oss pending ids = %+v, want [77]", externalRepo.ossPendingIDs)
+	if len(externalRepo.ossPendingIDs) != 0 {
+		t.Fatalf("oss pending ids = %+v, want none", externalRepo.ossPendingIDs)
 	}
 }
 

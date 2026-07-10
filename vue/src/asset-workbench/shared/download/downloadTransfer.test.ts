@@ -24,13 +24,14 @@ describe('asset workbench streamed download transfer', () => {
     } as unknown as Response
     const progress: DownloadTransferProgress[] = []
     const saveBlob = vi.fn()
+    const fetcher = vi.fn().mockResolvedValue(response)
 
     const result = await transferDownload(
       { downloadUrl: 'https://oss.example.com/file.psd', filename: 'file.psd', fileSize: 6 },
       new AbortController().signal,
       (value) => progress.push(value),
       {
-        fetcher: vi.fn().mockResolvedValue(response),
+        fetcher,
         now: () => nowValue,
         progressIntervalMs: 250,
         saveBlob,
@@ -43,6 +44,7 @@ describe('asset workbench streamed download transfer', () => {
     expect(progress.map((item) => item.progress)).toEqual([50, 99, 100])
     expect(saveBlob).toHaveBeenCalledOnce()
     expect(saveBlob.mock.calls[0][0]).toBeInstanceOf(Blob)
+    expect(fetcher).toHaveBeenCalledWith('https://oss.example.com/file.psd', expect.objectContaining({ credentials: 'same-origin' }))
   })
 
   it('hands the URL to the browser when cross-origin streaming is unavailable', async () => {

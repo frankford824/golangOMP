@@ -37,7 +37,10 @@ const taskAssetSearchSelect = `
 	       COALESCE(NULLIF(asset_creator.username, ''), '') AS asset_creator_username,
 	       COALESCE(NULLIF(asset_creator.display_name, ''), '') AS asset_creator_name,
 	       COALESCE(NULLIF(uploaded_user.username, ''), '') AS uploaded_by_username,
-	       COALESCE(NULLIF(uploaded_user.display_name, ''), '') AS uploaded_by_name`
+	       COALESCE(NULLIF(uploaded_user.display_name, ''), '') AS uploaded_by_name,
+	       COALESCE(derived_preview_version.storage_key, '') AS derived_preview_storage_key,
+	       COALESCE(derived_preview_version.original_filename, derived_preview_version.file_name, '') AS derived_preview_filename,
+	       COALESCE(derived_preview_version.mime_type, '') AS derived_preview_mime_type`
 
 const taskAssetSearchFrom = `
 	  FROM task_assets ta
@@ -46,7 +49,18 @@ const taskAssetSearchFrom = `
 	  LEFT JOIN task_modules tm ON tm.id = ta.source_task_module_id
 	  LEFT JOIN users task_creator ON task_creator.id = t.creator_id
 	  LEFT JOIN users asset_creator ON asset_creator.id = da.created_by
-	  LEFT JOIN users uploaded_user ON uploaded_user.id = ta.uploaded_by`
+	  LEFT JOIN users uploaded_user ON uploaded_user.id = ta.uploaded_by
+	  LEFT JOIN design_assets derived_preview ON derived_preview.id = (
+	      SELECT candidate.id
+	        FROM design_assets candidate
+	       WHERE candidate.source_asset_id = da.id
+	         AND candidate.asset_type IN ('preview', 'design_thumb')
+	       ORDER BY FIELD(candidate.asset_type, 'preview', 'design_thumb'), candidate.id DESC
+	       LIMIT 1
+	  )
+	  LEFT JOIN task_assets derived_preview_version
+	    ON derived_preview_version.id = derived_preview.current_version_id
+	   AND derived_preview_version.deleted_at IS NULL`
 
 const taskAssetSearchCountFrom = `
 	  FROM task_assets ta
@@ -343,6 +357,7 @@ func scanTaskAssetSearchScanner(s taskAssetSearchScanner) (*repo.TaskAssetSearch
 	var designCreatedAt, designUpdatedAt time.Time
 	var ownerTeamCode string
 	var taskCreatorUsername, taskCreatorName, assetCreatorUsername, assetCreatorName, uploadedByUsername, uploadedByName string
+	var derivedPreviewStorageKey, derivedPreviewFilename, derivedPreviewMimeType string
 	if err := s.Scan(
 		&a.ID, &a.TaskID, &assetID, &scopeSKUCode, &a.AssetType, &a.VersionNo, &assetVersionNo,
 		&uploadMode, &uploadRequestID, &storageRefID, &a.FileName, &originalFilename, &remoteFileID,
@@ -361,6 +376,7 @@ func scanTaskAssetSearchScanner(s taskAssetSearchScanner) (*repo.TaskAssetSearch
 		&taskCreatorUsername, &taskCreatorName,
 		&assetCreatorUsername, &assetCreatorName,
 		&uploadedByUsername, &uploadedByName,
+		&derivedPreviewStorageKey, &derivedPreviewFilename, &derivedPreviewMimeType,
 	); err != nil {
 		return nil, fmt.Errorf("scan task asset search row: %w", err)
 	}
@@ -425,19 +441,22 @@ func scanTaskAssetSearchScanner(s taskAssetSearchScanner) (*repo.TaskAssetSearch
 	}
 	t.IsBatchTask = isBatchTask.Valid && isBatchTask.Bool
 	return &repo.TaskAssetSearchRow{
-		Asset:                &a,
-		Task:                 &t,
-		AssetNo:              assetNo,
-		DesignCreatedBy:      designCreatedBy,
-		DesignCreatedAt:      designCreatedAt,
-		DesignUpdatedAt:      designUpdatedAt,
-		OwnerTeamCode:        ownerTeamCode,
-		TaskCreatorUsername:  taskCreatorUsername,
-		TaskCreatorName:      taskCreatorName,
-		AssetCreatorUsername: assetCreatorUsername,
-		AssetCreatorName:     assetCreatorName,
-		UploadedByUsername:   uploadedByUsername,
-		UploadedByName:       uploadedByName,
+		Asset:                    &a,
+		Task:                     &t,
+		AssetNo:                  assetNo,
+		DesignCreatedBy:          designCreatedBy,
+		DesignCreatedAt:          designCreatedAt,
+		DesignUpdatedAt:          designUpdatedAt,
+		OwnerTeamCode:            ownerTeamCode,
+		TaskCreatorUsername:      taskCreatorUsername,
+		TaskCreatorName:          taskCreatorName,
+		AssetCreatorUsername:     assetCreatorUsername,
+		AssetCreatorName:         assetCreatorName,
+		UploadedByUsername:       uploadedByUsername,
+		UploadedByName:           uploadedByName,
+		DerivedPreviewStorageKey: derivedPreviewStorageKey,
+		DerivedPreviewFilename:   derivedPreviewFilename,
+		DerivedPreviewMimeType:   derivedPreviewMimeType,
 	}, nil
 }
 

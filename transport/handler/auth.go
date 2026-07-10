@@ -13,12 +13,14 @@ import (
 
 // AssetFilesTokenCookie carries the session token for browser-native asset
 // loads (<img> src, direct download links) that cannot attach an Authorization
-// header. It is HttpOnly and path-scoped to the asset file proxy only.
+// header. The companion stream cookie covers authenticated external downloads.
 const (
-	AssetFilesTokenCookie     = "wf_asset_token"
-	assetFilesTokenCookiePath = "/v1/assets/files"
-	WSTokenCookie             = "wf_ws_token"
-	wsTokenCookiePath         = "/ws"
+	AssetFilesTokenCookie      = "wf_asset_token"
+	assetFilesTokenCookiePath  = "/v1/assets/files"
+	AssetStreamTokenCookie     = "wf_asset_stream_token"
+	assetStreamTokenCookiePath = "/v1/assets"
+	WSTokenCookie              = "wf_ws_token"
+	wsTokenCookiePath          = "/ws"
 )
 
 func setAssetFilesTokenCookie(c *gin.Context, result *domain.AuthResult, cookieDomain string) {
@@ -32,6 +34,7 @@ func setAssetFilesTokenCookie(c *gin.Context, result *domain.AuthResult, cookieD
 	secure := c.Request.TLS != nil || strings.EqualFold(c.GetHeader("X-Forwarded-Proto"), "https")
 	c.SetSameSite(http.SameSiteLaxMode)
 	c.SetCookie(AssetFilesTokenCookie, result.Session.Token, maxAge, assetFilesTokenCookiePath, cookieDomain, secure, true)
+	c.SetCookie(AssetStreamTokenCookie, result.Session.Token, maxAge, assetStreamTokenCookiePath, cookieDomain, secure, true)
 	c.SetCookie(WSTokenCookie, result.Session.Token, maxAge, wsTokenCookiePath, cookieDomain, secure, true)
 }
 
@@ -43,6 +46,7 @@ func setAssetFilesRawTokenCookie(c *gin.Context, token string, maxAge int, cooki
 	secure := c.Request.TLS != nil || strings.EqualFold(c.GetHeader("X-Forwarded-Proto"), "https")
 	c.SetSameSite(http.SameSiteLaxMode)
 	c.SetCookie(AssetFilesTokenCookie, token, maxAge, assetFilesTokenCookiePath, cookieDomain, secure, true)
+	c.SetCookie(AssetStreamTokenCookie, token, maxAge, assetStreamTokenCookiePath, cookieDomain, secure, true)
 	c.SetCookie(WSTokenCookie, token, maxAge, wsTokenCookiePath, cookieDomain, secure, true)
 }
 
@@ -50,6 +54,7 @@ func clearAssetFilesTokenCookie(c *gin.Context, cookieDomain string) {
 	secure := c.Request.TLS != nil || strings.EqualFold(c.GetHeader("X-Forwarded-Proto"), "https")
 	c.SetSameSite(http.SameSiteLaxMode)
 	c.SetCookie(AssetFilesTokenCookie, "", -1, assetFilesTokenCookiePath, cookieDomain, secure, true)
+	c.SetCookie(AssetStreamTokenCookie, "", -1, assetStreamTokenCookiePath, cookieDomain, secure, true)
 	c.SetCookie(WSTokenCookie, "", -1, wsTokenCookiePath, cookieDomain, secure, true)
 }
 

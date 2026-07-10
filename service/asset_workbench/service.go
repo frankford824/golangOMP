@@ -9859,6 +9859,10 @@ func overviewRowFromSystemAsset(asset *assetcenter.AssetDetail) *domain.AssetWor
 	if creatorName == "" && creatorID > 0 {
 		creatorName = fmt.Sprintf("用户 %d", creatorID)
 	}
+	previewURL := ""
+	if asset.PreviewURL != nil {
+		previewURL = strings.TrimSpace(*asset.PreviewURL)
+	}
 	status := strings.TrimSpace(string(asset.UsableState))
 	if status == "" {
 		status = strings.TrimSpace(string(asset.TaskStatus))
@@ -9892,6 +9896,7 @@ func overviewRowFromSystemAsset(asset *assetcenter.AssetDetail) *domain.AssetWor
 			"sku_code":            asset.SKUCode,
 			"primary_sku_code":    asset.PrimarySKUCode,
 			"preview_available":   asset.PreviewAvailable,
+			"preview_url":         previewURL,
 			"task_creator_name":   asset.TaskCreatorName,
 			"created_by_name":     asset.CreatedByName,
 			"created_by_username": asset.CreatedByUsername,

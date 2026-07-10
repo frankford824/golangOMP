@@ -1768,6 +1768,7 @@ async function prefetchSearchResultPreviews(rows: OverviewSearchRow[]) {
 }
 
 async function ensureSearchResultMaterialPreview(asset: SystemAssetRow) {
+  if (!canAttemptSystemAssetPreview(asset)) return
   const key = materialAssetKey(asset)
   if (!key || materialPreviewUrls.value[key] || searchPreviewLoadingKeys.has(key)) return
   const inline = resolvedSystemAssetThumbnailUrl(asset)
@@ -2669,12 +2670,7 @@ function cacheMaterialPreview(key: string, url: string) {
 }
 
 function ensureMaterialPreview(asset: SystemAssetRow) {
-  const key = materialAssetKey(asset)
-  if (materialPreviewUrls.value[key]) return
-  const inline = resolvedSystemAssetThumbnailUrl(asset)
-  if (inline) {
-    cacheMaterialPreview(key, inline)
-  }
+  void ensureSearchResultMaterialPreview(asset)
 }
 
 const activeMaterialPreviewUrl = computed(() => {
@@ -3192,6 +3188,7 @@ onBeforeUnmount(() => {
               v-if="isOperationalSearchHit(hit)"
               :asset="searchHitMaterial(hit)"
               :cached-url="materialPreviewUrls[materialAssetKey(searchHitMaterial(hit))]"
+              @preview-needed="ensureMaterialPreview(searchHitMaterial(hit))"
             />
             <DriveThumb
               v-else-if="searchHitDriveFileID(hit)"
@@ -3786,7 +3783,11 @@ onBeforeUnmount(() => {
                     </label>
                     <button class="aw-material-row__button" type="button" @click="selectMaterial(asset)" @dblclick="openMaterialPreview(asset)">
                       <span class="aw-material-row__thumb">
-                        <MaterialListThumb :asset="asset" :cached-url="materialPreviewUrls[materialAssetKey(asset)]" />
+                        <MaterialListThumb
+                          :asset="asset"
+                          :cached-url="materialPreviewUrls[materialAssetKey(asset)]"
+                          @preview-needed="ensureMaterialPreview(asset)"
+                        />
                       </span>
                       <span class="aw-material-row__body">
                         <strong :title="titleOf(asset)">{{ materialFolderFileName(asset) }}</strong>

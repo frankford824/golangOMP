@@ -88,7 +88,7 @@ func (s *Service) Search(ctx context.Context, query domain.AssetSearchQuery) (*S
 	}
 	items := make([]*AssetDetail, 0, len(rows))
 	for _, row := range rows {
-		items = append(items, buildAssetDetail(row, nil))
+		items = append(items, s.buildAssetDetail(row, nil))
 	}
 	if query.Source == domain.AssetResourceSourceAll &&
 		!assetSearchHasSystemOnlyFilters(query) &&
@@ -381,9 +381,10 @@ func (s *Service) buildExternalAssetDetail(row *domain.ExternalAssetRecord) *Ass
 		previewAvailable = true
 	}
 	downloadURL := ""
+	previewURL := ""
 	if s != nil && s.externalSvc != nil {
-		if previewURL := s.externalSvc.BrowserPreviewURL(row); previewURL != "" {
-			downloadURL = previewURL
+		if url := s.externalSvc.BrowserPreviewURL(row); url != "" {
+			previewURL = url
 			previewAvailable = true
 		} else if url := s.externalSvc.BrowserDownloadURL(row); url != "" {
 			downloadURL = url
@@ -404,6 +405,7 @@ func (s *Service) buildExternalAssetDetail(row *domain.ExternalAssetRecord) *Ass
 		FileSize:              &row.FileSize,
 		MimeType:              row.MimeType,
 		DownloadURL:           stringPtrIfNotEmpty(downloadURL),
+		PreviewURL:            stringPtrIfNotEmpty(previewURL),
 		PreviewAvailable:      previewAvailable,
 		UsableState:           domain.TaskAssetUsableStateNotApplicable,
 		UsableLabel:           "外部资源",

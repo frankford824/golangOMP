@@ -506,6 +506,95 @@ func TestNetdiskBrowserURLsDoNotExposeBFFProxyWhenDirectURLMissing(t *testing.T)
 	}
 }
 
+func TestSearchAppliesSharedVisibleRootsAcrossMounts(t *testing.T) {
+	repo := &externalAssetRepoStub{}
+	base := "/quark/我的备份/来自：ASUS Administrator 电脑备份"
+	svc := NewService(repo, Config{
+		Enabled:      true,
+		Mounts:       ParseMounts("/quark:netdisk,/p3:nas_local"),
+		VisibleRoots: ParseMountPaths(base + "/电视投屏," + base + "/海报," + base + "/kt板," + base + "/闲置kt板"),
+	}, nil)
+
+	if _, _, err := svc.Search(context.Background(), domain.ExternalAssetSearchQuery{Page: 1, Size: 20}); err != nil {
+		t.Fatalf("Search() error = %v", err)
+	}
+	if len(repo.searchQueries) != 1 {
+		t.Fatalf("search queries = %d, want 1", len(repo.searchQueries))
+	}
+	prefixes := strings.Join(repo.searchQueries[0].OriginPrefixes, ",")
+	for _, expected := range []string{"/p3", base + "/电视投屏", base + "/海报", base + "/kt板", base + "/闲置kt板"} {
+		if !strings.Contains(prefixes, expected) {
+			t.Fatalf("visible prefixes = %q, missing %q", prefixes, expected)
+		}
+	}
+}
+
+func TestQuarkBrowseRootFlattensVisibleFoldersAndRecountsMount(t *testing.T) {
+	base := "/quark/我的备份/来自：ASUS Administrator 电脑备份"
+	roots := []string{base + "/电视投屏", base + "/海报", base + "/kt板", base + "/闲置kt板"}
+	repo := &externalAssetRepoStub{directoryEntriesByParent: map[string][]domain.ExternalAssetDirectoryEntry{
+		"": {
+			{Path: "/p3", Name: "p3", FileCount: 90},
+			{Path: "/quark", Name: "quark", FileCount: 9999},
+		},
+		base: {
+			{Path: roots[0], Name: "电视投屏", FileCount: 11},
+			{Path: roots[1], Name: "海报", FileCount: 22},
+			{Path: roots[2], Name: "kt板", FileCount: 33},
+			{Path: roots[3], Name: "闲置kt板", FileCount: 44},
+			{Path: base + "/无关目录", Name: "无关目录", FileCount: 8888},
+		},
+	}}
+	svc := NewService(repo, Config{
+		Enabled:      true,
+		Mounts:       ParseMounts("/quark:netdisk,/p3:nas_local"),
+		VisibleRoots: roots,
+	}, nil)
+
+	children, err := svc.ListDirectoryChildren(context.Background(), "/quark", 100, domain.AssetFormatCategoryAll)
+	if err != nil {
+		t.Fatalf("ListDirectoryChildren(/quark) error = %v", err)
+	}
+	if len(children) != 4 {
+		t.Fatalf("quark children = %+v, want four visible roots", children)
+	}
+	rootEntries, err := svc.ListDirectoryChildren(context.Background(), "", 100, domain.AssetFormatCategoryAll)
+	if err != nil {
+		t.Fatalf("ListDirectoryChildren(root) error = %v", err)
+	}
+	for _, entry := range rootEntries {
+		if entry.Path == "/quark" && entry.FileCount != 110 {
+			t.Fatalf("quark root count = %d, want 110", entry.FileCount)
+		}
+	}
+}
+
+func TestEnsureVisiblePreviewsPendingQueuesP3AndFourQuarkRoots(t *testing.T) {
+	repo := &externalAssetRepoStub{}
+	base := "/quark/我的备份/来自：ASUS Administrator 电脑备份"
+	svc := NewService(repo, Config{
+		Enabled: true,
+		Mounts:  ParseMounts("/quark:netdisk,/p3:nas_local"),
+		VisibleRoots: ParseMountPaths(strings.Join([]string{
+			base + "/电视投屏",
+			base + "/海报",
+			base + "/kt板",
+			base + "/闲置kt板",
+		}, ",")),
+	}, nil)
+
+	queued, err := svc.EnsureVisiblePreviewsPending(context.Background())
+	if err != nil {
+		t.Fatalf("EnsureVisiblePreviewsPending() error = %v", err)
+	}
+	if queued != 5 || len(repo.previewPrefixMarks) != 5 {
+		t.Fatalf("queued=%d prefixes=%+v, want /p3 plus four quark roots", queued, repo.previewPrefixMarks)
+	}
+	if repo.previewPrefixMarks[0].MountPath != "/p3" || repo.previewPrefixMarks[0].OriginPath != "/p3" {
+		t.Fatalf("first prefix = %+v, want full /p3", repo.previewPrefixMarks[0])
+	}
+}
+
 func TestNetdiskBrowserURLsPreferPublicRawURL(t *testing.T) {
 	svc := NewService(&externalAssetRepoStub{}, Config{
 		Enabled:           true,
@@ -531,7 +620,7 @@ func TestNetdiskBrowserURLsPreferPublicRawURL(t *testing.T) {
 	}
 }
 
-func TestNetdiskDownloadQueuesOSSWhenOnlyInternalURLExists(t *testing.T) {
+func TestNetdiskDownloadUsesAuthenticatedAListStreamWithoutQueuingOSS(t *testing.T) {
 	checkedAt := time.Now().UTC()
 	repo := &externalAssetRepoStub{getRow: &domain.ExternalAssetRecord{
 		ID:                42,
@@ -553,11 +642,48 @@ func TestNetdiskDownloadQueuesOSSWhenOnlyInternalURLExists(t *testing.T) {
 	if appErr != nil {
 		t.Fatalf("DownloadInfo() error = %+v", appErr)
 	}
-	if info == nil || info.DownloadURL != nil || !strings.Contains(info.AccessHint, "prepare_required") {
-		t.Fatalf("DownloadInfo() = %+v, want queued OSS preparation", info)
+	if info == nil || info.DownloadURL == nil || *info.DownloadURL != "/v1/assets/ext-42/content" {
+		t.Fatalf("DownloadInfo() = %+v, want authenticated AList stream URL", info)
 	}
-	if len(repo.ossPendingIDs) != 1 || repo.ossPendingIDs[0] != 42 {
-		t.Fatalf("OSS pending ids = %+v, want [42]", repo.ossPendingIDs)
+	if info.AccessHint != "external_netdisk_alist_stream" {
+		t.Fatalf("AccessHint = %q, want external_netdisk_alist_stream", info.AccessHint)
+	}
+	if len(repo.ossPendingIDs) != 0 {
+		t.Fatalf("OSS pending ids = %+v, want none", repo.ossPendingIDs)
+	}
+}
+
+func TestResolveNetdiskStreamBuildsProtectedAListInternalRedirect(t *testing.T) {
+	bff := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/fetch" {
+			t.Fatalf("path = %q, want /api/fetch", r.URL.Path)
+		}
+		w.Header().Set("Location", "http://172.21.0.1:5244/p/quark/%E6%B5%B7%E6%8A%A5/poster.psd?sign=token%3A0")
+		w.WriteHeader(http.StatusFound)
+	}))
+	defer bff.Close()
+	repo := &externalAssetRepoStub{getRow: &domain.ExternalAssetRecord{
+		ID:         42,
+		Kind:       domain.ExternalAssetKindNetdisk,
+		MountPath:  "/quark",
+		OriginPath: "/quark/海报/poster.psd",
+		FileName:   "poster.psd",
+		MimeType:   "image/vnd.adobe.photoshop",
+		Status:     domain.ExternalAssetStatusIndexed,
+	}}
+	svc := NewService(repo, Config{
+		Enabled:    true,
+		BFFBaseURL: bff.URL,
+		Mounts:     ParseMounts("/quark:netdisk"),
+	}, nil)
+
+	target, appErr := svc.ResolveNetdiskStream(context.Background(), 42)
+	if appErr != nil {
+		t.Fatalf("ResolveNetdiskStream() error = %+v", appErr)
+	}
+	want := "/_protected/external-alist/p/quark/%E6%B5%B7%E6%8A%A5/poster.psd?sign=token%3A0"
+	if target == nil || target.InternalRedirect != want || target.RedirectURL != "" {
+		t.Fatalf("target = %+v, want internal redirect %q", target, want)
 	}
 }
 
@@ -1145,17 +1271,19 @@ type externalAssetRepoStub struct {
 		upserted int
 		message  string
 	}
-	missingMount      string
-	missingPrefixes   []repo.ExternalAssetOriginPrefix
-	missingOrigins    []string
-	searchRows        []*domain.ExternalAssetRecord
-	searchTotal       int64
-	searchQueries     []domain.ExternalAssetSearchQuery
-	getRow            *domain.ExternalAssetRecord
-	previewPendingIDs []int64
-	ossPendingIDs     []int64
-	ossPrefixMarks    []repo.ExternalAssetOriginPrefix
-	ossPriorityReads  []repo.ExternalAssetOriginPrefix
+	missingMount             string
+	missingPrefixes          []repo.ExternalAssetOriginPrefix
+	missingOrigins           []string
+	searchRows               []*domain.ExternalAssetRecord
+	searchTotal              int64
+	searchQueries            []domain.ExternalAssetSearchQuery
+	getRow                   *domain.ExternalAssetRecord
+	previewPendingIDs        []int64
+	ossPendingIDs            []int64
+	ossPrefixMarks           []repo.ExternalAssetOriginPrefix
+	ossPriorityReads         []repo.ExternalAssetOriginPrefix
+	directoryEntriesByParent map[string][]domain.ExternalAssetDirectoryEntry
+	previewPrefixMarks       []repo.ExternalAssetOriginPrefix
 }
 
 func (r *externalAssetRepoStub) Search(_ context.Context, query domain.ExternalAssetSearchQuery) ([]*domain.ExternalAssetRecord, int64, error) {
@@ -1263,6 +1391,11 @@ func (r *externalAssetRepoStub) MarkPreviewPreparePending(_ context.Context, id 
 	return nil
 }
 
+func (r *externalAssetRepoStub) MarkPreviewPendingByOriginPrefixes(_ context.Context, prefixes []repo.ExternalAssetOriginPrefix) (int64, error) {
+	r.previewPrefixMarks = append(r.previewPrefixMarks, prefixes...)
+	return int64(len(prefixes)), nil
+}
+
 func (r *externalAssetRepoStub) ListDirectURLRefreshCandidates(context.Context, []string, int, time.Time) ([]*domain.ExternalAssetRecord, error) {
 	return nil, nil
 }
@@ -1278,6 +1411,14 @@ func (r *externalAssetRepoStub) ListPendingOSSPrioritized(_ context.Context, pre
 
 func (r *externalAssetRepoStub) ListPendingPreview(context.Context, []string, int) ([]*domain.ExternalAssetRecord, error) {
 	return nil, nil
+}
+
+func (r *externalAssetRepoStub) ListDirectoryChildren(_ context.Context, parentPath string, _ []string, _ int, _ domain.AssetFormatCategoryFilter) ([]domain.ExternalAssetDirectoryEntry, error) {
+	return append([]domain.ExternalAssetDirectoryEntry(nil), r.directoryEntriesByParent[cleanExternalMaterialBrowsePath(parentPath)]...), nil
+}
+
+func (r *externalAssetRepoStub) ListDirectoryFiles(context.Context, string, []string, int, int, domain.AssetFormatCategoryFilter) ([]*domain.ExternalAssetRecord, int64, error) {
+	return nil, 0, nil
 }
 
 func (r *externalAssetRepoStub) MarkOSSReady(context.Context, int64, string) error {

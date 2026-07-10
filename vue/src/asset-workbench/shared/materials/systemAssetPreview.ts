@@ -39,6 +39,12 @@ export function isSystemAssetPdfPreviewable(asset: SystemAssetRow | SystemAssetP
   return mime === 'application/pdf' || extensionOf(systemAssetFilename(asset)) === 'pdf'
 }
 
+export function isSystemAssetDerivedPreviewCandidate(asset: SystemAssetRow | SystemAssetPreviewMeta) {
+  const mime = normalizedMime(asset.mime_type)
+  if (mime.includes('photoshop') || mime.includes('illustrator')) return true
+  return ['psd', 'psb', 'ai', 'eps', 'ps', 'tif', 'tiff', 'heic', 'heif', 'avif'].includes(extensionOf(systemAssetFilename(asset)))
+}
+
 export function isPdfMimeOrFilename(mimeType?: string | null, filename?: string | null) {
   const mime = normalizedMime(mimeType)
   if (mime === 'application/pdf') return true
@@ -55,6 +61,7 @@ export function canAttemptSystemAssetPreview(asset: SystemAssetRow | SystemAsset
   if (asset.preview_available) return true
   if (isSystemAssetImagePreviewable(asset)) return true
   if (isSystemAssetPdfPreviewable(asset)) return true
+  if (isSystemAssetDerivedPreviewCandidate(asset)) return true
   return isVideoMimeOrFilename(asset.mime_type, systemAssetFilename(asset))
 }
 

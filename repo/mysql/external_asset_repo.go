@@ -275,6 +275,14 @@ func buildExternalAssetWhereWithMode(query domain.ExternalAssetSearchQuery, pref
 		clauses = append(clauses, `mount_path = ?`)
 		args = append(args, query.MountPath)
 	}
+	if len(query.OriginPrefixes) > 0 {
+		prefixClauses := make([]string, 0, len(query.OriginPrefixes))
+		for _, prefix := range query.OriginPrefixes {
+			prefixClauses = append(prefixClauses, `(origin_path = ? OR origin_path LIKE ?)`)
+			args = append(args, prefix, prefix+"/%")
+		}
+		clauses = append(clauses, `(`+strings.Join(prefixClauses, " OR ")+`)`)
+	}
 	if query.CreatedFrom != nil {
 		clauses = append(clauses, `updated_at >= ?`)
 		args = append(args, *query.CreatedFrom)
@@ -1113,6 +1121,33 @@ func (r *externalAssetRepo) MarkPreviewPreparePending(ctx context.Context, id in
 	return wrapExternalAssetUpdate(err, "mark external preview pending")
 }
 
+func (r *externalAssetRepo) MarkPreviewPendingByOriginPrefixes(ctx context.Context, prefixes []repo.ExternalAssetOriginPrefix) (int64, error) {
+	where, args := externalAssetOriginPrefixWhere(prefixes)
+	if where == "" {
+		return 0, nil
+	}
+	result, err := r.db.db.ExecContext(ctx, `
+		UPDATE external_asset_records
+		   SET preview_status = 'pending',
+		       last_prepare_error = NULL
+		 WHERE is_dir = 0
+		   AND status <> 'missing'
+		   AND preview_status <> 'ready'
+		   AND (
+		       LOWER(COALESCE(mime_type, '')) LIKE 'image/%'
+		       OR LOWER(COALESCE(mime_type, '')) LIKE '%photoshop%'
+		       OR LOWER(COALESCE(mime_type, '')) LIKE '%illustrator%'
+		       OR LOWER(COALESCE(mime_type, '')) = 'application/pdf'
+		       OR LOWER(COALESCE(file_ext, '')) IN ('.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp', '.svg', '.tif', '.tiff', '.heic', '.heif', '.avif', '.pdf', '.psd', '.psb', '.ai', '.eps', '.ps')
+		   )
+		   AND (`+where+`)`, args...)
+	if err != nil {
+		return 0, fmt.Errorf("mark external preview pending by origin prefixes: %w", err)
+	}
+	affected, _ := result.RowsAffected()
+	return affected, nil
+}
+
 func (r *externalAssetRepo) ListDirectURLRefreshCandidates(ctx context.Context, mountPaths []string, limit int, staleBefore time.Time) ([]*domain.ExternalAssetRecord, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
@@ -1150,8 +1185,9 @@ func (r *externalAssetRepo) ListPendingOSSPrioritized(ctx context.Context, prefi
 	args := append(mountArgs, priorityArgs...)
 	args = append(args, limit)
 	rows, err := r.db.db.QueryContext(ctx, externalAssetSelect+`
-		WHERE kind IN ('nas_local', 'netdisk')
+		WHERE kind = 'nas_local'
 		  AND is_dir = 0
+		  AND status <> 'missing'
 		  `+mountClause+`
 		  AND (
 		    oss_sync_status = 'pending'

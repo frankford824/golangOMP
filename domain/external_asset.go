@@ -106,6 +106,7 @@ type ExternalAssetSearchQuery struct {
 	Keyword        string
 	Kind           ExternalAssetKind
 	MountPath      string
+	OriginPrefixes []string
 	CreatedFrom    *time.Time
 	CreatedTo      *time.Time
 	FormatCategory AssetFormatCategoryFilter
@@ -116,6 +117,22 @@ type ExternalAssetSearchQuery struct {
 func (q ExternalAssetSearchQuery) Normalized() ExternalAssetSearchQuery {
 	q.Keyword = strings.TrimSpace(q.Keyword)
 	q.MountPath = strings.TrimSpace(q.MountPath)
+	if len(q.OriginPrefixes) > 0 {
+		prefixes := make([]string, 0, len(q.OriginPrefixes))
+		seen := map[string]struct{}{}
+		for _, raw := range q.OriginPrefixes {
+			prefix := path.Clean("/" + strings.TrimLeft(strings.TrimSpace(strings.ReplaceAll(raw, "\\", "/")), "/"))
+			if prefix == "/" {
+				continue
+			}
+			if _, ok := seen[prefix]; ok {
+				continue
+			}
+			seen[prefix] = struct{}{}
+			prefixes = append(prefixes, prefix)
+		}
+		q.OriginPrefixes = prefixes
+	}
 	if q.Page <= 0 {
 		q.Page = 1
 	}
