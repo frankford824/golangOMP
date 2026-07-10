@@ -17,7 +17,8 @@ func NewTaskAssetRepo(db *DB) repo.TaskAssetRepo { return &taskAssetRepo{db: db}
 const taskAssetSelectCols = `
 	ta.id, ta.task_id, ta.asset_id, ta.scope_sku_code, ta.retouch_requirement_id, ta.asset_type, ta.version_no, ta.asset_version_no, ta.upload_mode, ta.upload_request_id, ta.storage_ref_id,
 	ta.file_name, ta.original_filename, ta.remote_file_id, ta.mime_type, ta.file_size, ta.file_path, ta.storage_key, ta.whole_hash, ta.upload_status, ta.preview_status, ta.uploaded_by, ta.uploaded_at, ta.remark, ta.created_at,
-	ta.source_module_key, ta.flow_review_status, ta.approved_at, ta.approved_by, ta.rejected_at, ta.rejected_by, ta.superseded_by_version_id, ta.superseded_at, ta.cleanup_after_at, ta.source_asset_version_id,
+	ta.source_module_key, ta.source_task_module_id, COALESCE(ta.is_archived, 0), ta.archived_at, ta.archived_by, ta.cleaned_at, ta.deleted_at,
+	ta.flow_review_status, ta.approved_at, ta.approved_by, ta.rejected_at, ta.rejected_by, ta.superseded_by_version_id, ta.superseded_at, ta.cleanup_after_at, ta.source_asset_version_id,
 	asr.ref_id, asr.asset_id, asr.owner_type, asr.owner_id, asr.upload_request_id, asr.storage_adapter,
 	asr.ref_type, asr.ref_key, asr.file_name, asr.mime_type, asr.file_size, asr.is_placeholder, asr.checksum_hint,
 	asr.status, asr.created_at`
@@ -83,6 +84,19 @@ func (r *taskAssetRepo) GetByID(ctx context.Context, id int64) (*domain.TaskAsse
 		FROM task_assets ta
 		LEFT JOIN asset_storage_refs asr ON asr.ref_id = ta.storage_ref_id
 		WHERE ta.id = ?`, id)
+	return scanTaskAsset(row)
+}
+
+// GetByIDForUpdate returns one version while holding its task_assets row lock.
+// State-sensitive services discover this capability through a local optional
+// interface so the broad TaskAssetRepo contract does not need to grow.
+func (r *taskAssetRepo) GetByIDForUpdate(ctx context.Context, tx repo.Tx, id int64) (*domain.TaskAsset, error) {
+	row := Unwrap(tx).QueryRowContext(ctx, `
+		SELECT `+taskAssetSelectCols+`
+		FROM task_assets ta
+		LEFT JOIN asset_storage_refs asr ON asr.ref_id = ta.storage_ref_id
+		WHERE ta.id = ?
+		FOR UPDATE`, id)
 	return scanTaskAsset(row)
 }
 
@@ -184,8 +198,10 @@ func scanTaskAsset(row *sql.Row) (*domain.TaskAsset, error) {
 	var fileSize sql.NullInt64
 	var uploadedAt sql.NullTime
 	var flowReviewStatus sql.NullString
+	var archivedAt, cleanedAt, deletedAt sql.NullTime
 	var approvedAt, rejectedAt, supersededAt, cleanupAfterAt sql.NullTime
-	var approvedBy, rejectedBy, supersededByVersionID, sourceAssetVersionID sql.NullInt64
+	var sourceTaskModuleID, archivedBy, approvedBy, rejectedBy, supersededByVersionID, sourceAssetVersionID sql.NullInt64
+	var isArchived bool
 	var refID, refOwnerType, refUploadRequestID, refStorageAdapter sql.NullString
 	var refType, refKey, refFileName, refMimeType, refChecksumHint, refStatus sql.NullString
 	var refAssetID, refOwnerID, refFileSize sql.NullInt64
@@ -194,7 +210,8 @@ func scanTaskAsset(row *sql.Row) (*domain.TaskAsset, error) {
 	err := row.Scan(
 		&asset.ID, &asset.TaskID, &assetID, &scopeSKUCode, &retouchRequirementID, &asset.AssetType, &asset.VersionNo, &assetVersionNo, &uploadMode, &uploadRequestID, &storageRefID,
 		&asset.FileName, &originalFilename, &remoteFileID, &mimeType, &fileSize, &filePath, &storageKey, &wholeHash, &uploadStatus, &previewStatus, &asset.UploadedBy, &uploadedAt, &asset.Remark, &asset.CreatedAt,
-		&asset.SourceModuleKey, &flowReviewStatus, &approvedAt, &approvedBy, &rejectedAt, &rejectedBy, &supersededByVersionID, &supersededAt, &cleanupAfterAt, &sourceAssetVersionID,
+		&asset.SourceModuleKey, &sourceTaskModuleID, &isArchived, &archivedAt, &archivedBy, &cleanedAt, &deletedAt,
+		&flowReviewStatus, &approvedAt, &approvedBy, &rejectedAt, &rejectedBy, &supersededByVersionID, &supersededAt, &cleanupAfterAt, &sourceAssetVersionID,
 		&refID, &refAssetID, &refOwnerType, &refOwnerID, &refUploadRequestID, &refStorageAdapter,
 		&refType, &refKey, &refFileName, &refMimeType, &refFileSize, &refIsPlaceholder, &refChecksumHint,
 		&refStatus, &refCreatedAt,
@@ -224,6 +241,12 @@ func scanTaskAsset(row *sql.Row) (*domain.TaskAsset, error) {
 	asset.UploadStatus = fromNullString(uploadStatus)
 	asset.PreviewStatus = fromNullString(previewStatus)
 	asset.UploadedAt = fromNullTime(uploadedAt)
+	asset.SourceTaskModuleID = fromNullInt64(sourceTaskModuleID)
+	asset.IsArchived = isArchived
+	asset.ArchivedAt = fromNullTime(archivedAt)
+	asset.ArchivedBy = fromNullInt64(archivedBy)
+	asset.CleanedAt = fromNullTime(cleanedAt)
+	asset.DeletedAt = fromNullTime(deletedAt)
 	if flowReviewStatus.Valid {
 		asset.FlowReviewStatus = domain.NormalizeTaskAssetFlowReviewStatus(domain.TaskAssetFlowReviewStatus(flowReviewStatus.String), asset.AssetType)
 	} else {
@@ -268,8 +291,10 @@ func scanTaskAssetRow(rows *sql.Rows) (*domain.TaskAsset, error) {
 	var fileSize sql.NullInt64
 	var uploadedAt sql.NullTime
 	var flowReviewStatus sql.NullString
+	var archivedAt, cleanedAt, deletedAt sql.NullTime
 	var approvedAt, rejectedAt, supersededAt, cleanupAfterAt sql.NullTime
-	var approvedBy, rejectedBy, supersededByVersionID, sourceAssetVersionID sql.NullInt64
+	var sourceTaskModuleID, archivedBy, approvedBy, rejectedBy, supersededByVersionID, sourceAssetVersionID sql.NullInt64
+	var isArchived bool
 	var refID, refOwnerType, refUploadRequestID, refStorageAdapter sql.NullString
 	var refType, refKey, refFileName, refMimeType, refChecksumHint, refStatus sql.NullString
 	var refAssetID, refOwnerID, refFileSize sql.NullInt64
@@ -278,7 +303,8 @@ func scanTaskAssetRow(rows *sql.Rows) (*domain.TaskAsset, error) {
 	if err := rows.Scan(
 		&asset.ID, &asset.TaskID, &assetID, &scopeSKUCode, &retouchRequirementID, &asset.AssetType, &asset.VersionNo, &assetVersionNo, &uploadMode, &uploadRequestID, &storageRefID,
 		&asset.FileName, &originalFilename, &remoteFileID, &mimeType, &fileSize, &filePath, &storageKey, &wholeHash, &uploadStatus, &previewStatus, &asset.UploadedBy, &uploadedAt, &asset.Remark, &asset.CreatedAt,
-		&asset.SourceModuleKey, &flowReviewStatus, &approvedAt, &approvedBy, &rejectedAt, &rejectedBy, &supersededByVersionID, &supersededAt, &cleanupAfterAt, &sourceAssetVersionID,
+		&asset.SourceModuleKey, &sourceTaskModuleID, &isArchived, &archivedAt, &archivedBy, &cleanedAt, &deletedAt,
+		&flowReviewStatus, &approvedAt, &approvedBy, &rejectedAt, &rejectedBy, &supersededByVersionID, &supersededAt, &cleanupAfterAt, &sourceAssetVersionID,
 		&refID, &refAssetID, &refOwnerType, &refOwnerID, &refUploadRequestID, &refStorageAdapter,
 		&refType, &refKey, &refFileName, &refMimeType, &refFileSize, &refIsPlaceholder, &refChecksumHint,
 		&refStatus, &refCreatedAt,
@@ -304,6 +330,12 @@ func scanTaskAssetRow(rows *sql.Rows) (*domain.TaskAsset, error) {
 	asset.UploadStatus = fromNullString(uploadStatus)
 	asset.PreviewStatus = fromNullString(previewStatus)
 	asset.UploadedAt = fromNullTime(uploadedAt)
+	asset.SourceTaskModuleID = fromNullInt64(sourceTaskModuleID)
+	asset.IsArchived = isArchived
+	asset.ArchivedAt = fromNullTime(archivedAt)
+	asset.ArchivedBy = fromNullInt64(archivedBy)
+	asset.CleanedAt = fromNullTime(cleanedAt)
+	asset.DeletedAt = fromNullTime(deletedAt)
 	if flowReviewStatus.Valid {
 		asset.FlowReviewStatus = domain.NormalizeTaskAssetFlowReviewStatus(domain.TaskAssetFlowReviewStatus(flowReviewStatus.String), asset.AssetType)
 	} else {

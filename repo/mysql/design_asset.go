@@ -46,6 +46,16 @@ func (r *designAssetRepo) GetByID(ctx context.Context, id int64) (*domain.Design
 	return scanDesignAsset(row)
 }
 
+// GetByIDForUpdate returns one resource root while holding its row lock.
+func (r *designAssetRepo) GetByIDForUpdate(ctx context.Context, tx repo.Tx, id int64) (*domain.DesignAsset, error) {
+	row := Unwrap(tx).QueryRowContext(ctx, `
+		SELECT `+designAssetSelectCols+`
+		FROM design_assets
+		WHERE id = ?
+		FOR UPDATE`, id)
+	return scanDesignAsset(row)
+}
+
 func (r *designAssetRepo) List(ctx context.Context, filter repo.DesignAssetListFilter) ([]*domain.DesignAsset, error) {
 	whereParts := []string{"1=1"}
 	args := make([]interface{}, 0, 4)
@@ -125,6 +135,34 @@ func (r *designAssetRepo) UpdateCurrentVersionID(ctx context.Context, tx repo.Tx
 		return err
 	}
 	return nil
+}
+
+// UpdateCurrentVersionIDCAS prevents two replacement sessions that observed
+// the same current version from silently overwriting one another.
+func (r *designAssetRepo) UpdateCurrentVersionIDCAS(ctx context.Context, tx repo.Tx, id int64, expectedCurrentVersionID, currentVersionID *int64) (bool, error) {
+	sqlTx := Unwrap(tx)
+	res, err := sqlTx.ExecContext(ctx, `
+		UPDATE design_assets
+		SET current_version_id = ?, updated_at = CURRENT_TIMESTAMP
+		WHERE id = ? AND current_version_id <=> ?`,
+		toNullInt64(currentVersionID),
+		id,
+		toNullInt64(expectedCurrentVersionID),
+	)
+	if err != nil {
+		return false, fmt.Errorf("compare-and-swap design_asset current version: %w", err)
+	}
+	rowsAffected, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("compare-and-swap design_asset current version rows affected: %w", err)
+	}
+	if rowsAffected == 0 {
+		return false, nil
+	}
+	if err := reindexAssetSearchDocument(ctx, sqlTx, id); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func scanDesignAsset(scanner interface {

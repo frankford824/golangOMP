@@ -278,6 +278,7 @@ func main() {
 		service.WithTaskCreateRequestRepo(taskCreateRequestRepo),
 		service.WithTaskCreateFilingAsync(),
 		service.WithTaskCustomizationJobRepo(customizationJobRepo),
+		service.WithTaskCustomizationReviewModuleSync(taskModuleRepo, taskModuleEventRepo),
 		service.WithUserDisplayNameResolver(service.NewUserRepoDisplayNameResolver(userRepo)),
 		service.WithTaskDataScopeResolver(taskDataScopeResolver),
 		service.WithTaskScopeUserRepo(userRepo),
@@ -361,6 +362,7 @@ func main() {
 		service.WithWarehouseDataScopeResolver(taskDataScopeResolver),
 		service.WithWarehouseScopeUserRepo(userRepo),
 		service.WithWarehouseCustomizationJobRepo(customizationJobRepo),
+		service.WithWarehouseModuleSync(taskModuleRepo, taskModuleEventRepo),
 		service.WithWarehouseFilingTrigger(taskSvc))
 	operationLogSvc := service.NewOperationLogService(taskEventRepo, exportJobEventRepo, integrationCallLogRepo)
 	notificationGen := notificationsvc.NewGenerator(notificationSvc, moduleNotificationRepo, logger.Named("notification_generator"))

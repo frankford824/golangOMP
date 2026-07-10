@@ -155,6 +155,12 @@ func TestSA_A_I8_CleanupJobDryRunRealRunIdempotent(t *testing.T) {
 	if _, err := db.Exec(`UPDATE tasks SET task_status='Completed', updated_at = NOW(6) - INTERVAL 400 DAY WHERE id=?`, fixture.TaskID); err != nil {
 		t.Fatalf("mark task terminal old: %v", err)
 	}
+	if _, err := db.Exec(`UPDATE task_assets SET uploaded_at = NOW(6) - INTERVAL 400 DAY, created_at = NOW(6) - INTERVAL 400 DAY WHERE id=?`, fixture.VersionID); err != nil {
+		t.Fatalf("mark asset version old: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE design_assets SET current_version_id = NULL WHERE id=?`, fixture.AssetID); err != nil {
+		t.Fatalf("make old version non-current: %v", err)
+	}
 	_, _, cleanup := newIntegrationServices(db)
 	dry, appErr := cleanup.Run(context.Background(), CleanupOptions{DryRun: true, Limit: 10})
 	if appErr != nil {

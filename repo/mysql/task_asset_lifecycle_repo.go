@@ -229,15 +229,19 @@ func (r *taskAssetLifecycleRepo) ListEligibleForCleanup(ctx context.Context, cut
 		limit = 100
 	}
 	rows, err := r.db.db.QueryContext(ctx, `
-		SELECT ta.asset_id, ta.id, ta.task_id, ta.source_task_module_id, COALESCE(ta.storage_key, ''), ta.source_module_key, t.updated_at
+		SELECT ta.asset_id, ta.id, ta.task_id, ta.source_task_module_id, COALESCE(ta.storage_key, ''), ta.source_module_key,
+		       COALESCE(ta.uploaded_at, ta.created_at)
 		  FROM task_assets ta
 		  JOIN tasks t ON t.id = ta.task_id
 		 WHERE ta.deleted_at IS NULL
 		   AND ta.cleaned_at IS NULL
 		   AND COALESCE(ta.storage_key, '') <> ''
 		   AND t.task_status IN (?, ?, ?)
-		   AND t.updated_at < ?
-		 ORDER BY t.updated_at ASC, ta.id ASC
+		   AND COALESCE(ta.uploaded_at, ta.created_at) < ?
+		   AND ta.id <> COALESCE((
+		        SELECT da.current_version_id FROM design_assets da WHERE da.id = ta.asset_id
+		   ), 0)
+		 ORDER BY COALESCE(ta.uploaded_at, ta.created_at) ASC, ta.id ASC
 		 LIMIT ?`,
 		string(domain.TaskStatusCompleted), string(domain.TaskStatusCancelled), string(domain.TaskStatusArchived), cutoff, limit)
 	if err != nil {

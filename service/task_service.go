@@ -344,6 +344,8 @@ type taskService struct {
 	referenceFileRefFlatRepo       repo.ReferenceFileRefFlatRepo
 	retouchRequirementRepo         repo.TaskRetouchRequirementRepo
 	taskCreateRequestRepo          repo.TaskCreateRequestRepo
+	taskModuleRepo                 repo.TaskModuleRepo
+	taskModuleEventRepo            repo.TaskModuleEventRepo
 	taskReferenceAssetFormalizer   TaskReferenceAssetFormalizer
 	productCodeSeqRepo             repo.ProductCodeSequenceRepo
 	erpBridgeSvc                   ERPBridgeService
@@ -462,6 +464,13 @@ func WithTaskProductCodeSequenceRepo(productCodeSeqRepo repo.ProductCodeSequence
 func WithTaskCustomizationJobRepo(customizationJobRepo repo.CustomizationJobRepo) TaskServiceOption {
 	return func(s *taskService) {
 		s.customizationJobRepo = customizationJobRepo
+	}
+}
+
+func WithTaskCustomizationReviewModuleSync(moduleRepo repo.TaskModuleRepo, moduleEventRepo repo.TaskModuleEventRepo) TaskServiceOption {
+	return func(s *taskService) {
+		s.taskModuleRepo = moduleRepo
+		s.taskModuleEventRepo = moduleEventRepo
 	}
 }
 

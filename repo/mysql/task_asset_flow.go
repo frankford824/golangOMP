@@ -54,6 +54,7 @@ func (r *taskAssetRepo) MarkCurrentDeliveryVersionsApprovedForTask(ctx context.C
 		       ta.rejected_by = NULL
 		 WHERE ta.task_id = ?
 		   AND ta.asset_type = ?
+		   AND COALESCE(ta.is_archived, 0) = 0
 		   AND ta.deleted_at IS NULL
 		   AND ta.cleaned_at IS NULL`,
 		string(domain.TaskAssetFlowReviewStatusApproved), approvedAt, actorID, taskID, string(domain.TaskAssetTypeDelivery))
@@ -80,10 +81,13 @@ func (r *taskAssetRepo) MarkCurrentDeliveryVersionsRejectedForTask(ctx context.C
 		UPDATE task_assets ta
 		JOIN design_assets da ON da.id = ta.asset_id AND da.current_version_id = ta.id
 		   SET ta.flow_review_status = ?,
+		       ta.approved_at = NULL,
+		       ta.approved_by = NULL,
 		       ta.rejected_at = ?,
 		       ta.rejected_by = ?
 		 WHERE ta.task_id = ?
 		   AND ta.asset_type = ?
+		   AND COALESCE(ta.is_archived, 0) = 0
 		   AND ta.deleted_at IS NULL
 		   AND ta.cleaned_at IS NULL`,
 		string(domain.TaskAssetFlowReviewStatusRejected), rejectedAt, actorID, taskID, string(domain.TaskAssetTypeDelivery))
@@ -107,6 +111,7 @@ func currentDeliveryAssetIDsByTaskID(ctx context.Context, q taskSearchDocumentSQ
 		  JOIN design_assets da ON da.id = ta.asset_id AND da.current_version_id = ta.id
 		 WHERE ta.task_id = ?
 		   AND ta.asset_type = ?
+		   AND COALESCE(ta.is_archived, 0) = 0
 		   AND ta.deleted_at IS NULL
 		   AND ta.cleaned_at IS NULL`,
 		taskID, string(domain.TaskAssetTypeDelivery))
@@ -153,8 +158,9 @@ func (r *taskAssetRepo) CountUnapprovedCurrentDeliveryVersions(ctx context.Conte
 		  FROM task_assets ta
 		  JOIN design_assets da ON da.id = ta.asset_id AND da.current_version_id = ta.id
 		 WHERE ta.task_id = ?
-		   AND ta.asset_type = ?
-		   AND ta.deleted_at IS NULL
+			   AND ta.asset_type = ?
+			   AND COALESCE(ta.is_archived, 0) = 0
+			   AND ta.deleted_at IS NULL
 		   AND ta.cleaned_at IS NULL
 		   AND ta.flow_review_status <> ?`,
 		taskID, string(domain.TaskAssetTypeDelivery), string(domain.TaskAssetFlowReviewStatusApproved)).Scan(&n)
@@ -182,8 +188,9 @@ func (r *taskAssetRepo) ListWarehouseAutoReleaseCandidates(ctx context.Context, 
 		          FROM task_assets ta
 		          JOIN design_assets da ON da.id = ta.asset_id AND da.current_version_id = ta.id
 		         WHERE ta.task_id = t.id
-		           AND ta.asset_type IN (?, ?, ?, ?, ?)
-		           AND ta.deleted_at IS NULL
+			           AND ta.asset_type IN (?, ?, ?, ?, ?)
+			           AND COALESCE(ta.is_archived, 0) = 0
+			           AND ta.deleted_at IS NULL
 		           AND ta.cleaned_at IS NULL
 		   )
 		   AND NOT EXISTS (
@@ -191,8 +198,9 @@ func (r *taskAssetRepo) ListWarehouseAutoReleaseCandidates(ctx context.Context, 
 		          FROM task_assets ta
 		          JOIN design_assets da ON da.id = ta.asset_id AND da.current_version_id = ta.id
 		         WHERE ta.task_id = t.id
-		           AND ta.asset_type IN (?, ?, ?, ?, ?)
-		           AND ta.deleted_at IS NULL
+			           AND ta.asset_type IN (?, ?, ?, ?, ?)
+			           AND COALESCE(ta.is_archived, 0) = 0
+			           AND ta.deleted_at IS NULL
 		           AND ta.cleaned_at IS NULL
 		           AND COALESCE(ta.flow_review_status, '') <> ?
 		   )

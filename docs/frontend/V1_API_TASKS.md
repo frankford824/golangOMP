@@ -3826,7 +3826,7 @@ Content-Type: `application/json`
 |---|---|---|---|
 | `task_id` | integer | 否 | Required on `POST /v1/assets/upload-sessions`; ignored on task-scoped compatibility routes where task context comes from path. |
 | `created_by` | integer | 否 | - |
-| `asset_id` | integer | 否 | - |
+| `asset_id` | integer | 否 | Existing design-asset id when replacing a current resource. Required for every upload against a `Completed` task. |
 | `source_asset_id` | integer | 否 | Optional linkage to a source asset. Allowed for `preview` and `design_thumb` intents. |
 | `asset_type` | enum(reference/source/delivery/preview/design_thumb) | 否 | Compatibility alias of `asset_kind` retained for migration safety. |
 | `asset_kind` | enum(reference/source/delivery/preview/design_thumb) | 否 | Canonical upload intent field for new frontend integrations. |
@@ -4136,7 +4136,7 @@ Content-Type: `application/json`
 |---|---|---|---|
 | `task_id` | integer | 否 | Required on `POST /v1/assets/upload-sessions`; ignored on task-scoped compatibility routes where task context comes from path. |
 | `created_by` | integer | 否 | - |
-| `asset_id` | integer | 否 | - |
+| `asset_id` | integer | 否 | Existing design-asset id when replacing a current resource. Required for every upload against a `Completed` task. |
 | `source_asset_id` | integer | 否 | Optional linkage to a source asset. Allowed for `preview` and `design_thumb` intents. |
 | `asset_type` | enum(reference/source/delivery/preview/design_thumb) | 否 | Compatibility alias of `asset_kind` retained for migration safety. |
 | `asset_kind` | enum(reference/source/delivery/preview/design_thumb) | 否 | Canonical upload intent field for new frontend integrations. |
@@ -7165,7 +7165,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/warehouse/complete \
 ### 简介
 支持方法: POST。
 
-- `POST`: Dedicated customization reviewer entry. The primary `customization_job` is created at task creation. Review may optionally write business-entered review reference data on that record (`customization_level_code`, `customization_level_name`, `review_reference_unit_price`, `review_reference_weight_factor`, `customization_note`); approved decisions do not require level or pricing fields. `source_asset_id`, when provided, must point to an uploaded `source` asset owned by the current task and is written to both `source_asset_id` and `current_asset_id`. Customization tasks reach this endpoint after `CustomizationOperator` submits design through `POST /v1/tasks/{id}/submit-design` and the task enters `PendingCustomizationReview`. `return_to_designer` returns the task to `PendingCustomizationProduction` for customization-operator rework, preferring `last_customization_operator_id` and falling back to `designer_id` for historical tasks. Approved customization reviews enter the warehouse chain through `PendingWarehouseReceive`. Review does not freeze execution settlement pricing.
+- `POST`: Dedicated customization reviewer entry. The primary `customization_job` is created at task creation. Review may optionally write business-entered review reference data on that record (`customization_level_code`, `customization_level_name`, `review_reference_unit_price`, `review_reference_weight_factor`, `customization_note`); approved decisions do not require level or pricing fields. `source_asset_id`, when provided, must point to an uploaded `source` asset owned by the current task and is written to both `source_asset_id` and `current_asset_id`. Customization tasks reach this endpoint after `CustomizationOperator` submits design through `POST /v1/tasks/{id}/submit-design` and the task enters `PendingCustomizationReview`. `return_to_designer` marks current delivery versions rejected, reopens the customization module, and returns the task to `PendingCustomizationProduction`, preferring `last_customization_operator_id` and falling back to `designer_id` for historical tasks. Approved or reviewer-fixed customization reviews atomically mark current delivery versions approved, close the customization/audit modules, and enter the warehouse chain through `PendingWarehouseReceive`. Review does not freeze execution settlement pricing.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。

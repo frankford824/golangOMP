@@ -54,6 +54,8 @@ type warehouseService struct {
 	warehouseRepo        repo.WarehouseRepo
 	taskEventRepo        repo.TaskEventRepo
 	customizationJobRepo repo.CustomizationJobRepo
+	taskModuleRepo       repo.TaskModuleRepo
+	taskModuleEventRepo  repo.TaskModuleEventRepo
 	txRunner             repo.TxRunner
 	filingTrigger        warehouseTaskFilingTrigger
 	dataScopeResolver    DataScopeResolver
@@ -76,6 +78,13 @@ func WithWarehouseFilingTrigger(trigger warehouseTaskFilingTrigger) WarehouseSer
 func WithWarehouseCustomizationJobRepo(customizationJobRepo repo.CustomizationJobRepo) WarehouseServiceOption {
 	return func(s *warehouseService) {
 		s.customizationJobRepo = customizationJobRepo
+	}
+}
+
+func WithWarehouseModuleSync(moduleRepo repo.TaskModuleRepo, moduleEventRepo repo.TaskModuleEventRepo) WarehouseServiceOption {
+	return func(s *warehouseService) {
+		s.taskModuleRepo = moduleRepo
+		s.taskModuleEventRepo = moduleEventRepo
 	}
 }
 
@@ -207,6 +216,12 @@ func (s *warehouseService) Receive(ctx context.Context, p ReceiveWarehouseParams
 		if err := s.advanceWarehouseTask(ctx, tx, task, TaskActionWarehouseReceive, nextStatus, nextHandlerID); err != nil {
 			return err
 		}
+		if err := s.syncWarehouseModuleState(ctx, tx, task.ID, domain.ModuleStateReceived, domain.ModuleEventReceived, receiverID, map[string]interface{}{
+			"receipt_no": receipt.ReceiptNo,
+			"remark":     p.Remark,
+		}); err != nil {
+			return err
+		}
 		_, err := s.taskEventRepo.Append(ctx, tx, p.TaskID, domain.TaskEventWarehouseReceived, &receiverID,
 			taskTransitionEventPayload(task, task.TaskStatus, nextStatus, task.CurrentHandlerID, nextHandlerID, map[string]interface{}{
 				"receiver_id":         receiverID,
@@ -305,6 +320,14 @@ func (s *warehouseService) Reject(ctx context.Context, p RejectWarehouseParams) 
 		if err := s.applyWarehouseRejectToCustomization(ctx, tx, task, p.RejectReason, strings.TrimSpace(p.RejectCategory)); err != nil {
 			return err
 		}
+		if err := s.syncWarehouseModuleState(ctx, tx, task.ID, domain.ModuleStateRejected, domain.ModuleEventRejected, receiverID, map[string]interface{}{
+			"receipt_no":      existing.ReceiptNo,
+			"reject_reason":   p.RejectReason,
+			"reject_category": strings.TrimSpace(p.RejectCategory),
+			"remark":          p.Remark,
+		}); err != nil {
+			return err
+		}
 		_, err := s.taskEventRepo.Append(ctx, tx, p.TaskID, domain.TaskEventWarehouseRejected, &receiverID,
 			taskTransitionEventPayload(task, task.TaskStatus, nextStatus, task.CurrentHandlerID, nextHandlerID, map[string]interface{}{
 				"receiver_id":            receiverID,
@@ -386,6 +409,12 @@ func (s *warehouseService) Complete(ctx context.Context, p CompleteWarehousePara
 		if err := s.advanceWarehouseTask(ctx, tx, task, TaskActionWarehouseComplete, nextStatus, nextHandlerID); err != nil {
 			return err
 		}
+		if err := s.syncWarehouseModuleState(ctx, tx, task.ID, domain.ModuleStateCompleted, domain.ModuleEventCompleted, receiverID, map[string]interface{}{
+			"receipt_no": existing.ReceiptNo,
+			"remark":     p.Remark,
+		}); err != nil {
+			return err
+		}
 		_, err := s.taskEventRepo.Append(ctx, tx, p.TaskID, domain.TaskEventWarehouseCompleted, &receiverID,
 			taskTransitionEventPayload(task, task.TaskStatus, nextStatus, task.CurrentHandlerID, nextHandlerID, map[string]interface{}{
 				"receiver_id":         receiverID,
@@ -416,6 +445,80 @@ func (s *warehouseService) getWarehouseTask(ctx context.Context, taskID int64) (
 		return nil, domain.ErrNotFound
 	}
 	return task, nil
+}
+
+func (s *warehouseService) syncWarehouseModuleState(ctx context.Context, tx repo.Tx, taskID int64, next domain.ModuleState, eventType domain.ModuleEventType, actorID int64, eventPayload map[string]interface{}) error {
+	if s.taskModuleRepo == nil && s.taskModuleEventRepo == nil {
+		return nil
+	}
+	if s.taskModuleRepo == nil || s.taskModuleEventRepo == nil {
+		return domain.NewAppError(domain.ErrCodeInternalError, "warehouse module synchronization is partially configured", map[string]interface{}{
+			"task_id": taskID,
+		})
+	}
+	atomicRepo, ok := s.taskModuleRepo.(taskModuleAtomicStateRepo)
+	if !ok {
+		return domain.NewAppError(domain.ErrCodeInternalError, "task module repository does not support atomic warehouse synchronization", map[string]interface{}{
+			"task_id": taskID,
+		})
+	}
+	module, err := atomicRepo.GetByTaskAndKeyForUpdate(ctx, tx, taskID, domain.ModuleKeyWarehouse)
+	if err != nil {
+		return err
+	}
+	if module == nil {
+		return domain.NewAppError(domain.ErrCodeInvalidStateTransition, "warehouse action requires an initialized warehouse module", map[string]interface{}{
+			"task_id": taskID,
+		})
+	}
+	if module.State == next {
+		return nil
+	}
+	if !warehouseModuleTransitionAllowed(module.State, next) {
+		return domain.NewAppError(domain.ErrCodeInvalidStateTransition, "warehouse action cannot overwrite the current module state", map[string]interface{}{
+			"task_id":      taskID,
+			"from_state":   module.State,
+			"target_state": next,
+		})
+	}
+	from := module.State
+	updated, err := atomicRepo.UpdateStateCAS(ctx, tx, taskID, domain.ModuleKeyWarehouse, from, next, next.Terminal(), nil)
+	if err != nil {
+		return err
+	}
+	if !updated {
+		return domain.NewAppError(domain.ErrCodeConflict, "warehouse module state changed concurrently", map[string]interface{}{
+			"task_id":        taskID,
+			"expected_state": from,
+		})
+	}
+	_, err = s.taskModuleEventRepo.Insert(ctx, tx, &domain.TaskModuleEvent{
+		TaskID:       taskID,
+		TaskModuleID: module.ID,
+		ModuleKey:    domain.ModuleKeyWarehouse,
+		EventType:    eventType,
+		FromState:    &from,
+		ToState:      &next,
+		ActorID:      &actorID,
+		Payload:      mustJSON(eventPayload),
+	})
+	return err
+}
+
+func warehouseModuleTransitionAllowed(from, next domain.ModuleState) bool {
+	if from.Terminal() {
+		return false
+	}
+	switch next {
+	case domain.ModuleStateReceived:
+		return from == domain.ModuleStatePending || from == domain.ModuleStatePendingClaim || from == domain.ModuleStatePreparing
+	case domain.ModuleStateRejected:
+		return from == domain.ModuleStatePending || from == domain.ModuleStatePendingClaim || from == domain.ModuleStatePreparing || from == domain.ModuleStateReceived
+	case domain.ModuleStateCompleted:
+		return from == domain.ModuleStatePreparing || from == domain.ModuleStateReceived
+	default:
+		return false
+	}
 }
 
 func (s *warehouseService) loadReceiptByTask(ctx context.Context, taskID int64, op string) (*domain.WarehouseReceipt, *domain.AppError) {

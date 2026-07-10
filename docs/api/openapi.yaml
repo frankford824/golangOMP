@@ -4203,6 +4203,11 @@ components:
         design asset to one child SKU.
         Asset-center upload sessions now return OSS-backed remote upload instructions.
         Frontend uploads bytes using the returned remote plan, then calls `complete`.
+        Completed tasks accept replacement uploads only: `asset_id` must identify an existing
+        active, non-archived task-owned current resource and `asset_kind` must be `reference`,
+        `source`, or `delivery`.
+        A completed-task delivery replacement creates a new approved current version without
+        reopening the task workflow; the previous current version becomes `superseded`.
       properties:
         task_id:
           type: integer
@@ -4213,6 +4218,7 @@ components:
         asset_id:
           type: integer
           nullable: true
+          description: Existing design-asset id when replacing a current resource. Required for every upload against a `Completed` task.
         source_asset_id:
           type: integer
           nullable: true
@@ -12861,6 +12867,9 @@ paths:
         asset uploader; it may use this route only through
         `task.customization.review.asset_upload` for uploaded `source` assets while the
         task is in `PendingCustomizationReview` or `PendingEffectReview`.
+        When the task is `Completed`, this route only replaces an active, non-archived current
+        `reference`, `source`, or `delivery` resource supplied through `asset_id`; it never
+        creates an unrelated new resource.
       tags: [Assets, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
@@ -12886,6 +12895,8 @@ paths:
           description: Invalid request payload
         '403':
           description: Permission denied
+        '409':
+          description: Completed task request is not an existing-current-resource replacement
   /v1/assets/upload-sessions/{session_id}:
     get:
       summary: Get asset upload session
@@ -12916,7 +12927,7 @@ paths:
   /v1/assets/upload-sessions/{session_id}/complete:
     post:
       summary: Complete asset upload session
-      description: Completes one asset upload session after the frontend uploads bytes to OSS using the returned plan. `CustomizationReviewer` completion is allowed only for the same restricted customization-review source upload flow documented on create.
+      description: Completes one asset upload session after the frontend uploads bytes to OSS using the returned plan. `CustomizationReviewer` completion is allowed only for the same restricted customization-review source upload flow documented on create. A delivery replacement created while the task is `Completed` remains approved and does not reopen the task workflow.
       tags: [Assets, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
@@ -12953,7 +12964,7 @@ paths:
   /v1/assets/upload-sessions/{session_id}/cancel:
     post:
       summary: Cancel asset upload session
-      description: Cancels one asset upload session and aborts the remote OSS session when needed. `CustomizationReviewer` cancellation is allowed only for the same restricted customization-review source upload flow documented on create.
+      description: Cancels one asset upload session and aborts the remote OSS session when needed. `CustomizationReviewer` cancellation is allowed only for the same restricted customization-review source upload flow documented on create. Completed tasks may cancel only upload sessions that were created as an existing-resource replacement.
       tags: [Assets, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
@@ -17061,7 +17072,7 @@ paths:
   /v1/tasks/{id}/customization/review:
     post:
       summary: Submit customization review for task
-      description: "Dedicated customization reviewer entry. The primary `customization_job` is created at task creation. Review may optionally write business-entered review reference data on that record (`customization_level_code`, `customization_level_name`, `review_reference_unit_price`, `review_reference_weight_factor`, `customization_note`); approved decisions do not require level or pricing fields. `source_asset_id`, when provided, must point to an uploaded `source` asset owned by the current task and is written to both `source_asset_id` and `current_asset_id`. Customization tasks reach this endpoint after `CustomizationOperator` submits design through `POST /v1/tasks/{id}/submit-design` and the task enters `PendingCustomizationReview`. `return_to_designer` returns the task to `PendingCustomizationProduction` for customization-operator rework, preferring `last_customization_operator_id` and falling back to `designer_id` for historical tasks. Approved customization reviews enter the warehouse chain through `PendingWarehouseReceive`. Review does not freeze execution settlement pricing."
+      description: "Dedicated customization reviewer entry. The primary `customization_job` is created at task creation. Review may optionally write business-entered review reference data on that record (`customization_level_code`, `customization_level_name`, `review_reference_unit_price`, `review_reference_weight_factor`, `customization_note`); approved decisions do not require level or pricing fields. `source_asset_id`, when provided, must point to an uploaded `source` asset owned by the current task and is written to both `source_asset_id` and `current_asset_id`. Customization tasks reach this endpoint after `CustomizationOperator` submits design through `POST /v1/tasks/{id}/submit-design` and the task enters `PendingCustomizationReview`. `return_to_designer` marks current delivery versions rejected, reopens the customization module, and returns the task to `PendingCustomizationProduction`, preferring `last_customization_operator_id` and falling back to `designer_id` for historical tasks. Approved or reviewer-fixed customization reviews atomically mark current delivery versions approved, close the customization/audit modules, and enter the warehouse chain through `PendingWarehouseReceive`. Review does not freeze execution settlement pricing."
       tags: [Tasks, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:

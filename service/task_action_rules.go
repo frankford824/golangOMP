@@ -161,6 +161,7 @@ func taskActionRuleFor(action TaskAction) taskActionRule {
 				domain.TaskStatusPendingEffectRevision,
 				domain.TaskStatusPendingProductionTransfer,
 				domain.TaskStatusRejectedByWarehouse,
+				domain.TaskStatusCompleted,
 			},
 			AllowedScopes:     []TaskActionScopeSource{TaskActionScopeViewAll, TaskActionScopeManagedDepartment, TaskActionScopeManagedTeam, TaskActionScopeDepartment, TaskActionScopeTeam, TaskActionScopeHandler, TaskActionScopeDesigner, TaskActionScopeStage},
 			PreferHandlerDeny: true,

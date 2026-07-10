@@ -19,9 +19,9 @@ describe('asset replacement gate', () => {
     expect(canReplaceAssetResource({ ...baseAsset, taskStatus: 'pending_customization_production' })).toBe(true)
   })
 
-  it('blocks completed and cancelled tasks before opening the file picker', () => {
-    expect(canReplaceAssetResource({ ...baseAsset, taskStatus: 'Completed' })).toBe(false)
-    expect(assetReplacementUnavailableReason({ ...baseAsset, taskStatus: 'Completed' })).toContain('已结单')
+  it('allows replacing current resources after close but still blocks cancelled tasks', () => {
+    expect(canReplaceAssetResource({ ...baseAsset, taskStatus: 'Completed' })).toBe(true)
+    expect(assetReplacementUnavailableReason({ ...baseAsset, taskStatus: 'Completed' })).toBe('')
     expect(assetReplacementUnavailableReason({ ...baseAsset, taskStatus: 'Cancelled' })).toContain('已取消')
   })
 
@@ -30,8 +30,10 @@ describe('asset replacement gate', () => {
     expect(taskStatusBlocksAssetReplacement(undefined)).toBe('')
   })
 
-  it('blocks external, historical, cleaned, and non-replaceable asset kinds', () => {
+  it('blocks external, archived, historical, cleaned, and non-replaceable asset kinds', () => {
     expect(canReplaceAssetResource({ ...baseAsset, isExternal: true })).toBe(false)
+    expect(canReplaceAssetResource({ ...baseAsset, isArchived: true })).toBe(false)
+    expect(canReplaceAssetResource({ ...baseAsset, archiveStatus: 'archived' })).toBe(false)
     expect(canReplaceAssetResource({ ...baseAsset, usableState: 'history' })).toBe(false)
     expect(canReplaceAssetResource({ ...baseAsset, usableState: 'cleaned' })).toBe(false)
     expect(canReplaceAssetResource({ ...baseAsset, assetKind: 'preview' })).toBe(false)

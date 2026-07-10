@@ -455,6 +455,8 @@ function assetReplacementGate(row: BackendAsset | null | undefined) {
     assetKind: rawAssetKind(row),
     usableState: rawUsableState(record),
     taskStatus: record.task_status ?? record.taskStatus,
+    isArchived: record.is_archived ?? record.isArchived,
+    archiveStatus: record.archive_status ?? record.archiveStatus,
   }
 }
 

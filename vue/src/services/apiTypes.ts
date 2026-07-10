@@ -467,6 +467,8 @@ export interface BackendAsset {
   rejected_at?: string
   superseded_at?: string
   cleanup_after_at?: string
+  is_archived?: boolean
+  archive_status?: 'active' | 'archived' | string
   versions?: BackendAssetVersion[]
   approved_version?: number
   warehouse_ready_version?: number

@@ -5,6 +5,8 @@ export interface AssetReplacementGateInput {
   assetKind?: unknown
   usableState?: unknown
   taskStatus?: unknown
+  isArchived?: unknown
+  archiveStatus?: unknown
 }
 
 const REPLACEABLE_ASSET_KINDS = new Set(['delivery', 'source', 'reference'])
@@ -23,6 +25,7 @@ const TASK_ASSET_UPLOAD_SESSION_STATUSES = new Set([
   'PendingEffectRevision',
   'PendingProductionTransfer',
   'RejectedByWarehouse',
+  'Completed',
 ])
 
 const TASK_STATUS_ALIASES: Record<string, string> = {
@@ -98,6 +101,10 @@ export function assetReplacementUnavailableReason(input: AssetReplacementGateInp
   }
   if (!REPLACEABLE_ASSET_KINDS.has(normalizeKind(input.assetKind))) {
     return '当前资源不可修改；只有系统内的参考图、源文件、最终成品图可替换'
+  }
+  const archived = input.isArchived === true || normalizeKind(input.isArchived) === 'true'
+  if (archived || normalizeKind(input.archiveStatus) === 'archived') {
+    return '已归档资源不可修改，请先由超级管理员恢复资源'
   }
   const usableState = normalizeKind(input.usableState)
   if (usableState === 'history' || usableState === 'cleaned') {

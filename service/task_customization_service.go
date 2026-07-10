@@ -4,10 +4,21 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"time"
 
 	"workflow/domain"
 	"workflow/repo"
 )
+
+type customizationReviewAssetFlowRepo interface {
+	MarkCurrentDeliveryVersionsApprovedForTask(ctx context.Context, tx repo.Tx, taskID, actorID int64, approvedAt time.Time) (int64, error)
+	MarkCurrentDeliveryVersionsRejectedForTask(ctx context.Context, tx repo.Tx, taskID, actorID int64, rejectedAt time.Time) (int64, error)
+}
+
+type taskModuleAtomicStateRepo interface {
+	GetByTaskAndKeyForUpdate(ctx context.Context, tx repo.Tx, taskID int64, moduleKey string) (*domain.TaskModule, error)
+	UpdateStateCAS(ctx context.Context, tx repo.Tx, taskID int64, moduleKey string, expected, next domain.ModuleState, terminal bool, data json.RawMessage) (bool, error)
+}
 
 func (s *taskService) SubmitCustomizationReview(ctx context.Context, p SubmitCustomizationReviewParams) (*domain.CustomizationJob, *domain.AppError) {
 	if s.customizationJobRepo == nil {
@@ -56,9 +67,11 @@ func (s *taskService) SubmitCustomizationReview(ctx context.Context, p SubmitCus
 	if appErr := s.validateCustomizationReviewSourceAsset(ctx, task.ID, p.SourceAssetID); appErr != nil {
 		return nil, appErr
 	}
-	currentJob.SourceAssetID = p.SourceAssetID
 	previousAssetID := cloneInt64Ptr(currentJob.CurrentAssetID)
-	currentJob.CurrentAssetID = p.SourceAssetID
+	if p.SourceAssetID != nil {
+		currentJob.SourceAssetID = cloneInt64Ptr(p.SourceAssetID)
+		currentJob.CurrentAssetID = cloneInt64Ptr(p.SourceAssetID)
+	}
 	currentJob.CustomizationLevelCode = levelCode
 	currentJob.CustomizationLevelName = levelName
 	currentJob.ReviewReferenceUnitPrice = cloneFloat64Ptr(p.CustomizationPrice)
@@ -78,6 +91,22 @@ func (s *taskService) SubmitCustomizationReview(ctx context.Context, p SubmitCus
 	currentJob.Status = nextJobStatus
 
 	txErr := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
+		statusRepo, ok := s.taskRepo.(taskStatusCASRepo)
+		if !ok {
+			return domain.NewAppError(domain.ErrCodeInternalError, "task repository does not support atomic customization review transition", map[string]interface{}{
+				"task_id": task.ID,
+			})
+		}
+		updated, err := statusRepo.CASUpdateStatus(ctx, tx, task.ID, domain.TaskStatusPendingCustomizationReview, nextStatus)
+		if err != nil {
+			return err
+		}
+		if !updated {
+			return domain.NewAppError(domain.ErrCodeConflict, "customization review task status changed concurrently", map[string]interface{}{
+				"task_id":         task.ID,
+				"expected_status": domain.TaskStatusPendingCustomizationReview,
+			})
+		}
 		if currentJob.LastOperatorID == nil && task.LastCustomizationOperatorID != nil {
 			currentJob.LastOperatorID = cloneInt64Ptr(task.LastCustomizationOperatorID)
 		}
@@ -90,7 +119,10 @@ func (s *taskService) SubmitCustomizationReview(ctx context.Context, p SubmitCus
 		} else if err := s.customizationJobRepo.Update(ctx, tx, currentJob); err != nil {
 			return err
 		}
-		if err := s.taskRepo.UpdateStatus(ctx, tx, task.ID, nextStatus); err != nil {
+		if err := s.syncCustomizationReviewAssetState(ctx, tx, task, p.Decision, p.ReviewerID); err != nil {
+			return err
+		}
+		if err := s.syncCustomizationReviewModuleState(ctx, tx, task, p.Decision, p.ReviewerID); err != nil {
 			return err
 		}
 		if err := s.taskRepo.UpdateHandler(ctx, tx, task.ID, nextHandler); err != nil {
@@ -99,7 +131,7 @@ func (s *taskService) SubmitCustomizationReview(ctx context.Context, p SubmitCus
 		if err := s.taskRepo.UpdateCustomizationState(ctx, tx, task.ID, customizationOperatorFallbackHandler(task, currentJob), "", ""); err != nil {
 			return err
 		}
-		_, err := s.taskEventRepo.Append(ctx, tx, task.ID, "task.customization.reviewed", &p.ReviewerID, mergeTaskEventPayload(taskEventBasePayload(task), map[string]interface{}{
+		_, err = s.taskEventRepo.Append(ctx, tx, task.ID, "task.customization.reviewed", &p.ReviewerID, mergeTaskEventPayload(taskEventBasePayload(task), map[string]interface{}{
 			"customization_review_decision":  p.Decision,
 			"customization_level_code":       levelCode,
 			"customization_level_name":       levelName,
@@ -119,9 +151,226 @@ func (s *taskService) SubmitCustomizationReview(ctx context.Context, p SubmitCus
 		return err
 	})
 	if txErr != nil {
+		if appErr, ok := txErr.(*domain.AppError); ok {
+			return nil, appErr
+		}
 		return nil, infraError("customization review tx", txErr)
 	}
 	return s.GetCustomizationJob(ctx, currentJob.ID)
+}
+
+func (s *taskService) syncCustomizationReviewAssetState(ctx context.Context, tx repo.Tx, task *domain.Task, decision domain.CustomizationReviewDecision, reviewerID int64) error {
+	if task == nil || s.taskAssetRepo == nil {
+		return nil
+	}
+	flowRepo, ok := s.taskAssetRepo.(customizationReviewAssetFlowRepo)
+	if !ok {
+		return domain.NewAppError(domain.ErrCodeInternalError, "task asset repo does not support customization review state synchronization", map[string]interface{}{
+			"task_id": task.ID,
+		})
+	}
+	now := time.Now().UTC()
+	if decision == domain.CustomizationReviewDecisionReturnToDesigner {
+		_, err := flowRepo.MarkCurrentDeliveryVersionsRejectedForTask(ctx, tx, task.ID, reviewerID, now)
+		return err
+	}
+	updated, err := flowRepo.MarkCurrentDeliveryVersionsApprovedForTask(ctx, tx, task.ID, reviewerID, now)
+	if err != nil {
+		return err
+	}
+	if updated == 0 {
+		return domain.NewAppError(domain.ErrCodeInvalidStateTransition, "customization review approval requires a current delivery asset", map[string]interface{}{
+			"task_id":   task.ID,
+			"deny_code": "customization_review_current_delivery_required",
+		})
+	}
+	return nil
+}
+
+func (s *taskService) syncCustomizationReviewModuleState(ctx context.Context, tx repo.Tx, task *domain.Task, decision domain.CustomizationReviewDecision, reviewerID int64) error {
+	if task == nil {
+		return nil
+	}
+	if s.taskModuleRepo == nil && s.taskModuleEventRepo == nil {
+		return nil
+	}
+	if s.taskModuleRepo == nil || s.taskModuleEventRepo == nil {
+		return domain.NewAppError(domain.ErrCodeInternalError, "customization review module synchronization is partially configured", map[string]interface{}{
+			"task_id": task.ID,
+		})
+	}
+	payload := mustJSON(map[string]interface{}{
+		"source":                        "customization_review",
+		"customization_review_decision": decision,
+	})
+	if err := s.transitionCustomizationReviewModule(ctx, tx, task.ID, domain.ModuleKeyDesign, domain.ModuleStateClosed, domain.ModuleEventClosed, reviewerID, payload); err != nil {
+		return err
+	}
+	if decision == domain.CustomizationReviewDecisionReturnToDesigner {
+		if err := s.transitionCustomizationReviewModule(ctx, tx, task.ID, domain.ModuleKeyAudit, domain.ModuleStateRejected, domain.ModuleEventRejected, reviewerID, payload); err != nil {
+			return err
+		}
+		return s.transitionCustomizationReviewModule(ctx, tx, task.ID, domain.ModuleKeyCustomization, domain.ModuleStateInProgress, domain.ModuleEventReopened, reviewerID, payload)
+	}
+	if err := s.transitionCustomizationReviewModule(ctx, tx, task.ID, domain.ModuleKeyAudit, domain.ModuleStateClosed, domain.ModuleEventApproved, reviewerID, payload); err != nil {
+		return err
+	}
+	if err := s.transitionCustomizationReviewModule(ctx, tx, task.ID, domain.ModuleKeyCustomization, domain.ModuleStateClosed, domain.ModuleEventClosed, reviewerID, payload); err != nil {
+		return err
+	}
+	return s.enterCustomizationWarehouseModule(ctx, tx, task.ID, reviewerID, payload)
+}
+
+func (s *taskService) transitionCustomizationReviewModule(ctx context.Context, tx repo.Tx, taskID int64, moduleKey string, next domain.ModuleState, eventType domain.ModuleEventType, actorID int64, payload json.RawMessage) error {
+	atomicRepo, ok := s.taskModuleRepo.(taskModuleAtomicStateRepo)
+	if !ok {
+		return domain.NewAppError(domain.ErrCodeInternalError, "task module repository does not support atomic state synchronization", map[string]interface{}{
+			"task_id":    taskID,
+			"module_key": moduleKey,
+		})
+	}
+	module, err := atomicRepo.GetByTaskAndKeyForUpdate(ctx, tx, taskID, moduleKey)
+	if err != nil {
+		return err
+	}
+	if module == nil {
+		if moduleKey == domain.ModuleKeyDesign {
+			return nil
+		}
+		return domain.NewAppError(domain.ErrCodeInvalidStateTransition, "customization review requires an initialized task module", map[string]interface{}{
+			"task_id":    taskID,
+			"module_key": moduleKey,
+		})
+	}
+	if module.State == next {
+		return nil
+	}
+	if moduleKey == domain.ModuleKeyDesign && module.State.Terminal() {
+		return nil
+	}
+	if !customizationReviewModuleTransitionAllowed(moduleKey, module.State, next) {
+		return domain.NewAppError(domain.ErrCodeInvalidStateTransition, "customization review cannot overwrite the current module state", map[string]interface{}{
+			"task_id":      taskID,
+			"module_key":   moduleKey,
+			"from_state":   module.State,
+			"target_state": next,
+		})
+	}
+	from := module.State
+	updated, err := atomicRepo.UpdateStateCAS(ctx, tx, taskID, moduleKey, from, next, next.Terminal(), nil)
+	if err != nil {
+		return err
+	}
+	if !updated {
+		return domain.NewAppError(domain.ErrCodeConflict, "task module state changed concurrently", map[string]interface{}{
+			"task_id":        taskID,
+			"module_key":     moduleKey,
+			"expected_state": from,
+		})
+	}
+	_, err = s.taskModuleEventRepo.Insert(ctx, tx, &domain.TaskModuleEvent{
+		TaskID:       taskID,
+		TaskModuleID: module.ID,
+		ModuleKey:    moduleKey,
+		EventType:    eventType,
+		FromState:    &from,
+		ToState:      &next,
+		ActorID:      &actorID,
+		Payload:      payload,
+	})
+	return err
+}
+
+func customizationReviewModuleTransitionAllowed(moduleKey string, from, next domain.ModuleState) bool {
+	if from.Terminal() {
+		return false
+	}
+	switch moduleKey {
+	case domain.ModuleKeyDesign:
+		return next == domain.ModuleStateClosed
+	case domain.ModuleKeyAudit:
+		// The dedicated customization-review endpoint is the review boundary:
+		// authority projects PendingCustomizationReview as audit.pending_claim,
+		// so it records the real pending_claim -> decision transition without
+		// inventing a synthetic claim event or reviewer assignment.
+		if from != domain.ModuleStatePendingClaim && from != domain.ModuleStateInProgress {
+			return false
+		}
+		return next == domain.ModuleStateClosed || next == domain.ModuleStateRejected
+	case domain.ModuleKeyCustomization:
+		switch next {
+		case domain.ModuleStateClosed:
+			return from == domain.ModuleStateSubmitted || from == domain.ModuleStateInProgress
+		case domain.ModuleStateInProgress:
+			return from == domain.ModuleStateSubmitted || from == domain.ModuleStateRejected
+		}
+	}
+	return false
+}
+
+func (s *taskService) enterCustomizationWarehouseModule(ctx context.Context, tx repo.Tx, taskID, actorID int64, payload json.RawMessage) error {
+	atomicRepo, ok := s.taskModuleRepo.(taskModuleAtomicStateRepo)
+	if !ok {
+		return domain.NewAppError(domain.ErrCodeInternalError, "task module repository does not support atomic warehouse synchronization", map[string]interface{}{
+			"task_id": taskID,
+		})
+	}
+	before, err := atomicRepo.GetByTaskAndKeyForUpdate(ctx, tx, taskID, domain.ModuleKeyWarehouse)
+	if err != nil {
+		return err
+	}
+	if before != nil {
+		switch before.State {
+		case domain.ModuleStatePending, domain.ModuleStatePendingClaim:
+			return nil
+		case domain.ModuleStateRejected:
+			from := before.State
+			to := domain.ModuleStatePending
+			updated, err := atomicRepo.UpdateStateCAS(ctx, tx, taskID, domain.ModuleKeyWarehouse, from, to, false, nil)
+			if err != nil {
+				return err
+			}
+			if !updated {
+				return domain.NewAppError(domain.ErrCodeConflict, "warehouse module state changed concurrently", map[string]interface{}{
+					"task_id":        taskID,
+					"expected_state": from,
+				})
+			}
+			_, err = s.taskModuleEventRepo.Insert(ctx, tx, &domain.TaskModuleEvent{
+				TaskID:       taskID,
+				TaskModuleID: before.ID,
+				ModuleKey:    domain.ModuleKeyWarehouse,
+				EventType:    domain.ModuleEventEntered,
+				FromState:    &from,
+				ToState:      &to,
+				ActorID:      &actorID,
+				Payload:      payload,
+			})
+			return err
+		default:
+			return domain.NewAppError(domain.ErrCodeInvalidStateTransition, "customization review cannot rewind the warehouse module", map[string]interface{}{
+				"task_id":      taskID,
+				"from_state":   before.State,
+				"target_state": domain.ModuleStatePending,
+			})
+		}
+	}
+	module, err := s.taskModuleRepo.Enter(ctx, tx, taskID, domain.ModuleKeyWarehouse, domain.ModuleStatePending, nil, json.RawMessage(`{}`))
+	if err != nil {
+		return err
+	}
+	to := domain.ModuleStatePending
+	_, err = s.taskModuleEventRepo.Insert(ctx, tx, &domain.TaskModuleEvent{
+		TaskID:       taskID,
+		TaskModuleID: module.ID,
+		ModuleKey:    domain.ModuleKeyWarehouse,
+		EventType:    domain.ModuleEventEntered,
+		FromState:    nil,
+		ToState:      &to,
+		ActorID:      &actorID,
+		Payload:      payload,
+	})
+	return err
 }
 
 func (s *taskService) SubmitCustomizationEffectPreview(ctx context.Context, p SubmitCustomizationEffectPreviewParams) (*domain.CustomizationJob, *domain.AppError) {

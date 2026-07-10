@@ -163,9 +163,32 @@ func TestSubmitCustomizationReviewApprovedWithoutLevelFields(t *testing.T) {
 		DecisionType: domain.CustomizationJobDecisionTypeFinal,
 		Status:       domain.CustomizationJobStatusPendingCustomizationReview,
 	})
+	assetRepo := newStep04TaskAssetRepo()
+	designAssetID := int64(991)
+	assetVersionNo := 1
+	assetVersionID, err := assetRepo.Create(context.Background(), nil, &domain.TaskAsset{
+		TaskID:           120,
+		AssetID:          &designAssetID,
+		AssetType:        domain.TaskAssetTypeDelivery,
+		AssetVersionNo:   &assetVersionNo,
+		FlowReviewStatus: domain.TaskAssetFlowReviewStatusPendingReview,
+	})
+	if err != nil {
+		t.Fatalf("create delivery asset: %v", err)
+	}
+	moduleRepo := newStep04TaskModuleRepo(
+		&domain.TaskModule{ID: 1, TaskID: 120, ModuleKey: domain.ModuleKeyDesign, State: domain.ModuleStatePendingClaim},
+		&domain.TaskModule{ID: 2, TaskID: 120, ModuleKey: domain.ModuleKeyCustomization, State: domain.ModuleStateSubmitted},
+		&domain.TaskModule{ID: 3, TaskID: 120, ModuleKey: domain.ModuleKeyAudit, State: domain.ModuleStatePendingClaim},
+		&domain.TaskModule{ID: 4, TaskID: 120, ModuleKey: domain.ModuleKeyWarehouse, State: domain.ModuleStatePending},
+	)
+	moduleEventRepo := &step04TaskModuleEventRepo{}
 	svc := &taskService{
 		taskRepo:             taskRepo,
+		taskAssetRepo:        assetRepo,
 		taskEventRepo:        &step04TaskEventRepo{},
+		taskModuleRepo:       moduleRepo,
+		taskModuleEventRepo:  moduleEventRepo,
 		customizationJobRepo: jobRepo,
 		txRunner:             step04TxRunner{},
 	}
@@ -188,6 +211,34 @@ func TestSubmitCustomizationReviewApprovedWithoutLevelFields(t *testing.T) {
 	if taskRepo.tasks[120].TaskStatus != domain.TaskStatusPendingWarehouseReceive {
 		t.Fatalf("task status = %s, want PendingWarehouseReceive", taskRepo.tasks[120].TaskStatus)
 	}
+	if assetRepo.approvedRuns != 1 || assetRepo.assets[assetVersionID].FlowReviewStatus != domain.TaskAssetFlowReviewStatusApproved {
+		t.Fatalf("approved asset sync = runs:%d asset:%+v", assetRepo.approvedRuns, assetRepo.assets[assetVersionID])
+	}
+	if moduleRepo.modules[domain.ModuleKeyCustomization].State != domain.ModuleStateClosed || moduleRepo.modules[domain.ModuleKeyAudit].State != domain.ModuleStateClosed {
+		t.Fatalf("review modules = customization:%s audit:%s", moduleRepo.modules[domain.ModuleKeyCustomization].State, moduleRepo.modules[domain.ModuleKeyAudit].State)
+	}
+	if moduleRepo.modules[domain.ModuleKeyDesign].State != domain.ModuleStateClosed {
+		t.Fatalf("residual design module = %s, want closed", moduleRepo.modules[domain.ModuleKeyDesign].State)
+	}
+	if moduleRepo.modules[domain.ModuleKeyWarehouse].State != domain.ModuleStatePending {
+		t.Fatalf("warehouse module = %s, want pending", moduleRepo.modules[domain.ModuleKeyWarehouse].State)
+	}
+	if len(moduleEventRepo.events) != 3 {
+		t.Fatalf("module events = %d, want 3", len(moduleEventRepo.events))
+	}
+	auditEvent := findCustomizationModuleEvent(moduleEventRepo.events, domain.ModuleKeyAudit, domain.ModuleEventApproved)
+	if auditEvent == nil || auditEvent.FromState == nil || *auditEvent.FromState != domain.ModuleStatePendingClaim ||
+		auditEvent.ToState == nil || *auditEvent.ToState != domain.ModuleStateClosed ||
+		auditEvent.ActorID == nil || *auditEvent.ActorID != 1 {
+		t.Fatalf("audit approved event = %+v", auditEvent)
+	}
+	var payload map[string]interface{}
+	if err := json.Unmarshal(auditEvent.Payload, &payload); err != nil {
+		t.Fatalf("decode audit event payload: %v", err)
+	}
+	if payload["source"] != "customization_review" || payload["customization_review_decision"] != string(domain.CustomizationReviewDecisionApproved) {
+		t.Fatalf("audit event payload = %+v", payload)
+	}
 }
 
 func TestSubmitCustomizationReviewReturnToDesignerCommitsWithoutError(t *testing.T) {
@@ -204,9 +255,31 @@ func TestSubmitCustomizationReviewReturnToDesignerCommitsWithoutError(t *testing
 		CurrentHandlerID:            nil,
 	})
 	jobRepo := newCustomizationFlowJobRepo()
+	assetRepo := newStep04TaskAssetRepo()
+	designAssetID := int64(992)
+	assetVersionNo := 1
+	assetVersionID, err := assetRepo.Create(context.Background(), nil, &domain.TaskAsset{
+		TaskID:           101,
+		AssetID:          &designAssetID,
+		AssetType:        domain.TaskAssetTypeDelivery,
+		AssetVersionNo:   &assetVersionNo,
+		FlowReviewStatus: domain.TaskAssetFlowReviewStatusPendingReview,
+	})
+	if err != nil {
+		t.Fatalf("create delivery asset: %v", err)
+	}
+	moduleRepo := newStep04TaskModuleRepo(
+		&domain.TaskModule{ID: 11, TaskID: 101, ModuleKey: domain.ModuleKeyDesign, State: domain.ModuleStatePendingClaim},
+		&domain.TaskModule{ID: 12, TaskID: 101, ModuleKey: domain.ModuleKeyCustomization, State: domain.ModuleStateSubmitted},
+		&domain.TaskModule{ID: 13, TaskID: 101, ModuleKey: domain.ModuleKeyAudit, State: domain.ModuleStatePendingClaim},
+	)
+	moduleEventRepo := &step04TaskModuleEventRepo{}
 	svc := &taskService{
 		taskRepo:             taskRepo,
+		taskAssetRepo:        assetRepo,
 		taskEventRepo:        &step04TaskEventRepo{},
+		taskModuleRepo:       moduleRepo,
+		taskModuleEventRepo:  moduleEventRepo,
 		customizationJobRepo: jobRepo,
 		txRunner:             step04TxRunner{},
 	}
@@ -233,6 +306,235 @@ func TestSubmitCustomizationReviewReturnToDesignerCommitsWithoutError(t *testing
 	}
 	if item.Status != domain.CustomizationJobStatusPendingCustomizationProduction {
 		t.Fatalf("customization job status = %s, want pending_customization_production", item.Status)
+	}
+	if assetRepo.rejectedRuns != 1 || assetRepo.assets[assetVersionID].FlowReviewStatus != domain.TaskAssetFlowReviewStatusRejected {
+		t.Fatalf("rejected asset sync = runs:%d asset:%+v", assetRepo.rejectedRuns, assetRepo.assets[assetVersionID])
+	}
+	if moduleRepo.modules[domain.ModuleKeyCustomization].State != domain.ModuleStateInProgress || moduleRepo.modules[domain.ModuleKeyAudit].State != domain.ModuleStateRejected {
+		t.Fatalf("return modules = customization:%s audit:%s", moduleRepo.modules[domain.ModuleKeyCustomization].State, moduleRepo.modules[domain.ModuleKeyAudit].State)
+	}
+	if moduleRepo.modules[domain.ModuleKeyDesign].State != domain.ModuleStateClosed {
+		t.Fatalf("residual design module = %s, want closed", moduleRepo.modules[domain.ModuleKeyDesign].State)
+	}
+}
+
+func findCustomizationModuleEvent(events []*domain.TaskModuleEvent, moduleKey string, eventType domain.ModuleEventType) *domain.TaskModuleEvent {
+	for _, event := range events {
+		if event != nil && event.ModuleKey == moduleKey && event.EventType == eventType {
+			return event
+		}
+	}
+	return nil
+}
+
+func TestSubmitCustomizationReviewReviewerFixedSynchronizesAssetAndModules(t *testing.T) {
+	const taskID = int64(121)
+	taskRepo := newStep04TaskRepo(&domain.Task{
+		ID:                    taskID,
+		TaskStatus:            domain.TaskStatusPendingCustomizationReview,
+		CustomizationRequired: true,
+		OwnerDepartment:       "运营部",
+		OwnerOrgTeam:          "运营组",
+	})
+	jobRepo := newCustomizationFlowJobRepo(&domain.CustomizationJob{
+		ID:     421,
+		TaskID: taskID,
+		Status: domain.CustomizationJobStatusPendingCustomizationReview,
+	})
+	assetRepo := newStep04TaskAssetRepo()
+	assetID := int64(992)
+	versionNo := 1
+	versionID, err := assetRepo.Create(context.Background(), nil, &domain.TaskAsset{
+		TaskID:           taskID,
+		AssetID:          &assetID,
+		AssetType:        domain.TaskAssetTypeDelivery,
+		AssetVersionNo:   &versionNo,
+		FlowReviewStatus: domain.TaskAssetFlowReviewStatusPendingReview,
+	})
+	if err != nil {
+		t.Fatalf("create delivery asset: %v", err)
+	}
+	moduleRepo := newStep04TaskModuleRepo(
+		&domain.TaskModule{ID: 11, TaskID: taskID, ModuleKey: domain.ModuleKeyDesign, State: domain.ModuleStateInProgress},
+		&domain.TaskModule{ID: 12, TaskID: taskID, ModuleKey: domain.ModuleKeyCustomization, State: domain.ModuleStateSubmitted},
+		&domain.TaskModule{ID: 13, TaskID: taskID, ModuleKey: domain.ModuleKeyAudit, State: domain.ModuleStateInProgress},
+		&domain.TaskModule{ID: 14, TaskID: taskID, ModuleKey: domain.ModuleKeyWarehouse, State: domain.ModuleStatePending},
+	)
+	moduleEvents := &step04TaskModuleEventRepo{}
+	svc := &taskService{
+		taskRepo:             taskRepo,
+		taskAssetRepo:        assetRepo,
+		taskEventRepo:        &step04TaskEventRepo{},
+		taskModuleRepo:       moduleRepo,
+		taskModuleEventRepo:  moduleEvents,
+		customizationJobRepo: jobRepo,
+		txRunner:             step04TxRunner{},
+	}
+
+	_, appErr := svc.SubmitCustomizationReview(customizationAdminContext(), SubmitCustomizationReviewParams{
+		TaskID:     taskID,
+		ReviewerID: 1,
+		Decision:   domain.CustomizationReviewDecisionReviewerFixed,
+	})
+	if appErr != nil {
+		t.Fatalf("SubmitCustomizationReview(reviewer_fixed) appErr = %+v", appErr)
+	}
+	if got := assetRepo.assets[versionID].FlowReviewStatus; got != domain.TaskAssetFlowReviewStatusApproved {
+		t.Fatalf("delivery flow_review_status = %s, want approved", got)
+	}
+	if got := moduleRepo.modules[domain.ModuleKeyDesign].State; got != domain.ModuleStateClosed {
+		t.Fatalf("design state = %s, want closed", got)
+	}
+	if got := moduleRepo.modules[domain.ModuleKeyAudit].State; got != domain.ModuleStateClosed {
+		t.Fatalf("audit state = %s, want closed", got)
+	}
+	if got := moduleRepo.modules[domain.ModuleKeyWarehouse].State; got != domain.ModuleStatePending {
+		t.Fatalf("warehouse state = %s, want pending", got)
+	}
+	auditEvent := findCustomizationModuleEvent(moduleEvents.events, domain.ModuleKeyAudit, domain.ModuleEventApproved)
+	if auditEvent == nil || auditEvent.FromState == nil || *auditEvent.FromState != domain.ModuleStateInProgress {
+		t.Fatalf("audit reviewer_fixed event = %+v", auditEvent)
+	}
+}
+
+func TestSubmitCustomizationReviewPreservesExistingSourceWhenOmitted(t *testing.T) {
+	const taskID = int64(122)
+	existingSourceID := int64(7001)
+	taskRepo := newStep04TaskRepo(&domain.Task{
+		ID:                    taskID,
+		TaskStatus:            domain.TaskStatusPendingCustomizationReview,
+		CustomizationRequired: true,
+		OwnerDepartment:       "运营部",
+		OwnerOrgTeam:          "运营组",
+	})
+	jobRepo := newCustomizationFlowJobRepo(&domain.CustomizationJob{
+		ID:             422,
+		TaskID:         taskID,
+		Status:         domain.CustomizationJobStatusPendingCustomizationReview,
+		SourceAssetID:  &existingSourceID,
+		CurrentAssetID: &existingSourceID,
+		ReviewDecision: domain.CustomizationReviewDecisionReturnToDesigner,
+		DecisionType:   domain.CustomizationJobDecisionTypeFinal,
+	})
+	assetRepo := newStep04TaskAssetRepo()
+	deliveryAssetID := int64(993)
+	versionNo := 1
+	if _, err := assetRepo.Create(context.Background(), nil, &domain.TaskAsset{
+		TaskID:           taskID,
+		AssetID:          &deliveryAssetID,
+		AssetType:        domain.TaskAssetTypeDelivery,
+		AssetVersionNo:   &versionNo,
+		FlowReviewStatus: domain.TaskAssetFlowReviewStatusPendingReview,
+	}); err != nil {
+		t.Fatalf("create delivery asset: %v", err)
+	}
+	moduleRepo := newStep04TaskModuleRepo(
+		&domain.TaskModule{ID: 21, TaskID: taskID, ModuleKey: domain.ModuleKeyCustomization, State: domain.ModuleStateSubmitted},
+		&domain.TaskModule{ID: 22, TaskID: taskID, ModuleKey: domain.ModuleKeyAudit, State: domain.ModuleStatePendingClaim},
+		&domain.TaskModule{ID: 23, TaskID: taskID, ModuleKey: domain.ModuleKeyWarehouse, State: domain.ModuleStatePending},
+	)
+	svc := &taskService{
+		taskRepo:             taskRepo,
+		taskAssetRepo:        assetRepo,
+		taskEventRepo:        &step04TaskEventRepo{},
+		taskModuleRepo:       moduleRepo,
+		taskModuleEventRepo:  &step04TaskModuleEventRepo{},
+		customizationJobRepo: jobRepo,
+		txRunner:             step04TxRunner{},
+	}
+
+	job, appErr := svc.SubmitCustomizationReview(customizationAdminContext(), SubmitCustomizationReviewParams{
+		TaskID:     taskID,
+		ReviewerID: 1,
+		Decision:   domain.CustomizationReviewDecisionApproved,
+	})
+	if appErr != nil {
+		t.Fatalf("SubmitCustomizationReview() appErr = %+v", appErr)
+	}
+	if job.SourceAssetID == nil || *job.SourceAssetID != existingSourceID ||
+		job.CurrentAssetID == nil || *job.CurrentAssetID != existingSourceID {
+		t.Fatalf("source/current asset = %+v/%+v, want preserved %d", job.SourceAssetID, job.CurrentAssetID, existingSourceID)
+	}
+}
+
+func TestSubmitCustomizationReviewApprovalRequiresCurrentDelivery(t *testing.T) {
+	const taskID = int64(123)
+	taskRepo := newStep04TaskRepo(&domain.Task{
+		ID:                    taskID,
+		TaskStatus:            domain.TaskStatusPendingCustomizationReview,
+		CustomizationRequired: true,
+		OwnerDepartment:       "运营部",
+		OwnerOrgTeam:          "运营组",
+	})
+	svc := &taskService{
+		taskRepo:             taskRepo,
+		taskAssetRepo:        newStep04TaskAssetRepo(),
+		taskEventRepo:        &step04TaskEventRepo{},
+		customizationJobRepo: newCustomizationFlowJobRepo(&domain.CustomizationJob{ID: 423, TaskID: taskID, Status: domain.CustomizationJobStatusPendingCustomizationReview}),
+		txRunner:             step04TxRunner{},
+	}
+
+	_, appErr := svc.SubmitCustomizationReview(customizationAdminContext(), SubmitCustomizationReviewParams{
+		TaskID:     taskID,
+		ReviewerID: 1,
+		Decision:   domain.CustomizationReviewDecisionApproved,
+	})
+	if appErr == nil || appErr.Code != domain.ErrCodeInvalidStateTransition {
+		t.Fatalf("SubmitCustomizationReview() appErr = %+v, want invalid state", appErr)
+	}
+}
+
+func TestSubmitCustomizationReviewRejectsConcurrentStatusChange(t *testing.T) {
+	const taskID = int64(125)
+	taskRepo := newStep04TaskRepo(&domain.Task{
+		ID:                    taskID,
+		TaskStatus:            domain.TaskStatusPendingCustomizationReview,
+		CustomizationRequired: true,
+		OwnerDepartment:       "运营部",
+		OwnerOrgTeam:          "运营组",
+	})
+	taskRepo.forceStatusCASMiss = true
+	jobRepo := newCustomizationFlowJobRepo(&domain.CustomizationJob{
+		ID:     425,
+		TaskID: taskID,
+		Status: domain.CustomizationJobStatusPendingCustomizationReview,
+	})
+	svc := &taskService{
+		taskRepo:             taskRepo,
+		taskEventRepo:        &step04TaskEventRepo{},
+		customizationJobRepo: jobRepo,
+		txRunner:             step04TxRunner{},
+	}
+
+	_, appErr := svc.SubmitCustomizationReview(customizationAdminContext(), SubmitCustomizationReviewParams{
+		TaskID:     taskID,
+		ReviewerID: 1,
+		Decision:   domain.CustomizationReviewDecisionReturnToDesigner,
+	})
+	if appErr == nil || appErr.Code != domain.ErrCodeConflict {
+		t.Fatalf("SubmitCustomizationReview() appErr = %+v, want conflict", appErr)
+	}
+	if got := jobRepo.jobs[425].Status; got != domain.CustomizationJobStatusPendingCustomizationReview {
+		t.Fatalf("customization job status = %s, want unchanged", got)
+	}
+}
+
+func TestCustomizationReviewWarehouseSyncDoesNotRewindReceived(t *testing.T) {
+	const taskID = int64(124)
+	moduleRepo := newStep04TaskModuleRepo(&domain.TaskModule{
+		ID:        31,
+		TaskID:    taskID,
+		ModuleKey: domain.ModuleKeyWarehouse,
+		State:     domain.ModuleStateReceived,
+	})
+	svc := &taskService{taskModuleRepo: moduleRepo, taskModuleEventRepo: &step04TaskModuleEventRepo{}}
+	err := svc.enterCustomizationWarehouseModule(context.Background(), step04Tx{}, taskID, 1, json.RawMessage(`{}`))
+	appErr, ok := err.(*domain.AppError)
+	if !ok || appErr.Code != domain.ErrCodeInvalidStateTransition {
+		t.Fatalf("enterCustomizationWarehouseModule() error = %+v, want invalid state", err)
+	}
+	if got := moduleRepo.modules[domain.ModuleKeyWarehouse].State; got != domain.ModuleStateReceived {
+		t.Fatalf("warehouse state = %s, want received", got)
 	}
 }
 

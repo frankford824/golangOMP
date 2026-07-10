@@ -235,6 +235,21 @@ func (r *taskRepo) GetByID(ctx context.Context, id int64) (*domain.Task, error) 
 	return scanTask(row)
 }
 
+// GetByIDForUpdate returns one task while holding its row lock for the caller's
+// transaction. Upload completion uses it to revalidate terminal task state
+// before replacing a current resource.
+func (r *taskRepo) GetByIDForUpdate(ctx context.Context, tx repo.Tx, id int64) (*domain.Task, error) {
+	row := Unwrap(tx).QueryRowContext(ctx, `
+		SELECT id, task_no, source_mode, product_id, sku_code, product_name_snapshot,
+		       task_type, operator_group_id, owner_team, owner_department, owner_org_team, creator_id, requester_id, designer_id, current_handler_id,
+		       task_status, priority, deadline_at, need_outsource, is_outsource, COALESCE(business_lane, ''), customization_required, customization_source_type,
+		       last_customization_operator_id, warehouse_reject_reason, warehouse_reject_category,
+		       is_batch_task, batch_item_count, batch_mode, primary_sku_code, sku_generation_status,
+		       created_at, updated_at
+		FROM tasks WHERE id = ? FOR UPDATE`, id)
+	return scanTask(row)
+}
+
 func (r *taskRepo) GetDetailByTaskID(ctx context.Context, taskID int64) (*domain.TaskDetail, error) {
 	row := r.db.db.QueryRowContext(ctx, `
 		SELECT id, task_id, demand_text, copy_text, style_keywords, remark, COALESCE(note, ''), risk_flags_json,

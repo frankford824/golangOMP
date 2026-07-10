@@ -130,6 +130,24 @@ func (r *uploadRequestRepo) GetByRequestID(ctx context.Context, requestID string
 	return request, nil
 }
 
+// GetByRequestIDForUpdate serializes terminal session transitions. Callers
+// must keep the returned row and all subsequent state writes in the same tx.
+func (r *uploadRequestRepo) GetByRequestIDForUpdate(ctx context.Context, tx repo.Tx, requestID string) (*domain.UploadRequest, error) {
+	row := Unwrap(tx).QueryRowContext(ctx, `
+		SELECT `+uploadRequestSelectCols+`
+		FROM upload_requests
+		WHERE request_id = ?
+		FOR UPDATE`, strings.TrimSpace(requestID))
+	request, err := scanUploadRequest(row)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("lock upload request: %w", err)
+	}
+	return request, nil
+}
+
 func (r *uploadRequestRepo) List(ctx context.Context, filter repo.UploadRequestListFilter) ([]*domain.UploadRequest, int64, error) {
 	page, pageSize := normalizeUploadRequestPage(filter.Page, filter.PageSize)
 	whereParts := []string{"1=1"}

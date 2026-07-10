@@ -1304,9 +1304,11 @@ func (step04TxRunner) RunInTx(_ context.Context, fn func(tx repo.Tx) error) erro
 }
 
 type step04TaskRepo struct {
-	tasks     map[int64]*domain.Task
-	skuItems  map[int64][]*domain.TaskSKUItem
-	skuByCode map[string]*domain.TaskSKUItem
+	tasks              map[int64]*domain.Task
+	skuItems           map[int64][]*domain.TaskSKUItem
+	skuByCode          map[string]*domain.TaskSKUItem
+	forceStatusCASMiss bool
+	forUpdateTask      *domain.Task
 }
 
 func newStep04TaskRepo(tasks ...*domain.Task) *step04TaskRepo {
@@ -1345,6 +1347,13 @@ func (r *step04TaskRepo) CreateSKUItems(_ context.Context, _ repo.Tx, items []*d
 }
 
 func (r *step04TaskRepo) GetByID(_ context.Context, id int64) (*domain.Task, error) {
+	return r.tasks[id], nil
+}
+
+func (r *step04TaskRepo) GetByIDForUpdate(_ context.Context, _ repo.Tx, id int64) (*domain.Task, error) {
+	if r.forUpdateTask != nil {
+		return r.forUpdateTask, nil
+	}
 	return r.tasks[id], nil
 }
 
@@ -1395,6 +1404,18 @@ func (r *step04TaskRepo) UpdateStatus(_ context.Context, _ repo.Tx, id int64, st
 	return nil
 }
 
+func (r *step04TaskRepo) CASUpdateStatus(_ context.Context, _ repo.Tx, id int64, expected, next domain.TaskStatus) (bool, error) {
+	if r.forceStatusCASMiss {
+		return false, nil
+	}
+	task := r.tasks[id]
+	if task == nil || task.TaskStatus != expected {
+		return false, nil
+	}
+	task.TaskStatus = next
+	return true, nil
+}
+
 func (r *step04TaskRepo) UpdateDesigner(_ context.Context, _ repo.Tx, id int64, designerID *int64) error {
 	r.tasks[id].DesignerID = designerID
 	return nil
@@ -1417,8 +1438,10 @@ func (r *step04TaskRepo) UpdateCustomizationState(_ context.Context, _ repo.Tx, 
 }
 
 type step04TaskAssetRepo struct {
-	nextID int64
-	assets map[int64]*domain.TaskAsset
+	nextID       int64
+	assets       map[int64]*domain.TaskAsset
+	approvedRuns int
+	rejectedRuns int
 }
 
 func newStep04TaskAssetRepo() *step04TaskAssetRepo {
@@ -1436,6 +1459,10 @@ func (r *step04TaskAssetRepo) Create(_ context.Context, _ repo.Tx, asset *domain
 }
 
 func (r *step04TaskAssetRepo) GetByID(_ context.Context, id int64) (*domain.TaskAsset, error) {
+	return r.assets[id], nil
+}
+
+func (r *step04TaskAssetRepo) GetByIDForUpdate(_ context.Context, _ repo.Tx, id int64) (*domain.TaskAsset, error) {
 	return r.assets[id], nil
 }
 
@@ -1477,6 +1504,52 @@ func (r *step04TaskAssetRepo) NextAssetVersionNo(_ context.Context, _ repo.Tx, a
 		}
 	}
 	return maxVersion + 1, nil
+}
+
+func (r *step04TaskAssetRepo) MarkCurrentDeliveryVersionsApprovedForTask(_ context.Context, _ repo.Tx, taskID, actorID int64, approvedAt time.Time) (int64, error) {
+	r.approvedRuns++
+	var updated int64
+	for _, asset := range r.assets {
+		if asset.TaskID != taskID || !asset.AssetType.IsDelivery() || asset.IsArchived || asset.DeletedAt != nil || asset.CleanedAt != nil {
+			continue
+		}
+		asset.FlowReviewStatus = domain.TaskAssetFlowReviewStatusApproved
+		asset.ApprovedAt = &approvedAt
+		asset.ApprovedBy = &actorID
+		asset.RejectedAt = nil
+		asset.RejectedBy = nil
+		updated++
+	}
+	return updated, nil
+}
+
+func (r *step04TaskAssetRepo) MarkCurrentDeliveryVersionsRejectedForTask(_ context.Context, _ repo.Tx, taskID, actorID int64, rejectedAt time.Time) (int64, error) {
+	r.rejectedRuns++
+	var updated int64
+	for _, asset := range r.assets {
+		if asset.TaskID != taskID || !asset.AssetType.IsDelivery() || asset.IsArchived || asset.DeletedAt != nil || asset.CleanedAt != nil {
+			continue
+		}
+		asset.FlowReviewStatus = domain.TaskAssetFlowReviewStatusRejected
+		asset.ApprovedAt = nil
+		asset.ApprovedBy = nil
+		asset.RejectedAt = &rejectedAt
+		asset.RejectedBy = &actorID
+		updated++
+	}
+	return updated, nil
+}
+
+func (r *step04TaskAssetRepo) MarkAssetVersionSuperseded(_ context.Context, _ repo.Tx, versionID, supersededByVersionID int64, supersededAt, cleanupAfterAt time.Time) error {
+	asset := r.assets[versionID]
+	if asset == nil {
+		return nil
+	}
+	asset.FlowReviewStatus = domain.TaskAssetFlowReviewStatusSuperseded
+	asset.SupersededByVersionID = &supersededByVersionID
+	asset.SupersededAt = &supersededAt
+	asset.CleanupAfterAt = &cleanupAfterAt
+	return nil
 }
 
 type step04TaskEventRepo struct {
@@ -1522,6 +1595,10 @@ func (r *step04TaskModuleRepo) GetByTaskAndKey(_ context.Context, _ int64, modul
 	return r.modules[moduleKey], nil
 }
 
+func (r *step04TaskModuleRepo) GetByTaskAndKeyForUpdate(_ context.Context, _ repo.Tx, _ int64, moduleKey string) (*domain.TaskModule, error) {
+	return r.modules[moduleKey], nil
+}
+
 func (r *step04TaskModuleRepo) ListByTask(context.Context, int64) ([]*domain.TaskModule, error) {
 	out := make([]*domain.TaskModule, 0, len(r.modules))
 	for _, module := range r.modules {
@@ -1548,6 +1625,26 @@ func (r *step04TaskModuleRepo) UpdateState(_ context.Context, _ repo.Tx, _ int64
 		}
 	}
 	return nil
+}
+
+func (r *step04TaskModuleRepo) UpdateStateCAS(_ context.Context, _ repo.Tx, _ int64, moduleKey string, expected, next domain.ModuleState, terminal bool, data json.RawMessage) (bool, error) {
+	module := r.modules[moduleKey]
+	if module == nil || module.State != expected {
+		return false, nil
+	}
+	module.State = next
+	if terminal {
+		now := time.Now().UTC()
+		if module.TerminalAt == nil {
+			module.TerminalAt = &now
+		}
+	} else {
+		module.TerminalAt = nil
+	}
+	if data != nil {
+		module.Data = data
+	}
+	return true, nil
 }
 
 func (r *step04TaskModuleRepo) Reassign(_ context.Context, _ repo.Tx, _ int64, moduleKey string, actorID int64, claimedTeamCode string, actorSnapshot json.RawMessage) error {
@@ -1665,6 +1762,10 @@ func (r *step37UploadRequestRepo) Create(_ context.Context, _ repo.Tx, request *
 }
 
 func (r *step37UploadRequestRepo) GetByRequestID(_ context.Context, requestID string) (*domain.UploadRequest, error) {
+	return r.requests[requestID], nil
+}
+
+func (r *step37UploadRequestRepo) GetByRequestIDForUpdate(_ context.Context, _ repo.Tx, requestID string) (*domain.UploadRequest, error) {
 	return r.requests[requestID], nil
 }
 
@@ -1803,6 +1904,10 @@ func (r *step67DesignAssetRepo) GetByID(_ context.Context, id int64) (*domain.De
 	return r.assets[id], nil
 }
 
+func (r *step67DesignAssetRepo) GetByIDForUpdate(_ context.Context, _ repo.Tx, id int64) (*domain.DesignAsset, error) {
+	return r.assets[id], nil
+}
+
 func (r *step67DesignAssetRepo) List(_ context.Context, filter repo.DesignAssetListFilter) ([]*domain.DesignAsset, error) {
 	var out []*domain.DesignAsset
 	for _, asset := range r.assets {
@@ -1853,4 +1958,14 @@ func (r *step67DesignAssetRepo) UpdateCurrentVersionID(_ context.Context, _ repo
 	asset.CurrentVersionID = currentVersionID
 	asset.UpdatedAt = time.Date(2026, 3, 14, 0, 0, 0, 0, time.UTC)
 	return nil
+}
+
+func (r *step67DesignAssetRepo) UpdateCurrentVersionIDCAS(_ context.Context, _ repo.Tx, id int64, expectedCurrentVersionID, currentVersionID *int64) (bool, error) {
+	asset := r.assets[id]
+	if asset == nil || !optionalInt64Equal(asset.CurrentVersionID, expectedCurrentVersionID) {
+		return false, nil
+	}
+	asset.CurrentVersionID = domain.CloneInt64Ptr(currentVersionID)
+	asset.UpdatedAt = time.Date(2026, 3, 14, 0, 0, 0, 0, time.UTC)
+	return true, nil
 }

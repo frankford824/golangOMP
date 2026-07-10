@@ -183,6 +183,26 @@ type taskAssetVersionSupersedeRepo interface {
 	MarkAssetVersionSuperseded(ctx context.Context, tx repo.Tx, versionID, supersededByVersionID int64, supersededAt, cleanupAfterAt time.Time) error
 }
 
+type uploadRequestForUpdateRepo interface {
+	GetByRequestIDForUpdate(ctx context.Context, tx repo.Tx, requestID string) (*domain.UploadRequest, error)
+}
+
+type designAssetForUpdateRepo interface {
+	GetByIDForUpdate(ctx context.Context, tx repo.Tx, id int64) (*domain.DesignAsset, error)
+}
+
+type designAssetCurrentVersionCASRepo interface {
+	UpdateCurrentVersionIDCAS(ctx context.Context, tx repo.Tx, id int64, expectedCurrentVersionID, currentVersionID *int64) (bool, error)
+}
+
+type taskAssetForUpdateRepo interface {
+	GetByIDForUpdate(ctx context.Context, tx repo.Tx, id int64) (*domain.TaskAsset, error)
+}
+
+type taskForUpdateRepo interface {
+	GetByIDForUpdate(ctx context.Context, tx repo.Tx, id int64) (*domain.Task, error)
+}
+
 type TaskAssetCenterServiceOption func(*taskAssetCenterService)
 
 func NewTaskAssetCenterService(
@@ -1006,8 +1026,29 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 		}
 	}
 	authz.logDecision(TaskActionAssetUploadSessionComplete, decision)
+	if appErr := requireCompletedTaskAssetMutationActor(ctx, task); appErr != nil {
+		return nil, appErr
+	}
 	if appErr := requireCustomizationReviewerUploadSessionSource(ctx, task, request); appErr != nil {
 		return nil, appErr
+	}
+	legacyRetouchCompletion, appErr := s.isCompletedLegacyRetouchCompletion(ctx, task, request)
+	if appErr != nil {
+		return nil, appErr
+	}
+	if appErr := validateCompletedTaskReplacementRequest(task, request, legacyRetouchCompletion); appErr != nil {
+		return nil, appErr
+	}
+	var expectedCurrentVersionID *int64
+	if task.TaskStatus == domain.TaskStatusCompleted && request.AssetID != nil {
+		if legacyRetouchCompletion {
+			expectedCurrentVersionID = nil
+		} else {
+			expectedCurrentVersionID, appErr = s.completedTaskReplacementCurrentVersionID(ctx, task, request.AssetID)
+			if appErr != nil {
+				return nil, appErr
+			}
+		}
 	}
 	if request.Status == domain.UploadRequestStatusBound || (request.SessionStatus == domain.DesignAssetSessionStatusCompleted && request.BoundAssetID != nil) {
 		return s.buildCompletedUploadSessionResult(ctx, params.TaskID, request)
@@ -1063,12 +1104,53 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 	var asset *domain.DesignAsset
 	attemptedTimelineVersionNo := 0
 	var previousCurrentVersionID *int64
+	alreadyCompleted := false
 
 	txErr := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
-		if request.AssetID != nil {
-			existingAsset, err := s.designAssetRepo.GetByID(ctx, *request.AssetID)
+		lockedRequest, err := s.getUploadRequestForUpdate(ctx, tx, request.RequestID)
+		if err != nil {
+			return fmt.Errorf("lock upload request before completion: %w", err)
+		}
+		if lockedRequest == nil || lockedRequest.TaskID != params.TaskID {
+			return domain.ErrNotFound
+		}
+		request = lockedRequest
+		if task.TaskStatus == domain.TaskStatusCompleted {
+			lockedTask, err := s.getTaskForUpdate(ctx, tx, params.TaskID)
 			if err != nil {
-				return fmt.Errorf("get existing design asset: %w", err)
+				return fmt.Errorf("lock completed task before asset replacement: %w", err)
+			}
+			if lockedTask == nil {
+				return domain.ErrNotFound
+			}
+			if lockedTask.TaskStatus != domain.TaskStatusCompleted {
+				return domain.NewAppError(domain.ErrCodeConflict, "task status changed before completed asset replacement", map[string]interface{}{
+					"task_id":         task.ID,
+					"expected_status": domain.TaskStatusCompleted,
+					"actual_status":   lockedTask.TaskStatus,
+				})
+			}
+			task = lockedTask
+		}
+		if request.Status == domain.UploadRequestStatusBound || (request.SessionStatus == domain.DesignAssetSessionStatusCompleted && request.BoundAssetID != nil) {
+			alreadyCompleted = true
+			return nil
+		}
+		if request.Status == domain.UploadRequestStatusCancelled || request.Status == domain.UploadRequestStatusExpired ||
+			request.SessionStatus == domain.DesignAssetSessionStatusCancelled || request.SessionStatus == domain.DesignAssetSessionStatusExpired {
+			return domain.NewAppError(domain.ErrCodeConflict, "upload_session changed concurrently and is already terminal", map[string]interface{}{
+				"upload_session_id": request.RequestID,
+				"session_status":    request.SessionStatus,
+			})
+		}
+		if appErr := validateCompletedTaskReplacementRequest(task, request, legacyRetouchCompletion); appErr != nil {
+			return appErr
+		}
+
+		if request.AssetID != nil {
+			existingAsset, err := s.getDesignAssetForUpdate(ctx, tx, *request.AssetID)
+			if err != nil {
+				return fmt.Errorf("lock existing design asset: %w", err)
 			}
 			if existingAsset == nil || existingAsset.TaskID != params.TaskID {
 				return domain.ErrNotFound
@@ -1095,6 +1177,20 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 			asset = existingAsset
 			assetID = existingAsset.ID
 			previousCurrentVersionID = domain.CloneInt64Ptr(existingAsset.CurrentVersionID)
+			if task.TaskStatus == domain.TaskStatusCompleted {
+				if !optionalInt64Equal(existingAsset.CurrentVersionID, expectedCurrentVersionID) {
+					return completedReplacementConcurrentChangeError(task, assetID, expectedCurrentVersionID, existingAsset.CurrentVersionID)
+				}
+				if !legacyRetouchCompletion {
+					current, err := s.getTaskAssetForUpdate(ctx, tx, *expectedCurrentVersionID)
+					if err != nil {
+						return fmt.Errorf("lock completed task replacement current version: %w", err)
+					}
+					if !isUsableCompletedReplacementCurrentVersion(current, task.ID, existingAsset.ID) {
+						return completedReplacementCurrentAssetRequiredError(task, existingAsset.ID)
+					}
+				}
+			}
 		} else {
 			assetNo, err := s.designAssetRepo.NextAssetNo(ctx, tx, params.TaskID)
 			if err != nil {
@@ -1130,8 +1226,15 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 		uploadStatus := string(domain.DesignAssetUploadStatusUploaded)
 		previewStatus := string(domain.DesignAssetPreviewStatusNotApplicable)
 		flowReviewStatus := domain.TaskAssetFlowReviewStatusNotApplicable
+		var approvedAt *time.Time
+		var approvedBy *int64
 		if requestAssetType.IsDelivery() {
 			flowReviewStatus = domain.TaskAssetFlowReviewStatusPendingReview
+			if task.TaskStatus == domain.TaskStatusCompleted {
+				flowReviewStatus = domain.TaskAssetFlowReviewStatusApproved
+				approvedAt = &now
+				approvedBy = &params.CompletedBy
+			}
 		}
 		taskAsset := &domain.TaskAsset{
 			TaskID:               params.TaskID,
@@ -1158,6 +1261,8 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 			Remark:               firstNonEmpty(strings.TrimSpace(params.Remark), strings.TrimSpace(request.Remark)),
 			SourceModuleKey:      designAssetSourceModuleKeyForTask(task, requestAssetType),
 			FlowReviewStatus:     flowReviewStatus,
+			ApprovedAt:           approvedAt,
+			ApprovedBy:           approvedBy,
 		}
 		id, err := s.taskAssetRepo.Create(ctx, tx, taskAsset)
 		if err != nil {
@@ -1189,7 +1294,19 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 				return err
 			}
 		}
-		if err := s.designAssetRepo.UpdateCurrentVersionID(ctx, tx, assetID, &versionID); err != nil {
+		if task.TaskStatus == domain.TaskStatusCompleted && request.AssetID != nil {
+			if casRepo, ok := s.designAssetRepo.(designAssetCurrentVersionCASRepo); ok {
+				updated, err := casRepo.UpdateCurrentVersionIDCAS(ctx, tx, assetID, expectedCurrentVersionID, &versionID)
+				if err != nil {
+					return err
+				}
+				if !updated {
+					return completedReplacementConcurrentChangeError(task, assetID, expectedCurrentVersionID, nil)
+				}
+			} else if err := s.designAssetRepo.UpdateCurrentVersionID(ctx, tx, assetID, &versionID); err != nil {
+				return fmt.Errorf("update design asset current version: %w", err)
+			}
+		} else if err := s.designAssetRepo.UpdateCurrentVersionID(ctx, tx, assetID, &versionID); err != nil {
 			return fmt.Errorf("update design asset current version: %w", err)
 		}
 		if previousCurrentVersionID != nil && *previousCurrentVersionID > 0 && *previousCurrentVersionID != versionID {
@@ -1252,35 +1369,37 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 			}
 		}
 		_, err = s.taskEventRepo.Append(ctx, tx, params.TaskID, domain.TaskEventAssetVersionCreated, &params.CompletedBy, map[string]interface{}{
-			"asset_id":          assetID,
-			"asset_type":        string(requestAssetType),
-			"target_sku_code":   scopeSKUCode,
-			"asset_version_id":  versionID,
-			"asset_version_no":  assetVersionNo,
-			"timeline_version":  timelineVersionNo,
-			"upload_session_id": request.RequestID,
-			"remote_file_id":    meta.FileID,
-			"storage_key":       resolvedStorageKey,
-			"remark":            taskAsset.Remark,
+			"asset_id":               assetID,
+			"asset_type":             string(requestAssetType),
+			"target_sku_code":        scopeSKUCode,
+			"asset_version_id":       versionID,
+			"asset_version_no":       assetVersionNo,
+			"timeline_version":       timelineVersionNo,
+			"upload_session_id":      request.RequestID,
+			"remote_file_id":         meta.FileID,
+			"storage_key":            resolvedStorageKey,
+			"remark":                 taskAsset.Remark,
+			"post_close_replacement": task.TaskStatus == domain.TaskStatusCompleted,
 		})
 		if err != nil {
 			return fmt.Errorf("append asset version created event: %w", err)
 		}
 		_, err = s.taskEventRepo.Append(ctx, tx, params.TaskID, domain.TaskEventAssetUploadSessionCompleted, &params.CompletedBy, map[string]interface{}{
-			"asset_id":          assetID,
-			"asset_type":        string(requestAssetType),
-			"target_sku_code":   scopeSKUCode,
-			"asset_version_id":  versionID,
-			"asset_version_no":  assetVersionNo,
-			"timeline_version":  timelineVersionNo,
-			"upload_session_id": request.RequestID,
-			"upload_mode":       string(request.UploadMode),
-			"storage_provider":  string(request.StorageProvider),
-			"remote_upload_id":  request.RemoteUploadID,
-			"remote_file_id":    meta.FileID,
-			"storage_key":       resolvedStorageKey,
-			"file_hash":         meta.FileHash,
-			"remark":            taskAsset.Remark,
+			"asset_id":               assetID,
+			"asset_type":             string(requestAssetType),
+			"target_sku_code":        scopeSKUCode,
+			"asset_version_id":       versionID,
+			"asset_version_no":       assetVersionNo,
+			"timeline_version":       timelineVersionNo,
+			"upload_session_id":      request.RequestID,
+			"upload_mode":            string(request.UploadMode),
+			"storage_provider":       string(request.StorageProvider),
+			"remote_upload_id":       request.RemoteUploadID,
+			"remote_file_id":         meta.FileID,
+			"storage_key":            resolvedStorageKey,
+			"file_hash":              meta.FileHash,
+			"remark":                 taskAsset.Remark,
+			"post_close_replacement": task.TaskStatus == domain.TaskStatusCompleted,
 		})
 		if err != nil {
 			return fmt.Errorf("append upload session completed event: %w", err)
@@ -1308,6 +1427,9 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 			return nil, assetVersionRaceConflictAppError(params.TaskID, request.RequestID, attemptedTimelineVersionNo)
 		}
 		return nil, infraError("complete upload session", txErr)
+	}
+	if alreadyCompleted {
+		return s.buildCompletedUploadSessionResult(ctx, params.TaskID, request)
 	}
 
 	request, appErr = s.requireUploadRequest(ctx, params.TaskID, request.RequestID)
@@ -1472,7 +1594,13 @@ func (s *taskAssetCenterService) CancelUploadSession(ctx context.Context, params
 	if !decision.Allowed {
 		return nil, taskActionDecisionAppError(TaskActionAssetUploadSessionCancel, decision)
 	}
+	if appErr := requireCompletedTaskAssetMutationActor(ctx, task); appErr != nil {
+		return nil, appErr
+	}
 	if appErr := requireCustomizationReviewerUploadSessionSource(ctx, task, request); appErr != nil {
+		return nil, appErr
+	}
+	if appErr := validateCompletedTaskReplacementRequest(task, request, false); appErr != nil {
 		return nil, appErr
 	}
 	if request.SessionStatus == domain.DesignAssetSessionStatusCompleted {
@@ -1485,7 +1613,35 @@ func (s *taskAssetCenterService) CancelUploadSession(ctx context.Context, params
 		return nil, infraError("abort upload session via upload service client", err)
 	}
 	lastSyncedAt := s.nowFn().UTC()
+	alreadyCancelled := false
 	txErr := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
+		lockedRequest, err := s.getUploadRequestForUpdate(ctx, tx, request.RequestID)
+		if err != nil {
+			return fmt.Errorf("lock upload request before cancellation: %w", err)
+		}
+		if lockedRequest == nil || lockedRequest.TaskID != params.TaskID {
+			return domain.ErrNotFound
+		}
+		request = lockedRequest
+		if request.Status == domain.UploadRequestStatusBound || request.SessionStatus == domain.DesignAssetSessionStatusCompleted {
+			return domain.NewAppError(domain.ErrCodeConflict, "upload_session completed concurrently and cannot be cancelled", map[string]interface{}{
+				"upload_session_id": request.RequestID,
+				"session_status":    request.SessionStatus,
+			})
+		}
+		if request.Status == domain.UploadRequestStatusCancelled || request.SessionStatus == domain.DesignAssetSessionStatusCancelled {
+			alreadyCancelled = true
+			return nil
+		}
+		if request.Status == domain.UploadRequestStatusExpired || request.SessionStatus == domain.DesignAssetSessionStatusExpired {
+			return domain.NewAppError(domain.ErrCodeConflict, "upload_session expired concurrently and cannot be cancelled", map[string]interface{}{
+				"upload_session_id": request.RequestID,
+				"session_status":    request.SessionStatus,
+			})
+		}
+		if appErr := validateCompletedTaskReplacementRequest(task, request, false); appErr != nil {
+			return appErr
+		}
 		if err := s.uploadRequestRepo.UpdateLifecycle(ctx, tx, repo.UploadRequestLifecycleUpdate{
 			RequestID: request.RequestID,
 			Status:    domain.UploadRequestStatusCancelled,
@@ -1504,7 +1660,7 @@ func (s *taskAssetCenterService) CancelUploadSession(ctx context.Context, params
 		}); err != nil {
 			return err
 		}
-		_, err := s.taskEventRepo.Append(ctx, tx, params.TaskID, domain.TaskEventAssetUploadSessionCancelled, &params.CancelledBy, map[string]interface{}{
+		_, err = s.taskEventRepo.Append(ctx, tx, params.TaskID, domain.TaskEventAssetUploadSessionCancelled, &params.CancelledBy, map[string]interface{}{
 			"upload_session_id": request.RequestID,
 			"upload_mode":       string(request.UploadMode),
 			"remote_upload_id":  request.RemoteUploadID,
@@ -1513,7 +1669,13 @@ func (s *taskAssetCenterService) CancelUploadSession(ctx context.Context, params
 		return err
 	})
 	if txErr != nil {
+		if appErr, ok := txErr.(*domain.AppError); ok {
+			return nil, appErr
+		}
 		return nil, infraError("cancel upload session", txErr)
+	}
+	if alreadyCancelled {
+		return domain.BuildUploadSession(request), nil
 	}
 	return s.GetUploadSession(ctx, params.TaskID, request.RequestID)
 }
@@ -1565,6 +1727,15 @@ func (s *taskAssetCenterService) createUploadSession(ctx context.Context, params
 	authz.logDecision(TaskActionAssetUploadSessionCreate, decision)
 	if !decision.Allowed {
 		return nil, taskActionDecisionAppError(TaskActionAssetUploadSessionCreate, decision)
+	}
+	if appErr := requireCompletedTaskAssetMutationActor(ctx, task); appErr != nil {
+		return nil, appErr
+	}
+	if appErr := validateCompletedTaskReplacementIntent(task, params.AssetID, params.AssetType); appErr != nil {
+		return nil, appErr
+	}
+	if appErr := s.validateCompletedTaskReplacementCurrentAsset(ctx, task, params.AssetID); appErr != nil {
+		return nil, appErr
 	}
 	if appErr := validateAuditStageUploadAssetType(task, params.AssetType, params.OwnerModuleKey); appErr != nil {
 		return nil, appErr
@@ -1673,6 +1844,7 @@ func (s *taskAssetCenterService) createUploadSession(ctx context.Context, params
 			"storage_provider":       string(request.StorageProvider),
 			"remote_upload_id":       request.RemoteUploadID,
 			"expires_at":             request.ExpiresAt,
+			"post_close_replacement": task.TaskStatus == domain.TaskStatusCompleted,
 		})
 		return err
 	})
@@ -2349,6 +2521,189 @@ func validateAuditStageUploadAssetType(task *domain.Task, assetType domain.TaskA
 			string(domain.TaskAssetTypeDelivery),
 		},
 		"allowed_reference_owner_module_key": string(domain.ModuleKeyBasicInfo),
+	})
+}
+
+func validateCompletedTaskReplacementIntent(task *domain.Task, assetID *int64, assetType domain.TaskAssetType) *domain.AppError {
+	if task == nil || task.TaskStatus != domain.TaskStatusCompleted {
+		return nil
+	}
+	if assetID == nil || *assetID <= 0 {
+		return domain.NewAppError(domain.ErrCodeInvalidStateTransition, "completed tasks only allow replacing an existing current asset", map[string]interface{}{
+			"deny_code":   "post_close_replacement_requires_asset_id",
+			"task_id":     task.ID,
+			"task_status": task.TaskStatus,
+		})
+	}
+	normalized := domain.NormalizeTaskAssetType(assetType)
+	if normalized.IsReference() || normalized.IsSource() || normalized.IsDelivery() {
+		return nil
+	}
+	return domain.NewAppError(domain.ErrCodeInvalidRequest, "completed task replacement only supports reference, source, or delivery assets", map[string]interface{}{
+		"deny_code":           "post_close_replacement_asset_type_not_allowed",
+		"task_id":             task.ID,
+		"task_status":         task.TaskStatus,
+		"asset_type":          normalized,
+		"allowed_asset_types": []string{string(domain.TaskAssetTypeReference), string(domain.TaskAssetTypeSource), string(domain.TaskAssetTypeDelivery)},
+	})
+}
+
+func validateCompletedTaskReplacementRequest(task *domain.Task, request *domain.UploadRequest, allowLegacyRetouchCompletion bool) *domain.AppError {
+	if task == nil || task.TaskStatus != domain.TaskStatusCompleted {
+		return nil
+	}
+	if allowLegacyRetouchCompletion && task.TaskType == domain.TaskTypeRetouchTask && isPrecreatedCompletableUploadSession(request) {
+		return nil
+	}
+	if request == nil || request.TaskAssetType == nil {
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "completed task replacement upload session is missing asset type", map[string]interface{}{
+			"deny_code": "post_close_replacement_missing_asset_type",
+			"task_id":   task.ID,
+		})
+	}
+	return validateCompletedTaskReplacementIntent(task, request.AssetID, *request.TaskAssetType)
+}
+
+func (s *taskAssetCenterService) validateCompletedTaskReplacementCurrentAsset(ctx context.Context, task *domain.Task, assetID *int64) *domain.AppError {
+	_, appErr := s.completedTaskReplacementCurrentVersionID(ctx, task, assetID)
+	return appErr
+}
+
+func (s *taskAssetCenterService) completedTaskReplacementCurrentVersionID(ctx context.Context, task *domain.Task, assetID *int64) (*int64, *domain.AppError) {
+	if task == nil || task.TaskStatus != domain.TaskStatusCompleted || assetID == nil || *assetID <= 0 {
+		return nil, nil
+	}
+	asset, appErr := s.requireDesignAsset(ctx, task.ID, *assetID)
+	if appErr != nil {
+		return nil, appErr
+	}
+	if asset.CurrentVersionID == nil || *asset.CurrentVersionID <= 0 {
+		return nil, completedReplacementCurrentAssetRequiredError(task, *assetID)
+	}
+	current, err := s.taskAssetRepo.GetByID(ctx, *asset.CurrentVersionID)
+	if err != nil {
+		return nil, infraError("get completed task replacement current asset version", err)
+	}
+	if !isUsableCompletedReplacementCurrentVersion(current, task.ID, asset.ID) {
+		return nil, completedReplacementCurrentAssetRequiredError(task, *assetID)
+	}
+	return domain.CloneInt64Ptr(asset.CurrentVersionID), nil
+}
+
+func isUsableCompletedReplacementCurrentVersion(current *domain.TaskAsset, taskID, assetID int64) bool {
+	if current == nil || current.TaskID != taskID || current.AssetID == nil || *current.AssetID != assetID {
+		return false
+	}
+	if current.IsArchived || current.ArchivedAt != nil || current.CleanedAt != nil || current.DeletedAt != nil {
+		return false
+	}
+	if current.FlowReviewStatus == domain.TaskAssetFlowReviewStatusSuperseded || current.SupersededAt != nil || current.SupersededByVersionID != nil {
+		return false
+	}
+	return true
+}
+
+func (s *taskAssetCenterService) isCompletedLegacyRetouchCompletion(ctx context.Context, task *domain.Task, request *domain.UploadRequest) (bool, *domain.AppError) {
+	if task == nil || task.TaskStatus != domain.TaskStatusCompleted || task.TaskType != domain.TaskTypeRetouchTask || request == nil {
+		return false, nil
+	}
+	if !isPrecreatedCompletableUploadSession(request) || request.Status != domain.UploadRequestStatusRequested || request.BoundAssetID != nil {
+		return false, nil
+	}
+	// The exception is only for a session that predates the task's transition
+	// to Completed. Sessions created after close must follow the normal
+	// existing-current replacement contract.
+	if request.CreatedAt.IsZero() || task.UpdatedAt.IsZero() || request.CreatedAt.After(task.UpdatedAt) {
+		return false, nil
+	}
+	if request.AssetID == nil || *request.AssetID <= 0 {
+		return true, nil
+	}
+	asset, appErr := s.requireDesignAsset(ctx, task.ID, *request.AssetID)
+	if appErr != nil {
+		return false, appErr
+	}
+	return asset.CurrentVersionID == nil || *asset.CurrentVersionID <= 0, nil
+}
+
+func requireCompletedTaskAssetMutationActor(ctx context.Context, task *domain.Task) *domain.AppError {
+	if task == nil || task.TaskStatus != domain.TaskStatusCompleted {
+		return nil
+	}
+	actor, ok := resolveTaskActionActor(ctx)
+	if ok && actor != nil && hasAnyRoleValue(actor.Roles,
+		domain.RoleDesigner,
+		domain.RoleCustomizationOperator,
+		domain.RoleOps,
+		domain.RoleAdmin,
+		domain.RoleSuperAdmin,
+		domain.RoleHRAdmin,
+		domain.RoleRoleAdmin,
+		domain.RoleDeptAdmin,
+		domain.RoleTeamLead,
+		domain.RoleDesignDirector,
+	) {
+		return nil
+	}
+	return domain.NewAppError(domain.ErrCodePermissionDenied, "completed task asset replacement requires a design, customization, operation, or management role", map[string]interface{}{
+		"deny_code":   "post_close_replacement_role_not_allowed",
+		"task_id":     task.ID,
+		"task_status": task.TaskStatus,
+	})
+}
+
+func (s *taskAssetCenterService) getUploadRequestForUpdate(ctx context.Context, tx repo.Tx, requestID string) (*domain.UploadRequest, error) {
+	if lockingRepo, ok := s.uploadRequestRepo.(uploadRequestForUpdateRepo); ok {
+		return lockingRepo.GetByRequestIDForUpdate(ctx, tx, requestID)
+	}
+	return s.uploadRequestRepo.GetByRequestID(ctx, requestID)
+}
+
+func (s *taskAssetCenterService) getTaskForUpdate(ctx context.Context, tx repo.Tx, taskID int64) (*domain.Task, error) {
+	if lockingRepo, ok := s.taskRepo.(taskForUpdateRepo); ok {
+		return lockingRepo.GetByIDForUpdate(ctx, tx, taskID)
+	}
+	return s.taskRepo.GetByID(ctx, taskID)
+}
+
+func (s *taskAssetCenterService) getDesignAssetForUpdate(ctx context.Context, tx repo.Tx, assetID int64) (*domain.DesignAsset, error) {
+	if lockingRepo, ok := s.designAssetRepo.(designAssetForUpdateRepo); ok {
+		return lockingRepo.GetByIDForUpdate(ctx, tx, assetID)
+	}
+	return s.designAssetRepo.GetByID(ctx, assetID)
+}
+
+func (s *taskAssetCenterService) getTaskAssetForUpdate(ctx context.Context, tx repo.Tx, versionID int64) (*domain.TaskAsset, error) {
+	if lockingRepo, ok := s.taskAssetRepo.(taskAssetForUpdateRepo); ok {
+		return lockingRepo.GetByIDForUpdate(ctx, tx, versionID)
+	}
+	return s.taskAssetRepo.GetByID(ctx, versionID)
+}
+
+func optionalInt64Equal(left, right *int64) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return *left == *right
+}
+
+func completedReplacementConcurrentChangeError(task *domain.Task, assetID int64, expected, actual *int64) *domain.AppError {
+	return domain.NewAppError(domain.ErrCodeConflict, "completed task replacement current asset changed concurrently; refresh and retry", map[string]interface{}{
+		"deny_code":                   "post_close_replacement_current_changed",
+		"task_id":                     task.ID,
+		"task_status":                 task.TaskStatus,
+		"asset_id":                    assetID,
+		"expected_current_version_id": expected,
+		"actual_current_version_id":   actual,
+	})
+}
+
+func completedReplacementCurrentAssetRequiredError(task *domain.Task, assetID int64) *domain.AppError {
+	return domain.NewAppError(domain.ErrCodeInvalidStateTransition, "completed tasks only allow replacing an existing current asset", map[string]interface{}{
+		"deny_code":   "post_close_replacement_requires_current_asset",
+		"task_id":     task.ID,
+		"task_status": task.TaskStatus,
+		"asset_id":    assetID,
 	})
 }
 

@@ -33,6 +33,18 @@ func (r *taskModuleRepo) getByTaskAndKeyTx(ctx context.Context, tx repo.Tx, task
 	return m, err
 }
 
+// GetByTaskAndKeyForUpdate returns a module snapshot protected by the caller's
+// transaction so a concurrent terminal transition cannot be overwritten.
+func (r *taskModuleRepo) GetByTaskAndKeyForUpdate(ctx context.Context, tx repo.Tx, taskID int64, moduleKey string) (*domain.TaskModule, error) {
+	sqlTx := Unwrap(tx)
+	row := sqlTx.QueryRowContext(ctx, taskModuleSelectSQL()+` WHERE task_id = ? AND module_key = ? FOR UPDATE`, taskID, moduleKey)
+	m, err := scanTaskModule(row)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	return m, err
+}
+
 func (r *taskModuleRepo) ListByTask(ctx context.Context, taskID int64) ([]*domain.TaskModule, error) {
 	rows, err := r.db.db.QueryContext(ctx, taskModuleSelectSQL()+`
 		WHERE task_id = ?
@@ -111,6 +123,26 @@ func (r *taskModuleRepo) UpdateState(ctx context.Context, tx repo.Tx, taskID int
 		return fmt.Errorf("update task_module state: %w", err)
 	}
 	return nil
+}
+
+// UpdateStateCAS changes one module only from expected. Reopening a module also
+// clears stale terminal metadata.
+func (r *taskModuleRepo) UpdateStateCAS(ctx context.Context, tx repo.Tx, taskID int64, moduleKey string, expected, next domain.ModuleState, terminal bool, data json.RawMessage) (bool, error) {
+	sqlTx := Unwrap(tx)
+	terminalSQL := "terminal_at = NULL"
+	if terminal {
+		terminalSQL = "terminal_at = COALESCE(terminal_at, NOW())"
+	}
+	query := fmt.Sprintf(`UPDATE task_modules SET state = ?, %s, data = CASE WHEN ? IS NULL THEN data ELSE ? END, updated_at = NOW() WHERE task_id = ? AND module_key = ? AND state = ?`, terminalSQL)
+	result, err := sqlTx.ExecContext(ctx, query, string(next), nullJSONString(data), nullJSONString(data), taskID, moduleKey, string(expected))
+	if err != nil {
+		return false, fmt.Errorf("update task_module state cas: %w", err)
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("update task_module state cas rows affected: %w", err)
+	}
+	return rowsAffected == 1, nil
 }
 
 func (r *taskModuleRepo) Reassign(ctx context.Context, tx repo.Tx, taskID int64, moduleKey string, actorID int64, claimedTeamCode string, actorSnapshot json.RawMessage) error {

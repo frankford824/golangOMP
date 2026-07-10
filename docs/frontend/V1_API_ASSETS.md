@@ -482,7 +482,7 @@ curl -X GET https://api.example.com/v1/assets/<asset_id>/preview \
 ### 简介
 支持方法: POST。
 
-- `POST`: Canonical frontend entry for asset upload session creation. Backend decides whether to use single-part or multipart upload and returns the upload strategy plus completion/cancel endpoints. Reference uploads are allowed while a task is still `PendingAssign`, so operations users can fill in reference material before a designer self-claims or is assigned. `CustomizationReviewer` is not a generic asset uploader; it may use this route only through `task.customization.review.asset_upload` for uploaded `source` assets while the task is in `PendingCustomizationReview` or `PendingEffectReview`.
+- `POST`: Canonical frontend entry for asset upload session creation. Backend decides whether to use single-part or multipart upload and returns the upload strategy plus completion/cancel endpoints. Reference uploads are allowed while a task is still `PendingAssign`, so operations users can fill in reference material before a designer self-claims or is assigned. `CustomizationReviewer` is not a generic asset uploader; it may use this route only through `task.customization.review.asset_upload` for uploaded `source` assets while the task is in `PendingCustomizationReview` or `PendingEffectReview`. When the task is `Completed`, this route only replaces an active, non-archived current `reference`, `source`, or `delivery` resource supplied through `asset_id`; it never creates an unrelated new resource.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -533,6 +533,7 @@ Content-Type: `application/json`
 |---|---|---|---|
 | 400 | 见 `error.code` | 见 `deny_code` | Invalid request payload |
 | 403 | 见 `error.code` | 见 `deny_code` | Permission denied |
+| 409 | 见 `error.code` | 见 `deny_code` | Completed task request is not an existing-current-resource replacement |
 
 ### curl 示例
 ```bash
@@ -609,7 +610,7 @@ curl -X GET https://api.example.com/v1/assets/upload-sessions/<session_id> \
 ### 简介
 支持方法: POST。
 
-- `POST`: Completes one asset upload session after the frontend uploads bytes to OSS using the returned plan. `CustomizationReviewer` completion is allowed only for the same restricted customization-review source upload flow documented on create.
+- `POST`: Completes one asset upload session after the frontend uploads bytes to OSS using the returned plan. `CustomizationReviewer` completion is allowed only for the same restricted customization-review source upload flow documented on create. A delivery replacement created while the task is `Completed` remains approved and does not reopen the task workflow.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -691,7 +692,7 @@ curl -X POST https://api.example.com/v1/assets/upload-sessions/<session_id>/comp
 ### 简介
 支持方法: POST。
 
-- `POST`: Cancels one asset upload session and aborts the remote OSS session when needed. `CustomizationReviewer` cancellation is allowed only for the same restricted customization-review source upload flow documented on create.
+- `POST`: Cancels one asset upload session and aborts the remote OSS session when needed. `CustomizationReviewer` cancellation is allowed only for the same restricted customization-review source upload flow documented on create. Completed tasks may cancel only upload sessions that were created as an existing-resource replacement.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。

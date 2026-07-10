@@ -142,18 +142,29 @@ func (j *WarehouseAutoReleaseJob) releaseOne(ctx context.Context, taskID int64, 
 	if !ok {
 		return false, fmt.Errorf("task repo does not support CASUpdateStatus")
 	}
-	var warehouseModule *domain.TaskModule
-	var warehouseModuleState domain.ModuleState
-	if j.taskModuleRepo != nil && j.moduleEventRepo != nil {
-		warehouseModule, err = j.taskModuleRepo.GetByTaskAndKey(ctx, taskID, domain.ModuleKeyWarehouse)
-		if err != nil {
-			return false, err
+	var atomicModuleRepo taskModuleAtomicStateRepo
+	if j.taskModuleRepo != nil || j.moduleEventRepo != nil {
+		if j.taskModuleRepo == nil || j.moduleEventRepo == nil {
+			return false, fmt.Errorf("warehouse auto release module synchronization is partially configured")
 		}
-		if warehouseModule != nil {
-			warehouseModuleState = warehouseModule.State
+		atomicModuleRepo, ok = j.taskModuleRepo.(taskModuleAtomicStateRepo)
+		if !ok {
+			return false, fmt.Errorf("task module repo does not support atomic state synchronization")
 		}
 	}
 	if err := j.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
+		var warehouseModule *domain.TaskModule
+		var warehouseModuleState domain.ModuleState
+		if atomicModuleRepo != nil {
+			warehouseModule, err = atomicModuleRepo.GetByTaskAndKeyForUpdate(ctx, tx, taskID, domain.ModuleKeyWarehouse)
+			if err != nil {
+				return err
+			}
+			if warehouseModule == nil {
+				return fmt.Errorf("warehouse module is missing")
+			}
+			warehouseModuleState = warehouseModule.State
+		}
 		current := task.TaskStatus
 		receipt, err := j.warehouseRepo.GetByTaskID(ctx, taskID)
 		if err != nil {
@@ -312,11 +323,22 @@ func (j *WarehouseAutoReleaseJob) updateWarehouseModuleState(ctx context.Context
 		return nil
 	}
 	from := *current
-	if err := j.taskModuleRepo.UpdateState(ctx, tx, module.TaskID, domain.ModuleKeyWarehouse, next, next.Terminal(), nil); err != nil {
+	if !warehouseModuleTransitionAllowed(from, next) {
+		return fmt.Errorf("warehouse module transition %s -> %s is not allowed", from, next)
+	}
+	atomicRepo, ok := j.taskModuleRepo.(taskModuleAtomicStateRepo)
+	if !ok {
+		return fmt.Errorf("task module repo does not support atomic state synchronization")
+	}
+	updated, err := atomicRepo.UpdateStateCAS(ctx, tx, module.TaskID, domain.ModuleKeyWarehouse, from, next, next.Terminal(), nil)
+	if err != nil {
 		return err
 	}
+	if !updated {
+		return fmt.Errorf("warehouse module state changed before auto release")
+	}
 	to := next
-	_, err := j.moduleEventRepo.Insert(ctx, tx, &domain.TaskModuleEvent{
+	_, err = j.moduleEventRepo.Insert(ctx, tx, &domain.TaskModuleEvent{
 		TaskID:       module.TaskID,
 		TaskModuleID: module.ID,
 		ModuleKey:    domain.ModuleKeyWarehouse,

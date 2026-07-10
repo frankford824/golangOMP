@@ -189,9 +189,11 @@ func TestWarehouseReceiveAdvancesTaskStatus(t *testing.T) {
 	})
 	warehouseRepo := newWarehouseTestReceiptRepo()
 	eventRepo := &step04TaskEventRepo{}
+	moduleRepo := newStep04TaskModuleRepo(&domain.TaskModule{ID: 4530, TaskID: taskID, ModuleKey: domain.ModuleKeyWarehouse, State: domain.ModuleStatePending})
+	moduleEventRepo := &step04TaskModuleEventRepo{}
 	svc := NewWarehouseService(taskRepo, newStep04TaskAssetRepo(), warehouseRepo, eventRepo, warehouseTestTxRunner{
 		snapshotters: []warehouseTestSnapshotter{taskRepo, warehouseRepo},
-	}).(*warehouseService)
+	}, WithWarehouseModuleSync(moduleRepo, moduleEventRepo)).(*warehouseService)
 	svc.nowFn = func() time.Time {
 		return time.Date(2026, 4, 18, 10, 45, 40, 0, time.UTC)
 	}
@@ -229,6 +231,12 @@ func TestWarehouseReceiveAdvancesTaskStatus(t *testing.T) {
 	}
 	if storedReceipt.Status != domain.WarehouseReceiptStatusReceived {
 		t.Fatalf("stored warehouse status = %s, want received", storedReceipt.Status)
+	}
+	if moduleRepo.modules[domain.ModuleKeyWarehouse].State != domain.ModuleStateReceived {
+		t.Fatalf("warehouse module state = %s, want received", moduleRepo.modules[domain.ModuleKeyWarehouse].State)
+	}
+	if len(moduleEventRepo.events) != 1 || moduleEventRepo.events[0].EventType != domain.ModuleEventReceived {
+		t.Fatalf("warehouse module events = %+v, want one received event", moduleEventRepo.events)
 	}
 
 	detail := &domain.TaskDetail{
@@ -321,9 +329,11 @@ func TestWarehouseRejectAdvancesTaskStatus(t *testing.T) {
 		OwnerOrgTeam:     "ops-team",
 	})
 	warehouseRepo := newWarehouseTestReceiptRepo()
+	moduleRepo := newStep04TaskModuleRepo(&domain.TaskModule{ID: 4540, TaskID: taskID, ModuleKey: domain.ModuleKeyWarehouse, State: domain.ModuleStatePendingClaim})
+	moduleEventRepo := &step04TaskModuleEventRepo{}
 	svc := NewWarehouseService(taskRepo, newStep04TaskAssetRepo(), warehouseRepo, &step04TaskEventRepo{}, warehouseTestTxRunner{
 		snapshotters: []warehouseTestSnapshotter{taskRepo, warehouseRepo},
-	}).(*warehouseService)
+	}, WithWarehouseModuleSync(moduleRepo, moduleEventRepo)).(*warehouseService)
 	svc.nowFn = func() time.Time {
 		return time.Date(2026, 4, 18, 10, 46, 0, 0, time.UTC)
 	}
@@ -353,6 +363,12 @@ func TestWarehouseRejectAdvancesTaskStatus(t *testing.T) {
 	if receipt.RejectReason != "damaged package" {
 		t.Fatalf("reject_reason = %q, want damaged package", receipt.RejectReason)
 	}
+	if moduleRepo.modules[domain.ModuleKeyWarehouse].State != domain.ModuleStateRejected {
+		t.Fatalf("warehouse module state = %s, want rejected", moduleRepo.modules[domain.ModuleKeyWarehouse].State)
+	}
+	if len(moduleEventRepo.events) != 1 || moduleEventRepo.events[0].EventType != domain.ModuleEventRejected {
+		t.Fatalf("warehouse module events = %+v, want one rejected event", moduleEventRepo.events)
+	}
 }
 
 func TestWarehouseCompleteAdvancesTaskStatus(t *testing.T) {
@@ -381,9 +397,11 @@ func TestWarehouseCompleteAdvancesTaskStatus(t *testing.T) {
 		CreatedAt:  receivedAt,
 		UpdatedAt:  receivedAt,
 	})
+	moduleRepo := newStep04TaskModuleRepo(&domain.TaskModule{ID: 4550, TaskID: taskID, ModuleKey: domain.ModuleKeyWarehouse, State: domain.ModuleStateReceived})
+	moduleEventRepo := &step04TaskModuleEventRepo{}
 	svc := NewWarehouseService(taskRepo, newStep04TaskAssetRepo(), warehouseRepo, &step04TaskEventRepo{}, warehouseTestTxRunner{
 		snapshotters: []warehouseTestSnapshotter{taskRepo, warehouseRepo},
-	}).(*warehouseService)
+	}, WithWarehouseModuleSync(moduleRepo, moduleEventRepo)).(*warehouseService)
 	svc.nowFn = func() time.Time {
 		return time.Date(2026, 4, 18, 10, 46, 20, 0, time.UTC)
 	}
@@ -411,6 +429,41 @@ func TestWarehouseCompleteAdvancesTaskStatus(t *testing.T) {
 	}
 	if receipt.CompletedAt == nil {
 		t.Fatalf("completed_at is nil: %+v", receipt)
+	}
+	if moduleRepo.modules[domain.ModuleKeyWarehouse].State != domain.ModuleStateCompleted {
+		t.Fatalf("warehouse module state = %s, want completed", moduleRepo.modules[domain.ModuleKeyWarehouse].State)
+	}
+	if len(moduleEventRepo.events) != 1 || moduleEventRepo.events[0].EventType != domain.ModuleEventCompleted {
+		t.Fatalf("warehouse module events = %+v, want one completed event", moduleEventRepo.events)
+	}
+}
+
+func TestWarehouseModuleSyncRejectsTerminalRegression(t *testing.T) {
+	const taskID = int64(457)
+	moduleRepo := newStep04TaskModuleRepo(&domain.TaskModule{
+		ID:        4570,
+		TaskID:    taskID,
+		ModuleKey: domain.ModuleKeyWarehouse,
+		State:     domain.ModuleStateCompleted,
+	})
+	moduleEvents := &step04TaskModuleEventRepo{}
+	svc := &warehouseService{
+		taskModuleRepo:      moduleRepo,
+		taskModuleEventRepo: moduleEvents,
+	}
+
+	err := svc.syncWarehouseModuleState(context.Background(), step04Tx{}, taskID, domain.ModuleStateReceived, domain.ModuleEventReceived, 200, map[string]interface{}{
+		"source": "test",
+	})
+	appErr, ok := err.(*domain.AppError)
+	if !ok || appErr.Code != domain.ErrCodeInvalidStateTransition {
+		t.Fatalf("syncWarehouseModuleState() error = %+v, want invalid state", err)
+	}
+	if got := moduleRepo.modules[domain.ModuleKeyWarehouse].State; got != domain.ModuleStateCompleted {
+		t.Fatalf("warehouse module state = %s, want completed", got)
+	}
+	if len(moduleEvents.events) != 0 {
+		t.Fatalf("warehouse module events = %+v, want none", moduleEvents.events)
 	}
 }
 

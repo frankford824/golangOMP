@@ -101,6 +101,239 @@ func TestTaskAssetCenterServiceCreateAndCompleteMultipartUploadSession(t *testin
 	}
 }
 
+func TestTaskAssetCenterServiceCompletedTaskOnlyReplacesExistingCurrentAsset(t *testing.T) {
+	const (
+		taskID     = int64(2099)
+		uploaderID = int64(509)
+	)
+	taskRepo := newStep04TaskRepo(&domain.Task{ID: taskID, TaskStatus: domain.TaskStatusCompleted, DesignerID: uploadRequestInt64Ptr(uploaderID)})
+	designAssetRepo := newStep67DesignAssetRepo()
+	taskAssetRepo := newStep04TaskAssetRepo()
+	uploadRequestRepo := newStep37UploadRequestRepo()
+	taskEventRepo := &step04TaskEventRepo{}
+	storageRefRepo := newStep37AssetStorageRefRepo()
+	uploadClient := newStubUploadServiceClient().(*stubUploadServiceClient)
+	uploadClient.remoteSessionStatus = domain.DesignAssetSessionStatusCompleted
+
+	assetID, err := designAssetRepo.Create(context.Background(), nil, &domain.DesignAsset{
+		TaskID:    taskID,
+		AssetNo:   "AST-0001",
+		AssetType: domain.TaskAssetTypeDelivery,
+		CreatedBy: uploaderID,
+	})
+	if err != nil {
+		t.Fatalf("create design asset: %v", err)
+	}
+	oldVersionNo := 1
+	oldVersionID, err := taskAssetRepo.Create(context.Background(), nil, &domain.TaskAsset{
+		TaskID:           taskID,
+		AssetID:          &assetID,
+		AssetType:        domain.TaskAssetTypeDelivery,
+		VersionNo:        1,
+		AssetVersionNo:   &oldVersionNo,
+		FileName:         "old.psd",
+		FlowReviewStatus: domain.TaskAssetFlowReviewStatusApproved,
+	})
+	if err != nil {
+		t.Fatalf("create old asset version: %v", err)
+	}
+	if err := designAssetRepo.UpdateCurrentVersionID(context.Background(), nil, assetID, &oldVersionID); err != nil {
+		t.Fatalf("set old current version: %v", err)
+	}
+
+	svc := NewTaskAssetCenterService(taskRepo, designAssetRepo, taskAssetRepo, uploadRequestRepo, storageRefRepo, taskEventRepo, step04TxRunner{}, uploadClient).(*taskAssetCenterService)
+	svc.nowFn = func() time.Time { return time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC) }
+	ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{
+		ID:       uploaderID,
+		Roles:    []domain.Role{domain.RoleDesigner},
+		Source:   domain.RequestActorSourceSessionToken,
+		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
+	})
+	emptyAssetID, err := designAssetRepo.Create(context.Background(), nil, &domain.DesignAsset{
+		TaskID:    taskID,
+		AssetNo:   "AST-EMPTY",
+		AssetType: domain.TaskAssetTypeDelivery,
+		CreatedBy: uploaderID,
+	})
+	if err != nil {
+		t.Fatalf("create empty design asset: %v", err)
+	}
+
+	_, appErr := svc.CreateMultipartUploadSession(ctx, CreateTaskAssetUploadSessionParams{
+		TaskID:       taskID,
+		CreatedBy:    uploaderID,
+		AssetType:    domain.TaskAssetTypeDelivery,
+		Filename:     "new-without-asset.psd",
+		ExpectedSize: uploadRequestInt64Ptr(2048),
+	})
+	if appErr == nil {
+		t.Fatal("completed task create without asset_id error = nil")
+	}
+	details, _ := appErr.Details.(map[string]interface{})
+	if details["deny_code"] != "post_close_replacement_requires_asset_id" {
+		t.Fatalf("completed task create without asset_id error = %+v", appErr)
+	}
+	_, appErr = svc.CreateMultipartUploadSession(ctx, CreateTaskAssetUploadSessionParams{
+		TaskID:       taskID,
+		AssetID:      &emptyAssetID,
+		CreatedBy:    uploaderID,
+		AssetType:    domain.TaskAssetTypeDelivery,
+		Filename:     "new-against-empty-root.psd",
+		ExpectedSize: uploadRequestInt64Ptr(2048),
+	})
+	if appErr == nil {
+		t.Fatal("completed task create against empty asset root error = nil")
+	}
+	details, _ = appErr.Details.(map[string]interface{})
+	if details["deny_code"] != "post_close_replacement_requires_current_asset" {
+		t.Fatalf("completed task create against empty asset root error = %+v", appErr)
+	}
+
+	createResult, appErr := svc.CreateMultipartUploadSession(ctx, CreateTaskAssetUploadSessionParams{
+		TaskID:       taskID,
+		AssetID:      &assetID,
+		CreatedBy:    uploaderID,
+		AssetType:    domain.TaskAssetTypeDelivery,
+		Filename:     "new-current.psd",
+		ExpectedSize: uploadRequestInt64Ptr(4096),
+		MimeType:     "image/vnd.adobe.photoshop",
+		Remark:       "post-close correction",
+	})
+	if appErr != nil {
+		t.Fatalf("CreateMultipartUploadSession(completed replacement) error = %+v", appErr)
+	}
+	completeResult, appErr := svc.CompleteUploadSession(ctx, CompleteTaskAssetUploadSessionParams{
+		TaskID:      taskID,
+		SessionID:   createResult.Session.ID,
+		CompletedBy: uploaderID,
+		Remark:      "post-close correction",
+	})
+	if appErr != nil {
+		t.Fatalf("CompleteUploadSession(completed replacement) error = %+v", appErr)
+	}
+	if taskRepo.tasks[taskID].TaskStatus != domain.TaskStatusCompleted {
+		t.Fatalf("task status = %s, want Completed", taskRepo.tasks[taskID].TaskStatus)
+	}
+	if completeResult.Version == nil || completeResult.Version.FlowReviewStatus != domain.TaskAssetFlowReviewStatusApproved {
+		t.Fatalf("new version = %+v, want approved", completeResult.Version)
+	}
+	if completeResult.Version.ApprovedAt == nil || completeResult.Version.ApprovedBy == nil || *completeResult.Version.ApprovedBy != uploaderID {
+		t.Fatalf("new version approval = %+v / %+v", completeResult.Version.ApprovedAt, completeResult.Version.ApprovedBy)
+	}
+	if taskAssetRepo.assets[oldVersionID].FlowReviewStatus != domain.TaskAssetFlowReviewStatusSuperseded {
+		t.Fatalf("old version status = %s, want superseded", taskAssetRepo.assets[oldVersionID].FlowReviewStatus)
+	}
+}
+
+func TestTaskAssetCenterServiceCompletedTaskMutationRejectsAuditOnlyActors(t *testing.T) {
+	for _, role := range []domain.Role{domain.RoleAuditA, domain.RoleAuditB} {
+		role := role
+		for _, action := range []string{"create", "complete", "cancel"} {
+			action := action
+			t.Run(string(role)+"_"+action, func(t *testing.T) {
+				const taskID = int64(2100)
+				actorID := int64(610)
+				taskRepo := newStep04TaskRepo(&domain.Task{
+					ID:               taskID,
+					TaskStatus:       domain.TaskStatusCompleted,
+					CurrentHandlerID: &actorID,
+				})
+				designAssetRepo := newStep67DesignAssetRepo()
+				taskAssetRepo := newStep04TaskAssetRepo()
+				uploadRequestRepo := newStep37UploadRequestRepo()
+				taskEventRepo := &step04TaskEventRepo{}
+				storageRefRepo := newStep37AssetStorageRefRepo()
+				uploadClient := newStubUploadServiceClient().(*stubUploadServiceClient)
+
+				assetID, err := designAssetRepo.Create(context.Background(), step04Tx{}, &domain.DesignAsset{
+					TaskID: taskID, AssetNo: "AST-AUDIT-DENY", AssetType: domain.TaskAssetTypeDelivery, CreatedBy: actorID,
+				})
+				if err != nil {
+					t.Fatalf("create design asset: %v", err)
+				}
+				versionNo := 1
+				versionID, err := taskAssetRepo.Create(context.Background(), step04Tx{}, &domain.TaskAsset{
+					TaskID: taskID, AssetID: &assetID, AssetType: domain.TaskAssetTypeDelivery,
+					VersionNo: 1, AssetVersionNo: &versionNo, FileName: "current.psd", FlowReviewStatus: domain.TaskAssetFlowReviewStatusApproved,
+				})
+				if err != nil {
+					t.Fatalf("create task asset: %v", err)
+				}
+				if err := designAssetRepo.UpdateCurrentVersionID(context.Background(), step04Tx{}, assetID, &versionID); err != nil {
+					t.Fatalf("set current version: %v", err)
+				}
+				assetType := domain.TaskAssetTypeDelivery
+				uploadRequestRepo.requests["audit-only-session"] = &domain.UploadRequest{
+					RequestID: "audit-only-session", OwnerType: domain.AssetOwnerTypeTask, OwnerID: taskID, TaskID: taskID,
+					AssetID: &assetID, TaskAssetType: &assetType, Status: domain.UploadRequestStatusRequested,
+					SessionStatus: domain.DesignAssetSessionStatusCreated, RemoteUploadID: "remote-audit-only",
+				}
+				domain.HydrateUploadRequestDerived(uploadRequestRepo.requests["audit-only-session"])
+
+				svc := NewTaskAssetCenterService(taskRepo, designAssetRepo, taskAssetRepo, uploadRequestRepo, storageRefRepo, taskEventRepo, step04TxRunner{}, uploadClient).(*taskAssetCenterService)
+				ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{
+					ID: actorID, Roles: []domain.Role{role}, Source: domain.RequestActorSourceSessionToken, AuthMode: domain.AuthModeSessionTokenRoleEnforced,
+				})
+				var appErr *domain.AppError
+				switch action {
+				case "create":
+					_, appErr = svc.CreateMultipartUploadSession(ctx, CreateTaskAssetUploadSessionParams{
+						TaskID: taskID, AssetID: &assetID, CreatedBy: actorID, AssetType: assetType, Filename: "replacement.psd",
+					})
+				case "complete":
+					_, appErr = svc.CompleteUploadSession(ctx, CompleteTaskAssetUploadSessionParams{TaskID: taskID, SessionID: "audit-only-session", CompletedBy: actorID})
+				case "cancel":
+					_, appErr = svc.CancelUploadSession(ctx, CancelTaskAssetUploadSessionParams{TaskID: taskID, SessionID: "audit-only-session", CancelledBy: actorID})
+				}
+				if appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
+					t.Fatalf("%s completed mutation error = %+v, want permission denied", action, appErr)
+				}
+				details, _ := appErr.Details.(map[string]interface{})
+				if got := details["deny_code"]; got != "post_close_replacement_role_not_allowed" {
+					t.Fatalf("%s deny_code = %+v, want post_close_replacement_role_not_allowed", action, got)
+				}
+			})
+		}
+	}
+}
+
+func TestTaskAssetCenterServiceCompletedReplacementRejectsInactiveCurrentLifecycle(t *testing.T) {
+	now := time.Date(2026, 7, 10, 10, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name   string
+		mutate func(*domain.TaskAsset)
+	}{
+		{name: "archived_flag", mutate: func(asset *domain.TaskAsset) { asset.IsArchived = true }},
+		{name: "archived_at", mutate: func(asset *domain.TaskAsset) { asset.ArchivedAt = &now }},
+		{name: "cleaned", mutate: func(asset *domain.TaskAsset) { asset.CleanedAt = &now }},
+		{name: "deleted", mutate: func(asset *domain.TaskAsset) { asset.DeletedAt = &now }},
+		{name: "superseded_status", mutate: func(asset *domain.TaskAsset) { asset.FlowReviewStatus = domain.TaskAssetFlowReviewStatusSuperseded }},
+		{name: "superseded_at", mutate: func(asset *domain.TaskAsset) { asset.SupersededAt = &now }},
+		{name: "superseded_pointer", mutate: func(asset *domain.TaskAsset) { asset.SupersededByVersionID = uploadRequestInt64Ptr(999) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			task := &domain.Task{ID: 2101, TaskStatus: domain.TaskStatusCompleted}
+			designAssetRepo := newStep67DesignAssetRepo()
+			taskAssetRepo := newStep04TaskAssetRepo()
+			assetID, _ := designAssetRepo.Create(context.Background(), step04Tx{}, &domain.DesignAsset{TaskID: task.ID, AssetNo: "AST-LIFECYCLE", AssetType: domain.TaskAssetTypeSource})
+			versionNo := 1
+			current := &domain.TaskAsset{TaskID: task.ID, AssetID: &assetID, AssetType: domain.TaskAssetTypeSource, VersionNo: 1, AssetVersionNo: &versionNo, FlowReviewStatus: domain.TaskAssetFlowReviewStatusApproved}
+			tc.mutate(current)
+			versionID, _ := taskAssetRepo.Create(context.Background(), step04Tx{}, current)
+			_ = designAssetRepo.UpdateCurrentVersionID(context.Background(), step04Tx{}, assetID, &versionID)
+			svc := &taskAssetCenterService{designAssetRepo: designAssetRepo, taskAssetRepo: taskAssetRepo}
+			appErr := svc.validateCompletedTaskReplacementCurrentAsset(context.Background(), task, &assetID)
+			if appErr == nil {
+				t.Fatal("validate current lifecycle error = nil")
+			}
+			details, _ := appErr.Details.(map[string]interface{})
+			if got := details["deny_code"]; got != "post_close_replacement_requires_current_asset" {
+				t.Fatalf("deny_code = %+v", got)
+			}
+		})
+	}
+}
+
 func TestTaskAssetCenterServiceCompleteMultipartSkipsSecondRemoteCompleteAfterBrowserRemoteComplete(t *testing.T) {
 	taskRepo := newStep04TaskRepo(&domain.Task{ID: 2011, TaskStatus: domain.TaskStatusInProgress})
 	designAssetRepo := newStep67DesignAssetRepo()
@@ -2204,12 +2437,14 @@ func TestTaskAssetCenterServiceRetouchDeliveryBatchCompletesAfterLastPreparedSes
 
 func TestTaskAssetCenterServiceCompletesLegacyRetouchSessionAfterPrematureCompleted(t *testing.T) {
 	designerID := int64(702)
+	now := time.Date(2026, 6, 9, 13, 33, 5, 0, time.UTC)
 	taskRepo := newStep04TaskRepo(&domain.Task{
 		ID:         2061,
 		TaskNo:     "T-2061",
 		TaskType:   domain.TaskTypeRetouchTask,
 		TaskStatus: domain.TaskStatusCompleted,
 		DesignerID: &designerID,
+		UpdatedAt:  now.Add(time.Minute),
 	})
 	designAssetRepo := newStep67DesignAssetRepo()
 	taskAssetRepo := newStep04TaskAssetRepo()
@@ -2220,12 +2455,21 @@ func TestTaskAssetCenterServiceCompletesLegacyRetouchSessionAfterPrematureComple
 	uploadClient.remoteSessionStatus = domain.DesignAssetSessionStatusCompleted
 
 	assetType := domain.TaskAssetTypeDelivery
-	now := time.Date(2026, 6, 9, 13, 33, 5, 0, time.UTC)
+	precreatedAssetID, err := designAssetRepo.Create(context.Background(), step04Tx{}, &domain.DesignAsset{
+		TaskID:    2061,
+		AssetNo:   "AST-PRECREATED",
+		AssetType: assetType,
+		CreatedBy: designerID,
+	})
+	if err != nil {
+		t.Fatalf("create precreated legacy retouch root: %v", err)
+	}
 	uploadRequestRepo.requests["legacy-retouch-session"] = &domain.UploadRequest{
 		RequestID:       "legacy-retouch-session",
 		OwnerType:       domain.AssetOwnerTypeTask,
 		OwnerID:         2061,
 		TaskID:          2061,
+		AssetID:         &precreatedAssetID,
 		TaskAssetType:   &assetType,
 		StorageAdapter:  domain.AssetStorageAdapterOSSUploadService,
 		UploadMode:      domain.DesignAssetUploadModeMultipart,
@@ -2268,6 +2512,213 @@ func TestTaskAssetCenterServiceCompletesLegacyRetouchSessionAfterPrematureComple
 	}
 	if countStep04TaskEvents(taskEventRepo.events, domain.TaskEventAssetVersionCreated) != 1 {
 		t.Fatalf("asset version created events = %+v, want 1", taskEventRepo.events)
+	}
+}
+
+func TestTaskAssetCenterServiceDoesNotTreatPostCloseRetouchSessionAsLegacy(t *testing.T) {
+	designerID := int64(703)
+	completedAt := time.Date(2026, 6, 9, 13, 33, 5, 0, time.UTC)
+	taskRepo := newStep04TaskRepo(&domain.Task{
+		ID: 2062, TaskNo: "T-2062", TaskType: domain.TaskTypeRetouchTask, TaskStatus: domain.TaskStatusCompleted,
+		DesignerID: &designerID, UpdatedAt: completedAt,
+	})
+	designAssetRepo := newStep67DesignAssetRepo()
+	taskAssetRepo := newStep04TaskAssetRepo()
+	uploadRequestRepo := newStep37UploadRequestRepo()
+	assetType := domain.TaskAssetTypeDelivery
+	assetID, _ := designAssetRepo.Create(context.Background(), step04Tx{}, &domain.DesignAsset{
+		TaskID: 2062, AssetNo: "AST-POST-CLOSE", AssetType: assetType, CreatedBy: designerID,
+	})
+	uploadRequestRepo.requests["post-close-retouch-session"] = &domain.UploadRequest{
+		RequestID: "post-close-retouch-session", OwnerType: domain.AssetOwnerTypeTask, OwnerID: 2062, TaskID: 2062,
+		AssetID: &assetID, TaskAssetType: &assetType, Status: domain.UploadRequestStatusRequested,
+		SessionStatus: domain.DesignAssetSessionStatusCreated, RemoteUploadID: "remote-post-close-retouch",
+		CreatedBy: designerID, CreatedAt: completedAt.Add(time.Minute), UpdatedAt: completedAt.Add(time.Minute),
+	}
+	domain.HydrateUploadRequestDerived(uploadRequestRepo.requests["post-close-retouch-session"])
+	svc := NewTaskAssetCenterService(
+		taskRepo, designAssetRepo, taskAssetRepo, uploadRequestRepo, newStep37AssetStorageRefRepo(), &step04TaskEventRepo{}, step04TxRunner{}, newStubUploadServiceClient(),
+	).(*taskAssetCenterService)
+	ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{
+		ID: designerID, Roles: []domain.Role{domain.RoleDesigner}, Source: domain.RequestActorSourceSessionToken, AuthMode: domain.AuthModeSessionTokenRoleEnforced,
+	})
+	_, appErr := svc.CompleteUploadSession(ctx, CompleteTaskAssetUploadSessionParams{
+		TaskID: 2062, SessionID: "post-close-retouch-session", CompletedBy: designerID,
+	})
+	if appErr == nil {
+		t.Fatal("CompleteUploadSession(post-close retouch) error = nil")
+	}
+	details, _ := appErr.Details.(map[string]interface{})
+	if got := details["deny_code"]; got != "post_close_replacement_requires_current_asset" {
+		t.Fatalf("deny_code = %+v, want post_close_replacement_requires_current_asset", got)
+	}
+}
+
+func TestTaskAssetCenterServiceCompletedReplacementRejectsCurrentChangedBeforeLockedWrite(t *testing.T) {
+	const taskID = int64(2063)
+	designerID := int64(704)
+	taskRepo := newStep04TaskRepo(&domain.Task{ID: taskID, TaskStatus: domain.TaskStatusCompleted, DesignerID: &designerID})
+	baseDesignRepo := newStep67DesignAssetRepo()
+	taskAssetRepo := newStep04TaskAssetRepo()
+	uploadRequestRepo := newStep37UploadRequestRepo()
+	assetID, _ := baseDesignRepo.Create(context.Background(), step04Tx{}, &domain.DesignAsset{TaskID: taskID, AssetNo: "AST-CAS", AssetType: domain.TaskAssetTypeDelivery, CreatedBy: designerID})
+	versionNo := 1
+	oldVersionID, _ := taskAssetRepo.Create(context.Background(), step04Tx{}, &domain.TaskAsset{
+		TaskID: taskID, AssetID: &assetID, AssetType: domain.TaskAssetTypeDelivery, VersionNo: 1, AssetVersionNo: &versionNo,
+		FileName: "old.psd", FlowReviewStatus: domain.TaskAssetFlowReviewStatusApproved,
+	})
+	_ = baseDesignRepo.UpdateCurrentVersionID(context.Background(), step04Tx{}, assetID, &oldVersionID)
+	concurrentVersionID := int64(9999)
+	designAssetRepo := &currentChangedOnLockDesignAssetRepo{step67DesignAssetRepo: baseDesignRepo, lockedCurrentVersionID: &concurrentVersionID}
+	assetType := domain.TaskAssetTypeDelivery
+	uploadRequestRepo.requests["replacement-race"] = &domain.UploadRequest{
+		RequestID: "replacement-race", OwnerType: domain.AssetOwnerTypeTask, OwnerID: taskID, TaskID: taskID,
+		AssetID: &assetID, TaskAssetType: &assetType, Status: domain.UploadRequestStatusRequested,
+		SessionStatus: domain.DesignAssetSessionStatusCreated, RemoteUploadID: "remote-replacement-race",
+		UploadMode: domain.DesignAssetUploadModeMultipart, StorageProvider: domain.DesignAssetStorageProviderOSS,
+	}
+	domain.HydrateUploadRequestDerived(uploadRequestRepo.requests["replacement-race"])
+	svc := NewTaskAssetCenterService(
+		taskRepo, designAssetRepo, taskAssetRepo, uploadRequestRepo, newStep37AssetStorageRefRepo(), &step04TaskEventRepo{}, step04TxRunner{}, newStubUploadServiceClient(),
+	).(*taskAssetCenterService)
+	ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{
+		ID: designerID, Roles: []domain.Role{domain.RoleDesigner}, Source: domain.RequestActorSourceSessionToken, AuthMode: domain.AuthModeSessionTokenRoleEnforced,
+	})
+	_, appErr := svc.CompleteUploadSession(ctx, CompleteTaskAssetUploadSessionParams{TaskID: taskID, SessionID: "replacement-race", CompletedBy: designerID})
+	if appErr == nil || appErr.Code != domain.ErrCodeConflict {
+		t.Fatalf("CompleteUploadSession(current changed) error = %+v, want conflict", appErr)
+	}
+	details, _ := appErr.Details.(map[string]interface{})
+	if got := details["deny_code"]; got != "post_close_replacement_current_changed" {
+		t.Fatalf("deny_code = %+v", got)
+	}
+	if got := len(taskAssetRepo.assets); got != 1 {
+		t.Fatalf("task asset versions = %d, want original only", got)
+	}
+}
+
+func TestTaskAssetCenterServiceCompletedReplacementRejectsTaskArchivedBeforeLockedWrite(t *testing.T) {
+	const taskID = int64(2065)
+	designerID := int64(706)
+	taskRepo := newStep04TaskRepo(&domain.Task{ID: taskID, TaskStatus: domain.TaskStatusCompleted, DesignerID: &designerID})
+	taskRepo.forUpdateTask = &domain.Task{ID: taskID, TaskStatus: domain.TaskStatusArchived, DesignerID: &designerID}
+	designAssetRepo := newStep67DesignAssetRepo()
+	taskAssetRepo := newStep04TaskAssetRepo()
+	uploadRequestRepo := newStep37UploadRequestRepo()
+	assetID, _ := designAssetRepo.Create(context.Background(), step04Tx{}, &domain.DesignAsset{TaskID: taskID, AssetNo: "AST-ARCHIVE-RACE", AssetType: domain.TaskAssetTypeDelivery, CreatedBy: designerID})
+	versionNo := 1
+	versionID, _ := taskAssetRepo.Create(context.Background(), step04Tx{}, &domain.TaskAsset{
+		TaskID: taskID, AssetID: &assetID, AssetType: domain.TaskAssetTypeDelivery, VersionNo: 1, AssetVersionNo: &versionNo,
+		FileName: "current.psd", FlowReviewStatus: domain.TaskAssetFlowReviewStatusApproved,
+	})
+	_ = designAssetRepo.UpdateCurrentVersionID(context.Background(), step04Tx{}, assetID, &versionID)
+	assetType := domain.TaskAssetTypeDelivery
+	uploadRequestRepo.requests["replacement-archive-race"] = &domain.UploadRequest{
+		RequestID: "replacement-archive-race", OwnerType: domain.AssetOwnerTypeTask, OwnerID: taskID, TaskID: taskID,
+		AssetID: &assetID, TaskAssetType: &assetType, Status: domain.UploadRequestStatusRequested,
+		SessionStatus: domain.DesignAssetSessionStatusCreated, RemoteUploadID: "remote-replacement-archive-race",
+		UploadMode: domain.DesignAssetUploadModeMultipart, StorageProvider: domain.DesignAssetStorageProviderOSS,
+	}
+	domain.HydrateUploadRequestDerived(uploadRequestRepo.requests["replacement-archive-race"])
+	svc := NewTaskAssetCenterService(
+		taskRepo, designAssetRepo, taskAssetRepo, uploadRequestRepo, newStep37AssetStorageRefRepo(), &step04TaskEventRepo{}, step04TxRunner{}, newStubUploadServiceClient(),
+	).(*taskAssetCenterService)
+	ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{
+		ID: designerID, Roles: []domain.Role{domain.RoleDesigner}, Source: domain.RequestActorSourceSessionToken, AuthMode: domain.AuthModeSessionTokenRoleEnforced,
+	})
+	_, appErr := svc.CompleteUploadSession(ctx, CompleteTaskAssetUploadSessionParams{TaskID: taskID, SessionID: "replacement-archive-race", CompletedBy: designerID})
+	if appErr == nil || appErr.Code != domain.ErrCodeConflict {
+		t.Fatalf("CompleteUploadSession(task archived) error = %+v, want conflict", appErr)
+	}
+	if got := len(taskAssetRepo.assets); got != 1 {
+		t.Fatalf("task asset versions = %d, want original only", got)
+	}
+}
+
+func TestTaskAssetCenterServiceConcurrentCompleteObservesWinnerWithoutSecondVersion(t *testing.T) {
+	const taskID = int64(2064)
+	designerID := int64(705)
+	taskRepo := newStep04TaskRepo(&domain.Task{ID: taskID, TaskStatus: domain.TaskStatusCompleted, DesignerID: &designerID})
+	designAssetRepo := newStep67DesignAssetRepo()
+	taskAssetRepo := newStep04TaskAssetRepo()
+	baseUploadRepo := newStep37UploadRequestRepo()
+	assetID, _ := designAssetRepo.Create(context.Background(), step04Tx{}, &domain.DesignAsset{TaskID: taskID, AssetNo: "AST-IDEMPOTENT-RACE", AssetType: domain.TaskAssetTypeDelivery, CreatedBy: designerID})
+	versionNo := 1
+	versionID, _ := taskAssetRepo.Create(context.Background(), step04Tx{}, &domain.TaskAsset{
+		TaskID: taskID, AssetID: &assetID, AssetType: domain.TaskAssetTypeDelivery, VersionNo: 1, AssetVersionNo: &versionNo,
+		FileName: "winner.psd", FlowReviewStatus: domain.TaskAssetFlowReviewStatusApproved,
+	})
+	_ = designAssetRepo.UpdateCurrentVersionID(context.Background(), step04Tx{}, assetID, &versionID)
+	assetType := domain.TaskAssetTypeDelivery
+	initial := &domain.UploadRequest{
+		RequestID: "same-session-race", OwnerType: domain.AssetOwnerTypeTask, OwnerID: taskID, TaskID: taskID,
+		AssetID: &assetID, TaskAssetType: &assetType, Status: domain.UploadRequestStatusRequested,
+		SessionStatus: domain.DesignAssetSessionStatusCreated, RemoteUploadID: "remote-same-session-race",
+		UploadMode: domain.DesignAssetUploadModeMultipart, StorageProvider: domain.DesignAssetStorageProviderOSS,
+	}
+	bound := *initial
+	bound.Status = domain.UploadRequestStatusBound
+	bound.SessionStatus = domain.DesignAssetSessionStatusCompleted
+	bound.BoundAssetID = &versionID
+	baseUploadRepo.requests[initial.RequestID] = initial
+	domain.HydrateUploadRequestDerived(initial)
+	domain.HydrateUploadRequestDerived(&bound)
+	uploadRequestRepo := &completedOnLockUploadRequestRepo{step37UploadRequestRepo: baseUploadRepo, lockedRequest: &bound}
+	taskEventRepo := &step04TaskEventRepo{}
+	svc := NewTaskAssetCenterService(
+		taskRepo, designAssetRepo, taskAssetRepo, uploadRequestRepo, newStep37AssetStorageRefRepo(), taskEventRepo, step04TxRunner{}, newStubUploadServiceClient(),
+	).(*taskAssetCenterService)
+	ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{
+		ID: designerID, Roles: []domain.Role{domain.RoleDesigner}, Source: domain.RequestActorSourceSessionToken, AuthMode: domain.AuthModeSessionTokenRoleEnforced,
+	})
+	result, appErr := svc.CompleteUploadSession(ctx, CompleteTaskAssetUploadSessionParams{TaskID: taskID, SessionID: initial.RequestID, CompletedBy: designerID})
+	if appErr != nil {
+		t.Fatalf("CompleteUploadSession(concurrent winner) error = %+v", appErr)
+	}
+	if result == nil || result.Version == nil || result.Version.ID != versionID {
+		t.Fatalf("result = %+v, want winner version %d", result, versionID)
+	}
+	if got := len(taskAssetRepo.assets); got != 1 {
+		t.Fatalf("task asset versions = %d, want no second version", got)
+	}
+	if len(taskEventRepo.events) != 0 {
+		t.Fatalf("events = %+v, want no duplicate completion event", taskEventRepo.events)
+	}
+}
+
+func TestTaskAssetCenterServiceConcurrentCompletePreventsCancelOverwrite(t *testing.T) {
+	const taskID = int64(2065)
+	designerID := int64(706)
+	taskRepo := newStep04TaskRepo(&domain.Task{ID: taskID, TaskStatus: domain.TaskStatusCompleted, DesignerID: &designerID})
+	designAssetRepo := newStep67DesignAssetRepo()
+	taskAssetRepo := newStep04TaskAssetRepo()
+	baseUploadRepo := newStep37UploadRequestRepo()
+	assetID, _ := designAssetRepo.Create(context.Background(), step04Tx{}, &domain.DesignAsset{TaskID: taskID, AssetNo: "AST-CANCEL-RACE", AssetType: domain.TaskAssetTypeDelivery, CreatedBy: designerID})
+	versionNo := 1
+	versionID, _ := taskAssetRepo.Create(context.Background(), step04Tx{}, &domain.TaskAsset{TaskID: taskID, AssetID: &assetID, AssetType: domain.TaskAssetTypeDelivery, VersionNo: 1, AssetVersionNo: &versionNo, FlowReviewStatus: domain.TaskAssetFlowReviewStatusApproved})
+	_ = designAssetRepo.UpdateCurrentVersionID(context.Background(), step04Tx{}, assetID, &versionID)
+	assetType := domain.TaskAssetTypeDelivery
+	initial := &domain.UploadRequest{RequestID: "cancel-race", OwnerType: domain.AssetOwnerTypeTask, OwnerID: taskID, TaskID: taskID, AssetID: &assetID, TaskAssetType: &assetType, Status: domain.UploadRequestStatusRequested, SessionStatus: domain.DesignAssetSessionStatusCreated, RemoteUploadID: "remote-cancel-race"}
+	bound := *initial
+	bound.Status = domain.UploadRequestStatusBound
+	bound.SessionStatus = domain.DesignAssetSessionStatusCompleted
+	bound.BoundAssetID = &versionID
+	baseUploadRepo.requests[initial.RequestID] = initial
+	domain.HydrateUploadRequestDerived(initial)
+	domain.HydrateUploadRequestDerived(&bound)
+	uploadRequestRepo := &completedOnLockUploadRequestRepo{step37UploadRequestRepo: baseUploadRepo, lockedRequest: &bound}
+	taskEventRepo := &step04TaskEventRepo{}
+	svc := NewTaskAssetCenterService(taskRepo, designAssetRepo, taskAssetRepo, uploadRequestRepo, newStep37AssetStorageRefRepo(), taskEventRepo, step04TxRunner{}, newStubUploadServiceClient()).(*taskAssetCenterService)
+	ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{ID: designerID, Roles: []domain.Role{domain.RoleDesigner}, Source: domain.RequestActorSourceSessionToken, AuthMode: domain.AuthModeSessionTokenRoleEnforced})
+	_, appErr := svc.CancelUploadSession(ctx, CancelTaskAssetUploadSessionParams{TaskID: taskID, SessionID: initial.RequestID, CancelledBy: designerID})
+	if appErr == nil || appErr.Code != domain.ErrCodeConflict {
+		t.Fatalf("CancelUploadSession(concurrent complete) error = %+v, want conflict", appErr)
+	}
+	if initial.Status != domain.UploadRequestStatusRequested || initial.SessionStatus != domain.DesignAssetSessionStatusCreated {
+		t.Fatalf("stale request was overwritten: %+v", initial)
+	}
+	if len(taskEventRepo.events) != 0 {
+		t.Fatalf("events = %+v, want no cancellation event", taskEventRepo.events)
 	}
 }
 
@@ -2333,6 +2784,34 @@ func countStep04TaskEvents(events []*domain.TaskEvent, eventType string) int {
 
 func timeValuePtr(v time.Time) *time.Time {
 	return &v
+}
+
+type currentChangedOnLockDesignAssetRepo struct {
+	*step67DesignAssetRepo
+	lockedCurrentVersionID *int64
+}
+
+func (r *currentChangedOnLockDesignAssetRepo) GetByIDForUpdate(ctx context.Context, tx repo.Tx, id int64) (*domain.DesignAsset, error) {
+	asset, err := r.step67DesignAssetRepo.GetByID(ctx, id)
+	if err != nil || asset == nil {
+		return asset, err
+	}
+	locked := *asset
+	locked.CurrentVersionID = domain.CloneInt64Ptr(r.lockedCurrentVersionID)
+	return &locked, nil
+}
+
+type completedOnLockUploadRequestRepo struct {
+	*step37UploadRequestRepo
+	lockedRequest *domain.UploadRequest
+}
+
+func (r *completedOnLockUploadRequestRepo) GetByRequestIDForUpdate(_ context.Context, _ repo.Tx, requestID string) (*domain.UploadRequest, error) {
+	if r.lockedRequest == nil || r.lockedRequest.RequestID != requestID {
+		return nil, nil
+	}
+	copyRequest := *r.lockedRequest
+	return &copyRequest, nil
 }
 
 type stubUploadServiceClient struct {
