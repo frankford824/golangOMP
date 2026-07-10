@@ -4,6 +4,12 @@ import { Download, RefreshCw } from 'lucide-vue-next'
 
 import SettlementHubTabs from '@aw/shared/console/SettlementHubTabs.vue'
 import { exportSettlementReportWorkbook } from '@aw/features/export/settlementExport'
+import {
+  mergeBusinessMonths,
+  selectedSettlementReportMonths,
+  settlementReportRangeHint,
+  type SettlementReportRangeMode,
+} from '@aw/features/export/settlementReportRange'
 import { assetWorkbenchApi, type SettlementReport, type SettlementReportDifficultyMetric, type SettlementReportRow } from '@aw/shared/api/assetWorkbenchApi'
 import { usePageRequest } from '@aw/shared/composables/usePageRequest'
 import { currentBusinessMonth } from '@aw/shared/format/businessMonth'
@@ -24,8 +30,6 @@ type ReportGridRow = Record<string, unknown> & {
   created_date_range: string
 }
 type ReportSectionKey = 'overview' | 'difficulty' | 'daily' | 'supplements'
-type ReportRangeMode = 'single' | 'last3' | 'last12' | 'available'
-
 interface ReportNavItem {
   key: ReportSectionKey
   title: string
@@ -36,7 +40,7 @@ interface ReportNavItem {
 const month = ref(defaultBusinessMonth())
 const exporting = ref(false)
 const activeReportSection = ref<ReportSectionKey>('overview')
-const reportRangeMode = ref<ReportRangeMode>('single')
+const reportRangeMode = ref<SettlementReportRangeMode>('single')
 const availableReportMonths = ref<string[]>([])
 const availableMonthsLoading = ref(false)
 const exportError = ref('')
@@ -102,7 +106,7 @@ const reportNavGroups = computed<{ label: string; items: ReportNavItem[] }[]>(()
     ],
   },
 ])
-const reportRangeOptions: Array<{ value: ReportRangeMode; label: string }> = [
+const reportRangeOptions: Array<{ value: SettlementReportRangeMode; label: string }> = [
   { value: 'single', label: '所选月' },
   { value: 'last3', label: '所选月及前 2 个月' },
   { value: 'last12', label: '所选月及前 11 个月' },
@@ -110,15 +114,12 @@ const reportRangeOptions: Array<{ value: ReportRangeMode; label: string }> = [
 ]
 const reportLoadedForSelectedMonth = computed(() => report.value?.business_month === month.value)
 const currentReportHasData = computed(() => reportLoadedForSelectedMonth.value && reportHasData(report.value))
-const selectedExportMonths = computed(() => {
-  if (reportRangeMode.value === 'last3') return previousBusinessMonths(month.value, 3)
-  if (reportRangeMode.value === 'last12') return previousBusinessMonths(month.value, 12)
-  if (reportRangeMode.value === 'available') {
-    const known = mergeBusinessMonths([month.value, ...availableReportMonths.value, report.value?.business_month || ''])
-    return known.length ? known : [month.value]
-  }
-  return [month.value]
-})
+const selectedExportMonths = computed(() => selectedSettlementReportMonths(
+  reportRangeMode.value,
+  month.value,
+  availableReportMonths.value,
+  report.value?.business_month,
+))
 const canExportReport = computed(() => {
   if (exporting.value || loading.value || availableMonthsLoading.value) return false
   if (reportRangeMode.value === 'single') return currentReportHasData.value
@@ -133,12 +134,7 @@ const exportDisabledReason = computed(() => {
   if (!currentReportHasData.value) return `${month.value} 没有可导出的计件统计`
   return ''
 })
-const exportRangeHint = computed(() => {
-  if (reportRangeMode.value === 'single') return `仅导出 ${month.value}，不会合并系统当前月份`
-  if (reportRangeMode.value === 'last3') return `导出 ${selectedExportMonths.value.at(-1)} 至 ${month.value}`
-  if (reportRangeMode.value === 'last12') return `导出 ${selectedExportMonths.value.at(-1)} 至 ${month.value}`
-  return '导出所有已生成结算批次的月份，并包含当前所选月'
-})
+const exportRangeHint = computed(() => settlementReportRangeHint(reportRangeMode.value, month.value, selectedExportMonths.value))
 
 const baseColumns: GridColumn[] = [
   { key: 'creator_name', label: '创建人', width: 132 },
@@ -217,23 +213,6 @@ async function refreshAvailableReportMonths() {
 function reportHasData(value?: SettlementReport | null) {
   if (!value) return false
   return (value.rows?.length ?? 0) > 0 || (value.totals?.item_count ?? 0) > 0 || Math.abs(value.totals?.net_amount ?? 0) > 0
-}
-
-function previousBusinessMonths(value: string, count: number): string[] {
-  const match = /^(\d{4})-(\d{2})$/.exec(value)
-  if (!match) return [value]
-  const year = Number(match[1])
-  const monthIndex = Number(match[2]) - 1
-  const output: string[] = []
-  for (let index = 0; index < count; index += 1) {
-    const date = new Date(year, monthIndex - index, 1)
-    output.push(`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`)
-  }
-  return output
-}
-
-function mergeBusinessMonths(values: string[]): string[] {
-  return Array.from(new Set(values.filter((value) => /^\d{4}-\d{2}$/.test(value)))).sort((a, b) => b.localeCompare(a))
 }
 
 function exportFileRangeLabel() {
