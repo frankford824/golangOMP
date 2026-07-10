@@ -1046,42 +1046,24 @@ func buildProductManagementWhereWithOptions(filter repo.ProductManagementListFil
 	keyword := strings.TrimSpace(filter.Keyword)
 	if keyword != "" {
 		kw := normalizeSearchKeyword(keyword)
-		keywordClauses := []string{
+		textClauses := []string{
 			"pm.product_name LIKE ?",
 			"pm.category_name LIKE ?",
 			"pm.creator_name LIKE ?",
 		}
-		keywordArgs := []interface{}{kw.Like, kw.Like, kw.Like}
+		textArgs := []interface{}{kw.Like, kw.Like, kw.Like}
 		if kw.HasInt64 {
-			keywordClauses = append(keywordClauses, "pm.creator_id = ?")
-			keywordArgs = append(keywordArgs, kw.Int64)
+			textClauses = append(textClauses, "pm.creator_id = ?")
+			textArgs = append(textArgs, kw.Int64)
 		}
-		if kw.IsCode {
-			keywordClauses = append(keywordClauses,
-				"pm.sku_code = ?",
-				"pm.task_no = ?",
-				"pm.product_i_id = ?",
-				"pm.erp_i_id = ?",
-				"pm.sku_code LIKE ?",
-				"pm.task_no LIKE ?",
-				"pm.product_i_id LIKE ?",
-				"pm.erp_i_id LIKE ?",
-			)
-			keywordArgs = append(keywordArgs, kw.Upper, kw.Upper, kw.Upper, kw.Upper, kw.Upper+"%", kw.Upper+"%", kw.Upper+"%", kw.Upper+"%")
-		} else {
-			keywordClauses = append(keywordClauses,
-				"pm.sku_code LIKE ?",
-				"pm.task_no LIKE ?",
-				"pm.product_i_id LIKE ?",
-				"pm.erp_i_id LIKE ?",
-			)
-			keywordArgs = append(keywordArgs, kw.Like, kw.Like, kw.Like, kw.Like)
-		}
+
+		comboClause := ""
+		comboArgs := make([]interface{}, 0, 6)
 		if options.UseComboFullText {
-			keywordClauses = append(keywordClauses, `MATCH(pm.combo_search_text) AGAINST (? IN NATURAL LANGUAGE MODE)`)
-			keywordArgs = append(keywordArgs, keyword)
+			comboClause = `MATCH(pm.combo_search_text) AGAINST (? IN NATURAL LANGUAGE MODE)`
+			comboArgs = append(comboArgs, keyword)
 		} else {
-			keywordClauses = append(keywordClauses, `EXISTS (
+			comboClause = `EXISTS (
 			  SELECT 1
 			    FROM omp_sku_combo_relations rel
 				    LEFT JOIN omp_sku_combo_records rec ON rec.combo_sku_code = rel.combo_sku_code
@@ -1094,11 +1076,55 @@ func buildProductManagementWhereWithOptions(filter repo.ProductManagementListFil
 			       OR rec.name LIKE ?
 			       OR rec.short_name LIKE ?
 			     )
-			)`)
-			keywordArgs = append(keywordArgs, kw.Upper, kw.Upper, kw.Upper+"%", kw.Upper+"%", kw.Like, kw.Like)
+			)`
+			comboArgs = append(comboArgs, kw.Upper, kw.Upper, kw.Upper+"%", kw.Upper+"%", kw.Like, kw.Like)
 		}
-		clauses = append(clauses, "("+strings.Join(keywordClauses, " OR ")+")")
-		args = append(args, keywordArgs...)
+
+		if kw.IsCode {
+			exactClauses := []string{
+				"pm.sku_code = ?",
+				"pm.task_no = ?",
+				"pm.product_i_id = ?",
+				"pm.erp_i_id = ?",
+			}
+			fallbackClauses := append(textClauses,
+				"pm.sku_code LIKE ?",
+				"pm.task_no LIKE ?",
+				"pm.product_i_id LIKE ?",
+				"pm.erp_i_id LIKE ?",
+				comboClause,
+			)
+			directMatchGuard := `NOT EXISTS (
+			  SELECT 1
+			    FROM erp_product_sync_records direct_pm
+			   WHERE direct_pm.sku_code = ?
+			      OR direct_pm.task_no = ?
+			      OR direct_pm.product_i_id = ?
+			      OR direct_pm.erp_i_id = ?
+			)`
+			clauses = append(clauses,
+				"(("+strings.Join(exactClauses, " OR ")+") OR ("+directMatchGuard+" AND ("+strings.Join(fallbackClauses, " OR ")+")))",
+			)
+			args = append(args,
+				kw.Upper, kw.Upper, kw.Upper, kw.Upper,
+				kw.Upper, kw.Upper, kw.Upper, kw.Upper,
+			)
+			args = append(args, textArgs...)
+			args = append(args, kw.Upper+"%", kw.Upper+"%", kw.Upper+"%", kw.Upper+"%")
+			args = append(args, comboArgs...)
+		} else {
+			keywordClauses := append(textClauses,
+				"pm.sku_code LIKE ?",
+				"pm.task_no LIKE ?",
+				"pm.product_i_id LIKE ?",
+				"pm.erp_i_id LIKE ?",
+				comboClause,
+			)
+			keywordArgs := append(textArgs, kw.Like, kw.Like, kw.Like, kw.Like)
+			keywordArgs = append(keywordArgs, comboArgs...)
+			clauses = append(clauses, "("+strings.Join(keywordClauses, " OR ")+")")
+			args = append(args, keywordArgs...)
+		}
 	}
 	if source := strings.TrimSpace(filter.ImageSource); source != "" {
 		clauses = append(clauses, "pm.image_source = ?")

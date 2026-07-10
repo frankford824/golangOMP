@@ -116,6 +116,42 @@ func TestProductManagementComboScopePaginatesComboGroups(t *testing.T) {
 	}
 }
 
+func TestProductManagementAllScopeShowsExactIdentifierAsSingleRecord(t *testing.T) {
+	now := time.Date(2026, 7, 2, 13, 0, 0, 0, time.UTC)
+	record := productManagementTestRecord(1, "CGP000111", now)
+	record.TaskNo = "RW-20260630-A-001931"
+	svc := &productManagementService{
+		records: &productManagementRecordRepoFake{items: []*domain.ProductManagementRecord{record}},
+		skuCombos: &skuComboRepoFake{
+			relations: []*domain.OMPSKUComboRelationWithRecord{
+				{
+					Relation: domain.OMPSKUComboRelation{ComboSKUCode: "COMBO-1", ChildSKUCode: "CGP000111", Quantity: 1},
+					Record:   &domain.OMPSKUComboRecord{ComboSKUCode: "COMBO-1", Name: "无关组合父级", LastSyncedAt: now},
+				},
+			},
+		},
+		now: func() time.Time { return now },
+	}
+
+	for _, keyword := range []string{"CGP000111", "RW-20260630-A-001931"} {
+		result, appErr := svc.ListComboTree(context.Background(), repo.ProductManagementListFilter{
+			Keyword:      keyword,
+			DisplayScope: "all",
+			Page:         1,
+			PageSize:     20,
+		})
+		if appErr != nil {
+			t.Fatalf("ListComboTree(%q) appErr = %+v", keyword, appErr)
+		}
+		if len(result.Groups) != 1 || result.Groups[0].GroupType != "single" {
+			t.Fatalf("ListComboTree(%q) groups = %#v, want exact single record", keyword, result.Groups)
+		}
+		if got := result.Groups[0].Children[0].Record; got == nil || got.SKUCode != "CGP000111" {
+			t.Fatalf("ListComboTree(%q) child = %#v, want CGP000111", keyword, got)
+		}
+	}
+}
+
 func TestProductManagementCostDashboardAddsLegacyFallbackPolicyState(t *testing.T) {
 	svc := NewProductManagementService(
 		&productManagementRecordRepoFake{},

@@ -93,14 +93,14 @@
       />
     </div>
     <div class="filter-field">
-      <span class="field-label">起始日期</span>
+      <span class="field-label">创建起始</span>
       <BaseDatePicker
         :model-value="filters.dateFrom"
         @update:model-value="patchFilters({ dateFrom: $event })"
       />
     </div>
     <div class="filter-field">
-      <span class="field-label">结束日期</span>
+      <span class="field-label">创建结束</span>
       <BaseDatePicker
         :model-value="filters.dateTo"
         @update:model-value="patchFilters({ dateTo: $event })"
@@ -116,7 +116,6 @@
         />
         <span>仅逾期</span>
       </label>
-      <BaseButton size="sm" variant="secondary" @click="reset">清空全部筛选</BaseButton>
     </div>
   </div>
 </template>
@@ -125,7 +124,6 @@
 import type { LegacyTaskStatus as TaskStatus } from '@/domain/types/task'
 import BaseDatePicker from '@/components/base/BaseDatePicker.vue'
 import BaseSelect, { type BaseSelectOption } from '@/components/base/BaseSelect.vue'
-import BaseButton from '@/components/base/BaseButton.vue'
 import TaskStatusMultiSelect from '@/components/task/TaskStatusMultiSelect.vue'
 import { useTaskFilterOptions } from '@/composables/useTaskFilterOptions'
 import { useOrgOwnershipFilterOptions } from '@/composables/useOrgOwnershipFilterOptions'
@@ -233,22 +231,6 @@ const warehouseStatusOptions: BaseSelectOption[] = [
   { label: '已归档', value: 'archived' },
 ]
 
-function reset() {
-  emit('update:filters', {
-    status: [],
-    taskCategory: '',
-    taskType: '',
-    priority: '',
-    creatorId: '',
-    assigneeId: '',
-    warehouseStatus: '',
-    dateFrom: '',
-    dateTo: '',
-    overdueOnly: false,
-    ownerDepartment: '',
-    ownerOrgTeam: '',
-  })
-}
 </script>
 
 <style scoped>

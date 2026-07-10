@@ -90,6 +90,14 @@
                 : '高级筛选'
           }}
         </BaseButton>
+        <BaseButton
+          size="sm"
+          variant="secondary"
+          class="clear-all-filter-button"
+          @click="clearAllTaskFilters"
+        >
+          清空全部筛选
+        </BaseButton>
       </div>
       <div v-show="advancedFilterOpen" class="filter-bar-wrap">
         <TaskFilterBar v-model:filters="filters" @update:filters="page = 1" />
@@ -917,6 +925,16 @@ const ARCHIVED_TAB_DEFAULT_STATUSES: LegacyTaskStatus[] = [
 const filters = ref<TaskListFilters>({
   ...defaultTaskFilters,
 })
+
+function clearAllTaskFilters() {
+  if (searchDebounceTimer) {
+    clearTimeout(searchDebounceTimer)
+    searchDebounceTimer = null
+  }
+  searchKeyword.value = ''
+  filters.value = { ...defaultTaskFilters }
+  page.value = 1
+}
 
 const activeAdvancedFilterCount = computed(() => {
   const f = filters.value
@@ -2599,6 +2617,10 @@ watch(totalPages, (value) => {
   border-color: var(--tc-blue-border);
   background: var(--tc-blue-soft);
   color: var(--tc-blue-strong);
+}
+
+.clear-all-filter-button {
+  white-space: nowrap;
 }
 
 .filter-bar-wrap {

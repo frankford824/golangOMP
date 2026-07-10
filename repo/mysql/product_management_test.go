@@ -355,6 +355,9 @@ func TestProductManagementWhereUsesComboFullTextWhenEnabled(t *testing.T) {
 	if !strings.Contains(where, "MATCH(pm.combo_search_text) AGAINST (? IN NATURAL LANGUAGE MODE)") {
 		t.Fatalf("where missing combo fulltext: %s", where)
 	}
+	if !strings.Contains(where, "FROM erp_product_sync_records direct_pm") {
+		t.Fatalf("where missing exact identifier precedence guard: %s", where)
+	}
 	if strings.Contains(where, "FROM omp_sku_combo_relations rel") {
 		t.Fatalf("where must not use combo relation EXISTS on fulltext path: %s", where)
 	}
@@ -366,6 +369,7 @@ func TestProductManagementWhereUsesComboFullTextWhenEnabled(t *testing.T) {
 func TestProductManagementWhereSearchesComboRelations(t *testing.T) {
 	where, args := buildProductManagementWhere(repo.ProductManagementListFilter{Keyword: "COMBO001"})
 	for _, fragment := range []string{
+		"FROM erp_product_sync_records direct_pm",
 		"FROM omp_sku_combo_relations rel",
 		"LEFT JOIN omp_sku_combo_records rec",
 		"rel.child_sku_code = pm.sku_code",
@@ -384,6 +388,19 @@ func TestProductManagementWhereSearchesComboRelations(t *testing.T) {
 	}
 	if !containsStringArg(args, "COMBO001") || !containsStringArg(args, "COMBO001%") {
 		t.Fatalf("args missing exact/prefix combo search values: %#v", args)
+	}
+}
+
+func TestProductManagementWhereKeepsTextSearchOnComboPathWithoutExactCodeGuard(t *testing.T) {
+	where, args := buildProductManagementWhere(repo.ProductManagementListFilter{Keyword: "生日海报"})
+	if strings.Contains(where, "FROM erp_product_sync_records direct_pm") {
+		t.Fatalf("text search must not use exact identifier precedence guard: %s", where)
+	}
+	if !strings.Contains(where, "FROM omp_sku_combo_relations rel") {
+		t.Fatalf("text search must keep combo relation search: %s", where)
+	}
+	if !containsStringArg(args, "%生日海报%") {
+		t.Fatalf("args missing text search value: %#v", args)
 	}
 }
 

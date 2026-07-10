@@ -66,6 +66,21 @@ func TestBuildTaskListQuerySpecWarehouseBlockingUsesJoinedLatestAssetAlias(t *te
 	}
 }
 
+func TestBuildTaskListQuerySpecFiltersTaskCreatedAtRange(t *testing.T) {
+	from := time.Date(2026, 7, 1, 0, 0, 0, 0, time.FixedZone("Asia/Shanghai", 8*60*60))
+	to := from.Add(24*time.Hour - time.Nanosecond)
+	spec, err := buildTaskListQuerySpec(repo.TaskListFilter{CreatedFrom: &from, CreatedTo: &to}, nil)
+	if err != nil {
+		t.Fatalf("buildTaskListQuerySpec() error = %v", err)
+	}
+	if !strings.Contains(spec.whereSQL, "t.created_at >= ?") || !strings.Contains(spec.whereSQL, "t.created_at <= ?") {
+		t.Fatalf("whereSQL missing created_at range: %s", spec.whereSQL)
+	}
+	if len(spec.args) != 2 || spec.args[0] != from || spec.args[1] != to {
+		t.Fatalf("args = %#v, want [%s %s]", spec.args, from, to)
+	}
+}
+
 func TestBuildTaskListQuerySpecUsesSearchDocumentsForKeywordWhenEnabled(t *testing.T) {
 	spec, err := buildTaskListQuerySpecWithOptions(repo.TaskListFilter{Keyword: "海报"}, nil, taskListQueryBuildOptions{UseSearchDocumentKeyword: true})
 	if err != nil {

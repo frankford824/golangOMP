@@ -2,6 +2,7 @@ package handler
 
 import (
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -81,6 +82,22 @@ func parseTaskFilterQuery(c *gin.Context) (service.TaskFilter, *domain.AppError)
 		}
 		filter.Overdue = &value
 	}
+	createdFrom, appErr := parseTaskCreatedDateBoundary(c.Query("date_from"), false)
+	if appErr != nil {
+		return service.TaskFilter{}, appErr
+	}
+	createdTo, appErr := parseTaskCreatedDateBoundary(c.Query("date_to"), true)
+	if appErr != nil {
+		return service.TaskFilter{}, appErr
+	}
+	if createdFrom != nil && createdTo != nil && createdFrom.After(*createdTo) {
+		return service.TaskFilter{}, domain.NewAppError(domain.ErrCodeInvalidRequest, "date_from must not be after date_to", map[string]interface{}{
+			"date_from": strings.TrimSpace(c.Query("date_from")),
+			"date_to":   strings.TrimSpace(c.Query("date_to")),
+		})
+	}
+	filter.CreatedFrom = createdFrom
+	filter.CreatedTo = createdTo
 	if raw := c.Query("warehouse_prepare_ready"); raw != "" {
 		value, err := parseBool(raw)
 		if err != nil {
@@ -111,6 +128,27 @@ func parseTaskFilterQuery(c *gin.Context) (service.TaskFilter, *domain.AppError)
 	}
 
 	return filter, nil
+}
+
+func parseTaskCreatedDateBoundary(raw string, endOfDay bool) (*time.Time, *domain.AppError) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	if parsed, err := time.Parse(time.RFC3339, raw); err == nil {
+		return &parsed, nil
+	}
+	location := time.FixedZone("Asia/Shanghai", 8*60*60)
+	parsed, err := time.ParseInLocation("2006-01-02", raw, location)
+	if err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "date filter must be YYYY-MM-DD or RFC3339", map[string]interface{}{
+			"value": raw,
+		})
+	}
+	if endOfDay {
+		parsed = parsed.Add(24*time.Hour - time.Nanosecond)
+	}
+	return &parsed, nil
 }
 
 func parseTaskPriorities(c *gin.Context, key string) ([]domain.TaskPriority, *domain.AppError) {

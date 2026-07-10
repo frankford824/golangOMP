@@ -4208,6 +4208,9 @@ components:
         `source`, or `delivery`.
         A completed-task delivery replacement creates a new approved current version without
         reopening the task workflow; the previous current version becomes `superseded`.
+        During `PendingCustomizationReview` or `PendingEffectReview`, a customization reviewer
+        may upload `source`, or replace an existing `delivery` by providing its `asset_id`.
+        Creating a second delivery root from those review states is rejected.
       properties:
         task_id:
           type: integer
@@ -4218,7 +4221,7 @@ components:
         asset_id:
           type: integer
           nullable: true
-          description: Existing design-asset id when replacing a current resource. Required for every upload against a `Completed` task.
+          description: Existing design-asset id when replacing a current resource. Required for every upload against a `Completed` task and for delivery replacement during customization review.
         source_asset_id:
           type: integer
           nullable: true
@@ -12918,6 +12921,9 @@ paths:
         When the task is `Completed`, this route only replaces an active, non-archived current
         `reference`, `source`, or `delivery` resource supplied through `asset_id`; it never
         creates an unrelated new resource.
+        During `PendingCustomizationReview` or `PendingEffectReview`, an existing `delivery`
+        may be replaced only when its `asset_id` is supplied; creating a second delivery root
+        from those review states is rejected.
       tags: [Assets, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
@@ -13256,6 +13262,16 @@ paths:
           name: overdue
           description: When `true`, filters `deadline_at < now` and excludes `Completed`/`Archived`/`Cancelled`; when `false`, returns the complement set.
           schema: { type: boolean }
+        - in: query
+          name: date_from
+          description: Inclusive lower bound for task `created_at`. Accepts `YYYY-MM-DD` as an Asia/Shanghai calendar date or an RFC3339 timestamp.
+          schema:
+            type: string
+        - in: query
+          name: date_to
+          description: Inclusive upper bound for task `created_at`. A `YYYY-MM-DD` value includes that entire Asia/Shanghai calendar day; RFC3339 is compared as provided.
+          schema:
+            type: string
         - in: query
           name: keyword
           description: Matches task no, task SKU, batch SKU, product name, owner department/team, task id, and related actor display names/usernames (creator, requester, designer, current handler).

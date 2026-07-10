@@ -903,6 +903,138 @@ func TestTaskAssetCenterServiceCustomizationReviewerCannotCancelNonSourceSession
 	}
 }
 
+func TestTaskAssetCenterServiceCustomizationReviewerCanReplaceExistingDelivery(t *testing.T) {
+	const (
+		taskID     = int64(2100)
+		reviewerID = int64(7003)
+	)
+	taskRepo := newStep04TaskRepo(&domain.Task{
+		ID:                    taskID,
+		TaskStatus:            domain.TaskStatusPendingCustomizationReview,
+		BusinessLane:          domain.TaskBusinessLaneCustomization,
+		CustomizationRequired: true,
+	})
+	designAssetRepo := newStep67DesignAssetRepo()
+	taskAssetRepo := newStep04TaskAssetRepo()
+	assetID, err := designAssetRepo.Create(context.Background(), nil, &domain.DesignAsset{
+		TaskID:    taskID,
+		AssetNo:   "AST-0001",
+		AssetType: domain.TaskAssetTypeDelivery,
+		CreatedBy: 502,
+	})
+	if err != nil {
+		t.Fatalf("create design asset: %v", err)
+	}
+	oldVersionNo := 1
+	oldVersionID, err := taskAssetRepo.Create(context.Background(), nil, &domain.TaskAsset{
+		TaskID:           taskID,
+		AssetID:          &assetID,
+		AssetType:        domain.TaskAssetTypeDelivery,
+		VersionNo:        1,
+		AssetVersionNo:   &oldVersionNo,
+		FileName:         "DZK000149.png",
+		FlowReviewStatus: domain.TaskAssetFlowReviewStatusRejected,
+	})
+	if err != nil {
+		t.Fatalf("create rejected delivery version: %v", err)
+	}
+	if err := designAssetRepo.UpdateCurrentVersionID(context.Background(), nil, assetID, &oldVersionID); err != nil {
+		t.Fatalf("set current version: %v", err)
+	}
+	uploadClient := newStubUploadServiceClient().(*stubUploadServiceClient)
+	uploadClient.remoteSessionStatus = domain.DesignAssetSessionStatusCompleted
+	svc := NewTaskAssetCenterService(taskRepo, designAssetRepo, taskAssetRepo, newStep37UploadRequestRepo(), newStep37AssetStorageRefRepo(), &step04TaskEventRepo{}, step04TxRunner{}, uploadClient).(*taskAssetCenterService)
+	ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{
+		ID:       reviewerID,
+		Username: "customization_reviewer",
+		Roles:    []domain.Role{domain.RoleCustomizationReviewer},
+		Source:   domain.RequestActorSourceSessionToken,
+		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
+	})
+
+	createResult, appErr := svc.CreateMultipartUploadSession(ctx, CreateTaskAssetUploadSessionParams{
+		TaskID:       taskID,
+		AssetID:      &assetID,
+		CreatedBy:    reviewerID,
+		AssetType:    domain.TaskAssetTypeDelivery,
+		Filename:     "DZK000149-fixed.png",
+		ExpectedSize: uploadRequestInt64Ptr(2048),
+		MimeType:     "image/png",
+		Remark:       "资产中心修改资源",
+	})
+	if appErr != nil {
+		t.Fatalf("CreateMultipartUploadSession(replacement) appErr = %+v", appErr)
+	}
+	completeResult, appErr := svc.CompleteUploadSession(ctx, CompleteTaskAssetUploadSessionParams{
+		TaskID:      taskID,
+		SessionID:   createResult.Session.ID,
+		CompletedBy: reviewerID,
+	})
+	if appErr != nil {
+		t.Fatalf("CompleteUploadSession(replacement) appErr = %+v", appErr)
+	}
+	if completeResult.Version == nil || completeResult.Version.VersionNo != 2 {
+		t.Fatalf("replacement version = %+v, want V2", completeResult.Version)
+	}
+	if completeResult.Version.FlowReviewStatus != domain.TaskAssetFlowReviewStatusPendingReview {
+		t.Fatalf("replacement review status = %s, want pending_review", completeResult.Version.FlowReviewStatus)
+	}
+	if taskAssetRepo.assets[oldVersionID].FlowReviewStatus != domain.TaskAssetFlowReviewStatusSuperseded {
+		t.Fatalf("old version status = %s, want superseded", taskAssetRepo.assets[oldVersionID].FlowReviewStatus)
+	}
+}
+
+func TestResolveRejectedDeliveryRevisionAssetIDReusesMatchingRoot(t *testing.T) {
+	const taskID = int64(2101)
+	task := &domain.Task{
+		ID:                    taskID,
+		TaskStatus:            domain.TaskStatusPendingCustomizationProduction,
+		BusinessLane:          domain.TaskBusinessLaneCustomization,
+		CustomizationRequired: true,
+	}
+	designAssetRepo := newStep67DesignAssetRepo()
+	taskAssetRepo := newStep04TaskAssetRepo()
+	assetID, err := designAssetRepo.Create(context.Background(), nil, &domain.DesignAsset{
+		TaskID:    taskID,
+		AssetNo:   "AST-0001",
+		AssetType: domain.TaskAssetTypeDelivery,
+		CreatedBy: 502,
+	})
+	if err != nil {
+		t.Fatalf("create design asset: %v", err)
+	}
+	versionNo := 1
+	originalFilename := "DZK000149.png"
+	versionID, err := taskAssetRepo.Create(context.Background(), nil, &domain.TaskAsset{
+		TaskID:           taskID,
+		AssetID:          &assetID,
+		AssetType:        domain.TaskAssetTypeDelivery,
+		AssetVersionNo:   &versionNo,
+		FileName:         originalFilename,
+		OriginalName:     &originalFilename,
+		FlowReviewStatus: domain.TaskAssetFlowReviewStatusRejected,
+	})
+	if err != nil {
+		t.Fatalf("create rejected version: %v", err)
+	}
+	if err := designAssetRepo.UpdateCurrentVersionID(context.Background(), nil, assetID, &versionID); err != nil {
+		t.Fatalf("set current version: %v", err)
+	}
+	svc := &taskAssetCenterService{designAssetRepo: designAssetRepo, taskAssetRepo: taskAssetRepo}
+
+	resolved, appErr := svc.resolveRejectedDeliveryRevisionAssetID(context.Background(), task, CreateTaskAssetUploadSessionParams{
+		TaskID:    taskID,
+		AssetType: domain.TaskAssetTypeDelivery,
+		Filename:  originalFilename,
+	})
+	if appErr != nil {
+		t.Fatalf("resolveRejectedDeliveryRevisionAssetID() appErr = %+v", appErr)
+	}
+	if resolved == nil || *resolved != assetID {
+		t.Fatalf("resolved asset id = %+v, want %d", resolved, assetID)
+	}
+}
+
 func TestTaskAssetCenterServiceRejectsSmallUploadForDeliverySourcePreview(t *testing.T) {
 	taskRepo := newStep04TaskRepo(&domain.Task{ID: 2004, TaskStatus: domain.TaskStatusInProgress})
 	svc := NewTaskAssetCenterService(taskRepo, newStep67DesignAssetRepo(), newStep04TaskAssetRepo(), newStep37UploadRequestRepo(), newStep37AssetStorageRefRepo(), &step04TaskEventRepo{}, step04TxRunner{}, newStubUploadServiceClient()).(*taskAssetCenterService)
@@ -3208,18 +3340,18 @@ func rawQueryHasFlag(rawQuery, key string) bool {
 	return strings.HasPrefix(rawQuery, key+"&") || strings.Contains(rawQuery, "&"+key+"&") || strings.HasSuffix(rawQuery, "&"+key) || strings.Contains(rawQuery, "&"+key+"=")
 }
 
-func TestValidateAuditStageUploadAssetTypeCustomizationReviewSourceOnly(t *testing.T) {
+func TestValidateAuditStageUploadAssetTypeCustomizationReviewAllowsExistingDeliveryReplacement(t *testing.T) {
 	for _, status := range []domain.TaskStatus{domain.TaskStatusPendingCustomizationReview, domain.TaskStatusPendingEffectReview} {
 		status := status
 		t.Run(string(status)+"_source_allowed", func(t *testing.T) {
-			appErr := validateAuditStageUploadAssetType(&domain.Task{TaskStatus: status}, domain.TaskAssetTypeSource, string(domain.ModuleKeyCustomization))
+			appErr := validateAuditStageUploadAssetType(&domain.Task{TaskStatus: status}, domain.TaskAssetTypeSource, string(domain.ModuleKeyCustomization), nil)
 			if appErr != nil {
 				t.Fatalf("validateAuditStageUploadAssetType(source) appErr = %+v", appErr)
 			}
 		})
 
-		t.Run(string(status)+"_delivery_denied", func(t *testing.T) {
-			appErr := validateAuditStageUploadAssetType(&domain.Task{TaskStatus: status}, domain.TaskAssetTypeDelivery, string(domain.ModuleKeyCustomization))
+		t.Run(string(status)+"_new_delivery_denied", func(t *testing.T) {
+			appErr := validateAuditStageUploadAssetType(&domain.Task{TaskStatus: status}, domain.TaskAssetTypeDelivery, string(domain.ModuleKeyCustomization), nil)
 			if appErr == nil {
 				t.Fatal("validateAuditStageUploadAssetType(delivery) appErr = nil, want deny")
 			}
@@ -3228,8 +3360,16 @@ func TestValidateAuditStageUploadAssetTypeCustomizationReviewSourceOnly(t *testi
 			}
 		})
 
+		t.Run(string(status)+"_delivery_replacement_allowed", func(t *testing.T) {
+			assetID := int64(99)
+			appErr := validateAuditStageUploadAssetType(&domain.Task{TaskStatus: status}, domain.TaskAssetTypeDelivery, string(domain.ModuleKeyCustomization), &assetID)
+			if appErr != nil {
+				t.Fatalf("validateAuditStageUploadAssetType(delivery replacement) appErr = %+v", appErr)
+			}
+		})
+
 		t.Run(string(status)+"_reference_denied", func(t *testing.T) {
-			appErr := validateAuditStageUploadAssetType(&domain.Task{TaskStatus: status}, domain.TaskAssetTypeReference, string(domain.ModuleKeyBasicInfo))
+			appErr := validateAuditStageUploadAssetType(&domain.Task{TaskStatus: status}, domain.TaskAssetTypeReference, string(domain.ModuleKeyBasicInfo), nil)
 			if appErr == nil {
 				t.Fatal("validateAuditStageUploadAssetType(reference) appErr = nil, want deny")
 			}
@@ -3242,10 +3382,10 @@ func TestValidateAuditStageUploadAssetTypeCustomizationReviewSourceOnly(t *testi
 
 func TestValidateAuditStageUploadAssetTypeNormalAuditStillAllowsDeliveryAndBasicInfoReference(t *testing.T) {
 	task := &domain.Task{TaskStatus: domain.TaskStatusPendingAuditA}
-	if appErr := validateAuditStageUploadAssetType(task, domain.TaskAssetTypeDelivery, string(domain.ModuleKeyAudit)); appErr != nil {
+	if appErr := validateAuditStageUploadAssetType(task, domain.TaskAssetTypeDelivery, string(domain.ModuleKeyAudit), nil); appErr != nil {
 		t.Fatalf("validateAuditStageUploadAssetType(delivery) appErr = %+v", appErr)
 	}
-	if appErr := validateAuditStageUploadAssetType(task, domain.TaskAssetTypeReference, string(domain.ModuleKeyBasicInfo)); appErr != nil {
+	if appErr := validateAuditStageUploadAssetType(task, domain.TaskAssetTypeReference, string(domain.ModuleKeyBasicInfo), nil); appErr != nil {
 		t.Fatalf("validateAuditStageUploadAssetType(basic_info reference) appErr = %+v", appErr)
 	}
 }

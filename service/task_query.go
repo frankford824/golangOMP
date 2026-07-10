@@ -72,6 +72,8 @@ func taskFilterToRepoTaskListFilter(filter TaskFilter, page, pageSize int, scope
 		DesignerEmpty:             filter.DesignerEmpty,
 		NeedOutsource:             filter.NeedOutsource,
 		Overdue:                   filter.Overdue,
+		CreatedFrom:               filter.CreatedFrom,
+		CreatedTo:                 filter.CreatedTo,
 		Keyword:                   filter.Keyword,
 		Page:                      page,
 		PageSize:                  pageSize,
@@ -149,6 +151,12 @@ func matchesTaskFilter(item *domain.TaskListItem, filter TaskFilter) bool {
 		if item.DesignerID != nil && *item.DesignerID > 0 {
 			return false
 		}
+	}
+	if filter.CreatedFrom != nil && item.CreatedAt.Before(*filter.CreatedFrom) {
+		return false
+	}
+	if filter.CreatedTo != nil && item.CreatedAt.After(*filter.CreatedTo) {
+		return false
 	}
 	if filter.WarehousePrepareReady != nil {
 		if item.Workflow.CanPrepareWarehouse != *filter.WarehousePrepareReady {

@@ -17,6 +17,7 @@ const baseAsset = {
 describe('asset replacement gate', () => {
   it('allows replacement while backend upload-session status gate allows the task', () => {
     expect(canReplaceAssetResource({ ...baseAsset, taskStatus: 'PendingAuditA' })).toBe(true)
+    expect(canReplaceAssetResource({ ...baseAsset, taskStatus: 'PendingCustomizationReview' })).toBe(true)
     expect(canReplaceAssetResource({ ...baseAsset, taskStatus: 'pending_customization_production' })).toBe(true)
   })
 

@@ -852,6 +852,8 @@ type TaskListFilter struct {
 	DesignerEmpty               *bool
 	NeedOutsource               *bool
 	Overdue                     *bool
+	CreatedFrom                 *time.Time
+	CreatedTo                   *time.Time
 	Keyword                     string
 	ExcludePendingAuditHandover bool
 	ScopeViewAll                bool

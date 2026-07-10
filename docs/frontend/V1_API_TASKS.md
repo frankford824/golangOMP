@@ -1512,6 +1512,8 @@ curl -X POST https://api.example.com/v1/tasks/prepare-product-codes \
 | `designer_empty` | query | boolean | 否 | When `true`, returns only tasks with no designer assignment (`designer_id` IS NULL or `0`). Use with `workflow_lane=customization` for customization-lane unassigned-artwork filtering; do not combine with `status=PendingAssign` for that case. |
 | `need_outsource` | query | boolean | 否 | - |
 | `overdue` | query | boolean | 否 | When `true`, filters `deadline_at < now` and excludes `Completed`/`Archived`/`Cancelled`; when `false`, returns the complement set. |
+| `date_from` | query | string | 否 | Inclusive lower bound for task `created_at`. Accepts `YYYY-MM-DD` as an Asia/Shanghai calendar date or an RFC3339 timestamp. |
+| `date_to` | query | string | 否 | Inclusive upper bound for task `created_at`. A `YYYY-MM-DD` value includes that entire Asia/Shanghai calendar day; RFC3339 is compared as provided. |
 | `keyword` | query | string | 否 | Matches task no, task SKU, batch SKU, product name, owner department/team, task id, and related actor display names/usernames (creator, requester, designer, current handler). |
 | `owner_department` | query | array<string> | 否 | Filters by canonical task owner department. Supports comma-separated multi-value queries. |
 | `owner_org_team` | query | array<string> | 否 | Filters by canonical task owner org team. Supports comma-separated multi-value queries. |
@@ -3826,7 +3828,7 @@ Content-Type: `application/json`
 |---|---|---|---|
 | `task_id` | integer | 否 | Required on `POST /v1/assets/upload-sessions`; ignored on task-scoped compatibility routes where task context comes from path. |
 | `created_by` | integer | 否 | - |
-| `asset_id` | integer | 否 | Existing design-asset id when replacing a current resource. Required for every upload against a `Completed` task. |
+| `asset_id` | integer | 否 | Existing design-asset id when replacing a current resource. Required for every upload against a `Completed` task and for delivery replacement during customization review. |
 | `source_asset_id` | integer | 否 | Optional linkage to a source asset. Allowed for `preview` and `design_thumb` intents. |
 | `asset_type` | enum(reference/source/delivery/preview/design_thumb) | 否 | Compatibility alias of `asset_kind` retained for migration safety. |
 | `asset_kind` | enum(reference/source/delivery/preview/design_thumb) | 否 | Canonical upload intent field for new frontend integrations. |
@@ -4136,7 +4138,7 @@ Content-Type: `application/json`
 |---|---|---|---|
 | `task_id` | integer | 否 | Required on `POST /v1/assets/upload-sessions`; ignored on task-scoped compatibility routes where task context comes from path. |
 | `created_by` | integer | 否 | - |
-| `asset_id` | integer | 否 | Existing design-asset id when replacing a current resource. Required for every upload against a `Completed` task. |
+| `asset_id` | integer | 否 | Existing design-asset id when replacing a current resource. Required for every upload against a `Completed` task and for delivery replacement during customization review. |
 | `source_asset_id` | integer | 否 | Optional linkage to a source asset. Allowed for `preview` and `design_thumb` intents. |
 | `asset_type` | enum(reference/source/delivery/preview/design_thumb) | 否 | Compatibility alias of `asset_kind` retained for migration safety. |
 | `asset_kind` | enum(reference/source/delivery/preview/design_thumb) | 否 | Canonical upload intent field for new frontend integrations. |

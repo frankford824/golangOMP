@@ -1757,6 +1757,14 @@ func buildTaskListQuerySpecWithOptions(filter repo.TaskListFilter, candidateFilt
 			args = append(args, time.Now(), string(domain.TaskStatusCompleted), string(domain.TaskStatusArchived), string(domain.TaskStatusCancelled))
 		}
 	}
+	if filter.CreatedFrom != nil {
+		where = append(where, "t.created_at >= ?")
+		args = append(args, *filter.CreatedFrom)
+	}
+	if filter.CreatedTo != nil {
+		where = append(where, "t.created_at <= ?")
+		args = append(args, *filter.CreatedTo)
+	}
 	if filter.Keyword != "" {
 		kw := normalizeSearchKeyword(filter.Keyword)
 		if options.UseSearchDocumentKeyword {

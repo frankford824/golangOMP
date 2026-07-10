@@ -1029,7 +1029,7 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 	if appErr := requireCompletedTaskAssetMutationActor(ctx, task); appErr != nil {
 		return nil, appErr
 	}
-	if appErr := requireCustomizationReviewerUploadSessionSource(ctx, task, request); appErr != nil {
+	if appErr := s.requireCustomizationReviewerUploadSessionSource(ctx, task, request); appErr != nil {
 		return nil, appErr
 	}
 	legacyRetouchCompletion, appErr := s.isCompletedLegacyRetouchCompletion(ctx, task, request)
@@ -1597,7 +1597,7 @@ func (s *taskAssetCenterService) CancelUploadSession(ctx context.Context, params
 	if appErr := requireCompletedTaskAssetMutationActor(ctx, task); appErr != nil {
 		return nil, appErr
 	}
-	if appErr := requireCustomizationReviewerUploadSessionSource(ctx, task, request); appErr != nil {
+	if appErr := s.requireCustomizationReviewerUploadSessionSource(ctx, task, request); appErr != nil {
 		return nil, appErr
 	}
 	if appErr := validateCompletedTaskReplacementRequest(task, request, false); appErr != nil {
@@ -1731,13 +1731,20 @@ func (s *taskAssetCenterService) createUploadSession(ctx context.Context, params
 	if appErr := requireCompletedTaskAssetMutationActor(ctx, task); appErr != nil {
 		return nil, appErr
 	}
+	if params.AssetID == nil {
+		revisionAssetID, appErr := s.resolveRejectedDeliveryRevisionAssetID(ctx, task, params)
+		if appErr != nil {
+			return nil, appErr
+		}
+		params.AssetID = revisionAssetID
+	}
 	if appErr := validateCompletedTaskReplacementIntent(task, params.AssetID, params.AssetType); appErr != nil {
 		return nil, appErr
 	}
 	if appErr := s.validateCompletedTaskReplacementCurrentAsset(ctx, task, params.AssetID); appErr != nil {
 		return nil, appErr
 	}
-	if appErr := validateAuditStageUploadAssetType(task, params.AssetType, params.OwnerModuleKey); appErr != nil {
+	if appErr := validateAuditStageUploadAssetType(task, params.AssetType, params.OwnerModuleKey, params.AssetID); appErr != nil {
 		return nil, appErr
 	}
 	taskRef := strings.TrimSpace(task.TaskNo)
@@ -2486,7 +2493,7 @@ func inferTaskAssetUploadMode(assetType domain.TaskAssetType) (domain.DesignAsse
 	return domain.DesignAssetUploadModeMultipart, nil
 }
 
-func validateAuditStageUploadAssetType(task *domain.Task, assetType domain.TaskAssetType, ownerModuleKey string) *domain.AppError {
+func validateAuditStageUploadAssetType(task *domain.Task, assetType domain.TaskAssetType, ownerModuleKey string, assetID *int64) *domain.AppError {
 	if task == nil {
 		return nil
 	}
@@ -2495,11 +2502,17 @@ func validateAuditStageUploadAssetType(task *domain.Task, assetType domain.TaskA
 		if normalized == domain.TaskAssetTypeSource {
 			return nil
 		}
-		return domain.NewAppError(domain.ErrCodeInvalidRequest, "customization review uploads only support source assets", map[string]interface{}{
+		if normalized == domain.TaskAssetTypeDelivery && assetID != nil && *assetID > 0 {
+			return nil
+		}
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "customization review uploads only support source assets or replacement of an existing delivery asset", map[string]interface{}{
 			"deny_code":           "customization_review_asset_type_not_allowed",
 			"task_status":         string(task.TaskStatus),
 			"asset_type":          string(assetType),
 			"allowed_asset_types": []string{string(domain.TaskAssetTypeSource)},
+			"replaceable_asset_types": []string{
+				string(domain.TaskAssetTypeDelivery),
+			},
 		})
 	}
 	if !isAuditStageTaskStatus(task.TaskStatus) {
@@ -2725,7 +2738,7 @@ func isCustomizationReviewTaskStatus(status domain.TaskStatus) bool {
 	}
 }
 
-func requireCustomizationReviewerUploadSessionSource(ctx context.Context, task *domain.Task, request *domain.UploadRequest) *domain.AppError {
+func (s *taskAssetCenterService) requireCustomizationReviewerUploadSessionSource(ctx context.Context, task *domain.Task, request *domain.UploadRequest) *domain.AppError {
 	if task == nil || request == nil || !isCustomizationReviewTaskStatus(task.TaskStatus) {
 		return nil
 	}
@@ -2736,11 +2749,20 @@ func requireCustomizationReviewerUploadSessionSource(ctx context.Context, task *
 	if request.TaskAssetType != nil && domain.NormalizeTaskAssetType(*request.TaskAssetType) == domain.TaskAssetTypeSource {
 		return nil
 	}
+	if request.TaskAssetType != nil && domain.NormalizeTaskAssetType(*request.TaskAssetType) == domain.TaskAssetTypeDelivery && request.AssetID != nil && *request.AssetID > 0 {
+		asset, err := s.designAssetRepo.GetByID(ctx, *request.AssetID)
+		if err != nil {
+			return infraError("get customization review replacement asset", err)
+		}
+		if asset != nil && asset.TaskID == task.ID && asset.AssetType.IsDelivery() && asset.CurrentVersionID != nil && *asset.CurrentVersionID > 0 {
+			return nil
+		}
+	}
 	assetType := ""
 	if request.TaskAssetType != nil {
 		assetType = string(*request.TaskAssetType)
 	}
-	return domain.NewAppError(domain.ErrCodePermissionDenied, "customization reviewer upload sessions only support source assets", map[string]interface{}{
+	return domain.NewAppError(domain.ErrCodePermissionDenied, "customization reviewer upload sessions only support source assets or replacement of an existing delivery asset", map[string]interface{}{
 		"deny_code":         "customization_review_upload_session_asset_type_not_allowed",
 		"task_status":       string(task.TaskStatus),
 		"upload_session_id": request.RequestID,
@@ -2748,7 +2770,109 @@ func requireCustomizationReviewerUploadSessionSource(ctx context.Context, task *
 		"allowed_asset_types": []string{
 			string(domain.TaskAssetTypeSource),
 		},
+		"replaceable_asset_types": []string{
+			string(domain.TaskAssetTypeDelivery),
+		},
 	})
+}
+
+func (s *taskAssetCenterService) resolveRejectedDeliveryRevisionAssetID(ctx context.Context, task *domain.Task, params CreateTaskAssetUploadSessionParams) (*int64, *domain.AppError) {
+	if task == nil || !domain.NormalizeTaskAssetType(params.AssetType).IsDelivery() || !taskStatusCanReuseRejectedDelivery(task.TaskStatus) {
+		return nil, nil
+	}
+	taskID := task.ID
+	assetType := domain.TaskAssetTypeDelivery
+	assets, err := s.designAssetRepo.List(ctx, repo.DesignAssetListFilter{
+		TaskID:       &taskID,
+		AssetType:    &assetType,
+		ScopeSKUCode: strings.TrimSpace(params.TargetSKUCode),
+	})
+	if err != nil {
+		return nil, infraError("list rejected delivery revision assets", err)
+	}
+	type candidate struct {
+		asset   *domain.DesignAsset
+		version *domain.TaskAsset
+	}
+	candidates := make([]candidate, 0, len(assets))
+	exactFilename := make([]candidate, 0, 1)
+	for _, asset := range assets {
+		if asset == nil || strings.TrimSpace(asset.ScopeSKUCode) != strings.TrimSpace(params.TargetSKUCode) || !retouchRequirementIDsEqual(asset.RetouchRequirementID, params.RetouchRequirementID) || asset.CurrentVersionID == nil || *asset.CurrentVersionID <= 0 {
+			continue
+		}
+		version, err := s.taskAssetRepo.GetByID(ctx, *asset.CurrentVersionID)
+		if err != nil {
+			return nil, infraError("get rejected delivery revision current version", err)
+		}
+		if version == nil || version.TaskID != task.ID || domain.NormalizeTaskAssetFlowReviewStatus(version.FlowReviewStatus, version.AssetType) != domain.TaskAssetFlowReviewStatusRejected || version.DeletedAt != nil || version.CleanedAt != nil {
+			continue
+		}
+		item := candidate{asset: asset, version: version}
+		candidates = append(candidates, item)
+		if taskAssetFilenameMatches(version, params.Filename) {
+			exactFilename = append(exactFilename, item)
+		}
+	}
+	selected := candidates
+	if len(exactFilename) > 0 {
+		selected = exactFilename
+	} else if len(candidates) != 1 {
+		return nil, nil
+	}
+	best := selected[0]
+	for _, item := range selected[1:] {
+		if taskAssetRevisionCandidateNewer(item.version, best.version) {
+			best = item
+		}
+	}
+	assetID := best.asset.ID
+	return &assetID, nil
+}
+
+func taskStatusCanReuseRejectedDelivery(status domain.TaskStatus) bool {
+	switch status {
+	case domain.TaskStatusRejectedByAuditA,
+		domain.TaskStatusRejectedByAuditB,
+		domain.TaskStatusPendingCustomizationProduction,
+		domain.TaskStatusPendingEffectRevision,
+		domain.TaskStatusRejectedByWarehouse:
+		return true
+	default:
+		return false
+	}
+}
+
+func taskAssetFilenameMatches(asset *domain.TaskAsset, filename string) bool {
+	if asset == nil {
+		return false
+	}
+	filename = strings.TrimSpace(filename)
+	if filename == "" {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(asset.FileName), filename) ||
+		(asset.OriginalName != nil && strings.EqualFold(strings.TrimSpace(*asset.OriginalName), filename))
+}
+
+func taskAssetRevisionCandidateNewer(left, right *domain.TaskAsset) bool {
+	if left == nil {
+		return false
+	}
+	if right == nil {
+		return true
+	}
+	leftTime := left.CreatedAt
+	if left.UploadedAt != nil {
+		leftTime = *left.UploadedAt
+	}
+	rightTime := right.CreatedAt
+	if right.UploadedAt != nil {
+		rightTime = *right.UploadedAt
+	}
+	if !leftTime.Equal(rightTime) {
+		return leftTime.After(rightTime)
+	}
+	return left.ID > right.ID
 }
 
 func matchesAssetResourceFilters(asset *domain.DesignAsset, params ListAssetResourcesParams) bool {

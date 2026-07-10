@@ -176,6 +176,9 @@ export interface TaskListParams {
   owner_org_team?: string
   /** 按任务创建人用户 id 筛选（OpenAPI：creator_id） */
   creator_id?: string | number
+  /** 按任务创建时间筛选，YYYY-MM-DD；结束日期包含当天。 */
+  date_from?: string
+  date_to?: string
   [key: string]: unknown
 }
 

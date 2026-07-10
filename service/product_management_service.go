@@ -162,7 +162,7 @@ func (s *productManagementService) ListComboTree(ctx context.Context, filter rep
 		return nil, appErr
 	}
 	groups := s.productManagementComboGroups(ctx, items)
-	if displayScope == "single" {
+	if displayScope == "single" || hasExactProductManagementIdentifier(items, filter.Keyword) {
 		groups = productManagementSingleGroups(items)
 	}
 	summary, appErr := s.productManagementComboSyncSummary(ctx)
@@ -1593,6 +1593,24 @@ func productManagementSingleGroups(records []*domain.ProductManagementRecord) []
 		groups = append(groups, productManagementSingleGroup(record))
 	}
 	return groups
+}
+
+func hasExactProductManagementIdentifier(records []*domain.ProductManagementRecord, keyword string) bool {
+	keyword = strings.TrimSpace(keyword)
+	if keyword == "" {
+		return false
+	}
+	for _, record := range records {
+		if record == nil {
+			continue
+		}
+		for _, value := range []string{record.SKUCode, record.TaskNo, record.ProductIID, record.ERPIID} {
+			if strings.EqualFold(strings.TrimSpace(value), keyword) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func productManagementSingleGroup(record *domain.ProductManagementRecord) domain.ProductManagementComboGroup {

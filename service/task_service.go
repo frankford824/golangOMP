@@ -253,6 +253,8 @@ type TaskFilter struct {
 	DesignerEmpty *bool
 	NeedOutsource *bool
 	Overdue       *bool
+	CreatedFrom   *time.Time
+	CreatedTo     *time.Time
 	Keyword       string
 	Page          int
 	PageSize      int
