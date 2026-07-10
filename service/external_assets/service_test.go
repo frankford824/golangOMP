@@ -529,6 +529,45 @@ func TestSearchAppliesSharedVisibleRootsAcrossMounts(t *testing.T) {
 	}
 }
 
+func TestSyncKeywordSearchesConfiguredMountAndFiltersVisibleRoots(t *testing.T) {
+	base := "/quark/我的备份/来自：ASUS Administrator 电脑备份"
+	visibleRoot := base + "/海报"
+	requestedParents := []string{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/search":
+			requestedParents = append(requestedParents, r.URL.Query().Get("mounts"))
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
+				"items": []map[string]interface{}{
+					{"parent": visibleRoot, "name": "visible.jpg", "full_path": visibleRoot + "/visible.jpg", "size": 10},
+					{"parent": base + "/其他目录", "name": "hidden.jpg", "full_path": base + "/其他目录/hidden.jpg", "size": 11},
+				},
+			})
+		default:
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	repo := &externalAssetRepoStub{}
+	svc := NewService(repo, Config{
+		Enabled:      true,
+		BFFBaseURL:   server.URL,
+		Mounts:       ParseMounts("/quark:netdisk"),
+		VisibleRoots: ParseMountPaths(visibleRoot),
+	}, nil)
+
+	if err := svc.SyncKeyword(context.Background(), "visible", 20); err != nil {
+		t.Fatalf("SyncKeyword() error = %v", err)
+	}
+	if len(requestedParents) != 1 || requestedParents[0] != "/quark" {
+		t.Fatalf("search parents = %v, want configured /quark mount", requestedParents)
+	}
+	if len(repo.upserts) != 1 || repo.upserts[0].OriginPath != visibleRoot+"/visible.jpg" {
+		t.Fatalf("upserts = %+v, want only visible-root result", repo.upserts)
+	}
+}
+
 func TestQuarkBrowseRootFlattensVisibleFoldersAndRecountsMount(t *testing.T) {
 	base := "/quark/我的备份/来自：ASUS Administrator 电脑备份"
 	roots := []string{base + "/电视投屏", base + "/海报", base + "/kt板", base + "/闲置kt板"}

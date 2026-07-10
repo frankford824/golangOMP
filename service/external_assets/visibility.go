@@ -67,9 +67,8 @@ func (s *Service) isOriginVisible(mountPath, originPath string) bool {
 }
 
 func (s *Service) searchScopesForMount(mount MountConfig) []string {
-	if roots, narrowed := s.visibleRootsForMount(mount.Path); narrowed {
-		return roots
-	}
+	// The BFF search contract accepts configured mount names only. Results are
+	// filtered through isOriginVisible before they are persisted or returned.
 	return []string{cleanAListPath(mount.Path)}
 }
 
