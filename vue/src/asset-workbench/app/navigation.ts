@@ -2,6 +2,7 @@ import type { Component } from 'vue'
 import {
   BarChart3,
   Calculator,
+  ClipboardCheck,
   FileUp,
   HardDrive,
   LayoutDashboard,
@@ -48,6 +49,7 @@ const DAILY_NAV_DEFS: Array<{ path: string; icon: Component; requires?: readonly
   { path: '/upload', icon: FileUp, requires: assetWorkbenchRouteAccess['/upload'].requiresAnyCapability ?? [] },
   { path: '/drive', icon: HardDrive, requires: assetWorkbenchRouteAccess['/drive'].requiresAnyCapability ?? [] },
   { path: '/upload-overview', icon: ScrollText, requires: assetWorkbenchRouteAccess['/upload-overview'].requiresAnyCapability ?? [] },
+  { path: '/quality-errors', icon: ClipboardCheck, requires: assetWorkbenchRouteAccess['/quality-errors'].requiresAnyCapability ?? [] },
   { path: '/settlement', icon: ReceiptText, requires: assetWorkbenchRouteAccess['/settlement'].requiresAnyCapability ?? [], hub: 'settlement' },
 ]
 

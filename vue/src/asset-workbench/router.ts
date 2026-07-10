@@ -106,6 +106,12 @@ const routes: RouteRecordRaw[] = [
     meta: accessMeta('/upload-overview'),
   },
   {
+    path: '/quality-errors',
+    name: 'asset-quality-errors',
+    component: () => import('./pages/QualityErrorsPage.vue'),
+    meta: accessMeta('/quality-errors'),
+  },
+  {
     path: '/overview',
     name: 'asset-overview',
     redirect: (to) => ({ path: '/drive', query: { ...to.query, scope: to.query.scope ?? 'all' } }),

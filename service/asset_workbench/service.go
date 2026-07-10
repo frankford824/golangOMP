@@ -6678,14 +6678,16 @@ func (s *Service) ClientMaterialDownload(ctx context.Context, actor domain.Reque
 	if appErr != nil {
 		return nil, appErr
 	}
-	_ = s.recordSystemAssetDownloadEvent(ctx, actor, domain.AssetWorkbenchEventClientMaterialDownloaded, &material.ID, map[string]interface{}{
-		"material_id": material.ID,
-		"asset_id":    material.AssetID,
-		"source_type": material.SourceType,
-		"source_ref":  material.SourceRef,
-		"filename":    info.Filename,
-		"mode":        info.DownloadMode,
-	})
+	if info != nil && info.DownloadURL != nil && strings.TrimSpace(*info.DownloadURL) != "" {
+		_ = s.recordSystemAssetDownloadEvent(ctx, actor, domain.AssetWorkbenchEventClientMaterialDownloaded, &material.ID, map[string]interface{}{
+			"material_id": material.ID,
+			"asset_id":    material.AssetID,
+			"source_type": material.SourceType,
+			"source_ref":  material.SourceRef,
+			"filename":    info.Filename,
+			"mode":        info.DownloadMode,
+		})
+	}
 	return info, nil
 }
 
@@ -10753,10 +10755,10 @@ func parseErrorRecordsExcel(reader io.Reader) ([]ImportErrorRecordInput, *domain
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "Excel file is missing quality error import headers.", nil)
 	}
 	orderIndex, hasOrder := firstExcelColumn(headers, "order_no", "orderno", "订单号", "线上订单号", "线上单号", "文件名")
-	errorIndex, hasErrorCount := firstExcelColumn(headers, "error_count", "errorcount", "errors", "出错数", "错误数", "出错数量", "错误件数", "错误张数")
+	errorIndex, hasErrorCount := firstExcelColumn(headers, "error_count", "errorcount", "errors", "出错数", "错误数", "出错数量", "错误件数", "错误张数", "出错张数")
 	payeeIndex, hasPayee := firstExcelColumn(headers, "payee_user_id", "payeeuserid", "user_id", "userid", "人员id", "用户id")
 	payeeNameIndex, hasPayeeName := firstExcelColumn(headers, "payee_name", "payeename", "出错人", "人员", "姓名", "计件人")
-	difficultyIndex, hasDifficulty := firstExcelColumn(headers, "difficulty_class", "difficultyclass", "分类", "难度", "难度类", "难度类别")
+	difficultyIndex, hasDifficulty := firstExcelColumn(headers, "difficulty_class", "difficultyclass", "分类", "出错分类", "难度", "难度类", "难度类别")
 	dateIndex, hasDate := firstExcelColumn(headers, "occurred_date", "occurreddate", "日期", "出错日期", "发生日期")
 	issueIndex, hasIssue := firstExcelColumn(headers, "issue_description", "issuedescription", "问题描述", "问题", "错误描述")
 	sourceIndex, hasSource := firstExcelColumn(headers, "source_type", "sourcetype", "抽查/售后", "来源", "类型")
@@ -11077,9 +11079,9 @@ func findErrorImportHeaderRow(rows [][]string) (int, map[string]int, bool) {
 			}
 			headers[key] = index
 		}
-		_, hasError := firstExcelColumn(headers, "error_count", "errorcount", "errors", "出错数", "错误数", "出错数量", "错误件数", "错误张数")
+		_, hasError := firstExcelColumn(headers, "error_count", "errorcount", "errors", "出错数", "错误数", "出错数量", "错误件数", "错误张数", "出错张数")
 		_, hasPayee := firstExcelColumn(headers, "payee_name", "payeename", "出错人", "人员", "姓名", "计件人")
-		_, hasDifficulty := firstExcelColumn(headers, "difficulty_class", "difficultyclass", "分类", "难度", "难度类", "难度类别")
+		_, hasDifficulty := firstExcelColumn(headers, "difficulty_class", "difficultyclass", "分类", "出错分类", "难度", "难度类", "难度类别")
 		if hasError || hasPayee || hasDifficulty {
 			return rowIndex, headers, true
 		}

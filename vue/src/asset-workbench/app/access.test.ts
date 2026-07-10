@@ -36,6 +36,7 @@ describe('asset workbench access rules', () => {
     expect(canAccessAssetWorkbenchRoute(user, routeAccessForPath('/upload'))).toBe(true)
     expect(canAccessAssetWorkbenchRoute(user, routeAccessForPath('/submissions'))).toBe(false)
     expect(canAccessAssetWorkbenchRoute(user, routeAccessForPath('/upload-overview'))).toBe(false)
+    expect(canAccessAssetWorkbenchRoute(user, routeAccessForPath('/quality-errors'))).toBe(false)
     expect(canAccessAssetWorkbenchRoute(user, routeAccessForPath('/materials'))).toBe(true)
     expect(canAccessAssetWorkbenchRoute(user, routeAccessForPath('/my-settlement'))).toBe(true)
     expect(canAccessAssetWorkbenchRoute(user, routeAccessForPath('/account'))).toBe(true)
@@ -62,6 +63,7 @@ describe('asset workbench access rules', () => {
     expect(hasAnyCapability(admin, ['asset.workbench.manage', 'asset.workbench.settlement'])).toBe(true)
     expect(canAccessAssetWorkbenchRoute(admin, routeAccessForPath('/settlement'))).toBe(true)
     expect(canAccessAssetWorkbenchRoute(admin, routeAccessForPath('/upload-overview'))).toBe(true)
+    expect(canAccessAssetWorkbenchRoute(admin, routeAccessForPath('/quality-errors'))).toBe(true)
     expect(canAccessAssetWorkbenchRoute(admin, routeAccessForPath('/materials'))).toBe(false)
   })
 
@@ -105,6 +107,7 @@ describe('asset workbench access rules', () => {
     expect(routeAccessForPath('/')?.label).toBe('今日待办')
     expect(routeAccessForPath('/submissions')?.aliases).toContain('维护区')
     expect(routeAccessForPath('/upload-overview')?.label).toBe('上传总览')
+    expect(routeAccessForPath('/quality-errors')?.aliases).toContain('出错/质检')
     expect(routeAccessForPath('/settings/pricing')?.label).toBe('计价设置')
     expect(routeAccessForPath('/overview')?.aliases).toContain('总盘查询')
   })

@@ -37,6 +37,19 @@ export interface SettlementPayrollExportRow {
   netAmount: number
 }
 
+export const errorImportTemplateHeaders = [
+  '日期',
+  '出错人',
+  '出错分类',
+  '出错张数',
+  '问题描述',
+  '抽查/售后',
+  '处理方法',
+  '登记人',
+  '备注',
+  '线上订单号',
+] as const
+
 export function payrollRowLabel(rowType: string): string {
   return rowType === 'supplement_piecework' ? '补录计件工资' : '日常计件工资'
 }
@@ -89,28 +102,29 @@ export async function exportErrorImportTemplateWorkbook(): Promise<void> {
   workbook.creator = 'asset-workbench'
   workbook.created = new Date()
 
-  const sheet = workbook.addWorksheet('质检扣款导入表')
+  const sheet = workbook.addWorksheet('出错记录导入表')
   sheet.columns = [
-    { key: 'note', width: 14 },
     { key: 'occurred_date', width: 14 },
-    { key: 'order_no', width: 24 },
-    { key: 'difficulty_class', width: 14 },
     { key: 'payee_name', width: 18 },
+    { key: 'difficulty_class', width: 16 },
+    { key: 'error_count', width: 14 },
     { key: 'issue_description', width: 28 },
     { key: 'source_type', width: 14 },
     { key: 'handling_method', width: 18 },
     { key: 'reporter_name', width: 14 },
     { key: 'remark', width: 18 },
-    { key: 'error_count', width: 12 },
+    { key: 'order_no', width: 24 },
   ]
-  sheet.addRow(['说明：', '格式', '可选留痕，不参与金额计算', '关联系统难度类，用于计价', '绑定系统人员档案', '文字', '选其一', '文字', '文字', '文字', '隐藏：默认一行一错'])
-  sheet.addRow(['导入模板：', '日期', '线上订单号', '分类', '出错人', '问题描述', '抽查/售后', '处理方法', '登记人', '备注', '出错数'])
-  sheet.addRow(['', new Date(2026, 6, 1), '3310254339917022991', 'C类', '张三', '年龄做错了', '抽查', '重修', '李四', '', 1])
-  sheet.getColumn(11).hidden = true
+  sheet.addRow(['说明：前四列必填。系统按日期、出错人、出错分类和出错张数匹配扣款规则；其余列用于说明和追溯，可不填。'])
+  sheet.mergeCells(1, 1, 1, errorImportTemplateHeaders.length)
+  sheet.addRow([...errorImportTemplateHeaders])
+  sheet.addRow([new Date(2026, 6, 1), '张三', 'C类', 1, '年龄做错了', '抽查', '重修', '李四', '', ''])
   sheet.getRow(1).font = { color: { argb: 'FF6B6258' } }
+  sheet.getRow(1).alignment = { vertical: 'middle', wrapText: true }
+  sheet.getRow(1).height = 34
   sheet.getRow(2).font = { bold: true }
   sheet.getRow(2).alignment = { vertical: 'middle', horizontal: 'center' }
-  sheet.getColumn(2).numFmt = 'yyyy-mm-dd'
+  sheet.getColumn(1).numFmt = 'yyyy-mm-dd'
   sheet.views = [{ state: 'frozen', ySplit: 2 }]
 
   const buffer = await workbook.xlsx.writeBuffer()

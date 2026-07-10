@@ -15500,7 +15500,7 @@ curl -X DELETE https://api.example.com/v1/asset-workbench/client-materials/<mate
 ### 简介
 支持方法: GET。
 
-- `GET`: Returns a direct download manifest only when the material is published and enabled for clients.
+- `GET`: Returns a direct download manifest only when the material is published and enabled for clients. External netdisk files without a public source URL are queued for OSS preparation and temporarily return an empty `download_url` with `access_hint=external_netdisk_prepare_required`; clients should poll this endpoint until the signed OSS URL is ready.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -15524,8 +15524,8 @@ curl -X DELETE https://api.example.com/v1/asset-workbench/client-materials/<mate
   "data": {
     "download_mode": "string",
     "download_url": "string",
-    "filename": "string",
-    "file_size": 123
+    "access_hint": "string",
+    "preview_available": true
   }
 }
 ```

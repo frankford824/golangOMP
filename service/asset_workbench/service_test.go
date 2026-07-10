@@ -1268,6 +1268,8 @@ func (s *systemAssetDownloaderStub) BuildBatchDownloadManifest(_ context.Context
 
 type externalMaterialProviderStub struct {
 	searchCalls   int
+	searchQueries []domain.AssetSearchQuery
+	searchResult  *assetcenter.SearchResult
 	browseCalls   []assetcenter.MaterialBrowseQuery
 	detailCalls   []int64
 	downloadCalls []int64
@@ -1278,8 +1280,14 @@ type externalMaterialProviderStub struct {
 	previewInfo   *domain.AssetDownloadInfo
 }
 
-func (s *externalMaterialProviderStub) Search(_ context.Context, _ domain.AssetSearchQuery) (*assetcenter.SearchResult, *domain.AppError) {
+func (s *externalMaterialProviderStub) Search(_ context.Context, query domain.AssetSearchQuery) (*assetcenter.SearchResult, *domain.AppError) {
 	s.searchCalls++
+	s.searchQueries = append(s.searchQueries, query)
+	if s.searchResult != nil {
+		result := *s.searchResult
+		result.Items = append([]*assetcenter.AssetDetail(nil), s.searchResult.Items...)
+		return &result, nil
+	}
 	return &assetcenter.SearchResult{}, nil
 }
 
@@ -3199,6 +3207,40 @@ func TestExternalClientMaterialDownloadAndPreviewUseExternalProvider(t *testing.
 	}
 }
 
+func TestExternalClientMaterialPendingDownloadDoesNotRecordCompletedEvent(t *testing.T) {
+	workbenchRepo := &clientMaterialRepo{materials: map[int64]*domain.AssetWorkbenchClientMaterial{
+		1: {
+			ID:               1,
+			AssetID:          501,
+			SourceType:       string(domain.AssetResourceSourceExternal),
+			SourceRef:        domain.ExternalAssetResourceID(501),
+			FilenameSnapshot: "external.psd",
+			Enabled:          true,
+		},
+	}}
+	externalProvider := &externalMaterialProviderStub{downloadInfo: &domain.AssetDownloadInfo{
+		DownloadMode: domain.AssetDownloadModeDirect,
+		AccessHint:   "external_netdisk_prepare_required",
+		Filename:     "external.psd",
+	}}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"},
+		WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}),
+		WithSystemAssetSearcher(externalProvider),
+	)
+	actor := domain.RequestActor{ID: 77, Roles: []domain.Role{domain.RoleAssetSubmitter}}
+
+	info, appErr := svc.ClientMaterialDownload(context.Background(), actor, 1)
+	if appErr != nil {
+		t.Fatalf("ClientMaterialDownload() error = %+v", appErr)
+	}
+	if info == nil || !strings.Contains(info.AccessHint, "prepare_required") {
+		t.Fatalf("download info = %+v, want pending preparation", info)
+	}
+	if len(workbenchRepo.events) != 0 {
+		t.Fatalf("pending download recorded %d events, want 0", len(workbenchRepo.events))
+	}
+}
+
 func TestClientMaterialBatchDownloadSupportsMixedSources(t *testing.T) {
 	workbenchRepo := &clientMaterialRepo{materials: map[int64]*domain.AssetWorkbenchClientMaterial{
 		1: {ID: 1, AssetID: 1001, SourceType: string(domain.AssetResourceSourceSystem), SourceRef: "1001", Title: "系统素材", Enabled: true},
@@ -4666,10 +4708,10 @@ func TestParseErrorRecordsExcelDefaultsFormalTemplateErrorCountToOne(t *testing.
 func TestParseErrorRecordsExcelSupportsFormalTemplateWithoutOrderColumn(t *testing.T) {
 	f := excelize.NewFile()
 	sheet := f.GetSheetName(f.GetActiveSheetIndex())
-	if err := f.SetSheetRow(sheet, "A1", &[]interface{}{"日期", "分类", "出错人", "问题描述"}); err != nil {
+	if err := f.SetSheetRow(sheet, "A1", &[]interface{}{"日期", "出错人", "出错分类", "出错张数", "问题描述"}); err != nil {
 		t.Fatalf("set header row: %v", err)
 	}
-	if err := f.SetSheetRow(sheet, "A2", &[]interface{}{"2026-07-01", "B类", "李四", "文件尺寸不对"}); err != nil {
+	if err := f.SetSheetRow(sheet, "A2", &[]interface{}{"2026-07-01", "李四", "B类", 3, "文件尺寸不对"}); err != nil {
 		t.Fatalf("set data row: %v", err)
 	}
 	var buf bytes.Buffer
@@ -4680,7 +4722,7 @@ func TestParseErrorRecordsExcelSupportsFormalTemplateWithoutOrderColumn(t *testi
 	if appErr != nil {
 		t.Fatalf("parseErrorRecordsExcel appErr = %v", appErr)
 	}
-	if len(records) != 1 || records[0].OrderNo != "" || records[0].DifficultyClass != "B类" || records[0].PayeeName != "李四" {
+	if len(records) != 1 || records[0].OrderNo != "" || records[0].DifficultyClass != "B类" || records[0].PayeeName != "李四" || records[0].ErrorCount != 3 {
 		t.Fatalf("records = %+v, want one quality row without order_no", records)
 	}
 }
@@ -4762,5 +4804,34 @@ func TestWorkbenchMaterialAssetVisibilityKeepsSystemAssets(t *testing.T) {
 	}
 	if assetWorkbenchMaterialAssetVisible(&assetcenter.AssetDetail{SourceType: string(domain.AssetResourceSourceExternal), OriginPath: "/quark/其他目录/a.jpg"}) {
 		t.Fatalf("external asset under hidden quark root should be filtered")
+	}
+}
+
+func TestSystemSearchAllSourcesKeepsSystemAndVisibleExternalAssets(t *testing.T) {
+	provider := &externalMaterialProviderStub{searchResult: &assetcenter.SearchResult{
+		Items: []*assetcenter.AssetDetail{
+			{ID: 1, SourceType: string(domain.AssetResourceSourceSystem), OriginalFilename: "system.png"},
+			{ID: 2, SourceType: string(domain.AssetResourceSourceExternal), OriginPath: "/quark/海报/external.png"},
+			{ID: 3, SourceType: string(domain.AssetResourceSourceExternal), OriginPath: "/quark/其他目录/hidden.png"},
+		},
+		Total: 3,
+		Page:  1,
+		Size:  50,
+	}}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithSystemAssetSearcher(provider))
+	actor := domain.RequestActor{ID: 1, Roles: []domain.Role{domain.RoleAssetManager}}
+
+	result, appErr := svc.SystemSearch(context.Background(), actor, "png", 1, 50, "all", "all", "")
+	if appErr != nil {
+		t.Fatalf("SystemSearch() error = %+v", appErr)
+	}
+	if len(result.Items) != 2 || result.Total != 2 {
+		t.Fatalf("SystemSearch() items/total = %d/%d, want visible system plus external", len(result.Items), result.Total)
+	}
+	if result.Items[0].SourceType != string(domain.AssetResourceSourceSystem) || result.Items[1].OriginPath != "/quark/海报/external.png" {
+		t.Fatalf("SystemSearch() items = %+v, want system and visible external assets", result.Items)
+	}
+	if len(provider.searchQueries) != 1 || provider.searchQueries[0].Source != domain.AssetResourceSourceAll {
+		t.Fatalf("search queries = %+v, want all-source query", provider.searchQueries)
 	}
 }

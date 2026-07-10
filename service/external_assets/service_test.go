@@ -529,6 +529,82 @@ func TestNetdiskBrowserURLsPreferPublicRawURL(t *testing.T) {
 	}
 }
 
+func TestNetdiskDownloadQueuesOSSWhenOnlyInternalURLExists(t *testing.T) {
+	checkedAt := time.Now().UTC()
+	repo := &externalAssetRepoStub{getRow: &domain.ExternalAssetRecord{
+		ID:                42,
+		Kind:              domain.ExternalAssetKindNetdisk,
+		MountPath:         "/quark",
+		OriginPath:        "/quark/poster.psd",
+		FileName:          "poster.psd",
+		MimeType:          "image/vnd.adobe.photoshop",
+		Status:            domain.ExternalAssetStatusIndexed,
+		RawURL:            "http://172.21.0.1:5244/p/quark/poster.psd",
+		LastLinkCheckedAt: &checkedAt,
+	}}
+	svc := NewService(repo, Config{
+		Enabled: true,
+		Mounts:  ParseMounts("/quark:netdisk"),
+	}, nil)
+
+	info, appErr := svc.DownloadInfo(context.Background(), 42)
+	if appErr != nil {
+		t.Fatalf("DownloadInfo() error = %+v", appErr)
+	}
+	if info == nil || info.DownloadURL != nil || !strings.Contains(info.AccessHint, "prepare_required") {
+		t.Fatalf("DownloadInfo() = %+v, want queued OSS preparation", info)
+	}
+	if len(repo.ossPendingIDs) != 1 || repo.ossPendingIDs[0] != 42 {
+		t.Fatalf("OSS pending ids = %+v, want [42]", repo.ossPendingIDs)
+	}
+}
+
+func TestNetdiskDownloadUsesReadyOSSOriginal(t *testing.T) {
+	ossDirect := baseservice.NewOSSDirectService(baseservice.OSSDirectConfig{
+		Enabled:         true,
+		Endpoint:        "oss-cn-hangzhou.aliyuncs.com",
+		PublicEndpoint:  "oss-cn-hangzhou.aliyuncs.com",
+		Bucket:          "test-bucket",
+		AccessKeyID:     "test-key",
+		AccessKeySecret: "test-secret",
+		PresignExpiry:   15 * time.Minute,
+	})
+	repo := &externalAssetRepoStub{getRow: &domain.ExternalAssetRecord{
+		ID:             42,
+		Kind:           domain.ExternalAssetKindNetdisk,
+		MountPath:      "/quark",
+		OriginPath:     "/quark/poster.psd",
+		FileName:       "poster.psd",
+		MimeType:       "image/vnd.adobe.photoshop",
+		Status:         domain.ExternalAssetStatusIndexed,
+		OSSOriginalKey: "external-assets/alist/original/quark/hash/poster.psd",
+		OSSSyncStatus:  domain.ExternalAssetOSSStatusReady,
+	}}
+	svc := NewService(repo, Config{Enabled: true, Mounts: ParseMounts("/quark:netdisk")}, ossDirect)
+
+	info, appErr := svc.DownloadInfo(context.Background(), 42)
+	if appErr != nil {
+		t.Fatalf("DownloadInfo() error = %+v", appErr)
+	}
+	if info == nil || info.DownloadURL == nil || !strings.Contains(*info.DownloadURL, repo.getRow.OSSOriginalKey) {
+		t.Fatalf("DownloadInfo() = %+v, want presigned OSS original", info)
+	}
+	if info.AccessHint != "external_original_oss" {
+		t.Fatalf("AccessHint = %q, want external_original_oss", info.AccessHint)
+	}
+}
+
+func TestPrepareMountPathsStayInsideConfiguredMounts(t *testing.T) {
+	svc := NewService(&externalAssetRepoStub{}, Config{
+		Enabled:       true,
+		Mounts:        ParseMounts("/quark:netdisk,/p3:nas_local"),
+		PrepareMounts: ParseMountPaths("/p3,/missing"),
+	}, nil)
+	if got := strings.Join(svc.PrepareMountPaths(), ","); got != "/p3" {
+		t.Fatalf("PrepareMountPaths() = %q, want /p3", got)
+	}
+}
+
 func TestNASLocalBrowserPreviewUsesReadyOriginalOSS(t *testing.T) {
 	ossDirect := baseservice.NewOSSDirectService(baseservice.OSSDirectConfig{
 		Enabled:         true,
@@ -1016,6 +1092,7 @@ type externalAssetRepoStub struct {
 	searchQueries     []domain.ExternalAssetSearchQuery
 	getRow            *domain.ExternalAssetRecord
 	previewPendingIDs []int64
+	ossPendingIDs     []int64
 	ossPrefixMarks    []repo.ExternalAssetOriginPrefix
 	ossPriorityReads  []repo.ExternalAssetOriginPrefix
 }
@@ -1110,7 +1187,8 @@ func (r *externalAssetRepoStub) UpdateDirectURL(context.Context, int64, string, 
 	return nil
 }
 
-func (r *externalAssetRepoStub) MarkOSSPreparePending(context.Context, int64) error {
+func (r *externalAssetRepoStub) MarkOSSPreparePending(_ context.Context, id int64) error {
+	r.ossPendingIDs = append(r.ossPendingIDs, id)
 	return nil
 }
 
@@ -1124,20 +1202,20 @@ func (r *externalAssetRepoStub) MarkPreviewPreparePending(_ context.Context, id 
 	return nil
 }
 
-func (r *externalAssetRepoStub) ListDirectURLRefreshCandidates(context.Context, int, time.Time) ([]*domain.ExternalAssetRecord, error) {
+func (r *externalAssetRepoStub) ListDirectURLRefreshCandidates(context.Context, []string, int, time.Time) ([]*domain.ExternalAssetRecord, error) {
 	return nil, nil
 }
 
-func (r *externalAssetRepoStub) ListPendingOSS(context.Context, int) ([]*domain.ExternalAssetRecord, error) {
+func (r *externalAssetRepoStub) ListPendingOSS(context.Context, []string, int) ([]*domain.ExternalAssetRecord, error) {
 	return nil, nil
 }
 
-func (r *externalAssetRepoStub) ListPendingOSSPrioritized(_ context.Context, prefixes []repo.ExternalAssetOriginPrefix, _ int) ([]*domain.ExternalAssetRecord, error) {
+func (r *externalAssetRepoStub) ListPendingOSSPrioritized(_ context.Context, prefixes []repo.ExternalAssetOriginPrefix, _ []string, _ int) ([]*domain.ExternalAssetRecord, error) {
 	r.ossPriorityReads = append(r.ossPriorityReads, prefixes...)
 	return nil, nil
 }
 
-func (r *externalAssetRepoStub) ListPendingPreview(context.Context, int) ([]*domain.ExternalAssetRecord, error) {
+func (r *externalAssetRepoStub) ListPendingPreview(context.Context, []string, int) ([]*domain.ExternalAssetRecord, error) {
 	return nil, nil
 }
 

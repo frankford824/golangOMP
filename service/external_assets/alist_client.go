@@ -368,16 +368,43 @@ func (c *BFFClient) OpenFetch(ctx context.Context, filePath string, inline bool)
 	if err != nil {
 		return nil, err
 	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+	for attempt := 1; attempt <= 4; attempt++ {
+		resp, err := client.Do(req.Clone(ctx))
+		if err != nil {
+			return nil, err
+		}
+		if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			return resp.Body, nil
+		}
 		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
 		_ = resp.Body.Close()
-		return nil, fmt.Errorf("external asset bff fetch status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(raw)))
+		if attempt == 4 || (resp.StatusCode != http.StatusTooManyRequests && resp.StatusCode != http.StatusServiceUnavailable) {
+			return nil, fmt.Errorf("external asset bff fetch status=%d body=%s", resp.StatusCode, strings.TrimSpace(string(raw)))
+		}
+		wait := bffFetchRetryDelay(raw)
+		timer := time.NewTimer(wait)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
 	}
-	return resp.Body, nil
+	return nil, fmt.Errorf("external asset bff fetch retries exhausted")
+}
+
+func bffFetchRetryDelay(raw []byte) time.Duration {
+	var payload struct {
+		RetryAfterMS int64 `json:"retry_after_ms"`
+	}
+	if json.Unmarshal(raw, &payload) == nil && payload.RetryAfterMS > 0 {
+		wait := time.Duration(payload.RetryAfterMS) * time.Millisecond
+		if wait > 15*time.Second {
+			return 15 * time.Second
+		}
+		return wait
+	}
+	return 2 * time.Second
 }
 
 func (c *AListClient) OpenRawURL(ctx context.Context, rawURL string) (io.ReadCloser, error) {

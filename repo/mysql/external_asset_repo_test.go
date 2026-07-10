@@ -1,15 +1,54 @@
 package mysqlrepo
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/go-sql-driver/mysql"
 
 	"workflow/domain"
 )
+
+func TestPendingExternalAssetQueriesScopeMountsAndBackOffFailures(t *testing.T) {
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherFunc(func(_ string, actual string) error {
+		for _, required := range []string{
+			"mount_path IN (?,?)",
+			"updated_at <= UTC_TIMESTAMP() - INTERVAL 10 MINUTE",
+		} {
+			if !strings.Contains(actual, required) {
+				return fmt.Errorf("query missing %q: %s", required, actual)
+			}
+		}
+		return nil
+	})))
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectQuery("pending OSS").
+		WithArgs("/p3", "/quark", 25).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
+	mock.ExpectQuery("pending preview").
+		WithArgs("/p3", "/quark", 25).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
+
+	repository := NewExternalAssetRepo(New(db))
+	mounts := []string{"/p3", "/quark"}
+	if _, err := repository.ListPendingOSS(context.Background(), mounts, 25); err != nil {
+		t.Fatalf("ListPendingOSS() error = %v", err)
+	}
+	if _, err := repository.ListPendingPreview(context.Background(), mounts, 25); err != nil {
+		t.Fatalf("ListPendingPreview() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations = %v", err)
+	}
+}
 
 func TestBuildExternalAssetWhereUsesFullTextForKeyword(t *testing.T) {
 	where, args, orderBy := buildExternalAssetWhere(domain.ExternalAssetSearchQuery{Keyword: "KT poster", Page: 1, Size: 20})

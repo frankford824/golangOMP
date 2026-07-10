@@ -16,7 +16,12 @@ interface ParsedReviewSheet {
 }
 
 const SUPPLEMENT_REQUIRED_HEADERS = ['payee_user_id', 'order_no', 'difficulty_class', 'page_count', 'gross_amount']
-const ERROR_REQUIRED_HEADERS = ['线上订单号', '出错人', '问题描述']
+const ERROR_REQUIRED_HEADER_GROUPS = [
+  { label: '日期', aliases: ['日期', '出错日期', '发生日期'] },
+  { label: '出错人', aliases: ['出错人', '人员', '姓名', '计件人'] },
+  { label: '出错分类', aliases: ['出错分类', '分类', '难度', '难度类', '难度类别'] },
+  { label: '出错张数', aliases: ['出错张数', '出错数', '错误数', '出错数量', '错误件数', '错误张数'] },
+] as const
 
 export async function buildImportReviewSource(kind: ImportReviewKind, files: File[], revision: string | number): Promise<WorkbenchSpreadsheetSource> {
   const sheets = await parseReviewFiles(kind, files)
@@ -24,7 +29,7 @@ export async function buildImportReviewSource(kind: ImportReviewKind, files: Fil
     id: `import-review-${kind}`,
     revision,
     mode: 'import-review',
-    title: kind === 'supplement' ? '补录导入校对' : '质检扣款导入校对',
+    title: kind === 'supplement' ? '补录导入校对' : '出错记录导入校对',
     description: '先在浏览器内核对 Excel 内容和明显缺失项，确认后再调用现有导入接口。',
     readonly: false,
     sheets,
@@ -102,14 +107,16 @@ function parseWorksheet(kind: ImportReviewKind, worksheet: import('exceljs').Wor
   const headers = normalizeHeaders(worksheet.getRow(headerRowIndex).values)
   const rows: Record<string, unknown>[] = []
   const validations: WorkbenchSpreadsheetValidation[] = []
-  const requiredHeaders = kind === 'supplement' ? SUPPLEMENT_REQUIRED_HEADERS : ERROR_REQUIRED_HEADERS
-  const missingHeaders = requiredHeaders.filter((header) => !headers.includes(header))
+  const requiredHeaders = kind === 'supplement'
+    ? SUPPLEMENT_REQUIRED_HEADERS.map((header) => ({ label: header, header }))
+    : ERROR_REQUIRED_HEADER_GROUPS.map((group) => ({ label: group.label, header: group.aliases.find((alias) => headers.includes(alias)) }))
+  const missingHeaders = requiredHeaders.filter((item) => !item.header)
 
   for (const missing of missingHeaders) {
     validations.push({
       rowKey: 1,
       tone: 'danger',
-      message: `缺少必要列：${missing}`,
+      message: `缺少必要列：${missing.label}`,
     })
   }
 
@@ -125,13 +132,13 @@ function parseWorksheet(kind: ImportReviewKind, worksheet: import('exceljs').Wor
     if (!hasValue) return
     const rowID = rows.length + 1
     rows.push(item)
-    for (const header of requiredHeaders) {
-      if (headers.includes(header) && isEmptyValue(item[header])) {
+    for (const required of requiredHeaders) {
+      if (required.header && isEmptyValue(item[required.header])) {
         validations.push({
           rowKey: rowID,
-          columnKey: header,
+          columnKey: required.header,
           tone: 'danger',
-          message: `第 ${rowNumber} 行缺少 ${header}`,
+          message: `第 ${rowNumber} 行缺少 ${required.label}`,
         })
       }
     }

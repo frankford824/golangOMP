@@ -2,7 +2,12 @@ import { describe, expect, it } from 'vitest'
 
 import type { SettlementReportRow } from '@aw/shared/api/assetWorkbenchApi'
 
-import { buildSettlementPayrollExportRows, buildSettlementReportExportRow, payrollRowLabel } from './settlementExport'
+import {
+  buildSettlementPayrollExportRows,
+  buildSettlementReportExportRow,
+  errorImportTemplateHeaders,
+  payrollRowLabel,
+} from './settlementExport'
 
 describe('asset workbench settlement export', () => {
   it('maps fixed two payroll row types into export labels', () => {
@@ -96,5 +101,10 @@ describe('asset workbench settlement export', () => {
       created_date: '2026-06-02',
       created_date_end: '2026-06-10',
     }))
+  })
+
+  it('puts the four deduction matching fields first and keeps order number optional', () => {
+    expect(errorImportTemplateHeaders.slice(0, 4)).toEqual(['日期', '出错人', '出错分类', '出错张数'])
+    expect(errorImportTemplateHeaders.at(-1)).toBe('线上订单号')
   })
 })

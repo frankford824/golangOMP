@@ -86,9 +86,10 @@ func main() {
 		return
 	}
 	if dryRun {
-		ossRows, _ := repo.ListPendingOSS(ctx, limit)
-		previewRows, _ := repo.ListPendingPreview(ctx, limit)
-		directRows, _ := repo.ListDirectURLRefreshCandidates(ctx, limit, time.Now().UTC().Add(-cfg.ExternalAssets.LinkRefreshInterval))
+		prepareMounts := svc.PrepareMountPaths()
+		ossRows, _ := repo.ListPendingOSS(ctx, prepareMounts, limit)
+		previewRows, _ := repo.ListPendingPreview(ctx, prepareMounts, limit)
+		directRows, _ := repo.ListDirectURLRefreshCandidates(ctx, svc.ConfiguredMountPaths(), limit, time.Now().UTC().Add(-cfg.ExternalAssets.LinkRefreshInterval))
 		writeSummary(summary{
 			OSSProcessed:        len(ossRows),
 			PreviewProcessed:    len(previewRows),

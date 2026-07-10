@@ -56,6 +56,7 @@ type Config struct {
 	PrepareInterval     time.Duration
 	PrepareLimit        int
 	PrepareConcurrency  int
+	PrepareMounts       []string
 }
 
 type FullSyncResult struct {
@@ -130,6 +131,7 @@ func ConfigFromApp(cfg config.ExternalAssetsConfig) Config {
 		PrepareInterval:     cfg.PrepareInterval,
 		PrepareLimit:        cfg.PrepareLimit,
 		PrepareConcurrency:  cfg.PrepareConcurrency,
+		PrepareMounts:       ParseMountPaths(cfg.PrepareMounts),
 	}
 }
 
@@ -147,7 +149,7 @@ func NewService(repo repo.ExternalAssetRepo, cfg Config, ossDirect *baseservice.
 		cfg.OSSPreviewPrefix = "external-assets/alist/preview"
 	}
 	if len(cfg.Mounts) == 0 {
-		cfg.Mounts = ParseMounts("/quark:netdisk,/p1:netdisk,/p2:netdisk,/p3:nas_local")
+		cfg.Mounts = ParseMounts("/quark:netdisk,/p3:nas_local")
 	}
 	if cfg.FullSyncPageSize <= 0 || cfg.FullSyncPageSize > 200 {
 		cfg.FullSyncPageSize = 100
@@ -229,6 +231,38 @@ func (s *Service) PrepareLimit() int {
 		return 50
 	}
 	return s.cfg.PrepareLimit
+}
+
+func (s *Service) ConfiguredMountPaths() []string {
+	if s == nil {
+		return nil
+	}
+	mounts := make([]string, 0, len(s.cfg.Mounts))
+	for _, mount := range s.cfg.Mounts {
+		if cleaned := cleanAListPath(mount.Path); cleaned != "" {
+			mounts = append(mounts, cleaned)
+		}
+	}
+	return ParseMountPaths(strings.Join(mounts, ","))
+}
+
+func (s *Service) PrepareMountPaths() []string {
+	configured := s.ConfiguredMountPaths()
+	if s == nil || len(s.cfg.PrepareMounts) == 0 {
+		return configured
+	}
+	allowed := make(map[string]struct{}, len(configured))
+	for _, mount := range configured {
+		allowed[mount] = struct{}{}
+	}
+	selected := make([]string, 0, len(s.cfg.PrepareMounts))
+	for _, raw := range s.cfg.PrepareMounts {
+		mount := cleanAListPath(raw)
+		if _, ok := allowed[mount]; ok {
+			selected = append(selected, mount)
+		}
+	}
+	return ParseMountPaths(strings.Join(selected, ","))
 }
 
 func (s *Service) FullSyncReady() bool {
@@ -1161,7 +1195,7 @@ func (s *Service) RefreshDirectURLs(ctx context.Context, limit int) (int, int, e
 		return 0, 0, nil
 	}
 	staleBefore := s.nowFn().UTC().Add(-s.cfg.LinkRefreshInterval)
-	rows, err := s.repo.ListDirectURLRefreshCandidates(ctx, limit, staleBefore)
+	rows, err := s.repo.ListDirectURLRefreshCandidates(ctx, s.ConfiguredMountPaths(), limit, staleBefore)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -1208,10 +1242,14 @@ func (s *Service) DownloadInfo(ctx context.Context, id int64) (*domain.AssetDown
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "文件夹暂不支持下载", nil)
 	}
 	if urlValue := s.BrowserDownloadURL(row); urlValue != "" {
+		accessHint := "external_netdisk_direct"
+		if row.OSSOriginalKey != "" && row.OSSSyncStatus == domain.ExternalAssetOSSStatusReady {
+			accessHint = "external_original_oss"
+		}
 		return &domain.AssetDownloadInfo{
 			DownloadMode:     domain.AssetDownloadModeDirect,
 			DownloadURL:      &urlValue,
-			AccessHint:       "external_bff_browser_download",
+			AccessHint:       accessHint,
 			PreviewAvailable: canDirectBrowserPreview(row.FileName, row.MimeType),
 			Filename:         row.FileName,
 			FileSize:         row.FileSize,
@@ -1306,10 +1344,10 @@ func (s *Service) BrowserDownloadURL(row *domain.ExternalAssetRecord) string {
 	if row == nil || row.IsDir {
 		return ""
 	}
+	if row.OSSOriginalKey != "" && row.OSSSyncStatus == domain.ExternalAssetOSSStatusReady {
+		return s.presignedOriginalURL(row)
+	}
 	if row.Kind == domain.ExternalAssetKindNASLocal {
-		if row.OSSOriginalKey != "" && row.OSSSyncStatus == domain.ExternalAssetOSSStatusReady {
-			return s.presignedOriginalURL(row)
-		}
 		return ""
 	}
 	if row.Kind == domain.ExternalAssetKindNetdisk {
@@ -1370,13 +1408,17 @@ func (s *Service) netdiskDownloadInfo(ctx context.Context, row *domain.ExternalA
 		nextURL, err := s.resolveNetdiskDirectURL(ctx, row, preview)
 		if err != nil {
 			_ = s.repo.UpdateDirectURL(ctx, row.ID, "", nil, "failed")
-			return nil, domain.NewAppError(domain.ErrCodeAssetMissing, "外部网盘暂时无法获取文件，请稍后再试", map[string]interface{}{"detail": err.Error()})
+			rawURL = ""
+		} else {
+			rawURL = strings.TrimSpace(nextURL)
+			_ = s.repo.UpdateDirectURL(ctx, row.ID, rawURL, nil, directURLStatus(rawURL))
 		}
-		rawURL = strings.TrimSpace(nextURL)
-		_ = s.repo.UpdateDirectURL(ctx, row.ID, rawURL, nil, directURLStatus(rawURL))
 	}
 	if rawURL == "" || s.isInternalProviderURL(rawURL) {
-		return nil, domain.NewAppError(domain.ErrCodeAssetMissing, "外部网盘暂时没有可用直链，请稍后再试", nil)
+		if err := s.repo.MarkOSSPreparePending(ctx, row.ID); err != nil {
+			return nil, domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)
+		}
+		return prepareInfo(row, "external_netdisk_prepare_required"), nil
 	}
 	filename := row.FileName
 	return &domain.AssetDownloadInfo{
@@ -1555,13 +1597,17 @@ func (s *Service) mountPathForOrigin(origin string) string {
 }
 
 func (s *Service) ProcessPendingOSS(ctx context.Context, limit int) (int, error) {
-	priorityPrefixes := s.ossRequiredOriginPrefixes()
+	prepareMounts := s.PrepareMountPaths()
+	if len(prepareMounts) == 0 {
+		return 0, nil
+	}
+	priorityPrefixes := externalAssetPrefixesForMounts(s.ossRequiredOriginPrefixes(), prepareMounts)
 	if len(priorityPrefixes) > 0 {
 		if _, err := s.repo.MarkOSSPendingByOriginPrefixes(ctx, priorityPrefixes); err != nil {
 			return 0, err
 		}
 	}
-	rows, err := s.repo.ListPendingOSSPrioritized(ctx, priorityPrefixes, limit)
+	rows, err := s.repo.ListPendingOSSPrioritized(ctx, priorityPrefixes, prepareMounts, limit)
 	if err != nil {
 		return 0, err
 	}
@@ -1580,7 +1626,11 @@ func (s *Service) ProcessPendingOSS(ctx context.Context, limit int) (int, error)
 }
 
 func (s *Service) ProcessPendingPreview(ctx context.Context, limit int) (int, error) {
-	rows, err := s.repo.ListPendingPreview(ctx, limit)
+	prepareMounts := s.PrepareMountPaths()
+	if len(prepareMounts) == 0 {
+		return 0, nil
+	}
+	rows, err := s.repo.ListPendingPreview(ctx, prepareMounts, limit)
 	if err != nil {
 		return 0, err
 	}
@@ -1598,11 +1648,43 @@ func (s *Service) ProcessPendingPreview(ctx context.Context, limit int) (int, er
 	return done, nil
 }
 
+func externalAssetPrefixesForMounts(prefixes []repo.ExternalAssetOriginPrefix, mountPaths []string) []repo.ExternalAssetOriginPrefix {
+	allowed := make(map[string]struct{}, len(mountPaths))
+	for _, mount := range mountPaths {
+		allowed[cleanAListPath(mount)] = struct{}{}
+	}
+	filtered := make([]repo.ExternalAssetOriginPrefix, 0, len(prefixes))
+	for _, prefix := range prefixes {
+		if _, ok := allowed[cleanAListPath(prefix.MountPath)]; ok {
+			filtered = append(filtered, prefix)
+		}
+	}
+	return filtered
+}
+
 func (s *Service) runPrepareWorkers(ctx context.Context, rows []*domain.ExternalAssetRecord, handle func(*domain.ExternalAssetRecord)) {
 	if len(rows) == 0 || handle == nil {
 		return
 	}
-	workers := s.cfg.PrepareConcurrency
+	netdisk := make([]*domain.ExternalAssetRecord, 0, len(rows))
+	local := make([]*domain.ExternalAssetRecord, 0, len(rows))
+	for _, row := range rows {
+		if row != nil && row.Kind == domain.ExternalAssetKindNetdisk {
+			netdisk = append(netdisk, row)
+		} else {
+			local = append(local, row)
+		}
+	}
+	// Quark rejects parallel source reads with ExceedMaxConcurrency. Keep those
+	// jobs serial while allowing NAS-backed preparation to use configured concurrency.
+	s.runPrepareWorkersWithLimit(ctx, netdisk, 1, handle)
+	s.runPrepareWorkersWithLimit(ctx, local, s.cfg.PrepareConcurrency, handle)
+}
+
+func (s *Service) runPrepareWorkersWithLimit(ctx context.Context, rows []*domain.ExternalAssetRecord, workers int, handle func(*domain.ExternalAssetRecord)) {
+	if len(rows) == 0 || handle == nil {
+		return
+	}
 	if workers <= 0 {
 		workers = 1
 	}

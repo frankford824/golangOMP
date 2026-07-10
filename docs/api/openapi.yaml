@@ -24203,7 +24203,7 @@ paths:
   /v1/asset-workbench/client-materials/{material_id}/download:
     get:
       summary: Get client material download info
-      description: Returns a direct download manifest only when the material is published and enabled for clients.
+      description: Returns a direct download manifest only when the material is published and enabled for clients. External netdisk files without a public source URL are queued for OSS preparation and temporarily return an empty `download_url` with `access_hint=external_netdisk_prepare_required`; clients should poll this endpoint until the signed OSS URL is ready.
       tags: [AssetWorkbench, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
@@ -24226,7 +24226,9 @@ paths:
                     type: object
                     properties:
                       download_mode: { type: string }
-                      download_url: { type: string }
+                      download_url: { type: string, nullable: true }
+                      access_hint: { type: string }
+                      preview_available: { type: boolean }
                       filename: { type: string }
                       file_size: { type: integer }
                       mime_type: { type: string }

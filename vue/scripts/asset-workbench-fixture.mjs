@@ -186,6 +186,12 @@ const difficultyClasses = [
   { id: 3, code: 'C', name: 'C类', description: '文字类', enabled: true, sort_order: 30, created_by: 1001 },
 ]
 
+const deductionRules = [
+  { id: 21, worker_type: 'parttime', job_grade: 'P1', difficulty_class: 'A', deduction_amount: 2, effective_from: '2026-01-01', enabled: true },
+  { id: 22, worker_type: 'parttime', job_grade: 'P1', difficulty_class: 'B', deduction_amount: 4, effective_from: '2026-01-01', enabled: true },
+  { id: 23, worker_type: 'fulltime', job_grade: 'P2', difficulty_class: 'C', deduction_amount: 6, effective_from: '2026-01-01', enabled: true },
+]
+
 const clientMaterials = [
   {
     id: 1,
@@ -440,6 +446,48 @@ function overviewRows(url) {
   return { items: rows, total: rows.length, page: 1, size: rows.length }
 }
 
+function systemSearchResult(url) {
+  const q = (url.searchParams.get('q') || '').trim().toLowerCase()
+  const source = url.searchParams.get('source') || 'all'
+  const items = systemAssets.filter((asset) => {
+    if (source !== 'all' && asset.source_type !== source) return false
+    if (!q) return true
+    return [asset.product_name, asset.file_name, asset.original_filename, asset.scope_sku_code, asset.resource_id, asset.origin_path]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase()
+      .includes(q)
+  })
+  return { items, total: items.length, page: 1, size: items.length }
+}
+
+function materialBrowseResult(url) {
+  const path = url.searchParams.get('path') || ''
+  const source = url.searchParams.get('source') || 'all'
+  const systemRows = systemAssets.filter((asset) => asset.source_type === 'system')
+  const externalRows = systemAssets.filter((asset) => asset.source_type === 'external')
+  if (!path) {
+    return {
+      path: '',
+      folders: [
+        ...(source === 'all' || source === 'system' ? [{ path: '/系统资源', name: '系统资源', source_type: 'system', file_count: systemRows.length, direct_file_count: systemRows.length }] : []),
+        ...(source === 'all' || source === 'external' ? [{ path: '/p3', name: 'p3', source_type: 'external', file_count: externalRows.length, direct_file_count: externalRows.length }] : []),
+      ],
+      files: [],
+      total: 0,
+      page: 1,
+      size: 100,
+    }
+  }
+  if (path === '/系统资源') {
+    return { path, folders: [], files: systemRows, total: systemRows.length, page: 1, size: 100 }
+  }
+  if (path === '/p3' || path === '/quark') {
+    return { path, folders: [], files: externalRows, total: externalRows.length, page: 1, size: 100 }
+  }
+  return { path, folders: [], files: [], total: 0, page: 1, size: 100 }
+}
+
 function bootstrapFor(role) {
   const simple = role === 'simple'
   const profile = simple ? simpleProfile : adminProfile
@@ -487,6 +535,7 @@ export const assetAuditPages = [
     },
   },
   { name: 'admin-drive', path: '/drive?q=poster&scope=all', ready: '.aw-drive', role: 'admin' },
+  { name: 'admin-quality-errors', path: '/quality-errors', ready: '.aw-quality-errors-page', role: 'admin' },
   { name: 'admin-settlement', path: '/settlement', ready: '.aw-console-hero', role: 'admin' },
   { name: 'admin-notifications', path: '/notifications', ready: '.aw-compact-list', role: 'admin' },
   { name: 'simple-home', path: '/', ready: '.aw-simple-home', role: 'simple' },
@@ -699,6 +748,21 @@ export async function installAssetWorkbenchFixture(context, role = 'admin') {
     if (path.endsWith('/settlement/supplements')) return paginated(route, fixtureSupplements)
     if (path.endsWith('/settlement/supplement-permissions')) return paginated(route, [])
     if (path.endsWith('/difficulty-classes') || path.endsWith('/difficulty-classes/admin')) return json(route, difficultyClasses)
+    if (path.endsWith('/deduction-rules')) return paginated(route, deductionRules)
+    if (path.endsWith('/error-imports/excel') && route.request().method() === 'POST') {
+      return json(route, {
+        id: 901,
+        import_no: 'ERR-202606-001',
+        business_month: url.searchParams.get('business_month') || '2026-06',
+        uploaded_by: 1001,
+        original_filename: 'quality-errors.xlsx',
+        status: 'completed',
+        total_rows: 2,
+        matched_rows: 2,
+        unmatched_rows: 0,
+        ambiguous_rows: 0,
+      })
+    }
     if (path.endsWith('/overview-search')) return json(route, overviewRows(url))
     if (path.endsWith('/drive/directories')) return json(route, driveDirectories())
     if (path.endsWith('/drive/orders')) return json(route, driveOrders(url))
@@ -728,7 +792,8 @@ export async function installAssetWorkbenchFixture(context, role = 'admin') {
         mime_type: 'image/png',
       })
     }
-    if (path.endsWith('/system-search')) return json(route, { items: systemAssets, total: systemAssets.length, page: 1, size: systemAssets.length })
+    if (path.endsWith('/system-search')) return json(route, systemSearchResult(url))
+    if (path.endsWith('/materials/browse')) return json(route, materialBrowseResult(url))
     if (path.endsWith('/upload-directories') || path.endsWith('/upload-directories/admin')) return json(route, uploadDirectories)
     if (path.endsWith('/client-materials')) return json(route, clientMaterials)
     if (path.endsWith('/client-materials/1/preview')) {

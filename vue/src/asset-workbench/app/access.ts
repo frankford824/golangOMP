@@ -79,6 +79,12 @@ export const assetWorkbenchRouteAccess = {
     aliases: ['上传台账', '上传记录', '作品总览', '作品台账'],
     requiresAnyCapability: ['asset.workbench.manage', 'asset.workbench.settlement'],
   },
+  '/quality-errors': {
+    label: '出错记录',
+    subtitle: '导入出错表，自动计算扣款',
+    aliases: ['质检', '质检扣款', '出错/质检', '错误记录'],
+    requiresAnyCapability: ['asset.workbench.manage', 'asset.workbench.settlement'],
+  },
   '/materials': {
     label: '素材库',
     subtitle: '已并入素材网盘',

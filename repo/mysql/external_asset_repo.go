@@ -1113,13 +1113,16 @@ func (r *externalAssetRepo) MarkPreviewPreparePending(ctx context.Context, id in
 	return wrapExternalAssetUpdate(err, "mark external preview pending")
 }
 
-func (r *externalAssetRepo) ListDirectURLRefreshCandidates(ctx context.Context, limit int, staleBefore time.Time) ([]*domain.ExternalAssetRecord, error) {
+func (r *externalAssetRepo) ListDirectURLRefreshCandidates(ctx context.Context, mountPaths []string, limit int, staleBefore time.Time) ([]*domain.ExternalAssetRecord, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
+	mountClause, mountArgs := externalAssetQueueMountClause(mountPaths)
+	args := append(mountArgs, staleBefore.UTC(), limit)
 	rows, err := r.db.db.QueryContext(ctx, externalAssetSelect+`
 		WHERE kind = 'netdisk'
 		  AND is_dir = 0
+		  `+mountClause+`
 		  AND (
 		    raw_url IS NULL
 		    OR raw_url = ''
@@ -1128,7 +1131,7 @@ func (r *externalAssetRepo) ListDirectURLRefreshCandidates(ctx context.Context, 
 		    OR last_link_checked_at <= ?
 		  )
 		ORDER BY COALESCE(last_link_checked_at, '1970-01-01') ASC, updated_at DESC, id DESC
-		LIMIT ?`, staleBefore.UTC(), limit)
+		LIMIT ?`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list external direct url refresh candidates: %w", err)
 	}
@@ -1136,18 +1139,24 @@ func (r *externalAssetRepo) ListDirectURLRefreshCandidates(ctx context.Context, 
 	return scanExternalAssetRows(rows)
 }
 
-func (r *externalAssetRepo) ListPendingOSS(ctx context.Context, limit int) ([]*domain.ExternalAssetRecord, error) {
-	return r.ListPendingOSSPrioritized(ctx, nil, limit)
+func (r *externalAssetRepo) ListPendingOSS(ctx context.Context, mountPaths []string, limit int) ([]*domain.ExternalAssetRecord, error) {
+	return r.ListPendingOSSPrioritized(ctx, nil, mountPaths, limit)
 }
 
-func (r *externalAssetRepo) ListPendingOSSPrioritized(ctx context.Context, prefixes []repo.ExternalAssetOriginPrefix, limit int) ([]*domain.ExternalAssetRecord, error) {
+func (r *externalAssetRepo) ListPendingOSSPrioritized(ctx context.Context, prefixes []repo.ExternalAssetOriginPrefix, mountPaths []string, limit int) ([]*domain.ExternalAssetRecord, error) {
 	limit = externalAssetPrepareLimit(limit)
 	priorityOrder, priorityArgs := externalAssetOriginPrefixPriorityOrder(prefixes)
-	args := append(priorityArgs, limit)
+	mountClause, mountArgs := externalAssetQueueMountClause(mountPaths)
+	args := append(mountArgs, priorityArgs...)
+	args = append(args, limit)
 	rows, err := r.db.db.QueryContext(ctx, externalAssetSelect+`
-		WHERE kind = 'nas_local'
+		WHERE kind IN ('nas_local', 'netdisk')
 		  AND is_dir = 0
-		  AND oss_sync_status IN ('pending', 'failed')
+		  `+mountClause+`
+		  AND (
+		    oss_sync_status = 'pending'
+		    OR (oss_sync_status = 'failed' AND updated_at <= UTC_TIMESTAMP() - INTERVAL 10 MINUTE)
+		  )
 		ORDER BY `+priorityOrder+`CASE oss_sync_status WHEN 'pending' THEN 0 ELSE 1 END, updated_at DESC, id DESC
 		LIMIT ?`, args...)
 	if err != nil {
@@ -1157,18 +1166,38 @@ func (r *externalAssetRepo) ListPendingOSSPrioritized(ctx context.Context, prefi
 	return scanExternalAssetRows(rows)
 }
 
-func (r *externalAssetRepo) ListPendingPreview(ctx context.Context, limit int) ([]*domain.ExternalAssetRecord, error) {
+func (r *externalAssetRepo) ListPendingPreview(ctx context.Context, mountPaths []string, limit int) ([]*domain.ExternalAssetRecord, error) {
 	limit = externalAssetPrepareLimit(limit)
+	mountClause, mountArgs := externalAssetQueueMountClause(mountPaths)
+	args := append(mountArgs, limit)
 	rows, err := r.db.db.QueryContext(ctx, externalAssetSelect+`
 		WHERE is_dir = 0
-		  AND preview_status IN ('pending', 'failed')
+		  `+mountClause+`
+		  AND (
+		    preview_status = 'pending'
+		    OR (preview_status = 'failed' AND updated_at <= UTC_TIMESTAMP() - INTERVAL 10 MINUTE)
+		  )
 		ORDER BY CASE preview_status WHEN 'pending' THEN 0 ELSE 1 END, updated_at DESC, id DESC
-		LIMIT ?`, limit)
+		LIMIT ?`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("list external preview pending: %w", err)
 	}
 	defer rows.Close()
 	return scanExternalAssetRows(rows)
+}
+
+func externalAssetQueueMountClause(mountPaths []string) (string, []interface{}) {
+	cleanMounts := cleanExternalAssetMountPaths(mountPaths)
+	if len(cleanMounts) == 0 {
+		return "", nil
+	}
+	placeholders := make([]string, 0, len(cleanMounts))
+	args := make([]interface{}, 0, len(cleanMounts))
+	for _, mount := range cleanMounts {
+		placeholders = append(placeholders, "?")
+		args = append(args, mount)
+	}
+	return `AND mount_path IN (` + strings.Join(placeholders, ",") + `)`, args
 }
 
 func externalAssetPrepareLimit(limit int) int {

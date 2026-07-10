@@ -31,6 +31,7 @@ import {
   type MaterialFolderRow,
   type MaterialSourceFilter,
   type OverviewSearchRow,
+  type SystemAssetDownloadInfo,
   type SystemAssetRow,
   type SystemAssetPreviewMeta,
   type UploadDirectoryRow,
@@ -47,6 +48,7 @@ import WorkbenchFolderIcon from '@aw/shared/icons/WorkbenchFolderIcon.vue'
 import WorkbenchPreviewDialog from '@aw/shared/preview/WorkbenchPreviewDialog.vue'
 import { formatShanghaiDateTime } from '@aw/shared/format/dateTime'
 import { formatMoney } from '@aw/shared/format/number'
+import { previewIsPreparing, waitForPreparedDownload, waitForPreparedPreview } from '@aw/shared/download/preparedDownload'
 import SpreadsheetWorkbench from '@aw/shared/spreadsheet/SpreadsheetWorkbench.vue'
 import type {
   WorkbenchSpreadsheetActionPayload,
@@ -164,6 +166,7 @@ const batchJobsError = ref('')
 const selectedMaterialIds = ref<Set<string>>(new Set())
 const materialPreviewUrls = ref<Record<string, string>>({})
 const materialPreviewLoadingIds = ref<Set<string>>(new Set())
+const materialDownloadActiveIds = ref<Set<string>>(new Set())
 const activeMaterial = shallowRef<SystemAssetRow | null>(null)
 const publishingClientMaterial = ref(false)
 const batchUpdatingClientMaterials = ref(false)
@@ -2267,6 +2270,28 @@ function canPreviewArchiveVirtualFile(file: ArchiveVirtualFile) {
   return ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp', 'svg', 'tif', 'tiff', 'pdf', 'mp4', 'webm', 'mov', 'm4v'].includes(ext)
 }
 
+function clearMaterialResultSnapshot(options: { clearFolders?: boolean } = {}) {
+  materialItems.value = []
+  materialFileTotal.value = 0
+  materialPage.value = 1
+  selectedMaterialIds.value = new Set()
+  activeMaterial.value = null
+  if (!options.clearFolders) return
+  materialKnownFolders.value = {}
+  selectedMaterialFolderPath.value = ''
+  expandedMaterialFolderPaths.value = new Set([''])
+}
+
+function resetMaterialScopeSnapshot() {
+  materialAbortController?.abort()
+  materialAbortController = null
+  materialRequestSeq += 1
+  materialLoading.value = false
+  materialLoadingMore.value = false
+  materialError.value = ''
+  clearMaterialResultSnapshot({ clearFolders: true })
+}
+
 async function loadMaterials(query = materialQuery.value, options: { append?: boolean } = {}) {
   if (!canUseOperational.value) return
   const nextQuery = query.trim()
@@ -2287,9 +2312,7 @@ async function loadMaterials(query = materialQuery.value, options: { append?: bo
   materialQuery.value = nextQuery
   const page = append ? materialPage.value + 1 : 1
   if (!append) {
-    selectedMaterialFolderPath.value = ''
-    activeMaterial.value = null
-    selectedMaterialIds.value = new Set()
+    clearMaterialResultSnapshot({ clearFolders: true })
   }
   try {
     if (canManageDrive.value) {
@@ -2363,10 +2386,9 @@ async function loadMaterialFolder(path = selectedMaterialFolderPath.value, optio
   materialError.value = ''
   const page = append ? materialPage.value + 1 : 1
   if (!append) {
+    clearMaterialResultSnapshot()
     materialQuery.value = ''
     selectedMaterialFolderPath.value = normalized
-    activeMaterial.value = null
-    selectedMaterialIds.value = new Set()
     materialSourceFilter.value = materialRequestSourceForPath(normalized)
   }
   rememberMaterialPath(normalized)
@@ -2438,14 +2460,13 @@ function loadMoreMaterials() {
 }
 
 function refreshMaterialsForFilters() {
-  selectedMaterialIds.value = new Set()
-  activeMaterial.value = null
   materialSourceFilter.value = normalizeMaterialSourceFilter(materialSourceFilter.value)
   materialFormatFilter.value = normalizeMaterialFormatFilter(materialFormatFilter.value)
   materialBusinessLaneFilter.value = normalizeMaterialBusinessLaneFilter(materialBusinessLaneFilter.value)
   if (materialBusinessLaneFilter.value !== 'all' && materialSourceFilter.value !== 'system') {
     materialSourceFilter.value = 'system'
   }
+  resetMaterialScopeSnapshot()
   if (materialQuery.value.trim()) {
     void loadMaterials(materialQuery.value)
     return
@@ -2455,7 +2476,7 @@ function refreshMaterialsForFilters() {
 
 function clearMaterialSearch() {
   materialQuery.value = ''
-  selectedMaterialIds.value = new Set()
+  resetMaterialScopeSnapshot()
   void loadMaterialFolder(materialDefaultFolderPathForSource())
 }
 
@@ -2475,7 +2496,11 @@ async function openMaterialPreview(asset: SystemAssetRow) {
     download: () => downloadMaterial(asset),
   })
   try {
-    const meta = await previewMaterial(asset)
+    let meta = await previewMaterial(asset)
+    if (asset.material_id && previewIsPreparing(meta)) {
+      previewEmptyLabel.value = '正在生成预览，完成后会自动显示'
+      meta = await waitForPreparedPreview(meta, () => assetWorkbenchApi.previewClientMaterial(asset.material_id as number))
+    }
     const url = meta.preview_url || meta.download_url || ''
     if (url) {
       materialPreviewUrls.value = { ...materialPreviewUrls.value, [key]: url }
@@ -2500,14 +2525,56 @@ async function previewMaterial(asset: SystemAssetRow): Promise<SystemAssetPrevie
 }
 
 async function downloadMaterial(asset: SystemAssetRow) {
+  const key = materialAssetKey(asset)
+  if (materialDownloadActiveIds.value.has(key)) {
+    notice.value = '这个文件正在准备下载，请稍候'
+    return
+  }
+  materialDownloadActiveIds.value = new Set(materialDownloadActiveIds.value).add(key)
+  actionError.value = ''
+  notice.value = '正在生成下载地址'
   try {
-    const meta = asset.material_id
+    let meta = asset.material_id
       ? await assetWorkbenchApi.downloadClientMaterial(asset.material_id)
       : await assetWorkbenchApi.downloadMaterialAsset(asset)
-    if (meta.download_url) window.open(meta.download_url, '_blank', 'noopener,noreferrer')
+    if (asset.material_id) {
+      meta = await waitForPreparedDownload(
+        meta,
+        () => assetWorkbenchApi.downloadClientMaterial(asset.material_id as number),
+        {
+          onWaiting: (attempt) => {
+            notice.value = attempt === 1
+              ? '首次下载需要准备源文件，完成后会自动开始，请保持页面打开'
+              : '正在准备源文件，完成后会自动开始下载'
+          },
+        },
+      )
+    }
+    startMaterialBrowserDownload(meta)
+    notice.value = `已开始下载：${meta.filename || materialDisplayTitle(asset)}`
   } catch (err) {
     actionError.value = err instanceof Error ? err.message : '素材下载失败'
+  } finally {
+    const active = new Set(materialDownloadActiveIds.value)
+    active.delete(key)
+    materialDownloadActiveIds.value = active
   }
+}
+
+function startMaterialBrowserDownload(meta: SystemAssetDownloadInfo) {
+  const url = String(meta.download_url ?? '').trim()
+  if (!url) throw new Error('当前文件暂时无法下载，请稍后重试')
+  if (String(meta.access_hint ?? '').includes('oss')) {
+    const link = document.createElement('a')
+    link.href = url
+    link.download = meta.filename || 'download'
+    link.rel = 'noopener'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    return
+  }
+  window.open(url, '_blank', 'noopener,noreferrer')
 }
 
 function materialPreviewRows(asset: SystemAssetRow, meta: SystemAssetPreviewMeta | null): Array<[string, string]> {
@@ -2926,10 +2993,14 @@ function syncEditForm(file: DriveFileRow | null) {
 }
 
 watch(selectedFile, syncEditForm)
-watch(activeMode, (mode) => {
-  if (mode === 'operational' && materialItems.value.length === 0 && !suppressMaterialAutoload.value && !materialLoading.value) {
-    void loadMaterials()
+watch(activeMode, (mode, previousMode) => {
+  if (mode !== 'operational' || previousMode === 'operational' || suppressMaterialAutoload.value) return
+  resetMaterialScopeSnapshot()
+  if (materialQuery.value.trim()) {
+    void loadMaterials(materialQuery.value)
+    return
   }
+  void loadMaterialFolder(materialDefaultFolderPathForSource())
 })
 watch(
   () => [route.query.q, route.query.scope] as const,

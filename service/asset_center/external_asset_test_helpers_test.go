@@ -136,19 +136,19 @@ func (r *assetCenterExternalRepoStub) MarkPreviewPreparePending(_ context.Contex
 	return nil
 }
 
-func (r *assetCenterExternalRepoStub) ListDirectURLRefreshCandidates(context.Context, int, time.Time) ([]*domain.ExternalAssetRecord, error) {
+func (r *assetCenterExternalRepoStub) ListDirectURLRefreshCandidates(context.Context, []string, int, time.Time) ([]*domain.ExternalAssetRecord, error) {
 	return nil, nil
 }
 
-func (r *assetCenterExternalRepoStub) ListPendingOSS(context.Context, int) ([]*domain.ExternalAssetRecord, error) {
+func (r *assetCenterExternalRepoStub) ListPendingOSS(context.Context, []string, int) ([]*domain.ExternalAssetRecord, error) {
 	return nil, nil
 }
 
-func (r *assetCenterExternalRepoStub) ListPendingOSSPrioritized(context.Context, []repo.ExternalAssetOriginPrefix, int) ([]*domain.ExternalAssetRecord, error) {
+func (r *assetCenterExternalRepoStub) ListPendingOSSPrioritized(context.Context, []repo.ExternalAssetOriginPrefix, []string, int) ([]*domain.ExternalAssetRecord, error) {
 	return nil, nil
 }
 
-func (r *assetCenterExternalRepoStub) ListPendingPreview(context.Context, int) ([]*domain.ExternalAssetRecord, error) {
+func (r *assetCenterExternalRepoStub) ListPendingPreview(context.Context, []string, int) ([]*domain.ExternalAssetRecord, error) {
 	return nil, nil
 }
 

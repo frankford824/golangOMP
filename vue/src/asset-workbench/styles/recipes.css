@@ -2415,6 +2415,149 @@ body.aw-submission-dialog-locked {
   min-width: min(320px, 100%);
 }
 
+.aw-quality-errors__metrics {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.aw-quality-errors__workbench {
+  display: grid;
+  grid-template-columns: minmax(236px, 276px) minmax(0, 1fr);
+  align-items: start;
+  gap: var(--aw-space-4);
+  min-width: 0;
+}
+
+.aw-quality-errors__steps {
+  position: sticky;
+  top: var(--aw-space-4);
+  display: grid;
+  gap: var(--aw-space-1);
+  border: 1px solid var(--aw-hairline);
+  border-radius: var(--aw-radius-md);
+  background: var(--aw-surface);
+  box-shadow: var(--aw-shadow-panel);
+  padding: var(--aw-space-3);
+}
+
+.aw-quality-errors__steps > div {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  column-gap: var(--aw-space-3);
+  row-gap: 2px;
+  padding: var(--aw-space-3);
+  border-radius: var(--aw-radius-sm);
+}
+
+.aw-quality-errors__steps > div + div {
+  border-top: 1px solid var(--aw-hairline);
+  border-radius: 0;
+}
+
+.aw-quality-errors__steps span {
+  grid-row: 1 / span 2;
+  display: inline-grid;
+  place-items: center;
+  align-self: start;
+  width: 30px;
+  height: 30px;
+  border: 1px solid color-mix(in srgb, var(--aw-accent) 34%, var(--aw-hairline));
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--aw-accent) 9%, var(--aw-surface));
+  color: var(--aw-accent-strong);
+  font-family: var(--aw-font-mono);
+  font-size: var(--aw-font-size-sm);
+  font-weight: var(--aw-weight-strong);
+}
+
+.aw-quality-errors__steps strong,
+.aw-quality-errors__steps p {
+  margin: 0;
+}
+
+.aw-quality-errors__steps p {
+  color: var(--aw-ink-muted);
+  font-size: var(--aw-font-size-xs);
+  line-height: 1.55;
+}
+
+.aw-quality-errors__workspace,
+.aw-quality-errors__import,
+.aw-quality-errors__rules {
+  display: grid;
+  gap: var(--aw-space-4);
+  min-width: 0;
+}
+
+.aw-quality-errors__dropzone {
+  display: grid;
+  place-items: center;
+  gap: var(--aw-space-2);
+  width: 100%;
+  min-height: 220px;
+  border: 1px dashed color-mix(in srgb, var(--aw-accent) 42%, var(--aw-hairline));
+  border-radius: var(--aw-radius-md);
+  background: color-mix(in srgb, var(--aw-accent) 4%, var(--aw-surface));
+  color: var(--aw-ink);
+  cursor: pointer;
+  font: inherit;
+  padding: var(--aw-space-6);
+  text-align: center;
+  transition:
+    border-color var(--aw-motion-fast) var(--aw-ease-standard),
+    background var(--aw-motion-fast) var(--aw-ease-standard),
+    box-shadow var(--aw-motion-fast) var(--aw-ease-standard);
+}
+
+.aw-quality-errors__dropzone:hover,
+.aw-quality-errors__dropzone:focus-visible,
+.aw-quality-errors__dropzone.is-active {
+  border-color: var(--aw-accent);
+  background: color-mix(in srgb, var(--aw-accent) 9%, var(--aw-surface));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--aw-accent) 10%, transparent);
+}
+
+.aw-quality-errors__dropzone:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.aw-quality-errors__dropzone svg {
+  color: var(--aw-accent);
+}
+
+.aw-quality-errors__dropzone strong {
+  font-size: var(--aw-font-size-lg);
+}
+
+.aw-quality-errors__dropzone span {
+  color: var(--aw-ink-muted);
+  font-size: var(--aw-font-size-sm);
+}
+
+.aw-quality-errors__required {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--aw-space-2);
+}
+
+.aw-quality-errors__required span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--aw-space-2);
+  min-height: var(--aw-row-sm);
+  border: 1px solid var(--aw-hairline);
+  border-radius: var(--aw-radius-sm);
+  background: var(--aw-surface-muted);
+  color: var(--aw-ink-2);
+  font-size: var(--aw-font-size-sm);
+  font-weight: var(--aw-weight-strong);
+}
+
+.aw-quality-errors__required svg {
+  color: var(--aw-success);
+}
+
 .aw-advanced-settings {
   border: 1px solid var(--aw-hairline);
   border-radius: var(--aw-radius-md);
@@ -8454,6 +8597,19 @@ body.aw-submission-dialog-locked {
 
   .aw-settlement-workbench {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .aw-quality-errors__metrics,
+  .aw-quality-errors__workbench {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .aw-quality-errors__steps {
+    position: static;
+  }
+
+  .aw-quality-errors__required {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .aw-settlement-nav {

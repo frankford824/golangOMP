@@ -154,6 +154,7 @@ type ExternalAssetsConfig struct {
 	PrepareInterval     time.Duration
 	PrepareLimit        int
 	PrepareConcurrency  int
+	PrepareMounts       string
 }
 
 type AssetWorkbenchConfig struct {
@@ -369,7 +370,7 @@ func Load() (*Config, error) {
 			BFFBrowserBaseURL:   getEnv("EXTERNAL_ASSETS_BFF_BROWSER_BASE_URL", ""),
 			AListBaseURL:        getEnv("EXTERNAL_ASSETS_ALIST_BASE_URL", ""),
 			AListToken:          getEnv("EXTERNAL_ASSETS_ALIST_TOKEN", ""),
-			AListMounts:         getEnv("EXTERNAL_ASSETS_ALIST_MOUNTS", "/quark:netdisk,/p1:netdisk,/p2:netdisk,/p3:nas_local"),
+			AListMounts:         getEnv("EXTERNAL_ASSETS_ALIST_MOUNTS", "/quark:netdisk,/p3:nas_local"),
 			AListTimeout:        mustParseDuration(getEnv("EXTERNAL_ASSETS_ALIST_TIMEOUT", "30s")),
 			SyncInterval:        mustParseDuration(getEnv("EXTERNAL_ASSETS_SYNC_INTERVAL", "1h")),
 			LinkRefreshInterval: mustParseDuration(getEnv("EXTERNAL_ASSETS_LINK_REFRESH_INTERVAL", "1h")),
@@ -388,6 +389,7 @@ func Load() (*Config, error) {
 			PrepareInterval:     mustParseDuration(getEnv("EXTERNAL_ASSETS_PREPARE_INTERVAL", "30s")),
 			PrepareLimit:        mustParseInt(getEnv("EXTERNAL_ASSETS_PREPARE_LIMIT", "50")),
 			PrepareConcurrency:  mustParseInt(getEnv("EXTERNAL_ASSETS_PREPARE_CONCURRENCY", "4")),
+			PrepareMounts:       getEnv("EXTERNAL_ASSETS_PREPARE_MOUNTS", ""),
 		},
 		AssetWorkbench: AssetWorkbenchConfig{
 			CookieDomain:                getEnv("ASSET_COOKIE_DOMAIN", ""),
