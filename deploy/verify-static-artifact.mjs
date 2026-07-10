@@ -97,6 +97,9 @@ if (!config.allowedBuildCommands.has(manifest.buildCommand)) {
 if (typeof manifest.gitCommit !== 'string' || !/^[0-9a-f]{40}$/.test(manifest.gitCommit)) {
   fail('Manifest gitCommit must be a 40-character commit hash')
 }
+if (args['expected-commit'] && manifest.gitCommit !== args['expected-commit']) {
+  fail(`Manifest gitCommit expected ${JSON.stringify(args['expected-commit'])} but got ${JSON.stringify(manifest.gitCommit)}`)
+}
 if (typeof manifest.builtAt !== 'string' || Number.isNaN(Date.parse(manifest.builtAt))) {
   fail('Manifest builtAt must be an ISO timestamp')
 }

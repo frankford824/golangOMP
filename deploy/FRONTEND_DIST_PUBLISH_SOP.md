@@ -83,6 +83,7 @@ Before publishing, confirm:
 - `dist/front/index.html` exists.
 - `dist/front/assets/` exists.
 - `dist/front/static-artifact-manifest.json` exists and says `app=main-ops`, `entry=index.html`, and `targetHost=yongbo.cloud`.
+- `static-artifact-manifest.json.gitCommit` exactly matches the current repository `HEAD`; publish scripts reject stale or pre-commit builds.
 - `dist/front/asset.html` does not exist.
 - production build does not hardcode `localhost` or `127.0.0.1`.
 - browser API traffic remains same-origin and reaches `/v1`.
@@ -121,6 +122,8 @@ The script performs:
 8. `systemctl reload nginx`.
 9. HTTP probes for `/`, `/login`, `/health`, and `/v1/auth/login`.
 10. WebSocket handshake probe for `/ws/v1` when notification or realtime pages are affected.
+
+The main-ops and asset-workbench publish scripts both stop before upload when the local artifact commit differs from `HEAD`. A remote backup failure is fatal and must not be bypassed.
 
 After publish, use a browser and a real account to smoke test the affected workflow.
 

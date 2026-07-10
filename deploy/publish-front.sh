@@ -10,6 +10,7 @@ VERIFY_STATIC_ARTIFACT="$ROOT/deploy/verify-static-artifact.mjs"
 SSH_HOST="${SSH_HOST:-jst_ecs}"
 REMOTE_WEB="/var/www/yongbo.cloud"
 REMOTE_BACKUP_PARENT="/var/www/backups"
+EXPECTED_COMMIT="$(git -C "$ROOT" rev-parse HEAD)"
 
 SKIP_CHECKS=false
 SKIP_VERIFY=false
@@ -37,7 +38,7 @@ step() { echo "[publish-front] $*"; }
 
 guard_main_artifact() {
   command -v node >/dev/null || die "node is required for static artifact manifest validation"
-  node "$VERIFY_STATIC_ARTIFACT" --app main-ops --dir "$FRONT" || die "static artifact manifest validation failed"
+  node "$VERIFY_STATIC_ARTIFACT" --app main-ops --dir "$FRONT" --expected-commit "$EXPECTED_COMMIT" || die "static artifact manifest validation failed"
   [[ -d "$FRONT" ]] || die "Missing directory: $FRONT"
   [[ -f "$FRONT/index.html" ]] || die "Missing file: $FRONT/index.html"
   [[ -d "$FRONT/assets" ]] || die "Missing directory: $FRONT/assets"
@@ -104,7 +105,7 @@ else
 fi
 
 step "Remote artifact guard: main-ops staging ..."
-ssh "$SSH_HOST" "test -f \"$STAGING/index.html\" && test -d \"$STAGING/assets\" && test -f \"$STAGING/static-artifact-manifest.json\" && test ! -f \"$STAGING/asset.html\" && grep -q 'id=\"app\"' \"$STAGING/index.html\" && ! grep -q 'asset-workbench-app' \"$STAGING/index.html\" && ! grep -Eq 'src=\"/assets/asset-[^\"]+\\.js\"' \"$STAGING/index.html\" && grep -Eq '\"app\"[[:space:]]*:[[:space:]]*\"main-ops\"' \"$STAGING/static-artifact-manifest.json\" && grep -Eq '\"entry\"[[:space:]]*:[[:space:]]*\"index.html\"' \"$STAGING/static-artifact-manifest.json\" && grep -Eq '\"targetHost\"[[:space:]]*:[[:space:]]*\"yongbo.cloud\"' \"$STAGING/static-artifact-manifest.json\" && grep -Eq '\"targetWebRoot\"[[:space:]]*:[[:space:]]*\"/var/www/yongbo.cloud\"' \"$STAGING/static-artifact-manifest.json\"" \
+ssh "$SSH_HOST" "test -f \"$STAGING/index.html\" && test -d \"$STAGING/assets\" && test -f \"$STAGING/static-artifact-manifest.json\" && test ! -f \"$STAGING/asset.html\" && grep -q 'id=\"app\"' \"$STAGING/index.html\" && ! grep -q 'asset-workbench-app' \"$STAGING/index.html\" && ! grep -Eq 'src=\"/assets/asset-[^\"]+\\.js\"' \"$STAGING/index.html\" && grep -Eq '\"app\"[[:space:]]*:[[:space:]]*\"main-ops\"' \"$STAGING/static-artifact-manifest.json\" && grep -Eq '\"entry\"[[:space:]]*:[[:space:]]*\"index.html\"' \"$STAGING/static-artifact-manifest.json\" && grep -Eq '\"targetHost\"[[:space:]]*:[[:space:]]*\"yongbo.cloud\"' \"$STAGING/static-artifact-manifest.json\" && grep -Eq '\"targetWebRoot\"[[:space:]]*:[[:space:]]*\"/var/www/yongbo.cloud\"' \"$STAGING/static-artifact-manifest.json\" && grep -Eq '\"gitCommit\"[[:space:]]*:[[:space:]]*\"$EXPECTED_COMMIT\"' \"$STAGING/static-artifact-manifest.json\"" \
   || die "staged artifact failed the main-ops identity guard"
 
 step "Sync to web root, chmod, nginx reload"
