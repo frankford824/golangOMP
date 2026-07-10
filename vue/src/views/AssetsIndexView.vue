@@ -476,6 +476,7 @@
           <span>表格记录 {{ excelPackageResult.parsedRows }} 行</span>
           <span>系统图片 {{ excelPackageResult.systemRows }} 张</span>
           <span>外部图片 {{ excelPackageResult.externalRows }} 张</span>
+          <span>套装目录 {{ excelPackageResult.setGroups }} 个</span>
           <span>待 OSS 准备 {{ excelPackageResult.pendingRows }} 张</span>
         </div>
 
@@ -874,7 +875,10 @@ import {
   sanitizeZipEntryName,
 } from '@/utils/batchZipDownload'
 import {
+  countExcelPackageRows,
   createExcelPackageBlobLoader,
+  excelPackageSourceKey,
+  resolveExcelPackageSetFolders,
   resolveExcelPackageZipFilename,
   sumExcelPackageQuantities,
 } from '@/utils/excelPackageZip'
@@ -981,6 +985,7 @@ type ExcelPackageResultState = {
   systemRows: number
   externalRows: number
   pendingRows: number
+  setGroups: number
   failedRows: number
   totalFiles: number
   copiedFiles: number
@@ -995,6 +1000,7 @@ const excelPackageResult = reactive<ExcelPackageResultState>({
   systemRows: 0,
   externalRows: 0,
   pendingRows: 0,
+  setGroups: 0,
   failedRows: 0,
   totalFiles: 0,
   copiedFiles: 0,
@@ -2085,6 +2091,7 @@ function resetExcelPackageResult() {
   excelPackageResult.systemRows = 0
   excelPackageResult.externalRows = 0
   excelPackageResult.pendingRows = 0
+  excelPackageResult.setGroups = 0
   excelPackageResult.failedRows = 0
   excelPackageResult.totalFiles = 0
   excelPackageResult.copiedFiles = 0
@@ -2122,13 +2129,16 @@ async function downloadExcelPackageAsZip(
   const { default: JSZip } = await import('jszip')
   const zip = new JSZip()
   const downloadFailures: AssetExcelPackageFailure[] = []
+  const setFolders = resolveExcelPackageSetFolders(items)
+  const setFolderCount = new Set(setFolders.filter(Boolean)).size
   const reportLines: string[] = [
     '仓库外发打包报告',
     `生成时间：${formatDateTimeBeijing(new Date().toISOString())}`,
-    `表格记录：${items.length + failures.length} 行`,
+    `表格记录：${countExcelPackageRows([...items, ...failures])} 行`,
     `需求图片：${sumExcelPackageQuantities([...items, ...failures])} 张`,
     `匹配图片：${sumExcelPackageQuantities(items)} 张`,
     `未匹配图片：${sumExcelPackageQuantities(failures)} 张`,
+    `套装目录：${setFolderCount} 个`,
     '',
     '失败明细：',
     ...(failures.length ? failures.map(formatExcelFailure) : ['无']),
@@ -2138,7 +2148,7 @@ async function downloadExcelPackageAsZip(
   let copied = 0
   const addressByOrder = new Map<string, string>()
   const failedLinesByOrder = new Map<string, string[]>()
-  const skuCountersByOrder = new Map<string, number>()
+  const sourceCounters = new Map<string, number>()
   const loadBlob = createExcelPackageBlobLoader()
 
   for (const item of [...items, ...failures]) {
@@ -2153,9 +2163,8 @@ async function downloadExcelPackageAsZip(
     failedLinesByOrder.set(order, lines)
   }
 
-  await mapWithConcurrency(items, EXCEL_PACKAGE_CONCURRENCY, async (item) => {
+  await mapWithConcurrency(items, EXCEL_PACKAGE_CONCURRENCY, async (item, itemIndex) => {
     const url = String(item.download_url ?? '').trim()
-    const order = excelPackageOrderKey(item.order_no)
     if (!url) {
       reportLines.push(formatExcelFailure({
         row_number: item.row_number,
@@ -2179,14 +2188,17 @@ async function downloadExcelPackageAsZip(
     }
     try {
       const blob = await loadBlob(item)
-      const counterKey = `${order}\n${item.sku_code || item.sku_name || item.asset_id}`
-      let sequence = skuCountersByOrder.get(counterKey) ?? 0
+      const setFolder = setFolders[itemIndex] ?? ''
+      const counterKey = `${setFolder || excelPackageOrderKey(item.order_no)}\n${excelPackageSourceKey(item)}`
+      let sequence = sourceCounters.get(counterKey) ?? 0
       for (let i = 1; i <= item.quantity; i += 1) {
         sequence += 1
-        zip.file(resolveExcelPackageZipFilename(item, sequence), blob, { binary: true, compression: 'STORE' })
+        const filename = resolveExcelPackageZipFilename(item, sequence, { includeBusinessPrefix: !setFolder })
+        const zipPath = setFolder ? `${setFolder}/${filename}` : filename
+        zip.file(zipPath, blob, { binary: true, compression: 'STORE' })
         copied += 1
       }
-      skuCountersByOrder.set(counterKey, sequence)
+      sourceCounters.set(counterKey, sequence)
     } catch (err) {
       const reason = err instanceof Error ? err.message : 'fetch_failed'
       reportLines.push(formatExcelFailure({
@@ -2210,7 +2222,7 @@ async function downloadExcelPackageAsZip(
     } finally {
       completed += 1
       excelPackageResult.copiedFiles = copied
-      excelPackageStatus.value = `正在下载并分拣 ${completed}/${items.length} 条匹配记录，已写入 ${copied} 张图片`
+      excelPackageStatus.value = `正在下载并分拣 ${completed}/${items.length} 个图片组件，已写入 ${copied} 张图片`
     }
   })
 
@@ -2263,12 +2275,14 @@ async function handleExcelPackageFile(event: Event) {
     if (!items.length && !failures.length) throw new Error('没有匹配到可下载的 JPG/PNG 资产')
     const matchedFiles = sumExcelPackageQuantities(items)
     const unmatchedFiles = sumExcelPackageQuantities(failures)
-    excelPackageResult.parsedRows = items.length + failures.length
+    const setFolders = resolveExcelPackageSetFolders(items)
+    excelPackageResult.parsedRows = countExcelPackageRows([...items, ...failures])
     excelPackageResult.matchedRows = matchedFiles
     excelPackageResult.failedRows = unmatchedFiles
     excelPackageResult.totalFiles = manifest?.total_files ?? matchedFiles
     excelPackageResult.systemRows = sumExcelPackageQuantities(items.filter((item) => item.source_type === 'system'))
     excelPackageResult.externalRows = sumExcelPackageQuantities(items.filter((item) => item.source_type === 'external'))
+    excelPackageResult.setGroups = new Set(setFolders.filter(Boolean)).size
     excelPackageResult.pendingRows = sumExcelPackageQuantities(failures.filter(isExcelPackagePendingFailure))
     excelPackageResult.failures = failures
     excelPackagePhase.value = 'downloading'

@@ -3,6 +3,7 @@ package asset_center
 import (
 	"context"
 	"fmt"
+	pathpkg "path"
 	"strings"
 	"testing"
 	"time"
@@ -303,6 +304,93 @@ func TestBuildExcelPackageManifestPrefersOSSReadyExternalCandidate(t *testing.T)
 	}
 	if len(externalRepo.ossPendingIDs) != 0 {
 		t.Fatalf("pending IDs=%v, ready candidate must not enqueue preparation", externalRepo.ossPendingIDs)
+	}
+}
+
+func TestBuildExcelPackageManifestPackagesXuKaiMultiImageFolderAsCompleteSet(t *testing.T) {
+	now := time.Date(2026, 7, 10, 10, 0, 0, 0, time.UTC)
+	parentPath := "/p3/仓库素材区/徐凯/水晶标/叶真婚庆水晶标/HSC33333——真-常规水晶标-卡通喜字款"
+	filenames := []string{"第三张【25x35cm】.jpg", "第一张【24x32cm】.jpg", "第二张【19x15cm】.jpg"}
+	searchRows := make([]*domain.ExternalAssetRecord, 0, len(filenames))
+	for index, filename := range filenames {
+		id := int64(101 + index)
+		searchRows = append(searchRows, &domain.ExternalAssetRecord{
+			ID:             id,
+			ResourceID:     domain.ExternalAssetResourceID(id),
+			Provider:       "alist",
+			Kind:           domain.ExternalAssetKindNASLocal,
+			MountPath:      "/p3",
+			OriginPath:     parentPath + "/" + filename,
+			ParentPath:     parentPath,
+			FileName:       filename,
+			FileExt:        ".jpg",
+			MimeType:       "image/jpeg",
+			FileSize:       int64(1000 + index),
+			Status:         domain.ExternalAssetStatusIndexed,
+			OSSOriginalKey: fmt.Sprintf("external-assets/alist/original/p3/HSC33333/%d.jpg", index+1),
+			OSSSyncStatus:  domain.ExternalAssetOSSStatusReady,
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		})
+	}
+	externalRepo := &assetCenterExternalRepoStub{searchRows: searchRows}
+	ossDirect := baseservice.NewOSSDirectService(baseservice.OSSDirectConfig{
+		Enabled: true, Endpoint: "oss-cn-hangzhou.aliyuncs.com", PublicEndpoint: "oss-cn-hangzhou.aliyuncs.com",
+		Bucket: "test-bucket", AccessKeyID: "test-key", AccessKeySecret: "test-secret", PresignExpiry: 15 * time.Minute,
+	})
+	svc := NewService(&excelPackageRepoStub{}, excelPackagePresignerStub{}, nil)
+	svc.SetExternalAssetService(externalassets.NewService(externalRepo, externalassets.Config{
+		Enabled: true,
+		Mounts:  externalassets.ParseMounts("/p3:nas_local"),
+	}, ossDirect))
+
+	manifest, appErr := svc.BuildExcelPackageManifest(context.Background(), []ExcelPackageRow{
+		{RowNumber: 2, OrderNo: "HSC33333", SKUCode: "HSC33333", Quantity: 2},
+	})
+	if appErr != nil {
+		t.Fatalf("BuildExcelPackageManifest error = %+v", appErr)
+	}
+	if manifest.SuccessCount != 1 || manifest.FailureCount != 0 || len(manifest.Items) != 3 {
+		t.Fatalf("manifest summary = %+v, want one successful set row with three components", manifest)
+	}
+	if manifest.TotalFiles != 6 || manifest.TotalSize != 6006 {
+		t.Fatalf("manifest totals = files:%d size:%d, want 6 files and 6006 bytes", manifest.TotalFiles, manifest.TotalSize)
+	}
+	wantOrder := []string{"第一张【24x32cm】.jpg", "第二张【19x15cm】.jpg", "第三张【25x35cm】.jpg"}
+	for index, item := range manifest.Items {
+		if item.Filename != wantOrder[index] || item.Quantity != 2 || pathpkg.Dir(item.OriginPath) != parentPath || item.PackageFolder != pathpkg.Base(parentPath) {
+			t.Fatalf("items[%d]=%+v, want ordered component %q", index, item, wantOrder[index])
+		}
+	}
+
+	searchRows[1].OSSOriginalKey = ""
+	searchRows[1].OSSSyncStatus = domain.ExternalAssetOSSStatusNone
+	incomplete, appErr := svc.BuildExcelPackageManifest(context.Background(), []ExcelPackageRow{
+		{RowNumber: 2, OrderNo: "HSC33333", SKUCode: "HSC33333", Quantity: 1},
+	})
+	if appErr != nil {
+		t.Fatalf("BuildExcelPackageManifest incomplete set error = %+v", appErr)
+	}
+	if incomplete.SuccessCount != 0 || incomplete.FailureCount != 1 || len(incomplete.Items) != 0 {
+		t.Fatalf("incomplete manifest = %+v, want the whole set rejected", incomplete)
+	}
+	if len(externalRepo.ossPendingIDs) != 1 || externalRepo.ossPendingIDs[0] != searchRows[1].ID {
+		t.Fatalf("pending IDs=%v, want unavailable set component %d queued", externalRepo.ossPendingIDs, searchRows[1].ID)
+	}
+}
+
+func TestExcelPackageSetParentRequiresExactXuKaiSKUFolder(t *testing.T) {
+	valid := "/p3/仓库素材区/徐凯/水晶标/HSC33333——套装/第一张.jpg"
+	if parent, ok := excelPackageSetParent(valid, "HSC33333"); !ok || !strings.HasSuffix(parent, "HSC33333——套装") {
+		t.Fatalf("excelPackageSetParent(valid) = (%q, %v), want XuKai SKU folder", parent, ok)
+	}
+	for _, invalid := range []string{
+		"/p3/仓库素材区/徐凯/水晶标/HSC333330——其他/第一张.jpg",
+		"/p3/其他素材区/HSC33333——套装/第一张.jpg",
+	} {
+		if parent, ok := excelPackageSetParent(invalid, "HSC33333"); ok {
+			t.Fatalf("excelPackageSetParent(%q) = (%q, true), want rejected", invalid, parent)
+		}
 	}
 }
 

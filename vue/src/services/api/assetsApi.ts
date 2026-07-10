@@ -369,6 +369,7 @@ export interface AssetExcelPackageItem {
   download_url: string
   address?: string
   origin_path?: string
+  package_folder?: string
   expires_at?: string | null
 }
 

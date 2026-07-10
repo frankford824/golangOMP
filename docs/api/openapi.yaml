@@ -5841,7 +5841,7 @@ components:
           description: Original Excel row number, used in failure reports.
         order_no:
           type: string
-          description: Order number used as the ZIP folder name.
+          description: Order number retained for address metadata and flat-file disambiguation.
         sku_code:
           type: string
           description: SKU code for asset matching.
@@ -5851,10 +5851,10 @@ components:
         quantity:
           type: integer
           minimum: 1
-          description: Number of image copies to place under the order folder.
+          description: Number of copies for each matched image component. A multi-image XuKai SKU set expands every component by this quantity.
         address:
           type: string
-          description: Optional recipient/address column copied into the order folder as address metadata by the frontend ZIP builder.
+          description: Optional recipient/address column copied into the ZIP address summary by the frontend builder.
         keyword:
           type: string
           description: Optional filename/product keyword for disambiguation.
@@ -5902,6 +5902,9 @@ components:
         origin_path:
           type: string
           description: External asset origin path when the match comes from an external source.
+        package_folder:
+          type: string
+          description: Non-empty only for a complete multi-image set. The frontend must place all items from the same input row and this folder value under one ZIP directory.
         expires_at:
           type: string
           format: date-time
@@ -6006,11 +6009,15 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/AssetExcelPackageFailure'
-        success_count: { type: integer }
-        failure_count: { type: integer }
+        success_count:
+          type: integer
+          description: Successful input-row count. A multi-image set still counts as one successful row.
+        failure_count:
+          type: integer
+          description: Failed input-row count.
         total_files:
           type: integer
-          description: Expanded file count after applying row quantities.
+          description: Expanded image count after applying row quantities and multi-image set components.
         total_size:
           type: integer
           format: int64
@@ -12628,7 +12635,7 @@ paths:
   /v1/assets/excel-package/preview:
     post:
       summary: Preview Excel image package manifest
-      description: Matches uploaded Excel rows to current JPG/PNG system assets and OSS-ready external assets, returns direct download URLs and per-row failures. The frontend builds the ZIP with order-number folders, address files, missing-SKU reports, and quantity-based image copies.
+      description: Matches uploaded Excel rows to current JPG/PNG system assets and OSS-ready external assets, returns direct download URLs and per-row failures. Single images remain flat in the ZIP. Under `/p3/仓库素材区/徐凯`, an exact SKU-prefixed source directory with at least two indexed image files is returned as a complete set; the frontend restores that source directory in the ZIP and keeps all components together. Address summaries, missing-SKU reports, source filenames, and quantity-based copies are preserved.
       tags: [Assets, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
@@ -12665,7 +12672,7 @@ paths:
   /v1/assets/excel-package/preview-file:
     post:
       summary: Preview Excel image package manifest from uploaded file
-      description: Uploads an Eve-compatible .xlsx or .xls template, parses order number, SKU, quantity, address, and keyword columns on the backend, then returns the same Excel image package manifest as /v1/assets/excel-package/preview.
+      description: Uploads an Eve-compatible .xlsx or .xls template, parses order number, SKU, quantity, address, and keyword columns on the backend, then returns the same flat-single-image and complete-multi-image-set manifest as /v1/assets/excel-package/preview.
       tags: [Assets, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:

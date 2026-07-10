@@ -150,7 +150,7 @@ curl -X POST https://api.example.com/v1/assets/batch-download \
 ### 简介
 支持方法: POST。
 
-- `POST`: Matches uploaded Excel rows to current JPG/PNG system assets and OSS-ready external assets, returns direct download URLs and per-row failures. The frontend builds the ZIP with order-number folders, address files, missing-SKU reports, and quantity-based image copies.
+- `POST`: Matches uploaded Excel rows to current JPG/PNG system assets and OSS-ready external assets, returns direct download URLs and per-row failures. Single images remain flat in the ZIP. Under `/p3/仓库素材区/徐凯`, an exact SKU-prefixed source directory with at least two indexed image files is returned as a complete set; the frontend restores that source directory in the ZIP and keeps all components together. Address summaries, missing-SKU reports, source filenames, and quantity-based copies are preserved.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -214,7 +214,7 @@ curl -X POST https://api.example.com/v1/assets/excel-package/preview \
 ### 简介
 支持方法: POST。
 
-- `POST`: Uploads an Eve-compatible .xlsx or .xls template, parses order number, SKU, quantity, address, and keyword columns on the backend, then returns the same Excel image package manifest as /v1/assets/excel-package/preview.
+- `POST`: Uploads an Eve-compatible .xlsx or .xls template, parses order number, SKU, quantity, address, and keyword columns on the backend, then returns the same flat-single-image and complete-multi-image-set manifest as /v1/assets/excel-package/preview.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。

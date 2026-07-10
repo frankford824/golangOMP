@@ -3,7 +3,16 @@ import { sanitizeZipEntryName } from '@/utils/batchZipDownload'
 
 type ExcelPackageZipItem = Pick<
   AssetExcelPackageItem,
-  'asset_id' | 'download_url' | 'filename' | 'order_no' | 'resource_id' | 'sku_code' | 'sku_name' | 'source_type'
+  | 'asset_id'
+  | 'download_url'
+  | 'filename'
+  | 'order_no'
+  | 'package_folder'
+  | 'resource_id'
+  | 'row_number'
+  | 'sku_code'
+  | 'sku_name'
+  | 'source_type'
 >
 
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
@@ -14,7 +23,11 @@ function normalizedIncludes(value: string, expected: string): boolean {
   return normalizedExpected !== '' && normalizedValue.includes(normalizedExpected)
 }
 
-export function resolveExcelPackageZipFilename(item: ExcelPackageZipItem, sequence: number): string {
+export function resolveExcelPackageZipFilename(
+  item: ExcelPackageZipItem,
+  sequence: number,
+  options?: { includeBusinessPrefix?: boolean },
+): string {
   const rawFilename = String(item.filename ?? '').trim()
   const extensionMatch = rawFilename.match(/\.[A-Za-z0-9]{1,10}$/)
   const extension = extensionMatch?.[0] ?? '.jpg'
@@ -25,16 +38,54 @@ export function resolveExcelPackageZipFilename(item: ExcelPackageZipItem, sequen
   const rawOrder = String(item.order_no ?? '').trim()
   const parts: string[] = []
 
-  if (rawOrder && rawOrder.toUpperCase() !== rawSku.toUpperCase() && !normalizedIncludes(sourceBase, rawOrder)) {
-    parts.push(sanitizeZipEntryName(rawOrder, '未知订单'))
-  }
-  if (rawSku && !normalizedIncludes(sourceBase, rawSku)) {
-    parts.push(sanitizeZipEntryName(rawSku, fallback))
+  if (options?.includeBusinessPrefix !== false) {
+    if (rawOrder && rawOrder.toUpperCase() !== rawSku.toUpperCase() && !normalizedIncludes(sourceBase, rawOrder)) {
+      parts.push(sanitizeZipEntryName(rawOrder, '未知订单'))
+    }
+    if (rawSku && !normalizedIncludes(sourceBase, rawSku)) {
+      parts.push(sanitizeZipEntryName(rawSku, fallback))
+    }
   }
   parts.push(sourceBase)
 
   const base = parts.filter((part, index) => part && parts.indexOf(part) === index).join('_') || fallback
   return `${base}_${Math.max(1, Math.trunc(sequence))}${extension}`
+}
+
+export function resolveExcelPackageSetFolders(items: ExcelPackageZipItem[]): string[] {
+  const folders = new Array<string>(items.length).fill('')
+  const groups = new Map<string, { base: string; indexes: number[]; sources: Set<string> }>()
+  items.forEach((item, index) => {
+    const rawFolder = String(item.package_folder ?? '').trim()
+    if (!rawFolder) return
+    const base = sanitizeZipEntryName(rawFolder, String(item.sku_code ?? '').trim() || '套装')
+    const key = [item.row_number ?? index, item.order_no, item.sku_code, rawFolder].join('\u0000')
+    const group = groups.get(key) ?? { base, indexes: [], sources: new Set<string>() }
+    group.indexes.push(index)
+    group.sources.add(excelPackageSourceKey(item))
+    groups.set(key, group)
+  })
+
+  const usedFolders = new Map<string, number>()
+  for (const group of groups.values()) {
+    if (group.sources.size < 2) continue
+    const count = (usedFolders.get(group.base) ?? 0) + 1
+    usedFolders.set(group.base, count)
+    const folder = count === 1 ? group.base : `${group.base} (${count})`
+    group.indexes.forEach((index) => {
+      folders[index] = folder
+    })
+  }
+  return folders
+}
+
+export function countExcelPackageRows(items: Array<{ row_number?: number }>): number {
+  const rows = new Set<string>()
+  items.forEach((item, index) => {
+    const rowNumber = Number(item.row_number)
+    rows.add(Number.isInteger(rowNumber) && rowNumber > 0 ? `row:${rowNumber}` : `item:${index}`)
+  })
+  return rows.size
 }
 
 export function excelPackageSourceKey(item: ExcelPackageZipItem): string {
