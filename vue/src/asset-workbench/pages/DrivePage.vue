@@ -373,17 +373,6 @@ const materialFolderBreadcrumbs = computed(() => {
 const selectedMaterialFolderNode = computed(() =>
   allMaterialDirectoryNodes.value.find((node) => node.path === selectedMaterialFolderPath.value) ?? allMaterialDirectoryNodes.value[0] ?? null,
 )
-const materialFilterSummary = computed(() => {
-  const source = materialSourceOptions.find((option) => option.value === materialSourceFilter.value)?.label || '全部来源'
-  const format = materialFormatOptions.find((option) => option.value === materialFormatFilter.value)?.label || '全部格式'
-  const businessLane = materialBusinessLaneOptions.find((option) => option.value === materialBusinessLaneFilter.value)?.label || '全部分类'
-  const parts = [
-    materialSourceFilter.value !== 'all' ? source : '',
-    materialBusinessLaneFilter.value !== 'all' ? businessLane : '',
-    materialFormatFilter.value !== 'all' ? format : '',
-  ].filter(Boolean)
-  return parts.length ? parts.join(' / ') : '全部素材'
-})
 const visibleMaterialFolders = computed<MaterialFolderEntry[]>(() => {
   const selectedParts = pathSegments(selectedMaterialFolderPath.value)
   return allMaterialDirectoryNodes.value
@@ -3285,7 +3274,7 @@ onBeforeUnmount(() => {
       </nav>
 
       <main class="aw-drive-main">
-        <div class="aw-drive-main__bar">
+        <div class="aw-drive-main__bar" :class="{ 'aw-drive-main__bar--operational': activeMode === 'operational' }">
           <nav class="aw-drive__breadcrumb" aria-label="路径">
             <template v-if="activeMode === 'uploads'">
               <button class="aw-drive__crumb" :class="{ 'is-active': true }" type="button" @click="openUploadOverview">上传总览</button>
@@ -3371,35 +3360,37 @@ onBeforeUnmount(() => {
               </button>
             </template>
             <template v-else>
-              <form class="aw-drive__search aw-drive__search--inline" @submit.prevent="loadMaterials()">
-                <span class="aw-drive__search-icon" aria-hidden="true">
-                  <IconfontActionIcon name="search" :size="17" />
-                </span>
-                <span class="aw-drive__search-context">{{ materialFilterSummary }}</span>
-                <span class="aw-drive__search-divider" aria-hidden="true"></span>
-                <label class="aw-drive__material-filter">
-                  <span>来源</span>
-                  <select v-model="materialSourceFilter" aria-label="素材来源" @change="refreshMaterialsForFilters">
-                    <option v-for="option in materialSourceOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
-                  </select>
-                </label>
-                <label class="aw-drive__material-filter aw-drive__material-filter--business">
-                  <span>分类</span>
-                  <select v-model="materialBusinessLaneFilter" aria-label="素材分类" @change="refreshMaterialsForFilters">
-                    <option v-for="option in materialBusinessLaneOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
-                  </select>
-                </label>
-                <label class="aw-drive__material-filter">
-                  <span>格式</span>
-                  <select v-model="materialFormatFilter" aria-label="素材格式" @change="refreshMaterialsForFilters">
-                    <option v-for="option in materialFormatOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
-                  </select>
-                </label>
-                <input v-model="materialQuery" type="search" placeholder="搜索名称、SKU、路径" />
-                <button v-if="materialQuery" class="aw-drive__search-clear" type="button" aria-label="清除" @click="clearMaterialSearch">
-                  <IconfontActionIcon name="close" :size="14" />
-                </button>
-                <button class="aw-drive__search-submit" type="submit">搜索</button>
+              <form class="aw-material-toolbar" @submit.prevent="loadMaterials()">
+                <div class="aw-material-toolbar__query">
+                  <span class="aw-material-toolbar__search-icon" aria-hidden="true">
+                    <IconfontActionIcon name="search" :size="18" />
+                  </span>
+                  <input v-model="materialQuery" type="search" aria-label="搜索运营素材" placeholder="搜索名称、编码、SKU 或路径" />
+                  <button v-if="materialQuery" class="aw-drive__search-clear" type="button" aria-label="清除搜索" @click="clearMaterialSearch">
+                    <IconfontActionIcon name="close" :size="14" />
+                  </button>
+                  <button class="aw-material-toolbar__submit" type="submit">搜索</button>
+                </div>
+                <div class="aw-material-toolbar__filters" aria-label="素材筛选条件">
+                  <label class="aw-material-toolbar__filter">
+                    <span>来源</span>
+                    <select v-model="materialSourceFilter" aria-label="素材来源" @change="refreshMaterialsForFilters">
+                      <option v-for="option in materialSourceOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+                    </select>
+                  </label>
+                  <label class="aw-material-toolbar__filter">
+                    <span>分类</span>
+                    <select v-model="materialBusinessLaneFilter" aria-label="素材分类" @change="refreshMaterialsForFilters">
+                      <option v-for="option in materialBusinessLaneOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+                    </select>
+                  </label>
+                  <label class="aw-material-toolbar__filter">
+                    <span>格式</span>
+                    <select v-model="materialFormatFilter" aria-label="素材格式" @change="refreshMaterialsForFilters">
+                      <option v-for="option in materialFormatOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
+                    </select>
+                  </label>
+                </div>
               </form>
               <button class="aw-secondary-button" type="button" @click="driveSpreadsheetOpen = !driveSpreadsheetOpen">
                 <Table2 :size="16" aria-hidden="true" />
@@ -3680,21 +3671,39 @@ onBeforeUnmount(() => {
                   </button>
                 </div>
 
-                <div v-if="canManageDrive && visibleMaterialFiles.length" class="aw-material-batch-toolbar">
-                  <div>
-                    <strong>已选 {{ selectedMaterialCount }} 个素材</strong>
-                    <span>批量操作只处理当前列表中勾选的文件，不会包含隐藏目录或失败任务。</span>
+                <div
+                  v-if="canManageDrive && visibleMaterialFiles.length"
+                  class="aw-material-batch-toolbar"
+                  :class="{ 'has-selection': selectedMaterialCount > 0 }"
+                >
+                  <div class="aw-material-batch-toolbar__head">
+                    <div>
+                      <strong>{{ selectedMaterialCount > 0 ? `已选 ${selectedMaterialCount} 个素材` : '批量管理' }}</strong>
+                      <span>{{ selectedMaterialCount > 0 ? '以下操作仅处理已勾选的素材' : '先勾选素材，或直接处理当前目录' }}</span>
+                    </div>
+                    <div class="aw-material-batch-toolbar__selection">
+                      <button class="aw-grid-button" type="button" :disabled="batchUpdatingClientMaterials" @click="selectAllVisibleMaterials">全选当前列表</button>
+                      <button v-if="selectedMaterialCount > 0" class="aw-grid-button" type="button" :disabled="batchUpdatingClientMaterials" @click="clearSelectedMaterials">取消全选</button>
+                    </div>
                   </div>
-                  <div class="aw-material-batch-toolbar__actions">
-                    <button class="aw-grid-button" type="button" :disabled="batchUpdatingClientMaterials" @click="selectAllVisibleMaterials">选择当前列表</button>
-                    <button class="aw-grid-button" type="button" :disabled="batchUpdatingClientMaterials || selectedMaterialCount === 0" @click="clearSelectedMaterials">清空选择</button>
-                    <button class="aw-primary-button" type="button" :disabled="batchUpdatingClientMaterials || selectedMaterialCount === 0" @click="batchUpdateSelectedClientMaterials('publish')">
-                      {{ batchUpdatingClientMaterials ? '处理中…' : '上架到客户端' }}
-                    </button>
-                    <button class="aw-secondary-button" type="button" :disabled="batchUpdatingClientMaterials || selectedMaterialCount === 0" @click="batchUpdateSelectedClientMaterials('disable')">停用客户端可见</button>
-                    <button class="aw-secondary-button" type="button" :disabled="batchUpdatingClientMaterials || selectedMaterialCount === 0" @click="batchUpdateSelectedClientMaterials('remove')">从客户端下架</button>
-                    <button class="aw-secondary-button" type="button" :disabled="batchUpdatingClientMaterials" @click="batchPublishCurrentMaterialFolder(false)">上架当前目录</button>
-                    <button class="aw-secondary-button" type="button" :disabled="batchUpdatingClientMaterials" @click="batchPublishCurrentMaterialFolder(true)">上架当前目录及子目录</button>
+                  <div class="aw-material-batch-toolbar__groups">
+                    <div v-if="selectedMaterialCount > 0" class="aw-material-batch-toolbar__group">
+                      <span>已选素材</span>
+                      <div>
+                        <button class="aw-primary-button" type="button" :disabled="batchUpdatingClientMaterials" @click="batchUpdateSelectedClientMaterials('publish')">
+                          {{ batchUpdatingClientMaterials ? '处理中…' : '上架所选' }}
+                        </button>
+                        <button class="aw-secondary-button" type="button" :disabled="batchUpdatingClientMaterials" @click="batchUpdateSelectedClientMaterials('disable')">停用所选</button>
+                        <button class="aw-secondary-button" type="button" :disabled="batchUpdatingClientMaterials" @click="batchUpdateSelectedClientMaterials('remove')">下架所选</button>
+                      </div>
+                    </div>
+                    <div class="aw-material-batch-toolbar__group aw-material-batch-toolbar__group--directory">
+                      <span>当前目录</span>
+                      <div>
+                        <button class="aw-secondary-button" type="button" :disabled="batchUpdatingClientMaterials" @click="batchPublishCurrentMaterialFolder(false)">上架本目录</button>
+                        <button class="aw-secondary-button" type="button" :disabled="batchUpdatingClientMaterials" @click="batchPublishCurrentMaterialFolder(true)">含子目录上架</button>
+                      </div>
+                    </div>
                   </div>
                 </div>
 
@@ -3720,7 +3729,10 @@ onBeforeUnmount(() => {
                     v-for="asset in visibleMaterialFiles"
                     :key="materialAssetKey(asset)"
                     class="aw-material-row"
-                    :class="{ 'is-active': activeMaterial && materialAssetKey(activeMaterial) === materialAssetKey(asset) }"
+                    :class="{
+                      'is-active': activeMaterial && materialAssetKey(activeMaterial) === materialAssetKey(asset),
+                      'is-selected': selectedMaterialIds.has(materialAssetKey(asset)),
+                    }"
                     @contextmenu.prevent.stop
                   >
                     <label class="aw-material-row__check" @click.stop>
@@ -3737,7 +3749,12 @@ onBeforeUnmount(() => {
                       </span>
                       <span class="aw-material-row__body">
                         <strong :title="titleOf(asset)">{{ materialFolderFileName(asset) }}</strong>
-                        <small>{{ materialCodeOf(asset) }} · {{ materialBusinessLaneLabel(asset) }} · {{ materialTypeLabel(asset) }}</small>
+                        <span class="aw-material-row__meta">
+                          <small class="aw-material-row__code" :title="materialCodeOf(asset)">
+                            <span>编码</span>{{ materialCodeOf(asset) }}
+                          </small>
+                          <small>{{ materialBusinessLaneLabel(asset) }} · {{ materialTypeLabel(asset) }}</small>
+                        </span>
                       </span>
                       <span class="aw-material-row__badges">
                         <span class="aw-chip aw-chip--subtle aw-material-row__source">{{ sourceLabelOf(asset) }}</span>
