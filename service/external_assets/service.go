@@ -86,15 +86,16 @@ type directoryBrowserRepo interface {
 }
 
 type Service struct {
-	cfg       Config
-	repo      repo.ExternalAssetRepo
-	bff       *BFFClient
-	alist     *AListClient
-	ossDirect *baseservice.OSSDirectService
-	renderer  baseservice.AssetPreviewRenderer
-	nowFn     func() time.Time
-	recentMu  sync.Mutex
-	recent    map[string]time.Time
+	cfg             Config
+	repo            repo.ExternalAssetRepo
+	bff             *BFFClient
+	alist           *AListClient
+	ossDirect       *baseservice.OSSDirectService
+	renderer        baseservice.AssetPreviewRenderer
+	nowFn           func() time.Time
+	recentMu        sync.Mutex
+	recent          map[string]time.Time
+	netdiskSourceMu sync.Mutex
 
 	keywordRefreshMu       sync.Mutex
 	keywordRefreshLast     map[string]time.Time
@@ -1767,6 +1768,7 @@ func (s *Service) renderAndUploadPreview(ctx context.Context, row *domain.Extern
 				_ = os.Remove(sourcePath)
 				return err
 			}
+			_ = rc.Close()
 			_ = tmp.Close()
 			cleanup = func() { _ = os.Remove(sourcePath) }
 		}
@@ -1786,6 +1788,7 @@ func (s *Service) renderAndUploadPreview(ctx context.Context, row *domain.Extern
 			_ = os.Remove(sourcePath)
 			return err
 		}
+		_ = rc.Close()
 		_ = tmp.Close()
 		cleanup = func() { _ = os.Remove(sourcePath) }
 	}
@@ -1819,21 +1822,50 @@ func (s *Service) openSourceForUpload(ctx context.Context, row *domain.ExternalA
 		}
 		return nil, fmt.Errorf("local file is not available")
 	}
+	return s.openNetdiskSourceForUpload(ctx, row)
+}
+
+func (s *Service) openNetdiskSourceForUpload(ctx context.Context, row *domain.ExternalAssetRecord) (io.ReadCloser, error) {
+	s.netdiskSourceMu.Lock()
 	rawURL := strings.TrimSpace(row.RawURL)
 	if rawURL == "" || s.isInternalProviderURL(rawURL) {
 		nextURL, err := s.resolveNetdiskDirectURL(ctx, row, false)
 		if err != nil {
+			s.netdiskSourceMu.Unlock()
 			return nil, err
 		}
 		rawURL = strings.TrimSpace(nextURL)
 	}
 	if rawURL != "" && !s.isInternalProviderURL(rawURL) {
-		return openHTTPBody(ctx, rawURL)
+		rc, err := openHTTPBody(ctx, rawURL)
+		if err != nil {
+			s.netdiskSourceMu.Unlock()
+			return nil, err
+		}
+		return &unlockingReadCloser{ReadCloser: rc, unlock: s.netdiskSourceMu.Unlock}, nil
 	}
 	if s.bff != nil && s.bff.Enabled() {
-		return s.bff.OpenFetch(ctx, row.OriginPath, false)
+		rc, err := s.bff.OpenFetch(ctx, row.OriginPath, false)
+		if err != nil {
+			s.netdiskSourceMu.Unlock()
+			return nil, err
+		}
+		return &unlockingReadCloser{ReadCloser: rc, unlock: s.netdiskSourceMu.Unlock}, nil
 	}
+	s.netdiskSourceMu.Unlock()
 	return nil, fmt.Errorf("external asset source is not available")
+}
+
+type unlockingReadCloser struct {
+	io.ReadCloser
+	once   sync.Once
+	unlock func()
+}
+
+func (r *unlockingReadCloser) Close() error {
+	err := r.ReadCloser.Close()
+	r.once.Do(r.unlock)
+	return err
 }
 
 func (s *Service) upsertFromSearchItem(mount MountConfig, item AListSearchItem) domain.ExternalAssetUpsert {

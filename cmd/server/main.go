@@ -864,37 +864,35 @@ func startExternalAssetRefresh(ctx context.Context, svc *externalassets.Service,
 			}
 		}
 	}()
-	go func() {
-		interval := svc.PrepareInterval()
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		logger.Info("external asset prepare worker started", zap.Duration("interval", interval))
-		runPrepare := func() {
-			prepareCtx, cancel := context.WithTimeout(ctx, 20*time.Minute)
-			defer cancel()
-			limit := svc.PrepareLimit()
-			ossDone, err := svc.ProcessPendingOSS(prepareCtx, limit)
-			if err != nil {
-				logger.Warn("external oss prepare failed", zap.Error(err))
+	startPrepareLoop := func(name string, run func(context.Context, int) (int, error)) {
+		go func() {
+			interval := svc.PrepareInterval()
+			ticker := time.NewTicker(interval)
+			defer ticker.Stop()
+			logger.Info("external asset prepare worker started", zap.String("queue", name), zap.Duration("interval", interval))
+			runPrepare := func() {
+				prepareCtx, cancel := context.WithTimeout(ctx, 20*time.Minute)
+				defer cancel()
+				done, err := run(prepareCtx, svc.PrepareLimit())
+				if err != nil {
+					logger.Warn("external asset prepare failed", zap.String("queue", name), zap.Error(err))
+				} else if done > 0 {
+					logger.Info("external asset prepare finished", zap.String("queue", name), zap.Int("done", done))
+				}
 			}
-			previewDone, err := svc.ProcessPendingPreview(prepareCtx, limit)
-			if err != nil {
-				logger.Warn("external preview prepare failed", zap.Error(err))
+			runPrepare()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					runPrepare()
+				}
 			}
-			if ossDone > 0 || previewDone > 0 {
-				logger.Info("external asset prepare finished", zap.Int("oss_done", ossDone), zap.Int("preview_done", previewDone))
-			}
-		}
-		runPrepare()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				runPrepare()
-			}
-		}
-	}()
+		}()
+	}
+	startPrepareLoop("original", svc.ProcessPendingOSS)
+	startPrepareLoop("preview", svc.ProcessPendingPreview)
 }
 
 func startExperienceWorker(ctx context.Context, svc service.ExperienceService, cfg config.ExperienceConfig, logger *zap.Logger) {

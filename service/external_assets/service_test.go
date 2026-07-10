@@ -3,10 +3,12 @@ package externalassets
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"sort"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -602,6 +604,65 @@ func TestPrepareMountPathsStayInsideConfiguredMounts(t *testing.T) {
 	}, nil)
 	if got := strings.Join(svc.PrepareMountPaths(), ","); got != "/p3" {
 		t.Fatalf("PrepareMountPaths() = %q, want /p3", got)
+	}
+}
+
+func TestNetdiskSourceReadsAreSerializedAcrossPrepareQueues(t *testing.T) {
+	var fetchCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("proxy") == "0" {
+			w.Header().Set("Location", "http://172.21.0.1:5244/p/quark/poster.psd")
+			w.WriteHeader(http.StatusFound)
+			return
+		}
+		fetchCalls.Add(1)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("source"))
+	}))
+	defer server.Close()
+
+	svc := NewService(&externalAssetRepoStub{}, Config{
+		Enabled:    true,
+		BFFBaseURL: server.URL,
+		Mounts:     ParseMounts("/quark:netdisk"),
+	}, nil)
+	row := &domain.ExternalAssetRecord{
+		Kind:       domain.ExternalAssetKindNetdisk,
+		MountPath:  "/quark",
+		OriginPath: "/quark/poster.psd",
+		FileName:   "poster.psd",
+	}
+
+	first, err := svc.openSourceForUpload(context.Background(), row)
+	if err != nil {
+		t.Fatalf("first openSourceForUpload() error = %v", err)
+	}
+	secondReady := make(chan io.ReadCloser, 1)
+	secondErr := make(chan error, 1)
+	go func() {
+		second, openErr := svc.openSourceForUpload(context.Background(), row)
+		if openErr != nil {
+			secondErr <- openErr
+			return
+		}
+		secondReady <- second
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+	if got := fetchCalls.Load(); got != 1 {
+		t.Fatalf("fetch calls while first source is open = %d, want 1", got)
+	}
+	_ = first.Close()
+	select {
+	case err := <-secondErr:
+		t.Fatalf("second openSourceForUpload() error = %v", err)
+	case second := <-secondReady:
+		_ = second.Close()
+	case <-time.After(time.Second):
+		t.Fatal("second source did not proceed after the first source closed")
+	}
+	if got := fetchCalls.Load(); got != 2 {
+		t.Fatalf("fetch calls after release = %d, want 2", got)
 	}
 }
 
