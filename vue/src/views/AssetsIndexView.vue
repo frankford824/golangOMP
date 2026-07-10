@@ -451,33 +451,37 @@
 
         <div class="excel-package-summary-grid">
           <div>
-            <span>解析行</span>
-            <strong>{{ excelPackageResult.parsedRows }}</strong>
+            <span>需求图片</span>
+            <strong>{{ excelPackageRequestedFiles }}</strong>
           </div>
           <div>
-            <span>匹配成功</span>
+            <span>已匹配图片</span>
             <strong>{{ excelPackageResult.matchedRows }}</strong>
           </div>
           <div>
-            <span>已写入</span>
+            <span>已写入图片</span>
             <strong>{{ excelPackageResult.copiedFiles }}</strong>
           </div>
           <div>
-            <span>失败行</span>
-            <strong>{{ excelPackageFailureCount }}</strong>
+            <span>未匹配图片</span>
+            <strong>{{ excelPackageResult.failedRows }}</strong>
+          </div>
+          <div>
+            <span>下载失败图片</span>
+            <strong>{{ excelPackageDownloadFailedFiles }}</strong>
           </div>
         </div>
 
         <div class="excel-package-source-grid">
-          <span>系统资源 {{ excelPackageResult.systemRows }}</span>
-          <span>外部资源 {{ excelPackageResult.externalRows }}</span>
-          <span>待 OSS 准备 {{ excelPackageResult.pendingRows }}</span>
-          <span>计划文件 {{ excelPackageResult.totalFiles }}</span>
+          <span>表格记录 {{ excelPackageResult.parsedRows }} 行</span>
+          <span>系统图片 {{ excelPackageResult.systemRows }} 张</span>
+          <span>外部图片 {{ excelPackageResult.externalRows }} 张</span>
+          <span>待 OSS 准备 {{ excelPackageResult.pendingRows }} 张</span>
         </div>
 
         <div v-if="excelPackageFailureItems.length" class="excel-package-detail-list">
           <div class="excel-package-detail-head">
-            <strong>失败明细</strong>
+            <strong>异常明细</strong>
             <span>显示前 {{ excelPackageFailureItems.length }} 条</span>
           </div>
           <article
@@ -869,6 +873,11 @@ import {
   mapWithConcurrency,
   sanitizeZipEntryName,
 } from '@/utils/batchZipDownload'
+import {
+  createExcelPackageBlobLoader,
+  resolveExcelPackageZipFilename,
+  sumExcelPackageQuantities,
+} from '@/utils/excelPackageZip'
 
 const route = useRoute()
 const router = useRouter()
@@ -1105,7 +1114,8 @@ const excelPackageFailureItems = computed(() =>
   [...excelPackageResult.failures, ...excelPackageResult.downloadFailures].slice(0, 30),
 )
 
-const excelPackageFailureCount = computed(() => excelPackageResult.failedRows + excelPackageResult.downloadFailures.length)
+const excelPackageRequestedFiles = computed(() => excelPackageResult.matchedRows + excelPackageResult.failedRows)
+const excelPackageDownloadFailedFiles = computed(() => sumExcelPackageQuantities(excelPackageResult.downloadFailures))
 
 const excelPackageProgressPercent = computed(() => {
   if (excelPackagePhase.value === 'done') return 100
@@ -2086,23 +2096,6 @@ function excelPackageOrderKey(orderNo: string | undefined): string {
   return String(orderNo ?? '').trim() || '未知订单'
 }
 
-function resolveExcelPackageFilename(item: AssetExcelPackageItem, sequence: number): string {
-  const ext = (() => {
-    const i = item.filename.lastIndexOf('.')
-    return i > 0 ? item.filename.slice(i) : '.jpg'
-  })()
-  const rawSku = item.sku_code || item.sku_name || `asset-${item.asset_id}`
-  const rawOrder = excelPackageOrderKey(item.order_no)
-  const normalizedOrder = rawOrder.toUpperCase()
-  const normalizedSku = String(rawSku).trim().toUpperCase()
-  const sku = sanitizeZipEntryName(rawSku, `asset-${item.asset_id}`)
-  if (!normalizedOrder || normalizedOrder === '未知订单' || normalizedOrder === normalizedSku) {
-    return `${sku}_${sequence}${ext}`
-  }
-  const order = sanitizeZipEntryName(rawOrder, '未知订单')
-  return `${order}_${sku}_${sequence}${ext}`
-}
-
 function formatExcelFailure(item: AssetExcelPackageFailure): string {
   return [
     item.row_number ? `row=${item.row_number}` : '',
@@ -2132,8 +2125,10 @@ async function downloadExcelPackageAsZip(
   const reportLines: string[] = [
     '仓库外发打包报告',
     `生成时间：${formatDateTimeBeijing(new Date().toISOString())}`,
-    `成功行数：${items.length}`,
-    `失败行数：${failures.length}`,
+    `表格记录：${items.length + failures.length} 行`,
+    `需求图片：${sumExcelPackageQuantities([...items, ...failures])} 张`,
+    `匹配图片：${sumExcelPackageQuantities(items)} 张`,
+    `未匹配图片：${sumExcelPackageQuantities(failures)} 张`,
     '',
     '失败明细：',
     ...(failures.length ? failures.map(formatExcelFailure) : ['无']),
@@ -2144,6 +2139,7 @@ async function downloadExcelPackageAsZip(
   const addressByOrder = new Map<string, string>()
   const failedLinesByOrder = new Map<string, string[]>()
   const skuCountersByOrder = new Map<string, number>()
+  const loadBlob = createExcelPackageBlobLoader()
 
   for (const item of [...items, ...failures]) {
     const order = excelPackageOrderKey(item.order_no)
@@ -2182,14 +2178,12 @@ async function downloadExcelPackageAsZip(
       return
     }
     try {
-      const response = await fetch(url, { credentials: 'omit', mode: 'cors' })
-      if (!response.ok) throw new Error(`http_${response.status}`)
-      const blob = await response.blob()
+      const blob = await loadBlob(item)
       const counterKey = `${order}\n${item.sku_code || item.sku_name || item.asset_id}`
       let sequence = skuCountersByOrder.get(counterKey) ?? 0
       for (let i = 1; i <= item.quantity; i += 1) {
         sequence += 1
-        zip.file(resolveExcelPackageFilename(item, sequence), blob, { binary: true, compression: 'STORE' })
+        zip.file(resolveExcelPackageZipFilename(item, sequence), blob, { binary: true, compression: 'STORE' })
         copied += 1
       }
       skuCountersByOrder.set(counterKey, sequence)
@@ -2216,7 +2210,7 @@ async function downloadExcelPackageAsZip(
     } finally {
       completed += 1
       excelPackageResult.copiedFiles = copied
-      excelPackageStatus.value = `正在下载并分拣 ${completed}/${items.length} 行，已写入 ${copied} 个文件`
+      excelPackageStatus.value = `正在下载并分拣 ${completed}/${items.length} 条匹配记录，已写入 ${copied} 张图片`
     }
   })
 
@@ -2267,23 +2261,26 @@ async function handleExcelPackageFile(event: Event) {
     const items = Array.isArray(manifest?.items) ? manifest.items : []
     const failures = Array.isArray(manifest?.failures) ? manifest.failures : []
     if (!items.length && !failures.length) throw new Error('没有匹配到可下载的 JPG/PNG 资产')
+    const matchedFiles = sumExcelPackageQuantities(items)
+    const unmatchedFiles = sumExcelPackageQuantities(failures)
     excelPackageResult.parsedRows = items.length + failures.length
-    excelPackageResult.matchedRows = items.length
-    excelPackageResult.failedRows = failures.length
-    excelPackageResult.totalFiles = manifest?.total_files ?? 0
-    excelPackageResult.systemRows = items.filter((item) => item.source_type === 'system').length
-    excelPackageResult.externalRows = items.filter((item) => item.source_type === 'external').length
-    excelPackageResult.pendingRows = failures.filter(isExcelPackagePendingFailure).length
+    excelPackageResult.matchedRows = matchedFiles
+    excelPackageResult.failedRows = unmatchedFiles
+    excelPackageResult.totalFiles = manifest?.total_files ?? matchedFiles
+    excelPackageResult.systemRows = sumExcelPackageQuantities(items.filter((item) => item.source_type === 'system'))
+    excelPackageResult.externalRows = sumExcelPackageQuantities(items.filter((item) => item.source_type === 'external'))
+    excelPackageResult.pendingRows = sumExcelPackageQuantities(failures.filter(isExcelPackagePendingFailure))
     excelPackageResult.failures = failures
     excelPackagePhase.value = 'downloading'
-    excelPackageStatus.value = `匹配成功 ${items.length} 行，准备生成 ${manifest?.total_files ?? 0} 个文件`
+    excelPackageStatus.value = `已匹配 ${matchedFiles} 张图片，准备生成仓库外发包`
     const { copied, downloadFailures } = await downloadExcelPackageAsZip(items, failures)
     excelPackageResult.downloadFailures = downloadFailures
     excelPackagePhase.value = 'done'
-    excelPackageStatus.value = `已生成 ZIP，共写入 ${copied} 个文件`
+    excelPackageStatus.value = `已生成 ZIP，共写入 ${copied} 张图片`
     const errors: string[] = []
-    if (failures.length > 0) errors.push(`${failures.length} 行未匹配`)
-    if (downloadFailures.length > 0) errors.push(`${downloadFailures.length} 行下载失败`)
+    if (unmatchedFiles > 0) errors.push(`${unmatchedFiles} 张图片未匹配`)
+    const downloadFailedFiles = sumExcelPackageQuantities(downloadFailures)
+    if (downloadFailedFiles > 0) errors.push(`${downloadFailedFiles} 张图片下载失败`)
     if (copied <= 0) errors.push('没有图片文件下载成功')
     excelPackageError.value = errors.length > 0 ? `${errors.join('；')}，详情见 ZIP 内打包报告.txt` : ''
   } catch (err) {
@@ -3843,7 +3840,7 @@ onBeforeUnmount(() => {
 
 .excel-package-summary-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 0.65rem;
 }
 

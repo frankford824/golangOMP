@@ -15,6 +15,7 @@ type assetCenterExternalRepoStub struct {
 	getRows       map[int64]*domain.ExternalAssetRecord
 	previewIDs    []int64
 	ossPendingIDs []int64
+	getIDs        []int64
 }
 
 func (r *assetCenterExternalRepoStub) Search(_ context.Context, query domain.ExternalAssetSearchQuery) ([]*domain.ExternalAssetRecord, int64, error) {
@@ -72,6 +73,7 @@ func (r *assetCenterExternalRepoStub) Upsert(_ context.Context, item domain.Exte
 }
 
 func (r *assetCenterExternalRepoStub) GetByID(_ context.Context, id int64) (*domain.ExternalAssetRecord, error) {
+	r.getIDs = append(r.getIDs, id)
 	if r.getRows != nil {
 		if row := r.getRows[id]; row != nil {
 			return cloneExternalAssetRecord(row), nil

@@ -73,6 +73,26 @@ func TestBuildExcelPackageRowsExtractsSKUAndInlineQuantity(t *testing.T) {
 	}
 }
 
+func TestBuildExcelPackageRowsDoesNotGuessOptionalColumns(t *testing.T) {
+	rows, err := buildExcelPackageRowsFromTable([][]string{
+		{"商品编码", "商品标题", "颜色", "备注", "渠道"},
+		{"HSC04325", "毕业季手举牌", "彩色", "加急", "淘系"},
+	})
+	if err != nil {
+		t.Fatalf("buildExcelPackageRowsFromTable() error = %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("len(rows)=%d, want 1", len(rows))
+	}
+	got := rows[0]
+	if got.OrderNo != "HSC04325" || got.SKUCode != "HSC04325" || got.Quantity != 1 {
+		t.Fatalf("row=%+v, want SKU-derived order and default quantity", got)
+	}
+	if got.SKUName != "" || got.Address != "" || got.Keyword != "" {
+		t.Fatalf("row=%+v, optional columns must stay empty when their headers are absent", got)
+	}
+}
+
 func TestParseExcelPackageRowsXLSX(t *testing.T) {
 	f := excelize.NewFile()
 	defer func() { _ = f.Close() }()

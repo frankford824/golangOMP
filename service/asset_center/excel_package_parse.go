@@ -126,12 +126,19 @@ func buildExcelPackageRowsFromTable(table [][]string) ([]ExcelPackageRow, error)
 	for _, value := range table[headerIndex] {
 		headers = append(headers, normalizeExcelPackageHeader(value))
 	}
-	orderCol := resolveExcelPackageColumn(headers, excelPackageOrderHeaders(), 0)
-	skuCol := resolveExcelPackageColumn(headers, excelPackageSKUHeaders(), 1)
+	orderCol := resolveExcelPackageColumn(headers, excelPackageOrderHeaders(), -1)
+	skuCol := resolveExcelPackageColumn(headers, excelPackageSKUHeaders(), -1)
 	skuNameCol := resolveExcelPackageColumn(headers, excelPackageSKUNameHeaders(), -1)
-	quantityCol := resolveExcelPackageColumn(headers, excelPackageQuantityHeaders(), 2)
-	addressCol := resolveExcelPackageColumn(headers, excelPackageAddressHeaders(), 3)
-	keywordCol := resolveExcelPackageColumn(headers, excelPackageKeywordHeaders(), 4)
+	quantityCol := resolveExcelPackageColumn(headers, excelPackageQuantityHeaders(), -1)
+	addressCol := resolveExcelPackageColumn(headers, excelPackageAddressHeaders(), -1)
+	keywordCol := resolveExcelPackageColumn(headers, excelPackageKeywordHeaders(), -1)
+	if excelPackageHeaderScore(headers) == 0 {
+		orderCol, skuCol, quantityCol, addressCol, keywordCol = 0, 1, 2, 3, 4
+	} else if skuCol < 0 {
+		// Keep the original positional SKU fallback only when the template has
+		// recognizable headers but uses a non-standard SKU title.
+		skuCol = 1
+	}
 
 	rows := make([]ExcelPackageRow, 0, len(table)-headerIndex-1)
 	for idx, raw := range table[headerIndex+1:] {
@@ -179,7 +186,7 @@ func buildExcelPackageRowsFromRaw(raw []string, rowNumber, orderCol, skuCol, sku
 	for idx, sku := range skuCodes {
 		row := ExcelPackageRow{
 			RowNumber: rowNumber,
-			OrderNo:   orderNo,
+			OrderNo:   firstNonEmptyExcelPackage(orderNo, sku),
 			SKUCode:   sku,
 			SKUName:   skuName,
 			Quantity:  quantities[idx],

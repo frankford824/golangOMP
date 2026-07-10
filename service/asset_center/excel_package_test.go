@@ -211,6 +211,101 @@ func TestBuildExcelPackageManifestReusesDuplicateSKUMatch(t *testing.T) {
 	}
 }
 
+func TestBuildExcelPackageManifestFreezesDuplicateExternalPreparation(t *testing.T) {
+	now := time.Date(2026, 7, 9, 10, 0, 0, 0, time.UTC)
+	externalRepo := &assetCenterExternalRepoStub{
+		searchRows: []*domain.ExternalAssetRecord{
+			{
+				ID:            88,
+				ResourceID:    domain.ExternalAssetResourceID(88),
+				Provider:      "alist",
+				Kind:          domain.ExternalAssetKindNASLocal,
+				MountPath:     "/p3",
+				OriginPath:    "/p3/仓库素材区/徐凯/HSC04325.jpg",
+				FileName:      "HSC04325.jpg",
+				FileExt:       ".jpg",
+				MimeType:      "image/jpeg",
+				FileSize:      1024,
+				Status:        domain.ExternalAssetStatusIndexed,
+				OSSSyncStatus: domain.ExternalAssetOSSStatusNone,
+				CreatedAt:     now,
+				UpdatedAt:     now,
+			},
+		},
+	}
+	svc := NewService(&excelPackageRepoStub{}, excelPackagePresignerStub{}, nil)
+	svc.SetExternalAssetService(externalassets.NewService(externalRepo, externalassets.Config{
+		Enabled: true,
+		Mounts:  externalassets.ParseMounts("/p3:nas_local"),
+	}, nil))
+
+	rows := make([]ExcelPackageRow, 0, 6)
+	for idx := 0; idx < 6; idx++ {
+		rows = append(rows, ExcelPackageRow{RowNumber: idx + 2, OrderNo: "HSC04325", SKUCode: "HSC04325", Quantity: 1})
+	}
+	manifest, appErr := svc.BuildExcelPackageManifest(context.Background(), rows)
+	if appErr != nil {
+		t.Fatalf("BuildExcelPackageManifest error = %+v", appErr)
+	}
+	if manifest.SuccessCount != 0 || manifest.FailureCount != 6 {
+		t.Fatalf("manifest summary = %+v, want all six rows to share one stable pending result", manifest)
+	}
+	if len(externalRepo.ossPendingIDs) != 1 || len(externalRepo.getIDs) != 1 {
+		t.Fatalf("prepare calls=%v get calls=%v, want one source preparation for duplicate SKU", externalRepo.ossPendingIDs, externalRepo.getIDs)
+	}
+}
+
+func TestBuildExcelPackageManifestPrefersOSSReadyExternalCandidate(t *testing.T) {
+	now := time.Date(2026, 7, 9, 10, 30, 0, 0, time.UTC)
+	ready := &domain.ExternalAssetRecord{
+		ID:             91,
+		ResourceID:     domain.ExternalAssetResourceID(91),
+		Provider:       "alist",
+		Kind:           domain.ExternalAssetKindNASLocal,
+		MountPath:      "/p3",
+		OriginPath:     "/p3/仓库素材区/徐凯/HSC06122.jpg",
+		FileName:       "HSC06122.jpg",
+		FileExt:        ".jpg",
+		MimeType:       "image/jpeg",
+		FileSize:       2048,
+		Status:         domain.ExternalAssetStatusIndexed,
+		OSSOriginalKey: "external-assets/alist/original/p3/HSC06122.jpg",
+		OSSSyncStatus:  domain.ExternalAssetOSSStatusReady,
+		CreatedAt:      now.Add(-time.Hour),
+		UpdatedAt:      now.Add(-time.Hour),
+	}
+	pending := *ready
+	pending.ID = 92
+	pending.ResourceID = domain.ExternalAssetResourceID(92)
+	pending.OriginPath = "/p3/其他目录/HSC06122.jpg"
+	pending.OSSOriginalKey = ""
+	pending.OSSSyncStatus = domain.ExternalAssetOSSStatusNone
+	pending.UpdatedAt = now
+	externalRepo := &assetCenterExternalRepoStub{searchRows: []*domain.ExternalAssetRecord{&pending, ready}}
+	ossDirect := baseservice.NewOSSDirectService(baseservice.OSSDirectConfig{
+		Enabled: true, Endpoint: "oss-cn-hangzhou.aliyuncs.com", PublicEndpoint: "oss-cn-hangzhou.aliyuncs.com",
+		Bucket: "test-bucket", AccessKeyID: "test-key", AccessKeySecret: "test-secret", PresignExpiry: 15 * time.Minute,
+	})
+	svc := NewService(&excelPackageRepoStub{}, excelPackagePresignerStub{}, nil)
+	svc.SetExternalAssetService(externalassets.NewService(externalRepo, externalassets.Config{
+		Enabled: true,
+		Mounts:  externalassets.ParseMounts("/p3:nas_local"),
+	}, ossDirect))
+
+	manifest, appErr := svc.BuildExcelPackageManifest(context.Background(), []ExcelPackageRow{
+		{RowNumber: 2, OrderNo: "HSC06122", SKUCode: "HSC06122", Quantity: 1},
+	})
+	if appErr != nil {
+		t.Fatalf("BuildExcelPackageManifest error = %+v", appErr)
+	}
+	if manifest.SuccessCount != 1 || manifest.Items[0].AssetID != ready.ID {
+		t.Fatalf("manifest=%+v, want OSS-ready candidate %d", manifest, ready.ID)
+	}
+	if len(externalRepo.ossPendingIDs) != 0 {
+		t.Fatalf("pending IDs=%v, ready candidate must not enqueue preparation", externalRepo.ossPendingIDs)
+	}
+}
+
 type excelPackageRepoStub struct {
 	rowsByKeyword  map[string][]*repo.TaskAssetSearchRow
 	callsByKeyword map[string]int

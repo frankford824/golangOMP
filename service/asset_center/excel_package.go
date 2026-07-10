@@ -74,7 +74,14 @@ type scoredExcelAsset struct {
 	system   *repo.TaskAssetSearchRow
 	external *AssetDetail
 	score    int
+	ready    bool
 	updated  time.Time
+}
+
+type preparedExcelPackageAsset struct {
+	item           ExcelPackageItem
+	failureReason  string
+	failureMessage string
 }
 
 func (s *Service) BuildExcelPackageManifest(ctx context.Context, rows []ExcelPackageRow) (*ExcelPackageManifest, *domain.AppError) {
@@ -97,6 +104,7 @@ func (s *Service) BuildExcelPackageManifest(ctx context.Context, rows []ExcelPac
 	var totalBytes int64
 	var totalFiles int
 	matchCache := map[string]scoredExcelAsset{}
+	preparedCache := map[string]preparedExcelPackageAsset{}
 
 	for idx, raw := range rows {
 		row := normalizeExcelPackageRow(raw, idx+2)
@@ -132,11 +140,21 @@ func (s *Service) BuildExcelPackageManifest(ctx context.Context, rows []ExcelPac
 			continue
 		}
 
-		item, failure := s.buildExcelPackageItem(ctx, match, row, totalBytes)
-		if failure != nil {
-			manifest.Failures = append(manifest.Failures, *failure)
+		prepared, ok := preparedCache[cacheKey]
+		if !ok {
+			item, failure := s.buildExcelPackageItem(ctx, match, row)
+			prepared.item = item
+			if failure != nil {
+				prepared.failureReason = failure.Reason
+				prepared.failureMessage = failure.Message
+			}
+			preparedCache[cacheKey] = prepared
+		}
+		if prepared.failureReason != "" {
+			manifest.Failures = append(manifest.Failures, row.failure(prepared.failureReason, prepared.failureMessage))
 			continue
 		}
+		item := applyExcelPackageRow(prepared.item, row)
 		nextBytes := totalBytes + item.FileSize*int64(row.Quantity)
 		if nextBytes > MaxExcelPackageTotalBytes {
 			manifest.Failures = append(manifest.Failures, row.failure("total_size_limit_exceeded", fmt.Sprintf("总大小超过 %d MB", MaxExcelPackageTotalBytes/1024/1024)))
@@ -155,6 +173,16 @@ func (s *Service) BuildExcelPackageManifest(ctx context.Context, rows []ExcelPac
 	manifest.TotalFiles = totalFiles
 	manifest.TotalSize = totalBytes
 	return manifest, nil
+}
+
+func applyExcelPackageRow(item ExcelPackageItem, row ExcelPackageRow) ExcelPackageItem {
+	item.RowNumber = row.RowNumber
+	item.OrderNo = row.OrderNo
+	item.SKUCode = row.SKUCode
+	item.SKUName = row.SKUName
+	item.Quantity = row.Quantity
+	item.Address = row.Address
+	return item
 }
 
 func normalizeExcelPackageRow(row ExcelPackageRow, fallbackRowNumber int) ExcelPackageRow {
@@ -213,7 +241,8 @@ func (s *Service) matchExcelPackageAsset(ctx context.Context, row ExcelPackageRo
 		if candidate != nil && candidate.Asset != nil {
 			updated = candidate.Asset.CreatedAt
 		}
-		candidates = append(candidates, scoredExcelAsset{system: candidate, score: score, updated: updated})
+		ready := candidate != nil && candidate.Asset != nil && strings.TrimSpace(stringPtrValue(candidate.Asset.StorageKey)) != ""
+		candidates = append(candidates, scoredExcelAsset{system: candidate, score: score, ready: ready, updated: updated})
 	}
 	externalRows, externalErr := s.batchSearchExternalRows(ctx, keyword, "jpg_png")
 	if externalErr != nil {
@@ -224,12 +253,16 @@ func (s *Service) matchExcelPackageAsset(ctx context.Context, row ExcelPackageRo
 		if score <= 0 {
 			continue
 		}
-		candidates = append(candidates, scoredExcelAsset{external: candidate, score: score, updated: candidate.UpdatedAt})
+		ready := strings.EqualFold(strings.TrimSpace(candidate.OSSSyncStatus), string(domain.ExternalAssetOSSStatusReady))
+		candidates = append(candidates, scoredExcelAsset{external: candidate, score: score, ready: ready, updated: candidate.UpdatedAt})
 	}
 	if len(candidates) == 0 {
 		return scoredExcelAsset{}, nil
 	}
 	sort.SliceStable(candidates, func(i, j int) bool {
+		if candidates[i].ready != candidates[j].ready {
+			return candidates[i].ready
+		}
 		if candidates[i].score != candidates[j].score {
 			return candidates[i].score > candidates[j].score
 		}
@@ -376,14 +409,14 @@ func dedupeExcelPackageExternalFileCandidates(candidates []scoredExcelAsset) []s
 	return out
 }
 
-func (s *Service) buildExcelPackageItem(ctx context.Context, match scoredExcelAsset, req ExcelPackageRow, currentTotal int64) (ExcelPackageItem, *ExcelPackageFailure) {
+func (s *Service) buildExcelPackageItem(ctx context.Context, match scoredExcelAsset, req ExcelPackageRow) (ExcelPackageItem, *ExcelPackageFailure) {
 	if match.external != nil {
-		return s.buildExternalExcelPackageItem(ctx, match.external, req, currentTotal)
+		return s.buildExternalExcelPackageItem(ctx, match.external, req)
 	}
-	return s.buildSystemExcelPackageItem(match.system, req, currentTotal)
+	return s.buildSystemExcelPackageItem(match.system, req)
 }
 
-func (s *Service) buildSystemExcelPackageItem(row *repo.TaskAssetSearchRow, req ExcelPackageRow, currentTotal int64) (ExcelPackageItem, *ExcelPackageFailure) {
+func (s *Service) buildSystemExcelPackageItem(row *repo.TaskAssetSearchRow, req ExcelPackageRow) (ExcelPackageItem, *ExcelPackageFailure) {
 	if row == nil || row.Asset == nil || row.Task == nil {
 		f := req.failure("asset_not_found", "未找到匹配的 JPG/PNG 资产")
 		return ExcelPackageItem{}, &f
@@ -399,10 +432,6 @@ func (s *Service) buildSystemExcelPackageItem(row *repo.TaskAssetSearchRow, req 
 	fileSize := int64(0)
 	if asset.FileSize != nil {
 		fileSize = *asset.FileSize
-	}
-	if fileSize > 0 && currentTotal+fileSize*int64(req.Quantity) > MaxExcelPackageTotalBytes {
-		f := req.failure("total_size_limit_exceeded", "总大小超过限制")
-		return ExcelPackageItem{}, &f
 	}
 	signed := s.presigner.PresignDownloadURL(storageKey)
 	if filenamePresigner, ok := s.presigner.(DownloadFilenamePresigner); ok {
@@ -434,7 +463,7 @@ func (s *Service) buildSystemExcelPackageItem(row *repo.TaskAssetSearchRow, req 
 	}, nil
 }
 
-func (s *Service) buildExternalExcelPackageItem(ctx context.Context, asset *AssetDetail, req ExcelPackageRow, currentTotal int64) (ExcelPackageItem, *ExcelPackageFailure) {
+func (s *Service) buildExternalExcelPackageItem(ctx context.Context, asset *AssetDetail, req ExcelPackageRow) (ExcelPackageItem, *ExcelPackageFailure) {
 	if asset == nil {
 		f := req.failure("asset_not_found", "未找到匹配的 JPG/PNG 资产")
 		return ExcelPackageItem{}, &f
@@ -453,10 +482,6 @@ func (s *Service) buildExternalExcelPackageItem(ctx context.Context, asset *Asse
 		return ExcelPackageItem{}, &f
 	}
 	fileSize := info.FileSize
-	if fileSize > 0 && currentTotal+fileSize*int64(req.Quantity) > MaxExcelPackageTotalBytes {
-		f := req.failure("total_size_limit_exceeded", "总大小超过限制")
-		return ExcelPackageItem{}, &f
-	}
 	expiresAt := info.ExpiresAt
 	return ExcelPackageItem{
 		RowNumber:   req.RowNumber,
