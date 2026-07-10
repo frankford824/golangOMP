@@ -81,7 +81,7 @@ require_asset_workbench_routes() {
   missing=()
   [ -f "$ROOT/service/asset_workbench/service.go" ] || missing+=("service/asset_workbench/service.go")
   [ -f "$ROOT/transport/routes_asset_workbench.go" ] || missing+=("transport/routes_asset_workbench.go")
-  grep -q "registerAssetWorkbenchRoutes(v1, access, assetWorkbenchH)" "$ROOT/transport/http.go" || missing+=("transport/http.go route registration")
+  grep -Fq "registerAssetWorkbenchRoutes(v1, access, assetWorkbenchH" "$ROOT/transport/http.go" || missing+=("transport/http.go route registration")
   grep -q "assetWorkbenchH := handler.NewAssetWorkbenchHandler" "$ROOT/cmd/server/main.go" || missing+=("cmd/server/main.go handler wiring")
   grep -q "AssetWorkbenchPreview:" "$ROOT/cmd/server/main.go" || missing+=("cmd/server/main.go worker wiring")
 
