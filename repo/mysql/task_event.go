@@ -161,30 +161,40 @@ func prefixedTaskEventWhere(where []string, alias string) []string {
 }
 
 // nextTaskEventSequence atomically returns the next sequence number for a task.
-// Uses task_event_sequences counter table with SELECT FOR UPDATE.
+// The counter row serializes compliant writers, while the locked MAX(sequence)
+// read self-heals counters that lag behind directly inserted repair events.
 // MUST be called inside an active transaction.
 func nextTaskEventSequence(ctx context.Context, sqlTx *sql.Tx, taskID int64) (int64, error) {
+	if _, err := sqlTx.ExecContext(ctx, `
+		INSERT INTO task_event_sequences (task_id, last_sequence)
+		VALUES (?, 0)
+		ON DUPLICATE KEY UPDATE task_id = VALUES(task_id)`, taskID); err != nil {
+		return 0, fmt.Errorf("task_event nextSequence initialize: %w", err)
+	}
+
 	var current int64
-	err := sqlTx.QueryRowContext(ctx,
+	if err := sqlTx.QueryRowContext(ctx,
 		`SELECT last_sequence FROM task_event_sequences WHERE task_id = ? FOR UPDATE`,
 		taskID,
-	).Scan(&current)
-
-	if err == sql.ErrNoRows {
-		if _, err = sqlTx.ExecContext(ctx,
-			`INSERT INTO task_event_sequences (task_id, last_sequence) VALUES (?, 1)`,
-			taskID,
-		); err != nil {
-			return 0, fmt.Errorf("task_event nextSequence insert: %w", err)
-		}
-		return 1, nil
-	}
-	if err != nil {
+	).Scan(&current); err != nil {
 		return 0, fmt.Errorf("task_event nextSequence select: %w", err)
 	}
 
-	next := current + 1
-	if _, err = sqlTx.ExecContext(ctx,
+	var loggedMax int64
+	if err := sqlTx.QueryRowContext(ctx, `
+		SELECT COALESCE(MAX(sequence), 0)
+		FROM task_event_logs
+		WHERE task_id = ?
+		FOR UPDATE`, taskID).Scan(&loggedMax); err != nil {
+		return 0, fmt.Errorf("task_event nextSequence reconcile: %w", err)
+	}
+
+	baseline := current
+	if loggedMax > baseline {
+		baseline = loggedMax
+	}
+	next := baseline + 1
+	if _, err := sqlTx.ExecContext(ctx,
 		`UPDATE task_event_sequences SET last_sequence = ? WHERE task_id = ?`,
 		next, taskID,
 	); err != nil {
