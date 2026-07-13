@@ -117,6 +117,14 @@ export function canReplaceAssetResource(input: AssetReplacementGateInput): boole
   return assetReplacementUnavailableReason(input) === ''
 }
 
+export function assetReplacementScopeSKUCode(input: Record<string, unknown>): string {
+  for (const key of ['scope_sku_code', 'scopeSkuCode', 'target_sku_code', 'targetSkuCode'] as const) {
+    const value = input[key]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return ''
+}
+
 export function assetReplacementSuccessMessage(input: AssetReplacementGateInput): string {
   if (normalizeTaskStatus(input.taskStatus) === 'Completed') {
     return '资源已修改，新版本已生效，任务状态未改变'

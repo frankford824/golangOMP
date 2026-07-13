@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  assetReplacementScopeSKUCode,
   assetReplacementSuccessMessage,
   assetReplacementUnavailableReason,
   canReplaceAssetResource,
@@ -42,5 +43,11 @@ describe('asset replacement gate', () => {
     expect(canReplaceAssetResource({ ...baseAsset, usableState: 'history' })).toBe(false)
     expect(canReplaceAssetResource({ ...baseAsset, usableState: 'cleaned' })).toBe(false)
     expect(canReplaceAssetResource({ ...baseAsset, assetKind: 'preview' })).toBe(false)
+  })
+
+  it('submits only the asset scope when replacing and never falls back to the product SKU', () => {
+    expect(assetReplacementScopeSKUCode({ scope_sku_code: 'SKU-SCOPE', sku_code: 'SKU-PRODUCT' })).toBe('SKU-SCOPE')
+    expect(assetReplacementScopeSKUCode({ targetSkuCode: 'SKU-TARGET', primary_sku_code: 'SKU-PRIMARY' })).toBe('SKU-TARGET')
+    expect(assetReplacementScopeSKUCode({ sku_code: 'DZK000142', primary_sku_code: 'DZK000142' })).toBe('')
   })
 })

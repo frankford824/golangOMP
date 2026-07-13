@@ -304,7 +304,7 @@ import {
 } from '@/domain/asset-access'
 import { assetsApi, type AssetKind } from '@/services/api/assetsApi'
 import type { BackendAsset, BackendAssetVersion } from '@/services/apiTypes'
-import { assetReplacementSuccessMessage, assetReplacementUnavailableReason, canReplaceAssetResource } from '@/domain/asset-replacement'
+import { assetReplacementScopeSKUCode, assetReplacementSuccessMessage, assetReplacementUnavailableReason, canReplaceAssetResource } from '@/domain/asset-replacement'
 import { assetDeletionSuccessMessage, assetDeletionUnavailableReason, canDeleteAssetResource } from '@/domain/asset-deletion'
 import { formatDateTimeBeijing } from '@/utils/date'
 import { userAccountDisplay } from '@/domain/user-display'
@@ -488,12 +488,7 @@ function rawAssetKind(row: BackendAsset | null | undefined): string {
 
 function assetScopeSkuCode(row: BackendAsset | null | undefined): string {
   if (!row) return ''
-  const record = row as Record<string, unknown>
-  for (const key of ['scope_sku_code', 'sku_code', 'primary_sku_code', 'target_sku_code'] as const) {
-    const value = record[key]
-    if (typeof value === 'string' && value.trim()) return value.trim()
-  }
-  return ''
+  return assetReplacementScopeSKUCode(row as Record<string, unknown>)
 }
 
 function assetCanBeReplaced(row: BackendAsset | null | undefined): boolean {

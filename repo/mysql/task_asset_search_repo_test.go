@@ -300,6 +300,16 @@ func TestBuildListCurrentByAssetIDsQueryUsesCurrentReadModelSelect(t *testing.T)
 	}
 }
 
+func TestTaskAssetSearchProjectionResolvesLegacyModuleLink(t *testing.T) {
+	if !strings.Contains(taskAssetSearchSelect, "COALESCE(ta.source_task_module_id, source_tm.id)") {
+		t.Fatalf("search projection must resolve missing source_task_module_id from the task module")
+	}
+	if !strings.Contains(taskAssetSearchFrom, "source_tm.task_id = ta.task_id") ||
+		!strings.Contains(taskAssetSearchFrom, "source_tm.module_key = COALESCE(NULLIF(ta.source_module_key, ''), 'design') COLLATE utf8mb4_unicode_ci") {
+		t.Fatalf("search join must resolve the task module by task_id and source_module_key")
+	}
+}
+
 func containsStringArg(args []interface{}, want string) bool {
 	for _, arg := range args {
 		got, ok := arg.(string)

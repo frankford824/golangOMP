@@ -915,7 +915,7 @@ import {
 import { predictionsApi, type PredictionSuggestion } from '@/services/api/predictionsApi'
 import { recordExperienceBehavior } from '@/services/experienceBehavior'
 import type { AssetResourceSource, BackendAsset, BackendAssetVersion } from '@/services/apiTypes'
-import { assetReplacementSuccessMessage, assetReplacementUnavailableReason, canReplaceAssetResource } from '@/domain/asset-replacement'
+import { assetReplacementScopeSKUCode, assetReplacementSuccessMessage, assetReplacementUnavailableReason, canReplaceAssetResource } from '@/domain/asset-replacement'
 import { assetDeletionSuccessMessage, assetDeletionUnavailableReason, canDeleteAssetResource } from '@/domain/asset-deletion'
 import { invalidateAssetAccessCache } from '@/domain/asset-access'
 import { formatDateTimeBeijing } from '@/utils/date'
@@ -1600,12 +1600,7 @@ function rawAssetKind(asset: BackendAsset | null | undefined): string {
 
 function assetScopeSkuCode(asset: BackendAsset | null | undefined): string {
   if (!asset) return ''
-  const record = asset as Record<string, unknown>
-  for (const key of ['scope_sku_code', 'sku_code', 'primary_sku_code', 'target_sku_code'] as const) {
-    const value = record[key]
-    if (typeof value === 'string' && value.trim()) return value.trim()
-  }
-  return ''
+  return assetReplacementScopeSKUCode(asset as Record<string, unknown>)
 }
 
 function assetCanBeReplaced(asset: BackendAsset | null | undefined): boolean {

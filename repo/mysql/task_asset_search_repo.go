@@ -22,7 +22,7 @@ const taskAssetSearchSelect = `
 	       ta.upload_mode, ta.upload_request_id, ta.storage_ref_id, ta.file_name, ta.original_filename, ta.remote_file_id,
 	       ta.mime_type, ta.file_size, ta.file_path, ta.storage_key, ta.whole_hash, ta.upload_status, ta.preview_status,
 	       ta.uploaded_by, ta.uploaded_at, ta.remark, ta.created_at,
-	       ta.source_module_key, ta.source_task_module_id, ta.is_archived, ta.archived_at, ta.archived_by, ta.cleaned_at, ta.deleted_at,
+	       ta.source_module_key, COALESCE(ta.source_task_module_id, source_tm.id), ta.is_archived, ta.archived_at, ta.archived_by, ta.cleaned_at, ta.deleted_at,
 	       ta.flow_review_status, ta.approved_at, ta.approved_by, ta.rejected_at, ta.rejected_by, ta.superseded_by_version_id, ta.superseded_at, ta.cleanup_after_at, ta.source_asset_version_id,
 	       t.id, t.task_no, t.source_mode, t.product_id, t.sku_code, t.product_name_snapshot,
 	       t.task_type, t.operator_group_id, t.owner_team, t.owner_department, t.owner_org_team, t.creator_id, t.requester_id,
@@ -46,6 +46,9 @@ const taskAssetSearchFrom = `
 	  FROM task_assets ta
 	  JOIN design_assets da ON da.id = ta.asset_id
 	  JOIN tasks t ON t.id = ta.task_id
+	  LEFT JOIN task_modules source_tm
+	    ON source_tm.task_id = ta.task_id
+	   AND source_tm.module_key = COALESCE(NULLIF(ta.source_module_key, ''), 'design') COLLATE utf8mb4_unicode_ci
 	  LEFT JOIN task_modules tm ON tm.id = ta.source_task_module_id
 	  LEFT JOIN users task_creator ON task_creator.id = t.creator_id
 	  LEFT JOIN users asset_creator ON asset_creator.id = da.created_by

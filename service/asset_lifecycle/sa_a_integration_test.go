@@ -131,6 +131,25 @@ func TestSA_A_I5B_CompletedAssetMaintenanceRoleCanDeleteCurrentResource(t *testi
 	assertEventCount(t, db, fixture.ModuleID, "asset_deleted_by_admin", 1)
 }
 
+func TestSA_A_I5C_DeleteResolvesLegacyMissingSourceTaskModuleID(t *testing.T) {
+	db := r35.MustOpenTestDB(t)
+	defer db.Close()
+	fixture := insertAssetFixture(t, db, 20013, "customization", fixtureOptions{})
+	defer cleanupSAATask(t, db, fixture.TaskID)
+	if _, err := db.Exec(`UPDATE tasks SET task_status=? WHERE id=?`, domain.TaskStatusCompleted, fixture.TaskID); err != nil {
+		t.Fatalf("complete fixture task: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE task_assets SET source_task_module_id=NULL WHERE id=?`, fixture.VersionID); err != nil {
+		t.Fatalf("clear legacy source_task_module_id: %v", err)
+	}
+	_, lifecycle, _ := newIntegrationServices(db)
+	auditor := domain.RequestActor{ID: 3013, Roles: []domain.Role{domain.RoleAuditA}}
+	if appErr := lifecycle.Delete(context.Background(), auditor, fixture.AssetID, "remove legacy completed resource"); appErr != nil {
+		t.Fatalf("delete legacy asset without source_task_module_id: %v", appErr)
+	}
+	assertEventCount(t, db, fixture.ModuleID, "asset_deleted_by_admin", 1)
+}
+
 func TestSA_A_I6_DownloadAutoCleanedGoneDeletedNotFound(t *testing.T) {
 	db := r35.MustOpenTestDB(t)
 	defer db.Close()
