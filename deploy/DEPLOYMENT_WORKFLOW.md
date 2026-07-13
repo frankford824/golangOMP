@@ -219,7 +219,7 @@ subtree to exactly one shard, including top-level directories created later.
 NAS-side environment (keep the real token out of Git):
 
 ```dotenv
-WATCH_BACKEND_URL=https://api.yongbo.cloud
+WATCH_BACKEND_URL=https://yongbo.cloud
 WATCH_EVENT_TOKEN=<same value as backend EXTERNAL_ASSETS_EVENT_TOKEN>
 WATCH_AGENT_ID=synology-p3-xukai
 WATCH_RECONCILE_INTERVAL=6h
