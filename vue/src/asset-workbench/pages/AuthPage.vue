@@ -6,6 +6,7 @@ import { ArrowRight, LockKeyhole, UserRound } from 'lucide-vue-next'
 import { authApi } from '@/services/api/authApi'
 import { clearToken, setToken } from '@/services/http'
 import { assetWorkbenchApi } from '../shared/api/assetWorkbenchApi'
+import { cityOptions, provinceOptions } from '../shared/profile/chinaRegions'
 
 const route = useRoute()
 const router = useRouter()
@@ -33,6 +34,8 @@ const registerForm = reactive({
 
 const isRegister = computed(() => route.path.includes('register'))
 const title = computed(() => (isRegister.value ? '创建工作台账号' : '登录资产工作台'))
+const availableProvinces = computed(() => provinceOptions(registerForm.province))
+const availableCities = computed(() => cityOptions(registerForm.province, registerForm.city))
 const redirectTarget = computed(() => {
   const redirect = route.query.redirect
   if (typeof redirect !== 'string' || !redirect.startsWith('/')) return '/'
@@ -179,11 +182,17 @@ async function submitRegister() {
           </label>
           <label class="aw-field">
             <span class="aw-field__label">省份 <small class="aw-field__mark aw-field__mark--optional">选填</small></span>
-            <input v-model.trim="registerForm.province" autocomplete="address-level1" placeholder="选填" />
+            <select v-model="registerForm.province" autocomplete="address-level1" @change="registerForm.city = ''">
+              <option value="">请选择省份</option>
+              <option v-for="province in availableProvinces" :key="province" :value="province">{{ province }}</option>
+            </select>
           </label>
           <label class="aw-field">
             <span class="aw-field__label">城市 <small class="aw-field__mark aw-field__mark--optional">选填</small></span>
-            <input v-model.trim="registerForm.city" autocomplete="address-level2" placeholder="选填" />
+            <select v-model="registerForm.city" autocomplete="address-level2" :disabled="!registerForm.province">
+              <option value="">请选择城市</option>
+              <option v-for="city in availableCities" :key="city" :value="city">{{ city }}</option>
+            </select>
           </label>
           <label class="aw-field aw-form-grid__full">
             <span class="aw-field__label">身份证号 <small class="aw-field__mark aw-field__mark--optional">选填</small></span>

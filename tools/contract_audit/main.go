@@ -150,6 +150,7 @@ var knownGapReasons = map[string]string{
 	knownGapKey("GET", "/v1/asset-workbench/people-lookup"):                                     "asset-workbench-mounted-route-contract-pending",
 	knownGapKey("GET", "/v1/asset-workbench/price-matrix"):                                      "asset-workbench-mounted-route-contract-pending",
 	knownGapKey("GET", "/v1/asset-workbench/profiles"):                                          "asset-workbench-mounted-route-contract-pending",
+	knownGapKey("GET", "/v1/asset-workbench/profiles/:user_id"):                                 "asset-workbench-mounted-route-contract-pending",
 	knownGapKey("GET", "/v1/asset-workbench/promo-coupons"):                                     "asset-workbench-mounted-route-contract-pending",
 	knownGapKey("GET", "/v1/asset-workbench/saved-views"):                                       "asset-workbench-mounted-route-contract-pending",
 	knownGapKey("GET", "/v1/asset-workbench/settlement/batches"):                                "asset-workbench-mounted-route-contract-pending",

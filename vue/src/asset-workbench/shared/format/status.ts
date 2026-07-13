@@ -171,6 +171,7 @@ export function eventTypeMeta(value?: string | null): StatusMeta {
   const key = value || ''
   const known: Record<string, StatusMeta> = {
     'profile.upserted': { label: '更新人员资料', tone: 'info' },
+    'profile.pii_viewed': { label: '查看完整资料', tone: 'warn' },
     'price.created': { label: '新增单价', tone: 'money' },
     'deduction.created': { label: '新增质检扣款', tone: 'warn' },
     'welfare.created': { label: '新增福利规则', tone: 'money' },

@@ -41,6 +41,7 @@ func registerAssetWorkbenchRoutes(
 		group.GET("/batch-jobs/:job_id", access(group, http.MethodGet, "/batch-jobs/:job_id", domain.APIReadinessReadyForFrontend, domain.RoleAssetManager, domain.RoleSuperAdmin), assetWorkbenchH.GetBatchJob)
 		group.PATCH("/profile", access(group, http.MethodPatch, "/profile", domain.APIReadinessReadyForFrontend, assetWorkbenchRoles()...), assetWorkbenchH.UpsertMyProfile)
 		group.GET("/profiles", access(group, http.MethodGet, "/profiles", domain.APIReadinessReadyForFrontend, domain.RoleHRAdmin, domain.RoleAssetSettlement, domain.RoleSuperAdmin), assetWorkbenchH.ListProfiles)
+		group.GET("/profiles/:user_id", access(group, http.MethodGet, "/profiles/:user_id", domain.APIReadinessReadyForFrontend, domain.RoleHRAdmin, domain.RoleAssetSettlement, domain.RoleSuperAdmin), assetWorkbenchH.GetProfile)
 		group.PATCH("/profiles/:user_id", access(group, http.MethodPatch, "/profiles/:user_id", domain.APIReadinessReadyForFrontend, domain.RoleHRAdmin, domain.RoleAssetSettlement, domain.RoleSuperAdmin), assetWorkbenchH.UpsertProfile)
 		group.GET("/members", access(group, http.MethodGet, "/members", domain.APIReadinessReadyForFrontend, domain.RoleAssetManager, domain.RoleSuperAdmin), assetWorkbenchH.ListMembers)
 		group.PATCH("/members/:user_id/identity", access(group, http.MethodPatch, "/members/:user_id/identity", domain.APIReadinessReadyForFrontend, domain.RoleSuperAdmin), assetWorkbenchH.UpdateMemberIdentity)

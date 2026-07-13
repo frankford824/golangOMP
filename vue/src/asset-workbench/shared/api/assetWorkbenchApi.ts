@@ -1281,6 +1281,11 @@ export const assetWorkbenchApi = {
     return unwrapPaginated(res.data)
   },
 
+  async getProfile(userId: number, signal?: AbortSignal): Promise<AssetWorkbenchProfile> {
+    const res = await http.get<ApiEnvelope<AssetWorkbenchProfile>>(`/v1/asset-workbench/profiles/${userId}`, { signal })
+    return unwrap(res.data)
+  },
+
   async upsertProfile(userId: number, payload: UpsertProfilePayload, signal?: AbortSignal): Promise<AssetWorkbenchProfile> {
     const res = await http.patch<ApiEnvelope<AssetWorkbenchProfile>>(`/v1/asset-workbench/profiles/${userId}`, payload, { signal })
     return unwrap(res.data)

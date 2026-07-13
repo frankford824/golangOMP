@@ -1345,6 +1345,28 @@ func (s *Service) ListProfiles(ctx context.Context, actor domain.RequestActor, f
 	return maskProfileListPII(items), total, nil
 }
 
+func (s *Service) GetProfile(ctx context.Context, actor domain.RequestActor, userID int64) (*domain.AssetWorkbenchProfile, *domain.AppError) {
+	if err := s.requireRepo(); err != nil {
+		return nil, err
+	}
+	if !actorHasAny(actor, domain.RoleHRAdmin, domain.RoleAssetSettlement, domain.RoleSuperAdmin) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only HR or settlement roles can view full workbench profiles.", nil)
+	}
+	if userID <= 0 {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "user_id is required.", nil)
+	}
+	profile, err := s.repo.GetProfileByUserID(ctx, userID)
+	if err != nil {
+		return nil, mapRepoReadError(err, "Asset workbench profile not found.", "Failed to load asset workbench profile.")
+	}
+	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
+		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventProfilePIIViewed, domain.AssetWorkbenchEntityProfile, &profile.ID, nil, nil, "查看人员完整资料")
+	}); err != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to record profile access.", err.Error())
+	}
+	return profile, nil
+}
+
 func (s *Service) ListMembers(ctx context.Context, actor domain.RequestActor, filter repo.AssetWorkbenchMemberFilter) ([]*domain.AssetWorkbenchMember, int64, *domain.AppError) {
 	if err := s.requireRepo(); err != nil {
 		return nil, 0, err

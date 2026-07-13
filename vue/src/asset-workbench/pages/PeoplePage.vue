@@ -7,6 +7,7 @@ import { useRoutePageCopy } from '@aw/app/useRoutePageCopy'
 import { usePageRequest } from '@aw/shared/composables/usePageRequest'
 import { maskPhone } from '@aw/shared/format/pii'
 import { chipClass, profileStatusMeta, workerTypeMeta } from '@aw/shared/format/status'
+import { cityOptions, provinceOptions } from '@aw/shared/profile/chinaRegions'
 
 const parttimeGrades = ['J1', 'J2', 'J3']
 const fulltimeGrades = ['P1', 'P2', 'P3', 'P4', 'S1', 'S2', 'M1', 'M2']
@@ -18,6 +19,7 @@ const form = reactive({
   phone: '',
   province: '',
   city: '',
+  id_card: '',
   gender: '',
   alipay_account: '',
   status: 'pending',
@@ -25,6 +27,8 @@ const form = reactive({
 const profiles = ref<AssetWorkbenchProfile[]>([])
 const saving = ref(false)
 const hrSaving = ref(false)
+const profileDetailLoading = ref(false)
+const profileDetailError = ref('')
 const notice = ref('')
 const selectedProfile = ref<AssetWorkbenchProfile | null>(null)
 const route = useRoute()
@@ -33,12 +37,15 @@ const { label: pageLabel, subtitle: pageSubtitle } = useRoutePageCopy('/settings
 const peopleRequest = usePageRequest(
   async () => {
     const bootstrap = await assetWorkbenchApi.bootstrap()
+    if (!bootstrap.capabilities.includes('asset.workbench.profile.manage')) {
+      return { bootstrap, profiles: [] as AssetWorkbenchProfile[] }
+    }
     const focusedUserID = Number(route.query.user_id || 0)
     const result = await assetWorkbenchApi.listProfiles({
       page: 1,
       page_size: focusedUserID > 0 ? 1 : 100,
       ...(focusedUserID > 0 ? { user_id: focusedUserID } : {}),
-    }).catch(() => ({ items: [], total: 0 }))
+    })
     return { bootstrap, profiles: result.items }
   },
   null,
@@ -55,6 +62,7 @@ const hrForm = reactive({
   phone: '',
   province: '',
   city: '',
+  id_card: '',
   gender: '',
   alipay_account: '',
   onboarded_at: '',
@@ -63,10 +71,15 @@ const hrForm = reactive({
   reason: '',
 })
 const gradeOptions = computed(() => (hrForm.worker_type === 'fulltime' ? fulltimeGrades : parttimeGrades))
+const availableSelfProvinces = computed(() => provinceOptions(form.province))
+const availableSelfCities = computed(() => cityOptions(form.province, form.city))
+const availableHRProvinces = computed(() => provinceOptions(hrForm.province))
+const availableHRCities = computed(() => cityOptions(hrForm.province, hrForm.city))
 const focusedUserID = computed(() => Number(route.query.user_id || 0))
 const pendingProfiles = computed(() => profiles.value.filter((profile) => profileNeedsGrade(profile)))
 const readyProfiles = computed(() => profiles.value.filter((profile) => !profileNeedsGrade(profile)))
 const selectedProfileNeedsGrade = computed(() => selectedProfile.value ? profileNeedsGrade(selectedProfile.value) : false)
+let profileDetailRequestID = 0
 function profileNeedsGrade(profile: AssetWorkbenchProfile) {
   return profile.status !== 'active' || !profile.worker_type || !profile.job_grade
 }
@@ -90,15 +103,18 @@ async function loadPeople() {
       phone: data.bootstrap.profile.phone || '',
       province: data.bootstrap.profile.province || '',
       city: data.bootstrap.profile.city || '',
+      id_card: data.bootstrap.profile.id_card || '',
       gender: data.bootstrap.profile.gender || '',
       alipay_account: data.bootstrap.profile.alipay_account || '',
       status: data.bootstrap.profile.status || 'pending',
     })
   }
   profiles.value = data.profiles
-  if (focusedUserID.value > 0 && selectProfileByUserID(focusedUserID.value)) return
-  if (selectedProfile.value && profiles.value.some((profile) => profile.id === selectedProfile.value?.id)) return
-  selectFirstPendingProfile()
+  const selectedUserID = selectedProfile.value?.user_id
+  const target = focusedUserID.value > 0
+    ? profiles.value.find((profile) => profile.user_id === focusedUserID.value)
+    : profiles.value.find((profile) => profile.user_id === selectedUserID) ?? pendingProfiles.value[0] ?? profiles.value[0]
+  if (target) await selectProfileRecord(target)
 }
 
 async function saveProfile() {
@@ -112,9 +128,20 @@ async function saveProfile() {
       phone: form.phone,
       province: form.province,
       city: form.city,
+      id_card: form.id_card,
       gender: form.gender,
       alipay_account: form.alipay_account,
       reason: 'self profile update',
+    })
+    Object.assign(form, {
+      real_name: saved.real_name || '',
+      phone: saved.phone || '',
+      province: saved.province || '',
+      city: saved.city || '',
+      id_card: saved.id_card || '',
+      gender: saved.gender || '',
+      alipay_account: saved.alipay_account || '',
+      status: saved.status || 'pending',
     })
     notice.value = saved.pii_completed ? '资料已保存' : '资料已保存，仍有待补字段'
   } catch (err) {
@@ -124,17 +151,17 @@ async function saveProfile() {
   }
 }
 
-function selectProfileRecord(profile: AssetWorkbenchProfile) {
-  selectedProfile.value = profile
+function fillHRForm(profile: AssetWorkbenchProfile, includePII: boolean) {
   Object.assign(hrForm, {
     worker_type: profile.worker_type || 'parttime',
     job_grade: profile.job_grade || '',
     real_name: profile.real_name || '',
-    phone: '',
+    phone: includePII ? profile.phone || '' : '',
     province: profile.province || '',
     city: profile.city || '',
+    id_card: includePII ? profile.id_card || '' : '',
     gender: profile.gender || '',
-    alipay_account: '',
+    alipay_account: includePII ? profile.alipay_account || '' : '',
     onboarded_at: formatDateInput(profile.onboarded_at),
     grade_hidden: profile.grade_hidden === true,
     status: profileNeedsGrade(profile) ? 'active' : profile.status || 'pending',
@@ -142,21 +169,35 @@ function selectProfileRecord(profile: AssetWorkbenchProfile) {
   })
 }
 
-function selectProfileByUserID(userID: number) {
-  const profile = profiles.value.find((item) => item.user_id === userID)
-  if (!profile) return false
-  selectProfileRecord(profile)
-  return true
-}
-
-function selectFirstPendingProfile() {
-  const profile = pendingProfiles.value[0] ?? profiles.value[0]
-  if (profile) selectProfileRecord(profile)
+async function selectProfileRecord(profile: AssetWorkbenchProfile) {
+  const requestID = ++profileDetailRequestID
+  selectedProfile.value = profile
+  fillHRForm(profile, false)
+  profileDetailLoading.value = true
+  profileDetailError.value = ''
+  try {
+    const detail = await assetWorkbenchApi.getProfile(profile.user_id)
+    if (requestID !== profileDetailRequestID) return
+    selectedProfile.value = detail
+    fillHRForm(detail, true)
+  } catch (err) {
+    if (requestID !== profileDetailRequestID) return
+    profileDetailError.value = err instanceof Error ? err.message : '完整资料加载失败'
+  } finally {
+    if (requestID === profileDetailRequestID) profileDetailLoading.value = false
+  }
 }
 
 async function clearFocusedProfile() {
   await router.replace({ path: '/settings/people' })
   await loadPeople()
+}
+
+function clearSelectedProfile() {
+  profileDetailRequestID += 1
+  profileDetailLoading.value = false
+  profileDetailError.value = ''
+  selectedProfile.value = null
 }
 
 async function goToPendingSubmissions() {
@@ -177,6 +218,7 @@ async function saveHRProfile() {
       phone: hrForm.phone || undefined,
       province: hrForm.province,
       city: hrForm.city,
+      id_card: hrForm.id_card || undefined,
       gender: hrForm.gender,
       alipay_account: hrForm.alipay_account || undefined,
       onboarded_at: hrForm.onboarded_at ? `${hrForm.onboarded_at}T00:00:00+08:00` : undefined,
@@ -186,8 +228,6 @@ async function saveHRProfile() {
     })
     notice.value = `已更新 ${hrForm.real_name || profile.user_id} 的人员资料`
     await loadPeople()
-    const refreshed = profiles.value.find((item) => item.user_id === profile.user_id)
-    selectedProfile.value = refreshed ?? null
   } catch (err) {
     error.value = err instanceof Error ? err.message : '人员资料更新失败'
   } finally {
@@ -284,6 +324,8 @@ onMounted(() => {
           <div v-if="selectedProfileNeedsGrade" class="aw-inline-alert">
             该人员缺少可计价定级。保存人员类型、岗级并设为“可计价”后，历史待定级作品需要在“资产维护专区”点击重计价。
           </div>
+          <div v-if="profileDetailLoading" class="aw-inline-alert">正在读取完整人员资料，请稍候。</div>
+          <div v-else-if="profileDetailError" class="aw-inline-alert">{{ profileDetailError }}</div>
           <div class="aw-form-grid">
             <label>
               人员类型
@@ -321,7 +363,11 @@ onMounted(() => {
             </label>
             <label>
               手机
-              <input v-model="hrForm.phone" placeholder="不填则保留原值" />
+              <input v-model="hrForm.phone" autocomplete="tel" :disabled="profileDetailLoading" />
+            </label>
+            <label>
+              身份证号
+              <input v-model="hrForm.id_card" autocomplete="off" :disabled="profileDetailLoading" />
             </label>
             <label>
               性别
@@ -332,16 +378,22 @@ onMounted(() => {
               </select>
             </label>
             <label>
-              支付账号
-              <input v-model="hrForm.alipay_account" placeholder="不填则保留原值" />
+              支付宝账号
+              <input v-model="hrForm.alipay_account" autocomplete="off" :disabled="profileDetailLoading" />
             </label>
             <label>
               省份
-              <input v-model="hrForm.province" />
+              <select v-model="hrForm.province" autocomplete="address-level1" @change="hrForm.city = ''">
+                <option value="">请选择省份</option>
+                <option v-for="province in availableHRProvinces" :key="province" :value="province">{{ province }}</option>
+              </select>
             </label>
             <label>
               城市
-              <input v-model="hrForm.city" />
+              <select v-model="hrForm.city" autocomplete="address-level2" :disabled="!hrForm.province">
+                <option value="">请选择城市</option>
+                <option v-for="city in availableHRCities" :key="city" :value="city">{{ city }}</option>
+              </select>
             </label>
             <label class="aw-form-grid__full">
               变更原因
@@ -349,10 +401,10 @@ onMounted(() => {
             </label>
           </div>
           <div class="aw-inline-actions">
-            <button class="aw-primary-button" type="button" :disabled="hrSaving || !hrForm.job_grade" @click="saveHRProfile">
-              {{ hrSaving ? '保存中' : '保存人员资料' }}
+            <button class="aw-primary-button" type="button" :disabled="hrSaving || profileDetailLoading || !!profileDetailError || !hrForm.job_grade" @click="saveHRProfile">
+              {{ profileDetailLoading ? '正在读取资料' : hrSaving ? '保存中' : '保存人员资料' }}
             </button>
-            <button class="aw-secondary-button" type="button" @click="selectedProfile = null">取消选择</button>
+            <button class="aw-secondary-button" type="button" @click="clearSelectedProfile">取消选择</button>
           </div>
         </div>
         <div v-else class="aw-grade-editor aw-grade-editor--empty">
@@ -393,11 +445,21 @@ onMounted(() => {
           </label>
           <label>
             省份
-            <input v-model="form.province" />
+            <select v-model="form.province" autocomplete="address-level1" @change="form.city = ''">
+              <option value="">请选择省份</option>
+              <option v-for="province in availableSelfProvinces" :key="province" :value="province">{{ province }}</option>
+            </select>
           </label>
           <label>
             城市
-            <input v-model="form.city" />
+            <select v-model="form.city" autocomplete="address-level2" :disabled="!form.province">
+              <option value="">请选择城市</option>
+              <option v-for="city in availableSelfCities" :key="city" :value="city">{{ city }}</option>
+            </select>
+          </label>
+          <label>
+            身份证号
+            <input v-model="form.id_card" autocomplete="off" />
           </label>
           <label>
             性别
@@ -408,8 +470,8 @@ onMounted(() => {
             </select>
           </label>
           <label>
-            支付账号
-            <input v-model="form.alipay_account" />
+            支付宝账号
+            <input v-model="form.alipay_account" autocomplete="off" />
           </label>
         </div>
         <p v-if="notice" class="aw-copy">{{ notice }}</p>

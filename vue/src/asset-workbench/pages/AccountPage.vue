@@ -7,6 +7,7 @@ import { useWorkbenchSession } from '@aw/app/useWorkbenchSession'
 import { assetWorkbenchApi } from '@aw/shared/api/assetWorkbenchApi'
 import { maskAlipay, maskIdCard, maskPhone } from '@aw/shared/format/pii'
 import { roleDisplayList } from '@aw/shared/format/roleDisplay'
+import { cityOptions, provinceOptions } from '@aw/shared/profile/chinaRegions'
 import AsyncBoundary from '@aw/shared/ui/AsyncBoundary.vue'
 
 const { bootstrap, loading, error, refresh } = useAssetWorkbenchBootstrap()
@@ -41,6 +42,8 @@ const accountName = computed(() => bootstrap.value?.user?.username || bootstrap.
 const maskedPhone = computed(() => maskPhone(form.phone))
 const maskedIdCard = computed(() => maskIdCard(form.id_card))
 const maskedAlipay = computed(() => maskAlipay(form.alipay_account))
+const availableProvinces = computed(() => provinceOptions(form.province))
+const availableCities = computed(() => cityOptions(form.province, form.city))
 
 function syncForm() {
   const profile = bootstrap.value?.profile
@@ -81,7 +84,7 @@ onMounted(() => {
   void refresh()
 })
 
-watch(bootstrap, syncForm)
+watch(bootstrap, syncForm, { immediate: true })
 </script>
 
 <template>
@@ -172,11 +175,17 @@ watch(bootstrap, syncForm)
           </label>
           <label>
             <span>省份</span>
-            <input v-model="form.province" />
+            <select v-model="form.province" autocomplete="address-level1" @change="form.city = ''">
+              <option value="">请选择省份</option>
+              <option v-for="province in availableProvinces" :key="province" :value="province">{{ province }}</option>
+            </select>
           </label>
           <label>
             <span>城市</span>
-            <input v-model="form.city" />
+            <select v-model="form.city" autocomplete="address-level2" :disabled="!form.province">
+              <option value="">请选择城市</option>
+              <option v-for="city in availableCities" :key="city" :value="city">{{ city }}</option>
+            </select>
           </label>
           <label>
             <span>身份证</span>

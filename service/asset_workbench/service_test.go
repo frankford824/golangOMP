@@ -1966,6 +1966,60 @@ func TestListProfilesMasksPIIForListResponses(t *testing.T) {
 	}
 }
 
+func TestGetProfileReturnsFullPIIAndAuditsAccess(t *testing.T) {
+	phone := "13800000991"
+	idCard := "330100199001010000"
+	workbenchRepo := &profileListRepo{items: []*domain.AssetWorkbenchProfile{
+		{
+			ID:            10,
+			UserID:        77,
+			RealName:      "计件人员",
+			Phone:         &phone,
+			IDCard:        &idCard,
+			AlipayAccount: "piece-worker@example.com",
+		},
+	}}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"},
+		WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}),
+	)
+
+	profile, appErr := svc.GetProfile(context.Background(), domain.RequestActor{
+		ID:    1,
+		Roles: []domain.Role{domain.RoleHRAdmin},
+	}, 77)
+	if appErr != nil {
+		t.Fatalf("GetProfile() error = %+v", appErr)
+	}
+	if profile.Phone == nil || *profile.Phone != phone || profile.IDCard == nil || *profile.IDCard != idCard || profile.AlipayAccount != "piece-worker@example.com" {
+		t.Fatalf("GetProfile() should return complete PII, got %+v", profile)
+	}
+	if len(workbenchRepo.events) != 1 {
+		t.Fatalf("events = %+v, want one profile access event", workbenchRepo.events)
+	}
+	event := workbenchRepo.events[0]
+	if event.EventType != domain.AssetWorkbenchEventProfilePIIViewed || event.EntityType != domain.AssetWorkbenchEntityProfile || event.EntityID == nil || *event.EntityID != 10 {
+		t.Fatalf("profile access event = %+v", event)
+	}
+	if len(event.Before) != 0 || len(event.After) != 0 {
+		t.Fatalf("profile access audit must not copy PII snapshots: %+v", event)
+	}
+}
+
+func TestGetProfileRejectsSubmitterPIIAccess(t *testing.T) {
+	workbenchRepo := &profileListRepo{}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"},
+		WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}),
+	)
+
+	_, appErr := svc.GetProfile(context.Background(), domain.RequestActor{
+		ID:    77,
+		Roles: []domain.Role{domain.RoleAssetSubmitter},
+	}, 88)
+	if appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
+		t.Fatalf("GetProfile() error = %+v, want permission denied", appErr)
+	}
+}
+
 func TestUpsertMyProfileCreatesMissingPIINotification(t *testing.T) {
 	workbenchRepo := &profileListRepo{}
 	notifier := &profileNotificationStub{}

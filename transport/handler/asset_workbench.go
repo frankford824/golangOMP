@@ -209,6 +209,24 @@ func (h *AssetWorkbenchHandler) ListProfiles(c *gin.Context) {
 	respondOKWithPagination(c, items, gin.H{"total": total, "page": page, "page_size": pageSize})
 }
 
+func (h *AssetWorkbenchHandler) GetProfile(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	userID, err := strconv.ParseInt(strings.TrimSpace(c.Param("user_id")), 10, 64)
+	if err != nil || userID <= 0 {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid user_id", nil))
+		return
+	}
+	result, appErr := h.svc.GetProfile(c.Request.Context(), actor, userID)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
 func (h *AssetWorkbenchHandler) UpsertProfile(c *gin.Context) {
 	actor, ok := h.sessionActor(c)
 	if !ok {

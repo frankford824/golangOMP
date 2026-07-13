@@ -129,6 +129,7 @@ const (
 	AssetWorkbenchAdjustmentStatusApplied  = "applied"
 
 	AssetWorkbenchEventProfileUpserted             = "profile.upserted"
+	AssetWorkbenchEventProfilePIIViewed            = "profile.pii_viewed"
 	AssetWorkbenchEventPriceCreated                = "price.created"
 	AssetWorkbenchEventPriceUpdated                = "price.updated"
 	AssetWorkbenchEventPriceSuperseded             = "price.superseded"
