@@ -273,6 +273,86 @@ function getTaskOr404(taskId: string): MockTask | null {
 }
 
 export const tasksHandler: MockHandler = (request) => {
+  if (request.method === 'GET' && request.path === '/v1/task-board/overview') {
+    const now = nowISO()
+    return {
+      status: 200,
+      data: {
+        data: {
+          generated_at: now,
+          time_zone: 'Asia/Shanghai',
+          period_start: now,
+          period_end: now,
+          health_status: 'ok',
+          counts: {
+            total_tasks: 24,
+            active_tasks: 12,
+            design_pending: 7,
+            pending_audit: 2,
+            handover: 1,
+            customization_in_progress: 2,
+            pending_warehouse_receive: 2,
+            overdue: 1,
+            due_today: 4,
+            today_created: 5,
+            today_completed: 3,
+          },
+          kpis: {
+            week_created: 18,
+            week_created_completed: 10,
+            week_completion_rate: 55.6,
+            week_audit_decisions: 12,
+            week_audit_rejected: 1,
+            week_reject_rate: 8.3,
+            week_completed: 11,
+            average_processing_hours: 16.8,
+            average_processing_sample_count: 11,
+            exact_completion_sample_count: 11,
+            fallback_completion_sample_count: 0,
+            completion_event_coverage_rate: 100,
+          },
+          trend: [
+            ['2026-07-07', 2, 1, 3],
+            ['2026-07-08', 3, 2, 4],
+            ['2026-07-09', 2, 1, 2],
+            ['2026-07-10', 4, 3, 3],
+            ['2026-07-11', 1, 1, 2],
+            ['2026-07-12', 3, 2, 3],
+            ['2026-07-13', 5, 3, 4],
+          ].map(([date, created, completed, due]) => ({ date, created, completed, due })),
+          status_distribution: [
+            { key: 'design_ops', name: '设计/运营待推进', count: 7 },
+            { key: 'audit', name: '待审核', count: 2 },
+            { key: 'customization', name: '定制协同', count: 2 },
+            { key: 'warehouse', name: '待仓库', count: 2 },
+            { key: 'completed', name: '已完成/终止', count: 11 },
+          ],
+          recent_tasks: [
+            {
+              task_id: 1,
+              task_no: 'RW-MOCK-001',
+              product_name: '演示新品任务',
+              owner_name: '演示账号',
+              task_status: 'InProgress',
+              deadline_at: now,
+            },
+          ],
+          recent_events: [
+            {
+              id: 'mock-dashboard-event-1',
+              event_type: 'task.closed',
+              title: '任务结单',
+              task_id: 1,
+              task_no: 'RW-MOCK-001',
+              actor_name: '演示账号',
+              created_at: now,
+            },
+          ],
+        },
+      },
+    }
+  }
+
   if (request.method === 'GET' && request.path === '/v1/tasks') {
     if (isLargeSurfaceAuditEnabled()) {
       return {

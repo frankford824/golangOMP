@@ -30,6 +30,15 @@ func (h *TaskBoardHandler) Summary(c *gin.Context) {
 	respondOK(c, result)
 }
 
+func (h *TaskBoardHandler) OperationalOverview(c *gin.Context) {
+	result, appErr := h.svc.GetOperationalOverview(c.Request.Context())
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
 func (h *TaskBoardHandler) Queues(c *gin.Context) {
 	filter, appErr := parseTaskBoardFilter(c)
 	if appErr != nil {

@@ -6956,6 +6956,126 @@ components:
       properties:
         data:
           $ref: '#/components/schemas/TaskBoardSummary'
+    TaskOperationalCounts:
+      type: object
+      required: [total_tasks, active_tasks, design_pending, pending_audit, handover, customization_in_progress, pending_warehouse_receive, overdue, due_today, today_created, today_completed]
+      properties:
+        total_tasks: { type: integer, format: int64 }
+        active_tasks: { type: integer, format: int64 }
+        design_pending: { type: integer, format: int64 }
+        pending_audit: { type: integer, format: int64 }
+        handover: { type: integer, format: int64 }
+        customization_in_progress: { type: integer, format: int64 }
+        pending_warehouse_receive: { type: integer, format: int64 }
+        overdue: { type: integer, format: int64 }
+        due_today: { type: integer, format: int64 }
+        today_created: { type: integer, format: int64 }
+        today_completed: { type: integer, format: int64 }
+    TaskOperationalKPIs:
+      type: object
+      required: [week_created, week_created_completed, week_completion_rate, week_audit_decisions, week_audit_rejected, week_reject_rate, week_completed, average_processing_hours, average_processing_sample_count, exact_completion_sample_count, fallback_completion_sample_count, completion_event_coverage_rate]
+      properties:
+        week_created: { type: integer, format: int64 }
+        week_created_completed: { type: integer, format: int64 }
+        week_completion_rate: { type: number, format: double }
+        week_audit_decisions: { type: integer, format: int64 }
+        week_audit_rejected: { type: integer, format: int64 }
+        week_reject_rate: { type: number, format: double }
+        week_completed: { type: integer, format: int64 }
+        average_processing_hours: { type: number, format: double }
+        average_processing_sample_count: { type: integer, format: int64 }
+        exact_completion_sample_count: { type: integer, format: int64 }
+        fallback_completion_sample_count: { type: integer, format: int64 }
+        completion_event_coverage_rate:
+          type: number
+          format: double
+          description: Percentage of the current-week completion-duration sample backed by an explicit completion event rather than the legacy updated_at fallback.
+    TaskOperationalTrendPoint:
+      type: object
+      required: [date, created, completed, due]
+      properties:
+        date: { type: string, format: date }
+        created: { type: integer, format: int64 }
+        completed: { type: integer, format: int64 }
+        due: { type: integer, format: int64 }
+    TaskOperationalStatusBucket:
+      type: object
+      required: [key, name, count]
+      properties:
+        key:
+          type: string
+          enum: [design_ops, audit, customization, warehouse, completed]
+        name: { type: string }
+        count: { type: integer, format: int64 }
+    TaskOperationalEvent:
+      type: object
+      required: [id, event_type, title, task_id, task_no, actor_name, created_at]
+      properties:
+        id: { type: string }
+        event_type: { type: string }
+        title: { type: string }
+        task_id: { type: integer, format: int64 }
+        task_no: { type: string }
+        actor_name: { type: string }
+        created_at: { type: string, format: date-time }
+    TaskOperationalRecentTask:
+      type: object
+      required: [task_id, task_no, product_name, owner_name, task_status]
+      properties:
+        task_id: { type: integer, format: int64 }
+        task_no: { type: string }
+        product_name: { type: string }
+        owner_name: { type: string }
+        task_status: { type: string }
+        deadline_at:
+          type: string
+          format: date-time
+          nullable: true
+    TaskOperationalOverview:
+      type: object
+      required: [generated_at, time_zone, period_start, period_end, health_status, counts, kpis, trend, status_distribution, recent_tasks, recent_events]
+      properties:
+        generated_at: { type: string, format: date-time }
+        time_zone:
+          type: string
+          enum: [Asia/Shanghai]
+        period_start: { type: string, format: date-time }
+        period_end: { type: string, format: date-time }
+        health_status:
+          type: string
+          enum: [ok]
+          description: "`ok` means the uncached task, audit, and completion-event aggregate queries all succeeded for this response."
+        counts:
+          $ref: '#/components/schemas/TaskOperationalCounts'
+        kpis:
+          $ref: '#/components/schemas/TaskOperationalKPIs'
+        trend:
+          type: array
+          minItems: 7
+          maxItems: 7
+          items:
+            $ref: '#/components/schemas/TaskOperationalTrendPoint'
+        status_distribution:
+          type: array
+          minItems: 5
+          maxItems: 5
+          items:
+            $ref: '#/components/schemas/TaskOperationalStatusBucket'
+        recent_tasks:
+          type: array
+          maxItems: 8
+          items:
+            $ref: '#/components/schemas/TaskOperationalRecentTask'
+        recent_events:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskOperationalEvent'
+    TaskOperationalOverviewResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: '#/components/schemas/TaskOperationalOverview'
     TaskBoardQueue:
       type: object
       properties:
@@ -16265,6 +16385,32 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/WarehouseReceiptListResponse'
+  /v1/task-board/overview:
+    get:
+      summary: Get the main operations dashboard overview
+      description: |
+        Returns an uncached, database-aggregated snapshot for the main operations dashboard.
+        All counts use the globally visible main task-flow scope. Calendar-day and current-week
+        boundaries use `Asia/Shanghai`. Completion counts and duration prefer explicit
+        `task.closed` or terminal retouch `task.design.submitted` events; legacy completed tasks
+        without a completion event use `updated_at` only as an explicitly measured fallback.
+        The response always contains seven trend days and all five mutually exclusive status buckets.
+      tags: [TaskBoard, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: session_token_role_enforced
+        required_roles: [Ops, Designer, CustomizationOperator, CustomizationReviewer, Audit_A, Audit_B, Warehouse, Outsource, Admin, SuperAdmin, HRAdmin, OrgAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector]
+      responses:
+        '200':
+          description: Authoritative task operational overview
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskOperationalOverviewResponse'
+        '401':
+          description: Unauthenticated
+        '403':
+          description: Caller is not a task-facing authenticated role
   /v1/task-board/summary:
     get:
       summary: Get task-board queue summary

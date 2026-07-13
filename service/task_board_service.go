@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"workflow/domain"
+	"workflow/repo"
 )
 
 type TaskBoardFilter struct {
@@ -18,6 +19,7 @@ type TaskBoardFilter struct {
 type TaskBoardService interface {
 	GetSummary(ctx context.Context, filter TaskBoardFilter) (*domain.TaskBoardSummary, *domain.AppError)
 	GetQueues(ctx context.Context, filter TaskBoardFilter) (*domain.TaskBoardQueuesResponse, *domain.AppError)
+	GetOperationalOverview(ctx context.Context) (*domain.TaskOperationalOverview, *domain.AppError)
 }
 
 type taskBoardCandidateLister interface {
@@ -25,15 +27,31 @@ type taskBoardCandidateLister interface {
 }
 
 type taskBoardService struct {
-	taskSvc taskBoardCandidateLister
-	nowFn   func() time.Time
+	taskSvc       taskBoardCandidateLister
+	dashboardRepo repo.TaskOperationalDashboardRepo
+	nowFn         func() time.Time
 }
 
-func NewTaskBoardService(taskSvc taskBoardCandidateLister) TaskBoardService {
-	return &taskBoardService{
+func NewTaskBoardService(taskSvc taskBoardCandidateLister, dashboardRepos ...repo.TaskOperationalDashboardRepo) TaskBoardService {
+	service := &taskBoardService{
 		taskSvc: taskSvc,
 		nowFn:   time.Now,
 	}
+	if len(dashboardRepos) > 0 {
+		service.dashboardRepo = dashboardRepos[0]
+	}
+	return service
+}
+
+func (s *taskBoardService) GetOperationalOverview(ctx context.Context) (*domain.TaskOperationalOverview, *domain.AppError) {
+	if s.dashboardRepo == nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "task operational dashboard repository is not configured", nil)
+	}
+	overview, err := s.dashboardRepo.GetTaskOperationalOverview(ctx, s.nowFn().UTC())
+	if err != nil {
+		return nil, infraError("get task operational overview", err)
+	}
+	return overview, nil
 }
 
 type taskBoardPresetDefinition struct {

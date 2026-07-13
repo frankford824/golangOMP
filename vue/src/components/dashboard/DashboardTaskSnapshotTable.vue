@@ -29,16 +29,34 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { Task } from '@/domain/types/task'
+import type { TaskOperationalRecentTask } from '@/types/dashboard'
 import { getTaskStatusLabel } from '@/domain/enums/task-status'
 import { isDoneStatus, isInAuditQueue, isInCustomizationFlow } from '@/domain/task-actions'
 import { taskBeijingDateKey } from '@/utils/date'
 
 const props = defineProps<{
-  tasks: Task[]
+  tasks?: Task[]
+  snapshots?: TaskOperationalRecentTask[]
 }>()
 
 const rows = computed(() => {
-  return props.tasks.map((t) => {
+  if (props.snapshots) {
+    return props.snapshots.map((task) => ({
+      id: String(task.task_id),
+      title: task.product_name.trim() || task.task_no,
+      owner: task.owner_name || '—',
+      statusLabel: getTaskStatusLabel(task.task_status as Task['status']),
+      statusTone: task.task_status === 'Completed' || task.task_status === 'Archived' || task.task_status === 'Cancelled'
+        ? 'success' as const
+        : task.task_status.includes('Audit')
+          ? 'info' as const
+          : task.task_status.includes('Customization')
+            ? 'warning' as const
+            : 'neutral' as const,
+      due: taskBeijingDateKey(task.deadline_at ?? undefined) || '—',
+    }))
+  }
+  return (props.tasks ?? []).map((t) => {
     const statusLabel = getTaskStatusLabel(t.status)
     let statusTone: 'neutral' | 'info' | 'warning' | 'success' = 'neutral'
     if (isDoneStatus(t)) statusTone = 'success'

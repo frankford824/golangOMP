@@ -446,6 +446,7 @@ func NewRouter(
 	// V7: Task board / inbox aggregation
 	taskBoardGroup := v1.Group("/task-board")
 	{
+		taskBoardGroup.GET("/overview", access(taskBoardGroup, http.MethodGet, "/overview", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskBoardH.OperationalOverview)
 		taskBoardGroup.GET("/summary", access(taskBoardGroup, http.MethodGet, "/summary", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleAdmin), taskBoardH.Summary)
 		taskBoardGroup.GET("/queues", access(taskBoardGroup, http.MethodGet, "/queues", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleAdmin), taskBoardH.Queues)
 	}

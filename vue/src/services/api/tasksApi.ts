@@ -14,6 +14,7 @@ import type {
   BusinessInfoPatch,
   SubmitDesignPayload,
 } from '@/services/apiTypes'
+import type { TaskOperationalOverview } from '@/types/dashboard'
 
 export interface TaskReferenceBatchDownloadItem {
   key: string
@@ -224,6 +225,13 @@ export const tasksApi = {
    */
   boardSummary: (signal?: AbortSignal) =>
     http.get('/v1/task-board/summary', { signal }),
+
+  /**
+   * 获取运营主页权威全量统计快照。
+   * GET /v1/task-board/overview
+   */
+  operationalOverview: (signal?: AbortSignal) =>
+    http.get<{ data: TaskOperationalOverview }>('/v1/task-board/overview', { signal }),
 
   /**
    * 获取任务看板各队列明细

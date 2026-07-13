@@ -8,7 +8,7 @@
   >
     <div v-if="error" class="dashboard-error mx-auto max-w-lg p-8 text-center">
       <p>{{ error }}</p>
-      <BaseButton variant="primary" size="sm" @click="load">重试</BaseButton>
+      <BaseButton variant="primary" size="sm" @click="load()">重试</BaseButton>
     </div>
     <template v-else-if="hasBusinessAccess">
       <div
@@ -27,12 +27,26 @@
               先看今日是否正常，再判断队列积压、质量风险和下一步处理入口。
             </p>
           </div>
-          <div class="board-header-aside" aria-hidden="true">
-            <span>实时</span>
+          <div class="board-header-aside" aria-live="polite">
+            <span>30 秒自动刷新</span>
             <strong>{{ summary.todayPendingCount }}</strong>
             <small>设计待办</small>
+            <small class="board-header-updated">更新于 {{ lastUpdatedLabel }}</small>
+            <BaseButton
+              type="button"
+              variant="ghost"
+              size="sm"
+              :disabled="refreshing"
+              @click="load(false)"
+            >
+              {{ refreshing ? '刷新中…' : '立即刷新' }}
+            </BaseButton>
           </div>
         </header>
+
+        <p v-if="refreshWarning" class="dashboard-refresh-warning" role="status">
+          {{ refreshWarning }}；当前保留上次成功数据。
+        </p>
 
         <!-- 快捷健康条（原「任务健康度」能力保留为单行） -->
         <div
@@ -42,8 +56,8 @@
           <div class="dashboard-health-metrics flex flex-wrap items-center gap-2">
             <span class="dashboard-health-item dashboard-health-item--success">
               <span class="dashboard-health-dot" aria-hidden="true" />
-              <span class="dashboard-health-label">系统健康</span>
-              <strong class="dashboard-health-value">正常</strong>
+              <span class="dashboard-health-label">数据服务</span>
+              <strong class="dashboard-health-value">{{ dataHealthLabel }}</strong>
             </span>
             <span class="dashboard-health-item dashboard-health-item--load">
               <span class="dashboard-health-dot" aria-hidden="true" />
@@ -57,7 +71,7 @@
             </span>
             <span class="dashboard-health-item dashboard-health-item--danger">
               <span class="dashboard-health-dot" aria-hidden="true" />
-              <span class="dashboard-health-label">即将逾期</span>
+              <span class="dashboard-health-label">已逾期</span>
               <strong class="dashboard-health-value">{{ summary.overdueCount }}</strong>
             </span>
           </div>
@@ -79,22 +93,22 @@
           <DashboardKpiCard
             title="本周完成率"
             :value="kpiStats.completedRateLabel"
-            hint="本周已完成任务 / 总任务"
+            hint="本周新建且已结单 / 本周新建"
           />
           <DashboardKpiCard
             title="打回率"
             :value="kpiStats.rejectRateLabel"
-            hint="本周审核打回 / 总审核"
+            hint="本周审核打回 / 审核结论"
           />
           <DashboardKpiCard
             title="平均处理时长"
             :value="kpiStats.avgHoursLabel"
-            hint="已完成任务平均耗时"
+            :hint="kpiStats.avgHoursHint"
           />
           <DashboardKpiCard
-            title="我可见的进行中任务"
+            title="全局进行中任务"
             :value="kpiStats.pendingCount"
-            hint="按当前角色数据范围，未完成/未关单任务"
+            hint="全局未完成、未取消任务"
             route="/tasks"
           />
         </section>
@@ -228,7 +242,7 @@
               <StatusSkeleton :loading="true" :lines="4" class="!py-0" />
             </div>
             <div v-else class="min-w-0 overflow-x-auto -mx-1 px-1 sm:mx-0 sm:px-0">
-              <DashboardTaskSnapshotTable :tasks="snapshotTasks" />
+              <DashboardTaskSnapshotTable :snapshots="overview?.recent_tasks ?? []" />
             </div>
           </article>
           <article
@@ -241,8 +255,8 @@
             >
               <RecentEventStream
                 :events="recentEvents"
-                :loading="auditsStore.loading"
-                :error="auditsStore.loadError"
+                :loading="loading"
+                :error="overview == null ? error : ''"
                 hide-title
                 variant="dashboard"
               />
@@ -306,45 +320,37 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed, defineAsyncComponent } from 'vue'
+import { ref, onMounted, onBeforeUnmount, computed, defineAsyncComponent } from 'vue'
 import { useRouter } from 'vue-router'
-import type { Task } from '@/domain/types/task'
-import type { DashboardSummary, RecentEvent, RiskItem } from '@/types/dashboard'
-import { useTasksStore } from '@/stores/tasks'
-import { useAuditsStore } from '@/stores/audits'
+import type {
+  DashboardSummary,
+  RecentEvent,
+  RiskItem,
+  TaskOperationalOverview,
+  TaskOperationalStatusBucket,
+} from '@/types/dashboard'
+import { tasksApi } from '@/services/api/tasksApi'
 import StatusSkeleton from '@/components/common/StatusSkeleton.vue'
 import DashboardKpiCard from '@/components/dashboard/DashboardKpiCard.vue'
 import DashboardTaskSnapshotTable from '@/components/dashboard/DashboardTaskSnapshotTable.vue'
 import RecentEventStream from '@/components/dashboard/RecentEventStream.vue'
 import RiskListCard from '@/components/dashboard/RiskListCard.vue'
 import BaseButton from '@/components/base/BaseButton.vue'
-import {
-  TODAY_PENDING_STATUSES,
-  isInAuditQueue,
-  isInCustomizationFlow,
-  isDoneStatus,
-  isPendingAuditB,
-  canGoWarehouse,
-  isCompletedOrArchived,
-} from '@/domain/task-actions'
 import { usePermission } from '@/composables/usePermission'
-import {
-  getBeijingDateString,
-  formatDateBeijing,
-  isOverdueByBeijingDay as checkOverdue,
-  taskBeijingDateKey,
-  taskInstantMs,
-} from '@/utils/date'
-import { getLastNBeijingDateKeys, beijingDateKeyToShortLabel } from '@/utils/beijing-calendar'
+import { formatDateBeijing } from '@/utils/date'
+import { beijingDateKeyToShortLabel } from '@/utils/beijing-calendar'
 
 const DashboardTrendChart = defineAsyncComponent(() => import('@/components/dashboard/DashboardTrendChart.vue'))
 
 const router = useRouter()
-const tasksStore = useTasksStore()
-const auditsStore = useAuditsStore()
-const { can, canAccessTask } = usePermission()
+const { can } = usePermission()
 const loading = ref(true)
+const refreshing = ref(false)
 const error = ref('')
+const refreshWarning = ref('')
+const overview = ref<TaskOperationalOverview | null>(null)
+let refreshTimer: ReturnType<typeof setInterval> | null = null
+let lastSuccessfulRefreshAt = 0
 
 const BUSINESS_ACTIONS = [
   'task.list',
@@ -355,76 +361,32 @@ const BUSINESS_ACTIONS = [
   'design.review',
 ] as const
 
-const canListTasks = computed(() => can('task.list'))
 const hasBusinessAccess = computed(() => BUSINESS_ACTIONS.some((a) => can(a)))
-const canAccessAuditLogs = computed(() => can('audit.view'))
 
-function formatEventAt(iso: string): string {
-  if (!iso) return ''
-  return formatDateBeijing(iso)
-}
+const lastUpdatedLabel = computed(() =>
+  overview.value?.generated_at ? formatDateBeijing(overview.value.generated_at) : '尚未更新',
+)
+const dataHealthLabel = computed(() => overview.value?.health_status === 'ok' ? '正常' : '不可用')
 
 const summary = computed<DashboardSummary>(() => {
-  const list = tasksStore.list
-  const todayStr = getBeijingDateString()
-
-  const todayPendingCount = list.filter((t) =>
-    (TODAY_PENDING_STATUSES as readonly string[]).includes(t.status),
-  ).length
-  const pendingAuditCount = list.filter((t) => isInAuditQueue(t)).length
-  const handoverCount = list.filter((t) => isPendingAuditB(t)).length
-  const pendingOutsourceReturnCount = list.filter((t) => isInCustomizationFlow(t)).length
-  const pendingWarehouseReceiveCount = list.filter((t) => canGoWarehouse(t)).length
-  const todayCreatedCount = list.filter(
-    (t) => taskBeijingDateKey(t.createdAt) === todayStr,
-  ).length
-  const overdueCount = list.filter((t) => checkOverdue(t.dueAt, isDoneStatus(t))).length
-
+  const counts = overview.value?.counts
   return {
-    todayPendingCount,
-    pendingAuditCount,
-    handoverCount,
-    pendingOutsourceReturnCount,
-    pendingWarehouseReceiveCount,
-    todayCreatedCount,
-    overdueCount,
+    todayPendingCount: counts?.design_pending ?? 0,
+    pendingAuditCount: counts?.pending_audit ?? 0,
+    handoverCount: counts?.handover ?? 0,
+    pendingOutsourceReturnCount: counts?.customization_in_progress ?? 0,
+    pendingWarehouseReceiveCount: counts?.pending_warehouse_receive ?? 0,
+    todayCreatedCount: counts?.today_created ?? 0,
+    overdueCount: counts?.overdue ?? 0,
   }
-})
-
-const PIE_NAMES = ['设计/运营待推进', '待审核', '定制协同', '待仓库', '已完成/关单'] as const
-
-function statusPieSlice(t: Task): 0 | 1 | 2 | 3 | 4 {
-  if (isCompletedOrArchived(t)) return 4
-  if (isInAuditQueue(t)) return 1
-  if (isInCustomizationFlow(t)) return 2
-  if (canGoWarehouse(t)) return 3
-  return 0
-}
-
-const statusPieSeries = computed(() => {
-  const c: [number, number, number, number, number] = [0, 0, 0, 0, 0]
-  for (const t of tasksStore.list) {
-    c[statusPieSlice(t)] += 1
-  }
-  return PIE_NAMES.map((name, i) => ({ name, value: c[i] }))
 })
 
 const trend7d = computed(() => {
-  const keys = getLastNBeijingDateKeys(7)
-  const list = tasksStore.list
-  const labels = keys.map(beijingDateKeyToShortLabel)
-  const created = keys.map(
-    (day) => list.filter((t) => taskBeijingDateKey(t.createdAt) === day).length,
-  )
-  const completed = keys.map(
-    (day) =>
-      list.filter(
-        (t) => isCompletedOrArchived(t) && taskBeijingDateKey(t.updatedAt) === day,
-      ).length,
-  )
-  const dueOnDay = keys.map(
-    (day) => list.filter((t) => taskBeijingDateKey(t.dueAt) === day).length,
-  )
+  const points = overview.value?.trend ?? []
+  const labels = points.map((point) => beijingDateKeyToShortLabel(point.date))
+  const created = points.map((point) => point.created)
+  const completed = points.map((point) => point.completed)
+  const dueOnDay = points.map((point) => point.due)
   return { labels, created, completed, dueOnDay }
 })
 
@@ -438,28 +400,26 @@ const trendTodayStats = computed(() => {
 })
 
 const statusDistribution = computed(() => {
-  const valueOf = (name: (typeof PIE_NAMES)[number]) =>
-    statusPieSeries.value.find((item) => item.name === name)?.value ?? 0
-  const items = [
-    {
-      key: 'pending',
-      name: '设计/运营待推进',
-      value: valueOf('设计/运营待推进'),
-      hint: '非审核、非定制协同、非待仓库的进行中任务',
-    },
-    {
-      key: 'audit',
-      name: '待审核',
-      value: valueOf('待审核'),
-      hint: '审核队列待处理',
-    },
-    {
-      key: 'warehouse',
-      name: '待仓库',
-      value: valueOf('待仓库'),
-      hint: '交付链路待接收',
-    },
-  ] as const
+  const hintByKey: Record<TaskOperationalStatusBucket['key'], string> = {
+    design_ops: '设计、运营或打回后待推进',
+    audit: '审核队列待处理',
+    customization: '定制生产及协同处理中',
+    warehouse: '仓库接收、生产交接或待结单',
+    completed: '已结单、已归档或已取消',
+  }
+  const toneByKey: Record<TaskOperationalStatusBucket['key'], string> = {
+    design_ops: 'pending',
+    audit: 'audit',
+    customization: 'customization',
+    warehouse: 'warehouse',
+    completed: 'completed',
+  }
+  const items = (overview.value?.status_distribution ?? []).map((bucket) => ({
+    key: toneByKey[bucket.key],
+    name: bucket.name,
+    value: bucket.count,
+    hint: hintByKey[bucket.key],
+  }))
   const total = items.reduce((sum, item) => sum + item.value, 0)
   const withPercent = items.map((item) => ({
     ...item,
@@ -471,193 +431,137 @@ const statusDistribution = computed(() => {
     total,
     conclusion:
       total > 0
-        ? `当前积压主要集中在「${lead.name}」阶段，共 ${lead.value} 项`
-        : '当前暂无明显积压',
+        ? `当前任务主要集中在「${lead.name}」，共 ${lead.value} 项`
+        : '当前暂无任务',
     caption:
       total > 0
         ? withPercent.map((item) => `${item.name} ${item.percent}%`).join(' · ')
-        : '设计/运营待推进 0% · 待审核 0% · 待仓库 0%',
+        : '暂无任务分布数据',
   }
 })
-
-const snapshotTasks = computed(() => {
-  return [...tasksStore.list]
-    .sort(
-      (a, b) =>
-        taskInstantMs(b.updatedAt) - taskInstantMs(a.updatedAt),
-    )
-    .slice(0, 8)
-})
-
-const RECENT_EVENT_LIMIT = 20
 
 const recentEvents = computed<RecentEvent[]>(() => {
-  const events: RecentEvent[] = []
-  const taskById = (id: string) => tasksStore.getById(id)
-
-  for (const r of auditsStore.records) {
-    const task = taskById(r.taskId)
-    const refNo = task?.taskNo ?? (r.taskId || '未知')
-    const type =
-      r.action === 'pass'
-        ? 'audit_passed'
-        : r.action === 'reject'
-          ? 'audit_rejected'
-          : 'handover'
-    const title =
-      type === 'audit_passed'
-        ? '审核通过'
-        : type === 'audit_rejected'
-          ? '审核打回'
-          : '审核交班'
-    events.push({
-      id: `audit-${r.id}`,
-      type,
-      title,
-      refId: task?.id ?? '',
-      refNo,
-      actor: r.auditorName,
-      at: formatEventAt(r.createdAt),
-    })
-  }
-  for (const h of auditsStore.handovers) {
-    const task = taskById(h.taskId)
-    events.push({
-      id: `handover-${h.id}`,
-      type: 'handover',
-      title: '审核交班',
-      refId: task?.id ?? '',
-      refNo: task?.taskNo ?? (h.taskId || '未知'),
-      actor: h.fromUserName,
-      at: formatEventAt(h.createdAt),
-    })
-  }
-  const todayStr = getBeijingDateString()
-  for (const t of tasksStore.list) {
-    if (taskBeijingDateKey(t.createdAt) !== todayStr) continue
-    events.push({
-      id: `task-created-${t.id}`,
-      type: 'task_created',
-      title: '新建任务',
-      refId: t.id,
-      refNo: t.taskNo,
-      actor: t.requesterName,
-      at: formatEventAt(t.createdAt),
-    })
-  }
-  events.sort((a, b) => {
-    const atA = a.at.replace(' ', 'T')
-    const atB = b.at.replace(' ', 'T')
-    return atB.localeCompare(atA)
-  })
-  return events.slice(0, RECENT_EVENT_LIMIT)
+  return (overview.value?.recent_events ?? []).map((event) => ({
+    id: event.id,
+    type: event.event_type,
+    title: event.title,
+    refId: String(event.task_id),
+    refNo: event.task_no,
+    actor: event.actor_name,
+    at: formatDateBeijing(event.created_at),
+    createdAtIso: event.created_at,
+  }))
 })
 
 const risks = computed<RiskItem[]>(() => {
   const list: RiskItem[] = []
-  for (const t of tasksStore.list) {
-    if (!t.dueAt || isDoneStatus(t)) continue
-    if (!checkOverdue(t.dueAt, false)) continue
+  const counts = overview.value?.counts
+  if (!counts) return list
+  if (counts.overdue > 0) {
     list.push({
-      id: `overdue-${t.id}`,
+      id: 'overdue-tasks',
       level: 'high',
-      message: `任务 ${t.taskNo} 已逾期`,
-      refId: t.id,
-      refNo: t.taskNo,
+      message: `${counts.overdue} 个进行中任务已经逾期`,
+      route: '/tasks?overdue=true',
     })
   }
-  const pendingOutsource = tasksStore.list.filter((t) => isInCustomizationFlow(t)).length
-  if (pendingOutsource > 0) {
+  if (counts.due_today > 0) {
+    list.push({
+      id: 'due-today',
+      level: 'medium',
+      message: `${counts.due_today} 个任务今天截止`,
+      route: '/tasks',
+    })
+  }
+  if (counts.customization_in_progress > 0) {
     list.push({
       id: 'outsource-pending',
       level: 'medium',
-      message: `${pendingOutsource} 个定制任务处理中`,
-      route: '/tasks?task_category=customization',
+      message: `${counts.customization_in_progress} 个定制任务处理中`,
+      route: '/tasks?workflow_lane=customization',
     })
   }
   return list
 })
 
 const kpiStats = computed(() => {
-  const now = Date.now()
-  const weekMs = 7 * 24 * 60 * 60 * 1000
-
-  const tasks = tasksStore.list
-  const audits = auditsStore.records
-
-  const thisWeekTasks = tasks.filter((t) => {
-    const created = taskInstantMs(t.createdAt)
-    return now - created <= weekMs && now >= created
-  })
-
-  const completedThisWeek = thisWeekTasks.filter((t) => t.status === 'Completed')
-  const completedRate =
-    thisWeekTasks.length > 0 ? (completedThisWeek.length / thisWeekTasks.length) * 100 : 0
-
-  const thisWeekAudits = audits.filter((r) => {
-    const ts = taskInstantMs(r.createdAt)
-    return now - ts <= weekMs && now >= ts
-  })
-  const rejectCount = thisWeekAudits.filter((r) => r.action === 'reject').length
-  const auditTotal = thisWeekAudits.length || 1
-  const rejectRate = (rejectCount / auditTotal) * 100
-
-  const durations: number[] = []
-  for (const t of tasks) {
-    if (!t.createdAt || !t.updatedAt) continue
-    if (t.status !== 'Completed') continue
-    const start = taskInstantMs(t.createdAt)
-    const end = taskInstantMs(t.updatedAt)
-    if (end > start) {
-      durations.push((end - start) / (60 * 60 * 1000))
-    }
-  }
-  const avgHours =
-    durations.length > 0
-      ? durations.reduce((sum, v) => sum + v, 0) / durations.length
-      : 0
-
-  const pendingForUser = tasks.filter(
-    (t) => !isDoneStatus(t) && canAccessTask(t),
-  ).length
-
+  const kpis = overview.value?.kpis
+  const counts = overview.value?.counts
+  const sampleCount = kpis?.average_processing_sample_count ?? 0
+  const exactCount = kpis?.exact_completion_sample_count ?? 0
+  const fallbackCount = kpis?.fallback_completion_sample_count ?? 0
   return {
-    completedRateLabel: `${completedRate.toFixed(1)}%`,
-    rejectRateLabel: `${rejectRate.toFixed(1)}%`,
-    avgHoursLabel: `${avgHours.toFixed(1)} 小时`,
-    pendingCount: pendingForUser,
+    completedRateLabel: `${(kpis?.week_completion_rate ?? 0).toFixed(1)}%`,
+    rejectRateLabel: `${(kpis?.week_reject_rate ?? 0).toFixed(1)}%`,
+    avgHoursLabel: `${(kpis?.average_processing_hours ?? 0).toFixed(1)} 小时`,
+    avgHoursHint:
+      sampleCount > 0
+        ? `本周结单平均耗时；事件 ${exactCount} 条，历史回退 ${fallbackCount} 条`
+        : '本周暂无结单样本',
+    pendingCount: counts?.active_tasks ?? 0,
   }
 })
 
-async function load() {
-  loading.value = true
-  error.value = ''
-  auditsStore.loadError = ''
-
+async function load(initial = overview.value == null) {
+  if (refreshing.value) return
+  if (initial) loading.value = true
+  refreshing.value = true
+  refreshWarning.value = ''
   try {
-    if (canListTasks.value) {
-      await tasksStore.loadTasks()
+    const overviewResponse = await tasksApi.operationalOverview()
+    const nextOverview = overviewResponse.data?.data
+    if (!nextOverview) {
+      throw new Error('运营主页统计响应缺少 data')
     }
+    overview.value = nextOverview
+    lastSuccessfulRefreshAt = Date.now()
+    error.value = ''
   } catch (e) {
-    error.value = e instanceof Error ? e.message : '加载任务运营主页总览失败'
+    const message = e instanceof Error ? e.message : '加载任务运营主页总览失败'
+    if (overview.value == null) error.value = message
+    else refreshWarning.value = message
   } finally {
-    loading.value = false
+    if (initial) loading.value = false
+    refreshing.value = false
   }
+}
 
-  if (canAccessAuditLogs.value) {
-    try {
-      await auditsStore.loadAuditLogs()
-    } catch (e) {
-      auditsStore.loadError = e instanceof Error ? e.message : '加载审计日志失败'
-    }
+function refreshWhenVisible() {
+  if (document.visibilityState !== 'visible') return
+  if (Date.now() - lastSuccessfulRefreshAt < 5000) return
+  void load(false)
+}
+
+function startRefreshLoop() {
+  refreshTimer = setInterval(() => {
+    if (document.visibilityState === 'visible') void load(false)
+  }, 30_000)
+  document.addEventListener('visibilitychange', refreshWhenVisible)
+  window.addEventListener('focus', refreshWhenVisible)
+}
+
+function stopRefreshLoop() {
+  if (refreshTimer != null) {
+    clearInterval(refreshTimer)
+    refreshTimer = null
   }
+  document.removeEventListener('visibilitychange', refreshWhenVisible)
+  window.removeEventListener('focus', refreshWhenVisible)
 }
 
 function goTaskPool() {
   void router.push('/tasks?tab=pool')
 }
 
-onMounted(load)
+onMounted(() => {
+  if (!hasBusinessAccess.value) {
+    loading.value = false
+    return
+  }
+  void load(true)
+  startRefreshLoop()
+})
+onBeforeUnmount(stopRefreshLoop)
 </script>
 
 <style scoped>
@@ -669,6 +573,15 @@ onMounted(load)
 }
 .dashboard-error p {
   margin: 0 0 1rem;
+}
+.dashboard-refresh-warning {
+  margin: 0;
+  border: 1px solid rgb(var(--yb-warning-border-soft));
+  border-radius: 0.75rem;
+  padding: 0.65rem 0.8rem;
+  background: rgb(var(--yb-warning-soft));
+  color: rgb(var(--yb-warning-text));
+  font-size: 0.8rem;
 }
 .kpi-skeleton {
   min-height: 5.5rem;
@@ -994,6 +907,17 @@ onMounted(load)
   font-family: var(--yb-font-data);
   font-size: clamp(2rem, 3vw, 3.1rem);
   line-height: 1;
+}
+
+.board-header-aside .board-header-updated {
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.board-header-aside :deep(button) {
+  min-height: 1.75rem;
+  padding-inline: 0.6rem;
+  font-size: 0.7rem;
 }
 
 .dashboard-health-strip {
@@ -1349,8 +1273,16 @@ onMounted(load)
   background: rgb(var(--yb-success-border-bright));
 }
 
+.status-stack-seg--customization {
+  background: rgb(var(--yb-warning));
+}
+
 .status-stack-seg--warehouse {
   background: rgb(var(--yb-status-warehouse));
+}
+
+.status-stack-seg--completed {
+  background: rgb(var(--yb-success));
 }
 
 .status-stack-caption {
@@ -1399,8 +1331,16 @@ onMounted(load)
   background: rgb(var(--yb-success-border-bright));
 }
 
+.status-card--customization .status-card-dot {
+  background: rgb(var(--yb-warning));
+}
+
 .status-card--warehouse .status-card-dot {
   background: rgb(var(--yb-status-warehouse));
+}
+
+.status-card--completed .status-card-dot {
+  background: rgb(var(--yb-success));
 }
 
 .status-card-main {
@@ -1443,8 +1383,16 @@ onMounted(load)
   color: rgb(var(--yb-success-strong));
 }
 
+.status-card--customization .status-card-value {
+  color: rgb(var(--yb-warning-text));
+}
+
 .status-card--warehouse .status-card-value {
   color: rgb(var(--yb-warning-text));
+}
+
+.status-card--completed .status-card-value {
+  color: rgb(var(--yb-success-strong));
 }
 
 .board-panel :deep(.task-table__head) {

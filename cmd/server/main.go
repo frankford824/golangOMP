@@ -156,6 +156,7 @@ func main() {
 	searchRepo := mysqlrepo.NewSearchRepo(mdb)
 	predictionRepo := mysqlrepo.NewPredictionRepo(mdb)
 	reportL1Repo := mysqlrepo.NewReportL1Repo(mdb)
+	taskOperationalDashboardRepo := mysqlrepo.NewTaskOperationalDashboardRepo(mdb)
 	kpiAnalysisRepo := mysqlrepo.NewKPIAnalysisRepo(mdb)
 	businessTrendRepo := mysqlrepo.NewBusinessTrendRepo(mdb)
 	workflowTraceEventRepo := mysqlrepo.NewWorkflowTraceEventRepo(mdb)
@@ -375,7 +376,7 @@ func main() {
 		service.WithTaskRetouchRequirementRepo(taskRetouchRequirementRepo),
 		service.WithTaskProductManagementCloseSyncer(productManagementSvc),
 		service.WithTaskNotificationService(notificationSvc))
-	taskBoardSvc := service.NewTaskBoardService(taskSvc)
+	taskBoardSvc := service.NewTaskBoardService(taskSvc, taskOperationalDashboardRepo)
 	taskBatchTemplateSvc := taskbatchexcel.NewTemplateService()
 	workbenchSvc := service.NewWorkbenchService(workbenchPreferenceRepo)
 	exportCenterSvc := service.NewExportCenterService(exportJobRepo, exportJobDispatchRepo, exportJobAttemptRepo, exportJobEventRepo, mdb)
