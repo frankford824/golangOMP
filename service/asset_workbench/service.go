@@ -1013,29 +1013,9 @@ func (s *Service) Register(ctx context.Context, params RegisterParams) (*Registe
 	if account == "" || name == "" || phone == "" || strings.TrimSpace(params.Password) == "" {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "account, name, phone and password are required.", nil)
 	}
-	auth, appErr := s.identity.RegisterAssetWorkbenchUser(ctx, baseservice.RegisterAssetWorkbenchUserParams{
-		Username:    account,
-		DisplayName: name,
-		Mobile:      phone,
-		Email:       strings.TrimSpace(params.Email),
-		Password:    params.Password,
-	})
-	if appErr != nil {
-		return nil, appErr
-	}
-	if auth == nil || auth.User == nil || auth.User.ID <= 0 {
-		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Asset workbench registration did not create a user.", nil)
-	}
 	workerType := normalizeWorkerType(params.WorkerType)
 	if workerType == "" {
-		workerType = domain.AssetWorkbenchWorkerTypeParttime
-	}
-	actor := domain.RequestActor{
-		ID:       auth.User.ID,
-		Username: auth.User.Username,
-		Roles:    auth.User.Roles,
-		Source:   domain.RequestActorSourceSessionToken,
-		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "请选择人员类型。", nil)
 	}
 	onboardedAt := s.nowFn().UTC()
 	profileParams := UpsertProfileParams{
@@ -1052,10 +1032,36 @@ func (s *Service) Register(ctx context.Context, params RegisterParams) (*Registe
 		Status:        domain.AssetWorkbenchProfileStatusPending,
 		Reason:        "asset workbench self-registration",
 	}
-	profile, appErr := s.normalizeProfile(auth.User.ID, auth.User.ID, profileParams)
+	profile, appErr := s.normalizeProfile(0, 0, profileParams)
 	if appErr != nil {
 		return nil, appErr
 	}
+	if appErr = validateRequiredClientProfile(profile); appErr != nil {
+		return nil, appErr
+	}
+	auth, appErr := s.identity.RegisterAssetWorkbenchUser(ctx, baseservice.RegisterAssetWorkbenchUserParams{
+		Username:    account,
+		DisplayName: name,
+		Mobile:      phone,
+		Email:       strings.TrimSpace(params.Email),
+		Password:    params.Password,
+	})
+	if appErr != nil {
+		return nil, appErr
+	}
+	if auth == nil || auth.User == nil || auth.User.ID <= 0 {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Asset workbench registration did not create a user.", nil)
+	}
+	actor := domain.RequestActor{
+		ID:       auth.User.ID,
+		Username: auth.User.Username,
+		Roles:    auth.User.Roles,
+		Source:   domain.RequestActorSourceSessionToken,
+		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
+	}
+	profile.UserID = auth.User.ID
+	profile.CreatedBy = &actor.ID
+	profile.UpdatedBy = &actor.ID
 	profile, appErr = s.upsertProfile(ctx, actor, profile, profileParams.Reason, true)
 	if appErr != nil {
 		return nil, appErr
@@ -1128,6 +1134,7 @@ func (s *Service) buildBootstrap(ctx context.Context, actor domain.RequestActor,
 	if s.repo != nil && actor.ID > 0 {
 		item, err := s.repo.GetProfileByUserID(ctx, actor.ID)
 		if err == nil {
+			refreshProfileCompletion(item)
 			profile = item
 		} else if !errors.Is(err, sql.ErrNoRows) {
 			return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to load asset workbench profile.", err.Error())
@@ -1258,6 +1265,9 @@ func (s *Service) UpsertMyProfile(ctx context.Context, actor domain.RequestActor
 	if appErr != nil {
 		return nil, appErr
 	}
+	if appErr = validateRequiredClientProfile(profile); appErr != nil {
+		return nil, appErr
+	}
 	return s.upsertProfile(ctx, actor, profile, params.Reason, false)
 }
 
@@ -1359,6 +1369,7 @@ func (s *Service) GetProfile(ctx context.Context, actor domain.RequestActor, use
 	if err != nil {
 		return nil, mapRepoReadError(err, "Asset workbench profile not found.", "Failed to load asset workbench profile.")
 	}
+	refreshProfileCompletion(profile)
 	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
 		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventProfilePIIViewed, domain.AssetWorkbenchEntityProfile, &profile.ID, nil, nil, "查看人员完整资料")
 	}); err != nil {
@@ -1849,6 +1860,7 @@ func maskProfileListPII(items []*domain.AssetWorkbenchProfile) []*domain.AssetWo
 			continue
 		}
 		copyItem := *item
+		refreshProfileCompletion(&copyItem)
 		if copyItem.Phone != nil {
 			masked := maskSensitiveValue(*copyItem.Phone, 3, 4)
 			copyItem.Phone = &masked
@@ -7574,13 +7586,42 @@ func missingProfileFields(profile *domain.AssetWorkbenchProfile) []string {
 	if profile.Phone == nil || strings.TrimSpace(*profile.Phone) == "" {
 		missing = append(missing, "phone")
 	}
+	if strings.TrimSpace(profile.Province) == "" {
+		missing = append(missing, "province")
+	}
+	if strings.TrimSpace(profile.City) == "" {
+		missing = append(missing, "city")
+	}
 	if profile.IDCard == nil || strings.TrimSpace(*profile.IDCard) == "" {
 		missing = append(missing, "id_card")
+	}
+	if strings.TrimSpace(profile.Gender) == "" {
+		missing = append(missing, "gender")
 	}
 	if strings.TrimSpace(profile.AlipayAccount) == "" {
 		missing = append(missing, "alipay_account")
 	}
 	return missing
+}
+
+func validateRequiredClientProfile(profile *domain.AssetWorkbenchProfile) *domain.AppError {
+	if missing := missingProfileFields(profile); len(missing) > 0 {
+		return domain.NewAppError(
+			domain.ErrCodeInvalidRequest,
+			"请完整填写姓名、手机号、省份、城市、身份证号、性别和支付宝账号。",
+			map[string]interface{}{"missing_fields": missing},
+		)
+	}
+	return nil
+}
+
+func refreshProfileCompletion(profile *domain.AssetWorkbenchProfile) {
+	if profile == nil {
+		return
+	}
+	profile.PIICompleted = len(missingProfileFields(profile)) == 0 &&
+		profile.IDCard != nil && assetWorkbenchIDCardPattern.MatchString(strings.TrimSpace(*profile.IDCard)) &&
+		(profile.Gender == "female" || profile.Gender == "male")
 }
 
 func (s *Service) normalizeProfile(userID, actorID int64, params UpsertProfileParams) (*domain.AssetWorkbenchProfile, *domain.AppError) {
@@ -7596,6 +7637,14 @@ func (s *Service) normalizeProfile(userID, actorID int64, params UpsertProfilePa
 	if jobGrade != "" && !validWorkbenchJobGrade(workerType, jobGrade, false) {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "job_grade is not valid for worker_type.", map[string]string{"worker_type": workerType, "job_grade": jobGrade})
 	}
+	idCard := strings.TrimSpace(params.IDCard)
+	if idCard != "" && !assetWorkbenchIDCardPattern.MatchString(idCard) {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "身份证号必须为 18 位数字。", nil)
+	}
+	gender := strings.TrimSpace(params.Gender)
+	if gender != "" && gender != "female" && gender != "male" {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "性别只能选择女或男。", nil)
+	}
 	createdBy := actorID
 	updatedBy := actorID
 	profile := &domain.AssetWorkbenchProfile{
@@ -7606,19 +7655,16 @@ func (s *Service) normalizeProfile(userID, actorID int64, params UpsertProfilePa
 		Phone:         stringPtr(strings.TrimSpace(params.Phone)),
 		Province:      strings.TrimSpace(params.Province),
 		City:          strings.TrimSpace(params.City),
-		IDCard:        stringPtr(strings.TrimSpace(params.IDCard)),
-		Gender:        strings.TrimSpace(params.Gender),
+		IDCard:        stringPtr(idCard),
+		Gender:        gender,
 		AlipayAccount: strings.TrimSpace(params.AlipayAccount),
 		OnboardedAt:   params.OnboardedAt,
 		GradeHidden:   params.GradeHidden,
 		Status:        status,
-		PIICompleted: strings.TrimSpace(params.RealName) != "" &&
-			strings.TrimSpace(params.Phone) != "" &&
-			strings.TrimSpace(params.IDCard) != "" &&
-			strings.TrimSpace(params.AlipayAccount) != "",
-		CreatedBy: &createdBy,
-		UpdatedBy: &updatedBy,
+		CreatedBy:     &createdBy,
+		UpdatedBy:     &updatedBy,
 	}
+	refreshProfileCompletion(profile)
 	return profile, nil
 }
 
@@ -9104,7 +9150,10 @@ func clientMaterialMatchesSKU(item *domain.AssetWorkbenchClientMaterial, sku str
 		strings.Contains(strings.ToLower(item.PrimarySKUCode), sku)
 }
 
-var externalMaterialCodePattern = regexp.MustCompile(`(?i)([A-Z]{1,8}[-_]?\d{3,}[A-Z0-9_-]*|\d{6}-\d{8,}|[A-Z0-9]{6,}[-_][A-Z0-9_-]{2,})`)
+var (
+	assetWorkbenchIDCardPattern = regexp.MustCompile(`^[0-9]{18}$`)
+	externalMaterialCodePattern = regexp.MustCompile(`(?i)([A-Z]{1,8}[-_]?\d{3,}[A-Z0-9_-]*|\d{6}-\d{8,}|[A-Z0-9]{6,}[-_][A-Z0-9_-]{2,})`)
+)
 
 func groupMaterialAssets(items []*assetcenter.AssetDetail) []*MaterialGroupRow {
 	byKey := map[string]*MaterialGroupRow{}

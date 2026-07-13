@@ -34,12 +34,12 @@ export interface AssetWorkbenchRegisterPayload {
   phone: string
   email?: string
   password: string
-  worker_type?: string
-  province?: string
-  city?: string
-  id_card?: string
-  gender?: string
-  alipay_account?: string
+  worker_type: 'fulltime' | 'parttime'
+  province: string
+  city: string
+  id_card: string
+  gender: 'female' | 'male'
+  alipay_account: string
 }
 
 export interface AssetWorkbenchRegisterResult {
@@ -69,6 +69,16 @@ export interface UpsertProfilePayload {
   grade_hidden?: boolean
   status?: string
   reason?: string
+}
+
+export interface UpsertMyProfilePayload extends UpsertProfilePayload {
+  real_name: string
+  phone: string
+  province: string
+  city: string
+  id_card: string
+  gender: 'female' | 'male'
+  alipay_account: string
 }
 
 export interface AssetWorkbenchBootstrap {
@@ -1289,7 +1299,7 @@ export const assetWorkbenchApi = {
     return unwrap(res.data)
   },
 
-  async upsertMyProfile(payload: UpsertProfilePayload, signal?: AbortSignal): Promise<AssetWorkbenchProfile> {
+  async upsertMyProfile(payload: UpsertMyProfilePayload, signal?: AbortSignal): Promise<AssetWorkbenchProfile> {
     const res = await http.patch<ApiEnvelope<AssetWorkbenchProfile>>('/v1/asset-workbench/profile', payload, { signal })
     return unwrap(res.data)
   },

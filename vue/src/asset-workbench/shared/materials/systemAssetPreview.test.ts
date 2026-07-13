@@ -8,6 +8,16 @@ describe('systemAssetPreview helpers', () => {
     expect(canAttemptSystemAssetPreview({ id: 8, file_name: 'poster.ai', mime_type: 'application/octet-stream' })).toBe(true)
   })
 
+  it('requests a published client material preview even when its old snapshot is empty', () => {
+    expect(canAttemptSystemAssetPreview({
+      id: 14354,
+      material_id: 982,
+      file_name: '',
+      mime_type: '',
+      preview_available: false,
+    })).toBe(true)
+  })
+
   it('detects pdf by filename when mime is missing', () => {
     expect(isPdfMimeOrFilename('', 'catalog.pdf')).toBe(true)
     expect(isPdfMimeOrFilename('', 'catalog.PDF')).toBe(true)

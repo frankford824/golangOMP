@@ -111,4 +111,27 @@ describe('PeoplePage', () => {
     const nameField = selfPanel.findAll('label').find((item) => item.text().startsWith('姓名'))
     expect((nameField?.find('input').element as HTMLInputElement).value).toBe('测试李梅')
   })
+
+  it('blocks an incomplete self-service profile before calling the API', async () => {
+    mocks.bootstrap.mockResolvedValue({
+      capabilities: ['asset.workbench.profile'],
+      profile: completeProfile,
+    })
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [{ path: '/settings/people', component: PeoplePage }],
+    })
+    await router.push('/settings/people')
+    await router.isReady()
+    const wrapper = mount(PeoplePage, { global: { plugins: [router] } })
+    await flushPromises()
+
+    const selfPanel = wrapper.find('.aw-two-column .aw-panel')
+    const idCard = selfPanel.findAll('label').find((item) => item.text().startsWith('身份证号'))?.find('input')
+    await idCard?.setValue('32010019900101033X')
+    await wrapper.find('.aw-page-bar__actions .aw-primary-button').trigger('click')
+
+    expect(mocks.upsertMyProfile).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('身份证号必须为 18 位数字')
+  })
 })

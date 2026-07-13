@@ -68,4 +68,25 @@ describe('AccountPage', () => {
     expect(fieldValue(wrapper, '支付宝')).toBe('piece-worker@example.com')
     expect(wrapper.text()).toContain('资料已完成')
   })
+
+  it('marks every client-managed field as required and blocks an incomplete save', async () => {
+    const wrapper = mount(AccountPage)
+    const idCard = wrapper.findAll('label').find((item) => item.text().startsWith('身份证号'))?.find('input')
+    const gender = wrapper.findAll('label').find((item) => item.text().startsWith('性别'))?.find('select')
+
+    expect(idCard?.attributes('required')).toBeDefined()
+    expect(idCard?.attributes('pattern')).toBe('[0-9]{18}')
+    expect(idCard?.attributes('minlength')).toBe('18')
+    expect(idCard?.attributes('maxlength')).toBe('18')
+    expect(gender?.attributes('required')).toBeDefined()
+    expect(gender?.findAll('option').map((option) => option.attributes('value')).filter(Boolean)).toEqual(['female', 'male'])
+    expect(gender?.find('option[value=""]').attributes()).toHaveProperty('disabled')
+
+    const city = wrapper.findAll('label').find((item) => item.text().startsWith('城市'))?.find('select')
+    await city?.setValue('')
+    await wrapper.find('.aw-form-grid .aw-primary-button').trigger('click')
+
+    expect(mocks.upsertMyProfile).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('请填写城市')
+  })
 })

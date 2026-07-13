@@ -8,6 +8,7 @@ import { usePageRequest } from '@aw/shared/composables/usePageRequest'
 import { maskPhone } from '@aw/shared/format/pii'
 import { chipClass, profileStatusMeta, workerTypeMeta } from '@aw/shared/format/status'
 import { cityOptions, provinceOptions } from '@aw/shared/profile/chinaRegions'
+import { validateClientProfile } from '@aw/shared/profile/clientProfileValidation'
 
 const parttimeGrades = ['J1', 'J2', 'J3']
 const fulltimeGrades = ['P1', 'P2', 'P3', 'P4', 'S1', 'S2', 'M1', 'M2']
@@ -118,6 +119,12 @@ async function loadPeople() {
 }
 
 async function saveProfile() {
+  const validationError = validateClientProfile(form)
+  if (validationError) {
+    notice.value = ''
+    error.value = validationError
+    return
+  }
   saving.value = true
   error.value = ''
   notice.value = ''
@@ -129,7 +136,7 @@ async function saveProfile() {
       province: form.province,
       city: form.city,
       id_card: form.id_card,
-      gender: form.gender,
+      gender: form.gender as 'female' | 'male',
       alipay_account: form.alipay_account,
       reason: 'self profile update',
     })
@@ -436,42 +443,42 @@ onMounted(() => {
             <input v-model="form.job_grade" disabled placeholder="HR 定级后显示" />
           </label>
           <label>
-            姓名
-            <input v-model="form.real_name" />
+            <span>姓名 <small class="aw-field__mark">必填</small></span>
+            <input v-model="form.real_name" required />
           </label>
           <label>
-            手机
-            <input v-model="form.phone" />
+            <span>手机号 <small class="aw-field__mark">必填</small></span>
+            <input v-model="form.phone" autocomplete="tel" required />
           </label>
           <label>
-            省份
-            <select v-model="form.province" autocomplete="address-level1" @change="form.city = ''">
+            <span>省份 <small class="aw-field__mark">必填</small></span>
+            <select v-model="form.province" autocomplete="address-level1" required @change="form.city = ''">
               <option value="">请选择省份</option>
               <option v-for="province in availableSelfProvinces" :key="province" :value="province">{{ province }}</option>
             </select>
           </label>
           <label>
-            城市
-            <select v-model="form.city" autocomplete="address-level2" :disabled="!form.province">
+            <span>城市 <small class="aw-field__mark">必填</small></span>
+            <select v-model="form.city" autocomplete="address-level2" required :disabled="!form.province">
               <option value="">请选择城市</option>
               <option v-for="city in availableSelfCities" :key="city" :value="city">{{ city }}</option>
             </select>
           </label>
           <label>
-            身份证号
-            <input v-model="form.id_card" autocomplete="off" />
+            <span>身份证号 <small class="aw-field__mark">必填</small></span>
+            <input v-model="form.id_card" autocomplete="off" inputmode="numeric" minlength="18" maxlength="18" pattern="[0-9]{18}" placeholder="请输入 18 位数字" required />
           </label>
           <label>
-            性别
-            <select v-model="form.gender">
-              <option value="">不填写</option>
+            <span>性别 <small class="aw-field__mark">必填</small></span>
+            <select v-model="form.gender" required>
+              <option value="" disabled>请选择性别</option>
               <option value="female">女</option>
               <option value="male">男</option>
             </select>
           </label>
           <label>
-            支付宝账号
-            <input v-model="form.alipay_account" autocomplete="off" />
+            <span>支付宝账号 <small class="aw-field__mark">必填</small></span>
+            <input v-model="form.alipay_account" autocomplete="off" required />
           </label>
         </div>
         <p v-if="notice" class="aw-copy">{{ notice }}</p>

@@ -7,6 +7,7 @@ import { authApi } from '@/services/api/authApi'
 import { clearToken, setToken } from '@/services/http'
 import { assetWorkbenchApi } from '../shared/api/assetWorkbenchApi'
 import { cityOptions, provinceOptions } from '../shared/profile/chinaRegions'
+import { validateClientProfile } from '../shared/profile/clientProfileValidation'
 
 const route = useRoute()
 const router = useRouter()
@@ -79,6 +80,19 @@ async function submitLogin() {
 
 async function submitRegister() {
   if (loading.value) return
+  const validationError = validateClientProfile({
+    real_name: registerForm.name,
+    phone: registerForm.phone,
+    province: registerForm.province,
+    city: registerForm.city,
+    id_card: registerForm.id_card,
+    gender: registerForm.gender,
+    alipay_account: registerForm.alipay_account,
+  })
+  if (validationError) {
+    error.value = validationError
+    return
+  }
   loading.value = true
   error.value = ''
   try {
@@ -88,11 +102,11 @@ async function submitRegister() {
       phone: registerForm.phone,
       email: registerForm.email,
       password: registerForm.password,
-      worker_type: registerForm.worker_type,
+      worker_type: registerForm.worker_type as 'fulltime' | 'parttime',
       province: registerForm.province,
       city: registerForm.city,
       id_card: registerForm.id_card,
-      gender: registerForm.gender,
+      gender: registerForm.gender as 'female' | 'male',
       alipay_account: registerForm.alipay_account,
     })
     await activateSession(pickAuthToken(response))
@@ -166,41 +180,41 @@ async function submitRegister() {
             <input v-model.trim="registerForm.email" type="email" autocomplete="email" placeholder="选填" />
           </label>
           <label class="aw-field">
-            <span class="aw-field__label">人员类型 <small class="aw-field__mark aw-field__mark--optional">选填</small></span>
-            <select v-model="registerForm.worker_type">
+            <span class="aw-field__label">人员类型 <small class="aw-field__mark">必填</small></span>
+            <select v-model="registerForm.worker_type" required>
               <option value="parttime">兼职</option>
               <option value="fulltime">全职</option>
             </select>
           </label>
           <label class="aw-field">
-            <span class="aw-field__label">性别 <small class="aw-field__mark aw-field__mark--optional">选填</small></span>
-            <select v-model="registerForm.gender">
-              <option value="">不填写</option>
+            <span class="aw-field__label">性别 <small class="aw-field__mark">必填</small></span>
+            <select v-model="registerForm.gender" required>
+              <option value="" disabled>请选择性别</option>
               <option value="female">女</option>
               <option value="male">男</option>
             </select>
           </label>
           <label class="aw-field">
-            <span class="aw-field__label">省份 <small class="aw-field__mark aw-field__mark--optional">选填</small></span>
-            <select v-model="registerForm.province" autocomplete="address-level1" @change="registerForm.city = ''">
+            <span class="aw-field__label">省份 <small class="aw-field__mark">必填</small></span>
+            <select v-model="registerForm.province" autocomplete="address-level1" required @change="registerForm.city = ''">
               <option value="">请选择省份</option>
               <option v-for="province in availableProvinces" :key="province" :value="province">{{ province }}</option>
             </select>
           </label>
           <label class="aw-field">
-            <span class="aw-field__label">城市 <small class="aw-field__mark aw-field__mark--optional">选填</small></span>
-            <select v-model="registerForm.city" autocomplete="address-level2" :disabled="!registerForm.province">
+            <span class="aw-field__label">城市 <small class="aw-field__mark">必填</small></span>
+            <select v-model="registerForm.city" autocomplete="address-level2" required :disabled="!registerForm.province">
               <option value="">请选择城市</option>
               <option v-for="city in availableCities" :key="city" :value="city">{{ city }}</option>
             </select>
           </label>
           <label class="aw-field aw-form-grid__full">
-            <span class="aw-field__label">身份证号 <small class="aw-field__mark aw-field__mark--optional">选填</small></span>
-            <input v-model.trim="registerForm.id_card" autocomplete="off" placeholder="选填" />
+            <span class="aw-field__label">身份证号 <small class="aw-field__mark">必填</small></span>
+            <input v-model.trim="registerForm.id_card" autocomplete="off" inputmode="numeric" minlength="18" maxlength="18" pattern="[0-9]{18}" placeholder="请输入 18 位数字" required />
           </label>
           <label class="aw-field aw-form-grid__full">
-            <span class="aw-field__label">支付宝账号 <small class="aw-field__mark aw-field__mark--optional">选填</small></span>
-            <input v-model.trim="registerForm.alipay_account" autocomplete="off" placeholder="选填" />
+            <span class="aw-field__label">支付宝账号 <small class="aw-field__mark">必填</small></span>
+            <input v-model.trim="registerForm.alipay_account" autocomplete="off" placeholder="请输入支付宝账号" required />
           </label>
           <label class="aw-field aw-form-grid__full">
             <span class="aw-field__label">密码 <small class="aw-field__mark">必填</small></span>

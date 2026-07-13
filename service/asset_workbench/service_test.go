@@ -1904,9 +1904,11 @@ func TestRegisterCreatesPendingProfileFromSelfRegistration(t *testing.T) {
 		Name:          "计件人员",
 		Phone:         "13800000991",
 		Password:      "Pass1234",
+		WorkerType:    domain.AssetWorkbenchWorkerTypeParttime,
 		Province:      "浙江",
 		City:          "杭州",
 		IDCard:        "330100199001010000",
+		Gender:        "female",
 		AlipayAccount: "piece-worker@example.com",
 	})
 	if appErr != nil {
@@ -1938,6 +1940,32 @@ func TestRegisterCreatesPendingProfileFromSelfRegistration(t *testing.T) {
 	}
 }
 
+func TestRegisterRejectsIncompleteProfileBeforeCreatingIdentity(t *testing.T) {
+	identity := &registerIdentityStub{}
+	workbenchRepo := &registerProfileRepo{}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"},
+		WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}),
+		WithIdentityRegistrar(identity),
+	)
+
+	_, appErr := svc.Register(context.Background(), RegisterParams{
+		Account:    "piece_worker",
+		Name:       "计件人员",
+		Phone:      "13800000991",
+		Password:   "Pass1234",
+		WorkerType: domain.AssetWorkbenchWorkerTypeParttime,
+	})
+	if appErr == nil || appErr.Code != domain.ErrCodeInvalidRequest {
+		t.Fatalf("Register() error = %+v, want invalid request", appErr)
+	}
+	if identity.params.username != "" {
+		t.Fatalf("identity must not be created before profile validation: %+v", identity.params)
+	}
+	if workbenchRepo.profile != nil {
+		t.Fatalf("incomplete profile must not be saved: %+v", workbenchRepo.profile)
+	}
+}
+
 func TestListProfilesMasksPIIForListResponses(t *testing.T) {
 	phone := "13800000991"
 	idCard := "330100199001010000"
@@ -1952,6 +1980,7 @@ func TestListProfilesMasksPIIForListResponses(t *testing.T) {
 			IDCard:        &idCard,
 			AlipayAccount: "piece-worker@example.com",
 			Status:        domain.AssetWorkbenchProfileStatusActive,
+			PIICompleted:  true,
 		},
 	}}
 	svc := NewService(Config{Timezone: "Asia/Shanghai"},
@@ -1976,6 +2005,9 @@ func TestListProfilesMasksPIIForListResponses(t *testing.T) {
 	}
 	if items[0].AlipayAccount == "piece-worker@example.com" {
 		t.Fatalf("alipay account should be masked, got %q", items[0].AlipayAccount)
+	}
+	if items[0].PIICompleted {
+		t.Fatalf("legacy completion flag must be recalculated when required fields are missing: %+v", items[0])
 	}
 }
 
@@ -2033,7 +2065,7 @@ func TestGetProfileRejectsSubmitterPIIAccess(t *testing.T) {
 	}
 }
 
-func TestUpsertMyProfileCreatesMissingPIINotification(t *testing.T) {
+func TestUpsertMyProfileRequiresEveryClientManagedField(t *testing.T) {
 	workbenchRepo := &profileListRepo{}
 	notifier := &profileNotificationStub{}
 	svc := NewService(Config{Timezone: "Asia/Shanghai"},
@@ -2041,71 +2073,76 @@ func TestUpsertMyProfileCreatesMissingPIINotification(t *testing.T) {
 		WithNotificationCreator(notifier),
 	)
 
-	saved, appErr := svc.UpsertMyProfile(context.Background(), domain.RequestActor{ID: 77, Roles: []domain.Role{domain.RoleAssetSubmitter}}, UpsertProfileParams{
+	_, appErr := svc.UpsertMyProfile(context.Background(), domain.RequestActor{ID: 77, Roles: []domain.Role{domain.RoleAssetSubmitter}}, UpsertProfileParams{
 		RealName: "计件人员",
+		Phone:    "13800000077",
 		Province: "浙江",
 		City:     "杭州",
+		IDCard:   "330100199001010077",
+		Gender:   "female",
 	})
-	if appErr != nil {
-		t.Fatalf("UpsertMyProfile() error = %+v", appErr)
+	if appErr == nil || appErr.Code != domain.ErrCodeInvalidRequest {
+		t.Fatalf("UpsertMyProfile() error = %+v, want invalid request", appErr)
 	}
-	if saved.PIICompleted {
-		t.Fatalf("profile should be incomplete: %+v", saved)
+	if workbenchRepo.saved != nil {
+		t.Fatalf("incomplete profile must not be saved: %+v", workbenchRepo.saved)
 	}
-	if len(notifier.calls) != 1 {
-		t.Fatalf("notification calls = %+v, want one", notifier.calls)
-	}
-	call := notifier.calls[0]
-	if call.userID != 77 || call.ntype != domain.NotificationTypeAssetWorkbenchProfileIncomplete {
-		t.Fatalf("notification call = %+v", call)
-	}
-	if call.dedupeScope != "asset_workbench_profile_completion" || call.dedupeKey != "asset_workbench_profile_completion:77" {
-		t.Fatalf("dedupe = %q/%q", call.dedupeScope, call.dedupeKey)
-	}
-	var payload map[string]interface{}
-	if err := json.Unmarshal(call.payload, &payload); err != nil {
-		t.Fatalf("payload unmarshal: %v", err)
-	}
-	if payload["reason"] != "missing_pii" || payload["action"] != "complete_profile" {
-		t.Fatalf("payload = %+v", payload)
-	}
-	missing, ok := payload["missing_fields"].([]interface{})
-	if !ok || len(missing) != 3 {
-		t.Fatalf("missing_fields = %+v", payload["missing_fields"])
+	if len(notifier.calls) != 0 {
+		t.Fatalf("rejected profile must not emit a completion notification: %+v", notifier.calls)
 	}
 }
 
-func TestUpsertMyProfileRequiresAlipayForPIICompletion(t *testing.T) {
+func TestUpsertMyProfileValidatesIDCardAndGender(t *testing.T) {
 	workbenchRepo := &profileListRepo{}
-	notifier := &profileNotificationStub{}
 	svc := NewService(Config{Timezone: "Asia/Shanghai"},
 		WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}),
-		WithNotificationCreator(notifier),
 	)
 
-	saved, appErr := svc.UpsertMyProfile(context.Background(), domain.RequestActor{ID: 78, Roles: []domain.Role{domain.RoleAssetSubmitter}}, UpsertProfileParams{
-		RealName: "计件人员",
-		Phone:    "13800000078",
-		IDCard:   "330100199001010078",
-		Province: "浙江",
-		City:     "杭州",
+	valid := UpsertProfileParams{
+		RealName:      "计件人员",
+		Phone:         "13800000078",
+		IDCard:        "330100199001010078",
+		Province:      "浙江",
+		City:          "杭州",
+		Gender:        "male",
+		AlipayAccount: "13800000078",
+	}
+	for name, mutate := range map[string]func(*UpsertProfileParams){
+		"short id card":  func(params *UpsertProfileParams) { params.IDCard = "33010019900101007" },
+		"id card with X": func(params *UpsertProfileParams) { params.IDCard = "33010019900101007X" },
+		"unknown gender": func(params *UpsertProfileParams) { params.Gender = "unknown" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			params := valid
+			mutate(&params)
+			_, appErr := svc.UpsertMyProfile(context.Background(), domain.RequestActor{ID: 78, Roles: []domain.Role{domain.RoleAssetSubmitter}}, params)
+			if appErr == nil || appErr.Code != domain.ErrCodeInvalidRequest {
+				t.Fatalf("UpsertMyProfile() error = %+v, want invalid request", appErr)
+			}
+		})
+	}
+}
+
+func TestUpsertMyProfileSavesCompleteClientProfile(t *testing.T) {
+	workbenchRepo := &profileListRepo{}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"},
+		WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}),
+	)
+
+	saved, appErr := svc.UpsertMyProfile(context.Background(), domain.RequestActor{ID: 79, Roles: []domain.Role{domain.RoleAssetSubmitter}}, UpsertProfileParams{
+		RealName:      "计件人员",
+		Phone:         "13800000079",
+		Province:      "浙江",
+		City:          "杭州",
+		IDCard:        "330100199001010079",
+		Gender:        "female",
+		AlipayAccount: "13800000079",
 	})
 	if appErr != nil {
 		t.Fatalf("UpsertMyProfile() error = %+v", appErr)
 	}
-	if saved.PIICompleted {
-		t.Fatalf("profile without alipay should be incomplete: %+v", saved)
-	}
-	if len(notifier.calls) != 1 {
-		t.Fatalf("notification calls = %+v, want one", notifier.calls)
-	}
-	var payload map[string]interface{}
-	if err := json.Unmarshal(notifier.calls[0].payload, &payload); err != nil {
-		t.Fatalf("payload unmarshal: %v", err)
-	}
-	missing, ok := payload["missing_fields"].([]interface{})
-	if !ok || len(missing) != 1 || missing[0] != "alipay_account" {
-		t.Fatalf("missing_fields = %+v, want alipay_account", payload["missing_fields"])
+	if saved == nil || !saved.PIICompleted {
+		t.Fatalf("complete profile should be saved as complete: %+v", saved)
 	}
 }
 

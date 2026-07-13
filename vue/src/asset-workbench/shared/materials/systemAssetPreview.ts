@@ -58,6 +58,9 @@ export function isVideoMimeOrFilename(mimeType?: string | null, filename?: strin
 }
 
 export function canAttemptSystemAssetPreview(asset: SystemAssetRow | SystemAssetPreviewMeta) {
+  // Published client materials have a dedicated preview endpoint that resolves
+  // the current source asset even when older publication snapshots lack MIME data.
+  if ('material_id' in asset && Number(asset.material_id) > 0) return true
   if (asset.preview_available) return true
   if (isSystemAssetImagePreviewable(asset)) return true
   if (isSystemAssetPdfPreviewable(asset)) return true

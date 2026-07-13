@@ -96,13 +96,50 @@ components:
         phone: { type: string }
         province: { type: string }
         city: { type: string }
-        id_card: { type: string }
+        id_card: { type: string, minLength: 18, maxLength: 18, pattern: '^[0-9]{18}$' }
         gender: { type: string, enum: ['', female, male] }
         alipay_account: { type: string }
         onboarded_at: { type: string, format: date-time }
         grade_hidden: { type: boolean }
         status: { type: string, enum: [pending, active, suspended] }
         reason: { type: string }
+    AssetWorkbenchSelfProfileUpdate:
+      type: object
+      required: [real_name, phone, province, city, id_card, gender, alipay_account]
+      properties:
+        worker_type: { type: string, enum: [fulltime, parttime] }
+        real_name: { type: string, minLength: 1 }
+        phone: { type: string, minLength: 1 }
+        province: { type: string, minLength: 1 }
+        city: { type: string, minLength: 1 }
+        id_card: { type: string, minLength: 18, maxLength: 18, pattern: '^[0-9]{18}$' }
+        gender: { type: string, enum: [female, male] }
+        alipay_account: { type: string, minLength: 1 }
+        reason: { type: string }
+    AssetWorkbenchRegisterRequest:
+      type: object
+      required: [account, name, phone, password, worker_type, province, city, id_card, gender, alipay_account]
+      properties:
+        account: { type: string, minLength: 1 }
+        name: { type: string, minLength: 1 }
+        phone: { type: string, minLength: 1 }
+        email: { type: string, format: email }
+        password: { type: string, minLength: 1, format: password }
+        worker_type: { type: string, enum: [fulltime, parttime] }
+        province: { type: string, minLength: 1 }
+        city: { type: string, minLength: 1 }
+        id_card: { type: string, minLength: 18, maxLength: 18, pattern: '^[0-9]{18}$' }
+        gender: { type: string, enum: [female, male] }
+        alipay_account: { type: string, minLength: 1 }
+    AssetWorkbenchRegisterResponse:
+      type: object
+      required: [auth, profile]
+      properties:
+        auth:
+          type: object
+          additionalProperties: true
+        profile:
+          $ref: '#/components/schemas/AssetWorkbenchProfile'
     Department:
       type: string
       description: Dynamic backend org-master department name. Values come from enabled `org_departments` rows exposed by default from `/v1/org/options`; this is no longer a fixed frontend enum. v1.0 business baseline is exactly `人事部`, `运营部`, `设计研发部`, `定制美工部`, `审核部`, `云仓部` (plus the system bucket `未分配`). Legacy names (`设计部`, `采购部`, `仓储部`, `烘焙仓储部`) remain only as disabled compatibility rows for historical integrity; they are hidden from the default `/v1/org/options` projection and are not accepted by registration / user admin / task create inputs. Organization master maintenance clients may request `/v1/org/options?include_disabled=true` to display and restore disabled rows when authorized.
@@ -21261,6 +21298,33 @@ paths:
         '401': { description: Unauthenticated }
         '403': { description: Forbidden }
         '404': { description: Not found }
+  /v1/asset-workbench/register:
+    post:
+      summary: Register an asset workbench account
+      description: Creates a workbench account only after all required contact, location, identity and payment profile fields pass validation.
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: public
+        required_roles: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AssetWorkbenchRegisterRequest'
+      responses:
+        '201':
+          description: Registered account and pending workbench profile
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    $ref: '#/components/schemas/AssetWorkbenchRegisterResponse'
+        '400': { description: Invalid registration data }
+        '409': { description: Account already exists }
   /v1/asset-workbench/access/request:
     post:
       summary: Request asset workbench access
@@ -21407,7 +21471,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/AssetWorkbenchProfileUpdate'
+              $ref: '#/components/schemas/AssetWorkbenchSelfProfileUpdate'
       responses:
         '200':
           description: Updated self profile with full values

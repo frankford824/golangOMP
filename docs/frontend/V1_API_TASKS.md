@@ -14,7 +14,7 @@
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
-- 本文件覆盖 `228` 个 `/v1` path；同一路径多 method 合并在同一节。
+- 本文件覆盖 `229` 个 `/v1` path；同一路径多 method 合并在同一节。
 
 ## GET /v1/trace-events
 
@@ -11030,6 +11030,84 @@ curl -X GET https://api.example.com/v1/asset-workbench/batch-jobs/<job_id> \
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
 
+## POST /v1/asset-workbench/register
+
+### 简介
+支持方法: POST。
+
+- `POST`: Creates a workbench account only after all required contact, location, identity and payment profile fields pass validation.
+
+### 鉴权与 RBAC
+- 本节为公开资源接口，不需要 Bearer token。
+- `POST` 允许角色: 公开。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+无 path/query/header 参数。
+
+Content-Type: `application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `account` | string | 是 | - |
+| `name` | string | 是 | - |
+| `phone` | string | 是 | - |
+| `email` | string | 否 | - |
+| `password` | string | 是 | - |
+| `worker_type` | enum(fulltime/parttime) | 是 | - |
+| `province` | string | 是 | - |
+| `city` | string | 是 | - |
+| `id_card` | string | 是 | - |
+| `gender` | enum(female/male) | 是 | - |
+| `alipay_account` | string | 是 | - |
+
+### 响应体 schema
+成功响应: `201 application/json`
+
+```json
+{
+  "data": {
+    "auth": {},
+    "profile": {
+      "id": "...",
+      "user_id": "...",
+      "worker_type": "...",
+      "job_grade": "...",
+      "real_name": "...",
+      "province": "..."
+    }
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | AssetWorkbenchRegisterResponse | 否 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid registration data |
+| 409 | 见 `error.code` | 见 `deny_code` | Account already exists |
+
+### curl 示例
+```bash
+curl -X POST https://api.example.com/v1/asset-workbench/register \
+  -H "Content-Type: application/json" \
+  -d '{"example":"value"}'
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
 ## POST /v1/asset-workbench/access/request
 
 ### 简介
@@ -11248,17 +11326,13 @@ Content-Type: `application/json`
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `worker_type` | enum(fulltime/parttime) | 否 | - |
-| `job_grade` | string | 否 | - |
-| `real_name` | string | 否 | - |
-| `phone` | string | 否 | - |
-| `province` | string | 否 | - |
-| `city` | string | 否 | - |
-| `id_card` | string | 否 | - |
-| `gender` | enum(/female/male) | 否 | - |
-| `alipay_account` | string | 否 | - |
-| `onboarded_at` | string | 否 | - |
-| `grade_hidden` | boolean | 否 | - |
-| `status` | enum(pending/active/suspended) | 否 | - |
+| `real_name` | string | 是 | - |
+| `phone` | string | 是 | - |
+| `province` | string | 是 | - |
+| `city` | string | 是 | - |
+| `id_card` | string | 是 | - |
+| `gender` | enum(female/male) | 是 | - |
+| `alipay_account` | string | 是 | - |
 | `reason` | string | 否 | - |
 
 ### 响应体 schema
