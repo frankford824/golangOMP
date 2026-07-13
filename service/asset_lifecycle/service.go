@@ -18,6 +18,10 @@ type lifecycleEventModuleResolver interface {
 	ResolveOrCreateLifecycleEventModule(ctx context.Context, tx repo.Tx, taskID int64, moduleKey string) (int64, error)
 }
 
+type resourceDeletionStorageKeyRepo interface {
+	ListResourceDeletionStorageKeys(ctx context.Context, assetID int64) ([]string, error)
+}
+
 type Service struct {
 	searchRepo    repo.TaskAssetSearchRepo
 	lifecycleRepo repo.TaskAssetLifecycleRepo

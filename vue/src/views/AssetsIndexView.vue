@@ -214,7 +214,7 @@
           </label>
           <div class="ac-card-img-box">
             <AssetPreviewMedia
-              :key="`${assetResourceId(asset)}-${assetPreviewRefreshEpoch}`"
+              :key="`${assetPreviewIdentity(asset)}-${assetPreviewRefreshEpoch}`"
               :asset-id="assetResourceId(asset)"
               :resolved-preview-url="listCardResolvedPreviewUrl(asset)"
               defer-until-visible
@@ -660,7 +660,7 @@
           <h4 class="subsection-title">预览内容</h4>
           <div class="preview-media-shell">
             <AssetPreviewMedia
-              :key="`${selectedAssetIdForPreview || 'selected'}-${assetPreviewRefreshEpoch}`"
+              :key="`${selectedAsset ? assetPreviewIdentity(selectedAsset) : (selectedAssetIdForPreview || 'selected')}-${assetPreviewRefreshEpoch}`"
               :asset-id="selectedAssetIdForPreview"
               :fallback-src="selectedPreviewFallbackUrl"
               :resolved-preview-url="selectedPreviewFallbackUrl"
@@ -1384,6 +1384,12 @@ function assetResourceId(asset: BackendAsset): string {
   if (resourceID) return resourceID
   const id = String(asset.id ?? '').trim()
   return isExternalAsset(asset) && id && !id.startsWith('ext-') ? `ext-${id}` : id
+}
+
+function assetPreviewIdentity(asset: BackendAsset): string {
+  const record = asset as Record<string, unknown>
+  const versionID = String(record.current_version_id ?? record.currentVersionId ?? '').trim()
+  return `${assetResourceId(asset)}-version-${versionID || 'unknown'}`
 }
 
 function assetSourceLabel(asset: BackendAsset | null | undefined): string {

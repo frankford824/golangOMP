@@ -32,12 +32,21 @@ func (s *Service) Delete(ctx context.Context, actor domain.RequestActor, assetID
 	if len(versions) == 0 {
 		return domain.ErrNotFound
 	}
-	if s.deleter != nil && s.deleter.Enabled() {
+	storageKeys := make([]string, 0, len(versions))
+	if keyRepo, ok := s.lifecycleRepo.(resourceDeletionStorageKeyRepo); ok {
+		storageKeys, err = keyRepo.ListResourceDeletionStorageKeys(ctx, assetID)
+		if err != nil {
+			return domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)
+		}
+	} else {
 		for _, version := range versions {
-			key := storageKey(version.Asset)
-			if key == "" {
-				continue
+			if key := storageKey(version.Asset); key != "" {
+				storageKeys = append(storageKeys, key)
 			}
+		}
+	}
+	if s.deleter != nil && s.deleter.Enabled() {
+		for _, key := range storageKeys {
 			if err := s.deleter.DeleteObject(ctx, key); err != nil {
 				return domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)
 			}

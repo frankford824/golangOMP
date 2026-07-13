@@ -3,7 +3,7 @@
     :model-value="modelValue"
     title="确认修改资源"
     :show-confirm="false"
-    panel-class="asset-operation-dialog-panel"
+    panel-max-width="36rem"
     @update:model-value="onVisibilityChange"
   >
     <section class="grid gap-4 pb-4">

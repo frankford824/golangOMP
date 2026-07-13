@@ -2241,20 +2241,21 @@ func TestTaskAssetCenterServiceSourcePreviewFallsBackToDerivedPreviewAsset(t *te
 	})
 	derivedVersionNo := 1
 	derivedVersionID, _ := taskAssetRepo.Create(context.Background(), step04Tx{}, &domain.TaskAsset{
-		TaskID:         2051,
-		AssetID:        &derivedPreviewAssetID,
-		AssetType:      domain.TaskAssetTypePreview,
-		VersionNo:      2,
-		AssetVersionNo: &derivedVersionNo,
-		UploadMode:     strPtr("small"),
-		FileName:       "preview.png",
-		OriginalName:   strPtr("preview.png"),
-		MimeType:       strPtr("image/png"),
-		StorageKey:     strPtr("objects/design-assets/source-preview.png"),
-		UploadStatus:   strPtr("uploaded"),
-		PreviewStatus:  strPtr("not_applicable"),
-		UploadedBy:     651,
-		UploadedAt:     timeValuePtr(time.Date(2026, 4, 15, 9, 12, 0, 0, time.UTC)),
+		TaskID:               2051,
+		AssetID:              &derivedPreviewAssetID,
+		AssetType:            domain.TaskAssetTypePreview,
+		VersionNo:            2,
+		AssetVersionNo:       &derivedVersionNo,
+		UploadMode:           strPtr("small"),
+		FileName:             "preview.png",
+		OriginalName:         strPtr("preview.png"),
+		MimeType:             strPtr("image/png"),
+		StorageKey:           strPtr("objects/design-assets/source-preview.png"),
+		UploadStatus:         strPtr("uploaded"),
+		PreviewStatus:        strPtr("not_applicable"),
+		UploadedBy:           651,
+		UploadedAt:           timeValuePtr(time.Date(2026, 4, 15, 9, 12, 0, 0, time.UTC)),
+		SourceAssetVersionID: &sourceVersionID,
 	})
 	_ = designAssetRepo.UpdateCurrentVersionID(context.Background(), step04Tx{}, derivedPreviewAssetID, &derivedVersionID)
 
@@ -2420,6 +2421,62 @@ func TestTaskAssetCenterServiceCompleteSourceUploadGeneratesDerivedPreviewAssets
 	}
 	if !strings.Contains(*downloadInfo.DownloadURL, completeResult.Version.StorageKey) {
 		t.Fatalf("download url = %q, want source key %q", *downloadInfo.DownloadURL, completeResult.Version.StorageKey)
+	}
+
+	oldPreviewVersionID := previewAssets[0].CurrentVersion.ID
+	oldPreviewStorageKey := previewAssets[0].CurrentVersion.StorageKey
+	replacementBody := bytes.Repeat([]byte("replacement-source-psd-binary"), 80)
+	replacementStorageKey := "tasks/T-2052/assets/AST-0001/v2/source-replacement.psd"
+	if err := ossDirect.UploadObject(context.Background(), replacementStorageKey, "image/vnd.adobe.photoshop", replacementBody); err != nil {
+		t.Fatalf("UploadObject(replacement source) error = %v", err)
+	}
+	replacementVersionNo := 2
+	replacementTimelineVersion, _ := taskAssetRepo.NextVersionNo(context.Background(), step04Tx{}, 2052)
+	replacementSourceVersionID, err := taskAssetRepo.Create(context.Background(), step04Tx{}, &domain.TaskAsset{
+		TaskID:           2052,
+		AssetID:          &sourceAssetID,
+		AssetType:        domain.TaskAssetTypeSource,
+		VersionNo:        replacementTimelineVersion,
+		AssetVersionNo:   &replacementVersionNo,
+		UploadMode:       strPtr("multipart"),
+		FileName:         "source-replacement.psd",
+		OriginalName:     strPtr("source-replacement.psd"),
+		MimeType:         strPtr("image/vnd.adobe.photoshop"),
+		FileSize:         uploadRequestInt64Ptr(int64(len(replacementBody))),
+		StorageKey:       &replacementStorageKey,
+		UploadStatus:     strPtr("uploaded"),
+		PreviewStatus:    strPtr("not_applicable"),
+		UploadedBy:       652,
+		UploadedAt:       timeValuePtr(time.Date(2026, 4, 15, 9, 30, 0, 0, time.UTC)),
+		FlowReviewStatus: domain.TaskAssetFlowReviewStatusNotApplicable,
+	})
+	if err != nil {
+		t.Fatalf("create replacement source version: %v", err)
+	}
+	if err := designAssetRepo.UpdateCurrentVersionID(context.Background(), step04Tx{}, sourceAssetID, &replacementSourceVersionID); err != nil {
+		t.Fatalf("set replacement source current version: %v", err)
+	}
+	if err := svc.ensureDerivedPreviewAssets(context.Background(), 2052, sourceAssetID, 652); err != nil {
+		t.Fatalf("ensureDerivedPreviewAssets(replacement) error = %v", err)
+	}
+
+	previewAssets, appErr = svc.ListAssetResources(context.Background(), ListAssetResourcesParams{
+		TaskID:        uploadRequestInt64Ptr(2052),
+		SourceAssetID: &sourceAssetID,
+		AssetType:     domain.TaskAssetTypePreview,
+	})
+	if appErr != nil || len(previewAssets) == 0 || previewAssets[0].CurrentVersion == nil {
+		t.Fatalf("replacement preview derived assets = %+v, appErr = %+v", previewAssets, appErr)
+	}
+	newPreview := previewAssets[0].CurrentVersion
+	if newPreview.ID == oldPreviewVersionID || newPreview.StorageKey == oldPreviewStorageKey {
+		t.Fatalf("replacement preview reused stale version: old=%d/%q new=%d/%q", oldPreviewVersionID, oldPreviewStorageKey, newPreview.ID, newPreview.StorageKey)
+	}
+	if newPreview.SourceAssetVersionID == nil || *newPreview.SourceAssetVersionID != replacementSourceVersionID {
+		t.Fatalf("replacement preview source version = %v, want %d", newPreview.SourceAssetVersionID, replacementSourceVersionID)
+	}
+	if got := taskAssetRepo.assets[oldPreviewVersionID].FlowReviewStatus; got != domain.TaskAssetFlowReviewStatusSuperseded {
+		t.Fatalf("old preview version status = %q, want superseded", got)
 	}
 }
 

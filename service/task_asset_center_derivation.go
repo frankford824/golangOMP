@@ -69,6 +69,9 @@ func (s *taskAssetCenterService) resolveDerivedPreviewInfo(ctx context.Context, 
 			if hydrated == nil || hydrated.CurrentVersion == nil || !hydrated.CurrentVersion.PreviewAvailable {
 				continue
 			}
+			if !derivedPreviewMatchesSourceVersion(hydrated.CurrentVersion, sourceAsset.CurrentVersion) {
+				continue
+			}
 			if appErr := validateAssetVersionObjectAvailable(hydrated.CurrentVersion); appErr != nil {
 				continue
 			}
@@ -76,6 +79,13 @@ func (s *taskAssetCenterService) resolveDerivedPreviewInfo(ctx context.Context, 
 		}
 	}
 	return nil, nil
+}
+
+func derivedPreviewMatchesSourceVersion(derivedVersion, sourceVersion *domain.DesignAssetVersion) bool {
+	return derivedVersion != nil &&
+		sourceVersion != nil &&
+		derivedVersion.SourceAssetVersionID != nil &&
+		*derivedVersion.SourceAssetVersionID == sourceVersion.ID
 }
 
 func (s *taskAssetCenterService) scheduleDerivedPreviewGeneration(taskID, sourceAssetID, completedBy int64, sourceVersion *domain.DesignAssetVersion) {
@@ -263,7 +273,9 @@ func (s *taskAssetCenterService) ensureSingleDerivedPreviewAsset(
 		if targetAsset == nil {
 			targetAsset = hydrated
 		}
-		if hydrated != nil && hydrated.CurrentVersion != nil && strings.TrimSpace(hydrated.CurrentVersion.StorageKey) != "" {
+		if hydrated != nil && hydrated.CurrentVersion != nil &&
+			derivedPreviewMatchesSourceVersion(hydrated.CurrentVersion, sourceAsset.CurrentVersion) &&
+			strings.TrimSpace(hydrated.CurrentVersion.StorageKey) != "" {
 			if validateAssetVersionObjectAvailable(hydrated.CurrentVersion) == nil && !isLegacyPlaceholderDerivedPreview(hydrated.CurrentVersion) {
 				return nil
 			}
@@ -300,6 +312,7 @@ func (s *taskAssetCenterService) ensureSingleDerivedPreviewAsset(
 			}
 			asset.ID = assetID
 		}
+		previousCurrentVersionID := cloneInt64Ptr(asset.CurrentVersionID)
 		timelineVersionNo, err := s.taskAssetRepo.NextVersionNo(ctx, tx, task.ID)
 		if err != nil {
 			return err
@@ -370,6 +383,14 @@ func (s *taskAssetCenterService) ensureSingleDerivedPreviewAsset(
 		}
 		if err := s.designAssetRepo.UpdateCurrentVersionID(ctx, tx, asset.ID, &versionID); err != nil {
 			return err
+		}
+		if previousCurrentVersionID != nil && *previousCurrentVersionID > 0 && *previousCurrentVersionID != versionID {
+			if supersedeRepo, ok := s.taskAssetRepo.(taskAssetVersionSupersedeRepo); ok {
+				cleanupAfter := now.Add(assetVersionReplacementRetention)
+				if err := supersedeRepo.MarkAssetVersionSuperseded(ctx, tx, *previousCurrentVersionID, versionID, now, cleanupAfter); err != nil {
+					return err
+				}
+			}
 		}
 		_, err = s.taskEventRepo.Append(ctx, tx, task.ID, domain.TaskEventAssetVersionCreated, &completedBy, map[string]interface{}{
 			"asset_id":          asset.ID,

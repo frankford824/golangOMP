@@ -22,6 +22,9 @@ let activeBlobFetches = 0
 const blobFetchQueue: Array<() => void> = []
 const materializedCache = new Map<string, CachedMaterializedPreviewImage>()
 const materializedInflight = new Map<string, Promise<CachedMaterializedPreviewImage | undefined>>()
+const materializedGenerationByAsset = new Map<string, number>()
+const materializedCacheKeysByAsset = new Map<string, Set<string>>()
+const materializedAssetByCacheKey = new Map<string, string>()
 
 export function normalizePreviewAssetId(raw: string | number | null | undefined): string {
   const value = String(raw ?? '').trim()
@@ -84,6 +87,44 @@ function retainCachedImage(cacheKey: string, cached: CachedMaterializedPreviewIm
   return { displaySrc: cached.displaySrc, objectUrl: cached.objectUrl, cacheKey }
 }
 
+function registerMaterializedCacheKey(assetId: string, cacheKey: string) {
+  if (!assetId) return
+  let keys = materializedCacheKeysByAsset.get(assetId)
+  if (!keys) {
+    keys = new Set<string>()
+    materializedCacheKeysByAsset.set(assetId, keys)
+  }
+  keys.add(cacheKey)
+  materializedAssetByCacheKey.set(cacheKey, assetId)
+}
+
+function unregisterMaterializedCacheKey(cacheKey: string) {
+  const assetId = materializedAssetByCacheKey.get(cacheKey)
+  if (!assetId) return
+  materializedAssetByCacheKey.delete(cacheKey)
+  const keys = materializedCacheKeysByAsset.get(assetId)
+  keys?.delete(cacheKey)
+  if (keys?.size === 0) materializedCacheKeysByAsset.delete(assetId)
+}
+
+/**
+ * 资源版本替换/删除后，立即丢弃该资产根的 Blob/Object URL 缓存。
+ * generation 同时阻止失效前已发出的请求在稍后完成时重新写回旧图。
+ */
+export function invalidateMaterializedPreviewImagesForAsset(rawAssetId: string | number): void {
+  const assetId = normalizePreviewAssetId(rawAssetId)
+  if (!assetId) return
+  materializedGenerationByAsset.set(assetId, (materializedGenerationByAsset.get(assetId) ?? 0) + 1)
+  const keys = Array.from(materializedCacheKeysByAsset.get(assetId) ?? [])
+  for (const cacheKey of keys) {
+    const cached = materializedCache.get(cacheKey)
+    if (cached?.objectUrl && cached.refCount === 0) URL.revokeObjectURL(cached.objectUrl)
+    materializedCache.delete(cacheKey)
+    materializedInflight.delete(cacheKey)
+    unregisterMaterializedCacheKey(cacheKey)
+  }
+}
+
 function ensureCachedImage(cacheKey: string, image: CachedMaterializedPreviewImage): CachedMaterializedPreviewImage {
   const cached = materializedCache.get(cacheKey)
   if (cached) return cached
@@ -98,6 +139,7 @@ function evictMaterializedCache(): void {
     if (cached.refCount === 0 && cached.expiresAt > 0 && cached.expiresAt <= now) {
       if (cached.objectUrl) URL.revokeObjectURL(cached.objectUrl)
       materializedCache.delete(key)
+      unregisterMaterializedCacheKey(key)
     }
   }
   if (materializedCache.size <= PREVIEW_BLOB_CACHE_MAX_ENTRIES) return
@@ -108,6 +150,7 @@ function evictMaterializedCache(): void {
     if (materializedCache.size <= PREVIEW_BLOB_CACHE_MAX_ENTRIES) break
     if (cached.objectUrl) URL.revokeObjectURL(cached.objectUrl)
     materializedCache.delete(key)
+    unregisterMaterializedCacheKey(key)
   }
 }
 
@@ -236,6 +279,7 @@ async function sniffPreviewImageMimeType(blob: Blob): Promise<string> {
 
 export async function materializePreviewImageUrl(
   raw: string,
+  rawAssetId?: string | number | null,
 ): Promise<MaterializedPreviewImage | undefined> {
   const url = raw.trim()
   if (!url) return undefined
@@ -245,23 +289,36 @@ export async function materializePreviewImageUrl(
   if (!isSameOriginPreviewUrl(url)) {
     return { displaySrc: url }
   }
-  const cacheKey = url
+  const assetId = normalizePreviewAssetId(rawAssetId)
+  const generation = assetId ? (materializedGenerationByAsset.get(assetId) ?? 0) : 0
+  const cacheKey = assetId ? `${url}\u0000asset=${assetId}\u0000generation=${generation}` : url
+  registerMaterializedCacheKey(assetId, cacheKey)
   const cached = materializedCache.get(cacheKey)
   if (cached) return retainCachedImage(cacheKey, cached)
   const existingInflight = materializedInflight.get(cacheKey)
   if (existingInflight) {
     const inflightResult = await existingInflight
+    if (assetId && (materializedGenerationByAsset.get(assetId) ?? 0) !== generation) return undefined
     return inflightResult ? retainCachedImage(cacheKey, ensureCachedImage(cacheKey, inflightResult)) : undefined
   }
   const pending = fetchSameOriginPreview(url)
   materializedInflight.set(cacheKey, pending)
   try {
     const image = await pending
-    if (!image) return undefined
+    if (!image) {
+      unregisterMaterializedCacheKey(cacheKey)
+      return undefined
+    }
+    if (assetId && (materializedGenerationByAsset.get(assetId) ?? 0) !== generation) {
+      if (image.objectUrl) URL.revokeObjectURL(image.objectUrl)
+      unregisterMaterializedCacheKey(cacheKey)
+      return undefined
+    }
     return retainCachedImage(cacheKey, ensureCachedImage(cacheKey, image))
   } catch {
+    unregisterMaterializedCacheKey(cacheKey)
     return undefined
   } finally {
-    materializedInflight.delete(cacheKey)
+    if (materializedInflight.get(cacheKey) === pending) materializedInflight.delete(cacheKey)
   }
 }

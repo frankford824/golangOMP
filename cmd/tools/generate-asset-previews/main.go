@@ -154,6 +154,7 @@ func listAsyncPreviewJobs(ctx context.Context, db *sql.DB, limit int, onlyAssetI
 				JOIN task_assets tp ON tp.id = dp.current_version_id
 				WHERE dp.source_asset_id = da.id
 				  AND dp.asset_type = 'preview'
+				  AND tp.source_asset_version_id = ta.id
 				  AND COALESCE(tp.storage_key, '') <> ''
 				  AND COALESCE(tp.mime_type, '') = 'image/webp'
 				  AND COALESCE(tp.remark, '') = 'async-derived-preview:webp'
@@ -166,6 +167,7 @@ func listAsyncPreviewJobs(ctx context.Context, db *sql.DB, limit int, onlyAssetI
 				JOIN task_assets tt ON tt.id = dt.current_version_id
 				WHERE dt.source_asset_id = da.id
 				  AND dt.asset_type = 'design_thumb'
+				  AND tt.source_asset_version_id = ta.id
 				  AND COALESCE(tt.storage_key, '') <> ''
 				  AND COALESCE(tt.mime_type, '') = 'image/webp'
 				  AND COALESCE(tt.remark, '') = 'async-derived-preview:webp'

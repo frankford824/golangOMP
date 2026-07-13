@@ -206,14 +206,18 @@ type DesignAssetVersion struct {
 	SupersededByVersionID *int64                      `json:"superseded_by_version_id,omitempty"`
 	SupersededAt          *time.Time                  `json:"superseded_at,omitempty"`
 	CleanupAfterAt        *time.Time                  `json:"cleanup_after_at,omitempty"`
-	WarehouseReady        bool                        `json:"warehouse_ready"`
-	ApprovedForFlow       bool                        `json:"approved_for_flow"`
-	CurrentVersionRole    string                      `json:"current_version_role,omitempty"`
-	DownloadURL           *string                     `json:"download_url"`
-	PublicDownloadAllowed bool                        `json:"public_download_allowed"`
-	PreviewPublicAllowed  bool                        `json:"preview_public_allowed"`
-	AccessHint            string                      `json:"access_hint,omitempty"`
-	Notes                 string                      `json:"notes,omitempty"`
+	// SourceAssetVersionID is internal derivation provenance. It is needed to
+	// decide whether a preview belongs to the resource's current version, but it
+	// is intentionally excluded from the public design-asset response contract.
+	SourceAssetVersionID  *int64  `json:"-"`
+	WarehouseReady        bool    `json:"warehouse_ready"`
+	ApprovedForFlow       bool    `json:"approved_for_flow"`
+	CurrentVersionRole    string  `json:"current_version_role,omitempty"`
+	DownloadURL           *string `json:"download_url"`
+	PublicDownloadAllowed bool    `json:"public_download_allowed"`
+	PreviewPublicAllowed  bool    `json:"preview_public_allowed"`
+	AccessHint            string  `json:"access_hint,omitempty"`
+	Notes                 string  `json:"notes,omitempty"`
 }
 
 type UploadSession struct {
@@ -314,6 +318,7 @@ func BuildDesignAssetVersion(taskAsset *TaskAsset) *DesignAssetVersion {
 		SupersededByVersionID: taskAsset.SupersededByVersionID,
 		SupersededAt:          taskAsset.SupersededAt,
 		CleanupAfterAt:        taskAsset.CleanupAfterAt,
+		SourceAssetVersionID:  cloneInt64Ptr(taskAsset.SourceAssetVersionID),
 	}
 }
 

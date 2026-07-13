@@ -3,7 +3,35 @@ package service
 import (
 	"sync"
 	"testing"
+
+	"workflow/domain"
 )
+
+func TestDerivedPreviewMatchesOnlyCurrentSourceVersion(t *testing.T) {
+	currentSourceVersion := &domain.DesignAssetVersion{ID: 14514}
+	matchingSourceVersionID := int64(14514)
+	staleSourceVersionID := int64(12323)
+
+	tests := []struct {
+		name    string
+		derived *domain.DesignAssetVersion
+		source  *domain.DesignAssetVersion
+		want    bool
+	}{
+		{name: "matching provenance", derived: &domain.DesignAssetVersion{SourceAssetVersionID: &matchingSourceVersionID}, source: currentSourceVersion, want: true},
+		{name: "stale provenance", derived: &domain.DesignAssetVersion{SourceAssetVersionID: &staleSourceVersionID}, source: currentSourceVersion, want: false},
+		{name: "missing provenance", derived: &domain.DesignAssetVersion{}, source: currentSourceVersion, want: false},
+		{name: "missing derived", derived: nil, source: currentSourceVersion, want: false},
+		{name: "missing source", derived: &domain.DesignAssetVersion{SourceAssetVersionID: &matchingSourceVersionID}, source: nil, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := derivedPreviewMatchesSourceVersion(tt.derived, tt.source); got != tt.want {
+				t.Fatalf("derivedPreviewMatchesSourceVersion() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
 
 func TestClaimDerivedPreviewGenerationDeduplicatesConcurrentKey(t *testing.T) {
 	svc := &taskAssetCenterService{}

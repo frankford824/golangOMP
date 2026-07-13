@@ -2,6 +2,7 @@ package asset_lifecycle
 
 import (
 	"context"
+	"slices"
 	"testing"
 	"time"
 
@@ -41,6 +42,39 @@ func TestDeleteRepairsMissingLifecycleModuleAndWritesEvent(t *testing.T) {
 	}
 	if lifecycle.eventModuleID != lifecycle.resolvedModuleID || lifecycle.eventType != "asset_deleted_by_admin" {
 		t.Fatalf("event = module:%d type:%q", lifecycle.eventModuleID, lifecycle.eventType)
+	}
+}
+
+func TestDeleteRemovesResourceAndDerivedPreviewObjects(t *testing.T) {
+	assetID := int64(8802)
+	parentKey := "tasks/RW-REPLACE/delivery-B.psd"
+	row := &repo.TaskAssetSearchRow{
+		Asset: &domain.TaskAsset{
+			ID:              9902,
+			TaskID:          7702,
+			AssetID:         &assetID,
+			AssetType:       domain.TaskAssetTypeDelivery,
+			SourceModuleKey: domain.ModuleKeyCustomization,
+			StorageKey:      &parentKey,
+		},
+		Task: &domain.Task{ID: 7702, TaskStatus: domain.TaskStatusCompleted},
+	}
+	search := &deleteSearchRepoStub{current: row, versions: []*repo.TaskAssetSearchRow{row}}
+	wantKeys := []string{
+		parentKey,
+		"tasks/RW-REPLACE/previews/delivery-B-preview.webp",
+		"tasks/RW-REPLACE/previews/delivery-B-thumb.webp",
+	}
+	lifecycle := &deleteLifecycleRepoStub{current: row, resolvedModuleID: 6602, deletionStorageKeys: wantKeys}
+	deleter := &recordingObjectDeleter{enabled: true}
+	svc := NewService(search, lifecycle, fakeTxRunner{}, deleter)
+
+	actor := domain.RequestActor{ID: 303, Roles: []domain.Role{domain.RoleCustomizationReviewer}}
+	if appErr := svc.Delete(context.Background(), actor, assetID, "文件错误"); appErr != nil {
+		t.Fatalf("Delete() appErr = %+v", appErr)
+	}
+	if !slices.Equal(deleter.deletedKeys, wantKeys) {
+		t.Fatalf("deleted keys = %v, want %v", deleter.deletedKeys, wantKeys)
 	}
 }
 
@@ -88,13 +122,18 @@ func (s *deleteSearchRepoStub) GetVersion(context.Context, int64, int64) (*repo.
 }
 
 type deleteLifecycleRepoStub struct {
-	current           *repo.TaskAssetSearchRow
-	resolvedModuleID  int64
-	resolvedTaskID    int64
-	resolvedModuleKey string
-	softDeleted       bool
-	eventModuleID     int64
-	eventType         domain.ModuleEventType
+	current             *repo.TaskAssetSearchRow
+	resolvedModuleID    int64
+	resolvedTaskID      int64
+	resolvedModuleKey   string
+	softDeleted         bool
+	eventModuleID       int64
+	eventType           domain.ModuleEventType
+	deletionStorageKeys []string
+}
+
+func (s *deleteLifecycleRepoStub) ListResourceDeletionStorageKeys(context.Context, int64) ([]string, error) {
+	return append([]string(nil), s.deletionStorageKeys...), nil
 }
 
 func (s *deleteLifecycleRepoStub) Archive(context.Context, repo.Tx, repo.TaskAssetLifecycleUpdate) error {
@@ -125,4 +164,16 @@ func (s *deleteLifecycleRepoStub) ResolveOrCreateLifecycleEventModule(_ context.
 	s.resolvedTaskID = taskID
 	s.resolvedModuleKey = moduleKey
 	return s.resolvedModuleID, nil
+}
+
+type recordingObjectDeleter struct {
+	enabled     bool
+	deletedKeys []string
+}
+
+func (d *recordingObjectDeleter) Enabled() bool { return d.enabled }
+
+func (d *recordingObjectDeleter) DeleteObject(_ context.Context, key string) error {
+	d.deletedKeys = append(d.deletedKeys, key)
+	return nil
 }

@@ -18,6 +18,35 @@ func NewTaskAssetLifecycleRepo(db *DB) repo.TaskAssetLifecycleRepo {
 	return &taskAssetLifecycleRepo{db: db}
 }
 
+// ListResourceDeletionStorageKeys returns both the resource's own objects and
+// backend-derived preview/thumb objects. Deleting only the parent resource
+// would otherwise leave the old preview bytes addressable in object storage.
+func (r *taskAssetLifecycleRepo) ListResourceDeletionStorageKeys(ctx context.Context, assetID int64) ([]string, error) {
+	rows, err := r.db.db.QueryContext(ctx, `
+		SELECT DISTINCT COALESCE(ta.storage_key, '')
+		  FROM task_assets ta
+		  JOIN design_assets da ON da.id = ta.asset_id
+		 WHERE (da.id = ? OR da.source_asset_id = ?)
+		   AND ta.deleted_at IS NULL
+		   AND COALESCE(ta.storage_key, '') <> ''
+		 ORDER BY COALESCE(ta.storage_key, '')`, assetID, assetID)
+	if err != nil {
+		return nil, fmt.Errorf("list resource deletion storage keys: %w", err)
+	}
+	defer rows.Close()
+	keys := make([]string, 0)
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return nil, fmt.Errorf("scan resource deletion storage key: %w", err)
+		}
+		if key = strings.TrimSpace(key); key != "" {
+			keys = append(keys, key)
+		}
+	}
+	return keys, rows.Err()
+}
+
 func (r *taskAssetLifecycleRepo) ListSupersededEligibleForCleanup(ctx context.Context, cutoff time.Time, limit int) ([]*repo.TaskAssetCleanupCandidate, error) {
 	if limit <= 0 || limit > 1000 {
 		limit = 100
@@ -178,11 +207,17 @@ func (r *taskAssetLifecycleRepo) SoftDelete(ctx context.Context, tx repo.Tx, upd
 	if err != nil {
 		return err
 	}
+	assetIDs, err := resourceAndDerivedAssetIDs(ctx, sqlTx, update.AssetID)
+	if err != nil {
+		return err
+	}
 	res, err := sqlTx.ExecContext(ctx, `
-		UPDATE task_assets
-		   SET deleted_at = ?, storage_key = NULL
-		 WHERE asset_id = ? AND deleted_at IS NULL`,
-		update.Now, update.AssetID)
+		UPDATE task_assets ta
+		JOIN design_assets da ON da.id = ta.asset_id
+		   SET ta.deleted_at = ?, ta.storage_key = NULL
+		 WHERE (da.id = ? OR da.source_asset_id = ?)
+		   AND ta.deleted_at IS NULL`,
+		update.Now, update.AssetID, update.AssetID)
 	if err != nil {
 		return fmt.Errorf("soft delete task asset: %w", err)
 	}
@@ -192,7 +227,28 @@ func (r *taskAssetLifecycleRepo) SoftDelete(ctx context.Context, tx repo.Tx, upd
 	if err := reindexTaskSearchDocuments(ctx, sqlTx, taskIDs); err != nil {
 		return err
 	}
-	return reindexAssetSearchDocument(ctx, sqlTx, update.AssetID)
+	return reindexAssetSearchDocuments(ctx, sqlTx, assetIDs)
+}
+
+func resourceAndDerivedAssetIDs(ctx context.Context, q taskSearchDocumentSQL, assetID int64) ([]int64, error) {
+	rows, err := q.QueryContext(ctx, `
+		SELECT id
+		  FROM design_assets
+		 WHERE id = ? OR source_asset_id = ?
+		 ORDER BY id`, assetID, assetID)
+	if err != nil {
+		return nil, fmt.Errorf("list resource and derived asset ids: %w", err)
+	}
+	defer rows.Close()
+	ids := make([]int64, 0)
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan resource and derived asset id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 func (r *taskAssetLifecycleRepo) MarkAutoCleaned(ctx context.Context, tx repo.Tx, versionID int64, cleanedAt time.Time) error {

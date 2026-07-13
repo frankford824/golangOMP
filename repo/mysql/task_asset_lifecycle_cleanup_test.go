@@ -84,3 +84,35 @@ func TestTaskAssetLifecycleRepoCleanupUsesAssetAgeAndExcludesCurrentVersion(t *t
 		t.Fatalf("sql expectations: %v", err)
 	}
 }
+
+func TestListResourceDeletionStorageKeysIncludesDerivedObjects(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectQuery(`SELECT DISTINCT COALESCE\(ta\.storage_key, ''\)`).
+		WithArgs(int64(12401), int64(12401)).
+		WillReturnRows(sqlmock.NewRows([]string{"storage_key"}).
+			AddRow("tasks/RW-1/delivery-B.psd").
+			AddRow("tasks/RW-1/previews/delivery-B-preview.webp").
+			AddRow("tasks/RW-1/previews/delivery-B-thumb.webp"))
+
+	keys, err := NewTaskAssetLifecycleRepo(New(db)).(*taskAssetLifecycleRepo).
+		ListResourceDeletionStorageKeys(t.Context(), 12401)
+	if err != nil {
+		t.Fatalf("ListResourceDeletionStorageKeys() error = %v", err)
+	}
+	want := []string{
+		"tasks/RW-1/delivery-B.psd",
+		"tasks/RW-1/previews/delivery-B-preview.webp",
+		"tasks/RW-1/previews/delivery-B-thumb.webp",
+	}
+	if fmt.Sprint(keys) != fmt.Sprint(want) {
+		t.Fatalf("keys = %v, want %v", keys, want)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}

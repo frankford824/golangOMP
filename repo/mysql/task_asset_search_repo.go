@@ -56,8 +56,14 @@ const taskAssetSearchFrom = `
 	  LEFT JOIN design_assets derived_preview ON derived_preview.id = (
 	      SELECT candidate.id
 	        FROM design_assets candidate
+	        JOIN task_assets candidate_version
+	          ON candidate_version.id = candidate.current_version_id
 	       WHERE candidate.source_asset_id = da.id
 	         AND candidate.asset_type IN ('preview', 'design_thumb')
+	         AND candidate_version.source_asset_version_id = ta.id
+	         AND candidate_version.deleted_at IS NULL
+	         AND candidate_version.cleaned_at IS NULL
+	         AND COALESCE(candidate_version.storage_key, '') <> ''
 	       ORDER BY FIELD(candidate.asset_type, 'preview', 'design_thumb'), candidate.id DESC
 	       LIMIT 1
 	  )

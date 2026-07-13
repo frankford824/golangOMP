@@ -6,7 +6,7 @@ import axios from 'axios'
 import type { BackendAsset, BackendAssetVersion } from '@/services/apiTypes'
 import type { AssetDownloadMeta } from '@/services/api/assetsApi'
 import { assetsApi } from '@/services/api/assetsApi'
-import { normalizePreviewAssetId } from '@/domain/asset-preview-image'
+import { invalidateMaterializedPreviewImagesForAsset, normalizePreviewAssetId } from '@/domain/asset-preview-image'
 import { toRelativeAssetUrl } from '@/utils/url'
 
 export type AssetPreviewMetaStatus = 'ok' | 'preparing' | 'not_found' | 'unavailable' | 'error'
@@ -96,6 +96,7 @@ export function invalidateAssetAccessCache(assetId: string): void {
   downloadMetaCache.delete(id)
   previewMetaInflight.delete(id)
   downloadMetaInflight.delete(id)
+  invalidateMaterializedPreviewImagesForAsset(id)
 }
 
 function unwrapDownloadPayload(body: unknown): AssetDownloadMeta | undefined {

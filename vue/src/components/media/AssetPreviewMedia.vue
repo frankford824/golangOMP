@@ -182,8 +182,8 @@ function bindDeferIo() {
   io.observe(el)
 }
 
-async function materializeDisplaySrc(url: string): Promise<string | undefined> {
-  const image = await materializePreviewImageUrl(url)
+async function materializeDisplaySrc(url: string, assetId?: string): Promise<string | undefined> {
+  const image = await materializePreviewImageUrl(url, assetId)
   if (!image) return undefined
   clearObjectUrl()
   materializedImage = image
@@ -198,12 +198,16 @@ async function runLoad() {
     return
   }
 
+  const primaryId = normalizePreviewAssetId(props.assetId)
+  const secondaryId = normalizePreviewAssetId(props.fallbackAssetId)
+  const previewCacheAssetId = primaryId || secondaryId
+
   const resolved = (props.resolvedPreviewUrl ?? '').trim()
   if (resolved) {
     phase.value = 'loading'
     clearObjectUrl()
     displaySrc.value = ''
-    const renderable = await materializeDisplaySrc(resolved)
+    const renderable = await materializeDisplaySrc(resolved, previewCacheAssetId)
     if (my !== seq) return
     if (renderable) {
       displaySrc.value = renderable
@@ -215,11 +219,9 @@ async function runLoad() {
     return
   }
 
-  const primaryId = normalizePreviewAssetId(props.assetId)
-  const secondaryId = normalizePreviewAssetId(props.fallbackAssetId)
   if (!primaryId && !secondaryId) {
     clearObjectUrl()
-    const fallback = await materializeDisplaySrc((props.fallbackSrc ?? '').trim())
+    const fallback = await materializeDisplaySrc((props.fallbackSrc ?? '').trim(), previewCacheAssetId)
     displaySrc.value = fallback ?? ''
     phase.value = displaySrc.value ? 'ready' : 'idle'
     return
@@ -238,7 +240,7 @@ async function runLoad() {
   }
   if (my !== seq) return
   if (res.status === 'ok' && res.displayUrl) {
-    const renderable = await materializeDisplaySrc(res.displayUrl)
+    const renderable = await materializeDisplaySrc(res.displayUrl, previewCacheAssetId)
     if (my !== seq) return
     if (renderable) {
       displaySrc.value = renderable
@@ -252,7 +254,7 @@ async function runLoad() {
   }
   if (res.status === 'unavailable') {
     if (props.fallbackSrc?.trim()) {
-      const fallback = await materializeDisplaySrc(props.fallbackSrc.trim())
+      const fallback = await materializeDisplaySrc(props.fallbackSrc.trim(), previewCacheAssetId)
       if (my !== seq) return
       if (fallback) {
         displaySrc.value = fallback
@@ -274,7 +276,7 @@ async function runLoad() {
   errorHint.value = res.message ?? '加载失败'
   phase.value = 'error'
   if (props.fallbackSrc?.trim()) {
-    const fallback = await materializeDisplaySrc(props.fallbackSrc.trim())
+    const fallback = await materializeDisplaySrc(props.fallbackSrc.trim(), previewCacheAssetId)
     if (my !== seq) return
     if (fallback) {
       displaySrc.value = fallback
@@ -290,7 +292,10 @@ function reload() {
 function useFallbackOnly() {
   void (async () => {
     if (props.fallbackSrc?.trim()) {
-      const fallback = await materializeDisplaySrc(props.fallbackSrc.trim())
+      const fallback = await materializeDisplaySrc(
+        props.fallbackSrc.trim(),
+        normalizePreviewAssetId(props.assetId) || normalizePreviewAssetId(props.fallbackAssetId),
+      )
       if (fallback) {
         displaySrc.value = fallback
         phase.value = 'ready'

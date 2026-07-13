@@ -15,6 +15,7 @@
             'w-full max-w-[calc(100vw-1.5rem)] sm:max-w-[calc(100vw-2rem)] max-h-[88dvh] rounded-2xl border border-[rgb(var(--yb-border))] bg-[rgb(var(--yb-surface))] text-[rgb(var(--yb-text-body))] shadow-float overflow-hidden flex flex-col focus:outline-none',
             panelClass,
           ]"
+          :style="panelMaxWidth ? { maxWidth: panelMaxWidth } : undefined"
         >
           <header class="flex-shrink-0 px-4 sm:px-5 pt-4 sm:pt-5 pb-3 sm:pb-4 flex items-center justify-between gap-3">
             <h2 class="min-w-0 text-base font-headline font-bold text-[rgb(var(--yb-text))]">
@@ -69,6 +70,8 @@ const props = withDefaults(
     customFooter?: boolean
     /** 覆盖默认 max-w-3xl，例如批量创建任务加宽 */
     panelClass?: string
+    /** 需要精确桌面宽度时使用；内联 max-width 可稳定覆盖响应式宽度类。 */
+    panelMaxWidth?: string
   }>(),
   {
     title: '',
@@ -77,6 +80,7 @@ const props = withDefaults(
     cancelText: '取消',
     customFooter: false,
     panelClass: 'max-w-3xl',
+    panelMaxWidth: '',
   },
 )
 

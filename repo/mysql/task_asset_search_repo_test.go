@@ -310,6 +310,21 @@ func TestTaskAssetSearchProjectionResolvesLegacyModuleLink(t *testing.T) {
 	}
 }
 
+func TestTaskAssetSearchDerivedPreviewRequiresCurrentSourceVersion(t *testing.T) {
+	normalized := strings.Join(strings.Fields(taskAssetSearchFrom), " ")
+	for _, required := range []string{
+		"JOIN task_assets candidate_version ON candidate_version.id = candidate.current_version_id",
+		"candidate_version.source_asset_version_id = ta.id",
+		"candidate_version.deleted_at IS NULL",
+		"candidate_version.cleaned_at IS NULL",
+		"COALESCE(candidate_version.storage_key, '') <> ''",
+	} {
+		if !strings.Contains(normalized, required) {
+			t.Fatalf("derived preview selection missing %q: %s", required, normalized)
+		}
+	}
+}
+
 func containsStringArg(args []interface{}, want string) bool {
 	for _, arg := range args {
 		got, ok := arg.(string)

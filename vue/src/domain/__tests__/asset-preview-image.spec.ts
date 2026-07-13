@@ -11,6 +11,7 @@ vi.mock('@/services/http', () => ({
 }))
 
 import {
+  invalidateMaterializedPreviewImagesForAsset,
   materializePreviewImageUrl,
   normalizePreviewAssetId,
   revokeMaterializedPreviewImage,
@@ -45,7 +46,8 @@ afterAll(() => {
 
 beforeEach(() => {
   getMock.mockReset()
-  createObjectURLMock.mockClear()
+  createObjectURLMock.mockReset()
+  createObjectURLMock.mockImplementation(() => 'blob:preview-image')
   revokeObjectURLMock.mockClear()
 })
 
@@ -120,6 +122,28 @@ describe('materializePreviewImageUrl', () => {
 
     expect(image).toBeUndefined()
     expect(createObjectURLMock).not.toHaveBeenCalled()
+  })
+
+  it('refetches the same preview URL after the resource version is replaced', async () => {
+    const url = '/v1/assets/files/tasks/RW-1/current-preview.webp'
+    const assetId = '12401'
+    getMock
+      .mockResolvedValueOnce({ data: new Blob(['A-preview'], { type: 'image/webp' }) })
+      .mockResolvedValueOnce({ data: new Blob(['B-preview'], { type: 'image/webp' }) })
+    createObjectURLMock.mockReturnValueOnce('blob:A-preview').mockReturnValueOnce('blob:B-preview')
+
+    const first = await materializePreviewImageUrl(url, assetId)
+    expect(first?.displaySrc).toBe('blob:A-preview')
+    revokeMaterializedPreviewImage(first)
+
+    invalidateMaterializedPreviewImagesForAsset(assetId)
+    const replaced = await materializePreviewImageUrl(url, assetId)
+
+    expect(replaced?.displaySrc).toBe('blob:B-preview')
+    expect(getMock).toHaveBeenCalledTimes(2)
+    expect(createObjectURLMock).toHaveBeenCalledTimes(2)
+    expect(revokeObjectURLMock).toHaveBeenCalledWith('blob:A-preview')
+    revokeMaterializedPreviewImage(replaced)
   })
 })
 

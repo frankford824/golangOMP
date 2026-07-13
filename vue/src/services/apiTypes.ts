@@ -424,6 +424,8 @@ export interface BackendAssetVersion {
 /** 后端资产项 */
 export interface BackendAsset {
   id: string
+  /** 当前资源版本；变化时必须重新挂载预览组件，避免沿用旧版本图片。 */
+  current_version_id?: string | number | null
   /** 统一资源 ID：系统资产为数字字符串，外部资源为 ext-{id}。 */
   resource_id?: string
   /** UI 只展示 system/external 两类来源，避免泄露挂载细节。 */
