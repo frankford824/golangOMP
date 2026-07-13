@@ -8,11 +8,22 @@ import (
 )
 
 func (s *Service) Delete(ctx context.Context, actor domain.RequestActor, assetID int64, reason string) *domain.AppError {
-	if !isSuperAdmin(actor) {
-		return roleDenied()
+	current, err := s.searchRepo.GetCurrentByAssetID(ctx, assetID)
+	if err != nil {
+		return domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)
+	}
+	if current == nil || current.Asset == nil || current.Task == nil {
+		return domain.ErrNotFound
+	}
+	if !canDeleteCompletedTaskAsset(actor, current) {
+		return deleteRoleDenied()
 	}
 	if appErr := requireReason(reason); appErr != nil {
 		return appErr
+	}
+	state := domain.DeriveLifecycleState(*current.Asset, *current.Task)
+	if !CanDelete(state) {
+		return domain.NewAppError(domain.ErrCodeInvalidStateTransition, "asset cannot be deleted from current lifecycle state", map[string]interface{}{"state": state})
 	}
 	versions, err := s.searchRepo.ListVersionsByAssetID(ctx, assetID)
 	if err != nil {

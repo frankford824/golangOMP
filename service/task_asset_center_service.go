@@ -2813,7 +2813,11 @@ func requireCompletedTaskAssetMutationActor(ctx context.Context, task *domain.Ta
 	if ok && actor != nil && hasAnyRoleValue(actor.Roles,
 		domain.RoleDesigner,
 		domain.RoleCustomizationOperator,
+		domain.RoleCustomizationReviewer,
+		domain.RoleAuditA,
+		domain.RoleAuditB,
 		domain.RoleOps,
+		domain.RoleAssetManager,
 		domain.RoleAdmin,
 		domain.RoleSuperAdmin,
 		domain.RoleHRAdmin,
@@ -2824,7 +2828,7 @@ func requireCompletedTaskAssetMutationActor(ctx context.Context, task *domain.Ta
 	) {
 		return nil
 	}
-	return domain.NewAppError(domain.ErrCodePermissionDenied, "completed task asset replacement requires a design, customization, operation, or management role", map[string]interface{}{
+	return domain.NewAppError(domain.ErrCodePermissionDenied, "completed task asset replacement requires a design, audit, customization review, operation, asset management, or management role", map[string]interface{}{
 		"deny_code":   "post_close_replacement_role_not_allowed",
 		"task_id":     task.ID,
 		"task_status": task.TaskStatus,

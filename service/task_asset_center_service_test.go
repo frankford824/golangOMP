@@ -102,12 +102,17 @@ func TestTaskAssetCenterServiceCreateAndCompleteMultipartUploadSession(t *testin
 	}
 }
 
-func TestTaskAssetCenterServiceCompletedTaskOnlyReplacesExistingCurrentAsset(t *testing.T) {
+func TestTaskAssetCenterServiceAssetManagerCompletedTaskOnlyReplacesExistingCurrentAsset(t *testing.T) {
 	const (
 		taskID     = int64(2099)
 		uploaderID = int64(509)
 	)
-	taskRepo := newStep04TaskRepo(&domain.Task{ID: taskID, TaskStatus: domain.TaskStatusCompleted, DesignerID: uploadRequestInt64Ptr(uploaderID)})
+	taskRepo := newStep04TaskRepo(&domain.Task{
+		ID:              taskID,
+		TaskStatus:      domain.TaskStatusCompleted,
+		OwnerDepartment: string(domain.DepartmentOperations),
+		OwnerOrgTeam:    "淘系运营三部",
+	})
 	designAssetRepo := newStep67DesignAssetRepo()
 	taskAssetRepo := newStep04TaskAssetRepo()
 	uploadRequestRepo := newStep37UploadRequestRepo()
@@ -146,7 +151,7 @@ func TestTaskAssetCenterServiceCompletedTaskOnlyReplacesExistingCurrentAsset(t *
 	svc.nowFn = func() time.Time { return time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC) }
 	ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{
 		ID:       uploaderID,
-		Roles:    []domain.Role{domain.RoleDesigner},
+		Roles:    []domain.Role{domain.RoleAssetManager},
 		Source:   domain.RequestActorSourceSessionToken,
 		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
 	})
@@ -226,75 +231,17 @@ func TestTaskAssetCenterServiceCompletedTaskOnlyReplacesExistingCurrentAsset(t *
 	}
 }
 
-func TestTaskAssetCenterServiceCompletedTaskMutationRejectsAuditOnlyActors(t *testing.T) {
-	for _, role := range []domain.Role{domain.RoleAuditA, domain.RoleAuditB} {
-		role := role
-		for _, action := range []string{"create", "complete", "cancel"} {
-			action := action
-			t.Run(string(role)+"_"+action, func(t *testing.T) {
-				const taskID = int64(2100)
-				actorID := int64(610)
-				taskRepo := newStep04TaskRepo(&domain.Task{
-					ID:               taskID,
-					TaskStatus:       domain.TaskStatusCompleted,
-					CurrentHandlerID: &actorID,
-				})
-				designAssetRepo := newStep67DesignAssetRepo()
-				taskAssetRepo := newStep04TaskAssetRepo()
-				uploadRequestRepo := newStep37UploadRequestRepo()
-				taskEventRepo := &step04TaskEventRepo{}
-				storageRefRepo := newStep37AssetStorageRefRepo()
-				uploadClient := newStubUploadServiceClient().(*stubUploadServiceClient)
-
-				assetID, err := designAssetRepo.Create(context.Background(), step04Tx{}, &domain.DesignAsset{
-					TaskID: taskID, AssetNo: "AST-AUDIT-DENY", AssetType: domain.TaskAssetTypeDelivery, CreatedBy: actorID,
-				})
-				if err != nil {
-					t.Fatalf("create design asset: %v", err)
-				}
-				versionNo := 1
-				versionID, err := taskAssetRepo.Create(context.Background(), step04Tx{}, &domain.TaskAsset{
-					TaskID: taskID, AssetID: &assetID, AssetType: domain.TaskAssetTypeDelivery,
-					VersionNo: 1, AssetVersionNo: &versionNo, FileName: "current.psd", FlowReviewStatus: domain.TaskAssetFlowReviewStatusApproved,
-				})
-				if err != nil {
-					t.Fatalf("create task asset: %v", err)
-				}
-				if err := designAssetRepo.UpdateCurrentVersionID(context.Background(), step04Tx{}, assetID, &versionID); err != nil {
-					t.Fatalf("set current version: %v", err)
-				}
-				assetType := domain.TaskAssetTypeDelivery
-				uploadRequestRepo.requests["audit-only-session"] = &domain.UploadRequest{
-					RequestID: "audit-only-session", OwnerType: domain.AssetOwnerTypeTask, OwnerID: taskID, TaskID: taskID,
-					AssetID: &assetID, TaskAssetType: &assetType, Status: domain.UploadRequestStatusRequested,
-					SessionStatus: domain.DesignAssetSessionStatusCreated, RemoteUploadID: "remote-audit-only",
-				}
-				domain.HydrateUploadRequestDerived(uploadRequestRepo.requests["audit-only-session"])
-
-				svc := NewTaskAssetCenterService(taskRepo, designAssetRepo, taskAssetRepo, uploadRequestRepo, storageRefRepo, taskEventRepo, step04TxRunner{}, uploadClient).(*taskAssetCenterService)
-				ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{
-					ID: actorID, Roles: []domain.Role{role}, Source: domain.RequestActorSourceSessionToken, AuthMode: domain.AuthModeSessionTokenRoleEnforced,
-				})
-				var appErr *domain.AppError
-				switch action {
-				case "create":
-					_, appErr = svc.CreateMultipartUploadSession(ctx, CreateTaskAssetUploadSessionParams{
-						TaskID: taskID, AssetID: &assetID, CreatedBy: actorID, AssetType: assetType, Filename: "replacement.psd",
-						ExpectedSize: uploadRequestInt64Ptr(1024),
-					})
-				case "complete":
-					_, appErr = svc.CompleteUploadSession(ctx, CompleteTaskAssetUploadSessionParams{TaskID: taskID, SessionID: "audit-only-session", CompletedBy: actorID})
-				case "cancel":
-					_, appErr = svc.CancelUploadSession(ctx, CancelTaskAssetUploadSessionParams{TaskID: taskID, SessionID: "audit-only-session", CancelledBy: actorID})
-				}
-				if appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
-					t.Fatalf("%s completed mutation error = %+v, want permission denied", action, appErr)
-				}
-				details, _ := appErr.Details.(map[string]interface{})
-				if got := details["deny_code"]; got != "post_close_replacement_role_not_allowed" {
-					t.Fatalf("%s deny_code = %+v, want post_close_replacement_role_not_allowed", action, got)
-				}
-			})
+func TestRequireCompletedTaskAssetMutationActorAllowsReviewAndAssetManagementRoles(t *testing.T) {
+	task := &domain.Task{ID: 2100, TaskStatus: domain.TaskStatusCompleted}
+	for _, role := range []domain.Role{
+		domain.RoleCustomizationReviewer,
+		domain.RoleAuditA,
+		domain.RoleAuditB,
+		domain.RoleAssetManager,
+	} {
+		ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{ID: 610, Roles: []domain.Role{role}})
+		if appErr := requireCompletedTaskAssetMutationActor(ctx, task); appErr != nil {
+			t.Fatalf("role %s completed asset mutation error = %+v", role, appErr)
 		}
 	}
 }

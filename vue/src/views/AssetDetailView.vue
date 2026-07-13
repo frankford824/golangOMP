@@ -19,6 +19,15 @@
           {{ replacementUploading ? '上传中' : '修改资源' }}
         </BaseButton>
         <BaseButton
+          v-if="assetCanBeDeleted(asset)"
+          variant="danger"
+          size="sm"
+          :disabled="deletionRunning"
+          @click="startDeleteAsset"
+        >
+          {{ deletionRunning ? '删除中' : '删除资源' }}
+        </BaseButton>
+        <BaseButton
           v-if="assetTaskId"
           variant="primary"
           size="sm"
@@ -56,9 +65,11 @@
       </div>
     </div>
 
-    <div v-if="replacementStatus || replacementError" class="replace-message">
+    <div v-if="replacementStatus || replacementError || deletionStatus || deletionError" class="replace-message">
       <span v-if="replacementStatus" class="replace-message-ok">{{ replacementStatus }}</span>
       <span v-if="replacementError" class="replace-message-error">{{ replacementError }}</span>
+      <span v-if="deletionStatus" class="replace-message-ok">{{ deletionStatus }}</span>
+      <span v-if="deletionError" class="replace-message-error">{{ deletionError }}</span>
     </div>
 
     <section class="detail-card">
@@ -79,7 +90,9 @@
             <span class="asset-usable-label">使用状态</span>
             <strong>{{ assetUsableLabel(asset) }}</strong>
           </div>
-          <span v-if="assetCanBeReplaced(asset)" class="asset-editable-label">可修改资源</span>
+          <span v-if="assetCanBeReplaced(asset) || assetCanBeDeleted(asset)" class="asset-editable-label">
+            {{ assetCanBeDeleted(asset) ? '可修改 / 可删除资源' : '可修改资源' }}
+          </span>
         </div>
         <dl class="detail-grid">
           <div class="detail-row">
@@ -237,6 +250,35 @@
         </div>
       </template>
     </section>
+
+    <AssetReplacementDialog
+      v-model="replacementDialogOpen"
+      :task-no="asset ? businessTaskNo(asset) : ''"
+      :sku="asset ? businessSku(asset) : ''"
+      :asset-kind="asset ? assetKind(asset) : ''"
+      :current-file-name="asset ? assetFileName(asset) : ''"
+      :selected-file="replacementSelectedFile"
+      :uploading="replacementUploading"
+      :status="replacementStatus"
+      :error="replacementError"
+      @choose-file="chooseReplacementFile"
+      @confirm="confirmReplacement"
+      @cancel="cancelReplacement"
+    />
+    <AssetDeletionDialog
+      v-model="deletionDialogOpen"
+      v-model:reason="deletionReason"
+      :task-no="asset ? businessTaskNo(asset) : ''"
+      :sku="asset ? businessSku(asset) : ''"
+      :asset-kind="asset ? assetKind(asset) : ''"
+      :current-file-name="asset ? assetFileName(asset) : ''"
+      :reason-error="deletionReasonError"
+      :deleting="deletionRunning"
+      :status="deletionStatus"
+      :error="deletionError"
+      @confirm="confirmDeletion"
+      @cancel="cancelDeletion"
+    />
   </div>
 </template>
 
@@ -245,6 +287,8 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import BaseButton from '@/components/base/BaseButton.vue'
 import BaseEmptyState from '@/components/base/BaseEmptyState.vue'
+import AssetDeletionDialog from '@/components/assets/AssetDeletionDialog.vue'
+import AssetReplacementDialog from '@/components/assets/AssetReplacementDialog.vue'
 import { usePermission } from '@/composables/usePermission'
 import {
   assetArchiveStatusLabelCn,
@@ -255,11 +299,13 @@ import { normalizeAssetDetailFromApi } from '@/domain/mappers/asset-detail-from-
 import {
   fetchAssetPreviewMeta,
   fetchTaskAssetPreviewWithDerivedFallback,
+  invalidateAssetAccessCache,
   primeAssetDownloadMetaCache,
 } from '@/domain/asset-access'
 import { assetsApi, type AssetKind } from '@/services/api/assetsApi'
 import type { BackendAsset, BackendAssetVersion } from '@/services/apiTypes'
 import { assetReplacementSuccessMessage, assetReplacementUnavailableReason, canReplaceAssetResource } from '@/domain/asset-replacement'
+import { assetDeletionSuccessMessage, assetDeletionUnavailableReason, canDeleteAssetResource } from '@/domain/asset-deletion'
 import { formatDateTimeBeijing } from '@/utils/date'
 import { userAccountDisplay } from '@/domain/user-display'
 import { resolveApiUserMessage } from '@/utils/api-message-zh'
@@ -267,7 +313,7 @@ import { uploadTaskFileViaAssetSession } from '@/services/upload/assetUploadFlow
 
 const route = useRoute()
 const router = useRouter()
-const { canAccessPage } = usePermission()
+const { canAccessPage, frontendRoles } = usePermission()
 
 const ASSET_CENTER_FILE_TYPE_LABELS: Record<string, string> = {
   delivery: '成品图',
@@ -294,9 +340,17 @@ const previewUnavailable = ref(false)
 const previewNotFound = ref(false)
 const previewPreparing = ref(false)
 const replacementFileInput = ref<HTMLInputElement | null>(null)
+const replacementDialogOpen = ref(false)
+const replacementSelectedFile = ref<File | null>(null)
 const replacementUploading = ref(false)
 const replacementStatus = ref('')
 const replacementError = ref('')
+const deletionDialogOpen = ref(false)
+const deletionReason = ref('')
+const deletionReasonError = ref('')
+const deletionRunning = ref(false)
+const deletionStatus = ref('')
+const deletionError = ref('')
 
 const versions = computed<BackendAssetVersion[]>(() => asset.value?.versions ?? [])
 const assetTaskId = computed(() => positiveID(asset.value?.task_id) || positiveID(taskId.value))
@@ -446,12 +500,22 @@ function assetCanBeReplaced(row: BackendAsset | null | undefined): boolean {
   return canReplaceAssetResource(assetReplacementGate(row))
 }
 
+function assetCanBeDeleted(row: BackendAsset | null | undefined): boolean {
+  return canDeleteAssetResource(assetReplacementGate(row), frontendRoles.value)
+}
+
+function assetMutationId(row: BackendAsset | null | undefined): string {
+  if (!row) return ''
+  const record = row as Record<string, unknown>
+  return positiveID(record.asset_id ?? record.assetId) || positiveID(assetResourceId(row))
+}
+
 function assetReplacementGate(row: BackendAsset | null | undefined) {
   const record = (row ?? {}) as Record<string, unknown>
   return {
     isExternal: Boolean(row && isExternalAsset(row)),
     taskId: assetTaskId.value,
-    assetId: row ? assetResourceId(row) : '',
+    assetId: assetMutationId(row),
     assetKind: rawAssetKind(row),
     usableState: rawUsableState(record),
     taskStatus: record.task_status ?? record.taskStatus,
@@ -462,6 +526,10 @@ function assetReplacementGate(row: BackendAsset | null | undefined) {
 
 function assetReplacementUnavailableMessage(row: BackendAsset | null | undefined): string {
   return assetReplacementUnavailableReason(assetReplacementGate(row))
+}
+
+function assetDeletionUnavailableMessage(row: BackendAsset | null | undefined): string {
+  return assetDeletionUnavailableReason(assetReplacementGate(row), frontendRoles.value)
 }
 
 function externalOriginPath(row: BackendAsset): string {
@@ -629,25 +697,43 @@ function startReplaceAsset() {
   }
   replacementStatus.value = ''
   replacementError.value = ''
+  replacementSelectedFile.value = null
+  replacementDialogOpen.value = true
+}
+
+function chooseReplacementFile() {
   if (replacementFileInput.value) {
     replacementFileInput.value.value = ''
     replacementFileInput.value.click()
   }
 }
 
-async function handleReplacementFile(event: Event) {
+function handleReplacementFile(event: Event) {
   const input = event.target as HTMLInputElement | null
   const file = input?.files?.[0]
-  const row = asset.value
-  if (!file || !row) return
+  if (file) replacementSelectedFile.value = file
+  if (input) input.value = ''
+}
 
-  const assetID = positiveID(assetResourceId(row))
+function cancelReplacement() {
+  if (replacementUploading.value) return
+  replacementDialogOpen.value = false
+  replacementSelectedFile.value = null
+  replacementStatus.value = ''
+  replacementError.value = ''
+}
+
+async function confirmReplacement() {
+  const file = replacementSelectedFile.value
+  const row = asset.value
+  if (!file || !row || replacementUploading.value) return
+
+  const assetID = assetMutationId(row)
   const kind = rawAssetKind(row)
   const unavailableMessage = assetReplacementUnavailableMessage(row)
   if (unavailableMessage || !assetTaskId.value || !assetID || (kind !== 'delivery' && kind !== 'source' && kind !== 'reference')) {
     replacementStatus.value = ''
     replacementError.value = unavailableMessage || '当前资源缺少任务或资产信息，不能直接修改'
-    if (input) input.value = ''
     return
   }
 
@@ -673,14 +759,74 @@ async function handleReplacementFile(event: Event) {
         },
       },
     )
-    replacementStatus.value = assetReplacementSuccessMessage(assetReplacementGate(row))
+    const successMessage = assetReplacementSuccessMessage(assetReplacementGate(row))
+    invalidateAssetAccessCache(assetID)
     await loadAsset()
+    replacementStatus.value = successMessage
+    replacementDialogOpen.value = false
+    replacementSelectedFile.value = null
   } catch (err) {
     replacementStatus.value = ''
     replacementError.value = resolveApiUserMessage(err, { fallback: '修改资源失败，请稍后重试' })
   } finally {
     replacementUploading.value = false
-    if (input) input.value = ''
+  }
+}
+
+function startDeleteAsset() {
+  const unavailableMessage = assetDeletionUnavailableMessage(asset.value)
+  if (unavailableMessage) {
+    deletionStatus.value = ''
+    deletionError.value = unavailableMessage
+    return
+  }
+  deletionReason.value = ''
+  deletionReasonError.value = ''
+  deletionStatus.value = ''
+  deletionError.value = ''
+  deletionDialogOpen.value = true
+}
+
+function cancelDeletion() {
+  if (deletionRunning.value) return
+  deletionDialogOpen.value = false
+  deletionReason.value = ''
+  deletionReasonError.value = ''
+  deletionStatus.value = ''
+  deletionError.value = ''
+}
+
+async function confirmDeletion() {
+  const row = asset.value
+  const reason = deletionReason.value.trim()
+  if (!row || deletionRunning.value) return
+  if (!reason) {
+    deletionReasonError.value = '请填写删除原因'
+    return
+  }
+  const unavailableMessage = assetDeletionUnavailableMessage(row)
+  const mutationID = assetMutationId(row)
+  if (unavailableMessage || !mutationID) {
+    deletionError.value = unavailableMessage || '当前资源缺少资产信息，不能删除'
+    return
+  }
+
+  deletionRunning.value = true
+  deletionReasonError.value = ''
+  deletionStatus.value = '正在删除资源及历史版本'
+  deletionError.value = ''
+  try {
+    await assetsApi.deleteAsset(mutationID, { reason })
+    invalidateAssetAccessCache(assetResourceId(row))
+    invalidateAssetAccessCache(mutationID)
+    deletionStatus.value = assetDeletionSuccessMessage(assetReplacementGate(row).taskStatus)
+    deletionDialogOpen.value = false
+    await router.push({ name: 'AssetsIndex', query: { asset_notice: 'deleted' } })
+  } catch (err) {
+    deletionStatus.value = ''
+    deletionError.value = resolveApiUserMessage(err, { fallback: '删除资源失败，请稍后重试' })
+  } finally {
+    deletionRunning.value = false
   }
 }
 

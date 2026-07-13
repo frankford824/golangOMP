@@ -108,6 +108,29 @@ func TestSA_A_I5_DeleteSoftDeletesAndWritesEvent(t *testing.T) {
 	assertEventCount(t, db, fixture.ModuleID, "asset_deleted_by_admin", 1)
 }
 
+func TestSA_A_I5B_CompletedAssetMaintenanceRoleCanDeleteCurrentResource(t *testing.T) {
+	db := r35.MustOpenTestDB(t)
+	defer db.Close()
+	fixture := insertAssetFixture(t, db, 20012, "design", fixtureOptions{})
+	defer cleanupSAATask(t, db, fixture.TaskID)
+	if _, err := db.Exec(`UPDATE tasks SET task_status=? WHERE id=?`, domain.TaskStatusCompleted, fixture.TaskID); err != nil {
+		t.Fatalf("complete fixture task: %v", err)
+	}
+	_, lifecycle, _ := newIntegrationServices(db)
+	auditor := domain.RequestActor{ID: 3012, Roles: []domain.Role{domain.RoleAuditA}}
+	if appErr := lifecycle.Delete(context.Background(), auditor, fixture.AssetID, "remove incorrect completed resource"); appErr != nil {
+		t.Fatalf("completed asset maintenance delete: %v", appErr)
+	}
+	var deletedAt sql.NullTime
+	if err := db.QueryRow(`SELECT deleted_at FROM task_assets WHERE id=?`, fixture.VersionID).Scan(&deletedAt); err != nil {
+		t.Fatalf("select deleted state: %v", err)
+	}
+	if !deletedAt.Valid {
+		t.Fatalf("deleted_at is null after completed asset maintenance delete")
+	}
+	assertEventCount(t, db, fixture.ModuleID, "asset_deleted_by_admin", 1)
+}
+
 func TestSA_A_I6_DownloadAutoCleanedGoneDeletedNotFound(t *testing.T) {
 	db := r35.MustOpenTestDB(t)
 	defer db.Close()

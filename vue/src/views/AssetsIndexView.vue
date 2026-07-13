@@ -174,9 +174,11 @@
       <span v-if="excelPackageStatus" class="ac-batch-status">{{ excelPackageStatus }}</span>
       <span v-if="excelPackageError" class="ac-batch-error">{{ excelPackageError }}</span>
     </div>
-    <div v-if="replacementStatus || replacementError" class="ac-excel-package-bar">
+    <div v-if="replacementStatus || replacementError || deletionStatus || deletionError" class="ac-excel-package-bar">
       <span v-if="replacementStatus" class="ac-batch-status">{{ replacementStatus }}</span>
       <span v-if="replacementError" class="ac-batch-error">{{ replacementError }}</span>
+      <span v-if="deletionStatus" class="ac-batch-status">{{ deletionStatus }}</span>
+      <span v-if="deletionError" class="ac-batch-error">{{ deletionError }}</span>
     </div>
     <main class="ac-grid">
       <div v-if="loading" class="ac-loading-state">
@@ -212,6 +214,7 @@
           </label>
           <div class="ac-card-img-box">
             <AssetPreviewMedia
+              :key="`${assetResourceId(asset)}-${assetPreviewRefreshEpoch}`"
               :asset-id="assetResourceId(asset)"
               :resolved-preview-url="listCardResolvedPreviewUrl(asset)"
               defer-until-visible
@@ -245,10 +248,10 @@
                 {{ assetUsableLabel(asset) }}
               </span>
               <span
-                v-if="assetCanBeReplaced(asset)"
+                v-if="assetCanBeReplaced(asset) || assetCanBeDeleted(asset)"
                 class="ac-editable-pill"
               >
-                可修改资源
+                {{ assetCanBeDeleted(asset) ? '可修改 / 可删除' : '可修改资源' }}
               </span>
               <span
                 class="ac-format-pill"
@@ -317,6 +320,15 @@
               @click.stop="startReplaceAsset(asset)"
             >
               {{ replacementUploading && replacementTargetId === assetResourceId(asset) ? '上传中' : '修改资源' }}
+            </button>
+            <button
+              v-if="assetCanBeDeleted(asset)"
+              type="button"
+              class="ac-card-link-btn ac-card-link-btn--delete"
+              :disabled="deletionRunning"
+              @click.stop="startDeleteAsset(asset)"
+            >
+              {{ deletionRunning && deletionTargetId === assetResourceId(asset) ? '删除中' : '删除资源' }}
             </button>
             <button
               type="button"
@@ -648,6 +660,7 @@
           <h4 class="subsection-title">预览内容</h4>
           <div class="preview-media-shell">
             <AssetPreviewMedia
+              :key="`${selectedAssetIdForPreview || 'selected'}-${assetPreviewRefreshEpoch}`"
               :asset-id="selectedAssetIdForPreview"
               :fallback-src="selectedPreviewFallbackUrl"
               :resolved-preview-url="selectedPreviewFallbackUrl"
@@ -768,6 +781,15 @@
           >
             {{ replacementUploading && replacementTargetId === assetResourceId(selectedAsset) ? '上传中' : '修改资源' }}
           </button>
+          <button
+            v-if="assetCanBeDeleted(selectedAsset)"
+            type="button"
+            class="ac-card-link-btn ac-card-link-btn--delete"
+            :disabled="deletionRunning"
+            @click="startDeleteAsset(selectedAsset)"
+          >
+            {{ deletionRunning && deletionTargetId === assetResourceId(selectedAsset) ? '删除中' : '删除资源' }}
+          </button>
         </div>
 
         <div class="versions-section">
@@ -823,6 +845,35 @@
       </template>
     </BaseModal>
 
+    <AssetReplacementDialog
+      v-model="replacementDialogOpen"
+      :task-no="replacementTargetAsset ? businessTaskNo(replacementTargetAsset) : ''"
+      :sku="replacementTargetAsset ? businessSku(replacementTargetAsset) : ''"
+      :asset-kind="replacementTargetAsset ? assetKind(replacementTargetAsset) : ''"
+      :current-file-name="replacementTargetAsset ? assetFileName(replacementTargetAsset) : ''"
+      :selected-file="replacementSelectedFile"
+      :uploading="replacementUploading"
+      :status="replacementStatus"
+      :error="replacementError"
+      @choose-file="chooseReplacementFile"
+      @confirm="confirmReplacement"
+      @cancel="cancelReplacement"
+    />
+    <AssetDeletionDialog
+      v-model="deletionDialogOpen"
+      v-model:reason="deletionReason"
+      :task-no="deletionTargetAsset ? businessTaskNo(deletionTargetAsset) : ''"
+      :sku="deletionTargetAsset ? businessSku(deletionTargetAsset) : ''"
+      :asset-kind="deletionTargetAsset ? assetKind(deletionTargetAsset) : ''"
+      :current-file-name="deletionTargetAsset ? assetFileName(deletionTargetAsset) : ''"
+      :reason-error="deletionReasonError"
+      :deleting="deletionRunning"
+      :status="deletionStatus"
+      :error="deletionError"
+      @confirm="confirmDeletion"
+      @cancel="cancelDeletion"
+    />
+
     <ImagePreviewLightbox
       v-model="previewLightboxOpen"
       :items="previewLightboxItems"
@@ -840,6 +891,8 @@ import BaseEmptyState from '@/components/base/BaseEmptyState.vue'
 import BaseInput from '@/components/base/BaseInput.vue'
 import BaseModal from '@/components/base/BaseModal.vue'
 import BaseSelect, { type BaseSelectOption } from '@/components/base/BaseSelect.vue'
+import AssetDeletionDialog from '@/components/assets/AssetDeletionDialog.vue'
+import AssetReplacementDialog from '@/components/assets/AssetReplacementDialog.vue'
 import AssetPreviewMedia from '@/components/media/AssetPreviewMedia.vue'
 import AssetDownloadLink from '@/components/media/AssetDownloadLink.vue'
 import ImagePreviewLightbox from '@/components/media/ImagePreviewLightbox.vue'
@@ -863,6 +916,8 @@ import { predictionsApi, type PredictionSuggestion } from '@/services/api/predic
 import { recordExperienceBehavior } from '@/services/experienceBehavior'
 import type { AssetResourceSource, BackendAsset, BackendAssetVersion } from '@/services/apiTypes'
 import { assetReplacementSuccessMessage, assetReplacementUnavailableReason, canReplaceAssetResource } from '@/domain/asset-replacement'
+import { assetDeletionSuccessMessage, assetDeletionUnavailableReason, canDeleteAssetResource } from '@/domain/asset-deletion'
+import { invalidateAssetAccessCache } from '@/domain/asset-access'
 import { formatDateTimeBeijing } from '@/utils/date'
 import { resolveApiUserMessage } from '@/utils/api-message-zh'
 import { userAccountDisplay } from '@/domain/user-display'
@@ -885,7 +940,7 @@ import {
 
 const route = useRoute()
 const router = useRouter()
-const { canAccessPage } = usePermission()
+const { canAccessPage, frontendRoles } = usePermission()
 const loading = ref(false)
 const error = ref('')
 const assets = ref<BackendAsset[]>([])
@@ -932,9 +987,19 @@ const excelPackageError = ref('')
 const excelPackageSelectedFileName = ref('')
 const replacementFileInput = ref<HTMLInputElement | null>(null)
 const replacementTargetAsset = ref<BackendAsset | null>(null)
+const replacementDialogOpen = ref(false)
+const replacementSelectedFile = ref<File | null>(null)
 const replacementUploading = ref(false)
 const replacementStatus = ref('')
 const replacementError = ref('')
+const deletionTargetAsset = ref<BackendAsset | null>(null)
+const deletionDialogOpen = ref(false)
+const deletionReason = ref('')
+const deletionReasonError = ref('')
+const deletionRunning = ref(false)
+const deletionStatus = ref('')
+const deletionError = ref('')
+const assetPreviewRefreshEpoch = ref(0)
 const bulkSearchModalOpen = ref(false)
 const bulkSearchInput = ref('')
 const bulkSearchRunning = ref(false)
@@ -1191,6 +1256,9 @@ const canBatchDownload = computed(
 )
 const replacementTargetId = computed(() =>
   replacementTargetAsset.value ? assetResourceId(replacementTargetAsset.value) : '',
+)
+const deletionTargetId = computed(() =>
+  deletionTargetAsset.value ? assetResourceId(deletionTargetAsset.value) : '',
 )
 
 const EXCEL_PACKAGE_CONCURRENCY = 4
@@ -1544,12 +1612,22 @@ function assetCanBeReplaced(asset: BackendAsset | null | undefined): boolean {
   return canReplaceAssetResource(assetReplacementGate(asset))
 }
 
+function assetCanBeDeleted(asset: BackendAsset | null | undefined): boolean {
+  return canDeleteAssetResource(assetReplacementGate(asset), frontendRoles.value)
+}
+
+function assetMutationId(asset: BackendAsset | null | undefined): string {
+  if (!asset) return ''
+  const record = asset as Record<string, unknown>
+  return positiveID(record.asset_id ?? record.assetId) || positiveID(assetResourceId(asset))
+}
+
 function assetReplacementGate(asset: BackendAsset | null | undefined) {
   const record = (asset ?? {}) as Record<string, unknown>
   return {
     isExternal: Boolean(asset && isExternalAsset(asset)),
     taskId: assetTaskId(asset),
-    assetId: asset ? assetResourceId(asset) : '',
+    assetId: assetMutationId(asset),
     assetKind: rawAssetKind(asset),
     usableState: rawUsableState(record),
     taskStatus: record.task_status ?? record.taskStatus,
@@ -1560,6 +1638,10 @@ function assetReplacementGate(asset: BackendAsset | null | undefined) {
 
 function assetReplacementUnavailableMessage(asset: BackendAsset | null | undefined): string {
   return assetReplacementUnavailableReason(assetReplacementGate(asset))
+}
+
+function assetDeletionUnavailableMessage(asset: BackendAsset | null | undefined): string {
+  return assetDeletionUnavailableReason(assetReplacementGate(asset), frontendRoles.value)
 }
 
 function cardTitle(asset: BackendAsset): string {
@@ -2028,28 +2110,47 @@ function startReplaceAsset(asset: BackendAsset | null | undefined) {
     return
   }
   replacementTargetAsset.value = asset
+  replacementSelectedFile.value = null
   replacementStatus.value = ''
   replacementError.value = ''
+  replacementDialogOpen.value = true
+}
+
+function chooseReplacementFile() {
   if (replacementFileInput.value) {
     replacementFileInput.value.value = ''
     replacementFileInput.value.click()
   }
 }
 
-async function handleReplacementFile(event: Event) {
+function handleReplacementFile(event: Event) {
   const input = event.target as HTMLInputElement | null
   const file = input?.files?.[0]
+  if (file) replacementSelectedFile.value = file
+  if (input) input.value = ''
+}
+
+function cancelReplacement() {
+  if (replacementUploading.value) return
+  replacementDialogOpen.value = false
+  replacementSelectedFile.value = null
+  replacementTargetAsset.value = null
+  replacementStatus.value = ''
+  replacementError.value = ''
+}
+
+async function confirmReplacement() {
+  const file = replacementSelectedFile.value
   const asset = replacementTargetAsset.value
-  if (!file || !asset) return
+  if (!file || !asset || replacementUploading.value) return
 
   const taskId = assetTaskId(asset)
-  const assetId = positiveID(assetResourceId(asset))
+  const assetId = assetMutationId(asset)
   const kind = rawAssetKind(asset)
   const unavailableMessage = assetReplacementUnavailableMessage(asset)
   if (unavailableMessage || !taskId || !assetId || (kind !== 'delivery' && kind !== 'source' && kind !== 'reference')) {
     replacementStatus.value = ''
     replacementError.value = unavailableMessage || '当前资源缺少任务或资产信息，不能在资产中心直接修改'
-    if (input) input.value = ''
     return
   }
 
@@ -2075,14 +2176,87 @@ async function handleReplacementFile(event: Event) {
         },
       },
     )
-    replacementStatus.value = assetReplacementSuccessMessage(assetReplacementGate(asset))
+    const successMessage = assetReplacementSuccessMessage(assetReplacementGate(asset))
+    invalidateAssetAccessCache(String(assetId))
+    assetPreviewRefreshEpoch.value += 1
     await reload()
+    replacementStatus.value = successMessage
+    replacementDialogOpen.value = false
+    replacementSelectedFile.value = null
+    replacementTargetAsset.value = null
   } catch (err) {
     replacementStatus.value = ''
     replacementError.value = resolveApiUserMessage(err, { fallback: '修改资源失败，请稍后重试' })
   } finally {
     replacementUploading.value = false
-    if (input) input.value = ''
+  }
+}
+
+function startDeleteAsset(asset: BackendAsset | null | undefined) {
+  if (!asset) return
+  const unavailableMessage = assetDeletionUnavailableMessage(asset)
+  if (unavailableMessage) {
+    deletionStatus.value = ''
+    deletionError.value = unavailableMessage
+    return
+  }
+  deletionTargetAsset.value = asset
+  deletionReason.value = ''
+  deletionReasonError.value = ''
+  deletionStatus.value = ''
+  deletionError.value = ''
+  deletionDialogOpen.value = true
+}
+
+function cancelDeletion() {
+  if (deletionRunning.value) return
+  deletionDialogOpen.value = false
+  deletionTargetAsset.value = null
+  deletionReason.value = ''
+  deletionReasonError.value = ''
+  deletionStatus.value = ''
+  deletionError.value = ''
+}
+
+async function confirmDeletion() {
+  const target = deletionTargetAsset.value
+  const reason = deletionReason.value.trim()
+  if (!target || deletionRunning.value) return
+  if (!reason) {
+    deletionReasonError.value = '请填写删除原因'
+    return
+  }
+  const unavailableMessage = assetDeletionUnavailableMessage(target)
+  const mutationID = assetMutationId(target)
+  if (unavailableMessage || !mutationID) {
+    deletionError.value = unavailableMessage || '当前资源缺少资产信息，不能删除'
+    return
+  }
+
+  deletionRunning.value = true
+  deletionReasonError.value = ''
+  deletionStatus.value = '正在删除资源及历史版本'
+  deletionError.value = ''
+  try {
+    await assetsApi.deleteAsset(mutationID, { reason })
+    invalidateAssetAccessCache(assetResourceId(target))
+    invalidateAssetAccessCache(mutationID)
+    assetPreviewRefreshEpoch.value += 1
+    if (selectedAssetId.value === assetResourceId(target)) {
+      selectedAssetId.value = ''
+      selectedAssetDetail.value = null
+      detailModalOpen.value = false
+    }
+    await reload()
+    deletionStatus.value = assetDeletionSuccessMessage(assetReplacementGate(target).taskStatus)
+    deletionDialogOpen.value = false
+    deletionTargetAsset.value = null
+    deletionReason.value = ''
+  } catch (err) {
+    deletionStatus.value = ''
+    deletionError.value = resolveApiUserMessage(err, { fallback: '删除资源失败，请稍后重试' })
+  } finally {
+    deletionRunning.value = false
   }
 }
 
@@ -2666,6 +2840,12 @@ function recordAssetPredictionBehavior(item: PredictionSuggestion, action: 'jump
 }
 
 onMounted(() => {
+  if (route.query.asset_notice === 'deleted') {
+    deletionStatus.value = '资源已删除，列表已刷新；所属任务状态未改变'
+    const query = { ...route.query }
+    delete query.asset_notice
+    void router.replace({ query })
+  }
   if (requestedTaskId.value) {
     filters.keyword = requestedTaskId.value
   }
@@ -4694,6 +4874,13 @@ onBeforeUnmount(() => {
   background: rgb(var(--yb-teal)) ;
   border-color: rgb(var(--yb-teal)) ;
   color: rgb(var(--yb-surface)) ;
+}
+
+.ac-card-link-btn--delete,
+.ac-card-link-btn--delete:hover {
+  background: rgb(var(--yb-danger-soft)) ;
+  border-color: rgb(var(--yb-danger-border)) ;
+  color: rgb(var(--yb-danger-text)) ;
 }
 
 .ac-card-link-btn:disabled {

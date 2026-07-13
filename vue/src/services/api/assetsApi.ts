@@ -568,7 +568,7 @@ export const assetsApi = {
   restoreAsset: (assetId: string, signal?: AbortSignal) =>
     http.post(`/v1/assets/${assetId}/restore`, {}, { signal }),
 
-  deleteAsset: (assetId: string, payload: { reason?: string }, signal?: AbortSignal) =>
+  deleteAsset: (assetId: string, payload: { reason: string }, signal?: AbortSignal) =>
     http.delete(`/v1/assets/${assetId}`, { data: payload, signal }),
 
   /**

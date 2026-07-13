@@ -13091,10 +13091,18 @@ paths:
           description: Asset not found
     delete:
       summary: Delete asset
-      description: Hard-delete (OSS DeleteObject + soft-delete DB row). SuperAdmin only. Source V1_ASSET_OWNERSHIP §5.4.
+      description: >-
+        Hard-delete all stored versions (OSS DeleteObject + soft-delete DB rows); reason is required.
+        SuperAdmin may delete assets in supported lifecycle states. For a Completed task, CustomizationReviewer,
+        Audit_A, Audit_B, and AssetManager may delete only the current system reference/source/delivery resource.
+        Active-task workflow permissions are unchanged. Source V1_ASSET_OWNERSHIP §5.4 plus completed-resource
+        maintenance policy.
       tags: [Assets, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-owner-round: R4-SA-A
+      x-rbac-placeholder:
+        auth_mode: session_token_role_and_completed_asset_scope_enforced
+        required_roles: [SuperAdmin, CustomizationReviewer, Audit_A, Audit_B, AssetManager]
       parameters:
         - in: path
           name: asset_id
@@ -13110,7 +13118,7 @@ paths:
       responses:
         '204': { description: Asset deleted }
         '403':
-          description: Not SuperAdmin
+          description: Role or completed-resource maintenance scope denied
           content:
             application/json:
               schema:
@@ -13243,7 +13251,10 @@ paths:
         task is in `PendingCustomizationReview` or `PendingEffectReview`.
         When the task is `Completed`, this route only replaces an active, non-archived current
         `reference`, `source`, or `delivery` resource supplied through `asset_id`; it never
-        creates an unrelated new resource.
+        creates an unrelated new resource. `CustomizationReviewer`, regular audit roles
+        (`Audit_A`/`Audit_B`), and `AssetManager` may perform this completed-task replacement
+        across task department/team scope; active workflow tasks retain their normal workflow
+        and organization-scope authorization.
         During `PendingCustomizationReview` or `PendingEffectReview`, an existing `delivery`
         may be replaced only when its `asset_id` is supplied; creating a second delivery root
         from those review states is rejected.
@@ -13251,7 +13262,7 @@ paths:
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
         auth_mode: session_token_role_enforced
-        required_roles: [Designer, CustomizationOperator, Ops, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector]
+        required_roles: [Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, AssetManager, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector]
       requestBody:
         required: true
         content:
@@ -13282,7 +13293,7 @@ paths:
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
         auth_mode: session_token_role_enforced
-        required_roles: [Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, Warehouse, Admin]
+        required_roles: [Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, Warehouse, AssetManager, Admin]
       parameters:
         - in: path
           name: session_id
@@ -13309,7 +13320,7 @@ paths:
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
         auth_mode: session_token_role_enforced
-        required_roles: [Designer, CustomizationOperator, Ops, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector]
+        required_roles: [Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, AssetManager, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector]
       parameters:
         - in: path
           name: session_id
@@ -13346,7 +13357,7 @@ paths:
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
         auth_mode: session_token_role_enforced
-        required_roles: [Designer, CustomizationOperator, Ops, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector]
+        required_roles: [Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, AssetManager, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector]
       parameters:
         - in: path
           name: session_id

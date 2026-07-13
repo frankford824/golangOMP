@@ -43,6 +43,14 @@ func roleDenied() *domain.AppError {
 	return domain.NewAppError(domain.DenyModuleActionRoleDenied, "SuperAdmin role is required", nil)
 }
 
+func deleteRoleDenied() *domain.AppError {
+	return domain.NewAppError(
+		domain.DenyModuleActionRoleDenied,
+		"asset deletion requires SuperAdmin, or a customization review, audit, or asset management role for a completed task",
+		map[string]interface{}{"deny_code": "completed_asset_delete_role_not_allowed"},
+	)
+}
+
 func requireReason(reason string) *domain.AppError {
 	if strings.TrimSpace(reason) == "" {
 		return domain.ErrReasonRequired

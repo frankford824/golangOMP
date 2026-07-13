@@ -1008,6 +1008,24 @@ func TestTaskActionAuthorizerAssetUploadStageScopeMatrix(t *testing.T) {
 			wantScopeSourceAny: []string{string(TaskActionScopeDepartment), string(TaskActionScopeTeam)},
 			wantScopeSourceNot: string(TaskActionScopeStage),
 		},
+		{
+			name:   "asset_manager_can_replace_completed_asset_across_task_org_scope",
+			action: TaskActionAssetUploadSessionCreate,
+			actor: domain.RequestActor{
+				ID:         303,
+				Roles:      []domain.Role{domain.RoleAssetManager},
+				Department: string(domain.DepartmentCustomizationArt),
+				Team:       "全职组",
+			},
+			task: &domain.Task{
+				ID:              2199,
+				OwnerDepartment: string(domain.DepartmentOperations),
+				OwnerOrgTeam:    "淘系运营三部",
+				TaskStatus:      domain.TaskStatusCompleted,
+			},
+			wantAllowed:     true,
+			wantScopeSource: string(TaskActionScopeAssetMaintenance),
+		},
 	}
 
 	authz := newTaskActionAuthorizer(NewRoleBasedDataScopeResolver(), nil)
@@ -1043,6 +1061,43 @@ func TestTaskActionAuthorizerAssetUploadStageScopeMatrix(t *testing.T) {
 				t.Fatalf("ScopeSource = %q, must not be %q, decision=%+v", decision.ScopeSource, tc.wantScopeSourceNot, decision)
 			}
 		})
+	}
+}
+
+func TestTaskActionAuthorizerCompletedAssetMaintenanceRolesCrossOrg(t *testing.T) {
+	authz := newTaskActionAuthorizer(NewRoleBasedDataScopeResolver(), nil)
+	task := &domain.Task{
+		ID:              2199,
+		OwnerDepartment: string(domain.DepartmentOperations),
+		OwnerOrgTeam:    "淘系运营三部",
+		TaskStatus:      domain.TaskStatusCompleted,
+	}
+	for _, role := range []domain.Role{
+		domain.RoleCustomizationReviewer,
+		domain.RoleAuditA,
+		domain.RoleAuditB,
+		domain.RoleAssetManager,
+	} {
+		role := role
+		for _, action := range []TaskAction{
+			TaskActionAssetUploadSessionCreate,
+			TaskActionAssetUploadSessionComplete,
+			TaskActionAssetUploadSessionCancel,
+		} {
+			action := action
+			t.Run(string(role)+"_"+string(action), func(t *testing.T) {
+				ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{
+					ID:         303,
+					Roles:      []domain.Role{role},
+					Department: string(domain.DepartmentCustomizationArt),
+					Team:       "全职组",
+				})
+				decision := authz.EvaluateTaskActionPolicy(ctx, action, task, "", "")
+				if !decision.Allowed || decision.ScopeSource != string(TaskActionScopeAssetMaintenance) {
+					t.Fatalf("decision = %+v, want completed asset-maintenance allow", decision)
+				}
+			})
+		}
 	}
 }
 

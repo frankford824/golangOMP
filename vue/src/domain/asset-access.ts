@@ -37,6 +37,11 @@ const downloadMetaInflight = new Map<string, Promise<AssetDownloadMetaResult>>()
 const PREVIEW_META_TTL_MS = 60_000
 const previewMetaCache = new Map<string, { result: AssetPreviewMetaResult; expiresAt: number }>()
 const previewMetaInflight = new Map<string, Promise<AssetPreviewMetaResult>>()
+const assetAccessGeneration = new Map<string, number>()
+
+function accessGeneration(id: string): number {
+  return assetAccessGeneration.get(id) ?? 0
+}
 
 function readPreviewMetaCache(id: string): AssetPreviewMetaResult | undefined {
   const hit = previewMetaCache.get(id)
@@ -77,6 +82,20 @@ export function primeAssetDownloadMetaCache(assetId: string, responseBody: unkno
   const downloadUrl = normalizeDisplayUrl(pickMetaUrl(meta))
   if (!downloadUrl) return
   writeDownloadCache(id, { status: 'ok', downloadUrl })
+}
+
+/**
+ * 资源替换成功后清除同一资产根的预览/下载短缓存。
+ * 资产 id 不会随版本变化；若不主动失效，页面可能在 TTL 内继续展示旧版本地址。
+ */
+export function invalidateAssetAccessCache(assetId: string): void {
+  const id = normalizePreviewAssetId(assetId)
+  if (!id) return
+  assetAccessGeneration.set(id, accessGeneration(id) + 1)
+  previewMetaCache.delete(id)
+  downloadMetaCache.delete(id)
+  previewMetaInflight.delete(id)
+  downloadMetaInflight.delete(id)
 }
 
 function unwrapDownloadPayload(body: unknown): AssetDownloadMeta | undefined {
@@ -137,6 +156,7 @@ export async function fetchAssetPreviewMeta(
   if (cached) return cached
   const inflight = previewMetaInflight.get(id)
   if (inflight) return inflight
+  const generation = accessGeneration(id)
 
   const p = (async (): Promise<AssetPreviewMetaResult> => {
     try {
@@ -149,7 +169,7 @@ export async function fetchAssetPreviewMeta(
           displayUrl: url,
           downloadUrl: normalizeDisplayUrl(pickMetaUrl(meta)),
         }
-        writePreviewMetaCache(id, out)
+        if (accessGeneration(id) === generation) writePreviewMetaCache(id, out)
         return out
       }
       const raw = meta as Record<string, unknown> | undefined
@@ -209,13 +229,14 @@ export async function fetchAssetDownloadMetaResolved(
   if (cached) return cached
   const inflight = downloadMetaInflight.get(id)
   if (inflight) return inflight
+  const generation = accessGeneration(id)
 
   const p = (async (): Promise<AssetDownloadMetaResult> => {
     try {
       const res = await assetsApi.getAssetDownloadMeta(id, signal)
       const meta = unwrapDownloadPayload(res.data)
       const out = buildDownloadMetaResult(meta)
-      if (out.status === 'ok') writeDownloadCache(id, out)
+      if (out.status === 'ok' && accessGeneration(id) === generation) writeDownloadCache(id, out)
       return out
     } catch (e) {
       if (axios.isAxiosError(e)) {

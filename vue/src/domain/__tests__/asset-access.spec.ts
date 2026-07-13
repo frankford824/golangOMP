@@ -10,7 +10,7 @@ vi.mock('@/services/api/assetsApi', () => ({
   },
 }))
 
-import { fetchAssetPreviewMeta } from '@/domain/asset-access'
+import { fetchAssetPreviewMeta, invalidateAssetAccessCache } from '@/domain/asset-access'
 
 beforeEach(() => {
   getAssetPreviewMetaMock.mockReset()
@@ -42,6 +42,20 @@ describe('fetchAssetPreviewMeta', () => {
 
     expect(ready.status).toBe('ok')
     expect(ready.displayUrl).toBe('https://oss.example.com/previews/990041.webp')
+    expect(getAssetPreviewMetaMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('invalidates preview metadata after a resource version is replaced', async () => {
+    getAssetPreviewMetaMock
+      .mockResolvedValueOnce({ data: { data: { download_url: 'https://oss.example.com/previews/990042-v1.webp' } } })
+      .mockResolvedValueOnce({ data: { data: { download_url: 'https://oss.example.com/previews/990042-v2.webp' } } })
+
+    const before = await fetchAssetPreviewMeta('990042')
+    invalidateAssetAccessCache('990042')
+    const after = await fetchAssetPreviewMeta('990042')
+
+    expect(before.displayUrl).toContain('v1.webp')
+    expect(after.displayUrl).toContain('v2.webp')
     expect(getAssetPreviewMetaMock).toHaveBeenCalledTimes(2)
   })
 })

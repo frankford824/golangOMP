@@ -278,12 +278,12 @@ curl -X POST https://api.example.com/v1/assets/excel-package/preview-file \
 支持方法: GET, DELETE。
 
 - `GET`: Returns one asset resource by id including full version list. Source V1_ASSET_OWNERSHIP §5.2.
-- `DELETE`: Hard-delete (OSS DeleteObject + soft-delete DB row). SuperAdmin only. Source V1_ASSET_OWNERSHIP §5.4.
+- `DELETE`: Hard-delete all stored versions (OSS DeleteObject + soft-delete DB rows); reason is required. SuperAdmin may delete assets in supported lifecycle states. For a Completed task, CustomizationReviewer, Audit_A, Audit_B, and AssetManager may delete only the current system reference/source/delivery resource. Active-task workflow permissions are unchanged. Source V1_ASSET_OWNERSHIP §5.4 plus completed-resource maintenance policy.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
 - `GET` 允许角色: Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, Warehouse, Admin。
-- `DELETE` 允许角色: 已登录 / scope-aware。
+- `DELETE` 允许角色: SuperAdmin, CustomizationReviewer, Audit_A, Audit_B, AssetManager。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 #### GET 细节
@@ -349,7 +349,7 @@ Content-Type: `application/json`
 ##### 错误码
 | HTTP | code | deny_code | 说明 |
 |---|---|---|---|
-| 403 | 见 `error.code` | 见 `deny_code` | Not SuperAdmin |
+| 403 | 见 `error.code` | 见 `deny_code` | Role or completed-resource maintenance scope denied |
 | 404 | 见 `error.code` | 见 `deny_code` | Asset not found |
 
 ##### curl 示例
@@ -534,11 +534,11 @@ curl -X GET https://api.example.com/v1/assets/<asset_id>/preview \
 ### 简介
 支持方法: POST。
 
-- `POST`: Canonical frontend entry for asset upload session creation. Backend decides whether to use single-part or multipart upload and returns the upload strategy plus completion/cancel endpoints. Reference uploads are allowed while a task is still `PendingAssign`, so operations users can fill in reference material before a designer self-claims or is assigned. `CustomizationReviewer` is not a generic asset uploader; it may use this route only through `task.customization.review.asset_upload` for uploaded `source` assets while the task is in `PendingCustomizationReview` or `PendingEffectReview`. When the task is `Completed`, this route only replaces an active, non-archived current `reference`, `source`, or `delivery` resource supplied through `asset_id`; it never creates an unrelated new resource. During `PendingCustomizationReview` or `PendingEffectReview`, an existing `delivery` may be replaced only when its `asset_id` is supplied; creating a second delivery root from those review states is rejected.
+- `POST`: Canonical frontend entry for asset upload session creation. Backend decides whether to use single-part or multipart upload and returns the upload strategy plus completion/cancel endpoints. Reference uploads are allowed while a task is still `PendingAssign`, so operations users can fill in reference material before a designer self-claims or is assigned. `CustomizationReviewer` is not a generic asset uploader; it may use this route only through `task.customization.review.asset_upload` for uploaded `source` assets while the task is in `PendingCustomizationReview` or `PendingEffectReview`. When the task is `Completed`, this route only replaces an active, non-archived current `reference`, `source`, or `delivery` resource supplied through `asset_id`; it never creates an unrelated new resource. `CustomizationReviewer`, regular audit roles (`Audit_A`/`Audit_B`), and `AssetManager` may perform this completed-task replacement across task department/team scope; active workflow tasks retain their normal workflow and organization-scope authorization. During `PendingCustomizationReview` or `PendingEffectReview`, an existing `delivery` may be replaced only when its `asset_id` is supplied; creating a second delivery root from those review states is rejected.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `POST` 允许角色: Designer, CustomizationOperator, Ops, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector。
+- `POST` 允许角色: Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, AssetManager, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -616,7 +616,7 @@ curl -X POST https://api.example.com/v1/assets/upload-sessions \
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `GET` 允许角色: Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, Warehouse, Admin。
+- `GET` 允许角色: Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, Warehouse, AssetManager, Admin。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -672,7 +672,7 @@ curl -X GET https://api.example.com/v1/assets/upload-sessions/<session_id> \
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `POST` 允许角色: Designer, CustomizationOperator, Ops, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector。
+- `POST` 允许角色: Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, AssetManager, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -757,7 +757,7 @@ curl -X POST https://api.example.com/v1/assets/upload-sessions/<session_id>/comp
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `POST` 允许角色: Designer, CustomizationOperator, Ops, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector。
+- `POST` 允许角色: Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, AssetManager, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
