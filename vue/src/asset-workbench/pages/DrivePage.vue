@@ -43,6 +43,12 @@ import DriveThumb from '@aw/shared/drive/DriveThumb.vue'
 import DriveUploadDialog from '@aw/shared/drive/DriveUploadDialog.vue'
 import MaterialListThumb from '@aw/shared/materials/MaterialListThumb.vue'
 import { matchesClientMaterialQuery } from '@aw/shared/materials/clientMaterialSearch'
+import {
+  filtersForLocatedMaterial,
+  materialBrowseRootForSource,
+  reconcileMaterialFilterState,
+  type MaterialFilterDimension,
+} from '@aw/shared/materials/materialFilterState'
 import IconfontActionIcon from '@aw/shared/icons/IconfontActionIcon.vue'
 import WorkbenchFolderIcon from '@aw/shared/icons/WorkbenchFolderIcon.vue'
 import WorkbenchPreviewDialog from '@aw/shared/preview/WorkbenchPreviewDialog.vue'
@@ -56,7 +62,12 @@ import type {
   WorkbenchSpreadsheetSource,
   WorkbenchSpreadsheetValidation,
 } from '@aw/shared/spreadsheet/types'
-import { canAttemptSystemAssetPreview, materialAssetKey, resolvedSystemAssetThumbnailUrl } from '@aw/shared/materials/systemAssetPreview'
+import {
+  canAttemptSystemAssetPreview,
+  materialAssetKey,
+  resolvedSystemAssetPreviewUrl,
+  resolvedSystemAssetThumbnailUrl,
+} from '@aw/shared/materials/systemAssetPreview'
 
 type DriveMode = 'uploads' | 'directories' | 'operational'
 type SearchScope = 'all' | 'operational' | 'files' | 'orders'
@@ -236,6 +247,7 @@ let searchDebounceTimer: number | null = null
 let archivePreviewObjectUrl = ''
 let archivePreviewRequestSeq = 0
 const searchPreviewLoadingKeys = new Set<string>()
+const materialPreviewFailedUrls = new Map<string, string>()
 
 function revokeArchivePreviewObjectUrl() {
   archivePreviewRequestSeq += 1
@@ -650,9 +662,7 @@ function materialSourceForPath(path?: string): MaterialSourceFilter | '' {
 
 function materialDefaultFolderPathForSource(source = materialSourceFilter.value): string {
   if (materialBusinessLaneFilter.value !== 'all') return '/系统资源'
-  if (source === 'system') return '/系统资源'
-  if (source === 'external') return '/quark'
-  return ''
+  return materialBrowseRootForSource(source)
 }
 
 function materialRequestSourceForPath(path?: string): MaterialSourceFilter {
@@ -1056,6 +1066,7 @@ function materialFromOverview(row: OverviewSearchRow): SystemAssetRow {
     scope_sku_code: stringFromMeta(row, 'scope_sku_code') || row.secondary_code || '',
     sku_code: stringFromMeta(row, 'sku_code'),
     primary_sku_code: stringFromMeta(row, 'primary_sku_code'),
+    business_lane: stringFromMeta(row, 'business_lane'),
     file_name: filename,
     original_filename: filename,
     mime_type: stringFromMeta(row, 'mime_type'),
@@ -1348,6 +1359,7 @@ function materialFromClient(row: ClientMaterialRow): SystemAssetRow {
     scope_sku_code: row.scope_sku_code,
     sku_code: row.sku_code,
     primary_sku_code: row.primary_sku_code,
+    business_lane: row.business_lane,
     file_name: row.filename_snapshot,
     original_filename: row.filename_snapshot,
     mime_type: row.mime_type_snapshot,
@@ -1365,6 +1377,7 @@ function materialWithClientPublication(asset: SystemAssetRow, row: ClientMateria
     file_name: published.file_name || asset.file_name,
     original_filename: published.original_filename || asset.original_filename,
     mime_type: published.mime_type || asset.mime_type,
+    business_lane: published.business_lane || asset.business_lane,
     preview_url: asset.preview_url,
     download_url: asset.download_url,
     origin_path: asset.origin_path,
@@ -1690,12 +1703,6 @@ function openMaterialFolderParent() {
   openMaterialFolder(selectedMaterialFolderParent.value)
 }
 
-async function revealMaterialInFolder(asset: SystemAssetRow) {
-  await loadMaterialFolder(materialDirectoryPath(asset), { expandTree: true })
-  upsertMaterialItem(asset)
-  selectMaterial(asset)
-}
-
 const detailOpen = computed(() =>
   activeMode.value === 'operational' ? !!activeMaterial.value : !!selectedFile.value,
 )
@@ -1779,6 +1786,9 @@ async function ensureSearchResultMaterialPreview(asset: SystemAssetRow) {
     return
   }
   searchPreviewLoadingKeys.add(key)
+  const loading = new Set(materialPreviewLoadingIds.value)
+  loading.add(key)
+  materialPreviewLoadingIds.value = loading
   try {
     const meta = await previewMaterial(asset)
     const url = meta.preview_url || ''
@@ -1787,6 +1797,9 @@ async function ensureSearchResultMaterialPreview(asset: SystemAssetRow) {
     /* Search thumbnails are opportunistic; detail preview still reports errors. */
   } finally {
     searchPreviewLoadingKeys.delete(key)
+    const next = new Set(materialPreviewLoadingIds.value)
+    next.delete(key)
+    materialPreviewLoadingIds.value = next
   }
 }
 
@@ -1834,13 +1847,23 @@ async function locateSearchRow(row: OverviewSearchRow) {
     suppressMaterialAutoload.value = true
     try {
       activeMode.value = 'operational'
-      await loadMaterials(row.title || row.primary_code || materialQuery.value)
+      const target = materialFromOverview(row)
+      const nextFilters = filtersForLocatedMaterial(
+        materialAssetSource(target),
+        materialBusinessLaneOf(target),
+        materialFormatCategoryOf(target),
+      )
+      materialSourceFilter.value = nextFilters.source
+      materialBusinessLaneFilter.value = nextFilters.businessLane
+      materialFormatFilter.value = nextFilters.format
+      resetMaterialScopeSnapshot()
+      await loadMaterialFolder(materialDirectoryPath(target), { expandTree: true })
       const found = materialItems.value.find((asset) => materialMatchesOverviewRow(asset, row))
-      const target = found || materialFromOverview(row)
-      if (!found) upsertMaterialItem(target)
-      await revealMaterialInFolder(target)
+      const located = found || target
+      if (!found) upsertMaterialItem(located)
+      selectMaterial(located)
       searchActive.value = false
-      notice.value = `已定位目录：${materialDirectoryPath(target) || '全部素材'} · ${materialFolderFileName(target)}`
+      notice.value = `已定位目录：${materialDirectoryPath(located) || '全部素材'} · ${materialFolderFileName(located)}`
     } finally {
       suppressMaterialAutoload.value = false
     }
@@ -2455,13 +2478,18 @@ function loadMoreMaterials() {
   void loadMaterialFolder(selectedMaterialFolderPath.value, { expandTree: false, append: true })
 }
 
-function refreshMaterialsForFilters() {
+function refreshMaterialsForFilters(changed: MaterialFilterDimension) {
   materialSourceFilter.value = normalizeMaterialSourceFilter(materialSourceFilter.value)
   materialFormatFilter.value = normalizeMaterialFormatFilter(materialFormatFilter.value)
   materialBusinessLaneFilter.value = normalizeMaterialBusinessLaneFilter(materialBusinessLaneFilter.value)
-  if (materialBusinessLaneFilter.value !== 'all' && materialSourceFilter.value !== 'system') {
-    materialSourceFilter.value = 'system'
-  }
+  const next = reconcileMaterialFilterState({
+    source: materialSourceFilter.value,
+    businessLane: materialBusinessLaneFilter.value,
+    format: materialFormatFilter.value,
+  }, changed)
+  materialSourceFilter.value = next.source
+  materialBusinessLaneFilter.value = next.businessLane
+  materialFormatFilter.value = next.format
   resetMaterialScopeSnapshot()
   if (materialQuery.value.trim()) {
     void loadMaterials(materialQuery.value)
@@ -2497,13 +2525,13 @@ async function openMaterialPreview(asset: SystemAssetRow) {
       previewEmptyLabel.value = '正在生成预览，完成后会自动显示'
       meta = await waitForPreparedPreview(meta, () => assetWorkbenchApi.previewClientMaterial(asset.material_id as number))
     }
-    const url = meta.preview_url || meta.download_url || ''
+    const url = resolvedSystemAssetPreviewUrl(meta)
     if (url) {
-      materialPreviewUrls.value = { ...materialPreviewUrls.value, [key]: url }
+      cacheMaterialPreview(key, url)
       previewUrl.value = url
       previewEmptyLabel.value = ''
     } else {
-      previewEmptyLabel.value = '当前素材只能下载'
+      previewEmptyLabel.value = '预览图暂未生成，可下载原文件查看'
     }
     previewRows.value = materialPreviewRows(asset, meta)
   } catch (err) {
@@ -2661,8 +2689,27 @@ function stopBatchJobPolling() {
 }
 
 function cacheMaterialPreview(key: string, url: string) {
-  if (!key || !url || materialPreviewUrls.value[key]) return
+  if (!key || !url || materialPreviewUrls.value[key] === url) return
   materialPreviewUrls.value = { ...materialPreviewUrls.value, [key]: url }
+}
+
+function forgetMaterialPreview(key: string) {
+  if (!key || !materialPreviewUrls.value[key]) return
+  const next = { ...materialPreviewUrls.value }
+  delete next[key]
+  materialPreviewUrls.value = next
+}
+
+function handleMaterialPreviewFailure(asset: SystemAssetRow, failedUrl = '') {
+  const key = materialAssetKey(asset)
+  if (!key) return
+  const cachedUrl = materialPreviewUrls.value[key] || ''
+  if (failedUrl && cachedUrl && failedUrl !== cachedUrl) return
+  const rejectedUrl = failedUrl || cachedUrl
+  if (rejectedUrl && materialPreviewFailedUrls.get(key) === rejectedUrl) return
+  if (rejectedUrl) materialPreviewFailedUrls.set(key, rejectedUrl)
+  forgetMaterialPreview(key)
+  void ensureSearchResultMaterialPreview(asset)
 }
 
 function ensureMaterialPreview(asset: SystemAssetRow) {
@@ -3185,6 +3232,7 @@ onBeforeUnmount(() => {
               :asset="searchHitMaterial(hit)"
               :cached-url="materialPreviewUrls[materialAssetKey(searchHitMaterial(hit))]"
               @preview-needed="ensureMaterialPreview(searchHitMaterial(hit))"
+              @preview-failed="handleMaterialPreviewFailure(searchHitMaterial(hit), $event)"
             />
             <DriveThumb
               v-else-if="searchHitDriveFileID(hit)"
@@ -3406,19 +3454,19 @@ onBeforeUnmount(() => {
                 <div class="aw-material-toolbar__filters" aria-label="素材筛选条件">
                   <label class="aw-material-toolbar__filter">
                     <span>来源</span>
-                    <select v-model="materialSourceFilter" aria-label="素材来源" @change="refreshMaterialsForFilters">
+                    <select v-model="materialSourceFilter" aria-label="素材来源" @change="refreshMaterialsForFilters('source')">
                       <option v-for="option in materialSourceOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
                     </select>
                   </label>
                   <label class="aw-material-toolbar__filter">
                     <span>分类</span>
-                    <select v-model="materialBusinessLaneFilter" aria-label="素材分类" @change="refreshMaterialsForFilters">
+                    <select v-model="materialBusinessLaneFilter" aria-label="素材分类" @change="refreshMaterialsForFilters('business_lane')">
                       <option v-for="option in materialBusinessLaneOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
                     </select>
                   </label>
                   <label class="aw-material-toolbar__filter">
                     <span>格式</span>
-                    <select v-model="materialFormatFilter" aria-label="素材格式" @change="refreshMaterialsForFilters">
+                    <select v-model="materialFormatFilter" aria-label="素材格式" @change="refreshMaterialsForFilters('format')">
                       <option v-for="option in materialFormatOptions" :key="option.value" :value="option.value">{{ option.label }}</option>
                     </select>
                   </label>
@@ -3783,6 +3831,7 @@ onBeforeUnmount(() => {
                           :asset="asset"
                           :cached-url="materialPreviewUrls[materialAssetKey(asset)]"
                           @preview-needed="ensureMaterialPreview(asset)"
+                          @preview-failed="handleMaterialPreviewFailure(asset, $event)"
                         />
                       </span>
                       <span class="aw-material-row__body">
@@ -3929,7 +3978,13 @@ onBeforeUnmount(() => {
             </button>
           </div>
           <button class="aw-drive__detail-preview" type="button" @click="openMaterialPreview(activeMaterial)">
-            <img v-if="activeMaterialPreviewUrl" :src="activeMaterialPreviewUrl" :alt="materialDisplayTitle(activeMaterial)" loading="lazy" />
+            <img
+              v-if="activeMaterialPreviewUrl"
+              :src="activeMaterialPreviewUrl"
+              :alt="materialDisplayTitle(activeMaterial)"
+              loading="lazy"
+              @error="handleMaterialPreviewFailure(activeMaterial, activeMaterialPreviewUrl)"
+            />
             <span v-else-if="activeMaterialPreviewLoading" class="aw-drive-thumb__ph" aria-hidden="true" />
             <ImageDown v-else :size="30" aria-hidden="true" />
             <span class="aw-drive__detail-hint">点击预览</span>

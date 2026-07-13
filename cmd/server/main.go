@@ -521,6 +521,7 @@ func main() {
 		assetworkbench.WithOSSDirect(ossDirectSvc),
 		assetworkbench.WithPreviewRenderer(service.NewExternalAssetPreviewRenderer()),
 		assetworkbench.WithSystemAssetSearcher(globalAssetCenterSvc),
+		assetworkbench.WithSystemAssetPreviewer(taskAssetCenterSvc),
 	}
 	if sessionRevoker, ok := userSessionRepo.(assetworkbench.UserSessionRevoker); ok {
 		assetWorkbenchOptions = append(assetWorkbenchOptions, assetworkbench.WithUserSessionRepository(sessionRevoker))

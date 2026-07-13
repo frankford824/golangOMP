@@ -24784,6 +24784,7 @@ paths:
                         scope_sku_code: { type: string }
                         sku_code: { type: string }
                         primary_sku_code: { type: string }
+                        business_lane: { type: string, enum: [normal, customization] }
                         preview_available: { type: boolean }
                         enabled: { type: boolean }
                         sort_order: { type: integer }

@@ -4,6 +4,7 @@ import { FileArchive, FileImage, FileText } from 'lucide-vue-next'
 
 import type { SystemAssetRow } from '@aw/shared/api/assetWorkbenchApi'
 import {
+  materialAssetKey,
   resolvedSystemAssetThumbnailUrl,
 } from '@aw/shared/materials/systemAssetPreview'
 
@@ -14,6 +15,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   previewNeeded: []
+  previewFailed: [url: string]
 }>()
 
 const previewUrl = shallowRef(resolvedSystemAssetThumbnailUrl(props.asset, props.cachedUrl))
@@ -39,6 +41,13 @@ function requestPreview() {
   emit('previewNeeded')
 }
 
+function handlePreviewError() {
+  const failedUrl = previewUrl.value
+  previewUrl.value = ''
+  requested = false
+  emit('previewFailed', failedUrl)
+}
+
 function observeVisibility() {
   observer?.disconnect()
   observer = null
@@ -55,7 +64,11 @@ function observeVisibility() {
   observer.observe(root.value)
 }
 
-watch(() => [props.asset, props.cachedUrl], async () => {
+watch([
+  () => materialAssetKey(props.asset),
+  () => props.asset.preview_url,
+  () => props.cachedUrl,
+], async () => {
   syncResolvedPreview()
   if (previewUrl.value) {
     observer?.disconnect()
@@ -72,7 +85,7 @@ onBeforeUnmount(() => observer?.disconnect())
 
 <template>
   <span ref="root" class="aw-drive-thumb aw-drive-thumb--sm">
-    <img v-if="previewUrl" :src="previewUrl" :alt="asset.original_filename || asset.file_name || ''" loading="lazy" />
+    <img v-if="previewUrl" :src="previewUrl" :alt="asset.original_filename || asset.file_name || ''" loading="lazy" @error="handlePreviewError" />
     <component :is="iconFor()" v-else :size="18" aria-hidden="true" />
   </span>
 </template>

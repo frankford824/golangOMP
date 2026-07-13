@@ -1006,6 +1006,19 @@ type systemAssetPreviewDownloaderStub struct {
 	previewErr   *domain.AppError
 }
 
+type systemAssetPreviewerStub struct {
+	previewCalls int
+	previewIDs   []int64
+	previewInfo  *domain.AssetDownloadInfo
+}
+
+func (s *systemAssetPreviewerStub) GetAssetPreviewInfoByID(_ context.Context, assetID int64) (*domain.AssetDownloadInfo, *domain.AppError) {
+	s.previewCalls++
+	s.previewIDs = append(s.previewIDs, assetID)
+	copyInfo := *s.previewInfo
+	return &copyInfo, nil
+}
+
 func (s *systemAssetPreviewDownloaderStub) GetAssetPreviewInfoByID(_ context.Context, assetID int64) (*domain.AssetDownloadInfo, *domain.AppError) {
 	s.previewCalls++
 	s.previewIDs = append(s.previewIDs, assetID)
@@ -1326,6 +1339,15 @@ func (s *externalMaterialProviderStub) GetExternalDetail(_ context.Context, exte
 	s.detailCalls = append(s.detailCalls, externalID)
 	if s.details != nil && s.details[externalID] != nil {
 		detail := *s.details[externalID]
+		return &detail, nil
+	}
+	return nil, domain.ErrNotFound
+}
+
+func (s *externalMaterialProviderStub) GetDetail(_ context.Context, assetID int64) (*assetcenter.AssetDetail, *domain.AppError) {
+	s.detailCalls = append(s.detailCalls, assetID)
+	if s.details != nil && s.details[assetID] != nil {
+		detail := *s.details[assetID]
 		return &detail, nil
 	}
 	return nil, domain.ErrNotFound
@@ -3198,6 +3220,37 @@ func TestSystemAssetPreviewUsesSharedPreviewerBeforeDownload(t *testing.T) {
 	}
 }
 
+func TestSystemAssetPreviewUsesSeparatelyWiredDerivedPreviewer(t *testing.T) {
+	url := "https://assets.example.com/system/derived-preview.webp"
+	downloader := &systemAssetDownloaderStub{}
+	previewer := &systemAssetPreviewerStub{previewInfo: &domain.AssetDownloadInfo{
+		DownloadMode:     domain.AssetDownloadModeDirect,
+		DownloadURL:      &url,
+		Filename:         "preview.webp",
+		MimeType:         "image/webp",
+		PreviewAvailable: true,
+	}}
+	svc := NewService(
+		Config{Timezone: "Asia/Shanghai"},
+		WithSystemAssetDownloader(downloader),
+		WithSystemAssetPreviewer(previewer),
+	)
+
+	meta, appErr := svc.SystemAssetPreview(context.Background(), domain.RequestActor{ID: 1, Roles: []domain.Role{domain.RoleAssetManager}}, 14354)
+	if appErr != nil {
+		t.Fatalf("SystemAssetPreview() error = %+v", appErr)
+	}
+	if meta == nil || meta.PreviewURL != url || meta.MimeType != "image/webp" || !meta.PreviewAvailable {
+		t.Fatalf("preview meta = %+v, want derived WebP", meta)
+	}
+	if previewer.previewCalls != 1 || len(previewer.previewIDs) != 1 || previewer.previewIDs[0] != 14354 {
+		t.Fatalf("preview calls = %d ids=%+v, want asset 14354", previewer.previewCalls, previewer.previewIDs)
+	}
+	if downloader.downloadCalls != 0 {
+		t.Fatalf("downloadCalls = %d, want 0", downloader.downloadCalls)
+	}
+}
+
 func TestOverviewSearchReturnsEmptyItemsInsteadOfNil(t *testing.T) {
 	workbenchRepo := &clientMaterialRepo{materials: map[int64]*domain.AssetWorkbenchClientMaterial{}}
 	svc := NewService(
@@ -3241,6 +3294,7 @@ func TestOverviewSearchMatchesIndexedClientMaterialSKU(t *testing.T) {
 				ScopeSKUCode:   "DZC000027",
 				SKUCode:        "DZC000027",
 				PrimarySKUCode: "DZC000027",
+				BusinessLane:   domain.TaskBusinessLaneCustomization,
 			}},
 			Total: 1,
 			Page:  1,
@@ -3267,6 +3321,13 @@ func TestOverviewSearchMatchesIndexedClientMaterialSKU(t *testing.T) {
 	if got := result.Items[0].SecondaryCode; got != "DZC000027" {
 		t.Fatalf("OverviewSearch() secondary_code = %q, want DZC000027", got)
 	}
+	var resultMeta map[string]interface{}
+	if err := json.Unmarshal(result.Items[0].Meta, &resultMeta); err != nil {
+		t.Fatalf("OverviewSearch() meta decode: %v", err)
+	}
+	if got := resultMeta["business_lane"]; got != string(domain.TaskBusinessLaneCustomization) {
+		t.Fatalf("OverviewSearch() business_lane = %#v, want customization", got)
+	}
 	if provider.searchCalls != 1 {
 		t.Fatalf("OverviewSearch() indexed search calls = %d, want 1", provider.searchCalls)
 	}
@@ -3281,6 +3342,32 @@ func TestOverviewSearchMatchesIndexedClientMaterialSKU(t *testing.T) {
 	}
 	if provider.searchCalls != 1 {
 		t.Fatalf("OverviewSearch(title) indexed search calls = %d, want raw snapshot match without another indexed search", provider.searchCalls)
+	}
+}
+
+func TestListClientMaterialsHydratesSystemBusinessLane(t *testing.T) {
+	workbenchRepo := &clientMaterialRepo{materials: map[int64]*domain.AssetWorkbenchClientMaterial{
+		982: {ID: 982, AssetID: 14354, SourceType: string(domain.AssetResourceSourceSystem), SourceRef: "14354", Enabled: true},
+	}}
+	provider := &externalMaterialProviderStub{details: map[int64]*assetcenter.AssetDetail{
+		14354: {ID: 14354, BusinessLane: domain.TaskBusinessLaneCustomization},
+	}}
+	svc := NewService(
+		Config{Timezone: "Asia/Shanghai"},
+		WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}),
+		WithSystemAssetSearcher(provider),
+	)
+
+	items, appErr := svc.ListClientMaterials(
+		context.Background(),
+		domain.RequestActor{ID: 77, Roles: []domain.Role{domain.RoleAssetSubmitter}},
+		false,
+	)
+	if appErr != nil {
+		t.Fatalf("ListClientMaterials() error = %+v", appErr)
+	}
+	if len(items) != 1 || items[0].BusinessLane != string(domain.TaskBusinessLaneCustomization) {
+		t.Fatalf("ListClientMaterials() items = %+v, want customization lane", items)
 	}
 }
 

@@ -6638,6 +6638,20 @@ body.aw-submission-dialog-locked {
   min-height: 0;
 }
 
+.aw-drive__shell.has-drawer .aw-material-drive {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.aw-drive__shell.has-drawer .aw-material-drive__folders {
+  display: none;
+}
+
+@media (max-width: 1400px) {
+  .aw-drive__shell.has-drawer .aw-drive-side {
+    display: none;
+  }
+}
+
 .aw-material-drive__folders,
 .aw-material-drive__files {
   min-width: 0;

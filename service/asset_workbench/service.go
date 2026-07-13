@@ -217,6 +217,12 @@ func WithSystemAssetDownloader(downloader SystemAssetDownloader) Option {
 	}
 }
 
+func WithSystemAssetPreviewer(previewer SystemAssetPreviewer) Option {
+	return func(s *Service) {
+		s.systemPreviews = previewer
+	}
+}
+
 type BootstrapResponse struct {
 	App                    string                        `json:"app"`
 	Version                string                        `json:"version"`
@@ -9977,6 +9983,7 @@ func (s *Service) searchClientMaterialsForOverview(ctx context.Context, keyword 
 					copyMaterial.ScopeSKUCode = strings.TrimSpace(asset.ScopeSKUCode)
 					copyMaterial.SKUCode = strings.TrimSpace(asset.SKUCode)
 					copyMaterial.PrimarySKUCode = strings.TrimSpace(asset.PrimarySKUCode)
+					copyMaterial.BusinessLane = string(asset.BusinessLane)
 					if !clientMaterialMatchesOverviewKeyword(&copyMaterial, keyword) {
 						continue
 					}
@@ -10059,6 +10066,7 @@ func overviewRowFromClientMaterial(material *domain.AssetWorkbenchClientMaterial
 			"scope_sku_code":    material.ScopeSKUCode,
 			"sku_code":          material.SKUCode,
 			"primary_sku_code":  material.PrimarySKUCode,
+			"business_lane":     material.BusinessLane,
 		}),
 	}
 	row.Locate = overviewLocate(row)
@@ -10116,6 +10124,7 @@ func overviewRowFromSystemAsset(asset *assetcenter.AssetDetail) *domain.AssetWor
 			"scope_sku_code":      asset.ScopeSKUCode,
 			"sku_code":            asset.SKUCode,
 			"primary_sku_code":    asset.PrimarySKUCode,
+			"business_lane":       asset.BusinessLane,
 			"preview_available":   asset.PreviewAvailable,
 			"preview_url":         previewURL,
 			"task_creator_name":   asset.TaskCreatorName,
@@ -10192,6 +10201,7 @@ func (s *Service) hydrateClientMaterialRows(ctx context.Context, items []*domain
 		item.ScopeSKUCode = strings.TrimSpace(detail.ScopeSKUCode)
 		item.SKUCode = strings.TrimSpace(detail.SKUCode)
 		item.PrimarySKUCode = strings.TrimSpace(detail.PrimarySKUCode)
+		item.BusinessLane = string(detail.BusinessLane)
 		filename := firstNonEmpty(detail.OriginalFilename, detail.FileName, item.FilenameSnapshot)
 		mimeType := firstNonEmpty(detail.MimeType, item.MimeTypeSnapshot)
 		item.PreviewAvailable = detail.PreviewAvailable || isWorkbenchSystemAssetDirectPreviewable(mimeType, filename)

@@ -771,6 +771,7 @@ export interface ClientMaterialRow {
   scope_sku_code?: string
   sku_code?: string
   primary_sku_code?: string
+  business_lane?: MaterialBusinessLane | string
   preview_available?: boolean
   enabled: boolean
   sort_order: number

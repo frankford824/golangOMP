@@ -407,6 +407,7 @@ type AssetWorkbenchClientMaterial struct {
 	ScopeSKUCode     string    `json:"scope_sku_code,omitempty"`
 	SKUCode          string    `json:"sku_code,omitempty"`
 	PrimarySKUCode   string    `json:"primary_sku_code,omitempty"`
+	BusinessLane     string    `json:"business_lane,omitempty"`
 	PreviewAvailable bool      `json:"preview_available"`
 	Enabled          bool      `json:"enabled" db:"enabled"`
 	SortOrder        int       `json:"sort_order" db:"sort_order"`
