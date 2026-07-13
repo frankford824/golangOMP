@@ -251,6 +251,100 @@ func TestAssetFilesHandlerServeFileAllowsAuthorizedTaskAssetStorageKey(t *testin
 	}
 }
 
+func TestAssetFilesHandlerServeFileAllowsAttachedTaskCreateReferenceViewer(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	const (
+		storageKey = "tasks/task-create-reference/assets/PRECREATE-REFERENCE/v1/derived/reference.zip"
+		refID      = "ref-precreate-1"
+		taskID     = int64(2171)
+		designerID = int64(228)
+	)
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/zip")
+		w.WriteHeader(http.StatusOK)
+		_, _ = io.WriteString(w, "zip-bytes")
+	}))
+	defer upstream.Close()
+
+	h := NewAssetFilesHandler(upstream.URL, "oss-token", "nas", zap.NewNop())
+	h.SetFileAccessPolicy(
+		assetFilesTaskRepoStub{tasks: map[int64]*domain.Task{
+			taskID: {ID: taskID, DesignerID: assetFilesInt64Ptr(designerID)},
+		}},
+		assetFilesTaskAssetRepoStub{},
+		assetFilesStorageRefRepoStub{
+			refsByKey: map[string]*domain.AssetStorageRef{
+				storageKey: {
+					RefID:     refID,
+					OwnerType: domain.AssetOwnerTypeTaskCreateReference,
+					OwnerID:   249,
+					RefKey:    storageKey,
+				},
+			},
+			taskIDsByRef: map[string][]int64{refID: {taskID}},
+		},
+		nil,
+	)
+	router := gin.New()
+	router.GET("/v1/assets/files/*path", h.ServeFile)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/assets/files/"+storageKey, nil)
+	req = req.WithContext(domain.WithRequestActor(req.Context(), domain.RequestActor{
+		ID:       designerID,
+		Username: "designer",
+		Roles:    []domain.Role{domain.RoleDesigner},
+		Source:   domain.RequestActorSourceSessionToken,
+		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
+	}))
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 body=%s", rec.Code, rec.Body.String())
+	}
+	if rec.Body.String() != "zip-bytes" {
+		t.Fatalf("body = %q, want zip-bytes", rec.Body.String())
+	}
+}
+
+func TestAssetFilesHandlerServeFileRejectsUnattachedTaskCreateReferenceViewer(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	const storageKey = "tasks/task-create-reference/assets/PRECREATE-REFERENCE/v1/derived/unattached.zip"
+	h := NewAssetFilesHandler("http://example.invalid", "oss-token", "nas", zap.NewNop())
+	h.SetFileAccessPolicy(
+		assetFilesTaskRepoStub{},
+		assetFilesTaskAssetRepoStub{},
+		assetFilesStorageRefRepoStub{refsByKey: map[string]*domain.AssetStorageRef{
+			storageKey: {
+				RefID:     "ref-unattached",
+				OwnerType: domain.AssetOwnerTypeTaskCreateReference,
+				OwnerID:   249,
+				RefKey:    storageKey,
+			},
+		}},
+		nil,
+	)
+	router := gin.New()
+	router.GET("/v1/assets/files/*path", h.ServeFile)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/assets/files/"+storageKey, nil)
+	req = req.WithContext(domain.WithRequestActor(req.Context(), domain.RequestActor{
+		ID:       228,
+		Username: "designer",
+		Roles:    []domain.Role{domain.RoleDesigner},
+		Source:   domain.RequestActorSourceSessionToken,
+		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
+	}))
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403 body=%s", rec.Code, rec.Body.String())
+	}
+}
+
 type assetFilesPresignerStub struct {
 	urls map[string]string
 }
@@ -374,11 +468,20 @@ func (r assetFilesTaskAssetRepoStub) NextAssetVersionNo(context.Context, repo.Tx
 }
 
 type assetFilesStorageRefRepoStub struct {
-	refsByKey map[string]*domain.AssetStorageRef
+	refsByKey     map[string]*domain.AssetStorageRef
+	taskIDsByRef  map[string][]int64
+	attachedTasks error
 }
 
 func (r assetFilesStorageRefRepoStub) GetByRefKey(_ context.Context, refKey string) (*domain.AssetStorageRef, error) {
 	return r.refsByKey[refKey], nil
+}
+
+func (r assetFilesStorageRefRepoStub) ListAttachedTaskIDsByRefID(_ context.Context, refID string) ([]int64, error) {
+	if r.attachedTasks != nil {
+		return nil, r.attachedTasks
+	}
+	return r.taskIDsByRef[refID], nil
 }
 
 type assetFilesTaskRepoStub struct {
@@ -454,6 +557,8 @@ func assetFilesSessionActor() domain.RequestActor {
 		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
 	}
 }
+
+func assetFilesInt64Ptr(value int64) *int64 { return &value }
 
 func TestAssetFilesHandlerServeFileEscapesStorageKeyPath(t *testing.T) {
 	gin.SetMode(gin.TestMode)

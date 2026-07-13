@@ -172,24 +172,7 @@ func (s *taskAssetCenterService) BuildTaskReferenceBatchDownloadManifest(ctx con
 			}
 		}
 
-		if downloadURL == "" && storageKey != "" {
-			if s.ossDirectService != nil && s.ossDirectService.Enabled() {
-				signed := s.ossDirectService.PresignDownloadURLWithFilename(storageKey, strings.TrimSpace(ref.Filename))
-				if signed != nil {
-					downloadURL = strings.TrimSpace(signed.DownloadURL)
-					ref.DownloadURL = &downloadURL
-					if !signed.ExpiresAt.IsZero() {
-						expiresAt := signed.ExpiresAt
-						ref.DownloadURLExpiresAt = &expiresAt
-					}
-				}
-			}
-			if downloadURL == "" {
-				path := domain.BuildRelativeEscapedURLPath("/v1/assets/files", storageKey)
-				downloadURL = path
-				ref.DownloadURL = &downloadURL
-			}
-		}
+		downloadURL, downloadExpiresAt := s.resolveLegacyReferenceDownload(downloadURL, storageKey, strings.TrimSpace(ref.Filename), ref.DownloadURLExpiresAt)
 		if downloadURL == "" {
 			manifest.Failures = append(manifest.Failures, TaskReferenceBatchDownloadFailure{
 				SourceKind: "legacy_ref",
@@ -210,7 +193,7 @@ func (s *taskAssetCenterService) BuildTaskReferenceBatchDownloadManifest(ctx con
 			FileSize:    fileSize,
 			MimeType:    strings.TrimSpace(ref.MimeType),
 			DownloadURL: downloadURL,
-			ExpiresAt:   ref.DownloadURLExpiresAt,
+			ExpiresAt:   downloadExpiresAt,
 			SourceKind:  "legacy_ref",
 			RefID:       optionalStringPtr(refID),
 		}
@@ -229,6 +212,37 @@ func (s *taskAssetCenterService) BuildTaskReferenceBatchDownloadManifest(ctx con
 	manifest.SuccessCount = len(manifest.Items)
 	manifest.FailureCount = len(manifest.Failures)
 	return manifest, nil
+}
+
+func (s *taskAssetCenterService) resolveLegacyReferenceDownload(existingURL, storageKey, filename string, existingExpiresAt *time.Time) (string, *time.Time) {
+	existingURL = strings.TrimSpace(existingURL)
+	storageKey = strings.TrimSpace(storageKey)
+	filename = strings.TrimSpace(filename)
+
+	// A stored compatibility proxy URL is not a direct-download manifest item:
+	// it still requires a session cookie and is therefore unsuitable for the
+	// frontend's cross-origin ZIP fetch. Prefer a fresh OSS URL whenever the
+	// canonical storage key is known, even when a legacy URL is already set.
+	if storageKey != "" && s != nil && s.ossDirectService != nil && s.ossDirectService.Enabled() {
+		if signed := s.ossDirectService.PresignDownloadURLWithFilename(storageKey, filename); signed != nil {
+			urlValue := strings.TrimSpace(signed.DownloadURL)
+			if urlValue != "" {
+				if signed.ExpiresAt.IsZero() {
+					return urlValue, existingExpiresAt
+				}
+				expiresAt := signed.ExpiresAt
+				return urlValue, &expiresAt
+			}
+		}
+	}
+	if existingURL != "" {
+		return existingURL, existingExpiresAt
+	}
+	if storageKey == "" {
+		return "", existingExpiresAt
+	}
+	proxyURL := domain.BuildRelativeEscapedURLPath("/v1/assets/files", storageKey)
+	return AppendProxyDownloadFilenameQuery(proxyURL, filename), existingExpiresAt
 }
 
 func markSeenReferenceAsset(version *domain.TaskAsset, downloadURL string, seenByRefID, seenByStorageKey, seenByURL map[string]struct{}) {

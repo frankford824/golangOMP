@@ -106,6 +106,37 @@ func (r *assetStorageRefRepo) GetByRefKey(ctx context.Context, refKey string) (*
 	return ref, nil
 }
 
+// ListAttachedTaskIDsByRefID returns the task ownership projected by the
+// canonical reference_file_refs flattening table. Pre-create uploads retain
+// their uploader ownership in asset_storage_refs for audit purposes, so file
+// access must use this attachment projection after the reference is bound.
+func (r *assetStorageRefRepo) ListAttachedTaskIDsByRefID(ctx context.Context, refID string) ([]int64, error) {
+	rows, err := r.db.db.QueryContext(ctx, `
+		SELECT DISTINCT task_id
+		FROM reference_file_refs
+		WHERE ref_id = ?
+		ORDER BY task_id`, strings.TrimSpace(refID))
+	if err != nil {
+		return nil, fmt.Errorf("list attached task ids by asset storage ref: %w", err)
+	}
+	defer rows.Close()
+
+	var taskIDs []int64
+	for rows.Next() {
+		var taskID int64
+		if err := rows.Scan(&taskID); err != nil {
+			return nil, fmt.Errorf("scan attached task id by asset storage ref: %w", err)
+		}
+		if taskID > 0 {
+			taskIDs = append(taskIDs, taskID)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate attached task ids by asset storage ref: %w", err)
+	}
+	return taskIDs, nil
+}
+
 func (r *assetStorageRefRepo) UpdateStatus(ctx context.Context, tx repo.Tx, refID string, status domain.AssetStorageRefStatus) error {
 	sqlTx := Unwrap(tx)
 	_, err := sqlTx.ExecContext(ctx, `

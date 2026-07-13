@@ -3097,6 +3097,7 @@ async function handleReferenceBatchDownload() {
         }),
       })),
       zipFilename: resolveTaskReferenceBatchZipFilename(currentTask),
+      normalizeNestedZipFilenames: true,
       serverFailures: failures.map((entry) => formatTaskReferenceBatchFailure(entry)),
       onStatus: (message) => {
         referenceBatchDownloadStatus.value = message

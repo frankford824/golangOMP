@@ -47,6 +47,7 @@ type AssetFilesTaskAssetRepo interface {
 
 type AssetFilesStorageRefRepo interface {
 	GetByRefKey(ctx context.Context, refKey string) (*domain.AssetStorageRef, error)
+	ListAttachedTaskIDsByRefID(ctx context.Context, refID string) ([]int64, error)
 }
 
 // NewAssetFilesHandler creates a handler that proxies file requests to the OSS-backed upload service.
@@ -156,6 +157,7 @@ func (h *AssetFilesHandler) authorizeStorageRefAccess(ctx context.Context, actor
 		if actor.ID == ref.OwnerID || assetFilePrivilegedActor(actor) {
 			return nil
 		}
+		return h.authorizeAttachedTaskCreateReference(ctx, ref)
 	case domain.AssetOwnerTypeExportJob, domain.AssetOwnerTypeOutsource, domain.AssetOwnerTypeWarehouse:
 		if actor.ID == ref.OwnerID || assetFilePrivilegedActor(actor) {
 			return nil
@@ -163,6 +165,29 @@ func (h *AssetFilesHandler) authorizeStorageRefAccess(ctx context.Context, actor
 	}
 	return domain.NewAppError(domain.ErrCodePermissionDenied, "Asset file is outside the current access scope.", gin.H{
 		"deny_code":  "asset_file_scope_denied",
+		"owner_type": ref.OwnerType,
+	})
+}
+
+func (h *AssetFilesHandler) authorizeAttachedTaskCreateReference(ctx context.Context, ref *domain.AssetStorageRef) *domain.AppError {
+	if h == nil || h.accessStorageRefRepo == nil || ref == nil {
+		return domain.NewAppError(domain.ErrCodePermissionDenied, "Asset file is outside the current access scope.", gin.H{
+			"deny_code": "asset_file_scope_denied",
+		})
+	}
+	taskIDs, err := h.accessStorageRefRepo.ListAttachedTaskIDsByRefID(ctx, strings.TrimSpace(ref.RefID))
+	if err != nil {
+		return domain.NewAppError(domain.ErrCodeInternalError, "Failed to verify attached task reference access.", nil)
+	}
+	for _, taskID := range taskIDs {
+		if appErr := h.authorizeTaskAccess(ctx, taskID); appErr == nil {
+			return nil
+		} else if appErr.Code == domain.ErrCodeInternalError {
+			return appErr
+		}
+	}
+	return domain.NewAppError(domain.ErrCodePermissionDenied, "Asset file is outside the current access scope.", gin.H{
+		"deny_code":  "asset_file_task_reference_scope_denied",
 		"owner_type": ref.OwnerType,
 	})
 }
