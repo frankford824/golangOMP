@@ -155,7 +155,6 @@ func (r *reportL1Repo) loadTaskOperationalCounts(
 		weekStart, tomorrowStart,
 		weekStart, tomorrowStart,
 		weekStart, tomorrowStart,
-		weekStart, tomorrowStart,
 	}
 	queryCtx, cancel := mysqlReadQueryContext(ctx)
 	defer cancel()

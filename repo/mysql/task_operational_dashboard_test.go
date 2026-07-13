@@ -2,6 +2,7 @@ package mysqlrepo
 
 import (
 	"context"
+	"database/sql/driver"
 	"fmt"
 	"strings"
 	"testing"
@@ -72,7 +73,11 @@ func TestTaskOperationalOverviewUsesFullAggregateAndCompletionEvents(t *testing.
 	}
 	defer db.Close()
 
-	mock.ExpectQuery("operational-counts").WillReturnRows(sqlmock.NewRows([]string{
+	countArgs := make([]driver.Value, 25)
+	for index := range countArgs {
+		countArgs[index] = sqlmock.AnyArg()
+	}
+	mock.ExpectQuery("operational-counts").WithArgs(countArgs...).WillReturnRows(sqlmock.NewRows([]string{
 		"total_tasks", "active_tasks", "design_pending", "pending_audit", "handover",
 		"customization_in_progress", "pending_warehouse_receive", "overdue", "due_today",
 		"today_created", "today_completed", "week_created", "week_created_completed",
