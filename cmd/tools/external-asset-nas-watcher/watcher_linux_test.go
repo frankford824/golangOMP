@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -62,5 +64,54 @@ func TestPostEventsUsesDedicatedToken(t *testing.T) {
 	event := domain.ExternalAssetFilesystemEvent{EventID: "evt", Type: domain.ExternalAssetFilesystemEventDelete, MountPath: "/p3", OriginPath: "/p3/仓库素材区/徐凯/a.jpg", ObservedAt: time.Now().UTC()}
 	if err := w.postEvents(context.Background(), []domain.ExternalAssetFilesystemEvent{event}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestShardOwnershipIsStableAndExclusive(t *testing.T) {
+	shard0 := &nasWatcher{cfg: watcherConfig{ShardCount: 2, ShardIndex: 0}}
+	shard1 := &nasWatcher{cfg: watcherConfig{ShardCount: 2, ShardIndex: 1}}
+	for _, rel := range []string{"海报/a.jpg", "KT/a.jpg", "写真布/子目录/a.jpg", "root-file.jpg"} {
+		first := shard0.ownsRelative(rel)
+		second := shard1.ownsRelative(rel)
+		if first == second {
+			t.Fatalf("ownership for %q = shard0:%v shard1:%v; want exactly one", rel, first, second)
+		}
+		if shard0.ownsRelative(rel) != first || shard1.ownsRelative(rel) != second {
+			t.Fatalf("ownership for %q is not stable", rel)
+		}
+	}
+	if !shard0.ownsRelative(".") || !shard1.ownsRelative(".") {
+		t.Fatal("every shard must own the shared root watch")
+	}
+}
+
+func TestShardSnapshotsAreDisjointAndComplete(t *testing.T) {
+	root := t.TempDir()
+	files := []string{"海报/a.jpg", "KT/b.jpg", "写真布/子目录/c.jpg", "root.txt"}
+	for _, rel := range files {
+		filename := filepath.Join(root, filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(filename), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filename, []byte(rel), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	combined := map[string]struct{}{}
+	for index := 0; index < 2; index++ {
+		watcher := &nasWatcher{cfg: watcherConfig{Root: root, ShardCount: 2, ShardIndex: index}}
+		snapshots, err := watcher.scanSnapshots(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for rel := range snapshots {
+			if _, exists := combined[rel]; exists {
+				t.Fatalf("snapshot %q belongs to multiple shards", rel)
+			}
+			combined[rel] = struct{}{}
+		}
+	}
+	if len(combined) != len(files) {
+		t.Fatalf("combined snapshots = %v, want %d files", combined, len(files))
 	}
 }

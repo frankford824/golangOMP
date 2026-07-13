@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"io"
 	"io/fs"
 	"log"
@@ -45,6 +46,8 @@ type watcherConfig struct {
 	HTTPTimeout       time.Duration
 	BatchSize         int
 	BootstrapEmit     bool
+	ShardCount        int
+	ShardIndex        int
 }
 
 type fileSnapshot struct {
@@ -97,6 +100,8 @@ func loadWatcherConfig() (watcherConfig, error) {
 		HTTPTimeout:       durationEnv("WATCH_HTTP_TIMEOUT", 30*time.Second),
 		BatchSize:         intEnv("WATCH_BATCH_SIZE", 200),
 		BootstrapEmit:     boolEnv("WATCH_BOOTSTRAP_EMIT", false),
+		ShardCount:        intEnv("WATCH_SHARD_COUNT", 1),
+		ShardIndex:        intEnv("WATCH_SHARD_INDEX", 0),
 	}
 	if cfg.BackendURL == "" || cfg.EventToken == "" {
 		return watcherConfig{}, fmt.Errorf("WATCH_BACKEND_URL and WATCH_EVENT_TOKEN are required")
@@ -106,6 +111,9 @@ func loadWatcherConfig() (watcherConfig, error) {
 	}
 	if cfg.BatchSize < 1 || cfg.BatchSize > 500 {
 		return watcherConfig{}, fmt.Errorf("WATCH_BATCH_SIZE must be 1-500")
+	}
+	if cfg.ShardCount < 1 || cfg.ShardCount > 16 || cfg.ShardIndex < 0 || cfg.ShardIndex >= cfg.ShardCount {
+		return watcherConfig{}, fmt.Errorf("WATCH_SHARD_COUNT must be 1-16 and WATCH_SHARD_INDEX must be inside that range")
 	}
 	return cfg, nil
 }
@@ -151,7 +159,7 @@ func (w *nasWatcher) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	current, err := scanSnapshots(w.cfg.Root)
+	current, err := w.scanSnapshots(w.cfg.Root)
 	if err != nil {
 		return err
 	}
@@ -168,7 +176,7 @@ func (w *nasWatcher) Run(ctx context.Context) error {
 		w.state = *loaded
 		w.scheduleDiff(current, w.state.Files)
 	}
-	log.Printf("nas watcher started root=%q origin_root=%q watches=%d tracked=%d pending=%d reconcile=%s", w.cfg.Root, w.cfg.OriginRoot, len(w.watchDirs), len(w.state.Files), len(w.pending), w.cfg.ReconcileInterval)
+	log.Printf("nas watcher started root=%q origin_root=%q shard=%d/%d watches=%d tracked=%d pending=%d reconcile=%s", w.cfg.Root, w.cfg.OriginRoot, w.cfg.ShardIndex, w.cfg.ShardCount, len(w.watchDirs), len(w.state.Files), len(w.pending), w.cfg.ReconcileInterval)
 
 	rawEvents := make(chan rawWatchEvent, 8192)
 	errCh := make(chan error, 1)
@@ -214,6 +222,9 @@ func (w *nasWatcher) addRecursive(root string) error {
 			return nil
 		}
 		rel, _ := filepath.Rel(w.cfg.Root, current)
+		if rel != "." && !w.ownsRelative(rel) {
+			return filepath.SkipDir
+		}
 		if rel != "." && shouldIgnoreRelative(rel) {
 			return filepath.SkipDir
 		}
@@ -277,7 +288,7 @@ func (w *nasWatcher) readEvents(ctx context.Context, out chan<- rawWatchEvent) e
 
 func (w *nasWatcher) handleRawEvent(event rawWatchEvent) {
 	rel, ok := w.relative(event.Path)
-	if !ok || shouldIgnoreRelative(rel) {
+	if !ok || !w.ownsRelative(rel) || shouldIgnoreRelative(rel) {
 		return
 	}
 	if event.IsDir {
@@ -285,11 +296,10 @@ func (w *nasWatcher) handleRawEvent(event rawWatchEvent) {
 			if err := w.addRecursive(event.Path); err != nil {
 				log.Printf("add directory watches failed path=%q err=%v", event.Path, err)
 			}
-			current, err := scanSnapshots(event.Path)
+			current, err := w.scanSnapshots(event.Path)
 			if err == nil {
 				for childRel := range current {
-					rootRel, _ := filepath.Rel(w.cfg.Root, filepath.Join(event.Path, childRel))
-					w.schedule(rootRel, "upsert")
+					w.schedule(childRel, "upsert")
 				}
 			}
 		}
@@ -393,7 +403,7 @@ func (w *nasWatcher) processDue(ctx context.Context) error {
 }
 
 func (w *nasWatcher) reconcile() error {
-	current, err := scanSnapshots(w.cfg.Root)
+	current, err := w.scanSnapshots(w.cfg.Root)
 	if err != nil {
 		return err
 	}
@@ -463,15 +473,21 @@ func (w *nasWatcher) relative(fullPath string) (string, bool) {
 	return rel, true
 }
 
-func scanSnapshots(root string) (map[string]fileSnapshot, error) {
+func (w *nasWatcher) scanSnapshots(root string) (map[string]fileSnapshot, error) {
 	result := map[string]fileSnapshot{}
 	err := filepath.WalkDir(root, func(current string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		rel, relErr := filepath.Rel(root, current)
+		rel, relErr := filepath.Rel(w.cfg.Root, current)
 		if relErr != nil {
 			return relErr
+		}
+		if rel != "." && !w.ownsRelative(rel) {
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
 		}
 		if rel != "." && shouldIgnoreRelative(rel) {
 			if entry.IsDir() {
@@ -490,6 +506,24 @@ func scanSnapshots(root string) (map[string]fileSnapshot, error) {
 		return nil
 	})
 	return result, err
+}
+
+// ownsRelative partitions complete top-level subtrees. Every shard watches the
+// configured root, while exactly one shard recursively watches and snapshots a
+// given child subtree. Running shards under distinct host UIDs also gives each
+// process its own Linux max_user_watches budget.
+func (w *nasWatcher) ownsRelative(rel string) bool {
+	if w == nil || w.cfg.ShardCount <= 1 {
+		return true
+	}
+	rel = strings.Trim(filepath.ToSlash(filepath.Clean(rel)), "/")
+	if rel == "" || rel == "." {
+		return true
+	}
+	top, _, _ := strings.Cut(rel, "/")
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(top))
+	return int(h.Sum32()%uint32(w.cfg.ShardCount)) == w.cfg.ShardIndex
 }
 
 func snapshotFromInfo(info fs.FileInfo) fileSnapshot {

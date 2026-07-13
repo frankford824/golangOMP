@@ -211,6 +211,11 @@ The packaged `external_asset_nas_watcher` is deployed on the Synology host with
 waits for file-size/mtime stability, and posts idempotent batches to
 `POST /v1/integration/external-assets/events`.
 
+The Synology tree currently exceeds its per-user inotify watch budget. The
+compose file therefore runs two non-privileged shards under distinct host UIDs.
+Both watch the root; stable FNV-1a ownership assigns each complete top-level
+subtree to exactly one shard, including top-level directories created later.
+
 NAS-side environment (keep the real token out of Git):
 
 ```dotenv

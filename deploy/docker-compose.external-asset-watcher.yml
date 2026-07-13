@@ -1,30 +1,51 @@
-version: "3.9"
+x-watcher: &watcher
+  image: company-bff:fix-python
+  network_mode: "host"
+  restart: unless-stopped
+  entrypoint: ["/app/bin/external-asset-nas-watcher"]
+  environment: &watcher-environment
+    WATCH_ROOT: /data/image_lib/仓库素材区/徐凯
+    WATCH_MOUNT_PATH: /p3
+    WATCH_ORIGIN_ROOT: /p3/仓库素材区/徐凯
+    WATCH_STATE_FILE: /state/snapshot.json
+    WATCH_BACKEND_URL: ${WATCH_BACKEND_URL}
+    WATCH_EVENT_TOKEN: ${WATCH_EVENT_TOKEN}
+    WATCH_AGENT_ID: ${WATCH_AGENT_ID:-synology-p3-xukai}
+    WATCH_DEBOUNCE: ${WATCH_DEBOUNCE:-3s}
+    WATCH_STABILITY: ${WATCH_STABILITY:-2s}
+    WATCH_RECONCILE_INTERVAL: ${WATCH_RECONCILE_INTERVAL:-6h}
+    WATCH_RETRY_INTERVAL: ${WATCH_RETRY_INTERVAL:-10s}
+    WATCH_HTTP_TIMEOUT: ${WATCH_HTTP_TIMEOUT:-30s}
+    WATCH_BATCH_SIZE: ${WATCH_BATCH_SIZE:-200}
+    WATCH_BOOTSTRAP_EMIT: ${WATCH_BOOTSTRAP_EMIT:-false}
+    WATCH_SHARD_COUNT: 2
+    TZ: Asia/Shanghai
+
 services:
-  external-asset-nas-watcher:
-    image: company-bff:fix-python
-    container_name: external-asset-nas-watcher
-    network_mode: "host"
+  external-asset-nas-watcher-0:
+    <<: *watcher
+    container_name: external-asset-nas-watcher-0
     user: "0:0"
-    restart: unless-stopped
-    entrypoint: ["/app/bin/external-asset-nas-watcher"]
     environment:
-      WATCH_ROOT: /data/image_lib/仓库素材区/徐凯
-      WATCH_MOUNT_PATH: /p3
-      WATCH_ORIGIN_ROOT: /p3/仓库素材区/徐凯
-      WATCH_STATE_FILE: /state/snapshot.json
-      WATCH_BACKEND_URL: ${WATCH_BACKEND_URL}
-      WATCH_EVENT_TOKEN: ${WATCH_EVENT_TOKEN}
-      WATCH_AGENT_ID: ${WATCH_AGENT_ID:-synology-p3-xukai}
-      WATCH_DEBOUNCE: ${WATCH_DEBOUNCE:-3s}
-      WATCH_STABILITY: ${WATCH_STABILITY:-2s}
-      WATCH_RECONCILE_INTERVAL: ${WATCH_RECONCILE_INTERVAL:-6h}
-      WATCH_RETRY_INTERVAL: ${WATCH_RETRY_INTERVAL:-10s}
-      WATCH_HTTP_TIMEOUT: ${WATCH_HTTP_TIMEOUT:-30s}
-      WATCH_BATCH_SIZE: ${WATCH_BATCH_SIZE:-200}
-      WATCH_BOOTSTRAP_EMIT: ${WATCH_BOOTSTRAP_EMIT:-false}
-      TZ: Asia/Shanghai
+      <<: *watcher-environment
+      WATCH_AGENT_ID: ${WATCH_AGENT_ID:-synology-p3-xukai}-0
+      WATCH_SHARD_INDEX: 0
     volumes:
       - "/volume1/image_lib:/data/image_lib:ro"
       - "/volume1/company_bff/deploy/bin:/app/bin:ro"
-      - "/volume1/company_bff/state/external-asset-watcher:/state"
+      - "/volume1/company_bff/state/external-asset-watcher/shard-0:/state"
+      - "/etc/localtime:/etc/localtime:ro"
+
+  external-asset-nas-watcher-1:
+    <<: *watcher
+    container_name: external-asset-nas-watcher-1
+    user: "1026:100"
+    environment:
+      <<: *watcher-environment
+      WATCH_AGENT_ID: ${WATCH_AGENT_ID:-synology-p3-xukai}-1
+      WATCH_SHARD_INDEX: 1
+    volumes:
+      - "/volume1/image_lib:/data/image_lib:ro"
+      - "/volume1/company_bff/deploy/bin:/app/bin:ro"
+      - "/volume1/company_bff/state/external-asset-watcher/shard-1:/state"
       - "/etc/localtime:/etc/localtime:ro"
