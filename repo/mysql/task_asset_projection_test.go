@@ -2,11 +2,24 @@ package mysqlrepo
 
 import (
 	"database/sql/driver"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 )
+
+func TestTaskAssetCreatePersistsResolvedSourceTaskModuleID(t *testing.T) {
+	normalized := strings.Join(strings.Fields(taskAssetInsertSQL), " ")
+	for _, required := range []string{
+		"source_module_key, source_task_module_id",
+		"COALESCE(?, ( SELECT tm.id FROM task_modules tm WHERE tm.task_id = ? AND tm.module_key = ? LIMIT 1 ))",
+	} {
+		if !strings.Contains(normalized, required) {
+			t.Fatalf("task asset insert must persist the source module link via %q: %s", required, normalized)
+		}
+	}
+}
 
 func TestTaskAssetRepoGetByIDProjectsLifecycleState(t *testing.T) {
 	db, mock, err := sqlmock.New()

@@ -118,6 +118,7 @@ func TestTaskAssetCenterServiceAssetManagerCompletedTaskOnlyReplacesExistingCurr
 	uploadRequestRepo := newStep37UploadRequestRepo()
 	taskEventRepo := &step04TaskEventRepo{}
 	storageRefRepo := newStep37AssetStorageRefRepo()
+	moduleRepo := newStep04TaskModuleRepo()
 	uploadClient := newStubUploadServiceClient().(*stubUploadServiceClient)
 	uploadClient.remoteSessionStatus = domain.DesignAssetSessionStatusCompleted
 
@@ -147,7 +148,17 @@ func TestTaskAssetCenterServiceAssetManagerCompletedTaskOnlyReplacesExistingCurr
 		t.Fatalf("set old current version: %v", err)
 	}
 
-	svc := NewTaskAssetCenterService(taskRepo, designAssetRepo, taskAssetRepo, uploadRequestRepo, storageRefRepo, taskEventRepo, step04TxRunner{}, uploadClient).(*taskAssetCenterService)
+	svc := NewTaskAssetCenterService(
+		taskRepo,
+		designAssetRepo,
+		taskAssetRepo,
+		uploadRequestRepo,
+		storageRefRepo,
+		taskEventRepo,
+		step04TxRunner{},
+		uploadClient,
+		WithTaskAssetCenterModuleRepo(moduleRepo),
+	).(*taskAssetCenterService)
 	svc.nowFn = func() time.Time { return time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC) }
 	ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{
 		ID:       uploaderID,
@@ -228,6 +239,11 @@ func TestTaskAssetCenterServiceAssetManagerCompletedTaskOnlyReplacesExistingCurr
 	}
 	if taskAssetRepo.assets[oldVersionID].FlowReviewStatus != domain.TaskAssetFlowReviewStatusSuperseded {
 		t.Fatalf("old version status = %s, want superseded", taskAssetRepo.assets[oldVersionID].FlowReviewStatus)
+	}
+	currentVersionID := designAssetRepo.assets[assetID].CurrentVersionID
+	currentVersion := taskAssetRepo.assets[*currentVersionID]
+	if currentVersion.SourceTaskModuleID == nil || *currentVersion.SourceTaskModuleID != moduleRepo.modules[domain.ModuleKeyDesign].ID {
+		t.Fatalf("new version source module = %+v, modules = %+v", currentVersion.SourceTaskModuleID, moduleRepo.modules)
 	}
 }
 
@@ -1616,6 +1632,27 @@ func TestTaskAssetCenterServiceCreateUploadSessionInfersModeByFileSize(t *testin
 	}
 	if largeResult.Session == nil || largeResult.Session.UploadMode != domain.DesignAssetUploadModeMultipart {
 		t.Fatalf("CreateUploadSession(large) session = %+v", largeResult.Session)
+	}
+}
+
+func TestTaskAssetCenterServiceResolveTaskAssetSourceModuleIDBackfillsCompletedLegacyTask(t *testing.T) {
+	moduleRepo := newStep04TaskModuleRepo()
+	svc := &taskAssetCenterService{taskModuleRepo: moduleRepo}
+	task := &domain.Task{ID: 2199, TaskStatus: domain.TaskStatusCompleted}
+
+	moduleID, err := svc.resolveTaskAssetSourceModuleID(context.Background(), step04Tx{}, task, domain.ModuleKeyCustomization)
+	if err != nil {
+		t.Fatalf("resolveTaskAssetSourceModuleID() error = %v", err)
+	}
+	if moduleID == nil || *moduleID <= 0 {
+		t.Fatalf("resolveTaskAssetSourceModuleID() module_id = %+v", moduleID)
+	}
+	module := moduleRepo.modules[domain.ModuleKeyCustomization]
+	if module == nil || module.State != domain.ModuleStateClosed {
+		t.Fatalf("placeholder module = %+v", module)
+	}
+	if !strings.Contains(string(module.Data), `"backfill_placeholder":true`) {
+		t.Fatalf("placeholder module data = %s", module.Data)
 	}
 }
 

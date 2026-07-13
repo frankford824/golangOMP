@@ -7,9 +7,31 @@ export interface AssetReplacementGateInput {
   taskStatus?: unknown
   isArchived?: unknown
   archiveStatus?: unknown
+  sourceModuleKey?: unknown
+  roles?: readonly unknown[]
 }
 
 const REPLACEABLE_ASSET_KINDS = new Set(['delivery', 'source', 'reference'])
+const ASSET_REPLACEMENT_ROLES = new Set([
+  'designer',
+  'customizationoperator',
+  'customizationreviewer',
+  'audita',
+  'auditb',
+  'ops',
+  'assetmanager',
+  'admin',
+  'superadmin',
+  'hradmin',
+  'roleadmin',
+  'departmentadmin',
+  'deptadmin',
+  'teamlead',
+  'groupleader',
+  'designdirector',
+])
+const CUSTOMIZATION_REVIEW_STATUSES = new Set(['PendingCustomizationReview', 'PendingEffectReview'])
+const AUDIT_STAGE_STATUSES = new Set(['PendingAuditA', 'PendingAuditB', 'PendingOutsourceReview'])
 
 const TASK_ASSET_UPLOAD_SESSION_STATUSES = new Set([
   'PendingAssign',
@@ -81,6 +103,10 @@ function normalizeKind(value: unknown): string {
   return String(value ?? '').trim().toLowerCase()
 }
 
+function normalizeRole(value: unknown): string {
+  return String(value ?? '').trim().toLowerCase().replace(/[^a-z0-9]/g, '')
+}
+
 function hasPositiveNumericId(value: unknown): boolean {
   if (typeof value === 'number') return Number.isSafeInteger(value) && value > 0
   const raw = String(value ?? '').trim()
@@ -99,8 +125,23 @@ export function assetReplacementUnavailableReason(input: AssetReplacementGateInp
   if (!hasPositiveNumericId(input.taskId) || !hasPositiveNumericId(input.assetId)) {
     return '当前资源缺少任务或资产信息，不能在资产管理直接修改'
   }
-  if (!REPLACEABLE_ASSET_KINDS.has(normalizeKind(input.assetKind))) {
+  const assetKind = normalizeKind(input.assetKind)
+  if (!REPLACEABLE_ASSET_KINDS.has(assetKind)) {
     return '当前资源不可修改；只有系统内的参考图、源文件、最终成品图可替换'
+  }
+  if (input.roles && !input.roles.some((role) => ASSET_REPLACEMENT_ROLES.has(normalizeRole(role)))) {
+    return '当前账号没有修改资源的权限'
+  }
+  const taskStatus = normalizeTaskStatus(input.taskStatus)
+  if (CUSTOMIZATION_REVIEW_STATUSES.has(taskStatus) && assetKind === 'reference') {
+    return '定制审核阶段只能修改源文件或当前成品资源'
+  }
+  if (
+    AUDIT_STAGE_STATUSES.has(taskStatus) &&
+    assetKind === 'reference' &&
+    normalizeKind(input.sourceModuleKey) !== 'basic_info'
+  ) {
+    return '常规审核阶段只能修改基础信息模块的参考图'
   }
   const archived = input.isArchived === true || normalizeKind(input.isArchived) === 'true'
   if (archived || normalizeKind(input.archiveStatus) === 'archived') {
@@ -119,6 +160,14 @@ export function canReplaceAssetResource(input: AssetReplacementGateInput): boole
 
 export function assetReplacementScopeSKUCode(input: Record<string, unknown>): string {
   for (const key of ['scope_sku_code', 'scopeSkuCode', 'target_sku_code', 'targetSkuCode'] as const) {
+    const value = input[key]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return ''
+}
+
+export function assetReplacementOwnerModuleKey(input: Record<string, unknown>): string {
+  for (const key of ['source_module_key', 'sourceModuleKey', 'module_key', 'moduleKey'] as const) {
     const value = input[key]
     if (typeof value === 'string' && value.trim()) return value.trim()
   }

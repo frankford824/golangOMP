@@ -1675,8 +1675,8 @@ func (r *step04TaskModuleRepo) CloseOpenModules(context.Context, repo.Tx, int64,
 	return nil, nil
 }
 
-func (r *step04TaskModuleRepo) InsertPlaceholder(context.Context, repo.Tx, int64, string) (*domain.TaskModule, error) {
-	return nil, nil
+func (r *step04TaskModuleRepo) InsertPlaceholder(ctx context.Context, tx repo.Tx, taskID int64, moduleKey string) (*domain.TaskModule, error) {
+	return r.Enter(ctx, tx, taskID, moduleKey, domain.ModuleStateClosed, nil, json.RawMessage(`{"backfill_placeholder":true}`))
 }
 
 type step04TaskModuleEventRepo struct {

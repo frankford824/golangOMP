@@ -56,7 +56,7 @@ func (s *Service) Delete(ctx context.Context, actor domain.RequestActor, assetID
 		if !CanDelete(state) {
 			return domain.NewAppError(domain.ErrCodeInvalidStateTransition, "asset cannot be deleted from current lifecycle state", map[string]interface{}{"state": state})
 		}
-		moduleID, appErr := moduleIDFromAsset(row.Asset)
+		moduleID, appErr := s.resolveLifecycleEventModuleID(ctx, tx, row)
 		if appErr != nil {
 			return appErr
 		}

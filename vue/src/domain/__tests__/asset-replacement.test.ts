@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  assetReplacementOwnerModuleKey,
   assetReplacementScopeSKUCode,
   assetReplacementSuccessMessage,
   assetReplacementUnavailableReason,
@@ -49,5 +50,38 @@ describe('asset replacement gate', () => {
     expect(assetReplacementScopeSKUCode({ scope_sku_code: 'SKU-SCOPE', sku_code: 'SKU-PRODUCT' })).toBe('SKU-SCOPE')
     expect(assetReplacementScopeSKUCode({ targetSkuCode: 'SKU-TARGET', primary_sku_code: 'SKU-PRIMARY' })).toBe('SKU-TARGET')
     expect(assetReplacementScopeSKUCode({ sku_code: 'DZK000142', primary_sku_code: 'DZK000142' })).toBe('')
+  })
+
+  it.each(['CustomizationReviewer', 'Audit_A', 'Audit_B', 'AssetManager'])(
+    'allows the main maintenance role %s while blocking read-only roles',
+    (role) => {
+      expect(canReplaceAssetResource({ ...baseAsset, taskStatus: 'Completed', roles: [role] })).toBe(true)
+      expect(canReplaceAssetResource({ ...baseAsset, taskStatus: 'Completed', roles: ['Warehouse'] })).toBe(false)
+    },
+  )
+
+  it('matches audit-stage reference rules and carries the source module into the request', () => {
+    expect(canReplaceAssetResource({
+      ...baseAsset,
+      assetKind: 'reference',
+      taskStatus: 'PendingAuditA',
+      sourceModuleKey: 'basic_info',
+      roles: ['Audit_A'],
+    })).toBe(true)
+    expect(canReplaceAssetResource({
+      ...baseAsset,
+      assetKind: 'reference',
+      taskStatus: 'PendingAuditA',
+      sourceModuleKey: 'design',
+      roles: ['Audit_A'],
+    })).toBe(false)
+    expect(canReplaceAssetResource({
+      ...baseAsset,
+      assetKind: 'reference',
+      taskStatus: 'PendingCustomizationReview',
+      sourceModuleKey: 'basic_info',
+      roles: ['CustomizationReviewer'],
+    })).toBe(false)
+    expect(assetReplacementOwnerModuleKey({ source_module_key: 'basic_info', module_key: 'design' })).toBe('basic_info')
   })
 })

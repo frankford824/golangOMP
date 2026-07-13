@@ -14,6 +14,10 @@ type ObjectDeleter interface {
 	DeleteObject(ctx context.Context, objectKey string) error
 }
 
+type lifecycleEventModuleResolver interface {
+	ResolveOrCreateLifecycleEventModule(ctx context.Context, tx repo.Tx, taskID int64, moduleKey string) (int64, error)
+}
+
 type Service struct {
 	searchRepo    repo.TaskAssetSearchRepo
 	lifecycleRepo repo.TaskAssetLifecycleRepo
@@ -63,6 +67,54 @@ func moduleIDFromAsset(asset *domain.TaskAsset) (int64, *domain.AppError) {
 		return 0, domain.NewAppError(domain.ErrCodeInvalidRequest, "asset source_task_module_id is required for lifecycle event", nil)
 	}
 	return *asset.SourceTaskModuleID, nil
+}
+
+func (s *Service) resolveLifecycleEventModuleID(ctx context.Context, tx repo.Tx, row *repo.TaskAssetSearchRow) (int64, *domain.AppError) {
+	if row == nil || row.Asset == nil || row.Task == nil {
+		return 0, domain.NewAppError(domain.ErrCodeInvalidRequest, "asset task context is required for lifecycle event", nil)
+	}
+	if moduleID, appErr := moduleIDFromAsset(row.Asset); appErr == nil {
+		return moduleID, nil
+	}
+	resolver, ok := s.lifecycleRepo.(lifecycleEventModuleResolver)
+	if !ok {
+		return moduleIDFromAsset(row.Asset)
+	}
+	moduleKey := lifecycleSourceModuleKey(row.Asset, row.Task)
+	moduleID, err := resolver.ResolveOrCreateLifecycleEventModule(ctx, tx, row.Task.ID, moduleKey)
+	if err != nil {
+		return 0, domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)
+	}
+	if moduleID <= 0 {
+		return 0, domain.NewAppError(domain.ErrCodeInternalError, "asset lifecycle event module could not be resolved", nil)
+	}
+	row.Asset.SourceModuleKey = moduleKey
+	row.Asset.SourceTaskModuleID = &moduleID
+	return moduleID, nil
+}
+
+func lifecycleSourceModuleKey(asset *domain.TaskAsset, task *domain.Task) string {
+	if asset != nil {
+		switch key := strings.TrimSpace(asset.SourceModuleKey); key {
+		case domain.ModuleKeyBasicInfo, domain.ModuleKeyDesign, domain.ModuleKeyAudit,
+			domain.ModuleKeyWarehouse, domain.ModuleKeyCustomization, domain.ModuleKeyProcurement,
+			domain.ModuleKeyRetouch:
+			return key
+		}
+		assetType := domain.NormalizeTaskAssetType(asset.AssetType)
+		if assetType.IsReference() {
+			return domain.ModuleKeyBasicInfo
+		}
+		if task != nil && task.TaskType == domain.TaskTypeRetouchTask &&
+			(assetType.IsSource() || assetType.IsDelivery() || assetType.IsPreview() || assetType.IsDesignThumb()) {
+			return domain.ModuleKeyRetouch
+		}
+		if task != nil && task.CustomizationRequired &&
+			(assetType.IsSource() || assetType.IsDelivery() || assetType.IsPreview() || assetType.IsDesignThumb()) {
+			return domain.ModuleKeyCustomization
+		}
+	}
+	return domain.ModuleKeyDesign
 }
 
 func lifecyclePayload(asset *domain.TaskAsset, actor domain.RequestActor, reason string, originalStorageKey string) map[string]interface{} {

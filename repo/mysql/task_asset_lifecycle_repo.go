@@ -275,6 +275,32 @@ func (r *taskAssetLifecycleRepo) GetCurrentForUpdate(ctx context.Context, tx rep
 	return scanTaskAssetSearchRow(row)
 }
 
+// ResolveOrCreateLifecycleEventModule keeps delete auditing available for old
+// tasks that predate task_modules. Existing modules are never overwritten;
+// only a hidden closed placeholder is inserted when the exact source module
+// does not exist yet.
+func (r *taskAssetLifecycleRepo) ResolveOrCreateLifecycleEventModule(ctx context.Context, tx repo.Tx, taskID int64, moduleKey string) (int64, error) {
+	moduleKey = strings.TrimSpace(moduleKey)
+	if taskID <= 0 || moduleKey == "" {
+		return 0, fmt.Errorf("resolve lifecycle event module: task_id and module_key are required")
+	}
+	res, err := Unwrap(tx).ExecContext(ctx, `
+		INSERT INTO task_modules (task_id, module_key, state, data)
+		VALUES (?, ?, 'closed', JSON_OBJECT('backfill_placeholder', TRUE, 'source', 'asset_lifecycle'))
+		ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id)`, taskID, moduleKey)
+	if err != nil {
+		return 0, fmt.Errorf("resolve lifecycle event module: %w", err)
+	}
+	moduleID, err := res.LastInsertId()
+	if err != nil {
+		return 0, fmt.Errorf("resolve lifecycle event module id: %w", err)
+	}
+	if moduleID <= 0 {
+		return 0, fmt.Errorf("resolve lifecycle event module: no module id returned")
+	}
+	return moduleID, nil
+}
+
 func (r *taskAssetLifecycleRepo) InsertLifecycleEvent(ctx context.Context, tx repo.Tx, moduleID int64, eventType domain.ModuleEventType, actorID *int64, payload interface{}) error {
 	raw, err := json.Marshal(payload)
 	if err != nil {

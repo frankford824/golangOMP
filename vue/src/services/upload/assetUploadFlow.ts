@@ -3,7 +3,6 @@
  * → complete；失败或 complete 失败时调用 cancel 终止 MAIN 会话。
  */
 import type { AssetUploadProgress, ReferenceFileRef } from '@/services/api/assetsApi'
-import axios from 'axios'
 import {
   assetsApi,
   assertAssetCenterUploadCompleteOk,
@@ -19,6 +18,7 @@ import {
   type RemoteUploadPlan,
   runOssDirectUploadPlan,
 } from '@/services/upload/ossDirectUpload'
+import { parseApiErrorPayload } from '@/utils/api-message-zh'
 import { resolveFileMimeType } from '@/utils/mime'
 import { formatUploadFailureMessage } from '@/utils/upload-errors'
 
@@ -63,16 +63,34 @@ export interface PreparedTaskAssetUploadSession {
   completeEndpoint?: string
 }
 
+function uploadErrorResponseData(err: unknown): unknown {
+  if (!err || typeof err !== 'object') return undefined
+  const value = err as {
+    response?: { data?: unknown }
+    responseData?: unknown
+  }
+  return value.response?.data ?? value.responseData
+}
+
 function readUploadDenyDetail(err: unknown, key: string): string | undefined {
-  if (!axios.isAxiosError(err)) return undefined
-  const data = err.response?.data as
-    | {
-        error?: { details?: Record<string, unknown> }
-      }
-    | undefined
-  const details = data?.error?.details
-  const v = details?.[key]
-  return typeof v === 'string' && v.trim() ? v.trim() : undefined
+  if (key === 'deny_code') {
+    const denyCode = parseApiErrorPayload(err).denyCode
+    if (denyCode) return denyCode
+  }
+  const raw = uploadErrorResponseData(err)
+  if (!raw || typeof raw !== 'object') return undefined
+  const root = raw as Record<string, unknown>
+  const envelope = root.data && typeof root.data === 'object'
+    ? root.data as Record<string, unknown>
+    : root
+  const apiError = envelope.error && typeof envelope.error === 'object'
+    ? envelope.error as Record<string, unknown>
+    : undefined
+  const details = apiError?.details && typeof apiError.details === 'object'
+    ? apiError.details as Record<string, unknown>
+    : undefined
+  const value = details?.[key]
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined
 }
 
 /**
@@ -82,30 +100,20 @@ function readUploadDenyDetail(err: unknown, key: string): string | undefined {
  * 申请一次新 session → 再次 complete）即可恢复。其余 4xx / 5xx 不在本预判范围内。
  */
 export function isAssetVersionRaceRetryError(err: unknown): boolean {
-  if (!axios.isAxiosError(err)) return false
-  const status = err.response?.status
+  const parsed = parseApiErrorPayload(err)
+  const status = parsed.status
   if (status !== 409) return false
-  const data = err.response?.data as
-    | { error?: { code?: string; details?: Record<string, unknown> } }
-    | undefined
-  const code = data?.error?.code
-  if (String(code ?? '').toUpperCase() !== 'CONFLICT') return false
+  if (parsed.code !== 'CONFLICT') return false
   const denyCode = readUploadDenyDetail(err, 'deny_code')
   return denyCode === 'asset_version_race_retry'
 }
 
 function isTaskStatusNotActionableUploadError(err: unknown): boolean {
-  if (!axios.isAxiosError(err)) return false
-  const data = err.response?.data as
-    | {
-        error?: { code?: string; details?: Record<string, unknown> }
-      }
-    | undefined
-  const code = data?.error?.code
+  const code = parseApiErrorPayload(err).code
   const denyCode = readUploadDenyDetail(err, 'deny_code')
   const action = readUploadDenyDetail(err, 'action')
   return (
-    String(code ?? '').toUpperCase() === 'PERMISSION_DENIED' &&
+    code === 'PERMISSION_DENIED' &&
     denyCode === 'task_status_not_actionable' &&
     (action === 'asset_upload_session_complete' || action === 'asset_upload_session_cancel')
   )
@@ -175,10 +183,14 @@ async function uploadFileViaAssetSession(
     retouchRequirementId: options?.retouchRequirementId,
     createSession: options?.createSession,
   })
-  return completePreparedTaskAssetUploadSession(prepared, file, {
+  const completed = await completeWithAssetVersionRaceRetry(taskId, file, prepared, intent, {
     signal: options?.signal,
     onProgress: options?.onProgress,
+    remarkSuffix: options?.remarkSuffix,
+    retouchRequirementId: options?.retouchRequirementId,
+    createSession: options?.createSession,
   })
+  return completed.result
 }
 
 export async function prepareTaskAssetUploadSession(
@@ -379,7 +391,7 @@ export async function completeWithAssetVersionRaceRetry(
   },
   options?: Pick<
     TaskAssetUploadFlowOptions,
-    'signal' | 'onProgress' | 'remarkSuffix' | 'retouchRequirementId'
+    'signal' | 'onProgress' | 'remarkSuffix' | 'retouchRequirementId' | 'createSession'
   > & {
     /** 新一轮 prepare 完成后回调，常用于把新 sessionId 接续到取消集 */
     onRetryPrepared?: (next: PreparedTaskAssetUploadSession) => void
@@ -403,6 +415,7 @@ export async function completeWithAssetVersionRaceRetry(
       signal: options?.signal,
       remarkSuffix: options?.remarkSuffix,
       retouchRequirementId: options?.retouchRequirementId,
+      createSession: options?.createSession,
     })
     options?.onRetryPrepared?.(retryPrepared)
     try {

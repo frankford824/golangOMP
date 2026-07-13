@@ -23,12 +23,21 @@ const taskAssetSelectCols = `
 	asr.ref_type, asr.ref_key, asr.file_name, asr.mime_type, asr.file_size, asr.is_placeholder, asr.checksum_hint,
 	asr.status, asr.created_at`
 
+const taskAssetInsertSQL = `
+			INSERT INTO task_assets
+			  (task_id, asset_id, scope_sku_code, retouch_requirement_id, asset_type, version_no, asset_version_no, upload_mode, upload_request_id, storage_ref_id, file_name, original_filename, remote_file_id, mime_type, file_size, file_path, storage_key, whole_hash, upload_status, preview_status, uploaded_by, uploaded_at, remark, source_module_key, source_task_module_id, flow_review_status, approved_at, approved_by, source_asset_version_id)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, (
+			  SELECT tm.id
+			    FROM task_modules tm
+			   WHERE tm.task_id = ?
+			     AND tm.module_key = ?
+			   LIMIT 1
+			)), ?, ?, ?, ?)`
+
 func (r *taskAssetRepo) Create(ctx context.Context, tx repo.Tx, asset *domain.TaskAsset) (int64, error) {
 	sqlTx := Unwrap(tx)
-	res, err := sqlTx.ExecContext(ctx, `
-			INSERT INTO task_assets
-			  (task_id, asset_id, scope_sku_code, retouch_requirement_id, asset_type, version_no, asset_version_no, upload_mode, upload_request_id, storage_ref_id, file_name, original_filename, remote_file_id, mime_type, file_size, file_path, storage_key, whole_hash, upload_status, preview_status, uploaded_by, uploaded_at, remark, source_module_key, flow_review_status, approved_at, approved_by, source_asset_version_id)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	moduleKey := taskAssetSourceModuleKey(asset)
+	res, err := sqlTx.ExecContext(ctx, taskAssetInsertSQL,
 		asset.TaskID,
 		toNullInt64(asset.AssetID),
 		toNullString(asset.ScopeSKUCode),
@@ -52,7 +61,10 @@ func (r *taskAssetRepo) Create(ctx context.Context, tx repo.Tx, asset *domain.Ta
 		asset.UploadedBy,
 		toNullTime(asset.UploadedAt),
 		asset.Remark,
-		taskAssetSourceModuleKey(asset),
+		moduleKey,
+		toNullInt64(asset.SourceTaskModuleID),
+		asset.TaskID,
+		moduleKey,
 		string(domain.NormalizeTaskAssetFlowReviewStatus(asset.FlowReviewStatus, asset.AssetType)),
 		toNullTime(asset.ApprovedAt),
 		toNullInt64(asset.ApprovedBy),

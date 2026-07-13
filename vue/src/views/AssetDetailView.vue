@@ -304,7 +304,7 @@ import {
 } from '@/domain/asset-access'
 import { assetsApi, type AssetKind } from '@/services/api/assetsApi'
 import type { BackendAsset, BackendAssetVersion } from '@/services/apiTypes'
-import { assetReplacementScopeSKUCode, assetReplacementSuccessMessage, assetReplacementUnavailableReason, canReplaceAssetResource } from '@/domain/asset-replacement'
+import { assetReplacementOwnerModuleKey, assetReplacementScopeSKUCode, assetReplacementSuccessMessage, assetReplacementUnavailableReason, canReplaceAssetResource } from '@/domain/asset-replacement'
 import { assetDeletionSuccessMessage, assetDeletionUnavailableReason, canDeleteAssetResource } from '@/domain/asset-deletion'
 import { formatDateTimeBeijing } from '@/utils/date'
 import { userAccountDisplay } from '@/domain/user-display'
@@ -516,6 +516,8 @@ function assetReplacementGate(row: BackendAsset | null | undefined) {
     taskStatus: record.task_status ?? record.taskStatus,
     isArchived: record.is_archived ?? record.isArchived,
     archiveStatus: record.archive_status ?? record.archiveStatus,
+    sourceModuleKey: assetReplacementOwnerModuleKey(record),
+    roles: frontendRoles.value,
   }
 }
 
@@ -743,6 +745,7 @@ async function confirmReplacement() {
         asset_id: assetID,
         asset_kind: kind as AssetKind,
         target_sku_code: assetScopeSkuCode(row) || undefined,
+        owner_module_key: assetReplacementOwnerModuleKey(row as Record<string, unknown>) || undefined,
         remark: `资产详情修改资源：${file.name}`,
       },
       {

@@ -915,7 +915,7 @@ import {
 import { predictionsApi, type PredictionSuggestion } from '@/services/api/predictionsApi'
 import { recordExperienceBehavior } from '@/services/experienceBehavior'
 import type { AssetResourceSource, BackendAsset, BackendAssetVersion } from '@/services/apiTypes'
-import { assetReplacementScopeSKUCode, assetReplacementSuccessMessage, assetReplacementUnavailableReason, canReplaceAssetResource } from '@/domain/asset-replacement'
+import { assetReplacementOwnerModuleKey, assetReplacementScopeSKUCode, assetReplacementSuccessMessage, assetReplacementUnavailableReason, canReplaceAssetResource } from '@/domain/asset-replacement'
 import { assetDeletionSuccessMessage, assetDeletionUnavailableReason, canDeleteAssetResource } from '@/domain/asset-deletion'
 import { invalidateAssetAccessCache } from '@/domain/asset-access'
 import { formatDateTimeBeijing } from '@/utils/date'
@@ -1628,6 +1628,8 @@ function assetReplacementGate(asset: BackendAsset | null | undefined) {
     taskStatus: record.task_status ?? record.taskStatus,
     isArchived: record.is_archived ?? record.isArchived,
     archiveStatus: record.archive_status ?? record.archiveStatus,
+    sourceModuleKey: assetReplacementOwnerModuleKey(record),
+    roles: frontendRoles.value,
   }
 }
 
@@ -2160,6 +2162,7 @@ async function confirmReplacement() {
         asset_id: assetId,
         asset_kind: kind as AssetKind,
         target_sku_code: assetScopeSkuCode(asset) || undefined,
+        owner_module_key: assetReplacementOwnerModuleKey(asset as Record<string, unknown>) || undefined,
         remark: `资产中心修改资源：${file.name}`,
       },
       {
@@ -2241,6 +2244,9 @@ async function confirmDeletion() {
       selectedAssetId.value = ''
       selectedAssetDetail.value = null
       detailModalOpen.value = false
+    }
+    if (assets.value.length === 1 && listPage.value > 1) {
+      listPage.value -= 1
     }
     await reload()
     deletionStatus.value = assetDeletionSuccessMessage(assetReplacementGate(target).taskStatus)

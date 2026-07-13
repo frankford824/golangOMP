@@ -113,6 +113,7 @@ import {
   prepareTaskAssetUploadSession,
   completePreparedTaskAssetUploadSession,
   cancelPreparedTaskAssetUploadSession,
+  uploadTaskFileViaAssetSession,
 } from '../assetUploadFlow'
 import { assetsApi } from '@/services/api/assetsApi'
 import { taskAssetsApi } from '@/services/api/taskAssetsApi'
@@ -488,5 +489,65 @@ describe('completePreparedTaskAssetUploadSession — remote transport', () => {
     await expect(
       completePreparedTaskAssetUploadSession(prepared, fakeFile()),
     ).rejects.toThrow('上传入口未准备好')
+  })
+})
+
+describe('uploadTaskFileViaAssetSession — replacement race recovery', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('cancels the losing session, recreates it once, and completes the replacement', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.mocked(assetsApi.createAssetUploadSession)
+      .mockResolvedValueOnce({
+        data: {
+          data: {
+            session: { id: 'sess-race-1' },
+            remote: { upload_url: 'https://proxy.internal/race-1', required_upload_content_type: 'image/png' },
+          },
+        },
+      } as never)
+      .mockResolvedValueOnce({
+        data: {
+          data: {
+            session: { id: 'sess-race-2' },
+            remote: { upload_url: 'https://proxy.internal/race-2', required_upload_content_type: 'image/png' },
+          },
+        },
+      } as never)
+    vi.mocked(assetsApi.uploadToRemoteUrl).mockResolvedValue({} as never)
+    vi.mocked(assetsApi.cancelAssetUploadSession).mockResolvedValue({} as never)
+    vi.mocked(assetsApi.completeAssetUploadSession)
+      .mockRejectedValueOnce(Object.assign(new Error('资产版本发生并发更新，请刷新后重试'), {
+        status: 409,
+        code: 'CONFLICT',
+        denyCode: 'asset_version_race_retry',
+        responseData: {
+          error: {
+            code: 'CONFLICT',
+            details: { deny_code: 'asset_version_race_retry' },
+          },
+        },
+      }))
+      .mockResolvedValueOnce({
+        data: {
+          data: {
+            session: { id: 'sess-race-2', session_status: 'completed', upload_status: 'uploaded' },
+            asset: { id: '12401', file_role: 'delivery' },
+          },
+        },
+      } as never)
+
+    await uploadTaskFileViaAssetSession(
+      '2199',
+      fakeFile('replacement.png'),
+      { asset_kind: 'delivery', asset_id: 12401, remark: 'replace current resource' },
+    )
+
+    expect(assetsApi.createAssetUploadSession).toHaveBeenCalledTimes(2)
+    expect(assetsApi.uploadToRemoteUrl).toHaveBeenCalledTimes(2)
+    expect(assetsApi.completeAssetUploadSession).toHaveBeenCalledTimes(2)
+    expect(assetsApi.cancelAssetUploadSession).toHaveBeenCalledWith('sess-race-1', {})
   })
 })

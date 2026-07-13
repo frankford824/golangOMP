@@ -210,6 +210,10 @@ type taskForUpdateRepo interface {
 	GetByIDForUpdate(ctx context.Context, tx repo.Tx, id int64) (*domain.Task, error)
 }
 
+type taskModuleForUpdateRepo interface {
+	GetByTaskAndKeyForUpdate(ctx context.Context, tx repo.Tx, taskID int64, moduleKey string) (*domain.TaskModule, error)
+}
+
 type TaskAssetCenterServiceOption func(*taskAssetCenterService)
 
 func NewTaskAssetCenterService(
@@ -1334,6 +1338,11 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 				approvedBy = &params.CompletedBy
 			}
 		}
+		sourceModuleKey := designAssetSourceModuleKeyForTask(task, requestAssetType)
+		sourceTaskModuleID, err := s.resolveTaskAssetSourceModuleID(ctx, tx, task, sourceModuleKey)
+		if err != nil {
+			return fmt.Errorf("resolve task asset source module: %w", err)
+		}
 		taskAsset := &domain.TaskAsset{
 			TaskID:               params.TaskID,
 			AssetID:              &assetID,
@@ -1357,7 +1366,8 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 			UploadedBy:           params.CompletedBy,
 			UploadedAt:           &now,
 			Remark:               firstNonEmpty(strings.TrimSpace(params.Remark), strings.TrimSpace(request.Remark)),
-			SourceModuleKey:      designAssetSourceModuleKeyForTask(task, requestAssetType),
+			SourceModuleKey:      sourceModuleKey,
+			SourceTaskModuleID:   sourceTaskModuleID,
 			FlowReviewStatus:     flowReviewStatus,
 			ApprovedAt:           approvedAt,
 			ApprovedBy:           approvedBy,
@@ -1546,6 +1556,37 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 
 func (s *taskAssetCenterService) markDesignModuleSubmitted(ctx context.Context, tx repo.Tx, taskID int64) error {
 	return s.markDesignSubmissionModuleState(ctx, tx, taskID, designSubmissionTransitionForTask(nil))
+}
+
+func (s *taskAssetCenterService) resolveTaskAssetSourceModuleID(ctx context.Context, tx repo.Tx, task *domain.Task, moduleKey string) (*int64, error) {
+	moduleKey = strings.TrimSpace(moduleKey)
+	if s.taskModuleRepo == nil || task == nil || moduleKey == "" {
+		return nil, nil
+	}
+
+	var (
+		module *domain.TaskModule
+		err    error
+	)
+	if atomicRepo, ok := s.taskModuleRepo.(taskModuleForUpdateRepo); ok {
+		module, err = atomicRepo.GetByTaskAndKeyForUpdate(ctx, tx, task.ID, moduleKey)
+	} else {
+		module, err = s.taskModuleRepo.GetByTaskAndKey(ctx, task.ID, moduleKey)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if module == nil && task.TaskStatus == domain.TaskStatusCompleted {
+		module, err = s.taskModuleRepo.InsertPlaceholder(ctx, tx, task.ID, moduleKey)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if module == nil || module.ID <= 0 {
+		return nil, nil
+	}
+	moduleID := module.ID
+	return &moduleID, nil
 }
 
 func (s *taskAssetCenterService) markDesignSubmissionModuleState(ctx context.Context, tx repo.Tx, taskID int64, transition designSubmissionTransition) error {
