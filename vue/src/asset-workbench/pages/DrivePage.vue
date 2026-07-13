@@ -42,6 +42,7 @@ import { createArchiveEntryObjectUrl, downloadArchiveEntryBlob } from '@aw/share
 import DriveThumb from '@aw/shared/drive/DriveThumb.vue'
 import DriveUploadDialog from '@aw/shared/drive/DriveUploadDialog.vue'
 import MaterialListThumb from '@aw/shared/materials/MaterialListThumb.vue'
+import { matchesClientMaterialQuery } from '@aw/shared/materials/clientMaterialSearch'
 import IconfontActionIcon from '@aw/shared/icons/IconfontActionIcon.vue'
 import WorkbenchFolderIcon from '@aw/shared/icons/WorkbenchFolderIcon.vue'
 import WorkbenchPreviewDialog from '@aw/shared/preview/WorkbenchPreviewDialog.vue'
@@ -2339,15 +2340,9 @@ async function loadMaterials(query = materialQuery.value, options: { append?: bo
     } else {
       const published = await assetWorkbenchApi.listClientMaterials(false)
       clientMaterials.value = published
-      const q = materialQuery.value.toLowerCase()
       materialItems.value = published.map(materialFromClient).filter((asset) => {
         if (!materialMatchesActiveFilters(asset)) return false
-        if (!q) return true
-        return [titleOf(asset), asset.original_filename, asset.resource_id, asset.scope_sku_code, asset.source_label]
-          .filter(Boolean)
-          .join(' ')
-          .toLowerCase()
-          .includes(q)
+        return matchesClientMaterialQuery(asset, materialQuery.value)
       })
       materialFileTotal.value = materialItems.value.length
       materialPage.value = 1
