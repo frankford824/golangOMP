@@ -54,6 +54,73 @@ func TestPendingExternalAssetQueriesScopeMountsAndBackOffFailures(t *testing.T) 
 	}
 }
 
+func TestClaimPendingOSSUsesLockedLeaseSelection(t *testing.T) {
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherFunc(func(expected, actual string) error {
+		normalized := strings.Join(strings.Fields(actual), " ")
+		for _, fragment := range []string{
+			"oss_sync_status = 'uploading' AND updated_at <= ?",
+			"FOR UPDATE SKIP LOCKED",
+			"status <> 'missing'",
+		} {
+			if !strings.Contains(normalized, fragment) {
+				return fmt.Errorf("claim query missing %q: %s", fragment, normalized)
+			}
+		}
+		return nil
+	})))
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	leaseBefore := time.Date(2026, 7, 12, 20, 0, 0, 0, time.UTC)
+	mock.ExpectBegin()
+	mock.ExpectQuery("claim pending OSS").
+		WithArgs("/p3", leaseBefore, 25).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}))
+	mock.ExpectCommit()
+
+	repository := NewExternalAssetRepo(New(db))
+	rows, err := repository.ClaimPendingOSSPrioritized(context.Background(), nil, []string{"/p3"}, 25, leaseBefore)
+	if err != nil {
+		t.Fatalf("ClaimPendingOSSPrioritized() error = %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("rows = %+v, want empty", rows)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations = %v", err)
+	}
+}
+
+func TestClaimedOSSCompletionUsesClaimTokenCAS(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+
+	mock.ExpectExec("UPDATE external_asset_records").
+		WithArgs("object/key.jpg", int64(91), "claim:token-1").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("UPDATE external_asset_records").
+		WithArgs("upload failed", int64(92), "claim:token-2").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+
+	repository := NewExternalAssetRepo(New(db))
+	ready, err := repository.MarkClaimedOSSReady(context.Background(), 91, "object/key.jpg", "token-1")
+	if err != nil || !ready {
+		t.Fatalf("MarkClaimedOSSReady() = %v, %v", ready, err)
+	}
+	failed, err := repository.MarkClaimedOSSFailed(context.Background(), 92, "token-2", "upload failed")
+	if err != nil || failed {
+		t.Fatalf("MarkClaimedOSSFailed() = %v, %v; want stale claim rejected", failed, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations = %v", err)
+	}
+}
+
 func TestBuildExternalAssetWhereUsesFullTextForKeyword(t *testing.T) {
 	where, args, orderBy := buildExternalAssetWhere(domain.ExternalAssetSearchQuery{Keyword: "KT poster", Page: 1, Size: 20})
 

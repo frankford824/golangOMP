@@ -191,6 +191,7 @@ Copy `deploy/deploy.env.example` to another local-only shell snippet if needed, 
 ## Package Contents
 - `ecommerce-api`
 - `erp_bridge`
+- `external_asset_nas_watcher` (static Linux AMD64 sidecar for Synology `/p3` event ingestion)
 - `.env.example`
 - `bridge.env.example`
 - `config/*.json`
@@ -199,7 +200,43 @@ Copy `deploy/deploy.env.example` to another local-only shell snippet if needed, 
 - `docs/API_USAGE_GUIDE.md` (auto-generated per release since v0.4)
 - `docs/API_INTEGRATION_GUIDE.md` (auto-generated per release since v0.4)
 - `deploy/*.sh` (includes `check-remote-db.sh` for database integration readiness check and `run-org-master-convergence.sh` for the v1.0 org-master-data release flow)
+- `deploy/docker-compose.external-asset-watcher.yml` (NAS-side watcher lifecycle; requires a dedicated event token and writable state directory)
 - `PACKAGE_INFO.json`
+
+## NAS External-Asset Watcher
+
+The packaged `external_asset_nas_watcher` is deployed on the Synology host with
+`deploy/docker-compose.external-asset-watcher.yml`. It watches
+`/volume1/image_lib/仓库素材区/徐凯`, persists a local snapshot, debounces writes,
+waits for file-size/mtime stability, and posts idempotent batches to
+`POST /v1/integration/external-assets/events`.
+
+NAS-side environment (keep the real token out of Git):
+
+```dotenv
+WATCH_BACKEND_URL=https://api.yongbo.cloud
+WATCH_EVENT_TOKEN=<same value as backend EXTERNAL_ASSETS_EVENT_TOKEN>
+WATCH_AGENT_ID=synology-p3-xukai
+WATCH_RECONCILE_INTERVAL=6h
+```
+
+Backend runtime requirements:
+
+- `EXTERNAL_ASSETS_EVENT_TOKEN` must be a dedicated random secret.
+- `EXTERNAL_ASSETS_EVENT_ROOTS=/p3/仓库素材区/徐凯` restricts accepted events.
+- `EXTERNAL_ASSETS_PREPARE_LEASE_TTL=2h` reclaims interrupted OSS uploads.
+- Include `/p3` and `/p3/仓库素材区/徐凯` in `EXTERNAL_ASSETS_FULL_SYNC_MOUNTS`
+  and `EXTERNAL_ASSETS_FULL_SYNC_ROOTS`; the existing full-sync interval is the
+  authoritative periodic calibration if inotify delivery or watcher state is lost.
+- Keep `EXTERNAL_ASSETS_FULL_SYNC_MAX_FILES_PER_MOUNT` above the measured root
+  size (the deployment default is `100000`) so calibration completes instead of
+  stopping in a safe-but-partial state.
+
+On first start, `WATCH_BOOTSTRAP_EMIT=false` snapshots existing files without
+flooding the event endpoint. Run one scoped full sync after deployment to establish
+the backend baseline. Subsequent create, close-write, move, and delete events are
+sent after the stability delay; a six-hour local snapshot reconciliation and the
+backend full sync independently repair missed events.
 
 ## Local Packaging Only
 - `bash ./deploy/package-local.sh --version v0.1`

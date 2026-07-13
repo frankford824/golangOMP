@@ -1300,6 +1300,63 @@ func TestProcessPendingOSSPrioritizesRequiredPrefixes(t *testing.T) {
 	}
 }
 
+func TestApplyFilesystemEventsValidatesRootAndWakesOSSWorker(t *testing.T) {
+	repository := &externalAssetRepoStub{}
+	svc := NewService(repository, Config{
+		Enabled:             true,
+		Mounts:              ParseMounts("/p3:nas_local"),
+		EventRoots:          ParseOSSPrefixes("/p3/仓库素材区/徐凯"),
+		OSSRequiredPrefixes: ParseOSSPrefixes("/p3/仓库素材区/徐凯"),
+	}, nil)
+	modifiedAt := time.Date(2026, 7, 12, 20, 30, 0, 0, time.UTC)
+	batch := domain.ExternalAssetFilesystemEventBatch{
+		AgentID: "nas-p3",
+		Events: []domain.ExternalAssetFilesystemEvent{
+			{EventID: "evt-upsert", Type: domain.ExternalAssetFilesystemEventUpsert, MountPath: "/p3", OriginPath: "/p3/仓库素材区/徐凯/SKU-1/main.jpg", FileSize: 128, ModifiedAt: &modifiedAt, ObservedAt: modifiedAt.Add(time.Second)},
+			{EventID: "evt-upsert", Type: domain.ExternalAssetFilesystemEventUpsert, MountPath: "/p3", OriginPath: "/p3/仓库素材区/徐凯/SKU-1/main.jpg", FileSize: 128, ModifiedAt: &modifiedAt, ObservedAt: modifiedAt.Add(time.Second)},
+			{EventID: "evt-delete", Type: domain.ExternalAssetFilesystemEventDelete, MountPath: "/p3", OriginPath: "/p3/仓库素材区/徐凯/SKU-1/old.jpg", ObservedAt: modifiedAt.Add(2 * time.Second)},
+		},
+	}
+
+	result, appErr := svc.ApplyFilesystemEvents(context.Background(), batch)
+	if appErr != nil {
+		t.Fatalf("ApplyFilesystemEvents() error = %v", appErr)
+	}
+	if result.Received != 3 || result.Applied != 2 || result.Duplicates != 1 || result.Upserted != 1 || result.Deleted != 1 {
+		t.Fatalf("result = %+v", result)
+	}
+	if len(repository.upserts) != 1 || repository.upserts[0].SourceModifiedAt == nil || !repository.upserts[0].SourceModifiedAt.Equal(modifiedAt) {
+		t.Fatalf("upserts = %+v", repository.upserts)
+	}
+	if len(repository.missingOrigins) != 1 || repository.missingOrigins[0] != "/p3/仓库素材区/徐凯/SKU-1/old.jpg" {
+		t.Fatalf("missing origins = %+v", repository.missingOrigins)
+	}
+	select {
+	case <-svc.OSSPrepareWake():
+	default:
+		t.Fatal("upsert event should wake OSS preparation")
+	}
+}
+
+func TestApplyFilesystemEventsRejectsPathOutsideConfiguredRoot(t *testing.T) {
+	svc := NewService(&externalAssetRepoStub{}, Config{
+		Enabled:    true,
+		Mounts:     ParseMounts("/p3:nas_local"),
+		EventRoots: ParseOSSPrefixes("/p3/仓库素材区/徐凯"),
+	}, nil)
+	observedAt := time.Now().UTC()
+	_, appErr := svc.ApplyFilesystemEvents(context.Background(), domain.ExternalAssetFilesystemEventBatch{
+		AgentID: "nas-p3",
+		Events: []domain.ExternalAssetFilesystemEvent{{
+			EventID: "outside", Type: domain.ExternalAssetFilesystemEventDelete, MountPath: "/p3",
+			OriginPath: "/p3/仓库素材区/其他/file.jpg", ObservedAt: observedAt,
+		}},
+	})
+	if appErr == nil || appErr.Code != domain.ErrCodeInvalidRequest {
+		t.Fatalf("appErr = %+v, want invalid request", appErr)
+	}
+}
+
 type externalAssetRepoStub struct {
 	upserts      []domain.ExternalAssetUpsert
 	nextRunID    int64
@@ -1448,6 +1505,11 @@ func (r *externalAssetRepoStub) ListPendingOSSPrioritized(_ context.Context, pre
 	return nil, nil
 }
 
+func (r *externalAssetRepoStub) ClaimPendingOSSPrioritized(_ context.Context, prefixes []repo.ExternalAssetOriginPrefix, _ []string, _ int, _ time.Time) ([]*domain.ExternalAssetRecord, error) {
+	r.ossPriorityReads = append(r.ossPriorityReads, prefixes...)
+	return nil, nil
+}
+
 func (r *externalAssetRepoStub) ListPendingPreview(context.Context, []string, int) ([]*domain.ExternalAssetRecord, error) {
 	return nil, nil
 }
@@ -1462,6 +1524,14 @@ func (r *externalAssetRepoStub) ListDirectoryFiles(context.Context, string, []st
 
 func (r *externalAssetRepoStub) MarkOSSReady(context.Context, int64, string) error {
 	return nil
+}
+
+func (r *externalAssetRepoStub) MarkClaimedOSSReady(context.Context, int64, string, string) (bool, error) {
+	return true, nil
+}
+
+func (r *externalAssetRepoStub) MarkClaimedOSSFailed(context.Context, int64, string, string) (bool, error) {
+	return true, nil
 }
 
 func (r *externalAssetRepoStub) MarkPreviewReady(context.Context, int64, string) error {

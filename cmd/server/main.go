@@ -582,6 +582,7 @@ func main() {
 	assetWorkbenchH := handler.NewAssetWorkbenchHandler(assetWorkbenchSvc, cfg.AssetWorkbench.CookieDomain)
 	exportCenterH := handler.NewExportCenterHandler(exportCenterSvc)
 	integrationCenterH := handler.NewIntegrationCenterHandler(integrationCenterSvc)
+	integrationCenterH.SetExternalAssetEventService(externalAssetSvc)
 	codeRuleH := handler.NewCodeRuleHandler(codeRuleSvc)
 	ruleTemplateSvc := service.NewRuleTemplateService(ruleTemplateRepo)
 	ruleTemplateH := handler.NewRuleTemplateHandler(ruleTemplateSvc)
@@ -865,7 +866,7 @@ func startExternalAssetRefresh(ctx context.Context, svc *externalassets.Service,
 			}
 		}
 	}()
-	startPrepareLoop := func(name string, run func(context.Context, int) (int, error)) {
+	startPrepareLoop := func(name string, wake <-chan struct{}, run func(context.Context, int) (int, error)) {
 		go func() {
 			interval := svc.PrepareInterval()
 			ticker := time.NewTicker(interval)
@@ -888,12 +889,14 @@ func startExternalAssetRefresh(ctx context.Context, svc *externalassets.Service,
 					return
 				case <-ticker.C:
 					runPrepare()
+				case <-wake:
+					runPrepare()
 				}
 			}
 		}()
 	}
-	startPrepareLoop("original", svc.ProcessPendingOSS)
-	startPrepareLoop("preview", svc.ProcessPendingPreview)
+	startPrepareLoop("original", svc.OSSPrepareWake(), svc.ProcessPendingOSS)
+	startPrepareLoop("preview", nil, svc.ProcessPendingPreview)
 }
 
 func startExperienceWorker(ctx context.Context, svc service.ExperienceService, cfg config.ExperienceConfig, logger *zap.Logger) {

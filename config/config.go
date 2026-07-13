@@ -151,10 +151,12 @@ type ExternalAssetsConfig struct {
 	OSSOriginalPrefix   string
 	OSSPreviewPrefix    string
 	OSSRequiredPrefixes string
+	EventRoots          string
 	LocalPathMappings   string
 	PrepareInterval     time.Duration
 	PrepareLimit        int
 	PrepareConcurrency  int
+	PrepareLeaseTTL     time.Duration
 	PrepareMounts       string
 }
 
@@ -382,15 +384,17 @@ func Load() (*Config, error) {
 			VisibleRoots:        getEnv("EXTERNAL_ASSETS_VISIBLE_ROOTS", getEnv("EXTERNAL_ASSETS_FULL_SYNC_ROOTS", "")),
 			FullSyncPageSize:    mustParseInt(getEnv("EXTERNAL_ASSETS_FULL_SYNC_PAGE_SIZE", "100")),
 			FullSyncMaxDepth:    mustParseInt(getEnv("EXTERNAL_ASSETS_FULL_SYNC_MAX_DEPTH", "16")),
-			FullSyncMaxFiles:    mustParseInt(getEnv("EXTERNAL_ASSETS_FULL_SYNC_MAX_FILES_PER_MOUNT", "20000")),
-			FullSyncMaxDirs:     mustParseInt(getEnv("EXTERNAL_ASSETS_FULL_SYNC_MAX_DIRS_PER_MOUNT", "5000")),
+			FullSyncMaxFiles:    mustParseInt(getEnv("EXTERNAL_ASSETS_FULL_SYNC_MAX_FILES_PER_MOUNT", "100000")),
+			FullSyncMaxDirs:     mustParseInt(getEnv("EXTERNAL_ASSETS_FULL_SYNC_MAX_DIRS_PER_MOUNT", "20000")),
 			OSSOriginalPrefix:   getEnv("EXTERNAL_ASSETS_OSS_ORIGINAL_PREFIX", "external-assets/alist/original"),
 			OSSPreviewPrefix:    getEnv("EXTERNAL_ASSETS_OSS_PREVIEW_PREFIX", "external-assets/alist/preview"),
 			OSSRequiredPrefixes: getEnv("EXTERNAL_ASSETS_OSS_REQUIRED_PREFIXES", "/p3/仓库素材区/徐凯"),
+			EventRoots:          getEnv("EXTERNAL_ASSETS_EVENT_ROOTS", getEnv("EXTERNAL_ASSETS_OSS_REQUIRED_PREFIXES", "/p3/仓库素材区/徐凯")),
 			LocalPathMappings:   getEnv("EXTERNAL_ASSETS_LOCAL_PATH_MAPPINGS", "/p3=/volume1/image_lib"),
 			PrepareInterval:     mustParseDuration(getEnv("EXTERNAL_ASSETS_PREPARE_INTERVAL", "30s")),
 			PrepareLimit:        mustParseInt(getEnv("EXTERNAL_ASSETS_PREPARE_LIMIT", "50")),
 			PrepareConcurrency:  mustParseInt(getEnv("EXTERNAL_ASSETS_PREPARE_CONCURRENCY", "4")),
+			PrepareLeaseTTL:     mustParseDuration(getEnv("EXTERNAL_ASSETS_PREPARE_LEASE_TTL", "2h")),
 			PrepareMounts:       getEnv("EXTERNAL_ASSETS_PREPARE_MOUNTS", ""),
 		},
 		AssetWorkbench: AssetWorkbenchConfig{

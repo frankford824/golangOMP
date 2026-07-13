@@ -481,6 +481,10 @@ func NewRouter(
 
 	integrationGroup := v1.Group("/integration")
 	{
+		externalAssetIntegrationGroup := integrationGroup.Group("/external-assets")
+		externalAssetIntegrationGroup.Use(withExternalAssetEventTokenAuth())
+		externalAssetIntegrationGroup.POST("/events", integrationCenterH.IngestExternalAssetEvents)
+
 		integrationGroup.GET("/connectors", access(integrationGroup, http.MethodGet, "/connectors", domain.APIReadinessInternalPlaceholder, domain.RoleAdmin, domain.RoleERP), integrationCenterH.ListConnectors)
 		integrationGroup.POST("/call-logs", access(integrationGroup, http.MethodPost, "/call-logs", domain.APIReadinessInternalPlaceholder, domain.RoleAdmin, domain.RoleERP), integrationCenterH.CreateCallLog)
 		integrationGroup.GET("/call-logs", access(integrationGroup, http.MethodGet, "/call-logs", domain.APIReadinessInternalPlaceholder, domain.RoleAdmin, domain.RoleERP), integrationCenterH.ListCallLogs)

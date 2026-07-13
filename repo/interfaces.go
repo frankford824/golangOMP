@@ -324,8 +324,11 @@ type ExternalAssetRepo interface {
 	ListDirectURLRefreshCandidates(ctx context.Context, mountPaths []string, limit int, staleBefore time.Time) ([]*domain.ExternalAssetRecord, error)
 	ListPendingOSS(ctx context.Context, mountPaths []string, limit int) ([]*domain.ExternalAssetRecord, error)
 	ListPendingOSSPrioritized(ctx context.Context, prefixes []ExternalAssetOriginPrefix, mountPaths []string, limit int) ([]*domain.ExternalAssetRecord, error)
+	ClaimPendingOSSPrioritized(ctx context.Context, prefixes []ExternalAssetOriginPrefix, mountPaths []string, limit int, leaseExpiredBefore time.Time) ([]*domain.ExternalAssetRecord, error)
 	ListPendingPreview(ctx context.Context, mountPaths []string, limit int) ([]*domain.ExternalAssetRecord, error)
 	MarkOSSReady(ctx context.Context, id int64, objectKey string) error
+	MarkClaimedOSSReady(ctx context.Context, id int64, objectKey, claimToken string) (bool, error)
+	MarkClaimedOSSFailed(ctx context.Context, id int64, claimToken, message string) (bool, error)
 	MarkPreviewReady(ctx context.Context, id int64, previewKey string) error
 	MarkPrepareFailed(ctx context.Context, id int64, target, message string) error
 }

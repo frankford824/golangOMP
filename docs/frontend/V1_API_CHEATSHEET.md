@@ -1,10 +1,10 @@
-# V1 API 速查表(352 path · 一行一条)
+# V1 API 速查表(353 path · 一行一条)
 
 > Revision: V1.3-A2 i_id-first task/ERP/search integration (2026-04-27)
 > Source: docs/api/openapi.yaml (post V1.3-A2)
 
 > 本表一行对应一个 `/v1` path；同一路径多 method 合并到 `Methods` 列。
-> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 352 个 `/v1` path。
+> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 353 个 `/v1` path。
 > 新前端只接 canonical 路径；compatibility/deprecated 路径仅作迁移兜底。
 
 | Methods | Path | Summary | RBAC | family doc |
@@ -127,6 +127,7 @@
 | GET | `/v1/task-board/queues` | Get task-board queue tasks | GET:Ops, Designer, CustomizationOperator, CustomizationReviewer, Audit_A, Audit_B, Warehouse, Admin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET, PATCH | `/v1/workbench/preferences` | Get saved workbench preferences；Save workbench preferences | GET:Ops, Designer, CustomizationOperator, CustomizationReviewer, Audit_A, Audit_B, Warehouse, Admin; PATCH:Ops, Designer, CustomizationOperator, CustomizationReviewer, Audit_A, Audit_B, Warehouse, Admin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/export-templates` | List export templates | GET:Ops, Designer, Audit_A, Audit_B, Warehouse, Admin | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/integration/external-assets/events` | Ingest NAS filesystem events | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/integration/connectors` | List integration connectors | GET:Admin, ERP | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET, POST | `/v1/integration/call-logs` | List integration call logs；Create integration call log | GET:Admin, ERP; POST:Admin, ERP | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/integration/call-logs/{id}` | Get integration call log | GET:Admin, ERP | [V1_API_TASKS.md](V1_API_TASKS.md) |

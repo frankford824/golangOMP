@@ -475,6 +475,7 @@ package_release() {
   local bridge_output
   local asset_preview_output
   local external_asset_worker_output
+  local external_asset_nas_watcher_output
 
   dist_root="$(resolve_path "$root" "$output_root")"
   artifact_dir_name="${artifact_prefix}-${version}-linux-amd64"
@@ -487,6 +488,7 @@ package_release() {
   bridge_output="$stage_root/erp_bridge"
   asset_preview_output="$stage_root/generate_asset_previews"
   external_asset_worker_output="$stage_root/external_asset_worker"
+  external_asset_nas_watcher_output="$stage_root/external_asset_nas_watcher"
 
   rm -rf "$stage_root" "$artifact_path"
   mkdir -p "$stage_root" "$stage_root/config" "$stage_root/db" "$stage_root/docs" "$deploy_root"
@@ -504,6 +506,9 @@ package_release() {
     if [ -f "$root/cmd/tools/external-asset-worker/main.go" ]; then
       go_build_linux_amd64 "$root" "$go_tool" "$external_asset_worker_output" "./cmd/tools/external-asset-worker"
     fi
+    if [ -f "$root/cmd/tools/external-asset-nas-watcher/main_linux.go" ]; then
+      go_build_linux_amd64 "$root" "$go_tool" "$external_asset_nas_watcher_output" "./cmd/tools/external-asset-nas-watcher"
+    fi
   )
 
   wait_for_file "$stage_root/ecommerce-api" "main"
@@ -513,6 +518,9 @@ package_release() {
   fi
   if [ -f "$root/cmd/tools/external-asset-worker/main.go" ]; then
     wait_for_file "$stage_root/external_asset_worker" "external asset worker"
+  fi
+  if [ -f "$root/cmd/tools/external-asset-nas-watcher/main_linux.go" ]; then
+    wait_for_file "$stage_root/external_asset_nas_watcher" "external asset NAS watcher"
   fi
 
   cp "$root"/config/*.json "$stage_root/config/"
@@ -525,6 +533,7 @@ package_release() {
   cp "$root/deploy/main.env.example" "$stage_root/.env.example"
   cp "$root/deploy/bridge.env.example" "$stage_root/bridge.env.example"
   cp "$root/deploy/DEPLOYMENT_WORKFLOW.md" "$stage_root/README_DEPLOY.md"
+  cp "$root/deploy/docker-compose.external-asset-watcher.yml" "$deploy_root/docker-compose.external-asset-watcher.yml"
 
   local helpe
   for helper in lib.sh remote-deploy.sh run-with-env.sh run-pending-migrations.sh run-migrations-v05.sh run-org-master-convergence.sh verify-v05-acceptance.sh start-main.sh stop-main.sh start-bridge.sh stop-bridge.sh start-sync.sh stop-sync.sh verify-runtime.sh check-three-services.sh check-remote-db.sh; do
@@ -546,6 +555,9 @@ package_release() {
   if [ -f "$stage_root/external_asset_worker" ]; then
     chmod +x "$stage_root/external_asset_worker"
   fi
+  if [ -f "$stage_root/external_asset_nas_watcher" ]; then
+    chmod +x "$stage_root/external_asset_nas_watcher"
+  fi
 
   cat >"$stage_root/PACKAGE_INFO.json" <<EOF
 {
@@ -556,11 +568,13 @@ package_release() {
   "bridge_binary": "erp_bridge",
   "asset_preview_generator_binary": "generate_asset_previews",
   "external_asset_worker_binary": "external_asset_worker",
+  "external_asset_nas_watcher_binary": "external_asset_nas_watcher",
   "resolved_entrypoint": "$(json_escape "$entrypoint")",
   "main_build_command": "CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o ecommerce-api $(json_escape "$entrypoint")",
   "bridge_build_command": "CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o erp_bridge $(json_escape "$entrypoint")",
   "asset_preview_generator_build_command": "CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o generate_asset_previews ./cmd/tools/generate-asset-previews",
   "external_asset_worker_build_command": "CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o external_asset_worker ./cmd/tools/external-asset-worker",
+  "external_asset_nas_watcher_build_command": "CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o external_asset_nas_watcher ./cmd/tools/external-asset-nas-watcher",
   "runtime_bridge_base_url": "$(json_escape "$bridge_base_url")",
   "suggested_remote_base_dir": "/root/ecommerce_ai",
   "runtime_env_example": ".env.example",

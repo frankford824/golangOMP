@@ -47,6 +47,12 @@ tags:
   - name: V6-Legacy
     description: Legacy public routes documented for compatibility or retirement tracking only. Do not use them as canonical MAIN routes or new integration targets.
 components:
+  securitySchemes:
+    ExternalAssetEventToken:
+      type: apiKey
+      in: header
+      name: X-External-Asset-Event-Token
+      description: Dedicated pre-shared machine credential for the NAS filesystem event watcher. It does not grant access to session or legacy agent APIs.
   schemas:
     V7Role:
       type: string
@@ -7815,6 +7821,65 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/ExportTemplate'
+    ExternalAssetFilesystemEventType:
+      type: string
+      enum: [upsert, delete]
+    ExternalAssetFilesystemEvent:
+      type: object
+      required: [event_id, type, mount_path, origin_path, observed_at]
+      properties:
+        event_id:
+          type: string
+          minLength: 1
+          description: Stable id generated from operation, normalized origin path, size, and source mtime. Replays are safe.
+        type:
+          $ref: '#/components/schemas/ExternalAssetFilesystemEventType'
+        mount_path:
+          type: string
+          example: /p3
+        origin_path:
+          type: string
+          example: /p3/仓库素材区/徐凯/SKU-001/main.jpg
+        file_size:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Required for `upsert`; omitted for `delete`.
+        modified_at:
+          type: string
+          format: date-time
+          description: Required source-file mtime for `upsert`; omitted for `delete`.
+        observed_at:
+          type: string
+          format: date-time
+    ExternalAssetFilesystemEventBatch:
+      type: object
+      required: [agent_id, events]
+      properties:
+        agent_id:
+          type: string
+          minLength: 1
+        events:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            $ref: '#/components/schemas/ExternalAssetFilesystemEvent'
+    ExternalAssetFilesystemEventResult:
+      type: object
+      required: [received, applied, duplicates, upserted, deleted]
+      properties:
+        received: { type: integer }
+        applied: { type: integer }
+        duplicates: { type: integer }
+        upserted: { type: integer }
+        deleted: { type: integer }
+    ExternalAssetFilesystemEventResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: '#/components/schemas/ExternalAssetFilesystemEventResult'
     IntegrationConnectorKey:
       type: string
       enum: [erp_product_stub, erp_bridge_product_upsert, export_adapter_bridge]
@@ -16725,6 +16790,39 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ExportTemplateListResponse'
+  /v1/integration/external-assets/events:
+    post:
+      summary: Ingest NAS filesystem events
+      description: |
+        Dedicated machine-to-machine entry for the NAS watcher. The backend validates every path against configured NAS event roots, applies upsert/delete transitions idempotently by external origin identity and source fingerprint, queues required originals for OSS, and wakes the upload worker immediately. Duplicate `event_id` values inside one batch are ignored. Periodic full reconciliation remains the recovery path for missed filesystem events.
+      tags: [IntegrationCenter, InternalPlaceholder]
+      x-api-readiness: internal_placeholder
+      x-machine-auth:
+        mode: dedicated_pre_shared_token
+        header: X-External-Asset-Event-Token
+      security:
+        - ExternalAssetEventToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExternalAssetFilesystemEventBatch'
+      responses:
+        '200':
+          description: Filesystem events accepted and applied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExternalAssetFilesystemEventResponse'
+        '400':
+          description: Invalid batch, event type, file metadata, mount, or origin root
+        '401':
+          description: Missing or invalid dedicated machine token
+        '409':
+          description: External asset synchronization is disabled
+        '500':
+          description: Event application or OSS queueing failed
   /v1/integration/connectors:
     get:
       summary: List integration connectors

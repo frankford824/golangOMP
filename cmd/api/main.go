@@ -469,6 +469,7 @@ func main() {
 	workbenchH := handler.NewWorkbenchHandler(workbenchSvc)
 	exportCenterH := handler.NewExportCenterHandler(exportCenterSvc)
 	integrationCenterH := handler.NewIntegrationCenterHandler(integrationCenterSvc)
+	integrationCenterH.SetExternalAssetEventService(externalAssetSvc)
 	codeRuleH := handler.NewCodeRuleHandler(codeRuleSvc)
 	ruleTemplateSvc := service.NewRuleTemplateService(ruleTemplateRepo)
 	ruleTemplateH := handler.NewRuleTemplateHandler(ruleTemplateSvc)

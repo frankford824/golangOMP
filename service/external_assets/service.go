@@ -63,10 +63,12 @@ type Config struct {
 	OSSOriginalPrefix   string
 	OSSPreviewPrefix    string
 	OSSRequiredPrefixes []string
+	EventRoots          []string
 	LocalPathMappings   map[string]string
 	PrepareInterval     time.Duration
 	PrepareLimit        int
 	PrepareConcurrency  int
+	PrepareLeaseTTL     time.Duration
 	PrepareMounts       []string
 }
 
@@ -115,6 +117,7 @@ type Service struct {
 	keywordRefreshTimeout  time.Duration
 	keywordRefreshAsyncFn  func(func())
 	previewPrepareAsyncFn  func(func())
+	ossPrepareWake         chan struct{}
 }
 
 func ConfigFromApp(cfg config.ExternalAssetsConfig) Config {
@@ -140,10 +143,12 @@ func ConfigFromApp(cfg config.ExternalAssetsConfig) Config {
 		OSSOriginalPrefix:   strings.Trim(strings.TrimSpace(cfg.OSSOriginalPrefix), "/"),
 		OSSPreviewPrefix:    strings.Trim(strings.TrimSpace(cfg.OSSPreviewPrefix), "/"),
 		OSSRequiredPrefixes: ParseOSSPrefixes(cfg.OSSRequiredPrefixes),
+		EventRoots:          ParseOSSPrefixes(cfg.EventRoots),
 		LocalPathMappings:   ParseLocalPathMappings(cfg.LocalPathMappings),
 		PrepareInterval:     cfg.PrepareInterval,
 		PrepareLimit:        cfg.PrepareLimit,
 		PrepareConcurrency:  cfg.PrepareConcurrency,
+		PrepareLeaseTTL:     cfg.PrepareLeaseTTL,
 		PrepareMounts:       ParseMountPaths(cfg.PrepareMounts),
 	}
 }
@@ -163,6 +168,9 @@ func NewService(repo repo.ExternalAssetRepo, cfg Config, ossDirect *baseservice.
 	}
 	if len(cfg.Mounts) == 0 {
 		cfg.Mounts = ParseMounts("/quark:netdisk,/p3:nas_local")
+	}
+	if len(cfg.EventRoots) == 0 {
+		cfg.EventRoots = append([]string(nil), cfg.OSSRequiredPrefixes...)
 	}
 	if len(cfg.VisibleRoots) == 0 && len(cfg.FullSyncRoots) > 0 {
 		cfg.VisibleRoots = append([]string(nil), cfg.FullSyncRoots...)
@@ -191,6 +199,9 @@ func NewService(repo repo.ExternalAssetRepo, cfg Config, ossDirect *baseservice.
 	if cfg.PrepareConcurrency <= 0 || cfg.PrepareConcurrency > 16 {
 		cfg.PrepareConcurrency = 4
 	}
+	if cfg.PrepareLeaseTTL <= 0 {
+		cfg.PrepareLeaseTTL = 2 * time.Hour
+	}
 	return &Service{
 		cfg:       cfg,
 		repo:      repo,
@@ -211,6 +222,7 @@ func NewService(repo repo.ExternalAssetRepo, cfg Config, ossDirect *baseservice.
 		previewPrepareAsyncFn: func(fn func()) {
 			go fn()
 		},
+		ossPrepareWake: make(chan struct{}, 1),
 	}
 }
 
@@ -247,6 +259,26 @@ func (s *Service) PrepareLimit() int {
 		return 50
 	}
 	return s.cfg.PrepareLimit
+}
+
+// OSSPrepareWake exposes a coalescing wake signal for the backend worker.
+// Filesystem events can therefore start preparation immediately while the
+// periodic ticker remains as a recovery fallback.
+func (s *Service) OSSPrepareWake() <-chan struct{} {
+	if s == nil {
+		return nil
+	}
+	return s.ossPrepareWake
+}
+
+func (s *Service) wakeOSSPrepare() {
+	if s == nil || s.ossPrepareWake == nil {
+		return
+	}
+	select {
+	case s.ossPrepareWake <- struct{}{}:
+	default:
+	}
 }
 
 func (s *Service) ConfiguredMountPaths() []string {
@@ -1737,15 +1769,22 @@ func (s *Service) ProcessPendingOSS(ctx context.Context, limit int) (int, error)
 			return 0, err
 		}
 	}
-	rows, err := s.repo.ListPendingOSSPrioritized(ctx, priorityPrefixes, prepareMounts, limit)
+	leaseExpiredBefore := s.nowFn().UTC().Add(-s.cfg.PrepareLeaseTTL)
+	rows, err := s.repo.ClaimPendingOSSPrioritized(ctx, priorityPrefixes, prepareMounts, limit, leaseExpiredBefore)
 	if err != nil {
 		return 0, err
 	}
 	var done int
 	var mu sync.Mutex
 	s.runPrepareWorkers(ctx, rows, func(row *domain.ExternalAssetRecord) {
+		claimToken := strings.TrimPrefix(row.LastPrepareError, "claim:")
 		if err := s.uploadLocalOriginal(ctx, row); err != nil {
-			_ = s.repo.MarkPrepareFailed(ctx, row.ID, "oss", err.Error())
+			_, _ = s.repo.MarkClaimedOSSFailed(ctx, row.ID, claimToken, err.Error())
+			return
+		}
+		key := s.BuildOSSOriginalKey(row)
+		committed, err := s.repo.MarkClaimedOSSReady(ctx, row.ID, key, claimToken)
+		if err != nil || !committed {
 			return
 		}
 		mu.Lock()
@@ -1866,7 +1905,7 @@ func (s *Service) uploadLocalOriginal(ctx context.Context, row *domain.ExternalA
 	if err := s.ossDirect.UploadObjectFromReader(ctx, key, normalizeMimeType(row.FileName, row.MimeType), rc); err != nil {
 		return err
 	}
-	return s.repo.MarkOSSReady(ctx, row.ID, key)
+	return nil
 }
 
 func (s *Service) renderAndUploadPreview(ctx context.Context, row *domain.ExternalAssetRecord) error {

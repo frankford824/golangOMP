@@ -2,6 +2,7 @@ package mysqlrepo
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
@@ -1202,6 +1203,108 @@ func (r *externalAssetRepo) ListPendingOSSPrioritized(ctx context.Context, prefi
 	return scanExternalAssetRows(rows)
 }
 
+// ClaimPendingOSSPrioritized selects and marks upload work in one transaction.
+// SKIP LOCKED prevents concurrent backend/manual workers from selecting the
+// same rows. A random marker in last_prepare_error is the completion CAS token;
+// updated_at is the lease clock used to reclaim abandoned uploads.
+func (r *externalAssetRepo) ClaimPendingOSSPrioritized(ctx context.Context, prefixes []repo.ExternalAssetOriginPrefix, mountPaths []string, limit int, leaseExpiredBefore time.Time) ([]*domain.ExternalAssetRecord, error) {
+	limit = externalAssetPrepareLimit(limit)
+	priorityOrder, priorityArgs := externalAssetOriginPrefixPriorityOrder(prefixes)
+	mountClause, mountArgs := externalAssetQueueMountClause(mountPaths)
+	if leaseExpiredBefore.IsZero() {
+		leaseExpiredBefore = time.Now().UTC().Add(-2 * time.Hour)
+	}
+	tx, err := r.db.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin external oss claim: %w", err)
+	}
+	defer tx.Rollback()
+
+	args := append([]interface{}{}, mountArgs...)
+	args = append(args, leaseExpiredBefore.UTC())
+	args = append(args, priorityArgs...)
+	args = append(args, limit)
+	rows, err := tx.QueryContext(ctx, `
+		SELECT id
+		  FROM external_asset_records
+		 WHERE kind = 'nas_local'
+		   AND is_dir = 0
+		   AND status <> 'missing'
+		   `+mountClause+`
+		   AND (
+		     oss_sync_status = 'pending'
+		     OR (oss_sync_status = 'failed' AND updated_at <= UTC_TIMESTAMP() - INTERVAL 10 MINUTE)
+		     OR (oss_sync_status = 'uploading' AND updated_at <= ?)
+		   )
+		 ORDER BY `+priorityOrder+`CASE oss_sync_status WHEN 'pending' THEN 0 WHEN 'failed' THEN 1 ELSE 2 END, updated_at ASC, id ASC
+		 LIMIT ?
+		 FOR UPDATE SKIP LOCKED`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("select external oss claims: %w", err)
+	}
+	ids := make([]int64, 0, limit)
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("scan external oss claim id: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, fmt.Errorf("iterate external oss claim ids: %w", err)
+	}
+	_ = rows.Close()
+	if len(ids) == 0 {
+		if err := tx.Commit(); err != nil {
+			return nil, fmt.Errorf("commit empty external oss claim: %w", err)
+		}
+		return []*domain.ExternalAssetRecord{}, nil
+	}
+
+	placeholders := make([]string, len(ids))
+	idArgs := make([]interface{}, len(ids))
+	for idx, id := range ids {
+		placeholders[idx] = "?"
+		idArgs[idx] = id
+	}
+	inClause := strings.Join(placeholders, ",")
+	claimToken, err := newExternalAssetClaimToken()
+	if err != nil {
+		return nil, err
+	}
+	claimMarker := "claim:" + claimToken
+	updateArgs := append([]interface{}{claimMarker}, idArgs...)
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE external_asset_records
+		   SET oss_sync_status = 'uploading', last_prepare_error = ?, updated_at = UTC_TIMESTAMP()
+		 WHERE id IN (`+inClause+`)`, updateArgs...); err != nil {
+		return nil, fmt.Errorf("mark external oss claims uploading: %w", err)
+	}
+	claimedRows, err := tx.QueryContext(ctx, externalAssetSelect+` WHERE id IN (`+inClause+`) ORDER BY id ASC`, idArgs...)
+	if err != nil {
+		return nil, fmt.Errorf("load external oss claims: %w", err)
+	}
+	claimed, err := scanExternalAssetRows(claimedRows)
+	_ = claimedRows.Close()
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit external oss claim: %w", err)
+	}
+	return claimed, nil
+}
+
+func newExternalAssetClaimToken() (string, error) {
+	raw := make([]byte, 16)
+	if _, err := rand.Read(raw); err != nil {
+		return "", fmt.Errorf("generate external oss claim token: %w", err)
+	}
+	return hex.EncodeToString(raw), nil
+}
+
 func (r *externalAssetRepo) ListPendingPreview(ctx context.Context, mountPaths []string, limit int) ([]*domain.ExternalAssetRecord, error) {
 	limit = externalAssetPrepareLimit(limit)
 	mountClause, mountArgs := externalAssetQueueMountClause(mountPaths)
@@ -1252,6 +1355,30 @@ func (r *externalAssetRepo) MarkOSSReady(ctx context.Context, id int64, objectKe
 		   SET oss_original_key = ?, oss_sync_status = 'ready', last_prepare_error = NULL
 		 WHERE id = ?`, strings.TrimSpace(objectKey), id)
 	return wrapExternalAssetUpdate(err, "mark external oss ready")
+}
+
+func (r *externalAssetRepo) MarkClaimedOSSReady(ctx context.Context, id int64, objectKey, claimToken string) (bool, error) {
+	result, err := r.db.db.ExecContext(ctx, `
+		UPDATE external_asset_records
+		   SET oss_original_key = ?, oss_sync_status = 'ready', last_prepare_error = NULL
+		 WHERE id = ? AND status <> 'missing' AND oss_sync_status = 'uploading' AND last_prepare_error = ?`, strings.TrimSpace(objectKey), id, "claim:"+strings.TrimSpace(claimToken))
+	if err != nil {
+		return false, wrapExternalAssetUpdate(err, "mark claimed external oss ready")
+	}
+	affected, _ := result.RowsAffected()
+	return affected == 1, nil
+}
+
+func (r *externalAssetRepo) MarkClaimedOSSFailed(ctx context.Context, id int64, claimToken, message string) (bool, error) {
+	result, err := r.db.db.ExecContext(ctx, `
+		UPDATE external_asset_records
+		   SET oss_sync_status = 'failed', last_prepare_error = ?
+		 WHERE id = ? AND status <> 'missing' AND oss_sync_status = 'uploading' AND last_prepare_error = ?`, strings.TrimSpace(message), id, "claim:"+strings.TrimSpace(claimToken))
+	if err != nil {
+		return false, wrapExternalAssetUpdate(err, "mark claimed external oss failed")
+	}
+	affected, _ := result.RowsAffected()
+	return affected == 1, nil
 }
 
 func (r *externalAssetRepo) MarkPreviewReady(ctx context.Context, id int64, previewKey string) error {

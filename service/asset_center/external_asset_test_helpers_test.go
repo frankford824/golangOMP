@@ -152,12 +152,24 @@ func (r *assetCenterExternalRepoStub) ListPendingOSSPrioritized(context.Context,
 	return nil, nil
 }
 
+func (r *assetCenterExternalRepoStub) ClaimPendingOSSPrioritized(context.Context, []repo.ExternalAssetOriginPrefix, []string, int, time.Time) ([]*domain.ExternalAssetRecord, error) {
+	return nil, nil
+}
+
 func (r *assetCenterExternalRepoStub) ListPendingPreview(context.Context, []string, int) ([]*domain.ExternalAssetRecord, error) {
 	return nil, nil
 }
 
 func (r *assetCenterExternalRepoStub) MarkOSSReady(context.Context, int64, string) error {
 	return nil
+}
+
+func (r *assetCenterExternalRepoStub) MarkClaimedOSSReady(context.Context, int64, string, string) (bool, error) {
+	return true, nil
+}
+
+func (r *assetCenterExternalRepoStub) MarkClaimedOSSFailed(context.Context, int64, string, string) (bool, error) {
+	return true, nil
 }
 
 func (r *assetCenterExternalRepoStub) MarkPreviewReady(context.Context, int64, string) error {

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 
@@ -11,11 +12,38 @@ import (
 )
 
 type IntegrationCenterHandler struct {
-	svc service.IntegrationCenterService
+	svc                 service.IntegrationCenterService
+	externalAssetEvents externalAssetEventService
+}
+
+type externalAssetEventService interface {
+	ApplyFilesystemEvents(context.Context, domain.ExternalAssetFilesystemEventBatch) (*domain.ExternalAssetFilesystemEventResult, *domain.AppError)
 }
 
 func NewIntegrationCenterHandler(svc service.IntegrationCenterService) *IntegrationCenterHandler {
 	return &IntegrationCenterHandler{svc: svc}
+}
+
+func (h *IntegrationCenterHandler) SetExternalAssetEventService(svc externalAssetEventService) {
+	h.externalAssetEvents = svc
+}
+
+func (h *IntegrationCenterHandler) IngestExternalAssetEvents(c *gin.Context) {
+	if h.externalAssetEvents == nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInternalError, "external asset event service is not configured", nil))
+		return
+	}
+	var batch domain.ExternalAssetFilesystemEventBatch
+	if err := c.ShouldBindJSON(&batch); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	result, appErr := h.externalAssetEvents.ApplyFilesystemEvents(c.Request.Context(), batch)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
 }
 
 type createIntegrationCallLogReq struct {
