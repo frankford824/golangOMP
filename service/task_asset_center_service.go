@@ -2306,7 +2306,32 @@ func isAuditSupplementUploadRequest(request *domain.UploadRequest) bool {
 }
 
 func (s *taskAssetCenterService) authorizeAuditSupplementRead(ctx context.Context, task *domain.Task) *domain.AppError {
-	return s.authorizeAuditSupplementAccess(ctx, task, false)
+	if task == nil {
+		return domain.ErrNotFound
+	}
+	actor, ok := resolveTaskActionActor(ctx)
+	if !ok {
+		return domain.NewAppError(domain.ErrCodeUnauthorized, "actor context required", nil)
+	}
+	if !hasAnyRoleValue(actor.Roles,
+		domain.RoleAuditA,
+		domain.RoleAuditB,
+		domain.RoleAdmin,
+		domain.RoleSuperAdmin,
+		domain.RoleHRAdmin,
+		domain.RoleRoleAdmin,
+		domain.RoleDeptAdmin,
+		domain.RoleTeamLead,
+		domain.RoleDesignDirector,
+	) {
+		return domain.NewAppError(domain.ErrCodePermissionDenied, "audit supplement requires an audit or management role", map[string]interface{}{
+			"deny_code":   "audit_supplement_missing_role",
+			"task_id":     task.ID,
+			"actor_id":    actor.ID,
+			"actor_roles": actor.Roles,
+		})
+	}
+	return s.taskActionAuthorizer().AuthorizeTaskAction(ctx, TaskActionReadDetail, task)
 }
 
 func (s *taskAssetCenterService) authorizeAuditSupplementWrite(ctx context.Context, task *domain.Task) *domain.AppError {
