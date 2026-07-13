@@ -1233,6 +1233,13 @@ func (s *auditV7Service) resolveAuditLaneProfileByUserID(ctx context.Context, us
 			"user_id":   userID,
 		})
 	}
+	if len(user.Roles) == 0 {
+		roles, err := s.scopeUserRepo.ListRoles(ctx, userID)
+		if err != nil {
+			return nil, infraError("load audit subject roles", err)
+		}
+		user.Roles = domain.NormalizeRoleValues(roles)
+	}
 	return buildAuditLaneProfileFromUser(user), nil
 }
 

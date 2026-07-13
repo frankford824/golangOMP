@@ -10,6 +10,20 @@ import (
 	"workflow/repo"
 )
 
+type auditLaneProductionShapeUserRepo struct {
+	repo.UserRepo
+}
+
+func (r auditLaneProductionShapeUserRepo) GetByID(ctx context.Context, id int64) (*domain.User, error) {
+	user, err := r.UserRepo.GetByID(ctx, id)
+	if user == nil || err != nil {
+		return user, err
+	}
+	copyUser := *user
+	copyUser.Roles = nil
+	return &copyUser, nil
+}
+
 func TestAuditV7ServiceApproveClearsHandlerForNextStage(t *testing.T) {
 	currentHandlerID := int64(41)
 	taskRepo := &prdTaskRepo{
@@ -43,6 +57,69 @@ func TestAuditV7ServiceApproveClearsHandlerForNextStage(t *testing.T) {
 	}
 	if taskRepo.tasks[1].CurrentHandlerID != nil {
 		t.Fatalf("Approve() current_handler_id = %+v, want nil", taskRepo.tasks[1].CurrentHandlerID)
+	}
+}
+
+func TestAuditV7ServiceApproveHydratesAuditorRolesForLanePolicy(t *testing.T) {
+	const (
+		taskID    = int64(2317)
+		auditorID = int64(331)
+	)
+	taskRepo := &prdTaskRepo{
+		tasks: map[int64]*domain.Task{
+			taskID: {
+				ID:              taskID,
+				TaskNo:          "RW-20260713-A-002314",
+				TaskType:        domain.TaskTypeOriginalProductDevelopment,
+				TaskStatus:      domain.TaskStatusPendingAuditA,
+				BusinessLane:    domain.TaskBusinessLaneNormal,
+				OwnerDepartment: string(domain.DepartmentOperations),
+				OwnerOrgTeam:    "天猫运营一部（池州）",
+			},
+		},
+	}
+	baseUserRepo := newIdentityUserRepo()
+	baseUserRepo.users[auditorID] = &domain.User{
+		ID:          auditorID,
+		Username:    "左取名",
+		DisplayName: "左取名",
+		Department:  domain.DepartmentCustomizationArt,
+		Team:        "全职组",
+		Status:      domain.UserStatusActive,
+	}
+	baseUserRepo.roles[auditorID] = []domain.Role{
+		domain.RoleAuditA,
+		domain.RoleCustomizationOperator,
+		domain.RoleCustomizationReviewer,
+	}
+	userRepo := auditLaneProductionShapeUserRepo{UserRepo: baseUserRepo}
+	svc := NewAuditV7Service(taskRepo, &auditV7RepoStub{}, &prdTaskEventRepo{}, prdCodeRuleService{}, step04TxRunner{},
+		WithAuditV7DataScopeResolver(NewRoleBasedDataScopeResolver()),
+		WithAuditV7ScopeUserRepo(userRepo))
+	ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{
+		ID:         auditorID,
+		Username:   "左取名",
+		Roles:      append([]domain.Role(nil), baseUserRepo.roles[auditorID]...),
+		Department: string(domain.DepartmentCustomizationArt),
+		Team:       "全职组",
+		Source:     domain.RequestActorSourceSessionToken,
+		AuthMode:   domain.AuthModeSessionTokenRoleEnforced,
+	})
+
+	if appErr := svc.Approve(ctx, ApproveAuditParams{
+		TaskID:     taskID,
+		AuditorID:  auditorID,
+		Stage:      domain.AuditRecordStageA,
+		NextStatus: domain.TaskStatusPendingWarehouseReceive,
+		Comment:    "审核通过",
+	}); appErr != nil {
+		t.Fatalf("Approve() unexpected error: %+v", appErr)
+	}
+	if baseUserRepo.listRolesCalls == 0 {
+		t.Fatal("Approve() should hydrate auditor roles from user_roles")
+	}
+	if got := taskRepo.tasks[taskID].TaskStatus; got != domain.TaskStatusPendingWarehouseReceive {
+		t.Fatalf("Approve() task status = %s, want %s", got, domain.TaskStatusPendingWarehouseReceive)
 	}
 }
 
