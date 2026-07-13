@@ -5610,7 +5610,7 @@ func (s *Service) OverviewSearch(ctx context.Context, actor domain.RequestActor,
 		PageSize:    pageSize,
 	}
 	var (
-		items  []*domain.AssetWorkbenchOverviewRow
+		items  = make([]*domain.AssetWorkbenchOverviewRow, 0, pageSize)
 		total  int64
 		appErr *domain.AppError
 		mu     sync.Mutex
@@ -9880,13 +9880,63 @@ func (s *Service) searchClientMaterialsForOverview(ctx context.Context, keyword 
 		return nil, 0, err
 	}
 	items := []*domain.AssetWorkbenchOverviewRow{}
+	seen := make(map[int64]struct{}, len(rows))
+	publishedByAsset := make(map[string][]*domain.AssetWorkbenchClientMaterial, len(rows))
 	for _, material := range rows {
+		normalizeClientMaterialRow(material)
+		if material != nil && material.AssetID > 0 {
+			key := clientMaterialAssetIndexKey(material.SourceType, material.AssetID)
+			publishedByAsset[key] = append(publishedByAsset[key], material)
+		}
 		if !clientMaterialMatchesOverviewKeyword(material, keyword) {
 			continue
 		}
 		row := overviewRowFromClientMaterial(material)
 		if row != nil {
 			items = append(items, row)
+			seen[material.ID] = struct{}{}
+		}
+	}
+	if strings.TrimSpace(keyword) != "" && externalMaterialCodePattern.MatchString(strings.TrimSpace(keyword)) && s.systemAssets != nil {
+		searchSize := limit
+		if searchSize <= 0 {
+			searchSize = 50
+		}
+		indexed, appErr := s.systemAssets.Search(ctx, domain.AssetSearchQuery{
+			Keyword:        strings.TrimSpace(keyword),
+			Page:           1,
+			Size:           searchSize,
+			Source:         domain.AssetResourceSourceAll,
+			UsableState:    domain.AssetUsableStateFilterAll,
+			FormatCategory: domain.AssetFormatCategoryAll,
+			IsArchived:     domain.AssetArchiveFilterFalse,
+			TaskStatus:     domain.AssetTaskStatusFilterAll,
+		})
+		if appErr != nil {
+			return nil, 0, appErr
+		}
+		if indexed != nil {
+			for _, asset := range indexed.Items {
+				if asset == nil || asset.ID <= 0 {
+					continue
+				}
+				for _, material := range publishedByAsset[clientMaterialAssetIndexKey(asset.SourceType, asset.ID)] {
+					if _, ok := seen[material.ID]; ok {
+						continue
+					}
+					copyMaterial := *material
+					copyMaterial.ScopeSKUCode = strings.TrimSpace(asset.ScopeSKUCode)
+					copyMaterial.SKUCode = strings.TrimSpace(asset.SKUCode)
+					copyMaterial.PrimarySKUCode = strings.TrimSpace(asset.PrimarySKUCode)
+					if !clientMaterialMatchesOverviewKeyword(&copyMaterial, keyword) {
+						continue
+					}
+					if row := overviewRowFromClientMaterial(&copyMaterial); row != nil {
+						items = append(items, row)
+						seen[material.ID] = struct{}{}
+					}
+				}
+			}
 		}
 	}
 	total := int64(len(items))
@@ -9894,6 +9944,14 @@ func (s *Service) searchClientMaterialsForOverview(ctx context.Context, keyword 
 		items = items[:limit]
 	}
 	return items, total, nil
+}
+
+func clientMaterialAssetIndexKey(sourceType string, assetID int64) string {
+	source := domain.NormalizeAssetResourceSource(sourceType)
+	if source == domain.AssetResourceSourceAll {
+		source = domain.AssetResourceSourceSystem
+	}
+	return fmt.Sprintf("%s:%d", source, assetID)
 }
 
 func clientMaterialMatchesOverviewKeyword(material *domain.AssetWorkbenchClientMaterial, keyword string) bool {

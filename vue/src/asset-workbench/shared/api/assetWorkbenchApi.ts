@@ -1211,6 +1211,24 @@ function unwrapPaginated<T>(payload: ApiEnvelope<T[]> | T[]): PaginatedResult<T>
   return { items, total: items.length }
 }
 
+function arrayOrEmpty<T>(value: T[] | null | undefined): T[] {
+  return Array.isArray(value) ? value : []
+}
+
+function normalizeOverviewSearchResult(value: unknown): OverviewSearchResult {
+  const result = value && typeof value === 'object' ? value as Partial<OverviewSearchResult> : {}
+  const items = arrayOrEmpty(result.items)
+  const total = Number(result.total)
+  const page = Number(result.page)
+  const size = Number(result.size)
+  return {
+    items,
+    total: Number.isFinite(total) ? total : items.length,
+    page: Number.isFinite(page) && page > 0 ? page : 1,
+    size: Number.isFinite(size) && size > 0 ? size : items.length,
+  }
+}
+
 export const assetWorkbenchApi = {
   async refreshDownloadCookie(signal?: AbortSignal): Promise<void> {
     await http.post('/v1/auth/asset-cookie', undefined, { signal })
@@ -1727,7 +1745,7 @@ export const assetWorkbenchApi = {
 
   async overviewSearch(params: Record<string, unknown> = {}, signal?: AbortSignal): Promise<OverviewSearchResult> {
     const res = await http.get<ApiEnvelope<OverviewSearchResult>>('/v1/asset-workbench/overview-search', { params, signal })
-    return unwrap(res.data)
+    return normalizeOverviewSearchResult(unwrap(res.data))
   },
 
   async driveDirectories(signal?: AbortSignal): Promise<DriveDirectoryRow[]> {
@@ -1827,7 +1845,7 @@ export const assetWorkbenchApi = {
       params: admin ? { admin: 1 } : undefined,
       signal,
     })
-    return unwrap(res.data)
+    return arrayOrEmpty(unwrap(res.data))
   },
 
   async searchClientMaterials(params: { q?: string; sku?: string; creator?: string; admin?: boolean; page?: number; page_size?: number } = {}, signal?: AbortSignal): Promise<ClientMaterialSearchResult> {

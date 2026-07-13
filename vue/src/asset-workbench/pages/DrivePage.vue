@@ -1746,9 +1746,10 @@ async function runUnifiedSearch() {
   try {
     const result = await assetWorkbenchApi.overviewSearch({ q, scope: searchScope.value, page: 1, page_size: 60 }, searchAbortController.signal)
     if (requestID !== searchRequestSeq) return
-    searchResults.value = result.items
+    const items = Array.isArray(result.items) ? result.items : []
+    searchResults.value = items
     searchTotal.value = result.total
-    void prefetchSearchResultPreviews(result.items)
+    void prefetchSearchResultPreviews(items)
   } catch (err) {
     if (requestID !== searchRequestSeq || isAbortError(err)) return
     searchResults.value = []

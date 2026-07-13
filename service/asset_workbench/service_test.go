@@ -1239,6 +1239,19 @@ func (r *clientMaterialRepo) GetClientMaterial(_ context.Context, materialID int
 	return &copyItem, nil
 }
 
+func (r *clientMaterialRepo) ListClientMaterials(_ context.Context, filter repo.AssetWorkbenchClientMaterialFilter) ([]*domain.AssetWorkbenchClientMaterial, error) {
+	items := make([]*domain.AssetWorkbenchClientMaterial, 0, len(r.materials))
+	for _, item := range r.materials {
+		if item == nil || (filter.Enabled != nil && item.Enabled != *filter.Enabled) {
+			continue
+		}
+		copyItem := *item
+		items = append(items, &copyItem)
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].ID < items[j].ID })
+	return items, nil
+}
+
 func (r *clientMaterialRepo) AppendEvent(_ context.Context, _ repo.Tx, event *domain.AssetWorkbenchEvent) (*domain.AssetWorkbenchEvent, error) {
 	copyEvent := *event
 	copyEvent.ID = int64(len(r.events) + 1)
@@ -3145,6 +3158,92 @@ func TestSystemAssetPreviewUsesSharedPreviewerBeforeDownload(t *testing.T) {
 	}
 	if previewer.downloadCalls != 0 {
 		t.Fatalf("downloadCalls = %d, want 0", previewer.downloadCalls)
+	}
+}
+
+func TestOverviewSearchReturnsEmptyItemsInsteadOfNil(t *testing.T) {
+	workbenchRepo := &clientMaterialRepo{materials: map[int64]*domain.AssetWorkbenchClientMaterial{}}
+	svc := NewService(
+		Config{Timezone: "Asia/Shanghai"},
+		WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}),
+	)
+
+	result, appErr := svc.OverviewSearch(
+		context.Background(),
+		domain.RequestActor{ID: 77, Roles: []domain.Role{domain.RoleAssetSubmitter}},
+		OverviewSearchParams{Query: "DZC000027", Scope: "operational", Page: 1, PageSize: 60},
+	)
+	if appErr != nil {
+		t.Fatalf("OverviewSearch() error = %+v", appErr)
+	}
+	if result == nil || result.Items == nil || len(result.Items) != 0 {
+		t.Fatalf("OverviewSearch() items = %#v, want non-nil empty slice", result)
+	}
+}
+
+func TestOverviewSearchMatchesIndexedClientMaterialSKU(t *testing.T) {
+	publishedAt := time.Date(2026, 7, 13, 8, 0, 0, 0, time.UTC)
+	workbenchRepo := &clientMaterialRepo{materials: map[int64]*domain.AssetWorkbenchClientMaterial{
+		982: {
+			ID:               982,
+			AssetID:          14354,
+			SourceType:       string(domain.AssetResourceSourceSystem),
+			ResourceID:       "14354",
+			Title:            "真硕定制海报",
+			FilenameSnapshot: "真硕-定制海报.psd",
+			Enabled:          true,
+			PublishedAt:      publishedAt,
+		},
+	}}
+	provider := &externalMaterialProviderStub{
+		searchResult: &assetcenter.SearchResult{
+			Items: []*assetcenter.AssetDetail{{
+				ID:             14354,
+				ResourceID:     "14354",
+				SourceType:     string(domain.AssetResourceSourceSystem),
+				ScopeSKUCode:   "DZC000027",
+				SKUCode:        "DZC000027",
+				PrimarySKUCode: "DZC000027",
+			}},
+			Total: 1,
+			Page:  1,
+			Size:  60,
+		},
+	}
+	svc := NewService(
+		Config{Timezone: "Asia/Shanghai"},
+		WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}),
+		WithSystemAssetSearcher(provider),
+	)
+
+	result, appErr := svc.OverviewSearch(
+		context.Background(),
+		domain.RequestActor{ID: 77, Roles: []domain.Role{domain.RoleAssetSubmitter}},
+		OverviewSearchParams{Query: "DZC000027", Scope: "operational", Page: 1, PageSize: 60},
+	)
+	if appErr != nil {
+		t.Fatalf("OverviewSearch() error = %+v", appErr)
+	}
+	if result == nil || len(result.Items) != 1 {
+		t.Fatalf("OverviewSearch() result = %#v, want one client material", result)
+	}
+	if got := result.Items[0].SecondaryCode; got != "DZC000027" {
+		t.Fatalf("OverviewSearch() secondary_code = %q, want DZC000027", got)
+	}
+	if provider.searchCalls != 1 {
+		t.Fatalf("OverviewSearch() indexed search calls = %d, want 1", provider.searchCalls)
+	}
+
+	titleResult, titleErr := svc.OverviewSearch(
+		context.Background(),
+		domain.RequestActor{ID: 77, Roles: []domain.Role{domain.RoleAssetSubmitter}},
+		OverviewSearchParams{Query: "真硕", Scope: "operational", Page: 1, PageSize: 60},
+	)
+	if titleErr != nil || titleResult == nil || len(titleResult.Items) != 1 {
+		t.Fatalf("OverviewSearch(title) result = %#v error = %+v, want one client material", titleResult, titleErr)
+	}
+	if provider.searchCalls != 1 {
+		t.Fatalf("OverviewSearch(title) indexed search calls = %d, want raw snapshot match without another indexed search", provider.searchCalls)
 	}
 }
 

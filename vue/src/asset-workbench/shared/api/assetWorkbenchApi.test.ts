@@ -1,15 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const postMock = vi.fn()
+const getMock = vi.fn()
 
 vi.mock('@/services/http', () => ({
   default: {
+    get: getMock,
     post: postMock,
   },
 }))
 
 describe('assetWorkbenchApi Excel imports', () => {
   beforeEach(() => {
+    getMock.mockReset()
     postMock.mockReset()
     postMock.mockResolvedValue({ data: { data: {} } })
   })
@@ -32,5 +35,39 @@ describe('assetWorkbenchApi Excel imports', () => {
         headers: { 'Content-Type': 'multipart/form-data' },
       })
     }
+  })
+})
+
+describe('assetWorkbenchApi array response normalization', () => {
+  beforeEach(() => {
+    getMock.mockReset()
+  })
+
+  it('normalizes a null overview item list to an empty result', async () => {
+    getMock.mockResolvedValue({
+      data: {
+        data: {
+          items: null,
+          total: 0,
+          page: 1,
+          size: 60,
+        },
+      },
+    })
+    const { assetWorkbenchApi } = await import('./assetWorkbenchApi')
+
+    await expect(assetWorkbenchApi.overviewSearch({ q: 'DZC000027' })).resolves.toEqual({
+      items: [],
+      total: 0,
+      page: 1,
+      size: 60,
+    })
+  })
+
+  it('normalizes a null client material list to an empty array', async () => {
+    getMock.mockResolvedValue({ data: { data: null } })
+    const { assetWorkbenchApi } = await import('./assetWorkbenchApi')
+
+    await expect(assetWorkbenchApi.listClientMaterials()).resolves.toEqual([])
   })
 })
