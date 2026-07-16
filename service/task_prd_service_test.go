@@ -959,6 +959,64 @@ func TestTaskServiceCreatePersistsProductSelectionContext(t *testing.T) {
 	}
 }
 
+func TestTaskServiceCreateInitializesResourceGroupsInsideCreateTransaction(t *testing.T) {
+	taskRepo := &prdTaskRepo{}
+	initializer := &resourceGroupInitializerRecorder{taskRepo: taskRepo}
+	svc := NewTaskService(
+		taskRepo,
+		&prdProcurementRepo{},
+		&prdTaskAssetRepo{},
+		&prdTaskEventRepo{},
+		nil,
+		&prdWarehouseRepo{},
+		prdCodeRuleService{},
+		step04TxRunner{},
+		WithTaskResourceGroupInitializer(initializer),
+	)
+
+	task, appErr := svc.Create(context.Background(), CreateTaskParams{
+		TaskType:      domain.TaskTypeOriginalProductDevelopment,
+		CreatorID:     9,
+		OwnerTeam:     domain.AllValidTeams()[0],
+		DeadlineAt:    timePtr(),
+		ChangeRequest: "update layout",
+		ProductSelection: &domain.TaskProductSelectionContext{
+			SelectedProductID:      int64Ptr(88),
+			SelectedProductName:    "KT Banner Stand",
+			SelectedProductSKUCode: "SKU-088",
+		},
+	})
+	if appErr != nil {
+		t.Fatalf("Create() unexpected error: %+v", appErr)
+	}
+	if len(initializer.calls) != 1 || initializer.calls[0].taskID != task.ID || initializer.calls[0].taskType != task.TaskType {
+		t.Fatalf("resource group initializer calls = %+v", initializer.calls)
+	}
+	if !initializer.sawTransaction || !initializer.sawPersistedTask {
+		t.Fatalf("initializer transaction/persisted task = %v/%v", initializer.sawTransaction, initializer.sawPersistedTask)
+	}
+}
+
+type resourceGroupInitializerRecorder struct {
+	taskRepo *prdTaskRepo
+	calls    []struct {
+		taskID   int64
+		taskType domain.TaskType
+	}
+	sawTransaction   bool
+	sawPersistedTask bool
+}
+
+func (r *resourceGroupInitializerRecorder) EnsureGroupShells(_ context.Context, tx repo.Tx, taskID int64, taskType domain.TaskType) error {
+	r.calls = append(r.calls, struct {
+		taskID   int64
+		taskType domain.TaskType
+	}{taskID: taskID, taskType: taskType})
+	r.sawTransaction = tx != nil
+	r.sawPersistedTask = r.taskRepo != nil && r.taskRepo.tasks[taskID] != nil
+	return nil
+}
+
 func TestTaskServiceCreateAutoGeneratesSKUForNewProductDevelopment(t *testing.T) {
 	taskRepo := &prdTaskRepo{}
 	eventRepo := &prdTaskEventRepo{}
@@ -4554,13 +4612,14 @@ func TestTaskServiceCreateBatchUniqueConflictReturnsInvalidRequest(t *testing.T)
 }
 
 type prdTaskRepo struct {
-	tasks          map[int64]*domain.Task
-	details        map[int64]*domain.TaskDetail
-	skuItems       map[int64][]*domain.TaskSKUItem
-	skuByCode      map[string]*domain.TaskSKUItem
-	listItems      []*domain.TaskListItem
-	lastListFilter repo.TaskListFilter
-	listCalls      int
+	tasks            map[int64]*domain.Task
+	details          map[int64]*domain.TaskDetail
+	skuItems         map[int64][]*domain.TaskSKUItem
+	skuByCode        map[string]*domain.TaskSKUItem
+	listItems        []*domain.TaskListItem
+	lastListFilter   repo.TaskListFilter
+	listCalls        int
+	getForUpdateHook func(*domain.Task)
 }
 
 type prdProcurementRepo struct {
@@ -4653,6 +4712,14 @@ func (r *prdTaskRepo) CreateSKUItems(_ context.Context, _ repo.Tx, items []*doma
 
 func (r *prdTaskRepo) GetByID(_ context.Context, id int64) (*domain.Task, error) {
 	return r.tasks[id], nil
+}
+
+func (r *prdTaskRepo) GetByIDForUpdate(_ context.Context, _ repo.Tx, id int64) (*domain.Task, error) {
+	task := r.tasks[id]
+	if r.getForUpdateHook != nil {
+		r.getForUpdateHook(task)
+	}
+	return task, nil
 }
 
 func (r *prdTaskRepo) GetDetailByTaskID(_ context.Context, taskID int64) (*domain.TaskDetail, error) {

@@ -278,12 +278,12 @@ curl -X POST https://api.example.com/v1/assets/excel-package/preview-file \
 支持方法: GET, DELETE。
 
 - `GET`: Returns one asset resource by id including full version list. Source V1_ASSET_OWNERSHIP §5.2.
-- `DELETE`: Hard-delete all stored versions (OSS DeleteObject + soft-delete DB rows); reason is required. SuperAdmin may delete assets in supported lifecycle states. For a Completed task, CustomizationReviewer, Audit_A, Audit_B, and AssetManager may delete only the current system reference/source/delivery resource. Active-task workflow permissions are unchanged. Source V1_ASSET_OWNERSHIP §5.4 plus completed-resource maintenance policy.
+- `DELETE`: Discards one staged, unbound resource and its backend-derived preview/design-thumb resources; reason is required. Authorization is the explicit `asset.manage` capability intersected with the task's stable organization-ID scope. The same transaction locks the complete resource set, rejects any resource referenced by a working/finalized/historical resource-group revision or client publication, immediately revokes access, soft-deletes metadata, and writes durable adapter-aware object-deletion outbox rows. Physical deletion is asynchronous: only `oss_upload_service` rows reach OSS; placeholder/mock/export-placeholder rows complete without a physical call; unknown adapters fail closed, alert, and retry indefinitely. Object-not-found is success. Completed and Archived tasks require reopen; reopening never permits deletion of files retained by an earlier finalized revision.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
 - `GET` 允许角色: Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, Warehouse, Admin。
-- `DELETE` 允许角色: SuperAdmin, CustomizationReviewer, Audit_A, Audit_B, AssetManager。
+- `DELETE` 允许角色: 已登录 / scope-aware。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 #### GET 细节
@@ -349,8 +349,9 @@ Content-Type: `application/json`
 ##### 错误码
 | HTTP | code | deny_code | 说明 |
 |---|---|---|---|
-| 403 | 见 `error.code` | 见 `deny_code` | Role or completed-resource maintenance scope denied |
+| 403 | 见 `error.code` | 见 `deny_code` | Missing `asset.manage` capability or outside the task's stable organization-ID scope |
 | 404 | 见 `error.code` | 见 `deny_code` | Asset not found |
+| 409 | 见 `error.code` | 见 `deny_code` | Task requires reopen, or the resource is bound, finalized, historical, or publication-pinned |
 
 ##### curl 示例
 ```bash
@@ -534,11 +535,11 @@ curl -X GET https://api.example.com/v1/assets/<asset_id>/preview \
 ### 简介
 支持方法: POST。
 
-- `POST`: Canonical frontend entry for asset upload session creation. Backend decides whether to use single-part or multipart upload and returns the upload strategy plus completion/cancel endpoints. Reference uploads are allowed while a task is still `PendingAssign`, so operations users can fill in reference material before a designer self-claims or is assigned. `CustomizationReviewer` is not a generic asset uploader; it may use this route only through `task.customization.review.asset_upload` for uploaded `source` assets while the task is in `PendingCustomizationReview` or `PendingEffectReview`. When the task is `Completed`, this route only replaces an active, non-archived current `reference`, `source`, or `delivery` resource supplied through `asset_id`; it never creates an unrelated new resource. `CustomizationReviewer`, regular audit roles (`Audit_A`/`Audit_B`), and `AssetManager` may perform this completed-task replacement across task department/team scope; active workflow tasks retain their normal workflow and organization-scope authorization. During `PendingCustomizationReview` or `PendingEffectReview`, an existing `delivery` may be replaced only when its `asset_id` is supplied; creating a second delivery root from those review states is rejected.
+- `POST`: Creates a staged task-asset upload session and lets the backend choose single-part or multipart OSS upload. The task must be in an editable design or audit state. Authorization is `task.design.submit`, `task.audit.decision`, or `asset.manage`, intersected with the task's stable organization-ID scope. Upload completion never advances workflow state. Completed and Archived tasks reject upload-session access/mutations and must be reopened first. Task state is locked and checked again in every transaction that writes upload-session state.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `POST` 允许角色: Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, AssetManager, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector。
+- `POST` 允许角色: 已登录 / scope-aware。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -591,7 +592,7 @@ Content-Type: `application/json`
 |---|---|---|---|
 | 400 | 见 `error.code` | 见 `deny_code` | Invalid request payload |
 | 403 | 见 `error.code` | 见 `deny_code` | Permission denied |
-| 409 | 见 `error.code` | 见 `deny_code` | Completed task request is not an existing-current-resource replacement |
+| 409 | 见 `error.code` | 见 `deny_code` | Task state changed concurrently, or the task is Completed/Archived and requires reopen |
 
 ### curl 示例
 ```bash
@@ -612,11 +613,11 @@ curl -X POST https://api.example.com/v1/assets/upload-sessions \
 ### 简介
 支持方法: GET。
 
-- `GET`: Returns the current upload-session state by session id.
+- `GET`: Returns the current upload-session state by session id. Because polling may synchronize remote session state, Completed and Archived tasks reject this operation and require reopen; the task is locked and checked again before any synchronized state is written.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `GET` 允许角色: Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, Warehouse, AssetManager, Admin。
+- `GET` 允许角色: 已登录 / scope-aware。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -650,6 +651,7 @@ curl -X POST https://api.example.com/v1/assets/upload-sessions \
 | HTTP | code | deny_code | 说明 |
 |---|---|---|---|
 | 404 | 见 `error.code` | 见 `deny_code` | Upload session not found |
+| 409 | 见 `error.code` | 见 `deny_code` | Task is Completed/Archived and requires reopen |
 
 ### curl 示例
 ```bash
@@ -668,11 +670,11 @@ curl -X GET https://api.example.com/v1/assets/upload-sessions/<session_id> \
 ### 简介
 支持方法: POST。
 
-- `POST`: Completes one asset upload session after the frontend uploads bytes to OSS using the returned plan. `CustomizationReviewer` completion is allowed only for the same restricted customization-review source upload flow documented on create. A delivery replacement created while the task is `Completed` remains approved and does not reopen the task workflow.
+- `POST`: Completes one staged upload after OSS bytes are verified. It never advances workflow state. Completed and Archived tasks reject the mutation and require reopen; task state is locked and checked again inside the transaction.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `POST` 允许角色: Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, AssetManager, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector。
+- `POST` 允许角色: 已登录 / scope-aware。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -732,7 +734,7 @@ Content-Type: `application/json`
 |---|---|---|---|
 | 400 | 见 `error.code` | 见 `deny_code` | Invalid request payload |
 | 404 | 见 `error.code` | 见 `deny_code` | Upload session not found |
-| 409 | 见 `error.code` | 见 `deny_code` | Upload session already terminal or asset type mismatch |
+| 409 | 见 `error.code` | 见 `deny_code` | Upload session already terminal, asset type mismatch, or Completed/Archived task requires reopen |
 
 ### curl 示例
 ```bash
@@ -753,11 +755,11 @@ curl -X POST https://api.example.com/v1/assets/upload-sessions/<session_id>/comp
 ### 简介
 支持方法: POST。
 
-- `POST`: Cancels one asset upload session and aborts the remote OSS session when needed. `CustomizationReviewer` cancellation is allowed only for the same restricted customization-review source upload flow documented on create. Completed tasks may cancel only upload sessions that were created as an existing-resource replacement.
+- `POST`: Cancels one staged upload session and aborts the remote OSS session when needed. Completed and Archived tasks reject the mutation and require reopen; task state is locked and checked again inside the transaction.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `POST` 允许角色: Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, AssetManager, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector。
+- `POST` 允许角色: 已登录 / scope-aware。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -799,7 +801,7 @@ Content-Type: `application/json`
 |---|---|---|---|
 | 400 | 见 `error.code` | 见 `deny_code` | Invalid request payload |
 | 404 | 见 `error.code` | 见 `deny_code` | Upload session not found |
-| 409 | 见 `error.code` | 见 `deny_code` | Completed upload session cannot be cancelled |
+| 409 | 见 `error.code` | 见 `deny_code` | Upload session is terminal, or the task is Completed/Archived and requires reopen |
 
 ### curl 示例
 ```bash
@@ -897,9 +899,9 @@ curl -X GET https://api.example.com/v1/assets/files/<path> \
   "data": [
     {
       "request_id": "...",
-      "owner_type": "...",
-      "owner_id": "...",
-      "task_id": "..."
+      "client_create_id": "...",
+      "client_item_id": "...",
+      "owner_type": "..."
     }
   ],
   "pagination": {
@@ -955,9 +957,9 @@ Content-Type: `application/json`
 {
   "data": {
     "request_id": "string",
-    "owner_type": "task",
-    "owner_id": 123,
-    "task_id": 123
+    "client_create_id": "string",
+    "client_item_id": "string",
+    "owner_type": "task"
   }
 }
 ```
@@ -1014,9 +1016,9 @@ curl -X POST https://api.example.com/v1/assets/upload-requests \
 {
   "data": {
     "request_id": "string",
-    "owner_type": "task",
-    "owner_id": 123,
-    "task_id": 123
+    "client_create_id": "string",
+    "client_item_id": "string",
+    "owner_type": "task"
   }
 }
 ```
@@ -1075,9 +1077,9 @@ Content-Type: `application/json`
 {
   "data": {
     "request_id": "string",
-    "owner_type": "task",
-    "owner_id": 123,
-    "task_id": 123
+    "client_create_id": "string",
+    "client_item_id": "string",
+    "owner_type": "task"
   }
 }
 ```

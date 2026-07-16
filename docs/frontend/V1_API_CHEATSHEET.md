@@ -1,10 +1,10 @@
-# V1 API 速查表(357 path · 一行一条)
+# V1 API 速查表(360 path · 一行一条)
 
 > Revision: V1.3-A2 i_id-first task/ERP/search integration (2026-04-27)
 > Source: docs/api/openapi.yaml (post V1.3-A2)
 
 > 本表一行对应一个 `/v1` path；同一路径多 method 合并到 `Methods` 列。
-> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 357 个 `/v1` path。
+> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 360 个 `/v1` path。
 > 新前端只接 canonical 路径；compatibility/deprecated 路径仅作迁移兜底。
 
 | Methods | Path | Summary | RBAC | family doc |
@@ -49,6 +49,40 @@
 | GET | `/v1/org-move-requests` | List org move requests | GET:SuperAdmin, HRAdmin, DepartmentAdmin | [V1_API_ORG.md](V1_API_ORG.md) |
 | POST | `/v1/org-move-requests/{id}/approve` | Approve an org move request | POST:SuperAdmin | [V1_API_ORG.md](V1_API_ORG.md) |
 | POST | `/v1/org-move-requests/{id}/reject` | Reject an org move request | POST:SuperAdmin | [V1_API_ORG.md](V1_API_ORG.md) |
+| GET | `/v1/access/permissions` | List the code-maintained capability catalog | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET, POST | `/v1/access/roles` | List administrator-managed business roles；Create a business role | GET:已登录 / scope-aware; POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| PATCH | `/v1/access/roles/{id}` | Update role display metadata | PATCH:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/access/roles/{id}/archive` | Archive an in-use role without physical deletion | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| PUT | `/v1/access/roles/{id}/permissions` | Atomically replace a role's capability set | PUT:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/access/users` | Search the minimal personnel selector for explicit assignments | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| PUT | `/v1/access/users/{id}/assignments` | Atomically replace a user's roles and stable organization-ID scopes | PUT:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/access/users/{id}/effective` | Resolve capabilities, scopes, sources and policy revision | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET, PUT | `/v1/access/org-policies/{subject_type}/{subject_id}` | Read explicitly enabled defaults for an organization ID；Atomically replace policies for an organization ID | GET:已登录 / scope-aware; PUT:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/access/preview` | Preview the current effective-access projection for a user | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/access/events` | List access-policy audit events | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/tasks/{id}/submit-design` | Atomically bind the complete resource manifest and submit for unified audit | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/tasks/{id}/audit/decision` | Approve and finalize, or return the task to design | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/tasks/audit/handover-candidates` | List PendingAudit tasks currently handled by the caller and eligible for handover | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/tasks/audit/handover-batch` | Hand over caller-owned PendingAudit tasks to an eligible auditor | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/tasks/{id}/audit/handover` | Hand over a PendingAudit task currently handled by the caller | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/tasks/{id}/audit/handovers` | List audit handovers visible in the caller's task scope | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/tasks/{id}/audit/takeover` | Accept a PendingAudit handover assigned to the caller | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/tasks/{id}/reopen` | Reopen a completed design or retouch task under optimistic concurrency | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/tasks/{id}/resource-bundle` | Read task, SKU and retouch resource groups | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/resource-groups` | Search the current working and finalized resource-group read model | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/resource-groups/{id}` | Read one resource group and its current revisions | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/resource-groups/batch-download` | Expand finalized revision items into an ordered download manifest | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/tasks/sku-planning/image-upload-sessions` | Stage one planning-SKU product image before task creation | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/tasks/sku-planning/image-upload-sessions/{session_id}` | Read a planning-SKU image staging session | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/tasks/sku-planning/image-upload-sessions/{session_id}/complete` | Complete staging and return an image_upload_ref | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/tasks/sku-planning/image-upload-sessions/{session_id}/abort` | Abort an unbound planning-SKU image staging session | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/tasks/sku-planning/template.xlsx` | Download the standard or ERP planning-SKU import template | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/tasks/sku-planning/parse-excel` | Parse and validate an import workbook without creating a task | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| PATCH | `/v1/tasks/{id}/planning-skus/{item_id}` | Create an immutable correction revision for a completed planning SKU | PATCH:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/tasks/{id}/planning-skus/export.xlsx` | Export all planning SKUs for one task | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/planning-skus/export.xlsx` | Export up to 5000 selected planning-SKU rows | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/tasks/{id}/planning-skus/erp-retry` | Queue retry for failed planning-SKU ERP projections | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/tasks/{id}/planning-skus/erp-resync` | Explicitly queue ERP overwrite after a completed-SKU correction | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET, POST | `/v1/trace-events` | List business trace events；Record frontend business trace event | GET:Admin, SuperAdmin, HRAdmin; POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/product-management` | List product management records | GET:Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, Warehouse, ERP, Admin, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/product-management/combo-tree` | List product management records grouped by ERP combo SKU | GET:Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, Warehouse, ERP, Admin, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
@@ -66,15 +100,15 @@
 | GET, POST | `/v1/cost-rule-bindings` | List cost rule i_id bindings；Create cost rule i_id binding | GET:Ops, ERP, Admin, SuperAdmin; POST:Ops, ERP, Admin, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/cost-rule-bindings/unbound-candidates` | List unbound i_id candidates from legacy pricing fallback | GET:Ops, ERP, Admin, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | PATCH | `/v1/cost-rule-bindings/{id}` | Patch cost rule i_id binding | PATCH:Ops, ERP, Admin, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| POST | `/v1/tasks/reference-upload-sessions` | Create task reference upload session | POST:Ops | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| GET | `/v1/tasks/reference-upload-sessions/{session_id}` | Get task reference upload session | GET:Ops | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| POST | `/v1/tasks/reference-upload-sessions/{session_id}/complete` | Complete task reference upload session | POST:Ops | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| POST | `/v1/tasks/reference-upload-sessions/{session_id}/abort` | Abort task reference upload session | POST:Ops | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/tasks/reference-upload-sessions` | Create task reference upload session | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/tasks/reference-upload-sessions/{session_id}` | Get task reference upload session | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/tasks/reference-upload-sessions/{session_id}/complete` | Complete task reference upload session | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/tasks/reference-upload-sessions/{session_id}/abort` | Abort task reference upload session | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/tasks/prepare-product-codes` | Prepare task product codes | POST:Ops, Admin | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| GET, POST | `/v1/tasks` | List tasks；Create task | GET:已登录 / 主流程读全量可见; POST:Ops | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| GET | `/v1/tasks/filter-options` | Get task center filter options | GET:Ops, Designer, CustomizationOperator, CustomizationReviewer, Audit_A, Audit_B, Warehouse, Outsource, Admin, SuperAdmin, HRAdmin, OrgAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET, POST | `/v1/tasks` | List tasks within explicit capability and data scope；Create task | GET:已登录 / 主流程读全量可见; POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/tasks/filter-options` | Get task center filter options | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/tasks/{id}` | Get task read model | GET:已登录 / 主流程读全量可见 | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| GET | `/v1/tasks/{id}/predictions` | Get task next-action prediction suggestions | GET:Ops, Designer, CustomizationOperator, CustomizationReviewer, Audit_A, Audit_B, Warehouse, Outsource, Admin, SuperAdmin, HRAdmin, OrgAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/tasks/{id}/predictions` | Get task next-action prediction suggestions | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET, PATCH | `/v1/tasks/{id}/product-info` | Get per-task product information；Patch per-task product information | GET:Ops, Designer, Audit_A, Audit_B, Warehouse, Outsource, Admin; PATCH:Ops, Warehouse, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET, PATCH | `/v1/tasks/{id}/cost-info` | Get per-task cost information；Patch per-task cost information | GET:Ops, Designer, Audit_A, Audit_B, Warehouse, Outsource, Admin; PATCH:Ops, Warehouse, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | PATCH | `/v1/tasks/{id}/sku-items/{sku_item_id}` | Patch one batch SKU item | PATCH:Ops, Warehouse, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_TASKS.md](V1_API_TASKS.md) |
@@ -83,8 +117,6 @@
 | PATCH | `/v1/tasks/{id}/business-info` | Update task business-info and generic cost fields | PATCH:Ops, Warehouse, Admin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/tasks/{id}/filing-status` | Get task filing status view | GET:Ops, Warehouse, Admin, Designer, Audit_A, Audit_B | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/tasks/{id}/filing/retry` | Retry task filing | POST:Ops, Warehouse, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| PATCH | `/v1/tasks/{id}/procurement` | Update purchase-task procurement draft data | PATCH:Ops, Warehouse, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| POST | `/v1/tasks/{id}/procurement/advance` | Advance purchase-task procurement lifecycle | POST:Ops, Warehouse, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/tasks/{id}/detail` | Get task aggregate detail (V1.1-A1 fast-path) | GET:已登录 / 主流程读全量可见 | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/tasks/{id}/cost-overrides` | Get task cost-override governance audit timeline | GET:Ops, Warehouse, Admin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/tasks/{id}/cost-overrides/{event_id}/review` | Upsert cost-override review placeholder boundary | POST:Ops, Warehouse, Admin | [V1_API_TASKS.md](V1_API_TASKS.md) |
@@ -92,36 +124,17 @@
 | POST | `/v1/tasks/{id}/assign` | Assign task to designer | POST:Designer, Ops, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/tasks/batch/assign` | Batch assign tasks to designer | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/tasks/batch/remind` | Batch remind task handlers | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| POST | `/v1/tasks/{id}/submit-design` | Submit task design asset | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| GET | `/v1/tasks/{id}/audit-supplements` | List audit post-close supplement uploads | GET:Audit_A, Audit_B, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| POST | `/v1/tasks/{id}/audit-supplements/upload-sessions` | Create audit supplement upload session | POST:Audit_A, Audit_B, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| POST | `/v1/tasks/{id}/audit-supplements/upload-sessions/{session_id}/complete` | Complete audit supplement upload session | POST:Audit_A, Audit_B, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/tasks/{id}/assets` | List task-linked design assets | GET:Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, Warehouse, Admin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/tasks/{id}/reference-assets/batch-download` | Batch download task reference direct URL manifest | POST:Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, Warehouse, Admin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/tasks/{id}/assets/timeline` | List legacy task asset timeline | GET:Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, Warehouse, Admin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/tasks/{id}/assets/{asset_id}/versions` | List versions under one design asset | GET:Designer, Ops, Audit_A, Audit_B | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/tasks/{id}/assets/{asset_id}/download` | Get latest version download info for one design asset | GET:Designer, Ops, Audit_A, Audit_B | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/tasks/{id}/assets/{asset_id}/versions/{version_id}/download` | Get specific version download info for one design asset | GET:Designer, Ops, Audit_A, Audit_B | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| POST | `/v1/tasks/{id}/assets/upload-sessions` | Create upload session | POST:Designer, Ops, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| GET | `/v1/tasks/{id}/assets/upload-sessions/{session_id}` | Get upload session status | GET:Designer, Ops, Audit_A, Audit_B | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| POST | `/v1/tasks/{id}/assets/upload-sessions/{session_id}/complete` | Complete upload session and record asset version | POST:Designer, Ops, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| POST | `/v1/tasks/{id}/assets/upload-sessions/{session_id}/abort` | Abort upload session | POST:Designer, Ops, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| POST | `/v1/tasks/{id}/assets/upload` | Create small-file direct upload handoff (legacy path) | POST:Designer, Ops | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| POST | `/v1/tasks/{id}/warehouse/prepare` | Prepare task for warehouse handoff | POST:Ops, Warehouse, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/tasks/{id}/assets/upload-sessions` | Create upload session | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/tasks/{id}/assets/upload-sessions/{session_id}` | Get upload session status | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/tasks/{id}/assets/upload-sessions/{session_id}/complete` | Complete upload session and record asset version | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/tasks/{id}/assets/upload-sessions/{session_id}/abort` | Abort upload session | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/tasks/{id}/assets/mock-upload` | Mock upload task asset | POST:Designer, Ops | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| POST | `/v1/tasks/{id}/close` | Close task explicitly | POST:Ops, Warehouse, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| POST | `/v1/tasks/{id}/audit/claim` | Claim task for audit | POST:Audit_A, Audit_B, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| POST | `/v1/tasks/{id}/audit/approve` | Approve audit and move task to next status | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| POST | `/v1/tasks/{id}/audit/reject` | Reject audit | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| POST | `/v1/tasks/{id}/audit/transfer` | Transfer audit responsibility | POST:Audit_A, Audit_B, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| GET | `/v1/tasks/audit/handover-candidates` | List audit handover candidates for current actor | GET:Audit_A, Audit_B, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| POST | `/v1/tasks/audit/handover-batch` | Create batch audit handovers | POST:Audit_A, Audit_B, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| POST | `/v1/tasks/{id}/audit/handover` | Create audit handover | POST:Audit_A, Audit_B, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| GET | `/v1/tasks/{id}/audit/handovers` | List audit handovers for task | GET:Audit_A, Audit_B, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| POST | `/v1/tasks/{id}/audit/takeover` | Take over pending handover | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| POST | `/v1/tasks/{id}/outsource` | Create outsource order for task | POST:Outsource, Ops, Admin | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| GET | `/v1/outsource-orders` | List outsource orders | GET:Outsource, Ops, Admin | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| GET | `/v1/warehouse/receipts` | List warehouse receipts | GET:Warehouse, Ops, Admin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/task-board/overview` | Get the main operations dashboard overview | GET:Ops, Designer, CustomizationOperator, CustomizationReviewer, Audit_A, Audit_B, Warehouse, Outsource, Admin, SuperAdmin, HRAdmin, OrgAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/task-board/summary` | Get task-board queue summary | GET:Ops, Designer, CustomizationOperator, CustomizationReviewer, Audit_A, Audit_B, Warehouse, Admin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/task-board/queues` | Get task-board queue tasks | GET:Ops, Designer, CustomizationOperator, CustomizationReviewer, Audit_A, Audit_B, Warehouse, Admin | [V1_API_TASKS.md](V1_API_TASKS.md) |
@@ -147,15 +160,6 @@
 | POST | `/v1/export-jobs/{id}/refresh-download` | Refresh export job download handoff | POST:Ops, Designer, Audit_A, Audit_B, Warehouse, Admin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/export-jobs/{id}/start` | Start export job placeholder runner | POST:Admin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/export-jobs/{id}/advance` | Advance export job lifecycle | POST:Admin | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| POST | `/v1/tasks/{id}/warehouse/receive` | Mark warehouse receipt as received | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| POST | `/v1/tasks/{id}/warehouse/reject` | Reject warehouse receipt | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| POST | `/v1/tasks/{id}/warehouse/complete` | Complete warehouse flow and move task to pending close | POST:Warehouse, Ops, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| POST | `/v1/tasks/{id}/customization/review` | Submit customization review for task | POST:CustomizationReviewer, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| GET | `/v1/customization-jobs` | List customization jobs | GET:CustomizationReviewer, CustomizationOperator, Ops, Designer, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| GET | `/v1/customization-jobs/{id}` | Get customization job detail | GET:CustomizationReviewer, CustomizationOperator, Ops, Designer, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| POST | `/v1/customization-jobs/{id}/effect-preview` | Submit customization effect preview | POST:CustomizationOperator, Designer, Ops, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| POST | `/v1/customization-jobs/{id}/effect-review` | Review customization effect | POST:CustomizationReviewer, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| POST | `/v1/customization-jobs/{id}/production-transfer` | Transfer customization production to warehouse QC | POST:CustomizationOperator, Designer, Ops, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/tasks/{id}/events` | List task events | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/code-rules` | List code rules | GET:Ops, Admin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/code-rules/{id}/preview` | Preview generated code | GET:Ops, Admin | [V1_API_TASKS.md](V1_API_TASKS.md) |
@@ -165,7 +169,6 @@
 | POST | `/v1/sku` | [V6] Create SKU | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/sku/{id}` | [V6] Get SKU by ID | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/sku/{id}/sync_status` | [V6] Frontend sequence-gap recovery | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| POST | `/v1/audit` | [V6] Submit audit decision | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/agent/sync` | [V6] NAS agent sync | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/agent/pull_job` | [V6] Agent pull job | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/agent/heartbeat` | [V6] Agent heartbeat | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
@@ -278,34 +281,34 @@
 | GET | `/v1/asset-workbench/client-materials/{material_id}/preview` | Get client material preview metadata | GET:AssetSubmitter, AssetManager, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/asset-workbench/client-materials/batch-download` | Batch download client materials | POST:AssetSubmitter, AssetManager, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/asset-workbench/system-assets/{asset_id}/preview` | Get asset workbench system asset preview | GET:AssetManager, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| POST | `/v1/task-create/asset-center/upload-sessions` | Create task-create reference upload session | POST:Ops, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_TASK_ASSETS.md](V1_API_TASK_ASSETS.md) |
-| GET | `/v1/task-create/asset-center/upload-sessions/{session_id}` | Get task-create reference upload session | GET:Ops | [V1_API_TASK_ASSETS.md](V1_API_TASK_ASSETS.md) |
-| POST | `/v1/task-create/asset-center/upload-sessions/{session_id}/complete` | Complete task-create reference upload session | POST:Ops | [V1_API_TASK_ASSETS.md](V1_API_TASK_ASSETS.md) |
-| POST | `/v1/task-create/asset-center/upload-sessions/{session_id}/abort` | Abort task-create reference upload session | POST:Ops | [V1_API_TASK_ASSETS.md](V1_API_TASK_ASSETS.md) |
-| POST | `/v1/tasks/reference-upload` | Upload task-create reference file through backend compatibility proxy | POST:Ops | [V1_API_TASK_ASSETS.md](V1_API_TASK_ASSETS.md) |
+| POST | `/v1/task-create/asset-center/upload-sessions` | Create task-create reference upload session | POST:已登录 / scope-aware | [V1_API_TASK_ASSETS.md](V1_API_TASK_ASSETS.md) |
+| GET | `/v1/task-create/asset-center/upload-sessions/{session_id}` | Get task-create reference upload session | GET:已登录 / scope-aware | [V1_API_TASK_ASSETS.md](V1_API_TASK_ASSETS.md) |
+| POST | `/v1/task-create/asset-center/upload-sessions/{session_id}/complete` | Complete task-create reference upload session | POST:已登录 / scope-aware | [V1_API_TASK_ASSETS.md](V1_API_TASK_ASSETS.md) |
+| POST | `/v1/task-create/asset-center/upload-sessions/{session_id}/abort` | Abort task-create reference upload session | POST:已登录 / scope-aware | [V1_API_TASK_ASSETS.md](V1_API_TASK_ASSETS.md) |
+| POST | `/v1/tasks/reference-upload` | Upload task-create reference file through backend compatibility proxy | POST:已登录 / scope-aware | [V1_API_TASK_ASSETS.md](V1_API_TASK_ASSETS.md) |
 | GET | `/v1/tasks/{id}/asset-center/assets` | List design assets in task asset center | GET:Designer, Ops, Audit_A, Audit_B | [V1_API_TASK_ASSETS.md](V1_API_TASK_ASSETS.md) |
 | GET | `/v1/tasks/{id}/asset-center/assets/{asset_id}/versions` | List versions under one design asset | GET:Designer, Ops, Audit_A, Audit_B | [V1_API_TASK_ASSETS.md](V1_API_TASK_ASSETS.md) |
 | GET | `/v1/tasks/{id}/asset-center/assets/{asset_id}/download` | Get latest version download info for one design asset | GET:Designer, Ops, Audit_A, Audit_B | [V1_API_TASK_ASSETS.md](V1_API_TASK_ASSETS.md) |
 | GET | `/v1/tasks/{id}/asset-center/assets/{asset_id}/versions/{version_id}/download` | Get specific version download info for one design asset | GET:Designer, Ops, Audit_A, Audit_B | [V1_API_TASK_ASSETS.md](V1_API_TASK_ASSETS.md) |
-| POST | `/v1/tasks/{id}/asset-center/upload-sessions` | Create upload session | POST:Designer, Ops, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_TASK_ASSETS.md](V1_API_TASK_ASSETS.md) |
-| POST | `/v1/tasks/{id}/asset-center/upload-sessions/small` | Create small-file upload session | POST:Designer, Ops, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_TASK_ASSETS.md](V1_API_TASK_ASSETS.md) |
-| POST | `/v1/tasks/{id}/asset-center/upload-sessions/multipart` | Create multipart upload session | POST:Designer, Ops, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_TASK_ASSETS.md](V1_API_TASK_ASSETS.md) |
-| GET | `/v1/tasks/{id}/asset-center/upload-sessions/{session_id}` | Get upload session status | GET:Designer, Ops, Audit_A, Audit_B | [V1_API_TASK_ASSETS.md](V1_API_TASK_ASSETS.md) |
-| POST | `/v1/tasks/{id}/asset-center/upload-sessions/{session_id}/complete` | Complete upload session and record asset version | POST:Designer, Ops, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_TASK_ASSETS.md](V1_API_TASK_ASSETS.md) |
-| POST | `/v1/tasks/{id}/asset-center/upload-sessions/{session_id}/cancel` | Cancel upload session | POST:Designer, Ops, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_TASK_ASSETS.md](V1_API_TASK_ASSETS.md) |
-| POST | `/v1/tasks/{id}/asset-center/upload-sessions/{session_id}/abort` | Abort upload session | POST:Designer, Ops, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_TASK_ASSETS.md](V1_API_TASK_ASSETS.md) |
+| POST | `/v1/tasks/{id}/asset-center/upload-sessions` | Create upload session | POST:已登录 / scope-aware | [V1_API_TASK_ASSETS.md](V1_API_TASK_ASSETS.md) |
+| POST | `/v1/tasks/{id}/asset-center/upload-sessions/small` | Create small-file upload session | POST:已登录 / scope-aware | [V1_API_TASK_ASSETS.md](V1_API_TASK_ASSETS.md) |
+| POST | `/v1/tasks/{id}/asset-center/upload-sessions/multipart` | Create multipart upload session | POST:已登录 / scope-aware | [V1_API_TASK_ASSETS.md](V1_API_TASK_ASSETS.md) |
+| GET | `/v1/tasks/{id}/asset-center/upload-sessions/{session_id}` | Get upload session status | GET:已登录 / scope-aware | [V1_API_TASK_ASSETS.md](V1_API_TASK_ASSETS.md) |
+| POST | `/v1/tasks/{id}/asset-center/upload-sessions/{session_id}/complete` | Complete upload session and record asset version | POST:已登录 / scope-aware | [V1_API_TASK_ASSETS.md](V1_API_TASK_ASSETS.md) |
+| POST | `/v1/tasks/{id}/asset-center/upload-sessions/{session_id}/cancel` | Cancel upload session | POST:已登录 / scope-aware | [V1_API_TASK_ASSETS.md](V1_API_TASK_ASSETS.md) |
+| POST | `/v1/tasks/{id}/asset-center/upload-sessions/{session_id}/abort` | Abort upload session | POST:已登录 / scope-aware | [V1_API_TASK_ASSETS.md](V1_API_TASK_ASSETS.md) |
 | GET | `/v1/assets` | List assets | GET:Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, Warehouse, Admin | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
 | POST | `/v1/assets/batch-download` | Batch download asset direct URL manifest | POST:Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, Warehouse, Admin | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
 | POST | `/v1/assets/excel-package/preview` | Preview Excel image package manifest | POST:Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, Warehouse, Admin | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
 | POST | `/v1/assets/excel-package/preview-file` | Preview Excel image package manifest from uploaded file | POST:Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, Warehouse, Admin | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
-| GET, DELETE | `/v1/assets/{asset_id}` | Get asset；Delete asset | GET:Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, Warehouse, Admin; DELETE:SuperAdmin, CustomizationReviewer, Audit_A, Audit_B, AssetManager | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
+| GET, DELETE | `/v1/assets/{asset_id}` | Get asset；Delete asset | GET:Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, Warehouse, Admin; DELETE:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
 | GET | `/v1/assets/{asset_id}/download` | Get asset download info | GET:Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, Warehouse, Admin | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
 | GET | `/v1/assets/{asset_id}/content` | Stream external netdisk asset content | GET:Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, Warehouse, Admin | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
 | GET | `/v1/assets/{asset_id}/preview` | Get asset preview info | GET:Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, Warehouse, Admin | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
-| POST | `/v1/assets/upload-sessions` | Create asset upload session | POST:Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, AssetManager, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
-| GET | `/v1/assets/upload-sessions/{session_id}` | Get asset upload session | GET:Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, Warehouse, AssetManager, Admin | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
-| POST | `/v1/assets/upload-sessions/{session_id}/complete` | Complete asset upload session | POST:Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, AssetManager, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
-| POST | `/v1/assets/upload-sessions/{session_id}/cancel` | Cancel asset upload session | POST:Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, AssetManager, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
+| POST | `/v1/assets/upload-sessions` | Create asset upload session | POST:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
+| GET | `/v1/assets/upload-sessions/{session_id}` | Get asset upload session | GET:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
+| POST | `/v1/assets/upload-sessions/{session_id}/complete` | Complete asset upload session | POST:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
+| POST | `/v1/assets/upload-sessions/{session_id}/cancel` | Cancel asset upload session | POST:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
 | GET | `/v1/assets/files/{path}` | Authorize and redirect OSS-backed business file | GET:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
 | GET, POST | `/v1/assets/upload-requests` | List asset upload requests；Create asset upload request | GET:Ops, Designer, Audit_A, Audit_B, Warehouse, Outsource, Admin; POST:Ops, Designer, Audit_A, Audit_B, Warehouse, Outsource, Admin | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
 | GET | `/v1/assets/upload-requests/{id}` | Get asset upload request | GET:Ops, Designer, Audit_A, Audit_B, Warehouse, Outsource, Admin | [V1_API_ASSETS.md](V1_API_ASSETS.md) |

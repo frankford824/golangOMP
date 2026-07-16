@@ -55,26 +55,6 @@ export function canSubmitTask(kind: TaskKind, form: TaskCreateFormModel, now: Da
         form.dueAt
       )
     }
-  } else if (kind === 'PURCHASE_TASK') {
-    // 采购任务：
-    // - 分类编码 / 产品名称 / 规格尺寸必填
-    // - 产品名称必填
-    // - 成本计价方式必填（costPriceMode）
-    // - 数量必填
-    // - 截止时间必填
-    base = !!(
-      form.category &&
-      form.productName &&
-      form.prefillSpecText?.trim() &&
-      form.costPriceMode &&
-      form.dueAt
-    )
-    if (!base) return false
-    if (form.purchaseQuantity == null || Number.isNaN(form.purchaseQuantity)) return false
-    // 成本计价方式为 manual 时，必须填写成本
-    if (form.costPriceMode === 'manual') {
-      if (form.costPriceAmount == null || Number.isNaN(form.costPriceAmount)) return false
-    }
   } else if (kind === 'RETOUCH_TASK') {
     base = !!(hasValidRetouchRequirementDrafts(form) && form.dueAt)
   }
@@ -124,8 +104,6 @@ export function getTaskCreateCompletionHint(
     base = !!(form.sku && form.productId && form.productName && form.groupId)
   } else if (kind === 'NEW_PRODUCT_DEV') {
     base = form.skuMode === 'multiple' ? !!form.dueAt : !!(form.productName && form.category)
-  } else if (kind === 'PURCHASE_TASK') {
-    base = !!(form.productName && form.category)
   } else if (kind === 'RETOUCH_TASK') {
     base = hasValidRetouchRequirementDrafts(form)
   }
@@ -153,19 +131,6 @@ export function getTaskCreateCompletionHint(
     if (form.skuMode !== 'multiple' && !form.designRequirement.trim()) return '请填写设计需求'
     if (!form.dueAt) return '请填写截止时间'
     return '请完善新品开发必填信息'
-  }
-
-  if (kind === 'PURCHASE_TASK') {
-    if (!form.category) return '请填写产品分类编码'
-    if (!form.productName) return '请填写产品名称'
-    if (!form.prefillSpecText?.trim()) return '请填写规格尺寸'
-    if (!form.costPriceMode) return '请选择成本计价方式'
-    if (form.purchaseQuantity == null || Number.isNaN(form.purchaseQuantity)) return '请填写数量'
-    if (form.costPriceMode === 'manual' && (form.costPriceAmount == null || Number.isNaN(form.costPriceAmount))) {
-      return '成本计价方式为手动录入时，请填写成本'
-    }
-    if (!form.dueAt) return '请填写截止时间'
-    return '请完善采购必填信息'
   }
 
   if (kind === 'RETOUCH_TASK') {

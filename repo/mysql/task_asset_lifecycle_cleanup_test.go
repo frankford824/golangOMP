@@ -85,34 +85,168 @@ func TestTaskAssetLifecycleRepoCleanupUsesAssetAgeAndExcludesCurrentVersion(t *t
 	}
 }
 
-func TestListResourceDeletionStorageKeysIncludesDerivedObjects(t *testing.T) {
-	db, mock, err := sqlmock.New()
+func TestEnqueueObjectDeletionsSnapshotsResourceAndDerivedObjectsInTransaction(t *testing.T) {
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherFunc(func(expectedSQL, actualSQL string) error {
+		if expectedSQL != "enqueue-resource-and-derived-object-deletions" {
+			return fmt.Errorf("unexpected expected SQL marker %q", expectedSQL)
+		}
+		normalized := strings.Join(strings.Fields(actualSQL), " ")
+		for _, required := range []string{
+			"task_asset_id, storage_ref_id, storage_adapter, storage_is_placeholder, storage_key, dedupe_key",
+			"CONCAT('asset-delete:task-asset:', object_keys.task_asset_id, ':', SHA2(object_keys.storage_key, 256))",
+			"TRIM(ta.storage_key) AS storage_key",
+			"LEFT JOIN asset_storage_refs storage_ref ON storage_ref.ref_id = ta.storage_ref_id",
+			"JOIN asset_storage_refs storage_ref ON storage_ref.ref_id = ta.storage_ref_id",
+			"COALESCE(NULLIF(TRIM(storage_ref.storage_adapter), ''), 'unknown') AS storage_adapter",
+			"COALESCE(storage_ref.is_placeholder, 0) AS storage_is_placeholder",
+			"ta.id IN (?,?,?)",
+			"ta.deleted_at IS NULL",
+		} {
+			if !strings.Contains(normalized, required) {
+				return fmt.Errorf("outbox query missing %q: %s", required, normalized)
+			}
+		}
+		return nil
+	})))
 	if err != nil {
 		t.Fatalf("sqlmock.New() error = %v", err)
 	}
 	defer db.Close()
 
-	mock.ExpectQuery(`SELECT DISTINCT COALESCE\(ta\.storage_key, ''\)`).
-		WithArgs(int64(12401), int64(12401)).
-		WillReturnRows(sqlmock.NewRows([]string{"storage_key"}).
-			AddRow("tasks/RW-1/delivery-B.psd").
-			AddRow("tasks/RW-1/previews/delivery-B-preview.webp").
-			AddRow("tasks/RW-1/previews/delivery-B-thumb.webp"))
+	mock.ExpectBegin()
+	mock.ExpectExec("enqueue-resource-and-derived-object-deletions").
+		WithArgs(int64(901), int64(902), int64(903), int64(901), int64(902), int64(903)).
+		WillReturnResult(sqlmock.NewResult(0, 5))
+	mock.ExpectCommit()
 
-	keys, err := NewTaskAssetLifecycleRepo(New(db)).(*taskAssetLifecycleRepo).
-		ListResourceDeletionStorageKeys(t.Context(), 12401)
+	mysqlDB := New(db)
+	lifecycleRepo := NewTaskAssetLifecycleRepo(mysqlDB)
+	err = mysqlDB.RunInTx(t.Context(), func(tx repo.Tx) error {
+		return lifecycleRepo.EnqueueObjectDeletions(t.Context(), tx, []int64{901, 902, 903})
+	})
 	if err != nil {
-		t.Fatalf("ListResourceDeletionStorageKeys() error = %v", err)
-	}
-	want := []string{
-		"tasks/RW-1/delivery-B.psd",
-		"tasks/RW-1/previews/delivery-B-preview.webp",
-		"tasks/RW-1/previews/delivery-B-thumb.webp",
-	}
-	if fmt.Sprint(keys) != fmt.Sprint(want) {
-		t.Fatalf("keys = %v, want %v", keys, want)
+		t.Fatalf("EnqueueObjectDeletions() error = %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestLockGenericDeleteGuardLocksHistoricalRevisionAndPublicationReferences(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatalf("sqlmock.New() error = %v", err)
+	}
+	defer db.Close()
+	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT id[\s\S]+FROM design_assets[\s\S]+source_asset_id`).
+		WithArgs(int64(12402), int64(12402)).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).
+			AddRow(int64(12402)).
+			AddRow(int64(12403)))
+	mock.ExpectQuery(`SELECT ta\.id, ta\.binding_state, ta\.bound_group_id, ta\.bound_role`).
+		WithArgs(int64(12402), int64(12403)).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "binding_state", "bound_group_id", "bound_role"}).
+			AddRow(int64(901), "staged", nil, nil).
+			AddRow(int64(902), "staged", nil, nil))
+	mock.ExpectQuery(`SELECT id FROM task_asset_group_revisions WHERE source_task_asset_id IN`).
+		WithArgs(int64(901), int64(902)).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(701)))
+	mock.ExpectQuery(`SELECT revision_id FROM task_asset_group_revision_items WHERE task_asset_id IN`).
+		WithArgs(int64(901), int64(902)).
+		WillReturnRows(sqlmock.NewRows([]string{"revision_id"}))
+	mock.ExpectQuery(`SELECT revision_id FROM task_asset_group_revision_references WHERE formal_task_asset_id IN`).
+		WithArgs(int64(901), int64(902)).
+		WillReturnRows(sqlmock.NewRows([]string{"revision_id"}))
+	mock.ExpectQuery(`SELECT id[\s\S]+FROM asset_workbench_client_materials`).
+		WithArgs(int64(12402), int64(12403)).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(801)))
+	mock.ExpectCommit()
+
+	mysqlDB := New(db)
+	lifecycleRepo := NewTaskAssetLifecycleRepo(mysqlDB)
+	var guard *repo.TaskAssetDeleteGuard
+	err = mysqlDB.RunInTx(t.Context(), func(tx repo.Tx) error {
+		var err error
+		guard, err = lifecycleRepo.LockGenericDeleteGuard(t.Context(), tx, 12402)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("LockGenericDeleteGuard() error = %v", err)
+	}
+	if !guard.AllStagedUnbound || fmt.Sprint(guard.DesignAssetIDs) != "[12402 12403]" || fmt.Sprint(guard.TaskAssetIDs) != "[901 902]" || fmt.Sprint(guard.RevisionReferenceIDs) != "[701]" || fmt.Sprint(guard.PublicationPinIDs) != "[801]" {
+		t.Fatalf("guard = %+v", guard)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("sql expectations: %v", err)
+	}
+}
+
+func TestObjectDeletionOutboxClaimReclaimsExpiredLeaseAndIncrementsAttempt(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	now := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
+	leaseUntil := now.Add(2 * time.Minute)
+	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT id, task_asset_id, storage_ref_id, storage_adapter, storage_is_placeholder, storage_key, attempt[\s\S]+FOR UPDATE SKIP LOCKED`).
+		WithArgs(now, now, 50).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_asset_id", "storage_ref_id", "storage_adapter", "storage_is_placeholder", "storage_key", "attempt"}).
+			AddRow(int64(1), int64(101), "ref-101", "oss_upload_service", false, "tasks/1/source.psd", 0).
+			AddRow(int64(2), int64(102), nil, "placeholder_storage", true, "tasks/1/preview.webp", 2))
+	mock.ExpectExec(`UPDATE asset_object_deletion_outbox[\s\S]+attempt = attempt \+ 1`).
+		WithArgs("lease-1", leaseUntil, int64(1), int64(2)).
+		WillReturnResult(sqlmock.NewResult(0, 2))
+	mock.ExpectCommit()
+
+	mysqlDB := New(db)
+	repository := NewTaskAssetLifecycleRepo(mysqlDB).(repo.AssetObjectDeletionOutboxRepo)
+	var items []repo.AssetObjectDeletionOutboxItem
+	err = mysqlDB.RunInTx(t.Context(), func(tx repo.Tx) error {
+		var err error
+		items, err = repository.ClaimObjectDeletions(t.Context(), tx, "lease-1", now, leaseUntil, 50)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("ClaimObjectDeletions() error = %v", err)
+	}
+	if len(items) != 2 || items[0].Attempt != 1 || items[1].Attempt != 3 || items[0].StorageAdapter != "oss_upload_service" || items[0].StorageRefID == nil || *items[0].StorageRefID != "ref-101" || !items[1].StorageIsPlaceholder {
+		t.Fatalf("items = %+v", items)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestObjectDeletionOutboxSuccessMarksTaskAssetObjectDeleted(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	now := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
+	taskAssetID := int64(101)
+	item := repo.AssetObjectDeletionOutboxItem{ID: 1, TaskAssetID: &taskAssetID, StorageKey: "tasks/1/source.psd", Attempt: 1}
+	mock.ExpectBegin()
+	mock.ExpectExec(`UPDATE asset_object_deletion_outbox[\s\S]+status = 'succeeded'`).
+		WithArgs(item.ID, "lease-1").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`UPDATE task_assets[\s\S]+object_deleted_at = COALESCE`).
+		WithArgs(now, taskAssetID, taskAssetID).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	mysqlDB := New(db)
+	repository := NewTaskAssetLifecycleRepo(mysqlDB).(repo.AssetObjectDeletionOutboxRepo)
+	err = mysqlDB.RunInTx(t.Context(), func(tx repo.Tx) error {
+		return repository.MarkObjectDeletionSucceeded(t.Context(), tx, item, "lease-1", now)
+	})
+	if err != nil {
+		t.Fatalf("MarkObjectDeletionSucceeded() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }

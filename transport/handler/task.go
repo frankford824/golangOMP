@@ -27,6 +27,11 @@ type TaskHandler struct {
 	claimSvc     *task_pool.ClaimService
 	moduleSvc    *r3module.ActionService
 	cancelSvc    *task_cancel.Service
+	planningSvc  service.PlanningSKUService
+}
+
+func (h *TaskHandler) SetPlanningSKUService(planningSvc service.PlanningSKUService) {
+	h.planningSvc = planningSvc
 }
 
 func NewTaskHandler(svc service.TaskService, costRuleSvc service.CostRuleService, detailSvc service.TaskDetailAggregateService) *TaskHandler {
@@ -46,7 +51,9 @@ type createTaskReq struct {
 	SourceMode              string                            `json:"source_mode"`
 	OwnerTeam               string                            `json:"owner_team"`
 	OwnerDepartment         string                            `json:"owner_department"`
+	OwnerDepartmentID       *int64                            `json:"owner_department_id"`
 	OwnerOrgTeam            string                            `json:"owner_org_team"`
+	OwnerTeamID             *int64                            `json:"owner_team_id"`
 	CreatorID               *int64                            `json:"creator_id"`
 	OperatorGroupID         *int64                            `json:"operator_group_id"`
 	DesignerID              *int64                            `json:"designer_id"`
@@ -78,23 +85,25 @@ type createTaskReq struct {
 	ChangeRequest       string                   `json:"change_request"`
 
 	// New product development fields
-	CategoryCode      string   `json:"category_code"`
-	IID               string   `json:"i_id"`
-	ProductIID        string   `json:"product_i_id"`
-	MaterialMode      string   `json:"material_mode"`
-	Material          string   `json:"material"`
-	MaterialOther     string   `json:"material_other"`
-	NewSKU            string   `json:"new_sku"`
-	ProductName       string   `json:"product_name"`
-	ProductShortName  string   `json:"product_short_name"`
-	DesignRequirement string   `json:"design_requirement"`
-	CostPriceMode     string   `json:"cost_price_mode"`
-	CostPrice         *float64 `json:"cost_price"`
-	Quantity          *int64   `json:"quantity"`
-	BaseSalePrice     *float64 `json:"base_sale_price"`
-	ReferenceLink     string   `json:"reference_link"`
-	SyncERPOnCreate   *bool    `json:"sync_erp_on_create"`
-	ClientCreateID    string   `json:"client_create_id"`
+	CategoryCode      string                        `json:"category_code"`
+	IID               string                        `json:"i_id"`
+	ProductIID        string                        `json:"product_i_id"`
+	MaterialMode      string                        `json:"material_mode"`
+	Material          string                        `json:"material"`
+	MaterialOther     string                        `json:"material_other"`
+	NewSKU            string                        `json:"new_sku"`
+	ProductName       string                        `json:"product_name"`
+	ProductShortName  string                        `json:"product_short_name"`
+	DesignRequirement string                        `json:"design_requirement"`
+	CostPriceMode     string                        `json:"cost_price_mode"`
+	CostPrice         *float64                      `json:"cost_price"`
+	Quantity          *int64                        `json:"quantity"`
+	BaseSalePrice     *float64                      `json:"base_sale_price"`
+	ReferenceLink     string                        `json:"reference_link"`
+	SyncERPOnCreate   *bool                         `json:"sync_erp_on_create"`
+	ClientCreateID    string                        `json:"client_create_id"`
+	ERPSyncMode       string                        `json:"erp_sync_mode"`
+	PlanningSKUItems  []domain.PlanningSKUItemInput `json:"planning_sku_items"`
 
 	// Purchase task fields
 	PurchaseSKU    string `json:"purchase_sku"`
@@ -661,6 +670,29 @@ func (h *TaskHandler) Create(c *gin.Context) {
 		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
 		return
 	}
+	if domain.TaskType(strings.TrimSpace(req.TaskType)) == domain.TaskTypePurchaseTask {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "purchase_task has been retired; use task_type=sku_planning", nil))
+		return
+	}
+	if domain.TaskType(strings.TrimSpace(req.TaskType)) == domain.TaskTypeSKUPlanning {
+		if h.planningSvc == nil {
+			respondError(c, domain.NewAppError(domain.ErrCodeInternalError, "planning SKU service is unavailable", nil))
+			return
+		}
+		actor, _ := domain.RequestActorFromContext(c.Request.Context())
+		clientCreateID := firstNonEmptyTrimmed(req.ClientCreateID, c.GetHeader("Idempotency-Key"), c.GetHeader("X-Idempotency-Key"))
+		result, appErr := h.planningSvc.Create(c.Request.Context(), actor, domain.CreatePlanningSKUTaskRequest{
+			ClientCreateID: clientCreateID,
+			ERPSyncMode:    domain.PlanningSKUERPSyncMode(strings.TrimSpace(req.ERPSyncMode)),
+			Items:          req.PlanningSKUItems,
+		})
+		if appErr != nil {
+			respondError(c, appErr)
+			return
+		}
+		respondCreated(c, result)
+		return
+	}
 
 	rawHasProductSelection := req.hasRawProductSelectionField()
 
@@ -852,7 +884,9 @@ func (h *TaskHandler) Create(c *gin.Context) {
 		OperatorGroupID:         req.OperatorGroupID,
 		OwnerTeam:               req.OwnerTeam,
 		OwnerDepartment:         req.OwnerDepartment,
+		OwnerDepartmentID:       req.OwnerDepartmentID,
 		OwnerOrgTeam:            req.OwnerOrgTeam,
+		OwnerTeamID:             req.OwnerTeamID,
 		DesignerID:              designerID,
 		Priority:                domain.TaskPriority(priority),
 		DeadlineAt:              deadlineAt,
@@ -991,6 +1025,18 @@ func (h *TaskHandler) List(c *gin.Context) {
 		respondError(c, appErr)
 		return
 	}
+	actor := requestActor(c)
+	for _, task := range tasks {
+		if task == nil {
+			continue
+		}
+		task.WorkflowContractVersion = 2
+		task.AllowedActions = v8AllowedTaskActions(actor, task.TaskType, task.TaskStatus, domain.TaskAccessSubject{
+			TaskID: task.ID, CreatorID: task.CreatorID, RequesterID: task.RequesterID,
+			DesignerID: task.DesignerID, CurrentHandlerID: task.CurrentHandlerID,
+			OwnerDepartmentID: task.OwnerDepartmentID, OwnerTeamID: task.OwnerTeamID,
+		})
+	}
 	respondOKWithPagination(c, tasks, pagination)
 }
 
@@ -1023,7 +1069,41 @@ func (h *TaskHandler) GetByID(c *gin.Context) {
 		respondError(c, appErr)
 		return
 	}
+	task.WorkflowContractVersion = 2
+	task.AllowedActions = v8AllowedTaskActions(requestActor(c), task.TaskType, task.TaskStatus, task.AccessSubject())
 	respondOK(c, task)
+}
+
+func v8AllowedTaskActions(actor domain.RequestActor, taskType domain.TaskType, status domain.TaskStatus, subject domain.TaskAccessSubject) []string {
+	actions := make([]string, 0, 6)
+	if taskType == domain.TaskTypeSKUPlanning {
+		if domain.EffectiveAccessAllowsTask(actor, domain.PermissionPlanningSKUEdit, subject) {
+			actions = append(actions, "planning_sku.edit")
+		}
+		if domain.EffectiveAccessAllowsTask(actor, domain.PermissionPlanningSKUExport, subject) {
+			actions = append(actions, "planning_sku.export")
+		}
+		if domain.EffectiveAccessAllowsTask(actor, domain.PermissionPlanningSKURetry, subject) {
+			actions = append(actions, "planning_sku.erp_retry")
+		}
+		if domain.EffectiveAccessAllowsTask(actor, domain.PermissionPlanningSKUSync, subject) {
+			actions = append(actions, "planning_sku.erp_sync")
+		}
+		return actions
+	}
+	if status == domain.TaskStatusInProgress && domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskDesignSubmit, subject) {
+		actions = append(actions, "task.design.submit")
+	}
+	if status == domain.TaskStatusPendingAudit && domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskAuditDecision, subject) {
+		actions = append(actions, "task.audit.approve", "task.audit.return_to_design")
+		if subject.CurrentHandlerID != nil && *subject.CurrentHandlerID == actor.ID {
+			actions = append(actions, "task.audit.handover")
+		}
+	}
+	if status == domain.TaskStatusCompleted && domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskReopen, subject) {
+		actions = append(actions, "task.reopen")
+	}
+	return actions
 }
 
 // UpdateBusinessInfo handles PATCH /v1/tasks/:id/business-info

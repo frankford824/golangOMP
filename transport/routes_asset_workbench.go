@@ -12,6 +12,7 @@ import (
 func registerAssetWorkbenchRoutes(
 	v1 *gin.RouterGroup,
 	access routeAccessRegistrar,
+	capabilityAccess capabilityRouteAccessRegistrar,
 	assetWorkbenchH *handler.AssetWorkbenchHandler,
 	notificationH *handler.NotificationHandler,
 ) {
@@ -129,22 +130,22 @@ func registerAssetWorkbenchRoutes(
 		group.GET("/saved-views", access(group, http.MethodGet, "/saved-views", domain.APIReadinessReadyForFrontend, assetWorkbenchRoles()...), assetWorkbenchH.ListSavedViews)
 		group.PUT("/saved-views", access(group, http.MethodPut, "/saved-views", domain.APIReadinessReadyForFrontend, assetWorkbenchRoles()...), assetWorkbenchH.UpsertSavedView)
 		group.DELETE("/saved-views/:view_id", access(group, http.MethodDelete, "/saved-views/:view_id", domain.APIReadinessReadyForFrontend, assetWorkbenchRoles()...), assetWorkbenchH.DeleteSavedView)
-		group.GET("/client-materials", access(group, http.MethodGet, "/client-materials", domain.APIReadinessReadyForFrontend, domain.RoleAssetSubmitter, domain.RoleAssetManager, domain.RoleSuperAdmin), assetWorkbenchH.ListClientMaterials)
-		group.GET("/client-materials/search", access(group, http.MethodGet, "/client-materials/search", domain.APIReadinessReadyForFrontend, domain.RoleAssetSubmitter, domain.RoleAssetManager, domain.RoleSuperAdmin), assetWorkbenchH.SearchClientMaterials)
-		group.POST("/client-materials", access(group, http.MethodPost, "/client-materials", domain.APIReadinessReadyForFrontend, domain.RoleAssetManager, domain.RoleSuperAdmin), assetWorkbenchH.CreateClientMaterial)
-		group.POST("/client-materials/batch-update", access(group, http.MethodPost, "/client-materials/batch-update", domain.APIReadinessReadyForFrontend, domain.RoleAssetManager, domain.RoleSuperAdmin), assetWorkbenchH.BatchUpdateClientMaterials)
-		group.PATCH("/client-materials/:material_id", access(group, http.MethodPatch, "/client-materials/:material_id", domain.APIReadinessReadyForFrontend, domain.RoleAssetManager, domain.RoleSuperAdmin), assetWorkbenchH.UpdateClientMaterial)
-		group.DELETE("/client-materials/:material_id", access(group, http.MethodDelete, "/client-materials/:material_id", domain.APIReadinessReadyForFrontend, domain.RoleAssetManager, domain.RoleSuperAdmin), assetWorkbenchH.DeleteClientMaterial)
-		group.GET("/client-materials/:material_id/download", access(group, http.MethodGet, "/client-materials/:material_id/download", domain.APIReadinessReadyForFrontend, domain.RoleAssetSubmitter, domain.RoleAssetManager, domain.RoleSuperAdmin), assetWorkbenchH.DownloadClientMaterial)
-		group.GET("/client-materials/:material_id/preview", access(group, http.MethodGet, "/client-materials/:material_id/preview", domain.APIReadinessReadyForFrontend, domain.RoleAssetSubmitter, domain.RoleAssetManager, domain.RoleSuperAdmin), assetWorkbenchH.PreviewClientMaterial)
-		group.POST("/client-materials/batch-download", access(group, http.MethodPost, "/client-materials/batch-download", domain.APIReadinessReadyForFrontend, domain.RoleAssetSubmitter, domain.RoleAssetManager, domain.RoleSuperAdmin), assetWorkbenchH.BatchDownloadClientMaterials)
-		group.GET("/materials/groups", access(group, http.MethodGet, "/materials/groups", domain.APIReadinessReadyForFrontend, domain.RoleAssetManager, domain.RoleSuperAdmin), assetWorkbenchH.MaterialGroups)
-		group.GET("/materials/group-files", access(group, http.MethodGet, "/materials/group-files", domain.APIReadinessReadyForFrontend, domain.RoleAssetManager, domain.RoleSuperAdmin), assetWorkbenchH.MaterialGroupFiles)
-		group.GET("/materials/browse", access(group, http.MethodGet, "/materials/browse", domain.APIReadinessReadyForFrontend, domain.RoleAssetManager, domain.RoleSuperAdmin), assetWorkbenchH.BrowseMaterials)
-		group.GET("/system-assets/:asset_id/download", access(group, http.MethodGet, "/system-assets/:asset_id/download", domain.APIReadinessReadyForFrontend, domain.RoleAssetManager, domain.RoleSuperAdmin), assetWorkbenchH.DownloadSystemAsset)
-		group.GET("/system-assets/:asset_id/preview", access(group, http.MethodGet, "/system-assets/:asset_id/preview", domain.APIReadinessReadyForFrontend, domain.RoleAssetManager, domain.RoleSuperAdmin), assetWorkbenchH.PreviewSystemAsset)
-		group.POST("/system-assets/batch-download", access(group, http.MethodPost, "/system-assets/batch-download", domain.APIReadinessReadyForFrontend, domain.RoleAssetManager, domain.RoleSuperAdmin), assetWorkbenchH.BatchDownloadSystemAssets)
-		group.GET("/system-search", access(group, http.MethodGet, "/system-search", domain.APIReadinessReadyForFrontend, domain.RoleAssetManager, domain.RoleSuperAdmin), assetWorkbenchH.SystemSearch)
+		group.GET("/client-materials", capabilityAccess(group, http.MethodGet, "/client-materials", domain.APIReadinessReadyForFrontend, domain.PermissionAssetView), assetWorkbenchH.ListClientMaterials)
+		group.GET("/client-materials/search", capabilityAccess(group, http.MethodGet, "/client-materials/search", domain.APIReadinessReadyForFrontend, domain.PermissionAssetView), assetWorkbenchH.SearchClientMaterials)
+		group.POST("/client-materials", capabilityAccess(group, http.MethodPost, "/client-materials", domain.APIReadinessReadyForFrontend, domain.PermissionAssetPublish), assetWorkbenchH.CreateClientMaterial)
+		group.POST("/client-materials/batch-update", capabilityAccess(group, http.MethodPost, "/client-materials/batch-update", domain.APIReadinessReadyForFrontend, domain.PermissionAssetPublish), assetWorkbenchH.BatchUpdateClientMaterials)
+		group.PATCH("/client-materials/:material_id", capabilityAccess(group, http.MethodPatch, "/client-materials/:material_id", domain.APIReadinessReadyForFrontend, domain.PermissionAssetPublish), assetWorkbenchH.UpdateClientMaterial)
+		group.DELETE("/client-materials/:material_id", capabilityAccess(group, http.MethodDelete, "/client-materials/:material_id", domain.APIReadinessReadyForFrontend, domain.PermissionAssetPublish), assetWorkbenchH.DeleteClientMaterial)
+		group.GET("/client-materials/:material_id/download", capabilityAccess(group, http.MethodGet, "/client-materials/:material_id/download", domain.APIReadinessReadyForFrontend, domain.PermissionAssetDownload), assetWorkbenchH.DownloadClientMaterial)
+		group.GET("/client-materials/:material_id/preview", capabilityAccess(group, http.MethodGet, "/client-materials/:material_id/preview", domain.APIReadinessReadyForFrontend, domain.PermissionAssetView), assetWorkbenchH.PreviewClientMaterial)
+		group.POST("/client-materials/batch-download", capabilityAccess(group, http.MethodPost, "/client-materials/batch-download", domain.APIReadinessReadyForFrontend, domain.PermissionAssetDownload), assetWorkbenchH.BatchDownloadClientMaterials)
+		group.GET("/materials/groups", capabilityAccess(group, http.MethodGet, "/materials/groups", domain.APIReadinessReadyForFrontend, domain.PermissionAssetView), assetWorkbenchH.MaterialGroups)
+		group.GET("/materials/group-files", capabilityAccess(group, http.MethodGet, "/materials/group-files", domain.APIReadinessReadyForFrontend, domain.PermissionAssetView), assetWorkbenchH.MaterialGroupFiles)
+		group.GET("/materials/browse", capabilityAccess(group, http.MethodGet, "/materials/browse", domain.APIReadinessReadyForFrontend, domain.PermissionAssetView), assetWorkbenchH.BrowseMaterials)
+		group.GET("/system-assets/:asset_id/download", capabilityAccess(group, http.MethodGet, "/system-assets/:asset_id/download", domain.APIReadinessReadyForFrontend, domain.PermissionAssetDownload), assetWorkbenchH.DownloadSystemAsset)
+		group.GET("/system-assets/:asset_id/preview", capabilityAccess(group, http.MethodGet, "/system-assets/:asset_id/preview", domain.APIReadinessReadyForFrontend, domain.PermissionAssetView), assetWorkbenchH.PreviewSystemAsset)
+		group.POST("/system-assets/batch-download", capabilityAccess(group, http.MethodPost, "/system-assets/batch-download", domain.APIReadinessReadyForFrontend, domain.PermissionAssetDownload), assetWorkbenchH.BatchDownloadSystemAssets)
+		group.GET("/system-search", capabilityAccess(group, http.MethodGet, "/system-search", domain.APIReadinessReadyForFrontend, domain.PermissionAssetView), assetWorkbenchH.SystemSearch)
 	}
 }
 

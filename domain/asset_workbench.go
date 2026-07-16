@@ -393,29 +393,32 @@ type AssetWorkbenchUploadDirectory struct {
 }
 
 type AssetWorkbenchClientMaterial struct {
-	ID               int64     `json:"id" db:"id"`
-	AssetID          int64     `json:"asset_id" db:"asset_id"`
-	SourceType       string    `json:"source_type" db:"source_type"`
-	SourceRef        string    `json:"source_ref" db:"source_ref"`
-	ResourceID       string    `json:"resource_id,omitempty"`
-	SourceLabel      string    `json:"source_label,omitempty"`
-	Title            string    `json:"title" db:"title"`
-	Description      string    `json:"description" db:"description"`
-	FilenameSnapshot string    `json:"filename_snapshot" db:"filename_snapshot"`
-	MimeTypeSnapshot string    `json:"mime_type_snapshot" db:"mime_type_snapshot"`
-	FileSizeSnapshot int64     `json:"file_size_snapshot" db:"file_size_snapshot"`
-	ScopeSKUCode     string    `json:"scope_sku_code,omitempty"`
-	SKUCode          string    `json:"sku_code,omitempty"`
-	PrimarySKUCode   string    `json:"primary_sku_code,omitempty"`
-	BusinessLane     string    `json:"business_lane,omitempty"`
-	PreviewAvailable bool      `json:"preview_available"`
-	Enabled          bool      `json:"enabled" db:"enabled"`
-	SortOrder        int       `json:"sort_order" db:"sort_order"`
-	PublishedBy      int64     `json:"published_by" db:"published_by"`
-	UpdatedBy        *int64    `json:"updated_by,omitempty" db:"updated_by"`
-	PublishedAt      time.Time `json:"published_at" db:"published_at"`
-	CreatedAt        time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at" db:"updated_at"`
+	ID                  int64     `json:"id" db:"id"`
+	AssetID             int64     `json:"asset_id" db:"asset_id"`
+	SourceType          string    `json:"source_type" db:"source_type"`
+	SourceRef           string    `json:"source_ref" db:"source_ref"`
+	ResourceGroupID     *int64    `json:"resource_group_id,omitempty" db:"resource_group_id"`
+	FinalizedRevisionID *int64    `json:"finalized_revision_id,omitempty" db:"finalized_revision_id"`
+	CoverRevisionItemID *int64    `json:"cover_revision_item_id,omitempty" db:"cover_revision_item_id"`
+	ResourceID          string    `json:"resource_id,omitempty"`
+	SourceLabel         string    `json:"source_label,omitempty"`
+	Title               string    `json:"title" db:"title"`
+	Description         string    `json:"description" db:"description"`
+	FilenameSnapshot    string    `json:"filename_snapshot" db:"filename_snapshot"`
+	MimeTypeSnapshot    string    `json:"mime_type_snapshot" db:"mime_type_snapshot"`
+	FileSizeSnapshot    int64     `json:"file_size_snapshot" db:"file_size_snapshot"`
+	ScopeSKUCode        string    `json:"scope_sku_code,omitempty"`
+	SKUCode             string    `json:"sku_code,omitempty"`
+	PrimarySKUCode      string    `json:"primary_sku_code,omitempty"`
+	BusinessLane        string    `json:"business_lane,omitempty"`
+	PreviewAvailable    bool      `json:"preview_available"`
+	Enabled             bool      `json:"enabled" db:"enabled"`
+	SortOrder           int       `json:"sort_order" db:"sort_order"`
+	PublishedBy         int64     `json:"published_by" db:"published_by"`
+	UpdatedBy           *int64    `json:"updated_by,omitempty" db:"updated_by"`
+	PublishedAt         time.Time `json:"published_at" db:"published_at"`
+	CreatedAt           time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at" db:"updated_at"`
 }
 
 type AssetWorkbenchBatchJob struct {

@@ -8,7 +8,72 @@ import (
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
+
+	"workflow/domain"
 )
+
+func TestSearchResourceGroupsAppliesEffectiveScope(t *testing.T) {
+	mysqlSchemaPresenceCache = sync.Map{}
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(searchRepoQueryMatcher(t)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectQuery("schema-table").WithArgs("task_asset_group_search_documents").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectQuery("resource-group-scope").
+		WithArgs("%x%", int64(41), int64(41), int64(41), int64(41), int64(3), int64(7), 20).
+		WillReturnRows(sqlmock.NewRows([]string{"group_id", "task_id", "task_no", "sku_code", "revision_id", "mode", "count", "file_name"}).AddRow(9, 8, "T-8", "SKU-8", 7, "set", 2, "final.png"))
+	repository := NewSearchRepo(New(db)).(*searchRepo)
+	items, err := repository.SearchResourceGroups(context.Background(), "x", 20, false, domain.ResourceGroupAccessFilter{ActorID: 41, Self: true, DepartmentIDs: []int64{3}, TeamIDs: []int64{7}})
+	if err != nil || len(items) != 1 || items[0].ResourceGroupID != 9 {
+		t.Fatalf("items=%+v err=%v", items, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSearchResourceGroupsPublishedBranchPinsFinalizedRevision(t *testing.T) {
+	mysqlSchemaPresenceCache = sync.Map{}
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(searchRepoQueryMatcher(t)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectQuery("schema-table").WithArgs("task_asset_group_search_documents").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectQuery("resource-group-published").WithArgs("%x%", 20).
+		WillReturnRows(sqlmock.NewRows([]string{"group_id", "task_id", "task_no", "sku_code", "revision_id", "mode", "count", "file_name"}).AddRow(9, 8, "T-8", "SKU-8", 7, "single", 1, "final.png"))
+	repository := NewSearchRepo(New(db)).(*searchRepo)
+	items, err := repository.SearchResourceGroups(context.Background(), "x", 20, true, domain.ResourceGroupAccessFilter{})
+	if err != nil || len(items) != 1 || items[0].FinalizedRevisionID != 7 {
+		t.Fatalf("items=%+v err=%v", items, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSearchTasksScopedAppliesStableOrganizationScope(t *testing.T) {
+	mysqlSchemaPresenceCache = sync.Map{}
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(searchRepoQueryMatcher(t)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectQuery("schema-table").WithArgs("task_search_documents").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectQuery("task-doc-scoped").
+		WithArgs("%x%", "%x%", "%x%", "%x%", "%x%", int64(51), int64(51), int64(51), int64(51), int64(3), int64(7), 20).
+		WillReturnRows(sqlmock.NewRows([]string{"task_id", "task_no", "title", "status", "priority", "task_type", "sku_code", "primary_sku_code", "product_i_id", "owner_department", "owner_team", "owner_org_team", "creator_id", "creator_name", "designer_id", "designer_name", "created_at", "deadline_at"}).
+			AddRow(2, "T-2", "title", "InProgress", "normal", "new_product_development", "SKU", "SKU", nil, "D", "T", "OT", 51, "creator", nil, nil, nil, nil))
+	repository := NewSearchRepo(New(db)).(*searchRepo)
+	items, err := repository.SearchTasksScoped(context.Background(), "x", 20, domain.ResourceGroupAccessFilter{ActorID: 51, Self: true, DepartmentIDs: []int64{3}, TeamIDs: []int64{7}})
+	if err != nil || len(items) != 1 || items[0].ID != 2 {
+		t.Fatalf("items=%+v err=%v", items, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestSearchAssetsFromDocumentsUsesFullTextForCodeKeyword(t *testing.T) {
 	mysqlSchemaPresenceCache = sync.Map{}
@@ -243,6 +308,24 @@ func searchRepoQueryMatcher(t *testing.T) sqlmock.QueryMatcher {
 			if strings.Contains(normalized, "IN NATURAL LANGUAGE MODE") {
 				return fmt.Errorf("asset phrase query must not run natural fallback in same SQL: %s", normalized)
 			}
+		case "resource-group-scope":
+			for _, fragment := range []string{"FROM task_asset_group_search_documents d", "t.creator_id = ?", "t.owner_department_id IN (?)", "t.owner_team_id IN (?)"} {
+				if !strings.Contains(normalized, fragment) {
+					return fmt.Errorf("resource-group scope query missing %q: %s", fragment, normalized)
+				}
+			}
+			if strings.Contains(normalized, "asset_workbench_client_materials") {
+				return fmt.Errorf("internal scope query unexpectedly uses publication gate: %s", normalized)
+			}
+		case "resource-group-published":
+			for _, fragment := range []string{"d.final_text LIKE ?", "asset_workbench_client_materials cm", "cm.finalized_revision_id = g.finalized_revision_id", "cm.enabled = 1"} {
+				if !strings.Contains(normalized, fragment) {
+					return fmt.Errorf("published resource-group query missing %q: %s", fragment, normalized)
+				}
+			}
+			if strings.Contains(normalized, "t.creator_id = ?") || strings.Contains(normalized, "1 = 0") {
+				return fmt.Errorf("published query must not inherit internal scope: %s", normalized)
+			}
 		case "product-doc-code":
 			if !strings.Contains(normalized, "FROM product_search_documents") {
 				return fmt.Errorf("product code query missing document table: %s", normalized)
@@ -270,6 +353,12 @@ func searchRepoQueryMatcher(t *testing.T) sqlmock.QueryMatcher {
 			}
 			if strings.Contains(normalized, "IN BOOLEAN MODE") {
 				return fmt.Errorf("product natural fallback query must not run boolean phrase in same SQL: %s", normalized)
+			}
+		case "task-doc-scoped":
+			for _, fragment := range []string{"FROM task_search_documents d JOIN tasks t", "t.creator_id = ?", "t.owner_department_id IN (?)", "t.owner_team_id IN (?)"} {
+				if !strings.Contains(normalized, fragment) {
+					return fmt.Errorf("scoped task query missing %q: %s", fragment, normalized)
+				}
 			}
 		case "task-doc-code":
 			if !strings.Contains(normalized, "FROM task_search_documents d") {

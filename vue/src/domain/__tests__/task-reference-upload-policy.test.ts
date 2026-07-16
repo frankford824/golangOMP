@@ -40,25 +40,18 @@ function makeCtx(options?: {
 }
 
 describe('canUserSupplementReferenceOnTaskDetail', () => {
-  it('returns false for purchase tasks', () => {
-    const task = makeTask({ taskType: 'PURCHASE_TASK', businessType: 'PURCHASE_TASK' })
+  it('returns false outside the editable design phase', () => {
+    const task = makeTask({ status: 'PendingAudit', designSubStatus: 'PENDING_AUDIT' })
     const user = makeUser('u-creator')
     const ctx = makeCtx({ permissions: [PermissionEnum.TASK_CREATE] })
     expect(canUserSupplementReferenceOnTaskDetail(task, user, ctx)).toBe(false)
   })
 
-  it('allows super admin during reference supplement phase', () => {
+  it('does not infer access from a legacy admin role', () => {
     const task = makeTask()
     const user = makeUser('someone')
     const ctx = makeCtx({ roleCodes: ['super_admin'] })
-    expect(canUserSupplementReferenceOnTaskDetail(task, user, ctx)).toBe(true)
-  })
-
-  it('allows hr admin during reference supplement phase', () => {
-    const task = makeTask()
-    const user = makeUser('someone')
-    const ctx = makeCtx({ roleCodes: ['hr_admin'] })
-    expect(canUserSupplementReferenceOnTaskDetail(task, user, ctx)).toBe(true)
+    expect(canUserSupplementReferenceOnTaskDetail(task, user, ctx)).toBe(false)
   })
 
   it('allows creator when task.create is granted', () => {

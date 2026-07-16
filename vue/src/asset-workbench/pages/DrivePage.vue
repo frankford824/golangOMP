@@ -18,6 +18,7 @@ import {
 import { buildTimestampedZipFilename, downloadBatchAsZip } from '@/utils/batchZipDownload'
 import {
   assetWorkbenchApi,
+  isExternalMaterialSource,
   type AssetWorkbenchBatchJob,
   type ArchiveVirtualFile,
   type ArchiveVirtualFolder,
@@ -42,6 +43,7 @@ import { createArchiveEntryObjectUrl, downloadArchiveEntryBlob } from '@aw/share
 import DriveThumb from '@aw/shared/drive/DriveThumb.vue'
 import DriveUploadDialog from '@aw/shared/drive/DriveUploadDialog.vue'
 import MaterialListThumb from '@aw/shared/materials/MaterialListThumb.vue'
+import ResourceGroupMaterialCard from '@aw/shared/resource-groups/ResourceGroupMaterialCard.vue'
 import { matchesClientMaterialQuery } from '@aw/shared/materials/clientMaterialSearch'
 import {
   filtersForLocatedMaterial,
@@ -680,7 +682,7 @@ function materialPathMatchesSourceFilter(path?: string): boolean {
 }
 
 function materialAssetSource(asset: SystemAssetRow): MaterialSourceFilter {
-  return asset.source_type === 'external' ? 'external' : 'system'
+  return isExternalMaterialSource(asset.source_type) ? 'external' : 'system'
 }
 
 function materialBusinessLaneOf(asset: SystemAssetRow): MaterialBusinessLane {
@@ -692,7 +694,7 @@ function materialBusinessLaneLabel(asset: SystemAssetRow): string {
   const lane = materialBusinessLaneOf(asset)
   if (lane === 'customization') return '定制'
   if (lane === 'normal') return '常规'
-  return asset.source_type === 'external' ? '外部资源' : '未标记分类'
+  return isExternalMaterialSource(asset.source_type) ? '外部资源' : '未标记分类'
 }
 
 function materialAssetFilenameForFormat(asset: SystemAssetRow): string {
@@ -726,15 +728,15 @@ function materialMatchesActiveFilters(asset: SystemAssetRow): boolean {
 
 function materialDisplayTitle(asset: SystemAssetRow): string {
   const title = titleOf(asset)
-  if (asset.source_type === 'external') {
+  if (isExternalMaterialSource(asset.source_type)) {
     return fileNameFromPath(asset.origin_path || title) || title
   }
   return title
 }
 
 function materialVirtualFilePath(asset: SystemAssetRow): string {
-  const externalPath = normalizeVirtualPath(asset.origin_path || (asset.source_type === 'external' ? titleOf(asset) : ''))
-  if (asset.source_type === 'external' && externalPath) return materialPathActualToVirtual(externalPath)
+  const externalPath = normalizeVirtualPath(asset.origin_path || (isExternalMaterialSource(asset.source_type) ? titleOf(asset) : ''))
+  if (isExternalMaterialSource(asset.source_type) && externalPath) return materialPathActualToVirtual(externalPath)
   return normalizeVirtualPath(`/系统资源/${asset.original_filename || asset.file_name || titleOf(asset)}`)
 }
 
@@ -869,7 +871,7 @@ function expandMaterialFolderTreePath(path: string) {
 }
 
 function sourceLabelOf(asset: SystemAssetRow) {
-  return asset.source_label || (asset.source_type === 'external' ? '外部资源' : '系统资源')
+  return asset.source_label || (isExternalMaterialSource(asset.source_type) ? '外部资源' : '系统资源')
 }
 
 function stringFromMeta(row: OverviewSearchRow, key: string): string {
@@ -905,18 +907,19 @@ function externalIDFromResourceID(value?: string): number {
 
 function normalizeMaterialSourceType(sourceType?: string, resourceID?: string): 'system' | 'external' {
   const normalized = String(sourceType || '').trim().toLowerCase()
-  if (normalized === 'external' || externalIDFromResourceID(resourceID) > 0) return 'external'
+  if (normalized === 'external' || normalized === 'external_asset' || externalIDFromResourceID(resourceID) > 0) return 'external'
   return 'system'
 }
 
 function materialResourceID(asset: SystemAssetRow): string {
   if (asset.resource_id) return asset.resource_id
-  if (asset.source_type === 'external') return `ext-${asset.id}`
+  if (asset.resource_group_id) return `group:${asset.resource_group_id}`
+  if (isExternalMaterialSource(asset.source_type)) return `ext-${asset.id}`
   return String(asset.id)
 }
 
 function clientMaterialResourceID(material: ClientMaterialRow): string {
-  return material.resource_id || material.source_ref || (material.source_type === 'external' ? `ext-${material.asset_id}` : String(material.asset_id))
+  return material.resource_id || material.source_ref || (material.resource_group_id ? `group:${material.resource_group_id}` : material.source_type === 'external' || material.source_type === 'external_asset' ? `ext-${material.asset_id}` : String(material.asset_id))
 }
 
 function addIdentityKey(keys: Set<string>, value?: string | number) {
@@ -1351,11 +1354,11 @@ function driveDirectoryFromUpload(row: UploadDirectoryRow, count?: DriveDirector
 
 function materialFromClient(row: ClientMaterialRow): SystemAssetRow {
   return {
-    id: row.asset_id,
+    id: row.resource_group_id || row.asset_id,
     material_id: row.id,
     resource_id: row.resource_id || row.source_ref || String(row.asset_id),
     source_type: row.source_type || 'system',
-    source_label: row.source_label || (row.source_type === 'external' ? '外部资源' : '系统资源'),
+    source_label: row.source_label || (row.source_type === 'task_resource_group' ? '任务资源组' : row.source_type === 'external' || row.source_type === 'external_asset' ? '外部资源' : '系统资源'),
     scope_sku_code: row.scope_sku_code,
     sku_code: row.sku_code,
     primary_sku_code: row.primary_sku_code,
@@ -1365,6 +1368,9 @@ function materialFromClient(row: ClientMaterialRow): SystemAssetRow {
     mime_type: row.mime_type_snapshot,
     product_name: row.title,
     preview_available: row.preview_available,
+    resource_group_id: row.resource_group_id,
+    finalized_revision_id: row.finalized_revision_id,
+    cover_revision_item_id: row.cover_revision_item_id,
   }
 }
 
@@ -1388,6 +1394,8 @@ function materialWithClientPublication(asset: SystemAssetRow, row: ClientMateria
     task_creator_username: asset.task_creator_username,
     created_at: asset.created_at,
     updated_at: asset.updated_at,
+    resource_mode: asset.resource_mode,
+    resource_item_count: asset.resource_item_count,
   }
 }
 
@@ -2729,7 +2737,7 @@ const activeMaterialPreviewLoading = computed(() => {
 })
 
 function materialCodeOf(asset: SystemAssetRow): string {
-  if (asset.source_type === 'external') return asset.resource_id || `ext-${asset.id}`
+  if (isExternalMaterialSource(asset.source_type)) return asset.resource_id || `ext-${asset.id}`
   const sku = asset.scope_sku_code || asset.sku_code || asset.primary_sku_code
   return sku ? `SKU ${sku}` : asset.resource_id || `素材 ${asset.id}`
 }
@@ -2752,7 +2760,24 @@ function toggleMaterial(asset: SystemAssetRow, checked: boolean) {
   activeMaterial.value = asset
 }
 
-function publishPayloadForMaterial(asset: SystemAssetRow) {
+function publishPayloadForMaterial(asset: SystemAssetRow, pin?: { finalizedRevisionId: number; coverRevisionItemId: number }) {
+  if (asset.resource_group_id) {
+    if ((asset.resource_mode === 'set' || Number(asset.resource_item_count || 0) > 1) && !pin) {
+      throw new Error('套装资源必须逐项确认客户端封面后再发布。')
+    }
+    return {
+      source_type: 'task_resource_group',
+      source_ref: `group:${asset.resource_group_id}`,
+      resource_id: `group:${asset.resource_group_id}`,
+      resource_group_id: asset.resource_group_id,
+      finalized_revision_id: pin?.finalizedRevisionId || asset.finalized_revision_id,
+      cover_revision_item_id: pin?.coverRevisionItemId || asset.cover_revision_item_id,
+      title: materialDisplayTitle(asset),
+      description: '',
+      enabled: true,
+      sort_order: clientMaterials.value.length + 1,
+    }
+  }
   const resourceID = materialResourceID(asset)
   const sourceType = normalizeMaterialSourceType(asset.source_type, resourceID)
   const payload = {
@@ -2766,14 +2791,33 @@ function publishPayloadForMaterial(asset: SystemAssetRow) {
   if (sourceType === 'external') {
     return {
       ...payload,
+      source_type: 'external_asset',
       source_ref: resourceID,
       resource_id: resourceID,
     }
   }
-  return {
-    ...payload,
-    source_ref: String(asset.id),
-    resource_id: String(asset.id),
+  throw new Error('该历史文件未绑定 finalized 资源组，不能发布给客户。')
+}
+
+async function publishResourceGroupMaterial(asset: SystemAssetRow, pin: { finalizedRevisionId: number; coverRevisionItemId: number }) {
+  if (publishingClientMaterial.value || !asset.resource_group_id) return
+  publishingClientMaterial.value = true
+  actionError.value = ''
+  try {
+    const payload = publishPayloadForMaterial(asset, pin)
+    const existing = clientMaterialForAsset(asset)
+    const published = existing
+      ? await assetWorkbenchApi.updateClientMaterial(existing.id, payload)
+      : await assetWorkbenchApi.createClientMaterial(payload)
+    clientMaterials.value = [published, ...clientMaterials.value.filter((material) => material.id !== published.id)]
+    const publishedAsset = materialWithClientPublication(asset, published)
+    upsertMaterialItem(publishedAsset)
+    activeMaterial.value = publishedAsset
+    notice.value = `${existing ? '已重新发布' : '已上架到客户端'}：固定资源版本 ${published.finalized_revision_id || pin.finalizedRevisionId}`
+  } catch (err) {
+    actionError.value = err instanceof Error ? err.message : '资源组发布失败'
+  } finally {
+    publishingClientMaterial.value = false
   }
 }
 
@@ -2813,7 +2857,7 @@ async function batchUpdateSelectedClientMaterials(action: 'publish' | 'disable' 
   try {
     const result = await assetWorkbenchApi.batchUpdateClientMaterials({
       action,
-      items: selectedMaterialAssets.value.map(publishPayloadForMaterial),
+      items: selectedMaterialAssets.value.map((asset) => publishPayloadForMaterial(asset)),
       selection_scope: 'selected',
     })
     await finishClientMaterialBatch(action, result)
@@ -3825,7 +3869,20 @@ onBeforeUnmount(() => {
                         @change="toggleMaterial(asset, ($event.target as HTMLInputElement).checked)"
                       />
                     </label>
-                    <button class="aw-material-row__button" type="button" @click="selectMaterial(asset)" @dblclick="openMaterialPreview(asset)">
+                    <ResourceGroupMaterialCard
+                      v-if="asset.resource_group_id"
+                      :asset="asset"
+                      :published="clientMaterialForAsset(asset)"
+                      :preview-url="materialPreviewUrls[materialAssetKey(asset)] || resolvedSystemAssetThumbnailUrl(asset)"
+                      :can-publish="canManageDrive"
+                      :publishing="publishingClientMaterial"
+                      @select="selectMaterial(asset)"
+                      @preview="openMaterialPreview(asset)"
+                      @download="downloadMaterial(asset)"
+                      @preview-failed="handleMaterialPreviewFailure(asset, $event)"
+                      @publish="publishResourceGroupMaterial(asset, $event)"
+                    />
+                    <button v-else class="aw-material-row__button" type="button" @click="selectMaterial(asset)" @dblclick="openMaterialPreview(asset)">
                       <span class="aw-material-row__thumb">
                         <MaterialListThumb
                           :asset="asset"
@@ -3993,6 +4050,10 @@ onBeforeUnmount(() => {
           <dl class="aw-material-detail__list">
             <div><dt>来源</dt><dd>{{ sourceLabelOf(activeMaterial) }}</dd></div>
             <div><dt>SKU</dt><dd>{{ activeMaterial.scope_sku_code || activeMaterial.sku_code || activeMaterial.primary_sku_code || '—' }}</dd></div>
+            <div v-if="activeMaterial.resource_group_id"><dt>资源模式</dt><dd>{{ activeMaterial.resource_mode === 'set' ? '套装' : '单图' }}</dd></div>
+            <div v-if="activeMaterial.resource_group_id"><dt>最终成品</dt><dd>{{ activeMaterial.resource_item_count || 1 }} 张</dd></div>
+            <div v-if="activeMaterial.resource_group_id"><dt>当前资源版本</dt><dd>{{ activeMaterial.finalized_revision_id || '—' }}</dd></div>
+            <div v-if="activeClientMaterial?.finalized_revision_id"><dt>客户端固定版本</dt><dd>{{ activeClientMaterial.finalized_revision_id }}</dd></div>
             <div><dt>文件</dt><dd>{{ activeMaterial.original_filename || activeMaterial.file_name || '—' }}</dd></div>
             <div><dt>类型</dt><dd>{{ materialTypeLabel(activeMaterial) }}</dd></div>
             <div><dt>路径</dt><dd>{{ materialVirtualFilePath(activeMaterial) || '—' }}</dd></div>
@@ -4010,7 +4071,19 @@ onBeforeUnmount(() => {
           </div>
           <section v-if="canManageDrive" class="aw-drive-maintenance">
             <p class="aw-eyebrow">当前素材发布</p>
-            <div class="aw-compact-list__item">
+            <ResourceGroupMaterialCard
+              v-if="activeMaterial.resource_group_id"
+              :asset="activeMaterial"
+              :published="activeClientMaterial"
+              :preview-url="activeMaterialPreviewUrl"
+              :can-publish="true"
+              :publishing="publishingClientMaterial"
+              @preview="openMaterialPreview(activeMaterial)"
+              @download="downloadMaterial(activeMaterial)"
+              @preview-failed="handleMaterialPreviewFailure(activeMaterial, $event)"
+              @publish="publishResourceGroupMaterial(activeMaterial, $event)"
+            />
+            <div v-else class="aw-compact-list__item">
               <div>
                 <strong>{{ activeClientMaterial ? '客户端已收录' : '未上架到客户端' }}</strong>
                 <span>

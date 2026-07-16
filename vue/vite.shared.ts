@@ -1,10 +1,17 @@
+import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import vue from '@vitejs/plugin-vue'
-import type { UserConfig } from 'vite'
+import { searchForWorkspaceRoot, type UserConfig } from 'vite'
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url))
+
+function dependencyAllowList(): string[] {
+  const dependencyDir = path.join(rootDir, 'node_modules')
+  const resolvedDependencyDir = fs.existsSync(dependencyDir) ? fs.realpathSync(dependencyDir) : dependencyDir
+  return Array.from(new Set([searchForWorkspaceRoot(rootDir), rootDir, resolvedDependencyDir]))
+}
 
 export const sharedAlias = {
   '@': path.resolve(rootDir, 'src'),
@@ -78,6 +85,7 @@ export function devServerProxy(): UserConfig['server'] {
   const target = process.env.VITE_DEV_API_PROXY_TARGET || 'http://127.0.0.1:8080'
   return {
     host: '0.0.0.0',
+    fs: { allow: dependencyAllowList() },
     proxy: {
       '/v1': {
         target,

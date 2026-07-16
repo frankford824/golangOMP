@@ -106,6 +106,9 @@ type ResponseShape struct {
 }
 
 var knownGapReasons = map[string]string{
+	knownGapKey("POST", "/v1/tasks"):                                                            "documented-task-create-discriminated-union",
+	knownGapKey("GET", "/v1/tasks/sku-planning/template.xlsx"):                                  "legitimate-binary-stream-response",
+	knownGapKey("POST", "/v1/tasks/sku-planning/image-upload-sessions/:session_id/complete"):    "tool-deref-limit-dynamic-payload-documented",
 	knownGapKey("GET", "/v1/tasks/:id/audit-supplements"):                                       "task-audit-supplement-contract-pending",
 	knownGapKey("POST", "/v1/tasks/:id/audit-supplements/upload-sessions"):                      "task-audit-supplement-contract-pending",
 	knownGapKey("POST", "/v1/tasks/:id/audit-supplements/upload-sessions/:session_id/complete"): "task-audit-supplement-contract-pending",

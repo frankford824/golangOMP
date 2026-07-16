@@ -17,7 +17,7 @@ type userRepo struct{ db *DB }
 func NewUserRepo(db *DB) repo.UserRepo { return &userRepo{db: db} }
 
 const userSelectColumns = `
-		id, username, employee_no, display_name, department, team, managed_departments_json, managed_teams_json,
+		id, username, employee_no, display_name, department, department_id, team, team_id, managed_departments_json, managed_teams_json,
 		mobile, email, avatar_url, password_hash, status, employment_type, is_config_super_admin,
 		last_login_at, created_at, updated_at, jst_u_id, jst_raw_snapshot_json`
 
@@ -55,13 +55,15 @@ func (r *userRepo) CountByTeam(ctx context.Context, team string) (int64, error) 
 
 func (r *userRepo) Create(ctx context.Context, tx repo.Tx, user *domain.User) (int64, error) {
 	result, err := Unwrap(tx).ExecContext(ctx, `
-		INSERT INTO users (username, employee_no, display_name, department, team, managed_departments_json, managed_teams_json, mobile, email, avatar_url, password_hash, status, employment_type, is_config_super_admin, last_login_at, created_at, updated_at, jst_u_id, jst_raw_snapshot_json)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		INSERT INTO users (username, employee_no, display_name, department, department_id, team, team_id, managed_departments_json, managed_teams_json, mobile, email, avatar_url, password_hash, status, employment_type, is_config_super_admin, last_login_at, created_at, updated_at, jst_u_id, jst_raw_snapshot_json)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		user.Username,
 		toNullInt(user.EmployeeNo),
 		user.DisplayName,
 		user.Department,
+		toNullInt64(user.DepartmentID),
 		user.Team,
+		toNullInt64(user.TeamID),
 		marshalStringSlice(user.ManagedDepartments),
 		marshalStringSlice(user.ManagedTeams),
 		user.Mobile,
@@ -208,12 +210,14 @@ func (r *userRepo) ListActiveByRole(ctx context.Context, role domain.Role) ([]*d
 func (r *userRepo) Update(ctx context.Context, tx repo.Tx, user *domain.User) error {
 	_, err := Unwrap(tx).ExecContext(ctx, `
 		UPDATE users
-		SET employee_no = ?, display_name = ?, department = ?, team = ?, managed_departments_json = ?, managed_teams_json = ?, mobile = ?, email = ?, avatar_url = ?, status = ?, employment_type = ?, is_config_super_admin = ?, updated_at = ?
+		SET employee_no = ?, display_name = ?, department = ?, department_id = ?, team = ?, team_id = ?, managed_departments_json = ?, managed_teams_json = ?, mobile = ?, email = ?, avatar_url = ?, status = ?, employment_type = ?, is_config_super_admin = ?, updated_at = ?
 		WHERE id = ?`,
 		toNullInt(user.EmployeeNo),
 		user.DisplayName,
 		user.Department,
+		toNullInt64(user.DepartmentID),
 		user.Team,
+		toNullInt64(user.TeamID),
 		marshalStringSlice(user.ManagedDepartments),
 		marshalStringSlice(user.ManagedTeams),
 		user.Mobile,
@@ -672,13 +676,16 @@ func scanUser(scanner userScanner) (*domain.User, error) {
 	var managedDepartmentsJSON sql.NullString
 	var managedTeamsJSON sql.NullString
 	var avatarURL sql.NullString
+	var departmentID, teamID sql.NullInt64
 	if err := scanner.Scan(
 		&user.ID,
 		&user.Username,
 		&employeeNo,
 		&user.DisplayName,
 		&user.Department,
+		&departmentID,
 		&user.Team,
+		&teamID,
 		&managedDepartmentsJSON,
 		&managedTeamsJSON,
 		&user.Mobile,
@@ -700,6 +707,8 @@ func scanUser(scanner userScanner) (*domain.User, error) {
 		return nil, fmt.Errorf("scan user: %w", err)
 	}
 	user.LastLoginAt = fromNullTime(lastLoginAt)
+	user.DepartmentID = fromNullInt64(departmentID)
+	user.TeamID = fromNullInt64(teamID)
 	if employeeNo.Valid {
 		value := int(employeeNo.Int64)
 		user.EmployeeNo = &value

@@ -301,3 +301,18 @@ func TestExternalAssetNeedsOSSRealignmentOnSourceFingerprintChange(t *testing.T)
 		t.Fatal("without source fingerprint state, file size change should still re-queue OSS copy")
 	}
 }
+
+func TestBuildExternalAssetWhereAppliesOperationalVisibilityBeforeCountAndPage(t *testing.T) {
+	where, args, _ := buildExternalAssetWhere(domain.ExternalAssetSearchQuery{OperationalVisibleOnly: true, Page: 3, Size: 75})
+	if !strings.Contains(where, "origin_path NOT LIKE '/quark/%'") || !strings.Contains(where, "origin_path = ? OR origin_path LIKE ?") {
+		t.Fatalf("operational visibility where = %s", where)
+	}
+	if len(args) < len(externalAssetOperationalVisibleQuarkPrefixes)*2 {
+		t.Fatalf("visibility args = %d, want at least %d", len(args), len(externalAssetOperationalVisibleQuarkPrefixes)*2)
+	}
+	for index, prefix := range externalAssetOperationalVisibleQuarkPrefixes {
+		if args[index*2] != prefix || args[index*2+1] != prefix+"/%" {
+			t.Fatalf("visibility args[%d] = %v/%v, want %q/%q", index, args[index*2], args[index*2+1], prefix, prefix+"/%")
+		}
+	}
+}

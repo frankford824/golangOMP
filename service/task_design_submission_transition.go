@@ -29,14 +29,14 @@ func designSubmissionTransitionForTask(task *domain.Task) designSubmissionTransi
 	}
 	if task != nil && task.CustomizationRequired {
 		return designSubmissionTransition{
-			TaskStatus:     domain.TaskStatusPendingCustomizationReview,
+			TaskStatus:     domain.TaskStatusPendingAudit,
 			ModuleKey:      domain.ModuleKeyCustomization,
 			ModuleState:    domain.ModuleStateSubmitted,
 			ModuleTerminal: false,
 		}
 	}
 	return designSubmissionTransition{
-		TaskStatus:     domain.TaskStatusPendingAuditA,
+		TaskStatus:     domain.TaskStatusPendingAudit,
 		ModuleKey:      domain.ModuleKeyDesign,
 		ModuleState:    domain.ModuleStateSubmitted,
 		ModuleTerminal: false,
@@ -52,9 +52,7 @@ func designAssetSourceModuleKeyForTask(task *domain.Task, assetType domain.TaskA
 		(assetType.IsSource() || assetType.IsDelivery() || assetType.IsPreview() || assetType.IsDesignThumb()) {
 		return domain.ModuleKeyRetouch
 	}
-	if task != nil && (task.TaskStatus == domain.TaskStatusPendingAuditA ||
-		task.TaskStatus == domain.TaskStatusPendingAuditB ||
-		task.TaskStatus == domain.TaskStatusPendingOutsourceReview) &&
+	if task != nil && task.TaskStatus == domain.TaskStatusPendingAudit &&
 		(assetType.IsSource() || assetType.IsDelivery()) {
 		return domain.ModuleKeyAudit
 	}
@@ -70,10 +68,8 @@ func applyDesignSubmissionWorkflow(ctx context.Context, tx repo.Tx, rules design
 		return nil
 	}
 	switch transition.TaskStatus {
-	case domain.TaskStatusPendingAuditA:
-		// design.submit -> audit (audit_standard pool)
-	case domain.TaskStatusPendingCustomizationReview:
-		// customization.submit -> audit (audit_customization pool)
+	case domain.TaskStatusPendingAudit:
+		// design.submit -> unified audit pool
 	default:
 		return nil
 	}

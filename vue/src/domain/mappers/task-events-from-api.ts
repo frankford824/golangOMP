@@ -90,7 +90,7 @@ function toOutcomeCn(raw: unknown): string | undefined {
 const TASK_TYPE_API_CN: Record<string, string> = {
   original_product_development: '原品开发任务',
   new_product_development: '新品任务',
-  purchase_task: '采购任务',
+  sku_planning: '策划 SKU',
   retouch_task: 'P 图任务',
 }
 
@@ -104,10 +104,8 @@ const MODULE_KEY_CN: Record<string, string> = {
   basic_info: '基础信息',
   design: '设计',
   audit: '审核',
-  warehouse: '仓库人员',
   retouch: '修图',
   customization: '定制',
-  procurement: '采购',
 }
 
 function moduleKeyLabelCn(key: string | undefined): string {
@@ -157,35 +155,6 @@ function filingStatusDisplayCn(raw: string | undefined): string {
   if (!raw?.trim()) return ''
   const k = raw.trim().toLowerCase()
   return FILING_STATUS_CN[k] ?? raw.trim()
-}
-
-const PROCUREMENT_STATUS_CN: Record<string, string> = {
-  draft: '待完善',
-  prepared: '已备货',
-  in_progress: '采购中',
-  completed: '已完成',
-  cancelled: '已取消',
-  canceled: '已取消',
-}
-
-function procurementStatusDisplayCn(raw: string | undefined): string {
-  if (!raw?.trim()) return ''
-  const k = raw.trim().toLowerCase()
-  return PROCUREMENT_STATUS_CN[k] ?? raw.trim()
-}
-
-const WAREHOUSE_STATUS_CN: Record<string, string> = {
-  prepared: '已备货',
-  received: '已接收',
-  rejected: '已拒收',
-  completed: '已完成',
-  pending: '待处理',
-}
-
-function warehouseStatusDisplayCn(raw: string | undefined): string {
-  if (!raw?.trim()) return ''
-  const k = raw.trim().toLowerCase()
-  return WAREHOUSE_STATUS_CN[k] ?? raw.trim()
 }
 
 function moneyDisplay(raw: unknown): string {
@@ -614,42 +583,7 @@ function buildTaskEventSummaryCn(
     return `${parts.join('，')}。`
   }
 
-  if (et === 'task.procurement.updated' || et === 'task.procurement.advanced') {
-    const status = procurementStatusDisplayCn(pickFirst(raw, payload, ['status', 'procurement_status']))
-    const previous = procurementStatusDisplayCn(pickFirst(raw, payload, ['previous_status', 'from_status']))
-    const supplier = pickFirst(raw, payload, ['supplier_name', 'supplier'])
-    const quantity = pickFirst(raw, payload, ['quantity', 'procurement_quantity'])
-    const price = payload.procurement_price ?? payload.procurementPrice
-    const parts = [`${actor} ${et === 'task.procurement.updated' ? '更新了采购信息' : '推进了采购流程'}`]
-    if (previous && status && previous !== status) parts.push(`状态由「${previous}」变为「${status}」`)
-    else if (status) parts.push(`状态为「${status}」`)
-    if (supplier && supplier !== '[默认]') parts.push(`供应商：${cleanInlineBusinessText(supplier)}`)
-    if (quantity) parts.push(`数量：${quantity}`)
-    if (price != null && price !== '') parts.push(`采购价：${moneyDisplay(price)}`)
-    return `${parts.join('，')}。`
-  }
-
-  if (
-    et === 'task.warehouse.prepared' ||
-    et === 'task.warehouse.received' ||
-    et === 'task.warehouse.rejected' ||
-    et === 'task.warehouse.completed'
-  ) {
-    const status = warehouseStatusDisplayCn(pickFirst(raw, payload, ['warehouse_status', 'status']))
-    const remark = pickFirst(raw, payload, ['remark', 'reason'])
-    const verb: Record<string, string> = {
-      'task.warehouse.prepared': '完成了仓库备货',
-      'task.warehouse.received': '接收了仓库任务',
-      'task.warehouse.rejected': '退回了仓库任务',
-      'task.warehouse.completed': '完成了仓库处理',
-    }
-    const parts = [`${actor} ${verb[et] ?? '处理了仓库任务'}`]
-    if (status) parts.push(`仓库状态为「${status}」`)
-    if (remark) parts.push(cleanInlineBusinessText(remark))
-    return `${parts.join('，')}。`
-  }
-
-  if (et === 'task.closed') {
+  if (et === 'task.completed') {
     const remark = pickFirst(raw, payload, ['remark', 'reason'])
     const sku = pickFirst(raw, payload, ['sku_code', 'primary_sku_code'])
     const parts = [`${actor} 已结单`]

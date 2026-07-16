@@ -121,11 +121,11 @@ func TestScanTaskListItemRowAllowsMissingTaskDetail(t *testing.T) {
 	defer db.Close()
 
 	now := time.Now()
-	columns := make([]string, 81)
+	columns := make([]string, 84)
 	for i := range columns {
 		columns[i] = fmt.Sprintf("c%d", i)
 	}
-	values := make([]driver.Value, 81)
+	values := make([]driver.Value, 84)
 	values[0] = int64(26)                               // id
 	values[1] = "RW-20260313-A-000022"                  // task_no
 	values[3] = "SKU-000005"                            // sku_code
@@ -135,26 +135,27 @@ func TestScanTaskListItemRowAllowsMissingTaskDetail(t *testing.T) {
 	values[7] = "team-a"                                // owner_team
 	values[8] = ""                                      // owner_department
 	values[9] = ""                                      // owner_org_team
-	values[10] = string(domain.TaskPriorityLow)         // priority
-	values[11] = int64(7)                               // creator_id
-	values[12] = int64(8)                               // requester_id
-	values[15] = "Requester 8"                          // requester_name
-	values[16] = "Creator 7"                            // creator_name
-	values[19] = string(domain.TaskStatusPendingAssign) // task_status
-	values[20] = now                                    // created_at
-	values[21] = now                                    // updated_at
-	values[23] = false                                  // need_outsource
-	values[24] = false                                  // is_outsource
-	values[25] = string(domain.TaskBusinessLaneNormal)  // business_lane
-	values[26] = false                                  // customization_required
-	values[27] = ""                                     // customization_source_type
-	values[29] = ""                                     // warehouse_reject_reason
-	values[30] = ""                                     // warehouse_reject_category
-	values[31] = false                                  // is_batch_task
-	values[32] = int64(1)                               // batch_item_count
-	values[33] = string(domain.TaskBatchModeSingle)     // batch_mode
-	values[34] = "SKU-000005"                           // primary_sku_code
-	values[35] = string(domain.TaskSKUCodeTypeRegular)  // sku_code_type
+	values[12] = int64(0)                               // workflow_revision
+	values[13] = string(domain.TaskPriorityLow)         // priority
+	values[14] = int64(7)                               // creator_id
+	values[15] = int64(8)                               // requester_id
+	values[18] = "Requester 8"                          // requester_name
+	values[19] = "Creator 7"                            // creator_name
+	values[22] = string(domain.TaskStatusPendingAssign) // task_status
+	values[23] = now                                    // created_at
+	values[24] = now                                    // updated_at
+	values[26] = false                                  // need_outsource
+	values[27] = false                                  // is_outsource
+	values[28] = string(domain.TaskBusinessLaneNormal)  // business_lane
+	values[29] = false                                  // customization_required
+	values[30] = ""                                     // customization_source_type
+	values[32] = ""                                     // warehouse_reject_reason
+	values[33] = ""                                     // warehouse_reject_category
+	values[34] = false                                  // is_batch_task
+	values[35] = int64(1)                               // batch_item_count
+	values[36] = string(domain.TaskBatchModeSingle)     // batch_mode
+	values[37] = "SKU-000005"                           // primary_sku_code
+	values[38] = string(domain.TaskSKUCodeTypeRegular)  // sku_code_type
 
 	rows := sqlmock.NewRows(columns).AddRow(values...)
 	mock.ExpectQuery("SELECT").WillReturnRows(rows)
@@ -596,11 +597,11 @@ func newTaskListItemSQLMockRow(t *testing.T) *sqlmock.Rows {
 	t.Helper()
 
 	now := time.Now()
-	columns := make([]string, 81)
+	columns := make([]string, 84)
 	for i := range columns {
 		columns[i] = fmt.Sprintf("c%d", i)
 	}
-	values := make([]driver.Value, 81)
+	values := make([]driver.Value, 84)
 	values[0] = int64(100)
 	values[1] = "T-BATCH-001"
 	values[3] = "CGG000025"
@@ -610,21 +611,22 @@ func newTaskListItemSQLMockRow(t *testing.T) *sqlmock.Rows {
 	values[7] = "team-a"
 	values[8] = ""
 	values[9] = ""
-	values[10] = string(domain.TaskPriorityLow)
-	values[16] = "Creator"
-	values[19] = string(domain.TaskStatusPendingAssign)
-	values[11] = int64(1)
-	values[20] = now
-	values[21] = now
-	values[23] = false
-	values[24] = false
-	values[25] = string(domain.TaskBusinessLaneNormal)
+	values[12] = int64(0)
+	values[13] = string(domain.TaskPriorityLow)
+	values[19] = "Creator"
+	values[22] = string(domain.TaskStatusPendingAssign)
+	values[14] = int64(1)
+	values[23] = now
+	values[24] = now
 	values[26] = false
-	values[31] = true
-	values[32] = int64(5)
-	values[33] = string(domain.TaskBatchModeMultiSKU)
-	values[34] = "CGG000025"
-	values[35] = string(domain.TaskSKUCodeTypeRegular)
+	values[27] = false
+	values[28] = string(domain.TaskBusinessLaneNormal)
+	values[29] = false
+	values[34] = true
+	values[35] = int64(5)
+	values[36] = string(domain.TaskBatchModeMultiSKU)
+	values[37] = "CGG000025"
+	values[38] = string(domain.TaskSKUCodeTypeRegular)
 	return sqlmock.NewRows(columns).AddRow(values...)
 }
 

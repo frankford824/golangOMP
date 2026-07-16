@@ -122,14 +122,8 @@ const taskStatusItems: TaskStatusItem[] = [
   {
     key: 'audit',
     label: '待审核',
-    to: '/tasks?tab=mine&status=PendingAuditA,PendingAuditB,PendingCustomizationReview,PendingEffectReview',
-    status: 'PendingAuditA,PendingAuditB,PendingCustomizationReview,PendingEffectReview',
-  },
-  {
-    key: 'warehouse',
-    label: '待仓库',
-    to: '/tasks?tab=mine&status=PendingWarehouseQC,PendingWarehouseReceive',
-    status: 'PendingWarehouseQC,PendingWarehouseReceive',
+    to: '/tasks?tab=mine&status=PendingAudit',
+    status: 'PendingAudit',
   },
   { key: 'completed', label: '已完成', to: '/tasks?tab=mine&status=Completed', status: 'Completed' },
   { key: 'cancelled', label: '已终止', to: '/tasks?tab=mine&status=Cancelled', status: 'Cancelled' },

@@ -150,12 +150,6 @@ func (a *taskActionAuthorizer) EvaluateTaskActionPolicyWithAttributes(
 		decision.ScopeSource = scopeSource
 		return decision
 	}
-	if scopeSource, ok := evaluateCompletedAssetMaintenanceScope(resolvedAction, actor, task); ok {
-		decision.Allowed = true
-		decision.ScopeSource = scopeSource
-		return decision
-	}
-
 	if !actorHasAllowedTaskActionRole(actor, rule.RequiredRoles) {
 		decision.DenyCode = "missing_required_role"
 		decision.DenyReason = authFirstNonEmpty(rule.RoleGateMessage, "task action denied because the actor role is insufficient")
@@ -286,21 +280,6 @@ func evaluateCustomizationReviewerAssetUploadScope(action TaskAction, actor *tas
 		}
 	}
 	return "", false
-}
-
-func evaluateCompletedAssetMaintenanceScope(action TaskAction, actor *taskActionActor, task *domain.Task) (string, bool) {
-	if action != TaskActionAssetUploadSessionCreate && action != TaskActionAssetUploadSessionComplete && action != TaskActionAssetUploadSessionCancel {
-		return "", false
-	}
-	if actor == nil || task == nil || task.TaskStatus != domain.TaskStatusCompleted || !hasAnyRoleValue(actor.Roles,
-		domain.RoleCustomizationReviewer,
-		domain.RoleAuditA,
-		domain.RoleAuditB,
-		domain.RoleAssetManager,
-	) {
-		return "", false
-	}
-	return string(TaskActionScopeAssetMaintenance), true
 }
 
 func actorHasGenericAssetUploadRole(actor *taskActionActor) bool {

@@ -60,6 +60,14 @@ func (f *fakeLifecycleRepo) Restore(context.Context, repo.Tx, repo.TaskAssetLife
 	return nil
 }
 
+func (f *fakeLifecycleRepo) LockGenericDeleteGuard(context.Context, repo.Tx, int64) (*repo.TaskAssetDeleteGuard, error) {
+	return nil, nil
+}
+
+func (f *fakeLifecycleRepo) EnqueueObjectDeletions(context.Context, repo.Tx, []int64) error {
+	return nil
+}
+
 func (f *fakeLifecycleRepo) SoftDelete(context.Context, repo.Tx, repo.TaskAssetLifecycleUpdate) error {
 	return nil
 }

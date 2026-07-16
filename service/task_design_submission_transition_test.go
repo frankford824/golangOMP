@@ -28,10 +28,10 @@ func TestApplyDesignSubmissionWorkflow(t *testing.T) {
 	task := &domain.Task{ID: 1}
 	actorID := int64(99)
 
-	t.Run("regular PendingAuditA triggers design submit", func(t *testing.T) {
+	t.Run("regular PendingAudit triggers design submit", func(t *testing.T) {
 		rec := &designSubmissionWorkflowRecorder{}
 		err := applyDesignSubmissionWorkflow(ctx, nil, rec, task, designSubmissionTransition{
-			TaskStatus: domain.TaskStatusPendingAuditA,
+			TaskStatus: domain.TaskStatusPendingAudit,
 			ModuleKey:  domain.ModuleKeyDesign,
 		}, actorID)
 		if err != nil {
@@ -42,10 +42,10 @@ func TestApplyDesignSubmissionWorkflow(t *testing.T) {
 		}
 	})
 
-	t.Run("customization PendingCustomizationReview triggers customization submit", func(t *testing.T) {
+	t.Run("customization PendingAudit triggers customization submit", func(t *testing.T) {
 		rec := &designSubmissionWorkflowRecorder{}
 		err := applyDesignSubmissionWorkflow(ctx, nil, rec, task, designSubmissionTransition{
-			TaskStatus: domain.TaskStatusPendingCustomizationReview,
+			TaskStatus: domain.TaskStatusPendingAudit,
 			ModuleKey:  domain.ModuleKeyCustomization,
 		}, actorID)
 		if err != nil {
@@ -79,7 +79,7 @@ func TestDesignAssetSourceModuleKeyForTask(t *testing.T) {
 	if got := designAssetSourceModuleKeyForTask(regular, domain.TaskAssetTypeDelivery); got != domain.ModuleKeyDesign {
 		t.Fatalf("delivery source_module_key = %q, want %q", got, domain.ModuleKeyDesign)
 	}
-	audit := &domain.Task{CustomizationRequired: false, TaskStatus: domain.TaskStatusPendingAuditA}
+	audit := &domain.Task{CustomizationRequired: false, TaskStatus: domain.TaskStatusPendingAudit}
 	if got := designAssetSourceModuleKeyForTask(audit, domain.TaskAssetTypeSource); got != domain.ModuleKeyAudit {
 		t.Fatalf("audit source source_module_key = %q, want %q", got, domain.ModuleKeyAudit)
 	}
@@ -98,11 +98,11 @@ func TestDesignAssetSourceModuleKeyForTask(t *testing.T) {
 
 func TestDesignSubmissionTransitionForTask(t *testing.T) {
 	regular := designSubmissionTransitionForTask(&domain.Task{CustomizationRequired: false})
-	if regular.TaskStatus != domain.TaskStatusPendingAuditA || regular.ModuleKey != domain.ModuleKeyDesign {
+	if regular.TaskStatus != domain.TaskStatusPendingAudit || regular.ModuleKey != domain.ModuleKeyDesign {
 		t.Fatalf("regular transition = %+v", regular)
 	}
 	custom := designSubmissionTransitionForTask(&domain.Task{CustomizationRequired: true})
-	if custom.TaskStatus != domain.TaskStatusPendingCustomizationReview || custom.ModuleKey != domain.ModuleKeyCustomization {
+	if custom.TaskStatus != domain.TaskStatusPendingAudit || custom.ModuleKey != domain.ModuleKeyCustomization {
 		t.Fatalf("customization transition = %+v", custom)
 	}
 }

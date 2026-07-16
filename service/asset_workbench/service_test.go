@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"sort"
@@ -32,6 +33,22 @@ func testWorkbenchOSSDirect() *baseservice.OSSDirectService {
 		AccessKeySecret: "test-secret",
 		PresignExpiry:   15 * time.Minute,
 	})
+}
+
+func assetCapabilityActor(id int64, permissions ...domain.PermissionCode) domain.RequestActor {
+	assignment := domain.AccessAssignment{ID: 1, UserID: id, RoleID: 9001, RoleCode: "migrated_asset_manager", ScopeMode: domain.AccessScopeGlobal, SourceType: "direct"}
+	sources := make([]domain.EffectiveAccessNote, 0, len(permissions))
+	for _, permission := range permissions {
+		sources = append(sources, domain.EffectiveAccessNote{Permission: permission, RoleID: assignment.RoleID, RoleCode: assignment.RoleCode, SourceType: assignment.SourceType, ScopeMode: assignment.ScopeMode})
+	}
+	return domain.RequestActor{
+		ID:          id,
+		Permissions: append([]domain.PermissionCode(nil), permissions...),
+		EffectiveAccess: &domain.EffectiveAccess{
+			UserID: id, Permissions: append([]domain.PermissionCode(nil), permissions...),
+			Assignments: []domain.AccessAssignment{assignment}, Sources: sources,
+		},
+	}
 }
 
 func containsString(values []string, target string) bool {
@@ -1239,8 +1256,43 @@ func (r *submissionDirectoryDifficultyRepo) CreateSettlementSupplement(_ context
 
 type clientMaterialRepo struct {
 	repo.AssetWorkbenchRepo
-	materials map[int64]*domain.AssetWorkbenchClientMaterial
-	events    []*domain.AssetWorkbenchEvent
+	materials                 map[int64]*domain.AssetWorkbenchClientMaterial
+	events                    []*domain.AssetWorkbenchEvent
+	currentResourceRevisionID int64
+	resourceCoverItemID       int64
+	batchJobs                 []*domain.AssetWorkbenchBatchJob
+}
+
+func (r *clientMaterialRepo) ResolveResourceGroupPublication(_ context.Context, groupID, finalizedRevisionID, coverRevisionItemID int64) (*domain.ResourceGroupPublicationSnapshot, error) {
+	revisionID := finalizedRevisionID
+	if revisionID == 0 {
+		revisionID = r.currentResourceRevisionID
+	}
+	coverID := r.resourceCoverItemID
+	if coverID == 0 {
+		coverID = 501
+	}
+	return &domain.ResourceGroupPublicationSnapshot{
+		GroupID: groupID, TaskID: 20, TaskNo: "RW-20", SKUCode: "SKU-20", Mode: domain.TaskAssetGroupModeSingle,
+		FinalizedRevisionID: revisionID, CurrentFinalizedRevisionID: r.currentResourceRevisionID, CoverRevisionItemID: coverID,
+		Files: []domain.TaskResourceFile{{RevisionItemID: coverID, TaskAssetID: 900, FileName: "final.png", MimeType: "image/png", StorageKey: "tasks/20/final.png"}},
+	}, nil
+}
+
+func (r *clientMaterialRepo) CreateClientMaterial(_ context.Context, _ repo.Tx, material *domain.AssetWorkbenchClientMaterial) (*domain.AssetWorkbenchClientMaterial, error) {
+	if r.materials == nil {
+		r.materials = map[int64]*domain.AssetWorkbenchClientMaterial{}
+	}
+	copyItem := *material
+	copyItem.ID = int64(len(r.materials) + 1)
+	r.materials[copyItem.ID] = &copyItem
+	return &copyItem, nil
+}
+
+func (r *clientMaterialRepo) UpdateClientMaterial(_ context.Context, _ repo.Tx, material *domain.AssetWorkbenchClientMaterial) (*domain.AssetWorkbenchClientMaterial, error) {
+	copyItem := *material
+	r.materials[copyItem.ID] = &copyItem
+	return &copyItem, nil
 }
 
 func (r *clientMaterialRepo) GetClientMaterial(_ context.Context, materialID int64) (*domain.AssetWorkbenchClientMaterial, error) {
@@ -1272,6 +1324,120 @@ func (r *clientMaterialRepo) AppendEvent(_ context.Context, _ repo.Tx, event *do
 	return &copyEvent, nil
 }
 
+func (r *clientMaterialRepo) CreateBatchJob(_ context.Context, _ repo.Tx, job *domain.AssetWorkbenchBatchJob) (*domain.AssetWorkbenchBatchJob, error) {
+	copyJob := *job
+	copyJob.ID = int64(len(r.batchJobs) + 1)
+	copyJob.RequestPayload = append(json.RawMessage(nil), job.RequestPayload...)
+	r.batchJobs = append(r.batchJobs, &copyJob)
+	return &copyJob, nil
+}
+
+func (r *clientMaterialRepo) UpdateBatchJobProgress(_ context.Context, _ repo.Tx, job *domain.AssetWorkbenchBatchJob) error {
+	return nil
+}
+
+func (r *clientMaterialRepo) CompleteBatchJob(_ context.Context, _ repo.Tx, job *domain.AssetWorkbenchBatchJob) error {
+	return nil
+}
+
+type effectiveAccessResolverStub struct {
+	effective *domain.EffectiveAccess
+	err       *domain.AppError
+}
+
+func (s *effectiveAccessResolverStub) EffectiveAccess(_ context.Context, _ int64) (*domain.EffectiveAccess, *domain.AppError) {
+	return s.effective, s.err
+}
+
+func TestBatchUpdateClientMaterialsPersistsAnImmutableResolvedSnapshot(t *testing.T) {
+	repository := &clientMaterialRepo{}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(repository, assetWorkbenchTestTxRunner{}))
+	actor := assetCapabilityActor(9, domain.PermissionAssetPublish)
+	items := make([]CreateClientMaterialParams, assetWorkbenchClientMaterialBatchUpdateLimit+1)
+	for index := range items {
+		items[index] = CreateClientMaterialParams{SourceType: "external_asset", SourceRef: fmt.Sprintf("ext-%d", index+1), ResourceID: fmt.Sprintf("ext-%d", index+1)}
+	}
+
+	result, appErr := svc.BatchUpdateClientMaterials(context.Background(), actor, BatchUpdateClientMaterialsParams{Action: "publish", Items: items})
+	if appErr != nil || result == nil || !result.AsyncRequired || len(repository.batchJobs) != 1 {
+		t.Fatalf("BatchUpdateClientMaterials() result=%+v error=%+v jobs=%d", result, appErr, len(repository.batchJobs))
+	}
+	var payload BatchUpdateClientMaterialsParams
+	if err := json.Unmarshal(repository.batchJobs[0].RequestPayload, &payload); err != nil {
+		t.Fatalf("decode snapshot: %v", err)
+	}
+	if payload.SelectionScope != "resolved_snapshot" || len(payload.Items) != len(items) || len(payload.Folders) != 0 || payload.Query != "" {
+		t.Fatalf("queued payload = %+v, want exact immutable items", payload)
+	}
+}
+
+func TestBatchWorkerFailsClosedWhenPublishPermissionWasRevoked(t *testing.T) {
+	repository := &clientMaterialRepo{materials: map[int64]*domain.AssetWorkbenchClientMaterial{}, currentResourceRevisionID: 100, resourceCoverItemID: 501}
+	resolver := &effectiveAccessResolverStub{effective: &domain.EffectiveAccess{UserID: 9}}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(repository, assetWorkbenchTestTxRunner{}), WithEffectiveAccessResolver(resolver))
+	payload := mustJSON(BatchUpdateClientMaterialsParams{Action: "publish", SelectionScope: "resolved_snapshot", Items: []CreateClientMaterialParams{{
+		SourceType: "task_resource_group", ResourceGroupID: 10, FinalizedRevisionID: 100, CoverRevisionItemID: 501,
+	}}})
+	job := &domain.AssetWorkbenchBatchJob{ID: 1, JobID: "job-1", JobType: domain.AssetWorkbenchAsyncJobTypeClientMaterialBatchUpdate, Action: "publish", RequestedBy: 9, RequestPayload: payload}
+
+	appErr := svc.processBatchJob(context.Background(), job)
+	if appErr == nil || len(repository.materials) != 0 || !strings.Contains(job.ErrorMessage, "revoked") {
+		t.Fatalf("processBatchJob() error=%+v job=%+v materials=%d", appErr, job, len(repository.materials))
+	}
+}
+
+func TestBatchWorkerNeverInventsPermissionsWithoutEffectiveAccess(t *testing.T) {
+	repository := &clientMaterialRepo{materials: map[int64]*domain.AssetWorkbenchClientMaterial{}}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(repository, assetWorkbenchTestTxRunner{}))
+	payload := mustJSON(BatchUpdateClientMaterialsParams{Action: "publish", SelectionScope: "resolved_snapshot", Items: []CreateClientMaterialParams{{SourceType: "external_asset", SourceRef: "ext-1"}}})
+	job := &domain.AssetWorkbenchBatchJob{ID: 1, JobID: "job-1", JobType: domain.AssetWorkbenchAsyncJobTypeClientMaterialBatchUpdate, Action: "publish", RequestedBy: 9, RequestPayload: payload}
+
+	appErr := svc.processBatchJob(context.Background(), job)
+	if appErr == nil || len(repository.materials) != 0 || !strings.Contains(job.ErrorMessage, "resolver") {
+		t.Fatalf("processBatchJob() error=%+v job=%+v materials=%d", appErr, job, len(repository.materials))
+	}
+}
+
+func TestResourceGroupPublicationPinsResolvedRevisionAndRejectsWrongCover(t *testing.T) {
+	repository := &clientMaterialRepo{materials: map[int64]*domain.AssetWorkbenchClientMaterial{}, currentResourceRevisionID: 100, resourceCoverItemID: 501}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(repository, assetWorkbenchTestTxRunner{}), WithOSSDirect(testWorkbenchOSSDirect()))
+	actor := assetCapabilityActor(9, domain.PermissionAssetPublish)
+
+	created, appErr := svc.CreateClientMaterial(context.Background(), actor, CreateClientMaterialParams{
+		SourceType: "task_resource_group", ResourceGroupID: 10, FinalizedRevisionID: 100, CoverRevisionItemID: 501, Title: "Pinned set",
+	})
+	if appErr != nil {
+		t.Fatalf("CreateClientMaterial() error = %+v", appErr)
+	}
+	if created.FinalizedRevisionID == nil || *created.FinalizedRevisionID != 100 {
+		t.Fatalf("created finalized revision = %v, want 100", created.FinalizedRevisionID)
+	}
+
+	// A later finalized group revision must not move an existing publication.
+	repository.currentResourceRevisionID = 200
+	info, appErr := svc.clientMaterialDownloadInfo(context.Background(), created)
+	if appErr != nil {
+		t.Fatalf("clientMaterialDownloadInfo() error = %+v", appErr)
+	}
+	if info == nil || info.Filename != "final.png" || created.FinalizedRevisionID == nil || *created.FinalizedRevisionID != 100 {
+		t.Fatalf("pinned download = %+v material=%+v", info, created)
+	}
+
+	_, appErr = svc.CreateClientMaterial(context.Background(), actor, CreateClientMaterialParams{
+		SourceType: "task_resource_group", ResourceGroupID: 10, FinalizedRevisionID: 100, CoverRevisionItemID: 501,
+	})
+	if appErr == nil || appErr.Code != domain.ErrCodeConflict {
+		t.Fatalf("superseded revision appErr = %+v, want conflict", appErr)
+	}
+
+	_, appErr = svc.CreateClientMaterial(context.Background(), actor, CreateClientMaterialParams{
+		SourceType: "task_resource_group", ResourceGroupID: 10, CoverRevisionItemID: 999,
+	})
+	if appErr == nil || appErr.Code != domain.ErrCodeInvalidStateTransition {
+		t.Fatalf("wrong cover appErr = %+v", appErr)
+	}
+}
+
 func (s *systemAssetDownloaderStub) BuildBatchDownloadManifest(_ context.Context, assetIDs []int64, _ ...assetcenter.BatchDownloadOption) (*assetcenter.BatchDownloadManifest, *domain.AppError) {
 	s.batchCalls++
 	s.batchAssetIDs = append([]int64(nil), assetIDs...)
@@ -1296,6 +1462,7 @@ type externalMaterialProviderStub struct {
 	searchCalls   int
 	searchQueries []domain.AssetSearchQuery
 	searchResult  *assetcenter.SearchResult
+	pagedSearch   []*assetcenter.AssetDetail
 	browseCalls   []assetcenter.MaterialBrowseQuery
 	detailCalls   []int64
 	downloadCalls []int64
@@ -1309,12 +1476,103 @@ type externalMaterialProviderStub struct {
 func (s *externalMaterialProviderStub) Search(_ context.Context, query domain.AssetSearchQuery) (*assetcenter.SearchResult, *domain.AppError) {
 	s.searchCalls++
 	s.searchQueries = append(s.searchQueries, query)
+	if query.BusinessLane.Valid() && query.Source == domain.AssetResourceSourceExternal {
+		return &assetcenter.SearchResult{Items: []*assetcenter.AssetDetail{}, Total: 0, Page: query.Page, Size: query.Size}, nil
+	}
+	if s.pagedSearch != nil {
+		rows := append([]*assetcenter.AssetDetail(nil), s.pagedSearch...)
+		if query.OperationalVisibleOnly {
+			rows = filterVisibleWorkbenchMaterialAssets(rows)
+		}
+		start := (query.Page - 1) * query.Size
+		if start > len(rows) {
+			start = len(rows)
+		}
+		end := start + query.Size
+		if end > len(rows) {
+			end = len(rows)
+		}
+		return &assetcenter.SearchResult{
+			Items: append([]*assetcenter.AssetDetail(nil), rows[start:end]...),
+			Total: int64(len(rows)), Page: query.Page, Size: query.Size,
+		}, nil
+	}
 	if s.searchResult != nil {
 		result := *s.searchResult
 		result.Items = append([]*assetcenter.AssetDetail(nil), s.searchResult.Items...)
 		return &result, nil
 	}
 	return &assetcenter.SearchResult{}, nil
+}
+
+type resourceGroupMaterialProviderStub struct {
+	items   []domain.TaskAssetGroup
+	queries []domain.ResourceGroupListParams
+}
+
+func (s *resourceGroupMaterialProviderStub) ListResourceGroups(_ context.Context, _ domain.RequestActor, params domain.ResourceGroupListParams) (*domain.ResourceGroupListResult, *domain.AppError) {
+	s.queries = append(s.queries, params)
+	items := append([]domain.TaskAssetGroup(nil), s.items...)
+	if params.BusinessLane.Valid() {
+		filtered := items[:0]
+		for _, item := range items {
+			if item.BusinessLane == params.BusinessLane {
+				filtered = append(filtered, item)
+			}
+		}
+		items = filtered
+	}
+	if params.FormatCategory != "" && params.FormatCategory != domain.AssetFormatCategoryAll {
+		filtered := items[:0]
+		for _, item := range items {
+			if testResourceGroupMatchesFormat(item, params.FormatCategory) {
+				filtered = append(filtered, item)
+			}
+		}
+		items = filtered
+	}
+	start := (params.Page - 1) * params.PageSize
+	if start > len(items) {
+		start = len(items)
+	}
+	end := start + params.PageSize
+	if end > len(items) {
+		end = len(items)
+	}
+	return &domain.ResourceGroupListResult{
+		Items: append([]domain.TaskAssetGroup(nil), items[start:end]...),
+		Page:  params.Page, PageSize: params.PageSize, Total: int64(len(items)),
+	}, nil
+}
+
+func testResourceGroupMatchesFormat(item domain.TaskAssetGroup, category domain.AssetFormatCategoryFilter) bool {
+	if item.FinalizedRevision == nil {
+		return false
+	}
+	if testResourceFileMatchesFormat(item.FinalizedRevision.SourceFile, category) {
+		return true
+	}
+	for _, revisionItem := range item.FinalizedRevision.Items {
+		if testResourceFileMatchesFormat(revisionItem.File, category) {
+			return true
+		}
+	}
+	return false
+}
+
+func testResourceFileMatchesFormat(file *domain.TaskResourceFile, category domain.AssetFormatCategoryFilter) bool {
+	if file == nil {
+		return false
+	}
+	name := strings.ToLower(file.FileName)
+	mime := strings.ToLower(file.MimeType)
+	switch category {
+	case domain.AssetFormatCategoryImage:
+		return strings.HasPrefix(mime, "image/") && !strings.Contains(mime, "photoshop")
+	case domain.AssetFormatCategoryDesign:
+		return strings.Contains(mime, "photoshop") || strings.HasSuffix(name, ".psd") || strings.HasSuffix(name, ".ai")
+	}
+	return false
 }
 
 func (s *externalMaterialProviderStub) BrowseMaterials(_ context.Context, query assetcenter.MaterialBrowseQuery) (*assetcenter.MaterialBrowseResult, *domain.AppError) {
@@ -3203,7 +3461,7 @@ func TestSystemAssetPreviewUsesSharedPreviewerBeforeDownload(t *testing.T) {
 		},
 	}
 	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithSystemAssetDownloader(previewer))
-	actor := domain.RequestActor{ID: 1, Roles: []domain.Role{domain.RoleAssetManager}}
+	actor := assetCapabilityActor(1, domain.PermissionAssetView)
 
 	meta, appErr := svc.SystemAssetPreview(context.Background(), actor, 1001)
 	if appErr != nil {
@@ -3236,7 +3494,7 @@ func TestSystemAssetPreviewUsesSeparatelyWiredDerivedPreviewer(t *testing.T) {
 		WithSystemAssetPreviewer(previewer),
 	)
 
-	meta, appErr := svc.SystemAssetPreview(context.Background(), domain.RequestActor{ID: 1, Roles: []domain.Role{domain.RoleAssetManager}}, 14354)
+	meta, appErr := svc.SystemAssetPreview(context.Background(), assetCapabilityActor(1, domain.PermissionAssetView), 14354)
 	if appErr != nil {
 		t.Fatalf("SystemAssetPreview() error = %+v", appErr)
 	}
@@ -3360,7 +3618,7 @@ func TestListClientMaterialsHydratesSystemBusinessLane(t *testing.T) {
 
 	items, appErr := svc.ListClientMaterials(
 		context.Background(),
-		domain.RequestActor{ID: 77, Roles: []domain.Role{domain.RoleAssetSubmitter}},
+		domain.RequestActor{ID: 77, Permissions: []domain.PermissionCode{domain.PermissionAssetView}},
 		false,
 	)
 	if appErr != nil {
@@ -3381,7 +3639,7 @@ func TestClientMaterialDownloadRequiresEnabledPublishedMaterial(t *testing.T) {
 		WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}),
 		WithSystemAssetDownloader(downloader),
 	)
-	actor := domain.RequestActor{ID: 77, Roles: []domain.Role{domain.RoleAssetSubmitter}}
+	actor := domain.RequestActor{ID: 77, Permissions: []domain.PermissionCode{domain.PermissionAssetDownload}}
 
 	info, appErr := svc.ClientMaterialDownload(context.Background(), actor, 1)
 	if appErr != nil {
@@ -3418,7 +3676,7 @@ func TestClientMaterialPreviewRequiresEnabledPublishedMaterial(t *testing.T) {
 		WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}),
 		WithSystemAssetDownloader(downloader),
 	)
-	actor := domain.RequestActor{ID: 77, Roles: []domain.Role{domain.RoleAssetSubmitter}}
+	actor := domain.RequestActor{ID: 77, Permissions: []domain.PermissionCode{domain.PermissionAssetView}}
 
 	meta, appErr := svc.ClientMaterialPreview(context.Background(), actor, 1)
 	if appErr != nil {
@@ -3459,7 +3717,7 @@ func TestExternalClientMaterialDownloadAndPreviewUseExternalProvider(t *testing.
 		WithSystemAssetSearcher(externalProvider),
 		WithSystemAssetDownloader(systemDownloader),
 	)
-	actor := domain.RequestActor{ID: 77, Roles: []domain.Role{domain.RoleAssetSubmitter}}
+	actor := domain.RequestActor{ID: 77, Permissions: []domain.PermissionCode{domain.PermissionAssetView, domain.PermissionAssetDownload}}
 
 	info, appErr := svc.ClientMaterialDownload(context.Background(), actor, 1)
 	if appErr != nil {
@@ -3476,7 +3734,7 @@ func TestExternalClientMaterialDownloadAndPreviewUseExternalProvider(t *testing.
 	if appErr != nil {
 		t.Fatalf("ClientMaterialPreview(external) error = %+v", appErr)
 	}
-	if meta == nil || meta.SourceType != string(domain.AssetResourceSourceExternal) || meta.SourceRef != domain.ExternalAssetResourceID(501) || !meta.PreviewAvailable {
+	if meta == nil || meta.SourceType != "external_asset" || meta.SourceRef != domain.ExternalAssetResourceID(501) || !meta.PreviewAvailable {
 		t.Fatalf("preview meta = %+v, want external ready preview", meta)
 	}
 	if len(externalProvider.previewCalls) != 1 || externalProvider.previewCalls[0] != 501 {
@@ -3504,7 +3762,7 @@ func TestExternalClientMaterialPendingDownloadDoesNotRecordCompletedEvent(t *tes
 		WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}),
 		WithSystemAssetSearcher(externalProvider),
 	)
-	actor := domain.RequestActor{ID: 77, Roles: []domain.Role{domain.RoleAssetSubmitter}}
+	actor := domain.RequestActor{ID: 77, Permissions: []domain.PermissionCode{domain.PermissionAssetDownload}}
 
 	info, appErr := svc.ClientMaterialDownload(context.Background(), actor, 1)
 	if appErr != nil {
@@ -3533,7 +3791,7 @@ func TestClientMaterialBatchDownloadSupportsMixedSources(t *testing.T) {
 
 	manifest, appErr := svc.ClientMaterialBatchDownloadManifest(
 		context.Background(),
-		domain.RequestActor{ID: 77, Roles: []domain.Role{domain.RoleAssetSubmitter}},
+		domain.RequestActor{ID: 77, Permissions: []domain.PermissionCode{domain.PermissionAssetDownload}},
 		ClientMaterialBatchDownloadParams{MaterialIDs: []int64{1, 2}},
 	)
 	if appErr != nil {
@@ -3542,7 +3800,7 @@ func TestClientMaterialBatchDownloadSupportsMixedSources(t *testing.T) {
 	if manifest.SuccessCount != 2 || len(manifest.Items) != 2 {
 		t.Fatalf("manifest = %+v, want two mixed-source items", manifest)
 	}
-	if manifest.Items[0].SourceType != string(domain.AssetResourceSourceSystem) || manifest.Items[1].SourceType != string(domain.AssetResourceSourceExternal) {
+	if manifest.Items[0].SourceType != string(domain.AssetResourceSourceSystem) || manifest.Items[1].SourceType != "external_asset" {
 		t.Fatalf("manifest items = %+v, want system then external", manifest.Items)
 	}
 	if systemDownloader.downloadCalls != 1 || len(externalProvider.downloadCalls) != 1 {
@@ -3563,7 +3821,7 @@ func TestSystemAssetPreviewUsesPreviewableDownloadURL(t *testing.T) {
 	}
 	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithSystemAssetDownloader(downloader))
 
-	meta, appErr := svc.SystemAssetPreview(context.Background(), domain.RequestActor{ID: 99, Roles: []domain.Role{domain.RoleAssetManager}}, 1001)
+	meta, appErr := svc.SystemAssetPreview(context.Background(), assetCapabilityActor(99, domain.PermissionAssetView), 1001)
 	if appErr != nil {
 		t.Fatalf("SystemAssetPreview() error = %+v", appErr)
 	}
@@ -3595,7 +3853,7 @@ func TestSystemAssetBatchDownloadDelegatesAndWritesEvent(t *testing.T) {
 
 	manifest, appErr := svc.SystemAssetBatchDownloadManifest(
 		context.Background(),
-		domain.RequestActor{ID: 99, Roles: []domain.Role{domain.RoleAssetManager}},
+		assetCapabilityActor(99, domain.PermissionAssetDownload),
 		SystemAssetBatchDownloadParams{AssetIDs: []int64{1001, 1002}, NamingMode: "business"},
 	)
 	if appErr != nil {
@@ -5047,15 +5305,19 @@ func TestBrowseMaterialsVirtualQuarkRootUsesVisibleFolderCounts(t *testing.T) {
 			Size: 100,
 		},
 	}}
-	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithSystemAssetSearcher(provider))
-	actor := domain.RequestActor{ID: 1, Roles: []domain.Role{domain.RoleAssetManager}}
+	groups := &resourceGroupMaterialProviderStub{items: []domain.TaskAssetGroup{testResourceGroupMaterial(1, time.Now().UTC())}}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithSystemAssetSearcher(provider), WithResourceGroupMaterialSearcher(groups))
+	actor := assetCapabilityActor(1, domain.PermissionAssetView)
 
 	root, appErr := svc.BrowseMaterials(context.Background(), actor, "", 1, 100, "all", "all", "")
 	if appErr != nil {
 		t.Fatalf("BrowseMaterials(root) error = %+v", appErr)
 	}
-	if len(root.Folders) != 1 || root.Folders[0].Path != "/quark" || root.Folders[0].FileCount != 3064 || root.Folders[0].DirectFileCount != 0 {
-		t.Fatalf("root folders = %+v, want /quark count from visible roots", root.Folders)
+	if len(root.Folders) != 2 || root.Folders[0].Path != "/quark" || root.Folders[0].FileCount != 3064 || root.Folders[0].DirectFileCount != 0 || root.Folders[1].Path != workbenchMaterialSystemRoot {
+		t.Fatalf("root folders = %+v, want /quark plus finalized resource-group root", root.Folders)
+	}
+	if len(root.Files) != 1 || root.Files[0].SourceType != "task_resource_group" {
+		t.Fatalf("root files = %+v, want finalized resource groups and no legacy system files", root.Files)
 	}
 
 	quark, appErr := svc.BrowseMaterials(context.Background(), actor, "/quark", 1, 100, "all", "all", "")
@@ -5085,18 +5347,14 @@ func TestWorkbenchMaterialAssetVisibilityKeepsSystemAssets(t *testing.T) {
 }
 
 func TestSystemSearchAllSourcesKeepsSystemAndVisibleExternalAssets(t *testing.T) {
-	provider := &externalMaterialProviderStub{searchResult: &assetcenter.SearchResult{
-		Items: []*assetcenter.AssetDetail{
-			{ID: 1, SourceType: string(domain.AssetResourceSourceSystem), OriginalFilename: "system.png"},
-			{ID: 2, SourceType: string(domain.AssetResourceSourceExternal), OriginPath: "/quark/海报/external.png"},
-			{ID: 3, SourceType: string(domain.AssetResourceSourceExternal), OriginPath: "/quark/其他目录/hidden.png"},
-		},
-		Total: 3,
-		Page:  1,
-		Size:  50,
+	now := time.Now().UTC()
+	groups := &resourceGroupMaterialProviderStub{items: []domain.TaskAssetGroup{testResourceGroupMaterial(1, now)}}
+	provider := &externalMaterialProviderStub{pagedSearch: []*assetcenter.AssetDetail{
+		{ID: 2, SourceType: string(domain.AssetResourceSourceExternal), OriginPath: "/quark/海报/external.png", UpdatedAt: now.Add(-time.Minute)},
+		{ID: 3, SourceType: string(domain.AssetResourceSourceExternal), OriginPath: "/quark/其他目录/hidden.png", UpdatedAt: now.Add(-2 * time.Minute)},
 	}}
-	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithSystemAssetSearcher(provider))
-	actor := domain.RequestActor{ID: 1, Roles: []domain.Role{domain.RoleAssetManager}}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithSystemAssetSearcher(provider), WithResourceGroupMaterialSearcher(groups))
+	actor := assetCapabilityActor(1, domain.PermissionAssetView)
 
 	result, appErr := svc.SystemSearch(context.Background(), actor, "png", 1, 50, "all", "all", "")
 	if appErr != nil {
@@ -5105,10 +5363,159 @@ func TestSystemSearchAllSourcesKeepsSystemAndVisibleExternalAssets(t *testing.T)
 	if len(result.Items) != 2 || result.Total != 2 {
 		t.Fatalf("SystemSearch() items/total = %d/%d, want visible system plus external", len(result.Items), result.Total)
 	}
-	if result.Items[0].SourceType != string(domain.AssetResourceSourceSystem) || result.Items[1].OriginPath != "/quark/海报/external.png" {
+	if result.Items[0].SourceType != "task_resource_group" || result.Items[1].OriginPath != "/quark/海报/external.png" {
 		t.Fatalf("SystemSearch() items = %+v, want system and visible external assets", result.Items)
 	}
-	if len(provider.searchQueries) != 1 || provider.searchQueries[0].Source != domain.AssetResourceSourceAll {
-		t.Fatalf("search queries = %+v, want all-source query", provider.searchQueries)
+	if len(provider.searchQueries) != 1 || provider.searchQueries[0].Source != domain.AssetResourceSourceExternal {
+		t.Fatalf("search queries = %+v, want external-only union branch", provider.searchQueries)
+	}
+}
+
+func testResourceGroupMaterial(id int64, updatedAt time.Time) domain.TaskAssetGroup {
+	fileSize := int64(1024)
+	return domain.TaskAssetGroup{
+		ID: id, TaskID: id + 1000, TaskNo: fmt.Sprintf("RW-%04d", id), SKUCode: fmt.Sprintf("SKU-%04d", id),
+		BusinessLane: domain.TaskBusinessLaneNormal, CreatedAt: updatedAt, UpdatedAt: updatedAt,
+		FinalizedRevision: &domain.TaskAssetGroupRevision{
+			ID: id + 10000, Status: domain.TaskAssetGroupRevisionFinalized, Mode: domain.TaskAssetGroupModeSingle,
+			Items: []domain.TaskAssetGroupRevisionItem{{
+				ID: id + 20000, SortOrder: 1,
+				File: &domain.TaskResourceFile{TaskAssetID: id + 30000, FileName: fmt.Sprintf("group-%04d.png", id), MimeType: "image/png", FileSize: &fileSize},
+			}},
+		},
+	}
+}
+
+func TestSystemSearchPushesResourceGroupLaneAndFormatFiltersIntoCountAndPage(t *testing.T) {
+	base := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
+	normalImage := testResourceGroupMaterial(1, base)
+	customDesign := testResourceGroupMaterial(2, base.Add(-time.Minute))
+	customDesign.BusinessLane = domain.TaskBusinessLaneCustomization
+	customDesign.FinalizedRevision.SourceFile = &domain.TaskResourceFile{TaskAssetID: 9002, FileName: "custom.psd", MimeType: "image/vnd.adobe.photoshop"}
+	groups := &resourceGroupMaterialProviderStub{items: []domain.TaskAssetGroup{normalImage, customDesign}}
+	external := &externalMaterialProviderStub{pagedSearch: []*assetcenter.AssetDetail{{
+		ID: 3, SourceType: string(domain.AssetResourceSourceExternal), OriginPath: "/quark/海报/external.psd", UpdatedAt: base,
+	}}}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithSystemAssetSearcher(external), WithResourceGroupMaterialSearcher(groups))
+	actor := assetCapabilityActor(1, domain.PermissionAssetView)
+
+	for _, source := range []string{"system", "all"} {
+		result, appErr := svc.SystemSearch(context.Background(), actor, "", 1, 50, source, "design", string(domain.TaskBusinessLaneCustomization))
+		if appErr != nil {
+			t.Fatalf("SystemSearch(%s) error = %+v", source, appErr)
+		}
+		if result.Total != 1 || len(result.Items) != 1 || result.Items[0].ID != customDesign.ID {
+			t.Fatalf("SystemSearch(%s) = total %d items %+v, want only custom design group", source, result.Total, result.Items)
+		}
+	}
+	imageResult, appErr := svc.SystemSearch(context.Background(), actor, "", 1, 50, "system", "image", string(domain.TaskBusinessLaneCustomization))
+	if appErr != nil || imageResult.Total != 1 || len(imageResult.Items) != 1 || imageResult.Items[0].ID != customDesign.ID {
+		t.Fatalf("source PSD + final PNG image filter = %+v/%+v", imageResult, appErr)
+	}
+	pdfResult, appErr := svc.SystemSearch(context.Background(), actor, "", 1, 50, "system", "pdf", string(domain.TaskBusinessLaneCustomization))
+	if appErr != nil || pdfResult.Total != 0 || len(pdfResult.Items) != 0 {
+		t.Fatalf("unmatched PDF filter = %+v/%+v", pdfResult, appErr)
+	}
+	if len(groups.queries) != 4 {
+		t.Fatalf("resource group queries = %+v", groups.queries)
+	}
+	for index, query := range groups.queries {
+		if query.BusinessLane != domain.TaskBusinessLaneCustomization {
+			t.Fatalf("resource group filters not pushed down: %+v", query)
+		}
+		if index < 2 && query.FormatCategory != domain.AssetFormatCategoryDesign {
+			t.Fatalf("design filter not pushed down: %+v", query)
+		}
+	}
+}
+
+func TestSystemSearchDeepPagesUseConstantChunksWithoutGapsOrDuplicates(t *testing.T) {
+	base := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
+	groupItems := make([]domain.TaskAssetGroup, 0, 310)
+	externalItems := make([]*assetcenter.AssetDetail, 0, 310)
+	for index := 0; index < 310; index++ {
+		groupItems = append(groupItems, testResourceGroupMaterial(int64(index+1), base.Add(-time.Duration(index*2)*time.Minute)))
+		externalItems = append(externalItems, &assetcenter.AssetDetail{
+			ID: int64(index + 1), SourceType: string(domain.AssetResourceSourceExternal),
+			OriginPath: fmt.Sprintf("/quark/海报/external-%04d.png", index+1), UpdatedAt: base.Add(-time.Duration(index*2+1) * time.Minute),
+		})
+	}
+
+	tests := []struct {
+		name          string
+		source        string
+		wantFirstType string
+		wantFirstID   int64
+	}{
+		{name: "system", source: "system", wantFirstType: "task_resource_group", wantFirstID: 151},
+		{name: "external", source: "external", wantFirstType: string(domain.AssetResourceSourceExternal), wantFirstID: 151},
+		{name: "all", source: "all", wantFirstType: "task_resource_group", wantFirstID: 76},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			groups := &resourceGroupMaterialProviderStub{items: groupItems}
+			external := &externalMaterialProviderStub{pagedSearch: externalItems}
+			svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithSystemAssetSearcher(external), WithResourceGroupMaterialSearcher(groups))
+			result, appErr := svc.SystemSearch(context.Background(), assetCapabilityActor(1, domain.PermissionAssetView), "", 3, 75, tc.source, "all", "")
+			if appErr != nil {
+				t.Fatalf("SystemSearch() error = %+v", appErr)
+			}
+			if len(result.Items) != 75 || result.Items[0].SourceType != tc.wantFirstType || result.Items[0].ID != tc.wantFirstID {
+				t.Fatalf("page result len/first = %d/%s:%d, want 75/%s:%d", len(result.Items), result.Items[0].SourceType, result.Items[0].ID, tc.wantFirstType, tc.wantFirstID)
+			}
+			seen := map[string]struct{}{}
+			for _, item := range result.Items {
+				key := fmt.Sprintf("%s:%d", item.SourceType, item.ID)
+				if _, exists := seen[key]; exists {
+					t.Fatalf("duplicate item %s", key)
+				}
+				seen[key] = struct{}{}
+			}
+			for _, params := range groups.queries {
+				if params.PageSize != 200 {
+					t.Fatalf("resource group page size changed across pages: %+v", groups.queries)
+				}
+			}
+			for _, query := range external.searchQueries {
+				if query.Size != 100 {
+					t.Fatalf("external page size changed across pages: %+v", external.searchQueries)
+				}
+			}
+		})
+	}
+}
+
+func TestSystemSearchExternalVisibilityIsAppliedBeforeCountAndPaging(t *testing.T) {
+	base := time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC)
+	raw := make([]*assetcenter.AssetDetail, 0, 250)
+	visibleIDs := make([]int64, 0, 205)
+	for index := 0; index < 250; index++ {
+		hidden := index < 15 || (index >= 100 && index < 115) || index >= 235
+		origin := fmt.Sprintf("/quark/海报/visible-%03d.png", index)
+		if hidden {
+			origin = fmt.Sprintf("/quark/其他目录/hidden-%03d.png", index)
+		} else {
+			visibleIDs = append(visibleIDs, int64(index+1))
+		}
+		raw = append(raw, &assetcenter.AssetDetail{ID: int64(index + 1), SourceType: string(domain.AssetResourceSourceExternal), OriginPath: origin, UpdatedAt: base.Add(-time.Duration(index) * time.Minute)})
+	}
+	provider := &externalMaterialProviderStub{pagedSearch: raw}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithSystemAssetSearcher(provider))
+	result, appErr := svc.SystemSearch(context.Background(), assetCapabilityActor(1, domain.PermissionAssetView), "", 3, 75, "external", "all", "")
+	if appErr != nil {
+		t.Fatalf("SystemSearch() error = %+v", appErr)
+	}
+	if result.Total != int64(len(visibleIDs)) || len(result.Items) != len(visibleIDs)-150 {
+		t.Fatalf("visible total/page = %d/%d, want %d/%d", result.Total, len(result.Items), len(visibleIDs), len(visibleIDs)-150)
+	}
+	for index, item := range result.Items {
+		if item.ID != visibleIDs[index+150] || strings.Contains(item.OriginPath, "/其他目录/") {
+			t.Fatalf("page item[%d] = %+v, want visible id %d", index, item, visibleIDs[index+150])
+		}
+	}
+	for _, query := range provider.searchQueries {
+		if !query.OperationalVisibleOnly || query.Size != 100 {
+			t.Fatalf("external visibility/count filter not pushed down: %+v", provider.searchQueries)
+		}
 	}
 }

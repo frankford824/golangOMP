@@ -212,7 +212,9 @@ type User struct {
 	Name               string             `db:"-"                      json:"name"`
 	RealName           string             `db:"-"                      json:"real_name,omitempty"`
 	Department         Department         `db:"department"             json:"department"`
+	DepartmentID       *int64             `db:"department_id"          json:"department_id,omitempty"`
 	Team               string             `db:"team"                   json:"team,omitempty"`
+	TeamID             *int64             `db:"team_id"                json:"team_id,omitempty"`
 	Group              string             `db:"-"                      json:"group,omitempty"`
 	ManagedDepartments []string           `db:"-"                      json:"managed_departments,omitempty"`
 	ManagedTeams       []string           `db:"-"                      json:"managed_teams,omitempty"`

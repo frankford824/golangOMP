@@ -69,6 +69,8 @@ type Service struct {
 	oss             objectStore
 	renderer        baseservice.AssetPreviewRenderer
 	systemAssets    SystemAssetSearcher
+	resourceGroups  ResourceGroupMaterialSearcher
+	accessResolver  EffectiveAccessResolver
 	systemDownloads SystemAssetDownloader
 	systemPreviews  SystemAssetPreviewer
 	nowFn           func() time.Time
@@ -91,6 +93,14 @@ type ProfileCompletionNotifier interface {
 
 type SystemAssetSearcher interface {
 	Search(ctx context.Context, query domain.AssetSearchQuery) (*assetcenter.SearchResult, *domain.AppError)
+}
+
+type ResourceGroupMaterialSearcher interface {
+	ListResourceGroups(ctx context.Context, actor domain.RequestActor, params domain.ResourceGroupListParams) (*domain.ResourceGroupListResult, *domain.AppError)
+}
+
+type EffectiveAccessResolver interface {
+	EffectiveAccess(ctx context.Context, userID int64) (*domain.EffectiveAccess, *domain.AppError)
 }
 
 type SystemMaterialBrowser interface {
@@ -205,6 +215,18 @@ func WithSystemAssetSearcher(searcher SystemAssetSearcher) Option {
 		if previewer, ok := searcher.(SystemAssetPreviewer); ok {
 			s.systemPreviews = previewer
 		}
+	}
+}
+
+func WithResourceGroupMaterialSearcher(searcher ResourceGroupMaterialSearcher) Option {
+	return func(s *Service) {
+		s.resourceGroups = searcher
+	}
+}
+
+func WithEffectiveAccessResolver(resolver EffectiveAccessResolver) Option {
+	return func(s *Service) {
+		s.accessResolver = resolver
 	}
 }
 
@@ -455,25 +477,31 @@ type UpdateUploadDirectoryParams struct {
 }
 
 type CreateClientMaterialParams struct {
-	AssetID     int64  `json:"asset_id"`
-	SourceType  string `json:"source_type"`
-	SourceRef   string `json:"source_ref"`
-	ResourceID  string `json:"resource_id"`
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	Enabled     *bool  `json:"enabled"`
-	SortOrder   int    `json:"sort_order"`
+	AssetID             int64  `json:"asset_id"`
+	SourceType          string `json:"source_type"`
+	SourceRef           string `json:"source_ref"`
+	ResourceID          string `json:"resource_id"`
+	ResourceGroupID     int64  `json:"resource_group_id"`
+	FinalizedRevisionID int64  `json:"finalized_revision_id"`
+	CoverRevisionItemID int64  `json:"cover_revision_item_id"`
+	Title               string `json:"title"`
+	Description         string `json:"description"`
+	Enabled             *bool  `json:"enabled"`
+	SortOrder           int    `json:"sort_order"`
 }
 
 type UpdateClientMaterialParams struct {
-	AssetID     *int64  `json:"asset_id"`
-	SourceType  *string `json:"source_type"`
-	SourceRef   *string `json:"source_ref"`
-	ResourceID  *string `json:"resource_id"`
-	Title       *string `json:"title"`
-	Description *string `json:"description"`
-	Enabled     *bool   `json:"enabled"`
-	SortOrder   *int    `json:"sort_order"`
+	AssetID             *int64  `json:"asset_id"`
+	SourceType          *string `json:"source_type"`
+	SourceRef           *string `json:"source_ref"`
+	ResourceID          *string `json:"resource_id"`
+	ResourceGroupID     *int64  `json:"resource_group_id"`
+	FinalizedRevisionID *int64  `json:"finalized_revision_id"`
+	CoverRevisionItemID *int64  `json:"cover_revision_item_id"`
+	Title               *string `json:"title"`
+	Description         *string `json:"description"`
+	Enabled             *bool   `json:"enabled"`
+	SortOrder           *int    `json:"sort_order"`
 }
 
 type ClientMaterialBatchDownloadParams struct {
@@ -543,15 +571,17 @@ type ClientMaterialBatchDownloadManifest struct {
 }
 
 type ClientMaterialBatchDownloadItem struct {
-	MaterialID  int64      `json:"material_id"`
-	AssetID     int64      `json:"asset_id"`
-	SourceType  string     `json:"source_type"`
-	SourceRef   string     `json:"source_ref"`
-	Filename    string     `json:"filename"`
-	FileSize    int64      `json:"file_size"`
-	MimeType    string     `json:"mime_type,omitempty"`
-	DownloadURL string     `json:"download_url"`
-	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
+	MaterialID          int64      `json:"material_id"`
+	AssetID             int64      `json:"asset_id"`
+	ResourceGroupID     int64      `json:"resource_group_id,omitempty"`
+	FinalizedRevisionID int64      `json:"finalized_revision_id,omitempty"`
+	SourceType          string     `json:"source_type"`
+	SourceRef           string     `json:"source_ref"`
+	Filename            string     `json:"filename"`
+	FileSize            int64      `json:"file_size"`
+	MimeType            string     `json:"mime_type,omitempty"`
+	DownloadURL         string     `json:"download_url"`
+	ExpiresAt           *time.Time `json:"expires_at,omitempty"`
 }
 
 type ClientMaterialBatchDownloadFailure struct {
@@ -5719,11 +5749,8 @@ func (s *Service) OverviewSearch(ctx context.Context, actor domain.RequestActor,
 }
 
 func (s *Service) SystemSearch(ctx context.Context, actor domain.RequestActor, query string, page int, pageSize int, source string, formatCategory string, businessLane string) (*SystemSearchResult, *domain.AppError) {
-	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleSuperAdmin) {
-		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset managers can search system assets from workbench.", nil)
-	}
-	if s.systemAssets == nil {
-		return nil, domain.NewAppError(domain.ErrCodeInternalError, "System asset searcher is not configured.", nil)
+	if !domain.ActorHasPermission(actor, domain.PermissionAssetView) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "asset.view is required to search material resources.", nil)
 	}
 	query = strings.TrimSpace(query)
 	if page <= 0 {
@@ -5734,35 +5761,134 @@ func (s *Service) SystemSearch(ctx context.Context, actor domain.RequestActor, q
 	}
 	sourceFilter := domain.NormalizeAssetResourceSource(source)
 	laneFilter := normalizeAssetWorkbenchBusinessLane(businessLane)
-	result, appErr := s.systemAssets.Search(ctx, domain.AssetSearchQuery{
-		Keyword:        query,
-		Page:           page,
-		Size:           pageSize,
-		Source:         sourceFilter,
-		UsableState:    domain.AssetUsableStateFilterAll,
-		FormatCategory: domain.AssetFormatCategoryFilter(strings.TrimSpace(formatCategory)),
-		BusinessLane:   laneFilter,
-		IsArchived:     domain.AssetArchiveFilterFalse,
-		TaskStatus:     domain.AssetTaskStatusFilterAll,
+	limit := page * pageSize
+	items := make([]*assetcenter.AssetDetail, 0, limit*2)
+	var total int64
+	if sourceFilter != domain.AssetResourceSourceExternal {
+		if s.resourceGroups == nil {
+			return nil, domain.NewAppError(domain.ErrCodeInternalError, "Resource group material searcher is not configured.", nil)
+		}
+		groups, groupTotal, appErr := s.searchResourceGroupMaterials(ctx, actor, query, limit, formatCategory, laneFilter)
+		if appErr != nil {
+			return nil, appErr
+		}
+		items = append(items, groups...)
+		total += groupTotal
+	}
+	if sourceFilter != domain.AssetResourceSourceSystem {
+		if s.systemAssets == nil {
+			return nil, domain.NewAppError(domain.ErrCodeInternalError, "External asset searcher is not configured.", nil)
+		}
+		external, externalTotal, appErr := s.searchExternalMaterialAssets(ctx, query, limit, formatCategory, laneFilter)
+		if appErr != nil {
+			return nil, appErr
+		}
+		items = append(items, external...)
+		total += externalTotal
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].UpdatedAt.Equal(items[j].UpdatedAt) {
+			if items[i].SourceType == items[j].SourceType {
+				return items[i].ID > items[j].ID
+			}
+			return items[i].SourceType < items[j].SourceType
+		}
+		return items[i].UpdatedAt.After(items[j].UpdatedAt)
 	})
-	if appErr != nil {
-		return nil, appErr
+	start := (page - 1) * pageSize
+	if start >= len(items) {
+		items = []*assetcenter.AssetDetail{}
+	} else {
+		end := start + pageSize
+		if end > len(items) {
+			end = len(items)
+		}
+		items = items[start:end]
 	}
-	items := filterVisibleWorkbenchMaterialAssets(result.Items)
-	total := result.Total
-	if len(items) != len(result.Items) {
-		total = int64(len(items))
+	return &SystemSearchResult{Items: items, Total: total, Page: page, Size: pageSize}, nil
+}
+
+func (s *Service) searchResourceGroupMaterials(ctx context.Context, actor domain.RequestActor, query string, limit int, formatCategory string, businessLane domain.TaskBusinessLane) ([]*assetcenter.AssetDetail, int64, *domain.AppError) {
+	items := make([]*assetcenter.AssetDetail, 0, limit)
+	const chunkSize = 200
+	page := 1
+	var total int64
+	for len(items) < limit {
+		result, appErr := s.resourceGroups.ListResourceGroups(ctx, actor, domain.ResourceGroupListParams{
+			Query: query, FormatCategory: domain.AssetFormatCategoryFilter(strings.TrimSpace(formatCategory)), BusinessLane: businessLane,
+			Page: page, PageSize: chunkSize,
+		})
+		if appErr != nil {
+			return nil, 0, appErr
+		}
+		total = result.Total
+		for index := range result.Items {
+			if item := resourceGroupMaterialAsset(&result.Items[index]); item != nil {
+				items = append(items, item)
+			}
+		}
+		if len(result.Items) < chunkSize || int64(page*chunkSize) >= total {
+			break
+		}
+		page++
 	}
-	return &SystemSearchResult{Items: items, Total: total, Page: result.Page, Size: result.Size}, nil
+	if len(items) > limit {
+		items = items[:limit]
+	}
+	return items, total, nil
+}
+
+func (s *Service) searchExternalMaterialAssets(ctx context.Context, query string, limit int, formatCategory string, businessLane domain.TaskBusinessLane) ([]*assetcenter.AssetDetail, int64, *domain.AppError) {
+	items := make([]*assetcenter.AssetDetail, 0, limit)
+	const chunkSize = 100
+	page := 1
+	var total int64
+	for len(items) < limit {
+		result, appErr := s.systemAssets.Search(ctx, domain.AssetSearchQuery{
+			Keyword: query, Page: page, Size: chunkSize, Source: domain.AssetResourceSourceExternal,
+			UsableState: domain.AssetUsableStateFilterAll, FormatCategory: domain.AssetFormatCategoryFilter(strings.TrimSpace(formatCategory)),
+			BusinessLane: businessLane, IsArchived: domain.AssetArchiveFilterFalse, TaskStatus: domain.AssetTaskStatusFilterAll,
+			OperationalVisibleOnly: true,
+		})
+		if appErr != nil {
+			return nil, 0, appErr
+		}
+		total = result.Total
+		visible := filterVisibleWorkbenchMaterialAssets(result.Items)
+		items = append(items, visible...)
+		if len(result.Items) < chunkSize || int64(page*chunkSize) >= result.Total {
+			break
+		}
+		page++
+	}
+	if len(items) > limit {
+		items = items[:limit]
+	}
+	return items, total, nil
+}
+
+func resourceGroupMaterialAsset(group *domain.TaskAssetGroup) *assetcenter.AssetDetail {
+	if group == nil || group.FinalizedRevision == nil || len(group.FinalizedRevision.Items) == 0 {
+		return nil
+	}
+	cover := group.FinalizedRevision.Items[0]
+	if cover.File == nil {
+		return nil
+	}
+	return &assetcenter.AssetDetail{
+		ID: group.ID, ResourceID: fmt.Sprintf("group:%d", group.ID), SourceType: "task_resource_group", SourceLabel: "任务资源组",
+		TaskID: group.TaskID, TaskNo: group.TaskNo, SKUCode: group.SKUCode, ScopeSKUCode: group.SKUCode,
+		BusinessLane: group.BusinessLane,
+		FileName:     cover.File.FileName, OriginalFilename: cover.File.FileName, FileSize: cover.File.FileSize, MimeType: cover.File.MimeType,
+		PreviewAvailable: true, CreatedAt: group.CreatedAt, UpdatedAt: group.UpdatedAt,
+		ResourceGroupID: group.ID, FinalizedRevisionID: group.FinalizedRevision.ID, CoverRevisionItemID: cover.ID,
+		ResourceMode: group.FinalizedRevision.Mode, ResourceItemCount: len(group.FinalizedRevision.Items),
+	}
 }
 
 func (s *Service) BrowseMaterials(ctx context.Context, actor domain.RequestActor, path string, page int, pageSize int, source string, formatCategory string, businessLane string) (*assetcenter.MaterialBrowseResult, *domain.AppError) {
-	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleSuperAdmin) {
-		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset managers can browse material assets from workbench.", nil)
-	}
-	browser, _ := s.systemAssets.(SystemMaterialBrowser)
-	if browser == nil {
-		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Material browser is not configured.", nil)
+	if !domain.ActorHasPermission(actor, domain.PermissionAssetView) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "asset.view is required to browse material resources.", nil)
 	}
 	if page <= 0 {
 		page = 1
@@ -5772,6 +5898,10 @@ func (s *Service) BrowseMaterials(ctx context.Context, actor domain.RequestActor
 	}
 	laneFilter := normalizeAssetWorkbenchBusinessLane(businessLane)
 	publicPath := normalizeWorkbenchMaterialPath(path)
+	sourceFilter := domain.NormalizeAssetResourceSource(source)
+	if sourceFilter != domain.AssetResourceSourceExternal && (publicPath == "" || publicPath == workbenchMaterialSystemRoot) {
+		return s.browseFinalizedResourceGroups(ctx, actor, publicPath, page, pageSize, sourceFilter, formatCategory, laneFilter)
+	}
 	if !assetWorkbenchOperationalMaterialPathVisible(publicPath) {
 		return &assetcenter.MaterialBrowseResult{
 			Path:    publicPath,
@@ -5782,13 +5912,17 @@ func (s *Service) BrowseMaterials(ctx context.Context, actor domain.RequestActor
 			Size:    pageSize,
 		}, nil
 	}
+	browser, _ := s.systemAssets.(SystemMaterialBrowser)
+	if browser == nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "External material browser is not configured.", nil)
+	}
 	if workbenchIsVirtualQuarkRoot(publicPath) {
-		return s.browseWorkbenchVirtualQuarkRoot(ctx, browser, page, pageSize, source, formatCategory, laneFilter)
+		return s.browseWorkbenchVirtualQuarkRoot(ctx, browser, page, pageSize, string(domain.AssetResourceSourceExternal), formatCategory, laneFilter)
 	}
 	actualPath := workbenchMaterialActualPath(publicPath)
 	result, appErr := browser.BrowseMaterials(ctx, assetcenter.MaterialBrowseQuery{
 		Path:           actualPath,
-		Source:         domain.NormalizeAssetResourceSource(source),
+		Source:         domain.AssetResourceSourceExternal,
 		FormatCategory: domain.AssetFormatCategoryFilter(strings.TrimSpace(formatCategory)),
 		BusinessLane:   laneFilter,
 		Page:           page,
@@ -5812,6 +5946,63 @@ func (s *Service) BrowseMaterials(ctx context.Context, actor domain.RequestActor
 	result.Path = publicPath
 	if len(result.Folders) != originalFolderCount || len(result.Files) != originalFileCount {
 		result.Total = int64(len(result.Files))
+	}
+	return result, nil
+}
+
+func (s *Service) browseFinalizedResourceGroups(ctx context.Context, actor domain.RequestActor, publicPath string, page, pageSize int, source domain.AssetResourceSource, formatCategory string, businessLane domain.TaskBusinessLane) (*assetcenter.MaterialBrowseResult, *domain.AppError) {
+	searchSource := string(source)
+	if publicPath == workbenchMaterialSystemRoot || businessLane.Valid() {
+		searchSource = string(domain.AssetResourceSourceSystem)
+	}
+	search, appErr := s.SystemSearch(ctx, actor, "", page, pageSize, searchSource, formatCategory, string(businessLane))
+	if appErr != nil {
+		return nil, appErr
+	}
+	result := &assetcenter.MaterialBrowseResult{
+		Path: publicPath, Folders: []assetcenter.MaterialFolder{}, Files: search.Items,
+		Total: search.Total, Page: search.Page, Size: search.Size,
+	}
+	if publicPath != "" {
+		return result, nil
+	}
+	systemTotal := search.Total
+	if source != domain.AssetResourceSourceSystem {
+		system, systemErr := s.SystemSearch(ctx, actor, "", 1, 1, string(domain.AssetResourceSourceSystem), formatCategory, string(businessLane))
+		if systemErr != nil {
+			return nil, systemErr
+		}
+		systemTotal = system.Total
+	}
+	if source != domain.AssetResourceSourceExternal {
+		result.Folders = append(result.Folders, assetcenter.MaterialFolder{
+			Path: workbenchMaterialSystemRoot, Name: strings.TrimPrefix(workbenchMaterialSystemRoot, "/"),
+			SourceType: string(domain.AssetResourceSourceSystem), FileCount: systemTotal,
+		})
+	}
+	if source == domain.AssetResourceSourceSystem || businessLane.Valid() {
+		return result, nil
+	}
+	browser, _ := s.systemAssets.(SystemMaterialBrowser)
+	if browser == nil {
+		return result, nil
+	}
+	externalRoot, browseErr := browser.BrowseMaterials(ctx, assetcenter.MaterialBrowseQuery{
+		Path: "", Source: domain.AssetResourceSourceExternal,
+		FormatCategory: domain.AssetFormatCategoryFilter(strings.TrimSpace(formatCategory)),
+		Page:           1, Size: pageSize,
+	})
+	if browseErr != nil {
+		return nil, browseErr
+	}
+	result.Folders = filterVisibleWorkbenchMaterialFolders(externalRoot.Folders)
+	result.Folders = append(result.Folders, assetcenter.MaterialFolder{
+		Path: workbenchMaterialSystemRoot, Name: strings.TrimPrefix(workbenchMaterialSystemRoot, "/"),
+		SourceType: string(domain.AssetResourceSourceSystem), FileCount: systemTotal,
+	})
+	result.Folders, appErr = s.hydrateWorkbenchVirtualQuarkRootFolder(ctx, browser, result.Folders, string(domain.AssetResourceSourceExternal), formatCategory, "")
+	if appErr != nil {
+		return nil, appErr
 	}
 	return result, nil
 }
@@ -5892,10 +6083,10 @@ func (s *Service) SearchClientMaterials(ctx context.Context, actor domain.Reques
 	if err := s.requireRepo(); err != nil {
 		return nil, err
 	}
-	if !actorHasAny(actor, domain.RoleAssetSubmitter, domain.RoleAssetManager, domain.RoleSuperAdmin) {
-		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset workbench users can search client materials.", nil)
+	if !domain.ActorHasPermission(actor, domain.PermissionAssetView) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "asset.view is required to search client materials.", nil)
 	}
-	admin := params.Admin && actorHasAny(actor, domain.RoleAssetManager, domain.RoleSuperAdmin)
+	admin := params.Admin && domain.ActorHasPermission(actor, domain.PermissionAssetPublish)
 	items, appErr := s.ListClientMaterials(ctx, actor, admin)
 	if appErr != nil {
 		return nil, appErr
@@ -5933,8 +6124,8 @@ func (s *Service) SearchClientMaterials(ctx context.Context, actor domain.Reques
 }
 
 func (s *Service) MaterialGroups(ctx context.Context, actor domain.RequestActor, params MaterialGroupSearchParams) (*MaterialGroupSearchResult, *domain.AppError) {
-	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleSuperAdmin) {
-		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset managers can browse material groups from workbench.", nil)
+	if !domain.ActorHasPermission(actor, domain.PermissionAssetView) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "asset.view is required to browse material groups.", nil)
 	}
 	if s.systemAssets == nil {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "System asset searcher is not configured.", nil)
@@ -5969,8 +6160,8 @@ func (s *Service) MaterialGroups(ctx context.Context, actor domain.RequestActor,
 }
 
 func (s *Service) MaterialGroupFiles(ctx context.Context, actor domain.RequestActor, groupKey string, page int, pageSize int) (*MaterialGroupFilesResult, *domain.AppError) {
-	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleSuperAdmin) {
-		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset managers can browse material group files from workbench.", nil)
+	if !domain.ActorHasPermission(actor, domain.PermissionAssetView) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "asset.view is required to browse material groups.", nil)
 	}
 	if s.systemAssets == nil {
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "System asset searcher is not configured.", nil)
@@ -6014,8 +6205,8 @@ func (s *Service) MaterialGroupFiles(ctx context.Context, actor domain.RequestAc
 }
 
 func (s *Service) SystemAssetDownload(ctx context.Context, actor domain.RequestActor, assetID int64) (*domain.AssetDownloadInfo, *domain.AppError) {
-	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleSuperAdmin) {
-		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset managers can download system assets from workbench.", nil)
+	if !domain.ActorHasPermission(actor, domain.PermissionAssetDownload) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "asset.download is required.", nil)
 	}
 	if assetID <= 0 {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "asset_id is required.", nil)
@@ -6039,8 +6230,8 @@ func (s *Service) SystemAssetDownload(ctx context.Context, actor domain.RequestA
 }
 
 func (s *Service) SystemAssetPreview(ctx context.Context, actor domain.RequestActor, assetID int64) (*SystemAssetPreviewMeta, *domain.AppError) {
-	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleSuperAdmin) {
-		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset managers can preview system assets from workbench.", nil)
+	if !domain.ActorHasPermission(actor, domain.PermissionAssetView) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "asset.view is required.", nil)
 	}
 	if assetID <= 0 {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "asset_id is required.", nil)
@@ -6101,8 +6292,8 @@ func systemAssetPreviewMetaFromDownloadInfo(assetID int64, sourceType, sourceRef
 }
 
 func (s *Service) SystemAssetBatchDownloadManifest(ctx context.Context, actor domain.RequestActor, params SystemAssetBatchDownloadParams) (*assetcenter.BatchDownloadManifest, *domain.AppError) {
-	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleSuperAdmin) {
-		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset managers can batch download system assets from workbench.", nil)
+	if !domain.ActorHasPermission(actor, domain.PermissionAssetDownload) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "asset.download is required.", nil)
 	}
 	if len(params.AssetIDs) == 0 {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "asset_ids is required.", nil)
@@ -6132,8 +6323,8 @@ func (s *Service) ListClientMaterials(ctx context.Context, actor domain.RequestA
 		return nil, err
 	}
 	if admin {
-		if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleSuperAdmin) {
-			return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset managers can list client materials for administration.", nil)
+		if !domain.ActorHasPermission(actor, domain.PermissionAssetPublish) {
+			return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "asset.publish is required to list disabled client materials.", nil)
 		}
 		items, err := s.repo.ListClientMaterials(ctx, repo.AssetWorkbenchClientMaterialFilter{})
 		if err != nil {
@@ -6142,8 +6333,8 @@ func (s *Service) ListClientMaterials(ctx context.Context, actor domain.RequestA
 		s.hydrateClientMaterialRows(ctx, items)
 		return items, nil
 	}
-	if !actorHasAny(actor, domain.RoleAssetSubmitter, domain.RoleAssetManager, domain.RoleSuperAdmin) {
-		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset workbench users can list client materials.", nil)
+	if !domain.ActorHasPermission(actor, domain.PermissionAssetView) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "asset.view is required to list client materials.", nil)
 	}
 	enabled := true
 	items, err := s.repo.ListClientMaterials(ctx, repo.AssetWorkbenchClientMaterialFilter{Enabled: &enabled})
@@ -6158,10 +6349,10 @@ func (s *Service) CreateClientMaterial(ctx context.Context, actor domain.Request
 	if err := s.requireRepo(); err != nil {
 		return nil, err
 	}
-	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleSuperAdmin) {
-		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset managers can publish client materials.", nil)
+	if !domain.ActorHasPermission(actor, domain.PermissionAssetPublish) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "asset.publish is required to publish client materials.", nil)
 	}
-	source, appErr := resolveClientMaterialSourceInput(params.AssetID, params.SourceType, params.SourceRef, params.ResourceID)
+	source, appErr := resolveClientMaterialSourceInput(params.AssetID, params.SourceType, params.SourceRef, params.ResourceID, params.ResourceGroupID, params.FinalizedRevisionID, params.CoverRevisionItemID)
 	if appErr != nil {
 		return nil, appErr
 	}
@@ -6171,24 +6362,27 @@ func (s *Service) CreateClientMaterial(ctx context.Context, actor domain.Request
 	}
 	now := s.nowFn().UTC()
 	item := &domain.AssetWorkbenchClientMaterial{
-		AssetID:          snapshot.AssetID,
-		SourceType:       snapshot.SourceType,
-		SourceRef:        snapshot.SourceRef,
-		ResourceID:       snapshot.ResourceID,
-		SourceLabel:      snapshot.SourceLabel,
-		Title:            clientMaterialTitle(params.Title, snapshot.AssetID, &domain.AssetDownloadInfo{Filename: snapshot.Filename}),
-		Description:      strings.TrimSpace(params.Description),
-		FilenameSnapshot: snapshot.Filename,
-		MimeTypeSnapshot: snapshot.MimeType,
-		FileSizeSnapshot: snapshot.FileSize,
-		ScopeSKUCode:     snapshot.ScopeSKUCode,
-		SKUCode:          snapshot.SKUCode,
-		PrimarySKUCode:   snapshot.PrimarySKUCode,
-		PreviewAvailable: snapshot.PreviewAvailable,
-		Enabled:          boolValueDefault(params.Enabled, true),
-		SortOrder:        params.SortOrder,
-		PublishedBy:      actor.ID,
-		PublishedAt:      now,
+		AssetID:             snapshot.AssetID,
+		SourceType:          snapshot.SourceType,
+		SourceRef:           snapshot.SourceRef,
+		ResourceGroupID:     positiveInt64Ptr(snapshot.ResourceGroupID),
+		FinalizedRevisionID: positiveInt64Ptr(snapshot.FinalizedRevisionID),
+		CoverRevisionItemID: positiveInt64Ptr(snapshot.CoverRevisionItemID),
+		ResourceID:          snapshot.ResourceID,
+		SourceLabel:         snapshot.SourceLabel,
+		Title:               clientMaterialTitle(params.Title, snapshot.AssetID, &domain.AssetDownloadInfo{Filename: snapshot.Filename}),
+		Description:         strings.TrimSpace(params.Description),
+		FilenameSnapshot:    snapshot.Filename,
+		MimeTypeSnapshot:    snapshot.MimeType,
+		FileSizeSnapshot:    snapshot.FileSize,
+		ScopeSKUCode:        snapshot.ScopeSKUCode,
+		SKUCode:             snapshot.SKUCode,
+		PrimarySKUCode:      snapshot.PrimarySKUCode,
+		PreviewAvailable:    snapshot.PreviewAvailable,
+		Enabled:             boolValueDefault(params.Enabled, true),
+		SortOrder:           params.SortOrder,
+		PublishedBy:         actor.ID,
+		PublishedAt:         now,
 	}
 	var created *domain.AssetWorkbenchClientMaterial
 	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
@@ -6212,8 +6406,8 @@ func (s *Service) UpdateClientMaterial(ctx context.Context, actor domain.Request
 	if err := s.requireRepo(); err != nil {
 		return nil, err
 	}
-	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleSuperAdmin) {
-		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset managers can update client materials.", nil)
+	if !domain.ActorHasPermission(actor, domain.PermissionAssetPublish) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "asset.publish is required to update client materials.", nil)
 	}
 	if materialID <= 0 {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "material_id is required.", nil)
@@ -6224,11 +6418,14 @@ func (s *Service) UpdateClientMaterial(ctx context.Context, actor domain.Request
 	}
 	item := *existing
 	normalizeClientMaterialRow(&item)
-	if params.AssetID != nil || params.SourceType != nil || params.SourceRef != nil || params.ResourceID != nil {
+	if params.AssetID != nil || params.SourceType != nil || params.SourceRef != nil || params.ResourceID != nil || params.ResourceGroupID != nil || params.FinalizedRevisionID != nil || params.CoverRevisionItemID != nil {
 		sourceType := item.SourceType
 		sourceRef := item.SourceRef
 		resourceID := item.ResourceID
 		assetID := item.AssetID
+		resourceGroupID := int64Value(item.ResourceGroupID)
+		finalizedRevisionID := int64Value(item.FinalizedRevisionID)
+		coverRevisionItemID := int64Value(item.CoverRevisionItemID)
 		if params.AssetID != nil {
 			assetID = *params.AssetID
 			if params.SourceType == nil && params.SourceRef == nil && params.ResourceID == nil {
@@ -6246,7 +6443,16 @@ func (s *Service) UpdateClientMaterial(ctx context.Context, actor domain.Request
 		if params.ResourceID != nil {
 			resourceID = *params.ResourceID
 		}
-		source, appErr := resolveClientMaterialSourceInput(assetID, sourceType, sourceRef, resourceID)
+		if params.ResourceGroupID != nil {
+			resourceGroupID = *params.ResourceGroupID
+		}
+		if params.FinalizedRevisionID != nil {
+			finalizedRevisionID = *params.FinalizedRevisionID
+		}
+		if params.CoverRevisionItemID != nil {
+			coverRevisionItemID = *params.CoverRevisionItemID
+		}
+		source, appErr := resolveClientMaterialSourceInput(assetID, sourceType, sourceRef, resourceID, resourceGroupID, finalizedRevisionID, coverRevisionItemID)
 		if appErr != nil {
 			return nil, appErr
 		}
@@ -6258,6 +6464,9 @@ func (s *Service) UpdateClientMaterial(ctx context.Context, actor domain.Request
 		item.SourceType = snapshot.SourceType
 		item.SourceRef = snapshot.SourceRef
 		item.ResourceID = snapshot.ResourceID
+		item.ResourceGroupID = positiveInt64Ptr(snapshot.ResourceGroupID)
+		item.FinalizedRevisionID = positiveInt64Ptr(snapshot.FinalizedRevisionID)
+		item.CoverRevisionItemID = positiveInt64Ptr(snapshot.CoverRevisionItemID)
 		item.SourceLabel = snapshot.SourceLabel
 		item.FilenameSnapshot = snapshot.Filename
 		item.MimeTypeSnapshot = snapshot.MimeType
@@ -6305,8 +6514,8 @@ func (s *Service) DeleteClientMaterial(ctx context.Context, actor domain.Request
 	if err := s.requireRepo(); err != nil {
 		return err
 	}
-	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleSuperAdmin) {
-		return domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset managers can delete client materials.", nil)
+	if !domain.ActorHasPermission(actor, domain.PermissionAssetPublish) {
+		return domain.NewAppError(domain.ErrCodePermissionDenied, "asset.publish is required to delete client materials.", nil)
 	}
 	if materialID <= 0 {
 		return domain.NewAppError(domain.ErrCodeInvalidRequest, "material_id is required.", nil)
@@ -6333,8 +6542,8 @@ func (s *Service) BatchUpdateClientMaterials(ctx context.Context, actor domain.R
 	if err := s.requireRepo(); err != nil {
 		return nil, err
 	}
-	if !actorHasAny(actor, domain.RoleAssetManager, domain.RoleSuperAdmin) {
-		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset managers can batch update client materials.", nil)
+	if !domain.ActorHasPermission(actor, domain.PermissionAssetPublish) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "asset.publish is required to batch update client materials.", nil)
 	}
 	action := strings.TrimSpace(strings.ToLower(params.Action))
 	switch action {
@@ -6347,7 +6556,15 @@ func (s *Service) BatchUpdateClientMaterials(ctx context.Context, actor domain.R
 		return nil, appErr
 	}
 	if asyncRequired {
-		job, appErr := s.createClientMaterialBatchJob(ctx, actor, action, params, len(items))
+		items, asyncRequired, appErr = s.resolveClientMaterialBatchCandidates(ctx, actor, params, assetWorkbenchClientMaterialBatchAsyncLimit)
+		if appErr != nil {
+			return nil, appErr
+		}
+		if asyncRequired {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, fmt.Sprintf("selection exceeds the async limit of %d items", assetWorkbenchClientMaterialBatchAsyncLimit), nil)
+		}
+		snapshot := BatchUpdateClientMaterialsParams{Action: action, Items: items, SelectionScope: "resolved_snapshot"}
+		job, appErr := s.createClientMaterialBatchJob(ctx, actor, action, snapshot, len(items))
 		if appErr != nil {
 			return nil, appErr
 		}
@@ -6425,7 +6642,7 @@ func (s *Service) applyClientMaterialBatchUpdate(ctx context.Context, actor doma
 	}
 	seen := map[string]bool{}
 	for index, item := range items {
-		source, appErr := resolveClientMaterialSourceInput(item.AssetID, item.SourceType, item.SourceRef, item.ResourceID)
+		source, appErr := resolveClientMaterialSourceInput(item.AssetID, item.SourceType, item.SourceRef, item.ResourceID, item.ResourceGroupID, item.FinalizedRevisionID, item.CoverRevisionItemID)
 		if appErr != nil {
 			result.addClientMaterialBatchFailure(index, item, appErr.Message)
 			continue
@@ -6600,18 +6817,23 @@ func (s *Service) processBatchJob(ctx context.Context, job *domain.AssetWorkbenc
 		return s.failBatchJob(ctx, job, "decode batch job request payload: "+err.Error())
 	}
 	action := strings.TrimSpace(strings.ToLower(firstNonEmpty(job.Action, params.Action)))
-	actor := domain.RequestActor{
-		ID:       job.RequestedBy,
-		Roles:    []domain.Role{domain.RoleAssetManager},
-		Source:   "asset_workbench_batch_worker",
-		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
+	if s.accessResolver == nil {
+		return s.failBatchJob(ctx, job, "effective access resolver is unavailable")
 	}
-	items, asyncRequired, appErr := s.resolveClientMaterialBatchCandidates(ctx, actor, params, assetWorkbenchClientMaterialBatchAsyncLimit)
+	effective, appErr := s.accessResolver.EffectiveAccess(ctx, job.RequestedBy)
 	if appErr != nil {
-		return s.failBatchJob(ctx, job, appErr.Message)
+		return s.failBatchJob(ctx, job, "requester effective access could not be resolved")
 	}
-	if asyncRequired {
-		return s.failBatchJob(ctx, job, fmt.Sprintf("选择范围超过异步处理上限 %d 项，请缩小目录或筛选条件。", assetWorkbenchClientMaterialBatchAsyncLimit))
+	actor := domain.RequestActor{ID: job.RequestedBy, Permissions: append([]domain.PermissionCode(nil), effective.Permissions...), EffectiveAccess: effective, Source: "asset_workbench_batch_worker", AuthMode: domain.AuthModeSessionTokenRoleEnforced}
+	if !domain.ActorHasPermission(actor, domain.PermissionAssetPublish) {
+		return s.failBatchJob(ctx, job, "asset.publish permission was revoked before the batch job executed")
+	}
+	if strings.TrimSpace(params.Query) != "" || len(params.Folders) > 0 || strings.TrimSpace(params.SelectionScope) != "resolved_snapshot" {
+		return s.failBatchJob(ctx, job, "batch job payload is not an immutable resolved snapshot")
+	}
+	items := append([]CreateClientMaterialParams(nil), params.Items...)
+	if len(items) == 0 || len(items) > assetWorkbenchClientMaterialBatchAsyncLimit {
+		return s.failBatchJob(ctx, job, "batch job snapshot is empty or exceeds the async limit")
 	}
 	job.TotalCount = len(items)
 	job.ProcessedCount = 0
@@ -6776,6 +6998,22 @@ func clientMaterialParamsFromAssetDetail(asset *assetcenter.AssetDetail) CreateC
 	if asset == nil {
 		return CreateClientMaterialParams{}
 	}
+	if asset.ResourceGroupID > 0 || strings.EqualFold(strings.TrimSpace(asset.SourceType), "task_resource_group") {
+		groupID := asset.ResourceGroupID
+		if groupID <= 0 {
+			groupID = asset.ID
+		}
+		coverID := asset.CoverRevisionItemID
+		if asset.ResourceMode == domain.TaskAssetGroupModeSet {
+			coverID = 0
+		}
+		enabled := true
+		return CreateClientMaterialParams{
+			SourceType: "task_resource_group", SourceRef: fmt.Sprintf("group:%d", groupID), ResourceID: fmt.Sprintf("group:%d", groupID),
+			ResourceGroupID: groupID, FinalizedRevisionID: asset.FinalizedRevisionID, CoverRevisionItemID: coverID,
+			Title: firstNonEmpty(asset.ProductName, asset.TaskNo, asset.SKUCode, fmt.Sprintf("资源组 %d", groupID)), Enabled: &enabled,
+		}
+	}
 	source := domain.NormalizeAssetResourceSource(asset.SourceType)
 	if source == domain.AssetResourceSourceAll {
 		source = domain.AssetResourceSourceSystem
@@ -6804,8 +7042,8 @@ func (s *Service) ClientMaterialDownload(ctx context.Context, actor domain.Reque
 	if err := s.requireRepo(); err != nil {
 		return nil, err
 	}
-	if !actorHasAny(actor, domain.RoleAssetSubmitter, domain.RoleAssetManager, domain.RoleSuperAdmin) {
-		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset workbench users can download client materials.", nil)
+	if !domain.ActorHasPermission(actor, domain.PermissionAssetDownload) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "asset.download is required to download client materials.", nil)
 	}
 	material, appErr := s.resolveDownloadableClientMaterial(ctx, actor, materialID)
 	if appErr != nil {
@@ -6832,8 +7070,8 @@ func (s *Service) ClientMaterialPreview(ctx context.Context, actor domain.Reques
 	if err := s.requireRepo(); err != nil {
 		return nil, err
 	}
-	if !actorHasAny(actor, domain.RoleAssetSubmitter, domain.RoleAssetManager, domain.RoleSuperAdmin) {
-		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset workbench users can preview client materials.", nil)
+	if !domain.ActorHasPermission(actor, domain.PermissionAssetView) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "asset.view is required to preview client materials.", nil)
 	}
 	material, appErr := s.resolveDownloadableClientMaterial(ctx, actor, materialID)
 	if appErr != nil {
@@ -6846,8 +7084,8 @@ func (s *Service) ClientMaterialBatchDownloadManifest(ctx context.Context, actor
 	if err := s.requireRepo(); err != nil {
 		return nil, err
 	}
-	if !actorHasAny(actor, domain.RoleAssetSubmitter, domain.RoleAssetManager, domain.RoleSuperAdmin) {
-		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only asset workbench users can batch download client materials.", nil)
+	if !domain.ActorHasPermission(actor, domain.PermissionAssetDownload) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "asset.download is required to batch download client materials.", nil)
 	}
 	materialIDs := positiveUniqueInt64s(params.MaterialIDs)
 	if len(materialIDs) == 0 {
@@ -6893,7 +7131,26 @@ func (s *Service) ClientMaterialBatchDownloadManifest(ctx context.Context, actor
 			})
 			continue
 		}
-		if info.FileSize > 0 && totalSize+info.FileSize > assetcenter.MaxBatchDownloadTotalBytes {
+		files := info.Items
+		if len(files) == 0 {
+			files = []domain.AssetDownloadInfo{*info}
+		}
+		var groupSize int64
+		for _, file := range files {
+			if file.DownloadURL == nil || strings.TrimSpace(*file.DownloadURL) == "" {
+				groupSize = -1
+				break
+			}
+			groupSize += file.FileSize
+		}
+		if groupSize < 0 {
+			manifest.Failures = append(manifest.Failures, ClientMaterialBatchDownloadFailure{
+				MaterialID: material.ID, SourceType: material.SourceType, SourceRef: material.SourceRef,
+				Filename: material.FilenameSnapshot, Reason: "resource_group_incomplete",
+			})
+			continue
+		}
+		if groupSize > 0 && totalSize+groupSize > assetcenter.MaxBatchDownloadTotalBytes {
 			manifest.Failures = append(manifest.Failures, ClientMaterialBatchDownloadFailure{
 				MaterialID: material.ID,
 				AssetID:    material.AssetID,
@@ -6904,22 +7161,20 @@ func (s *Service) ClientMaterialBatchDownloadManifest(ctx context.Context, actor
 			})
 			continue
 		}
-		filename := uniqueWorkbenchDownloadFilename(firstNonEmpty(info.Filename, material.FilenameSnapshot, fmt.Sprintf("client-material-%d", material.ID)), material.ID, usedNames)
-		totalSize += info.FileSize
-		if manifest.ExpiresAt == nil || (info.ExpiresAt != nil && info.ExpiresAt.Before(*manifest.ExpiresAt)) {
-			manifest.ExpiresAt = info.ExpiresAt
+		for _, file := range files {
+			filename := uniqueWorkbenchDownloadFilename(firstNonEmpty(file.Filename, material.FilenameSnapshot, fmt.Sprintf("client-material-%d", material.ID)), material.ID, usedNames)
+			totalSize += file.FileSize
+			if manifest.ExpiresAt == nil || (file.ExpiresAt != nil && file.ExpiresAt.Before(*manifest.ExpiresAt)) {
+				manifest.ExpiresAt = file.ExpiresAt
+			}
+			manifest.Items = append(manifest.Items, ClientMaterialBatchDownloadItem{
+				MaterialID: material.ID, AssetID: material.AssetID,
+				ResourceGroupID: int64Value(material.ResourceGroupID), FinalizedRevisionID: int64Value(material.FinalizedRevisionID),
+				SourceType: material.SourceType, SourceRef: material.SourceRef,
+				Filename: filename, FileSize: file.FileSize, MimeType: strings.TrimSpace(file.MimeType),
+				DownloadURL: strings.TrimSpace(*file.DownloadURL), ExpiresAt: file.ExpiresAt,
+			})
 		}
-		manifest.Items = append(manifest.Items, ClientMaterialBatchDownloadItem{
-			MaterialID:  material.ID,
-			AssetID:     material.AssetID,
-			SourceType:  material.SourceType,
-			SourceRef:   material.SourceRef,
-			Filename:    filename,
-			FileSize:    info.FileSize,
-			MimeType:    strings.TrimSpace(info.MimeType),
-			DownloadURL: strings.TrimSpace(*info.DownloadURL),
-			ExpiresAt:   info.ExpiresAt,
-		})
 	}
 	if len(manifest.Items) == 0 {
 		return nil, domain.NewAppError(domain.ErrCodeAssetMissing, "all requested client materials are unavailable for download", map[string]interface{}{
@@ -9331,6 +9586,7 @@ func filterVisibleWorkbenchMaterialFolders(folders []assetcenter.MaterialFolder)
 }
 
 const (
+	workbenchMaterialSystemRoot       = "/系统资源"
 	workbenchQuarkMaterialVirtualRoot = "/quark"
 	workbenchQuarkMaterialActualBase  = "/quark/我的备份/来自：ASUS Administrator 电脑备份"
 )
@@ -9506,35 +9762,61 @@ func (s *Service) systemDownloadSnapshot(ctx context.Context, assetID int64) (*d
 }
 
 type clientMaterialSourceRef struct {
-	SourceType string
-	SourceRef  string
-	AssetID    int64
+	SourceType          string
+	SourceRef           string
+	AssetID             int64
+	ResourceGroupID     int64
+	FinalizedRevisionID int64
+	CoverRevisionItemID int64
 }
 
 type clientMaterialSourceSnapshot struct {
-	AssetID          int64
-	SourceType       string
-	SourceRef        string
-	ResourceID       string
-	SourceLabel      string
-	Filename         string
-	MimeType         string
-	FileSize         int64
-	ScopeSKUCode     string
-	SKUCode          string
-	PrimarySKUCode   string
-	PreviewAvailable bool
+	AssetID             int64
+	SourceType          string
+	SourceRef           string
+	ResourceID          string
+	SourceLabel         string
+	Filename            string
+	MimeType            string
+	FileSize            int64
+	ScopeSKUCode        string
+	SKUCode             string
+	PrimarySKUCode      string
+	PreviewAvailable    bool
+	ResourceGroupID     int64
+	FinalizedRevisionID int64
+	CoverRevisionItemID int64
+	Files               []domain.TaskResourceFile
 }
 
-func resolveClientMaterialSourceInput(assetID int64, sourceType, sourceRef, resourceID string) (clientMaterialSourceRef, *domain.AppError) {
+type resourceGroupPublicationResolver interface {
+	ResolveResourceGroupPublication(ctx context.Context, groupID, finalizedRevisionID, coverRevisionItemID int64) (*domain.ResourceGroupPublicationSnapshot, error)
+}
+
+func resolveClientMaterialSourceInput(assetID int64, sourceType, sourceRef, resourceID string, resourceGroupID, finalizedRevisionID, coverRevisionItemID int64) (clientMaterialSourceRef, *domain.AppError) {
 	sourceType = strings.TrimSpace(strings.ToLower(sourceType))
 	rawRef := firstNonEmpty(sourceRef, resourceID)
+	if sourceType == "task_resource_group" || strings.HasPrefix(strings.ToLower(strings.TrimSpace(rawRef)), "group:") || resourceGroupID > 0 {
+		groupID := resourceGroupID
+		if groupID <= 0 {
+			value := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(rawRef)), "group:")
+			parsed, err := strconv.ParseInt(value, 10, 64)
+			if err != nil || parsed <= 0 {
+				return clientMaterialSourceRef{}, domain.NewAppError(domain.ErrCodeInvalidRequest, "resource_group_id is required.", nil)
+			}
+			groupID = parsed
+		}
+		return clientMaterialSourceRef{
+			SourceType: "task_resource_group", SourceRef: fmt.Sprintf("group:%d", groupID),
+			ResourceGroupID: groupID, FinalizedRevisionID: finalizedRevisionID, CoverRevisionItemID: coverRevisionItemID,
+		}, nil
+	}
 	normalized := domain.NormalizeAssetResourceSource(sourceType)
 	if sourceType == "" || normalized == domain.AssetResourceSourceAll {
 		if _, ok := domain.ParseExternalAssetResourceID(rawRef); ok {
 			normalized = domain.AssetResourceSourceExternal
 		} else {
-			normalized = domain.AssetResourceSourceSystem
+			return clientMaterialSourceRef{}, domain.NewAppError(domain.ErrCodeInvalidRequest, "source_type must be task_resource_group or external_asset.", nil)
 		}
 	}
 	switch normalized {
@@ -9548,37 +9830,29 @@ func resolveClientMaterialSourceInput(assetID int64, sourceType, sourceRef, reso
 			return clientMaterialSourceRef{}, domain.NewAppError(domain.ErrCodeInvalidRequest, "external source_ref is required.", nil)
 		}
 		return clientMaterialSourceRef{
-			SourceType: string(domain.AssetResourceSourceExternal),
+			SourceType: "external_asset",
 			SourceRef:  domain.ExternalAssetResourceID(id),
 			AssetID:    id,
 		}, nil
 	case domain.AssetResourceSourceSystem:
-		if _, ok := domain.ParseExternalAssetResourceID(rawRef); ok {
-			return clientMaterialSourceRef{}, domain.NewAppError(domain.ErrCodeInvalidRequest, "system client material requires a numeric asset_id.", nil)
-		}
-		id := assetID
-		if strings.TrimSpace(rawRef) != "" {
-			parsed, err := strconv.ParseInt(strings.TrimSpace(rawRef), 10, 64)
-			if err != nil || parsed <= 0 {
-				return clientMaterialSourceRef{}, domain.NewAppError(domain.ErrCodeInvalidRequest, "asset_id is required.", nil)
-			}
-			id = parsed
-		}
-		if id <= 0 {
-			return clientMaterialSourceRef{}, domain.NewAppError(domain.ErrCodeInvalidRequest, "asset_id is required.", nil)
-		}
-		return clientMaterialSourceRef{
-			SourceType: string(domain.AssetResourceSourceSystem),
-			SourceRef:  strconv.FormatInt(id, 10),
-			AssetID:    id,
-		}, nil
+		return clientMaterialSourceRef{}, domain.NewAppError(domain.ErrCodeInvalidRequest, "new system-file publications are retired; publish a finalized task resource group instead.", nil)
 	default:
-		return clientMaterialSourceRef{}, domain.NewAppError(domain.ErrCodeInvalidRequest, "source_type must be system or external.", nil)
+		return clientMaterialSourceRef{}, domain.NewAppError(domain.ErrCodeInvalidRequest, "source_type must be task_resource_group or external_asset.", nil)
 	}
 }
 
 func normalizeClientMaterialRow(material *domain.AssetWorkbenchClientMaterial) {
 	if material == nil {
+		return
+	}
+	if strings.EqualFold(strings.TrimSpace(material.SourceType), "task_resource_group") || material.ResourceGroupID != nil {
+		material.SourceType = "task_resource_group"
+		if material.ResourceGroupID != nil {
+			material.SourceRef = fmt.Sprintf("group:%d", *material.ResourceGroupID)
+			material.ResourceID = material.SourceRef
+		}
+		material.AssetID = 0
+		material.SourceLabel = "任务资源组"
 		return
 	}
 	sourceType := domain.NormalizeAssetResourceSource(material.SourceType)
@@ -9588,6 +9862,7 @@ func normalizeClientMaterialRow(material *domain.AssetWorkbenchClientMaterial) {
 	material.SourceType = string(sourceType)
 	switch sourceType {
 	case domain.AssetResourceSourceExternal:
+		material.SourceType = "external_asset"
 		id, ok := domain.ParseExternalAssetResourceID(material.SourceRef)
 		if !ok && material.AssetID > 0 {
 			id = material.AssetID
@@ -9610,11 +9885,29 @@ func normalizeClientMaterialRow(material *domain.AssetWorkbenchClientMaterial) {
 }
 
 func clientMaterialSourceKey(sourceType, sourceRef string) string {
+	if strings.EqualFold(strings.TrimSpace(sourceType), "task_resource_group") {
+		return "task_resource_group:" + strings.TrimSpace(sourceRef)
+	}
 	normalized := domain.NormalizeAssetResourceSource(sourceType)
 	if normalized == domain.AssetResourceSourceAll {
 		normalized = domain.AssetResourceSourceSystem
 	}
 	return string(normalized) + ":" + strings.TrimSpace(sourceRef)
+}
+
+func positiveInt64Ptr(value int64) *int64 {
+	if value <= 0 {
+		return nil
+	}
+	copy := value
+	return &copy
+}
+
+func int64Value(value *int64) int64 {
+	if value == nil {
+		return 0
+	}
+	return *value
 }
 
 func (r *ClientMaterialBatchUpdateResult) addClientMaterialBatchFailure(index int, item CreateClientMaterialParams, reason string) {
@@ -9629,6 +9922,51 @@ func (r *ClientMaterialBatchUpdateResult) addClientMaterialBatchFailure(index in
 }
 
 func (s *Service) clientMaterialSourceSnapshot(ctx context.Context, source clientMaterialSourceRef) (*clientMaterialSourceSnapshot, *domain.AppError) {
+	if source.SourceType == "task_resource_group" {
+		resolver, ok := s.repo.(resourceGroupPublicationResolver)
+		if !ok {
+			return nil, domain.NewAppError(domain.ErrCodeInternalError, "Resource group publication resolver is not configured.", nil)
+		}
+		publication, err := resolver.ResolveResourceGroupPublication(ctx, source.ResourceGroupID, source.FinalizedRevisionID, source.CoverRevisionItemID)
+		if errors.Is(err, repo.ErrNotFound) {
+			return nil, domain.ErrNotFound
+		}
+		if errors.Is(err, repo.ErrConflict) {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidStateTransition, "Resource group is not complete and publishable.", nil)
+		}
+		if err != nil {
+			return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to resolve resource group publication.", err.Error())
+		}
+		if publication.GroupID != source.ResourceGroupID || (source.FinalizedRevisionID > 0 && publication.FinalizedRevisionID != source.FinalizedRevisionID) || publication.CoverRevisionItemID != source.CoverRevisionItemID {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidStateTransition, "Resource group publication pin is inconsistent.", nil)
+		}
+		if source.FinalizedRevisionID > 0 && publication.CurrentFinalizedRevisionID > 0 && publication.FinalizedRevisionID != publication.CurrentFinalizedRevisionID {
+			return nil, domain.NewAppError(domain.ErrCodeConflict, "Resource group has changed. Refresh and publish the current finalized revision.", nil)
+		}
+		var cover *domain.TaskResourceFile
+		for index := range publication.Files {
+			if publication.Files[index].RevisionItemID == publication.CoverRevisionItemID {
+				cover = &publication.Files[index]
+				break
+			}
+		}
+		if cover == nil {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidStateTransition, "Resource group cover does not belong to the finalized revision.", nil)
+		}
+		fileSize := int64(0)
+		if cover.FileSize != nil {
+			fileSize = *cover.FileSize
+		}
+		return &clientMaterialSourceSnapshot{
+			SourceType: "task_resource_group", SourceRef: fmt.Sprintf("group:%d", publication.GroupID),
+			ResourceID: fmt.Sprintf("group:%d", publication.GroupID), SourceLabel: "任务资源组",
+			Filename: cover.FileName, MimeType: cover.MimeType, FileSize: fileSize,
+			SKUCode: publication.SKUCode, ScopeSKUCode: publication.SKUCode,
+			PreviewAvailable: isWorkbenchSystemAssetDirectPreviewable(cover.MimeType, cover.FileName),
+			ResourceGroupID:  publication.GroupID, FinalizedRevisionID: publication.FinalizedRevisionID,
+			CoverRevisionItemID: publication.CoverRevisionItemID, Files: publication.Files,
+		}, nil
+	}
 	switch domain.NormalizeAssetResourceSource(source.SourceType) {
 	case domain.AssetResourceSourceExternal:
 		detailer, _ := s.systemAssets.(ExternalAssetDetailer)
@@ -9649,7 +9987,7 @@ func (s *Service) clientMaterialSourceSnapshot(ctx context.Context, source clien
 		resourceID := firstNonEmpty(detail.ResourceID, source.SourceRef, domain.ExternalAssetResourceID(source.AssetID))
 		return &clientMaterialSourceSnapshot{
 			AssetID:          source.AssetID,
-			SourceType:       string(domain.AssetResourceSourceExternal),
+			SourceType:       "external_asset",
 			SourceRef:        resourceID,
 			ResourceID:       resourceID,
 			SourceLabel:      firstNonEmpty(detail.SourceLabel, "外部资源"),
@@ -9696,6 +10034,50 @@ func (s *Service) clientMaterialSourceSnapshot(ctx context.Context, source clien
 
 func (s *Service) clientMaterialDownloadInfo(ctx context.Context, material *domain.AssetWorkbenchClientMaterial) (*domain.AssetDownloadInfo, *domain.AppError) {
 	normalizeClientMaterialRow(material)
+	if material.SourceType == "task_resource_group" {
+		resolver, ok := s.repo.(resourceGroupPublicationResolver)
+		if !ok || material.ResourceGroupID == nil || material.FinalizedRevisionID == nil || material.CoverRevisionItemID == nil {
+			return nil, domain.NewAppError(domain.ErrCodeInternalError, "Pinned resource group publication is incomplete.", nil)
+		}
+		publication, err := resolver.ResolveResourceGroupPublication(ctx, *material.ResourceGroupID, *material.FinalizedRevisionID, *material.CoverRevisionItemID)
+		if err != nil {
+			return nil, domain.NewAppError(domain.ErrCodeAssetMissing, "Pinned resource group revision is unavailable.", nil)
+		}
+		if publication.GroupID != *material.ResourceGroupID || publication.FinalizedRevisionID != *material.FinalizedRevisionID || publication.CoverRevisionItemID != *material.CoverRevisionItemID {
+			return nil, domain.NewAppError(domain.ErrCodeAssetMissing, "Pinned resource group publication is inconsistent.", nil)
+		}
+		if s.oss == nil || !s.oss.Enabled() {
+			return nil, domain.NewAppError(domain.ErrCodeInternalError, "Object store download signing is not configured.", nil)
+		}
+		items := make([]domain.AssetDownloadInfo, 0, len(publication.Files))
+		coverIndex := -1
+		for _, file := range publication.Files {
+			info := s.oss.PresignDownloadURLWithFilename(file.StorageKey, file.FileName)
+			if info == nil || strings.TrimSpace(info.DownloadURL) == "" {
+				return nil, domain.NewAppError(domain.ErrCodeAssetMissing, "A file in the pinned resource group is unavailable.", map[string]interface{}{"revision_item_id": file.RevisionItemID})
+			}
+			fileSize := int64(0)
+			if file.FileSize != nil {
+				fileSize = *file.FileSize
+			}
+			urlValue := strings.TrimSpace(info.DownloadURL)
+			expiresAt := info.ExpiresAt
+			items = append(items, domain.AssetDownloadInfo{
+				DownloadMode: domain.AssetDownloadModeDirect, DownloadURL: &urlValue,
+				Filename: file.FileName, FileSize: fileSize, MimeType: file.MimeType,
+				ExpiresAt: &expiresAt, PreviewAvailable: isWorkbenchSystemAssetDirectPreviewable(file.MimeType, file.FileName),
+			})
+			if file.RevisionItemID == publication.CoverRevisionItemID {
+				coverIndex = len(items) - 1
+			}
+		}
+		if coverIndex < 0 || len(items) == 0 {
+			return nil, domain.NewAppError(domain.ErrCodeAssetMissing, "Pinned resource group cover is unavailable.", nil)
+		}
+		result := items[coverIndex]
+		result.Items = items
+		return &result, nil
+	}
 	switch domain.NormalizeAssetResourceSource(material.SourceType) {
 	case domain.AssetResourceSourceExternal:
 		downloader, _ := s.systemAssets.(ExternalAssetDownloader)
@@ -9710,6 +10092,13 @@ func (s *Service) clientMaterialDownloadInfo(ctx context.Context, material *doma
 
 func (s *Service) clientMaterialPreviewMeta(ctx context.Context, material *domain.AssetWorkbenchClientMaterial) (*SystemAssetPreviewMeta, *domain.AppError) {
 	normalizeClientMaterialRow(material)
+	if material.SourceType == "task_resource_group" {
+		info, appErr := s.clientMaterialDownloadInfo(ctx, material)
+		if appErr != nil {
+			return nil, appErr
+		}
+		return clientMaterialPreviewMetaFromDownloadInfo(material, info), nil
+	}
 	if domain.NormalizeAssetResourceSource(material.SourceType) != domain.AssetResourceSourceExternal {
 		meta, appErr := s.systemAssetPreviewMeta(ctx, material.AssetID)
 		if meta != nil {
@@ -10155,7 +10544,7 @@ func (s *Service) resolveDownloadableClientMaterial(ctx context.Context, actor d
 	if err != nil {
 		return nil, mapRepoReadError(err, "Client material not found.", "Failed to load client material.")
 	}
-	if material == nil || (!material.Enabled && !actorHasAny(actor, domain.RoleAssetManager, domain.RoleSuperAdmin)) {
+	if material == nil || (!material.Enabled && !domain.ActorHasPermission(actor, domain.PermissionAssetPublish)) {
 		return nil, domain.NewAppError(domain.ErrCodeNotFound, "Client material not found.", nil)
 	}
 	return material, nil

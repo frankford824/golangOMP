@@ -83,16 +83,6 @@
       />
     </div>
     <div class="filter-field">
-      <span class="field-label">仓库接收</span>
-      <BaseSelect
-        :model-value="filters.warehouseStatus"
-        clearable
-        placeholder="仓库接收"
-        :options="warehouseStatusOptions"
-        @update:model-value="patchFilters({ warehouseStatus: String($event) })"
-      />
-    </div>
-    <div class="filter-field">
       <span class="field-label">创建起始</span>
       <BaseDatePicker
         :model-value="filters.dateFrom"
@@ -121,7 +111,7 @@
 </template>
 
 <script setup lang="ts">
-import type { LegacyTaskStatus as TaskStatus } from '@/domain/types/task'
+import type { ActiveTaskStatus as TaskStatus } from '@/domain/types/task'
 import BaseDatePicker from '@/components/base/BaseDatePicker.vue'
 import BaseSelect, { type BaseSelectOption } from '@/components/base/BaseSelect.vue'
 import TaskStatusMultiSelect from '@/components/task/TaskStatusMultiSelect.vue'
@@ -136,7 +126,6 @@ export interface TaskListFilters {
   /** 创建人用户 id，对应 GET /v1/tasks `creator_id` */
   creatorId: string
   assigneeId: string
-  warehouseStatus: string
   dateFrom: string
   dateTo: string
   overdueOnly: boolean
@@ -156,7 +145,6 @@ const props = withDefaults(
       priority: '',
       creatorId: '',
       assigneeId: '',
-      warehouseStatus: '',
       dateFrom: '',
       dateTo: '',
       overdueOnly: false,
@@ -188,13 +176,7 @@ const statusOptions: { value: TaskStatus; label: string }[] = [
   { value: 'Draft', label: '草稿' },
   { value: 'PendingAssign', label: '待指派' },
   { value: 'InProgress', label: '进行中' },
-  { value: 'PendingAuditA', label: '待审核' },
-  { value: 'RejectedByAuditA', label: '审核打回' },
-  { value: 'PendingOutsource', label: '待定制' },
-  { value: 'Outsourcing', label: '定制中' },
-  { value: 'PendingCustomizationReview', label: '待定制审核' },
-  { value: 'PendingEffectReview', label: '待效果审核' },
-  { value: 'PendingWarehouseReceive', label: '待仓库接收' },
+  { value: 'PendingAudit', label: '待审核' },
   { value: 'Completed', label: '已完成' },
   { value: 'Archived', label: '已归档' },
   { value: 'Blocked', label: '阻塞' },
@@ -209,7 +191,7 @@ const taskCategoryOptions: BaseSelectOption[] = [
 const taskTypeOptions: BaseSelectOption[] = [
   { label: '原有产品开发', value: 'ORIGINAL_PRODUCT_DEV' },
   { label: '新品开发', value: 'NEW_PRODUCT_DEV' },
-  { label: '采购任务', value: 'PURCHASE_TASK' },
+  { label: '策划 SKU', value: 'SKU_PLANNING' },
   { label: 'P 图任务', value: 'RETOUCH_TASK' },
   { label: '客户定制', value: 'CUSTOMER_CUSTOMIZATION' },
   { label: '常规定制', value: 'REGULAR_CUSTOMIZATION' },
@@ -223,13 +205,6 @@ const priorityOptions: BaseSelectOption[] = [
 ]
 
 const { creatorOptions, assigneeOptions } = useTaskFilterOptions(true, '全部')
-
-const warehouseStatusOptions: BaseSelectOption[] = [
-  { label: '待接收', value: 'pending' },
-  { label: '已接收', value: 'received' },
-  { label: '已退回', value: 'returned' },
-  { label: '已归档', value: 'archived' },
-]
 
 </script>
 

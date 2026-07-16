@@ -284,6 +284,14 @@ func buildExternalAssetWhereWithMode(query domain.ExternalAssetSearchQuery, pref
 		}
 		clauses = append(clauses, `(`+strings.Join(prefixClauses, " OR ")+`)`)
 	}
+	if query.OperationalVisibleOnly {
+		visible := []string{`origin_path NOT LIKE '/quark/%'`, `origin_path = '/quark'`}
+		for _, prefix := range externalAssetOperationalVisibleQuarkPrefixes {
+			visible = append(visible, `(origin_path = ? OR origin_path LIKE ?)`)
+			args = append(args, prefix, prefix+"/%")
+		}
+		clauses = append(clauses, `(`+strings.Join(visible, " OR ")+`)`)
+	}
 	if query.CreatedFrom != nil {
 		clauses = append(clauses, `updated_at >= ?`)
 		args = append(args, *query.CreatedFrom)
@@ -301,6 +309,17 @@ func buildExternalAssetWhereWithMode(query domain.ExternalAssetSearchQuery, pref
 	)
 	return " WHERE " + strings.Join(clauses, " AND "), args, `
 		ORDER BY updated_at DESC, id DESC`
+}
+
+var externalAssetOperationalVisibleQuarkPrefixes = []string{
+	"/quark/电视投屏",
+	"/quark/海报",
+	"/quark/kt板",
+	"/quark/闲置kt板",
+	"/quark/我的备份/来自：ASUS Administrator 电脑备份/电视投屏",
+	"/quark/我的备份/来自：ASUS Administrator 电脑备份/海报",
+	"/quark/我的备份/来自：ASUS Administrator 电脑备份/kt板",
+	"/quark/我的备份/来自：ASUS Administrator 电脑备份/闲置kt板",
 }
 
 func externalAssetBooleanQuery(keyword string) string {

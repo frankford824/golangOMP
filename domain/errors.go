@@ -20,6 +20,7 @@ const (
 	ErrCodeInvalidRequest            = "INVALID_REQUEST"
 	ErrCodeReasonRequired            = "REASON_REQUIRED"
 	ErrCodeConflict                  = "CONFLICT"
+	ErrCodeSKUPlanningRuleMissing    = "SKU_RULE_NOT_CONFIGURED"
 	ErrCodeInternalError             = "INTERNAL_ERROR"
 	ErrDenyCodeReportsSuperAdminOnly = "reports_super_admin_only"
 	// ErrCodeUploadEndpointDeprecated is returned when a removed browser upload contract is used

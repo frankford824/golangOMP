@@ -57,6 +57,7 @@ func httpStatusFromCode(code string) int {
 		"excel_assist_task_type_not_supported":
 		return http.StatusBadRequest
 	case domain.ErrCodeInvalidRequest,
+		domain.ErrCodeSKUPlanningRuleMissing,
 		domain.ErrCodeReasonRequired,
 		domain.ErrCodeAssetNotStable,
 		domain.ErrCodeAssetMissing,

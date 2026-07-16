@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"time"
 
 	"workflow/domain"
 	"workflow/repo"
@@ -81,6 +82,43 @@ func (r *taskAssetRepo) Create(ctx context.Context, tx repo.Tx, asset *domain.Ta
 		return 0, err
 	}
 	return id, nil
+}
+
+// MarkBindingStaged makes a completed source/final upload available only to the
+// resource-group binding workflow. It intentionally does not touch the legacy
+// design_assets.current_version_id pointer.
+func (r *taskAssetRepo) MarkBindingStaged(ctx context.Context, tx repo.Tx, taskAssetID, taskID, actorID int64, scopeSKUCode string, retouchRequirementID *int64, role, uploadSessionID string, expiresAt time.Time) error {
+	result, err := Unwrap(tx).ExecContext(ctx, `
+		UPDATE task_assets
+		SET binding_state = 'staged',
+		    bound_group_id = NULL,
+		    bound_role = NULL,
+		    staged_task_sku_item_id = (
+		      SELECT tsi.id FROM task_sku_items tsi
+		      WHERE tsi.task_id = ? AND tsi.sku_code = NULLIF(?, '')
+		      LIMIT 1
+		    ),
+		    staged_retouch_requirement_id = ?,
+		    staged_role = ?,
+		    staged_by = ?,
+		    upload_session_id = ?,
+		    staged_expires_at = ?,
+		    access_revoked_at = NULL,
+		    access_revoked_reason = ''
+		WHERE id = ? AND task_id = ?`,
+		taskID, strings.TrimSpace(scopeSKUCode), toNullInt64(retouchRequirementID), role, actorID,
+		strings.TrimSpace(uploadSessionID), expiresAt, taskAssetID, taskID)
+	if err != nil {
+		return fmt.Errorf("mark task asset staged: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows != 1 {
+		return repo.ErrConflict
+	}
+	return nil
 }
 
 func taskAssetSourceModuleKey(asset *domain.TaskAsset) string {

@@ -70,7 +70,7 @@ describe('home fallback', () => {
         query: {
           tab: 'mine',
           task_category: 'normal',
-          status: 'PendingAuditA,PendingAuditB',
+          status: 'PendingAudit',
         },
       }),
     } as unknown as Router
@@ -78,7 +78,7 @@ describe('home fallback', () => {
     const route = resolvePostLoginLandingRoute(
       router,
       makePermissionsStore({ menus: ['task_list'] }),
-      '/tasks?tab=mine&task_category=normal&status=PendingAuditA,PendingAuditB',
+      '/tasks?tab=mine&task_category=normal&status=PendingAudit',
     )
 
     expect(route).toEqual({ name: 'TaskList' })

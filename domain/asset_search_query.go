@@ -51,21 +51,22 @@ const (
 )
 
 type AssetSearchQuery struct {
-	Keyword        string
-	ModuleKey      string
-	OwnerTeamCode  string
-	CreatedFrom    *time.Time
-	CreatedTo      *time.Time
-	TimeBasis      AssetSearchTimeBasis
-	Page           int
-	Size           int
-	IsArchived     AssetArchiveFilter
-	TaskStatus     AssetTaskStatusFilter
-	Source         AssetResourceSource
-	UsableState    AssetUsableStateFilter
-	FormatCategory AssetFormatCategoryFilter
-	BusinessLane   TaskBusinessLane
-	AssetType      TaskAssetType
+	Keyword                string
+	ModuleKey              string
+	OwnerTeamCode          string
+	CreatedFrom            *time.Time
+	CreatedTo              *time.Time
+	TimeBasis              AssetSearchTimeBasis
+	Page                   int
+	Size                   int
+	IsArchived             AssetArchiveFilter
+	TaskStatus             AssetTaskStatusFilter
+	Source                 AssetResourceSource
+	UsableState            AssetUsableStateFilter
+	FormatCategory         AssetFormatCategoryFilter
+	BusinessLane           TaskBusinessLane
+	AssetType              TaskAssetType
+	OperationalVisibleOnly bool
 }
 
 func (q AssetSearchQuery) Normalized() AssetSearchQuery {

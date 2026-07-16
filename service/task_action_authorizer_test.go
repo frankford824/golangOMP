@@ -938,7 +938,7 @@ func TestTaskActionAuthorizerAssetUploadStageScopeMatrix(t *testing.T) {
 			wantScopeSource: string(TaskActionScopeStage),
 		},
 		{
-			name:   "customization_reviewer_pending_review_upload_allowed_via_review_asset_scope",
+			name:   "legacy_customization_reviewer_role_does_not_authorize_upload",
 			action: TaskActionAssetUploadSessionCreate,
 			actor: domain.RequestActor{
 				ID:    501,
@@ -951,11 +951,12 @@ func TestTaskActionAuthorizerAssetUploadStageScopeMatrix(t *testing.T) {
 				TaskStatus:            domain.TaskStatusPendingCustomizationReview,
 				CustomizationRequired: true,
 			},
-			wantAllowed:     true,
-			wantScopeSource: string(TaskActionScopeStage),
+			wantAllowed:    false,
+			wantDenyCode:   "missing_required_role",
+			wantDenyReason: "asset upload requires a design, audit, customization, operation, or management role",
 		},
 		{
-			name:   "customization_reviewer_pending_effect_review_upload_allowed_via_review_asset_scope",
+			name:   "legacy_effect_review_state_does_not_authorize_upload",
 			action: TaskActionAssetUploadSessionCreate,
 			actor: domain.RequestActor{
 				ID:    502,
@@ -968,8 +969,9 @@ func TestTaskActionAuthorizerAssetUploadStageScopeMatrix(t *testing.T) {
 				TaskStatus:            domain.TaskStatusPendingEffectReview,
 				CustomizationRequired: true,
 			},
-			wantAllowed:     true,
-			wantScopeSource: string(TaskActionScopeStage),
+			wantAllowed:    false,
+			wantDenyCode:   "missing_required_role",
+			wantDenyReason: "asset upload requires a design, audit, customization, operation, or management role",
 		},
 		{
 			name:   "customization_reviewer_in_progress_upload_denied_as_generic_upload",
@@ -1009,7 +1011,7 @@ func TestTaskActionAuthorizerAssetUploadStageScopeMatrix(t *testing.T) {
 			wantScopeSourceNot: string(TaskActionScopeStage),
 		},
 		{
-			name:   "asset_manager_can_replace_completed_asset_across_task_org_scope",
+			name:   "legacy_asset_manager_role_cannot_replace_completed_asset",
 			action: TaskActionAssetUploadSessionCreate,
 			actor: domain.RequestActor{
 				ID:         303,
@@ -1023,8 +1025,8 @@ func TestTaskActionAuthorizerAssetUploadStageScopeMatrix(t *testing.T) {
 				OwnerOrgTeam:    "淘系运营三部",
 				TaskStatus:      domain.TaskStatusCompleted,
 			},
-			wantAllowed:     true,
-			wantScopeSource: string(TaskActionScopeAssetMaintenance),
+			wantAllowed:  false,
+			wantDenyCode: "missing_required_role",
 		},
 	}
 
@@ -1064,7 +1066,7 @@ func TestTaskActionAuthorizerAssetUploadStageScopeMatrix(t *testing.T) {
 	}
 }
 
-func TestTaskActionAuthorizerCompletedAssetMaintenanceRolesCrossOrg(t *testing.T) {
+func TestTaskActionAuthorizerLegacyRolesCannotMutateCompletedAssets(t *testing.T) {
 	authz := newTaskActionAuthorizer(NewRoleBasedDataScopeResolver(), nil)
 	task := &domain.Task{
 		ID:              2199,
@@ -1093,8 +1095,8 @@ func TestTaskActionAuthorizerCompletedAssetMaintenanceRolesCrossOrg(t *testing.T
 					Team:       "全职组",
 				})
 				decision := authz.EvaluateTaskActionPolicy(ctx, action, task, "", "")
-				if !decision.Allowed || decision.ScopeSource != string(TaskActionScopeAssetMaintenance) {
-					t.Fatalf("decision = %+v, want completed asset-maintenance allow", decision)
+				if decision.Allowed {
+					t.Fatalf("decision = %+v, want legacy role-only request denied", decision)
 				}
 			})
 		}

@@ -963,8 +963,8 @@ func TestTaskAssetServiceSubmitDesignFromInProgress(t *testing.T) {
 	if asset.VersionNo != 1 {
 		t.Fatalf("SubmitDesign() version_no = %d, want 1", asset.VersionNo)
 	}
-	if taskRepo.tasks[2].TaskStatus != domain.TaskStatusPendingAuditA {
-		t.Fatalf("SubmitDesign() task status = %s, want PendingAuditA", taskRepo.tasks[2].TaskStatus)
+	if taskRepo.tasks[2].TaskStatus != domain.TaskStatusPendingAudit {
+		t.Fatalf("SubmitDesign() task status = %s, want PendingAudit", taskRepo.tasks[2].TaskStatus)
 	}
 	if taskRepo.tasks[2].CurrentHandlerID != nil {
 		t.Fatalf("SubmitDesign() current_handler_id = %+v, want nil", taskRepo.tasks[2].CurrentHandlerID)
@@ -980,7 +980,7 @@ func TestTaskAssetServiceSubmitDesignFromInProgress(t *testing.T) {
 	}
 }
 
-func TestTaskAssetServiceSubmitDesignCustomizationOperatorAdvancesToReview(t *testing.T) {
+func TestTaskAssetServiceSubmitDesignLegacyCustomizationStateAdvancesToUnifiedAudit(t *testing.T) {
 	operatorID := int64(701)
 	ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{
 		ID:    operatorID,
@@ -1016,8 +1016,8 @@ func TestTaskAssetServiceSubmitDesignCustomizationOperatorAdvancesToReview(t *te
 	if asset.SourceModuleKey != domain.ModuleKeyCustomization {
 		t.Fatalf("asset source_module_key = %s, want customization", asset.SourceModuleKey)
 	}
-	if taskRepo.tasks[27].TaskStatus != domain.TaskStatusPendingCustomizationReview {
-		t.Fatalf("task status = %s, want PendingCustomizationReview", taskRepo.tasks[27].TaskStatus)
+	if taskRepo.tasks[27].TaskStatus != domain.TaskStatusPendingAudit {
+		t.Fatalf("task status = %s, want PendingAudit", taskRepo.tasks[27].TaskStatus)
 	}
 	if taskRepo.tasks[27].LastCustomizationOperatorID == nil || *taskRepo.tasks[27].LastCustomizationOperatorID != operatorID {
 		t.Fatalf("last_customization_operator_id = %+v, want %d", taskRepo.tasks[27].LastCustomizationOperatorID, operatorID)
@@ -1129,7 +1129,7 @@ func TestTaskAssetServiceSubmitDesignCompletesRetouchTask(t *testing.T) {
 	}
 }
 
-func TestTaskAssetServiceSubmitDesignFromRejectedByAuditA(t *testing.T) {
+func TestTaskAssetServiceSubmitDesignFromLegacyRejectedByAuditAUsesUnifiedAudit(t *testing.T) {
 	ctx := context.Background()
 	designerID := int64(102)
 	taskRepo := newStep04TaskRepo(&domain.Task{
@@ -1154,12 +1154,12 @@ func TestTaskAssetServiceSubmitDesignFromRejectedByAuditA(t *testing.T) {
 	if asset.AssetType != domain.TaskAssetTypeDelivery {
 		t.Fatalf("SubmitDesign(rejected) asset_type = %s, want delivery", asset.AssetType)
 	}
-	if taskRepo.tasks[3].TaskStatus != domain.TaskStatusPendingAuditA {
-		t.Fatalf("SubmitDesign(rejected) task status = %s, want PendingAuditA", taskRepo.tasks[3].TaskStatus)
+	if taskRepo.tasks[3].TaskStatus != domain.TaskStatusPendingAudit {
+		t.Fatalf("SubmitDesign(rejected) task status = %s, want PendingAudit", taskRepo.tasks[3].TaskStatus)
 	}
 }
 
-func TestTaskAssetServiceSubmitDesignFromRejectedByAuditB(t *testing.T) {
+func TestTaskAssetServiceSubmitDesignFromLegacyRejectedByAuditBUsesUnifiedAudit(t *testing.T) {
 	ctx := context.Background()
 	designerID := int64(103)
 	taskRepo := newStep04TaskRepo(&domain.Task{
@@ -1185,8 +1185,8 @@ func TestTaskAssetServiceSubmitDesignFromRejectedByAuditB(t *testing.T) {
 	if asset.AssetType != domain.TaskAssetTypeDelivery {
 		t.Fatalf("SubmitDesign(rejected B) asset_type = %s, want delivery", asset.AssetType)
 	}
-	if taskRepo.tasks[6].TaskStatus != domain.TaskStatusPendingAuditA {
-		t.Fatalf("SubmitDesign(rejected B) task status = %s, want PendingAuditA", taskRepo.tasks[6].TaskStatus)
+	if taskRepo.tasks[6].TaskStatus != domain.TaskStatusPendingAudit {
+		t.Fatalf("SubmitDesign(rejected B) task status = %s, want PendingAudit", taskRepo.tasks[6].TaskStatus)
 	}
 	if taskRepo.tasks[6].CurrentHandlerID != nil {
 		t.Fatalf("SubmitDesign(rejected B) current_handler_id = %+v, want nil", taskRepo.tasks[6].CurrentHandlerID)
@@ -1549,6 +1549,13 @@ func (r *step04TaskAssetRepo) MarkAssetVersionSuperseded(_ context.Context, _ re
 	asset.SupersededByVersionID = &supersededByVersionID
 	asset.SupersededAt = &supersededAt
 	asset.CleanupAfterAt = &cleanupAfterAt
+	return nil
+}
+
+func (r *step04TaskAssetRepo) MarkBindingStaged(_ context.Context, _ repo.Tx, taskAssetID, _ int64, _ int64, _ string, _ *int64, _ string, _ string, _ time.Time) error {
+	if r.assets[taskAssetID] == nil {
+		return fmt.Errorf("task asset %d not found", taskAssetID)
+	}
 	return nil
 }
 

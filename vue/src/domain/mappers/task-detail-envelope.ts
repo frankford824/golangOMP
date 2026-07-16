@@ -40,8 +40,6 @@ export function mergeDetailEnvelopeIntoTaskRaw(
     'assetVersions',
     'retouch_requirements',
     'retouchRequirements',
-    'procurement_summary',
-    'procurementSummary',
     'matched_rule_governance',
     'matchedRuleGovernance',
     'override_summary',
@@ -60,7 +58,7 @@ export function mergeDetailEnvelopeIntoTaskRaw(
     const d = detail
     const nonEmpty = (v: unknown) => v != null && String(v).trim() !== ''
 
-    // 采购任务关键字段：从 task_detail 提升到 task root，供 normalizeBackendTask 读取。
+    // 成本与数量字段从 task_detail 提升到 task root，供统一详情映射读取。
     if (typeof d.cost_price === 'number' && Number.isFinite(d.cost_price)) {
       merged.cost_price = d.cost_price
     }

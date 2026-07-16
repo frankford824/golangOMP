@@ -75,6 +75,7 @@ type AuditHandover struct {
 	CurrentJudgement string         `db:"current_judgement" json:"current_judgement"`
 	RiskRemark       string         `db:"risk_remark"       json:"risk_remark"`
 	Status           HandoverStatus `db:"status"            json:"status"`
+	AllowedActions   []string       `db:"-"                 json:"allowed_actions"`
 	CreatedAt        time.Time      `db:"created_at"        json:"created_at"`
 	UpdatedAt        time.Time      `db:"updated_at"        json:"updated_at"`
 }

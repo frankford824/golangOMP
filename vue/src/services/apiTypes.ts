@@ -480,47 +480,6 @@ export interface BackendAsset {
   [key: string]: unknown
 }
 
-// ─── 定制单（OpenAPI OutsourceOrder，GET /v1/outsource-orders，字段名兼容 outsource_*）────────
-
-export type BackendOutsourceOrderStatus =
-  | 'created'
-  | 'packaged'
-  | 'sent'
-  | 'in_production'
-  | 'returned'
-  | 'reviewing'
-  | 'approved'
-  | 'rejected'
-  | 'closed'
-
-/** 与后端 JSON 对齐；部分字段可能由后端扩展（任务号、SKU 等） */
-export interface BackendOutsourceOrderRaw {
-  id: number
-  outsource_no: string
-  task_id: number
-  vendor_name: string
-  outsource_type: string
-  delivery_requirement?: string
-  settlement_note?: string
-  status: BackendOutsourceOrderStatus | string
-  returned_at?: string | null
-  created_at: string
-  updated_at?: string
-  /** 若后端在列表项中嵌套任务摘要 */
-  task_no?: string
-  sku?: string
-  product_name?: string
-  [key: string]: unknown
-}
-
-export interface OutsourceOrderListQuery {
-  task_id?: number
-  status?: string
-  vendor?: string
-  page?: number
-  page_size?: number
-}
-
 export interface CustomizationJobRaw {
   id: number | string
   task_id?: number | string

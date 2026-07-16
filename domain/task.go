@@ -103,8 +103,9 @@ func (t TaskSKUCodeType) Valid() bool {
 	}
 }
 
-// Task is the V7 business aggregate root (spec V7 §7.1).
-// Every formal workflow must start with a Task that is bound to a SKU.
+// Task is the V8 business aggregate root. Legacy persistence columns remain
+// readable during cutover, but are intentionally excluded from the public JSON
+// contract once their workflow semantics have been retired.
 type Task struct {
 	ID                          int64                   `db:"id"                    json:"id"`
 	TaskNo                      string                  `db:"task_no"               json:"task_no"`
@@ -113,30 +114,35 @@ type Task struct {
 	SKUCode                     string                  `db:"sku_code"              json:"sku_code"`
 	ProductNameSnapshot         string                  `db:"product_name_snapshot" json:"product_name_snapshot"`
 	TaskType                    TaskType                `db:"task_type"             json:"task_type"`
-	OperatorGroupID             *int64                  `db:"operator_group_id"     json:"operator_group_id,omitempty"`
-	OwnerTeam                   string                  `db:"owner_team"            json:"owner_team"`
+	OperatorGroupID             *int64                  `db:"operator_group_id"     json:"-"`
+	OwnerTeam                   string                  `db:"owner_team"            json:"owner_team,omitempty"`
 	OwnerDepartment             string                  `db:"owner_department"      json:"owner_department"`
+	OwnerDepartmentID           *int64                  `db:"owner_department_id"   json:"owner_department_id,omitempty"`
 	OwnerOrgTeam                string                  `db:"owner_org_team"        json:"owner_org_team"`
+	OwnerTeamID                 *int64                  `db:"owner_team_id"         json:"owner_team_id,omitempty"`
 	CreatorID                   int64                   `db:"creator_id"            json:"creator_id"`
 	RequesterID                 *int64                  `db:"requester_id"          json:"requester_id,omitempty"`
 	DesignerID                  *int64                  `db:"designer_id"           json:"designer_id,omitempty"`
 	CurrentHandlerID            *int64                  `db:"current_handler_id"    json:"current_handler_id,omitempty"`
 	TaskStatus                  TaskStatus              `db:"task_status"           json:"task_status"`
+	WorkflowRevision            int64                   `db:"workflow_revision"      json:"workflow_revision"`
+	WorkflowContractVersion     int                     `db:"-"                      json:"workflow_contract_version"`
+	AllowedActions              []string                `db:"-"                      json:"allowed_actions"`
 	Priority                    TaskPriority            `db:"priority"              json:"priority"`
 	DeadlineAt                  *time.Time              `db:"deadline_at"           json:"deadline_at,omitempty"`
-	NeedOutsource               bool                    `db:"need_outsource"        json:"need_outsource"`
-	IsOutsource                 bool                    `db:"is_outsource"          json:"is_outsource"`
+	NeedOutsource               bool                    `db:"need_outsource"        json:"-"`
+	IsOutsource                 bool                    `db:"is_outsource"          json:"-"`
 	BusinessLane                TaskBusinessLane        `db:"business_lane"         json:"business_lane"`
 	CustomizationRequired       bool                    `db:"customization_required" json:"customization_required"`
-	CustomizationSourceType     CustomizationSourceType `db:"customization_source_type" json:"customization_source_type"`
-	LastCustomizationOperatorID *int64                  `db:"last_customization_operator_id" json:"last_customization_operator_id,omitempty"`
-	WarehouseRejectReason       string                  `db:"warehouse_reject_reason" json:"warehouse_reject_reason,omitempty"`
-	WarehouseRejectCategory     string                  `db:"warehouse_reject_category" json:"warehouse_reject_category,omitempty"`
+	CustomizationSourceType     CustomizationSourceType `db:"customization_source_type" json:"-"`
+	LastCustomizationOperatorID *int64                  `db:"last_customization_operator_id" json:"-"`
+	WarehouseRejectReason       string                  `db:"warehouse_reject_reason" json:"-"`
+	WarehouseRejectCategory     string                  `db:"warehouse_reject_category" json:"-"`
 	IsBatchTask                 bool                    `db:"is_batch_task"         json:"is_batch_task"`
 	BatchItemCount              int                     `db:"batch_item_count"      json:"batch_item_count"`
 	BatchMode                   TaskBatchMode           `db:"batch_mode"            json:"batch_mode"`
 	PrimarySKUCode              string                  `db:"primary_sku_code"      json:"primary_sku_code,omitempty"`
-	SKUGenerationStatus         TaskSKUGenerationStatus `db:"sku_generation_status" json:"sku_generation_status"`
+	SKUGenerationStatus         TaskSKUGenerationStatus `db:"sku_generation_status" json:"-"`
 	CreatedAt                   time.Time               `db:"created_at"            json:"created_at"`
 	UpdatedAt                   time.Time               `db:"updated_at"            json:"updated_at"`
 }
@@ -146,6 +152,17 @@ func (t *Task) WorkflowLane() WorkflowLane {
 		return WorkflowLaneNormal
 	}
 	return NormalizeTaskBusinessLane(t.BusinessLane, t.CustomizationRequired).WorkflowLane()
+}
+
+func (t *Task) AccessSubject() TaskAccessSubject {
+	if t == nil {
+		return TaskAccessSubject{}
+	}
+	return TaskAccessSubject{
+		TaskID: t.ID, CreatorID: t.CreatorID, RequesterID: t.RequesterID,
+		DesignerID: t.DesignerID, CurrentHandlerID: t.CurrentHandlerID,
+		OwnerDepartmentID: t.OwnerDepartmentID, OwnerTeamID: t.OwnerTeamID,
+	}
 }
 
 // TaskDetail stores supplemental demand information for a Task.

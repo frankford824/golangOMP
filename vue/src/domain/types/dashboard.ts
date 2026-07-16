@@ -2,8 +2,7 @@ export interface DashboardSummary {
   todayPendingCount: number
   pendingAuditCount: number
   handoverCount: number
-  pendingOutsourceReturnCount: number
-  pendingWarehouseReceiveCount: number
+  todayCompletedCount: number
   todayCreatedCount: number
   overdueCount: number
 }

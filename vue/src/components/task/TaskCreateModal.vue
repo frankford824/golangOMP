@@ -187,10 +187,6 @@
                 v-else-if="taskKind === 'NEW_PRODUCT_DEV'"
                 v-model:form="form"
               />
-              <TaskCreatePurchaseForm
-                v-else-if="taskKind === 'PURCHASE_TASK'"
-                v-model:form="form"
-              />
 
               <section v-if="requiresDesignSource" class="v1-extra-section">
                 <h4 class="batch-section-title">设计来源校验</h4>
@@ -289,7 +285,7 @@
 
             <ExcelBatchSkuPanel
               v-if="isBatchLayout"
-              :task-type="taskKind === 'PURCHASE_TASK' ? 'purchase_task' : 'new_product_development'"
+              task-type="new_product_development"
               :hide-preview="true"
               @parsed="onExcelParsed"
               @reset="onExcelReset"
@@ -342,7 +338,7 @@
 	                  {{
 	                    showSkuAsCustomization
 	                      ? '将使用 DZ + 类目首字母 + 6 位序号，ERP 中可直接识别定制 SKU。'
-	                      : '将使用 CG + 类目首字母 + 6 位序号，适用于常规新品或采购 SKU。'
+	                      : '将使用 CG + 类目首字母 + 6 位序号，适用于常规新品 SKU。'
 	                  }}
 	                </p>
 	              </div>
@@ -414,7 +410,7 @@
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { Box, Images, Sparkles, ShoppingCart, Wand2 } from 'lucide-vue-next'
+import { Box, Images, Sparkles, Wand2 } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import type { Task } from '@/domain/types'
 import type { TaskCreateFormModel, TaskKind } from '@/domain/types'
@@ -433,7 +429,6 @@ import BaseSelect from '@/components/base/BaseSelect.vue'
 import BaseSwitch from '@/components/base/BaseSwitch.vue'
 import TaskCreateOriginalForm from '@/components/task/TaskCreateOriginalForm.vue'
 import TaskCreateNewProductForm from '@/components/task/TaskCreateNewProductForm.vue'
-import TaskCreatePurchaseForm from '@/components/task/TaskCreatePurchaseForm.vue'
 import TaskCreateRetouchForm from '@/components/task/TaskCreateRetouchForm.vue'
 import { createEmptyRetouchRequirementDraft } from '@/domain/types/retouch-requirement'
 import {
@@ -489,7 +484,6 @@ type CreateType =
   | 'original'
   | 'new_single'
   | 'new_batch'
-  | 'purchase_single'
   | 'retouch'
 
 const taskGroup = ref<TaskGroup>('normal')
@@ -599,13 +593,6 @@ const createTypeOptions: Array<{
     icon: Images,
   },
   {
-    value: 'purchase_single',
-    group: 'normal',
-    label: '采购单 SKU',
-    kind: 'PURCHASE_TASK',
-    icon: ShoppingCart,
-  },
-  {
     value: 'retouch',
     group: 'normal',
     label: 'P 图任务',
@@ -633,18 +620,11 @@ const createTypeOptions: Array<{
     kind: 'NEW_PRODUCT_DEV',
     icon: Images,
   },
-  {
-    value: 'purchase_single',
-    group: 'customization',
-    label: '定制采购单 SKU',
-    kind: 'PURCHASE_TASK',
-    icon: ShoppingCart,
-  },
 ]
 
 const taskKind = ref<TaskKind>(props.defaultTaskKind ?? 'ORIGINAL_PRODUCT_DEV')
 const submitting = ref(false)
-const ARCHIVE_PREFILL_TASK_KIND_WHITELIST: readonly TaskKind[] = ['NEW_PRODUCT_DEV', 'PURCHASE_TASK']
+const ARCHIVE_PREFILL_TASK_KIND_WHITELIST: readonly TaskKind[] = ['NEW_PRODUCT_DEV']
 
 const form = ref<TaskCreateFormModel>({
   productId: null,
@@ -664,7 +644,6 @@ const form = ref<TaskCreateFormModel>({
   customizationRequired: false,
   customizationSourceType: undefined,
   note: '',
-  costPriceMode: 'template',
   category: undefined,
   material: undefined,
   materialOther: undefined,
@@ -672,14 +651,8 @@ const form = ref<TaskCreateFormModel>({
   productReferenceUrl: undefined,
   costUnitPrice: undefined,
   quantity: undefined,
-  basePriceAmount: undefined,
-	  productChannel: undefined,
-	  costPriceAmount: undefined,
-	  costPriceCurrency: 'CNY',
 	  syncErpOnCreate: true,
 	  skuCodeType: 'regular',
-	  purchaseQuantity: undefined,
-  purchaseUnit: undefined,
   prefillSpecText: undefined,
   skuMode: 'single',
   batchItems: [],
@@ -702,7 +675,6 @@ const contextPanelTitle = computed(() => {
   if (isBatchLayout.value) return 'Excel 批量流程'
   if (isCustomizationFlow.value) return '定制上下文'
   if (taskKind.value === 'RETOUCH_TASK') return 'P 图任务只保留必要字段'
-  if (taskKind.value === 'PURCHASE_TASK') return '成本与采购规则'
   if (taskKind.value === 'NEW_PRODUCT_DEV') return 'SKU 创建状态'
   return 'ERP 产品主档'
 })
@@ -723,13 +695,6 @@ const contextPanelItems = computed(() => {
         title: '本条附件',
         body: '每条需求可单独上传参考图与素材文件（PSD / AI / ZIP 等），创建后自动绑定到该需求；单文件大小上限见上传提示。',
       },
-    ]
-  }
-  if (taskKind.value === 'PURCHASE_TASK') {
-    return [
-      { title: 'SKU 状态', body: 'SKU 由后端创建任务后生成，创建前可先做预展示。' },
-      { title: '成本方式', body: '手动录入显示成本输入；按模板时由系统规则计算。' },
-      { title: 'ERP 同步', body: '默认创建后立即同步 ERP，可手动关闭；关闭后将在后续流程触发同步。' },
     ]
   }
   if (taskKind.value === 'NEW_PRODUCT_DEV') {
@@ -753,13 +718,11 @@ const requiresDesignSource = computed(() => false)
 const requiresErpVerification = computed(() => false)
 const showSyncErpToggle = computed(() =>
   createType.value === 'new_single' ||
-  createType.value === 'new_batch' ||
-  createType.value === 'purchase_single',
+  createType.value === 'new_batch',
 )
 const showSkuCodeTypeCard = computed(() =>
   createType.value === 'new_single' ||
-  createType.value === 'new_batch' ||
-  createType.value === 'purchase_single'
+  createType.value === 'new_batch'
 )
 /** 右侧 SKU 编码提示：定制分组优先 DZ，避免 form.skuCodeType 与 taskGroup 脱节 */
 const showSkuAsCustomization = computed(
@@ -946,23 +909,14 @@ watch(taskKind, (mode) => {
   form.value.erpProductSnapshot = undefined
   // 字段白名单清理：隐藏字段必须在 v-if 变 false 时同步清空，
   // 避免残留值被 buildCreatePayload 带入 POST 体触发 400。
-  if (mode !== 'NEW_PRODUCT_DEV' && mode !== 'PURCHASE_TASK') {
+  if (mode !== 'NEW_PRODUCT_DEV') {
     form.value.material = undefined
     form.value.materialOther = undefined
     form.value.category = undefined
     form.value.productShortName = undefined
   }
-  if (mode !== 'PURCHASE_TASK') {
-    form.value.costPriceAmount = undefined
-    form.value.purchaseQuantity = undefined
-    form.value.basePriceAmount = undefined
-    form.value.productChannel = undefined
-    form.value.costPriceMode = 'template'
-  }
-  if (mode === 'PURCHASE_TASK') {
-    form.value.designRequirement = ''
-    form.value.costPriceMode = form.value.costPriceMode || 'template'
-  }
+  form.value.basePriceAmount = undefined
+  form.value.costPriceMode = 'template'
   if (mode === 'RETOUCH_TASK') {
     if (!Array.isArray(form.value.retouchRequirements) || form.value.retouchRequirements.length === 0) {
       form.value.retouchRequirements = [createEmptyRetouchRequirementDraft(1)]
@@ -1068,15 +1022,6 @@ const validationIssues = computed<string[]>(() => {
       if (!f.productName) issues.push('未填写产品名称')
       if (isErpProductNameTooLong(f.productName)) issues.push(erpProductNameLimitMessage('产品名称'))
       if (!f.designRequirement?.trim()) issues.push('未填写设计需求')
-    } else if (taskKind.value === 'PURCHASE_TASK') {
-      if (!f.category) issues.push('未选择产品款式编码')
-      if (!f.productName) issues.push('未填写产品名称')
-      if (isErpProductNameTooLong(f.productName)) issues.push(erpProductNameLimitMessage('产品名称'))
-      if (!f.prefillSpecText?.trim()) issues.push('未填写规格尺寸')
-      if (f.purchaseQuantity == null) issues.push('未填写采购数量')
-      if (f.costPriceMode === 'manual' && (f.costPriceAmount == null || Number.isNaN(f.costPriceAmount))) {
-        issues.push('成本计价方式为手动录入时未填写成本')
-      }
     } else if (taskKind.value === 'RETOUCH_TASK') {
       if (!hasValidRetouchRequirementDrafts(f)) issues.push('请至少填写 1 条 P 图需求描述')
     } else if (taskKind.value === 'ORIGINAL_PRODUCT_DEV') {
@@ -1231,9 +1176,6 @@ function resolveCreateTypeFromDraft(
     const value = skuMode === 'multiple' ? 'new_batch' : 'new_single'
     return createTypeOptions.find((option) => option.value === value && option.group === (isCustomization ? 'customization' : 'normal'))
   }
-  if (draftTaskKind === 'PURCHASE_TASK') {
-    return createTypeOptions.find((option) => option.value === 'purchase_single' && option.group === (isCustomization ? 'customization' : 'normal'))
-  }
   if (draftTaskKind === 'RETOUCH_TASK') {
     return createTypeOptions.find((option) => option.value === 'retouch')
   }
@@ -1337,7 +1279,7 @@ async function prepareSkuPreview() {
       groupName: form.value.groupName,
       ownerDepartment: resolveOwnerDepartmentForSubmit(),
       ownerOrgTeam: form.value.groupId || undefined,
-      designRequirement: businessType === 'PURCHASE_TASK' ? undefined : form.value.designRequirement || undefined,
+      designRequirement: form.value.designRequirement || undefined,
       referenceFileRefs: referenceFileRefs as unknown as Task['referenceFileRefs'],
       dueAt: form.value.dueAt,
 	      priority: normalizedPriority,
@@ -1349,41 +1291,8 @@ async function prepareSkuPreview() {
 	      note: form.value.note,
       assetVersions: [],
       businessType,
-      requiresAssetVersions: businessType !== 'PURCHASE_TASK',
+      requiresAssetVersions: true,
       ...(topCategoryCode ? { category: topCategoryCode } : {}),
-      purchaseInfo:
-        businessType === 'PURCHASE_TASK'
-          ? {
-              status: 'PendingPurchase',
-              supplierName: form.value.purchaseSupplierName ?? '',
-              quantity: form.value.purchaseQuantity,
-              unit: form.value.purchaseUnit ?? undefined,
-              purchasePrice: (() => {
-                const pick =
-                  form.value.purchasePriceAmount != null && !Number.isNaN(form.value.purchasePriceAmount)
-                    ? form.value.purchasePriceAmount
-                    : form.value.costPriceAmount != null && !Number.isNaN(form.value.costPriceAmount)
-                      ? form.value.costPriceAmount
-                      : form.value.basePriceAmount != null && !Number.isNaN(form.value.basePriceAmount)
-                        ? form.value.basePriceAmount
-                        : undefined
-                return pick != null ? { amount: pick, currency: form.value.purchasePriceCurrency || 'CNY' } : undefined
-              })(),
-              expectedArrivalAt: form.value.purchaseExpectedAt ?? undefined,
-              warehouseLocationCode: form.value.warehouseLocationCode ?? undefined,
-              warehouseLocationName: form.value.warehouseLocationName ?? undefined,
-            }
-          : undefined,
-      costPrice:
-        businessType === 'PURCHASE_TASK' && form.value.costPriceAmount != null
-          ? { amount: form.value.costPriceAmount, currency: form.value.costPriceCurrency || 'CNY' }
-          : undefined,
-    }
-
-    if (businessType === 'PURCHASE_TASK') {
-      Object.assign(base, {
-        costPriceMode: form.value.costPriceMode,
-      })
     }
 
     if (businessType === 'NEW_PRODUCT_DEV') {
@@ -1406,13 +1315,6 @@ async function prepareSkuPreview() {
         productName: '',
         designRequirement: undefined,
         batchItems: normalizedItems,
-        ...(businessType === 'PURCHASE_TASK'
-          ? {
-              purchaseInfo: undefined,
-              costPrice: undefined,
-              basePriceAmount: undefined,
-            }
-          : {}),
       })
     }
 
@@ -1426,8 +1328,7 @@ async function prepareSkuPreview() {
       const items = form.value.batchItems ?? []
       items.forEach((it, idx) => {
         const code = skuItems[idx]
-        if (businessType === 'PURCHASE_TASK') it.purchaseSku = code ?? undefined
-        else it.newSku = code ?? undefined
+        it.newSku = code ?? undefined
       })
     }
   } catch (e) {
@@ -1449,17 +1350,9 @@ function getPrefillBusinessPatchPayload(): Record<string, unknown> {
   const category = String(categoryFromForm).trim()
   const specText = (f.prefillSpecText ?? '').trim()
 
-  let costPrice: number | undefined
-  if (taskKind.value === 'PURCHASE_TASK') {
-    const n = isBatchLayout.value ? tpl?.costPriceAmount : f.costPriceAmount
-    if (typeof n === 'number' && Number.isFinite(n)) costPrice = n
-  }
-
   const patch: Record<string, unknown> = {}
   Object.assign(patch, buildCategoryPatchFields(category))
   if (specText) patch.spec_text = specText
-  if (typeof costPrice === 'number' && Number.isFinite(costPrice)) patch.cost_price = costPrice
-
   return patch
 }
 
@@ -1541,8 +1434,7 @@ async function submit() {
     // owner_* 字段，由后端按 actor 归属派生；DA/组长/Global 等按下拉选中值提交。
     ownerDepartment: hideOwnerFields.value ? undefined : preflightOwnerDepartment,
     ownerOrgTeam: hideOwnerFields.value ? undefined : (form.value.groupId || undefined),
-    designRequirement:
-      businessType === 'PURCHASE_TASK' ? undefined : form.value.designRequirement || undefined,
+    designRequirement: form.value.designRequirement || undefined,
     ...(businessType === 'RETOUCH_TASK'
       ? { retouchRequirements: form.value.retouchRequirements ?? [] }
       : {}),
@@ -1565,42 +1457,9 @@ async function submit() {
     erpProductVerified: erpProductVerified.value,
     syncErpOnCreate: form.value.syncErpOnCreate !== false,
     ...(topCategoryCode ? { category: topCategoryCode, productCategoryCode: topCategoryCode } : {}),
-    requiresAssetVersions: businessType !== 'PURCHASE_TASK',
+    requiresAssetVersions: true,
     createdAt: now,
     updatedAt: now,
-    costPrice:
-      businessType === 'PURCHASE_TASK' && form.value.costPriceAmount != null
-        ? { amount: form.value.costPriceAmount, currency: form.value.costPriceCurrency || 'CNY' }
-        : undefined,
-    purchaseInfo:
-      businessType === 'PURCHASE_TASK'
-        ? {
-            status: 'PendingPurchase',
-            supplierName: form.value.purchaseSupplierName ?? '',
-            quantity: form.value.purchaseQuantity,
-            unit: form.value.purchaseUnit ?? undefined,
-            purchasePrice: (() => {
-              const pick =
-                form.value.purchasePriceAmount != null && !Number.isNaN(form.value.purchasePriceAmount)
-                  ? form.value.purchasePriceAmount
-                  : form.value.costPriceAmount != null && !Number.isNaN(form.value.costPriceAmount)
-                    ? form.value.costPriceAmount
-                    : form.value.basePriceAmount != null && !Number.isNaN(form.value.basePriceAmount)
-                      ? form.value.basePriceAmount
-                      : undefined
-              return pick != null ? { amount: pick, currency: form.value.purchasePriceCurrency || 'CNY' } : undefined
-            })(),
-            expectedArrivalAt: form.value.purchaseExpectedAt ?? undefined,
-            warehouseLocationCode: form.value.warehouseLocationCode ?? undefined,
-            warehouseLocationName: form.value.warehouseLocationName ?? undefined,
-          }
-        : undefined,
-  }
-
-  if (businessType === 'PURCHASE_TASK' && !isBatch) {
-    Object.assign(base, {
-      costPriceMode: form.value.costPriceMode,
-    })
   }
 
   if (businessType === 'NEW_PRODUCT_DEV' && !isBatch) {
@@ -1624,13 +1483,6 @@ async function submit() {
       designRequirement: undefined,
 	        batchItems: normalizedItems,
       batchExcelImported: true,
-      ...(businessType === 'PURCHASE_TASK'
-        ? {
-            purchaseInfo: undefined,
-            costPrice: undefined,
-            basePriceAmount: undefined,
-          }
-        : {}),
     })
   }
   try {
@@ -1640,38 +1492,6 @@ async function submit() {
       lastSubmitPayloadSignature.value = submitSignature
     }
     const created = await tasksStore.addTask(base as unknown as Partial<Task>, actionId.value)
-    let procurementSyncFailed = false
-    if (businessType === 'PURCHASE_TASK' && !isBatch) {
-      const procurementPrice =
-        form.value.costPriceAmount != null && Number.isFinite(form.value.costPriceAmount)
-          ? form.value.costPriceAmount
-          : form.value.purchasePriceAmount != null && Number.isFinite(form.value.purchasePriceAmount)
-            ? form.value.purchasePriceAmount
-            : undefined
-      const procurementQuantity =
-        form.value.purchaseQuantity != null && Number.isFinite(form.value.purchaseQuantity)
-          ? form.value.purchaseQuantity
-          : undefined
-      if (
-        procurementPrice != null &&
-        procurementQuantity != null &&
-        procurementQuantity > 0
-      ) {
-        try {
-          const supplierName = String(form.value.purchaseSupplierName ?? '').trim()
-          await tasksStore.bootstrapProcurement(created.id, {
-            procurement_price: procurementPrice,
-            quantity: procurementQuantity,
-            ...(supplierName ? { supplier_name: supplierName } : {}),
-            purchase_remark: String(form.value.note ?? '').trim() || undefined,
-          })
-        } catch {
-          procurementSyncFailed = true
-        }
-      } else {
-        procurementSyncFailed = true
-      }
-    }
     const prefillPatchPayload = getPrefillBusinessPatchPayload()
     let prefillSyncFailed = false
     if (Object.keys(prefillPatchPayload).length > 0) {
@@ -1724,7 +1544,6 @@ async function submit() {
       query: {
         fromCreate: '1',
         ...(prefillSyncFailed ? { prefillSyncFailed: '1' } : {}),
-        ...(procurementSyncFailed ? { procurementSyncFailed: '1' } : {}),
         ...(retouchRequirementUploadFailed ? { retouchRequirementUploadFailed: '1' } : {}),
       },
     })

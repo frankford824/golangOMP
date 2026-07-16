@@ -65,6 +65,7 @@ type TaskSKUItem struct {
 	SKUCode                  string              `db:"sku_code"              json:"sku_code"`
 	SKUCodeType              TaskSKUCodeType     `db:"sku_code_type"         json:"sku_code_type,omitempty"`
 	SKUStatus                TaskSKUStatus       `db:"sku_status"            json:"sku_status"`
+	SKUOrigin                string              `db:"sku_origin"            json:"sku_origin,omitempty"`
 	ProductID                *int64              `db:"product_id"            json:"product_id,omitempty"`
 	ERPProductID             *string             `db:"erp_product_id"        json:"erp_product_id,omitempty"`
 	FilingStatus             FilingStatus        `db:"filing_status"         json:"filing_status,omitempty"`
@@ -75,7 +76,7 @@ type TaskSKUItem struct {
 	FilingErrorMessage       string              `db:"filing_error_message"  json:"filing_error_message,omitempty"`
 	ProductNameSnapshot      string              `db:"product_name_snapshot" json:"product_name_snapshot"`
 	ProductShortName         string              `db:"product_short_name"    json:"product_short_name,omitempty"`
-	ProductIID               string              `db:"-"                     json:"product_i_id,omitempty"`
+	ProductIID               string              `db:"product_i_id"          json:"product_i_id,omitempty"`
 	CategoryCode             string              `db:"category_code"         json:"category_code,omitempty"`
 	MaterialMode             string              `db:"material_mode"         json:"material_mode,omitempty"`
 	CostPriceMode            string              `db:"cost_price_mode"       json:"cost_price_mode,omitempty"`

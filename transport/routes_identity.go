@@ -15,6 +15,7 @@ func registerV1IdentityRoutes(
 	v1 *gin.RouterGroup,
 	routeAccessCatalog *RouteAccessCatalog,
 	permissionLogger PermissionLogWriter,
+	capabilityAccess capabilityRouteAccessRegistrar,
 	authH *handler.AuthHandler,
 	taskDraftH *handler.TaskDraftHandler,
 	designSourceH *handler.DesignSourceHandler,
@@ -62,8 +63,7 @@ func registerV1IdentityRoutes(
 		v1.GET("/design-sources/search", withAuthenticated(domain.APIReadinessReadyForFrontend, permissionLogger), designSourceH.Search)
 	}
 	if searchH != nil {
-		routeAccessCatalog.AddRule(domain.NewRouteAccessRule(http.MethodGet, "/v1/search", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...))
-		v1.GET("/search", withAuthenticated(domain.APIReadinessReadyForFrontend, permissionLogger), searchH.Search)
+		v1.GET("/search", capabilityAccess(v1, http.MethodGet, "/search", domain.APIReadinessReadyForFrontend, domain.PermissionAccountUse), searchH.Search)
 	}
 	if reportL1H != nil {
 		routeAccessCatalog.AddRule(domain.NewRouteAccessRule(http.MethodGet, "/v1/reports/l1/cards", domain.APIReadinessReadyForFrontend, domain.RoleSuperAdmin))

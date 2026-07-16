@@ -61,18 +61,15 @@ const routes: RouteRecordRaw[] = [
         },
       },
       {
-        path: 'tasks/excel-assist',
-        name: 'TaskExcelAssistCreate',
-        component: () => import('@/views/TaskExcelAssistCreateView.vue'),
-        meta: {
-          requiresAuth: true,
-          requiredPermissions: ['task:create'],
-        },
+        path: 'tasks/sku-planning',
+        name: 'PlanningSKUCreate',
+        component: () => import('@/views/PlanningSKUCreateView.vue'),
+        meta: { requiresAuth: true, requiredMenuKey: ['planning_sku', 'task_list'] },
       },
       {
         path: 'tasks/:id',
         name: 'TaskDetail',
-        component: () => import('@/views/TaskDetailView.vue'),
+        component: () => import('@/views/TaskDetailV8View.vue'),
         meta: { requiresAuth: true },
       },
       {
@@ -114,13 +111,19 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'asset-center',
         name: 'AssetsIndex',
-        component: () => import('@/views/AssetsIndexView.vue'),
+        component: () => import('@/views/ResourceGroupsView.vue'),
         meta: { requiresAuth: true, requiredMenuKey: ['resource_management', 'task_list'] },
       },
       {
-        path: 'asset-center/:id',
-        name: 'AssetDetail',
+        path: 'asset-center/:id(ext-[^/]+)',
+        name: 'ExternalAssetDetail',
         component: () => import('@/views/AssetDetailView.vue'),
+        meta: { requiresAuth: true, requiredMenuKey: ['resource_management', 'task_list'] },
+      },
+      {
+        path: 'asset-center/:id(\\d+)',
+        name: 'AssetDetail',
+        component: () => import('@/views/ResourceGroupDetailView.vue'),
         meta: { requiresAuth: true, requiredMenuKey: ['resource_management', 'task_list'] },
       },
       {
@@ -220,6 +223,12 @@ const routes: RouteRecordRaw[] = [
         name: 'UserManagement',
         component: () => import('@/views/org-permission/UserManagementView.vue'),
         meta: { requiresAuth: true, requiredMenuKey: 'user_admin' },
+      },
+      {
+        path: 'access-policy',
+        name: 'AccessPolicy',
+        component: () => import('@/views/AccessPolicyView.vue'),
+        meta: { requiresAuth: true, requiredMenuKey: ['access_policy', 'user_admin'] },
       },
       {
         path: 'export-center',

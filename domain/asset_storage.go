@@ -11,6 +11,8 @@ const (
 	AssetOwnerTypeTask                AssetOwnerType = "task"
 	AssetOwnerTypeTaskAsset           AssetOwnerType = "task_asset"
 	AssetOwnerTypeTaskCreateReference AssetOwnerType = "task_create_reference"
+	AssetOwnerTypePlanningSKUCreate   AssetOwnerType = "planning_sku_create"
+	AssetOwnerTypePlanningSKURevision AssetOwnerType = "planning_sku_revision_image"
 	AssetOwnerTypeExportJob           AssetOwnerType = "export_job"
 	AssetOwnerTypeOutsource           AssetOwnerType = "outsource_order"
 	AssetOwnerTypeWarehouse           AssetOwnerType = "warehouse_receipt"
@@ -18,7 +20,7 @@ const (
 
 func (t AssetOwnerType) Valid() bool {
 	switch t {
-	case AssetOwnerTypeTask, AssetOwnerTypeTaskAsset, AssetOwnerTypeTaskCreateReference, AssetOwnerTypeExportJob, AssetOwnerTypeOutsource, AssetOwnerTypeWarehouse:
+	case AssetOwnerTypeTask, AssetOwnerTypeTaskAsset, AssetOwnerTypeTaskCreateReference, AssetOwnerTypePlanningSKUCreate, AssetOwnerTypePlanningSKURevision, AssetOwnerTypeExportJob, AssetOwnerTypeOutsource, AssetOwnerTypeWarehouse:
 		return true
 	default:
 		return false
@@ -112,49 +114,51 @@ func (s AssetStorageRefStatus) Valid() bool {
 }
 
 type UploadRequest struct {
-	RequestID          string                     `json:"request_id"`
-	OwnerType          AssetOwnerType             `json:"owner_type"`
-	OwnerID            int64                      `json:"owner_id"`
-	TaskID             int64                      `json:"task_id,omitempty"`
-	AssetID            *int64                     `json:"asset_id,omitempty"`
-	SourceAssetID      *int64                     `json:"source_asset_id,omitempty"`
-	TargetSKUCode          string                     `json:"target_sku_code,omitempty"`
-	RetouchRequirementID   *int64                     `json:"retouch_requirement_id,omitempty"`
-	TaskAssetType          *TaskAssetType             `json:"task_asset_type,omitempty"`
-	StorageAdapter     AssetStorageAdapter        `json:"storage_adapter"`
-	UploadMode         DesignAssetUploadMode      `json:"upload_mode,omitempty"`
-	RefType            AssetStorageRefType        `json:"ref_type"`
-	FileName           string                     `json:"file_name,omitempty"`
-	MimeType           string                     `json:"mime_type,omitempty"`
-	FileSize           *int64                     `json:"file_size,omitempty"`
-	ExpectedSize       *int64                     `json:"expected_size,omitempty"`
-	ChecksumHint       string                     `json:"checksum_hint,omitempty"`
-	Status             UploadRequestStatus        `json:"status"`
-	StorageProvider    DesignAssetStorageProvider `json:"storage_provider,omitempty"`
-	SessionStatus      DesignAssetSessionStatus   `json:"session_status,omitempty"`
-	RemoteUploadID     string                     `json:"remote_upload_id,omitempty"`
-	RemoteFileID       string                     `json:"remote_file_id,omitempty"`
-	IsPlaceholder      bool                       `json:"is_placeholder"`
-	AdapterMode        BoundaryAdapterMode        `json:"adapter_mode"`
-	DispatchMode       BoundaryDispatchMode       `json:"dispatch_mode"`
-	StorageMode        BoundaryStorageMode        `json:"storage_mode"`
-	AdapterRefSummary  *AdapterRefSummary         `json:"adapter_ref_summary,omitempty"`
-	HandoffRefSummary  *HandoffRefSummary         `json:"handoff_ref_summary,omitempty"`
-	CanBind            bool                       `json:"can_bind"`
-	CanCancel          bool                       `json:"can_cancel"`
-	CanExpire          bool                       `json:"can_expire"`
-	BoundAssetID       *int64                     `json:"bound_asset_id,omitempty"`
-	BoundRefID         string                     `json:"bound_ref_id,omitempty"`
-	CreatedBy          int64                      `json:"created_by,omitempty"`
-	ExpiresAt          *time.Time                 `json:"expires_at,omitempty"`
-	LastSyncedAt       *time.Time                 `json:"last_synced_at,omitempty"`
-	PolicyMode         PolicyMode                 `json:"policy_mode,omitempty"`
-	VisibleToRoles     []Role                     `json:"visible_to_roles,omitempty"`
-	ActionRoles        []ActionPolicySummary      `json:"action_roles,omitempty"`
-	PolicyScopeSummary *PolicyScopeSummary        `json:"policy_scope_summary,omitempty"`
-	Remark             string                     `json:"remark,omitempty"`
-	CreatedAt          time.Time                  `json:"created_at"`
-	UpdatedAt          time.Time                  `json:"updated_at"`
+	RequestID            string                     `json:"request_id"`
+	OwnerType            AssetOwnerType             `json:"owner_type"`
+	OwnerID              int64                      `json:"owner_id"`
+	ClientCreateID       string                     `json:"client_create_id,omitempty"`
+	ClientItemID         string                     `json:"client_item_id,omitempty"`
+	TaskID               int64                      `json:"task_id,omitempty"`
+	AssetID              *int64                     `json:"asset_id,omitempty"`
+	SourceAssetID        *int64                     `json:"source_asset_id,omitempty"`
+	TargetSKUCode        string                     `json:"target_sku_code,omitempty"`
+	RetouchRequirementID *int64                     `json:"retouch_requirement_id,omitempty"`
+	TaskAssetType        *TaskAssetType             `json:"task_asset_type,omitempty"`
+	StorageAdapter       AssetStorageAdapter        `json:"storage_adapter"`
+	UploadMode           DesignAssetUploadMode      `json:"upload_mode,omitempty"`
+	RefType              AssetStorageRefType        `json:"ref_type"`
+	FileName             string                     `json:"file_name,omitempty"`
+	MimeType             string                     `json:"mime_type,omitempty"`
+	FileSize             *int64                     `json:"file_size,omitempty"`
+	ExpectedSize         *int64                     `json:"expected_size,omitempty"`
+	ChecksumHint         string                     `json:"checksum_hint,omitempty"`
+	Status               UploadRequestStatus        `json:"status"`
+	StorageProvider      DesignAssetStorageProvider `json:"storage_provider,omitempty"`
+	SessionStatus        DesignAssetSessionStatus   `json:"session_status,omitempty"`
+	RemoteUploadID       string                     `json:"remote_upload_id,omitempty"`
+	RemoteFileID         string                     `json:"remote_file_id,omitempty"`
+	IsPlaceholder        bool                       `json:"is_placeholder"`
+	AdapterMode          BoundaryAdapterMode        `json:"adapter_mode"`
+	DispatchMode         BoundaryDispatchMode       `json:"dispatch_mode"`
+	StorageMode          BoundaryStorageMode        `json:"storage_mode"`
+	AdapterRefSummary    *AdapterRefSummary         `json:"adapter_ref_summary,omitempty"`
+	HandoffRefSummary    *HandoffRefSummary         `json:"handoff_ref_summary,omitempty"`
+	CanBind              bool                       `json:"can_bind"`
+	CanCancel            bool                       `json:"can_cancel"`
+	CanExpire            bool                       `json:"can_expire"`
+	BoundAssetID         *int64                     `json:"bound_asset_id,omitempty"`
+	BoundRefID           string                     `json:"bound_ref_id,omitempty"`
+	CreatedBy            int64                      `json:"created_by,omitempty"`
+	ExpiresAt            *time.Time                 `json:"expires_at,omitempty"`
+	LastSyncedAt         *time.Time                 `json:"last_synced_at,omitempty"`
+	PolicyMode           PolicyMode                 `json:"policy_mode,omitempty"`
+	VisibleToRoles       []Role                     `json:"visible_to_roles,omitempty"`
+	ActionRoles          []ActionPolicySummary      `json:"action_roles,omitempty"`
+	PolicyScopeSummary   *PolicyScopeSummary        `json:"policy_scope_summary,omitempty"`
+	Remark               string                     `json:"remark,omitempty"`
+	CreatedAt            time.Time                  `json:"created_at"`
+	UpdatedAt            time.Time                  `json:"updated_at"`
 }
 
 type AssetStorageRef struct {

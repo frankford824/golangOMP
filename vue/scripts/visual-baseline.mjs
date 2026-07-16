@@ -70,30 +70,22 @@ const pages = [
       await page.waitForTimeout(200)
     },
   },
-  { name: 'task-detail', path: '/tasks/task_1002', ready: '.task-detail-view' },
-  { name: 'task-assets', path: '/tasks/task_1002/assets?asset_id=asset_1001', ready: '.task-assets-view' },
-  { name: 'asset-detail', path: '/asset-center/asset_1001?task_id=task_1002', ready: '.asset-detail-view' },
+  { name: 'task-detail', path: '/tasks/1002', ready: '.task-detail-view' },
+  { name: 'task-assets', path: '/tasks/1002/assets?asset_id=1001', ready: '.task-resources-page' },
+  { name: 'resource-group-detail', path: '/asset-center/1', ready: '.group-detail' },
   {
-    name: 'task-info-edit-modal',
-    path: '/tasks/task_1002',
+    name: 'audit-confirmation-dialog',
+    path: '/tasks/1002',
     ready: '.task-detail-view',
     prepare: async (page) => {
-      await page.getByRole('button', { name: /编辑信息|编辑母任务/ }).first().click()
-      await page.waitForSelector('.task-info-edit-modal-panel', { state: 'visible' })
-      await page.waitForTimeout(200)
-    },
-  },
-  {
-    name: 'reassign-designer-dialog',
-    path: '/tasks/task_1002',
-    ready: '.task-detail-view',
-    prepare: async (page) => {
-      await page.getByRole('button', { name: /重新指派/ }).first().click()
-      await page.waitForSelector('.reassign-body', { state: 'visible' })
+      await page.getByRole('button', { name: '通过并结单' }).click()
+      await page.waitForSelector('[role="dialog"][aria-modal="true"]', { state: 'visible' })
       await page.waitForTimeout(200)
     },
   },
   { name: 'assets-index', path: '/asset-center', ready: '.assets-index-view' },
+  { name: 'access-policy', path: '/access-policy', ready: '.access-page' },
+  { name: 'planning-sku', path: '/tasks/sku-planning', ready: '.planning-page' },
   { name: 'product-management', path: '/products', ready: '.product-management-view' },
   {
     name: 'user-management-role-modal',

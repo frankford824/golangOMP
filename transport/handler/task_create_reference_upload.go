@@ -29,6 +29,16 @@ type createTaskCreateReferenceUploadSessionReq struct {
 	Remark       string `json:"remark"`
 }
 
+type createPlanningSKUImageUploadSessionReq struct {
+	ClientCreateID string `json:"client_create_id" binding:"required"`
+	ClientItemID   string `json:"client_item_id" binding:"required"`
+	Filename       string `json:"filename" binding:"required"`
+	ExpectedSize   *int64 `json:"expected_size" binding:"required"`
+	MimeType       string `json:"mime_type"`
+	FileHash       string `json:"file_hash"`
+	Remark         string `json:"remark"`
+}
+
 type completeTaskCreateReferenceUploadSessionReq struct {
 	CompletedBy       *int64                    `json:"completed_by"`
 	FileHash          string                    `json:"file_hash"`
@@ -64,6 +74,30 @@ func (h *TaskCreateReferenceUploadHandler) CreateUploadSession(c *gin.Context) {
 		MimeType:     strings.TrimSpace(req.MimeType),
 		FileHash:     strings.TrimSpace(req.FileHash),
 		Remark:       strings.TrimSpace(req.Remark),
+	})
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondCreated(c, result)
+}
+
+func (h *TaskCreateReferenceUploadHandler) CreatePlanningSKUImageUploadSession(c *gin.Context) {
+	var req createPlanningSKUImageUploadSessionReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	createdBy, appErr := actorIDOrRequestValue(c, nil, "created_by")
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	result, appErr := h.svc.CreateUploadSession(c.Request.Context(), service.CreateTaskReferenceUploadSessionParams{
+		CreatedBy: createdBy, OwnerType: domain.AssetOwnerTypePlanningSKUCreate,
+		ClientCreateID: strings.TrimSpace(req.ClientCreateID), ClientItemID: strings.TrimSpace(req.ClientItemID),
+		Filename: strings.TrimSpace(req.Filename), ExpectedSize: req.ExpectedSize,
+		MimeType: strings.TrimSpace(req.MimeType), FileHash: strings.TrimSpace(req.FileHash), Remark: strings.TrimSpace(req.Remark),
 	})
 	if appErr != nil {
 		respondError(c, appErr)
@@ -166,6 +200,53 @@ func (h *TaskCreateReferenceUploadHandler) CompleteUploadSession(c *gin.Context)
 		return
 	}
 	respondOK(c, result)
+}
+
+func (h *TaskCreateReferenceUploadHandler) CompletePlanningSKUImageUploadSession(c *gin.Context) {
+	var req completeTaskCreateReferenceUploadSessionReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	completedBy, appErr := actorIDOrRequestValue(c, nil, "completed_by")
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	result, appErr := h.svc.CompleteUploadSession(c.Request.Context(), service.CompleteTaskReferenceUploadSessionParams{
+		SessionID: strings.TrimSpace(c.Param("session_id")), CompletedBy: completedBy,
+		OwnerType: domain.AssetOwnerTypePlanningSKUCreate, Remark: strings.TrimSpace(req.Remark),
+		FileHash: strings.TrimSpace(req.FileHash), UploadContentType: strings.TrimSpace(req.UploadContentType),
+		OSSParts: req.OSSParts, OSSUploadID: strings.TrimSpace(req.OSSUploadID), OSSObjectKey: strings.TrimSpace(req.OSSObjectKey),
+	})
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, gin.H{"session": result.Session, "image_upload_ref": result.ReferenceFileRef, "storage_ref": result.StorageRef})
+}
+
+func (h *TaskCreateReferenceUploadHandler) AbortPlanningSKUImageUploadSession(c *gin.Context) {
+	var req cancelTaskCreateReferenceUploadSessionReq
+	if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	cancelledBy, appErr := actorIDOrRequestValue(c, nil, "cancelled_by")
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	session, appErr := h.svc.CancelUploadSession(c.Request.Context(), service.CancelTaskReferenceUploadSessionParams{
+		SessionID: strings.TrimSpace(c.Param("session_id")), CancelledBy: cancelledBy,
+		OwnerType: domain.AssetOwnerTypePlanningSKUCreate, Remark: strings.TrimSpace(req.Remark),
+		OSSUploadID: strings.TrimSpace(req.OSSUploadID), OSSObjectKey: strings.TrimSpace(req.OSSObjectKey),
+	})
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, session)
 }
 
 func (h *TaskCreateReferenceUploadHandler) AbortUploadSession(c *gin.Context) {

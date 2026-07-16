@@ -436,8 +436,8 @@ func TestTaskHandlerCreateNewProductDevelopmentWithProductSelectionRejected(t *t
 	}
 }
 
-// Case3: purchase_task without product_selection in body (purchase_sku) — must not trigger the error.
-func TestTaskHandlerCreatePurchaseTaskWithoutProductSelectionSucceeds(t *testing.T) {
+// purchase_task is retired; callers must use sku_planning and its explicit item contract.
+func TestTaskHandlerCreatePurchaseTaskWithoutProductSelectionIsRetired(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	taskSvc := &taskServiceCaptureStub{
@@ -467,11 +467,11 @@ func TestTaskHandlerCreatePurchaseTaskWithoutProductSelectionSucceeds(t *testing
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("POST /v1/tasks code = %d, want 201 (Case3: purchase_task without product_selection must succeed) body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("POST /v1/tasks code = %d, want 400 retired contract body=%s", rec.Code, rec.Body.String())
 	}
-	if taskSvc.createParams.ProductSelection != nil {
-		t.Fatalf("Case3: ProductSelection should be nil when not in body, got %+v", taskSvc.createParams.ProductSelection)
+	if taskSvc.createParams.TaskType != "" {
+		t.Fatalf("retired purchase task reached service: %+v", taskSvc.createParams)
 	}
 }
 
@@ -602,7 +602,7 @@ func TestTaskHandlerCreateCase1NewProductWithoutProductSelectionDoesNotHitExisti
 	}
 }
 
-func TestTaskHandlerCreateCase2PurchaseTaskWithoutProductSelectionDoesNotHitExistingProductError(t *testing.T) {
+func TestTaskHandlerCreateCase2PurchaseTaskWithoutProductSelectionIsRetired(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	taskSvc := &taskServiceCaptureStub{
@@ -633,14 +633,11 @@ func TestTaskHandlerCreateCase2PurchaseTaskWithoutProductSelectionDoesNotHitExis
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("POST /v1/tasks code = %d, want 201 body=%s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("POST /v1/tasks code = %d, want 400 retired contract body=%s", rec.Code, rec.Body.String())
 	}
-	if taskSvc.createParams.SourceMode != domain.TaskSourceModeNewProduct {
-		t.Fatalf("captured source_mode = %s, want %s", taskSvc.createParams.SourceMode, domain.TaskSourceModeNewProduct)
-	}
-	if taskSvc.createParams.ProductSelection != nil {
-		t.Fatalf("captured product_selection = %+v, want nil", taskSvc.createParams.ProductSelection)
+	if taskSvc.createParams.TaskType != "" {
+		t.Fatalf("retired purchase task reached service: %+v", taskSvc.createParams)
 	}
 }
 

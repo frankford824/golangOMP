@@ -20,7 +20,7 @@ func NewUploadRequestRepo(db *DB) repo.UploadRequestRepo {
 }
 
 const uploadRequestSelectCols = `
-	request_id, owner_type, owner_id, task_id, asset_id, source_asset_id, target_sku_code, retouch_requirement_id, task_asset_type, storage_adapter, upload_mode, ref_type,
+	request_id, owner_type, owner_id, client_create_id, client_item_id, task_id, asset_id, source_asset_id, target_sku_code, retouch_requirement_id, task_asset_type, storage_adapter, upload_mode, ref_type,
 	file_name, mime_type, file_size, expected_size, checksum_hint, storage_provider, status, session_status, remote_upload_id, remote_file_id,
 	is_placeholder, bound_asset_id, bound_ref_id, created_by, expires_at, last_synced_at, remark, created_at, updated_at`
 
@@ -64,13 +64,15 @@ func (r *uploadRequestRepo) Create(ctx context.Context, tx repo.Tx, request *dom
 	}
 	_, err := sqlTx.ExecContext(ctx, `
 		INSERT INTO upload_requests (
-			request_id, owner_type, owner_id, task_id, asset_id, source_asset_id, target_sku_code, retouch_requirement_id, task_asset_type, storage_adapter, upload_mode, ref_type,
+			request_id, owner_type, owner_id, client_create_id, client_item_id, task_id, asset_id, source_asset_id, target_sku_code, retouch_requirement_id, task_asset_type, storage_adapter, upload_mode, ref_type,
 			file_name, mime_type, file_size, expected_size, checksum_hint, storage_provider, status, session_status, remote_upload_id, remote_file_id,
 			is_placeholder, bound_asset_id, bound_ref_id, created_by, expires_at, last_synced_at, remark, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		requestID,
 		string(request.OwnerType),
 		request.OwnerID,
+		strings.TrimSpace(request.ClientCreateID),
+		strings.TrimSpace(request.ClientItemID),
 		toNullInt64(taskIDPtr),
 		toNullInt64(request.AssetID),
 		toNullInt64(request.SourceAssetID),
@@ -316,6 +318,8 @@ func scanUploadRequest(scanner interface {
 		&request.RequestID,
 		&request.OwnerType,
 		&request.OwnerID,
+		&request.ClientCreateID,
+		&request.ClientItemID,
 		&taskID,
 		&assetID,
 		&sourceAssetID,

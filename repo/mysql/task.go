@@ -30,11 +30,11 @@ func (r *taskRepo) Create(ctx context.Context, tx repo.Tx, task *domain.Task, de
 	res, err := sqlTx.ExecContext(ctx, `
 		INSERT INTO tasks
 		  (task_no, source_mode, product_id, sku_code, product_name_snapshot,
-		   task_type, operator_group_id, owner_team, owner_department, owner_org_team, creator_id, requester_id, designer_id, current_handler_id,
+		   task_type, operator_group_id, owner_team, owner_department, owner_department_id, owner_org_team, owner_team_id, creator_id, requester_id, designer_id, current_handler_id,
 		   task_status, priority, deadline_at, need_outsource, is_outsource, business_lane, customization_required, customization_source_type,
 		   last_customization_operator_id, warehouse_reject_reason, warehouse_reject_category,
 		   is_batch_task, batch_item_count, batch_mode, primary_sku_code, sku_generation_status)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		task.TaskNo,
 		string(task.SourceMode),
 		toNullInt64(task.ProductID),
@@ -44,7 +44,9 @@ func (r *taskRepo) Create(ctx context.Context, tx repo.Tx, task *domain.Task, de
 		toNullInt64(task.OperatorGroupID),
 		task.OwnerTeam,
 		sql.NullString{String: task.OwnerDepartment, Valid: strings.TrimSpace(task.OwnerDepartment) != ""},
+		toNullInt64(task.OwnerDepartmentID),
 		sql.NullString{String: task.OwnerOrgTeam, Valid: strings.TrimSpace(task.OwnerOrgTeam) != ""},
+		toNullInt64(task.OwnerTeamID),
 		task.CreatorID,
 		toNullInt64(task.RequesterID),
 		toNullInt64(task.DesignerID),
@@ -163,13 +165,13 @@ func (r *taskRepo) CreateSKUItems(ctx context.Context, tx repo.Tx, items []*doma
 	sqlTx := Unwrap(tx)
 	stmt, err := sqlTx.PrepareContext(ctx, `
 		INSERT INTO task_sku_items
-		  (task_id, sequence_no, sku_code, sku_status, product_id, erp_product_id,
-			   product_name_snapshot, product_short_name, category_code, material_mode,
+		  (task_id, sequence_no, sku_code, sku_status, sku_origin, product_id, erp_product_id,
+			   product_name_snapshot, product_i_id, product_short_name, category_code, material_mode,
 			   cost_price_mode, quantity, base_sale_price, cost_price, estimated_cost, cost_rule_id, cost_rule_name,
 		   cost_rule_source, matched_rule_version, prefill_source, prefill_at, requires_manual_review,
 		   manual_cost_override, manual_cost_override_reason, override_actor, override_at,
 			   design_requirement, variant_json, reference_file_refs_json, dedupe_key, sku_code_type)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return fmt.Errorf("prepare insert task_sku_items: %w", err)
 	}
@@ -185,9 +187,11 @@ func (r *taskRepo) CreateSKUItems(ctx context.Context, tx repo.Tx, items []*doma
 			item.SequenceNo,
 			item.SKUCode,
 			string(item.SKUStatus),
+			firstNonEmptyString(item.SKUOrigin, "native"),
 			toNullInt64(item.ProductID),
 			toNullStringPtr(item.ERPProductID),
 			item.ProductNameSnapshot,
+			item.ProductIID,
 			item.ProductShortName,
 			item.CategoryCode,
 			item.MaterialMode,
@@ -226,8 +230,8 @@ func (r *taskRepo) CreateSKUItems(ctx context.Context, tx repo.Tx, items []*doma
 func (r *taskRepo) GetByID(ctx context.Context, id int64) (*domain.Task, error) {
 	row := r.db.db.QueryRowContext(ctx, `
 		SELECT id, task_no, source_mode, product_id, sku_code, product_name_snapshot,
-		       task_type, operator_group_id, owner_team, owner_department, owner_org_team, creator_id, requester_id, designer_id, current_handler_id,
-		       task_status, priority, deadline_at, need_outsource, is_outsource, COALESCE(business_lane, ''), customization_required, customization_source_type,
+		       task_type, operator_group_id, owner_team, owner_department, owner_org_team, owner_department_id, owner_team_id, creator_id, requester_id, designer_id, current_handler_id,
+		       task_status, workflow_revision, priority, deadline_at, need_outsource, is_outsource, COALESCE(business_lane, ''), customization_required, customization_source_type,
 		       last_customization_operator_id, warehouse_reject_reason, warehouse_reject_category,
 		       is_batch_task, batch_item_count, batch_mode, primary_sku_code, sku_generation_status,
 		       created_at, updated_at
@@ -241,8 +245,8 @@ func (r *taskRepo) GetByID(ctx context.Context, id int64) (*domain.Task, error) 
 func (r *taskRepo) GetByIDForUpdate(ctx context.Context, tx repo.Tx, id int64) (*domain.Task, error) {
 	row := Unwrap(tx).QueryRowContext(ctx, `
 		SELECT id, task_no, source_mode, product_id, sku_code, product_name_snapshot,
-		       task_type, operator_group_id, owner_team, owner_department, owner_org_team, creator_id, requester_id, designer_id, current_handler_id,
-		       task_status, priority, deadline_at, need_outsource, is_outsource, COALESCE(business_lane, ''), customization_required, customization_source_type,
+		       task_type, operator_group_id, owner_team, owner_department, owner_org_team, owner_department_id, owner_team_id, creator_id, requester_id, designer_id, current_handler_id,
+		       task_status, workflow_revision, priority, deadline_at, need_outsource, is_outsource, COALESCE(business_lane, ''), customization_required, customization_source_type,
 		       last_customization_operator_id, warehouse_reject_reason, warehouse_reject_category,
 		       is_batch_task, batch_item_count, batch_mode, primary_sku_code, sku_generation_status,
 		       created_at, updated_at
@@ -543,7 +547,7 @@ func (r *taskRepo) List(ctx context.Context, filter repo.TaskListFilter) ([]*dom
 
 	query := fmt.Sprintf(`
 		SELECT t.id, t.task_no, t.product_id, t.sku_code, t.product_name_snapshot,
-		       t.task_type, t.source_mode, t.owner_team, COALESCE(t.owner_department, ''), COALESCE(t.owner_org_team, ''), t.priority, t.creator_id, t.requester_id, t.designer_id, t.current_handler_id,
+		       t.task_type, t.source_mode, t.owner_team, COALESCE(t.owner_department, ''), COALESCE(t.owner_org_team, ''), t.owner_department_id, t.owner_team_id, t.workflow_revision, t.priority, t.creator_id, t.requester_id, t.designer_id, t.current_handler_id,
 		       COALESCE(requester_user.display_name, requester_user.username, ''), COALESCE(creator_user.display_name, creator_user.username, ''), COALESCE(designer_user.display_name, designer_user.username, ''), COALESCE(handler_user.display_name, handler_user.username, ''),
 		       t.task_status, t.created_at, t.updated_at, t.deadline_at, t.need_outsource, t.is_outsource, COALESCE(t.business_lane, ''), t.customization_required, COALESCE(t.customization_source_type, ''),
 		       t.last_customization_operator_id, COALESCE(t.warehouse_reject_reason, ''), COALESCE(t.warehouse_reject_category, ''),
@@ -690,7 +694,7 @@ func (r *taskRepo) ListBoardCandidates(ctx context.Context, filter repo.TaskBoar
 
 	query := fmt.Sprintf(`
 		SELECT t.id, t.task_no, t.product_id, t.sku_code, t.product_name_snapshot,
-		       t.task_type, t.source_mode, t.owner_team, COALESCE(t.owner_department, ''), COALESCE(t.owner_org_team, ''), t.priority, t.creator_id, t.requester_id, t.designer_id, t.current_handler_id,
+		       t.task_type, t.source_mode, t.owner_team, COALESCE(t.owner_department, ''), COALESCE(t.owner_org_team, ''), t.owner_department_id, t.owner_team_id, t.workflow_revision, t.priority, t.creator_id, t.requester_id, t.designer_id, t.current_handler_id,
 		       COALESCE(requester_user.display_name, requester_user.username, ''), COALESCE(creator_user.display_name, creator_user.username, ''), COALESCE(designer_user.display_name, designer_user.username, ''), COALESCE(handler_user.display_name, handler_user.username, ''),
 		       t.task_status, t.created_at, t.updated_at, t.deadline_at, t.need_outsource, t.is_outsource, COALESCE(t.business_lane, ''), t.customization_required, COALESCE(t.customization_source_type, ''),
 		       t.last_customization_operator_id, COALESCE(t.warehouse_reject_reason, ''), COALESCE(t.warehouse_reject_category, ''),
@@ -1147,14 +1151,14 @@ func (r *taskRepo) UpdateCustomizationState(ctx context.Context, tx repo.Tx, id 
 
 func scanTask(row *sql.Row) (*domain.Task, error) {
 	var t domain.Task
-	var productID, operatorGroupID, requesterID, designerID, currentHandlerID, lastCustomizationOperatorID sql.NullInt64
+	var productID, operatorGroupID, ownerDepartmentID, ownerTeamID, requesterID, designerID, currentHandlerID, lastCustomizationOperatorID sql.NullInt64
 	var deadlineAt sql.NullTime
 	var ownerDepartment, ownerOrgTeam, businessLane, customizationSourceType, warehouseRejectReason, warehouseRejectCategory sql.NullString
 	var primarySKUCode sql.NullString
 	err := row.Scan(
 		&t.ID, &t.TaskNo, &t.SourceMode, &productID, &t.SKUCode, &t.ProductNameSnapshot,
-		&t.TaskType, &operatorGroupID, &t.OwnerTeam, &ownerDepartment, &ownerOrgTeam, &t.CreatorID, &requesterID, &designerID, &currentHandlerID,
-		&t.TaskStatus, &t.Priority, &deadlineAt, &t.NeedOutsource, &t.IsOutsource, &businessLane, &t.CustomizationRequired, &customizationSourceType,
+		&t.TaskType, &operatorGroupID, &t.OwnerTeam, &ownerDepartment, &ownerOrgTeam, &ownerDepartmentID, &ownerTeamID, &t.CreatorID, &requesterID, &designerID, &currentHandlerID,
+		&t.TaskStatus, &t.WorkflowRevision, &t.Priority, &deadlineAt, &t.NeedOutsource, &t.IsOutsource, &businessLane, &t.CustomizationRequired, &customizationSourceType,
 		&lastCustomizationOperatorID, &warehouseRejectReason, &warehouseRejectCategory,
 		&t.IsBatchTask, &t.BatchItemCount, &t.BatchMode, &primarySKUCode, &t.SKUGenerationStatus,
 		&t.CreatedAt, &t.UpdatedAt,
@@ -1167,6 +1171,8 @@ func scanTask(row *sql.Row) (*domain.Task, error) {
 	}
 	t.ProductID = fromNullInt64(productID)
 	t.OperatorGroupID = fromNullInt64(operatorGroupID)
+	t.OwnerDepartmentID = fromNullInt64(ownerDepartmentID)
+	t.OwnerTeamID = fromNullInt64(ownerTeamID)
 	t.RequesterID = fromNullInt64(requesterID)
 	t.DesignerID = fromNullInt64(designerID)
 	t.CurrentHandlerID = fromNullInt64(currentHandlerID)
@@ -1284,6 +1290,7 @@ func scanTaskListItemRow(rows *sql.Rows) (*domain.TaskListItem, error) {
 	var item domain.TaskListItem
 	var productID, requesterID, designerID, currentHandlerID sql.NullInt64
 	var sourceProductID sql.NullInt64
+	var ownerDepartmentID, ownerTeamID sql.NullInt64
 	var deadlineAt sql.NullTime
 	var batchMode sql.NullString
 	var primarySKUCode sql.NullString
@@ -1314,7 +1321,7 @@ func scanTaskListItemRow(rows *sql.Rows) (*domain.TaskListItem, error) {
 	var prefillAt, overrideAt, filedAt, lastFilingAttemptAt, lastFiledAt sql.NullTime
 	if err := rows.Scan(
 		&item.ID, &item.TaskNo, &productID, &item.SKUCode, &item.ProductNameSnapshot,
-		&item.TaskType, &item.SourceMode, &item.OwnerTeam, &item.OwnerDepartment, &item.OwnerOrgTeam, &item.Priority, &item.CreatorID, &requesterID, &designerID, &currentHandlerID,
+		&item.TaskType, &item.SourceMode, &item.OwnerTeam, &item.OwnerDepartment, &item.OwnerOrgTeam, &ownerDepartmentID, &ownerTeamID, &item.WorkflowRevision, &item.Priority, &item.CreatorID, &requesterID, &designerID, &currentHandlerID,
 		&requesterName, &creatorName, &designerName, &currentHandlerName,
 		&item.TaskStatus, &item.CreatedAt, &item.UpdatedAt, &deadlineAt, &item.NeedOutsource, &item.IsOutsource, &businessLane, &item.CustomizationRequired, &customizationSourceType,
 		&lastCustomizationOperatorID, &warehouseRejectReason, &warehouseRejectCategory,
@@ -1334,6 +1341,8 @@ func scanTaskListItemRow(rows *sql.Rows) (*domain.TaskListItem, error) {
 		return nil, fmt.Errorf("scan task list item: %w", err)
 	}
 	item.ProductID = fromNullInt64(productID)
+	item.OwnerDepartmentID = fromNullInt64(ownerDepartmentID)
+	item.OwnerTeamID = fromNullInt64(ownerTeamID)
 	item.RequesterID = fromNullInt64(requesterID)
 	item.DesignerID = fromNullInt64(designerID)
 	item.CurrentHandlerID = fromNullInt64(currentHandlerID)
@@ -1941,6 +1950,20 @@ func appendTaskDataScopeWhere(where *[]string, args *[]interface{}, filter repo.
 			scopeArgs = append(scopeArgs, userIDs...)
 			scopeArgs = append(scopeArgs, userIDs...)
 			scopeArgs = append(scopeArgs, userIDs...)
+		}
+	}
+	if len(filter.ScopeDepartmentIDs) > 0 {
+		clause, clauseArgs := buildInt64InClause("t.owner_department_id", filter.ScopeDepartmentIDs)
+		if clause != "" {
+			scopeClauses = append(scopeClauses, clause)
+			scopeArgs = append(scopeArgs, clauseArgs...)
+		}
+	}
+	if len(filter.ScopeTeamIDs) > 0 {
+		clause, clauseArgs := buildInt64InClause("t.owner_team_id", filter.ScopeTeamIDs)
+		if clause != "" {
+			scopeClauses = append(scopeClauses, clause)
+			scopeArgs = append(scopeArgs, clauseArgs...)
 		}
 	}
 	if len(filter.ScopeDepartmentCodes) > 0 {

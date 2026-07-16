@@ -126,14 +126,15 @@ const (
 )
 
 type AssetDownloadInfo struct {
-	DownloadMode     AssetDownloadMode `json:"download_mode"`
-	DownloadURL      *string           `json:"download_url"`
-	AccessHint       string            `json:"access_hint"`
-	PreviewAvailable bool              `json:"preview_available"`
-	Filename         string            `json:"filename"`
-	FileSize         int64             `json:"file_size"`
-	MimeType         string            `json:"mime_type"`
-	ExpiresAt        *time.Time        `json:"expires_at,omitempty"`
+	DownloadMode     AssetDownloadMode   `json:"download_mode"`
+	DownloadURL      *string             `json:"download_url"`
+	AccessHint       string              `json:"access_hint"`
+	PreviewAvailable bool                `json:"preview_available"`
+	Filename         string              `json:"filename"`
+	FileSize         int64               `json:"file_size"`
+	MimeType         string              `json:"mime_type"`
+	ExpiresAt        *time.Time          `json:"expires_at,omitempty"`
+	Items            []AssetDownloadInfo `json:"items,omitempty"`
 }
 
 type DesignAsset struct {

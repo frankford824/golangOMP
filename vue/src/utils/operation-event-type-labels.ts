@@ -27,36 +27,22 @@ export const OPERATION_EVENT_TYPE_LABELS: Record<string, string> = {
   'task.reference.asset.formalized': '参考图已接入任务',
   'task.reference.asset.bulk_formalized': '参考图已批量接入任务',
   'task.reference.asset.formalize_failed': '参考图接入失败',
-  'task.outsource.created': '外协单已创建',
-  'task.outsource.returned': '外协已回件',
-  'task.outsource.reviewed': '外协已验收',
-  'task.procurement.updated': '采购信息已更新',
-  'task.procurement.advanced': '采购流程已推进',
   'task.filing.triggered': 'ERP 同步已提交',
   'task.filing.readback_confirmed': 'ERP 同步已确认',
   'task.erp_image.auto_synced': 'ERP 图片已自动同步',
   'task.erp_image.auto_sync_failed': 'ERP 图片自动同步失败',
   'task.erp_image.awaiting_upload': '待上传 ERP 商品图',
-  'task.warehouse.prepared': '仓库备货已准备',
-  'task.warehouse.received': '仓库已收货',
-  'task.warehouse.rejected': '仓库已拒收',
-  'task.warehouse.completed': '仓库已完成',
-  'task.closed': '任务已关闭',
+  'task.completed': '任务已结单',
   'task.reminded': '任务已提醒',
   'task.batch_assigned': '任务已批量指派',
   'task.batch_items_created': '批量子项已生成',
   'task.customization.reviewed': '定制需求已审核',
-  'task.customization.effect_preview_submitted': '定制效果图已提交',
-  'task.customization.effect_reviewed': '定制效果图已审核',
-  'task.customization.production_transferred': '定制任务已转生产',
   // 模块 / mock 中可能出现的裸动词
   submitted: '已提交',
   approved: '已通过',
   rejected: '已驳回',
   received: '已接收',
   archived: '已归档',
-  close_task: '任务已关闭',
-  forcibly_closed: '已强制关闭',
   task_cancelled: '任务已取消',
   // 流程模块（GET /v1/tasks/.../modules/...）
   'module.enter': '进入流程模块',
@@ -98,7 +84,6 @@ export function getTaskEventDisplayTitle(eventType: string | undefined | null): 
   if (t.includes('replace') || t.includes('replacement')) return '稿件替换'
   if (t.includes('submit') && t.includes('design')) return '提交设计'
   if (t.includes('audit')) return '审核'
-  if (t.includes('warehouse')) return '仓库'
   if (t.includes('assign')) return '指派'
   if (t.startsWith('module.')) return '流程模块'
   return '其他事件'

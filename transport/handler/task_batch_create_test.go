@@ -87,7 +87,7 @@ func TestTaskHandlerCreateBatchErrorIncludesViolations(t *testing.T) {
 	router.POST("/v1/tasks", handler.Create)
 
 	body := map[string]interface{}{
-		"task_type":      "purchase_task",
+		"task_type":      "new_product_development",
 		"creator_id":     9,
 		"owner_team":     "采购仓储组",
 		"due_at":         "2026-04-01T00:00:00Z",

@@ -31,6 +31,12 @@ export interface V1GlobalSearchTaskHit {
 
 export interface V1GlobalSearchAssetHit {
   asset_id: number
+  resource_group_id?: number | null
+  finalized_revision_id?: number | null
+  task_no?: string | null
+  sku_code?: string | null
+  mode?: 'single' | 'set' | string | null
+  final_item_count?: number | null
   resource_id?: string | null
   file_name: string
   source_module_key?: string | null
@@ -92,22 +98,6 @@ export function emptyGlobalSearchBundle(): GlobalSearchOverlayBundle {
   return { tasks: [], assets: [], products: [], users: [] }
 }
 
-const SOURCE_MODULE_KEY_LABELS: Record<string, string> = {
-  design: '设计',
-  retouch: '精修',
-  audit: '审核',
-  warehouse: '仓库',
-  customization: '定制',
-  procurement: '采购',
-  basic_info: '基础信息',
-}
-
-function sourceModuleLabelForSearch(key: string | null | undefined): string {
-  if (key == null || key === '') return ''
-  const k = String(key).trim().toLowerCase()
-  return SOURCE_MODULE_KEY_LABELS[k] ?? key
-}
-
 function taskStatusSearchLabel(raw: string | null | undefined): string | undefined {
   if (raw == null || raw === '') return undefined
   return TASK_STATUS_LABELS[raw as LegacyTaskStatus] ?? raw
@@ -124,6 +114,19 @@ function taskHitToOverlay(row: V1GlobalSearchTaskHit): GlobalSearchOverlayHit {
 }
 
 function assetHitToOverlay(row: V1GlobalSearchAssetHit): GlobalSearchOverlayHit {
+  if (row.source_type === 'task_resource_group') {
+    const groupID = Number(row.resource_group_id || 0)
+    const modeLabel = row.mode === 'set' ? '套装' : '单图'
+    const itemCount = Math.max(0, Number(row.final_item_count || 0))
+    const identity = [row.task_no, row.sku_code].filter((item) => typeof item === 'string' && item.trim()).join(' · ')
+    return {
+      id: String(groupID),
+      type: 'asset',
+      title: identity || '任务资源',
+      subtitle: modeLabel + ' · ' + itemCount + ' 张最终成品',
+      badgeLabel: modeLabel,
+    }
+  }
   const usableLabel =
     typeof row.usable_label === 'string' && row.usable_label.trim()
       ? row.usable_label.trim()
@@ -131,20 +134,13 @@ function assetHitToOverlay(row: V1GlobalSearchAssetHit): GlobalSearchOverlayHit 
   const sourceLabel =
     typeof row.source_label === 'string' && row.source_label.trim()
       ? row.source_label.trim()
-      : row.source_type === 'external'
+      : row.source_type === 'external' || row.source_type === 'external_asset'
       ? '外部资源'
       : '系统资源'
-  const moduleBit =
-    row.source_module_key != null && String(row.source_module_key).trim() !== ''
-      ? sourceModuleLabelForSearch(row.source_module_key)
-      : ''
-  const businessSub =
-    row.task_id != null
-      ? `任务 #${row.task_id}${moduleBit ? ` · ${moduleBit}` : ''}`
-      : moduleBit || ''
-  const sub = [sourceLabel, businessSub].filter(Boolean).join(' · ')
+  const sub = [sourceLabel, row.external_mount_path].filter(Boolean).join(' · ')
+  const externalID = String(row.resource_id || row.asset_id)
   return {
-    id: String(row.resource_id || row.asset_id),
+    id: externalID.startsWith('ext-') ? externalID : 'ext-' + externalID,
     type: 'asset',
     title: row.file_name,
     subtitle: sub,

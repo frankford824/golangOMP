@@ -7,9 +7,9 @@ const rootDir = path.resolve(__dirname, '..')
 const srcDir = path.join(rootDir, 'src')
 const mainCssPath = path.join(srcDir, 'assets', 'main.css')
 const taskListPath = path.join(srcDir, 'views', 'TaskListView.vue')
-const taskDetailPath = path.join(srcDir, 'views', 'TaskDetailView.vue')
+const taskDetailPath = path.join(srcDir, 'views', 'TaskDetailV8View.vue')
 const taskAssetsPath = path.join(srcDir, 'views', 'TaskAssetsView.vue')
-const assetsIndexPath = path.join(srcDir, 'views', 'AssetsIndexView.vue')
+const assetsIndexPath = path.join(srcDir, 'views', 'ResourceGroupsView.vue')
 const assetDetailPath = path.join(srcDir, 'views', 'AssetDetailView.vue')
 const dashboardPath = path.join(srcDir, 'views', 'DashboardView.vue')
 const appShellPath = path.join(srcDir, 'layouts', 'AppShell.vue')
@@ -20,8 +20,7 @@ const globalSearchOverlayPath = path.join(srcDir, 'components', 'global-search',
 const userManagementPath = path.join(srcDir, 'views', 'org-permission', 'UserManagementView.vue')
 const closeDraftConfirmModalPath = path.join(srcDir, 'components', 'task-create', 'CloseDraftConfirmModal.vue')
 const reassignDesignerDialogPath = path.join(srcDir, 'components', 'task', 'ReassignDesignerDialog.vue')
-const designAssetBlockPath = path.join(srcDir, 'components', 'task-detail', 'DesignAssetBlock.vue')
-const outsourceOrderTablePath = path.join(srcDir, 'components', 'outsource', 'OutsourceOrderTable.vue')
+const designAssetBlockPath = path.join(srcDir, 'components', 'task', 'SkuResourceMatrix.vue')
 const workflowProgressPath = path.join(srcDir, 'components', 'task', 'WorkflowProgress.vue')
 
 const importantBudget = Number(process.env.DESIGN_IMPORTANT_BUDGET ?? 0)
@@ -43,7 +42,6 @@ const taskInfoEditModalImportantBudget = Number(process.env.DESIGN_TASK_INFO_EDI
 const closeDraftConfirmModalImportantBudget = Number(process.env.DESIGN_CLOSE_DRAFT_CONFIRM_MODAL_IMPORTANT_BUDGET ?? 0)
 const reassignDesignerDialogImportantBudget = Number(process.env.DESIGN_REASSIGN_DESIGNER_DIALOG_IMPORTANT_BUDGET ?? 0)
 const designAssetBlockImportantBudget = Number(process.env.DESIGN_DESIGN_ASSET_BLOCK_IMPORTANT_BUDGET ?? 0)
-const outsourceOrderTableImportantBudget = Number(process.env.DESIGN_OUTSOURCE_ORDER_TABLE_IMPORTANT_BUDGET ?? 0)
 const workflowProgressImportantBudget = Number(process.env.DESIGN_WORKFLOW_PROGRESS_IMPORTANT_BUDGET ?? 0)
 const hardcodedColorBudget = Number(process.env.DESIGN_HARDCODED_COLOR_BUDGET ?? 0)
 const mainCssHardcodedColorBudget = Number(process.env.DESIGN_MAIN_CSS_COLOR_BUDGET ?? 0)
@@ -59,7 +57,6 @@ const globalSearchOverlayHardcodedColorBudget = Number(process.env.DESIGN_GLOBAL
 const closeDraftConfirmModalHardcodedColorBudget = Number(process.env.DESIGN_CLOSE_DRAFT_CONFIRM_MODAL_COLOR_BUDGET ?? 0)
 const reassignDesignerDialogHardcodedColorBudget = Number(process.env.DESIGN_REASSIGN_DESIGNER_DIALOG_COLOR_BUDGET ?? 0)
 const designAssetBlockHardcodedColorBudget = Number(process.env.DESIGN_DESIGN_ASSET_BLOCK_COLOR_BUDGET ?? 0)
-const outsourceOrderTableHardcodedColorBudget = Number(process.env.DESIGN_OUTSOURCE_ORDER_TABLE_COLOR_BUDGET ?? 0)
 const workflowProgressHardcodedColorBudget = Number(process.env.DESIGN_WORKFLOW_PROGRESS_COLOR_BUDGET ?? 0)
 
 const sourceExtensions = new Set(['.css', '.vue'])
@@ -97,7 +94,6 @@ const globalSearchOverlaySource = await readFile(globalSearchOverlayPath, 'utf8'
 const closeDraftConfirmModalSource = await readFile(closeDraftConfirmModalPath, 'utf8')
 const reassignDesignerDialogSource = await readFile(reassignDesignerDialogPath, 'utf8')
 const designAssetBlockSource = await readFile(designAssetBlockPath, 'utf8')
-const outsourceOrderTableSource = await readFile(outsourceOrderTablePath, 'utf8')
 const workflowProgressSource = await readFile(workflowProgressPath, 'utf8')
 await readFile(userManagementPath, 'utf8')
 const topLevelRootCount = mainCss.split(/\r?\n/).filter((line) => /^:root\s*\{/.test(line)).length
@@ -115,7 +111,6 @@ const globalSearchOverlayHardcodedColors = findHardcodedColors(globalSearchOverl
 const closeDraftConfirmModalHardcodedColors = findHardcodedColors(closeDraftConfirmModalSource)
 const reassignDesignerDialogHardcodedColors = findHardcodedColors(reassignDesignerDialogSource)
 const designAssetBlockHardcodedColors = findHardcodedColors(designAssetBlockSource)
-const outsourceOrderTableHardcodedColors = findHardcodedColors(outsourceOrderTableSource)
 const workflowProgressHardcodedColors = findHardcodedColors(workflowProgressSource)
 const ybFontSansDefined = mainCss.includes('--yb-font-sans:')
 const importantByFile = new Map()
@@ -157,9 +152,9 @@ const malformedTokenColorTotal = [...malformedTokenColorsByFile.values()].reduce
 )
 const mainCssImportantCount = importantByFile.get('src/assets/main.css') ?? 0
 const taskListImportantCount = importantByFile.get('src/views/TaskListView.vue') ?? 0
-const taskDetailImportantCount = importantByFile.get('src/views/TaskDetailView.vue') ?? 0
+const taskDetailImportantCount = importantByFile.get('src/views/TaskDetailV8View.vue') ?? 0
 const taskAssetsImportantCount = importantByFile.get('src/views/TaskAssetsView.vue') ?? 0
-const assetsIndexImportantCount = importantByFile.get('src/views/AssetsIndexView.vue') ?? 0
+const assetsIndexImportantCount = importantByFile.get('src/views/ResourceGroupsView.vue') ?? 0
 const assetDetailImportantCount = importantByFile.get('src/views/AssetDetailView.vue') ?? 0
 const dashboardImportantCount = importantByFile.get('src/views/DashboardView.vue') ?? 0
 const appShellImportantCount = importantByFile.get('src/layouts/AppShell.vue') ?? 0
@@ -176,9 +171,7 @@ const closeDraftConfirmModalImportantCount =
 const reassignDesignerDialogImportantCount =
   importantByFile.get('src/components/task/ReassignDesignerDialog.vue') ?? 0
 const designAssetBlockImportantCount =
-  importantByFile.get('src/components/task-detail/DesignAssetBlock.vue') ?? 0
-const outsourceOrderTableImportantCount =
-  importantByFile.get('src/components/outsource/OutsourceOrderTable.vue') ?? 0
+  importantByFile.get('src/components/task/SkuResourceMatrix.vue') ?? 0
 const workflowProgressImportantCount = importantByFile.get('src/components/task/WorkflowProgress.vue') ?? 0
 
 if (topLevelRootCount !== 1) {
@@ -292,12 +285,6 @@ if (designAssetBlockImportantCount > designAssetBlockImportantBudget) {
   )
 }
 
-if (outsourceOrderTableImportantCount > outsourceOrderTableImportantBudget) {
-  failures.push(
-    `OutsourceOrderTable !important count ${outsourceOrderTableImportantCount} exceeds budget ${outsourceOrderTableImportantBudget}`,
-  )
-}
-
 if (workflowProgressImportantCount > workflowProgressImportantBudget) {
   failures.push(
     `WorkflowProgress !important count ${workflowProgressImportantCount} exceeds budget ${workflowProgressImportantBudget}`,
@@ -382,12 +369,6 @@ if (designAssetBlockHardcodedColors.length > designAssetBlockHardcodedColorBudge
   )
 }
 
-if (outsourceOrderTableHardcodedColors.length > outsourceOrderTableHardcodedColorBudget) {
-  failures.push(
-    `OutsourceOrderTable hardcoded colors ${outsourceOrderTableHardcodedColors.length} exceeds budget ${outsourceOrderTableHardcodedColorBudget}`,
-  )
-}
-
 if (workflowProgressHardcodedColors.length > workflowProgressHardcodedColorBudget) {
   failures.push(
     `WorkflowProgress hardcoded colors ${workflowProgressHardcodedColors.length} exceeds budget ${workflowProgressHardcodedColorBudget}`,
@@ -441,10 +422,7 @@ console.log(
 console.log(
   `- ReassignDesignerDialog !important count: ${reassignDesignerDialogImportantCount}/${reassignDesignerDialogImportantBudget}`,
 )
-console.log(`- DesignAssetBlock !important count: ${designAssetBlockImportantCount}/${designAssetBlockImportantBudget}`)
-console.log(
-  `- OutsourceOrderTable !important count: ${outsourceOrderTableImportantCount}/${outsourceOrderTableImportantBudget}`,
-)
+console.log(`- SkuResourceMatrix !important count: ${designAssetBlockImportantCount}/${designAssetBlockImportantBudget}`)
 console.log(`- WorkflowProgress !important count: ${workflowProgressImportantCount}/${workflowProgressImportantBudget}`)
 console.log(`- main.css hardcoded colors outside token root: ${mainCssHardcodedColors.length}/${mainCssHardcodedColorBudget}`)
 console.log(`- TaskList hardcoded colors: ${taskListHardcodedColors.length}/${taskListHardcodedColorBudget}`)
@@ -467,10 +445,7 @@ console.log(
   `- ReassignDesignerDialog hardcoded colors: ${reassignDesignerDialogHardcodedColors.length}/${reassignDesignerDialogHardcodedColorBudget}`,
 )
 console.log(
-  `- DesignAssetBlock hardcoded colors: ${designAssetBlockHardcodedColors.length}/${designAssetBlockHardcodedColorBudget}`,
-)
-console.log(
-  `- OutsourceOrderTable hardcoded colors: ${outsourceOrderTableHardcodedColors.length}/${outsourceOrderTableHardcodedColorBudget}`,
+  `- SkuResourceMatrix hardcoded colors: ${designAssetBlockHardcodedColors.length}/${designAssetBlockHardcodedColorBudget}`,
 )
 console.log(
   `- WorkflowProgress hardcoded colors: ${workflowProgressHardcodedColors.length}/${workflowProgressHardcodedColorBudget}`,

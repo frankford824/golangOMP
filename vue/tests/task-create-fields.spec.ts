@@ -73,29 +73,18 @@ describe('sanitizeCreateTaskPayload — customization is orthogonal', () => {
     expect((out as Record<string, unknown>).design_requirement).toBe('新品')
   })
 
-  it('new/purchase required 字段改为 i_id', () => {
+  it('new product required fields include i_id', () => {
     expect(TASK_TYPE_FIELD_WHITELIST.new_product_development.required).toContain('i_id')
-    expect(TASK_TYPE_FIELD_WHITELIST.purchase_task.required).toContain('i_id')
+    expect('purchase_task' in TASK_TYPE_FIELD_WHITELIST).toBe(false)
   })
 
-  it('case 4: purchase_task + customization=false 移除产品渠道/基本售价，保留分类与采购 SKU', () => {
+  it('retired task types do not receive an active sanitizer branch', () => {
     const raw = {
       task_type: 'purchase_task',
-      purchase_sku: 'PS-001',
-      product_channel: 'TB',
-      product_name: '商品',
-      cost_price_mode: 'manual',
-      quantity: 10,
-      base_sale_price: 99,
-      change_request: '不应出现',
-      material: '不应出现',
+      unsupported: true,
     }
     const out = sanitizeCreateTaskPayload(raw, 'purchase_task')
-    expect((out as Record<string, unknown>).purchase_sku).toBe('PS-001')
-    expect((out as Record<string, unknown>).product_channel).toBeUndefined()
-    expect((out as Record<string, unknown>).base_sale_price).toBeUndefined()
-    expect((out as Record<string, unknown>).change_request).toBeUndefined()
-    expect((out as Record<string, unknown>).material).toBeUndefined()
+    expect(out).toEqual(raw)
   })
 
   it('sanitizer 不修改入参（深克隆）', () => {

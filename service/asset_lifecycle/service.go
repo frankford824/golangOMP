@@ -18,24 +18,16 @@ type lifecycleEventModuleResolver interface {
 	ResolveOrCreateLifecycleEventModule(ctx context.Context, tx repo.Tx, taskID int64, moduleKey string) (int64, error)
 }
 
-type resourceDeletionStorageKeyRepo interface {
-	ListResourceDeletionStorageKeys(ctx context.Context, assetID int64) ([]string, error)
-}
-
 type Service struct {
-	searchRepo    repo.TaskAssetSearchRepo
 	lifecycleRepo repo.TaskAssetLifecycleRepo
 	txRunner      repo.TxRunner
-	deleter       ObjectDeleter
 	now           func() time.Time
 }
 
-func NewService(searchRepo repo.TaskAssetSearchRepo, lifecycleRepo repo.TaskAssetLifecycleRepo, txRunner repo.TxRunner, deleter ObjectDeleter) *Service {
+func NewService(_ repo.TaskAssetSearchRepo, lifecycleRepo repo.TaskAssetLifecycleRepo, txRunner repo.TxRunner, _ ObjectDeleter) *Service {
 	return &Service{
-		searchRepo:    searchRepo,
 		lifecycleRepo: lifecycleRepo,
 		txRunner:      txRunner,
-		deleter:       deleter,
 		now:           time.Now,
 	}
 }
@@ -51,11 +43,15 @@ func roleDenied() *domain.AppError {
 	return domain.NewAppError(domain.DenyModuleActionRoleDenied, "SuperAdmin role is required", nil)
 }
 
-func deleteRoleDenied() *domain.AppError {
+func deleteAccessDenied(taskID int64) *domain.AppError {
 	return domain.NewAppError(
-		domain.DenyModuleActionRoleDenied,
-		"asset deletion requires SuperAdmin, or a customization review, audit, or asset management role for a completed task",
-		map[string]interface{}{"deny_code": "completed_asset_delete_role_not_allowed"},
+		domain.ErrCodePermissionDenied,
+		"asset deletion is outside the actor's explicit capability or task scope",
+		map[string]interface{}{
+			"deny_code":            "asset_manage_scope_denied",
+			"task_id":              taskID,
+			"required_permissions": []domain.PermissionCode{domain.PermissionAssetManage},
+		},
 	)
 }
 

@@ -51,7 +51,9 @@ type CreateTaskParams struct {
 	OperatorGroupID         *int64
 	OwnerTeam               string
 	OwnerDepartment         string
+	OwnerDepartmentID       *int64
 	OwnerOrgTeam            string
+	OwnerTeamID             *int64
 	DesignerID              *int64
 	Priority                domain.TaskPriority
 	DeadlineAt              *time.Time
@@ -323,6 +325,10 @@ type ProductManagementBaseSyncQueuer interface {
 	QueuePendingBaseSyncForTask(ctx context.Context, taskID int64) (int, *domain.AppError)
 }
 
+type taskResourceGroupInitializer interface {
+	EnsureGroupShells(ctx context.Context, tx repo.Tx, taskID int64, taskType domain.TaskType) error
+}
+
 type taskService struct {
 	taskRepo                       repo.TaskRepo
 	procurementRepo                repo.ProcurementRepo
@@ -345,6 +351,7 @@ type taskService struct {
 	assetStorageRefRepo            repo.AssetStorageRefRepo
 	referenceFileRefFlatRepo       repo.ReferenceFileRefFlatRepo
 	retouchRequirementRepo         repo.TaskRetouchRequirementRepo
+	resourceGroupInitializer       taskResourceGroupInitializer
 	taskCreateRequestRepo          repo.TaskCreateRequestRepo
 	taskModuleRepo                 repo.TaskModuleRepo
 	taskModuleEventRepo            repo.TaskModuleEventRepo
@@ -436,6 +443,12 @@ func WithTaskReferenceFileRefFlatRepo(referenceFileRefFlatRepo repo.ReferenceFil
 func WithTaskRetouchRequirementRepo(retouchRequirementRepo repo.TaskRetouchRequirementRepo) TaskServiceOption {
 	return func(s *taskService) {
 		s.retouchRequirementRepo = retouchRequirementRepo
+	}
+}
+
+func WithTaskResourceGroupInitializer(initializer taskResourceGroupInitializer) TaskServiceOption {
+	return func(s *taskService) {
+		s.resourceGroupInitializer = initializer
 	}
 }
 
@@ -665,7 +678,14 @@ func (s *taskService) Create(ctx context.Context, p CreateTaskParams) (created *
 	p.OwnerTeam = ownership.LegacyOwnerTeam
 	p.OwnerDepartment = ownership.OwnerDepartment
 	p.OwnerOrgTeam = ownership.OwnerOrgTeam
-	if appErr := s.taskActionAuthorizer().AuthorizeTaskCreate(ctx, p.OwnerDepartment, p.OwnerOrgTeam); appErr != nil {
+	if actor, ok := domain.RequestActorFromContext(ctx); ok && actor.EffectiveAccess != nil {
+		if !domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskCreate, domain.TaskAccessSubject{
+			CreatorID: p.CreatorID, RequesterID: p.RequesterID,
+			OwnerDepartmentID: p.OwnerDepartmentID, OwnerTeamID: p.OwnerTeamID,
+		}) {
+			return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "task.create is outside the effective data scope", nil)
+		}
+	} else if appErr := s.taskActionAuthorizer().AuthorizeTaskCreate(ctx, p.OwnerDepartment, p.OwnerOrgTeam); appErr != nil {
 		return nil, appErr
 	}
 	if p.ReferenceImagesProvided || len(p.ReferenceImages) > 0 {
@@ -786,7 +806,9 @@ func (s *taskService) createSingleTask(ctx context.Context, p CreateTaskParams) 
 		OperatorGroupID:             p.OperatorGroupID,
 		OwnerTeam:                   strings.TrimSpace(p.OwnerTeam),
 		OwnerDepartment:             strings.TrimSpace(p.OwnerDepartment),
+		OwnerDepartmentID:           cloneInt64Ptr(p.OwnerDepartmentID),
 		OwnerOrgTeam:                strings.TrimSpace(p.OwnerOrgTeam),
+		OwnerTeamID:                 cloneInt64Ptr(p.OwnerTeamID),
 		CreatorID:                   p.CreatorID,
 		RequesterID:                 cloneInt64Ptr(p.RequesterID),
 		DesignerID:                  p.DesignerID,
@@ -929,7 +951,9 @@ func (s *taskService) createBatchTask(ctx context.Context, p CreateTaskParams) (
 		OperatorGroupID:             p.OperatorGroupID,
 		OwnerTeam:                   strings.TrimSpace(p.OwnerTeam),
 		OwnerDepartment:             strings.TrimSpace(p.OwnerDepartment),
+		OwnerDepartmentID:           cloneInt64Ptr(p.OwnerDepartmentID),
 		OwnerOrgTeam:                strings.TrimSpace(p.OwnerOrgTeam),
+		OwnerTeamID:                 cloneInt64Ptr(p.OwnerTeamID),
 		CreatorID:                   p.CreatorID,
 		RequesterID:                 cloneInt64Ptr(p.RequesterID),
 		DesignerID:                  p.DesignerID,

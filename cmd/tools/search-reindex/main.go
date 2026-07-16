@@ -38,7 +38,7 @@ func main() {
 	var dryRun bool
 	var timeout time.Duration
 	flag.StringVar(&dsn, "dsn", "", "MySQL DSN; defaults to config MySQL DSN")
-	flag.BoolVar(&assets, "assets", true, "rebuild asset_search_documents")
+	flag.BoolVar(&assets, "assets", true, "rebuild task_asset_group_search_documents")
 	flag.BoolVar(&products, "products", true, "rebuild product_search_documents")
 	flag.BoolVar(&dryRun, "dry-run", false, "count rows without rebuilding documents")
 	flag.DurationVar(&timeout, "timeout", 10*time.Minute, "whole run timeout")
@@ -133,16 +133,12 @@ func run(parent context.Context, opts runOptions) int {
 func rebuildAssets(ctx context.Context, db *sql.DB, dryRun bool) (*reindexTable, error) {
 	sourceRows, err := countRows(ctx, db, `
 		SELECT COUNT(*)
-		  FROM design_assets da
-		  JOIN task_assets ta ON ta.id = da.current_version_id
-		  JOIN tasks t ON t.id = ta.task_id
-		 WHERE ta.deleted_at IS NULL
-		   AND ta.cleaned_at IS NULL
-		   AND COALESCE(ta.is_archived, 0) = 0`)
+		  FROM task_asset_groups g
+		 WHERE g.finalized_revision_id IS NOT NULL`)
 	if err != nil {
 		return nil, fmt.Errorf("count asset source rows: %w", err)
 	}
-	beforeRows, err := countRows(ctx, db, `SELECT COUNT(*) FROM asset_search_documents`)
+	beforeRows, err := countRows(ctx, db, `SELECT COUNT(*) FROM task_asset_group_search_documents`)
 	if err != nil {
 		return nil, fmt.Errorf("count asset documents: %w", err)
 	}
@@ -158,13 +154,13 @@ func rebuildAssets(ctx context.Context, db *sql.DB, dryRun bool) (*reindexTable,
 	if _, err := tx.ExecContext(ctx, `SET SESSION group_concat_max_len = 1048576`); err != nil {
 		return nil, fmt.Errorf("set group_concat_max_len: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM asset_search_documents`); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM task_asset_group_search_documents`); err != nil {
 		return nil, fmt.Errorf("delete asset documents: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, assetReindexSQL); err != nil {
 		return nil, fmt.Errorf("insert asset documents: %w", err)
 	}
-	afterRows, err := countRows(ctx, tx, `SELECT COUNT(*) FROM asset_search_documents`)
+	afterRows, err := countRows(ctx, tx, `SELECT COUNT(*) FROM task_asset_group_search_documents`)
 	if err != nil {
 		return nil, fmt.Errorf("count rebuilt asset documents: %w", err)
 	}
@@ -244,31 +240,37 @@ func writeError(message string) {
 }
 
 const assetReindexSQL = `
-	INSERT INTO asset_search_documents (
-	  asset_id, task_asset_id, task_id, asset_type, flow_review_status, sort_time, search_text, source_updated_at
+	INSERT INTO task_asset_group_search_documents (
+	  group_id, task_id, finalized_revision_id, internal_text, final_text
 	)
 	SELECT
-	  da.id,
-	  ta.id,
-	  ta.task_id,
-	  COALESCE(ta.asset_type, ''),
-	  COALESCE(ta.flow_review_status, ''),
-	  COALESCE(ta.sort_time, ta.uploaded_at, ta.created_at),
+	  g.id,
+	  g.task_id,
+	  g.finalized_revision_id,
 	  CONCAT_WS(' ',
-	    da.id, da.asset_no, ta.id, ta.file_name, ta.original_filename, ta.storage_key, ta.source_module_key,
 	    t.id, t.task_no, t.sku_code, t.primary_sku_code, t.product_name_snapshot,
-	    t.owner_team, t.owner_department, t.owner_org_team,
-	    creator.username, creator.display_name, designer.username, designer.display_name
+	    COALESCE(tsi.sku_code, ''), COALESCE(source.file_name, ''),
+	    COALESCE((SELECT GROUP_CONCAT(ref.file_name_snapshot ORDER BY ref.sort_order SEPARATOR ' ')
+	              FROM task_asset_group_revision_references ref WHERE ref.revision_id = revision.id), ''),
+	    COALESCE((SELECT GROUP_CONCAT(ta.file_name ORDER BY item.sort_order SEPARATOR ' ')
+	              FROM task_asset_group_revision_items item
+	              JOIN task_assets ta ON ta.id = item.task_asset_id
+	              WHERE item.revision_id = revision.id), '')
 	  ),
-	  GREATEST(ta.created_at, da.updated_at, t.updated_at)
-	FROM design_assets da
-	JOIN task_assets ta ON ta.id = da.current_version_id
-	JOIN tasks t ON t.id = ta.task_id
-	LEFT JOIN users creator ON creator.id = t.creator_id
-	LEFT JOIN users designer ON designer.id = t.designer_id
-	WHERE ta.deleted_at IS NULL
-	  AND ta.cleaned_at IS NULL
-	  AND COALESCE(ta.is_archived, 0) = 0`
+	  CONCAT_WS(' ',
+	    t.id, t.task_no, t.sku_code, t.primary_sku_code, t.product_name_snapshot,
+	    COALESCE(tsi.sku_code, ''),
+	    COALESCE((SELECT GROUP_CONCAT(ta.file_name ORDER BY item.sort_order SEPARATOR ' ')
+	              FROM task_asset_group_revision_items item
+	              JOIN task_assets ta ON ta.id = item.task_asset_id
+	              WHERE item.revision_id = revision.id), '')
+	  )
+	FROM task_asset_groups g
+	JOIN tasks t ON t.id = g.task_id
+	JOIN task_asset_group_revisions revision ON revision.id = g.finalized_revision_id
+	LEFT JOIN task_sku_items tsi ON tsi.id = g.task_sku_item_id
+	LEFT JOIN task_assets source ON source.id = revision.source_task_asset_id
+	WHERE g.finalized_revision_id IS NOT NULL`
 
 const productReindexSQL = `
 	INSERT INTO product_search_documents (

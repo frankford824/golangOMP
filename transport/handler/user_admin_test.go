@@ -5,6 +5,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -51,6 +52,34 @@ func TestUserAdminHandlerListUsersPassesDepartmentTeamAndRoleFilters(t *testing.
 	}
 	if svc.lastListFilter.Page != 2 || svc.lastListFilter.PageSize != 5 {
 		t.Fatalf("ListUsers() pagination filter = %+v", svc.lastListFilter)
+	}
+}
+
+func TestUserAdminHandlerListAccessPolicyUsersUsesDedicatedMinimalSelector(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/access/users?q=alice&page=2&page_size=8", nil)
+	departmentID, teamID := int64(3), int64(7)
+	serviceStub := &userAdminServiceStub{
+		listAccessPolicyUsersResp: []*domain.User{{ID: 12, Username: "alice", DisplayName: "Alice", Department: domain.DepartmentOperations, DepartmentID: &departmentID, Team: "T1", TeamID: &teamID, Mobile: "secret"}},
+		listAccessPolicyUsersMeta: domain.PaginationMeta{Page: 2, PageSize: 8, Total: 1},
+	}
+	NewUserAdminHandler(serviceStub, nil, nil).ListAccessPolicyUsers(c)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if serviceStub.lastAccessPolicyFilter.Keyword != "alice" || serviceStub.lastAccessPolicyFilter.Page != 2 || serviceStub.lastAccessPolicyFilter.PageSize != 8 {
+		t.Fatalf("filter=%+v", serviceStub.lastAccessPolicyFilter)
+	}
+	body := recorder.Body.String()
+	for _, expected := range []string{"\"id\":12", "\"department_id\":3", "\"team_id\":7"} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("response missing %s: %s", expected, body)
+		}
+	}
+	if strings.Contains(body, "secret") || strings.Contains(body, "mobile") {
+		t.Fatalf("minimal selector leaked contact data: %s", body)
 	}
 }
 
@@ -383,6 +412,8 @@ type userAdminServiceStub struct {
 	listUsersResp               []*domain.User
 	listUsersMeta               domain.PaginationMeta
 	listAssignableDesignersResp []*domain.User
+	listAccessPolicyUsersResp   []*domain.User
+	listAccessPolicyUsersMeta   domain.PaginationMeta
 	orgOptions                  *domain.OrgOptions
 	orgOptionsIncludingDisabled *domain.OrgOptions
 	createUserResp              *domain.User
@@ -393,6 +424,7 @@ type userAdminServiceStub struct {
 	updateTeam                  *domain.OrgTeam
 
 	lastListFilter                      service.UserFilter
+	lastAccessPolicyFilter              service.UserFilter
 	lastCreateParams                    service.CreateManagedUserParams
 	lastResetParams                     service.ResetUserPasswordParams
 	lastAssignableActor                 domain.RequestActor
@@ -505,6 +537,11 @@ func (s *userAdminServiceStub) ListUsers(_ context.Context, filter service.UserF
 		meta = domain.PaginationMeta{Page: 2, PageSize: 5, Total: int64(len(s.listUsersResp))}
 	}
 	return s.listUsersResp, meta, nil
+}
+
+func (s *userAdminServiceStub) ListAccessPolicyUsers(_ context.Context, filter service.UserFilter) ([]*domain.User, domain.PaginationMeta, *domain.AppError) {
+	s.lastAccessPolicyFilter = filter
+	return s.listAccessPolicyUsersResp, s.listAccessPolicyUsersMeta, nil
 }
 
 func (s *userAdminServiceStub) ListAssignableDesigners(_ context.Context, actor *domain.RequestActor, lane service.AssignableLane) ([]*domain.User, *domain.AppError) {

@@ -402,6 +402,14 @@ func (s *taskService) createTaskWithBatchSkuItemsTx(ctx context.Context, p Creat
 		if err := s.insertTaskRetouchRequirements(ctx, tx, newID, p); err != nil {
 			return err
 		}
+		// Resource group identities are part of task creation. They must exist before
+		// the first resource-bundle read so clients can stage and submit against stable
+		// group IDs. Historical gaps are repaired only by the cutover migration.
+		if s.resourceGroupInitializer != nil {
+			if err := s.resourceGroupInitializer.EnsureGroupShells(ctx, tx, newID, p.TaskType); err != nil {
+				return fmt.Errorf("initialize task resource groups: %w", err)
+			}
+		}
 
 		var procurementRecord *domain.ProcurementRecord
 		if p.TaskType == domain.TaskTypePurchaseTask {

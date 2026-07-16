@@ -141,7 +141,7 @@ func reindexTaskSearchDocument(ctx context.Context, q taskSearchDocumentSQL, tas
 		return nil
 	}
 	if !taskSearchDocumentsTableExists(ctx, q) {
-		return reindexAssetSearchDocumentsByTaskID(ctx, q, taskID)
+		return nil
 	}
 	if _, err := q.ExecContext(ctx, `SET SESSION group_concat_max_len = 1048576`); err != nil {
 		return fmt.Errorf("set task search group_concat_max_len: %w", err)
@@ -198,7 +198,8 @@ func reindexTaskSearchDocument(ctx context.Context, q taskSearchDocumentSQL, tas
 		    COALESCE(NULLIF(designer.display_name, ''), designer.username, ''),
 		    COALESCE(NULLIF(handler.display_name, ''), handler.username, ''),
 		    DATE_FORMAT(t.created_at, '%Y-%m-%d'), DATE_FORMAT(t.created_at, '%Y%m%d'),
-		    DATE_FORMAT(t.deadline_at, '%Y-%m-%d'), COALESCE(assets.asset_text, '')
+		    DATE_FORMAT(t.deadline_at, '%Y-%m-%d'), COALESCE(assets.asset_text, ''),
+		    COALESCE(planning.planning_text, '')
 		  )
 		FROM tasks t
 		LEFT JOIN task_details td ON td.task_id = t.id
@@ -212,6 +213,19 @@ func reindexTaskSearchDocument(ctx context.Context, q taskSearchDocumentSQL, tas
 			  WHERE task_id = ? AND {{active_asset_where}}
 			  GROUP BY task_id
 			) assets ON assets.task_id = t.id
+		LEFT JOIN (
+		  SELECT tsi.task_id,
+		         GROUP_CONCAT(CONCAT_WS(' ', tsi.sku_code, revision.description_spec, revision.note,
+		           revision.erp_product_i_id, revision.erp_product_name,
+		           COALESCE((SELECT latest.status FROM task_erp_outbox latest
+		                     WHERE latest.task_sku_item_id = tsi.id
+		                     ORDER BY latest.generation DESC, latest.id DESC LIMIT 1), '')) SEPARATOR ' ') AS planning_text
+		  FROM task_sku_items tsi
+		  JOIN task_planning_sku_details planning_detail ON planning_detail.task_sku_item_id = tsi.id
+		  JOIN task_planning_sku_revisions revision ON revision.id = planning_detail.current_revision_id
+		  WHERE tsi.task_id = ?
+		  GROUP BY tsi.task_id
+		) planning ON planning.task_id = t.id
 		WHERE t.id = ?
 		ON DUPLICATE KEY UPDATE
 		  task_no = VALUES(task_no),
@@ -241,11 +255,12 @@ func reindexTaskSearchDocument(ctx context.Context, q taskSearchDocumentSQL, tas
 	_, err := q.ExecContext(ctx, query,
 		taskID,
 		taskID,
+		taskID,
 	)
 	if err != nil {
 		return fmt.Errorf("reindex task search document: %w", err)
 	}
-	return reindexAssetSearchDocumentsByTaskID(ctx, q, taskID)
+	return nil
 }
 
 func reindexTaskSearchDocuments(ctx context.Context, q taskSearchDocumentSQL, taskIDs []int64) error {

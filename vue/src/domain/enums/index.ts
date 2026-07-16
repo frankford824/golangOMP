@@ -1,6 +1,4 @@
 export * from './task-status'
 export * from './task-type'
 export * from './audit'
-export * from './outsource'
-export * from './warehouse'
 export * from './upload-status'

@@ -25,7 +25,7 @@ const taskAssetSearchSelect = `
 	       ta.source_module_key, COALESCE(ta.source_task_module_id, source_tm.id), ta.is_archived, ta.archived_at, ta.archived_by, ta.cleaned_at, ta.deleted_at,
 	       ta.flow_review_status, ta.approved_at, ta.approved_by, ta.rejected_at, ta.rejected_by, ta.superseded_by_version_id, ta.superseded_at, ta.cleanup_after_at, ta.source_asset_version_id,
 	       t.id, t.task_no, t.source_mode, t.product_id, t.sku_code, t.product_name_snapshot,
-	       t.task_type, t.operator_group_id, t.owner_team, t.owner_department, t.owner_org_team, t.creator_id, t.requester_id,
+	       t.task_type, t.operator_group_id, t.owner_team, t.owner_department, t.owner_department_id, t.owner_org_team, t.owner_team_id, t.creator_id, t.requester_id,
 	       t.designer_id, t.current_handler_id, t.task_status, t.priority, t.deadline_at, t.need_outsource, t.is_outsource,
 	       COALESCE(t.business_lane, ''), t.customization_required, t.customization_source_type, t.last_customization_operator_id, t.warehouse_reject_reason,
 	       t.warehouse_reject_category, t.is_batch_task, t.batch_item_count, t.batch_mode, t.primary_sku_code,
@@ -355,7 +355,7 @@ type taskAssetSearchScanner interface {
 func scanTaskAssetSearchScanner(s taskAssetSearchScanner) (*repo.TaskAssetSearchRow, error) {
 	var a domain.TaskAsset
 	var t domain.Task
-	var assetID, assetVersionNo, sourceTaskModuleID, archivedBy, approvedBy, rejectedBy, supersededByVersionID, sourceAssetVersionID, productID, operatorGroupID, requesterID, designerID, currentHandlerID, lastCustomizationOperatorID sql.NullInt64
+	var assetID, assetVersionNo, sourceTaskModuleID, archivedBy, approvedBy, rejectedBy, supersededByVersionID, sourceAssetVersionID, productID, operatorGroupID, ownerDepartmentID, ownerTeamID, requesterID, designerID, currentHandlerID, lastCustomizationOperatorID sql.NullInt64
 	var scopeSKUCode, uploadMode, uploadRequestID, storageRefID, originalFilename, remoteFileID, mimeType, filePath, storageKey, wholeHash, uploadStatus, previewStatus, businessLane, customizationSourceType, warehouseRejectReason, warehouseRejectCategory sql.NullString
 	var flowReviewStatus sql.NullString
 	var fileSize sql.NullInt64
@@ -375,7 +375,7 @@ func scanTaskAssetSearchScanner(s taskAssetSearchScanner) (*repo.TaskAssetSearch
 		&a.SourceModuleKey, &sourceTaskModuleID, &a.IsArchived, &archivedAt, &archivedBy, &cleanedAt, &deletedAt,
 		&flowReviewStatus, &approvedAt, &approvedBy, &rejectedAt, &rejectedBy, &supersededByVersionID, &supersededAt, &cleanupAfterAt, &sourceAssetVersionID,
 		&t.ID, &t.TaskNo, &t.SourceMode, &productID, &t.SKUCode, &t.ProductNameSnapshot,
-		&t.TaskType, &operatorGroupID, &t.OwnerTeam, &t.OwnerDepartment, &t.OwnerOrgTeam, &t.CreatorID, &requesterID,
+		&t.TaskType, &operatorGroupID, &t.OwnerTeam, &t.OwnerDepartment, &ownerDepartmentID, &t.OwnerOrgTeam, &ownerTeamID, &t.CreatorID, &requesterID,
 		&designerID, &currentHandlerID, &t.TaskStatus, &t.Priority, &deadlineAt, &needOutsource, &isOutsource,
 		&businessLane, &customizationRequired, &customizationSourceType, &lastCustomizationOperatorID, &warehouseRejectReason,
 		&warehouseRejectCategory, &isBatchTask, &t.BatchItemCount, &t.BatchMode, &t.PrimarySKUCode,
@@ -426,6 +426,8 @@ func scanTaskAssetSearchScanner(s taskAssetSearchScanner) (*repo.TaskAssetSearch
 	a.SourceAssetVersionID = fromNullInt64(sourceAssetVersionID)
 	t.ProductID = fromNullInt64(productID)
 	t.OperatorGroupID = fromNullInt64(operatorGroupID)
+	t.OwnerDepartmentID = fromNullInt64(ownerDepartmentID)
+	t.OwnerTeamID = fromNullInt64(ownerTeamID)
 	t.RequesterID = fromNullInt64(requesterID)
 	t.DesignerID = fromNullInt64(designerID)
 	t.CurrentHandlerID = fromNullInt64(currentHandlerID)

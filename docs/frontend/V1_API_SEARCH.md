@@ -162,7 +162,7 @@ curl -X GET https://api.example.com/v1/design-sources/search \
 ### 简介
 支持方法: GET。
 
-- `GET`: Source: V1_INFORMATION_ARCHITECTURE §4.2. Global search across tasks / assets / products / users. Row-level policy (R1.7-D Q1=A1 + Q2=U1): tasks/assets/products return full matches regardless of caller scope; `users[]` is always `[]` unless caller role ∈ {super_admin, hr_admin}. Backend (R1.7-D Q3=B1): v1 uses MySQL LIKE; no ES / relevance scoring in v1.
+- `GET`: Source: V1_INFORMATION_ARCHITECTURE §4.2. Global search across tasks / assets / products / users. The route hydrates the caller's explicit access policy before searching. Internal task-resource groups require `asset.view` and are filtered by self / own department / own team / selected organization / global scope. AssetSubmitter results are limited to published finalized revisions. Resource-group results are pinned to `finalized_revision_id`; staged files and historical revisions are never returned. `users[]` remains limited to authorized people-management views.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。

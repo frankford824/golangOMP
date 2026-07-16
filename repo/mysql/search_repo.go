@@ -22,6 +22,40 @@ func (r *searchRepo) SearchTasks(ctx context.Context, q string, limit int) ([]do
 	return r.searchTasksLegacy(ctx, q, limit)
 }
 
+// SearchTasksScoped is the only task-search path used by the v8 global search.
+// It joins the live task row so the same stable-ID scope predicate used by
+// resource groups is applied before LIMIT. Historical unscoped search helpers
+// remain only for non-v8 diagnostics and tests.
+func (r *searchRepo) SearchTasksScoped(ctx context.Context, q string, limit int, access domain.ResourceGroupAccessFilter) ([]domain.SearchTask, error) {
+	if !r.tableExists(ctx, "task_search_documents") {
+		return []domain.SearchTask{}, nil
+	}
+	limit = normalizeSearchLimit(limit)
+	keyword := strings.TrimSpace(q)
+	if keyword == "" {
+		return []domain.SearchTask{}, nil
+	}
+	like := "%" + keyword + "%"
+	where := []string{`(
+		d.task_no LIKE ? OR COALESCE(d.sku_code,'') LIKE ? OR COALESCE(d.primary_sku_code,'') LIKE ?
+		OR COALESCE(d.product_i_id,'') LIKE ? OR d.search_text LIKE ?
+	)`}
+	args := []interface{}{like, like, like, like, like}
+	where, args = appendResourceGroupAccessScope(where, args, access)
+	args = append(args, limit)
+	rows, err := r.db.db.QueryContext(ctx, `
+		SELECT `+taskSearchDocumentSelectCols+`
+		FROM task_search_documents d
+		JOIN tasks t ON t.id = d.task_id
+		WHERE `+strings.Join(where, " AND ")+`
+		ORDER BY d.updated_at DESC, d.task_id DESC
+		LIMIT ?`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("search scoped task documents: %w", err)
+	}
+	return scanSearchTasks(rows)
+}
+
 func (r *searchRepo) searchTasksFromDocuments(ctx context.Context, q string, limit int) ([]domain.SearchTask, error) {
 	limit = normalizeSearchLimit(limit)
 	kw := normalizeSearchKeyword(q)
@@ -283,6 +317,81 @@ func (r *searchRepo) SearchAssets(ctx context.Context, q string, limit int) ([]d
 		}
 	}
 	return r.searchAssetsLegacy(ctx, q, limit)
+}
+
+func (r *searchRepo) SearchResourceGroups(ctx context.Context, q string, limit int, publishedOnly bool, access domain.ResourceGroupAccessFilter) ([]domain.SearchAsset, error) {
+	if !r.tableExists(ctx, "task_asset_group_search_documents") {
+		return []domain.SearchAsset{}, nil
+	}
+	limit = normalizeSearchLimit(limit)
+	keyword := strings.TrimSpace(q)
+	if keyword == "" {
+		return []domain.SearchAsset{}, nil
+	}
+	textColumn := "d.internal_text"
+	where := make([]string, 0, 3)
+	if publishedOnly {
+		textColumn = "d.final_text"
+		where = append(where, `EXISTS (
+			SELECT 1 FROM asset_workbench_client_materials cm
+			WHERE cm.resource_group_id = g.id
+			  AND cm.finalized_revision_id = g.finalized_revision_id
+			  AND cm.enabled = 1
+		)`)
+	}
+	matchClause := textColumn + " LIKE ?"
+	whereArgs := []interface{}{"%" + keyword + "%"}
+	orderClause := "g.updated_at DESC, g.id DESC"
+	var orderArgs []interface{}
+	if len([]rune(keyword)) >= 2 {
+		matchClause = "MATCH(" + textColumn + ") AGAINST (? IN BOOLEAN MODE)"
+		whereArgs[0] = booleanPhraseSearchQuery(keyword)
+		orderClause = "MATCH(" + textColumn + ") AGAINST (? IN BOOLEAN MODE) DESC, g.updated_at DESC, g.id DESC"
+		orderArgs = append(orderArgs, booleanPhraseSearchQuery(keyword))
+	}
+	where = append([]string{matchClause}, where...)
+	if !publishedOnly {
+		where, whereArgs = appendResourceGroupAccessScope(where, whereArgs, access)
+	}
+	args := append(append(whereArgs, orderArgs...), limit)
+	rows, err := r.db.db.QueryContext(ctx, `
+		SELECT g.id, g.task_id, t.task_no, COALESCE(tsi.sku_code, ''),
+		       revision.id, revision.mode,
+		       (SELECT COUNT(*) FROM task_asset_group_revision_items ri WHERE ri.revision_id = revision.id),
+		       COALESCE((
+		         SELECT ta.file_name
+		         FROM task_asset_group_revision_items ri
+		         JOIN task_assets ta ON ta.id = ri.task_asset_id
+		         WHERE ri.revision_id = revision.id
+		         ORDER BY ri.sort_order, ri.id LIMIT 1
+		       ), '')
+		FROM task_asset_group_search_documents d
+		JOIN task_asset_groups g ON g.id = d.group_id AND g.finalized_revision_id = d.finalized_revision_id
+		JOIN task_asset_group_revisions revision ON revision.id = g.finalized_revision_id
+		JOIN tasks t ON t.id = g.task_id
+		LEFT JOIN task_sku_items tsi ON tsi.id = g.task_sku_item_id
+		WHERE `+strings.Join(where, " AND ")+`
+		ORDER BY `+orderClause+` LIMIT ?`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("search task resource groups: %w", err)
+	}
+	defer rows.Close()
+	items := make([]domain.SearchAsset, 0, limit)
+	for rows.Next() {
+		var item domain.SearchAsset
+		var taskID int64
+		if err := rows.Scan(&item.ResourceGroupID, &taskID, &item.TaskNo, &item.SKUCode,
+			&item.FinalizedRevisionID, &item.Mode, &item.FinalItemCount, &item.FileName); err != nil {
+			return nil, fmt.Errorf("scan task resource group search result: %w", err)
+		}
+		item.AssetID = item.ResourceGroupID
+		item.TaskID = &taskID
+		item.ResourceID = fmt.Sprintf("group:%d", item.ResourceGroupID)
+		item.SourceType = "task_resource_group"
+		item.SourceLabel = "任务资源组"
+		items = append(items, item)
+	}
+	return items, rows.Err()
 }
 
 func (r *searchRepo) searchAssetsFromDocuments(ctx context.Context, q string, limit int) ([]domain.SearchAsset, error) {

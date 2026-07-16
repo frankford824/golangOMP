@@ -78,10 +78,7 @@ const previewRows = computed(() => props.items.slice(0, PREVIEW_MAX))
 const restCount = computed(() => Math.max(0, props.items.length - PREVIEW_MAX))
 
 const skuReadyCount = computed(() =>
-  props.items.filter((it) => {
-    const s = props.taskKind === 'PURCHASE_TASK' ? it.purchaseSku?.trim() : it.newSku?.trim()
-    return Boolean(s)
-  }).length,
+  props.items.filter((it) => Boolean(it.newSku?.trim())).length,
 )
 
 const modifiedCount = computed(() => props.items.filter((it) => it._editedFromTemplate).length)
@@ -92,7 +89,7 @@ const pendingCount = computed(() =>
 const duplicateSkuCount = computed(() => {
   const bag = new Map<string, number>()
   for (const it of props.items) {
-    const sku = (props.taskKind === 'PURCHASE_TASK' ? it.purchaseSku : it.newSku)?.trim()
+    const sku = it.newSku?.trim()
     if (!sku) continue
     bag.set(sku, (bag.get(sku) ?? 0) + 1)
   }
@@ -102,7 +99,7 @@ const abnormalCount = computed(() => pendingCount.value + duplicateSkuCount.valu
 const duplicateKeys = computed(() => {
   const bag = new Map<string, TaskBatchItem[]>()
   for (const row of props.items) {
-    const sku = (props.taskKind === 'PURCHASE_TASK' ? row.purchaseSku : row.newSku)?.trim()
+    const sku = row.newSku?.trim()
     if (!sku) continue
     bag.set(sku, [...(bag.get(sku) ?? []), row])
   }
@@ -120,7 +117,7 @@ const refHint = computed(() => {
 })
 
 function skuLabel(row: TaskBatchItem) {
-  const s = props.taskKind === 'PURCHASE_TASK' ? row.purchaseSku : row.newSku
+  const s = row.newSku
   return s?.trim() || '未生成'
 }
 

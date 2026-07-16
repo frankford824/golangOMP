@@ -82,6 +82,11 @@ type AssetDetail struct {
 	TaskCreatedAt         *time.Time                       `json:"task_created_at,omitempty"`
 	CreatedAt             time.Time                        `json:"created_at"`
 	UpdatedAt             time.Time                        `json:"updated_at"`
+	ResourceGroupID       int64                            `json:"resource_group_id,omitempty"`
+	FinalizedRevisionID   int64                            `json:"finalized_revision_id,omitempty"`
+	CoverRevisionItemID   int64                            `json:"cover_revision_item_id,omitempty"`
+	ResourceMode          domain.TaskAssetGroupMode        `json:"resource_mode,omitempty"`
+	ResourceItemCount     int                              `json:"resource_item_count,omitempty"`
 	Versions              []AssetVersion                   `json:"versions,omitempty"`
 	ArchivedAt            *time.Time                       `json:"archived_at,omitempty"`
 	ArchivedBy            *Actor                           `json:"archived_by,omitempty"`

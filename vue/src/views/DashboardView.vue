@@ -61,8 +61,8 @@
             </span>
             <span class="dashboard-health-item dashboard-health-item--load">
               <span class="dashboard-health-dot" aria-hidden="true" />
-              <span class="dashboard-health-label">待仓库接收</span>
-              <strong class="dashboard-health-value">{{ summary.pendingWarehouseReceiveCount }}</strong>
+              <span class="dashboard-health-label">今日结单</span>
+              <strong class="dashboard-health-value">{{ summary.todayCompletedCount }}</strong>
             </span>
             <span class="dashboard-health-item dashboard-health-item--quality">
               <span class="dashboard-health-dot" aria-hidden="true" />
@@ -131,13 +131,13 @@
             title="待审核"
             :value="summary.pendingAuditCount"
             hint="待审核任务"
-            route="/tasks?status=PendingAuditA,PendingAuditB"
+            route="/tasks?status=PendingAudit"
           />
           <DashboardKpiCard
             title="需交班"
             :value="summary.handoverCount"
             hint="审核交班任务"
-            route="/tasks?status=PendingAuditA,PendingAuditB"
+            route="/tasks?status=PendingAudit"
           />
           <DashboardKpiCard
             title="今日新建"
@@ -327,7 +327,6 @@ import type {
   RecentEvent,
   RiskItem,
   TaskOperationalOverview,
-  TaskOperationalStatusBucket,
 } from '@/types/dashboard'
 import { tasksApi } from '@/services/api/tasksApi'
 import StatusSkeleton from '@/components/common/StatusSkeleton.vue'
@@ -353,12 +352,10 @@ let refreshTimer: ReturnType<typeof setInterval> | null = null
 let lastSuccessfulRefreshAt = 0
 
 const BUSINESS_ACTIONS = [
-  'task.list',
+  'task.view',
   'task.create',
-  'task.audit.claim',
-  'warehouse.receive',
-  'task.customization.submit',
-  'design.review',
+  'task.design.submit',
+  'task.audit.decision',
 ] as const
 
 const hasBusinessAccess = computed(() => BUSINESS_ACTIONS.some((a) => can(a)))
@@ -374,8 +371,7 @@ const summary = computed<DashboardSummary>(() => {
     todayPendingCount: counts?.design_pending ?? 0,
     pendingAuditCount: counts?.pending_audit ?? 0,
     handoverCount: counts?.handover ?? 0,
-    pendingOutsourceReturnCount: counts?.customization_in_progress ?? 0,
-    pendingWarehouseReceiveCount: counts?.pending_warehouse_receive ?? 0,
+    todayCompletedCount: counts?.today_completed ?? 0,
     todayCreatedCount: counts?.today_created ?? 0,
     overdueCount: counts?.overdue ?? 0,
   }
@@ -400,26 +396,16 @@ const trendTodayStats = computed(() => {
 })
 
 const statusDistribution = computed(() => {
-  const hintByKey: Record<TaskOperationalStatusBucket['key'], string> = {
-    design_ops: '设计、运营或打回后待推进',
-    audit: '审核队列待处理',
-    customization: '定制生产及协同处理中',
-    warehouse: '仓库接收、生产交接或待结单',
-    completed: '已结单、已归档或已取消',
-  }
-  const toneByKey: Record<TaskOperationalStatusBucket['key'], string> = {
-    design_ops: 'pending',
-    audit: 'audit',
-    customization: 'customization',
-    warehouse: 'warehouse',
-    completed: 'completed',
-  }
-  const items = (overview.value?.status_distribution ?? []).map((bucket) => ({
-    key: toneByKey[bucket.key],
-    name: bucket.name,
-    value: bucket.count,
-    hint: hintByKey[bucket.key],
-  }))
+  const activeBucketMeta = {
+    design_ops: { tone: 'pending', hint: '设计、运营或打回后待推进' },
+    audit: { tone: 'audit', hint: '审核队列待处理' },
+    customization: { tone: 'customization', hint: '定制设计协同处理中' },
+    completed: { tone: 'completed', hint: '已结单、已归档或已取消' },
+  } as const
+  const items = (overview.value?.status_distribution ?? []).flatMap((bucket) => {
+    const meta = activeBucketMeta[bucket.key as keyof typeof activeBucketMeta]
+    return meta ? [{ key: meta.tone, name: bucket.name, value: bucket.count, hint: meta.hint }] : []
+  })
   const total = items.reduce((sum, item) => sum + item.value, 0)
   const withPercent = items.map((item) => ({
     ...item,
@@ -1277,10 +1263,6 @@ onBeforeUnmount(stopRefreshLoop)
   background: rgb(var(--yb-warning));
 }
 
-.status-stack-seg--warehouse {
-  background: rgb(var(--yb-status-warehouse));
-}
-
 .status-stack-seg--completed {
   background: rgb(var(--yb-success));
 }
@@ -1335,10 +1317,6 @@ onBeforeUnmount(stopRefreshLoop)
   background: rgb(var(--yb-warning));
 }
 
-.status-card--warehouse .status-card-dot {
-  background: rgb(var(--yb-status-warehouse));
-}
-
 .status-card--completed .status-card-dot {
   background: rgb(var(--yb-success));
 }
@@ -1384,10 +1362,6 @@ onBeforeUnmount(stopRefreshLoop)
 }
 
 .status-card--customization .status-card-value {
-  color: rgb(var(--yb-warning-text));
-}
-
-.status-card--warehouse .status-card-value {
   color: rgb(var(--yb-warning-text));
 }
 

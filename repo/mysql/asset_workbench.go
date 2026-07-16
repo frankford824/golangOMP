@@ -1528,15 +1528,84 @@ func (r *assetWorkbenchRepo) GetClientMaterial(ctx context.Context, materialID i
 	return scanAssetWorkbenchClientMaterial(row)
 }
 
+func (r *assetWorkbenchRepo) ResolveResourceGroupPublication(ctx context.Context, groupID, finalizedRevisionID, coverRevisionItemID int64) (*domain.ResourceGroupPublicationSnapshot, error) {
+	var snapshot domain.ResourceGroupPublicationSnapshot
+	err := r.db.db.QueryRowContext(ctx, `
+		SELECT g.id, g.task_id, t.task_no, COALESCE(tsi.sku_code, ''), revision.mode, revision.id, g.finalized_revision_id
+		FROM task_asset_groups g
+		JOIN tasks t ON t.id = g.task_id
+		LEFT JOIN task_sku_items tsi ON tsi.id = g.task_sku_item_id
+		JOIN task_asset_group_revisions revision
+		  ON revision.group_id = g.id
+		 AND revision.id = COALESCE(NULLIF(?, 0), g.finalized_revision_id)
+		WHERE g.id = ? AND revision.status IN ('finalized','superseded')`, finalizedRevisionID, groupID).
+		Scan(&snapshot.GroupID, &snapshot.TaskID, &snapshot.TaskNo, &snapshot.SKUCode, &snapshot.Mode, &snapshot.FinalizedRevisionID, &snapshot.CurrentFinalizedRevisionID)
+	if err == sql.ErrNoRows {
+		return nil, repo.ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	rows, err := r.db.db.QueryContext(ctx, `
+		SELECT item.id, ta.id, ta.file_name, COALESCE(ta.mime_type, ''), ta.file_size,
+		       COALESCE(NULLIF(ta.storage_key, ''), NULLIF(asr.ref_key, ''))
+		FROM task_asset_group_revision_items item
+		JOIN task_assets ta ON ta.id = item.task_asset_id
+		LEFT JOIN asset_storage_refs asr ON asr.ref_id = ta.storage_ref_id
+		WHERE item.revision_id = ?
+		  AND ta.access_revoked_at IS NULL AND ta.object_deleted_at IS NULL
+		ORDER BY item.sort_order, item.id`, snapshot.FinalizedRevisionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var coverFound bool
+	for rows.Next() {
+		var itemID int64
+		var file domain.TaskResourceFile
+		var fileSize sql.NullInt64
+		var storageKey sql.NullString
+		if err := rows.Scan(&itemID, &file.TaskAssetID, &file.FileName, &file.MimeType, &fileSize, &storageKey); err != nil {
+			return nil, err
+		}
+		file.FileSize = fromNullInt64(fileSize)
+		file.RevisionItemID = itemID
+		file.StorageKey = storageKey.String
+		if strings.TrimSpace(file.StorageKey) == "" {
+			return nil, repo.ErrConflict
+		}
+		if coverRevisionItemID == itemID {
+			coverFound = true
+		}
+		if coverRevisionItemID == 0 && snapshot.Mode == domain.TaskAssetGroupModeSingle {
+			coverRevisionItemID = itemID
+			coverFound = true
+		}
+		snapshot.Files = append(snapshot.Files, file)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(snapshot.Files) == 0 || !coverFound {
+		return nil, repo.ErrConflict
+	}
+	snapshot.CoverRevisionItemID = coverRevisionItemID
+	return &snapshot, nil
+}
+
 func (r *assetWorkbenchRepo) CreateClientMaterial(ctx context.Context, tx repo.Tx, material *domain.AssetWorkbenchClientMaterial) (*domain.AssetWorkbenchClientMaterial, error) {
 	res, err := Unwrap(tx).ExecContext(ctx, `
 		INSERT INTO asset_workbench_client_materials (
-			asset_id, source_type, source_ref, title, description, filename_snapshot, mime_type_snapshot, file_size_snapshot,
+			asset_id, source_type, source_ref, resource_group_id, finalized_revision_id, cover_revision_item_id,
+			title, description, filename_snapshot, mime_type_snapshot, file_size_snapshot,
 			enabled, sort_order, published_by, updated_by, published_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		material.AssetID,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		sql.NullInt64{Int64: material.AssetID, Valid: material.AssetID > 0},
 		material.SourceType,
 		material.SourceRef,
+		toNullInt64(material.ResourceGroupID),
+		toNullInt64(material.FinalizedRevisionID),
+		toNullInt64(material.CoverRevisionItemID),
 		material.Title,
 		material.Description,
 		material.FilenameSnapshot,
@@ -1562,12 +1631,16 @@ func (r *assetWorkbenchRepo) CreateClientMaterial(ctx context.Context, tx repo.T
 func (r *assetWorkbenchRepo) UpdateClientMaterial(ctx context.Context, tx repo.Tx, material *domain.AssetWorkbenchClientMaterial) (*domain.AssetWorkbenchClientMaterial, error) {
 	res, err := Unwrap(tx).ExecContext(ctx, `
 		UPDATE asset_workbench_client_materials
-		SET asset_id = ?, source_type = ?, source_ref = ?, title = ?, description = ?, filename_snapshot = ?, mime_type_snapshot = ?,
+		SET asset_id = ?, source_type = ?, source_ref = ?, resource_group_id = ?, finalized_revision_id = ?, cover_revision_item_id = ?,
+		    title = ?, description = ?, filename_snapshot = ?, mime_type_snapshot = ?,
 		    file_size_snapshot = ?, enabled = ?, sort_order = ?, updated_by = ?, updated_at = CURRENT_TIMESTAMP
 		WHERE id = ?`,
-		material.AssetID,
+		sql.NullInt64{Int64: material.AssetID, Valid: material.AssetID > 0},
 		material.SourceType,
 		material.SourceRef,
+		toNullInt64(material.ResourceGroupID),
+		toNullInt64(material.FinalizedRevisionID),
+		toNullInt64(material.CoverRevisionItemID),
 		material.Title,
 		material.Description,
 		material.FilenameSnapshot,
@@ -4427,6 +4500,7 @@ func assetWorkbenchDifficultyClassSelect() string {
 
 func assetWorkbenchClientMaterialSelect() string {
 	return `SELECT id, asset_id, source_type, source_ref, title, description, filename_snapshot, mime_type_snapshot, file_size_snapshot,
+		resource_group_id, finalized_revision_id, cover_revision_item_id,
 		enabled, sort_order, published_by, updated_by, published_at, created_at, updated_at
 		FROM asset_workbench_client_materials`
 }
@@ -4775,10 +4849,10 @@ func scanAssetWorkbenchDifficultyClass(scanner interface{ Scan(...interface{}) e
 
 func scanAssetWorkbenchClientMaterial(scanner interface{ Scan(...interface{}) error }) (*domain.AssetWorkbenchClientMaterial, error) {
 	var item domain.AssetWorkbenchClientMaterial
-	var updatedBy sql.NullInt64
+	var assetID, resourceGroupID, finalizedRevisionID, coverRevisionItemID, updatedBy sql.NullInt64
 	if err := scanner.Scan(
 		&item.ID,
-		&item.AssetID,
+		&assetID,
 		&item.SourceType,
 		&item.SourceRef,
 		&item.Title,
@@ -4786,6 +4860,9 @@ func scanAssetWorkbenchClientMaterial(scanner interface{ Scan(...interface{}) er
 		&item.FilenameSnapshot,
 		&item.MimeTypeSnapshot,
 		&item.FileSizeSnapshot,
+		&resourceGroupID,
+		&finalizedRevisionID,
+		&coverRevisionItemID,
 		&item.Enabled,
 		&item.SortOrder,
 		&item.PublishedBy,
@@ -4796,6 +4873,10 @@ func scanAssetWorkbenchClientMaterial(scanner interface{ Scan(...interface{}) er
 	); err != nil {
 		return nil, err
 	}
+	item.AssetID = assetID.Int64
+	item.ResourceGroupID = fromNullInt64(resourceGroupID)
+	item.FinalizedRevisionID = fromNullInt64(finalizedRevisionID)
+	item.CoverRevisionItemID = fromNullInt64(coverRevisionItemID)
 	item.UpdatedBy = fromNullInt64(updatedBy)
 	return &item, nil
 }

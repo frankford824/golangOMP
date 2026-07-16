@@ -111,18 +111,8 @@ func TestReindexTaskSearchDocumentRefreshesAssetDocumentsForTaskMetadata(t *test
 		WithArgs("task_assets", "cleaned_at").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 	mock.ExpectExec("task-doc-upsert").
-		WithArgs(taskID, taskID).
+		WithArgs(taskID, taskID, taskID).
 		WillReturnResult(sqlmock.NewResult(0, 1))
-	mock.ExpectQuery("schema-table").
-		WithArgs("asset_search_documents").
-		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
-	mock.ExpectExec("set-group-concat").WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectExec("asset-doc-delete-by-task").
-		WithArgs(taskID).
-		WillReturnResult(sqlmock.NewResult(0, 2))
-	mock.ExpectExec("asset-doc-upsert-by-task").
-		WithArgs(taskID).
-		WillReturnResult(sqlmock.NewResult(0, 2))
 
 	if err := reindexTaskSearchDocument(context.Background(), db, taskID); err != nil {
 		t.Fatalf("reindexTaskSearchDocument() error = %v", err)

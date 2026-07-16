@@ -36,11 +36,17 @@ func applyActorOrgOwnershipFallbackForTaskCreate(ctx context.Context, p *CreateT
 		p.OwnerDepartment = department
 		p.rawOwnerDepartment = department
 	}
+	if p.OwnerDepartmentID == nil {
+		p.OwnerDepartmentID = cloneInt64Ptr(actor.DepartmentID)
+	}
 	if team != "" {
 		p.OwnerOrgTeam = team
 		p.rawOwnerOrgTeam = team
 		p.OwnerTeam = team
 		p.rawOwnerTeam = team
+	}
+	if p.OwnerTeamID == nil {
+		p.OwnerTeamID = cloneInt64Ptr(actor.TeamID)
 	}
 }
 

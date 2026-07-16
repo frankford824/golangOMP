@@ -402,10 +402,7 @@ const KPI_TASK_EVENT_TYPES = [
   'task.audit.approved',
   'task.audit.rejected',
   'task.customization.reviewed',
-  'task.warehouse.received',
-  'task.warehouse.completed',
-  'task.warehouse.rejected',
-  'task.closed',
+  'task.completed',
 ] as const
 
 const REPORT_CARD_LABELS: Record<string, string> = {
@@ -598,14 +595,12 @@ function inactiveDesignAssignment(event: WorkflowTraceEvent): boolean {
   if (!status) return false
   if (
     status.includes('audit') ||
-    status.includes('warehouse') ||
     status.includes('completed') ||
     status.includes('cancelled') ||
     status.includes('canceled') ||
     status.includes('closed') ||
     status.includes('archived') ||
     status.includes('审核') ||
-    status.includes('仓库') ||
     status.includes('完成') ||
     status.includes('取消') ||
     status.includes('关闭') ||

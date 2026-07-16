@@ -71,3 +71,47 @@ describe('assetWorkbenchApi array response normalization', () => {
     await expect(assetWorkbenchApi.listClientMaterials()).resolves.toEqual([])
   })
 })
+
+describe('assetWorkbenchApi material source discriminators', () => {
+  beforeEach(() => {
+    getMock.mockReset()
+    getMock.mockResolvedValue({ data: { data: { download_mode: 'direct', filename: 'external.png', file_size: 1 } } })
+  })
+
+  it('downloads migrated external_asset rows through the external resource route', async () => {
+    const { assetWorkbenchApi, isExternalMaterialSource } = await import('./assetWorkbenchApi')
+    expect(isExternalMaterialSource('external_asset')).toBe(true)
+
+    await assetWorkbenchApi.downloadMaterialAsset({ id: 42, source_type: 'external_asset', resource_id: 'ext-42' })
+
+    expect(getMock).toHaveBeenCalledWith('/v1/assets/ext-42/download', { signal: undefined })
+  })
+})
+
+describe('assetWorkbenchApi resource-group downloads', () => {
+  beforeEach(() => {
+    getMock.mockReset()
+    postMock.mockReset()
+  })
+
+  it('keeps every finalized set item in the download result and uses the selected cover', async () => {
+    postMock.mockResolvedValue({ data: { data: { items: [
+      { group_id: 8, revision_id: 70, revision_item_id: 701, task_id: 3, sort_order: 1, filename: 'front.png', download_url: 'https://files/front' },
+      { group_id: 8, revision_id: 70, revision_item_id: 702, task_id: 3, sort_order: 2, filename: 'side.png', download_url: 'https://files/side' },
+    ] } } })
+    const { assetWorkbenchApi } = await import('./assetWorkbenchApi')
+
+    const result = await assetWorkbenchApi.downloadMaterialAsset({ id: 8, resource_group_id: 8, cover_revision_item_id: 702 })
+
+    expect(result.download_url).toBe('https://files/side')
+    expect(result.items?.map((item) => item.filename)).toEqual(['front.png', 'side.png'])
+    expect(postMock).toHaveBeenCalledWith('/v1/resource-groups/batch-download', { group_ids: [8] }, { signal: undefined })
+  })
+
+  it('fails the whole resource-group download when the manifest is empty', async () => {
+    postMock.mockResolvedValue({ data: { data: { items: [] } } })
+    const { assetWorkbenchApi } = await import('./assetWorkbenchApi')
+
+    await expect(assetWorkbenchApi.downloadMaterialAsset({ id: 8, resource_group_id: 8 })).rejects.toThrow('没有可下载的最终成品')
+  })
+})

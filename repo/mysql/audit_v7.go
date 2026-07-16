@@ -161,6 +161,25 @@ func (r *auditV7Repo) GetHandoverByID(ctx context.Context, id int64) (*domain.Au
 	return &h, nil
 }
 
+func (r *auditV7Repo) GetHandoverByIDForUpdate(ctx context.Context, tx repo.Tx, id int64) (*domain.AuditHandover, error) {
+	row := Unwrap(tx).QueryRowContext(ctx, `
+		SELECT id, handover_no, task_id, from_auditor_id, to_auditor_id,
+		       reason, current_judgement, risk_remark, status, created_at, updated_at
+		FROM audit_handovers WHERE id = ? FOR UPDATE`, id)
+	var h domain.AuditHandover
+	err := row.Scan(
+		&h.ID, &h.HandoverNo, &h.TaskID, &h.FromAuditorID, &h.ToAuditorID,
+		&h.Reason, &h.CurrentJudgement, &h.RiskRemark, &h.Status, &h.CreatedAt, &h.UpdatedAt,
+	)
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("scan locked audit_handover: %w", err)
+	}
+	return &h, nil
+}
+
 func (r *auditV7Repo) ListHandoversByTaskID(ctx context.Context, taskID int64) ([]*domain.AuditHandover, error) {
 	rows, err := r.db.db.QueryContext(ctx, `
 		SELECT id, handover_no, task_id, from_auditor_id, to_auditor_id,
@@ -197,4 +216,19 @@ func (r *auditV7Repo) UpdateHandoverStatus(ctx context.Context, tx repo.Tx, id i
 		return fmt.Errorf("update handover status: %w", err)
 	}
 	return nil
+}
+
+func (r *auditV7Repo) CASUpdateHandoverStatus(ctx context.Context, tx repo.Tx, id int64, expected, next domain.HandoverStatus) (bool, error) {
+	res, err := Unwrap(tx).ExecContext(ctx,
+		`UPDATE audit_handovers SET status = ? WHERE id = ? AND status = ?`,
+		string(next), id, string(expected),
+	)
+	if err != nil {
+		return false, fmt.Errorf("CAS update handover status: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("CAS update handover rows affected: %w", err)
+	}
+	return affected == 1, nil
 }

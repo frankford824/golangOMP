@@ -30,6 +30,14 @@ type ExternalAssetSearchProvider interface {
 	SearchGlobal(ctx context.Context, q string, limit int) ([]domain.SearchAsset, error)
 }
 
+type ResourceGroupSearchProvider interface {
+	SearchResourceGroups(ctx context.Context, q string, limit int, publishedOnly bool, access domain.ResourceGroupAccessFilter) ([]domain.SearchAsset, error)
+}
+
+type ScopedTaskSearchProvider interface {
+	SearchTasksScoped(ctx context.Context, q string, limit int, access domain.ResourceGroupAccessFilter) ([]domain.SearchTask, error)
+}
+
 func (s *Service) SetExternalAssetSearchProvider(provider ExternalAssetSearchProvider) {
 	s.external = provider
 }
@@ -71,22 +79,22 @@ func (s *Service) Search(ctx context.Context, actor domain.RequestActor, q strin
 		if err = runSearchJobs(
 			s.logger,
 			searchJob{name: "tasks", run: func() error {
-				rows, err := s.repo.SearchTasks(ctx, q, limit)
+				rows, err := s.searchTasks(ctx, actor, q, limit)
 				result.Tasks = rows
 				return err
 			}},
 			searchJob{name: "assets", run: func() error {
-				rows, err := s.repo.SearchAssets(ctx, q, limit)
+				rows, err := s.searchResourceGroups(ctx, actor, q, limit)
 				result.Assets = rows
 				return err
 			}},
 			searchJob{name: "external", run: func() error {
-				rows, err := s.searchExternalAssets(ctx, q, limit)
+				rows, err := s.searchExternalAssets(ctx, actor, q, limit)
 				externalAssets = rows
 				return err
 			}},
 			searchJob{name: "products", run: func() error {
-				rows, err := s.repo.SearchProducts(ctx, q, limit)
+				rows, err := s.searchProducts(ctx, actor, q, limit)
 				result.Products = rows
 				return err
 			}},
@@ -100,7 +108,7 @@ func (s *Service) Search(ctx context.Context, actor domain.RequestActor, q strin
 		}
 		result.Assets = append(result.Assets, externalAssets...)
 	case "tasks":
-		if result.Tasks, err = s.repo.SearchTasks(ctx, q, limit); err != nil {
+		if result.Tasks, err = s.searchTasks(ctx, actor, q, limit); err != nil {
 			return nil, internalErr(err)
 		}
 	case "assets":
@@ -109,12 +117,12 @@ func (s *Service) Search(ctx context.Context, actor domain.RequestActor, q strin
 		if err = runSearchJobs(
 			s.logger,
 			searchJob{name: "assets", run: func() error {
-				rows, err := s.repo.SearchAssets(ctx, q, limit)
+				rows, err := s.searchResourceGroups(ctx, actor, q, limit)
 				systemAssets = rows
 				return err
 			}},
 			searchJob{name: "external", run: func() error {
-				rows, err := s.searchExternalAssets(ctx, q, limit)
+				rows, err := s.searchExternalAssets(ctx, actor, q, limit)
 				externalAssets = rows
 				return err
 			}},
@@ -123,7 +131,7 @@ func (s *Service) Search(ctx context.Context, actor domain.RequestActor, q strin
 		}
 		result.Assets = append(systemAssets, externalAssets...)
 	case "products":
-		if result.Products, err = s.repo.SearchProducts(ctx, q, limit); err != nil {
+		if result.Products, err = s.searchProducts(ctx, actor, q, limit); err != nil {
 			return nil, internalErr(err)
 		}
 	case "users":
@@ -138,8 +146,43 @@ func (s *Service) Search(ctx context.Context, actor domain.RequestActor, q strin
 	return result, nil
 }
 
-func (s *Service) searchExternalAssets(ctx context.Context, q string, limit int) ([]domain.SearchAsset, error) {
-	if s.external == nil {
+func (s *Service) searchResourceGroups(ctx context.Context, actor domain.RequestActor, q string, limit int) ([]domain.SearchAsset, error) {
+	if provider, ok := s.repo.(ResourceGroupSearchProvider); ok {
+		if !domain.ActorHasPermission(actor, domain.PermissionAssetView) {
+			return []domain.SearchAsset{}, nil
+		}
+		publishedOnly := publishedAssetSearchOnly(actor)
+		if publishedOnly {
+			return provider.SearchResourceGroups(ctx, q, limit, true, domain.ResourceGroupAccessFilter{})
+		}
+		return provider.SearchResourceGroups(ctx, q, limit, false, domain.ResourceGroupAccessFilterForActor(actor, domain.PermissionAssetView))
+	}
+	// Cutover deliberately fails closed when the repository has not implemented
+	// resource-group search. Falling back to historical file-version search
+	// would reintroduce both scope leaks and retired result semantics.
+	return []domain.SearchAsset{}, nil
+}
+
+func (s *Service) searchTasks(ctx context.Context, actor domain.RequestActor, q string, limit int) ([]domain.SearchTask, error) {
+	if !domain.ActorHasPermission(actor, domain.PermissionTaskView) {
+		return []domain.SearchTask{}, nil
+	}
+	provider, ok := s.repo.(ScopedTaskSearchProvider)
+	if !ok {
+		return []domain.SearchTask{}, nil
+	}
+	return provider.SearchTasksScoped(ctx, q, limit, domain.ResourceGroupAccessFilterForActor(actor, domain.PermissionTaskView))
+}
+
+func (s *Service) searchProducts(ctx context.Context, actor domain.RequestActor, q string, limit int) ([]domain.SearchProduct, error) {
+	if !domain.ActorHasPermission(actor, domain.PermissionCatalogView) {
+		return []domain.SearchProduct{}, nil
+	}
+	return s.repo.SearchProducts(ctx, q, limit)
+}
+
+func (s *Service) searchExternalAssets(ctx context.Context, actor domain.RequestActor, q string, limit int) ([]domain.SearchAsset, error) {
+	if s.external == nil || !domain.ActorHasPermission(actor, domain.PermissionAssetView) || publishedAssetSearchOnly(actor) {
 		return []domain.SearchAsset{}, nil
 	}
 	items, err := s.external.SearchGlobal(ctx, q, limit)
@@ -147,6 +190,23 @@ func (s *Service) searchExternalAssets(ctx context.Context, q string, limit int)
 		return []domain.SearchAsset{}, nil
 	}
 	return items, nil
+}
+
+func publishedAssetSearchOnly(actor domain.RequestActor) bool {
+	if actor.EffectiveAccess == nil {
+		return false
+	}
+	found := false
+	for _, source := range actor.EffectiveAccess.Sources {
+		if source.Permission != domain.PermissionAssetView {
+			continue
+		}
+		found = true
+		if source.RoleCode != "asset_submitter" {
+			return false
+		}
+	}
+	return found
 }
 
 type searchJob struct {

@@ -1,5 +1,6 @@
-import { defineConfig, loadEnv } from 'vite';
+import { defineConfig, loadEnv, searchForWorkspaceRoot } from 'vite';
 import vue from '@vitejs/plugin-vue';
+import fs from 'node:fs';
 import path from 'path';
 import { fileURLToPath } from 'node:url';
 export default defineConfig(function (_a) {
@@ -7,6 +8,8 @@ export default defineConfig(function (_a) {
     var mode = _a.mode;
     var env = loadEnv(mode, process.cwd(), 'VITE_');
     var rootDir = path.dirname(fileURLToPath(import.meta.url));
+    var dependencyDir = path.join(rootDir, 'node_modules');
+    var resolvedDependencyDir = fs.existsSync(dependencyDir) ? fs.realpathSync(dependencyDir) : dependencyDir;
     var devProxyTarget = (_b = env.VITE_DEV_API_PROXY_TARGET) === null || _b === void 0 ? void 0 : _b.trim();
     var proxy = devProxyTarget
         ? {
@@ -30,6 +33,7 @@ export default defineConfig(function (_a) {
         server: {
             host: '0.0.0.0',
             proxy: proxy,
+            fs: { allow: Array.from(new Set([searchForWorkspaceRoot(rootDir), rootDir, resolvedDependencyDir])) },
         },
         build: {
             // `vite build --mode test` 输出到 `dist-test/`，避免覆盖生产 `dist/`

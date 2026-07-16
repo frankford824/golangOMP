@@ -33,35 +33,51 @@ const (
 
 // RequestActor is the request-scoped identity placeholder for future auth/RBAC integration.
 type RequestActor struct {
-	ID                 int64              `json:"id"`
-	Username           string             `json:"username,omitempty"`
-	Roles              []Role             `json:"roles,omitempty"`
-	Department         string             `json:"department,omitempty"`
-	Team               string             `json:"team,omitempty"`
-	ManagedDepartments []string           `json:"managed_departments,omitempty"`
-	ManagedTeams       []string           `json:"managed_teams,omitempty"`
-	FrontendAccess     FrontendAccessView `json:"frontend_access,omitempty"`
-	Source             string             `json:"source"`
-	AuthMode           AuthMode           `json:"auth_mode"`
+	ID                   int64              `json:"id"`
+	Username             string             `json:"username,omitempty"`
+	Roles                []Role             `json:"roles,omitempty"`
+	Department           string             `json:"department,omitempty"`
+	Team                 string             `json:"team,omitempty"`
+	ManagedDepartments   []string           `json:"managed_departments,omitempty"`
+	ManagedTeams         []string           `json:"managed_teams,omitempty"`
+	DepartmentID         *int64             `json:"department_id,omitempty"`
+	TeamID               *int64             `json:"team_id,omitempty"`
+	Permissions          []PermissionCode   `json:"permissions,omitempty"`
+	AccessPolicyRevision int64              `json:"access_policy_revision,omitempty"`
+	EffectiveAccess      *EffectiveAccess   `json:"effective_access,omitempty"`
+	FrontendAccess       FrontendAccessView `json:"frontend_access,omitempty"`
+	Source               string             `json:"source"`
+	AuthMode             AuthMode           `json:"auth_mode"`
+}
+
+func ActorHasPermission(actor RequestActor, permission PermissionCode) bool {
+	for _, candidate := range actor.Permissions {
+		if candidate == permission {
+			return true
+		}
+	}
+	return false
 }
 
 // RouteAccessMeta exposes per-route placeholder readiness and required-role intent.
 type RouteAccessMeta struct {
-	Readiness       APIReadiness `json:"readiness"`
-	RequiredRoles   []Role       `json:"required_roles,omitempty"`
-	AuthMode        AuthMode     `json:"auth_mode"`
-	SessionRequired bool         `json:"session_required"`
-	DebugCompatible bool         `json:"debug_compatible"`
+	Readiness           APIReadiness     `json:"readiness"`
+	RequiredRoles       []Role           `json:"required_roles,omitempty"`
+	RequiredPermissions []PermissionCode `json:"required_permissions,omitempty"`
+	AuthMode            AuthMode         `json:"auth_mode"`
+	SessionRequired     bool             `json:"session_required"`
+	DebugCompatible     bool             `json:"debug_compatible"`
 }
 
 type RouteAccessRule struct {
-	Method          string       `json:"method"`
-	Path            string       `json:"path"`
-	Readiness       APIReadiness `json:"readiness"`
-	RequiredRoles   []Role       `json:"required_roles,omitempty"`
-	AuthMode        AuthMode     `json:"auth_mode"`
-	SessionRequired bool         `json:"session_required"`
-	DebugCompatible bool         `json:"debug_compatible"`
+	Method              string           `json:"method"`
+	Path                string           `json:"path"`
+	Readiness           APIReadiness     `json:"readiness"`
+	RequiredRoles       []Role           `json:"required_roles,omitempty"`
+	RequiredPermissions []PermissionCode `json:"required_permissions,omitempty"`
+	AuthMode            AuthMode         `json:"auth_mode"`
+	SessionRequired     bool             `json:"session_required"`
+	DebugCompatible     bool             `json:"debug_compatible"`
 }
 
 type requestActorContextKey struct{}
@@ -146,6 +162,42 @@ func NewRouteAccessRule(method, path string, readiness APIReadiness, roles ...Ro
 		SessionRequired: meta.SessionRequired,
 		DebugCompatible: meta.DebugCompatible,
 	}
+}
+
+func NewCapabilityRouteAccessMeta(readiness APIReadiness, permissions ...PermissionCode) RouteAccessMeta {
+	meta := NewRouteAccessMeta(readiness)
+	meta.RequiredPermissions = normalizePermissionCodes(permissions)
+	return meta
+}
+
+func NewCapabilityRouteAccessRule(method, path string, readiness APIReadiness, permissions ...PermissionCode) RouteAccessRule {
+	meta := NewCapabilityRouteAccessMeta(readiness, permissions...)
+	return RouteAccessRule{
+		Method:              method,
+		Path:                path,
+		Readiness:           meta.Readiness,
+		RequiredPermissions: meta.RequiredPermissions,
+		AuthMode:            meta.AuthMode,
+		SessionRequired:     meta.SessionRequired,
+		DebugCompatible:     meta.DebugCompatible,
+	}
+}
+
+func normalizePermissionCodes(raw []PermissionCode) []PermissionCode {
+	out := make([]PermissionCode, 0, len(raw))
+	seen := make(map[PermissionCode]struct{}, len(raw))
+	for _, permission := range raw {
+		permission = PermissionCode(strings.TrimSpace(string(permission)))
+		if permission == "" {
+			continue
+		}
+		if _, exists := seen[permission]; exists {
+			continue
+		}
+		seen[permission] = struct{}{}
+		out = append(out, permission)
+	}
+	return out
 }
 
 func RouteAuthModeForReadiness(readiness APIReadiness) AuthMode {

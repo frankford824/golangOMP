@@ -22,17 +22,21 @@ import (
 )
 
 type CreateTaskReferenceUploadSessionParams struct {
-	CreatedBy    int64
-	Filename     string
-	ExpectedSize *int64
-	MimeType     string
-	FileHash     string
-	Remark       string
+	CreatedBy      int64
+	OwnerType      domain.AssetOwnerType
+	ClientCreateID string
+	ClientItemID   string
+	Filename       string
+	ExpectedSize   *int64
+	MimeType       string
+	FileHash       string
+	Remark         string
 }
 
 type CompleteTaskReferenceUploadSessionParams struct {
 	SessionID         string
 	CompletedBy       int64
+	OwnerType         domain.AssetOwnerType
 	Remark            string
 	FileHash          string
 	ExpectedSHA256    string
@@ -45,6 +49,7 @@ type CompleteTaskReferenceUploadSessionParams struct {
 type CancelTaskReferenceUploadSessionParams struct {
 	SessionID    string
 	CancelledBy  int64
+	OwnerType    domain.AssetOwnerType
 	Remark       string
 	OSSUploadID  string
 	OSSObjectKey string
@@ -72,6 +77,17 @@ const (
 	TaskCreateReferenceUploadMaxFileSizeBytes = int64(300 * 1024 * 1024)
 	TaskCreateReferenceUploadMaxFileSizeLabel = "300MB"
 )
+
+func isPreCreateUploadOwner(ownerType domain.AssetOwnerType) bool {
+	return ownerType == domain.AssetOwnerTypeTaskCreateReference || ownerType == domain.AssetOwnerTypePlanningSKUCreate
+}
+
+func preCreateUploadNamespace(ownerType domain.AssetOwnerType) string {
+	if ownerType == domain.AssetOwnerTypePlanningSKUCreate {
+		return "planning-sku-create"
+	}
+	return "task-create-reference"
+}
 
 type CompleteTaskReferenceUploadSessionResult struct {
 	Session          *domain.UploadSession    `json:"session"`
@@ -161,6 +177,17 @@ func (s *taskCreateReferenceUploadService) CreateUploadSession(ctx context.Conte
 			"max_label": TaskCreateReferenceUploadMaxFileSizeLabel,
 		})
 	}
+	ownerType := params.OwnerType
+	if ownerType == "" {
+		ownerType = domain.AssetOwnerTypeTaskCreateReference
+	}
+	if !isPreCreateUploadOwner(ownerType) {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "unsupported pre-create upload owner", nil)
+	}
+	if ownerType == domain.AssetOwnerTypePlanningSKUCreate && (strings.TrimSpace(params.ClientCreateID) == "" || strings.TrimSpace(params.ClientItemID) == "") {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "client_create_id and client_item_id are required for planning SKU images", nil)
+	}
+	namespace := preCreateUploadNamespace(ownerType)
 
 	referenceType := domain.TaskAssetTypeReference
 	now := s.nowFn().UTC()
@@ -172,7 +199,7 @@ func (s *taskCreateReferenceUploadService) CreateUploadSession(ctx context.Conte
 	var expiresAt *time.Time
 	if s.ossDirectService != nil && s.ossDirectService.Enabled() {
 		fileSize := *params.ExpectedSize
-		objectKey := s.ossDirectService.BuildUploadSessionObjectKey("task-create-reference", requestID, params.Filename)
+		objectKey := s.ossDirectService.BuildUploadSessionObjectKey(namespace, requestID, params.Filename)
 		plan, err := s.ossDirectService.CreateUploadPlan(ctx, objectKey, fileSize, contentType)
 		if err != nil {
 			log.Printf("task_reference_oss_direct_plan_fallback request_id=%s error=%v", requestID, err)
@@ -187,8 +214,8 @@ func (s *taskCreateReferenceUploadService) CreateUploadSession(ctx context.Conte
 	if ossPlan == nil {
 		var err error
 		remote, err = s.uploadClient.CreateUploadSession(ctx, RemoteCreateUploadSessionRequest{
-			TaskRef:      "task-create-reference",
-			AssetNo:      "PRECREATE-REFERENCE",
+			TaskRef:      namespace,
+			AssetNo:      map[bool]string{true: "PRECREATE-PLANNING-SKU", false: "PRECREATE-REFERENCE"}[ownerType == domain.AssetOwnerTypePlanningSKUCreate],
 			AssetType:    domain.TaskAssetTypeReference,
 			VersionNo:    1,
 			UploadMode:   uploadMode,
@@ -214,8 +241,10 @@ func (s *taskCreateReferenceUploadService) CreateUploadSession(ctx context.Conte
 	}
 	request := &domain.UploadRequest{
 		RequestID:       requestID,
-		OwnerType:       domain.AssetOwnerTypeTaskCreateReference,
+		OwnerType:       ownerType,
 		OwnerID:         params.CreatedBy,
+		ClientCreateID:  strings.TrimSpace(params.ClientCreateID),
+		ClientItemID:    strings.TrimSpace(params.ClientItemID),
 		TaskAssetType:   &referenceType,
 		StorageAdapter:  domain.AssetStorageAdapterOSSUploadService,
 		UploadMode:      uploadMode,
@@ -249,12 +278,16 @@ func (s *taskCreateReferenceUploadService) CreateUploadSession(ctx context.Conte
 		return nil, infraError("create task-create reference upload session", err)
 	}
 
+	baseEndpoint := "/v1/tasks/reference-upload-sessions/"
+	if ownerType == domain.AssetOwnerTypePlanningSKUCreate {
+		baseEndpoint = "/v1/tasks/sku-planning/image-upload-sessions/"
+	}
 	return &CreateTaskReferenceUploadSessionResult{
 		Session:          domain.BuildUploadSession(request),
 		Remote:           remote,
 		OSSDirect:        ossPlan,
-		CompleteEndpoint: "/v1/tasks/reference-upload-sessions/" + request.RequestID + "/complete",
-		CancelEndpoint:   "/v1/tasks/reference-upload-sessions/" + request.RequestID + "/abort",
+		CompleteEndpoint: baseEndpoint + request.RequestID + "/complete",
+		CancelEndpoint:   baseEndpoint + request.RequestID + "/abort",
 	}, nil
 }
 
@@ -530,6 +563,9 @@ func (s *taskCreateReferenceUploadService) CompleteUploadSession(ctx context.Con
 	if appErr != nil {
 		return nil, appErr
 	}
+	if params.OwnerType != "" && request.OwnerType != params.OwnerType {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "upload_session belongs to another upload workflow", nil)
+	}
 	if request.Status == domain.UploadRequestStatusBound || request.SessionStatus == domain.DesignAssetSessionStatusCompleted {
 		if strings.TrimSpace(request.BoundRefID) == "" {
 			return nil, domain.NewAppError(domain.ErrCodeInvalidStateTransition, "upload_session already completed without bound reference_file_ref", nil)
@@ -611,7 +647,7 @@ func (s *taskCreateReferenceUploadService) completeOSSDirectReferenceUpload(
 			return domain.ErrNotFound
 		}
 		request = locked
-		if request.OwnerType != domain.AssetOwnerTypeTaskCreateReference || request.OwnerID != params.CompletedBy {
+		if !isPreCreateUploadOwner(request.OwnerType) || request.OwnerID != params.CompletedBy {
 			return domain.NewAppError(domain.ErrCodeInvalidRequest, "upload_session does not belong to current actor", nil)
 		}
 		if request.Status == domain.UploadRequestStatusBound || request.SessionStatus == domain.DesignAssetSessionStatusCompleted {
@@ -630,7 +666,7 @@ func (s *taskCreateReferenceUploadService) completeOSSDirectReferenceUpload(
 				"max_bytes": TaskCreateReferenceUploadMaxFileSizeBytes,
 			})
 		}
-		expectedObjectKey := s.ossDirectService.BuildUploadSessionObjectKey("task-create-reference", request.RequestID, request.FileName)
+		expectedObjectKey := s.ossDirectService.BuildUploadSessionObjectKey(preCreateUploadNamespace(request.OwnerType), request.RequestID, request.FileName)
 		objectKey := strings.TrimSpace(params.OSSObjectKey)
 		if objectKey != expectedObjectKey {
 			return domain.NewAppError(domain.ErrCodeInvalidRequest, "oss_object_key does not belong to upload_session", map[string]interface{}{
@@ -683,7 +719,7 @@ func (s *taskCreateReferenceUploadService) completeOSSDirectReferenceUpload(
 		checksumHint := firstNonEmpty(strings.TrimSpace(params.FileHash), strings.TrimSpace(request.ChecksumHint))
 		ref, err := s.assetStorageRefRepo.Create(ctx, tx, &domain.AssetStorageRef{
 			RefID:           uuid.NewString(),
-			OwnerType:       domain.AssetOwnerTypeTaskCreateReference,
+			OwnerType:       request.OwnerType,
 			OwnerID:         request.OwnerID,
 			UploadRequestID: request.RequestID,
 			StorageAdapter:  domain.AssetStorageAdapterOSSUploadService,
@@ -749,6 +785,9 @@ func (s *taskCreateReferenceUploadService) CancelUploadSession(ctx context.Conte
 	if appErr != nil {
 		return nil, appErr
 	}
+	if params.OwnerType != "" && request.OwnerType != params.OwnerType {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "upload_session belongs to another upload workflow", nil)
+	}
 	alreadyCancelled := false
 	if err := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
 		locked, err := s.getUploadRequestForUpdate(ctx, tx, request.RequestID)
@@ -759,7 +798,7 @@ func (s *taskCreateReferenceUploadService) CancelUploadSession(ctx context.Conte
 			return domain.ErrNotFound
 		}
 		request = locked
-		if request.OwnerType != domain.AssetOwnerTypeTaskCreateReference || request.OwnerID != params.CancelledBy {
+		if !isPreCreateUploadOwner(request.OwnerType) || request.OwnerID != params.CancelledBy {
 			return domain.NewAppError(domain.ErrCodeInvalidRequest, "upload_session does not belong to current actor", nil)
 		}
 		if request.SessionStatus == domain.DesignAssetSessionStatusCompleted || request.Status == domain.UploadRequestStatusBound {
@@ -777,7 +816,7 @@ func (s *taskCreateReferenceUploadService) CancelUploadSession(ctx context.Conte
 				return fmt.Errorf("abort task-create reference upload session via upload service client: %w", err)
 			}
 		} else if s.ossDirectService != nil && s.ossDirectService.Enabled() {
-			expectedObjectKey := s.ossDirectService.BuildUploadSessionObjectKey("task-create-reference", request.RequestID, request.FileName)
+			expectedObjectKey := s.ossDirectService.BuildUploadSessionObjectKey(preCreateUploadNamespace(request.OwnerType), request.RequestID, request.FileName)
 			objectKey := strings.TrimSpace(params.OSSObjectKey)
 			if objectKey == "" {
 				objectKey = expectedObjectKey
@@ -839,7 +878,7 @@ func (s *taskCreateReferenceUploadService) requireUploadRequest(ctx context.Cont
 	if request == nil {
 		return nil, domain.ErrNotFound
 	}
-	if request.OwnerType != domain.AssetOwnerTypeTaskCreateReference {
+	if !isPreCreateUploadOwner(request.OwnerType) {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "upload_session does not belong to task-create reference uploads", nil)
 	}
 	if request.OwnerID != requesterID {
@@ -1027,7 +1066,7 @@ func (s *taskCreateReferenceUploadService) finalizeUploadedReference(ctx context
 			return domain.ErrNotFound
 		}
 		request = locked
-		if request.OwnerType != domain.AssetOwnerTypeTaskCreateReference || request.OwnerID != completedBy {
+		if !isPreCreateUploadOwner(request.OwnerType) || request.OwnerID != completedBy {
 			return domain.NewAppError(domain.ErrCodeInvalidRequest, "upload_session does not belong to current actor", nil)
 		}
 		if request.Status == domain.UploadRequestStatusBound || request.SessionStatus == domain.DesignAssetSessionStatusCompleted {
@@ -1043,7 +1082,7 @@ func (s *taskCreateReferenceUploadService) finalizeUploadedReference(ctx context
 		}
 		ref, createErr := s.assetStorageRefRepo.Create(ctx, tx, &domain.AssetStorageRef{
 			RefID:           uuid.NewString(),
-			OwnerType:       domain.AssetOwnerTypeTaskCreateReference,
+			OwnerType:       request.OwnerType,
 			OwnerID:         request.OwnerID,
 			UploadRequestID: request.RequestID,
 			StorageAdapter:  domain.AssetStorageAdapterOSSUploadService,

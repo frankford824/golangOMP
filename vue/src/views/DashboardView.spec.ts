@@ -113,6 +113,9 @@ describe('DashboardView authoritative refresh', () => {
     expect(wrapper.get('.board-header-aside strong').text()).toBe('303')
     expect(wrapper.text()).toContain('全局进行中任务 978')
     expect(wrapper.text()).toContain('本周完成率 20.0%')
+    expect(wrapper.text()).toContain('今日结单')
+    expect(wrapper.text()).not.toContain('待仓库')
+    expect(wrapper.text()).not.toContain('待结单')
 
     const refreshButton = wrapper.findAll('button').find((button) => button.text().includes('立即刷新'))
     expect(refreshButton).toBeTruthy()

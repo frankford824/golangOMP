@@ -9,21 +9,7 @@ export function deepCloneJson<T>(v: T): T {
 }
 
 export function defaultBatchTemplateValues(kind: TaskKind): TaskBatchTemplateValues {
-  if (kind === 'PURCHASE_TASK') {
-    return {
-      productName: '',
-      productChannel: undefined,
-      material: undefined,
-      materialOther: undefined,
-      purchaseSku: undefined,
-      skuRuleId: null,
-      costPriceMode: 'template',
-      costPriceAmount: undefined,
-      quantity: undefined,
-      baseSalePrice: undefined,
-      referenceFileRefs: [],
-    }
-  }
+  void kind
   return {
     productName: '',
     productShortName: '',
@@ -66,7 +52,6 @@ export function createBatchItemsFromTemplate(
   for (let i = 0; i < n; i++) {
     const row = deepCloneJson(baseFields) as TaskBatchTemplateValues
     row.newSku = undefined
-    row.purchaseSku = undefined
     const refs = opts.inheritRefs && Array.isArray(template.referenceFileRefs)
       ? deepCloneJson(template.referenceFileRefs)
       : []
@@ -89,9 +74,9 @@ export function createBatchItemsFromTemplate(
 export type BatchItemStatus = 'generated' | 'modified' | 'pending' | 'error'
 
 export function getBatchItemDisplayStatus(item: TaskBatchItem, taskKind: TaskKind): BatchItemStatus {
+  void taskKind
   if (item._editedFromTemplate) return 'modified'
-  const sku =
-    taskKind === 'PURCHASE_TASK' ? item.purchaseSku?.trim() : item.newSku?.trim()
+  const sku = item.newSku?.trim()
   if (sku) return 'generated'
   return 'pending'
 }

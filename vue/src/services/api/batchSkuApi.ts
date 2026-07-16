@@ -16,11 +16,6 @@ export interface BatchPreviewRow {
   design_requirement?: string
   product_i_id?: string
   category_code?: string
-  cost_price_mode?: string
-  quantity?: number
-  base_sale_price?: number
-  cost_price?: number
-  purchase_sku?: string
   variant_json?: Record<string, unknown>
   reference_file_refs?: ReferenceFileRef[]
 }
@@ -96,12 +91,7 @@ export function normalizeBatchPreviewRow(row: unknown): BatchPreviewRow {
   }
 
   const category_code = pickStr('category_code', 'categoryCode')
-  const cost_price_mode = pickStr('cost_price_mode', 'costPriceMode')
-  const quantity = pickNum('quantity')
   const source_row = pickNum('source_row', 'sourceRow')
-  const base_sale_price = pickNum('base_sale_price', 'baseSalePrice')
-  const cost_price = pickNum('cost_price', 'costPrice', 'costPriceAmount')
-  const purchase_sku = pickStr('purchase_sku', 'purchaseSku')
 
   let variant_json: Record<string, unknown> | undefined
   const variantRaw = r.variant_json ?? r.variantJson
@@ -124,11 +114,6 @@ export function normalizeBatchPreviewRow(row: unknown): BatchPreviewRow {
     design_requirement: pickStr('design_requirement', 'designRequirement') ?? r.design_requirement,
     ...(product_i_id !== undefined ? { product_i_id } : {}),
     ...(category_code !== undefined ? { category_code } : {}),
-    ...(cost_price_mode !== undefined ? { cost_price_mode } : {}),
-    ...(quantity !== undefined ? { quantity } : {}),
-    ...(base_sale_price !== undefined ? { base_sale_price } : {}),
-    ...(cost_price !== undefined ? { cost_price } : {}),
-    ...(purchase_sku !== undefined ? { purchase_sku } : {}),
     ...(variant_json !== undefined ? { variant_json } : {}),
     ...(reference_file_refs ? { reference_file_refs } : {}),
   }
@@ -144,7 +129,7 @@ export const batchSkuApi = {
 
   parseExcel: (
     file: File,
-    taskType: 'new_product_development' | 'purchase_task' = 'new_product_development',
+    taskType: 'new_product_development' = 'new_product_development',
     signal?: AbortSignal,
   ) => {
     const form = new FormData()

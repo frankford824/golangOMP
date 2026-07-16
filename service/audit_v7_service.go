@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -40,6 +41,7 @@ type auditV7Service struct {
 	scopeUserRepo     repo.UserRepo
 	assetFlowRepo     AuditAssetFlowRepo
 	experienceSvc     ExperienceService
+	v8AccessResolver  auditV8EffectiveAccessResolver
 }
 
 type auditTaskFilingTrigger interface {
@@ -56,6 +58,19 @@ type AuditAssetFlowRepo interface {
 }
 
 type AuditV7ServiceOption func(*auditV7Service)
+
+type auditV8EffectiveAccessResolver interface {
+	EffectiveAccess(ctx context.Context, userID int64) (*domain.EffectiveAccess, *domain.AppError)
+}
+
+type auditV8TaskLockingRepo interface {
+	GetByIDForUpdate(ctx context.Context, tx repo.Tx, id int64) (*domain.Task, error)
+}
+
+type auditV8HandoverLockingRepo interface {
+	GetHandoverByIDForUpdate(ctx context.Context, tx repo.Tx, id int64) (*domain.AuditHandover, error)
+	CASUpdateHandoverStatus(ctx context.Context, tx repo.Tx, id int64, expected, next domain.HandoverStatus) (bool, error)
+}
 
 func WithAuditV7FilingTrigger(trigger auditTaskFilingTrigger) AuditV7ServiceOption {
 	return func(s *auditV7Service) {
@@ -84,6 +99,12 @@ func WithAuditV7AssetFlowRepo(assetFlowRepo AuditAssetFlowRepo) AuditV7ServiceOp
 func WithAuditV7ExperienceService(experienceSvc ExperienceService) AuditV7ServiceOption {
 	return func(s *auditV7Service) {
 		s.experienceSvc = experienceSvc
+	}
+}
+
+func WithAuditV8EffectiveAccessResolver(resolver auditV8EffectiveAccessResolver) AuditV7ServiceOption {
+	return func(s *auditV7Service) {
+		s.v8AccessResolver = resolver
 	}
 }
 
@@ -594,25 +615,41 @@ func (s *auditV7Service) Handover(ctx context.Context, p HandoverAuditParams) (*
 	if appErr != nil {
 		return nil, appErr
 	}
-	if appErr := s.ensureAuditLanePolicy(ctx, task, string(TaskActionAuditHandover), []auditLaneAccessSubject{
-		{UserID: p.FromAuditorID, Label: "from_auditor_id"},
-		{UserID: p.ToAuditorID, Label: "to_auditor_id"},
-	}); appErr != nil {
-		return nil, appErr
-	}
 	stage, ok := activeAuditStageFromStatus(task.TaskStatus)
 	if !ok {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidStateTransition,
 			fmt.Sprintf("task %d in status %q cannot be handed over",
 				p.TaskID, task.TaskStatus), nil)
 	}
-	authz := s.taskActionAuthorizer()
-	decision := authz.EvaluateTaskActionPolicyWithAttributes(ctx, TaskActionAuditHandover, task, "", "", TaskActionAttributes{
-		AuditStage: stage,
-	})
-	authz.logDecision(TaskActionAuditHandover, decision)
-	if !decision.Allowed {
-		return nil, taskActionDecisionAppError(TaskActionAuditHandover, decision)
+	if task.TaskStatus == domain.TaskStatusPendingAudit {
+		if appErr := authorizeV8AuditTask(ctx, task, domain.PermissionTaskAuditDecision, p.FromAuditorID); appErr != nil {
+			return nil, appErr
+		}
+		if task.CurrentHandlerID == nil || *task.CurrentHandlerID != p.FromAuditorID {
+			return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "only the current audit handler can hand over this task", map[string]interface{}{
+				"deny_code": "audit_handover_requires_current_handler",
+				"task_id":   task.ID,
+				"actor_id":  p.FromAuditorID,
+			})
+		}
+		if appErr := s.authorizeV8AuditTarget(ctx, task, p.ToAuditorID); appErr != nil {
+			return nil, appErr
+		}
+	} else {
+		if appErr := s.ensureAuditLanePolicy(ctx, task, string(TaskActionAuditHandover), []auditLaneAccessSubject{
+			{UserID: p.FromAuditorID, Label: "from_auditor_id"},
+			{UserID: p.ToAuditorID, Label: "to_auditor_id"},
+		}); appErr != nil {
+			return nil, appErr
+		}
+		authz := s.taskActionAuthorizer()
+		decision := authz.EvaluateTaskActionPolicyWithAttributes(ctx, TaskActionAuditHandover, task, "", "", TaskActionAttributes{
+			AuditStage: stage,
+		})
+		authz.logDecision(TaskActionAuditHandover, decision)
+		if !decision.Allowed {
+			return nil, taskActionDecisionAppError(TaskActionAuditHandover, decision)
+		}
 	}
 	if appErr := s.ensureNoPendingHandover(ctx, p.TaskID); appErr != nil {
 		return nil, appErr
@@ -620,6 +657,11 @@ func (s *auditV7Service) Handover(ctx context.Context, p HandoverAuditParams) (*
 	if p.FromAuditorID == p.ToAuditorID {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "to_auditor_id must be different from from_auditor_id", nil)
 	}
+	p.Reason = strings.TrimSpace(p.Reason)
+	if p.Reason == "" {
+		return nil, domain.ErrReasonRequired
+	}
+	expectedWorkflowRevision := task.WorkflowRevision
 
 	handoverNo, appErr := s.codeRuleSvc.GenerateCode(ctx, domain.CodeRuleTypeHandoverNo)
 	if appErr != nil {
@@ -639,6 +681,21 @@ func (s *auditV7Service) Handover(ctx context.Context, p HandoverAuditParams) (*
 
 	var newID int64
 	txErr := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
+		if task.TaskStatus == domain.TaskStatusPendingAudit {
+			lockingRepo, ok := s.taskRepo.(auditV8TaskLockingRepo)
+			if !ok {
+				return fmt.Errorf("v8 audit handover task locking is unavailable")
+			}
+			lockedTask, err := lockingRepo.GetByIDForUpdate(ctx, tx, p.TaskID)
+			if err != nil {
+				return fmt.Errorf("lock task for v8 audit handover: %w", err)
+			}
+			if lockedTask == nil || lockedTask.TaskStatus != domain.TaskStatusPendingAudit ||
+				lockedTask.WorkflowRevision != expectedWorkflowRevision || lockedTask.CurrentHandlerID == nil ||
+				*lockedTask.CurrentHandlerID != p.FromAuditorID {
+				return repo.ErrConflict
+			}
+		}
 		id, err := s.auditV7Repo.CreateHandover(ctx, tx, handover)
 		if err != nil {
 			return fmt.Errorf("create handover: %w", err)
@@ -672,6 +729,12 @@ func (s *auditV7Service) Handover(ctx context.Context, p HandoverAuditParams) (*
 		return err
 	})
 	if txErr != nil {
+		if errors.Is(txErr, repo.ErrConflict) {
+			return nil, domain.NewAppError(domain.ErrCodeConflict, "task audit handler or workflow revision changed; refresh and retry", map[string]interface{}{
+				"deny_code": "audit_handover_concurrent_change",
+				"task_id":   p.TaskID,
+			})
+		}
 		return nil, infraError("handover tx", txErr)
 	}
 
@@ -826,26 +889,25 @@ func (s *auditV7Service) listHandoverCandidatesForActor(ctx context.Context, act
 	if appErr != nil {
 		return nil, appErr
 	}
-	statuses := []domain.TaskStatus{domain.TaskStatusPendingAuditA, domain.TaskStatusPendingAuditB}
-	if normalized.Status != "" {
-		statuses = []domain.TaskStatus{normalized.Status}
-	}
+	statuses := []domain.TaskStatus{domain.TaskStatusPendingAudit}
 	ownerOrgTeams := []string{}
 	if normalized.OwnerOrgTeam != "" {
 		ownerOrgTeams = []string{normalized.OwnerOrgTeam}
 	}
+	access := domain.ResourceGroupAccessFilterForActor(actor, domain.PermissionTaskAuditDecision)
 	handlerID := actor.ID
 	items, total, err := s.taskRepo.List(ctx, repo.TaskListFilter{
 		TaskQueryFilterDefinition: domain.TaskQueryFilterDefinition{
 			Statuses:      statuses,
-			BusinessLanes: []domain.TaskBusinessLane{domain.TaskBusinessLaneNormal},
-			WorkflowLanes: []domain.WorkflowLane{domain.WorkflowLaneNormal},
 			OwnerOrgTeams: ownerOrgTeams,
 		},
 		CurrentHandlerID:            &handlerID,
 		Keyword:                     normalized.Keyword,
 		ExcludePendingAuditHandover: true,
-		ScopeViewAll:                true,
+		ScopeViewAll:                access.Global,
+		ScopeUserIDs:                v8ScopeUserIDs(access),
+		ScopeDepartmentIDs:          access.DepartmentIDs,
+		ScopeTeamIDs:                access.TeamIDs,
 		Page:                        normalized.Page,
 		PageSize:                    normalized.PageSize,
 	})
@@ -893,10 +955,10 @@ func normalizeAuditHandoverCandidateFilter(filter AuditHandoverCandidateFilter) 
 		filter.PageSize = 100
 	}
 	switch filter.Status {
-	case "", domain.TaskStatusPendingAuditA, domain.TaskStatusPendingAuditB:
+	case "", domain.TaskStatusPendingAudit:
 		return filter, nil
 	default:
-		return AuditHandoverCandidateFilter{}, domain.NewAppError(domain.ErrCodeInvalidRequest, "status must be PendingAuditA or PendingAuditB", nil)
+		return AuditHandoverCandidateFilter{}, domain.NewAppError(domain.ErrCodeInvalidRequest, "status must be PendingAudit", nil)
 	}
 }
 
@@ -910,17 +972,14 @@ func auditHandoverActorFromContext(ctx context.Context) (domain.RequestActor, *d
 }
 
 func authorizeAuditHandoverBatchActor(actor domain.RequestActor) *domain.AppError {
-	rule := taskActionRuleFor(TaskActionAuditHandover)
-	if domain.ActorHasAnyRole(actor, rule.RequiredRoles) {
+	if domain.ActorHasPermission(actor, domain.PermissionTaskAuditDecision) && actor.EffectiveAccess != nil {
 		return nil
 	}
-	return domain.NewAppError(domain.ErrCodePermissionDenied, rule.RoleGateMessage, map[string]interface{}{
-		"action":       string(TaskActionAuditHandover),
-		"deny_code":    "missing_required_role",
-		"deny_reason":  "missing_required_role",
-		"matched_rule": rule.MatchedRule,
-		"actor_id":     actor.ID,
-		"actor_roles":  actor.Roles,
+	return domain.NewAppError(domain.ErrCodePermissionDenied, "task.audit.decision is required", map[string]interface{}{
+		"action":      string(TaskActionAuditHandover),
+		"deny_code":   "missing_required_capability",
+		"deny_reason": "missing_required_capability",
+		"actor_id":    actor.ID,
 	})
 }
 
@@ -998,15 +1057,23 @@ func (s *auditV7Service) Takeover(ctx context.Context, taskID, handoverID, audit
 	if appErr != nil {
 		return appErr
 	}
-	if appErr := s.ensureAuditLanePolicy(ctx, task, string(TaskActionAuditTakeover), []auditLaneAccessSubject{
-		{UserID: handover.FromAuditorID, Label: "handover_from_auditor_id"},
-		{UserID: handover.ToAuditorID, Label: "handover_to_auditor_id"},
-		{UserID: auditorID, Label: "auditor_id"},
-	}); appErr != nil {
-		return appErr
-	}
-	if appErr := s.taskActionAuthorizer().AuthorizeTaskAction(ctx, TaskActionAuditTakeover, task); appErr != nil {
-		return appErr
+	if task.TaskStatus == domain.TaskStatusPendingAudit {
+		subject := task.AccessSubject()
+		subject.CurrentHandlerID = &auditorID
+		if appErr := authorizeV8AuditSubject(ctx, subject, domain.PermissionTaskAuditDecision, auditorID); appErr != nil {
+			return appErr
+		}
+	} else {
+		if appErr := s.ensureAuditLanePolicy(ctx, task, string(TaskActionAuditTakeover), []auditLaneAccessSubject{
+			{UserID: handover.FromAuditorID, Label: "handover_from_auditor_id"},
+			{UserID: handover.ToAuditorID, Label: "handover_to_auditor_id"},
+			{UserID: auditorID, Label: "auditor_id"},
+		}); appErr != nil {
+			return appErr
+		}
+		if appErr := s.taskActionAuthorizer().AuthorizeTaskAction(ctx, TaskActionAuditTakeover, task); appErr != nil {
+			return appErr
+		}
 	}
 	stage, ok := activeAuditStageFromStatus(task.TaskStatus)
 	if !ok {
@@ -1014,9 +1081,40 @@ func (s *auditV7Service) Takeover(ctx context.Context, taskID, handoverID, audit
 			fmt.Sprintf("task %d in status %q cannot take over audit",
 				handover.TaskID, task.TaskStatus), nil)
 	}
+	expectedWorkflowRevision := task.WorkflowRevision
 
 	txErr := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
-		if err := s.auditV7Repo.UpdateHandoverStatus(ctx, tx, handoverID, domain.HandoverStatusTakenOver); err != nil {
+		if task.TaskStatus == domain.TaskStatusPendingAudit {
+			taskLockingRepo, ok := s.taskRepo.(auditV8TaskLockingRepo)
+			if !ok {
+				return fmt.Errorf("v8 audit takeover task locking is unavailable")
+			}
+			handoverLockingRepo, ok := s.auditV7Repo.(auditV8HandoverLockingRepo)
+			if !ok {
+				return fmt.Errorf("v8 audit takeover handover locking is unavailable")
+			}
+			lockedTask, err := taskLockingRepo.GetByIDForUpdate(ctx, tx, task.ID)
+			if err != nil {
+				return fmt.Errorf("lock task for v8 audit takeover: %w", err)
+			}
+			lockedHandover, err := handoverLockingRepo.GetHandoverByIDForUpdate(ctx, tx, handoverID)
+			if err != nil {
+				return fmt.Errorf("lock handover for v8 audit takeover: %w", err)
+			}
+			if lockedTask == nil || lockedHandover == nil ||
+				lockedTask.TaskStatus != domain.TaskStatusPendingAudit || lockedTask.WorkflowRevision != expectedWorkflowRevision ||
+				lockedTask.CurrentHandlerID != nil || lockedHandover.Status != domain.HandoverStatusPendingTakeover ||
+				lockedHandover.TaskID != taskID || lockedHandover.ToAuditorID != auditorID {
+				return repo.ErrConflict
+			}
+			updated, err := handoverLockingRepo.CASUpdateHandoverStatus(ctx, tx, handoverID, domain.HandoverStatusPendingTakeover, domain.HandoverStatusTakenOver)
+			if err != nil {
+				return err
+			}
+			if !updated {
+				return repo.ErrConflict
+			}
+		} else if err := s.auditV7Repo.UpdateHandoverStatus(ctx, tx, handoverID, domain.HandoverStatusTakenOver); err != nil {
 			return err
 		}
 		if err := s.taskRepo.UpdateHandler(ctx, tx, handover.TaskID, &auditorID); err != nil {
@@ -1040,6 +1138,13 @@ func (s *auditV7Service) Takeover(ctx context.Context, taskID, handoverID, audit
 		return err
 	})
 	if txErr != nil {
+		if errors.Is(txErr, repo.ErrConflict) {
+			return domain.NewAppError(domain.ErrCodeConflict, "task or audit handover changed concurrently; refresh and retry", map[string]interface{}{
+				"deny_code":   "audit_takeover_concurrent_change",
+				"task_id":     taskID,
+				"handover_id": handoverID,
+			})
+		}
 		return infraError("takeover tx", txErr)
 	}
 	return nil
@@ -1050,18 +1155,53 @@ func (s *auditV7Service) ListHandovers(ctx context.Context, taskID int64) ([]*do
 	if appErr != nil {
 		return nil, appErr
 	}
-	if appErr := s.authorizeListHandovers(ctx, task); appErr != nil {
-		return nil, appErr
-	}
-
 	handovers, err := s.auditV7Repo.ListHandoversByTaskID(ctx, taskID)
 	if err != nil {
 		return nil, infraError("list handovers", err)
 	}
+	if appErr := s.authorizeListHandovers(ctx, task, handovers); appErr != nil {
+		return nil, appErr
+	}
+	actor, _ := domain.RequestActorFromContext(ctx)
+	for _, handover := range handovers {
+		if handover == nil {
+			continue
+		}
+		handover.AllowedActions = []string{}
+		if task.TaskStatus != domain.TaskStatusPendingAudit || handover.Status != domain.HandoverStatusPendingTakeover || handover.ToAuditorID != actor.ID {
+			continue
+		}
+		prospectiveSubject := task.AccessSubject()
+		prospectiveSubject.CurrentHandlerID = &actor.ID
+		if domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskAuditDecision, prospectiveSubject) {
+			handover.AllowedActions = append(handover.AllowedActions, "task.audit.takeover")
+		}
+	}
 	return handovers, nil
 }
 
-func (s *auditV7Service) authorizeListHandovers(ctx context.Context, task *domain.Task) *domain.AppError {
+func (s *auditV7Service) authorizeListHandovers(ctx context.Context, task *domain.Task, handovers []*domain.AuditHandover) *domain.AppError {
+	if task != nil && task.TaskStatus == domain.TaskStatusPendingAudit {
+		actor, ok := domain.RequestActorFromContext(ctx)
+		if !ok || actor.ID <= 0 {
+			return domain.ErrUnauthorized
+		}
+		if domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskView, task.AccessSubject()) || domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskAuditDecision, task.AccessSubject()) {
+			return nil
+		}
+		prospectiveSubject := task.AccessSubject()
+		prospectiveSubject.CurrentHandlerID = &actor.ID
+		for _, handover := range handovers {
+			if handover != nil && handover.Status == domain.HandoverStatusPendingTakeover && handover.ToAuditorID == actor.ID &&
+				domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskAuditDecision, prospectiveSubject) {
+				return nil
+			}
+		}
+		return domain.NewAppError(domain.ErrCodePermissionDenied, "task handovers are outside the effective data scope", map[string]interface{}{
+			"deny_code": "audit_handover_list_out_of_scope",
+			"task_id":   task.ID,
+		})
+	}
 	actor, ok := domain.RequestActorFromContext(ctx)
 	if !ok || actor.ID <= 0 {
 		return nil
@@ -1346,6 +1486,8 @@ func isClaimableStatus(status domain.TaskStatus, stage domain.AuditRecordStage) 
 
 func activeAuditStageFromStatus(status domain.TaskStatus) (domain.AuditRecordStage, bool) {
 	switch status {
+	case domain.TaskStatusPendingAudit:
+		return domain.AuditRecordStageUnified, true
 	case domain.TaskStatusPendingAuditA:
 		return domain.AuditRecordStageA, true
 	case domain.TaskStatusPendingAuditB:
@@ -1355,6 +1497,74 @@ func activeAuditStageFromStatus(status domain.TaskStatus) (domain.AuditRecordSta
 	default:
 		return "", false
 	}
+}
+
+func authorizeV8AuditTask(ctx context.Context, task *domain.Task, permission domain.PermissionCode, actorID int64) *domain.AppError {
+	if task == nil {
+		return domain.ErrNotFound
+	}
+	return authorizeV8AuditSubject(ctx, task.AccessSubject(), permission, actorID)
+}
+
+func authorizeV8AuditSubject(ctx context.Context, subject domain.TaskAccessSubject, permission domain.PermissionCode, actorID int64) *domain.AppError {
+	actor, ok := domain.RequestActorFromContext(ctx)
+	if !ok || actor.ID <= 0 {
+		return domain.ErrUnauthorized
+	}
+	if actor.ID != actorID || !domain.EffectiveAccessAllowsTask(actor, permission, subject) {
+		return domain.NewAppError(domain.ErrCodePermissionDenied, "task audit action is outside the effective data scope", map[string]interface{}{
+			"deny_code": "task_audit_out_of_scope",
+			"task_id":   subject.TaskID,
+			"actor_id":  actor.ID,
+		})
+	}
+	return nil
+}
+
+func v8ScopeUserIDs(access domain.ResourceGroupAccessFilter) []int64 {
+	if access.Self && access.ActorID > 0 {
+		return []int64{access.ActorID}
+	}
+	return nil
+}
+
+func (s *auditV7Service) authorizeV8AuditTarget(ctx context.Context, task *domain.Task, targetID int64) *domain.AppError {
+	if targetID <= 0 {
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "to_auditor_id is required", nil)
+	}
+	if s.v8AccessResolver == nil || s.scopeUserRepo == nil {
+		return domain.NewAppError(domain.ErrCodeInternalError, "v8 audit target authorization is unavailable", nil)
+	}
+	user, err := s.scopeUserRepo.GetByID(ctx, targetID)
+	if err != nil {
+		return infraError("get v8 audit target", err)
+	}
+	if user == nil || user.Status != domain.UserStatusActive {
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "target auditor must be an active user", map[string]interface{}{"to_auditor_id": targetID})
+	}
+	effective, appErr := s.v8AccessResolver.EffectiveAccess(ctx, targetID)
+	if appErr != nil {
+		return appErr
+	}
+	target := domain.RequestActor{
+		ID:              targetID,
+		DepartmentID:    user.DepartmentID,
+		TeamID:          user.TeamID,
+		EffectiveAccess: effective,
+	}
+	if effective != nil {
+		target.Permissions = effective.Permissions
+	}
+	prospectiveSubject := task.AccessSubject()
+	prospectiveSubject.CurrentHandlerID = &targetID
+	if !domain.EffectiveAccessAllowsTask(target, domain.PermissionTaskAuditDecision, prospectiveSubject) {
+		return domain.NewAppError(domain.ErrCodePermissionDenied, "target auditor is outside the effective task audit scope", map[string]interface{}{
+			"deny_code":     "target_auditor_out_of_scope",
+			"task_id":       task.ID,
+			"to_auditor_id": targetID,
+		})
+	}
+	return nil
 }
 
 func rejectedStatusForStage(stage domain.AuditRecordStage) (domain.TaskStatus, bool) {

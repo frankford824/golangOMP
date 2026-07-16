@@ -4,10 +4,13 @@ package domain
 type TaskStatus string
 
 const (
-	TaskStatusDraft                          TaskStatus = "Draft"
-	TaskStatusPendingAssign                  TaskStatus = "PendingAssign"
-	TaskStatusAssigned                       TaskStatus = "Assigned"
-	TaskStatusInProgress                     TaskStatus = "InProgress"
+	TaskStatusDraft         TaskStatus = "Draft"
+	TaskStatusPendingAssign TaskStatus = "PendingAssign"
+	TaskStatusAssigned      TaskStatus = "Assigned"
+	TaskStatusInProgress    TaskStatus = "InProgress"
+	TaskStatusPendingAudit  TaskStatus = "PendingAudit"
+	// Legacy workflow statuses below are read/migration-only. New writes must use
+	// PendingAudit, InProgress or Completed.
 	TaskStatusPendingAuditA                  TaskStatus = "PendingAuditA"
 	TaskStatusRejectedByAuditA               TaskStatus = "RejectedByAuditA"
 	TaskStatusPendingAuditB                  TaskStatus = "PendingAuditB"
@@ -36,7 +39,9 @@ type TaskType string
 const (
 	TaskTypeOriginalProductDevelopment TaskType = "original_product_development"
 	TaskTypeNewProductDevelopment      TaskType = "new_product_development"
-	TaskTypePurchaseTask               TaskType = "purchase_task"
+	TaskTypeSKUPlanning                TaskType = "sku_planning"
+	// TaskTypePurchaseTask is migration-only. New writes use TaskTypeSKUPlanning.
+	TaskTypePurchaseTask TaskType = "purchase_task"
 )
 
 // TaskSourceMode controls how a Task binds its SKU (spec V7 §4.2).
@@ -99,6 +104,8 @@ const (
 	// CodeRuleTypeNewSKU is retained only to recognize and reject archived legacy rules.
 	// Current SKU/product-code allocation uses product_code_sequences.
 	CodeRuleTypeNewSKU      CodeRuleType = "new_sku"
+	CodeRuleTypeTaskProduct CodeRuleType = "task_product_code"
+	CodeRuleTypeSKUPlanning CodeRuleType = "sku_planning"
 	CodeRuleTypeOutsourceNo CodeRuleType = "outsource_no"
 	CodeRuleTypeHandoverNo  CodeRuleType = "handover_no"
 )
@@ -110,6 +117,7 @@ const (
 	ResetCycleNone    ResetCycle = "none"
 	ResetCycleDaily   ResetCycle = "daily"
 	ResetCycleMonthly ResetCycle = "monthly"
+	ResetCycleYearly  ResetCycle = "yearly"
 )
 
 // AuditRecordStage identifies the audit gate in V7 AuditRecord.
@@ -117,6 +125,7 @@ const (
 type AuditRecordStage string
 
 const (
+	AuditRecordStageUnified         AuditRecordStage = "audit"
 	AuditRecordStageA               AuditRecordStage = "A"
 	AuditRecordStageB               AuditRecordStage = "B"
 	AuditRecordStageOutsourceReview AuditRecordStage = "outsource_review"
@@ -210,7 +219,7 @@ func (t TaskType) RequiresAudit() bool {
 
 func (t TaskType) Valid() bool {
 	switch t {
-	case TaskTypeOriginalProductDevelopment, TaskTypeNewProductDevelopment, TaskTypePurchaseTask:
+	case TaskTypeOriginalProductDevelopment, TaskTypeNewProductDevelopment, TaskTypeSKUPlanning, TaskTypePurchaseTask:
 		return true
 	case TaskTypeRetouchTask, TaskTypeCustomerCustomization, TaskTypeRegularCustomization:
 		return true
@@ -223,7 +232,7 @@ func (t TaskType) DefaultSourceMode() (TaskSourceMode, bool) {
 	switch t {
 	case TaskTypeOriginalProductDevelopment:
 		return TaskSourceModeExistingProduct, true
-	case TaskTypeNewProductDevelopment, TaskTypePurchaseTask, TaskTypeRetouchTask, TaskTypeCustomerCustomization, TaskTypeRegularCustomization:
+	case TaskTypeNewProductDevelopment, TaskTypeSKUPlanning, TaskTypePurchaseTask, TaskTypeRetouchTask, TaskTypeCustomerCustomization, TaskTypeRegularCustomization:
 		return TaskSourceModeNewProduct, true
 	default:
 		return "", false

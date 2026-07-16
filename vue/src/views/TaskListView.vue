@@ -32,14 +32,6 @@
           >
             创建任务
           </BaseButton>
-          <BaseButton
-            v-if="can('task.create')"
-            variant="secondary"
-            class="task-list-action-button"
-            @click="goExcelAssistCreate"
-          >
-            Excel 辅助创建
-          </BaseButton>
         </div>
       </div>
       <div class="task-category-switch" aria-label="任务分类">
@@ -128,15 +120,6 @@
           @click="showBatchAssign = true"
         >
           批量指派
-        </BaseButton>
-        <BaseButton
-          v-if="can('warehouse.receive')"
-          size="sm"
-          variant="secondary"
-          :disabled="batchReceiving"
-          @click="batchReceive"
-        >
-          {{ batchReceiving ? '接收中...' : '批量接收' }}
         </BaseButton>
         <BaseButton
           v-if="canUseBatchAuditHandover"
@@ -574,7 +557,7 @@ import { ref, computed, onBeforeUnmount, onMounted, reactive, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useTasksStore } from '@/stores/tasks'
 import { usePermissionsStore } from '@/stores/permissions'
-import type { Task, TaskSkuItem, LegacyTaskStatus } from '@/domain/types/task'
+import type { ActiveTaskStatus, Task, TaskSkuItem } from '@/domain/types/task'
 import { isDoneStatus, shouldShowDesignerMetaOnTaskCenterCard } from '@/domain/task-actions'
 import { usePermission } from '@/composables/usePermission'
 import type { TaskListFilters } from '@/components/task/TaskFilterBar.vue'
@@ -608,13 +591,8 @@ import { getTaskCenterCardStatusLabel } from '@/domain/task-center-card-status'
 import { expandTaskListStatusFilter } from '@/domain/task-list-status-filter'
 import {
   canClaimTaskFromCenter,
-  isCustomizationModuleClaimTask,
   taskCenterClaimButtonLabel,
-  userCanActAsCustomizationClaimActor,
-  userIsPureDesignerForCustomizationClaim,
 } from '@/domain/task-center-claim'
-import { PermissionEnum } from '@/types'
-
 const router = useRouter()
 const route = useRoute()
 const tasksStore = useTasksStore()
@@ -655,13 +633,13 @@ function queryString(value: unknown): string {
   return Array.isArray(value) ? String(value[0] ?? '') : String(value ?? '')
 }
 
-function parseStatusQuery(value: unknown): LegacyTaskStatus[] {
+function parseStatusQuery(value: unknown): ActiveTaskStatus[] {
   const raw = queryString(value).trim()
   if (!raw) return []
   return raw
     .split(',')
     .map((token) => token.trim())
-    .filter(Boolean) as LegacyTaskStatus[]
+    .filter(Boolean) as ActiveTaskStatus[]
 }
 
 function parseTaskTab(value: unknown): TaskListTab {
@@ -700,7 +678,6 @@ const showCreateModal = ref(false)
 const showBatchAssign = ref(false)
 const showBatchAuditHandover = ref(false)
 const batchReminding = ref(false)
-const batchReceiving = ref(false)
 const batchAuditHandoverSubmitting = ref(false)
 const batchAuditHandoverToId = ref<string | number>('')
 const batchAuditHandoverReason = ref('')
@@ -709,13 +686,12 @@ const batchAuditHandoverRisk = ref('')
 const batchAuditHandoverError = ref('')
 const auditHandoverFilters = reactive({
   keyword: '',
-  status: '' as '' | 'PendingAuditA' | 'PendingAuditB',
+  status: '' as '' | 'PendingAudit',
   owner_org_team: '',
 })
 const auditHandoverStatusOptions: BaseSelectOption[] = [
   { label: '全部', value: '' },
-  { label: '待一审', value: 'PendingAuditA' },
-  { label: '待二审', value: 'PendingAuditB' },
+  { label: '待审核', value: 'PendingAudit' },
 ]
 const auditHandoverCandidates = ref<AuditHandoverCandidateItem[]>([])
 const auditHandoverCandidateLoading = ref(false)
@@ -760,7 +736,7 @@ const {
   includeEmpty: false,
   autoLoad: false,
   workflowLane: 'audit',
-  requiredActions: ['task.audit.review', 'task.audit.takeover'],
+  requiredActions: ['task.audit.decision'],
 })
 const listActionError = ref('')
 const listActionSuccess = ref('')
@@ -779,15 +755,7 @@ const canBatchAssign = computed(
     canAccessAction('task.assign.department') ||
     canAccessAction('task.assign.team'),
 )
-const AUDIT_REVIEW_PERMISSION_KEYS = [
-  'task.audit',
-  'task.audit.review',
-  'task.audit.approve',
-  'task.audit.reject',
-] as const
-const canUseBatchAuditHandover = computed(
-  () => can([...AUDIT_REVIEW_PERMISSION_KEYS]) && can('task.audit.takeover'),
-)
+const canUseBatchAuditHandover = computed(() => can('task.audit.decision'))
 const showAuditHandoverEntry = computed(
   () => canUseBatchAuditHandover.value && auditHandoverEntryEligibleCount.value > 0,
 )
@@ -808,14 +776,9 @@ const selectedTasks = computed(() => tasksStore.list.filter((task) => selectedId
 const currentUserIdForBatchAuditHandover = computed(() =>
   String(permissionsStore.currentUser?.id ?? '').trim(),
 )
-const REGULAR_AUDIT_HANDOVER_STATUSES = new Set<LegacyTaskStatus>([
-  'PendingAuditA',
-  'PendingAuditB',
-])
 const batchAuditHandoverTasks = computed(() =>
   selectedTasks.value.filter((task) => {
-    if (!REGULAR_AUDIT_HANDOVER_STATUSES.has(task.status)) return false
-    if (isCustomizationTask(task)) return false
+    if (task.status !== 'PendingAudit') return false
     const currentUserId = currentUserIdForBatchAuditHandover.value
     if (!currentUserId) return false
     return String(task.currentHandlerId ?? '').trim() === currentUserId
@@ -902,7 +865,6 @@ const defaultTaskFilters: TaskListFilters = {
   priority: '',
   creatorId: '',
   assigneeId: '',
-  warehouseStatus: '',
   dateFrom: '',
   dateTo: '',
   overdueOnly: false,
@@ -913,11 +875,10 @@ const defaultTaskFilters: TaskListFilters = {
 /**
  * “已归档/已结束”tab 默认展示所有终态任务：
  * - Archived: 严格归档
- * - Completed / PendingClose: 已完成或待结单
+ * - Completed: 已结单
  * - Cancelled: 已取消
  */
-const ARCHIVED_TAB_DEFAULT_STATUSES: LegacyTaskStatus[] = [
-  'PendingClose',
+const ARCHIVED_TAB_DEFAULT_STATUSES: ActiveTaskStatus[] = [
   'Completed',
   'Archived',
   'Cancelled',
@@ -947,7 +908,6 @@ const activeAdvancedFilterCount = computed(() => {
   if (f.ownerOrgTeam) count += 1
   if (f.creatorId) count += 1
   if (f.assigneeId) count += 1
-  if (f.warehouseStatus) count += 1
   if (f.dateFrom || f.dateTo) count += 1
   if (f.overdueOnly) count += 1
   return count
@@ -961,9 +921,6 @@ if (typeof route.query.owner_org_team === 'string') {
 }
 if (typeof route.query.task_category === 'string') {
   filters.value.taskCategory = route.query.task_category
-}
-if (typeof route.query.warehouse_status === 'string') {
-  filters.value.warehouseStatus = route.query.warehouse_status
 }
 if (typeof route.query.task_type === 'string') {
   filters.value.taskType = route.query.task_type
@@ -1063,7 +1020,7 @@ function buildListParams(opt?: { page?: number; append?: boolean }): TaskListPar
     const map: Record<string, string> = {
       ORIGINAL_PRODUCT_DEV: 'original_product_development',
       NEW_PRODUCT_DEV: 'new_product_development',
-      PURCHASE_TASK: 'purchase_task',
+      SKU_PLANNING: 'sku_planning',
       RETOUCH_TASK: 'retouch_task',
       CUSTOMER_CUSTOMIZATION: 'customer_customization',
       REGULAR_CUSTOMIZATION: 'regular_customization',
@@ -1094,18 +1051,13 @@ function ownershipPrimary(task: Task): string {
   return getTaskOwnershipDisplay(task).primary
 }
 
-/** 方案 B：服务端分页 + 搜索，列表由后端过滤；仅对 warehouseStatus 做前端兜底（后端未统一支持） */
+/** 服务端分页 + 搜索；前端不再按已退役流程节点二次推断。 */
 const filteredList = computed(() => {
   let list = tasksStore.list
   const f = filters.value
   if (f.creatorId) {
     const creatorId = String(f.creatorId).trim()
     list = list.filter((t) => String(t.creatorId ?? '').trim() === creatorId)
-  }
-  if (f.warehouseStatus) {
-    list = list.filter(
-      (t) => t.warehouseSubStatus === f.warehouseStatus || t.warehouseReceiveStatus === f.warehouseStatus,
-    )
   }
   return list
 })
@@ -1159,30 +1111,6 @@ async function onBatchAssignConfirm(payload: { assigneeId: string; assigneeName:
   } catch (error) {
     listActionError.value = formatTaskActionDenyMessage(error, '批量指派失败，请稍后重试')
   }
-}
-
-async function batchReceive() {
-  const ids = Array.from(selectedIds)
-  if (ids.length === 0 || batchReceiving.value) return
-  batchReceiving.value = true
-  listActionError.value = ''
-  // v4.2 修复：老板要求 + 批量接收此前是清空选中无任何后端动作，改为逐条调用真实仓库接收接口
-  const results = await Promise.allSettled(ids.map((id) => tasksStore.receiveInWarehouse(id)))
-  const failures = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected')
-  const successCount = results.length - failures.length
-  if (successCount > 0) {
-    selectedIds.clear()
-    await refreshList(true)
-  }
-  if (failures.length > 0) {
-    const firstMessage = failures[0]?.reason instanceof Error
-      ? failures[0].reason.message
-      : '部分任务接收失败，请检查任务状态与 SKU'
-    listActionError.value = successCount > 0
-      ? `已接收 ${successCount} 条，另有 ${failures.length} 条失败：${firstMessage}`
-      : firstMessage
-  }
-  batchReceiving.value = false
 }
 
 function resetBatchAuditHandoverForm() {
@@ -1346,8 +1274,7 @@ function goAuditHandoverCandidatePage(nextPage: number) {
 }
 
 function formatAuditHandoverCandidateStatus(status: string): string {
-  if (status === 'PendingAuditA') return '待一审'
-  if (status === 'PendingAuditB') return '待二审'
+  if (status === 'PendingAudit') return '待审核'
   return status || '-'
 }
 
@@ -1637,35 +1564,8 @@ function onTaskCardClick(event: MouseEvent, task: Task) {
   goDetail(task)
 }
 
-/** 池中「接单」仅面向设计侧；单靠 design.work 会漏掉只下发 task.asset_upload / task.design_submit 的普通设计师 */
-function userCanClaimFromDesignerPool(): boolean {
-  if (can(PermissionEnum.DESIGN_WORK)) return true
-  if (can(PermissionEnum.DESIGN_UPLOAD)) return true
-  if (can(PermissionEnum.DESIGN_SUBMIT)) return true
-  if (canAccessAction('task.asset_upload') || canAccessAction('task.design_submit')) return true
-  return permissionsStore.hasAnyRole(['Designer', 'CustomizationOperator'])
-}
-
-function userCanClaimCustomizationFromPool(): boolean {
-  const hasRole = (roles: readonly string[]) => permissionsStore.hasAnyRole(roles)
-  if (userIsPureDesignerForCustomizationClaim(hasRole)) return false
-  return userCanActAsCustomizationClaimActor(hasRole, permissionsStore.isCustomizationOperator)
-}
-
-function taskCenterClaimGate(): {
-  canActAsCustomizationClaimActor: boolean
-  canClaimFromDesignerPool: boolean
-  activeTabIsPool: boolean
-} {
-  return {
-    canActAsCustomizationClaimActor: userCanClaimCustomizationFromPool(),
-    canClaimFromDesignerPool: userCanClaimFromDesignerPool(),
-    activeTabIsPool: activeTab.value === 'pool',
-  }
-}
-
 function canClaimTask(task: Task): boolean {
-  return canClaimTaskFromCenter(task, taskCenterClaimGate())
+  return canClaimTaskFromCenter(task)
 }
 
 async function claimTask(task: Task) {
@@ -1673,11 +1573,6 @@ async function claimTask(task: Task) {
   claimingTaskId.value = task.id
   listActionError.value = ''
   try {
-    if (isCustomizationModuleClaimTask(task)) {
-      await tasksStore.claimCustomizationModule(task.id)
-      await refreshList(true)
-      return
-    }
     const me = permissionsStore.currentUser
     if (!me) return
     const currentUserId = Number.parseInt(String(me.id ?? ''), 10)
@@ -1713,12 +1608,6 @@ function goCreate() {
   } else {
     showCreateModal.value = true
   }
-}
-
-function goExcelAssistCreate() {
-  if (!can('task.create')) return
-  saveState()
-  void router.push({ name: 'TaskExcelAssistCreate' })
 }
 
 function goDetail(task: Task) {
@@ -1888,8 +1777,6 @@ watch(
     else delete q.owner_org_team
     if (filters.value.taskCategory) q.task_category = filters.value.taskCategory
     else delete q.task_category
-    if (filters.value.warehouseStatus) q.warehouse_status = filters.value.warehouseStatus
-    else delete q.warehouse_status
     if (filters.value.taskType) q.task_type = filters.value.taskType
     else delete q.task_type
     if (filters.value.creatorId) q.creator_id = filters.value.creatorId
@@ -1921,7 +1808,6 @@ watch(
       ownerDepartment: queryString(query.owner_department),
       ownerOrgTeam: queryString(query.owner_org_team),
       taskCategory: queryString(query.task_category),
-      warehouseStatus: queryString(query.warehouse_status),
       taskType: queryString(query.task_type),
       creatorId: queryString(query.creator_id),
       assigneeId: queryHasNonEmptyParam(query, 'designer_id')

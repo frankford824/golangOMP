@@ -22,7 +22,7 @@
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `POST` 允许角色: Ops, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector。
+- `POST` 允许角色: 已登录 / scope-aware。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -103,7 +103,7 @@ curl -X POST https://api.example.com/v1/task-create/asset-center/upload-sessions
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `GET` 允许角色: Ops。
+- `GET` 允许角色: 已登录 / scope-aware。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -159,7 +159,7 @@ curl -X GET https://api.example.com/v1/task-create/asset-center/upload-sessions/
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `POST` 允许角色: Ops。
+- `POST` 允许角色: 已登录 / scope-aware。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -242,7 +242,7 @@ curl -X POST https://api.example.com/v1/task-create/asset-center/upload-sessions
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `POST` 允许角色: Ops。
+- `POST` 允许角色: 已登录 / scope-aware。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -284,7 +284,7 @@ Content-Type: `application/json`
 |---|---|---|---|
 | 400 | 见 `error.code` | 见 `deny_code` | Invalid request payload |
 | 404 | 见 `error.code` | 见 `deny_code` | Upload session not found |
-| 409 | 见 `error.code` | 见 `deny_code` | Completed upload session cannot be aborted |
+| 409 | 见 `error.code` | 见 `deny_code` | Upload session is terminal, or the task is Completed and requires reopen |
 
 ### curl 示例
 ```bash
@@ -309,7 +309,7 @@ curl -X POST https://api.example.com/v1/task-create/asset-center/upload-sessions
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `POST` 允许角色: Ops。
+- `POST` 允许角色: 已登录 / scope-aware。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -604,7 +604,7 @@ curl -X GET https://api.example.com/v1/tasks/<id>/asset-center/assets/<asset_id>
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `POST` 允许角色: Designer, Ops, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector。
+- `POST` 允许角色: 已登录 / scope-aware。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -620,7 +620,7 @@ Content-Type: `application/json`
 |---|---|---|---|
 | `task_id` | integer | 否 | Required on `POST /v1/assets/upload-sessions`; ignored on task-scoped compatibility routes where task context comes from path. |
 | `created_by` | integer | 否 | Deprecated and ignored. The backend always uses the authenticated session actor. |
-| `asset_id` | integer | 否 | Existing design-asset id when replacing a current resource. Required for every upload against a `Completed` task and for delivery replacement during customization review. |
+| `asset_id` | integer | 否 | Existing technical design-asset root when adding another staged version. Completed tasks reject the request and require reopen. |
 | `source_asset_id` | integer | 否 | Optional linkage to a source asset. Allowed for `preview` and `design_thumb` intents. |
 | `asset_type` | enum(reference/source/delivery/preview/design_thumb) | 否 | Compatibility alias of `asset_kind` retained for migration safety. |
 | `asset_kind` | enum(reference/source/delivery/preview/design_thumb) | 否 | Canonical upload intent field for new frontend integrations. |
@@ -700,7 +700,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/asset-center/upload-sessions 
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `POST` 允许角色: Designer, Ops, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector。
+- `POST` 允许角色: 已登录 / scope-aware。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -716,7 +716,7 @@ Content-Type: `application/json`
 |---|---|---|---|
 | `task_id` | integer | 否 | Required on `POST /v1/assets/upload-sessions`; ignored on task-scoped compatibility routes where task context comes from path. |
 | `created_by` | integer | 否 | Deprecated and ignored. The backend always uses the authenticated session actor. |
-| `asset_id` | integer | 否 | Existing design-asset id when replacing a current resource. Required for every upload against a `Completed` task and for delivery replacement during customization review. |
+| `asset_id` | integer | 否 | Existing technical design-asset root when adding another staged version. Completed tasks reject the request and require reopen. |
 | `source_asset_id` | integer | 否 | Optional linkage to a source asset. Allowed for `preview` and `design_thumb` intents. |
 | `asset_type` | enum(reference/source/delivery/preview/design_thumb) | 否 | Compatibility alias of `asset_kind` retained for migration safety. |
 | `asset_kind` | enum(reference/source/delivery/preview/design_thumb) | 否 | Canonical upload intent field for new frontend integrations. |
@@ -796,7 +796,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/asset-center/upload-sessions/
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `POST` 允许角色: Designer, Ops, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector。
+- `POST` 允许角色: 已登录 / scope-aware。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -812,7 +812,7 @@ Content-Type: `application/json`
 |---|---|---|---|
 | `task_id` | integer | 否 | Required on `POST /v1/assets/upload-sessions`; ignored on task-scoped compatibility routes where task context comes from path. |
 | `created_by` | integer | 否 | Deprecated and ignored. The backend always uses the authenticated session actor. |
-| `asset_id` | integer | 否 | Existing design-asset id when replacing a current resource. Required for every upload against a `Completed` task and for delivery replacement during customization review. |
+| `asset_id` | integer | 否 | Existing technical design-asset root when adding another staged version. Completed tasks reject the request and require reopen. |
 | `source_asset_id` | integer | 否 | Optional linkage to a source asset. Allowed for `preview` and `design_thumb` intents. |
 | `asset_type` | enum(reference/source/delivery/preview/design_thumb) | 否 | Compatibility alias of `asset_kind` retained for migration safety. |
 | `asset_kind` | enum(reference/source/delivery/preview/design_thumb) | 否 | Canonical upload intent field for new frontend integrations. |
@@ -888,11 +888,11 @@ curl -X POST https://api.example.com/v1/tasks/<id>/asset-center/upload-sessions/
 ### 简介
 支持方法: GET。
 
-- `GET`: Compatibility-only alias for `GET /v1/assets/upload-sessions/{session_id}`. Returns the MAIN-side upload-session business view.
+- `GET`: Compatibility-only alias for `GET /v1/assets/upload-sessions/{session_id}`. Returns the MAIN-side upload-session business view. Completed and Archived tasks require reopen because the read may synchronize remote session state transactionally.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `GET` 允许角色: Designer, Ops, Audit_A, Audit_B。
+- `GET` 允许角色: 已登录 / scope-aware。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -927,6 +927,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/asset-center/upload-sessions/
 | HTTP | code | deny_code | 说明 |
 |---|---|---|---|
 | 404 | 见 `error.code` | 见 `deny_code` | Task or upload session not found |
+| 409 | 见 `error.code` | 见 `deny_code` | Task is Completed/Archived and requires reopen |
 
 ### curl 示例
 ```bash
@@ -945,11 +946,11 @@ curl -X GET https://api.example.com/v1/tasks/<id>/asset-center/upload-sessions/<
 ### 简介
 支持方法: POST。
 
-- `POST`: Compatibility-only alias for `POST /v1/assets/upload-sessions/{session_id}/complete`. For multi-SKU batch delivery submissions, whole-task status does not advance on the first successful bucket. `PendingAuditA` is entered only after all SKU items required by the batch have a completed delivery asset.
+- `POST`: Compatibility-only alias for `POST /v1/assets/upload-sessions/{session_id}/complete`. For multi-SKU batch delivery submissions, whole-task status does not advance on the first successful bucket. Workflow state never advances from upload completion; submit-design performs the atomic transition to `PendingAudit`.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `POST` 允许角色: Designer, Ops, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector。
+- `POST` 允许角色: 已登录 / scope-aware。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -1011,7 +1012,7 @@ Content-Type: `application/json`
 | 400 | 见 `error.code` | 见 `deny_code` | Invalid request payload |
 | 403 | 见 `error.code` | 见 `deny_code` | `PERMISSION_DENIED` with task-action `deny_code` details when the actor is outside the allowed org scope. |
 | 404 | 见 `error.code` | 见 `deny_code` | Task or upload session not found |
-| 409 | 见 `error.code` | 见 `deny_code` | Upload session already terminal or asset type mismatch |
+| 409 | 见 `error.code` | 见 `deny_code` | Upload session already terminal, asset type mismatch, or Completed task requires reopen |
 
 ### curl 示例
 ```bash
@@ -1036,7 +1037,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/asset-center/upload-sessions/
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `POST` 允许角色: Designer, Ops, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector。
+- `POST` 允许角色: 已登录 / scope-aware。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -1080,7 +1081,7 @@ Content-Type: `application/json`
 | 400 | 见 `error.code` | 见 `deny_code` | Invalid request payload |
 | 403 | 见 `error.code` | 见 `deny_code` | `PERMISSION_DENIED` with task-action `deny_code` details when the actor is outside the allowed org scope. |
 | 404 | 见 `error.code` | 见 `deny_code` | Task or upload session not found |
-| 409 | 见 `error.code` | 见 `deny_code` | Completed upload session cannot be cancelled |
+| 409 | 见 `error.code` | 见 `deny_code` | Upload session is terminal, or the task is Completed and requires reopen |
 
 ### curl 示例
 ```bash
@@ -1105,7 +1106,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/asset-center/upload-sessions/
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `POST` 允许角色: Designer, Ops, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector。
+- `POST` 允许角色: 已登录 / scope-aware。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -1149,7 +1150,7 @@ Content-Type: `application/json`
 | 400 | 见 `error.code` | 见 `deny_code` | Invalid request payload |
 | 403 | 见 `error.code` | 见 `deny_code` | `PERMISSION_DENIED` with task-action `deny_code` details when the actor is outside the allowed org scope. |
 | 404 | 见 `error.code` | 见 `deny_code` | Task or upload session not found |
-| 409 | 见 `error.code` | 见 `deny_code` | Completed upload session cannot be aborted |
+| 409 | 见 `error.code` | 见 `deny_code` | Upload session is terminal, or the task is Completed and requires reopen |
 
 ### curl 示例
 ```bash

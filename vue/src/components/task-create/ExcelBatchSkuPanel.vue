@@ -170,7 +170,7 @@ const emit = defineEmits<{
 
 const props = withDefaults(
   defineProps<{
-    taskType?: 'new_product_development' | 'purchase_task'
+    taskType?: 'new_product_development'
     hidePreview?: boolean
   }>(),
   {

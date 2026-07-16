@@ -109,7 +109,7 @@ describe('mapTaskEventRowToRecentEvent', () => {
     expect(event.summary).not.toContain('remote_upload_id')
   })
 
-  it('uses business copy for warehouse and close events without handler ids', () => {
+  it('neutralizes retired workflow history without leaking technical fields', () => {
     const closeEvent = mapTaskEventRowToRecentEvent(
       {
         id: 6,
@@ -128,7 +128,9 @@ describe('mapTaskEventRowToRecentEvent', () => {
       '1001',
     )
 
-    expect(closeEvent.summary).toBe('系统 已结单，SKU CGK000128，系统自动结单：仓库 30 分钟未处理。')
+    expect(closeEvent.summary).toBe('系统 记录了其他事件。')
+    expect(closeEvent.summary).not.toContain('自动结单')
+    expect(closeEvent.summary).not.toContain('仓库')
     expect(closeEvent.summary).not.toContain('handler')
     expect(closeEvent.summary).not.toContain('PendingClose')
     expect(closeEvent.summary).not.toContain('Completed')

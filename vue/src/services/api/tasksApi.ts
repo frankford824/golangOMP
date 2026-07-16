@@ -52,7 +52,7 @@ export interface TaskReferenceBatchDownloadResponse {
 
 export interface AuditHandoverCandidateFilters {
   keyword?: string
-  status?: 'PendingAuditA' | 'PendingAuditB' | ''
+  status?: 'PendingAudit' | ''
   owner_org_team?: string
   page?: number
   page_size?: number
@@ -64,7 +64,7 @@ export interface AuditHandoverCandidateItem {
   sku_code?: string
   primary_sku_code?: string
   product_name?: string
-  task_status: 'PendingAuditA' | 'PendingAuditB' | string
+  task_status: 'PendingAudit' | string
   owner_org_team?: string
   current_handler_id?: number | null
   current_handler_name?: string
@@ -442,44 +442,7 @@ export const tasksApi = {
   submitDesign: (id: string, payload: SubmitDesignPayload, signal?: AbortSignal) =>
     http.post(`/v1/tasks/${id}/submit-design`, payload, { signal }),
 
-  /**
-   * 定制审核入口
-   * POST /v1/tasks/{id}/customization/review
-   */
-  submitCustomizationReview: (id: string, payload: Record<string, unknown>, signal?: AbortSignal) =>
-    http.post(`/v1/tasks/${id}/customization/review`, payload, { signal }),
-
   // ─── 审核流程 ──────────────────────────────────────────────────────────────
-
-  /**
-   * 审核员领取审核任务（兼容入口；审核通过/驳回不再要求先领取）
-   * POST /v1/tasks/{id}/audit/claim
-   * 权限：审核员
-   * 后端要求 stage 必填，与 openapi 一致：A=常规审核 / B=常规审核交接复核 / outsource_review=历史外协复核
-   */
-  auditClaim: (id: string, payload: { stage: string }, signal?: AbortSignal) =>
-    http.post(`/v1/tasks/${id}/audit/claim`, payload, { signal }),
-
-  /**
-   * 审核通过
-   * POST /v1/tasks/{id}/audit/approve
-   * 权限：审核员（不要求先领取）
-   * 后端要求 stage、next_status 必填（openapi required）
-   */
-  auditApprove: (
-    id: string,
-    payload: { stage: string; next_status: string; comment?: string },
-    signal?: AbortSignal,
-  ) => http.post(`/v1/tasks/${id}/audit/approve`, payload, { signal }),
-
-  /**
-   * 审核驳回
-   * POST /v1/tasks/{id}/audit/reject
-   * 权限：审核员（不要求先领取）
-   * 后端要求 stage（问题分类）、comment（审核说明）必填
-   */
-  auditReject: (id: string, payload: { stage: string; comment: string }, signal?: AbortSignal) =>
-    http.post(`/v1/tasks/${id}/audit/reject`, payload, { signal }),
 
   /**
    * 审核交班
@@ -527,81 +490,6 @@ export const tasksApi = {
   auditTakeover: (id: string, payload: { handover_id: number }, signal?: AbortSignal) =>
     http.post(`/v1/tasks/${id}/audit/takeover`, payload, { signal }),
 
-  /**
-   * 审核转交
-   * POST /v1/tasks/{id}/audit/transfer
-   */
-  auditTransfer: (
-    id: string,
-    payload: { to_auditor_id: number; stage: string; from_auditor_id?: number; comment?: string; reason?: string },
-    signal?: AbortSignal,
-  ) => http.post(`/v1/tasks/${id}/audit/transfer`, payload, { signal }),
-
-  /**
-   * @deprecated 新逻辑请改用 /v1/customization-jobs*。
-   * 任务下创建定制单（任务需处于 PendingOutsource，API 路径仍为 outsource）
-   * POST /v1/tasks/{id}/outsource
-   */
-  createTaskOutsource: (
-    id: string,
-    payload: {
-      operator_id: number
-      vendor_name: string
-      outsource_type: string
-      delivery_requirement?: string
-      settlement_note?: string
-    },
-    signal?: AbortSignal,
-  ) => http.post(`/v1/tasks/${id}/outsource`, payload, { signal }),
-
-  // ─── 仓库流程 ──────────────────────────────────────────────────────────────
-
-  /**
-   * 仓库准备（将任务推进到待仓库接收队列）
-   * POST /v1/tasks/{id}/warehouse/prepare
-   */
-  warehousePrepare: (id: string, payload: Record<string, unknown> = {}, signal?: AbortSignal) =>
-    http.post(`/v1/tasks/${id}/warehouse/prepare`, payload, { signal }),
-
-  /**
-   * 仓库接收（标记已收到实物）
-   * POST /v1/tasks/{id}/warehouse/receive
-   * 权限：仓库员
-   */
-  warehouseReceive: (id: string, payload: Record<string, unknown> = {}, signal?: AbortSignal) =>
-    http.post(`/v1/tasks/${id}/warehouse/receive`, payload, { signal }),
-
-  /**
-   * 仓库驳回
-   * POST /v1/tasks/{id}/warehouse/reject
-   */
-  warehouseReject: (
-    id: string,
-    payload: {
-      reject_reason?: string
-      reject_category?: string
-      remark?: string
-      receiver_id?: number
-    },
-    signal?: AbortSignal,
-  ) => http.post(`/v1/tasks/${id}/warehouse/reject`, payload, { signal }),
-
-  /**
-   * 仓库完成（确认入库完成）
-   * POST /v1/tasks/{id}/warehouse/complete
-   * 权限：仓库员
-   */
-  warehouseComplete: (id: string, payload: Record<string, unknown> = {}, signal?: AbortSignal) =>
-    http.post(`/v1/tasks/${id}/warehouse/complete`, payload, { signal }),
-
-  /**
-   * 正式关单（仓库完成后的 PendingClose → Closed/Completed）
-   * POST /v1/tasks/{id}/close
-   * 要求任务处于 PendingClose；readiness 失败时 409 + cannot_close_reasons
-   */
-  closeTask: (id: string, payload: Record<string, unknown> = {}, signal?: AbortSignal) =>
-    http.post(`/v1/tasks/${id}/close`, payload, { signal }),
-
   // ─── 业务信息 ──────────────────────────────────────────────────────────────
 
   /**
@@ -624,14 +512,14 @@ export const tasksApi = {
 
   /**
    * GET /v1/tasks/{id}/product-info
-   * 权限：Ops/Designer/Audit_A/Audit_B/Warehouse/Outsource/Admin
+   * 权限由后端显式 capability 与稳定组织范围决定。
    */
   getProductInfo: (id: string, signal?: AbortSignal) =>
     http.get(`/v1/tasks/${id}/product-info`, { signal }),
 
   /**
    * PATCH /v1/tasks/{id}/product-info
-   * 权限：Ops/Warehouse/Admin；设计/审核/外协仅可读
+   * 权限由后端显式 capability 与稳定组织范围决定。
    * 局部编辑仅提交变更字段
    */
   patchProductInfo: (id: string, patch: Record<string, unknown>, signal?: AbortSignal) =>
@@ -639,14 +527,14 @@ export const tasksApi = {
 
   /**
    * GET /v1/tasks/{id}/cost-info
-   * 权限：Ops/Designer/Audit_A/Audit_B/Warehouse/Outsource/Admin
+   * 权限由后端显式 capability 与稳定组织范围决定。
    */
   getCostInfo: (id: string, signal?: AbortSignal) =>
     http.get(`/v1/tasks/${id}/cost-info`, { signal }),
 
   /**
    * PATCH /v1/tasks/{id}/cost-info
-   * 权限：Ops/Warehouse/Admin；设计/审核/外协仅可读
+   * 权限由后端显式 capability 与稳定组织范围决定。
    * 局部编辑仅提交变更字段
    */
   patchCostInfo: (id: string, patch: Record<string, unknown>, signal?: AbortSignal) =>
@@ -661,26 +549,10 @@ export const tasksApi = {
 
   /**
    * POST /v1/tasks/{id}/cost-quote/preview
-   * 权限：Ops/Warehouse/Admin；设计/审核/外协不可调用
+   * 权限由后端显式 capability 与稳定组织范围决定。
    */
   costQuotePreview: (id: string, payload: Record<string, unknown>, signal?: AbortSignal) =>
     http.post(`/v1/tasks/${id}/cost-quote/preview`, payload, { signal }),
-
-  // ─── 采购任务 procurement 记录（OpenAPI: PATCH + advance）──────────────────
-
-  /**
-   * 创建/更新采购任务 procurement 草稿
-   * PATCH /v1/tasks/{id}/procurement
-   */
-  patchTaskProcurement: (id: string, payload: Record<string, unknown>, signal?: AbortSignal) =>
-    http.patch(`/v1/tasks/${id}/procurement`, payload, { signal }),
-
-  /**
-   * 采购生命周期推进：prepare | start | complete | reopen
-   * POST /v1/tasks/{id}/procurement/advance
-   */
-  advanceTaskProcurement: (id: string, payload: Record<string, unknown>, signal?: AbortSignal) =>
-    http.post(`/v1/tasks/${id}/procurement/advance`, payload, { signal }),
 
   /**
    * 批量 SKU 子项编辑（后端待补充正式契约）

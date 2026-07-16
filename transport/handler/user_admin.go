@@ -38,7 +38,9 @@ type patchUserReq struct {
 	Status             *string         `json:"status"`
 	EmploymentType     *string         `json:"employment_type"`
 	Department         *string         `json:"department"`
+	DepartmentID       *int64          `json:"department_id"`
 	Team               *string         `json:"team"`
+	TeamID             *int64          `json:"team_id"`
 	Group              *string         `json:"group"`
 	Email              *string         `json:"email"`
 	Mobile             *string         `json:"mobile"`
@@ -57,7 +59,9 @@ type createUserReq struct {
 	DisplayName        string          `json:"display_name"`
 	Name               string          `json:"name"`
 	Department         string          `json:"department"`
+	DepartmentID       *int64          `json:"department_id"`
 	Team               string          `json:"team"`
+	TeamID             *int64          `json:"team_id"`
 	Group              string          `json:"group"`
 	Mobile             string          `json:"mobile"`
 	Phone              string          `json:"phone"`
@@ -140,6 +144,41 @@ func (h *UserAdminHandler) ListUsers(c *gin.Context) {
 		return
 	}
 	respondOKWithPagination(c, users, pagination)
+}
+
+// ListAccessPolicyUsers returns the minimal personnel selector used by the
+// explicit access-policy console. Authorization is enforced by the
+// capability guard on /v1/access/users; no legacy role inference happens in
+// this handler or its service path.
+func (h *UserAdminHandler) ListAccessPolicyUsers(c *gin.Context) {
+	page, _ := parseInt(c.Query("page"))
+	pageSize, _ := parseInt(c.Query("page_size"))
+	users, pagination, appErr := h.svc.ListAccessPolicyUsers(c.Request.Context(), service.UserFilter{
+		Keyword:  c.Query("q"),
+		Page:     page,
+		PageSize: pageSize,
+	})
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	type option struct {
+		ID           int64             `json:"id"`
+		Username     string            `json:"username"`
+		DisplayName  string            `json:"display_name"`
+		Department   domain.Department `json:"department"`
+		DepartmentID *int64            `json:"department_id,omitempty"`
+		Team         string            `json:"team,omitempty"`
+		TeamID       *int64            `json:"team_id,omitempty"`
+	}
+	items := make([]option, 0, len(users))
+	for _, user := range users {
+		if user == nil {
+			continue
+		}
+		items = append(items, option{ID: user.ID, Username: user.Username, DisplayName: user.DisplayName, Department: user.Department, DepartmentID: user.DepartmentID, Team: user.Team, TeamID: user.TeamID})
+	}
+	respondOKWithPagination(c, items, pagination)
 }
 
 // ListDesigners returns designers for task assignment (Ops/Designer/Admin/
@@ -253,7 +292,9 @@ func (h *UserAdminHandler) CreateUser(c *gin.Context) {
 		EmployeeNo:         employeeNo,
 		DisplayName:        firstNonEmpty(req.Name, req.DisplayName),
 		Department:         domain.Department(req.Department),
+		DepartmentID:       req.DepartmentID,
 		Team:               firstNonEmpty(req.Group, req.Team),
+		TeamID:             req.TeamID,
 		Mobile:             firstNonEmpty(req.Phone, req.Mobile),
 		Email:              req.Email,
 		Password:           req.Password,
@@ -307,7 +348,9 @@ func (h *UserAdminHandler) PatchUser(c *gin.Context) {
 		Status:             status,
 		EmploymentType:     employmentType,
 		Department:         department,
+		DepartmentID:       req.DepartmentID,
 		Team:               req.Team,
+		TeamID:             req.TeamID,
 		Group:              req.Group,
 		Email:              req.Email,
 		Mobile:             req.Mobile,

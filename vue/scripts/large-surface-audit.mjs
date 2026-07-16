@@ -26,7 +26,7 @@ const pages = [
     name: 'assets-index',
     path: '/asset-center',
     ready: '.assets-index-view',
-    countSelector: '.ac-card',
+    countSelector: '.resource-card',
     minItems: 80,
     maxNodes: 24_000,
     maxReadyMs: defaultMaxReadyMs,
@@ -39,6 +39,18 @@ const pages = [
     minItems: 80,
     maxNodes: 24_000,
     maxReadyMs: defaultMaxReadyMs,
+  },
+  {
+    name: 'planning-sku-200',
+    path: '/tasks/sku-planning',
+    ready: '.planning-page',
+    countSelector: '[data-testid="planning-row"]',
+    minItems: 1,
+    maxItems: 60,
+    maxNodes: 25_000,
+    maxReadyMs: defaultMaxReadyMs,
+    viewport: { width: 1366, height: 768 },
+    scenario: 'planning-sku-200',
   },
 ]
 
@@ -146,6 +158,7 @@ async function runLoadAudit() {
   try {
     for (const entry of pages) {
       const page = await context.newPage()
+      await page.setViewportSize(entry.viewport ?? { width: 1440, height: 900 })
       page.setDefaultTimeout(pageTimeoutMs)
       const startedAt = performance.now()
       try {
@@ -167,6 +180,9 @@ async function runLoadAudit() {
         })
         await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {})
         await page.waitForSelector(entry.ready, { state: 'visible' })
+        const scenarioMetrics = entry.scenario === 'planning-sku-200'
+          ? await preparePlanningSkuScenario(page)
+          : {}
         await page.waitForFunction(
           ({ selector, minItems }) => document.querySelectorAll(selector).length >= minItems,
           { selector: entry.countSelector, minItems: entry.minItems },
@@ -181,11 +197,14 @@ async function runLoadAudit() {
           readyMs,
           thresholds: {
             minItems: entry.minItems,
+            maxItems: entry.maxItems ?? null,
             maxReadyMs: entry.maxReadyMs,
             maxNodes: entry.maxNodes,
             maxHorizontalOverflowPx: 2,
           },
+          viewport: entry.viewport ?? { width: 1440, height: 900 },
           ...metrics,
+          ...scenarioMetrics,
         }
         reports.push(report)
         collectFailures(entry, report, failures)
@@ -218,7 +237,10 @@ async function runLoadAudit() {
   for (const report of reports) {
     console.log(
       `- ${report.name}: ${report.itemCount} items, ${report.readyMs}ms ready, ` +
-        `${report.nodeCount} nodes, overflow ${report.horizontalOverflowPx}px`,
+        `${report.nodeCount} nodes, overflow ${report.horizontalOverflowPx}px` +
+        (report.name === 'planning-sku-200'
+          ? `, order=${report.orderPreserved}, values=${report.firstValuePreserved && report.lastValuePreserved}, footer=${report.footerVisible && !report.footerOverlapsLast}`
+          : ''),
     )
   }
 
@@ -256,9 +278,76 @@ function measurePage(countSelector) {
   }
 }
 
+async function preparePlanningSkuScenario(page) {
+  const addRow = page.getByRole('button', { name: '添加一行' })
+  await addRow.waitFor({ state: 'visible' })
+  await page.evaluate(() => {
+    const button = [...document.querySelectorAll('button')].find((item) => item.textContent?.trim() === '添加一行')
+    if (!(button instanceof HTMLButtonElement)) throw new Error('planning SKU add-row control is missing')
+    for (let index = 1; index < 200; index += 1) button.click()
+  })
+  await page.waitForFunction(() => document.querySelector('[data-testid="virtual-total"]')?.textContent?.includes('当前 200 行'))
+
+  const viewport = page.locator('.virtual-list')
+  const firstDescription = page.locator('[data-row-index="0"] textarea').first()
+  await firstDescription.fill('首行保持值 001')
+
+  await viewport.evaluate((element) => {
+    element.scrollTop = element.scrollHeight
+    element.dispatchEvent(new Event('scroll'))
+  })
+  await page.waitForSelector('[data-row-index="199"]', { state: 'visible' })
+  const lastDescription = page.locator('[data-row-index="199"] textarea').first()
+  await lastDescription.fill('末行保持值 200')
+  const bottomOrder = await page.locator('[data-testid="planning-row"]').evaluateAll((rows) => rows.map((row) => Number(row.getAttribute('data-row-index'))))
+
+  await viewport.evaluate((element) => {
+    element.scrollTop = 0
+    element.dispatchEvent(new Event('scroll'))
+  })
+  await page.waitForSelector('[data-row-index="0"]', { state: 'visible' })
+  const firstValuePreserved = await page.locator('[data-row-index="0"] textarea').first().inputValue() === '首行保持值 001'
+
+  await viewport.evaluate((element) => {
+    element.scrollTop = element.scrollHeight
+    element.dispatchEvent(new Event('scroll'))
+  })
+  await page.waitForSelector('[data-row-index="199"]', { state: 'visible' })
+  const lastValuePreserved = await page.locator('[data-row-index="199"] textarea').first().inputValue() === '末行保持值 200'
+  const footer = page.locator('.editor-footer')
+  await footer.scrollIntoViewIfNeeded()
+  const layout = await page.evaluate(() => {
+    const footerElement = document.querySelector('.editor-footer')
+    const lastRow = document.querySelector('[data-row-index="199"]')
+    if (!(footerElement instanceof HTMLElement) || !(lastRow instanceof HTMLElement)) {
+      throw new Error('planning SKU footer or last row is missing')
+    }
+    const footerRect = footerElement.getBoundingClientRect()
+    const lastRowRect = lastRow.getBoundingClientRect()
+    return {
+      footerVisible: footerRect.top >= 0 && footerRect.bottom <= window.innerHeight,
+      footerOverlapsLast: footerRect.top < lastRowRect.bottom && footerRect.bottom > lastRowRect.top,
+    }
+  })
+
+  return {
+    rowCount: 200,
+    visibleRowCount: await page.locator('[data-testid="planning-row"]').count(),
+    firstValuePreserved,
+    lastValuePreserved,
+    orderPreserved: bottomOrder.length > 0
+      && bottomOrder.at(-1) === 199
+      && bottomOrder.every((value, index) => index === 0 || value === bottomOrder[index - 1] + 1),
+    ...layout,
+  }
+}
+
 function collectFailures(entry, report, failures) {
   if (report.itemCount < entry.minItems) {
     failures.push(`${entry.name}: only ${report.itemCount} items rendered, expected at least ${entry.minItems}`)
+  }
+  if (entry.maxItems && report.itemCount > entry.maxItems) {
+    failures.push(`${entry.name}: ${report.itemCount} visible items, limit ${entry.maxItems}`)
   }
   if (report.readyMs > entry.maxReadyMs) {
     failures.push(`${entry.name}: ready in ${report.readyMs}ms, limit ${entry.maxReadyMs}ms`)
@@ -268,6 +357,13 @@ function collectFailures(entry, report, failures) {
   }
   if (report.horizontalOverflowPx > 2) {
     failures.push(`${entry.name}: horizontal overflow ${report.horizontalOverflowPx}px, limit 2px`)
+  }
+  if (entry.scenario === 'planning-sku-200') {
+    if (report.rowCount !== 200) failures.push(`${entry.name}: constructed ${report.rowCount} rows, expected 200`)
+    if (!report.firstValuePreserved || !report.lastValuePreserved) failures.push(`${entry.name}: first/last values changed after virtual scrolling`)
+    if (!report.orderPreserved) failures.push(`${entry.name}: visible row order changed after virtual scrolling`)
+    if (!report.footerVisible) failures.push(`${entry.name}: submit footer is not fully visible at 1366x768`)
+    if (report.footerOverlapsLast) failures.push(`${entry.name}: submit footer overlaps the last editable row`)
   }
 }
 

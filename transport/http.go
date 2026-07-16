@@ -27,6 +27,7 @@ func NewRouter(
 	incidentH *handler.IncidentHandler,
 	policyH *handler.PolicyHandler,
 	authH *handler.AuthHandler,
+	accessPolicyH *handler.AccessPolicyHandler,
 	userAdminH *handler.UserAdminHandler,
 	erpBridgeH *handler.ERPBridgeHandler,
 	productH *handler.ProductHandler,
@@ -44,6 +45,8 @@ func NewRouter(
 	assetUploadH *handler.AssetUploadHandler,
 	assetFilesH *handler.AssetFilesHandler,
 	designSubmissionH *handler.DesignSubmissionHandler,
+	taskResourceWorkflowH *handler.TaskResourceWorkflowHandler,
+	planningSKUH *handler.PlanningSKUHandler,
 	taskDetailH *handler.TaskDetailHandler,
 	taskAISummaryH *handler.TaskAISummaryHandler,
 	taskCostOverrideH *handler.TaskCostOverrideHandler,
@@ -58,8 +61,6 @@ func NewRouter(
 	ruleTemplateH *handler.RuleTemplateHandler,
 	auditV7H *handler.AuditV7Handler,
 	auditLogH *handler.AuditLogHandler,
-	outsourceH *handler.OutsourceHandler,
-	warehouseH *handler.WarehouseHandler,
 	jstUserAdminH *handler.JSTUserAdminHandler,
 	serverLogH *handler.ServerLogHandler,
 	orgMoveH *handler.OrgMoveRequestHandler,
@@ -75,6 +76,7 @@ func NewRouter(
 	routeAccessCatalog *RouteAccessCatalog,
 	actorResolver RequestActorResolver,
 	permissionLogger PermissionLogWriter,
+	effectiveAccessResolver EffectiveAccessResolver,
 	logger *zap.Logger,
 	traceRecorders ...workflowTraceRecorder,
 ) http.Handler {
@@ -97,8 +99,20 @@ func NewRouter(
 	}
 	routeAccessCatalog.Reset()
 
+	capabilityAccess := func(group *gin.RouterGroup, method, path string, readiness domain.APIReadiness, permissions ...domain.PermissionCode) gin.HandlerFunc {
+		fullPath := joinRoutePath(group.BasePath(), path)
+		routeAccessCatalog.AddRule(domain.NewCapabilityRouteAccessRule(method, fullPath, readiness, permissions...))
+		return withCapabilityAccess(permissionLogger, effectiveAccessResolver, readiness, permissions...)
+	}
 	access := func(group *gin.RouterGroup, method, path string, readiness domain.APIReadiness, roles ...domain.Role) gin.HandlerFunc {
-		routeAccessCatalog.AddRule(domain.NewRouteAccessRule(method, joinRoutePath(group.BasePath(), path), readiness, roles...))
+		fullPath := joinRoutePath(group.BasePath(), path)
+		if readiness == domain.APIReadinessReadyForFrontend {
+			if permissions, governed := v8BusinessRoutePermissions(method, fullPath); governed {
+				routeAccessCatalog.AddRule(domain.NewCapabilityRouteAccessRule(method, fullPath, readiness, permissions...))
+				return withCapabilityAccess(permissionLogger, effectiveAccessResolver, readiness, permissions...)
+			}
+		}
+		routeAccessCatalog.AddRule(domain.NewRouteAccessRule(method, fullPath, readiness, roles...))
 		return withAccessMetaAndLogger(permissionLogger, readiness, roles...)
 	}
 	legacyRoleConvergedAccess := func(group *gin.RouterGroup, method, path string, readiness domain.APIReadiness, roles ...domain.Role) []gin.HandlerFunc {
@@ -109,14 +123,31 @@ func NewRouter(
 		}
 	}
 
-	registerV1IdentityRoutes(r, v1, routeAccessCatalog, permissionLogger, authH, taskDraftH, designSourceH, searchH, reportL1H, notificationH, wsH)
+	registerV1IdentityRoutes(r, v1, routeAccessCatalog, permissionLogger, capabilityAccess, authH, taskDraftH, designSourceH, searchH, reportL1H, notificationH, wsH)
+
+	if accessPolicyH != nil {
+		accessGroup := v1.Group("/access")
+		accessGroup.GET("/permissions", capabilityAccess(accessGroup, http.MethodGet, "/permissions", domain.APIReadinessReadyForFrontend, domain.PermissionAccessPolicyView, domain.PermissionAccessPolicyAdmin), accessPolicyH.ListPermissions)
+		accessGroup.GET("/roles", capabilityAccess(accessGroup, http.MethodGet, "/roles", domain.APIReadinessReadyForFrontend, domain.PermissionAccessPolicyView, domain.PermissionAccessPolicyAdmin), accessPolicyH.ListRoles)
+		accessGroup.POST("/roles", capabilityAccess(accessGroup, http.MethodPost, "/roles", domain.APIReadinessReadyForFrontend, domain.PermissionAccessPolicyAdmin), accessPolicyH.CreateRole)
+		accessGroup.PATCH("/roles/:id", capabilityAccess(accessGroup, http.MethodPatch, "/roles/:id", domain.APIReadinessReadyForFrontend, domain.PermissionAccessPolicyAdmin), accessPolicyH.UpdateRole)
+		accessGroup.POST("/roles/:id/archive", capabilityAccess(accessGroup, http.MethodPost, "/roles/:id/archive", domain.APIReadinessReadyForFrontend, domain.PermissionAccessPolicyAdmin), accessPolicyH.ArchiveRole)
+		accessGroup.PUT("/roles/:id/permissions", capabilityAccess(accessGroup, http.MethodPut, "/roles/:id/permissions", domain.APIReadinessReadyForFrontend, domain.PermissionAccessPolicyAdmin), accessPolicyH.ReplaceRolePermissions)
+		accessGroup.GET("/users", capabilityAccess(accessGroup, http.MethodGet, "/users", domain.APIReadinessReadyForFrontend, domain.PermissionAccessPolicyView, domain.PermissionAccessPolicyAdmin), userAdminH.ListAccessPolicyUsers)
+		accessGroup.PUT("/users/:id/assignments", capabilityAccess(accessGroup, http.MethodPut, "/users/:id/assignments", domain.APIReadinessReadyForFrontend, domain.PermissionAccessPolicyAdmin), accessPolicyH.ReplaceUserAssignments)
+		accessGroup.GET("/users/:id/effective", capabilityAccess(accessGroup, http.MethodGet, "/users/:id/effective", domain.APIReadinessReadyForFrontend, domain.PermissionAccessPolicyView, domain.PermissionAccessPolicyAdmin), accessPolicyH.EffectiveAccess)
+		accessGroup.GET("/org-policies/:subject_type/:subject_id", capabilityAccess(accessGroup, http.MethodGet, "/org-policies/:subject_type/:subject_id", domain.APIReadinessReadyForFrontend, domain.PermissionAccessPolicyView, domain.PermissionAccessPolicyAdmin), accessPolicyH.GetOrgPolicies)
+		accessGroup.PUT("/org-policies/:subject_type/:subject_id", capabilityAccess(accessGroup, http.MethodPut, "/org-policies/:subject_type/:subject_id", domain.APIReadinessReadyForFrontend, domain.PermissionAccessPolicyAdmin), accessPolicyH.ReplaceOrgPolicies)
+		accessGroup.POST("/preview", capabilityAccess(accessGroup, http.MethodPost, "/preview", domain.APIReadinessReadyForFrontend, domain.PermissionAccessPolicyView, domain.PermissionAccessPolicyAdmin), accessPolicyH.Preview)
+		accessGroup.GET("/events", capabilityAccess(accessGroup, http.MethodGet, "/events", domain.APIReadinessReadyForFrontend, domain.PermissionAccessPolicyView, domain.PermissionAccessPolicyAdmin), accessPolicyH.ListEvents)
+	}
 
 	if assetFilesH != nil {
 		v1.GET("/public/erp-product-images/:version_id", assetFilesH.ServeERPProductImage)
 	}
 
 	registerV1AdminRoutes(v1, access, legacyRoleConvergedAccess, userAdminH, orgMoveH, auditLogH, serverLogH, notificationH)
-	registerAssetWorkbenchRoutes(v1, access, assetWorkbenchH, notificationH)
+	registerAssetWorkbenchRoutes(v1, access, capabilityAccess, assetWorkbenchH, notificationH)
 
 	v1.POST("/trace-events", access(v1, http.MethodPost, "/trace-events", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), userAdminH.RecordWorkflowTraceEvent)
 	v1.GET("/trace-events", access(v1, http.MethodGet, "/trace-events", domain.APIReadinessReadyForFrontend, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin), userAdminH.ListWorkflowTraceEvents)
@@ -165,7 +196,6 @@ func NewRouter(
 	}
 
 	// Audit (idempotent via action_id)
-	v1.POST("/audit", access(v1, http.MethodPost, "/audit", domain.APIReadinessReadyForFrontend, domain.RoleAuditA, domain.RoleAuditB, domain.RoleAdmin), withDeprecatedRoute("/v1/tasks/{id}/audit/*", "candidate_for_v1_0_removal"), auditH.Submit)
 
 	// NAS Agent endpoints (machine-to-machine; pre-shared token via AGENT_API_TOKEN)
 	agentGroup := v1.Group("/agent")
@@ -287,34 +317,41 @@ func NewRouter(
 
 	taskCreateAssetCenterGroup := v1.Group("/task-create/asset-center")
 	{
-		taskCreateAssetCenterGroup.POST("/upload-sessions", access(taskCreateAssetCenterGroup, http.MethodPost, "/upload-sessions", domain.APIReadinessReadyForFrontend, domain.RoleOps), withCompatibilityRoute("/v1/tasks/reference-upload-sessions", "remove_after_frontend_migration"), taskCreateReferenceUploadH.CreateUploadSession)
-		taskCreateAssetCenterGroup.GET("/upload-sessions/:session_id", access(taskCreateAssetCenterGroup, http.MethodGet, "/upload-sessions/:session_id", domain.APIReadinessReadyForFrontend, domain.RoleOps), withCompatibilityRoute("/v1/tasks/reference-upload-sessions/{session_id}", "remove_after_frontend_migration"), taskCreateReferenceUploadH.GetUploadSession)
-		taskCreateAssetCenterGroup.POST("/upload-sessions/:session_id/complete", access(taskCreateAssetCenterGroup, http.MethodPost, "/upload-sessions/:session_id/complete", domain.APIReadinessReadyForFrontend, domain.RoleOps), withCompatibilityRoute("/v1/tasks/reference-upload-sessions/{session_id}/complete", "remove_after_frontend_migration"), taskCreateReferenceUploadH.CompleteUploadSession)
-		taskCreateAssetCenterGroup.POST("/upload-sessions/:session_id/abort", access(taskCreateAssetCenterGroup, http.MethodPost, "/upload-sessions/:session_id/abort", domain.APIReadinessReadyForFrontend, domain.RoleOps), withCompatibilityRoute("/v1/tasks/reference-upload-sessions/{session_id}/abort", "remove_after_frontend_migration"), taskCreateReferenceUploadH.AbortUploadSession)
+		taskCreateAssetCenterGroup.POST("/upload-sessions", capabilityAccess(taskCreateAssetCenterGroup, http.MethodPost, "/upload-sessions", domain.APIReadinessReadyForFrontend, domain.PermissionTaskCreate), withCompatibilityRoute("/v1/tasks/reference-upload-sessions", "remove_after_frontend_migration"), taskCreateReferenceUploadH.CreateUploadSession)
+		taskCreateAssetCenterGroup.GET("/upload-sessions/:session_id", capabilityAccess(taskCreateAssetCenterGroup, http.MethodGet, "/upload-sessions/:session_id", domain.APIReadinessReadyForFrontend, domain.PermissionTaskCreate), withCompatibilityRoute("/v1/tasks/reference-upload-sessions/{session_id}", "remove_after_frontend_migration"), taskCreateReferenceUploadH.GetUploadSession)
+		taskCreateAssetCenterGroup.POST("/upload-sessions/:session_id/complete", capabilityAccess(taskCreateAssetCenterGroup, http.MethodPost, "/upload-sessions/:session_id/complete", domain.APIReadinessReadyForFrontend, domain.PermissionTaskCreate), withCompatibilityRoute("/v1/tasks/reference-upload-sessions/{session_id}/complete", "remove_after_frontend_migration"), taskCreateReferenceUploadH.CompleteUploadSession)
+		taskCreateAssetCenterGroup.POST("/upload-sessions/:session_id/abort", capabilityAccess(taskCreateAssetCenterGroup, http.MethodPost, "/upload-sessions/:session_id/abort", domain.APIReadinessReadyForFrontend, domain.PermissionTaskCreate), withCompatibilityRoute("/v1/tasks/reference-upload-sessions/{session_id}/abort", "remove_after_frontend_migration"), taskCreateReferenceUploadH.AbortUploadSession)
 	}
 
-	// V7: Task (business aggregate root)
+	// V8: task aggregate root. Organization names are display-only; capability and
+	// stable organization-ID scope are resolved by capabilityAccess/requestActor.
 	taskGroup := v1.Group("/tasks")
 	{
-		taskGroup.POST("/reference-upload-sessions", access(taskGroup, http.MethodPost, "/reference-upload-sessions", domain.APIReadinessReadyForFrontend, domain.RoleOps), taskCreateReferenceUploadH.CreateUploadSession)
-		taskGroup.GET("/reference-upload-sessions/:session_id", access(taskGroup, http.MethodGet, "/reference-upload-sessions/:session_id", domain.APIReadinessReadyForFrontend, domain.RoleOps), taskCreateReferenceUploadH.GetUploadSession)
-		taskGroup.POST("/reference-upload-sessions/:session_id/complete", access(taskGroup, http.MethodPost, "/reference-upload-sessions/:session_id/complete", domain.APIReadinessReadyForFrontend, domain.RoleOps), taskCreateReferenceUploadH.CompleteUploadSession)
-		taskGroup.POST("/reference-upload-sessions/:session_id/abort", access(taskGroup, http.MethodPost, "/reference-upload-sessions/:session_id/abort", domain.APIReadinessReadyForFrontend, domain.RoleOps), taskCreateReferenceUploadH.AbortUploadSession)
-		taskGroup.POST("/reference-upload", access(taskGroup, http.MethodPost, "/reference-upload", domain.APIReadinessReadyForFrontend, domain.RoleOps), taskCreateReferenceUploadH.UploadFile)
+		taskGroup.POST("/reference-upload-sessions", capabilityAccess(taskGroup, http.MethodPost, "/reference-upload-sessions", domain.APIReadinessReadyForFrontend, domain.PermissionTaskCreate), taskCreateReferenceUploadH.CreateUploadSession)
+		taskGroup.GET("/reference-upload-sessions/:session_id", capabilityAccess(taskGroup, http.MethodGet, "/reference-upload-sessions/:session_id", domain.APIReadinessReadyForFrontend, domain.PermissionTaskCreate), taskCreateReferenceUploadH.GetUploadSession)
+		taskGroup.POST("/reference-upload-sessions/:session_id/complete", capabilityAccess(taskGroup, http.MethodPost, "/reference-upload-sessions/:session_id/complete", domain.APIReadinessReadyForFrontend, domain.PermissionTaskCreate), taskCreateReferenceUploadH.CompleteUploadSession)
+		taskGroup.POST("/reference-upload-sessions/:session_id/abort", capabilityAccess(taskGroup, http.MethodPost, "/reference-upload-sessions/:session_id/abort", domain.APIReadinessReadyForFrontend, domain.PermissionTaskCreate), taskCreateReferenceUploadH.AbortUploadSession)
+		taskGroup.POST("/reference-upload", capabilityAccess(taskGroup, http.MethodPost, "/reference-upload", domain.APIReadinessReadyForFrontend, domain.PermissionTaskCreate), taskCreateReferenceUploadH.UploadFile)
 		taskGroup.POST("/prepare-product-codes", access(taskGroup, http.MethodPost, "/prepare-product-codes", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleAdmin), taskH.PrepareProductCodes)
 		taskGroup.GET("/excel-assist/template.xlsx", access(taskGroup, http.MethodGet, "/excel-assist/template.xlsx", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskSingleExcelH.DownloadTemplate)
 		taskGroup.POST("/excel-assist/parse-excel", access(taskGroup, http.MethodPost, "/excel-assist/parse-excel", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskSingleExcelH.ParseUpload)
 		taskGroup.GET("/batch-create/template.xlsx", access(taskGroup, http.MethodGet, "/batch-create/template.xlsx", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskBatchExcelH.DownloadTemplate)
 		taskGroup.POST("/batch-create/parse-excel", access(taskGroup, http.MethodPost, "/batch-create/parse-excel", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskBatchExcelH.ParseUpload)
-		taskGroup.POST("", access(taskGroup, http.MethodPost, "", domain.APIReadinessReadyForFrontend, domain.RoleOps), taskH.Create)
-		taskGroup.GET("", access(taskGroup, http.MethodGet, "", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleOutsource, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleOrgAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskH.List)
-		taskGroup.GET("/filter-options", access(taskGroup, http.MethodGet, "/filter-options", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleOutsource, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleOrgAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskH.FilterOptions)
+		taskGroup.POST("/sku-planning/image-upload-sessions", capabilityAccess(taskGroup, http.MethodPost, "/sku-planning/image-upload-sessions", domain.APIReadinessReadyForFrontend, domain.PermissionPlanningSKUCreate, domain.PermissionPlanningSKUEdit), taskCreateReferenceUploadH.CreatePlanningSKUImageUploadSession)
+		taskGroup.GET("/sku-planning/image-upload-sessions/:session_id", capabilityAccess(taskGroup, http.MethodGet, "/sku-planning/image-upload-sessions/:session_id", domain.APIReadinessReadyForFrontend, domain.PermissionPlanningSKUCreate, domain.PermissionPlanningSKUEdit), taskCreateReferenceUploadH.GetUploadSession)
+		taskGroup.POST("/sku-planning/image-upload-sessions/:session_id/complete", capabilityAccess(taskGroup, http.MethodPost, "/sku-planning/image-upload-sessions/:session_id/complete", domain.APIReadinessReadyForFrontend, domain.PermissionPlanningSKUCreate, domain.PermissionPlanningSKUEdit), taskCreateReferenceUploadH.CompletePlanningSKUImageUploadSession)
+		taskGroup.POST("/sku-planning/image-upload-sessions/:session_id/abort", capabilityAccess(taskGroup, http.MethodPost, "/sku-planning/image-upload-sessions/:session_id/abort", domain.APIReadinessReadyForFrontend, domain.PermissionPlanningSKUCreate, domain.PermissionPlanningSKUEdit), taskCreateReferenceUploadH.AbortPlanningSKUImageUploadSession)
+		taskGroup.POST("", capabilityAccess(taskGroup, http.MethodPost, "", domain.APIReadinessReadyForFrontend, domain.PermissionTaskCreate, domain.PermissionPlanningSKUCreate), taskH.Create)
+		taskGroup.GET("", capabilityAccess(taskGroup, http.MethodGet, "", domain.APIReadinessReadyForFrontend, domain.PermissionTaskView), taskH.List)
+		taskGroup.GET("/filter-options", capabilityAccess(taskGroup, http.MethodGet, "/filter-options", domain.APIReadinessReadyForFrontend, domain.PermissionTaskView), taskH.FilterOptions)
+		if auditV7H != nil {
+			taskGroup.GET("/audit/handover-candidates", capabilityAccess(taskGroup, http.MethodGet, "/audit/handover-candidates", domain.APIReadinessReadyForFrontend, domain.PermissionTaskAuditDecision), auditV7H.ListHandoverCandidates)
+			taskGroup.POST("/audit/handover-batch", capabilityAccess(taskGroup, http.MethodPost, "/audit/handover-batch", domain.APIReadinessReadyForFrontend, domain.PermissionTaskAuditDecision), auditV7H.BatchHandover)
+		}
 		taskGroup.GET("/pool", access(taskGroup, http.MethodGet, "/pool", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskH.Pool)
-		taskGroup.GET("/audit/handover-candidates", access(taskGroup, http.MethodGet, "/audit/handover-candidates", domain.APIReadinessReadyForFrontend, domain.RoleAuditA, domain.RoleAuditB, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), auditV7H.ListHandoverCandidates)
-		taskGroup.POST("/audit/handover-batch", access(taskGroup, http.MethodPost, "/audit/handover-batch", domain.APIReadinessReadyForFrontend, domain.RoleAuditA, domain.RoleAuditB, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), auditV7H.BatchHandover)
-		taskGroup.GET("/:id", access(taskGroup, http.MethodGet, "/:id", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleOutsource, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleOrgAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskH.GetByID)
+		taskGroup.GET("/:id", capabilityAccess(taskGroup, http.MethodGet, "/:id", domain.APIReadinessReadyForFrontend, domain.PermissionTaskView), taskH.GetByID)
 		if predictionH != nil {
-			taskGroup.GET("/:id/predictions", access(taskGroup, http.MethodGet, "/:id/predictions", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleOutsource, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleOrgAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), predictionH.TaskNextActions)
+			taskGroup.GET("/:id/predictions", capabilityAccess(taskGroup, http.MethodGet, "/:id/predictions", domain.APIReadinessReadyForFrontend, domain.PermissionTaskView), predictionH.TaskNextActions)
 		}
 		taskGroup.GET("/:id/product-info", access(taskGroup, http.MethodGet, "/:id/product-info", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleOutsource, domain.RoleAdmin), taskH.GetProductInfo)
 		taskGroup.PATCH("/:id/product-info", access(taskGroup, http.MethodPatch, "/:id/product-info", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleWarehouse, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskH.PatchProductInfo)
@@ -326,14 +363,12 @@ func NewRouter(
 		taskGroup.PATCH("/:id/sku-items/:sku_item_id", access(taskGroup, http.MethodPatch, "/:id/sku-items/:sku_item_id", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleWarehouse, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskH.PatchSKUItemInfo)
 		taskGroup.PATCH("/:id/sku-items/:sku_item_id/cost-info", access(taskGroup, http.MethodPatch, "/:id/sku-items/:sku_item_id/cost-info", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleWarehouse, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskH.PatchSKUItemCostInfo)
 		taskGroup.POST("/:id/cost-quote/preview", access(taskGroup, http.MethodPost, "/:id/cost-quote/preview", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleWarehouse, domain.RoleAdmin), taskH.PreviewCostQuote)
-		// business-info remains a compatibility filing entry, but Step 87 filing policy
-		// also auto-triggers from create/audit/procurement/warehouse checkpoints.
+		// Business information remains editable, while filing is asynchronous and
+		// never acts as a task-completion gate in the v8 workflow.
 		taskGroup.PATCH("/:id/business-info", access(taskGroup, http.MethodPatch, "/:id/business-info", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleWarehouse, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskH.UpdateBusinessInfo)
 		taskGroup.GET("/:id/filing-status", access(taskGroup, http.MethodGet, "/:id/filing-status", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleWarehouse, domain.RoleAdmin, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleAuditA, domain.RoleAuditB), taskH.GetFilingStatus)
 		taskGroup.POST("/:id/filing/retry", access(taskGroup, http.MethodPost, "/:id/filing/retry", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleWarehouse, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskH.RetryFiling)
-		taskGroup.PATCH("/:id/procurement", access(taskGroup, http.MethodPatch, "/:id/procurement", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleWarehouse, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskH.UpdateProcurement)
-		taskGroup.POST("/:id/procurement/advance", access(taskGroup, http.MethodPost, "/:id/procurement/advance", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleWarehouse, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskH.AdvanceProcurement)
-		taskGroup.GET("/:id/detail", access(taskGroup, http.MethodGet, "/:id/detail", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleOutsource, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleOrgAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskDetailH.GetByTaskID)
+		taskGroup.GET("/:id/detail", capabilityAccess(taskGroup, http.MethodGet, "/:id/detail", domain.APIReadinessReadyForFrontend, domain.PermissionTaskView), taskDetailH.GetByTaskID)
 		taskGroup.POST("/:id/ai-summary", access(taskGroup, http.MethodPost, "/:id/ai-summary", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleOutsource, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleOrgAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskAISummaryH.Generate)
 		taskGroup.POST("/:id/modules/:module_key/claim", access(taskGroup, http.MethodPost, "/:id/modules/:module_key/claim", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskH.ModuleClaim)
 		taskGroup.POST("/:id/modules/:module_key/actions/:action", access(taskGroup, http.MethodPost, "/:id/modules/:module_key/actions/:action", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskH.ModuleAction)
@@ -343,68 +378,64 @@ func NewRouter(
 		taskGroup.GET("/:id/cost-overrides", access(taskGroup, http.MethodGet, "/:id/cost-overrides", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleWarehouse, domain.RoleAdmin), taskCostOverrideH.ListByTaskID)
 		taskGroup.POST("/:id/cost-overrides/:event_id/review", access(taskGroup, http.MethodPost, "/:id/cost-overrides/:event_id/review", domain.APIReadinessInternalPlaceholder, domain.RoleOps, domain.RoleWarehouse, domain.RoleAdmin), taskCostOverrideH.UpsertReview)
 		taskGroup.POST("/:id/cost-overrides/:event_id/finance-mark", access(taskGroup, http.MethodPost, "/:id/cost-overrides/:event_id/finance-mark", domain.APIReadinessInternalPlaceholder, domain.RoleERP, domain.RoleAdmin), taskCostOverrideH.UpsertFinanceFlag)
-		taskGroup.POST("/:id/close", access(taskGroup, http.MethodPost, "/:id/close", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleWarehouse, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskH.Close)
 		taskGroup.POST("/batch/assign", access(taskGroup, http.MethodPost, "/batch/assign", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskAssignmentH.BatchAssign)
 		taskGroup.POST("/batch/remind", access(taskGroup, http.MethodPost, "/batch/remind", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleAdmin), taskAssignmentH.BatchRemind)
 		taskGroup.POST("/:id/assign", access(taskGroup, http.MethodPost, "/:id/assign", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleOps, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskAssignmentH.Assign)
-		taskGroup.POST("/:id/submit-design", access(taskGroup, http.MethodPost, "/:id/submit-design", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleOps, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), designSubmissionH.Submit)
-		taskGroup.GET("/:id/audit-supplements", access(taskGroup, http.MethodGet, "/:id/audit-supplements", domain.APIReadinessReadyForFrontend, domain.RoleAuditA, domain.RoleAuditB, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskAssetCenterH.ListAuditSupplements)
-		taskGroup.POST("/:id/audit-supplements/upload-sessions", access(taskGroup, http.MethodPost, "/:id/audit-supplements/upload-sessions", domain.APIReadinessReadyForFrontend, domain.RoleAuditA, domain.RoleAuditB, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskAssetCenterH.CreateAuditSupplementUploadSession)
-		taskGroup.POST("/:id/audit-supplements/upload-sessions/:session_id/complete", access(taskGroup, http.MethodPost, "/:id/audit-supplements/upload-sessions/:session_id/complete", domain.APIReadinessReadyForFrontend, domain.RoleAuditA, domain.RoleAuditB, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskAssetCenterH.CompleteAuditSupplementUploadSession)
+		if taskResourceWorkflowH != nil {
+			taskGroup.POST("/:id/submit-design", capabilityAccess(taskGroup, http.MethodPost, "/:id/submit-design", domain.APIReadinessReadyForFrontend, domain.PermissionTaskDesignSubmit), taskResourceWorkflowH.SubmitDesign)
+			taskGroup.POST("/:id/audit/decision", capabilityAccess(taskGroup, http.MethodPost, "/:id/audit/decision", domain.APIReadinessReadyForFrontend, domain.PermissionTaskAuditDecision), taskResourceWorkflowH.AuditDecision)
+			taskGroup.POST("/:id/reopen", capabilityAccess(taskGroup, http.MethodPost, "/:id/reopen", domain.APIReadinessReadyForFrontend, domain.PermissionTaskReopen), taskResourceWorkflowH.Reopen)
+			taskGroup.GET("/:id/resource-bundle", capabilityAccess(taskGroup, http.MethodGet, "/:id/resource-bundle", domain.APIReadinessReadyForFrontend, domain.PermissionTaskView, domain.PermissionAssetView), taskResourceWorkflowH.ResourceBundle)
+		}
+		if planningSKUH != nil {
+			taskGroup.GET("/sku-planning/template.xlsx", capabilityAccess(taskGroup, http.MethodGet, "/sku-planning/template.xlsx", domain.APIReadinessReadyForFrontend, domain.PermissionPlanningSKUCreate), planningSKUH.Template)
+			taskGroup.POST("/sku-planning/parse-excel", capabilityAccess(taskGroup, http.MethodPost, "/sku-planning/parse-excel", domain.APIReadinessReadyForFrontend, domain.PermissionPlanningSKUCreate), planningSKUH.ParseExcel)
+			taskGroup.PATCH("/:id/planning-skus/:item_id", capabilityAccess(taskGroup, http.MethodPatch, "/:id/planning-skus/:item_id", domain.APIReadinessReadyForFrontend, domain.PermissionPlanningSKUEdit), planningSKUH.Update)
+			taskGroup.GET("/:id/planning-skus/export.xlsx", capabilityAccess(taskGroup, http.MethodGet, "/:id/planning-skus/export.xlsx", domain.APIReadinessReadyForFrontend, domain.PermissionPlanningSKUExport), planningSKUH.ExportTask)
+			taskGroup.POST("/:id/planning-skus/erp-retry", capabilityAccess(taskGroup, http.MethodPost, "/:id/planning-skus/erp-retry", domain.APIReadinessReadyForFrontend, domain.PermissionPlanningSKURetry), planningSKUH.ERPRetry)
+			taskGroup.POST("/:id/planning-skus/erp-resync", capabilityAccess(taskGroup, http.MethodPost, "/:id/planning-skus/erp-resync", domain.APIReadinessReadyForFrontend, domain.PermissionPlanningSKUSync), planningSKUH.ERPResync)
+		}
 		taskGroup.GET("/:id/assets", access(taskGroup, http.MethodGet, "/:id/assets", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleAdmin), taskAssetCenterH.ListAssets)
 		taskGroup.POST("/:id/reference-assets/batch-download", access(taskGroup, http.MethodPost, "/:id/reference-assets/batch-download", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleAdmin), taskAssetCenterH.BatchDownloadTaskReferenceAssets)
 		taskGroup.GET("/:id/assets/timeline", access(taskGroup, http.MethodGet, "/:id/assets/timeline", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleAdmin), withCompatibilityRoute("/v1/tasks/{id}/asset-center/assets", "candidate_for_v1_0_removal"), taskAssetH.List)
 		taskGroup.GET("/:id/assets/:asset_id/versions", access(taskGroup, http.MethodGet, "/:id/assets/:asset_id/versions", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleAdmin), withCompatibilityRoute("/v1/tasks/{id}/asset-center/assets/{asset_id}/versions", "remove_after_frontend_migration"), taskAssetCenterH.ListVersions)
 		taskGroup.GET("/:id/assets/:asset_id/download", access(taskGroup, http.MethodGet, "/:id/assets/:asset_id/download", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleAdmin), withCompatibilityRoute("/v1/tasks/{id}/asset-center/assets/{asset_id}/download", "remove_after_frontend_migration"), taskAssetCenterH.DownloadAsset)
 		taskGroup.GET("/:id/assets/:asset_id/versions/:version_id/download", access(taskGroup, http.MethodGet, "/:id/assets/:asset_id/versions/:version_id/download", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleAdmin), withCompatibilityRoute("/v1/tasks/{id}/asset-center/assets/{asset_id}/versions/{version_id}/download", "remove_after_frontend_migration"), taskAssetCenterH.DownloadVersion)
-		taskGroup.POST("/:id/assets/upload-sessions", access(taskGroup, http.MethodPost, "/:id/assets/upload-sessions", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), withCompatibilityRoute("/v1/assets/upload-sessions", "remove_after_frontend_migration"), taskAssetCenterH.CreateUploadSession)
-		taskGroup.GET("/:id/assets/upload-sessions/:session_id", access(taskGroup, http.MethodGet, "/:id/assets/upload-sessions/:session_id", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleAdmin), withCompatibilityRoute("/v1/assets/upload-sessions/{session_id}", "remove_after_frontend_migration"), taskAssetCenterH.GetUploadSession)
-		taskGroup.POST("/:id/assets/upload-sessions/:session_id/complete", access(taskGroup, http.MethodPost, "/:id/assets/upload-sessions/:session_id/complete", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), withCompatibilityRoute("/v1/assets/upload-sessions/{session_id}/complete", "remove_after_frontend_migration"), taskAssetCenterH.CompleteUploadSession)
-		taskGroup.POST("/:id/assets/upload-sessions/:session_id/abort", access(taskGroup, http.MethodPost, "/:id/assets/upload-sessions/:session_id/abort", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), withCompatibilityRoute("/v1/assets/upload-sessions/{session_id}/cancel", "remove_after_frontend_migration"), taskAssetCenterH.AbortUploadSession)
-		taskGroup.POST("/:id/assets/upload", access(taskGroup, http.MethodPost, "/:id/assets/upload", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), withDeprecatedRoute("/v1/assets/upload-sessions", "remove_after_frontend_migration"), taskAssetCenterH.LegacyTaskAssetsUpload)
+		taskGroup.POST("/:id/assets/upload-sessions", capabilityAccess(taskGroup, http.MethodPost, "/:id/assets/upload-sessions", domain.APIReadinessReadyForFrontend, domain.PermissionTaskDesignSubmit, domain.PermissionTaskAuditDecision, domain.PermissionAssetManage), withCompatibilityRoute("/v1/assets/upload-sessions", "remove_after_frontend_migration"), taskAssetCenterH.CreateUploadSession)
+		taskGroup.GET("/:id/assets/upload-sessions/:session_id", capabilityAccess(taskGroup, http.MethodGet, "/:id/assets/upload-sessions/:session_id", domain.APIReadinessReadyForFrontend, domain.PermissionTaskView, domain.PermissionAssetView, domain.PermissionTaskDesignSubmit, domain.PermissionTaskAuditDecision, domain.PermissionAssetManage), withCompatibilityRoute("/v1/assets/upload-sessions/{session_id}", "remove_after_frontend_migration"), taskAssetCenterH.GetUploadSession)
+		taskGroup.POST("/:id/assets/upload-sessions/:session_id/complete", capabilityAccess(taskGroup, http.MethodPost, "/:id/assets/upload-sessions/:session_id/complete", domain.APIReadinessReadyForFrontend, domain.PermissionTaskDesignSubmit, domain.PermissionTaskAuditDecision, domain.PermissionAssetManage), withCompatibilityRoute("/v1/assets/upload-sessions/{session_id}/complete", "remove_after_frontend_migration"), taskAssetCenterH.CompleteUploadSession)
+		taskGroup.POST("/:id/assets/upload-sessions/:session_id/abort", capabilityAccess(taskGroup, http.MethodPost, "/:id/assets/upload-sessions/:session_id/abort", domain.APIReadinessReadyForFrontend, domain.PermissionTaskDesignSubmit, domain.PermissionTaskAuditDecision, domain.PermissionAssetManage), withCompatibilityRoute("/v1/assets/upload-sessions/{session_id}/cancel", "remove_after_frontend_migration"), taskAssetCenterH.AbortUploadSession)
 		taskGroup.POST("/:id/assets/mock-upload", access(taskGroup, http.MethodPost, "/:id/assets/mock-upload", domain.APIReadinessMockPlaceholderOnly, domain.RoleDesigner, domain.RoleOps), taskAssetH.MockUpload)
 		taskGroup.GET("/:id/asset-center/assets", access(taskGroup, http.MethodGet, "/:id/asset-center/assets", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleAdmin), taskAssetCenterH.ListAssets)
 		taskGroup.GET("/:id/asset-center/assets/:asset_id/versions", access(taskGroup, http.MethodGet, "/:id/asset-center/assets/:asset_id/versions", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleAdmin), taskAssetCenterH.ListVersions)
 		taskGroup.GET("/:id/asset-center/assets/:asset_id/download", access(taskGroup, http.MethodGet, "/:id/asset-center/assets/:asset_id/download", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleAdmin), taskAssetCenterH.DownloadAsset)
 		taskGroup.GET("/:id/asset-center/assets/:asset_id/versions/:version_id/download", access(taskGroup, http.MethodGet, "/:id/asset-center/assets/:asset_id/versions/:version_id/download", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleAdmin), taskAssetCenterH.DownloadVersion)
-		taskGroup.POST("/:id/asset-center/upload-sessions", access(taskGroup, http.MethodPost, "/:id/asset-center/upload-sessions", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), withCompatibilityRoute("/v1/assets/upload-sessions", "remove_after_frontend_migration"), taskAssetCenterH.CreateUploadSession)
-		taskGroup.POST("/:id/asset-center/upload-sessions/small", access(taskGroup, http.MethodPost, "/:id/asset-center/upload-sessions/small", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), withCompatibilityRoute("/v1/assets/upload-sessions", "remove_after_frontend_migration"), taskAssetCenterH.CreateSmallUploadSession)
-		taskGroup.POST("/:id/asset-center/upload-sessions/multipart", access(taskGroup, http.MethodPost, "/:id/asset-center/upload-sessions/multipart", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), withCompatibilityRoute("/v1/assets/upload-sessions", "remove_after_frontend_migration"), taskAssetCenterH.CreateMultipartUploadSession)
-		taskGroup.GET("/:id/asset-center/upload-sessions/:session_id", access(taskGroup, http.MethodGet, "/:id/asset-center/upload-sessions/:session_id", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleAdmin), withCompatibilityRoute("/v1/assets/upload-sessions/{session_id}", "remove_after_frontend_migration"), taskAssetCenterH.GetUploadSession)
-		taskGroup.POST("/:id/asset-center/upload-sessions/:session_id/complete", access(taskGroup, http.MethodPost, "/:id/asset-center/upload-sessions/:session_id/complete", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), withCompatibilityRoute("/v1/assets/upload-sessions/{session_id}/complete", "remove_after_frontend_migration"), taskAssetCenterH.CompleteUploadSession)
-		taskGroup.POST("/:id/asset-center/upload-sessions/:session_id/cancel", access(taskGroup, http.MethodPost, "/:id/asset-center/upload-sessions/:session_id/cancel", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), withCompatibilityRoute("/v1/assets/upload-sessions/{session_id}/cancel", "remove_after_frontend_migration"), taskAssetCenterH.CancelUploadSession)
-		taskGroup.POST("/:id/asset-center/upload-sessions/:session_id/abort", access(taskGroup, http.MethodPost, "/:id/asset-center/upload-sessions/:session_id/abort", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), withCompatibilityRoute("/v1/assets/upload-sessions/{session_id}/cancel", "candidate_for_v1_0_removal"), taskAssetCenterH.AbortUploadSession)
+		taskGroup.POST("/:id/asset-center/upload-sessions", capabilityAccess(taskGroup, http.MethodPost, "/:id/asset-center/upload-sessions", domain.APIReadinessReadyForFrontend, domain.PermissionTaskDesignSubmit, domain.PermissionTaskAuditDecision, domain.PermissionAssetManage), withCompatibilityRoute("/v1/assets/upload-sessions", "remove_after_frontend_migration"), taskAssetCenterH.CreateUploadSession)
+		taskGroup.POST("/:id/asset-center/upload-sessions/small", capabilityAccess(taskGroup, http.MethodPost, "/:id/asset-center/upload-sessions/small", domain.APIReadinessReadyForFrontend, domain.PermissionTaskDesignSubmit, domain.PermissionTaskAuditDecision, domain.PermissionAssetManage), withCompatibilityRoute("/v1/assets/upload-sessions", "remove_after_frontend_migration"), taskAssetCenterH.CreateSmallUploadSession)
+		taskGroup.POST("/:id/asset-center/upload-sessions/multipart", capabilityAccess(taskGroup, http.MethodPost, "/:id/asset-center/upload-sessions/multipart", domain.APIReadinessReadyForFrontend, domain.PermissionTaskDesignSubmit, domain.PermissionTaskAuditDecision, domain.PermissionAssetManage), withCompatibilityRoute("/v1/assets/upload-sessions", "remove_after_frontend_migration"), taskAssetCenterH.CreateMultipartUploadSession)
+		taskGroup.GET("/:id/asset-center/upload-sessions/:session_id", capabilityAccess(taskGroup, http.MethodGet, "/:id/asset-center/upload-sessions/:session_id", domain.APIReadinessReadyForFrontend, domain.PermissionTaskView, domain.PermissionAssetView, domain.PermissionTaskDesignSubmit, domain.PermissionTaskAuditDecision, domain.PermissionAssetManage), withCompatibilityRoute("/v1/assets/upload-sessions/{session_id}", "remove_after_frontend_migration"), taskAssetCenterH.GetUploadSession)
+		taskGroup.POST("/:id/asset-center/upload-sessions/:session_id/complete", capabilityAccess(taskGroup, http.MethodPost, "/:id/asset-center/upload-sessions/:session_id/complete", domain.APIReadinessReadyForFrontend, domain.PermissionTaskDesignSubmit, domain.PermissionTaskAuditDecision, domain.PermissionAssetManage), withCompatibilityRoute("/v1/assets/upload-sessions/{session_id}/complete", "remove_after_frontend_migration"), taskAssetCenterH.CompleteUploadSession)
+		taskGroup.POST("/:id/asset-center/upload-sessions/:session_id/cancel", capabilityAccess(taskGroup, http.MethodPost, "/:id/asset-center/upload-sessions/:session_id/cancel", domain.APIReadinessReadyForFrontend, domain.PermissionTaskDesignSubmit, domain.PermissionTaskAuditDecision, domain.PermissionAssetManage), withCompatibilityRoute("/v1/assets/upload-sessions/{session_id}/cancel", "remove_after_frontend_migration"), taskAssetCenterH.CancelUploadSession)
+		taskGroup.POST("/:id/asset-center/upload-sessions/:session_id/abort", capabilityAccess(taskGroup, http.MethodPost, "/:id/asset-center/upload-sessions/:session_id/abort", domain.APIReadinessReadyForFrontend, domain.PermissionTaskDesignSubmit, domain.PermissionTaskAuditDecision, domain.PermissionAssetManage), withCompatibilityRoute("/v1/assets/upload-sessions/{session_id}/cancel", "candidate_for_v1_0_removal"), taskAssetCenterH.AbortUploadSession)
 
-		// V7 audit actions (task-centric)
-		taskGroup.POST("/:id/audit/claim", access(taskGroup, http.MethodPost, "/:id/audit/claim", domain.APIReadinessReadyForFrontend, domain.RoleAuditA, domain.RoleAuditB, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), auditV7H.Claim)
-		taskGroup.POST("/:id/audit/approve", access(taskGroup, http.MethodPost, "/:id/audit/approve", domain.APIReadinessReadyForFrontend, domain.RoleAuditA, domain.RoleAuditB, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), auditV7H.Approve)
-		taskGroup.POST("/:id/audit/reject", access(taskGroup, http.MethodPost, "/:id/audit/reject", domain.APIReadinessReadyForFrontend, domain.RoleAuditA, domain.RoleAuditB, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), auditV7H.Reject)
-		taskGroup.POST("/:id/audit/transfer", access(taskGroup, http.MethodPost, "/:id/audit/transfer", domain.APIReadinessReadyForFrontend, domain.RoleAuditA, domain.RoleAuditB, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), auditV7H.Transfer)
-		taskGroup.POST("/:id/audit/handover", access(taskGroup, http.MethodPost, "/:id/audit/handover", domain.APIReadinessReadyForFrontend, domain.RoleAuditA, domain.RoleAuditB, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), auditV7H.Handover)
-		taskGroup.GET("/:id/audit/handovers", access(taskGroup, http.MethodGet, "/:id/audit/handovers", domain.APIReadinessReadyForFrontend, domain.RoleAuditA, domain.RoleAuditB, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), auditV7H.ListHandovers)
-		taskGroup.POST("/:id/audit/takeover", access(taskGroup, http.MethodPost, "/:id/audit/takeover", domain.APIReadinessReadyForFrontend, domain.RoleAuditA, domain.RoleAuditB, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), auditV7H.Takeover)
-
-		// V7 outsource creation under task
-		taskGroup.POST("/:id/outsource", access(taskGroup, http.MethodPost, "/:id/outsource", domain.APIReadinessReadyForFrontend, domain.RoleOutsource, domain.RoleOps, domain.RoleAdmin), withCompatibilityRoute("/v1/tasks", "candidate_for_v1_0_removal"), outsourceH.Create)
-
-		// V7 warehouse actions under task
-		taskGroup.POST("/:id/warehouse/prepare", access(taskGroup, http.MethodPost, "/:id/warehouse/prepare", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleWarehouse, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskH.PrepareWarehouse)
-		taskGroup.POST("/:id/warehouse/receive", access(taskGroup, http.MethodPost, "/:id/warehouse/receive", domain.APIReadinessReadyForFrontend, domain.RoleWarehouse, domain.RoleOps, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), warehouseH.Receive)
-		taskGroup.POST("/:id/warehouse/reject", access(taskGroup, http.MethodPost, "/:id/warehouse/reject", domain.APIReadinessReadyForFrontend, domain.RoleWarehouse, domain.RoleOps, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), warehouseH.Reject)
-		taskGroup.POST("/:id/warehouse/complete", access(taskGroup, http.MethodPost, "/:id/warehouse/complete", domain.APIReadinessReadyForFrontend, domain.RoleWarehouse, domain.RoleOps, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), warehouseH.Complete)
-		taskGroup.POST("/:id/customization/review", access(taskGroup, http.MethodPost, "/:id/customization/review", domain.APIReadinessReadyForFrontend, domain.RoleCustomizationReviewer, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskH.SubmitCustomizationReview)
-
-		// V7 task event log
-		taskGroup.GET("/:id/events", access(taskGroup, http.MethodGet, "/:id/events", domain.APIReadinessReadyForFrontend, domain.RoleOps, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleOutsource, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), auditV7H.ListEvents)
+		if auditV7H != nil {
+			// V8 audit collaboration is capability governed. Handover is only a
+			// current-handler action; management reassignment is a separate flow.
+			taskGroup.POST("/:id/audit/handover", capabilityAccess(taskGroup, http.MethodPost, "/:id/audit/handover", domain.APIReadinessReadyForFrontend, domain.PermissionTaskAuditDecision), auditV7H.Handover)
+			taskGroup.GET("/:id/audit/handovers", capabilityAccess(taskGroup, http.MethodGet, "/:id/audit/handovers", domain.APIReadinessReadyForFrontend, domain.PermissionTaskView, domain.PermissionTaskAuditDecision), auditV7H.ListHandovers)
+			taskGroup.POST("/:id/audit/takeover", capabilityAccess(taskGroup, http.MethodPost, "/:id/audit/takeover", domain.APIReadinessReadyForFrontend, domain.PermissionTaskAuditDecision), auditV7H.Takeover)
+			// V8 task event log
+			taskGroup.GET("/:id/events", capabilityAccess(taskGroup, http.MethodGet, "/:id/events", domain.APIReadinessReadyForFrontend, domain.PermissionTaskView), auditV7H.ListEvents)
+		}
 	}
-
-	customizationGroup := v1.Group("/customization-jobs")
-	{
-		customizationGroup.GET("", access(customizationGroup, http.MethodGet, "", domain.APIReadinessReadyForFrontend, domain.RoleCustomizationReviewer, domain.RoleCustomizationOperator, domain.RoleOps, domain.RoleDesigner, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskH.ListCustomizationJobs)
-		customizationGroup.GET("/:id", access(customizationGroup, http.MethodGet, "/:id", domain.APIReadinessReadyForFrontend, domain.RoleCustomizationReviewer, domain.RoleCustomizationOperator, domain.RoleOps, domain.RoleDesigner, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskH.GetCustomizationJob)
-		customizationGroup.POST("/:id/effect-preview", access(customizationGroup, http.MethodPost, "/:id/effect-preview", domain.APIReadinessReadyForFrontend, domain.RoleCustomizationOperator, domain.RoleDesigner, domain.RoleOps, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskH.SubmitCustomizationEffectPreview)
-		customizationGroup.POST("/:id/effect-review", access(customizationGroup, http.MethodPost, "/:id/effect-review", domain.APIReadinessReadyForFrontend, domain.RoleCustomizationReviewer, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskH.ReviewCustomizationEffect)
-		customizationGroup.POST("/:id/production-transfer", access(customizationGroup, http.MethodPost, "/:id/production-transfer", domain.APIReadinessReadyForFrontend, domain.RoleCustomizationOperator, domain.RoleDesigner, domain.RoleOps, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskH.TransferCustomizationProduction)
+	if planningSKUH != nil {
+		v1.POST("/planning-skus/export.xlsx", capabilityAccess(v1, http.MethodPost, "/planning-skus/export.xlsx", domain.APIReadinessReadyForFrontend, domain.PermissionPlanningSKUExport), planningSKUH.ExportSelection)
+	}
+	if taskResourceWorkflowH != nil {
+		resourceGroups := v1.Group("/resource-groups")
+		resourceGroups.GET("", capabilityAccess(resourceGroups, http.MethodGet, "", domain.APIReadinessReadyForFrontend, domain.PermissionAssetView), taskResourceWorkflowH.ListResourceGroups)
+		resourceGroups.GET("/:id", capabilityAccess(resourceGroups, http.MethodGet, "/:id", domain.APIReadinessReadyForFrontend, domain.PermissionAssetView), taskResourceWorkflowH.ResourceGroup)
+		resourceGroups.POST("/batch-download", capabilityAccess(resourceGroups, http.MethodPost, "/batch-download", domain.APIReadinessReadyForFrontend, domain.PermissionAssetDownload), taskResourceWorkflowH.BatchDownloadResourceGroups)
 	}
 
 	assetGroup := v1.Group("/assets")
@@ -416,17 +447,17 @@ func NewRouter(
 		assetGroup.POST("/excel-package/preview", access(assetGroup, http.MethodPost, "/excel-package/preview", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskAssetCenterH.PreviewExcelPackage)
 		assetGroup.POST("/excel-package/preview-file", access(assetGroup, http.MethodPost, "/excel-package/preview-file", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskAssetCenterH.PreviewExcelPackageFile)
 		assetGroup.GET("/:asset_id", access(assetGroup, http.MethodGet, "/:asset_id", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskAssetCenterH.GetGlobalAsset)
-		assetGroup.DELETE("/:asset_id", access(assetGroup, http.MethodDelete, "/:asset_id", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskAssetCenterH.DeleteGlobalAsset)
+		assetGroup.DELETE("/:asset_id", capabilityAccess(assetGroup, http.MethodDelete, "/:asset_id", domain.APIReadinessReadyForFrontend, domain.PermissionAssetManage), taskAssetCenterH.DeleteGlobalAsset)
 		assetGroup.GET("/:asset_id/download", access(assetGroup, http.MethodGet, "/:asset_id/download", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskAssetCenterH.DownloadGlobalAsset)
 		assetGroup.GET("/:asset_id/content", withAssetFileTokenFallback(actorResolver), access(assetGroup, http.MethodGet, "/:asset_id/content", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskAssetCenterH.StreamGlobalExternalAsset)
 		assetGroup.GET("/:asset_id/versions/:version_id/download", access(assetGroup, http.MethodGet, "/:asset_id/versions/:version_id/download", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskAssetCenterH.DownloadGlobalAssetVersion)
 		assetGroup.POST("/:asset_id/archive", access(assetGroup, http.MethodPost, "/:asset_id/archive", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskAssetCenterH.ArchiveGlobalAsset)
 		assetGroup.POST("/:asset_id/restore", access(assetGroup, http.MethodPost, "/:asset_id/restore", domain.APIReadinessReadyForFrontend, v1R1AllLoggedInRoles()...), taskAssetCenterH.RestoreGlobalAsset)
 		assetGroup.GET("/:asset_id/preview", access(assetGroup, http.MethodGet, "/:asset_id/preview", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleERP, domain.RoleAdmin, domain.RoleSuperAdmin), taskAssetCenterH.PreviewAssetResource)
-		assetGroup.POST("/upload-sessions", access(assetGroup, http.MethodPost, "/upload-sessions", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB, domain.RoleAssetManager, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskAssetCenterH.CreateAssetUploadSession)
-		assetGroup.GET("/upload-sessions/:session_id", access(assetGroup, http.MethodGet, "/upload-sessions/:session_id", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleAssetManager, domain.RoleAdmin), taskAssetCenterH.GetAssetUploadSession)
-		assetGroup.POST("/upload-sessions/:session_id/complete", access(assetGroup, http.MethodPost, "/upload-sessions/:session_id/complete", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB, domain.RoleAssetManager, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskAssetCenterH.CompleteAssetUploadSession)
-		assetGroup.POST("/upload-sessions/:session_id/cancel", access(assetGroup, http.MethodPost, "/upload-sessions/:session_id/cancel", domain.APIReadinessReadyForFrontend, domain.RoleDesigner, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer, domain.RoleOps, domain.RoleAuditA, domain.RoleAuditB, domain.RoleAssetManager, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead, domain.RoleDesignDirector), taskAssetCenterH.CancelAssetUploadSession)
+		assetGroup.POST("/upload-sessions", capabilityAccess(assetGroup, http.MethodPost, "/upload-sessions", domain.APIReadinessReadyForFrontend, domain.PermissionTaskDesignSubmit, domain.PermissionTaskAuditDecision, domain.PermissionAssetManage), taskAssetCenterH.CreateAssetUploadSession)
+		assetGroup.GET("/upload-sessions/:session_id", capabilityAccess(assetGroup, http.MethodGet, "/upload-sessions/:session_id", domain.APIReadinessReadyForFrontend, domain.PermissionTaskView, domain.PermissionAssetView, domain.PermissionTaskDesignSubmit, domain.PermissionTaskAuditDecision, domain.PermissionAssetManage), taskAssetCenterH.GetAssetUploadSession)
+		assetGroup.POST("/upload-sessions/:session_id/complete", capabilityAccess(assetGroup, http.MethodPost, "/upload-sessions/:session_id/complete", domain.APIReadinessReadyForFrontend, domain.PermissionTaskDesignSubmit, domain.PermissionTaskAuditDecision, domain.PermissionAssetManage), taskAssetCenterH.CompleteAssetUploadSession)
+		assetGroup.POST("/upload-sessions/:session_id/cancel", capabilityAccess(assetGroup, http.MethodPost, "/upload-sessions/:session_id/cancel", domain.APIReadinessReadyForFrontend, domain.PermissionTaskDesignSubmit, domain.PermissionTaskAuditDecision, domain.PermissionAssetManage), taskAssetCenterH.CancelAssetUploadSession)
 		// GET /v1/assets/files/* — compatibility proxy fallback for OSS-backed business file bytes.
 		// Browser-native loads (<img>) authenticate via login-issued HttpOnly
 		// cookie; header-based sessions pass through.
@@ -436,12 +467,6 @@ func NewRouter(
 		assetGroup.GET("/upload-requests/:id", access(assetGroup, http.MethodGet, "/upload-requests/:id", domain.APIReadinessInternalPlaceholder, domain.RoleOps, domain.RoleDesigner, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleOutsource, domain.RoleAdmin), assetUploadH.GetUploadRequest)
 		assetGroup.POST("/upload-requests/:id/advance", access(assetGroup, http.MethodPost, "/upload-requests/:id/advance", domain.APIReadinessInternalPlaceholder, domain.RoleOps, domain.RoleDesigner, domain.RoleAuditA, domain.RoleAuditB, domain.RoleWarehouse, domain.RoleOutsource, domain.RoleAdmin), assetUploadH.AdvanceUploadRequest)
 	}
-
-	// V7: Outsource orders list (cross-task)
-	v1.GET("/outsource-orders", access(v1, http.MethodGet, "/outsource-orders", domain.APIReadinessReadyForFrontend, domain.RoleOutsource, domain.RoleOps, domain.RoleAdmin), withCompatibilityRoute("/v1/customization-jobs", "candidate_for_v1_0_removal"), outsourceH.List)
-
-	// V7: Warehouse receipts list (cross-task)
-	v1.GET("/warehouse/receipts", access(v1, http.MethodGet, "/warehouse/receipts", domain.APIReadinessReadyForFrontend, domain.RoleWarehouse, domain.RoleOps, domain.RoleAdmin), warehouseH.List)
 
 	// V7: Task board / inbox aggregation
 	taskBoardGroup := v1.Group("/task-board")
@@ -527,6 +552,8 @@ func NewRouter(
 }
 
 type routeAccessRegistrar func(group *gin.RouterGroup, method, path string, readiness domain.APIReadiness, roles ...domain.Role) gin.HandlerFunc
+
+type capabilityRouteAccessRegistrar func(group *gin.RouterGroup, method, path string, readiness domain.APIReadiness, permissions ...domain.PermissionCode) gin.HandlerFunc
 
 type legacyRouteAccessRegistrar func(group *gin.RouterGroup, method, path string, readiness domain.APIReadiness, roles ...domain.Role) []gin.HandlerFunc
 

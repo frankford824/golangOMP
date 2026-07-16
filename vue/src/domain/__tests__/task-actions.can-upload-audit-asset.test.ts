@@ -2,44 +2,21 @@ import { describe, expect, it } from 'vitest'
 import type { Task } from '@/domain/types/task'
 import { canUploadAuditAsset } from '@/domain/task-actions'
 
-function makeTask(overrides: Partial<Task> = {}): Task {
-  return {
-    status: 'InProgress',
-    designSubStatus: 'IN_PROGRESS',
-    taskType: 'NEW_PRODUCT_DEV',
-    businessType: 'NEW_PRODUCT_DEV',
-    ...overrides,
-  } as Task
+function task(allowedActions: string[], status: Task['status'] = 'PendingAudit'): Task {
+  return { status, taskType: 'NEW_PRODUCT_DEV', allowedActions } as Task
 }
 
-describe('canUploadAuditAsset', () => {
-  it('blocks PendingAuditA so UI does not expose a guaranteed 403 entry', () => {
-    expect(canUploadAuditAsset(makeTask({ status: 'PendingAuditA' }))).toBe(false)
+describe('canUploadAuditAsset v8 action contract', () => {
+  it('allows replacement upload only when approve is explicitly allowed', () => {
+    expect(canUploadAuditAsset(task(['task.audit.approve']))).toBe(true)
   })
 
-  it('blocks PendingAuditB for the same reason as PendingAuditA', () => {
-    expect(canUploadAuditAsset(makeTask({ status: 'PendingAuditB' }))).toBe(false)
+  it('does not infer upload from audit state or unrelated actions', () => {
+    expect(canUploadAuditAsset(task([]))).toBe(false)
+    expect(canUploadAuditAsset(task(['task.audit.return_to_design']))).toBe(false)
   })
 
-  it('allows RejectedByAuditA so reviewer-initiated rework upload stays possible', () => {
-    expect(canUploadAuditAsset(makeTask({ status: 'RejectedByAuditA' }))).toBe(true)
-  })
-
-  it('allows InProgress (designer editable phase)', () => {
-    expect(canUploadAuditAsset(makeTask({ status: 'InProgress' }))).toBe(true)
-  })
-
-  it('blocks purchase tasks regardless of status', () => {
-    const task = makeTask({
-      status: 'InProgress',
-      taskType: 'PURCHASE_TASK',
-      businessType: 'PURCHASE_TASK',
-    })
-    expect(canUploadAuditAsset(task)).toBe(false)
-  })
-
-  it('blocks terminal states like Completed / Cancelled', () => {
-    expect(canUploadAuditAsset(makeTask({ status: 'Completed' }))).toBe(false)
-    expect(canUploadAuditAsset(makeTask({ status: 'Cancelled' }))).toBe(false)
+  it('keeps terminal tasks closed when no action is returned', () => {
+    expect(canUploadAuditAsset(task([], 'Completed'))).toBe(false)
   })
 })

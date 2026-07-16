@@ -2,45 +2,18 @@ import { describe, expect, it } from 'vitest'
 import type { Task } from '@/domain/types/task'
 import { auditActionForRow, isInAuditQueue } from '@/domain/task-actions'
 
-function makeRetouchTask(partial: Partial<Task>): Task {
-  return {
-    id: '1',
-    taskNo: 'T1',
-    sku: null,
-    productId: null,
-    productName: '',
-    productSource: 'new',
+describe('retouch task v8 audit gates', () => {
+  const task = {
     taskType: 'RETOUCH_TASK',
-    status: 'PendingAuditA',
-    referenceFileRefs: [],
-    assetVersions: [],
-    needOutsource: false,
-    groupId: '',
-    groupName: '',
-    requesterId: '1',
-    requesterName: '',
-    creatorId: '1',
-    creatorName: '',
-    designerId: '2',
-    designerName: '',
-    currentHandlerId: null,
-    currentHandlerName: null,
-    assigneeId: null,
-    assigneeName: null,
-    dueAt: null,
-    priority: 'normal',
-    ...partial,
-  } as Task
-}
+    status: 'Completed',
+    allowedActions: [],
+  } as unknown as Task
 
-describe('retouch_task audit gates (dirty legacy status)', () => {
-  it('isInAuditQueue is false for retouch even when status is PendingAuditA', () => {
-    const t = makeRetouchTask({ status: 'PendingAuditA' })
-    expect(isInAuditQueue(t)).toBe(false)
+  it('does not enter the audit queue after direct completion', () => {
+    expect(isInAuditQueue(task)).toBe(false)
   })
 
-  it('auditActionForRow is null for retouch even when status is PendingAuditA', () => {
-    const t = makeRetouchTask({ status: 'PendingAuditA' })
-    expect(auditActionForRow(t)).toBeNull()
+  it('does not expose an audit action after direct completion', () => {
+    expect(auditActionForRow(task)).toBeNull()
   })
 })

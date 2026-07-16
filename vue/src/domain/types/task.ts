@@ -1,59 +1,40 @@
-import type { PurchaseInfo } from './purchase'
 import type { ReferenceFileRef } from '@/services/api/assetsApi'
 import type { RetouchRequirement } from '@/domain/types/retouch-requirement'
 import type { ModuleSummary } from '@/services/apiTypes'
 import type { TaskPriorityApi } from '@/domain/task-priority'
 
-/**
- * @deprecated 旧扁平状态枚举，仅用于过渡期桥接。
- * 所有新代码改用 MainTaskStatus + DesignSubStatus / AuditSubStatus / WarehouseSubStatus / PurchaseSubStatus 组合。
- * 迁移完成后此类型将被删除。
- */
-export type LegacyTaskStatus =
+/** Cutover 后唯一可用于活动任务查询、渲染与动作判定的状态合同。 */
+export type ActiveTaskStatus =
   | 'Draft'
   | 'PendingAssign'
   | 'Assigned'
   | 'InProgress'
-  | 'PendingAuditA'
-  | 'RejectedByAuditA'
-  | 'PendingAuditB'
-  | 'RejectedByAuditB'
-  | 'PendingOutsource'
-  | 'Outsourcing'
-  | 'PendingOutsourceReview'
-  | 'PendingCustomizationReview'
-  | 'PendingCustomizationProduction'
-  | 'PendingEffectReview'
-  | 'PendingEffectRevision'
-  | 'PendingProductionTransfer'
-  | 'PendingWarehouseQC'
-  | 'RejectedByWarehouse'
-  | 'PendingWarehouseReceive'
-  | 'PendingClose'
+  | 'PendingAudit'
   | 'Completed'
   | 'Archived'
   | 'Blocked'
   | 'Cancelled'
 
-/** @deprecated 使用 LegacyTaskStatus 或新的主/子状态类型，迁移完成后移除此别名 */
-export type TaskStatus = LegacyTaskStatus
+/** @deprecated use ActiveTaskStatus for activity queries. */
+export type LegacyTaskStatus = ActiveTaskStatus
+/** Read-model boundary; historical values are never valid activity-query filters. */
+export type TaskStatus = ActiveTaskStatus
 
 // ─── 主状态（PRD V2.0 主线阶段，与子状态统一使用 SCREAMING_SNAKE_CASE）─────────────
 export type MainTaskStatus =
   | 'DRAFT'
-  | 'CREATED'
-  | 'CODE_GENERATED'
-  | 'ERP_REGISTERED'
-  | 'INFO_PENDING'
-  | 'WAREHOUSE_PENDING'
-  | 'WAREHOUSE_PROCESSING'
-  | 'READY_TO_CLOSE'
-  | 'CLOSED'
+  | 'PENDING_ASSIGN'
+  | 'ASSIGNED'
+  | 'IN_PROGRESS'
+  | 'PENDING_AUDIT'
+  | 'COMPLETED'
+  | 'ARCHIVED'
+  | 'CANCELLED'
   | 'BLOCKED'
 
 // ─── 设计子状态：仅在需要设计的任务（原品开发 / 新品开发）中生效 ────────────────
 export type DesignSubStatus =
-  | 'NOT_REQUIRED'   // 采购任务默认；不需要设计
+  | 'NOT_REQUIRED'   // 修图或策划 SKU 等无需设计审核的任务
   | 'PENDING_ASSIGN' // 待指派设计师
   | 'IN_PROGRESS'    // 设计中
   | 'PENDING_AUDIT'  // 待审核
@@ -63,7 +44,7 @@ export type DesignSubStatus =
 
 // ─── 审核子状态：覆盖常规审核 / 交接复核 / 定制转派 / 交班等节点 ────────────────────────
 export type AuditSubStatus =
-  | 'NOT_REQUIRED'  // 采购任务默认；无需审核
+  | 'NOT_REQUIRED'  // 修图或策划 SKU 等无需审核的任务
   | 'PENDING'       // 待审核（含常规审核 / 交接复核排队）
   | 'IN_PROGRESS'   // 审核进行中（已领取审核单）
   | 'PASSED'        // 审核通过
@@ -71,34 +52,11 @@ export type AuditSubStatus =
   | 'TRANSFERRED'   // 已转定制 / 转派
   | 'HANDED_OVER'   // 已交班
 
-// ─── 仓库子状态：统一描述仓库节点的处理进度 ────────────────────────────────────
-export type WarehouseSubStatus =
-  | 'NOT_REQUIRED'   // 尚未到达仓库节点
-  | 'PENDING_RECEIVE' // 待仓库接收
-  | 'RECEIVED'        // 已接收
-  | 'RETURNED'        // 已退回
-  | 'PACKING'         // 打包中
-  | 'DONE'            // 仓库节点完成
-
-// ─── 采购子状态：采购任务中为主支线，其他任务按需触发 ───────────────────────────
-export type PurchaseSubStatus =
-  | 'NOT_REQUIRED' // 非采购任务默认
-  | 'PENDING'      // 待采购
-  | 'IN_PROGRESS'  // 采购中（已下单 / 跟进中）
-  | 'PURCHASED'    // 已采购，待入仓
-  | 'INBOUND_DONE' // 已入仓 / 到货完成
-
-// ─── 结单状态 ───────────────────────────────────────────────────────────────────
-export type CloseStatus =
-  | 'NOT_READY' // 结单条件未满足
-  | 'READY'     // 所有条件已满足，可结单
-  | 'CLOSED'    // 已结单
-
 // ─── 任务业务分型 ─────────────────────────────────────────────────────────────
 export type TaskBusinessType =
   | 'ORIGINAL_PRODUCT_DEV' // 原品开发：基于 ERP 已有单品
   | 'NEW_PRODUCT_DEV'      // 新品开发：基于外部链接/截图/文案
-  | 'PURCHASE_TASK'        // 采购任务：不经设计/审核，直达仓库
+  | 'SKU_PLANNING'         // 策划 SKU：生成 SKU 与策划信息后直接结单
   | 'RETOUCH_TASK'         // P 图任务：图片精修，不走设计审核
 
 export type TaskType = TaskBusinessType
@@ -107,27 +65,10 @@ export type TaskType = TaskBusinessType
 /** @deprecated 使用 MainTaskStatus */
 export type TaskMainStatus = MainTaskStatus
 
-/**
- * @deprecated 使用具体的 DesignSubStatus / AuditSubStatus / WarehouseSubStatus 代替。
- * 此联合类型是过渡期遗留，新代码禁止引用。
- */
+/** 活动详情只保留设计与统一审核节点。 */
 export type TaskSubStatus =
   | 'PendingAssign'
-  | 'PendingAuditA'
-  | 'RejectedByAuditA'
-  | 'PendingAuditB'
-  | 'RejectedByAuditB'
-  | 'PendingOutsource'
-  | 'Outsourcing'
-  | 'PendingOutsourceReview'
-  | 'PendingCustomizationReview'
-  | 'PendingCustomizationProduction'
-  | 'PendingEffectReview'
-  | 'PendingEffectRevision'
-  | 'PendingProductionTransfer'
-  | 'PendingWarehouseQC'
-  | 'RejectedByWarehouse'
-  | 'PendingWarehouseReceive'
+  | 'PendingAudit'
 
 // ─── 资产版本 ─────────────────────────────────────────────────────────────────
 export type ProductSource = 'existing' | 'new'
@@ -236,23 +177,23 @@ export interface Task {
   productSelectionSourceMatchType?: string
   productSource: ProductSource
   taskType: TaskType
-  businessType?: TaskBusinessType
+  businessType?: TaskType
 
   /**
    * @deprecated 过渡期字段，新代码禁止基于此字段做业务判断。
    * 使用 mainStatus + *SubStatus 组合替代。
    * 由 enrichTaskDomainFields 自动填充保持同步。
    */
-  status: LegacyTaskStatus
+  status: TaskStatus
+
+  /** v8 后端动作合同；workflow_contract_version=2 时空数组表示明确禁止。 */
+  allowedActions?: string[]
+  workflowContractVersion?: number
 
   // ── 新状态模型（由 enrichTaskDomainFields 负责派生和同步）────────────────
   mainStatus?: MainTaskStatus
   designSubStatus?: DesignSubStatus
   auditSubStatus?: AuditSubStatus
-  warehouseSubStatus?: WarehouseSubStatus
-  purchaseSubStatus?: PurchaseSubStatus
-  closeStatus?: CloseStatus
-
   /** @deprecated 使用具体子状态字段代替 */
   subStatus?: TaskSubStatus
 
@@ -311,16 +252,9 @@ export interface Task {
   dueAt: string | null
   /** v1.21 四态；读 API 时由 store 将 urgent/medium 归一 */
   priority: TaskPriorityApi
-  /**
-   * 后端 `need_outsource`：已持久化的外协/定制协作意图标志（筛选与展示）。
-   * 不代表已存在 customization job；POST /tasks/{id}/outsource 也不会自动创建 job。
-   */
-  needOutsource: boolean
   customizationRequired?: boolean
   customizationSourceType?: 'new_product' | 'existing_product' | string | null
   lastCustomizationOperatorId?: string | null
-  warehouseRejectReason?: string | null
-  warehouseRejectCategory?: string | null
   note?: string
 
   // ── 资产版本（GET /v1/tasks/{id} 主读模型；与 upload-session 落库一致，不依赖 submit-design）──
@@ -331,10 +265,9 @@ export interface Task {
     amount: number
     currency: string
   }
-  purchaseInfo?: PurchaseInfo
-  /** 采购任务：创建时录入的基本售价（GET 任务常返回 base_sale_price） */
+  /** 新品创建时录入的基础售价。 */
   basePriceAmount?: number
-  /** 采购任务：成本单价来源 */
+  /** 新品成本单价来源。 */
   costPriceMode?: 'manual' | 'template'
   /** 系统规则估算成本；为空且 requiresManualReview=true 时，需补尺寸或人工维护 */
   estimatedCost?: number
@@ -344,8 +277,6 @@ export interface Task {
   requiresManualReview?: boolean
   manualCostOverride?: boolean
   manualCostOverrideReason?: string
-  /** 成本治理读模型：GET /v1/tasks/{id} 的采购摘要，用于详情页展示与仓库/财务判断 */
-  procurementSummary?: Record<string, unknown>
   /** 成本人工覆盖摘要：GET /v1/tasks/{id} override_summary */
   costOverrideSummary?: Record<string, unknown>
   /** 成本治理审计摘要：GET /v1/tasks/{id} governance_audit_summary */
@@ -373,36 +304,12 @@ export interface Task {
   productReferenceUrl?: string
   newProductQuantity?: number
   newProductCostUnitPrice?: number
-  /** 采购：产品渠道 */
   productChannel?: string
   /**
    * GET 任务读模型 `spec_text` / `size_text`：创建时「规格尺寸」等主档快照，供后续环节只读展示。
    */
   specText?: string
   sizeText?: string
-
-  // ── 仓库 ───────────────────────────────────────────────────────────────────
-  /** @deprecated 使用 warehouseSubStatus 代替 */
-  warehouseReceiveStatus?: 'pending' | 'received' | 'returned' | 'archived'
-
-  /** 后端 workflow.can_prepare_warehouse：是否允许进入仓库准备/交接 */
-  canPrepareWarehouse?: boolean
-  /** 后端 workflow.warehouse_blocking_reasons：未满足时仓库节点不触发 */
-  warehouseBlockingReasons?: Array<{ code: string; message: string }>
-  /** procurement_summary：是否满足仓库准备条件（读模型） */
-  warehousePrepareReady?: boolean
-  /** procurement_summary：是否可进入仓库接收（读模型） */
-  warehouseReceiveReady?: boolean
-
-  /** 后端 procurement 记录原始 status（如 draft/completed），供 PATCH /procurement 幂等更新 */
-  procurementApiStatus?: string
-
-  /** 后端 workflow.main_status（小写，如 closed / pending_close），用于主状态徽章与终态判断 */
-  workflowMainStatus?: string
-  /** 后端 workflow.can_close / workflow.closable：有则结单按钮与后端门禁一致 */
-  workflowCanClose?: boolean
-  /** 后端 workflow.cannot_close_reasons */
-  cannotCloseReasons?: Array<{ code: string; message: string }>
 
   // ── 其他标志位 ─────────────────────────────────────────────────────────────
   requiresAssetVersions?: boolean

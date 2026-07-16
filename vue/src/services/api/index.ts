@@ -41,11 +41,8 @@ export { categoriesApi } from './categoriesApi'
 
 // 以下为其他业务模块（含各自内部 mock/real 实现）
 export * from './productsApi'
-export * from './outsourceApi'
 export * from './customizationApi'
 export * from './designApi'
-export * from './purchaseApi'
-export * from './warehouseApi'
 export * from './financeApi'
 export * from './kpiApi'
 export * from './adminApi'

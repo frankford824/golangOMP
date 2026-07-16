@@ -1,4 +1,5 @@
 import http from '@/services/http'
+import type { WorkbenchResourceDownloadManifest, WorkbenchResourceGroup } from '@aw/shared/resource-groups/types'
 import type { BackendUser } from '@/services/apiTypes'
 
 interface ApiEnvelope<T> {
@@ -605,6 +606,12 @@ export interface SystemAssetDownloadInfo {
   file_size: number
   mime_type?: string
   expires_at?: string
+  items?: Array<{
+    download_url: string
+    filename: string
+    file_size: number
+    mime_type?: string
+  }>
 }
 
 export interface SystemAssetPreviewMeta {
@@ -647,6 +654,11 @@ export interface SystemAssetRow {
   origin_path?: string
   created_at?: string
   updated_at?: string
+  resource_group_id?: number
+  finalized_revision_id?: number
+  cover_revision_item_id?: number
+  resource_mode?: 'single' | 'set'
+  resource_item_count?: number
 }
 
 export interface SystemSearchResult {
@@ -654,6 +666,11 @@ export interface SystemSearchResult {
   total: number
   page: number
   size: number
+}
+
+export function isExternalMaterialSource(sourceType?: string): boolean {
+  const normalized = String(sourceType || '').trim().toLowerCase()
+  return normalized === 'external' || normalized === 'external_asset'
 }
 
 export interface MaterialFolderRow {
@@ -780,6 +797,9 @@ export interface ClientMaterialRow {
   published_at?: string
   created_at?: string
   updated_at?: string
+  resource_group_id?: number
+  finalized_revision_id?: number
+  cover_revision_item_id?: number
 }
 
 export interface ClientMaterialSearchResult {
@@ -1195,6 +1215,9 @@ export interface UpsertClientMaterialPayload {
   description?: string
   enabled?: boolean
   sort_order?: number
+  resource_group_id?: number
+  finalized_revision_id?: number
+  cover_revision_item_id?: number
 }
 
 function unwrap<T>(payload: ApiEnvelope<T> | T): T {
@@ -1716,13 +1739,30 @@ export const assetWorkbenchApi = {
     return unwrap(res.data)
   },
 
+  async getResourceGroup(groupId: number, signal?: AbortSignal): Promise<WorkbenchResourceGroup> {
+    const res = await http.get<ApiEnvelope<WorkbenchResourceGroup>>(`/v1/resource-groups/${groupId}`, { signal })
+    return unwrap(res.data)
+  },
+
   async browseMaterials(params: { path?: string; source?: MaterialSourceFilter; format_category?: MaterialFormatCategory; business_lane?: MaterialBusinessLane; limit?: number; page?: number; page_size?: number } = {}, signal?: AbortSignal): Promise<MaterialBrowseResult> {
     const res = await http.get<ApiEnvelope<MaterialBrowseResult>>('/v1/asset-workbench/materials/browse', { params, signal })
     return unwrap(res.data)
   },
 
   async downloadMaterialAsset(asset: SystemAssetRow, signal?: AbortSignal): Promise<SystemAssetDownloadInfo> {
-    if (asset.source_type === 'external') {
+    if (asset.resource_group_id) {
+      const res = await http.post<ApiEnvelope<WorkbenchResourceDownloadManifest>>('/v1/resource-groups/batch-download', { group_ids: [asset.resource_group_id] }, { signal })
+      const manifest = unwrap(res.data)
+      const files = [...(manifest.items || [])].sort((a, b) => a.sort_order - b.sort_order)
+      if (!files.length) throw new Error('该资源组没有可下载的最终成品。')
+      const cover = files.find((item) => item.revision_item_id === asset.cover_revision_item_id) || files[0]
+      return {
+        download_mode: 'direct', download_url: cover.download_url, filename: cover.filename,
+        file_size: Number(cover.file_size || 0), mime_type: cover.mime_type, preview_available: true,
+        items: files.map((item) => ({ download_url: item.download_url, filename: item.filename, file_size: Number(item.file_size || 0), mime_type: item.mime_type })),
+      }
+    }
+    if (isExternalMaterialSource(asset.source_type)) {
       const resourceId = asset.resource_id || `ext-${asset.id}`
       const res = await http.get<ApiEnvelope<SystemAssetDownloadInfo>>(`/v1/assets/${encodeURIComponent(resourceId)}/download`, { signal })
       return unwrap(res.data)
@@ -1731,7 +1771,11 @@ export const assetWorkbenchApi = {
   },
 
   async previewMaterialAsset(asset: SystemAssetRow, signal?: AbortSignal): Promise<SystemAssetPreviewMeta> {
-    if (asset.source_type === 'external') {
+    if (asset.resource_group_id) {
+      const info = await this.downloadMaterialAsset(asset, signal)
+      return { asset_id: asset.id, source_type: 'task_resource_group', source_ref: `group:${asset.resource_group_id}`, status: 'ready', preparing: false, preview_url: info.download_url, download_url: info.download_url, mime_type: info.mime_type, filename: info.filename, preview_available: Boolean(info.preview_available) }
+    }
+    if (isExternalMaterialSource(asset.source_type)) {
       const resourceId = asset.resource_id || `ext-${asset.id}`
       const res = await http.get<ApiEnvelope<SystemAssetDownloadInfo>>(`/v1/assets/${encodeURIComponent(resourceId)}/preview`, { signal })
       const info = unwrap(res.data)

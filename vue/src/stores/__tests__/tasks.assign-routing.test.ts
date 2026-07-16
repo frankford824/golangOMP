@@ -38,6 +38,7 @@ function baseRawTask(overrides: Record<string, unknown> = {}): Record<string, un
     requester_name: 'req',
     creator_id: '1',
     creator_name: 'req',
+    allowed_actions: ['task.assign', 'task.reassign'],
     created_at: '2026-05-15T00:00:00.000Z',
     updated_at: '2026-05-15T00:00:00.000Z',
     ...overrides,
@@ -142,12 +143,12 @@ describe('useTasksStore assign routing', () => {
     expect(reassignModuleMock).not.toHaveBeenCalled()
   })
 
-  it('customization PendingCustomizationProduction 指派走 tasksApi.assign', async () => {
+  it('customization design node assignment uses tasksApi.assign', async () => {
     const store = useTasksStore()
     mockListWithTask(
       baseRawTask({
         id: '206',
-        task_status: 'PendingCustomizationProduction',
+        task_status: 'InProgress',
         customization_required: true,
         business_lane: 'customization',
       }),

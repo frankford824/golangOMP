@@ -1,90 +1,34 @@
 <template>
-  <span
-    class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium border"
-    :class="styleClass"
-  >
-    {{ label }}
-  </span>
+  <span class="status-tag" :class="`status-tag--${kind}`">{{ label }}</span>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { LegacyTaskStatus as TaskStatus } from '@/domain/types/task'
 
-const props = defineProps<{ status: TaskStatus }>()
+const props = defineProps<{ status: string }>()
 
-const statusLabels: Record<TaskStatus, string> = {
+const statusLabels: Record<string, string> = {
   Draft: '草稿',
   PendingAssign: '待指派',
   Assigned: '已指派',
-  InProgress: '进行中',
-  PendingAuditA: '待审核',
-  RejectedByAuditA: '审核打回',
-  PendingAuditB: '待审核',
-  RejectedByAuditB: '审核打回',
-  PendingOutsource: '待定制',
-  Outsourcing: '定制中',
-  PendingOutsourceReview: '定制中',
-  PendingCustomizationReview: '待定制审核',
-  PendingCustomizationProduction: '待定制生产',
-  PendingEffectReview: '待效果审核',
-  PendingEffectRevision: '待效果返修',
-  PendingProductionTransfer: '待生产流转',
-  PendingWarehouseQC: '待仓库质检',
-  RejectedByWarehouse: '仓库驳回',
-  PendingWarehouseReceive: '待仓库接收',
-  PendingClose: '待结单',
-  Completed: '已完成',
+  InProgress: '设计中',
+  PendingAudit: '待审核',
+  Completed: '已结单',
   Archived: '已归档',
   Blocked: '阻塞',
   Cancelled: '已取消',
 }
 
-const label = computed(() => statusLabels[props.status] ?? props.status)
-
-type SemanticKind = 'success' | 'processing' | 'warning' | 'error' | 'neutral'
-
-function getSemanticKind(status: TaskStatus): SemanticKind {
-  if (status === 'Completed' || status === 'Archived') return 'success'
-  if (status === 'Draft' || status === 'PendingAssign') return 'neutral'
-  if (
-    status === 'RejectedByAuditA' ||
-    status === 'RejectedByAuditB' ||
-    status === 'RejectedByWarehouse' ||
-    status === 'Cancelled' ||
-    status === 'Blocked'
-  ) {
-    return 'error'
-  }
-  if (
-    status === 'PendingAuditA' ||
-    status === 'PendingAuditB' ||
-    status === 'PendingCustomizationReview' ||
-    status === 'PendingEffectReview' ||
-    status === 'PendingWarehouseQC' ||
-    status === 'PendingWarehouseReceive' ||
-    status === 'PendingClose'
-  ) {
-    return 'warning'
-  }
-  return 'processing'
-}
-
-function getStatusStyle(kind: SemanticKind): string {
-  if (kind === 'success') {
-    return 'bg-[rgb(var(--yb-success-soft))] text-[rgb(var(--yb-success-strong))] border-[rgb(var(--yb-success-border))]'
-  }
-  if (kind === 'processing') {
-    return 'bg-[rgb(var(--yb-brand-soft))] text-[rgb(var(--yb-brand-strong))] border-[rgb(var(--yb-brand-border))]'
-  }
-  if (kind === 'warning') {
-    return 'bg-[rgb(var(--yb-warning-soft))] text-[rgb(var(--yb-warning-text))] border-[rgb(var(--yb-warning-border-soft))]'
-  }
-  if (kind === 'error') {
-    return 'bg-[rgb(var(--yb-danger-soft))] text-[rgb(var(--yb-danger-text))] border-[rgb(var(--yb-danger-border))]'
-  }
-  return 'bg-[rgb(var(--yb-surface-muted))] text-[rgb(var(--yb-text-muted-strong))] border-[rgb(var(--yb-border))]'
-}
-
-const styleClass = computed(() => getStatusStyle(getSemanticKind(props.status)))
+const label = computed(() => statusLabels[props.status] || props.status)
+const kind = computed(() => {
+  if (['Completed', 'Archived'].includes(props.status)) return 'success'
+  if (['Cancelled', 'Blocked'].includes(props.status)) return 'danger'
+  if (props.status === 'PendingAudit') return 'warning'
+  if (['Assigned', 'InProgress'].includes(props.status)) return 'active'
+  return 'neutral'
+})
 </script>
+
+<style scoped>
+.status-tag{display:inline-flex;align-items:center;padding:3px 9px;border:1px solid rgb(var(--yb-border));border-radius:999px;font-size:12px;font-weight:700;background:rgb(var(--yb-surface-muted));color:rgb(var(--yb-text-muted-strong))}.status-tag--success{background:rgb(var(--yb-success-soft));border-color:rgb(var(--yb-success-border));color:rgb(var(--yb-success-strong))}.status-tag--active{background:rgb(var(--yb-brand-soft));border-color:rgb(var(--yb-brand-border));color:rgb(var(--yb-brand-strong))}.status-tag--warning{background:rgb(var(--yb-warning-soft));border-color:rgb(var(--yb-warning-border-soft));color:rgb(var(--yb-warning-text))}.status-tag--danger{background:rgb(var(--yb-danger-soft));border-color:rgb(var(--yb-danger-border));color:rgb(var(--yb-danger-text))}
+</style>

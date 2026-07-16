@@ -100,6 +100,7 @@ func main() {
 	// V7 repos
 	userRepo := mysqlrepo.NewUserRepo(mdb)
 	orgRepo := mysqlrepo.NewOrgRepo(mdb)
+	accessPolicyRepo := mysqlrepo.NewAccessPolicyRepo(mdb)
 	userSessionRepo := mysqlrepo.NewUserSessionRepo(mdb)
 	permissionLogRepo := mysqlrepo.NewPermissionLogRepo(mdb)
 	productRepo := mysqlrepo.NewProductRepo(mdb)
@@ -111,6 +112,8 @@ func main() {
 	costRecalculationRunRepo := mysqlrepo.NewCostRecalculationRunRepo(mdb)
 	erpSyncRunRepo := mysqlrepo.NewERPSyncRunRepo(mdb)
 	taskRepo := mysqlrepo.NewTaskRepo(mdb)
+	taskResourceGroupRepo := mysqlrepo.NewTaskResourceGroupRepo(mdb)
+	planningSKURepo := mysqlrepo.NewPlanningSKURepo(mdb)
 	taskCreateRequestRepo := mysqlrepo.NewTaskCreateRequestRepo(mdb)
 	skuTraceRepo := mysqlrepo.NewSKUTraceRepo(mdb)
 	skuComboRepo := mysqlrepo.NewSKUComboRepo(mdb)
@@ -374,6 +377,7 @@ func main() {
 		service.WithTaskScopeUserRepo(userRepo),
 		service.WithTaskBlueprintRuleEngine(blueprintRules),
 		service.WithTaskRetouchRequirementRepo(taskRetouchRequirementRepo),
+		service.WithTaskResourceGroupInitializer(taskResourceGroupRepo),
 		service.WithTaskProductManagementCloseSyncer(productManagementSvc),
 		service.WithTaskNotificationService(notificationSvc))
 	taskBoardSvc := service.NewTaskBoardService(taskSvc, taskOperationalDashboardRepo)
@@ -414,6 +418,13 @@ func main() {
 	globalAssetCenterSvc.SetStorageStreamOpener(service.NewStorageStreamOpener(ossDirectSvc, uploadClient))
 	globalAssetCenterSvc.SetExternalAssetService(externalAssetSvc)
 	globalAssetLifecycleSvc := assetlifecycle.NewService(taskAssetSearchRepo, taskAssetLifecycleRepo, mdb, ossDirectSvc)
+	assetObjectDeletionWorker := assetlifecycle.NewObjectDeletionWorker(
+		taskAssetLifecycleRepo,
+		mdb,
+		ossDirectSvc,
+		assetlifecycle.ObjectDeletionWorkerConfig{},
+		log.New(os.Stderr, "[ASSET-OBJECT-DELETION] ", log.LstdFlags),
+	)
 	taskDetailSvc := service.NewTaskDetailAggregateService(taskRepo, procurementRepo, productRepo, costRuleRepo, auditV7Repo, outsourceRepo, taskAssetRepo, warehouseRepo, taskEventRepo, taskCostOverrideEventRepo, taskCostOverrideReviewRepo, taskCostFinanceFlagRepo,
 		service.WithTaskDetailScopeUserRepo(userRepo),
 		service.WithTaskDetailUserDisplayNameResolver(service.NewUserRepoDisplayNameResolver(userRepo)),
@@ -435,25 +446,20 @@ func main() {
 		RuntimeConfigFile:            cfg.Experience.RuntimeConfigFile,
 		RetentionDays:                cfg.Experience.RetentionDays,
 	}, logger.Named("experience"))
+	accessPolicySvc := service.NewAccessPolicyService(accessPolicyRepo, mdb, orgRepo)
 	auditV7Options := []service.AuditV7ServiceOption{
 		service.WithAuditV7DataScopeResolver(taskDataScopeResolver),
 		service.WithAuditV7ScopeUserRepo(userRepo),
 		service.WithAuditV7FilingTrigger(taskSvc),
 		service.WithAuditV7ExperienceService(experienceSvc),
+		service.WithAuditV8EffectiveAccessResolver(accessPolicySvc),
 	}
 	if assetFlowRepo, ok := taskAssetRepo.(service.AuditAssetFlowRepo); ok {
 		auditV7Options = append(auditV7Options, service.WithAuditV7AssetFlowRepo(assetFlowRepo))
 	}
 	auditV7Svc := service.NewAuditV7Service(taskRepo, auditV7Repo, taskEventRepo, codeRuleSvc, mdb, auditV7Options...)
-	outsourceSvc := service.NewOutsourceService(outsourceRepo, taskRepo, auditV7Repo, taskEventRepo, codeRuleSvc, mdb)
 	taskEventSvc := service.NewTaskEventService(taskEventRepo, taskRepo,
 		service.WithTaskEventUserDisplayNameResolver(service.NewUserRepoDisplayNameResolver(userRepo)))
-	warehouseSvc := service.NewWarehouseService(taskRepo, taskAssetRepo, warehouseRepo, taskEventRepo, mdb,
-		service.WithWarehouseDataScopeResolver(taskDataScopeResolver),
-		service.WithWarehouseScopeUserRepo(userRepo),
-		service.WithWarehouseCustomizationJobRepo(customizationJobRepo),
-		service.WithWarehouseModuleSync(taskModuleRepo, taskModuleEventRepo),
-		service.WithWarehouseFilingTrigger(taskSvc))
 	operationLogSvc := service.NewOperationLogService(taskEventRepo, exportJobEventRepo, integrationCallLogRepo)
 	notificationGen := notificationsvc.NewGenerator(notificationSvc, moduleNotificationRepo, logger.Named("notification_generator"))
 	blueprintRules.SetNotificationGenerator(notificationGen)
@@ -513,6 +519,7 @@ func main() {
 		reportl1svc.WithBusinessTrendGenerator(aiSummaryClient),
 		reportl1svc.WithBusinessTrendProviders(trendProviders, expectedTrendSources))
 	taskAISummarySvc := taskaisummarysvc.NewService(r3DetailSvc, taskEventSvc, taskCostOverrideEventRepo, aiSummaryClient)
+	taskResourceWorkflowSvc := service.NewTaskResourceWorkflowService(taskResourceGroupRepo, mdb, taskEventRepo, service.WithTaskResourceWorkflowOSSDirect(ossDirectSvc))
 	assetWorkbenchOptions := []assetworkbench.Option{
 		assetworkbench.WithRepository(assetWorkbenchRepo, mdb),
 		assetworkbench.WithUserRepository(userRepo),
@@ -521,6 +528,8 @@ func main() {
 		assetworkbench.WithOSSDirect(ossDirectSvc),
 		assetworkbench.WithPreviewRenderer(service.NewExternalAssetPreviewRenderer()),
 		assetworkbench.WithSystemAssetSearcher(globalAssetCenterSvc),
+		assetworkbench.WithResourceGroupMaterialSearcher(taskResourceWorkflowSvc),
+		assetworkbench.WithEffectiveAccessResolver(accessPolicySvc),
 		assetworkbench.WithSystemAssetPreviewer(taskAssetCenterSvc),
 	}
 	if sessionRevoker, ok := userSessionRepo.(assetworkbench.UserSessionRevoker); ok {
@@ -534,6 +543,7 @@ func main() {
 		PreviewWorkerMaxAttempts: cfg.AssetWorkbench.PreviewWorkerMaxAttempts,
 		BatchJobWorkerLeaseTTL:   cfg.AssetWorkbench.BatchJobWorkerLeaseTTL,
 	}, assetWorkbenchOptions...)
+	planningSKUSvc := service.NewPlanningSKUService(planningSKURepo, taskRepo, mdb, service.NewTaskFinalizer(taskResourceGroupRepo, taskEventRepo))
 
 	skuH := handler.NewSKUHandler(skuSvc)
 	auditH := handler.NewAuditHandler(auditSvc)
@@ -541,6 +551,7 @@ func main() {
 	incidentH := handler.NewIncidentHandler(incidentSvc)
 	policyH := handler.NewPolicyHandler(policySvc)
 	authH := handler.NewAuthHandler(identitySvc, cfg.AssetWorkbench.CookieDomain)
+	accessPolicyH := handler.NewAccessPolicyHandler(accessPolicySvc)
 	routeAccessCatalog := transport.NewRouteAccessCatalog()
 	userAdminH := handler.NewUserAdminHandler(identitySvc, routeAccessCatalog, operationLogSvc, workflowTraceEventSvc)
 
@@ -555,6 +566,7 @@ func main() {
 	erpSyncH := handler.NewERPSyncHandler(erpSyncSvc)
 	taskH := handler.NewTaskHandler(taskSvc, costRuleSvc, taskDetailSvc)
 	taskH.SetR3Services(r3PoolQuerySvc, r3ClaimSvc, r3ModuleSvc, r3CancelSvc)
+	taskH.SetPlanningSKUService(planningSKUSvc)
 	taskAssignmentH := handler.NewTaskAssignmentHandler(taskAssignmentSvc)
 	taskAssetH := handler.NewTaskAssetHandler(taskAssetSvc)
 	taskAssetCenterH := handler.NewTaskAssetCenterHandler(taskAssetCenterSvc)
@@ -573,6 +585,8 @@ func main() {
 	}
 	assetFilesH.SetFileAccessPolicy(taskRepo, assetFilesTaskAssetRepo, assetFilesStorageRefRepo, userRepo)
 	designSubmissionH := handler.NewDesignSubmissionHandler(taskAssetSvc, taskAssetCenterSvc, taskSvc)
+	taskResourceWorkflowH := handler.NewTaskResourceWorkflowHandler(taskResourceWorkflowSvc)
+	planningSKUH := handler.NewPlanningSKUHandler(planningSKUSvc)
 	taskDetailH := handler.NewTaskDetailHandler(r3DetailSvc)
 	taskAISummaryH := handler.NewTaskAISummaryHandler(taskAISummarySvc)
 	taskCostOverrideH := handler.NewTaskCostOverrideHandler(taskCostOverrideSvc)
@@ -589,8 +603,6 @@ func main() {
 	ruleTemplateH := handler.NewRuleTemplateHandler(ruleTemplateSvc)
 	auditV7H := handler.NewAuditV7Handler(auditV7Svc, taskEventSvc)
 	auditLogH := handler.NewAuditLogHandler(auditV7Repo, taskRepo, userRepo)
-	outsourceH := handler.NewOutsourceHandler(outsourceSvc)
-	warehouseH := handler.NewWarehouseHandler(warehouseSvc)
 	jstUserImportSvc := service.NewJSTUserImportService(erpBridgeSvc, userRepo, mdb, cfg.Auth)
 	jstUserAdminH := handler.NewJSTUserAdminHandler(erpBridgeSvc, jstUserImportSvc)
 	serverLogSvc := service.NewServerLogService(serverLogRepo)
@@ -608,7 +620,7 @@ func main() {
 	wsH := transportws.NewHandler(identitySvc, wsHub)
 
 	// ── 6. HTTP router ────────────────────────────────────────────────────────
-	router := transport.NewRouter(skuH, auditH, agentH, incidentH, policyH, authH, userAdminH, erpBridgeH, productH, productManagementH, categoryH, categoryMappingH, costRuleH, costRuleBindingH, erpSyncH, taskH, taskAssignmentH, taskAssetH, taskAssetCenterH, taskCreateReferenceUploadH, assetUploadH, assetFilesH, designSubmissionH, taskDetailH, taskAISummaryH, taskCostOverrideH, taskBoardH, taskBatchExcelH, taskSingleExcelH, workbenchH, assetWorkbenchH, exportCenterH, integrationCenterH, codeRuleH, ruleTemplateH, auditV7H, auditLogH, outsourceH, warehouseH, jstUserAdminH, serverLogH, orgMoveH, taskDraftH, notificationH, erpProductH, designSourceH, searchH, reportL1H, experienceH, predictionH, wsH, routeAccessCatalog, identitySvc, identitySvc, logger, workflowTraceEventSvc)
+	router := transport.NewRouter(skuH, auditH, agentH, incidentH, policyH, authH, accessPolicyH, userAdminH, erpBridgeH, productH, productManagementH, categoryH, categoryMappingH, costRuleH, costRuleBindingH, erpSyncH, taskH, taskAssignmentH, taskAssetH, taskAssetCenterH, taskCreateReferenceUploadH, assetUploadH, assetFilesH, designSubmissionH, taskResourceWorkflowH, planningSKUH, taskDetailH, taskAISummaryH, taskCostOverrideH, taskBoardH, taskBatchExcelH, taskSingleExcelH, workbenchH, assetWorkbenchH, exportCenterH, integrationCenterH, codeRuleH, ruleTemplateH, auditV7H, auditLogH, jstUserAdminH, serverLogH, orgMoveH, taskDraftH, notificationH, erpProductH, designSourceH, searchH, reportL1H, experienceH, predictionH, wsH, routeAccessCatalog, identitySvc, identitySvc, accessPolicySvc, logger, workflowTraceEventSvc)
 
 	// ── 7. Background workers ─────────────────────────────────────────────────
 	workerCtx, cancelWorkers := context.WithCancel(context.Background())
@@ -642,6 +654,7 @@ func main() {
 		AssetWorkbenchBatchJobLimit:     cfg.AssetWorkbench.BatchJobWorkerLimit,
 	}).Start(workerCtx)
 	startExperienceWorker(workerCtx, experienceSvc, cfg.Experience, logger.Named("experience_worker"))
+	startAssetObjectDeletionWorker(workerCtx, assetObjectDeletionWorker, logger.Named("asset_object_deletion_worker"))
 	if wecomSender.Start(workerCtx) {
 		logger.Info("wecom aibot sender started", zap.String("chat_id", cfg.WeCom.AiBotDefaultChatID))
 	}
@@ -687,44 +700,6 @@ func main() {
 			logger.Fatal("cron auto-archive add failed", zap.Error(err))
 		}
 		logger.Info("cron auto-archive enabled", zap.String("spec", archiveSpec))
-	}
-	if envFlag("ENABLE_CRON_WAREHOUSE_AUTO_RELEASE") {
-		releaseSpec := envOr("CRON_SCHEDULE_WAREHOUSE_AUTO_RELEASE", "*/5 * * * *")
-		autoReleaseCandidateRepo, ok := taskAssetRepo.(service.WarehouseAutoReleaseCandidateRepo)
-		if !ok {
-			logger.Fatal("cron warehouse-auto-release requires candidate repo support")
-		}
-		autoReleaseJob := service.NewWarehouseAutoReleaseJob(
-			autoReleaseCandidateRepo,
-			taskRepo,
-			warehouseRepo,
-			taskEventRepo,
-			mdb,
-			log.New(os.Stderr, "[WAREHOUSE-AUTO-RELEASE-CRON] ", log.LstdFlags),
-			service.WithWarehouseAutoReleaseModuleRepos(taskModuleRepo, taskModuleEventRepo),
-			service.WithWarehouseAutoReleaseProductManagementCloseSyncer(productManagementSvc),
-			service.WithWarehouseAutoReleaseNotificationService(notificationSvc),
-		)
-		if err := cronInst.Add("warehouse-auto-release", releaseSpec, func(ctx context.Context) error {
-			result, appErr := autoReleaseJob.Run(ctx, service.WarehouseAutoReleaseOptions{
-				Limit:         envInt("WAREHOUSE_AUTO_RELEASE_LIMIT", 100),
-				GracePeriod:   time.Duration(envInt("WAREHOUSE_AUTO_RELEASE_GRACE_MINUTES", 30)) * time.Minute,
-				SystemActorID: int64(envInt("WAREHOUSE_AUTO_RELEASE_SYSTEM_ACTOR_ID", 0)),
-			})
-			if appErr != nil {
-				return fmt.Errorf("%s: %s", appErr.Code, appErr.Message)
-			}
-			logger.Info("cron warehouse-auto-release run",
-				zap.Int("scanned", result.Scanned),
-				zap.Int("released", result.Released),
-				zap.Int("skipped", result.Skipped),
-				zap.Time("cutoff", result.Cutoff),
-			)
-			return nil
-		}); err != nil {
-			logger.Fatal("cron warehouse-auto-release add failed", zap.Error(err))
-		}
-		logger.Info("cron warehouse-auto-release enabled", zap.String("spec", releaseSpec))
 	}
 	if envFlag("ENABLE_CRON_REPORT_L1_DAILY") {
 		reportSpec := envOr("CRON_SCHEDULE_REPORT_L1_DAILY", "*/10 * * * *")
@@ -898,6 +873,45 @@ func startExternalAssetRefresh(ctx context.Context, svc *externalassets.Service,
 	}
 	startPrepareLoop("original", svc.OSSPrepareWake(), svc.ProcessPendingOSS)
 	startPrepareLoop("preview", nil, svc.ProcessPendingPreview)
+}
+
+func startAssetObjectDeletionWorker(ctx context.Context, worker *assetlifecycle.ObjectDeletionWorker, logger *zap.Logger) {
+	if worker == nil || !worker.Enabled() {
+		logger.Info("asset object deletion worker disabled")
+		return
+	}
+	go func() {
+		const interval = 5 * time.Second
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		logger.Info("asset object deletion worker started", zap.Duration("interval", interval))
+		run := func() {
+			runCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+			defer cancel()
+			result, appErr := worker.RunOnce(runCtx, 100)
+			if appErr != nil {
+				logger.Warn("asset object deletion worker failed", zap.String("code", appErr.Code), zap.String("message", appErr.Message))
+				return
+			}
+			if result.Claimed > 0 {
+				logger.Info("asset object deletion worker finished",
+					zap.Int("claimed", result.Claimed),
+					zap.Int("succeeded", result.Succeeded),
+					zap.Int("retried", result.Retried),
+					zap.Int("alerted", result.Alerted),
+				)
+			}
+		}
+		run()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				run()
+			}
+		}
+	}()
 }
 
 func startExperienceWorker(ctx context.Context, svc service.ExperienceService, cfg config.ExperienceConfig, logger *zap.Logger) {

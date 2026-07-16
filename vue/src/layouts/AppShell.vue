@@ -214,6 +214,14 @@ const MENU_CONFIG: MenuConfig[] = [
     icon: 'reorder',
   },
   {
+    key: 'planning_sku',
+    label: '策划 SKU',
+    to: '/tasks/sku-planning',
+    aliases: ['task_list'],
+    section: 'workbench',
+    icon: 'inventory_2',
+  },
+  {
     key: 'resource_management',
     label: '资产管理',
     to: '/asset-center',
@@ -267,6 +275,14 @@ const MENU_CONFIG: MenuConfig[] = [
     section: 'data',
     icon: 'person',
   },
+  {
+    key: 'access_policy',
+    label: '权限管理',
+    to: '/access-policy',
+    aliases: ['user_admin', 'user_manage'],
+    section: 'data',
+    icon: 'admin_panel_settings',
+  },
 ]
 
 // v1.8 Round I：菜单可见性完全由后端 `frontend_access.menus` 下发决定，
@@ -279,7 +295,6 @@ const visibleMenus = computed(() => {
   const alwaysVisibleKeys = new Set(['task_list'])
   return MENU_CONFIG.filter((menu) =>
     alwaysVisibleKeys.has(menu.key) ||
-    (menu.key === 'report_center' && permissionsStore.currentUser?.role === 'super_admin') ||
     userMenus.includes(menu.key) ||
     (menu.aliases ?? []).some((alias) => userMenus.includes(alias)),
   )
@@ -296,42 +311,7 @@ const menuSections = computed(() =>
   ].filter((section) => section.menus.length > 0),
 )
 
-const CUSTOMIZATION_REVIEWER_ROLES = [
-  'CustomizationReviewer',
-  'customization_reviewer',
-  'customizationreviewer',
-] as const
 function resolveMenuTo(menu: MenuConfig) {
-  if (menu.key !== 'task_list') return menu.to
-
-  const canReviewCustomization = permissionsStore.hasAnyRole(CUSTOMIZATION_REVIEWER_ROLES)
-  const canReviewNormal = permissionsStore.hasAction('task.audit.review')
-  if (canReviewCustomization && !canReviewNormal) {
-    return {
-      path: '/tasks',
-      query: {
-        task_category: 'customization',
-        status: 'PendingCustomizationReview,PendingEffectReview',
-      },
-    }
-  }
-  if (canReviewNormal && !canReviewCustomization) {
-    return {
-      path: '/tasks',
-      query: {
-        task_category: 'normal',
-        status: 'PendingAuditA,PendingAuditB',
-      },
-    }
-  }
-  if (canReviewCustomization && canReviewNormal) {
-    return {
-      path: '/tasks',
-      query: {
-        status: 'PendingAuditA,PendingAuditB,PendingCustomizationReview,PendingEffectReview',
-      },
-    }
-  }
   return menu.to
 }
 

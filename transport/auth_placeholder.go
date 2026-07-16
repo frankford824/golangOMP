@@ -14,14 +14,15 @@ import (
 )
 
 const (
-	authorizationHeader      = "Authorization"
-	debugActorIDHeader       = "X-Debug-Actor-Id"
-	debugActorRolesHeader    = "X-Debug-Actor-Roles"
-	workflowActorIDHeader    = "X-Workflow-Actor-Id"
-	workflowActorRolesHeader = "X-Workflow-Actor-Roles"
-	workflowAuthModeHeader   = "X-Workflow-Auth-Mode"
-	workflowReadinessHeader  = "X-Workflow-API-Readiness"
-	workflowRolesHeader      = "X-Workflow-Required-Roles"
+	authorizationHeader       = "Authorization"
+	debugActorIDHeader        = "X-Debug-Actor-Id"
+	debugActorRolesHeader     = "X-Debug-Actor-Roles"
+	workflowActorIDHeader     = "X-Workflow-Actor-Id"
+	workflowActorRolesHeader  = "X-Workflow-Actor-Roles"
+	workflowAuthModeHeader    = "X-Workflow-Auth-Mode"
+	workflowReadinessHeader   = "X-Workflow-API-Readiness"
+	workflowRolesHeader       = "X-Workflow-Required-Roles"
+	workflowPermissionsHeader = "X-Workflow-Required-Permissions"
 )
 
 // debugActorHeadersEnabled gates X-Debug-Actor-* identity injection. It is
@@ -40,6 +41,65 @@ type RequestActorResolver interface {
 
 type PermissionLogWriter interface {
 	RecordRouteAccess(ctx context.Context, entry domain.PermissionLog)
+}
+
+type EffectiveAccessResolver interface {
+	EffectiveAccess(ctx context.Context, userID int64) (*domain.EffectiveAccess, *domain.AppError)
+}
+
+func withCapabilityAccess(permissionLogger PermissionLogWriter, resolver EffectiveAccessResolver, readiness domain.APIReadiness, permissions ...domain.PermissionCode) gin.HandlerFunc {
+	meta := domain.NewCapabilityRouteAccessMeta(readiness, permissions...)
+	return func(c *gin.Context) {
+		c.Header(workflowReadinessHeader, string(readiness))
+		codes := make([]string, 0, len(permissions))
+		for _, permission := range permissions {
+			codes = append(codes, string(permission))
+		}
+		c.Header(workflowPermissionsHeader, strings.Join(codes, ","))
+
+		actor, ok := domain.RequestActorFromContext(c.Request.Context())
+		if !ok || !domain.IsSessionBackedRequestActor(actor) || actor.ID <= 0 {
+			recordRouteAccess(permissionLogger, c, actor, meta, false, "session-backed actor required for capability access")
+			err := domain.NewAppError(domain.ErrCodeUnauthorized, "Session-backed authentication is required for this route.", nil)
+			err.TraceID = c.GetString(traceIDKey)
+			c.AbortWithStatusJSON(http.StatusUnauthorized, domain.APIErrorResponse{Error: err})
+			return
+		}
+		if resolver == nil {
+			err := domain.NewAppError(domain.ErrCodeInternalError, "Effective access resolver is unavailable.", nil)
+			err.TraceID = c.GetString(traceIDKey)
+			c.AbortWithStatusJSON(http.StatusInternalServerError, domain.APIErrorResponse{Error: err})
+			return
+		}
+		effective, appErr := resolver.EffectiveAccess(c.Request.Context(), actor.ID)
+		if appErr != nil {
+			appErr.TraceID = c.GetString(traceIDKey)
+			c.AbortWithStatusJSON(transportHTTPStatusFromCode(appErr.Code), domain.APIErrorResponse{Error: appErr})
+			return
+		}
+		granted := len(permissions) == 0
+		for _, required := range permissions {
+			if effective.Has(required) {
+				granted = true
+				break
+			}
+		}
+		if !granted {
+			recordRouteAccess(permissionLogger, c, actor, meta, false, "required capability was not granted")
+			err := domain.NewAppError(domain.ErrCodePermissionDenied, "Actor does not have a required capability.", gin.H{"required_permissions": permissions})
+			err.TraceID = c.GetString(traceIDKey)
+			c.AbortWithStatusJSON(http.StatusForbidden, domain.APIErrorResponse{Error: err})
+			return
+		}
+		actor.Permissions = effective.Permissions
+		actor.AccessPolicyRevision = effective.PolicyRevision
+		actor.EffectiveAccess = effective
+		ctx := domain.WithRequestActor(c.Request.Context(), actor)
+		ctx = domain.WithRouteAccessMeta(ctx, meta)
+		c.Request = c.Request.WithContext(ctx)
+		recordRouteAccess(permissionLogger, c, actor, meta, true, "effective capability matched")
+		c.Next()
+	}
 }
 
 func injectRequestActorPlaceholder() gin.HandlerFunc {

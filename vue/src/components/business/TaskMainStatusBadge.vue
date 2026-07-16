@@ -27,11 +27,10 @@ const label = computed(() => {
 type SemanticKind = 'success' | 'processing' | 'warning' | 'error' | 'neutral'
 
 function getSemanticKind(status: MainTaskStatus): SemanticKind {
-  if (status === 'CLOSED') return 'success'
-  if (status === 'BLOCKED') return 'error'
+  if (status === 'COMPLETED' || status === 'ARCHIVED') return 'success'
+  if (status === 'BLOCKED' || status === 'CANCELLED') return 'error'
   if (status === 'DRAFT') return 'neutral'
-  if (status === 'READY_TO_CLOSE') return 'warning'
-  if (status === 'WAREHOUSE_PENDING' || status === 'WAREHOUSE_PROCESSING') return 'processing'
+  if (status === 'PENDING_AUDIT') return 'warning'
   return 'processing'
 }
 

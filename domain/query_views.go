@@ -224,22 +224,22 @@ type TaskCostOverrideSummary struct {
 
 type TaskReadModel struct {
 	Task
-	DesignAssets           []*DesignAsset                      `json:"design_assets"`
-	AssetVersions          []*DesignAssetVersion               `json:"asset_versions"`
+	DesignAssets           []*DesignAsset                      `json:"-"`
+	AssetVersions          []*DesignAssetVersion               `json:"-"`
 	SKUItems               []*TaskSKUItem                      `json:"sku_items"`
-	Workflow               TaskWorkflowSnapshot                `json:"workflow"`
-	Procurement            *ProcurementRecord                  `json:"procurement,omitempty"`
-	ProcurementSummary     *ProcurementSummary                 `json:"procurement_summary,omitempty"`
+	Workflow               TaskWorkflowSnapshot                `json:"-"`
+	Procurement            *ProcurementRecord                  `json:"-"`
+	ProcurementSummary     *ProcurementSummary                 `json:"-"`
 	ProductSelection       *TaskProductSelectionContext        `json:"product_selection,omitempty"`
-	MatchedRuleGovernance  *TaskMatchedRuleGovernance          `json:"matched_rule_governance,omitempty"`
-	OverrideSummary        *TaskCostOverrideSummary            `json:"override_summary,omitempty"`
-	GovernanceAuditSummary *TaskGovernanceAuditSummary         `json:"governance_audit_summary,omitempty"`
-	OverrideBoundary       *TaskCostOverrideGovernanceBoundary `json:"override_governance_boundary,omitempty"`
-	PolicyMode             PolicyMode                          `json:"policy_mode,omitempty"`
-	VisibleToRoles         []Role                              `json:"visible_to_roles,omitempty"`
-	ActionRoles            []ActionPolicySummary               `json:"action_roles,omitempty"`
-	PolicyScopeSummary     *PolicyScopeSummary                 `json:"policy_scope_summary,omitempty"`
-	PlatformEntryBoundary  *PlatformEntryBoundary              `json:"platform_entry_boundary,omitempty"`
+	MatchedRuleGovernance  *TaskMatchedRuleGovernance          `json:"-"`
+	OverrideSummary        *TaskCostOverrideSummary            `json:"-"`
+	GovernanceAuditSummary *TaskGovernanceAuditSummary         `json:"-"`
+	OverrideBoundary       *TaskCostOverrideGovernanceBoundary `json:"-"`
+	PolicyMode             PolicyMode                          `json:"-"`
+	VisibleToRoles         []Role                              `json:"-"`
+	ActionRoles            []ActionPolicySummary               `json:"-"`
+	PolicyScopeSummary     *PolicyScopeSummary                 `json:"-"`
+	PlatformEntryBoundary  *PlatformEntryBoundary              `json:"-"`
 	// Frontend detail fields (v0.5)
 	AssigneeID         *int64          `json:"assignee_id,omitempty"` // alias for designer_id
 	AssigneeName       string          `json:"assignee_name,omitempty"`
@@ -249,7 +249,7 @@ type TaskReadModel struct {
 	DesignRequirement  string          `json:"design_requirement,omitempty"`
 	ChangeRequest      string          `json:"change_request,omitempty"`
 	Note               string          `json:"note,omitempty"`
-	SKUCodeType        TaskSKUCodeType `json:"sku_code_type,omitempty"`
+	SKUCodeType        TaskSKUCodeType `json:"-"`
 	// Always JSON-encode as an array (including empty) so detail clients do not confuse omission with missing data.
 	ReferenceFileRefs []ReferenceFileRef `json:"reference_file_refs"`
 	// Always present for retouch_task reads; empty array for other task types and legacy retouch rows.
@@ -277,16 +277,18 @@ type TaskFilterOptions struct {
 type TaskListItem struct {
 	ID                           int64                        `json:"id"`
 	TaskNo                       string                       `json:"task_no"`
-	ProductID                    *int64                       `json:"-"`
+	ProductID                    *int64                       `json:"product_id,omitempty"`
 	SKUCode                      string                       `json:"sku_code"`
 	PrimarySKUCode               string                       `json:"primary_sku_code,omitempty"`
-	SKUCodeType                  TaskSKUCodeType              `json:"sku_code_type,omitempty"`
+	SKUCodeType                  TaskSKUCodeType              `json:"-"`
 	ProductNameSnapshot          string                       `json:"product_name_snapshot"`
 	TaskType                     TaskType                     `json:"task_type"`
 	SourceMode                   TaskSourceMode               `json:"source_mode"`
-	OwnerTeam                    string                       `json:"owner_team"`
+	OwnerTeam                    string                       `json:"-"`
 	OwnerDepartment              string                       `json:"owner_department"`
+	OwnerDepartmentID            *int64                       `json:"owner_department_id,omitempty"`
 	OwnerOrgTeam                 string                       `json:"owner_org_team"`
+	OwnerTeamID                  *int64                       `json:"owner_team_id,omitempty"`
 	Priority                     TaskPriority                 `json:"priority"`
 	CreatorID                    int64                        `json:"creator_id"`
 	RequesterID                  *int64                       `json:"requester_id,omitempty"`
@@ -297,77 +299,80 @@ type TaskListItem struct {
 	DesignerName                 string                       `json:"designer_name,omitempty"`
 	CurrentHandlerName           string                       `json:"current_handler_name,omitempty"`
 	TaskStatus                   TaskStatus                   `json:"task_status"`
+	WorkflowRevision             int64                        `json:"workflow_revision"`
+	WorkflowContractVersion      int                          `json:"workflow_contract_version"`
+	AllowedActions               []string                     `json:"allowed_actions"`
 	CreatedAt                    time.Time                    `json:"created_at"`
 	UpdatedAt                    time.Time                    `json:"updated_at"`
 	DeadlineAt                   *time.Time                   `json:"deadline_at,omitempty"`
-	NeedOutsource                bool                         `json:"need_outsource"`
-	IsOutsource                  bool                         `json:"is_outsource"`
+	NeedOutsource                bool                         `json:"-"`
+	IsOutsource                  bool                         `json:"-"`
 	BusinessLane                 TaskBusinessLane             `json:"business_lane"`
 	CustomizationRequired        bool                         `json:"customization_required"`
-	WorkflowLane                 WorkflowLane                 `json:"workflow_lane"`
-	CustomizationSourceType      CustomizationSourceType      `json:"customization_source_type"`
-	LastCustomizationOperatorID  *int64                       `json:"last_customization_operator_id,omitempty"`
-	WarehouseRejectReason        string                       `json:"warehouse_reject_reason,omitempty"`
-	WarehouseRejectCategory      string                       `json:"warehouse_reject_category,omitempty"`
+	WorkflowLane                 WorkflowLane                 `json:"-"`
+	CustomizationSourceType      CustomizationSourceType      `json:"-"`
+	LastCustomizationOperatorID  *int64                       `json:"-"`
+	WarehouseRejectReason        string                       `json:"-"`
+	WarehouseRejectCategory      string                       `json:"-"`
 	IsBatchTask                  bool                         `json:"is_batch_task"`
 	BatchItemCount               int                          `json:"batch_item_count"`
 	BatchMode                    TaskBatchMode                `json:"batch_mode"`
 	SKUItems                     []*TaskSKUItem               `json:"sku_items,omitempty"`
-	WarehouseStatus              *WarehouseReceiptStatus      `json:"warehouse_status,omitempty"`
-	LatestAssetType              *TaskAssetType               `json:"latest_asset_type,omitempty"`
-	Workflow                     TaskWorkflowSnapshot         `json:"workflow"`
-	ProcurementSummary           *ProcurementSummary          `json:"procurement_summary,omitempty"`
+	WarehouseStatus              *WarehouseReceiptStatus      `json:"-"`
+	LatestAssetType              *TaskAssetType               `json:"-"`
+	Workflow                     TaskWorkflowSnapshot         `json:"-"`
+	ProcurementSummary           *ProcurementSummary          `json:"-"`
 	ProductSelection             *TaskProductSelectionSummary `json:"product_selection,omitempty"`
-	PolicyMode                   PolicyMode                   `json:"policy_mode,omitempty"`
-	VisibleToRoles               []Role                       `json:"visible_to_roles,omitempty"`
-	ActionRoles                  []ActionPolicySummary        `json:"action_roles,omitempty"`
-	PolicyScopeSummary           *PolicyScopeSummary          `json:"policy_scope_summary,omitempty"`
-	PlatformEntryBoundary        *PlatformEntryBoundary       `json:"platform_entry_boundary,omitempty"`
-	Category                     string                       `json:"category,omitempty"`
-	CategoryCode                 string                       `json:"category_code,omitempty"`
-	CategoryName                 string                       `json:"category_name,omitempty"`
-	SourceProductID              *int64                       `json:"source_product_id,omitempty"`
-	SourceProductName            string                       `json:"source_product_name,omitempty"`
-	SourceSearchEntryCode        string                       `json:"source_search_entry_code,omitempty"`
-	SourceMatchType              string                       `json:"source_match_type,omitempty"`
-	SourceMatchRule              string                       `json:"source_match_rule,omitempty"`
-	MatchedCategoryCode          string                       `json:"matched_category_code,omitempty"`
-	MatchedSearchEntryCode       string                       `json:"matched_search_entry_code,omitempty"`
-	ProductSelectionSnapshotJSON string                       `json:"product_selection_snapshot_json,omitempty"`
-	SpecText                     string                       `json:"spec_text,omitempty"`
-	Material                     string                       `json:"material,omitempty"`
-	SizeText                     string                       `json:"size_text,omitempty"`
-	CraftText                    string                       `json:"craft_text,omitempty"`
-	ProcurementPrice             *float64                     `json:"procurement_price,omitempty"`
-	ProcurementStatus            *ProcurementStatus           `json:"procurement_status,omitempty"`
-	ProcurementQuantity          *int64                       `json:"procurement_quantity,omitempty"`
-	SupplierName                 string                       `json:"supplier_name,omitempty"`
-	ExpectedDeliveryAt           *time.Time                   `json:"expected_delivery_at,omitempty"`
-	CostPrice                    *float64                     `json:"cost_price,omitempty"`
-	EstimatedCost                *float64                     `json:"estimated_cost,omitempty"`
-	CostRuleID                   *int64                       `json:"cost_rule_id,omitempty"`
-	CostRuleName                 string                       `json:"cost_rule_name,omitempty"`
-	CostRuleSource               string                       `json:"cost_rule_source,omitempty"`
-	MatchedRuleVersion           *int                         `json:"matched_rule_version,omitempty"`
-	PrefillSource                string                       `json:"prefill_source,omitempty"`
-	PrefillAt                    *time.Time                   `json:"prefill_at,omitempty"`
-	RequiresManualReview         bool                         `json:"requires_manual_review,omitempty"`
-	ManualCostOverride           bool                         `json:"manual_cost_override,omitempty"`
-	ManualCostOverrideReason     string                       `json:"manual_cost_override_reason,omitempty"`
-	OverrideActor                string                       `json:"override_actor,omitempty"`
-	OverrideAt                   *time.Time                   `json:"override_at,omitempty"`
-	FilingStatus                 FilingStatus                 `json:"filing_status,omitempty"`
-	FilingErrorMessage           string                       `json:"filing_error_message,omitempty"`
-	FilingTriggerSource          string                       `json:"filing_trigger_source,omitempty"`
-	LastFilingAttemptAt          *time.Time                   `json:"last_filing_attempt_at,omitempty"`
-	LastFiledAt                  *time.Time                   `json:"last_filed_at,omitempty"`
-	ERPSyncRequired              bool                         `json:"erp_sync_required,omitempty"`
-	ERPSyncVersion               int64                        `json:"erp_sync_version,omitempty"`
+	PolicyMode                   PolicyMode                   `json:"-"`
+	VisibleToRoles               []Role                       `json:"-"`
+	ActionRoles                  []ActionPolicySummary        `json:"-"`
+	PolicyScopeSummary           *PolicyScopeSummary          `json:"-"`
+	PlatformEntryBoundary        *PlatformEntryBoundary       `json:"-"`
+	Category                     string                       `json:"-"`
+	CategoryCode                 string                       `json:"-"`
+	CategoryName                 string                       `json:"-"`
+	SourceProductID              *int64                       `json:"-"`
+	SourceProductName            string                       `json:"-"`
+	SourceSearchEntryCode        string                       `json:"-"`
+	SourceMatchType              string                       `json:"-"`
+	SourceMatchRule              string                       `json:"-"`
+	MatchedCategoryCode          string                       `json:"-"`
+	MatchedSearchEntryCode       string                       `json:"-"`
+	ProductSelectionSnapshotJSON string                       `json:"-"`
+	SpecText                     string                       `json:"-"`
+	Material                     string                       `json:"-"`
+	SizeText                     string                       `json:"-"`
+	CraftText                    string                       `json:"-"`
+	ProcurementPrice             *float64                     `json:"-"`
+	ProcurementStatus            *ProcurementStatus           `json:"-"`
+	ProcurementQuantity          *int64                       `json:"-"`
+	SupplierName                 string                       `json:"-"`
+	ExpectedDeliveryAt           *time.Time                   `json:"-"`
+	CostPrice                    *float64                     `json:"-"`
+	EstimatedCost                *float64                     `json:"-"`
+	CostRuleID                   *int64                       `json:"-"`
+	CostRuleName                 string                       `json:"-"`
+	CostRuleSource               string                       `json:"-"`
+	MatchedRuleVersion           *int                         `json:"-"`
+	PrefillSource                string                       `json:"-"`
+	PrefillAt                    *time.Time                   `json:"-"`
+	RequiresManualReview         bool                         `json:"-"`
+	ManualCostOverride           bool                         `json:"-"`
+	ManualCostOverrideReason     string                       `json:"-"`
+	OverrideActor                string                       `json:"-"`
+	OverrideAt                   *time.Time                   `json:"-"`
+	FilingStatus                 FilingStatus                 `json:"-"`
+	FilingErrorMessage           string                       `json:"-"`
+	FilingTriggerSource          string                       `json:"-"`
+	LastFilingAttemptAt          *time.Time                   `json:"-"`
+	LastFiledAt                  *time.Time                   `json:"-"`
+	ERPSyncRequired              bool                         `json:"-"`
+	ERPSyncVersion               int64                        `json:"-"`
 	LastFilingPayloadHash        string                       `json:"-"`
 	LastFilingPayloadJSON        string                       `json:"-"`
-	MissingFields                []string                     `json:"missing_fields,omitempty"`
-	MissingFieldsSummaryCN       string                       `json:"missing_fields_summary_cn,omitempty"`
-	FiledAt                      *time.Time                   `json:"filed_at,omitempty"`
+	MissingFields                []string                     `json:"-"`
+	MissingFieldsSummaryCN       string                       `json:"-"`
+	FiledAt                      *time.Time                   `json:"-"`
 }
 
 type TaskFilingStatusView struct {

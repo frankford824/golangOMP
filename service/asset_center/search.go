@@ -355,12 +355,13 @@ func (s *Service) searchExternalRows(ctx context.Context, query domain.AssetSear
 		return []*AssetDetail{}, 0, nil
 	}
 	rows, total, err := s.externalSvc.Search(ctx, domain.ExternalAssetSearchQuery{
-		Keyword:        query.Keyword,
-		CreatedFrom:    query.CreatedFrom,
-		CreatedTo:      query.CreatedTo,
-		FormatCategory: query.FormatCategory,
-		Page:           query.Page,
-		Size:           query.Size,
+		Keyword:                query.Keyword,
+		CreatedFrom:            query.CreatedFrom,
+		CreatedTo:              query.CreatedTo,
+		FormatCategory:         query.FormatCategory,
+		OperationalVisibleOnly: query.OperationalVisibleOnly,
+		Page:                   query.Page,
+		Size:                   query.Size,
 	})
 	if err != nil {
 		return nil, 0, domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)

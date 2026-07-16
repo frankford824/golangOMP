@@ -3,9 +3,15 @@ package repo
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 
 	"workflow/domain"
+)
+
+var (
+	ErrConflict = errors.New("optimistic concurrency conflict")
+	ErrNotFound = errors.New("repository entity not found")
 )
 
 // Tx is a marker for a live database transaction.
@@ -863,6 +869,8 @@ type TaskListFilter struct {
 	ScopeViewAll                bool
 	ScopeDepartmentCodes        []string
 	ScopeTeamCodes              []string
+	ScopeDepartmentIDs          []int64
+	ScopeTeamIDs                []int64
 	ScopeManagedDepartmentCodes []string
 	ScopeManagedTeamCodes       []string
 	ScopeUserIDs                []int64

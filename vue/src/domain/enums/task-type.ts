@@ -5,13 +5,13 @@ import type { TaskBusinessType, TaskType } from '../types/task'
  *
  * - ORIGINAL_PRODUCT_DEV：原品开发 / 旧品改图
  * - NEW_PRODUCT_DEV：新品开发
- * - PURCHASE_TASK：采购任务（可走无图、无审核路径）
+ * - SKU_PLANNING：策划 SKU（独立创建页，生成后直接结单）
  * - RETOUCH_TASK：P 图任务（图片精修）
  */
 export const TaskTypeEnum = {
   ORIGINAL_PRODUCT_DEV: 'ORIGINAL_PRODUCT_DEV',
   NEW_PRODUCT_DEV: 'NEW_PRODUCT_DEV',
-  PURCHASE_TASK: 'PURCHASE_TASK',
+  SKU_PLANNING: 'SKU_PLANNING',
   RETOUCH_TASK: 'RETOUCH_TASK',
 } as const
 
@@ -26,8 +26,8 @@ export type TaskTypeEnumValue = (typeof TaskTypeEnum)[keyof typeof TaskTypeEnum]
  */
 export function normalizeTaskType(type: TaskType | TaskBusinessType): TaskTypeEnumValue {
   switch (type) {
-    case 'PURCHASE_TASK':
-      return TaskTypeEnum.PURCHASE_TASK
+    case 'SKU_PLANNING':
+      return TaskTypeEnum.SKU_PLANNING
     case 'NEW_PRODUCT_DEV':
       return TaskTypeEnum.NEW_PRODUCT_DEV
     case 'RETOUCH_TASK':
@@ -37,4 +37,3 @@ export function normalizeTaskType(type: TaskType | TaskBusinessType): TaskTypeEn
       return TaskTypeEnum.ORIGINAL_PRODUCT_DEV
   }
 }
-

@@ -51,10 +51,6 @@ const TECHNICAL_TOKEN_LABELS: Record<string, string> = {
   approved: '已通过',
   rejected: '已打回',
   completed: '已完成',
-  pendingwarehousereceive: '待仓库接收',
-  pendingclose: '待结单',
-  pending_warehouse_receive: '待仓库接收',
-  pending_close: '待结单',
   task_next_action: '下一步建议',
   task_create: '创建建议',
   open_task_assets: '查看任务资产',
@@ -108,12 +104,9 @@ function replaceTechnicalTokens(raw: string): string {
     const pattern = new RegExp(`(^|[^A-Za-z0-9_])${escapeRegExp(token)}([^A-Za-z0-9_]|$)`, 'gi')
     text = text.replace(pattern, `$1${label}$2`)
   }
-  text = text.replace(/\bPendingWarehouseReceive\b/g, '待仓库接收')
-  text = text.replace(/\bPendingClose\b/g, '待结单')
   text = text.replace(/\bInProgress\b/g, '处理中')
   text = text.replace(/\bPendingAssign\b/g, '待指派')
-  text = text.replace(/\bPendingAudit[A-Z]?\b/g, '待审核')
-  text = text.replace(/\bRejectedByAudit[A-Z]?\b/g, '审核打回')
+  text = text.replace(/\bPendingAudit\b/g, '待审核')
   text = text.replace(/\bmissing\b/gi, '缺少')
   text = text.replace(/\brequired\b/gi, '必填')
   text = text.replace(/\bempty\b/gi, '为空')

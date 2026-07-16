@@ -1,7 +1,7 @@
 import type { TaskPriorityApi } from '@/domain/task-priority'
 import type { RetouchRequirementDraft } from '@/domain/types/retouch-requirement'
 
-export type TaskKind = 'ORIGINAL_PRODUCT_DEV' | 'NEW_PRODUCT_DEV' | 'PURCHASE_TASK' | 'RETOUCH_TASK'
+export type TaskKind = 'ORIGINAL_PRODUCT_DEV' | 'NEW_PRODUCT_DEV' | 'RETOUCH_TASK'
 export type TaskCreateSkuMode = 'single' | 'multiple'
 export type TaskSkuCodeType = 'regular' | 'customization'
 
@@ -22,7 +22,6 @@ export interface TaskBatchItem {
   materialOther?: string
   designRequirement?: string
   newSku?: string
-  purchaseSku?: string
   skuCodeType?: TaskSkuCodeType
   /** 预生成 SKU 所用规则 id，与 SkuRulePreviewCard 选择同步 */
   skuRuleId?: string | null
@@ -125,24 +124,7 @@ export interface TaskCreateFormModel {
   basePriceAmount?: number
   inspirationNote?: string
 
-  // ── 采购任务专属字段（与《创建任务-三个分型取消》文档对齐）────────────────────
-  /** 产品渠道（非必填） */
-  productChannel?: string
-  /** 成本单价 */
-  costPriceAmount: number | undefined
-  costPriceCurrency: string
-  /** 数量 */
-  purchaseQuantity: number | undefined
-  purchaseUnit?: string
-  /** 以下字段保留用于后端兼容，文档未要求展示时可留空 */
-  purchaseSupplierName?: string
-  purchasePriceAmount?: number
-  purchasePriceCurrency?: string
-  purchaseExpectedAt?: string | null
-  warehouseLocationCode?: string
-  warehouseLocationName?: string
-
-  // ── 批量 SKU 创建（new/purchase 可选）──────────────────────────────────────
+  // ── 批量 SKU 创建（新品设计任务）────────────────────────────────────────────
   skuMode?: TaskCreateSkuMode
   batchItems?: TaskBatchItem[]
   batchTemplate?: TaskBatchTemplateValues

@@ -462,8 +462,27 @@ export const tasksHandler: MockHandler = (request) => {
   if (request.method === 'GET') {
     const taskId = parseTaskIdFromRoot(request.path)
     if (taskId) {
-      const task = mockTasks.find((item) => item.id === taskId)
+      const task = mockTasks.find((item) => item.id === taskId || item.id === `task_${taskId}`)
       if (!task) return { status: 404, data: { message: 'task not found' } }
+      if (/^\d+$/.test(taskId)) {
+        return { status: 200, data: {
+          ...task,
+          id: Number(taskId),
+          task_status: task.status === 'completed' ? 'Completed' : 'PendingAudit',
+          workflow_revision: 3,
+          workflow_contract_version: 2,
+          business_lane: task.task_type === 'customer_customization' ? 'customization' : 'normal',
+          allowed_actions: ['task.audit.approve', 'task.audit.return_to_design', 'task.audit.handover'],
+          product_name_snapshot: task.title,
+          primary_sku_code: 'SKU-MOCK-1002',
+          current_handler_name: '审核演示',
+          owner_department: '设计部',
+          owner_org_team: '主图组',
+          requirement_description: '完成主图设计并核对套装顺序。',
+          operation_note: '请在审核通过前检查全部最终成品。',
+          reference_file_refs: [{ id: 1, file_name: '参考图.png', download_url: '/mock-assets/reference.png' }],
+        } }
+      }
       return { status: 200, data: task }
     }
   }

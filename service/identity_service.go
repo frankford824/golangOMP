@@ -63,7 +63,9 @@ type CreateManagedUserParams struct {
 	EmployeeNo         *int
 	DisplayName        string
 	Department         domain.Department
+	DepartmentID       *int64
 	Team               string
+	TeamID             *int64
 	Mobile             string
 	Email              string
 	Password           string
@@ -108,7 +110,9 @@ type UpdateUserParams struct {
 	Status             *domain.UserStatus
 	EmploymentType     *domain.EmploymentType
 	Department         *domain.Department
+	DepartmentID       *int64
 	Team               *string
+	TeamID             *int64
 	Group              *string
 	Mobile             *string
 	Email              *string
@@ -185,6 +189,11 @@ type IdentityService interface {
 	UpdateMyAvatar(ctx context.Context, p UpdateMyAvatarParams) (*domain.User, *domain.AppError)
 	GetMyOrg(ctx context.Context) (*domain.MyOrgProfile, *domain.AppError)
 	ListUsers(ctx context.Context, filter UserFilter) ([]*domain.User, domain.PaginationMeta, *domain.AppError)
+	// ListAccessPolicyUsers is a capability-guarded selector for the explicit
+	// access-policy UI. It intentionally does not infer authorization from
+	// legacy roles; the /v1/access/users route guard is the sole authorization
+	// boundary and the handler returns only minimal identity fields.
+	ListAccessPolicyUsers(ctx context.Context, filter UserFilter) ([]*domain.User, domain.PaginationMeta, *domain.AppError)
 	// ListAssignableDesigners returns the full set of assignable users for the
 	// requested candidate-pool lane. It is the Round D dedicated "assignment
 	// candidate pool" service path, extended in Round N with lane-aware role
@@ -243,6 +252,48 @@ type identityService struct {
 	logger                 *zap.Logger
 	orgOptionsOnce         sync.Once
 	orgOptionsCache        *domain.OrgOptions
+}
+
+func (s *identityService) resolveStableUserOrgIDs(ctx context.Context, departmentID, teamID *int64, department domain.Department, team string) (*int64, *int64, *domain.AppError) {
+	if departmentID == nil && teamID == nil {
+		return nil, nil, nil
+	}
+	if s.orgRepo == nil {
+		return nil, nil, domain.NewAppError(domain.ErrCodeInternalError, "organization repository is unavailable", nil)
+	}
+	if departmentID == nil || *departmentID <= 0 {
+		return nil, nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "department_id is required when stable organization ids are supplied", nil)
+	}
+	departmentRow, err := s.orgRepo.GetDepartmentByID(ctx, *departmentID)
+	if err != nil {
+		return nil, nil, infraError("load user department by id", err)
+	}
+	if departmentRow == nil || !departmentRow.Enabled || (strings.TrimSpace(string(department)) != "" && departmentRow.Name != strings.TrimSpace(string(department))) {
+		return nil, nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "department_id does not match an enabled department", nil)
+	}
+	departmentValue := departmentRow.ID
+	if strings.TrimSpace(team) == "" && teamID == nil {
+		return &departmentValue, nil, nil
+	}
+	if teamID == nil || *teamID <= 0 {
+		return nil, nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "team_id is required when a team is supplied", nil)
+	}
+	teamRow, err := s.orgRepo.GetTeamByID(ctx, *teamID)
+	if err != nil {
+		return nil, nil, infraError("load user team by id", err)
+	}
+	if teamRow == nil || !teamRow.Enabled || teamRow.DepartmentID != departmentRow.ID || (strings.TrimSpace(team) != "" && teamRow.Name != strings.TrimSpace(team)) {
+		return nil, nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "team_id does not match the selected department and team", nil)
+	}
+	teamValue := teamRow.ID
+	return &departmentValue, &teamValue, nil
+}
+
+func equalOptionalInt64(left, right *int64) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return *left == *right
 }
 
 // userRoleRawReader is an optional repo extension used by ResolveRequestActor
@@ -922,6 +973,10 @@ func (s *identityService) CreateManagedUser(ctx context.Context, p CreateManaged
 	if appErr := s.validateTeam(p.Department, team); appErr != nil {
 		return nil, appErr
 	}
+	departmentID, teamID, orgErr := s.resolveStableUserOrgIDs(ctx, p.DepartmentID, p.TeamID, p.Department, team)
+	if orgErr != nil {
+		return nil, orgErr
+	}
 	if appErr := validateMobile(mobile); appErr != nil {
 		return nil, appErr
 	}
@@ -977,7 +1032,9 @@ func (s *identityService) CreateManagedUser(ctx context.Context, p CreateManaged
 		EmployeeNo:         &employeeNo,
 		DisplayName:        displayName,
 		Department:         p.Department,
+		DepartmentID:       departmentID,
 		Team:               team,
+		TeamID:             teamID,
 		Mobile:             mobile,
 		Email:              email,
 		PasswordHash:       string(hash),
@@ -1110,6 +1167,29 @@ func (s *identityService) ListUsers(ctx context.Context, filter UserFilter) ([]*
 	}
 	if err := s.attachRolesForUsers(ctx, users); err != nil {
 		return nil, domain.PaginationMeta{}, infraError("attach user roles", err)
+	}
+	for _, user := range users {
+		s.prepareUserForResponse(user)
+	}
+	return users, buildPaginationMeta(filter.Page, filter.PageSize, total), nil
+}
+
+func (s *identityService) ListAccessPolicyUsers(ctx context.Context, filter UserFilter) ([]*domain.User, domain.PaginationMeta, *domain.AppError) {
+	filter.Keyword = strings.TrimSpace(filter.Keyword)
+	if filter.Page <= 0 {
+		filter.Page = 1
+	}
+	if filter.PageSize <= 0 || filter.PageSize > 100 {
+		filter.PageSize = 30
+	}
+	users, total, err := s.userRepo.List(ctx, repo.UserListFilter{
+		Keyword:  filter.Keyword,
+		Status:   filter.Status,
+		Page:     filter.Page,
+		PageSize: filter.PageSize,
+	})
+	if err != nil {
+		return nil, domain.PaginationMeta{}, infraError("list access policy users", err)
 	}
 	for _, user := range users {
 		s.prepareUserForResponse(user)
@@ -1318,6 +1398,20 @@ func (s *identityService) UpdateUser(ctx context.Context, p UpdateUserParams) (*
 	if nextTeam != user.Team {
 		user.Team = nextTeam
 		changes = append(changes, "team")
+	}
+	if p.DepartmentID != nil || p.TeamID != nil {
+		departmentID, teamID, orgErr := s.resolveStableUserOrgIDs(ctx, p.DepartmentID, p.TeamID, nextDepartment, nextTeam)
+		if orgErr != nil {
+			return nil, orgErr
+		}
+		if !equalOptionalInt64(user.DepartmentID, departmentID) {
+			user.DepartmentID = departmentID
+			changes = append(changes, "department_id")
+		}
+		if !equalOptionalInt64(user.TeamID, teamID) {
+			user.TeamID = teamID
+			changes = append(changes, "team_id")
+		}
 	}
 	if p.Mobile != nil {
 		mobile := strings.TrimSpace(*p.Mobile)
@@ -1687,7 +1781,9 @@ func (s *identityService) ResolveRequestActor(ctx context.Context, bearerToken s
 		Username:           user.Username,
 		Roles:              canonicalRoles,
 		Department:         string(user.Department),
+		DepartmentID:       user.DepartmentID,
 		Team:               user.Team,
+		TeamID:             user.TeamID,
 		ManagedDepartments: append([]string(nil), user.ManagedDepartments...),
 		ManagedTeams:       append([]string(nil), user.ManagedTeams...),
 		FrontendAccess:     user.FrontendAccess,
@@ -1725,7 +1821,9 @@ func (s *identityService) resolveRequestActorBundle(ctx context.Context, bearerT
 		Username:           user.Username,
 		Roles:              canonicalRoles,
 		Department:         string(user.Department),
+		DepartmentID:       user.DepartmentID,
 		Team:               user.Team,
+		TeamID:             user.TeamID,
 		ManagedDepartments: append([]string(nil), user.ManagedDepartments...),
 		ManagedTeams:       append([]string(nil), user.ManagedTeams...),
 		FrontendAccess:     user.FrontendAccess,

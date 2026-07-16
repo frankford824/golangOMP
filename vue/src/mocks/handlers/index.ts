@@ -11,10 +11,12 @@ import { searchHandler } from './search'
 import { taskDraftsHandler } from './taskDrafts'
 import { taskModulesHandler } from './taskModules'
 import { tasksHandler } from './tasks'
+import { v8Handler } from './v8'
 import type { MockHandler, MockHttpResponse, MockRequest } from './types'
 
 const handlers: MockHandler[] = [
   authHandler,
+  v8Handler,
   tasksHandler,
   taskModulesHandler,
   taskDraftsHandler,

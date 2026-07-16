@@ -5,7 +5,6 @@ import type {
   LegacyTaskStatus,
   Task,
   TaskAssetVersion,
-  WarehouseSubStatus,
 } from '@/domain/types/task'
 import { tasksApi } from '@/services/api/tasksApi'
 import type { AssignTaskPayload, SubmitDesignPayload, TaskListParams } from '@/services/apiTypes'
@@ -17,23 +16,11 @@ import { parseReferenceFileRefs } from '@/domain/mappers/reference-file-refs'
 import { nowISO } from '@/utils/date'
 import type { ModuleSummary } from '@/services/apiTypes'
 import {
-  isPurchaseTask,
   isRetouchTask,
   canAssign,
   canReassignDesigner,
   canSubmitAudit,
-  canAudit,
-  canResubmitAuditB,
-  canGoWarehouse,
-  canArchive,
-  canTransferToAuditB,
-  isDoneStatus,
-  isCompletedOrArchived,
-  canTransitionToPendingWarehouse,
-  isPendingAuditA,
 } from '@/domain/task-actions'
-import { canCloseTaskForArchive } from '@/domain/task-close-eligibility'
-import { checkTaskCompletion } from '@/domain/task-completion'
 import { sanitizeCreateTaskPayload } from '@/domain/task-create-fields'
 import { mapRetouchRequirementsFromApi } from '@/domain/mappers/retouch-requirements-from-api'
 import {
@@ -42,17 +29,15 @@ import {
 } from '@/domain/retouch-requirements'
 import type { RetouchRequirementDraft } from '@/domain/types/retouch-requirement'
 import { buildClearDesignerAssigneePayload } from '@/domain/task-assignment-payload'
-import type { PurchaseInfo } from '@/domain/types/purchase'
 import { DesignSubStatusEnum } from '@/domain/enums/task-status'
 import { toRelativeAssetUrl } from '@/utils/url'
 import { normalizePriorityForApi, normalizePriorityFromApi } from '@/domain/task-priority'
 import { hasModuleAction } from '@/domain/module-actions'
-import { sanitizeCustomizationPayload } from '@/domain/customization-payload'
 
 const BACKEND_TASK_TYPE_TO_FRONTEND: Record<string, Task['taskType']> = {
   original_product_development: 'ORIGINAL_PRODUCT_DEV',
   new_product_development: 'NEW_PRODUCT_DEV',
-  purchase_task: 'PURCHASE_TASK',
+  sku_planning: 'SKU_PLANNING',
   retouch_task: 'RETOUCH_TASK',
 }
 
@@ -122,8 +107,6 @@ function mergeReadModelCostGovernanceFields(
 ) {
   if (!readModel) return
   for (const key of [
-    'procurement_summary',
-    'procurementSummary',
     'matched_rule_governance',
     'matchedRuleGovernance',
     'override_summary',
@@ -194,150 +177,6 @@ function backendAllowsDesignerReassignment(task: Task): boolean {
     hasModuleAction(retouchModule, [...keys]) ||
     hasModuleAction(customizationModule, [...keys])
   )
-}
-
-function mapPurchaseStatus(s: unknown): PurchaseInfo['status'] {
-  const v = String(s ?? '')
-  const m: Record<string, PurchaseInfo['status']> = {
-    NotRequired: 'NotRequired',
-    PendingPurchase: 'PendingPurchase',
-    pending_purchase: 'PendingPurchase',
-    Purchasing: 'Purchasing',
-    purchasing: 'Purchasing',
-    Purchased: 'Purchased',
-    purchased: 'Purchased',
-    Cancelled: 'Cancelled',
-    cancelled: 'Cancelled',
-    draft: 'PendingPurchase',
-    Draft: 'PendingPurchase',
-    prepared: 'Purchasing',
-    in_progress: 'Purchasing',
-    completed: 'Purchased',
-  }
-  return m[v] ?? 'PendingPurchase'
-}
-
-/**
- * GET task 若返回 `procurement` 而非 `purchase_info`，结构与创建时 PATCH 体接近，在此归一化。
- */
-function parseProcurementRecord(raw: unknown): PurchaseInfo | undefined {
-  if (raw == null || typeof raw !== 'object') return undefined
-  const p = raw as Record<string, unknown>
-  const qty = p.quantity ?? p.purchase_quantity ?? p.qty
-  const supplierName = (p.supplier_name ?? p.supplierName) as string | undefined
-  const purchaseRemark = (p.purchase_remark ?? p.purchaseRemark) as string | undefined
-  const note = ((p.note as string | undefined) ?? purchaseRemark)?.trim()
-  const purchasePriceRaw = p.procurement_price ?? p.purchase_price ?? p.purchasePrice
-  let purchasePrice: PurchaseInfo['purchasePrice']
-  if (purchasePriceRaw != null && typeof purchasePriceRaw === 'object') {
-    const pr = purchasePriceRaw as Record<string, unknown>
-    if (typeof pr.amount === 'number') {
-      purchasePrice = { amount: pr.amount, currency: String(pr.currency ?? 'CNY') }
-    }
-  } else if (typeof purchasePriceRaw === 'number' && Number.isFinite(purchasePriceRaw)) {
-    purchasePrice = { amount: purchasePriceRaw, currency: 'CNY' }
-  }
-  const hasAny =
-    typeof qty === 'number' ||
-    (supplierName != null && String(supplierName).trim() !== '') ||
-    (note != null && note !== '') ||
-    purchasePrice != null ||
-    p.status != null
-  if (!hasAny) return undefined
-  return {
-    status: mapPurchaseStatus(p.status),
-    supplierId:
-      p.supplier_id != null
-        ? String(p.supplier_id)
-        : p.supplierId != null
-          ? String(p.supplierId)
-          : undefined,
-    supplierName: supplierName ?? undefined,
-    quantity: typeof qty === 'number' ? qty : undefined,
-    unit: (p.unit as string) ?? undefined,
-    purchasePrice,
-    expectedArrivalAt: (p.expected_arrival_at ?? p.expectedArrivalAt) as string | undefined,
-    warehouseLocationCode: (p.warehouse_location_code ?? p.warehouseLocationCode) as string | undefined,
-    warehouseLocationName: (p.warehouse_location_name ?? p.warehouseLocationName) as string | undefined,
-    note: note || undefined,
-  }
-}
-
-function parsePurchaseInfoObject(raw: unknown): PurchaseInfo | undefined {
-  if (raw == null || typeof raw !== 'object') return undefined
-  const p = raw as Record<string, unknown>
-  const purchasePriceRaw = p.purchase_price ?? p.purchasePrice
-  let purchasePrice: { amount: number; currency: string } | undefined
-  if (purchasePriceRaw != null && typeof purchasePriceRaw === 'object') {
-    const pr = purchasePriceRaw as Record<string, unknown>
-    if (typeof pr.amount === 'number') {
-      purchasePrice = { amount: pr.amount, currency: String(pr.currency ?? 'CNY') }
-    }
-  } else if (typeof purchasePriceRaw === 'number' && Number.isFinite(purchasePriceRaw)) {
-    purchasePrice = { amount: purchasePriceRaw, currency: 'CNY' }
-  }
-  const qty = p.quantity
-  return {
-    status: mapPurchaseStatus(p.status),
-    supplierId:
-      p.supplier_id != null
-        ? String(p.supplier_id)
-        : p.supplierId != null
-          ? String(p.supplierId)
-          : undefined,
-    supplierName: (p.supplier_name ?? p.supplierName) as string | undefined,
-    quantity: typeof qty === 'number' ? qty : undefined,
-    unit: (p.unit as string) ?? undefined,
-    purchasePrice,
-    expectedArrivalAt: (p.expected_arrival_at ?? p.expectedArrivalAt) as string | undefined,
-    warehouseLocationCode: (p.warehouse_location_code ?? p.warehouseLocationCode) as string | undefined,
-    warehouseLocationName: (p.warehouse_location_name ?? p.warehouseLocationName) as string | undefined,
-    note: (p.note as string) ?? undefined,
-  }
-}
-
-/** 合并后端 TaskReadModel.procurement_summary（采购任务读模型） */
-function mergeProcurementSummaryIntoPurchase(
-  base: PurchaseInfo | undefined,
-  summary: Record<string, unknown> | null | undefined,
-): PurchaseInfo | undefined {
-  if (!summary || typeof summary !== 'object') return base
-  const quantity =
-    base?.quantity ??
-    (typeof summary.quantity === 'number' ? summary.quantity : undefined) ??
-    (typeof summary.purchase_quantity === 'number' ? summary.purchase_quantity : undefined)
-  const supplierFromSummary =
-    typeof summary.supplier_name === 'string' ? summary.supplier_name.trim() : ''
-  const supplierName =
-    (base?.supplierName && String(base.supplierName).trim()) || supplierFromSummary || undefined
-  let purchasePrice = base?.purchasePrice
-  if (!purchasePrice && typeof summary.procurement_price === 'number') {
-    purchasePrice = { amount: summary.procurement_price, currency: 'CNY' }
-  }
-  const expectedArrivalAt =
-    base?.expectedArrivalAt ??
-    (typeof summary.expected_delivery_at === 'string' ? summary.expected_delivery_at : undefined)
-  const status = base?.status ?? mapPurchaseStatus(summary.status)
-  const merged: PurchaseInfo = {
-    status,
-    supplierId: base?.supplierId,
-    supplierName,
-    quantity,
-    unit: base?.unit,
-    purchasePrice,
-    expectedArrivalAt,
-    warehouseLocationCode: base?.warehouseLocationCode,
-    warehouseLocationName: base?.warehouseLocationName,
-    note: base?.note,
-  }
-  const hasAny =
-    merged.quantity != null ||
-    (merged.supplierName != null && merged.supplierName !== '') ||
-    merged.purchasePrice != null ||
-    merged.expectedArrivalAt != null ||
-    (base != null && Object.keys(base).length > 0)
-  if (!base && !hasAny) return undefined
-  return merged
 }
 
 /** 与登录用户 id（permissions 中统一为 string）比较前，将后端 number/string 规范为 string；空值为 null */
@@ -419,202 +258,29 @@ function parseDesignSubStatusFromRetouchWorkflow(
   return map[code]
 }
 
-const WAREHOUSE_SUB_STATUS_SET = new Set<string>([
-  'NOT_REQUIRED',
-  'PENDING_RECEIVE',
-  'RECEIVED',
-  'RETURNED',
-  'PACKING',
-  'DONE',
-])
-
-function parseOptionalWarehouseSubStatus(raw: unknown): WarehouseSubStatus | undefined {
-  if (raw == null || typeof raw !== 'string') return undefined
-  const v = raw.trim()
-  return WAREHOUSE_SUB_STATUS_SET.has(v) ? (v as WarehouseSubStatus) : undefined
-}
-
-function mapWarehouseFieldsFromWorkflow(
-  raw: Record<string, unknown>,
-): Partial<Pick<Task, 'warehouseReceiveStatus' | 'warehouseSubStatus'>> {
-  const workflow = raw.workflow as Record<string, unknown> | undefined
-  const subStatus = workflow?.sub_status as Record<string, unknown> | undefined
-  const wh = subStatus?.warehouse as Record<string, unknown> | undefined
-  const codeRaw = wh?.code
-  if (typeof codeRaw !== 'string' || !codeRaw.trim()) return {}
-  const code = codeRaw.trim().toLowerCase().replace(/-/g, '_')
-
-  const terminalWarehouseCodes = new Set(['done', 'complete', 'completed', 'warehouse_complete'])
-  if (terminalWarehouseCodes.has(code)) {
-    return {
-      warehouseSubStatus: 'DONE',
-      warehouseReceiveStatus: 'archived',
-    }
-  }
-
-  const workflowMap: Record<
-    string,
-    { warehouseSubStatus: WarehouseSubStatus; warehouseReceiveStatus?: Task['warehouseReceiveStatus'] }
-  > = {
-    pending_receive: { warehouseSubStatus: 'PENDING_RECEIVE', warehouseReceiveStatus: 'pending' },
-    received: { warehouseSubStatus: 'RECEIVED', warehouseReceiveStatus: 'received' },
-    returned: { warehouseSubStatus: 'RETURNED', warehouseReceiveStatus: 'returned' },
-    packing: { warehouseSubStatus: 'PACKING' },
-    done: { warehouseSubStatus: 'DONE', warehouseReceiveStatus: 'archived' },
-    complete: { warehouseSubStatus: 'DONE', warehouseReceiveStatus: 'archived' },
-    completed: { warehouseSubStatus: 'DONE', warehouseReceiveStatus: 'archived' },
-    warehouse_complete: { warehouseSubStatus: 'DONE', warehouseReceiveStatus: 'archived' },
-    not_required: { warehouseSubStatus: 'NOT_REQUIRED' },
-    not_triggered: { warehouseSubStatus: 'NOT_REQUIRED' },
-  }
-
-  const mapped = workflowMap[code]
-  if (mapped) return mapped
-  return {}
-}
-
-/**
- * 从扁平字段或 workflow.sub_status.warehouse.code 解析仓库维度（读模型常见为后者）。
- * 见后端 task read model：workflow.sub_status.warehouse.code = pending_receive 等。
- */
-function parseWarehouseFieldsFromApi(raw: Record<string, unknown>): Partial<
-  Pick<Task, 'warehouseReceiveStatus' | 'warehouseSubStatus'>
-> {
-  const fromWorkflow = mapWarehouseFieldsFromWorkflow(raw)
-  const workflowWarehouseTerminal = fromWorkflow.warehouseReceiveStatus === 'archived'
-  if (workflowWarehouseTerminal) {
-    return fromWorkflow
-  }
-
-  const flatSub = parseOptionalWarehouseSubStatus(
-    raw.warehouse_sub_status ?? raw.warehouseSubStatus,
-  )
-  const flatRecvRaw = raw.warehouse_receive_status ?? raw.warehouseReceiveStatus
-  if (typeof flatRecvRaw === 'string' && flatRecvRaw.trim()) {
-    const fr = flatRecvRaw.trim().toLowerCase()
-    const fromFlat: Partial<Pick<Task, 'warehouseReceiveStatus' | 'warehouseSubStatus'>> = {}
-    if (fr === 'pending') {
-      fromFlat.warehouseReceiveStatus = 'pending'
-      fromFlat.warehouseSubStatus = flatSub ?? 'PENDING_RECEIVE'
-    } else if (fr === 'received') {
-      if (fromWorkflow.warehouseReceiveStatus === 'archived') {
-        return fromWorkflow
-      }
-      fromFlat.warehouseReceiveStatus = 'received'
-      fromFlat.warehouseSubStatus = flatSub ?? 'RECEIVED'
-    } else if (fr === 'returned') {
-      fromFlat.warehouseReceiveStatus = 'returned'
-      fromFlat.warehouseSubStatus = flatSub ?? 'RETURNED'
-    } else if (fr === 'archived') {
-      fromFlat.warehouseReceiveStatus = 'archived'
-      fromFlat.warehouseSubStatus = flatSub ?? 'DONE'
-    }
-    if (fromFlat.warehouseReceiveStatus != null) {
-      return {
-        warehouseReceiveStatus: fromFlat.warehouseReceiveStatus,
-        warehouseSubStatus: flatSub ?? fromFlat.warehouseSubStatus,
-      }
-    }
-  }
-  if (flatSub != null) {
-    if (fromWorkflow.warehouseReceiveStatus === 'archived') {
-      return fromWorkflow
-    }
-    return { warehouseSubStatus: flatSub }
-  }
-
-  return fromWorkflow
-}
-
-function parseWorkflowCloseFields(raw: Record<string, unknown>): Partial<
-  Pick<Task, 'workflowCanClose' | 'cannotCloseReasons' | 'workflowMainStatus'>
-> {
-  const workflowRaw = raw.workflow as Record<string, unknown> | undefined
-  if (!workflowRaw) return {}
-  const wfMainRaw = workflowRaw.main_status ?? workflowRaw.mainStatus
-  let workflowMainStatus: string | undefined
-  if (typeof wfMainRaw === 'string' && wfMainRaw.trim()) {
-    workflowMainStatus = wfMainRaw.trim().toLowerCase()
-  }
-  let workflowCanClose: boolean | undefined
-  if (typeof workflowRaw.can_close === 'boolean') workflowCanClose = workflowRaw.can_close
-  else if (typeof workflowRaw.closable === 'boolean') workflowCanClose = workflowRaw.closable
-
-  const ccr = workflowRaw.cannot_close_reasons
-  let cannotCloseReasons: Task['cannotCloseReasons']
-  if (Array.isArray(ccr)) {
-    cannotCloseReasons = ccr
-      .map((item) => {
-        if (!item || typeof item !== 'object') return undefined
-        const o = item as Record<string, unknown>
-        const code = typeof o.code === 'string' ? o.code : ''
-        const message = typeof o.message === 'string' ? o.message : ''
-        if (!code && !message) return undefined
-        return { code: code || 'unknown', message: message || code }
-      })
-      .filter((x): x is { code: string; message: string } => x != null)
-    if (cannotCloseReasons.length === 0) cannotCloseReasons = undefined
-  }
-
-  return {
-    ...(workflowMainStatus ? { workflowMainStatus } : {}),
-    ...(workflowCanClose !== undefined ? { workflowCanClose } : {}),
-    ...(cannotCloseReasons != null ? { cannotCloseReasons } : {}),
-  }
-}
-
-const KNOWN_LEGACY_STATUSES = new Set<string>([
+const KNOWN_ACTIVE_STATUSES = new Set<string>([
   'Draft',
   'PendingAssign',
+  'Assigned',
   'InProgress',
-  'PendingAuditA',
-  'RejectedByAuditA',
-  'PendingAuditB',
-  'RejectedByAuditB',
-  'PendingOutsource',
-  'Outsourcing',
-  'PendingOutsourceReview',
-  'PendingCustomizationReview',
-  'PendingCustomizationProduction',
-  'PendingEffectReview',
-  'PendingEffectRevision',
-  'PendingProductionTransfer',
-  'PendingWarehouseQC',
-  'RejectedByWarehouse',
-  'PendingWarehouseReceive',
-  'PendingClose',
+  'PendingAudit',
   'Completed',
   'Archived',
   'Blocked',
   'Cancelled',
 ])
 
-/** OpenAPI TaskListItem.task_status 含 `Assigned` 等；列表也可能只推进 workflow.sub_status 而扁平字段滞后 */
+/** 严格接受 v8 活动状态；未知值 fail-closed 为 Blocked，禁止前端复活旧流程。 */
 function normalizeFlatTaskStatusFromApi(value: unknown): LegacyTaskStatus {
   const s = String(value ?? '').trim()
   if (!s) return 'Draft'
-  if (KNOWN_LEGACY_STATUSES.has(s)) return s as LegacyTaskStatus
+  if (KNOWN_ACTIVE_STATUSES.has(s)) return s as LegacyTaskStatus
   const lower = s.toLowerCase().replace(/-/g, '_')
   const map: Record<string, LegacyTaskStatus> = {
-    assigned: 'InProgress',
+    assigned: 'Assigned',
     in_progress: 'InProgress',
     pending_assign: 'PendingAssign',
-    pending_audit_a: 'PendingAuditA',
-    pending_audit_b: 'PendingAuditB',
-    rejected_by_audit_a: 'RejectedByAuditA',
-    rejected_by_audit_b: 'RejectedByAuditB',
-    pending_outsource: 'PendingOutsource',
-    outsourcing: 'Outsourcing',
-    pending_outsource_review: 'PendingOutsourceReview',
-    pending_customization_review: 'PendingCustomizationReview',
-    pending_customization_production: 'PendingCustomizationProduction',
-    pending_effect_review: 'PendingEffectReview',
-    pending_effect_revision: 'PendingEffectRevision',
-    pending_production_transfer: 'PendingProductionTransfer',
-    pending_warehouse_qc: 'PendingWarehouseQC',
-    rejected_by_warehouse: 'RejectedByWarehouse',
-    pending_warehouse_receive: 'PendingWarehouseReceive',
-    pending_close: 'PendingClose',
+    pending_audit: 'PendingAudit',
     completed: 'Completed',
     archived: 'Archived',
     blocked: 'Blocked',
@@ -622,55 +288,14 @@ function normalizeFlatTaskStatusFromApi(value: unknown): LegacyTaskStatus {
   }
   const mapped = map[lower]
   if (mapped) return mapped
-  return s as LegacyTaskStatus
-}
-
-/**
- * 当扁平 task_status 仍为「设计中」但 workflow.sub_status.audit 已进入待审/交接复核时，
- * 对齐为 PendingAudit*，否则审核工作台左侧（仅看 tasksStore.list + isPendingAudit*）会漏单。
- * retouch_task 不进入审核轨，禁止根据 audit 子状态抬升为 PendingAudit*。
- */
-function reconcileLegacyStatusWithWorkflowAudit(
-  raw: Record<string, unknown>,
-  flatStatus: LegacyTaskStatus,
-): LegacyTaskStatus {
-  if (flatStatus === 'PendingAuditA' || flatStatus === 'PendingAuditB') return flatStatus
-
-  const rawTaskType = String(raw.task_type ?? raw.taskType ?? '').toLowerCase()
-  if (rawTaskType === 'retouch_task') return flatStatus
-
-  const wf = raw.workflow as Record<string, unknown> | undefined
-  if (!wf || typeof wf !== 'object') return flatStatus
-  const sub = wf.sub_status as Record<string, unknown> | undefined
-  if (!sub || typeof sub !== 'object') return flatStatus
-  const audit = sub.audit as Record<string, unknown> | undefined
-  if (!audit || typeof audit !== 'object') return flatStatus
-  const codeRaw = audit.code
-  if (typeof codeRaw !== 'string' || !codeRaw.trim()) return flatStatus
-  const code = codeRaw.trim().toLowerCase().replace(/-/g, '_')
-
-  const designLike =
-    flatStatus === 'InProgress' ||
-    flatStatus === 'PendingAssign' ||
-    flatStatus === 'RejectedByAuditA' ||
-    flatStatus === 'RejectedByAuditB'
-
-  if (!designLike) return flatStatus
-
-  if (code === 'pending_audit' || code === 'pending_review' || code === 'in_review') {
-    const stage = String(raw.audit_stage ?? raw.auditStage ?? '').toUpperCase()
-    if (stage === 'B' || stage === 'AUDIT_B') return 'PendingAuditB'
-    return 'PendingAuditA'
-  }
-  return flatStatus
+  return 'Blocked'
 }
 
 /** 将后端任务列表项转为前端 Task 形状（供 enrichTaskDomainFields 使用） */
 function normalizeBackendTask(raw: Record<string, unknown>): Task {
   const workflow = (raw.workflow ?? raw) as Record<string, unknown>
   const rawStatus = workflow.status ?? raw.status ?? raw.task_status ?? 'Draft'
-  let status = normalizeFlatTaskStatusFromApi(rawStatus)
-  status = reconcileLegacyStatusWithWorkflowAudit(raw, status)
+  const status = normalizeFlatTaskStatusFromApi(rawStatus)
   const now = nowISO()
   const rawTaskType = (raw.task_type ?? raw.taskType ?? 'ORIGINAL_PRODUCT_DEV') as string
   const taskType = BACKEND_TASK_TYPE_TO_FRONTEND[rawTaskType] ?? (rawTaskType as Task['taskType'])
@@ -718,45 +343,11 @@ function normalizeBackendTask(raw: Record<string, unknown>): Task {
         ? 'new'
         : 'existing'
 
-  const procurementSummary = objectOrUndefined(raw.procurement_summary ?? raw.procurementSummary)
   const costOverrideSummary = objectOrUndefined(raw.override_summary ?? raw.overrideSummary)
   const governanceAuditSummary = objectOrUndefined(raw.governance_audit_summary ?? raw.governanceAuditSummary)
   const costOverrideBoundary = objectOrUndefined(
     raw.override_governance_boundary ?? raw.overrideGovernanceBoundary,
   )
-  const procurementRaw = raw.procurement as Record<string, unknown> | undefined
-  const procurementApiStatus =
-    typeof procurementRaw?.status === 'string' ? procurementRaw.status : undefined
-
-  const workflowRaw = raw.workflow as Record<string, unknown> | undefined
-  const canPrepareWarehouse =
-    typeof workflowRaw?.can_prepare_warehouse === 'boolean'
-      ? workflowRaw.can_prepare_warehouse
-      : undefined
-  const whBlockRaw = workflowRaw?.warehouse_blocking_reasons
-  let warehouseBlockingReasons: Task['warehouseBlockingReasons']
-  if (Array.isArray(whBlockRaw)) {
-    warehouseBlockingReasons = whBlockRaw
-      .map((r: unknown) => {
-        if (!r || typeof r !== 'object') return undefined
-        const o = r as Record<string, unknown>
-        const code = typeof o.code === 'string' ? o.code : ''
-        const message = typeof o.message === 'string' ? o.message : ''
-        if (!code && !message) return undefined
-        return { code: code || 'unknown', message: message || code }
-      })
-      .filter((x): x is { code: string; message: string } => x !== undefined)
-    if (warehouseBlockingReasons.length === 0) warehouseBlockingReasons = undefined
-  }
-  const warehousePrepareReady =
-    procurementSummary != null && typeof procurementSummary.warehouse_prepare_ready === 'boolean'
-      ? procurementSummary.warehouse_prepare_ready
-      : undefined
-  const warehouseReceiveReady =
-    procurementSummary != null && typeof procurementSummary.warehouse_receive_ready === 'boolean'
-      ? procurementSummary.warehouse_receive_ready
-      : undefined
-
   const rawCatCode = raw.category_code ?? raw.categoryCode
   const rawCategoryName = raw.category_name ?? raw.categoryName
   const categoryName =
@@ -786,10 +377,10 @@ function normalizeBackendTask(raw: Record<string, unknown>): Task {
   const refLinkRaw = raw.reference_link ?? raw.product_reference_url ?? raw.productReferenceUrl
   const productReferenceUrl =
     typeof refLinkRaw === 'string' && String(refLinkRaw).trim() !== '' ? String(refLinkRaw) : undefined
-  const qtyRaw = raw.quantity ?? raw.purchase_quantity ?? procurementSummary?.quantity
+  const qtyRaw = raw.quantity
   let newProductQuantity: number | undefined =
     typeof qtyRaw === 'number' && Number.isFinite(qtyRaw) ? qtyRaw : undefined
-  const costUnitRaw = raw.cost_unit_price ?? raw.costUnitPrice ?? procurementSummary?.cost_unit_price
+  const costUnitRaw = raw.cost_unit_price ?? raw.costUnitPrice
   let newProductCostUnitPrice: number | undefined =
     typeof costUnitRaw === 'number' && Number.isFinite(costUnitRaw) ? costUnitRaw : undefined
   const chRaw = raw.product_channel ?? raw.productChannel
@@ -802,28 +393,13 @@ function normalizeBackendTask(raw: Record<string, unknown>): Task {
   const sizeText =
     typeof sizeTr === 'string' && String(sizeTr).trim() !== '' ? String(sizeTr).trim() : undefined
 
-  let purchaseInfo =
-    parsePurchaseInfoObject(raw.purchase_info ?? raw.purchaseInfo) ??
-    parseProcurementRecord(raw.procurement)
-  purchaseInfo =
-    mergeProcurementSummaryIntoPurchase(purchaseInfo, procurementSummary) ?? purchaseInfo
-
   let costPrice = parseCostPriceFromRaw(raw.cost_price ?? raw.costPrice)
   if (!costPrice && costOverrideSummary && typeof costOverrideSummary.current_cost_price === 'number') {
     costPrice = { amount: costOverrideSummary.current_cost_price, currency: 'CNY' }
   }
-  if (!costPrice && procurementSummary && typeof procurementSummary.cost_price === 'number') {
-    costPrice = { amount: procurementSummary.cost_price, currency: 'CNY' }
-  }
-
   const bspRaw = raw.base_sale_price ?? raw.baseSalePrice
-  let basePriceAmount: number | undefined =
+  const basePriceAmount: number | undefined =
     typeof bspRaw === 'number' && Number.isFinite(bspRaw) ? bspRaw : undefined
-  if (basePriceAmount == null && procurementSummary && typeof procurementSummary === 'object') {
-    const ps = procurementSummary as Record<string, unknown>
-    const psBsp = ps.base_sale_price ?? ps.baseSalePrice
-    if (typeof psBsp === 'number' && Number.isFinite(psBsp)) basePriceAmount = psBsp
-  }
 
   let costPriceMode: Task['costPriceMode'] | undefined =
       raw.cost_price_mode === 'manual' || raw.cost_price_mode === 'template'
@@ -831,12 +407,6 @@ function normalizeBackendTask(raw: Record<string, unknown>): Task {
         : raw.costPriceMode === 'manual' || raw.costPriceMode === 'template'
           ? (raw.costPriceMode as Task['costPriceMode'])
           : undefined
-  if (costPriceMode == null && procurementSummary && typeof procurementSummary === 'object') {
-    const ps = procurementSummary as Record<string, unknown>
-    const cpm = ps.cost_price_mode ?? ps.costPriceMode
-    if (cpm === 'manual' || cpm === 'template') costPriceMode = cpm as Task['costPriceMode']
-    if (costPriceMode == null && ps.manual_cost_override === true) costPriceMode = 'manual'
-  }
   if (costPriceMode == null) {
     const manualOverride = raw.manual_cost_override ?? raw.manualCostOverride ?? costOverrideSummary?.current_override_active
     if (manualOverride === true) costPriceMode = 'manual'
@@ -1013,6 +583,13 @@ function normalizeBackendTask(raw: Record<string, unknown>): Task {
     ...(specText != null ? { specText } : {}),
     ...(sizeText != null ? { sizeText } : {}),
     status,
+    allowedActions: Array.isArray(raw.allowed_actions ?? raw.allowedActions)
+      ? ((raw.allowed_actions ?? raw.allowedActions) as unknown[]).map(String)
+      : [],
+    workflowContractVersion:
+      typeof (raw.workflow_contract_version ?? raw.workflowContractVersion) === 'number'
+        ? Number(raw.workflow_contract_version ?? raw.workflowContractVersion)
+        : undefined,
     requesterId: String(raw.requester_id ?? raw.requesterId ?? ''),
     requesterName: String(raw.requester_name ?? raw.requesterName ?? ''),
     creatorId: normalizeOptionalUserId(raw.creator_id ?? raw.creatorId),
@@ -1098,8 +675,6 @@ function normalizeBackendTask(raw: Record<string, unknown>): Task {
       undefined,
     dueAt: (raw.due_at ?? raw.deadline_at ?? raw.dueAt) as string | null ?? null,
     priority: normalizePriorityFromApi(raw.priority as string | undefined),
-    /** 持久化外协意图标志；与 customization job 是否存在无必然关系 */
-    needOutsource: Boolean(raw.need_outsource ?? raw.needOutsource ?? false),
     customizationRequired:
       typeof (raw.customization_required ?? raw.customizationRequired) === 'boolean'
         ? Boolean(raw.customization_required ?? raw.customizationRequired)
@@ -1111,14 +686,6 @@ function normalizeBackendTask(raw: Record<string, unknown>): Task {
     lastCustomizationOperatorId: normalizeOptionalUserId(
       raw.last_customization_operator_id ?? raw.lastCustomizationOperatorId,
     ),
-    warehouseRejectReason:
-      raw.warehouse_reject_reason != null || raw.warehouseRejectReason != null
-        ? String(raw.warehouse_reject_reason ?? raw.warehouseRejectReason)
-        : null,
-    warehouseRejectCategory:
-      raw.warehouse_reject_category != null || raw.warehouseRejectCategory != null
-        ? String(raw.warehouse_reject_category ?? raw.warehouseRejectCategory)
-        : null,
     assetVersions: normalizeAssetVersionsFromTaskRaw(raw),
     createdAt: String(raw.created_at ?? raw.createdAt ?? now),
     updatedAt: String(raw.updated_at ?? raw.updatedAt ?? now),
@@ -1158,7 +725,6 @@ function normalizeBackendTask(raw: Record<string, unknown>): Task {
         : undefined,
     ...(skuItems != null ? { skuItems } : {}),
     costPrice,
-    purchaseInfo,
     basePriceAmount,
     costPriceMode,
     ...(estimatedCost != null ? { estimatedCost } : {}),
@@ -1174,18 +740,10 @@ function normalizeBackendTask(raw: Record<string, unknown>): Task {
     ...(typeof (raw.manual_cost_override_reason ?? raw.manualCostOverrideReason) === 'string'
       ? { manualCostOverrideReason: String(raw.manual_cost_override_reason ?? raw.manualCostOverrideReason) }
       : {}),
-    ...(procurementSummary != null ? { procurementSummary } : {}),
     ...(costOverrideSummary != null ? { costOverrideSummary } : {}),
     ...(governanceAuditSummary != null ? { governanceAuditSummary } : {}),
     ...(costOverrideBoundary != null ? { costOverrideBoundary } : {}),
     ...(designSubStatusFromApi != null ? { designSubStatus: designSubStatusFromApi } : {}),
-    ...parseWarehouseFieldsFromApi(raw),
-    ...(canPrepareWarehouse !== undefined ? { canPrepareWarehouse } : {}),
-    ...(warehouseBlockingReasons != null ? { warehouseBlockingReasons } : {}),
-    ...(warehousePrepareReady !== undefined ? { warehousePrepareReady } : {}),
-    ...(warehouseReceiveReady !== undefined ? { warehouseReceiveReady } : {}),
-    ...(procurementApiStatus != null ? { procurementApiStatus } : {}),
-    ...parseWorkflowCloseFields(raw),
   }
 }
 
@@ -1212,11 +770,7 @@ function mergeDesignSubStatusOnLoad(parsed: Task, existing: Task | null): Design
   const ex = existing?.designSubStatus
   if (ex == null) return undefined
   const ps = parsed.status
-  const keepListSubStatus =
-    ps === 'InProgress' ||
-    ps === 'RejectedByAuditA' ||
-    ps === 'RejectedByAuditB' ||
-    ps === 'PendingAssign'
+  const keepListSubStatus = ps === 'InProgress' || ps === 'PendingAssign'
   if (keepListSubStatus) return ex
   if (
     ex === DesignSubStatusEnum.IN_PROGRESS ||
@@ -1277,19 +831,6 @@ function mergeListRowWithCachedDetail(prev: Task | undefined, listRow: Task): Ta
         ? prev.requesterName
         : listRow.requesterName,
     designSubStatus: mergeDesignSubStatusOnLoad(listRow, prev),
-    warehouseReceiveStatus: listRow.warehouseReceiveStatus ?? prev.warehouseReceiveStatus,
-    warehouseSubStatus: listRow.warehouseSubStatus ?? prev.warehouseSubStatus,
-    canPrepareWarehouse: listRow.canPrepareWarehouse ?? prev.canPrepareWarehouse,
-    warehouseBlockingReasons: listRow.warehouseBlockingReasons ?? prev.warehouseBlockingReasons,
-    warehousePrepareReady: listRow.warehousePrepareReady ?? prev.warehousePrepareReady,
-    warehouseReceiveReady: listRow.warehouseReceiveReady ?? prev.warehouseReceiveReady,
-    procurementApiStatus: listRow.procurementApiStatus ?? prev.procurementApiStatus,
-    workflowCanClose:
-      listRow.workflowCanClose !== undefined ? listRow.workflowCanClose : prev.workflowCanClose,
-    cannotCloseReasons:
-      listRow.cannotCloseReasons !== undefined ? listRow.cannotCloseReasons : prev.cannotCloseReasons,
-    workflowMainStatus:
-      listRow.workflowMainStatus !== undefined ? listRow.workflowMainStatus : prev.workflowMainStatus,
     businessLane: listRow.businessLane ?? prev.businessLane,
   }
 
@@ -1447,8 +988,6 @@ export const useTasksStore = defineStore('tasks', () => {
   const mainStatusOf = (id: string) => getById(id)?.mainStatus
   const designStatusOf = (id: string) => getById(id)?.designSubStatus
   const auditStatusOf = (id: string) => getById(id)?.auditSubStatus
-  const warehouseStatusOf = (id: string) => getById(id)?.warehouseSubStatus
-  const purchaseStatusOf = (id: string) => getById(id)?.purchaseSubStatus
 
   /** 方案 B：服务端分页 + 搜索。拉取任务列表（append 逻辑在 fetchAndApplyTaskList）
    * 后端 TaskListResponse: { data: [...], pagination: { total, page, page_size } } */
@@ -1626,26 +1165,7 @@ export const useTasksStore = defineStore('tasks', () => {
             ? existing!.requesterName
             : parsed.requesterName,
         designSubStatus: mergeDesignSubStatusOnLoad(parsed, existing),
-        warehouseReceiveStatus: parsed.warehouseReceiveStatus ?? existing?.warehouseReceiveStatus,
-        warehouseSubStatus: parsed.warehouseSubStatus ?? existing?.warehouseSubStatus,
-        canPrepareWarehouse: parsed.canPrepareWarehouse ?? existing?.canPrepareWarehouse,
-        warehouseBlockingReasons: parsed.warehouseBlockingReasons ?? existing?.warehouseBlockingReasons,
-        warehousePrepareReady: parsed.warehousePrepareReady ?? existing?.warehousePrepareReady,
-        warehouseReceiveReady: parsed.warehouseReceiveReady ?? existing?.warehouseReceiveReady,
-        procurementApiStatus: parsed.procurementApiStatus ?? existing?.procurementApiStatus,
         assetVersions: parsed.assetVersions,
-        workflowCanClose:
-          parsed.workflowCanClose !== undefined
-            ? parsed.workflowCanClose
-            : existing?.workflowCanClose,
-        cannotCloseReasons:
-          parsed.cannotCloseReasons !== undefined
-            ? parsed.cannotCloseReasons
-            : existing?.cannotCloseReasons,
-        workflowMainStatus:
-          parsed.workflowMainStatus !== undefined
-            ? parsed.workflowMainStatus
-            : existing?.workflowMainStatus,
         // `GET /v1/tasks/{id}` 详情响应不保证回传 workflow_lane；
         // 若详情缺字段，必须回落到列表缓存的 lane，否则审核工作台按 lane 过滤
         // （AuditQueuePanel.matchesLane）会在详情刷入后把 `undefined` 当作
@@ -1688,7 +1208,6 @@ export const useTasksStore = defineStore('tasks', () => {
   const TASK_TYPE_TO_BACKEND: Record<string, string> = {
     ORIGINAL_PRODUCT_DEV: 'original_product_development',
     NEW_PRODUCT_DEV: 'new_product_development',
-    PURCHASE_TASK: 'purchase_task',
     RETOUCH_TASK: 'retouch_task',
     CUSTOMER_CUSTOMIZATION: 'customer_customization',
     REGULAR_CUSTOMIZATION: 'regular_customization',
@@ -1768,15 +1287,14 @@ export const useTasksStore = defineStore('tasks', () => {
       // 兼容字段保留，不再由前端新逻辑驱动。
       is_outsource: false,
       reference_file_refs: referenceFileRefs,
-      // 原品用 change_request；采购任务 POST 白名单不允许 design_requirement（见后端 INVALID_REQUEST）
-      ...(isOriginal || isRetouch || taskType === 'purchase_task' || isBatchMode
+      ...(isOriginal || isRetouch || isBatchMode
         ? {}
         : { design_requirement: t.designRequirement ?? task.designRequirement ?? undefined }),
       copy_content: t.copyContent ?? task.copyContent ?? undefined,
       style_keywords: t.styleKeywords ?? task.styleKeywords ?? undefined,
       remark: t.note ?? task.note ?? undefined,
     }
-    if (taskType === 'new_product_development' || taskType === 'purchase_task') {
+    if (taskType === 'new_product_development') {
       payload.sync_erp_on_create = t.syncErpOnCreate !== false
     }
     const sourceDraftId = t.sourceDraftId ?? t.draftId ?? (task as Record<string, unknown>).sourceDraftId ?? (task as Record<string, unknown>).draftId
@@ -1853,17 +1371,14 @@ export const useTasksStore = defineStore('tasks', () => {
             t.materialOther ?? (task as Record<string, unknown>).materialOther,
           ),
         )
-      } else if (taskType === 'purchase_task') {
-        payload.i_id = topCategoryCode
       }
-      // 统一由后端自动编码：不再携带 purchase_sku / sku_code
+      // 统一由后端自动编码，不携带客户端 SKU。
     } else {
       // batch_sku_mode=multiple：
       // - 后端要求 batch_items.length >= 2（violation: insufficient_batch_items）
       // - new_product_development 当前仅需每行 product_name + design_requirement
       payload.product_id = null
       payload.batch_sku_mode = 'multiple'
-      if (taskType === 'purchase_task' && topCategoryCode) payload.i_id = topCategoryCode
       const rawBatchItems = Array.isArray(t.batchItems) ? t.batchItems : []
       payload.batch_items = rawBatchItems.map((itemRaw) => {
 	        const item = itemRaw as Record<string, unknown>
@@ -1881,22 +1396,6 @@ export const useTasksStore = defineStore('tasks', () => {
               .filter((r): r is Record<string, unknown> => r != null)
             if (cleaned.length) baseItem.reference_file_refs = cleaned
           }
-        } else if (taskType === 'purchase_task') {
-          baseItem.i_id = item.categoryCode ?? topCategoryCode ?? undefined
-          baseItem.cost_price_mode = item.costPriceMode ?? undefined
-          baseItem.quantity = item.quantity ?? undefined
-          baseItem.base_sale_price = item.baseSalePrice ?? undefined
-          if (item.productChannel) baseItem.product_channel = item.productChannel
-          if (item.costPriceMode === 'manual' && item.costPriceAmount != null && !Number.isNaN(item.costPriceAmount)) {
-            baseItem.cost_price = item.costPriceAmount
-          }
-          const refs = item.referenceFileRefs as unknown[] | undefined
-          if (Array.isArray(refs) && refs.length) {
-            const cleaned = refs
-              .map((r) => sanitizeReferenceFileRefObject(r))
-              .filter((r): r is Record<string, unknown> => r != null)
-            if (cleaned.length) baseItem.reference_file_refs = cleaned
-          }
         }
         if (item.variantJson && typeof item.variantJson === 'object') {
           baseItem.variant_json = item.variantJson
@@ -1904,34 +1403,8 @@ export const useTasksStore = defineStore('tasks', () => {
         return baseItem
       })
     }
-    // 后端 POST：purchase_task 与 new_product_development 的 cost_price 均为 float64；发对象会 400
     if (task.costPrice != null && !isBatchMode) {
-      payload.cost_price =
-        taskType === 'purchase_task'
-          ? task.costPrice.amount
-          : { amount: task.costPrice.amount, currency: task.costPrice.currency }
-    }
-    if (task.purchaseInfo != null && !isBatchMode) {
-      payload.purchase_info = {
-        status: task.purchaseInfo.status,
-        supplier_name: task.purchaseInfo.supplierName,
-        quantity: task.purchaseInfo.quantity,
-        unit: task.purchaseInfo.unit,
-        purchase_price: task.purchaseInfo.purchasePrice,
-        expected_arrival_at: task.purchaseInfo.expectedArrivalAt,
-        warehouse_location_code: task.purchaseInfo.warehouseLocationCode,
-        warehouse_location_name: task.purchaseInfo.warehouseLocationName,
-      }
-    }
-    if (taskType === 'purchase_task' && !isBatchMode) {
-      const purchasePayload = payload as Record<string, unknown>
-      purchasePayload.cost_price_mode =
-        t.costPriceMode ?? (task as Record<string, unknown>).costPriceMode ?? undefined
-      purchasePayload.quantity =
-        task.purchaseInfo?.quantity ?? (t.purchaseInfo as { quantity?: number })?.quantity
-      purchasePayload.base_sale_price =
-        t.basePriceAmount ?? (task as Record<string, unknown>).basePriceAmount ?? undefined
-      Object.assign(purchasePayload, optionalMaterialSnakeFields(t.material, t.materialOther))
+      payload.cost_price = { amount: task.costPrice.amount, currency: task.costPrice.currency }
     }
     if (!isOriginal && 'product_selection' in payload) {
       delete payload.product_selection
@@ -2123,7 +1596,6 @@ export const useTasksStore = defineStore('tasks', () => {
   async function assignTask(taskId: string, payload: { assigneeId: string; assigneeName: string }) {
     const task = getById(taskId)
     if (!task) throw new Error('任务不存在')
-    if (isPurchaseTask(task)) throw new Error('采购任务不走设计指派流程')
     if (!canAssign(task)) throw new Error('当前状态不可指派')
     const designerIdNum = parseInt(payload.assigneeId, 10)
     if (Number.isNaN(designerIdNum)) throw new Error('请选择有效设计师')
@@ -2145,7 +1617,6 @@ export const useTasksStore = defineStore('tasks', () => {
   ) {
     const task = getById(taskId)
     if (!task) throw new Error('任务不存在')
-    if (isPurchaseTask(task)) throw new Error('采购任务不走设计指派流程')
     if (!backendAllowsDesignerReassignment(task) && !canReassignDesigner(task)) {
       throw new Error('当前状态不可重新指派')
     }
@@ -2167,7 +1638,6 @@ export const useTasksStore = defineStore('tasks', () => {
   async function clearDesignerAssignee(taskId: string, remark = '清空指派') {
     const task = getById(taskId)
     if (!task) throw new Error('任务不存在')
-    if (isPurchaseTask(task)) throw new Error('采购任务不走设计指派流程')
     if (!backendAllowsDesignerReassignment(task) && !canReassignDesigner(task)) {
       throw new Error('当前状态不可重新指派')
     }
@@ -2183,7 +1653,6 @@ export const useTasksStore = defineStore('tasks', () => {
   ) {
     const task = getById(taskId)
     if (!task) throw new Error('任务不存在')
-    if (isPurchaseTask(task)) throw new Error('采购任务不走设计提审流程')
     if (!canSubmitAudit(task)) throw new Error('当前状态不可提交审核')
     await tasksApi.submitDesign(taskId, payload)
     await loadTaskById(taskId)
@@ -2215,50 +1684,6 @@ export const useTasksStore = defineStore('tasks', () => {
     await loadTaskById(taskId)
   }
 
-  /** 审核领取兼容入口；审核通过/驳回不再要求先领取。 */
-  async function claimAudit(taskId: string, stage: string = 'A') {
-    await tasksApi.auditClaim(taskId, { stage })
-    await loadTaskById(taskId)
-  }
-
-  /** 审核通过，后端要求 stage、next_status 必填 */
-  async function passAudit(
-    taskId: string,
-    options: { stage: string; next_status: string; comment?: string },
-  ) {
-    const task = getById(taskId)
-    if (!task) throw new Error('任务不存在')
-    if (isPurchaseTask(task)) throw new Error('采购任务不通过该入口流转')
-    if (!canAudit(task)) throw new Error('当前状态不可审核通过')
-    await tasksApi.auditApprove(taskId, {
-      stage: options.stage,
-      next_status: options.next_status,
-      comment: options.comment ?? '通过',
-    })
-    await loadTaskById(taskId)
-  }
-
-  /** 审核驳回，调用 POST /v1/tasks/{id}/audit/reject（后端要求 stage、comment 必填） */
-  async function rejectAudit(taskId: string, payload: { stage: string; comment: string }) {
-    const task = getById(taskId)
-    if (!task) throw new Error('任务不存在')
-    if (isPurchaseTask(task)) throw new Error('采购任务不进入设计审核打回链路')
-    if (!canAudit(task)) throw new Error('当前状态不可驳回')
-    await tasksApi.auditReject(taskId, payload)
-    await loadTaskById(taskId)
-  }
-
-  /** 审核转交，调用 POST /v1/tasks/{id}/audit/transfer */
-  async function transferAudit(
-    taskId: string,
-    payload: { to_auditor_id: number; stage: string; from_auditor_id?: number; comment?: string; reason?: string },
-  ) {
-    const task = getById(taskId)
-    if (!task) throw new Error('任务不存在')
-    await tasksApi.auditTransfer(taskId, payload)
-    await loadTaskById(taskId)
-  }
-
   async function handoverAudit(
     taskId: string,
     payload: {
@@ -2284,252 +1709,6 @@ export const useTasksStore = defineStore('tasks', () => {
     const task = getById(taskId)
     if (!task) throw new Error('任务不存在')
     await tasksApi.auditTakeover(taskId, { handover_id: handoverId })
-    await loadTaskById(taskId)
-  }
-
-  function markPendingWarehouse(taskId: string) {
-    const task = getById(taskId)
-    if (!task) return
-    // 采购任务：由采购完成后直接进入仓库节点，重置仓库接收子状态
-    if (isPurchaseTask(task)) {
-      if (isDoneStatus(task)) return
-      updateTask(taskId, {
-        status: 'PendingWarehouseReceive',
-        warehouseReceiveStatus: 'pending',
-      })
-      return
-    }
-    // 非采购任务：仅允许从审核/定制相关节点进入仓库
-    if (canTransitionToPendingWarehouse(task)) {
-      updateTask(taskId, {
-        status: 'PendingWarehouseReceive',
-        warehouseReceiveStatus: 'pending',
-        auditSubStatus: 'PASSED',
-      })
-    }
-  }
-
-  /** 转交复核，进入常规审核交接/复核状态。后端要求 stage、next_status 必填。 */
-  async function transferToAuditB(taskId: string, comment?: string) {
-    const task = getById(taskId)
-    if (!task) throw new Error('任务不存在')
-    if (isPurchaseTask(task)) throw new Error('采购任务不转交复核')
-    if (!canTransferToAuditB(task)) throw new Error('当前状态不可转交复核')
-    await tasksApi.auditApprove(taskId, {
-      stage: 'A',
-      next_status: 'PendingAuditB',
-      comment: comment ?? '转交复核',
-    })
-    await loadTaskById(taskId)
-  }
-
-  async function submitCustomizationReview(
-    taskId: string,
-    payload: {
-      reviewer_id?: number | string
-      source_asset_id?: number | string | null
-      customization_level_code?: string
-      customization_level_name?: string
-      customization_price?: number | null
-      customization_weight_factor?: number | null
-      customization_note?: string
-      customization_review_decision: 'approved' | 'return_to_designer' | 'reviewer_fixed' | string
-      // customization_reviews 子表扩展字段（均可选）：审核工作台的定制弹窗会附带这些层级/参考信息，后端按需消费。
-      market_tier?: string
-      price_tier?: string
-      ref_price?: number | null
-      ref_inventory?: number | null
-      order_no?: string
-    },
-  ) {
-    const task = getById(taskId)
-    if (!task) throw new Error('任务不存在')
-    await tasksApi.submitCustomizationReview(taskId, sanitizeCustomizationPayload(payload))
-    await loadTaskById(taskId)
-  }
-
-  type TaskProcurementPatchPayload = {
-    status?: 'draft' | 'prepared' | 'in_progress' | 'completed'
-    procurement_price?: number
-    quantity?: number
-    supplier_name?: string
-    purchase_remark?: string
-    expected_delivery_at?: string
-    remark?: string
-    operator_id?: number
-  }
-
-  type TaskProcurementBootstrapPayload = {
-    procurement_price: number
-    quantity: number
-    supplier_name?: string
-    purchase_remark?: string
-    expected_delivery_at?: string
-    remark?: string
-  }
-
-  /** 采购任务：保存/更新 procurement 草稿记录 */
-  async function saveProcurementRecord(taskId: string, payload: TaskProcurementPatchPayload) {
-    const body: Record<string, unknown> = {
-      status: payload.status ?? 'draft',
-      procurement_price: payload.procurement_price,
-      quantity: payload.quantity,
-      supplier_name: payload.supplier_name,
-      purchase_remark: payload.purchase_remark,
-      expected_delivery_at: payload.expected_delivery_at,
-      remark: payload.remark,
-      operator_id: payload.operator_id,
-    }
-    Object.keys(body).forEach((k) => {
-      if (body[k] === undefined) delete body[k]
-    })
-    await tasksApi.patchTaskProcurement(taskId, body)
-    await loadTaskById(taskId)
-  }
-
-  function procurementAdvanceActionsByStatus(status: string | undefined): Array<'prepare' | 'start' | 'complete'> {
-    const v = String(status ?? '').toLowerCase()
-    if (v === 'completed') return []
-    if (v === 'in_progress') return ['complete']
-    if (v === 'prepared') return ['start', 'complete']
-    return ['prepare', 'start', 'complete']
-  }
-
-  /** 采购任务：推进 procurement 到 completed（按当前状态跳过已完成步骤） */
-  async function completeProcurementFlow(taskId: string) {
-    const task = getById(taskId)
-    const supplierName = String(task?.purchaseInfo?.supplierName ?? '').trim() || '[默认]'
-    await saveProcurementRecord(taskId, {
-      status: (task?.procurementApiStatus as TaskProcurementPatchPayload['status']) ?? 'draft',
-      supplier_name: supplierName,
-    })
-    const steps = procurementAdvanceActionsByStatus(task?.procurementApiStatus)
-    for (const action of steps) {
-      await tasksApi.advanceTaskProcurement(taskId, { action })
-    }
-    await loadTaskById(taskId)
-  }
-
-  /** 采购任务：一次性写 procurement 草稿并推进到 completed */
-  async function bootstrapProcurement(taskId: string, payload: TaskProcurementBootstrapPayload) {
-    await saveProcurementRecord(taskId, {
-      status: 'draft',
-      procurement_price: payload.procurement_price,
-      quantity: payload.quantity,
-      supplier_name: String(payload.supplier_name ?? '').trim() || '[默认]',
-      purchase_remark: payload.purchase_remark,
-      expected_delivery_at: payload.expected_delivery_at,
-      remark: payload.remark,
-    })
-    await completeProcurementFlow(taskId)
-  }
-
-  function startOutsourcing(taskId: string) {
-    const task = getById(taskId)
-    if (!task) return
-    if (isPurchaseTask(task)) return
-    // 定制流程仅允许从初审阶段（PendingAuditA）触发，防止已归档/仓库等状态误触发
-    if (!isPendingAuditA(task)) return
-    updateTask(taskId, { status: 'Outsourcing', auditSubStatus: 'TRANSFERRED' })
-  }
-
-  function rejectAfterOutsourceReview(taskId: string) {
-    const task = getById(taskId)
-    if (!task) return
-    if (isPurchaseTask(task)) return
-    updateTask(taskId, { status: 'RejectedByAuditB', auditSubStatus: 'REJECTED' })
-  }
-
-  function resubmitAuditB(taskId: string) {
-    const task = getById(taskId)
-    if (!task) return
-    if (isPurchaseTask(task)) return
-    if (!canResubmitAuditB(task)) return
-    // 复核打回后重新提交交接复核，同时清理仓库退回标记，允许后续再次进仓库
-    updateTask(taskId, { status: 'PendingAuditB', warehouseReceiveStatus: undefined, auditSubStatus: 'IN_PROGRESS' })
-  }
-
-  /** 仓库接收，调用 POST /v1/tasks/{id}/warehouse/receive */
-  async function receiveInWarehouse(taskId: string) {
-    const task = getById(taskId)
-    if (task) {
-      if (!task.sku) throw new Error('任务无 SKU，无法仓库接收')
-      if (task.warehouseReceiveStatus === 'returned') throw new Error('该任务已退回，无法再次接收')
-      const alreadyReceived =
-        task.warehouseReceiveStatus === 'received' ||
-        task.warehouseReceiveStatus === 'archived' ||
-        task.warehouseSubStatus === 'RECEIVED' ||
-        task.warehouseSubStatus === 'DONE'
-      if (alreadyReceived) {
-        await loadTaskById(taskId)
-        return
-      }
-    }
-    await tasksApi.warehouseReceive(taskId)
-    await loadTaskById(taskId)
-  }
-
-  /** 仓库完成（推进到 PendingClose），成功后刷新任务详情 */
-  async function completeWarehouseFlow(taskId: string) {
-    await tasksApi.warehouseComplete(taskId)
-    await loadTaskById(taskId)
-  }
-
-  /** 仓库驳回，调用 POST /v1/tasks/{id}/warehouse/reject */
-  async function rejectInWarehouse(
-    taskId: string,
-    payload: {
-      reject_reason?: string
-      reject_category?: string
-      remark?: string
-      receiver_id?: number
-    },
-  ) {
-    await tasksApi.warehouseReject(taskId, payload)
-    await loadTaskById(taskId)
-  }
-
-  function markCompleted(taskId: string) {
-    const task = getById(taskId)
-    if (!task) return
-    if (isCompletedOrArchived(task)) return
-    const result = checkTaskCompletion(task)
-    if (!result.canComplete) {
-      // 仅在控制台输出原因，UI 层后续通过 checkTaskCompletion 独立展示
-      console.warn('[tasks] cannot complete task', task.id, result.reasons)
-      return
-    }
-    updateTask(taskId, { status: 'Completed', warehouseSubStatus: 'DONE' })
-  }
-
-  /**
-   * 仓库侧一键结单：
-   * - PendingProductionTransfer：先调 warehouse/complete 推进到 PendingClose，再调 close 正式关单
-   * - PendingClose：直接调 close
-   */
-  async function archiveTask(taskId: string) {
-    const task = getById(taskId)
-    if (!task) throw new Error('任务不存在')
-    if (task.status === 'PendingClose') {
-      if (!canArchive(task)) throw new Error('当前状态不可结单')
-      await tasksApi.closeTask(taskId, {})
-      await loadTaskById(taskId)
-      return
-    }
-    if (task.status !== 'PendingProductionTransfer') {
-      throw new Error('当前状态不可结单')
-    }
-    await completeWarehouseFlow(taskId)
-    const refreshed = getById(taskId)
-    if (refreshed?.status !== 'PendingClose') {
-      throw new Error('仓库流转已完成，但任务尚未进入待结单状态，请刷新后重试')
-    }
-    const closeReadiness = canCloseTaskForArchive(refreshed)
-    if (!closeReadiness.allowed) {
-      const suffix = closeReadiness.reasons.length > 0 ? `：${closeReadiness.reasons.join('；')}` : ''
-      throw new Error(`仓库流转已完成，任务已进入待结单；当前还不能正式结单${suffix}`)
-    }
-    await tasksApi.closeTask(taskId, {})
     await loadTaskById(taskId)
   }
 
@@ -2562,28 +1741,6 @@ export const useTasksStore = defineStore('tasks', () => {
     })
   }
 
-  function returnFromWarehouse(taskId: string) {
-    const task = getById(taskId)
-    if (!task || !canGoWarehouse(task)) return
-
-    if (isPurchaseTask(task)) {
-      // 采购任务没有设计/审核节点，退回后停留在仓库层等待重新采购/核查
-      // 不应写入 RejectedByAuditB（该状态对采购任务毫无意义）
-      updateTask(taskId, {
-        warehouseReceiveStatus: 'returned',
-        warehouseSubStatus: 'RETURNED',
-      })
-      return
-    }
-
-    // 设计类任务：退回仓库后回退到交接复核打回节点，由审核/设计侧整改后重新提交
-    updateTask(taskId, {
-      warehouseReceiveStatus: 'returned',
-      warehouseSubStatus: 'RETURNED',
-      status: 'RejectedByAuditB',
-    })
-  }
-
   /** 登出或切换账号时调用，清空列表并允许下次重新拉取 */
   function resetToInitialState() {
     items.value = []
@@ -2609,8 +1766,6 @@ export const useTasksStore = defineStore('tasks', () => {
     mainStatusOf,
     designStatusOf,
     auditStatusOf,
-    warehouseStatusOf,
-    purchaseStatusOf,
     addTask,
     prepareProductCodes,
     updateTask,
@@ -2624,28 +1779,9 @@ export const useTasksStore = defineStore('tasks', () => {
     claimRetouchModule,
     claimCustomizationModule,
     submitRetouch,
-    claimAudit,
-    passAudit,
-    rejectAudit,
-    transferAudit,
     handoverAudit,
     listAuditHandovers,
     takeoverAudit,
-    markPendingWarehouse,
-    transferToAuditB,
-    submitCustomizationReview,
-    saveProcurementRecord,
-    completeProcurementFlow,
-    bootstrapProcurement,
-    startOutsourcing,
-    rejectAfterOutsourceReview,
-    resubmitAuditB,
-    receiveInWarehouse,
-    completeWarehouseFlow,
-    rejectInWarehouse,
-    markCompleted,
-    archiveTask,
-    returnFromWarehouse,
     uploadAssetVersion,
     refreshReferenceUrls,
     resetToInitialState,

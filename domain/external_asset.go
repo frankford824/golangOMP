@@ -21,7 +21,7 @@ func NormalizeAssetResourceSource(value string) AssetResourceSource {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case string(AssetResourceSourceSystem):
 		return AssetResourceSourceSystem
-	case string(AssetResourceSourceExternal):
+	case string(AssetResourceSourceExternal), "external_asset":
 		return AssetResourceSourceExternal
 	default:
 		return AssetResourceSourceAll
@@ -103,15 +103,16 @@ type ExternalAssetDirectoryEntry struct {
 }
 
 type ExternalAssetSearchQuery struct {
-	Keyword        string
-	Kind           ExternalAssetKind
-	MountPath      string
-	OriginPrefixes []string
-	CreatedFrom    *time.Time
-	CreatedTo      *time.Time
-	FormatCategory AssetFormatCategoryFilter
-	Page           int
-	Size           int
+	Keyword                string
+	Kind                   ExternalAssetKind
+	MountPath              string
+	OriginPrefixes         []string
+	CreatedFrom            *time.Time
+	CreatedTo              *time.Time
+	FormatCategory         AssetFormatCategoryFilter
+	OperationalVisibleOnly bool
+	Page                   int
+	Size                   int
 }
 
 func (q ExternalAssetSearchQuery) Normalized() ExternalAssetSearchQuery {

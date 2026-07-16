@@ -32,19 +32,25 @@ type SearchTask struct {
 }
 
 type SearchAsset struct {
-	AssetID           int64   `json:"asset_id"`
-	ResourceID        string  `json:"resource_id,omitempty"`
-	FileName          string  `json:"file_name"`
-	SourceModuleKey   *string `json:"source_module_key"`
-	TaskID            *int64  `json:"task_id"`
-	SourceType        string  `json:"source_type,omitempty"`
-	SourceLabel       string  `json:"source_label,omitempty"`
-	ExternalKind      string  `json:"external_kind,omitempty"`
-	ExternalMountPath string  `json:"external_mount_path,omitempty"`
-	ExternalDriver    string  `json:"external_driver,omitempty"`
-	FlowReviewStatus  string  `json:"flow_review_status,omitempty"`
-	UsableState       string  `json:"usable_state,omitempty"`
-	UsableLabel       string  `json:"usable_label,omitempty"`
+	AssetID             int64   `json:"asset_id"`
+	ResourceGroupID     int64   `json:"resource_group_id,omitempty"`
+	FinalizedRevisionID int64   `json:"finalized_revision_id,omitempty"`
+	TaskNo              string  `json:"task_no,omitempty"`
+	SKUCode             string  `json:"sku_code,omitempty"`
+	Mode                string  `json:"mode,omitempty"`
+	FinalItemCount      int     `json:"final_item_count,omitempty"`
+	ResourceID          string  `json:"resource_id,omitempty"`
+	FileName            string  `json:"file_name"`
+	SourceModuleKey     *string `json:"source_module_key"`
+	TaskID              *int64  `json:"task_id"`
+	SourceType          string  `json:"source_type,omitempty"`
+	SourceLabel         string  `json:"source_label,omitempty"`
+	ExternalKind        string  `json:"external_kind,omitempty"`
+	ExternalMountPath   string  `json:"external_mount_path,omitempty"`
+	ExternalDriver      string  `json:"external_driver,omitempty"`
+	FlowReviewStatus    string  `json:"flow_review_status,omitempty"`
+	UsableState         string  `json:"usable_state,omitempty"`
+	UsableLabel         string  `json:"usable_label,omitempty"`
 }
 
 type SearchProduct struct {

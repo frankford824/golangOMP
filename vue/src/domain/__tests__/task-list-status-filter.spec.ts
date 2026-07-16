@@ -2,21 +2,11 @@ import { describe, expect, it } from 'vitest'
 import { expandTaskListStatusFilter } from '@/domain/task-list-status-filter'
 
 describe('expandTaskListStatusFilter', () => {
-  it('includes assigned customization work in the business in-progress filter', () => {
-    expect(expandTaskListStatusFilter(['InProgress'])).toEqual([
-      'InProgress',
-      'Assigned',
-      'PendingCustomizationProduction',
-      'PendingEffectRevision',
-    ])
+  it('keeps the unified activity status unchanged', () => {
+    expect(expandTaskListStatusFilter(['InProgress'])).toEqual(['InProgress'])
   })
 
-  it('deduplicates statuses when multiple filter aliases overlap', () => {
-    expect(expandTaskListStatusFilter(['InProgress', 'PendingCustomizationProduction'])).toEqual([
-      'InProgress',
-      'Assigned',
-      'PendingCustomizationProduction',
-      'PendingEffectRevision',
-    ])
+  it('deduplicates repeated v8 statuses without adding aliases', () => {
+    expect(expandTaskListStatusFilter(['PendingAudit', 'PendingAudit'])).toEqual(['PendingAudit'])
   })
 })
