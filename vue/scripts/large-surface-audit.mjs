@@ -57,11 +57,19 @@ const pages = [
 const startedServer = process.env.LOAD_BASE_URL ? null : startVite()
 
 try {
-  await waitForServer(baseUrl)
-  await runLoadAudit()
+  if (startedServer) {
+    await waitForOwnedServer(baseUrl, startedServer)
+    await Promise.race([
+      runLoadAudit(),
+      rejectOnUnexpectedViteExit(startedServer, 'during load audit'),
+    ])
+  } else {
+    await waitForServer(baseUrl)
+    await runLoadAudit()
+  }
 } finally {
   if (startedServer) {
-    startedServer.kill('SIGTERM')
+    await stopVite(startedServer)
   }
 }
 
@@ -80,22 +88,47 @@ function startVite() {
         VITE_LARGE_SURFACE_TOTAL: process.env.VITE_LARGE_SURFACE_TOTAL ?? '5000',
       },
       shell: process.platform === 'win32',
+      detached: process.platform !== 'win32',
       stdio: ['ignore', 'pipe', 'pipe'],
     },
   )
 
+  let stopping = false
+  let stdout = ''
+  let markReady
+  const readyPromise = new Promise((resolve) => {
+    markReady = resolve
+  })
+  const exitPromise = new Promise((resolve) => {
+    child.once('error', (error) => resolve({ code: null, signal: null, error }))
+    child.once('exit', (code, signal) => resolve({ code, signal, error: null }))
+  })
+
   child.stdout.on('data', (chunk) => {
     writeViteOutput(process.stdout, chunk)
+    stdout = `${stdout}${String(chunk)}`.slice(-8_192)
+    if (/Local:\s+http:\/\/127\.0\.0\.1:\d+\//.test(stripAnsi(stdout))) {
+      markReady()
+    }
   })
   child.stderr.on('data', (chunk) => {
     writeViteOutput(process.stderr, chunk)
   })
-  child.on('exit', (code, signal) => {
-    if (code !== 0 && code !== 143 && signal !== 'SIGTERM') {
-      console.error(`[load:vite] exited with code=${code} signal=${signal}`)
-    }
-  })
-  return child
+  return {
+    child,
+    readyPromise,
+    exitPromise,
+    get stopping() {
+      return stopping
+    },
+    beginStopping() {
+      stopping = true
+    },
+  }
+}
+
+function stripAnsi(value) {
+  return value.replace(/\u001b\[[0-9;]*m/g, '')
 }
 
 function writeViteOutput(stream, chunk) {
@@ -118,6 +151,70 @@ async function waitForServer(url) {
     await sleep(500)
   }
   throw new Error(`Timed out waiting for ${url}: ${lastError?.message ?? 'no response'}`)
+}
+
+async function waitForOwnedServer(url, server) {
+  await Promise.race([
+    server.readyPromise,
+    rejectOnUnexpectedViteExit(server, 'before ready'),
+  ])
+  await Promise.race([
+    waitForServer(url),
+    rejectOnUnexpectedViteExit(server, 'before HTTP readiness'),
+  ])
+  if (server.child.exitCode !== null || server.child.signalCode !== null) {
+    throw new Error(
+      `[load:vite] exited before readiness with code=${server.child.exitCode} signal=${server.child.signalCode}`,
+    )
+  }
+}
+
+async function rejectOnUnexpectedViteExit(server, phase) {
+  const { code, signal, error } = await server.exitPromise
+  if (server.stopping) {
+    return await new Promise(() => {})
+  }
+  throw new Error(
+    `[load:vite] exited ${phase} with code=${code} signal=${signal}` +
+      (error ? ` error=${error.message}` : ''),
+  )
+}
+
+async function stopVite(server) {
+  server.beginStopping()
+  if (server.child.exitCode !== null || server.child.signalCode !== null) {
+    await server.exitPromise
+    return
+  }
+
+  signalVite(server.child, 'SIGTERM')
+  const exited = await Promise.race([
+    server.exitPromise.then(() => true),
+    sleep(5_000).then(() => false),
+  ])
+  if (exited) return
+
+  signalVite(server.child, 'SIGKILL')
+  const killed = await Promise.race([
+    server.exitPromise.then(() => true),
+    sleep(5_000).then(() => false),
+  ])
+  if (!killed) {
+    throw new Error(`[load:vite] failed to terminate child pid=${server.child.pid}`)
+  }
+}
+
+function signalVite(child, signal) {
+  if (!child.pid) return
+  try {
+    if (process.platform === 'win32') {
+      child.kill(signal)
+    } else {
+      process.kill(-child.pid, signal)
+    }
+  } catch (error) {
+    if (error?.code !== 'ESRCH') throw error
+  }
 }
 
 async function runLoadAudit() {
@@ -158,6 +255,7 @@ async function runLoadAudit() {
   try {
     for (const entry of pages) {
       const page = await context.newPage()
+      const diagnostics = collectPageDiagnostics(page)
       await page.setViewportSize(entry.viewport ?? { width: 1440, height: 900 })
       page.setDefaultTimeout(pageTimeoutMs)
       const startedAt = performance.now()
@@ -203,6 +301,8 @@ async function runLoadAudit() {
             maxHorizontalOverflowPx: 2,
           },
           viewport: entry.viewport ?? { width: 1440, height: 900 },
+          finalUrl: page.url(),
+          diagnostics: diagnostics.snapshot(),
           ...metrics,
           ...scenarioMetrics,
         }
@@ -210,13 +310,22 @@ async function runLoadAudit() {
         collectFailures(entry, report, failures)
       } catch (error) {
         const metrics = await page.evaluate(measurePage, entry.countSelector).catch(() => null)
+        const finalUrl = page.url()
+        const title = await page.title().catch(() => '')
+        const bodyText = await page.locator('body').innerText({ timeout: 1_000 }).catch(() => '')
+        const message = error instanceof Error ? error.message : String(error)
         reports.push({
           name: entry.name,
           path: entry.path,
-          error: error instanceof Error ? error.message : String(error),
+          readyMs: Math.round(performance.now() - startedAt),
+          error: message,
+          finalUrl,
+          title,
+          bodyTextSnippet: bodyText.trim().slice(0, 1_000),
+          diagnostics: diagnostics.snapshot(),
           ...(metrics ?? {}),
         })
-        failures.push(`${entry.name}: ${error instanceof Error ? error.message : String(error)}`)
+        failures.push(`${entry.name} at ${finalUrl}: ${message}`)
       } finally {
         await page.close()
       }
@@ -235,6 +344,14 @@ async function runLoadAudit() {
 
   console.log('Large surface audit')
   for (const report of reports) {
+    if (report.error) {
+      console.error(
+        `- ${report.name}: FAILED at ${report.finalUrl}; ${report.error}; ` +
+          `${report.nodeCount ?? 'unknown'} nodes`,
+      )
+      printPageDiagnostics(report.diagnostics)
+      continue
+    }
     console.log(
       `- ${report.name}: ${report.itemCount} items, ${report.readyMs}ms ready, ` +
         `${report.nodeCount} nodes, overflow ${report.horizontalOverflowPx}px` +
@@ -250,10 +367,73 @@ async function runLoadAudit() {
       console.error(`- ${failure}`)
     }
     console.error(`Report written to ${path.relative(rootDir, outputPath)}`)
-    process.exit(1)
+    throw new Error(`Large surface audit failed with ${failures.length} failing surface(s)`)
   }
 
   console.log(`Large surface audit passed. Report written to ${path.relative(rootDir, outputPath)}`)
+}
+
+function collectPageDiagnostics(page) {
+  const consoleMessages = []
+  const pageErrors = []
+  const failedRequests = []
+  const httpErrors = []
+  const append = (target, value) => {
+    if (target.length < 50) target.push(value)
+  }
+
+  page.on('console', (message) => {
+    if (!['warning', 'error'].includes(message.type())) return
+    append(consoleMessages, {
+      type: message.type(),
+      text: message.text(),
+      location: message.location(),
+    })
+  })
+  page.on('pageerror', (error) => {
+    append(pageErrors, error.stack ?? error.message)
+  })
+  page.on('requestfailed', (request) => {
+    append(failedRequests, {
+      method: request.method(),
+      url: request.url(),
+      errorText: request.failure()?.errorText ?? 'unknown request failure',
+    })
+  })
+  page.on('response', (response) => {
+    if (response.status() < 400) return
+    append(httpErrors, {
+      status: response.status(),
+      method: response.request().method(),
+      url: response.url(),
+    })
+  })
+
+  return {
+    snapshot() {
+      return {
+        consoleMessages: [...consoleMessages],
+        pageErrors: [...pageErrors],
+        failedRequests: [...failedRequests],
+        httpErrors: [...httpErrors],
+      }
+    },
+  }
+}
+
+function printPageDiagnostics(diagnostics) {
+  for (const message of diagnostics?.consoleMessages ?? []) {
+    console.error(`  console.${message.type}: ${message.text}`)
+  }
+  for (const error of diagnostics?.pageErrors ?? []) {
+    console.error(`  pageerror: ${error}`)
+  }
+  for (const request of diagnostics?.failedRequests ?? []) {
+    console.error(`  requestfailed: ${request.method} ${request.url} (${request.errorText})`)
+  }
+  for (const response of diagnostics?.httpErrors ?? []) {
+    console.error(`  http ${response.status}: ${response.method} ${response.url}`)
+  }
 }
 
 function measurePage(countSelector) {

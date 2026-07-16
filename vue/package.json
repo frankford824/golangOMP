@@ -17,6 +17,7 @@
     "a11y:audit": "node scripts/accessibility-audit.mjs",
     "asset:a11y": "node scripts/asset-workbench-a11y-audit.mjs",
     "design:audit": "node scripts/design-system-audit.mjs",
+    "preload:audit": "node --test scripts/large-surface-audit.node-test.mjs",
     "load:audit": "node scripts/large-surface-audit.mjs",
     "asset:audit": "node scripts/asset-workbench-architecture-audit.mjs",
     "asset:visual:baseline": "node scripts/asset-workbench-visual-baseline.mjs baseline",
