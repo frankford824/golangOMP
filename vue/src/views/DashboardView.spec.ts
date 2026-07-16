@@ -34,7 +34,6 @@ function overview(designPending: number, generatedAt: string): TaskOperationalOv
       pending_audit: 457,
       handover: 0,
       customization_in_progress: 54,
-      pending_warehouse_receive: 136,
       overdue: 938,
       due_today: 29,
       today_created: 5,
@@ -64,7 +63,7 @@ function overview(designPending: number, generatedAt: string): TaskOperationalOv
       { key: 'design_ops', name: '设计/运营待推进', count: designPending },
       { key: 'audit', name: '待审核', count: 457 },
       { key: 'customization', name: '定制协同', count: 54 },
-      { key: 'warehouse', name: '待仓库', count: 166 },
+		{ key: 'blocked', name: '异常待处理', count: 2 },
       { key: 'completed', name: '已完成/终止', count: 839 },
     ],
     recent_tasks: [

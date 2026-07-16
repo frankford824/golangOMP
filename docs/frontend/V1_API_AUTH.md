@@ -18,7 +18,7 @@
 ### 简介
 支持方法: POST。
 
-- `POST`: Frontend-ready registration endpoint for the current minimal auth mainline. Registration now accepts explicit profile fields (`name`, `department`, optional `team`, `mobile`, optional `email`, `account`, `password`, optional admin key). Department must match the backend org master exposed by `/v1/org/options`. If `team` is provided it must belong to the selected department. `mobile` is validated and kept unique. If the provided admin key matches the configured department rule, the new user is granted `DepartmentAdmin`. The response includes `user.frontend_access`.
+- `POST`: Frontend-ready registration endpoint for the current minimal auth mainline. Registration now accepts explicit profile fields (`name`, `department`, optional `team`, `mobile`, optional `email`, `account`, `password`). Department must match the backend org master exposed by `/v1/org/options`. If `team` is provided it must belong to the selected department. `mobile` is validated and kept unique. Every new user receives only the protected explicit `member/self` assignment. Administrators grant all additional roles and stable-ID scopes through `/v1/access`. Organization display names and registration payloads never infer authorization. The response includes `user.frontend_access`.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -45,8 +45,6 @@ Content-Type: `application/json`
 | `phone` | string | 否 | Compatibility alias of mobile |
 | `email` | string | 否 | - |
 | `password` | string | 是 | - |
-| `admin_key` | string | 否 | Department admin registration key. If a valid department admin key is provided, the user is registered as a department admin (role: dept_admin) for the specified department. If omitted or invalid, the user is registered as a regular member. Super admin accounts are NOT created through self-registration; they are managed via auth_identity.json configuration (super_admins section). |
-| `secret_key` | string | 否 | Compatibility alias of admin_key |
 
 ### 响应体 schema
 成功响应: `201 application/json`

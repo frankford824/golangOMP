@@ -12,44 +12,55 @@
     <div v-if="error" class="message error" role="alert">{{ error }}</div>
     <div v-if="success" class="message success" role="status">{{ success }}</div>
 
-    <div v-if="canSubmit || editingAudit" class="group-editor">
-      <article v-for="(row, groupIndex) in rows" :key="row.group.id" class="edit-card">
+    <div
+      v-if="canSubmit || editingAudit"
+      ref="editorViewport"
+      class="group-editor-viewport"
+      :style="{ '--resource-editor-row-height': editorRowHeight + 'px' }"
+      data-testid="resource-editor-viewport"
+      @scroll="onEditorScroll"
+    >
+      <div class="group-editor-spacer" :style="{ height: editorTotalHeight + 'px' }">
+        <div class="group-editor-window" :style="{ transform: 'translateY(' + editorWindowOffset + 'px)' }">
+      <article v-for="entry in visibleEditorRows" :key="entry.row.group.id" class="edit-card" :data-group-index="entry.groupIndex">
         <div class="edit-head">
-          <div><strong>{{ row.group.sku_code || scopeLabel(row.group) }}</strong><small>{{ revisionStatus(row) }}</small></div>
+          <div><strong>{{ entry.row.group.sku_code || scopeLabel(entry.row.group) }}</strong><small>{{ revisionStatus(entry.row) }}</small></div>
           <label>成品模式
-            <select v-model="row.mode" @change="markChanged(row.group.id)"><option value="single">单图</option><option value="set">套装</option></select>
+            <select v-model="entry.row.mode" @change="markChanged(entry.row.group.id)"><option value="single">单图</option><option value="set">套装</option></select>
           </label>
         </div>
         <div class="upload-grid">
           <label class="upload-box">
             <span>设计源文件{{ sourceRequired ? '（必填）' : '（选填）' }}</span>
-            <strong>{{ row.source?.name || inheritedSourceName(row) || '选择 PSD 或其他源文件' }}</strong>
-            <input type="file" :disabled="Boolean(row.uploading)" @change="uploadSource($event, row)" />
+            <strong>{{ entry.row.source?.name || inheritedSourceName(entry.row) || '选择 PSD 或其他源文件' }}</strong>
+            <input type="file" :disabled="Boolean(entry.row.uploading)" @change="uploadSource($event, entry.row)" />
           </label>
           <label class="upload-box">
             <span>最终成品图</span>
-            <strong>{{ row.finals.length ? `已选择 ${row.finals.length} 张` : '选择一张或多张图片' }}</strong>
-            <input type="file" accept="image/*" multiple :disabled="Boolean(row.uploading)" @change="uploadFinals($event, row)" />
+            <strong>{{ entry.row.finals.length ? `已选择 ${entry.row.finals.length} 张` : '选择一张或多张图片' }}</strong>
+            <input type="file" accept="image/*" multiple :disabled="Boolean(entry.row.uploading)" @change="uploadFinals($event, entry.row)" />
           </label>
         </div>
-        <div v-if="row.uploading" class="uploading">正在上传 {{ row.uploading }}…</div>
-        <ol v-if="row.finals.length" class="final-order">
+        <div v-if="entry.row.uploading" class="uploading">正在上传 {{ entry.row.uploading }}…</div>
+        <ol v-if="entry.row.finals.length" class="final-order">
           <li
-            v-for="(file, index) in row.finals"
+            v-for="(file, index) in entry.row.finals"
             :key="`${file.id}-${index}`"
             draggable="true"
             tabindex="0"
-            @dragstart="dragStart(groupIndex, index)"
+            @dragstart="dragStart(entry.groupIndex, index)"
             @dragover.prevent
-            @drop="drop(groupIndex, index)"
-            @keydown.alt.up.prevent="move(row, index, -1)"
-            @keydown.alt.down.prevent="move(row, index, 1)"
+            @drop="drop(entry.groupIndex, index)"
+            @keydown.alt.up.prevent="move(entry.row, index, -1)"
+            @keydown.alt.down.prevent="move(entry.row, index, 1)"
           >
             <span>{{ index + 1 }}</span><strong>{{ file.name }}</strong>
-            <div><button aria-label="上移" :disabled="index === 0" @click="move(row,index,-1)">↑</button><button aria-label="下移" :disabled="index === row.finals.length - 1" @click="move(row,index,1)">↓</button><button aria-label="移除" @click="removeFinal(row,index)">×</button></div>
+            <div><button aria-label="上移" :disabled="index === 0" @click="move(entry.row,index,-1)">↑</button><button aria-label="下移" :disabled="index === entry.row.finals.length - 1" @click="move(entry.row,index,1)">↓</button><button aria-label="移除" @click="removeFinal(entry.row,index)">×</button></div>
           </li>
         </ol>
       </article>
+        </div>
+      </div>
     </div>
 
     <footer v-if="canSubmit" class="action-bar">
@@ -88,7 +99,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { uploadTaskFileViaAssetSession } from '@/services/upload/assetUploadFlow'
 import { resourceGroupsApi, type ResourceBundle, type ResourceGroup, type ResourceGroupSubmission, type ResourceMode } from '@/services/api/resourceGroupsApi'
 
@@ -96,7 +107,7 @@ type UploadedFile = { id: number; name: string; inherited?: boolean }
 type EditorRow = { group: ResourceGroup; mode: ResourceMode; source: UploadedFile | null; finals: UploadedFile[]; uploading: string }
 
 const props = defineProps<{ taskId: number; taskType: string; bundle: ResourceBundle; allowedActions: string[] }>()
-const emit = defineEmits<{ updated: [bundle: ResourceBundle] }>()
+const emit = defineEmits<{ updated: [bundle: ResourceBundle]; 'dirty-change': [dirty: boolean] }>()
 const rows = ref<EditorRow[]>([])
 const changedGroups = ref(new Set<number>())
 const busy = ref(false)
@@ -107,6 +118,11 @@ const editingAudit = ref(false)
 const pendingAction = ref<'approve' | 'return_to_design' | 'reopen' | null>(null)
 const confirmDialog = ref<HTMLElement | null>(null)
 const confirmCancelButton = ref<HTMLButtonElement | null>(null)
+const editorViewport = ref<HTMLElement | null>(null)
+const editorScrollTop = ref(0)
+const editorViewportHeight = ref(720)
+const editorRowHeight = ref(390)
+const editorOverscan = 2
 let confirmationTrigger: HTMLElement | null = null
 const reopenTarget = ref<'design' | 'audit' | 'retouch'>('design')
 let dragged: { groupIndex: number; index: number } | null = null
@@ -122,8 +138,15 @@ const isRetouch = computed(() => ['retouch', 'retouch_task'].includes(props.task
 const sourceRequired = computed(() => !isRetouch.value)
 const heading = computed(() => canAudit.value ? '统一审核' : canSubmit.value ? (isRetouch.value ? '提交修图成品' : '设计提交') : canReopen.value ? '重开任务' : '当前无可执行动作')
 const submitLabel = computed(() => isRetouch.value ? '提交成品并结单' : '提交审核')
+const editorTotalHeight = computed(() => rows.value.length * editorRowHeight.value)
+const editorVisibleStart = computed(() => Math.max(0, Math.floor(editorScrollTop.value / editorRowHeight.value) - editorOverscan))
+const editorVisibleCount = computed(() => Math.ceil(editorViewportHeight.value / editorRowHeight.value) + editorOverscan * 2)
+const visibleEditorRows = computed(() => rows.value.slice(editorVisibleStart.value, editorVisibleStart.value + editorVisibleCount.value).map((row, offset) => ({ row, groupIndex: editorVisibleStart.value + offset })))
+const editorWindowOffset = computed(() => editorVisibleStart.value * editorRowHeight.value)
+const isDirty = computed(() => changedGroups.value.size > 0 || rows.value.some((row) => Boolean(row.uploading)))
 
 watch(() => props.bundle, buildRows, { immediate: true, deep: true })
+watch(isDirty, (dirty) => emit('dirty-change', dirty), { immediate: true })
 
 function buildRows() {
   rows.value = props.bundle.groups.map((group) => {
@@ -137,7 +160,15 @@ function buildRows() {
     }
   })
   changedGroups.value = new Set()
+  editorScrollTop.value = 0
+  if (editorViewport.value) editorViewport.value.scrollTop = 0
 }
+
+function refreshEditorMetrics() {
+  editorRowHeight.value = typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 780px)').matches ? 620 : 390
+  editorViewportHeight.value = editorViewport.value?.clientHeight || Math.min(window.innerHeight * 0.68, 760)
+}
+function onEditorScroll() { editorScrollTop.value = editorViewport.value?.scrollTop || 0 }
 
 function scopeLabel(group: ResourceGroup) { return group.scope_kind === 'retouch_requirement' ? `修图需求 ${group.retouch_requirement_id}` : '任务资源' }
 function revisionStatus(row: EditorRow) { return row.group.finalized_revision ? '当前已结单资源' : row.group.working_revision ? '当前待处理资源' : '尚未提交资源' }
@@ -218,8 +249,27 @@ async function confirmAction() {
   else await reopen()
   if (!error.value) closeConfirmation()
 }
+onMounted(() => { refreshEditorMetrics(); window.addEventListener('resize', refreshEditorMetrics) })
+onBeforeUnmount(() => { window.removeEventListener('resize', refreshEditorMetrics); emit('dirty-change', false) })
 </script>
 
 <style scoped>
 .workflow-panel{display:grid;gap:16px;border:1px solid rgb(var(--yb-border));border-radius:18px;background:rgb(var(--yb-surface));overflow:hidden}.workflow-panel>header{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;padding:20px 22px;border-bottom:1px solid rgb(var(--yb-border))}.workflow-panel h2{margin:3px 0;font-size:21px}.workflow-panel p{margin:0;color:rgb(var(--yb-text-muted))}.eyebrow{font-size:11px;letter-spacing:.13em;font-weight:900;color:rgb(var(--yb-brand))}.group-editor{display:grid;gap:14px;padding:0 20px}.edit-card{border:1px solid rgb(var(--yb-border));border-radius:14px;overflow:hidden}.edit-head{display:flex;justify-content:space-between;align-items:center;padding:13px 15px;background:rgb(var(--yb-surface-soft))}.edit-head>div{display:grid;gap:3px}.edit-head small{color:rgb(var(--yb-text-muted))}.edit-head label{display:flex;gap:8px;align-items:center;font-size:12px}.edit-head select,.reopen-bar select,.audit-bar input,.reopen-bar input{min-height:36px;border:1px solid rgb(var(--yb-border));border-radius:9px;padding:0 10px;background:rgb(var(--yb-surface));color:rgb(var(--yb-text))}.upload-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:14px}.upload-box{display:grid;gap:5px;padding:14px;border:1px dashed rgb(var(--yb-border));border-radius:11px;cursor:pointer}.upload-box span{font-size:12px;color:rgb(var(--yb-text-muted))}.upload-box input{margin-top:5px}.uploading{padding:0 14px 12px;color:rgb(var(--yb-brand))}.final-order{display:grid;gap:6px;padding:0 14px 14px;margin:0;list-style:none}.final-order li{display:grid;grid-template-columns:25px 1fr auto;align-items:center;gap:9px;padding:8px;border-radius:9px;background:rgb(var(--yb-surface-muted))}.final-order li>span{display:grid;place-items:center;width:24px;height:24px;border-radius:7px;background:rgb(var(--yb-brand-soft))}.final-order button{border:0;background:transparent;cursor:pointer}.action-bar,.audit-bar,.reopen-bar{display:flex;align-items:flex-end;justify-content:space-between;gap:15px;padding:16px 20px;border-top:1px solid rgb(var(--yb-border));background:rgb(var(--yb-surface-soft))}.action-bar span{color:rgb(var(--yb-text-muted));font-size:12px}.audit-bar label,.reopen-bar label{display:grid;gap:5px;flex:1}.audit-bar label span,.reopen-bar label span{font-size:12px;color:rgb(var(--yb-text-muted))}.audit-bar>div{display:flex;gap:8px}.primary,.secondary{min-height:40px;padding:0 15px;border-radius:10px;font-weight:750;cursor:pointer}.primary{border:0;background:rgb(var(--yb-brand));color:rgb(var(--yb-text-inverse))}.secondary{border:1px solid rgb(var(--yb-border));background:rgb(var(--yb-surface));color:rgb(var(--yb-text))}.primary:disabled,.secondary:disabled{opacity:.45;cursor:not-allowed}.message{margin:0 20px;padding:11px 13px;border-radius:10px}.error{background:rgb(var(--yb-danger-soft));color:rgb(var(--yb-danger-text))}.success{background:rgb(var(--yb-success-soft));color:rgb(var(--yb-success-strong))}.confirm-backdrop{position:fixed;inset:0;z-index:80;display:grid;place-items:center;padding:20px;background:rgb(var(--yb-overlay-night) / .48)}.confirm-dialog{width:min(520px,100%);display:grid;gap:14px;padding:22px;border:1px solid rgb(var(--yb-border));border-radius:18px;background:rgb(var(--yb-surface));box-shadow:0 20px 55px rgb(var(--yb-shadow) / .22)}.confirm-dialog h3{margin:0}.confirm-dialog dl{display:grid;gap:8px;margin:0}.confirm-dialog dl div{display:grid;grid-template-columns:90px 1fr;gap:12px}.confirm-dialog dt{color:rgb(var(--yb-text-muted))}.confirm-dialog dd{margin:0}.confirm-actions{display:flex;justify-content:flex-end;gap:8px}@media(max-width:780px){.workflow-panel>header,.action-bar,.audit-bar,.reopen-bar{align-items:stretch;flex-direction:column}.upload-grid{grid-template-columns:1fr}.audit-bar>div{flex-wrap:wrap}}
+.group-editor-viewport {
+  height: min(68vh, 760px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  margin: 0 20px;
+  background: rgb(var(--yb-surface-soft));
+  border-radius: 14px;
+}
+.group-editor-spacer { position: relative; }
+.group-editor-window { position: absolute; inset: 0 0 auto; }
+.group-editor-window .edit-card {
+  box-sizing: border-box;
+  height: calc(var(--resource-editor-row-height) - 12px);
+  margin: 6px 0;
+  overflow: auto;
+  background: rgb(var(--yb-surface));
+}
 </style>

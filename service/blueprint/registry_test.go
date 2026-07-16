@@ -6,9 +6,15 @@ import (
 	"workflow/domain"
 )
 
-func TestRegistry_CoversSixTaskTypes(t *testing.T) {
+func TestRegistry_CoversActiveWorkflowTaskTypes(t *testing.T) {
 	reg := NewRegistry()
-	for _, taskType := range domain.V1TaskTypes() {
+	for _, taskType := range []domain.TaskType{
+		domain.TaskTypeOriginalProductDevelopment,
+		domain.TaskTypeNewProductDevelopment,
+		domain.TaskTypeRetouchTask,
+		domain.TaskTypeCustomerCustomization,
+		domain.TaskTypeRegularCustomization,
+	} {
 		bp, ok := reg.Get(taskType)
 		if !ok {
 			t.Fatalf("missing blueprint for %s", taskType)
@@ -47,7 +53,6 @@ func TestModulesForTask_HybridNewProductDevelopmentAddsCustomization(t *testing.
 		domain.ModuleKeyDesign,
 		domain.ModuleKeyCustomization,
 		domain.ModuleKeyAudit,
-		domain.ModuleKeyWarehouse,
 	}
 	if len(got) != len(want) {
 		t.Fatalf("hybrid modules = %v, want %v", got, want)

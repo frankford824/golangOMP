@@ -111,9 +111,6 @@ export interface RegisterPayload {
   mobile: string
   phone?: string
   email?: string
-  /** 管理员密钥，可选；若当前接口支持则传此字段注册为部门管理员 */
-  admin_key?: string
-  secret_key?: string
 }
 
 /** PUT /v1/auth/password 请求体 */

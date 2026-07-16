@@ -44,6 +44,7 @@ const (
 	TaskEventClosed                      = "task.closed"
 	TaskEventReminded                    = "task.reminded"
 	TaskEventBatchAssigned               = "task.batch_assigned"
+	TaskEventPlanningSKUCorrected        = "task.planning_sku.corrected"
 )
 
 // AuditRecord records one audit action against a Task (V7 §11).

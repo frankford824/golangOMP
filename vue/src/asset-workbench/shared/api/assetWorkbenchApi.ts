@@ -1758,7 +1758,8 @@ export const assetWorkbenchApi = {
       const cover = files.find((item) => item.revision_item_id === asset.cover_revision_item_id) || files[0]
       return {
         download_mode: 'direct', download_url: cover.download_url, filename: cover.filename,
-        file_size: Number(cover.file_size || 0), mime_type: cover.mime_type, preview_available: true,
+        file_size: Number(cover.file_size || 0), mime_type: cover.mime_type,
+        preview_available: Boolean(asset.preview_available && asset.preview_url),
         items: files.map((item) => ({ download_url: item.download_url, filename: item.filename, file_size: Number(item.file_size || 0), mime_type: item.mime_type })),
       }
     }
@@ -1773,7 +1774,19 @@ export const assetWorkbenchApi = {
   async previewMaterialAsset(asset: SystemAssetRow, signal?: AbortSignal): Promise<SystemAssetPreviewMeta> {
     if (asset.resource_group_id) {
       const info = await this.downloadMaterialAsset(asset, signal)
-      return { asset_id: asset.id, source_type: 'task_resource_group', source_ref: `group:${asset.resource_group_id}`, status: 'ready', preparing: false, preview_url: info.download_url, download_url: info.download_url, mime_type: info.mime_type, filename: info.filename, preview_available: Boolean(info.preview_available) }
+      const ready = Boolean(asset.preview_available && asset.preview_url)
+      return {
+        asset_id: asset.id,
+        source_type: 'task_resource_group',
+        source_ref: `group:${asset.resource_group_id}`,
+        status: ready ? 'ready' : 'not_applicable',
+        preparing: false,
+        preview_url: ready ? asset.preview_url : undefined,
+        download_url: info.download_url,
+        mime_type: info.mime_type,
+        filename: info.filename,
+        preview_available: ready,
+      }
     }
     if (isExternalMaterialSource(asset.source_type)) {
       const resourceId = asset.resource_id || `ext-${asset.id}`

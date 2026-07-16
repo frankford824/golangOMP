@@ -308,23 +308,6 @@ func TestTaskServiceCreateBatchOwnerTeamCompatRegression(t *testing.T) {
 			wantBatch:     true,
 		},
 		{
-			name: "batch purchase compat owner team",
-			params: CreateTaskParams{
-				TaskType:     domain.TaskTypePurchaseTask,
-				SourceMode:   domain.TaskSourceModeNewProduct,
-				CreatorID:    9,
-				OwnerTeam:    "\u8fd0\u8425\u4e09\u7ec4",
-				DeadlineAt:   timePtr(),
-				BatchSKUMode: "multiple",
-				BatchItems: []CreateTaskBatchSKUItemParams{
-					{ProductName: "Batch A", CategoryCode: "LIGHTBOX", PurchaseSKU: "BATCH-PUR-001", CostPriceMode: string(domain.CostPriceModeTemplate), Quantity: int64Ptr(10), BaseSalePrice: float64Ptr(11.5)},
-					{ProductName: "Batch B", CategoryCode: "LIGHTBOX", PurchaseSKU: "BATCH-PUR-002", CostPriceMode: string(domain.CostPriceModeTemplate), Quantity: int64Ptr(12), BaseSalePrice: float64Ptr(13.5)},
-				},
-			},
-			wantOwnerTeam: "\u5185\u8d38\u8fd0\u8425\u7ec4",
-			wantBatch:     true,
-		},
-		{
 			name: "batch original product still rejected",
 			params: CreateTaskParams{
 				TaskType:      domain.TaskTypeOriginalProductDevelopment,

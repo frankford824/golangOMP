@@ -120,12 +120,8 @@ type BatchAuditHandoverResponse struct {
 	Results      []BatchAuditHandoverResultItem `json:"results"`
 }
 
-// AuditV7Service defines V7 task-centric audit actions.
+// AuditV7Service now exposes only the v8 PendingAudit handover surface.
 type AuditV7Service interface {
-	Claim(ctx context.Context, p ClaimAuditParams) *domain.AppError
-	Approve(ctx context.Context, p ApproveAuditParams) *domain.AppError
-	Reject(ctx context.Context, p RejectAuditParams) *domain.AppError
-	Transfer(ctx context.Context, p TransferAuditParams) *domain.AppError
 	Handover(ctx context.Context, p HandoverAuditParams) (*domain.AuditHandover, *domain.AppError)
 	ListHandoverCandidates(ctx context.Context, filter AuditHandoverCandidateFilter) (*AuditHandoverCandidateListResponse, *domain.AppError)
 	BatchHandover(ctx context.Context, p BatchAuditHandoverParams) (*BatchAuditHandoverResponse, *domain.AppError)

@@ -203,9 +203,9 @@ func TestTaskFinalizerReplacesSourceWithAdapterSnapshotAndCompletesTask(t *testi
 	if outboxAssetID != assets[0].id || storageRefID != assets[0].refID || storageAdapter != "oss_upload_service" || placeholder || storageKey != assets[0].storageKey || status != "pending" {
 		t.Fatalf("outbox snapshot = asset %d ref %q adapter %q placeholder %v key %q status %q", outboxAssetID, storageRefID, storageAdapter, placeholder, storageKey, status)
 	}
-	var completedEvents int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM task_event_logs WHERE task_id=? AND event_type='task.completed'`, taskID).Scan(&completedEvents); err != nil || completedEvents != 1 {
-		t.Fatalf("task.completed events = %d/%v", completedEvents, err)
+	var closedEvents int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM task_event_logs WHERE task_id=? AND event_type='task.closed'`, taskID).Scan(&closedEvents); err != nil || closedEvents != 1 {
+		t.Fatalf("task.closed events = %d/%v", closedEvents, err)
 	}
 }
 

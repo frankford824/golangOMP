@@ -39,26 +39,22 @@ func TestSAEI_DownloadTemplate_NPD(t *testing.T) {
 	}
 }
 
-func TestSAEI_DownloadTemplate_PT(t *testing.T) {
+func TestSAEI_DownloadTemplate_PurchaseRetired(t *testing.T) {
 	router := saeiRouter(true)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/v1/tasks/batch-create/template.xlsx?task_type=purchase_task", nil)
 	req.Header.Set("Authorization", "Bearer token")
 	router.ServeHTTP(rec, req)
-	if rec.Code != http.StatusOK {
+	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
-	if _, err := excelize.OpenReader(bytes.NewReader(rec.Body.Bytes())); err != nil {
-		t.Fatalf("open response workbook: %v", err)
+	if !strings.Contains(rec.Body.String(), "batch_not_supported_for_task_type") {
+		t.Fatalf("body=%s, want retired task type rejection", rec.Body.String())
 	}
 }
 
 func TestSAEI_ParseUpload_HappyPath_NPD(t *testing.T) {
 	assertSAEIParseHappyPath(t, domain.TaskTypeNewProductDevelopment)
-}
-
-func TestSAEI_ParseUpload_HappyPath_PT(t *testing.T) {
-	assertSAEIParseHappyPath(t, domain.TaskTypePurchaseTask)
 }
 
 func TestSAEI_ParseUpload_RejectedTaskType(t *testing.T) {

@@ -32,7 +32,7 @@ export const OPERATION_EVENT_TYPE_LABELS: Record<string, string> = {
   'task.erp_image.auto_synced': 'ERP 图片已自动同步',
   'task.erp_image.auto_sync_failed': 'ERP 图片自动同步失败',
   'task.erp_image.awaiting_upload': '待上传 ERP 商品图',
-  'task.completed': '任务已结单',
+  'task.closed': '任务已结单',
   'task.reminded': '任务已提醒',
   'task.batch_assigned': '任务已批量指派',
   'task.batch_items_created': '批量子项已生成',

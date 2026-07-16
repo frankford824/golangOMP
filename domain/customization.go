@@ -54,6 +54,8 @@ func (d CustomizationJobDecisionType) Valid() bool {
 type CustomizationJobStatus string
 
 const (
+	CustomizationJobStatusInProgress                     CustomizationJobStatus = "in_progress"
+	CustomizationJobStatusReadyForSubmit                 CustomizationJobStatus = "ready_for_submit"
 	CustomizationJobStatusPendingCustomizationReview     CustomizationJobStatus = "pending_customization_review"
 	CustomizationJobStatusPendingCustomizationProduction CustomizationJobStatus = "pending_customization_production"
 	CustomizationJobStatusPendingEffectReview            CustomizationJobStatus = "pending_effect_review"
@@ -66,7 +68,9 @@ const (
 
 func (s CustomizationJobStatus) Valid() bool {
 	switch s {
-	case CustomizationJobStatusPendingCustomizationReview,
+	case CustomizationJobStatusInProgress,
+		CustomizationJobStatusReadyForSubmit,
+		CustomizationJobStatusPendingCustomizationReview,
 		CustomizationJobStatusPendingCustomizationProduction,
 		CustomizationJobStatusPendingEffectReview,
 		CustomizationJobStatusPendingEffectRevision,

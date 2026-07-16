@@ -81,7 +81,7 @@ func TestTaskServiceCreateOriginalProductWithOrgTeamCompatWritesCanonicalOwnersh
 	}
 }
 
-func TestTaskServiceCreateNewAndPurchaseTaskWithOrgTeamCompatWriteCanonicalOwnership(t *testing.T) {
+func TestTaskServiceCreateNewTaskWithOrgTeamCompatWritesCanonicalOwnership(t *testing.T) {
 	cases := []struct {
 		name   string
 		params CreateTaskParams
@@ -100,23 +100,6 @@ func TestTaskServiceCreateNewAndPurchaseTaskWithOrgTeamCompatWriteCanonicalOwner
 				ProductNameSnapshot: "New Lightbox",
 				ProductShortName:    "Lightbox",
 				DesignRequirement:   "need design",
-			},
-		},
-		{
-			name: "purchase_task",
-			params: CreateTaskParams{
-				TaskType:            domain.TaskTypePurchaseTask,
-				SourceMode:          domain.TaskSourceModeNewProduct,
-				CreatorID:           9,
-				OwnerTeam:           "运营三组",
-				DeadlineAt:          timePtr(),
-				PurchaseSKU:         "PUR-001",
-				ProductNameSnapshot: "Purchase Product",
-				CostPriceMode:       string(domain.CostPriceModeManual),
-				CostPrice:           float64Ptr(12.5),
-				Quantity:            int64Ptr(10),
-				BaseSalePrice:       float64Ptr(25),
-				ProductChannel:      "1688",
 			},
 		},
 	}

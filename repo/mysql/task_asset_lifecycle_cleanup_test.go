@@ -85,6 +85,35 @@ func TestTaskAssetLifecycleRepoCleanupUsesAssetAgeAndExcludesCurrentVersion(t *t
 	}
 }
 
+func TestLockCleanupObjectIDsLocksRootAndDerivedVersions(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	repository := NewTaskAssetLifecycleRepo(New(db))
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT id\\s+FROM task_assets").WithArgs(int64(101), int64(101)).WillReturnRows(
+		sqlmock.NewRows([]string{"id"}).AddRow(int64(101)).AddRow(int64(102)),
+	)
+	mock.ExpectCommit()
+	var ids []int64
+	err = New(db).RunInTx(context.Background(), func(tx repo.Tx) error {
+		var lockErr error
+		ids, lockErr = repository.LockCleanupObjectIDs(context.Background(), tx, 101)
+		return lockErr
+	})
+	if err != nil {
+		t.Fatalf("LockCleanupObjectIDs() error = %v", err)
+	}
+	if len(ids) != 2 || ids[0] != 101 || ids[1] != 102 {
+		t.Fatalf("locked ids = %v", ids)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestEnqueueObjectDeletionsSnapshotsResourceAndDerivedObjectsInTransaction(t *testing.T) {
 	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherFunc(func(expectedSQL, actualSQL string) error {
 		if expectedSQL != "enqueue-resource-and-derived-object-deletions" {

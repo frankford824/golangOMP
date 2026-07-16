@@ -32,8 +32,6 @@ func FieldsForTaskType(taskType domain.TaskType, mode string) ([]FieldSpec, bool
 	switch taskType {
 	case domain.TaskTypeNewProductDevelopment:
 		return append([]FieldSpec(nil), npdSingleFields...), true
-	case domain.TaskTypePurchaseTask:
-		return append([]FieldSpec(nil), purchaseSingleFields...), true
 	case domain.TaskTypeOriginalProductDevelopment:
 		return append([]FieldSpec(nil), originalSingleFields...), true
 	default:
@@ -134,57 +132,6 @@ var originalSingleFields = []FieldSpec{
 		Key:      "spec_text",
 		Format:   FieldFormatString,
 		HelpText: "可选；未填写时创建后可在详情查看 ERP 规格",
-	},
-	{
-		Column:   "备注",
-		Key:      "remark",
-		Format:   FieldFormatString,
-		HelpText: "可选",
-	},
-}
-
-var purchaseSingleFields = []FieldSpec{
-	{
-		Column:   "产品款式编码",
-		Key:      "product_i_id",
-		Required: true,
-		Format:   FieldFormatString,
-		HelpText: "必填；须为 ERP 产品款式编码（i_id）",
-		ViolationCodes: ViolationCodeSet{
-			Missing: "missing_required_field",
-			Invalid: "invalid_i_id",
-		},
-	},
-	{
-		Column:   "产品名称",
-		Key:      "product_name",
-		Required: true,
-		Format:   FieldFormatString,
-		HelpText: "必填",
-		ViolationCodes: ViolationCodeSet{
-			Missing: "missing_required_field",
-		},
-	},
-	{
-		Column:   "数量",
-		Key:      "quantity",
-		Required: true,
-		Format:   FieldFormatInt64,
-		HelpText: "必填；大于 0 的整数",
-		ViolationCodes: ViolationCodeSet{
-			Missing: "missing_required_field",
-			Invalid: "invalid_quantity",
-		},
-	},
-	{
-		Column:   "规格尺寸",
-		Key:      "spec_text",
-		Required: true,
-		Format:   FieldFormatString,
-		HelpText: "必填",
-		ViolationCodes: ViolationCodeSet{
-			Missing: "missing_required_field",
-		},
 	},
 	{
 		Column:   "备注",

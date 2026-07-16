@@ -11,7 +11,11 @@ vi.mock('@/services/api/resourceGroupsApi', async (loadOriginal) => ({
   ...(await loadOriginal<typeof import('@/services/api/resourceGroupsApi')>()),
   resourceGroupsApi: { taskBundle: mocks.taskBundle },
 }))
-vi.mock('vue-router', () => ({ useRoute: () => mocks.route, useRouter: () => ({ push: mocks.push }) }))
+vi.mock('vue-router', () => ({
+  useRoute: () => mocks.route,
+  useRouter: () => ({ push: mocks.push }),
+  onBeforeRouteLeave: vi.fn(),
+}))
 
 import TaskDetailV8View from './TaskDetailV8View.vue'
 

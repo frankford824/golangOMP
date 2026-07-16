@@ -304,7 +304,7 @@ export const useDesignStore = defineStore('design', () => {
 
       await tasksStore.loadTaskById(taskId)
       const refreshed = tasksStore.getById(taskId)
-      // 版本已随 upload complete 落库；submit-design 仅作审核流转（v0.9：多 SKU 需全部 delivery 完成后整单才进 PendingAuditA，勿假设首次 complete 即待审）
+      // 上传完成只保存暂存文件；全部 SKU 资源清单必须通过 submit-design 原子进入统一待审核状态。
       if (refreshed && canSubmitAudit(refreshed)) {
         const payload = toSubmitDesignAssetPayload(uploadedFacts, {
           requireTargetSkuForDelivery: Boolean(normalizeSkuCode(targetSkuCode)),

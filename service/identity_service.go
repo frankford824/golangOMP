@@ -28,15 +28,13 @@ var (
 const maxEmployeeNo = 9999
 
 type RegisterUserParams struct {
-	Username           string
-	DisplayName        string
-	Department         domain.Department
-	Team               string
-	Mobile             string
-	Email              string
-	Password           string
-	AdminKey           string
-	ManagedDepartments *[]string
+	Username    string
+	DisplayName string
+	Department  domain.Department
+	Team        string
+	Mobile      string
+	Email       string
+	Password    string
 }
 
 type RegisterAssetWorkbenchUserParams struct {
@@ -219,6 +217,19 @@ type IdentityService interface {
 
 type IdentityServiceOption func(*identityService)
 
+// IdentityAccessAssignmentWriter persists the explicit v8 role assignments
+// that must be created atomically with a user. Legacy user_roles are retained
+// only as identity/display compatibility and are not an authorization source.
+type IdentityAccessAssignmentWriter interface {
+	EnsureExplicitRoleAssignment(ctx context.Context, tx repo.Tx, userID int64, roleCode string, scopeMode domain.AccessScopeMode) error
+}
+
+func WithIdentityAccessAssignmentWriter(writer IdentityAccessAssignmentWriter) IdentityServiceOption {
+	return func(s *identityService) {
+		s.accessAssignmentWriter = writer
+	}
+}
+
 func WithIdentitySettings(authSettings domain.AuthSettings, frontendAccessSettings domain.FrontendAccessSettings) IdentityServiceOption {
 	return func(s *identityService) {
 		s.authSettings = authSettings
@@ -245,6 +256,7 @@ type identityService struct {
 	orgRepo                repo.OrgRepo
 	sessionRepo            repo.UserSessionRepo
 	permissionLogRepo      repo.PermissionLogRepo
+	accessAssignmentWriter IdentityAccessAssignmentWriter
 	txRunner               repo.TxRunner
 	sessionTTL             time.Duration
 	authSettings           domain.AuthSettings
@@ -252,6 +264,26 @@ type identityService struct {
 	logger                 *zap.Logger
 	orgOptionsOnce         sync.Once
 	orgOptionsCache        *domain.OrgOptions
+}
+
+type explicitIdentityRole struct {
+	Code  string
+	Scope domain.AccessScopeMode
+}
+
+func (s *identityService) ensureExplicitRoleAssignments(ctx context.Context, tx repo.Tx, userID int64, roles ...explicitIdentityRole) error {
+	if s.accessAssignmentWriter == nil {
+		// Tests and non-production embedders created before the v8 access cutover
+		// may omit the optional writer. cmd/server always wires the concrete
+		// access-policy repository and has a regression test for that contract.
+		return nil
+	}
+	for _, role := range roles {
+		if err := s.accessAssignmentWriter.EnsureExplicitRoleAssignment(ctx, tx, userID, role.Code, role.Scope); err != nil {
+			return fmt.Errorf("ensure explicit identity role %s: %w", role.Code, err)
+		}
+	}
+	return nil
 }
 
 func (s *identityService) resolveStableUserOrgIDs(ctx context.Context, departmentID, teamID *int64, department domain.Department, team string) (*int64, *int64, *domain.AppError) {
@@ -477,7 +509,6 @@ func (s *identityService) Register(ctx context.Context, p RegisterUserParams) (*
 	team := strings.TrimSpace(p.Team)
 	mobile := strings.TrimSpace(p.Mobile)
 	email := strings.TrimSpace(p.Email)
-	adminKey := strings.TrimSpace(p.AdminKey)
 
 	if username == "" {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "account is required", nil)
@@ -510,31 +541,20 @@ func (s *identityService) Register(ctx context.Context, p RegisterUserParams) (*
 	}
 
 	roles := []domain.Role{domain.RoleMember}
-	if s.matchesDepartmentAdminKey(p.Department, adminKey) {
-		roles = append(roles, domain.RoleDeptAdmin)
-		for _, businessRole := range domain.DepartmentDefaultBusinessRoles(p.Department) {
-			if !containsRole(roles, businessRole) {
-				roles = append(roles, businessRole)
-			}
-		}
-	}
-	managedDepartments, appErr := s.resolveCreateManagedDepartments(p.Department, roles, p.ManagedDepartments)
-	if appErr != nil {
-		return nil, appErr
-	}
-
 	now := time.Now().UTC()
 	user := &domain.User{
-		Username:           username,
-		DisplayName:        displayName,
-		Department:         p.Department,
-		Team:               team,
-		Mobile:             mobile,
-		Email:              email,
-		PasswordHash:       string(hash),
-		Status:             domain.UserStatusActive,
-		EmploymentType:     domain.EmploymentTypeFullTime,
-		ManagedDepartments: managedDepartments,
+		Username:       username,
+		DisplayName:    displayName,
+		Department:     p.Department,
+		Team:           team,
+		Mobile:         mobile,
+		Email:          email,
+		PasswordHash:   string(hash),
+		Status:         domain.UserStatusActive,
+		EmploymentType: domain.EmploymentTypeFullTime,
+		// Self-registration never establishes management scope. Administrators
+		// must grant stable-ID scopes through the explicit access-policy API.
+		ManagedDepartments: nil,
 		LastLoginAt:        &now,
 		CreatedAt:          now,
 		UpdatedAt:          now,
@@ -562,6 +582,9 @@ func (s *identityService) Register(ctx context.Context, p RegisterUserParams) (*
 		if err := s.userRepo.ReplaceRoles(ctx, tx, userID, roles); err != nil {
 			return err
 		}
+		if err := s.ensureExplicitRoleAssignments(ctx, tx, userID, explicitIdentityRole{Code: "member", Scope: domain.AccessScopeSelf}); err != nil {
+			return err
+		}
 		session.UserID = userID
 		if _, err := s.sessionRepo.Create(ctx, tx, session); err != nil {
 			return err
@@ -573,17 +596,13 @@ func (s *identityService) Register(ctx context.Context, p RegisterUserParams) (*
 
 	user.Roles = domain.NormalizeRoleValues(roles)
 	s.prepareUserForResponse(user)
-	reason := "user registered"
-	if containsRole(user.Roles, domain.RoleDeptAdmin) {
-		reason = "user registered as department admin"
-	}
 	s.recordPermissionAction(ctx, domain.PermissionLog{
 		ActionType:     domain.PermissionActionRegister,
 		TargetUserID:   actorIDPtr(user.ID),
 		TargetUsername: user.Username,
 		TargetRoles:    user.Roles,
 		Granted:        true,
-		Reason:         reason,
+		Reason:         "user registered with explicit member access",
 		Method:         "POST",
 		RoutePath:      "/v1/auth/register",
 	})
@@ -675,6 +694,12 @@ func (s *identityService) RegisterAssetWorkbenchUser(ctx context.Context, p Regi
 		}
 		user.ID = userID
 		if err := s.userRepo.ReplaceRoles(ctx, tx, userID, roles); err != nil {
+			return err
+		}
+		if err := s.ensureExplicitRoleAssignments(ctx, tx, userID,
+			explicitIdentityRole{Code: "member", Scope: domain.AccessScopeSelf},
+			explicitIdentityRole{Code: "asset_submitter", Scope: domain.AccessScopeSelf},
+		); err != nil {
 			return err
 		}
 		session.UserID = userID
@@ -1050,7 +1075,10 @@ func (s *identityService) CreateManagedUser(ctx context.Context, p CreateManaged
 			return err
 		}
 		user.ID = userID
-		return s.userRepo.ReplaceRoles(ctx, tx, userID, roles)
+		if err := s.userRepo.ReplaceRoles(ctx, tx, userID, roles); err != nil {
+			return err
+		}
+		return s.ensureExplicitRoleAssignments(ctx, tx, userID, explicitIdentityRole{Code: "member", Scope: domain.AccessScopeSelf})
 	}); err != nil {
 		if appErr := s.employeeNoWriteConflict(ctx, err, employeeNo, 0); appErr != nil {
 			return nil, appErr
@@ -3060,18 +3088,6 @@ func (s *identityService) activeUsersWithRoles(ctx context.Context, roles ...dom
 	return userIDs, nil
 }
 
-func (s *identityService) matchesDepartmentAdminKey(department domain.Department, providedKey string) bool {
-	if providedKey == "" {
-		return false
-	}
-	for _, candidate := range s.authSettings.DepartmentAdminKeys[string(department)] {
-		if strings.TrimSpace(candidate) != "" && providedKey == strings.TrimSpace(candidate) {
-			return true
-		}
-	}
-	return false
-}
-
 func (s *identityService) normalizeConfiguredSuperAdminOrg(entry domain.ConfiguredSuperAdmin) domain.ConfiguredSuperAdmin {
 	if s.orgRepo == nil {
 		return entry
@@ -3210,7 +3226,13 @@ func (s *identityService) upsertConfiguredSuperAdmin(ctx context.Context, entry 
 				return err
 			}
 			user.ID = userID
-			return s.userRepo.ReplaceRoles(ctx, tx, userID, roles)
+			if err := s.userRepo.ReplaceRoles(ctx, tx, userID, roles); err != nil {
+				return err
+			}
+			return s.ensureExplicitRoleAssignments(ctx, tx, userID,
+				explicitIdentityRole{Code: "member", Scope: domain.AccessScopeSelf},
+				explicitIdentityRole{Code: "super_admin", Scope: domain.AccessScopeGlobal},
+			)
 		}); err != nil {
 			return infraError("create configured super admin", err)
 		}
@@ -3262,7 +3284,13 @@ func (s *identityService) upsertConfiguredSuperAdmin(ctx context.Context, entry 
 				return err
 			}
 		}
-		return s.userRepo.ReplaceRoles(ctx, tx, existing.ID, roles)
+		if err := s.userRepo.ReplaceRoles(ctx, tx, existing.ID, roles); err != nil {
+			return err
+		}
+		return s.ensureExplicitRoleAssignments(ctx, tx, existing.ID,
+			explicitIdentityRole{Code: "member", Scope: domain.AccessScopeSelf},
+			explicitIdentityRole{Code: "super_admin", Scope: domain.AccessScopeGlobal},
+		)
 	}); err != nil {
 		return infraError("update configured super admin", err)
 	}

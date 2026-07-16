@@ -46,7 +46,7 @@ func TestTaskOperationalOverviewUsesFullAggregateAndCompletionEvents(t *testing.
 				}
 			}
 		case "operational-distribution":
-			for _, fragment := range []string{"PendingCustomizationReview", "PendingProductionTransfer", "customization_required", "GROUP BY bucket"} {
+			for _, fragment := range []string{"PendingAudit", "Blocked", "customization_required", "GROUP BY bucket"} {
 				if !strings.Contains(normalized, fragment) {
 					return fmt.Errorf("distribution SQL missing %q", fragment)
 				}
@@ -79,12 +79,12 @@ func TestTaskOperationalOverviewUsesFullAggregateAndCompletionEvents(t *testing.
 	}
 	mock.ExpectQuery("operational-counts").WithArgs(countArgs...).WillReturnRows(sqlmock.NewRows([]string{
 		"total_tasks", "active_tasks", "design_pending", "pending_audit", "handover",
-		"customization_in_progress", "pending_warehouse_receive", "overdue", "due_today",
+		"customization_in_progress", "overdue", "due_today",
 		"today_created", "today_completed", "week_created", "week_created_completed",
 		"week_completed", "average_processing_hours", "average_processing_sample_count",
 		"exact_completion_sample_count", "fallback_completion_sample_count",
 		"week_audit_decisions", "week_audit_rejected",
-	}).AddRow(1817, 978, 303, 457, 0, 54, 136, 938, 29, 5, 5, 5, 1, 5, 8.25, 5, 4, 1, 2, 1))
+	}).AddRow(1817, 978, 303, 457, 0, 54, 938, 29, 5, 5, 5, 1, 5, 8.25, 5, 4, 1, 2, 1))
 	mock.ExpectQuery("operational-trend").WillReturnRows(sqlmock.NewRows([]string{"day", "created_count", "completed_count", "due_count"}).
 		AddRow("2026-07-12", 31, 14, 34).
 		AddRow("2026-07-13", 5, 5, 29))
@@ -92,7 +92,7 @@ func TestTaskOperationalOverviewUsesFullAggregateAndCompletionEvents(t *testing.
 		AddRow("design_ops", 303).
 		AddRow("audit", 457).
 		AddRow("customization", 52).
-		AddRow("warehouse", 166).
+		AddRow("blocked", 2).
 		AddRow("completed", 839))
 	mock.ExpectQuery("operational-recent-tasks").WillReturnRows(sqlmock.NewRows([]string{"id", "task_no", "product_name", "owner_name", "task_status", "deadline_at"}).
 		AddRow(2317, "RW-20260713-A-002314", "测试产品", "设计甲", "InProgress", time.Date(2026, 7, 13, 10, 0, 0, 0, time.UTC)))

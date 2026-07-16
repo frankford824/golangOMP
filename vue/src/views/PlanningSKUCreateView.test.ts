@@ -6,6 +6,8 @@ const mocks = vi.hoisted(() => ({
   create: vi.fn(),
   parseExcel: vi.fn(),
   uploadImage: vi.fn(),
+  retryFailedERP: vi.fn(),
+  exportSelection: vi.fn(),
 }))
 
 vi.mock('@/services/api/planningSkuApi', async (loadOriginal) => {
@@ -17,6 +19,8 @@ vi.mock('@/services/api/planningSkuApi', async (loadOriginal) => {
       create: mocks.create,
       parseExcel: mocks.parseExcel,
       uploadImage: mocks.uploadImage,
+      retryFailedERP: mocks.retryFailedERP,
+      exportSelection: mocks.exportSelection,
       templateURL: () => '/template.xlsx',
       exportTaskURL: (id: number) => `/export/${id}.xlsx`,
     },
@@ -36,6 +40,8 @@ describe('PlanningSKUCreateView', () => {
     mocks.create.mockResolvedValue({ task_id: 1, task_no: 'PLAN-1', task_status: 'Completed', workflow_revision: 1, items: [] })
     mocks.parseExcel.mockResolvedValue({ planning_sku_items: [], errors: [], valid: true })
     mocks.uploadImage.mockResolvedValue('image-ref-1')
+    mocks.retryFailedERP.mockResolvedValue({ queued: 1, resync: false })
+    mocks.exportSelection.mockResolvedValue(undefined)
   })
 
   it('explains every blocking field and focuses the first invalid row', async () => {
@@ -92,5 +98,36 @@ describe('PlanningSKUCreateView', () => {
     expect(wrapper.findAll('.planning-row')).toHaveLength(1)
     expect(wrapper.text()).toContain('Excel 第 4 行 · reference_url：链接格式错误')
     expect(wrapper.get('.primary-button').attributes('disabled')).toBeDefined()
+  })
+
+  it('filters failed ERP rows, retries them, and exports the checked result set', async () => {
+    mocks.create.mockResolvedValue({
+      task_id: 9,
+      task_no: 'PLAN-9',
+      task_status: 'Completed',
+      workflow_revision: 1,
+      items: [
+        { task_sku_item_id: 91, sequence_no: 1, sku_code: 'SKU-91', quantity: 1, erp_status: 'succeeded' },
+        { task_sku_item_id: 92, sequence_no: 2, sku_code: 'SKU-92', quantity: 1, erp_status: 'retry' },
+      ],
+    })
+    const wrapper = mount(PlanningSKUCreateView)
+    await wrapper.get('textarea[placeholder="产品名称、材质、尺寸、工艺等"]').setValue('玻璃杯 500ml')
+    await wrapper.findAll('button').find((item) => item.text().includes('生成 1 个 SKU'))?.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('同步失败 1')
+    await wrapper.findAll('.result-filters button').find((item) => item.text().includes('同步失败'))?.trigger('click')
+    expect(wrapper.text()).toContain('SKU-92')
+    expect(wrapper.text()).not.toContain('SKU-91')
+
+    await wrapper.findAll('button').find((item) => item.text().includes('重试失败项'))?.trigger('click')
+    await flushPromises()
+    expect(mocks.retryFailedERP).toHaveBeenCalledWith(9)
+    expect(wrapper.text()).toContain('已提交 1 个失败项重试')
+
+    await wrapper.findAll('button').find((item) => item.text().includes('导出已勾选'))?.trigger('click')
+    await flushPromises()
+    expect(mocks.exportSelection).toHaveBeenCalledWith([91, 92])
   })
 })

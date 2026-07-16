@@ -186,11 +186,13 @@ func (r *recordingResourceWorkflowTxRunner) RunInTx(_ context.Context, fn func(r
 
 type bindingRollbackRepo struct {
 	TaskResourceGroupRepository
-	task          *domain.TaskWorkflowLock
-	group         domain.TaskAssetGroup
-	staged        map[int64]domain.StagedTaskAssetBinding
-	createCalls   int
-	completeCalls int
+	task                     *domain.TaskWorkflowLock
+	group                    domain.TaskAssetGroup
+	staged                   map[int64]domain.StagedTaskAssetBinding
+	createCalls              int
+	completeCalls            int
+	customizationReadyErr    error
+	customizationReadyChecks int
 }
 
 func (r *bindingRollbackRepo) StoreIdempotency(context.Context, repo.Tx, int64, int64, string, string, string, interface{}) (bool, json.RawMessage, error) {
@@ -199,6 +201,15 @@ func (r *bindingRollbackRepo) StoreIdempotency(context.Context, repo.Tx, int64, 
 
 func (r *bindingRollbackRepo) GetWorkflowForUpdate(context.Context, repo.Tx, int64) (*domain.TaskWorkflowLock, error) {
 	return r.task, nil
+}
+
+func (r *bindingRollbackRepo) RequireCustomizationReadyForSubmit(context.Context, repo.Tx, int64) error {
+	r.customizationReadyChecks++
+	return r.customizationReadyErr
+}
+
+func (r *bindingRollbackRepo) ResetCustomizationReadyForSubmit(context.Context, repo.Tx, int64) error {
+	return nil
 }
 
 func (r *bindingRollbackRepo) ListGroupsForUpdate(context.Context, repo.Tx, int64) ([]domain.TaskAssetGroup, error) {
@@ -249,6 +260,89 @@ func TestSubmitDesignRollsBackEntireTransactionOnScopedBindingFailure(t *testing
 		t.Fatalf("error/tx/create/complete = %+v/%d/%d/%d/%d", appErr, runner.rolledBack, runner.committed, repository.createCalls, repository.completeCalls)
 	}
 }
+
+func TestSubmitDesignRejectsCustomizationBeforeReadyForSubmit(t *testing.T) {
+	actorID := int64(7)
+	repository := &bindingRollbackRepo{
+		task: &domain.TaskWorkflowLock{
+			TaskID: 10, TaskType: domain.TaskTypeNewProductDevelopment, Status: domain.TaskStatusInProgress,
+			WorkflowRevision: 3, CreatorID: actorID, Customization: true,
+		},
+		customizationReadyErr: domain.NewAppError(domain.ErrCodeInvalidStateTransition, "定制任务尚未完成设计准备", nil),
+	}
+	runner := &recordingResourceWorkflowTxRunner{}
+	svc := NewTaskResourceWorkflowService(repository, runner, nil)
+	_, appErr := svc.SubmitDesign(context.Background(), 10, globalCapabilityActor(actorID, domain.PermissionTaskDesignSubmit), domain.SubmitDesignV2Request{
+		ExpectedWorkflowRevision: 3, IdempotencyKey: "customization-not-ready",
+	})
+	if appErr == nil || appErr.Code != domain.ErrCodeInvalidStateTransition {
+		t.Fatalf("SubmitDesign() error = %+v", appErr)
+	}
+	if repository.customizationReadyChecks != 1 || repository.createCalls != 0 || repository.completeCalls != 0 {
+		t.Fatalf("ready/create/complete calls = %d/%d/%d", repository.customizationReadyChecks, repository.createCalls, repository.completeCalls)
+	}
+	if runner.rolledBack != 1 || runner.committed != 0 {
+		t.Fatalf("transaction rolled back/committed = %d/%d", runner.rolledBack, runner.committed)
+	}
+}
+
+type finalizerEventRepo struct {
+	repo.TaskEventRepo
+	eventTypes []string
+}
+
+func (r *finalizerEventRepo) Append(_ context.Context, _ repo.Tx, _ int64, eventType string, _ *int64, _ interface{}) (*domain.TaskEvent, error) {
+	r.eventTypes = append(r.eventTypes, eventType)
+	return &domain.TaskEvent{EventType: eventType}, nil
+}
+
+type finalizerRepoStub struct {
+	TaskResourceGroupRepository
+	revision      domain.TaskAssetGroupRevision
+	finalizeCalls int
+	enqueueCalls  int
+}
+
+func (r *finalizerRepoStub) GetRevisionForUpdate(context.Context, repo.Tx, int64) (*domain.TaskAssetGroupRevision, error) {
+	copyRevision := r.revision
+	return &copyRevision, nil
+}
+func (r *finalizerRepoStub) FinalizeGroup(context.Context, repo.Tx, int64, int64, int64, int64) error {
+	r.finalizeCalls++
+	return nil
+}
+func (r *finalizerRepoStub) CompleteModules(context.Context, repo.Tx, int64) error { return nil }
+func (r *finalizerRepoStub) CASTaskStatus(_ context.Context, _ repo.Tx, _ int64, expectedRevision int64, _, _ domain.TaskStatus, _ bool) (int64, error) {
+	return expectedRevision + 1, nil
+}
+func (r *finalizerRepoStub) EnqueueTaskFinalized(context.Context, repo.Tx, int64, int64, bool, bool) error {
+	r.enqueueCalls++
+	return nil
+}
+
+func TestTaskFinalizerUsesAuthoritativeTaskClosedEvent(t *testing.T) {
+	sourceID := int64(70)
+	repository := &finalizerRepoStub{revision: domain.TaskAssetGroupRevision{
+		ID: 80, Status: domain.TaskAssetGroupRevisionSubmitted, Mode: domain.TaskAssetGroupModeSingle,
+		SourceTaskAssetID: &sourceID, Items: []domain.TaskAssetGroupRevisionItem{{ID: 90, TaskAssetID: 91}},
+	}}
+	events := &finalizerEventRepo{}
+	finalizer := NewTaskFinalizer(repository, events)
+	next, err := finalizer.FinalizeInTx(context.Background(), resourceWorkflowTestTx{}, &domain.TaskWorkflowLock{
+		TaskID: 10, TaskType: domain.TaskTypeNewProductDevelopment, Status: domain.TaskStatusPendingAudit, WorkflowRevision: 4,
+	}, []domain.TaskAssetGroup{{ID: 20, WorkingRevisionID: int64PtrForResourceWorkflowTest(80), LockVersion: 2}}, FinalizeModeDesignAudit, 7)
+	if err != nil {
+		t.Fatalf("FinalizeInTx() error = %v", err)
+	}
+	if next != 5 || repository.finalizeCalls != 1 || repository.enqueueCalls != 1 {
+		t.Fatalf("next/finalize/enqueue = %d/%d/%d", next, repository.finalizeCalls, repository.enqueueCalls)
+	}
+	if len(events.eventTypes) != 1 || events.eventTypes[0] != domain.TaskEventClosed {
+		t.Fatalf("event types = %+v", events.eventTypes)
+	}
+}
+
+func int64PtrForResourceWorkflowTest(value int64) *int64 { return &value }
 
 func TestBatchDownloadResourceGroupsUsesDownloadCapabilityAndTaskScope(t *testing.T) {
 	departmentID, otherDepartmentID := int64(101), int64(202)

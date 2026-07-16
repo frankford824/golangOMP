@@ -162,7 +162,6 @@ func TestRuleEngine_InitTask_RegularNewProductDevelopmentOmitsCustomizationModul
 		domain.ModuleKeyBasicInfo,
 		domain.ModuleKeyDesign,
 		domain.ModuleKeyAudit,
-		domain.ModuleKeyWarehouse,
 	}
 	list, err := modules.ListByTask(ctx, task.ID)
 	if err != nil {
@@ -223,7 +222,7 @@ func TestRuleEngine_InitTask_HybridCustomizationCustomizationOnlyRequired(t *tes
 	}
 }
 
-func TestRuleEngine_EnterAuditPoolForHybridCustomizationTask(t *testing.T) {
+func TestRuleEngine_CustomizationSubmitStaysInsideDesignNode(t *testing.T) {
 	ctx := context.Background()
 	modules := &rulesTestModuleRepo{modules: map[string]*domain.TaskModule{}}
 	events := &rulesTestEventRepo{}
@@ -245,22 +244,12 @@ func TestRuleEngine_EnterAuditPoolForHybridCustomizationTask(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetByTaskAndKey(audit) err = %v", err)
 	}
-	if got := poolTeamCodeFromModule(audit); got != domain.TeamAuditCustomization {
-		t.Fatalf("audit module pool_team_code = %q, want %q", got, domain.TeamAuditCustomization)
+	if got := poolTeamCodeFromModule(audit); got != "" {
+		t.Fatalf("audit module pool_team_code = %q, want unified audit pool", got)
 	}
 
-	var entered *domain.TaskModuleEvent
-	for _, evt := range events.events {
-		if evt.EventType == domain.ModuleEventEntered {
-			entered = evt
-			break
-		}
-	}
-	if entered == nil {
-		t.Fatal("expected audit entered event")
-	}
-	if got := poolTeamCodeFromEventPayload(entered.Payload); got != domain.TeamAuditCustomization {
-		t.Fatalf("entered event payload.pool_team_code = %q, want %q", got, domain.TeamAuditCustomization)
+	if len(events.events) != 0 {
+		t.Fatalf("customization submit emitted %d module events; submit-design must enter the unified audit node", len(events.events))
 	}
 }
 

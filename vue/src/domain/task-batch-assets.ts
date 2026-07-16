@@ -62,22 +62,6 @@ export function activeSkuCodeForSelection(task: Task, sel: BatchObjectSelection)
 }
 
 /**
- * 统一上传会话 target_sku_code 的产出规则：
- * - 采购任务不传
- * - 非批量任务不传
- * - 批量任务按当前对象选择返回 sku
- */
-export function targetSkuCodeForUpload(
-  task: Task,
-  sel: BatchObjectSelection,
-  opts?: { isPurchase?: boolean },
-): string | undefined {
-  if (opts?.isPurchase) return undefined
-  if (!taskHasSkuItemsForBatchUi(task)) return undefined
-  return activeSkuCodeForSelection(task, sel) ?? undefined
-}
-
-/**
  * @param parallelRowIndex 与 `buildParallelProductRows(task)[i].index` 一致
  */
 export function selectionFromProductIndex(task: Task, parallelRowIndex: number): BatchObjectSelection {

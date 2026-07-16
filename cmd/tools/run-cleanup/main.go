@@ -15,7 +15,6 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 
 	mysqlrepo "workflow/repo/mysql"
-	"workflow/service"
 	assetlifecycle "workflow/service/asset_lifecycle"
 	taskdraft "workflow/service/task_draft"
 	tasklifecycle "workflow/service/task_lifecycle"
@@ -34,13 +33,6 @@ type commandOptions struct {
 	dsn        string
 	reason     string
 	jsonOut    bool
-}
-
-type noopDeleter struct{}
-
-func (noopDeleter) Enabled() bool { return false }
-func (noopDeleter) DeleteObject(context.Context, string) error {
-	return nil
 }
 
 func main() {
@@ -73,7 +65,7 @@ func run(args []string, getenv envFunc, stdout, stderr io.Writer) int {
 	defer cancel()
 	switch opts.subcommand {
 	case "oss-365":
-		return runOSS365(ctx, opts, getenv, stdout, start)
+		return runOSS365(ctx, opts, stdout, start)
 	case "drafts-7d":
 		return runDrafts7D(ctx, opts, stdout, start)
 	case "auto-archive":
@@ -113,7 +105,7 @@ func parseSubcommand(subcommand string, args []string, getenv envFunc, stderr io
 	return opts, true
 }
 
-func runOSS365(ctx context.Context, opts commandOptions, getenv envFunc, stdout io.Writer, start time.Time) int {
+func runOSS365(ctx context.Context, opts commandOptions, stdout io.Writer, start time.Time) int {
 	db, err := openDB(ctx, opts.dsn)
 	if err != nil {
 		writeError(stdout, opts.subcommand, err)
@@ -123,12 +115,7 @@ func runOSS365(ctx context.Context, opts commandOptions, getenv envFunc, stdout 
 
 	mdb := mysqlrepo.New(db)
 	lifecycleRepo := mysqlrepo.NewTaskAssetLifecycleRepo(mdb)
-	deleter, err := buildObjectDeleter(opts.dryRun, getenv)
-	if err != nil {
-		writeError(stdout, opts.subcommand, err)
-		return 1
-	}
-	job := assetlifecycle.NewCleanupJob(lifecycleRepo, mdb, deleter, log.New(os.Stderr, "", log.LstdFlags))
+	job := assetlifecycle.NewCleanupJob(lifecycleRepo, mdb, log.New(os.Stderr, "", log.LstdFlags))
 	result, appErr := job.Run(ctx, assetlifecycle.CleanupOptions{DryRun: opts.dryRun, Limit: opts.limit})
 	if appErr != nil {
 		writeError(stdout, opts.subcommand, fmt.Errorf("%s: %s", appErr.Code, appErr.Message))
@@ -215,24 +202,6 @@ func openDB(ctx context.Context, dsn string) (*sql.DB, error) {
 		return nil, fmt.Errorf("ping mysql: %w", err)
 	}
 	return db, nil
-}
-
-func buildObjectDeleter(dryRun bool, getenv envFunc) (assetlifecycle.ObjectDeleter, error) {
-	if dryRun || getenv("OSS_DELETER_DISABLED") == "1" {
-		return noopDeleter{}, nil
-	}
-	deleter := service.NewOSSDirectService(service.OSSDirectConfig{
-		Enabled:         true,
-		Endpoint:        getenv("OSS_ENDPOINT"),
-		Bucket:          getenv("OSS_BUCKET"),
-		AccessKeyID:     getenv("OSS_ACCESS_KEY_ID"),
-		AccessKeySecret: getenv("OSS_ACCESS_KEY_SECRET"),
-		PublicEndpoint:  getenv("OSS_PUBLIC_ENDPOINT"),
-	})
-	if !deleter.Enabled() {
-		return nil, fmt.Errorf("oss deleter is not configured; set OSS_ENDPOINT/OSS_BUCKET/OSS_ACCESS_KEY_ID/OSS_ACCESS_KEY_SECRET or OSS_DELETER_DISABLED=1")
-	}
-	return deleter, nil
 }
 
 func countExpiredDrafts(ctx context.Context, db *sql.DB) (int, error) {

@@ -224,14 +224,14 @@ func TestAuthorizeUserReadDepartmentAdminSameDepartmentIsSilent(t *testing.T) {
 		Team:        team,
 		Mobile:      "13800000720",
 		Password:    "Pass1234",
-		AdminKey:    "superAdmin",
 	})
 	if appErr != nil {
 		t.Fatalf("Register(admin) error = %+v", appErr)
 	}
-	if !containsRoleValue(adminReg.User.Roles, domain.RoleDeptAdmin) {
-		t.Fatalf("admin roles = %+v, want DepartmentAdmin", adminReg.User.Roles)
+	if err := userRepo.ReplaceRoles(context.Background(), identityTx{}, adminReg.User.ID, []domain.Role{domain.RoleMember, domain.RoleDeptAdmin}); err != nil {
+		t.Fatalf("ReplaceRoles(admin) error = %v", err)
 	}
+	userRepo.users[adminReg.User.ID].ManagedDepartments = []string{string(dept)}
 
 	targetReg, appErr := svc.Register(context.Background(), RegisterUserParams{
 		Username:    "procurement_member",

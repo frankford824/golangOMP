@@ -402,7 +402,7 @@ const KPI_TASK_EVENT_TYPES = [
   'task.audit.approved',
   'task.audit.rejected',
   'task.customization.reviewed',
-  'task.completed',
+  'task.closed',
 ] as const
 
 const REPORT_CARD_LABELS: Record<string, string> = {

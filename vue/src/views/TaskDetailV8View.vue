@@ -73,6 +73,7 @@
           :bundle="bundle"
           :allowed-actions="task.allowed_actions || []"
           @updated="onWorkflowUpdated"
+          @dirty-change="workflowDirty = $event"
         />
         <section class="resource-card">
           <div class="resource-head"><div><p class="eyebrow">成品资料</p><h2>任务资源</h2></div><button @click="router.push(`/tasks/${task.id}/assets`)">独立查看</button></div>
@@ -90,8 +91,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { tasksApi } from '@/services/api/tasksApi'
 import { resourceGroupsApi, type ResourceBundle } from '@/services/api/resourceGroupsApi'
 import WorkflowProgress from '@/components/task/WorkflowProgress.vue'
@@ -139,6 +140,7 @@ const showHandover = ref(false)
 const handoverUserId = ref<number | null>(null)
 const handoverReason = ref('')
 const handoverBusy = ref(false)
+const workflowDirty = ref(false)
 const taskId = computed(() => Number(route.params.id))
 const isPlanning = computed(() => task.value?.task_type === 'sku_planning')
 const taskTypeLabel = computed(() => ({ original_product_development: '原品开发', new_product_development: '新品开发', retouch_task: '修图任务', sku_planning: '策划 SKU' }[task.value?.task_type || ''] || task.value?.task_type || '任务'))
@@ -170,7 +172,7 @@ async function load() {
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '任务加载失败。' }
   finally { loading.value = false }
 }
-async function onWorkflowUpdated(next: ResourceBundle) { bundle.value = next; await load() }
+async function onWorkflowUpdated(next: ResourceBundle) { workflowDirty.value = false; bundle.value = next; await load() }
 async function submitHandover() {
   if (!handoverUserId.value || !handoverReason.value || handoverBusy.value) return
   handoverBusy.value = true; error.value = ''
@@ -185,7 +187,18 @@ async function takeover(handoverId: number) {
   catch (cause) { error.value = cause instanceof Error ? cause.message : '接手任务失败。' }
   finally { handoverBusy.value = false }
 }
-onMounted(load)
+function confirmWorkflowLeave() {
+  if (!workflowDirty.value) return true
+  return window.confirm('当前设计资源还有未提交的修改，离开后需要重新选择这些文件。确定离开吗？')
+}
+function warnBeforeUnload(event: BeforeUnloadEvent) {
+  if (!workflowDirty.value) return
+  event.preventDefault()
+  event.returnValue = ''
+}
+onBeforeRouteLeave(() => confirmWorkflowLeave())
+onMounted(() => { window.addEventListener('beforeunload', warnBeforeUnload); void load() })
+onBeforeUnmount(() => window.removeEventListener('beforeunload', warnBeforeUnload))
 </script>
 
 <style scoped>

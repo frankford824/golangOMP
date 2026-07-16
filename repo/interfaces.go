@@ -1230,6 +1230,7 @@ type CustomizationJobRepo interface {
 	Create(ctx context.Context, tx Tx, job *domain.CustomizationJob) (int64, error)
 	GetByID(ctx context.Context, id int64) (*domain.CustomizationJob, error)
 	GetLatestByTaskID(ctx context.Context, taskID int64) (*domain.CustomizationJob, error)
+	GetLatestByTaskIDForUpdate(ctx context.Context, tx Tx, taskID int64) (*domain.CustomizationJob, error)
 	List(ctx context.Context, filter CustomizationJobListFilter) ([]*domain.CustomizationJob, int64, error)
 	Update(ctx context.Context, tx Tx, job *domain.CustomizationJob) error
 }

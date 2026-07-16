@@ -66,7 +66,7 @@ func TestTaskServiceCreateNewProductUsesDefaultProductCodeRule(t *testing.T) {
 	}
 }
 
-func TestTaskServiceCreatePurchaseTaskUsesDefaultProductCodeRule(t *testing.T) {
+func TestTaskServiceCreatePurchaseTaskIsRetired(t *testing.T) {
 	taskRepo := &prdTaskRepo{}
 	svc := NewTaskService(
 		taskRepo,
@@ -80,69 +80,12 @@ func TestTaskServiceCreatePurchaseTaskUsesDefaultProductCodeRule(t *testing.T) {
 		WithTaskProductCodeSequenceRepo(newProductCodeSequenceRepoStub()),
 	)
 
-	task, appErr := svc.Create(context.Background(), CreateTaskParams{
-		TaskType:            domain.TaskTypePurchaseTask,
-		SourceMode:          domain.TaskSourceModeNewProduct,
-		CreatorID:           9,
-		OwnerTeam:           domain.AllValidTeams()[0],
-		DeadlineAt:          timePtr(),
-		CategoryCode:        "KT_STANDARD",
-		ProductNameSnapshot: "Purchase KT",
-		CostPriceMode:       string(domain.CostPriceModeTemplate),
-		Quantity:            int64Ptr(100),
-		BaseSalePrice:       float64Ptr(12.5),
+	_, appErr := svc.Create(context.Background(), CreateTaskParams{
+		TaskType:   domain.TaskTypePurchaseTask,
+		SourceMode: domain.TaskSourceModeNewProduct,
 	})
-	if appErr != nil {
-		t.Fatalf("Create() unexpected error: %+v", appErr)
-	}
-	if task.SKUCode != "CGK000000" {
-		t.Fatalf("Create() sku_code=%s, want CGK000000", task.SKUCode)
-	}
-}
-
-func TestTaskServiceCreateCustomizationPurchaseKeepsProcurementFlowAndDZ(t *testing.T) {
-	taskRepo := &prdTaskRepo{}
-	procurementRepo := &prdProcurementRepo{}
-	svc := NewTaskService(
-		taskRepo,
-		procurementRepo,
-		&prdTaskAssetRepo{},
-		&prdTaskEventRepo{},
-		nil,
-		&prdWarehouseRepo{},
-		prdCodeRuleService{},
-		productCodeTestTxRunner{},
-		WithTaskProductCodeSequenceRepo(newProductCodeSequenceRepoStub()),
-	)
-
-	task, appErr := svc.Create(context.Background(), CreateTaskParams{
-		TaskType:              domain.TaskTypePurchaseTask,
-		SourceMode:            domain.TaskSourceModeNewProduct,
-		BusinessLane:          domain.TaskBusinessLaneCustomization,
-		CreatorID:             9,
-		OwnerTeam:             domain.AllValidTeams()[0],
-		DeadlineAt:            timePtr(),
-		CategoryCode:          "KT_STANDARD",
-		ProductNameSnapshot:   "Custom Purchase KT",
-		CostPriceMode:         string(domain.CostPriceModeTemplate),
-		Quantity:              int64Ptr(100),
-		BaseSalePrice:         float64Ptr(12.5),
-		CustomizationRequired: true,
-	})
-	if appErr != nil {
-		t.Fatalf("Create() unexpected error: %+v", appErr)
-	}
-	if task.SKUCode != "DZK000000" {
-		t.Fatalf("Create() sku_code=%s, want DZK000000", task.SKUCode)
-	}
-	if task.TaskStatus != domain.TaskStatusPendingAssign {
-		t.Fatalf("Create() task_status=%s, want %s", task.TaskStatus, domain.TaskStatusPendingAssign)
-	}
-	if task.BusinessLane != domain.TaskBusinessLaneCustomization {
-		t.Fatalf("Create() business_lane=%s, want customization", task.BusinessLane)
-	}
-	if got := procurementRepo.records[task.ID]; got == nil {
-		t.Fatal("Create() did not initialize procurement record")
+	if appErr == nil || appErr.Code != domain.ErrCodeInvalidRequest {
+		t.Fatalf("Create() appErr=%#v, want retired task type rejection", appErr)
 	}
 }
 
@@ -349,17 +292,11 @@ func TestTaskServicePrepareProductCodesBatchAndConcurrentUnique(t *testing.T) {
 		t.Fatalf("PrepareProductCodes(batch) codes=%+v", batchResult.Codes)
 	}
 
-	customPurchase, appErr := prepareSvc.PrepareProductCodes(context.Background(), PrepareTaskProductCodesParams{
-		TaskType:     domain.TaskTypePurchaseTask,
-		BusinessLane: domain.TaskBusinessLaneCustomization,
-		CategoryCode: "KT_STANDARD",
-		Count:        1,
+	_, appErr = prepareSvc.PrepareProductCodes(context.Background(), PrepareTaskProductCodesParams{
+		TaskType: domain.TaskTypePurchaseTask,
 	})
-	if appErr != nil {
-		t.Fatalf("PrepareProductCodes(custom purchase) unexpected error: %+v", appErr)
-	}
-	if len(customPurchase.Codes) != 1 || customPurchase.Codes[0].SKUCode != "DZK000000" {
-		t.Fatalf("PrepareProductCodes(custom purchase) codes=%+v, want DZK000000", customPurchase.Codes)
+	if appErr == nil || appErr.Code != domain.ErrCodeInvalidRequest {
+		t.Fatalf("PrepareProductCodes(purchase) appErr=%#v, want invalid request", appErr)
 	}
 
 	const goroutines = 30
@@ -372,7 +309,7 @@ func TestTaskServicePrepareProductCodesBatchAndConcurrentUnique(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			result, appErr := prepareSvc.PrepareProductCodes(context.Background(), PrepareTaskProductCodesParams{
-				TaskType:     domain.TaskTypePurchaseTask,
+				TaskType:     domain.TaskTypeNewProductDevelopment,
 				CategoryCode: "KT_STANDARD",
 				Count:        perRequest,
 			})

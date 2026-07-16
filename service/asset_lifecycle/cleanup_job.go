@@ -14,7 +14,6 @@ const CleanupLogPrefix = "[ASSET-CLEANUP]"
 type CleanupJob struct {
 	lifecycleRepo repo.TaskAssetLifecycleRepo
 	txRunner      repo.TxRunner
-	deleter       ObjectDeleter
 	now           func() time.Time
 	logger        *log.Logger
 }
@@ -36,8 +35,8 @@ type supersededCleanupRepo interface {
 	MarkSupersededAutoCleaned(ctx context.Context, tx repo.Tx, versionID int64, cleanedAt time.Time) error
 }
 
-func NewCleanupJob(lifecycleRepo repo.TaskAssetLifecycleRepo, txRunner repo.TxRunner, deleter ObjectDeleter, logger *log.Logger) *CleanupJob {
-	return &CleanupJob{lifecycleRepo: lifecycleRepo, txRunner: txRunner, deleter: deleter, logger: logger, now: time.Now}
+func NewCleanupJob(lifecycleRepo repo.TaskAssetLifecycleRepo, txRunner repo.TxRunner, logger *log.Logger) *CleanupJob {
+	return &CleanupJob{lifecycleRepo: lifecycleRepo, txRunner: txRunner, logger: logger, now: time.Now}
 }
 
 func (j *CleanupJob) WithNow(now func() time.Time) *CleanupJob {
@@ -72,14 +71,14 @@ func (j *CleanupJob) Run(ctx context.Context, opts CleanupOptions) (*CleanupResu
 		if candidate == nil {
 			continue
 		}
-		if j.deleter != nil && j.deleter.Enabled() {
-			for _, key := range cleanupStorageKeys(candidate) {
-				if err := j.deleter.DeleteObject(ctx, key); err != nil {
-					return result, domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)
-				}
-			}
-		}
 		err := j.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
+			objectIDs, err := j.lifecycleRepo.LockCleanupObjectIDs(ctx, tx, candidate.VersionID)
+			if err != nil {
+				return err
+			}
+			if err := j.lifecycleRepo.EnqueueObjectDeletions(ctx, tx, objectIDs); err != nil {
+				return err
+			}
 			if candidate.CleanupReason == "superseded" {
 				if supersededRepo, ok := j.lifecycleRepo.(supersededCleanupRepo); ok {
 					if err := supersededRepo.MarkSupersededAutoCleaned(ctx, tx, candidate.VersionID, j.now().UTC()); err != nil {
@@ -112,29 +111,6 @@ func (j *CleanupJob) Run(ctx context.Context, opts CleanupOptions) (*CleanupResu
 	}
 	j.logf("cleaned=%d", result.Cleaned)
 	return result, nil
-}
-
-func cleanupStorageKeys(candidate *repo.TaskAssetCleanupCandidate) []string {
-	if candidate == nil {
-		return nil
-	}
-	seen := map[string]struct{}{}
-	out := []string{}
-	add := func(key string) {
-		if key == "" {
-			return
-		}
-		if _, ok := seen[key]; ok {
-			return
-		}
-		seen[key] = struct{}{}
-		out = append(out, key)
-	}
-	add(candidate.StorageKey)
-	for _, key := range candidate.RelatedStorageKeys {
-		add(key)
-	}
-	return out
 }
 
 func (j *CleanupJob) logf(format string, args ...interface{}) {

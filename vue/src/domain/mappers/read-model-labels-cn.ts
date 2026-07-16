@@ -2,39 +2,8 @@
  * 读模型展示用中文标签：内存与请求仍保留后端英文 code/枚举，仅在 UI 层映射。
  */
 
-const WORKFLOW_GATE_REASON_CN: Record<string, string> = {
-  category_missing: '缺少商品分类',
-  spec_text_missing: '缺少规格说明',
-  procurement_price_missing: '缺少采购单价（若已填成本单价仍提示，请按后端要求补采购价字段）',
-  procurement_quantity_missing: '缺少采购数量',
-  warehouse_already_received: '仓库已接收该任务',
-  warehouse_already_completed: '仓库流程已完成',
-  warehouse_not_received: '仓库尚未确认接收',
-  not_pending_close: '任务不在待结单状态',
-  filed_at_missing: '缺少建档/归档时间或与 ERP 的关联信息',
-  erp_linkage_missing: '缺少与 ERP 的关联信息',
-  filed_erp_linkage_missing: '缺少建档或与 ERP 的关联信息',
-  design_not_finalized: '设计尚未终稿',
-  sku_not_bound: '未绑定 SKU',
-  task_no_missing: '缺少任务号',
-  audit_not_approved: '审核尚未通过',
-  missing_final_design_asset: '缺少最终设计资产',
-}
-
 function normSnake(code: string | undefined | null): string {
   return (code ?? '').trim().toLowerCase()
-}
-
-/** workflow.cannot_close_reasons / warehouse_blocking_reasons 等门禁 code → 中文短句 */
-export function workflowGateReasonLabelCn(
-  code: string | undefined | null,
-  fallbackMessage?: string | null,
-): string {
-  const k = normSnake(code)
-  if (k && WORKFLOW_GATE_REASON_CN[k]) return WORKFLOW_GATE_REASON_CN[k]
-  const msg = (fallbackMessage ?? '').trim()
-  if (msg) return msg
-  return k || '未知原因'
 }
 
 const SKU_GENERATION_STATUS_CN: Record<string, string> = {

@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"workflow/domain"
+	"workflow/repo"
 	"workflow/service"
 )
 
@@ -24,6 +25,9 @@ type Group struct {
 	assetWorkbenchPreview          AssetWorkbenchPreviewProcessor
 	assetWorkbenchMaintenance      AssetWorkbenchMaintenanceProcessor
 	assetWorkbenchBatchJob         AssetWorkbenchBatchJobProcessor
+	asyncProjectionOutbox          repo.AsyncProjectionOutboxRepo
+	asyncProjectionTx              repo.TxRunner
+	taskERPOutboxProcessor         service.TaskERPOutboxProcessor
 	erpEnabled                     bool
 	erpInterval                    time.Duration
 	webPushEnabled                 bool
@@ -53,6 +57,9 @@ type GroupDeps struct {
 	AssetWorkbenchPreview           AssetWorkbenchPreviewProcessor
 	AssetWorkbenchMaintenance       AssetWorkbenchMaintenanceProcessor
 	AssetWorkbenchBatchJob          AssetWorkbenchBatchJobProcessor
+	AsyncProjectionOutbox           repo.AsyncProjectionOutboxRepo
+	AsyncProjectionTx               repo.TxRunner
+	TaskERPOutboxProcessor          service.TaskERPOutboxProcessor
 	ERPEnabled                      bool
 	ERPInterval                     time.Duration
 	WebPushEnabled                  bool
@@ -95,6 +102,9 @@ func NewGroup(deps GroupDeps) *Group {
 		assetWorkbenchPreview:          deps.AssetWorkbenchPreview,
 		assetWorkbenchMaintenance:      deps.AssetWorkbenchMaintenance,
 		assetWorkbenchBatchJob:         deps.AssetWorkbenchBatchJob,
+		asyncProjectionOutbox:          deps.AsyncProjectionOutbox,
+		asyncProjectionTx:              deps.AsyncProjectionTx,
+		taskERPOutboxProcessor:         deps.TaskERPOutboxProcessor,
 		erpEnabled:                     deps.ERPEnabled,
 		erpInterval:                    deps.ERPInterval,
 		webPushEnabled:                 deps.WebPushEnabled,
@@ -120,6 +130,12 @@ func (g *Group) Start(ctx context.Context) {
 	go NewRetryScheduler(g.db, g.logger).Run(ctx)
 	go NewVerifyWorker(g.db, g.rdb, g.logger).Run(ctx)
 	go NewEventDispatcher(g.db, g.rdb, g.logger).Run(ctx)
+	if g.asyncProjectionOutbox != nil && g.asyncProjectionTx != nil {
+		go NewSearchReindexOutboxWorker(g.asyncProjectionOutbox, g.asyncProjectionTx, AsyncOutboxWorkerConfig{}, g.logger.Named("search_reindex_outbox")).Run(ctx)
+		if g.taskERPOutboxProcessor != nil {
+			go NewTaskERPOutboxWorker(g.asyncProjectionOutbox, g.asyncProjectionTx, g.taskERPOutboxProcessor, AsyncOutboxWorkerConfig{}, g.logger.Named("task_erp_outbox")).Run(ctx)
+		}
+	}
 	if g.erpEnabled && g.erpSyncSvc != nil {
 		go NewERPSyncWorker(g.erpSyncSvc, g.logger, g.erpInterval).Run(ctx)
 	}

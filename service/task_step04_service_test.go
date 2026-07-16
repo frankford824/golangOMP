@@ -1438,16 +1438,18 @@ func (r *step04TaskRepo) UpdateCustomizationState(_ context.Context, _ repo.Tx, 
 }
 
 type step04TaskAssetRepo struct {
-	nextID       int64
-	assets       map[int64]*domain.TaskAsset
-	approvedRuns int
-	rejectedRuns int
+	nextID              int64
+	assets              map[int64]*domain.TaskAsset
+	stagedPreviewByRoot map[int64]*domain.StagedTaskAssetPreviewAccess
+	approvedRuns        int
+	rejectedRuns        int
 }
 
 func newStep04TaskAssetRepo() *step04TaskAssetRepo {
 	return &step04TaskAssetRepo{
-		nextID: 1,
-		assets: map[int64]*domain.TaskAsset{},
+		nextID:              1,
+		assets:              map[int64]*domain.TaskAsset{},
+		stagedPreviewByRoot: map[int64]*domain.StagedTaskAssetPreviewAccess{},
 	}
 }
 
@@ -1484,6 +1486,10 @@ func (r *step04TaskAssetRepo) ListByAssetID(_ context.Context, assetID int64) ([
 		}
 	}
 	return out, nil
+}
+
+func (r *step04TaskAssetRepo) GetStagedPreviewAccessByDesignAssetID(_ context.Context, assetID int64) (*domain.StagedTaskAssetPreviewAccess, error) {
+	return r.stagedPreviewByRoot[assetID], nil
 }
 
 func (r *step04TaskAssetRepo) NextVersionNo(_ context.Context, _ repo.Tx, taskID int64) (int, error) {

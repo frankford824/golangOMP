@@ -195,6 +195,10 @@ type taskAssetBindingStagingRepo interface {
 	MarkBindingStaged(ctx context.Context, tx repo.Tx, taskAssetID, taskID, actorID int64, scopeSKUCode string, retouchRequirementID *int64, role, uploadSessionID string, expiresAt time.Time) error
 }
 
+type stagedTaskAssetPreviewAccessRepo interface {
+	GetStagedPreviewAccessByDesignAssetID(ctx context.Context, assetID int64) (*domain.StagedTaskAssetPreviewAccess, error)
+}
+
 type uploadRequestForUpdateRepo interface {
 	GetByRequestIDForUpdate(ctx context.Context, tx repo.Tx, requestID string) (*domain.UploadRequest, error)
 }
@@ -442,9 +446,45 @@ func (s *taskAssetCenterService) GetAssetDownloadInfoByID(ctx context.Context, a
 }
 
 func (s *taskAssetCenterService) GetAssetPreviewInfoByID(ctx context.Context, assetID int64) (*domain.AssetDownloadInfo, *domain.AppError) {
-	asset, appErr := s.GetAsset(ctx, assetID)
+	asset, appErr := s.requireDesignAssetByID(ctx, assetID)
 	if appErr != nil {
 		return nil, appErr
+	}
+	task, appErr := s.requireTask(ctx, asset.TaskID)
+	if appErr != nil {
+		return nil, appErr
+	}
+
+	var stagedAccess *domain.StagedTaskAssetPreviewAccess
+	if accessRepo, ok := s.taskAssetRepo.(stagedTaskAssetPreviewAccessRepo); ok {
+		var err error
+		stagedAccess, err = accessRepo.GetStagedPreviewAccessByDesignAssetID(ctx, assetID)
+		if err != nil {
+			return nil, infraError("load staged asset preview access", err)
+		}
+	}
+	if appErr := authorizeV8TaskAssetPreview(ctx, task, stagedAccess); appErr != nil {
+		return nil, appErr
+	}
+	if stagedAccess != nil {
+		record, err := s.taskAssetRepo.GetByID(ctx, stagedAccess.TaskAssetID)
+		if err != nil {
+			return nil, infraError("load staged asset preview version", err)
+		}
+		if record == nil || record.TaskID != task.ID || record.AssetID == nil || *record.AssetID != asset.ID {
+			return nil, domain.ErrNotFound
+		}
+		asset.CurrentVersionID = &record.ID
+		asset.CurrentVersion = domain.BuildDesignAssetVersion(record)
+		if asset.CurrentVersion != nil {
+			s.applyDesignAssetVersionDerivedFields(task, asset, asset.CurrentVersion)
+		}
+		s.applyDesignAssetResourceSummary(asset)
+	} else {
+		asset, appErr = s.loadAssetResource(ctx, asset)
+		if appErr != nil {
+			return nil, appErr
+		}
 	}
 	if asset.CurrentVersion == nil {
 		return nil, domain.ErrNotFound
@@ -474,6 +514,31 @@ func (s *taskAssetCenterService) GetAssetPreviewInfoByID(ctx context.Context, as
 		return nil, appErr
 	}
 	return buildAssetPreviewInfoWithOSS(asset.CurrentVersion, s.uploadClient, s.ossDirectService), nil
+}
+
+func authorizeV8TaskAssetPreview(ctx context.Context, task *domain.Task, staged *domain.StagedTaskAssetPreviewAccess) *domain.AppError {
+	actor, ok := domain.RequestActorFromContext(ctx)
+	if !ok || actor.ID <= 0 || actor.EffectiveAccess == nil {
+		return domain.NewAppError(domain.ErrCodePermissionDenied, "asset preview requires explicit access", nil)
+	}
+	if task == nil || (staged != nil && staged.TaskID != task.ID) {
+		return domain.ErrNotFound
+	}
+	if staged != nil {
+		if (staged.StagedBy == actor.ID && actor.EffectiveAccess.Has(domain.PermissionAssetView)) ||
+			domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskAuditDecision, task.AccessSubject()) {
+			return nil
+		}
+		return domain.NewAppError(domain.ErrCodePermissionDenied, "staged asset preview is limited to its uploader or an authorized auditor", map[string]interface{}{
+			"deny_code": "staged_preview_scope_denied",
+		})
+	}
+	if domain.EffectiveAccessAllowsTask(actor, domain.PermissionAssetView, task.AccessSubject()) {
+		return nil
+	}
+	return domain.NewAppError(domain.ErrCodePermissionDenied, "asset preview is outside the actor's explicit data scope", map[string]interface{}{
+		"deny_code": "asset_preview_scope_denied",
+	})
 }
 
 func (s *taskAssetCenterService) GetUploadSessionByID(ctx context.Context, sessionID string) (*domain.UploadSession, *domain.AppError) {

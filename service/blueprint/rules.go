@@ -63,9 +63,6 @@ func (e *RuleEngine) InitTask(ctx context.Context, tx repo.Tx, task *domain.Task
 			case domain.ModuleKeyAudit:
 				state = domain.ModuleStatePending
 				pool = nil
-			case domain.ModuleKeyWarehouse:
-				state = domain.ModuleStatePending
-				pool = nil
 			}
 		}
 		m, err := e.modules.Enter(ctx, tx, task.ID, spec.Key, state, pool, json.RawMessage(`{}`))
@@ -96,16 +93,14 @@ func (e *RuleEngine) ApplyAfterAction(ctx context.Context, tx repo.Tx, task *dom
 	case domain.ModuleKeyRetouch + "." + domain.ModuleActionSubmit:
 		return e.completeRetouchTask(ctx, tx, task, actorID, actionEventID)
 	case domain.ModuleKeyCustomization + "." + domain.ModuleActionSubmit:
-		return e.enterModule(ctx, tx, task, domain.ModuleKeyAudit, actorID, actionEventID)
+		// v8 keeps customization inside the design node. The unified
+		// submit-design transaction is the only path that enters PendingAudit.
+		return nil
 	case domain.ModuleKeyAudit + "." + domain.ModuleActionApprove:
 		if isCustomizationTask(task) {
-			if err := e.closeModule(ctx, tx, task.ID, domain.ModuleKeyCustomization, actorID, actionEventID); err != nil {
-				return err
-			}
-		} else if err := e.closeModule(ctx, tx, task.ID, domain.ModuleKeyDesign, actorID, actionEventID); err != nil {
-			return err
+			return e.closeModule(ctx, tx, task.ID, domain.ModuleKeyCustomization, actorID, actionEventID)
 		}
-		return e.enterModule(ctx, tx, task, domain.ModuleKeyWarehouse, actorID, actionEventID)
+		return e.closeModule(ctx, tx, task.ID, domain.ModuleKeyDesign, actorID, actionEventID)
 	case domain.ModuleKeyAudit + "." + domain.ModuleActionReject:
 		target := domain.ModuleKeyDesign
 		if isCustomizationTask(task) {
@@ -139,14 +134,6 @@ func (e *RuleEngine) enterModule(ctx context.Context, tx repo.Tx, task *domain.T
 	}
 	state := domain.ModuleStatePendingClaim
 	pool := spec.PoolTeamCode
-	switch moduleKey {
-	case domain.ModuleKeyWarehouse:
-		pool = strPtr(domain.TeamWarehouseMain)
-	case domain.ModuleKeyAudit:
-		if isCustomizationTask(task) {
-			pool = strPtr(domain.TeamAuditCustomization)
-		}
-	}
 	m, err := e.modules.Enter(ctx, tx, task.ID, moduleKey, state, pool, json.RawMessage(`{}`))
 	if err != nil {
 		return err

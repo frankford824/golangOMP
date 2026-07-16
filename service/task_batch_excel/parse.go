@@ -3,7 +3,6 @@ package task_batch_excel
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"image"
 	_ "image/gif"
@@ -211,30 +210,6 @@ func parseItemRow(row []string, fields []FieldSpec, columnIndex map[string]int) 
 			item.DesignRequirement = value
 		case "new_sku":
 			item.NewSKU = value
-		case "purchase_sku":
-			item.PurchaseSKU = value
-		case "cost_price_mode":
-			item.CostPriceMode = value
-		case "quantity":
-			parsed, err := strconv.ParseInt(value, 10, 64)
-			if err != nil {
-				violations = append(violations, ParseViolation{Column: field.Column, Code: "missing_required_field", Message: "batch_items[].quantity is required and must be greater than 0"})
-				continue
-			}
-			item.Quantity = &parsed
-		case "base_sale_price":
-			parsed, err := strconv.ParseFloat(value, 64)
-			if err != nil {
-				violations = append(violations, ParseViolation{Column: field.Column, Code: "missing_required_field", Message: "batch_items[].base_sale_price is required"})
-				continue
-			}
-			item.BaseSalePrice = &parsed
-		case "variant_json":
-			if !json.Valid([]byte(value)) {
-				violations = append(violations, ParseViolation{Column: field.Column, Code: "invalid_variant_json", Message: "batch_items[].variant_json must be valid JSON"})
-				continue
-			}
-			item.VariantJSON = json.RawMessage(value)
 		}
 	}
 	if hasProductIIDField {
@@ -577,7 +552,7 @@ func mapValidationViolations(appErr *domain.AppError, taskType domain.TaskType, 
 
 func skuColumnKey(fields []FieldSpec) string {
 	for _, field := range fields {
-		if field.Key == "new_sku" || field.Key == "purchase_sku" {
+		if field.Key == "new_sku" {
 			return field.Key
 		}
 	}
@@ -652,12 +627,7 @@ func isImageOnlyBatchItem(idx int, items []service.CreateTaskBatchSKUItemParams,
 		strings.TrimSpace(item.ProductIID) == "" &&
 		strings.TrimSpace(item.MaterialMode) == "" &&
 		strings.TrimSpace(item.DesignRequirement) == "" &&
-		strings.TrimSpace(item.NewSKU) == "" &&
-		strings.TrimSpace(item.PurchaseSKU) == "" &&
-		strings.TrimSpace(item.CostPriceMode) == "" &&
-		item.Quantity == nil &&
-		item.BaseSalePrice == nil &&
-		len(bytes.TrimSpace(item.VariantJSON)) == 0
+		strings.TrimSpace(item.NewSKU) == ""
 }
 
 func duplicateBatchItemMessage(taskType domain.TaskType, idx int, items []service.CreateTaskBatchSKUItemParams, itemRows []int, fallback string) string {
@@ -686,11 +656,6 @@ func batchItemFromService(item service.CreateTaskBatchSKUItemParams) BatchItem {
 		MaterialMode:      item.MaterialMode,
 		DesignRequirement: item.DesignRequirement,
 		NewSKU:            item.NewSKU,
-		PurchaseSKU:       item.PurchaseSKU,
-		CostPriceMode:     item.CostPriceMode,
-		Quantity:          item.Quantity,
-		BaseSalePrice:     item.BaseSalePrice,
-		VariantJSON:       item.VariantJSON,
 		ReferenceFileRefs: item.ReferenceFileRefs,
 	}
 }

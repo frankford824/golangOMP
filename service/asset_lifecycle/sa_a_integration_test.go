@@ -250,7 +250,7 @@ func newIntegrationServices(db *sql.DB) (*assetcenter.Service, *Service, *Cleanu
 	lifecycleRepo := mysqlrepo.NewTaskAssetLifecycleRepo(mysqlDB)
 	return assetcenter.NewService(searchRepo, nil, nil),
 		NewService(searchRepo, lifecycleRepo, mysqlDB, nil),
-		NewCleanupJob(lifecycleRepo, mysqlDB, nil, nil)
+		NewCleanupJob(lifecycleRepo, mysqlDB, nil)
 }
 
 func insertAssetFixture(t *testing.T, db *sql.DB, taskID int64, moduleKey string, opts fixtureOptions) assetFixture {

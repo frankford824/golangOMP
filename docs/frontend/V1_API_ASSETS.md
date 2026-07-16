@@ -478,11 +478,11 @@ curl -X GET https://api.example.com/v1/assets/<asset_id>/content \
 ### 简介
 支持方法: GET。
 
-- `GET`: Returns preview metadata for one asset resource. For source formats that OSS IMG can process directly (`jpg/png/bmp/gif/webp/tiff/heic/avif`), this endpoint returns a signed private-bucket URL with `x-oss-process` preview transform. For source formats that are not directly previewable (such as PSD/PSB), this endpoint resolves backend-derived `preview/design_thumb` assets linked by `source_asset_id` when available. External resources prefer OSS-backed derived preview/original URLs or already-public provider URLs; browser-facing BFF proxy URLs are not returned as the default preview surface. When preview metadata is not currently available for the asset, runtime returns HTTP 409 with `error.code=INVALID_STATE_TRANSITION` and message `asset preview is not available`.
+- `GET`: Returns preview metadata for one asset resource. For source formats that OSS IMG can process directly (`jpg/png/bmp/gif/webp/tiff/heic/avif`), this endpoint returns a signed private-bucket URL with `x-oss-process` preview transform. For source formats that are not directly previewable (such as PSD/PSB), this endpoint resolves backend-derived `preview/design_thumb` assets linked by `source_asset_id` when available. External resources prefer OSS-backed derived preview/original URLs or already-public provider URLs; browser-facing BFF proxy URLs are not returned as the default preview surface. A staged, unbound upload is visible only to its uploader with `asset.view`, or to an auditor whose explicit `task.audit.decision` scope includes the task. Bound resources require `asset.view` within the task's stable organization-ID scope. Legacy roles and organization names do not authorize preview. When preview metadata is not currently available for the asset, runtime returns HTTP 409 with `error.code=INVALID_STATE_TRANSITION` and message `asset preview is not available`.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `GET` 允许角色: Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, Warehouse, Admin。
+- `GET` 允许角色: 已登录 / scope-aware。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -516,6 +516,7 @@ curl -X GET https://api.example.com/v1/assets/<asset_id>/content \
 | HTTP | code | deny_code | 说明 |
 |---|---|---|---|
 | 404 | 见 `error.code` | 见 `deny_code` | Asset not found |
+| 403 | 见 `error.code` | 见 `deny_code` | Actor lacks preview capability or stable task scope |
 | 409 | 见 `error.code` | 见 `deny_code` | Preview metadata not available for current asset state |
 
 ### curl 示例

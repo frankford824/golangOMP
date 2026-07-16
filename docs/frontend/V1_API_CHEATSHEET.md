@@ -104,7 +104,7 @@
 | GET | `/v1/tasks/reference-upload-sessions/{session_id}` | Get task reference upload session | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/tasks/reference-upload-sessions/{session_id}/complete` | Complete task reference upload session | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/tasks/reference-upload-sessions/{session_id}/abort` | Abort task reference upload session | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| POST | `/v1/tasks/prepare-product-codes` | Prepare task product codes | POST:Ops, Admin | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/tasks/prepare-product-codes` | Prepare task product codes | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET, POST | `/v1/tasks` | List tasks within explicit capability and data scope；Create task | GET:已登录 / 主流程读全量可见; POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/tasks/filter-options` | Get task center filter options | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/tasks/{id}` | Get task read model | GET:已登录 / 主流程读全量可见 | [V1_API_TASKS.md](V1_API_TASKS.md) |
@@ -304,7 +304,7 @@
 | GET, DELETE | `/v1/assets/{asset_id}` | Get asset；Delete asset | GET:Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, Warehouse, Admin; DELETE:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
 | GET | `/v1/assets/{asset_id}/download` | Get asset download info | GET:Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, Warehouse, Admin | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
 | GET | `/v1/assets/{asset_id}/content` | Stream external netdisk asset content | GET:Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, Warehouse, Admin | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
-| GET | `/v1/assets/{asset_id}/preview` | Get asset preview info | GET:Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, Warehouse, Admin | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
+| GET | `/v1/assets/{asset_id}/preview` | Get asset preview info | GET:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
 | POST | `/v1/assets/upload-sessions` | Create asset upload session | POST:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
 | GET | `/v1/assets/upload-sessions/{session_id}` | Get asset upload session | GET:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |
 | POST | `/v1/assets/upload-sessions/{session_id}/complete` | Complete asset upload session | POST:已登录 / scope-aware | [V1_API_ASSETS.md](V1_API_ASSETS.md) |

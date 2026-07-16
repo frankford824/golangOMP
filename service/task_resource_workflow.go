@@ -35,9 +35,11 @@ type TaskResourceGroupRepository interface {
 	CloneRevision(ctx context.Context, tx repo.Tx, group domain.TaskAssetGroup, sourceRevisionID int64, status domain.TaskAssetGroupRevisionStatus, stage domain.TaskAssetSourceStage, actorID int64, reason string) (int64, error)
 	MarkWorkingRejected(ctx context.Context, tx repo.Tx, revisionID int64) error
 	CASTaskStatus(ctx context.Context, tx repo.Tx, taskID, expectedRevision int64, expectedStatus, nextStatus domain.TaskStatus, clearHandler bool) (int64, error)
+	RequireCustomizationReadyForSubmit(ctx context.Context, tx repo.Tx, taskID int64) error
+	ResetCustomizationReadyForSubmit(ctx context.Context, tx repo.Tx, taskID int64) error
 	RestoreDesignerHandler(ctx context.Context, tx repo.Tx, taskID int64) error
 	CompleteModules(ctx context.Context, tx repo.Tx, taskID int64) error
-	EnqueueTaskFinalized(ctx context.Context, tx repo.Tx, taskID, workflowRevision int64, enqueueFiling bool) error
+	EnqueueTaskFinalized(ctx context.Context, tx repo.Tx, taskID, workflowRevision int64, enqueueFiling, enqueueImageSync bool) error
 	StoreIdempotency(ctx context.Context, tx repo.Tx, taskID, actorID int64, action, key, requestHash string, response interface{}) (bool, json.RawMessage, error)
 	CompleteIdempotency(ctx context.Context, tx repo.Tx, taskID, actorID int64, action, key string, response interface{}) error
 }
@@ -329,6 +331,11 @@ func (s *taskResourceWorkflowService) SubmitDesign(ctx context.Context, taskID i
 		if task.TaskType == domain.TaskTypeSKUPlanning || task.TaskType == domain.TaskTypePurchaseTask {
 			return domain.NewAppError(domain.ErrCodeInvalidStateTransition, "策划 SKU does not use design submission", nil)
 		}
+		if task.Customization {
+			if err := s.repo.RequireCustomizationReadyForSubmit(ctx, tx, taskID); err != nil {
+				return err
+			}
+		}
 		groups, err := s.repo.ListGroupsForUpdate(ctx, tx, taskID)
 		if err != nil {
 			return err
@@ -448,6 +455,11 @@ func (s *taskResourceWorkflowService) AuditDecision(ctx context.Context, taskID 
 			}
 			if err := s.repo.RestoreDesignerHandler(ctx, tx, taskID); err != nil {
 				return err
+			}
+			if task.Customization {
+				if err := s.repo.ResetCustomizationReadyForSubmit(ctx, tx, taskID); err != nil {
+					return err
+				}
 			}
 			if _, err := s.eventRepo.Append(ctx, tx, taskID, "task.audit_returned_to_design", &actor.ID, map[string]interface{}{"reason": request.Reason, "workflow_revision": next}); err != nil {
 				return err
@@ -589,6 +601,11 @@ func (s *taskResourceWorkflowService) Reopen(ctx context.Context, taskID int64, 
 			if err := s.repo.RestoreDesignerHandler(ctx, tx, taskID); err != nil {
 				return err
 			}
+			if task.Customization {
+				if err := s.repo.ResetCustomizationReadyForSubmit(ctx, tx, taskID); err != nil {
+					return err
+				}
+			}
 		}
 		if _, err := s.eventRepo.Append(ctx, tx, taskID, "task.reopened", &actor.ID, map[string]interface{}{"reason": request.Reason, "target": request.Target, "workflow_revision": next}); err != nil {
 			return err
@@ -650,10 +667,10 @@ func (f *TaskFinalizer) FinalizeInTx(ctx context.Context, tx repo.Tx, task *doma
 	if err != nil {
 		return 0, err
 	}
-	if _, err := f.eventRepo.Append(ctx, tx, task.TaskID, "task.completed", &actorID, map[string]interface{}{"mode": mode, "workflow_revision": next}); err != nil {
+	if _, err := f.eventRepo.Append(ctx, tx, task.TaskID, domain.TaskEventClosed, &actorID, map[string]interface{}{"mode": mode, "workflow_revision": next}); err != nil {
 		return 0, err
 	}
-	if err := f.repo.EnqueueTaskFinalized(ctx, tx, task.TaskID, next, mode != FinalizeModeSKUPlanning); err != nil {
+	if err := f.repo.EnqueueTaskFinalized(ctx, tx, task.TaskID, next, mode == FinalizeModeDesignAudit, mode != FinalizeModeSKUPlanning); err != nil {
 		return 0, err
 	}
 	return next, nil

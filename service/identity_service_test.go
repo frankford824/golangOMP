@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"slices"
 	"strconv"
@@ -15,11 +16,12 @@ import (
 	"workflow/repo"
 )
 
-func TestIdentityServiceRegisterLoginAndCurrentUserWithDepartmentAdmin(t *testing.T) {
+func TestIdentityServiceRegisterCreatesOnlyExplicitMember(t *testing.T) {
 	userRepo := newIdentityUserRepo()
 	sessionRepo := &identitySessionRepoStub{}
 	logRepo := &identityPermissionLogRepoStub{}
-	svc := NewIdentityService(userRepo, sessionRepo, logRepo, identityTxRunner{})
+	assignmentWriter := &identityAccessAssignmentWriterStub{}
+	svc := NewIdentityService(userRepo, sessionRepo, logRepo, identityTxRunner{}, WithIdentityAccessAssignmentWriter(assignmentWriter))
 
 	registerResult, appErr := svc.Register(context.Background(), RegisterUserParams{
 		Username:    "designer_admin",
@@ -29,7 +31,6 @@ func TestIdentityServiceRegisterLoginAndCurrentUserWithDepartmentAdmin(t *testin
 		Mobile:      "13800000001",
 		Email:       "designer@example.com",
 		Password:    "Pass1234",
-		AdminKey:    "superAdmin",
 	})
 	if appErr != nil {
 		t.Fatalf("Register() error = %+v", appErr)
@@ -37,11 +38,8 @@ func TestIdentityServiceRegisterLoginAndCurrentUserWithDepartmentAdmin(t *testin
 	if registerResult.User == nil || registerResult.Session == nil {
 		t.Fatalf("Register() result = %+v", registerResult)
 	}
-	if !containsRoleValue(registerResult.User.Roles, domain.RoleDeptAdmin) {
-		t.Fatalf("Register() roles = %+v, want DepartmentAdmin", registerResult.User.Roles)
-	}
-	if !containsRoleValue(registerResult.User.Roles, domain.RoleDesigner) || containsRoleValue(registerResult.User.Roles, domain.RoleDesignReviewer) {
-		t.Fatalf("Register() roles = %+v, want design default business bundle without DesignReviewer", registerResult.User.Roles)
+	if !reflect.DeepEqual(registerResult.User.Roles, []domain.Role{domain.RoleMember}) {
+		t.Fatalf("Register() roles = %+v, want only Member", registerResult.User.Roles)
 	}
 	if registerResult.User.Account != "designer_admin" || registerResult.User.Name != "设计主管" {
 		t.Fatalf("Register() user aliases = %+v", registerResult.User)
@@ -49,11 +47,8 @@ func TestIdentityServiceRegisterLoginAndCurrentUserWithDepartmentAdmin(t *testin
 	if registerResult.User.Department != domain.DepartmentDesign || registerResult.User.Team != "设计审核组" {
 		t.Fatalf("Register() profile = %+v", registerResult.User)
 	}
-	if !registerResult.User.FrontendAccess.IsDepartmentAdmin {
-		t.Fatalf("Register() frontend_access = %+v, want department admin", registerResult.User.FrontendAccess)
-	}
-	if !containsString(registerResult.User.FrontendAccess.ManagedDepartments, string(domain.DepartmentDesign)) {
-		t.Fatalf("Register() managed_departments = %+v", registerResult.User.FrontendAccess.ManagedDepartments)
+	if registerResult.User.FrontendAccess.IsDepartmentAdmin || len(registerResult.User.ManagedDepartments) != 0 {
+		t.Fatalf("Register() must not infer management from organization profile: %+v", registerResult.User)
 	}
 	if !containsString(registerResult.User.FrontendAccess.Roles, "member") {
 		t.Fatalf("Register() frontend_access.roles = %+v", registerResult.User.FrontendAccess.Roles)
@@ -81,11 +76,11 @@ func TestIdentityServiceRegisterLoginAndCurrentUserWithDepartmentAdmin(t *testin
 	if currentUser.Department != domain.DepartmentDesign || currentUser.Email != "designer@example.com" {
 		t.Fatalf("GetCurrentUser() user = %+v", currentUser)
 	}
-	if !containsString(currentUser.FrontendAccess.Pages, "department_users") {
-		t.Fatalf("GetCurrentUser() pages = %+v", currentUser.FrontendAccess.Pages)
+	if currentUser.FrontendAccess.IsDepartmentAdmin || containsString(currentUser.FrontendAccess.Pages, "department_users") {
+		t.Fatalf("GetCurrentUser() leaked department-admin access = %+v", currentUser.FrontendAccess)
 	}
-	if !containsString(currentUser.FrontendAccess.Menus, "design_workspace") || !containsString(currentUser.FrontendAccess.Pages, "design_workspace") {
-		t.Fatalf("GetCurrentUser() frontend_access missing design workspace pages = %+v", currentUser.FrontendAccess)
+	if len(assignmentWriter.calls) != 1 || assignmentWriter.calls[0].roleCode != "member" || assignmentWriter.calls[0].scopeMode != domain.AccessScopeSelf {
+		t.Fatalf("explicit assignments = %+v, want member/self", assignmentWriter.calls)
 	}
 }
 
@@ -93,7 +88,8 @@ func TestIdentityServiceRegisterAssetWorkbenchUserOnlyGrantsSubmitter(t *testing
 	userRepo := newIdentityUserRepo()
 	sessionRepo := &identitySessionRepoStub{}
 	logRepo := &identityPermissionLogRepoStub{}
-	svc := NewIdentityService(userRepo, sessionRepo, logRepo, identityTxRunner{})
+	assignmentWriter := &identityAccessAssignmentWriterStub{}
+	svc := NewIdentityService(userRepo, sessionRepo, logRepo, identityTxRunner{}, WithIdentityAccessAssignmentWriter(assignmentWriter))
 
 	result, appErr := svc.RegisterAssetWorkbenchUser(context.Background(), RegisterAssetWorkbenchUserParams{
 		Username:    "piece_worker",
@@ -125,6 +121,37 @@ func TestIdentityServiceRegisterAssetWorkbenchUserOnlyGrantsSubmitter(t *testing
 	}
 	if len(logRepo.logs) != 1 || logRepo.logs[0].RoutePath != "/v1/asset-workbench/register" {
 		t.Fatalf("permission logs = %+v", logRepo.logs)
+	}
+	if got := assignmentWriter.roleCodes(); !reflect.DeepEqual(got, []string{"member", "asset_submitter"}) {
+		t.Fatalf("explicit assignments = %+v, want member + asset_submitter", assignmentWriter.calls)
+	}
+}
+
+func TestIdentityServiceRegisterAbortsBeforeSessionWhenExplicitAssignmentFails(t *testing.T) {
+	userRepo := newIdentityUserRepo()
+	sessionRepo := &identitySessionRepoStub{}
+	assignmentWriter := &identityAccessAssignmentWriterStub{err: errors.New("assignment write failed")}
+	svc := NewIdentityService(
+		userRepo,
+		sessionRepo,
+		&identityPermissionLogRepoStub{},
+		identityTxRunner{},
+		WithIdentityAccessAssignmentWriter(assignmentWriter),
+	)
+
+	result, appErr := svc.Register(context.Background(), RegisterUserParams{
+		Username:    "member_assignment_failure",
+		DisplayName: "授权失败用户",
+		Department:  domain.DepartmentOperations,
+		Team:        "运营一组",
+		Mobile:      "13800000992",
+		Password:    "Pass1234",
+	})
+	if appErr == nil || result != nil {
+		t.Fatalf("Register() = result:%+v error:%+v, want transaction failure", result, appErr)
+	}
+	if len(sessionRepo.sessions) != 0 {
+		t.Fatalf("sessions = %+v, assignment failure must abort before session creation", sessionRepo.sessions)
 	}
 }
 
@@ -331,7 +358,7 @@ func TestIdentityServiceRegisterOrdinaryMemberDoesNotReceiveDepartmentBusinessBu
 	}
 }
 
-func TestIdentityService_RegisterDeptAdmin_AutoFillsManagedDepartments(t *testing.T) {
+func TestIdentityService_RegisterDoesNotAutoFillManagedDepartments(t *testing.T) {
 	svc := NewIdentityService(newIdentityUserRepo(), &identitySessionRepoStub{}, &identityPermissionLogRepoStub{}, identityTxRunner{})
 
 	registerResult, appErr := svc.Register(context.Background(), RegisterUserParams{
@@ -341,38 +368,15 @@ func TestIdentityService_RegisterDeptAdmin_AutoFillsManagedDepartments(t *testin
 		Team:        "默认组",
 		Mobile:      "13800001091",
 		Password:    "Pass1234",
-		AdminKey:    "superAdmin",
 	})
 	if appErr != nil {
 		t.Fatalf("Register() error = %+v", appErr)
 	}
-	if got := registerResult.User.ManagedDepartments; !reflect.DeepEqual(got, []string{string(domain.DepartmentDesignRD)}) {
-		t.Fatalf("ManagedDepartments = %+v, want [%q]", got, domain.DepartmentDesignRD)
+	if got := registerResult.User.ManagedDepartments; len(got) != 0 {
+		t.Fatalf("ManagedDepartments = %+v, want empty", got)
 	}
-	if !containsString(registerResult.User.FrontendAccess.ManagedDepartments, string(domain.DepartmentDesignRD)) {
-		t.Fatalf("FrontendAccess.ManagedDepartments = %+v, want %q", registerResult.User.FrontendAccess.ManagedDepartments, domain.DepartmentDesignRD)
-	}
-}
-
-func TestIdentityService_RegisterDeptAdmin_ExplicitManagedDepartmentsWins(t *testing.T) {
-	svc := NewIdentityService(newIdentityUserRepo(), &identitySessionRepoStub{}, &identityPermissionLogRepoStub{}, identityTxRunner{})
-	explicit := []string{string(domain.DepartmentAudit)}
-
-	registerResult, appErr := svc.Register(context.Background(), RegisterUserParams{
-		Username:           "explicit_scope_dept_admin",
-		DisplayName:        "Explicit Scope Dept Admin",
-		Department:         domain.DepartmentDesignRD,
-		Team:               "默认组",
-		Mobile:             "13800001092",
-		Password:           "Pass1234",
-		AdminKey:           "superAdmin",
-		ManagedDepartments: &explicit,
-	})
-	if appErr != nil {
-		t.Fatalf("Register() error = %+v", appErr)
-	}
-	if got := registerResult.User.ManagedDepartments; !reflect.DeepEqual(got, explicit) {
-		t.Fatalf("ManagedDepartments = %+v, want %+v", got, explicit)
+	if containsRoleValue(registerResult.User.Roles, domain.RoleDeptAdmin) {
+		t.Fatalf("roles = %+v, registration must not grant DepartmentAdmin", registerResult.User.Roles)
 	}
 }
 
@@ -1397,11 +1401,14 @@ func TestIdentityServiceResolveRequestActorHydratesFrontendAccess(t *testing.T) 
 		Team:        "默认组",
 		Mobile:      "13800001025",
 		Password:    "Pass1234",
-		AdminKey:    "superAdmin",
 	})
 	if appErr != nil {
 		t.Fatalf("Register() error = %+v", appErr)
 	}
+	if err := userRepo.ReplaceRoles(context.Background(), identityTx{}, registerResult.User.ID, []domain.Role{domain.RoleMember, domain.RoleDeptAdmin}); err != nil {
+		t.Fatalf("ReplaceRoles() error = %v", err)
+	}
+	userRepo.users[registerResult.User.ID].ManagedDepartments = []string{string(domain.DepartmentDesignRD)}
 
 	actor, appErr := svc.ResolveRequestActor(context.Background(), registerResult.Session.Token)
 	if appErr != nil {
@@ -1695,6 +1702,33 @@ type identityTxRunner struct{}
 
 func (identityTxRunner) RunInTx(_ context.Context, fn func(tx repo.Tx) error) error {
 	return fn(identityTx{})
+}
+
+type identityAccessAssignmentCall struct {
+	userID    int64
+	roleCode  string
+	scopeMode domain.AccessScopeMode
+}
+
+type identityAccessAssignmentWriterStub struct {
+	calls []identityAccessAssignmentCall
+	err   error
+}
+
+func (s *identityAccessAssignmentWriterStub) EnsureExplicitRoleAssignment(_ context.Context, _ repo.Tx, userID int64, roleCode string, scopeMode domain.AccessScopeMode) error {
+	if s.err != nil {
+		return s.err
+	}
+	s.calls = append(s.calls, identityAccessAssignmentCall{userID: userID, roleCode: roleCode, scopeMode: scopeMode})
+	return nil
+}
+
+func (s *identityAccessAssignmentWriterStub) roleCodes() []string {
+	out := make([]string, 0, len(s.calls))
+	for _, call := range s.calls {
+		out = append(out, call.roleCode)
+	}
+	return out
 }
 
 type identityUserRepoStub struct {

@@ -74,6 +74,21 @@ func (r *customizationJobRepo) GetLatestByTaskID(ctx context.Context, taskID int
 	return scanCustomizationJob(row)
 }
 
+func (r *customizationJobRepo) GetLatestByTaskIDForUpdate(ctx context.Context, tx repo.Tx, taskID int64) (*domain.CustomizationJob, error) {
+	row := Unwrap(tx).QueryRowContext(ctx, `
+		SELECT id, task_id, order_no, source_asset_id, current_asset_id, customization_level_code, customization_level_name,
+		       review_reference_unit_price, review_reference_weight_factor, unit_price, weight_factor,
+		       note, customization_review_decision, decision_type,
+		       assigned_operator_id, last_operator_id, pricing_worker_type, status, warehouse_reject_reason, warehouse_reject_category,
+		       created_at, updated_at
+		FROM customization_jobs
+		WHERE task_id = ?
+		ORDER BY id DESC
+		LIMIT 1
+		FOR UPDATE`, taskID)
+	return scanCustomizationJob(row)
+}
+
 func (r *customizationJobRepo) List(ctx context.Context, filter repo.CustomizationJobListFilter) ([]*domain.CustomizationJob, int64, error) {
 	where := []string{"1=1"}
 	args := []interface{}{}

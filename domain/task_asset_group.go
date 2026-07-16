@@ -210,6 +210,15 @@ type StagedTaskAssetBinding struct {
 	AccessRevoked       bool   `json:"access_revoked"`
 }
 
+// StagedTaskAssetPreviewAccess is the minimal, stable-ID authorization
+// projection for previewing an unbound upload. It intentionally contains no
+// organization display names or legacy roles.
+type StagedTaskAssetPreviewAccess struct {
+	TaskAssetID int64
+	TaskID      int64
+	StagedBy    int64
+}
+
 type SubmitResourceGroupInput struct {
 	GroupID                  int64              `json:"group_id"`
 	ExpectedGroupLockVersion int64              `json:"expected_group_lock_version"`

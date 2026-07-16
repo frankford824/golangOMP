@@ -352,14 +352,8 @@ func main() {
 	}, logger.Named("experience"))
 	accessPolicySvc := service.NewAccessPolicyService(accessPolicyRepo, mdb, orgRepo)
 	auditV7Options := []service.AuditV7ServiceOption{
-		service.WithAuditV7DataScopeResolver(taskDataScopeResolver),
 		service.WithAuditV7ScopeUserRepo(userRepo),
-		service.WithAuditV7FilingTrigger(taskSvc),
-		service.WithAuditV7ExperienceService(experienceSvc),
 		service.WithAuditV8EffectiveAccessResolver(accessPolicySvc),
-	}
-	if assetFlowRepo, ok := taskAssetRepo.(service.AuditAssetFlowRepo); ok {
-		auditV7Options = append(auditV7Options, service.WithAuditV7AssetFlowRepo(assetFlowRepo))
 	}
 	auditV7Svc := service.NewAuditV7Service(taskRepo, auditV7Repo, taskEventRepo, codeRuleSvc, mdb, auditV7Options...)
 	taskEventSvc := service.NewTaskEventService(taskEventRepo, taskRepo,
@@ -382,7 +376,7 @@ func main() {
 	workflowTraceEventSvc := service.NewWorkflowTraceEventService(workflowTraceEventRepo)
 	r3PoolQuerySvc := task_pool.NewPoolQueryService(mdb)
 	r3ClaimSvc := task_pool.NewClaimService(taskRepo, taskModuleRepo, taskModuleEventRepo, mdb, task_pool.WithNotificationGenerator(notificationGen), task_pool.WithWebSocketHub(wsHub))
-	r3ModuleSvc := r3module.NewActionService(taskRepo, taskModuleRepo, taskModuleEventRepo, referenceFileRefFlatRepo, mdb, blueprintRules, r3module.WithNotificationGenerator(notificationGen))
+	r3ModuleSvc := r3module.NewActionService(taskRepo, taskModuleRepo, taskModuleEventRepo, referenceFileRefFlatRepo, mdb, blueprintRules, r3module.WithNotificationGenerator(notificationGen), r3module.WithCustomizationJobRepo(customizationJobRepo))
 	r3CancelSvc := task_cancel.NewService(taskRepo, taskModuleRepo, taskModuleEventRepo, mdb)
 	r3DetailSvc := task_aggregator.NewDetailService(taskRepo, taskModuleRepo, taskModuleEventRepo, referenceFileRefFlatRepo,
 		task_aggregator.WithTaskAssetRepo(taskAssetRepo),
@@ -429,7 +423,7 @@ func main() {
 	policyH := handler.NewPolicyHandler(policySvc)
 	authH := handler.NewAuthHandler(identitySvc, cfg.AssetWorkbench.CookieDomain)
 	taskResourceWorkflowSvc := service.NewTaskResourceWorkflowService(taskResourceGroupRepo, mdb, taskEventRepo, service.WithTaskResourceWorkflowOSSDirect(ossDirectSvc))
-	planningSKUSvc := service.NewPlanningSKUService(planningSKURepo, taskRepo, mdb, service.NewTaskFinalizer(taskResourceGroupRepo, taskEventRepo))
+	planningSKUSvc := service.NewPlanningSKUService(planningSKURepo, taskRepo, taskEventRepo, mdb, service.NewTaskFinalizer(taskResourceGroupRepo, taskEventRepo))
 	accessPolicyH := handler.NewAccessPolicyHandler(accessPolicySvc)
 	routeAccessCatalog := transport.NewRouteAccessCatalog()
 	userAdminH := handler.NewUserAdminHandler(identitySvc, routeAccessCatalog, operationLogSvc, workflowTraceEventSvc)

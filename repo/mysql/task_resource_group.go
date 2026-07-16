@@ -908,6 +908,62 @@ func (r *TaskResourceGroupRepo) RestoreDesignerHandler(ctx context.Context, tx r
 	return err
 }
 
+func (r *TaskResourceGroupRepo) RequireCustomizationReadyForSubmit(ctx context.Context, tx repo.Tx, taskID int64) error {
+	var moduleState domain.ModuleState
+	var jobStatus domain.CustomizationJobStatus
+	err := Unwrap(tx).QueryRowContext(ctx, `
+		SELECT tm.state, cj.status
+		FROM task_modules tm
+		JOIN customization_jobs cj ON cj.task_id = tm.task_id
+		WHERE tm.task_id = ? AND tm.module_key = 'customization'
+		ORDER BY cj.id DESC
+		LIMIT 1
+		FOR UPDATE`, taskID).Scan(&moduleState, &jobStatus)
+	if err == sql.ErrNoRows {
+		return domain.NewAppError(domain.ErrCodeInvalidStateTransition, "定制任务尚未完成设计准备", map[string]interface{}{"required_status": domain.CustomizationJobStatusReadyForSubmit})
+	}
+	if err != nil {
+		return err
+	}
+	if moduleState != domain.ModuleStateSubmitted || jobStatus != domain.CustomizationJobStatusReadyForSubmit {
+		return domain.NewAppError(domain.ErrCodeInvalidStateTransition, "定制任务尚未完成设计准备", map[string]interface{}{
+			"module_state":    moduleState,
+			"job_status":      jobStatus,
+			"required_status": domain.CustomizationJobStatusReadyForSubmit,
+		})
+	}
+	return nil
+}
+
+func (r *TaskResourceGroupRepo) ResetCustomizationReadyForSubmit(ctx context.Context, tx repo.Tx, taskID int64) error {
+	sqlTx := Unwrap(tx)
+	result, err := sqlTx.ExecContext(ctx, `
+		UPDATE task_modules
+		SET state = 'in_progress', terminal_at = NULL, updated_at = CURRENT_TIMESTAMP
+		WHERE task_id = ? AND module_key = 'customization' AND state = 'submitted'`, taskID)
+	if err != nil {
+		return err
+	}
+	if rows, _ := result.RowsAffected(); rows != 1 {
+		return repo.ErrConflict
+	}
+	result, err = sqlTx.ExecContext(ctx, `
+		UPDATE customization_jobs
+		SET status = 'in_progress', updated_at = CURRENT_TIMESTAMP
+		WHERE id = (
+			SELECT id FROM (
+				SELECT id FROM customization_jobs WHERE task_id = ? ORDER BY id DESC LIMIT 1
+			) latest
+		) AND status = 'ready_for_submit'`, taskID)
+	if err != nil {
+		return err
+	}
+	if rows, _ := result.RowsAffected(); rows != 1 {
+		return repo.ErrConflict
+	}
+	return nil
+}
+
 func (r *TaskResourceGroupRepo) CompleteModules(ctx context.Context, tx repo.Tx, taskID int64) error {
 	_, err := Unwrap(tx).ExecContext(ctx, `
 		UPDATE task_modules SET state = 'completed', claimed_by = NULL, claimed_team_code = NULL,
@@ -916,13 +972,21 @@ func (r *TaskResourceGroupRepo) CompleteModules(ctx context.Context, tx repo.Tx,
 	return err
 }
 
-func (r *TaskResourceGroupRepo) EnqueueTaskFinalized(ctx context.Context, tx repo.Tx, taskID, workflowRevision int64, enqueueFiling bool) error {
+func (r *TaskResourceGroupRepo) EnqueueTaskFinalized(ctx context.Context, tx repo.Tx, taskID, workflowRevision int64, enqueueFiling, enqueueImageSync bool) error {
 	sqlTx := Unwrap(tx)
 	if enqueueFiling {
 		if _, err := sqlTx.ExecContext(ctx, `
 			INSERT INTO task_erp_outbox (task_id, job_type, dedupe_key, payload_json)
 			VALUES (?, 'task_filing', ?, JSON_OBJECT('task_id', ?, 'workflow_revision', ?))
 			ON DUPLICATE KEY UPDATE dedupe_key = dedupe_key`, taskID, fmt.Sprintf("task_filing:%d:%d", taskID, workflowRevision), taskID, workflowRevision); err != nil {
+			return err
+		}
+	}
+	if enqueueImageSync {
+		if _, err := sqlTx.ExecContext(ctx, `
+			INSERT INTO task_erp_outbox (task_id, job_type, dedupe_key, payload_json)
+			VALUES (?, 'task_image_sync', ?, JSON_OBJECT('task_id', ?, 'workflow_revision', ?))
+			ON DUPLICATE KEY UPDATE dedupe_key = dedupe_key`, taskID, fmt.Sprintf("task_image_sync:%d:%d", taskID, workflowRevision), taskID, workflowRevision); err != nil {
 			return err
 		}
 	}

@@ -237,6 +237,9 @@ func (s *deleteLifecycleRepoStub) LockGenericDeleteGuard(context.Context, repo.T
 	}
 	return &repo.TaskAssetDeleteGuard{TaskAssetIDs: []int64{9901}, AllStagedUnbound: true}, nil
 }
+func (s *deleteLifecycleRepoStub) LockCleanupObjectIDs(context.Context, repo.Tx, int64) ([]int64, error) {
+	return nil, nil
+}
 func (s *deleteLifecycleRepoStub) EnqueueObjectDeletions(context.Context, repo.Tx, []int64) error {
 	s.enqueued = true
 	s.mutationOrder = append(s.mutationOrder, "outbox")

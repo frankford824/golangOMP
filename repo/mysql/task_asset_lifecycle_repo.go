@@ -299,6 +299,41 @@ func (r *taskAssetLifecycleRepo) EnqueueObjectDeletions(ctx context.Context, tx 
 	return enqueueTaskAssetObjectDeletions(ctx, Unwrap(tx), taskAssetIDs)
 }
 
+// LockCleanupObjectIDs freezes the exact root + derived object set before the
+// cleanup transaction snapshots deletion outbox rows and clears live pointers.
+// The worker, never the cleanup request, performs physical deletion.
+func (r *taskAssetLifecycleRepo) LockCleanupObjectIDs(ctx context.Context, tx repo.Tx, versionID int64) ([]int64, error) {
+	rows, err := Unwrap(tx).QueryContext(ctx, `
+		SELECT id
+		FROM task_assets
+		WHERE (id = ? OR source_asset_version_id = ?)
+		  AND deleted_at IS NULL
+		  AND cleaned_at IS NULL
+		ORDER BY id
+		FOR UPDATE`, versionID, versionID)
+	if err != nil {
+		return nil, fmt.Errorf("lock cleanup object versions: %w", err)
+	}
+	defer rows.Close()
+	ids := make([]int64, 0, 4)
+	rootFound := false
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+		rootFound = rootFound || id == versionID
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if !rootFound {
+		return nil, repo.ErrConflict
+	}
+	return ids, nil
+}
+
 func enqueueTaskAssetObjectDeletions(ctx context.Context, sqlTx *sql.Tx, taskAssetIDs []int64) error {
 	marks, args := int64MutationArgs(taskAssetIDs)
 	if marks == "" {

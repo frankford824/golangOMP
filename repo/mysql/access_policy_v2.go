@@ -242,6 +242,36 @@ func (r *AccessPolicyRepo) ReplaceUserAssignments(ctx context.Context, tx repo.T
 	return nil
 }
 
+// EnsureExplicitRoleAssignment is used only at identity creation/config-sync
+// boundaries. It deliberately writes an explicit assignment by stable role
+// code in the caller's transaction; organization display names and legacy
+// user_roles never participate in the decision.
+func (r *AccessPolicyRepo) EnsureExplicitRoleAssignment(ctx context.Context, tx repo.Tx, userID int64, roleCode string, scopeMode domain.AccessScopeMode) error {
+	if userID <= 0 || strings.TrimSpace(roleCode) == "" || !scopeMode.Valid() {
+		return fmt.Errorf("invalid explicit identity assignment")
+	}
+	var roleID int64
+	if err := Unwrap(tx).QueryRowContext(ctx, `
+		SELECT id
+		FROM auth_roles
+		WHERE code = ? AND archived_at IS NULL
+		FOR SHARE`, strings.TrimSpace(roleCode)).Scan(&roleID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("active auth role %q does not exist", strings.TrimSpace(roleCode))
+		}
+		return fmt.Errorf("lock explicit identity role %q: %w", strings.TrimSpace(roleCode), err)
+	}
+	if _, err := Unwrap(tx).ExecContext(ctx, `
+		INSERT INTO auth_user_role_assignments
+		  (user_id, role_id, scope_mode, source_type, source_ref_id, version, assigned_by)
+		VALUES (?, ?, ?, 'direct', 0, 0, NULL)
+		ON DUPLICATE KEY UPDATE scope_mode = VALUES(scope_mode), version = version + 1`,
+		userID, roleID, scopeMode); err != nil {
+		return fmt.Errorf("ensure explicit identity assignment %q: %w", strings.TrimSpace(roleCode), err)
+	}
+	return nil
+}
+
 func (r *AccessPolicyRepo) EffectiveAccess(ctx context.Context, userID int64) (*domain.EffectiveAccess, error) {
 	revision, err := r.GetPolicyRevision(ctx)
 	if err != nil {

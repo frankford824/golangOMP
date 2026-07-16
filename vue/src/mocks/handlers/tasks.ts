@@ -165,8 +165,6 @@ function modulePoolTeamCode(moduleKey: string): string {
   if (moduleKey === 'design' || moduleKey === 'retouch') return 'design_standard'
   if (moduleKey === 'audit') return 'audit_standard'
   if (moduleKey === 'customization') return 'customization_art'
-  if (moduleKey === 'procurement') return 'procurement_standard'
-  if (moduleKey === 'warehouse') return 'warehouse_standard'
   return 'ops_standard'
 }
 
@@ -291,7 +289,6 @@ export const tasksHandler: MockHandler = (request) => {
             pending_audit: 2,
             handover: 1,
             customization_in_progress: 2,
-            pending_warehouse_receive: 2,
             overdue: 1,
             due_today: 4,
             today_created: 5,
@@ -324,7 +321,7 @@ export const tasksHandler: MockHandler = (request) => {
             { key: 'design_ops', name: '设计/运营待推进', count: 7 },
             { key: 'audit', name: '待审核', count: 2 },
             { key: 'customization', name: '定制协同', count: 2 },
-            { key: 'warehouse', name: '待仓库', count: 2 },
+			{ key: 'blocked', name: '异常待处理', count: 2 },
             { key: 'completed', name: '已完成/终止', count: 11 },
           ],
           recent_tasks: [
@@ -427,11 +424,7 @@ export const tasksHandler: MockHandler = (request) => {
               design: { code: rtCode, label: 'Retouch', source: 'retouch_module' },
               retouch: { code: rtCode, label: 'Retouch', source: 'module' },
               audit: { code: 'not_triggered', label: 'Not triggered', source: 'task_type' },
-              procurement: { code: 'not_triggered', label: 'Not triggered', source: 'task_type' },
-              warehouse: { code: 'not_triggered', label: 'Not triggered', source: 'task_status' },
               customization: { code: 'not_triggered', label: 'Not triggered', source: 'task_type' },
-              outsource: { code: 'not_triggered', label: 'Not triggered', source: 'task_type' },
-              production: { code: 'reserved', label: 'Reserved', source: 'reserved' },
             },
           }
         : undefined
@@ -601,99 +594,22 @@ export const tasksHandler: MockHandler = (request) => {
     return { status: 200, data: { data: task } }
   }
 
-  if (request.method === 'POST' && request.path.match(/^\/v1\/tasks\/[^/]+\/audit\/approve$/)) {
+  if (request.method === 'POST' && request.path.match(/^\/v1\/tasks\/[^/]+\/audit\/decision$/)) {
     const taskId = request.path.split('/')[3] ?? ''
     const task = getTaskOr404(taskId)
     if (!task) return { status: 404, data: { message: 'task not found' } }
-    task.status = 'approved'
+    const action = String(request.body?.action ?? '')
+    if (action !== 'approve' && action !== 'return_to_design') {
+      return { status: 400, data: { code: 'INVALID_REQUEST', message: 'invalid audit action' } }
+    }
+    task.status = action === 'approve' ? 'completed' : 'in_progress'
     task.updated_at = nowISO()
-    updateModuleState(taskId, 'audit', 'approved')
-    updateModuleState(taskId, 'warehouse', 'pending')
+    updateModuleState(taskId, 'audit', action === 'approve' ? 'closed' : 'pending_claim')
+    if (action === 'return_to_design') updateModuleState(taskId, 'design', 'in_progress')
     pushTaskEvent({
       task_id: taskId,
       module_key: 'audit',
-      event_type: 'approved',
-      payload: withMockEventPayload(request.body),
-    })
-    return { status: 200, data: { id: task.id, status: task.status } }
-  }
-
-  if (request.method === 'POST' && request.path.match(/^\/v1\/tasks\/[^/]+\/audit\/reject$/)) {
-    const taskId = request.path.split('/')[3] ?? ''
-    const task = getTaskOr404(taskId)
-    if (!task) return { status: 404, data: { message: 'task not found' } }
-    task.status = 'rejected'
-    task.updated_at = nowISO()
-    updateModuleState(taskId, 'audit', 'rejected')
-    updateModuleState(taskId, task.task_type === 'regular_customization' || task.task_type === 'customer_customization' ? 'customization' : 'design', 'pending_claim')
-    pushTaskEvent({
-      task_id: taskId,
-      module_key: 'audit',
-      event_type: 'rejected',
-      payload: withMockEventPayload(request.body),
-    })
-    return { status: 200, data: { id: task.id, status: task.status } }
-  }
-
-  if (request.method === 'POST' && request.path.match(/^\/v1\/tasks\/[^/]+\/warehouse\/receive$/)) {
-    const taskId = request.path.split('/')[3] ?? ''
-    const task = getTaskOr404(taskId)
-    if (!task) return { status: 404, data: { message: 'task not found' } }
-    task.status = 'in_progress'
-    task.updated_at = nowISO()
-    updateModuleState(taskId, 'warehouse', 'in_progress')
-    pushTaskEvent({
-      task_id: taskId,
-      module_key: 'warehouse',
-      event_type: 'received',
-      payload: withMockEventPayload(request.body),
-    })
-    return { status: 200, data: { id: task.id, status: task.status, warehouse_status: 'received' } }
-  }
-
-  if (request.method === 'POST' && request.path.match(/^\/v1\/tasks\/[^/]+\/warehouse\/complete$/)) {
-    const taskId = request.path.split('/')[3] ?? ''
-    const task = getTaskOr404(taskId)
-    if (!task) return { status: 404, data: { message: 'task not found' } }
-    task.status = 'completed'
-    task.updated_at = nowISO()
-    updateModuleState(taskId, 'warehouse', 'closed')
-    pushTaskEvent({
-      task_id: taskId,
-      module_key: 'warehouse',
-      event_type: 'archived',
-      payload: withMockEventPayload(request.body),
-    })
-    return { status: 200, data: { id: task.id, status: task.status } }
-  }
-
-  if (request.method === 'POST' && request.path.match(/^\/v1\/tasks\/[^/]+\/warehouse\/reject$/)) {
-    const taskId = request.path.split('/')[3] ?? ''
-    const task = getTaskOr404(taskId)
-    if (!task) return { status: 404, data: { message: 'task not found' } }
-    task.status = 'rejected'
-    task.updated_at = nowISO()
-    updateModuleState(taskId, 'warehouse', 'rejected')
-    pushTaskEvent({
-      task_id: taskId,
-      module_key: 'warehouse',
-      event_type: 'rejected',
-      payload: withMockEventPayload(request.body),
-    })
-    return { status: 200, data: { id: task.id, status: task.status } }
-  }
-
-  if (request.method === 'POST' && request.path.match(/^\/v1\/tasks\/[^/]+\/close$/)) {
-    const taskId = request.path.split('/')[3] ?? ''
-    const task = getTaskOr404(taskId)
-    if (!task) return { status: 404, data: { message: 'task not found' } }
-    task.status = 'closed'
-    task.updated_at = nowISO()
-    updateModuleState(taskId, 'warehouse', 'closed')
-    pushTaskEvent({
-      task_id: taskId,
-      module_key: 'warehouse',
-      event_type: 'close_task',
+      event_type: action === 'approve' ? 'task.closed' : 'task.audit.returned_to_design',
       payload: withMockEventPayload(request.body),
     })
     return { status: 200, data: { id: task.id, status: task.status } }
@@ -703,21 +619,17 @@ export const tasksHandler: MockHandler = (request) => {
     const taskId = request.path.split('/')[3] ?? ''
     const task = mockTasks.find((item) => item.id === taskId)
     if (!task) return { status: 404, data: { message: 'task not found' } }
-    const force = Boolean(request.body?.force)
-    if (!force) {
-      const hasClaimedModule = listTaskModules(taskId).some((module) => Boolean(module.claimed_by))
-      if (hasClaimedModule) {
-        return {
-          status: 409,
-          data: {
-            code: 'task_already_claimed',
-            message: 'task already claimed by another actor',
-          },
-        }
+    const hasClaimedModule = listTaskModules(taskId).some((module) => Boolean(module.claimed_by))
+    if (hasClaimedModule) {
+      return {
+        status: 409,
+        data: {
+          code: 'task_already_claimed',
+          message: 'task already claimed by another actor',
+        },
       }
     }
-    const nextStatus: MockTaskStatus = force ? 'closed' : 'cancelled'
-    task.status = nextStatus
+    task.status = 'cancelled'
     task.updated_at = nowISO()
     for (const m of mockTaskModules.filter((x) => x.task_id === taskId)) {
       m.state = 'closed'
@@ -726,7 +638,7 @@ export const tasksHandler: MockHandler = (request) => {
     pushTaskEvent({
       task_id: taskId,
       module_key: 'basic_info',
-      event_type: force ? 'forcibly_closed' : 'task_cancelled',
+      event_type: 'task.cancelled',
       payload: withMockEventPayload({ reason: String(request.body?.reason ?? '') }),
     })
     return { status: 200, data: { id: task.id, status: task.status } }

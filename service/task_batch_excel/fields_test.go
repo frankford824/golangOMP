@@ -38,11 +38,6 @@ func TestFieldsAlignWithValidateBatchTaskCreateRequest(t *testing.T) {
 	}{
 		{domain.TaskTypeNewProductDevelopment, "product_name"},
 		{domain.TaskTypeNewProductDevelopment, "design_requirement"},
-		{domain.TaskTypePurchaseTask, "product_name"},
-		{domain.TaskTypePurchaseTask, "category_code"},
-		{domain.TaskTypePurchaseTask, "cost_price_mode"},
-		{domain.TaskTypePurchaseTask, "quantity"},
-		{domain.TaskTypePurchaseTask, "base_sale_price"},
 	}
 	for _, tc := range cases {
 		t.Run(string(tc.taskType)+"/"+tc.fieldKey, func(t *testing.T) {
@@ -61,7 +56,7 @@ func TestFieldsAlignWithValidateBatchTaskCreateRequest(t *testing.T) {
 }
 
 func TestViolationCodeDictionaryAligns(t *testing.T) {
-	for _, taskType := range []domain.TaskType{domain.TaskTypeNewProductDevelopment, domain.TaskTypePurchaseTask} {
+	for _, taskType := range []domain.TaskType{domain.TaskTypeNewProductDevelopment} {
 		fields, _ := FieldsForTaskType(taskType)
 		for _, field := range fields {
 			if field.Required && field.ViolationCodes.Missing != "missing_required_field" {
@@ -81,8 +76,11 @@ func TestTemplateGenerateNPD(t *testing.T) {
 	assertTemplateHeaders(t, domain.TaskTypeNewProductDevelopment)
 }
 
-func TestTemplateGeneratePT(t *testing.T) {
-	assertTemplateHeaders(t, domain.TaskTypePurchaseTask)
+func TestTemplateRejectsRetiredPurchaseTask(t *testing.T) {
+	_, appErr := NewTemplateService().Generate(t.Context(), domain.TaskTypePurchaseTask)
+	if appErr == nil || appErr.Code != domain.ErrCodeInvalidRequest {
+		t.Fatalf("Generate appErr = %#v, want invalid request", appErr)
+	}
 }
 
 func TestParseExcelSupportsTemplateReferenceColumns(t *testing.T) {
@@ -695,28 +693,15 @@ func testWorkbookWithDualIIDColumns(t *testing.T, primaryIID string, legacyIID s
 	return buf.Bytes()
 }
 
-func validRowValues(taskType domain.TaskType, idx int) map[string]string {
-	values := map[string]string{
+func validRowValues(_ domain.TaskType, idx int) map[string]string {
+	return map[string]string{
 		"product_name":       "产品" + strconv.Itoa(idx),
 		"design_requirement": "出单画图",
 	}
-	if taskType == domain.TaskTypePurchaseTask {
-		values = map[string]string{
-			"product_name":    "采购产品",
-			"category_code":   "CAT",
-			"cost_price_mode": string(domain.CostPriceModeManual),
-			"quantity":        "2",
-			"base_sale_price": "10.5",
-			"purchase_sku":    "PT-SKU-" + strconv.Itoa(idx),
-			"variant_json":    `{"idx":` + strconv.Itoa(idx) + `}`,
-		}
-	}
-	return values
 }
 
 func hasViolation(violations []ParseViolation, fieldKey string, code string) bool {
 	fields, _ := FieldsForTaskType(domain.TaskTypeNewProductDevelopment)
-	fields = append(fields, ptFields...)
 	columns := map[string]bool{}
 	for _, field := range fields {
 		if field.Key == fieldKey {

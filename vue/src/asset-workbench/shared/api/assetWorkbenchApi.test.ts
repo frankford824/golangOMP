@@ -114,4 +114,25 @@ describe('assetWorkbenchApi resource-group downloads', () => {
 
     await expect(assetWorkbenchApi.downloadMaterialAsset({ id: 8, resource_group_id: 8 })).rejects.toThrow('没有可下载的最终成品')
   })
+
+  it('does not present a resource-group download URL as a preview URL', async () => {
+    postMock.mockResolvedValue({ data: { data: { items: [
+      { group_id: 8, revision_id: 70, revision_item_id: 701, task_id: 3, sort_order: 1, filename: 'source.psd', download_url: 'https://files/source' },
+    ] } } })
+    const { assetWorkbenchApi } = await import('./assetWorkbenchApi')
+
+    const unavailable = await assetWorkbenchApi.previewMaterialAsset({ id: 8, resource_group_id: 8 })
+    expect(unavailable.preview_available).toBe(false)
+    expect(unavailable.preview_url).toBeUndefined()
+    expect(unavailable.download_url).toBe('https://files/source')
+
+    const ready = await assetWorkbenchApi.previewMaterialAsset({
+      id: 8,
+      resource_group_id: 8,
+      preview_available: true,
+      preview_url: 'https://previews/cover.webp',
+    })
+    expect(ready.preview_available).toBe(true)
+    expect(ready.preview_url).toBe('https://previews/cover.webp')
+  })
 })

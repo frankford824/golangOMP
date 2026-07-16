@@ -92,7 +92,7 @@ describe('V1 mock E2E flow', () => {
     expect(Number(data.total ?? 0)).toBeGreaterThanOrEqual(items.length)
   })
 
-  it('cancel returns 409 when task already claimed, force closes it', async () => {
+  it('keeps claimed-task cancellation blocked even when a legacy force flag is sent', async () => {
     const res = await tasksApi.list({ status: 'in_progress', page_size: 10 })
     const list = (res.data as { items?: Array<{ id: string }> }).items ?? []
     const taskId = list[0]?.id
@@ -108,8 +108,16 @@ describe('V1 mock E2E flow', () => {
       if (status === 409) conflict = true
     }
     expect(conflict).toBe(true)
-    const forced = await tasksApi.cancel(taskId, { reason: 'admin force close', force: true })
-    expect((forced.data as { status?: string }).status).toBe('closed')
+    let forcedConflict = false
+    try {
+      await tasksApi.cancel(taskId, { reason: 'legacy force flag must not bypass the workflow', force: true })
+    } catch (err) {
+      const status =
+        (err as { status?: number; response?: { status?: number } }).status ??
+        (err as { response?: { status?: number } }).response?.status
+      if (status === 409) forcedConflict = true
+    }
+    expect(forcedConflict).toBe(true)
   })
 
   it('excel batch preview returns steps, preview rows, and violations', async () => {

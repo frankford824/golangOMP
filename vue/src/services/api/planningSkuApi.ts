@@ -105,4 +105,23 @@ export const planningSkuApi = {
   exportTaskURL(taskId: number): string {
     return `/v1/tasks/${taskId}/planning-skus/export.xlsx`
   },
+  async retryFailedERP(taskId: number): Promise<{ queued: number; resync: false }> {
+    return unwrap(await http.post(`/v1/tasks/${taskId}/planning-skus/erp-retry`, {}))
+  },
+  async exportSelection(taskSkuItemIds: number[]): Promise<void> {
+    const response = await http.post('/v1/planning-skus/export.xlsx', {
+      task_sku_item_ids: taskSkuItemIds,
+    }, { responseType: 'blob' })
+    const blob = response.data instanceof Blob
+      ? response.data
+      : new Blob([response.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+    const objectURL = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = objectURL
+    link.download = `策划SKU_勾选结果_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}.xlsx`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    URL.revokeObjectURL(objectURL)
+  },
 }

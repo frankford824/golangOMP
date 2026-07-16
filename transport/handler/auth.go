@@ -84,24 +84,21 @@ func NewAuthHandler(svc service.IdentityService, assetCookieDomains ...string) *
 }
 
 type registerReq struct {
-	Username           string    `json:"username" binding:"required"`
-	Account            string    `json:"account"`
-	DisplayName        string    `json:"display_name"`
-	Name               string    `json:"name"`
-	Department         string    `json:"department" binding:"required"`
-	Team               string    `json:"team"`
-	Group              string    `json:"group"`
-	Mobile             string    `json:"mobile" binding:"required"`
-	Phone              string    `json:"phone"`
-	Email              string    `json:"email"`
-	Password           string    `json:"password" binding:"required"`
-	AdminKey           string    `json:"admin_key"`
-	SecretKey          string    `json:"secret_key"`
-	ManagedDepartments *[]string `json:"managed_departments"`
+	Username    string `json:"username"`
+	Account     string `json:"account"`
+	DisplayName string `json:"display_name"`
+	Name        string `json:"name"`
+	Department  string `json:"department" binding:"required"`
+	Team        string `json:"team"`
+	Group       string `json:"group"`
+	Mobile      string `json:"mobile" binding:"required"`
+	Phone       string `json:"phone"`
+	Email       string `json:"email"`
+	Password    string `json:"password" binding:"required"`
 }
 
 type loginReq struct {
-	Username string `json:"username" binding:"required"`
+	Username string `json:"username"`
 	Account  string `json:"account"`
 	Password string `json:"password" binding:"required"`
 }
@@ -119,16 +116,18 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
 		return
 	}
+	if firstNonEmpty(req.Account, req.Username) == "" {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "account is required", nil))
+		return
+	}
 	result, appErr := h.svc.Register(c.Request.Context(), service.RegisterUserParams{
-		Username:           firstNonEmpty(req.Account, req.Username),
-		DisplayName:        firstNonEmpty(req.Name, req.DisplayName),
-		Department:         domain.Department(req.Department),
-		Team:               firstNonEmpty(req.Group, req.Team),
-		Mobile:             firstNonEmpty(req.Phone, req.Mobile),
-		Email:              req.Email,
-		Password:           req.Password,
-		AdminKey:           firstNonEmpty(req.SecretKey, req.AdminKey),
-		ManagedDepartments: req.ManagedDepartments,
+		Username:    firstNonEmpty(req.Account, req.Username),
+		DisplayName: firstNonEmpty(req.Name, req.DisplayName),
+		Department:  domain.Department(req.Department),
+		Team:        firstNonEmpty(req.Group, req.Team),
+		Mobile:      firstNonEmpty(req.Phone, req.Mobile),
+		Email:       req.Email,
+		Password:    req.Password,
 	})
 	if appErr != nil {
 		respondError(c, appErr)
@@ -151,6 +150,10 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	var req loginReq
 	if err := c.ShouldBindJSON(&req); err != nil {
 		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	if firstNonEmpty(req.Account, req.Username) == "" {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "username is required", nil))
 		return
 	}
 	result, appErr := h.svc.Login(c.Request.Context(), service.LoginParams{

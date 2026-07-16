@@ -21,7 +21,7 @@
 ### 简介
 支持方法: GET。
 
-- `GET`: Downloads the batch-create workbook. For `new_product_development`, the Items sheet requires only `产品名称` and `设计要求`; `产品款式编码` (mapped to `batch_items[].product_i_id`) and `参考图` are optional but recommended when the user wants row-scoped ERP filing and image handoff. Users may paste one or more reference images into the same row; `parse-excel` extracts and uploads them server-side. For backward compatibility, `parse-excel` also accepts legacy column `商品编码`. For `purchase_task`, purchase-specific fields remain, and `产品款式编码`/`参考图` are also supported as optional row-scoped fields.
+- `GET`: Downloads the batch-create workbook for `new_product_development`. The Items sheet requires `产品名称` and `设计要求`; `产品款式编码` (mapped to `batch_items[].product_i_id`) and `参考图` are optional but recommended when the user wants row-scoped ERP filing and image handoff. Users may paste one or more reference images into the same row; `parse-excel` extracts and uploads them server-side. Planning SKU imports use `/v1/tasks/sku-planning/parse-excel` instead.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -33,7 +33,7 @@
 
 | 参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---|---|
-| `task_type` | query | enum(new_product_development/purchase_task) | 否 | - |
+| `task_type` | query | enum(new_product_development) | 否 | - |
 
 请求体: 无请求体。
 
@@ -91,7 +91,7 @@ Content-Type: `multipart/form-data`
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `task_type` | enum(new_product_development/purchase_task) | 是 | - |
+| `task_type` | enum(new_product_development) | 是 | - |
 | `file` | string | 是 | - |
 
 ### 响应体 schema

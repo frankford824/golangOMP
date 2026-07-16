@@ -30,7 +30,7 @@ const revision = (group: ResourceGroup): ResourceRevision | null | undefined => 
 const finals = (group: ResourceGroup) => [...(revision(group)?.items || [])].sort((a, b) => a.sort_order - b.sort_order)
 const scopeLabel = (group: ResourceGroup) => group.scope_kind === 'retouch_requirement' ? `修图需求 ${group.retouch_requirement_id}` : '任务资源'
 const laneLabel = (lane?: string) => ({ normal: '常规', customization: '定制', retouch: '修图' }[lane || ''] || '')
-const coverURL = (item: ResourceRevisionItem) => item.file?.preview_url || item.file?.download_url || ''
+const coverURL = (item: ResourceRevisionItem) => item.file?.preview_url || ''
 const fileInitial = (name?: string) => (name || '文件').slice(0, 2).toUpperCase()
 function markImageBroken(id: number) { brokenImages.value = new Set(brokenImages.value).add(id) }
 function openGroup(id: number) { void router.push(`/asset-center/${id}`) }

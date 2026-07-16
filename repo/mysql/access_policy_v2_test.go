@@ -2,12 +2,41 @@ package mysqlrepo
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 
 	"github.com/DATA-DOG/go-sqlmock"
 
 	"workflow/domain"
 )
+
+func TestEnsureExplicitRoleAssignmentUsesStableRoleCodeAndCallerTransaction(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	repository := NewAccessPolicyRepo(New(db))
+	mock.ExpectBegin()
+	sqlTx, err := db.BeginTx(context.Background(), &sql.TxOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx := &MySQLTx{tx: sqlTx}
+	mock.ExpectQuery("SELECT id\\s+FROM auth_roles").WithArgs("member").WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(8)))
+	mock.ExpectExec("INSERT INTO auth_user_role_assignments").WithArgs(int64(42), int64(8), domain.AccessScopeSelf).WillReturnResult(sqlmock.NewResult(1, 1))
+
+	if err := repository.EnsureExplicitRoleAssignment(context.Background(), tx, 42, "member", domain.AccessScopeSelf); err != nil {
+		t.Fatalf("EnsureExplicitRoleAssignment() error = %v", err)
+	}
+	mock.ExpectRollback()
+	if err := sqlTx.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
 
 func TestEffectiveAccessInjectsOrgPolicySelectedSubject(t *testing.T) {
 	db, mock, err := sqlmock.New()

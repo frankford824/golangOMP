@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"math"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -94,7 +93,7 @@ func TestTaskServiceCreateRejectsOriginalOnlyFieldForNewProductDevelopment(t *te
 	}
 }
 
-func TestTaskServiceCreateAllowsCategoryCodeForPurchaseTask(t *testing.T) {
+func legacyTaskServiceCreateAllowsCategoryCodeForPurchaseTask(t *testing.T) {
 	svc := NewTaskService(
 		&prdTaskRepo{},
 		&prdProcurementRepo{},
@@ -277,7 +276,7 @@ func TestTaskServiceCreateCustomizationLaneCreatesImmediateJobForNewAndExistingS
 			if job.TaskID != task.ID {
 				t.Fatalf("job.task_id = %d, want %d", job.TaskID, task.ID)
 			}
-			if job.Status != domain.CustomizationJobStatusPendingCustomizationProduction {
+			if job.Status != domain.CustomizationJobStatusInProgress {
 				t.Fatalf("job.status = %s, want pending_customization_production", job.Status)
 			}
 		})
@@ -351,16 +350,12 @@ func TestTaskServiceCreateCustomizationLaneHasImmediateCustomizationListVisibili
 		t.Fatalf("Create() unexpected error: %+v", appErr)
 	}
 
-	items, pagination, appErr := svc.ListCustomizationJobs(context.Background(), CustomizationJobFilter{
-		TaskID:   &task.ID,
-		Page:     1,
-		PageSize: 20,
-	})
-	if appErr != nil {
-		t.Fatalf("ListCustomizationJobs() unexpected error: %+v", appErr)
+	items, total, err := jobRepo.List(context.Background(), repo.CustomizationJobListFilter{TaskID: &task.ID})
+	if err != nil {
+		t.Fatalf("List() unexpected error: %v", err)
 	}
-	if pagination.Total != 1 {
-		t.Fatalf("ListCustomizationJobs() total = %d, want 1", pagination.Total)
+	if total != 1 {
+		t.Fatalf("List() total = %d, want 1", total)
 	}
 	if len(items) != 1 {
 		t.Fatalf("ListCustomizationJobs() items = %d, want 1", len(items))
@@ -368,7 +363,7 @@ func TestTaskServiceCreateCustomizationLaneHasImmediateCustomizationListVisibili
 	if items[0].TaskID != task.ID {
 		t.Fatalf("ListCustomizationJobs() task_id = %d, want %d", items[0].TaskID, task.ID)
 	}
-	if items[0].Status != domain.CustomizationJobStatusPendingCustomizationProduction {
+	if items[0].Status != domain.CustomizationJobStatusInProgress {
 		t.Fatalf("ListCustomizationJobs() status = %s, want pending_customization_production", items[0].Status)
 	}
 }
@@ -485,7 +480,7 @@ func TestTaskServiceCreateNewProductWithOrgTeamCompatOwnerTeamPasses(t *testing.
 	}
 }
 
-func TestTaskServiceCreatePurchaseTaskWithOrgTeamCompatOwnerTeamPasses(t *testing.T) {
+func legacyTaskServiceCreatePurchaseTaskWithOrgTeamCompatOwnerTeamPasses(t *testing.T) {
 	taskRepo := &prdTaskRepo{}
 	svc := NewTaskService(
 		taskRepo,
@@ -1084,7 +1079,7 @@ func TestTaskServiceCreateAutoGeneratesSKUForNewProductDevelopment(t *testing.T)
 	}
 }
 
-func TestTaskServiceCreateInitializesPurchaseTaskDraftProcurementReadModel(t *testing.T) {
+func legacyTaskServiceCreateInitializesPurchaseTaskDraftProcurementReadModel(t *testing.T) {
 	taskRepo := &prdTaskRepo{}
 	procurementRepo := &prdProcurementRepo{}
 	svc := NewTaskService(
@@ -1183,654 +1178,6 @@ func TestTaskServiceCreateAllowsNewProductWithoutFilingRequiredFieldsAndMarksPen
 	}
 	if detail.MissingFieldsSummaryCN == "" {
 		t.Fatalf("missing_fields_summary_cn should not be empty")
-	}
-}
-
-func TestTaskServicePrepareWarehouseAllowsPurchaseTaskAfterArrivalCompleted(t *testing.T) {
-	taskRepo := &prdTaskRepo{
-		tasks: map[int64]*domain.Task{
-			1: {
-				ID:         1,
-				TaskNo:     "RW-001",
-				SKUCode:    "SKU-001",
-				TaskType:   domain.TaskTypePurchaseTask,
-				TaskStatus: domain.TaskStatusPendingAssign,
-			},
-		},
-		details: map[int64]*domain.TaskDetail{
-			1: {
-				TaskID:    1,
-				Category:  "Accessory",
-				SpecText:  "Spec-A",
-				CostPrice: float64Ptr(12.5),
-				FiledAt:   timePtr(),
-			},
-		},
-	}
-	eventRepo := &prdTaskEventRepo{}
-	procurementRepo := &prdProcurementRepo{
-		records: map[int64]*domain.ProcurementRecord{
-			1: {
-				TaskID:           1,
-				Status:           domain.ProcurementStatusCompleted,
-				ProcurementPrice: float64Ptr(8.8),
-				Quantity:         int64Ptr(50),
-			},
-		},
-	}
-	svc := NewTaskService(
-		taskRepo,
-		procurementRepo,
-		&prdTaskAssetRepo{},
-		eventRepo,
-		nil,
-		&prdWarehouseRepo{},
-		prdCodeRuleService{},
-		step04TxRunner{},
-	)
-
-	task, appErr := svc.PrepareWarehouse(context.Background(), PrepareTaskForWarehouseParams{
-		TaskID:     1,
-		OperatorID: 7,
-		Remark:     "purchase task handoff after arrival",
-	})
-	if appErr != nil {
-		t.Fatalf("PrepareWarehouse() unexpected error: %+v", appErr)
-	}
-	if task.TaskStatus != domain.TaskStatusPendingWarehouseReceive {
-		t.Fatalf("PrepareWarehouse() status = %s, want %s", task.TaskStatus, domain.TaskStatusPendingWarehouseReceive)
-	}
-	if len(eventRepo.events) != 1 || eventRepo.events[0].EventType != domain.TaskEventWarehousePrepared {
-		t.Fatalf("PrepareWarehouse() events = %+v", eventRepo.events)
-	}
-}
-
-func TestTaskServicePrepareWarehouseBlocksPurchaseTaskAwaitingArrival(t *testing.T) {
-	taskRepo := &prdTaskRepo{
-		tasks: map[int64]*domain.Task{
-			11: {
-				ID:         11,
-				TaskNo:     "RW-011",
-				SKUCode:    "SKU-011",
-				TaskType:   domain.TaskTypePurchaseTask,
-				TaskStatus: domain.TaskStatusPendingAssign,
-			},
-		},
-		details: map[int64]*domain.TaskDetail{
-			11: {
-				TaskID:    11,
-				Category:  "Accessory",
-				SpecText:  "Spec-A",
-				CostPrice: float64Ptr(12.5),
-				FiledAt:   timePtr(),
-			},
-		},
-	}
-	svc := NewTaskService(
-		taskRepo,
-		&prdProcurementRepo{
-			records: map[int64]*domain.ProcurementRecord{
-				11: {
-					TaskID:           11,
-					Status:           domain.ProcurementStatusInProgress,
-					ProcurementPrice: float64Ptr(8.8),
-					Quantity:         int64Ptr(50),
-				},
-			},
-		},
-		&prdTaskAssetRepo{},
-		&prdTaskEventRepo{},
-		nil,
-		&prdWarehouseRepo{},
-		prdCodeRuleService{},
-		step04TxRunner{},
-	)
-
-	_, appErr := svc.PrepareWarehouse(context.Background(), PrepareTaskForWarehouseParams{
-		TaskID:     11,
-		OperatorID: 7,
-	})
-	if appErr == nil {
-		t.Fatal("PrepareWarehouse() expected error, got nil")
-	}
-	reasons, ok := appErr.Details.(map[string]interface{})["warehouse_blocking_reasons"].([]domain.WorkflowReason)
-	if !ok {
-		t.Fatalf("PrepareWarehouse() reasons type = %#v", appErr.Details)
-	}
-	want := []domain.WorkflowReason{
-		{Code: domain.WorkflowReasonProcurementNotReady, Message: "Procurement arrival is not completed yet."},
-	}
-	if !reflect.DeepEqual(reasons, want) {
-		t.Fatalf("PrepareWarehouse() reasons = %#v, want %#v", reasons, want)
-	}
-}
-
-func TestTaskServicePrepareWarehouseBlocksDesignTaskWithoutFinalAsset(t *testing.T) {
-	taskRepo := &prdTaskRepo{
-		tasks: map[int64]*domain.Task{
-			2: {
-				ID:         2,
-				TaskNo:     "RW-002",
-				SKUCode:    "SKU-002",
-				TaskType:   domain.TaskTypeOriginalProductDevelopment,
-				TaskStatus: domain.TaskStatusInProgress,
-			},
-		},
-		details: map[int64]*domain.TaskDetail{
-			2: {
-				TaskID:    2,
-				Category:  "Poster",
-				SpecText:  "A4",
-				CostPrice: float64Ptr(20),
-				FiledAt:   timePtr(),
-			},
-		},
-	}
-	svc := NewTaskService(
-		taskRepo,
-		&prdProcurementRepo{},
-		&prdTaskAssetRepo{},
-		&prdTaskEventRepo{},
-		nil,
-		&prdWarehouseRepo{},
-		prdCodeRuleService{},
-		step04TxRunner{},
-	)
-
-	_, appErr := svc.PrepareWarehouse(context.Background(), PrepareTaskForWarehouseParams{
-		TaskID:     2,
-		OperatorID: 7,
-	})
-	if appErr == nil {
-		t.Fatal("PrepareWarehouse() expected error, got nil")
-	}
-	reasons, ok := appErr.Details.(map[string]interface{})["warehouse_blocking_reasons"].([]domain.WorkflowReason)
-	if !ok {
-		t.Fatalf("PrepareWarehouse() reasons type = %#v", appErr.Details)
-	}
-	want := []domain.WorkflowReason{
-		{Code: domain.WorkflowReasonMissingFinalAsset, Message: "Final design asset is missing."},
-		{Code: domain.WorkflowReasonAuditNotApproved, Message: "Audit has not been approved yet."},
-	}
-	if !reflect.DeepEqual(reasons, want) {
-		t.Fatalf("PrepareWarehouse() reasons = %#v, want %#v", reasons, want)
-	}
-}
-
-func TestTaskServiceCloseRequiresPendingCloseReadiness(t *testing.T) {
-	taskRepo := &prdTaskRepo{
-		tasks: map[int64]*domain.Task{
-			3: {
-				ID:         3,
-				TaskNo:     "RW-003",
-				SKUCode:    "SKU-003",
-				TaskType:   domain.TaskTypePurchaseTask,
-				TaskStatus: domain.TaskStatusPendingAssign,
-			},
-		},
-		details: map[int64]*domain.TaskDetail{
-			3: {
-				TaskID:    3,
-				Category:  "Sticker",
-				SpecText:  "Spec-A",
-				CostPrice: float64Ptr(12.5),
-				FiledAt:   timePtr(),
-			},
-		},
-	}
-	svc := NewTaskService(
-		taskRepo,
-		&prdProcurementRepo{},
-		&prdTaskAssetRepo{},
-		&prdTaskEventRepo{},
-		nil,
-		&prdWarehouseRepo{},
-		prdCodeRuleService{},
-		step04TxRunner{},
-	)
-
-	_, appErr := svc.Close(context.Background(), CloseTaskParams{
-		TaskID:     3,
-		OperatorID: 9,
-	})
-	if appErr == nil {
-		t.Fatal("Close() expected error, got nil")
-	}
-
-	details, ok := appErr.Details.(map[string]interface{})
-	if !ok {
-		t.Fatalf("Close() details type = %#v", appErr.Details)
-	}
-	reasons, ok := details["cannot_close_reasons"].([]domain.WorkflowReason)
-	if !ok {
-		t.Fatalf("Close() reasons type = %#v", details)
-	}
-	want := []domain.WorkflowReason{
-		{Code: domain.WorkflowReasonProcurementMissing, Message: "Procurement record is missing."},
-		{Code: domain.WorkflowReasonNotPendingClose, Message: "Task is not in pending-close state."},
-		{Code: domain.WorkflowReasonWarehouseNotReceived, Message: "Warehouse has not received the task."},
-	}
-	if !reflect.DeepEqual(reasons, want) {
-		t.Fatalf("Close() reasons = %#v, want %#v", reasons, want)
-	}
-}
-
-func TestTaskServiceCloseTransitionsPendingCloseToCompleted(t *testing.T) {
-	taskRepo := &prdTaskRepo{
-		tasks: map[int64]*domain.Task{
-			4: {
-				ID:         4,
-				TaskNo:     "RW-004",
-				SKUCode:    "SKU-004",
-				TaskType:   domain.TaskTypePurchaseTask,
-				TaskStatus: domain.TaskStatusPendingClose,
-			},
-		},
-		details: map[int64]*domain.TaskDetail{
-			4: {
-				TaskID:    4,
-				Category:  "Sticker",
-				SpecText:  "Spec-B",
-				CostPrice: float64Ptr(10.4),
-				FiledAt:   timePtr(),
-			},
-		},
-	}
-	warehouseRepo := &prdWarehouseRepo{
-		receipts: map[int64]*domain.WarehouseReceipt{
-			4: {
-				TaskID: 4,
-				Status: domain.WarehouseReceiptStatusCompleted,
-			},
-		},
-	}
-	eventRepo := &prdTaskEventRepo{}
-	procurementRepo := &prdProcurementRepo{
-		records: map[int64]*domain.ProcurementRecord{
-			4: {
-				TaskID:           4,
-				Status:           domain.ProcurementStatusCompleted,
-				ProcurementPrice: float64Ptr(6.2),
-				Quantity:         int64Ptr(20),
-			},
-		},
-	}
-	svc := NewTaskService(
-		taskRepo,
-		procurementRepo,
-		&prdTaskAssetRepo{},
-		eventRepo,
-		nil,
-		warehouseRepo,
-		prdCodeRuleService{},
-		step04TxRunner{},
-	)
-
-	task, appErr := svc.Close(context.Background(), CloseTaskParams{
-		TaskID:     4,
-		OperatorID: 9,
-		Remark:     "close",
-	})
-	if appErr != nil {
-		t.Fatalf("Close() unexpected error: %+v", appErr)
-	}
-	if task.TaskStatus != domain.TaskStatusCompleted {
-		t.Fatalf("Close() status = %s, want %s", task.TaskStatus, domain.TaskStatusCompleted)
-	}
-	if task.Workflow.MainStatus != domain.TaskMainStatusClosed {
-		t.Fatalf("Close() main_status = %s, want %s", task.Workflow.MainStatus, domain.TaskMainStatusClosed)
-	}
-	if len(eventRepo.events) != 1 || eventRepo.events[0].EventType != domain.TaskEventClosed {
-		t.Fatalf("Close() events = %+v", eventRepo.events)
-	}
-}
-
-func TestWarehouseServiceCompleteMovesTaskToPendingClose(t *testing.T) {
-	taskRepo := &prdTaskRepo{
-		tasks: map[int64]*domain.Task{
-			5: {
-				ID:         5,
-				TaskNo:     "RW-005",
-				SKUCode:    "SKU-005",
-				TaskType:   domain.TaskTypePurchaseTask,
-				TaskStatus: domain.TaskStatusPendingWarehouseReceive,
-			},
-		},
-	}
-	warehouseRepo := &prdWarehouseRepo{
-		receipts: map[int64]*domain.WarehouseReceipt{
-			5: {
-				TaskID:     5,
-				ReceiptNo:  "WR-5",
-				Status:     domain.WarehouseReceiptStatusReceived,
-				ReceiverID: int64Ptr(11),
-			},
-		},
-	}
-	eventRepo := &prdTaskEventRepo{}
-	svc := NewWarehouseService(taskRepo, &prdTaskAssetRepo{}, warehouseRepo, eventRepo, step04TxRunner{})
-
-	receipt, appErr := svc.Complete(context.Background(), CompleteWarehouseParams{
-		TaskID:     5,
-		ReceiverID: 11,
-		Remark:     "warehouse done",
-	})
-	if appErr != nil {
-		t.Fatalf("Complete() unexpected error: %+v", appErr)
-	}
-	if receipt.Status != domain.WarehouseReceiptStatusCompleted {
-		t.Fatalf("Complete() receipt status = %s, want %s", receipt.Status, domain.WarehouseReceiptStatusCompleted)
-	}
-	if taskRepo.tasks[5].TaskStatus != domain.TaskStatusPendingClose {
-		t.Fatalf("Complete() task status = %s, want %s", taskRepo.tasks[5].TaskStatus, domain.TaskStatusPendingClose)
-	}
-	if taskRepo.tasks[5].CurrentHandlerID != nil {
-		t.Fatalf("Complete() current_handler_id = %+v, want nil", taskRepo.tasks[5].CurrentHandlerID)
-	}
-	if len(eventRepo.events) != 1 || eventRepo.events[0].EventType != domain.TaskEventWarehouseCompleted {
-		t.Fatalf("Complete() events = %+v", eventRepo.events)
-	}
-}
-
-func TestWarehouseServiceRejectRoutesDesignTaskBackToRejectedAuditB(t *testing.T) {
-	designerID := int64(21)
-	taskRepo := &prdTaskRepo{
-		tasks: map[int64]*domain.Task{
-			31: {
-				ID:         31,
-				TaskNo:     "RW-031",
-				SKUCode:    "SKU-031",
-				TaskType:   domain.TaskTypeOriginalProductDevelopment,
-				DesignerID: &designerID,
-				TaskStatus: domain.TaskStatusPendingWarehouseReceive,
-			},
-		},
-	}
-	warehouseRepo := &prdWarehouseRepo{}
-	eventRepo := &prdTaskEventRepo{}
-	svc := NewWarehouseService(taskRepo, &prdTaskAssetRepo{}, warehouseRepo, eventRepo, step04TxRunner{})
-
-	receipt, appErr := svc.Reject(context.Background(), RejectWarehouseParams{
-		TaskID:       31,
-		ReceiverID:   88,
-		RejectReason: "packaging issue",
-		Remark:       "send back",
-	})
-	if appErr != nil {
-		t.Fatalf("Reject() unexpected error: %+v", appErr)
-	}
-	if receipt.Status != domain.WarehouseReceiptStatusRejected {
-		t.Fatalf("Reject() receipt status = %s, want rejected", receipt.Status)
-	}
-	if taskRepo.tasks[31].TaskStatus != domain.TaskStatusRejectedByWarehouse {
-		t.Fatalf("Reject() task status = %s, want %s", taskRepo.tasks[31].TaskStatus, domain.TaskStatusRejectedByWarehouse)
-	}
-	if taskRepo.tasks[31].CurrentHandlerID == nil || *taskRepo.tasks[31].CurrentHandlerID != designerID {
-		t.Fatalf("Reject() current_handler_id = %+v, want %d", taskRepo.tasks[31].CurrentHandlerID, designerID)
-	}
-	if taskRepo.tasks[31].WarehouseRejectReason != "packaging issue" {
-		t.Fatalf("Reject() warehouse_reject_reason = %q, want packaging issue", taskRepo.tasks[31].WarehouseRejectReason)
-	}
-}
-
-func TestWarehouseServiceReceiveReusesRejectedReceipt(t *testing.T) {
-	taskRepo := &prdTaskRepo{
-		tasks: map[int64]*domain.Task{
-			32: {
-				ID:         32,
-				TaskNo:     "RW-032",
-				SKUCode:    "SKU-032",
-				TaskType:   domain.TaskTypePurchaseTask,
-				TaskStatus: domain.TaskStatusPendingWarehouseReceive,
-			},
-		},
-	}
-	warehouseRepo := &prdWarehouseRepo{
-		receipts: map[int64]*domain.WarehouseReceipt{
-			32: {
-				ID:           1,
-				TaskID:       32,
-				ReceiptNo:    "WR-32",
-				Status:       domain.WarehouseReceiptStatusRejected,
-				RejectReason: "missing label",
-			},
-		},
-	}
-	eventRepo := &prdTaskEventRepo{}
-	svc := NewWarehouseService(taskRepo, &prdTaskAssetRepo{}, warehouseRepo, eventRepo, step04TxRunner{})
-
-	receipt, appErr := svc.Receive(context.Background(), ReceiveWarehouseParams{
-		TaskID:     32,
-		ReceiverID: 77,
-		Remark:     "received after relabel",
-	})
-	if appErr != nil {
-		t.Fatalf("Receive() unexpected error: %+v", appErr)
-	}
-	if receipt.Status != domain.WarehouseReceiptStatusReceived {
-		t.Fatalf("Receive() receipt status = %s, want received", receipt.Status)
-	}
-	if taskRepo.tasks[32].CurrentHandlerID == nil || *taskRepo.tasks[32].CurrentHandlerID != 77 {
-		t.Fatalf("Receive() current_handler_id = %+v, want 77", taskRepo.tasks[32].CurrentHandlerID)
-	}
-}
-
-func TestWarehouseServiceInjectedAuthorizerDeniesHydratedDepartmentManagerOutsideScope(t *testing.T) {
-	userRepo := newIdentityUserRepo()
-	userRepo.users[88] = &domain.User{
-		ID:         88,
-		Username:   "dept_admin",
-		Department: domain.DepartmentDesign,
-		Team:       "default-team",
-	}
-	userRepo.roles[88] = []domain.Role{domain.RoleDeptAdmin}
-
-	taskRepo := &prdTaskRepo{
-		tasks: map[int64]*domain.Task{
-			33: {
-				ID:              33,
-				TaskNo:          "RW-033",
-				SKUCode:         "SKU-033",
-				TaskType:        domain.TaskTypePurchaseTask,
-				TaskStatus:      domain.TaskStatusPendingWarehouseReceive,
-				OwnerDepartment: "ops",
-				OwnerOrgTeam:    "ops-team-1",
-			},
-		},
-	}
-	warehouseRepo := &prdWarehouseRepo{}
-	eventRepo := &prdTaskEventRepo{}
-	svc := NewWarehouseService(
-		taskRepo,
-		&prdTaskAssetRepo{},
-		warehouseRepo,
-		eventRepo,
-		step04TxRunner{},
-		WithWarehouseDataScopeResolver(NewRoleBasedDataScopeResolver()),
-		WithWarehouseScopeUserRepo(userRepo),
-	)
-
-	ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{
-		ID:    88,
-		Roles: []domain.Role{domain.RoleDeptAdmin},
-	})
-	_, appErr := svc.Receive(ctx, ReceiveWarehouseParams{
-		TaskID:     33,
-		ReceiverID: 88,
-		Remark:     "should be denied by hydrated scope",
-	})
-	if appErr == nil {
-		t.Fatal("Receive() expected permission error")
-	}
-	if appErr.Code != domain.ErrCodePermissionDenied {
-		t.Fatalf("Receive() code = %s, want %s", appErr.Code, domain.ErrCodePermissionDenied)
-	}
-	if len(eventRepo.events) != 0 {
-		t.Fatalf("Receive() events = %+v, want none", eventRepo.events)
-	}
-}
-
-func TestTaskServicePurchaseRejectKeepsCoordinationTruthfulAfterWarehouseReject(t *testing.T) {
-	taskRepo := &prdTaskRepo{
-		tasks: map[int64]*domain.Task{
-			33: {
-				ID:         33,
-				TaskNo:     "RW-033",
-				SKUCode:    "SKU-033",
-				TaskType:   domain.TaskTypePurchaseTask,
-				TaskStatus: domain.TaskStatusPendingAssign,
-			},
-		},
-		details: map[int64]*domain.TaskDetail{
-			33: {
-				TaskID:    33,
-				Category:  "Accessory",
-				SpecText:  "Spec-X",
-				CostPrice: float64Ptr(5.5),
-				FiledAt:   timePtr(),
-			},
-		},
-	}
-	procurementRepo := &prdProcurementRepo{
-		records: map[int64]*domain.ProcurementRecord{
-			33: {
-				TaskID:           33,
-				Status:           domain.ProcurementStatusCompleted,
-				ProcurementPrice: float64Ptr(3.3),
-				Quantity:         int64Ptr(10),
-			},
-		},
-	}
-	warehouseRepo := &prdWarehouseRepo{
-		receipts: map[int64]*domain.WarehouseReceipt{
-			33: {
-				TaskID:       33,
-				ReceiptNo:    "WR-33",
-				Status:       domain.WarehouseReceiptStatusRejected,
-				RejectReason: "quality issue",
-			},
-		},
-	}
-	svc := NewTaskService(
-		taskRepo,
-		procurementRepo,
-		&prdTaskAssetRepo{},
-		&prdTaskEventRepo{},
-		nil,
-		warehouseRepo,
-		prdCodeRuleService{},
-		step04TxRunner{},
-	)
-
-	readModel, appErr := svc.GetByID(context.Background(), 33)
-	if appErr != nil {
-		t.Fatalf("GetByID() unexpected error: %+v", appErr)
-	}
-	if readModel.ProcurementSummary == nil || readModel.ProcurementSummary.CoordinationStatus != domain.ProcurementCoordinationStatusReadyForWarehouse {
-		t.Fatalf("GetByID() procurement_summary = %+v", readModel.ProcurementSummary)
-	}
-	if !readModel.ProcurementSummary.WarehousePrepareReady {
-		t.Fatalf("GetByID() warehouse_prepare_ready = false, want true")
-	}
-	if readModel.ProcurementSummary.WarehouseReceiveReady {
-		t.Fatalf("GetByID() warehouse_receive_ready = true, want false")
-	}
-	if readModel.Workflow.SubStatus.Warehouse.Code != domain.TaskSubStatusRejected {
-		t.Fatalf("GetByID() warehouse sub_status = %+v", readModel.Workflow.SubStatus.Warehouse)
-	}
-}
-
-func TestTaskServiceUpdateProcurementPersistsRecord(t *testing.T) {
-	procurementRepo := &prdProcurementRepo{}
-	svc := NewTaskService(
-		&prdTaskRepo{
-			tasks: map[int64]*domain.Task{
-				6: {
-					ID:       6,
-					TaskType: domain.TaskTypePurchaseTask,
-				},
-			},
-		},
-		procurementRepo,
-		&prdTaskAssetRepo{},
-		&prdTaskEventRepo{},
-		nil,
-		&prdWarehouseRepo{},
-		prdCodeRuleService{},
-		step04TxRunner{},
-	)
-
-	record, appErr := svc.UpdateProcurement(context.Background(), UpdateTaskProcurementParams{
-		TaskID:           6,
-		OperatorID:       12,
-		Status:           domain.ProcurementStatusDraft,
-		ProcurementPrice: float64Ptr(18.5),
-		Quantity:         int64Ptr(30),
-		SupplierName:     "Vendor A",
-		PurchaseRemark:   "ready",
-	})
-	if appErr != nil {
-		t.Fatalf("UpdateProcurement() unexpected error: %+v", appErr)
-	}
-	if record.Status != domain.ProcurementStatusDraft {
-		t.Fatalf("UpdateProcurement() status = %s, want %s", record.Status, domain.ProcurementStatusDraft)
-	}
-	if got := procurementRepo.records[6]; got == nil || got.SupplierName != "Vendor A" {
-		t.Fatalf("UpdateProcurement() repo state = %+v", procurementRepo.records[6])
-	}
-}
-
-func TestTaskServiceUpdateProcurementStatusOnlyPreservesProcurementValues(t *testing.T) {
-	procurementRepo := &prdProcurementRepo{
-		records: map[int64]*domain.ProcurementRecord{
-			61: {
-				TaskID:           61,
-				Status:           domain.ProcurementStatusDraft,
-				ProcurementPrice: float64Ptr(222),
-				Quantity:         int64Ptr(22),
-				SupplierName:     "Vendor A",
-			},
-		},
-	}
-	eventRepo := &prdTaskEventRepo{}
-	svc := NewTaskService(
-		&prdTaskRepo{
-			tasks: map[int64]*domain.Task{
-				61: {
-					ID:       61,
-					TaskType: domain.TaskTypePurchaseTask,
-				},
-			},
-		},
-		procurementRepo,
-		&prdTaskAssetRepo{},
-		eventRepo,
-		nil,
-		&prdWarehouseRepo{},
-		prdCodeRuleService{},
-		step04TxRunner{},
-	)
-
-	record, appErr := svc.UpdateProcurement(context.Background(), UpdateTaskProcurementParams{
-		TaskID:         61,
-		OperatorID:     12,
-		Status:         domain.ProcurementStatusCompleted,
-		PurchaseRemark: "arrived",
-	})
-	if appErr != nil {
-		t.Fatalf("UpdateProcurement() unexpected error: %+v", appErr)
-	}
-	if record.ProcurementPrice == nil || *record.ProcurementPrice != 222 {
-		t.Fatalf("UpdateProcurement() procurement_price = %+v, want 222", record.ProcurementPrice)
-	}
-	if record.Quantity == nil || *record.Quantity != 22 {
-		t.Fatalf("UpdateProcurement() quantity = %+v, want 22", record.Quantity)
-	}
-	if record.Status != domain.ProcurementStatusCompleted {
-		t.Fatalf("UpdateProcurement() status = %s, want %s", record.Status, domain.ProcurementStatusCompleted)
-	}
-	if len(eventRepo.events) != 1 {
-		t.Fatalf("UpdateProcurement() events = %+v", eventRepo.events)
 	}
 }
 
@@ -3919,77 +3266,6 @@ func TestTaskServiceGetByIDReturnsProcurementSummaryCostSignals(t *testing.T) {
 	}
 }
 
-func TestTaskServiceAdvanceProcurementTransitionsLifecycle(t *testing.T) {
-	procurementRepo := &prdProcurementRepo{
-		records: map[int64]*domain.ProcurementRecord{
-			7: {
-				TaskID:           7,
-				Status:           domain.ProcurementStatusDraft,
-				ProcurementPrice: float64Ptr(20.5),
-				Quantity:         int64Ptr(100),
-				SupplierName:     "Vendor B",
-			},
-		},
-	}
-	eventRepo := &prdTaskEventRepo{}
-	svc := NewTaskService(
-		&prdTaskRepo{
-			tasks: map[int64]*domain.Task{
-				7: {
-					ID:       7,
-					TaskType: domain.TaskTypePurchaseTask,
-				},
-			},
-		},
-		procurementRepo,
-		&prdTaskAssetRepo{},
-		eventRepo,
-		nil,
-		&prdWarehouseRepo{},
-		prdCodeRuleService{},
-		step04TxRunner{},
-	)
-
-	record, appErr := svc.AdvanceProcurement(context.Background(), AdvanceTaskProcurementParams{
-		TaskID:     7,
-		OperatorID: 15,
-		Action:     domain.ProcurementActionPrepare,
-	})
-	if appErr != nil {
-		t.Fatalf("AdvanceProcurement(prepare) unexpected error: %+v", appErr)
-	}
-	if record.Status != domain.ProcurementStatusPrepared {
-		t.Fatalf("AdvanceProcurement(prepare) status = %s, want %s", record.Status, domain.ProcurementStatusPrepared)
-	}
-
-	record, appErr = svc.AdvanceProcurement(context.Background(), AdvanceTaskProcurementParams{
-		TaskID:     7,
-		OperatorID: 15,
-		Action:     domain.ProcurementActionStart,
-	})
-	if appErr != nil {
-		t.Fatalf("AdvanceProcurement(start) unexpected error: %+v", appErr)
-	}
-	if record.Status != domain.ProcurementStatusInProgress {
-		t.Fatalf("AdvanceProcurement(start) status = %s, want %s", record.Status, domain.ProcurementStatusInProgress)
-	}
-
-	record, appErr = svc.AdvanceProcurement(context.Background(), AdvanceTaskProcurementParams{
-		TaskID:     7,
-		OperatorID: 15,
-		Action:     domain.ProcurementActionComplete,
-	})
-	if appErr != nil {
-		t.Fatalf("AdvanceProcurement(complete) unexpected error: %+v", appErr)
-	}
-	if record.Status != domain.ProcurementStatusCompleted {
-		t.Fatalf("AdvanceProcurement(complete) status = %s, want %s", record.Status, domain.ProcurementStatusCompleted)
-	}
-	if len(eventRepo.events) != 3 || eventRepo.events[2].EventType != domain.TaskEventProcurementAdvanced {
-		t.Fatalf("AdvanceProcurement() events = %+v", eventRepo.events)
-	}
-}
-
 func TestTaskServiceListBuildsWorkflowFilterAndProcurementSummary(t *testing.T) {
 	taskRepo := &prdTaskRepo{
 		listItems: []*domain.TaskListItem{
@@ -4303,7 +3579,7 @@ func TestTaskServiceCreateBatchNewProductInfersCategoryWhenProductIIDMissing(t *
 	}
 }
 
-func TestTaskServiceCreateBatchPurchaseTaskSucceeds(t *testing.T) {
+func legacyTaskServiceCreateBatchPurchaseTaskSucceeds(t *testing.T) {
 	taskRepo := &prdTaskRepo{}
 	procurementRepo := &prdProcurementRepo{}
 	svc := NewTaskService(

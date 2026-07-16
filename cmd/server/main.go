@@ -113,6 +113,7 @@ func main() {
 	erpSyncRunRepo := mysqlrepo.NewERPSyncRunRepo(mdb)
 	taskRepo := mysqlrepo.NewTaskRepo(mdb)
 	taskResourceGroupRepo := mysqlrepo.NewTaskResourceGroupRepo(mdb)
+	asyncProjectionOutboxRepo := mysqlrepo.NewAsyncProjectionOutboxRepo(mdb)
 	planningSKURepo := mysqlrepo.NewPlanningSKURepo(mdb)
 	taskCreateRequestRepo := mysqlrepo.NewTaskCreateRequestRepo(mdb)
 	skuTraceRepo := mysqlrepo.NewSKUTraceRepo(mdb)
@@ -171,7 +172,16 @@ func main() {
 	agentSvc := service.NewAgentService(assetVersionRepo, skuRepo, jobRepo, eventRepo, incidentRepo, policyRepo, mdb, engine)
 	incidentSvc := service.NewIncidentService(incidentRepo, eventRepo, mdb)
 	policySvc := service.NewPolicyService(policyRepo)
-	identitySvc := service.NewIdentityService(userRepo, userSessionRepo, permissionLogRepo, mdb, service.WithIdentitySettings(cfg.Auth, cfg.FrontendAccess), service.WithOrgRepo(orgRepo), service.WithIdentityLogger(logger))
+	identitySvc := service.NewIdentityService(
+		userRepo,
+		userSessionRepo,
+		permissionLogRepo,
+		mdb,
+		service.WithIdentitySettings(cfg.Auth, cfg.FrontendAccess),
+		service.WithOrgRepo(orgRepo),
+		service.WithIdentityAccessAssignmentWriter(accessPolicyRepo),
+		service.WithIdentityLogger(logger),
+	)
 	orgMoveSvc := orgmovesvc.NewService(userRepo, orgRepo, orgMoveRequestRepo, permissionLogRepo, mdb)
 	if appErr := identitySvc.SyncConfiguredAuth(context.Background()); appErr != nil {
 		logger.Fatal("sync configured auth failed", zap.String("code", appErr.Code), zap.String("message", appErr.Message))
@@ -448,14 +458,8 @@ func main() {
 	}, logger.Named("experience"))
 	accessPolicySvc := service.NewAccessPolicyService(accessPolicyRepo, mdb, orgRepo)
 	auditV7Options := []service.AuditV7ServiceOption{
-		service.WithAuditV7DataScopeResolver(taskDataScopeResolver),
 		service.WithAuditV7ScopeUserRepo(userRepo),
-		service.WithAuditV7FilingTrigger(taskSvc),
-		service.WithAuditV7ExperienceService(experienceSvc),
 		service.WithAuditV8EffectiveAccessResolver(accessPolicySvc),
-	}
-	if assetFlowRepo, ok := taskAssetRepo.(service.AuditAssetFlowRepo); ok {
-		auditV7Options = append(auditV7Options, service.WithAuditV7AssetFlowRepo(assetFlowRepo))
 	}
 	auditV7Svc := service.NewAuditV7Service(taskRepo, auditV7Repo, taskEventRepo, codeRuleSvc, mdb, auditV7Options...)
 	taskEventSvc := service.NewTaskEventService(taskEventRepo, taskRepo,
@@ -478,7 +482,7 @@ func main() {
 	workflowTraceEventSvc := service.NewWorkflowTraceEventService(workflowTraceEventRepo)
 	r3PoolQuerySvc := task_pool.NewPoolQueryService(mdb)
 	r3ClaimSvc := task_pool.NewClaimService(taskRepo, taskModuleRepo, taskModuleEventRepo, mdb, task_pool.WithNotificationGenerator(notificationGen), task_pool.WithWebSocketHub(wsHub))
-	r3ModuleSvc := r3module.NewActionService(taskRepo, taskModuleRepo, taskModuleEventRepo, referenceFileRefFlatRepo, mdb, blueprintRules, r3module.WithNotificationGenerator(notificationGen))
+	r3ModuleSvc := r3module.NewActionService(taskRepo, taskModuleRepo, taskModuleEventRepo, referenceFileRefFlatRepo, mdb, blueprintRules, r3module.WithNotificationGenerator(notificationGen), r3module.WithCustomizationJobRepo(customizationJobRepo))
 	r3CancelSvc := task_cancel.NewService(taskRepo, taskModuleRepo, taskModuleEventRepo, mdb)
 	r3DetailSvc := task_aggregator.NewDetailService(taskRepo, taskModuleRepo, taskModuleEventRepo, referenceFileRefFlatRepo,
 		task_aggregator.WithTaskAssetRepo(taskAssetRepo),
@@ -543,7 +547,8 @@ func main() {
 		PreviewWorkerMaxAttempts: cfg.AssetWorkbench.PreviewWorkerMaxAttempts,
 		BatchJobWorkerLeaseTTL:   cfg.AssetWorkbench.BatchJobWorkerLeaseTTL,
 	}, assetWorkbenchOptions...)
-	planningSKUSvc := service.NewPlanningSKUService(planningSKURepo, taskRepo, mdb, service.NewTaskFinalizer(taskResourceGroupRepo, taskEventRepo))
+	planningSKUSvc := service.NewPlanningSKUService(planningSKURepo, taskRepo, taskEventRepo, mdb, service.NewTaskFinalizer(taskResourceGroupRepo, taskEventRepo))
+	taskERPOutboxProcessor := service.NewTaskERPOutboxProcessor(taskSvc, productManagementSvc, erpBridgeSvc, assetStorageRefRepo, ossDirectSvc)
 
 	skuH := handler.NewSKUHandler(skuSvc)
 	auditH := handler.NewAuditHandler(auditSvc)
@@ -652,6 +657,9 @@ func main() {
 		AssetWorkbenchBatchJobEnabled:   cfg.AssetWorkbench.BatchJobWorkerEnabled,
 		AssetWorkbenchBatchJobInterval:  cfg.AssetWorkbench.BatchJobWorkerInterval,
 		AssetWorkbenchBatchJobLimit:     cfg.AssetWorkbench.BatchJobWorkerLimit,
+		AsyncProjectionOutbox:           asyncProjectionOutboxRepo,
+		AsyncProjectionTx:               mdb,
+		TaskERPOutboxProcessor:          taskERPOutboxProcessor,
 	}).Start(workerCtx)
 	startExperienceWorker(workerCtx, experienceSvc, cfg.Experience, logger.Named("experience_worker"))
 	startAssetObjectDeletionWorker(workerCtx, assetObjectDeletionWorker, logger.Named("asset_object_deletion_worker"))
@@ -665,7 +673,7 @@ func main() {
 	cronInst := scheduler.New(workerCtx, log.New(os.Stderr, "", log.LstdFlags))
 	if envFlag("ENABLE_CRON_OSS_365") {
 		ossSpec := envOr("CRON_SCHEDULE_OSS_365", "0 3 * * *")
-		cleanupJob := assetlifecycle.NewCleanupJob(taskAssetLifecycleRepo, mdb, ossDirectSvc, log.New(os.Stderr, "[ASSET-CLEANUP-CRON] ", log.LstdFlags))
+		cleanupJob := assetlifecycle.NewCleanupJob(taskAssetLifecycleRepo, mdb, log.New(os.Stderr, "[ASSET-CLEANUP-CRON] ", log.LstdFlags))
 		if err := cronInst.Add("oss-365", ossSpec, func(ctx context.Context) error {
 			_, appErr := cleanupJob.Run(ctx, assetlifecycle.CleanupOptions{Limit: 1000})
 			if appErr != nil {

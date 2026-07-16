@@ -74,7 +74,7 @@ func (s *taskService) PrepareProductCodes(ctx context.Context, p PrepareTaskProd
 	if !supportsDefaultTaskProductCode(p.TaskType) {
 		return nil, domain.NewAppError(
 			domain.ErrCodeInvalidRequest,
-			"task_type must be new_product_development or purchase_task",
+			"task_type must be new_product_development",
 			map[string]interface{}{"task_type": p.TaskType},
 		)
 	}
@@ -171,7 +171,7 @@ func (s *taskService) PrepareProductCodes(ctx context.Context, p PrepareTaskProd
 }
 
 func supportsDefaultTaskProductCode(taskType domain.TaskType) bool {
-	return taskType == domain.TaskTypeNewProductDevelopment || taskType == domain.TaskTypePurchaseTask
+	return taskType == domain.TaskTypeNewProductDevelopment
 }
 
 func normalizeTaskSKUCodeType(value domain.TaskSKUCodeType, customizationRequired bool) domain.TaskSKUCodeType {
@@ -293,7 +293,7 @@ func (s *taskService) generateDefaultTaskProductCodes(ctx context.Context, taskT
 	if !supportsDefaultTaskProductCode(taskType) {
 		return nil, domain.NewAppError(
 			domain.ErrCodeInvalidRequest,
-			"default product-code generation is only enabled for new_product_development and purchase_task",
+			"default product-code generation is only enabled for new_product_development",
 			map[string]interface{}{"task_type": taskType},
 		)
 	}

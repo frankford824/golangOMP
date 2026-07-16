@@ -438,7 +438,7 @@ func (s *taskService) createTaskWithBatchSkuItemsTx(ctx context.Context, p Creat
 			job := &domain.CustomizationJob{
 				TaskID:       newID,
 				DecisionType: domain.CustomizationJobDecisionTypeFinal,
-				Status:       domain.CustomizationJobStatusPendingCustomizationProduction,
+				Status:       domain.CustomizationJobStatusInProgress,
 			}
 			customizationJobID, err = s.customizationJobRepo.Create(ctx, tx, job)
 			if err != nil {

@@ -59,6 +59,7 @@ type TaskAssetLifecycleRepo interface {
 	Archive(ctx context.Context, tx Tx, update TaskAssetLifecycleUpdate) error
 	Restore(ctx context.Context, tx Tx, update TaskAssetLifecycleUpdate) error
 	LockGenericDeleteGuard(ctx context.Context, tx Tx, assetID int64) (*TaskAssetDeleteGuard, error)
+	LockCleanupObjectIDs(ctx context.Context, tx Tx, versionID int64) ([]int64, error)
 	EnqueueObjectDeletions(ctx context.Context, tx Tx, taskAssetIDs []int64) error
 	SoftDelete(ctx context.Context, tx Tx, update TaskAssetLifecycleUpdate) error
 	MarkAutoCleaned(ctx context.Context, tx Tx, versionID int64, cleanedAt time.Time) error

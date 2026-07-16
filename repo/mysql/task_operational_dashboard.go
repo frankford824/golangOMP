@@ -122,11 +122,10 @@ func (r *reportL1Repo) loadTaskOperationalCounts(
 	SELECT
 		COUNT(*) AS total_tasks,
 		COALESCE(SUM(task_status NOT IN ('Completed', 'Archived', 'Cancelled')), 0) AS active_tasks,
-		COALESCE(SUM(task_status IN ('PendingAssign', 'InProgress', 'RejectedByAuditA', 'RejectedByAuditB')), 0) AS design_pending,
-		COALESCE(SUM(task_status IN ('PendingAuditA', 'PendingAuditB', 'PendingCustomizationReview', 'PendingEffectReview') AND task_type <> 'retouch_task'), 0) AS pending_audit,
-		COALESCE(SUM(task_status = 'PendingAuditB' AND task_type <> 'retouch_task'), 0) AS handover,
+		COALESCE(SUM(task_status IN ('Draft', 'PendingAssign', 'Assigned', 'InProgress')), 0) AS design_pending,
+		COALESCE(SUM(task_status = 'PendingAudit' AND task_type <> 'retouch_task'), 0) AS pending_audit,
+		COALESCE(SUM(task_status = 'PendingAudit' AND current_handler_id IS NULL AND task_type <> 'retouch_task'), 0) AS handover,
 		COALESCE(SUM(task_status NOT IN ('Completed', 'Archived', 'Cancelled') AND (COALESCE(business_lane, '') = 'customization' OR customization_required = 1)), 0) AS customization_in_progress,
-		COALESCE(SUM(task_status = 'PendingWarehouseReceive'), 0) AS pending_warehouse_receive,
 		COALESCE(SUM(task_status NOT IN ('Completed', 'Archived', 'Cancelled') AND deadline_at IS NOT NULL AND deadline_at < ?), 0) AS overdue,
 		COALESCE(SUM(deadline_at >= ? AND deadline_at < ?), 0) AS due_today,
 		COALESCE(SUM(created_at >= ? AND created_at < ?), 0) AS today_created,
@@ -168,7 +167,6 @@ func (r *reportL1Repo) loadTaskOperationalCounts(
 		&counts.PendingAudit,
 		&counts.Handover,
 		&counts.CustomizationInProgress,
-		&counts.PendingWarehouseReceive,
 		&counts.Overdue,
 		&counts.DueToday,
 		&counts.TodayCreated,
@@ -259,8 +257,8 @@ func (r *reportL1Repo) loadTaskOperationalDistribution(ctx context.Context, over
 	  FROM (
 		SELECT CASE
 			WHEN task_status IN ('Completed', 'Archived', 'Cancelled') THEN 'completed'
-			WHEN task_status IN ('PendingAuditA', 'PendingAuditB', 'PendingCustomizationReview', 'PendingEffectReview') AND task_type <> 'retouch_task' THEN 'audit'
-			WHEN task_status IN ('PendingWarehouseReceive', 'PendingProductionTransfer', 'PendingClose') THEN 'warehouse'
+			WHEN task_status = 'PendingAudit' AND task_type <> 'retouch_task' THEN 'audit'
+			WHEN task_status = 'Blocked' THEN 'blocked'
 			WHEN COALESCE(business_lane, '') = 'customization' OR customization_required = 1 THEN 'customization'
 			ELSE 'design_ops'
 		END AS bucket
@@ -291,7 +289,7 @@ func (r *reportL1Repo) loadTaskOperationalDistribution(ctx context.Context, over
 		{key: "design_ops", name: "设计/运营待推进"},
 		{key: "audit", name: "待审核"},
 		{key: "customization", name: "定制协同"},
-		{key: "warehouse", name: "待仓库"},
+		{key: "blocked", name: "异常待处理"},
 		{key: "completed", name: "已完成/终止"},
 	}
 	overview.StatusDistribution = make([]domain.TaskOperationalStatusBucket, 0, len(definitions))
@@ -315,8 +313,7 @@ func (r *reportL1Repo) loadTaskOperationalRecentEvents(ctx context.Context, over
 	 WHERE tel.event_type IN (
 		'task.created', 'task.assigned', 'task.reassigned', 'task.design.submitted',
 		'task.audit.approved', 'task.audit.rejected', 'task.audit.handed_over',
-		'task.outsource.reviewed', 'task.customization.reviewed', 'task.warehouse.received', 'task.warehouse.completed',
-		'task.warehouse.rejected', 'task.closed'
+		'task.customization.reviewed', 'task.closed'
 	 )
 	 ORDER BY tel.created_at DESC, tel.sequence DESC
 	 LIMIT 20`
@@ -355,14 +352,8 @@ func taskOperationalEventTitle(eventType string) string {
 		return "审核打回"
 	case domain.TaskEventAuditHandedOver:
 		return "审核交班"
-	case domain.TaskEventOutsourceReviewed, "task.customization.reviewed":
+	case "task.customization.reviewed":
 		return "定制复核"
-	case domain.TaskEventWarehouseReceived:
-		return "仓库接收"
-	case domain.TaskEventWarehouseCompleted:
-		return "仓库完成"
-	case domain.TaskEventWarehouseRejected:
-		return "仓库退回"
 	case domain.TaskEventClosed:
 		return "任务结单"
 	default:

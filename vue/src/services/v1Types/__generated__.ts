@@ -612,10 +612,12 @@ export interface paths {
          * Register workflow user
          * @description Frontend-ready registration endpoint for the current minimal auth mainline. Registration now
          *     accepts explicit profile fields (`name`, `department`, optional `team`, `mobile`, optional
-         *     `email`, `account`, `password`, optional admin key). Department must match the backend org
+         *     `email`, `account`, `password`). Department must match the backend org
          *     master exposed by `/v1/org/options`. If `team` is provided it must belong to the selected department. `mobile`
-         *     is validated and kept unique. If the provided admin key matches the configured department rule,
-         *     the new user is granted `DepartmentAdmin`. The response includes `user.frontend_access`.
+         *     is validated and kept unique. Every new user receives only the protected explicit `member/self`
+         *     assignment. Administrators grant all additional roles and stable-ID scopes through `/v1/access`.
+         *     Organization display names and registration payloads never infer authorization. The response includes
+         *     `user.frontend_access`.
          */
         post: {
             parameters: {
@@ -641,16 +643,6 @@ export interface paths {
                         phone?: string;
                         email?: string;
                         password: string;
-                        /**
-                         * @description Department admin registration key. If a valid department admin key is provided,
-                         *     the user is registered as a department admin (role: dept_admin) for the specified
-                         *     department. If omitted or invalid, the user is registered as a regular member.
-                         *     Super admin accounts are NOT created through self-registration; they are managed
-                         *     via auth_identity.json configuration (super_admins section).
-                         */
-                        admin_key?: string;
-                        /** @description Compatibility alias of admin_key */
-                        secret_key?: string;
                     };
                 };
             };
@@ -6409,6 +6401,9 @@ export interface paths {
          *     backend-derived `preview/design_thumb` assets linked by `source_asset_id` when available.
          *     External resources prefer OSS-backed derived preview/original URLs or already-public provider URLs;
          *     browser-facing BFF proxy URLs are not returned as the default preview surface.
+         *     A staged, unbound upload is visible only to its uploader with `asset.view`, or to an auditor whose
+         *     explicit `task.audit.decision` scope includes the task. Bound resources require `asset.view` within
+         *     the task's stable organization-ID scope. Legacy roles and organization names do not authorize preview.
          *     When preview metadata is not currently available for the asset, runtime returns HTTP 409 with
          *     `error.code=INVALID_STATE_TRANSITION` and message `asset preview is not available`.
          */
@@ -6433,6 +6428,15 @@ export interface paths {
                         "application/json": {
                             data?: components["schemas"]["AssetDownloadInfo"];
                         };
+                    };
+                };
+                /** @description Actor lacks preview capability or stable task scope */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
                 /** @description Asset not found */
@@ -6740,8 +6744,8 @@ export interface paths {
          * Prepare task product codes
          * @description Allocates unique default product codes for task-create UIs.
          *     Default format is selected by `sku_code_type`: `regular` allocates `CG + {CATEGORY_LETTER} + {6-digit sequence}` and `customization` allocates `DZ + {CATEGORY_LETTER} + {6-digit sequence}`.
-         *     This endpoint does not require frontend code-rule/template selection and is available for
-         *     `new_product_development` and `purchase_task`.
+         *     This endpoint does not require frontend code-rule/template selection and is available only for
+         *     `new_product_development`. Planning-SKU codes use the dedicated versioned code-rule engine.
          */
         post: {
             parameters: {
@@ -6802,7 +6806,6 @@ export interface paths {
          *     - `retouch_task` completes when all retouch requirements have final products.
          *     - `sku_planning` accepts 1-200 `planning_sku_items`, allocates one atomic SKU range and returns only after the task is `Completed`.
          *     - task ownership uses stable `owner_department_id` and `owner_team_id`; organization names are display-only.
-         *     - `purchase_task`, procurement, warehouse, outsource and outside-collaboration semantics are rejected.
          *     - planning-SKU product images must be staged through the dedicated image-upload-session API and never enter task resource groups.
          */
         post: {
@@ -7878,10 +7881,8 @@ export interface paths {
          * Assign task to designer
          * @description `POST /v1/tasks/{id}/assign` now carries bounded semantics under the same route:
          *     - `PendingAssign` (regular lane): assign is allowed for the existing operation/management path within the allowed org scope. A Designer may also self-claim an unassigned task by sending their own user id as `designer_id`; success sets `designer_id` and `current_handler_id`, then moves the task to `InProgress`. Target user must be an active `Designer`.
-         *     - `PendingCustomizationProduction` (customization lane): Ops/Admin/SuperAdmin (and other existing assign scopes) may assign an active `CustomizationOperator` as `designer_id`. Success writes `designer_id` and `current_handler_id`, keeps `task_status` at `PendingCustomizationProduction`, and syncs the `customization` module to `in_progress` (not the `design` module). Pure `Designer` targets are rejected with `target_assignee_not_customization_operator`. Customization operators self-claim through `POST /v1/tasks/{id}/modules/customization/claim` instead of this route.
-         *     - `InProgress` (regular lane): the same route acts as reassign. Allowed actors are requester/initiator (`requester_id` or `creator_id`), the current owning-group `TeamLead`, and scoped management roles (`DepartmentAdmin`, `DesignDirector`, `RoleAdmin`, `HRAdmin`, `SuperAdmin`, `Admin`). Ordinary Ops users without those conditions are denied. Target user must remain an active `Designer`.
-         *     - Audit / warehouse / close states remain denied with machine-readable `PERMISSION_DENIED` details such as `task_not_reassignable`.
-         *     - `purchase_task` cannot be assigned or reassigned to a designer.
+         *     - `InProgress`: the same route acts as reassign when the backend returns the corresponding allowed action.
+         *     - `PendingAudit`, `Completed`, `Archived`, `Cancelled`, and `Blocked` remain denied with machine-readable `PERMISSION_DENIED` details such as `task_not_reassignable`.
          */
         post: {
             parameters: {
@@ -7923,7 +7924,7 @@ export interface paths {
                     };
                     content?: never;
                 };
-                /** @description Invalid task state such as attempting designer assignment on `purchase_task` */
+                /** @description Task state or workflow revision conflict */
                 409: {
                     headers: {
                         [name: string]: unknown;
@@ -9793,7 +9794,7 @@ export interface paths {
                     queue_key?: string;
                     keyword?: string;
                     /** @description Applies the same task-list filter semantics as `/v1/tasks`. Supports comma-separated multi-value queries. */
-                    task_type?: ("original_product_development" | "new_product_development" | "purchase_task")[];
+                    task_type?: ("original_product_development" | "new_product_development" | "retouch_task" | "sku_planning")[];
                     /** @description Applies the same task-list filter semantics as `/v1/tasks`. Supports comma-separated multi-value queries. */
                     source_mode?: ("existing_product" | "new_product")[];
                     /** @description Applies the same task-list filter semantics as `/v1/tasks`. Supports comma-separated multi-value queries. */
@@ -9869,7 +9870,7 @@ export interface paths {
                     queue_key?: string;
                     keyword?: string;
                     /** @description Applies the same task-list filter semantics as `/v1/tasks`. Supports comma-separated multi-value queries. */
-                    task_type?: ("original_product_development" | "new_product_development" | "purchase_task")[];
+                    task_type?: ("original_product_development" | "new_product_development" | "retouch_task" | "sku_planning")[];
                     /** @description Applies the same task-list filter semantics as `/v1/tasks`. Supports comma-separated multi-value queries. */
                     source_mode?: ("existing_product" | "new_product")[];
                     /** @description Applies the same task-list filter semantics as `/v1/tasks`. Supports comma-separated multi-value queries. */
@@ -12295,7 +12296,14 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Trigger a task module action */
+        /**
+         * Trigger a task module action
+         * @description Requires one of the code-owned capabilities `task.design.submit`, `task.audit.decision`,
+         *     or `task.manage`; the service then applies the exact module/state/scope rule. For a
+         *     customization `submit`, the caller must have `task.design.submit` in the task's stable
+         *     organization scope. The action marks the internal customization job `ready_for_submit`
+         *     but does not advance the main task; only `/submit-design` can enter `PendingAudit`.
+         */
         post: {
             parameters: {
                 query?: never;
@@ -12315,6 +12323,24 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content?: never;
+                };
+                /** @description Missing effective capability or outside the stable task scope */
+                403: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Module, task, or customization readiness state changed */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
                 };
                 /** @description Module action denied */
                 "4XX": {
@@ -12559,7 +12585,7 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
-                    /** @description Optional task_type filter (e.g. `new_product_development`, `purchase_task`). */
+                    /** @description Optional task_type filter (for example `new_product_development` or `retouch_task`). */
                     task_type?: string;
                     limit?: number;
                     /** @description Opaque cursor returned by a previous page; omit for first page. */
@@ -12735,7 +12761,6 @@ export interface paths {
          * @description Downloads the Excel assist workbook for creating one task at a time with `mode=single`.
          *     `task_type=new_product_development` columns: `产品款式编码`, `产品名称`, `设计要求` (required);
          *     optional `规格尺寸`, `材质`, `材质备注`, `备注`.
-         *     `task_type=purchase_task` columns: `产品款式编码`, `产品名称`, `数量`, `规格尺寸` (required); optional `备注`.
          *     `task_type=original_product_development` columns: `SKU编码`, `修改要求` (required); optional `规格尺寸`, `备注`.
          *     Product name and category are enriched from ERP during `parse-excel`, not collected in the template.
          *     The workbook has no sample data rows; `parse-excel` rejects more than one non-empty data row.
@@ -12743,7 +12768,7 @@ export interface paths {
         get: {
             parameters: {
                 query: {
-                    task_type: "new_product_development" | "purchase_task" | "original_product_development";
+                    task_type: "new_product_development" | "original_product_development";
                     mode: "single";
                 };
                 header?: never;
@@ -12811,11 +12836,10 @@ export interface paths {
          * Parse a single-task Excel assist file
          * @description Parses a single-task Excel assist upload into a `draft` plus row-level `violations`. Does not create tasks.
          *     `mode` must be `single`. For `new_product_development`, required columns: `产品款式编码`, `产品名称`, `设计要求`.
-         *     For `purchase_task`, required: `产品款式编码`, `产品名称`, `数量` (positive integer), `规格尺寸`; optional `备注`.
          *     For `original_product_development`, required: `SKU编码`, `修改要求`; optional `规格尺寸`, `备注`.
          *     Parsed `sku_code` values are resolved through ERP product search; unknown SKU returns `product_not_found`.
          *     More than one non-empty data row returns `multiple_rows_not_allowed`. Invalid quantity returns `invalid_quantity`.
-         *     Parsed `product_i_id` values (new/purchase only) are validated against ERP i_id options when configured.
+         *     Parsed `product_i_id` values for new-product development are validated against ERP i_id options when configured.
          */
         post: {
             parameters: {
@@ -12828,7 +12852,7 @@ export interface paths {
                 content: {
                     "multipart/form-data": {
                         /** @enum {string} */
-                        task_type: "new_product_development" | "purchase_task" | "original_product_development";
+                        task_type: "new_product_development" | "original_product_development";
                         /** @enum {string} */
                         mode: "single";
                         /** Format: binary */
@@ -12901,12 +12925,12 @@ export interface paths {
         };
         /**
          * Download batch create Excel template
-         * @description Downloads the batch-create workbook. For `new_product_development`, the Items sheet requires only `产品名称` and `设计要求`; `产品款式编码` (mapped to `batch_items[].product_i_id`) and `参考图` are optional but recommended when the user wants row-scoped ERP filing and image handoff. Users may paste one or more reference images into the same row; `parse-excel` extracts and uploads them server-side. For backward compatibility, `parse-excel` also accepts legacy column `商品编码`. For `purchase_task`, purchase-specific fields remain, and `产品款式编码`/`参考图` are also supported as optional row-scoped fields.
+         * @description Downloads the batch-create workbook for `new_product_development`. The Items sheet requires `产品名称` and `设计要求`; `产品款式编码` (mapped to `batch_items[].product_i_id`) and `参考图` are optional but recommended when the user wants row-scoped ERP filing and image handoff. Users may paste one or more reference images into the same row; `parse-excel` extracts and uploads them server-side. Planning SKU imports use `/v1/tasks/sku-planning/parse-excel` instead.
          */
         get: {
             parameters: {
                 query?: {
-                    task_type?: "new_product_development" | "purchase_task";
+                    task_type?: "new_product_development";
                 };
                 header?: never;
                 path?: never;
@@ -12984,7 +13008,7 @@ export interface paths {
                 content: {
                     "multipart/form-data": {
                         /** @enum {string} */
-                        task_type: "new_product_development" | "purchase_task";
+                        task_type: "new_product_development";
                         /** Format: binary */
                         file: string;
                     };
@@ -26935,48 +26959,6 @@ export interface components {
             failure_count: number;
             results: components["schemas"]["BatchAuditHandoverResultItem"][];
         };
-        OutsourceOrder: {
-            id?: number;
-            outsource_no?: string;
-            task_id?: number;
-            vendor_name?: string;
-            outsource_type?: string;
-            delivery_requirement?: string;
-            settlement_note?: string;
-            /** @enum {string} */
-            status?: "created" | "packaged" | "sent" | "in_production" | "returned" | "reviewing" | "approved" | "rejected" | "closed";
-            /** Format: date-time */
-            returned_at?: string | null;
-            /** Format: date-time */
-            created_at?: string;
-            /** Format: date-time */
-            updated_at?: string;
-        };
-        WarehouseReceipt: {
-            id?: number;
-            task_id?: number;
-            receipt_no?: string;
-            /** @enum {string} */
-            workflow_lane?: "normal" | "customization";
-            /** @description Canonical upstream source department for the warehouse intake item (`Design R&D Department`, `Customization Art Department`, or `Cloud Warehouse Department` for purchase intake). */
-            source_department?: string | null;
-            /** @description Task type of the originating task (e.g. `original_product_development`, `new_product_development`, `purchase_task`). */
-            task_type?: string | null;
-            /** @enum {string} */
-            status?: "received" | "rejected" | "completed";
-            receiver_id?: number | null;
-            /** Format: date-time */
-            received_at?: string | null;
-            /** Format: date-time */
-            completed_at?: string | null;
-            reject_reason?: string;
-            remark?: string;
-            /** Format: date-time */
-            created_at?: string;
-            /** Format: date-time */
-            updated_at?: string;
-            warehouse_ready_version?: components["schemas"]["DesignAssetVersion"] | null;
-        };
         CustomizationJob: {
             id?: number;
             task_id?: number;
@@ -27017,8 +26999,11 @@ export interface components {
             last_operator_id?: number | null;
             /** @description Execution-stage frozen settlement worker employment type captured at the pricing freeze point. */
             pricing_worker_type?: components["schemas"]["EmploymentType"] | null;
-            /** @enum {string} */
-            status?: "pending_customization_review" | "pending_customization_production" | "pending_effect_review" | "pending_effect_revision" | "pending_production_transfer" | "pending_warehouse_qc" | "rejected_by_warehouse" | "completed";
+            /**
+             * @description Active v8 customization work uses in_progress and ready_for_submit. Remaining values are legacy read-only history until cleanup.
+             * @enum {string}
+             */
+            status?: "in_progress" | "ready_for_submit" | "pending_customization_review" | "pending_customization_production" | "pending_effect_review" | "pending_effect_revision" | "pending_production_transfer" | "pending_warehouse_qc" | "rejected_by_warehouse" | "completed";
             warehouse_reject_reason?: string | null;
             warehouse_reject_category?: string | null;
             /** Format: date-time */
@@ -27897,7 +27882,7 @@ export interface components {
             base_sale_price?: number | null;
             /** @description Per-SKU design requirement. For `original_product_development`, this is a compatibility alias carrying the same value as `change_request`. */
             design_requirement?: string | null;
-            /** @description Optional per-SKU change request derived from task detail. Emitted for `original_product_development`; omitted for `new_product_development` and `purchase_task`. */
+            /** @description Optional per-SKU change request derived from task detail. Emitted for `original_product_development`; omitted for `new_product_development`. */
             change_request?: string | null;
             variant_json?: {
                 [key: string]: unknown;
@@ -28020,7 +28005,7 @@ export interface components {
         };
         PrepareTaskProductCodesRequest: {
             /** @enum {string} */
-            task_type: "new_product_development" | "purchase_task";
+            task_type: "new_product_development";
             /**
              * @description Canonical lane selector. Controls default SKU prefix (`CG` for `normal`, `DZ` for `customization`).
              * @enum {string}
@@ -29033,7 +29018,7 @@ export interface components {
         /** @description Shared board/list filter contract. Queue `normalized_filters` map directly to `/v1/tasks` query semantics. */
         TaskQueryFilterDefinition: {
             statuses?: string[];
-            task_types?: ("original_product_development" | "new_product_development" | "purchase_task")[];
+            task_types?: ("original_product_development" | "new_product_development" | "retouch_task" | "sku_planning")[];
             source_modes?: ("existing_product" | "new_product")[];
             main_statuses?: components["schemas"]["TaskMainStatus"][];
             sub_status_scope?: components["schemas"]["TaskSubStatusScope"];
@@ -29125,8 +29110,6 @@ export interface components {
             /** Format: int64 */
             customization_in_progress: number;
             /** Format: int64 */
-            pending_warehouse_receive: number;
-            /** Format: int64 */
             overdue: number;
             /** Format: int64 */
             due_today: number;
@@ -29176,7 +29159,7 @@ export interface components {
         };
         TaskOperationalStatusBucket: {
             /** @enum {string} */
-            key: "design_ops" | "audit" | "customization" | "warehouse" | "completed";
+            key: "design_ops" | "audit" | "customization" | "blocked" | "completed";
             name: string;
             /** Format: int64 */
             count: number;
@@ -29906,14 +29889,6 @@ export interface components {
             failure_reason?: string;
             remark?: string;
         };
-        OutsourceOrderListResponse: {
-            data?: components["schemas"]["OutsourceOrder"][];
-            pagination?: components["schemas"]["PaginationMeta"];
-        };
-        WarehouseReceiptListResponse: {
-            data?: components["schemas"]["WarehouseReceipt"][];
-            pagination?: components["schemas"]["PaginationMeta"];
-        };
         CodeRule: {
             id?: number;
             /** @enum {string} */
@@ -30021,7 +29996,7 @@ export interface components {
              * @description Row-level parse code. Common values include `missing_required_field`, `invalid_i_id`,
              *     `invalid_sku_code`, `product_not_found`, `ambiguous_product`, `erp_lookup_failed`,
              *     `multiple_rows_not_allowed`, `invalid_header`, and `invalid_quantity` (non-numeric or
-             *     non-positive quantity for purchase single-task assist).
+             *     a row-level value outside the field contract).
              */
             code: string;
             message: string;
@@ -30040,11 +30015,10 @@ export interface components {
         /**
          * @description Draft fields for single-task Excel assist. Required columns depend on `task_type`:
          *     `new_product_development` requires `product_i_id`, `product_name`, `design_requirement`;
-         *     `purchase_task` requires `product_i_id`, `product_name`, `quantity`, `spec_text`;
          *     `original_product_development` requires `sku_code`, `change_request` (ERP lookup enriches product fields).
          */
         SingleTaskExcelDraft: {
-            /** @description ERP product style i_id (maps to task create `i_id` / category). New/purchase only. */
+            /** @description ERP product style i_id (maps to task create `i_id` / category). New-product development only. */
             product_i_id?: string;
             product_name?: string;
             /** @description Required for `new_product_development` only. */
@@ -30063,20 +30037,15 @@ export interface components {
             category_name?: string;
             image_url?: string;
             erp_product?: components["schemas"]["ExcelAssistERPProductDraft"] | null;
-            /** @description Optional for `new_product_development` and `original_product_development`; required for `purchase_task`. */
+            /** @description Optional for `new_product_development` and `original_product_development`. */
             spec_text?: string;
-            /**
-             * Format: int64
-             * @description Required for `purchase_task` only; must be a positive integer.
-             */
-            quantity?: number;
             material?: string;
             material_other?: string;
             remark?: string;
         };
         ExcelAssistParseResult: {
             /** @enum {string} */
-            task_type?: "new_product_development" | "purchase_task" | "original_product_development";
+            task_type?: "new_product_development" | "original_product_development";
             /** @enum {string} */
             mode?: "single";
             draft?: components["schemas"]["SingleTaskExcelDraft"];
@@ -30085,7 +30054,7 @@ export interface components {
         /** @description Source: V1_INFORMATION_ARCHITECTURE §3.5.4. */
         BatchCreateParseResult: {
             /** @enum {string} */
-            task_type?: "new_product_development" | "purchase_task";
+            task_type?: "new_product_development";
             preview?: components["schemas"]["BatchItem"][];
             violations?: components["schemas"]["ParseViolation"][];
         };

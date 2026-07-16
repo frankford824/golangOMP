@@ -47,13 +47,14 @@ type PlanningSKUService interface {
 type planningSKUService struct {
 	repo      PlanningSKURepository
 	taskRepo  repo.TaskRepo
+	eventRepo repo.TaskEventRepo
 	txRunner  repo.TxRunner
 	finalizer *TaskFinalizer
 	now       func() time.Time
 }
 
-func NewPlanningSKUService(repository PlanningSKURepository, taskRepo repo.TaskRepo, txRunner repo.TxRunner, finalizer *TaskFinalizer) PlanningSKUService {
-	return &planningSKUService{repo: repository, taskRepo: taskRepo, txRunner: txRunner, finalizer: finalizer, now: time.Now}
+func NewPlanningSKUService(repository PlanningSKURepository, taskRepo repo.TaskRepo, eventRepo repo.TaskEventRepo, txRunner repo.TxRunner, finalizer *TaskFinalizer) PlanningSKUService {
+	return &planningSKUService{repo: repository, taskRepo: taskRepo, eventRepo: eventRepo, txRunner: txRunner, finalizer: finalizer, now: time.Now}
 }
 
 func (s *planningSKUService) Create(ctx context.Context, actor domain.RequestActor, request domain.CreatePlanningSKUTaskRequest) (*domain.PlanningSKUCreateResult, *domain.AppError) {
@@ -247,6 +248,23 @@ func (s *planningSKUService) Update(ctx context.Context, actor domain.RequestAct
 		updated, err = s.repo.UpdateRevision(ctx, tx, *lock, request, actor.ID)
 		if err != nil {
 			return err
+		}
+		if s.eventRepo == nil {
+			return fmt.Errorf("planning SKU correction audit repository is unavailable")
+		}
+		if _, err := s.eventRepo.Append(ctx, tx, taskID, domain.TaskEventPlanningSKUCorrected, &actor.ID, map[string]interface{}{
+			"task_sku_item_id":    itemID,
+			"sku_code":            lock.SKUCode,
+			"previous_revision":   lock.CurrentRevision.ID,
+			"current_revision":    updated.ID,
+			"previous_version":    lock.CurrentRevision.VersionNo,
+			"current_version":     updated.VersionNo,
+			"reason":              strings.TrimSpace(request.Reason),
+			"image_changed":       updated.ProductImageRefID != lock.CurrentRevision.ProductImageRefID,
+			"quantity_changed":    updated.Quantity != lock.CurrentRevision.Quantity,
+			"description_changed": updated.DescriptionSpec != lock.CurrentRevision.DescriptionSpec,
+		}); err != nil {
+			return fmt.Errorf("append planning SKU correction event: %w", err)
 		}
 		return s.repo.ReindexTask(ctx, tx, taskID)
 	})

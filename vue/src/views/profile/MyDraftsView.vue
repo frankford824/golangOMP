@@ -106,7 +106,7 @@ const errorMessage = ref('')
 const TASK_TYPE_LABELS: Record<string, string> = {
   ORIGINAL_PRODUCT_DEV: '原款开发',
   NEW_PRODUCT_DEV: '新款开发',
-  PURCHASE_TASK: '采购任务',
+  SKU_PLANNING: '策划 SKU',
   RETOUCH_TASK: 'P 图任务',
 }
 

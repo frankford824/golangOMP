@@ -89,9 +89,6 @@ func writePlaceholderRow(f *excelize.File, fields []FieldSpec, taskType domain.T
 func placeholderValue(field FieldSpec, taskType domain.TaskType, idx int) interface{} {
 	switch field.Key {
 	case "product_name":
-		if taskType == domain.TaskTypePurchaseTask {
-			return fmt.Sprintf("采购样品%d", idx+1)
-		}
 		return fmt.Sprintf("新品样品%d", idx+1)
 	case "product_short_name":
 		return "样品"
@@ -103,16 +100,6 @@ func placeholderValue(field FieldSpec, taskType domain.TaskType, idx int) interf
 		return "出单画图"
 	case "new_sku":
 		return fmt.Sprintf("R5-NPD-SAMPLE-%03d", idx+1)
-	case "purchase_sku":
-		return fmt.Sprintf("R5-PT-SAMPLE-%03d", idx+1)
-	case "cost_price_mode":
-		return string(domain.CostPriceModeManual)
-	case "quantity":
-		return int64(1)
-	case "base_sale_price":
-		return float64(9.9)
-	case "variant_json":
-		return fmt.Sprintf(`{"sample":%d}`, idx+1)
 	default:
 		return ""
 	}

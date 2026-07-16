@@ -69,6 +69,24 @@ function mountPanel(actions: string[]) {
   })
 }
 
+function bundleWithGroups(count: number): ResourceBundle {
+  const seed = bundle()
+  return {
+    ...seed,
+    groups: Array.from({ length: count }, (_, index) => ({
+      ...seed.groups[0],
+      id: index + 1,
+      task_sku_item_id: index + 100,
+      sku_code: `SKU-${String(index + 1).padStart(3, '0')}`,
+      working_revision: seed.groups[0].working_revision ? {
+        ...seed.groups[0].working_revision,
+        id: index + 1000,
+        group_id: index + 1,
+      } : undefined,
+    })),
+  }
+}
+
 function button(wrapper: ReturnType<typeof mountPanel>, label: string) {
   const target = wrapper.findAll('button').find((item) => item.text() === label)
   if (!target) throw new Error(`missing button ${label}`)
@@ -192,6 +210,24 @@ describe('ResourceWorkflowPanel action contract', () => {
     expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
     expect(document.activeElement).toBe(trigger.element)
     expect(mocks.auditDecision).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('renders a bounded editor window for 200 SKU groups and reports unsaved changes', async () => {
+    const wrapper = mount(ResourceWorkflowPanel, {
+      props: { taskId: 41, taskType: 'design', bundle: bundleWithGroups(200), allowedActions: ['task.design.submit'] },
+    })
+    await flushPromises()
+    expect(wrapper.findAll('.edit-card').length).toBeLessThan(10)
+    const viewport = wrapper.get('[data-testid="resource-editor-viewport"]')
+    ;(viewport.element as HTMLElement).scrollTop = 200 * 390
+    await viewport.trigger('scroll')
+    await flushPromises()
+    expect(wrapper.find('[data-group-index="199"]').exists()).toBe(true)
+
+    const select = wrapper.get('select')
+    await select.setValue('set')
+    expect(wrapper.emitted('dirty-change')?.some((entry) => entry[0] === true)).toBe(true)
     wrapper.unmount()
   })
 })

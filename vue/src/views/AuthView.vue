@@ -175,15 +175,6 @@
             </option>
           </select>
         </div>
-        <div>
-          <label class="text-xs font-bold text-[rgb(var(--yb-text-muted))] uppercase tracking-widest mb-2 block whitespace-nowrap">管理员密钥（可选）</label>
-          <input
-            v-model="registerForm.adminKey"
-            type="password"
-            placeholder="仅部门管理员注册时填写"
-            class="auth-input w-full h-14 px-4 bg-[rgb(var(--yb-surface-soft))] border-none rounded-xl text-base text-[rgb(var(--yb-text))] placeholder:text-[rgb(var(--yb-text-faint))] whitespace-nowrap"
-          />
-        </div>
         <button
           type="submit"
           class="auth-submit w-full h-12 bg-[rgb(var(--yb-brand))] text-[rgb(var(--yb-text-inverse))] text-sm font-medium rounded-xl transition-all hover:bg-[rgb(var(--yb-brand-strong))] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
@@ -243,7 +234,6 @@ const registerForm = ref({
   email: '',
   department: '',
   team: '',
-  adminKey: '',
 })
 
 // 部门/组选项
@@ -357,9 +347,6 @@ async function handleRegister() {
       team: registerForm.value.team || registerForm.value.department,
       mobile: registerForm.value.mobile.trim(),
       email: registerForm.value.email.trim() || undefined,
-    }
-    if (registerForm.value.adminKey?.trim()) {
-      payload.admin_key = registerForm.value.adminKey.trim()
     }
     await authApi.register(payload)
 

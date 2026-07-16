@@ -3,6 +3,7 @@ package mysqlrepo
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -209,6 +210,32 @@ func (r *taskAssetRepo) ListByAssetID(ctx context.Context, assetID int64) ([]*do
 		assets = append(assets, asset)
 	}
 	return assets, rows.Err()
+}
+
+// GetStagedPreviewAccessByDesignAssetID returns only an active staged version.
+// Bound/finalized resources must be read through the resource-group authority;
+// this projection exists solely for the short-lived uploader/auditor preview.
+func (r *taskAssetRepo) GetStagedPreviewAccessByDesignAssetID(ctx context.Context, assetID int64) (*domain.StagedTaskAssetPreviewAccess, error) {
+	var item domain.StagedTaskAssetPreviewAccess
+	err := r.db.db.QueryRowContext(ctx, `
+		SELECT ta.id, ta.task_id, COALESCE(ta.staged_by, ta.uploaded_by)
+		FROM task_assets ta
+		WHERE ta.asset_id = ?
+		  AND ta.binding_state = 'staged'
+		  AND ta.deleted_at IS NULL
+		  AND ta.cleaned_at IS NULL
+		  AND ta.access_revoked_at IS NULL
+		  AND ta.object_deleted_at IS NULL
+		  AND (ta.staged_expires_at IS NULL OR ta.staged_expires_at > CURRENT_TIMESTAMP)
+		ORDER BY ta.asset_version_no DESC, ta.id DESC
+		LIMIT 1`, assetID).Scan(&item.TaskAssetID, &item.TaskID, &item.StagedBy)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get staged preview access by design asset: %w", err)
+	}
+	return &item, nil
 }
 
 func (r *taskAssetRepo) NextVersionNo(ctx context.Context, tx repo.Tx, taskID int64) (int, error) {

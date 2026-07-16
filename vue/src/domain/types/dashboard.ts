@@ -46,10 +46,9 @@ export interface TaskOperationalCounts {
   total_tasks: number
   active_tasks: number
   design_pending: number
-  pending_audit: number
-  handover: number
-  customization_in_progress: number
-  pending_warehouse_receive: number
+	pending_audit: number
+	handover: number
+	customization_in_progress: number
   overdue: number
   due_today: number
   today_created: number
@@ -79,7 +78,7 @@ export interface TaskOperationalTrendPoint {
 }
 
 export interface TaskOperationalStatusBucket {
-  key: 'design_ops' | 'audit' | 'customization' | 'warehouse' | 'completed'
+	key: 'design_ops' | 'audit' | 'customization' | 'blocked' | 'completed'
   name: string
   count: number
 }

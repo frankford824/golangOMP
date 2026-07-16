@@ -31,6 +31,7 @@ func taskAssetMutationTestContext() context.Context {
 	permissions := []domain.PermissionCode{
 		domain.PermissionTaskDesignSubmit,
 		domain.PermissionTaskAuditDecision,
+		domain.PermissionAssetView,
 		domain.PermissionAssetManage,
 	}
 	assignment := domain.AccessAssignment{ID: 1, UserID: actorID, RoleID: roleID, ScopeMode: domain.AccessScopeGlobal, SourceType: "direct"}
@@ -40,6 +41,23 @@ func taskAssetMutationTestContext() context.Context {
 	}
 	effective := &domain.EffectiveAccess{UserID: actorID, Permissions: permissions, Assignments: []domain.AccessAssignment{assignment}, Sources: sources}
 	return domain.WithRequestActor(context.Background(), domain.RequestActor{ID: actorID, Permissions: permissions, EffectiveAccess: effective})
+}
+
+func taskAssetPreviewTestContext(actorID int64, permission domain.PermissionCode, scope domain.AccessScopeMode) context.Context {
+	roleID := actorID + 100000
+	assignment := domain.AccessAssignment{ID: roleID, UserID: actorID, RoleID: roleID, ScopeMode: scope, SourceType: "direct"}
+	effective := &domain.EffectiveAccess{
+		UserID:      actorID,
+		Permissions: []domain.PermissionCode{permission},
+		Assignments: []domain.AccessAssignment{assignment},
+		Sources: []domain.EffectiveAccessNote{{
+			Permission: permission,
+			RoleID:     roleID,
+			SourceType: "direct",
+			ScopeMode:  scope,
+		}},
+	}
+	return domain.WithRequestActor(context.Background(), domain.RequestActor{ID: actorID, Permissions: effective.Permissions, EffectiveAccess: effective})
 }
 
 func TestTaskAssetCenterServiceCreateAndCompleteMultipartUploadSession(t *testing.T) {
@@ -1981,6 +1999,42 @@ func TestTaskAssetCenterServiceListAssetResourcesAndPreviewByID(t *testing.T) {
 	_, appErr = svc.GetAssetPreviewInfoByID(taskAssetMutationTestContext(), sourceAssetID)
 	if appErr == nil {
 		t.Fatal("GetAssetPreviewInfoByID(source) appErr = nil, want invalid state")
+	}
+}
+
+func TestTaskAssetCenterServiceStagedPreviewRequiresUploaderOrScopedAuditor(t *testing.T) {
+	const (
+		taskID     = int64(2049)
+		uploaderID = int64(701)
+	)
+	taskRepo := newStep04TaskRepo(&domain.Task{ID: taskID, TaskNo: "T-2049", TaskStatus: domain.TaskStatusInProgress, CreatorID: uploaderID})
+	designAssetRepo := newStep67DesignAssetRepo()
+	taskAssetRepo := newStep04TaskAssetRepo()
+	assetID, _ := designAssetRepo.Create(context.Background(), step04Tx{}, &domain.DesignAsset{
+		TaskID: taskID, AssetNo: "AST-0001", AssetType: domain.TaskAssetTypePreview, CreatedBy: uploaderID,
+	})
+	versionNo := 1
+	versionID, _ := taskAssetRepo.Create(context.Background(), step04Tx{}, &domain.TaskAsset{
+		TaskID: taskID, AssetID: &assetID, AssetType: domain.TaskAssetTypePreview,
+		VersionNo: 1, AssetVersionNo: &versionNo, UploadMode: strPtr("multipart"),
+		FileName: "staged-preview.png", OriginalName: strPtr("staged-preview.png"), MimeType: strPtr("image/png"),
+		StorageKey: strPtr("objects/design-assets/staged-preview.png"), UploadStatus: strPtr("uploaded"),
+		PreviewStatus: strPtr("not_applicable"), UploadedBy: uploaderID,
+	})
+	taskAssetRepo.stagedPreviewByRoot[assetID] = &domain.StagedTaskAssetPreviewAccess{TaskAssetID: versionID, TaskID: taskID, StagedBy: uploaderID}
+	svc := NewTaskAssetCenterService(taskRepo, designAssetRepo, taskAssetRepo, newStep37UploadRequestRepo(), newStep37AssetStorageRefRepo(), &step04TaskEventRepo{}, step04TxRunner{}, newStubUploadServiceClient())
+
+	if _, appErr := svc.GetAssetPreviewInfoByID(taskAssetPreviewTestContext(uploaderID, domain.PermissionAssetView, domain.AccessScopeSelf), assetID); appErr != nil {
+		t.Fatalf("uploader preview error = %+v", appErr)
+	}
+	if _, appErr := svc.GetAssetPreviewInfoByID(taskAssetPreviewTestContext(702, domain.PermissionAssetView, domain.AccessScopeGlobal), assetID); appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
+		t.Fatalf("non-uploader asset viewer error = %+v, want permission denied", appErr)
+	}
+	if _, appErr := svc.GetAssetPreviewInfoByID(taskAssetPreviewTestContext(703, domain.PermissionTaskAuditDecision, domain.AccessScopeGlobal), assetID); appErr != nil {
+		t.Fatalf("scoped auditor preview error = %+v", appErr)
+	}
+	if _, appErr := svc.GetAssetPreviewInfoByID(taskAssetPreviewTestContext(uploaderID, domain.PermissionTaskView, domain.AccessScopeGlobal), assetID); appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
+		t.Fatalf("uploader without asset.view error = %+v, want permission denied", appErr)
 	}
 }
 

@@ -147,7 +147,6 @@ type TaskOperationalCounts struct {
 	PendingAudit            int64 `json:"pending_audit"`
 	Handover                int64 `json:"handover"`
 	CustomizationInProgress int64 `json:"customization_in_progress"`
-	PendingWarehouseReceive int64 `json:"pending_warehouse_receive"`
 	Overdue                 int64 `json:"overdue"`
 	DueToday                int64 `json:"due_today"`
 	TodayCreated            int64 `json:"today_created"`

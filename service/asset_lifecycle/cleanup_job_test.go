@@ -22,7 +22,7 @@ func TestCleanupJobDryRunRealRunIdempotent(t *testing.T) {
 			TaskUpdatedAt:      now.AddDate(0, 0, -400),
 		}},
 	}
-	job := NewCleanupJob(repo, fakeTxRunner{}, nil, nil).WithNow(func() time.Time { return now })
+	job := NewCleanupJob(repo, fakeTxRunner{}, nil).WithNow(func() time.Time { return now })
 	dry, appErr := job.Run(context.Background(), CleanupOptions{DryRun: true})
 	if appErr != nil {
 		t.Fatalf("dry-run error = %v", appErr)
@@ -34,15 +34,18 @@ func TestCleanupJobDryRunRealRunIdempotent(t *testing.T) {
 	if appErr != nil {
 		t.Fatalf("real run error = %v", appErr)
 	}
-	if real.Cleaned != 1 || repo.marked != 1 || repo.events != 1 {
-		t.Fatalf("real cleaned/marked/events = %d/%d/%d", real.Cleaned, repo.marked, repo.events)
+	if real.Cleaned != 1 || repo.marked != 1 || repo.events != 1 || len(repo.enqueued) != 1 {
+		t.Fatalf("real cleaned/marked/events/outbox = %d/%d/%d/%d", real.Cleaned, repo.marked, repo.events, len(repo.enqueued))
+	}
+	if got := repo.enqueued[0]; len(got) != 2 || got[0] != 101 || got[1] != 102 {
+		t.Fatalf("outbox object ids = %v", got)
 	}
 	again, appErr := job.Run(context.Background(), CleanupOptions{})
 	if appErr != nil {
 		t.Fatalf("again error = %v", appErr)
 	}
-	if again.Cleaned != 0 || repo.marked != 1 || repo.events != 1 {
-		t.Fatalf("again cleaned/marked/events = %d/%d/%d", again.Cleaned, repo.marked, repo.events)
+	if again.Cleaned != 0 || repo.marked != 1 || repo.events != 1 || len(repo.enqueued) != 1 {
+		t.Fatalf("again cleaned/marked/events/outbox = %d/%d/%d/%d", again.Cleaned, repo.marked, repo.events, len(repo.enqueued))
 	}
 }
 
@@ -50,6 +53,7 @@ type fakeLifecycleRepo struct {
 	candidates []*repo.TaskAssetCleanupCandidate
 	marked     int
 	events     int
+	enqueued   [][]int64
 }
 
 func (f *fakeLifecycleRepo) Archive(context.Context, repo.Tx, repo.TaskAssetLifecycleUpdate) error {
@@ -64,7 +68,12 @@ func (f *fakeLifecycleRepo) LockGenericDeleteGuard(context.Context, repo.Tx, int
 	return nil, nil
 }
 
-func (f *fakeLifecycleRepo) EnqueueObjectDeletions(context.Context, repo.Tx, []int64) error {
+func (f *fakeLifecycleRepo) LockCleanupObjectIDs(_ context.Context, _ repo.Tx, versionID int64) ([]int64, error) {
+	return []int64{versionID, versionID + 1}, nil
+}
+
+func (f *fakeLifecycleRepo) EnqueueObjectDeletions(_ context.Context, _ repo.Tx, ids []int64) error {
+	f.enqueued = append(f.enqueued, append([]int64(nil), ids...))
 	return nil
 }
 

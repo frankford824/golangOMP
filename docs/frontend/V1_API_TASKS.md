@@ -4026,11 +4026,11 @@ curl -X POST https://api.example.com/v1/tasks/reference-upload-sessions/<session
 ### 简介
 支持方法: POST。
 
-- `POST`: Allocates unique default product codes for task-create UIs. Default format is selected by `sku_code_type`: `regular` allocates `CG + {CATEGORY_LETTER} + {6-digit sequence}` and `customization` allocates `DZ + {CATEGORY_LETTER} + {6-digit sequence}`. This endpoint does not require frontend code-rule/template selection and is available for `new_product_development` and `purchase_task`.
+- `POST`: Allocates unique default product codes for task-create UIs. Default format is selected by `sku_code_type`: `regular` allocates `CG + {CATEGORY_LETTER} + {6-digit sequence}` and `customization` allocates `DZ + {CATEGORY_LETTER} + {6-digit sequence}`. This endpoint does not require frontend code-rule/template selection and is available only for `new_product_development`. Planning-SKU codes use the dedicated versioned code-rule engine.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `POST` 允许角色: Ops, Admin。
+- `POST` 允许角色: 已登录 / scope-aware。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -4042,7 +4042,7 @@ Content-Type: `application/json`
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `task_type` | enum(new_product_development/purchase_task) | 是 | - |
+| `task_type` | enum(new_product_development) | 是 | - |
 | `business_lane` | enum(normal/customization) | 否 | Canonical lane selector. Controls default SKU prefix (`CG` for `normal`, `DZ` for `customization`). |
 | `workflow_lane` | enum(normal/customization) | 否 | Compatibility alias of `business_lane`. |
 | `category_code` | string | 否 | Required when `batch_items` is omitted. |
@@ -4095,7 +4095,7 @@ curl -X POST https://api.example.com/v1/tasks/prepare-product-codes \
 支持方法: GET, POST。
 
 - `GET`: Returns V8 task rows, stable organization IDs, workflow revision, allowed actions and current resource summaries. Organization names are display-only.
-- `POST`: Creates one task under the V8 contract. - `original_product_development` and `new_product_development` enter the unified design workflow. - `retouch_task` completes when all retouch requirements have final products. - `sku_planning` accepts 1-200 `planning_sku_items`, allocates one atomic SKU range and returns only after the task is `Completed`. - task ownership uses stable `owner_department_id` and `owner_team_id`; organization names are display-only. - `purchase_task`, procurement, warehouse, outsource and outside-collaboration semantics are rejected. - planning-SKU product images must be staged through the dedicated image-upload-session API and never enter task resource groups.
+- `POST`: Creates one task under the V8 contract. - `original_product_development` and `new_product_development` enter the unified design workflow. - `retouch_task` completes when all retouch requirements have final products. - `sku_planning` accepts 1-200 `planning_sku_items`, allocates one atomic SKU range and returns only after the task is `Completed`. - task ownership uses stable `owner_department_id` and `owner_team_id`; organization names are display-only. - planning-SKU product images must be staged through the dedicated image-upload-session API and never enter task resource groups.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -5367,7 +5367,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/cost-overrides/<event_id>/fin
 ### 简介
 支持方法: POST。
 
-- `POST`: `POST /v1/tasks/{id}/assign` now carries bounded semantics under the same route: - `PendingAssign` (regular lane): assign is allowed for the existing operation/management path within the allowed org scope. A Designer may also self-claim an unassigned task by sending their own user id as `designer_id`; success sets `designer_id` and `current_handler_id`, then moves the task to `InProgress`. Target user must be an active `Designer`. - `PendingCustomizationProduction` (customization lane): Ops/Admin/SuperAdmin (and other existing assign scopes) may assign an active `CustomizationOperator` as `designer_id`. Success writes `designer_id` and `current_handler_id`, keeps `task_status` at `PendingCustomizationProduction`, and syncs the `customization` module to `in_progress` (not the `design` module). Pure `Designer` targets are rejected with `target_assignee_not_customization_operator`. Customization operators self-claim through `POST /v1/tasks/{id}/modules/customization/claim` instead of this route. - `InProgress` (regular lane): the same route acts as reassign. Allowed actors are requester/initiator (`requester_id` or `creator_id`), the current owning-group `TeamLead`, and scoped management roles (`DepartmentAdmin`, `DesignDirector`, `RoleAdmin`, `HRAdmin`, `SuperAdmin`, `Admin`). Ordinary Ops users without those conditions are denied. Target user must remain an active `Designer`. - Audit / warehouse / close states remain denied with machine-readable `PERMISSION_DENIED` details such as `task_not_reassignable`. - `purchase_task` cannot be assigned or reassigned to a designer.
+- `POST`: `POST /v1/tasks/{id}/assign` now carries bounded semantics under the same route: - `PendingAssign` (regular lane): assign is allowed for the existing operation/management path within the allowed org scope. A Designer may also self-claim an unassigned task by sending their own user id as `designer_id`; success sets `designer_id` and `current_handler_id`, then moves the task to `InProgress`. Target user must be an active `Designer`. - `InProgress`: the same route acts as reassign when the backend returns the corresponding allowed action. - `PendingAudit`, `Completed`, `Archived`, `Cancelled`, and `Blocked` remain denied with machine-readable `PERMISSION_DENIED` details such as `task_not_reassignable`.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -5416,7 +5416,7 @@ Content-Type: `application/json`
 |---|---|---|---|
 | 403 | 见 `error.code` | 见 `deny_code` | `PERMISSION_DENIED` with machine-readable task-action details such as `missing_required_role`, `task_out_of_department_scope`, `task_out_of_team_scope`, `task_not_reassignable`, or `task_reassign_requires_requester_or_manager`. |
 | 404 | 见 `error.code` | 见 `deny_code` | Task not found |
-| 409 | 见 `error.code` | 见 `deny_code` | Invalid task state such as attempting designer assignment on `purchase_task` |
+| 409 | 见 `error.code` | 见 `deny_code` | Task state or workflow revision conflict |
 
 ### curl 示例
 ```bash
@@ -6429,7 +6429,7 @@ curl -X GET https://api.example.com/v1/task-board/overview \
 | `board_view` | query | enum(all/ops/designer/audit/procurement/warehouse) | 否 | Restricts the response to one role-oriented board. Defaults to `all`. |
 | `queue_key` | query | string | 否 | When present, returns only one preset queue inside the board summary. |
 | `keyword` | query | string | 否 | - |
-| `task_type` | query | array<enum(original_product_development/new_product_development/purchase_task)> | 否 | Applies the same task-list filter semantics as `/v1/tasks`. Supports comma-separated multi-value queries. |
+| `task_type` | query | array<enum(original_product_development/new_product_development/retouch_task/sku_planning)> | 否 | Applies the same task-list filter semantics as `/v1/tasks`. Supports comma-separated multi-value queries. |
 | `source_mode` | query | array<enum(existing_product/new_product)> | 否 | Applies the same task-list filter semantics as `/v1/tasks`. Supports comma-separated multi-value queries. |
 | `status` | query | array<string> | 否 | Applies the same task-list filter semantics as `/v1/tasks`. Supports comma-separated multi-value queries. |
 | `main_status` | query | array<TaskMainStatus> | 否 | Applies the same task-list filter semantics as `/v1/tasks`. Supports comma-separated multi-value queries. |
@@ -6510,7 +6510,7 @@ curl -X GET https://api.example.com/v1/task-board/summary \
 | `board_view` | query | enum(all/ops/designer/audit/procurement/warehouse) | 否 | Restricts the response to one role-oriented board. Defaults to `all`. |
 | `queue_key` | query | string | 否 | When present, returns only one preset queue. |
 | `keyword` | query | string | 否 | - |
-| `task_type` | query | array<enum(original_product_development/new_product_development/purchase_task)> | 否 | Applies the same task-list filter semantics as `/v1/tasks`. Supports comma-separated multi-value queries. |
+| `task_type` | query | array<enum(original_product_development/new_product_development/retouch_task/sku_planning)> | 否 | Applies the same task-list filter semantics as `/v1/tasks`. Supports comma-separated multi-value queries. |
 | `source_mode` | query | array<enum(existing_product/new_product)> | 否 | Applies the same task-list filter semantics as `/v1/tasks`. Supports comma-separated multi-value queries. |
 | `status` | query | array<string> | 否 | Applies the same task-list filter semantics as `/v1/tasks`. Supports comma-separated multi-value queries. |
 | `main_status` | query | array<TaskMainStatus> | 否 | Applies the same task-list filter semantics as `/v1/tasks`. Supports comma-separated multi-value queries. |
@@ -9642,7 +9642,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/modules/<module_key>/claim \
 ### 简介
 支持方法: POST。
 
-- `POST`: Trigger a task module action
+- `POST`: Requires one of the code-owned capabilities `task.design.submit`, `task.audit.decision`, or `task.manage`; the service then applies the exact module/state/scope rule. For a customization `submit`, the caller must have `task.design.submit` in the task's stable organization scope. The action marks the internal customization job `ready_for_submit` but does not advance the main task; only `/submit-design` can enter `PendingAudit`.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -9668,6 +9668,8 @@ curl -X POST https://api.example.com/v1/tasks/<id>/modules/<module_key>/claim \
 ### 错误码
 | HTTP | code | deny_code | 说明 |
 |---|---|---|---|
+| 403 | 见 `error.code` | 见 `deny_code` | Missing effective capability or outside the stable task scope |
+| 409 | 见 `error.code` | 见 `deny_code` | Module, task, or customization readiness state changed |
 | 4XX | 见 `error.code` | 见 `deny_code` | Module action denied |
 
 ### curl 示例
@@ -9837,7 +9839,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/cancel \
 ### 简介
 支持方法: GET。
 
-- `GET`: Downloads the Excel assist workbook for creating one task at a time with `mode=single`. `task_type=new_product_development` columns: `产品款式编码`, `产品名称`, `设计要求` (required); optional `规格尺寸`, `材质`, `材质备注`, `备注`. `task_type=purchase_task` columns: `产品款式编码`, `产品名称`, `数量`, `规格尺寸` (required); optional `备注`. `task_type=original_product_development` columns: `SKU编码`, `修改要求` (required); optional `规格尺寸`, `备注`. Product name and category are enriched from ERP during `parse-excel`, not collected in the template. The workbook has no sample data rows; `parse-excel` rejects more than one non-empty data row.
+- `GET`: Downloads the Excel assist workbook for creating one task at a time with `mode=single`. `task_type=new_product_development` columns: `产品款式编码`, `产品名称`, `设计要求` (required); optional `规格尺寸`, `材质`, `材质备注`, `备注`. `task_type=original_product_development` columns: `SKU编码`, `修改要求` (required); optional `规格尺寸`, `备注`. Product name and category are enriched from ERP during `parse-excel`, not collected in the template. The workbook has no sample data rows; `parse-excel` rejects more than one non-empty data row.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -9849,7 +9851,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/cancel \
 
 | 参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---|---|
-| `task_type` | query | enum(new_product_development/purchase_task/original_product_development) | 是 | - |
+| `task_type` | query | enum(new_product_development/original_product_development) | 是 | - |
 | `mode` | query | enum(single) | 是 | - |
 
 请求体: 无请求体。
@@ -9892,7 +9894,7 @@ curl -X GET https://api.example.com/v1/tasks/excel-assist/template.xlsx \
 ### 简介
 支持方法: POST。
 
-- `POST`: Parses a single-task Excel assist upload into a `draft` plus row-level `violations`. Does not create tasks. `mode` must be `single`. For `new_product_development`, required columns: `产品款式编码`, `产品名称`, `设计要求`. For `purchase_task`, required: `产品款式编码`, `产品名称`, `数量` (positive integer), `规格尺寸`; optional `备注`. For `original_product_development`, required: `SKU编码`, `修改要求`; optional `规格尺寸`, `备注`. Parsed `sku_code` values are resolved through ERP product search; unknown SKU returns `product_not_found`. More than one non-empty data row returns `multiple_rows_not_allowed`. Invalid quantity returns `invalid_quantity`. Parsed `product_i_id` values (new/purchase only) are validated against ERP i_id options when configured.
+- `POST`: Parses a single-task Excel assist upload into a `draft` plus row-level `violations`. Does not create tasks. `mode` must be `single`. For `new_product_development`, required columns: `产品款式编码`, `产品名称`, `设计要求`. For `original_product_development`, required: `SKU编码`, `修改要求`; optional `规格尺寸`, `备注`. Parsed `sku_code` values are resolved through ERP product search; unknown SKU returns `product_not_found`. More than one non-empty data row returns `multiple_rows_not_allowed`. Invalid quantity returns `invalid_quantity`. Parsed `product_i_id` values for new-product development are validated against ERP i_id options when configured.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -9908,7 +9910,7 @@ Content-Type: `multipart/form-data`
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `task_type` | enum(new_product_development/purchase_task/original_product_development) | 是 | - |
+| `task_type` | enum(new_product_development/original_product_development) | 是 | - |
 | `mode` | enum(single) | 是 | - |
 | `file` | string | 是 | - |
 

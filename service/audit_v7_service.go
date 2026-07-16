@@ -2,59 +2,22 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"strings"
-	"time"
 
 	"workflow/domain"
 	"workflow/repo"
 )
 
-const (
-	auditLanePinnedNormalAuditorName        = "马雨琪"
-	auditLanePinnedCustomizationAuditorName = "章鹏鹏"
-)
-
-type auditLaneAccessSubject struct {
-	UserID int64
-	Label  string
-}
-
-type auditLaneProfile struct {
-	UserID      int64
-	Username    string
-	DisplayName string
-	Allowed     map[domain.TaskBusinessLane]struct{}
-}
-
 type auditV7Service struct {
-	taskRepo          repo.TaskRepo
-	auditV7Repo       repo.AuditV7Repo
-	taskEventRepo     repo.TaskEventRepo
-	codeRuleSvc       CodeRuleService
-	txRunner          repo.TxRunner
-	filingTrigger     auditTaskFilingTrigger
-	dataScopeResolver DataScopeResolver
-	scopeUserRepo     repo.UserRepo
-	assetFlowRepo     AuditAssetFlowRepo
-	experienceSvc     ExperienceService
-	v8AccessResolver  auditV8EffectiveAccessResolver
-}
-
-type auditTaskFilingTrigger interface {
-	TriggerFiling(ctx context.Context, p TriggerTaskFilingParams) (*domain.TaskFilingStatusView, *domain.AppError)
-}
-
-type taskNeedOutsourceUpdater interface {
-	UpdateNeedOutsource(ctx context.Context, tx repo.Tx, id int64, needOutsource bool) error
-}
-
-type AuditAssetFlowRepo interface {
-	MarkCurrentDeliveryVersionsApprovedForTask(ctx context.Context, tx repo.Tx, taskID, actorID int64, approvedAt time.Time) (int64, error)
-	MarkCurrentDeliveryVersionsRejectedForTask(ctx context.Context, tx repo.Tx, taskID, actorID int64, rejectedAt time.Time) (int64, error)
+	taskRepo         repo.TaskRepo
+	auditV7Repo      repo.AuditV7Repo
+	taskEventRepo    repo.TaskEventRepo
+	codeRuleSvc      CodeRuleService
+	txRunner         repo.TxRunner
+	scopeUserRepo    repo.UserRepo
+	v8AccessResolver auditV8EffectiveAccessResolver
 }
 
 type AuditV7ServiceOption func(*auditV7Service)
@@ -72,33 +35,9 @@ type auditV8HandoverLockingRepo interface {
 	CASUpdateHandoverStatus(ctx context.Context, tx repo.Tx, id int64, expected, next domain.HandoverStatus) (bool, error)
 }
 
-func WithAuditV7FilingTrigger(trigger auditTaskFilingTrigger) AuditV7ServiceOption {
-	return func(s *auditV7Service) {
-		s.filingTrigger = trigger
-	}
-}
-
-func WithAuditV7DataScopeResolver(resolver DataScopeResolver) AuditV7ServiceOption {
-	return func(s *auditV7Service) {
-		s.dataScopeResolver = resolver
-	}
-}
-
 func WithAuditV7ScopeUserRepo(userRepo repo.UserRepo) AuditV7ServiceOption {
 	return func(s *auditV7Service) {
 		s.scopeUserRepo = userRepo
-	}
-}
-
-func WithAuditV7AssetFlowRepo(assetFlowRepo AuditAssetFlowRepo) AuditV7ServiceOption {
-	return func(s *auditV7Service) {
-		s.assetFlowRepo = assetFlowRepo
-	}
-}
-
-func WithAuditV7ExperienceService(experienceSvc ExperienceService) AuditV7ServiceOption {
-	return func(s *auditV7Service) {
-		s.experienceSvc = experienceSvc
 	}
 }
 
@@ -131,525 +70,29 @@ func NewAuditV7Service(
 	return svc
 }
 
-func (s *auditV7Service) taskActionAuthorizer() *taskActionAuthorizer {
-	return newTaskActionAuthorizer(s.dataScopeResolver, s.scopeUserRepo)
-}
-
-func (s *auditV7Service) Claim(ctx context.Context, p ClaimAuditParams) *domain.AppError {
-	task, appErr := s.getTask(ctx, p.TaskID)
-	if appErr != nil {
-		return appErr
-	}
-	if appErr := s.ensureAuditLanePolicy(ctx, task, string(TaskActionAuditClaim), []auditLaneAccessSubject{
-		{UserID: p.AuditorID, Label: "auditor_id"},
-	}); appErr != nil {
-		return appErr
-	}
-	if appErr := s.taskActionAuthorizer().AuthorizeTaskActionWithAttributes(ctx, TaskActionAuditClaim, task, TaskActionAttributes{
-		AuditStage: p.Stage,
-	}); appErr != nil {
-		return appErr
-	}
-	if !isClaimableStatus(task.TaskStatus, p.Stage) {
-		return domain.NewAppError(domain.ErrCodeInvalidStateTransition,
-			fmt.Sprintf("task %d in status %q cannot be claimed for stage %q; claim requires PendingAuditA (stage A), PendingAuditB (stage B), or PendingOutsourceReview (stage outsource_review)",
-				p.TaskID, task.TaskStatus, p.Stage), map[string]interface{}{
-				"task_id":            p.TaskID,
-				"task_status":        string(task.TaskStatus),
-				"stage":              string(p.Stage),
-				"current_handler_id": task.CurrentHandlerID,
-			})
-	}
-	if appErr := s.ensureNoPendingHandover(ctx, p.TaskID); appErr != nil {
-		return appErr
-	}
-
-	txErr := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
-		if _, err := s.auditV7Repo.CreateRecord(ctx, tx, &domain.AuditRecord{
-			TaskID:         p.TaskID,
-			Stage:          p.Stage,
-			Action:         domain.AuditActionTypeClaim,
-			AuditorID:      p.AuditorID,
-			IssueTypesJSON: "[]",
-		}); err != nil {
-			return fmt.Errorf("audit claim record: %w", err)
-		}
-		if err := s.taskRepo.UpdateHandler(ctx, tx, p.TaskID, &p.AuditorID); err != nil {
-			return err
-		}
-		_, err := s.taskEventRepo.Append(ctx, tx, p.TaskID, domain.TaskEventAuditClaimed, &p.AuditorID,
-			taskTransitionEventPayload(task, task.TaskStatus, task.TaskStatus, task.CurrentHandlerID, &p.AuditorID, map[string]interface{}{
-				"auditor_id": p.AuditorID,
-				"stage":      string(p.Stage),
-			}))
-		return err
-	})
-	if txErr != nil {
-		return infraError("claim audit tx", txErr)
-	}
-	return nil
-}
-
-func (s *auditV7Service) Approve(ctx context.Context, p ApproveAuditParams) *domain.AppError {
-	task, appErr := s.getTask(ctx, p.TaskID)
-	if appErr != nil {
-		return appErr
-	}
-	fromStatus := task.TaskStatus
-	if appErr := s.ensureAuditLanePolicy(ctx, task, string(TaskActionAuditApprove), []auditLaneAccessSubject{
-		{UserID: p.AuditorID, Label: "auditor_id"},
-	}); appErr != nil {
-		return appErr
-	}
-	authz := s.taskActionAuthorizer()
-	decision := authz.EvaluateTaskActionPolicyWithAttributes(ctx, TaskActionAuditApprove, task, "", "", TaskActionAttributes{
-		AuditStage: p.Stage,
-	})
-	authz.logDecision(TaskActionAuditApprove, decision)
-	if !decision.Allowed {
-		return taskActionDecisionAppError(TaskActionAuditApprove, decision)
-	}
-	if !isClaimableStatus(task.TaskStatus, p.Stage) {
-		return domain.NewAppError(domain.ErrCodeInvalidStateTransition,
-			fmt.Sprintf("task %d in status %q cannot be approved for stage %q",
-				p.TaskID, task.TaskStatus, p.Stage), nil)
-	}
-	if !validApproveTransition(task.TaskStatus, p.NextStatus) {
-		return domain.NewAppError(domain.ErrCodeInvalidStateTransition,
-			fmt.Sprintf("transition %q -> %q is not a valid approval path",
-				task.TaskStatus, p.NextStatus), nil)
-	}
-	if appErr := s.ensureNoPendingHandover(ctx, p.TaskID); appErr != nil {
-		return appErr
-	}
-
-	issueJSON := issueTypesToJSON(p.IssueTypes)
-	needOutsource := p.NextStatus == domain.TaskStatusPendingOutsource
-	var nextHandlerID *int64
-	txErr := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
-		if _, err := s.auditV7Repo.CreateRecord(ctx, tx, &domain.AuditRecord{
-			TaskID:         p.TaskID,
-			Stage:          p.Stage,
-			Action:         domain.AuditActionTypeApprove,
-			AuditorID:      p.AuditorID,
-			IssueTypesJSON: issueJSON,
-			Comment:        p.Comment,
-			NeedOutsource:  needOutsource,
-		}); err != nil {
-			return fmt.Errorf("audit approve record: %w", err)
-		}
-		if err := s.taskRepo.UpdateStatus(ctx, tx, p.TaskID, p.NextStatus); err != nil {
-			return err
-		}
-		if needOutsource {
-			if updater, ok := s.taskRepo.(taskNeedOutsourceUpdater); ok {
-				if err := updater.UpdateNeedOutsource(ctx, tx, p.TaskID, true); err != nil {
-					return err
-				}
-			}
-		}
-		if err := s.taskRepo.UpdateHandler(ctx, tx, p.TaskID, nextHandlerID); err != nil {
-			return err
-		}
-		if p.NextStatus == domain.TaskStatusPendingWarehouseReceive && s.assetFlowRepo != nil {
-			if _, err := s.assetFlowRepo.MarkCurrentDeliveryVersionsApprovedForTask(ctx, tx, p.TaskID, p.AuditorID, time.Now().UTC()); err != nil {
-				return err
-			}
-		}
-		eventExtra := map[string]interface{}{
-			"auditor_id":     p.AuditorID,
-			"stage":          string(p.Stage),
-			"next_status":    string(p.NextStatus),
-			"comment":        p.Comment,
-			"need_outsource": needOutsource,
-		}
-		if p.ReplacementAssetID != nil {
-			eventExtra["current_asset_id"] = *p.ReplacementAssetID
-			eventExtra["replacement_actor_id"] = p.AuditorID
-			if p.PreviousAssetID != nil {
-				eventExtra["previous_asset_id"] = *p.PreviousAssetID
-			}
-			if p.ReplacementNote != "" {
-				eventExtra["replacement_note"] = p.ReplacementNote
-			}
-		}
-		_, err := s.taskEventRepo.Append(ctx, tx, p.TaskID, domain.TaskEventAuditApproved, &p.AuditorID,
-			taskTransitionEventPayload(task, task.TaskStatus, p.NextStatus, task.CurrentHandlerID, nextHandlerID, eventExtra))
-		return err
-	})
-	if txErr != nil {
-		return infraError("approve audit tx", txErr)
-	}
-	if isFinalDesignAuditApproval(p.NextStatus) && s.filingTrigger != nil {
-		_, filingErr := s.filingTrigger.TriggerFiling(ctx, TriggerTaskFilingParams{
-			TaskID:     p.TaskID,
-			OperatorID: p.AuditorID,
-			Remark:     p.Comment,
-			Source:     TaskFilingTriggerSourceAuditFinalApproved,
-			Force:      false,
-		})
-		if filingErr != nil {
-			log.Printf("audit_final_approval_filing_trigger_failed task_id=%d err=%s", p.TaskID, filingErr.Message)
-		}
-	}
-	s.enqueueAuditExperienceEvent(ctx, task, auditExperienceEventParams{
-		AuditorID:  p.AuditorID,
-		Stage:      p.Stage,
-		Action:     domain.AuditActionTypeApprove,
-		FromStatus: fromStatus,
-		ToStatus:   p.NextStatus,
-		Outcome:    "approved",
-		Comment:    p.Comment,
-		IssueTypes: p.IssueTypes,
-		Extra: map[string]interface{}{
-			"need_outsource": needOutsource,
-		},
-	})
-	return nil
-}
-
-func (s *auditV7Service) Reject(ctx context.Context, p RejectAuditParams) *domain.AppError {
-	task, appErr := s.getTask(ctx, p.TaskID)
-	if appErr != nil {
-		return appErr
-	}
-	fromStatus := task.TaskStatus
-	if appErr := s.ensureAuditLanePolicy(ctx, task, string(TaskActionAuditReject), []auditLaneAccessSubject{
-		{UserID: p.AuditorID, Label: "auditor_id"},
-	}); appErr != nil {
-		return appErr
-	}
-	authz := s.taskActionAuthorizer()
-	decision := authz.EvaluateTaskActionPolicyWithAttributes(ctx, TaskActionAuditReject, task, "", "", TaskActionAttributes{
-		AuditStage: p.Stage,
-	})
-	authz.logDecision(TaskActionAuditReject, decision)
-	if !decision.Allowed {
-		return taskActionDecisionAppError(TaskActionAuditReject, decision)
-	}
-	if !isClaimableStatus(task.TaskStatus, p.Stage) {
-		return domain.NewAppError(domain.ErrCodeInvalidStateTransition,
-			fmt.Sprintf("task %d in status %q cannot be rejected for stage %q",
-				p.TaskID, task.TaskStatus, p.Stage), nil)
-	}
-	nextStatus, ok := rejectedStatusForStage(p.Stage)
-	if !ok {
-		return domain.NewAppError(domain.ErrCodeInvalidRequest,
-			fmt.Sprintf("no rejection status defined for stage %q", p.Stage), nil)
-	}
-	if appErr := s.ensureNoPendingHandover(ctx, p.TaskID); appErr != nil {
-		return appErr
-	}
-
-	issueJSON := issueTypesToJSON(p.IssueTypes)
-	nextHandlerID := cloneInt64Ptr(task.DesignerID)
-	txErr := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
-		if _, err := s.auditV7Repo.CreateRecord(ctx, tx, &domain.AuditRecord{
-			TaskID:         p.TaskID,
-			Stage:          p.Stage,
-			Action:         domain.AuditActionTypeReject,
-			AuditorID:      p.AuditorID,
-			IssueTypesJSON: issueJSON,
-			Comment:        p.Comment,
-			AffectsLaunch:  p.AffectsLaunch,
-		}); err != nil {
-			return fmt.Errorf("audit reject record: %w", err)
-		}
-		if err := s.taskRepo.UpdateStatus(ctx, tx, p.TaskID, nextStatus); err != nil {
-			return err
-		}
-		if err := s.taskRepo.UpdateHandler(ctx, tx, p.TaskID, nextHandlerID); err != nil {
-			return err
-		}
-		if s.assetFlowRepo != nil {
-			if _, err := s.assetFlowRepo.MarkCurrentDeliveryVersionsRejectedForTask(ctx, tx, p.TaskID, p.AuditorID, time.Now().UTC()); err != nil {
-				return err
-			}
-		}
-		rejectExtra := map[string]interface{}{
-			"auditor_id":     p.AuditorID,
-			"stage":          string(p.Stage),
-			"next_status":    string(nextStatus),
-			"comment":        p.Comment,
-			"affects_launch": p.AffectsLaunch,
-			"designer_id":    cloneInt64Ptr(task.DesignerID),
-		}
-		if p.ReplacementAssetID != nil {
-			rejectExtra["current_asset_id"] = *p.ReplacementAssetID
-			rejectExtra["replacement_actor_id"] = p.AuditorID
-			if p.PreviousAssetID != nil {
-				rejectExtra["previous_asset_id"] = *p.PreviousAssetID
-			}
-			if p.ReplacementNote != "" {
-				rejectExtra["replacement_note"] = p.ReplacementNote
-			}
-		}
-		_, err := s.taskEventRepo.Append(ctx, tx, p.TaskID, domain.TaskEventAuditRejected, &p.AuditorID,
-			taskTransitionEventPayload(task, task.TaskStatus, nextStatus, task.CurrentHandlerID, nextHandlerID, rejectExtra))
-		return err
-	})
-	if txErr != nil {
-		return infraError("reject audit tx", txErr)
-	}
-	s.enqueueAuditExperienceEvent(ctx, task, auditExperienceEventParams{
-		AuditorID:     p.AuditorID,
-		Stage:         p.Stage,
-		Action:        domain.AuditActionTypeReject,
-		FromStatus:    fromStatus,
-		ToStatus:      nextStatus,
-		Outcome:       "rejected",
-		Comment:       p.Comment,
-		IssueTypes:    p.IssueTypes,
-		AffectsLaunch: p.AffectsLaunch,
-	})
-	return nil
-}
-
-type auditExperienceEventParams struct {
-	AuditorID     int64
-	Stage         domain.AuditRecordStage
-	Action        domain.AuditActionType
-	FromStatus    domain.TaskStatus
-	ToStatus      domain.TaskStatus
-	Outcome       string
-	Comment       string
-	IssueTypes    []string
-	AffectsLaunch bool
-	Extra         map[string]interface{}
-}
-
-func (s *auditV7Service) enqueueAuditExperienceEvent(ctx context.Context, task *domain.Task, p auditExperienceEventParams) {
-	if s == nil || s.experienceSvc == nil || task == nil {
-		return
-	}
-	occurredAt := time.Now().UTC()
-	payload := map[string]interface{}{
-		"stage":              string(p.Stage),
-		"audit_action":       string(p.Action),
-		"from_task_status":   string(p.FromStatus),
-		"to_task_status":     string(p.ToStatus),
-		"reason_note":        trimMax(strings.TrimSpace(p.Comment), experienceReasonNoteMaxLength),
-		"affects_launch":     p.AffectsLaunch,
-		"current_handler_id": cloneInt64Ptr(task.CurrentHandlerID),
-		"designer_id":        cloneInt64Ptr(task.DesignerID),
-	}
-	if len(p.IssueTypes) > 0 {
-		payload["reason_codes"] = append([]string(nil), p.IssueTypes...)
-	}
-	for key, value := range p.Extra {
-		payload[key] = value
-	}
-	taskID := task.ID
-	event := &domain.ExperienceOutboxEvent{
-		EventKey:           trimMax(fmt.Sprintf("task_audit:%d:%s:%s:%s:%d", task.ID, p.Stage, p.Action, p.ToStatus, occurredAt.UnixNano()), 191),
-		SourceType:         "task_audit",
-		SourceID:           auditExperienceSourceID(task),
-		TaskID:             &taskID,
-		Action:             auditExperienceAction(p.Action),
-		Outcome:            p.Outcome,
-		EventTime:          occurredAt,
-		ActorSnapshot:      auditExperienceJSON(map[string]interface{}{"actor_id": p.AuditorID, "actor_type": "user", "surface": "task_audit"}),
-		BusinessSnapshot:   auditExperienceJSON(auditExperienceTaskSnapshot(task, p.FromStatus, p.ToStatus)),
-		Payload:            auditExperienceJSON(payload),
-		DataClassification: "business_fact",
-		GroundTruthStatus:  "observed",
-	}
-	if appErr := s.experienceSvc.EnqueueEvent(ctx, event); appErr != nil {
-		log.Printf("audit_experience_enqueue_failed task_id=%d action=%s err=%s", task.ID, p.Action, appErr.Message)
-	}
-}
-
-func auditExperienceSourceID(task *domain.Task) string {
-	if task == nil {
-		return ""
-	}
-	if value := strings.TrimSpace(task.TaskNo); value != "" {
-		return trimMax(value, 128)
-	}
-	return fmt.Sprintf("task-%d", task.ID)
-}
-
-func auditExperienceAction(action domain.AuditActionType) string {
-	switch action {
-	case domain.AuditActionTypeApprove:
-		return "audit_approved"
-	case domain.AuditActionTypeReject:
-		return "audit_rejected"
-	default:
-		return trimMax("audit_"+strings.TrimSpace(string(action)), 96)
-	}
-}
-
-func auditExperienceTaskSnapshot(task *domain.Task, fromStatus, toStatus domain.TaskStatus) map[string]interface{} {
-	snapshot := map[string]interface{}{}
-	if task == nil {
-		return snapshot
-	}
-	snapshot["task_id"] = task.ID
-	snapshot["task_no"] = task.TaskNo
-	snapshot["task_type"] = string(task.TaskType)
-	snapshot["source_mode"] = string(task.SourceMode)
-	snapshot["business_lane"] = string(domain.NormalizeTaskBusinessLane(task.BusinessLane, task.CustomizationRequired))
-	snapshot["workflow_lane"] = string(task.WorkflowLane())
-	snapshot["from_task_status"] = string(fromStatus)
-	snapshot["to_task_status"] = string(toStatus)
-	snapshot["sku_code"] = task.SKUCode
-	snapshot["primary_sku_code"] = task.PrimarySKUCode
-	snapshot["product_id"] = cloneInt64Ptr(task.ProductID)
-	snapshot["product_name_snapshot"] = task.ProductNameSnapshot
-	snapshot["owner_team"] = task.OwnerTeam
-	snapshot["owner_department"] = task.OwnerDepartment
-	snapshot["owner_org_team"] = task.OwnerOrgTeam
-	snapshot["priority"] = string(task.Priority)
-	snapshot["need_outsource"] = task.NeedOutsource
-	snapshot["is_outsource"] = task.IsOutsource
-	snapshot["is_batch_task"] = task.IsBatchTask
-	snapshot["batch_item_count"] = task.BatchItemCount
-	return snapshot
-}
-
-func auditExperienceJSON(value interface{}) json.RawMessage {
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return nil
-	}
-	return json.RawMessage(raw)
-}
-
-func (s *auditV7Service) Transfer(ctx context.Context, p TransferAuditParams) *domain.AppError {
-	task, appErr := s.getTask(ctx, p.TaskID)
-	if appErr != nil {
-		return appErr
-	}
-	transferActorID := p.ActorID
-	if transferActorID <= 0 {
-		transferActorID = p.FromAuditorID
-	}
-	if appErr := s.ensureAuditLanePolicy(ctx, task, string(TaskActionAuditTransfer), []auditLaneAccessSubject{
-		{UserID: transferActorID, Label: "transfer_actor_id"},
-		{UserID: p.FromAuditorID, Label: "from_auditor_id"},
-		{UserID: p.ToAuditorID, Label: "to_auditor_id"},
-	}); appErr != nil {
-		return appErr
-	}
-	authz := s.taskActionAuthorizer()
-	decision := authz.EvaluateTaskActionPolicyWithAttributes(ctx, TaskActionAuditTransfer, task, "", "", TaskActionAttributes{
-		AuditStage: p.Stage,
-	})
-	authz.logDecision(TaskActionAuditTransfer, decision)
-	if !decision.Allowed {
-		return taskActionDecisionAppError(TaskActionAuditTransfer, decision)
-	}
-	if task.CurrentHandlerID == nil || *task.CurrentHandlerID <= 0 {
-		return domain.NewAppError(domain.ErrCodeInvalidRequest, "audit transfer requires a current audit handler", map[string]interface{}{
-			"deny_code":       "audit_transfer_requires_current_handler",
-			"task_id":         p.TaskID,
-			"task_status":     string(task.TaskStatus),
-			"from_auditor_id": p.FromAuditorID,
-		})
-	}
-	if p.FromAuditorID <= 0 || p.FromAuditorID != *task.CurrentHandlerID {
-		return domain.NewAppError(domain.ErrCodeInvalidRequest, "from_auditor_id must match current audit handler", map[string]interface{}{
-			"deny_code":          "audit_transfer_from_mismatch",
-			"task_id":            p.TaskID,
-			"task_status":        string(task.TaskStatus),
-			"current_handler_id": *task.CurrentHandlerID,
-			"from_auditor_id":    p.FromAuditorID,
-		})
-	}
-	if p.ToAuditorID == p.FromAuditorID {
-		return domain.NewAppError(domain.ErrCodeInvalidRequest, "to_auditor_id must be different from current audit handler", map[string]interface{}{
-			"deny_code":       "audit_transfer_target_same_as_current_handler",
-			"task_id":         p.TaskID,
-			"from_auditor_id": p.FromAuditorID,
-			"to_auditor_id":   p.ToAuditorID,
-		})
-	}
-	stage, ok := activeAuditStageFromStatus(task.TaskStatus)
-	if !ok {
-		return domain.NewAppError(domain.ErrCodeInvalidStateTransition,
-			fmt.Sprintf("task %d in status %q cannot be transferred",
-				p.TaskID, task.TaskStatus), nil)
-	}
-	if stage != p.Stage {
-		return domain.NewAppError(domain.ErrCodeInvalidStateTransition,
-			fmt.Sprintf("task %d is in audit stage %q, not %q",
-				p.TaskID, stage, p.Stage), nil)
-	}
-	if appErr := s.ensureNoPendingHandover(ctx, p.TaskID); appErr != nil {
-		return appErr
-	}
-
-	txErr := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
-		if _, err := s.auditV7Repo.CreateRecord(ctx, tx, &domain.AuditRecord{
-			TaskID:         p.TaskID,
-			Stage:          p.Stage,
-			Action:         domain.AuditActionTypeTransfer,
-			AuditorID:      transferActorID,
-			IssueTypesJSON: "[]",
-			Comment:        p.Comment,
-		}); err != nil {
-			return fmt.Errorf("audit transfer record: %w", err)
-		}
-		if err := s.taskRepo.UpdateHandler(ctx, tx, p.TaskID, &p.ToAuditorID); err != nil {
-			return err
-		}
-		_, err := s.taskEventRepo.Append(ctx, tx, p.TaskID, domain.TaskEventAuditTransferred, &transferActorID,
-			taskTransitionEventPayload(task, task.TaskStatus, task.TaskStatus, task.CurrentHandlerID, &p.ToAuditorID, map[string]interface{}{
-				"transfer_actor_id": transferActorID,
-				"from_auditor_id":   p.FromAuditorID,
-				"to_auditor_id":     p.ToAuditorID,
-				"stage":             string(p.Stage),
-				"comment":           p.Comment,
-			}))
-		return err
-	})
-	if txErr != nil {
-		return infraError("transfer audit tx", txErr)
-	}
-	return nil
-}
-
 func (s *auditV7Service) Handover(ctx context.Context, p HandoverAuditParams) (*domain.AuditHandover, *domain.AppError) {
 	task, appErr := s.getTask(ctx, p.TaskID)
 	if appErr != nil {
 		return nil, appErr
 	}
-	stage, ok := activeAuditStageFromStatus(task.TaskStatus)
-	if !ok {
+	if task.TaskStatus != domain.TaskStatusPendingAudit {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidStateTransition,
 			fmt.Sprintf("task %d in status %q cannot be handed over",
 				p.TaskID, task.TaskStatus), nil)
 	}
-	if task.TaskStatus == domain.TaskStatusPendingAudit {
-		if appErr := authorizeV8AuditTask(ctx, task, domain.PermissionTaskAuditDecision, p.FromAuditorID); appErr != nil {
-			return nil, appErr
-		}
-		if task.CurrentHandlerID == nil || *task.CurrentHandlerID != p.FromAuditorID {
-			return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "only the current audit handler can hand over this task", map[string]interface{}{
-				"deny_code": "audit_handover_requires_current_handler",
-				"task_id":   task.ID,
-				"actor_id":  p.FromAuditorID,
-			})
-		}
-		if appErr := s.authorizeV8AuditTarget(ctx, task, p.ToAuditorID); appErr != nil {
-			return nil, appErr
-		}
-	} else {
-		if appErr := s.ensureAuditLanePolicy(ctx, task, string(TaskActionAuditHandover), []auditLaneAccessSubject{
-			{UserID: p.FromAuditorID, Label: "from_auditor_id"},
-			{UserID: p.ToAuditorID, Label: "to_auditor_id"},
-		}); appErr != nil {
-			return nil, appErr
-		}
-		authz := s.taskActionAuthorizer()
-		decision := authz.EvaluateTaskActionPolicyWithAttributes(ctx, TaskActionAuditHandover, task, "", "", TaskActionAttributes{
-			AuditStage: stage,
+	stage := domain.AuditRecordStageUnified
+	if appErr := authorizeV8AuditTask(ctx, task, domain.PermissionTaskAuditDecision, p.FromAuditorID); appErr != nil {
+		return nil, appErr
+	}
+	if task.CurrentHandlerID == nil || *task.CurrentHandlerID != p.FromAuditorID {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "only the current audit handler can hand over this task", map[string]interface{}{
+			"deny_code": "audit_handover_requires_current_handler",
+			"task_id":   task.ID,
+			"actor_id":  p.FromAuditorID,
 		})
-		authz.logDecision(TaskActionAuditHandover, decision)
-		if !decision.Allowed {
-			return nil, taskActionDecisionAppError(TaskActionAuditHandover, decision)
-		}
+	}
+	if appErr := s.authorizeV8AuditTarget(ctx, task, p.ToAuditorID); appErr != nil {
+		return nil, appErr
 	}
 	if appErr := s.ensureNoPendingHandover(ctx, p.TaskID); appErr != nil {
 		return nil, appErr
@@ -681,20 +124,18 @@ func (s *auditV7Service) Handover(ctx context.Context, p HandoverAuditParams) (*
 
 	var newID int64
 	txErr := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
-		if task.TaskStatus == domain.TaskStatusPendingAudit {
-			lockingRepo, ok := s.taskRepo.(auditV8TaskLockingRepo)
-			if !ok {
-				return fmt.Errorf("v8 audit handover task locking is unavailable")
-			}
-			lockedTask, err := lockingRepo.GetByIDForUpdate(ctx, tx, p.TaskID)
-			if err != nil {
-				return fmt.Errorf("lock task for v8 audit handover: %w", err)
-			}
-			if lockedTask == nil || lockedTask.TaskStatus != domain.TaskStatusPendingAudit ||
-				lockedTask.WorkflowRevision != expectedWorkflowRevision || lockedTask.CurrentHandlerID == nil ||
-				*lockedTask.CurrentHandlerID != p.FromAuditorID {
-				return repo.ErrConflict
-			}
+		lockingRepo, ok := s.taskRepo.(auditV8TaskLockingRepo)
+		if !ok {
+			return fmt.Errorf("v8 audit handover task locking is unavailable")
+		}
+		lockedTask, err := lockingRepo.GetByIDForUpdate(ctx, tx, p.TaskID)
+		if err != nil {
+			return fmt.Errorf("lock task for v8 audit handover: %w", err)
+		}
+		if lockedTask == nil || lockedTask.TaskStatus != domain.TaskStatusPendingAudit ||
+			lockedTask.WorkflowRevision != expectedWorkflowRevision || lockedTask.CurrentHandlerID == nil ||
+			*lockedTask.CurrentHandlerID != p.FromAuditorID {
+			return repo.ErrConflict
 		}
 		id, err := s.auditV7Repo.CreateHandover(ctx, tx, handover)
 		if err != nil {
@@ -1057,65 +498,48 @@ func (s *auditV7Service) Takeover(ctx context.Context, taskID, handoverID, audit
 	if appErr != nil {
 		return appErr
 	}
-	if task.TaskStatus == domain.TaskStatusPendingAudit {
-		subject := task.AccessSubject()
-		subject.CurrentHandlerID = &auditorID
-		if appErr := authorizeV8AuditSubject(ctx, subject, domain.PermissionTaskAuditDecision, auditorID); appErr != nil {
-			return appErr
-		}
-	} else {
-		if appErr := s.ensureAuditLanePolicy(ctx, task, string(TaskActionAuditTakeover), []auditLaneAccessSubject{
-			{UserID: handover.FromAuditorID, Label: "handover_from_auditor_id"},
-			{UserID: handover.ToAuditorID, Label: "handover_to_auditor_id"},
-			{UserID: auditorID, Label: "auditor_id"},
-		}); appErr != nil {
-			return appErr
-		}
-		if appErr := s.taskActionAuthorizer().AuthorizeTaskAction(ctx, TaskActionAuditTakeover, task); appErr != nil {
-			return appErr
-		}
-	}
-	stage, ok := activeAuditStageFromStatus(task.TaskStatus)
-	if !ok {
+	if task.TaskStatus != domain.TaskStatusPendingAudit {
 		return domain.NewAppError(domain.ErrCodeInvalidStateTransition,
 			fmt.Sprintf("task %d in status %q cannot take over audit",
 				handover.TaskID, task.TaskStatus), nil)
 	}
+	subject := task.AccessSubject()
+	subject.CurrentHandlerID = &auditorID
+	if appErr := authorizeV8AuditSubject(ctx, subject, domain.PermissionTaskAuditDecision, auditorID); appErr != nil {
+		return appErr
+	}
+	stage := domain.AuditRecordStageUnified
 	expectedWorkflowRevision := task.WorkflowRevision
 
 	txErr := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
-		if task.TaskStatus == domain.TaskStatusPendingAudit {
-			taskLockingRepo, ok := s.taskRepo.(auditV8TaskLockingRepo)
-			if !ok {
-				return fmt.Errorf("v8 audit takeover task locking is unavailable")
-			}
-			handoverLockingRepo, ok := s.auditV7Repo.(auditV8HandoverLockingRepo)
-			if !ok {
-				return fmt.Errorf("v8 audit takeover handover locking is unavailable")
-			}
-			lockedTask, err := taskLockingRepo.GetByIDForUpdate(ctx, tx, task.ID)
-			if err != nil {
-				return fmt.Errorf("lock task for v8 audit takeover: %w", err)
-			}
-			lockedHandover, err := handoverLockingRepo.GetHandoverByIDForUpdate(ctx, tx, handoverID)
-			if err != nil {
-				return fmt.Errorf("lock handover for v8 audit takeover: %w", err)
-			}
-			if lockedTask == nil || lockedHandover == nil ||
-				lockedTask.TaskStatus != domain.TaskStatusPendingAudit || lockedTask.WorkflowRevision != expectedWorkflowRevision ||
-				lockedTask.CurrentHandlerID != nil || lockedHandover.Status != domain.HandoverStatusPendingTakeover ||
-				lockedHandover.TaskID != taskID || lockedHandover.ToAuditorID != auditorID {
-				return repo.ErrConflict
-			}
-			updated, err := handoverLockingRepo.CASUpdateHandoverStatus(ctx, tx, handoverID, domain.HandoverStatusPendingTakeover, domain.HandoverStatusTakenOver)
-			if err != nil {
-				return err
-			}
-			if !updated {
-				return repo.ErrConflict
-			}
-		} else if err := s.auditV7Repo.UpdateHandoverStatus(ctx, tx, handoverID, domain.HandoverStatusTakenOver); err != nil {
+		taskLockingRepo, ok := s.taskRepo.(auditV8TaskLockingRepo)
+		if !ok {
+			return fmt.Errorf("v8 audit takeover task locking is unavailable")
+		}
+		handoverLockingRepo, ok := s.auditV7Repo.(auditV8HandoverLockingRepo)
+		if !ok {
+			return fmt.Errorf("v8 audit takeover handover locking is unavailable")
+		}
+		lockedTask, err := taskLockingRepo.GetByIDForUpdate(ctx, tx, task.ID)
+		if err != nil {
+			return fmt.Errorf("lock task for v8 audit takeover: %w", err)
+		}
+		lockedHandover, err := handoverLockingRepo.GetHandoverByIDForUpdate(ctx, tx, handoverID)
+		if err != nil {
+			return fmt.Errorf("lock handover for v8 audit takeover: %w", err)
+		}
+		if lockedTask == nil || lockedHandover == nil ||
+			lockedTask.TaskStatus != domain.TaskStatusPendingAudit || lockedTask.WorkflowRevision != expectedWorkflowRevision ||
+			lockedTask.CurrentHandlerID != nil || lockedHandover.Status != domain.HandoverStatusPendingTakeover ||
+			lockedHandover.TaskID != taskID || lockedHandover.ToAuditorID != auditorID {
+			return repo.ErrConflict
+		}
+		updated, err := handoverLockingRepo.CASUpdateHandoverStatus(ctx, tx, handoverID, domain.HandoverStatusPendingTakeover, domain.HandoverStatusTakenOver)
+		if err != nil {
 			return err
+		}
+		if !updated {
+			return repo.ErrConflict
 		}
 		if err := s.taskRepo.UpdateHandler(ctx, tx, handover.TaskID, &auditorID); err != nil {
 			return err
@@ -1129,7 +553,7 @@ func (s *auditV7Service) Takeover(ctx context.Context, taskID, handoverID, audit
 		}); err != nil {
 			return fmt.Errorf("takeover audit record: %w", err)
 		}
-		_, err := s.taskEventRepo.Append(ctx, tx, handover.TaskID, domain.TaskEventAuditTakenOver, &auditorID,
+		_, err = s.taskEventRepo.Append(ctx, tx, handover.TaskID, domain.TaskEventAuditTakenOver, &auditorID,
 			taskTransitionEventPayload(task, task.TaskStatus, task.TaskStatus, task.CurrentHandlerID, &auditorID, map[string]interface{}{
 				"handover_id": handoverID,
 				"auditor_id":  auditorID,
@@ -1181,79 +605,28 @@ func (s *auditV7Service) ListHandovers(ctx context.Context, taskID int64) ([]*do
 }
 
 func (s *auditV7Service) authorizeListHandovers(ctx context.Context, task *domain.Task, handovers []*domain.AuditHandover) *domain.AppError {
-	if task != nil && task.TaskStatus == domain.TaskStatusPendingAudit {
-		actor, ok := domain.RequestActorFromContext(ctx)
-		if !ok || actor.ID <= 0 {
-			return domain.ErrUnauthorized
-		}
-		if domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskView, task.AccessSubject()) || domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskAuditDecision, task.AccessSubject()) {
-			return nil
-		}
-		prospectiveSubject := task.AccessSubject()
-		prospectiveSubject.CurrentHandlerID = &actor.ID
-		for _, handover := range handovers {
-			if handover != nil && handover.Status == domain.HandoverStatusPendingTakeover && handover.ToAuditorID == actor.ID &&
-				domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskAuditDecision, prospectiveSubject) {
-				return nil
-			}
-		}
-		return domain.NewAppError(domain.ErrCodePermissionDenied, "task handovers are outside the effective data scope", map[string]interface{}{
-			"deny_code": "audit_handover_list_out_of_scope",
-			"task_id":   task.ID,
-		})
+	if task == nil || task.TaskStatus != domain.TaskStatusPendingAudit {
+		return domain.NewAppError(domain.ErrCodeInvalidStateTransition, "audit handovers are only available while a task is pending audit", nil)
 	}
 	actor, ok := domain.RequestActorFromContext(ctx)
 	if !ok || actor.ID <= 0 {
+		return domain.ErrUnauthorized
+	}
+	if domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskView, task.AccessSubject()) || domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskAuditDecision, task.AccessSubject()) {
 		return nil
 	}
-	scope, appErr := resolveDataScopeForActor(ctx, s.dataScopeResolver, s.scopeUserRepo)
-	if appErr != nil {
-		return appErr
+	prospectiveSubject := task.AccessSubject()
+	prospectiveSubject.CurrentHandlerID = &actor.ID
+	for _, handover := range handovers {
+		if handover != nil && handover.Status == domain.HandoverStatusPendingTakeover && handover.ToAuditorID == actor.ID &&
+			domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskAuditDecision, prospectiveSubject) {
+			return nil
+		}
 	}
-	if scope == nil || scope.ViewAll {
-		return nil
-	}
-	if hasAnyRoleValue(actor.Roles, domain.RoleAuditA, domain.RoleAuditB) && matchesAnyStageVisibility(task, scope.StageVisibilities) {
-		return nil
-	}
-	if auditHandoverListOrgScopeAllows(task, scope) {
-		return nil
-	}
-	return domain.NewAppError(domain.ErrCodePermissionDenied, "audit handover list is outside the actor organization scope", map[string]interface{}{
-		"deny_code":        "audit_handover_list_out_of_scope",
-		"task_id":          task.ID,
-		"task_status":      string(task.TaskStatus),
-		"owner_department": task.OwnerDepartment,
-		"owner_org_team":   task.OwnerOrgTeam,
-		"actor_id":         actor.ID,
-		"actor_roles":      actor.Roles,
+	return domain.NewAppError(domain.ErrCodePermissionDenied, "task handovers are outside the effective data scope", map[string]interface{}{
+		"deny_code": "audit_handover_list_out_of_scope",
+		"task_id":   task.ID,
 	})
-}
-
-func auditHandoverListOrgScopeAllows(task *domain.Task, scope *DataScope) bool {
-	if task == nil || scope == nil {
-		return false
-	}
-	applyTaskReadModelOrgOwnership(task)
-	for _, uid := range scope.UserIDs {
-		if uid <= 0 {
-			continue
-		}
-		if task.CurrentHandlerID != nil && *task.CurrentHandlerID == uid {
-			return true
-		}
-	}
-	for _, department := range append(append([]string{}, scope.DepartmentCodes...), scope.ManagedDepartmentCodes...) {
-		if domain.OrgDepartmentsEquivalent(department, task.OwnerDepartment) {
-			return true
-		}
-	}
-	for _, team := range append(append([]string{}, scope.TeamCodes...), scope.ManagedTeamCodes...) {
-		if domain.OrgTeamsEquivalent(team, task.OwnerOrgTeam) {
-			return true
-		}
-	}
-	return false
 }
 
 func (s *auditV7Service) getTask(ctx context.Context, taskID int64) (*domain.Task, *domain.AppError) {
@@ -1283,220 +656,11 @@ func (s *auditV7Service) ensureNoPendingHandover(ctx context.Context, taskID int
 	return nil
 }
 
-func (s *auditV7Service) ensureAuditLanePolicy(
-	ctx context.Context,
-	task *domain.Task,
-	action string,
-	subjects []auditLaneAccessSubject,
-) *domain.AppError {
-	lane := domain.NormalizeTaskBusinessLane(task.BusinessLane, task.CustomizationRequired)
-	if appErr := s.ensureRequestActorLanePolicy(ctx, lane, action); appErr != nil {
-		return appErr
-	}
-	if s.scopeUserRepo == nil {
-		return nil
-	}
-	seen := map[int64]struct{}{}
-	for _, subject := range subjects {
-		if subject.UserID <= 0 {
-			continue
-		}
-		if _, exists := seen[subject.UserID]; exists {
-			continue
-		}
-		seen[subject.UserID] = struct{}{}
-		profile, appErr := s.resolveAuditLaneProfileByUserID(ctx, subject.UserID)
-		if appErr != nil {
-			return appErr
-		}
-		if !profile.allows(lane) {
-			return s.auditLaneDeniedError(action, lane, subject, profile)
-		}
-	}
-	return nil
-}
-
-func (s *auditV7Service) ensureRequestActorLanePolicy(ctx context.Context, lane domain.TaskBusinessLane, action string) *domain.AppError {
-	actor, ok := domain.RequestActorFromContext(ctx)
-	if !ok || actor.ID <= 0 {
-		return nil
-	}
-	profile, appErr := s.resolveAuditLaneProfileForRequestActor(ctx, actor)
-	if appErr != nil {
-		return appErr
-	}
-	if profile == nil || !profile.allows(lane) {
-		subject := auditLaneAccessSubject{UserID: actor.ID, Label: "request_actor"}
-		return s.auditLaneDeniedError(action, lane, subject, profile)
-	}
-	return nil
-}
-
-func (s *auditV7Service) resolveAuditLaneProfileForRequestActor(ctx context.Context, actor domain.RequestActor) (*auditLaneProfile, *domain.AppError) {
-	if actor.ID <= 0 {
-		return nil, nil
-	}
-	if s.scopeUserRepo != nil {
-		user, err := s.scopeUserRepo.GetByID(ctx, actor.ID)
-		if err != nil {
-			return nil, infraError("load request actor for audit lane", err)
-		}
-		if user != nil {
-			if len(user.Roles) == 0 {
-				user.Roles = append([]domain.Role(nil), actor.Roles...)
-			}
-			return buildAuditLaneProfileFromUser(user), nil
-		}
-	}
-	pseudoUser := &domain.User{
-		ID:          actor.ID,
-		Username:    strings.TrimSpace(actor.Username),
-		DisplayName: strings.TrimSpace(actor.Username),
-		Department:  domain.Department(strings.TrimSpace(actor.Department)),
-		Team:        strings.TrimSpace(actor.Team),
-		Roles:       append([]domain.Role(nil), actor.Roles...),
-	}
-	return buildAuditLaneProfileFromUser(pseudoUser), nil
-}
-
-func (s *auditV7Service) resolveAuditLaneProfileByUserID(ctx context.Context, userID int64) (*auditLaneProfile, *domain.AppError) {
-	if s.scopeUserRepo == nil {
-		return nil, nil
-	}
-	user, err := s.scopeUserRepo.GetByID(ctx, userID)
-	if err != nil {
-		return nil, infraError("load audit subject", err)
-	}
-	if user == nil {
-		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "audit lane policy: auditor not found", map[string]interface{}{
-			"deny_code": "audit_lane_subject_not_found",
-			"user_id":   userID,
-		})
-	}
-	if len(user.Roles) == 0 {
-		roles, err := s.scopeUserRepo.ListRoles(ctx, userID)
-		if err != nil {
-			return nil, infraError("load audit subject roles", err)
-		}
-		user.Roles = domain.NormalizeRoleValues(roles)
-	}
-	return buildAuditLaneProfileFromUser(user), nil
-}
-
-func (s *auditV7Service) auditLaneDeniedError(
-	action string,
-	lane domain.TaskBusinessLane,
-	subject auditLaneAccessSubject,
-	profile *auditLaneProfile,
-) *domain.AppError {
-	details := map[string]interface{}{
-		"deny_code":     "audit_lane_forbidden",
-		"action":        action,
-		"business_lane": string(lane),
-		"subject":       subject.Label,
-		"user_id":       subject.UserID,
-	}
-	if profile != nil {
-		details["username"] = profile.Username
-		details["display_name"] = profile.DisplayName
-		details["allowed_lanes"] = profile.allowedLaneValues()
-	}
-	return domain.NewAppError(domain.ErrCodePermissionDenied, "audit action is outside the auditor business lane", details)
-}
-
-func buildAuditLaneProfileFromUser(user *domain.User) *auditLaneProfile {
-	if user == nil {
-		return nil
-	}
-	profile := &auditLaneProfile{
-		UserID:      user.ID,
-		Username:    strings.TrimSpace(user.Username),
-		DisplayName: strings.TrimSpace(user.DisplayName),
-		Allowed:     map[domain.TaskBusinessLane]struct{}{},
-	}
-	if profile.DisplayName == auditLanePinnedNormalAuditorName || profile.Username == auditLanePinnedNormalAuditorName {
-		profile.Allow(domain.TaskBusinessLaneNormal)
-		return profile
-	}
-	if profile.DisplayName == auditLanePinnedCustomizationAuditorName || profile.Username == auditLanePinnedCustomizationAuditorName {
-		profile.Allow(domain.TaskBusinessLaneCustomization)
-		return profile
-	}
-	team := strings.TrimSpace(user.Team)
-	switch {
-	case strings.Contains(team, "定制"):
-		profile.Allow(domain.TaskBusinessLaneCustomization)
-	case strings.Contains(team, "普通"), strings.Contains(team, "常规"), strings.Contains(team, "设计审核"):
-		profile.Allow(domain.TaskBusinessLaneNormal)
-	}
-	if hasAnyRoleValue(user.Roles, domain.RoleCustomizationOperator, domain.RoleCustomizationReviewer) {
-		profile.Allow(domain.TaskBusinessLaneCustomization)
-	}
-	if hasAnyRoleValue(user.Roles, domain.RoleAuditA, domain.RoleAuditB, domain.RoleDesignReviewer) {
-		profile.Allow(domain.TaskBusinessLaneNormal)
-	}
-	if hasAnyRoleValue(user.Roles,
-		domain.RoleAdmin,
-		domain.RoleSuperAdmin,
-		domain.RoleRoleAdmin,
-		domain.RoleHRAdmin,
-		domain.RoleOrgAdmin,
-		domain.RoleDeptAdmin,
-		domain.RoleTeamLead,
-		domain.RoleDesignDirector,
-	) && len(profile.Allowed) == 0 {
-		return profile
-	}
-	return profile
-}
-
-func (p *auditLaneProfile) Allow(lane domain.TaskBusinessLane) {
-	if p == nil || !lane.Valid() {
-		return
-	}
-	if p.Allowed == nil {
-		p.Allowed = map[domain.TaskBusinessLane]struct{}{}
-	}
-	p.Allowed[lane] = struct{}{}
-}
-
-func (p *auditLaneProfile) allows(lane domain.TaskBusinessLane) bool {
-	if p == nil || !lane.Valid() {
-		return false
-	}
-	_, ok := p.Allowed[lane]
-	return ok
-}
-
-func (p *auditLaneProfile) allowedLaneValues() []string {
-	if p == nil || len(p.Allowed) == 0 {
-		return []string{}
-	}
-	out := make([]string, 0, len(p.Allowed))
-	for lane := range p.Allowed {
-		out = append(out, string(lane))
-	}
-	return out
-}
-
-func isClaimableStatus(status domain.TaskStatus, stage domain.AuditRecordStage) bool {
-	currentStage, ok := activeAuditStageFromStatus(status)
-	return ok && currentStage == stage
-}
-
 func activeAuditStageFromStatus(status domain.TaskStatus) (domain.AuditRecordStage, bool) {
-	switch status {
-	case domain.TaskStatusPendingAudit:
+	if status == domain.TaskStatusPendingAudit {
 		return domain.AuditRecordStageUnified, true
-	case domain.TaskStatusPendingAuditA:
-		return domain.AuditRecordStageA, true
-	case domain.TaskStatusPendingAuditB:
-		return domain.AuditRecordStageB, true
-	case domain.TaskStatusPendingOutsourceReview:
-		return domain.AuditRecordStageOutsourceReview, true
-	default:
-		return "", false
 	}
+	return "", false
 }
 
 func authorizeV8AuditTask(ctx context.Context, task *domain.Task, permission domain.PermissionCode, actorID int64) *domain.AppError {
@@ -1565,43 +729,4 @@ func (s *auditV7Service) authorizeV8AuditTarget(ctx context.Context, task *domai
 		})
 	}
 	return nil
-}
-
-func rejectedStatusForStage(stage domain.AuditRecordStage) (domain.TaskStatus, bool) {
-	switch stage {
-	case domain.AuditRecordStageA:
-		return domain.TaskStatusRejectedByAuditA, true
-	case domain.AuditRecordStageB:
-		return domain.TaskStatusRejectedByAuditB, true
-	}
-	return "", false
-}
-
-func validApproveTransition(current, next domain.TaskStatus) bool {
-	switch current {
-	case domain.TaskStatusPendingAuditA:
-		return next == domain.TaskStatusPendingAuditB ||
-			next == domain.TaskStatusPendingWarehouseReceive ||
-			next == domain.TaskStatusPendingOutsource
-	case domain.TaskStatusPendingAuditB:
-		return next == domain.TaskStatusPendingWarehouseReceive
-	case domain.TaskStatusPendingOutsourceReview:
-		return next == domain.TaskStatusPendingWarehouseReceive
-	}
-	return false
-}
-
-func issueTypesToJSON(types []string) string {
-	if len(types) == 0 {
-		return "[]"
-	}
-	out := `[`
-	for i, t := range types {
-		if i > 0 {
-			out += ","
-		}
-		out += `"` + t + `"`
-	}
-	out += `]`
-	return out
 }

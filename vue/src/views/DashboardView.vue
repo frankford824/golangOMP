@@ -397,10 +397,11 @@ const trendTodayStats = computed(() => {
 
 const statusDistribution = computed(() => {
   const activeBucketMeta = {
-    design_ops: { tone: 'pending', hint: '设计、运营或打回后待推进' },
-    audit: { tone: 'audit', hint: '审核队列待处理' },
-    customization: { tone: 'customization', hint: '定制设计协同处理中' },
-    completed: { tone: 'completed', hint: '已结单、已归档或已取消' },
+		design_ops: { tone: 'pending', hint: '设计、运营或打回后待推进' },
+		audit: { tone: 'audit', hint: '审核队列待处理' },
+		customization: { tone: 'customization', hint: '定制设计协同处理中' },
+		blocked: { tone: 'danger', hint: '存在异常，需要人工处理' },
+		completed: { tone: 'completed', hint: '已结单、已归档或已取消' },
   } as const
   const items = (overview.value?.status_distribution ?? []).flatMap((bucket) => {
     const meta = activeBucketMeta[bucket.key as keyof typeof activeBucketMeta]
@@ -461,7 +462,7 @@ const risks = computed<RiskItem[]>(() => {
   }
   if (counts.customization_in_progress > 0) {
     list.push({
-      id: 'outsource-pending',
+      id: 'customization-in-progress',
       level: 'medium',
       message: `${counts.customization_in_progress} 个定制任务处理中`,
       route: '/tasks?workflow_lane=customization',

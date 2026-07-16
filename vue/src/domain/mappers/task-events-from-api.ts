@@ -583,12 +583,14 @@ function buildTaskEventSummaryCn(
     return `${parts.join('，')}。`
   }
 
-  if (et === 'task.completed') {
-    const remark = pickFirst(raw, payload, ['remark', 'reason'])
+  if (et === 'task.closed') {
+    const fromStatus = pickFirst(raw, payload, ['from_task_status'])
+    if (fromStatus && !['PendingAudit', 'InProgress'].includes(fromStatus)) {
+      return `${actor} 记录了其他事件。`
+    }
     const sku = pickFirst(raw, payload, ['sku_code', 'primary_sku_code'])
     const parts = [`${actor} 已结单`]
     if (sku) parts.push(`SKU ${sku}`)
-    if (remark) parts.push(cleanInlineBusinessText(remark))
     return `${parts.join('，')}。`
   }
 

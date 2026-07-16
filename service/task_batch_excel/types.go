@@ -2,7 +2,6 @@ package task_batch_excel
 
 import (
 	"context"
-	"encoding/json"
 	"io"
 
 	"workflow/domain"
@@ -60,11 +59,6 @@ type BatchItem struct {
 	MaterialMode      string                    `json:"material_mode,omitempty"`
 	DesignRequirement string                    `json:"design_requirement,omitempty"`
 	NewSKU            string                    `json:"new_sku,omitempty"`
-	PurchaseSKU       string                    `json:"purchase_sku,omitempty"`
-	CostPriceMode     string                    `json:"cost_price_mode,omitempty"`
-	Quantity          *int64                    `json:"quantity,omitempty"`
-	BaseSalePrice     *float64                  `json:"base_sale_price,omitempty"`
-	VariantJSON       json.RawMessage           `json:"variant_json,omitempty"`
 	ReferenceFileRefs []domain.ReferenceFileRef `json:"reference_file_refs,omitempty"`
 }
 
