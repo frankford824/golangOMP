@@ -58,7 +58,10 @@ The persistent host toolchain is part of the runner contract: Go must match the
 `go` directive in `go.mod`, Node.js major version must be 22, and the matching
 Playwright Chromium revision is cached under root's standard Playwright cache.
 The workflow validates these versions instead of downloading a fresh Go/Node
-toolchain for every release run.
+toolchain for every release run. Go modules use `https://goproxy.cn,direct`
+with checksum verification through `sum.golang.google.cn`, because the
+production ECS cannot reliably reach `proxy.golang.org`; checksum validation is
+not disabled.
 
 Run **Production self-hosted release** manually from GitHub Actions and select:
 
