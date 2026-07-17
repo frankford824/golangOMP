@@ -54,6 +54,12 @@ The repository-level runner on the production ECS host carries these labels:
 - `x64`
 - `yongbo-production`
 
+The persistent host toolchain is part of the runner contract: Go must match the
+`go` directive in `go.mod`, Node.js major version must be 22, and the matching
+Playwright Chromium revision is cached under root's standard Playwright cache.
+The workflow validates these versions instead of downloading a fresh Go/Node
+toolchain for every release run.
+
 Run **Production self-hosted release** manually from GitHub Actions and select:
 
 - `validate`: all backend/frontend gates only.

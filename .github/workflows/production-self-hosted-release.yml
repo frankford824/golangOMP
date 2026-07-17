@@ -93,18 +93,23 @@ jobs:
             exit 1
           fi
 
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-          cache-dependency-path: vue/package-lock.json
+      - name: Verify persistent runner toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          required_go="go$(awk '$1 == "go" { print $2; exit }' go.mod)"
+          actual_go="$(go env GOVERSION)"
+          [[ "$actual_go" == "$required_go" ]] || {
+            echo "runner Go mismatch: required=$required_go actual=$actual_go" >&2
+            exit 1
+          }
+          [[ "$(node -p 'process.versions.node.split(`.`)[0]')" == "22" ]] || {
+            echo "runner Node.js major version must be 22" >&2
+            exit 1
+          }
+          go version
+          node --version
+          npm --version
 
       - name: Install frontend dependencies
         working-directory: vue
