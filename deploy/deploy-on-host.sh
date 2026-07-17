@@ -81,7 +81,36 @@ fi
 [ -d "$PACKAGE_ROOT" ] || die "package root not found: $PACKAGE_ROOT"
 
 if [ "$MODE" = "package" ]; then
-  step "package ready at $PACKAGE_ROOT"
+  # The runner workspace is cleaned by the next checkout. Persist package-mode
+  # output outside that workspace so an independently reviewed archive remains
+  # available for candidate or production promotion.
+  # shellcheck source=deploy/lib.sh
+  . "$SCRIPT_DIR/lib.sh"
+  ensure_release_history_file "$ROOT/deploy/release-history.log"
+  artifact_prefix="$(history_value "$ROOT/deploy/release-history.log" artifact_prefix)"
+  archive_name="${artifact_prefix}-${VERSION}-linux-amd64.tar.gz"
+  archive_source="$ROOT/dist/$archive_name"
+  package_store="$BASE_DIR/packages"
+  archive_destination="$package_store/$archive_name"
+  checksum_destination="${archive_destination}.sha256"
+
+  [ -f "$archive_source" ] || die "package archive not found: $archive_source"
+  install -d -m 0755 "$package_store"
+  if [ -f "$archive_destination" ]; then
+    cmp -s "$archive_source" "$archive_destination" ||
+      die "package version already exists with different content: $archive_destination"
+  else
+    archive_tmp="${archive_destination}.tmp.$$"
+    trap 'rm -f "${archive_tmp:-}"' EXIT
+    install -m 0644 "$archive_source" "$archive_tmp"
+    mv -f "$archive_tmp" "$archive_destination"
+    trap - EXIT
+  fi
+  (
+    cd "$package_store"
+    sha256sum "$archive_name" >"$(basename "$checksum_destination")"
+  )
+  step "package ready at $archive_destination"
   exit 0
 fi
 

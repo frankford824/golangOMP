@@ -66,7 +66,10 @@ not disabled.
 Run **Production self-hosted release** manually from GitHub Actions and select:
 
 - `validate`: all backend/frontend gates only.
-- `package`: gates plus a versioned Linux package.
+- `package`: gates plus a versioned Linux package, persisted outside the
+  ephemeral runner workspace at
+  `/root/ecommerce_ai/packages/<artifact>-<version>-linux-amd64.tar.gz` with a
+  SHA-256 sidecar. Reusing a version with different bytes is rejected.
 - `candidate`: gates, package, and parallel MAIN startup on port `18080` (or
   the supplied port). Live MAIN/Bridge and web roots are unchanged.
 - `production`: requires `confirm_production=PRODUCTION`, a matching
