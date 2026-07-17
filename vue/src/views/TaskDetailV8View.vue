@@ -49,7 +49,7 @@
         </article>
       </section>
 
-      <section class="collaboration-card" aria-label="审核协作">
+      <section v-if="supportsAuditCollaboration" class="collaboration-card" aria-label="审核协作">
         <div class="section-title"><div><p class="eyebrow">审核协作</p><h2>交班与接手</h2><p>审核人员可把当前任务交给另一位审核人员，接手后继续处理。</p></div><button v-if="canHandover" @click="showHandover = !showHandover">{{ showHandover ? '取消交班' : '发起交班' }}</button></div>
         <form v-if="showHandover" class="handover-form" @submit.prevent="submitHandover">
           <label>接手人员 ID<input v-model.number="handoverUserId" type="number" min="1" required /></label>
@@ -146,6 +146,7 @@ const isPlanning = computed(() => task.value?.task_type === 'sku_planning')
 const taskTypeLabel = computed(() => ({ original_product_development: '原品开发', new_product_development: '新品开发', retouch_task: '修图任务', sku_planning: '策划 SKU' }[task.value?.task_type || ''] || task.value?.task_type || '任务'))
 const requirementHeading = computed(() => isPlanning.value ? '策划说明' : isRetouch.value ? '修图要求' : task.value?.business_lane === 'customization' ? '定制需求' : '需求说明')
 const isRetouch = computed(() => ['retouch', 'retouch_task'].includes(task.value?.task_type || ''))
+const supportsAuditCollaboration = computed(() => ['original_product_development', 'new_product_development'].includes(task.value?.task_type || ''))
 const requirementText = computed(() => task.value?.requirement_description || task.value?.description || '未填写需求说明。')
 const operationNote = computed(() => task.value?.operation_note || task.value?.note || task.value?.remark || '未填写运营备注。')
 const referenceFiles = computed(() => task.value?.reference_file_refs || [])
@@ -164,7 +165,7 @@ async function load() {
     const [nextBundle, eventResponse, handoverResponse] = await Promise.all([
       task.value.task_type === 'sku_planning' ? Promise.resolve(null) : resourceGroupsApi.taskBundle(taskId.value),
       tasksApi.listTaskEvents(String(taskId.value)).catch(() => null),
-      tasksApi.listAuditHandovers(String(taskId.value)).catch(() => null),
+      supportsAuditCollaboration.value ? tasksApi.listAuditHandovers(String(taskId.value)).catch(() => null) : Promise.resolve(null),
     ])
     bundle.value = nextBundle
     events.value = eventResponse ? unwrap<TaskEvent[]>(eventResponse) || [] : []

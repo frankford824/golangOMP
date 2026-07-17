@@ -151,7 +151,7 @@ func (s *planningSKUService) Create(ctx context.Context, actor domain.RequestAct
 			IsBatchTask: len(items) > 1, BatchItemCount: len(items), BatchMode: batchMode,
 			SKUGenerationStatus: domain.TaskSKUGenerationStatusCompleted,
 		}
-		detail := &domain.TaskDetail{DemandText: "策划 SKU", Note: "策划 SKU 创建后直接结单", Quantity: pointerInt64(totalPlanningQuantity(request.Items)), FilingStatus: domain.FilingStatusNotFiled}
+		detail := newPlanningTaskDetail(request.Items)
 		taskID, err = s.taskRepo.Create(ctx, tx, task, detail)
 		if err != nil {
 			return err
@@ -204,6 +204,13 @@ func (s *planningSKUService) Create(ctx context.Context, actor domain.RequestAct
 	}
 	result.WorkflowRevision = completedRevision
 	return result, nil
+}
+
+func newPlanningTaskDetail(items []domain.PlanningSKUItemInput) *domain.TaskDetail {
+	return &domain.TaskDetail{
+		DemandText: "策划 SKU", Note: "策划 SKU 创建后直接结单", RiskFlagsJSON: "{}",
+		Quantity: pointerInt64(totalPlanningQuantity(items)), FilingStatus: domain.FilingStatusNotFiled,
+	}
 }
 
 func (s *planningSKUService) Update(ctx context.Context, actor domain.RequestActor, taskID, itemID int64, request domain.UpdatePlanningSKURequest) (*domain.PlanningSKURevision, *domain.AppError) {

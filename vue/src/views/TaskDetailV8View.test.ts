@@ -116,6 +116,8 @@ describe('TaskDetailV8View business context', () => {
     expect(wrapper.text()).toContain('不进入设计成品或客户素材')
     expect(wrapper.get('.planning-card a').attributes('href')).toBe('/v1/tasks/41/planning-skus/export.xlsx')
     expect(mocks.taskBundle).not.toHaveBeenCalled()
+    expect(mocks.listAuditHandovers).not.toHaveBeenCalled()
     expect(wrapper.find('.workflow-stub').exists()).toBe(false)
+    expect(wrapper.find('.collaboration-card').exists()).toBe(false)
   })
 })
