@@ -74,7 +74,7 @@ jobs:
         env:
           RELEASE_MODE: ${{ inputs.mode || 'validate' }}
           RELEASE_VERSION: ${{ inputs.version }}
-          PARALLEL_PORT: ${{ inputs.parallel_port }}
+          PARALLEL_PORT: ${{ inputs.parallel_port || '18080' }}
           CONFIRM_PRODUCTION: ${{ inputs.confirm_production }}
         run: |
           set -euo pipefail
