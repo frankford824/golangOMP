@@ -1,0 +1,190 @@
+name: Production self-hosted release
+
+on:
+  push:
+    branches:
+      - dev/external-developer
+    paths:
+      - '.github/workflows/production-self-hosted-release.yml'
+      - 'cmd/**'
+      - 'config/**'
+      - 'db/migrations/**'
+      - 'domain/**'
+      - 'repo/**'
+      - 'service/**'
+      - 'transport/**'
+      - 'workers/**'
+      - 'vue/**'
+      - 'deploy/**'
+      - 'go.mod'
+      - 'go.sum'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Validation, package, parallel candidate, or production cutover
+        required: true
+        type: choice
+        default: validate
+        options:
+          - validate
+          - package
+          - candidate
+          - production
+      version:
+        description: Release version such as v1.293; required except for validate
+        required: false
+        type: string
+      parallel_port:
+        description: Candidate MAIN port
+        required: true
+        default: '18080'
+        type: string
+      publish_frontend:
+        description: Publish main-ops and asset-workbench after production cutover
+        required: true
+        default: true
+        type: boolean
+      confirm_production:
+        description: Enter PRODUCTION when mode=production
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: yongbo-production-self-hosted-release
+  cancel-in-progress: false
+
+jobs:
+  validate-package-release:
+    name: ${{ inputs.mode || 'validate' }} on production runner
+    runs-on: [self-hosted, linux, x64, yongbo-production]
+    timeout-minutes: 120
+    environment: ${{ inputs.mode == 'production' && 'production' || 'production-validation' }}
+    steps:
+      - name: Checkout selected commit
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          clean: true
+
+      - name: Validate inputs
+        shell: bash
+        env:
+          RELEASE_MODE: ${{ inputs.mode || 'validate' }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          PARALLEL_PORT: ${{ inputs.parallel_port }}
+          CONFIRM_PRODUCTION: ${{ inputs.confirm_production }}
+        run: |
+          set -euo pipefail
+          if [[ "$RELEASE_MODE" != "validate" ]]; then
+            [[ "$RELEASE_VERSION" =~ ^v[0-9]+\.[0-9]+$ ]] || {
+              echo "version must match v<major>.<minor>" >&2
+              exit 1
+            }
+          fi
+          [[ "$PARALLEL_PORT" =~ ^[0-9]+$ ]] || {
+            echo "parallel_port must be numeric" >&2
+            exit 1
+          }
+          if [[ "$RELEASE_MODE" == "production" && "$CONFIRM_PRODUCTION" != "PRODUCTION" ]]; then
+            echo "production mode requires confirm_production=PRODUCTION" >&2
+            exit 1
+          fi
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: vue/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: vue
+        run: npm ci
+
+      - name: Install Chromium runtime
+        working-directory: vue
+        run: npx playwright install --with-deps chromium
+
+      - name: Backend authority gate
+        run: ./scripts/agent-check.sh
+
+      - name: Deployment process guard tests
+        run: |
+          bash deploy/tests/deploy-process-guards.test.sh
+          bash deploy/tests/self-hosted-release.test.sh
+
+      - name: Regenerate frontend API docs and verify clean output
+        run: |
+          python3 scripts/docs/generate_frontend_docs.py
+          git diff --exit-code -- docs/frontend
+
+      - name: Frontend generated contract gate
+        working-directory: vue
+        run: npm run gen:api-types:check
+
+      - name: Frontend unit tests
+        working-directory: vue
+        run: npm run test:unit
+
+      - name: Build main-ops
+        working-directory: vue
+        run: npm run build:prod
+
+      - name: Build asset-workbench
+        working-directory: vue
+        run: npm run build:asset
+
+      - name: Frontend design and architecture audits
+        working-directory: vue
+        run: npm run design:audit && npm run asset:audit
+
+      - name: Frontend accessibility audits
+        working-directory: vue
+        run: npm run a11y:audit && npm run asset:a11y
+
+      - name: Frontend large-surface audit
+        working-directory: vue
+        run: npm run load:audit
+
+      - name: Package or release on this host
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode != 'validate' }}
+        shell: bash
+        env:
+          RELEASE_MODE: ${{ inputs.mode }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          PARALLEL_PORT: ${{ inputs.parallel_port }}
+          PUBLISH_FRONTEND: ${{ inputs.publish_frontend }}
+          CONFIRM_PRODUCTION: ${{ inputs.confirm_production }}
+        run: |
+          set -euo pipefail
+          args=(
+            --mode "$RELEASE_MODE"
+            --version "$RELEASE_VERSION"
+            --parallel-port "$PARALLEL_PORT"
+            --confirm-production "$CONFIRM_PRODUCTION"
+          )
+          if [[ "$PUBLISH_FRONTEND" == "true" && "$RELEASE_MODE" == "production" ]]; then
+            args+=(--publish-frontend)
+          fi
+          bash deploy/deploy-on-host.sh "${args[@]}"
+
+      - name: Record release summary
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          {
+            echo "## Production self-hosted workflow"
+            echo "- mode: ${{ inputs.mode || 'validate' }}"
+            echo "- version: ${{ inputs.version || 'n/a' }}"
+            echo "- commit: ${{ github.sha }}"
+            echo "- runner: ${{ runner.name }}"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -11,6 +11,12 @@
 - compatibility-only legacy `8080` surfaces remain rollback-safe continuity only; they are not a second target deployment model
 - Fixed release history source of truth: `deploy/release-history.log`
 - Managed release versions start at `v0.1`
+- The preferred production automation path is
+  `.github/workflows/production-self-hosted-release.yml`, executed by the
+  repository self-hosted runner labeled `yongbo-production` on the ECS host.
+- `deploy/deploy-on-host.sh` packages and deploys directly on that host without
+  an SSH/SCP round trip. `deploy/deploy.sh` remains the emergency workstation
+  path.
 - MAIN runtime keeps same-host Bridge access at `http://127.0.0.1:8081`
 - Remote Linux base path defaults to `/root/ecommerce_ai`
 
@@ -38,6 +44,46 @@
 - The setup helpers accept the host key with `StrictHostKeyChecking=accept-new`; they do not disable host verification.
 - After setup succeeds, `deploy.sh` runs without `DEPLOY_PASSWORD` or `sshpass`.
 - **Fallback**: Password auth is compatibility-only. Use `DEPLOY_AUTH_MODE=password` plus `DEPLOY_PASSWORD` if you must keep the old path temporarily.
+
+## GitHub Self-hosted Production Workflow
+
+The repository-level runner on the production ECS host carries these labels:
+
+- `self-hosted`
+- `linux`
+- `x64`
+- `yongbo-production`
+
+Run **Production self-hosted release** manually from GitHub Actions and select:
+
+- `validate`: all backend/frontend gates only.
+- `package`: gates plus a versioned Linux package.
+- `candidate`: gates, package, and parallel MAIN startup on port `18080` (or
+  the supplied port). Live MAIN/Bridge and web roots are unchanged.
+- `production`: requires `confirm_production=PRODUCTION`, a matching
+  `/root/ecommerce_ai/shared/v8-cutover-approved.env`, then performs the normal
+  backend cutover and optionally publishes both frontends.
+
+The cutover marker must contain the exact reviewed commit:
+
+```text
+APPROVED_COMMIT=<40-character-git-sha>
+```
+
+This marker deliberately keeps the large v8 database/data migration outside
+ordinary CI. It may be created only after the production-equivalent snapshot,
+workflow-groups dry-run/apply/rollback rehearsal, and operator review are
+complete.
+
+Immediately before a production cutover, `deploy/backup-production-db.sh`
+creates and verifies a consistent compressed MySQL dump under
+`/root/ecommerce_ai/backups/production-release`. The three newest release
+backups are retained by default.
+
+Frontend publication on the host uses
+`deploy/publish-front-on-host.sh`. It validates both static artifact manifests,
+backs up both web roots, synchronizes the artifacts, validates/reloads Nginx,
+probes both public sites, and restores the backups if publication fails.
 
 ## Required Local Environment Variables
 - `DEPLOY_HOST`
