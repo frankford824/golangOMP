@@ -39,6 +39,7 @@ import type {
   WorkbenchSpreadsheetValidation,
 } from '@aw/shared/spreadsheet/types'
 import AsyncBoundary from '@aw/shared/ui/AsyncBoundary.vue'
+import PersonnelPicker from '@aw/shared/ui/PersonnelPicker.vue'
 import { resolveApiUserMessage } from '@/utils/api-message-zh'
 
 interface GridColumn {
@@ -97,7 +98,7 @@ const supplementPage = ref(1)
 const supplementPageSize = ref(20)
 const supplementTotal = ref(0)
 const supplementSearch = ref('')
-const supplementPayeeFilter = ref('')
+const supplementPayeeFilter = ref(0)
 const supplementStatusFilter = ref('')
 const supplementDateFilter = ref('')
 const supplementSortBy = ref('supplement_date')
@@ -469,7 +470,7 @@ async function querySupplements() {
 
 async function resetSupplementQuery() {
   supplementSearch.value = ''
-  supplementPayeeFilter.value = ''
+  supplementPayeeFilter.value = 0
   supplementStatusFilter.value = ''
   supplementDateFilter.value = ''
   supplementSortBy.value = 'supplement_date'
@@ -742,6 +743,10 @@ async function handleSettlementSpreadsheetAction(payload: WorkbenchSpreadsheetAc
 async function upsertSupplementPermission() {
   error.value = ''
   notice.value = ''
+  if (!permissionForm.value.payee_user_id) {
+    error.value = '请先选择要开放补录的人员'
+    return
+  }
   try {
     const saved = await assetWorkbenchApi.upsertSupplementPermission({
       payee_user_id: permissionForm.value.payee_user_id,
@@ -759,7 +764,7 @@ async function upsertSupplementPermission() {
 
 async function loadSupplementEligibleMonths() {
   if (!permissionForm.value.payee_user_id) {
-    error.value = '请先填写要开放补录的人员编号'
+    error.value = '请先选择要开放补录的人员'
     return
   }
   error.value = ''
@@ -780,7 +785,7 @@ async function loadSupplementEligibleMonths() {
 
 async function loadEntrySupplementEligibleMonths() {
   if (!supplementForm.value.payee_user_id) {
-    error.value = '请先填写补录人员编号'
+    error.value = '请先选择补录人员'
     return
   }
   error.value = ''
@@ -803,7 +808,7 @@ async function loadEntrySupplementEligibleMonths() {
 
 function requireEntrySupplementMonth() {
   if (!supplementForm.value.payee_user_id) {
-    error.value = '请填写补录人员编号'
+    error.value = '请选择补录人员'
     return ''
   }
   if (entryEligiblePayeeUserId.value !== supplementForm.value.payee_user_id) {
@@ -819,6 +824,21 @@ function requireEntrySupplementMonth() {
     return ''
   }
   return supplementMonth.value
+}
+
+async function selectPermissionPayee() {
+  eligibleSupplementMonths.value = []
+  await loadSupplementEligibleMonths()
+}
+
+async function selectEntryPayee() {
+  entryEligibleSupplementMonths.value = []
+  entryEligiblePayeeUserId.value = 0
+  await loadEntrySupplementEligibleMonths()
+}
+
+async function selectSupplementQueryPayee() {
+  await querySupplements()
 }
 
 async function createSupplement() {
@@ -1253,10 +1273,12 @@ onMounted(() => {
                 <span :class="chipClass(enabledMeta(permissionForm.enabled).tone)">{{ enabledMeta(permissionForm.enabled).label }}</span>
               </div>
               <div class="aw-form-grid">
-                <label>
-                  开放人员编号
-                  <input v-model.number="permissionForm.payee_user_id" type="number" min="1" />
-                </label>
+                <PersonnelPicker
+                  v-model="permissionForm.payee_user_id"
+                  label="开放人员"
+                  hint="选中后自动读取人员编码和可开放月份"
+                  @selected="selectPermissionPayee"
+                />
                 <label>
                   开放结算月
                   <select v-model="supplementMonth" :disabled="eligibleSupplementMonths.length === 0">
@@ -1293,10 +1315,12 @@ onMounted(() => {
                 <span class="aw-chip aw-chip--info">无补录显示 0</span>
               </div>
               <div class="aw-form-grid">
-                <label>
-                  人员编号
-                  <input v-model.number="supplementForm.payee_user_id" type="number" min="1" />
-                </label>
+                <PersonnelPicker
+                  v-model="supplementForm.payee_user_id"
+                  label="补录人员"
+                  hint="选中后自动读取人员编码和补录权限"
+                  @selected="selectEntryPayee"
+                />
                 <label>
                   计入结算月
                   <select v-model="supplementMonth" :disabled="!entryEligibleReady">
@@ -1387,10 +1411,14 @@ onMounted(() => {
                 文件/作品名称（精确）
                 <input v-model.trim="supplementSearch" placeholder="完整文件名或作品名" @keydown.enter.prevent="querySupplements" />
               </label>
-              <label>
-                人员编号（精确）
-                <input v-model.trim="supplementPayeeFilter" inputmode="numeric" placeholder="例如 1001" @keydown.enter.prevent="querySupplements" />
-              </label>
+              <PersonnelPicker
+                v-model="supplementPayeeFilter"
+                label="按人员查询"
+                hint="姓名或人员编号"
+                clearable
+                @selected="selectSupplementQueryPayee"
+                @cleared="querySupplements"
+              />
               <label>
                 状态
                 <select v-model="supplementStatusFilter">
