@@ -11,7 +11,9 @@ import {
   type SettlementPreview,
   type SettlementSupplementRow,
   type SupplementPermissionRow,
+  type UploadDirectoryRow,
 } from '@aw/shared/api/assetWorkbenchApi'
+import { uploadWorkbenchFile } from '@aw/features/upload/uploadFlow'
 import { exportErrorImportTemplateWorkbook, exportSettlementWorkbook, exportSupplementImportTemplateWorkbook } from '@aw/features/export/settlementExport'
 import { usePageRequest } from '@aw/shared/composables/usePageRequest'
 import LedgerReadout from '@aw/shared/console/LedgerReadout.vue'
@@ -71,6 +73,7 @@ const batches = ref<SettlementBatchRow[]>([])
 const supplements = ref<SettlementSupplementRow[]>([])
 const supplementPermissions = ref<SupplementPermissionRow[]>([])
 const difficultyRows = ref<DifficultyClassRow[]>([])
+const uploadDirectories = ref<UploadDirectoryRow[]>([])
 const eligibleSupplementMonths = ref<string[]>([])
 const entryEligibleSupplementMonths = ref<string[]>([])
 const entryEligiblePayeeUserId = ref(0)
@@ -103,14 +106,20 @@ const supplementStatusFilter = ref('')
 const supplementDateFilter = ref('')
 const supplementSortBy = ref('supplement_date')
 const supplementSortDir = ref<'asc' | 'desc'>('desc')
+const supplementUploadDirectoryId = ref(0)
+const supplementUploadFile = ref<File | null>(null)
+const supplementUploadInput = ref<HTMLInputElement | null>(null)
+const supplementUploading = ref(false)
+const supplementUploadProgress = ref(0)
 const settlementRequest = usePageRequest(
   async () => {
-    const [previewResult, batchResult, supplementResult, permissionResult, difficultyResult] = await Promise.all([
+    const [previewResult, batchResult, supplementResult, permissionResult, difficultyResult, uploadDirectoryResult] = await Promise.all([
       assetWorkbenchApi.previewSettlement(month.value),
       assetWorkbenchApi.listSettlementBatches({ business_month: month.value, page: 1, page_size: 20 }),
       assetWorkbenchApi.listSettlementSupplements(buildSupplementListParams()),
       assetWorkbenchApi.listSupplementPermissions({ business_month: month.value, page: 1, page_size: 50 }),
       assetWorkbenchApi.listDifficultyClasses(),
+      assetWorkbenchApi.listUploadDirectories(),
     ])
     return {
       preview: previewResult,
@@ -119,6 +128,7 @@ const settlementRequest = usePageRequest(
       supplementTotal: supplementResult.total,
       supplementPermissions: permissionResult.items,
       difficulties: difficultyResult,
+      uploadDirectories: uploadDirectoryResult,
     }
   },
   null,
@@ -157,6 +167,7 @@ const adjustmentMode = computed({
 const moneyColumns = new Set(['gross_amount', 'deduction_amount', 'welfare_amount', 'supplement_amount', 'adjustment_amount', 'net_amount', 'amount'])
 const intColumns = new Set(['item_count', 'page_count', 'error_count', 'quantity'])
 const difficultyOptions = computed(() => difficultyCodes(difficultyRows.value))
+const selectedSupplementUploadDirectory = computed(() => uploadDirectories.value.find((item) => item.id === supplementUploadDirectoryId.value) ?? null)
 
 const totals = computed(() => preview.value?.totals)
 const payrollRows = computed(() => preview.value?.payroll_rows ?? [])
@@ -498,6 +509,10 @@ async function loadSettlement(options: { keepNotice?: boolean } = {}) {
   supplementTotal.value = data.supplementTotal
   supplementPermissions.value = data.supplementPermissions
   difficultyRows.value = data.difficulties
+  uploadDirectories.value = data.uploadDirectories
+  if (!supplementUploadDirectoryId.value && data.uploadDirectories[0]) {
+    supplementUploadDirectoryId.value = data.uploadDirectories[0].id
+  }
   if (!difficultyOptions.value.includes(supplementForm.value.difficulty_class)) {
     supplementForm.value.difficulty_class = difficultyOptions.value[0] || ''
   }
@@ -850,21 +865,56 @@ async function createSupplement() {
   }
   const selectedMonth = requireEntrySupplementMonth()
   if (!selectedMonth) return
+  supplementUploading.value = true
+  supplementUploadProgress.value = 0
+  let uploadedSessionID = ''
   try {
+    if (supplementUploadFile.value) {
+      const directory = selectedSupplementUploadDirectory.value
+      if (!directory) {
+        error.value = '请选择补录文件的上传目录'
+        return
+      }
+      const uploaded = await uploadWorkbenchFile(supplementUploadFile.value, {
+        uploadDirectoryId: directory.id,
+        expectedBusinessMonth: selectedMonth,
+        relativePath: supplementUploadFile.value.name,
+        onProgress: (progress) => {
+          supplementUploadProgress.value = progress.percent
+        },
+      })
+      uploadedSessionID = uploaded.sessionId
+    }
     const payload = {
       ...supplementForm.value,
       business_month: selectedMonth,
       status: 'approved',
+      ...(uploadedSessionID ? { upload_session_ids: [uploadedSessionID] } : {}),
     }
     await assetWorkbenchApi.createSettlementSupplement(payload)
-    notice.value = `补录已创建，计入 ${selectedMonth} 结算`
+    notice.value = uploadedSessionID
+      ? `补录文件已关联并创建，金额按上传目录自动计价，计入 ${selectedMonth} 结算`
+      : `手工补录已创建，计入 ${selectedMonth} 结算`
     supplementForm.value.order_no = ''
     supplementForm.value.supplement_date = todayDate()
     supplementForm.value.page_count = 1
     supplementForm.value.gross_amount = 0
+    supplementUploadFile.value = null
+    if (supplementUploadInput.value) supplementUploadInput.value.value = ''
     await loadSettlement({ keepNotice: true })
   } catch (err) {
+    if (uploadedSessionID) await assetWorkbenchApi.cancelUploadSession(uploadedSessionID).catch(() => undefined)
     error.value = settlementActionError(err, '创建补录失败')
+  } finally {
+    supplementUploading.value = false
+  }
+}
+
+function selectAdminSupplementFile(event: Event) {
+  const input = event.target as HTMLInputElement | null
+  supplementUploadFile.value = input?.files?.[0] ?? null
+  if (supplementUploadFile.value && !supplementForm.value.order_no.trim()) {
+    supplementForm.value.order_no = supplementUploadFile.value.name
   }
 }
 
@@ -1337,8 +1387,21 @@ onMounted(() => {
                   <input v-model="supplementForm.order_no" placeholder="填写文件名或作品名" />
                 </label>
                 <label>
+                  关联补录文件（可选）
+                  <input ref="supplementUploadInput" type="file" accept="image/*" @change="selectAdminSupplementFile" />
+                </label>
+                <label>
+                  文件上传目录 / 计价分类
+                  <select v-model.number="supplementUploadDirectoryId" :disabled="!supplementUploadFile">
+                    <option :value="0" disabled>请选择上传目录</option>
+                    <option v-for="directory in uploadDirectories" :key="directory.id" :value="directory.id">
+                      {{ directory.name }} · {{ directory.difficulty_class }}类
+                    </option>
+                  </select>
+                </label>
+                <label>
                   难度
-                  <select v-model="supplementForm.difficulty_class">
+                  <select v-model="supplementForm.difficulty_class" :disabled="Boolean(supplementUploadFile)">
                     <option v-for="difficulty in difficultyOptions" :key="difficulty" :value="difficulty">{{ difficulty }}</option>
                   </select>
                 </label>
@@ -1348,7 +1411,7 @@ onMounted(() => {
                 </label>
                 <label>
                   补录金额
-                  <input v-model.number="supplementForm.gross_amount" min="0" type="number" />
+                  <input v-model.number="supplementForm.gross_amount" min="0" type="number" :disabled="Boolean(supplementUploadFile)" />
                 </label>
                 <label class="aw-inline-check">
                   <input v-model="supplementForm.finalized" type="checkbox" />
@@ -1359,12 +1422,14 @@ onMounted(() => {
                 <button class="aw-secondary-button" type="button" :disabled="entryEligibleMonthsLoading" @click="loadEntrySupplementEligibleMonths">
                   检查补录权限
                 </button>
-                <button class="aw-primary-button" type="button" @click="createSupplement">创建补录</button>
+                <button class="aw-primary-button" type="button" :disabled="supplementUploading" @click="createSupplement">
+                  {{ supplementUploading ? `上传中 ${formatInt(supplementUploadProgress)}%` : (supplementUploadFile ? '上传文件并创建补录' : '创建手工补录') }}
+                </button>
               </div>
               <p v-if="manualSupplementDuplicateWarning" class="aw-inline-alert aw-inline-alert--warning">
                 {{ manualSupplementDuplicateWarning }}
               </p>
-              <p class="aw-copy">补录日期只记录实际补的是哪一天；补录工资统一计入创建补录时所在的当前自然月，并在工资条中单独显示。</p>
+              <p class="aw-copy">选择文件时，系统会保存具体文件并按上传目录自动计价；不选文件则创建手工补录。补录工资统一计入当前自然月，并在工资条中单独显示。</p>
               <div class="aw-inline-alert" @dragover.prevent @drop.prevent="handleSupplementDrop">
                 <span>补录 Excel 批量导入</span>
                 <button class="aw-secondary-button" type="button" @click="openSupplementImport">选择文件</button>

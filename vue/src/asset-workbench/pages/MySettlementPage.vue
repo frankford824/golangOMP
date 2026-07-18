@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { Eye, Gift, RefreshCw, Upload, WalletCards } from 'lucide-vue-next'
+import { Eye, Gift, RefreshCw, Trash2, Upload, WalletCards } from 'lucide-vue-next'
 
 import { uploadWorkbenchFile } from '@aw/features/upload/uploadFlow'
 import { buildSelfSupplementPayload, duplicateSupplementFileNames } from '@aw/features/supplement/supplementUpload'
@@ -31,6 +31,7 @@ const currentAmount = computed(() => formatMoney(result.value?.estimated_net_amo
 const months = computed(() => result.value?.months ?? [])
 const supplementPermission = computed(() => result.value?.supplement_permission ?? null)
 const supplements = computed(() => result.value?.supplements ?? [])
+const activeSupplements = computed(() => supplements.value.filter((row) => row.status !== 'voided'))
 const uploadDirectories = ref<UploadDirectoryRow[]>([])
 const selectedDirectoryId = ref(0)
 const supplementDate = ref(todayDate())
@@ -39,6 +40,9 @@ const uploading = ref(false)
 const uploadProgress = ref(0)
 const uploadError = ref('')
 const uploadNotice = ref('')
+const selectedSupplementIds = ref<number[]>([])
+const supplementDeleteReason = ref('')
+const deletingSupplements = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
 const previewDialog = ref({
   open: false,
@@ -55,6 +59,9 @@ const supplementUploadOpen = computed(() => Boolean(supplementPermission.value?.
 const canUploadSupplement = computed(() =>
   supplementUploadOpen.value && Boolean(selectedDirectory.value) && selectedFiles.value.length > 0 && Boolean(supplementDate.value) && !uploading.value,
 )
+const deletableSupplements = computed(() => activeSupplements.value.filter((row) => ['draft', 'approved'].includes(row.status)))
+const selectedSupplements = computed(() => deletableSupplements.value.filter((row) => selectedSupplementIds.value.includes(row.id)))
+const allSupplementsSelected = computed(() => deletableSupplements.value.length > 0 && deletableSupplements.value.every((row) => selectedSupplementIds.value.includes(row.id)))
 
 function formatMonthLabel(month: string) {
   const [year, value] = month.split('-')
@@ -147,6 +154,43 @@ async function openSupplementPreview(row: SettlementSupplementRow, file: Submiss
     ]
   } catch (err) {
     previewDialog.value.emptyLabel = resolveApiUserMessage(err, { fallback: '文件预览加载失败' })
+  }
+}
+
+function toggleSupplement(row: SettlementSupplementRow) {
+  if (!['draft', 'approved'].includes(row.status)) return
+  selectedSupplementIds.value = selectedSupplementIds.value.includes(row.id)
+    ? selectedSupplementIds.value.filter((id) => id !== row.id)
+    : [...selectedSupplementIds.value, row.id]
+}
+
+function toggleAllSupplements() {
+  selectedSupplementIds.value = allSupplementsSelected.value ? [] : deletableSupplements.value.map((row) => row.id)
+}
+
+async function deleteSelectedSupplements() {
+  const reason = supplementDeleteReason.value.trim()
+  if (!selectedSupplementIds.value.length) {
+    uploadError.value = '请先选择要删除的补录记录'
+    return
+  }
+  if (!reason) {
+    uploadError.value = '请填写删除原因'
+    return
+  }
+  deletingSupplements.value = true
+  uploadError.value = ''
+  uploadNotice.value = ''
+  try {
+    const result = await assetWorkbenchApi.batchDeleteSettlementSupplements(selectedSupplementIds.value, reason)
+    uploadNotice.value = `已删除 ${formatInt(result.deleted_ids.length)} 条补录，关联文件和补录金额已同步移除。`
+    selectedSupplementIds.value = []
+    supplementDeleteReason.value = ''
+    await settlementRequest.run()
+  } catch (err) {
+    uploadError.value = resolveApiUserMessage(err, { fallback: '删除补录失败；本次选择没有产生部分删除。' })
+  } finally {
+    deletingSupplements.value = false
   }
 }
 
@@ -298,16 +342,33 @@ onMounted(() => {
           <p class="aw-eyebrow">补录查询</p>
           <h3>我的补录记录</h3>
         </div>
-        <span class="aw-chip aw-chip--neutral">{{ formatInt(supplements.length) }} 条</span>
+        <span class="aw-chip aw-chip--neutral">{{ formatInt(activeSupplements.length) }} 条</span>
       </div>
-      <div v-if="supplements.length" class="aw-simple-income__list">
-        <article v-for="row in supplements" :key="row.id" class="aw-simple-income__row">
+      <div v-if="deletableSupplements.length" class="aw-grid-toolbar">
+        <label class="aw-inline-check">
+          <input type="checkbox" :checked="allSupplementsSelected" @change="toggleAllSupplements" />
+          选择全部可删除补录
+        </label>
+        <span>已选 {{ formatInt(selectedSupplementIds.length) }} 条</span>
+      </div>
+      <div v-if="activeSupplements.length" class="aw-simple-income__list">
+        <article v-for="row in activeSupplements" :key="row.id" class="aw-simple-income__row">
           <header class="aw-simple-income__month">
-            <div>
-              <strong>{{ row.order_no }}</strong>
-              <small>{{ row.supplement_date || '未填写日期' }} · {{ row.difficulty_class }}类 · {{ formatInt(row.page_count) }} 张</small>
+            <label class="aw-inline-check aw-supplement-row__main">
+              <input
+                type="checkbox"
+                :checked="selectedSupplementIds.includes(row.id)"
+                :disabled="!['draft', 'approved'].includes(row.status)"
+                @change="toggleSupplement(row)"
+              />
+              <span>
+                <strong>{{ row.order_no }}</strong>
+                <small>{{ row.supplement_date || '未填写日期' }} · {{ row.difficulty_class }}类 · {{ formatInt(row.page_count) }} 张</small>
+              </span>
+            </label>
+            <div class="aw-supplement-row__summary">
+              <b class="aw-cell-money">{{ formatMoney(row.gross_amount) }}</b>
             </div>
-            <b class="aw-cell-money">{{ formatMoney(row.gross_amount) }}</b>
           </header>
           <div v-if="row.files?.length" class="aw-inline-actions">
             <button
@@ -322,11 +383,39 @@ onMounted(() => {
             </button>
           </div>
           <p v-else class="aw-copy">这是一条管理员手工补录记录，没有关联上传文件。</p>
+          <button
+            v-if="['draft', 'approved'].includes(row.status)"
+            class="aw-secondary-button"
+            type="button"
+            @click="selectedSupplementIds = [row.id]"
+          >
+            <Trash2 :size="15" aria-hidden="true" />
+            删除此条补录
+          </button>
         </article>
       </div>
       <div v-else class="aw-empty-state">
         <h3>当前月还没有补录记录</h3>
         <p>补录权限开放后，在上方选择日期、目录和图片即可上传。</p>
+      </div>
+      <div v-if="selectedSupplements.length" class="aw-panel">
+        <div class="aw-panel__head">
+          <div>
+            <h3>删除选中的补录</h3>
+            <p class="aw-copy">会同步删除补录文件，并从本月未结算补录金额中移除。</p>
+          </div>
+          <span class="aw-chip aw-chip--warn">{{ formatInt(selectedSupplements.length) }} 条</span>
+        </div>
+        <label class="aw-field">
+          <span>删除原因</span>
+          <input v-model="supplementDeleteReason" placeholder="例如：上传错文件" />
+        </label>
+        <div class="aw-inline-actions">
+          <button class="aw-primary-button" type="button" :disabled="deletingSupplements" @click="deleteSelectedSupplements">
+            {{ deletingSupplements ? '删除中' : `确认删除 ${formatInt(selectedSupplements.length)} 条` }}
+          </button>
+          <button class="aw-secondary-button" type="button" :disabled="deletingSupplements" @click="selectedSupplementIds = []">取消</button>
+        </div>
       </div>
     </div>
 

@@ -677,6 +677,7 @@ type AssetWorkbenchRepo interface {
 	ListSubmissionItemsByMonth(ctx context.Context, businessMonth string) ([]*domain.AssetWorkbenchSubmissionItem, error)
 	ListPendingGradeSubmissionItemsForPayee(ctx context.Context, tx Tx, payeeUserID int64, limit int) ([]*domain.AssetWorkbenchSubmissionItem, error)
 	ListSubmissionFiles(ctx context.Context, submissionItemID int64) ([]*domain.AssetWorkbenchSubmissionFile, error)
+	ListSubmissionFilesForUpdate(ctx context.Context, tx Tx, submissionItemID int64) ([]*domain.AssetWorkbenchSubmissionFile, error)
 	GetSubmissionFile(ctx context.Context, fileID int64) (*domain.AssetWorkbenchSubmissionFile, error)
 	ListSubmissionFilesByIDs(ctx context.Context, fileIDs []int64) ([]*domain.AssetWorkbenchSubmissionFile, error)
 	UpdateSubmissionFileDisplayName(ctx context.Context, tx Tx, fileID int64, displayName string) (*domain.AssetWorkbenchSubmissionFile, error)

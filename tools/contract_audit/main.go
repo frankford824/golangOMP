@@ -212,6 +212,7 @@ var knownGapReasons = map[string]string{
 	knownGapKey("POST", "/v1/asset-workbench/settlement/batches/:batch_id/cancel"):              "asset-workbench-mounted-route-contract-pending",
 	knownGapKey("POST", "/v1/asset-workbench/settlement/batches/:batch_id/confirm"):             "asset-workbench-mounted-route-contract-pending",
 	knownGapKey("POST", "/v1/asset-workbench/settlement/supplements"):                           "asset-workbench-mounted-route-contract-pending",
+	knownGapKey("POST", "/v1/asset-workbench/settlement/supplements/batch-delete"):              "asset-workbench-mounted-route-contract-pending",
 	knownGapKey("POST", "/v1/asset-workbench/settlement/supplements/excel"):                     "asset-workbench-mounted-route-contract-pending",
 	knownGapKey("POST", "/v1/asset-workbench/submissions"):                                      "asset-workbench-mounted-route-contract-pending",
 	knownGapKey("POST", "/v1/asset-workbench/submissions/:submission_id/void"):                  "asset-workbench-mounted-route-contract-pending",

@@ -62,6 +62,7 @@ const SETTINGS_NAV_DEFS: Array<{ path: AssetWorkbenchSettingsPath; icon: Compone
 
 const SETTLEMENT_HUB_TABS = [
   { path: '/settlement', icon: ReceiptText },
+  { path: '/supplements', icon: ScrollText },
   { path: '/reports', icon: BarChart3 },
 ] as const
 

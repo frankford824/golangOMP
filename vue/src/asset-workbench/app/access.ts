@@ -123,6 +123,12 @@ export const assetWorkbenchRouteAccess = {
     aliases: ['结算工资', '结算'],
     requiresAnyCapability: ['asset.workbench.settlement'],
   },
+  '/supplements': {
+    label: '补录查询',
+    subtitle: '查询、预览与批量删除补录',
+    aliases: ['补录管理', '补录文件', '补录删除'],
+    requiresAnyCapability: ['asset.workbench.settlement'],
+  },
   '/reports': {
     label: '计件统计',
     subtitle: '按月导出明细',
@@ -247,7 +253,7 @@ export function isConfigOnlyAdmin(bootstrap: AssetWorkbenchBootstrap | null): bo
 }
 
 export function settlementHubPaths(): readonly string[] {
-  return ['/settlement', '/reports']
+  return ['/settlement', '/supplements', '/reports']
 }
 
 export function isSettlementHubPath(path: string): boolean {

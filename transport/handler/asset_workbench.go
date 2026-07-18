@@ -1832,6 +1832,27 @@ func (h *AssetWorkbenchHandler) DeleteSettlementSupplement(c *gin.Context) {
 	respondOK(c, result)
 }
 
+func (h *AssetWorkbenchHandler) BatchDeleteSettlementSupplements(c *gin.Context) {
+	actor, ok := h.sessionActor(c)
+	if !ok {
+		return
+	}
+	var req assetworkbench.BatchDeleteSettlementSupplementsParams
+	if err := c.ShouldBindJSON(&req); err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
+		return
+	}
+	result, appErr := h.svc.BatchDeleteSettlementSupplements(c.Request.Context(), actor, req)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, gin.H{
+		"deleted_ids": result.DeletedIDs,
+		"supplements": result.Supplements,
+	})
+}
+
 func (h *AssetWorkbenchHandler) ListEvents(c *gin.Context) {
 	actor, ok := h.sessionActor(c)
 	if !ok {

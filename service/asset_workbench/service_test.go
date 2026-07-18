@@ -230,6 +230,10 @@ type supplementRepo struct {
 	created         *domain.AssetWorkbenchSettlementSupplement
 	lastListFilter  repo.AssetWorkbenchSettlementSupplementFilter
 	events          []*domain.AssetWorkbenchEvent
+	filesByItem     map[int64][]*domain.AssetWorkbenchSubmissionFile
+	deletedFileIDs  []int64
+	voidedItemIDs   []int64
+	refreshedIDs    []int64
 }
 
 func (r *supplementRepo) GetDifficultyClass(_ context.Context, code string) (*domain.AssetWorkbenchDifficultyClass, error) {
@@ -278,6 +282,46 @@ func (r *supplementRepo) CreateSettlementSupplement(_ context.Context, _ repo.Tx
 	copyItem.ID = 7001
 	r.created = &copyItem
 	return &copyItem, nil
+}
+
+func (r *supplementRepo) GetSettlementSupplementForUpdate(_ context.Context, _ repo.Tx, id int64) (*domain.AssetWorkbenchSettlementSupplement, error) {
+	for _, item := range r.supplements {
+		if item != nil && item.ID == id {
+			copyItem := *item
+			return &copyItem, nil
+		}
+	}
+	return nil, sql.ErrNoRows
+}
+
+func (r *supplementRepo) VoidSettlementSupplement(_ context.Context, _ repo.Tx, id int64) (*domain.AssetWorkbenchSettlementSupplement, error) {
+	for _, item := range r.supplements {
+		if item != nil && item.ID == id {
+			item.Status = domain.AssetWorkbenchSupplementStatusVoided
+			copyItem := *item
+			return &copyItem, nil
+		}
+	}
+	return nil, sql.ErrNoRows
+}
+
+func (r *supplementRepo) ListSubmissionFilesForUpdate(_ context.Context, _ repo.Tx, itemID int64) ([]*domain.AssetWorkbenchSubmissionFile, error) {
+	return append([]*domain.AssetWorkbenchSubmissionFile(nil), r.filesByItem[itemID]...), nil
+}
+
+func (r *supplementRepo) DeleteSubmissionFile(_ context.Context, _ repo.Tx, fileID int64, _ int64, _ string, _ time.Time) error {
+	r.deletedFileIDs = append(r.deletedFileIDs, fileID)
+	return nil
+}
+
+func (r *supplementRepo) VoidSubmissionItem(_ context.Context, _ repo.Tx, itemID int64, _ int64, _ string, _ time.Time) (*domain.AssetWorkbenchSubmissionItem, error) {
+	r.voidedItemIDs = append(r.voidedItemIDs, itemID)
+	return &domain.AssetWorkbenchSubmissionItem{ID: itemID, SubmissionID: 9000 + itemID, QCStatus: domain.AssetWorkbenchSubmissionStatusVoided}, nil
+}
+
+func (r *supplementRepo) RefreshSubmissionTotals(_ context.Context, _ repo.Tx, submissionID int64) error {
+	r.refreshedIDs = append(r.refreshedIDs, submissionID)
+	return nil
 }
 
 func (r *supplementRepo) GetSupplementPermission(_ context.Context, payeeUserID int64, businessMonth string) (*domain.AssetWorkbenchSupplementPermission, error) {
@@ -2920,6 +2964,62 @@ func TestListSettlementSupplementsRejectsInvalidDateAndSort(t *testing.T) {
 	}
 }
 
+func TestBatchDeleteSettlementSupplementsDeletesFilesItemsAndAmounts(t *testing.T) {
+	linkedItemID := int64(501)
+	workbenchRepo := &supplementRepo{
+		supplements: []*domain.AssetWorkbenchSettlementSupplement{
+			{ID: 601, SubmissionItemID: &linkedItemID, PayeeUserID: 1001, BusinessMonth: "2026-07", OrderNo: "wrong.jpg", Status: domain.AssetWorkbenchSupplementStatusApproved, GrossAmount: 12},
+			{ID: 602, PayeeUserID: 1001, BusinessMonth: "2026-07", OrderNo: "manual", Status: domain.AssetWorkbenchSupplementStatusDraft, GrossAmount: 3},
+		},
+		filesByItem: map[int64][]*domain.AssetWorkbenchSubmissionFile{
+			501: {{ID: 701, SubmissionItemID: 501, OwnerUserID: 1001, OriginalFilename: "wrong.jpg"}},
+		},
+	}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}))
+	actor := domain.RequestActor{ID: 1001, Roles: []domain.Role{domain.RoleAssetSubmitter}}
+
+	result, appErr := svc.BatchDeleteSettlementSupplements(context.Background(), actor, BatchDeleteSettlementSupplementsParams{
+		SupplementIDs: []int64{601, 602, 601},
+		Reason:        "上传错文件",
+	})
+	if appErr != nil {
+		t.Fatalf("BatchDeleteSettlementSupplements() error = %+v", appErr)
+	}
+	if fmt.Sprint(result.DeletedIDs) != "[601 602]" || len(result.Supplements) != 2 {
+		t.Fatalf("result = %+v, want two unique deleted supplements", result)
+	}
+	if fmt.Sprint(workbenchRepo.deletedFileIDs) != "[701]" || fmt.Sprint(workbenchRepo.voidedItemIDs) != "[501]" || len(workbenchRepo.refreshedIDs) != 1 {
+		t.Fatalf("files=%v items=%v refresh=%v", workbenchRepo.deletedFileIDs, workbenchRepo.voidedItemIDs, workbenchRepo.refreshedIDs)
+	}
+	for _, row := range workbenchRepo.supplements {
+		if row.Status != domain.AssetWorkbenchSupplementStatusVoided {
+			t.Fatalf("supplement %d status = %q, want voided", row.ID, row.Status)
+		}
+	}
+}
+
+func TestBatchDeleteSettlementSupplementsRejectsOtherPayeeAndLockedRows(t *testing.T) {
+	workbenchRepo := &supplementRepo{
+		supplements: []*domain.AssetWorkbenchSettlementSupplement{
+			{ID: 601, PayeeUserID: 2002, Status: domain.AssetWorkbenchSupplementStatusApproved},
+			{ID: 602, PayeeUserID: 1001, Status: domain.AssetWorkbenchSupplementStatusInBatch},
+		},
+	}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}))
+	actor := domain.RequestActor{ID: 1001, Roles: []domain.Role{domain.RoleAssetSubmitter}}
+
+	if _, appErr := svc.BatchDeleteSettlementSupplements(context.Background(), actor, BatchDeleteSettlementSupplementsParams{SupplementIDs: []int64{601}, Reason: "错传"}); appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
+		t.Fatalf("other payee error = %+v, want permission denied", appErr)
+	}
+	admin := domain.RequestActor{ID: 99, Roles: []domain.Role{domain.RoleAssetSettlement}}
+	if _, appErr := svc.BatchDeleteSettlementSupplements(context.Background(), admin, BatchDeleteSettlementSupplementsParams{SupplementIDs: []int64{602}, Reason: "错传"}); appErr == nil || appErr.Code != domain.ErrCodeConflict {
+		t.Fatalf("locked row error = %+v, want conflict", appErr)
+	}
+	if _, appErr := svc.BatchDeleteSettlementSupplements(context.Background(), admin, BatchDeleteSettlementSupplementsParams{SupplementIDs: []int64{602}, Reason: " "}); appErr == nil || appErr.Code != domain.ErrCodeReasonRequired {
+		t.Fatalf("empty reason error = %+v, want reason required", appErr)
+	}
+}
+
 func TestBootstrapTreatsTwoPayrollRowsAsActiveContract(t *testing.T) {
 	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(&bootstrapAccessRepo{}, assetWorkbenchTestTxRunner{}))
 	result, appErr := svc.Bootstrap(context.Background(), domain.RequestActor{
@@ -4244,6 +4344,34 @@ func TestBatchDeleteFilesSplitsSuccessAndFailureAndWritesEvents(t *testing.T) {
 		workbenchRepo.events[0].EventType != domain.AssetWorkbenchEventFileDeleted ||
 		workbenchRepo.events[1].EventType != domain.AssetWorkbenchEventItemVoided {
 		t.Fatalf("events = %+v", workbenchRepo.events)
+	}
+}
+
+func TestBatchDeleteFilesRejectsSupplementFilesToProtectSupplementAmount(t *testing.T) {
+	workbenchRepo := &batchFileMutationRepo{
+		files: map[int64]*domain.AssetWorkbenchSubmissionFile{
+			501: {ID: 501, SubmissionID: 9001, SubmissionItemID: 8001, OwnerUserID: 99, ObjectKey: "asset-workbench/uploads/supplement.jpg"},
+		},
+		items: map[int64]*domain.AssetWorkbenchSubmissionItem{
+			8001: {
+				ID: 8001, SubmissionID: 9001, PayeeUserID: 99, OrderNo: "supplement.jpg", DifficultyClass: "A", PageCount: 1, ItemCount: 1,
+				BusinessMonth: "2026-07", SubmittedAt: time.Date(2026, 7, 3, 8, 0, 0, 0, time.UTC), EntryKind: domain.AssetWorkbenchSubmissionEntryKindSupplement,
+				SettlementStatus: domain.AssetWorkbenchSettlementStatusUnsettled, QCStatus: domain.AssetWorkbenchSubmissionStatusSubmitted,
+			},
+		},
+	}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithRepository(workbenchRepo, assetWorkbenchTestTxRunner{}))
+	actor := domain.RequestActor{ID: 99, Roles: []domain.Role{domain.RoleAssetSubmitter}}
+
+	result, appErr := svc.BatchDeleteFiles(context.Background(), actor, BatchDeleteFilesParams{FileIDs: []int64{501}, Reason: "错传"})
+	if appErr != nil {
+		t.Fatalf("BatchDeleteFiles() appErr = %+v", appErr)
+	}
+	if len(result.Deleted) != 0 || len(result.Failures) != 1 || !strings.Contains(result.Failures[0].Reason, "Supplement upload files must be managed through their supplement record") {
+		t.Fatalf("result = %+v, want supplement consistency failure", result)
+	}
+	if len(workbenchRepo.deletedFiles) != 0 || len(workbenchRepo.updatedItems) != 0 {
+		t.Fatalf("supplement file must remain unchanged: files=%v items=%v", workbenchRepo.deletedFiles, workbenchRepo.updatedItems)
 	}
 }
 

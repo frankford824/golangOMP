@@ -792,6 +792,29 @@
   color: var(--aw-ink-2);
 }
 
+.aw-supplement-row__main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.aw-supplement-row__main > span {
+  display: grid;
+  min-width: 0;
+  gap: var(--aw-space-1);
+}
+
+.aw-supplement-row__main strong,
+.aw-supplement-row__main small {
+  overflow-wrap: anywhere;
+}
+
+.aw-supplement-row__summary {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--aw-space-2);
+}
+
 .aw-pay-slip-list {
   display: grid;
   gap: var(--aw-space-2);

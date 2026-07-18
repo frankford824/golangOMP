@@ -24010,28 +24010,77 @@ paths:
         '400': { description: Invalid request }
         '401': { description: Unauthenticated }
         '403': { description: Forbidden }
-  /v1/asset-workbench/settlement/supplements/{supplement_id}:
-    delete:
-      summary: Delete a draft or approved settlement supplement
-      description: Deletes by marking the supplement as `voided`; in-batch and settled supplement rows are protected.
+  /v1/asset-workbench/settlement/supplements/batch-delete:
+    post:
+      summary: Delete draft or approved settlement supplements in one transaction
+      description: Atomically marks every requested supplement as `voided`, soft-deletes all linked upload files, voids the linked supplement submission items, and removes their amounts from unsettled totals. Submitters and managers may delete only their own supplement rows; settlement roles may delete any payee's rows. If any row is missing, unauthorized, already in a batch, settled, or voided, no requested row is changed.
       tags: [AssetWorkbench, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
         auth_mode: bearer_authenticated
-        required_roles: [AssetSettlement, SuperAdmin]
+        required_roles: [AssetSubmitter, AssetManager, AssetSettlement, SuperAdmin]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [supplement_ids, reason]
+              properties:
+                supplement_ids:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  uniqueItems: true
+                  items: { type: integer, minimum: 1 }
+                reason:
+                  type: string
+                  minLength: 1
+      responses:
+        '200':
+          description: Atomically deleted supplement rows
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      deleted_ids:
+                        type: array
+                        items: { type: integer }
+                      supplements:
+                        type: array
+                        items: *AssetWorkbenchSettlementSupplementRow
+        '400': { description: Invalid request or missing reason }
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden because a requested row belongs to another payee }
+        '404': { description: One or more supplements were not found }
+        '409': { description: One or more supplements are already in batch, settled, or voided }
+  /v1/asset-workbench/settlement/supplements/{supplement_id}:
+    delete:
+      summary: Delete a draft or approved settlement supplement
+      description: Atomically marks the supplement as `voided`, soft-deletes linked upload files, voids the linked supplement submission item, and removes its amount from unsettled totals. Submitters and managers may delete only their own rows; settlement roles may delete any payee's row. In-batch, settled, and already-voided rows are protected.
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetSubmitter, AssetManager, AssetSettlement, SuperAdmin]
       parameters:
         - in: path
           name: supplement_id
           required: true
           schema: { type: integer }
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
               type: object
+              required: [reason]
               properties:
-                reason: { type: string }
+                reason: { type: string, minLength: 1 }
       responses:
         '200':
           description: Voided supplement
@@ -24043,7 +24092,7 @@ paths:
                   data: *AssetWorkbenchSettlementSupplementRow
         '400': { description: Invalid request }
         '401': { description: Unauthenticated }
-        '403': { description: Forbidden }
+        '403': { description: Forbidden because the supplement belongs to another payee }
         '404': { description: Supplement not found }
         '409': { description: Supplement is already in batch or settled }
   /v1/asset-workbench/upload-sessions:
@@ -24054,7 +24103,7 @@ paths:
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
         auth_mode: bearer_authenticated
-        required_roles: [AssetSubmitter, AssetManager, SuperAdmin]
+        required_roles: [AssetSubmitter, AssetManager, AssetSettlement, SuperAdmin]
       requestBody:
         required: true
         content:
@@ -24122,7 +24171,7 @@ paths:
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
         auth_mode: bearer_authenticated
-        required_roles: [AssetSubmitter, AssetManager, SuperAdmin]
+        required_roles: [AssetSubmitter, AssetManager, AssetSettlement, SuperAdmin]
       parameters:
         - in: path
           name: session_id
@@ -24156,6 +24205,34 @@ paths:
         '403': { description: Forbidden }
         '404': { description: Upload session not found }
         '409': { description: Upload session cannot be completed from current state }
+  /v1/asset-workbench/upload-sessions/{session_id}/cancel:
+    post:
+      summary: Cancel an asset workbench upload session
+      description: Cancels an owned upload session and aborts or removes its pending OSS upload object when applicable. Asset settlement users may cancel sessions they created while associating a file with an administrator-entered supplement.
+      tags: [AssetWorkbench, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-rbac-placeholder:
+        auth_mode: bearer_authenticated
+        required_roles: [AssetSubmitter, AssetManager, AssetSettlement, SuperAdmin]
+      parameters:
+        - in: path
+          name: session_id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Upload session cancelled
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: *AssetWorkbenchUploadSessionRow
+        '400': { description: Invalid request }
+        '401': { description: Unauthenticated }
+        '403': { description: Forbidden }
+        '404': { description: Upload session not found }
+        '409': { description: Upload session cannot be cancelled from current state }
   /v1/asset-workbench/upload-directories:
     get:
       summary: List enabled asset workbench upload directories
@@ -24164,7 +24241,7 @@ paths:
       x-api-readiness: ready_for_frontend
       x-rbac-placeholder:
         auth_mode: bearer_authenticated
-        required_roles: [AssetSubmitter, AssetManager, SuperAdmin]
+        required_roles: [AssetSubmitter, AssetManager, AssetSettlement, SuperAdmin]
       responses:
         '200':
           description: Enabled upload directories

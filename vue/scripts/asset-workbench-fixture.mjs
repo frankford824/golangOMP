@@ -537,11 +537,35 @@ export const assetAuditPages = [
   { name: 'admin-drive', path: '/drive?q=poster&scope=all', ready: '.aw-drive', role: 'admin' },
   { name: 'admin-quality-errors', path: '/quality-errors', ready: '.aw-quality-errors-page', role: 'admin' },
   { name: 'admin-settlement', path: '/settlement', ready: '.aw-console-hero', role: 'admin' },
+  {
+    name: 'admin-supplements',
+    path: '/supplements',
+    ready: '.aw-console-hero',
+    role: 'admin',
+    prepare: async (page) => {
+      await page.getByRole('checkbox', { name: '选择本页可删除记录' }).check()
+      await page.getByPlaceholder('例如：客户端上传错文件').fill('fixture 管理员删除错传补录')
+      await page.getByRole('button', { name: '确认删除 1 条' }).click()
+      await page.getByText(/关联文件和补录金额已同步移除/).waitFor()
+    },
+  },
   { name: 'admin-notifications', path: '/notifications', ready: '.aw-compact-list', role: 'admin' },
   { name: 'simple-home', path: '/', ready: '.aw-simple-home', role: 'simple' },
   { name: 'simple-upload', path: '/upload', ready: '.aw-dropzone', role: 'simple' },
   { name: 'simple-drive', path: '/drive?scope=operational', ready: '.aw-drive', role: 'simple' },
   { name: 'simple-income', path: '/my-settlement', ready: '.aw-simple-income', role: 'simple' },
+  {
+    name: 'simple-income-delete',
+    path: '/my-settlement',
+    ready: '.aw-simple-income',
+    role: 'simple',
+    prepare: async (page) => {
+      await page.getByRole('checkbox', { name: '选择全部可删除补录' }).check()
+      await page.getByPlaceholder('例如：上传错文件').fill('fixture 客户端删除错传补录')
+      await page.getByRole('button', { name: '确认删除 1 条' }).click()
+      await page.getByText(/关联文件和补录金额已同步移除/).waitFor()
+    },
+  },
 ]
 
 export function startAssetVite(rootDir, port, label) {
@@ -588,7 +612,7 @@ export async function installAssetWorkbenchFixture(context, role = 'admin') {
     granted_at: '2026-06-24T09:00:00+08:00',
   }
   const supplementUploads = new Map()
-  const fixtureSupplements = role === 'simple' ? [{
+  const fixtureSupplements = [{
     id: 701,
     submission_item_id: 801,
     payee_user_id: bootstrap.profile.user_id,
@@ -614,7 +638,7 @@ export async function installAssetWorkbenchFixture(context, role = 'admin') {
       file_size: 2048,
       preview_status: 'ready',
     }],
-  }] : []
+  }]
   await context.addInitScript(
     ({ now }) => {
       const RealDate = Date
@@ -717,6 +741,13 @@ export async function installAssetWorkbenchFixture(context, role = 'admin') {
           net_amount: 2300,
         },
       ])
+    }
+    if (path.endsWith('/settlement/supplements/batch-delete') && route.request().method() === 'POST') {
+      const payload = route.request().postDataJSON()
+      const ids = new Set(payload.supplement_ids ?? [])
+      const deleted = fixtureSupplements.filter((item) => ids.has(item.id))
+      for (const item of deleted) item.status = 'voided'
+      return json(route, { deleted_ids: deleted.map((item) => item.id), supplements: deleted })
     }
     if (path.endsWith('/settlement/supplements') && route.request().method() === 'POST') {
       const payload = route.request().postDataJSON()

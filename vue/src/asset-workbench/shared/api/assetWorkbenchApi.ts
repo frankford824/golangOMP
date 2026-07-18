@@ -478,6 +478,11 @@ export interface SettlementSupplementImportResult {
   }>
 }
 
+export interface BatchDeleteSettlementSupplementsResult {
+  deleted_ids: number[]
+  supplements: SettlementSupplementRow[]
+}
+
 export interface SupplementPermissionRow {
   id: number
   payee_user_id: number
@@ -1623,6 +1628,15 @@ export const assetWorkbenchApi = {
       data: { reason },
       signal,
     })
+    return unwrap(res.data)
+  },
+
+  async batchDeleteSettlementSupplements(supplementIds: number[], reason: string, signal?: AbortSignal): Promise<BatchDeleteSettlementSupplementsResult> {
+    const res = await http.post<ApiEnvelope<BatchDeleteSettlementSupplementsResult>>(
+      '/v1/asset-workbench/settlement/supplements/batch-delete',
+      { supplement_ids: supplementIds, reason },
+      { signal },
+    )
     return unwrap(res.data)
   },
 

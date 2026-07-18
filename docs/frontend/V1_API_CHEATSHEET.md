@@ -1,10 +1,10 @@
-# V1 API 速查表(360 path · 一行一条)
+# V1 API 速查表(362 path · 一行一条)
 
 > Revision: V1.3-A2 i_id-first task/ERP/search integration (2026-04-27)
 > Source: docs/api/openapi.yaml (post V1.3-A2)
 
 > 本表一行对应一个 `/v1` path；同一路径多 method 合并到 `Methods` 列。
-> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 360 个 `/v1` path。
+> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 362 个 `/v1` path。
 > 新前端只接 canonical 路径；compatibility/deprecated 路径仅作迁移兜底。
 
 | Methods | Path | Summary | RBAC | family doc |
@@ -267,10 +267,12 @@
 | GET, POST | `/v1/asset-workbench/settlement/supplements` | List asset workbench settlement supplements；Create asset workbench settlement supplement | GET:AssetSettlement, SuperAdmin; POST:AssetSubmitter, AssetManager, AssetSettlement, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/asset-workbench/settlement/my` | Get my asset-workbench settlement and supplement upload state | GET:AssetSubmitter, AssetManager, AssetTemplateAdmin, AssetSettlement, HRAdmin, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/asset-workbench/settlement/supplements/excel` | Import monthly settlement supplements from Excel | POST:AssetSettlement, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| DELETE | `/v1/asset-workbench/settlement/supplements/{supplement_id}` | Delete a draft or approved settlement supplement | DELETE:AssetSettlement, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| POST | `/v1/asset-workbench/upload-sessions` | Create asset workbench upload session | POST:AssetSubmitter, AssetManager, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| POST | `/v1/asset-workbench/upload-sessions/{session_id}/complete` | Complete asset workbench upload session | POST:AssetSubmitter, AssetManager, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| GET, POST | `/v1/asset-workbench/upload-directories` | List enabled asset workbench upload directories；Create asset workbench upload directory | GET:AssetSubmitter, AssetManager, SuperAdmin; POST:AssetManager, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/asset-workbench/settlement/supplements/batch-delete` | Delete draft or approved settlement supplements in one transaction | POST:AssetSubmitter, AssetManager, AssetSettlement, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| DELETE | `/v1/asset-workbench/settlement/supplements/{supplement_id}` | Delete a draft or approved settlement supplement | DELETE:AssetSubmitter, AssetManager, AssetSettlement, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/asset-workbench/upload-sessions` | Create asset workbench upload session | POST:AssetSubmitter, AssetManager, AssetSettlement, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/asset-workbench/upload-sessions/{session_id}/complete` | Complete asset workbench upload session | POST:AssetSubmitter, AssetManager, AssetSettlement, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/asset-workbench/upload-sessions/{session_id}/cancel` | Cancel an asset workbench upload session | POST:AssetSubmitter, AssetManager, AssetSettlement, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET, POST | `/v1/asset-workbench/upload-directories` | List enabled asset workbench upload directories；Create asset workbench upload directory | GET:AssetSubmitter, AssetManager, AssetSettlement, SuperAdmin; POST:AssetManager, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/asset-workbench/upload-directories/admin` | List all asset workbench upload directories for administration | GET:AssetManager, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | PATCH | `/v1/asset-workbench/upload-directories/{directory_id}` | Update asset workbench upload directory | PATCH:AssetManager, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET, POST | `/v1/asset-workbench/client-materials` | List client-downloadable materials；Publish an asset to client materials | GET:AssetSubmitter, AssetManager, SuperAdmin; POST:AssetManager, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |

@@ -996,6 +996,16 @@ type CreateSettlementSupplementParams struct {
 	UploadSessionIDs []string `json:"upload_session_ids,omitempty"`
 }
 
+type BatchDeleteSettlementSupplementsParams struct {
+	SupplementIDs []int64 `json:"supplement_ids"`
+	Reason        string  `json:"reason"`
+}
+
+type BatchDeleteSettlementSupplementsResult struct {
+	DeletedIDs  []int64                                      `json:"deleted_ids"`
+	Supplements []*domain.AssetWorkbenchSettlementSupplement `json:"supplements"`
+}
+
 type SettlementSupplementImportResult struct {
 	Created  []*domain.AssetWorkbenchSettlementSupplement `json:"created"`
 	Failures []SettlementSupplementImportFailure          `json:"failures"`
@@ -5496,52 +5506,107 @@ func (s *Service) ImportSettlementSupplementsExcel(ctx context.Context, actor do
 }
 
 func (s *Service) VoidSettlementSupplement(ctx context.Context, actor domain.RequestActor, supplementID int64, reason string) (*domain.AssetWorkbenchSettlementSupplement, *domain.AppError) {
+	result, appErr := s.BatchDeleteSettlementSupplements(ctx, actor, BatchDeleteSettlementSupplementsParams{
+		SupplementIDs: []int64{supplementID},
+		Reason:        reason,
+	})
+	if appErr != nil {
+		return nil, appErr
+	}
+	if result == nil || len(result.Supplements) != 1 {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to delete settlement supplement.", nil)
+	}
+	return result.Supplements[0], nil
+}
+
+func (s *Service) BatchDeleteSettlementSupplements(ctx context.Context, actor domain.RequestActor, params BatchDeleteSettlementSupplementsParams) (*BatchDeleteSettlementSupplementsResult, *domain.AppError) {
 	if err := s.requireRepo(); err != nil {
 		return nil, err
 	}
-	if !actorHasAny(actor, domain.RoleAssetSettlement, domain.RoleSuperAdmin) {
-		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only settlement roles can delete settlement supplements.", nil)
+	canManage := actorHasAny(actor, domain.RoleAssetSettlement, domain.RoleSuperAdmin)
+	if !canManage && !actorHasAny(actor, domain.RoleAssetSubmitter, domain.RoleAssetManager) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "Only settlement roles or the supplement payee can delete settlement supplements.", nil)
 	}
-	var updated *domain.AssetWorkbenchSettlementSupplement
+	reason := strings.TrimSpace(params.Reason)
+	if reason == "" {
+		return nil, domain.NewAppError(domain.ErrCodeReasonRequired, "reason is required when deleting settlement supplements.", nil)
+	}
+	supplementIDs := positiveUniqueInt64s(params.SupplementIDs)
+	if len(supplementIDs) == 0 {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "supplement_ids is required.", nil)
+	}
+	if len(supplementIDs) > 100 {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "supplement_ids cannot contain more than 100 values.", nil)
+	}
+	result := &BatchDeleteSettlementSupplementsResult{
+		DeletedIDs:  make([]int64, 0, len(supplementIDs)),
+		Supplements: make([]*domain.AssetWorkbenchSettlementSupplement, 0, len(supplementIDs)),
+	}
 	if err := s.tx.RunInTx(ctx, func(tx repo.Tx) error {
-		before, err := s.repo.GetSettlementSupplementForUpdate(ctx, tx, supplementID)
-		if err != nil {
-			return err
-		}
-		switch before.Status {
-		case domain.AssetWorkbenchSupplementStatusInBatch, domain.AssetWorkbenchSupplementStatusSettled, domain.AssetWorkbenchSupplementStatusVoided:
-			return domain.NewAppError(domain.ErrCodeConflict, "Only draft or approved supplements can be deleted.", map[string]interface{}{
-				"supplement_id": supplementID,
-				"status":        before.Status,
-			})
-		}
-		updated, err = s.repo.VoidSettlementSupplement(ctx, tx, supplementID)
-		if err != nil {
-			return err
-		}
-		if before.SubmissionItemID != nil && *before.SubmissionItemID > 0 {
-			voidedItem, err := s.repo.VoidSubmissionItem(ctx, tx, *before.SubmissionItemID, actor.ID, "linked supplement voided: "+reason, s.nowFn().UTC())
+		now := s.nowFn().UTC()
+		for _, supplementID := range supplementIDs {
+			before, err := s.repo.GetSettlementSupplementForUpdate(ctx, tx, supplementID)
 			if err != nil {
 				return err
 			}
-			if err := s.repo.RefreshSubmissionTotals(ctx, tx, voidedItem.SubmissionID); err != nil {
+			if !canManage && before.PayeeUserID != actor.ID {
+				return domain.NewAppError(domain.ErrCodePermissionDenied, "Supplement payees can only delete their own supplement records.", map[string]interface{}{
+					"supplement_id": supplementID,
+					"payee_user_id": before.PayeeUserID,
+				})
+			}
+			switch before.Status {
+			case domain.AssetWorkbenchSupplementStatusInBatch, domain.AssetWorkbenchSupplementStatusSettled, domain.AssetWorkbenchSupplementStatusVoided:
+				return domain.NewAppError(domain.ErrCodeConflict, "Only draft or approved supplements can be deleted.", map[string]interface{}{
+					"supplement_id": supplementID,
+					"status":        before.Status,
+				})
+			}
+			if before.SubmissionItemID != nil && *before.SubmissionItemID > 0 {
+				files, err := s.repo.ListSubmissionFilesForUpdate(ctx, tx, *before.SubmissionItemID)
+				if err != nil {
+					return err
+				}
+				for _, file := range files {
+					if err := s.repo.DeleteSubmissionFile(ctx, tx, file.ID, actor.ID, reason, now); err != nil {
+						return err
+					}
+					if err := s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventFileDeleted, domain.AssetWorkbenchEntitySubmissionFile, &file.ID, file, nil, reason); err != nil {
+						return err
+					}
+				}
+				voidedItem, err := s.repo.VoidSubmissionItem(ctx, tx, *before.SubmissionItemID, actor.ID, "linked supplement voided: "+reason, now)
+				if err != nil {
+					return err
+				}
+				if err := s.repo.RefreshSubmissionTotals(ctx, tx, voidedItem.SubmissionID); err != nil {
+					return err
+				}
+				if err := s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventItemVoided, domain.AssetWorkbenchEntitySubmissionItem, &voidedItem.ID, nil, voidedItem, reason); err != nil {
+					return err
+				}
+			}
+			updated, err := s.repo.VoidSettlementSupplement(ctx, tx, supplementID)
+			if err != nil {
 				return err
 			}
-			if err := s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventItemVoided, domain.AssetWorkbenchEntitySubmissionItem, &voidedItem.ID, nil, voidedItem, reason); err != nil {
+			if err := s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventSupplementVoided, domain.AssetWorkbenchEntitySupplement, &updated.ID, before, updated, reason); err != nil {
 				return err
 			}
+			result.DeletedIDs = append(result.DeletedIDs, supplementID)
+			result.Supplements = append(result.Supplements, updated)
 		}
-		return s.appendEvent(ctx, tx, actor, domain.AssetWorkbenchEventSupplementVoided, domain.AssetWorkbenchEntitySupplement, &updated.ID, before, updated, reason)
+		return nil
 	}); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, domain.NewAppError(domain.ErrCodeNotFound, "Settlement supplement not found.", nil)
+			return nil, domain.NewAppError(domain.ErrCodeNotFound, "One or more settlement supplements were not found.", nil)
 		}
 		if appErr := asAppError(err); appErr != nil {
 			return nil, appErr
 		}
 		return nil, domain.NewAppError(domain.ErrCodeInternalError, "Failed to delete settlement supplement.", err.Error())
 	}
-	return updated, nil
+	return result, nil
 }
 
 func (s *Service) ListEvents(ctx context.Context, actor domain.RequestActor, filter repo.AssetWorkbenchEventFilter) ([]*domain.AssetWorkbenchEvent, int64, *domain.AppError) {

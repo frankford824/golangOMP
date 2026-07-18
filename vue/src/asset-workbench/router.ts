@@ -124,6 +124,12 @@ const routes: RouteRecordRaw[] = [
     meta: accessMeta('/settlement'),
   },
   {
+    path: '/supplements',
+    name: 'asset-supplements',
+    component: () => import('./pages/SupplementQueryPage.vue'),
+    meta: accessMeta('/supplements'),
+  },
+  {
     path: '/reports',
     name: 'asset-reports',
     component: () => import('./pages/ReportsPage.vue'),
