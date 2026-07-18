@@ -289,6 +289,7 @@ func (s *taskService) buildBatchTaskSkuItems(ctx context.Context, p CreateTaskPa
 			Quantity:            cloneInt64Ptr(rawItem.Quantity),
 			BaseSalePrice:       cloneFloat64Ptr(rawItem.BaseSalePrice),
 			DesignRequirement:   rawItem.DesignRequirement,
+			SetModeHint:         rawItem.SetModeHint,
 			VariantJSON:         variantJSON,
 			ReferenceFileRefs:   domain.NormalizeReferenceFileRefs(rawItem.ReferenceFileRefs),
 			DedupeKey:           dedupeKey,
@@ -585,6 +586,7 @@ func buildSingleTaskSKUItems(task *domain.Task, detail *domain.TaskDetail) []*ta
 	}
 	productIID := strings.TrimSpace(firstNonEmptyString(detail.CategoryName, detail.Category))
 	variantJSON, _ := mergeBatchItemProductIIDIntoVariantJSON(nil, productIID)
+	variantJSON = mergeTaskDetailDimensionsIntoVariantJSON(variantJSON, detail)
 	item := &domain.TaskSKUItem{
 		SequenceNo:               1,
 		SKUCode:                  task.SKUCode,
@@ -612,6 +614,7 @@ func buildSingleTaskSKUItems(task *domain.Task, detail *domain.TaskDetail) []*ta
 		Quantity:                 cloneInt64Ptr(detail.Quantity),
 		BaseSalePrice:            cloneFloat64Ptr(detail.BaseSalePrice),
 		DesignRequirement:        detail.DesignRequirement,
+		SetModeHint:              detail.SetModeHint,
 		VariantJSON:              variantJSON,
 		ReferenceFileRefs:        domain.ParseReferenceFileRefsJSON(detail.ReferenceFileRefsJSON),
 		DedupeKey:                buildSingleTaskDedupeKey(task, detail),
@@ -623,6 +626,26 @@ func buildSingleTaskSKUItems(task *domain.Task, detail *domain.TaskDetail) []*ta
 		item.ReferenceFileRefs = []domain.ReferenceFileRef{}
 	}
 	return []*taskBatchItemBuild{{Item: item}}
+}
+
+func mergeTaskDetailDimensionsIntoVariantJSON(raw json.RawMessage, detail *domain.TaskDetail) json.RawMessage {
+	if detail == nil || (detail.Width == nil && detail.Height == nil && detail.Area == nil) {
+		return raw
+	}
+	obj := map[string]interface{}{}
+	if len(bytes.TrimSpace(raw)) > 0 {
+		if err := json.Unmarshal(raw, &obj); err != nil {
+			return raw
+		}
+	}
+	setVariantFloatValue(obj, "width", detail.Width)
+	setVariantFloatValue(obj, "height", detail.Height)
+	setVariantFloatValue(obj, "area", detail.Area)
+	encoded, err := json.Marshal(obj)
+	if err != nil {
+		return raw
+	}
+	return json.RawMessage(encoded)
 }
 
 func buildSingleTaskDedupeKey(task *domain.Task, detail *domain.TaskDetail) string {

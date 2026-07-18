@@ -60,7 +60,7 @@
 | GET, PUT | `/v1/access/org-policies/{subject_type}/{subject_id}` | Read explicitly enabled defaults for an organization ID；Atomically replace policies for an organization ID | GET:已登录 / scope-aware; PUT:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/access/preview` | Preview the current effective-access projection for a user | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/access/events` | List access-policy audit events | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| POST | `/v1/tasks/{id}/submit-design` | Atomically bind the complete resource manifest and submit for unified audit | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/tasks/{id}/submit-design` | Submit designer-selected mode and source files for unified audit | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/tasks/{id}/audit/decision` | Approve and finalize, or return the task to design | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/tasks/audit/handover-candidates` | List PendingAudit tasks currently handled by the caller and eligible for handover | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/tasks/audit/handover-batch` | Hand over caller-owned PendingAudit tasks to an eligible auditor | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
@@ -121,7 +121,7 @@
 | GET | `/v1/tasks/{id}/cost-overrides` | Get task cost-override governance audit timeline | GET:Ops, Warehouse, Admin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/tasks/{id}/cost-overrides/{event_id}/review` | Upsert cost-override review placeholder boundary | POST:Ops, Warehouse, Admin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/tasks/{id}/cost-overrides/{event_id}/finance-mark` | Upsert cost-override finance placeholder boundary | POST:ERP, Admin | [V1_API_TASKS.md](V1_API_TASKS.md) |
-| POST | `/v1/tasks/{id}/assign` | Assign task to designer | POST:Designer, Ops, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/tasks/{id}/assign` | Assign task to designer | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/tasks/batch/assign` | Batch assign tasks to designer | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/tasks/batch/remind` | Batch remind task handlers | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/tasks/{id}/assets` | List task-linked design assets | GET:Designer, CustomizationOperator, CustomizationReviewer, Ops, Audit_A, Audit_B, Warehouse, Admin | [V1_API_TASKS.md](V1_API_TASKS.md) |

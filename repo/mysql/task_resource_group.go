@@ -76,7 +76,7 @@ func (r *TaskResourceGroupRepo) EnsureGroupShells(ctx context.Context, tx repo.T
 			SELECT trr.task_id, 'retouch_requirement', trr.id
 			FROM task_retouch_requirements trr
 			WHERE trr.task_id = ?
-			ON DUPLICATE KEY UPDATE updated_at = updated_at`, taskID)
+			ON DUPLICATE KEY UPDATE updated_at = task_asset_groups.updated_at`, taskID)
 		return err
 	default:
 		var skuCount int
@@ -89,13 +89,13 @@ func (r *TaskResourceGroupRepo) EnsureGroupShells(ctx context.Context, tx repo.T
 			SELECT tsi.task_id, 'sku', tsi.id
 			FROM task_sku_items tsi
 			WHERE tsi.task_id = ?
-			ON DUPLICATE KEY UPDATE updated_at = updated_at`, taskID)
+			ON DUPLICATE KEY UPDATE updated_at = task_asset_groups.updated_at`, taskID)
 			return err
 		}
 		_, err := sqlTx.ExecContext(ctx, `
 			INSERT INTO task_asset_groups (task_id, scope_kind)
 			VALUES (?, 'task')
-			ON DUPLICATE KEY UPDATE updated_at = updated_at`, taskID)
+			ON DUPLICATE KEY UPDATE updated_at = task_asset_groups.updated_at`, taskID)
 		return err
 	}
 }
@@ -737,7 +737,19 @@ func (r *TaskResourceGroupRepo) FinalizeGroup(ctx context.Context, tx repo.Tx, g
 	sqlTx := Unwrap(tx)
 	var previousRevisionID, previousSourceID, nextSourceID sql.NullInt64
 	if err := sqlTx.QueryRowContext(ctx, `
-		SELECT g.finalized_revision_id, previous.source_task_asset_id, next_revision.source_task_asset_id
+		SELECT g.finalized_revision_id,
+		       CASE
+		         WHEN g.finalized_revision_id IS NOT NULL THEN previous.source_task_asset_id
+		         ELSE (
+		           SELECT predecessor.source_task_asset_id
+		           FROM task_asset_group_revisions predecessor
+		           WHERE predecessor.group_id = g.id
+		             AND predecessor.revision_no < next_revision.revision_no
+		           ORDER BY predecessor.revision_no DESC
+		           LIMIT 1
+		         )
+		       END AS previous_source_task_asset_id,
+		       next_revision.source_task_asset_id
 		FROM task_asset_groups g
 		JOIN task_asset_group_revisions next_revision ON next_revision.id = ? AND next_revision.group_id = g.id
 		LEFT JOIN task_asset_group_revisions previous ON previous.id = g.finalized_revision_id

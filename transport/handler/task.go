@@ -95,10 +95,14 @@ type createTaskReq struct {
 	ProductName       string                        `json:"product_name"`
 	ProductShortName  string                        `json:"product_short_name"`
 	DesignRequirement string                        `json:"design_requirement"`
+	SetModeHint       bool                          `json:"set_mode_hint"`
 	CostPriceMode     string                        `json:"cost_price_mode"`
 	CostPrice         *float64                      `json:"cost_price"`
 	Quantity          *int64                        `json:"quantity"`
 	BaseSalePrice     *float64                      `json:"base_sale_price"`
+	Width             *float64                      `json:"width"`
+	Height            *float64                      `json:"height"`
+	Area              *float64                      `json:"area"`
 	ReferenceLink     string                        `json:"reference_link"`
 	SyncERPOnCreate   *bool                         `json:"sync_erp_on_create"`
 	ClientCreateID    string                        `json:"client_create_id"`
@@ -136,6 +140,7 @@ type createTaskBatchItemReq struct {
 	ProductIID        string                    `json:"product_i_id"`
 	MaterialMode      string                    `json:"material_mode"`
 	DesignRequirement string                    `json:"design_requirement"`
+	SetModeHint       bool                      `json:"set_mode_hint"`
 	NewSKU            string                    `json:"new_sku"`
 	PurchaseSKU       string                    `json:"purchase_sku"`
 	SKUCodeType       string                    `json:"sku_code_type"`
@@ -904,6 +909,7 @@ func (h *TaskHandler) Create(c *gin.Context) {
 
 		ChangeRequest:       req.ChangeRequest,
 		DesignRequirement:   req.DesignRequirement,
+		SetModeHint:         req.SetModeHint,
 		CategoryCode:        req.CategoryCode,
 		ProductIID:          firstNonEmptyTrimmed(req.IID, req.ProductIID),
 		MaterialMode:        req.MaterialMode,
@@ -914,6 +920,9 @@ func (h *TaskHandler) Create(c *gin.Context) {
 		CostPrice:           req.CostPrice,
 		Quantity:            req.Quantity,
 		BaseSalePrice:       req.BaseSalePrice,
+		Width:               req.Width,
+		Height:              req.Height,
+		Area:                req.Area,
 		ReferenceLink:       req.ReferenceLink,
 		PurchaseSKU:         req.PurchaseSKU,
 		ProductChannel:      req.ProductChannel,
@@ -947,6 +956,7 @@ func (h *TaskHandler) Create(c *gin.Context) {
 				ProductIID:        firstNonEmptyTrimmed(item.IID, item.ProductIID),
 				MaterialMode:      item.MaterialMode,
 				DesignRequirement: item.DesignRequirement,
+				SetModeHint:       item.SetModeHint,
 				NewSKU:            item.NewSKU,
 				PurchaseSKU:       item.PurchaseSKU,
 				SKUCodeType:       domain.TaskSKUCodeType(strings.TrimSpace(item.SKUCodeType)),
@@ -1090,6 +1100,15 @@ func v8AllowedTaskActions(actor domain.RequestActor, taskType domain.TaskType, s
 			actions = append(actions, "planning_sku.erp_sync")
 		}
 		return actions
+	}
+	if (status == domain.TaskStatusDraft || status == domain.TaskStatusPendingAssign || status == domain.TaskStatusAssigned ||
+		status == domain.TaskStatusInProgress || status == domain.TaskStatusPendingAudit) &&
+		domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskManage, subject) {
+		actions = append(actions, "task.reference.append")
+	}
+	if (status == domain.TaskStatusPendingAssign || status == domain.TaskStatusInProgress) &&
+		domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskManage, subject) {
+		actions = append(actions, "task.assign")
 	}
 	if status == domain.TaskStatusInProgress && domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskDesignSubmit, subject) {
 		actions = append(actions, "task.design.submit")

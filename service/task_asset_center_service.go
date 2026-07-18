@@ -1151,7 +1151,10 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 	if appErr := rejectCompletedTaskAssetMutation(task); appErr != nil {
 		return nil, appErr
 	}
-	if appErr := authorizeV8TaskAssetMutation(ctx, task); appErr != nil {
+	if request.TaskAssetType == nil {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "upload_session asset_type is required", nil)
+	}
+	if appErr := authorizeV8TaskAssetMutation(ctx, task, *request.TaskAssetType); appErr != nil {
 		return nil, appErr
 	}
 	if appErr := s.requireCustomizationReviewerUploadSessionSource(ctx, task, request); appErr != nil {
@@ -1163,8 +1166,8 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 	if request.SessionStatus == domain.DesignAssetSessionStatusCancelled || request.SessionStatus == domain.DesignAssetSessionStatusExpired {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidStateTransition, "upload_session is already terminal", nil)
 	}
-	if request.TaskAssetType == nil {
-		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "upload_session asset_type is required", nil)
+	if appErr := validateTaskStageUploadAssetType(task, *request.TaskAssetType, "", request.AssetID); appErr != nil {
+		return nil, appErr
 	}
 	if request.ExpectedSize == nil || *request.ExpectedSize <= 0 || *request.ExpectedSize > taskAssetUploadMaxFileSizeBytes {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "upload_session expected_size is outside the allowed range", map[string]interface{}{
@@ -1180,6 +1183,10 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 	requestAssetType := domain.NormalizeTaskAssetType(*request.TaskAssetType)
 	scopeSKUCode := strings.TrimSpace(request.TargetSKUCode)
 	retouchRequirementID := domain.CloneInt64Ptr(request.RetouchRequirementID)
+	referenceSKUItemID, appErr := s.resolveReferenceSKUItemID(ctx, params.TaskID, requestAssetType, scopeSKUCode)
+	if appErr != nil {
+		return nil, appErr
+	}
 
 	checksumHint := firstNonEmpty(strings.TrimSpace(params.FileHash), strings.TrimSpace(request.ChecksumHint))
 	var err error
@@ -1282,7 +1289,13 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 		if appErr := rejectCompletedTaskAssetMutation(task); appErr != nil {
 			return appErr
 		}
-		if appErr := authorizeV8TaskAssetMutation(ctx, task); appErr != nil {
+		if appErr := authorizeV8TaskAssetMutation(ctx, task, *request.TaskAssetType); appErr != nil {
+			return appErr
+		}
+		if request.TaskAssetType == nil {
+			return domain.NewAppError(domain.ErrCodeInvalidRequest, "upload_session asset_type is required", nil)
+		}
+		if appErr := validateTaskStageUploadAssetType(task, *request.TaskAssetType, "", request.AssetID); appErr != nil {
 			return appErr
 		}
 		if request.Status == domain.UploadRequestStatusBound || (request.SessionStatus == domain.DesignAssetSessionStatusCompleted && request.BoundAssetID != nil) {
@@ -1426,7 +1439,7 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 			return fmt.Errorf("create asset storage ref: %w", err)
 		}
 		if requestAssetType.IsReference() {
-			if err := s.insertRetouchRequirementReferenceFlat(ctx, tx, params.TaskID, retouchRequirementID, storageRefID); err != nil {
+			if err := s.insertReferenceFileRefFlat(ctx, tx, params.TaskID, referenceSKUItemID, retouchRequirementID, storageRefID); err != nil {
 				return err
 			}
 		}
@@ -1723,7 +1736,11 @@ func (s *taskAssetCenterService) CancelUploadSession(ctx context.Context, params
 	if appErr := rejectCompletedTaskAssetMutation(task); appErr != nil {
 		return nil, appErr
 	}
-	if appErr := authorizeV8TaskAssetMutation(ctx, task); appErr != nil {
+	assetType := domain.TaskAssetType("")
+	if request.TaskAssetType != nil {
+		assetType = *request.TaskAssetType
+	}
+	if appErr := authorizeV8TaskAssetMutation(ctx, task, assetType); appErr != nil {
 		return nil, appErr
 	}
 	if appErr := s.requireCustomizationReviewerUploadSessionSource(ctx, task, request); appErr != nil {
@@ -1757,7 +1774,7 @@ func (s *taskAssetCenterService) CancelUploadSession(ctx context.Context, params
 		if appErr := rejectCompletedTaskAssetMutation(task); appErr != nil {
 			return appErr
 		}
-		if appErr := authorizeV8TaskAssetMutation(ctx, task); appErr != nil {
+		if appErr := authorizeV8TaskAssetMutation(ctx, task, assetType); appErr != nil {
 			return appErr
 		}
 		if request.Status == domain.UploadRequestStatusBound || request.SessionStatus == domain.DesignAssetSessionStatusCompleted {
@@ -1907,7 +1924,7 @@ func (s *taskAssetCenterService) createUploadSession(ctx context.Context, params
 	if appErr := rejectCompletedTaskAssetMutation(task); appErr != nil {
 		return nil, appErr
 	}
-	if appErr := authorizeV8TaskAssetMutation(ctx, task); appErr != nil {
+	if appErr := authorizeV8TaskAssetMutation(ctx, task, params.AssetType); appErr != nil {
 		return nil, appErr
 	}
 	if params.AssetID == nil {
@@ -1917,7 +1934,7 @@ func (s *taskAssetCenterService) createUploadSession(ctx context.Context, params
 		}
 		params.AssetID = revisionAssetID
 	}
-	if appErr := validateAuditStageUploadAssetType(task, params.AssetType, params.OwnerModuleKey, params.AssetID); appErr != nil {
+	if appErr := validateTaskStageUploadAssetType(task, params.AssetType, params.OwnerModuleKey, params.AssetID); appErr != nil {
 		return nil, appErr
 	}
 	taskRef := strings.TrimSpace(task.TaskNo)
@@ -2051,7 +2068,10 @@ func (s *taskAssetCenterService) createUploadSession(ctx context.Context, params
 		if appErr := rejectCompletedTaskAssetMutation(task); appErr != nil {
 			return appErr
 		}
-		if appErr := authorizeV8TaskAssetMutation(ctx, task); appErr != nil {
+		if appErr := authorizeV8TaskAssetMutation(ctx, task, params.AssetType); appErr != nil {
+			return appErr
+		}
+		if appErr := validateTaskStageUploadAssetType(task, params.AssetType, params.OwnerModuleKey, params.AssetID); appErr != nil {
 			return appErr
 		}
 		created, err := s.uploadRequestRepo.Create(ctx, tx, request)
@@ -2726,35 +2746,59 @@ func (s *taskAssetCenterService) inferTaskAssetUploadMode(assetType domain.TaskA
 	return domain.DesignAssetUploadModeMultipart, nil
 }
 
-func validateAuditStageUploadAssetType(task *domain.Task, assetType domain.TaskAssetType, ownerModuleKey string, assetID *int64) *domain.AppError {
+func validateTaskStageUploadAssetType(task *domain.Task, assetType domain.TaskAssetType, ownerModuleKey string, frozenAssetID *int64) *domain.AppError {
 	if task == nil {
 		return nil
 	}
 	normalized := domain.NormalizeTaskAssetType(assetType)
-	if isCustomizationReviewTaskStatus(task.TaskStatus) {
+	if task.TaskType == domain.TaskTypeSKUPlanning || task.TaskType == domain.TaskTypePurchaseTask {
+		return domain.NewAppError(domain.ErrCodeInvalidStateTransition, "planning SKU images do not use task resource upload sessions", map[string]interface{}{
+			"deny_code": "planning_sku_resource_upload_not_allowed",
+		})
+	}
+	if normalized == domain.TaskAssetTypeReference {
+		if strings.TrimSpace(ownerModuleKey) == string(domain.ModuleKeyBasicInfo) {
+			return nil
+		}
+		// Completion and cancellation reload the frozen upload request rather than
+		// the original command, so owner_module_key is no longer present there.
+		// A frozen asset id proves that the session passed the create-time
+		// basic_info reference gate; it does not widen creation of new references.
+		if strings.TrimSpace(ownerModuleKey) == "" && frozenAssetID != nil && *frozenAssetID > 0 {
+			return nil
+		}
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "reference uploads must belong to the task basic information", map[string]interface{}{
+			"deny_code":                          "reference_owner_module_not_allowed",
+			"owner_module_key":                   strings.TrimSpace(ownerModuleKey),
+			"allowed_reference_owner_module_key": string(domain.ModuleKeyBasicInfo),
+		})
+	}
+	if task.TaskStatus == domain.TaskStatusInProgress {
+		if task.TaskType == domain.TaskTypeRetouchTask {
+			if normalized == domain.TaskAssetTypeSource || normalized == domain.TaskAssetTypeDelivery {
+				return nil
+			}
+			return domain.NewAppError(domain.ErrCodeInvalidRequest, "retouch uploads only support source or final output files", map[string]interface{}{
+				"deny_code": "retouch_asset_type_not_allowed",
+			})
+		}
 		if normalized == domain.TaskAssetTypeSource {
 			return nil
 		}
-		if normalized == domain.TaskAssetTypeDelivery && assetID != nil && *assetID > 0 {
-			return nil
-		}
-		return domain.NewAppError(domain.ErrCodeInvalidRequest, "customization review uploads only support source assets or replacement of an existing delivery asset", map[string]interface{}{
-			"deny_code":           "customization_review_asset_type_not_allowed",
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "design stage only accepts source files; final output is uploaded during audit", map[string]interface{}{
+			"deny_code":           "design_stage_final_output_not_allowed",
 			"task_status":         string(task.TaskStatus),
 			"asset_type":          string(assetType),
 			"allowed_asset_types": []string{string(domain.TaskAssetTypeSource)},
-			"replaceable_asset_types": []string{
-				string(domain.TaskAssetTypeDelivery),
-			},
 		})
 	}
-	if !isAuditStageTaskStatus(task.TaskStatus) {
-		return nil
+	if task.TaskStatus != domain.TaskStatusPendingAudit {
+		return domain.NewAppError(domain.ErrCodeInvalidStateTransition, "task assets cannot be uploaded in the current task state", map[string]interface{}{
+			"deny_code":   "task_asset_stage_not_uploadable",
+			"task_status": string(task.TaskStatus),
+		})
 	}
 	if normalized == domain.TaskAssetTypeSource || normalized == domain.TaskAssetTypeDelivery {
-		return nil
-	}
-	if normalized == domain.TaskAssetTypeReference && strings.TrimSpace(ownerModuleKey) == string(domain.ModuleKeyBasicInfo) {
 		return nil
 	}
 	return domain.NewAppError(domain.ErrCodeInvalidRequest, "audit-stage uploads only support source, delivery, or basic_info reference assets", map[string]interface{}{
@@ -2781,7 +2825,7 @@ func rejectCompletedTaskAssetMutation(task *domain.Task) *domain.AppError {
 	})
 }
 
-func authorizeV8TaskAssetMutation(ctx context.Context, task *domain.Task) *domain.AppError {
+func authorizeV8TaskAssetMutation(ctx context.Context, task *domain.Task, assetType domain.TaskAssetType) *domain.AppError {
 	if task == nil {
 		return domain.NewAppError(domain.ErrCodeInvalidRequest, "task is required", nil)
 	}
@@ -2794,17 +2838,32 @@ func authorizeV8TaskAssetMutation(ctx context.Context, task *domain.Task) *domai
 	}
 
 	permissions := []domain.PermissionCode{domain.PermissionAssetManage}
-	switch task.TaskStatus {
-	case domain.TaskStatusPendingAssign, domain.TaskStatusAssigned, domain.TaskStatusInProgress:
-		permissions = append([]domain.PermissionCode{domain.PermissionTaskDesignSubmit}, permissions...)
-	case domain.TaskStatusPendingAudit:
-		permissions = append([]domain.PermissionCode{domain.PermissionTaskAuditDecision}, permissions...)
-	default:
-		return domain.NewAppError(domain.ErrCodeInvalidStateTransition, "task assets cannot be changed in the current task state", map[string]interface{}{
-			"deny_code":   "task_asset_status_not_editable",
-			"task_id":     task.ID,
-			"task_status": task.TaskStatus,
-		})
+	if assetType.IsReference() {
+		// Operational reference attachments are a task-maintenance action. They are
+		// intentionally not implied by design/audit capabilities.
+		permissions = append([]domain.PermissionCode{domain.PermissionTaskManage}, permissions...)
+		switch task.TaskStatus {
+		case domain.TaskStatusDraft, domain.TaskStatusPendingAssign, domain.TaskStatusAssigned, domain.TaskStatusInProgress, domain.TaskStatusPendingAudit:
+		default:
+			return domain.NewAppError(domain.ErrCodeInvalidStateTransition, "task references cannot be changed in the current task state", map[string]interface{}{
+				"deny_code":   "task_reference_status_not_editable",
+				"task_id":     task.ID,
+				"task_status": task.TaskStatus,
+			})
+		}
+	} else {
+		switch task.TaskStatus {
+		case domain.TaskStatusPendingAssign, domain.TaskStatusAssigned, domain.TaskStatusInProgress:
+			permissions = append([]domain.PermissionCode{domain.PermissionTaskDesignSubmit}, permissions...)
+		case domain.TaskStatusPendingAudit:
+			permissions = append([]domain.PermissionCode{domain.PermissionTaskAuditDecision}, permissions...)
+		default:
+			return domain.NewAppError(domain.ErrCodeInvalidStateTransition, "task assets cannot be changed in the current task state", map[string]interface{}{
+				"deny_code":   "task_asset_status_not_editable",
+				"task_id":     task.ID,
+				"task_status": task.TaskStatus,
+			})
+		}
 	}
 
 	subject := task.AccessSubject()
@@ -2837,6 +2896,7 @@ func authorizeV8TaskAssetSessionRead(ctx context.Context, task *domain.Task) *do
 		domain.PermissionAssetView,
 		domain.PermissionTaskDesignSubmit,
 		domain.PermissionTaskAuditDecision,
+		domain.PermissionTaskManage,
 		domain.PermissionAssetManage,
 	}
 	for _, permission := range permissions {
@@ -3160,28 +3220,61 @@ type frozenUploadAssetIdentity struct {
 	AssetNo string
 }
 
-func (s *taskAssetCenterService) insertRetouchRequirementReferenceFlat(
+func (s *taskAssetCenterService) resolveReferenceSKUItemID(
+	ctx context.Context,
+	taskID int64,
+	assetType domain.TaskAssetType,
+	targetSKUCode string,
+) (*int64, *domain.AppError) {
+	if !assetType.IsReference() || strings.TrimSpace(targetSKUCode) == "" {
+		return nil, nil
+	}
+	items, err := s.taskRepo.ListSKUItemsByTaskID(ctx, taskID)
+	if err != nil {
+		return nil, infraError("list task sku items for reference scope", err)
+	}
+	for _, item := range items {
+		if item != nil && strings.TrimSpace(item.SKUCode) == strings.TrimSpace(targetSKUCode) {
+			id := item.ID
+			return &id, nil
+		}
+	}
+	return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "reference target_sku_code must belong to the task", map[string]interface{}{
+		"task_id":         taskID,
+		"target_sku_code": strings.TrimSpace(targetSKUCode),
+	})
+}
+
+func (s *taskAssetCenterService) insertReferenceFileRefFlat(
 	ctx context.Context,
 	tx repo.Tx,
 	taskID int64,
+	skuItemID *int64,
 	retouchRequirementID *int64,
 	refID string,
 ) error {
-	if s.referenceFileRefFlatRepo == nil || retouchRequirementID == nil || *retouchRequirementID <= 0 {
+	if s.referenceFileRefFlatRepo == nil {
 		return nil
 	}
 	refID = strings.TrimSpace(refID)
 	if refID == "" {
 		return nil
 	}
+	contextValue := "task_reference"
+	if retouchRequirementID != nil && *retouchRequirementID > 0 {
+		contextValue = "retouch_requirement_reference"
+	} else if skuItemID != nil && *skuItemID > 0 {
+		contextValue = "sku_reference"
+	}
 	if _, err := s.referenceFileRefFlatRepo.InsertFlat(ctx, tx, &domain.ReferenceFileRefFlat{
 		TaskID:               taskID,
+		SKUItemID:            domain.CloneInt64Ptr(skuItemID),
 		RetouchRequirementID: retouchRequirementID,
 		RefID:                refID,
 		OwnerModuleKey:       string(domain.ModuleKeyBasicInfo),
-		Context:              stringPtr("retouch_requirement_reference"),
+		Context:              stringPtr(contextValue),
 	}); err != nil {
-		return fmt.Errorf("insert retouch requirement reference_file_ref flat row: %w", err)
+		return fmt.Errorf("insert reference_file_ref flat row: %w", err)
 	}
 	return nil
 }

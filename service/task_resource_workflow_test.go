@@ -165,6 +165,55 @@ func TestBindingValidationRejectsCrossDiscriminatorAndSourceFinalOverlap(t *test
 	}
 }
 
+func TestDesignSubmissionAcceptsModeAndSourceButRejectsFinalOutput(t *testing.T) {
+	sourceID := int64(17)
+	for _, mode := range []domain.TaskAssetGroupMode{domain.TaskAssetGroupModeSingle, domain.TaskAssetGroupModeSet} {
+		input := domain.SubmitResourceGroupInput{
+			GroupID: 9, ExpectedGroupLockVersion: 0, Mode: mode, SourceTaskAssetID: &sourceID,
+		}
+		if appErr := validateDesignGroupInput(input); appErr != nil {
+			t.Fatalf("mode %s rejected: %+v", mode, appErr)
+		}
+		input.FinalTaskAssetIDs = []int64{18}
+		appErr := validateDesignGroupInput(input)
+		if appErr == nil || appErr.Code != domain.ErrCodeInvalidRequest {
+			t.Fatalf("mode %s final output error = %+v", mode, appErr)
+		}
+	}
+}
+
+func TestFinalOutputValidationUsesDesignerSelectedMode(t *testing.T) {
+	sourceID := int64(17)
+	if appErr := validateGroupInput(domain.SubmitResourceGroupInput{
+		GroupID: 9, Mode: domain.TaskAssetGroupModeSingle, SourceTaskAssetID: &sourceID, FinalTaskAssetIDs: []int64{18},
+	}, true); appErr != nil {
+		t.Fatalf("single final rejected: %+v", appErr)
+	}
+	if appErr := validateGroupInput(domain.SubmitResourceGroupInput{
+		GroupID: 9, Mode: domain.TaskAssetGroupModeSet, SourceTaskAssetID: &sourceID, FinalTaskAssetIDs: []int64{18},
+	}, true); appErr == nil {
+		t.Fatal("set mode accepted fewer than two final outputs")
+	}
+}
+
+func TestAuditRevisionSourceStagePreservesInheritedDesignSource(t *testing.T) {
+	designSourceID := int64(17)
+	replacementSourceID := int64(18)
+	current := &domain.TaskAssetGroupRevision{
+		SourceTaskAssetID: &designSourceID,
+		SourceStage:       domain.TaskAssetSourceDesign,
+	}
+	if got := auditRevisionSourceStage(current, nil); got != domain.TaskAssetSourceDesign {
+		t.Fatalf("omitted audit source stage = %s, want design", got)
+	}
+	if got := auditRevisionSourceStage(current, &designSourceID); got != domain.TaskAssetSourceDesign {
+		t.Fatalf("same audit source stage = %s, want design", got)
+	}
+	if got := auditRevisionSourceStage(current, &replacementSourceID); got != domain.TaskAssetSourceAudit {
+		t.Fatalf("replacement audit source stage = %s, want audit", got)
+	}
+}
+
 type resourceWorkflowTestTx struct{}
 
 func (resourceWorkflowTestTx) IsTx() {}
@@ -193,6 +242,7 @@ type bindingRollbackRepo struct {
 	completeCalls            int
 	customizationReadyErr    error
 	customizationReadyChecks int
+	revision                 *domain.TaskAssetGroupRevision
 }
 
 func (r *bindingRollbackRepo) StoreIdempotency(context.Context, repo.Tx, int64, int64, string, string, string, interface{}) (bool, json.RawMessage, error) {
@@ -229,6 +279,14 @@ func (r *bindingRollbackRepo) ListStagedAssetsForUpdate(context.Context, repo.Tx
 	return r.staged, nil
 }
 
+func (r *bindingRollbackRepo) GetRevisionForUpdate(context.Context, repo.Tx, int64) (*domain.TaskAssetGroupRevision, error) {
+	if r.revision == nil {
+		return nil, repo.ErrNotFound
+	}
+	copyRevision := *r.revision
+	return &copyRevision, nil
+}
+
 func (r *bindingRollbackRepo) CreateRevision(context.Context, repo.Tx, domain.TaskAssetGroup, domain.SubmitResourceGroupInput, domain.TaskAssetGroupRevisionStatus, domain.TaskAssetSourceStage, int64, string) (int64, error) {
 	r.createCalls++
 	return 100, nil
@@ -239,15 +297,15 @@ func (r *bindingRollbackRepo) CompleteIdempotency(context.Context, repo.Tx, int6
 	return nil
 }
 
-func TestSubmitDesignRollsBackEntireTransactionOnScopedBindingFailure(t *testing.T) {
-	actorID, skuID := int64(7), int64(22)
+func TestSubmitDesignRollsBackEntireTransactionWhenFinalOutputIsSentDuringDesign(t *testing.T) {
+	actorID := int64(7)
 	sourceID, finalID := int64(1), int64(2)
 	repository := &bindingRollbackRepo{
 		task:  &domain.TaskWorkflowLock{TaskID: 10, TaskType: domain.TaskTypeNewProductDevelopment, Status: domain.TaskStatusInProgress, WorkflowRevision: 3, CreatorID: actorID},
 		group: domain.TaskAssetGroup{ID: 20, TaskID: 10, ScopeKind: domain.TaskAssetGroupScopeTask, LockVersion: 0},
 		staged: map[int64]domain.StagedTaskAssetBinding{
 			sourceID: {TaskAssetID: sourceID, TaskID: 10, BindingState: "staged", StagedRole: "source", StagedBy: &actorID},
-			finalID:  {TaskAssetID: finalID, TaskID: 10, BindingState: "staged", StagedRole: "final", StagedBy: &actorID, StagedTaskSKUItemID: &skuID},
+			finalID:  {TaskAssetID: finalID, TaskID: 10, BindingState: "staged", StagedRole: "final", StagedBy: &actorID},
 		},
 	}
 	runner := &recordingResourceWorkflowTxRunner{}
@@ -259,6 +317,46 @@ func TestSubmitDesignRollsBackEntireTransactionOnScopedBindingFailure(t *testing
 	if appErr == nil || runner.rolledBack != 1 || runner.committed != 0 || repository.createCalls != 0 || repository.completeCalls != 0 {
 		t.Fatalf("error/tx/create/complete = %+v/%d/%d/%d/%d", appErr, runner.rolledBack, runner.committed, repository.createCalls, repository.completeCalls)
 	}
+}
+
+func TestAuditDecisionRejectsModeChangeAndBoundDesignFinals(t *testing.T) {
+	actorID, sourceID, finalID, revisionID := int64(7), int64(1), int64(2), int64(90)
+	base := func() (*bindingRollbackRepo, *recordingResourceWorkflowTxRunner) {
+		groupID := int64(20)
+		return &bindingRollbackRepo{
+			task:     &domain.TaskWorkflowLock{TaskID: 10, TaskType: domain.TaskTypeNewProductDevelopment, Status: domain.TaskStatusPendingAudit, WorkflowRevision: 4, CreatorID: actorID},
+			group:    domain.TaskAssetGroup{ID: groupID, TaskID: 10, ScopeKind: domain.TaskAssetGroupScopeTask, LockVersion: 2, WorkingRevisionID: &revisionID},
+			revision: &domain.TaskAssetGroupRevision{ID: revisionID, GroupID: groupID, Status: domain.TaskAssetGroupRevisionSubmitted, Mode: domain.TaskAssetGroupModeSingle, SourceTaskAssetID: &sourceID},
+			staged: map[int64]domain.StagedTaskAssetBinding{
+				sourceID: {TaskAssetID: sourceID, TaskID: 10, BindingState: "bound", BoundGroupID: &groupID, BoundRole: "source"},
+				finalID:  {TaskAssetID: finalID, TaskID: 10, BindingState: "bound", BoundGroupID: &groupID, BoundRole: "final"},
+			},
+		}, &recordingResourceWorkflowTxRunner{}
+	}
+
+	t.Run("auditor cannot change designer mode", func(t *testing.T) {
+		repository, runner := base()
+		svc := NewTaskResourceWorkflowService(repository, runner, nil)
+		_, appErr := svc.AuditDecision(context.Background(), 10, globalCapabilityActor(actorID, domain.PermissionTaskAuditDecision), domain.AuditDecisionRequest{
+			Decision: domain.TaskAuditDecisionApprove, ExpectedWorkflowRevision: 4, IdempotencyKey: "audit-mode-mismatch",
+			Groups: []domain.SubmitResourceGroupInput{{GroupID: 20, ExpectedGroupLockVersion: 2, Mode: domain.TaskAssetGroupModeSet, FinalTaskAssetIDs: []int64{finalID, finalID + 1}}},
+		})
+		if appErr == nil || appErr.Code != domain.ErrCodeInvalidRequest || repository.createCalls != 0 || runner.rolledBack != 1 {
+			t.Fatalf("error/create/rollback = %+v/%d/%d", appErr, repository.createCalls, runner.rolledBack)
+		}
+	})
+
+	t.Run("audit finals must be newly staged by current auditor", func(t *testing.T) {
+		repository, runner := base()
+		svc := NewTaskResourceWorkflowService(repository, runner, nil)
+		_, appErr := svc.AuditDecision(context.Background(), 10, globalCapabilityActor(actorID, domain.PermissionTaskAuditDecision), domain.AuditDecisionRequest{
+			Decision: domain.TaskAuditDecisionApprove, ExpectedWorkflowRevision: 4, IdempotencyKey: "audit-bound-final",
+			Groups: []domain.SubmitResourceGroupInput{{GroupID: 20, ExpectedGroupLockVersion: 2, Mode: domain.TaskAssetGroupModeSingle, FinalTaskAssetIDs: []int64{finalID}}},
+		})
+		if appErr == nil || appErr.Code != domain.ErrCodeInvalidRequest || repository.createCalls != 0 || runner.rolledBack != 1 {
+			t.Fatalf("error/create/rollback = %+v/%d/%d", appErr, repository.createCalls, runner.rolledBack)
+		}
+	})
 }
 
 func TestSubmitDesignRejectsCustomizationBeforeReadyForSubmit(t *testing.T) {

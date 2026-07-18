@@ -146,7 +146,13 @@ func (s *taskAssignmentService) Assign(ctx context.Context, p AssignTaskParams) 
 	authz := s.taskActionAuthorizer()
 	selfClaim, actorID := isTaskAssignmentSelfClaim(ctx, task, p)
 	decision := authz.EvaluateTaskActionPolicy(ctx, operation.Action, task, "", "")
-	if selfClaim {
+	actor, hasActor := domain.RequestActorFromContext(ctx)
+	usesExplicitAccess := hasActor && actor.EffectiveAccess != nil
+	if usesExplicitAccess {
+		selfClaim = false
+		actorID = actor.ID
+		decision = explicitTaskAssignmentDecision(ctx, actor, task, operation)
+	} else if selfClaim {
 		decision.Allowed = true
 		decision.DenyCode = ""
 		decision.DenyReason = ""
@@ -164,6 +170,10 @@ func (s *taskAssignmentService) Assign(ctx context.Context, p AssignTaskParams) 
 		return nil, taskActionDecisionAppError(operation.Action, denied)
 	}
 	if !decision.Allowed {
+		if usesExplicitAccess {
+			logTaskAssignmentDecision(ctx, operation.LogAction, task, p.DesignerID, operation.ResultingStatus, decision, false)
+			return nil, taskActionDecisionAppError(operation.Action, decision)
+		}
 		overrideDecision, overridden, appErr := s.allowDesignManagerAssignmentByTargetScope(ctx, task, p, operation, decision)
 		if appErr != nil {
 			logTaskAssignmentDecision(ctx, operation.LogAction, task, p.DesignerID, operation.ResultingStatus, decision, false)
@@ -300,6 +310,36 @@ func (s *taskAssignmentService) Assign(ctx context.Context, p AssignTaskParams) 
 	}
 	logTaskAssignmentDecision(ctx, operation.LogAction, task, p.DesignerID, operation.ResultingStatus, decision, true)
 	return updated, nil
+}
+
+func explicitTaskAssignmentDecision(ctx context.Context, actor domain.RequestActor, task *domain.Task, operation taskAssignmentOperation) TaskActionDecision {
+	decision := TaskActionDecision{
+		Allowed:        false,
+		DenyCode:       "task_assignment_permission_or_scope_denied",
+		DenyReason:     "task assignment requires task.manage within the task data scope",
+		MatchedRule:    "explicit_task_manage_scope",
+		TraceID:        domain.TraceIDFromContext(ctx),
+		ResolvedAction: string(operation.Action),
+		ActorID:        actor.ID,
+		ActorRoles:     append([]domain.Role(nil), actor.Roles...),
+		TaskID:         task.ID,
+		TaskStatus:     string(task.TaskStatus),
+		OwnerDept:      task.OwnerDepartment,
+		OwnerOrgTeam:   task.OwnerOrgTeam,
+	}
+	if task.TaskStatus != domain.TaskStatusPendingAssign && task.TaskStatus != domain.TaskStatusInProgress {
+		decision.DenyCode = "task_status_not_actionable"
+		decision.DenyReason = "task assignment is not allowed in the current task state"
+		decision.StatusReason = decision.DenyReason
+		return decision
+	}
+	if domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskManage, task.AccessSubject()) {
+		decision.Allowed = true
+		decision.DenyCode = ""
+		decision.DenyReason = ""
+		decision.ScopeSource = "explicit_access"
+	}
+	return decision
 }
 
 func (s *taskAssignmentService) createAssignmentNotification(ctx context.Context, tx repo.Tx, task *domain.Task, p AssignTaskParams, operation taskAssignmentOperation, actorID int64, previousDesignerID, previousHandlerID *int64) {
@@ -866,7 +906,11 @@ func isActorTakingTaskAlreadyClaimedByOther(ctx context.Context, task *domain.Ta
 	}
 	// Management reassign-to-self is scheduled handoff, not unassigned-pool self-claim.
 	if operation.Action == TaskActionReassign {
-		if actor, ok := resolveTaskActionActor(ctx); ok && taskActionActorHasManagementScopeRole(actor) {
+		if actor, ok := domain.RequestActorFromContext(ctx); ok && actor.EffectiveAccess != nil {
+			if domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskManage, task.AccessSubject()) {
+				return false
+			}
+		} else if legacyActor, ok := resolveTaskActionActor(ctx); ok && taskActionActorHasManagementScopeRole(legacyActor) {
 			return false
 		}
 	}
@@ -880,11 +924,11 @@ func taskAssignmentAllowsInProgressReassign(ctx context.Context, task *domain.Ta
 	if taskActionDecisionHasElevatedScope(decision) {
 		return true
 	}
-	actor, ok := resolveTaskActionActor(ctx)
-	if !ok {
-		return false
+	if actor, ok := domain.RequestActorFromContext(ctx); ok && actor.EffectiveAccess != nil {
+		return domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskManage, task.AccessSubject())
 	}
-	return taskActionActorIsCreatorOrRequester(actor, task)
+	legacyActor, ok := resolveTaskActionActor(ctx)
+	return ok && taskActionActorIsCreatorOrRequester(legacyActor, task)
 }
 
 func (s *taskAssignmentService) BatchAssign(ctx context.Context, p BatchAssignTasksParams) (*BatchTaskActionResult, *domain.AppError) {

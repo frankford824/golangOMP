@@ -358,7 +358,12 @@ func (s *taskResourceWorkflowService) SubmitDesign(ctx context.Context, taskID i
 		if task.TaskType == domain.TaskTypeRetouchTask {
 			stage = domain.TaskAssetSourceRetouch
 		}
-		locked, err := s.createSubmittedRevisions(ctx, tx, taskID, actor.ID, groups, request.Groups, stage, task.TaskType != domain.TaskTypeRetouchTask, "")
+		var locked []domain.TaskAssetGroup
+		if task.TaskType == domain.TaskTypeRetouchTask {
+			locked, err = s.createSubmittedRevisions(ctx, tx, taskID, actor.ID, groups, request.Groups, stage, false, "")
+		} else {
+			locked, err = s.createDesignSourceRevisions(ctx, tx, taskID, actor.ID, groups, request.Groups)
+		}
 		if err != nil {
 			return err
 		}
@@ -468,19 +473,12 @@ func (s *taskResourceWorkflowService) AuditDecision(ctx context.Context, taskID 
 			return s.repo.CompleteIdempotency(ctx, tx, taskID, actor.ID, "audit_decision", request.IdempotencyKey, response)
 		}
 
-		overrides := make(map[int64]domain.SubmitResourceGroupInput, len(request.Groups))
-		knownGroups := make(map[int64]struct{}, len(groups))
-		for _, group := range groups {
-			knownGroups[group.ID] = struct{}{}
+		if err := validateCompleteGroupCoverage(groups, request.Groups); err != nil {
+			return err
 		}
+		auditInputs := make(map[int64]domain.SubmitResourceGroupInput, len(request.Groups))
 		for _, input := range request.Groups {
-			if _, ok := knownGroups[input.GroupID]; !ok {
-				return domain.NewAppError(domain.ErrCodeInvalidRequest, "resource group does not belong to task", map[string]interface{}{"group_id": input.GroupID})
-			}
-			if _, duplicate := overrides[input.GroupID]; duplicate {
-				return domain.NewAppError(domain.ErrCodeInvalidRequest, "duplicate resource group", map[string]interface{}{"group_id": input.GroupID})
-			}
-			overrides[input.GroupID] = input
+			auditInputs[input.GroupID] = input
 		}
 		for i := range groups {
 			if groups[i].WorkingRevisionID == nil {
@@ -490,35 +488,36 @@ func (s *taskResourceWorkflowService) AuditDecision(ctx context.Context, taskID 
 			if err != nil || current.Status != domain.TaskAssetGroupRevisionSubmitted {
 				return domain.NewAppError(domain.ErrCodeInvalidStateTransition, "resource group is not awaiting audit", map[string]interface{}{"group_id": groups[i].ID})
 			}
-			input, replace := overrides[groups[i].ID]
-			if replace {
-				if input.ExpectedGroupLockVersion != groups[i].LockVersion {
-					return repo.ErrConflict
-				}
-				if input.Mode == "" {
-					input.Mode = current.Mode
-				}
-				if input.SourceTaskAssetID == nil {
-					input.SourceTaskAssetID = current.SourceTaskAssetID
-				}
-				if len(input.FinalTaskAssetIDs) == 0 {
-					for _, item := range current.Items {
-						input.FinalTaskAssetIDs = append(input.FinalTaskAssetIDs, item.TaskAssetID)
-					}
-				}
-				if appErr := validateGroupInput(input, true); appErr != nil {
-					return appErr
-				}
-				if err := s.validateBindingAssets(ctx, tx, actor.ID, groups[i], input); err != nil {
-					return err
-				}
-				revisionID, err := s.repo.CreateRevision(ctx, tx, groups[i], input, domain.TaskAssetGroupRevisionSubmitted, domain.TaskAssetSourceAudit, actor.ID, request.Reason)
-				if err != nil {
-					return err
-				}
-				groups[i].WorkingRevisionID = &revisionID
-				groups[i].LockVersion++
+			input := auditInputs[groups[i].ID]
+			if input.ExpectedGroupLockVersion != groups[i].LockVersion {
+				return repo.ErrConflict
 			}
+			if input.Mode == "" {
+				input.Mode = current.Mode
+			}
+			if input.Mode != current.Mode {
+				return domain.NewAppError(domain.ErrCodeInvalidRequest, "audit cannot change the designer-selected resource mode; return the task to design", map[string]interface{}{
+					"group_id":       groups[i].ID,
+					"design_mode":    current.Mode,
+					"requested_mode": input.Mode,
+				})
+			}
+			sourceStage := auditRevisionSourceStage(current, input.SourceTaskAssetID)
+			if input.SourceTaskAssetID == nil {
+				input.SourceTaskAssetID = current.SourceTaskAssetID
+			}
+			if appErr := validateGroupInput(input, true); appErr != nil {
+				return appErr
+			}
+			if err := s.validateBindingAssetsForStage(ctx, tx, actor.ID, groups[i], input, true); err != nil {
+				return err
+			}
+			revisionID, err := s.repo.CreateRevision(ctx, tx, groups[i], input, domain.TaskAssetGroupRevisionSubmitted, sourceStage, actor.ID, request.Reason)
+			if err != nil {
+				return err
+			}
+			groups[i].WorkingRevisionID = &revisionID
+			groups[i].LockVersion++
 		}
 		next, err := s.finalizer.FinalizeInTx(ctx, tx, task, groups, FinalizeModeDesignAudit, actor.ID)
 		if err != nil {
@@ -534,6 +533,22 @@ func (s *taskResourceWorkflowService) AuditDecision(ctx context.Context, taskID 
 		return replay, nil
 	}
 	return s.ResourceBundle(ctx, taskID, actor)
+}
+
+// auditRevisionSourceStage preserves the actual source-file provenance when
+// audit inherits the submitted design source. Only a different source asset
+// uploaded by the auditor changes the provenance to audit.
+func auditRevisionSourceStage(current *domain.TaskAssetGroupRevision, requestedSourceID *int64) domain.TaskAssetSourceStage {
+	if current == nil {
+		return domain.TaskAssetSourceAudit
+	}
+	if requestedSourceID != nil && (current.SourceTaskAssetID == nil || *requestedSourceID != *current.SourceTaskAssetID) {
+		return domain.TaskAssetSourceAudit
+	}
+	if current.SourceStage == "" {
+		return domain.TaskAssetSourceDesign
+	}
+	return current.SourceStage
 }
 
 func (s *taskResourceWorkflowService) Reopen(ctx context.Context, taskID int64, actor domain.RequestActor, request domain.ReopenTaskRequest) (*domain.ResourceBundle, *domain.AppError) {
@@ -705,7 +720,40 @@ func (s *taskResourceWorkflowService) createSubmittedRevisions(ctx context.Conte
 	return locked, nil
 }
 
+func (s *taskResourceWorkflowService) createDesignSourceRevisions(ctx context.Context, tx repo.Tx, taskID, actorID int64, groups []domain.TaskAssetGroup, inputs []domain.SubmitResourceGroupInput) ([]domain.TaskAssetGroup, error) {
+	inputByGroup := make(map[int64]domain.SubmitResourceGroupInput, len(inputs))
+	for _, input := range inputs {
+		inputByGroup[input.GroupID] = input
+	}
+	locked := make([]domain.TaskAssetGroup, 0, len(groups))
+	for _, shell := range groups {
+		input := inputByGroup[shell.ID]
+		if appErr := validateDesignGroupInput(input); appErr != nil {
+			return nil, appErr
+		}
+		group, err := s.repo.LockGroup(ctx, tx, taskID, input.GroupID, input.ExpectedGroupLockVersion)
+		if err != nil {
+			return nil, err
+		}
+		if err := s.validateBindingAssets(ctx, tx, actorID, *group, input); err != nil {
+			return nil, err
+		}
+		revisionID, err := s.repo.CreateRevision(ctx, tx, *group, input, domain.TaskAssetGroupRevisionSubmitted, domain.TaskAssetSourceDesign, actorID, "")
+		if err != nil {
+			return nil, err
+		}
+		group.WorkingRevisionID = &revisionID
+		group.LockVersion++
+		locked = append(locked, *group)
+	}
+	return locked, nil
+}
+
 func (s *taskResourceWorkflowService) validateBindingAssets(ctx context.Context, tx repo.Tx, actorID int64, group domain.TaskAssetGroup, input domain.SubmitResourceGroupInput) error {
+	return s.validateBindingAssetsForStage(ctx, tx, actorID, group, input, false)
+}
+
+func (s *taskResourceWorkflowService) validateBindingAssetsForStage(ctx context.Context, tx repo.Tx, actorID int64, group domain.TaskAssetGroup, input domain.SubmitResourceGroupInput, requireStagedFinal bool) error {
 	ids := append([]int64{}, input.FinalTaskAssetIDs...)
 	if input.SourceTaskAssetID != nil {
 		ids = append(ids, *input.SourceTaskAssetID)
@@ -727,6 +775,9 @@ func (s *taskResourceWorkflowService) validateBindingAssets(ctx context.Context,
 			return domain.NewAppError(domain.ErrCodeInvalidRequest, "task asset cannot be bound to this task", map[string]interface{}{"task_asset_id": id})
 		}
 		if asset.BindingState == "bound" {
+			if expectedRole == "final" && requireStagedFinal {
+				return domain.NewAppError(domain.ErrCodeInvalidRequest, "audit final output must be uploaded by the current auditor", map[string]interface{}{"task_asset_id": id})
+			}
 			if asset.BoundGroupID == nil || *asset.BoundGroupID != group.ID || asset.BoundRole != expectedRole {
 				return domain.NewAppError(domain.ErrCodeInvalidRequest, "inherited task asset belongs to another resource role", map[string]interface{}{"task_asset_id": id})
 			}
@@ -753,6 +804,24 @@ func (s *taskResourceWorkflowService) validateBindingAssets(ctx context.Context,
 		}
 	}
 	return nil
+}
+
+func validateDesignGroupInput(input domain.SubmitResourceGroupInput) *domain.AppError {
+	if input.GroupID <= 0 || input.ExpectedGroupLockVersion < 0 {
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "group_id and expected_group_lock_version are required", nil)
+	}
+	if input.SourceTaskAssetID == nil || *input.SourceTaskAssetID <= 0 {
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "source_task_asset_id is required", map[string]interface{}{"group_id": input.GroupID})
+	}
+	if len(input.FinalTaskAssetIDs) > 0 {
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "design submission only accepts source files; final output is uploaded during audit", map[string]interface{}{"group_id": input.GroupID})
+	}
+	switch input.Mode {
+	case domain.TaskAssetGroupModeSingle, domain.TaskAssetGroupModeSet:
+		return nil
+	default:
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "mode must be single or set", map[string]interface{}{"group_id": input.GroupID})
+	}
 }
 
 func validateCompleteGroupCoverage(groups []domain.TaskAssetGroup, inputs []domain.SubmitResourceGroupInput) error {

@@ -191,6 +191,7 @@ type TaskDetail struct {
 	ProductSelection             *TaskProductSelectionContext `db:"-"         json:"product_selection,omitempty"`
 	ChangeRequest                string                       `db:"change_request"              json:"change_request"`
 	DesignRequirement            string                       `db:"design_requirement"          json:"design_requirement"`
+	SetModeHint                  bool                         `db:"set_mode_hint"                json:"set_mode_hint"`
 	ProductShortName             string                       `db:"product_short_name"          json:"product_short_name"`
 	MaterialMode                 string                       `db:"material_mode"               json:"material_mode"`
 	MaterialOther                string                       `db:"material_other"              json:"material_other"`

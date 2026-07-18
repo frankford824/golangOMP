@@ -25,6 +25,10 @@ func TestTaskHandlerCreateParsesBatchItems(t *testing.T) {
 
 	body := map[string]interface{}{
 		"task_type":      "new_product_development",
+		"set_mode_hint":  true,
+		"width":          1.2,
+		"height":         0.8,
+		"area":           0.96,
 		"creator_id":     9,
 		"owner_team":     "总经办组",
 		"due_at":         "2026-04-01T00:00:00Z",
@@ -36,6 +40,7 @@ func TestTaskHandlerCreateParsesBatchItems(t *testing.T) {
 				"category_code":      "LIGHTBOX",
 				"material_mode":      "preset",
 				"design_requirement": "need design A",
+				"set_mode_hint":      false,
 			},
 			{
 				"product_name":       "Batch B",
@@ -43,6 +48,7 @@ func TestTaskHandlerCreateParsesBatchItems(t *testing.T) {
 				"category_code":      "LIGHTBOX",
 				"material_mode":      "other",
 				"design_requirement": "need design B",
+				"set_mode_hint":      true,
 				"variant_json": map[string]interface{}{
 					"color": "red",
 				},
@@ -60,6 +66,12 @@ func TestTaskHandlerCreateParsesBatchItems(t *testing.T) {
 	}
 	if taskSvc.createParams.BatchSKUMode != "multiple" {
 		t.Fatalf("batch_sku_mode = %q, want multiple", taskSvc.createParams.BatchSKUMode)
+	}
+	if !taskSvc.createParams.SetModeHint || !taskSvc.createParams.BatchItems[1].SetModeHint || taskSvc.createParams.BatchItems[0].SetModeHint {
+		t.Fatalf("set mode hints not preserved: top=%t items=%+v", taskSvc.createParams.SetModeHint, taskSvc.createParams.BatchItems)
+	}
+	if taskSvc.createParams.Width == nil || *taskSvc.createParams.Width != 1.2 || taskSvc.createParams.Height == nil || *taskSvc.createParams.Height != 0.8 || taskSvc.createParams.Area == nil || *taskSvc.createParams.Area != 0.96 {
+		t.Fatalf("single-task dimensions not parsed: width=%v height=%v area=%v", taskSvc.createParams.Width, taskSvc.createParams.Height, taskSvc.createParams.Area)
 	}
 	if len(taskSvc.createParams.BatchItems) != 2 {
 		t.Fatalf("batch_items len = %d, want 2", len(taskSvc.createParams.BatchItems))

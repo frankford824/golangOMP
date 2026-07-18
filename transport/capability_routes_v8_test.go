@@ -160,7 +160,7 @@ func TestV8TaskAssetUploadSessionAliasesShareCanonicalCapabilityContract(t *test
 		"/v1/tasks/8/asset-center/upload-sessions/session-1/cancel",
 		"/v1/tasks/8/asset-center/upload-sessions/session-1/abort",
 	}
-	want := []domain.PermissionCode{domain.PermissionTaskDesignSubmit, domain.PermissionTaskAuditDecision, domain.PermissionAssetManage}
+	want := []domain.PermissionCode{domain.PermissionTaskDesignSubmit, domain.PermissionTaskAuditDecision, domain.PermissionTaskManage, domain.PermissionAssetManage}
 	for _, path := range writes {
 		permissions, governed := v8BusinessRoutePermissions(http.MethodPost, path)
 		if !governed {

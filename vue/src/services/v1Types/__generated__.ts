@@ -208,7 +208,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Atomically bind the complete resource manifest and submit for unified audit */
+        /**
+         * Submit designer-selected mode and source files for unified audit
+         * @description Ordinary/customization design tasks submit one source per group plus the designer's single/set
+         *     decision; final outputs are rejected at this stage. Retouch tasks submit final outputs here and
+         *     complete directly. Upload-session completion never advances workflow state.
+         */
         post: operations["submitTaskDesignV8"];
         delete?: never;
         options?: never;
@@ -225,7 +230,13 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Approve and finalize, or return the task to design */
+        /**
+         * Approve and finalize, or return the task to design
+         * @description Approval uploads a complete final set for every resource group using the designer-selected mode.
+         *     The auditor may replace the source file; otherwise the designer source remains effective. Approval
+         *     finalizes resources and returns only after the task is `Completed`. Return requires a reason and
+         *     restores the design stage without accepting a partial final set.
+         */
         post: operations["decideTaskAuditV8"];
         delete?: never;
         options?: never;
@@ -6481,7 +6492,8 @@ export interface paths {
          * @description Creates a staged task-asset upload session and lets the backend choose single-part or
          *     multipart OSS upload. The task must be in an editable design or audit state. Authorization
          *     is `task.design.submit`, `task.audit.decision`, or `asset.manage`, intersected with the
-         *     task's stable organization-ID scope. Upload completion never advances workflow state.
+         *     task's stable organization-ID scope. `task.manage` may create, complete, and cancel only
+         *     `reference` uploads; it never authorizes source or final-product uploads. Upload completion never advances workflow state.
          *     Completed and Archived tasks reject upload-session access/mutations and must be reopened first. Task state
          *     is locked and checked again in every transaction that writes upload-session state.
          */
@@ -7879,10 +7891,11 @@ export interface paths {
         put?: never;
         /**
          * Assign task to designer
-         * @description `POST /v1/tasks/{id}/assign` now carries bounded semantics under the same route:
-         *     - `PendingAssign` (regular lane): assign is allowed for the existing operation/management path within the allowed org scope. A Designer may also self-claim an unassigned task by sending their own user id as `designer_id`; success sets `designer_id` and `current_handler_id`, then moves the task to `InProgress`. Target user must be an active `Designer`.
-         *     - `InProgress`: the same route acts as reassign when the backend returns the corresponding allowed action.
-         *     - `PendingAudit`, `Completed`, `Archived`, `Cancelled`, and `Blocked` remain denied with machine-readable `PERMISSION_DENIED` details such as `task_not_reassignable`.
+         * @description Assigns an active Designer to a `PendingAssign` task or reassigns an `InProgress` task.
+         *     Authorization requires explicit `task.manage` intersected with the task's stable organization-ID scope;
+         *     legacy roles and department/team names never grant access. The action is exposed to clients as
+         *     `task.assign` in the task's `allowed_actions`. `PendingAudit`, `Completed`, `Archived`, `Cancelled`,
+         *     and `Blocked` are rejected.
          */
         post: {
             parameters: {
@@ -7910,7 +7923,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description `PERMISSION_DENIED` with machine-readable task-action details such as `missing_required_role`, `task_out_of_department_scope`, `task_out_of_team_scope`, `task_not_reassignable`, or `task_reassign_requires_requester_or_manager`. */
+                /** @description `PERMISSION_DENIED` when explicit `task.manage` is missing or the task is outside the actor's stable organization-ID scope. */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -26363,6 +26376,8 @@ export interface components {
             product_selection?: components["schemas"]["TaskProductSelectionContext"] | null;
             change_request?: string;
             design_requirement?: string;
+            /** @description Operations suggestion captured at task creation. It never overrides the design-stage `single|set` resource revision mode. */
+            set_mode_hint?: boolean;
             product_short_name?: string;
             material_mode?: string;
             material_other?: string;
@@ -27882,6 +27897,8 @@ export interface components {
             base_sale_price?: number | null;
             /** @description Per-SKU design requirement. For `original_product_development`, this is a compatibility alias carrying the same value as `change_request`. */
             design_requirement?: string | null;
+            /** @description Operations suggestion only. The authoritative final resource mode is selected by design and stored on the resource-group revision. */
+            set_mode_hint?: boolean;
             /** @description Optional per-SKU change request derived from task detail. Emitted for `original_product_development`; omitted for `new_product_development`. */
             change_request?: string | null;
             variant_json?: {
@@ -27972,6 +27989,11 @@ export interface components {
             product_name_snapshot?: string;
             product_selection?: components["schemas"]["TaskProductSelectionContext"] | null;
             change_request?: string;
+            /**
+             * @description Operations may suggest that this SKU is a set. Design remains the final authority and may choose either `single` or `set`.
+             * @default false
+             */
+            set_mode_hint: boolean;
             category_code?: string;
             i_id?: string;
             /** @enum {string} */
@@ -27984,6 +28006,21 @@ export interface components {
             size?: string;
             /** Format: int64 */
             quantity?: number | null;
+            /**
+             * Format: double
+             * @description Optional width captured by operations for the single-SKU task.
+             */
+            width?: number | null;
+            /**
+             * Format: double
+             * @description Optional height captured by operations for the single-SKU task.
+             */
+            height?: number | null;
+            /**
+             * Format: double
+             * @description Optional area captured by operations for the single-SKU task.
+             */
+            area?: number | null;
         };
         CreateTaskBatchItem: {
             client_item_id?: string;
@@ -27994,6 +28031,11 @@ export interface components {
             /** @enum {string} */
             material_mode?: "preset" | "other";
             design_requirement: string;
+            /**
+             * @description Per-SKU operations suggestion only; it does not pre-finalize the resource-group mode.
+             * @default false
+             */
+            set_mode_hint: boolean;
             color?: string;
             size?: string;
             /** Format: int64 */
@@ -30719,24 +30761,50 @@ export interface components {
             workflow_revision: number;
             groups: components["schemas"]["TaskAssetGroup"][];
         };
+        /**
+         * @description One complete resource-group input. For ordinary and customization tasks, the designer selects
+         *     `mode` and submits exactly one editable source while `final_task_asset_ids` MUST be empty.
+         *     During audit, `mode` MUST equal the designer-selected mode; each group supplies a newly staged
+         *     complete final set (`single` exactly one, `set` at least two in array order). Omitting
+         *     `source_task_asset_id` during audit inherits the designer source; supplying it replaces that source.
+         *     Retouch submissions provide final files directly and may omit the source.
+         */
         SubmitResourceGroupInput: {
             /** Format: int64 */
             group_id: number;
             /** Format: int64 */
             expected_group_lock_version: number;
-            /** @enum {string} */
+            /**
+             * @description Selected by the designer for ordinary/customization tasks and read-only during audit.
+             * @enum {string}
+             */
             mode: "single" | "set";
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Required for ordinary/customization design submission. During audit omission inherits the submitted designer source.
+             */
             source_task_asset_id?: number | null;
+            /** @description Empty during ordinary/customization design submission; complete ordered final output set during audit or retouch submission. */
             final_task_asset_ids: number[];
             reference_file_ref_ids?: number[];
         };
+        /**
+         * @description Atomically covers every task resource group. Ordinary/customization design submissions declare
+         *     each group's single/set mode and editable source only, then enter `PendingAudit`. Retouch submissions
+         *     include complete final outputs and complete the task directly.
+         */
         SubmitDesignV2Request: {
             /** Format: int64 */
             expected_workflow_revision: number;
             idempotency_key: string;
             groups: components["schemas"]["SubmitResourceGroupInput"][];
         };
+        /**
+         * @description `approve` requires a complete `groups` array covering every resource group. Final files must be
+         *     newly staged by the current auditor and match the designer-selected mode. The auditor may replace
+         *     the source, but cannot change single/set; an incorrect mode must be returned to design.
+         *     `return_to_design` requires `reason` and does not accept partial resource replacement.
+         */
         AuditDecisionV2Request: {
             /** @enum {string} */
             decision: "approve" | "return_to_design";
@@ -30744,6 +30812,7 @@ export interface components {
             expected_workflow_revision: number;
             idempotency_key: string;
             reason?: string;
+            /** @description Required and complete for approve; omitted or empty for return_to_design. */
             groups?: components["schemas"]["SubmitResourceGroupInput"][];
         };
         ReopenTaskV2Request: {

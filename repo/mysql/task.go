@@ -82,14 +82,14 @@ func (r *taskRepo) Create(ctx context.Context, tx repo.Tx, task *domain.Task, de
 		   category, category_id, category_code, category_name,
 		   source_product_id, source_product_name, source_search_entry_code, source_match_type, source_match_rule,
 		   matched_category_code, matched_search_entry_code, matched_mapping_rule_json, product_selection_snapshot_json,
-		   change_request, design_requirement, product_short_name, material_mode, material_other,
+		   change_request, design_requirement, set_mode_hint, product_short_name, material_mode, material_other,
 			   cost_price_mode, base_sale_price, product_channel, sku_code_type, reference_images_json, reference_file_refs_json, reference_link,
 		   spec_text, material, size_text, craft_text,
 		   width, height, area, quantity, process,
 		   procurement_price, cost_price, estimated_cost, cost_rule_id, cost_rule_name, cost_rule_source,
 		   matched_rule_version, prefill_source, prefill_at,
 		   requires_manual_review, manual_cost_override, manual_cost_override_reason, override_actor, override_at, filing_status, filing_error_message, filed_at)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		taskID,
 		detail.DemandText,
 		detail.CopyText,
@@ -112,6 +112,7 @@ func (r *taskRepo) Create(ctx context.Context, tx repo.Tx, task *domain.Task, de
 		detail.ProductSelectionSnapshotJSON,
 		detail.ChangeRequest,
 		detail.DesignRequirement,
+		detail.SetModeHint,
 		detail.ProductShortName,
 		detail.MaterialMode,
 		detail.MaterialOther,
@@ -170,8 +171,8 @@ func (r *taskRepo) CreateSKUItems(ctx context.Context, tx repo.Tx, items []*doma
 			   cost_price_mode, quantity, base_sale_price, cost_price, estimated_cost, cost_rule_id, cost_rule_name,
 		   cost_rule_source, matched_rule_version, prefill_source, prefill_at, requires_manual_review,
 		   manual_cost_override, manual_cost_override_reason, override_actor, override_at,
-			   design_requirement, variant_json, reference_file_refs_json, dedupe_key, sku_code_type)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+			   design_requirement, set_mode_hint, variant_json, reference_file_refs_json, dedupe_key, sku_code_type)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		return fmt.Errorf("prepare insert task_sku_items: %w", err)
 	}
@@ -212,6 +213,7 @@ func (r *taskRepo) CreateSKUItems(ctx context.Context, tx repo.Tx, items []*doma
 			item.OverrideActor,
 			toNullTime(item.OverrideAt),
 			item.DesignRequirement,
+			item.SetModeHint,
 			toNullJSONString(item.VariantJSON),
 			marshalReferenceFileRefs(item.ReferenceFileRefs),
 			item.DedupeKey,
@@ -260,7 +262,7 @@ func (r *taskRepo) GetDetailByTaskID(ctx context.Context, taskID int64) (*domain
 		       category, category_id, category_code, category_name,
 		       source_product_id, source_product_name, source_search_entry_code, source_match_type, source_match_rule,
 		       matched_category_code, matched_search_entry_code, matched_mapping_rule_json, product_selection_snapshot_json,
-		       change_request, design_requirement, product_short_name, material_mode, material_other,
+		       change_request, design_requirement, COALESCE(set_mode_hint, 0), product_short_name, material_mode, material_other,
 			       cost_price_mode, base_sale_price, product_channel, COALESCE(sku_code_type, ''), reference_images_json, COALESCE(reference_file_refs_json, ''), reference_link,
 		       spec_text, material, size_text, craft_text,
 		       width, height, area, quantity, process,
@@ -284,7 +286,7 @@ func (r *taskRepo) GetDetailByTaskID(ctx context.Context, taskID int64) (*domain
 		&detail.Remark, &detail.Note, &detail.RiskFlagsJSON, &detail.Category, &categoryID, &detail.CategoryCode, &detail.CategoryName,
 		&sourceProductID, &detail.SourceProductName, &detail.SourceSearchEntryCode, &detail.SourceMatchType, &detail.SourceMatchRule,
 		&detail.MatchedCategoryCode, &detail.MatchedSearchEntryCode, &detail.MatchedMappingRuleJSON, &detail.ProductSelectionSnapshotJSON,
-		&detail.ChangeRequest, &detail.DesignRequirement, &detail.ProductShortName, &detail.MaterialMode, &detail.MaterialOther,
+		&detail.ChangeRequest, &detail.DesignRequirement, &detail.SetModeHint, &detail.ProductShortName, &detail.MaterialMode, &detail.MaterialOther,
 		&detail.CostPriceMode, &baseSalePrice, &detail.ProductChannel, &detail.SKUCodeType, &detail.ReferenceImagesJSON, &detail.ReferenceFileRefsJSON, &detail.ReferenceLink,
 		&detail.SpecText,
 		&detail.Material, &detail.SizeText, &detail.CraftText,
@@ -346,7 +348,7 @@ func (r *taskRepo) GetSKUItemBySKUCode(ctx context.Context, skuCode string) (*do
 		       cost_price_mode, quantity, base_sale_price, cost_price, estimated_cost, cost_rule_id, cost_rule_name,
 		       cost_rule_source, matched_rule_version, prefill_source, prefill_at, requires_manual_review,
 		       manual_cost_override, manual_cost_override_reason, override_actor, override_at,
-			       design_requirement, variant_json, COALESCE(reference_file_refs_json, ''),
+			       design_requirement, COALESCE(set_mode_hint, 0), variant_json, COALESCE(reference_file_refs_json, ''),
 			       dedupe_key, COALESCE(sku_code_type, ''), created_at, updated_at
 		FROM task_sku_items
 		WHERE sku_code = ?`, skuCode)
@@ -368,7 +370,7 @@ func (r *taskRepo) ListSKUItemsByTaskID(ctx context.Context, taskID int64) ([]*d
 		       cost_price_mode, quantity, base_sale_price, cost_price, estimated_cost, cost_rule_id, cost_rule_name,
 		       cost_rule_source, matched_rule_version, prefill_source, prefill_at, requires_manual_review,
 		       manual_cost_override, manual_cost_override_reason, override_actor, override_at,
-			       design_requirement, variant_json, COALESCE(reference_file_refs_json, ''),
+		       design_requirement, COALESCE(set_mode_hint, 0), variant_json, COALESCE(reference_file_refs_json, ''),
 			       dedupe_key, COALESCE(sku_code_type, ''), created_at, updated_at
 		FROM task_sku_items
 		WHERE task_id = ?
@@ -1564,6 +1566,7 @@ func scanTaskSKUItem(scanner interface{ Scan(...interface{}) error }) (*domain.T
 		&item.OverrideActor,
 		&overrideAt,
 		&item.DesignRequirement,
+		&item.SetModeHint,
 		&variantJSON,
 		&referenceFileRefsJSON,
 		&item.DedupeKey,

@@ -27,7 +27,7 @@ func TestTaskAssetUploadSessionRoutesAcceptCapabilityOnlyAndRejectLegacyRoleOnly
 		{name: "task alias create", pattern: "/v1/tasks/:id/assets/upload-sessions", path: "/v1/tasks/8/assets/upload-sessions"},
 		{name: "asset-center alias cancel", pattern: "/v1/tasks/:id/asset-center/upload-sessions/:session_id/cancel", path: "/v1/tasks/8/asset-center/upload-sessions/session-1/cancel"},
 	}
-	required := []domain.PermissionCode{domain.PermissionTaskDesignSubmit, domain.PermissionTaskAuditDecision, domain.PermissionAssetManage}
+	required := []domain.PermissionCode{domain.PermissionTaskDesignSubmit, domain.PermissionTaskAuditDecision, domain.PermissionTaskManage, domain.PermissionAssetManage}
 	for _, route := range routes {
 		t.Run(route.name, func(t *testing.T) {
 			for _, tc := range []struct {

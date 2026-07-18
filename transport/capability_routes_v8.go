@@ -102,9 +102,9 @@ func v8AssetWorkbenchRoutePermissions(method, path string) ([]domain.PermissionC
 func v8TaskRoutePermissions(method, path string) []domain.PermissionCode {
 	if strings.Contains(path, "/upload-sessions") {
 		if method == http.MethodGet {
-			return []domain.PermissionCode{domain.PermissionTaskView, domain.PermissionAssetView, domain.PermissionTaskDesignSubmit, domain.PermissionTaskAuditDecision, domain.PermissionAssetManage}
+			return []domain.PermissionCode{domain.PermissionTaskView, domain.PermissionAssetView, domain.PermissionTaskDesignSubmit, domain.PermissionTaskAuditDecision, domain.PermissionTaskManage, domain.PermissionAssetManage}
 		}
-		return []domain.PermissionCode{domain.PermissionTaskDesignSubmit, domain.PermissionTaskAuditDecision, domain.PermissionAssetManage}
+		return []domain.PermissionCode{domain.PermissionTaskDesignSubmit, domain.PermissionTaskAuditDecision, domain.PermissionTaskManage, domain.PermissionAssetManage}
 	}
 	if strings.Contains(path, "/audit/handover") || strings.Contains(path, "/audit/takeover") {
 		if method == http.MethodGet && strings.HasSuffix(path, "/audit/handovers") {
@@ -141,7 +141,7 @@ func v8TaskRoutePermissions(method, path string) []domain.PermissionCode {
 		if method == http.MethodGet {
 			return []domain.PermissionCode{domain.PermissionAssetView}
 		}
-		return []domain.PermissionCode{domain.PermissionTaskDesignSubmit, domain.PermissionAssetManage}
+		return []domain.PermissionCode{domain.PermissionTaskDesignSubmit, domain.PermissionTaskAuditDecision, domain.PermissionTaskManage, domain.PermissionAssetManage}
 	}
 	if method == http.MethodGet {
 		if strings.Contains(path, ".xlsx") {
@@ -161,9 +161,9 @@ func v8TaskRoutePermissions(method, path string) []domain.PermissionCode {
 func v8AssetRoutePermissions(method, path string) []domain.PermissionCode {
 	if strings.Contains(path, "/upload-sessions") {
 		if method == http.MethodGet {
-			return []domain.PermissionCode{domain.PermissionTaskView, domain.PermissionAssetView, domain.PermissionTaskDesignSubmit, domain.PermissionTaskAuditDecision, domain.PermissionAssetManage}
+			return []domain.PermissionCode{domain.PermissionTaskView, domain.PermissionAssetView, domain.PermissionTaskDesignSubmit, domain.PermissionTaskAuditDecision, domain.PermissionTaskManage, domain.PermissionAssetManage}
 		}
-		return []domain.PermissionCode{domain.PermissionTaskDesignSubmit, domain.PermissionTaskAuditDecision, domain.PermissionAssetManage}
+		return []domain.PermissionCode{domain.PermissionTaskDesignSubmit, domain.PermissionTaskAuditDecision, domain.PermissionTaskManage, domain.PermissionAssetManage}
 	}
 	if strings.Contains(path, "/download") || strings.Contains(path, "/content") || strings.HasSuffix(path, "/files/*path") {
 		return []domain.PermissionCode{domain.PermissionAssetDownload}

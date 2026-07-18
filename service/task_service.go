@@ -24,6 +24,7 @@ type CreateTaskBatchSKUItemParams struct {
 	ProductIID        string
 	MaterialMode      string
 	DesignRequirement string
+	SetModeHint       bool
 	NewSKU            string
 	PurchaseSKU       string
 	SKUCodeType       domain.TaskSKUCodeType
@@ -74,6 +75,7 @@ type CreateTaskParams struct {
 
 	// New product development
 	DesignRequirement string
+	SetModeHint       bool
 	CategoryCode      string
 	ProductIID        string
 	MaterialMode      string
@@ -84,6 +86,9 @@ type CreateTaskParams struct {
 	CostPrice         *float64
 	Quantity          *int64
 	BaseSalePrice     *float64
+	Width             *float64
+	Height            *float64
+	Area              *float64
 	ReferenceLink     string
 
 	// Purchase task
@@ -847,6 +852,7 @@ func (s *taskService) createSingleTask(ctx context.Context, p CreateTaskParams) 
 		RiskFlagsJSON:         "{}",
 		ChangeRequest:         strings.TrimSpace(p.ChangeRequest),
 		DesignRequirement:     strings.TrimSpace(p.DesignRequirement),
+		SetModeHint:           p.SetModeHint,
 		ProductShortName:      defaultCreateTaskProductShortName(p),
 		MaterialMode:          strings.TrimSpace(p.MaterialMode),
 		Material:              materialValue,
@@ -854,6 +860,9 @@ func (s *taskService) createSingleTask(ctx context.Context, p CreateTaskParams) 
 		CostPriceMode:         strings.TrimSpace(p.CostPriceMode),
 		CostPrice:             p.CostPrice,
 		BaseSalePrice:         p.BaseSalePrice,
+		Width:                 cloneFloat64Ptr(p.Width),
+		Height:                cloneFloat64Ptr(p.Height),
+		Area:                  cloneFloat64Ptr(p.Area),
 		Quantity:              p.Quantity,
 		ProductChannel:        strings.TrimSpace(p.ProductChannel),
 		SKUCodeType:           p.SKUCodeType,
@@ -982,6 +991,7 @@ func (s *taskService) createBatchTask(ctx context.Context, p CreateTaskParams) (
 		Note:                  p.Note,
 		RiskFlagsJSON:         "{}",
 		DesignRequirement:     primaryItem.DesignRequirement,
+		SetModeHint:           primaryItem.SetModeHint,
 		ProductShortName:      primaryItem.ProductShortName,
 		MaterialMode:          primaryItem.MaterialMode,
 		CostPriceMode:         primaryItem.CostPriceMode,

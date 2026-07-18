@@ -96,6 +96,7 @@ type TaskSKUItem struct {
 	OverrideActor            string              `db:"override_actor"        json:"override_actor,omitempty"`
 	OverrideAt               *time.Time          `db:"override_at"           json:"override_at,omitempty"`
 	DesignRequirement        string              `db:"design_requirement"    json:"design_requirement,omitempty"`
+	SetModeHint              bool                `db:"set_mode_hint"          json:"set_mode_hint"`
 	ChangeRequest            string              `db:"-"                     json:"change_request,omitempty"`
 	VariantJSON              json.RawMessage     `db:"variant_json"          json:"variant_json,omitempty"`
 	ReferenceFileRefs        []ReferenceFileRef  `db:"-"                  json:"reference_file_refs"`

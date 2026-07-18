@@ -850,7 +850,7 @@ curl -X GET https://api.example.com/v1/access/events \
 ### 简介
 支持方法: POST。
 
-- `POST`: Atomically bind the complete resource manifest and submit for unified audit
+- `POST`: Ordinary/customization design tasks submit one source per group plus the designer's single/set decision; final outputs are rejected at this stage. Retouch tasks submit final outputs here and complete directly. Upload-session completion never advances workflow state.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -920,7 +920,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/submit-design \
 ### 简介
 支持方法: POST。
 
-- `POST`: Approve and finalize, or return the task to design
+- `POST`: Approval uploads a complete final set for every resource group using the designer-selected mode. The auditor may replace the source file; otherwise the designer source remains effective. Approval finalizes resources and returns only after the task is `Completed`. Return requires a reason and restores the design stage without accepting a partial final set.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -942,7 +942,7 @@ Content-Type: `application/json`
 | `expected_workflow_revision` | integer | 是 | - |
 | `idempotency_key` | string | 是 | - |
 | `reason` | string | 否 | - |
-| `groups` | array<SubmitResourceGroupInput> | 否 | - |
+| `groups` | array<SubmitResourceGroupInput> | 否 | Required and complete for approve; omitted or empty for return_to_design. |
 
 ### 响应体 schema
 成功响应: `200 application/json`
@@ -5367,11 +5367,11 @@ curl -X POST https://api.example.com/v1/tasks/<id>/cost-overrides/<event_id>/fin
 ### 简介
 支持方法: POST。
 
-- `POST`: `POST /v1/tasks/{id}/assign` now carries bounded semantics under the same route: - `PendingAssign` (regular lane): assign is allowed for the existing operation/management path within the allowed org scope. A Designer may also self-claim an unassigned task by sending their own user id as `designer_id`; success sets `designer_id` and `current_handler_id`, then moves the task to `InProgress`. Target user must be an active `Designer`. - `InProgress`: the same route acts as reassign when the backend returns the corresponding allowed action. - `PendingAudit`, `Completed`, `Archived`, `Cancelled`, and `Blocked` remain denied with machine-readable `PERMISSION_DENIED` details such as `task_not_reassignable`.
+- `POST`: Assigns an active Designer to a `PendingAssign` task or reassigns an `InProgress` task. Authorization requires explicit `task.manage` intersected with the task's stable organization-ID scope; legacy roles and department/team names never grant access. The action is exposed to clients as `task.assign` in the task's `allowed_actions`. `PendingAudit`, `Completed`, `Archived`, `Cancelled`, and `Blocked` are rejected.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `POST` 允许角色: Designer, Ops, Admin, SuperAdmin, HRAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector。
+- `POST` 允许角色: 已登录 / scope-aware。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -5414,7 +5414,7 @@ Content-Type: `application/json`
 ### 错误码
 | HTTP | code | deny_code | 说明 |
 |---|---|---|---|
-| 403 | 见 `error.code` | 见 `deny_code` | `PERMISSION_DENIED` with machine-readable task-action details such as `missing_required_role`, `task_out_of_department_scope`, `task_out_of_team_scope`, `task_not_reassignable`, or `task_reassign_requires_requester_or_manager`. |
+| 403 | 见 `error.code` | 见 `deny_code` | `PERMISSION_DENIED` when explicit `task.manage` is missing or the task is outside the actor's stable organization-ID scope. |
 | 404 | 见 `error.code` | 见 `deny_code` | Task not found |
 | 409 | 见 `error.code` | 见 `deny_code` | Task state or workflow revision conflict |
 
