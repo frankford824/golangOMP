@@ -4483,6 +4483,109 @@ body.aw-submission-dialog-locked {
   margin: 0;
 }
 
+.aw-personnel-picker {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: var(--aw-space-1);
+  min-width: 0;
+  color: var(--aw-ink-2);
+  font-size: var(--aw-font-size-sm);
+}
+
+.aw-personnel-picker__label {
+  font-weight: var(--aw-weight-strong);
+}
+
+.aw-personnel-picker__field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--aw-space-3);
+  min-height: 44px;
+  border: 1px solid var(--aw-hairline);
+  border-radius: var(--aw-radius-sm);
+  background: var(--aw-surface-raised);
+  padding: var(--aw-space-2) var(--aw-space-3);
+}
+
+.aw-personnel-picker__field--selected {
+  border-color: color-mix(in srgb, var(--aw-accent) 44%, var(--aw-hairline));
+  background: color-mix(in srgb, var(--aw-accent) 5%, var(--aw-surface-raised));
+}
+
+.aw-personnel-picker__field > span:first-child,
+.aw-personnel-picker__result > span:first-child {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.aw-personnel-picker__field strong,
+.aw-personnel-picker__result strong {
+  overflow: hidden;
+  color: var(--aw-ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aw-personnel-picker__field small,
+.aw-personnel-picker__result small {
+  color: var(--aw-ink-muted);
+}
+
+.aw-personnel-picker__dialog {
+  width: min(620px, 100%);
+  max-height: min(720px, calc(100vh - 40px));
+  overflow: hidden;
+}
+
+.aw-personnel-picker__search {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--aw-space-2);
+}
+
+.aw-personnel-picker__results {
+  display: grid;
+  gap: var(--aw-space-2);
+  max-height: 360px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.aw-personnel-picker__result {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--aw-space-3);
+  width: 100%;
+  border: 1px solid var(--aw-hairline);
+  border-radius: var(--aw-radius-sm);
+  background: var(--aw-surface-raised);
+  color: inherit;
+  padding: var(--aw-space-3);
+  text-align: left;
+}
+
+.aw-personnel-picker__result:hover,
+.aw-personnel-picker__result:focus-visible,
+.aw-personnel-picker__result[aria-selected='true'] {
+  border-color: var(--aw-accent);
+  background: color-mix(in srgb, var(--aw-accent) 6%, var(--aw-surface-raised));
+  outline: none;
+}
+
+@media (max-width: 640px) {
+  .aw-personnel-picker__field {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .aw-personnel-picker__search {
+    grid-template-columns: 1fr;
+  }
+}
+
 .aw-confirm-dialog__summary {
   display: grid;
   gap: var(--aw-space-2);
