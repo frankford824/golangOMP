@@ -53,18 +53,15 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'tasks/create',
         name: 'TaskCreate',
-        component: () => import('@/views/TaskListView.vue'),
+        component: () => import('@/views/UnifiedTaskCreateView.vue'),
         meta: {
           requiresAuth: true,
-          requiredPermissions: ['task:create'],
-          openCreateModal: true,
+          requiredPermissions: ['task:create', 'planning_sku.create'],
         },
       },
       {
         path: 'tasks/sku-planning',
-        name: 'PlanningSKUCreate',
-        component: () => import('@/views/PlanningSKUCreateView.vue'),
-        meta: { requiresAuth: true, requiredMenuKey: ['planning_sku', 'task_list'] },
+        redirect: { name: 'TaskCreate', query: { intent: 'planning_sku' } },
       },
       {
         path: 'tasks/:id',

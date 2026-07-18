@@ -32,6 +32,7 @@ export const PermissionEnum = {
   // 任务
   TASK_VIEW: 'task:view',
   TASK_CREATE: 'task:create',
+  PLANNING_SKU_CREATE: 'planning_sku.create',
   TASK_EDIT: 'task:edit',
   /** v0.6 对齐：K 节，商品/成本编辑与试算仅 Ops/Warehouse/Admin */
   TASK_EDIT_COST: 'task:edit-cost',

@@ -524,6 +524,7 @@ function normalizeBackendTask(raw: Record<string, unknown>): Task {
           width: itemWidth,
           height: itemHeight,
           area: itemArea,
+          setModeHint: Boolean(o.set_mode_hint ?? o.setModeHint),
           ...(variantJson !== undefined ? { variantJson } : {}),
           filing_status: typeof o.filing_status === 'string' ? o.filing_status : undefined,
           erp_sync_status: typeof o.erp_sync_status === 'string' ? o.erp_sync_status : undefined,
@@ -673,6 +674,7 @@ function normalizeBackendTask(raw: Record<string, unknown>): Task {
       (raw.note as string | undefined)?.trim() ||
       (raw.remark as string | undefined)?.trim() ||
       undefined,
+    setModeHint: Boolean(raw.set_mode_hint ?? raw.setModeHint),
     dueAt: (raw.due_at ?? raw.deadline_at ?? raw.dueAt) as string | null ?? null,
     priority: normalizePriorityFromApi(raw.priority as string | undefined),
     customizationRequired:
@@ -1229,8 +1231,8 @@ export const useTasksStore = defineStore('tasks', () => {
       (Boolean(t.customizationRequired ?? task.customizationRequired) ? 'customization' : 'normal')
     const normalizedLaneSkuCodeType = businessLane === 'customization' ? 'customization' : 'regular'
     const skuModeRaw = (t.skuMode ?? 'single') as string
-	    const isBatchMode = skuModeRaw === 'multiple' && !isOriginal && !isRetouch
-	    const skuCodeType = normalizedLaneSkuCodeType
+    const isBatchMode = skuModeRaw === 'multiple' && !isOriginal && !isRetouch
+    const skuCodeType = normalizedLaneSkuCodeType
 
     const ownerTeam = t.groupId ?? task.groupId ?? ''
     const ownerDepartment =
@@ -1273,11 +1275,11 @@ export const useTasksStore = defineStore('tasks', () => {
       // Legacy compatibility: keep owner_team for old backend branches.
       owner_team: ownerTeam,
       deadline_at: t.dueAt ?? task.dueAt ?? null,
-	      priority,
-	      business_lane: businessLane,
-	      workflow_lane: businessLane,
-	      sku_code_type: skuCodeType,
-	      customization_required:
+      priority,
+      business_lane: businessLane,
+      workflow_lane: businessLane,
+      sku_code_type: skuCodeType,
+      customization_required:
           businessLane === 'customization' ||
           Boolean(t.customizationRequired ?? task.customizationRequired ?? false),
       customization_source_type:
@@ -1293,6 +1295,10 @@ export const useTasksStore = defineStore('tasks', () => {
       copy_content: t.copyContent ?? task.copyContent ?? undefined,
       style_keywords: t.styleKeywords ?? task.styleKeywords ?? undefined,
       remark: t.note ?? task.note ?? undefined,
+      width: t.width ?? task.width ?? undefined,
+      height: t.height ?? task.height ?? undefined,
+      area: t.area ?? task.area ?? undefined,
+      set_mode_hint: Boolean(t.setModeHint ?? task.setModeHint),
     }
     if (taskType === 'new_product_development') {
       payload.sync_erp_on_create = t.syncErpOnCreate !== false
@@ -1400,6 +1406,7 @@ export const useTasksStore = defineStore('tasks', () => {
         if (item.variantJson && typeof item.variantJson === 'object') {
           baseItem.variant_json = item.variantJson
         }
+        baseItem.set_mode_hint = Boolean(item.setModeHint)
         return baseItem
       })
     }

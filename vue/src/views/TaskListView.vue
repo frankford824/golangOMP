@@ -265,13 +265,6 @@
       </div>
     </div>
 
-    <TaskCreateModal
-      v-if="can('task.create')"
-      v-model="showCreateModal"
-      :initial-draft-id="queryString(route.query.draft_id)"
-      @created="handleTaskCreated"
-    />
-
     <!-- v0.6 批量指派弹窗 -->
     <DesignerSelectDialog
       v-model="showBatchAssign"
@@ -569,7 +562,6 @@ import BaseInput from '@/components/base/BaseInput.vue'
 import BaseModal from '@/components/base/BaseModal.vue'
 import BaseSelect, { type BaseSelectOption } from '@/components/base/BaseSelect.vue'
 import BaseTextarea from '@/components/base/BaseTextarea.vue'
-import TaskCreateModal from '@/components/task/TaskCreateModal.vue'
 import DesignerSelectDialog from '@/components/task/DesignerSelectDialog.vue'
 import { tasksApi } from '@/services/api/tasksApi'
 import type {
@@ -674,7 +666,6 @@ const sortKey = ref<'taskNo' | 'updatedAt' | 'dueAt'>('updatedAt')
 const sortOrder = ref<'asc' | 'desc'>('desc')
 const page = ref(1)
 const pageSize = ref(20)
-const showCreateModal = ref(false)
 const showBatchAssign = ref(false)
 const showBatchAuditHandover = ref(false)
 const batchReminding = ref(false)
@@ -1603,11 +1594,7 @@ function formatDate(iso: string): string {
 function goCreate() {
   if (!can('task.create')) return
   saveState()
-  if (route.name !== 'TaskCreate') {
-    void router.push({ name: 'TaskCreate' })
-  } else {
-    showCreateModal.value = true
-  }
+  void router.push({ name: 'TaskCreate' })
 }
 
 function goDetail(task: Task) {
@@ -1667,12 +1654,6 @@ async function refreshList(_force?: boolean) {
   }
 }
 
-async function handleTaskCreated(taskId: string) {
-  // v4.2 修复：老板要求 + 创建成功后强刷全局任务列表，避免排序、统计和徽标状态滞后
-  await tasksStore.loadTaskById(taskId)
-  await refreshList(true)
-}
-
 onMounted(async () => {
   await refreshList(true)
   await loadAuditHandoverEntryCount()
@@ -1682,36 +1663,6 @@ onBeforeUnmount(() => {
   listActionSeq += 1
   if (searchDebounceTimer) clearTimeout(searchDebounceTimer)
   if (listActionSuccessTimer) clearTimeout(listActionSuccessTimer)
-})
-
-// 根据路由控制创建任务弹窗（支持侧边栏 /tasks/create 与 ?create=1 深链接）
-watch(
-  () => [route.name, route.query.create, route.meta.openCreateModal],
-  () => {
-    const shouldOpen =
-      (route.meta.openCreateModal === true || route.query.create === '1') && can('task.create')
-    showCreateModal.value = shouldOpen
-    if (shouldOpen) {
-      page.value = 1
-    }
-  },
-  { immediate: true },
-)
-
-/** 关闭弹窗时同步路由，否则仍停留在 /tasks/create 或 ?create=1，与“已关闭”状态不一致；浏览器返回能走是因为路由变了。 */
-watch(showCreateModal, (open) => {
-  if (open) return
-  if (route.name === 'TaskCreate') {
-    const q = { ...route.query } as Record<string, string | string[] | undefined>
-    delete q.create
-    delete q.draft_id
-    void router.replace({ name: 'TaskList', query: q })
-  } else if (route.name === 'TaskList' && queryString(route.query.create) === '1') {
-    const q = { ...route.query } as Record<string, string | string[] | undefined>
-    delete q.create
-    delete q.draft_id
-    void router.replace({ path: route.path, query: q })
-  }
 })
 
 watch(showBatchAssign, (open) => {

@@ -38,6 +38,7 @@
     "@formatjs/intl-segmenter": "^12.2.10",
     "@formkit/auto-animate": "^0.9.0",
     "@univerjs/preset-sheets-core": "^0.25.1",
+    "@univerjs/preset-sheets-drawing": "0.25.1",
     "axios": "^1.18.1",
     "echarts": "^6.1.0",
     "exceljs": "^4.4.0",

@@ -146,6 +146,8 @@ export interface TaskSkuItem {
   /** 批量创建时子项级 design_requirement（若后端返回） */
   designRequirement?: string
   /** 批量子项 ERP 同步投影 */
+  /** 运营创建时的套装建议；不等于资源组最终 mode。 */
+  setModeHint?: boolean
   filing_status?: string
   erp_sync_status?: string
   erp_sync_required?: boolean
@@ -305,11 +307,16 @@ export interface Task {
   newProductQuantity?: number
   newProductCostUnitPrice?: number
   productChannel?: string
+  /** 单任务级运营套装建议；批量任务以 skuItems[].setModeHint 为准。 */
+  setModeHint?: boolean
   /**
    * GET 任务读模型 `spec_text` / `size_text`：创建时「规格尺寸」等主档快照，供后续环节只读展示。
    */
   specText?: string
   sizeText?: string
+  width?: number
+  height?: number
+  area?: number
 
   // ── 其他标志位 ─────────────────────────────────────────────────────────────
   requiresAssetVersions?: boolean

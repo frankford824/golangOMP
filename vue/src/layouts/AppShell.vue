@@ -214,14 +214,6 @@ const MENU_CONFIG: MenuConfig[] = [
     icon: 'reorder',
   },
   {
-    key: 'planning_sku',
-    label: '策划 SKU',
-    to: '/tasks/sku-planning',
-    aliases: ['task_list'],
-    section: 'workbench',
-    icon: 'inventory_2',
-  },
-  {
     key: 'resource_management',
     label: '资产管理',
     to: '/asset-center',

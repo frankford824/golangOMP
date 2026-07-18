@@ -75,7 +75,7 @@ export function sharedManualChunks(id: string): string | undefined {
   if (normalizedId.includes('naive-ui') || normalizedId.includes('@css-render')) {
     return 'ui-vendor'
   }
-  if (normalizedId.includes('vue') || normalizedId.includes('pinia')) {
+  if (/\/node_modules\/(?:@vue\/[^/]+|vue|vue-router|pinia)\//.test(normalizedId)) {
     return 'vue-vendor'
   }
   return 'vendor'

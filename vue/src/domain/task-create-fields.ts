@@ -7,7 +7,7 @@
  * 'field_not_allowed_for_task_type'`。
  *
  * 前端作为「UI 门禁」：
- *   1. 表单渲染层：按 task_type v-if 隔离控件（详见 TaskCreateModal /
+ *   1. 统一创建工作台按意图切换列模型，并在提交编排时隔离 task_type 字段；
  *      TaskCreateView / CustomizationCreateDialog），禁止收集 forbidden 字段。
  *   2. 提交层：在调用 POST 前，`sanitizeCreateTaskPayload` 再过滤
  *      一次，防止遗留字段或回归 UI 把脏数据送出。
