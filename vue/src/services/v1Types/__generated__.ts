@@ -376,7 +376,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Search the current working and finalized resource-group read model */
+        /**
+         * Search the current working and finalized resource-group read model
+         * @description Default response uses `view_mode=group` (one SKU resource-group card).
+         *     When `resource_role` or a non-all `format_category` is supplied, the service returns `view_mode=flat` with matching `flat_items`.
+         */
         get: operations["listTaskResourceGroups"];
         put?: never;
         post?: never;
@@ -6413,7 +6417,7 @@ export interface paths {
          *     External resources prefer OSS-backed derived preview/original URLs or already-public provider URLs;
          *     browser-facing BFF proxy URLs are not returned as the default preview surface.
          *     A staged, unbound upload is visible only to its uploader with `asset.view`, or to an auditor whose
-         *     explicit `task.audit.decision` scope includes the task. Bound resources require `asset.view` within
+         *     explicit `task.audit` scope includes the task. Bound resources require `asset.view` within
          *     the task's stable organization-ID scope. Legacy roles and organization names do not authorize preview.
          *     When preview metadata is not currently available for the asset, runtime returns HTTP 409 with
          *     `error.code=INVALID_STATE_TRANSITION` and message `asset preview is not available`.
@@ -6491,8 +6495,8 @@ export interface paths {
          * Create asset upload session
          * @description Creates a staged task-asset upload session and lets the backend choose single-part or
          *     multipart OSS upload. The task must be in an editable design or audit state. Authorization
-         *     is `task.design.submit`, `task.audit.decision`, or `asset.manage`, intersected with the
-         *     task's stable organization-ID scope. `task.manage` may create, complete, and cancel only
+         *     is `task.upload_source`, `task.audit`, or `asset.manage`, intersected with the
+         *     task's stable organization-ID scope. `task.create` may create, complete, and cancel only
          *     `reference` uploads; it never authorizes source or final-product uploads. Upload completion never advances workflow state.
          *     Completed and Archived tasks reject upload-session access/mutations and must be reopened first. Task state
          *     is locked and checked again in every transaction that writes upload-session state.
@@ -7892,7 +7896,8 @@ export interface paths {
         /**
          * Assign task to designer
          * @description Assigns an active Designer to a `PendingAssign` task or reassigns an `InProgress` task.
-         *     Authorization requires explicit `task.manage` intersected with the task's stable organization-ID scope;
+         *     Authorization requires explicit `task.assign` for first assignment or `task.reassign` for reassignment,
+         *     intersected with the task's stable organization-ID scope;
          *     legacy roles and department/team names never grant access. The action is exposed to clients as
          *     `task.assign` in the task's `allowed_actions`. `PendingAudit`, `Completed`, `Archived`, `Cancelled`,
          *     and `Blocked` are rejected.
@@ -7923,7 +7928,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description `PERMISSION_DENIED` when explicit `task.manage` is missing or the task is outside the actor's stable organization-ID scope. */
+                /** @description `PERMISSION_DENIED` when the exact assign/reassign capability is missing or the task is outside the actor's stable organization-ID scope. */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -12311,9 +12316,9 @@ export interface paths {
         put?: never;
         /**
          * Trigger a task module action
-         * @description Requires one of the code-owned capabilities `task.design.submit`, `task.audit.decision`,
-         *     or `task.manage`; the service then applies the exact module/state/scope rule. For a
-         *     customization `submit`, the caller must have `task.design.submit` in the task's stable
+         * @description Requires one of the code-owned capabilities `task.upload_source` or `task.audit`;
+         *     the service then applies the exact module/state/scope rule. For a customization `submit`,
+         *     the caller must have `task.upload_source` in the task's stable
          *     organization scope. The action marks the internal customization job `ready_for_submit`
          *     but does not advance the main task; only `/submit-design` can enter `PendingAudit`.
          */
@@ -30561,8 +30566,16 @@ export interface components {
             matched_count: number;
             failed_count: number;
         };
-        /** @enum {string} */
-        V8PermissionCode: "task.view" | "task.create" | "task.design.submit" | "task.audit.decision" | "task.reopen" | "task.manage" | "planning_sku.view" | "planning_sku.create" | "planning_sku.edit" | "planning_sku.export" | "planning_sku.erp_sync" | "planning_sku.erp_retry" | "asset.view" | "asset.download" | "asset.export" | "asset.publish" | "asset.manage" | "asset_workbench.use" | "asset_workbench.submit" | "asset_workbench.members.manage" | "asset_workbench.profiles.manage" | "asset_workbench.groups.manage" | "asset_workbench.drive.manage" | "asset_workbench.batch.manage" | "asset_workbench.templates.manage" | "asset_workbench.qc.manage" | "asset_workbench.settlement.manage" | "asset_workbench.audit.view" | "catalog.view" | "catalog.manage" | "erp.manage" | "account.use" | "report.view" | "system.manage" | "access_policy.view" | "access_policy.manage";
+        /**
+         * @description Code-owned business operations used by the v8 access-policy matrix. Legacy roles and organization display names are not authorization sources.
+         * @enum {string}
+         */
+        V8PermissionCode: "task.view" | "task.create" | "task.assign" | "task.reassign" | "task.terminate" | "task.upload_source" | "task.audit" | "task.audit_handover" | "task.reopen" | "planning_sku.view" | "planning_sku.create" | "planning_sku.edit" | "planning_sku.export" | "planning_sku.erp_sync" | "planning_sku.erp_retry" | "asset.view" | "asset.download" | "asset.export" | "asset.publish" | "asset.manage" | "asset_workbench.use" | "asset_workbench.submit" | "asset_workbench.members.manage" | "asset_workbench.profiles.manage" | "asset_workbench.groups.manage" | "asset_workbench.drive.manage" | "asset_workbench.batch.manage" | "asset_workbench.templates.manage" | "asset_workbench.qc.manage" | "asset_workbench.settlement.manage" | "asset_workbench.audit.view" | "catalog.view" | "catalog.manage" | "erp.manage" | "account.use" | "report.view" | "system.manage" | "access.view" | "access.manage";
+        /** @description One role operation grant. Empty task_types means all task types are allowed. */
+        AccessRolePermission: {
+            code: components["schemas"]["V8PermissionCode"];
+            task_types?: ("original_product_development" | "new_product_development" | "retouch_task" | "sku_planning" | "customer_customization" | "regular_customization")[];
+        };
         AccessPermission: {
             code: components["schemas"]["V8PermissionCode"];
             module: string;
@@ -30623,7 +30636,7 @@ export interface components {
             archived_at?: string | null;
             /** Format: int64 */
             version: number;
-            permissions: components["schemas"]["V8PermissionCode"][];
+            permissions: components["schemas"]["AccessRolePermission"][];
         };
         EffectiveAccess: {
             /** Format: int64 */
@@ -30640,6 +30653,7 @@ export interface components {
                 source_type: string;
                 /** @enum {string} */
                 scope_mode: "self" | "own_department" | "own_team" | "selected_org" | "global";
+                task_types?: ("original_product_development" | "new_product_development" | "retouch_task" | "sku_planning")[];
             }[];
         };
         AccessOrgPolicy: {
@@ -30936,7 +30950,7 @@ export interface components {
             code: string;
             name: string;
             description?: string;
-            permissions?: components["schemas"]["V8PermissionCode"][];
+            permissions?: components["schemas"]["AccessRolePermission"][];
             reason: string;
             /** Format: int64 */
             expected_policy_revision: number;
@@ -30958,7 +30972,7 @@ export interface components {
             expected_policy_revision: number;
         };
         ReplaceRolePermissionsRequest: {
-            permissions: components["schemas"]["V8PermissionCode"][];
+            permissions: components["schemas"]["AccessRolePermission"][];
             /** Format: int64 */
             expected_role_version: number;
             reason: string;
@@ -30991,8 +31005,29 @@ export interface components {
             /** Format: date-time */
             created_at: string;
         };
+        /** @description One matched resource row used when asset-center list filters by resource_role or format_category. */
+        FlatResourceItem: {
+            /** Format: int64 */
+            group_id: number;
+            /** Format: int64 */
+            task_id: number;
+            task_no?: string;
+            sku_code?: string;
+            /** @enum {string} */
+            resource_role: "reference" | "source" | "final";
+            file_name: string;
+            mime_type?: string;
+            preview_url?: string;
+            download_url?: string;
+        };
         ResourceGroupListResult: {
             items: components["schemas"]["TaskAssetGroup"][];
+            flat_items?: components["schemas"]["FlatResourceItem"][];
+            /**
+             * @description group keeps one SKU summary card per resource group; flat returns matched resource rows.
+             * @enum {string}
+             */
+            view_mode?: "group" | "flat";
             page: number;
             page_size: number;
             /** Format: int64 */
@@ -31720,9 +31755,13 @@ export interface operations {
             query?: {
                 task_id?: number;
                 sku_code?: string;
+                task_no?: string;
+                creator_id?: number;
+                resource_role?: "reference" | "source" | "final";
                 /** @description Searches task number */
                 q?: string;
-                format_category?: "all" | "image" | "design" | "pdf" | "video" | "archive";
+                /** @description document is accepted as an alias of pdf. */
+                format_category?: "all" | "image" | "design" | "pdf" | "document" | "video" | "archive";
                 business_lane?: "normal" | "customization";
                 page?: number;
                 page_size?: number;
@@ -32131,6 +32170,7 @@ export interface operations {
                 date_from?: string;
                 date_to?: string;
                 keyword?: string;
+                sort?: "created_at" | "-created_at" | "updated_at" | "-updated_at" | "due_at" | "-due_at" | "task_no" | "-task_no";
                 page?: number;
                 page_size?: number;
             };

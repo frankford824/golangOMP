@@ -17,11 +17,30 @@ func (h *TaskResourceWorkflowHandler) ListResourceGroups(c *gin.Context) {
 	taskID, _ := strconv.ParseInt(c.Query("task_id"), 10, 64)
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "50"))
-	result, appErr := h.svc.ListResourceGroups(c.Request.Context(), requestActor(c), domain.ResourceGroupListParams{
-		TaskID: taskID, SKUCode: c.Query("sku_code"), Query: c.Query("q"),
-		FormatCategory: domain.AssetFormatCategoryFilter(c.Query("format_category")), BusinessLane: domain.TaskBusinessLane(c.Query("business_lane")),
-		Page: page, PageSize: pageSize,
-	})
+	params := domain.ResourceGroupListParams{
+		TaskID: taskID, SKUCode: c.Query("sku_code"), TaskNo: c.Query("task_no"), Query: c.Query("q"),
+		ResourceRole:   domain.ResourceRoleFilter(c.Query("resource_role")),
+		FormatCategory: domain.AssetFormatCategoryFilter(c.Query("format_category")),
+		BusinessLane:   domain.TaskBusinessLane(c.Query("business_lane")),
+		Page:           page, PageSize: pageSize,
+	}
+	if !params.ResourceRole.Valid() {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "resource_role must be reference, source, or final", nil))
+		return
+	}
+	if raw := c.Query("creator_id"); raw != "" {
+		creatorID, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || creatorID <= 0 {
+			respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "creator_id must be a positive integer", nil))
+			return
+		}
+		params.CreatorID = &creatorID
+	}
+	if params.BusinessLane != "" && !params.BusinessLane.Valid() {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "business_lane must be normal or customization", nil))
+		return
+	}
+	result, appErr := h.svc.ListResourceGroups(c.Request.Context(), requestActor(c), params)
 	if appErr != nil {
 		respondError(c, appErr)
 		return

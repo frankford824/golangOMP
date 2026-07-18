@@ -180,6 +180,7 @@ func main() {
 		service.WithIdentitySettings(cfg.Auth, cfg.FrontendAccess),
 		service.WithOrgRepo(orgRepo),
 		service.WithIdentityAccessAssignmentWriter(accessPolicyRepo),
+		service.WithIdentityEffectiveAccessReader(accessPolicyRepo),
 		service.WithIdentityLogger(logger),
 	)
 	orgMoveSvc := orgmovesvc.NewService(userRepo, orgRepo, orgMoveRequestRepo, permissionLogRepo, mdb)

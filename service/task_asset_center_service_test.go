@@ -293,13 +293,13 @@ func TestAuthorizeV8TaskAssetMutationUsesCapabilityAndStableScope(t *testing.T) 
 	}
 
 	task.TaskStatus = domain.TaskStatusInProgress
-	manageActor := scopedCapabilityActor(actorID, domain.PermissionTaskManage, domain.AccessScopeOwnDepartment, &departmentID, nil, nil)
+	manageActor := scopedCapabilityActor(actorID, domain.PermissionTaskCreate, domain.AccessScopeOwnDepartment, &departmentID, nil, nil)
 	manageCtx := domain.WithRequestActor(taskAssetMutationTestContext(), manageActor)
 	if appErr := authorizeV8TaskAssetMutation(manageCtx, task, domain.TaskAssetTypeReference); appErr != nil {
-		t.Fatalf("in-scope task.manage reference mutation rejected: %+v", appErr)
+		t.Fatalf("in-scope task.create reference mutation rejected: %+v", appErr)
 	}
 	if appErr := authorizeV8TaskAssetMutation(manageCtx, task, domain.TaskAssetTypeSource); appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
-		t.Fatalf("task.manage unexpectedly authorized source upload: %+v", appErr)
+		t.Fatalf("task.create unexpectedly authorized source upload: %+v", appErr)
 	}
 }
 
@@ -340,7 +340,7 @@ func TestTaskAssetCenterServiceCompletingTaskReferencePersistsFlatRelation(t *te
 		uploadClient,
 		WithTaskAssetCenterReferenceFileRefFlatRepo(referenceRepo),
 	).(*taskAssetCenterService)
-	actor := scopedCapabilityActor(610, domain.PermissionTaskManage, domain.AccessScopeGlobal, nil, nil, nil)
+	actor := scopedCapabilityActor(610, domain.PermissionTaskCreate, domain.AccessScopeGlobal, nil, nil, nil)
 	ctx := domain.WithRequestActor(context.Background(), actor)
 
 	created, appErr := svc.CreateUploadSession(ctx, CreateTaskAssetUploadSessionParams{

@@ -570,8 +570,8 @@ func (r *taskRepo) List(ctx context.Context, filter repo.TaskListFilter) ([]*dom
 		%s
 		%s
 		WHERE %s
-		ORDER BY t.updated_at DESC, t.id DESC
-		LIMIT ? OFFSET ?`, spec.latestAssetExpr, spec.fromSQL, taskActorNameJoins(), spec.whereSQL)
+		ORDER BY %s
+		LIMIT ? OFFSET ?`, spec.latestAssetExpr, spec.fromSQL, taskActorNameJoins(), spec.whereSQL, taskListOrderBy(filter.Sort))
 	pageArgs := append(append([]interface{}{}, spec.args...), pageSize, offset)
 
 	queryCtx, cancelQuery := mysqlReadQueryContext(ctx)
@@ -740,6 +740,31 @@ func (r *taskRepo) ListBoardCandidates(ctx context.Context, filter repo.TaskBoar
 		return nil, err
 	}
 	return items, nil
+}
+
+func taskListOrderBy(sortToken string) string {
+	token := strings.TrimSpace(sortToken)
+	desc := strings.HasPrefix(token, "-")
+	field := strings.TrimPrefix(token, "-")
+	column := "t.updated_at"
+	switch field {
+	case "task_no":
+		column = "t.task_no"
+	case "due_at":
+		column = "t.deadline_at"
+	case "created_at":
+		column = "t.created_at"
+	case "updated_at", "":
+		column = "t.updated_at"
+	default:
+		column = "t.updated_at"
+		desc = true
+	}
+	direction := "ASC"
+	if desc || field == "" {
+		direction = "DESC"
+	}
+	return column + " " + direction + ", t.id DESC"
 }
 
 func taskActorNameJoins() string {

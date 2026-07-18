@@ -27,7 +27,7 @@ func TestTaskAssetUploadSessionRoutesAcceptCapabilityOnlyAndRejectLegacyRoleOnly
 		{name: "task alias create", pattern: "/v1/tasks/:id/assets/upload-sessions", path: "/v1/tasks/8/assets/upload-sessions"},
 		{name: "asset-center alias cancel", pattern: "/v1/tasks/:id/asset-center/upload-sessions/:session_id/cancel", path: "/v1/tasks/8/asset-center/upload-sessions/session-1/cancel"},
 	}
-	required := []domain.PermissionCode{domain.PermissionTaskDesignSubmit, domain.PermissionTaskAuditDecision, domain.PermissionTaskManage, domain.PermissionAssetManage}
+	required := []domain.PermissionCode{domain.PermissionTaskCreate, domain.PermissionTaskDesignSubmit, domain.PermissionTaskAuditDecision, domain.PermissionAssetManage}
 	for _, route := range routes {
 		t.Run(route.name, func(t *testing.T) {
 			for _, tc := range []struct {
@@ -265,7 +265,7 @@ func TestAssetWorkbenchMigratedRoleCapabilityParity(t *testing.T) {
 		{"use only cannot read price rules", "asset_submitter", http.MethodGet, "/v1/asset-workbench/price-matrix", false},
 		{"settlement reads profiles", "asset_settlement", http.MethodGet, "/v1/asset-workbench/profiles", true},
 		{"submitter profiles denied", "asset_submitter", http.MethodGet, "/v1/asset-workbench/profiles", false},
-		{"submitter creates supplement", "asset_submitter", http.MethodPost, "/v1/asset-workbench/settlement/supplements", true},
+		{"submitter creates own supplement", "asset_submitter", http.MethodPost, "/v1/asset-workbench/settlement/supplements", true},
 		{"submitter settlement confirm denied", "asset_submitter", http.MethodPost, "/v1/asset-workbench/settlement/batches/3/confirm", false},
 		{"submitter batch delete", "asset_submitter", http.MethodPost, "/v1/asset-workbench/files/batch-delete", true},
 		{"submitter batch move denied", "asset_submitter", http.MethodPost, "/v1/asset-workbench/files/batch-move", false},

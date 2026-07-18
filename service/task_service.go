@@ -263,8 +263,10 @@ type TaskFilter struct {
 	CreatedFrom   *time.Time
 	CreatedTo     *time.Time
 	Keyword       string
-	Page          int
-	PageSize      int
+	// Sort is an optional order token such as "-updated_at", "task_no", or "due_at".
+	Sort     string
+	Page     int
+	PageSize int
 }
 
 type UpdateTaskSKUItemCostInfoParams struct {
@@ -675,7 +677,7 @@ func (s *taskService) Create(ctx context.Context, p CreateTaskParams) (created *
 	p.OwnerOrgTeam = ownership.OwnerOrgTeam
 	if actor, ok := domain.RequestActorFromContext(ctx); ok && actor.EffectiveAccess != nil {
 		if !domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskCreate, domain.TaskAccessSubject{
-			CreatorID: p.CreatorID, RequesterID: p.RequesterID,
+			CreatorID: p.CreatorID, RequesterID: p.RequesterID, TaskType: p.TaskType,
 			OwnerDepartmentID: p.OwnerDepartmentID, OwnerTeamID: p.OwnerTeamID,
 		}) {
 			return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "task.create is outside the effective data scope", nil)

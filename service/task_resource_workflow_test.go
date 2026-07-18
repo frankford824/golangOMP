@@ -15,6 +15,7 @@ type resourceWorkflowRepoStub struct {
 	groups        []domain.TaskAssetGroup
 	expected      int64
 	listFn        func(domain.ResourceGroupListParams) ([]domain.TaskAssetGroup, int64)
+	flatListFn    func(domain.ResourceGroupListParams) ([]domain.FlatResourceItem, int64)
 	staged        map[int64]domain.StagedTaskAssetBinding
 	workflowReads int
 	groupReads    int
@@ -38,6 +39,11 @@ func (s *resourceWorkflowRepoStub) ListByTaskID(context.Context, int64) ([]domai
 
 func (s *resourceWorkflowRepoStub) ListResourceGroups(_ context.Context, params domain.ResourceGroupListParams) ([]domain.TaskAssetGroup, int64, error) {
 	items, total := s.listFn(params)
+	return items, total, nil
+}
+
+func (s *resourceWorkflowRepoStub) ListFlatResourceItems(_ context.Context, params domain.ResourceGroupListParams) ([]domain.FlatResourceItem, int64, error) {
+	items, total := s.flatListFn(params)
 	return items, total, nil
 }
 
@@ -117,6 +123,36 @@ func TestListResourceGroupsPushesScopeBeforePagination(t *testing.T) {
 	}
 	if result.Total != 2 || len(result.Items) != 1 || result.Items[0].ID != 2 {
 		t.Fatalf("scoped page = %+v", result)
+	}
+}
+
+func TestListResourceGroupsUsesFileLevelPaginationForFlatMode(t *testing.T) {
+	departmentID := int64(101)
+	actor := scopedCapabilityActor(7, domain.PermissionAssetView, domain.AccessScopeOwnDepartment, &departmentID, nil, nil)
+	repository := &resourceWorkflowRepoStub{
+		listFn: func(domain.ResourceGroupListParams) ([]domain.TaskAssetGroup, int64) {
+			t.Fatal("group-level list must not run for flat mode")
+			return nil, 0
+		},
+		flatListFn: func(params domain.ResourceGroupListParams) ([]domain.FlatResourceItem, int64) {
+			if params.Page != 3 || params.PageSize != 2 || params.ResourceRole != domain.ResourceRoleFilterFinal {
+				t.Fatalf("flat params = %+v", params)
+			}
+			if len(params.Access.DepartmentIDs) != 1 || params.Access.DepartmentIDs[0] != departmentID {
+				t.Fatalf("flat SQL scope params = %+v", params.Access)
+			}
+			return []domain.FlatResourceItem{{GroupID: 8, FileName: "fifth.png", ResourceRole: domain.ResourceRoleFilterFinal}}, 5
+		},
+	}
+	svc := NewTaskResourceWorkflowService(repository, nil, nil)
+	result, appErr := svc.ListResourceGroups(context.Background(), actor, domain.ResourceGroupListParams{
+		Page: 3, PageSize: 2, ResourceRole: domain.ResourceRoleFilterFinal,
+	})
+	if appErr != nil {
+		t.Fatalf("ListResourceGroups() error = %+v", appErr)
+	}
+	if result.ViewMode != "flat" || result.Total != 5 || len(result.FlatItems) != 1 || len(result.Items) != 0 {
+		t.Fatalf("flat page = %+v", result)
 	}
 }
 

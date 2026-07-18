@@ -22,7 +22,7 @@ type AccessPolicyRepository interface {
 	CreateRole(ctx context.Context, tx repo.Tx, role *domain.AccessRole, actorID int64) (int64, error)
 	UpdateRole(ctx context.Context, tx repo.Tx, role *domain.AccessRole, expectedVersion, actorID int64) (bool, error)
 	ArchiveRole(ctx context.Context, tx repo.Tx, roleID, expectedVersion, actorID int64) (bool, error)
-	ReplaceRolePermissions(ctx context.Context, tx repo.Tx, roleID int64, permissions []domain.PermissionCode) error
+	ReplaceRolePermissions(ctx context.Context, tx repo.Tx, roleID int64, permissions []domain.AccessRolePermission) error
 	ReplaceUserAssignments(ctx context.Context, tx repo.Tx, userID, actorID int64, assignments []domain.AccessAssignment) error
 	EffectiveAccess(ctx context.Context, userID int64) (*domain.EffectiveAccess, error)
 	CountUsersWithRoleCode(ctx context.Context, roleCode string) (int64, error)
@@ -46,12 +46,12 @@ type AccessPolicyService interface {
 }
 
 type AccessRoleCreateRequest struct {
-	Code                   string                  `json:"code"`
-	Name                   string                  `json:"name"`
-	Description            string                  `json:"description"`
-	Permissions            []domain.PermissionCode `json:"permissions"`
-	Reason                 string                  `json:"reason"`
-	ExpectedPolicyRevision int64                   `json:"expected_policy_revision"`
+	Code                   string                        `json:"code"`
+	Name                   string                        `json:"name"`
+	Description            string                        `json:"description"`
+	Permissions            []domain.AccessRolePermission `json:"permissions"`
+	Reason                 string                        `json:"reason"`
+	ExpectedPolicyRevision int64                         `json:"expected_policy_revision"`
 }
 
 type AccessRoleUpdateRequest struct {
@@ -69,10 +69,10 @@ type AccessRoleArchiveRequest struct {
 }
 
 type ReplaceRolePermissionsRequest struct {
-	Permissions            []domain.PermissionCode `json:"permissions"`
-	ExpectedRoleVersion    int64                   `json:"expected_role_version"`
-	Reason                 string                  `json:"reason"`
-	ExpectedPolicyRevision int64                   `json:"expected_policy_revision"`
+	Permissions            []domain.AccessRolePermission `json:"permissions"`
+	ExpectedRoleVersion    int64                         `json:"expected_role_version"`
+	Reason                 string                        `json:"reason"`
+	ExpectedPolicyRevision int64                         `json:"expected_policy_revision"`
 }
 
 type ReplaceOrgPoliciesRequest struct {
@@ -135,10 +135,14 @@ func (s *accessPolicyService) CreateRole(ctx context.Context, actor domain.Reque
 	if strings.TrimSpace(request.Name) == "" || strings.TrimSpace(request.Reason) == "" {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "name and reason are required", nil)
 	}
-	if appErr := s.authorizePermissionGrant(ctx, actor, request.Permissions); appErr != nil {
+	permissions, appErr := normalizeRolePermissions(request.Permissions)
+	if appErr != nil {
 		return nil, appErr
 	}
-	role := &domain.AccessRole{Code: strings.TrimSpace(request.Code), Name: strings.TrimSpace(request.Name), Description: strings.TrimSpace(request.Description), Permissions: normalizePermissionCodes(request.Permissions)}
+	if appErr := s.authorizePermissionGrant(ctx, actor, permissionCodesOf(permissions)); appErr != nil {
+		return nil, appErr
+	}
+	role := &domain.AccessRole{Code: strings.TrimSpace(request.Code), Name: strings.TrimSpace(request.Name), Description: strings.TrimSpace(request.Description), Permissions: permissions}
 	var next int64
 	var roleID int64
 	err := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
@@ -238,8 +242,11 @@ func (s *accessPolicyService) ReplaceRolePermissions(ctx context.Context, actor 
 	if strings.TrimSpace(request.Reason) == "" {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "reason is required", nil)
 	}
-	permissions := normalizePermissionCodes(request.Permissions)
-	if appErr := s.authorizePermissionGrant(ctx, actor, permissions); appErr != nil {
+	permissions, appErr := normalizeRolePermissions(request.Permissions)
+	if appErr != nil {
+		return nil, appErr
+	}
+	if appErr := s.authorizePermissionGrant(ctx, actor, permissionCodesOf(permissions)); appErr != nil {
 		return nil, appErr
 	}
 	before, err := s.repo.GetRole(ctx, roleID)
@@ -348,7 +355,7 @@ func (s *accessPolicyService) ReplaceOrgPolicies(ctx context.Context, actor doma
 		if err != nil || role.ArchivedAt != nil {
 			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "organization policy role does not exist or is archived", map[string]interface{}{"index": i, "role_id": request.Policies[i].RoleID})
 		}
-		if appErr := s.authorizePermissionGrant(ctx, actor, role.Permissions); appErr != nil {
+		if appErr := s.authorizePermissionGrant(ctx, actor, role.PermissionCodes()); appErr != nil {
 			return nil, appErr
 		}
 	}
@@ -393,8 +400,8 @@ func (s *accessPolicyService) requireManage(ctx context.Context, actor domain.Re
 	if err != nil {
 		return infraError("authorize access policy management", err)
 	}
-	if !effective.Has(domain.PermissionAccessPolicyAdmin) {
-		return domain.NewAppError(domain.ErrCodePermissionDenied, "access_policy.manage is required", nil)
+	if !effective.Has(domain.PermissionAccessManage) {
+		return domain.NewAppError(domain.ErrCodePermissionDenied, "access.manage is required", nil)
 	}
 	return nil
 }
@@ -439,6 +446,9 @@ func (s *accessPolicyService) authorizePermissionGrant(ctx context.Context, acto
 	if err != nil {
 		return infraError("resolve actor permissions", err)
 	}
+	if !effective.Has(domain.PermissionAccessManage) {
+		return domain.NewAppError(domain.ErrCodePermissionDenied, "access.manage is required to grant operations", nil)
+	}
 	for _, permission := range normalizePermissionCodes(permissions) {
 		if riskByCode[permission] == "high" {
 			return domain.NewAppError(domain.ErrCodePermissionDenied, "high-risk permissions may only be granted by SuperAdmin", map[string]interface{}{"permission": permission})
@@ -475,7 +485,7 @@ func (s *accessPolicyService) validateAssignments(ctx context.Context, actor dom
 		if err != nil || role.ArchivedAt != nil {
 			return domain.NewAppError(domain.ErrCodeInvalidRequest, "assigned role does not exist or is archived", map[string]interface{}{"role_id": assignment.RoleID})
 		}
-		if appErr := s.authorizePermissionGrant(ctx, actor, role.Permissions); appErr != nil {
+		if appErr := s.authorizePermissionGrant(ctx, actor, role.PermissionCodes()); appErr != nil {
 			return appErr
 		}
 		if role.Code == "super_admin" {
@@ -525,6 +535,59 @@ func normalizePermissionCodes(items []domain.PermissionCode) []domain.Permission
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i] < out[j] })
 	return out
+}
+
+func permissionCodesOf(items []domain.AccessRolePermission) []domain.PermissionCode {
+	out := make([]domain.PermissionCode, 0, len(items))
+	for _, item := range items {
+		out = append(out, item.Code)
+	}
+	return normalizePermissionCodes(out)
+}
+
+func normalizeRolePermissions(items []domain.AccessRolePermission) ([]domain.AccessRolePermission, *domain.AppError) {
+	seen := map[domain.PermissionCode]int{}
+	out := make([]domain.AccessRolePermission, 0, len(items))
+	for itemIndex, item := range items {
+		code := domain.PermissionCode(strings.TrimSpace(string(item.Code)))
+		if code == "" {
+			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "permission code is required", map[string]interface{}{"index": itemIndex})
+		}
+		taskTypes := item.TaskTypes
+		if !domain.PermissionSupportsTaskTypes(code) {
+			if len(taskTypes) > 0 {
+				return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "permission does not support task-type restrictions", map[string]interface{}{"permission": code})
+			}
+			taskTypes = nil
+		} else {
+			normalized := make([]string, 0, len(taskTypes))
+			seenType := map[string]struct{}{}
+			for taskTypeIndex, taskType := range taskTypes {
+				taskType = strings.TrimSpace(taskType)
+				if taskType == "" {
+					return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "task type is required", map[string]interface{}{"permission": code, "index": taskTypeIndex})
+				}
+				if !domain.AccessTaskTypeValid(domain.TaskType(taskType)) {
+					return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid task type", map[string]interface{}{"permission": code, "task_type": taskType})
+				}
+				if _, ok := seenType[taskType]; ok {
+					continue
+				}
+				seenType[taskType] = struct{}{}
+				normalized = append(normalized, taskType)
+			}
+			sort.Strings(normalized)
+			taskTypes = normalized
+		}
+		if index, ok := seen[code]; ok {
+			out[index].TaskTypes = taskTypes
+			continue
+		}
+		seen[code] = len(out)
+		out = append(out, domain.AccessRolePermission{Code: code, TaskTypes: taskTypes})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Code < out[j].Code })
+	return out, nil
 }
 
 func effectiveHasRole(view *domain.EffectiveAccess, roleCode string) bool {

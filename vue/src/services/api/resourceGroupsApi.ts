@@ -55,8 +55,22 @@ export interface ResourceBundle {
   groups: ResourceGroup[]
 }
 
+export interface FlatResourceItem {
+  group_id: number
+  task_id: number
+  task_no?: string
+  sku_code?: string
+  resource_role: 'reference' | 'source' | 'final'
+  file_name: string
+  mime_type?: string
+  preview_url?: string
+  download_url?: string
+}
+
 export interface ResourceGroupListResult {
   items: ResourceGroup[]
+  flat_items?: FlatResourceItem[]
+  view_mode?: 'group' | 'flat'
   page: number
   page_size: number
   total: number
@@ -80,7 +94,18 @@ export const resourceGroupsApi = {
   async taskBundle(taskId: number): Promise<ResourceBundle> {
     return unwrap(await http.get(`/v1/tasks/${taskId}/resource-bundle`))
   },
-  async list(params: { task_id?: number; sku_code?: string; q?: string; format_category?: string; business_lane?: string; page?: number; page_size?: number } = {}): Promise<ResourceGroupListResult> {
+  async list(params: {
+    task_id?: number
+    sku_code?: string
+    task_no?: string
+    creator_id?: number | string
+    resource_role?: 'reference' | 'source' | 'final' | ''
+    q?: string
+    format_category?: string
+    business_lane?: string
+    page?: number
+    page_size?: number
+  } = {}): Promise<ResourceGroupListResult> {
     return unwrap(await http.get('/v1/resource-groups', { params }))
   },
   async get(id: number): Promise<ResourceGroup> {

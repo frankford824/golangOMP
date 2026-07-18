@@ -9034,7 +9034,17 @@ components:
           type: integer
     V8PermissionCode:
       type: string
-      enum: [task.view, task.create, task.design.submit, task.audit.decision, task.reopen, task.manage, planning_sku.view, planning_sku.create, planning_sku.edit, planning_sku.export, planning_sku.erp_sync, planning_sku.erp_retry, asset.view, asset.download, asset.export, asset.publish, asset.manage, asset_workbench.use, asset_workbench.submit, asset_workbench.members.manage, asset_workbench.profiles.manage, asset_workbench.groups.manage, asset_workbench.drive.manage, asset_workbench.batch.manage, asset_workbench.templates.manage, asset_workbench.qc.manage, asset_workbench.settlement.manage, asset_workbench.audit.view, catalog.view, catalog.manage, erp.manage, account.use, report.view, system.manage, access_policy.view, access_policy.manage]
+      description: Code-owned business operations used by the v8 access-policy matrix. Legacy roles and organization display names are not authorization sources.
+      enum: [task.view, task.create, task.assign, task.reassign, task.terminate, task.upload_source, task.audit, task.audit_handover, task.reopen, planning_sku.view, planning_sku.create, planning_sku.edit, planning_sku.export, planning_sku.erp_sync, planning_sku.erp_retry, asset.view, asset.download, asset.export, asset.publish, asset.manage, asset_workbench.use, asset_workbench.submit, asset_workbench.members.manage, asset_workbench.profiles.manage, asset_workbench.groups.manage, asset_workbench.drive.manage, asset_workbench.batch.manage, asset_workbench.templates.manage, asset_workbench.qc.manage, asset_workbench.settlement.manage, asset_workbench.audit.view, catalog.view, catalog.manage, erp.manage, account.use, report.view, system.manage, access.view, access.manage]
+    AccessRolePermission:
+      type: object
+      required: [code]
+      description: One role operation grant. Empty task_types means all task types are allowed.
+      properties:
+        code: { $ref: '#/components/schemas/V8PermissionCode' }
+        task_types:
+          type: array
+          items: { type: string, enum: [original_product_development, new_product_development, retouch_task, sku_planning, customer_customization, regular_customization] }
     AccessPermission:
       type: object
       required: [code, module, name, description, risk_level, enabled]
@@ -9092,7 +9102,7 @@ components:
         version: { type: integer, format: int64 }
         permissions:
           type: array
-          items: { $ref: '#/components/schemas/V8PermissionCode' }
+          items: { $ref: '#/components/schemas/AccessRolePermission' }
     EffectiveAccess:
       type: object
       required: [user_id, policy_revision, permissions, assignments, sources]
@@ -9116,6 +9126,9 @@ components:
               role_code: { type: string }
               source_type: { type: string }
               scope_mode: { type: string, enum: [self, own_department, own_team, selected_org, global] }
+              task_types:
+                type: array
+                items: { type: string, enum: [original_product_development, new_product_development, retouch_task, sku_planning] }
     AccessOrgPolicy:
       type: object
       required: [subject_type, subject_id, role_id, scope_mode, enabled, version, reason]
@@ -9402,7 +9415,7 @@ components:
         code: { type: string, pattern: '^[a-z][a-z0-9_]{1,63}$' }
         name: { type: string, minLength: 1, maxLength: 100 }
         description: { type: string, maxLength: 500 }
-        permissions: { type: array, items: { $ref: '#/components/schemas/V8PermissionCode' } }
+        permissions: { type: array, items: { $ref: '#/components/schemas/AccessRolePermission' } }
         reason: { type: string, minLength: 1 }
         expected_policy_revision: { type: integer, format: int64 }
     AccessRoleUpdateRequest:
@@ -9425,7 +9438,7 @@ components:
       type: object
       required: [permissions, expected_role_version, reason, expected_policy_revision]
       properties:
-        permissions: { type: array, items: { $ref: '#/components/schemas/V8PermissionCode' } }
+        permissions: { type: array, items: { $ref: '#/components/schemas/AccessRolePermission' } }
         expected_role_version: { type: integer, format: int64 }
         reason: { type: string, minLength: 1 }
         expected_policy_revision: { type: integer, format: int64 }
@@ -9450,11 +9463,27 @@ components:
         after: { type: object, additionalProperties: true }
         policy_revision: { type: integer, format: int64 }
         created_at: { type: string, format: date-time }
+    FlatResourceItem:
+      type: object
+      required: [group_id, task_id, resource_role, file_name]
+      description: One matched resource row used when asset-center list filters by resource_role or format_category.
+      properties:
+        group_id: { type: integer, format: int64 }
+        task_id: { type: integer, format: int64 }
+        task_no: { type: string }
+        sku_code: { type: string }
+        resource_role: { type: string, enum: [reference, source, final] }
+        file_name: { type: string }
+        mime_type: { type: string }
+        preview_url: { type: string }
+        download_url: { type: string }
     ResourceGroupListResult:
       type: object
       required: [items, page, page_size, total]
       properties:
         items: { type: array, items: { $ref: '#/components/schemas/TaskAssetGroup' } }
+        flat_items: { type: array, items: { $ref: '#/components/schemas/FlatResourceItem' } }
+        view_mode: { type: string, enum: [group, flat], description: group keeps one SKU summary card per resource group; flat returns matched resource rows. }
         page: { type: integer }
         page_size: { type: integer }
         total: { type: integer, format: int64 }
@@ -10030,12 +10059,18 @@ paths:
       operationId: listTaskResourceGroups
       tags: [TaskResourceWorkflow]
       summary: Search the current working and finalized resource-group read model
+      description: |
+        Default response uses `view_mode=group` (one SKU resource-group card).
+        When `resource_role` or a non-all `format_category` is supplied, the service returns `view_mode=flat` with matching `flat_items`.
       x-api-readiness: ready_for_frontend
       parameters:
         - { name: task_id, in: query, schema: { type: integer, format: int64 } }
         - { name: sku_code, in: query, schema: { type: string } }
+        - { name: task_no, in: query, schema: { type: string } }
+        - { name: creator_id, in: query, schema: { type: integer, format: int64 } }
+        - { name: resource_role, in: query, schema: { type: string, enum: [reference, source, final] } }
         - { name: q, in: query, description: Searches task number, SKU, indexed resource text, and finalized filenames., schema: { type: string } }
-        - { name: format_category, in: query, schema: { type: string, enum: [all, image, design, pdf, video, archive], default: all } }
+        - { name: format_category, in: query, schema: { type: string, enum: [all, image, design, pdf, document, video, archive], default: all }, description: document is accepted as an alias of pdf. }
         - { name: business_lane, in: query, schema: { type: string, enum: [normal, customization] } }
         - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
         - { name: page_size, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
@@ -14289,13 +14324,13 @@ paths:
         External resources prefer OSS-backed derived preview/original URLs or already-public provider URLs;
         browser-facing BFF proxy URLs are not returned as the default preview surface.
         A staged, unbound upload is visible only to its uploader with `asset.view`, or to an auditor whose
-        explicit `task.audit.decision` scope includes the task. Bound resources require `asset.view` within
+        explicit `task.audit` scope includes the task. Bound resources require `asset.view` within
         the task's stable organization-ID scope. Legacy roles and organization names do not authorize preview.
         When preview metadata is not currently available for the asset, runtime returns HTTP 409 with
         `error.code=INVALID_STATE_TRANSITION` and message `asset preview is not available`.
       tags: [Assets, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
-      x-permissions: [asset.view, task.audit.decision]
+      x-permissions: [asset.view, task.audit]
       x-rbac-placeholder:
         auth_mode: session_token_capability_and_stable_scope_enforced
       parameters:
@@ -14339,14 +14374,14 @@ paths:
       description: |
         Creates a staged task-asset upload session and lets the backend choose single-part or
         multipart OSS upload. The task must be in an editable design or audit state. Authorization
-        is `task.design.submit`, `task.audit.decision`, or `asset.manage`, intersected with the
-        task's stable organization-ID scope. `task.manage` may create, complete, and cancel only
+        is `task.upload_source`, `task.audit`, or `asset.manage`, intersected with the
+        task's stable organization-ID scope. `task.create` may create, complete, and cancel only
         `reference` uploads; it never authorizes source or final-product uploads. Upload completion never advances workflow state.
         Completed and Archived tasks reject upload-session access/mutations and must be reopened first. Task state
         is locked and checked again in every transaction that writes upload-session state.
       tags: [Assets, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
-      x-permissions: [task.design.submit, task.audit.decision, task.manage, asset.manage]
+      x-permissions: [task.create, task.upload_source, task.audit, asset.manage]
       x-rbac-placeholder:
         auth_mode: session_token_capability_enforced
       requestBody:
@@ -14380,7 +14415,7 @@ paths:
         before any synchronized state is written.
       tags: [Assets, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
-      x-permissions: [task.view, asset.view, task.design.submit, task.audit.decision, task.manage, asset.manage]
+      x-permissions: [task.view, asset.view, task.create, task.upload_source, task.audit, asset.manage]
       x-rbac-placeholder:
         auth_mode: session_token_capability_enforced
       parameters:
@@ -14409,7 +14444,7 @@ paths:
       description: Completes one staged upload after OSS bytes are verified. It never advances workflow state. Completed and Archived tasks reject the mutation and require reopen; task state is locked and checked again inside the transaction.
       tags: [Assets, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
-      x-permissions: [task.design.submit, task.audit.decision, task.manage, asset.manage]
+      x-permissions: [task.create, task.upload_source, task.audit, asset.manage]
       x-rbac-placeholder:
         auth_mode: session_token_capability_enforced
       parameters:
@@ -14446,7 +14481,7 @@ paths:
       description: Cancels one staged upload session and aborts the remote OSS session when needed. Completed and Archived tasks reject the mutation and require reopen; task state is locked and checked again inside the transaction.
       tags: [Assets, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
-      x-permissions: [task.design.submit, task.audit.decision, task.manage, asset.manage]
+      x-permissions: [task.create, task.upload_source, task.audit, asset.manage]
       x-rbac-placeholder:
         auth_mode: session_token_capability_enforced
       parameters:
@@ -14579,6 +14614,7 @@ paths:
         - { in: query, name: date_from, schema: { type: string } }
         - { in: query, name: date_to, schema: { type: string } }
         - { in: query, name: keyword, schema: { type: string } }
+        - { in: query, name: sort, schema: { type: string, enum: [created_at, -created_at, updated_at, -updated_at, due_at, -due_at, task_no, -task_no], default: -updated_at } }
         - { in: query, name: page, schema: { type: integer, minimum: 1, default: 1 } }
         - { in: query, name: page_size, schema: { type: integer, minimum: 1, maximum: 200, default: 20 } }
       responses:
@@ -15278,13 +15314,14 @@ paths:
       summary: Assign task to designer
       description: |
         Assigns an active Designer to a `PendingAssign` task or reassigns an `InProgress` task.
-        Authorization requires explicit `task.manage` intersected with the task's stable organization-ID scope;
+        Authorization requires explicit `task.assign` for first assignment or `task.reassign` for reassignment,
+        intersected with the task's stable organization-ID scope;
         legacy roles and department/team names never grant access. The action is exposed to clients as
         `task.assign` in the task's `allowed_actions`. `PendingAudit`, `Completed`, `Archived`, `Cancelled`,
         and `Blocked` are rejected.
       tags: [Tasks, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
-      x-permissions: [task.manage]
+      x-permissions: [task.assign, task.reassign]
       x-rbac-placeholder:
         auth_mode: session_token_capability_and_stable_scope_enforced
       parameters:
@@ -15309,7 +15346,7 @@ paths:
                   data:
                     $ref: '#/components/schemas/Task'
         '403':
-          description: "`PERMISSION_DENIED` when explicit `task.manage` is missing or the task is outside the actor's stable organization-ID scope."
+          description: "`PERMISSION_DENIED` when the exact assign/reassign capability is missing or the task is outside the actor's stable organization-ID scope."
         '404':
           description: Task not found
         '409':
@@ -15653,7 +15690,7 @@ paths:
       x-workflow-target-removal-phase: remove_after_frontend_migration
       tags: [TaskAssetCenter, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
-      x-permissions: [task.design.submit, task.audit.decision, task.manage, asset.manage]
+      x-permissions: [task.create, task.upload_source, task.audit, asset.manage]
       x-rbac-placeholder:
         auth_mode: session_token_capability_enforced
       parameters:
@@ -15698,7 +15735,7 @@ paths:
       x-workflow-target-removal-phase: remove_after_frontend_migration
       tags: [TaskAssetCenter, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
-      x-permissions: [task.view, asset.view, task.design.submit, task.audit.decision, task.manage, asset.manage]
+      x-permissions: [task.view, asset.view, task.create, task.upload_source, task.audit, asset.manage]
       x-rbac-placeholder:
         auth_mode: session_token_capability_enforced
       parameters:
@@ -15738,7 +15775,7 @@ paths:
       x-workflow-target-removal-phase: remove_after_frontend_migration
       tags: [TaskAssetCenter, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
-      x-permissions: [task.design.submit, task.audit.decision, task.manage, asset.manage]
+      x-permissions: [task.create, task.upload_source, task.audit, asset.manage]
       x-rbac-placeholder:
         auth_mode: session_token_capability_enforced
       parameters:
@@ -15788,7 +15825,7 @@ paths:
       x-workflow-target-removal-phase: remove_after_frontend_migration
       tags: [TaskAssetCenter, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
-      x-permissions: [task.design.submit, task.audit.decision, task.manage, asset.manage]
+      x-permissions: [task.create, task.upload_source, task.audit, asset.manage]
       x-rbac-placeholder:
         auth_mode: session_token_capability_enforced
       parameters:
@@ -15988,7 +16025,7 @@ paths:
       x-workflow-target-removal-phase: remove_after_frontend_migration
       tags: [TaskAssetCenter, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
-      x-permissions: [task.design.submit, task.audit.decision, task.manage, asset.manage]
+      x-permissions: [task.create, task.upload_source, task.audit, asset.manage]
       x-rbac-placeholder:
         auth_mode: session_token_capability_enforced
       parameters:
@@ -16030,7 +16067,7 @@ paths:
       x-workflow-target-removal-phase: remove_after_frontend_migration
       tags: [TaskAssetCenter, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
-      x-permissions: [task.design.submit, task.audit.decision, task.manage, asset.manage]
+      x-permissions: [task.create, task.upload_source, task.audit, asset.manage]
       x-rbac-placeholder:
         auth_mode: session_token_capability_enforced
       parameters:
@@ -16072,7 +16109,7 @@ paths:
       x-workflow-target-removal-phase: remove_after_frontend_migration
       tags: [TaskAssetCenter, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
-      x-permissions: [task.design.submit, task.audit.decision, task.manage, asset.manage]
+      x-permissions: [task.create, task.upload_source, task.audit, asset.manage]
       x-rbac-placeholder:
         auth_mode: session_token_capability_enforced
       parameters:
@@ -16114,7 +16151,7 @@ paths:
       x-workflow-target-removal-phase: remove_after_frontend_migration
       tags: [TaskAssetCenter, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
-      x-permissions: [task.view, asset.view, task.design.submit, task.audit.decision, task.manage, asset.manage]
+      x-permissions: [task.view, asset.view, task.create, task.upload_source, task.audit, asset.manage]
       x-rbac-placeholder:
         auth_mode: session_token_capability_enforced
       parameters:
@@ -16155,7 +16192,7 @@ paths:
       x-workflow-target-removal-phase: remove_after_frontend_migration
       tags: [TaskAssetCenter, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
-      x-permissions: [task.design.submit, task.audit.decision, task.manage, asset.manage]
+      x-permissions: [task.create, task.upload_source, task.audit, asset.manage]
       x-rbac-placeholder:
         auth_mode: session_token_capability_enforced
       parameters:
@@ -16203,7 +16240,7 @@ paths:
       x-workflow-target-removal-phase: remove_after_frontend_migration
       tags: [TaskAssetCenter, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
-      x-permissions: [task.design.submit, task.audit.decision, task.manage, asset.manage]
+      x-permissions: [task.create, task.upload_source, task.audit, asset.manage]
       x-rbac-placeholder:
         auth_mode: session_token_capability_enforced
       parameters:
@@ -16251,7 +16288,7 @@ paths:
       x-workflow-target-removal-phase: candidate_for_v1_0_removal
       tags: [TaskAssetCenter, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
-      x-permissions: [task.design.submit, task.audit.decision, task.manage, asset.manage]
+      x-permissions: [task.create, task.upload_source, task.audit, asset.manage]
       x-rbac-placeholder:
         auth_mode: session_token_capability_enforced
       parameters:
@@ -18010,15 +18047,15 @@ paths:
     post:
       summary: Trigger a task module action
       description: |
-        Requires one of the code-owned capabilities `task.design.submit`, `task.audit.decision`,
-        or `task.manage`; the service then applies the exact module/state/scope rule. For a
-        customization `submit`, the caller must have `task.design.submit` in the task's stable
+        Requires one of the code-owned capabilities `task.upload_source` or `task.audit`;
+        the service then applies the exact module/state/scope rule. For a customization `submit`,
+        the caller must have `task.upload_source` in the task's stable
         organization scope. The action marks the internal customization job `ready_for_submit`
         but does not advance the main task; only `/submit-design` can enter `PendingAudit`.
       tags: [Tasks, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-owner-round: R3
-      x-permissions: [task.design.submit, task.audit.decision, task.manage]
+      x-permissions: [task.upload_source, task.audit]
       x-rbac-placeholder:
         auth_mode: session_token_capability_enforced
       parameters:

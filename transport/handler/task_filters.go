@@ -126,6 +126,15 @@ func parseTaskFilterQuery(c *gin.Context) (service.TaskFilter, *domain.AppError)
 		}
 		filter.PageSize = pageSize
 	}
+	if raw := strings.TrimSpace(c.Query("sort")); raw != "" {
+		field := strings.TrimPrefix(raw, "-")
+		switch field {
+		case "updated_at", "task_no", "due_at", "created_at":
+			filter.Sort = raw
+		default:
+			return service.TaskFilter{}, domain.NewAppError(domain.ErrCodeInvalidRequest, "unsupported sort field", map[string]interface{}{"sort": raw})
+		}
+	}
 
 	return filter, nil
 }

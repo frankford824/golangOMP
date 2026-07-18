@@ -37,7 +37,7 @@ function resourceGroup(id: number) {
 
 const roles = [
   { id: 1, code: 'member', name: '成员', description: '基础访问', system_protected: true, version: 1, permissions: ['account.use'] },
-  { id: 2, code: 'reviewer', name: '审核人员', description: '审核任务', system_protected: false, version: 1, permissions: ['task.audit.decision'] },
+  { id: 2, code: 'reviewer', name: '审核人员', description: '审核任务', system_protected: false, version: 1, permissions: ['task.audit'] },
 ]
 
 export const v8Handler: MockHandler = (request) => {
@@ -61,11 +61,11 @@ export const v8Handler: MockHandler = (request) => {
   }
   if (request.method === 'GET' && request.path.match(/^\/v1\/tasks\/\d+\/audit\/handovers$/)) return { status: 200, data: { data: [] } }
 
-  if (request.method === 'GET' && request.path === '/v1/access/permissions') return { status: 200, data: { data: [{ code: 'task.audit.decision', module: 'task', name: '审核任务', description: '审核授权范围内任务', risk_level: 'normal', enabled: true }] } }
+  if (request.method === 'GET' && request.path === '/v1/access/permissions') return { status: 200, data: { data: [{ code: 'task.audit', module: 'task', name: '审核任务', description: '审核授权范围内任务', risk_level: 'normal', enabled: true }] } }
   if (request.method === 'GET' && request.path === '/v1/access/roles') return { status: 200, data: { data: roles } }
   if (request.method === 'GET' && request.path === '/v1/access/users') return { status: 200, data: { data: { items: [{ id: 2, display_name: '李审核', username: 'reviewer', department: '设计部', department_id: 10 }], page: 1, page_size: 30, total: 1 } } }
   const effectiveMatch = request.path.match(/^\/v1\/access\/users\/(\d+)\/effective$/)
-  if (request.method === 'GET' && effectiveMatch) return { status: 200, data: { data: { user_id: Number(effectiveMatch[1]), policy_revision: 4, permissions: ['task.audit.decision'], assignments: [], sources: [] } } }
+  if (request.method === 'GET' && effectiveMatch) return { status: 200, data: { data: { user_id: Number(effectiveMatch[1]), policy_revision: 4, permissions: ['task.audit'], assignments: [], sources: [] } } }
   const policyMatch = request.path.match(/^\/v1\/access\/org-policies\/(department|team)\/(\d+)$/)
   if (request.method === 'GET' && policyMatch) return { status: 200, data: { data: [] } }
   if (request.method === 'PUT' && policyMatch) return { status: 200, data: { data: { policy_revision: 5, org_policies: request.body?.policies || [] } } }

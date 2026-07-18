@@ -149,7 +149,7 @@ Content-Type: `application/json`
 | `code` | string | 是 | - |
 | `name` | string | 是 | - |
 | `description` | string | 否 | - |
-| `permissions` | array<V8PermissionCode> | 否 | - |
+| `permissions` | array<AccessRolePermission> | 否 | - |
 | `reason` | string | 是 | - |
 | `expected_policy_revision` | integer | 是 | - |
 
@@ -350,7 +350,7 @@ Content-Type: `application/json`
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `permissions` | array<V8PermissionCode> | 是 | - |
+| `permissions` | array<AccessRolePermission> | 是 | - |
 | `expected_role_version` | integer | 是 | - |
 | `reason` | string | 是 | - |
 | `expected_policy_revision` | integer | 是 | - |
@@ -1464,7 +1464,7 @@ curl -X GET https://api.example.com/v1/tasks/<id>/resource-bundle \
 ### 简介
 支持方法: GET。
 
-- `GET`: Search the current working and finalized resource-group read model
+- `GET`: Default response uses `view_mode=group` (one SKU resource-group card). When `resource_role` or a non-all `format_category` is supplied, the service returns `view_mode=flat` with matching `flat_items`.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -1478,8 +1478,11 @@ curl -X GET https://api.example.com/v1/tasks/<id>/resource-bundle \
 |---|---|---|---|---|
 | `task_id` | query | integer | 否 | - |
 | `sku_code` | query | string | 否 | - |
+| `task_no` | query | string | 否 | - |
+| `creator_id` | query | integer | 否 | - |
+| `resource_role` | query | enum(reference/source/final) | 否 | - |
 | `q` | query | string | 否 | Searches task number |
-| `format_category` | query | enum(all/image/design/pdf/video/archive) | 否 | - |
+| `format_category` | query | enum(all/image/design/pdf/document/video/archive) | 否 | document is accepted as an alias of pdf. |
 | `business_lane` | query | enum(normal/customization) | 否 | - |
 | `page` | query | integer | 否 | - |
 | `page_size` | query | integer | 否 | - |
@@ -4121,6 +4124,7 @@ curl -X POST https://api.example.com/v1/tasks/prepare-product-codes \
 | `date_from` | query | string | 否 | - |
 | `date_to` | query | string | 否 | - |
 | `keyword` | query | string | 否 | - |
+| `sort` | query | enum(created_at/-created_at/updated_at/-updated_at/due_at/-due_at/task_no/-task_no) | 否 | - |
 | `page` | query | integer | 否 | - |
 | `page_size` | query | integer | 否 | - |
 
@@ -5367,7 +5371,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/cost-overrides/<event_id>/fin
 ### 简介
 支持方法: POST。
 
-- `POST`: Assigns an active Designer to a `PendingAssign` task or reassigns an `InProgress` task. Authorization requires explicit `task.manage` intersected with the task's stable organization-ID scope; legacy roles and department/team names never grant access. The action is exposed to clients as `task.assign` in the task's `allowed_actions`. `PendingAudit`, `Completed`, `Archived`, `Cancelled`, and `Blocked` are rejected.
+- `POST`: Assigns an active Designer to a `PendingAssign` task or reassigns an `InProgress` task. Authorization requires explicit `task.assign` for first assignment or `task.reassign` for reassignment, intersected with the task's stable organization-ID scope; legacy roles and department/team names never grant access. The action is exposed to clients as `task.assign` in the task's `allowed_actions`. `PendingAudit`, `Completed`, `Archived`, `Cancelled`, and `Blocked` are rejected.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -5414,7 +5418,7 @@ Content-Type: `application/json`
 ### 错误码
 | HTTP | code | deny_code | 说明 |
 |---|---|---|---|
-| 403 | 见 `error.code` | 见 `deny_code` | `PERMISSION_DENIED` when explicit `task.manage` is missing or the task is outside the actor's stable organization-ID scope. |
+| 403 | 见 `error.code` | 见 `deny_code` | `PERMISSION_DENIED` when the exact assign/reassign capability is missing or the task is outside the actor's stable organization-ID scope. |
 | 404 | 见 `error.code` | 见 `deny_code` | Task not found |
 | 409 | 见 `error.code` | 见 `deny_code` | Task state or workflow revision conflict |
 
@@ -9642,7 +9646,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/modules/<module_key>/claim \
 ### 简介
 支持方法: POST。
 
-- `POST`: Requires one of the code-owned capabilities `task.design.submit`, `task.audit.decision`, or `task.manage`; the service then applies the exact module/state/scope rule. For a customization `submit`, the caller must have `task.design.submit` in the task's stable organization scope. The action marks the internal customization job `ready_for_submit` but does not advance the main task; only `/submit-design` can enter `PendingAudit`.
+- `POST`: Requires one of the code-owned capabilities `task.upload_source` or `task.audit`; the service then applies the exact module/state/scope rule. For a customization `submit`, the caller must have `task.upload_source` in the task's stable organization scope. The action marks the internal customization job `ready_for_submit` but does not advance the main task; only `/submit-design` can enter `PendingAudit`.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。

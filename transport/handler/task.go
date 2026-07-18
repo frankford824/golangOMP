@@ -1086,6 +1086,7 @@ func (h *TaskHandler) GetByID(c *gin.Context) {
 
 func v8AllowedTaskActions(actor domain.RequestActor, taskType domain.TaskType, status domain.TaskStatus, subject domain.TaskAccessSubject) []string {
 	actions := make([]string, 0, 6)
+	subject.TaskType = taskType
 	if taskType == domain.TaskTypeSKUPlanning {
 		if domain.EffectiveAccessAllowsTask(actor, domain.PermissionPlanningSKUEdit, subject) {
 			actions = append(actions, "planning_sku.edit")
@@ -1103,18 +1104,21 @@ func v8AllowedTaskActions(actor domain.RequestActor, taskType domain.TaskType, s
 	}
 	if (status == domain.TaskStatusDraft || status == domain.TaskStatusPendingAssign || status == domain.TaskStatusAssigned ||
 		status == domain.TaskStatusInProgress || status == domain.TaskStatusPendingAudit) &&
-		domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskManage, subject) {
+		(domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskCreate, subject) ||
+			domain.EffectiveAccessAllowsTask(actor, domain.PermissionAssetManage, subject)) {
 		actions = append(actions, "task.reference.append")
 	}
 	if (status == domain.TaskStatusPendingAssign || status == domain.TaskStatusInProgress) &&
-		domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskManage, subject) {
+		domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskAssign, subject) {
 		actions = append(actions, "task.assign")
 	}
-	if status == domain.TaskStatusInProgress && domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskDesignSubmit, subject) {
+	if status == domain.TaskStatusInProgress && domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskUploadSource, subject) {
 		actions = append(actions, "task.design.submit")
 	}
-	if status == domain.TaskStatusPendingAudit && domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskAuditDecision, subject) {
+	if status == domain.TaskStatusPendingAudit && domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskAudit, subject) {
 		actions = append(actions, "task.audit.approve", "task.audit.return_to_design")
+	}
+	if status == domain.TaskStatusPendingAudit && domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskAuditHandover, subject) {
 		if subject.CurrentHandlerID != nil && *subject.CurrentHandlerID == actor.ID {
 			actions = append(actions, "task.audit.handover")
 		}

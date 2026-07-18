@@ -4,7 +4,7 @@
       <div>
         <p class="eyebrow">权限配置</p>
         <h1>权限管理</h1>
-        <p>为人员配置业务角色和可管理范围，部门与团队名称只用于识别。</p>
+        <p>按业务角色配置可执行操作；人员与组织只需选择角色和可管理范围。</p>
       </div>
       <button class="secondary" :disabled="loading" @click="load">{{ loading ? '刷新中…' : '刷新配置' }}</button>
     </header>
@@ -32,21 +32,31 @@
             <section v-for="group in permissionGroups" :key="group.module">
               <h3>{{ moduleLabel(group.module) }}</h3>
               <label v-for="permission in group.items" :key="permission.code" class="permission-row">
-                <input v-model="draftPermissions" type="checkbox" :value="permission.code" :disabled="selectedRole.system_protected" />
-                <span><strong>{{ permission.name }}</strong><small>{{ permission.description }}</small></span>
+                <input type="checkbox" :checked="isOperationChecked(permission.code)" :disabled="selectedRole.system_protected" @change="toggleOperation(permission.code, ($event.target as HTMLInputElement).checked)" />
+                <span>
+                  <strong>{{ permission.name }}</strong>
+                  <small>{{ permission.description }}</small>
+                  <div v-if="isOperationChecked(permission.code) && supportsTaskTypes(permission.code)" class="task-type-picker">
+                    <span class="hint">允许的任务类型（不选=全部）</span>
+                    <label v-for="option in TASK_TYPE_OPTIONS" :key="option.value" class="task-type-chip">
+                      <input type="checkbox" :checked="hasTaskType(permission.code, option.value)" :disabled="selectedRole.system_protected" @change="toggleTaskType(permission.code, option.value, ($event.target as HTMLInputElement).checked)" />
+                      {{ option.label }}
+                    </label>
+                  </div>
+                </span>
                 <em :class="permission.risk_level">{{ permission.risk_level === 'high' ? '需谨慎授权' : '常规' }}</em>
               </label>
             </section>
           </div>
           <footer class="save-bar"><input v-model.trim="reason" :disabled="selectedRole.system_protected" placeholder="填写调整原因" /><button class="primary" :disabled="selectedRole.system_protected || !reason || saving" @click="saveRolePermissions">{{ saving ? '保存中…' : '保存角色权限' }}</button></footer>
         </template>
-        <div v-else class="empty">选择一个角色查看权限。</div>
+        <div v-else class="empty">选择一个角色查看可执行操作。</div>
       </section>
     </section>
 
     <section v-else-if="activeTab === 'people'" class="panel people-panel">
       <header class="panel-head">
-        <div><h2>人员授权</h2><p>搜索人员后，一次性核对并保存他的全部直接授权。</p></div>
+        <div><h2>人员授权</h2><p>选择人员后，为其配置角色与可管理范围。</p></div>
         <form @submit.prevent="searchPeople"><input v-model.trim="userKeyword" placeholder="姓名或账号" /><button class="secondary">搜索</button></form>
       </header>
       <div class="people-layout">
@@ -58,23 +68,27 @@
           <p v-if="!userOptions.length">请先搜索并选择人员。</p>
         </div>
         <form v-if="selectedUser" class="assignment-editor" @submit.prevent="saveAssignments">
-          <header class="editor-head"><div><h3>直接授权</h3><p>新增、删除或调整后将作为完整集合保存。</p></div><button type="button" class="secondary" @click="addAssignment">添加角色</button></header>
+          <header class="editor-head"><div><h3>直接授权</h3><p>保存时提交下列完整集合。</p></div><button type="button" class="secondary" @click="addAssignment">添加角色</button></header>
           <article v-for="(item, index) in directAssignments" :key="item.client_key" class="assignment-card">
             <label>业务角色<select v-model.number="item.role_id" required><option :value="0" disabled>请选择</option><option v-for="role in activeRoles" :key="role.id" :value="role.id">{{ role.name }}</option></select></label>
             <label>可管理范围<select v-model="item.scope_mode"><option value="self">仅本人相关</option><option value="own_department">本人所在部门</option><option value="own_team">本人所在团队</option><option value="selected_org">指定部门或团队</option><option value="global">全部数据</option></select></label>
             <section v-if="item.scope_mode === 'selected_org'" class="subject-editor">
               <header><strong>指定组织</strong><button type="button" class="link-button" @click="addAssignmentSubject(item)">添加组织</button></header>
               <div v-for="(subject, subjectIndex) in item.subjects" :key="subjectIndex" class="subject-row">
-                <label>组织类型<select v-model="subject.subject_type"><option value="department">部门</option><option value="team">团队</option></select></label>
-                <label>组织 ID<input v-model.number="subject.subject_id" type="number" min="1" required /></label>
-                <button type="button" class="remove-button" :aria-label="'删除第 ' + (subjectIndex + 1) + ' 个组织'" @click="removeAssignmentSubject(item, subjectIndex)">删除组织</button>
+                <label>组织类型<select v-model="subject.subject_type" @change="subject.subject_id = 0"><option value="department">部门</option><option value="team">团队</option></select></label>
+                <label>组织
+                  <select v-model.number="subject.subject_id" required>
+                    <option :value="0" disabled>请选择</option>
+                    <option v-for="option in orgOptionsFor(subject.subject_type)" :key="option.id" :value="option.id">{{ option.name }}</option>
+                  </select>
+                </label>
+                <button type="button" class="remove-button" @click="removeAssignmentSubject(item, subjectIndex)">删除组织</button>
               </div>
             </section>
-            <button type="button" class="remove-button" :aria-label="'删除第 ' + (index + 1) + ' 条直接授权'" @click="removeAssignment(index)">删除</button>
+            <button type="button" class="remove-button" @click="removeAssignment(index)">删除</button>
             <p v-if="assignmentError(item, index)" class="row-error" role="alert">{{ assignmentError(item, index) }}</p>
           </article>
-          <p v-if="!directAssignments.length" class="empty-line">此人员没有直接授权。可添加角色，或保持为空后保存以清除直接授权。</p>
-
+          <p v-if="!directAssignments.length" class="empty-line">此人员没有直接授权。</p>
           <section v-if="inheritedAssignments.length" class="inherited">
             <h3>组织策略带来的权限（只读）</h3>
             <article v-for="item in inheritedAssignments" :key="'inherited-' + item.id">
@@ -86,14 +100,19 @@
           <button class="primary" :disabled="saving || !assignmentReason || !assignmentsValid">保存全部直接授权</button>
         </form>
       </div>
-      <div v-if="effective" class="effective-result"><strong>{{ selectedUser?.display_name || selectedUser?.username }} 当前可用权限</strong><div class="chips"><span v-for="permission in effective.permissions" :key="permission">{{ permissionName(permission) }}</span></div></div>
+      <div v-if="effective" class="effective-result"><strong>{{ selectedUser?.display_name || selectedUser?.username }} 当前可用操作</strong><div class="chips"><span v-for="permission in effective.permissions" :key="permission">{{ permissionName(permission) }}</span></div></div>
     </section>
 
     <section v-else-if="activeTab === 'org'" class="panel">
-      <header class="panel-head"><div><h2>组织默认策略</h2><p>先读取当前完整策略，再新增、调整或停用其中一项。</p></div></header>
+      <header class="panel-head"><div><h2>组织默认策略</h2><p>为部门或团队配置默认角色。</p></div></header>
       <form class="org-selector" @submit.prevent="loadOrgPolicies">
         <label>组织类型<select v-model="orgSubjectType" @change="resetOrgPolicies"><option value="department">部门</option><option value="team">团队</option></select></label>
-        <label>组织 ID<input v-model.number="orgSubjectId" type="number" min="1" required @input="resetOrgPolicies" /></label>
+        <label>组织
+          <select v-model.number="orgSubjectId" required @change="resetOrgPolicies">
+            <option :value="0" disabled>请选择</option>
+            <option v-for="option in orgOptionsFor(orgSubjectType)" :key="option.id" :value="option.id">{{ option.name }}</option>
+          </select>
+        </label>
         <button class="secondary">读取当前策略</button>
       </form>
       <form v-if="orgPoliciesLoaded" class="org-editor" @submit.prevent="saveOrgPolicies">
@@ -102,7 +121,7 @@
           <label>默认角色<select v-model.number="item.role_id" required><option :value="0" disabled>请选择</option><option v-for="role in activeRoles" :key="role.id" :value="role.id">{{ role.name }}</option></select></label>
           <label>生效范围<select v-model="item.scope_mode"><option value="own_department">本部门</option><option value="own_team">本团队</option><option value="selected_org">当前组织</option><option value="global">全部数据</option></select></label>
           <label class="switch"><input v-model="item.enabled" type="checkbox" /><span>{{ item.enabled ? '已启用' : '已停用' }}</span></label>
-          <button type="button" class="remove-button" :aria-label="'删除第 ' + (index + 1) + ' 条组织策略'" @click="removeOrgPolicy(index)">删除</button>
+          <button type="button" class="remove-button" @click="removeOrgPolicy(index)">删除</button>
         </article>
         <p v-if="!orgPolicyDrafts.length" class="empty-line">当前组织没有默认策略。</p>
         <label class="wide">调整原因<input v-model.trim="orgReason" required /></label>
@@ -133,11 +152,27 @@
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { accessPolicyApi, type AccessAssignment, type AccessPermission, type AccessPolicyEvent, type AccessRole, type AccessUserOption, type EffectiveAccess, type OrgPolicy, type ScopeMode, type ScopeSubjectType } from '@/services/api/accessPolicyApi'
+import {
+  accessPolicyApi,
+  TASK_TYPE_OPTIONS,
+  TASK_TYPE_SCOPED_OPERATIONS,
+  type AccessAssignment,
+  type AccessPermission,
+  type AccessPolicyEvent,
+  type AccessRole,
+  type AccessRolePermission,
+  type AccessUserOption,
+  type EffectiveAccess,
+  type OrgPolicy,
+  type ScopeMode,
+  type ScopeSubjectType,
+} from '@/services/api/accessPolicyApi'
+import { fetchOrgOwnershipOptions } from '@/services/api/orgApi'
 import { usePermissionsStore } from '@/stores/permissions'
 
 type AssignmentDraft = AccessAssignment & { client_key: string }
 type OrgPolicyDraft = OrgPolicy & { client_key: string }
+type OrgOption = { id: number; name: string }
 
 const store = usePermissionsStore()
 const tabs = [{ id: 'roles', label: '业务角色' }, { id: 'people', label: '人员授权' }, { id: 'org', label: '组织策略' }, { id: 'events', label: '变更记录' }] as const
@@ -145,7 +180,7 @@ const activeTab = ref<(typeof tabs)[number]['id']>('roles')
 const permissions = ref<AccessPermission[]>([])
 const roles = ref<AccessRole[]>([])
 const selectedRole = ref<AccessRole | null>(null)
-const draftPermissions = ref<string[]>([])
+const draftPermissions = ref<AccessRolePermission[]>([])
 const policyRevision = ref(0)
 const reason = ref('')
 const loading = ref(false)
@@ -162,12 +197,14 @@ const directAssignments = ref<AssignmentDraft[]>([])
 const inheritedAssignments = ref<AccessAssignment[]>([])
 const assignmentReason = ref('')
 const orgSubjectType = ref<ScopeSubjectType>('department')
-const orgSubjectId = ref<number | null>(null)
+const orgSubjectId = ref(0)
 const orgPoliciesLoaded = ref(false)
 const orgPolicyDrafts = ref<OrgPolicyDraft[]>([])
 const orgReason = ref('')
 const events = ref<AccessPolicyEvent[]>([])
 const eventFilter = ref('')
+const departmentOptions = ref<OrgOption[]>([])
+const teamOptions = ref<OrgOption[]>([])
 let clientKey = 0
 
 const activeRoles = computed(() => roles.value.filter((item) => !item.archived_at))
@@ -186,12 +223,54 @@ const filteredEvents = computed(() => {
 
 function nextKey(prefix: string) { clientKey += 1; return prefix + '-' + clientKey }
 function activateTab(tab: (typeof tabs)[number]['id']) { activeTab.value = tab; if (tab === 'events' && !events.value.length) void loadEvents() }
-function selectRole(role: AccessRole) { selectedRole.value = role; draftPermissions.value = [...role.permissions]; reason.value = '' }
+function supportsTaskTypes(code: string) { return TASK_TYPE_SCOPED_OPERATIONS.has(code) }
+function isOperationChecked(code: string) { return draftPermissions.value.some((item) => item.code === code) }
+function hasTaskType(code: string, taskType: string) {
+  return (draftPermissions.value.find((item) => item.code === code)?.task_types || []).includes(taskType)
+}
+function toggleOperation(code: string, checked: boolean) {
+  if (checked) {
+    if (!isOperationChecked(code)) draftPermissions.value = [...draftPermissions.value, { code, task_types: [] }]
+    return
+  }
+  draftPermissions.value = draftPermissions.value.filter((item) => item.code !== code)
+}
+function toggleTaskType(code: string, taskType: string, checked: boolean) {
+  draftPermissions.value = draftPermissions.value.map((item) => {
+    if (item.code !== code) return item
+    const current = new Set(item.task_types || [])
+    if (checked) current.add(taskType)
+    else current.delete(taskType)
+    return { ...item, task_types: [...current] }
+  })
+}
+function selectRole(role: AccessRole) {
+  selectedRole.value = role
+  draftPermissions.value = role.permissions.map((item) => ({ code: item.code, task_types: [...(item.task_types || [])] }))
+  reason.value = ''
+}
+async function loadOrgOptions() {
+  try {
+    const parsed = await fetchOrgOwnershipOptions({ throwOnError: false })
+    departmentOptions.value = (parsed.departmentRecords || [])
+      .map((item) => ({ id: Number(item.id), name: item.name }))
+      .filter((item) => item.id > 0 && item.name)
+    teamOptions.value = (parsed.teamRecords || [])
+      .map((item) => ({ id: Number(item.id), name: item.departmentName ? `${item.name}（${item.departmentName}）` : item.name }))
+      .filter((item) => item.id > 0 && item.name)
+  } catch {
+    departmentOptions.value = []
+    teamOptions.value = []
+  }
+}
+function orgOptionsFor(type: ScopeSubjectType) {
+  return type === 'department' ? departmentOptions.value : teamOptions.value
+}
 async function load() {
   loading.value = true
   error.value = ''
   try {
-    const [permissionRows, roleRows] = await Promise.all([accessPolicyApi.permissions(), accessPolicyApi.roles(true)])
+    const [permissionRows, roleRows] = await Promise.all([accessPolicyApi.permissions(), accessPolicyApi.roles(true), loadOrgOptions()])
     permissions.value = permissionRows
     roles.value = roleRows
     const previousId = selectedRole.value?.id
@@ -261,10 +340,10 @@ function addAssignmentSubject(item: AssignmentDraft) { item.subjects.push({ subj
 function removeAssignmentSubject(item: AssignmentDraft, index: number) { item.subjects.splice(index, 1) }
 function assignmentError(item: AssignmentDraft, index: number): string {
   if (item.role_id <= 0) return '请选择业务角色。'
-  if (directAssignments.value.some((candidate, candidateIndex) => candidateIndex !== index && candidate.role_id === item.role_id)) return '同一个业务角色只能配置一次，请合并它的组织范围。'
+  if (directAssignments.value.some((candidate, candidateIndex) => candidateIndex !== index && candidate.role_id === item.role_id)) return '同一个业务角色只能配置一次。'
   if (item.scope_mode === 'selected_org') {
     if (!item.subjects.length) return '指定组织范围至少需要一个部门或团队。'
-    if (item.subjects.some((subject) => Number(subject.subject_id) <= 0)) return '请填写有效的组织 ID。'
+    if (item.subjects.some((subject) => Number(subject.subject_id) <= 0)) return '请选择有效的组织。'
     const keys = item.subjects.map((subject) => subject.subject_type + ':' + subject.subject_id)
     if (new Set(keys).size !== keys.length) return '同一部门或团队不能重复添加。'
   }
@@ -314,7 +393,7 @@ async function saveOrgPolicies() {
   } catch (cause) { handleError(cause, '组织策略保存失败。') } finally { saving.value = false }
 }
 async function loadEvents() { try { events.value = await accessPolicyApi.events(200) } catch (cause) { handleError(cause, '变更记录加载失败。') } }
-const moduleLabel = (module: string) => ({ task: '任务', planning_sku: '策划 SKU', asset: '资产', asset_workbench: '素材工作台', catalog: '产品资料', erp: 'ERP', account: '个人工作台', report: '经营报表', system: '系统管理', access: '权限策略' }[module] || module)
+const moduleLabel = (module: string) => ({ task: '任务操作', planning_sku: '策划 SKU', asset: '资产', workbench: '素材工作台', catalog: '产品资料', erp: 'ERP', account: '个人工作台', report: '经营报表', system: '系统管理', access: '权限' }[module] || module)
 const permissionName = (code: string) => permissions.value.find((item) => item.code === code)?.name || code
 const roleName = (roleId: number) => roles.value.find((item) => item.id === roleId)?.name || '角色 ' + roleId
 const scopeLabel = (scope: ScopeMode) => ({ self: '仅本人相关', own_department: '本人所在部门', own_team: '本人所在团队', selected_org: '指定组织', global: '全部数据' }[scope])
@@ -322,7 +401,7 @@ onMounted(load)
 </script>
 
 <style scoped>
-.access-page{max-width:1320px;margin:0 auto;padding:30px;display:grid;gap:20px}.page-head,.matrix-head,.panel-head,.editor-head{display:flex;align-items:center;justify-content:space-between;gap:20px}.page-head h1{margin:4px 0;font-size:32px}.page-head p,.matrix-head p,.panel-head p,.editor-head p{margin:0;color:rgb(var(--yb-text-muted))}.eyebrow{color:rgb(var(--yb-brand));font-size:11px;letter-spacing:.14em;font-weight:900}.primary,.secondary,.danger-button,.link-button,.tabs button,.remove-button{min-height:40px;padding:0 16px;border-radius:11px;font-weight:750;cursor:pointer}.primary{border:0;background:rgb(var(--yb-brand));color:rgb(var(--yb-text-inverse))}.secondary,.tabs button{border:1px solid rgb(var(--yb-border));background:rgb(var(--yb-surface));color:rgb(var(--yb-text))}.danger-button,.remove-button{border:1px solid rgb(var(--yb-danger-border));background:rgb(var(--yb-danger-soft));color:rgb(var(--yb-danger-text))}.link-button{border:0;background:transparent;color:rgb(var(--yb-brand))}.tabs{display:flex;gap:8px}.tabs button.active{background:rgb(var(--yb-brand-soft));border-color:rgb(var(--yb-brand-border))}.layout{display:grid;grid-template-columns:280px 1fr;border:1px solid rgb(var(--yb-border));border-radius:18px;background:rgb(var(--yb-surface));overflow:hidden}.role-list{border-right:1px solid rgb(var(--yb-border));padding:14px}.role-list header{display:flex;justify-content:space-between;align-items:center}.role-list h2{margin:0;font-size:16px}.role-list>button{width:100%;display:flex;justify-content:space-between;align-items:center;padding:12px;border:0;border-radius:11px;background:transparent;color:rgb(var(--yb-text));text-align:left;cursor:pointer}.role-list>button.active{background:rgb(var(--yb-brand-soft))}.role-list span{display:grid;gap:3px}.role-list small,.role-list em{color:rgb(var(--yb-text-muted));font-style:normal}.matrix-panel{min-height:560px;display:flex;flex-direction:column}.matrix-head{padding:20px 22px;border-bottom:1px solid rgb(var(--yb-border))}.matrix-head h2{margin:0}.role-actions,.event-actions{display:flex;gap:8px}.permission-groups{padding:18px 22px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:22px}.permission-groups h3{font-size:13px;color:rgb(var(--yb-text-muted))}.permission-row{display:grid;grid-template-columns:20px 1fr auto;gap:10px;align-items:start;padding:10px 0;border-bottom:1px solid rgb(var(--yb-border))}.permission-row span{display:grid;gap:3px}.permission-row small{color:rgb(var(--yb-text-muted))}.permission-row em{font-size:11px;font-style:normal}.permission-row em.high{color:rgb(var(--yb-danger-text))}.save-bar{margin-top:auto;display:flex;gap:10px;padding:16px 22px;border-top:1px solid rgb(var(--yb-border));background:rgb(var(--yb-surface-soft))}.save-bar input,.panel input,.panel select,.dialog input,.dialog textarea{min-height:40px;border:1px solid rgb(var(--yb-border));border-radius:10px;padding:8px 12px;background:rgb(var(--yb-surface));color:rgb(var(--yb-text))}.save-bar input{flex:1}.panel{padding:20px;border:1px solid rgb(var(--yb-border));border-radius:18px;background:rgb(var(--yb-surface));display:grid;gap:18px}.people-layout{display:grid;grid-template-columns:300px 1fr;gap:18px}.user-results{display:grid;align-content:start;gap:6px}.user-results button{display:grid;gap:3px;padding:11px;border:1px solid rgb(var(--yb-border));border-radius:10px;background:rgb(var(--yb-surface));text-align:left}.user-results button.active{background:rgb(var(--yb-brand-soft))}.user-results small{color:rgb(var(--yb-text-muted))}.assignment-editor,.org-editor{display:grid;gap:12px}.assignment-card,.org-policy-card{display:grid;grid-template-columns:repeat(2,minmax(0,1fr)) auto;gap:12px;align-items:end;padding:14px;border:1px solid rgb(var(--yb-border));border-radius:12px;background:rgb(var(--yb-surface-soft))}.assignment-editor label,.org-editor label,.org-selector label,.dialog label{display:grid;gap:6px}.org-selector{display:flex;align-items:end;gap:12px}.org-selector label{min-width:220px}.wide{grid-column:1/-1}.switch{display:flex;align-items:center;gap:8px;min-height:40px}.switch input{width:auto}.inherited{display:grid;gap:8px;padding:14px;border-radius:12px;background:rgb(var(--yb-surface-muted))}.inherited h3{margin:0}.inherited article{display:flex;justify-content:space-between}.empty-line{color:rgb(var(--yb-text-muted))}.effective-result{display:grid;gap:10px;padding-top:14px;border-top:1px solid rgb(var(--yb-border))}.chips{display:flex;gap:6px;flex-wrap:wrap}.chips span{padding:5px 8px;border-radius:999px;background:rgb(var(--yb-surface-muted));font-size:12px}.event-list{display:grid;gap:8px}.event-list article{display:grid;grid-template-columns:1fr auto;gap:4px;padding:12px;border-radius:11px;background:rgb(var(--yb-surface-muted))}.event-list p,.event-list time{margin:0;color:rgb(var(--yb-text-muted))}.event-list time{grid-column:2;grid-row:2}.dialog-mask{position:fixed;inset:0;z-index:90;display:grid;place-items:center;padding:20px;background:rgb(var(--yb-overlay-night) / .48)}.dialog{width:min(500px,100%);display:grid;gap:14px;padding:22px;border-radius:18px;background:rgb(var(--yb-surface));box-shadow:0 20px 55px rgb(var(--yb-shadow) / .22)}.dialog h2{margin:0}.dialog>div{display:flex;justify-content:flex-end;gap:8px}.error{padding:12px 14px;border-radius:12px;background:rgb(var(--yb-danger-soft));color:rgb(var(--yb-danger-text))}.empty{display:grid;place-items:center;min-height:400px;color:rgb(var(--yb-text-muted))}
+.access-page{max-width:1320px;margin:0 auto;padding:30px;display:grid;gap:20px}.page-head,.matrix-head,.panel-head,.editor-head{display:flex;align-items:center;justify-content:space-between;gap:20px}.page-head h1{margin:4px 0;font-size:32px}.page-head p,.matrix-head p,.panel-head p,.editor-head p{margin:0;color:rgb(var(--yb-text-muted))}.eyebrow{color:rgb(var(--yb-brand));font-size:11px;letter-spacing:.14em;font-weight:900}.primary,.secondary,.danger-button,.link-button,.tabs button,.remove-button{min-height:40px;padding:0 16px;border-radius:11px;font-weight:750;cursor:pointer}.primary{border:0;background:rgb(var(--yb-brand));color:rgb(var(--yb-text-inverse))}.secondary,.tabs button{border:1px solid rgb(var(--yb-border));background:rgb(var(--yb-surface));color:rgb(var(--yb-text))}.danger-button,.remove-button{border:1px solid rgb(var(--yb-danger-border));background:rgb(var(--yb-danger-soft));color:rgb(var(--yb-danger-text))}.link-button{border:0;background:transparent;color:rgb(var(--yb-brand))}.tabs{display:flex;gap:8px}.tabs button.active{background:rgb(var(--yb-brand-soft));border-color:rgb(var(--yb-brand-border))}.layout{display:grid;grid-template-columns:280px 1fr;border:1px solid rgb(var(--yb-border));border-radius:18px;background:rgb(var(--yb-surface));overflow:hidden}.role-list{border-right:1px solid rgb(var(--yb-border));padding:14px}.role-list header{display:flex;justify-content:space-between;align-items:center}.role-list h2{margin:0;font-size:16px}.role-list>button{width:100%;display:flex;justify-content:space-between;align-items:center;padding:12px;border:0;border-radius:11px;background:transparent;color:rgb(var(--yb-text));text-align:left;cursor:pointer}.role-list>button.active{background:rgb(var(--yb-brand-soft))}.role-list span{display:grid;gap:3px}.role-list small,.role-list em{color:rgb(var(--yb-text-muted));font-style:normal}.matrix-panel{min-height:560px;display:flex;flex-direction:column}.matrix-head{padding:20px 22px;border-bottom:1px solid rgb(var(--yb-border))}.matrix-head h2{margin:0}.role-actions,.event-actions{display:flex;gap:8px}.permission-groups{padding:18px 22px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:22px}.permission-groups h3{font-size:13px;color:rgb(var(--yb-text-muted))}.permission-row{display:grid;grid-template-columns:20px 1fr auto;gap:10px;align-items:start;padding:10px 0;border-bottom:1px solid rgb(var(--yb-border))}.permission-row span{display:grid;gap:3px}.permission-row small{color:rgb(var(--yb-text-muted))}.permission-row em{font-size:11px;font-style:normal}.permission-row em.high{color:rgb(var(--yb-danger-text))}.task-type-picker{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}.task-type-picker .hint{width:100%;font-size:12px;color:rgb(var(--yb-text-muted))}.task-type-chip{display:inline-flex;align-items:center;gap:4px;padding:4px 8px;border-radius:999px;background:rgb(var(--yb-surface-muted));font-size:12px}.save-bar{margin-top:auto;display:flex;gap:10px;padding:16px 22px;border-top:1px solid rgb(var(--yb-border));background:rgb(var(--yb-surface-soft))}.save-bar input,.panel input,.panel select,.dialog input,.dialog textarea{min-height:40px;border:1px solid rgb(var(--yb-border));border-radius:10px;padding:8px 12px;background:rgb(var(--yb-surface));color:rgb(var(--yb-text))}.save-bar input{flex:1}.panel{padding:20px;border:1px solid rgb(var(--yb-border));border-radius:18px;background:rgb(var(--yb-surface));display:grid;gap:18px}.people-layout{display:grid;grid-template-columns:300px 1fr;gap:18px}.user-results{display:grid;align-content:start;gap:6px}.user-results button{display:grid;gap:3px;padding:11px;border:1px solid rgb(var(--yb-border));border-radius:10px;background:rgb(var(--yb-surface));text-align:left}.user-results button.active{background:rgb(var(--yb-brand-soft))}.user-results small{color:rgb(var(--yb-text-muted))}.assignment-editor,.org-editor{display:grid;gap:12px}.assignment-card,.org-policy-card{display:grid;grid-template-columns:repeat(2,minmax(0,1fr)) auto;gap:12px;align-items:end;padding:14px;border:1px solid rgb(var(--yb-border));border-radius:12px;background:rgb(var(--yb-surface-soft))}.assignment-editor label,.org-editor label,.org-selector label,.dialog label{display:grid;gap:6px}.org-selector{display:flex;align-items:end;gap:12px}.org-selector label{min-width:220px}.wide{grid-column:1/-1}.switch{display:flex;align-items:center;gap:8px;min-height:40px}.switch input{width:auto}.inherited{display:grid;gap:8px;padding:14px;border-radius:12px;background:rgb(var(--yb-surface-muted))}.inherited h3{margin:0}.inherited article{display:flex;justify-content:space-between}.empty-line{color:rgb(var(--yb-text-muted))}.effective-result{display:grid;gap:10px;padding-top:14px;border-top:1px solid rgb(var(--yb-border))}.chips{display:flex;gap:6px;flex-wrap:wrap}.chips span{padding:5px 8px;border-radius:999px;background:rgb(var(--yb-surface-muted));font-size:12px}.event-list{display:grid;gap:8px}.event-list article{display:grid;grid-template-columns:1fr auto;gap:4px;padding:12px;border-radius:11px;background:rgb(var(--yb-surface-muted))}.event-list p,.event-list time{margin:0;color:rgb(var(--yb-text-muted))}.event-list time{grid-column:2;grid-row:2}.dialog-mask{position:fixed;inset:0;z-index:90;display:grid;place-items:center;padding:20px;background:rgb(var(--yb-overlay-night) / .48)}.dialog{width:min(500px,100%);display:grid;gap:14px;padding:22px;border-radius:18px;background:rgb(var(--yb-surface));box-shadow:0 20px 55px rgb(var(--yb-shadow) / .22)}.dialog h2{margin:0}.dialog>div{display:flex;justify-content:flex-end;gap:8px}.error{padding:12px 14px;border-radius:12px;background:rgb(var(--yb-danger-soft));color:rgb(var(--yb-danger-text))}.empty{display:grid;place-items:center;min-height:400px;color:rgb(var(--yb-text-muted))}
 @media(max-width:850px){.access-page{padding:16px}.layout,.people-layout{grid-template-columns:1fr}.role-list{border-right:0;border-bottom:1px solid rgb(var(--yb-border));max-height:240px;overflow:auto}.permission-groups,.assignment-card,.org-policy-card{grid-template-columns:1fr}.wide{grid-column:auto}.page-head,.matrix-head,.panel-head,.editor-head{align-items:flex-start;flex-direction:column}.tabs,.event-actions{overflow:auto}.role-actions{flex-wrap:wrap}.org-selector{align-items:stretch;flex-direction:column}.org-selector label{min-width:0}.remove-button{justify-self:start}}
 .subject-editor{grid-column:1/-1;display:grid;gap:8px}.subject-editor header,.subject-row{display:flex;align-items:end;gap:10px}.subject-editor header{align-items:center;justify-content:space-between}.subject-row label{flex:1}.row-error{grid-column:1/-1;margin:0;color:rgb(var(--yb-danger-text));font-size:13px}
 @media(max-width:850px){.subject-row{align-items:stretch;flex-direction:column}.subject-row label{width:100%}}

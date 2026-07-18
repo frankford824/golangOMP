@@ -27,11 +27,7 @@ export function useOrgOwnershipFilterOptions(selectedDepartment: () => string) {
 
   onMounted(async () => {
     loadError.value = ''
-    if (!permissionsStore.hasMenu('org_admin') && !permissionsStore.hasMenu('user_admin')) {
-      departmentOptions.value = []
-      teamRows.value = []
-      return
-    }
+    // Read-only org options are available to all authenticated task-list users.
     try {
       const parsed = await fetchOrgOwnershipOptions()
       departmentOptions.value = parsed.departmentOptions

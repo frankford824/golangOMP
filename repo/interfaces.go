@@ -875,6 +875,8 @@ type TaskListFilter struct {
 	ScopeManagedTeamCodes       []string
 	ScopeUserIDs                []int64
 	ScopeStageVisibilities      []ScopeStageVisibility
+	// Sort is an optional order token such as "-updated_at", "task_no", or "due_at".
+	Sort                        string
 	Page                        int
 	PageSize                    int
 }

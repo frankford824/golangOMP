@@ -24,6 +24,7 @@ type TaskResourceGroupRepository interface {
 	ExpectedResourceGroupCountForUpdate(ctx context.Context, tx repo.Tx, taskID int64, taskType domain.TaskType) (int64, error)
 	ListByTaskID(ctx context.Context, taskID int64) ([]domain.TaskAssetGroup, error)
 	ListResourceGroups(ctx context.Context, params domain.ResourceGroupListParams) ([]domain.TaskAssetGroup, int64, error)
+	ListFlatResourceItems(ctx context.Context, params domain.ResourceGroupListParams) ([]domain.FlatResourceItem, int64, error)
 	GetResourceGroup(ctx context.Context, groupID int64) (*domain.TaskAssetGroup, error)
 	GetTaskAccessSubject(ctx context.Context, taskID int64) (domain.TaskAccessSubject, error)
 	ListGroupsForUpdate(ctx context.Context, tx repo.Tx, taskID int64) ([]domain.TaskAssetGroup, error)
@@ -147,12 +148,43 @@ func (s *taskResourceWorkflowService) ListResourceGroups(ctx context.Context, ac
 		params.PageSize = 200
 	}
 	params.Access = resourceGroupAccessFilter(actor, domain.PermissionAssetView)
+	if resourceGroupListShouldFlatten(params) {
+		items, total, err := s.repo.ListFlatResourceItems(ctx, params)
+		if err != nil {
+			return nil, infraError("list flat resource items", err)
+		}
+		s.hydrateFlatResourceItemURLs(items)
+		return &domain.ResourceGroupListResult{
+			Items: []domain.TaskAssetGroup{}, FlatItems: items, ViewMode: "flat",
+			Page: params.Page, PageSize: params.PageSize, Total: total,
+		}, nil
+	}
 	items, total, err := s.repo.ListResourceGroups(ctx, params)
 	if err != nil {
 		return nil, infraError("list resource groups", err)
 	}
 	s.hydrateResourceGroupURLs(items)
-	return &domain.ResourceGroupListResult{Items: items, Page: params.Page, PageSize: params.PageSize, Total: total}, nil
+	return &domain.ResourceGroupListResult{Items: items, FlatItems: []domain.FlatResourceItem{}, Page: params.Page, PageSize: params.PageSize, Total: total, ViewMode: "group"}, nil
+}
+
+func resourceGroupListShouldFlatten(params domain.ResourceGroupListParams) bool {
+	if params.ResourceRole != "" {
+		return true
+	}
+	return normalizeResourceListFormatCategory(params.FormatCategory) != domain.AssetFormatCategoryAll
+}
+
+func normalizeResourceListFormatCategory(category domain.AssetFormatCategoryFilter) domain.AssetFormatCategoryFilter {
+	switch category {
+	case domain.AssetFormatCategoryImage, domain.AssetFormatCategoryDesign, domain.AssetFormatCategoryPDF, domain.AssetFormatCategoryVideo, domain.AssetFormatCategoryArchive:
+		return category
+	case "document":
+		return domain.AssetFormatCategoryPDF
+	case "", domain.AssetFormatCategoryAll:
+		return domain.AssetFormatCategoryAll
+	default:
+		return domain.AssetFormatCategoryAll
+	}
 }
 
 func resourceGroupAccessFilter(actor domain.RequestActor, permission domain.PermissionCode) domain.ResourceGroupAccessFilter {
@@ -250,6 +282,19 @@ func (s *taskResourceWorkflowService) hydrateResourceGroupURLs(groups []domain.T
 	}
 }
 
+func (s *taskResourceWorkflowService) hydrateFlatResourceItemURLs(items []domain.FlatResourceItem) {
+	for index := range items {
+		file := &domain.TaskResourceFile{
+			FileName:   items[index].FileName,
+			MimeType:   items[index].MimeType,
+			StorageKey: items[index].StorageKey,
+		}
+		s.hydrateResourceFileURL(file)
+		items[index].PreviewURL = file.PreviewURL
+		items[index].DownloadURL = file.DownloadURL
+	}
+}
+
 func (s *taskResourceWorkflowService) hydrateResourceFileURL(file *domain.TaskResourceFile) {
 	if file == nil || strings.TrimSpace(file.StorageKey) == "" {
 		return
@@ -257,12 +302,14 @@ func (s *taskResourceWorkflowService) hydrateResourceFileURL(file *domain.TaskRe
 	if s.ossDirect != nil && s.ossDirect.Enabled() {
 		if info := s.ossDirect.PresignDownloadURLWithFilename(file.StorageKey, file.FileName); info != nil {
 			file.DownloadURL = info.DownloadURL
+			file.PreviewURL = info.DownloadURL
 			expiresAt := time.Now().UTC().Add(s.ossDirect.Config().PresignExpiry)
 			file.DownloadExpiry = &expiresAt
 			return
 		}
 	}
 	file.DownloadURL = "/v1/assets/files/" + escapeStorageKey(file.StorageKey) + "?download_filename=" + url.QueryEscape(file.FileName)
+	file.PreviewURL = file.DownloadURL
 }
 
 func escapeStorageKey(storageKey string) string {

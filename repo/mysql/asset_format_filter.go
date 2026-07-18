@@ -110,6 +110,9 @@ func normalizeAssetFormatCategoryForSQL(category domain.AssetFormatCategoryFilte
 		domain.AssetFormatCategoryVideo,
 		domain.AssetFormatCategoryArchive:
 		return category
+	case "document":
+		// Frontend historically labeled PDFs as "document"; map to the PDF bucket.
+		return domain.AssetFormatCategoryPDF
 	default:
 		return domain.AssetFormatCategoryAll
 	}

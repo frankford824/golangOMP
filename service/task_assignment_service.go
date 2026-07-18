@@ -76,6 +76,13 @@ type taskAssignmentOperation struct {
 	ResultingStatus domain.TaskStatus
 }
 
+func taskAssignmentPermission(operation taskAssignmentOperation) domain.PermissionCode {
+	if operation.Action == TaskActionReassign {
+		return domain.PermissionTaskReassign
+	}
+	return domain.PermissionTaskAssign
+}
+
 var errPendingAssignmentClaimConflict = errors.New("pending assignment claim conflict")
 
 type pendingAssignmentCASUpdater interface {
@@ -333,7 +340,7 @@ func explicitTaskAssignmentDecision(ctx context.Context, actor domain.RequestAct
 		decision.StatusReason = decision.DenyReason
 		return decision
 	}
-	if domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskManage, task.AccessSubject()) {
+	if domain.EffectiveAccessAllowsTask(actor, taskAssignmentPermission(operation), task.AccessSubject()) {
 		decision.Allowed = true
 		decision.DenyCode = ""
 		decision.DenyReason = ""
@@ -907,7 +914,7 @@ func isActorTakingTaskAlreadyClaimedByOther(ctx context.Context, task *domain.Ta
 	// Management reassign-to-self is scheduled handoff, not unassigned-pool self-claim.
 	if operation.Action == TaskActionReassign {
 		if actor, ok := domain.RequestActorFromContext(ctx); ok && actor.EffectiveAccess != nil {
-			if domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskManage, task.AccessSubject()) {
+			if domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskReassign, task.AccessSubject()) {
 				return false
 			}
 		} else if legacyActor, ok := resolveTaskActionActor(ctx); ok && taskActionActorHasManagementScopeRole(legacyActor) {
@@ -925,7 +932,7 @@ func taskAssignmentAllowsInProgressReassign(ctx context.Context, task *domain.Ta
 		return true
 	}
 	if actor, ok := domain.RequestActorFromContext(ctx); ok && actor.EffectiveAccess != nil {
-		return domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskManage, task.AccessSubject())
+		return domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskReassign, task.AccessSubject())
 	}
 	legacyActor, ok := resolveTaskActionActor(ctx)
 	return ok && taskActionActorIsCreatorOrRequester(legacyActor, task)

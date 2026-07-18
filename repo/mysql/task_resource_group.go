@@ -196,6 +196,31 @@ func (r *TaskResourceGroupRepo) ListResourceGroups(ctx context.Context, params d
 		where = append(where, "tsi.sku_code = ?")
 		args = append(args, value)
 	}
+	if value := strings.TrimSpace(params.TaskNo); value != "" {
+		where = append(where, "t.task_no LIKE ?")
+		args = append(args, "%"+value+"%")
+	}
+	if params.CreatorID != nil && *params.CreatorID > 0 {
+		where = append(where, "t.creator_id = ?")
+		args = append(args, *params.CreatorID)
+	}
+	switch params.ResourceRole {
+	case domain.ResourceRoleFilterReference:
+		where = append(where, `EXISTS (
+			SELECT 1 FROM task_asset_group_revision_references rr
+			WHERE rr.revision_id = g.finalized_revision_id
+		)`)
+	case domain.ResourceRoleFilterSource:
+		where = append(where, `EXISTS (
+			SELECT 1 FROM task_asset_group_revisions gr
+			WHERE gr.id = g.finalized_revision_id AND gr.source_task_asset_id IS NOT NULL
+		)`)
+	case domain.ResourceRoleFilterFinal:
+		where = append(where, `EXISTS (
+			SELECT 1 FROM task_asset_group_revision_items ri
+			WHERE ri.revision_id = g.finalized_revision_id
+		)`)
+	}
 	if value := strings.TrimSpace(params.Query); value != "" {
 		like := "%" + value + "%"
 		where = append(where, `(
@@ -280,6 +305,141 @@ func (r *TaskResourceGroupRepo) ListResourceGroups(ctx context.Context, params d
 			}
 		}
 		items = append(items, *item)
+	}
+	return items, total, rows.Err()
+}
+
+func (r *TaskResourceGroupRepo) ListFlatResourceItems(ctx context.Context, params domain.ResourceGroupListParams) ([]domain.FlatResourceItem, int64, error) {
+	baseWhere := []string{"g.finalized_revision_id IS NOT NULL"}
+	baseArgs := make([]interface{}, 0, 12)
+	if params.TaskID > 0 {
+		baseWhere = append(baseWhere, "g.task_id = ?")
+		baseArgs = append(baseArgs, params.TaskID)
+	}
+	if value := strings.TrimSpace(params.SKUCode); value != "" {
+		baseWhere = append(baseWhere, "tsi.sku_code = ?")
+		baseArgs = append(baseArgs, value)
+	}
+	if value := strings.TrimSpace(params.TaskNo); value != "" {
+		baseWhere = append(baseWhere, "t.task_no LIKE ?")
+		baseArgs = append(baseArgs, "%"+value+"%")
+	}
+	if params.CreatorID != nil && *params.CreatorID > 0 {
+		baseWhere = append(baseWhere, "t.creator_id = ?")
+		baseArgs = append(baseArgs, *params.CreatorID)
+	}
+	if params.BusinessLane.Valid() {
+		baseWhere = append(baseWhere, "t.business_lane = ?")
+		baseArgs = append(baseArgs, params.BusinessLane)
+	}
+	baseWhere, baseArgs = appendResourceGroupAccessScope(baseWhere, baseArgs, params.Access)
+	baseClause := strings.Join(baseWhere, " AND ")
+
+	flatCTE := `WITH flat_resources AS (
+		SELECT g.id AS group_id, g.task_id, t.task_no, COALESCE(tsi.sku_code, '') AS sku_code,
+		       'reference' AS resource_role,
+		       COALESCE(NULLIF(rr.file_name_snapshot, ''), asr.file_name, '') AS file_name,
+		       COALESCE(asr.mime_type, '') AS mime_type,
+		       CASE WHEN COALESCE(asr.is_placeholder, 1) = 0 THEN COALESCE(asr.ref_key, '') ELSE '' END AS storage_key,
+		       g.updated_at AS group_updated_at, 1 AS role_sort, rr.sort_order AS item_sort, rr.id AS row_id
+		FROM task_asset_groups g
+		JOIN tasks t ON t.id = g.task_id
+		LEFT JOIN task_sku_items tsi ON tsi.id = g.task_sku_item_id
+		JOIN task_asset_group_revision_references rr ON rr.revision_id = g.finalized_revision_id
+		LEFT JOIN asset_storage_refs asr ON asr.ref_id = rr.ref_id_snapshot
+		WHERE ` + baseClause + `
+		UNION ALL
+		SELECT g.id AS group_id, g.task_id, t.task_no, COALESCE(tsi.sku_code, '') AS sku_code,
+		       'source' AS resource_role, ta.file_name, COALESCE(ta.mime_type, '') AS mime_type,
+		       COALESCE(NULLIF(ta.storage_key, ''), CASE WHEN COALESCE(asr.is_placeholder, 1) = 0 THEN NULLIF(asr.ref_key, '') END, '') AS storage_key,
+		       g.updated_at AS group_updated_at, 2 AS role_sort, 0 AS item_sort, ta.id AS row_id
+		FROM task_asset_groups g
+		JOIN tasks t ON t.id = g.task_id
+		LEFT JOIN task_sku_items tsi ON tsi.id = g.task_sku_item_id
+		JOIN task_asset_group_revisions rev ON rev.id = g.finalized_revision_id
+		JOIN task_assets ta ON ta.id = rev.source_task_asset_id
+		LEFT JOIN asset_storage_refs asr ON asr.ref_id = ta.storage_ref_id
+		WHERE ` + baseClause + `
+		  AND ta.binding_state = 'bound' AND ta.deleted_at IS NULL AND ta.cleaned_at IS NULL
+		  AND ta.access_revoked_at IS NULL AND ta.object_deleted_at IS NULL
+		UNION ALL
+		SELECT g.id AS group_id, g.task_id, t.task_no, COALESCE(tsi.sku_code, '') AS sku_code,
+		       'final' AS resource_role, ta.file_name, COALESCE(ta.mime_type, '') AS mime_type,
+		       COALESCE(NULLIF(ta.storage_key, ''), CASE WHEN COALESCE(asr.is_placeholder, 1) = 0 THEN NULLIF(asr.ref_key, '') END, '') AS storage_key,
+		       g.updated_at AS group_updated_at, 3 AS role_sort, ri.sort_order AS item_sort, ri.id AS row_id
+		FROM task_asset_groups g
+		JOIN tasks t ON t.id = g.task_id
+		LEFT JOIN task_sku_items tsi ON tsi.id = g.task_sku_item_id
+		JOIN task_asset_group_revision_items ri ON ri.revision_id = g.finalized_revision_id
+		JOIN task_assets ta ON ta.id = ri.task_asset_id
+		LEFT JOIN asset_storage_refs asr ON asr.ref_id = ta.storage_ref_id
+		WHERE ` + baseClause + `
+		  AND ta.binding_state = 'bound' AND ta.deleted_at IS NULL AND ta.cleaned_at IS NULL
+		  AND ta.access_revoked_at IS NULL AND ta.object_deleted_at IS NULL
+	)`
+	unionArgs := make([]interface{}, 0, len(baseArgs)*3)
+	for range 3 {
+		unionArgs = append(unionArgs, baseArgs...)
+	}
+	flatWhere := []string{"1 = 1"}
+	flatArgs := make([]interface{}, 0, 12)
+	if params.ResourceRole != "" {
+		flatWhere = append(flatWhere, "flat.resource_role = ?")
+		flatArgs = append(flatArgs, params.ResourceRole)
+	}
+	if value := strings.TrimSpace(params.Query); value != "" {
+		like := "%" + value + "%"
+		flatWhere = append(flatWhere, `(
+			flat.task_no LIKE ? OR flat.sku_code LIKE ? OR flat.file_name LIKE ?
+			OR EXISTS (
+				SELECT 1 FROM task_asset_group_search_documents doc
+				WHERE doc.group_id = flat.group_id AND (doc.internal_text LIKE ? OR doc.final_text LIKE ?)
+			)
+		)`)
+		flatArgs = append(flatArgs, like, like, like, like, like)
+	}
+	if normalizeAssetFormatCategoryForSQL(params.FormatCategory) != domain.AssetFormatCategoryAll {
+		flatWhere, flatArgs = appendAssetFormatCategoryWhere(
+			flatWhere, flatArgs,
+			[]string{"LOWER(flat.file_name)"}, "LOWER(COALESCE(flat.mime_type, ''))", params.FormatCategory,
+		)
+	}
+	flatClause := strings.Join(flatWhere, " AND ")
+	filterArgs := append(append([]interface{}{}, unionArgs...), flatArgs...)
+
+	var total int64
+	if err := r.db.db.QueryRowContext(ctx, flatCTE+`
+		SELECT COUNT(*) FROM flat_resources flat WHERE `+flatClause, filterArgs...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	page := params.Page
+	if page <= 0 {
+		page = 1
+	}
+	pageSize := params.PageSize
+	if pageSize <= 0 {
+		pageSize = 50
+	}
+	queryArgs := append(append([]interface{}{}, filterArgs...), pageSize, (page-1)*pageSize)
+	rows, err := r.db.db.QueryContext(ctx, flatCTE+`
+		SELECT flat.group_id, flat.task_id, flat.task_no, flat.sku_code, flat.resource_role,
+		       flat.file_name, flat.mime_type, flat.storage_key
+		FROM flat_resources flat
+		WHERE `+flatClause+`
+		ORDER BY flat.group_updated_at DESC, flat.group_id DESC, flat.role_sort, flat.item_sort, flat.row_id
+		LIMIT ? OFFSET ?`, queryArgs...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	items := make([]domain.FlatResourceItem, 0, pageSize)
+	for rows.Next() {
+		var item domain.FlatResourceItem
+		if err := rows.Scan(&item.GroupID, &item.TaskID, &item.TaskNo, &item.SKUCode, &item.ResourceRole,
+			&item.FileName, &item.MimeType, &item.StorageKey); err != nil {
+			return nil, 0, err
+		}
+		items = append(items, item)
 	}
 	return items, total, rows.Err()
 }

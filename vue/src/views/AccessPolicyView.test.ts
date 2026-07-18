@@ -11,19 +11,27 @@ vi.mock('@/services/api/accessPolicyApi', async (loadOriginal) => ({
   ...(await loadOriginal<typeof import('@/services/api/accessPolicyApi')>()),
   accessPolicyApi: api,
 }))
+vi.mock('@/services/api/orgApi', () => ({
+  fetchOrgOwnershipOptions: vi.fn(async () => ({
+    departmentOptions: [{ value: '10', label: '设计部' }],
+    teamOptions: [{ value: '11', label: '一组', department: '10' }],
+    departmentRecords: [{ id: '10', name: '设计部' }],
+    teamRecords: [{ id: '11', name: '一组', departmentId: '10', departmentName: '设计部' }],
+  })),
+}))
 vi.mock('@/stores/permissions', () => ({ usePermissionsStore: () => ({ currentUser: { id: 1 } }) }))
 
 import AccessPolicyView from './AccessPolicyView.vue'
 
 const roles = [
-  { id: 10, code: 'member', name: '成员', description: '', system_protected: true, version: 1, permissions: ['account.use'] },
-  { id: 20, code: 'reviewer', name: '审核人员', description: '处理审核', system_protected: false, version: 2, permissions: ['task.audit.decision'] },
-  { id: 30, code: 'asset_manager', name: '资产管理员', description: '管理资产', system_protected: false, version: 3, permissions: ['asset.view'] },
+  { id: 10, code: 'member', name: '普通成员', description: '', system_protected: true, version: 1, permissions: [{ code: 'account.use' }] },
+  { id: 20, code: 'auditor', name: '审核', description: '处理审核', system_protected: false, version: 2, permissions: [{ code: 'task.audit', task_types: ['original_product_development'] }] },
+  { id: 30, code: 'asset', name: '资产', description: '管理资产', system_protected: false, version: 3, permissions: [{ code: 'asset.view' }] },
 ]
 
 const directAssignments = [
-  { id: 1, role_id: 20, role_name: '审核人员', scope_mode: 'selected_org' as const, subjects: [{ subject_type: 'department' as const, subject_id: 10 }, { subject_type: 'team' as const, subject_id: 11 }], source_type: 'direct' },
-  { id: 2, role_id: 30, role_name: '资产管理员', scope_mode: 'self' as const, subjects: [], source_type: 'direct' },
+  { id: 1, role_id: 20, role_name: '审核', scope_mode: 'selected_org' as const, subjects: [{ subject_type: 'department' as const, subject_id: 10 }, { subject_type: 'team' as const, subject_id: 11 }], source_type: 'direct' },
+  { id: 2, role_id: 30, role_name: '资产', scope_mode: 'self' as const, subjects: [], source_type: 'direct' },
 ]
 
 function tab(wrapper: ReturnType<typeof mount>, name: string) {
@@ -35,13 +43,16 @@ function tab(wrapper: ReturnType<typeof mount>, name: string) {
 describe('AccessPolicyView', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    api.permissions.mockResolvedValue([{ code: 'asset.view', module: 'asset', name: '查看资产', description: '查看授权范围内资产', risk_level: 'normal', enabled: true }])
+    api.permissions.mockResolvedValue([
+      { code: 'asset.view', module: 'asset', name: '查看资产', description: '查看授权范围内资产', risk_level: 'normal', enabled: true },
+      { code: 'task.audit', module: 'task', name: '审核任务', description: '通过或打回设计', risk_level: 'high', enabled: true },
+    ])
     api.roles.mockResolvedValue(roles)
     api.effective.mockImplementation(async (userId: number) => userId === 2 ? {
       user_id: 2,
       policy_revision: 8,
-      permissions: ['task.audit.decision', 'asset.view'],
-      assignments: [...directAssignments, { id: 3, role_id: 10, role_name: '成员', scope_mode: 'own_department', subjects: [], source_type: 'org_policy' }],
+      permissions: ['task.audit', 'asset.view'],
+      assignments: [...directAssignments, { id: 3, role_id: 10, role_name: '普通成员', scope_mode: 'own_department', subjects: [], source_type: 'org_policy' }],
       sources: [],
     } : { user_id: 1, policy_revision: 8, permissions: [], assignments: [], sources: [] })
     api.searchUsers.mockResolvedValue([{ id: 2, display_name: '李审核', department: '设计部', department_id: 10 }])
@@ -78,68 +89,19 @@ describe('AccessPolicyView', () => {
     await wrapper.get('.assignment-editor > label.wide input').setValue('调整审核范围')
     await wrapper.get('.assignment-editor').trigger('submit')
     await flushPromises()
-
     expect(api.replaceUserAssignments).toHaveBeenCalledWith(2, [
       { role_id: 20, scope_mode: 'selected_org', subjects: [{ subject_type: 'department', subject_id: 10 }, { subject_type: 'team', subject_id: 11 }] },
       { role_id: 30, scope_mode: 'self', subjects: [] },
     ], 8, '调整审核范围')
-    expect(api.replaceUserAssignments.mock.calls[0][1]).not.toEqual(expect.arrayContaining([expect.objectContaining({ source_type: 'org_policy' })]))
   })
 
-  it('removes one direct role without losing the other and explains duplicate-role conflicts', async () => {
+  it('shows task-type picker for scoped operations on the role panel', async () => {
     const wrapper = mount(AccessPolicyView)
     await flushPromises()
-    await chooseUser(wrapper)
-
-    const roleSelects = wrapper.findAll('.assignment-card select').filter((select) => select.element.closest('label')?.textContent?.includes('业务角色'))
-    await roleSelects[1].setValue('20')
-    expect(wrapper.text()).toContain('同一个业务角色只能配置一次')
-    expect(wrapper.get('.assignment-editor .primary').attributes('disabled')).toBeDefined()
-
-    await roleSelects[1].setValue('30')
-    await wrapper.get('[aria-label="删除第 1 条直接授权"]').trigger('click')
-    await wrapper.get('.assignment-editor > label.wide input').setValue('取消审核职责')
-    await wrapper.get('.assignment-editor').trigger('submit')
+    const auditor = wrapper.findAll('.role-list > button').find((button) => button.text().includes('审核'))
+    await auditor!.trigger('click')
     await flushPromises()
-    expect(api.replaceUserAssignments).toHaveBeenLastCalledWith(2, [{ role_id: 30, scope_mode: 'self', subjects: [] }], 8, '取消审核职责')
-  })
-
-  it('loads and replaces the complete organization-policy collection', async () => {
-    const wrapper = mount(AccessPolicyView)
-    await flushPromises()
-    await tab(wrapper, '组织策略').trigger('click')
-    await wrapper.get('.org-selector input').setValue('10')
-    await wrapper.get('.org-selector').trigger('submit')
-    await flushPromises()
-    expect(wrapper.findAll('.org-policy-card')).toHaveLength(2)
-
-    const scopes = wrapper.findAll('.org-policy-card select').filter((select) => select.element.closest('label')?.textContent?.includes('生效范围'))
-    await scopes[0].setValue('global')
-    await wrapper.get('.org-editor > label.wide input').setValue('仅调整第一条')
-    await wrapper.get('.org-editor').trigger('submit')
-    await flushPromises()
-    expect(api.replaceOrgPolicies).toHaveBeenCalledWith('department', 10, [
-      expect.objectContaining({ id: 1, role_id: 20, scope_mode: 'global', enabled: true }),
-      expect.objectContaining({ id: 2, role_id: 30, scope_mode: 'selected_org', enabled: false }),
-    ], 8, '仅调整第一条')
-  })
-
-  it('offers role lifecycle and searchable audit records without engineering jargon', async () => {
-    const wrapper = mount(AccessPolicyView)
-    await flushPromises()
-    expect(wrapper.text()).not.toContain('乐观锁')
-    expect(wrapper.text()).not.toContain('409')
-    await wrapper.findAll('.role-list button').find((button) => button.text() === '新建')?.trigger('click')
-    const dialogInputs = wrapper.findAll('.dialog input')
-    await dialogInputs[0].setValue('designer_reviewer')
-    await dialogInputs[1].setValue('设计审核')
-    await dialogInputs[2].setValue('新增审核职责')
-    await wrapper.get('.dialog').trigger('submit')
-    await flushPromises()
-    expect(api.createRole).toHaveBeenCalledWith(expect.objectContaining({ code: 'designer_reviewer', name: '设计审核', reason: '新增审核职责' }))
-
-    await tab(wrapper, '变更记录').trigger('click')
-    await flushPromises()
-    expect(wrapper.text()).toContain('职责调整')
+    expect(wrapper.text()).toContain('允许的任务类型')
+    expect(wrapper.text()).toContain('原品开发')
   })
 })

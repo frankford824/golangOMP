@@ -288,6 +288,75 @@ func BuildFrontendAccess(user *User, settings FrontendAccessSettings) FrontendAc
 	return view
 }
 
+// MergeEffectiveAccessIntoFrontendAccess overlays the explicit capability model
+// onto the legacy frontend_access projection so menus/actions stay in sync with
+// the v8 operation catalog without a second authorization track.
+func MergeEffectiveAccessIntoFrontendAccess(view FrontendAccessView, effective *EffectiveAccess) FrontendAccessView {
+	if effective == nil {
+		return view
+	}
+	actions := newStringSet()
+	actions.AddAll(view.Actions...)
+	menus := newStringSet()
+	menus.AddAll(view.Menus...)
+	pages := newStringSet()
+	pages.AddAll(view.Pages...)
+	for _, permission := range effective.Permissions {
+		code := string(permission)
+		actions.Add(code)
+		for _, alias := range frontendActionAliasesForPermission(permission) {
+			actions.Add(alias)
+		}
+		switch permission {
+		case PermissionAccessView, PermissionAccessManage:
+			menus.Add("access_policy")
+			pages.Add("access_policy")
+		case PermissionTaskView, PermissionTaskCreate, PermissionTaskAssign, PermissionTaskReassign, PermissionTaskTerminate, PermissionTaskUploadSource, PermissionTaskAudit, PermissionTaskAuditHandover, PermissionTaskReopen,
+			PermissionPlanningSKUView, PermissionPlanningSKUCreate, PermissionPlanningSKUEdit, PermissionPlanningSKUExport, PermissionPlanningSKUSync, PermissionPlanningSKURetry:
+			menus.Add("tasks")
+			pages.Add("tasks")
+		case PermissionAssetView, PermissionAssetDownload, PermissionAssetExport, PermissionAssetPublish, PermissionAssetManage:
+			menus.Add("assets")
+			pages.Add("assets")
+		case PermissionAssetWorkbenchUse, PermissionAssetWorkbenchSubmit, PermissionAssetWorkbenchMembers,
+			PermissionAssetWorkbenchProfiles, PermissionAssetWorkbenchGroups, PermissionAssetWorkbenchDrive,
+			PermissionAssetWorkbenchBatch, PermissionAssetWorkbenchTemplates, PermissionAssetWorkbenchQC,
+			PermissionAssetWorkbenchSettlement, PermissionAssetWorkbenchAuditView:
+			menus.Add("asset_workbench")
+			pages.Add("asset_workbench")
+		case PermissionReportView:
+			menus.Add("reports")
+			pages.Add("reports")
+		}
+	}
+	view.Actions = actions.SortedValues()
+	view.Menus = menus.SortedValues()
+	view.Pages = pages.SortedValues()
+	view.PermissionFlags = append([]string{}, view.Actions...)
+	view.MenuKeys = append([]string{}, view.Menus...)
+	view.PageKeys = append([]string{}, view.Pages...)
+	return view
+}
+
+func frontendActionAliasesForPermission(code PermissionCode) []string {
+	switch code {
+	case PermissionTaskUploadSource:
+		return []string{"task.design.submit"}
+	case PermissionTaskAudit:
+		return []string{"task.audit.decision", "task.audit"}
+	case PermissionTaskAuditHandover:
+		return []string{"task.audit.handover"}
+	case PermissionTaskAssign, PermissionTaskReassign, PermissionTaskTerminate:
+		return []string{"task.manage", "task.assign"}
+	case PermissionAccessManage:
+		return []string{"access_policy.manage"}
+	case PermissionAccessView:
+		return []string{"access_policy.view"}
+	default:
+		return nil
+	}
+}
+
 func frontendRoleName(role Role) string {
 	switch role {
 	case RoleAdmin:

@@ -2841,7 +2841,7 @@ func authorizeV8TaskAssetMutation(ctx context.Context, task *domain.Task, assetT
 	if assetType.IsReference() {
 		// Operational reference attachments are a task-maintenance action. They are
 		// intentionally not implied by design/audit capabilities.
-		permissions = append([]domain.PermissionCode{domain.PermissionTaskManage}, permissions...)
+		permissions = append([]domain.PermissionCode{domain.PermissionTaskCreate}, permissions...)
 		switch task.TaskStatus {
 		case domain.TaskStatusDraft, domain.TaskStatusPendingAssign, domain.TaskStatusAssigned, domain.TaskStatusInProgress, domain.TaskStatusPendingAudit:
 		default:
@@ -2894,9 +2894,9 @@ func authorizeV8TaskAssetSessionRead(ctx context.Context, task *domain.Task) *do
 	permissions := []domain.PermissionCode{
 		domain.PermissionTaskView,
 		domain.PermissionAssetView,
+		domain.PermissionTaskCreate,
 		domain.PermissionTaskDesignSubmit,
 		domain.PermissionTaskAuditDecision,
-		domain.PermissionTaskManage,
 		domain.PermissionAssetManage,
 	}
 	for _, permission := range permissions {

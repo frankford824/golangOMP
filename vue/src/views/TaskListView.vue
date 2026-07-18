@@ -34,18 +34,6 @@
           </BaseButton>
         </div>
       </div>
-      <div class="task-category-switch" aria-label="任务分类">
-        <BaseButton
-          v-for="option in taskCategoryOptions"
-          :key="option.value"
-          size="sm"
-          :variant="filters.taskCategory === option.value ? 'secondary' : 'ghost'"
-          :class="{ 'task-category-active': filters.taskCategory === option.value }"
-          @click="setTaskCategory(option.value)"
-        >
-          {{ option.label }}
-        </BaseButton>
-      </div>
       <div class="task-tabs" aria-label="任务中心列表范围">
         <BaseButton
           v-for="tab in taskTabs"
@@ -59,12 +47,6 @@
         </BaseButton>
       </div>
       <div class="toolbar">
-        <BaseInput
-          v-model="searchKeyword"
-          placeholder="搜索任务号、SKU、任务名、子项名称或设计要求"
-          class="search-input w-72"
-          @input="debouncedSearch"
-        />
         <BaseButton
           size="sm"
           variant="secondary"
@@ -92,7 +74,12 @@
         </BaseButton>
       </div>
       <div v-show="advancedFilterOpen" class="filter-bar-wrap">
-        <TaskFilterBar v-model:filters="filters" @update:filters="page = 1" />
+        <TaskFilterPanel
+          :filters="filters"
+          :keyword="searchKeyword"
+          @apply="onFilterApply"
+          @reset="onFilterReset"
+        />
       </div>
       <p v-if="tabStatusScopeHint" class="tab-status-scope-hint" role="status">
         {{ tabStatusScopeHint }}
@@ -553,8 +540,8 @@ import { usePermissionsStore } from '@/stores/permissions'
 import type { ActiveTaskStatus, Task, TaskSkuItem } from '@/domain/types/task'
 import { isDoneStatus, shouldShowDesignerMetaOnTaskCenterCard } from '@/domain/task-actions'
 import { usePermission } from '@/composables/usePermission'
-import type { TaskListFilters } from '@/components/task/TaskFilterBar.vue'
-import TaskFilterBar from '@/components/task/TaskFilterBar.vue'
+import type { TaskListFilters } from '@/components/task/TaskFilterPanel.vue'
+import TaskFilterPanel from '@/components/task/TaskFilterPanel.vue'
 import TaskCard from '@/components/task/TaskCard.vue'
 import AsyncStateWrapper from '@/components/base/AsyncStateWrapper.vue'
 import BaseButton from '@/components/base/BaseButton.vue'
@@ -608,12 +595,6 @@ const emptyDescription = computed(() => {
   if (activeTab.value !== 'pool') return '当前筛选条件下没有任务'
   return '当前暂无可接单任务'
 })
-
-const taskCategoryOptions = [
-  { label: '全部', value: '' },
-  { label: '常规任务', value: 'normal' },
-  { label: '定制任务', value: 'customization' },
-]
 
 const pageSizeOptions: BaseSelectOption[] = [
   { value: 20, label: '20' },
@@ -727,11 +708,10 @@ const {
   includeEmpty: false,
   autoLoad: false,
   workflowLane: 'audit',
-  requiredActions: ['task.audit.decision'],
+  requiredActions: ['task.audit', 'task.audit.decision'],
 })
 const listActionError = ref('')
 const listActionSuccess = ref('')
-let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null
 let listActionSuccessTimer: ReturnType<typeof setTimeout> | null = null
 let listActionSeq = 0
 const taskCardPointerState = {
@@ -746,21 +726,10 @@ const canBatchAssign = computed(
     canAccessAction('task.assign.department') ||
     canAccessAction('task.assign.team'),
 )
-const canUseBatchAuditHandover = computed(() => can('task.audit.decision'))
+const canUseBatchAuditHandover = computed(() => can('task.audit') || can('task.audit.decision'))
 const showAuditHandoverEntry = computed(
   () => canUseBatchAuditHandover.value && auditHandoverEntryEligibleCount.value > 0,
 )
-
-/** 方案 B：搜索防抖，300ms 后触发服务端检索 */
-function debouncedSearch() {
-  if (searchDebounceTimer) clearTimeout(searchDebounceTimer)
-  page.value = 1
-  saveState()
-  searchDebounceTimer = setTimeout(() => {
-    searchDebounceTimer = null
-    refreshList(true)
-  }, 300)
-}
 
 const selectedIds = reactive(new Set<string>())
 const selectedTasks = computed(() => tasksStore.list.filter((task) => selectedIds.has(task.id)))
@@ -879,13 +848,10 @@ const filters = ref<TaskListFilters>({
 })
 
 function clearAllTaskFilters() {
-  if (searchDebounceTimer) {
-    clearTimeout(searchDebounceTimer)
-    searchDebounceTimer = null
-  }
   searchKeyword.value = ''
   filters.value = { ...defaultTaskFilters }
   page.value = 1
+  void refreshList(true)
 }
 
 const activeAdvancedFilterCount = computed(() => {
@@ -976,11 +942,6 @@ function parseOverdueQuery(query: Record<string, unknown>): boolean {
   return raw === 'true' || raw === '1'
 }
 
-function setTaskCategory(category: string) {
-  if (filters.value.taskCategory === category) return
-  filters.value = { ...filters.value, taskCategory: category }
-}
-
 /** 方案 B：构建服务端分页 + 搜索参数 */
 function buildListParams(opt?: { page?: number; append?: boolean }): TaskListParams {
   const kw = searchKeyword.value.trim()
@@ -1042,16 +1003,22 @@ function ownershipPrimary(task: Task): string {
   return getTaskOwnershipDisplay(task).primary
 }
 
-/** 服务端分页 + 搜索；前端不再按已退役流程节点二次推断。 */
-const filteredList = computed(() => {
-  let list = tasksStore.list
-  const f = filters.value
-  if (f.creatorId) {
-    const creatorId = String(f.creatorId).trim()
-    list = list.filter((t) => String(t.creatorId ?? '').trim() === creatorId)
-  }
-  return list
-})
+/** 服务端分页 + 搜索；筛选条件全部由后端生效，前端不再二次过滤。 */
+const filteredList = computed(() => tasksStore.list)
+
+function onFilterApply(nextFilters: TaskListFilters, nextKeyword: string) {
+  filters.value = nextFilters
+  searchKeyword.value = nextKeyword
+  page.value = 1
+  void refreshList(true)
+}
+
+function onFilterReset(nextFilters: TaskListFilters, nextKeyword: string) {
+  filters.value = nextFilters
+  searchKeyword.value = nextKeyword
+  page.value = 1
+  void refreshList(true)
+}
 
 /** 翻页模式：每页固定展示，不追加；total 来自 listTotal */
 const totalPages = computed(() => Math.max(1, Math.ceil(tasksStore.listTotal / pageSize.value)))
@@ -1661,7 +1628,6 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   listActionSeq += 1
-  if (searchDebounceTimer) clearTimeout(searchDebounceTimer)
   if (listActionSuccessTimer) clearTimeout(listActionSuccessTimer)
 })
 
@@ -1702,16 +1668,6 @@ watch(activeTab, () => {
 })
 
 watch(
-  filters,
-  () => {
-    page.value = 1
-    saveState()
-    refreshList(true)
-  },
-  { deep: true },
-)
-
-watch(
   () => [filters.value, searchKeyword.value, activeTab.value, sortKey.value, sortOrder.value] as const,
   () => {
     const q = { ...route.query } as Record<string, string | string[] | undefined>
@@ -1732,12 +1688,16 @@ watch(
     else delete q.task_type
     if (filters.value.creatorId) q.creator_id = filters.value.creatorId
     else delete q.creator_id
+    if (filters.value.assigneeId) q.designer_id = filters.value.assigneeId
+    else delete q.designer_id
     if (filters.value.priority) q.priority = filters.value.priority
     else delete q.priority
     if (filters.value.dateFrom) q.date_from = filters.value.dateFrom
     else delete q.date_from
     if (filters.value.dateTo) q.date_to = filters.value.dateTo
     else delete q.date_to
+    if (filters.value.overdueOnly) q.overdue = 'true'
+    else delete q.overdue
     const sortMap: Record<typeof sortKey.value, string> = {
       taskNo: 'task_no',
       updatedAt: 'updated_at',
@@ -1771,6 +1731,7 @@ watch(
     }
     const nextKeyword = queryString(query.q)
     let changed = false
+    let filterChanged = false
     if (activeTab.value !== nextTab) {
       activeTab.value = nextTab
       changed = true
@@ -1778,6 +1739,7 @@ watch(
     if (searchKeyword.value !== nextKeyword) {
       searchKeyword.value = nextKeyword
       changed = true
+      filterChanged = true
     }
     if (typeof query.sort === 'string') {
       const direction = query.sort.startsWith('-') ? 'desc' : 'asc'
@@ -1796,8 +1758,10 @@ watch(
     if (JSON.stringify(filters.value) !== JSON.stringify(nextFilters)) {
       filters.value = nextFilters
       changed = true
+      filterChanged = true
     }
     if (changed) page.value = 1
+    if (filterChanged) void refreshList(true)
   },
 )
 

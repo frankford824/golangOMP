@@ -75,6 +75,7 @@ func taskFilterToRepoTaskListFilter(filter TaskFilter, page, pageSize int, scope
 		CreatedFrom:               filter.CreatedFrom,
 		CreatedTo:                 filter.CreatedTo,
 		Keyword:                   filter.Keyword,
+		Sort:                      filter.Sort,
 		Page:                      page,
 		PageSize:                  pageSize,
 	}

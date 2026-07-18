@@ -93,7 +93,25 @@ type TaskResourceFile struct {
 	FileSize       *int64     `json:"file_size,omitempty"`
 	StorageKey     string     `json:"-"`
 	DownloadURL    string     `json:"download_url,omitempty"`
+	PreviewURL     string     `json:"preview_url,omitempty"`
 	DownloadExpiry *time.Time `json:"download_expires_at,omitempty"`
+}
+
+type ResourceRoleFilter string
+
+const (
+	ResourceRoleFilterReference ResourceRoleFilter = "reference"
+	ResourceRoleFilterSource    ResourceRoleFilter = "source"
+	ResourceRoleFilterFinal     ResourceRoleFilter = "final"
+)
+
+func (r ResourceRoleFilter) Valid() bool {
+	switch r {
+	case "", ResourceRoleFilterReference, ResourceRoleFilterSource, ResourceRoleFilterFinal:
+		return true
+	default:
+		return false
+	}
 }
 
 type TaskAssetGroupRevisionReference struct {
@@ -117,12 +135,30 @@ type ResourceBundle struct {
 type ResourceGroupListParams struct {
 	TaskID         int64
 	SKUCode        string
+	TaskNo         string
+	CreatorID      *int64
+	ResourceRole   ResourceRoleFilter
 	Query          string
 	FormatCategory AssetFormatCategoryFilter
 	BusinessLane   TaskBusinessLane
 	Page           int
 	PageSize       int
 	Access         ResourceGroupAccessFilter
+}
+
+// FlatResourceItem is one cross-SKU resource row used when the asset-center
+// list is filtered by resource role or file format.
+type FlatResourceItem struct {
+	GroupID      int64              `json:"group_id"`
+	TaskID       int64              `json:"task_id"`
+	TaskNo       string             `json:"task_no"`
+	SKUCode      string             `json:"sku_code,omitempty"`
+	ResourceRole ResourceRoleFilter `json:"resource_role"`
+	FileName     string             `json:"file_name"`
+	MimeType     string             `json:"mime_type,omitempty"`
+	PreviewURL   string             `json:"preview_url,omitempty"`
+	DownloadURL  string             `json:"download_url,omitempty"`
+	StorageKey   string             `json:"-"`
 }
 
 type ResourceGroupAccessFilter struct {
@@ -134,10 +170,12 @@ type ResourceGroupAccessFilter struct {
 }
 
 type ResourceGroupListResult struct {
-	Items    []TaskAssetGroup `json:"items"`
-	Page     int              `json:"page"`
-	PageSize int              `json:"page_size"`
-	Total    int64            `json:"total"`
+	Items     []TaskAssetGroup   `json:"items"`
+	FlatItems []FlatResourceItem `json:"flat_items,omitempty"`
+	ViewMode  string             `json:"view_mode,omitempty"` // group | flat
+	Page      int                `json:"page"`
+	PageSize  int                `json:"page_size"`
+	Total     int64              `json:"total"`
 }
 
 type ResourceGroupBatchDownloadRequest struct {
@@ -192,6 +230,7 @@ func (t TaskWorkflowLock) AccessSubject() TaskAccessSubject {
 		TaskID: t.TaskID, CreatorID: t.CreatorID, RequesterID: t.RequesterID,
 		DesignerID: t.DesignerID, CurrentHandlerID: t.CurrentHandlerID,
 		OwnerDepartmentID: t.OwnerDepartmentID, OwnerTeamID: t.OwnerTeamID,
+		TaskType: t.TaskType,
 	}
 }
 

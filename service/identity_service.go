@@ -224,9 +224,25 @@ type IdentityAccessAssignmentWriter interface {
 	EnsureExplicitRoleAssignment(ctx context.Context, tx repo.Tx, userID int64, roleCode string, scopeMode domain.AccessScopeMode) error
 }
 
+// IdentityEffectiveAccessReader projects the explicit v8 capability model into
+// frontend_access so business pages no longer need a parallel authorization track.
+type IdentityEffectiveAccessReader interface {
+	EffectiveAccess(ctx context.Context, userID int64) (*domain.EffectiveAccess, error)
+}
+
+type IdentityEffectiveAccessBatchReader interface {
+	EffectiveAccessMany(ctx context.Context, userIDs []int64) (map[int64]*domain.EffectiveAccess, error)
+}
+
 func WithIdentityAccessAssignmentWriter(writer IdentityAccessAssignmentWriter) IdentityServiceOption {
 	return func(s *identityService) {
 		s.accessAssignmentWriter = writer
+	}
+}
+
+func WithIdentityEffectiveAccessReader(reader IdentityEffectiveAccessReader) IdentityServiceOption {
+	return func(s *identityService) {
+		s.effectiveAccessReader = reader
 	}
 }
 
@@ -257,6 +273,7 @@ type identityService struct {
 	sessionRepo            repo.UserSessionRepo
 	permissionLogRepo      repo.PermissionLogRepo
 	accessAssignmentWriter IdentityAccessAssignmentWriter
+	effectiveAccessReader  IdentityEffectiveAccessReader
 	txRunner               repo.TxRunner
 	sessionTTL             time.Duration
 	authSettings           domain.AuthSettings
@@ -1196,8 +1213,8 @@ func (s *identityService) ListUsers(ctx context.Context, filter UserFilter) ([]*
 	if err := s.attachRolesForUsers(ctx, users); err != nil {
 		return nil, domain.PaginationMeta{}, infraError("attach user roles", err)
 	}
-	for _, user := range users {
-		s.prepareUserForResponse(user)
+	if err := s.prepareUsersForResponse(ctx, users); err != nil {
+		return nil, domain.PaginationMeta{}, infraError("prepare user access", err)
 	}
 	return users, buildPaginationMeta(filter.Page, filter.PageSize, total), nil
 }
@@ -1219,8 +1236,8 @@ func (s *identityService) ListAccessPolicyUsers(ctx context.Context, filter User
 	if err != nil {
 		return nil, domain.PaginationMeta{}, infraError("list access policy users", err)
 	}
-	for _, user := range users {
-		s.prepareUserForResponse(user)
+	if err := s.prepareUsersForResponse(ctx, users); err != nil {
+		return nil, domain.PaginationMeta{}, infraError("prepare access policy users", err)
 	}
 	return users, buildPaginationMeta(filter.Page, filter.PageSize, total), nil
 }
@@ -1283,8 +1300,8 @@ func (s *identityService) ListAssignableDesigners(ctx context.Context, actor *do
 	if err := s.attachRolesForUsers(ctx, users); err != nil {
 		return nil, infraError("attach assignable designer roles", err)
 	}
-	for _, user := range users {
-		s.prepareUserForResponse(user)
+	if err := s.prepareUsersForResponse(ctx, users); err != nil {
+		return nil, infraError("prepare assignable designer access", err)
 	}
 	return users, nil
 }
@@ -1983,7 +2000,6 @@ func (s *identityService) attachRolesForUsers(ctx context.Context, users []*doma
 				continue
 			}
 			user.Roles = append([]domain.Role(nil), rolesByUser[user.ID]...)
-			s.prepareUserForResponse(user)
 		}
 		return nil
 	}
@@ -2298,6 +2314,55 @@ func (s *identityService) prepareUserForResponse(user *domain.User) {
 	if user == nil {
 		return
 	}
+	s.prepareUserBaseResponse(user)
+	if s.effectiveAccessReader != nil && user.ID > 0 {
+		if effective, err := s.effectiveAccessReader.EffectiveAccess(context.Background(), user.ID); err == nil && effective != nil {
+			user.FrontendAccess = domain.MergeEffectiveAccessIntoFrontendAccess(user.FrontendAccess, effective)
+		}
+	}
+}
+
+func (s *identityService) prepareUsersForResponse(ctx context.Context, users []*domain.User) error {
+	userIDs := make([]int64, 0, len(users))
+	for _, user := range users {
+		if user == nil {
+			continue
+		}
+		s.prepareUserBaseResponse(user)
+		if user.ID > 0 {
+			userIDs = append(userIDs, user.ID)
+		}
+	}
+	if s.effectiveAccessReader == nil || len(userIDs) == 0 {
+		return nil
+	}
+	if batchReader, ok := s.effectiveAccessReader.(IdentityEffectiveAccessBatchReader); ok {
+		effectiveByUser, err := batchReader.EffectiveAccessMany(ctx, userIDs)
+		if err != nil {
+			return err
+		}
+		for _, user := range users {
+			if user == nil {
+				continue
+			}
+			user.FrontendAccess = domain.MergeEffectiveAccessIntoFrontendAccess(user.FrontendAccess, effectiveByUser[user.ID])
+		}
+		return nil
+	}
+	for _, user := range users {
+		if user == nil || user.ID <= 0 {
+			continue
+		}
+		effective, err := s.effectiveAccessReader.EffectiveAccess(ctx, user.ID)
+		if err != nil {
+			return err
+		}
+		user.FrontendAccess = domain.MergeEffectiveAccessIntoFrontendAccess(user.FrontendAccess, effective)
+	}
+	return nil
+}
+
+func (s *identityService) prepareUserBaseResponse(user *domain.User) {
 	if len(user.Roles) == 0 {
 		user.Roles = []domain.Role{domain.RoleMember}
 	}

@@ -7,6 +7,8 @@ import (
 	"workflow/domain"
 )
 
+const unmappedV8RoutePermission domain.PermissionCode = "__v8_unmapped_route__"
+
 // v8BusinessRoutePermissions is the code-owned authorization catalog for the
 // task, asset, catalogue and ERP surfaces that remain active after the v8
 // cutover. Legacy role arguments on those registrations are documentation-only
@@ -20,7 +22,11 @@ func v8BusinessRoutePermissions(method, path string) ([]domain.PermissionCode, b
 
 	switch {
 	case strings.HasPrefix(path, "/v1/tasks"):
-		return v8TaskRoutePermissions(method, path), true
+		permissions, _ := v8TaskRoutePermissions(method, path)
+		// The tasks route family is always capability governed. An empty result
+		// means the route is unmapped and must be denied by the registrar rather
+		// than falling back to retired role middleware.
+		return permissions, true
 	case strings.HasPrefix(path, "/v1/assets"):
 		return v8AssetRoutePermissions(method, path), true
 	case strings.HasPrefix(path, "/v1/asset-workbench"):
@@ -99,71 +105,108 @@ func v8AssetWorkbenchRoutePermissions(method, path string) ([]domain.PermissionC
 	}
 }
 
-func v8TaskRoutePermissions(method, path string) []domain.PermissionCode {
+func v8TaskRoutePermissions(method, path string) ([]domain.PermissionCode, bool) {
 	if strings.Contains(path, "/upload-sessions") {
 		if method == http.MethodGet {
-			return []domain.PermissionCode{domain.PermissionTaskView, domain.PermissionAssetView, domain.PermissionTaskDesignSubmit, domain.PermissionTaskAuditDecision, domain.PermissionTaskManage, domain.PermissionAssetManage}
+			return []domain.PermissionCode{domain.PermissionTaskView, domain.PermissionAssetView, domain.PermissionTaskCreate, domain.PermissionTaskUploadSource, domain.PermissionTaskAudit, domain.PermissionAssetManage}, true
 		}
-		return []domain.PermissionCode{domain.PermissionTaskDesignSubmit, domain.PermissionTaskAuditDecision, domain.PermissionTaskManage, domain.PermissionAssetManage}
+		return []domain.PermissionCode{domain.PermissionTaskCreate, domain.PermissionTaskUploadSource, domain.PermissionTaskAudit, domain.PermissionAssetManage}, true
 	}
 	if strings.Contains(path, "/audit/handover") || strings.Contains(path, "/audit/takeover") {
 		if method == http.MethodGet && strings.HasSuffix(path, "/audit/handovers") {
-			return []domain.PermissionCode{domain.PermissionTaskView, domain.PermissionTaskAuditDecision}
+			return []domain.PermissionCode{domain.PermissionTaskView, domain.PermissionTaskAuditHandover}, true
 		}
-		return []domain.PermissionCode{domain.PermissionTaskAuditDecision}
+		return []domain.PermissionCode{domain.PermissionTaskAuditHandover}, true
+	}
+	if strings.Contains(path, "/audit/decision") {
+		return []domain.PermissionCode{domain.PermissionTaskAudit}, true
+	}
+	if strings.Contains(path, "/submit-design") {
+		return []domain.PermissionCode{domain.PermissionTaskUploadSource}, true
+	}
+	if strings.Contains(path, "/reopen") {
+		return []domain.PermissionCode{domain.PermissionTaskReopen}, true
 	}
 	if strings.Contains(path, "/planning-skus") || strings.Contains(path, "/sku-planning/") {
 		switch {
 		case strings.Contains(path, "/export"):
-			return []domain.PermissionCode{domain.PermissionPlanningSKUExport}
+			return []domain.PermissionCode{domain.PermissionPlanningSKUExport}, true
 		case strings.Contains(path, "/erp-resync"):
-			return []domain.PermissionCode{domain.PermissionPlanningSKUSync}
+			return []domain.PermissionCode{domain.PermissionPlanningSKUSync}, true
 		case strings.Contains(path, "/erp-retry"):
-			return []domain.PermissionCode{domain.PermissionPlanningSKURetry}
+			return []domain.PermissionCode{domain.PermissionPlanningSKURetry}, true
+		case strings.Contains(path, "/image-upload-sessions"), strings.Contains(path, "/parse-excel"):
+			return []domain.PermissionCode{domain.PermissionPlanningSKUCreate}, true
 		case method == http.MethodGet:
-			return []domain.PermissionCode{domain.PermissionPlanningSKUView}
+			return []domain.PermissionCode{domain.PermissionPlanningSKUView}, true
 		case method == http.MethodPatch:
-			return []domain.PermissionCode{domain.PermissionPlanningSKUEdit}
+			return []domain.PermissionCode{domain.PermissionPlanningSKUEdit}, true
 		default:
-			return []domain.PermissionCode{domain.PermissionPlanningSKUCreate}
+			return []domain.PermissionCode{domain.PermissionPlanningSKUCreate}, true
 		}
 	}
 	if strings.Contains(path, "/filing/") || strings.Contains(path, "/product-management") {
 		if method == http.MethodGet {
-			return []domain.PermissionCode{domain.PermissionTaskView, domain.PermissionCatalogView}
+			return []domain.PermissionCode{domain.PermissionTaskView, domain.PermissionCatalogView}, true
 		}
-		return []domain.PermissionCode{domain.PermissionERPManage}
+		return []domain.PermissionCode{domain.PermissionERPManage}, true
 	}
 	if strings.Contains(path, "/assets") || strings.Contains(path, "/reference-assets") || strings.Contains(path, "/asset-center") {
 		if strings.Contains(path, "/download") || strings.Contains(path, "/batch-download") {
-			return []domain.PermissionCode{domain.PermissionAssetDownload}
+			return []domain.PermissionCode{domain.PermissionAssetDownload}, true
 		}
 		if method == http.MethodGet {
-			return []domain.PermissionCode{domain.PermissionAssetView}
+			return []domain.PermissionCode{domain.PermissionAssetView}, true
 		}
-		return []domain.PermissionCode{domain.PermissionTaskDesignSubmit, domain.PermissionTaskAuditDecision, domain.PermissionTaskManage, domain.PermissionAssetManage}
+		return []domain.PermissionCode{domain.PermissionTaskCreate, domain.PermissionTaskUploadSource, domain.PermissionTaskAudit, domain.PermissionAssetManage}, true
 	}
 	if method == http.MethodGet {
 		if strings.Contains(path, ".xlsx") {
-			return []domain.PermissionCode{domain.PermissionTaskCreate}
+			return []domain.PermissionCode{domain.PermissionTaskCreate, domain.PermissionPlanningSKUExport}, true
 		}
-		return []domain.PermissionCode{domain.PermissionTaskView}
+		return []domain.PermissionCode{domain.PermissionTaskView}, true
 	}
 	if path == "/v1/tasks" {
-		return []domain.PermissionCode{domain.PermissionTaskCreate, domain.PermissionPlanningSKUCreate}
+		return []domain.PermissionCode{domain.PermissionTaskCreate, domain.PermissionPlanningSKUCreate}, true
 	}
 	if strings.Contains(path, "/reference-upload") || strings.Contains(path, "/prepare-product-codes") || strings.Contains(path, "/excel-assist/") || strings.Contains(path, "/batch-create/") {
-		return []domain.PermissionCode{domain.PermissionTaskCreate}
+		return []domain.PermissionCode{domain.PermissionTaskCreate}, true
 	}
-	return []domain.PermissionCode{domain.PermissionTaskManage}
+	if strings.Contains(path, "/product-info") || strings.Contains(path, "/cost-info") || strings.Contains(path, "/sku-items/") || strings.Contains(path, "/business-info") {
+		return []domain.PermissionCode{domain.PermissionCatalogManage}, true
+	}
+	if strings.Contains(path, "/cost-quote/preview") {
+		return []domain.PermissionCode{domain.PermissionCatalogView}, true
+	}
+	if strings.Contains(path, "/filing/retry") {
+		return []domain.PermissionCode{domain.PermissionERPManage}, true
+	}
+	if strings.Contains(path, "/ai-summary") || strings.Contains(path, "/batch/remind") {
+		return []domain.PermissionCode{domain.PermissionTaskView}, true
+	}
+	if strings.Contains(path, "/modules/") {
+		switch {
+		case strings.Contains(path, "/reassign"), strings.Contains(path, "/pool-reassign"):
+			return []domain.PermissionCode{domain.PermissionTaskReassign}, true
+		case strings.Contains(path, "/claim"), strings.Contains(path, "/actions/"):
+			return []domain.PermissionCode{domain.PermissionTaskUploadSource, domain.PermissionTaskAudit}, true
+		}
+	}
+	if strings.Contains(path, "/cancel") {
+		return []domain.PermissionCode{domain.PermissionTaskTerminate}, true
+	}
+	if strings.Contains(path, "/batch/assign") || strings.HasSuffix(path, "/assign") {
+		return []domain.PermissionCode{domain.PermissionTaskAssign}, true
+	}
+	return nil, false
 }
 
 func v8AssetRoutePermissions(method, path string) []domain.PermissionCode {
 	if strings.Contains(path, "/upload-sessions") {
 		if method == http.MethodGet {
-			return []domain.PermissionCode{domain.PermissionTaskView, domain.PermissionAssetView, domain.PermissionTaskDesignSubmit, domain.PermissionTaskAuditDecision, domain.PermissionTaskManage, domain.PermissionAssetManage}
+			return []domain.PermissionCode{domain.PermissionTaskView, domain.PermissionAssetView, domain.PermissionTaskCreate, domain.PermissionTaskUploadSource, domain.PermissionTaskAudit, domain.PermissionAssetManage}
 		}
-		return []domain.PermissionCode{domain.PermissionTaskDesignSubmit, domain.PermissionTaskAuditDecision, domain.PermissionTaskManage, domain.PermissionAssetManage}
+		return []domain.PermissionCode{domain.PermissionTaskCreate, domain.PermissionTaskUploadSource, domain.PermissionTaskAudit, domain.PermissionAssetManage}
 	}
 	if strings.Contains(path, "/download") || strings.Contains(path, "/content") || strings.HasSuffix(path, "/files/*path") {
 		return []domain.PermissionCode{domain.PermissionAssetDownload}

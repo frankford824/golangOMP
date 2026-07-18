@@ -84,7 +84,7 @@ func TestTaskAssignmentPendingAssignUsesCAS(t *testing.T) {
 	}
 }
 
-func TestTaskAssignmentUsesExplicitTaskManageAndStableScope(t *testing.T) {
+func TestTaskAssignmentUsesExplicitTaskAssignAndStableScope(t *testing.T) {
 	departmentID := int64(44)
 	taskRepo := &assignmentCASTaskRepo{
 		prdTaskRepo: prdTaskRepo{tasks: map[int64]*domain.Task{
@@ -97,7 +97,7 @@ func TestTaskAssignmentUsesExplicitTaskManageAndStableScope(t *testing.T) {
 	eventRepo := &prdTaskEventRepo{}
 	svc := NewTaskAssignmentService(taskRepo, eventRepo, step04TxRunner{})
 	designerID := int64(101)
-	actor := scopedCapabilityActor(51, domain.PermissionTaskManage, domain.AccessScopeOwnDepartment, &departmentID, nil, nil)
+	actor := scopedCapabilityActor(51, domain.PermissionTaskAssign, domain.AccessScopeOwnDepartment, &departmentID, nil, nil)
 
 	updated, appErr := svc.Assign(domain.WithRequestActor(context.Background(), actor), AssignTaskParams{
 		TaskID: 902, DesignerID: &designerID, AssignedBy: actor.ID,
@@ -143,7 +143,7 @@ func TestTaskAssignmentExplicitAccessDoesNotFallBackToLegacyRole(t *testing.T) {
 	}
 }
 
-func TestTaskAssignmentRejectsTaskManageOutsideStableScope(t *testing.T) {
+func TestTaskAssignmentRejectsTaskAssignOutsideStableScope(t *testing.T) {
 	taskDepartmentID := int64(44)
 	actorDepartmentID := int64(45)
 	taskRepo := &assignmentCASTaskRepo{
@@ -157,7 +157,7 @@ func TestTaskAssignmentRejectsTaskManageOutsideStableScope(t *testing.T) {
 	eventRepo := &prdTaskEventRepo{}
 	svc := NewTaskAssignmentService(taskRepo, eventRepo, step04TxRunner{})
 	designerID := int64(103)
-	actor := scopedCapabilityActor(53, domain.PermissionTaskManage, domain.AccessScopeOwnDepartment, &actorDepartmentID, nil, nil)
+	actor := scopedCapabilityActor(53, domain.PermissionTaskAssign, domain.AccessScopeOwnDepartment, &actorDepartmentID, nil, nil)
 
 	updated, appErr := svc.Assign(domain.WithRequestActor(context.Background(), actor), AssignTaskParams{
 		TaskID: 904, DesignerID: &designerID, AssignedBy: actor.ID,

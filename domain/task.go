@@ -162,6 +162,7 @@ func (t *Task) AccessSubject() TaskAccessSubject {
 		TaskID: t.ID, CreatorID: t.CreatorID, RequesterID: t.RequesterID,
 		DesignerID: t.DesignerID, CurrentHandlerID: t.CurrentHandlerID,
 		OwnerDepartmentID: t.OwnerDepartmentID, OwnerTeamID: t.OwnerTeamID,
+		TaskType: t.TaskType,
 	}
 }
 
