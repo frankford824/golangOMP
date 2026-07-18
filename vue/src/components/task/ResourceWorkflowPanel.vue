@@ -1,97 +1,158 @@
 <template>
-  <section class="workflow-panel">
-    <header>
+  <section class="resource-workspace" :data-phase="phase">
+    <header class="workspace-head">
       <div>
-        <p class="eyebrow">任务处理</p>
+        <span class="section-label">资源流程</span>
         <h2>{{ heading }}</h2>
-        <p>这里只显示你当前可以执行的操作；若任务已被他人更新，页面会提示刷新后继续。</p>
+        <p>{{ headingHint }}</p>
       </div>
-      <button v-if="canSubmit" class="secondary" @click="applyFirstMode">将首行模式应用到全部 SKU</button>
+      <button v-if="isDesignStage && rows.length > 1" class="quiet-button" @click="applyFirstMode">将首个 SKU 模式应用到全部</button>
     </header>
+
+    <div class="stage-map" aria-label="任务资源的三个阶段">
+      <article class="stage-node complete">
+        <span class="stage-index">1</span>
+        <div><strong>运营参考</strong><small>{{ displayReferenceCount }} 份参考资料</small></div>
+      </article>
+      <article class="stage-node" :class="{ active: isDesignStage, complete: !isDesignStage }">
+        <span class="stage-index">2</span>
+        <div><strong>设计源文件</strong><small>设计选择单图或套装，并提交源文件</small></div>
+      </article>
+      <article class="stage-node" :class="{ active: isAuditStage, locked: isDesignStage }">
+        <span class="stage-index">3</span>
+        <div><strong>{{ isRetouch ? '修图定稿' : '审核定稿' }}</strong><small>{{ finalStageHint }}</small></div>
+      </article>
+    </div>
 
     <div v-if="error" class="message error" role="alert">{{ error }}</div>
     <div v-if="success" class="message success" role="status">{{ success }}</div>
 
+    <aside v-if="isDesignStage" class="contract-note">
+      <strong>设计阶段只提交源文件</strong>
+      <span>请为每个 SKU 选择单图或套装。最终成品由审核人员上传；套装在审核时至少需要 2 张有序成品。</span>
+    </aside>
+    <aside v-else-if="isAuditStage" class="contract-note audit-note">
+      <strong>按设计模式完成定稿</strong>
+      <span>单图上传 1 张，套装至少上传 2 张并排序。未替换源文件时，默认保留设计师提交的源文件。</span>
+    </aside>
+
     <div
-      v-if="canSubmit || editingAudit"
+      v-if="showEditor"
       ref="editorViewport"
-      class="group-editor-viewport"
-      :style="{ '--resource-editor-row-height': editorRowHeight + 'px' }"
+      class="editor-viewport"
+      :style="{ '--editor-row-height': editorRowHeight + 'px' }"
       data-testid="resource-editor-viewport"
       @scroll="onEditorScroll"
     >
-      <div class="group-editor-spacer" :style="{ height: editorTotalHeight + 'px' }">
-        <div class="group-editor-window" :style="{ transform: 'translateY(' + editorWindowOffset + 'px)' }">
-      <article v-for="entry in visibleEditorRows" :key="entry.row.group.id" class="edit-card" :data-group-index="entry.groupIndex">
-        <div class="edit-head">
-          <div><strong>{{ entry.row.group.sku_code || scopeLabel(entry.row.group) }}</strong><small>{{ revisionStatus(entry.row) }}</small></div>
-          <label>成品模式
-            <select v-model="entry.row.mode" @change="markChanged(entry.row.group.id)"><option value="single">单图</option><option value="set">套装</option></select>
-          </label>
-        </div>
-        <div class="upload-grid">
-          <label class="upload-box">
-            <span>设计源文件{{ sourceRequired ? '（必填）' : '（选填）' }}</span>
-            <strong>{{ entry.row.source?.name || inheritedSourceName(entry.row) || '选择 PSD 或其他源文件' }}</strong>
-            <input type="file" :disabled="Boolean(entry.row.uploading)" @change="uploadSource($event, entry.row)" />
-          </label>
-          <label class="upload-box">
-            <span>最终成品图</span>
-            <strong>{{ entry.row.finals.length ? `已选择 ${entry.row.finals.length} 张` : '选择一张或多张图片' }}</strong>
-            <input type="file" accept="image/*" multiple :disabled="Boolean(entry.row.uploading)" @change="uploadFinals($event, entry.row)" />
-          </label>
-        </div>
-        <div v-if="entry.row.uploading" class="uploading">正在上传 {{ entry.row.uploading }}…</div>
-        <ol v-if="entry.row.finals.length" class="final-order">
-          <li
-            v-for="(file, index) in entry.row.finals"
-            :key="`${file.id}-${index}`"
-            draggable="true"
-            tabindex="0"
-            @dragstart="dragStart(entry.groupIndex, index)"
-            @dragover.prevent
-            @drop="drop(entry.groupIndex, index)"
-            @keydown.alt.up.prevent="move(entry.row, index, -1)"
-            @keydown.alt.down.prevent="move(entry.row, index, 1)"
-          >
-            <span>{{ index + 1 }}</span><strong>{{ file.name }}</strong>
-            <div><button aria-label="上移" :disabled="index === 0" @click="move(entry.row,index,-1)">↑</button><button aria-label="下移" :disabled="index === entry.row.finals.length - 1" @click="move(entry.row,index,1)">↓</button><button aria-label="移除" @click="removeFinal(entry.row,index)">×</button></div>
-          </li>
-        </ol>
-      </article>
+      <div class="editor-spacer" :style="{ height: editorTotalHeight + 'px' }">
+        <div class="editor-window" :style="{ transform: 'translateY(' + editorWindowOffset + 'px)' }">
+          <article v-for="entry in visibleEditorRows" :key="entry.row.group.id" class="sku-workbench" :data-group-index="entry.groupIndex">
+            <header class="sku-head">
+              <div>
+                <span>SKU 资源</span>
+                <strong>{{ entry.row.group.sku_code || scopeLabel(entry.row.group) }}</strong>
+                <small v-if="skuModeHints[entry.row.group.sku_code || '']" class="operations-hint">运营建议套装 · 最终由设计判定</small>
+              </div>
+              <div class="mode-control" :aria-label="`${entry.row.group.sku_code || '当前资源'}的成品模式`">
+                <span>设计判定</span>
+                <button type="button" :class="{ selected: entry.row.mode === 'single' }" :disabled="!canChooseMode" @click="setMode(entry.row, 'single')">单图</button>
+                <button type="button" :class="{ selected: entry.row.mode === 'set' }" :disabled="!canChooseMode" @click="setMode(entry.row, 'set')">套装</button>
+              </div>
+            </header>
+
+            <div class="resource-columns">
+              <section class="source-column">
+                <div class="column-title">
+                  <div><strong>设计源文件</strong><small>{{ isAuditStage ? '默认保留设计提交' : sourceRequired ? '每个 SKU 必填 1 份' : '选填' }}</small></div>
+                  <label v-if="isAuditStage" class="replace-toggle"><input type="checkbox" :checked="replaceSourceGroups.has(entry.row.group.id)" @change="toggleSourceReplacement(entry.row)" />我修改了源文件</label>
+                </div>
+                <div v-if="entry.row.source" class="file-tile source-file">
+                  <span class="file-mark">{{ sourceExtension(entry.row.source.name) }}</span>
+                  <div><strong>{{ entry.row.source.name }}</strong><small>{{ entry.row.source.inherited ? '设计师提交 · 将作为有效源文件' : '本次上传' }}</small></div>
+                </div>
+                <label v-if="canUploadSource(entry.row)" class="drop-zone source-drop">
+                  <span>{{ entry.row.source && !replaceSourceGroups.has(entry.row.group.id) ? '替换源文件' : '选择 PSD、AI、PSB 等源文件' }}</span>
+                  <input type="file" :disabled="Boolean(entry.row.uploading)" @change="uploadSource($event, entry.row)" />
+                </label>
+              </section>
+
+              <section class="final-column" :class="{ locked: isDesignStage }">
+                <div class="column-title">
+                  <div><strong>最终成品图</strong><small>{{ finalRequirement(entry.row) }}</small></div>
+                  <span v-if="isAuditStage" class="mode-summary">{{ entry.row.mode === 'set' ? '套装' : '单图' }}</span>
+                </div>
+                <div v-if="isDesignStage" class="locked-final">
+                  <span class="lock-symbol">◎</span>
+                  <div><strong>审核阶段上传</strong><small>设计提交后，审核人员会一眼看到当前模式。</small></div>
+                </div>
+                <template v-else>
+                  <label class="drop-zone final-drop">
+                    <span>{{ entry.row.finals.length ? `重新选择成品（当前 ${entry.row.finals.length} 张）` : '上传最终成品图' }}</span>
+                    <input type="file" accept="image/*" multiple :disabled="Boolean(entry.row.uploading)" @change="uploadFinals($event, entry.row)" />
+                  </label>
+                  <ol v-if="entry.row.finals.length" class="final-order">
+                    <li
+                      v-for="(file, index) in entry.row.finals"
+                      :key="`${file.id}-${index}`"
+                      draggable="true"
+                      tabindex="0"
+                      @dragstart="dragStart(entry.groupIndex, index)"
+                      @dragover.prevent
+                      @drop="drop(entry.groupIndex, index)"
+                      @keydown.alt.up.prevent="move(entry.row, index, -1)"
+                      @keydown.alt.down.prevent="move(entry.row, index, 1)"
+                    >
+                      <span>{{ index + 1 }}</span><strong>{{ file.name }}</strong>
+                      <div><button aria-label="上移" :disabled="index === 0" @click="move(entry.row,index,-1)">↑</button><button aria-label="下移" :disabled="index === entry.row.finals.length - 1" @click="move(entry.row,index,1)">↓</button><button aria-label="移除" @click="removeFinal(entry.row,index)">×</button></div>
+                    </li>
+                  </ol>
+                </template>
+              </section>
+            </div>
+            <div v-if="entry.row.uploading" class="uploading">正在上传 {{ entry.row.uploading }}…</div>
+          </article>
         </div>
       </div>
     </div>
 
-    <footer v-if="canSubmit" class="action-bar">
-      <span>single 必须 1 张成品；set 至少 2 张。任务内所有资源组原子提交。</span>
-      <button class="primary" :disabled="busy || !validDesign" @click="submitDesign">{{ busy ? '提交中…' : submitLabel }}</button>
+    <footer v-if="isDesignStage" class="command-dock">
+      <div><strong>{{ dirtyLabel }}</strong><span>离开页面前会提醒保存当前选择。</span></div>
+      <button class="primary" :disabled="busy || !validDesign" @click="submitDesign">{{ busy ? '提交中…' : '确认模式并提交源文件' }}</button>
     </footer>
 
-    <footer v-if="canReturnToDesign || canApprove || canUploadReplacement" class="audit-bar">
-      <label><span>打回或修改说明</span><input v-model.trim="reason" maxlength="1000" placeholder="打回设计时必填" /></label>
-      <div>
-        <button v-if="canReturnToDesign" class="secondary" :disabled="busy || !reason" @click="openConfirmation('return_to_design')">打回设计</button>
-        <button v-if="canUploadReplacement" class="secondary" :disabled="busy" @click="editingAudit = !editingAudit">{{ editingAudit ? '取消上传修改' : '上传修改后通过' }}</button>
-        <button v-if="canApprove || (editingAudit && canUploadReplacement)" class="primary" :disabled="busy || (editingAudit && !validAudit)" @click="openConfirmation('approve')">{{ busy ? '处理中…' : '通过并结单' }}</button>
+    <footer v-if="isRetouchStage" class="command-dock">
+      <div><strong>{{ dirtyLabel }}</strong><span>每项修图需求提交最终成品后，任务直接结单。</span></div>
+      <button class="primary" :disabled="busy || !validRetouch" @click="submitDesign">{{ busy ? '提交中…' : '提交修图成品并结单' }}</button>
+    </footer>
+
+    <footer v-if="isAuditStage" class="command-dock audit-dock">
+      <label><span>审核说明</span><input v-model.trim="reason" maxlength="1000" placeholder="通过时选填，打回时必填" /></label>
+      <div class="dock-actions">
+        <button v-if="canReturnToDesign" class="danger" :disabled="busy || !reason" @click="openConfirmation('return_to_design')">打回设计</button>
+        <button v-if="canApprove" class="primary" :disabled="busy || !validAudit" @click="openConfirmation('approve')">{{ busy ? '处理中…' : '确认定稿并结单' }}</button>
       </div>
     </footer>
 
-    <footer v-if="canReopen" class="reopen-bar">
+    <footer v-if="canReopen" class="command-dock reopen-dock">
       <label><span>重开目标</span><select v-model="reopenTarget"><option value="design">设计</option><option value="audit">审核</option><option v-if="isRetouch" value="retouch">修图</option></select></label>
-      <label><span>重开原因</span><input v-model.trim="reason" maxlength="1000" placeholder="必填" /></label>
-      <button class="secondary" :disabled="busy || !reason" @click="openConfirmation('reopen')">重开任务</button>
+      <label><span>重开原因</span><input v-model.trim="reason" maxlength="1000" placeholder="请说明重开原因" /></label>
+      <button class="quiet-button" :disabled="busy || !reason" @click="openConfirmation('reopen')">重开任务</button>
     </footer>
 
     <div v-if="pendingAction" class="confirm-backdrop" role="presentation" @click.self="cancelConfirmation">
       <section ref="confirmDialog" class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="workflow-confirm-title" tabindex="-1" @keydown.esc.prevent="cancelConfirmation" @keydown.tab="trapConfirmationFocus">
-        <p class="eyebrow">请确认操作</p>
+        <button class="dialog-close" aria-label="关闭" :disabled="busy" @click="cancelConfirmation">×</button>
+        <span class="section-label">确认审核结果</span>
         <h3 id="workflow-confirm-title">{{ confirmationTitle }}</h3>
         <p>{{ confirmationImpact }}</p>
-        <dl><div><dt>目标状态</dt><dd>{{ confirmationTarget }}</dd></div><div><dt>资源影响</dt><dd>{{ confirmationResources }}</dd></div></dl>
+        <dl>
+          <div><dt>目标状态</dt><dd>{{ confirmationTarget }}</dd></div>
+          <div><dt>资源结果</dt><dd>{{ confirmationResources }}</dd></div>
+          <div v-if="pendingAction === 'approve'"><dt>设计判定</dt><dd>{{ modeOverview }}</dd></div>
+        </dl>
         <div class="confirm-actions">
-          <button ref="confirmCancelButton" class="secondary" :disabled="busy" @click="cancelConfirmation">取消</button>
-          <button class="primary" :disabled="busy" @click="confirmAction">{{ busy ? '处理中…' : '确认执行' }}</button>
+          <button ref="confirmCancelButton" class="quiet-button" :disabled="busy" @click="cancelConfirmation">取消</button>
+          <button class="primary" :disabled="busy" @click="confirmAction">{{ busy ? '处理中…' : pendingAction === 'approve' ? '确认通过并结单' : '确认执行' }}</button>
         </div>
       </section>
     </div>
@@ -104,46 +165,76 @@ import { uploadTaskFileViaAssetSession } from '@/services/upload/assetUploadFlow
 import { resourceGroupsApi, type ResourceBundle, type ResourceGroup, type ResourceGroupSubmission, type ResourceMode } from '@/services/api/resourceGroupsApi'
 
 type UploadedFile = { id: number; name: string; inherited?: boolean }
-type EditorRow = { group: ResourceGroup; mode: ResourceMode; source: UploadedFile | null; finals: UploadedFile[]; uploading: string }
+type EditorRow = { group: ResourceGroup; mode: ResourceMode; submittedSource: UploadedFile | null; source: UploadedFile | null; finals: UploadedFile[]; uploading: string }
 
-const props = defineProps<{ taskId: number; taskType: string; bundle: ResourceBundle; allowedActions: string[] }>()
+const props = defineProps<{ taskId: number; taskType: string; bundle: ResourceBundle; referenceCount?: number; skuModeHints?: Record<string, boolean>; allowedActions: string[] }>()
 const emit = defineEmits<{ updated: [bundle: ResourceBundle]; 'dirty-change': [dirty: boolean] }>()
+const skuModeHints = computed(() => props.skuModeHints ?? {})
 const rows = ref<EditorRow[]>([])
 const changedGroups = ref(new Set<number>())
+const replaceSourceGroups = ref(new Set<number>())
 const busy = ref(false)
 const error = ref('')
 const success = ref('')
 const reason = ref('')
-const editingAudit = ref(false)
 const pendingAction = ref<'approve' | 'return_to_design' | 'reopen' | null>(null)
 const confirmDialog = ref<HTMLElement | null>(null)
 const confirmCancelButton = ref<HTMLButtonElement | null>(null)
 const editorViewport = ref<HTMLElement | null>(null)
 const editorScrollTop = ref(0)
-const editorViewportHeight = ref(720)
-const editorRowHeight = ref(390)
+const editorViewportHeight = ref(560)
+const editorRowHeight = ref(330)
 const editorOverscan = 2
-let confirmationTrigger: HTMLElement | null = null
 const reopenTarget = ref<'design' | 'audit' | 'retouch'>('design')
+let confirmationTrigger: HTMLElement | null = null
 let dragged: { groupIndex: number; index: number } | null = null
 
 const actionSet = computed(() => new Set(props.allowedActions || []))
 const canSubmit = computed(() => actionSet.value.has('submit_design') || actionSet.value.has('task.design.submit'))
 const canReturnToDesign = computed(() => actionSet.value.has('task.audit.return_to_design') || actionSet.value.has('task.audit.decision'))
 const canApprove = computed(() => actionSet.value.has('task.audit.approve') || actionSet.value.has('task.audit.decision'))
-const canUploadReplacement = computed(() => canApprove.value)
-const canAudit = computed(() => canReturnToDesign.value || canApprove.value || canUploadReplacement.value)
+const canAudit = computed(() => canReturnToDesign.value || canApprove.value)
 const canReopen = computed(() => actionSet.value.has('reopen') || actionSet.value.has('task.reopen'))
 const isRetouch = computed(() => ['retouch', 'retouch_task'].includes(props.taskType.toLowerCase()))
+const isDesignStage = computed(() => canSubmit.value && !isRetouch.value)
+const isRetouchStage = computed(() => canSubmit.value && isRetouch.value)
+const isAuditStage = computed(() => canAudit.value)
+const phase = computed(() => isAuditStage.value ? 'audit' : isDesignStage.value ? 'design' : isRetouch.value && canSubmit.value ? 'retouch' : 'read')
+const showEditor = computed(() => isDesignStage.value || isAuditStage.value || (isRetouch.value && canSubmit.value))
+const canChooseMode = computed(() => isDesignStage.value || (isRetouch.value && canSubmit.value))
 const sourceRequired = computed(() => !isRetouch.value)
-const heading = computed(() => canAudit.value ? '统一审核' : canSubmit.value ? (isRetouch.value ? '提交修图成品' : '设计提交') : canReopen.value ? '重开任务' : '当前无可执行动作')
-const submitLabel = computed(() => isRetouch.value ? '提交成品并结单' : '提交审核')
+const heading = computed(() => isAuditStage.value ? '审核定稿' : isDesignStage.value ? '设计提交' : isRetouch.value && canSubmit.value ? '提交修图成品' : canReopen.value ? '重开任务' : '任务资源')
+const headingHint = computed(() => isAuditStage.value ? '审核人员依据设计判定上传最终成品，必要时替换源文件。' : isDesignStage.value ? '先确定每个 SKU 的单图或套装模式，再提交一份可编辑源文件。' : '参考图、有效源文件与最终成品保持在同一资源链中。')
+const finalStageHint = computed(() => isDesignStage.value ? '审核人员上传最终成品' : isAuditStage.value ? '按设计判定上传定稿' : '最终资源')
+const displayReferenceCount = computed(() => {
+  if (Number.isSafeInteger(props.referenceCount) && Number(props.referenceCount) >= 0) return Number(props.referenceCount)
+  return props.bundle.groups.reduce((total, group) => total + ((group.working_revision || group.finalized_revision)?.references?.length || 0), 0)
+})
 const editorTotalHeight = computed(() => rows.value.length * editorRowHeight.value)
 const editorVisibleStart = computed(() => Math.max(0, Math.floor(editorScrollTop.value / editorRowHeight.value) - editorOverscan))
 const editorVisibleCount = computed(() => Math.ceil(editorViewportHeight.value / editorRowHeight.value) + editorOverscan * 2)
 const visibleEditorRows = computed(() => rows.value.slice(editorVisibleStart.value, editorVisibleStart.value + editorVisibleCount.value).map((row, offset) => ({ row, groupIndex: editorVisibleStart.value + offset })))
 const editorWindowOffset = computed(() => editorVisibleStart.value * editorRowHeight.value)
 const isDirty = computed(() => changedGroups.value.size > 0 || rows.value.some((row) => Boolean(row.uploading)))
+const dirtyLabel = computed(() => {
+  if (isDirty.value) return '当前修改尚未提交'
+  if (isDesignStage.value) {
+    const missing = rows.value.filter((row) => !row.source).length
+    return missing ? `还需上传 ${missing} 份设计源文件` : '设计源文件与模式已就绪'
+  }
+  if (isAuditStage.value) {
+    const missingSources = rows.value.filter((row) => !row.source).length
+    if (missingSources) return `还需补充 ${missingSources} 份有效源文件`
+    const unfinished = rows.value.filter((row) => !validFinals(row)).length
+    return unfinished ? `还需完成 ${unfinished} 个 SKU 的定稿` : '源文件与最终成品已就绪'
+  }
+  if (isRetouchStage.value) {
+    const unfinished = rows.value.filter((row) => !validFinals(row)).length
+    return unfinished ? `还需完成 ${unfinished} 项修图定稿` : '修图成品已就绪'
+  }
+  return '任务资源已就绪'
+})
+const modeOverview = computed(() => `${rows.value.filter((row) => row.mode === 'single').length} 个单图，${rows.value.filter((row) => row.mode === 'set').length} 个套装`)
 
 watch(() => props.bundle, buildRows, { immediate: true, deep: true })
 watch(isDirty, (dirty) => emit('dirty-change', dirty), { immediate: true })
@@ -151,39 +242,54 @@ watch(isDirty, (dirty) => emit('dirty-change', dirty), { immediate: true })
 function buildRows() {
   rows.value = props.bundle.groups.map((group) => {
     const revision = group.working_revision || group.finalized_revision
+    const preserveFinals = !isAuditStage.value || revision?.source_stage === 'audit'
+    const submittedSource = revision?.source_file ? { id: revision.source_file.task_asset_id, name: revision.source_file.file_name, inherited: true } : null
     return {
       group,
       mode: revision?.mode || 'single',
-      source: revision?.source_file ? { id: revision.source_file.task_asset_id, name: revision.source_file.file_name, inherited: true } : null,
-      finals: [...(revision?.items || [])].sort((a,b) => a.sort_order - b.sort_order).map((item) => ({ id: item.task_asset_id, name: item.file?.file_name || item.item_name || `文件 ${item.task_asset_id}`, inherited: true })),
+      submittedSource,
+      source: submittedSource ? { ...submittedSource } : null,
+      finals: preserveFinals ? [...(revision?.items || [])].sort((a,b) => a.sort_order - b.sort_order).map((item) => ({ id: item.task_asset_id, name: item.file?.file_name || item.item_name || `文件 ${item.task_asset_id}`, inherited: true })) : [],
       uploading: '',
     }
   })
   changedGroups.value = new Set()
+  replaceSourceGroups.value = new Set()
   editorScrollTop.value = 0
   if (editorViewport.value) editorViewport.value.scrollTop = 0
 }
 
 function refreshEditorMetrics() {
-  editorRowHeight.value = typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 780px)').matches ? 620 : 390
-  editorViewportHeight.value = editorViewport.value?.clientHeight || Math.min(window.innerHeight * 0.68, 760)
+  editorRowHeight.value = typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 780px)').matches ? 570 : 330
+  editorViewportHeight.value = editorViewport.value?.clientHeight || Math.min(window.innerHeight * 0.56, 620)
 }
 function onEditorScroll() { editorScrollTop.value = editorViewport.value?.scrollTop || 0 }
-
 function scopeLabel(group: ResourceGroup) { return group.scope_kind === 'retouch_requirement' ? `修图需求 ${group.retouch_requirement_id}` : '任务资源' }
-function revisionStatus(row: EditorRow) { return row.group.finalized_revision ? '当前已结单资源' : row.group.working_revision ? '当前待处理资源' : '尚未提交资源' }
-function inheritedSourceName(row: EditorRow) { return row.source?.inherited ? row.source.name : '' }
+function sourceExtension(name: string) { return name.split('.').pop()?.slice(0, 4).toUpperCase() || 'FILE' }
 function markChanged(groupId: number) { changedGroups.value = new Set(changedGroups.value).add(groupId) }
+function setMode(row: EditorRow, mode: ResourceMode) { if (!canChooseMode.value || row.mode === mode) return; row.mode = mode; markChanged(row.group.id) }
 function applyFirstMode() { const mode = rows.value[0]?.mode; if (!mode) return; rows.value.forEach((row) => { row.mode = mode; markChanged(row.group.id) }) }
+function toggleSourceReplacement(row: EditorRow) {
+  const next = new Set(replaceSourceGroups.value)
+  if (next.has(row.group.id)) {
+    next.delete(row.group.id)
+    row.source = row.submittedSource ? { ...row.submittedSource } : null
+  } else {
+    next.add(row.group.id)
+    row.source = null
+  }
+  replaceSourceGroups.value = next
+  markChanged(row.group.id)
+}
+function canUploadSource(row: EditorRow) { return isDesignStage.value || (isRetouch.value && canSubmit.value) || replaceSourceGroups.value.has(row.group.id) }
+function finalRequirement(row: EditorRow) { return row.mode === 'set' ? '套装至少 2 张，可拖拽排序' : '单图恰好 1 张' }
 function assetVersionId(uploaded: Awaited<ReturnType<typeof uploadTaskFileViaAssetSession>>): number {
   const raw = uploaded.version?.id || uploaded.version?.version_id
   const id = Number(raw)
   if (!Number.isSafeInteger(id) || id <= 0) throw new Error('上传完成但未返回任务资产 ID。')
   return id
 }
-function uploadOptions(row: EditorRow) {
-  return row.group.retouch_requirement_id ? { retouchRequirementId: row.group.retouch_requirement_id } : undefined
-}
+function uploadOptions(row: EditorRow) { return row.group.retouch_requirement_id ? { retouchRequirementId: row.group.retouch_requirement_id } : undefined }
 async function uploadSource(event: Event, row: EditorRow) {
   const input = event.target as HTMLInputElement; const file = input.files?.[0]; if (!file) return
   row.uploading = file.name; error.value = ''
@@ -211,65 +317,43 @@ function move(row: EditorRow, index: number, delta: number) { const next = index
 function removeFinal(row: EditorRow,index:number) { row.finals.splice(index,1); markChanged(row.group.id) }
 function dragStart(groupIndex:number,index:number) { dragged = { groupIndex,index } }
 function drop(groupIndex:number,index:number) { if (!dragged || dragged.groupIndex !== groupIndex) return; const row = rows.value[groupIndex]; const [item] = row.finals.splice(dragged.index,1); row.finals.splice(index,0,item); markChanged(row.group.id); dragged = null }
-
-function validRow(row: EditorRow, requireSource: boolean) { return (!requireSource || !!row.source) && (row.mode === 'single' ? row.finals.length === 1 : row.finals.length >= 2) }
-const validDesign = computed(() => rows.value.length > 0 && rows.value.every((row) => validRow(row, sourceRequired.value)) && !rows.value.some((row) => row.uploading))
-const validAudit = computed(() => [...changedGroups.value].length > 0 && rows.value.filter((row) => changedGroups.value.has(row.group.id)).every((row) => validRow(row, true)))
-function submission(row: EditorRow): ResourceGroupSubmission { return { group_id: row.group.id, expected_group_lock_version: row.group.lock_version, mode: row.mode, source_task_asset_id: row.source?.id, final_task_asset_ids: row.finals.map((file) => file.id) } }
-async function run(action: () => Promise<ResourceBundle>, message: string) { busy.value = true; error.value = ''; success.value = ''; try { const bundle = await action(); success.value = message; emit('updated', bundle) } catch (cause) { error.value = cause instanceof Error ? cause.message : '操作失败，请刷新后重试。' } finally { busy.value = false } }
-async function submitDesign() { if (!validDesign.value) return; await run(() => resourceGroupsApi.submitDesign(props.taskId, props.bundle, rows.value.map(submission)), isRetouch.value ? '修图任务已结单。' : '已提交审核。') }
-async function returnToDesign() { if (!reason.value) return; await run(() => resourceGroupsApi.auditDecision(props.taskId, props.bundle, 'return_to_design', reason.value), '已打回设计。') }
-async function approve() { const groups = editingAudit.value ? rows.value.filter((row) => changedGroups.value.has(row.group.id)).map(submission) : []; await run(() => resourceGroupsApi.auditDecision(props.taskId, props.bundle, 'approve', reason.value, groups), '审核通过，任务已结单。') }
-async function reopen() { if (!reason.value) return; await run(() => resourceGroupsApi.reopen(props.taskId, props.bundle, reopenTarget.value, reason.value), '任务已重开。') }
-const confirmationTitle = computed(() => pendingAction.value === 'approve' ? '通过审核并立即结单？' : pendingAction.value === 'return_to_design' ? '将任务打回设计？' : '重开已结单任务？')
-const confirmationImpact = computed(() => pendingAction.value === 'approve' ? '确认后任务立即变为已结单，当前审核资源成为最终资源。' : pendingAction.value === 'return_to_design' ? '任务将回到设计处理中，原负责人可以按说明重新提交。' : '任务将恢复为可处理状态，现有已结单资源在再次审核通过前保持对外有效。')
-const confirmationTarget = computed(() => pendingAction.value === 'approve' ? '已结单' : pendingAction.value === 'return_to_design' ? '设计处理中' : reopenTarget.value === 'audit' ? '待审核' : reopenTarget.value === 'retouch' ? '修图处理中' : '设计处理中')
-const confirmationResources = computed(() => pendingAction.value === 'approve' ? (editingAudit.value ? '审核上传的源文件和成品将替换当前提交。' : '沿用设计师提交的源文件和成品。') : pendingAction.value === 'return_to_design' ? '本次审核修改不会成为最终资源。' : '当前最终资源继续可见，直到新的审核结果生效。')
-function openConfirmation(action: 'approve' | 'return_to_design' | 'reopen') {
-  if (busy.value) return
-  if ((action === 'return_to_design' || action === 'reopen') && !reason.value) { error.value = '请先填写操作原因。'; return }
-  confirmationTrigger = document.activeElement instanceof HTMLElement ? document.activeElement : null
-  pendingAction.value = action
-  void nextTick(() => confirmCancelButton.value?.focus())
+function validFinals(row: EditorRow) { return row.mode === 'single' ? row.finals.length === 1 : row.finals.length >= 2 }
+const validDesign = computed(() => rows.value.length > 0 && rows.value.every((row) => Boolean(row.source) && ['single','set'].includes(row.mode)) && !rows.value.some((row) => row.uploading))
+const validAudit = computed(() => rows.value.length > 0 && rows.value.every((row) => Boolean(row.source) && validFinals(row)) && !rows.value.some((row) => row.uploading))
+const validRetouch = computed(() => rows.value.length > 0 && rows.value.every((row) => validFinals(row)) && !rows.value.some((row) => row.uploading))
+function submission(row: EditorRow): ResourceGroupSubmission {
+  const includeFinals = isAuditStage.value || (isRetouch.value && canSubmit.value)
+  const result: ResourceGroupSubmission = { group_id: row.group.id, expected_group_lock_version: row.group.lock_version, mode: row.mode, final_task_asset_ids: includeFinals ? row.finals.map((file) => file.id) : [] }
+  if (row.source && (!isAuditStage.value || replaceSourceGroups.value.has(row.group.id))) result.source_task_asset_id = row.source.id
+  return result
 }
+async function run(action: () => Promise<ResourceBundle>, message: string) { busy.value = true; error.value = ''; success.value = ''; try { const bundle = await action(); success.value = message; emit('updated', bundle) } catch (cause) { error.value = cause instanceof Error ? cause.message : '操作失败，请刷新后重试。' } finally { busy.value = false } }
+async function submitDesign() { if (isRetouch.value ? !validRetouch.value : !validDesign.value) return; await run(() => resourceGroupsApi.submitDesign(props.taskId, props.bundle, rows.value.map(submission)), isRetouch.value ? '修图任务已结单。' : '设计源文件与模式已提交审核。') }
+async function returnToDesign() { if (!reason.value) return; await run(() => resourceGroupsApi.auditDecision(props.taskId, props.bundle, 'return_to_design', reason.value), '已打回设计。') }
+async function approve() { if (!validAudit.value) return; await run(() => resourceGroupsApi.auditDecision(props.taskId, props.bundle, 'approve', reason.value, rows.value.map(submission)), '审核通过，任务已结单。') }
+async function reopen() { if (!reason.value) return; await run(() => resourceGroupsApi.reopen(props.taskId, props.bundle, reopenTarget.value, reason.value), '任务已重开。') }
+const confirmationTitle = computed(() => pendingAction.value === 'approve' ? '确认审核结果' : pendingAction.value === 'return_to_design' ? '将任务打回设计？' : '重开已结单任务？')
+const confirmationImpact = computed(() => pendingAction.value === 'approve' ? '确认后任务立即结单，本次定稿成为最终成品。' : pendingAction.value === 'return_to_design' ? '任务回到设计处理中，不会生成最终成品。' : '任务恢复为可处理状态，原最终资源继续有效直至再次通过。')
+const confirmationTarget = computed(() => pendingAction.value === 'approve' ? '已结单' : pendingAction.value === 'return_to_design' ? '设计处理中' : reopenTarget.value === 'audit' ? '待审核' : reopenTarget.value === 'retouch' ? '修图处理中' : '设计处理中')
+const confirmationResources = computed(() => pendingAction.value === 'approve' ? `保留运营参考、有效源文件与 ${rows.value.reduce((sum,row) => sum + row.finals.length,0)} 张最终成品。` : pendingAction.value === 'return_to_design' ? '保留参考资料，设计人员重新提交源文件与模式。' : '当前最终资源保持可见。')
+function openConfirmation(action: 'approve' | 'return_to_design' | 'reopen') { if (busy.value) return; if ((action === 'return_to_design' || action === 'reopen') && !reason.value) { error.value = '请先填写操作原因。'; return }; confirmationTrigger = document.activeElement instanceof HTMLElement ? document.activeElement : null; pendingAction.value = action; void nextTick(() => confirmCancelButton.value?.focus()) }
 function closeConfirmation() { pendingAction.value = null; void nextTick(() => confirmationTrigger?.focus()) }
 function cancelConfirmation() { if (!busy.value) closeConfirmation() }
-function trapConfirmationFocus(event: KeyboardEvent) {
-  const controls = [...(confirmDialog.value?.querySelectorAll<HTMLElement>('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])') || [])]
-  if (!controls.length) return
-  const first = controls[0]; const last = controls[controls.length - 1]
-  if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus() }
-  else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() }
-}
-async function confirmAction() {
-  if (!pendingAction.value || busy.value) return
-  const action = pendingAction.value
-  if (action === 'approve') await approve()
-  else if (action === 'return_to_design') await returnToDesign()
-  else await reopen()
-  if (!error.value) closeConfirmation()
-}
+function trapConfirmationFocus(event: KeyboardEvent) { const controls = [...(confirmDialog.value?.querySelectorAll<HTMLElement>('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])') || [])]; if (!controls.length) return; const first = controls[0]; const last = controls[controls.length - 1]; if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus() } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() } }
+async function confirmAction() { if (!pendingAction.value || busy.value) return; const action = pendingAction.value; if (action === 'approve') await approve(); else if (action === 'return_to_design') await returnToDesign(); else await reopen(); if (!error.value) closeConfirmation() }
 onMounted(() => { refreshEditorMetrics(); window.addEventListener('resize', refreshEditorMetrics) })
 onBeforeUnmount(() => { window.removeEventListener('resize', refreshEditorMetrics); emit('dirty-change', false) })
 </script>
 
 <style scoped>
-.workflow-panel{display:grid;gap:16px;border:1px solid rgb(var(--yb-border));border-radius:18px;background:rgb(var(--yb-surface));overflow:hidden}.workflow-panel>header{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;padding:20px 22px;border-bottom:1px solid rgb(var(--yb-border))}.workflow-panel h2{margin:3px 0;font-size:21px}.workflow-panel p{margin:0;color:rgb(var(--yb-text-muted))}.eyebrow{font-size:11px;letter-spacing:.13em;font-weight:900;color:rgb(var(--yb-brand))}.group-editor{display:grid;gap:14px;padding:0 20px}.edit-card{border:1px solid rgb(var(--yb-border));border-radius:14px;overflow:hidden}.edit-head{display:flex;justify-content:space-between;align-items:center;padding:13px 15px;background:rgb(var(--yb-surface-soft))}.edit-head>div{display:grid;gap:3px}.edit-head small{color:rgb(var(--yb-text-muted))}.edit-head label{display:flex;gap:8px;align-items:center;font-size:12px}.edit-head select,.reopen-bar select,.audit-bar input,.reopen-bar input{min-height:36px;border:1px solid rgb(var(--yb-border));border-radius:9px;padding:0 10px;background:rgb(var(--yb-surface));color:rgb(var(--yb-text))}.upload-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:14px}.upload-box{display:grid;gap:5px;padding:14px;border:1px dashed rgb(var(--yb-border));border-radius:11px;cursor:pointer}.upload-box span{font-size:12px;color:rgb(var(--yb-text-muted))}.upload-box input{margin-top:5px}.uploading{padding:0 14px 12px;color:rgb(var(--yb-brand))}.final-order{display:grid;gap:6px;padding:0 14px 14px;margin:0;list-style:none}.final-order li{display:grid;grid-template-columns:25px 1fr auto;align-items:center;gap:9px;padding:8px;border-radius:9px;background:rgb(var(--yb-surface-muted))}.final-order li>span{display:grid;place-items:center;width:24px;height:24px;border-radius:7px;background:rgb(var(--yb-brand-soft))}.final-order button{border:0;background:transparent;cursor:pointer}.action-bar,.audit-bar,.reopen-bar{display:flex;align-items:flex-end;justify-content:space-between;gap:15px;padding:16px 20px;border-top:1px solid rgb(var(--yb-border));background:rgb(var(--yb-surface-soft))}.action-bar span{color:rgb(var(--yb-text-muted));font-size:12px}.audit-bar label,.reopen-bar label{display:grid;gap:5px;flex:1}.audit-bar label span,.reopen-bar label span{font-size:12px;color:rgb(var(--yb-text-muted))}.audit-bar>div{display:flex;gap:8px}.primary,.secondary{min-height:40px;padding:0 15px;border-radius:10px;font-weight:750;cursor:pointer}.primary{border:0;background:rgb(var(--yb-brand));color:rgb(var(--yb-text-inverse))}.secondary{border:1px solid rgb(var(--yb-border));background:rgb(var(--yb-surface));color:rgb(var(--yb-text))}.primary:disabled,.secondary:disabled{opacity:.45;cursor:not-allowed}.message{margin:0 20px;padding:11px 13px;border-radius:10px}.error{background:rgb(var(--yb-danger-soft));color:rgb(var(--yb-danger-text))}.success{background:rgb(var(--yb-success-soft));color:rgb(var(--yb-success-strong))}.confirm-backdrop{position:fixed;inset:0;z-index:80;display:grid;place-items:center;padding:20px;background:rgb(var(--yb-overlay-night) / .48)}.confirm-dialog{width:min(520px,100%);display:grid;gap:14px;padding:22px;border:1px solid rgb(var(--yb-border));border-radius:18px;background:rgb(var(--yb-surface));box-shadow:0 20px 55px rgb(var(--yb-shadow) / .22)}.confirm-dialog h3{margin:0}.confirm-dialog dl{display:grid;gap:8px;margin:0}.confirm-dialog dl div{display:grid;grid-template-columns:90px 1fr;gap:12px}.confirm-dialog dt{color:rgb(var(--yb-text-muted))}.confirm-dialog dd{margin:0}.confirm-actions{display:flex;justify-content:flex-end;gap:8px}@media(max-width:780px){.workflow-panel>header,.action-bar,.audit-bar,.reopen-bar{align-items:stretch;flex-direction:column}.upload-grid{grid-template-columns:1fr}.audit-bar>div{flex-wrap:wrap}}
-.group-editor-viewport {
-  height: min(68vh, 760px);
-  overflow: auto;
-  overscroll-behavior: contain;
-  margin: 0 20px;
-  background: rgb(var(--yb-surface-soft));
-  border-radius: 14px;
-}
-.group-editor-spacer { position: relative; }
-.group-editor-window { position: absolute; inset: 0 0 auto; }
-.group-editor-window .edit-card {
-  box-sizing: border-box;
-  height: calc(var(--resource-editor-row-height) - 12px);
-  margin: 6px 0;
-  overflow: auto;
-  background: rgb(var(--yb-surface));
-}
+.resource-workspace{display:grid;grid-template-rows:auto auto auto minmax(0,1fr) auto;min-height:0;border:1px solid rgb(var(--yb-border));border-radius:18px;background:rgb(var(--yb-surface));overflow:hidden;box-shadow:0 18px 44px rgb(var(--yb-shadow)/.05)}
+.workspace-head{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;padding:18px 20px 14px}.workspace-head h2{margin:2px 0 4px;font-size:22px}.workspace-head p{margin:0;color:rgb(var(--yb-text-muted));font-size:13px}.section-label{font-size:11px;font-weight:800;letter-spacing:.08em;color:rgb(var(--yb-brand))}
+.stage-map{display:grid;grid-template-columns:repeat(3,1fr);border-block:1px solid rgb(var(--yb-border));background:linear-gradient(90deg,rgb(var(--yb-brand-soft)/.45),rgb(var(--yb-surface)) 48%)}.stage-node{position:relative;display:flex;align-items:center;gap:10px;min-height:66px;padding:10px 18px;color:rgb(var(--yb-text-muted))}.stage-node:not(:last-child)::after{content:"";position:absolute;right:-8px;width:16px;height:1px;background:rgb(var(--yb-border-strong))}.stage-node.active{color:rgb(var(--yb-text));background:rgb(var(--yb-brand-soft)/.45)}.stage-node.complete{color:rgb(var(--yb-text))}.stage-index{display:grid;place-items:center;width:28px;height:28px;border:1px solid rgb(var(--yb-border-strong));border-radius:50%;font-weight:800}.active .stage-index{border-color:rgb(var(--yb-brand));background:rgb(var(--yb-brand));color:rgb(var(--yb-text-inverse))}.complete .stage-index{border-color:rgb(var(--yb-brand));color:rgb(var(--yb-brand))}.stage-node div{display:grid;gap:3px}.stage-node small{font-size:11px;color:rgb(var(--yb-text-muted))}
+.contract-note{display:flex;gap:10px;align-items:center;margin:12px 18px 0;padding:10px 12px;border:1px solid rgb(var(--yb-brand-border));border-radius:11px;background:rgb(var(--yb-brand-soft)/.45);font-size:12px}.contract-note span{color:rgb(var(--yb-text-muted))}.audit-note{border-color:rgb(var(--yb-success-border));background:rgb(var(--yb-success-soft))}
+.editor-viewport{min-height:260px;overflow:auto;overscroll-behavior:contain;margin:12px 18px;background:rgb(var(--yb-surface-soft));border-radius:14px}.editor-spacer{position:relative}.editor-window{position:absolute;inset:0 0 auto}.sku-workbench{box-sizing:border-box;height:calc(var(--editor-row-height) - 10px);margin:5px;padding:14px;border:1px solid rgb(var(--yb-border));border-radius:13px;background:rgb(var(--yb-surface));overflow:auto}.sku-head,.column-title{display:flex;align-items:center;justify-content:space-between;gap:12px}.sku-head>div:first-child,.column-title>div{display:grid;gap:3px}.sku-head span,.column-title small{font-size:11px;color:rgb(var(--yb-text-muted))}.sku-head .operations-hint{width:max-content;padding:3px 7px;border-radius:999px;background:rgb(var(--yb-warning-soft));color:rgb(var(--yb-warning-strong));font-weight:750}.mode-control{display:flex;align-items:center;gap:4px}.mode-control>span{margin-right:4px}.mode-control button{min-height:32px;padding:0 11px;border:1px solid rgb(var(--yb-border));background:rgb(var(--yb-surface));color:rgb(var(--yb-text-muted));cursor:pointer}.mode-control button:first-of-type{border-radius:8px 0 0 8px}.mode-control button:last-of-type{margin-left:-5px;border-radius:0 8px 8px 0}.mode-control button.selected{position:relative;z-index:1;border-color:rgb(var(--yb-brand));background:rgb(var(--yb-brand-soft));color:rgb(var(--yb-brand-strong));font-weight:800}.mode-control button:disabled{cursor:default;opacity:1}
+.resource-columns{display:grid;grid-template-columns:1fr 1.08fr;gap:10px;margin-top:12px}.source-column,.final-column{display:grid;align-content:start;gap:10px;min-height:185px;padding:12px;border:1px solid rgb(var(--yb-border));border-radius:11px}.final-column.locked{background:rgb(var(--yb-surface-soft))}.replace-toggle{display:flex;align-items:center;gap:6px;font-size:11px;color:rgb(var(--yb-text-muted))}.file-tile{display:flex;align-items:center;gap:10px;padding:11px;border-radius:10px;background:rgb(var(--yb-surface-muted))}.file-tile div{display:grid;gap:3px;min-width:0}.file-tile strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.file-tile small{font-size:11px;color:rgb(var(--yb-text-muted))}.file-mark{display:grid;place-items:center;min-width:42px;height:42px;border-radius:9px;background:rgb(var(--yb-surface-neutral-inverse-deep));color:rgb(var(--yb-text-inverse));font-size:10px;font-weight:900}.drop-zone{display:grid;place-items:center;min-height:56px;padding:10px;border:1px dashed rgb(var(--yb-brand-border));border-radius:10px;color:rgb(var(--yb-brand-strong));font-size:12px;cursor:pointer}.drop-zone input{position:absolute;width:1px;height:1px;opacity:0}.locked-final{display:flex;align-items:center;gap:10px;min-height:92px;padding:12px;border-radius:10px;background:rgb(var(--yb-surface-muted))}.locked-final div{display:grid;gap:4px}.locked-final small{color:rgb(var(--yb-text-muted))}.lock-symbol{display:grid;place-items:center;width:36px;height:36px;border-radius:50%;background:rgb(var(--yb-brand-soft));color:rgb(var(--yb-brand))}.mode-summary{padding:4px 8px;border-radius:8px;background:rgb(var(--yb-brand-soft));color:rgb(var(--yb-brand-strong));font-size:11px;font-weight:800}.final-order{display:grid;gap:5px;margin:0;padding:0;list-style:none}.final-order li{display:grid;grid-template-columns:24px minmax(0,1fr) auto;align-items:center;gap:7px;padding:7px;border-radius:8px;background:rgb(var(--yb-surface-muted))}.final-order li>span{display:grid;place-items:center;width:22px;height:22px;border-radius:7px;background:rgb(var(--yb-brand-soft));color:rgb(var(--yb-brand-strong));font-size:11px}.final-order strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}.final-order button{border:0;background:transparent;cursor:pointer}.uploading{margin-top:8px;color:rgb(var(--yb-brand));font-size:12px}
+.command-dock{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:12px 18px;border-top:1px solid rgb(var(--yb-border));background:rgb(var(--yb-surface))}.command-dock>div:first-child{display:grid;gap:2px}.command-dock span{font-size:11px;color:rgb(var(--yb-text-muted))}.command-dock label{display:grid;gap:4px;flex:1}.command-dock input,.command-dock select{min-height:39px;border:1px solid rgb(var(--yb-border));border-radius:9px;padding:0 10px;background:rgb(var(--yb-surface));color:rgb(var(--yb-text))}.dock-actions{display:flex;gap:8px}.primary,.quiet-button,.danger{min-height:42px;padding:0 17px;border-radius:10px;font-weight:750;cursor:pointer}.primary{border:0;background:rgb(var(--yb-brand));color:rgb(var(--yb-text-inverse));box-shadow:0 8px 18px rgb(var(--yb-brand)/.16)}.quiet-button{border:1px solid rgb(var(--yb-border));background:rgb(var(--yb-surface));color:rgb(var(--yb-text))}.danger{border:1px solid rgb(var(--yb-danger-border));background:rgb(var(--yb-surface));color:rgb(var(--yb-danger-text))}.primary:disabled,.quiet-button:disabled,.danger:disabled{opacity:.45;cursor:not-allowed}.message{margin:10px 18px 0;padding:10px 12px;border-radius:10px}.error{background:rgb(var(--yb-danger-soft));color:rgb(var(--yb-danger-text))}.success{background:rgb(var(--yb-success-soft));color:rgb(var(--yb-success-strong))}
+.confirm-backdrop{position:fixed;inset:0;z-index:90;display:grid;place-items:center;padding:20px;background:rgb(var(--yb-overlay-night)/.48)}.confirm-dialog{position:relative;width:min(610px,100%);display:grid;gap:13px;padding:24px;border:1px solid rgb(var(--yb-border));border-radius:18px;background:rgb(var(--yb-surface));box-shadow:0 26px 70px rgb(var(--yb-shadow)/.24)}.confirm-dialog h3{margin:0;font-size:24px}.confirm-dialog>p{margin:0;color:rgb(var(--yb-text-muted))}.dialog-close{position:absolute;top:14px;right:14px;width:34px;height:34px;border:0;border-radius:9px;background:rgb(var(--yb-surface-muted));cursor:pointer}.confirm-dialog dl{display:grid;gap:7px;margin:0;padding:12px;border-radius:11px;background:rgb(var(--yb-surface-soft))}.confirm-dialog dl div{display:grid;grid-template-columns:80px 1fr;gap:12px}.confirm-dialog dt{color:rgb(var(--yb-text-muted))}.confirm-dialog dd{margin:0}.confirm-actions{display:flex;justify-content:flex-end;gap:8px}
+@media(max-width:780px){.resource-workspace{border-radius:14px}.workspace-head{padding:15px}.stage-map{grid-template-columns:1fr}.stage-node{min-height:54px}.stage-node:not(:last-child)::after{left:31px;right:auto;bottom:-9px;width:1px;height:18px}.contract-note{align-items:flex-start;flex-direction:column}.editor-viewport{margin:10px;height:min(57vh,620px)}.resource-columns{grid-template-columns:1fr}.sku-head{align-items:flex-start;flex-direction:column}.mode-control{width:100%}.mode-control button{flex:1}.command-dock,.audit-dock,.reopen-dock{align-items:stretch;flex-direction:column}.dock-actions{display:grid;grid-template-columns:1fr 1.5fr}.dock-actions button,.command-dock>.primary{width:100%}.confirm-backdrop{align-items:end;padding:0}.confirm-dialog{max-height:92vh;overflow:auto;border-radius:20px 20px 0 0}.stage-node small{max-width:32ch}}
+@media(prefers-reduced-motion:no-preference){.stage-node.active .stage-index{animation:stage-pulse 2.8s ease-in-out infinite}@keyframes stage-pulse{50%{box-shadow:0 0 0 7px rgb(var(--yb-brand-soft)/.8)}}}
 </style>

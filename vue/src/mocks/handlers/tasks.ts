@@ -64,6 +64,26 @@ function parseTaskIdFromRoot(path: string): string | null {
   return match?.[1] ?? null
 }
 
+function v8NumericTaskContract(task: MockTask, taskId: string) {
+  return {
+    ...task,
+    id: Number(taskId),
+    task_status: task.status === 'completed' ? 'Completed' : 'PendingAudit',
+    workflow_revision: 3,
+    workflow_contract_version: 2,
+    business_lane: task.task_type === 'customer_customization' ? 'customization' : 'normal',
+    allowed_actions: ['task.audit.approve', 'task.audit.return_to_design', 'task.audit.handover'],
+    product_name_snapshot: task.title,
+    primary_sku_code: 'SKU-MOCK-1002',
+    current_handler_name: '审核演示',
+    owner_department: '设计部',
+    owner_org_team: '主图组',
+    requirement_description: '完成主图设计并核对套装顺序。',
+    operation_note: '请在审核通过前检查全部最终成品。',
+    reference_file_refs: [{ id: 1, file_name: '参考图.png', download_url: '/mock-assets/reference.png' }],
+  }
+}
+
 function filterTasks(
   q: Record<string, unknown>,
 ): { items: MockTask[]; total: number; page: number; page_size: number } {
@@ -399,9 +419,10 @@ export const tasksHandler: MockHandler = (request) => {
 
   if (request.method === 'GET' && request.path.match(/^\/v1\/tasks\/[^/]+\/detail$/)) {
     const taskId = request.path.split('/')[3] ?? ''
-    const task = mockTasks.find((item) => item.id === taskId)
-    if (!task) return { status: 404, data: { message: 'task not found' } }
-    const modules = listTaskModules(taskId).map((m) => ({
+    const storedTask = mockTasks.find((item) => item.id === taskId || item.id === `task_${taskId}`)
+    if (!storedTask) return { status: 404, data: { message: 'task not found' } }
+    const task = /^\d+$/.test(taskId) ? v8NumericTaskContract(storedTask, taskId) : storedTask
+    const modules = listTaskModules(storedTask.id).map((m) => ({
       module_key: m.module_key,
       state: m.state,
       scope: {
@@ -411,7 +432,7 @@ export const tasksHandler: MockHandler = (request) => {
       },
       allowed_actions: { actions: m.allowed_actions ?? [] },
     }))
-    const retouchMod = listTaskModules(taskId).find((m) => m.module_key === 'retouch')
+    const retouchMod = listTaskModules(storedTask.id).find((m) => m.module_key === 'retouch')
     const rtCode =
       task.task_type === 'retouch_task'
         ? retouchWorkflowCodeFromModuleState(retouchMod?.state)
@@ -458,23 +479,7 @@ export const tasksHandler: MockHandler = (request) => {
       const task = mockTasks.find((item) => item.id === taskId || item.id === `task_${taskId}`)
       if (!task) return { status: 404, data: { message: 'task not found' } }
       if (/^\d+$/.test(taskId)) {
-        return { status: 200, data: {
-          ...task,
-          id: Number(taskId),
-          task_status: task.status === 'completed' ? 'Completed' : 'PendingAudit',
-          workflow_revision: 3,
-          workflow_contract_version: 2,
-          business_lane: task.task_type === 'customer_customization' ? 'customization' : 'normal',
-          allowed_actions: ['task.audit.approve', 'task.audit.return_to_design', 'task.audit.handover'],
-          product_name_snapshot: task.title,
-          primary_sku_code: 'SKU-MOCK-1002',
-          current_handler_name: '审核演示',
-          owner_department: '设计部',
-          owner_org_team: '主图组',
-          requirement_description: '完成主图设计并核对套装顺序。',
-          operation_note: '请在审核通过前检查全部最终成品。',
-          reference_file_refs: [{ id: 1, file_name: '参考图.png', download_url: '/mock-assets/reference.png' }],
-        } }
+        return { status: 200, data: v8NumericTaskContract(task, taskId) }
       }
       return { status: 200, data: task }
     }
