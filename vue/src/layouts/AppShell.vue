@@ -263,17 +263,9 @@ const MENU_CONFIG: MenuConfig[] = [
     key: 'user_admin',
     label: '用户与角色',
     to: '/users',
-    aliases: ['user_manage'],
+    aliases: ['user_manage', 'access_policy'],
     section: 'data',
     icon: 'person',
-  },
-  {
-    key: 'access_policy',
-    label: '权限管理',
-    to: '/access-policy',
-    aliases: ['user_admin', 'user_manage'],
-    section: 'data',
-    icon: 'admin_panel_settings',
   },
 ]
 

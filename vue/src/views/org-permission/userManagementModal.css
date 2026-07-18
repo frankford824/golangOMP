@@ -223,6 +223,13 @@
   font-weight: 700;
 }
 
+.um-modal .detail-section-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
 .um-modal .detail-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

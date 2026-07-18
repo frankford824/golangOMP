@@ -104,4 +104,34 @@ describe('AccessPolicyView', () => {
     expect(wrapper.text()).toContain('允许的任务类型')
     expect(wrapper.text()).toContain('原品开发')
   })
+
+  it('opens the requested employee directly when embedded in user management', async () => {
+    const wrapper = mount(AccessPolicyView, {
+      props: {
+        embedded: true,
+        initialTab: 'people',
+        initialUser: { id: 2, display_name: '李审核', department: '设计部', department_id: 10 },
+      },
+    })
+    await flushPromises()
+
+    expect(wrapper.find('.page-head').exists()).toBe(false)
+    expect(wrapper.find('.people-panel').exists()).toBe(true)
+    expect(wrapper.text()).toContain('李审核')
+    expect(api.effective).toHaveBeenCalledWith(2)
+  })
+
+  it('opens the selected organization policy without requiring repeated ID entry', async () => {
+    const wrapper = mount(AccessPolicyView, {
+      props: {
+        embedded: true,
+        initialTab: 'org',
+        initialOrg: { subject_type: 'team', subject_id: 11 },
+      },
+    })
+    await flushPromises()
+
+    expect(wrapper.find('.org-editor').exists()).toBe(true)
+    expect(api.orgPolicies).toHaveBeenCalledWith('team', 11)
+  })
 })

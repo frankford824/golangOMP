@@ -8,8 +8,14 @@ vi.mock('@/services/api/resourceGroupsApi', async (loadOriginal) => {
   return { ...original, resourceGroupsApi: { ...original.resourceGroupsApi, list: mocks.list } }
 })
 vi.mock('vue-router', () => ({ useRouter: () => ({ push: mocks.push }) }))
+vi.mock('@/composables/useTaskFilterOptions', async () => {
+  const { ref } = await import('vue')
+  return { useTaskFilterOptions: () => ({ creatorOptions: ref([{ value: '', label: '全部' }, { value: '12', label: '李运营' }]) }) }
+})
 
 import ResourceGroupsView from './ResourceGroupsView.vue'
+
+const mountView = () => mount(ResourceGroupsView, { global: { stubs: { Teleport: true } } })
 
 const group = {
   id: 8,
@@ -19,6 +25,9 @@ const group = {
   task_sku_item_id: 11,
   sku_code: 'SKU-008',
   business_lane: 'customization',
+  product_name: '北欧沙发组合',
+  creator_id: 12,
+  creator_name: '李运营',
   lock_version: 1,
   migration_incomplete: false,
   finalized_revision: {
@@ -41,25 +50,26 @@ describe('ResourceGroupsView', () => {
   })
 
   it('keeps all filters while paging and opens the numeric resource-group route', async () => {
-    const wrapper = mount(ResourceGroupsView)
+    const wrapper = mountView()
     await flushPromises()
-    const inputs = wrapper.findAll('.filters input')
-    await inputs[0].setValue('RW-008')
-    await inputs[1].setValue('keyword')
-    await inputs[2].setValue('SKU-008')
-    await inputs[3].setValue('12')
-    const selects = wrapper.findAll('.filters select')
-    await selects[0].setValue('customization')
-    await selects[1].setValue('final')
-    await selects[2].setValue('design')
-    await wrapper.get('form').trigger('submit')
+    await wrapper.get('.search-field input').setValue('keyword')
+    await wrapper.get('.filter-button').trigger('click')
+    const inputs = wrapper.findAll('.filter-drawer input')
+    await inputs[0].setValue('SKU-008')
+    await inputs[1].setValue('RW-008')
+    const selects = wrapper.findAll('.filter-drawer select')
+    await selects[0].setValue('final')
+    await selects[1].setValue('design')
+    await selects[2].setValue('customization')
+    await selects[3].setValue('12')
+    await wrapper.get('.filter-drawer form').trigger('submit')
     await flushPromises()
 
     expect(mocks.list).toHaveBeenLastCalledWith({
       q: 'keyword',
       sku_code: 'SKU-008',
       task_no: 'RW-008',
-      creator_id: 12,
+      creator_id: '12',
       business_lane: 'customization',
       resource_role: 'final',
       format_category: 'design',
@@ -73,7 +83,7 @@ describe('ResourceGroupsView', () => {
       q: 'keyword',
       sku_code: 'SKU-008',
       task_no: 'RW-008',
-      creator_id: 12,
+      creator_id: '12',
       business_lane: 'customization',
       resource_role: 'final',
       format_category: 'design',
@@ -82,13 +92,16 @@ describe('ResourceGroupsView', () => {
   })
 
   it('shows a single SKU cover summary card and navigates on click', async () => {
-    const wrapper = mount(ResourceGroupsView)
+    const wrapper = mountView()
     await flushPromises()
     expect(wrapper.get('.cover img').attributes('src')).toBe('https://img/front.png')
     await wrapper.get('.cover img').trigger('error')
     expect(wrapper.find('.cover img').exists()).toBe(false)
-    expect(wrapper.get('.preview-fallback').text()).toBe('FR')
-    expect(wrapper.text()).toContain('套装 · 1 张成品')
+    expect(wrapper.get('.preview-fallback').text()).toContain('PNG')
+    expect(wrapper.text()).toContain('北欧沙发组合')
+    expect(wrapper.text()).toContain('来源任务 · RW-008')
+    expect(wrapper.text()).toContain('套装')
+    expect(wrapper.text()).toContain('1 张成品')
 
     const card = wrapper.get('.resource-card')
     expect(card.element.tagName).toBe('BUTTON')
@@ -113,7 +126,7 @@ describe('ResourceGroupsView', () => {
       page_size: 24,
       total: 1,
     })
-    const wrapper = mount(ResourceGroupsView)
+    const wrapper = mountView()
     await flushPromises()
     expect(wrapper.find('.flat-grid').exists()).toBe(true)
     expect(wrapper.text()).toContain('参考图')
@@ -124,12 +137,12 @@ describe('ResourceGroupsView', () => {
 
   it('renders distinct empty and retryable error states', async () => {
     mocks.list.mockResolvedValueOnce({ items: [], flat_items: [], view_mode: 'group', page: 1, page_size: 24, total: 0 })
-    const empty = mount(ResourceGroupsView)
+    const empty = mountView()
     await flushPromises()
     expect(empty.text()).toContain('没有找到符合条件')
 
     mocks.list.mockRejectedValueOnce(new Error('资源服务暂不可用'))
-    const failed = mount(ResourceGroupsView)
+    const failed = mountView()
     await flushPromises()
     expect(failed.get('[role="alert"]').text()).toContain('资源服务暂不可用')
     expect(failed.get('[role="alert"] button').text()).toBe('重试')

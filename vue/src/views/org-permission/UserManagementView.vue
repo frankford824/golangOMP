@@ -18,11 +18,15 @@
           </BaseButton>
         </div>
       </header>
+      <nav v-if="canManage" class="management-tabs" aria-label="用户与权限管理内容">
+        <button v-if="canManageDirectory" type="button" :class="{ active: workspaceTab === 'directory' }" @click="openWorkspace('directory')">人员与组织</button>
+        <button v-if="canManageAccess" type="button" :class="{ active: workspaceTab === 'access' }" @click="openWorkspace('access')">角色与权限</button>
+      </nav>
     <div v-if="!canManage" class="mt-6">
       <BaseEmptyState title="无管理权限" description="需要用户、组织或角色管理权限才能访问本页。" />
     </div>
     <template v-else>
-      <section class="content-card">
+      <section v-if="workspaceTab === 'directory'" class="content-card">
         <div class="management-layout">
           <aside class="org-filter-panel" aria-label="组织列表与筛选">
             <div class="org-filter-header">
@@ -90,6 +94,7 @@
                 >
                   彻底删除
                 </button>
+                <button v-if="canManageAccess" type="button" class="org-icon-btn org-icon-btn--policy" @click.stop="openSelectedOrgAccess">应用权限策略</button>
               </div>
               <div v-else class="org-selected-buttons">
                 <button type="button" class="org-icon-btn" @click.stop="openEditTeam(selectedOrgTeam)">改名</button>
@@ -119,6 +124,7 @@
                 >
                   彻底删除
                 </button>
+                <button v-if="canManageAccess" type="button" class="org-icon-btn org-icon-btn--policy" @click.stop="openSelectedOrgAccess">应用权限策略</button>
               </div>
             </div>
             <OrgTreePanel
@@ -128,9 +134,11 @@
               :selected-team="teamFilter"
               :show-all-entry="!isDeptScopedOnly"
               :all-active="isAllOrgFilterActive"
+              :can-manage-policy="canManageAccess"
               @select-all="selectAllOrg"
               @select-department="selectOrgDepartment"
               @select-team="selectOrgTeam"
+              @manage-policy="openOrgAccess"
             />
             <button
               v-if="canManageOrgMaster && removableDisabledOrgCount > 0"
@@ -209,6 +217,16 @@
         </div>
       </section>
 
+      <section v-else class="access-workspace-card">
+        <AccessPolicyView
+          :key="accessContextKey"
+          embedded
+          :initial-tab="accessSubtab"
+          :initial-user="accessInitialUser"
+          :initial-org="accessInitialOrg"
+        />
+      </section>
+
       <Teleport to="body">
       <!-- 用户详情 / 角色管理 弹层 -->
       <UserDetailModal
@@ -221,6 +239,7 @@
         :can-assign-roles="canAssignRoles"
         :can-reset-password="canResetPassword"
         :can-disable-user="canDisableUser"
+        :can-manage-access="canManageAccess"
         :basic-form="basicForm"
         :membership-form="membershipForm"
         :membership-department-options="membershipDepartmentOptions"
@@ -244,6 +263,7 @@
         @submit-roles="submitRoleReplace"
         @reset-password="resetPassword"
         @set-status="setUserStatus"
+        @manage-access="openUserAccess(detailUser)"
       />
 
       <!-- 新增用户 -->
@@ -321,6 +341,7 @@
 <script setup lang="ts">
 import { ref, computed, h, onBeforeUnmount, onMounted, watch } from 'vue'
 import type { DataTableColumns, DataTableRowKey } from 'naive-ui'
+import { useRoute, useRouter } from 'vue-router'
 import { usersApi } from '@/services/api/usersApi'
 import {
   createOrgDepartment,
@@ -363,13 +384,17 @@ import BaseErrorState from '@/components/base/BaseErrorState.vue'
 import BaseDataTable from '@/components/base/BaseDataTable.vue'
 import BaseTablePager from '@/components/base/BaseTablePager.vue'
 import { RoleEnum } from '@/types'
+import AccessPolicyView from '@/views/AccessPolicyView.vue'
+import type { AccessUserOption, ScopeSubjectType } from '@/services/api/accessPolicyApi'
 
 const permissionsStore = usePermissionsStore()
 const { can } = usePermission()
+const route = useRoute()
+const router = useRouter()
 
 // v1.8 对齐：用户与角色页面同时向 HRAdmin / SuperAdmin 与 DepartmentAdmin 开放。
 // 以下 gate 全部走 action key，不再使用 `|| isDeptAdmin` 之类角色名兜底。
-const canManage = computed(
+const canManageDirectory = computed(
   () =>
     can('user.manage') ||
     can('department.manage') ||
@@ -377,6 +402,57 @@ const canManage = computed(
     can('role.assign') ||
     can('role.read'),
 )
+const canManageAccess = computed(() => can('access.manage') || can('access.view'))
+const canManage = computed(() => canManageDirectory.value || canManageAccess.value)
+type WorkspaceTab = 'directory' | 'access'
+type AccessTab = 'roles' | 'people' | 'org' | 'events'
+const routeTab = String(route.query.tab || '')
+const workspaceTab = ref<WorkspaceTab>(routeTab === 'access' || ['roles', 'people', 'org', 'events'].includes(routeTab) ? 'access' : 'directory')
+const accessSubtab = ref<AccessTab>(['roles', 'people', 'org', 'events'].includes(routeTab) ? routeTab as AccessTab : 'roles')
+const accessInitialUser = ref<AccessUserOption | null>(null)
+const accessInitialOrg = ref<{ subject_type: ScopeSubjectType; subject_id: number } | null>(null)
+const accessContextKey = computed(() => [accessSubtab.value, accessInitialUser.value?.id || 0, accessInitialOrg.value?.subject_type || '', accessInitialOrg.value?.subject_id || 0].join(':'))
+if (!canManageDirectory.value && canManageAccess.value) workspaceTab.value = 'access'
+
+function openWorkspace(tab: WorkspaceTab) {
+  workspaceTab.value = tab
+  accessInitialUser.value = null
+  accessInitialOrg.value = null
+  const query = tab === 'access' ? { ...route.query, tab: accessSubtab.value } : { ...route.query, tab: undefined }
+  void router.replace({ query })
+}
+
+function openUserAccess(user: UserRow | null) {
+  if (!user || !canManageAccess.value) return
+  detailUser.value = null
+  accessInitialOrg.value = null
+  accessInitialUser.value = {
+    id: Number(user.id),
+    username: user.username,
+    display_name: user.display_name,
+    department: user.department,
+    team: user.team,
+  }
+  accessSubtab.value = 'people'
+  workspaceTab.value = 'access'
+  void router.replace({ query: { ...route.query, tab: 'people', user_id: user.id } })
+}
+
+function openOrgAccess(subjectType: ScopeSubjectType, subjectId: number) {
+  if (!canManageAccess.value || subjectId <= 0) return
+  accessInitialUser.value = null
+  accessInitialOrg.value = { subject_type: subjectType, subject_id: subjectId }
+  accessSubtab.value = 'org'
+  workspaceTab.value = 'access'
+  void router.replace({ query: { ...route.query, tab: 'org', subject_type: subjectType, subject_id: String(subjectId) } })
+}
+
+function openSelectedOrgAccess() {
+  const teamID = Number(selectedOrgTeam.value?.id || 0)
+  if (teamID > 0) { openOrgAccess('team', teamID); return }
+  const departmentID = Number(selectedOrgDepartment.value?.id || 0)
+  if (departmentID > 0) openOrgAccess('department', departmentID)
+}
 const canCreateUser = computed(() => can('user.manage') || can('department.users.create'))
 const canMoveTeam = computed(() => can('user.manage') || can('department.users.move_team'))
 const canDisableUser = computed(() => can('user.manage') || can('department.users.disable'))
@@ -2355,6 +2431,46 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 0.15rem;
+}
+
+.management-tabs {
+  display: flex;
+  gap: 0.4rem;
+  margin: 0.9rem 0;
+  padding: 0.25rem;
+  width: max-content;
+  border: 1px solid rgb(var(--yb-border));
+  border-radius: 0.75rem;
+  background: rgb(var(--yb-surface-soft));
+}
+
+.management-tabs button {
+  min-height: 2.25rem;
+  padding: 0 0.85rem;
+  border: 0;
+  border-radius: 0.55rem;
+  background: transparent;
+  color: rgb(var(--yb-text-muted));
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.management-tabs button.active {
+  background: rgb(var(--yb-surface));
+  color: rgb(var(--yb-brand));
+  box-shadow: 0 1px 3px rgb(var(--yb-shadow) / 0.08);
+}
+
+.access-workspace-card {
+  padding: 1rem;
+  border: 1px solid rgb(var(--yb-border));
+  border-radius: 1rem;
+  background: rgb(var(--yb-surface));
+}
+
+.org-icon-btn--policy {
+  border-color: rgb(var(--yb-brand-border));
+  color: rgb(var(--yb-brand));
 }
 
 @media (max-width: 1024px) {

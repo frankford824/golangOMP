@@ -23,6 +23,11 @@ const permissionMock = vi.hoisted(() => ({
     value: { id: '1' },
   },
 }))
+const routerMock = vi.hoisted(() => ({ replace: vi.fn(), query: {} as Record<string, string> }))
+vi.mock('vue-router', () => ({
+  useRoute: () => ({ query: routerMock.query }),
+  useRouter: () => ({ replace: routerMock.replace }),
+}))
 
 vi.mock('@/composables/usePermission', () => ({
   usePermission: () => ({

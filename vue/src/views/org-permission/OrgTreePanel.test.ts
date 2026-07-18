@@ -33,6 +33,7 @@ function mountPanel(selectedDepartment = '') {
       selectedTeam: '',
       showAllEntry: true,
       allActive: !selectedDepartment,
+      canManagePolicy: true,
     },
   })
 }
@@ -63,5 +64,19 @@ describe('OrgTreePanel', () => {
 
     expect(wrapper.text()).not.toContain('定制美工组')
     expect(wrapper.emitted('select-department')?.at(-1)).toEqual(['设计研发部'])
+  })
+
+  it('exposes organization policy from both the visible shortcut and context menu', async () => {
+    const wrapper = mountPanel()
+    const shortcuts = wrapper.findAll('.org-policy-shortcut')
+
+    await shortcuts[0].trigger('click')
+    await wrapper.get('.org-tree-toggle').trigger('click')
+    await wrapper.get('.org-filter-item--team').trigger('contextmenu')
+
+    expect(wrapper.emitted('manage-policy')).toEqual([
+      ['department', 1],
+      ['team', 2],
+    ])
   })
 })

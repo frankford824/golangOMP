@@ -35,6 +35,16 @@ const pages = [
     },
   },
   { name: 'task-list', path: '/tasks', ready: '.task-list-view' },
+  {
+    name: 'task-list-advanced-filter',
+    path: '/tasks',
+    ready: '.task-list-view',
+    prepare: async (page) => {
+      await page.getByRole('button', { name: /高级筛选/ }).click()
+      await page.waitForSelector('.task-filter-drawer[role="dialog"]', { state: 'visible' })
+      await page.waitForTimeout(200)
+    },
+  },
   { name: 'task-create-workbench', path: '/tasks/create', ready: '.compose-page' },
   {
     name: 'task-create-planning-intent',
@@ -57,7 +67,7 @@ const pages = [
   },
   { name: 'task-detail', path: '/tasks/1002', ready: '.task-detail-view' },
   { name: 'task-assets', path: '/tasks/1002/assets?asset_id=1001', ready: '.task-resources-page' },
-  { name: 'resource-group-detail', path: '/asset-center/1', ready: '.group-detail' },
+  { name: 'resource-group-detail', path: '/asset-center/1', ready: '.detail-page' },
   {
     name: 'audit-confirmation-dialog',
     path: '/tasks/1002',

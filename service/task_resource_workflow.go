@@ -278,6 +278,18 @@ func (s *taskResourceWorkflowService) hydrateResourceGroupURLs(groups []domain.T
 			for itemIndex := range revision.Items {
 				s.hydrateResourceFileURL(revision.Items[itemIndex].File)
 			}
+			for referenceIndex := range revision.References {
+				reference := &revision.References[referenceIndex]
+				file := &domain.TaskResourceFile{
+					FileName:   reference.FileNameSnapshot,
+					MimeType:   reference.MimeType,
+					FileSize:   reference.FileSize,
+					StorageKey: reference.StorageKey,
+				}
+				s.hydrateResourceFileURL(file)
+				reference.DownloadURL = file.DownloadURL
+				reference.PreviewURL = file.PreviewURL
+			}
 		}
 	}
 }

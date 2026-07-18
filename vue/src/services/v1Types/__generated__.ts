@@ -30695,8 +30695,30 @@ export interface components {
             /** Format: int64 */
             file_size?: number | null;
             download_url?: string;
+            preview_url?: string;
             /** Format: date-time */
             download_expires_at?: string | null;
+        };
+        TaskAssetGroupRevisionReference: {
+            /** Format: int64 */
+            id: number;
+            /** Format: int64 */
+            revision_id: number;
+            /** Format: int64 */
+            reference_file_ref_id: number;
+            /** Format: int64 */
+            formal_task_asset_id?: number | null;
+            sort_order: number;
+            ref_id: string;
+            file_name?: string;
+            scope?: string;
+            mime_type?: string;
+            /** Format: int64 */
+            file_size?: number | null;
+            download_url?: string;
+            preview_url?: string;
+            /** Format: date-time */
+            created_at: string;
         };
         TaskAssetGroupRevisionItem: {
             /** Format: int64 */
@@ -30728,9 +30750,7 @@ export interface components {
             created_by: number;
             reason?: string;
             items: components["schemas"]["TaskAssetGroupRevisionItem"][];
-            references: {
-                [key: string]: unknown;
-            }[];
+            references: components["schemas"]["TaskAssetGroupRevisionReference"][];
             /** Format: date-time */
             submitted_at?: string | null;
             /** Format: date-time */
@@ -30759,6 +30779,10 @@ export interface components {
             migration_issue?: string;
             task_no?: string;
             sku_code?: string;
+            product_name?: string;
+            /** Format: int64 */
+            creator_id?: number;
+            creator_name?: string;
             /** @enum {string} */
             business_lane?: "normal" | "customization";
             working_revision?: components["schemas"]["TaskAssetGroupRevision"];

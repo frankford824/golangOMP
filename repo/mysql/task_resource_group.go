@@ -138,10 +138,13 @@ func (r *TaskResourceGroupRepo) ListByTaskID(ctx context.Context, taskID int64) 
 		SELECT g.id, g.task_id, g.scope_kind, g.task_sku_item_id, g.retouch_requirement_id,
 		       g.working_revision_id, g.finalized_revision_id, g.lock_version,
 		       g.migration_incomplete, g.migration_issue, g.created_at, g.updated_at,
-		       t.task_no, COALESCE(tsi.sku_code, ''), t.business_lane
+		       t.task_no, COALESCE(tsi.sku_code, ''),
+		       COALESCE(NULLIF(tsi.product_short_name, ''), NULLIF(tsi.product_name_snapshot, ''), NULLIF(t.product_name_snapshot, ''), ''),
+		       t.creator_id, COALESCE(NULLIF(u.display_name, ''), NULLIF(u.username, ''), ''), t.business_lane
 		FROM task_asset_groups g
 		JOIN tasks t ON t.id = g.task_id
 		LEFT JOIN task_sku_items tsi ON tsi.id = g.task_sku_item_id
+		LEFT JOIN users u ON u.id = t.creator_id
 		WHERE g.task_id = ?
 		ORDER BY FIELD(g.scope_kind, 'task','sku','retouch_requirement'), g.scope_ref_id, g.id`, taskID)
 	if err != nil {
@@ -154,7 +157,7 @@ func (r *TaskResourceGroupRepo) ListByTaskID(ctx context.Context, taskID int64) 
 		var skuID, retouchID, workingID, finalizedID sql.NullInt64
 		if err := rows.Scan(&item.ID, &item.TaskID, &item.ScopeKind, &skuID, &retouchID, &workingID, &finalizedID,
 			&item.LockVersion, &item.MigrationIncomplete, &item.MigrationIssue, &item.CreatedAt, &item.UpdatedAt,
-			&item.TaskNo, &item.SKUCode, &item.BusinessLane); err != nil {
+			&item.TaskNo, &item.SKUCode, &item.ProductName, &item.CreatorID, &item.CreatorName, &item.BusinessLane); err != nil {
 			return nil, err
 		}
 		item.TaskSKUItemID = fromNullInt64(skuID)
@@ -282,10 +285,13 @@ func (r *TaskResourceGroupRepo) ListResourceGroups(ctx context.Context, params d
 		SELECT g.id, g.task_id, g.scope_kind, g.task_sku_item_id, g.retouch_requirement_id,
 		       g.working_revision_id, g.finalized_revision_id, g.lock_version,
 		       g.migration_incomplete, g.migration_issue, g.created_at, g.updated_at,
-		       t.task_no, COALESCE(tsi.sku_code, ''), t.business_lane
+		       t.task_no, COALESCE(tsi.sku_code, ''),
+		       COALESCE(NULLIF(tsi.product_short_name, ''), NULLIF(tsi.product_name_snapshot, ''), NULLIF(t.product_name_snapshot, ''), ''),
+		       t.creator_id, COALESCE(NULLIF(u.display_name, ''), NULLIF(u.username, ''), ''), t.business_lane
 		FROM task_asset_groups g
 		JOIN tasks t ON t.id = g.task_id
 		LEFT JOIN task_sku_items tsi ON tsi.id = g.task_sku_item_id
+		LEFT JOIN users u ON u.id = t.creator_id
 		WHERE `+clause+`
 		ORDER BY g.updated_at DESC, g.id DESC LIMIT ? OFFSET ?`, queryArgs...)
 	if err != nil {
@@ -485,10 +491,13 @@ func (r *TaskResourceGroupRepo) GetResourceGroup(ctx context.Context, groupID in
 		SELECT g.id, g.task_id, g.scope_kind, g.task_sku_item_id, g.retouch_requirement_id,
 		       g.working_revision_id, g.finalized_revision_id, g.lock_version,
 		       g.migration_incomplete, g.migration_issue, g.created_at, g.updated_at,
-		       t.task_no, COALESCE(tsi.sku_code, ''), t.business_lane
+		       t.task_no, COALESCE(tsi.sku_code, ''),
+		       COALESCE(NULLIF(tsi.product_short_name, ''), NULLIF(tsi.product_name_snapshot, ''), NULLIF(t.product_name_snapshot, ''), ''),
+		       t.creator_id, COALESCE(NULLIF(u.display_name, ''), NULLIF(u.username, ''), ''), t.business_lane
 		FROM task_asset_groups g
 		JOIN tasks t ON t.id = g.task_id
 		LEFT JOIN task_sku_items tsi ON tsi.id = g.task_sku_item_id
+		LEFT JOIN users u ON u.id = t.creator_id
 		WHERE g.id = ?`, groupID)
 	item, err := scanTaskResourceGroup(row)
 	if err == sql.ErrNoRows {
@@ -537,7 +546,7 @@ func scanTaskResourceGroup(scanner resourceGroupScanner) (*domain.TaskAssetGroup
 	var skuID, retouchID, workingID, finalizedID sql.NullInt64
 	if err := scanner.Scan(&item.ID, &item.TaskID, &item.ScopeKind, &skuID, &retouchID, &workingID, &finalizedID,
 		&item.LockVersion, &item.MigrationIncomplete, &item.MigrationIssue, &item.CreatedAt, &item.UpdatedAt,
-		&item.TaskNo, &item.SKUCode, &item.BusinessLane); err != nil {
+		&item.TaskNo, &item.SKUCode, &item.ProductName, &item.CreatorID, &item.CreatorName, &item.BusinessLane); err != nil {
 		return nil, err
 	}
 	item.TaskSKUItemID = fromNullInt64(skuID)
@@ -581,20 +590,28 @@ func (r *TaskResourceGroupRepo) getRevision(ctx context.Context, revisionID int6
 		return nil, err
 	}
 	refRows, err := r.db.db.QueryContext(ctx, `
-		SELECT id, revision_id, reference_file_ref_id, formal_task_asset_id, sort_order,
-		       ref_id_snapshot, file_name_snapshot, scope_snapshot, created_at
-		FROM task_asset_group_revision_references WHERE revision_id = ? ORDER BY sort_order, id`, revisionID)
+		SELECT rr.id, rr.revision_id, rr.reference_file_ref_id, rr.formal_task_asset_id, rr.sort_order,
+		       rr.ref_id_snapshot, rr.file_name_snapshot, rr.scope_snapshot,
+		       COALESCE(asr.mime_type, ''), asr.file_size,
+		       CASE WHEN COALESCE(asr.is_placeholder, 1) = 0 THEN COALESCE(asr.ref_key, '') ELSE '' END,
+		       rr.created_at
+		FROM task_asset_group_revision_references rr
+		LEFT JOIN asset_storage_refs asr ON asr.ref_id = rr.ref_id_snapshot
+		WHERE rr.revision_id = ? ORDER BY rr.sort_order, rr.id`, revisionID)
 	if err != nil {
 		return nil, err
 	}
 	for refRows.Next() {
 		var child domain.TaskAssetGroupRevisionReference
 		var formalID sql.NullInt64
+		var fileSize sql.NullInt64
 		if err := refRows.Scan(&child.ID, &child.RevisionID, &child.ReferenceFileRefID, &formalID, &child.SortOrder,
-			&child.RefIDSnapshot, &child.FileNameSnapshot, &child.ScopeSnapshot, &child.CreatedAt); err != nil {
+			&child.RefIDSnapshot, &child.FileNameSnapshot, &child.ScopeSnapshot, &child.MimeType, &fileSize,
+			&child.StorageKey, &child.CreatedAt); err != nil {
 			return nil, err
 		}
 		child.FormalTaskAssetID = fromNullInt64(formalID)
+		child.FileSize = fromNullInt64(fileSize)
 		item.References = append(item.References, child)
 	}
 	if err := refRows.Err(); err != nil {

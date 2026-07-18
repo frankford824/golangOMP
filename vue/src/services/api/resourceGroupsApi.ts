@@ -21,6 +21,20 @@ export interface ResourceRevisionItem {
   file?: ResourceFile
 }
 
+export interface ResourceReference {
+  id?: number
+  revision_id?: number
+  reference_file_ref_id?: number
+  sort_order?: number
+  ref_id?: string
+  file_name?: string
+  scope?: string
+  mime_type?: string
+  file_size?: number | null
+  download_url?: string
+  preview_url?: string
+}
+
 export interface ResourceRevision {
   id: number
   group_id: number
@@ -30,7 +44,7 @@ export interface ResourceRevision {
   source_stage: 'design' | 'audit' | 'retouch' | 'migration' | 'reopen'
   source_file?: ResourceFile | null
   items: ResourceRevisionItem[]
-  references: Array<Record<string, unknown>>
+  references: ResourceReference[]
 }
 
 export interface ResourceGroup {
@@ -44,6 +58,9 @@ export interface ResourceGroup {
   migration_issue?: string
   task_no?: string
   sku_code?: string
+  product_name?: string
+  creator_id?: number
+  creator_name?: string
   business_lane?: string
   working_revision?: ResourceRevision | null
   finalized_revision?: ResourceRevision | null
@@ -74,6 +91,19 @@ export interface ResourceGroupListResult {
   page: number
   page_size: number
   total: number
+}
+
+export interface ResourceGroupDownloadItem {
+  group_id: number
+  revision_id: number
+  revision_item_id: number
+  task_id: number
+  sku_code?: string
+  sort_order: number
+  filename: string
+  mime_type?: string
+  file_size?: number | null
+  download_url: string
 }
 
 export interface ResourceGroupSubmission {
@@ -111,7 +141,7 @@ export const resourceGroupsApi = {
   async get(id: number): Promise<ResourceGroup> {
     return unwrap(await http.get(`/v1/resource-groups/${id}`))
   },
-  async batchDownload(groupIds: number[]): Promise<{ items: Array<ResourceFile & { group_id: number; sort_order: number }> }> {
+  async batchDownload(groupIds: number[]): Promise<{ items: ResourceGroupDownloadItem[] }> {
     return unwrap(await http.post('/v1/resource-groups/batch-download', { group_ids: groupIds }))
   },
   async submitDesign(taskId: number, bundle: ResourceBundle, groups: ResourceGroupSubmission[]): Promise<ResourceBundle> {

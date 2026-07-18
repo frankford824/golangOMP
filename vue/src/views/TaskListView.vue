@@ -47,6 +47,20 @@
         </BaseButton>
       </div>
       <div class="toolbar">
+        <BaseInput
+          v-model="quickKeyword"
+          class="quick-search"
+          placeholder="搜索任务号、SKU 或任务名称"
+          @keyup.enter="applyQuickFilters"
+        />
+        <BaseSelect
+          v-model="quickStatus"
+          class="quick-status"
+          :options="quickStatusOptions"
+          placeholder="全部状态"
+          clearable
+        />
+        <BaseButton size="sm" variant="primary" class="quick-apply" @click="applyQuickFilters">查询</BaseButton>
         <BaseButton
           size="sm"
           variant="secondary"
@@ -54,17 +68,16 @@
           :class="{
             'advanced-filter-toggle--active': advancedFilterOpen || activeAdvancedFilterCount > 0,
           }"
-          @click="advancedFilterOpen = !advancedFilterOpen"
+          @click="advancedFilterOpen = true"
         >
           {{
-            advancedFilterOpen
-              ? '收起筛选'
-              : activeAdvancedFilterCount > 0
+            activeAdvancedFilterCount > 0
                 ? `筛选 ${activeAdvancedFilterCount}`
                 : '高级筛选'
           }}
         </BaseButton>
         <BaseButton
+          v-if="activeAdvancedFilterCount > 0 || searchKeyword"
           size="sm"
           variant="secondary"
           class="clear-all-filter-button"
@@ -73,18 +86,28 @@
           清空全部筛选
         </BaseButton>
       </div>
-      <div v-show="advancedFilterOpen" class="filter-bar-wrap">
-        <TaskFilterPanel
-          :filters="filters"
-          :keyword="searchKeyword"
-          @apply="onFilterApply"
-          @reset="onFilterReset"
-        />
+      <div v-if="activeFilterChips.length" class="active-filter-chips" aria-label="已应用筛选">
+        <button v-for="chip in activeFilterChips" :key="chip.key" type="button" @click="removeActiveFilter(chip.key)">{{ chip.label }} <span aria-hidden="true">×</span></button>
       </div>
       <p v-if="tabStatusScopeHint" class="tab-status-scope-hint" role="status">
         {{ tabStatusScopeHint }}
       </p>
     </div>
+
+    <Teleport to="body">
+      <div v-if="advancedFilterOpen" class="task-filter-drawer-layer">
+        <button class="task-filter-backdrop" aria-label="关闭高级筛选" @click="advancedFilterOpen = false" />
+        <aside class="task-filter-drawer" role="dialog" aria-modal="true" aria-label="高级筛选">
+          <TaskFilterPanel
+            :filters="filters"
+            :keyword="searchKeyword"
+            @apply="onFilterApply"
+            @reset="onFilterReset"
+            @close="advancedFilterOpen = false"
+          />
+        </aside>
+      </div>
+    </Teleport>
 
     <!-- 批量操作条（有选中时滑出） -->
     <Transition name="batch-bar-slide">
@@ -846,9 +869,58 @@ const ARCHIVED_TAB_DEFAULT_STATUSES: ActiveTaskStatus[] = [
 const filters = ref<TaskListFilters>({
   ...defaultTaskFilters,
 })
+const quickKeyword = ref(searchKeyword.value)
+const quickStatus = ref<ActiveTaskStatus | ''>('')
+const quickStatusOptions: BaseSelectOption[] = [
+  { label: '全部状态', value: '' },
+  { label: '待指派', value: 'PendingAssign' },
+  { label: '进行中', value: 'InProgress' },
+  { label: '待审核', value: 'PendingAudit' },
+  { label: '已结单', value: 'Completed' },
+  { label: '已归档', value: 'Archived' },
+  { label: '阻塞', value: 'Blocked' },
+  { label: '已取消', value: 'Cancelled' },
+]
+type ActiveFilterKey = 'keyword' | keyof TaskListFilters
+const statusDisplay: Partial<Record<ActiveTaskStatus, string>> = { Draft: '草稿', PendingAssign: '待指派', Assigned: '已指派', InProgress: '进行中', PendingAudit: '待审核', Completed: '已结单', Archived: '已归档', Cancelled: '已取消', Blocked: '阻塞' }
+const activeFilterChips = computed(() => {
+  const chips: Array<{ key: ActiveFilterKey; label: string }> = []
+  const f = filters.value
+  if (searchKeyword.value) chips.push({ key: 'keyword', label: `关键词：${searchKeyword.value}` })
+  if (f.status.length) chips.push({ key: 'status', label: `状态：${f.status.map((item) => statusDisplay[item] || item).join('、')}` })
+  if (f.taskCategory) chips.push({ key: 'taskCategory', label: `分组：${f.taskCategory === 'customization' ? '定制' : '常规'}` })
+  if (f.taskType) chips.push({ key: 'taskType', label: `类型：${f.taskType}` })
+  if (f.priority) chips.push({ key: 'priority', label: `优先级：${f.priority}` })
+  if (f.ownerDepartment) chips.push({ key: 'ownerDepartment', label: `部门：${f.ownerDepartment}` })
+  if (f.ownerOrgTeam) chips.push({ key: 'ownerOrgTeam', label: `团队：${f.ownerOrgTeam}` })
+  if (f.creatorId) chips.push({ key: 'creatorId', label: '已选创建人' })
+  if (f.assigneeId) chips.push({ key: 'assigneeId', label: '已选执行人' })
+  if (f.dateFrom || f.dateTo) chips.push({ key: 'dateFrom', label: `时间：${f.dateFrom || '不限'} 至 ${f.dateTo || '不限'}` })
+  if (f.overdueOnly) chips.push({ key: 'overdueOnly', label: '仅逾期' })
+  return chips
+})
+
+function applyQuickFilters() {
+  searchKeyword.value = quickKeyword.value.trim()
+  filters.value = { ...filters.value, status: quickStatus.value ? [quickStatus.value] : [] }
+  page.value = 1
+  void refreshList(true)
+}
+
+function removeActiveFilter(key: ActiveFilterKey) {
+  if (key === 'keyword') { searchKeyword.value = ''; quickKeyword.value = '' }
+  else if (key === 'status') { filters.value = { ...filters.value, status: [] }; quickStatus.value = '' }
+  else if (key === 'dateFrom' || key === 'dateTo') filters.value = { ...filters.value, dateFrom: '', dateTo: '' }
+  else if (key === 'overdueOnly') filters.value = { ...filters.value, overdueOnly: false }
+  else filters.value = { ...filters.value, [key]: '' }
+  page.value = 1
+  void refreshList(true)
+}
 
 function clearAllTaskFilters() {
   searchKeyword.value = ''
+  quickKeyword.value = ''
+  quickStatus.value = ''
   filters.value = { ...defaultTaskFilters }
   page.value = 1
   void refreshList(true)
@@ -911,6 +983,7 @@ if (typeof route.query.sort === 'string') {
     sortOrder.value = direction
   }
 }
+quickStatus.value = filters.value.status.length === 1 ? filters.value.status[0] : ''
 
 function setTaskTab(tab: TaskListTab) {
   if (activeTab.value === tab) return
@@ -1009,6 +1082,9 @@ const filteredList = computed(() => tasksStore.list)
 function onFilterApply(nextFilters: TaskListFilters, nextKeyword: string) {
   filters.value = nextFilters
   searchKeyword.value = nextKeyword
+  quickKeyword.value = nextKeyword
+  quickStatus.value = nextFilters.status.length === 1 ? nextFilters.status[0] : ''
+  advancedFilterOpen.value = false
   page.value = 1
   void refreshList(true)
 }
@@ -1016,6 +1092,9 @@ function onFilterApply(nextFilters: TaskListFilters, nextKeyword: string) {
 function onFilterReset(nextFilters: TaskListFilters, nextKeyword: string) {
   filters.value = nextFilters
   searchKeyword.value = nextKeyword
+  quickKeyword.value = nextKeyword
+  quickStatus.value = ''
+  advancedFilterOpen.value = false
   page.value = 1
   void refreshList(true)
 }
@@ -2938,6 +3017,76 @@ watch(totalPages, (value) => {
     grid-column: 2;
     justify-self: start;
     max-width: 100%;
+  }
+}
+
+.toolbar {
+  gap: 0.55rem;
+}
+
+.quick-search {
+  flex: 1 1 18rem;
+  min-width: min(18rem, 100%);
+}
+
+.quick-status {
+  flex: 0 0 10rem;
+}
+
+.active-filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.7rem;
+}
+
+.active-filter-chips button {
+  min-height: 1.9rem;
+  padding: 0 0.65rem;
+  border: 0;
+  border-radius: 999px;
+  background: var(--tc-blue-soft);
+  color: var(--tc-blue-strong);
+  cursor: pointer;
+  font-size: 0.7rem;
+  font-weight: 760;
+}
+
+.task-filter-drawer-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 9500;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.task-filter-backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgb(var(--yb-overlay-night) / 0.44);
+}
+
+.task-filter-drawer {
+  position: relative;
+  width: min(31rem, 100vw);
+  height: 100%;
+  background: rgb(var(--yb-surface));
+  box-shadow: -1.2rem 0 3rem rgb(var(--yb-shadow) / 0.18);
+}
+
+@media (max-width: 720px) {
+  .quick-search {
+    flex-basis: 100%;
+  }
+
+  .quick-status {
+    flex: 1 1 9rem;
+  }
+
+  .quick-apply,
+  .advanced-filter-toggle {
+    flex: 1 1 auto;
   }
 }
 </style>

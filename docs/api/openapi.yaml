@@ -9170,7 +9170,25 @@ components:
         mime_type: { type: string }
         file_size: { type: integer, format: int64, nullable: true }
         download_url: { type: string }
+        preview_url: { type: string }
         download_expires_at: { type: string, format: date-time, nullable: true }
+    TaskAssetGroupRevisionReference:
+      type: object
+      required: [id, revision_id, reference_file_ref_id, sort_order, ref_id, created_at]
+      properties:
+        id: { type: integer, format: int64 }
+        revision_id: { type: integer, format: int64 }
+        reference_file_ref_id: { type: integer, format: int64 }
+        formal_task_asset_id: { type: integer, format: int64, nullable: true }
+        sort_order: { type: integer }
+        ref_id: { type: string }
+        file_name: { type: string }
+        scope: { type: string }
+        mime_type: { type: string }
+        file_size: { type: integer, format: int64, nullable: true }
+        download_url: { type: string }
+        preview_url: { type: string }
+        created_at: { type: string, format: date-time }
     TaskAssetGroupRevisionItem:
       type: object
       required: [id, revision_id, task_asset_id, sort_order]
@@ -9198,7 +9216,9 @@ components:
         items:
           type: array
           items: { $ref: '#/components/schemas/TaskAssetGroupRevisionItem' }
-        references: { type: array, items: { type: object, additionalProperties: true } }
+        references:
+          type: array
+          items: { $ref: '#/components/schemas/TaskAssetGroupRevisionReference' }
         submitted_at: { type: string, format: date-time, nullable: true }
         finalized_at: { type: string, format: date-time, nullable: true }
         created_at: { type: string, format: date-time }
@@ -9218,6 +9238,9 @@ components:
         migration_issue: { type: string }
         task_no: { type: string }
         sku_code: { type: string }
+        product_name: { type: string }
+        creator_id: { type: integer, format: int64 }
+        creator_name: { type: string }
         business_lane: { type: string, enum: [normal, customization] }
         working_revision: { $ref: '#/components/schemas/TaskAssetGroupRevision' }
         finalized_revision: { $ref: '#/components/schemas/TaskAssetGroupRevision' }

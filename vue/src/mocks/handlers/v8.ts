@@ -12,6 +12,9 @@ function resourceGroup(id: number) {
     scope_kind: 'sku',
     task_sku_item_id: 2000 + id,
     sku_code: `SKU-MOCK-${String(id).padStart(4, '0')}`,
+    product_name: id % 3 === 0 ? '轻奢客厅软装套系' : '北欧家居视觉组合',
+    creator_id: 2,
+    creator_name: '李运营',
     business_lane: id % 3 === 0 ? 'customization' : 'normal',
     lock_version: 1,
     migration_incomplete: false,
@@ -30,7 +33,17 @@ function resourceGroup(id: number) {
         sort_order: index + 1,
         file: { task_asset_id: 9000 + id * 10 + index, file_name: `final-${id}-${index + 1}.png`, mime_type: 'image/png', preview_url: preview, download_url: preview },
       })),
-      references: [],
+      references: [{
+        id: 10000 + id,
+        reference_file_ref_id: 11000 + id,
+        sort_order: 0,
+        ref_id: `REF-MOCK-${id}`,
+        file_name: `reference-${id}.jpg`,
+        mime_type: 'image/jpeg',
+        file_size: 245760,
+        preview_url: preview,
+        download_url: preview,
+      }],
     },
   }
 }

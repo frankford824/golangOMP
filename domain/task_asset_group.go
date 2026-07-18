@@ -50,6 +50,9 @@ type TaskAssetGroup struct {
 	MigrationIssue       string                  `json:"migration_issue,omitempty"`
 	TaskNo               string                  `json:"task_no,omitempty"`
 	SKUCode              string                  `json:"sku_code,omitempty"`
+	ProductName          string                  `json:"product_name,omitempty"`
+	CreatorID            int64                   `json:"creator_id,omitempty"`
+	CreatorName          string                  `json:"creator_name,omitempty"`
 	BusinessLane         TaskBusinessLane        `json:"business_lane,omitempty"`
 	WorkingRevision      *TaskAssetGroupRevision `json:"working_revision,omitempty"`
 	FinalizedRevision    *TaskAssetGroupRevision `json:"finalized_revision,omitempty"`
@@ -123,6 +126,11 @@ type TaskAssetGroupRevisionReference struct {
 	RefIDSnapshot      string    `json:"ref_id"`
 	FileNameSnapshot   string    `json:"file_name,omitempty"`
 	ScopeSnapshot      string    `json:"scope,omitempty"`
+	MimeType           string    `json:"mime_type,omitempty"`
+	FileSize           *int64    `json:"file_size,omitempty"`
+	StorageKey         string    `json:"-"`
+	DownloadURL        string    `json:"download_url,omitempty"`
+	PreviewURL         string    `json:"preview_url,omitempty"`
 	CreatedAt          time.Time `json:"created_at"`
 }
 

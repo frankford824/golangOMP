@@ -219,12 +219,12 @@ const routes: RouteRecordRaw[] = [
         path: 'users',
         name: 'UserManagement',
         component: () => import('@/views/org-permission/UserManagementView.vue'),
-        meta: { requiresAuth: true, requiredMenuKey: 'user_admin' },
+        meta: { requiresAuth: true, requiredMenuKey: ['user_admin', 'access_policy'] },
       },
       {
         path: 'access-policy',
         name: 'AccessPolicy',
-        component: () => import('@/views/AccessPolicyView.vue'),
+        redirect: { name: 'UserManagement', query: { tab: 'roles' } },
         meta: { requiresAuth: true, requiredMenuKey: ['access_policy', 'user_admin'] },
       },
       {

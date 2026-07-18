@@ -91,15 +91,18 @@
           <section class="detail-section">
             <header class="detail-section-header">
               <h4>角色权限</h4>
-              <button
-                v-if="canAssignRoles"
-                type="button"
-                class="um-btn um-btn--primary um-btn--sm"
-                :disabled="roleSubmitting"
-                @click="emit('submit-roles')"
-              >
-                {{ roleSubmitting ? '提交中...' : '保存角色' }}
-              </button>
+              <div class="detail-section-actions">
+                <button v-if="canManageAccess" type="button" class="um-btn um-btn--ghost um-btn--sm" @click="emit('manage-access')">权限与范围</button>
+                <button
+                  v-if="canAssignRoles"
+                  type="button"
+                  class="um-btn um-btn--primary um-btn--sm"
+                  :disabled="roleSubmitting"
+                  @click="emit('submit-roles')"
+                >
+                  {{ roleSubmitting ? '提交中...' : '保存角色' }}
+                </button>
+              </div>
             </header>
             <div v-if="lockedRoleOptions.length" class="legacy-role-box">
               <span class="legacy-role-title">{{ lockedRoleTitle }}</span>
@@ -197,6 +200,7 @@ defineProps<{
   canAssignRoles: boolean
   canResetPassword: boolean
   canDisableUser: boolean
+  canManageAccess: boolean
   basicForm: { display_name: string; employee_no: string }
   membershipForm: { department: string; team: string }
   membershipDepartmentOptions: SelectOptionItem[]
@@ -221,6 +225,7 @@ const emit = defineEmits<{
   'submit-roles': []
   'reset-password': []
   'set-status': [next: 'active' | 'disabled']
+  'manage-access': []
 }>()
 
 const selectedRoles = defineModel<string[]>('selectedRoles', { required: true })
