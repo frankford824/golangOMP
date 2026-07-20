@@ -6,6 +6,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"workflow/domain"
+	"workflow/service/aichat"
 )
 
 func respondOK(c *gin.Context, data interface{}) {
@@ -49,6 +50,14 @@ func httpStatusFromCode(code string) int {
 		return http.StatusConflict // 409
 	case domain.ErrCodePermissionDenied:
 		return http.StatusForbidden
+	case aichat.CodeAIChatRateLimited:
+		return http.StatusTooManyRequests
+	case aichat.CodeAIChatDisabled:
+		return http.StatusServiceUnavailable
+	case aichat.CodeAIChatConflict:
+		return http.StatusConflict
+	case aichat.CodeAIInputInvalid:
+		return http.StatusBadRequest
 	case domain.ErrCodeUploadEnvNotAllowed:
 		return http.StatusForbidden
 	case domain.ErrCodeUnauthorized:

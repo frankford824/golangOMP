@@ -23,6 +23,7 @@ import (
 	mysqlrepo "workflow/repo/mysql"
 	"workflow/service"
 	aiagentsvc "workflow/service/aiagent"
+	aichatsvc "workflow/service/aichat"
 	assetcenter "workflow/service/asset_center"
 	assetlifecycle "workflow/service/asset_lifecycle"
 	"workflow/service/blueprint"
@@ -34,6 +35,7 @@ import (
 	orgmovesvc "workflow/service/org_move_request"
 	predictionsvc "workflow/service/prediction"
 	reportl1svc "workflow/service/report_l1"
+	retrievalsvc "workflow/service/retrieval"
 	searchsvc "workflow/service/search"
 	"workflow/service/task_aggregator"
 	taskaisummarysvc "workflow/service/task_ai_summary"
@@ -137,13 +139,16 @@ func main() {
 	taskReferenceAssetBindingRepo := mysqlrepo.NewTaskReferenceAssetBindingRepo(mdb)
 	taskAssetSearchRepo := mysqlrepo.NewTaskAssetSearchRepo(mdb)
 	taskAssetLifecycleRepo := mysqlrepo.NewTaskAssetLifecycleRepo(mdb)
-	externalAssetRepo := mysqlrepo.NewExternalAssetRepo(mdb)
+	externalAssetRepo := mysqlrepo.NewExternalAssetRepoWithAIRetrieval(mdb, cfg.VectorSearch.EmbeddingVersion)
 	orgMoveRequestRepo := mysqlrepo.NewOrgMoveRequestRepo(mdb)
 	taskDraftRepo := mysqlrepo.NewTaskDraftRepo(mdb)
 	notificationRepo := mysqlrepo.NewNotificationRepo(mdb)
 	designSourceRepo := mysqlrepo.NewDesignSourceRepo(mdb)
 	moduleNotificationRepo := mysqlrepo.NewModuleNotificationRepo(mdb)
 	searchRepo := mysqlrepo.NewSearchRepo(mdb)
+	aiChatRepo := mysqlrepo.NewAIChatRepo(mdb)
+	aiRetrievalRepo := mysqlrepo.NewAIRetrievalRepo(mdb)
+	aiAnalysisRepo := mysqlrepo.NewAIAnalysisRepo(mdb)
 	predictionRepo := mysqlrepo.NewPredictionRepo(mdb)
 	reportL1Repo := mysqlrepo.NewReportL1Repo(mdb)
 	taskOperationalDashboardRepo := mysqlrepo.NewTaskOperationalDashboardRepo(mdb)
@@ -394,6 +399,32 @@ func main() {
 		RateLimitMax:    cfg.AI.RateLimitMax,
 		RateLimiter:     aiagentsvc.NewRedisAIRateLimiter(rdb, "omp"),
 	}, logger.Named("ai_agent"))
+	aiChatClient := aiagentsvc.NewAnthropicCompatibleClient(aiagentsvc.Config{
+		Enabled: cfg.AI.Enabled && cfg.AIChat.Enabled, Provider: cfg.AI.Provider,
+		BaseURL: cfg.AI.BaseURL, APIKey: cfg.AI.APIKey, Model: cfg.AI.Model,
+		Timeout: cfg.AIChat.ProviderTimeout, MaxTokens: cfg.AI.MaxTokens,
+		RateLimitWindow: cfg.AI.RateLimitWindow, RateLimitMax: cfg.AI.RateLimitMax,
+		RateLimiter: aiagentsvc.NewRedisAIRateLimiter(rdb, "omp"),
+	}, logger.Named("ai_chat_provider"))
+	embeddingClient := retrievalsvc.NewOpenAICompatibleEmbeddingClient(retrievalsvc.EmbeddingConfig{
+		Enabled: cfg.Embedding.Enabled, BaseURL: cfg.Embedding.BaseURL, APIKey: cfg.Embedding.APIKey,
+		Model: cfg.Embedding.Model, Dimensions: cfg.Embedding.Dimensions, Timeout: cfg.Embedding.Timeout,
+	})
+	qdrantClient := retrievalsvc.NewQdrantClient(retrievalsvc.QdrantConfig{
+		Enabled: cfg.VectorSearch.Enabled, BaseURL: cfg.VectorSearch.BaseURL, APIKey: cfg.VectorSearch.APIKey,
+		CollectionAlias: cfg.VectorSearch.CollectionAlias, Timeout: cfg.VectorSearch.Timeout,
+	})
+	retrievalService := retrievalsvc.NewService(aiRetrievalRepo, embeddingClient, qdrantClient, cfg.VectorSearch.Enabled, logger.Named("hybrid_retrieval"))
+	searchSvc.SetHybridRetrievalProvider(retrievalService)
+	aiChatService := aichatsvc.NewService(aiChatRepo, mdb, aiChatClient, retrievalService,
+		aichatsvc.NewRedisStreamLimiter(rdb, "omp:ai-chat", cfg.AIChat.MaxConcurrentGlobal, cfg.AIChat.MaxConcurrentUser, cfg.AIChat.ProviderTimeout+time.Minute),
+		aichatsvc.Config{
+			Enabled: cfg.AIChat.Enabled, RetentionDays: cfg.AIChat.RetentionDays, MaxInputChars: cfg.AIChat.MaxInputChars,
+			MaxRecentTurns: cfg.AIChat.MaxRecentTurns, MaxContextChars: cfg.AIChat.MaxContextChars,
+			MaxEvidence: cfg.AIChat.MaxEvidence, MaxEvidenceChars: cfg.AIChat.MaxEvidenceChars,
+			MaxConcurrentUser: cfg.AIChat.MaxConcurrentUser,
+		}, logger.Named("ai_chat"))
+	aiChatService.SetAnalysisOrchestrator(aichatsvc.NewToolOrchestrator(aiChatClient, retrievalService, aiAnalysisRepo))
 	trendProviders, expectedTrendSources := reportl1svc.NewDefaultTrendProviders(reportl1svc.TrendProviderConfig{
 		ChinaHotURL:         cfg.BusinessTrend.ChinaHotURL,
 		ApifyToken:          cfg.BusinessTrend.ApifyToken,
@@ -486,24 +517,32 @@ func main() {
 	erpProductH := handler.NewERPProductHandler(erpProductSvc)
 	designSourceH := handler.NewDesignSourceHandler(designSourceSvc)
 	searchH := handler.NewSearchHandler(searchSvc)
+	aiChatH := handler.NewAIChatHandler(aiChatService, cfg.AIChat.HeartbeatInterval)
 	reportL1H := handler.NewReportL1Handler(reportL1Svc, permissionLogRepo)
 	experienceH := handler.NewExperienceHandler(experienceSvc)
 	predictionH := handler.NewPredictionHandler(predictionSvc)
 	predictionH.SetExperienceService(experienceSvc)
 	wsH := transportws.NewHandler(identitySvc, wsHub)
 
-	router := transport.NewRouter(skuH, auditH, agentH, incidentH, policyH, authH, accessPolicyH, userAdminH, erpBridgeH, productH, productManagementH, categoryH, categoryMappingH, costRuleH, costRuleBindingH, erpSyncH, taskH, taskAssignmentH, taskAssetH, taskAssetCenterH, taskCreateReferenceUploadH, assetUploadH, assetFilesH, designSubmissionH, taskResourceWorkflowH, planningSKUH, taskDetailH, taskAISummaryH, taskCostOverrideH, taskBoardH, taskBatchExcelH, taskSingleExcelH, workbenchH, nil, exportCenterH, integrationCenterH, codeRuleH, ruleTemplateH, auditV7H, auditLogH, jstUserAdminH, serverLogH, orgMoveH, taskDraftH, notificationH, erpProductH, designSourceH, searchH, reportL1H, experienceH, predictionH, wsH, routeAccessCatalog, identitySvc, identitySvc, accessPolicySvc, logger, workflowTraceEventSvc)
+	router := transport.NewRouter(skuH, auditH, agentH, incidentH, policyH, authH, accessPolicyH, userAdminH, erpBridgeH, productH, productManagementH, categoryH, categoryMappingH, costRuleH, costRuleBindingH, erpSyncH, taskH, taskAssignmentH, taskAssetH, taskAssetCenterH, taskCreateReferenceUploadH, assetUploadH, assetFilesH, designSubmissionH, taskResourceWorkflowH, planningSKUH, taskDetailH, taskAISummaryH, taskCostOverrideH, taskBoardH, taskBatchExcelH, taskSingleExcelH, workbenchH, nil, exportCenterH, integrationCenterH, codeRuleH, ruleTemplateH, auditV7H, auditLogH, jstUserAdminH, serverLogH, orgMoveH, taskDraftH, notificationH, erpProductH, designSourceH, searchH, aiChatH, reportL1H, experienceH, predictionH, wsH, routeAccessCatalog, identitySvc, identitySvc, accessPolicySvc, logger, workflowTraceEventSvc)
 
 	workerCtx, cancelWorkers := context.WithCancel(context.Background())
 	defer cancelWorkers()
 	workers.NewGroup(workers.GroupDeps{
-		DB:                              db,
-		Redis:                           rdb,
-		Logger:                          logger,
-		ERPSync:                         erpSyncSvc,
-		ProductManagement:               productManagementSvc,
-		SKUComboSync:                    skuComboSyncSvc,
-		Notification:                    notificationSvc,
+		DB:                       db,
+		Redis:                    rdb,
+		Logger:                   logger,
+		ERPSync:                  erpSyncSvc,
+		ProductManagement:        productManagementSvc,
+		SKUComboSync:             skuComboSyncSvc,
+		Notification:             notificationSvc,
+		AIRetrievalRepo:          aiRetrievalRepo,
+		AIRetrievalProcessor:     retrievalService,
+		AIRetrievalWorkerEnabled: cfg.VectorSearch.WorkerEnabled,
+		AIRetrievalWorkerConfig: workers.AsyncOutboxWorkerConfig{
+			Interval: cfg.VectorSearch.WorkerInterval, LeaseTTL: cfg.VectorSearch.WorkerLeaseTTL,
+			Limit: cfg.VectorSearch.WorkerBatchSize, AlertAfterAttempt: cfg.VectorSearch.WorkerMaxAttempts,
+		},
 		ERPEnabled:                      cfg.ERP.Enabled,
 		ERPInterval:                     cfg.ERP.Interval,
 		WebPushEnabled:                  cfg.WebPush.Enabled,
@@ -512,6 +551,9 @@ func main() {
 		SKUSyncFailureReconcileInterval: cfg.WebPush.SKUSyncFailureScanInterval,
 		SKUSyncFailureReconcileLimit:    cfg.WebPush.SKUSyncFailureScanLimit,
 	}).Start(workerCtx)
+	if cfg.AIChat.PurgeEnabled {
+		go workers.RunAIConversationPurgeWorker(workerCtx, aiChatService, cfg.AIChat.PurgeInterval, cfg.AIChat.PurgeLimit, logger.Named("ai_chat_purge"))
+	}
 	startExperienceWorker(workerCtx, experienceSvc, cfg.Experience, logger.Named("experience_worker"))
 	if wecomSender.Start(workerCtx) {
 		logger.Info("wecom aibot sender started", zap.String("chat_id", cfg.WeCom.AiBotDefaultChatID))

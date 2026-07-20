@@ -81,6 +81,28 @@ func TestBatchSearchMatchesDeliveryImageBySKU(t *testing.T) {
 	}
 }
 
+func TestBatchSearchUsesFourBoundedWorkersAndKeepsInputOrder(t *testing.T) {
+	repository := &excelPackageRepoStub{delay: 20 * time.Millisecond}
+	svc := NewService(repository, excelPackagePresignerStub{}, nil)
+	terms := []string{"A", "B", "C", "D", "E", "F", "G", "H"}
+
+	result, appErr := svc.BatchSearch(context.Background(), BatchSearchRequest{Terms: terms})
+	if appErr != nil {
+		t.Fatalf("BatchSearch error = %+v", appErr)
+	}
+	if got := repository.maxActive.Load(); got < 2 || got > 4 {
+		t.Fatalf("maximum search concurrency = %d, want 2..4", got)
+	}
+	if len(result.Results) != len(terms) {
+		t.Fatalf("results = %d, want %d", len(result.Results), len(terms))
+	}
+	for index, item := range result.Results {
+		if item.Term != terms[index] {
+			t.Fatalf("result[%d].term = %q, want %q", index, item.Term, terms[index])
+		}
+	}
+}
+
 func TestBatchSearchReturnsAllMatchingDeliveryImagesForTerm(t *testing.T) {
 	uploaded := string(domain.DesignAssetUploadStatusUploaded)
 	scopeSKU := "CGP000155"

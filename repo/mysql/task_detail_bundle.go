@@ -9,13 +9,22 @@ import (
 )
 
 func (r *taskRepo) GetTaskDetailBundle(ctx context.Context, taskID int64, eventLimit int) (*domain.Task, *domain.TaskDetail, []*domain.TaskModule, []*domain.TaskModuleEvent, []*domain.ReferenceFileRefFlat, error) {
+	bundle, err := r.GetTaskDetailReadBundle(ctx, taskID, eventLimit)
+	if err != nil || bundle == nil {
+		return nil, nil, nil, nil, nil, err
+	}
+	return bundle.Task, bundle.TaskDetail, bundle.Modules, bundle.Events, bundle.ReferenceFiles, nil
+}
+
+func (r *taskRepo) GetTaskDetailReadBundle(ctx context.Context, taskID int64, eventLimit int) (*domain.TaskDetailReadBundle, error) {
 	if eventLimit <= 0 || eventLimit > 200 {
 		eventLimit = 50
 	}
 	query := fmt.Sprintf(`
 		SELECT id, task_no, source_mode, product_id, sku_code, product_name_snapshot,
-		       task_type, operator_group_id, owner_team, owner_department, owner_org_team, creator_id, requester_id, designer_id, current_handler_id,
-		       task_status, priority, deadline_at, need_outsource, is_outsource, COALESCE(business_lane, ''), customization_required, customization_source_type,
+		       task_type, operator_group_id, owner_team, owner_department, owner_org_team, owner_department_id, owner_team_id,
+		       creator_id, requester_id, designer_id, current_handler_id,
+		       task_status, workflow_revision, priority, deadline_at, need_outsource, is_outsource, COALESCE(business_lane, ''), customization_required, customization_source_type,
 		       last_customization_operator_id, warehouse_reject_reason, warehouse_reject_category,
 		       is_batch_task, batch_item_count, batch_mode, primary_sku_code, sku_generation_status,
 		       created_at, updated_at
@@ -56,50 +65,161 @@ func (r *taskRepo) GetTaskDetailBundle(ctx context.Context, taskID int64, eventL
 		SELECT id, task_id, sku_item_id, retouch_requirement_id, ref_id, owner_module_key, context, attached_at
 		FROM reference_file_refs
 		WHERE task_id = %[1]d
-		ORDER BY owner_module_key, attached_at ASC, id ASC`, taskID, eventLimit)
+		ORDER BY owner_module_key, attached_at ASC, id ASC;
+
+		SELECT id, task_id, sequence_no, sku_code, sku_status, product_id, erp_product_id,
+		       filing_status, erp_sync_status, erp_sync_required, erp_sync_version, last_filed_at, COALESCE(filing_error_message, ''),
+		       product_name_snapshot, product_short_name, category_code, material_mode,
+		       cost_price_mode, quantity, base_sale_price, cost_price, estimated_cost, cost_rule_id, cost_rule_name,
+		       cost_rule_source, matched_rule_version, prefill_source, prefill_at, requires_manual_review,
+		       manual_cost_override, manual_cost_override_reason, override_actor, override_at,
+		       design_requirement, COALESCE(set_mode_hint, 0), variant_json, COALESCE(reference_file_refs_json, ''),
+		       dedupe_key, COALESCE(sku_code_type, ''), created_at, updated_at
+		FROM task_sku_items
+		WHERE task_id = %[1]d
+		ORDER BY sequence_no ASC, id ASC;
+
+		SELECT %[3]s
+		FROM task_assets ta
+		LEFT JOIN asset_storage_refs asr ON asr.ref_id = ta.storage_ref_id
+		WHERE ta.task_id = %[1]d
+		ORDER BY ta.version_no ASC, ta.created_at ASC;
+
+		SELECT id, task_id, description, sku_code, spec, remark, sort_order,
+		       created_by, updated_by, created_at, updated_at
+		FROM task_retouch_requirements
+		WHERE task_id = %[1]d AND deleted_at IS NULL
+		ORDER BY sort_order ASC, id ASC;
+
+		SELECT u.id, COALESCE(NULLIF(u.display_name, ''), NULLIF(u.username, ''), '')
+		FROM users u
+		JOIN tasks t ON t.id = %[1]d
+		WHERE u.id IN (t.creator_id, t.requester_id, t.designer_id, t.current_handler_id)
+		ORDER BY u.id`, taskID, eventLimit, taskAssetSelectCols)
 
 	rows, err := r.db.db.QueryContext(ctx, query)
 	if err != nil {
-		return nil, nil, nil, nil, nil, fmt.Errorf("get task detail bundle: %w", err)
+		return nil, fmt.Errorf("get task detail bundle: %w", err)
 	}
 	defer rows.Close()
 
 	task, err := scanSingleTaskResult(rows)
 	if err != nil || task == nil {
-		return nil, nil, nil, nil, nil, err
+		return nil, err
 	}
+	bundle := &domain.TaskDetailReadBundle{Task: task, UserNames: map[int64]string{}}
 	if !rows.NextResultSet() {
 		if err := rows.Err(); err != nil {
-			return nil, nil, nil, nil, nil, err
+			return nil, err
 		}
-		return task, nil, nil, nil, nil, nil
+		return bundle, nil
 	}
 	detail, err := scanSingleTaskDetailResult(rows)
 	if err != nil {
-		return nil, nil, nil, nil, nil, err
+		return nil, err
 	}
+	bundle.TaskDetail = detail
 	if !rows.NextResultSet() {
-		return task, detail, nil, nil, nil, rows.Err()
+		return bundle, rows.Err()
 	}
 	modules, err := scanTaskModules(rows)
 	if err != nil {
-		return nil, nil, nil, nil, nil, err
+		return nil, err
 	}
+	bundle.Modules = modules
 	if !rows.NextResultSet() {
-		return task, detail, modules, nil, nil, rows.Err()
+		return bundle, rows.Err()
 	}
 	events, err := scanTaskModuleEvents(rows)
 	if err != nil {
-		return nil, nil, nil, nil, nil, err
+		return nil, err
 	}
+	bundle.Events = events
 	if !rows.NextResultSet() {
-		return task, detail, modules, events, nil, rows.Err()
+		return bundle, rows.Err()
 	}
 	refs, err := scanReferenceFileRefFlatRows(rows)
 	if err != nil {
-		return nil, nil, nil, nil, nil, err
+		return nil, err
 	}
-	return task, detail, modules, events, refs, rows.Err()
+	bundle.ReferenceFiles = refs
+	if !rows.NextResultSet() {
+		return bundle, rows.Err()
+	}
+	bundle.SKUItems, err = scanTaskSKUItemRows(rows)
+	if err != nil {
+		return nil, err
+	}
+	if !rows.NextResultSet() {
+		return bundle, rows.Err()
+	}
+	bundle.TaskAssets, err = scanTaskAssetRows(rows)
+	if err != nil {
+		return nil, err
+	}
+	if !rows.NextResultSet() {
+		return bundle, rows.Err()
+	}
+	bundle.RetouchRequirements, err = scanTaskRetouchRequirementRows(rows)
+	if err != nil {
+		return nil, err
+	}
+	if !rows.NextResultSet() {
+		return bundle, rows.Err()
+	}
+	for rows.Next() {
+		var id int64
+		var name string
+		if err := rows.Scan(&id, &name); err != nil {
+			return nil, err
+		}
+		bundle.UserNames[id] = name
+	}
+	return bundle, rows.Err()
+}
+
+func scanTaskSKUItemRows(rows *sql.Rows) ([]*domain.TaskSKUItem, error) {
+	items := make([]*domain.TaskSKUItem, 0)
+	for rows.Next() {
+		item, err := scanTaskSKUItem(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func scanTaskAssetRows(rows *sql.Rows) ([]*domain.TaskAsset, error) {
+	items := make([]*domain.TaskAsset, 0)
+	for rows.Next() {
+		item, err := scanTaskAssetRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func scanTaskRetouchRequirementRows(rows *sql.Rows) ([]*domain.TaskRetouchRequirement, error) {
+	items := make([]*domain.TaskRetouchRequirement, 0)
+	for rows.Next() {
+		var item domain.TaskRetouchRequirement
+		var skuCode, spec, remark sql.NullString
+		var createdBy, updatedBy sql.NullInt64
+		if err := rows.Scan(&item.ID, &item.TaskID, &item.Description, &skuCode, &spec, &remark,
+			&item.SortOrder, &createdBy, &updatedBy, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, err
+		}
+		item.SKUCode = skuCode.String
+		item.Spec = spec.String
+		item.Remark = remark.String
+		item.CreatedBy = fromNullInt64(createdBy)
+		item.UpdatedBy = fromNullInt64(updatedBy)
+		items = append(items, &item)
+	}
+	return items, rows.Err()
 }
 
 func scanSingleTaskResult(rows *sql.Rows) (*domain.Task, error) {

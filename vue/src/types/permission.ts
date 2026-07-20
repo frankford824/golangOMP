@@ -60,6 +60,7 @@ export const PermissionEnum = {
   // KPI / 财务
   KPI_VIEW: 'kpi:view',
   FINANCE_VIEW: 'finance:view',
+  REPORT_VIEW: 'report.view',
 } as const
 
 export type PermissionEnumValue = (typeof PermissionEnum)[keyof typeof PermissionEnum]

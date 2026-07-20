@@ -28,6 +28,10 @@ type Group struct {
 	asyncProjectionOutbox          repo.AsyncProjectionOutboxRepo
 	asyncProjectionTx              repo.TxRunner
 	taskERPOutboxProcessor         service.TaskERPOutboxProcessor
+	aiRetrievalRepo                repo.AIRetrievalRepo
+	aiRetrievalProcessor           AIRetrievalProcessor
+	aiRetrievalWorkerEnabled       bool
+	aiRetrievalWorkerConfig        AsyncOutboxWorkerConfig
 	erpEnabled                     bool
 	erpInterval                    time.Duration
 	webPushEnabled                 bool
@@ -60,6 +64,10 @@ type GroupDeps struct {
 	AsyncProjectionOutbox           repo.AsyncProjectionOutboxRepo
 	AsyncProjectionTx               repo.TxRunner
 	TaskERPOutboxProcessor          service.TaskERPOutboxProcessor
+	AIRetrievalRepo                 repo.AIRetrievalRepo
+	AIRetrievalProcessor            AIRetrievalProcessor
+	AIRetrievalWorkerEnabled        bool
+	AIRetrievalWorkerConfig         AsyncOutboxWorkerConfig
 	ERPEnabled                      bool
 	ERPInterval                     time.Duration
 	WebPushEnabled                  bool
@@ -105,6 +113,10 @@ func NewGroup(deps GroupDeps) *Group {
 		asyncProjectionOutbox:          deps.AsyncProjectionOutbox,
 		asyncProjectionTx:              deps.AsyncProjectionTx,
 		taskERPOutboxProcessor:         deps.TaskERPOutboxProcessor,
+		aiRetrievalRepo:                deps.AIRetrievalRepo,
+		aiRetrievalProcessor:           deps.AIRetrievalProcessor,
+		aiRetrievalWorkerEnabled:       deps.AIRetrievalWorkerEnabled,
+		aiRetrievalWorkerConfig:        deps.AIRetrievalWorkerConfig,
 		erpEnabled:                     deps.ERPEnabled,
 		erpInterval:                    deps.ERPInterval,
 		webPushEnabled:                 deps.WebPushEnabled,
@@ -135,6 +147,9 @@ func (g *Group) Start(ctx context.Context) {
 		if g.taskERPOutboxProcessor != nil {
 			go NewTaskERPOutboxWorker(g.asyncProjectionOutbox, g.asyncProjectionTx, g.taskERPOutboxProcessor, AsyncOutboxWorkerConfig{}, g.logger.Named("task_erp_outbox")).Run(ctx)
 		}
+	}
+	if g.aiRetrievalWorkerEnabled && g.aiRetrievalRepo != nil && g.asyncProjectionTx != nil && g.aiRetrievalProcessor != nil {
+		go NewAIRetrievalWorker(g.aiRetrievalRepo, g.asyncProjectionTx, g.aiRetrievalProcessor, g.aiRetrievalWorkerConfig, g.logger.Named("ai_retrieval_outbox")).Run(ctx)
 	}
 	if g.erpEnabled && g.erpSyncSvc != nil {
 		go NewERPSyncWorker(g.erpSyncSvc, g.logger, g.erpInterval).Run(ctx)

@@ -137,6 +137,17 @@ func taskAssetsActiveSQL(ctx context.Context, q taskSearchDocumentSQL, alias str
 }
 
 func reindexTaskSearchDocument(ctx context.Context, q taskSearchDocumentSQL, taskID int64) error {
+	if err := reindexTaskSearchDocumentProjection(ctx, q, taskID); err != nil {
+		return err
+	}
+	return enqueueTaskSearchReindex(ctx, q, taskID)
+}
+
+// reindexTaskSearchDocumentProjection refreshes the MySQL exact-search
+// projection without producing another search_reindex_outbox item. The async
+// outbox consumer must use this core helper to avoid recursively resetting the
+// row it is currently processing.
+func reindexTaskSearchDocumentProjection(ctx context.Context, q taskSearchDocumentSQL, taskID int64) error {
 	if taskID <= 0 {
 		return nil
 	}
@@ -259,6 +270,27 @@ func reindexTaskSearchDocument(ctx context.Context, q taskSearchDocumentSQL, tas
 	)
 	if err != nil {
 		return fmt.Errorf("reindex task search document: %w", err)
+	}
+	return nil
+}
+
+func enqueueTaskSearchReindex(ctx context.Context, q taskSearchDocumentSQL, taskID int64) error {
+	if taskID <= 0 {
+		return nil
+	}
+	result, err := q.ExecContext(ctx, `
+		INSERT IGNORE INTO search_reindex_outbox (entity_type, entity_id, dedupe_key)
+		SELECT 'task', d.task_id,
+		       CONCAT('task:', d.task_id, ':', SHA2(CONCAT_WS('|', d.task_no, d.search_text, UNIX_TIMESTAMP(d.updated_at)), 256))
+		FROM task_search_documents d
+		WHERE d.task_id = ?`, taskID)
+	if err != nil {
+		return fmt.Errorf("enqueue task search reindex: %w", err)
+	}
+	if rows, err := result.RowsAffected(); err != nil {
+		return fmt.Errorf("read task search reindex enqueue result: %w", err)
+	} else if rows > 1 {
+		return fmt.Errorf("enqueue task search reindex: unexpected affected rows %d", rows)
 	}
 	return nil
 }

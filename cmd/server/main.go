@@ -23,6 +23,7 @@ import (
 	mysqlrepo "workflow/repo/mysql"
 	"workflow/service"
 	aiagentsvc "workflow/service/aiagent"
+	aichatsvc "workflow/service/aichat"
 	assetcenter "workflow/service/asset_center"
 	assetlifecycle "workflow/service/asset_lifecycle"
 	"workflow/service/asset_lifecycle/scheduler"
@@ -36,6 +37,7 @@ import (
 	orgmovesvc "workflow/service/org_move_request"
 	predictionsvc "workflow/service/prediction"
 	reportl1svc "workflow/service/report_l1"
+	retrievalsvc "workflow/service/retrieval"
 	searchsvc "workflow/service/search"
 	"workflow/service/task_aggregator"
 	taskaisummarysvc "workflow/service/task_ai_summary"
@@ -113,7 +115,7 @@ func main() {
 	erpSyncRunRepo := mysqlrepo.NewERPSyncRunRepo(mdb)
 	taskRepo := mysqlrepo.NewTaskRepo(mdb)
 	taskResourceGroupRepo := mysqlrepo.NewTaskResourceGroupRepo(mdb)
-	asyncProjectionOutboxRepo := mysqlrepo.NewAsyncProjectionOutboxRepo(mdb)
+	asyncProjectionOutboxRepo := mysqlrepo.NewAsyncProjectionOutboxRepoWithAIRetrieval(mdb, cfg.VectorSearch.EmbeddingVersion)
 	planningSKURepo := mysqlrepo.NewPlanningSKURepo(mdb)
 	taskCreateRequestRepo := mysqlrepo.NewTaskCreateRequestRepo(mdb)
 	skuTraceRepo := mysqlrepo.NewSKUTraceRepo(mdb)
@@ -150,7 +152,7 @@ func main() {
 	taskReferenceAssetBindingRepo := mysqlrepo.NewTaskReferenceAssetBindingRepo(mdb)
 	taskAssetSearchRepo := mysqlrepo.NewTaskAssetSearchRepo(mdb)
 	taskAssetLifecycleRepo := mysqlrepo.NewTaskAssetLifecycleRepo(mdb)
-	externalAssetRepo := mysqlrepo.NewExternalAssetRepo(mdb)
+	externalAssetRepo := mysqlrepo.NewExternalAssetRepoWithAIRetrieval(mdb, cfg.VectorSearch.EmbeddingVersion)
 	taskAutoArchiveRepo := mysqlrepo.NewTaskAutoArchiveRepo(mdb)
 	orgMoveRequestRepo := mysqlrepo.NewOrgMoveRequestRepo(mdb)
 	taskDraftRepo := mysqlrepo.NewTaskDraftRepo(mdb)
@@ -158,6 +160,9 @@ func main() {
 	designSourceRepo := mysqlrepo.NewDesignSourceRepo(mdb)
 	moduleNotificationRepo := mysqlrepo.NewModuleNotificationRepo(mdb)
 	searchRepo := mysqlrepo.NewSearchRepo(mdb)
+	aiChatRepo := mysqlrepo.NewAIChatRepo(mdb)
+	aiRetrievalRepo := mysqlrepo.NewAIRetrievalRepo(mdb)
+	aiAnalysisRepo := mysqlrepo.NewAIAnalysisRepo(mdb)
 	predictionRepo := mysqlrepo.NewPredictionRepo(mdb)
 	reportL1Repo := mysqlrepo.NewReportL1Repo(mdb)
 	taskOperationalDashboardRepo := mysqlrepo.NewTaskOperationalDashboardRepo(mdb)
@@ -502,6 +507,32 @@ func main() {
 		RateLimitMax:    cfg.AI.RateLimitMax,
 		RateLimiter:     aiagentsvc.NewRedisAIRateLimiter(rdb, "omp"),
 	}, logger.Named("ai_agent"))
+	aiChatClient := aiagentsvc.NewAnthropicCompatibleClient(aiagentsvc.Config{
+		Enabled: cfg.AI.Enabled && cfg.AIChat.Enabled, Provider: cfg.AI.Provider,
+		BaseURL: cfg.AI.BaseURL, APIKey: cfg.AI.APIKey, Model: cfg.AI.Model,
+		Timeout: cfg.AIChat.ProviderTimeout, MaxTokens: cfg.AI.MaxTokens,
+		RateLimitWindow: cfg.AI.RateLimitWindow, RateLimitMax: cfg.AI.RateLimitMax,
+		RateLimiter: aiagentsvc.NewRedisAIRateLimiter(rdb, "omp"),
+	}, logger.Named("ai_chat_provider"))
+	embeddingClient := retrievalsvc.NewOpenAICompatibleEmbeddingClient(retrievalsvc.EmbeddingConfig{
+		Enabled: cfg.Embedding.Enabled, BaseURL: cfg.Embedding.BaseURL, APIKey: cfg.Embedding.APIKey,
+		Model: cfg.Embedding.Model, Dimensions: cfg.Embedding.Dimensions, Timeout: cfg.Embedding.Timeout,
+	})
+	qdrantClient := retrievalsvc.NewQdrantClient(retrievalsvc.QdrantConfig{
+		Enabled: cfg.VectorSearch.Enabled, BaseURL: cfg.VectorSearch.BaseURL, APIKey: cfg.VectorSearch.APIKey,
+		CollectionAlias: cfg.VectorSearch.CollectionAlias, Timeout: cfg.VectorSearch.Timeout,
+	})
+	retrievalService := retrievalsvc.NewService(aiRetrievalRepo, embeddingClient, qdrantClient, cfg.VectorSearch.Enabled, logger.Named("hybrid_retrieval"))
+	searchSvc.SetHybridRetrievalProvider(retrievalService)
+	aiChatService := aichatsvc.NewService(aiChatRepo, mdb, aiChatClient, retrievalService,
+		aichatsvc.NewRedisStreamLimiter(rdb, "omp:ai-chat", cfg.AIChat.MaxConcurrentGlobal, cfg.AIChat.MaxConcurrentUser, cfg.AIChat.ProviderTimeout+time.Minute),
+		aichatsvc.Config{
+			Enabled: cfg.AIChat.Enabled, RetentionDays: cfg.AIChat.RetentionDays, MaxInputChars: cfg.AIChat.MaxInputChars,
+			MaxRecentTurns: cfg.AIChat.MaxRecentTurns, MaxContextChars: cfg.AIChat.MaxContextChars,
+			MaxEvidence: cfg.AIChat.MaxEvidence, MaxEvidenceChars: cfg.AIChat.MaxEvidenceChars,
+			MaxConcurrentUser: cfg.AIChat.MaxConcurrentUser,
+		}, logger.Named("ai_chat"))
+	aiChatService.SetAnalysisOrchestrator(aichatsvc.NewToolOrchestrator(aiChatClient, retrievalService, aiAnalysisRepo))
 	trendProviders, expectedTrendSources := reportl1svc.NewDefaultTrendProviders(reportl1svc.TrendProviderConfig{
 		ChinaHotURL:         cfg.BusinessTrend.ChinaHotURL,
 		ApifyToken:          cfg.BusinessTrend.ApifyToken,
@@ -621,6 +652,7 @@ func main() {
 	erpProductH := handler.NewERPProductHandler(erpProductSvc)
 	designSourceH := handler.NewDesignSourceHandler(designSourceSvc)
 	searchH := handler.NewSearchHandler(searchSvc)
+	aiChatH := handler.NewAIChatHandler(aiChatService, cfg.AIChat.HeartbeatInterval)
 	reportL1H := handler.NewReportL1Handler(reportL1Svc, permissionLogRepo)
 	experienceH := handler.NewExperienceHandler(experienceSvc)
 	predictionH := handler.NewPredictionHandler(predictionSvc)
@@ -628,7 +660,7 @@ func main() {
 	wsH := transportws.NewHandler(identitySvc, wsHub)
 
 	// ── 6. HTTP router ────────────────────────────────────────────────────────
-	router := transport.NewRouter(skuH, auditH, agentH, incidentH, policyH, authH, accessPolicyH, userAdminH, erpBridgeH, productH, productManagementH, categoryH, categoryMappingH, costRuleH, costRuleBindingH, erpSyncH, taskH, taskAssignmentH, taskAssetH, taskAssetCenterH, taskCreateReferenceUploadH, assetUploadH, assetFilesH, designSubmissionH, taskResourceWorkflowH, planningSKUH, taskDetailH, taskAISummaryH, taskCostOverrideH, taskBoardH, taskBatchExcelH, taskSingleExcelH, workbenchH, assetWorkbenchH, exportCenterH, integrationCenterH, codeRuleH, ruleTemplateH, auditV7H, auditLogH, jstUserAdminH, serverLogH, orgMoveH, taskDraftH, notificationH, erpProductH, designSourceH, searchH, reportL1H, experienceH, predictionH, wsH, routeAccessCatalog, identitySvc, identitySvc, accessPolicySvc, logger, workflowTraceEventSvc)
+	router := transport.NewRouter(skuH, auditH, agentH, incidentH, policyH, authH, accessPolicyH, userAdminH, erpBridgeH, productH, productManagementH, categoryH, categoryMappingH, costRuleH, costRuleBindingH, erpSyncH, taskH, taskAssignmentH, taskAssetH, taskAssetCenterH, taskCreateReferenceUploadH, assetUploadH, assetFilesH, designSubmissionH, taskResourceWorkflowH, planningSKUH, taskDetailH, taskAISummaryH, taskCostOverrideH, taskBoardH, taskBatchExcelH, taskSingleExcelH, workbenchH, assetWorkbenchH, exportCenterH, integrationCenterH, codeRuleH, ruleTemplateH, auditV7H, auditLogH, jstUserAdminH, serverLogH, orgMoveH, taskDraftH, notificationH, erpProductH, designSourceH, searchH, aiChatH, reportL1H, experienceH, predictionH, wsH, routeAccessCatalog, identitySvc, identitySvc, accessPolicySvc, logger, workflowTraceEventSvc)
 
 	// ── 7. Background workers ─────────────────────────────────────────────────
 	workerCtx, cancelWorkers := context.WithCancel(context.Background())
@@ -663,7 +695,17 @@ func main() {
 		AsyncProjectionOutbox:           asyncProjectionOutboxRepo,
 		AsyncProjectionTx:               mdb,
 		TaskERPOutboxProcessor:          taskERPOutboxProcessor,
+		AIRetrievalRepo:                 aiRetrievalRepo,
+		AIRetrievalProcessor:            retrievalService,
+		AIRetrievalWorkerEnabled:        cfg.VectorSearch.WorkerEnabled,
+		AIRetrievalWorkerConfig: workers.AsyncOutboxWorkerConfig{
+			Interval: cfg.VectorSearch.WorkerInterval, LeaseTTL: cfg.VectorSearch.WorkerLeaseTTL,
+			Limit: cfg.VectorSearch.WorkerBatchSize, AlertAfterAttempt: cfg.VectorSearch.WorkerMaxAttempts,
+		},
 	}).Start(workerCtx)
+	if cfg.AIChat.PurgeEnabled {
+		go workers.RunAIConversationPurgeWorker(workerCtx, aiChatService, cfg.AIChat.PurgeInterval, cfg.AIChat.PurgeLimit, logger.Named("ai_chat_purge"))
+	}
 	startExperienceWorker(workerCtx, experienceSvc, cfg.Experience, logger.Named("experience_worker"))
 	startAssetObjectDeletionWorker(workerCtx, assetObjectDeletionWorker, logger.Named("asset_object_deletion_worker"))
 	if wecomSender.Start(workerCtx) {

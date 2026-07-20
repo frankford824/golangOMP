@@ -177,6 +177,7 @@ curl -X GET https://api.example.com/v1/design-sources/search \
 | `q` | query | string | 是 | - |
 | `scope` | query | enum(all/tasks/assets/products/users) | 否 | - |
 | `limit` | query | integer | 否 | Max items per result array. Default 20 (IA §4.2). |
+| `mode` | query | enum(auto/exact/hybrid) | 否 | Auto keeps identifier-like input exact and uses hybrid retrieval only for natural language. |
 
 请求体: 无请求体。
 
@@ -199,6 +200,12 @@ curl -X GET https://api.example.com/v1/design-sources/search \
     "users": [
       "..."
     ]
+  },
+  "retrieval": {
+    "requested_mode": "auto",
+    "mode": "exact",
+    "degraded": true,
+    "candidates": 123
   }
 }
 ```
@@ -207,6 +214,7 @@ curl -X GET https://api.example.com/v1/design-sources/search \
 |---|---|---|---|
 | `query` | string | 是 | - |
 | `results` | SearchResultGroup | 是 | Source: V1_INFORMATION_ARCHITECTURE §4.2. Decision (R1.7-D): all four arrays are item-schema fixed; `users[]` is always `[]` for callers other than super_admin / hr_admin regardless of match count (IA §4.3 row-level policy; R1.7-D Q1=A1 + Q2=U1). |
+| `retrieval` | SearchRetrievalMeta | 是 | - |
 
 ### 错误码
 | HTTP | code | deny_code | 说明 |

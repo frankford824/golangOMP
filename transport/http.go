@@ -69,6 +69,7 @@ func NewRouter(
 	erpProductH *handler.ERPProductHandler,
 	designSourceH *handler.DesignSourceHandler,
 	searchH *handler.SearchHandler,
+	aiChatH *handler.AIChatHandler,
 	reportL1H *handler.ReportL1Handler,
 	experienceH *handler.ExperienceHandler,
 	predictionH *handler.PredictionHandler,
@@ -127,6 +128,18 @@ func NewRouter(
 	}
 
 	registerV1IdentityRoutes(r, v1, routeAccessCatalog, permissionLogger, capabilityAccess, authH, taskDraftH, designSourceH, searchH, reportL1H, notificationH, wsH)
+
+	if aiChatH != nil {
+		aiChatGroup := v1.Group("/ai/chat")
+		aiChatGroup.GET("/config", capabilityAccess(aiChatGroup, http.MethodGet, "/config", domain.APIReadinessReadyForFrontend, domain.PermissionReportView), aiChatH.Config)
+		aiChatGroup.GET("/conversations", capabilityAccess(aiChatGroup, http.MethodGet, "/conversations", domain.APIReadinessReadyForFrontend, domain.PermissionReportView), aiChatH.ListConversations)
+		aiChatGroup.POST("/conversations", capabilityAccess(aiChatGroup, http.MethodPost, "/conversations", domain.APIReadinessReadyForFrontend, domain.PermissionReportView), aiChatH.CreateConversation)
+		aiChatGroup.GET("/conversations/:conversation_id", capabilityAccess(aiChatGroup, http.MethodGet, "/conversations/:conversation_id", domain.APIReadinessReadyForFrontend, domain.PermissionReportView), aiChatH.GetConversation)
+		aiChatGroup.DELETE("/conversations/:conversation_id", capabilityAccess(aiChatGroup, http.MethodDelete, "/conversations/:conversation_id", domain.APIReadinessReadyForFrontend, domain.PermissionReportView), aiChatH.DeleteConversation)
+		aiChatGroup.POST("/conversations/:conversation_id/messages:stream", capabilityAccess(aiChatGroup, http.MethodPost, "/conversations/:conversation_id/messages:stream", domain.APIReadinessReadyForFrontend, domain.PermissionReportView), aiChatH.StreamMessage)
+		aiChatGroup.GET("/admin/conversations", capabilityAccess(aiChatGroup, http.MethodGet, "/admin/conversations", domain.APIReadinessReadyForFrontend, domain.PermissionReportView), aiChatH.AdminListConversations)
+		aiChatGroup.GET("/admin/conversations/:conversation_id", capabilityAccess(aiChatGroup, http.MethodGet, "/admin/conversations/:conversation_id", domain.APIReadinessReadyForFrontend, domain.PermissionReportView), aiChatH.AdminGetConversation)
+	}
 
 	if accessPolicyH != nil {
 		accessGroup := v1.Group("/access")

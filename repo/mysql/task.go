@@ -1249,14 +1249,15 @@ func scanTask(row *sql.Row) (*domain.Task, error) {
 
 func scanTaskRow(rows *sql.Rows) (*domain.Task, error) {
 	var t domain.Task
-	var productID, operatorGroupID, requesterID, designerID, currentHandlerID, lastCustomizationOperatorID sql.NullInt64
+	var productID, operatorGroupID, ownerDepartmentID, ownerTeamID, requesterID, designerID, currentHandlerID, lastCustomizationOperatorID sql.NullInt64
 	var deadlineAt sql.NullTime
 	var ownerDepartment, ownerOrgTeam, businessLane, customizationSourceType, warehouseRejectReason, warehouseRejectCategory sql.NullString
 	var primarySKUCode sql.NullString
 	err := rows.Scan(
 		&t.ID, &t.TaskNo, &t.SourceMode, &productID, &t.SKUCode, &t.ProductNameSnapshot,
-		&t.TaskType, &operatorGroupID, &t.OwnerTeam, &ownerDepartment, &ownerOrgTeam, &t.CreatorID, &requesterID, &designerID, &currentHandlerID,
-		&t.TaskStatus, &t.Priority, &deadlineAt, &t.NeedOutsource, &t.IsOutsource, &businessLane, &t.CustomizationRequired, &customizationSourceType,
+		&t.TaskType, &operatorGroupID, &t.OwnerTeam, &ownerDepartment, &ownerOrgTeam, &ownerDepartmentID, &ownerTeamID,
+		&t.CreatorID, &requesterID, &designerID, &currentHandlerID,
+		&t.TaskStatus, &t.WorkflowRevision, &t.Priority, &deadlineAt, &t.NeedOutsource, &t.IsOutsource, &businessLane, &t.CustomizationRequired, &customizationSourceType,
 		&lastCustomizationOperatorID, &warehouseRejectReason, &warehouseRejectCategory,
 		&t.IsBatchTask, &t.BatchItemCount, &t.BatchMode, &primarySKUCode, &t.SKUGenerationStatus,
 		&t.CreatedAt, &t.UpdatedAt,
@@ -1266,6 +1267,8 @@ func scanTaskRow(rows *sql.Rows) (*domain.Task, error) {
 	}
 	t.ProductID = fromNullInt64(productID)
 	t.OperatorGroupID = fromNullInt64(operatorGroupID)
+	t.OwnerDepartmentID = fromNullInt64(ownerDepartmentID)
+	t.OwnerTeamID = fromNullInt64(ownerTeamID)
 	t.RequesterID = fromNullInt64(requesterID)
 	t.DesignerID = fromNullInt64(designerID)
 	t.CurrentHandlerID = fromNullInt64(currentHandlerID)

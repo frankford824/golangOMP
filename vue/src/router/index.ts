@@ -170,6 +170,7 @@ const routes: RouteRecordRaw[] = [
         meta: {
           requiresAuth: true,
           requiredMenuKey: ['report_center', 'export_center', 'logs_center', 'kpi', 'finance'],
+          requiredPermissions: ['report.view'],
           emptyTitle: '数据中心',
         },
       },
@@ -234,7 +235,7 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'export-center',
         name: 'ExportCenter',
-        redirect: { name: 'DataCenter', query: { tab: 'export' } },
+        redirect: { name: 'DataCenter' },
       },
       {
         path: 'audit-log',
@@ -245,7 +246,7 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'logs',
         name: 'LogsManagement',
-        redirect: { name: 'DataCenter', query: { tab: 'business' } },
+        redirect: { name: 'DataCenter' },
       },
       {
         path: 'finance',
@@ -256,7 +257,7 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'kpi',
         name: 'Kpi',
-        redirect: { name: 'DataCenter', query: { tab: 'kpi' } },
+        redirect: { name: 'DataCenter' },
       },
     ],
   },

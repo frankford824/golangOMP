@@ -94,6 +94,28 @@ const pages = [
   { name: 'planning-sku', path: '/tasks/sku-planning', ready: '.compose-page[data-compose-intent="planning_sku"]' },
   { name: 'cost-rules', path: '/cost-rules', ready: '.cost-manager-page' },
   {
+    name: 'data-assistant-streamed-answer',
+    path: '/data-center',
+    ready: '.data-assistant-view',
+    prepare: async (page) => {
+      await page.getByRole('button', { name: /过去 30 天哪些环节/ }).click()
+      await page.waitForSelector('.message-thread', { state: 'visible' })
+      await page.waitForFunction(() => document.querySelectorAll('.message-thread [data-message-role="assistant"]').length > 0)
+      await page.waitForTimeout(900)
+    },
+  },
+  {
+    name: 'data-assistant-mobile-history',
+    path: '/data-center',
+    ready: '.data-assistant-view',
+    viewport: { width: 390, height: 844 },
+    prepare: async (page) => {
+      await page.getByRole('button', { name: '打开历史对话' }).click()
+      await page.waitForSelector('.history-drawer[role="dialog"]', { state: 'visible' })
+      await page.waitForTimeout(200)
+    },
+  },
+  {
     name: 'user-management-role-modal',
     path: '/users',
     ready: '.user-management-view',
@@ -212,6 +234,7 @@ async function runAccessibilityAudit() {
     for (const entry of pages) {
       const page = await context.newPage()
       page.setDefaultTimeout(pageTimeoutMs)
+      if (entry.viewport) await page.setViewportSize(entry.viewport)
       await page.goto(new URL(entry.path, baseUrl).toString(), {
         waitUntil: 'domcontentloaded',
         timeout: pageTimeoutMs,

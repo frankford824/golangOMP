@@ -17,7 +17,10 @@ import (
 	"workflow/repo"
 )
 
-type externalAssetRepo struct{ db *DB }
+type externalAssetRepo struct {
+	db               *DB
+	embeddingVersion string
+}
 
 type sqlExecContext interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
@@ -50,6 +53,10 @@ func retryExternalAssetLockConflict(ctx context.Context, run func() error) error
 }
 
 func NewExternalAssetRepo(db *DB) repo.ExternalAssetRepo { return &externalAssetRepo{db: db} }
+
+func NewExternalAssetRepoWithAIRetrieval(db *DB, embeddingVersion string) repo.ExternalAssetRepo {
+	return &externalAssetRepo{db: db, embeddingVersion: strings.TrimSpace(embeddingVersion)}
+}
 
 const externalAssetSelectColumns = `
 	SELECT id, provider, kind, driver, mount_path, origin_path_hash, origin_path, parent_path,
@@ -780,6 +787,11 @@ func (r *externalAssetRepo) upsertExternalAsset(ctx context.Context, item domain
 	if err := upsertExternalAssetSourceFingerprint(ctx, tx, hash, item); err != nil {
 		return err
 	}
+	if r.embeddingVersion != "" && r.embeddingVersion != "disabled" && !item.IsDir {
+		if err := upsertAIExternalAssetProjection(ctx, tx, hash, r.embeddingVersion); err != nil {
+			return err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit external asset upsert: %w", err)
 	}
@@ -879,6 +891,11 @@ func (r *externalAssetRepo) MarkOriginPathMissing(ctx context.Context, provider,
 			return err
 		}
 	}
+	if r.embeddingVersion != "" && r.embeddingVersion != "disabled" {
+		if err := markAIExternalAssetProjectionsMissing(ctx, tx, "origin_path_hash = ?", []any{hash}, r.embeddingVersion); err != nil {
+			return err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit external origin missing update: %w", err)
 	}
@@ -961,6 +978,11 @@ func (r *externalAssetRepo) markMountMissingBefore(ctx context.Context, mountPat
 	if err := rebuildExternalAssetDirectoryIndexForMount(ctx, tx, mountPath); err != nil {
 		return err
 	}
+	if r.embeddingVersion != "" && r.embeddingVersion != "disabled" {
+		if err := markAIExternalAssetProjectionsMissing(ctx, tx, "mount_path = ? AND status = 'missing' AND (last_scanned_at IS NULL OR last_scanned_at < ?)", []any{mountPath, scannedBefore}, r.embeddingVersion); err != nil {
+			return err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit external mount missing update: %w", err)
 	}
@@ -1006,6 +1028,13 @@ func (r *externalAssetRepo) markOriginPrefixesMissingBefore(ctx context.Context,
 		}
 		seenMounts[prefix.MountPath] = struct{}{}
 		if err := rebuildExternalAssetDirectoryIndexForMount(ctx, tx, prefix.MountPath); err != nil {
+			return err
+		}
+	}
+	if r.embeddingVersion != "" && r.embeddingVersion != "disabled" {
+		missingArgs := append([]any{}, args...)
+		missingArgs = append(missingArgs, scannedBefore)
+		if err := markAIExternalAssetProjectionsMissing(ctx, tx, "("+where+") AND status = 'missing' AND (last_scanned_at IS NULL OR last_scanned_at < ?)", missingArgs, r.embeddingVersion); err != nil {
 			return err
 		}
 	}

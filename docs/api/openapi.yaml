@@ -16,6 +16,8 @@ info:
 servers:
   - url: /
 tags:
+  - name: AIChat
+    description: Native read-only data assistant with owner-scoped conversations, traceable evidence and streaming responses.
   - name: AccessPolicy
     description: Explicit administrator-managed roles, capabilities and stable organization-ID scopes.
   - name: TaskResourceWorkflow
@@ -8322,6 +8324,89 @@ components:
         created_at:
           type: string
           format: date-time
+    AIChatConfig:
+      type: object
+      required: [enabled, hybrid_search_enabled, max_input_chars, retention_days, max_concurrent_user, can_review_all]
+      properties:
+        enabled: { type: boolean }
+        hybrid_search_enabled: { type: boolean }
+        max_input_chars: { type: integer, minimum: 1 }
+        retention_days: { type: integer, minimum: 1 }
+        max_concurrent_user: { type: integer, minimum: 1 }
+        can_review_all: { type: boolean }
+    AIMessageSource:
+      type: object
+      required: [source_id, entity_type, entity_id, title, evidence_excerpt, rank]
+      properties:
+        source_id: { type: string, example: S1 }
+        entity_type: { type: string, enum: [task, task_resource_group, external_asset, business_trend, experience_summary] }
+        entity_id: { type: string }
+        title: { type: string }
+        internal_route: { type: string }
+        evidence_excerpt: { type: string }
+        source_version: { type: string }
+        rank: { type: integer, minimum: 1 }
+    AIMessage:
+      type: object
+      required: [id, conversation_id, role, content, status, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        conversation_id: { type: string, format: uuid }
+        reply_to_message_id: { type: string, format: uuid }
+        client_message_id: { type: string }
+        role: { type: string, enum: [user, assistant] }
+        content: { type: string }
+        status: { type: string, enum: [streaming, completed, cancelled, failed] }
+        provider: { type: string }
+        model: { type: string }
+        input_tokens: { type: integer, format: int64 }
+        output_tokens: { type: integer, format: int64 }
+        finish_reason: { type: string }
+        error_code: { type: string }
+        started_at: { type: string, format: date-time }
+        completed_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        sources:
+          type: array
+          items: { $ref: '#/components/schemas/AIMessageSource' }
+    AIConversation:
+      type: object
+      required: [id, owner_user_id, title, status, lock_version, expires_at, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        owner_user_id: { type: integer, format: int64 }
+        owner_name: { type: string }
+        title: { type: string }
+        status: { type: string, enum: [active, deleted] }
+        lock_version: { type: integer, format: int64 }
+        expires_at: { type: string, format: date-time }
+        deleted_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        messages:
+          type: array
+          items: { $ref: '#/components/schemas/AIMessage' }
+    AIConversationList:
+      type: object
+      required: [items, total, page, page_size, total_pages]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/AIConversation' }
+        total: { type: integer, format: int64 }
+        page: { type: integer }
+        page_size: { type: integer }
+        total_pages: { type: integer }
+    SearchRetrievalMeta:
+      type: object
+      required: [requested_mode, mode, degraded, candidates]
+      properties:
+        requested_mode: { type: string, enum: [auto, exact, hybrid] }
+        mode: { type: string, enum: [exact, hybrid] }
+        degraded: { type: boolean }
+        candidates: { type: integer, minimum: 0 }
+        reason: { type: string }
     SearchResultGroup:
       type: object
       description: |
@@ -18901,6 +18986,174 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /v1/ai/chat/config:
+    get:
+      operationId: getAIChatConfig
+      summary: Get the current data-assistant capability contract
+      tags: [AIChat, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-permissions: [report.view]
+      x-rbac-placeholder: { auth_mode: session_token_capability_enforced }
+      responses:
+        '200':
+          description: Safe public configuration without provider secrets or internal endpoints.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { data: { $ref: '#/components/schemas/AIChatConfig' } }
+        '401': { description: Unauthenticated }
+        '403': { description: Missing report.view }
+  /v1/ai/chat/conversations:
+    get:
+      operationId: listAIConversations
+      summary: List the caller's active conversations
+      tags: [AIChat, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-permissions: [report.view]
+      x-rbac-placeholder: { auth_mode: session_token_capability_enforced }
+      parameters:
+        - { in: query, name: page, schema: { type: integer, minimum: 1, default: 1 } }
+        - { in: query, name: page_size, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        '200':
+          description: Owner-scoped conversation list.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { data: { $ref: '#/components/schemas/AIConversationList' } }
+        '401': { description: Unauthenticated }
+        '403': { description: Missing report.view }
+    post:
+      operationId: createAIConversation
+      summary: Create an owner-scoped conversation retained for 90 days
+      tags: [AIChat, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-permissions: [report.view]
+      x-rbac-placeholder: { auth_mode: session_token_capability_enforced }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties: { title: { type: string, maxLength: 120 } }
+      responses:
+        '201':
+          description: Created conversation.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { data: { $ref: '#/components/schemas/AIConversation' } }
+        '403': { description: Missing report.view }
+        '503': { description: Data assistant disabled }
+  /v1/ai/chat/conversations/{conversation_id}:
+    parameters:
+      - { in: path, name: conversation_id, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getAIConversation
+      summary: Read one owner-scoped conversation and its evidence citations
+      tags: [AIChat, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-permissions: [report.view]
+      x-rbac-placeholder: { auth_mode: session_token_capability_enforced }
+      responses:
+        '200':
+          description: Conversation body.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { data: { $ref: '#/components/schemas/AIConversation' } }
+        '404': { description: Not found or not owned by caller }
+    delete:
+      operationId: deleteAIConversation
+      summary: Hide a conversation immediately and hard-delete its body within 24 hours
+      tags: [AIChat, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-permissions: [report.view]
+      x-rbac-placeholder: { auth_mode: session_token_capability_enforced }
+      responses:
+        '204': { description: Conversation scheduled for purge }
+        '404': { description: Not found or not owned by caller }
+  /v1/ai/chat/conversations/{conversation_id}/messages:stream:
+    post:
+      operationId: streamAIChatMessage
+      summary: Stream a read-only evidence-backed answer
+      description: |
+        Emits `meta`, `status`, `retrieval`, `delta`, `done`, and `error` SSE events with a heartbeat at least every 15 seconds.
+        The client_message_id is an idempotency key within the conversation. Cancellation persists any partial answer as cancelled.
+      tags: [AIChat, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-permissions: [report.view]
+      x-rbac-placeholder: { auth_mode: session_token_capability_enforced }
+      parameters:
+        - { in: path, name: conversation_id, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [client_message_id, content]
+              properties:
+                client_message_id: { type: string, minLength: 1, maxLength: 128 }
+                content: { type: string, minLength: 1, maxLength: 4000 }
+      responses:
+        '200':
+          description: Server-sent event stream.
+          content:
+            text/event-stream:
+              schema: { type: string }
+        '409': { description: Identical client message is still streaming }
+        '429': { description: Global or per-user stream concurrency limit reached }
+        '503': { description: Provider, limiter or assistant disabled }
+  /v1/ai/chat/admin/conversations:
+    get:
+      operationId: adminListAIConversations
+      summary: List conversation metadata across users
+      tags: [AIChat, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-permissions: [report.view]
+      x-rbac-placeholder: { auth_mode: protected_super_admin_and_capability_enforced }
+      parameters:
+        - { in: query, name: owner_user_id, schema: { type: integer, format: int64 } }
+        - { in: query, name: status, schema: { type: string, enum: [active, deleted] } }
+        - { in: query, name: from, schema: { type: string, format: date } }
+        - { in: query, name: to, schema: { type: string, format: date } }
+        - { in: query, name: page, schema: { type: integer, minimum: 1, default: 1 } }
+        - { in: query, name: page_size, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+      responses:
+        '200':
+          description: Cross-user metadata list.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { data: { $ref: '#/components/schemas/AIConversationList' } }
+        '403': { description: Only a protected SuperAdmin may review all conversations }
+  /v1/ai/chat/admin/conversations/{conversation_id}:
+    get:
+      operationId: adminGetAIConversation
+      summary: Review one cross-user conversation and write a metadata-only audit event
+      tags: [AIChat, ReadyForFrontend]
+      x-api-readiness: ready_for_frontend
+      x-permissions: [report.view]
+      x-rbac-placeholder: { auth_mode: protected_super_admin_and_capability_enforced }
+      parameters:
+        - { in: path, name: conversation_id, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Audited conversation body.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { data: { $ref: '#/components/schemas/AIConversation' } }
+        '403': { description: Only a protected SuperAdmin may review all conversations }
+        '404': { description: Conversation not found }
   /v1/search:
     get:
       summary: Perform a global search
@@ -18936,6 +19189,13 @@ paths:
             minimum: 1
             maximum: 50
             default: 20
+        - in: query
+          name: mode
+          description: Auto keeps identifier-like input exact and uses hybrid retrieval only for natural language.
+          schema:
+            type: string
+            enum: [auto, exact, hybrid]
+            default: auto
       responses:
         '200':
           description: Grouped search results
@@ -18943,12 +19203,14 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [query, results]
+                required: [query, results, retrieval]
                 properties:
                   query:
                     type: string
                   results:
                     $ref: '#/components/schemas/SearchResultGroup'
+                  retrieval:
+                    $ref: '#/components/schemas/SearchRetrievalMeta'
         '401':
           description: Unauthenticated
           content:

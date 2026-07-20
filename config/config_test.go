@@ -19,6 +19,42 @@ func TestLoadAuthSettingsRejectsBootstrapCredentialsByDefault(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsIncompleteAIChatAndVectorConfiguration(t *testing.T) {
+	setBase := func(t *testing.T) {
+		t.Helper()
+		t.Setenv("MYSQL_DSN", "root:password@tcp(127.0.0.1:3306)/workflow?charset=utf8mb4&parseTime=True&loc=Local")
+		t.Setenv("AUTH_ALLOW_EMBEDDED_SETTINGS", "true")
+		t.Setenv("AUTH_ALLOW_INSECURE_BOOTSTRAP_CREDENTIALS", "true")
+		t.Setenv("WEB_PUSH_ENABLED", "false")
+	}
+	t.Run("chat provider required", func(t *testing.T) {
+		setBase(t)
+		t.Setenv("AI_CHAT_ENABLED", "true")
+		t.Setenv("AI_AGENT_ENABLED", "false")
+		t.Setenv("AI_AGENT_BASE_URL", "")
+		t.Setenv("AI_AGENT_API_KEY", "")
+		t.Setenv("AI_AGENT_MODEL", "")
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "AI_CHAT_ENABLED=true requires") {
+			t.Fatalf("Load() error=%v", err)
+		}
+	})
+	t.Run("vector worker bounds required", func(t *testing.T) {
+		setBase(t)
+		t.Setenv("AI_CHAT_ENABLED", "false")
+		t.Setenv("VECTOR_SEARCH_ENABLED", "true")
+		t.Setenv("AI_EMBEDDING_ENABLED", "true")
+		t.Setenv("AI_EMBEDDING_BASE_URL", "http://embedding.test")
+		t.Setenv("AI_EMBEDDING_API_KEY", "secret")
+		t.Setenv("AI_EMBEDDING_MODEL", "embed")
+		t.Setenv("AI_EMBEDDING_VERSION", "embed:v1")
+		t.Setenv("QDRANT_API_KEY", "secret")
+		t.Setenv("AI_RETRIEVAL_WORKER_BATCH_SIZE", "0")
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "vector retrieval configuration is invalid") {
+			t.Fatalf("Load() error=%v", err)
+		}
+	})
+}
+
 func TestLoadDefaultsERPBridgeToLoopback(t *testing.T) {
 	t.Setenv("MYSQL_DSN", "root:password@tcp(127.0.0.1:3306)/workflow?charset=utf8mb4&parseTime=True&loc=Local")
 	t.Setenv("AUTH_ALLOW_EMBEDDED_SETTINGS", "true")

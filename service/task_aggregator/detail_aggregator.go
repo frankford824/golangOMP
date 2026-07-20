@@ -56,6 +56,10 @@ type detailBundleReader interface {
 	GetTaskDetailBundle(ctx context.Context, taskID int64, eventLimit int) (*domain.Task, *domain.TaskDetail, []*domain.TaskModule, []*domain.TaskModuleEvent, []*domain.ReferenceFileRefFlat, error)
 }
 
+type detailReadBundleReader interface {
+	GetTaskDetailReadBundle(ctx context.Context, taskID int64, eventLimit int) (*domain.TaskDetailReadBundle, error)
+}
+
 type referenceFileRefEnricher interface {
 	EnrichAll([]domain.ReferenceFileRef) []domain.ReferenceFileRef
 }
@@ -101,6 +105,17 @@ func NewDetailService(tasks repo.TaskRepo, modules repo.TaskModuleRepo, events r
 }
 
 func (s *DetailService) Get(ctx context.Context, taskID int64) (*Detail, error) {
+	if reader, ok := s.tasks.(detailReadBundleReader); ok {
+		bundle, err := reader.GetTaskDetailReadBundle(ctx, taskID, 50)
+		if err == nil {
+			if bundle == nil || bundle.Task == nil {
+				return nil, nil
+			}
+			out := s.buildDetailWithNames(ctx, bundle.Task, bundle.TaskDetail, bundle.Modules, bundle.Events, bundle.ReferenceFiles, bundle.UserNames)
+			s.hydrateBundledFields(ctx, out, bundle)
+			return out, nil
+		}
+	}
 	if reader, ok := s.tasks.(detailBundleReader); ok {
 		task, detail, modules, events, refs, err := reader.GetTaskDetailBundle(ctx, taskID, 50)
 		if err == nil {
@@ -142,6 +157,10 @@ func (s *DetailService) Get(ctx context.Context, taskID int64) (*Detail, error) 
 }
 
 func (s *DetailService) buildDetail(ctx context.Context, task *domain.Task, detail *domain.TaskDetail, modules []*domain.TaskModule, events []*domain.TaskModuleEvent, refs []*domain.ReferenceFileRefFlat) *Detail {
+	return s.buildDetailWithNames(ctx, task, detail, modules, events, refs, nil)
+}
+
+func (s *DetailService) buildDetailWithNames(ctx context.Context, task *domain.Task, detail *domain.TaskDetail, modules []*domain.TaskModule, events []*domain.TaskModuleEvent, refs []*domain.ReferenceFileRefFlat, names map[int64]string) *Detail {
 	moduleDetails := make([]ModuleDetail, 0, len(modules))
 	for _, m := range modules {
 		moduleDetails = append(moduleDetails, ModuleDetail{TaskModule: m, Visibility: "visible", Projection: json.RawMessage(`{}`)})
@@ -168,8 +187,26 @@ func (s *DetailService) buildDetail(ctx context.Context, task *domain.Task, deta
 		Workflow:        workflow,
 		DesignSubStatus: designSubStatus,
 	}
-	hydrateDetailActorFields(ctx, s.nameResolver, out, task)
+	hydrateDetailActorFields(ctx, s.nameResolver, out, task, names)
 	return out
+}
+
+func (s *DetailService) hydrateBundledFields(ctx context.Context, out *Detail, bundle *domain.TaskDetailReadBundle) {
+	if out == nil || bundle == nil || bundle.Task == nil {
+		return
+	}
+	out.SKUItems = bundle.SKUItems
+	out.AssetVersions = buildDetailAssetVersions(bundle.TaskAssets, bundle.Task)
+	requirements := make([]domain.TaskRetouchRequirement, 0, len(bundle.RetouchRequirements))
+	for _, item := range bundle.RetouchRequirements {
+		if item != nil {
+			requirements = append(requirements, *item)
+		}
+	}
+	designAssets := buildDetailDesignAssetsFromVersions(out.AssetVersions)
+	out.RetouchRequirements = parentservice.EnrichRetouchRequirementsReadModel(ctx, requirements, bundle.ReferenceFiles, designAssets, s.refEnricher)
+	_, out.AssetVersions = parentservice.FilterTaskLevelDesignAssetReadModel(nil, out.AssetVersions)
+	out.Workflow = normalizeDetailTerminalWorkflow(bundle.Task, out.Workflow)
 }
 
 func (s *DetailService) hydrateBatchAndAssetFields(ctx context.Context, out *Detail, task *domain.Task) error {
@@ -240,6 +277,10 @@ func (s *DetailService) loadAssetVersions(ctx context.Context, task *domain.Task
 	if err != nil {
 		return nil, err
 	}
+	return buildDetailAssetVersions(records, task), nil
+}
+
+func buildDetailAssetVersions(records []*domain.TaskAsset, task *domain.Task) []*domain.DesignAssetVersion {
 	versions := make([]*domain.DesignAssetVersion, 0, len(records))
 	for _, record := range records {
 		version := domain.BuildDesignAssetVersion(record)
@@ -265,9 +306,9 @@ func (s *DetailService) loadAssetVersions(ctx context.Context, task *domain.Task
 		versions = append(versions, version)
 	}
 	if versions == nil {
-		return []*domain.DesignAssetVersion{}, nil
+		return []*domain.DesignAssetVersion{}
 	}
-	return versions, nil
+	return versions
 }
 
 func detailAssetVersionPreviewAvailable(version *domain.DesignAssetVersion) bool {
@@ -313,7 +354,7 @@ func detailAssetVersionAccessHint(version *domain.DesignAssetVersion) string {
 	return "Task asset is available through download_url."
 }
 
-func hydrateDetailActorFields(ctx context.Context, resolver userDisplayNameResolver, out *Detail, task *domain.Task) {
+func hydrateDetailActorFields(ctx context.Context, resolver userDisplayNameResolver, out *Detail, task *domain.Task, names map[int64]string) {
 	if out == nil || task == nil {
 		return
 	}
@@ -322,6 +363,20 @@ func hydrateDetailActorFields(ctx context.Context, resolver userDisplayNameResol
 	out.DesignerID = cloneInt64Ptr(task.DesignerID)
 	out.AssigneeID = cloneInt64Ptr(task.DesignerID)
 	out.CurrentHandlerID = cloneInt64Ptr(task.CurrentHandlerID)
+	if names != nil {
+		out.CreatorName = names[task.CreatorID]
+		if task.RequesterID != nil {
+			out.RequesterName = names[*task.RequesterID]
+		}
+		if task.DesignerID != nil {
+			out.DesignerName = names[*task.DesignerID]
+			out.AssigneeName = out.DesignerName
+		}
+		if task.CurrentHandlerID != nil {
+			out.CurrentHandlerName = names[*task.CurrentHandlerID]
+		}
+		return
+	}
 	if resolver == nil {
 		return
 	}

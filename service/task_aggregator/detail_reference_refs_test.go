@@ -171,6 +171,40 @@ func TestDetailServiceReturnsSKUItemsAndScopedAssetVersions(t *testing.T) {
 	}
 }
 
+func TestDetailServiceUsesSingleReadBundleWithoutFallbackQueries(t *testing.T) {
+	taskID := int64(618)
+	designerID := int64(203)
+	designAssetID := int64(990)
+	assetVersion := 1
+	scopeSKU := "SKU-618"
+	storageKey := "tasks/RW-618/assets/final.jpg"
+	uploaded := string(domain.DesignAssetUploadStatusUploaded)
+	bundle := &domain.TaskDetailReadBundle{
+		Task:       &domain.Task{ID: taskID, TaskNo: "RW-618", TaskType: domain.TaskTypeNewProductDevelopment, TaskStatus: domain.TaskStatusInProgress, CreatorID: 1, DesignerID: &designerID},
+		TaskDetail: &domain.TaskDetail{TaskID: taskID},
+		SKUItems:   []*domain.TaskSKUItem{{ID: 88, TaskID: taskID, SKUCode: "SKU-618"}},
+		TaskAssets: []*domain.TaskAsset{{ID: 99, TaskID: taskID, AssetID: &designAssetID, AssetVersionNo: &assetVersion, ScopeSKUCode: &scopeSKU, AssetType: domain.TaskAssetTypeDelivery, FileName: "final.jpg", StorageKey: &storageKey, UploadStatus: &uploaded}},
+		UserNames:  map[int64]string{1: "创建人", designerID: "设计师"},
+	}
+	svc := NewDetailService(
+		bundledTaskRepoStub{detailTaskRepoStub: detailTaskRepoStub{}, bundle: bundle},
+		panicDetailModuleRepo{}, panicDetailEventRepo{}, panicDetailReferenceRepo{},
+		WithTaskAssetRepo(panicDetailAssetRepo{}),
+		WithUserDisplayNameResolver(panicDetailNameResolver{}),
+	)
+
+	detail, err := svc.Get(context.Background(), taskID)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if detail.CreatorName != "创建人" || detail.DesignerName != "设计师" {
+		t.Fatalf("bundled names = %q/%q", detail.CreatorName, detail.DesignerName)
+	}
+	if len(detail.SKUItems) != 1 || len(detail.AssetVersions) != 1 {
+		t.Fatalf("bundled sku/assets = %d/%d", len(detail.SKUItems), len(detail.AssetVersions))
+	}
+}
+
 type detailNameResolverStub struct {
 	names map[int64]string
 }
@@ -184,6 +218,45 @@ type detailTaskRepoStub struct {
 	task     *domain.Task
 	detail   *domain.TaskDetail
 	skuItems []*domain.TaskSKUItem
+}
+
+type bundledTaskRepoStub struct {
+	detailTaskRepoStub
+	bundle *domain.TaskDetailReadBundle
+}
+
+func (r bundledTaskRepoStub) GetTaskDetailReadBundle(context.Context, int64, int) (*domain.TaskDetailReadBundle, error) {
+	return r.bundle, nil
+}
+
+type panicDetailModuleRepo struct{ repo.TaskModuleRepo }
+
+func (panicDetailModuleRepo) ListByTask(context.Context, int64) ([]*domain.TaskModule, error) {
+	panic("fallback module query must not run")
+}
+
+type panicDetailEventRepo struct{ repo.TaskModuleEventRepo }
+
+func (panicDetailEventRepo) ListRecentByTask(context.Context, int64, int) ([]*domain.TaskModuleEvent, error) {
+	panic("fallback event query must not run")
+}
+
+type panicDetailReferenceRepo struct{ repo.ReferenceFileRefFlatRepo }
+
+func (panicDetailReferenceRepo) ListByTask(context.Context, int64) ([]*domain.ReferenceFileRefFlat, error) {
+	panic("fallback reference query must not run")
+}
+
+type panicDetailAssetRepo struct{ repo.TaskAssetRepo }
+
+func (panicDetailAssetRepo) ListByTaskID(context.Context, int64) ([]*domain.TaskAsset, error) {
+	panic("fallback asset query must not run")
+}
+
+type panicDetailNameResolver struct{}
+
+func (panicDetailNameResolver) GetDisplayName(context.Context, int64) string {
+	panic("fallback user query must not run")
 }
 
 func (r detailTaskRepoStub) GetByID(context.Context, int64) (*domain.Task, error) {

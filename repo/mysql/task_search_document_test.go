@@ -73,6 +73,12 @@ func TestReindexTaskSearchDocumentRefreshesAssetDocumentsForTaskMetadata(t *test
 					return fmt.Errorf("task document SQL missing %q: %s", fragment, normalized)
 				}
 			}
+		case "task-reindex-enqueue":
+			for _, fragment := range []string{"INSERT IGNORE INTO search_reindex_outbox", "SHA2", "FROM task_search_documents"} {
+				if !strings.Contains(normalized, fragment) {
+					return fmt.Errorf("task reindex enqueue SQL missing %q: %s", fragment, normalized)
+				}
+			}
 		case "asset-doc-delete-by-task":
 			if !strings.Contains(normalized, "DELETE FROM asset_search_documents WHERE task_id = ?") {
 				return fmt.Errorf("asset document delete SQL unexpected: %s", normalized)
@@ -113,11 +119,60 @@ func TestReindexTaskSearchDocumentRefreshesAssetDocumentsForTaskMetadata(t *test
 	mock.ExpectExec("task-doc-upsert").
 		WithArgs(taskID, taskID, taskID).
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("task-reindex-enqueue").
+		WithArgs(taskID).
+		WillReturnResult(sqlmock.NewResult(0, 1))
 
 	if err := reindexTaskSearchDocument(context.Background(), db, taskID); err != nil {
 		t.Fatalf("reindexTaskSearchDocument() error = %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestReindexTaskSearchDocumentProjectionDoesNotRecursivelyEnqueue(t *testing.T) {
+	mysqlSchemaPresenceCache = sync.Map{}
+	db, mock, err := sqlmock.New(sqlmock.QueryMatcherOption(sqlmock.QueryMatcherRegexp))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	taskID := int64(73)
+	mock.ExpectQuery(`information_schema\.tables`).
+		WithArgs("task_search_documents").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectExec(`SET SESSION group_concat_max_len`).WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(`information_schema\.columns`).WithArgs("task_assets", "deleted_at").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectQuery(`information_schema\.columns`).WithArgs("task_assets", "cleaned_at").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectExec(`INSERT INTO task_search_documents`).
+		WithArgs(taskID, taskID, taskID).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+
+	if err := reindexTaskSearchDocumentProjection(context.Background(), db, taskID); err != nil {
+		t.Fatalf("reindexTaskSearchDocumentProjection() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("unexpected recursive enqueue: %v", err)
+	}
+}
+
+func TestEnqueueTaskSearchReindexUsesContentVersionedDedupe(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectExec(`INSERT IGNORE INTO search_reindex_outbox[\s\S]+SHA2\(CONCAT_WS`).
+		WithArgs(int64(91)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	if err := enqueueTaskSearchReindex(context.Background(), db, 91); err != nil {
+		t.Fatalf("enqueueTaskSearchReindex() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }

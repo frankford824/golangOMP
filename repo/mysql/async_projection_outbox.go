@@ -10,10 +10,17 @@ import (
 	"workflow/repo"
 )
 
-type asyncProjectionOutboxRepo struct{ db *DB }
+type asyncProjectionOutboxRepo struct {
+	db               *DB
+	embeddingVersion string
+}
 
 func NewAsyncProjectionOutboxRepo(db *DB) repo.AsyncProjectionOutboxRepo {
 	return &asyncProjectionOutboxRepo{db: db}
+}
+
+func NewAsyncProjectionOutboxRepoWithAIRetrieval(db *DB, embeddingVersion string) repo.AsyncProjectionOutboxRepo {
+	return &asyncProjectionOutboxRepo{db: db, embeddingVersion: strings.TrimSpace(embeddingVersion)}
 }
 
 func (r *asyncProjectionOutboxRepo) ClaimTaskERPOutbox(ctx context.Context, tx repo.Tx, leaseToken string, now, leaseUntil time.Time, limit int) ([]repo.TaskERPOutboxItem, error) {
@@ -143,14 +150,19 @@ func (r *asyncProjectionOutboxRepo) ClaimSearchReindexOutbox(ctx context.Context
 }
 
 func (r *asyncProjectionOutboxRepo) ApplySearchReindex(ctx context.Context, tx repo.Tx, item repo.SearchReindexOutboxItem) error {
+	var err error
 	switch strings.TrimSpace(item.EntityType) {
 	case "task":
-		return reindexTaskSearchDocument(ctx, Unwrap(tx), item.EntityID)
+		err = reindexTaskSearchDocumentProjection(ctx, Unwrap(tx), item.EntityID)
 	case "task_resource_group":
-		return reindexTaskAssetGroupSearchDocument(ctx, Unwrap(tx), item.EntityID)
+		err = reindexTaskAssetGroupSearchDocument(ctx, Unwrap(tx), item.EntityID)
 	default:
 		return fmt.Errorf("unsupported search reindex entity type %q", item.EntityType)
 	}
+	if err != nil || r.embeddingVersion == "" || r.embeddingVersion == "disabled" {
+		return err
+	}
+	return upsertAIRetrievalProjection(ctx, Unwrap(tx), strings.TrimSpace(item.EntityType), item.EntityID, r.embeddingVersion)
 }
 
 func (r *asyncProjectionOutboxRepo) MarkSearchReindexOutboxSucceeded(ctx context.Context, tx repo.Tx, id int64, leaseToken string) error {

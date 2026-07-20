@@ -5,6 +5,8 @@ import (
 	"fmt"
 	pathpkg "path"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -397,10 +399,27 @@ func TestExcelPackageSetParentRequiresExactXuKaiSKUFolder(t *testing.T) {
 type excelPackageRepoStub struct {
 	rowsByKeyword  map[string][]*repo.TaskAssetSearchRow
 	callsByKeyword map[string]int
+	mu             sync.Mutex
+	delay          time.Duration
+	active         atomic.Int32
+	maxActive      atomic.Int32
 }
 
 func (s *excelPackageRepoStub) Search(_ context.Context, query domain.AssetSearchQuery) ([]*repo.TaskAssetSearchRow, int64, error) {
+	active := s.active.Add(1)
+	defer s.active.Add(-1)
+	for {
+		previous := s.maxActive.Load()
+		if active <= previous || s.maxActive.CompareAndSwap(previous, active) {
+			break
+		}
+	}
+	if s.delay > 0 {
+		time.Sleep(s.delay)
+	}
 	keyword := strings.ToUpper(strings.TrimSpace(query.Keyword))
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.callsByKeyword == nil {
 		s.callsByKeyword = map[string]int{}
 	}

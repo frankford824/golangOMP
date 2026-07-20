@@ -2,6 +2,9 @@ package search
 
 import (
 	"context"
+	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -17,9 +20,10 @@ const (
 )
 
 type Service struct {
-	repo     repo.SearchRepo
-	external ExternalAssetSearchProvider
-	logger   *zap.Logger
+	repo      repo.SearchRepo
+	external  ExternalAssetSearchProvider
+	retrieval HybridRetrievalProvider
+	logger    *zap.Logger
 }
 
 func NewService(repo repo.SearchRepo) *Service {
@@ -38,8 +42,17 @@ type ScopedTaskSearchProvider interface {
 	SearchTasksScoped(ctx context.Context, q string, limit int, access domain.ResourceGroupAccessFilter) ([]domain.SearchTask, error)
 }
 
+type HybridRetrievalProvider interface {
+	HybridReady() bool
+	Search(ctx context.Context, actor domain.RequestActor, query string, limit int) ([]domain.AIRetrievalHit, domain.AIRetrievalMeta, error)
+}
+
 func (s *Service) SetExternalAssetSearchProvider(provider ExternalAssetSearchProvider) {
 	s.external = provider
+}
+
+func (s *Service) SetHybridRetrievalProvider(provider HybridRetrievalProvider) {
+	s.retrieval = provider
 }
 
 func (s *Service) SetLogger(logger *zap.Logger) {
@@ -144,6 +157,181 @@ func (s *Service) Search(ctx context.Context, actor domain.RequestActor, q strin
 	}
 	normalizeNilSlices(result)
 	return result, nil
+}
+
+func (s *Service) SearchWithMode(ctx context.Context, actor domain.RequestActor, q string, scope string, limit int, requestedMode string) (*domain.SearchResultGroup, domain.SearchRetrievalMeta, *domain.AppError) {
+	q = strings.TrimSpace(q)
+	if q == "" {
+		return nil, domain.SearchRetrievalMeta{}, domain.NewAppError(CodeInvalidQuery, "q is required", nil)
+	}
+	requestedMode = strings.ToLower(strings.TrimSpace(requestedMode))
+	if requestedMode == "" {
+		requestedMode = "auto"
+	}
+	if requestedMode != "auto" && requestedMode != "exact" && requestedMode != "hybrid" {
+		return nil, domain.SearchRetrievalMeta{}, domain.NewAppError(CodeInvalidQuery, "invalid search mode", nil)
+	}
+	selectedMode := requestedMode
+	if selectedMode == "auto" {
+		selectedMode = "hybrid"
+		if deterministicSearchQuery(q) {
+			selectedMode = "exact"
+		}
+	}
+	meta := domain.SearchRetrievalMeta{RequestedMode: requestedMode, Mode: selectedMode}
+	if selectedMode != "hybrid" {
+		result, appErr := s.Search(ctx, actor, q, scope, limit)
+		if appErr != nil {
+			return nil, meta, appErr
+		}
+		return result, meta, nil
+	}
+	if s.retrieval == nil {
+		result, appErr := s.Search(ctx, actor, q, scope, limit)
+		if appErr != nil {
+			return nil, meta, appErr
+		}
+		meta.Mode, meta.Degraded, meta.Reason = "exact", true, "hybrid_not_configured"
+		return result, meta, nil
+	}
+	var result *domain.SearchResultGroup
+	var appErr *domain.AppError
+	var hits []domain.AIRetrievalHit
+	var retrievalMeta domain.AIRetrievalMeta
+	var retrievalErr error
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		result, appErr = s.Search(ctx, actor, q, scope, limit)
+	}()
+	go func() {
+		defer wg.Done()
+		hits, retrievalMeta, retrievalErr = s.retrieval.Search(ctx, actor, q, min(limit, 20))
+	}()
+	wg.Wait()
+	if appErr != nil {
+		return nil, meta, appErr
+	}
+	if retrievalErr != nil {
+		meta.Mode, meta.Degraded, meta.Reason = "exact", true, "hybrid_unavailable"
+		s.logger.Warn("hybrid global search degraded", zap.Error(retrievalErr))
+		return result, meta, nil
+	}
+	meta.Mode, meta.Degraded, meta.Candidates, meta.Reason = retrievalMeta.Mode, retrievalMeta.Degraded, retrievalMeta.Candidates, retrievalMeta.Reason
+	mergeRetrievalHits(result, hits, strings.TrimSpace(scope), normalizeSearchLimit(limit))
+	normalizeNilSlices(result)
+	return result, meta, nil
+}
+
+var deterministicQueryPattern = regexp.MustCompile(`(?i)^(?:[a-z]{1,8}[-_/])?[a-z0-9][a-z0-9._/-]{2,63}$`)
+
+func deterministicSearchQuery(query string) bool {
+	query = strings.TrimSpace(query)
+	if deterministicQueryPattern.MatchString(query) {
+		return true
+	}
+	for _, marker := range []string{"任务号", "SKU", "sku", "文件名"} {
+		if strings.Contains(query, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeSearchLimit(limit int) int {
+	if limit <= 0 {
+		return 20
+	}
+	if limit > 50 {
+		return 50
+	}
+	return limit
+}
+
+func mergeRetrievalHits(result *domain.SearchResultGroup, hits []domain.AIRetrievalHit, scope string, limit int) {
+	if result == nil {
+		return
+	}
+	if scope == "" {
+		scope = "all"
+	}
+	seenTasks := map[int64]struct{}{}
+	for _, item := range result.Tasks {
+		seenTasks[item.ID] = struct{}{}
+	}
+	seenAssets := map[string]struct{}{}
+	for _, item := range result.Assets {
+		seenAssets[item.ResourceID] = struct{}{}
+	}
+	for _, hit := range hits {
+		switch hit.EntityType {
+		case "task":
+			if scope != "all" && scope != "tasks" {
+				continue
+			}
+			id, err := strconv.ParseInt(hit.EntityID, 10, 64)
+			if err != nil {
+				continue
+			}
+			if _, exists := seenTasks[id]; exists {
+				continue
+			}
+			taskNo, highlight := metadataString(hit.Metadata, "task_no"), hit.Excerpt
+			result.Tasks = append(result.Tasks, domain.SearchTask{ID: id, TaskNo: taskNo, Highlight: &highlight})
+			seenTasks[id] = struct{}{}
+		case "task_resource_group":
+			if scope != "all" && scope != "assets" {
+				continue
+			}
+			id, err := strconv.ParseInt(hit.EntityID, 10, 64)
+			if err != nil {
+				continue
+			}
+			resourceID := fmt.Sprintf("group:%d", id)
+			if _, exists := seenAssets[resourceID]; exists {
+				continue
+			}
+			result.Assets = append(result.Assets, domain.SearchAsset{
+				AssetID: id, ResourceGroupID: id, ResourceID: resourceID, SourceType: "task_resource_group", SourceLabel: "任务资源组",
+				TaskNo: metadataString(hit.Metadata, "task_no"), SKUCode: metadataString(hit.Metadata, "sku_code"), Mode: metadataString(hit.Metadata, "mode"),
+				FinalizedRevisionID: metadataInt64(hit.Metadata, "finalized_revision_id"), FileName: hit.Title,
+			})
+			seenAssets[resourceID] = struct{}{}
+		case "external_asset":
+			if scope != "all" && scope != "assets" {
+				continue
+			}
+			resourceID := "ext-" + hit.EntityID
+			if _, exists := seenAssets[resourceID]; exists {
+				continue
+			}
+			result.Assets = append(result.Assets, domain.SearchAsset{ResourceID: resourceID, FileName: hit.Title, SourceType: "external_asset", SourceLabel: "外部资源"})
+			seenAssets[resourceID] = struct{}{}
+		}
+	}
+	if len(result.Tasks) > limit {
+		result.Tasks = result.Tasks[:limit]
+	}
+	if len(result.Assets) > limit {
+		result.Assets = result.Assets[:limit]
+	}
+}
+
+func metadataString(metadata map[string]any, key string) string {
+	value, ok := metadata[key]
+	if !ok || value == nil {
+		return ""
+	}
+	return strings.TrimSpace(fmt.Sprint(value))
+}
+
+func metadataInt64(metadata map[string]any, key string) int64 {
+	if value, ok := metadata[key].(float64); ok {
+		return int64(value)
+	}
+	value, _ := strconv.ParseInt(metadataString(metadata, key), 10, 64)
+	return value
 }
 
 func (s *Service) searchResourceGroups(ctx context.Context, actor domain.RequestActor, q string, limit int) ([]domain.SearchAsset, error) {

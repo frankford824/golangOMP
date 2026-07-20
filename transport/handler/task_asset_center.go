@@ -348,6 +348,12 @@ func (h *TaskAssetCenterHandler) SearchGlobalAssets(c *gin.Context) {
 		respondError(c, appErr)
 		return
 	}
+	actor, _ := domain.RequestActorFromContext(c.Request.Context())
+	policyRevision := int64(0)
+	if actor.EffectiveAccess != nil {
+		policyRevision = actor.EffectiveAccess.PolicyRevision
+	}
+	query.AccessScopeKey = fmt.Sprintf("user:%d:policy:%d", actor.ID, policyRevision)
 	result, appErr := h.globalSvc.Search(c.Request.Context(), query)
 	if appErr != nil {
 		respondAssetCenterError(c, appErr)

@@ -67,6 +67,9 @@ type AssetSearchQuery struct {
 	BusinessLane           TaskBusinessLane
 	AssetType              TaskAssetType
 	OperationalVisibleOnly bool
+	// AccessScopeKey is an internal cache partition derived from the resolved
+	// actor and access-policy revision. It is never accepted from public input.
+	AccessScopeKey string
 }
 
 func (q AssetSearchQuery) Normalized() AssetSearchQuery {

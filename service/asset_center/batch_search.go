@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"workflow/domain"
@@ -61,10 +62,28 @@ func (s *Service) BatchSearch(ctx context.Context, req BatchSearchRequest) (*Bat
 
 	formatFilter := normalizeBatchSearchFormat(req.FormatFilter)
 	assetKind := normalizeBatchSearchAssetKind(req.AssetKind)
-	response := &BatchSearchResponse{Results: make([]BatchSearchResult, 0, len(terms))}
-	for _, term := range terms {
-		result := s.batchSearchOne(ctx, term, formatFilter, assetKind)
-		response.Results = append(response.Results, result)
+	response := &BatchSearchResponse{Results: make([]BatchSearchResult, len(terms))}
+	jobs := make(chan int)
+	workerCount := 4
+	if len(terms) < workerCount {
+		workerCount = len(terms)
+	}
+	var workers sync.WaitGroup
+	for range workerCount {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			for index := range jobs {
+				response.Results[index] = s.batchSearchOne(ctx, terms[index], formatFilter, assetKind)
+			}
+		}()
+	}
+	for index := range terms {
+		jobs <- index
+	}
+	close(jobs)
+	workers.Wait()
+	for _, result := range response.Results {
 		if result.Status == BatchSearchStatusMatched {
 			response.MatchedCount++
 		} else {

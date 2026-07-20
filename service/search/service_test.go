@@ -5,6 +5,7 @@ import (
 	"errors"
 	"reflect"
 	"testing"
+	"time"
 
 	"workflow/domain"
 )
@@ -152,6 +153,104 @@ type countingExternalAssetSearch struct{ calls int }
 func (s *countingExternalAssetSearch) SearchGlobal(context.Context, string, int) ([]domain.SearchAsset, error) {
 	s.calls++
 	return []domain.SearchAsset{{AssetID: 99, ResourceID: "ext-99", SourceType: "external_asset", FileName: "external.png"}}, nil
+}
+
+type hybridRetrievalStub struct {
+	hits  []domain.AIRetrievalHit
+	meta  domain.AIRetrievalMeta
+	err   error
+	calls int
+}
+
+func (s *hybridRetrievalStub) HybridReady() bool { return true }
+func (s *hybridRetrievalStub) Search(context.Context, domain.RequestActor, string, int) ([]domain.AIRetrievalHit, domain.AIRetrievalMeta, error) {
+	s.calls++
+	return append([]domain.AIRetrievalHit{}, s.hits...), s.meta, s.err
+}
+
+func TestSearchWithModeAutoAndHybridDegradation(t *testing.T) {
+	t.Run("deterministic input stays exact", func(t *testing.T) {
+		hybrid := &hybridRetrievalStub{}
+		svc := NewService(&stubSearchRepo{})
+		svc.SetHybridRetrievalProvider(hybrid)
+		_, meta, appErr := svc.SearchWithMode(context.Background(), fullyScopedActor(7), "RW-20260719-001", "tasks", 20, "auto")
+		if appErr != nil || meta.Mode != "exact" || hybrid.calls != 0 {
+			t.Fatalf("meta=%+v calls=%d err=%+v", meta, hybrid.calls, appErr)
+		}
+	})
+	t.Run("natural language merges scoped hits", func(t *testing.T) {
+		hybrid := &hybridRetrievalStub{hits: []domain.AIRetrievalHit{{DocumentID: "task:9", EntityType: "task", EntityID: "9", Excerpt: "延期原因", Metadata: map[string]any{"task_no": "T-9"}}}, meta: domain.AIRetrievalMeta{Mode: "hybrid", Candidates: 2}}
+		svc := NewService(&stubSearchRepo{})
+		svc.SetHybridRetrievalProvider(hybrid)
+		result, meta, appErr := svc.SearchWithMode(context.Background(), fullyScopedActor(7), "哪些任务因为需求变更延期", "tasks", 20, "auto")
+		if appErr != nil || meta.Mode != "hybrid" || meta.Candidates != 2 || hybrid.calls != 1 || len(result.Tasks) != 2 || result.Tasks[1].ID != 9 {
+			t.Fatalf("result=%+v meta=%+v calls=%d err=%+v", result, meta, hybrid.calls, appErr)
+		}
+	})
+	t.Run("vector failure keeps exact result", func(t *testing.T) {
+		hybrid := &hybridRetrievalStub{err: errors.New("qdrant timeout")}
+		svc := NewService(&stubSearchRepo{})
+		svc.SetHybridRetrievalProvider(hybrid)
+		result, meta, appErr := svc.SearchWithMode(context.Background(), fullyScopedActor(7), "需求趋势", "tasks", 20, "hybrid")
+		if appErr != nil || len(result.Tasks) != 1 || !meta.Degraded || meta.Mode != "exact" || meta.Reason != "hybrid_unavailable" {
+			t.Fatalf("result=%+v meta=%+v err=%+v", result, meta, appErr)
+		}
+	})
+}
+
+type concurrentSearchRepo struct {
+	stubSearchRepo
+	entered chan<- string
+	release <-chan struct{}
+}
+
+func (s *concurrentSearchRepo) SearchTasksScoped(context.Context, string, int, domain.ResourceGroupAccessFilter) ([]domain.SearchTask, error) {
+	s.entered <- "mysql"
+	<-s.release
+	return []domain.SearchTask{{ID: 1, TaskNo: "T1"}}, nil
+}
+
+type concurrentHybridRetrieval struct {
+	entered chan<- string
+	release <-chan struct{}
+}
+
+func (*concurrentHybridRetrieval) HybridReady() bool { return true }
+func (s *concurrentHybridRetrieval) Search(context.Context, domain.RequestActor, string, int) ([]domain.AIRetrievalHit, domain.AIRetrievalMeta, error) {
+	s.entered <- "qdrant"
+	<-s.release
+	return []domain.AIRetrievalHit{}, domain.AIRetrievalMeta{Mode: "hybrid"}, nil
+}
+
+func TestSearchWithModeRunsExactAndHybridBranchesConcurrently(t *testing.T) {
+	entered := make(chan string, 2)
+	release := make(chan struct{})
+	repository := &concurrentSearchRepo{entered: entered, release: release}
+	svc := NewService(repository)
+	svc.SetHybridRetrievalProvider(&concurrentHybridRetrieval{entered: entered, release: release})
+	done := make(chan *domain.AppError, 1)
+	go func() {
+		_, _, appErr := svc.SearchWithMode(context.Background(), fullyScopedActor(7), "交付风险趋势", "tasks", 20, "hybrid")
+		done <- appErr
+	}()
+	seen := map[string]bool{}
+	for len(seen) < 2 {
+		select {
+		case branch := <-entered:
+			seen[branch] = true
+		case <-time.After(time.Second):
+			t.Fatalf("branches did not overlap before release: %v", seen)
+		}
+	}
+	close(release)
+	select {
+	case appErr := <-done:
+		if appErr != nil {
+			t.Fatal(appErr)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("hybrid search did not finish")
+	}
 }
 
 func fullyScopedActor(id int64) domain.RequestActor {

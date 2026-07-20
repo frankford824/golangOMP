@@ -1,10 +1,10 @@
-# V1 API 速查表(360 path · 一行一条)
+# V1 API 速查表(366 path · 一行一条)
 
 > Revision: V1.3-A2 i_id-first task/ERP/search integration (2026-04-27)
 > Source: docs/api/openapi.yaml (post V1.3-A2)
 
 > 本表一行对应一个 `/v1` path；同一路径多 method 合并到 `Methods` 列。
-> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 360 个 `/v1` path。
+> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 366 个 `/v1` path。
 > 新前端只接 canonical 路径；compatibility/deprecated 路径仅作迁移兜底。
 
 | Methods | Path | Summary | RBAC | family doc |
@@ -188,6 +188,12 @@
 | POST | `/v1/tasks/{id}/cancel` | Cancel or close a task | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/tasks/excel-assist/template.xlsx` | Download single-task Excel assist template | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/tasks/excel-assist/parse-excel` | Parse a single-task Excel assist file | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/ai/chat/config` | Get the current data-assistant capability contract | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET, POST | `/v1/ai/chat/conversations` | List the caller's active conversations；Create an owner-scoped conversation retained for 90 days | GET:已登录 / scope-aware; POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET, DELETE | `/v1/ai/chat/conversations/{conversation_id}` | Read one owner-scoped conversation and its evidence citations；Hide a conversation immediately and hard-delete its body within 24 hours | GET:已登录 / scope-aware; DELETE:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| POST | `/v1/ai/chat/conversations/{conversation_id}/messages:stream` | Stream a read-only evidence-backed answer | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/ai/chat/admin/conversations` | List conversation metadata across users | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/ai/chat/admin/conversations/{conversation_id}` | Review one cross-user conversation and write a metadata-only audit event | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/predictions/search` | Get global-search prediction suggestions | GET:Ops, Designer, CustomizationOperator, CustomizationReviewer, Audit_A, Audit_B, Warehouse, Outsource, Admin, SuperAdmin, HRAdmin, OrgAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/predictions/task-create` | Get task-create form prediction suggestions | GET:Ops, Admin, SuperAdmin | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/predictions/assets` | Get asset-center prediction suggestions | GET:Ops, Designer, CustomizationOperator, CustomizationReviewer, Audit_A, Audit_B, Warehouse, Outsource, Admin, SuperAdmin, HRAdmin, OrgAdmin, RoleAdmin, DepartmentAdmin, TeamLead, DesignDirector | [V1_API_TASKS.md](V1_API_TASKS.md) |

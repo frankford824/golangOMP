@@ -13542,6 +13542,116 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/ai/chat/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get the current data-assistant capability contract */
+        get: operations["getAIChatConfig"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ai/chat/conversations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the caller's active conversations */
+        get: operations["listAIConversations"];
+        put?: never;
+        /** Create an owner-scoped conversation retained for 90 days */
+        post: operations["createAIConversation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ai/chat/conversations/{conversation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        /** Read one owner-scoped conversation and its evidence citations */
+        get: operations["getAIConversation"];
+        put?: never;
+        post?: never;
+        /** Hide a conversation immediately and hard-delete its body within 24 hours */
+        delete: operations["deleteAIConversation"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ai/chat/conversations/{conversation_id}/messages:stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stream a read-only evidence-backed answer
+         * @description Emits `meta`, `status`, `retrieval`, `delta`, `done`, and `error` SSE events with a heartbeat at least every 15 seconds.
+         *     The client_message_id is an idempotency key within the conversation. Cancellation persists any partial answer as cancelled.
+         */
+        post: operations["streamAIChatMessage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ai/chat/admin/conversations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List conversation metadata across users */
+        get: operations["adminListAIConversations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ai/chat/admin/conversations/{conversation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Review one cross-user conversation and write a metadata-only audit event */
+        get: operations["adminGetAIConversation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/search": {
         parameters: {
             query?: never;
@@ -13565,6 +13675,8 @@ export interface paths {
                     scope?: "all" | "tasks" | "assets" | "products" | "users";
                     /** @description Max items per result array. Default 20 (IA §4.2). */
                     limit?: number;
+                    /** @description Auto keeps identifier-like input exact and uses hybrid retrieval only for natural language. */
+                    mode?: "auto" | "exact" | "hybrid";
                 };
                 header?: never;
                 path?: never;
@@ -13581,6 +13693,7 @@ export interface paths {
                         "application/json": {
                             query: string;
                             results: components["schemas"]["SearchResultGroup"];
+                            retrieval: components["schemas"]["SearchRetrievalMeta"];
                         };
                     };
                 };
@@ -30158,6 +30271,95 @@ export interface components {
             /** Format: date-time */
             created_at?: string;
         };
+        AIChatConfig: {
+            enabled: boolean;
+            hybrid_search_enabled: boolean;
+            max_input_chars: number;
+            retention_days: number;
+            max_concurrent_user: number;
+            can_review_all: boolean;
+        };
+        AIMessageSource: {
+            /** @example S1 */
+            source_id: string;
+            /** @enum {string} */
+            entity_type: "task" | "task_resource_group" | "external_asset" | "business_trend" | "experience_summary";
+            entity_id: string;
+            title: string;
+            internal_route?: string;
+            evidence_excerpt: string;
+            source_version?: string;
+            rank: number;
+        };
+        AIMessage: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            conversation_id: string;
+            /** Format: uuid */
+            reply_to_message_id?: string;
+            client_message_id?: string;
+            /** @enum {string} */
+            role: "user" | "assistant";
+            content: string;
+            /** @enum {string} */
+            status: "streaming" | "completed" | "cancelled" | "failed";
+            provider?: string;
+            model?: string;
+            /** Format: int64 */
+            input_tokens?: number;
+            /** Format: int64 */
+            output_tokens?: number;
+            finish_reason?: string;
+            error_code?: string;
+            /** Format: date-time */
+            started_at?: string;
+            /** Format: date-time */
+            completed_at?: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            sources?: components["schemas"]["AIMessageSource"][];
+        };
+        AIConversation: {
+            /** Format: uuid */
+            id: string;
+            /** Format: int64 */
+            owner_user_id: number;
+            owner_name?: string;
+            title: string;
+            /** @enum {string} */
+            status: "active" | "deleted";
+            /** Format: int64 */
+            lock_version: number;
+            /** Format: date-time */
+            expires_at: string;
+            /** Format: date-time */
+            deleted_at?: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            messages?: components["schemas"]["AIMessage"][];
+        };
+        AIConversationList: {
+            items: components["schemas"]["AIConversation"][];
+            /** Format: int64 */
+            total: number;
+            page: number;
+            page_size: number;
+            total_pages: number;
+        };
+        SearchRetrievalMeta: {
+            /** @enum {string} */
+            requested_mode: "auto" | "exact" | "hybrid";
+            /** @enum {string} */
+            mode: "exact" | "hybrid";
+            degraded: boolean;
+            candidates: number;
+            reason?: string;
+        };
         /**
          * @description Source: V1_INFORMATION_ARCHITECTURE §4.2.
          *     Decision (R1.7-D): all four arrays are item-schema fixed; `users[]` is always
@@ -32218,6 +32420,305 @@ export interface operations {
                 };
             };
             403: components["responses"]["V8Forbidden"];
+        };
+    };
+    getAIChatConfig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Safe public configuration without provider secrets or internal endpoints. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: components["schemas"]["AIChatConfig"];
+                    };
+                };
+            };
+            /** @description Unauthenticated */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing report.view */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    listAIConversations: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Owner-scoped conversation list. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: components["schemas"]["AIConversationList"];
+                    };
+                };
+            };
+            /** @description Unauthenticated */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing report.view */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    createAIConversation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    title?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Created conversation. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: components["schemas"]["AIConversation"];
+                    };
+                };
+            };
+            /** @description Missing report.view */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Data assistant disabled */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    getAIConversation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Conversation body. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: components["schemas"]["AIConversation"];
+                    };
+                };
+            };
+            /** @description Not found or not owned by caller */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    deleteAIConversation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Conversation scheduled for purge */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not found or not owned by caller */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    streamAIChatMessage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    client_message_id: string;
+                    content: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Server-sent event stream. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
+            /** @description Identical client message is still streaming */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Global or per-user stream concurrency limit reached */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Provider */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    adminListAIConversations: {
+        parameters: {
+            query?: {
+                owner_user_id?: number;
+                status?: "active" | "deleted";
+                from?: string;
+                to?: string;
+                page?: number;
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Cross-user metadata list. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: components["schemas"]["AIConversationList"];
+                    };
+                };
+            };
+            /** @description Only a protected SuperAdmin may review all conversations */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    adminGetAIConversation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Audited conversation body. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: components["schemas"]["AIConversation"];
+                    };
+                };
+            };
+            /** @description Only a protected SuperAdmin may review all conversations */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Conversation not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
 }
