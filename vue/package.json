@@ -20,6 +20,7 @@
     "v8:stale-audit": "node scripts/v8-stale-contract-audit.mjs",
     "preload:audit": "node --test scripts/large-surface-audit.node-test.mjs",
     "load:audit": "node scripts/large-surface-audit.mjs",
+    "surface:regression": "node scripts/task-detail-surface-regression.mjs",
     "asset:audit": "node scripts/asset-workbench-architecture-audit.mjs",
     "asset:visual:baseline": "node scripts/asset-workbench-visual-baseline.mjs baseline",
     "asset:visual:compare": "node scripts/asset-workbench-visual-baseline.mjs compare",

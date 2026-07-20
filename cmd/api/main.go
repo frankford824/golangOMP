@@ -422,7 +422,9 @@ func main() {
 	incidentH := handler.NewIncidentHandler(incidentSvc)
 	policyH := handler.NewPolicyHandler(policySvc)
 	authH := handler.NewAuthHandler(identitySvc, cfg.AssetWorkbench.CookieDomain)
-	taskResourceWorkflowSvc := service.NewTaskResourceWorkflowService(taskResourceGroupRepo, mdb, taskEventRepo, service.WithTaskResourceWorkflowOSSDirect(ossDirectSvc))
+	taskResourceWorkflowSvc := service.NewTaskResourceWorkflowService(taskResourceGroupRepo, mdb, taskEventRepo,
+		service.WithTaskResourceWorkflowOSSDirect(ossDirectSvc),
+		service.WithTaskResourceWorkflowSKUProfiles(productManagementSvc))
 	planningSKUSvc := service.NewPlanningSKUService(planningSKURepo, taskRepo, taskEventRepo, mdb, service.NewTaskFinalizer(taskResourceGroupRepo, taskEventRepo))
 	accessPolicyH := handler.NewAccessPolicyHandler(accessPolicySvc)
 	routeAccessCatalog := transport.NewRouteAccessCatalog()

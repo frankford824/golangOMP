@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -664,6 +665,85 @@ func (r *productManagementRepo) GetByTaskID(ctx context.Context, taskID int64) (
 	defer rows.Close()
 	items, _, err := scanProductManagementRows(rows, 0)
 	return items, err
+}
+
+// GetByTaskIDs loads the product/SKU projection for a resource-group page in
+// one query. It intentionally is a narrow optional capability rather than a
+// new requirement on repo.ProductManagementRepo so existing integrations can
+// adopt the SKU-centric asset read model without a compatibility shim.
+func (r *productManagementRepo) GetByTaskIDs(ctx context.Context, taskIDs []int64) ([]*domain.ProductManagementRecord, error) {
+	taskIDs = uniquePositiveInt64s(taskIDs)
+	if len(taskIDs) == 0 {
+		return []*domain.ProductManagementRecord{}, nil
+	}
+	args := make([]interface{}, 0, len(taskIDs))
+	for _, taskID := range taskIDs {
+		args = append(args, taskID)
+	}
+	queryCtx, cancelQuery := mysqlReadQueryContext(ctx)
+	rows, err := r.db.db.QueryContext(queryCtx, `SELECT `+productManagementSelectCols+` FROM erp_product_sync_records pm `+
+		productManagementCostTraceJoin+productManagementDimensionJoin+`
+		WHERE pm.task_id IN (`+resourceGroupPlaceholders(len(taskIDs))+`)
+		ORDER BY pm.task_id, pm.task_sku_item_id IS NULL DESC, pm.id ASC`, args...)
+	if err != nil {
+		cancelQuery()
+		return nil, fmt.Errorf("list product management records by tasks: %w", err)
+	}
+	defer cancelQuery()
+	defer rows.Close()
+	items, _, err := scanProductManagementRows(rows, 0)
+	if err != nil {
+		return nil, err
+	}
+	if err := r.hydrateProductManagementComboSKUs(ctx, items); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func (r *productManagementRepo) hydrateProductManagementComboSKUs(ctx context.Context, items []*domain.ProductManagementRecord) error {
+	bySKU := make(map[string][]*domain.ProductManagementRecord)
+	for _, item := range items {
+		if item == nil {
+			continue
+		}
+		sku := strings.TrimSpace(item.SKUCode)
+		if sku != "" {
+			bySKU[sku] = append(bySKU[sku], item)
+		}
+	}
+	if len(bySKU) == 0 {
+		return nil
+	}
+	skus := make([]string, 0, len(bySKU))
+	for sku := range bySKU {
+		skus = append(skus, sku)
+	}
+	sort.Strings(skus)
+	args := make([]interface{}, 0, len(skus))
+	for _, sku := range skus {
+		args = append(args, sku)
+	}
+	rows, err := r.db.db.QueryContext(ctx, `
+		SELECT child_sku_code, combo_sku_code
+		FROM omp_sku_combo_relations
+		WHERE child_sku_code IN (`+resourceGroupPlaceholders(len(skus))+`)
+		GROUP BY child_sku_code, combo_sku_code
+		ORDER BY child_sku_code, combo_sku_code`, args...)
+	if err != nil {
+		return fmt.Errorf("hydrate product combo sku codes: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var childSKU, comboSKU string
+		if err := rows.Scan(&childSKU, &comboSKU); err != nil {
+			return err
+		}
+		for _, item := range bySKU[strings.TrimSpace(childSKU)] {
+			item.ComboSKUCodes = append(item.ComboSKUCodes, strings.TrimSpace(comboSKU))
+		}
+	}
+	return rows.Err()
 }
 
 func (r *productManagementRepo) ClaimQueuedSyncRecords(ctx context.Context, limit int, claimToken string, now time.Time) ([]*domain.ProductManagementRecord, error) {

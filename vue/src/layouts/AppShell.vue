@@ -223,11 +223,10 @@ const MENU_CONFIG: MenuConfig[] = [
   },
   {
     key: 'product_management',
-    label: '产品管理',
-    to: '/products',
-    aliases: ['resource_management', 'assets_index'],
+    label: '成本规则',
+    to: '/cost-rules',
     section: 'data',
-    icon: 'inventory_2',
+    icon: 'calculate',
   },
   {
     key: 'report_center',

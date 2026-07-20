@@ -9,6 +9,7 @@ import { addMillisecondsToNowISO, getBeijingDateCompactString, nowISO } from '@/
 const MOCK_ACTOR = 'ops_demo'
 const MOCK_ACTOR_ID = 1
 const MOCK_ACTOR_TEAM = 'ungrouped'
+const MOCK_REFERENCE_PREVIEW = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="320" height="220" viewBox="0 0 320 220"%3E%3Crect width="320" height="220" rx="20" fill="%23eef3fb"/%3E%3Cpath d="M72 161l56-58 39 37 31-29 50 50H72z" fill="%2394a9c8"/%3E%3Ccircle cx="220" cy="70" r="24" fill="%23f6c66d"/%3E%3Ctext x="160" y="194" text-anchor="middle" font-family="sans-serif" font-size="15" fill="%23435b7d"%3E%E8%BF%90%E8%90%A5%E5%8F%82%E8%80%83%E5%9B%BE%3C/text%3E%3C/svg%3E'
 const LARGE_SURFACE_AUDIT_TOTAL = Number(import.meta.env.VITE_LARGE_SURFACE_TOTAL ?? 5000)
 const LARGE_SURFACE_AUDIT_PAGE_SIZE = Number(import.meta.env.VITE_LARGE_SURFACE_PAGE_SIZE ?? 100)
 
@@ -465,7 +466,7 @@ export const tasksHandler: MockHandler = (request) => {
           {
             filename: 'mock-ref.png',
             mime_type: 'image/png',
-            download_url: '/v1/assets/files/mock/ref.png',
+            download_url: MOCK_REFERENCE_PREVIEW,
           },
         ],
         modules,

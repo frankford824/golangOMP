@@ -1,10 +1,9 @@
 <template>
   <div class="product-management-view">
-    <header class="pm-header">
-      <div>
-        <p class="pm-eyebrow">ERP 商品资料对照</p>
-        <h1>产品管理</h1>
-        <p class="pm-subtitle">按 SKU 维护 ERP 图片、成本与同步状态，默认聚焦缺图、成本异常、待同步和失败项。</p>
+    <header class="pm-header yb-page-surface yb-page-header-row" data-page-header="product-management">
+      <div class="yb-page-heading-copy">
+        <h1 class="yb-page-title">产品管理</h1>
+        <p class="pm-subtitle yb-page-subtitle">按 SKU 维护 ERP 图片、成本与同步状态，默认聚焦缺图、成本异常、待同步和失败项。</p>
       </div>
       <div class="pm-header-actions">
         <button
@@ -2172,7 +2171,7 @@ function errorMessage(err: unknown): string {
 <style scoped>
 .product-management-view {
   min-height: 100%;
-  padding: 1.25rem clamp(0.875rem, 2vw, 1.75rem) 2.5rem;
+  padding: 0 0 2.5rem;
   color: rgb(var(--yb-text));
   background: rgb(var(--yb-bg-page));
 }
@@ -2190,8 +2189,8 @@ function errorMessage(err: unknown): string {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 18px;
-  padding: 1.1rem 1.25rem;
+  gap: 1rem;
+  padding: 1rem;
   border-radius: 1rem;
 }
 
@@ -2218,16 +2217,16 @@ function errorMessage(err: unknown): string {
 .pm-modal h2 {
   margin: 0;
   color: rgb(var(--yb-text));
-  font-size: clamp(1.65rem, 2.5vw, 2.25rem);
+  font-size: clamp(1.75rem, 1.8vw, 2.25rem);
   font-weight: 900;
   letter-spacing: 0;
 }
 
 .pm-subtitle {
   max-width: 760px;
-  margin: 0.55rem 0 0;
+  margin: 0.5rem 0 0;
   color: rgb(var(--yb-text-secondary));
-  line-height: 1.65;
+  line-height: 1.55;
 }
 
 .pm-filters {
@@ -3513,7 +3512,7 @@ function errorMessage(err: unknown): string {
 
 @media (max-width: 760px) {
   .product-management-view {
-    padding-inline: 12px;
+    padding-inline: 0;
   }
 
   .pm-header,

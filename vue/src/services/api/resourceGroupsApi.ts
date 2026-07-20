@@ -47,6 +47,45 @@ export interface ResourceRevision {
   references: ResourceReference[]
 }
 
+export interface ResourceSKUProfile {
+  id: number
+  task_id: number
+  task_sku_item_id?: number | null
+  sku_code: string
+  product_i_id?: string
+  erp_i_id?: string
+  category_name?: string
+  product_family?: string
+  product_name?: string
+  creator_name?: string
+  task_no?: string
+  combo_sku_codes?: string[]
+  cost_price?: number | null
+  cost_trace?: {
+    rule_name?: string
+    rule_source?: string
+    matched_rule_version?: number | null
+    requires_manual_review?: boolean
+    manual_cost_override?: boolean
+  } | null
+  spec_text?: string
+  size_text?: string
+  area_trace?: {
+    width_m?: number | null
+    height_m?: number | null
+    quantity?: number | null
+    area_m2?: number | null
+    formula?: string
+    source_label?: string
+    warning?: string
+  } | null
+  erp_sync_status?: string
+  base_sync_status?: string
+  image_sync_status?: string
+  last_erp_synced_at?: string | null
+  last_erp_checked_at?: string | null
+}
+
 export interface ResourceGroup {
   id: number
   task_id: number
@@ -62,6 +101,7 @@ export interface ResourceGroup {
   creator_id?: number
   creator_name?: string
   business_lane?: string
+  sku_profile?: ResourceSKUProfile | null
   working_revision?: ResourceRevision | null
   finalized_revision?: ResourceRevision | null
 }

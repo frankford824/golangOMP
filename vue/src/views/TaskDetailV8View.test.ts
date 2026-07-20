@@ -100,7 +100,9 @@ describe('TaskDetailV8View business context', () => {
     expect(bodyText()).toContain('HO-9')
     expect(document.body.querySelector('.handover-form')).not.toBeNull()
     expect(bodyText()).toContain('接手')
-    await wrapper.findAll('button').find((item) => item.text() === '查看任务资源')?.trigger('click')
+    ;(dialog().querySelector<HTMLButtonElement>('.close-button'))?.click()
+    await flushPromises()
+    await wrapper.findAll('button').find((item) => item.text().includes('查看全部文件'))?.trigger('click')
     expect(bodyText()).toContain('资源矩阵')
   })
 
@@ -243,9 +245,42 @@ describe('TaskDetailV8View business context', () => {
 
     await wrapper.findAll('button').find((item) => item.text() === '完整任务信息')?.trigger('click')
     const text = dialog().textContent || ''
-    for (const expected of ['紧急', '240', '¥12.50', '按件', 'Amazon US', '随行杯', '一键开盖，随行不漏水。', '清爽、通透、夏日', 'https://example.test/reference', '等待同步', '需要同步']) {
+    for (const expected of ['紧急', '240', '¥12.50', '按件', 'Amazon US', '随行杯', '一键开盖，随行不漏水。', '清爽、通透、夏日', 'https://example.test/reference', '等待同步']) {
       expect(text).toContain(expected)
     }
+  })
+
+  it('translates raw workflow values and keeps attachments in their own preview workspace', async () => {
+    const rawTask = { ...baseTask, priority: 'normal', filing_status: 'filed', task_status: 'PendingAudit' }
+    mocks.getById.mockResolvedValue({ data: { data: rawTask } })
+    mocks.getDetail.mockResolvedValue({ data: { data: { task: rawTask, task_detail: { design_requirement: '保留原始比例。' }, reference_file_refs: baseTask.reference_file_refs } } })
+    const wrapper = mountView()
+    await flushPromises()
+
+    await wrapper.findAll('button').find((item) => item.text() === '完整任务信息')?.trigger('click')
+    expect(dialog().textContent).toContain('普通')
+    expect(dialog().textContent).toContain('已完成 ERP 建档')
+    expect(dialog().textContent).not.toMatch(/\b(normal|filed)\b/u)
+
+    ;(dialog().querySelector<HTMLButtonElement>('.close-button'))?.click()
+    await flushPromises()
+    await wrapper.findAll('button').find((item) => item.text() === '查看参考附件')?.trigger('click')
+    expect(dialog().getAttribute('aria-label')).toBe('参考附件')
+    expect(dialog().textContent).toContain('下载文件')
+    expect(dialog().textContent).toContain('参考.jpg')
+    expect(dialog().textContent).not.toContain('人员与组织')
+  })
+
+  it('places the authoritative file chain before the current-stage command area', async () => {
+    mocks.taskBundle.mockResolvedValue({ task_id: 41, workflow_revision: 3, groups: [{ id: 501, task_id: 41, scope_kind: 'sku', lock_version: 1, sku_code: 'SKU-041', working_revision: { id: 601, group_id: 501, revision_no: 1, status: 'submitted', mode: 'set', source_stage: 'design', source_file: { task_asset_id: 701, file_name: '设计源文件.psd' }, items: [] } }] })
+    mocks.getDetail.mockResolvedValue({ data: { data: { task: { ...baseTask, task_status: 'InProgress', allowed_actions: ['task.design.submit'] }, task_detail: {}, reference_file_refs: baseTask.reference_file_refs } } })
+    const wrapper = mountView()
+    await flushPromises()
+
+    const resourceRail = wrapper.get('.resource-rail').element
+    const commandStrip = wrapper.get('.command-strip').element
+    expect(resourceRail.compareDocumentPosition(commandStrip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(wrapper.text()).toContain('设计阶段不上传成品')
   })
 
   it('shows assignment only from the exact backend task action', async () => {

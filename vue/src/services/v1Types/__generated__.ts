@@ -28707,6 +28707,8 @@ export interface components {
             category_name?: string;
             product_family?: string;
             product_name?: string;
+            /** @description Combination SKU codes that currently include this child SKU. */
+            combo_sku_codes?: string[];
             /** Format: double */
             cost_price?: number | null;
             cost_trace?: components["schemas"]["ProductManagementCostTrace"] | null;
@@ -30785,6 +30787,8 @@ export interface components {
             creator_name?: string;
             /** @enum {string} */
             business_lane?: "normal" | "customization";
+            /** @description Current SKU business projection used by the asset center for specifications, dimensions, cost trace, combination codes, and ERP synchronization state. */
+            sku_profile?: components["schemas"]["ProductManagementRecord"] | null;
             working_revision?: components["schemas"]["TaskAssetGroupRevision"];
             finalized_revision?: components["schemas"]["TaskAssetGroupRevision"];
             /** Format: date-time */

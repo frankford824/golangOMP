@@ -23,6 +23,17 @@ type resourceWorkflowRepoStub struct {
 	subjectByTask map[int64]domain.TaskAccessSubject
 }
 
+type taskResourceProfileProviderStub struct {
+	records []*domain.ProductManagementRecord
+	taskIDs []int64
+	appErr  *domain.AppError
+}
+
+func (s *taskResourceProfileProviderStub) GetByTaskIDs(_ context.Context, taskIDs []int64) ([]*domain.ProductManagementRecord, *domain.AppError) {
+	s.taskIDs = append([]int64(nil), taskIDs...)
+	return s.records, s.appErr
+}
+
 func (s *resourceWorkflowRepoStub) GetWorkflow(context.Context, int64) (*domain.TaskWorkflowLock, error) {
 	s.workflowReads++
 	return s.workflow, nil
@@ -123,6 +134,52 @@ func TestListResourceGroupsPushesScopeBeforePagination(t *testing.T) {
 	}
 	if result.Total != 2 || len(result.Items) != 1 || result.Items[0].ID != 2 {
 		t.Fatalf("scoped page = %+v", result)
+	}
+}
+
+func TestListResourceGroupsHydratesExactSKUProfilesInOneBatch(t *testing.T) {
+	skuItemID := int64(41)
+	repository := &resourceWorkflowRepoStub{listFn: func(params domain.ResourceGroupListParams) ([]domain.TaskAssetGroup, int64) {
+		return []domain.TaskAssetGroup{
+			{ID: 1, TaskID: 11, TaskSKUItemID: &skuItemID, SKUCode: "SKU-11"},
+			{ID: 2, TaskID: 12, SKUCode: "SKU-MAIN"},
+		}, 2
+	}}
+	provider := &taskResourceProfileProviderStub{records: []*domain.ProductManagementRecord{
+		{ID: 101, TaskID: 11, TaskSKUItemID: &skuItemID, SKUCode: "SKU-11", ComboSKUCodes: []string{"COMBO-1"}},
+		{ID: 102, TaskID: 12, SKUCode: "SKU-MAIN"},
+	}}
+	svc := NewTaskResourceWorkflowService(repository, nil, nil, WithTaskResourceWorkflowSKUProfiles(provider))
+	result, appErr := svc.ListResourceGroups(context.Background(), globalCapabilityActor(7, domain.PermissionAssetView), domain.ResourceGroupListParams{Page: 1, PageSize: 20})
+	if appErr != nil {
+		t.Fatalf("ListResourceGroups() error = %+v", appErr)
+	}
+	if len(provider.taskIDs) != 2 || provider.taskIDs[0] != 11 || provider.taskIDs[1] != 12 {
+		t.Fatalf("profile batch task ids = %+v", provider.taskIDs)
+	}
+	if len(result.Items) != 2 || result.Items[0].SKUProfile == nil || result.Items[0].SKUProfile.ID != 101 {
+		t.Fatalf("first sku profile = %+v", result.Items)
+	}
+	if result.Items[1].SKUProfile == nil || result.Items[1].SKUProfile.ID != 102 {
+		t.Fatalf("task-scope profile = %+v", result.Items[1].SKUProfile)
+	}
+}
+
+func TestListResourceGroupsKeepsGroupsWhenProfilesAreUnavailable(t *testing.T) {
+	repository := &resourceWorkflowRepoStub{listFn: func(domain.ResourceGroupListParams) ([]domain.TaskAssetGroup, int64) {
+		return []domain.TaskAssetGroup{{ID: 1, TaskID: 11, SKUCode: "SKU-MAIN"}}, 1
+	}}
+	provider := &taskResourceProfileProviderStub{appErr: domain.NewAppError(domain.ErrCodeInternalError, "profile unavailable", nil)}
+	svc := NewTaskResourceWorkflowService(repository, nil, nil, WithTaskResourceWorkflowSKUProfiles(provider))
+	result, appErr := svc.ListResourceGroups(context.Background(), globalCapabilityActor(7, domain.PermissionAssetView), domain.ResourceGroupListParams{Page: 1, PageSize: 20})
+	if appErr != nil {
+		t.Fatalf("ListResourceGroups() must not fail when optional profiles are unavailable: %+v", appErr)
+	}
+	if result.Total != 1 || len(result.Items) != 1 || result.Items[0].ID != 1 {
+		t.Fatalf("result = %+v", result)
+	}
+	if result.Items[0].SKUProfile != nil {
+		t.Fatalf("sku profile = %+v", result.Items[0].SKUProfile)
 	}
 }
 

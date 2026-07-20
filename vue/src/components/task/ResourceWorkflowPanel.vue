@@ -1,12 +1,17 @@
 <template>
   <section class="resource-workspace" :data-phase="phase">
     <header class="workspace-head">
-      <div>
-        <span class="section-label">资源流程</span>
-        <h2>{{ heading }}</h2>
-        <p>{{ headingHint }}</p>
+      <div class="workspace-identity">
+        <span class="workspace-mark" :class="`is-${phase}`"><ShieldCheck v-if="isAuditStage" :size="20" aria-hidden="true" /><FilePenLine v-else :size="20" aria-hidden="true" /></span>
+        <div>
+          <h2>{{ heading }}</h2>
+          <p>{{ headingHint }}</p>
+        </div>
       </div>
-      <button v-if="isDesignStage && rows.length > 1" class="quiet-button" @click="applyFirstMode">将首个 SKU 模式应用到全部</button>
+      <div class="workspace-tools">
+        <span class="workspace-count"><Boxes :size="15" aria-hidden="true" />{{ rows.length }} 个资源单元</span>
+        <button v-if="isDesignStage && rows.length > 1" class="quiet-button" @click="applyFirstMode"><CopyCheck :size="15" aria-hidden="true" />将首个模式应用到全部</button>
+      </div>
     </header>
 
     <div class="stage-map" aria-label="任务资源的三个阶段">
@@ -28,10 +33,12 @@
     <div v-if="success" class="message success" role="status">{{ success }}</div>
 
     <aside v-if="isDesignStage" class="contract-note">
+      <Info :size="17" aria-hidden="true" />
       <strong>设计阶段只提交源文件</strong>
       <span>请为每个 SKU 选择单图或套装。最终成品由审核人员上传；套装在审核时至少需要 2 张有序成品。</span>
     </aside>
     <aside v-else-if="isAuditStage" class="contract-note audit-note">
+      <ShieldCheck :size="17" aria-hidden="true" />
       <strong>按设计模式完成定稿</strong>
       <span>单图上传 1 张，套装至少上传 2 张并排序。未替换源文件时，默认保留设计师提交的源文件。</span>
     </aside>
@@ -54,7 +61,7 @@
                 <small v-if="skuModeHints[entry.row.group.sku_code || '']" class="operations-hint">运营建议套装 · 最终由设计判定</small>
               </div>
               <div class="mode-control" :aria-label="`${entry.row.group.sku_code || '当前资源'}的成品模式`">
-                <span>设计判定</span>
+                <span><LockKeyhole v-if="isAuditStage" :size="13" aria-hidden="true" />{{ isAuditStage ? '设计已判定' : '设计判定' }}</span>
                 <button type="button" :class="{ selected: entry.row.mode === 'single' }" :disabled="!canChooseMode" @click="setMode(entry.row, 'single')">单图</button>
                 <button type="button" :class="{ selected: entry.row.mode === 'set' }" :disabled="!canChooseMode" @click="setMode(entry.row, 'set')">套装</button>
               </div>
@@ -69,9 +76,10 @@
                 <div v-if="entry.row.source" class="file-tile source-file">
                   <span class="file-mark">{{ sourceExtension(entry.row.source.name) }}</span>
                   <div><strong>{{ entry.row.source.name }}</strong><small>{{ entry.row.source.inherited ? '设计师提交 · 将作为有效源文件' : '本次上传' }}</small></div>
+                  <CheckCircle2 :size="18" class="file-ready" aria-label="已就绪" />
                 </div>
                 <label v-if="canUploadSource(entry.row)" class="drop-zone source-drop">
-                  <span>{{ entry.row.source && !replaceSourceGroups.has(entry.row.group.id) ? '替换源文件' : '选择 PSD、AI、PSB 等源文件' }}</span>
+                  <UploadCloud :size="20" aria-hidden="true" /><span>{{ entry.row.source && !replaceSourceGroups.has(entry.row.group.id) ? '替换源文件' : '选择 PSD、AI、PSB 等源文件' }}</span>
                   <input type="file" :disabled="Boolean(entry.row.uploading)" @change="uploadSource($event, entry.row)" />
                 </label>
               </section>
@@ -82,12 +90,12 @@
                   <span v-if="isAuditStage" class="mode-summary">{{ entry.row.mode === 'set' ? '套装' : '单图' }}</span>
                 </div>
                 <div v-if="isDesignStage" class="locked-final">
-                  <span class="lock-symbol">◎</span>
+                  <span class="lock-symbol"><LockKeyhole :size="17" aria-hidden="true" /></span>
                   <div><strong>审核阶段上传</strong><small>设计提交后，审核人员会一眼看到当前模式。</small></div>
                 </div>
                 <template v-else>
                   <label class="drop-zone final-drop">
-                    <span>{{ entry.row.finals.length ? `重新选择成品（当前 ${entry.row.finals.length} 张）` : '上传最终成品图' }}</span>
+                    <Images :size="20" aria-hidden="true" /><span>{{ entry.row.finals.length ? `重新选择成品（当前 ${entry.row.finals.length} 张）` : '上传最终成品图' }}</span>
                     <input type="file" accept="image/*" multiple :disabled="Boolean(entry.row.uploading)" @change="uploadFinals($event, entry.row)" />
                   </label>
                   <ol v-if="entry.row.finals.length" class="final-order">
@@ -116,20 +124,20 @@
     </div>
 
     <footer v-if="isDesignStage" class="command-dock">
-      <div><strong>{{ dirtyLabel }}</strong><span>离开页面前会提醒保存当前选择。</span></div>
-      <button class="primary" :disabled="busy || !validDesign" @click="submitDesign">{{ busy ? '提交中…' : '确认模式并提交源文件' }}</button>
+      <div class="dock-progress"><strong>{{ workspaceProgressLabel }}</strong><span>{{ dirtyLabel }} · 离开前会提醒未提交修改。</span></div>
+      <button class="primary" :disabled="busy || !validDesign" @click="submitDesign"><Send :size="16" aria-hidden="true" />{{ busy ? '提交中…' : '确认模式并提交源文件' }}</button>
     </footer>
 
     <footer v-if="isRetouchStage" class="command-dock">
       <div><strong>{{ dirtyLabel }}</strong><span>每项修图需求提交最终成品后，任务直接结单。</span></div>
-      <button class="primary" :disabled="busy || !validRetouch" @click="submitDesign">{{ busy ? '提交中…' : '提交修图成品并结单' }}</button>
+      <button class="primary" :disabled="busy || !validRetouch" @click="submitDesign"><Send :size="16" aria-hidden="true" />{{ busy ? '提交中…' : '提交修图成品并结单' }}</button>
     </footer>
 
     <footer v-if="isAuditStage" class="command-dock audit-dock">
       <label><span>审核说明</span><input v-model.trim="reason" maxlength="1000" placeholder="通过时选填，打回时必填" /></label>
       <div class="dock-actions">
-        <button v-if="canReturnToDesign" class="danger" :disabled="busy || !reason" @click="openConfirmation('return_to_design')">打回设计</button>
-        <button v-if="canApprove" class="primary" :disabled="busy || !validAudit" @click="openConfirmation('approve')">{{ busy ? '处理中…' : '确认定稿并结单' }}</button>
+        <button v-if="canReturnToDesign" class="danger" :disabled="busy || !reason" @click="openConfirmation('return_to_design')"><RotateCcw :size="16" aria-hidden="true" />打回设计</button>
+        <button v-if="canApprove" class="primary approve" :disabled="busy || !validAudit" @click="openConfirmation('approve')"><CircleCheckBig :size="16" aria-hidden="true" />{{ busy ? '处理中…' : '确认定稿并结单' }}</button>
       </div>
     </footer>
 
@@ -161,6 +169,20 @@
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import {
+  Boxes,
+  CheckCircle2,
+  CircleCheckBig,
+  CopyCheck,
+  FilePenLine,
+  Images,
+  Info,
+  LockKeyhole,
+  RotateCcw,
+  Send,
+  ShieldCheck,
+  UploadCloud,
+} from 'lucide-vue-next'
 import { uploadTaskFileViaAssetSession } from '@/services/upload/assetUploadFlow'
 import { resourceGroupsApi, type ResourceBundle, type ResourceGroup, type ResourceGroupSubmission, type ResourceMode } from '@/services/api/resourceGroupsApi'
 
@@ -235,6 +257,13 @@ const dirtyLabel = computed(() => {
   return '任务资源已就绪'
 })
 const modeOverview = computed(() => `${rows.value.filter((row) => row.mode === 'single').length} 个单图，${rows.value.filter((row) => row.mode === 'set').length} 个套装`)
+const readyCount = computed(() => rows.value.filter((row) => {
+  if (isDesignStage.value) return Boolean(row.source) && ['single', 'set'].includes(row.mode)
+  if (isAuditStage.value) return Boolean(row.source) && validFinals(row)
+  if (isRetouchStage.value) return validFinals(row)
+  return true
+}).length)
+const workspaceProgressLabel = computed(() => `${readyCount.value} / ${rows.value.length} 个 SKU 已就绪`)
 
 watch(() => props.bundle, buildRows, { immediate: true, deep: true })
 watch(isDirty, (dirty) => emit('dirty-change', dirty), { immediate: true })
@@ -356,4 +385,28 @@ onBeforeUnmount(() => { window.removeEventListener('resize', refreshEditorMetric
 .confirm-backdrop{position:fixed;inset:0;z-index:90;display:grid;place-items:center;padding:20px;background:rgb(var(--yb-overlay-night)/.48)}.confirm-dialog{position:relative;width:min(610px,100%);display:grid;gap:13px;padding:24px;border:1px solid rgb(var(--yb-border));border-radius:18px;background:rgb(var(--yb-surface));box-shadow:0 26px 70px rgb(var(--yb-shadow)/.24)}.confirm-dialog h3{margin:0;font-size:24px}.confirm-dialog>p{margin:0;color:rgb(var(--yb-text-muted))}.dialog-close{position:absolute;top:14px;right:14px;width:34px;height:34px;border:0;border-radius:9px;background:rgb(var(--yb-surface-muted));cursor:pointer}.confirm-dialog dl{display:grid;gap:7px;margin:0;padding:12px;border-radius:11px;background:rgb(var(--yb-surface-soft))}.confirm-dialog dl div{display:grid;grid-template-columns:80px 1fr;gap:12px}.confirm-dialog dt{color:rgb(var(--yb-text-muted))}.confirm-dialog dd{margin:0}.confirm-actions{display:flex;justify-content:flex-end;gap:8px}
 @media(max-width:780px){.resource-workspace{border-radius:14px}.workspace-head{padding:15px}.stage-map{grid-template-columns:1fr}.stage-node{min-height:54px}.stage-node:not(:last-child)::after{left:31px;right:auto;bottom:-9px;width:1px;height:18px}.contract-note{align-items:flex-start;flex-direction:column}.editor-viewport{margin:10px;height:min(57vh,620px)}.resource-columns{grid-template-columns:1fr}.sku-head{align-items:flex-start;flex-direction:column}.mode-control{width:100%}.mode-control button{flex:1}.command-dock,.audit-dock,.reopen-dock{align-items:stretch;flex-direction:column}.dock-actions{display:grid;grid-template-columns:1fr 1.5fr}.dock-actions button,.command-dock>.primary{width:100%}.confirm-backdrop{align-items:end;padding:0}.confirm-dialog{max-height:92vh;overflow:auto;border-radius:20px 20px 0 0}.stage-node small{max-width:32ch}}
 @media(prefers-reduced-motion:no-preference){.stage-node.active .stage-index{animation:stage-pulse 2.8s ease-in-out infinite}@keyframes stage-pulse{50%{box-shadow:0 0 0 7px rgb(var(--yb-brand-soft)/.8)}}}
+</style>
+
+<style scoped>
+.resource-workspace{height:100%;grid-template-rows:auto auto auto minmax(0,1fr) auto;border:0;border-radius:13px;background:rgb(var(--yb-surface-soft));box-shadow:none}
+.workspace-head{align-items:center;padding:14px 16px;border-bottom:1px solid rgb(var(--yb-border));background:rgb(var(--yb-surface))}
+.workspace-identity,.workspace-tools{display:flex;align-items:center;gap:11px}
+.workspace-identity>div{display:grid;gap:3px}
+.workspace-mark{display:grid;width:38px;height:38px;place-items:center;border:1px solid rgb(var(--yb-brand-border));border-radius:10px;background:rgb(var(--yb-brand-soft));color:rgb(var(--yb-brand))}
+.workspace-mark.is-audit{border-color:rgb(var(--yb-success-border));background:rgb(var(--yb-success-soft));color:rgb(var(--yb-success-strong))}
+.workspace-head h2{margin:0;font-size:19px;line-height:1.2}.workspace-head p{font-size:12px}.workspace-count{display:inline-flex;align-items:center;gap:6px;color:rgb(var(--yb-text-muted));font-size:11px;font-weight:750}
+.workspace-tools .quiet-button{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding-inline:11px}
+.stage-map{border-top:0;background:rgb(var(--yb-surface));padding-inline:8px}
+.stage-node{min-height:60px;padding:9px 15px}.stage-node:not(:last-child)::after{right:0;width:1px;height:34px;background:rgb(var(--yb-border))}.stage-node.active{background:rgb(var(--yb-brand-soft)/.58)}.stage-node.active::before{content:"";position:absolute;right:12px;bottom:0;left:12px;height:2px;border-radius:999px;background:rgb(var(--yb-brand))}.stage-node.complete .stage-index{border-color:rgb(var(--yb-success-border));background:rgb(var(--yb-success-soft));color:rgb(var(--yb-success-strong))}.stage-node.locked{opacity:.58}.stage-node strong{font-size:12px}
+.contract-note{display:grid;grid-template-columns:auto auto minmax(0,1fr);margin:10px 12px 0;padding:9px 11px;border-radius:9px;background:rgb(var(--yb-brand-soft));line-height:1.45}.contract-note>svg{color:rgb(var(--yb-brand))}.contract-note strong{font-size:12px}.contract-note span{font-size:11px}.audit-note>svg{color:rgb(var(--yb-success-strong))}
+.editor-viewport{height:auto;min-height:0;margin:10px 12px;border:1px solid rgb(var(--yb-border));border-radius:12px;background:rgb(var(--yb-surface-soft));box-shadow:inset 0 1px 0 rgb(var(--yb-surface))}
+.sku-workbench{margin:6px;height:calc(var(--editor-row-height) - 12px);padding:14px 15px;border-radius:11px;box-shadow:0 3px 12px rgb(var(--yb-shadow)/.04)}
+.sku-head{padding-bottom:11px;border-bottom:1px solid rgb(var(--yb-border))}.sku-head>div:first-child>span{font-size:10px;font-weight:750;letter-spacing:.06em}.sku-head strong{font:800 14px var(--yb-font-data)}.sku-head .operations-hint{border-radius:7px}
+.mode-control>span{display:inline-flex;align-items:center;gap:5px;font-size:10px}.mode-control button{min-width:68px;min-height:34px}.mode-control button.selected{box-shadow:0 1px 4px rgb(var(--yb-brand)/.12)}
+.resource-columns{gap:12px}.source-column,.final-column{min-height:190px;border-radius:10px;background:rgb(var(--yb-surface))}.final-column.locked{border-style:dashed;background:rgb(var(--yb-surface-soft))}.column-title strong{font-size:13px}.replace-toggle{font-weight:650}
+.file-tile{border:1px solid rgb(var(--yb-border));background:rgb(var(--yb-surface-soft))}.file-ready{flex:0 0 auto;margin-left:auto;color:rgb(var(--yb-success-strong))}.drop-zone{grid-template-columns:auto auto;gap:8px;min-height:62px;background:rgb(var(--yb-surface));font-weight:700}.drop-zone:hover{border-color:rgb(var(--yb-brand));background:rgb(var(--yb-brand-soft)/.34)}.locked-final{min-height:104px;border:1px dashed rgb(var(--yb-border));background:rgb(var(--yb-surface-muted))}.locked-final strong{font-size:13px}.lock-symbol{border-radius:10px}
+.final-order li{min-height:38px;border:1px solid rgb(var(--yb-border));background:rgb(var(--yb-surface))}
+.command-dock{position:relative;z-index:2;min-height:72px;padding:11px 16px;border-top:1px solid rgb(var(--yb-border-strong));background:rgb(var(--yb-surface));box-shadow:0 -8px 22px rgb(var(--yb-shadow)/.05)}.dock-progress strong{font:850 14px var(--yb-font-data)}.command-dock span{font-size:10px}.primary,.quiet-button,.danger{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:40px;border-radius:9px;font-size:12px}.primary.approve{background:rgb(var(--yb-success-strong));box-shadow:0 6px 15px rgb(var(--yb-success-strong)/.18)}.danger{border-color:rgb(var(--yb-danger-border));background:rgb(var(--yb-danger-soft)/.18);font-weight:760}
+.audit-dock>label{max-width:560px}.audit-dock input{background:rgb(var(--yb-surface-soft))}
+@media(max-width:780px){.workspace-head,.workspace-tools{align-items:flex-start}.workspace-head{flex-direction:column}.workspace-tools{width:100%;justify-content:space-between}.contract-note{grid-template-columns:auto 1fr}.contract-note span{grid-column:1/-1}.editor-viewport{height:auto}.command-dock{min-height:0}.dock-progress{display:grid}.dock-actions{grid-template-columns:1fr 1.45fr}}
 </style>

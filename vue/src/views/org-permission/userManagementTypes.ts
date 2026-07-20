@@ -18,6 +18,8 @@ export interface UserRow {
 export interface RoleOption {
   code: string
   display: string
+  description?: string
+  hint?: string
   category: 'management' | 'business' | 'asset_workbench' | 'compatibility' | string
   assignable: boolean
   assignableByCurrentActor: boolean

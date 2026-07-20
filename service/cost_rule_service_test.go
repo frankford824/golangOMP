@@ -116,6 +116,12 @@ func TestCostRulePreviewAppliesFixedThresholdAndProcessSurcharge(t *testing.T) {
 	if result.EstimatedCost == nil || *result.EstimatedCost <= 0 {
 		t.Fatalf("estimated_cost = %+v, want > 0", result.EstimatedCost)
 	}
+	if !strings.Contains(result.Explanation, "固定单价部分") || !strings.Contains(result.Explanation, "特殊工艺附加") {
+		t.Fatalf("explanation = %q, want plain Chinese calculation details", result.Explanation)
+	}
+	if strings.Contains(result.Explanation, " applied ") || strings.Contains(result.Explanation, " requires ") {
+		t.Fatalf("explanation leaks technical English: %q", result.Explanation)
+	}
 }
 
 func TestCostRulePreviewAppliesSurchargeTaxMultiplier(t *testing.T) {

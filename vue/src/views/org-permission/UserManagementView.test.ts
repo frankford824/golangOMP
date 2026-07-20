@@ -16,6 +16,7 @@ import {
 import { patchUserMembership } from '@/composables/useOrgPermissionData'
 import { usePermissionsStore } from '@/stores/permissions'
 import { DataScopeEnum, RoleEnum, type PermissionUser } from '@/types'
+import { accessPolicyApi } from '@/services/api/accessPolicyApi'
 
 const permissionMock = vi.hoisted(() => ({
   allowedActions: new Set<string>(),
@@ -50,6 +51,16 @@ vi.mock('@/services/api/usersApi', () => ({
     deactivate: vi.fn(),
     activate: vi.fn(),
     resetPassword: vi.fn(),
+  },
+}))
+
+vi.mock('@/services/api/accessPolicyApi', () => ({
+  accessPolicyApi: {
+    roles: vi.fn(),
+    effective: vi.fn(),
+    replaceUserAssignments: vi.fn(),
+    orgPolicies: vi.fn(),
+    replaceOrgPolicies: vi.fn(),
   },
 }))
 
@@ -156,6 +167,8 @@ describe('UserManagementView role governance', () => {
     permissionMock.allowedActions.add('role.read')
     permissionMock.allowedActions.add('user.manage')
     permissionMock.allowedActions.add('org.manage')
+    permissionMock.allowedActions.add('access.view')
+    permissionMock.allowedActions.add('access.manage')
     vi.mocked(usersApi.listRoles).mockResolvedValue({
       data: {
         data: [
@@ -235,6 +248,36 @@ describe('UserManagementView role governance', () => {
         },
       },
     } as never)
+    vi.mocked(accessPolicyApi.roles).mockResolvedValue([
+      { id: 1, code: 'member', name: '成员', description: '基础身份', system_protected: true, version: 1, permissions: [] },
+      { id: 2, code: 'operations', name: '运营', description: '任务创建和运营处理', system_protected: false, version: 1, permissions: [] },
+      { id: 3, code: 'auditor', name: '审核员', description: '统一任务审核', system_protected: false, version: 1, permissions: [] },
+      { id: 4, code: 'asset_manager', name: '素材管理员', description: '素材管理与发布', system_protected: false, version: 1, permissions: [] },
+      { id: 5, code: 'super_admin', name: '超级管理员', description: '系统保护角色', system_protected: true, version: 1, permissions: [] },
+    ])
+    vi.mocked(accessPolicyApi.effective).mockImplementation(async (userId: number) => ({
+      user_id: userId,
+      policy_revision: 7,
+      permissions: ['access.manage'],
+      assignments: userId === 2 ? [
+        { id: 10, user_id: 2, role_id: 1, role_code: 'member', role_name: '成员', scope_mode: 'self', subjects: [], source_type: 'migration', version: 1 },
+        { id: 11, user_id: 2, role_id: 2, role_code: 'operations', role_name: '运营', scope_mode: 'selected_org', subjects: [
+          { subject_type: 'department', subject_id: 1 },
+          { subject_type: 'team', subject_id: 2 },
+        ], source_type: 'direct', version: 2 },
+        { user_id: 2, role_id: 3, role_code: 'auditor', role_name: '审核员', scope_mode: 'selected_org', subjects: [
+          { subject_type: 'department', subject_id: 1 },
+        ], source_type: 'org_policy', source_ref_id: 20, version: 1 },
+      ] : [
+        { id: 1, user_id: userId, role_id: 5, role_code: 'super_admin', role_name: '超级管理员', scope_mode: 'global', subjects: [], source_type: 'direct', version: 1 },
+      ],
+      sources: [],
+    }))
+    vi.mocked(accessPolicyApi.replaceUserAssignments).mockResolvedValue({ policy_revision: 8 } as never)
+    vi.mocked(accessPolicyApi.orgPolicies).mockResolvedValue([
+      { id: 20, subject_type: 'department', subject_id: 1, role_id: 2, scope_mode: 'selected_org', enabled: true, version: 1 },
+    ])
+    vi.mocked(accessPolicyApi.replaceOrgPolicies).mockResolvedValue({ policy_revision: 8, org_policies: [] })
     vi.mocked(usersApi.patch).mockResolvedValue({ data: { data: {} } } as never)
     vi.mocked(usersApi.create).mockResolvedValue({ data: { data: {} } } as never)
     vi.mocked(usersApi.resetPassword).mockResolvedValue({ data: { data: {} } } as never)
@@ -251,7 +294,7 @@ describe('UserManagementView role governance', () => {
     document.body.innerHTML = ''
   })
 
-  it('renders only actor-assignable roles as checkboxes and preserves locked roles on save', async () => {
+  it('keeps role assignment inside user detail and preserves direct scopes without copying inherited roles', async () => {
     const wrapper = mountView()
     await flushPromises()
 
@@ -267,21 +310,16 @@ describe('UserManagementView role governance', () => {
     const checkboxes = Array.from(
       document.body.querySelectorAll<HTMLInputElement>('.um-modal input[type="checkbox"]'),
     )
-    expect(checkboxes.map((item) => item.value)).toEqual(['Member', 'AssetSubmitter'])
-    expect(checkboxes[0]?.disabled).toBe(true)
-    expect(checkboxes[1]?.disabled).toBe(false)
+    expect(checkboxes.map((item) => item.value)).toEqual(['super_admin', 'member', 'operations', 'auditor', 'asset_manager'])
+    expect(checkboxes.find((item) => item.value === 'member')?.disabled).toBe(true)
+    expect(checkboxes.find((item) => item.value === 'operations')?.checked).toBe(true)
+    expect(checkboxes.find((item) => item.value === 'auditor')?.checked).toBe(false)
     const modalText = modal?.textContent ?? ''
-    expect(modalText).toContain('历史/不可编辑角色')
-    expect(modalText).toContain('历史兼容：常规审核旧编码')
-    expect(modalText).toContain('外协')
-    expect(modalText).toContain('超级管理员')
-    expect(modalText).toContain('素材工作台角色')
-    expect(modalText).toContain('素材工作台-交付人员')
-    expect(modalText).not.toContain('Super Admin')
-    expect(modalText).not.toContain('Outsource')
-    expect(modalText).not.toContain('普通审核B')
+    expect(modalText).toContain('由部门或小组自动应用')
+    expect(modalText).toContain('审核员')
+    expect(modalText).not.toContain('权限与范围')
 
-    checkboxes[0]?.click()
+    checkboxes.find((item) => item.value === 'asset_manager')?.click()
     await flushPromises()
     const saveButton = Array.from(document.body.querySelectorAll('button')).find(
       (button) => button.textContent?.trim() === '保存角色',
@@ -289,9 +327,41 @@ describe('UserManagementView role governance', () => {
     saveButton?.click()
     await flushPromises()
 
-    expect(usersApi.replaceRoles).toHaveBeenCalledWith('2', {
-      roles: ['Member', 'Audit_B', 'Outsource', 'SuperAdmin'],
-    })
+    expect(accessPolicyApi.replaceUserAssignments).toHaveBeenCalledWith(2, [
+      { role_id: 1, scope_mode: 'self', subjects: [] },
+      { role_id: 2, scope_mode: 'selected_org', subjects: [
+        { subject_type: 'department', subject_id: 1 },
+        { subject_type: 'team', subject_id: 2 },
+      ] },
+      { role_id: 4, scope_mode: 'global', subjects: [] },
+    ], 7, '在用户详情中更新工作角色')
+    expect(usersApi.replaceRoles).not.toHaveBeenCalled()
+  })
+
+  it('uses a compact organization role dialog instead of a separate permission workspace', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('角色与权限')
+
+    const vm = wrapper.vm as unknown as {
+      openOrgAccess: (type: 'department' | 'team', id: number) => Promise<void>
+      selectedOrgPolicyRoleCodes: string[]
+      saveOrgPolicyRoles: () => Promise<void>
+    }
+    await vm.openOrgAccess('department', 1)
+    await flushPromises()
+
+    const dialog = document.body.querySelector('.org-policy-modal')
+    expect(dialog?.textContent).toContain('部门：Design · 默认角色')
+    expect(dialog?.textContent).not.toContain('能力目录')
+    expect(vm.selectedOrgPolicyRoleCodes).toEqual(['operations'])
+    vm.selectedOrgPolicyRoleCodes.push('auditor')
+    await vm.saveOrgPolicyRoles()
+
+    expect(accessPolicyApi.replaceOrgPolicies).toHaveBeenCalledWith('department', 1, [
+      { subject_type: 'department', subject_id: 1, role_id: 2, scope_mode: 'selected_org', enabled: true, version: 1 },
+      { subject_type: 'department', subject_id: 1, role_id: 3, scope_mode: 'selected_org', enabled: true },
+    ], 7, '在组织树中更新默认工作角色')
   })
 
   it('saves employee number and validates employee number in Chinese copy', async () => {

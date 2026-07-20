@@ -87,7 +87,7 @@ export function inferMockFamily(path: string): MockFamily | undefined {
   if (path.startsWith('/v1/task-drafts')) return 'drafts'
   if (path.includes('/batch-create/')) return 'batch'
   if (path.startsWith('/v1/erp/') || path.startsWith('/v1/products') || path.startsWith('/v1/categories')) return 'erp'
-  if (path.startsWith('/v1/product-management') || path.match(/^\/v1\/tasks\/[^/]+\/product-management$/)) return 'product-management'
+  if (path.startsWith('/v1/product-management') || path.startsWith('/v1/cost-rules') || path.startsWith('/v1/cost-rule-bindings') || path.match(/^\/v1\/tasks\/[^/]+\/product-management$/)) return 'product-management'
   if (path.startsWith('/v1/design-sources/')) return 'search'
   if (path.startsWith('/v1/reports/')) return 'reports'
   if (path.startsWith('/v1/assets') || path.startsWith('/v1/resource-groups') || path.startsWith('/v1/tasks/reference-upload')) return 'assets'

@@ -7,17 +7,21 @@
         <TaskDetailAtmosphere />
         <div class="hero-content">
           <nav class="hero-nav" aria-label="页面位置">
-            <button class="back-button" @click="goBack">← 返回任务中心</button>
+            <button class="back-button" @click="goBack"><ArrowLeft :size="16" :stroke-width="1.9" aria-hidden="true" /><span>返回任务中心</span></button>
             <div class="hero-actions">
               <TaskStatusTag :status="task.task_status" />
-              <button :disabled="loading" @click="load">刷新</button>
+              <button class="refresh-button" :disabled="loading" aria-label="刷新任务" @click="load"><RefreshCw :size="16" :stroke-width="1.9" aria-hidden="true" /><span>刷新</span></button>
             </div>
           </nav>
           <div class="hero-main">
-            <div>
-              <p class="eyebrow light">{{ taskTypeLabel }} · {{ businessLaneLabel }}</p>
+            <div class="hero-identity">
               <h1>{{ task.product_name_snapshot || task.primary_sku_code || task.task_no }}</h1>
-              <p class="task-number">{{ task.task_no }} · {{ task.primary_sku_code || task.sku_code || '尚未生成 SKU' }}</p>
+              <p class="task-number"><span>{{ task.task_no }}</span><i aria-hidden="true" /><span>{{ task.primary_sku_code || task.sku_code || '尚未生成 SKU' }}</span></p>
+              <div class="identity-badges" aria-label="任务身份">
+                <span v-if="!isCustomization" class="identity-badge task-kind"><Tag :size="14" aria-hidden="true" />{{ taskTypeLabel }}</span>
+                <span class="identity-badge lane" :class="{ customization: isCustomization }"><Layers3 :size="14" aria-hidden="true" />{{ isCustomization ? `${taskTypeLabel} · ${businessLaneLabel}` : `${businessLaneLabel}任务` }}</span>
+                <span class="identity-badge sku-scope"><Boxes :size="14" aria-hidden="true" />{{ skuScopeLabel }}</span>
+              </div>
             </div>
             <dl class="hero-facts">
               <div v-for="fact in heroFacts" :key="fact.label"><dt>{{ fact.label }}</dt><dd :class="{ 'is-empty': fact.tone === 'empty', 'is-danger': fact.tone === 'danger' }">{{ fact.value }}</dd></div>
@@ -29,26 +33,38 @@
 
       <div v-if="error" class="message error" role="alert">{{ error }}</div>
 
+      <TaskResourceRail
+        v-if="bundle"
+        :bundle="bundle"
+        :references="referenceFiles"
+        :task-status="task.task_status"
+        :can-operate="canOperateResources"
+        :action-label="workflowButtonLabel"
+        @open-attachments="openWorkspace('attachments')"
+        @open-resources="openWorkspace('resources')"
+        @open-workflow="openWorkspace('workflow')"
+      />
+
       <section class="command-strip" :class="{ 'is-complete': isTerminal }" aria-label="当前阶段操作">
         <div class="stage-summary">
-          <span class="stage-orb" :class="{ 'is-complete': isTerminal }" aria-hidden="true">{{ isTerminal ? '✓' : '' }}</span>
-          <div class="stage-copy"><p class="eyebrow">当前节点</p><h2>{{ currentStageTitle }}</h2><p>{{ currentStageDescription }}</p></div>
+          <span class="stage-orb" :class="{ 'is-complete': isTerminal }" aria-hidden="true"><CheckCircle2 v-if="isTerminal" :size="20" /><PanelTopOpen v-else :size="19" /></span>
+          <div class="stage-copy"><p class="stage-label">当前节点</p><h2>{{ currentStageTitle }}</h2><p>{{ currentStageDescription }}</p></div>
           <dl class="stage-context" aria-label="当前协作信息">
             <div><dt>当前指派</dt><dd>{{ currentOwner }}</dd></div>
             <div><dt>最近动态</dt><dd>{{ latestEventTitle }}</dd></div>
           </dl>
         </div>
         <div class="command-actions">
-          <button v-if="isPlanning" class="primary-button" :disabled="planningExporting" @click="downloadPlanningResult">{{ planningExporting ? '正在导出…' : '导出策划结果' }}</button>
-          <button v-else-if="canOperateResources" class="primary-button" @click="openWorkspace('workflow')">{{ workflowButtonLabel }}</button>
-          <button v-if="bundle" class="secondary-button" @click="openWorkspace('resources')">查看任务资源</button>
-          <button class="secondary-button" @click="openWorkspace('details')">完整任务信息</button>
+          <button v-if="isPlanning" class="primary-button" :disabled="planningExporting" @click="downloadPlanningResult"><Download :size="16" aria-hidden="true" />{{ planningExporting ? '正在导出…' : '导出策划结果' }}</button>
+          <button v-else-if="canOperateResources" class="primary-button" @click="openWorkspace('workflow')"><PanelTopOpen :size="16" aria-hidden="true" />{{ workflowButtonLabel }}</button>
+          <button v-if="referenceFiles.length" class="secondary-button" @click="openWorkspace('attachments')"><Paperclip :size="16" aria-hidden="true" />查看参考附件</button>
+          <button class="secondary-button" @click="openWorkspace('details')"><FileText :size="16" aria-hidden="true" />完整任务信息</button>
         </div>
       </section>
 
       <section class="overview-grid" aria-label="任务关键信息">
         <article class="brief-card mission-card">
-          <header><div><p class="eyebrow">任务全貌</p><h2>{{ requirementHeading }}</h2></div><button @click="openWorkspace('details')">完整资料</button></header>
+          <header><div class="card-heading"><span class="heading-icon"><ClipboardList :size="18" aria-hidden="true" /></span><div><h2>{{ requirementHeading }}</h2><p>需求与运营交代</p></div></div><button @click="openWorkspace('details')"><FileText :size="15" aria-hidden="true" />完整资料</button></header>
           <div class="mission-copy">
             <section><span class="section-label">需求说明</span><p class="clamped-copy">{{ requirementText }}</p></section>
             <aside><span class="section-label">运营备注</span><p class="clamped-copy">{{ operationNote }}</p></aside>
@@ -57,10 +73,10 @@
         </article>
 
         <article class="brief-card references-card">
-          <header><div><p class="eyebrow">参考资料</p><h2>{{ referenceFiles.length }} 个附件</h2></div><div class="card-actions"><button @click="openWorkspace('details')">查看全部</button><button v-if="canManageReferences" class="upload-button" :disabled="referenceUploading" @click="referenceInput?.click()">{{ referenceUploading ? '上传中…' : '+ 补充附件' }}</button></div></header>
+          <header><div class="card-heading"><span class="heading-icon"><Paperclip :size="18" aria-hidden="true" /></span><div><h2>参考资料</h2><p>{{ referenceFiles.length }} 个附件</p></div></div><div class="card-actions"><button @click="openWorkspace('attachments')"><ExternalLink :size="15" aria-hidden="true" />查看附件</button><button v-if="canManageReferences" class="upload-button" :disabled="referenceUploading" @click="referenceInput?.click()"><Plus :size="15" aria-hidden="true" />{{ referenceUploading ? '上传中…' : '补充附件' }}</button></div></header>
           <div v-if="referenceFiles.length" class="reference-preview">
             <a v-for="(file,index) in referenceFiles.slice(0,4)" :key="referenceKey(file,index)" :href="referenceUrl(file)" target="_blank" rel="noreferrer">
-              <img v-if="isPreviewable(file) && referencePreviewUrl(file)" :src="referencePreviewUrl(file)" :alt="referenceName(file)" />
+              <img v-if="isPreviewable(file) && referencePreviewUrl(file) && !brokenReferences.has(referenceKey(file,index))" :src="referencePreviewUrl(file)" :alt="referenceName(file)" @error="markReferenceBroken(file,index)" />
               <span v-else class="file-glyph" aria-hidden="true">{{ fileExtension(file) }}</span>
               <small>{{ referenceName(file) }}</small>
             </a>
@@ -69,7 +85,7 @@
         </article>
 
         <article class="brief-card collaboration-card">
-          <header><div><p class="eyebrow">指派与动态</p><h2>当前协作状态</h2></div><button @click="openWorkspace('history')">历史 {{ events.length }}</button></header>
+          <header><div class="card-heading"><span class="heading-icon"><Activity :size="18" aria-hidden="true" /></span><div><h2>处理与动态</h2><p>当前协作状态</p></div></div><button @click="openWorkspace('history')"><History :size="15" aria-hidden="true" />历史记录 · {{ events.length }}</button></header>
           <div class="assignment-snapshot">
             <span class="person-avatar" aria-hidden="true">{{ ownerInitial }}</span>
             <div><small>当前处理人</small><strong>{{ currentOwner }}</strong><p>{{ ownerOrg }}</p></div>
@@ -80,22 +96,11 @@
           </div>
           <p v-else class="muted-copy">任务刚刚创建，等待首次处理。</p>
           <div class="collaboration-actions">
-            <button @click="openWorkspace('details')">人员与组织</button>
+            <button @click="openWorkspace('details')"><UserRound :size="15" aria-hidden="true" />人员与组织</button>
             <button v-if="canAssignDesigner" @click="openAssignDialog">{{ task.designer_name ? '改派设计' : '指派设计' }}</button>
             <button v-if="supportsAuditCollaboration" @click="openWorkspace('collaboration')">审核协作</button>
           </div>
         </article>
-      </section>
-
-      <section v-if="bundle" class="resource-story" aria-label="任务资源构成">
-        <header><div><p class="eyebrow">图片与文件</p><h2>从参考图、源文件到最终成品</h2></div><button @click="openWorkspace('resources')">查看全部文件</button></header>
-        <div class="resource-steps">
-          <div><span>01</span><strong>运营参考</strong><small>{{ referenceFiles.length }} 个附件</small></div>
-          <i aria-hidden="true">→</i>
-          <div><span>02</span><strong>设计源文件</strong><small>{{ sourceSummary }}</small></div>
-          <i aria-hidden="true">→</i>
-          <div><span>03</span><strong>最终成品</strong><small>{{ finalSummary }}</small></div>
-        </div>
       </section>
 
       <Teleport to="body">
@@ -121,15 +126,20 @@
 
           <div v-else-if="workspaceMode === 'resources' && bundle" class="workspace-body"><SkuResourceMatrix :bundle="bundle" /></div>
 
+          <div v-else-if="workspaceMode === 'attachments'" class="workspace-body attachment-body">
+            <TaskAttachmentWorkspace :files="referenceFiles" :can-upload="canManageReferences" :uploading="referenceUploading" @upload="referenceInput?.click()" />
+          </div>
+
           <div v-else-if="workspaceMode === 'details'" class="workspace-body detail-sections">
             <section class="detail-summary-strip"><div><span>当前状态</span><strong>{{ currentStageTitle }}</strong></div><div><span>任务类型</span><strong>{{ taskTypeLabel }} · {{ businessLaneLabel }}</strong></div><div><span>当前指派</span><strong>{{ currentOwner }}</strong></div><div><span>附件</span><strong>{{ referenceFiles.length }} 个</strong></div><div><span>最近更新</span><strong>{{ displayDate(task.updated_at) }}</strong></div></section>
             <section class="detail-requirement"><p class="eyebrow">需求与运营交代</p><div class="detail-copy-grid"><div><h3>{{ requirementHeading }}</h3><p class="long-copy">{{ requirementText }}</p></div><aside><h3>运营备注</h3><p class="long-copy">{{ operationNote }}</p></aside></div></section>
             <section><p class="eyebrow">人员与组织</p><dl class="detail-list"><div><dt>创建人</dt><dd>{{ task.creator_name || '—' }}</dd></div><div><dt>设计人员</dt><dd>{{ task.designer_name || '—' }}</dd></div><div><dt>当前处理人</dt><dd>{{ currentOwner }}</dd></div><div><dt>归属组织</dt><dd>{{ ownerOrg }}</dd></div></dl></section>
             <section><p class="eyebrow">产品与规格</p><dl class="detail-list"><div><dt>主 SKU</dt><dd>{{ task.primary_sku_code || task.sku_code || '—' }}</dd></div><div><dt>产品名称</dt><dd>{{ task.product_name_snapshot || '—' }}</dd></div><div><dt>规格</dt><dd>{{ detailValue('spec_text') }}</dd></div><div><dt>尺寸</dt><dd>{{ detailValue('size_text') }}</dd></div><div><dt>材质</dt><dd>{{ detailValue('material') }}</dd></div><div><dt>工艺</dt><dd>{{ detailValue('craft_text') }}</dd></div></dl></section>
+            <section v-if="resourceSKUProfiles.length"><p class="eyebrow">SKU 规格与成本</p><div class="detail-sku-costs"><article v-for="item in resourceSKUProfiles" :key="item.groupId"><div><strong>{{ item.sku }}</strong><span>{{ item.product }}</span></div><dl><div><dt>规格</dt><dd>{{ item.specification }}</dd></div><div><dt>面积</dt><dd>{{ item.area }}</dd></div><div><dt>成本</dt><dd>{{ item.cost }}</dd></div><div><dt>规则</dt><dd>{{ item.rule }}</dd></div></dl></article></div></section>
             <section><p class="eyebrow">业务与时效</p><dl class="detail-list"><div v-for="item in businessDetailItems" :key="item.label"><dt>{{ item.label }}</dt><dd>{{ item.value }}</dd></div></dl></section>
             <section><p class="eyebrow">文案与同步</p><dl class="detail-list"><div v-for="item in contentDetailItems" :key="item.label"><dt>{{ item.label }}</dt><dd>{{ item.value }}</dd></div></dl></section>
             <section v-if="retouchRequirements.length"><p class="eyebrow">逐项修图要求</p><ol class="retouch-requirement-list"><li v-for="(item,index) in retouchRequirements" :key="String(item.id || index)"><span>{{ index + 1 }}</span><div><strong>{{ item.description || item.requirement || `修图要求 ${index + 1}` }}</strong><p v-if="item.remark || item.note">{{ item.remark || item.note }}</p></div></li></ol></section>
-            <section class="reference-detail"><p class="eyebrow">参考附件</p><div v-if="referenceFiles.length" class="reference-detail-grid"><a v-for="(file,index) in referenceFiles" :key="referenceKey(file,index)" :href="referenceUrl(file)" target="_blank" rel="noreferrer"><img v-if="isPreviewable(file) && referencePreviewUrl(file)" :src="referencePreviewUrl(file)" :alt="referenceName(file)" /><span v-else class="file-glyph" aria-hidden="true">{{ fileExtension(file) }}</span><strong>{{ referenceName(file) }}</strong></a></div><p v-else class="muted-copy">暂无参考附件。</p></section>
+            <section class="reference-summary"><p class="eyebrow">参考附件</p><div><strong>{{ referenceFiles.length }} 个文件</strong><p>参考资料已集中到独立附件工作台，可预览并下载，不再与完整任务信息混在一起。</p><button type="button" @click="openWorkspace('attachments')">打开附件工作台</button></div></section>
             <section v-if="skuItems.length"><p class="eyebrow">SKU 清单</p><div class="sku-list"><span v-for="item in skuItems" :key="String(item.id || item.sku_code)">{{ item.sku_code || `子项 ${item.sequence_no || ''}` }}<em v-if="item.set_mode_hint || item.setModeHint">运营建议套装 · 设计可调整</em></span></div></section>
           </div>
 
@@ -152,7 +162,7 @@
               <button class="primary-button" :disabled="handoverBusy || !handoverUserId || !handoverReason">{{ handoverBusy ? '提交中…' : '确认交班' }}</button>
             </form>
             <div class="handover-side">
-              <div v-if="handovers.length" class="handover-list"><article v-for="item in handovers" :key="item.id"><div><strong>{{ item.handover_no || `交班 ${item.id}` }}</strong><p>{{ item.status || '待接手' }}</p></div><button v-if="item.allowed_actions?.includes('task.audit.takeover')" class="secondary-button" :disabled="handoverBusy" @click="takeover(item.id)">接手</button></article></div>
+              <div v-if="handovers.length" class="handover-list"><article v-for="item in handovers" :key="item.id"><div><strong>{{ item.handover_no || `交班 ${item.id}` }}</strong><p>{{ handoverStatusLabel(item.status) }}</p></div><button v-if="item.allowed_actions?.includes('task.audit.takeover')" class="secondary-button" :disabled="handoverBusy" @click="takeover(item.id)">接手</button></article></div>
               <p v-else class="muted-copy">暂无交班记录。</p>
               <p v-if="!canHandover" class="muted-copy">只有当前正在审核这张任务的人员可以发起交班；如需批量交班，请到任务中心列表右上角的「审核交班」入口。</p>
             </div>
@@ -182,6 +192,24 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
+import {
+  Activity,
+  ArrowLeft,
+  Boxes,
+  CheckCircle2,
+  ClipboardList,
+  Download,
+  ExternalLink,
+  FileText,
+  History,
+  Layers3,
+  PanelTopOpen,
+  Paperclip,
+  Plus,
+  RefreshCw,
+  Tag,
+  UserRound,
+} from 'lucide-vue-next'
 import { tasksApi } from '@/services/api/tasksApi'
 import { resourceGroupsApi, type ResourceBundle } from '@/services/api/resourceGroupsApi'
 import { mergeDetailEnvelopeIntoTaskRaw } from '@/domain/mappers/task-detail-envelope'
@@ -190,10 +218,13 @@ import WorkflowProgress from '@/components/task/WorkflowProgress.vue'
 import TaskStatusTag from '@/components/task/TaskStatusTag.vue'
 import SkuResourceMatrix from '@/components/task/SkuResourceMatrix.vue'
 import ResourceWorkflowPanel from '@/components/task/ResourceWorkflowPanel.vue'
+import TaskAttachmentWorkspace from '@/components/task/TaskAttachmentWorkspace.vue'
+import TaskResourceRail from '@/components/task/TaskResourceRail.vue'
 import TaskDetailAtmosphere from '@/components/task/TaskDetailAtmosphere.vue'
 import ReassignDesignerDialog from '@/components/task/ReassignDesignerDialog.vue'
 import { uploadReferenceFileRef } from '@/services/upload/assetUploadFlow'
 import { planningSkuApi } from '@/services/api/planningSkuApi'
+import { handoverStatusLabel, taskDetailDisplayValue } from '@/domain/task-detail-display'
 
 interface V8Task extends Record<string, unknown> {
   id: number; task_no: string; task_type: string; task_status: string; workflow_revision: number; workflow_contract_version: 2; allowed_actions: string[]
@@ -203,7 +234,7 @@ interface V8Task extends Record<string, unknown> {
 interface ReferenceFile extends Record<string, unknown> { id?: number; asset_id?: string; file_name?: string; filename?: string; mime_type?: string; download_url?: string; preview_url?: string; url?: string }
 interface TaskEvent extends Record<string, unknown> { id?: number; event_type?: string; title?: string; operator_name?: string; actor_name?: string; created_at?: string; reason?: string; remark?: string }
 interface AuditHandover { id: number; handover_no?: string; status?: string; allowed_actions?: string[] }
-type WorkspaceMode = 'workflow' | 'resources' | 'details' | 'history' | 'collaboration'
+type WorkspaceMode = 'workflow' | 'resources' | 'attachments' | 'details' | 'history' | 'collaboration'
 
 const route = useRoute()
 const router = useRouter()
@@ -221,6 +252,7 @@ const assignDialogOpen = ref(false)
 const assignSubmitting = ref(false)
 const referenceInput = ref<HTMLInputElement | null>(null)
 const referenceUploading = ref(false)
+const brokenReferences = ref(new Set<string>())
 const planningExporting = ref(false)
 const assignError = ref('')
 const {
@@ -241,7 +273,7 @@ let previousBodyOverflow = ''
 const taskId = computed(() => Number(route.params.id))
 const isPlanning = computed(() => task.value?.task_type === 'sku_planning')
 const isRetouch = computed(() => ['retouch', 'retouch_task'].includes(task.value?.task_type || ''))
-const taskTypeLabel = computed(() => ({ original_product_development: '原品开发', new_product_development: '新品开发', retouch_task: '修图任务', sku_planning: '策划 SKU', regular_customization: '常规定制', customer_customization: '客户定制' }[task.value?.task_type || ''] || task.value?.task_type || '任务'))
+const taskTypeLabel = computed(() => ({ original_product_development: '原品开发', new_product_development: '新品开发', retouch_task: '修图任务', sku_planning: '策划 SKU', regular_customization: '常规定制', customer_customization: '客户定制' }[task.value?.task_type || ''] || '其他任务'))
 const isCustomization = computed(() => task.value?.business_lane === 'customization' || ['regular_customization', 'customer_customization'].includes(task.value?.task_type || ''))
 const businessLaneLabel = computed(() => isCustomization.value ? '定制' : '常规')
 const requirementHeading = computed(() => isPlanning.value ? '策划说明' : isRetouch.value ? '修图要求' : isCustomization.value ? '定制需求' : '设计需求')
@@ -273,6 +305,7 @@ const currentDesignerId = computed(() => task.value?.designer_id != null && task
 const isTerminal = computed(() => ['Completed', 'Archived', 'Cancelled'].includes(task.value?.task_status || ''))
 const hasOwner = computed(() => Boolean(task.value?.current_handler_name || task.value?.designer_name))
 const skuCount = computed(() => skuItems.value.length || (task.value?.primary_sku_code || task.value?.sku_code ? 1 : 0))
+const skuScopeLabel = computed(() => skuCount.value > 1 ? `批量 SKU · ${skuCount.value} 项` : '单 SKU')
 const dueAtRaw = computed(() => task.value?.due_at || task.value?.deadline_at || '')
 const dueAtText = computed(() => {
   if (!dueAtRaw.value) return '未设置'
@@ -332,7 +365,7 @@ const businessDetailItems = computed(() => [
   { label: '优先级', value: detailValue('priority') },
   { label: '截止时间', value: dueAtText.value },
   { label: '数量', value: task.value?.quantity == null ? '—' : `${task.value.quantity}` },
-  { label: '成本价', value: formatMoney(task.value?.cost_price) },
+  { label: 'SKU 当前成本', value: resourceCostSummary.value || formatMoney(task.value?.cost_price) },
   { label: '成本方式', value: detailValue('cost_price_mode') },
   { label: '产品渠道', value: detailValue('product_channel') },
 ])
@@ -342,9 +375,30 @@ const contentDetailItems = computed(() => [
   { label: '风格关键词', value: detailValue('style_keywords') },
   { label: '参考链接', value: detailValue('reference_link') },
   { label: 'ERP 建档', value: detailValue('filing_status') },
-  { label: 'ERP 同步', value: task.value?.erp_sync_required === true ? '需要同步' : task.value?.erp_sync_required === false ? '无需同步' : '—' },
+  { label: 'ERP 同步', value: task.value?.erp_sync_required === true ? taskDetailDisplayValue('erp_sync_status', task.value?.erp_sync_status, '等待同步') : task.value?.erp_sync_required === false ? '无需同步' : taskDetailDisplayValue('erp_sync_status', task.value?.erp_sync_status) },
 ])
-const currentStageTitle = computed(() => ({ Draft: '等待完善', PendingAssign: '等待指派', Assigned: '准备开始', InProgress: isRetouch.value ? '修图处理中' : '设计处理中', PendingAudit: '等待审核', Completed: '任务已结单', Archived: '任务已归档', Cancelled: '任务已取消', Blocked: '任务被阻塞' }[task.value?.task_status || ''] || task.value?.task_status || '任务处理中'))
+const resourceSKUProfiles = computed(() => (bundle.value?.groups || []).map((group) => {
+  const profile = group.sku_profile
+  const area = profile?.area_trace?.area_m2
+  const cost = profile?.cost_price
+  return {
+    groupId: group.id,
+    sku: group.sku_code || '未绑定 SKU',
+    product: group.product_name || profile?.product_name || '未命名产品',
+    specification: profile?.size_text || profile?.spec_text || '规格待补充',
+    area: typeof area === 'number' ? `${area.toFixed(3)} ㎡` : '面积待核对',
+    cost: typeof cost === 'number' ? `¥${cost.toFixed(2)}` : '成本待计算',
+    rule: profile?.cost_trace?.rule_name || '尚未关联规则',
+    costValue: typeof cost === 'number' ? cost : null,
+  }
+}))
+const resourceCostSummary = computed(() => {
+  const values = resourceSKUProfiles.value.map((item) => item.costValue).filter((value): value is number => value != null)
+  if (!values.length) return ''
+  const min = Math.min(...values); const max = Math.max(...values)
+  return min === max ? `¥${min.toFixed(2)}` : `¥${min.toFixed(2)} ～ ¥${max.toFixed(2)}`
+})
+const currentStageTitle = computed(() => ({ Draft: '等待完善', PendingAssign: '等待指派', Assigned: '准备开始', InProgress: isRetouch.value ? '修图处理中' : '设计处理中', PendingAudit: '等待审核', Completed: '任务已结单', Archived: '任务已归档', Cancelled: '任务已取消', Blocked: '任务被阻塞' }[task.value?.task_status || ''] || '任务处理中'))
 const currentStageDescription = computed(() => {
   if (task.value?.task_status === 'InProgress' && !isRetouch.value) return '设计人员先确定每个 SKU 是单图还是套装，并提交一份可编辑源文件。'
   if (task.value?.task_status === 'PendingAudit') return '审核人员按设计确认的单图/套装模式上传最终成品，必要时替换源文件。'
@@ -353,10 +407,12 @@ const currentStageDescription = computed(() => {
   return '在这里查看任务全貌、资源与最新处理动态。'
 })
 const workflowButtonLabel = computed(() => task.value?.task_status === 'PendingAudit' ? '进入审核工作台' : isRetouch.value ? '提交修图成品' : task.value?.task_status === 'Completed' ? '查看结单资源' : '进入设计提交')
-const sourceSummary = computed(() => `${bundle.value?.groups.filter((group) => Boolean(group.finalized_revision?.source_file || group.working_revision?.source_file)).length || 0}/${bundle.value?.groups.length || 0} 组已提交`)
-const finalSummary = computed(() => `${bundle.value?.groups.reduce((sum, group) => sum + (group.finalized_revision?.items.length || 0), 0) || 0} 张成品图`)
-const workspaceTitle = computed(() => ({ workflow: currentStageTitle.value, resources: '任务文件总览', details: '完整任务信息', history: '全部任务动态', collaboration: '审核交班与接手' }[workspaceMode.value || 'details']))
-const workspaceSubtitle = computed(() => workspaceMode.value === 'workflow' ? currentStageDescription.value : '看完点右上角关闭，页面还停在这张任务上。')
+const workspaceTitle = computed(() => ({ workflow: currentStageTitle.value, resources: '任务文件总览', attachments: '参考附件', details: '完整任务信息', history: '全部任务动态', collaboration: '审核交班与接手' }[workspaceMode.value || 'details']))
+const workspaceSubtitle = computed(() => {
+  if (workspaceMode.value === 'workflow') return currentStageDescription.value
+  if (workspaceMode.value === 'attachments') return '集中预览和下载运营提供的参考图片与文件。'
+  return '看完点右上角关闭，页面还停在这张任务上。'
+})
 
 function unwrap<T>(response: { data?: unknown }): T { const body = response.data as Record<string, unknown> | undefined; return (body?.data && typeof body.data === 'object' ? body.data : body) as T }
 function unwrapCollection<T>(response: { data?: unknown } | null, fallback: T[] = []): T[] {
@@ -372,12 +428,13 @@ function unwrapCollection<T>(response: { data?: unknown } | null, fallback: T[] 
   return fallback
 }
 function displayDate(value: unknown) { if (!value) return '刚刚'; const date = new Date(String(value)); return Number.isNaN(date.getTime()) ? String(value) : new Intl.DateTimeFormat('zh-CN',{ month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit' }).format(date) }
-function detailValue(key: string) { return String(task.value?.[key] || '—') }
+function detailValue(key: string) { return taskDetailDisplayValue(key, task.value?.[key]) }
 function formatMoney(value: unknown) { const amount = Number(value); return Number.isFinite(amount) ? `¥${amount.toFixed(2)}` : '—' }
 function referenceName(file: ReferenceFile) { return String(file.filename || file.file_name || file.asset_id || '参考附件') }
 function referenceUrl(file: ReferenceFile) { return String(file.download_url || file.preview_url || file.url || '') }
 function referencePreviewUrl(file: ReferenceFile) { return String(file.preview_url || file.url || file.download_url || '') }
 function referenceKey(file: ReferenceFile,index: number) { return String(file.id || file.asset_id || `${referenceName(file)}-${index}`) }
+function markReferenceBroken(file: ReferenceFile,index: number) { brokenReferences.value = new Set(brokenReferences.value).add(referenceKey(file,index)) }
 function fileExtension(file: ReferenceFile) { const name = referenceName(file); const suffix = name.includes('.') ? name.split('.').pop() : 'FILE'; return String(suffix || 'FILE').slice(0,4).toUpperCase() }
 function isPreviewable(file: ReferenceFile) { return String(file.mime_type || '').startsWith('image/') || /\.(png|jpe?g|webp|gif)$/i.test(referenceName(file)) }
 function eventKey(item: TaskEvent) { return String(item.id || `${item.event_type}-${item.created_at}`) }
@@ -603,4 +660,72 @@ onBeforeUnmount(()=>{window.removeEventListener('beforeunload',warnBeforeUnload)
 @media(max-width:760px){.task-page{padding:10px}.task-hero{min-height:248px;border-radius:19px}.hero-content{min-height:248px;padding:12px}.hero-nav,.command-strip,.workspace-head{align-items:flex-start}.hero-actions{flex-wrap:wrap}.hero-main{gap:8px}.hero-main h1{font-size:27px;line-height:1.02}.hero-facts{grid-template-columns:repeat(2,minmax(0,1fr))}.hero-facts div{min-width:0;padding:7px}.hero-facts dd{overflow:hidden;font-size:11px;line-height:1.35;text-overflow:ellipsis}.overview-grid{grid-template-columns:1fr}.mission-card{grid-column:auto}.mission-copy,.detail-copy-grid{grid-template-columns:1fr}.command-strip{align-items:flex-start;flex-direction:column}.stage-summary{width:100%;display:grid;grid-template-columns:34px 1fr;align-items:start}.stage-orb{width:34px;height:34px}.stage-copy{min-width:0}.stage-context{grid-column:1/-1;width:100%;display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.stage-context dd{max-width:none}.command-actions{width:100%;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.command-actions>*{min-width:0}.command-actions>.primary-button{grid-column:1/-1}.resource-story{display:block}.resource-steps{grid-template-columns:1fr;margin-top:12px}.resource-steps i{transform:rotate(90deg);justify-self:center}.workspace-backdrop{padding:0}.workspace-dialog{height:100dvh;border:0;border-radius:0}.workspace-head{padding:13px}.workspace-body{padding:12px}.detail-sections,.collaboration-body{grid-template-columns:1fr}.detail-summary-strip,.detail-requirement{grid-column:auto}.detail-summary-strip{grid-template-columns:repeat(2,minmax(0,1fr))}.detail-list,.reference-detail-grid{grid-template-columns:1fr}.reference-preview{grid-template-columns:repeat(2,minmax(0,1fr))}.collaboration-fab{right:12px;bottom:12px}.hero-progress{overflow:auto}}
 @media(max-width:420px){.reference-preview{grid-template-columns:1fr}.command-actions>*{flex-basis:100%}}
 @media(prefers-reduced-motion:reduce){.workspace-backdrop{backdrop-filter:none}}
+</style>
+
+<style scoped>
+.detail-sku-costs{display:grid;gap:.55rem}.detail-sku-costs article{display:grid;grid-template-columns:minmax(9rem,.85fr) minmax(0,2.2fr);gap:1rem;border:1px solid rgb(var(--yb-border));border-radius:.75rem;padding:.75rem;background:rgb(var(--yb-surface-soft))}.detail-sku-costs article>div{min-width:0;display:grid;align-content:center;gap:.2rem}.detail-sku-costs article>div strong{font:800 .8rem var(--yb-font-data);color:rgb(var(--yb-brand))}.detail-sku-costs article>div span{overflow:hidden;color:rgb(var(--yb-text-muted));font-size:.72rem;text-overflow:ellipsis;white-space:nowrap}.detail-sku-costs dl{display:grid;grid-template-columns:1.2fr .8fr .8fr 1.2fr;margin:0}.detail-sku-costs dl>div{min-width:0;display:grid;gap:.25rem;padding:0 .7rem;border-left:1px solid rgb(var(--yb-border))}.detail-sku-costs dt{color:rgb(var(--yb-text-muted));font-size:.65rem}.detail-sku-costs dd{margin:0;overflow:hidden;font-size:.72rem;text-overflow:ellipsis;white-space:nowrap}@media(max-width:760px){.detail-sku-costs article{grid-template-columns:1fr}.detail-sku-costs dl{grid-template-columns:1fr 1fr}.detail-sku-costs dl>div{padding:.45rem;border-left:0}.detail-sku-costs dl>div:nth-child(n+3){border-top:1px solid rgb(var(--yb-border))}}
+</style>
+
+<style scoped>
+/* Premium task workstation visual system — restrained, legible and state-led. */
+.task-page{max-width:none;margin:0;padding:0 0 30px;gap:14px}
+.task-hero{min-height:184px;border:1px solid rgb(var(--yb-text-inverse)/.1);border-radius:18px;background:rgb(var(--yb-text-night));box-shadow:0 10px 28px rgb(var(--yb-shadow)/.14)}
+.hero-content{min-height:184px;row-gap:12px;padding:16px 20px 14px}
+.hero-nav{align-items:center}
+.back-button,.hero-actions button{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:36px;padding:0 12px;border-color:rgb(var(--yb-text-inverse)/.2);border-radius:9px;background:rgb(var(--yb-text-night)/.2);font-size:12px;font-weight:750}
+.back-button:hover,.hero-actions button:hover{border-color:rgb(var(--yb-text-inverse)/.38);background:rgb(var(--yb-text-inverse)/.08)}
+.refresh-button:disabled svg{animation:task-refresh-spin 1s linear infinite}
+.hero-main{align-items:center;gap:28px}
+.hero-identity{min-width:0;display:grid;align-content:center}
+.hero-identity h1{max-width:780px;margin:0;font-size:clamp(29px,2.4vw,36px);font-weight:820;line-height:1.1;letter-spacing:-.025em}
+.task-number{display:flex;align-items:center;gap:9px;margin:8px 0 0;color:rgb(var(--yb-text-inverse)/.74);font-size:12px;letter-spacing:.015em}
+.task-number i{width:3px;height:3px;border-radius:50%;background:rgb(var(--yb-text-inverse)/.38)}
+.identity-badges{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}
+.identity-badge{display:inline-flex;align-items:center;gap:6px;min-height:28px;padding:0 9px;border:1px solid rgb(var(--yb-text-inverse)/.18);border-radius:8px;background:rgb(var(--yb-text-inverse)/.07);color:rgb(var(--yb-text-inverse)/.88);font-size:11px;font-weight:750}
+.identity-badge.lane{border-color:rgb(var(--yb-brand-bright)/.34);background:rgb(var(--yb-brand)/.2);color:rgb(var(--yb-text-inverse))}
+.identity-badge.lane.customization{border-color:rgb(var(--yb-purple-border-strong)/.55);background:rgb(var(--yb-purple)/.2)}
+.hero-facts{flex:0 0 min(460px,42vw);grid-template-columns:repeat(4,minmax(92px,1fr));border-radius:11px;background:rgb(var(--yb-text-inverse)/.16)}
+.hero-facts div{padding:10px;background:rgb(var(--yb-text-night)/.38)}
+.hero-facts dt{font-size:10px;font-weight:650}
+.hero-facts dd{font-size:12px;font-weight:760}
+.hero-progress{padding-top:12px}
+.command-strip,.brief-card,.resource-story{border-radius:15px;box-shadow:0 5px 18px rgb(var(--yb-shadow)/.045)}
+.command-strip{min-height:78px;padding:12px 14px}
+.stage-summary{gap:11px}
+.stage-orb{width:40px;height:40px;border:1px solid rgb(var(--yb-brand-border));border-radius:12px;background:rgb(var(--yb-brand-soft));box-shadow:none;color:rgb(var(--yb-brand))}
+.stage-orb.is-complete{border-color:rgb(var(--yb-success-border));background:rgb(var(--yb-success-soft));color:rgb(var(--yb-success-strong))}
+.stage-label{margin:0;color:rgb(var(--yb-brand));font-size:10px;font-weight:850;letter-spacing:.08em}
+.stage-copy h2{margin:2px 0;font-size:17px;line-height:1.25}
+.stage-copy p:last-child{font-size:12px;line-height:1.45}
+.stage-context{border-radius:9px}
+.stage-context div{padding:7px 9px}
+.command-actions{flex-wrap:wrap}
+.primary-button,.secondary-button,.brief-card header button,.resource-story header button,.collaboration-actions button{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:36px;border-radius:9px;font-size:12px;font-weight:720}
+.primary-button{box-shadow:0 4px 12px rgb(var(--yb-brand)/.16)}
+.overview-grid{grid-template-columns:minmax(0,1.2fr) minmax(300px,.95fr) minmax(285px,.82fr);gap:14px}
+.brief-card{gap:13px;padding:15px}
+.brief-card header{align-items:center}
+.brief-card header button{min-height:32px;padding:0 9px}
+.card-heading{display:flex;align-items:center;gap:9px;min-width:0}
+.heading-icon{display:grid;flex:0 0 auto;width:32px;height:32px;place-items:center;border:1px solid rgb(var(--yb-border));border-radius:9px;background:rgb(var(--yb-surface-soft));color:rgb(var(--yb-brand))}
+.card-heading h2{margin:0;font-size:15px;line-height:1.25}
+.card-heading p{margin:3px 0 0;color:rgb(var(--yb-text-muted));font-size:10px}
+.mission-copy{gap:9px}
+.mission-copy>section,.mission-copy>aside{padding:11px;border-radius:10px}
+.reference-preview a{border-radius:9px}
+.assignment-snapshot{border-radius:10px}
+.collaboration-actions button{min-height:31px}
+.resource-story{padding:13px 15px}
+.resource-steps>div{border:1px solid rgb(var(--yb-border));border-radius:10px;background:rgb(var(--yb-surface))}
+.workspace-backdrop{padding:14px;background:rgb(var(--yb-overlay-night)/.68);backdrop-filter:blur(10px)}
+.workspace-dialog{width:min(1540px,100%);height:calc(100dvh - 28px);border-radius:18px;box-shadow:0 34px 90px rgb(var(--yb-shadow)/.34)}
+.workspace-head{padding:13px 16px;background:rgb(var(--yb-surface))}
+.workflow-body{overflow:hidden}
+.attachment-body{padding:0;overflow:hidden}
+.reference-summary>div{display:grid;gap:7px;border:1px solid rgb(var(--yb-border));border-radius:11px;padding:13px;background:rgb(var(--yb-surface-soft))}.reference-summary strong{font-size:14px}.reference-summary p{margin:0;color:rgb(var(--yb-text-muted));font-size:11px;line-height:1.55}.reference-summary button{justify-self:start;min-height:34px;border:1px solid rgb(var(--yb-brand));border-radius:9px;padding:0 11px;background:rgb(var(--yb-brand));color:rgb(var(--yb-text-inverse));font-size:11px;font-weight:720;cursor:pointer}
+.workspace-head h2{font-size:19px}
+.close-button{display:grid;width:36px;height:36px;place-items:center;border-radius:9px;font-size:21px}
+@media(max-width:1160px){.hero-facts{flex-basis:auto}.overview-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.mission-card{grid-column:1/-1}}
+@media(max-width:760px){.task-page{padding:0 0 22px;gap:10px}.task-hero{min-height:0;border-radius:14px}.hero-content{min-height:0;padding:12px}.hero-nav{align-items:center}.back-button span,.refresh-button span{display:none}.back-button,.refresh-button{width:36px;padding:0}.hero-main{gap:12px}.hero-identity h1{font-size:26px;line-height:1.12}.identity-badges{margin-top:10px}.identity-badge{min-height:26px;padding-inline:8px}.hero-facts{grid-template-columns:repeat(2,minmax(0,1fr))}.hero-progress{padding-bottom:2px;overflow:visible}.command-strip{padding:12px}.overview-grid{grid-template-columns:1fr;gap:10px}.mission-card{grid-column:auto}.card-actions{flex-wrap:wrap;justify-content:flex-end}.workspace-backdrop{padding:0}.workspace-dialog{height:100dvh;border-radius:0}.collaboration-fab{display:none}}
+@media(prefers-reduced-motion:no-preference){@keyframes task-refresh-spin{to{transform:rotate(360deg)}}}
 </style>

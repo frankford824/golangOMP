@@ -37,27 +37,63 @@ const (
 	TaskAssetSourceReopen    TaskAssetSourceStage = "reopen"
 )
 
+// TaskAssetGroupSKUProfile is the deliberately narrow, read-only SKU view
+// exposed by task/resource-group APIs.  Do not replace this with
+// ProductManagementRecord: that record also carries ERP identifiers,
+// synchronization state, operator capabilities and full cost traces which are
+// not part of asset visibility.
+type TaskAssetGroupSKUProfile struct {
+	ID            int64                         `json:"id"`
+	TaskID        int64                         `json:"task_id"`
+	TaskSKUItemID *int64                        `json:"task_sku_item_id,omitempty"`
+	SKUCode       string                        `json:"sku_code"`
+	CategoryName  string                        `json:"category_name,omitempty"`
+	ProductFamily string                        `json:"product_family,omitempty"`
+	ProductName   string                        `json:"product_name,omitempty"`
+	ComboSKUCodes []string                      `json:"combo_sku_codes,omitempty"`
+	CostPrice     *float64                      `json:"cost_price,omitempty"`
+	CostTrace     *TaskAssetGroupSKUCostSummary `json:"cost_trace,omitempty"`
+	SpecText      string                        `json:"spec_text,omitempty"`
+	SizeText      string                        `json:"size_text,omitempty"`
+	AreaTrace     *TaskAssetGroupSKUAreaSummary `json:"area_trace,omitempty"`
+}
+
+type TaskAssetGroupSKUCostSummary struct {
+	RuleName             string `json:"rule_name,omitempty"`
+	RequiresManualReview bool   `json:"requires_manual_review"`
+}
+
+type TaskAssetGroupSKUAreaSummary struct {
+	WidthM      *float64 `json:"width_m,omitempty"`
+	HeightM     *float64 `json:"height_m,omitempty"`
+	Quantity    *float64 `json:"quantity,omitempty"`
+	AreaM2      *float64 `json:"area_m2,omitempty"`
+	SourceLabel string   `json:"source_label,omitempty"`
+	Warning     string   `json:"warning,omitempty"`
+}
+
 type TaskAssetGroup struct {
-	ID                   int64                   `json:"id"`
-	TaskID               int64                   `json:"task_id"`
-	ScopeKind            TaskAssetGroupScopeKind `json:"scope_kind"`
-	TaskSKUItemID        *int64                  `json:"task_sku_item_id,omitempty"`
-	RetouchRequirementID *int64                  `json:"retouch_requirement_id,omitempty"`
-	WorkingRevisionID    *int64                  `json:"working_revision_id,omitempty"`
-	FinalizedRevisionID  *int64                  `json:"finalized_revision_id,omitempty"`
-	LockVersion          int64                   `json:"lock_version"`
-	MigrationIncomplete  bool                    `json:"migration_incomplete"`
-	MigrationIssue       string                  `json:"migration_issue,omitempty"`
-	TaskNo               string                  `json:"task_no,omitempty"`
-	SKUCode              string                  `json:"sku_code,omitempty"`
-	ProductName          string                  `json:"product_name,omitempty"`
-	CreatorID            int64                   `json:"creator_id,omitempty"`
-	CreatorName          string                  `json:"creator_name,omitempty"`
-	BusinessLane         TaskBusinessLane        `json:"business_lane,omitempty"`
-	WorkingRevision      *TaskAssetGroupRevision `json:"working_revision,omitempty"`
-	FinalizedRevision    *TaskAssetGroupRevision `json:"finalized_revision,omitempty"`
-	CreatedAt            time.Time               `json:"created_at"`
-	UpdatedAt            time.Time               `json:"updated_at"`
+	ID                   int64                     `json:"id"`
+	TaskID               int64                     `json:"task_id"`
+	ScopeKind            TaskAssetGroupScopeKind   `json:"scope_kind"`
+	TaskSKUItemID        *int64                    `json:"task_sku_item_id,omitempty"`
+	RetouchRequirementID *int64                    `json:"retouch_requirement_id,omitempty"`
+	WorkingRevisionID    *int64                    `json:"working_revision_id,omitempty"`
+	FinalizedRevisionID  *int64                    `json:"finalized_revision_id,omitempty"`
+	LockVersion          int64                     `json:"lock_version"`
+	MigrationIncomplete  bool                      `json:"migration_incomplete"`
+	MigrationIssue       string                    `json:"migration_issue,omitempty"`
+	TaskNo               string                    `json:"task_no,omitempty"`
+	SKUCode              string                    `json:"sku_code,omitempty"`
+	ProductName          string                    `json:"product_name,omitempty"`
+	CreatorID            int64                     `json:"creator_id,omitempty"`
+	CreatorName          string                    `json:"creator_name,omitempty"`
+	BusinessLane         TaskBusinessLane          `json:"business_lane,omitempty"`
+	SKUProfile           *TaskAssetGroupSKUProfile `json:"sku_profile,omitempty"`
+	WorkingRevision      *TaskAssetGroupRevision   `json:"working_revision,omitempty"`
+	FinalizedRevision    *TaskAssetGroupRevision   `json:"finalized_revision,omitempty"`
+	CreatedAt            time.Time                 `json:"created_at"`
+	UpdatedAt            time.Time                 `json:"updated_at"`
 }
 
 type TaskAssetGroupRevision struct {

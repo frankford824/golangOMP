@@ -75,6 +75,7 @@ type ProductManagementRecord struct {
 	CategoryName        string                              `json:"category_name,omitempty"`
 	ProductFamily       string                              `json:"product_family,omitempty"`
 	ProductName         string                              `json:"product_name"`
+	ComboSKUCodes       []string                            `json:"combo_sku_codes,omitempty"`
 	CostPrice           *float64                            `json:"cost_price,omitempty"`
 	CostTrace           *ProductManagementCostTrace         `json:"cost_trace,omitempty"`
 	SpecText            string                              `json:"spec_text,omitempty"`

@@ -12,18 +12,18 @@
     </div>
     <template v-else-if="hasBusinessAccess">
       <div
-        class="board dashboard-workbench mx-auto w-full min-w-0 max-w-[min(100%,90rem)] space-y-4 px-3 pb-8 pt-4 sm:space-y-5 sm:px-4 sm:pt-5 md:space-y-6 md:px-6 md:pt-6 lg:px-8"
+        class="board dashboard-workbench w-full min-w-0 space-y-4 pb-8 sm:space-y-5 md:space-y-6"
       >
         <!-- 顶栏 -->
         <header
-          class="board-header rounded-xl bg-[rgb(var(--yb-surface))] p-4 shadow-sm shadow-[rgb(var(--yb-shadow)/0.04)] ring-1 ring-[rgb(var(--yb-border)/0.6)] sm:p-5"
+          class="board-header yb-page-surface yb-page-header-row"
+          data-page-header="dashboard"
         >
-          <div class="board-header-content">
-            <p class="board-header-kicker">运营工作台</p>
-            <h1 class="board-header-title">
+          <div class="board-header-content yb-page-heading-copy">
+            <h1 class="board-header-title yb-page-title">
               任务运营主页总览
             </h1>
-            <p class="board-header-subtitle">
+            <p class="board-header-subtitle yb-page-subtitle">
               先看今日是否正常，再判断队列积压、质量风险和下一步处理入口。
             </p>
           </div>
@@ -801,8 +801,7 @@ onBeforeUnmount(stopRefreshLoop)
 }
 
 .dashboard-workbench {
-  padding-left: clamp(1rem, 1.65vw, 2rem);
-  padding-right: clamp(1rem, 1.65vw, 2rem);
+  padding-inline: 0;
 }
 
 .board::before,
@@ -838,14 +837,6 @@ onBeforeUnmount(stopRefreshLoop)
 
 .board-header-content {
   min-width: 0;
-}
-
-.board-header-kicker {
-  margin: 0 0 0.3rem;
-  color: rgb(var(--yb-text-muted));
-  font-size: 0.6875rem;
-  font-weight: 600;
-  letter-spacing: 0.04em;
 }
 
 .board-header-title,

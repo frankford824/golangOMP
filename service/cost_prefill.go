@@ -70,25 +70,25 @@ func previewCostRules(req domain.CostRulePreviewRequest, rules []*domain.CostRul
 			case area <= 0:
 				manualReview = true
 				applied = append(applied, match)
-				explanations = append(explanations, fmt.Sprintf("%s requires width/height/area input before minimum billable area can be applied", rule.RuleName))
+				explanations = append(explanations, fmt.Sprintf("%s：需要先填写宽、高或面积，才能应用最低计价面积。", rule.RuleName))
 			case area < *rule.MinArea:
 				area = *rule.MinArea
 				applied = append(applied, match)
-				explanations = append(explanations, fmt.Sprintf("%s adjusted billable area to %.4f", rule.RuleName, area))
+				explanations = append(explanations, fmt.Sprintf("%s：本次按最低计价面积 %.4f ㎡计算。", rule.RuleName, area))
 			}
 		case domain.CostRuleTypeFixedUnitPrice:
 			baseCharge, ok := applyFixedUnitPrice(rule, area, quantity)
 			if !ok {
 				manualReview = true
 				applied = append(applied, match)
-				explanations = append(explanations, fmt.Sprintf("%s requires width/height/area input before fixed-price estimation can run", rule.RuleName))
+				explanations = append(explanations, fmt.Sprintf("%s：需要先填写宽、高或面积，才能计算固定单价。", rule.RuleName))
 				continue
 			}
 			estimated += *baseCharge
 			hasFixedUnitPrice = true
 			fixedUnitTaxMultiplier = taxMultiplierOrOne(rule.TaxMultiplier)
 			applied = append(applied, match)
-			explanations = append(explanations, fmt.Sprintf("%s applied fixed price %.3f", rule.RuleName, *baseCharge))
+			explanations = append(explanations, fmt.Sprintf("%s：固定单价部分为 ¥%.3f。", rule.RuleName, *baseCharge))
 		case domain.CostRuleTypeAreaThresholdSurcharge:
 			switch {
 			case rule.AreaThreshold == nil || rule.SurchargeAmount == nil:
@@ -96,7 +96,7 @@ func previewCostRules(req domain.CostRulePreviewRequest, rules []*domain.CostRul
 			case area <= 0 || areaThresholdBasis <= 0:
 				manualReview = true
 				applied = append(applied, match)
-				explanations = append(explanations, fmt.Sprintf("%s requires width/height/area input before threshold surcharge can be evaluated", rule.RuleName))
+				explanations = append(explanations, fmt.Sprintf("%s：需要先填写宽、高或面积，才能判断是否产生小面积附加费。", rule.RuleName))
 			case areaThresholdBasis < *rule.AreaThreshold:
 				extra := (*rule.SurchargeAmount) * area * float64(quantity)
 				if rule.TaxMultiplier != nil && *rule.TaxMultiplier > 0 {
@@ -106,14 +106,14 @@ func previewCostRules(req domain.CostRulePreviewRequest, rules []*domain.CostRul
 				}
 				estimated += extra
 				applied = append(applied, match)
-				explanations = append(explanations, fmt.Sprintf("%s increased unit price by %.3f and applied %.3f because threshold area %.4f < %.4f", rule.RuleName, *rule.SurchargeAmount, extra, areaThresholdBasis, *rule.AreaThreshold))
+				explanations = append(explanations, fmt.Sprintf("%s：单价增加 ¥%.3f，本次附加 ¥%.3f（实际面积 %.4f ㎡，低于 %.4f ㎡阈值）。", rule.RuleName, *rule.SurchargeAmount, extra, areaThresholdBasis, *rule.AreaThreshold))
 			}
 		case domain.CostRuleTypeSpecialProcessPrice:
 			if rule.SpecialProcessPrice != nil && containsProcessKeyword(req.Process, strings.Join(nonEmptyStrings(req.CategoryCode, req.Notes), " "), rule.SpecialProcessKeyword) {
 				extra := (*rule.SpecialProcessPrice) * float64(quantity)
 				estimated += extra
 				applied = append(applied, match)
-				explanations = append(explanations, fmt.Sprintf("%s added process surcharge %.3f", rule.RuleName, extra))
+				explanations = append(explanations, fmt.Sprintf("%s：特殊工艺附加 ¥%.3f。", rule.RuleName, extra))
 			}
 		case domain.CostRuleTypeSizeBasedFormula:
 			calculated, explanation, ok := applySizeBasedFormula(rule, quantity, req.Process, req.Notes)
@@ -124,12 +124,12 @@ func previewCostRules(req domain.CostRulePreviewRequest, rules []*domain.CostRul
 			} else {
 				manualReview = true
 				applied = append(applied, match)
-				explanations = append(explanations, fmt.Sprintf("%s requires manual review because the size-based formula skeleton is not fully executable yet", rule.RuleName))
+				explanations = append(explanations, fmt.Sprintf("%s：当前尺寸公式还不能自动完成计算，需要人工确认。", rule.RuleName))
 			}
 		case domain.CostRuleTypeManualQuote:
 			manualReview = true
 			applied = append(applied, match)
-			explanations = append(explanations, fmt.Sprintf("%s is marked as manual_quote", rule.RuleName))
+			explanations = append(explanations, fmt.Sprintf("%s：此规则要求人工报价。", rule.RuleName))
 		}
 	}
 
@@ -140,7 +140,7 @@ func previewCostRules(req domain.CostRulePreviewRequest, rules []*domain.CostRul
 	}
 	if len(applied) == 0 {
 		manualReview = true
-		explanations = append(explanations, "No active cost rule matched the requested category and input snapshot.")
+		explanations = append(explanations, "没有找到可用于当前款式和输入条件的成本规则，需要人工确认。")
 	}
 
 	return costPreviewComputation{

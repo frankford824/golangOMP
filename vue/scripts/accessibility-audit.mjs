@@ -73,7 +73,7 @@ const pages = [
     path: '/tasks/1002',
     ready: '.task-detail-view',
     prepare: async (page) => {
-      await page.getByRole('button', { name: '进入审核工作台' }).click()
+      await page.getByLabel('当前阶段操作').getByRole('button', { name: '进入审核工作台' }).click()
       await page.waitForSelector('.workspace-dialog[role="dialog"]', { state: 'visible' })
       await page.getByRole('button', { name: '确认定稿并结单' }).click()
       await page.waitForSelector('.confirm-dialog[role="dialog"][aria-modal="true"]', { state: 'visible' })
@@ -81,9 +81,18 @@ const pages = [
     },
   },
   { name: 'assets-index', path: '/asset-center', ready: '.assets-index-view' },
-  { name: 'access-policy', path: '/access-policy', ready: '.access-page' },
+  {
+    name: 'user-management-org-role-modal',
+    path: '/users',
+    ready: '.user-management-view',
+    prepare: async (page) => {
+      await page.getByRole('button', { name: '设置部门默认角色' }).first().click()
+      await page.waitForSelector('.org-policy-modal .role-check', { state: 'visible' })
+      await page.waitForTimeout(200)
+    },
+  },
   { name: 'planning-sku', path: '/tasks/sku-planning', ready: '.compose-page[data-compose-intent="planning_sku"]' },
-  { name: 'product-management', path: '/products', ready: '.product-management-view' },
+  { name: 'cost-rules', path: '/cost-rules', ready: '.cost-manager-page' },
   {
     name: 'user-management-role-modal',
     path: '/users',
@@ -96,15 +105,12 @@ const pages = [
     },
   },
   {
-    name: 'product-management-cost-tooltip',
-    path: '/products',
-    ready: '.product-management-view',
+    name: 'cost-rule-editor',
+    path: '/cost-rules',
+    ready: '.cost-manager-page',
     prepare: async (page) => {
-      if ((await page.locator('.pm-detail-help').count()) === 0) {
-        await page.locator('.pm-combo-header').first().click()
-      }
-      await page.waitForSelector('.pm-detail-help', { state: 'visible' })
-      await page.locator('.pm-detail-help').first().focus()
+      await page.getByRole('button', { name: '新增规则' }).click()
+      await page.waitForSelector('.modal-card form, form.modal-card', { state: 'visible' })
       await page.waitForTimeout(200)
     },
   },

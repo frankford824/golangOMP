@@ -44,7 +44,7 @@
               <span class="org-item-name">{{ dept.label }}</span>
               <span v-if="dept.memberCount != null" class="org-count-badge">{{ dept.memberCount }}</span>
             </button>
-            <button v-if="canManagePolicy && dept.id" type="button" class="org-policy-shortcut" aria-label="应用部门权限策略" title="应用权限策略" @click.stop="emit('manage-policy', 'department', Number(dept.id))">⋯</button>
+            <button v-if="canManagePolicy && dept.id" type="button" class="org-policy-shortcut" aria-label="设置部门默认角色" title="设置默认角色" @click.stop="emit('manage-policy', 'department', Number(dept.id))">⋯</button>
           </div>
           <div v-if="dept.teams.length && isExpanded(dept.value)" class="org-filter-teams">
             <div v-for="team in dept.teams" :key="`enabled-${dept.value}-${team.value}`" class="org-filter-row">
@@ -58,7 +58,7 @@
                 <span class="org-item-name">{{ team.label }}</span>
                 <span v-if="team.memberCount != null" class="org-count-badge">{{ team.memberCount }}</span>
               </button>
-              <button v-if="canManagePolicy && team.id" type="button" class="org-policy-shortcut" aria-label="应用小组权限策略" title="应用权限策略" @click.stop="emit('manage-policy', 'team', Number(team.id))">⋯</button>
+              <button v-if="canManagePolicy && team.id" type="button" class="org-policy-shortcut" aria-label="设置小组默认角色" title="设置默认角色" @click.stop="emit('manage-policy', 'team', Number(team.id))">⋯</button>
             </div>
           </div>
         </div>
@@ -88,7 +88,7 @@
                 <span v-if="dept.memberCount != null" class="org-count-badge">{{ dept.memberCount }}</span>
                 <span v-if="!dept.enabled" class="org-state-pill org-state-pill--off">已停用</span>
               </button>
-              <button v-if="canManagePolicy && dept.id" type="button" class="org-policy-shortcut" aria-label="应用部门权限策略" title="应用权限策略" @click.stop="emit('manage-policy', 'department', Number(dept.id))">⋯</button>
+              <button v-if="canManagePolicy && dept.id" type="button" class="org-policy-shortcut" aria-label="设置部门默认角色" title="设置默认角色" @click.stop="emit('manage-policy', 'department', Number(dept.id))">⋯</button>
             </div>
             <div v-if="dept.teams.length" class="org-filter-teams">
               <div v-for="team in dept.teams" :key="`disabled-${dept.value}-${team.value}`" class="org-filter-row">
@@ -103,7 +103,7 @@
                   <span v-if="team.memberCount != null" class="org-count-badge">{{ team.memberCount }}</span>
                   <span v-if="!team.enabled" class="org-state-pill org-state-pill--off">已停用</span>
                 </button>
-                <button v-if="canManagePolicy && team.id" type="button" class="org-policy-shortcut" aria-label="应用小组权限策略" title="应用权限策略" @click.stop="emit('manage-policy', 'team', Number(team.id))">⋯</button>
+                <button v-if="canManagePolicy && team.id" type="button" class="org-policy-shortcut" aria-label="设置小组默认角色" title="设置默认角色" @click.stop="emit('manage-policy', 'team', Number(team.id))">⋯</button>
               </div>
             </div>
           </div>

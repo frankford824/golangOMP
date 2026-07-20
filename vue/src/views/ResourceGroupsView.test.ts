@@ -30,6 +30,19 @@ const group = {
   creator_name: '李运营',
   lock_version: 1,
   migration_incomplete: false,
+  sku_profile: {
+    id: 91,
+    task_id: 3,
+    task_sku_item_id: 11,
+    sku_code: 'SKU-008',
+    product_i_id: 'STYLE-88',
+    combo_sku_codes: ['COMBO-01'],
+    cost_price: 18.5,
+    spec_text: '80 × 120 cm',
+    area_trace: { area_m2: 0.96 },
+    cost_trace: { rule_name: '喷绘面积规则', matched_rule_version: 3 },
+    erp_sync_status: 'synced',
+  },
   finalized_revision: {
     id: 70,
     group_id: 8,
@@ -99,9 +112,14 @@ describe('ResourceGroupsView', () => {
     expect(wrapper.find('.cover img').exists()).toBe(false)
     expect(wrapper.get('.preview-fallback').text()).toContain('PNG')
     expect(wrapper.text()).toContain('北欧沙发组合')
-    expect(wrapper.text()).toContain('来源任务 · RW-008')
+    expect(wrapper.text()).toContain('任务 RW-008')
     expect(wrapper.text()).toContain('套装')
     expect(wrapper.text()).toContain('1 张成品')
+    expect(wrapper.text()).toContain('0.960 ㎡')
+    expect(wrapper.text()).toContain('¥ 18.50')
+    expect(wrapper.text()).toContain('COMBO-01')
+    expect(wrapper.text()).toContain('成本规则 · 喷绘面积规则（第 3 版）')
+    expect(wrapper.text()).toContain('ERP 已同步')
 
     const card = wrapper.get('.resource-card')
     expect(card.element.tagName).toBe('BUTTON')

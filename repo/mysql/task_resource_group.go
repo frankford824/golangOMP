@@ -169,21 +169,8 @@ func (r *TaskResourceGroupRepo) ListByTaskID(ctx context.Context, taskID int64) 
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	for i := range items {
-		if items[i].WorkingRevisionID != nil {
-			revision, err := r.getRevision(ctx, *items[i].WorkingRevisionID)
-			if err != nil {
-				return nil, err
-			}
-			items[i].WorkingRevision = revision
-		}
-		if items[i].FinalizedRevisionID != nil {
-			revision, err := r.getRevision(ctx, *items[i].FinalizedRevisionID)
-			if err != nil {
-				return nil, err
-			}
-			items[i].FinalizedRevision = revision
-		}
+	if err := r.hydrateResourceGroupRevisions(ctx, items); err != nil {
+		return nil, err
 	}
 	return items, nil
 }
@@ -304,15 +291,15 @@ func (r *TaskResourceGroupRepo) ListResourceGroups(ctx context.Context, params d
 		if err != nil {
 			return nil, 0, err
 		}
-		if item.FinalizedRevisionID != nil {
-			item.FinalizedRevision, err = r.getRevision(ctx, *item.FinalizedRevisionID)
-			if err != nil {
-				return nil, 0, err
-			}
-		}
 		items = append(items, *item)
 	}
-	return items, total, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	if err := r.hydrateResourceGroupRevisions(ctx, items); err != nil {
+		return nil, 0, err
+	}
+	return items, total, nil
 }
 
 func (r *TaskResourceGroupRepo) ListFlatResourceItems(ctx context.Context, params domain.ResourceGroupListParams) ([]domain.FlatResourceItem, int64, error) {
@@ -506,19 +493,11 @@ func (r *TaskResourceGroupRepo) GetResourceGroup(ctx context.Context, groupID in
 	if err != nil {
 		return nil, err
 	}
-	if item.WorkingRevisionID != nil {
-		item.WorkingRevision, err = r.getRevision(ctx, *item.WorkingRevisionID)
-		if err != nil {
-			return nil, err
-		}
+	groups := []domain.TaskAssetGroup{*item}
+	if err := r.hydrateResourceGroupRevisions(ctx, groups); err != nil {
+		return nil, err
 	}
-	if item.FinalizedRevisionID != nil {
-		item.FinalizedRevision, err = r.getRevision(ctx, *item.FinalizedRevisionID)
-		if err != nil {
-			return nil, err
-		}
-	}
-	return item, nil
+	return &groups[0], nil
 }
 
 func (r *TaskResourceGroupRepo) GetTaskAccessSubject(ctx context.Context, taskID int64) (domain.TaskAccessSubject, error) {
@@ -556,38 +535,83 @@ func scanTaskResourceGroup(scanner resourceGroupScanner) (*domain.TaskAssetGroup
 	return &item, nil
 }
 
-func (r *TaskResourceGroupRepo) getRevision(ctx context.Context, revisionID int64) (*domain.TaskAssetGroupRevision, error) {
-	var item domain.TaskAssetGroupRevision
-	var sourceID sql.NullInt64
-	var submittedAt, finalizedAt sql.NullTime
-	err := r.db.db.QueryRowContext(ctx, `
+func (r *TaskResourceGroupRepo) hydrateResourceGroupRevisions(ctx context.Context, groups []domain.TaskAssetGroup) error {
+	revisionIDs := make([]int64, 0, len(groups)*2)
+	for index := range groups {
+		if groups[index].WorkingRevisionID != nil {
+			revisionIDs = append(revisionIDs, *groups[index].WorkingRevisionID)
+		}
+		if groups[index].FinalizedRevisionID != nil {
+			revisionIDs = append(revisionIDs, *groups[index].FinalizedRevisionID)
+		}
+	}
+	revisionIDs = uniquePositiveInt64s(revisionIDs)
+	if len(revisionIDs) == 0 {
+		return nil
+	}
+	revisionArgs := make([]interface{}, len(revisionIDs))
+	for index, id := range revisionIDs {
+		revisionArgs[index] = id
+	}
+	revisions := make(map[int64]*domain.TaskAssetGroupRevision, len(revisionIDs))
+	rows, err := r.db.db.QueryContext(ctx, `
 		SELECT id, group_id, revision_no, status, mode, source_task_asset_id, source_stage,
 		       created_by, reason, submitted_at, finalized_at, created_at
-		FROM task_asset_group_revisions WHERE id = ?`, revisionID).
-		Scan(&item.ID, &item.GroupID, &item.RevisionNo, &item.Status, &item.Mode, &sourceID, &item.SourceStage,
-			&item.CreatedBy, &item.Reason, &submittedAt, &finalizedAt, &item.CreatedAt)
+		FROM task_asset_group_revisions
+		WHERE id IN (`+resourceGroupPlaceholders(len(revisionIDs))+`)`, revisionArgs...)
 	if err != nil {
-		return nil, err
-	}
-	item.SourceTaskAssetID = fromNullInt64(sourceID)
-	item.SubmittedAt = fromNullTime(submittedAt)
-	item.FinalizedAt = fromNullTime(finalizedAt)
-	rows, err := r.db.db.QueryContext(ctx, `
-		SELECT id, revision_id, task_asset_id, sort_order, item_name, created_at
-		FROM task_asset_group_revision_items WHERE revision_id = ? ORDER BY sort_order, id`, revisionID)
-	if err != nil {
-		return nil, err
+		return err
 	}
 	for rows.Next() {
-		var child domain.TaskAssetGroupRevisionItem
-		if err := rows.Scan(&child.ID, &child.RevisionID, &child.TaskAssetID, &child.SortOrder, &child.ItemName, &child.CreatedAt); err != nil {
+		item := &domain.TaskAssetGroupRevision{}
+		var sourceID sql.NullInt64
+		var submittedAt, finalizedAt sql.NullTime
+		if err := rows.Scan(&item.ID, &item.GroupID, &item.RevisionNo, &item.Status, &item.Mode, &sourceID, &item.SourceStage,
+			&item.CreatedBy, &item.Reason, &submittedAt, &finalizedAt, &item.CreatedAt); err != nil {
 			rows.Close()
-			return nil, err
+			return err
 		}
-		item.Items = append(item.Items, child)
+		item.SourceTaskAssetID = fromNullInt64(sourceID)
+		item.SubmittedAt = fromNullTime(submittedAt)
+		item.FinalizedAt = fromNullTime(finalizedAt)
+		revisions[item.ID] = item
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
 	}
 	if err := rows.Close(); err != nil {
-		return nil, err
+		return err
+	}
+	if len(revisions) != len(revisionIDs) {
+		return fmt.Errorf("hydrate resource group revisions: expected %d rows, got %d", len(revisionIDs), len(revisions))
+	}
+	assetIDs := make([]int64, 0, len(revisions)*2)
+	itemRows, err := r.db.db.QueryContext(ctx, `
+		SELECT id, revision_id, task_asset_id, sort_order, item_name, created_at
+		FROM task_asset_group_revision_items
+		WHERE revision_id IN (`+resourceGroupPlaceholders(len(revisionIDs))+`)
+		ORDER BY revision_id, sort_order, id`, revisionArgs...)
+	if err != nil {
+		return err
+	}
+	for itemRows.Next() {
+		var child domain.TaskAssetGroupRevisionItem
+		if err := itemRows.Scan(&child.ID, &child.RevisionID, &child.TaskAssetID, &child.SortOrder, &child.ItemName, &child.CreatedAt); err != nil {
+			itemRows.Close()
+			return err
+		}
+		if revision := revisions[child.RevisionID]; revision != nil {
+			revision.Items = append(revision.Items, child)
+			assetIDs = append(assetIDs, child.TaskAssetID)
+		}
+	}
+	if err := itemRows.Err(); err != nil {
+		itemRows.Close()
+		return err
+	}
+	if err := itemRows.Close(); err != nil {
+		return err
 	}
 	refRows, err := r.db.db.QueryContext(ctx, `
 		SELECT rr.id, rr.revision_id, rr.reference_file_ref_id, rr.formal_task_asset_id, rr.sort_order,
@@ -597,9 +621,10 @@ func (r *TaskResourceGroupRepo) getRevision(ctx context.Context, revisionID int6
 		       rr.created_at
 		FROM task_asset_group_revision_references rr
 		LEFT JOIN asset_storage_refs asr ON asr.ref_id = rr.ref_id_snapshot
-		WHERE rr.revision_id = ? ORDER BY rr.sort_order, rr.id`, revisionID)
+		WHERE rr.revision_id IN (`+resourceGroupPlaceholders(len(revisionIDs))+`)
+		ORDER BY rr.revision_id, rr.sort_order, rr.id`, revisionArgs...)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	for refRows.Next() {
 		var child domain.TaskAssetGroupRevisionReference
@@ -608,32 +633,89 @@ func (r *TaskResourceGroupRepo) getRevision(ctx context.Context, revisionID int6
 		if err := refRows.Scan(&child.ID, &child.RevisionID, &child.ReferenceFileRefID, &formalID, &child.SortOrder,
 			&child.RefIDSnapshot, &child.FileNameSnapshot, &child.ScopeSnapshot, &child.MimeType, &fileSize,
 			&child.StorageKey, &child.CreatedAt); err != nil {
-			return nil, err
+			refRows.Close()
+			return err
 		}
 		child.FormalTaskAssetID = fromNullInt64(formalID)
 		child.FileSize = fromNullInt64(fileSize)
-		item.References = append(item.References, child)
+		if revision := revisions[child.RevisionID]; revision != nil {
+			revision.References = append(revision.References, child)
+		}
 	}
 	if err := refRows.Err(); err != nil {
 		refRows.Close()
-		return nil, err
+		return err
 	}
 	if err := refRows.Close(); err != nil {
-		return nil, err
+		return err
 	}
-	if item.SourceTaskAssetID != nil {
-		item.SourceFile, err = r.getResourceFile(ctx, *item.SourceTaskAssetID)
-		if err != nil {
-			return nil, err
+	for _, revision := range revisions {
+		if revision.SourceTaskAssetID != nil {
+			assetIDs = append(assetIDs, *revision.SourceTaskAssetID)
 		}
 	}
-	for index := range item.Items {
-		item.Items[index].File, err = r.getResourceFile(ctx, item.Items[index].TaskAssetID)
+	assetIDs = uniquePositiveInt64s(assetIDs)
+	files := make(map[int64]*domain.TaskResourceFile, len(assetIDs))
+	if len(assetIDs) > 0 {
+		assetArgs := make([]interface{}, len(assetIDs))
+		for index, id := range assetIDs {
+			assetArgs[index] = id
+		}
+		fileRows, err := r.db.db.QueryContext(ctx, `
+			SELECT ta.id, ta.file_name, ta.mime_type, ta.file_size,
+			       COALESCE(NULLIF(ta.storage_key, ''), NULLIF(asr.ref_key, ''))
+			FROM task_assets ta
+			LEFT JOIN asset_storage_refs asr ON asr.ref_id = ta.storage_ref_id
+			WHERE ta.id IN (`+resourceGroupPlaceholders(len(assetIDs))+`)
+			  AND ta.binding_state = 'bound'
+			  AND ta.deleted_at IS NULL
+			  AND ta.cleaned_at IS NULL
+			  AND ta.access_revoked_at IS NULL
+			  AND ta.object_deleted_at IS NULL`, assetArgs...)
 		if err != nil {
-			return nil, err
+			return err
+		}
+		for fileRows.Next() {
+			file := &domain.TaskResourceFile{}
+			var mimeType, storageKey sql.NullString
+			var fileSize sql.NullInt64
+			if err := fileRows.Scan(&file.TaskAssetID, &file.FileName, &mimeType, &fileSize, &storageKey); err != nil {
+				fileRows.Close()
+				return err
+			}
+			file.MimeType = mimeType.String
+			file.FileSize = fromNullInt64(fileSize)
+			file.StorageKey = storageKey.String
+			files[file.TaskAssetID] = file
+		}
+		if err := fileRows.Err(); err != nil {
+			fileRows.Close()
+			return err
+		}
+		if err := fileRows.Close(); err != nil {
+			return err
+		}
+		if len(files) != len(assetIDs) {
+			return fmt.Errorf("hydrate resource group files: expected %d rows, got %d", len(assetIDs), len(files))
 		}
 	}
-	return &item, nil
+	for _, revision := range revisions {
+		if revision.SourceTaskAssetID != nil {
+			revision.SourceFile = files[*revision.SourceTaskAssetID]
+		}
+		for index := range revision.Items {
+			revision.Items[index].File = files[revision.Items[index].TaskAssetID]
+		}
+	}
+	for index := range groups {
+		if groups[index].WorkingRevisionID != nil {
+			groups[index].WorkingRevision = revisions[*groups[index].WorkingRevisionID]
+		}
+		if groups[index].FinalizedRevisionID != nil {
+			groups[index].FinalizedRevision = revisions[*groups[index].FinalizedRevisionID]
+		}
+	}
+	return nil
 }
 
 func (r *TaskResourceGroupRepo) getResourceFile(ctx context.Context, taskAssetID int64) (*domain.TaskResourceFile, error) {

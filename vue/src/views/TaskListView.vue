@@ -1,9 +1,9 @@
 <template>
   <div class="task-list-view">
     <!-- 顶栏 + 搜索/过滤：统一卡片容器 -->
-    <div class="header-card">
-      <div class="page-header">
-        <h2 class="page-title task-list-page-title">任务中心</h2>
+    <div class="header-card yb-page-surface" data-page-header="task-center">
+      <div class="page-header yb-page-header-row">
+        <h2 class="page-title task-list-page-title yb-page-title">任务中心</h2>
         <div class="page-header-actions">
           <BaseButton
             size="sm"
@@ -2585,7 +2585,7 @@ watch(totalPages, (value) => {
   }
 
   .page-title {
-    font-size: clamp(1.75rem, 10vw, 2.35rem);
+    font-size: 1.75rem;
   }
 
   .page-header-actions {
@@ -2888,7 +2888,7 @@ watch(totalPages, (value) => {
 
 @media (max-width: 720px) {
   :global(#app .task-list-page-title) {
-    font-size: clamp(1.75rem, 10vw, 2.35rem);
+    font-size: 1.75rem;
   }
 }
 

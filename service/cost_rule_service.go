@@ -448,7 +448,7 @@ func applySizeBasedFormula(rule *domain.CostRule, quantity int64, process, notes
 			price = 0.6
 		}
 		total := price * float64(quantity)
-		return total, fmt.Sprintf("%s applied copper-paper %s print price %.3f", rule.RuleName, side, total), true
+		return total, fmt.Sprintf("%s：按铜版纸%s价格计算，本次为 ¥%.3f。", rule.RuleName, printSideLabel(side), total), true
 	}
 	if strings.HasPrefix(expr, "print_side:") {
 		side := detectPrintSide(process, notes)
@@ -464,9 +464,16 @@ func applySizeBasedFormula(rule *domain.CostRule, quantity int64, process, notes
 			return 0, "", false
 		}
 		total := price * float64(quantity)
-		return total, fmt.Sprintf("%s applied %s print-side price %.3f", rule.RuleName, side, total), true
+		return total, fmt.Sprintf("%s：按%s价格计算，本次为 ¥%.3f。", rule.RuleName, printSideLabel(side), total), true
 	}
 	return 0, "", false
+}
+
+func printSideLabel(side string) string {
+	if side == "double" {
+		return "双面印刷"
+	}
+	return "单面印刷"
 }
 
 func costRuleLooksLikeCopperPaper(rule *domain.CostRule, notes string) bool {

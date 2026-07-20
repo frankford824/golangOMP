@@ -124,10 +124,14 @@ const routes: RouteRecordRaw[] = [
         meta: { requiresAuth: true, requiredMenuKey: ['resource_management', 'task_list'] },
       },
       {
-        path: 'products',
+        path: 'cost-rules',
         name: 'ProductManagement',
-        component: () => import('@/views/ProductManagementView.vue'),
-        meta: { requiresAuth: true, requiredMenuKey: ['product_management', 'resource_management'] },
+        component: () => import('@/views/CostRuleManagerView.vue'),
+        meta: { requiresAuth: true, requiredMenuKey: 'product_management' },
+      },
+      {
+        path: 'products',
+        redirect: { name: 'AssetsIndex' },
       },
       {
         path: 'org',
@@ -224,7 +228,7 @@ const routes: RouteRecordRaw[] = [
       {
         path: 'access-policy',
         name: 'AccessPolicy',
-        redirect: { name: 'UserManagement', query: { tab: 'roles' } },
+        redirect: { name: 'UserManagement' },
         meta: { requiresAuth: true, requiredMenuKey: ['access_policy', 'user_admin'] },
       },
       {

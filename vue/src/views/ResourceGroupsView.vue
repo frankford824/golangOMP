@@ -1,10 +1,9 @@
 <template>
   <main class="groups-page assets-index-view" data-surface-ready="true">
-    <header class="page-heading">
-      <div>
-        <p class="eyebrow">成品资料库</p>
-        <h1>资产中心</h1>
-        <p>以 SKU 为主线查看当前有效的参考图、设计源文件与最终成品。</p>
+    <header class="page-heading yb-page-surface yb-page-header-row" data-page-header="asset-center">
+      <div class="yb-page-heading-copy">
+        <h1 class="yb-page-title">SKU 资产中心</h1>
+        <p class="yb-page-subtitle">每张卡片就是一个可交付 SKU：图片、来源任务、规格、组合关系与当前成本保持在同一处。</p>
       </div>
       <button class="quiet-button" :disabled="loading" @click="load">
         {{ loading ? '刷新中…' : '刷新' }}
@@ -54,21 +53,42 @@
     <template v-else>
       <div v-if="!result.items.length" class="empty">没有找到符合条件的 SKU 资源。</div>
       <section v-else class="grid" aria-label="SKU 资源列表">
-        <button v-for="group in result.items" :key="group.id" class="resource-card" @click="openGroup(group.id)">
+        <button v-for="group in result.items" :key="group.id" class="resource-card sku-asset-card" @click="openGroup(group.id)">
           <span class="cover">
-            <img v-if="coverURL(group) && !brokenImages.has(group.id)" :src="coverURL(group)" :alt="coverName(group)" loading="lazy" @error="markImageBroken(group.id)" />
+            <AssetPreviewMedia
+              v-if="protectedCoverURL(group) && !brokenImages.has(group.id)"
+              :asset-id="String(coverAssetID(group))"
+              :fallback-src="protectedCoverURL(group)"
+              :alt="coverName(group)"
+              img-class="resource-cover-media"
+              inner-img-class="resource-cover-image"
+              defer-until-visible
+            />
+            <img v-else-if="coverURL(group) && !brokenImages.has(group.id)" :src="coverURL(group)" :alt="coverName(group)" loading="lazy" @error="markImageBroken(group.id)" />
             <span v-else class="preview-fallback"><span class="file-mark">{{ fileInitial(coverName(group)) }}</span><small>暂无成品预览</small></span>
             <span class="mode-badge">{{ revision(group)?.mode === 'set' ? '套装' : '单图' }}</span>
             <span class="item-count">{{ finals(group).length }} 张成品</span>
           </span>
-          <span class="card-body">
-            <strong class="sku-code">{{ group.sku_code || productTitle(group) }}</strong>
-            <span class="product-name">{{ productTitle(group) }}</span>
-            <span class="card-meta">
-              <span>{{ laneLabel(group.business_lane) || '常规' }}</span>
-              <span v-if="group.creator_name">{{ group.creator_name }}</span>
+          <span class="card-body sku-card-body">
+            <span class="sku-heading">
+              <span>
+                <strong class="sku-code">{{ displaySKU(group) }}</strong>
+                <span class="product-name">{{ productTitle(group) }}</span>
+              </span>
+              <span class="sync-pill" :class="syncTone(group)">{{ syncLabel(group) }}</span>
             </span>
-            <span class="provenance">来源任务 · {{ group.task_no || group.task_id }}</span>
+            <span class="sku-origin-line">
+              <span>{{ laneLabel(group.business_lane) || '常规任务' }}</span>
+              <span>任务 {{ group.task_no || group.task_id }}</span>
+              <span>{{ group.creator_name || '创建人待补充' }}</span>
+            </span>
+            <span class="sku-facts">
+              <span><small>规格 / 尺寸</small><b>{{ specificationText(group) }}</b></span>
+              <span><small>计价面积</small><b>{{ areaText(group) }}</b></span>
+              <span><small>当前成本</small><b>{{ costText(group) }}</b></span>
+            </span>
+            <span v-if="comboText(group)" class="combo-line"><small>组合编码</small><b>{{ comboText(group) }}</b></span>
+            <span class="cost-rule-line">{{ costRuleText(group) }}</span>
             <span v-if="group.migration_incomplete" class="warn">资源待人工确认</span>
           </span>
         </button>
@@ -110,6 +130,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import AssetPreviewMedia from '@/components/media/AssetPreviewMedia.vue'
 import { useTaskFilterOptions } from '@/composables/useTaskFilterOptions'
 import { resourceGroupsApi, type FlatResourceItem, type ResourceGroup, type ResourceRevision } from '@/services/api/resourceGroupsApi'
 
@@ -132,9 +153,30 @@ const revision = (group: ResourceGroup): ResourceRevision | null | undefined => 
 const finals = (group: ResourceGroup) => [...(revision(group)?.items || [])].sort((a, b) => a.sort_order - b.sort_order)
 const laneLabel = (lane?: string) => ({ normal: '常规', customization: '定制' }[lane || ''] || '')
 const roleLabel = (role: string) => ({ reference: '参考图', source: '源文件', final: '最终成品' }[role] || role)
-const productTitle = (group: ResourceGroup) => group.product_name || (group.scope_kind === 'retouch_requirement' ? '修图成品' : '未命名产品')
+const displaySKU = (group: ResourceGroup) => group.sku_code || group.sku_profile?.sku_code || 'SKU 待关联'
+const productTitle = (group: ResourceGroup) => group.sku_profile?.product_name || group.product_name || (group.scope_kind === 'retouch_requirement' ? '修图成品' : '未命名产品')
 const coverName = (group: ResourceGroup) => finals(group)[0]?.file?.file_name || finals(group)[0]?.item_name || group.product_name || '资源'
 const coverURL = (group: ResourceGroup) => finals(group)[0]?.file?.preview_url || finals(group)[0]?.file?.download_url || ''
+const protectedCoverURL = (group: ResourceGroup) => coverURL(group).startsWith('/') ? coverURL(group) : ''
+const coverAssetID = (group: ResourceGroup) => finals(group)[0]?.file?.task_asset_id || finals(group)[0]?.task_asset_id || 0
+const specificationText = (group: ResourceGroup) => group.sku_profile?.size_text || group.sku_profile?.spec_text || '规格待补充'
+const areaText = (group: ResourceGroup) => {
+  const area = group.sku_profile?.area_trace?.area_m2
+  return typeof area === 'number' && Number.isFinite(area) ? `${area.toFixed(3)} ㎡` : '面积待核对'
+}
+const costText = (group: ResourceGroup) => {
+  const cost = group.sku_profile?.cost_price
+  return typeof cost === 'number' && Number.isFinite(cost) ? `¥ ${cost.toFixed(2)}` : '成本待计算'
+}
+const comboText = (group: ResourceGroup) => (group.sku_profile?.combo_sku_codes || []).join('、')
+const costRuleText = (group: ResourceGroup) => {
+  const trace = group.sku_profile?.cost_trace
+  if (trace?.requires_manual_review) return '成本需要人工确认'
+  if (trace?.rule_name) return `成本规则 · ${trace.rule_name}${trace.matched_rule_version ? `（第 ${trace.matched_rule_version} 版）` : ''}`
+  return '尚未关联成本规则'
+}
+const syncLabel = (group: ResourceGroup) => ({ synced: 'ERP 已同步', queued: '等待同步', syncing: '正在同步', failed: '同步失败', cooling_down: '稍后重试', pending_sync: '待同步' }[group.sku_profile?.erp_sync_status || ''] || 'ERP 待关联')
+const syncTone = (group: ResourceGroup) => group.sku_profile?.erp_sync_status === 'synced' ? 'is-synced' : group.sku_profile?.erp_sync_status === 'failed' ? 'is-failed' : 'is-pending'
 const fileInitial = (name?: string) => (name || '文件').split('.').pop()?.slice(0, 4).toUpperCase() || 'FILE'
 const filterLabels: Record<FilterKey, string> = { sku_code: 'SKU', task_no: '来源任务', creator_id: '创建人', business_lane: '业务', resource_role: '资源', format_category: '格式' }
 const activeFilters = computed(() => (Object.keys(filterLabels) as FilterKey[]).flatMap((key) => {
@@ -167,4 +209,165 @@ onMounted(load)
 
 <style scoped>
 .groups-page{max-width:1320px;margin:0 auto;padding:28px;display:grid;gap:20px}.page-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:20px}.page-heading h1{margin:4px 0;font-size:31px}.page-heading p{margin:0;color:rgb(var(--yb-text-muted))}.eyebrow{margin:0;font-size:11px;letter-spacing:.13em;font-weight:900;color:rgb(var(--yb-brand))}.quiet-button,.primary-button,.filter-button,.pager button,.error button,.icon-button{min-height:40px;border:1px solid rgb(var(--yb-border));border-radius:10px;padding:0 14px;background:rgb(var(--yb-surface));color:rgb(var(--yb-text));cursor:pointer}.primary-button{border-color:rgb(var(--yb-brand));background:rgb(var(--yb-brand));color:rgb(var(--yb-text-inverse))}.search-workbench{display:grid;gap:10px;padding:14px;border:1px solid rgb(var(--yb-border));border-radius:16px;background:rgb(var(--yb-surface))}.search-row{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:9px}.search-field{position:relative}.search-field input{width:100%;min-height:42px;border:1px solid rgb(var(--yb-border));border-radius:11px;padding:0 16px 0 40px;background:rgb(var(--yb-surface-soft));color:rgb(var(--yb-text))}.search-icon{position:absolute;left:14px;top:9px;color:rgb(var(--yb-text-muted));font-size:20px}.filter-button.active{border-color:rgb(var(--yb-brand-border));background:rgb(var(--yb-brand-soft));color:rgb(var(--yb-brand))}.active-filters{display:flex;align-items:center;gap:7px;flex-wrap:wrap}.active-filters button{border:0;border-radius:999px;padding:6px 10px;background:rgb(var(--yb-brand-soft));color:rgb(var(--yb-brand));cursor:pointer}.active-filters .clear-filters{background:transparent;color:rgb(var(--yb-text-muted))}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:16px}.resource-card{min-width:0;padding:0;overflow:hidden;border:1px solid rgb(var(--yb-border));border-radius:16px;background:rgb(var(--yb-surface));color:rgb(var(--yb-text));text-align:left;cursor:pointer;transition:transform .18s,border-color .18s,box-shadow .18s}.resource-card:hover,.resource-card:focus-visible{transform:translateY(-3px);border-color:rgb(var(--yb-brand-border));box-shadow:0 12px 30px rgb(var(--yb-shadow)/.1);outline:2px solid rgb(var(--yb-brand-soft));outline-offset:2px}.cover{position:relative;display:block;aspect-ratio:16/11;background:rgb(var(--yb-surface-muted))}.cover img,.preview-fallback{width:100%;height:100%;object-fit:cover}.preview-fallback{display:grid;place-items:center;align-content:center;gap:6px;color:rgb(var(--yb-text-muted))}.file-mark{font-size:18px;font-weight:900}.preview-fallback small{font-size:11px}.mode-badge,.item-count{position:absolute;top:10px;padding:5px 8px;border-radius:999px;background:rgb(var(--yb-surface)/.94);font-size:11px;font-weight:800}.mode-badge{left:10px;color:rgb(var(--yb-brand))}.item-count{right:10px;color:rgb(var(--yb-text))}.card-body{display:grid;gap:7px;padding:14px}.sku-code{font-size:13px;color:rgb(var(--yb-brand))}.product-name{min-height:22px;font-weight:800;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.card-meta{display:flex;gap:8px;font-size:12px;color:rgb(var(--yb-text-muted))}.card-meta span+span::before{content:'·';margin-right:8px}.provenance{font-size:11px;color:rgb(var(--yb-text-faint))}.warn{font-size:12px;color:rgb(var(--yb-warning-text))}.pager{display:flex;align-items:center;justify-content:center;gap:14px}.empty,.error{padding:38px;text-align:center;border:1px dashed rgb(var(--yb-border));border-radius:16px;color:rgb(var(--yb-text-muted))}.error{display:flex;align-items:center;justify-content:center;gap:12px;background:rgb(var(--yb-danger-soft));color:rgb(var(--yb-danger-text))}.drawer-layer{position:fixed;inset:0;z-index:90;display:flex;justify-content:flex-end}.drawer-backdrop{position:absolute;inset:0;border:0;background:rgb(var(--yb-overlay-night)/.42)}.filter-drawer{position:relative;width:min(420px,100vw);height:100%;display:grid;grid-template-rows:auto 1fr;background:rgb(var(--yb-surface));box-shadow:-18px 0 48px rgb(var(--yb-shadow)/.18)}.filter-drawer>header{display:flex;align-items:center;justify-content:space-between;padding:22px;border-bottom:1px solid rgb(var(--yb-border))}.filter-drawer h2{margin:3px 0 0}.icon-button{width:40px;padding:0;font-size:24px}.filter-drawer form{min-height:0;display:grid;grid-template-rows:1fr auto;overflow:auto}.filter-section{display:grid;grid-template-columns:1fr 1fr;gap:14px;padding:22px}.filter-section+.filter-section{border-top:1px solid rgb(var(--yb-border))}.filter-section h3{grid-column:1/-1;margin:0;font-size:14px}.filter-section label{display:grid;gap:6px;font-size:12px;color:rgb(var(--yb-text-muted))}.filter-section input,.filter-section select{width:100%;min-height:41px;border:1px solid rgb(var(--yb-border));border-radius:10px;padding:0 11px;background:rgb(var(--yb-surface));color:rgb(var(--yb-text))}.filter-drawer footer{position:sticky;bottom:0;display:flex;justify-content:flex-end;gap:10px;padding:16px 22px;border-top:1px solid rgb(var(--yb-border));background:rgb(var(--yb-surface))}@media(max-width:700px){.groups-page{padding:16px}.page-heading{align-items:stretch;flex-direction:column}.search-row{grid-template-columns:1fr auto}.search-row .primary-button{display:none}.grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.card-body{padding:11px}.product-name{font-size:13px}.filter-section{grid-template-columns:1fr}.filter-section h3{grid-column:auto}}@media(max-width:430px){.grid{grid-template-columns:1fr 1fr}.mode-badge,.item-count{top:7px}.mode-badge{left:7px}.item-count{right:7px}.provenance,.card-meta{font-size:10px}}
+</style>
+<style scoped>
+.groups-page {
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  gap: 1rem;
+}
+
+.page-heading h1 {
+  margin: 0;
+  font-size: clamp(1.75rem, 1.8vw, 2.25rem);
+}
+
+.page-heading .yb-page-subtitle {
+  margin: 0.5rem 0 0;
+  color: rgb(var(--yb-text-muted));
+}
+
+.grid:not(.flat-grid) {
+  grid-template-columns: repeat(auto-fill, minmax(19rem, 1fr));
+}
+
+.sku-asset-card {
+  display: grid;
+  grid-template-rows: auto 1fr;
+}
+
+:deep(.resource-cover-media) {
+  width: 100%;
+  height: 100%;
+}
+
+:deep(.resource-cover-media .resource-cover-image),
+:deep(.resource-cover-media .apm-img) {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.sku-card-body {
+  gap: 0.8rem;
+}
+
+.sku-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.sku-heading > span:first-child {
+  min-width: 0;
+  display: grid;
+  gap: 0.2rem;
+}
+
+.sku-code {
+  font-size: 0.82rem;
+  letter-spacing: 0.035em;
+}
+
+.product-name {
+  min-height: 0;
+  font-size: 1rem;
+}
+
+.sync-pill {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: 0.32rem 0.55rem;
+  font-size: 0.68rem;
+  font-weight: 800;
+  color: rgb(var(--yb-text-muted));
+  background: rgb(var(--yb-surface-muted));
+}
+
+.sync-pill.is-synced {
+  color: rgb(var(--yb-success-text));
+  background: rgb(var(--yb-success-soft));
+}
+
+.sync-pill.is-failed {
+  color: rgb(var(--yb-danger-text));
+  background: rgb(var(--yb-danger-soft));
+}
+
+.sku-origin-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem 0.75rem;
+  color: rgb(var(--yb-text-muted));
+  font-size: 0.72rem;
+}
+
+.sku-origin-line span + span::before {
+  content: '·';
+  margin-right: 0.75rem;
+  color: rgb(var(--yb-text-faint));
+}
+
+.sku-facts {
+  display: grid;
+  grid-template-columns: 1.3fr 0.9fr 0.85fr;
+  overflow: hidden;
+  border: 1px solid rgb(var(--yb-border));
+  border-radius: 0.75rem;
+  background: rgb(var(--yb-surface-soft));
+}
+
+.sku-facts > span {
+  min-width: 0;
+  display: grid;
+  gap: 0.25rem;
+  padding: 0.65rem 0.7rem;
+}
+
+.sku-facts > span + span {
+  border-left: 1px solid rgb(var(--yb-border));
+}
+
+.sku-facts small,
+.combo-line small {
+  color: rgb(var(--yb-text-muted));
+  font-size: 0.65rem;
+}
+
+.sku-facts b,
+.combo-line b {
+  overflow: hidden;
+  color: rgb(var(--yb-text));
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.combo-line {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.cost-rule-line {
+  color: rgb(var(--yb-text-muted));
+  font-size: 0.7rem;
+}
+
+@media (max-width: 700px) {
+  .groups-page {
+    padding: 0;
+  }
+
+  .page-heading {
+    align-items: flex-start;
+  }
+
+  .grid:not(.flat-grid) {
+    grid-template-columns: 1fr;
+  }
+}
 </style>

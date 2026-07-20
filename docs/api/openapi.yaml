@@ -6035,6 +6035,10 @@ components:
         category_name: { type: string }
         product_family: { type: string }
         product_name: { type: string }
+        combo_sku_codes:
+          type: array
+          description: Combination SKU codes that currently include this child SKU.
+          items: { type: string }
         cost_price:
           type: number
           format: double
@@ -9242,6 +9246,10 @@ components:
         creator_id: { type: integer, format: int64 }
         creator_name: { type: string }
         business_lane: { type: string, enum: [normal, customization] }
+        sku_profile:
+          allOf: [{ $ref: '#/components/schemas/ProductManagementRecord' }]
+          nullable: true
+          description: Current SKU business projection used by the asset center for specifications, dimensions, cost trace, combination codes, and ERP synchronization state.
         working_revision: { $ref: '#/components/schemas/TaskAssetGroupRevision' }
         finalized_revision: { $ref: '#/components/schemas/TaskAssetGroupRevision' }
         created_at: { type: string, format: date-time }

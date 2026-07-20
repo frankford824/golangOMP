@@ -61,6 +61,11 @@ type taskResourceWorkflowService struct {
 	eventRepo repo.TaskEventRepo
 	finalizer *TaskFinalizer
 	ossDirect *OSSDirectService
+	profiles  taskResourceSKUProfileProvider
+}
+
+type taskResourceSKUProfileProvider interface {
+	GetByTaskIDs(ctx context.Context, taskIDs []int64) ([]*domain.ProductManagementRecord, *domain.AppError)
 }
 
 type FinalizeMode string
@@ -80,6 +85,14 @@ type TaskResourceWorkflowOption func(*taskResourceWorkflowService)
 
 func WithTaskResourceWorkflowOSSDirect(ossDirect *OSSDirectService) TaskResourceWorkflowOption {
 	return func(service *taskResourceWorkflowService) { service.ossDirect = ossDirect }
+}
+
+func WithTaskResourceWorkflowSKUProfiles(provider interface{}) TaskResourceWorkflowOption {
+	return func(service *taskResourceWorkflowService) {
+		if typed, ok := provider.(taskResourceSKUProfileProvider); ok {
+			service.profiles = typed
+		}
+	}
 }
 
 func NewTaskResourceWorkflowService(repository TaskResourceGroupRepository, txRunner repo.TxRunner, eventRepo repo.TaskEventRepo, opts ...TaskResourceWorkflowOption) TaskResourceWorkflowService {
@@ -130,6 +143,7 @@ func (s *taskResourceWorkflowService) ResourceBundle(ctx context.Context, taskID
 			})
 		}
 	}
+	s.hydrateSKUProfiles(ctx, groups)
 	s.hydrateResourceGroupURLs(groups)
 	return &domain.ResourceBundle{TaskID: taskID, WorkflowRevision: task.WorkflowRevision, Groups: groups}, nil
 }
@@ -163,6 +177,7 @@ func (s *taskResourceWorkflowService) ListResourceGroups(ctx context.Context, ac
 	if err != nil {
 		return nil, infraError("list resource groups", err)
 	}
+	s.hydrateSKUProfiles(ctx, items)
 	s.hydrateResourceGroupURLs(items)
 	return &domain.ResourceGroupListResult{Items: items, FlatItems: []domain.FlatResourceItem{}, Page: params.Page, PageSize: params.PageSize, Total: total, ViewMode: "group"}, nil
 }
@@ -213,8 +228,74 @@ func (s *taskResourceWorkflowService) ResourceGroup(ctx context.Context, actor d
 		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "resource group is outside the effective data scope", nil)
 	}
 	items := []domain.TaskAssetGroup{*group}
+	s.hydrateSKUProfiles(ctx, items)
 	s.hydrateResourceGroupURLs(items)
 	return &items[0], nil
+}
+
+func (s *taskResourceWorkflowService) hydrateSKUProfiles(ctx context.Context, groups []domain.TaskAssetGroup) {
+	if s.profiles == nil || len(groups) == 0 {
+		return
+	}
+	taskIDs := make([]int64, 0, len(groups))
+	for _, group := range groups {
+		taskIDs = append(taskIDs, group.TaskID)
+	}
+	records, appErr := s.profiles.GetByTaskIDs(ctx, taskIDs)
+	if appErr != nil {
+		// SKU profile data is presentation-only enrichment. A stale or
+		// temporarily unavailable profile must not turn an otherwise readable
+		// task/resource-group response into a 500.
+		return
+	}
+	type taskSKUKey struct {
+		taskID    int64
+		skuItemID int64
+	}
+	byItem := make(map[taskSKUKey]*domain.TaskAssetGroupSKUProfile)
+	byTaskScope := make(map[int64]*domain.TaskAssetGroupSKUProfile)
+	byTaskSKU := make(map[string]*domain.TaskAssetGroupSKUProfile)
+	for _, record := range records {
+		if record == nil {
+			continue
+		}
+		profile := taskAssetGroupSKUProfile(record)
+		if record.TaskSKUItemID != nil {
+			byItem[taskSKUKey{taskID: record.TaskID, skuItemID: *record.TaskSKUItemID}] = profile
+		} else {
+			byTaskScope[record.TaskID] = profile
+		}
+		if sku := strings.TrimSpace(record.SKUCode); sku != "" {
+			byTaskSKU[fmt.Sprintf("%d:%s", record.TaskID, sku)] = profile
+		}
+	}
+	for index := range groups {
+		group := &groups[index]
+		if group.TaskSKUItemID != nil {
+			group.SKUProfile = byItem[taskSKUKey{taskID: group.TaskID, skuItemID: *group.TaskSKUItemID}]
+		} else {
+			group.SKUProfile = byTaskScope[group.TaskID]
+		}
+		if group.SKUProfile == nil && strings.TrimSpace(group.SKUCode) != "" {
+			group.SKUProfile = byTaskSKU[fmt.Sprintf("%d:%s", group.TaskID, strings.TrimSpace(group.SKUCode))]
+		}
+	}
+}
+
+func taskAssetGroupSKUProfile(record *domain.ProductManagementRecord) *domain.TaskAssetGroupSKUProfile {
+	profile := &domain.TaskAssetGroupSKUProfile{
+		ID: record.ID, TaskID: record.TaskID, TaskSKUItemID: record.TaskSKUItemID,
+		SKUCode: record.SKUCode, CategoryName: record.CategoryName, ProductFamily: record.ProductFamily,
+		ProductName: record.ProductName, ComboSKUCodes: append([]string(nil), record.ComboSKUCodes...),
+		CostPrice: record.CostPrice, SpecText: record.SpecText, SizeText: record.SizeText,
+	}
+	if record.CostTrace != nil {
+		profile.CostTrace = &domain.TaskAssetGroupSKUCostSummary{RuleName: record.CostTrace.RuleName, RequiresManualReview: record.CostTrace.RequiresManualReview}
+	}
+	if record.AreaTrace != nil {
+		profile.AreaTrace = &domain.TaskAssetGroupSKUAreaSummary{WidthM: record.AreaTrace.WidthM, HeightM: record.AreaTrace.HeightM, Quantity: record.AreaTrace.Quantity, AreaM2: record.AreaTrace.AreaM2, SourceLabel: record.AreaTrace.SourceLabel, Warning: record.AreaTrace.Warning}
+	}
+	return profile
 }
 
 func (s *taskResourceWorkflowService) BatchDownloadResourceGroups(ctx context.Context, actor domain.RequestActor, request domain.ResourceGroupBatchDownloadRequest) (*domain.ResourceGroupBatchDownloadManifest, *domain.AppError) {

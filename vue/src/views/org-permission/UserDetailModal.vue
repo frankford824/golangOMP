@@ -7,7 +7,7 @@
           <p class="modal-subtitle">
             {{ formatEmployeeNo(user.employee_no) }} · {{ user.username }} · {{ formatUserStatusForDisplay(user.status) }}
           </p>
-          <p class="modal-subtitle">当前角色：{{ formatWorkflowRolesForDisplay(user.roles) }}</p>
+          <p class="modal-subtitle">当前角色：{{ currentRoleNames }}</p>
         </div>
         <button type="button" class="modal-close" aria-label="关闭角色管理" @click="emit('close')">
           ×
@@ -92,7 +92,6 @@
             <header class="detail-section-header">
               <h4>角色权限</h4>
               <div class="detail-section-actions">
-                <button v-if="canManageAccess" type="button" class="um-btn um-btn--ghost um-btn--sm" @click="emit('manage-access')">权限与范围</button>
                 <button
                   v-if="canAssignRoles"
                   type="button"
@@ -110,7 +109,7 @@
                 v-for="role in lockedRoleOptions"
                 :key="'locked-' + role.code"
                 class="legacy-role-tag"
-                :title="lockedRoleTooltip(role)"
+                :title="role.description"
               >
                 {{ role.display }}
               </span>
@@ -124,10 +123,11 @@
                       v-model="selectedRoles"
                       type="checkbox"
                       :value="role.code"
-                      :disabled="!canAssignRoles || role.code === 'Member'"
+                      :disabled="!canAssignRoles || role.code === 'member'"
                     />
                     <span>{{ role.display }}</span>
-                    <em v-if="role.code === 'Member'">基础身份，不能移除</em>
+                    <em v-if="role.code === 'member'">基础身份，不能移除</em>
+                    <em v-else-if="role.hint">{{ role.hint }}</em>
                   </label>
                 </div>
               </section>
@@ -180,11 +180,9 @@
 
 <script setup lang="ts">
 import BaseSkeleton from '@/components/base/BaseSkeleton.vue'
-import { formatWorkflowRolesForDisplay } from '@/domain/user-workflow-roles'
 import {
   formatEmployeeNo,
   formatUserStatusForDisplay,
-  lockedRoleTooltip,
   type RoleOption,
   type RoleOptionGroup,
   type SelectOptionItem,
@@ -194,13 +192,13 @@ import {
 defineProps<{
   user: UserRow
   loading: boolean
+  currentRoleNames: string
   canEditBasicInfo: boolean
   canMoveTeam: boolean
   canClearMembership: boolean
   canAssignRoles: boolean
   canResetPassword: boolean
   canDisableUser: boolean
-  canManageAccess: boolean
   basicForm: { display_name: string; employee_no: string }
   membershipForm: { department: string; team: string }
   membershipDepartmentOptions: SelectOptionItem[]
@@ -225,7 +223,6 @@ const emit = defineEmits<{
   'submit-roles': []
   'reset-password': []
   'set-status': [next: 'active' | 'disabled']
-  'manage-access': []
 }>()
 
 const selectedRoles = defineModel<string[]>('selectedRoles', { required: true })

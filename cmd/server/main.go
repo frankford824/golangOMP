@@ -524,7 +524,9 @@ func main() {
 		reportl1svc.WithBusinessTrendGenerator(aiSummaryClient),
 		reportl1svc.WithBusinessTrendProviders(trendProviders, expectedTrendSources))
 	taskAISummarySvc := taskaisummarysvc.NewService(r3DetailSvc, taskEventSvc, taskCostOverrideEventRepo, aiSummaryClient)
-	taskResourceWorkflowSvc := service.NewTaskResourceWorkflowService(taskResourceGroupRepo, mdb, taskEventRepo, service.WithTaskResourceWorkflowOSSDirect(ossDirectSvc))
+	taskResourceWorkflowSvc := service.NewTaskResourceWorkflowService(taskResourceGroupRepo, mdb, taskEventRepo,
+		service.WithTaskResourceWorkflowOSSDirect(ossDirectSvc),
+		service.WithTaskResourceWorkflowSKUProfiles(productManagementSvc))
 	assetWorkbenchOptions := []assetworkbench.Option{
 		assetworkbench.WithRepository(assetWorkbenchRepo, mdb),
 		assetworkbench.WithUserRepository(userRepo),
