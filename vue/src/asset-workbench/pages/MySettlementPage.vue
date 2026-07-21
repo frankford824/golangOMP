@@ -43,6 +43,8 @@ const uploadNotice = ref('')
 const selectedSupplementIds = ref<number[]>([])
 const supplementDeleteReason = ref('')
 const deletingSupplements = ref(false)
+const deleteDialogOpen = ref(false)
+const deleteDialogMode = ref<'single' | 'batch'>('batch')
 const fileInput = ref<HTMLInputElement | null>(null)
 const previewDialog = ref({
   open: false,
@@ -62,6 +64,7 @@ const canUploadSupplement = computed(() =>
 const deletableSupplements = computed(() => activeSupplements.value.filter((row) => ['draft', 'approved'].includes(row.status)))
 const selectedSupplements = computed(() => deletableSupplements.value.filter((row) => selectedSupplementIds.value.includes(row.id)))
 const allSupplementsSelected = computed(() => deletableSupplements.value.length > 0 && deletableSupplements.value.every((row) => selectedSupplementIds.value.includes(row.id)))
+const selectedSupplementAmount = computed(() => selectedSupplements.value.reduce((total, row) => total + row.gross_amount, 0))
 
 function formatMonthLabel(month: string) {
   const [year, value] = month.split('-')
@@ -168,6 +171,32 @@ function toggleAllSupplements() {
   selectedSupplementIds.value = allSupplementsSelected.value ? [] : deletableSupplements.value.map((row) => row.id)
 }
 
+function openSingleDelete(row: SettlementSupplementRow) {
+  selectedSupplementIds.value = [row.id]
+  supplementDeleteReason.value = ''
+  uploadError.value = ''
+  deleteDialogMode.value = 'single'
+  deleteDialogOpen.value = true
+}
+
+function openBatchDelete() {
+  if (!selectedSupplementIds.value.length) {
+    uploadError.value = '请先选择要删除的补录记录'
+    return
+  }
+  supplementDeleteReason.value = ''
+  uploadError.value = ''
+  deleteDialogMode.value = 'batch'
+  deleteDialogOpen.value = true
+}
+
+function closeDeleteDialog() {
+  if (deletingSupplements.value) return
+  deleteDialogOpen.value = false
+  supplementDeleteReason.value = ''
+  if (deleteDialogMode.value === 'single') selectedSupplementIds.value = []
+}
+
 async function deleteSelectedSupplements() {
   const reason = supplementDeleteReason.value.trim()
   if (!selectedSupplementIds.value.length) {
@@ -186,6 +215,7 @@ async function deleteSelectedSupplements() {
     uploadNotice.value = `已删除 ${formatInt(result.deleted_ids.length)} 条补录，关联文件和补录金额已同步移除。`
     selectedSupplementIds.value = []
     supplementDeleteReason.value = ''
+    deleteDialogOpen.value = false
     await settlementRequest.run()
   } catch (err) {
     uploadError.value = resolveApiUserMessage(err, { fallback: '删除补录失败；本次选择没有产生部分删除。' })
@@ -344,12 +374,21 @@ onMounted(() => {
         </div>
         <span class="aw-chip aw-chip--neutral">{{ formatInt(activeSupplements.length) }} 条</span>
       </div>
-      <div v-if="deletableSupplements.length" class="aw-grid-toolbar">
+      <div v-if="deletableSupplements.length" class="aw-grid-toolbar aw-supplement-delete-toolbar">
         <label class="aw-inline-check">
           <input type="checkbox" :checked="allSupplementsSelected" @change="toggleAllSupplements" />
           选择全部可删除补录
         </label>
         <span>已选 {{ formatInt(selectedSupplementIds.length) }} 条</span>
+        <button
+          v-if="selectedSupplementIds.length"
+          class="aw-secondary-button aw-secondary-button--danger"
+          type="button"
+          @click="openBatchDelete"
+        >
+          <Trash2 :size="15" aria-hidden="true" />
+          删除已选 {{ formatInt(selectedSupplementIds.length) }} 条
+        </button>
       </div>
       <div v-if="activeSupplements.length" class="aw-simple-income__list">
         <article v-for="row in activeSupplements" :key="row.id" class="aw-simple-income__row">
@@ -368,6 +407,16 @@ onMounted(() => {
             </label>
             <div class="aw-supplement-row__summary">
               <b class="aw-cell-money">{{ formatMoney(row.gross_amount) }}</b>
+              <button
+                v-if="['draft', 'approved'].includes(row.status)"
+                class="aw-secondary-button aw-secondary-button--danger aw-supplement-row__delete"
+                type="button"
+                :aria-label="`删除补录 ${row.order_no}`"
+                @click="openSingleDelete(row)"
+              >
+                <Trash2 :size="15" aria-hidden="true" />
+                删除
+              </button>
             </div>
           </header>
           <div v-if="row.files?.length" class="aw-inline-actions">
@@ -383,40 +432,48 @@ onMounted(() => {
             </button>
           </div>
           <p v-else class="aw-copy">这是一条管理员手工补录记录，没有关联上传文件。</p>
-          <button
-            v-if="['draft', 'approved'].includes(row.status)"
-            class="aw-secondary-button"
-            type="button"
-            @click="selectedSupplementIds = [row.id]"
-          >
-            <Trash2 :size="15" aria-hidden="true" />
-            删除此条补录
-          </button>
         </article>
       </div>
       <div v-else class="aw-empty-state">
         <h3>当前月还没有补录记录</h3>
         <p>补录权限开放后，在上方选择日期、目录和图片即可上传。</p>
       </div>
-      <div v-if="selectedSupplements.length" class="aw-panel">
-        <div class="aw-panel__head">
+    </div>
+
+    <div v-if="deleteDialogOpen" class="aw-dialog-backdrop" role="presentation" @click.self="closeDeleteDialog">
+      <section class="aw-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="supplement-delete-title" @keydown.esc.prevent="closeDeleteDialog">
+        <div>
+          <p class="aw-eyebrow">删除补录</p>
+          <h3 id="supplement-delete-title">确认删除{{ deleteDialogMode === 'single' ? '这条' : '选中的' }}补录？</h3>
+          <p class="aw-copy">关联补录文件会同步删除，补录金额会从本月未结算金额中移除。此操作不能撤销。</p>
+        </div>
+        <div class="aw-confirm-dialog__summary">
           <div>
-            <h3>删除选中的补录</h3>
-            <p class="aw-copy">会同步删除补录文件，并从本月未结算补录金额中移除。</p>
+            <span>记录数量</span>
+            <strong>{{ formatInt(selectedSupplements.length) }} 条</strong>
           </div>
-          <span class="aw-chip aw-chip--warn">{{ formatInt(selectedSupplements.length) }} 条</span>
+          <div>
+            <span>移除金额</span>
+            <strong>{{ formatMoney(selectedSupplementAmount) }}</strong>
+          </div>
         </div>
         <label class="aw-field">
           <span>删除原因</span>
-          <input v-model="supplementDeleteReason" placeholder="例如：上传错文件" />
+          <input v-model="supplementDeleteReason" autofocus placeholder="例如：上传错文件" />
         </label>
         <div class="aw-inline-actions">
-          <button class="aw-primary-button" type="button" :disabled="deletingSupplements" @click="deleteSelectedSupplements">
+          <button
+            class="aw-secondary-button aw-secondary-button--danger"
+            type="button"
+            :disabled="deletingSupplements || !supplementDeleteReason.trim()"
+            @click="deleteSelectedSupplements"
+          >
+            <Trash2 :size="15" aria-hidden="true" />
             {{ deletingSupplements ? '删除中' : `确认删除 ${formatInt(selectedSupplements.length)} 条` }}
           </button>
-          <button class="aw-secondary-button" type="button" :disabled="deletingSupplements" @click="selectedSupplementIds = []">取消</button>
+          <button class="aw-secondary-button" type="button" :disabled="deletingSupplements" @click="closeDeleteDialog">取消</button>
         </div>
-      </div>
+      </section>
     </div>
 
     <WorkbenchPreviewDialog

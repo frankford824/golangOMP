@@ -561,6 +561,7 @@ export const assetAuditPages = [
     role: 'simple',
     prepare: async (page) => {
       await page.getByRole('checkbox', { name: '选择全部可删除补录' }).check()
+      await page.getByRole('button', { name: '删除已选 1 条' }).click()
       await page.getByPlaceholder('例如：上传错文件').fill('fixture 客户端删除错传补录')
       await page.getByRole('button', { name: '确认删除 1 条' }).click()
       await page.getByText(/关联文件和补录金额已同步移除/).waitFor()

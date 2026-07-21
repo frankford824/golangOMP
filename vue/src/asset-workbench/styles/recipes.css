@@ -815,6 +815,39 @@
   gap: var(--aw-space-2);
 }
 
+.aw-supplement-row__delete {
+  min-height: 32px;
+  padding: 0 var(--aw-space-3);
+}
+
+.aw-supplement-delete-toolbar {
+  position: sticky;
+  top: calc(72px + var(--aw-space-2));
+  z-index: 2;
+  min-height: 48px;
+  border: 1px solid var(--aw-hairline);
+  border-radius: var(--aw-radius-sm);
+  background: color-mix(in srgb, var(--aw-surface) 94%, transparent);
+  box-shadow: var(--aw-shadow-soft);
+  padding: var(--aw-space-2) var(--aw-space-3);
+  backdrop-filter: blur(12px);
+}
+
+@media (max-width: 720px) {
+  .aw-supplement-delete-toolbar {
+    align-items: stretch;
+  }
+
+  .aw-supplement-delete-toolbar .aw-secondary-button--danger {
+    width: 100%;
+  }
+
+  .aw-supplement-row__summary {
+    align-items: flex-end;
+    flex-direction: column;
+  }
+}
+
 .aw-pay-slip-list {
   display: grid;
   gap: var(--aw-space-2);
