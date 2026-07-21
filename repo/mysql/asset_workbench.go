@@ -2668,6 +2668,23 @@ func (r *assetWorkbenchRepo) ListSubmissionFiles(ctx context.Context, submission
 	return items, rows.Err()
 }
 
+func (r *assetWorkbenchRepo) ListSubmissionFilesForUpdate(ctx context.Context, tx repo.Tx, submissionItemID int64) ([]*domain.AssetWorkbenchSubmissionFile, error) {
+	rows, err := Unwrap(tx).QueryContext(ctx, assetWorkbenchSubmissionFileSelect()+` WHERE submission_item_id = ? AND deleted_at IS NULL ORDER BY sort_order ASC, id ASC FOR UPDATE`, submissionItemID)
+	if err != nil {
+		return nil, fmt.Errorf("lock asset workbench submission files: %w", err)
+	}
+	defer rows.Close()
+	items := []*domain.AssetWorkbenchSubmissionFile{}
+	for rows.Next() {
+		item, err := scanAssetWorkbenchSubmissionFile(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 func (r *assetWorkbenchRepo) GetSubmissionFile(ctx context.Context, fileID int64) (*domain.AssetWorkbenchSubmissionFile, error) {
 	row := r.db.db.QueryRowContext(ctx, assetWorkbenchSubmissionFileSelect()+` WHERE id = ? AND deleted_at IS NULL`, fileID)
 	return scanAssetWorkbenchSubmissionFile(row)

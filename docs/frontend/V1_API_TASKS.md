@@ -14,7 +14,7 @@
 - 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
 - `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
 - 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
-- 本文件覆盖 `229` 个 `/v1` path；同一路径多 method 合并在同一节。
+- 本文件覆盖 `230` 个 `/v1` path；同一路径多 method 合并在同一节。
 
 ## GET /v1/trace-events
 
@@ -15559,16 +15559,86 @@ curl -X POST https://api.example.com/v1/asset-workbench/settlement/supplements/e
 - 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
 
+## POST /v1/asset-workbench/settlement/supplements/batch-delete
+
+### 简介
+支持方法: POST。
+
+- `POST`: Atomically marks every requested supplement as `voided`, soft-deletes all linked upload files, voids the linked supplement submission items, and removes their amounts from unsettled totals. Submitters and managers may delete only their own supplement rows; settlement roles may delete any payee's rows. If any row is missing, unauthorized, already in a batch, settled, or voided, no requested row is changed.
+
+### 鉴权与 RBAC
+- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
+- `POST` 允许角色: AssetSubmitter, AssetManager, AssetSettlement, SuperAdmin。
+- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
+
+### 请求体 schema
+参数:
+
+无 path/query/header 参数。
+
+Content-Type: `application/json`
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `supplement_ids` | array<integer> | 是 | - |
+| `reason` | string | 是 | - |
+
+### 响应体 schema
+成功响应: `200 application/json`
+
+```json
+{
+  "data": {
+    "deleted_ids": [
+      "..."
+    ],
+    "supplements": [
+      "..."
+    ]
+  }
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `data` | object | 否 | - |
+
+### 错误码
+| HTTP | code | deny_code | 说明 |
+|---|---|---|---|
+| 400 | 见 `error.code` | 见 `deny_code` | Invalid request or missing reason |
+| 401 | 见 `error.code` | 见 `deny_code` | Unauthenticated |
+| 403 | 见 `error.code` | 见 `deny_code` | Forbidden because a requested row belongs to another payee |
+| 404 | 见 `error.code` | 见 `deny_code` | One or more supplements were not found |
+| 409 | 见 `error.code` | 见 `deny_code` | One or more supplements are already in batch |
+
+### curl 示例
+```bash
+curl -X POST https://api.example.com/v1/asset-workbench/settlement/supplements/batch-delete \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"example":"value"}'
+```
+
+### 前端最佳实践
+- `GET /v1/tasks/{id}/detail` 是 V1.1-A1 优化后的首屏聚合接口，生产 warm P99 约 32.933ms。
+- 任务主流程读接口已统一为 task-facing 登录角色全量可见；接单、编辑、审核、上传、归档等动作仍以后端返回的权限/状态判定为准。
+- 创建任务时前端应优先提交 `i_id`；`category_code` 是后端兼容字段，不作为新前端必填项。
+- `sync_erp_on_create=true` 时，后端会在创建后用产品名称、SKU 与 i_id 触发前置 ERP upsert。
+- 模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。
+- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+
 ## DELETE /v1/asset-workbench/settlement/supplements/{supplement_id}
 
 ### 简介
 支持方法: DELETE。
 
-- `DELETE`: Deletes by marking the supplement as `voided`; in-batch and settled supplement rows are protected.
+- `DELETE`: Atomically marks the supplement as `voided`, soft-deletes linked upload files, voids the linked supplement submission item, and removes its amount from unsettled totals. Submitters and managers may delete only their own rows; settlement roles may delete any payee's row. In-batch, settled, and already-voided rows are protected.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `DELETE` 允许角色: AssetSettlement, SuperAdmin。
+- `DELETE` 允许角色: AssetSubmitter, AssetManager, AssetSettlement, SuperAdmin。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -15582,7 +15652,7 @@ Content-Type: `application/json`
 
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
-| `reason` | string | 否 | - |
+| `reason` | string | 是 | - |
 
 ### 响应体 schema
 成功响应: `200 application/json`
@@ -15607,7 +15677,7 @@ Content-Type: `application/json`
 |---|---|---|---|
 | 400 | 见 `error.code` | 见 `deny_code` | Invalid request |
 | 401 | 见 `error.code` | 见 `deny_code` | Unauthenticated |
-| 403 | 见 `error.code` | 见 `deny_code` | Forbidden |
+| 403 | 见 `error.code` | 见 `deny_code` | Forbidden because the supplement belongs to another payee |
 | 404 | 见 `error.code` | 见 `deny_code` | Supplement not found |
 | 409 | 见 `error.code` | 见 `deny_code` | Supplement is already in batch or settled |
 
