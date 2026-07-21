@@ -22,7 +22,8 @@ function rejectedTaskEnvelope(designSubStatusLocation: 'flat' | 'workflow') {
       id: 2759,
       task_no: 'RW-20260721-A-002756',
       task_type: 'new_product_development',
-      task_status: 'RejectedByAuditA',
+      task_status: 'Blocked',
+      allowed_actions: ['task.design.submit'],
       designer_id: 228,
       current_handler_id: 228,
       created_at: '2026-07-21T03:31:48.000Z',
@@ -61,7 +62,7 @@ describe('useTasksStore rejected design status compatibility', () => {
       expect(store.list).toHaveLength(1)
       expect(store.getById('2759')).toMatchObject({
         id: '2759',
-        status: 'RejectedByAuditA',
+        status: 'Blocked',
         designSubStatus: 'REJECTED',
       })
       expect(canUploadDesignDelivery(store.getById('2759')!)).toBe(true)
