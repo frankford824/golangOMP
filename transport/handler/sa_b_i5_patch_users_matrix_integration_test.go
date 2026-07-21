@@ -34,7 +34,7 @@ func TestSABI5_PatchUsers_FieldLevelAuthorizationDenyMatrix(t *testing.T) {
 	teamToken := saBCreateSession(t, db, 30055, "sab-i5-team-token")
 
 	router := saBAuthRouter(svc)
-	userH := NewUserAdminHandler(svc, nil, nil)
+	userH := NewUserAdminHandler(svc)
 	router.PATCH("/v1/users/:id", userH.PatchUser)
 
 	// SA-B.2(2026-04-24):DeptAdmin 访问跨部门用户会**先命中** read-scope gate

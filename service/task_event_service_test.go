@@ -109,10 +109,6 @@ func (r *taskEventTaskRepoStub) List(context.Context, repo.TaskListFilter) ([]*d
 	panic("not used")
 }
 
-func (r *taskEventTaskRepoStub) ListBoardCandidates(context.Context, repo.TaskBoardCandidateFilter) ([]*domain.TaskListItem, error) {
-	panic("not used")
-}
-
 func (r *taskEventTaskRepoStub) UpdateDetailBusinessInfo(context.Context, repo.Tx, *domain.TaskDetail) error {
 	panic("not used")
 }

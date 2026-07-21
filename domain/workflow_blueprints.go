@@ -12,8 +12,6 @@ const (
 	TeamAuditStandard      = "audit_standard"
 	TeamAuditCustomization = "audit_customization"
 	TeamCustomizationArt   = "customization_art"
-	TeamWarehouseMain      = "warehouse_main"
-	TeamProcurementMain    = "procurement_main"
 )
 
 type PoolTeamTarget struct {
@@ -37,8 +35,6 @@ func PoolTeamTargets(poolTeamCode string) []PoolTeamTarget {
 		}
 	case TeamCustomizationArt:
 		return []PoolTeamTarget{{Department: string(DepartmentCustomizationArt), Team: "默认组"}}
-	case TeamWarehouseMain:
-		return []PoolTeamTarget{{Department: string(DepartmentCloudWarehouse), Team: "默认组"}}
 	default:
 		return nil
 	}
@@ -48,7 +44,7 @@ func V1TaskTypes() []TaskType {
 	return []TaskType{
 		TaskTypeOriginalProductDevelopment,
 		TaskTypeNewProductDevelopment,
-		TaskTypePurchaseTask,
+		TaskTypeSKUPlanning,
 		TaskTypeRetouchTask,
 		TaskTypeCustomerCustomization,
 		TaskTypeRegularCustomization,

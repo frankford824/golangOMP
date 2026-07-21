@@ -2,155 +2,57 @@ package domain
 
 import "testing"
 
-func TestBuildFrontendAccessDepartmentOnlyAddsScopeNotBusinessMenus(t *testing.T) {
-	settings := FrontendAccessSettings{
-		Defaults: FrontendAccessDefaults{
-			AllAuthenticated: FrontendAccessSpec{
-				Roles:   []string{"member"},
-				Scopes:  []string{"frontend_ready", "self_only"},
-				Menus:   []string{"dashboard"},
-				Pages:   []string{"dashboard_home", "profile_me"},
-				Actions: []string{"auth.me.read", "profile.view"},
-			},
-		},
-		Departments: map[string]DepartmentAccessEntry{
-			string(DepartmentOperations): {
-				Code: "operations",
-				FrontendAccessSpec: FrontendAccessSpec{
-					Scopes:  []string{"department_operations"},
-					Menus:   []string{"task_board", "task_list"},
-					Pages:   []string{"task_board", "task_list"},
-					Actions: []string{"task.list"},
-				},
-			},
-		},
-		Roles: map[string]FrontendAccessSpec{},
-	}
-
+func TestBuildFrontendAccessDoesNotGrantBusinessAccessFromLegacyRoles(t *testing.T) {
+	settings := FrontendAccessSettings{Defaults: FrontendAccessDefaults{AllAuthenticated: FrontendAccessSpec{
+		Menus: []string{"dashboard"}, Pages: []string{"dashboard"}, Actions: []string{"account.use"},
+	}}}
 	view := BuildFrontendAccess(&User{
-		ID:         7,
-		Username:   "member_ops_scope_only",
-		Department: DepartmentOperations,
-		Team:       "运营三组",
-		Roles:      []Role{RoleMember},
+		ID: 7, Department: DepartmentOperations, Team: "运营一组",
+		Roles: []Role{RoleAdmin, RoleOps, RoleAuditA, RoleWarehouse},
 	}, settings)
-
-	if !containsStringValue(view.Scopes, "department_operations") {
-		t.Fatalf("department scope missing: %+v", view.Scopes)
+	if len(view.Menus) != 1 || view.Menus[0] != "dashboard" {
+		t.Fatalf("legacy roles granted menus: %+v", view.Menus)
 	}
-	if containsStringValue(view.Menus, "task_board") || containsStringValue(view.Menus, "task_list") {
-		t.Fatalf("department-only user should not receive task menus: %+v", view.Menus)
+	if len(view.Actions) != 1 || view.Actions[0] != "account.use" {
+		t.Fatalf("legacy roles granted actions: %+v", view.Actions)
 	}
-	if containsStringValue(view.Pages, "task_board") || containsStringValue(view.Pages, "task_list") {
-		t.Fatalf("department-only user should not receive task pages: %+v", view.Pages)
+	for _, stale := range []string{"warehouse_receive", "export_center", "audit_queue", "logs_center"} {
+		if containsStringValue(view.Menus, stale) || containsStringValue(view.Pages, stale) {
+			t.Fatalf("stale frontend access %q leaked: %+v", stale, view)
+		}
 	}
-	if containsStringValue(view.Actions, "task.list") {
-		t.Fatalf("department-only user should not receive task actions: %+v", view.Actions)
+	if containsStringValue(view.Scopes, "department:运营部") || containsStringValue(view.Scopes, "team:运营一组") {
+		t.Fatalf("organization names must not become authorization scopes: %+v", view.Scopes)
 	}
 }
 
-func TestBuildFrontendAccessRoleStillAddsBusinessMenus(t *testing.T) {
-	settings := FrontendAccessSettings{
-		Defaults: FrontendAccessDefaults{
-			AllAuthenticated: FrontendAccessSpec{
-				Roles:   []string{"member"},
-				Scopes:  []string{"frontend_ready", "self_only"},
-				Menus:   []string{"dashboard"},
-				Pages:   []string{"dashboard_home", "profile_me"},
-				Actions: []string{"auth.me.read", "profile.view"},
-			},
+func TestMergeEffectiveAccessMapsOnlyCurrentMainOpsSurfaces(t *testing.T) {
+	view := MergeEffectiveAccessIntoFrontendAccess(FrontendAccessView{Menus: []string{"dashboard"}}, &EffectiveAccess{
+		Permissions: []PermissionCode{
+			PermissionTaskView, PermissionAssetView, PermissionCatalogView,
+			PermissionReportView, PermissionAccessView,
 		},
-		Departments: map[string]DepartmentAccessEntry{
-			string(DepartmentOperations): {
-				Code: "operations",
-				FrontendAccessSpec: FrontendAccessSpec{
-					Scopes: []string{"department_operations"},
-				},
-			},
-		},
-		Roles: map[string]FrontendAccessSpec{
-			string(RoleOps): {
-				Roles:   []string{"ops"},
-				Scopes:  []string{"workflow_ops"},
-				Menus:   []string{"task_board", "task_list"},
-				Pages:   []string{"task_board", "task_list"},
-				Actions: []string{"task.list"},
-			},
-		},
+	})
+	for _, menu := range []string{"dashboard", "task_list", "resource_management", "cost_rules", "report_center", "user_admin"} {
+		if !containsStringValue(view.Menus, menu) {
+			t.Fatalf("current menu %q missing: %+v", menu, view.Menus)
+		}
 	}
-
-	view := BuildFrontendAccess(&User{
-		ID:         8,
-		Username:   "ops_user",
-		Department: DepartmentOperations,
-		Team:       "运营三组",
-		Roles:      []Role{RoleMember, RoleOps},
-	}, settings)
-
-	if !containsStringValue(view.Scopes, "department_operations") || !containsStringValue(view.Scopes, "workflow_ops") {
-		t.Fatalf("scopes missing: %+v", view.Scopes)
-	}
-	if !containsStringValue(view.Menus, "task_board") || !containsStringValue(view.Menus, "task_list") {
-		t.Fatalf("ops role menus missing: %+v", view.Menus)
-	}
-	if !containsStringValue(view.Pages, "task_board") || !containsStringValue(view.Pages, "task_list") {
-		t.Fatalf("ops role pages missing: %+v", view.Pages)
-	}
-	if !containsStringValue(view.Actions, "task.list") {
-		t.Fatalf("ops role actions missing: %+v", view.Actions)
+	for _, stale := range []string{"warehouse_receive", "export_center", "audit_queue", "logs_center", "product_management"} {
+		if containsStringValue(view.Menus, stale) {
+			t.Fatalf("stale menu %q leaked: %+v", stale, view.Menus)
+		}
 	}
 }
 
-func TestBuildFrontendAccessLegacyAdminDoesNotGetRoleAssignmentActions(t *testing.T) {
-	settings := FrontendAccessSettings{
-		Defaults: FrontendAccessDefaults{
-			AllAuthenticated: FrontendAccessSpec{
-				Roles:   []string{"member"},
-				Scopes:  []string{"frontend_ready"},
-				Menus:   []string{"dashboard"},
-				Pages:   []string{"dashboard_home"},
-				Actions: []string{"profile.view"},
-			},
-		},
-		Identities: map[string]FrontendAccessSpec{
-			"super_admin": {
-				Actions: []string{"role.assign", "role.remove", "user.manage"},
-			},
-			"department_admin": {},
-		},
-		Roles: map[string]FrontendAccessSpec{
-			string(RoleAdmin): {
-				Roles:   []string{"admin"},
-				Scopes:  []string{"identity_admin"},
-				Actions: []string{"user.manage"},
-			},
-			string(RoleSuperAdmin): {
-				Roles:   []string{"super_admin"},
-				Actions: []string{"role.assign", "role.remove"},
-			},
-		},
+func TestMergeEffectiveAccessMarksOnlyProtectedSuperAdminSource(t *testing.T) {
+	normal := MergeEffectiveAccessIntoFrontendAccess(FrontendAccessView{}, &EffectiveAccess{Sources: []EffectiveAccessNote{{RoleCode: "admin"}}})
+	if normal.IsSuperAdmin || normal.ViewAll {
+		t.Fatalf("legacy admin elevated: %+v", normal)
 	}
-
-	adminView := BuildFrontendAccess(&User{
-		ID:    9,
-		Roles: []Role{RoleAdmin},
-	}, settings)
-	if adminView.IsSuperAdmin {
-		t.Fatalf("Admin IsSuperAdmin = true, want false")
-	}
-	if !adminView.ViewAll {
-		t.Fatalf("Admin ViewAll = false, want true compatibility visibility")
-	}
-	if containsStringValue(adminView.Actions, "role.assign") || containsStringValue(adminView.Actions, "role.remove") {
-		t.Fatalf("Admin actions = %+v, must not include role assignment actions", adminView.Actions)
-	}
-
-	superView := BuildFrontendAccess(&User{
-		ID:    10,
-		Roles: []Role{RoleSuperAdmin},
-	}, settings)
-	if !superView.IsSuperAdmin || !containsStringValue(superView.Actions, "role.assign") || !containsStringValue(superView.Actions, "role.remove") {
-		t.Fatalf("SuperAdmin frontend access = %+v, want role assignment actions", superView)
+	super := MergeEffectiveAccessIntoFrontendAccess(FrontendAccessView{}, &EffectiveAccess{Sources: []EffectiveAccessNote{{RoleCode: "super_admin"}}})
+	if !super.IsSuperAdmin || !super.ViewAll {
+		t.Fatalf("protected super admin source not reflected: %+v", super)
 	}
 }
 
@@ -161,100 +63,4 @@ func containsStringValue(values []string, target string) bool {
 		}
 	}
 	return false
-}
-
-func TestBuildFrontendAccessIncludesCustomizationAndResourceVisibility(t *testing.T) {
-	settings := FrontendAccessSettings{
-		Defaults: FrontendAccessDefaults{
-			AllAuthenticated: FrontendAccessSpec{
-				Roles:   []string{"member"},
-				Scopes:  []string{"frontend_ready", "self_only"},
-				Menus:   []string{"dashboard"},
-				Pages:   []string{"dashboard_home"},
-				Actions: []string{"auth.me.read"},
-			},
-		},
-		Departments: map[string]DepartmentAccessEntry{},
-		Roles:       map[string]FrontendAccessSpec{},
-	}
-
-	view := BuildFrontendAccess(&User{
-		ID:    88,
-		Roles: []Role{RoleOps, RoleCustomizationReviewer},
-	}, settings)
-
-	if !containsStringValue(view.Menus, "resource_management") || !containsStringValue(view.Menus, "customization_management") {
-		t.Fatalf("menus missing resource/customization visibility: %+v", view.Menus)
-	}
-	if !containsStringValue(view.Pages, "assets_index") || !containsStringValue(view.Pages, "customization_jobs") || !containsStringValue(view.Pages, "customization_job_detail") {
-		t.Fatalf("pages missing customization/resource entries: %+v", view.Pages)
-	}
-}
-
-func TestBuildFrontendAccessCustomizationReviewerRoleUsesTaskCenterAuditQueueAndAssets(t *testing.T) {
-	settings := FrontendAccessSettings{
-		Defaults: FrontendAccessDefaults{
-			AllAuthenticated: FrontendAccessSpec{
-				Roles:   []string{"member"},
-				Scopes:  []string{"frontend_ready", "self_only"},
-				Menus:   []string{"dashboard"},
-				Pages:   []string{"dashboard_home"},
-				Actions: []string{"auth.me.read"},
-			},
-		},
-		Departments: map[string]DepartmentAccessEntry{},
-		Roles:       map[string]FrontendAccessSpec{},
-	}
-
-	view := BuildFrontendAccess(&User{
-		ID:    99,
-		Roles: []Role{RoleMember, RoleCustomizationReviewer},
-	}, settings)
-
-	if !containsStringValue(view.Roles, "customization_reviewer") {
-		t.Fatalf("roles missing customization reviewer: %+v", view.Roles)
-	}
-	if !containsStringValue(view.Menus, "task_list") || !containsStringValue(view.Menus, "customization_management") || !containsStringValue(view.Menus, "resource_management") || !containsStringValue(view.Menus, "audit_queue") {
-		t.Fatalf("menus missing task center/customization/audit/resource visibility: %+v", view.Menus)
-	}
-	if !containsStringValue(view.Pages, "customization_jobs") || !containsStringValue(view.Pages, "assets_index") || !containsStringValue(view.Pages, "audit_workspace") {
-		t.Fatalf("pages missing customization/resource entries: %+v", view.Pages)
-	}
-}
-
-func TestBuildFrontendAccessCustomizationOperatorRoleUsesDesignWorkspaceBaseMenus(t *testing.T) {
-	settings := FrontendAccessSettings{
-		Defaults: FrontendAccessDefaults{
-			AllAuthenticated: FrontendAccessSpec{
-				Roles:   []string{"member"},
-				Scopes:  []string{"frontend_ready", "self_only"},
-				Menus:   []string{"dashboard"},
-				Pages:   []string{"dashboard_home"},
-				Actions: []string{"auth.me.read"},
-			},
-		},
-		Departments: map[string]DepartmentAccessEntry{},
-		Roles:       map[string]FrontendAccessSpec{},
-	}
-
-	view := BuildFrontendAccess(&User{
-		ID:    100,
-		Roles: []Role{RoleMember, RoleCustomizationOperator},
-	}, settings)
-
-	if !containsStringValue(view.Roles, "customization_operator") {
-		t.Fatalf("roles missing customization operator: %+v", view.Roles)
-	}
-	if !containsStringValue(view.Menus, "design_workspace") || !containsStringValue(view.Menus, "resource_management") {
-		t.Fatalf("menus missing customization operator base workspace: %+v", view.Menus)
-	}
-	if containsStringValue(view.Menus, "customization_management") {
-		t.Fatalf("customization operator member should not receive dept-admin customization menus: %+v", view.Menus)
-	}
-	if !containsStringValue(view.Menus, "task_list") {
-		t.Fatalf("customization operator member should receive task_list for globally readable main task flow: %+v", view.Menus)
-	}
-	if !containsStringValue(view.Actions, "task.customization.submit") || !containsStringValue(view.Actions, "task.customization.transfer") {
-		t.Fatalf("actions missing customization operator abilities: %+v", view.Actions)
-	}
 }

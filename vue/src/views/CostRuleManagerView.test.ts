@@ -25,8 +25,8 @@ vi.mock('@/services/api/categoriesApi', () => ({
     updateCostRule: mocks.updateCostRule,
   },
 }))
-vi.mock('@/services/api/productManagementApi', () => ({
-  productManagementApi: {
+vi.mock('@/services/api/costManagementApi', () => ({
+  costManagementApi: {
     listCostRuleBindings: mocks.listBindings,
     listUnboundCostRuleCandidates: mocks.listCandidates,
     createCostRuleBinding: mocks.createBinding,

@@ -199,7 +199,7 @@ export interface Task {
   /** @deprecated 使用具体子状态字段代替 */
   subStatus?: TaskSubStatus
 
-  // ── 责任人与组织（v0.9 actor/source 正式字段）────────────────────────────────
+  // ── 责任人与组织 ───────────────────────────────────────────────────────────
   /** 发起人（正式） */
   requesterId: string
   requesterName: string
@@ -222,16 +222,13 @@ export interface Task {
   assigneeName: string | null
   groupId: string
   /**
-   * Legacy compatibility：来自后端 `owner_team` / `group_name` 等，用于历史数据与创建侧兼容展示。
-   * 正式组织归属请使用 `ownerDepartment` + `ownerOrgTeam`。
+   * 历史任务组名，只用于展示。权限判断禁止读取该字段。
    */
   groupName: string
   /** 规范归属：部门（GET 任务读模型 `owner_department`） */
   ownerDepartment?: string
   /** 规范归属：组织树团队（GET 任务读模型 `owner_org_team`） */
   ownerOrgTeam?: string
-  /** 工作流业务 lane：普通 / 定制（GET 任务读模型 `workflow_lane`） */
-  workflowLane?: 'normal' | 'customization'
   /** 任务业务 lane：普通 / 定制（GET 任务读模型 `business_lane`） */
   businessLane?: 'normal' | 'customization'
   skuCodeType?: 'regular' | 'customization' | string
@@ -306,7 +303,6 @@ export interface Task {
   productReferenceUrl?: string
   newProductQuantity?: number
   newProductCostUnitPrice?: number
-  productChannel?: string
   /** 单任务级运营套装建议；批量任务以 skuItems[].setModeHint 为准。 */
   setModeHint?: boolean
   /**

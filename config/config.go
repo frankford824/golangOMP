@@ -36,7 +36,6 @@ type Config struct {
 	Embedding      AIEmbeddingConfig
 	VectorSearch   VectorSearchConfig
 	Experience     ExperienceConfig
-	BusinessTrend  BusinessTrendConfig
 	CostGovernance CostGovernanceConfig
 	WeCom          WeComConfig
 	WebPush        WebPushConfig
@@ -137,20 +136,6 @@ type ExperienceConfig struct {
 	OutboxLeaseTTL               time.Duration
 	RuntimeConfigFile            string
 	RetentionDays                int
-}
-
-type BusinessTrendConfig struct {
-	ChinaHotURL         string
-	ApifyToken          string
-	ApifyBaseURL        string
-	ApifyDouyinHotActor string
-	ApifyDouyinActor    string
-	ApifyRedNoteActor   string
-	Apify1688Actor      string
-	ApifyTaobaoActor    string
-	Timeout             time.Duration
-	MaxExternalKeywords int
-	MaxExternalItems    int
 }
 
 type CostGovernanceConfig struct {
@@ -268,7 +253,6 @@ type ERPRemoteConfig struct {
 	GetCompanyUsersPath      string
 	SkuQueryPath             string
 	CombineSKUQueryPath      string
-	OrderActionQueryPath     string
 	OpenWebCharset           string
 	OpenWebVersion           string
 	Timeout                  time.Duration
@@ -360,7 +344,6 @@ func Load() (*Config, error) {
 			GetCompanyUsersPath:      getEnv("ERP_REMOTE_GET_COMPANY_USERS_PATH", "/open/webapi/userapi/company/getcompanyusers"),
 			SkuQueryPath:             getEnv("ERP_REMOTE_SKU_QUERY_PATH", "/open/sku/query"),
 			CombineSKUQueryPath:      getEnv("ERP_REMOTE_COMBINE_SKU_QUERY_PATH", "/open/combine/sku/query"),
-			OrderActionQueryPath:     getEnv("ERP_REMOTE_ORDER_ACTION_QUERY_PATH", "/open/order/action/query"),
 			OpenWebCharset:           getEnv("ERP_REMOTE_OPENWEB_CHARSET", "utf-8"),
 			OpenWebVersion:           getEnv("ERP_REMOTE_OPENWEB_VERSION", "2"),
 			Timeout:                  mustParseDuration(getEnv("ERP_REMOTE_TIMEOUT", "15s")),
@@ -528,19 +511,6 @@ func Load() (*Config, error) {
 			OutboxLeaseTTL:               mustParseDuration(getEnv("EXPERIENCE_OUTBOX_LEASE_TTL", "5m")),
 			RuntimeConfigFile:            getEnv("EXPERIENCE_RUNTIME_CONFIG_FILE", ""),
 			RetentionDays:                mustParseInt(getEnv("EXPERIENCE_RETENTION_DAYS", "180")),
-		},
-		BusinessTrend: BusinessTrendConfig{
-			ChinaHotURL:         getEnv("BUSINESS_TREND_CHINA_HOT_URL", ""),
-			ApifyToken:          getEnv("APIFY_TOKEN", ""),
-			ApifyBaseURL:        getEnv("BUSINESS_TREND_APIFY_BASE_URL", "https://api.apify.com"),
-			ApifyDouyinHotActor: getEnv("BUSINESS_TREND_APIFY_DOUYIN_HOT_ACTOR", "zen-studio/douyin-hot-search-scraper"),
-			ApifyDouyinActor:    getEnv("BUSINESS_TREND_APIFY_DOUYIN_SEARCH_ACTOR", "zen-studio/douyin-search-scraper"),
-			ApifyRedNoteActor:   getEnv("BUSINESS_TREND_APIFY_REDNOTE_SEARCH_ACTOR", "zen-studio/rednote-search-scraper"),
-			Apify1688Actor:      getEnv("BUSINESS_TREND_APIFY_1688_ACTOR", "automation-lab/1688-scraper"),
-			ApifyTaobaoActor:    getEnv("BUSINESS_TREND_APIFY_TAOBAO_ACTOR", "zen-studio/taobao-detail-scraper"),
-			Timeout:             mustParseDuration(getEnv("BUSINESS_TREND_EXTERNAL_TIMEOUT", "20s")),
-			MaxExternalKeywords: mustParseInt(getEnv("BUSINESS_TREND_MAX_EXTERNAL_KEYWORDS", "8")),
-			MaxExternalItems:    mustParseInt(getEnv("BUSINESS_TREND_MAX_EXTERNAL_ITEMS", "24")),
 		},
 		CostGovernance: CostGovernanceConfig{
 			LegacyAliasFallbackEnabled: mustParseBool(getEnv("COST_RULE_LEGACY_ALIAS_FALLBACK_ENABLED", "true")),

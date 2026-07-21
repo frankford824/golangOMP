@@ -185,15 +185,13 @@ interface MenuConfig {
   label: string
   to: string
   exact?: boolean
-  /** 老后端/老前端键兼容：任一命中即视为该菜单的 canonical key */
-  aliases?: string[]
   section: 'workbench' | 'business' | 'data'
   icon: string
   badge?: () => number
 }
 
 // 侧边栏完全以后端 `frontend_access.menus` 为 SoT；
-// 这里的 `MENU_CONFIG` 只保留显示元数据（label/icon/to/section）与兼容别名，
+// 这里的 `MENU_CONFIG` 只保留显示元数据（label/icon/to/section），
 // 不再做 page/module 二次门禁。
 const MENU_CONFIG: MenuConfig[] = [
   // v4.2 修复：老板要求 + Dashboard 使用精确高亮，避免 '/' 前缀匹配导致所有页面都高亮
@@ -209,7 +207,6 @@ const MENU_CONFIG: MenuConfig[] = [
     key: 'task_list',
     label: '任务中心',
     to: '/tasks',
-    aliases: ['my_tasks', 'task_center'],
     section: 'workbench',
     icon: 'reorder',
   },
@@ -217,12 +214,11 @@ const MENU_CONFIG: MenuConfig[] = [
     key: 'resource_management',
     label: '资产管理',
     to: '/asset-center',
-    aliases: ['assets_index'],
     section: 'data',
     icon: 'perm_media',
   },
   {
-    key: 'product_management',
+    key: 'cost_rules',
     label: '成本规则',
     to: '/cost-rules',
     section: 'data',
@@ -232,37 +228,13 @@ const MENU_CONFIG: MenuConfig[] = [
     key: 'report_center',
     label: '数据中心',
     to: '/data-center',
-    aliases: ['kpi', 'finance', 'export_center', 'export_jobs', 'logs_center', 'logs_manage'],
     section: 'data',
     icon: 'analytics',
-  },
-  {
-    key: 'audit_log',
-    label: '审计日志',
-    to: '/audit-log',
-    section: 'data',
-    icon: 'history',
-  },
-  {
-    key: 'finance',
-    label: '财务核算',
-    to: '/finance',
-    section: 'data',
-    icon: 'account_balance',
-    badge: () => 0,
-  },
-  {
-    key: 'rules',
-    label: '规则及模板',
-    to: '/rules',
-    section: 'data',
-    icon: 'settings_input_component',
   },
   {
     key: 'user_admin',
     label: '用户与角色',
     to: '/users',
-    aliases: ['user_manage', 'access_policy'],
     section: 'data',
     icon: 'person',
   },
@@ -275,11 +247,8 @@ const MENU_CONFIG: MenuConfig[] = [
 const visibleMenus = computed(() => {
   if (!permissionsStore.currentUser) return []
   const userMenus = permissionsStore.menus
-  const alwaysVisibleKeys = new Set(['task_list'])
   return MENU_CONFIG.filter((menu) =>
-    alwaysVisibleKeys.has(menu.key) ||
-    userMenus.includes(menu.key) ||
-    (menu.aliases ?? []).some((alias) => userMenus.includes(alias)),
+    userMenus.includes(menu.key),
   )
 })
 

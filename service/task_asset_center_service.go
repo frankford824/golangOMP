@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -47,31 +46,6 @@ type CompleteTaskAssetUploadSessionParams struct {
 	OSSObjectKey      string
 }
 
-type CreateAuditSupplementUploadSessionParams struct {
-	TaskID        int64
-	CreatedBy     int64
-	AssetID       *int64
-	Filename      string
-	ExpectedSize  *int64
-	MimeType      string
-	FileHash      string
-	Reason        string
-	TargetSKUCode string
-}
-
-type CompleteAuditSupplementUploadSessionParams struct {
-	TaskID            int64
-	SessionID         string
-	CompletedBy       int64
-	Reason            string
-	Remark            string
-	FileHash          string
-	UploadContentType string
-	OSSParts          []OSSCompletePart
-	OSSUploadID       string
-	OSSObjectKey      string
-}
-
 type CancelTaskAssetUploadSessionParams struct {
 	TaskID       int64
 	SessionID    string
@@ -102,26 +76,6 @@ type CompleteTaskAssetUploadSessionResult struct {
 	Version *domain.DesignAssetVersion `json:"version"`
 }
 
-type AuditSupplementItem struct {
-	EventID          string    `json:"event_id"`
-	Sequence         int64     `json:"sequence"`
-	TaskID           int64     `json:"task_id"`
-	AssetID          int64     `json:"asset_id"`
-	AssetVersionID   int64     `json:"asset_version_id"`
-	AssetVersionNo   int       `json:"asset_version_no"`
-	TimelineVersion  int       `json:"timeline_version"`
-	UploadSessionID  string    `json:"upload_session_id"`
-	Filename         string    `json:"filename"`
-	Reason           string    `json:"reason"`
-	TargetSKUCode    string    `json:"target_sku_code,omitempty"`
-	UploadedBy       int64     `json:"uploaded_by"`
-	UploadedByName   string    `json:"uploaded_by_name,omitempty"`
-	AuditCountBefore int       `json:"audit_delivery_count_before"`
-	AuditCountAfter  int       `json:"audit_delivery_count_after"`
-	DesignCount      int       `json:"design_delivery_count"`
-	CreatedAt        time.Time `json:"created_at"`
-}
-
 type TaskAssetCenterService interface {
 	ListAssetResources(ctx context.Context, params ListAssetResourcesParams) ([]*domain.DesignAsset, *domain.AppError)
 	GetAsset(ctx context.Context, assetID int64) (*domain.DesignAsset, *domain.AppError)
@@ -136,11 +90,8 @@ type TaskAssetCenterService interface {
 	GetUploadSession(ctx context.Context, taskID int64, sessionID string) (*domain.UploadSession, *domain.AppError)
 	CreateSmallUploadSession(ctx context.Context, params CreateTaskAssetUploadSessionParams) (*CreateTaskAssetUploadSessionResult, *domain.AppError)
 	CreateMultipartUploadSession(ctx context.Context, params CreateTaskAssetUploadSessionParams) (*CreateTaskAssetUploadSessionResult, *domain.AppError)
-	ListAuditSupplements(ctx context.Context, taskID int64) ([]AuditSupplementItem, *domain.AppError)
-	CreateAuditSupplementUploadSession(ctx context.Context, params CreateAuditSupplementUploadSessionParams) (*CreateTaskAssetUploadSessionResult, *domain.AppError)
 	CompleteUploadSessionByID(ctx context.Context, params CompleteTaskAssetUploadSessionParams) (*CompleteTaskAssetUploadSessionResult, *domain.AppError)
 	CompleteUploadSession(ctx context.Context, params CompleteTaskAssetUploadSessionParams) (*CompleteTaskAssetUploadSessionResult, *domain.AppError)
-	CompleteAuditSupplementUploadSession(ctx context.Context, params CompleteAuditSupplementUploadSessionParams) (*CompleteTaskAssetUploadSessionResult, *domain.AppError)
 	CancelUploadSessionByID(ctx context.Context, params CancelTaskAssetUploadSessionParams) (*domain.UploadSession, *domain.AppError)
 	CancelUploadSession(ctx context.Context, params CancelTaskAssetUploadSessionParams) (*domain.UploadSession, *domain.AppError)
 	BuildTaskReferenceBatchDownloadManifest(ctx context.Context, taskID int64, actorID int64) (*TaskReferenceBatchDownloadManifest, *domain.AppError)
@@ -167,10 +118,7 @@ type taskAssetCenterService struct {
 	derivedPreviewSlots       chan struct{}
 	derivedPreviewMu          sync.Mutex
 	derivedPreviewInflight    map[string]struct{}
-	dataScopeResolver         DataScopeResolver
-	scopeUserRepo             repo.UserRepo
 	userDisplayNameResolver   UserDisplayNameResolver
-	workflowRules             designSubmissionWorkflowEngine
 	retouchRequirementRepo    repo.TaskRetouchRequirementRepo
 	referenceFileRefFlatRepo  repo.ReferenceFileRefFlatRepo
 }
@@ -183,8 +131,6 @@ const (
 	taskAssetUploadMaxFileSizeBytes  = int64(1024 * 1024 * 1024)
 	taskAssetUploadMaxFileSizeLabel  = "1GB"
 	taskAssetSinglePartThreshold     = int64(10 * 1024 * 1024)
-	auditSupplementUploadPolicy      = "audit_post_close_supplement"
-	auditSupplementRemarkPrefix      = "[audit_supplement]"
 )
 
 type taskAssetVersionSupersedeRepo interface {
@@ -276,27 +222,9 @@ func WithTaskAssetCenterCustomizationJobRepo(customizationJobRepo repo.Customiza
 	}
 }
 
-func WithTaskAssetCenterDataScopeResolver(resolver DataScopeResolver) TaskAssetCenterServiceOption {
-	return func(s *taskAssetCenterService) {
-		s.dataScopeResolver = resolver
-	}
-}
-
-func WithTaskAssetCenterScopeUserRepo(userRepo repo.UserRepo) TaskAssetCenterServiceOption {
-	return func(s *taskAssetCenterService) {
-		s.scopeUserRepo = userRepo
-	}
-}
-
 func WithTaskAssetCenterUserDisplayNameResolver(resolver UserDisplayNameResolver) TaskAssetCenterServiceOption {
 	return func(s *taskAssetCenterService) {
 		s.userDisplayNameResolver = resolver
-	}
-}
-
-func WithTaskAssetCenterBlueprintRuleEngine(rules designSubmissionWorkflowEngine) TaskAssetCenterServiceOption {
-	return func(s *taskAssetCenterService) {
-		s.workflowRules = rules
 	}
 }
 
@@ -319,7 +247,7 @@ func WithTaskAssetCenterAuditRepo(auditV7Repo repo.AuditV7Repo) TaskAssetCenterS
 }
 
 func (s *taskAssetCenterService) taskActionAuthorizer() *taskActionAuthorizer {
-	return newTaskActionAuthorizer(s.dataScopeResolver, s.scopeUserRepo)
+	return newTaskActionAuthorizer()
 }
 
 func isTaskAssetVersionConflict(err error) bool {
@@ -674,471 +602,6 @@ func (s *taskAssetCenterService) CreateMultipartUploadSession(ctx context.Contex
 	return s.createUploadSession(ctx, params, domain.DesignAssetUploadModeMultipart)
 }
 
-func (s *taskAssetCenterService) ListAuditSupplements(ctx context.Context, taskID int64) ([]AuditSupplementItem, *domain.AppError) {
-	task, appErr := s.requireTask(ctx, taskID)
-	if appErr != nil {
-		return nil, appErr
-	}
-	if appErr := s.authorizeAuditSupplementRead(ctx, task); appErr != nil {
-		return nil, appErr
-	}
-	events, err := s.taskEventRepo.ListByTaskID(ctx, taskID)
-	if err != nil {
-		return nil, infraError("list audit supplement events", err)
-	}
-	items := make([]AuditSupplementItem, 0)
-	for _, event := range events {
-		if event == nil || event.EventType != domain.TaskEventAuditSupplementUploaded {
-			continue
-		}
-		item, ok := auditSupplementItemFromEvent(event)
-		if !ok {
-			continue
-		}
-		items = append(items, item)
-	}
-	return items, nil
-}
-
-func (s *taskAssetCenterService) CreateAuditSupplementUploadSession(ctx context.Context, params CreateAuditSupplementUploadSessionParams) (*CreateTaskAssetUploadSessionResult, *domain.AppError) {
-	reason := strings.TrimSpace(params.Reason)
-	if reason == "" {
-		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "reason is required", map[string]interface{}{
-			"deny_code": "audit_supplement_reason_required",
-		})
-	}
-	if params.AssetID != nil {
-		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "audit supplement must append a new delivery asset", map[string]interface{}{
-			"deny_code": "audit_supplement_replace_not_allowed",
-		})
-	}
-	return s.createUploadSession(ctx, CreateTaskAssetUploadSessionParams{
-		TaskID:         params.TaskID,
-		CreatedBy:      params.CreatedBy,
-		AssetType:      domain.TaskAssetTypeDelivery,
-		Filename:       params.Filename,
-		ExpectedSize:   params.ExpectedSize,
-		MimeType:       params.MimeType,
-		FileHash:       params.FileHash,
-		Remark:         buildAuditSupplementRemark(reason),
-		TargetSKUCode:  params.TargetSKUCode,
-		OwnerModuleKey: domain.ModuleKeyAudit,
-		UploadPolicy:   auditSupplementUploadPolicy,
-	}, domain.DesignAssetUploadModeMultipart)
-}
-
-func (s *taskAssetCenterService) createAuditSupplementUploadSession(ctx context.Context, task *domain.Task, params CreateTaskAssetUploadSessionParams, mode domain.DesignAssetUploadMode) (*CreateTaskAssetUploadSessionResult, *domain.AppError) {
-	reason := auditSupplementReasonFromRemark(params.Remark)
-	if reason == "" {
-		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "reason is required", map[string]interface{}{
-			"deny_code": "audit_supplement_reason_required",
-		})
-	}
-	if mode != domain.DesignAssetUploadModeMultipart {
-		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "audit supplement delivery assets must use multipart upload mode", nil)
-	}
-	if params.AssetType != domain.TaskAssetTypeDelivery {
-		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "audit supplement only supports delivery assets", map[string]interface{}{
-			"deny_code":           "audit_supplement_asset_type_not_allowed",
-			"allowed_asset_types": []string{string(domain.TaskAssetTypeDelivery)},
-			"asset_type":          string(params.AssetType),
-		})
-	}
-	if params.AssetID != nil {
-		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "audit supplement must append a new delivery asset", map[string]interface{}{
-			"deny_code": "audit_supplement_replace_not_allowed",
-		})
-	}
-	if appErr := s.authorizeAuditSupplementWrite(ctx, task); appErr != nil {
-		return nil, appErr
-	}
-
-	taskRef := strings.TrimSpace(task.TaskNo)
-	identity, appErr := s.freezeUploadAssetIdentity(ctx, params.TaskID, nil, nil, params.TargetSKUCode, nil, params.AssetType, params.CreatedBy)
-	if appErr != nil {
-		return nil, appErr
-	}
-	params.AssetID = &identity.AssetID
-	versionNo, appErr := s.nextPendingAssetVersionNo(ctx, identity.AssetID)
-	if appErr != nil {
-		return nil, appErr
-	}
-
-	createReq := RemoteCreateUploadSessionRequest{
-		TaskID:       params.TaskID,
-		TaskRef:      taskRef,
-		AssetID:      params.AssetID,
-		AssetNo:      identity.AssetNo,
-		AssetType:    params.AssetType,
-		VersionNo:    versionNo,
-		UploadMode:   mode,
-		Filename:     strings.TrimSpace(params.Filename),
-		ExpectedSize: params.ExpectedSize,
-		MimeType:     normalizeRequiredUploadContentType(params.MimeType),
-		CreatedBy:    params.CreatedBy,
-	}
-	remote, err := s.uploadClient.CreateUploadSession(ctx, createReq)
-	if err != nil {
-		return nil, infraError("create audit supplement upload session via upload service client", err)
-	}
-
-	now := s.nowFn().UTC()
-	requiredContentType := normalizeRequiredUploadContentType(params.MimeType)
-	request := &domain.UploadRequest{
-		OwnerType:       domain.AssetOwnerTypeTask,
-		OwnerID:         params.TaskID,
-		TaskID:          params.TaskID,
-		AssetID:         params.AssetID,
-		TargetSKUCode:   params.TargetSKUCode,
-		TaskAssetType:   &params.AssetType,
-		StorageAdapter:  domain.AssetStorageAdapterOSSUploadService,
-		UploadMode:      mode,
-		RefType:         domain.AssetStorageRefTypeTaskAssetObject,
-		FileName:        strings.TrimSpace(params.Filename),
-		MimeType:        requiredContentType,
-		FileSize:        params.ExpectedSize,
-		ExpectedSize:    params.ExpectedSize,
-		ChecksumHint:    strings.TrimSpace(params.FileHash),
-		Status:          domain.UploadRequestStatusRequested,
-		StorageProvider: domain.DesignAssetStorageProviderOSS,
-		SessionStatus:   domain.DesignAssetSessionStatusCreated,
-		RemoteUploadID:  remote.UploadID,
-		RemoteFileID:    valueOrEmpty(remote.FileID),
-		IsPlaceholder:   remote.IsStub,
-		CreatedBy:       params.CreatedBy,
-		ExpiresAt:       remote.ExpiresAt,
-		LastSyncedAt:    firstNonNilTime(remote.LastSyncedAt, &now),
-		Remark:          buildAuditSupplementRemark(reason),
-		CreatedAt:       now,
-		UpdatedAt:       now,
-	}
-	txErr := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
-		created, err := s.uploadRequestRepo.Create(ctx, tx, request)
-		if err != nil {
-			return err
-		}
-		request = created
-		_, err = s.taskEventRepo.Append(ctx, tx, params.TaskID, domain.TaskEventAssetUploadSessionCreated, &params.CreatedBy, map[string]interface{}{
-			"upload_session_id": request.RequestID,
-			"asset_id":          params.AssetID,
-			"asset_type":        string(params.AssetType),
-			"target_sku_code":   params.TargetSKUCode,
-			"owner_module_key":  domain.ModuleKeyAudit,
-			"upload_policy":     auditSupplementUploadPolicy,
-			"filename":          request.FileName,
-			"expected_size":     request.ExpectedSize,
-			"mime_type":         request.MimeType,
-			"upload_mode":       string(mode),
-			"storage_provider":  string(request.StorageProvider),
-			"remote_upload_id":  request.RemoteUploadID,
-			"expires_at":        request.ExpiresAt,
-			"reason":            reason,
-		})
-		return err
-	})
-	if txErr != nil {
-		return nil, infraError("create audit supplement upload session", txErr)
-	}
-	result := &CreateTaskAssetUploadSessionResult{
-		Session: domain.BuildUploadSession(request),
-		Remote:  remote,
-	}
-	if s.ossDirectService != nil && s.ossDirectService.Enabled() {
-		objectKey := s.ossDirectService.BuildObjectKey(taskRef, identity.AssetNo, versionNo, params.AssetType, strings.TrimSpace(params.Filename))
-		fileSize := int64(0)
-		if params.ExpectedSize != nil {
-			fileSize = *params.ExpectedSize
-		}
-		if ossPlan, ossErr := s.ossDirectService.CreateMultipartUploadPlan(ctx, objectKey, fileSize, requiredContentType); ossErr != nil {
-			log.Printf("oss_direct_audit_supplement_upload_plan_fallback error=%v session=%s", ossErr, request.RequestID)
-		} else {
-			result.OSSDirect = ossPlan
-		}
-	}
-	return result, nil
-}
-
-func (s *taskAssetCenterService) CompleteAuditSupplementUploadSession(ctx context.Context, params CompleteAuditSupplementUploadSessionParams) (*CompleteTaskAssetUploadSessionResult, *domain.AppError) {
-	task, appErr := s.requireTask(ctx, params.TaskID)
-	if appErr != nil {
-		return nil, appErr
-	}
-	if appErr := s.authorizeAuditSupplementWrite(ctx, task); appErr != nil {
-		return nil, appErr
-	}
-	request, appErr := s.requireUploadRequest(ctx, params.TaskID, params.SessionID)
-	if appErr != nil {
-		return nil, appErr
-	}
-	if !isAuditSupplementUploadRequest(request) {
-		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "upload_session is not an audit supplement session", map[string]interface{}{
-			"deny_code":         "upload_session_not_audit_supplement",
-			"upload_session_id": request.RequestID,
-		})
-	}
-	if request.Status == domain.UploadRequestStatusBound || (request.SessionStatus == domain.DesignAssetSessionStatusCompleted && request.BoundAssetID != nil) {
-		return s.buildCompletedUploadSessionResult(ctx, params.TaskID, request)
-	}
-	if request.SessionStatus == domain.DesignAssetSessionStatusCancelled || request.SessionStatus == domain.DesignAssetSessionStatusExpired {
-		return nil, domain.NewAppError(domain.ErrCodeInvalidStateTransition, "upload_session is already terminal", nil)
-	}
-	if request.TaskAssetType == nil || domain.NormalizeTaskAssetType(*request.TaskAssetType) != domain.TaskAssetTypeDelivery {
-		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "audit supplement only supports delivery assets", map[string]interface{}{
-			"deny_code": "audit_supplement_asset_type_not_allowed",
-		})
-	}
-	if request.ExpectedSize == nil || *request.ExpectedSize <= 0 || *request.ExpectedSize > taskAssetUploadMaxFileSizeBytes {
-		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "upload_session expected_size is outside the allowed range", map[string]interface{}{
-			"max_bytes": taskAssetUploadMaxFileSizeBytes,
-		})
-	}
-	if appErr := validateUploadContentTypeContract(request, params.UploadContentType); appErr != nil {
-		return nil, appErr
-	}
-	if appErr := validateOSSDirectCompleteContract(CompleteTaskAssetUploadSessionParams{
-		OSSParts:     params.OSSParts,
-		OSSUploadID:  params.OSSUploadID,
-		OSSObjectKey: params.OSSObjectKey,
-	}); appErr != nil {
-		return nil, appErr
-	}
-
-	reason := firstNonEmpty(strings.TrimSpace(params.Reason), auditSupplementReasonFromRemark(params.Remark), auditSupplementReasonFromRemark(request.Remark))
-	if reason == "" {
-		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "reason is required", map[string]interface{}{
-			"deny_code": "audit_supplement_reason_required",
-		})
-	}
-	scopeSKUCode := strings.TrimSpace(request.TargetSKUCode)
-	checksumHint := firstNonEmpty(strings.TrimSpace(params.FileHash), strings.TrimSpace(request.ChecksumHint))
-	var err error
-	ossDirectReady := s.canFinalizeOSSDirectUpload(CompleteTaskAssetUploadSessionParams{
-		OSSParts:     params.OSSParts,
-		OSSUploadID:  params.OSSUploadID,
-		OSSObjectKey: params.OSSObjectKey,
-	})
-	if request.RemoteUploadID != "" && request.SessionStatus == domain.DesignAssetSessionStatusCreated && !ossDirectReady {
-		if request, err = s.syncUploadRequestFromRemote(ctx, request); err != nil {
-			if appErr, ok := err.(*domain.AppError); ok {
-				return nil, appErr
-			}
-			return nil, infraError("sync audit supplement upload session before completion", err)
-		}
-	}
-	ossDirectFinalized := false
-	ossDirectObjectKey := ""
-	if ossDirectReady {
-		ossObjectKey := strings.TrimSpace(params.OSSObjectKey)
-		ossUploadID := strings.TrimSpace(params.OSSUploadID)
-		legacyTaskPrefix := "tasks/" + strings.Trim(strings.TrimSpace(task.TaskNo), "/") + "/assets/"
-		if !strings.HasPrefix(ossObjectKey, legacyTaskPrefix) {
-			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "oss_object_key does not belong to upload_session", map[string]interface{}{
-				"upload_session_id": request.RequestID,
-			})
-		}
-		multipartCompleteErr := s.ossDirectService.CompleteMultipartUpload(ctx, ossObjectKey, ossUploadID, params.OSSParts)
-		info, exists, statErr := s.ossDirectService.StatObject(ctx, ossObjectKey)
-		if statErr != nil {
-			return nil, infraError("verify completed audit supplement OSS object", statErr)
-		}
-		if !exists || info == nil {
-			if multipartCompleteErr != nil {
-				return nil, infraError("complete audit supplement oss direct multipart upload", multipartCompleteErr)
-			}
-			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "completed audit supplement OSS object is missing", nil)
-		}
-		if info.ContentLength < 0 || info.ContentLength != *request.ExpectedSize {
-			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "completed audit supplement OSS object size does not match upload_session", map[string]interface{}{
-				"expected_size": *request.ExpectedSize,
-				"actual_size":   info.ContentLength,
-			})
-		}
-		if multipartCompleteErr != nil {
-			log.Printf("oss_direct_audit_supplement_complete_recovered session=%s object_key=%s error=%v", request.RequestID, ossObjectKey, multipartCompleteErr)
-		}
-		ossDirectFinalized = true
-		ossDirectObjectKey = ossObjectKey
-	}
-	meta, appErr := s.resolveCompletedUploadMeta(ctx, request, checksumHint, ossDirectObjectKey, ossDirectFinalized)
-	if appErr != nil {
-		return nil, appErr
-	}
-
-	assetsBefore, err := s.taskAssetRepo.ListByTaskID(ctx, params.TaskID)
-	if err != nil {
-		return nil, infraError("list task assets before audit supplement", err)
-	}
-	auditDeliveryCountBefore := countDeliveryAssetsBySourceModule(assetsBefore, domain.ModuleKeyAudit)
-	designDeliveryCount := countDeliveryAssetsBySourceModule(assetsBefore, domain.ModuleKeyDesign)
-	now := s.nowFn().UTC()
-	lastSyncedAt := now
-	resolvedStorageKey := buildRemoteStorageKey(meta, request)
-	storageRefID := uuid.NewString()
-	var assetID int64
-	var versionID int64
-	var assetVersionNo int
-	var timelineVersionNo int
-	alreadyCompleted := false
-
-	txErr := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
-		lockedRequest, err := s.getUploadRequestForUpdate(ctx, tx, request.RequestID)
-		if err != nil {
-			return fmt.Errorf("lock audit supplement upload request before completion: %w", err)
-		}
-		if lockedRequest == nil || lockedRequest.TaskID != params.TaskID {
-			return domain.ErrNotFound
-		}
-		request = lockedRequest
-		if request.Status == domain.UploadRequestStatusBound || (request.SessionStatus == domain.DesignAssetSessionStatusCompleted && request.BoundAssetID != nil) {
-			alreadyCompleted = true
-			return nil
-		}
-		if request.Status == domain.UploadRequestStatusCancelled || request.Status == domain.UploadRequestStatusExpired ||
-			request.SessionStatus == domain.DesignAssetSessionStatusCancelled || request.SessionStatus == domain.DesignAssetSessionStatusExpired {
-			return domain.NewAppError(domain.ErrCodeConflict, "upload_session changed concurrently and is already terminal", map[string]interface{}{
-				"upload_session_id": request.RequestID,
-				"session_status":    request.SessionStatus,
-			})
-		}
-		if request.AssetID == nil || *request.AssetID <= 0 {
-			return domain.NewAppError(domain.ErrCodeInvalidStateTransition, "audit supplement upload_session is missing frozen asset identity", map[string]interface{}{
-				"upload_session_id": request.RequestID,
-			})
-		}
-		existingAsset, err := s.designAssetRepo.GetByID(ctx, *request.AssetID)
-		if err != nil {
-			return fmt.Errorf("get audit supplement design asset: %w", err)
-		}
-		if existingAsset == nil || existingAsset.TaskID != params.TaskID {
-			return domain.ErrNotFound
-		}
-		if existingAsset.CurrentVersionID != nil {
-			return domain.NewAppError(domain.ErrCodeInvalidStateTransition, "audit supplement asset already has a current version", map[string]interface{}{
-				"asset_id":          existingAsset.ID,
-				"upload_session_id": request.RequestID,
-			})
-		}
-		assetID = existingAsset.ID
-		timelineVersionNo, err = s.taskAssetRepo.NextVersionNo(ctx, tx, params.TaskID)
-		if err != nil {
-			return fmt.Errorf("next audit supplement task asset timeline version: %w", err)
-		}
-		assetVersionNo, err = s.taskAssetRepo.NextAssetVersionNo(ctx, tx, assetID)
-		if err != nil {
-			return fmt.Errorf("next audit supplement asset version: %w", err)
-		}
-		uploadStatus := string(domain.DesignAssetUploadStatusUploaded)
-		previewStatus := string(domain.DesignAssetPreviewStatusNotApplicable)
-		taskAsset := &domain.TaskAsset{
-			TaskID:           params.TaskID,
-			AssetID:          &assetID,
-			ScopeSKUCode:     optionalStringPtr(scopeSKUCode),
-			AssetType:        domain.TaskAssetTypeDelivery,
-			VersionNo:        timelineVersionNo,
-			AssetVersionNo:   &assetVersionNo,
-			UploadMode:       optionalStringPtr(string(request.UploadMode)),
-			UploadRequestID:  &request.RequestID,
-			StorageRefID:     &storageRefID,
-			FileName:         request.FileName,
-			OriginalName:     optionalStringPtr(request.FileName),
-			RemoteFileID:     meta.FileID,
-			MimeType:         optionalStringPtr(firstNonEmpty(meta.MimeType, request.MimeType)),
-			FileSize:         firstNonNilInt64(meta.FileSize, request.ExpectedSize, request.FileSize),
-			StorageKey:       optionalStringPtr(resolvedStorageKey),
-			WholeHash:        meta.FileHash,
-			UploadStatus:     &uploadStatus,
-			PreviewStatus:    &previewStatus,
-			UploadedBy:       params.CompletedBy,
-			UploadedAt:       &now,
-			Remark:           reason,
-			SourceModuleKey:  domain.ModuleKeyAudit,
-			FlowReviewStatus: domain.TaskAssetFlowReviewStatusApproved,
-			ApprovedAt:       &now,
-			ApprovedBy:       &params.CompletedBy,
-		}
-		id, err := s.taskAssetRepo.Create(ctx, tx, taskAsset)
-		if err != nil {
-			return fmt.Errorf("create audit supplement task asset version: %w", err)
-		}
-		versionID = id
-		ref := &domain.AssetStorageRef{
-			RefID:           storageRefID,
-			AssetID:         &versionID,
-			OwnerType:       domain.AssetOwnerTypeTaskAsset,
-			OwnerID:         versionID,
-			UploadRequestID: request.RequestID,
-			StorageAdapter:  domain.AssetStorageAdapterOSSUploadService,
-			RefType:         domain.AssetStorageRefTypeTaskAssetObject,
-			RefKey:          resolvedStorageKey,
-			FileName:        request.FileName,
-			MimeType:        firstNonEmpty(meta.MimeType, request.MimeType),
-			FileSize:        firstNonNilInt64(meta.FileSize, request.ExpectedSize, request.FileSize),
-			IsPlaceholder:   meta.IsStub,
-			ChecksumHint:    firstNonEmpty(checksumHint, request.ChecksumHint),
-			Status:          domain.AssetStorageRefStatusRecorded,
-		}
-		if _, err := s.assetStorageRefRepo.Create(ctx, tx, ref); err != nil {
-			return fmt.Errorf("create audit supplement asset storage ref: %w", err)
-		}
-		if err := s.designAssetRepo.UpdateCurrentVersionID(ctx, tx, assetID, &versionID); err != nil {
-			return fmt.Errorf("update audit supplement design asset current version: %w", err)
-		}
-		if err := s.uploadRequestRepo.UpdateBinding(ctx, tx, request.RequestID, &versionID, storageRefID, domain.UploadRequestStatusBound, buildAuditSupplementRemark(reason)); err != nil {
-			return fmt.Errorf("update audit supplement upload request binding: %w", err)
-		}
-		if err := s.uploadRequestRepo.UpdateSession(ctx, tx, repo.UploadRequestSessionUpdate{
-			RequestID:      request.RequestID,
-			AssetID:        &assetID,
-			SessionStatus:  domain.DesignAssetSessionStatusCompleted,
-			RemoteUploadID: request.RemoteUploadID,
-			RemoteFileID:   meta.FileID,
-			LastSyncedAt:   &lastSyncedAt,
-			Remark:         buildAuditSupplementRemark(reason),
-		}); err != nil {
-			return fmt.Errorf("update audit supplement upload request session: %w", err)
-		}
-		eventPayload := auditSupplementEventPayload(assetID, versionID, assetVersionNo, timelineVersionNo, request, reason, scopeSKUCode, designDeliveryCount, auditDeliveryCountBefore, auditDeliveryCountBefore+1, meta, resolvedStorageKey)
-		if _, err := s.taskEventRepo.Append(ctx, tx, params.TaskID, domain.TaskEventAssetVersionCreated, &params.CompletedBy, eventPayload); err != nil {
-			return fmt.Errorf("append audit supplement asset version event: %w", err)
-		}
-		if _, err := s.taskEventRepo.Append(ctx, tx, params.TaskID, domain.TaskEventAssetUploadSessionCompleted, &params.CompletedBy, eventPayload); err != nil {
-			return fmt.Errorf("append audit supplement upload completed event: %w", err)
-		}
-		if _, err := s.taskEventRepo.Append(ctx, tx, params.TaskID, domain.TaskEventAuditSupplementUploaded, &params.CompletedBy, eventPayload); err != nil {
-			return fmt.Errorf("append audit supplement uploaded event: %w", err)
-		}
-		return nil
-	})
-	if txErr != nil {
-		log.Printf("complete_audit_supplement_upload_session_tx_failed trace_id=%s task_id=%d session_id=%s asset_id=%v err=%v",
-			domain.TraceIDFromContext(ctx), params.TaskID, request.RequestID, request.AssetID, txErr)
-		if appErr, ok := txErr.(*domain.AppError); ok {
-			return nil, appErr
-		}
-		if isTaskAssetVersionConflict(txErr) {
-			s.logAssetVersionConflict(ctx, params.TaskID, request, timelineVersionNo, txErr, "")
-			return nil, assetVersionRaceConflictAppError(params.TaskID, request.RequestID, timelineVersionNo)
-		}
-		return nil, infraError("complete audit supplement upload session", txErr)
-	}
-	if alreadyCompleted {
-		return s.buildCompletedUploadSessionResult(ctx, params.TaskID, request)
-	}
-
-	request, appErr = s.requireUploadRequest(ctx, params.TaskID, request.RequestID)
-	if appErr != nil {
-		return nil, appErr
-	}
-	result, appErr := s.buildCompletedUploadSessionResult(ctx, params.TaskID, request)
-	if appErr != nil {
-		return nil, appErr
-	}
-	if result != nil {
-		s.scheduleDerivedPreviewGeneration(params.TaskID, assetID, params.CompletedBy, result.Version)
-	}
-	return result, nil
-}
-
 func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, params CompleteTaskAssetUploadSessionParams) (*CompleteTaskAssetUploadSessionResult, *domain.AppError) {
 	task, appErr := s.requireTask(ctx, params.TaskID)
 	if appErr != nil {
@@ -1155,9 +618,6 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "upload_session asset_type is required", nil)
 	}
 	if appErr := authorizeV8TaskAssetMutation(ctx, task, *request.TaskAssetType); appErr != nil {
-		return nil, appErr
-	}
-	if appErr := s.requireCustomizationReviewerUploadSessionSource(ctx, task, request); appErr != nil {
 		return nil, appErr
 	}
 	if request.Status == domain.UploadRequestStatusBound || (request.SessionStatus == domain.DesignAssetSessionStatusCompleted && request.BoundAssetID != nil) {
@@ -1560,10 +1020,6 @@ func (s *taskAssetCenterService) CompleteUploadSession(ctx context.Context, para
 	return result, nil
 }
 
-func (s *taskAssetCenterService) markDesignModuleSubmitted(ctx context.Context, tx repo.Tx, taskID int64) error {
-	return s.markDesignSubmissionModuleState(ctx, tx, taskID, designSubmissionTransitionForTask(nil))
-}
-
 func (s *taskAssetCenterService) resolveTaskAssetSourceModuleID(ctx context.Context, tx repo.Tx, task *domain.Task, moduleKey string) (*int64, error) {
 	moduleKey = strings.TrimSpace(moduleKey)
 	if s.taskModuleRepo == nil || task == nil || moduleKey == "" {
@@ -1593,13 +1049,6 @@ func (s *taskAssetCenterService) resolveTaskAssetSourceModuleID(ctx context.Cont
 	}
 	moduleID := module.ID
 	return &moduleID, nil
-}
-
-func (s *taskAssetCenterService) markDesignSubmissionModuleState(ctx context.Context, tx repo.Tx, taskID int64, transition designSubmissionTransition) error {
-	if s.taskModuleRepo == nil {
-		return nil
-	}
-	return s.taskModuleRepo.UpdateState(ctx, tx, taskID, transition.ModuleKey, transition.ModuleState, transition.ModuleTerminal, nil)
 }
 
 func (s *taskAssetCenterService) resolveCompletedUploadMeta(
@@ -1741,9 +1190,6 @@ func (s *taskAssetCenterService) CancelUploadSession(ctx context.Context, params
 		assetType = *request.TaskAssetType
 	}
 	if appErr := authorizeV8TaskAssetMutation(ctx, task, assetType); appErr != nil {
-		return nil, appErr
-	}
-	if appErr := s.requireCustomizationReviewerUploadSessionSource(ctx, task, request); appErr != nil {
 		return nil, appErr
 	}
 	if request.SessionStatus == domain.DesignAssetSessionStatusCompleted {
@@ -1916,23 +1362,11 @@ func (s *taskAssetCenterService) createUploadSession(ctx context.Context, params
 		return nil, appErr
 	}
 	params.TargetSKUCode = targetSKUCode
-	if isAuditSupplementUploadPolicy(params.UploadPolicy) {
-		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "audit supplement upload policy is retired; use the unified audit decision", map[string]interface{}{
-			"deny_code": "audit_supplement_retired",
-		})
-	}
 	if appErr := rejectCompletedTaskAssetMutation(task); appErr != nil {
 		return nil, appErr
 	}
 	if appErr := authorizeV8TaskAssetMutation(ctx, task, params.AssetType); appErr != nil {
 		return nil, appErr
-	}
-	if params.AssetID == nil {
-		revisionAssetID, appErr := s.resolveRejectedDeliveryRevisionAssetID(ctx, task, params)
-		if appErr != nil {
-			return nil, appErr
-		}
-		params.AssetID = revisionAssetID
 	}
 	if appErr := validateTaskStageUploadAssetType(task, params.AssetType, params.OwnerModuleKey, params.AssetID); appErr != nil {
 		return nil, appErr
@@ -2337,258 +1771,6 @@ func isPrecreatedCompletableUploadSession(request *domain.UploadRequest) bool {
 	}
 }
 
-func isAuditSupplementUploadPolicy(policy string) bool {
-	return strings.TrimSpace(policy) == auditSupplementUploadPolicy
-}
-
-func buildAuditSupplementRemark(reason string) string {
-	reason = strings.TrimSpace(reason)
-	if reason == "" {
-		return auditSupplementRemarkPrefix
-	}
-	return auditSupplementRemarkPrefix + " " + reason
-}
-
-func auditSupplementReasonFromRemark(remark string) string {
-	remark = strings.TrimSpace(remark)
-	if remark == "" {
-		return ""
-	}
-	if strings.HasPrefix(remark, auditSupplementRemarkPrefix) {
-		return strings.TrimSpace(strings.TrimPrefix(remark, auditSupplementRemarkPrefix))
-	}
-	return remark
-}
-
-func isAuditSupplementUploadRequest(request *domain.UploadRequest) bool {
-	if request == nil {
-		return false
-	}
-	return strings.HasPrefix(strings.TrimSpace(request.Remark), auditSupplementRemarkPrefix)
-}
-
-func (s *taskAssetCenterService) authorizeAuditSupplementRead(ctx context.Context, task *domain.Task) *domain.AppError {
-	if task == nil {
-		return domain.ErrNotFound
-	}
-	actor, ok := resolveTaskActionActor(ctx)
-	if !ok {
-		return domain.NewAppError(domain.ErrCodeUnauthorized, "actor context required", nil)
-	}
-	if !hasAnyRoleValue(actor.Roles,
-		domain.RoleAuditA,
-		domain.RoleAuditB,
-		domain.RoleAdmin,
-		domain.RoleSuperAdmin,
-		domain.RoleHRAdmin,
-		domain.RoleRoleAdmin,
-		domain.RoleDeptAdmin,
-		domain.RoleTeamLead,
-		domain.RoleDesignDirector,
-	) {
-		return domain.NewAppError(domain.ErrCodePermissionDenied, "audit supplement requires an audit or management role", map[string]interface{}{
-			"deny_code":   "audit_supplement_missing_role",
-			"task_id":     task.ID,
-			"actor_id":    actor.ID,
-			"actor_roles": actor.Roles,
-		})
-	}
-	return s.taskActionAuthorizer().AuthorizeTaskAction(ctx, TaskActionReadDetail, task)
-}
-
-func (s *taskAssetCenterService) authorizeAuditSupplementWrite(ctx context.Context, task *domain.Task) *domain.AppError {
-	return s.authorizeAuditSupplementAccess(ctx, task, true)
-}
-
-func (s *taskAssetCenterService) authorizeAuditSupplementAccess(ctx context.Context, task *domain.Task, requireCompleted bool) *domain.AppError {
-	if task == nil {
-		return domain.ErrNotFound
-	}
-	if requireCompleted && task.TaskStatus != domain.TaskStatusCompleted {
-		return domain.NewAppError(domain.ErrCodeInvalidStateTransition, "audit supplement is only allowed after task completion", map[string]interface{}{
-			"deny_code":   "audit_supplement_task_not_completed",
-			"task_id":     task.ID,
-			"task_status": string(task.TaskStatus),
-		})
-	}
-	actor, ok := resolveTaskActionActor(ctx)
-	if !ok {
-		return domain.NewAppError(domain.ErrCodeUnauthorized, "actor context required", nil)
-	}
-	if !hasAnyRoleValue(actor.Roles,
-		domain.RoleAuditA,
-		domain.RoleAuditB,
-		domain.RoleAdmin,
-		domain.RoleSuperAdmin,
-		domain.RoleHRAdmin,
-		domain.RoleRoleAdmin,
-		domain.RoleDeptAdmin,
-		domain.RoleTeamLead,
-		domain.RoleDesignDirector,
-	) {
-		return domain.NewAppError(domain.ErrCodePermissionDenied, "audit supplement requires an audit or management role", map[string]interface{}{
-			"deny_code":   "audit_supplement_missing_role",
-			"task_id":     task.ID,
-			"actor_id":    actor.ID,
-			"actor_roles": actor.Roles,
-		})
-	}
-	if hasAnyRoleValue(actor.Roles, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleRoleAdmin) {
-		return nil
-	}
-	scopeEval := evaluateTaskActionScope(actor, task, task.OwnerDepartment, task.OwnerOrgTeam)
-	if hasRoleValue(actor.Roles, domain.RoleDeptAdmin) &&
-		(scopeEval.Has(TaskActionScopeDepartment) || scopeEval.Has(TaskActionScopeManagedDepartment)) {
-		return nil
-	}
-	if hasRoleValue(actor.Roles, domain.RoleDesignDirector) &&
-		(scopeEval.Has(TaskActionScopeDepartment) || scopeEval.Has(TaskActionScopeManagedDepartment)) {
-		return nil
-	}
-	if hasRoleValue(actor.Roles, domain.RoleTeamLead) &&
-		(scopeEval.Has(TaskActionScopeTeam) || scopeEval.Has(TaskActionScopeManagedTeam)) {
-		return nil
-	}
-	if hasAnyRoleValue(actor.Roles, domain.RoleAuditA, domain.RoleAuditB) {
-		if s.auditV7Repo == nil {
-			return domain.NewAppError(domain.ErrCodePermissionDenied, "audit supplement requires audit history verification", map[string]interface{}{
-				"deny_code": "audit_supplement_audit_history_unavailable",
-				"task_id":   task.ID,
-				"actor_id":  actor.ID,
-			})
-		}
-		records, err := s.auditV7Repo.ListRecordsByTaskID(ctx, task.ID)
-		if err != nil {
-			return infraError("list audit records for supplement authorization", err)
-		}
-		for _, record := range records {
-			if record != nil && record.AuditorID == actor.ID {
-				return nil
-			}
-		}
-	}
-	return domain.NewAppError(domain.ErrCodePermissionDenied, "audit supplement is outside the actor audit history or organization scope", map[string]interface{}{
-		"deny_code":      "audit_supplement_scope_denied",
-		"task_id":        task.ID,
-		"actor_id":       actor.ID,
-		"owner_org_team": task.OwnerOrgTeam,
-	})
-}
-
-func countDeliveryAssetsBySourceModule(assets []*domain.TaskAsset, sourceModuleKey string) int {
-	sourceModuleKey = strings.TrimSpace(sourceModuleKey)
-	count := 0
-	for _, asset := range assets {
-		if asset == nil || domain.NormalizeTaskAssetType(asset.AssetType) != domain.TaskAssetTypeDelivery {
-			continue
-		}
-		moduleKey := strings.TrimSpace(asset.SourceModuleKey)
-		if moduleKey == "" {
-			moduleKey = domain.ModuleKeyDesign
-		}
-		if moduleKey == sourceModuleKey {
-			count++
-		}
-	}
-	return count
-}
-
-func auditSupplementEventPayload(
-	assetID int64,
-	versionID int64,
-	assetVersionNo int,
-	timelineVersionNo int,
-	request *domain.UploadRequest,
-	reason string,
-	scopeSKUCode string,
-	designDeliveryCount int,
-	auditDeliveryCountBefore int,
-	auditDeliveryCountAfter int,
-	meta *RemoteFileMeta,
-	storageKey string,
-) map[string]interface{} {
-	payload := map[string]interface{}{
-		"asset_id":                    assetID,
-		"asset_type":                  string(domain.TaskAssetTypeDelivery),
-		"asset_version_id":            versionID,
-		"asset_version_no":            assetVersionNo,
-		"timeline_version":            timelineVersionNo,
-		"upload_policy":               auditSupplementUploadPolicy,
-		"source_module_key":           domain.ModuleKeyAudit,
-		"supplement_after_completed":  true,
-		"reason":                      strings.TrimSpace(reason),
-		"target_sku_code":             strings.TrimSpace(scopeSKUCode),
-		"design_delivery_count":       designDeliveryCount,
-		"audit_delivery_count_before": auditDeliveryCountBefore,
-		"audit_delivery_count_after":  auditDeliveryCountAfter,
-		"storage_key":                 strings.TrimSpace(storageKey),
-	}
-	if request != nil {
-		payload["upload_session_id"] = request.RequestID
-		payload["filename"] = request.FileName
-		payload["upload_mode"] = string(request.UploadMode)
-		payload["storage_provider"] = string(request.StorageProvider)
-		payload["remote_upload_id"] = request.RemoteUploadID
-	}
-	if meta != nil {
-		payload["remote_file_id"] = meta.FileID
-		payload["file_hash"] = meta.FileHash
-		payload["mime_type"] = strings.TrimSpace(meta.MimeType)
-		payload["file_size"] = meta.FileSize
-	}
-	return payload
-}
-
-type auditSupplementEventPayloadJSON struct {
-	AssetID                  int64  `json:"asset_id"`
-	AssetVersionID           int64  `json:"asset_version_id"`
-	AssetVersionNo           int    `json:"asset_version_no"`
-	TimelineVersion          int    `json:"timeline_version"`
-	UploadSessionID          string `json:"upload_session_id"`
-	Filename                 string `json:"filename"`
-	Reason                   string `json:"reason"`
-	TargetSKUCode            string `json:"target_sku_code"`
-	DesignDeliveryCount      int    `json:"design_delivery_count"`
-	AuditDeliveryCountBefore int    `json:"audit_delivery_count_before"`
-	AuditDeliveryCountAfter  int    `json:"audit_delivery_count_after"`
-}
-
-func auditSupplementItemFromEvent(event *domain.TaskEvent) (AuditSupplementItem, bool) {
-	if event == nil {
-		return AuditSupplementItem{}, false
-	}
-	var payload auditSupplementEventPayloadJSON
-	if err := json.Unmarshal(event.Payload, &payload); err != nil {
-		return AuditSupplementItem{}, false
-	}
-	return AuditSupplementItem{
-		EventID:          event.ID,
-		Sequence:         event.Sequence,
-		TaskID:           event.TaskID,
-		AssetID:          payload.AssetID,
-		AssetVersionID:   payload.AssetVersionID,
-		AssetVersionNo:   payload.AssetVersionNo,
-		TimelineVersion:  payload.TimelineVersion,
-		UploadSessionID:  strings.TrimSpace(payload.UploadSessionID),
-		Filename:         strings.TrimSpace(payload.Filename),
-		Reason:           strings.TrimSpace(payload.Reason),
-		TargetSKUCode:    strings.TrimSpace(payload.TargetSKUCode),
-		UploadedBy:       auditSupplementOperatorID(event.OperatorID),
-		UploadedByName:   strings.TrimSpace(event.OperatorName),
-		AuditCountBefore: payload.AuditDeliveryCountBefore,
-		AuditCountAfter:  payload.AuditDeliveryCountAfter,
-		DesignCount:      payload.DesignDeliveryCount,
-		CreatedAt:        event.CreatedAt,
-	}, true
-}
-
-func auditSupplementOperatorID(value *int64) int64 {
-	if value == nil {
-		return 0
-	}
-	return *value
-}
-
 func validateUploadContentTypeContract(request *domain.UploadRequest, actualContentType string) *domain.AppError {
 	if request == nil {
 		return nil
@@ -2941,147 +2123,6 @@ func optionalInt64Equal(left, right *int64) bool {
 
 func isAuditStageTaskStatus(status domain.TaskStatus) bool {
 	return status == domain.TaskStatusPendingAudit
-}
-
-func isCustomizationReviewTaskStatus(status domain.TaskStatus) bool {
-	return false
-}
-
-func (s *taskAssetCenterService) requireCustomizationReviewerUploadSessionSource(ctx context.Context, task *domain.Task, request *domain.UploadRequest) *domain.AppError {
-	if task == nil || request == nil || !isCustomizationReviewTaskStatus(task.TaskStatus) {
-		return nil
-	}
-	actor, ok := resolveTaskActionActor(ctx)
-	if !ok || !hasRoleValue(actor.Roles, domain.RoleCustomizationReviewer) || actorHasGenericAssetUploadRole(actor) {
-		return nil
-	}
-	if request.TaskAssetType != nil && domain.NormalizeTaskAssetType(*request.TaskAssetType) == domain.TaskAssetTypeSource {
-		return nil
-	}
-	if request.TaskAssetType != nil && domain.NormalizeTaskAssetType(*request.TaskAssetType) == domain.TaskAssetTypeDelivery && request.AssetID != nil && *request.AssetID > 0 {
-		asset, err := s.designAssetRepo.GetByID(ctx, *request.AssetID)
-		if err != nil {
-			return infraError("get customization review replacement asset", err)
-		}
-		if asset != nil && asset.TaskID == task.ID && asset.AssetType.IsDelivery() && asset.CurrentVersionID != nil && *asset.CurrentVersionID > 0 {
-			return nil
-		}
-	}
-	assetType := ""
-	if request.TaskAssetType != nil {
-		assetType = string(*request.TaskAssetType)
-	}
-	return domain.NewAppError(domain.ErrCodePermissionDenied, "customization reviewer upload sessions only support source assets or replacement of an existing delivery asset", map[string]interface{}{
-		"deny_code":         "customization_review_upload_session_asset_type_not_allowed",
-		"task_status":       string(task.TaskStatus),
-		"upload_session_id": request.RequestID,
-		"asset_type":        assetType,
-		"allowed_asset_types": []string{
-			string(domain.TaskAssetTypeSource),
-		},
-		"replaceable_asset_types": []string{
-			string(domain.TaskAssetTypeDelivery),
-		},
-	})
-}
-
-func (s *taskAssetCenterService) resolveRejectedDeliveryRevisionAssetID(ctx context.Context, task *domain.Task, params CreateTaskAssetUploadSessionParams) (*int64, *domain.AppError) {
-	if task == nil || !domain.NormalizeTaskAssetType(params.AssetType).IsDelivery() || !taskStatusCanReuseRejectedDelivery(task.TaskStatus) {
-		return nil, nil
-	}
-	taskID := task.ID
-	assetType := domain.TaskAssetTypeDelivery
-	assets, err := s.designAssetRepo.List(ctx, repo.DesignAssetListFilter{
-		TaskID:       &taskID,
-		AssetType:    &assetType,
-		ScopeSKUCode: strings.TrimSpace(params.TargetSKUCode),
-	})
-	if err != nil {
-		return nil, infraError("list rejected delivery revision assets", err)
-	}
-	type candidate struct {
-		asset   *domain.DesignAsset
-		version *domain.TaskAsset
-	}
-	candidates := make([]candidate, 0, len(assets))
-	exactFilename := make([]candidate, 0, 1)
-	for _, asset := range assets {
-		if asset == nil || strings.TrimSpace(asset.ScopeSKUCode) != strings.TrimSpace(params.TargetSKUCode) || !retouchRequirementIDsEqual(asset.RetouchRequirementID, params.RetouchRequirementID) || asset.CurrentVersionID == nil || *asset.CurrentVersionID <= 0 {
-			continue
-		}
-		version, err := s.taskAssetRepo.GetByID(ctx, *asset.CurrentVersionID)
-		if err != nil {
-			return nil, infraError("get rejected delivery revision current version", err)
-		}
-		if version == nil || version.TaskID != task.ID || domain.NormalizeTaskAssetFlowReviewStatus(version.FlowReviewStatus, version.AssetType) != domain.TaskAssetFlowReviewStatusRejected || version.DeletedAt != nil || version.CleanedAt != nil {
-			continue
-		}
-		item := candidate{asset: asset, version: version}
-		candidates = append(candidates, item)
-		if taskAssetFilenameMatches(version, params.Filename) {
-			exactFilename = append(exactFilename, item)
-		}
-	}
-	selected := candidates
-	if len(exactFilename) > 0 {
-		selected = exactFilename
-	} else if len(candidates) != 1 {
-		return nil, nil
-	}
-	best := selected[0]
-	for _, item := range selected[1:] {
-		if taskAssetRevisionCandidateNewer(item.version, best.version) {
-			best = item
-		}
-	}
-	assetID := best.asset.ID
-	return &assetID, nil
-}
-
-func taskStatusCanReuseRejectedDelivery(status domain.TaskStatus) bool {
-	switch status {
-	case domain.TaskStatusRejectedByAuditA,
-		domain.TaskStatusRejectedByAuditB,
-		domain.TaskStatusPendingCustomizationProduction,
-		domain.TaskStatusPendingEffectRevision,
-		domain.TaskStatusRejectedByWarehouse:
-		return true
-	default:
-		return false
-	}
-}
-
-func taskAssetFilenameMatches(asset *domain.TaskAsset, filename string) bool {
-	if asset == nil {
-		return false
-	}
-	filename = strings.TrimSpace(filename)
-	if filename == "" {
-		return false
-	}
-	return strings.EqualFold(strings.TrimSpace(asset.FileName), filename) ||
-		(asset.OriginalName != nil && strings.EqualFold(strings.TrimSpace(*asset.OriginalName), filename))
-}
-
-func taskAssetRevisionCandidateNewer(left, right *domain.TaskAsset) bool {
-	if left == nil {
-		return false
-	}
-	if right == nil {
-		return true
-	}
-	leftTime := left.CreatedAt
-	if left.UploadedAt != nil {
-		leftTime = *left.UploadedAt
-	}
-	rightTime := right.CreatedAt
-	if right.UploadedAt != nil {
-		rightTime = *right.UploadedAt
-	}
-	if !leftTime.Equal(rightTime) {
-		return leftTime.After(rightTime)
-	}
-	return left.ID > right.ID
 }
 
 func matchesAssetResourceFilters(asset *domain.DesignAsset, params ListAssetResourcesParams) bool {

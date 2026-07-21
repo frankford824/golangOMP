@@ -438,21 +438,11 @@ func runSearchJobs(logger *zap.Logger, jobs ...searchJob) error {
 }
 
 func (s *Service) searchUsers(ctx context.Context, actor domain.RequestActor, q string, limit int) ([]domain.SearchUser, error) {
-	if !hasRole(actor, domain.RoleSuperAdmin, domain.RoleHRAdmin) {
+	if !domain.ActorHasPermission(actor, domain.PermissionAccessView) &&
+		!domain.ActorHasPermission(actor, domain.PermissionAccessManage) {
 		return []domain.SearchUser{}, nil
 	}
 	return s.repo.SearchUsers(ctx, q, limit)
-}
-
-func hasRole(actor domain.RequestActor, roles ...domain.Role) bool {
-	for _, actorRole := range actor.Roles {
-		for _, role := range roles {
-			if actorRole == role {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func normalizeNilSlices(result *domain.SearchResultGroup) {

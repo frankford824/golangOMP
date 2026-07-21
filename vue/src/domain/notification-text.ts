@@ -26,13 +26,9 @@ function businessTeamLabel(value: unknown, fallback = '对应小组'): string {
   const labels: Record<string, string> = {
     design_standard: '设计组',
     design_retouch: '精修组',
-    audit_standard: '常规审核组',
-    audit_a: '常规审核组',
-    audit_customization: '定制审核组',
-    audit_b: '定制审核组',
+    audit_standard: '审核组',
+    audit_customization: '审核组',
     customization_art: '定制美工组',
-    warehouse_main: '云仓组',
-    procurement_main: '采购组',
   }
   if (labels[raw]) return labels[raw]
   if (!raw || raw.includes('_') || raw.includes('.')) return fallback
@@ -47,8 +43,6 @@ function businessModuleLabel(value: unknown, fallback = '相关环节'): string 
     retouch: '精修',
     audit: '审核',
     customization: '定制美工',
-    warehouse: '仓库',
-    procurement: '采购',
   }
   if (labels[raw]) return labels[raw]
   if (!raw || raw.includes('_') || raw.includes('.')) return fallback

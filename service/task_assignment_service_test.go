@@ -8,26 +8,56 @@ import (
 	"workflow/repo"
 )
 
-func TestResolveTaskAssignmentOperationCustomizationProduction(t *testing.T) {
-	task := &domain.Task{
-		TaskStatus:            domain.TaskStatusPendingCustomizationProduction,
-		CustomizationRequired: true,
-		BusinessLane:          domain.TaskBusinessLaneCustomization,
-	}
-	op := resolveTaskAssignmentOperation(task)
-	if op.Action != TaskActionAssign {
-		t.Fatalf("action = %s, want assign", op.Action)
-	}
-	if op.ResultingStatus != domain.TaskStatusPendingCustomizationProduction {
-		t.Fatalf("resulting status = %s, want PendingCustomizationProduction", op.ResultingStatus)
-	}
-}
-
 func TestResolveTaskAssignmentOperationPendingAssign(t *testing.T) {
 	task := &domain.Task{TaskStatus: domain.TaskStatusPendingAssign}
 	op := resolveTaskAssignmentOperation(task)
 	if op.Action != TaskActionAssign || op.ResultingStatus != domain.TaskStatusInProgress {
 		t.Fatalf("operation = %+v, want assign -> InProgress", op)
+	}
+}
+
+func TestTaskAssignmentTargetUsesExplicitDesignAccessInsteadOfLegacyRole(t *testing.T) {
+	departmentID := int64(44)
+	designerID := int64(105)
+	userRepo := newIdentityUserRepo()
+	userRepo.users[designerID] = &domain.User{
+		ID: designerID, Username: "candidate", Status: domain.UserStatusActive,
+		DepartmentID: &departmentID, Roles: []domain.Role{domain.RoleWarehouse, domain.RoleAuditA},
+	}
+	taskRepo := &assignmentCASTaskRepo{prdTaskRepo: prdTaskRepo{tasks: map[int64]*domain.Task{
+		905: {
+			ID: 905, TaskType: domain.TaskTypeOriginalProductDevelopment, TaskStatus: domain.TaskStatusPendingAssign,
+			OwnerDepartmentID: &departmentID, CreatorID: 11, CustomizationRequired: true,
+		},
+	}}}
+	reader := assignableAccessReader{byUser: map[int64]*domain.EffectiveAccess{
+		designerID: assignableEffectiveAccess(designerID, 71, "designer", domain.PermissionTaskDesignSubmit),
+	}}
+	svc := NewTaskAssignmentService(taskRepo, &prdTaskEventRepo{}, step04TxRunner{},
+		WithTaskAssignmentScopeUserRepo(userRepo),
+		WithTaskAssignmentEffectiveAccessReader(reader),
+	)
+
+	updated, appErr := svc.Assign(context.Background(), AssignTaskParams{TaskID: 905, DesignerID: &designerID, AssignedBy: 11})
+	if appErr != nil {
+		t.Fatalf("Assign() unexpected error: %+v", appErr)
+	}
+	if updated.DesignerID == nil || *updated.DesignerID != designerID {
+		t.Fatalf("updated task = %+v", updated)
+	}
+
+	legacyOnlyID := int64(106)
+	userRepo.users[legacyOnlyID] = &domain.User{ID: legacyOnlyID, Username: "legacy-only", Status: domain.UserStatusActive, Roles: []domain.Role{domain.RoleDesigner}}
+	taskRepo.tasks[905].TaskStatus = domain.TaskStatusPendingAssign
+	taskRepo.tasks[905].DesignerID = nil
+	taskRepo.tasks[905].CurrentHandlerID = nil
+	_, appErr = svc.Assign(context.Background(), AssignTaskParams{TaskID: 905, DesignerID: &legacyOnlyID, AssignedBy: 11})
+	if appErr == nil || appErr.Code != domain.ErrCodeInvalidRequest {
+		t.Fatalf("legacy role-only target error = %+v", appErr)
+	}
+	details, _ := appErr.Details.(map[string]interface{})
+	if details["deny_code"] != "target_assignee_missing_design_access" {
+		t.Fatalf("deny details = %+v", details)
 	}
 }
 

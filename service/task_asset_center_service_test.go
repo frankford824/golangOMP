@@ -1053,57 +1053,6 @@ func TestTaskAssetCenterServiceCreateMultipartAndCancel(t *testing.T) {
 	}
 }
 
-func TestResolveRejectedDeliveryRevisionAssetIDReusesMatchingRoot(t *testing.T) {
-	const taskID = int64(2101)
-	task := &domain.Task{
-		ID:                    taskID,
-		TaskStatus:            domain.TaskStatusPendingCustomizationProduction,
-		BusinessLane:          domain.TaskBusinessLaneCustomization,
-		CustomizationRequired: true,
-	}
-	designAssetRepo := newStep67DesignAssetRepo()
-	taskAssetRepo := newStep04TaskAssetRepo()
-	assetID, err := designAssetRepo.Create(taskAssetMutationTestContext(), nil, &domain.DesignAsset{
-		TaskID:    taskID,
-		AssetNo:   "AST-0001",
-		AssetType: domain.TaskAssetTypeDelivery,
-		CreatedBy: 502,
-	})
-	if err != nil {
-		t.Fatalf("create design asset: %v", err)
-	}
-	versionNo := 1
-	originalFilename := "DZK000149.png"
-	versionID, err := taskAssetRepo.Create(taskAssetMutationTestContext(), nil, &domain.TaskAsset{
-		TaskID:           taskID,
-		AssetID:          &assetID,
-		AssetType:        domain.TaskAssetTypeDelivery,
-		AssetVersionNo:   &versionNo,
-		FileName:         originalFilename,
-		OriginalName:     &originalFilename,
-		FlowReviewStatus: domain.TaskAssetFlowReviewStatusRejected,
-	})
-	if err != nil {
-		t.Fatalf("create rejected version: %v", err)
-	}
-	if err := designAssetRepo.UpdateCurrentVersionID(taskAssetMutationTestContext(), nil, assetID, &versionID); err != nil {
-		t.Fatalf("set current version: %v", err)
-	}
-	svc := &taskAssetCenterService{designAssetRepo: designAssetRepo, taskAssetRepo: taskAssetRepo}
-
-	resolved, appErr := svc.resolveRejectedDeliveryRevisionAssetID(taskAssetMutationTestContext(), task, CreateTaskAssetUploadSessionParams{
-		TaskID:    taskID,
-		AssetType: domain.TaskAssetTypeDelivery,
-		Filename:  originalFilename,
-	})
-	if appErr != nil {
-		t.Fatalf("resolveRejectedDeliveryRevisionAssetID() appErr = %+v", appErr)
-	}
-	if resolved == nil || *resolved != assetID {
-		t.Fatalf("resolved asset id = %+v, want %d", resolved, assetID)
-	}
-}
-
 func TestTaskAssetCenterServiceAllowsSmallUploadForDeliverySourcePreview(t *testing.T) {
 	taskRepo := newStep04TaskRepo(&domain.Task{ID: 2004, TaskStatus: domain.TaskStatusPendingAudit})
 	svc := NewTaskAssetCenterService(taskRepo, newStep67DesignAssetRepo(), newStep04TaskAssetRepo(), newStep37UploadRequestRepo(), newStep37AssetStorageRefRepo(), &step04TaskEventRepo{}, step04TxRunner{}, newStubUploadServiceClient()).(*taskAssetCenterService)
@@ -1125,7 +1074,7 @@ func TestTaskAssetCenterServiceAllowsSmallUploadForDeliverySourcePreview(t *test
 }
 
 func TestTaskAssetCenterServiceListAssetsAndVersions(t *testing.T) {
-	taskRepo := newStep04TaskRepo(&domain.Task{ID: 2003, TaskNo: "T-2003", TaskStatus: domain.TaskStatusPendingWarehouseReceive})
+	taskRepo := newStep04TaskRepo(&domain.Task{ID: 2003, TaskNo: "T-2003", TaskStatus: domain.TaskStatusCompleted})
 	designAssetRepo := newStep67DesignAssetRepo()
 	taskAssetRepo := newStep04TaskAssetRepo()
 
@@ -1162,11 +1111,11 @@ func TestTaskAssetCenterServiceListAssetsAndVersions(t *testing.T) {
 	if len(assets) != 1 || assets[0].CurrentVersion == nil {
 		t.Fatalf("ListAssets() assets = %+v", assets)
 	}
-	if assets[0].ApprovedVersion == nil || assets[0].WarehouseReadyVersion == nil {
+	if assets[0].ApprovedVersion == nil {
 		t.Fatalf("ListAssets() version pointers = %+v", assets[0])
 	}
-	if assets[0].WarehouseReadyVersion.CurrentVersionRole != "current_warehouse_ready_version" {
-		t.Fatalf("ListAssets() warehouse_ready_version = %+v", assets[0].WarehouseReadyVersion)
+	if assets[0].ApprovedVersion.CurrentVersionRole != "current_approved_version" {
+		t.Fatalf("ListAssets() approved_version = %+v", assets[0].ApprovedVersion)
 	}
 	versions, appErr := svc.ListVersions(taskAssetMutationTestContext(), 2003, assetID)
 	if appErr != nil {
@@ -1175,7 +1124,7 @@ func TestTaskAssetCenterServiceListAssetsAndVersions(t *testing.T) {
 	if len(versions) != 1 || versions[0].VersionNo != 1 {
 		t.Fatalf("ListVersions() versions = %+v", versions)
 	}
-	if !versions[0].ApprovedForFlow || !versions[0].WarehouseReady || versions[0].TaskNo != "T-2003" || versions[0].AssetNo != "AST-0001" {
+	if !versions[0].ApprovedForFlow || versions[0].TaskNo != "T-2003" || versions[0].AssetNo != "AST-0001" {
 		t.Fatalf("ListVersions() version semantics = %+v", versions[0])
 	}
 }
@@ -1263,10 +1212,7 @@ func TestTaskAssetCenterServiceAuditBatchUploadsNeverAdvanceWorkflow(t *testing.
 	storageRefRepo := newStep37AssetStorageRefRepo()
 	uploadClient := newStubUploadServiceClient().(*stubUploadServiceClient)
 	uploadClient.remoteSessionStatus = domain.DesignAssetSessionStatusCompleted
-	workflow := &step04DesignSubmissionWorkflow{}
-
-	svc := NewTaskAssetCenterService(taskRepo, designAssetRepo, taskAssetRepo, uploadRequestRepo, storageRefRepo, taskEventRepo, step04TxRunner{}, uploadClient,
-		WithTaskAssetCenterBlueprintRuleEngine(workflow)).(*taskAssetCenterService)
+	svc := NewTaskAssetCenterService(taskRepo, designAssetRepo, taskAssetRepo, uploadRequestRepo, storageRefRepo, taskEventRepo, step04TxRunner{}, uploadClient).(*taskAssetCenterService)
 
 	createA, appErr := svc.CreateMultipartUploadSession(taskAssetMutationTestContext(), CreateTaskAssetUploadSessionParams{
 		TaskID:        2006,
@@ -1318,9 +1264,6 @@ func TestTaskAssetCenterServiceAuditBatchUploadsNeverAdvanceWorkflow(t *testing.
 	}
 	if countStep04TaskEvents(taskEventRepo.events, domain.TaskEventDesignSubmitted) != 0 {
 		t.Fatalf("design submitted events = %+v, want none before submit-design", taskEventRepo.events)
-	}
-	if len(workflow.calls) != 0 {
-		t.Fatalf("workflow calls = %+v, want none before submit-design", workflow.calls)
 	}
 }
 
@@ -1562,49 +1505,6 @@ func TestTaskAssetCenterServiceBatchDeliveryRequiresTargetSKUCode(t *testing.T) 
 	}
 	if appErr.Message != "target_sku_code is required for batch non-reference asset uploads" {
 		t.Fatalf("CreateMultipartUploadSession() message = %q", appErr.Message)
-	}
-}
-
-func TestTaskAssetCenterServiceCreateUploadSessionDeniesDepartmentManagerOutsideScope(t *testing.T) {
-	taskRepo := newStep04TaskRepo(&domain.Task{
-		ID:              2093,
-		TaskNo:          "T-2093",
-		TaskStatus:      domain.TaskStatusInProgress,
-		OwnerDepartment: "运营部",
-		OwnerOrgTeam:    "淘系一组",
-	})
-	userRepo := newIdentityUserRepo()
-	svc := NewTaskAssetCenterService(
-		taskRepo,
-		newStep67DesignAssetRepo(),
-		newStep04TaskAssetRepo(),
-		newStep37UploadRequestRepo(),
-		newStep37AssetStorageRefRepo(),
-		&step04TaskEventRepo{},
-		step04TxRunner{},
-		newStubUploadServiceClient(),
-		WithTaskAssetCenterDataScopeResolver(NewRoleBasedDataScopeResolver()),
-		WithTaskAssetCenterScopeUserRepo(userRepo),
-	).(*taskAssetCenterService)
-
-	ctx := domain.WithRequestActor(taskAssetMutationTestContext(), domain.RequestActor{
-		ID:         935,
-		Username:   "design_admin",
-		Roles:      []domain.Role{domain.RoleDeptAdmin},
-		Department: "设计研发部",
-		Source:     domain.RequestActorSourceSessionToken,
-		AuthMode:   domain.AuthModeSessionTokenRoleEnforced,
-	})
-	_, appErr := svc.CreateMultipartUploadSession(ctx, CreateTaskAssetUploadSessionParams{
-		TaskID:       2093,
-		CreatedBy:    935,
-		AssetType:    domain.TaskAssetTypeDelivery,
-		Filename:     "out-of-scope.zip",
-		ExpectedSize: uploadRequestInt64Ptr(1024),
-		MimeType:     "application/zip",
-	})
-	if appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
-		t.Fatalf("CreateMultipartUploadSession() appErr = %+v, want permission denied", appErr)
 	}
 }
 

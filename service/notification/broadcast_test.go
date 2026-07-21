@@ -23,9 +23,9 @@ func TestBroadcastToAllActiveUsers(t *testing.T) {
 	svc := NewService(notifications, nil, nil, nil, WithUserRepo(users), WithTxRunner(broadcastTxRunner{}))
 
 	got, appErr := svc.Broadcast(context.Background(), domain.RequestActor{
-		ID:       99,
-		Username: "admin",
-		Roles:    []domain.Role{domain.RoleAdmin},
+		ID:          99,
+		Username:    "system-manager",
+		Permissions: []domain.PermissionCode{domain.PermissionSystemManage},
 	}, BroadcastParams{Audience: BroadcastAudienceAll, Title: "系统通知", Content: "今天 18:00 前完成处理"})
 	if appErr != nil {
 		t.Fatalf("Broadcast returned error: %v", appErr)
@@ -70,8 +70,8 @@ func TestBroadcastSelectedUsersRejectsInactiveRecipient(t *testing.T) {
 	)
 
 	_, appErr := svc.Broadcast(context.Background(), domain.RequestActor{
-		ID:    99,
-		Roles: []domain.Role{domain.RoleDeptAdmin},
+		ID:          99,
+		Permissions: []domain.PermissionCode{domain.PermissionSystemManage},
 	}, BroadcastParams{Audience: BroadcastAudienceUsers, UserIDs: []int64{1, 2}, Title: "通知", Content: "内容"})
 	if appErr == nil {
 		t.Fatal("expected error")
@@ -81,7 +81,7 @@ func TestBroadcastSelectedUsersRejectsInactiveRecipient(t *testing.T) {
 	}
 }
 
-func TestBroadcastAllRejectsDepartmentAdmin(t *testing.T) {
+func TestBroadcastRejectsLegacyRoleWithoutSystemManage(t *testing.T) {
 	svc := NewService(&broadcastNotificationRepo{}, nil, nil, nil,
 		WithUserRepo(&broadcastUserRepo{}),
 		WithTxRunner(broadcastTxRunner{}),
@@ -376,10 +376,6 @@ func (r *broadcastUserRepo) List(ctx context.Context, filter repo.UserListFilter
 		active = append(active, &cp)
 	}
 	return active, int64(len(active)), nil
-}
-
-func (r *broadcastUserRepo) ListActiveByRole(ctx context.Context, role domain.Role) ([]*domain.User, error) {
-	return nil, errors.New("not implemented")
 }
 
 func (r *broadcastUserRepo) ListConfigManagedAdmins(ctx context.Context) ([]*domain.User, error) {

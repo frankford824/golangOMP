@@ -14,7 +14,7 @@ export const TASK_PRODUCT_INFO_MAINTAINER_ROLES = [] as const
 
 export const isRetouchTask = (task: Task): boolean => task.taskType === 'RETOUCH_TASK'
 export const isCustomizationTask = (task: Task): boolean =>
-  task.businessLane === 'customization' || task.workflowLane === 'customization'
+  task.businessLane === 'customization'
 export const shouldShowDesignerMetaOnTaskCenterCard = (task: Task): boolean =>
   task.taskType !== 'SKU_PLANNING'
 export const taskHasNoDesignHandler = (task: Task): boolean =>
@@ -33,12 +33,6 @@ export const canSubmitAudit = (task: Task): boolean =>
   hasAnyAction(task, ['task.design.submit', 'task.submit_design'])
 export const isLegacyTaskStatusInDesignerEditablePhase = (task: Task): boolean =>
   hasAnyAction(task, ['task.design.submit', 'task.reassign'])
-export function canMaintainTaskProductInfoAtAnyStage(
-  _hasAnyRole: (roles: readonly string[]) => boolean,
-  inTaskScope: boolean,
-): boolean {
-  return inTaskScope
-}
 export const canUploadDesignDelivery = (task: Task): boolean => canSubmitAudit(task)
 export const canUploadAuditAsset = (task: Task): boolean => actions(task).has('task.audit.approve')
 export const canAudit = (task: Task): boolean =>

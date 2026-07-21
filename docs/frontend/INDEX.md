@@ -1,11 +1,11 @@
 # V1 前端联调接口文档索引
 
-> Revision: V1.3-A2 i_id-first task/ERP/search integration (2026-04-27)
-> Source: docs/api/openapi.yaml (post V1.3-A2)
+> Revision: V8 current contract (2026-07-20)
+> Source: docs/api/openapi.yaml
 
 当前真相入口: [V1_BACKEND_SOURCE_OF_TRUTH.md](../V1_BACKEND_SOURCE_OF_TRUTH.md)
 
-> Release: v1.21 · Backend: V1.0 + V1.1-A1 · Production detail P99 warm 32.933ms / cold 32.995ms。
+> Contract: V8 shared-backend，覆盖 main-ops 与 asset-workbench 当前公开接口。
 
 ## §0 Base URL 与鉴权
 
@@ -49,33 +49,23 @@
 - `user_update_field_denied_by_scope`
 - `role_assignment_denied_by_scope`
 - `management_access_required`
-- `reports_super_admin_only`
 - `asset_version_race_retry`
-- `audit_log_access_denied`
 - `workflow_lane_unsupported`
 - `old_password_mismatch`
 - `password_confirmation_required`
 - `password_confirmation_mismatch`
 
-## §3 RBAC 角色矩阵
+## §3 显式权限模型
 
-| 角色 | 主要权限点 |
-|---|---|
-| `SuperAdmin` | 全局管理、报表、危险操作、用户管理。 |
-| `HRAdmin` | 组织与用户管理范围内操作。 |
-| `DepartmentAdmin` | 本部门用户与任务管理。 |
-| `TeamLead` | 本组任务管理与人员协作。 |
-| `Ops` | 运营/客服任务创建、分派与跟进。 |
-| `Designer` | 设计模块领取、提交与资产处理。 |
-| `CustomizationOperator` | 定制模块处理。 |
-| `Audit_A / Audit_B / CustomizationReviewer` | 审核相关模块动作。 |
-| `Warehouse / Member` | 仓库或普通成员范围内可见任务与操作。 |
+- 业务授权只认 `auth_*` 角色、能力与稳定组织 ID 范围。
+- `Member` 是基础身份；`SuperAdmin` 是受保护角色。
+- 前端菜单和动作以后端有效能力及 `allowed_actions` 为准，不按旧角色名、部门名或状态自行推断。
+- 具体路由能力要求以各接口 OpenAPI 扩展字段和运行时 middleware 为准。
 
 ## §4 路由分类
 
-- Canonical: `/v1/auth/*`, `/v1/me*`, `/v1/users*`, `/v1/erp/products*`, `/v1/tasks*`, `/v1/tasks/{id}/asset-center/*`, `/v1/task-drafts*`, `/v1/me/notifications*`, `/v1/reports/l1/*`, `/ws/v1`。
-- Compatibility: `/v1/products*`, `/v1/task-create/asset-center/*`, 以及 transport 中 `withCompatibilityRoute` 标记的旧入口。
-- Deprecated: transport 中 `withDeprecatedRoute` 标记的旧入口；新前端不要接。
+- 当前 `/v1` 与 `/ws/v1` 路径以本次从 OpenAPI 生成的 family 索引为准。
+- 任务主流程只包含创建、设计、统一审核与结单；已退役流程不属于当前合同。
 
 ## §5 Family 索引
 
@@ -83,19 +73,18 @@
 |---|---|---|
 | 认证与登录 | [V1_API_AUTH.md](V1_API_AUTH.md) | 5 |
 | 当前用户 | [V1_API_ME.md](V1_API_ME.md) | 6 |
-| 用户与管理审计 | [V1_API_USERS.md](V1_API_USERS.md) | 18 |
-| 组织架构 | [V1_API_ORG.md](V1_API_ORG.md) | 11 |
-| 任务主流程 | [V1_API_TASKS.md](V1_API_TASKS.md) | 238 |
-| 任务资产中心 | [V1_API_TASK_ASSETS.md](V1_API_TASK_ASSETS.md) | 16 |
-| 资产资源库 | [V1_API_ASSETS.md](V1_API_ASSETS.md) | 20 |
+| 用户与管理审计 | [V1_API_USERS.md](V1_API_USERS.md) | 6 |
+| 组织架构 | [V1_API_ORG.md](V1_API_ORG.md) | 7 |
+| 任务主流程 | [V1_API_TASKS.md](V1_API_TASKS.md) | 165 |
+| 任务资产中心 | [V1_API_TASK_ASSETS.md](V1_API_TASK_ASSETS.md) | 1 |
+| 资产资源库 | [V1_API_ASSETS.md](V1_API_ASSETS.md) | 10 |
 | 任务草稿 | [V1_API_DRAFTS.md](V1_API_DRAFTS.md) | 2 |
 | 通知 | [V1_API_NOTIFICATIONS.md](V1_API_NOTIFICATIONS.md) | 9 |
 | Excel 批量创建 | [V1_API_BATCH.md](V1_API_BATCH.md) | 2 |
-| ERP 与业务字典 | [V1_API_ERP.md](V1_API_ERP.md) | 28 |
-| 搜索 | [V1_API_SEARCH.md](V1_API_SEARCH.md) | 3 |
-| L1 报表 | [V1_API_REPORTS.md](V1_API_REPORTS.md) | 8 |
+| ERP 与业务字典 | [V1_API_ERP.md](V1_API_ERP.md) | 23 |
+| 搜索 | [V1_API_SEARCH.md](V1_API_SEARCH.md) | 2 |
 | WebSocket | [V1_API_WS.md](V1_API_WS.md) | 0 个 `/v1` path + `/ws/v1` |
-| 全量速查 | [V1_API_CHEATSHEET.md](V1_API_CHEATSHEET.md) | 366 |
+| 全量速查 | [V1_API_CHEATSHEET.md](V1_API_CHEATSHEET.md) | 238 |
 
 ## §6 联调硬门
 
@@ -106,10 +95,8 @@
 - WebSocket 只做实时提示，最终一致状态回读 HTTP。
 - Excel 批量创建以 parse preview 的 `violations` 为准，不在前端复制完整业务校验。
 
-## §7 Deprecated / Compatibility 清单
+## §7 已退役业务边界
 
-- `/v1/task-create/asset-center/*`: 创建前资产上传兼容入口。
-- `/v1/products*`: 老本地缓存商品入口，新联调用 `/v1/erp/products*`。
-- `/v1/tasks/{id}/audit_a_claim`、`/v1/tasks/{id}/audit_b_claim`: 老审核领取别名。
-- 所有 `withCompatibilityRoute` / `withDeprecatedRoute` 标记路径不得作为新前端主入口。
+- 不建设任何未启用的占位接口；当前文档仅描述已挂载且可使用的合同。
+- 历史证据只保留在明确的 archive/迁移边界，不得作为新前端或后续模型的实现依据。
 

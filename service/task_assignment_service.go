@@ -37,6 +37,7 @@ type BatchAssignTasksParams struct {
 
 type BatchRemindTasksParams struct {
 	TaskIDs        []int64
+	Actor          domain.RequestActor
 	ActorID        int64
 	Reason         string
 	RemindChannel  string
@@ -64,8 +65,8 @@ type taskAssignmentService struct {
 	taskModuleRepo      repo.TaskModuleRepo
 	taskModuleEventRepo repo.TaskModuleEventRepo
 	txRunner            repo.TxRunner
-	dataScopeResolver   DataScopeResolver
 	scopeUserRepo       repo.UserRepo
+	effectiveAccess     IdentityEffectiveAccessReader
 	notifications       taskAssignmentNotificationService
 }
 
@@ -95,15 +96,15 @@ type taskAssignmentNotificationService interface {
 
 type TaskAssignmentServiceOption func(*taskAssignmentService)
 
-func WithTaskAssignmentDataScopeResolver(resolver DataScopeResolver) TaskAssignmentServiceOption {
-	return func(s *taskAssignmentService) {
-		s.dataScopeResolver = resolver
-	}
-}
-
 func WithTaskAssignmentScopeUserRepo(userRepo repo.UserRepo) TaskAssignmentServiceOption {
 	return func(s *taskAssignmentService) {
 		s.scopeUserRepo = userRepo
+	}
+}
+
+func WithTaskAssignmentEffectiveAccessReader(reader IdentityEffectiveAccessReader) TaskAssignmentServiceOption {
+	return func(s *taskAssignmentService) {
+		s.effectiveAccess = reader
 	}
 }
 
@@ -135,7 +136,7 @@ func NewTaskAssignmentService(taskRepo repo.TaskRepo, taskEventRepo repo.TaskEve
 }
 
 func (s *taskAssignmentService) taskActionAuthorizer() *taskActionAuthorizer {
-	return newTaskActionAuthorizer(s.dataScopeResolver, s.scopeUserRepo)
+	return newTaskActionAuthorizer()
 }
 
 func (s *taskAssignmentService) Assign(ctx context.Context, p AssignTaskParams) (*domain.Task, *domain.AppError) {
@@ -151,81 +152,22 @@ func (s *taskAssignmentService) Assign(ctx context.Context, p AssignTaskParams) 
 	}
 	operation := resolveTaskAssignmentOperation(task)
 	authz := s.taskActionAuthorizer()
-	selfClaim, actorID := isTaskAssignmentSelfClaim(ctx, task, p)
 	decision := authz.EvaluateTaskActionPolicy(ctx, operation.Action, task, "", "")
+	actorID := p.AssignedBy
 	actor, hasActor := domain.RequestActorFromContext(ctx)
-	usesExplicitAccess := hasActor && actor.EffectiveAccess != nil
-	if usesExplicitAccess {
-		selfClaim = false
+	if hasActor {
 		actorID = actor.ID
 		decision = explicitTaskAssignmentDecision(ctx, actor, task, operation)
-	} else if selfClaim {
-		decision.Allowed = true
-		decision.DenyCode = ""
-		decision.DenyReason = ""
-		decision.ActorID = actorID
-		decision.MatchedRule = "pending_assign_self_claim"
 	}
 	authz.logDecision(operation.Action, decision)
-	if isActorTakingTaskAlreadyClaimedByOther(ctx, task, p, actorID, operation) {
-		denied := decision
-		denied.Allowed = false
-		denied.DenyCode = domain.DenyTaskAlreadyClaimed
-		denied.DenyReason = "task is already assigned to another actor"
-		denied.ActorID = actorID
-		logTaskAssignmentDecision(ctx, operation.LogAction, task, p.DesignerID, operation.ResultingStatus, denied, false)
-		return nil, taskActionDecisionAppError(operation.Action, denied)
-	}
 	if !decision.Allowed {
-		if usesExplicitAccess {
-			logTaskAssignmentDecision(ctx, operation.LogAction, task, p.DesignerID, operation.ResultingStatus, decision, false)
-			return nil, taskActionDecisionAppError(operation.Action, decision)
-		}
-		overrideDecision, overridden, appErr := s.allowDesignManagerAssignmentByTargetScope(ctx, task, p, operation, decision)
-		if appErr != nil {
-			logTaskAssignmentDecision(ctx, operation.LogAction, task, p.DesignerID, operation.ResultingStatus, decision, false)
-			return nil, appErr
-		}
-		if !overridden {
-			logTaskAssignmentDecision(ctx, operation.LogAction, task, p.DesignerID, operation.ResultingStatus, decision, false)
-			return nil, taskActionDecisionAppError(operation.Action, decision)
-		}
-		decision = overrideDecision
-	}
-	if task.TaskStatus != domain.TaskStatusPendingAssign &&
-		!isCustomizationProductionAssignmentTask(task) &&
-		!taskAssignmentAllowsInProgressReassign(ctx, task, operation, decision) {
-		denied := decision
-		denied.Allowed = false
-		denied.DenyCode = "task_reassign_requires_manager_scope"
-		denied.DenyReason = "task reassign requires manager scope"
-		logTaskAssignmentDecision(ctx, operation.LogAction, task, p.DesignerID, operation.ResultingStatus, denied, false)
-		return nil, taskActionDecisionAppError(operation.Action, denied)
-	}
-	if task.TaskStatus == domain.TaskStatusPendingAssign && task.TaskType == domain.TaskTypePurchaseTask {
 		logTaskAssignmentDecision(ctx, operation.LogAction, task, p.DesignerID, operation.ResultingStatus, decision, false)
-		return nil, domain.NewAppError(
-			domain.ErrCodeInvalidStateTransition,
-			"purchase_task does not support designer assignment",
-			nil,
-		)
-	}
-	if task.TaskStatus == domain.TaskStatusInProgress && task.TaskType == domain.TaskTypePurchaseTask {
-		logTaskAssignmentDecision(ctx, operation.LogAction, task, p.DesignerID, operation.ResultingStatus, decision, false)
-		return nil, domain.NewAppError(
-			domain.ErrCodeInvalidStateTransition,
-			"purchase_task does not support designer reassignment",
-			nil,
-		)
+		return nil, taskActionDecisionAppError(operation.Action, decision)
 	}
 	if p.DesignerID == nil {
 		return s.clearAssignment(ctx, task, p, operation, decision)
 	}
 	if appErr := s.validateAssignableDesignerTarget(ctx, task, p.DesignerID); appErr != nil {
-		logTaskAssignmentDecision(ctx, operation.LogAction, task, p.DesignerID, operation.ResultingStatus, decision, false)
-		return nil, appErr
-	}
-	if appErr := s.validateManagedDepartmentTarget(ctx, task, decision, p.DesignerID); appErr != nil {
 		logTaskAssignmentDecision(ctx, operation.LogAction, task, p.DesignerID, operation.ResultingStatus, decision, false)
 		return nil, appErr
 	}
@@ -328,7 +270,6 @@ func explicitTaskAssignmentDecision(ctx context.Context, actor domain.RequestAct
 		TraceID:        domain.TraceIDFromContext(ctx),
 		ResolvedAction: string(operation.Action),
 		ActorID:        actor.ID,
-		ActorRoles:     append([]domain.Role(nil), actor.Roles...),
 		TaskID:         task.ID,
 		TaskStatus:     string(task.TaskStatus),
 		OwnerDept:      task.OwnerDepartment,
@@ -473,10 +414,6 @@ func isCustomizationAssignmentTask(task *domain.Task) bool {
 	return task.WorkflowLane() == domain.WorkflowLaneCustomization
 }
 
-func isCustomizationProductionAssignmentTask(task *domain.Task) bool {
-	return isCustomizationAssignmentTask(task) && task.TaskStatus == domain.TaskStatusPendingCustomizationProduction
-}
-
 func assignmentModuleKey(task *domain.Task) string {
 	if isCustomizationAssignmentTask(task) {
 		return domain.ModuleKeyCustomization
@@ -609,229 +546,24 @@ func (s *taskAssignmentService) validateAssignableDesignerTarget(ctx context.Con
 			"target_status":  target.Status,
 		})
 	}
-	roles := append([]domain.Role(nil), target.Roles...)
-	if len(roles) == 0 {
-		loadedRoles, err := s.scopeUserRepo.ListRoles(ctx, *designerID)
-		if err != nil {
-			return infraError("load target assignee roles", err)
-		}
-		roles = loadedRoles
+	if s.effectiveAccess == nil {
+		return infraError("validate target assignee access", errors.New("effective access reader is not configured"))
 	}
-	if isCustomizationAssignmentTask(task) {
-		if !hasRoleValue(roles, domain.RoleCustomizationOperator) {
-			return domain.NewAppError(domain.ErrCodeInvalidRequest, "target assignee is not a customization operator", map[string]interface{}{
-				"deny_code":      "target_assignee_not_customization_operator",
-				"target_user_id": *designerID,
-				"target_roles":   roles,
-			})
-		}
-		return nil
+	effective, err := s.effectiveAccess.EffectiveAccess(ctx, *designerID)
+	if err != nil {
+		return infraError("load target assignee access", err)
 	}
-	if !hasRoleValue(roles, domain.RoleDesigner) {
-		return domain.NewAppError(domain.ErrCodeInvalidRequest, "target assignee is not a designer", map[string]interface{}{
-			"deny_code":      "target_assignee_not_designer",
+	prospective := task.AccessSubject()
+	prospective.DesignerID = designerID
+	prospective.CurrentHandlerID = designerID
+	targetActor := domain.RequestActor{ID: target.ID, DepartmentID: target.DepartmentID, TeamID: target.TeamID, EffectiveAccess: effective}
+	if !domain.EffectiveAccessAllowsTask(targetActor, domain.PermissionTaskDesignSubmit, prospective) {
+		return domain.NewAppError(domain.ErrCodeInvalidRequest, "target assignee cannot perform design work for this task", map[string]interface{}{
+			"deny_code":      "target_assignee_missing_design_access",
 			"target_user_id": *designerID,
-			"target_roles":   roles,
 		})
 	}
 	return nil
-}
-
-func (s *taskAssignmentService) validateManagedDepartmentTarget(ctx context.Context, task *domain.Task, decision TaskActionDecision, designerID *int64) *domain.AppError {
-	if designerID == nil {
-		return nil
-	}
-	actor, ok := domain.RequestActorFromContext(ctx)
-	if !ok || !hasAnyRoleValue(actor.Roles, domain.RoleDeptAdmin, domain.RoleDesignDirector) {
-		return nil
-	}
-	if !taskAssignmentRequiresManagedTargetScope(actor, task, decision) {
-		return nil
-	}
-	managedDepartments := normalizeTaskDepartmentCodes(actor.ManagedDepartments)
-	if len(managedDepartments) == 0 {
-		managedDepartments = normalizeTaskDepartmentCodes(actor.FrontendAccess.ManagedDepartments)
-	}
-	if len(managedDepartments) == 0 {
-		return domain.NewAppError(domain.ErrCodePermissionDenied, "target assignee is outside actor managed departments", map[string]interface{}{
-			"deny_code":           "reassign_target_out_of_managed_department",
-			"target_user_id":      *designerID,
-			"actor_id":            actor.ID,
-			"managed_departments": managedDepartments,
-		})
-	}
-	if s.scopeUserRepo == nil {
-		return domain.NewAppError(domain.ErrCodeInternalError, "target assignee validation is not configured", nil)
-	}
-	target, err := s.scopeUserRepo.GetByID(ctx, *designerID)
-	if err != nil {
-		return infraError("load target assignee", err)
-	}
-	if target == nil {
-		return domain.ErrNotFound
-	}
-	targetDepartment := normalizeTaskDepartmentCode(string(target.Department))
-	for _, department := range managedDepartments {
-		if domain.OrgDepartmentsEquivalent(department, targetDepartment) {
-			return nil
-		}
-	}
-	return domain.NewAppError(domain.ErrCodePermissionDenied, "target assignee is outside actor managed departments", map[string]interface{}{
-		"deny_code":           "reassign_target_out_of_managed_department",
-		"target_user_id":      *designerID,
-		"target_department":   targetDepartment,
-		"actor_id":            actor.ID,
-		"managed_departments": managedDepartments,
-	})
-}
-
-func taskAssignmentRequiresManagedTargetScope(actor domain.RequestActor, task *domain.Task, decision TaskActionDecision) bool {
-	if hasAnyRoleValue(actor.Roles, domain.RoleOps, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleRoleAdmin, domain.RoleHRAdmin) {
-		return false
-	}
-	if task != nil && actor.ID > 0 {
-		if task.CreatorID == actor.ID {
-			return false
-		}
-		if task.RequesterID != nil && *task.RequesterID == actor.ID {
-			return false
-		}
-	}
-	switch TaskActionScopeSource(decision.ScopeSource) {
-	case TaskActionScopeCreator, TaskActionScopeRequester, TaskActionScopeViewAll:
-		return false
-	case TaskActionScopeManagedDepartment, TaskActionScopeManagedTeam:
-		return true
-	case TaskActionScopeDepartment:
-		return hasAnyRoleValue(actor.Roles, domain.RoleDeptAdmin, domain.RoleDesignDirector)
-	case TaskActionScopeTeam:
-		return hasRoleValue(actor.Roles, domain.RoleTeamLead)
-	default:
-		return strings.EqualFold(strings.TrimSpace(decision.MatchedRule), "design_manager_target_scope")
-	}
-}
-
-func (s *taskAssignmentService) allowDesignManagerAssignmentByTargetScope(ctx context.Context, task *domain.Task, p AssignTaskParams, operation taskAssignmentOperation, decision TaskActionDecision) (TaskActionDecision, bool, *domain.AppError) {
-	if task == nil || p.DesignerID == nil {
-		return decision, false, nil
-	}
-	if operation.Action != TaskActionAssign && operation.Action != TaskActionReassign {
-		return decision, false, nil
-	}
-	if operation.Action == TaskActionAssign &&
-		task.TaskStatus != domain.TaskStatusPendingAssign &&
-		!isCustomizationProductionAssignmentTask(task) {
-		return decision, false, nil
-	}
-	if operation.Action == TaskActionReassign && task.TaskStatus != domain.TaskStatusInProgress {
-		return decision, false, nil
-	}
-	if !taskAssignmentScopeDenyCanUseTargetOverride(decision.DenyCode) {
-		return decision, false, nil
-	}
-	if s.scopeUserRepo == nil {
-		return decision, false, nil
-	}
-	actor, ok := domain.RequestActorFromContext(ctx)
-	if !ok || !hasAnyRoleValue(actor.Roles, domain.RoleDeptAdmin, domain.RoleDesignDirector, domain.RoleTeamLead) {
-		return decision, false, nil
-	}
-	scopeSource, appErr := s.validateDesignManagerTargetScope(ctx, actor, p.DesignerID)
-	if appErr != nil {
-		return decision, false, appErr
-	}
-	decision.Allowed = true
-	decision.DenyCode = ""
-	decision.DenyReason = ""
-	decision.StatusReason = ""
-	decision.ScopeSource = string(scopeSource)
-	decision.MatchedRule = "design_manager_target_scope"
-	return decision, true, nil
-}
-
-func taskAssignmentScopeDenyCanUseTargetOverride(denyCode string) bool {
-	switch strings.TrimSpace(denyCode) {
-	case "task_out_of_department_scope", "task_out_of_team_scope", "task_out_of_scope", "task_not_assigned_to_actor":
-		return true
-	default:
-		return false
-	}
-}
-
-func (s *taskAssignmentService) validateDesignManagerTargetScope(ctx context.Context, actor domain.RequestActor, designerID *int64) (TaskActionScopeSource, *domain.AppError) {
-	if designerID == nil {
-		return "", nil
-	}
-	if hasAnyRoleValue(actor.Roles, domain.RoleDeptAdmin, domain.RoleDesignDirector) {
-		managedDepartments := normalizeTaskDepartmentCodes(actor.ManagedDepartments)
-		if len(managedDepartments) == 0 {
-			managedDepartments = normalizeTaskDepartmentCodes(actor.FrontendAccess.ManagedDepartments)
-		}
-		if len(managedDepartments) == 0 {
-			return "", domain.NewAppError(domain.ErrCodePermissionDenied, "target assignee is outside actor managed departments", map[string]interface{}{
-				"deny_code":           "reassign_target_out_of_managed_department",
-				"target_user_id":      *designerID,
-				"actor_id":            actor.ID,
-				"managed_departments": managedDepartments,
-			})
-		}
-		target, appErr := s.loadTaskAssignmentTarget(ctx, designerID)
-		if appErr != nil {
-			return "", appErr
-		}
-		targetDepartment := normalizeTaskDepartmentCode(string(target.Department))
-		for _, department := range managedDepartments {
-			if domain.OrgDepartmentsEquivalent(department, targetDepartment) {
-				return TaskActionScopeManagedDepartment, nil
-			}
-		}
-		return "", domain.NewAppError(domain.ErrCodePermissionDenied, "target assignee is outside actor managed departments", map[string]interface{}{
-			"deny_code":           "reassign_target_out_of_managed_department",
-			"target_user_id":      *designerID,
-			"target_department":   targetDepartment,
-			"actor_id":            actor.ID,
-			"managed_departments": managedDepartments,
-		})
-	}
-	if hasRoleValue(actor.Roles, domain.RoleTeamLead) {
-		managedTeams := normalizeTaskAssignmentTeamCodes(actor.ManagedTeams)
-		if len(managedTeams) == 0 {
-			managedTeams = normalizeTaskAssignmentTeamCodes(actor.FrontendAccess.ManagedTeams)
-		}
-		if len(managedTeams) == 0 {
-			managedTeams = normalizeTaskAssignmentTeamCodes([]string{actor.Team, actor.FrontendAccess.Team})
-		}
-		if len(managedTeams) == 0 {
-			return "", domain.NewAppError(domain.ErrCodePermissionDenied, "target assignee is outside actor managed teams", map[string]interface{}{
-				"deny_code":      "reassign_target_out_of_managed_team",
-				"target_user_id": *designerID,
-				"actor_id":       actor.ID,
-				"managed_teams":  managedTeams,
-			})
-		}
-		target, appErr := s.loadTaskAssignmentTarget(ctx, designerID)
-		if appErr != nil {
-			return "", appErr
-		}
-		targetTeam := strings.TrimSpace(target.Team)
-		for _, team := range managedTeams {
-			if domain.OrgTeamsEquivalent(team, targetTeam) {
-				return TaskActionScopeManagedTeam, nil
-			}
-		}
-		return "", domain.NewAppError(domain.ErrCodePermissionDenied, "target assignee is outside actor managed teams", map[string]interface{}{
-			"deny_code":      "reassign_target_out_of_managed_team",
-			"target_user_id": *designerID,
-			"target_team":    targetTeam,
-			"actor_id":       actor.ID,
-			"managed_teams":  managedTeams,
-		})
-	}
-	return "", domain.NewAppError(domain.ErrCodePermissionDenied, "target assignee is outside actor managed scope", map[string]interface{}{
-		"deny_code":      "reassign_target_out_of_managed_scope",
-		"target_user_id": *designerID,
-		"actor_id":       actor.ID,
-	})
 }
 
 func (s *taskAssignmentService) loadTaskAssignmentTarget(ctx context.Context, designerID *int64) (*domain.User, *domain.AppError) {
@@ -846,96 +578,6 @@ func (s *taskAssignmentService) loadTaskAssignmentTarget(ctx context.Context, de
 		return nil, domain.ErrNotFound
 	}
 	return target, nil
-}
-
-func normalizeTaskAssignmentTeamCodes(values []string) []string {
-	out := make([]string, 0, len(values))
-	seen := make(map[string]struct{}, len(values))
-	for _, value := range values {
-		trimmed := strings.TrimSpace(value)
-		if trimmed == "" {
-			continue
-		}
-		key := strings.ToLower(trimmed)
-		if _, ok := seen[key]; ok {
-			continue
-		}
-		seen[key] = struct{}{}
-		out = append(out, trimmed)
-	}
-	return out
-}
-
-func isTaskAssignmentSelfClaim(ctx context.Context, task *domain.Task, p AssignTaskParams) (bool, int64) {
-	actor, ok := domain.RequestActorFromContext(ctx)
-	actorID := p.AssignedBy
-	if ok && actor.ID > 0 {
-		actorID = actor.ID
-	}
-	if task == nil || task.TaskStatus != domain.TaskStatusPendingAssign || p.DesignerID == nil || *p.DesignerID <= 0 || actorID <= 0 || *p.DesignerID != actorID {
-		return false, actorID
-	}
-	if task.DesignerID != nil || task.CurrentHandlerID != nil {
-		return false, actorID
-	}
-	if !ok {
-		return true, actorID
-	}
-	return hasAnyRoleValue(actor.Roles,
-		domain.RoleDesigner,
-		domain.RoleOps,
-		domain.RoleCustomizationOperator,
-		domain.RoleOutsource,
-		domain.RoleTeamLead,
-		domain.RoleDeptAdmin,
-		domain.RoleDesignDirector,
-		domain.RoleAdmin,
-		domain.RoleSuperAdmin,
-	), actorID
-}
-
-func taskAlreadyClaimedByOther(task *domain.Task, actorID int64) bool {
-	if task == nil || actorID <= 0 {
-		return false
-	}
-	if task.CurrentHandlerID != nil && *task.CurrentHandlerID > 0 && *task.CurrentHandlerID != actorID {
-		return true
-	}
-	if task.DesignerID != nil && *task.DesignerID > 0 && *task.DesignerID != actorID {
-		return true
-	}
-	return false
-}
-
-func isActorTakingTaskAlreadyClaimedByOther(ctx context.Context, task *domain.Task, p AssignTaskParams, actorID int64, operation taskAssignmentOperation) bool {
-	if p.DesignerID == nil || actorID <= 0 || *p.DesignerID != actorID {
-		return false
-	}
-	// Management reassign-to-self is scheduled handoff, not unassigned-pool self-claim.
-	if operation.Action == TaskActionReassign {
-		if actor, ok := domain.RequestActorFromContext(ctx); ok && actor.EffectiveAccess != nil {
-			if domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskReassign, task.AccessSubject()) {
-				return false
-			}
-		} else if legacyActor, ok := resolveTaskActionActor(ctx); ok && taskActionActorHasManagementScopeRole(legacyActor) {
-			return false
-		}
-	}
-	return taskAlreadyClaimedByOther(task, actorID)
-}
-
-func taskAssignmentAllowsInProgressReassign(ctx context.Context, task *domain.Task, operation taskAssignmentOperation, decision TaskActionDecision) bool {
-	if task == nil || operation.Action != TaskActionReassign {
-		return taskActionDecisionHasElevatedScope(decision)
-	}
-	if taskActionDecisionHasElevatedScope(decision) {
-		return true
-	}
-	if actor, ok := domain.RequestActorFromContext(ctx); ok && actor.EffectiveAccess != nil {
-		return domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskReassign, task.AccessSubject())
-	}
-	legacyActor, ok := resolveTaskActionActor(ctx)
-	return ok && taskActionActorIsCreatorOrRequester(legacyActor, task)
 }
 
 func (s *taskAssignmentService) BatchAssign(ctx context.Context, p BatchAssignTasksParams) (*BatchTaskActionResult, *domain.AppError) {
@@ -1014,6 +656,18 @@ func (s *taskAssignmentService) BatchRemind(ctx context.Context, p BatchRemindTa
 			result.Failed++
 			continue
 		}
+		canRemind := domain.EffectiveAccessAllowsTask(p.Actor, domain.PermissionTaskAssign, task.AccessSubject()) ||
+			domain.EffectiveAccessAllowsTask(p.Actor, domain.PermissionTaskAudit, task.AccessSubject())
+		if !canRemind {
+			result.Items = append(result.Items, BatchTaskActionItemResult{
+				TaskID:       taskID,
+				Success:      false,
+				ErrorCode:    domain.ErrCodePermissionDenied,
+				ErrorMessage: "task is outside the effective reminder scope",
+			})
+			result.Failed++
+			continue
+		}
 		eventErr := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
 			_, appendErr := s.taskEventRepo.Append(ctx, tx, taskID, domain.TaskEventReminded, &p.ActorID, map[string]interface{}{
 				"actor_id":         p.ActorID,
@@ -1057,14 +711,6 @@ func normalizeBatchTaskIDs(taskIDs []int64) []int64 {
 }
 
 func resolveTaskAssignmentOperation(task *domain.Task) taskAssignmentOperation {
-	if isCustomizationProductionAssignmentTask(task) {
-		return taskAssignmentOperation{
-			Action:          TaskActionAssign,
-			EventType:       domain.TaskEventAssigned,
-			LogAction:       "assign",
-			ResultingStatus: domain.TaskStatusPendingCustomizationProduction,
-		}
-	}
 	if task != nil && task.TaskStatus == domain.TaskStatusPendingAssign {
 		return taskAssignmentOperation{
 			Action:          TaskActionAssign,
@@ -1098,12 +744,11 @@ func logTaskAssignmentDecision(
 		previousDesignerID = *task.DesignerID
 	}
 	log.Printf(
-		"task_assignment trace_id=%s task_id=%d action=%s actor_id=%d actor_roles=%s owner_department=%s owner_org_team=%s previous_designer_id=%d new_designer_id=%d previous_status=%s resulting_status=%s allow=%t deny_reason=%s",
+		"task_assignment trace_id=%s task_id=%d action=%s actor_id=%d owner_department=%s owner_org_team=%s previous_designer_id=%d new_designer_id=%d previous_status=%s resulting_status=%s allow=%t deny_reason=%s",
 		domain.TraceIDFromContext(ctx),
 		task.ID,
 		action,
 		decision.ActorID,
-		domain.JoinRoles(decision.ActorRoles),
 		task.OwnerDepartment,
 		task.OwnerOrgTeam,
 		previousDesignerID,

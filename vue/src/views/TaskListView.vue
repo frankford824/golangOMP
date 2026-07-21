@@ -1056,7 +1056,7 @@ function buildListParams(opt?: { page?: number; append?: boolean }): TaskListPar
   if (f.dateFrom) params.date_from = f.dateFrom
   if (f.dateTo) params.date_to = f.dateTo
   if (f.taskCategory === 'normal' || f.taskCategory === 'customization') {
-    params.workflow_lane = f.taskCategory
+    params.business_lane = f.taskCategory
   }
   const sortMap: Record<typeof sortKey.value, string> = {
     taskNo: 'task_no',
@@ -1398,7 +1398,7 @@ function isOverdue(task: Task): boolean {
 }
 
 function isCustomizationTask(task: Task): boolean {
-  const lane = String(task.workflowLane ?? '').trim().toLowerCase()
+  const lane = String(task.businessLane ?? '').trim().toLowerCase()
   return task.customizationRequired === true || lane === 'customization'
 }
 
@@ -1411,7 +1411,7 @@ function taskCategoryLabel(task: Task): string {
  * 若业务标记为定制但 lane 仍为 normal 等不一致情形，仍保留短标签以免丢失信息。
  */
 function shouldShowWorkflowLaneTagOnCard(task: Task): boolean {
-  const lane = String(task.workflowLane ?? '').trim().toLowerCase()
+  const lane = String(task.businessLane ?? '').trim().toLowerCase()
   if (lane !== 'normal' && lane !== 'customization') return false
 
   const categoryIsCustomization = isCustomizationTask(task)

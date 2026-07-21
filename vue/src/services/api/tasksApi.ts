@@ -114,68 +114,6 @@ export interface BatchAuditHandoverResponse {
   data?: BatchAuditHandoverData
 }
 
-export interface TaskAiSummaryPerson {
-  role: string
-  name: string
-  id?: string
-  note?: string
-}
-
-export interface TaskAiSummaryBlocker {
-  title: string
-  owner?: string
-  reason?: string
-}
-
-export interface TaskAiSummaryAction {
-  role: string
-  action: string
-  timing?: string
-}
-
-export interface TaskAiSummaryTimelineItem {
-  time?: string
-  stage: string
-  actor?: string
-  summary: string
-}
-
-export interface TaskAiSummaryStuckPoint {
-  level: 'high' | 'medium' | 'low' | string
-  title: string
-  reason: string
-  owner?: string
-  next_action?: string
-}
-
-export interface TaskAiSummarySkuAssetCost {
-  sku: string
-  asset_status?: string
-  erp_status?: string
-  cost_status?: string
-  note?: string
-}
-
-export interface TaskAiSummaryResponse {
-  decision?: string
-  impact?: string
-  primary_blocker?: TaskAiSummaryBlocker | null
-  actions?: TaskAiSummaryAction[]
-  evidence?: string[]
-  headline?: string
-  current_status?: string
-  people?: TaskAiSummaryPerson[]
-  timeline?: TaskAiSummaryTimelineItem[]
-  stuck_points?: TaskAiSummaryStuckPoint[]
-  sku_asset_erp_cost?: TaskAiSummarySkuAssetCost[]
-  next_actions?: string[]
-  confidence?: 'high' | 'medium' | 'low' | string
-  raw_text?: string
-  generated_at?: string
-  model?: string
-  provider?: string
-}
-
 export interface TaskFilterActorOption {
   id: number
   name: string
@@ -212,34 +150,11 @@ export const tasksApi = {
     http.get<{ data?: TaskFilterOptionsResponse }>('/v1/tasks/filter-options', { signal }),
 
   /**
-   * 任务池列表（按模块领取）
-   * GET /v1/tasks/pool
-   */
-  pool: (params?: TaskListParams, signal?: AbortSignal) =>
-    http.get('/v1/tasks/pool', { params, signal }),
-
-  /**
-   * 获取任务看板摘要（今日待办等汇总）
-   * GET /v1/task-board/summary
-   * 权限：已登录用户
-   */
-  boardSummary: (signal?: AbortSignal) =>
-    http.get('/v1/task-board/summary', { signal }),
-
-  /**
    * 获取运营主页权威全量统计快照。
    * GET /v1/task-board/overview
    */
   operationalOverview: (signal?: AbortSignal) =>
     http.get<{ data: TaskOperationalOverview }>('/v1/task-board/overview', { signal }),
-
-  /**
-   * 获取任务看板各队列明细
-   * GET /v1/task-board/queues
-   * 权限：已登录用户
-   */
-  boardQueues: (signal?: AbortSignal) =>
-    http.get('/v1/task-board/queues', { signal }),
 
   /**
    * 获取单个任务详情（主读模型）
@@ -268,13 +183,6 @@ export const tasksApi = {
    */
   getDetail: (id: string, signal?: AbortSignal) =>
     http.get(`/v1/tasks/${id}/detail`, { signal }),
-
-  generateAiSummary: (id: string, signal?: AbortSignal) =>
-    http.post<{ data?: TaskAiSummaryResponse }>(
-      `/v1/tasks/${encodeURIComponent(id)}/ai-summary`,
-      {},
-      { signal },
-    ),
 
   batchDownloadTaskReferences: (id: string, signal?: AbortSignal) =>
     http.post<TaskReferenceBatchDownloadResponse>(
@@ -378,56 +286,8 @@ export const tasksApi = {
   submitRetouchModule: (id: string, signal?: AbortSignal) =>
     http.post(`/v1/tasks/${encodeURIComponent(id)}/modules/retouch/actions/submit`, {}, { signal }),
 
-  reassignModule: (
-    id: string,
-    moduleKey: string,
-    payload: Record<string, unknown>,
-    signal?: AbortSignal,
-  ) =>
-    http.post(
-      `/v1/tasks/${encodeURIComponent(id)}/modules/${encodeURIComponent(moduleKey)}/reassign`,
-      payload,
-      { signal },
-    ),
-
-  poolReassignModule: (
-    id: string,
-    moduleKey: string,
-    payload: Record<string, unknown>,
-    signal?: AbortSignal,
-  ) =>
-    http.post(
-      `/v1/tasks/${encodeURIComponent(id)}/modules/${encodeURIComponent(moduleKey)}/pool-reassign`,
-      payload,
-      { signal },
-    ),
-
   getCostOverrides: (id: string, signal?: AbortSignal) =>
     http.get(`/v1/tasks/${encodeURIComponent(id)}/cost-overrides`, { signal }),
-
-  reviewCostOverride: (
-    id: string,
-    eventId: string,
-    payload: Record<string, unknown>,
-    signal?: AbortSignal,
-  ) =>
-    http.post(
-      `/v1/tasks/${encodeURIComponent(id)}/cost-overrides/${encodeURIComponent(eventId)}/review`,
-      payload,
-      { signal },
-    ),
-
-  financeMarkCostOverride: (
-    id: string,
-    eventId: string,
-    payload: Record<string, unknown>,
-    signal?: AbortSignal,
-  ) =>
-    http.post(
-      `/v1/tasks/${encodeURIComponent(id)}/cost-overrides/${encodeURIComponent(eventId)}/finance-mark`,
-      payload,
-      { signal },
-    ),
 
   // ─── 设计提交 ──────────────────────────────────────────────────────────────
 
@@ -586,31 +446,4 @@ export const tasksApi = {
    */
   retryFiling: (id: string, signal?: AbortSignal) =>
     http.post(`/v1/tasks/${id}/filing/retry`, {}, { signal }),
-}
-
-// ─── 向后兼容：保留旧的函数式导出（供 Pinia store 直接调用）──────────────────
-// 这些函数在后续重构 store 时可逐步移除
-
-/** @deprecated 请使用 tasksApi.list */
-export async function fetchTaskList(params?: TaskListParams) {
-  const res = await tasksApi.list(params)
-  return res.data
-}
-
-/** @deprecated 请使用 tasksApi.getById */
-export async function fetchTaskById(id: string) {
-  const res = await tasksApi.getById(id)
-  return res.data
-}
-
-/** @deprecated 请使用 tasksApi.create */
-export async function createTask(payload: Record<string, unknown>, idempotencyKey?: string) {
-  const res = await tasksApi.create(payload, undefined, idempotencyKey)
-  return res.data
-}
-
-/** @deprecated 请使用 tasksApi.patchBusinessInfo */
-export async function updateTask(id: string, patch: BusinessInfoPatch) {
-  const res = await tasksApi.patchBusinessInfo(id, patch)
-  return res.data
 }

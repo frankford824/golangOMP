@@ -1,7 +1,4 @@
 export * from './task'
-export * from './product'
-export * from './audit'
-export * from './rule'
 export * from './dashboard'
 export * from './task-create'
 export * from './design-upload'

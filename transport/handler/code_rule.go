@@ -39,24 +39,3 @@ func (h *CodeRuleHandler) Preview(c *gin.Context) {
 	}
 	respondOK(c, preview)
 }
-
-type generateSKUReq struct {
-	RuleID int64 `json:"rule_id" binding:"required"`
-}
-
-// GenerateSKU is retained as an archived compatibility endpoint.
-// Legacy CodeRule new_sku generation is disabled; task product codes are
-// allocated through POST /v1/tasks/prepare-product-codes or task creation.
-func (h *CodeRuleHandler) GenerateSKU(c *gin.Context) {
-	var req generateSKUReq
-	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
-		return
-	}
-	sku, appErr := h.svc.GenerateSKU(c.Request.Context(), req.RuleID)
-	if appErr != nil {
-		respondError(c, appErr)
-		return
-	}
-	respondOK(c, gin.H{"sku_code": sku})
-}

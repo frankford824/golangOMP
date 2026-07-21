@@ -248,7 +248,6 @@ function commonTask(common: ComposeCommonInfo): Partial<Task> {
     customizationRequired: common.customization_required,
     customizationSourceType: common.customization_source_type,
     businessLane: common.customization_required ? 'customization' : 'normal',
-    workflowLane: common.customization_required ? 'customization' : 'normal',
     assigneeId: common.designer_id ?? null,
     designerId: common.designer_id ?? null,
   }

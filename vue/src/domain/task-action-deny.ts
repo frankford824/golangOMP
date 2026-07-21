@@ -30,25 +30,7 @@ const DENY_TEXT: Record<string, string> = {
   task_out_of_department_scope: '你无权操作其他部门任务',
   task_not_reassignable: '当前状态不允许重新分配',
   task_status_not_actionable: '当前状态不允许该操作',
-  warehouse_stage_mismatch: '当前任务不在可执行仓库动作的阶段',
-  task_not_closable: '当前任务尚不满足结单条件',
-  missing_required_role: '你缺少执行该操作所需角色',
-  audit_stage_mismatch: '当前任务不在对应审核阶段',
-  customization_stage_mismatch: '该任务已被审核处理过，正在刷新列表…',
-}
-
-/**
- * 判断本次 403/409 是否为「定制审核阶段已漂移」——即该任务已被另一位审核员
- * 或并发请求推进，当前快照已失效。调用方应走「静默成功 + 刷新列表」分支，
- * 避免给用户抛出原始网络错误。
- */
-export function isCustomizationStageMismatch(error: unknown): boolean {
-  return extractTaskActionDenyCode(error) === 'customization_stage_mismatch'
-}
-
-/** 查表获取 deny_code 对应的中文提示（用于静默成功路径回填 banner 文案）。 */
-export function denyCodeText(code: string): string | undefined {
-  return DENY_TEXT[code]
+  audit_stage_mismatch: '当前任务已不在待审核阶段，请刷新后重试',
 }
 
 export function formatTaskActionDenyMessage(
@@ -61,4 +43,3 @@ export function formatTaskActionDenyMessage(
   if (typeof msg === 'string' && msg.trim() !== '') return msg
   return fallback
 }
-

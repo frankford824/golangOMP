@@ -20,14 +20,13 @@ import (
 )
 
 type TaskHandler struct {
-	svc          service.TaskService
-	costRuleSvc  service.CostRuleService
-	detailSvc    service.TaskDetailAggregateService
-	poolQuerySvc *task_pool.PoolQueryService
-	claimSvc     *task_pool.ClaimService
-	moduleSvc    *r3module.ActionService
-	cancelSvc    *task_cancel.Service
-	planningSvc  service.PlanningSKUService
+	svc         service.TaskService
+	costRuleSvc service.CostRuleService
+	detailSvc   service.TaskDetailAggregateService
+	claimSvc    *task_pool.ClaimService
+	moduleSvc   *r3module.ActionService
+	cancelSvc   *task_cancel.Service
+	planningSvc service.PlanningSKUService
 }
 
 func (h *TaskHandler) SetPlanningSKUService(planningSvc service.PlanningSKUService) {
@@ -38,8 +37,7 @@ func NewTaskHandler(svc service.TaskService, costRuleSvc service.CostRuleService
 	return &TaskHandler{svc: svc, costRuleSvc: costRuleSvc, detailSvc: detailSvc}
 }
 
-func (h *TaskHandler) SetR3Services(poolQuery *task_pool.PoolQueryService, claim *task_pool.ClaimService, moduleSvc *r3module.ActionService, cancelSvc *task_cancel.Service) {
-	h.poolQuerySvc = poolQuery
+func (h *TaskHandler) SetR3Services(claim *task_pool.ClaimService, moduleSvc *r3module.ActionService, cancelSvc *task_cancel.Service) {
 	h.claimSvc = claim
 	h.moduleSvc = moduleSvc
 	h.cancelSvc = cancelSvc
@@ -62,10 +60,7 @@ type createTaskReq struct {
 	Priority                string                            `json:"priority"`
 	DeadlineAt              *string                           `json:"deadline_at"`
 	DueAt                   *string                           `json:"due_at"`
-	IsOutsource             *bool                             `json:"is_outsource"`
-	NeedOutsource           *bool                             `json:"need_outsource"`
 	BusinessLane            string                            `json:"business_lane"`
-	WorkflowLane            string                            `json:"workflow_lane"`
 	CustomizationRequired   *bool                             `json:"customization_required"`
 	CustomizationSourceType string                            `json:"customization_source_type"`
 	ReferenceImages         []string                          `json:"reference_images"`
@@ -109,10 +104,6 @@ type createTaskReq struct {
 	ERPSyncMode       string                        `json:"erp_sync_mode"`
 	PlanningSKUItems  []domain.PlanningSKUItemInput `json:"planning_sku_items"`
 
-	// Purchase task fields
-	PurchaseSKU    string `json:"purchase_sku"`
-	ProductChannel string `json:"product_channel"`
-
 	// Legacy compat fields (still accepted)
 	DemandText    string `json:"demand_text"`
 	CopyText      string `json:"copy_text"`
@@ -142,7 +133,6 @@ type createTaskBatchItemReq struct {
 	DesignRequirement string                    `json:"design_requirement"`
 	SetModeHint       bool                      `json:"set_mode_hint"`
 	NewSKU            string                    `json:"new_sku"`
-	PurchaseSKU       string                    `json:"purchase_sku"`
 	SKUCodeType       string                    `json:"sku_code_type"`
 	CostPriceMode     string                    `json:"cost_price_mode"`
 	CostPrice         *float64                  `json:"cost_price"`
@@ -172,7 +162,6 @@ type patchTaskSKUItemInfoReq struct {
 type prepareTaskProductCodesReq struct {
 	TaskType     string                            `json:"task_type" binding:"required"`
 	BusinessLane string                            `json:"business_lane"`
-	WorkflowLane string                            `json:"workflow_lane"`
 	CategoryCode string                            `json:"category_code"`
 	SKUCodeType  string                            `json:"sku_code_type"`
 	Count        int                               `json:"count"`
@@ -352,71 +341,6 @@ type taskCostQuotePreviewReq struct {
 	Quantity     *int64   `json:"quantity"`
 	Process      *string  `json:"process"`
 	Notes        *string  `json:"notes"`
-}
-
-type updateTaskProcurementReq struct {
-	OperatorID         *int64   `json:"operator_id"`
-	Status             string   `json:"status" binding:"required"`
-	ProcurementPrice   *float64 `json:"procurement_price"`
-	Quantity           *int64   `json:"quantity"`
-	SupplierName       string   `json:"supplier_name"`
-	PurchaseRemark     string   `json:"purchase_remark"`
-	ExpectedDeliveryAt *string  `json:"expected_delivery_at"`
-	Remark             string   `json:"remark"`
-}
-
-type advanceTaskProcurementReq struct {
-	OperatorID *int64 `json:"operator_id"`
-	Action     string `json:"action" binding:"required"`
-	Remark     string `json:"remark"`
-}
-
-type prepareWarehouseReq struct {
-	OperatorID *int64 `json:"operator_id"`
-	Remark     string `json:"remark"`
-}
-
-type closeTaskReq struct {
-	OperatorID *int64 `json:"operator_id"`
-	Remark     string `json:"remark"`
-}
-
-type submitCustomizationReviewReq struct {
-	ReviewerID             optionalInt64JSONField `json:"reviewer_id"`
-	SourceAssetID          optionalInt64JSONField `json:"source_asset_id"`
-	CustomizationLevelCode string                 `json:"customization_level_code"`
-	CustomizationLevelName string                 `json:"customization_level_name"`
-	CustomizationPrice     *float64               `json:"customization_price"`
-	CustomizationWeight    *float64               `json:"customization_weight_factor"`
-	CustomizationNote      string                 `json:"customization_note"`
-	Decision               string                 `json:"customization_review_decision"`
-}
-
-type submitCustomizationEffectPreviewReq struct {
-	OperatorID     optionalInt64JSONField `json:"operator_id"`
-	OrderNo        string                 `json:"order_no"`
-	CurrentAssetID optionalInt64JSONField `json:"current_asset_id"`
-	DecisionType   string                 `json:"decision_type"`
-	Note           string                 `json:"note"`
-}
-
-type reviewCustomizationEffectReq struct {
-	ReviewerID             optionalInt64JSONField `json:"reviewer_id"`
-	Decision               string                 `json:"customization_review_decision"`
-	CurrentAssetID         optionalInt64JSONField `json:"current_asset_id"`
-	CustomizationLevelCode string                 `json:"customization_level_code"`
-	CustomizationLevelName string                 `json:"customization_level_name"`
-	CustomizationPrice     *float64               `json:"customization_price"`
-	CustomizationWeight    *float64               `json:"customization_weight_factor"`
-	CustomizationNote      string                 `json:"customization_note"`
-}
-
-type transferCustomizationProductionReq struct {
-	OperatorID        optionalInt64JSONField `json:"operator_id"`
-	CurrentAssetID    optionalInt64JSONField `json:"current_asset_id"`
-	TransferChannel   string                 `json:"transfer_channel"`
-	TransferReference string                 `json:"transfer_reference"`
-	Note              string                 `json:"note"`
 }
 
 type taskProductSelectionReq struct {
@@ -633,7 +557,7 @@ func bindCreateTaskERPProductID(selection *domain.TaskProductSelectionContext, e
 
 func validateCreateTaskProductSelectionWhitelist(taskType string, hasEffectiveProductSelection bool) (string, *domain.AppError) {
 	switch domain.TaskType(strings.TrimSpace(taskType)) {
-	case domain.TaskTypeNewProductDevelopment, domain.TaskTypePurchaseTask:
+	case domain.TaskTypeNewProductDevelopment:
 		if hasEffectiveProductSelection {
 			return "task_type_whitelist_reject_non_original_product_selection", domain.NewAppError(
 				domain.ErrCodeInvalidRequest,
@@ -675,11 +599,15 @@ func (h *TaskHandler) Create(c *gin.Context) {
 		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
 		return
 	}
-	if domain.TaskType(strings.TrimSpace(req.TaskType)) == domain.TaskTypePurchaseTask {
-		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "purchase_task has been retired; use task_type=sku_planning", nil))
+	parsedTaskType := domain.TaskType(strings.TrimSpace(req.TaskType))
+	if !parsedTaskType.Valid() {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "task_type is not supported by the current API contract", map[string]interface{}{
+			"field":     "task_type",
+			"deny_code": "invalid_task_type",
+		}))
 		return
 	}
-	if domain.TaskType(strings.TrimSpace(req.TaskType)) == domain.TaskTypeSKUPlanning {
+	if parsedTaskType == domain.TaskTypeSKUPlanning {
 		if h.planningSvc == nil {
 			respondError(c, domain.NewAppError(domain.ErrCodeInternalError, "planning SKU service is unavailable", nil))
 			return
@@ -738,9 +666,6 @@ func (h *TaskHandler) Create(c *gin.Context) {
 	if skuCode == "" && req.NewSKU != "" && !isBatchMultiple {
 		skuCode = req.NewSKU
 	}
-	if skuCode == "" && req.PurchaseSKU != "" && !isBatchMultiple {
-		skuCode = req.PurchaseSKU
-	}
 
 	traceID := c.GetString("trace_id")
 	taskType := strings.TrimSpace(req.TaskType)
@@ -788,7 +713,7 @@ func (h *TaskHandler) Create(c *gin.Context) {
 		} else {
 			selectionValidationBranch = "source_mode_non_existing_without_product_selection"
 		}
-		// Do not pass synthesized selection from product_id/sku_code to service for new_product/purchase_task.
+		// Do not pass synthesized selection from product_id/sku_code to service for new-product tasks.
 		// Skip bindCreateTaskERPProductID and pass nil.
 	} else {
 		if hasEffectiveProductSelection {
@@ -851,14 +776,6 @@ func (h *TaskHandler) Create(c *gin.Context) {
 		designerID = req.AssigneeID
 	}
 
-	isOutsource := false
-	if req.IsOutsource != nil {
-		isOutsource = *req.IsOutsource
-	}
-	if req.NeedOutsource != nil {
-		isOutsource = isOutsource || *req.NeedOutsource
-	}
-
 	if req.hasRawReferenceImagesField() {
 		respondError(c, service.RejectReferenceImagesOnTaskCreateForHandler())
 		return
@@ -878,7 +795,7 @@ func (h *TaskHandler) Create(c *gin.Context) {
 
 	params := service.CreateTaskParams{
 		SourceMode:              domain.TaskSourceMode(sourceMode),
-		BusinessLane:            domain.TaskBusinessLane(firstNonEmptyTrimmed(req.BusinessLane, req.WorkflowLane)),
+		BusinessLane:            domain.TaskBusinessLane(strings.TrimSpace(req.BusinessLane)),
 		ProductID:               req.ProductID.LocalID(),
 		SKUCode:                 skuCode,
 		ProductNameSnapshot:     productName,
@@ -895,7 +812,6 @@ func (h *TaskHandler) Create(c *gin.Context) {
 		DesignerID:              designerID,
 		Priority:                domain.TaskPriority(priority),
 		DeadlineAt:              deadlineAt,
-		IsOutsource:             isOutsource,
 		CustomizationRequired:   req.CustomizationRequired != nil && *req.CustomizationRequired,
 		CustomizationSourceType: domain.CustomizationSourceType(strings.TrimSpace(req.CustomizationSourceType)),
 		ReferenceImagesProvided: req.hasRawReferenceImagesField(),
@@ -907,32 +823,29 @@ func (h *TaskHandler) Create(c *gin.Context) {
 		Remark:                  req.Remark,
 		Note:                    req.Note,
 
-		ChangeRequest:       req.ChangeRequest,
-		DesignRequirement:   req.DesignRequirement,
-		SetModeHint:         req.SetModeHint,
-		CategoryCode:        req.CategoryCode,
-		ProductIID:          firstNonEmptyTrimmed(req.IID, req.ProductIID),
-		MaterialMode:        req.MaterialMode,
-		Material:            req.Material,
-		MaterialOther:       req.MaterialOther,
-		ProductShortName:    req.ProductShortName,
-		CostPriceMode:       req.CostPriceMode,
-		CostPrice:           req.CostPrice,
-		Quantity:            req.Quantity,
-		BaseSalePrice:       req.BaseSalePrice,
-		Width:               req.Width,
-		Height:              req.Height,
-		Area:                req.Area,
-		ReferenceLink:       req.ReferenceLink,
-		PurchaseSKU:         req.PurchaseSKU,
-		ProductChannel:      req.ProductChannel,
-		BatchSKUMode:        req.BatchSKUMode,
-		SKUCodeType:         domain.TaskSKUCodeType(strings.TrimSpace(req.SKUCodeType)),
-		TopLevelNewSKU:      req.NewSKU,
-		TopLevelPurchaseSKU: req.PurchaseSKU,
-		SyncERPOnCreate:     req.SyncERPOnCreate != nil && *req.SyncERPOnCreate,
-		SyncERPOnCreateSet:  req.SyncERPOnCreate != nil,
-		ClientCreateID:      clientCreateID,
+		ChangeRequest:      req.ChangeRequest,
+		DesignRequirement:  req.DesignRequirement,
+		SetModeHint:        req.SetModeHint,
+		CategoryCode:       req.CategoryCode,
+		ProductIID:         firstNonEmptyTrimmed(req.IID, req.ProductIID),
+		MaterialMode:       req.MaterialMode,
+		Material:           req.Material,
+		MaterialOther:      req.MaterialOther,
+		ProductShortName:   req.ProductShortName,
+		CostPriceMode:      req.CostPriceMode,
+		CostPrice:          req.CostPrice,
+		Quantity:           req.Quantity,
+		BaseSalePrice:      req.BaseSalePrice,
+		Width:              req.Width,
+		Height:             req.Height,
+		Area:               req.Area,
+		ReferenceLink:      req.ReferenceLink,
+		BatchSKUMode:       req.BatchSKUMode,
+		SKUCodeType:        domain.TaskSKUCodeType(strings.TrimSpace(req.SKUCodeType)),
+		TopLevelNewSKU:     req.NewSKU,
+		SyncERPOnCreate:    req.SyncERPOnCreate != nil && *req.SyncERPOnCreate,
+		SyncERPOnCreateSet: req.SyncERPOnCreate != nil,
+		ClientCreateID:     clientCreateID,
 	}
 	if len(req.RetouchRequirements) > 0 {
 		params.RetouchRequirements = make([]domain.CreateRetouchRequirementItem, 0, len(req.RetouchRequirements))
@@ -958,7 +871,6 @@ func (h *TaskHandler) Create(c *gin.Context) {
 				DesignRequirement: item.DesignRequirement,
 				SetModeHint:       item.SetModeHint,
 				NewSKU:            item.NewSKU,
-				PurchaseSKU:       item.PurchaseSKU,
 				SKUCodeType:       domain.TaskSKUCodeType(strings.TrimSpace(item.SKUCodeType)),
 				CostPriceMode:     item.CostPriceMode,
 				CostPrice:         item.CostPrice,
@@ -999,7 +911,7 @@ func (h *TaskHandler) PrepareProductCodes(c *gin.Context) {
 
 	params := service.PrepareTaskProductCodesParams{
 		TaskType:     domain.TaskType(strings.TrimSpace(req.TaskType)),
-		BusinessLane: domain.TaskBusinessLane(firstNonEmptyTrimmed(req.BusinessLane, req.WorkflowLane)),
+		BusinessLane: domain.TaskBusinessLane(strings.TrimSpace(req.BusinessLane)),
 		CategoryCode: strings.TrimSpace(req.CategoryCode),
 		SKUCodeType:  domain.TaskSKUCodeType(strings.TrimSpace(req.SKUCodeType)),
 		Count:        req.Count,
@@ -1354,7 +1266,6 @@ func (h *TaskHandler) RetryFiling(c *gin.Context) {
 	respondOK(c, view)
 }
 
-// UpdateProcurement handles PATCH /v1/tasks/:id/procurement
 func (h *TaskHandler) GetProductInfo(c *gin.Context) {
 	taskID, err := parseID(c)
 	if err != nil {

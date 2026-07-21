@@ -126,7 +126,7 @@ Runtime URL split (compatibility only, must not be used in new frontend):
   - backend validates `assets[].target_sku_code` against task SKU scope and upload-session captured `target_sku_code`
   - response includes `submitted_assets[]` with completed session + persisted asset/version payload
 - For task-scoped `source` / `delivery` upload sessions that were created while the task was actionable,
-  MAIN allows `POST .../upload-sessions/{session_id}/complete` in `PendingAuditA` as a narrow post-transition window.
+  MAIN allows `POST .../upload-sessions/{session_id}/complete` in `PendingAudit` as the unified audit-stage upload window.
   This prevents batch submit races where later completes arrive after status transition; it does not reopen create-session permission in audit stages.
 - MAIN no longer accepts or emits NAS upload probe evidence, NAS allowlist logic, or NAS private-network policy
 

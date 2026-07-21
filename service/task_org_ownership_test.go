@@ -2,12 +2,10 @@ package service
 
 import (
 	"context"
-	"reflect"
 	"testing"
 	"time"
 
 	"workflow/domain"
-	"workflow/repo"
 )
 
 func TestResolveTaskCanonicalOrgOwnershipUsesConfiguredDepartmentAlias(t *testing.T) {
@@ -33,11 +31,9 @@ func TestTaskServiceCreateOriginalProductWithOrgTeamCompatWritesCanonicalOwnersh
 	taskRepo := &prdTaskRepo{}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		step04TxRunner{},
 	)
@@ -109,11 +105,9 @@ func TestTaskServiceCreateNewTaskWithOrgTeamCompatWritesCanonicalOwnership(t *te
 			taskRepo := &prdTaskRepo{}
 			svc := NewTaskService(
 				taskRepo,
-				&prdProcurementRepo{},
 				&prdTaskAssetRepo{},
 				&prdTaskEventRepo{},
 				nil,
-				&prdWarehouseRepo{},
 				prdCodeRuleService{},
 				step04TxRunner{},
 			)
@@ -139,11 +133,9 @@ func TestTaskServiceCreateLegacyOwnerTeamBackfillsCanonicalDepartmentWhenUnique(
 	taskRepo := &prdTaskRepo{}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		step04TxRunner{},
 	)
@@ -176,22 +168,20 @@ func TestTaskServiceCreateDerivesOwnershipFromSessionActorWhenOwnerFieldsOmitted
 	taskRepo := &prdTaskRepo{}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		step04TxRunner{},
 	)
 	ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{
-		ID:         291,
-		Username:   "ops-user",
-		Roles:      []domain.Role{domain.RoleMember, domain.RoleOps},
-		Department: string(domain.DepartmentOperations),
-		Team:       "淘系一组",
-		Source:     domain.RequestActorSourceSessionToken,
-		AuthMode:   domain.AuthModeSessionTokenRoleEnforced,
+		ID:              291,
+		Username:        "ops-user",
+		Department:      string(domain.DepartmentOperations),
+		Team:            "淘系一组",
+		Source:          domain.RequestActorSourceSessionToken,
+		AuthMode:        domain.AuthModeSessionTokenRoleEnforced,
+		EffectiveAccess: globalCapabilityActor(291, domain.PermissionTaskCreate).EffectiveAccess,
 	})
 
 	task, appErr := svc.Create(ctx, CreateTaskParams{
@@ -261,11 +251,9 @@ func TestTaskServiceListHydratesCanonicalOwnershipFields(t *testing.T) {
 	}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		step04TxRunner{},
 	)
@@ -309,126 +297,7 @@ func TestTaskReadModelOwnershipNormalizesLegacyDepartmentsToCanonical(t *testing
 	}
 }
 
-func TestTaskServiceListAppliesCanonicalOrgVisibilityScope(t *testing.T) {
-	now := time.Now().UTC()
-	taskRepo := &taskOrgVisibilityRepo{
-		items: []*domain.TaskListItem{
-			{
-				ID:                  1,
-				TaskNo:              "T-OPS-TEAM",
-				SKUCode:             "SKU-OPS-1",
-				ProductNameSnapshot: "Ops Team",
-				TaskType:            domain.TaskTypeNewProductDevelopment,
-				SourceMode:          domain.TaskSourceModeNewProduct,
-				OwnerTeam:           "内贸运营组",
-				OwnerDepartment:     "运营部",
-				OwnerOrgTeam:        "运营三组",
-				TaskStatus:          domain.TaskStatusPendingAssign,
-				Priority:            domain.TaskPriorityLow,
-				CreatorID:           11,
-				CreatedAt:           now,
-				UpdatedAt:           now,
-				BatchMode:           domain.TaskBatchModeSingle,
-				BatchItemCount:      1,
-			},
-			{
-				ID:                  2,
-				TaskNo:              "T-OPS-DEPT",
-				SKUCode:             "SKU-OPS-2",
-				ProductNameSnapshot: "Ops Department",
-				TaskType:            domain.TaskTypeNewProductDevelopment,
-				SourceMode:          domain.TaskSourceModeNewProduct,
-				OwnerTeam:           "内贸运营组",
-				OwnerDepartment:     "运营部",
-				TaskStatus:          domain.TaskStatusPendingAssign,
-				Priority:            domain.TaskPriorityLow,
-				CreatorID:           12,
-				CreatedAt:           now,
-				UpdatedAt:           now,
-				BatchMode:           domain.TaskBatchModeSingle,
-				BatchItemCount:      1,
-			},
-			{
-				ID:                  3,
-				TaskNo:              "T-DESIGN",
-				SKUCode:             "SKU-DESIGN-1",
-				ProductNameSnapshot: "Design",
-				TaskType:            domain.TaskTypeNewProductDevelopment,
-				SourceMode:          domain.TaskSourceModeNewProduct,
-				OwnerTeam:           "设计组",
-				OwnerDepartment:     "设计部",
-				OwnerOrgTeam:        "设计审核组",
-				TaskStatus:          domain.TaskStatusPendingAssign,
-				Priority:            domain.TaskPriorityLow,
-				CreatorID:           13,
-				CreatedAt:           now,
-				UpdatedAt:           now,
-				BatchMode:           domain.TaskBatchModeSingle,
-				BatchItemCount:      1,
-			},
-		},
-	}
-	userRepo := newIdentityUserRepo()
-	userRepo.users[100] = &domain.User{ID: 100, Username: "super", Department: domain.DepartmentUnassigned, Team: "未分配池"}
-	userRepo.users[200] = &domain.User{ID: 200, Username: "dept-admin", Department: domain.DepartmentOperations, Team: "运营三组"}
-	userRepo.users[300] = &domain.User{ID: 300, Username: "team-lead", Department: domain.DepartmentOperations, Team: "运营三组"}
-
-	svc := NewTaskService(
-		taskRepo,
-		&prdProcurementRepo{},
-		&prdTaskAssetRepo{},
-		&prdTaskEventRepo{},
-		nil,
-		&prdWarehouseRepo{},
-		prdCodeRuleService{},
-		step04TxRunner{},
-		WithTaskScopeUserRepo(userRepo),
-	)
-
-	viewAllCtx := domain.WithRequestActor(context.Background(), domain.RequestActor{
-		ID:       100,
-		Roles:    []domain.Role{domain.RoleSuperAdmin},
-		Source:   domain.RequestActorSourceSessionToken,
-		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
-	})
-	viewAllItems, _, appErr := svc.List(viewAllCtx, TaskFilter{Page: 1, PageSize: 20})
-	if appErr != nil {
-		t.Fatalf("view-all List() unexpected error: %+v", appErr)
-	}
-	if len(viewAllItems) != 3 {
-		t.Fatalf("view-all List() len = %d, want 3", len(viewAllItems))
-	}
-
-	departmentCtx := domain.WithRequestActor(context.Background(), domain.RequestActor{
-		ID:       200,
-		Roles:    []domain.Role{domain.RoleDeptAdmin},
-		Source:   domain.RequestActorSourceSessionToken,
-		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
-	})
-	departmentItems, _, appErr := svc.List(departmentCtx, TaskFilter{Page: 1, PageSize: 20})
-	if appErr != nil {
-		t.Fatalf("department List() unexpected error: %+v", appErr)
-	}
-	if len(departmentItems) != 3 {
-		t.Fatalf("department List() len = %d, want 3 (main task flow is globally readable)", len(departmentItems))
-	}
-
-	teamCtx := domain.WithRequestActor(context.Background(), domain.RequestActor{
-		ID:       300,
-		Roles:    []domain.Role{domain.RoleTeamLead},
-		Source:   domain.RequestActorSourceSessionToken,
-		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
-	})
-	teamItems, _, appErr := svc.List(teamCtx, TaskFilter{Page: 1, PageSize: 20})
-	if appErr != nil {
-		t.Fatalf("team List() unexpected error: %+v", appErr)
-	}
-	if len(teamItems) != 3 {
-		t.Fatalf("team List() len = %d, want 3 (main task flow is globally readable)", len(teamItems))
-	}
-}
-
-func TestTaskServiceListSupportsWorkflowLaneFilter(t *testing.T) {
+func TestTaskServiceListSupportsBusinessLaneFilter(t *testing.T) {
 	now := time.Now().UTC()
 	taskRepo := &prdTaskRepo{
 		listItems: []*domain.TaskListItem{
@@ -447,8 +316,8 @@ func TestTaskServiceListSupportsWorkflowLaneFilter(t *testing.T) {
 				UpdatedAt:             now,
 				BatchMode:             domain.TaskBatchModeSingle,
 				BatchItemCount:        1,
+				BusinessLane:          domain.TaskBusinessLaneNormal,
 				CustomizationRequired: false,
-				WorkflowLane:          domain.WorkflowLaneNormal,
 			},
 			{
 				ID:                    2,
@@ -458,32 +327,30 @@ func TestTaskServiceListSupportsWorkflowLaneFilter(t *testing.T) {
 				TaskType:              domain.TaskTypeOriginalProductDevelopment,
 				SourceMode:            domain.TaskSourceModeExistingProduct,
 				OwnerDepartment:       string(domain.DepartmentCustomizationArt),
-				TaskStatus:            domain.TaskStatusPendingCustomizationReview,
+				TaskStatus:            domain.TaskStatusPendingAudit,
 				Priority:              domain.TaskPriorityLow,
 				CreatorID:             9,
 				CreatedAt:             now,
 				UpdatedAt:             now,
 				BatchMode:             domain.TaskBatchModeSingle,
 				BatchItemCount:        1,
+				BusinessLane:          domain.TaskBusinessLaneCustomization,
 				CustomizationRequired: true,
-				WorkflowLane:          domain.WorkflowLaneCustomization,
 			},
 		},
 	}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		step04TxRunner{},
 	)
 
 	items, _, appErr := svc.List(context.Background(), TaskFilter{
 		TaskQueryFilterDefinition: domain.TaskQueryFilterDefinition{
-			WorkflowLanes: []domain.WorkflowLane{domain.WorkflowLaneCustomization},
+			BusinessLanes: []domain.TaskBusinessLane{domain.TaskBusinessLaneCustomization},
 		},
 		Page:     1,
 		PageSize: 20,
@@ -494,94 +361,4 @@ func TestTaskServiceListSupportsWorkflowLaneFilter(t *testing.T) {
 	if len(items) != 1 || items[0].TaskNo != "T-CUSTOM" {
 		t.Fatalf("List() items = %+v, want only customization lane item", items)
 	}
-}
-
-func TestApplyTaskOrgVisibilityScopeCopiesStageVisibilities(t *testing.T) {
-	scope := &DataScope{
-		DepartmentCodes: []string{string(domain.DepartmentAudit)},
-		StageVisibilities: []StageVisibility{
-			{
-				Statuses: []domain.TaskStatus{
-					domain.TaskStatusPendingAuditA,
-					domain.TaskStatusRejectedByAuditA,
-				},
-				Lane: workflowLanePtr(domain.WorkflowLaneNormal),
-			},
-			{
-				Statuses: []domain.TaskStatus{
-					domain.TaskStatusPendingCustomizationReview,
-				},
-				Lane: workflowLanePtr(domain.WorkflowLaneCustomization),
-			},
-		},
-	}
-
-	filter := applyTaskOrgVisibilityScope(repo.TaskListFilter{}, scope)
-	if len(filter.ScopeStageVisibilities) != 2 {
-		t.Fatalf("ScopeStageVisibilities len = %d, want 2", len(filter.ScopeStageVisibilities))
-	}
-	if !reflect.DeepEqual(filter.ScopeStageVisibilities[0].Statuses, scope.StageVisibilities[0].Statuses) {
-		t.Fatalf("ScopeStageVisibilities[0].Statuses = %#v, want %#v", filter.ScopeStageVisibilities[0].Statuses, scope.StageVisibilities[0].Statuses)
-	}
-	if filter.ScopeStageVisibilities[0].Lane == nil || *filter.ScopeStageVisibilities[0].Lane != domain.WorkflowLaneNormal {
-		t.Fatalf("ScopeStageVisibilities[0].Lane = %+v, want normal", filter.ScopeStageVisibilities[0].Lane)
-	}
-	if filter.ScopeStageVisibilities[1].Lane == nil || *filter.ScopeStageVisibilities[1].Lane != domain.WorkflowLaneCustomization {
-		t.Fatalf("ScopeStageVisibilities[1].Lane = %+v, want customization", filter.ScopeStageVisibilities[1].Lane)
-	}
-
-	filter.ScopeStageVisibilities[0].Statuses[0] = domain.TaskStatusCompleted
-	if scope.StageVisibilities[0].Statuses[0] != domain.TaskStatusPendingAuditA {
-		t.Fatal("applyTaskOrgVisibilityScope() should deep-copy stage statuses")
-	}
-}
-
-func workflowLanePtr(lane domain.WorkflowLane) *domain.WorkflowLane {
-	return &lane
-}
-
-type taskOrgVisibilityRepo struct {
-	prdTaskRepo
-	items []*domain.TaskListItem
-}
-
-func (r *taskOrgVisibilityRepo) List(_ context.Context, filter repo.TaskListFilter) ([]*domain.TaskListItem, int64, error) {
-	filtered := make([]*domain.TaskListItem, 0, len(r.items))
-	for _, item := range r.items {
-		if item == nil {
-			continue
-		}
-		copied := *item
-		applyTaskListItemReadModelOrgOwnership(&copied)
-		if !filter.ScopeViewAll {
-			visible := false
-			for _, uid := range filter.ScopeUserIDs {
-				if copied.CreatorID == uid {
-					visible = true
-					break
-				}
-			}
-			if !visible {
-				for _, department := range filter.ScopeDepartmentCodes {
-					if department != "" && department == copied.OwnerDepartment {
-						visible = true
-						break
-					}
-				}
-			}
-			if !visible {
-				for _, team := range filter.ScopeTeamCodes {
-					if team != "" && team == copied.OwnerOrgTeam {
-						visible = true
-						break
-					}
-				}
-			}
-			if !visible {
-				continue
-			}
-		}
-		filtered = append(filtered, &copied)
-	}
-	return filtered, int64(len(filtered)), nil
 }

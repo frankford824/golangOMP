@@ -5,6 +5,7 @@ import {
   resolveApiUserMessage,
 } from '@/utils/api-message-zh'
 import { inferMockFamily } from '@/mocks'
+import { dispatchMockRequest } from '@/mocks/handlers'
 
 function axiosError(status: number, data: unknown): AxiosError {
   return new AxiosError('failed', String(status), undefined, undefined, {
@@ -55,9 +56,11 @@ describe('P0 mock family routing', () => {
     expect(inferMockFamily('/v1/me/notifications')).toBe('notifications')
     expect(inferMockFamily('/v1/tasks/123/asset-center/upload-sessions')).toBe('task-assets')
     expect(inferMockFamily('/v1/tasks/batch-create/parse-excel')).toBe('batch')
-    expect(inferMockFamily('/v1/product-management/combo-tree')).toBe('product-management')
-    expect(inferMockFamily('/v1/tasks/123/product-management')).toBe('product-management')
-    expect(inferMockFamily('/v1/reports/l1/cards')).toBe('reports')
+    expect(inferMockFamily('/v1/cost-management/dashboard')).toBe('cost-management')
+    expect(inferMockFamily('/v1/product-management/combo-tree')).toBeUndefined()
+    expect(dispatchMockRequest({ method: 'GET', path: '/v1/tasks/123/product-management' }).status).toBe(404)
+    expect(inferMockFamily('/v1/reports/l1/cards')).toBeUndefined()
+    expect(inferMockFamily('/v1/predictions/search')).toBeUndefined()
     expect(inferMockFamily('/v1/search')).toBeUndefined()
   })
 })

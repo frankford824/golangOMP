@@ -11,10 +11,7 @@ type TaskFilingTriggerSource string
 const (
 	TaskFilingTriggerSourceCreate                  TaskFilingTriggerSource = "create"
 	TaskFilingTriggerSourceBusinessInfoPatch       TaskFilingTriggerSource = "business_info_patch"
-	TaskFilingTriggerSourceProcurementUpdate       TaskFilingTriggerSource = "procurement_update"
-	TaskFilingTriggerSourceProcurementAdvance      TaskFilingTriggerSource = "procurement_advance"
 	TaskFilingTriggerSourceAuditFinalApproved      TaskFilingTriggerSource = "audit_final_approved"
-	TaskFilingTriggerSourceWarehouseCompletePrechk TaskFilingTriggerSource = "warehouse_complete_precheck"
 	TaskFilingTriggerSourceManualRetry             TaskFilingTriggerSource = "manual_retry"
 	TaskFilingTriggerSourceLegacyFiledAt           TaskFilingTriggerSource = "legacy_filed_at"
 )
@@ -60,10 +57,6 @@ func ComputeFilingMissingFields(task *domain.Task, detail *domain.TaskDetail) ([
 		add("product_name", "产品名称", strings.TrimSpace(task.ProductNameSnapshot) == "")
 		add("i_id", "产品i_id", strings.TrimSpace(detail.Category) == "" && strings.TrimSpace(detail.CategoryName) == "")
 
-	case domain.TaskTypePurchaseTask:
-		add("sku_code", "采购SKU", strings.TrimSpace(task.SKUCode) == "")
-		add("product_name", "产品名称", strings.TrimSpace(task.ProductNameSnapshot) == "")
-		add("quantity", "数量", detail.Quantity == nil || *detail.Quantity <= 0)
 	}
 
 	if len(labels) == 0 {
@@ -100,13 +93,8 @@ func shouldAutoTriggerFiling(task *domain.Task, source TaskFilingTriggerSource) 
 	switch task.TaskType {
 	case domain.TaskTypeNewProductDevelopment:
 		return source == TaskFilingTriggerSourceCreate || source == TaskFilingTriggerSourceBusinessInfoPatch
-	case domain.TaskTypePurchaseTask:
-		return source == TaskFilingTriggerSourceCreate ||
-			source == TaskFilingTriggerSourceBusinessInfoPatch ||
-			source == TaskFilingTriggerSourceProcurementUpdate ||
-			source == TaskFilingTriggerSourceProcurementAdvance
 	case domain.TaskTypeOriginalProductDevelopment:
-		if source == TaskFilingTriggerSourceWarehouseCompletePrechk || source == TaskFilingTriggerSourceAuditFinalApproved {
+		if source == TaskFilingTriggerSourceAuditFinalApproved {
 			return true
 		}
 		if source == TaskFilingTriggerSourceBusinessInfoPatch {
@@ -126,22 +114,7 @@ func originalFilingAutoEligibleStatus(status domain.TaskStatus) bool {
 		return false
 	}
 	switch status {
-	case domain.TaskStatusPendingAssign,
-		domain.TaskStatusInProgress,
-		domain.TaskStatusPendingAuditA,
-		domain.TaskStatusPendingAuditB,
-		domain.TaskStatusRejectedByAuditA,
-		domain.TaskStatusRejectedByAuditB,
-		domain.TaskStatusBlocked:
-		return false
-	default:
-		return true
-	}
-}
-
-func isFinalDesignAuditApproval(nextStatus domain.TaskStatus) bool {
-	switch nextStatus {
-	case domain.TaskStatusPendingWarehouseReceive, domain.TaskStatusPendingOutsource:
+	case domain.TaskStatusCompleted, domain.TaskStatusArchived:
 		return true
 	default:
 		return false

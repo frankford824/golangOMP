@@ -85,9 +85,9 @@
           </BaseButton>
         </div>
 
-        <!-- KPI 详情（需权限，沿用原统计口径） -->
+        <!-- 任务经营指标与任务看板共用 task.view 权限。 -->
         <section
-          v-if="can('kpi.view')"
+          v-if="can('task.view')"
           class="kpi kpi--quality grid grid-cols-1 gap-3 min-[400px]:grid-cols-2 lg:grid-cols-4 lg:gap-4"
         >
           <DashboardKpiCard
@@ -465,7 +465,7 @@ const risks = computed<RiskItem[]>(() => {
       id: 'customization-in-progress',
       level: 'medium',
       message: `${counts.customization_in_progress} 个定制任务处理中`,
-      route: '/tasks?workflow_lane=customization',
+      route: '/tasks?task_category=customization',
     })
   }
   return list

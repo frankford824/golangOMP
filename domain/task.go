@@ -198,7 +198,7 @@ type TaskDetail struct {
 	MaterialOther                string                       `db:"material_other"              json:"material_other"`
 	CostPriceMode                string                       `db:"cost_price_mode"             json:"cost_price_mode"`
 	BaseSalePrice                *float64                     `db:"base_sale_price"             json:"base_sale_price,omitempty"`
-	ProductChannel               string                       `db:"product_channel"             json:"product_channel"`
+	ProductChannel               string                       `db:"product_channel"             json:"-"`
 	SKUCodeType                  TaskSKUCodeType              `db:"sku_code_type"               json:"sku_code_type,omitempty"`
 	ReferenceImagesJSON          string                       `db:"reference_images_json"       json:"reference_images_json"`
 	ReferenceFileRefsJSON        string                       `db:"reference_file_refs_json"    json:"reference_file_refs_json"`

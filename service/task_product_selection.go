@@ -15,7 +15,7 @@ const (
 
 // normalizeTaskProductSelection normalizes and validates product_selection for task creation/update.
 // When sourceMode != existing_product: product_selection is not supported. The handler MUST pass nil
-// for new_product_development/purchase_task when product_selection was not explicitly in the request body,
+// for current product-backed task types when product_selection was not explicitly in the request body,
 // to avoid false rejection from selection synthesized via product_id/sku_code in bindCreateTaskERPProductID.
 // This layer rejects only when a non-empty selection is passed for non-existing_product (defense in depth).
 func normalizeTaskProductSelection(

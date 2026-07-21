@@ -141,16 +141,10 @@ func TestV8TaskLegacyRegistrationsHaveCompleteCapabilityMapping(t *testing.T) {
 	}
 	re := regexp.MustCompile(`access\(taskGroup, http\.(MethodGet|MethodPost|MethodPatch|MethodPut|MethodDelete), "([^"]+)", domain\.APIReadinessReadyForFrontend`)
 	matches := re.FindAllStringSubmatch(string(raw), -1)
-	if len(matches) == 0 {
-		t.Fatal("no task access registrations found")
-	}
 	for _, match := range matches {
 		method := strings.TrimPrefix(match[1], "Method")
 		path := "/v1/tasks" + match[2]
-		permissions, governed := v8BusinessRoutePermissions(method, path)
-		if !governed || len(permissions) == 0 {
-			t.Errorf("%s %s would be denied as an unmapped v8 route", method, path)
-		}
+		t.Errorf("%s %s still uses retired role middleware instead of capabilityAccess", method, path)
 	}
 }
 

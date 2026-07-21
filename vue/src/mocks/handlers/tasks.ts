@@ -101,7 +101,7 @@ function filterTasks(
   const filterMine = filter === 'mine'
   const filterPool = filter === 'pool' || filter === 'module_pool'
   const actorTeam = String(q.pool_team_code ?? MOCK_ACTOR_TEAM).trim()
-  const workflowLane = String(q.workflow_lane ?? '')
+  const businessLane = String(q.business_lane ?? '')
   const dateFrom = String(q.date_from ?? '').trim()
   const dateTo = String(q.date_to ?? '').trim()
   const sort = String(q.sort ?? '-updated_at').trim()
@@ -117,11 +117,11 @@ function filterTasks(
     const poolTaskIds = new Set(poolRows(actorTeam).map((row) => row.id))
     items = items.filter((t) => poolTaskIds.has(t.id))
   }
-  if (workflowLane === 'normal') {
+  if (businessLane === 'normal') {
     items = items.filter(
       (t) => t.task_type !== 'customer_customization' && t.task_type !== 'regular_customization',
     )
-  } else if (workflowLane === 'customization') {
+  } else if (businessLane === 'customization') {
     items = items.filter(
       (t) => t.task_type === 'customer_customization' || t.task_type === 'regular_customization',
     )
@@ -203,12 +203,6 @@ function poolRows(actorTeam: string = MOCK_ACTOR_TEAM): Array<MockTask & { modul
     }
   }
   return rows
-}
-
-function retouchWorkflowCodeFromModuleState(state: string | undefined): string {
-  const s = String(state ?? 'pending_claim').toLowerCase().replace(/-/g, '_')
-  if (s === 'closed') return 'completed'
-  return s
 }
 
 function applyDesignerAssignToMockTask(
@@ -388,28 +382,6 @@ export const tasksHandler: MockHandler = (request) => {
     }
   }
 
-  if (request.method === 'GET' && request.path === '/v1/tasks/pool') {
-    const page = Math.max(1, Number(request.query.page ?? 1))
-    const pageSize = Math.min(100, Math.max(1, Number(request.query.page_size ?? 20)))
-    const actorTeam = String(request.query.pool_team_code ?? MOCK_ACTOR_TEAM).trim()
-    let items = poolRows(actorTeam)
-    const moduleKey = String(request.query.module_key ?? '')
-    if (moduleKey && moduleKey !== 'any') {
-      items = items.filter((item) => item.module_key === moduleKey)
-    }
-    const total = items.length
-    const start = (page - 1) * pageSize
-    return {
-      status: 200,
-      data: {
-        items: items.slice(start, start + pageSize),
-        total,
-        page,
-        page_size: pageSize,
-      },
-    }
-  }
-
   if (request.method === 'GET' && request.path.match(/^\/v1\/tasks\/[^/]+\/events$/)) {
     const taskId = request.path.split('/')[3] ?? ''
     const items = mockTaskEvents
@@ -433,28 +405,16 @@ export const tasksHandler: MockHandler = (request) => {
       },
       allowed_actions: { actions: m.allowed_actions ?? [] },
     }))
-    const retouchMod = listTaskModules(storedTask.id).find((m) => m.module_key === 'retouch')
-    const rtCode =
-      task.task_type === 'retouch_task'
-        ? retouchWorkflowCodeFromModuleState(retouchMod?.state)
-        : null
-    const workflow =
-      task.task_type === 'retouch_task'
-        ? {
-            main_status: 'created',
-            sub_status: {
-              design: { code: rtCode, label: 'Retouch', source: 'retouch_module' },
-              retouch: { code: rtCode, label: 'Retouch', source: 'module' },
-              audit: { code: 'not_triggered', label: 'Not triggered', source: 'task_type' },
-              customization: { code: 'not_triggered', label: 'Not triggered', source: 'task_type' },
-            },
-          }
-        : undefined
     return {
       status: 200,
       data: {
         task,
-        ...(workflow ? { workflow } : {}),
+        design_sub_status:
+          storedTask.status === 'completed'
+            ? 'finalized'
+            : storedTask.status === 'submitted'
+              ? 'pending_audit'
+              : 'in_progress',
         task_detail: {
           category_code: 'mock_category',
           design_requirement: 'mock 设计需求',

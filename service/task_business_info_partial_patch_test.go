@@ -38,11 +38,9 @@ func newBatchParentBusinessInfoSvc(t *testing.T, taskID int64, detail *domain.Ta
 	}
 	return NewTaskServiceWithCatalog(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		categoryRepo,
 		newCostRuleRepoStub(),
 		prdCodeRuleService{},
@@ -160,11 +158,9 @@ func TestUpdateBusinessInfoPriorityOnly(t *testing.T) {
 	}
 	svc := NewTaskServiceWithCatalog(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		newCategoryRepoStub(),
 		newCostRuleRepoStub(),
 		prdCodeRuleService{},
@@ -213,11 +209,9 @@ func TestUpdateBusinessInfoDeadlineOnly(t *testing.T) {
 	}
 	svc := NewTaskServiceWithCatalog(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		newCategoryRepoStub(),
 		newCostRuleRepoStub(),
 		prdCodeRuleService{},
@@ -289,11 +283,9 @@ func TestUpdateBusinessInfoProductNameUpdatesShortNameAndQueuesProductManagement
 	productManagement := &productManagementQueueStub{}
 	svc := NewTaskServiceWithCatalog(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		newCategoryRepoStub(),
 		newCostRuleRepoStub(),
 		prdCodeRuleService{},
@@ -370,11 +362,9 @@ func TestUpdateBusinessInfoBatchParentNameDoesNotTouchSKUItemsOrQueueSync(t *tes
 	productManagement := &productManagementQueueStub{}
 	svc := NewTaskServiceWithCatalog(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		newCategoryRepoStub(),
 		newCostRuleRepoStub(),
 		prdCodeRuleService{},
@@ -453,11 +443,9 @@ func TestUpdateSKUItemInfoProductNameUpdatesShortNameAndQueuesProductManagementS
 	eventRepo := &prdTaskEventRepo{}
 	svc := NewTaskServiceWithCatalog(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		eventRepo,
 		nil,
-		&prdWarehouseRepo{},
 		newCategoryRepoStub(),
 		newCostRuleRepoStub(),
 		prdCodeRuleService{},

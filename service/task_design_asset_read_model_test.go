@@ -70,7 +70,7 @@ func TestLoadTaskDesignAssetReadModelUsesTaskLevelBatchVersionRead(t *testing.T)
 	task := &domain.Task{
 		ID:         11,
 		TaskNo:     "T-11",
-		TaskStatus: domain.TaskStatusPendingAuditA,
+		TaskStatus: domain.TaskStatusPendingAudit,
 	}
 	assets, versions, appErr := loadTaskDesignAssetReadModel(context.Background(), nil, designRepo, taskAssetRepo, task)
 	if appErr != nil {
@@ -135,7 +135,7 @@ func TestDesignAssets_OrphanShellsAreFiltered(t *testing.T) {
 	task := &domain.Task{
 		ID:         13,
 		TaskNo:     "T-13",
-		TaskStatus: domain.TaskStatusPendingAuditA,
+		TaskStatus: domain.TaskStatusPendingAudit,
 	}
 	assets, versions, appErr := loadTaskDesignAssetReadModel(context.Background(), nil, designRepo, taskAssetRepo, task)
 	if appErr != nil {
@@ -200,7 +200,7 @@ func TestLoadTaskDesignAssetReadModelFallsBackWhenRootsMissing(t *testing.T) {
 	task := &domain.Task{
 		ID:         12,
 		TaskNo:     "T-12",
-		TaskStatus: domain.TaskStatusPendingAuditA,
+		TaskStatus: domain.TaskStatusPendingAudit,
 	}
 	assets, versions, appErr := loadTaskDesignAssetReadModel(context.Background(), nil, designRepo, taskAssetRepo, task)
 	if appErr != nil {

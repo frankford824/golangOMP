@@ -1,6 +1,4 @@
-export * from './product'
+export * from './erp-product-option'
 export * from './task'
-export * from './audit'
-export * from './rule'
 export * from './dashboard'
 export * from './permission'

@@ -73,11 +73,9 @@ func newRetouchTaskServiceTest(t *testing.T, retouchRepo repo.TaskRetouchRequire
 	t.Helper()
 	return NewTaskService(
 		&prdTaskRepo{},
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		productCodeTestTxRunner{},
 		WithTaskRetouchRequirementRepo(retouchRepo),

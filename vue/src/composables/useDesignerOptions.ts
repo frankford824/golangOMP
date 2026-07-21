@@ -1,7 +1,5 @@
 /**
- * 从 usersApi 获取 Designer 角色用户，供创建任务、指派、筛选等场景使用。
- * v0.5 对齐：FRONTEND_ALIGNMENT_v0.5.md 第 D 节
- * 使用 GET /v1/users/designers，不要从通用用户列表过滤 Designer。
+ * 从显式权限候选接口获取设计/审核人员，供创建、指派与交班使用。
  *
  * canonical 响应 envelope：{ data: [{id, username, display_name}], pagination: {...} }
  * 本 composable 解包时对裸数组与 { data, pagination } 两种形态都兼容。
@@ -17,23 +15,11 @@ import type { BaseSelectOption } from '@/components/base/BaseSelect.vue'
 import type { Designer } from '@/mock/designers'
 import { usePermissionsStore } from '@/stores/permissions'
 
-/**
- * 后端 `GET /v1/users/designers` 的候选池守卫白名单。
- * 该接口仍保留历史 path，但已经承载 normal/customization/audit 多个候选池；
- * 前端在发起前先短路，避免无权限角色每次打开弹窗都产生 403。
- */
-const DESIGNERS_ALLOWED_ROLES = [
-  'Ops',
-  'Designer',
-  'CustomizationOperator',
-  'Audit_A',
-  'Audit_B',
-  'Admin',
-  'HRAdmin',
-  'SuperAdmin',
-  'DepartmentAdmin',
-  'TeamLead',
-  'DesignDirector',
+const CANDIDATE_SELECTOR_ACTIONS = [
+  'task.create',
+  'task.assign',
+  'task.reassign',
+  'task.audit_handover',
 ] as const
 
 export type UseDesignerOptionsOpts = {
@@ -45,12 +31,12 @@ export type UseDesignerOptionsOpts = {
   autoLoad?: boolean
   /**
    * 可选更严格门禁：调用方声明「只有持有以下任一 action 才需要设计师下拉」。
-   * 与角色白名单是 AND 关系；未传时仅走角色短路。
+   * 与候选接口能力门禁是 AND 关系。
    */
   requiredActions?: readonly string[]
   /**
    * 可选更严格门禁：调用方声明「只有能访问以下任一 page 才需要设计师下拉」。
-   * 与角色白名单是 AND 关系；未传时仅走角色短路。
+   * 与候选接口能力门禁是 AND 关系。
    */
   requiredPages?: readonly string[]
   /**
@@ -87,7 +73,7 @@ export function useDesignerOptions(
   const loadError = ref('')
 
   function canLoad(): boolean {
-    if (!permissionsStore.hasAnyRole(DESIGNERS_ALLOWED_ROLES)) return false
+    if (!CANDIDATE_SELECTOR_ACTIONS.some((action) => permissionsStore.hasAction(action))) return false
     if (requiredActions?.length && !requiredActions.some((a) => permissionsStore.hasAction(a))) {
       return false
     }

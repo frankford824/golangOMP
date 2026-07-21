@@ -21,7 +21,7 @@ func TestTriggerFilingSkipsDuplicatePayload(t *testing.T) {
 				SKUCode:             "SKU-003",
 				ProductNameSnapshot: "Original Product 3",
 				TaskType:            domain.TaskTypeOriginalProductDevelopment,
-				TaskStatus:          domain.TaskStatusPendingWarehouseReceive,
+				TaskStatus:          domain.TaskStatusCompleted,
 			},
 		},
 		details: map[int64]*domain.TaskDetail{
@@ -46,11 +46,9 @@ func TestTriggerFilingSkipsDuplicatePayload(t *testing.T) {
 	}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		step04TxRunner{},
 		WithERPBridgeSelectionBinding(bridgeStub),
@@ -67,7 +65,7 @@ func TestTriggerFilingSkipsDuplicatePayload(t *testing.T) {
 	_, appErr = svc.TriggerFiling(context.Background(), TriggerTaskFilingParams{
 		TaskID:     3,
 		OperatorID: 7,
-		Source:     TaskFilingTriggerSourceWarehouseCompletePrechk,
+		Source:     TaskFilingTriggerSourceManualRetry,
 	})
 	if appErr != nil {
 		t.Fatalf("TriggerFiling(second) unexpected error: %+v", appErr)
@@ -87,7 +85,7 @@ func TestRetryFilingAfterFailure(t *testing.T) {
 				SKUCode:             "SKU-004",
 				ProductNameSnapshot: "Original Product 4",
 				TaskType:            domain.TaskTypeOriginalProductDevelopment,
-				TaskStatus:          domain.TaskStatusPendingWarehouseReceive,
+				TaskStatus:          domain.TaskStatusCompleted,
 			},
 		},
 		details: map[int64]*domain.TaskDetail{
@@ -112,11 +110,9 @@ func TestRetryFilingAfterFailure(t *testing.T) {
 	}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		step04TxRunner{},
 		WithERPBridgeSelectionBinding(bridgeStub),
@@ -163,11 +159,9 @@ func TestBatchNewProductFilingUsesPerSKUProductIID(t *testing.T) {
 	taskRepo := &prdTaskRepo{}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		productCodeTestTxRunner{},
 		WithTaskProductCodeSequenceRepo(newProductCodeSequenceRepoStub()),
@@ -235,11 +229,9 @@ func TestNewProductCreateExplicitSyncERPFalseSkipsCreateFiling(t *testing.T) {
 	taskRepo := &prdTaskRepo{}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		productCodeTestTxRunner{},
 		WithERPBridgeSelectionBinding(bridgeStub),
@@ -285,11 +277,9 @@ func TestBatchNewProductCreateExplicitSyncERPFalseSkipsCreateFiling(t *testing.T
 	taskRepo := &prdTaskRepo{}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		productCodeTestTxRunner{},
 		WithTaskProductCodeSequenceRepo(newProductCodeSequenceRepoStub()),
@@ -343,7 +333,7 @@ func TestBatchSKUItemInfoCanBeUpdatedAfterAuditStarted(t *testing.T) {
 				ID:             1373,
 				TaskNo:         "RW-20260611-A-001370",
 				TaskType:       domain.TaskTypeNewProductDevelopment,
-				TaskStatus:     domain.TaskStatusPendingAuditA,
+				TaskStatus:     domain.TaskStatusPendingAudit,
 				IsBatchTask:    true,
 				BatchItemCount: 3,
 				BatchMode:      domain.TaskBatchModeMultiSKU,
@@ -370,11 +360,9 @@ func TestBatchSKUItemInfoCanBeUpdatedAfterAuditStarted(t *testing.T) {
 	}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		productCodeTestTxRunner{},
 	)
@@ -410,11 +398,9 @@ func TestBatchNewProductCreateSyncAllowsMissingCost(t *testing.T) {
 	taskRepo := &prdTaskRepo{}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		productCodeTestTxRunner{},
 		WithTaskProductCodeSequenceRepo(newProductCodeSequenceRepoStub()),
@@ -463,153 +449,6 @@ func TestBatchNewProductCreateSyncAllowsMissingCost(t *testing.T) {
 	}
 }
 
-func legacyPurchaseFilingDoesNotRegressToPendingWhenBaseSalePriceMissingAfterCreateSync(t *testing.T) {
-	bridgeStub := &erpBridgeSelectionBinderStub{
-		iidOptions:   []*domain.ERPIIDOption{{IID: "定制海报", Label: "定制海报"}},
-		upsertResult: &domain.ERPProductUpsertResult{Status: "succeeded", Message: "ok"},
-	}
-	taskRepo := &prdTaskRepo{}
-	svc := NewTaskService(
-		taskRepo,
-		&prdProcurementRepo{},
-		&prdTaskAssetRepo{},
-		&prdTaskEventRepo{},
-		nil,
-		&prdWarehouseRepo{},
-		prdCodeRuleService{},
-		productCodeTestTxRunner{},
-		WithTaskProductCodeSequenceRepo(newProductCodeSequenceRepoStub()),
-		WithERPBridgeSelectionBinding(bridgeStub),
-	)
-
-	task, appErr := svc.Create(context.Background(), CreateTaskParams{
-		TaskType:            domain.TaskTypePurchaseTask,
-		SourceMode:          domain.TaskSourceModeNewProduct,
-		CreatorID:           11,
-		OwnerTeam:           domain.AllValidTeams()[0],
-		DeadlineAt:          timePtr(),
-		PurchaseSKU:         "NSCK000000",
-		ProductNameSnapshot: "上线前采购单SKU任务",
-		ProductIID:          "定制海报",
-		CostPriceMode:       string(domain.CostPriceModeManual),
-		CostPrice:           float64Ptr(22),
-		Quantity:            int64Ptr(22),
-		SyncERPOnCreate:     true,
-	})
-	if appErr != nil {
-		t.Fatalf("Create() unexpected error: %+v", appErr)
-	}
-	if taskRepo.details[task.ID].FilingStatus != domain.FilingStatusFiled {
-		t.Fatalf("filing_status after create = %s, want filed", taskRepo.details[task.ID].FilingStatus)
-	}
-
-	_, appErr = svc.UpdateBusinessInfo(context.Background(), UpdateTaskBusinessInfoParams{
-		TaskID:             task.ID,
-		OperatorID:         11,
-		ProductName:        "上线前采购单SKU任务",
-		ProductIID:         "定制海报",
-		Category:           "定制海报",
-		SpecText:           "20*20",
-		CostPrice:          float64Ptr(22),
-		ManualCostOverride: true,
-		Quantity:           int64Ptr(22),
-	})
-	if appErr != nil {
-		t.Fatalf("UpdateBusinessInfo() unexpected error: %+v", appErr)
-	}
-	if taskRepo.details[task.ID].FilingStatus != domain.FilingStatusFiled {
-		t.Fatalf("filing_status after business-info patch = %s, want filed", taskRepo.details[task.ID].FilingStatus)
-	}
-	if bridgeStub.upsertCalls != 2 {
-		t.Fatalf("upsert calls = %d, want 2", bridgeStub.upsertCalls)
-	}
-	if got := bridgeStub.upsertPayloads[0].SPrice; got == nil || *got != 0 {
-		t.Fatalf("create upsert s_price = %v, want explicit 0 to avoid ERP default sale price", got)
-	}
-	if got := bridgeStub.upsertPayloads[1].SPrice; got == nil || *got != 0 {
-		t.Fatalf("refile upsert s_price = %v, want explicit 0 to avoid ERP default sale price", got)
-	}
-}
-
-func legacyPurchaseUpdateBusinessInfoCostChangeRefilesERPAndAppendsCostEvent(t *testing.T) {
-	bridgeStub := &erpBridgeSelectionBinderStub{
-		iidOptions:   []*domain.ERPIIDOption{{IID: "定制海报", Label: "定制海报"}},
-		upsertResult: &domain.ERPProductUpsertResult{Status: "succeeded", Message: "ok"},
-	}
-	taskRepo := &prdTaskRepo{}
-	eventRepo := &prdTaskEventRepo{}
-	svc := NewTaskService(
-		taskRepo,
-		&prdProcurementRepo{},
-		&prdTaskAssetRepo{},
-		eventRepo,
-		nil,
-		&prdWarehouseRepo{},
-		prdCodeRuleService{},
-		productCodeTestTxRunner{},
-		WithTaskProductCodeSequenceRepo(newProductCodeSequenceRepoStub()),
-		WithERPBridgeSelectionBinding(bridgeStub),
-	)
-
-	task, appErr := svc.Create(context.Background(), CreateTaskParams{
-		TaskType:            domain.TaskTypePurchaseTask,
-		SourceMode:          domain.TaskSourceModeNewProduct,
-		CreatorID:           11,
-		OwnerTeam:           domain.AllValidTeams()[0],
-		DeadlineAt:          timePtr(),
-		PurchaseSKU:         "NSCK000000",
-		ProductNameSnapshot: "上线前采购单SKU任务",
-		ProductIID:          "定制海报",
-		CostPriceMode:       string(domain.CostPriceModeManual),
-		CostPrice:           float64Ptr(22),
-		Quantity:            int64Ptr(22),
-		SyncERPOnCreate:     true,
-	})
-	if appErr != nil {
-		t.Fatalf("Create() unexpected error: %+v", appErr)
-	}
-
-	_, appErr = svc.UpdateBusinessInfo(context.Background(), UpdateTaskBusinessInfoParams{
-		TaskID:                   task.ID,
-		OperatorID:               11,
-		ProductName:              "上线前采购单SKU任务",
-		ProductIID:               "定制海报",
-		Category:                 "定制海报",
-		SpecText:                 "20*20",
-		CostPrice:                float64Ptr(25),
-		ManualCostOverride:       true,
-		ManualCostOverrideReason: "仓库维护成本价",
-		Quantity:                 int64Ptr(22),
-	})
-	if appErr != nil {
-		t.Fatalf("UpdateBusinessInfo() unexpected error: %+v", appErr)
-	}
-	if bridgeStub.upsertCalls != 2 {
-		t.Fatalf("upsert calls = %d, want 2", bridgeStub.upsertCalls)
-	}
-	if got := bridgeStub.upsertPayloads[1].BusinessInfo.CostPrice; got == nil || *got != 25 {
-		t.Fatalf("refile cost_price = %v, want 25", got)
-	}
-
-	var costEvent *domain.TaskEvent
-	for _, event := range eventRepo.events {
-		if event.EventType == domain.TaskEventCostUpdated {
-			costEvent = event
-			break
-		}
-	}
-	if costEvent == nil {
-		t.Fatalf("events = %+v, want cost updated event", eventRepo.events)
-	}
-	var payload map[string]interface{}
-	if err := json.Unmarshal(costEvent.Payload, &payload); err != nil {
-		t.Fatalf("unmarshal cost event payload: %v", err)
-	}
-	if payload["manual_cost_override_reason"] != "仓库维护成本价" || payload["erp_sync_requested"] != true {
-		t.Fatalf("cost event payload = %#v, want reason and erp_sync_requested", payload)
-	}
-}
-
 func TestUpdateSingleSKUItemCostSyncsTaskDetailAndERPRefilingCost(t *testing.T) {
 	bridgeStub := &erpBridgeSelectionBinderStub{
 		iidOptions:   []*domain.ERPIIDOption{{IID: "铜版纸", Label: "铜版纸"}},
@@ -652,11 +491,9 @@ func TestUpdateSingleSKUItemCostSyncsTaskDetailAndERPRefilingCost(t *testing.T) 
 	eventRepo := &prdTaskEventRepo{}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		eventRepo,
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		productCodeTestTxRunner{},
 		WithERPBridgeSelectionBinding(bridgeStub),
@@ -730,11 +567,9 @@ func TestUpdateBatchSKUItemCostOnlyRefilesTargetSKU(t *testing.T) {
 	}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		productCodeTestTxRunner{},
 		WithERPBridgeSelectionBinding(bridgeStub),
@@ -842,11 +677,9 @@ func TestUpdateBatchSKUItemInfoRecomputesCostAndRefilesTargetSKU(t *testing.T) {
 	eventRepo := &prdTaskEventRepo{}
 	svc := NewTaskServiceWithCatalog(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		eventRepo,
 		nil,
-		&prdWarehouseRepo{},
 		categoryRepo,
 		costRuleRepo,
 		prdCodeRuleService{},
@@ -970,11 +803,9 @@ func TestUpdateBatchSKUItemInfoRecomputesCostFromSubmittedSpec(t *testing.T) {
 	eventRepo := &prdTaskEventRepo{}
 	svc := NewTaskServiceWithCatalog(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		eventRepo,
 		nil,
-		&prdWarehouseRepo{},
 		categoryRepo,
 		costRuleRepo,
 		prdCodeRuleService{},
@@ -1061,11 +892,9 @@ func TestRetryFilingSyncsSingleSKUItemCostProjectionFromTaskDetail(t *testing.T)
 	}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		productCodeTestTxRunner{},
 		WithERPBridgeSelectionBinding(bridgeStub),
@@ -1137,11 +966,9 @@ func TestRetryFilingBatchMultiSKUDoesNotReportTopLevelIIDMissingOnReadbackNotFou
 	}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		productCodeTestTxRunner{},
 		WithERPBridgeSelectionBinding(bridgeStub),
@@ -1202,11 +1029,9 @@ func TestRetryFilingRefreshesProductManagementProjection(t *testing.T) {
 	productManagement := &productManagementCloseSyncerStub{}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		productCodeTestTxRunner{},
 		WithERPBridgeSelectionBinding(bridgeStub),
@@ -1281,11 +1106,9 @@ func TestRetryFilingBatchMultiSKUReportsSKUScopedIIDMissing(t *testing.T) {
 	}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		productCodeTestTxRunner{},
 		WithERPBridgeSelectionBinding(&erpBridgeSelectionBinderStub{}),
@@ -1353,11 +1176,9 @@ func TestRetryFilingBatchMultiSKUOnlyRetriesRowsNeedingSync(t *testing.T) {
 	}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		productCodeTestTxRunner{},
 		WithERPBridgeSelectionBinding(bridgeStub),
@@ -1443,11 +1264,9 @@ func TestRetryFilingBatchMultiSKURecordsPerSKUResultAndContinuesAfterFailure(t *
 	}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		productCodeTestTxRunner{},
 		WithERPBridgeSelectionBinding(bridgeStub),
@@ -1492,11 +1311,9 @@ func TestNewProductFilingDoesNotRegressToPendingWhenCostFieldsMissingAfterCreate
 	taskRepo := &prdTaskRepo{}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		productCodeTestTxRunner{},
 		WithTaskProductCodeSequenceRepo(newProductCodeSequenceRepoStub()),
@@ -1598,11 +1415,9 @@ func TestNewProductFilingFailsWhenERPCostReadbackDiffers(t *testing.T) {
 	taskRepo := &prdTaskRepo{}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		productCodeTestTxRunner{},
 		WithTaskProductCodeSequenceRepo(newProductCodeSequenceRepoStub()),
@@ -1695,11 +1510,9 @@ func TestNewProductFilingSucceedsWhenERPCostReadbackMatchesAfterRetry(t *testing
 	taskRepo := &prdTaskRepo{}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		productCodeTestTxRunner{},
 		WithTaskProductCodeSequenceRepo(newProductCodeSequenceRepoStub()),
@@ -1781,11 +1594,9 @@ func TestNewProductFilingSucceedsWhenERPCostReadback404ThenMatched(t *testing.T)
 	taskRepo := &prdTaskRepo{}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		productCodeTestTxRunner{},
 		WithTaskProductCodeSequenceRepo(newProductCodeSequenceRepoStub()),
@@ -1865,11 +1676,9 @@ func TestNewProductFilingStaysPendingWhenERPCostReadback404Exhausted(t *testing.
 	taskRepo := &prdTaskRepo{}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		productCodeTestTxRunner{},
 		WithTaskProductCodeSequenceRepo(newProductCodeSequenceRepoStub()),
@@ -1939,11 +1748,9 @@ func TestNewProductFilingFailsWhenERPCostReadbackUnverified(t *testing.T) {
 	taskRepo := &prdTaskRepo{}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		productCodeTestTxRunner{},
 		WithTaskProductCodeSequenceRepo(newProductCodeSequenceRepoStub()),

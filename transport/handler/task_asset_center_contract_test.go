@@ -199,55 +199,6 @@ func TestTaskAssetCenterHandlerCreateAssetUploadSessionRejectsLegacyUUIDAssetID(
 	}
 }
 
-func TestTaskAssetCenterHandlerCreateAuditSupplementUploadSessionReturnsSupplementEndpoint(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	router := gin.New()
-	svc := &taskAssetCenterServiceStub{
-		createResult: &service.CreateTaskAssetUploadSessionResult{
-			Session: &domain.UploadSession{
-				ID:         "sess-supp-1",
-				TaskID:     789,
-				UploadMode: domain.DesignAssetUploadModeMultipart,
-				MimeType:   "image/png",
-			},
-		},
-	}
-	handler := NewTaskAssetCenterHandler(svc)
-	router.POST("/v1/tasks/:id/audit-supplements/upload-sessions", handler.CreateAuditSupplementUploadSession)
-
-	body := bytes.NewBufferString(`{"created_by":999,"asset_kind":"delivery","file_name":"missing.png","mime_type":"image/png","reason":"漏传补传"}`)
-	req := httptest.NewRequest(http.MethodPost, "/v1/tasks/789/audit-supplements/upload-sessions", body)
-	req = taskAssetCenterRequestWithSessionActor(req, 9)
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("POST audit supplement upload-sessions code = %d body=%s", rec.Code, rec.Body.String())
-	}
-	if svc.createAuditSupplementCalls != 1 {
-		t.Fatalf("CreateAuditSupplementUploadSession() calls = %d", svc.createAuditSupplementCalls)
-	}
-	if svc.lastAuditSupplementCreateParams.Reason != "漏传补传" {
-		t.Fatalf("Reason = %q", svc.lastAuditSupplementCreateParams.Reason)
-	}
-	if svc.lastAuditSupplementCreateParams.CreatedBy != 9 {
-		t.Fatalf("CreatedBy = %d, want session actor 9 (body actor must not override)", svc.lastAuditSupplementCreateParams.CreatedBy)
-	}
-
-	var resp struct {
-		Data struct {
-			CompleteEndpoint string `json:"complete_endpoint"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v body=%s", err, rec.Body.String())
-	}
-	if resp.Data.CompleteEndpoint != "/v1/tasks/789/audit-supplements/upload-sessions/sess-supp-1/complete" {
-		t.Fatalf("complete_endpoint = %q", resp.Data.CompleteEndpoint)
-	}
-}
-
 func taskAssetCenterRequestWithSessionActor(req *http.Request, actorID int64) *http.Request {
 	return req.WithContext(domain.WithRequestActor(req.Context(), domain.RequestActor{
 		ID:       actorID,
@@ -259,13 +210,11 @@ func taskAssetCenterRequestWithSessionActor(req *http.Request, actorID int64) *h
 }
 
 type taskAssetCenterServiceStub struct {
-	createResult                    *service.CreateTaskAssetUploadSessionResult
-	createCalls                     int
-	createSmallCalls                int
-	createMultipartCalls            int
-	createAuditSupplementCalls      int
-	lastCreateParams                service.CreateTaskAssetUploadSessionParams
-	lastAuditSupplementCreateParams service.CreateAuditSupplementUploadSessionParams
+	createResult         *service.CreateTaskAssetUploadSessionResult
+	createCalls          int
+	createSmallCalls     int
+	createMultipartCalls int
+	lastCreateParams     service.CreateTaskAssetUploadSessionParams
 }
 
 func (s *taskAssetCenterServiceStub) ListAssetResources(context.Context, service.ListAssetResourcesParams) ([]*domain.DesignAsset, *domain.AppError) {
@@ -313,21 +262,10 @@ func (s *taskAssetCenterServiceStub) CreateMultipartUploadSession(_ context.Cont
 	s.lastCreateParams = params
 	return s.createResult, nil
 }
-func (s *taskAssetCenterServiceStub) ListAuditSupplements(context.Context, int64) ([]service.AuditSupplementItem, *domain.AppError) {
-	return nil, nil
-}
-func (s *taskAssetCenterServiceStub) CreateAuditSupplementUploadSession(_ context.Context, params service.CreateAuditSupplementUploadSessionParams) (*service.CreateTaskAssetUploadSessionResult, *domain.AppError) {
-	s.createAuditSupplementCalls++
-	s.lastAuditSupplementCreateParams = params
-	return s.createResult, nil
-}
 func (s *taskAssetCenterServiceStub) CompleteUploadSessionByID(context.Context, service.CompleteTaskAssetUploadSessionParams) (*service.CompleteTaskAssetUploadSessionResult, *domain.AppError) {
 	return nil, nil
 }
 func (s *taskAssetCenterServiceStub) CompleteUploadSession(context.Context, service.CompleteTaskAssetUploadSessionParams) (*service.CompleteTaskAssetUploadSessionResult, *domain.AppError) {
-	return nil, nil
-}
-func (s *taskAssetCenterServiceStub) CompleteAuditSupplementUploadSession(context.Context, service.CompleteAuditSupplementUploadSessionParams) (*service.CompleteTaskAssetUploadSessionResult, *domain.AppError) {
 	return nil, nil
 }
 func (s *taskAssetCenterServiceStub) CancelUploadSessionByID(context.Context, service.CancelTaskAssetUploadSessionParams) (*domain.UploadSession, *domain.AppError) {

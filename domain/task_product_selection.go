@@ -1,7 +1,7 @@
 package domain
 
 // TaskProductSelectionSummary is the lightweight read-model view of original-product provenance.
-// It is intended for task list, board, and procurement-summary consumption.
+// It is intended for task list and task-board consumption.
 type TaskProductSelectionSummary struct {
 	SelectedProductID      *int64                       `json:"selected_product_id,omitempty"`
 	SelectedProductName    string                       `json:"selected_product_name"`

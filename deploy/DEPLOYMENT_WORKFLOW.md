@@ -4,7 +4,6 @@
 - Standard release entrypoint: `deploy/deploy.sh`
 - Local package helper: `deploy/package-local.sh`
 - MAIN packaging entrypoint is locked to `./cmd/server`; `cmd/api` is not a production packaging fallback
-- `cmd/api` remains in the repo only as a deprecated compatibility entrypoint and must not be used for production build or deploy flows
 - `live MAIN` means the public business application service bound to the cutover port `8080`
 - `candidate MAIN` means a side-by-side validation instance of that same MAIN service, usually on `18080`
 - `Bridge` means the ERP/JST adapter runtime on `8081`; side-by-side validation keeps candidate MAIN pointed at the live Bridge dependency instead of creating a second Bridge role
@@ -255,9 +254,9 @@ Copy `deploy/deploy.env.example` to another local-only shell snippet if needed, 
 - `config/*.json`
 - `db/migrations/`
 - `docs/openapi.yaml`
-- `docs/API_USAGE_GUIDE.md` (auto-generated per release since v0.4)
-- `docs/API_INTEGRATION_GUIDE.md` (auto-generated per release since v0.4)
-- `deploy/*.sh` (includes `check-remote-db.sh` for database integration readiness check and `run-org-master-convergence.sh` for the v1.0 org-master-data release flow)
+- `docs/API_USAGE_GUIDE.md` (current authority pointer generated per release)
+- `docs/API_INTEGRATION_GUIDE.md` (current authority pointer generated per release)
+- `deploy/*.sh` (includes the V8 `check-remote-db.sh` schema and cutover readiness check)
 - `deploy/docker-compose.external-asset-watcher.yml` (NAS-side watcher lifecycle; requires a dedicated event token and writable state directory)
 - `PACKAGE_INFO.json`
 
@@ -319,27 +318,17 @@ backend full sync independently repair missed events.
 - Run `bash deploy/tests/deploy-process-guards.test.sh` locally.
 - The test covers occupied-port rejection, exact listener ownership, unhealthy startup cleanup, same-version parallel candidate cleanup, and foreign pidfile refusal. It uses temporary directories and local ephemeral ports only; it does not connect to or modify production.
 
-## Remote Database Integration Readiness Check (since v0.4)
+## V8 Database Integration Readiness Check
 - After deploy, run on the server: `bash /root/ecommerce_ai/current/deploy/check-remote-db.sh`
 - Or with custom base dir: `bash deploy/check-remote-db.sh --base-dir /root/ecommerce_ai`
 - Requires: `main.env` (or `shared/main.env`) with DB_HOST, DB_USER, DB_NAME; mysql client on server
 - From local IDE: `ssh user@host "cd /root/ecommerce_ai/current && bash deploy/check-remote-db.sh"`
 
-## Performance Migration Release Checklist
-- Apply pending database migrations before starting the new `cmd/server` binary. Migrations 114-119 add columns and read-model tables used by hot read paths; starting the binary first can produce `unknown column` errors on product management, asset center, search, and report endpoints.
-- After migrations 117 and 119, run `cmd/tools/search-reindex` to rebuild `asset_search_documents` and `product_search_documents`; run `cmd/tools/search-semantic-enrich` only when AI enrichment is intentionally enabled.
-- After migration 118, keep `ENABLE_CRON_REPORT_L1_DAILY=true` in `shared/main.env`. The default `CRON_SCHEDULE_REPORT_L1_DAILY="*/10 * * * *"` and `REPORT_L1_DAILY_REFRESH_DAYS=3` keep recent L1 throughput aggregates fresh. If `report_task_daily.updated_at` is more than 2 hours stale, the runtime falls back to realtime throughput SQL instead of serving old aggregates.
+## V8 Migration Release Checklist
+- Apply pending migrations before starting the new `cmd/server` binary. The V8 runtime requires the explicit-access, planning-SKU, resource-group, and async-outbox schema.
+- Run `cmd/tools/workflow-groups-migrate --dry-run` against the frozen release snapshot, resolve every blocker, then run `--apply` during the maintenance window.
+- Run `cmd/tools/search-reindex` after the cutover mapping so task resource-group search documents are rebuilt from finalized revisions. Run `cmd/tools/search-semantic-enrich` only when AI enrichment is intentionally enabled.
 - Capture pre/post `EXPLAIN` and `performance_schema.events_statements_summary_by_digest` snapshots for the changed hot queries before claiming the performance rollout complete.
-
-## v1.0 Org-Master-Data Release Flow
-- The org-master-data convergence is not part of the generic deploy auto-start path; run it explicitly before claiming the v1.0 org baseline is live.
-- Server-side helper:
-  - `bash /root/ecommerce_ai/current/deploy/run-org-master-convergence.sh --base-dir /root/ecommerce_ai`
-- What it does:
-  - backs up `users`, `user_roles`, `org_departments`, and `org_teams`
-  - applies `058_v1_0_org_team_department_scoped_uniqueness.sql`
-  - seeds the official v1.0 departments/teams from packaged `config/auth_identity.json`
-  - applies `057_v1_0_org_master_convergence.sql`
   - prints postcheck SQL output for legacy-row and official-baseline verification
 
 ## Notes

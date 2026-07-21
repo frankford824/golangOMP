@@ -33,11 +33,11 @@ func (r *integrationCallLogRepo) Create(ctx context.Context, tx repo.Tx, log *do
 	if err != nil {
 		return 0, fmt.Errorf("marshal integration call roles: %w", err)
 	}
-	requestPayloadJSON, err := marshalOptionalExportJSON(log.RequestPayload)
+	requestPayloadJSON, err := marshalOptionalJSON(log.RequestPayload)
 	if err != nil {
 		return 0, fmt.Errorf("marshal integration request payload: %w", err)
 	}
-	responsePayloadJSON, err := marshalOptionalExportJSON(log.ResponsePayload)
+	responsePayloadJSON, err := marshalOptionalJSON(log.ResponsePayload)
 	if err != nil {
 		return 0, fmt.Errorf("marshal integration response payload: %w", err)
 	}
@@ -140,7 +140,7 @@ func (r *integrationCallLogRepo) List(ctx context.Context, filter repo.Integrati
 
 func (r *integrationCallLogRepo) Update(ctx context.Context, tx repo.Tx, update repo.IntegrationCallLogUpdate) error {
 	sqlTx := Unwrap(tx)
-	responsePayloadJSON, err := marshalOptionalExportJSON(update.ResponsePayload)
+	responsePayloadJSON, err := marshalOptionalJSON(update.ResponsePayload)
 	if err != nil {
 		return fmt.Errorf("marshal integration response payload: %w", err)
 	}

@@ -14,18 +14,12 @@ import (
 )
 
 type UserAdminHandler struct {
-	svc             service.IdentityService
-	operationLogSvc service.OperationLogService
-	traceEventSvc   service.WorkflowTraceEventService
-	routeRules      routeAccessRuleReader
+	svc           service.IdentityService
+	traceEventSvc service.WorkflowTraceEventService
 }
 
-type routeAccessRuleReader interface {
-	ListRouteAccessRules() []domain.RouteAccessRule
-}
-
-func NewUserAdminHandler(svc service.IdentityService, routeRules routeAccessRuleReader, operationLogSvc service.OperationLogService, traceEventSvcs ...service.WorkflowTraceEventService) *UserAdminHandler {
-	h := &UserAdminHandler{svc: svc, routeRules: routeRules, operationLogSvc: operationLogSvc}
+func NewUserAdminHandler(svc service.IdentityService, traceEventSvcs ...service.WorkflowTraceEventService) *UserAdminHandler {
+	h := &UserAdminHandler{svc: svc}
 	if len(traceEventSvcs) > 0 {
 		h.traceEventSvc = traceEventSvcs[0]
 	}
@@ -41,33 +35,23 @@ type patchUserReq struct {
 	DepartmentID       *int64          `json:"department_id"`
 	Team               *string         `json:"team"`
 	TeamID             *int64          `json:"team_id"`
-	Group              *string         `json:"group"`
 	Email              *string         `json:"email"`
 	Mobile             *string         `json:"mobile"`
 	ManagedDepartments *[]string       `json:"managed_departments"`
 	ManagedTeams       *[]string       `json:"managed_teams"`
-	Roles              *[]domain.Role  `json:"roles"`
-	Avatar             *string         `json:"avatar"`
-	TeamCodes          *[]string       `json:"team_codes"`
-	PrimaryTeamCode    *string         `json:"primary_team_code"`
 }
 
 type createUserReq struct {
 	Username           string          `json:"username"`
 	EmployeeNo         json.RawMessage `json:"employee_no"`
-	Account            string          `json:"account"`
 	DisplayName        string          `json:"display_name"`
-	Name               string          `json:"name"`
 	Department         string          `json:"department"`
 	DepartmentID       *int64          `json:"department_id"`
 	Team               string          `json:"team"`
 	TeamID             *int64          `json:"team_id"`
-	Group              string          `json:"group"`
 	Mobile             string          `json:"mobile"`
-	Phone              string          `json:"phone"`
 	Email              string          `json:"email"`
 	Password           string          `json:"password"`
-	Roles              []domain.Role   `json:"roles"`
 	Status             *string         `json:"status"`
 	EmploymentType     *string         `json:"employment_type"`
 	ManagedDepartments *[]string       `json:"managed_departments"`
@@ -101,27 +85,15 @@ type mergeTeamReq struct {
 	TargetTeamID int64 `json:"target_team_id"`
 }
 
-type setUserRolesReq struct {
-	Roles []domain.Role `json:"roles"`
-}
-
 type resetUserPasswordReq struct {
 	Password string `json:"password"`
 }
 
 func (h *UserAdminHandler) ListUsers(c *gin.Context) {
-	if !h.ensureManagementReadAccess(c) {
-		return
-	}
 	var status *domain.UserStatus
 	if raw := c.Query("status"); raw != "" {
 		value := domain.UserStatus(raw)
 		status = &value
-	}
-	var role *domain.Role
-	if raw := c.Query("role"); raw != "" {
-		value := domain.Role(raw)
-		role = &value
 	}
 	var department *domain.Department
 	if raw := c.Query("department"); raw != "" {
@@ -133,7 +105,6 @@ func (h *UserAdminHandler) ListUsers(c *gin.Context) {
 	users, pagination, appErr := h.svc.ListUsers(c.Request.Context(), service.UserFilter{
 		Keyword:    c.Query("keyword"),
 		Status:     status,
-		Role:       role,
 		Department: department,
 		Team:       c.Query("team"),
 		Page:       page,
@@ -181,21 +152,9 @@ func (h *UserAdminHandler) ListAccessPolicyUsers(c *gin.Context) {
 	respondOKWithPagination(c, items, pagination)
 }
 
-// ListDesigners returns designers for task assignment (Ops/Designer/Admin/
-// HRAdmin/SuperAdmin). Minimal fields: id, username, display_name.
-//
-// Round D (v1.6): this handler now routes to the dedicated
-// `ListAssignableDesigners` service method, which bypasses the standard
-// `authorizeUserListFilter` management-scope filter and returns every active
-// candidate for the requested workflow_lane regardless of the actor's
-// department/team. The default lane is normal, preserving Round D Designer
-// behavior; customization selects CustomizationOperator; audit selects regular
-// auditors; all returns the deduped design/customization union. Access control
-// for this route is enforced exclusively by
-// the route guard registered in transport/http.go (`/v1/users/designers`).
-//
-// This endpoint intentionally accepts no keyword/department/team/pagination
-// parameters — it is a narrowly scoped assignment-candidate-pool lookup.
+// ListDesigners returns the active candidate pool selected from explicit
+// auth_* assignments. It intentionally exposes only identity labels needed by
+// task assignment and audit handover controls.
 func (h *UserAdminHandler) ListDesigners(c *gin.Context) {
 	actor, _ := domain.RequestActorFromContext(c.Request.Context())
 	lane, appErr := parseAssignableLane(c.Query("workflow_lane"))
@@ -250,9 +209,6 @@ func parseAssignableLane(raw string) (service.AssignableLane, *domain.AppError) 
 }
 
 func (h *UserAdminHandler) GetUser(c *gin.Context) {
-	if !h.ensureManagementReadAccess(c) {
-		return
-	}
 	id, err := parseID(c)
 	if err != nil {
 		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid user id", nil))
@@ -288,17 +244,16 @@ func (h *UserAdminHandler) CreateUser(c *gin.Context) {
 		employmentType = &value
 	}
 	user, appErr := h.svc.CreateManagedUser(c.Request.Context(), service.CreateManagedUserParams{
-		Username:           firstNonEmpty(req.Account, req.Username),
+		Username:           req.Username,
 		EmployeeNo:         employeeNo,
-		DisplayName:        firstNonEmpty(req.Name, req.DisplayName),
+		DisplayName:        req.DisplayName,
 		Department:         domain.Department(req.Department),
 		DepartmentID:       req.DepartmentID,
-		Team:               firstNonEmpty(req.Group, req.Team),
+		Team:               req.Team,
 		TeamID:             req.TeamID,
-		Mobile:             firstNonEmpty(req.Phone, req.Mobile),
+		Mobile:             req.Mobile,
 		Email:              req.Email,
 		Password:           req.Password,
-		Roles:              req.Roles,
 		Status:             status,
 		EmploymentType:     employmentType,
 		ManagedDepartments: req.ManagedDepartments,
@@ -351,7 +306,6 @@ func (h *UserAdminHandler) PatchUser(c *gin.Context) {
 		DepartmentID:       req.DepartmentID,
 		Team:               req.Team,
 		TeamID:             req.TeamID,
-		Group:              req.Group,
 		Email:              req.Email,
 		Mobile:             req.Mobile,
 		ManagedDepartments: req.ManagedDepartments,
@@ -360,16 +314,6 @@ func (h *UserAdminHandler) PatchUser(c *gin.Context) {
 	if appErr != nil {
 		respondError(c, appErr)
 		return
-	}
-	if req.Roles != nil {
-		user, appErr = h.svc.SetUserRoles(c.Request.Context(), service.SetUserRolesParams{
-			UserID: id,
-			Roles:  *req.Roles,
-		})
-		if appErr != nil {
-			respondError(c, appErr)
-			return
-		}
 	}
 	respondOK(c, user)
 }
@@ -396,87 +340,18 @@ func (h *UserAdminHandler) ResetPassword(c *gin.Context) {
 	respondOK(c, user)
 }
 
-func (h *UserAdminHandler) SetRoles(c *gin.Context) {
-	id, err := parseID(c)
-	if err != nil {
-		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid user id", nil))
-		return
-	}
-	var req setUserRolesReq
-	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
-		return
-	}
-	user, appErr := h.svc.SetUserRoles(c.Request.Context(), service.SetUserRolesParams{
-		UserID: id,
-		Roles:  req.Roles,
-	})
-	if appErr != nil {
-		respondError(c, appErr)
-		return
-	}
-	respondOK(c, user)
-}
-
-func (h *UserAdminHandler) AddRoles(c *gin.Context) {
-	id, err := parseID(c)
-	if err != nil {
-		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid user id", nil))
-		return
-	}
-	var req setUserRolesReq
-	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
-		return
-	}
-	user, appErr := h.svc.AddUserRoles(c.Request.Context(), service.AddUserRolesParams{
-		UserID: id,
-		Roles:  req.Roles,
-	})
-	if appErr != nil {
-		respondError(c, appErr)
-		return
-	}
-	respondOK(c, user)
-}
-
-func (h *UserAdminHandler) RemoveRole(c *gin.Context) {
-	id, err := parseID(c)
-	if err != nil {
-		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid user id", nil))
-		return
-	}
-	user, appErr := h.svc.RemoveUserRole(c.Request.Context(), service.RemoveUserRoleParams{
-		UserID: id,
-		Role:   domain.Role(c.Param("role")),
-	})
-	if appErr != nil {
-		respondError(c, appErr)
-		return
-	}
-	respondOK(c, user)
-}
-
-func (h *UserAdminHandler) ListRoles(c *gin.Context) {
-	if !h.ensureRoleCatalogAccess(c) {
-		return
-	}
-	respondOK(c, h.svc.ListRoles(c.Request.Context()))
-}
-
 func (h *UserAdminHandler) GetOrgOptions(c *gin.Context) {
-	user, ok := h.loadOrgOptionsUser(c)
-	if !ok {
-		return
-	}
 	includeDisabled, appErr := parseIncludeDisabledOrgOptions(c.Query("include_disabled"))
 	if appErr != nil {
 		respondError(c, appErr)
 		return
 	}
-	if includeDisabled && !hasOrgMasterWriteRole(user.Roles) && !user.FrontendAccess.IsSuperAdmin {
-		respondError(c, domain.NewAppError(domain.ErrCodePermissionDenied, "组织维护权限不足，不能查看已停用组织。", nil))
-		return
+	if includeDisabled {
+		actor, ok := domain.RequestActorFromContext(c.Request.Context())
+		if !ok || !domain.ActorHasPermission(actor, domain.PermissionAccessManage) || !domain.ResourceGroupAccessFilterForActor(actor, domain.PermissionAccessManage).Global {
+			respondError(c, domain.NewAppError(domain.ErrCodePermissionDenied, "查看已停用组织需要全局组织管理权限。", nil))
+			return
+		}
 	}
 	var options *domain.OrgOptions
 	if includeDisabled {
@@ -642,86 +517,6 @@ func (h *UserAdminHandler) DeleteTeam(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
-func (h *UserAdminHandler) ListPermissionLogs(c *gin.Context) {
-	if !h.ensureManagementReadAccess(c) {
-		return
-	}
-	var actorID *int64
-	if raw := c.Query("actor_id"); raw != "" {
-		if value, err := parseInt64(raw); err == nil && value > 0 {
-			actorID = &value
-		}
-	}
-	var targetUserID *int64
-	if raw := c.Query("target_user_id"); raw != "" {
-		if value, err := parseInt64(raw); err == nil && value > 0 {
-			targetUserID = &value
-		}
-	}
-	var granted *bool
-	if raw := c.Query("granted"); raw != "" {
-		value := raw == "true" || raw == "1"
-		granted = &value
-	}
-	page, _ := parseInt(c.Query("page"))
-	pageSize, _ := parseInt(c.Query("page_size"))
-	logs, pagination, appErr := h.svc.ListPermissionLogs(c.Request.Context(), service.PermissionLogFilter{
-		ActorID:        actorID,
-		ActorUsername:  c.Query("actor_username"),
-		ActionType:     c.Query("action_type"),
-		TargetUserID:   targetUserID,
-		TargetUsername: c.Query("target_username"),
-		Granted:        granted,
-		Method:         c.Query("method"),
-		RoutePath:      c.Query("route_path"),
-		Page:           page,
-		PageSize:       pageSize,
-	})
-	if appErr != nil {
-		respondError(c, appErr)
-		return
-	}
-	respondOKWithPagination(c, logs, pagination)
-}
-
-func (h *UserAdminHandler) ListRouteAccessRules(c *gin.Context) {
-	if !h.ensureManagementReadAccess(c) {
-		return
-	}
-	if h.routeRules == nil {
-		respondOK(c, []domain.RouteAccessRule{})
-		return
-	}
-	respondOK(c, h.routeRules.ListRouteAccessRules())
-}
-
-func (h *UserAdminHandler) ListOperationLogs(c *gin.Context) {
-	if !h.ensureOperationLogAccess(c) {
-		return
-	}
-	if h.operationLogSvc == nil {
-		respondOKWithPagination(c, []*domain.OperationLogEntry{}, domain.PaginationMeta{
-			Page:     1,
-			PageSize: 20,
-			Total:    0,
-		})
-		return
-	}
-	page, _ := parseInt(c.Query("page"))
-	pageSize, _ := parseInt(c.Query("page_size"))
-	logs, pagination, appErr := h.operationLogSvc.List(c.Request.Context(), service.OperationLogFilter{
-		Source:    c.Query("source"),
-		EventType: c.Query("event_type"),
-		Page:      page,
-		PageSize:  pageSize,
-	})
-	if appErr != nil {
-		respondError(c, appErr)
-		return
-	}
-	respondOKWithPagination(c, logs, pagination)
-}
-
 type recordWorkflowTraceEventReq struct {
 	EventType            string          `json:"event_type"`
 	Action               string          `json:"action"`
@@ -797,196 +592,6 @@ func (h *UserAdminHandler) RecordWorkflowTraceEvent(c *gin.Context) {
 	respondOK(c, created)
 }
 
-func (h *UserAdminHandler) ListWorkflowTraceEvents(c *gin.Context) {
-	if !h.ensureOperationLogAccess(c) {
-		return
-	}
-	if h.traceEventSvc == nil {
-		respondOKWithPagination(c, []*domain.WorkflowTraceEvent{}, domain.PaginationMeta{Page: 1, PageSize: 20, Total: 0})
-		return
-	}
-	page, _ := parseInt(c.Query("page"))
-	pageSize, _ := parseInt(c.Query("page_size"))
-	filter := service.WorkflowTraceEventFilter{
-		TraceID:         c.Query("trace_id"),
-		EventSource:     c.Query("event_source"),
-		EventType:       c.Query("event_type"),
-		Action:          c.Query("action"),
-		ActorUsername:   c.Query("actor_username"),
-		ActorSource:     c.Query("actor_source"),
-		ActorDepartment: c.Query("actor_department"),
-		ActorTeam:       c.Query("actor_team"),
-		RoutePath:       c.Query("route_path"),
-		ModuleKey:       c.Query("module_key"),
-		SKUCode:         c.Query("sku_code"),
-		ResourceType:    c.Query("resource_type"),
-		ResourceID:      c.Query("resource_id"),
-		Outcome:         c.Query("outcome"),
-		BusinessOnly:    parseTraceBool(c.Query("business_only")),
-		Page:            page,
-		PageSize:        pageSize,
-	}
-	if raw := strings.TrimSpace(c.Query("actor_id")); raw != "" {
-		if value, err := parseInt64(raw); err == nil && value > 0 {
-			filter.ActorID = &value
-		}
-	}
-	if raw := strings.TrimSpace(c.Query("task_id")); raw != "" {
-		if value, err := parseInt64(raw); err == nil && value > 0 {
-			filter.TaskID = &value
-		}
-	}
-	if raw := strings.TrimSpace(c.Query("asset_id")); raw != "" {
-		if value, err := parseInt64(raw); err == nil && value > 0 {
-			filter.AssetID = &value
-		}
-	}
-	if raw := strings.TrimSpace(c.Query("design_asset_id")); raw != "" {
-		if value, err := parseInt64(raw); err == nil && value > 0 {
-			filter.DesignAssetID = &value
-		}
-	}
-	if raw := strings.TrimSpace(c.Query("task_asset_id")); raw != "" {
-		if value, err := parseInt64(raw); err == nil && value > 0 {
-			filter.TaskAssetID = &value
-		}
-	}
-	if raw := strings.TrimSpace(c.Query("integration_call_log_id")); raw != "" {
-		if value, err := parseInt64(raw); err == nil && value > 0 {
-			filter.IntegrationCallLogID = &value
-		}
-	}
-	if raw := firstNonEmptyTraceQuery(c.Query("from"), c.Query("since")); raw != "" {
-		if value, err := time.Parse(time.RFC3339, raw); err == nil {
-			filter.From = &value
-		}
-	}
-	if raw := firstNonEmptyTraceQuery(c.Query("to"), c.Query("until")); raw != "" {
-		if value, err := time.Parse(time.RFC3339, raw); err == nil {
-			filter.To = &value
-		}
-	}
-	events, pagination, appErr := h.traceEventSvc.ListTraceEvents(c.Request.Context(), filter)
-	if appErr != nil {
-		respondError(c, appErr)
-		return
-	}
-	respondOKWithPagination(c, events, pagination)
-}
-
-func (h *UserAdminHandler) ensureManagementReadAccess(c *gin.Context) bool {
-	user, appErr := h.svc.GetCurrentUser(c.Request.Context())
-	if appErr != nil {
-		respondError(c, appErr)
-		return false
-	}
-	if user == nil {
-		respondError(c, domain.ErrUnauthorized)
-		return false
-	}
-	if hasManagementReadRole(user.Roles) || user.FrontendAccess.IsSuperAdmin {
-		return true
-	}
-	respondError(c, domain.NewAppError(domain.ErrCodePermissionDenied, "management access is required", nil))
-	return false
-}
-
-func (h *UserAdminHandler) ensureRoleCatalogAccess(c *gin.Context) bool {
-	user, appErr := h.svc.GetCurrentUser(c.Request.Context())
-	if appErr != nil {
-		respondError(c, appErr)
-		return false
-	}
-	if user == nil {
-		respondError(c, domain.ErrUnauthorized)
-		return false
-	}
-	if hasRoleCatalogAccess(user.Roles) || user.FrontendAccess.IsSuperAdmin {
-		return true
-	}
-	respondError(c, domain.NewAppError(domain.ErrCodePermissionDenied, "role catalog access requires department management or higher", nil))
-	return false
-}
-
-func (h *UserAdminHandler) loadOrgOptionsUser(c *gin.Context) (*domain.User, bool) {
-	user, appErr := h.svc.GetCurrentUser(c.Request.Context())
-	if appErr != nil {
-		respondError(c, appErr)
-		return nil, false
-	}
-	if user == nil {
-		respondError(c, domain.ErrUnauthorized)
-		return nil, false
-	}
-	if hasOrgOptionsAccess(user.Roles) || user.FrontendAccess.IsSuperAdmin {
-		return user, true
-	}
-	respondError(c, domain.NewAppError(domain.ErrCodePermissionDenied, "organization access requires department management or higher", nil))
-	return nil, false
-}
-
-func (h *UserAdminHandler) ensureOrgOptionsAccess(c *gin.Context) bool {
-	_, ok := h.loadOrgOptionsUser(c)
-	return ok
-}
-
-func (h *UserAdminHandler) ensureOperationLogAccess(c *gin.Context) bool {
-	user, appErr := h.svc.GetCurrentUser(c.Request.Context())
-	if appErr != nil {
-		respondError(c, appErr)
-		return false
-	}
-	if user == nil {
-		respondError(c, domain.ErrUnauthorized)
-		return false
-	}
-	if hasOperationLogAccess(user.Roles) || user.FrontendAccess.IsSuperAdmin {
-		return true
-	}
-	respondError(c, domain.NewAppError(domain.ErrCodePermissionDenied, "operation logs require HRAdmin or SuperAdmin access", nil))
-	return false
-}
-
-func hasManagementReadRole(roles []domain.Role) bool {
-	for _, role := range domain.NormalizeRoleValues(roles) {
-		switch role {
-		case domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleOrgAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin, domain.RoleTeamLead:
-			return true
-		}
-	}
-	return false
-}
-
-func hasRoleCatalogAccess(roles []domain.Role) bool {
-	for _, role := range domain.NormalizeRoleValues(roles) {
-		switch role {
-		case domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleOrgAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin:
-			return true
-		}
-	}
-	return false
-}
-
-func hasOrgOptionsAccess(roles []domain.Role) bool {
-	for _, role := range domain.NormalizeRoleValues(roles) {
-		switch role {
-		case domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleOrgAdmin, domain.RoleRoleAdmin, domain.RoleDeptAdmin:
-			return true
-		}
-	}
-	return false
-}
-
-func hasOrgMasterWriteRole(roles []domain.Role) bool {
-	for _, role := range domain.NormalizeRoleValues(roles) {
-		switch role {
-		case domain.RoleSuperAdmin, domain.RoleHRAdmin:
-			return true
-		}
-	}
-	return false
-}
-
 func parseIncludeDisabledOrgOptions(raw string) (bool, *domain.AppError) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
@@ -1001,30 +606,11 @@ func parseIncludeDisabledOrgOptions(raw string) (bool, *domain.AppError) {
 	return value, nil
 }
 
-func hasOperationLogAccess(roles []domain.Role) bool {
-	for _, role := range domain.NormalizeRoleValues(roles) {
-		switch role {
-		case domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin:
-			return true
-		}
-	}
-	return false
-}
-
 func actorIDPtrFromRequestActor(actor domain.RequestActor) *int64 {
 	if actor.ID <= 0 {
 		return nil
 	}
 	return &actor.ID
-}
-
-func firstNonEmptyTraceQuery(values ...string) string {
-	for _, value := range values {
-		if trimmed := strings.TrimSpace(value); trimmed != "" {
-			return trimmed
-		}
-	}
-	return ""
 }
 
 func parseEmployeeNoRequestField(raw json.RawMessage, required bool) (*int, *domain.AppError) {

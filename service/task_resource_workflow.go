@@ -606,7 +606,7 @@ func (s *taskResourceWorkflowService) AuditDecision(ctx context.Context, taskID 
 					return err
 				}
 			}
-			if _, err := s.eventRepo.Append(ctx, tx, taskID, "task.audit_returned_to_design", &actor.ID, map[string]interface{}{"reason": request.Reason, "workflow_revision": next}); err != nil {
+			if _, err := s.eventRepo.Append(ctx, tx, taskID, domain.TaskEventAuditReturnedToDesign, &actor.ID, map[string]interface{}{"reason": request.Reason, "workflow_revision": next}); err != nil {
 				return err
 			}
 			response := &domain.ResourceBundle{TaskID: taskID, WorkflowRevision: next}

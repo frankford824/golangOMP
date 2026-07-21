@@ -100,30 +100,14 @@ func (s *Service) taskRepoUpdateStatus(ctx context.Context, tx repo.Tx, taskID i
 }
 
 func canCancel(actor domain.RequestActor, task *domain.Task, force bool) bool {
-	if actor.ID > 0 && actor.ID == task.CreatorID && !force {
-		return true
-	}
-	for _, role := range actor.Roles {
-		if role == domain.RoleSuperAdmin || role == domain.RoleDeptAdmin {
-			return true
-		}
-	}
-	return actor.FrontendAccess.IsSuperAdmin || actor.FrontendAccess.IsDepartmentAdmin
+	return domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskTerminate, task.AccessSubject())
 }
 
 func canBypassClaimRestriction(actor domain.RequestActor, task *domain.Task, force bool) bool {
-	if actor.ID > 0 && actor.ID == task.CreatorID {
-		return true
-	}
 	if !force {
 		return false
 	}
-	for _, role := range actor.Roles {
-		if role == domain.RoleSuperAdmin || role == domain.RoleDeptAdmin {
-			return true
-		}
-	}
-	return actor.FrontendAccess.IsSuperAdmin || actor.FrontendAccess.IsDepartmentAdmin
+	return domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskTerminate, task.AccessSubject())
 }
 
 func mustJSON(v interface{}) json.RawMessage {

@@ -51,7 +51,7 @@ func (r *taskRepo) GetTaskDetailReadBundle(ctx context.Context, taskID int64, ev
 		FROM task_modules
 		WHERE task_id = %[1]d
 		  AND COALESCE(JSON_EXTRACT(data, '$.backfill_placeholder'), CAST('false' AS JSON)) != CAST('true' AS JSON)
-		ORDER BY FIELD(module_key, 'basic_info', 'customization', 'design', 'retouch', 'procurement', 'audit', 'warehouse'), id;
+		ORDER BY FIELD(module_key, 'basic_info', 'customization', 'design', 'retouch', 'audit'), id;
 
 		SELECT task_module_events.id, task_module_events.task_module_id, task_module_events.event_type,
 		       task_module_events.from_state, task_module_events.to_state, task_module_events.actor_id,

@@ -63,7 +63,7 @@ func TestWeComNotifierSuppressesDuplicatePendingAuditMessages(t *testing.T) {
 	if len(sender.messages) != 1 {
 		t.Fatalf("messages = %d, want 1", len(sender.messages))
 	}
-	want := "待审核 | RW-002\n设计师: 李四  下一步: 常规审核组审核"
+	want := "待审核 | RW-002\n设计师: 李四  下一步: 审核组审核"
 	if sender.messages[0] != want {
 		t.Fatalf("message = %q, want %q", sender.messages[0], want)
 	}
@@ -90,7 +90,7 @@ func TestWeComNotifierDoesNotExposeTechnicalTeamCode(t *testing.T) {
 	if strings.Contains(sender.messages[0], "audit_standard") {
 		t.Fatalf("message exposes technical code: %q", sender.messages[0])
 	}
-	want := "待审核 | RW-003\n设计师: 张玉明  下一步: 常规审核组审核"
+	want := "待审核 | RW-003\n设计师: 张玉明  下一步: 审核组审核"
 	if sender.messages[0] != want {
 		t.Fatalf("message = %q, want %q", sender.messages[0], want)
 	}

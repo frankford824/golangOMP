@@ -1,7 +1,7 @@
 # 认证与登录
 
-> Revision: V1.3-A2 i_id-first task/ERP/search integration (2026-04-27)
-> Source: docs/api/openapi.yaml (post V1.3-A2)
+> Revision: V8 current contract (2026-07-20)
+> Source: docs/api/openapi.yaml
 
 > 来源: `docs/api/openapi.yaml`；业务口径参考 V1 四份权威文档。本文不覆盖 OpenAPI 契约。
 
@@ -38,7 +38,7 @@ Content-Type: `application/json`
 | `account` | string | 是 | - |
 | `display_name` | string | 否 | - |
 | `name` | string | 是 | - |
-| `department` | Department | 是 | Dynamic backend org-master department name. Values come from enabled `org_departments` rows exposed by default from `/v1/org/options`; this is no longer a fixed frontend enum. v1.0 business baseline is exactly `人事部`, `运营部`, `设计研发部`, `定制美工部`, `审核部`, `云仓部` (plus the system bucket `未分配`). Legacy names (`设计部`, `采购部`, `仓储部`, `烘焙仓储部`) remain only as disabled compatibility rows for historical integrity; they are hidden from the default `/v1/org/options` projection and are not accepted by registration / user admin / task create inputs. Organization master maintenance clients may request `/v1/org/options?include_disabled=true` to display and restore disabled rows when authorized. |
+| `department` | Department | 是 | Display name from the organization master. Authorization and data scope use stable department/team IDs only; names are never permission conditions. |
 | `team` | string | 否 | - |
 | `group` | string | 否 | Compatibility alias of team |
 | `mobile` | string | 是 | - |
@@ -88,7 +88,7 @@ curl -X POST https://api.example.com/v1/auth/register \
 ### 前端最佳实践
 - 公开端点仅限注册、登录、注册选项；其余端点需要 Bearer token。
 - 登录成功后，前端统一使用 `Authorization: Bearer <token>`。
-- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
 
 ## GET /v1/auth/register-options
@@ -145,7 +145,7 @@ curl -X GET https://api.example.com/v1/auth/register-options \
 ### 前端最佳实践
 - 公开端点仅限注册、登录、注册选项；其余端点需要 Bearer token。
 - 登录成功后，前端统一使用 `Authorization: Bearer <token>`。
-- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
 
 ## POST /v1/auth/login
@@ -215,7 +215,7 @@ curl -X POST https://api.example.com/v1/auth/login \
 ### 前端最佳实践
 - 公开端点仅限注册、登录、注册选项；其余端点需要 Bearer token。
 - 登录成功后，前端统一使用 `Authorization: Bearer <token>`。
-- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
 
 ## GET /v1/auth/me
@@ -269,7 +269,7 @@ curl -X GET https://api.example.com/v1/auth/me \
 ### 前端最佳实践
 - 公开端点仅限注册、登录、注册选项；其余端点需要 Bearer token。
 - 登录成功后，前端统一使用 `Authorization: Bearer <token>`。
-- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
 
 ## PUT /v1/auth/password
@@ -328,6 +328,6 @@ curl -X PUT https://api.example.com/v1/auth/password \
 ### 前端最佳实践
 - 公开端点仅限注册、登录、注册选项；其余端点需要 Bearer token。
 - 登录成功后，前端统一使用 `Authorization: Bearer <token>`。
-- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
 

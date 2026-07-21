@@ -937,13 +937,6 @@ func (s *erpBridgeClientStub) GetSyncLogByID(context.Context, string) (*domain.E
 	return nil, nil
 }
 
-func (s *erpBridgeClientStub) QueryOrderActionLogs(context.Context, domain.ERPOrderActionLogFilter) (*domain.ERPOrderActionLogListResponse, error) {
-	return &domain.ERPOrderActionLogListResponse{
-		Items:      []*domain.ERPOrderActionLog{},
-		Pagination: domain.PaginationMeta{Page: 1, PageSize: 30, Total: 0},
-	}, nil
-}
-
 func (s *erpBridgeClientStub) UpsertProduct(context.Context, domain.ERPProductUpsertPayload) (*domain.ERPProductUpsertResult, error) {
 	return &domain.ERPProductUpsertResult{}, nil
 }

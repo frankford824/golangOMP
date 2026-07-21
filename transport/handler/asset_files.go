@@ -154,12 +154,12 @@ func (h *AssetFilesHandler) authorizeStorageRefAccess(ctx context.Context, actor
 		}
 		return h.authorizeTaskAssetAccess(ctx, asset)
 	case domain.AssetOwnerTypeTaskCreateReference:
-		if actor.ID == ref.OwnerID || assetFilePrivilegedActor(actor) {
+		if actor.ID == ref.OwnerID || assetFileManagementActor(actor) {
 			return nil
 		}
 		return h.authorizeAttachedTaskCreateReference(ctx, ref)
-	case domain.AssetOwnerTypeExportJob, domain.AssetOwnerTypeOutsource, domain.AssetOwnerTypeWarehouse:
-		if actor.ID == ref.OwnerID || assetFilePrivilegedActor(actor) {
+	case domain.AssetOwnerTypeExportJob:
+		if actor.ID == ref.OwnerID || assetFileManagementActor(actor) {
 			return nil
 		}
 	}
@@ -210,14 +210,8 @@ func (h *AssetFilesHandler) authorizeTaskAccess(ctx context.Context, taskID int6
 	return service.AuthorizeTaskReadDetail(ctx, task, h.accessUserRepo)
 }
 
-func assetFilePrivilegedActor(actor domain.RequestActor) bool {
-	return domain.ActorHasAnyRole(actor, []domain.Role{
-		domain.RoleAdmin,
-		domain.RoleSuperAdmin,
-		domain.RoleOps,
-		domain.RoleERP,
-		domain.RoleWarehouse,
-	})
+func assetFileManagementActor(actor domain.RequestActor) bool {
+	return domain.ActorHasPermission(actor, domain.PermissionAssetManage)
 }
 
 // ServeFile handles GET /v1/assets/files/:path where path is the OSS object key or file id.

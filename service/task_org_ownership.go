@@ -203,18 +203,9 @@ func applyTaskOrgVisibilityScope(filter repo.TaskListFilter, scope *DataScope) r
 		return filter
 	}
 	filter.ScopeViewAll = scope.ViewAll
-	filter.ScopeDepartmentCodes = append([]string(nil), scope.DepartmentCodes...)
-	filter.ScopeTeamCodes = append([]string(nil), scope.TeamCodes...)
-	filter.ScopeManagedDepartmentCodes = append([]string(nil), scope.ManagedDepartmentCodes...)
-	filter.ScopeManagedTeamCodes = append([]string(nil), scope.ManagedTeamCodes...)
+	filter.ScopeDepartmentIDs = append([]int64(nil), scope.DepartmentIDs...)
+	filter.ScopeTeamIDs = append([]int64(nil), scope.TeamIDs...)
 	filter.ScopeUserIDs = append([]int64(nil), scope.UserIDs...)
-	filter.ScopeStageVisibilities = make([]repo.ScopeStageVisibility, 0, len(scope.StageVisibilities))
-	for _, visibility := range scope.StageVisibilities {
-		filter.ScopeStageVisibilities = append(filter.ScopeStageVisibilities, repo.ScopeStageVisibility{
-			Statuses: append([]domain.TaskStatus(nil), visibility.Statuses...),
-			Lane:     cloneWorkflowLane(visibility.Lane),
-		})
-	}
 	return filter
 }
 

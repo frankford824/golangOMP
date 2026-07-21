@@ -49,7 +49,7 @@ func (r *taskModuleRepo) ListByTask(ctx context.Context, taskID int64) ([]*domai
 	rows, err := r.db.db.QueryContext(ctx, taskModuleSelectSQL()+`
 		WHERE task_id = ?
 		  AND COALESCE(JSON_EXTRACT(data, '$.backfill_placeholder'), CAST('false' AS JSON)) != CAST('true' AS JSON)
-		ORDER BY FIELD(module_key, 'basic_info', 'customization', 'design', 'retouch', 'procurement', 'audit', 'warehouse'), id`, taskID)
+		ORDER BY FIELD(module_key, 'basic_info', 'customization', 'design', 'retouch', 'audit'), id`, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("list task_modules: %w", err)
 	}

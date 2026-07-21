@@ -14,55 +14,16 @@ import (
 	"workflow/repo"
 )
 
-func TestBuildTaskListQuerySpecUsesJoinedLatestAssetProjection(t *testing.T) {
+func TestBuildTaskListQuerySpecExcludesRetiredWarehouseProcurementAndFileVersionJoins(t *testing.T) {
 	spec, err := buildTaskListQuerySpec(repo.TaskListFilter{}, nil)
 	if err != nil {
 		t.Fatalf("buildTaskListQuerySpec() error = %v", err)
 	}
 
-	if !strings.Contains(spec.latestAssetExpr, "ELSE la.asset_type") {
-		t.Fatalf("latestAssetExpr = %q, want canonicalized la.asset_type expression", spec.latestAssetExpr)
-	}
-	if !strings.Contains(spec.fromSQL, "LEFT JOIN (") {
-		t.Fatalf("fromSQL missing latest asset join: %s", spec.fromSQL)
-	}
-	if !strings.Contains(spec.fromSQL, "WHEN SUM(CASE WHEN ta.asset_type IN ('delivery'") {
-		t.Fatalf("fromSQL missing delivery-priority asset projection: %s", spec.fromSQL)
-	}
-	if !strings.Contains(spec.fromSQL, "ta.id = da.current_version_id") {
-		t.Fatalf("fromSQL missing current-version guard: %s", spec.fromSQL)
-	}
-	if !strings.Contains(spec.fromSQL, "la ON la.task_id = t.id") {
-		t.Fatalf("fromSQL missing latest asset alias join: %s", spec.fromSQL)
-	}
-	if strings.Contains(spec.fromSQL, "t.idLEFT") {
-		t.Fatalf("fromSQL concatenated warehouse and latest asset joins without whitespace: %s", spec.fromSQL)
-	}
-	if strings.Contains(spec.countFromSQL, "task_assets ta") {
-		t.Fatalf("countFromSQL should not include latest asset join for plain list: %s", spec.countFromSQL)
-	}
-}
-
-func TestBuildTaskListQuerySpecWarehouseBlockingUsesJoinedLatestAssetAlias(t *testing.T) {
-	spec, err := buildTaskListQuerySpec(repo.TaskListFilter{
-		TaskQueryFilterDefinition: domain.TaskQueryFilterDefinition{
-			WarehouseBlockingReasonCodes: []domain.WorkflowReasonCode{
-				domain.WorkflowReasonMissingFinalAsset,
-			},
-		},
-	}, nil)
-	if err != nil {
-		t.Fatalf("buildTaskListQuerySpec() error = %v", err)
-	}
-
-	if !strings.Contains(spec.whereSQL, "COALESCE(CASE") || !strings.Contains(spec.whereSQL, "<> 'delivery'") {
-		t.Fatalf("whereSQL = %s", spec.whereSQL)
-	}
-	if strings.Contains(spec.whereSQL, "SELECT ta.asset_type") {
-		t.Fatalf("whereSQL should not contain repeated latest-asset scalar subquery: %s", spec.whereSQL)
-	}
-	if !strings.Contains(spec.countFromSQL, "task_assets ta") {
-		t.Fatalf("countFromSQL should keep latest asset join when where depends on la: %s", spec.countFromSQL)
+	for _, retiredTable := range []string{"procurement_records", "warehouse_receipts", "task_assets", "design_assets"} {
+		if strings.Contains(spec.fromSQL, retiredTable) || strings.Contains(spec.countFromSQL, retiredTable) {
+			t.Fatalf("task list query must not join retired/file-version table %q: from=%s count=%s", retiredTable, spec.fromSQL, spec.countFromSQL)
+		}
 	}
 }
 
@@ -121,41 +82,36 @@ func TestScanTaskListItemRowAllowsMissingTaskDetail(t *testing.T) {
 	defer db.Close()
 
 	now := time.Now()
-	columns := make([]string, 84)
+	columns := make([]string, 71)
 	for i := range columns {
 		columns[i] = fmt.Sprintf("c%d", i)
 	}
-	values := make([]driver.Value, 84)
-	values[0] = int64(26)                               // id
-	values[1] = "RW-20260313-A-000022"                  // task_no
-	values[3] = "SKU-000005"                            // sku_code
-	values[4] = "v0.3 regression retry 1773368404"      // product_name_snapshot
-	values[5] = string(domain.TaskTypePurchaseTask)     // task_type
-	values[6] = string(domain.TaskSourceModeNewProduct) // source_mode
-	values[7] = "team-a"                                // owner_team
-	values[8] = ""                                      // owner_department
-	values[9] = ""                                      // owner_org_team
-	values[12] = int64(0)                               // workflow_revision
-	values[13] = string(domain.TaskPriorityLow)         // priority
-	values[14] = int64(7)                               // creator_id
-	values[15] = int64(8)                               // requester_id
-	values[18] = "Requester 8"                          // requester_name
-	values[19] = "Creator 7"                            // creator_name
-	values[22] = string(domain.TaskStatusPendingAssign) // task_status
-	values[23] = now                                    // created_at
-	values[24] = now                                    // updated_at
-	values[26] = false                                  // need_outsource
-	values[27] = false                                  // is_outsource
-	values[28] = string(domain.TaskBusinessLaneNormal)  // business_lane
-	values[29] = false                                  // customization_required
-	values[30] = ""                                     // customization_source_type
-	values[32] = ""                                     // warehouse_reject_reason
-	values[33] = ""                                     // warehouse_reject_category
-	values[34] = false                                  // is_batch_task
-	values[35] = int64(1)                               // batch_item_count
-	values[36] = string(domain.TaskBatchModeSingle)     // batch_mode
-	values[37] = "SKU-000005"                           // primary_sku_code
-	values[38] = string(domain.TaskSKUCodeTypeRegular)  // sku_code_type
+	values := make([]driver.Value, 71)
+	values[0] = int64(26)                                    // id
+	values[1] = "RW-20260313-A-000022"                       // task_no
+	values[3] = "SKU-000005"                                 // sku_code
+	values[4] = "v0.3 regression retry 1773368404"           // product_name_snapshot
+	values[5] = string(domain.TaskTypeNewProductDevelopment) // task_type
+	values[6] = string(domain.TaskSourceModeNewProduct)      // source_mode
+	values[7] = "team-a"                                     // owner_team
+	values[8] = ""                                           // owner_department
+	values[9] = ""                                           // owner_org_team
+	values[12] = int64(0)                                    // workflow_revision
+	values[13] = string(domain.TaskPriorityLow)              // priority
+	values[14] = int64(7)                                    // creator_id
+	values[15] = int64(8)                                    // requester_id
+	values[18] = "Requester 8"                               // requester_name
+	values[19] = "Creator 7"                                 // creator_name
+	values[22] = string(domain.TaskStatusPendingAssign)      // task_status
+	values[23] = now                                         // created_at
+	values[24] = now                                         // updated_at
+	values[26] = string(domain.TaskBusinessLaneNormal)       // business_lane
+	values[27] = false                                       // customization_required
+	values[28] = false                                       // is_batch_task
+	values[29] = int64(1)                                    // batch_item_count
+	values[30] = string(domain.TaskBatchModeSingle)          // batch_mode
+	values[31] = "SKU-000005"                                // primary_sku_code
+	values[32] = string(domain.TaskSKUCodeTypeRegular)       // sku_code_type
 
 	rows := sqlmock.NewRows(columns).AddRow(values...)
 	mock.ExpectQuery("SELECT").WillReturnRows(rows)
@@ -188,9 +144,6 @@ func TestScanTaskListItemRowAllowsMissingTaskDetail(t *testing.T) {
 	if item.Category != "" || item.SpecText != "" || item.Material != "" || item.SizeText != "" || item.CraftText != "" {
 		t.Fatalf("nullable task_detail strings should stay empty: %+v", item)
 	}
-	if item.ProcurementStatus != nil || item.WarehouseStatus != nil || item.LatestAssetType != nil {
-		t.Fatalf("nullable joins should remain nil-backed: %+v", item)
-	}
 	if err := sqlRows.Err(); err != nil {
 		t.Fatalf("sqlRows.Err() = %v", err)
 	}
@@ -205,8 +158,6 @@ func TestBuildTaskListQuerySpecSupportsCanonicalOwnerFiltersAndScope(t *testing.
 			OwnerDepartments: []string{"运营部"},
 			OwnerOrgTeams:    []string{"运营三组"},
 		},
-		ScopeDepartmentCodes: []string{"设计部"},
-		ScopeTeamCodes:       []string{"设计审核组"},
 	}, nil)
 	if err != nil {
 		t.Fatalf("buildTaskListQuerySpec() error = %v", err)
@@ -223,10 +174,10 @@ func TestBuildTaskListQuerySpecSupportsCanonicalOwnerFiltersAndScope(t *testing.
 	}
 }
 
-func TestBuildTaskListQuerySpecSupportsWorkflowLaneFilter(t *testing.T) {
+func TestBuildTaskListQuerySpecSupportsBusinessLaneFilter(t *testing.T) {
 	spec, err := buildTaskListQuerySpec(repo.TaskListFilter{
 		TaskQueryFilterDefinition: domain.TaskQueryFilterDefinition{
-			WorkflowLanes: []domain.WorkflowLane{domain.WorkflowLaneCustomization},
+			BusinessLanes: []domain.TaskBusinessLane{domain.TaskBusinessLaneCustomization},
 		},
 	}, nil)
 	if err != nil {
@@ -283,107 +234,6 @@ func TestBuildTaskListQuerySpecPriorityDoesNotBreakStatusFilter(t *testing.T) {
 	}
 	if !strings.Contains(spec.whereSQL, "t.task_status IN (?)") {
 		t.Fatalf("whereSQL missing t.task_status IN clause: %s", spec.whereSQL)
-	}
-}
-
-func TestBuildTaskListQuerySpecSupportsStageVisibilityScope(t *testing.T) {
-	spec, err := buildTaskListQuerySpec(repo.TaskListFilter{
-		ScopeStageVisibilities: []repo.ScopeStageVisibility{
-			{
-				Statuses: []domain.TaskStatus{
-					domain.TaskStatusPendingCustomizationReview,
-					domain.TaskStatusPendingEffectReview,
-				},
-				Lane: workflowLanePtr(domain.WorkflowLaneCustomization),
-			},
-		},
-	}, nil)
-	if err != nil {
-		t.Fatalf("buildTaskListQuerySpec() error = %v", err)
-	}
-	if strings.Contains(spec.whereSQL, "1=0") {
-		t.Fatalf("whereSQL should not collapse to 1=0 when stage visibility exists: %s", spec.whereSQL)
-	}
-	if !strings.Contains(spec.whereSQL, "t.task_status IN (?, ?)") {
-		t.Fatalf("whereSQL missing stage status IN clause: %s", spec.whereSQL)
-	}
-	if !strings.Contains(spec.whereSQL, "COALESCE(t.business_lane, '') = 'customization'") {
-		t.Fatalf("whereSQL missing stage lane clause: %s", spec.whereSQL)
-	}
-}
-
-func TestAppendTaskDataScopeWhereOrsExistingAndStageClauses(t *testing.T) {
-	spec, err := buildTaskListQuerySpec(repo.TaskListFilter{
-		ScopeDepartmentCodes: []string{string(domain.DepartmentOperations)},
-		ScopeStageVisibilities: []repo.ScopeStageVisibility{
-			{
-				Statuses: []domain.TaskStatus{
-					domain.TaskStatusPendingAuditA,
-				},
-				Lane: workflowLanePtr(domain.WorkflowLaneNormal),
-			},
-			{
-				Statuses: []domain.TaskStatus{
-					domain.TaskStatusPendingWarehouseReceive,
-				},
-			},
-		},
-	}, nil)
-	if err != nil {
-		t.Fatalf("buildTaskListQuerySpec() error = %v", err)
-	}
-	if !strings.Contains(spec.whereSQL, "t.owner_department IN (?)") {
-		t.Fatalf("whereSQL missing department scope clause: %s", spec.whereSQL)
-	}
-	if !strings.Contains(spec.whereSQL, "t.task_status IN (?) AND (COALESCE(t.business_lane, '') = '' OR t.business_lane = 'normal')") {
-		t.Fatalf("whereSQL missing normal-lane stage clause: %s", spec.whereSQL)
-	}
-	if !strings.Contains(spec.whereSQL, "t.task_status IN (?)") {
-		t.Fatalf("whereSQL missing unrestricted stage clause: %s", spec.whereSQL)
-	}
-	if !strings.Contains(spec.whereSQL, " OR ") {
-		t.Fatalf("whereSQL missing OR-joined scope block: %s", spec.whereSQL)
-	}
-}
-
-func TestAppendTaskDataScopeWhereIncludesManagedDepartmentUserTies(t *testing.T) {
-	spec, err := buildTaskListQuerySpec(repo.TaskListFilter{
-		ScopeManagedDepartmentCodes: []string{"设计研发部"},
-	}, nil)
-	if err != nil {
-		t.Fatalf("buildTaskListQuerySpec() error = %v", err)
-	}
-	for _, want := range []string{
-		"t.owner_department IN (?, ?, ?)",
-		"(SELECT department FROM users WHERE id = t.creator_id) IN (?, ?, ?)",
-		"(SELECT department FROM users WHERE id = t.designer_id) IN (?, ?, ?)",
-		"(SELECT department FROM users WHERE id = t.current_handler_id) IN (?, ?, ?)",
-	} {
-		if !strings.Contains(spec.whereSQL, want) {
-			t.Fatalf("whereSQL missing %q: %s", want, spec.whereSQL)
-		}
-	}
-	if got, want := len(spec.args), 12; got != want {
-		t.Fatalf("args len = %d, want %d; args=%+v", got, want, spec.args)
-	}
-}
-
-func TestAppendTaskDataScopeWhereIncludesManagedTeamUserTies(t *testing.T) {
-	spec, err := buildTaskListQuerySpec(repo.TaskListFilter{
-		ScopeManagedTeamCodes: []string{"默认组"},
-	}, nil)
-	if err != nil {
-		t.Fatalf("buildTaskListQuerySpec() error = %v", err)
-	}
-	for _, want := range []string{
-		"t.owner_org_team IN (?)",
-		"(SELECT team FROM users WHERE id = t.creator_id) IN (?)",
-		"(SELECT team FROM users WHERE id = t.designer_id) IN (?)",
-		"(SELECT team FROM users WHERE id = t.current_handler_id) IN (?)",
-	} {
-		if !strings.Contains(spec.whereSQL, want) {
-			t.Fatalf("whereSQL missing %q: %s", want, spec.whereSQL)
-		}
 	}
 }
 
@@ -597,11 +447,11 @@ func newTaskListItemSQLMockRow(t *testing.T) *sqlmock.Rows {
 	t.Helper()
 
 	now := time.Now()
-	columns := make([]string, 84)
+	columns := make([]string, 71)
 	for i := range columns {
 		columns[i] = fmt.Sprintf("c%d", i)
 	}
-	values := make([]driver.Value, 84)
+	values := make([]driver.Value, 71)
 	values[0] = int64(100)
 	values[1] = "T-BATCH-001"
 	values[3] = "CGG000025"
@@ -618,15 +468,13 @@ func newTaskListItemSQLMockRow(t *testing.T) *sqlmock.Rows {
 	values[14] = int64(1)
 	values[23] = now
 	values[24] = now
-	values[26] = false
+	values[26] = string(domain.TaskBusinessLaneNormal)
 	values[27] = false
-	values[28] = string(domain.TaskBusinessLaneNormal)
-	values[29] = false
-	values[34] = true
-	values[35] = int64(5)
-	values[36] = string(domain.TaskBatchModeMultiSKU)
-	values[37] = "CGG000025"
-	values[38] = string(domain.TaskSKUCodeTypeRegular)
+	values[28] = true
+	values[29] = int64(5)
+	values[30] = string(domain.TaskBatchModeMultiSKU)
+	values[31] = "CGG000025"
+	values[32] = string(domain.TaskSKUCodeTypeRegular)
 	return sqlmock.NewRows(columns).AddRow(values...)
 }
 
@@ -654,21 +502,6 @@ func newTaskListSKUItemSQLMockRows() *sqlmock.Rows {
 		AddRow(int64(1002), int64(100), 2, "CGG000026", string(domain.TaskSKUStatusGenerated), "寿比南山 B", "寿比南山 B", "升学宴副视觉", string(domain.FilingStatusFilingFailed), string(domain.FilingStatusFilingFailed), true, int64(2), nil, "ERP失败", now, now)
 }
 
-func TestAppendTaskDataScopeWhereExpandsPlainDepartmentAliasesWithoutUserTies(t *testing.T) {
-	spec, err := buildTaskListQuerySpec(repo.TaskListFilter{
-		ScopeDepartmentCodes: []string{"设计研发部"},
-	}, nil)
-	if err != nil {
-		t.Fatalf("buildTaskListQuerySpec() error = %v", err)
-	}
-	if !strings.Contains(spec.whereSQL, "t.owner_department IN (?, ?, ?)") {
-		t.Fatalf("whereSQL missing owner department scope: %s", spec.whereSQL)
-	}
-	if strings.Contains(spec.whereSQL, "SELECT department FROM users") {
-		t.Fatalf("plain department scope should not include user department subqueries: %s", spec.whereSQL)
-	}
-}
-
 func TestBuildTaskListQuerySpecExpandsRenamedOwnerOrgTeamFilter(t *testing.T) {
 	spec, err := buildTaskListQuerySpec(repo.TaskListFilter{
 		TaskQueryFilterDefinition: domain.TaskQueryFilterDefinition{
@@ -687,10 +520,6 @@ func TestBuildTaskListQuerySpecExpandsRenamedOwnerOrgTeamFilter(t *testing.T) {
 	if !taskTestArgsContain(spec.args, "淘系运营三部") || !taskTestArgsContain(spec.args, "淘系三组") {
 		t.Fatalf("args = %+v, want current and historical org team aliases", spec.args)
 	}
-}
-
-func workflowLanePtr(lane domain.WorkflowLane) *domain.WorkflowLane {
-	return &lane
 }
 
 func taskTestArgsContain(args []interface{}, target string) bool {

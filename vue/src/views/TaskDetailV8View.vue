@@ -367,7 +367,6 @@ const businessDetailItems = computed(() => [
   { label: '数量', value: task.value?.quantity == null ? '—' : `${task.value.quantity}` },
   { label: 'SKU 当前成本', value: resourceCostSummary.value || formatMoney(task.value?.cost_price) },
   { label: '成本方式', value: detailValue('cost_price_mode') },
-  { label: '产品渠道', value: detailValue('product_channel') },
 ])
 const contentDetailItems = computed(() => [
   { label: '产品简称', value: detailValue('product_short_name') },

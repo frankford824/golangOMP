@@ -11,7 +11,6 @@ export function mergeDetailEnvelopeIntoTaskRaw(
   }
   const merged: Record<string, unknown> = { ...(taskObj as Record<string, unknown>) }
   for (const k of [
-    'workflow',
     'design_sub_status',
     'designSubStatus',
     'creator_id',

@@ -14,11 +14,9 @@ func TestTaskServiceCreateNewProductUsesDefaultProductCodeRule(t *testing.T) {
 	taskRepo := &prdTaskRepo{}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		productCodeTestTxRunner{},
 		WithTaskProductCodeSequenceRepo(newProductCodeSequenceRepoStub()),
@@ -70,11 +68,9 @@ func TestTaskServiceCreatePurchaseTaskIsRetired(t *testing.T) {
 	taskRepo := &prdTaskRepo{}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		productCodeTestTxRunner{},
 		WithTaskProductCodeSequenceRepo(newProductCodeSequenceRepoStub()),
@@ -93,11 +89,9 @@ func TestTaskServiceCreateCustomizationSKUUsesDZRule(t *testing.T) {
 	taskRepo := &prdTaskRepo{}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		productCodeTestTxRunner{},
 		WithTaskProductCodeSequenceRepo(newProductCodeSequenceRepoStub()),
@@ -130,11 +124,9 @@ func TestTaskServiceCustomizationLaneDefaultsSKUToDZ(t *testing.T) {
 	taskRepo := &prdTaskRepo{}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		productCodeTestTxRunner{},
 		WithTaskProductCodeSequenceRepo(newProductCodeSequenceRepoStub()),
@@ -167,11 +159,9 @@ func TestTaskServiceCreateCustomizationBatchNewProductUsesDZForAllItems(t *testi
 	taskRepo := &prdTaskRepo{}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		productCodeTestTxRunner{},
 		WithTaskProductCodeSequenceRepo(newProductCodeSequenceRepoStub()),
@@ -224,11 +214,9 @@ func TestTaskServiceCreateRetouchTaskDoesNotAllocateSKU(t *testing.T) {
 	taskRepo := &prdTaskRepo{}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		productCodeTestTxRunner{},
 		WithTaskProductCodeSequenceRepo(newProductCodeSequenceRepoStub()),
@@ -260,11 +248,9 @@ func TestTaskServiceCreateRetouchTaskDoesNotAllocateSKU(t *testing.T) {
 func TestTaskServicePrepareProductCodesBatchAndConcurrentUnique(t *testing.T) {
 	svc := NewTaskService(
 		&prdTaskRepo{},
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		productCodeTestTxRunner{},
 		WithTaskProductCodeSequenceRepo(newProductCodeSequenceRepoStub()),
@@ -390,11 +376,9 @@ func TestDefaultTaskProductCategoryShortCodeRules(t *testing.T) {
 func TestTaskServiceDefaultProductCodesFollowRegex(t *testing.T) {
 	svc := NewTaskService(
 		&prdTaskRepo{},
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		productCodeTestTxRunner{},
 		WithTaskProductCodeSequenceRepo(newProductCodeSequenceRepoStub()),
@@ -423,11 +407,9 @@ func TestTaskServicePrepareAndCreateUseSameShortCodeSequence(t *testing.T) {
 	taskRepo := &prdTaskRepo{}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		productCodeTestTxRunner{},
 		WithTaskProductCodeSequenceRepo(newProductCodeSequenceRepoStub()),

@@ -26,11 +26,9 @@ func TestTaskServiceCreatePersistsSingleTaskDimensionsAndHint(t *testing.T) {
 	taskRepo := &prdTaskRepo{}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		productCodeTestTxRunner{},
 		WithTaskProductCodeSequenceRepo(newProductCodeSequenceRepoStub()),

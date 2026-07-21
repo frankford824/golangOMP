@@ -50,7 +50,6 @@ type ERPBridgeService interface {
 	ListWarehouses(ctx context.Context) ([]domain.ERPWarehouse, *domain.AppError)
 	ListSyncLogs(ctx context.Context, filter domain.ERPSyncLogFilter) (*domain.ERPSyncLogListResponse, *domain.AppError)
 	GetSyncLogByID(ctx context.Context, id string) (*domain.ERPSyncLog, *domain.AppError)
-	QueryOrderActionLogs(ctx context.Context, filter domain.ERPOrderActionLogFilter) (*domain.ERPOrderActionLogListResponse, *domain.AppError)
 	EnsureLocalProduct(ctx context.Context, tx repo.Tx, snapshot *domain.ERPProductSelectionSnapshot) (*domain.Product, *domain.AppError)
 	// Mutation execution remains Bridge-owned; MAIN may invoke this only from explicit business boundaries.
 	UpsertProduct(ctx context.Context, payload domain.ERPProductUpsertPayload) (*domain.ERPProductUpsertResult, *domain.AppError)
@@ -156,58 +155,6 @@ func normalizeERPIIDListFilter(filter domain.ERPIIDListFilter) domain.ERPIIDList
 		filter.PageSize = 200
 	}
 	return filter
-}
-
-func normalizeERPOrderActionLogFilter(filter domain.ERPOrderActionLogFilter) (domain.ERPOrderActionLogFilter, *domain.AppError) {
-	filter.InternalOID = strings.TrimSpace(filter.InternalOID)
-	filter.OnlineSOID = strings.TrimSpace(filter.OnlineSOID)
-	filter.ActionName = strings.TrimSpace(filter.ActionName)
-	filter.ModifiedBegin = strings.TrimSpace(filter.ModifiedBegin)
-	filter.ModifiedEnd = strings.TrimSpace(filter.ModifiedEnd)
-	filter.PageIndex = normalizePositiveInt(filter.PageIndex, 1)
-	filter.PageSize = normalizePositiveInt(filter.PageSize, 30)
-	if filter.PageSize > 500 {
-		filter.PageSize = 500
-	}
-	hasOrder := filter.InternalOID != ""
-	hasBegin := filter.ModifiedBegin != ""
-	hasEnd := filter.ModifiedEnd != ""
-	if !hasOrder && !(hasBegin && hasEnd) {
-		return filter, domain.NewAppError(domain.ErrCodeInvalidRequest, "o_id or modified_begin/modified_end is required; so_id is retained only as a display-side correlation field", nil)
-	}
-	if hasBegin != hasEnd {
-		return filter, domain.NewAppError(domain.ErrCodeInvalidRequest, "modified_begin and modified_end must be provided together", nil)
-	}
-	if hasBegin && hasEnd {
-		begin, ok := parseJSTOpenWebDateTime(filter.ModifiedBegin)
-		if !ok {
-			return filter, domain.NewAppError(domain.ErrCodeInvalidRequest, "modified_begin must use yyyy-MM-dd HH:mm:ss", nil)
-		}
-		end, ok := parseJSTOpenWebDateTime(filter.ModifiedEnd)
-		if !ok {
-			return filter, domain.NewAppError(domain.ErrCodeInvalidRequest, "modified_end must use yyyy-MM-dd HH:mm:ss", nil)
-		}
-		if end.Before(begin) {
-			return filter, domain.NewAppError(domain.ErrCodeInvalidRequest, "modified_end must not be earlier than modified_begin", nil)
-		}
-		if end.Sub(begin) > 24*time.Hour {
-			return filter, domain.NewAppError(domain.ErrCodeInvalidRequest, "modified_begin/modified_end interval must not exceed one day", nil)
-		}
-	}
-	return filter, nil
-}
-
-func parseJSTOpenWebDateTime(value string) (time.Time, bool) {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return time.Time{}, false
-	}
-	for _, layout := range []string{"2006-01-02 15:04:05", time.RFC3339, time.RFC3339Nano} {
-		if parsed, err := time.ParseInLocation(layout, value, time.FixedZone("Asia/Shanghai", 8*3600)); err == nil {
-			return parsed, true
-		}
-	}
-	return time.Time{}, false
 }
 
 func (s *erpBridgeService) GetProductByID(ctx context.Context, id string) (*domain.ERPProduct, *domain.AppError) {
@@ -367,37 +314,6 @@ func (s *erpBridgeService) GetSyncLogByID(ctx context.Context, id string) (*doma
 		return nil, domain.ErrNotFound
 	}
 	return item, nil
-}
-
-func (s *erpBridgeService) QueryOrderActionLogs(ctx context.Context, filter domain.ERPOrderActionLogFilter) (*domain.ERPOrderActionLogListResponse, *domain.AppError) {
-	if s.client == nil {
-		return nil, domain.NewAppError(domain.ErrCodeInternalError, "erp bridge client is unavailable", nil)
-	}
-	normalized, appErr := normalizeERPOrderActionLogFilter(filter)
-	if appErr != nil {
-		return nil, appErr
-	}
-	result, err := s.client.QueryOrderActionLogs(ctx, normalized)
-	if err != nil {
-		return nil, mapERPBridgeError("query erp order action logs", err)
-	}
-	if result == nil {
-		result = &domain.ERPOrderActionLogListResponse{
-			Items:      []*domain.ERPOrderActionLog{},
-			Pagination: buildPaginationMeta(normalized.PageIndex, normalized.PageSize, 0),
-		}
-	}
-	if result.Items == nil {
-		result.Items = []*domain.ERPOrderActionLog{}
-	}
-	if result.Pagination.Page <= 0 {
-		result.Pagination.Page = normalized.PageIndex
-	}
-	if result.Pagination.PageSize <= 0 {
-		result.Pagination.PageSize = normalized.PageSize
-	}
-	result.NormalizedFilters = normalized
-	return result, nil
 }
 
 func (s *erpBridgeService) EnsureLocalProduct(ctx context.Context, tx repo.Tx, snapshot *domain.ERPProductSelectionSnapshot) (*domain.Product, *domain.AppError) {

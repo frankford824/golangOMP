@@ -105,17 +105,3 @@ type TaskSKUItem struct {
 	CreatedAt                time.Time           `db:"created_at"            json:"created_at"`
 	UpdatedAt                time.Time           `db:"updated_at"            json:"updated_at"`
 }
-
-type ProcurementRecordItem struct {
-	ID                  int64             `db:"id"                    json:"id"`
-	ProcurementRecordID int64             `db:"procurement_record_id" json:"procurement_record_id"`
-	TaskID              int64             `db:"task_id"               json:"task_id"`
-	TaskSKUItemID       int64             `db:"task_sku_item_id"      json:"task_sku_item_id"`
-	SKUCode             string            `db:"sku_code"              json:"sku_code"`
-	Status              ProcurementStatus `db:"status"                json:"status"`
-	Quantity            *int64            `db:"quantity"              json:"quantity,omitempty"`
-	CostPrice           *float64          `db:"cost_price"            json:"cost_price,omitempty"`
-	BaseSalePrice       *float64          `db:"base_sale_price"       json:"base_sale_price,omitempty"`
-	CreatedAt           time.Time         `db:"created_at"            json:"created_at"`
-	UpdatedAt           time.Time         `db:"updated_at"            json:"updated_at"`
-}

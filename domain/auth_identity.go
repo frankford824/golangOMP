@@ -122,28 +122,6 @@ func DefaultTaskTeamMappings() map[string][]string {
 	}
 }
 
-// DepartmentDefaultBusinessRoles returns the default business role bundle for
-// department-leader account registration. It intentionally excludes broad
-// cross-domain roles and keeps unassigned/non-business departments empty.
-func DepartmentDefaultBusinessRoles(department Department) []Role {
-	switch department {
-	case DepartmentOperations, DepartmentProcurement:
-		return []Role{RoleOps}
-	case DepartmentCloudWarehouse, DepartmentWarehouse, DepartmentBakeryWH:
-		return []Role{RoleWarehouse}
-	case DepartmentDesignRD:
-		return []Role{RoleDesigner}
-	case DepartmentDesign:
-		return []Role{RoleDesigner}
-	case DepartmentCustomizationArt:
-		return []Role{RoleCustomizationOperator}
-	case DepartmentAudit:
-		return []Role{RoleAuditA, RoleCustomizationReviewer}
-	default:
-		return []Role{}
-	}
-}
-
 func (d Department) Valid() bool {
 	for _, candidate := range DefaultDepartments() {
 		if d == candidate {
@@ -175,7 +153,6 @@ func AllValidTeams() []string {
 const (
 	UserStatusActive   UserStatus = "active"
 	UserStatusDisabled UserStatus = "disabled"
-	UserStatusDeleted  UserStatus = "deleted"
 )
 
 func (s UserStatus) Valid() bool {
@@ -296,19 +273,6 @@ type RegistrationOptions struct {
 	Departments []DepartmentOption `json:"departments"`
 }
 
-type RoleCatalogEntry struct {
-	Role                     Role     `json:"role"`
-	Name                     string   `json:"name"`
-	Description              string   `json:"description"`
-	Capabilities             []string `json:"capabilities,omitempty"`
-	Category                 string   `json:"category,omitempty"`
-	Assignable               bool     `json:"assignable"`
-	AssignableByCurrentActor bool     `json:"assignable_by_current_actor"`
-	Deprecated               bool     `json:"deprecated"`
-	HiddenByDefault          bool     `json:"hidden_by_default"`
-	AssignmentNote           string   `json:"assignment_note,omitempty"`
-}
-
 type ConfiguredSuperAdmin struct {
 	Username           string         `json:"username"`
 	DisplayName        string         `json:"display_name"`
@@ -349,181 +313,6 @@ type AuthSettings struct {
 type OrgOptions struct {
 	Departments           []DepartmentOption         `json:"departments"`
 	TeamsByDepartment     map[string][]string        `json:"teams_by_department"`
-	RoleCatalogSummary    []RoleCatalogEntry         `json:"role_catalog_summary"`
 	UnassignedPoolEnabled bool                       `json:"unassigned_pool_enabled"`
 	ConfiguredAssignments []ConfiguredUserAssignment `json:"configured_assignments,omitempty"`
-}
-
-func DefaultRoleCatalog() []RoleCatalogEntry {
-	entries := []RoleCatalogEntry{
-		{
-			Role:         RoleSuperAdmin,
-			Name:         "超级管理员",
-			Description:  "拥有全局用户、组织、角色、任务与系统管理权限。",
-			Capabilities: []string{"user.manage", "role.assign", "org.manage", "permission_logs.read", "task.full_access"},
-		},
-		{
-			Role:         RoleHRAdmin,
-			Name:         "人事管理员",
-			Description:  "负责人账号、未分配池调度与组织归属管理。",
-			Capabilities: []string{"user.manage", "org.assign", "permission_logs.read"},
-		},
-		{
-			Role:         RoleOrgAdmin,
-			Name:         "组织管理员",
-			Description:  "历史保留角色，仅用于兼容既有账号，不再作为新增授权入口。",
-			Capabilities: []string{"org.manage", "user.org.assign"},
-		},
-		{
-			Role:         RoleRoleAdmin,
-			Name:         "角色管理员",
-			Description:  "历史保留角色，仅用于兼容既有账号，不再作为新增授权入口。",
-			Capabilities: []string{"role.read"},
-		},
-		{
-			Role:         RoleAdmin,
-			Name:         "管理员",
-			Description:  "历史保留管理角色，仅用于兼容既有账号，不再作为新增授权入口。",
-			Capabilities: []string{"user.manage", "permission_logs.read", "operation_logs.read", "task.full_access"},
-		},
-		{
-			Role:         RoleDeptAdmin,
-			Name:         "部门管理员",
-			Description:  "管理本部门用户、小组归属与部门任务协同。",
-			Capabilities: []string{"department.manage", "department.users.read", "department.scope", "task.reassign.department"},
-		},
-		{
-			Role:         RoleTeamLead,
-			Name:         "组长",
-			Description:  "查看本部门任务并管理本组任务协同，不具备账号管理权限。",
-			Capabilities: []string{"team.manage", "team.users.read", "task.reassign.team"},
-		},
-		{
-			Role:         RoleDesignDirector,
-			Name:         "设计总监",
-			Description:  "历史保留角色，仅用于兼容既有账号，不再作为新增授权入口。",
-			Capabilities: []string{"design.department.manage", "design.review.read"},
-		},
-		{
-			Role:         RoleDesignReviewer,
-			Name:         "设计审核",
-			Description:  "历史保留角色，仅用于兼容既有账号，不再作为新增授权入口。",
-			Capabilities: []string{"design.review", "design.audit.view"},
-		},
-		{
-			Role:         RoleMember,
-			Name:         "成员",
-			Description:  "基础成员角色，可查看个人相关信息。",
-			Capabilities: []string{"profile.view"},
-		},
-		{
-			Role:         RoleOps,
-			Name:         "运营",
-			Description:  "创建任务、维护业务信息并推进主流程。",
-			Capabilities: []string{"task.create", "task.business_info", "warehouse.prepare", "task.close"},
-		},
-		{
-			Role:         RoleDesigner,
-			Name:         "设计师",
-			Description:  "处理设计任务并提交设计文件。",
-			Capabilities: []string{"task.design_submit", "task.asset_upload"},
-		},
-		{
-			Role:         RoleCustomizationOperator,
-			Name:         "定制美工",
-			Description:  "处理定制生产上传、效果流转与生产交接。",
-			Capabilities: []string{"task.customization.submit", "task.customization.transfer", "task.asset_upload"},
-		},
-		{
-			Role:         RoleAuditA,
-			Name:         "常规审核",
-			Description:  "处理常规任务审核、交接复核与打回。",
-			Capabilities: []string{"task.audit.claim", "task.audit.review", "task.audit.takeover"},
-		},
-		{
-			Role:           RoleAuditB,
-			Name:           "历史兼容：常规审核旧编码",
-			Description:    "历史保留角色，仅兼容既有账号；常规审核新授权请使用 Audit_A。",
-			AssignmentNote: "常规审核旧编码，不允许新增分配",
-			Capabilities:   []string{"task.audit.claim", "task.audit.review", "task.audit.takeover"},
-		},
-		{
-			Role:         RoleWarehouse,
-			Name:         "仓库人员",
-			Description:  "处理仓库接收、退回与完成。",
-			Capabilities: []string{"warehouse.receive", "warehouse.reject", "warehouse.complete"},
-		},
-		{
-			Role:         RoleAssetSubmitter,
-			Name:         "素材工作台-交付人员",
-			Description:  "在素材工作台提交计件交付内容。",
-			Capabilities: []string{"asset.workbench.submit", "asset.workbench.profile", "asset.workbench.material.download"},
-		},
-		{
-			Role:         RoleAssetManager,
-			Name:         "素材工作台-作品管理",
-			Description:  "管理素材工作台提交内容、审核作品并查询素材来源。",
-			Capabilities: []string{"asset.workbench.manage", "asset.workbench.system_search"},
-		},
-		{
-			Role:         RoleAssetTemplateAdmin,
-			Name:         "素材工作台-计价配置",
-			Description:  "维护素材工作台计价、扣款、福利与活动价配置。",
-			Capabilities: []string{"asset.workbench.cost_center.manage"},
-		},
-		{
-			Role:         RoleAssetSettlement,
-			Name:         "素材工作台-结算财务",
-			Description:  "处理素材工作台结算预览、生成、确认、取消与调整。",
-			Capabilities: []string{"asset.workbench.settlement", "asset.workbench.export"},
-		},
-		{
-			Role:         RoleOutsource,
-			Name:         "外协",
-			Description:  "历史保留角色，仅用于兼容既有账号，不再作为新增授权入口。",
-			Capabilities: []string{"outsource.manage"},
-		},
-		{
-			Role:         RoleCustomizationReviewer,
-			Name:         "定制审核",
-			Description:  "处理定制初审、效果审核、修改源文件上传与退回。",
-			Capabilities: []string{"task.customization.review", "task.customization.effect_review", "task.customization.review.asset_upload"},
-		},
-		{
-			Role:         RoleERP,
-			Name:         "企管ERP",
-			Description:  "历史保留角色，仅用于兼容既有系统同步账号。",
-			Capabilities: []string{"erp.sync"},
-		},
-	}
-	for i := range entries {
-		HydrateRoleCatalogEntryDefaults(&entries[i])
-	}
-	return entries
-}
-
-func HydrateRoleCatalogEntryDefaults(entry *RoleCatalogEntry) {
-	if entry == nil {
-		return
-	}
-	entry.Assignable = true
-	switch entry.Role {
-	case RoleSuperAdmin, RoleHRAdmin, RoleDeptAdmin, RoleTeamLead:
-		entry.Category = "management"
-	case RoleAssetSubmitter, RoleAssetManager, RoleAssetTemplateAdmin, RoleAssetSettlement:
-		entry.Category = "asset_workbench"
-	case RoleAuditB, RoleAdmin, RoleOrgAdmin, RoleRoleAdmin, RoleDesignDirector, RoleDesignReviewer, RoleOutsource, RoleERP:
-		entry.Category = "compatibility"
-		entry.Assignable = false
-		entry.Deprecated = true
-		entry.HiddenByDefault = true
-		if entry.AssignmentNote == "" {
-			entry.AssignmentNote = "历史兼容角色，不允许新增分配"
-		}
-	default:
-		entry.Category = "business"
-	}
-	if entry.Role == RoleMember {
-		entry.Category = "business"
-	}
 }

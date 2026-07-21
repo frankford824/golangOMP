@@ -34,10 +34,8 @@ export const usersApi = {
   /**
    * 获取设计师列表
    * GET /v1/users/designers
-   * v0.5 对齐：FRONTEND_ALIGNMENT_v0.5.md 第 D 节
-   * 返回 id、username、display_name，用于创建任务页设计师下拉、指派设计师场景
-   *
-   * 兼容调用形态（不破坏旧调用点）：
+   * 返回显式权限模型筛选后的 id、username、display_name，用于创建、指派与审核交班。
+   * 调用形态：
    *   - usersApi.getDesigners()
    *   - usersApi.getDesigners(signal)
    *   - usersApi.getDesigners({ workflowLane: 'customization' })
@@ -81,36 +79,6 @@ export const usersApi = {
    */
   getById: (id: string, signal?: AbortSignal) =>
     http.get(`/v1/users/${id}`, { signal }),
-
-  /**
-   * 角色目录
-   * GET /v1/roles
-   */
-  listRoles: (signal?: AbortSignal) =>
-    http.get('/v1/roles', { signal }),
-
-  /**
-   * 为用户分配角色
-   * POST /v1/users/{id}/roles
-   * 权限：超级管理员
-   */
-  assignRoles: (id: string, payload: { roles: string[] }, signal?: AbortSignal) =>
-    http.post(`/v1/users/${id}/roles`, payload, { signal }),
-
-  /**
-   * 覆盖用户角色（正式推荐）
-   * PUT /v1/users/{id}/roles
-   */
-  replaceRoles: (id: string, payload: { roles: string[] }, signal?: AbortSignal) =>
-    http.put(`/v1/users/${id}/roles`, payload, { signal }),
-
-  /**
-   * 移除用户的某个角色
-   * DELETE /v1/users/{id}/roles/{role}
-   * 权限：超级管理员
-   */
-  removeRole: (id: string, role: string, signal?: AbortSignal) =>
-    http.delete(`/v1/users/${id}/roles/${encodeURIComponent(role)}`, { signal }),
 
   /**
    * 更新用户（含组织归属：department / team）

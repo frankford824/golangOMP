@@ -225,12 +225,6 @@ type deleteLifecycleRepoStub struct {
 	deleteGuard       *repo.TaskAssetDeleteGuard
 }
 
-func (s *deleteLifecycleRepoStub) Archive(context.Context, repo.Tx, repo.TaskAssetLifecycleUpdate) error {
-	return nil
-}
-func (s *deleteLifecycleRepoStub) Restore(context.Context, repo.Tx, repo.TaskAssetLifecycleUpdate) error {
-	return nil
-}
 func (s *deleteLifecycleRepoStub) LockGenericDeleteGuard(context.Context, repo.Tx, int64) (*repo.TaskAssetDeleteGuard, error) {
 	if s.deleteGuard != nil {
 		return s.deleteGuard, nil

@@ -143,6 +143,26 @@ func (r *userRepo) List(ctx context.Context, filter repo.UserListFilter) ([]*dom
 			args = append(args, clauseArgs...)
 		}
 	}
+	if filter.ScopeRestricted && !filter.ScopeGlobal {
+		scopeClauses := make([]string, 0, 3)
+		if clause, clauseArgs := buildInt64InClause("users.id", filter.ScopeUserIDs); clause != "" {
+			scopeClauses = append(scopeClauses, clause)
+			args = append(args, clauseArgs...)
+		}
+		if clause, clauseArgs := buildInt64InClause("users.department_id", filter.ScopeDepartmentIDs); clause != "" {
+			scopeClauses = append(scopeClauses, clause)
+			args = append(args, clauseArgs...)
+		}
+		if clause, clauseArgs := buildInt64InClause("users.team_id", filter.ScopeTeamIDs); clause != "" {
+			scopeClauses = append(scopeClauses, clause)
+			args = append(args, clauseArgs...)
+		}
+		if len(scopeClauses) == 0 {
+			where = append(where, "1=0")
+		} else {
+			where = append(where, "("+strings.Join(scopeClauses, " OR ")+")")
+		}
+	}
 
 	countQuery := `SELECT COUNT(*) FROM users WHERE ` + strings.Join(where, " AND ")
 	var total int64
@@ -172,39 +192,6 @@ func (r *userRepo) List(ctx context.Context, filter repo.UserListFilter) ([]*dom
 		users = append(users, user)
 	}
 	return users, total, rows.Err()
-}
-
-// ListActiveByRole returns every user with status='active' that carries the
-// given role. It has no department/team/keyword filters and no pagination —
-// callers should use this ONLY for assignment-candidate-pool lookups (e.g.
-// `/v1/users/designers` dropdown) where the result set is expected to be
-// small and where the route layer is responsible for access control.
-func (r *userRepo) ListActiveByRole(ctx context.Context, role domain.Role) ([]*domain.User, error) {
-	rows, err := r.db.db.QueryContext(ctx, `
-		SELECT `+userSelectColumns+`
-		FROM users
-		WHERE status = ?
-		  AND EXISTS (SELECT 1 FROM user_roles ur WHERE ur.user_id = users.id AND ur.role = ?)
-		ORDER BY id DESC`,
-		domain.UserStatusActive, role,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("list active users by role: %w", err)
-	}
-	defer rows.Close()
-
-	users := make([]*domain.User, 0)
-	for rows.Next() {
-		user, err := scanUser(rows)
-		if err != nil {
-			return nil, err
-		}
-		users = append(users, user)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list active users by role rows: %w", err)
-	}
-	return users, nil
 }
 
 func (r *userRepo) Update(ctx context.Context, tx repo.Tx, user *domain.User) error {

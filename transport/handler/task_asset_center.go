@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -162,12 +161,6 @@ type cancelTaskAssetUploadSessionReq struct {
 	OSSObjectKey string `json:"oss_object_key"`
 }
 
-type batchGlobalAssetSearchReq struct {
-	Terms        []string `json:"terms"`
-	FormatFilter string   `json:"format_filter"`
-	AssetKind    string   `json:"asset_kind"`
-}
-
 func (h *TaskAssetCenterHandler) BatchDownloadTaskReferenceAssets(c *gin.Context) {
 	taskID, err := parseID(c)
 	if err != nil {
@@ -199,194 +192,6 @@ func (h *TaskAssetCenterHandler) ListAssets(c *gin.Context) {
 		return
 	}
 	respondOK(c, assets)
-}
-
-func (h *TaskAssetCenterHandler) ListAuditSupplements(c *gin.Context) {
-	taskID, err := parseID(c)
-	if err != nil {
-		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid task id", nil))
-		return
-	}
-	items, appErr := h.svc.ListAuditSupplements(c.Request.Context(), taskID)
-	if appErr != nil {
-		respondError(c, appErr)
-		return
-	}
-	respondOK(c, items)
-}
-
-func (h *TaskAssetCenterHandler) CreateAuditSupplementUploadSession(c *gin.Context) {
-	taskID, err := parseID(c)
-	if err != nil {
-		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid task id", nil))
-		return
-	}
-	req, bindErr := bindCreateTaskAssetUploadSessionReq(c)
-	if bindErr != nil {
-		respondError(c, bindErr)
-		return
-	}
-	createdBy, appErr := actorIDOrRequestValue(c, nil, "created_by")
-	if appErr != nil {
-		respondError(c, appErr)
-		return
-	}
-	assetType := normalizeAssetTypeInput(req.AssetKind, req.AssetType)
-	if assetType != "" && assetType != string(domain.TaskAssetTypeDelivery) {
-		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "audit supplement only supports delivery assets", map[string]interface{}{
-			"allowed_asset_types": []string{string(domain.TaskAssetTypeDelivery)},
-			"asset_type":          assetType,
-		}))
-		return
-	}
-	filename := firstNonEmptyTrimmed(req.FileName, req.Filename)
-	expectedSize := req.ExpectedSize
-	if expectedSize == nil {
-		expectedSize = req.FileSize
-	}
-	result, appErr := h.svc.CreateAuditSupplementUploadSession(c.Request.Context(), service.CreateAuditSupplementUploadSessionParams{
-		TaskID:        taskID,
-		CreatedBy:     createdBy,
-		AssetID:       req.AssetID,
-		Filename:      filename,
-		ExpectedSize:  expectedSize,
-		MimeType:      strings.TrimSpace(req.MimeType),
-		FileHash:      strings.TrimSpace(req.FileHash),
-		Reason:        strings.TrimSpace(firstNonEmptyTrimmed(req.Reason, req.Remark)),
-		TargetSKUCode: strings.TrimSpace(req.TargetSKUCode),
-	})
-	if appErr != nil {
-		respondError(c, appErr)
-		return
-	}
-	respondCreated(c, buildCreateAuditSupplementUploadSessionResponse(result))
-}
-
-func (h *TaskAssetCenterHandler) CompleteAuditSupplementUploadSession(c *gin.Context) {
-	taskID, err := parseID(c)
-	if err != nil {
-		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid task id", nil))
-		return
-	}
-	var req completeTaskAssetUploadSessionReq
-	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
-		return
-	}
-	completedBy, appErr := actorIDOrRequestValue(c, nil, "completed_by")
-	if appErr != nil {
-		respondError(c, appErr)
-		return
-	}
-	result, appErr := h.svc.CompleteAuditSupplementUploadSession(c.Request.Context(), service.CompleteAuditSupplementUploadSessionParams{
-		TaskID:            taskID,
-		SessionID:         strings.TrimSpace(c.Param("session_id")),
-		CompletedBy:       completedBy,
-		Reason:            strings.TrimSpace(firstNonEmptyTrimmed(req.Reason, req.Remark)),
-		Remark:            strings.TrimSpace(req.Remark),
-		FileHash:          strings.TrimSpace(req.FileHash),
-		UploadContentType: strings.TrimSpace(req.UploadContentType),
-		OSSParts:          req.OSSParts,
-		OSSUploadID:       strings.TrimSpace(req.OSSUploadID),
-		OSSObjectKey:      strings.TrimSpace(req.OSSObjectKey),
-	})
-	if appErr != nil {
-		respondError(c, appErr)
-		return
-	}
-	respondOK(c, result)
-}
-
-func (h *TaskAssetCenterHandler) ListAssetResources(c *gin.Context) {
-	var taskID *int64
-	var sourceAssetID *int64
-	if rawTaskID := strings.TrimSpace(c.Query("task_id")); rawTaskID != "" {
-		parsedTaskID, err := parseInt64(rawTaskID)
-		if err != nil {
-			respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid task_id", nil))
-			return
-		}
-		taskID = &parsedTaskID
-	}
-	if rawSourceAssetID := strings.TrimSpace(c.Query("source_asset_id")); rawSourceAssetID != "" {
-		parsedSourceAssetID, err := parseInt64(rawSourceAssetID)
-		if err != nil {
-			respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid source_asset_id", nil))
-			return
-		}
-		sourceAssetID = &parsedSourceAssetID
-	}
-	params := service.ListAssetResourcesParams{
-		TaskID:        taskID,
-		SourceAssetID: sourceAssetID,
-		ScopeSKUCode:  strings.TrimSpace(c.Query("scope_sku_code")),
-	}
-	if assetType := normalizeAssetTypeInput(c.Query("asset_kind"), c.Query("asset_type")); assetType != "" {
-		params.AssetType = domain.TaskAssetType(assetType)
-	}
-	if archiveStatus := domain.AssetArchiveStatus(strings.TrimSpace(c.Query("archive_status"))); archiveStatus.Valid() {
-		params.ArchiveStatus = archiveStatus
-	}
-	if uploadStatus := domain.DesignAssetUploadStatus(strings.TrimSpace(c.Query("upload_status"))); uploadStatus.Valid() {
-		params.UploadStatus = uploadStatus
-	}
-	assets, appErr := h.svc.ListAssetResources(c.Request.Context(), params)
-	if appErr != nil {
-		respondError(c, appErr)
-		return
-	}
-	respondOK(c, assets)
-}
-
-func (h *TaskAssetCenterHandler) SearchGlobalAssets(c *gin.Context) {
-	if h.globalSvc == nil {
-		respondError(c, domain.NewAppError(domain.ErrCodeInternalError, "asset center service is not configured", nil))
-		return
-	}
-	query, appErr := parseAssetSearchQuery(c)
-	if appErr != nil {
-		respondError(c, appErr)
-		return
-	}
-	actor, _ := domain.RequestActorFromContext(c.Request.Context())
-	policyRevision := int64(0)
-	if actor.EffectiveAccess != nil {
-		policyRevision = actor.EffectiveAccess.PolicyRevision
-	}
-	query.AccessScopeKey = fmt.Sprintf("user:%d:policy:%d", actor.ID, policyRevision)
-	result, appErr := h.globalSvc.Search(c.Request.Context(), query)
-	if appErr != nil {
-		respondAssetCenterError(c, appErr)
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{
-		"data":  result.Items,
-		"total": result.Total,
-		"page":  result.Page,
-		"size":  result.Size,
-	})
-}
-
-func (h *TaskAssetCenterHandler) BatchSearchGlobalAssets(c *gin.Context) {
-	if h.globalSvc == nil {
-		respondError(c, domain.NewAppError(domain.ErrCodeInternalError, "asset center service is not configured", nil))
-		return
-	}
-	var req batchGlobalAssetSearchReq
-	if err := c.ShouldBindJSON(&req); err != nil {
-		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, err.Error(), nil))
-		return
-	}
-	result, appErr := h.globalSvc.BatchSearch(c.Request.Context(), assetcenter.BatchSearchRequest{
-		Terms:        req.Terms,
-		FormatFilter: req.FormatFilter,
-		AssetKind:    req.AssetKind,
-	})
-	if appErr != nil {
-		respondAssetCenterError(c, appErr)
-		return
-	}
-	respondOK(c, result)
 }
 
 func (h *TaskAssetCenterHandler) GetGlobalAsset(c *gin.Context) {
@@ -477,69 +282,8 @@ func (h *TaskAssetCenterHandler) StreamGlobalExternalAsset(c *gin.Context) {
 	c.Status(http.StatusOK)
 }
 
-func (h *TaskAssetCenterHandler) DownloadGlobalAssetVersion(c *gin.Context) {
-	if h.globalSvc == nil {
-		respondError(c, domain.NewAppError(domain.ErrCodeInternalError, "asset center service is not configured", nil))
-		return
-	}
-	assetID, err := parseInt64(strings.TrimSpace(c.Param("asset_id")))
-	if err != nil {
-		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid asset id", nil))
-		return
-	}
-	versionID, err := parseInt64(strings.TrimSpace(c.Param("version_id")))
-	if err != nil {
-		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid version id", nil))
-		return
-	}
-	info, appErr := h.globalSvc.DownloadVersion(c.Request.Context(), assetID, versionID)
-	if appErr != nil {
-		respondAssetCenterError(c, appErr)
-		return
-	}
-	respondOK(c, info)
-}
-
 type assetReasonReq struct {
 	Reason string `json:"reason"`
-}
-
-func (h *TaskAssetCenterHandler) ArchiveGlobalAsset(c *gin.Context) {
-	assetID, err := parseInt64(strings.TrimSpace(c.Param("asset_id")))
-	if err != nil {
-		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid asset id", nil))
-		return
-	}
-	var req assetReasonReq
-	_ = c.ShouldBindJSON(&req)
-	actor, _ := domain.RequestActorFromContext(c.Request.Context())
-	if h.lifecycleSvc == nil {
-		respondError(c, domain.NewAppError(domain.ErrCodeInternalError, "asset lifecycle service is not configured", nil))
-		return
-	}
-	if appErr := h.lifecycleSvc.Archive(c.Request.Context(), actor, assetID, req.Reason); appErr != nil {
-		respondAssetCenterError(c, appErr)
-		return
-	}
-	c.JSON(http.StatusAccepted, gin.H{"data": gin.H{"asset_id": assetID, "archived": true}})
-}
-
-func (h *TaskAssetCenterHandler) RestoreGlobalAsset(c *gin.Context) {
-	if h.lifecycleSvc == nil {
-		respondError(c, domain.NewAppError(domain.ErrCodeInternalError, "asset lifecycle service is not configured", nil))
-		return
-	}
-	assetID, err := parseInt64(strings.TrimSpace(c.Param("asset_id")))
-	if err != nil {
-		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid asset id", nil))
-		return
-	}
-	actor, _ := domain.RequestActorFromContext(c.Request.Context())
-	if appErr := h.lifecycleSvc.Restore(c.Request.Context(), actor, assetID); appErr != nil {
-		respondAssetCenterError(c, appErr)
-		return
-	}
-	c.JSON(http.StatusAccepted, gin.H{"data": gin.H{"asset_id": assetID, "archived": false}})
 }
 
 func (h *TaskAssetCenterHandler) DeleteGlobalAsset(c *gin.Context) {
@@ -1002,17 +746,6 @@ func buildCreateUploadSessionResponse(result *service.CreateTaskAssetUploadSessi
 	return resp
 }
 
-func buildCreateAuditSupplementUploadSessionResponse(result *service.CreateTaskAssetUploadSessionResult) gin.H {
-	resp := buildCreateUploadSessionResponse(result, false)
-	if result == nil || result.Session == nil {
-		return resp
-	}
-	taskID := result.Session.TaskID
-	sessionID := result.Session.ID
-	resp["complete_endpoint"] = "/v1/tasks/" + int64ToString(taskID) + "/audit-supplements/upload-sessions/" + sessionID + "/complete"
-	return resp
-}
-
 func uploadStrategyLabel(mode domain.DesignAssetUploadMode) string {
 	if mode == domain.DesignAssetUploadModeSmall {
 		return "single_part"
@@ -1022,51 +755,6 @@ func uploadStrategyLabel(mode domain.DesignAssetUploadMode) string {
 
 func normalizeAssetTypeInput(primary, fallback string) string {
 	return firstNonEmptyTrimmed(primary, fallback)
-}
-
-func parseAssetSearchQuery(c *gin.Context) (domain.AssetSearchQuery, *domain.AppError) {
-	query := domain.AssetSearchQuery{
-		Keyword:        strings.TrimSpace(c.Query("keyword")),
-		ModuleKey:      strings.TrimSpace(c.Query("module_key")),
-		OwnerTeamCode:  strings.TrimSpace(c.Query("owner_team_code")),
-		IsArchived:     domain.AssetArchiveFilter(strings.TrimSpace(c.DefaultQuery("is_archived", string(domain.AssetArchiveFilterFalse)))),
-		TaskStatus:     domain.AssetTaskStatusFilter(strings.TrimSpace(c.DefaultQuery("task_status", string(domain.AssetTaskStatusFilterAll)))),
-		Source:         domain.NormalizeAssetResourceSource(firstNonEmptyTrimmed(c.Query("source"), c.Query("resource_source"))),
-		UsableState:    domain.AssetUsableStateFilter(strings.TrimSpace(c.DefaultQuery("usable_state", string(domain.AssetUsableStateFilterAll)))),
-		FormatCategory: domain.AssetFormatCategoryFilter(strings.TrimSpace(c.DefaultQuery("format_category", string(domain.AssetFormatCategoryAll)))),
-		BusinessLane:   domain.TaskBusinessLane(firstNonEmptyTrimmed(c.Query("business_lane"), c.Query("workflow_lane"))),
-		AssetType:      domain.TaskAssetType(firstNonEmptyTrimmed(c.Query("asset_type"), c.Query("asset_kind"))),
-		TimeBasis:      domain.AssetSearchTimeBasis(strings.TrimSpace(c.Query("time_basis"))),
-	}
-	if raw := strings.TrimSpace(c.Query("created_from")); raw != "" {
-		parsed, err := time.Parse(time.RFC3339, raw)
-		if err != nil {
-			return query, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid created_from", nil)
-		}
-		query.CreatedFrom = &parsed
-	}
-	if raw := strings.TrimSpace(c.Query("created_to")); raw != "" {
-		parsed, err := time.Parse(time.RFC3339, raw)
-		if err != nil {
-			return query, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid created_to", nil)
-		}
-		query.CreatedTo = &parsed
-	}
-	if raw := strings.TrimSpace(c.Query("page")); raw != "" {
-		page, err := strconv.Atoi(raw)
-		if err != nil {
-			return query, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid page", nil)
-		}
-		query.Page = page
-	}
-	if raw := strings.TrimSpace(c.Query("size")); raw != "" {
-		size, err := strconv.Atoi(raw)
-		if err != nil {
-			return query, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid size", nil)
-		}
-		query.Size = size
-	}
-	return query.Normalized(), nil
 }
 
 func respondAssetCenterError(c *gin.Context, err *domain.AppError) {

@@ -67,8 +67,8 @@ func PermissionSupportsTaskTypes(code PermissionCode) bool {
 }
 
 // AccessTaskTypeValid restricts new access-policy grants to task types that
-// remain writable after the v8 cutover. Legacy purchase_task values may still
-// exist in historical rows, but must never be introduced by a new policy.
+// remain writable in the current workflow. Historical task type values are
+// read-only evidence and must never be introduced by a new policy.
 func AccessTaskTypeValid(taskType TaskType) bool {
 	switch taskType {
 	case TaskTypeOriginalProductDevelopment, TaskTypeNewProductDevelopment, TaskTypeRetouchTask,

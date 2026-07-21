@@ -278,7 +278,7 @@ func TestSearchService(t *testing.T) {
 	})
 	t.Run("scope routing all", func(t *testing.T) {
 		repo := &stubSearchRepo{}
-		_, appErr := NewService(repo).Search(context.Background(), actor(domain.RoleSuperAdmin), "x", "all", 3)
+		_, appErr := NewService(repo).Search(context.Background(), actorWithPermissions(domain.PermissionTaskView, domain.PermissionAssetView, domain.PermissionCatalogView, domain.PermissionAccessView), "x", "all", 3)
 		if appErr != nil {
 			t.Fatal(appErr)
 		}
@@ -294,7 +294,7 @@ func TestSearchService(t *testing.T) {
 			{"tasks", "tasks"}, {"assets", "assets"}, {"products", "products"}, {"users", "users"},
 		} {
 			repo := &stubSearchRepo{}
-			_, appErr := NewService(repo).Search(context.Background(), actor(domain.RoleSuperAdmin), "x", tc.scope, 20)
+			_, appErr := NewService(repo).Search(context.Background(), actorWithPermissions(domain.PermissionTaskView, domain.PermissionAssetView, domain.PermissionCatalogView, domain.PermissionAccessView), "x", tc.scope, 20)
 			if appErr != nil {
 				t.Fatalf("%s appErr=%+v", tc.scope, appErr)
 			}
@@ -313,13 +313,23 @@ func TestSearchService(t *testing.T) {
 			t.Fatalf("usersCalls=%d users=%v", repo.usersCalls, got.Users)
 		}
 	})
-	t.Run("super and hr query users", func(t *testing.T) {
-		for _, role := range []domain.Role{domain.RoleSuperAdmin, domain.RoleHRAdmin} {
+	t.Run("explicit access capability queries users", func(t *testing.T) {
+		for _, permission := range []domain.PermissionCode{domain.PermissionAccessView, domain.PermissionAccessManage} {
 			repo := &stubSearchRepo{}
-			got, appErr := NewService(repo).Search(context.Background(), actor(role), "x", "users", 20)
+			got, appErr := NewService(repo).Search(context.Background(), actorWithPermissions(permission), "x", "users", 20)
 			if appErr != nil || repo.usersCalls != 1 || len(got.Users) != 1 {
-				t.Fatalf("role=%s calls=%d got=%+v err=%+v", role, repo.usersCalls, got, appErr)
+				t.Fatalf("permission=%s calls=%d got=%+v err=%+v", permission, repo.usersCalls, got, appErr)
 			}
+		}
+	})
+	t.Run("legacy admin role without access capability cannot query users", func(t *testing.T) {
+		repo := &stubSearchRepo{}
+		got, appErr := NewService(repo).Search(context.Background(), domain.RequestActor{ID: 1, Roles: []domain.Role{domain.RoleSuperAdmin}}, "x", "users", 20)
+		if appErr != nil {
+			t.Fatal(appErr)
+		}
+		if repo.usersCalls != 0 || len(got.Users) != 0 {
+			t.Fatalf("usersCalls=%d users=%v", repo.usersCalls, got.Users)
 		}
 	})
 }
@@ -365,16 +375,33 @@ func (errorExternalAssetSearch) SearchGlobal(context.Context, string, int) ([]do
 func actor(role domain.Role) domain.RequestActor {
 	result := domain.RequestActor{ID: 1, Roles: []domain.Role{role}, Source: domain.RequestActorSourceSessionToken, AuthMode: domain.AuthModeSessionTokenRoleEnforced}
 	if role == domain.RoleSuperAdmin {
-		result.Permissions = []domain.PermissionCode{domain.PermissionTaskView, domain.PermissionAssetView, domain.PermissionCatalogView}
+		result.Permissions = []domain.PermissionCode{domain.PermissionTaskView, domain.PermissionAssetView, domain.PermissionCatalogView, domain.PermissionAccessView}
 		result.EffectiveAccess = &domain.EffectiveAccess{
-			Permissions: []domain.PermissionCode{domain.PermissionTaskView, domain.PermissionAssetView, domain.PermissionCatalogView},
+			Permissions: []domain.PermissionCode{domain.PermissionTaskView, domain.PermissionAssetView, domain.PermissionCatalogView, domain.PermissionAccessView},
 			Assignments: []domain.AccessAssignment{{RoleID: 1, ScopeMode: domain.AccessScopeGlobal}},
 			Sources: []domain.EffectiveAccessNote{
 				{Permission: domain.PermissionTaskView, RoleID: 1},
 				{Permission: domain.PermissionAssetView, RoleID: 1},
 				{Permission: domain.PermissionCatalogView, RoleID: 1},
+				{Permission: domain.PermissionAccessView, RoleID: 1},
 			},
 		}
 	}
 	return result
+}
+
+func actorWithPermissions(permissions ...domain.PermissionCode) domain.RequestActor {
+	sources := make([]domain.EffectiveAccessNote, 0, len(permissions))
+	for _, permission := range permissions {
+		sources = append(sources, domain.EffectiveAccessNote{Permission: permission, RoleID: 1})
+	}
+	return domain.RequestActor{
+		ID:          1,
+		Permissions: append([]domain.PermissionCode(nil), permissions...),
+		EffectiveAccess: &domain.EffectiveAccess{
+			Permissions: append([]domain.PermissionCode(nil), permissions...),
+			Assignments: []domain.AccessAssignment{{RoleID: 1, ScopeMode: domain.AccessScopeGlobal}},
+			Sources:     sources,
+		},
+	}
 }

@@ -369,7 +369,7 @@ export const useDesignStore = defineStore('design', () => {
   }
 
   /**
-   * 批量并列商品：按桶串行上传（每桶须带 target_sku_code，v0.9 live）；全部完成后 loadTask 一次、submitDesign 一次。
+   * 批量 SKU：按资源组串行上传（每组须带 target_sku_code）；全部完成后刷新任务并统一提交设计。
    */
   async function submitDeliveryAuditBatches(
     taskId: string,

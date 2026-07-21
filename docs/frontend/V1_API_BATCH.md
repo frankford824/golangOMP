@@ -1,7 +1,7 @@
 # Excel 批量创建
 
-> Revision: V1.3-A2 i_id-first task/ERP/search integration (2026-04-27)
-> Source: docs/api/openapi.yaml (post V1.3-A2)
+> Revision: V8 current contract (2026-07-20)
+> Source: docs/api/openapi.yaml
 
 > 来源: `docs/api/openapi.yaml`；业务口径参考 V1 四份权威文档。本文不覆盖 OpenAPI 契约。
 
@@ -67,7 +67,7 @@ curl -X GET https://api.example.com/v1/tasks/batch-create/template.xlsx \
 - 前端只负责展示解析预览并在确认创建时把每行 `reference_file_refs` 原样放回 `batch_items[]`。
 - 用户填写的 `产品i_id` 会在 `parse-excel` 阶段由后端按 ERP i_id 选项做精确校验，非法值返回行级 `invalid_i_id`。
 - Excel 字段与枚举以模板中的 Schema/EnumDict sheet 和接口 violations 为准。
-- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
 
 ## POST /v1/tasks/batch-create/parse-excel
@@ -136,6 +136,6 @@ curl -X POST https://api.example.com/v1/tasks/batch-create/parse-excel \
 - 前端只负责展示解析预览并在确认创建时把每行 `reference_file_refs` 原样放回 `batch_items[]`。
 - 用户填写的 `产品i_id` 会在 `parse-excel` 阶段由后端按 ERP i_id 选项做精确校验，非法值返回行级 `invalid_i_id`。
 - Excel 字段与枚举以模板中的 Schema/EnumDict sheet 和接口 violations 为准。
-- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
 

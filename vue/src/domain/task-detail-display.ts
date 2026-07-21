@@ -31,12 +31,6 @@ const VALUE_LABELS: Record<string, Record<string, string>> = {
     rule: '按成本规则计算',
     automatic: '系统自动计算',
   },
-  product_channel: {
-    online: '线上渠道',
-    offline: '线下渠道',
-    domestic: '国内渠道',
-    overseas: '海外渠道',
-  },
   source_mode: {
     manual: '运营创建',
     excel: '表格导入',
@@ -79,4 +73,3 @@ export function taskDetailDisplayValue(key: string, value: unknown, empty = '未
 export function handoverStatusLabel(value: unknown): string {
   return taskDetailDisplayValue('handover_status', value, '等待接手')
 }
-

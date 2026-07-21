@@ -230,7 +230,6 @@ describe('TaskDetailV8View business context', () => {
       quantity: 240,
       cost_price: '12.50',
       cost_price_mode: '按件',
-      product_channel: 'Amazon US',
       product_short_name: '随行杯',
       copy_content: '一键开盖，随行不漏水。',
       style_keywords: '清爽、通透、夏日',
@@ -245,7 +244,7 @@ describe('TaskDetailV8View business context', () => {
 
     await wrapper.findAll('button').find((item) => item.text() === '完整任务信息')?.trigger('click')
     const text = dialog().textContent || ''
-    for (const expected of ['紧急', '240', '¥12.50', '按件', 'Amazon US', '随行杯', '一键开盖，随行不漏水。', '清爽、通透、夏日', 'https://example.test/reference', '等待同步']) {
+    for (const expected of ['紧急', '240', '¥12.50', '按件', '随行杯', '一键开盖，随行不漏水。', '清爽、通透、夏日', 'https://example.test/reference', '等待同步']) {
       expect(text).toContain(expected)
     }
   })

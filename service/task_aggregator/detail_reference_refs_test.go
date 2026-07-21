@@ -59,17 +59,14 @@ func TestBuildDetailEnrichesActorNamesAndDesignWorkflow(t *testing.T) {
 	if detail.DesignSubStatus != string(domain.TaskSubStatusInProgress) {
 		t.Fatalf("design_sub_status = %q, want in_progress", detail.DesignSubStatus)
 	}
-	if detail.Workflow.SubStatus.Design.Code != domain.TaskSubStatusInProgress {
-		t.Fatalf("workflow.sub_status.design = %+v, want in_progress", detail.Workflow.SubStatus.Design)
-	}
 }
 
-func TestBuildDetailWorkflowUsesTaskStatusWhenModuleStateIsStale(t *testing.T) {
+func TestBuildDetailUsesV8TaskStatusWhenModuleStateIsStale(t *testing.T) {
 	designerID := int64(203)
 	task := &domain.Task{
 		ID:         629,
 		TaskType:   domain.TaskTypeOriginalProductDevelopment,
-		TaskStatus: domain.TaskStatusPendingAuditA,
+		TaskStatus: domain.TaskStatusPendingAudit,
 		CreatorID:  1,
 		DesignerID: &designerID,
 	}
@@ -88,18 +85,6 @@ func TestBuildDetailWorkflowUsesTaskStatusWhenModuleStateIsStale(t *testing.T) {
 
 	if detail.DesignSubStatus != string(domain.TaskSubStatusPendingAudit) {
 		t.Fatalf("design_sub_status = %q, want pending_audit", detail.DesignSubStatus)
-	}
-	if detail.Workflow.MainStatus != domain.TaskMainStatusFiled {
-		t.Fatalf("workflow.main_status = %q, want filed", detail.Workflow.MainStatus)
-	}
-	if detail.Workflow.SubStatus.Design.Code != domain.TaskSubStatusPendingAudit {
-		t.Fatalf("workflow.sub_status.design = %+v, want pending_audit", detail.Workflow.SubStatus.Design)
-	}
-	if detail.Workflow.SubStatus.Audit.Code != domain.TaskSubStatusInReview {
-		t.Fatalf("workflow.sub_status.audit = %+v, want in_review", detail.Workflow.SubStatus.Audit)
-	}
-	if detail.Workflow.SubStatus.Warehouse.Code != domain.TaskSubStatusNotTriggered {
-		t.Fatalf("workflow.sub_status.warehouse = %+v, want not_triggered", detail.Workflow.SubStatus.Warehouse)
 	}
 }
 

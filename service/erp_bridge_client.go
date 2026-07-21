@@ -27,7 +27,6 @@ type ERPBridgeClient interface {
 	ListCategories(ctx context.Context) ([]*domain.ERPCategory, error)
 	ListSyncLogs(ctx context.Context, filter domain.ERPSyncLogFilter) (*domain.ERPSyncLogListResponse, error)
 	GetSyncLogByID(ctx context.Context, id string) (*domain.ERPSyncLog, error)
-	QueryOrderActionLogs(ctx context.Context, filter domain.ERPOrderActionLogFilter) (*domain.ERPOrderActionLogListResponse, error)
 	UpsertProduct(ctx context.Context, payload domain.ERPProductUpsertPayload) (*domain.ERPProductUpsertResult, error)
 	UpdateItemStyle(ctx context.Context, payload domain.ERPItemStyleUpdatePayload) (*domain.ERPItemStyleUpdateResult, error)
 	ShelveProductsBatch(ctx context.Context, payload domain.ERPProductBatchMutationPayload) (*domain.ERPProductBatchMutationResult, error)
@@ -240,37 +239,6 @@ func (c *erpBridgeClient) GetSyncLogByID(ctx context.Context, id string) (*domai
 		return nil, err
 	}
 	return decodeERPSyncLog(payload)
-}
-
-func (c *erpBridgeClient) QueryOrderActionLogs(ctx context.Context, filter domain.ERPOrderActionLogFilter) (*domain.ERPOrderActionLogListResponse, error) {
-	query := url.Values{}
-	if filter.PageIndex > 0 {
-		query.Set("page_index", strconv.Itoa(filter.PageIndex))
-		query.Set("page", strconv.Itoa(filter.PageIndex))
-	}
-	if filter.PageSize > 0 {
-		query.Set("page_size", strconv.Itoa(filter.PageSize))
-	}
-	if strings.TrimSpace(filter.ModifiedBegin) != "" {
-		query.Set("modified_begin", strings.TrimSpace(filter.ModifiedBegin))
-	}
-	if strings.TrimSpace(filter.ModifiedEnd) != "" {
-		query.Set("modified_end", strings.TrimSpace(filter.ModifiedEnd))
-	}
-	if strings.TrimSpace(filter.InternalOID) != "" {
-		query.Set("o_id", strings.TrimSpace(filter.InternalOID))
-	}
-	if strings.TrimSpace(filter.OnlineSOID) != "" {
-		query.Set("so_id", strings.TrimSpace(filter.OnlineSOID))
-	}
-	if strings.TrimSpace(filter.ActionName) != "" {
-		query.Set("action_name", strings.TrimSpace(filter.ActionName))
-	}
-	payload, err := c.doGET(ctx, "/v1/erp/order-action-logs", query)
-	if err != nil {
-		return nil, err
-	}
-	return decodeERPOrderActionLogList(payload, filter.PageIndex, filter.PageSize)
 }
 
 func (c *erpBridgeClient) GetCompanyUsers(ctx context.Context, filter domain.JSTUserListFilter) (*domain.JSTUserListResponse, error) {
@@ -682,32 +650,6 @@ func decodeERPSyncLog(payload []byte) (*domain.ERPSyncLog, error) {
 		syncLog = adaptERPSyncLog(extractSingular(root))
 	}
 	return syncLog, nil
-}
-
-func decodeERPOrderActionLogList(payload []byte, fallbackPage, fallbackPageSize int) (*domain.ERPOrderActionLogListResponse, error) {
-	root, err := decodeERPBridgePayload(payload)
-	if err != nil {
-		return nil, err
-	}
-	container := unwrapERPBridgePayload(root)
-	itemsRaw := extractCollection(container)
-	if len(itemsRaw) == 0 {
-		itemsRaw = extractCollection(root)
-	}
-	items := make([]*domain.ERPOrderActionLog, 0, len(itemsRaw))
-	for _, item := range itemsRaw {
-		if log := adaptERPOrderActionLog(item); log != nil {
-			items = append(items, log)
-		}
-	}
-	if items == nil {
-		items = []*domain.ERPOrderActionLog{}
-	}
-	return &domain.ERPOrderActionLogListResponse{
-		Items:      items,
-		Pagination: adaptERPPagination(root, container, fallbackPage, fallbackPageSize, int64(len(items))),
-		Raw:        marshalERPBridgeRawJSON(root),
-	}, nil
 }
 
 func decodeERPBatchMutationResult(payload []byte, action string, fallbackTotal int) (*domain.ERPProductBatchMutationResult, error) {
@@ -1188,26 +1130,6 @@ func adaptERPSyncLog(root interface{}) *domain.ERPSyncLog {
 	}
 	if updatedAt, ok := firstTime(mapped, "updated_at", "updatedAt", "status_updated_at", "statusUpdatedAt", "finished_at", "finishedAt"); ok {
 		log.UpdatedAt = &updatedAt
-	}
-	return log
-}
-
-func adaptERPOrderActionLog(root interface{}) *domain.ERPOrderActionLog {
-	mapped, ok := root.(map[string]interface{})
-	if !ok {
-		return nil
-	}
-	log := &domain.ERPOrderActionLog{
-		InternalOID: firstString(mapped, "o_id", "oid", "order_id", "orderId", "internal_order_id"),
-		OnlineSOID:  firstString(mapped, "so_id", "soid", "shop_order_id", "shopOrderId", "online_order_no", "onlineOrderNo"),
-		Action:      firstString(mapped, "action", "action_name", "actionName", "operation", "type"),
-		Content:     firstString(mapped, "content", "memo", "remark", "message", "msg", "desc", "description"),
-		Operator:    firstString(mapped, "operator", "operator_name", "operatorName", "user_name", "userName", "name"),
-		Modified:    firstString(mapped, "modified", "modified_at", "modifiedAt", "modified_time", "modifiedTime", "time", "created", "created_at", "createdAt"),
-		Raw:         marshalERPBridgeRawJSON(mapped),
-	}
-	if log.InternalOID == "" && log.OnlineSOID == "" && log.Action == "" && log.Content == "" && log.Operator == "" && log.Modified == "" {
-		return nil
 	}
 	return log
 }

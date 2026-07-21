@@ -129,52 +129,6 @@ func splitCleanupStorageKeys(raw string) []string {
 	return out
 }
 
-func (r *taskAssetLifecycleRepo) Archive(ctx context.Context, tx repo.Tx, update repo.TaskAssetLifecycleUpdate) error {
-	sqlTx := Unwrap(tx)
-	taskIDs, err := taskIDsByAssetID(ctx, sqlTx, update.AssetID)
-	if err != nil {
-		return err
-	}
-	res, err := sqlTx.ExecContext(ctx, `
-		UPDATE task_assets
-		   SET is_archived = 1, archived_at = ?, archived_by = ?
-		 WHERE asset_id = ? AND deleted_at IS NULL AND cleaned_at IS NULL`,
-		update.Now, update.ActorID, update.AssetID)
-	if err != nil {
-		return fmt.Errorf("archive task asset: %w", err)
-	}
-	if err := requireAffected(res, "archive task asset"); err != nil {
-		return err
-	}
-	if err := reindexTaskSearchDocuments(ctx, sqlTx, taskIDs); err != nil {
-		return err
-	}
-	return reindexAssetSearchDocument(ctx, sqlTx, update.AssetID)
-}
-
-func (r *taskAssetLifecycleRepo) Restore(ctx context.Context, tx repo.Tx, update repo.TaskAssetLifecycleUpdate) error {
-	sqlTx := Unwrap(tx)
-	taskIDs, err := taskIDsByAssetID(ctx, sqlTx, update.AssetID)
-	if err != nil {
-		return err
-	}
-	res, err := sqlTx.ExecContext(ctx, `
-		UPDATE task_assets
-		   SET is_archived = 0, archived_at = NULL, archived_by = NULL
-		 WHERE asset_id = ? AND deleted_at IS NULL AND cleaned_at IS NULL`,
-		update.AssetID)
-	if err != nil {
-		return fmt.Errorf("restore task asset: %w", err)
-	}
-	if err := requireAffected(res, "restore task asset"); err != nil {
-		return err
-	}
-	if err := reindexTaskSearchDocuments(ctx, sqlTx, taskIDs); err != nil {
-		return err
-	}
-	return reindexAssetSearchDocument(ctx, sqlTx, update.AssetID)
-}
-
 // LockGenericDeleteGuard locks one authoritative deletion set: the requested
 // design asset, every backend-derived design asset linked through
 // source_asset_id, and all of their live task-asset versions. Binding,

@@ -1,5 +1,5 @@
 /**
- * 组织相关 API（筛选下拉、v0.9 组织主数据变更）
+ * 组织相关 API（稳定 ID 筛选与组织主数据维护）。
  */
 import http from '@/services/http'
 import type { Department, Group } from '@/types'
@@ -198,23 +198,6 @@ export async function deleteOrgDepartment(id: string | number): Promise<void> {
 /** DELETE /v1/org/teams/{id} — 仅允许删除已停用且无成员的小组(硬删除) */
 export async function deleteOrgTeam(id: string | number): Promise<void> {
   await http.delete(`/v1/org/teams/${id}`)
-}
-
-export const orgMoveRequestsApi = {
-  list: (params?: Record<string, unknown>, signal?: AbortSignal) =>
-    http.get('/v1/org-move-requests', { params, signal }),
-
-  /**
-   * POST /v1/departments/{departmentId}/org-move-requests
-   */
-  create: (departmentId: string | number, payload: Record<string, unknown>, signal?: AbortSignal) =>
-    http.post(`/v1/departments/${encodeURIComponent(String(departmentId))}/org-move-requests`, payload, { signal }),
-
-  approve: (id: string, payload: Record<string, unknown> = {}, signal?: AbortSignal) =>
-    http.post(`/v1/org-move-requests/${encodeURIComponent(id)}/approve`, payload, { signal }),
-
-  reject: (id: string, payload: Record<string, unknown>, signal?: AbortSignal) =>
-    http.post(`/v1/org-move-requests/${encodeURIComponent(id)}/reject`, payload, { signal }),
 }
 
 /**

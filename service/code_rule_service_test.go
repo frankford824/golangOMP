@@ -14,9 +14,6 @@ func TestCodeRuleServiceArchivesLegacyNewSKU(t *testing.T) {
 	if code, appErr := svc.GenerateCode(context.Background(), domain.CodeRuleTypeNewSKU); appErr == nil {
 		t.Fatalf("GenerateCode(new_sku) code=%q, want archived error", code)
 	}
-	if code, appErr := svc.GenerateSKU(context.Background(), 2); appErr == nil {
-		t.Fatalf("GenerateSKU() code=%q, want archived error", code)
-	}
 	if preview, appErr := svc.Preview(context.Background(), 2); appErr == nil {
 		t.Fatalf("Preview(new_sku) preview=%+v, want archived error", preview)
 	}

@@ -131,28 +131,12 @@
       "sha256": "c41df7e3cfab4d88796493646249d7a624fc712a6c139b2241ee9b2771bbb2fa"
     },
     {
-      "id": "desktop:product-management",
-      "name": "product-management",
-      "viewport": "desktop",
-      "path": "/products",
-      "file": "product-management.png",
-      "sha256": "6a019a45ce2b22adca1f84c2098f62e463acafe90c212c09bc52a1a40b80f79d"
-    },
-    {
       "id": "desktop:user-management-role-modal",
       "name": "user-management-role-modal",
       "viewport": "desktop",
       "path": "/users",
       "file": "user-management-role-modal.png",
       "sha256": "967e157485f065bd27985cc77c590940881c55b61a3779d3bbbf52a9ce318e4c"
-    },
-    {
-      "id": "desktop:product-management-cost-tooltip",
-      "name": "product-management-cost-tooltip",
-      "viewport": "desktop",
-      "path": "/products",
-      "file": "product-management-cost-tooltip.png",
-      "sha256": "20b8de6883c9308ec837dff9abdc9b380bd3b3ebaa72501a5fdaddffffaf4f78"
     },
     {
       "id": "tablet:dashboard",
@@ -259,28 +243,12 @@
       "sha256": "c86ee9883caa00bc6689ebbd62e0cea00f2f3b519f75e87bb45b93a5fd40c59e"
     },
     {
-      "id": "tablet:product-management",
-      "name": "product-management",
-      "viewport": "tablet",
-      "path": "/products",
-      "file": "tablet-product-management.png",
-      "sha256": "475a3cdfa078875e62b5771b60e805eb8b8fdeb115e543f1efa24b583e2dbb5e"
-    },
-    {
       "id": "tablet:user-management-role-modal",
       "name": "user-management-role-modal",
       "viewport": "tablet",
       "path": "/users",
       "file": "tablet-user-management-role-modal.png",
       "sha256": "85bb4d5bab26134b58c2d7b407f6f39486fda665a779c142cf3a6a59e582f089"
-    },
-    {
-      "id": "tablet:product-management-cost-tooltip",
-      "name": "product-management-cost-tooltip",
-      "viewport": "tablet",
-      "path": "/products",
-      "file": "tablet-product-management-cost-tooltip.png",
-      "sha256": "6284efdd7a72390b0b4ee3b855835b2a9a129a6ce10ebc17d9e18037a1cddf8c"
     },
     {
       "id": "mobile:dashboard",
@@ -387,28 +355,12 @@
       "sha256": "edcf48216d6ccd09e92b6c5c4ba2ab24e6fc3d64af26a7be93e2bbd92db3a06d"
     },
     {
-      "id": "mobile:product-management",
-      "name": "product-management",
-      "viewport": "mobile",
-      "path": "/products",
-      "file": "mobile-product-management.png",
-      "sha256": "b3e9801881bff7184e99ed7c97b6c9428e99e5ff980b0867c199387bb242eba6"
-    },
-    {
       "id": "mobile:user-management-role-modal",
       "name": "user-management-role-modal",
       "viewport": "mobile",
       "path": "/users",
       "file": "mobile-user-management-role-modal.png",
       "sha256": "f9aac30fc728d32cdbcc021dc6f3f170466cd28d2687b96482f84c458db3b140"
-    },
-    {
-      "id": "mobile:product-management-cost-tooltip",
-      "name": "product-management-cost-tooltip",
-      "viewport": "mobile",
-      "path": "/products",
-      "file": "mobile-product-management-cost-tooltip.png",
-      "sha256": "5af88fe6833ebf48d063be677c2ac9133e26f677c6cae821a99954cdb7dec600"
     }
   ]
 }

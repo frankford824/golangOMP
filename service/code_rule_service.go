@@ -15,7 +15,6 @@ type CodeRuleService interface {
 	List(ctx context.Context) ([]*domain.CodeRule, *domain.AppError)
 	Preview(ctx context.Context, ruleID int64) (*domain.CodePreview, *domain.AppError)
 	GenerateCode(ctx context.Context, ruleType domain.CodeRuleType) (string, *domain.AppError)
-	GenerateSKU(ctx context.Context, ruleID int64) (string, *domain.AppError)
 }
 
 type codeRuleService struct {
@@ -71,10 +70,6 @@ func (s *codeRuleService) GenerateCode(ctx context.Context, ruleType domain.Code
 			fmt.Sprintf("no enabled rule found for type %q", ruleType), nil)
 	}
 	return s.generate(ctx, rule)
-}
-
-func (s *codeRuleService) GenerateSKU(ctx context.Context, ruleID int64) (string, *domain.AppError) {
-	return "", legacyNewSKUCodeRuleArchivedError()
 }
 
 func legacyNewSKUCodeRuleArchivedError() *domain.AppError {

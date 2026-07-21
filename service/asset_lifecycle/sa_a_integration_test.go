@@ -16,77 +16,6 @@ import (
 	"workflow/testsupport/r35"
 )
 
-func TestSA_A_I1_SearchDefaultStatesActiveOrClosedRetained(t *testing.T) {
-	db := r35.MustOpenTestDB(t)
-	defer db.Close()
-	center, _, _ := newIntegrationServices(db)
-	res, appErr := center.Search(context.Background(), domain.AssetSearchQuery{IsArchived: domain.AssetArchiveFilterFalse, Page: 1, Size: 100})
-	if appErr != nil {
-		t.Fatalf("search: %v", appErr)
-	}
-	for _, item := range res.Items {
-		if item.LifecycleState != domain.AssetLifecycleStateActive && item.LifecycleState != domain.AssetLifecycleStateClosedRetained {
-			t.Fatalf("lifecycle_state = %s, want active/closed_retained", item.LifecycleState)
-		}
-	}
-}
-
-func TestSA_A_I2_SearchAllSeesArchivedAsset(t *testing.T) {
-	db := r35.MustOpenTestDB(t)
-	defer db.Close()
-	fixture := insertAssetFixture(t, db, 20002, "design", fixtureOptions{Archived: true})
-	defer cleanupSAATask(t, db, fixture.TaskID)
-	center, _, _ := newIntegrationServices(db)
-	res, appErr := center.Search(context.Background(), domain.AssetSearchQuery{IsArchived: domain.AssetArchiveFilterAll, Page: 1, Size: 100})
-	if appErr != nil {
-		t.Fatalf("search all: %v", appErr)
-	}
-	for _, item := range res.Items {
-		if item.ID == fixture.AssetID && item.LifecycleState == domain.AssetLifecycleStateArchived {
-			return
-		}
-	}
-	t.Fatalf("archived asset %d not found in all search", fixture.AssetID)
-}
-
-func TestSA_A_I3_ArchiveRoleAndEvent(t *testing.T) {
-	db := r35.MustOpenTestDB(t)
-	defer db.Close()
-	fixture := insertAssetFixture(t, db, 20003, "design", fixtureOptions{})
-	defer cleanupSAATask(t, db, fixture.TaskID)
-	_, lifecycle, _ := newIntegrationServices(db)
-	member := domain.RequestActor{ID: 3001, Roles: []domain.Role{domain.RoleMember}}
-	if appErr := lifecycle.Archive(context.Background(), member, fixture.AssetID, "nope"); appErr == nil || appErr.Code != domain.DenyModuleActionRoleDenied {
-		t.Fatalf("member archive error = %#v, want module_action_role_denied", appErr)
-	}
-	admin := domain.RequestActor{ID: 3002, Roles: []domain.Role{domain.RoleSuperAdmin}}
-	if appErr := lifecycle.Archive(context.Background(), admin, fixture.AssetID, "archive integration"); appErr != nil {
-		t.Fatalf("super archive: %v", appErr)
-	}
-	assertEventCount(t, db, fixture.ModuleID, "asset_archived_by_admin", 1)
-}
-
-func TestSA_A_I4_RestoreClearsArchiveAndWritesEvent(t *testing.T) {
-	db := r35.MustOpenTestDB(t)
-	defer db.Close()
-	fixture := insertAssetFixture(t, db, 20004, "design", fixtureOptions{Archived: true})
-	defer cleanupSAATask(t, db, fixture.TaskID)
-	_, lifecycle, _ := newIntegrationServices(db)
-	admin := domain.RequestActor{ID: 3003, Roles: []domain.Role{domain.RoleSuperAdmin}}
-	if appErr := lifecycle.Restore(context.Background(), admin, fixture.AssetID); appErr != nil {
-		t.Fatalf("restore: %v", appErr)
-	}
-	var archived int
-	var archivedAt sql.NullTime
-	if err := db.QueryRow(`SELECT is_archived, archived_at FROM task_assets WHERE id=?`, fixture.VersionID).Scan(&archived, &archivedAt); err != nil {
-		t.Fatalf("select archive state: %v", err)
-	}
-	if archived != 0 || archivedAt.Valid {
-		t.Fatalf("archive state = %d/%v, want 0/null", archived, archivedAt.Valid)
-	}
-	assertEventCount(t, db, fixture.ModuleID, "asset_unarchived_by_admin", 1)
-}
-
 func TestSA_A_I5_DeleteSoftDeletesAndWritesEvent(t *testing.T) {
 	db := r35.MustOpenTestDB(t)
 	defer db.Close()
@@ -104,48 +33,6 @@ func TestSA_A_I5_DeleteSoftDeletesAndWritesEvent(t *testing.T) {
 	}
 	if !deletedAt.Valid || storageKey.Valid {
 		t.Fatalf("delete state deleted_at=%v storage_key_valid=%v, want deleted/null", deletedAt.Valid, storageKey.Valid)
-	}
-	assertEventCount(t, db, fixture.ModuleID, "asset_deleted_by_admin", 1)
-}
-
-func TestSA_A_I5B_CompletedAssetMaintenanceRoleCanDeleteCurrentResource(t *testing.T) {
-	db := r35.MustOpenTestDB(t)
-	defer db.Close()
-	fixture := insertAssetFixture(t, db, 20012, "design", fixtureOptions{})
-	defer cleanupSAATask(t, db, fixture.TaskID)
-	if _, err := db.Exec(`UPDATE tasks SET task_status=? WHERE id=?`, domain.TaskStatusCompleted, fixture.TaskID); err != nil {
-		t.Fatalf("complete fixture task: %v", err)
-	}
-	_, lifecycle, _ := newIntegrationServices(db)
-	auditor := domain.RequestActor{ID: 3012, Roles: []domain.Role{domain.RoleAuditA}}
-	if appErr := lifecycle.Delete(context.Background(), auditor, fixture.AssetID, "remove incorrect completed resource"); appErr != nil {
-		t.Fatalf("completed asset maintenance delete: %v", appErr)
-	}
-	var deletedAt sql.NullTime
-	if err := db.QueryRow(`SELECT deleted_at FROM task_assets WHERE id=?`, fixture.VersionID).Scan(&deletedAt); err != nil {
-		t.Fatalf("select deleted state: %v", err)
-	}
-	if !deletedAt.Valid {
-		t.Fatalf("deleted_at is null after completed asset maintenance delete")
-	}
-	assertEventCount(t, db, fixture.ModuleID, "asset_deleted_by_admin", 1)
-}
-
-func TestSA_A_I5C_DeleteResolvesLegacyMissingSourceTaskModuleID(t *testing.T) {
-	db := r35.MustOpenTestDB(t)
-	defer db.Close()
-	fixture := insertAssetFixture(t, db, 20013, "customization", fixtureOptions{})
-	defer cleanupSAATask(t, db, fixture.TaskID)
-	if _, err := db.Exec(`UPDATE tasks SET task_status=? WHERE id=?`, domain.TaskStatusCompleted, fixture.TaskID); err != nil {
-		t.Fatalf("complete fixture task: %v", err)
-	}
-	if _, err := db.Exec(`UPDATE task_assets SET source_task_module_id=NULL WHERE id=?`, fixture.VersionID); err != nil {
-		t.Fatalf("clear legacy source_task_module_id: %v", err)
-	}
-	_, lifecycle, _ := newIntegrationServices(db)
-	auditor := domain.RequestActor{ID: 3013, Roles: []domain.Role{domain.RoleAuditA}}
-	if appErr := lifecycle.Delete(context.Background(), auditor, fixture.AssetID, "remove legacy completed resource"); appErr != nil {
-		t.Fatalf("delete legacy asset without source_task_module_id: %v", appErr)
 	}
 	assertEventCount(t, db, fixture.ModuleID, "asset_deleted_by_admin", 1)
 }

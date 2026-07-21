@@ -4,7 +4,6 @@
 - Keep a local packaging shortcut next to the standardized Linux deploy flow.
 - Use the same tar.gz package layout as `deploy/deploy.sh` without touching the managed release history file.
 - MAIN packaging entrypoint is locked to `./cmd/server`; `cmd/api` is not a packaging fallback.
-- `cmd/api` remains on disk only as a deprecated compatibility entrypoint and is not a valid production packaging target.
 
 ## Command
 - `bash ./deploy/package-local.sh --version v0.1`

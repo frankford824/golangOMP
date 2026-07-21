@@ -1,6 +1,5 @@
 /**
- * Canonical task ownership 展示与回退逻辑（与 legacy owner_team 区分）。
- * v0.9：以 owner_department + owner_org_team 为规范读模型；groupName/owner_team 仅作兼容展示，不作组织树真相源。
+ * 任务归属展示逻辑。稳定组织 ID 才是授权依据；这里的名称只负责展示。
  * 列表/详情统一使用，避免各处散落判断。
  */
 
@@ -13,7 +12,7 @@ export interface TaskOwnershipDisplay {
   ownerDepartment?: string
   /** 正式团队（有则展示详情区块） */
   ownerOrgTeam?: string
-  /** legacy owner_team 原始值（兼容 tooltip / 副文案） */
+  /** 历史任务可能只有的组名，仅用于只读副文案。 */
   legacyOwnerTeam?: string
 }
 

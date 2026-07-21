@@ -33,18 +33,12 @@ func v8BusinessRoutePermissions(method, path string) ([]domain.PermissionCode, b
 		return v8AssetWorkbenchRoutePermissions(method, path)
 	case strings.HasPrefix(path, "/v1/task-board"):
 		return []domain.PermissionCode{domain.PermissionTaskView}, true
-	case strings.HasPrefix(path, "/v1/workbench"):
-		return []domain.PermissionCode{domain.PermissionAccountUse}, true
-	case strings.HasPrefix(path, "/v1/export-templates"), strings.HasPrefix(path, "/v1/export-jobs"):
-		return []domain.PermissionCode{domain.PermissionAssetExport}, true
-	case strings.HasPrefix(path, "/v1/predictions"):
-		return []domain.PermissionCode{domain.PermissionTaskView}, true
-	case strings.HasPrefix(path, "/v1/erp"), strings.HasPrefix(path, "/v1/products"), strings.HasPrefix(path, "/v1/product-management"):
+	case strings.HasPrefix(path, "/v1/erp"), strings.HasPrefix(path, "/v1/products"):
 		if method == http.MethodGet {
 			return []domain.PermissionCode{domain.PermissionCatalogView}, true
 		}
 		return []domain.PermissionCode{domain.PermissionERPManage}, true
-	case strings.HasPrefix(path, "/v1/categories"), strings.HasPrefix(path, "/v1/category-mappings"), strings.HasPrefix(path, "/v1/cost-rules"), strings.HasPrefix(path, "/v1/cost-rule-bindings"), strings.HasPrefix(path, "/v1/code-rules"), strings.HasPrefix(path, "/v1/rule-templates"), strings.HasPrefix(path, "/v1/sku"):
+	case strings.HasPrefix(path, "/v1/categories"), strings.HasPrefix(path, "/v1/category-mappings"), strings.HasPrefix(path, "/v1/cost-rules"), strings.HasPrefix(path, "/v1/cost-rule-bindings"), strings.HasPrefix(path, "/v1/code-rules"), strings.HasPrefix(path, "/v1/sku"):
 		if method == http.MethodGet {
 			return []domain.PermissionCode{domain.PermissionCatalogView}, true
 		}
@@ -145,7 +139,7 @@ func v8TaskRoutePermissions(method, path string) ([]domain.PermissionCode, bool)
 			return []domain.PermissionCode{domain.PermissionPlanningSKUCreate}, true
 		}
 	}
-	if strings.Contains(path, "/filing/") || strings.Contains(path, "/product-management") {
+	if strings.Contains(path, "/filing/") {
 		if method == http.MethodGet {
 			return []domain.PermissionCode{domain.PermissionTaskView, domain.PermissionCatalogView}, true
 		}
@@ -181,15 +175,15 @@ func v8TaskRoutePermissions(method, path string) ([]domain.PermissionCode, bool)
 	if strings.Contains(path, "/filing/retry") {
 		return []domain.PermissionCode{domain.PermissionERPManage}, true
 	}
-	if strings.Contains(path, "/ai-summary") || strings.Contains(path, "/batch/remind") {
+	if strings.Contains(path, "/batch/remind") {
 		return []domain.PermissionCode{domain.PermissionTaskView}, true
 	}
 	if strings.Contains(path, "/modules/") {
 		switch {
-		case strings.Contains(path, "/reassign"), strings.Contains(path, "/pool-reassign"):
-			return []domain.PermissionCode{domain.PermissionTaskReassign}, true
-		case strings.Contains(path, "/claim"), strings.Contains(path, "/actions/"):
+		case strings.Contains(path, "/claim"):
 			return []domain.PermissionCode{domain.PermissionTaskUploadSource, domain.PermissionTaskAudit}, true
+		case strings.Contains(path, "/actions/"):
+			return []domain.PermissionCode{domain.PermissionTaskUploadSource}, true
 		}
 	}
 	if strings.Contains(path, "/cancel") {
@@ -210,12 +204,6 @@ func v8AssetRoutePermissions(method, path string) []domain.PermissionCode {
 	}
 	if strings.Contains(path, "/download") || strings.Contains(path, "/content") || strings.HasSuffix(path, "/files/*path") {
 		return []domain.PermissionCode{domain.PermissionAssetDownload}
-	}
-	if strings.Contains(path, "/excel-package/") {
-		return []domain.PermissionCode{domain.PermissionAssetExport}
-	}
-	if strings.Contains(path, "/search") {
-		return []domain.PermissionCode{domain.PermissionAssetView}
 	}
 	if method == http.MethodGet {
 		return []domain.PermissionCode{domain.PermissionAssetView}

@@ -30,14 +30,6 @@ const mockUsers = [
   },
 ]
 
-const mockRoles = [
-  { code: 'super_admin', name: 'super_admin' },
-  { code: 'dept_admin', name: 'dept_admin' },
-  { code: 'designer', name: 'designer' },
-  { code: 'auditor', name: 'auditor' },
-  { code: 'warehouse', name: 'warehouse' },
-]
-
 export const orgHandler: MockHandler = (request) => {
   if (request.method === 'GET' && request.path === '/v1/users') {
     return {
@@ -70,16 +62,8 @@ export const orgHandler: MockHandler = (request) => {
     }
   }
 
-  if (request.method === 'GET' && request.path === '/v1/roles') {
-    return { status: 200, data: { data: mockRoles } }
-  }
-
   if (request.method === 'POST' && request.path.match(/^\/v1\/users\/[^/]+\/(activate|deactivate)$/)) {
     return { status: 204, data: undefined }
-  }
-
-  if (request.method === 'POST' && request.path.match(/^\/v1\/users\/[^/]+\/roles$/)) {
-    return { status: 200, data: { success: true } }
   }
 
   if (request.method === 'GET' && request.path === '/v1/departments') {
@@ -128,31 +112,6 @@ export const orgHandler: MockHandler = (request) => {
         ],
       },
     }
-  }
-
-  if (request.method === 'GET' && request.path === '/v1/org-move-requests') {
-    return {
-      status: 200,
-      data: {
-        items: [
-          {
-            id: 'mr_1',
-            user_name: '王小明',
-            from_department: '运营部',
-            to_department: '设计部',
-            status: 'pending_super_admin_confirm',
-          },
-        ],
-      },
-    }
-  }
-
-  if (request.method === 'POST' && request.path.match(/^\/v1\/departments\/[^/]+\/org-move-requests$/)) {
-    return { status: 201, data: { data: { id: `mr_${Date.now()}`, ...request.body, status: 'pending' } } }
-  }
-
-  if (request.method === 'POST' && request.path.match(/^\/v1\/org-move-requests\/[^/]+\/(approve|reject)$/)) {
-    return { status: 200, data: { success: true } }
   }
 
   return null

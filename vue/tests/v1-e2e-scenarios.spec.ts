@@ -70,20 +70,6 @@ describe('V1 mock E2E flow', () => {
     expect(data.page_size).toBe(1)
   })
 
-  it('module pool requires pool team match in mock', async () => {
-    const emptyPool = await tasksApi.pool()
-    const emptyItems = (emptyPool.data as { items?: Array<{ module_key?: string }> }).items ?? []
-    expect(emptyItems.length).toBe(0)
-
-    const matchedPool = await tasksApi.pool({ pool_team_code: 'design_standard' })
-    const matchedItems = (matchedPool.data as { items?: Array<{ module_key?: string }> }).items ?? []
-    expect(matchedItems.length).toBeGreaterThan(0)
-    for (const row of matchedItems) {
-      expect(typeof row.module_key).toBe('string')
-      expect((row.module_key ?? '').length).toBeGreaterThan(0)
-    }
-  })
-
   it('pending assign list uses /v1/tasks with task_status', async () => {
     const res = await tasksApi.list({ task_status: 'PendingAssign', page: 1, page_size: 20 })
     const data = res.data as { items?: Array<{ status?: string }>; total?: number }

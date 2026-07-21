@@ -47,11 +47,7 @@ func TestIdentityServiceOrgMasterBackendizesOptionsUsersAndTaskCatalog(t *testin
 		t.Fatalf("GetOrgOptions() = %+v, want 品牌部/品牌一组", options)
 	}
 
-	adminCtx := domain.WithRequestActor(context.Background(), domain.RequestActor{
-		ID:       1,
-		Username: "admin",
-		Roles:    []domain.Role{domain.RoleAdmin, domain.RoleHRAdmin},
-	})
+	adminCtx := identityGlobalAccessManageContext(1)
 	user, appErr := svc.CreateManagedUser(adminCtx, CreateManagedUserParams{
 		Username:    "brand_user",
 		EmployeeNo:  intPtr(2101),
@@ -60,7 +56,6 @@ func TestIdentityServiceOrgMasterBackendizesOptionsUsersAndTaskCatalog(t *testin
 		Team:        "品牌一组",
 		Mobile:      "13800009901",
 		Password:    "Init12345",
-		Roles:       []domain.Role{domain.RoleOps},
 	})
 	if appErr != nil {
 		t.Fatalf("CreateManagedUser() unexpected error: %+v", appErr)
@@ -104,10 +99,7 @@ func TestIdentityServiceRenameTeamRewritesAllPagedUsers(t *testing.T) {
 		t.Fatalf("CreateTeam() unexpected error: %+v", appErr)
 	}
 
-	adminCtx := domain.WithRequestActor(context.Background(), domain.RequestActor{
-		ID:    1,
-		Roles: []domain.Role{domain.RoleAdmin, domain.RoleHRAdmin},
-	})
+	adminCtx := identityGlobalAccessManageContext(1)
 	const memberTotal = 125
 	for i := 0; i < memberTotal; i++ {
 		_, appErr := svc.CreateManagedUser(adminCtx, CreateManagedUserParams{
@@ -118,7 +110,6 @@ func TestIdentityServiceRenameTeamRewritesAllPagedUsers(t *testing.T) {
 			Team:        "淘系二组",
 			Mobile:      fmt.Sprintf("13877%06d", i),
 			Password:    "Init12345",
-			Roles:       []domain.Role{domain.RoleOps},
 		})
 		if appErr != nil {
 			t.Fatalf("CreateManagedUser(%d) unexpected error: %+v", i, appErr)
@@ -184,10 +175,7 @@ func TestIdentityServiceRenameTeamReclaimsDisabledEmptyConflict(t *testing.T) {
 	}
 	orgRepo.teams[stale.ID].Enabled = false
 
-	adminCtx := domain.WithRequestActor(context.Background(), domain.RequestActor{
-		ID:    1,
-		Roles: []domain.Role{domain.RoleAdmin, domain.RoleHRAdmin},
-	})
+	adminCtx := identityGlobalAccessManageContext(1)
 	for i := 0; i < 3; i++ {
 		_, appErr := svc.CreateManagedUser(adminCtx, CreateManagedUserParams{
 			Username:    fmt.Sprintf("reclaim_team_member_%d", i),
@@ -197,7 +185,6 @@ func TestIdentityServiceRenameTeamReclaimsDisabledEmptyConflict(t *testing.T) {
 			Team:        "淘系二组",
 			Mobile:      fmt.Sprintf("13878%06d", i),
 			Password:    "Init12345",
-			Roles:       []domain.Role{domain.RoleOps},
 		})
 		if appErr != nil {
 			t.Fatalf("CreateManagedUser(%d) unexpected error: %+v", i, appErr)
@@ -252,10 +239,7 @@ func TestIdentityServiceRenameTeamRejectsDisabledConflictWithMembers(t *testing.
 		t.Fatalf("CreateTeam(conflict) unexpected error: %+v", appErr)
 	}
 
-	adminCtx := domain.WithRequestActor(context.Background(), domain.RequestActor{
-		ID:    1,
-		Roles: []domain.Role{domain.RoleAdmin, domain.RoleHRAdmin},
-	})
+	adminCtx := identityGlobalAccessManageContext(1)
 	_, appErr = svc.CreateManagedUser(adminCtx, CreateManagedUserParams{
 		Username:    "occupied_team_member",
 		EmployeeNo:  intPtr(3400),
@@ -264,7 +248,6 @@ func TestIdentityServiceRenameTeamRejectsDisabledConflictWithMembers(t *testing.
 		Team:        "淘系运营二部",
 		Mobile:      "13879000000",
 		Password:    "Init12345",
-		Roles:       []domain.Role{domain.RoleOps},
 	})
 	if appErr != nil {
 		t.Fatalf("CreateManagedUser(conflict member) unexpected error: %+v", appErr)
@@ -318,10 +301,7 @@ func TestIdentityServiceDisableTeamAndDepartmentMovesUsersToUnassignedPool(t *te
 	if !ok {
 		t.Fatalf("missing operations team in options: %+v", options.Departments)
 	}
-	adminCtx := domain.WithRequestActor(context.Background(), domain.RequestActor{
-		ID:    1,
-		Roles: []domain.Role{domain.RoleAdmin, domain.RoleHRAdmin},
-	})
+	adminCtx := identityGlobalAccessManageContext(1)
 	user, appErr := svc.CreateManagedUser(adminCtx, CreateManagedUserParams{
 		Username:    "brand_user_2",
 		EmployeeNo:  intPtr(2102),
@@ -330,7 +310,6 @@ func TestIdentityServiceDisableTeamAndDepartmentMovesUsersToUnassignedPool(t *te
 		Team:        "品牌二组",
 		Mobile:      "13800009902",
 		Password:    "Init12345",
-		Roles:       []domain.Role{domain.RoleOps},
 	})
 	if appErr != nil {
 		t.Fatalf("CreateManagedUser() unexpected error: %+v", appErr)
@@ -343,7 +322,6 @@ func TestIdentityServiceDisableTeamAndDepartmentMovesUsersToUnassignedPool(t *te
 		Team:        opsTeam,
 		Mobile:      "13800009903",
 		Password:    "Init12345",
-		Roles:       []domain.Role{domain.RoleDeptAdmin},
 	})
 	if appErr != nil {
 		t.Fatalf("CreateManagedUser(manager) unexpected error: %+v", appErr)
@@ -400,10 +378,7 @@ func TestIdentityServiceRenameDepartmentWithAssignedUsersUsesSnapshot(t *testing
 	if appErr != nil {
 		t.Fatalf("CreateTeam() unexpected error: %+v", appErr)
 	}
-	adminCtx := domain.WithRequestActor(context.Background(), domain.RequestActor{
-		ID:    1,
-		Roles: []domain.Role{domain.RoleAdmin, domain.RoleHRAdmin},
-	})
+	adminCtx := identityGlobalAccessManageContext(1)
 	user, appErr := svc.CreateManagedUser(adminCtx, CreateManagedUserParams{
 		Username:    "warehouse_rename_user",
 		EmployeeNo:  intPtr(2110),
@@ -412,7 +387,6 @@ func TestIdentityServiceRenameDepartmentWithAssignedUsersUsesSnapshot(t *testing
 		Team:        team.Name,
 		Mobile:      "13800009910",
 		Password:    "Init12345",
-		Roles:       []domain.Role{domain.RoleWarehouse},
 	})
 	if appErr != nil {
 		t.Fatalf("CreateManagedUser(user) unexpected error: %+v", appErr)
@@ -425,7 +399,6 @@ func TestIdentityServiceRenameDepartmentWithAssignedUsersUsesSnapshot(t *testing
 		Team:        team.Name,
 		Mobile:      "13800009911",
 		Password:    "Init12345",
-		Roles:       []domain.Role{domain.RoleDeptAdmin},
 	})
 	if appErr != nil {
 		t.Fatalf("CreateManagedUser(manager) unexpected error: %+v", appErr)
@@ -477,7 +450,7 @@ func TestIdentityServiceMergeDepartmentDoesNotRemoveSameNameManagedTeamOutsideSo
 	if _, appErr := svc.CreateTeam(context.Background(), CreateOrgTeamParams{DepartmentID: &otherDept.ID, Name: "默认组"}); appErr != nil {
 		t.Fatalf("CreateTeam(other) unexpected error: %+v", appErr)
 	}
-	adminCtx := domain.WithRequestActor(context.Background(), domain.RequestActor{ID: 1, Roles: []domain.Role{domain.RoleAdmin, domain.RoleHRAdmin}})
+	adminCtx := identityGlobalAccessManageContext(1)
 	sourceUser, appErr := svc.CreateManagedUser(adminCtx, CreateManagedUserParams{
 		Username:    "merge_dept_source_user",
 		EmployeeNo:  intPtr(2120),
@@ -486,7 +459,6 @@ func TestIdentityServiceMergeDepartmentDoesNotRemoveSameNameManagedTeamOutsideSo
 		Team:        "默认组",
 		Mobile:      "13800009920",
 		Password:    "Init12345",
-		Roles:       []domain.Role{domain.RoleOps},
 	})
 	if appErr != nil {
 		t.Fatalf("CreateManagedUser(sourceUser) unexpected error: %+v", appErr)
@@ -499,7 +471,6 @@ func TestIdentityServiceMergeDepartmentDoesNotRemoveSameNameManagedTeamOutsideSo
 		Team:        "默认组",
 		Mobile:      "13800009921",
 		Password:    "Init12345",
-		Roles:       []domain.Role{domain.RoleDeptAdmin, domain.RoleTeamLead},
 	})
 	if appErr != nil {
 		t.Fatalf("CreateManagedUser(sourceManager) unexpected error: %+v", appErr)
@@ -512,7 +483,6 @@ func TestIdentityServiceMergeDepartmentDoesNotRemoveSameNameManagedTeamOutsideSo
 		Team:        "默认组",
 		Mobile:      "13800009922",
 		Password:    "Init12345",
-		Roles:       []domain.Role{domain.RoleDeptAdmin, domain.RoleTeamLead},
 	})
 	if appErr != nil {
 		t.Fatalf("CreateManagedUser(otherManager) unexpected error: %+v", appErr)
@@ -569,7 +539,7 @@ func TestIdentityServiceMergeTeamDoesNotRewriteSameNameManagedTeamOutsideSourceD
 	if _, appErr := svc.CreateTeam(context.Background(), CreateOrgTeamParams{DepartmentID: &otherDept.ID, Name: "默认组"}); appErr != nil {
 		t.Fatalf("CreateTeam(other) unexpected error: %+v", appErr)
 	}
-	adminCtx := domain.WithRequestActor(context.Background(), domain.RequestActor{ID: 1, Roles: []domain.Role{domain.RoleAdmin, domain.RoleHRAdmin}})
+	adminCtx := identityGlobalAccessManageContext(1)
 	sourceLead, appErr := svc.CreateManagedUser(adminCtx, CreateManagedUserParams{
 		Username:    "merge_team_source_lead",
 		EmployeeNo:  intPtr(2130),
@@ -578,7 +548,6 @@ func TestIdentityServiceMergeTeamDoesNotRewriteSameNameManagedTeamOutsideSourceD
 		Team:        "默认组",
 		Mobile:      "13800009930",
 		Password:    "Init12345",
-		Roles:       []domain.Role{domain.RoleTeamLead},
 	})
 	if appErr != nil {
 		t.Fatalf("CreateManagedUser(sourceLead) unexpected error: %+v", appErr)
@@ -591,7 +560,6 @@ func TestIdentityServiceMergeTeamDoesNotRewriteSameNameManagedTeamOutsideSourceD
 		Team:        "默认组",
 		Mobile:      "13800009931",
 		Password:    "Init12345",
-		Roles:       []domain.Role{domain.RoleTeamLead},
 	})
 	if appErr != nil {
 		t.Fatalf("CreateManagedUser(otherLead) unexpected error: %+v", appErr)
@@ -632,10 +600,7 @@ func TestIdentityServiceDeleteOrgRowsMovesMembersToUnassignedPool(t *testing.T) 
 	}
 	department, _ := svc.CreateDepartment(context.Background(), CreateOrgDepartmentParams{Name: "待清理部门"})
 	team, _ := svc.CreateTeam(context.Background(), CreateOrgTeamParams{DepartmentID: &department.ID, Name: "待清理小组"})
-	adminCtx := domain.WithRequestActor(context.Background(), domain.RequestActor{
-		ID:    1,
-		Roles: []domain.Role{domain.RoleAdmin, domain.RoleHRAdmin},
-	})
+	adminCtx := identityGlobalAccessManageContext(1)
 	teamMember, appErr := svc.CreateManagedUser(adminCtx, CreateManagedUserParams{
 		Username:    "cleanup_team_member",
 		EmployeeNo:  intPtr(2210),
@@ -644,7 +609,6 @@ func TestIdentityServiceDeleteOrgRowsMovesMembersToUnassignedPool(t *testing.T) 
 		Team:        "待清理小组",
 		Mobile:      "13800002210",
 		Password:    "Init12345",
-		Roles:       []domain.Role{domain.RoleDeptAdmin},
 	})
 	if appErr != nil {
 		t.Fatalf("CreateManagedUser(team member) unexpected error: %+v", appErr)
@@ -677,7 +641,6 @@ func TestIdentityServiceDeleteOrgRowsMovesMembersToUnassignedPool(t *testing.T) 
 		Team:        "待级联小组",
 		Mobile:      "13800002211",
 		Password:    "Init12345",
-		Roles:       []domain.Role{domain.RoleDeptAdmin},
 	})
 	if appErr != nil {
 		t.Fatalf("CreateManagedUser(department member) unexpected error: %+v", appErr)

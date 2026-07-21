@@ -14,13 +14,11 @@ const (
 	AssetOwnerTypePlanningSKUCreate   AssetOwnerType = "planning_sku_create"
 	AssetOwnerTypePlanningSKURevision AssetOwnerType = "planning_sku_revision_image"
 	AssetOwnerTypeExportJob           AssetOwnerType = "export_job"
-	AssetOwnerTypeOutsource           AssetOwnerType = "outsource_order"
-	AssetOwnerTypeWarehouse           AssetOwnerType = "warehouse_receipt"
 )
 
 func (t AssetOwnerType) Valid() bool {
 	switch t {
-	case AssetOwnerTypeTask, AssetOwnerTypeTaskAsset, AssetOwnerTypeTaskCreateReference, AssetOwnerTypePlanningSKUCreate, AssetOwnerTypePlanningSKURevision, AssetOwnerTypeExportJob, AssetOwnerTypeOutsource, AssetOwnerTypeWarehouse:
+	case AssetOwnerTypeTask, AssetOwnerTypeTaskAsset, AssetOwnerTypeTaskCreateReference, AssetOwnerTypePlanningSKUCreate, AssetOwnerTypePlanningSKURevision, AssetOwnerTypeExportJob:
 		return true
 	default:
 		return false
@@ -139,11 +137,6 @@ type UploadRequest struct {
 	RemoteUploadID       string                     `json:"remote_upload_id,omitempty"`
 	RemoteFileID         string                     `json:"remote_file_id,omitempty"`
 	IsPlaceholder        bool                       `json:"is_placeholder"`
-	AdapterMode          BoundaryAdapterMode        `json:"adapter_mode"`
-	DispatchMode         BoundaryDispatchMode       `json:"dispatch_mode"`
-	StorageMode          BoundaryStorageMode        `json:"storage_mode"`
-	AdapterRefSummary    *AdapterRefSummary         `json:"adapter_ref_summary,omitempty"`
-	HandoffRefSummary    *HandoffRefSummary         `json:"handoff_ref_summary,omitempty"`
 	CanBind              bool                       `json:"can_bind"`
 	CanCancel            bool                       `json:"can_cancel"`
 	CanExpire            bool                       `json:"can_expire"`
@@ -152,35 +145,27 @@ type UploadRequest struct {
 	CreatedBy            int64                      `json:"created_by,omitempty"`
 	ExpiresAt            *time.Time                 `json:"expires_at,omitempty"`
 	LastSyncedAt         *time.Time                 `json:"last_synced_at,omitempty"`
-	PolicyMode           PolicyMode                 `json:"policy_mode,omitempty"`
-	VisibleToRoles       []Role                     `json:"visible_to_roles,omitempty"`
-	ActionRoles          []ActionPolicySummary      `json:"action_roles,omitempty"`
-	PolicyScopeSummary   *PolicyScopeSummary        `json:"policy_scope_summary,omitempty"`
 	Remark               string                     `json:"remark,omitempty"`
 	CreatedAt            time.Time                  `json:"created_at"`
 	UpdatedAt            time.Time                  `json:"updated_at"`
 }
 
 type AssetStorageRef struct {
-	RefID              string                `json:"ref_id"`
-	AssetID            *int64                `json:"asset_id,omitempty"`
-	OwnerType          AssetOwnerType        `json:"owner_type"`
-	OwnerID            int64                 `json:"owner_id"`
-	UploadRequestID    string                `json:"upload_request_id,omitempty"`
-	StorageAdapter     AssetStorageAdapter   `json:"storage_adapter"`
-	RefType            AssetStorageRefType   `json:"ref_type"`
-	RefKey             string                `json:"ref_key"`
-	FileName           string                `json:"file_name,omitempty"`
-	MimeType           string                `json:"mime_type,omitempty"`
-	FileSize           *int64                `json:"file_size,omitempty"`
-	IsPlaceholder      bool                  `json:"is_placeholder"`
-	ChecksumHint       string                `json:"checksum_hint,omitempty"`
-	Status             AssetStorageRefStatus `json:"status"`
-	AdapterMode        BoundaryAdapterMode   `json:"adapter_mode"`
-	StorageMode        BoundaryStorageMode   `json:"storage_mode"`
-	AdapterRefSummary  *AdapterRefSummary    `json:"adapter_ref_summary,omitempty"`
-	ResourceRefSummary *ResourceRefSummary   `json:"resource_ref_summary,omitempty"`
-	CreatedAt          time.Time             `json:"created_at"`
+	RefID           string                `json:"ref_id"`
+	AssetID         *int64                `json:"asset_id,omitempty"`
+	OwnerType       AssetOwnerType        `json:"owner_type"`
+	OwnerID         int64                 `json:"owner_id"`
+	UploadRequestID string                `json:"upload_request_id,omitempty"`
+	StorageAdapter  AssetStorageAdapter   `json:"storage_adapter"`
+	RefType         AssetStorageRefType   `json:"ref_type"`
+	RefKey          string                `json:"ref_key"`
+	FileName        string                `json:"file_name,omitempty"`
+	MimeType        string                `json:"mime_type,omitempty"`
+	FileSize        *int64                `json:"file_size,omitempty"`
+	IsPlaceholder   bool                  `json:"is_placeholder"`
+	ChecksumHint    string                `json:"checksum_hint,omitempty"`
+	Status          AssetStorageRefStatus `json:"status"`
+	CreatedAt       time.Time             `json:"created_at"`
 }
 
 func HydrateUploadRequestDerived(request *UploadRequest) {
@@ -214,37 +199,13 @@ func HydrateUploadRequestDerived(request *UploadRequest) {
 		lastSyncedAt := request.UpdatedAt
 		request.LastSyncedAt = &lastSyncedAt
 	}
-	request.AdapterMode = BoundaryAdapterModeUploadRequestThenStorageRef
-	request.DispatchMode = BoundaryDispatchModeUploadRequestBinding
-	request.StorageMode = BoundaryStorageModeAssetStorageRef
-	request.AdapterRefSummary = BuildAdapterRefSummary("storage_adapter", string(request.StorageAdapter), request.IsPlaceholder, "Placeholder upload adapter boundary.")
-	finishedAt := (*time.Time)(nil)
-	if request.Status != UploadRequestStatusRequested && !request.UpdatedAt.IsZero() {
-		finishedAt = &request.UpdatedAt
-	}
-	request.HandoffRefSummary = BuildHandoffRefSummary(
-		"upload_request",
-		request.RequestID,
-		string(request.Status),
-		&request.CreatedAt,
-		nil,
-		finishedAt,
-		nil,
-		request.IsPlaceholder,
-		request.Remark,
-	)
 	request.CanBind = request.Status == UploadRequestStatusRequested
 	request.CanCancel = request.Status == UploadRequestStatusRequested
 	request.CanExpire = request.Status == UploadRequestStatusRequested
-	HydrateUploadRequestPolicy(request)
 }
 
 func HydrateAssetStorageRefDerived(ref *AssetStorageRef) {
 	if ref == nil {
 		return
 	}
-	ref.AdapterMode = BoundaryAdapterModeUploadRequestThenStorageRef
-	ref.StorageMode = BoundaryStorageModeAssetStorageRef
-	ref.AdapterRefSummary = BuildAdapterRefSummary("storage_adapter", string(ref.StorageAdapter), ref.IsPlaceholder, "Placeholder storage reference boundary.")
-	ref.ResourceRefSummary = BuildResourceRefSummary(string(ref.RefType), ref.RefKey, ref.FileName, ref.MimeType, ref.FileSize, ref.ChecksumHint, nil, ref.IsPlaceholder, "")
 }

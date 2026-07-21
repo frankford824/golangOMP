@@ -12,16 +12,10 @@ func businessTeamLabel(code string) string {
 		return "设计组"
 	case domain.TeamDesignRetouch:
 		return "精修组"
-	case domain.TeamAuditStandard, "audit_a":
-		return "常规审核组"
-	case domain.TeamAuditCustomization, "audit_b":
-		return "定制审核组"
+	case domain.TeamAuditStandard, domain.TeamAuditCustomization:
+		return "审核组"
 	case domain.TeamCustomizationArt:
 		return "定制美工组"
-	case domain.TeamWarehouseMain:
-		return "云仓组"
-	case domain.TeamProcurementMain:
-		return "采购组"
 	default:
 		return ""
 	}
@@ -39,10 +33,6 @@ func businessModuleLabel(key string) string {
 		return "审核"
 	case domain.ModuleKeyCustomization:
 		return "定制美工"
-	case domain.ModuleKeyWarehouse:
-		return "仓库"
-	case domain.ModuleKeyProcurement:
-		return "采购"
 	default:
 		return ""
 	}

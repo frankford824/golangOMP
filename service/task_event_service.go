@@ -9,7 +9,7 @@ import (
 
 // TaskEventService provides read access to task_event_logs (V7 §8).
 // Write access is performed directly via TaskEventRepo inside service transactions
-// (audit, outsource, etc.) to guarantee atomicity with business state changes.
+// (audit, assignment, etc.) to guarantee atomicity with business state changes.
 type TaskEventService interface {
 	ListByTaskID(ctx context.Context, taskID int64) ([]*domain.TaskEvent, *domain.AppError)
 }

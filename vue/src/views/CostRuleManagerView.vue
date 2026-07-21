@@ -181,13 +181,13 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { categoriesApi } from '@/services/api/categoriesApi'
 import {
-  productManagementApi,
+  costManagementApi,
   type CostRecalculationRun,
   type CostRuleBinding,
   type CostRulePreviewResponse,
   type ProductCostDashboardResponse,
   type UnboundCostRuleCandidate,
-} from '@/services/api/productManagementApi'
+} from '@/services/api/costManagementApi'
 
 interface CostRuleRow {
   rule_id: number
@@ -281,9 +281,9 @@ async function loadAll() {
   try {
     const [ruleResponse, bindingResponse, runResponse, dashboardResponse] = await Promise.all([
       categoriesApi.listCostRules({ page: 1, page_size: 500 }),
-      productManagementApi.listCostRuleBindings({ page: 1, page_size: 500 }),
-      productManagementApi.listCostRecalculationRuns({ page: 1, page_size: 20 }),
-      productManagementApi.getCostDashboard(),
+      costManagementApi.listCostRuleBindings({ page: 1, page_size: 500 }),
+      costManagementApi.listCostRecalculationRuns({ page: 1, page_size: 20 }),
+      costManagementApi.getCostDashboard(),
     ])
     const body = ruleResponse.data as { data?: CostRuleRow[] }
     rules.value = body.data || []
@@ -308,7 +308,7 @@ async function saveRule() {
     await loadAll()
     selectedGroupCode.value = group
     try {
-      const run = await productManagementApi.createCostRecalculationRun({ mode: 'all_matching', filters: { rule_group: group }, reason: '成本规则维护后的影响预览' })
+      const run = await costManagementApi.createCostRecalculationRun({ mode: 'all_matching', filters: { rule_group: group }, reason: '成本规则维护后的影响预览' })
       notice.value = `规则已保存，并已生成影响预览${run.run_no ? `（${run.run_no}）` : ''}。系统不会在未确认时覆盖现有任务成本。`
     } catch {
       notice.value = '规则已保存；当前没有可生成影响预览的 SKU，现有成本未被修改。'
@@ -318,21 +318,21 @@ async function saveRule() {
 }
 
 async function loadCandidates() {
-  try { candidates.value = (await productManagementApi.listUnboundCostRuleCandidates({ keyword: candidateKeyword.value, page: 1, page_size: 100 })).data || [] }
+  try { candidates.value = (await costManagementApi.listUnboundCostRuleCandidates({ keyword: candidateKeyword.value, page: 1, page_size: 100 })).data || [] }
   catch (cause) { error.value = cause instanceof Error ? cause.message : '待绑定款式加载失败。' }
 }
 async function bindCandidate(candidate: UnboundCostRuleCandidate) {
   if (!selectedGroup.value) return
   savingBinding.value = true
   try {
-    await productManagementApi.createCostRuleBinding({ i_id_raw: candidate.i_id_raw || candidate.display_i_id || candidate.normalized_i_id, normalized_i_id: candidate.normalized_i_id, rule_group: selectedGroup.value.code, display_name: candidate.suggested_display_name || candidate.display_i_id || candidate.normalized_i_id, source: 'manual', is_active: true })
+    await costManagementApi.createCostRuleBinding({ i_id_raw: candidate.i_id_raw || candidate.display_i_id || candidate.normalized_i_id, normalized_i_id: candidate.normalized_i_id, rule_group: selectedGroup.value.code, display_name: candidate.suggested_display_name || candidate.display_i_id || candidate.normalized_i_id, source: 'manual', is_active: true })
     await loadAll(); await loadCandidates(); notice.value = '款式已绑定，后续成本计算会优先使用这组规则。'
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '款式绑定失败。' }
   finally { savingBinding.value = false }
 }
 async function previewCost() {
   previewing.value = true; error.value = ''
-  try { preview.value = await productManagementApi.previewCostRule({ rule_group: calculator.rule_group, width: calculator.width, height: calculator.height, area: calculator.area, quantity: calculator.quantity, process: calculator.process }) }
+  try { preview.value = await costManagementApi.previewCostRule({ rule_group: calculator.rule_group, width: calculator.width, height: calculator.height, area: calculator.area, quantity: calculator.quantity, process: calculator.process }) }
   catch (cause) { error.value = cause instanceof Error ? cause.message : '成本试算失败。' }
   finally { previewing.value = false }
 }
@@ -348,18 +348,18 @@ function formatDateTime(value?: string) { if (!value) return '时间待确认'; 
 function costChangeLabel(oldValue?: number | null, nextValue?: number | null) { const oldLabel = typeof oldValue === 'number' ? `¥${oldValue.toFixed(2)}` : '未设置'; const nextLabel = typeof nextValue === 'number' ? `¥${nextValue.toFixed(2)}` : '需人工确认'; return `${oldLabel} → ${nextLabel}` }
 async function openRun(id: number) {
   error.value = ''
-  try { selectedRun.value = await productManagementApi.getCostRecalculationRun(id, { page: 1, page_size: 200 }); runDialogOpen.value = true }
+  try { selectedRun.value = await costManagementApi.getCostRecalculationRun(id, { page: 1, page_size: 200 }); runDialogOpen.value = true }
   catch (cause) { error.value = cause instanceof Error ? cause.message : '成本影响明细加载失败。' }
 }
 async function applyRun(id: number) {
   runActionBusy.value = id; error.value = ''
-  try { const result = await productManagementApi.applyCostRecalculationRun(id); selectedRun.value = result.run; notice.value = '已更新确认范围内的任务与 SKU 成本。ERP 尚未同步，需要单独确认。'; await loadAll() }
+  try { const result = await costManagementApi.applyCostRecalculationRun(id); selectedRun.value = result.run; notice.value = '已更新确认范围内的任务与 SKU 成本。ERP 尚未同步，需要单独确认。'; await loadAll() }
   catch (cause) { error.value = cause instanceof Error ? cause.message : '成本更新失败，请核对冲突后重试。' }
   finally { runActionBusy.value = null }
 }
 async function syncRunERP(id: number) {
   runActionBusy.value = id; error.value = ''
-  try { const result = await productManagementApi.syncCostRecalculationRunERP(id); selectedRun.value = result.run; notice.value = '成本已进入 ERP 同步队列，可在更新记录中继续查看结果。'; await loadAll() }
+  try { const result = await costManagementApi.syncCostRecalculationRunERP(id); selectedRun.value = result.run; notice.value = '成本已进入 ERP 同步队列，可在更新记录中继续查看结果。'; await loadAll() }
   catch (cause) { error.value = cause instanceof Error ? cause.message : 'ERP 成本同步失败，请稍后重试。' }
   finally { runActionBusy.value = null }
 }

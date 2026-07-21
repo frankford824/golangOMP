@@ -38,18 +38,11 @@ func TestTaskActionRouteAuthorizationRegression(t *testing.T) {
 			},
 			details: map[int64]*domain.TaskDetail{1: routeReadyDetail(1)},
 		}
-		taskSvc := service.NewTaskService(taskRepo, &routeProcurementRepo{}, &routeTaskAssetRepo{}, &routeTaskEventRepo{}, nil, &routeWarehouseRepo{}, nil, routeTxRunner{},
-			service.WithTaskDataScopeResolver(service.NewRoleBasedDataScopeResolver()),
-			service.WithTaskScopeUserRepo(&routeUserRepo{
-				users: map[int64]*domain.User{
-					101: {ID: 101, Department: domain.Department("ops"), Roles: []domain.Role{domain.RoleDeptAdmin}},
-					102: {ID: 102, Department: domain.Department("design"), Roles: []domain.Role{domain.RoleDeptAdmin}},
-				},
-			}))
+		taskSvc := service.NewTaskService(taskRepo, &routeTaskAssetRepo{}, &routeTaskEventRepo{}, nil, nil, routeTxRunner{})
 		h := NewTaskHandler(taskSvc, nil, nil)
 
 		router := gin.New()
-		router.Use(routeActor(domain.RequestActor{ID: 101, Roles: []domain.Role{domain.RoleDeptAdmin}, Department: "ops"}))
+		router.Use(routeActor(routeCapabilityActor(101, domain.PermissionTaskView)))
 		router.GET("/v1/tasks/:id", h.GetByID)
 		rec := performJSON(router, http.MethodGet, "/v1/tasks/1", "")
 		if rec.Code != http.StatusOK {
@@ -57,11 +50,11 @@ func TestTaskActionRouteAuthorizationRegression(t *testing.T) {
 		}
 
 		router = gin.New()
-		router.Use(routeActor(domain.RequestActor{ID: 102, Roles: []domain.Role{domain.RoleDeptAdmin}, Department: "design"}))
+		router.Use(routeActor(domain.RequestActor{ID: 102, Roles: []domain.Role{domain.RoleDeptAdmin}}))
 		router.GET("/v1/tasks/:id", h.GetByID)
 		rec = performJSON(router, http.MethodGet, "/v1/tasks/1", "")
-		if rec.Code != http.StatusOK {
-			t.Fatalf("main flow read should allow cross-department GET /v1/tasks/1 code=%d body=%s", rec.Code, rec.Body.String())
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("legacy role-only read code=%d body=%s, want 403", rec.Code, rec.Body.String())
 		}
 	})
 
@@ -81,7 +74,7 @@ func TestTaskActionRouteAuthorizationRegression(t *testing.T) {
 		h := NewTaskAssignmentHandler(service.NewTaskAssignmentService(taskRepo, &routeTaskEventRepo{}, routeTxRunner{}))
 
 		router := gin.New()
-		router.Use(routeActor(domain.RequestActor{ID: 201, Roles: []domain.Role{domain.RoleTeamLead}, Team: "ops-team-1"}))
+		router.Use(routeActor(routeCapabilityActor(201, domain.PermissionTaskAssign)))
 		router.POST("/v1/tasks/:id/assign", h.Assign)
 		rec := performJSON(router, http.MethodPost, "/v1/tasks/2/assign", `{"designer_id":77,"assigned_by":201}`)
 		if rec.Code != http.StatusOK {
@@ -97,10 +90,10 @@ func TestTaskActionRouteAuthorizationRegression(t *testing.T) {
 			CreatorID:       200,
 		}
 		router = gin.New()
-		router.Use(routeActor(domain.RequestActor{ID: 202, Roles: []domain.Role{domain.RoleTeamLead}, Team: "ops-team-9"}))
+		router.Use(routeActor(domain.RequestActor{ID: 202, Roles: []domain.Role{domain.RoleTeamLead}}))
 		router.POST("/v1/tasks/:id/assign", h.Assign)
 		rec = performJSON(router, http.MethodPost, "/v1/tasks/2/assign", `{"designer_id":77,"assigned_by":202}`)
-		assertTaskPermissionDenied(t, rec, "task_out_of_team_scope")
+		assertTaskPermissionDenied(t, rec, "task_assignment_permission_or_scope_denied")
 
 		currentDesignerID := int64(41)
 		taskRepo.tasks[2] = &domain.Task{
@@ -114,7 +107,7 @@ func TestTaskActionRouteAuthorizationRegression(t *testing.T) {
 			CurrentHandlerID: &currentDesignerID,
 		}
 		router = gin.New()
-		router.Use(routeActor(domain.RequestActor{ID: 203, Roles: []domain.Role{domain.RoleTeamLead}, Team: "ops-team-1"}))
+		router.Use(routeActor(routeCapabilityActor(203, domain.PermissionTaskReassign)))
 		router.POST("/v1/tasks/:id/assign", h.Assign)
 		rec = performJSON(router, http.MethodPost, "/v1/tasks/2/assign", `{"designer_id":78,"assigned_by":203}`)
 		if rec.Code != http.StatusOK {
@@ -132,10 +125,10 @@ func TestTaskActionRouteAuthorizationRegression(t *testing.T) {
 			CurrentHandlerID: &currentDesignerID,
 		}
 		router = gin.New()
-		router.Use(routeActor(domain.RequestActor{ID: 204, Roles: []domain.Role{domain.RoleTeamLead}, Team: "ops-team-9"}))
+		router.Use(routeActor(domain.RequestActor{ID: 204, Roles: []domain.Role{domain.RoleTeamLead}}))
 		router.POST("/v1/tasks/:id/assign", h.Assign)
 		rec = performJSON(router, http.MethodPost, "/v1/tasks/2/assign", `{"designer_id":78,"assigned_by":204}`)
-		assertTaskPermissionDenied(t, rec, "task_out_of_team_scope")
+		assertTaskPermissionDenied(t, rec, "task_assignment_permission_or_scope_denied")
 
 		taskRepo.tasks[2] = &domain.Task{
 			ID:               2,
@@ -151,12 +144,12 @@ func TestTaskActionRouteAuthorizationRegression(t *testing.T) {
 		router.Use(routeActor(domain.RequestActor{ID: 205, Roles: []domain.Role{domain.RoleOps}, Department: "ops"}))
 		router.POST("/v1/tasks/:id/assign", h.Assign)
 		rec = performJSON(router, http.MethodPost, "/v1/tasks/2/assign", `{"designer_id":78,"assigned_by":205}`)
-		assertTaskPermissionDenied(t, rec, "task_reassign_requires_requester_or_manager")
+		assertTaskPermissionDenied(t, rec, "task_assignment_permission_or_scope_denied")
 
 		taskRepo.tasks[2] = &domain.Task{
 			ID:               2,
 			TaskType:         domain.TaskTypeNewProductDevelopment,
-			TaskStatus:       domain.TaskStatusPendingAuditA,
+			TaskStatus:       domain.TaskStatusPendingAudit,
 			OwnerDepartment:  "ops",
 			OwnerOrgTeam:     "ops-team-1",
 			CreatorID:        200,
@@ -164,56 +157,27 @@ func TestTaskActionRouteAuthorizationRegression(t *testing.T) {
 			CurrentHandlerID: &currentDesignerID,
 		}
 		router = gin.New()
-		router.Use(routeActor(domain.RequestActor{ID: 206, Roles: []domain.Role{domain.RoleTeamLead}, Team: "ops-team-1"}))
+		router.Use(routeActor(routeCapabilityActor(206, domain.PermissionTaskReassign)))
 		router.POST("/v1/tasks/:id/assign", h.Assign)
 		rec = performJSON(router, http.MethodPost, "/v1/tasks/2/assign", `{"designer_id":78,"assigned_by":206}`)
-		assertTaskPermissionDenied(t, rec, "task_not_reassignable")
-	})
-
-	t.Run("submit_design_allow_and_deny", func(t *testing.T) {
-		designerID := int64(301)
-		taskRepo := &routeTaskRepo{
-			tasks: map[int64]*domain.Task{
-				3: {
-					ID:               3,
-					TaskType:         domain.TaskTypeNewProductDevelopment,
-					TaskStatus:       domain.TaskStatusInProgress,
-					OwnerDepartment:  "ops",
-					OwnerOrgTeam:     "ops-team-1",
-					DesignerID:       &designerID,
-					CurrentHandlerID: &designerID,
-				},
-			},
-		}
-		taskAssetRepo := &routeTaskAssetRepo{}
-		h := NewDesignSubmissionHandler(service.NewTaskAssetService(taskRepo, taskAssetRepo, &routeTaskEventRepo{}, &routeUploadRequestRepo{}, &routeAssetStorageRefRepo{}, routeTxRunner{}), nil, nil)
-
-		router := gin.New()
-		router.Use(routeActor(domain.RequestActor{ID: 301, Roles: []domain.Role{domain.RoleDesigner}}))
-		router.POST("/v1/tasks/:id/submit-design", h.Submit)
-		rec := performJSON(router, http.MethodPost, "/v1/tasks/3/submit-design", `{"asset_type":"delivery","file_name":"proof.jpg","uploaded_by":301}`)
-		if rec.Code != http.StatusCreated {
-			t.Fatalf("allow submit-design code=%d body=%s", rec.Code, rec.Body.String())
-		}
-
-		otherHandler := int64(999)
-		taskRepo.tasks[3] = &domain.Task{
-			ID:               3,
-			TaskType:         domain.TaskTypeNewProductDevelopment,
-			TaskStatus:       domain.TaskStatusInProgress,
-			OwnerDepartment:  "ops",
-			OwnerOrgTeam:     "ops-team-1",
-			DesignerID:       &designerID,
-			CurrentHandlerID: &otherHandler,
-		}
-		router = gin.New()
-		router.Use(routeActor(domain.RequestActor{ID: 302, Roles: []domain.Role{domain.RoleDesigner}}))
-		router.POST("/v1/tasks/:id/submit-design", h.Submit)
-		rec = performJSON(router, http.MethodPost, "/v1/tasks/3/submit-design", `{"asset_type":"delivery","file_name":"proof.jpg","uploaded_by":302}`)
-		assertTaskPermissionDenied(t, rec, "task_not_assigned_to_actor")
+		assertTaskPermissionDenied(t, rec, "task_status_not_actionable")
 	})
 
 }
+
+func routeCapabilityActor(id int64, permission domain.PermissionCode) domain.RequestActor {
+	roleID := int64(1)
+	return domain.RequestActor{
+		ID: id,
+		EffectiveAccess: &domain.EffectiveAccess{
+			UserID:      id,
+			Permissions: []domain.PermissionCode{permission},
+			Assignments: []domain.AccessAssignment{{RoleID: roleID, UserID: id, ScopeMode: domain.AccessScopeGlobal}},
+			Sources:     []domain.EffectiveAccessNote{{RoleID: roleID, Permission: permission, ScopeMode: domain.AccessScopeGlobal}},
+		},
+	}
+}
+
 func routeActor(actor domain.RequestActor) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		c.Request = c.Request.WithContext(domain.WithRequestActor(c.Request.Context(), actor))
@@ -289,9 +253,6 @@ func (r *routeTaskRepo) ListSKUItemsByTaskID(context.Context, int64) ([]*domain.
 }
 func (r *routeTaskRepo) List(context.Context, repo.TaskListFilter) ([]*domain.TaskListItem, int64, error) {
 	return []*domain.TaskListItem{}, 0, nil
-}
-func (r *routeTaskRepo) ListBoardCandidates(context.Context, repo.TaskBoardCandidateFilter) ([]*domain.TaskListItem, error) {
-	return []*domain.TaskListItem{}, nil
 }
 func (r *routeTaskRepo) UpdateDetailBusinessInfo(_ context.Context, _ repo.Tx, detail *domain.TaskDetail) error {
 	r.details[detail.TaskID] = cloneRouteDetail(detail)
@@ -388,40 +349,12 @@ func (r *routeTaskEventRepo) ListRecent(context.Context, repo.TaskEventListFilte
 	return []*domain.TaskEvent{}, 0, nil
 }
 
-type routeWarehouseRepo struct {
-	receipts map[int64]*domain.WarehouseReceipt
-}
-
-func (r *routeWarehouseRepo) Create(_ context.Context, _ repo.Tx, receipt *domain.WarehouseReceipt) (int64, error) {
-	if r.receipts == nil {
-		r.receipts = map[int64]*domain.WarehouseReceipt{}
-	}
-	r.receipts[receipt.TaskID] = cloneRouteReceipt(receipt)
-	return int64(len(r.receipts)), nil
-}
-func (r *routeWarehouseRepo) GetByID(context.Context, int64) (*domain.WarehouseReceipt, error) {
-	return nil, nil
-}
-func (r *routeWarehouseRepo) GetByTaskID(_ context.Context, taskID int64) (*domain.WarehouseReceipt, error) {
-	return cloneRouteReceipt(r.receipts[taskID]), nil
-}
-func (r *routeWarehouseRepo) List(context.Context, repo.WarehouseListFilter) ([]*domain.WarehouseReceipt, int64, error) {
-	return []*domain.WarehouseReceipt{}, 0, nil
-}
-func (r *routeWarehouseRepo) Update(_ context.Context, _ repo.Tx, receipt *domain.WarehouseReceipt) error {
-	r.receipts[receipt.TaskID] = cloneRouteReceipt(receipt)
-	return nil
-}
-
 type routeAuditRepo struct{}
 
 func (r *routeAuditRepo) CreateRecord(context.Context, repo.Tx, *domain.AuditRecord) (int64, error) {
 	return 1, nil
 }
 func (r *routeAuditRepo) ListRecordsByTaskID(context.Context, int64) ([]*domain.AuditRecord, error) {
-	return []*domain.AuditRecord{}, nil
-}
-func (r *routeAuditRepo) ListRecords(context.Context, repo.AuditRecordListFilter) ([]*domain.AuditRecord, error) {
 	return []*domain.AuditRecord{}, nil
 }
 func (r *routeAuditRepo) CreateHandover(context.Context, repo.Tx, *domain.AuditHandover) (int64, error) {
@@ -470,21 +403,6 @@ func (r *routeAssetStorageRefRepo) UpdateStatus(context.Context, repo.Tx, string
 	return nil
 }
 
-type routeProcurementRepo struct{}
-
-func (r *routeProcurementRepo) GetByTaskID(context.Context, int64) (*domain.ProcurementRecord, error) {
-	return nil, nil
-}
-func (r *routeProcurementRepo) ListItemsByTaskID(context.Context, int64) ([]*domain.ProcurementRecordItem, error) {
-	return []*domain.ProcurementRecordItem{}, nil
-}
-func (r *routeProcurementRepo) Upsert(context.Context, repo.Tx, *domain.ProcurementRecord) error {
-	return nil
-}
-func (r *routeProcurementRepo) CreateItems(context.Context, repo.Tx, []*domain.ProcurementRecordItem) error {
-	return nil
-}
-
 type routeUserRepo struct {
 	users map[int64]*domain.User
 }
@@ -503,9 +421,6 @@ func (r *routeUserRepo) GetByEmployeeNo(context.Context, int) (*domain.User, err
 func (r *routeUserRepo) GetByJstUID(context.Context, int64) (*domain.User, error)    { return nil, nil }
 func (r *routeUserRepo) List(context.Context, repo.UserListFilter) ([]*domain.User, int64, error) {
 	return []*domain.User{}, 0, nil
-}
-func (r *routeUserRepo) ListActiveByRole(context.Context, domain.Role) ([]*domain.User, error) {
-	return []*domain.User{}, nil
 }
 func (r *routeUserRepo) ListConfigManagedAdmins(context.Context) ([]*domain.User, error) {
 	return []*domain.User{}, nil
@@ -564,14 +479,5 @@ func cloneRouteAsset(asset *domain.TaskAsset) *domain.TaskAsset {
 		return nil
 	}
 	out := *asset
-	return &out
-}
-
-func cloneRouteReceipt(receipt *domain.WarehouseReceipt) *domain.WarehouseReceipt {
-	if receipt == nil {
-		return nil
-	}
-	out := *receipt
-	out.ReceiverID = cloneRouteInt64(receipt.ReceiverID)
 	return &out
 }

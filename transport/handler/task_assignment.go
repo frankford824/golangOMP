@@ -124,6 +124,7 @@ func (h *TaskAssignmentHandler) BatchRemind(c *gin.Context) {
 	}
 	result, appErr := h.svc.BatchRemind(c.Request.Context(), service.BatchRemindTasksParams{
 		TaskIDs:        req.TaskIDs,
+		Actor:          requestActor(c),
 		ActorID:        actorID,
 		Reason:         req.Reason,
 		RemindChannel:  req.RemindChannel,

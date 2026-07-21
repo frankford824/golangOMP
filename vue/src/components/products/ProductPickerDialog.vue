@@ -5,7 +5,7 @@
  *   - 原有产品必须选择 ERP 已有产品并绑定 SKU（不可手填）
  *
  * 主要 Store：useTaskStore 或 useProductsStore
- * 预留接口：GET /api/products/search (mock)
+ * 数据来源：GET /v1/erp/products
  *
  * 当前状态：已迁移 Base 组件，搜索/选择交互完整
  * 维护注意 / 风险点：
@@ -106,14 +106,14 @@
 
 <script setup lang="ts">
 import { ref, computed, onBeforeUnmount, watch } from 'vue'
-import type { Product } from '@/types'
+import type { ERPProductOption } from '@/types'
 import { useProductsStore } from '@/stores/products'
 import BaseModal from '@/components/base/BaseModal.vue'
 import BaseInput from '@/components/base/BaseInput.vue'
 import BaseButton from '@/components/base/BaseButton.vue'
 
 const props = defineProps<{ modelValue: boolean }>()
-const emit = defineEmits<{ 'update:modelValue': [boolean]; select: [Product] }>()
+const emit = defineEmits<{ 'update:modelValue': [boolean]; select: [ERPProductOption] }>()
 
 const visible = computed({
   get: () => props.modelValue,
@@ -122,7 +122,7 @@ const visible = computed({
 
 const productsStore = useProductsStore()
 const keyword = ref('')
-const currentRow = ref<Product | null>(null)
+const currentRow = ref<ERPProductOption | null>(null)
 
 let debounceTimer: ReturnType<typeof setTimeout> | null = null
 const DEBOUNCE_MS = 300
@@ -153,7 +153,7 @@ onBeforeUnmount(() => {
   }
 })
 
-function selectRow(row: Product) {
+function selectRow(row: ERPProductOption) {
   currentRow.value = row
 }
 

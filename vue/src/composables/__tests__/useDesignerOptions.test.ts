@@ -1,7 +1,7 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
-import { DataScopeEnum, RoleEnum } from '@/types'
+import { DataScopeEnum, PermissionEnum, RoleEnum } from '@/types'
 
 const getDesignersMock = vi.fn(async () => ({
   data: {
@@ -31,7 +31,7 @@ describe('useDesignerOptions workflowLane', () => {
     getDesignersMock.mockClear()
   })
 
-  function signInUserWithRoles(roles: string[]): void {
+  function signInUserWithActions(actions: string[]): void {
     const permissions = usePermissionsStore()
     permissions.setCurrentUser({
       id: '9',
@@ -42,11 +42,11 @@ describe('useDesignerOptions workflowLane', () => {
       dataScope: DataScopeEnum.GLOBAL,
       permissions: [],
     })
-    permissions.roles = roles
+    permissions.actions = actions
   }
 
   function signInOpsUser(): void {
-    signInUserWithRoles(['Ops'])
+    signInUserWithActions([PermissionEnum.TASK_CREATE])
   }
 
   it('requests customization lane when workflowLane is customization', async () => {
@@ -71,8 +71,8 @@ describe('useDesignerOptions workflowLane', () => {
     expect(getDesignersMock).toHaveBeenCalledWith(undefined)
   })
 
-  it('allows snake_case department managers to request audit candidates', async () => {
-    signInUserWithRoles(['department_admin'])
+  it('allows audit handover capability to request audit candidates', async () => {
+    signInUserWithActions([PermissionEnum.TASK_AUDIT_HANDOVER])
     const lane = ref<'audit' | undefined>('audit')
     const { loadDesigners } = useDesignerOptions({
       autoLoad: false,
@@ -84,8 +84,8 @@ describe('useDesignerOptions workflowLane', () => {
     expect(getDesignersMock).toHaveBeenCalledWith({ workflowLane: 'audit' })
   })
 
-  it('does not request candidates for role_admin compatibility-only users', async () => {
-    signInUserWithRoles(['role_admin'])
+  it('does not request candidates for legacy display roles without capability', async () => {
+    signInUserWithActions([])
     const lane = ref<'audit' | undefined>('audit')
     const { loadDesigners } = useDesignerOptions({
       autoLoad: false,

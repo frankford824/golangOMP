@@ -15,11 +15,9 @@ func TestTaskServiceCreateBindsERPBridgeSelectionIntoMainline(t *testing.T) {
 	taskRepo := &prdTaskRepo{}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		step04TxRunner{},
 		WithERPBridgeSelectionBinding(&erpBridgeSelectionBinderStub{
@@ -95,11 +93,9 @@ func TestTaskServiceUpdateBusinessInfoRebindsERPBridgeSelectionIntoMainline(t *t
 	}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		step04TxRunner{},
 		WithERPBridgeSelectionBinding(&erpBridgeSelectionBinderStub{
@@ -179,11 +175,9 @@ func TestTaskServiceUpdateBusinessInfoFilesERPBridgeAtFiledBoundary(t *testing.T
 	}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		eventRepo,
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		step04TxRunner{},
 		WithERPBridgeSelectionBinding(bridgeStub),
@@ -282,11 +276,9 @@ func TestTaskServiceUpdateBusinessInfoMarksPendingFilingWithoutERPSelection(t *t
 	}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		step04TxRunner{},
 		WithERPBridgeSelectionBinding(&erpBridgeSelectionBinderStub{}),
@@ -313,11 +305,9 @@ func TestTaskServiceUpdateBusinessInfoMarksPendingFilingWithoutERPSelection(t *t
 func TestTaskServiceCreateRejectsMismatchedSelectedProductIDForERPSelection(t *testing.T) {
 	svc := NewTaskService(
 		&prdTaskRepo{},
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		step04TxRunner{},
 		WithERPBridgeSelectionBinding(&erpBridgeSelectionBinderStub{
@@ -445,11 +435,4 @@ func (s *erpBridgeSelectionBinderStub) UpdateVirtualInventory(context.Context, d
 
 func (s *erpBridgeSelectionBinderStub) ListJSTUsers(context.Context, domain.JSTUserListFilter) (*domain.JSTUserListResponse, *domain.AppError) {
 	return &domain.JSTUserListResponse{Datas: []*domain.JSTUser{}}, nil
-}
-
-func (s *erpBridgeSelectionBinderStub) QueryOrderActionLogs(context.Context, domain.ERPOrderActionLogFilter) (*domain.ERPOrderActionLogListResponse, *domain.AppError) {
-	return &domain.ERPOrderActionLogListResponse{
-		Items:      []*domain.ERPOrderActionLog{},
-		Pagination: domain.PaginationMeta{Page: 1, PageSize: 30, Total: 0},
-	}, nil
 }

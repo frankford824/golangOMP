@@ -8,7 +8,7 @@ import {
   isDashboardEntryRoute,
   resolveFirstAccessibleHomeRoute,
 } from '@/router/home-fallback'
-import { logsApi } from '@/services/api/logsApi'
+import { workflowTelemetryApi } from '@/services/api/workflowTelemetryApi'
 
 /**
  * 路由门禁：以后端 `frontend_access.menus` 为 SoT（Single Source of Truth）。
@@ -48,7 +48,7 @@ const routes: RouteRecordRaw[] = [
         path: 'tasks',
         name: 'TaskList',
         component: () => import('@/views/TaskListView.vue'),
-        meta: { requiresAuth: true },
+        meta: { requiresAuth: true, requiredMenuKey: 'task_list' },
       },
       {
         path: 'tasks/create',
@@ -56,7 +56,7 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/UnifiedTaskCreateView.vue'),
         meta: {
           requiresAuth: true,
-          requiredPermissions: ['task:create', 'planning_sku.create'],
+          requiredPermissions: ['task.create', 'planning_sku.create'],
         },
       },
       {
@@ -125,43 +125,9 @@ const routes: RouteRecordRaw[] = [
       },
       {
         path: 'cost-rules',
-        name: 'ProductManagement',
+        name: 'CostRules',
         component: () => import('@/views/CostRuleManagerView.vue'),
-        meta: { requiresAuth: true, requiredMenuKey: 'product_management' },
-      },
-      {
-        path: 'products',
-        redirect: { name: 'AssetsIndex' },
-      },
-      {
-        path: 'org',
-        name: 'OrgIndex',
-        component: () => import('@/views/org/OrgIndexView.vue'),
-        meta: { requiresAuth: true, requiredMenuKey: ['org_admin'], emptyTitle: '组织管理' },
-      },
-      {
-        path: 'org/users',
-        name: 'OrgUsers',
-        component: () => import('@/views/org/UsersView.vue'),
-        meta: { requiresAuth: true, requiredMenuKey: ['org_admin'], emptyTitle: '用户管理' },
-      },
-      {
-        path: 'org/departments',
-        name: 'OrgDepartments',
-        component: () => import('@/views/org/DepartmentsView.vue'),
-        meta: { requiresAuth: true, requiredMenuKey: ['org_admin'], emptyTitle: '部门管理' },
-      },
-      {
-        path: 'org/teams',
-        name: 'OrgTeams',
-        component: () => import('@/views/org/TeamsView.vue'),
-        meta: { requiresAuth: true, requiredMenuKey: ['org_admin'], emptyTitle: '团队管理' },
-      },
-      {
-        path: 'org/move-requests',
-        name: 'OrgMoveRequests',
-        component: () => import('@/views/org/MoveRequestsView.vue'),
-        meta: { requiresAuth: true, requiredMenuKey: ['org_admin'], emptyTitle: '异动申请' },
+        meta: { requiresAuth: true, requiredMenuKey: 'cost_rules' },
       },
       {
         path: 'data-center',
@@ -169,95 +135,16 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/data-center/DataCenterView.vue'),
         meta: {
           requiresAuth: true,
-          requiredMenuKey: ['report_center', 'export_center', 'logs_center', 'kpi', 'finance'],
+          requiredMenuKey: 'report_center',
           requiredPermissions: ['report.view'],
           emptyTitle: '数据中心',
         },
       },
       {
-        path: 'reports',
-        name: 'Reports',
-        component: () => import('@/views/reports/ReportsHomeView.vue'),
-        meta: {
-          requiresAuth: true,
-          requiredMenuKey: ['kpi', 'finance', 'report_center'],
-          emptyTitle: '报表中心',
-        },
-      },
-      {
-        path: 'reports/task-throughput',
-        name: 'ReportTaskThroughput',
-        component: () => import('@/views/reports/TaskThroughputReportView.vue'),
-        meta: {
-          requiresAuth: true,
-          requiredMenuKey: ['kpi', 'finance', 'report_center'],
-          emptyTitle: '任务吞吐报表',
-        },
-      },
-      {
-        path: 'reports/module-dwell',
-        name: 'ReportModuleDwell',
-        component: () => import('@/views/reports/AgingReportView.vue'),
-        meta: {
-          requiresAuth: true,
-          requiredMenuKey: ['kpi', 'finance', 'report_center'],
-          emptyTitle: '模块停留报表',
-        },
-      },
-      {
-        path: 'reports/aging',
-        redirect: { name: 'ReportModuleDwell' },
-      },
-      {
-        path: 'rules',
-        name: 'RuleConfig',
-        component: () => import('@/views/RuleConfigView.vue'),
-        meta: { requiresAuth: true, requiredMenuKey: 'rules' },
-      },
-      {
-        path: 'org-permission',
-        name: 'OrgPermission',
-        redirect: { name: 'UserManagement' },
-        meta: { requiresAuth: true, requiredMenuKey: 'user_admin' },
-      },
-      {
         path: 'users',
         name: 'UserManagement',
         component: () => import('@/views/org-permission/UserManagementView.vue'),
-        meta: { requiresAuth: true, requiredMenuKey: ['user_admin', 'access_policy'] },
-      },
-      {
-        path: 'access-policy',
-        name: 'AccessPolicy',
-        redirect: { name: 'UserManagement' },
-        meta: { requiresAuth: true, requiredMenuKey: ['access_policy', 'user_admin'] },
-      },
-      {
-        path: 'export-center',
-        name: 'ExportCenter',
-        redirect: { name: 'DataCenter' },
-      },
-      {
-        path: 'audit-log',
-        name: 'AuditLog',
-        component: () => import('@/views/audit/AuditLogView.vue'),
-        meta: { requiresAuth: true, requiredMenuKey: 'audit_log' },
-      },
-      {
-        path: 'logs',
-        name: 'LogsManagement',
-        redirect: { name: 'DataCenter' },
-      },
-      {
-        path: 'finance',
-        name: 'Finance',
-        component: () => import('@/views/finance/FinanceView.vue'),
-        meta: { requiresAuth: true, requiredMenuKey: 'finance' },
-      },
-      {
-        path: 'kpi',
-        name: 'Kpi',
-        redirect: { name: 'DataCenter' },
+        meta: { requiresAuth: true, requiredMenuKey: 'user_admin' },
       },
     ],
   },
@@ -299,18 +186,6 @@ router.beforeEach(async (to, _from, next) => {
   if (requiresAuth && !currentUser) {
     next({ path: '/login', query: { redirect: to.fullPath } })
     return
-  }
-
-  const requiredRoles = Array.isArray((to.meta as { requiredRoles?: unknown })?.requiredRoles)
-    ? ((to.meta as { requiredRoles: unknown[] }).requiredRoles as unknown[])
-        .filter((role): role is string => typeof role === 'string' && role.trim().length > 0)
-    : []
-  if (requiredRoles.length > 0) {
-    const actorRole = currentUser?.role ?? ''
-    if (!requiredRoles.includes(actorRole)) {
-      next('/403')
-      return
-    }
   }
 
   const requiredPermissions = (to.meta?.requiredPermissions ?? []) as PermissionEnumValue[]
@@ -356,8 +231,8 @@ router.afterEach((to) => {
   const taskID = numericRouteParam(to.params.id)
 
   window.setTimeout(() => {
-    logsApi
-      .recordTraceEvent({
+    workflowTelemetryApi
+      .recordEvent({
         event_type: 'page_view',
         action: '打开页面',
         page_url: window.location.href,

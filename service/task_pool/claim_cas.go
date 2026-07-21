@@ -16,7 +16,6 @@ type ClaimService struct {
 	modules         repo.TaskModuleRepo
 	events          repo.TaskModuleEventRepo
 	txRunner        repo.TxRunner
-	authorizer      *permission.Authorizer
 	notificationGen claimNotificationGenerator
 	wsHub           claimWebSocketHub
 }
@@ -50,7 +49,7 @@ func WithWebSocketHub(hub claimWebSocketHub) Option {
 }
 
 func NewClaimService(tasks taskGetter, modules repo.TaskModuleRepo, events repo.TaskModuleEventRepo, txRunner repo.TxRunner, opts ...Option) *ClaimService {
-	s := &ClaimService{tasks: tasks, modules: modules, events: events, txRunner: txRunner, authorizer: permission.NewAuthorizer(tasks, modules)}
+	s := &ClaimService{tasks: tasks, modules: modules, events: events, txRunner: txRunner}
 	for _, opt := range opts {
 		opt(s)
 	}
@@ -65,7 +64,8 @@ func (s *ClaimService) Claim(ctx context.Context, actor domain.RequestActor, tas
 	if task == nil {
 		return permission.Deny("task_not_found", "task not found")
 	}
-	if taskClaimedByOther(task, actor.ID) {
+	moduleKey = strings.TrimSpace(moduleKey)
+	if taskClaimedByOther(task, actor.ID, moduleKey) {
 		return permission.Deny(domain.DenyTaskAlreadyClaimed, "task is already assigned to another actor")
 	}
 	tm, err := s.modules.GetByTaskAndKey(ctx, taskID, moduleKey)
@@ -78,20 +78,12 @@ func (s *ClaimService) Claim(ctx context.Context, actor domain.RequestActor, tas
 	if confirmPoolTeamCode == "" && tm.PoolTeamCode != nil {
 		confirmPoolTeamCode = *tm.PoolTeamCode
 	}
-	moduleKey = strings.TrimSpace(moduleKey)
-	if moduleKey == domain.ModuleKeyCustomization {
-		if dec := validateCustomizationModuleClaim(actor, task, tm); !dec.OK {
-			return dec
-		}
+	if dec := authorizeModuleClaim(actor, task, tm, moduleKey); !dec.OK {
+		return dec
 	}
-	claimedTeam := matchedTeam(actor, confirmPoolTeamCode)
+	claimedTeam := strings.TrimSpace(actor.Team)
 	if claimedTeam == "" {
-		if moduleKey == domain.ModuleKeyCustomization && claimActorMayBypassCustomizationPoolScope(actor) {
-			claimedTeam = resolveClaimedTeamFallback(confirmPoolTeamCode, tm)
-		}
-		if claimedTeam == "" {
-			return permission.Deny(domain.DenyModuleOutOfScope, "actor is not in pool team")
-		}
+		claimedTeam = resolveClaimedTeamFallback(confirmPoolTeamCode, tm)
 	}
 	snapshot := actorSnapshot(actor)
 	err = s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
@@ -151,7 +143,7 @@ func (s *ClaimService) claimTaskIfUnassigned(ctx context.Context, tx repo.Tx, ta
 	if !ok {
 		return nil
 	}
-	if taskClaimedByOther(task, actorID) {
+	if taskClaimedByOther(task, actorID, moduleKey) {
 		return taskAlreadyClaimedError{}
 	}
 	if task.CurrentHandlerID == nil {
@@ -183,12 +175,15 @@ type taskAlreadyClaimedError struct{}
 
 func (taskAlreadyClaimedError) Error() string { return "task already claimed" }
 
-func taskClaimedByOther(task *domain.Task, actorID int64) bool {
+func taskClaimedByOther(task *domain.Task, actorID int64, moduleKey string) bool {
 	if task == nil || actorID <= 0 {
 		return false
 	}
 	if task.CurrentHandlerID != nil && *task.CurrentHandlerID > 0 && *task.CurrentHandlerID != actorID {
 		return true
+	}
+	if moduleKey == domain.ModuleKeyAudit {
+		return false
 	}
 	if task.DesignerID != nil && *task.DesignerID > 0 && *task.DesignerID != actorID {
 		return true
@@ -196,83 +191,44 @@ func taskClaimedByOther(task *domain.Task, actorID int64) bool {
 	return false
 }
 
-func matchedTeam(actor domain.RequestActor, pool string) string {
-	pool = strings.TrimSpace(pool)
-	if pool == "" {
-		return ""
-	}
-	for _, team := range actorTeams(actor) {
-		if strings.EqualFold(team, pool) {
-			return team
-		}
-	}
-	for _, target := range domain.PoolTeamTargets(pool) {
-		if !actorDepartmentMatches(actor, target.Department) {
-			continue
-		}
-		for _, team := range actorTeams(actor) {
-			if domain.OrgTeamsEquivalent(team, target.Team) {
-				return team
-			}
-		}
-	}
-	return ""
-}
-
-func validateCustomizationModuleClaim(actor domain.RequestActor, task *domain.Task, tm *domain.TaskModule) permission.Decision {
+func authorizeModuleClaim(actor domain.RequestActor, task *domain.Task, tm *domain.TaskModule, moduleKey string) permission.Decision {
 	if task == nil || tm == nil {
 		return permission.Deny(domain.ErrCodeInternalError, "task or module is missing")
 	}
-	if !task.CustomizationRequired {
-		return permission.Deny(domain.DenyModuleActionRoleDenied, "customization module claim requires a customization task")
-	}
-	if task.TaskStatus != domain.TaskStatusPendingCustomizationProduction {
-		return permission.Deny(domain.DenyModuleStateMismatch, "customization module claim requires PendingCustomizationProduction")
-	}
 	if tm.State != domain.ModuleStatePendingClaim {
-		return permission.Deny(domain.DenyModuleStateMismatch, "customization module is not pending claim")
+		return permission.Deny(domain.DenyModuleStateMismatch, "module is not pending claim")
 	}
-	if claimActorIsPureDesigner(actor) {
-		return permission.Deny(domain.DenyModuleActionRoleDenied, "designer role cannot claim customization module")
+	permissionCode := domain.PermissionTaskDesignSubmit
+	prospective := task.AccessSubject()
+	prospective.CurrentHandlerID = &actor.ID
+	switch moduleKey {
+	case domain.ModuleKeyDesign:
+		if !task.TaskType.RequiresDesign() || (task.TaskStatus != domain.TaskStatusPendingAssign && task.TaskStatus != domain.TaskStatusInProgress) {
+			return permission.Deny(domain.DenyModuleStateMismatch, "design module is not claimable in the current task state")
+		}
+		prospective.DesignerID = &actor.ID
+	case domain.ModuleKeyCustomization:
+		if !task.CustomizationRequired || (task.TaskStatus != domain.TaskStatusPendingAssign && task.TaskStatus != domain.TaskStatusInProgress) {
+			return permission.Deny(domain.DenyModuleStateMismatch, "customization module is not claimable in the current task state")
+		}
+		prospective.DesignerID = &actor.ID
+	case domain.ModuleKeyRetouch:
+		if task.TaskType != domain.TaskTypeRetouchTask || (task.TaskStatus != domain.TaskStatusPendingAssign && task.TaskStatus != domain.TaskStatusInProgress) {
+			return permission.Deny(domain.DenyModuleStateMismatch, "retouch module is not claimable in the current task state")
+		}
+		prospective.DesignerID = &actor.ID
+	case domain.ModuleKeyAudit:
+		if task.TaskStatus != domain.TaskStatusPendingAudit {
+			return permission.Deny(domain.DenyModuleStateMismatch, "audit module is not claimable in the current task state")
+		}
+		permissionCode = domain.PermissionTaskAuditDecision
+	default:
+		return permission.Deny(domain.DenyModuleActionRoleDenied, "module is not claimable")
 	}
-	if !claimActorMayClaimCustomizationModule(actor) {
-		return permission.Deny(domain.DenyModuleActionRoleDenied, "customization module claim requires customization operator or admin role")
+	if !domain.EffectiveAccessAllowsTask(actor, permissionCode, prospective) {
+		return permission.Deny(domain.ErrCodePermissionDenied, "explicit task capability is required in the task scope")
 	}
 	return permission.Allow()
-}
-
-func claimActorMayClaimCustomizationModule(actor domain.RequestActor) bool {
-	return claimActorMayBypassCustomizationPoolScope(actor) ||
-		claimActorHasRole(actor, domain.RoleCustomizationOperator)
-}
-
-func claimActorMayBypassCustomizationPoolScope(actor domain.RequestActor) bool {
-	return claimActorHasAnyRole(actor, domain.RoleAdmin, domain.RoleSuperAdmin)
-}
-
-func claimActorIsPureDesigner(actor domain.RequestActor) bool {
-	if !claimActorHasRole(actor, domain.RoleDesigner) {
-		return false
-	}
-	return !claimActorMayClaimCustomizationModule(actor)
-}
-
-func claimActorHasRole(actor domain.RequestActor, target domain.Role) bool {
-	for _, role := range actor.Roles {
-		if role == target {
-			return true
-		}
-	}
-	return false
-}
-
-func claimActorHasAnyRole(actor domain.RequestActor, targets ...domain.Role) bool {
-	for _, target := range targets {
-		if claimActorHasRole(actor, target) {
-			return true
-		}
-	}
-	return false
 }
 
 func resolveClaimedTeamFallback(confirmPoolTeamCode string, tm *domain.TaskModule) string {

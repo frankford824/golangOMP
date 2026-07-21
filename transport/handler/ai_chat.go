@@ -177,6 +177,14 @@ func (h *AIChatHandler) StreamMessage(c *gin.Context) {
 			}
 			c.Writer.Flush()
 		case <-c.Request.Context().Done():
+			// The provider receives the same cancellation signal, but StreamMessage
+			// persists the cancelled assistant message with a detached, bounded
+			// context before reporting completion. Drain that result so the handler
+			// does not return while the persistence transaction is still running.
+			select {
+			case <-result:
+			case <-time.After(6 * time.Second):
+			}
 			return
 		}
 	}

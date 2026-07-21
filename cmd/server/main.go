@@ -19,7 +19,6 @@ import (
 	"go.uber.org/zap"
 
 	"workflow/config"
-	"workflow/policy"
 	mysqlrepo "workflow/repo/mysql"
 	"workflow/service"
 	aiagentsvc "workflow/service/aiagent"
@@ -34,13 +33,9 @@ import (
 	externalassets "workflow/service/external_assets"
 	r3module "workflow/service/module_action"
 	notificationsvc "workflow/service/notification"
-	orgmovesvc "workflow/service/org_move_request"
-	predictionsvc "workflow/service/prediction"
-	reportl1svc "workflow/service/report_l1"
 	retrievalsvc "workflow/service/retrieval"
 	searchsvc "workflow/service/search"
 	"workflow/service/task_aggregator"
-	taskaisummarysvc "workflow/service/task_ai_summary"
 	taskbatchexcel "workflow/service/task_batch_excel"
 	"workflow/service/task_cancel"
 	taskdraftsvc "workflow/service/task_draft"
@@ -90,15 +85,6 @@ func main() {
 
 	// ── 5. Wire: repos → services → handlers ──────────────────────────────────
 	mdb := mysqlrepo.New(db)
-	skuRepo := mysqlrepo.NewSKURepo(mdb)
-	eventRepo := mysqlrepo.NewEventRepo(mdb)
-	assetVersionRepo := mysqlrepo.NewAssetVersionRepo(mdb)
-	auditRepo := mysqlrepo.NewAuditRepo(mdb)
-	jobRepo := mysqlrepo.NewJobRepo(mdb)
-	incidentRepo := mysqlrepo.NewIncidentRepo(mdb)
-	policyRepo := mysqlrepo.NewPolicyRepo(mdb)
-	engine := policy.NewEngine()
-
 	// V7 repos
 	userRepo := mysqlrepo.NewUserRepo(mdb)
 	orgRepo := mysqlrepo.NewOrgRepo(mdb)
@@ -120,29 +106,17 @@ func main() {
 	taskCreateRequestRepo := mysqlrepo.NewTaskCreateRequestRepo(mdb)
 	skuTraceRepo := mysqlrepo.NewSKUTraceRepo(mdb)
 	skuComboRepo := mysqlrepo.NewSKUComboRepo(mdb)
-	procurementRepo := mysqlrepo.NewProcurementRepo(mdb)
 	taskCostOverrideEventRepo := mysqlrepo.NewTaskCostOverrideEventRepo(mdb)
-	taskCostOverrideReviewRepo := mysqlrepo.NewTaskCostOverrideReviewRepo(mdb)
-	taskCostFinanceFlagRepo := mysqlrepo.NewTaskCostFinanceFlagRepo(mdb)
-	workbenchPreferenceRepo := mysqlrepo.NewWorkbenchPreferenceRepo(mdb)
-	exportJobRepo := mysqlrepo.NewExportJobRepo(mdb)
-	exportJobDispatchRepo := mysqlrepo.NewExportJobDispatchRepo(mdb)
-	exportJobAttemptRepo := mysqlrepo.NewExportJobAttemptRepo(mdb)
-	exportJobEventRepo := mysqlrepo.NewExportJobEventRepo(mdb)
 	designAssetRepo := mysqlrepo.NewDesignAssetRepo(mdb)
 	uploadRequestRepo := mysqlrepo.NewUploadRequestRepo(mdb)
 	assetStorageRefRepo := mysqlrepo.NewAssetStorageRefRepo(mdb)
 	integrationCallLogRepo := mysqlrepo.NewIntegrationCallLogRepo(mdb)
-	integrationExecutionRepo := mysqlrepo.NewIntegrationExecutionRepo(mdb)
 	codeRuleRepo := mysqlrepo.NewCodeRuleRepo(mdb)
 	productCodeSeqRepo := mysqlrepo.NewProductCodeSequenceRepo(mdb)
-	ruleTemplateRepo := mysqlrepo.NewRuleTemplateRepo(mdb)
 	serverLogRepo := mysqlrepo.NewServerLogRepo(mdb)
 	auditV7Repo := mysqlrepo.NewAuditV7Repo(mdb)
-	outsourceRepo := mysqlrepo.NewOutsourceRepo(mdb)
 	taskAssetRepo := mysqlrepo.NewTaskAssetRepo(mdb)
 	taskEventRepo := mysqlrepo.NewTaskEventRepo(mdb)
-	warehouseRepo := mysqlrepo.NewWarehouseRepo(mdb)
 	customizationJobRepo := mysqlrepo.NewCustomizationJobRepo(mdb)
 	customizationPricingRuleRepo := mysqlrepo.NewCustomizationPricingRuleRepo(mdb)
 	taskModuleRepo := mysqlrepo.NewTaskModuleRepo(mdb)
@@ -154,7 +128,6 @@ func main() {
 	taskAssetLifecycleRepo := mysqlrepo.NewTaskAssetLifecycleRepo(mdb)
 	externalAssetRepo := mysqlrepo.NewExternalAssetRepoWithAIRetrieval(mdb, cfg.VectorSearch.EmbeddingVersion)
 	taskAutoArchiveRepo := mysqlrepo.NewTaskAutoArchiveRepo(mdb)
-	orgMoveRequestRepo := mysqlrepo.NewOrgMoveRequestRepo(mdb)
 	taskDraftRepo := mysqlrepo.NewTaskDraftRepo(mdb)
 	notificationRepo := mysqlrepo.NewNotificationRepo(mdb)
 	designSourceRepo := mysqlrepo.NewDesignSourceRepo(mdb)
@@ -163,20 +136,11 @@ func main() {
 	aiChatRepo := mysqlrepo.NewAIChatRepo(mdb)
 	aiRetrievalRepo := mysqlrepo.NewAIRetrievalRepo(mdb)
 	aiAnalysisRepo := mysqlrepo.NewAIAnalysisRepo(mdb)
-	predictionRepo := mysqlrepo.NewPredictionRepo(mdb)
-	reportL1Repo := mysqlrepo.NewReportL1Repo(mdb)
 	taskOperationalDashboardRepo := mysqlrepo.NewTaskOperationalDashboardRepo(mdb)
-	kpiAnalysisRepo := mysqlrepo.NewKPIAnalysisRepo(mdb)
-	businessTrendRepo := mysqlrepo.NewBusinessTrendRepo(mdb)
 	workflowTraceEventRepo := mysqlrepo.NewWorkflowTraceEventRepo(mdb)
 	assetWorkbenchRepo := mysqlrepo.NewAssetWorkbenchRepo(mdb)
 	experienceRepo := mysqlrepo.NewExperienceRepo(mdb)
 
-	skuSvc := service.NewSKUService(skuRepo, eventRepo, mdb, engine)
-	auditSvc := service.NewAuditService(auditRepo, skuRepo, assetVersionRepo, jobRepo, eventRepo, incidentRepo, policyRepo, mdb, engine)
-	agentSvc := service.NewAgentService(assetVersionRepo, skuRepo, jobRepo, eventRepo, incidentRepo, policyRepo, mdb, engine)
-	incidentSvc := service.NewIncidentService(incidentRepo, eventRepo, mdb)
-	policySvc := service.NewPolicyService(policyRepo)
 	identitySvc := service.NewIdentityService(
 		userRepo,
 		userSessionRepo,
@@ -188,7 +152,6 @@ func main() {
 		service.WithIdentityEffectiveAccessReader(accessPolicyRepo),
 		service.WithIdentityLogger(logger),
 	)
-	orgMoveSvc := orgmovesvc.NewService(userRepo, orgRepo, orgMoveRequestRepo, permissionLogRepo, mdb)
 	if appErr := identitySvc.SyncConfiguredAuth(context.Background()); appErr != nil {
 		logger.Fatal("sync configured auth failed", zap.String("code", appErr.Code), zap.String("message", appErr.Message))
 	}
@@ -201,7 +164,6 @@ func main() {
 	categoryMappingSvc := service.NewCategoryERPMappingService(categoryERPMappingRepo, categoryRepo, mdb)
 	costRuleSvc := service.NewCostRuleService(costRuleRepo, categoryRepo, mdb)
 	costRuleBindingSvc := service.NewCostRuleBindingService(costRuleBindingRepo, costRuleRepo, mdb)
-	productSvc := service.NewProductService(productRepo, categoryRepo, categoryERPMappingRepo)
 	var erpBridgeClient service.ERPBridgeClient
 	localERPBridgeClient := service.NewLocalERPBridgeClient(productRepo, categoryRepo, mdb, integrationCallLogRepo)
 	erpMode := strings.ToLower(strings.TrimSpace(cfg.ERPRemote.Mode))
@@ -287,7 +249,6 @@ func main() {
 		Timeout:          cfg.ERP.Timeout,
 		Logger:           logger.Named("erp_sync"),
 	})
-	taskDataScopeResolver := service.NewRoleBasedDataScopeResolver()
 	taskReferenceAssetFormalizer := service.NewTaskReferenceAssetFormalizer(
 		designAssetRepo,
 		taskAssetRepo,
@@ -370,8 +331,7 @@ func main() {
 		service.WithCostRecalculationLegacyAliasFallbackEnabled(cfg.CostGovernance.LegacyAliasFallbackEnabled),
 		service.WithCostRecalculationProductManagementRedis(rdb))
 	skuComboSyncSvc := service.NewSKUComboSyncService(productManagementERPBridgeSvc, skuComboRepo, mdb)
-	taskSvc := service.NewTaskServiceWithCatalog(taskRepo, procurementRepo, taskAssetRepo, taskEventRepo, taskCostOverrideEventRepo, warehouseRepo, categoryRepo, costRuleRepo, codeRuleSvc, mdb,
-		service.WithTaskCostOverridePlaceholderRepos(taskCostOverrideReviewRepo, taskCostFinanceFlagRepo),
+	taskSvc := service.NewTaskServiceWithCatalog(taskRepo, taskAssetRepo, taskEventRepo, taskCostOverrideEventRepo, categoryRepo, costRuleRepo, codeRuleSvc, mdb,
 		service.WithERPBridgeSelectionBinding(erpBridgeSvc),
 		service.WithTaskERPBridgeFilingTrace(integrationCallLogRepo),
 		service.WithTaskSKUTraceRepo(skuTraceRepo),
@@ -389,26 +349,13 @@ func main() {
 		service.WithTaskCustomizationReviewModuleSync(taskModuleRepo, taskModuleEventRepo),
 		service.WithTaskCustomizationPricingRuleRepo(customizationPricingRuleRepo),
 		service.WithUserDisplayNameResolver(service.NewUserRepoDisplayNameResolver(userRepo)),
-		service.WithTaskDataScopeResolver(taskDataScopeResolver),
-		service.WithTaskScopeUserRepo(userRepo),
 		service.WithTaskBlueprintRuleEngine(blueprintRules),
 		service.WithTaskRetouchRequirementRepo(taskRetouchRequirementRepo),
 		service.WithTaskResourceGroupInitializer(taskResourceGroupRepo),
 		service.WithTaskProductManagementCloseSyncer(productManagementSvc),
 		service.WithTaskNotificationService(notificationSvc))
-	taskBoardSvc := service.NewTaskBoardService(taskSvc, taskOperationalDashboardRepo)
+	taskBoardSvc := service.NewTaskBoardService(taskOperationalDashboardRepo)
 	taskBatchTemplateSvc := taskbatchexcel.NewTemplateService()
-	workbenchSvc := service.NewWorkbenchService(workbenchPreferenceRepo)
-	exportCenterSvc := service.NewExportCenterService(exportJobRepo, exportJobDispatchRepo, exportJobAttemptRepo, exportJobEventRepo, mdb)
-	integrationCenterSvc := service.NewIntegrationCenterService(integrationCallLogRepo, integrationExecutionRepo, mdb)
-	taskAssetSvc := service.NewTaskAssetService(taskRepo, taskAssetRepo, taskEventRepo, uploadRequestRepo, assetStorageRefRepo, mdb,
-		service.WithTaskAssetModuleRepo(taskModuleRepo),
-		service.WithTaskAssetCustomizationJobRepo(customizationJobRepo),
-		service.WithTaskAssetBlueprintRuleEngine(blueprintRules),
-		service.WithTaskAssetDataScopeResolver(taskDataScopeResolver),
-		service.WithTaskAssetScopeUserRepo(userRepo),
-		service.WithTaskAssetUserDisplayNameResolver(service.NewUserRepoDisplayNameResolver(userRepo)))
-	assetUploadSvc := service.NewAssetUploadService(taskRepo, uploadRequestRepo, mdb)
 	taskCreateReferenceUploadSvc := service.NewTaskCreateReferenceUploadService(
 		uploadRequestRepo,
 		assetStorageRefRepo,
@@ -423,9 +370,6 @@ func main() {
 		service.WithOSSDirectService(ossDirectSvc),
 		service.WithTaskAssetCenterModuleRepo(taskModuleRepo),
 		service.WithTaskAssetCenterCustomizationJobRepo(customizationJobRepo),
-		service.WithTaskAssetCenterBlueprintRuleEngine(blueprintRules),
-		service.WithTaskAssetCenterDataScopeResolver(taskDataScopeResolver),
-		service.WithTaskAssetCenterScopeUserRepo(userRepo),
 		service.WithTaskAssetCenterUserDisplayNameResolver(service.NewUserRepoDisplayNameResolver(userRepo)),
 		service.WithTaskAssetCenterRetouchRequirementRepo(taskRetouchRequirementRepo),
 		service.WithTaskAssetCenterReferenceFileRefFlatRepo(referenceFileRefFlatRepo),
@@ -441,11 +385,8 @@ func main() {
 		assetlifecycle.ObjectDeletionWorkerConfig{},
 		log.New(os.Stderr, "[ASSET-OBJECT-DELETION] ", log.LstdFlags),
 	)
-	taskDetailSvc := service.NewTaskDetailAggregateService(taskRepo, procurementRepo, productRepo, costRuleRepo, auditV7Repo, outsourceRepo, taskAssetRepo, warehouseRepo, taskEventRepo, taskCostOverrideEventRepo, taskCostOverrideReviewRepo, taskCostFinanceFlagRepo,
-		service.WithTaskDetailScopeUserRepo(userRepo),
-		service.WithTaskDetailUserDisplayNameResolver(service.NewUserRepoDisplayNameResolver(userRepo)),
-		service.WithTaskDetailDesignAssetReadModel(designAssetRepo))
-	taskCostOverrideSvc := service.NewTaskCostOverrideAuditService(taskRepo, taskCostOverrideEventRepo, taskEventRepo, taskCostOverrideReviewRepo, taskCostFinanceFlagRepo)
+	taskDetailSvc := service.NewTaskDetailAggregateService(taskRepo)
+	taskCostOverrideSvc := service.NewTaskCostOverrideAuditService(taskRepo, taskCostOverrideEventRepo, taskEventRepo)
 	experienceSvc := service.NewExperienceService(experienceRepo, service.ExperienceServiceConfig{
 		UIEnabled:                    cfg.Experience.UIEnabled,
 		CaptureEnabled:               cfg.Experience.CaptureEnabled,
@@ -470,12 +411,11 @@ func main() {
 	auditV7Svc := service.NewAuditV7Service(taskRepo, auditV7Repo, taskEventRepo, codeRuleSvc, mdb, auditV7Options...)
 	taskEventSvc := service.NewTaskEventService(taskEventRepo, taskRepo,
 		service.WithTaskEventUserDisplayNameResolver(service.NewUserRepoDisplayNameResolver(userRepo)))
-	operationLogSvc := service.NewOperationLogService(taskEventRepo, exportJobEventRepo, integrationCallLogRepo)
 	notificationGen := notificationsvc.NewGenerator(notificationSvc, moduleNotificationRepo, logger.Named("notification_generator"))
 	blueprintRules.SetNotificationGenerator(notificationGen)
 	taskAssignmentSvc := service.NewTaskAssignmentService(taskRepo, taskEventRepo, mdb,
-		service.WithTaskAssignmentDataScopeResolver(taskDataScopeResolver),
 		service.WithTaskAssignmentScopeUserRepo(userRepo),
+		service.WithTaskAssignmentEffectiveAccessReader(accessPolicyRepo),
 		service.WithTaskAssignmentNotificationService(notificationSvc),
 		service.WithTaskAssignmentModuleSync(taskModuleRepo, taskModuleEventRepo))
 	taskDraftSvc := taskdraftsvc.NewService(taskDraftRepo, permissionLogRepo, mdb)
@@ -484,9 +424,7 @@ func main() {
 	searchSvc := searchsvc.NewService(searchRepo)
 	searchSvc.SetLogger(logger.Named("global_search"))
 	searchSvc.SetExternalAssetSearchProvider(externalAssetSvc)
-	predictionSvc := predictionsvc.NewService(predictionRepo)
 	workflowTraceEventSvc := service.NewWorkflowTraceEventService(workflowTraceEventRepo)
-	r3PoolQuerySvc := task_pool.NewPoolQueryService(mdb)
 	r3ClaimSvc := task_pool.NewClaimService(taskRepo, taskModuleRepo, taskModuleEventRepo, mdb, task_pool.WithNotificationGenerator(notificationGen), task_pool.WithWebSocketHub(wsHub))
 	r3ModuleSvc := r3module.NewActionService(taskRepo, taskModuleRepo, taskModuleEventRepo, referenceFileRefFlatRepo, mdb, blueprintRules, r3module.WithNotificationGenerator(notificationGen), r3module.WithCustomizationJobRepo(customizationJobRepo))
 	r3CancelSvc := task_cancel.NewService(taskRepo, taskModuleRepo, taskModuleEventRepo, mdb)
@@ -495,18 +433,6 @@ func main() {
 		task_aggregator.WithTaskRetouchRequirementRepo(taskRetouchRequirementRepo),
 		task_aggregator.WithReferenceFileRefEnricher(service.NewReferenceFileRefsEnricher(ossDirectSvc, nil)),
 		task_aggregator.WithUserDisplayNameResolver(service.NewUserRepoDisplayNameResolver(userRepo)))
-	aiSummaryClient := aiagentsvc.NewAnthropicCompatibleClient(aiagentsvc.Config{
-		Enabled:         cfg.AI.Enabled,
-		Provider:        cfg.AI.Provider,
-		BaseURL:         cfg.AI.BaseURL,
-		APIKey:          cfg.AI.APIKey,
-		Model:           cfg.AI.Model,
-		Timeout:         cfg.AI.Timeout,
-		MaxTokens:       cfg.AI.MaxTokens,
-		RateLimitWindow: cfg.AI.RateLimitWindow,
-		RateLimitMax:    cfg.AI.RateLimitMax,
-		RateLimiter:     aiagentsvc.NewRedisAIRateLimiter(rdb, "omp"),
-	}, logger.Named("ai_agent"))
 	aiChatClient := aiagentsvc.NewAnthropicCompatibleClient(aiagentsvc.Config{
 		Enabled: cfg.AI.Enabled && cfg.AIChat.Enabled, Provider: cfg.AI.Provider,
 		BaseURL: cfg.AI.BaseURL, APIKey: cfg.AI.APIKey, Model: cfg.AI.Model,
@@ -533,28 +459,6 @@ func main() {
 			MaxConcurrentUser: cfg.AIChat.MaxConcurrentUser,
 		}, logger.Named("ai_chat"))
 	aiChatService.SetAnalysisOrchestrator(aichatsvc.NewToolOrchestrator(aiChatClient, retrievalService, aiAnalysisRepo))
-	trendProviders, expectedTrendSources := reportl1svc.NewDefaultTrendProviders(reportl1svc.TrendProviderConfig{
-		ChinaHotURL:         cfg.BusinessTrend.ChinaHotURL,
-		ApifyToken:          cfg.BusinessTrend.ApifyToken,
-		ApifyBaseURL:        cfg.BusinessTrend.ApifyBaseURL,
-		ApifyDouyinHotActor: cfg.BusinessTrend.ApifyDouyinHotActor,
-		ApifyDouyinActor:    cfg.BusinessTrend.ApifyDouyinActor,
-		ApifyRedNoteActor:   cfg.BusinessTrend.ApifyRedNoteActor,
-		Apify1688Actor:      cfg.BusinessTrend.Apify1688Actor,
-		ApifyTaobaoActor:    cfg.BusinessTrend.ApifyTaobaoActor,
-		Timeout:             cfg.BusinessTrend.Timeout,
-		MaxExternalKeywords: cfg.BusinessTrend.MaxExternalKeywords,
-		MaxExternalItems:    cfg.BusinessTrend.MaxExternalItems,
-	}, logger.Named("business_trends"))
-	reportL1Svc := reportl1svc.NewService(reportL1Repo,
-		reportl1svc.WithPermissionLogRepo(permissionLogRepo),
-		reportl1svc.WithReportL1Redis(rdb),
-		reportl1svc.WithKPIAnalysisRepo(kpiAnalysisRepo),
-		reportl1svc.WithKPIAnalysisGenerator(aiSummaryClient),
-		reportl1svc.WithBusinessTrendRepo(businessTrendRepo),
-		reportl1svc.WithBusinessTrendGenerator(aiSummaryClient),
-		reportl1svc.WithBusinessTrendProviders(trendProviders, expectedTrendSources))
-	taskAISummarySvc := taskaisummarysvc.NewService(r3DetailSvc, taskEventSvc, taskCostOverrideEventRepo, aiSummaryClient)
 	taskResourceWorkflowSvc := service.NewTaskResourceWorkflowService(taskResourceGroupRepo, mdb, taskEventRepo,
 		service.WithTaskResourceWorkflowOSSDirect(ossDirectSvc),
 		service.WithTaskResourceWorkflowSKUProfiles(productManagementSvc))
@@ -584,34 +488,25 @@ func main() {
 	planningSKUSvc := service.NewPlanningSKUService(planningSKURepo, taskRepo, taskEventRepo, mdb, service.NewTaskFinalizer(taskResourceGroupRepo, taskEventRepo))
 	taskERPOutboxProcessor := service.NewTaskERPOutboxProcessor(taskSvc, productManagementSvc, erpBridgeSvc, assetStorageRefRepo, ossDirectSvc)
 
-	skuH := handler.NewSKUHandler(skuSvc)
-	auditH := handler.NewAuditHandler(auditSvc)
-	agentH := handler.NewAgentHandler(agentSvc)
-	incidentH := handler.NewIncidentHandler(incidentSvc)
-	policyH := handler.NewPolicyHandler(policySvc)
 	authH := handler.NewAuthHandler(identitySvc, cfg.AssetWorkbench.CookieDomain)
 	accessPolicyH := handler.NewAccessPolicyHandler(accessPolicySvc)
 	routeAccessCatalog := transport.NewRouteAccessCatalog()
-	userAdminH := handler.NewUserAdminHandler(identitySvc, routeAccessCatalog, operationLogSvc, workflowTraceEventSvc)
+	userAdminH := handler.NewUserAdminHandler(identitySvc, workflowTraceEventSvc)
 
 	// V7 handlers
 	erpBridgeH := handler.NewERPBridgeHandler(erpBridgeSvc)
-	productH := handler.NewProductHandler(productSvc)
 	productManagementH := handler.NewProductManagementHandler(productManagementSvc, costRecalculationSvc)
 	categoryH := handler.NewCategoryHandler(categorySvc)
 	categoryMappingH := handler.NewCategoryERPMappingHandler(categoryMappingSvc)
 	costRuleH := handler.NewCostRuleHandler(costRuleSvc)
 	costRuleBindingH := handler.NewCostRuleBindingHandler(costRuleBindingSvc)
-	erpSyncH := handler.NewERPSyncHandler(erpSyncSvc)
 	taskH := handler.NewTaskHandler(taskSvc, costRuleSvc, taskDetailSvc)
-	taskH.SetR3Services(r3PoolQuerySvc, r3ClaimSvc, r3ModuleSvc, r3CancelSvc)
+	taskH.SetR3Services(r3ClaimSvc, r3ModuleSvc, r3CancelSvc)
 	taskH.SetPlanningSKUService(planningSKUSvc)
 	taskAssignmentH := handler.NewTaskAssignmentHandler(taskAssignmentSvc)
-	taskAssetH := handler.NewTaskAssetHandler(taskAssetSvc)
 	taskAssetCenterH := handler.NewTaskAssetCenterHandler(taskAssetCenterSvc)
 	taskAssetCenterH.SetGlobalAssetServices(globalAssetCenterSvc, globalAssetLifecycleSvc)
 	taskCreateReferenceUploadH := handler.NewTaskCreateReferenceUploadHandler(taskCreateReferenceUploadSvc)
-	assetUploadH := handler.NewAssetUploadHandler(assetUploadSvc)
 	assetFilesH := handler.NewAssetFilesHandler(cfg.UploadService.BaseURL, cfg.UploadService.InternalToken, cfg.UploadService.StorageProvider, logger, ossDirectSvc)
 	assetFilesH.SetERPImageProxy(taskAssetRepo, erpImageProxySigner)
 	assetFilesTaskAssetRepo, ok := taskAssetRepo.(handler.AssetFilesTaskAssetRepo)
@@ -623,51 +518,35 @@ func main() {
 		logger.Fatal("asset storage ref repo does not support asset file access checks")
 	}
 	assetFilesH.SetFileAccessPolicy(taskRepo, assetFilesTaskAssetRepo, assetFilesStorageRefRepo, userRepo)
-	designSubmissionH := handler.NewDesignSubmissionHandler(taskAssetSvc, taskAssetCenterSvc, taskSvc)
 	taskResourceWorkflowH := handler.NewTaskResourceWorkflowHandler(taskResourceWorkflowSvc)
 	planningSKUH := handler.NewPlanningSKUHandler(planningSKUSvc)
 	taskDetailH := handler.NewTaskDetailHandler(r3DetailSvc)
-	taskAISummaryH := handler.NewTaskAISummaryHandler(taskAISummarySvc)
 	taskCostOverrideH := handler.NewTaskCostOverrideHandler(taskCostOverrideSvc)
 	taskBoardH := handler.NewTaskBoardHandler(taskBoardSvc)
 	taskBatchExcelH := handler.NewTaskBatchExcelHandler(taskBatchTemplateSvc, taskBatchParseSvc)
 	taskSingleExcelH := handler.NewTaskSingleExcelHandler(taskSingleTemplateSvc, taskSingleParseSvc)
-	workbenchH := handler.NewWorkbenchHandler(workbenchSvc)
 	assetWorkbenchH := handler.NewAssetWorkbenchHandler(assetWorkbenchSvc, cfg.AssetWorkbench.CookieDomain)
-	exportCenterH := handler.NewExportCenterHandler(exportCenterSvc)
-	integrationCenterH := handler.NewIntegrationCenterHandler(integrationCenterSvc)
-	integrationCenterH.SetExternalAssetEventService(externalAssetSvc)
+	integrationCenterH := handler.NewIntegrationCenterHandler(externalAssetSvc)
 	codeRuleH := handler.NewCodeRuleHandler(codeRuleSvc)
-	ruleTemplateSvc := service.NewRuleTemplateService(ruleTemplateRepo)
-	ruleTemplateH := handler.NewRuleTemplateHandler(ruleTemplateSvc)
 	auditV7H := handler.NewAuditV7Handler(auditV7Svc, taskEventSvc)
-	auditLogH := handler.NewAuditLogHandler(auditV7Repo, taskRepo, userRepo)
-	jstUserImportSvc := service.NewJSTUserImportService(erpBridgeSvc, userRepo, mdb, cfg.Auth)
-	jstUserAdminH := handler.NewJSTUserAdminHandler(erpBridgeSvc, jstUserImportSvc)
 	serverLogSvc := service.NewServerLogService(serverLogRepo)
 	serverLogH := handler.NewServerLogHandler(serverLogSvc)
-	orgMoveH := handler.NewOrgMoveRequestHandler(orgMoveSvc)
 	taskDraftH := handler.NewTaskDraftHandler(taskDraftSvc)
 	notificationH := handler.NewNotificationHandler(notificationSvc)
 	erpProductH := handler.NewERPProductHandler(erpProductSvc)
 	designSourceH := handler.NewDesignSourceHandler(designSourceSvc)
 	searchH := handler.NewSearchHandler(searchSvc)
 	aiChatH := handler.NewAIChatHandler(aiChatService, cfg.AIChat.HeartbeatInterval)
-	reportL1H := handler.NewReportL1Handler(reportL1Svc, permissionLogRepo)
-	experienceH := handler.NewExperienceHandler(experienceSvc)
-	predictionH := handler.NewPredictionHandler(predictionSvc)
-	predictionH.SetExperienceService(experienceSvc)
 	wsH := transportws.NewHandler(identitySvc, wsHub)
 
 	// ── 6. HTTP router ────────────────────────────────────────────────────────
-	router := transport.NewRouter(skuH, auditH, agentH, incidentH, policyH, authH, accessPolicyH, userAdminH, erpBridgeH, productH, productManagementH, categoryH, categoryMappingH, costRuleH, costRuleBindingH, erpSyncH, taskH, taskAssignmentH, taskAssetH, taskAssetCenterH, taskCreateReferenceUploadH, assetUploadH, assetFilesH, designSubmissionH, taskResourceWorkflowH, planningSKUH, taskDetailH, taskAISummaryH, taskCostOverrideH, taskBoardH, taskBatchExcelH, taskSingleExcelH, workbenchH, assetWorkbenchH, exportCenterH, integrationCenterH, codeRuleH, ruleTemplateH, auditV7H, auditLogH, jstUserAdminH, serverLogH, orgMoveH, taskDraftH, notificationH, erpProductH, designSourceH, searchH, aiChatH, reportL1H, experienceH, predictionH, wsH, routeAccessCatalog, identitySvc, identitySvc, accessPolicySvc, logger, workflowTraceEventSvc)
+	router := transport.NewRouter(authH, accessPolicyH, userAdminH, erpBridgeH, productManagementH, categoryH, categoryMappingH, costRuleH, costRuleBindingH, taskH, taskAssignmentH, taskAssetCenterH, taskCreateReferenceUploadH, assetFilesH, taskResourceWorkflowH, planningSKUH, taskDetailH, taskCostOverrideH, taskBoardH, taskBatchExcelH, taskSingleExcelH, assetWorkbenchH, integrationCenterH, codeRuleH, auditV7H, serverLogH, taskDraftH, notificationH, erpProductH, designSourceH, searchH, aiChatH, wsH, routeAccessCatalog, identitySvc, identitySvc, accessPolicySvc, logger, workflowTraceEventSvc)
 
 	// ── 7. Background workers ─────────────────────────────────────────────────
 	workerCtx, cancelWorkers := context.WithCancel(context.Background())
 	defer cancelWorkers()
 	workers.NewGroup(workers.GroupDeps{
 		DB:                              db,
-		Redis:                           rdb,
 		Logger:                          logger,
 		ERPSync:                         erpSyncSvc,
 		ProductManagement:               productManagementSvc,
@@ -753,29 +632,6 @@ func main() {
 			logger.Fatal("cron auto-archive add failed", zap.Error(err))
 		}
 		logger.Info("cron auto-archive enabled", zap.String("spec", archiveSpec))
-	}
-	if envFlag("ENABLE_CRON_REPORT_L1_DAILY") {
-		reportSpec := envOr("CRON_SCHEDULE_REPORT_L1_DAILY", "*/10 * * * *")
-		if err := cronInst.Add("report-l1-daily", reportSpec, func(ctx context.Context) error {
-			days := envInt("REPORT_L1_DAILY_REFRESH_DAYS", 3)
-			if days < 1 {
-				days = 1
-			}
-			to := time.Now().UTC().Truncate(24 * time.Hour)
-			from := to.AddDate(0, 0, -(days - 1))
-			if err := reportL1Repo.RefreshDailyAggregates(ctx, from, to); err != nil {
-				return err
-			}
-			logger.Info("cron report-l1-daily run",
-				zap.Time("from", from),
-				zap.Time("to", to),
-				zap.Int("days", days),
-			)
-			return nil
-		}); err != nil {
-			logger.Fatal("cron report-l1-daily add failed", zap.Error(err))
-		}
-		logger.Info("cron report-l1-daily enabled", zap.String("spec", reportSpec))
 	}
 	cronInst.Start()
 	logger.Info("cron started", zap.Int("entries", len(cronInst.Entries())))
@@ -1054,7 +910,6 @@ func erpRemoteServiceConfig(cfg *config.Config, log *zap.Logger) service.ERPRemo
 		GetCompanyUsersPath:      cfg.ERPRemote.GetCompanyUsersPath,
 		SkuQueryPath:             cfg.ERPRemote.SkuQueryPath,
 		CombineSKUQueryPath:      cfg.ERPRemote.CombineSKUQueryPath,
-		OrderActionQueryPath:     cfg.ERPRemote.OrderActionQueryPath,
 		OpenWebCharset:           cfg.ERPRemote.OpenWebCharset,
 		OpenWebVersion:           cfg.ERPRemote.OpenWebVersion,
 		Timeout:                  cfg.ERPRemote.Timeout,

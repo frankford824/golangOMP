@@ -1,20 +1,17 @@
+/**
+ * Display roles are labels only. Runtime authorization comes exclusively from
+ * `frontend_access.actions` and the backend `allowed_actions` contract.
+ */
 export const RoleEnum = {
-  // ─── 组织层级角色（管理体系）──────────────────────────────────────────────────
   SUPER_ADMIN: 'super_admin',
   HR_ADMIN: 'hr_admin',
   DEPT_ADMIN: 'dept_admin',
   GROUP_LEADER: 'group_leader',
   MEMBER: 'member',
-  // ─── 职位角色（岗位体系，与层级角色正交，基层员工可直接使用）──────────────────
-  OPS: 'ops',          // 运营：创建任务、指派、成本管控、结单
-  DESIGNER: 'designer', // 设计师：资产上传、提交审核
-  CUSTOMIZATION_OPERATOR: 'customization_operator', // 定制美工：作图、上传、效果产出
-  AUDIT_A: 'audit_a',   // 常规审核：覆盖常规审核与交接复核状态
-  /** @deprecated 常规审核旧编码，仅兼容历史账号；新授权使用 AUDIT_A */
-  AUDIT_B: 'audit_b',
-  /** @deprecated 使用 AUDIT_A */
+  OPS: 'ops',
+  DESIGNER: 'designer',
+  CUSTOMIZATION_OPERATOR: 'customization_operator',
   AUDITOR: 'auditor',
-  WAREHOUSE: 'warehouse', // 仓库员：接收/退回/归档
 } as const
 
 export type RoleEnumValue = (typeof RoleEnum)[keyof typeof RoleEnum]
@@ -28,39 +25,36 @@ export const DataScopeEnum = {
 
 export type DataScopeEnumValue = (typeof DataScopeEnum)[keyof typeof DataScopeEnum]
 
+/** Current V8 capability codes. No retired warehouse, outsource or A/B audit aliases. */
 export const PermissionEnum = {
-  // 任务
-  TASK_VIEW: 'task:view',
-  TASK_CREATE: 'task:create',
+  ACCOUNT_USE: 'account.use',
+  TASK_VIEW: 'task.view',
+  TASK_CREATE: 'task.create',
+  TASK_ASSIGN: 'task.assign',
+  TASK_REASSIGN: 'task.reassign',
+  TASK_TERMINATE: 'task.terminate',
+  TASK_DESIGN_SUBMIT: 'task.upload_source',
+  TASK_AUDIT: 'task.audit',
+  TASK_AUDIT_HANDOVER: 'task.audit_handover',
+  TASK_REOPEN: 'task.reopen',
+  PLANNING_SKU_VIEW: 'planning_sku.view',
   PLANNING_SKU_CREATE: 'planning_sku.create',
-  TASK_EDIT: 'task:edit',
-  /** v0.6 对齐：K 节，商品/成本编辑与试算仅 Ops/Warehouse/Admin */
-  TASK_EDIT_COST: 'task:edit-cost',
-  TASK_ASSIGN: 'task:assign',
-  TASK_AUDIT: 'task:audit',
-  TASK_WAREHOUSE: 'task:warehouse',
-  WAREHOUSE_RECEIVE: 'warehouse:receive',
-  WAREHOUSE_RETURN: 'warehouse:return',
-  TASK_COMPLETE: 'task:complete',
-  TASK_ARCHIVE: 'task:archive',
-  TASK_CLOSE: 'task:close',
-  TASK_FORCE_CLOSE: 'task:force_close',
-  // 设计
-  DESIGN_WORK: 'design.work',
-  DESIGN_UPLOAD: 'design.upload',
-  DESIGN_SUBMIT: 'design.submit',
-  // 定制 / 仓库
-  OUTSOURCE_VIEW: 'outsource:view',
-  WAREHOUSE_VIEW: 'warehouse:view',
-  // 数据 / 配置
-  RULES_EDIT: 'rules:edit',
-  ORG_MANAGE: 'org:manage',
-  EXPORT_TASKS: 'export:tasks',
-  AUDIT_VIEW: 'audit:view',
-  // KPI / 财务
-  KPI_VIEW: 'kpi:view',
-  FINANCE_VIEW: 'finance:view',
+  PLANNING_SKU_EDIT: 'planning_sku.edit',
+  PLANNING_SKU_EXPORT: 'planning_sku.export',
+  PLANNING_SKU_ERP_SYNC: 'planning_sku.erp_sync',
+  PLANNING_SKU_ERP_RETRY: 'planning_sku.erp_retry',
+  ASSET_VIEW: 'asset.view',
+  ASSET_DOWNLOAD: 'asset.download',
+  ASSET_EXPORT: 'asset.export',
+  ASSET_PUBLISH: 'asset.publish',
+  ASSET_MANAGE: 'asset.manage',
+  CATALOG_VIEW: 'catalog.view',
+  CATALOG_MANAGE: 'catalog.manage',
+  ERP_MANAGE: 'erp.manage',
   REPORT_VIEW: 'report.view',
+  SYSTEM_MANAGE: 'system.manage',
+  ACCESS_VIEW: 'access.view',
+  ACCESS_MANAGE: 'access.manage',
 } as const
 
 export type PermissionEnumValue = (typeof PermissionEnum)[keyof typeof PermissionEnum]

@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"time"
 
-	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 
 	"workflow/domain"
@@ -16,7 +15,6 @@ import (
 // Group manages all background workers (spec §4.1).
 type Group struct {
 	db                             *sql.DB
-	rdb                            *redis.Client
 	logger                         *zap.Logger
 	erpSyncSvc                     service.ERPSyncService
 	productMgmt                    service.ProductManagementService
@@ -52,7 +50,6 @@ type Group struct {
 
 type GroupDeps struct {
 	DB                              *sql.DB
-	Redis                           *redis.Client
 	Logger                          *zap.Logger
 	ERPSync                         service.ERPSyncService
 	ProductManagement               service.ProductManagementService
@@ -101,7 +98,6 @@ type AssetWorkbenchBatchJobProcessor interface {
 func NewGroup(deps GroupDeps) *Group {
 	return &Group{
 		db:                             deps.DB,
-		rdb:                            deps.Redis,
 		logger:                         deps.Logger,
 		erpSyncSvc:                     deps.ERPSync,
 		productMgmt:                    deps.ProductManagement,
@@ -138,10 +134,6 @@ func NewGroup(deps GroupDeps) *Group {
 
 // Start launches all workers as goroutines. All stop when ctx is cancelled.
 func (g *Group) Start(ctx context.Context) {
-	go NewLeaseReaper(g.db, g.logger).Run(ctx)
-	go NewRetryScheduler(g.db, g.logger).Run(ctx)
-	go NewVerifyWorker(g.db, g.rdb, g.logger).Run(ctx)
-	go NewEventDispatcher(g.db, g.rdb, g.logger).Run(ctx)
 	if g.asyncProjectionOutbox != nil && g.asyncProjectionTx != nil {
 		go NewSearchReindexOutboxWorker(g.asyncProjectionOutbox, g.asyncProjectionTx, AsyncOutboxWorkerConfig{}, g.logger.Named("search_reindex_outbox")).Run(ctx)
 		if g.taskERPOutboxProcessor != nil {

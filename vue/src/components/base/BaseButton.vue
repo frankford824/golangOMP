@@ -22,7 +22,7 @@ import BaseSpinner from './BaseSpinner.vue'
 
 const props = withDefaults(
   defineProps<{
-    variant?: 'primary' | 'secondary' | 'ghost' | 'danger' | 'outsource'
+    variant?: 'primary' | 'secondary' | 'ghost' | 'danger'
     size?: 'sm' | 'md'
     type?: 'button' | 'submit' | 'reset'
     disabled?: boolean
@@ -49,9 +49,6 @@ const baseGhost =
   'border border-transparent bg-transparent text-[rgb(var(--yb-text-muted-strong))] hover:border-transparent hover:bg-[rgb(var(--yb-brand-soft))] hover:text-[rgb(var(--yb-brand))]'
 const baseDanger =
   'border border-[rgb(var(--yb-danger))] bg-[rgb(var(--yb-danger))] text-[rgb(var(--yb-text-inverse))] hover:border-[rgb(var(--yb-danger-text))] hover:bg-[rgb(var(--yb-danger-text))]'
-const baseOutsource =
-  'border border-[rgb(var(--yb-warning-border-soft))] bg-[rgb(var(--yb-warning-soft))] text-[rgb(var(--yb-warning-text))] hover:bg-[rgb(var(--yb-warning-badge-soft))]'
-
 const sizeSm = 'h-8 px-3 text-xs'
 const sizeMd = 'h-10 px-3.5 text-sm'
 
@@ -63,8 +60,6 @@ const buttonClass = computed(() => {
       ? baseSecondary
       : props.variant === 'ghost'
       ? baseGhost
-      : props.variant === 'outsource'
-      ? baseOutsource
       : baseDanger
 
   const sizeClass = props.size === 'sm' ? sizeSm : sizeMd

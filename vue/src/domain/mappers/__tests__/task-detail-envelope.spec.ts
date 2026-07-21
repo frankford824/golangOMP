@@ -50,17 +50,12 @@ describe('mergeDetailEnvelopeIntoTaskRaw', () => {
     expect(refs[0].download_url).toBe('https://top')
   })
 
-  it('merges top-level workflow status and actor read-model fields into task root', () => {
+  it('merges the v8 design status and actor read-model fields into task root', () => {
     const out = mergeDetailEnvelopeIntoTaskRaw({
       task: {
         id: '612',
         designer_id: 198,
         task_status: 'InProgress',
-      },
-      workflow: {
-        sub_status: {
-          design: { code: 'in_progress' },
-        },
       },
       design_sub_status: 'in_progress',
       designer_name: '设计超级管理员',
@@ -70,11 +65,7 @@ describe('mergeDetailEnvelopeIntoTaskRaw', () => {
       current_handler_name: '设计超级管理员',
     })
 
-    expect(out.workflow).toEqual({
-      sub_status: {
-        design: { code: 'in_progress' },
-      },
-    })
+    expect(out.workflow).toBeUndefined()
     expect(out.design_sub_status).toBe('in_progress')
     expect(out.designer_name).toBe('设计超级管理员')
     expect(out.assignee_name).toBe('设计超级管理员')

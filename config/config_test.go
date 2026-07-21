@@ -278,18 +278,11 @@ func TestLoadIncludesAuthAndFrontendAccessSettings(t *testing.T) {
 	if cfg.FrontendAccess.Version == "" {
 		t.Fatal("FrontendAccess.Version is empty")
 	}
-	if len(cfg.FrontendAccess.Roles) == 0 {
-		t.Fatal("FrontendAccess.Roles is empty")
+	if len(cfg.FrontendAccess.Roles) != 0 {
+		t.Fatalf("FrontendAccess.Roles = %+v, legacy role grants must be empty", cfg.FrontendAccess.Roles)
 	}
-	hasDesignDepartment := false
-	for _, entry := range cfg.FrontendAccess.Departments {
-		if entry.Code == "design" {
-			hasDesignDepartment = true
-			break
-		}
-	}
-	if !hasDesignDepartment {
-		t.Fatalf("FrontendAccess.Departments = %+v, want one entry with code=design", cfg.FrontendAccess.Departments)
+	if _, ok := cfg.FrontendAccess.MenuCatalog["cost_rules"]; !ok {
+		t.Fatal("FrontendAccess.MenuCatalog.cost_rules is missing")
 	}
 	if len(cfg.FrontendAccess.Defaults.AllAuthenticated.Pages) == 0 {
 		t.Fatalf("FrontendAccess.Defaults.AllAuthenticated = %+v", cfg.FrontendAccess.Defaults.AllAuthenticated)

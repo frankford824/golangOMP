@@ -42,11 +42,9 @@ vi.mock('@/composables/usePermission', () => ({
 
 vi.mock('@/services/api/usersApi', () => ({
   usersApi: {
-    listRoles: vi.fn(),
     list: vi.fn(),
     getById: vi.fn(),
     patch: vi.fn(),
-    replaceRoles: vi.fn(),
     create: vi.fn(),
     deactivate: vi.fn(),
     activate: vi.fn(),
@@ -169,59 +167,6 @@ describe('UserManagementView role governance', () => {
     permissionMock.allowedActions.add('org.manage')
     permissionMock.allowedActions.add('access.view')
     permissionMock.allowedActions.add('access.manage')
-    vi.mocked(usersApi.listRoles).mockResolvedValue({
-      data: {
-        data: [
-          {
-            role: 'Member',
-            name: 'Member',
-            category: 'business',
-            assignable: true,
-            assignable_by_current_actor: true,
-            deprecated: false,
-            hidden_by_default: false,
-          },
-          {
-            role: 'AssetSubmitter',
-            name: '素材工作台-交付人员',
-            category: 'asset_workbench',
-            assignable: true,
-            assignable_by_current_actor: true,
-            deprecated: false,
-            hidden_by_default: false,
-          },
-          {
-            role: 'Audit_B',
-            name: '历史兼容：常规审核旧编码',
-            category: 'compatibility',
-            assignable: false,
-            assignable_by_current_actor: false,
-            deprecated: true,
-            hidden_by_default: true,
-            assignment_note: '常规审核旧编码，不允许新增分配',
-          },
-          {
-            role: 'Outsource',
-            name: 'Outsource',
-            category: 'compatibility',
-            assignable: false,
-            assignable_by_current_actor: false,
-            deprecated: true,
-            hidden_by_default: true,
-            assignment_note: '历史兼容角色',
-          },
-          {
-            role: 'SuperAdmin',
-            name: 'Super Admin',
-            category: 'management',
-            assignable: true,
-            assignable_by_current_actor: false,
-            deprecated: false,
-            hidden_by_default: false,
-          },
-        ],
-      },
-    } as never)
     vi.mocked(usersApi.list).mockResolvedValue({
       data: { data: [], pagination: { total: 0, page: 1, page_size: 20 } },
     } as never)
@@ -233,17 +178,7 @@ describe('UserManagementView role governance', () => {
           display_name: '目标用户',
           department: 'Design',
           team: 'Design-A',
-          roles: ['Member', 'Audit_B', 'Outsource', 'SuperAdmin'],
-          status: 'active',
-        },
-      },
-    } as never)
-    vi.mocked(usersApi.replaceRoles).mockResolvedValue({
-      data: {
-        data: {
-          id: '2',
-          username: 'target',
-          roles: ['Member', 'Audit_B', 'Outsource', 'SuperAdmin'],
+          roles: ['member', 'auditor', 'super_admin'],
           status: 'active',
         },
       },
@@ -335,7 +270,6 @@ describe('UserManagementView role governance', () => {
       ] },
       { role_id: 4, scope_mode: 'global', subjects: [] },
     ], 7, '在用户详情中更新工作角色')
-    expect(usersApi.replaceRoles).not.toHaveBeenCalled()
   })
 
   it('uses a compact organization role dialog instead of a separate permission workspace', async () => {
@@ -395,7 +329,7 @@ describe('UserManagementView role governance', () => {
     expect(document.body.textContent).toContain('工号必须是 0 到 9999 之间的纯数字。')
   })
 
-  it('creates users with employee number and preserves Member role', async () => {
+  it('creates the account without sending legacy role assignments', async () => {
     const wrapper = mountView()
     await flushPromises()
     const vm = wrapper.vm as unknown as {
@@ -408,7 +342,6 @@ describe('UserManagementView role governance', () => {
         mobile: string
         email: string
         password: string
-        roles: string[]
         status: 'active' | 'disabled'
       }
       createUser: () => Promise<void>
@@ -423,7 +356,6 @@ describe('UserManagementView role governance', () => {
       mobile: '13800009999',
       email: '',
       password: 'Init1234',
-      roles: ['AssetSubmitter'],
       status: 'active',
     })
     await vm.createUser()
@@ -438,7 +370,6 @@ describe('UserManagementView role governance', () => {
       mobile: '13800009999',
       email: undefined,
       password: 'Init1234',
-      roles: ['Member', 'AssetSubmitter'],
       status: 'active',
     })
   })
@@ -529,35 +460,9 @@ describe('UserManagementView role governance', () => {
     expect(usersApi.deactivate).toHaveBeenCalledWith('2')
   })
 
-  it('fails closed for DepartmentAdmin without a department scope', async () => {
+  it('does not treat a legacy department role as explicit access', async () => {
     permissionMock.allowedActions.clear()
     permissionMock.allowedActions.add('department.manage')
-    const wrapper = mountView({
-      id: '3',
-      name: 'DeptAdmin',
-      role: RoleEnum.DEPT_ADMIN,
-      departmentId: '',
-      groupId: '',
-      dataScope: DataScopeEnum.DEPARTMENT,
-      permissions: [],
-    })
-    await flushPromises()
-
-    expect(wrapper.text()).not.toContain('全部组织')
-    expect(wrapper.text()).toContain('当前账号缺少部门管理范围')
-    expect(usersApi.list).not.toHaveBeenCalled()
-  })
-
-  it('fails closed when DepartmentAdmin scope is no longer an active org option', async () => {
-    permissionMock.allowedActions.clear()
-    permissionMock.allowedActions.add('department.manage')
-    vi.mocked(fetchOrgOwnershipOptions).mockResolvedValueOnce({
-      departmentOptions: [{ value: '定制美工部', label: '定制美工部' }],
-      teamOptions: [{ value: '默认组', label: '默认组', department: '定制美工部' }],
-      departmentRecords: [{ id: '8', name: '定制美工部', enabled: true }],
-      teamRecords: [{ id: '18', name: '默认组', departmentId: '8', departmentName: '定制美工部', enabled: true }],
-    })
-
     const wrapper = mountView({
       id: '4',
       name: 'Legacy DeptAdmin',
@@ -569,8 +474,10 @@ describe('UserManagementView role governance', () => {
     })
     await flushPromises()
 
-    expect(wrapper.text()).toContain('当前账号部门范围已停用或不存在')
+    expect(wrapper.find('.user-management-view').exists()).toBe(true)
+    expect(fetchOrgOwnershipOptions).not.toHaveBeenCalled()
     expect(usersApi.list).not.toHaveBeenCalled()
+    expect(accessPolicyApi.roles).not.toHaveBeenCalled()
   })
 
   it('bulk purges disabled orgs even when member counts remain', async () => {

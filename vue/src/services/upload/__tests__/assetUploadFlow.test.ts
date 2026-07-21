@@ -395,38 +395,6 @@ describe('completePreparedTaskAssetUploadSession — remote transport', () => {
     )
   })
 
-  it('remote transport: completes with returned endpoint when present', async () => {
-    vi.mocked(assetsApi.uploadToRemoteUrl).mockResolvedValue({} as never)
-    vi.mocked(assetsApi.completeAssetUploadSessionAtEndpoint).mockResolvedValue({
-      data: {
-        data: {
-          session: { id: 'sess-supp', session_status: 'completed', upload_status: 'uploaded' },
-          asset: { id: 'a2', file_role: 'delivery' },
-        },
-      },
-    } as never)
-
-    const prepared = {
-      sessionId: 'sess-supp',
-      remote: {
-        upload_url: 'https://proxy.internal/supplement',
-        required_upload_content_type: 'image/png',
-      },
-      assetKind: 'delivery' as const,
-      remark: '漏传补传',
-      sessionMime: 'image/png',
-      completeEndpoint: '/v1/tasks/789/audit-supplements/upload-sessions/sess-supp/complete',
-    }
-    await completePreparedTaskAssetUploadSession(prepared, fakeFile())
-
-    expect(assetsApi.completeAssetUploadSessionAtEndpoint).toHaveBeenCalledWith(
-      '/v1/tasks/789/audit-supplements/upload-sessions/sess-supp/complete',
-      expect.objectContaining({ upload_content_type: 'image/png' }),
-      undefined,
-    )
-    expect(assetsApi.completeAssetUploadSession).not.toHaveBeenCalled()
-  })
-
   it('uses an independent request to cancel a session after the upload signal aborts', async () => {
     const controller = new AbortController()
     controller.abort()

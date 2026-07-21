@@ -1,15 +1,5 @@
 import { mapRawBackendMessageToZh } from '@/utils/api-message-zh'
 
-type PredictionLike = {
-  title?: string
-  detail?: string
-  action_label?: string
-  action_type?: string
-  target_type?: string
-  type?: string
-  source?: string
-}
-
 const TECHNICAL_TOKEN_LABELS: Record<string, string> = {
   filing_error_message: '同步失败原因',
   filing_status: '同步状态',
@@ -51,39 +41,6 @@ const TECHNICAL_TOKEN_LABELS: Record<string, string> = {
   approved: '已通过',
   rejected: '已打回',
   completed: '已完成',
-  task_next_action: '下一步建议',
-  task_create: '创建建议',
-  open_task_assets: '查看任务资产',
-  open_task_erp: '查看 ERP 同步',
-  open_task: '打开任务',
-  open_task_center: '查看任务中心',
-  open_integration_logs: '查看同步记录',
-  open_kpi: '查看绩效看板',
-  open_kpi_ops: '查看运营 KPI',
-}
-
-const PREDICTION_SOURCE_LABELS: Record<string, string> = {
-  recent: '近期操作',
-  search: '搜索建议',
-  product: '商品资料',
-  asset: '资产资源',
-  task_create: '创建建议',
-  task_next_action: '下一步建议',
-  management: '管理提醒',
-  task: '任务状态',
-  task_center: '任务中心',
-  data_center: '数据中心',
-  logs: '同步记录',
-}
-
-const PREDICTION_ACTION_LABELS: Record<string, string> = {
-  open_task_assets: '查看任务资产',
-  open_task_erp: '查看 ERP 同步',
-  open_task: '打开任务',
-  open_task_center: '查看任务中心',
-  open_integration_logs: '查看同步记录',
-  open_kpi: '查看绩效看板',
-  open_kpi_ops: '查看运营 KPI',
 }
 
 function hasChinese(text: string): boolean {
@@ -92,10 +49,6 @@ function hasChinese(text: string): boolean {
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}
-
-function normalizeTechnicalKey(value: string): string {
-  return value.trim().replace(/([a-z0-9])([A-Z])/g, '$1_$2').replace(/[\s.-]+/g, '_').toLowerCase()
 }
 
 function replaceTechnicalTokens(raw: string): string {
@@ -219,30 +172,4 @@ export function formatErpSyncFailureMessage(raw: string | null | undefined): str
   if (!formatted) return 'ERP 同步失败，请检查商品资料后重试。'
   if (!hasChinese(formatted) && looksTechnical(formatted)) return 'ERP 同步失败，请检查商品资料后重试。'
   return formatted
-}
-
-function predictionSourceFallback(item: PredictionLike): string {
-  const actionKey = normalizeTechnicalKey(item.action_type ?? '')
-  if (actionKey && PREDICTION_ACTION_LABELS[actionKey]) return PREDICTION_ACTION_LABELS[actionKey]
-  const typeKey = normalizeTechnicalKey(item.type ?? '')
-  if (typeKey && PREDICTION_SOURCE_LABELS[typeKey]) return PREDICTION_SOURCE_LABELS[typeKey]
-  const targetKey = normalizeTechnicalKey(item.target_type ?? '')
-  if (targetKey && PREDICTION_SOURCE_LABELS[targetKey]) return PREDICTION_SOURCE_LABELS[targetKey]
-  return '业务提醒'
-}
-
-export function normalizePredictionSuggestionForBusiness<T extends PredictionLike>(item: T): T {
-  const source = formatBusinessTechnicalText(item.source, predictionSourceFallback(item))
-  const title = formatBusinessTechnicalText(item.title, '系统建议关注此任务')
-  const detail = item.detail ? formatBusinessTechnicalText(item.detail, '系统检测到一条需要关注的业务事项。') : undefined
-  const actionKey = normalizeTechnicalKey(item.action_type ?? '')
-  const actionFallback = actionKey ? PREDICTION_ACTION_LABELS[actionKey] : '查看'
-  const actionLabel = formatBusinessTechnicalText(item.action_label, actionFallback || '查看')
-  return {
-    ...item,
-    source,
-    title,
-    detail,
-    action_label: actionLabel,
-  }
 }

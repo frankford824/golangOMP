@@ -333,11 +333,9 @@ func TestTaskServiceCreateBatchOwnerTeamCompatRegression(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			svc := NewTaskService(
 				&prdTaskRepo{},
-				&prdProcurementRepo{},
 				&prdTaskAssetRepo{},
 				&prdTaskEventRepo{},
 				nil,
-				&prdWarehouseRepo{},
 				prdCodeRuleService{},
 				step04TxRunner{},
 			)

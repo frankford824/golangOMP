@@ -139,28 +139,6 @@ export function assetVersionMatchesActiveSku(
   return !!(activeSku && activeSku === scope)
 }
 
-/**
- * 仓库接收详情定稿图：有 scope 时与当前商品 Tab 的 SKU 严格一致；
- * 无 scope 时仅一条并列商品则视为该任务交付（常见原品单 SKU + sku_items 占位）；
- * 多条商品且无 scope 时仅落在第一个 Tab（避免串图，待后端补 scope）。
- */
-export function assetVersionMatchesWarehouseProduct(
-  v: TaskAssetVersion,
-  sel: BatchObjectSelection,
-  task: Task,
-): boolean {
-  if (!taskHasSkuItemsForBatchUi(task)) return true
-  const scope = v.scopeSkuCode?.trim()
-  if (scope) {
-    const activeSku = activeSkuCodeForSelection(task, sel)
-    return !!(activeSku && activeSku === scope)
-  }
-  const n = task.skuItems?.length ?? 0
-  if (n <= 1) return true
-  /** 多商品任务下无 scope 的定稿不自动归属商品 1，由共享区展示 */
-  return false
-}
-
 export function assetVersionIsSharedForBatch(v: TaskAssetVersion, task: Task): boolean {
   if (!taskHasSkuItemsForBatchUi(task)) return false
   return !v.scopeSkuCode?.trim()

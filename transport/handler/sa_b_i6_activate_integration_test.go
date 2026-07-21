@@ -21,7 +21,7 @@ func TestSABI6_ActivateUser_TeamLeadWithinGroupOnly(t *testing.T) {
 	token := saBCreateSession(t, db, 30061, "sab-i6-team-token")
 
 	router := saBAuthRouter(svc)
-	userH := NewUserAdminHandler(svc, nil, nil)
+	userH := NewUserAdminHandler(svc)
 	router.POST("/v1/users/:id/activate", userH.Activate)
 
 	rec := saBPerformJSON(router, http.MethodPost, "/v1/users/30062/activate", token, "")

@@ -5,8 +5,7 @@ import { designSourcesHandler } from './designSources'
 import { erpBridgeHandler } from './erpBridge'
 import { notificationsHandler } from './notifications'
 import { orgHandler } from './org'
-import { productManagementHandler } from './productManagement'
-import { reportsHandler } from './reports'
+import { costManagementHandler } from './costManagement'
 import { searchHandler } from './search'
 import { taskDraftsHandler } from './taskDrafts'
 import { taskModulesHandler } from './taskModules'
@@ -24,8 +23,7 @@ const handlers: MockHandler[] = [
   designSourcesHandler,
   notificationsHandler,
   orgHandler,
-  productManagementHandler,
-  reportsHandler,
+  costManagementHandler,
   searchHandler,
   assetsHandler,
   batchSkuHandler,

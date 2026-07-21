@@ -25,7 +25,7 @@
         <span class="tc-tag" :class="categoryKind === 'custom' ? 'tc-tag--custom' : 'tc-tag--brand'">
           {{ categoryLabel }}
         </span>
-        <WorkflowLaneTag v-if="showLaneTag" :lane="task.workflowLane" />
+        <WorkflowLaneTag v-if="showLaneTag" :lane="task.businessLane" />
         <TaskTypeBadge :type="task.businessType ?? task.taskType" />
       </div>
     </div>
