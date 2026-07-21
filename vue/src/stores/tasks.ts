@@ -208,6 +208,9 @@ const DESIGN_SUB_STATUS_SET = new Set<string>([
 function parseOptionalDesignSubStatus(raw: unknown): DesignSubStatus | undefined {
   if (raw == null || typeof raw !== 'string') return undefined
   const v = raw.trim().replace(/-/g, '_').toUpperCase()
+  // V1 task detail uses `rework_required` after Audit A/B rejects a design.
+  // The main-ops domain calls the same user-visible state `REJECTED`.
+  if (v === 'REWORK_REQUIRED') return DesignSubStatusEnum.REJECTED
   return DESIGN_SUB_STATUS_SET.has(v) ? (v as DesignSubStatus) : undefined
 }
 
@@ -230,6 +233,7 @@ function parseDesignSubStatusFromWorkflow(raw: Record<string, unknown>): DesignS
     in_progress: 'IN_PROGRESS',
     pending_audit: 'PENDING_AUDIT',
     rejected: 'REJECTED',
+    rework_required: 'REJECTED',
     approved: 'APPROVED',
     finalized: 'FINALIZED',
   }
