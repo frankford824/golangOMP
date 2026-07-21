@@ -848,6 +848,438 @@
   }
 }
 
+.aw-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
+
+.aw-supplement-console {
+  gap: var(--aw-space-3);
+}
+
+.aw-supplement-console > .aw-hub-tabs {
+  margin-bottom: 0;
+}
+
+.aw-supplement-console > .aw-hub-tabs .aw-hub-tabs__tab {
+  min-height: 38px;
+  padding-block: var(--aw-space-1);
+}
+
+.aw-supplement-console > .aw-hub-tabs .aw-hub-tabs__tab small {
+  display: none;
+}
+
+.aw-supplement-console__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--aw-space-4);
+  min-height: 42px;
+}
+
+.aw-supplement-console__header h1 {
+  margin: 0;
+  color: var(--aw-ink);
+  font-size: clamp(22px, 2vw, 28px);
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+
+.aw-supplement-console__header-actions,
+.aw-supplement-filter-bar__actions,
+.aw-supplement-console__footer {
+  display: flex;
+  align-items: center;
+  gap: var(--aw-space-2);
+}
+
+.aw-supplement-console__header-actions > span {
+  color: var(--aw-ink-muted);
+  font-family: var(--aw-font-mono);
+  font-size: var(--aw-font-size-sm);
+}
+
+.aw-supplement-console__workbench {
+  min-width: 0;
+  overflow: visible;
+  border: 1px solid var(--aw-hairline);
+  border-radius: var(--aw-radius-sm);
+  background: var(--aw-surface-raised);
+}
+
+.aw-supplement-console__filter-toggle {
+  display: none;
+}
+
+.aw-supplement-filter-bar {
+  display: grid;
+  grid-template-columns: 132px minmax(210px, 0.9fr) minmax(180px, 1fr) 124px minmax(270px, 1.2fr) auto;
+  align-items: end;
+  gap: var(--aw-space-3);
+  padding: var(--aw-space-3);
+}
+
+.aw-supplement-filter-bar > label,
+.aw-supplement-filter-bar__dates {
+  display: grid;
+  min-width: 0;
+  gap: var(--aw-space-1);
+  margin: 0;
+  border: 0;
+  padding: 0;
+  color: var(--aw-ink-2);
+  font-size: var(--aw-font-size-sm);
+}
+
+.aw-supplement-filter-bar > label > span,
+.aw-supplement-filter-bar__dates legend,
+.aw-personnel-picker--compact .aw-personnel-picker__label {
+  color: var(--aw-ink-2);
+  font-size: var(--aw-font-size-xs);
+  font-weight: var(--aw-weight-strong);
+  line-height: 1.4;
+}
+
+.aw-supplement-filter-bar :is(input, select) {
+  min-width: 0;
+  min-height: 38px;
+}
+
+.aw-supplement-filter-bar__dates {
+  grid-template-columns: minmax(112px, 1fr) auto minmax(112px, 1fr);
+  align-items: center;
+}
+
+.aw-supplement-filter-bar__dates legend {
+  grid-column: 1 / -1;
+}
+
+.aw-supplement-filter-bar__dates > span {
+  color: var(--aw-ink-muted);
+  font-size: var(--aw-font-size-xs);
+}
+
+.aw-supplement-filter-bar__actions {
+  align-self: end;
+}
+
+.aw-supplement-filter-bar__actions button {
+  min-height: 38px;
+  white-space: nowrap;
+}
+
+.aw-supplement-console__workbench > .aw-inline-alert {
+  margin: 0 var(--aw-space-3) var(--aw-space-2);
+}
+
+.aw-supplement-console .aw-supplement-delete-toolbar {
+  top: 72px;
+  z-index: 3;
+  min-height: 46px;
+  margin: 0;
+  border-width: 1px 0;
+  border-radius: 0;
+  background: color-mix(in srgb, var(--aw-surface-raised) 97%, transparent);
+  box-shadow: 0 6px 14px color-mix(in srgb, var(--aw-ink) 7%, transparent);
+}
+
+.aw-supplement-console .aw-supplement-delete-toolbar .aw-secondary-button--danger {
+  margin-left: auto;
+}
+
+.aw-root .aw-supplement-delete-toolbar input[type='checkbox'] {
+  flex: 0 0 16px;
+  width: 16px;
+  height: 16px;
+  min-height: 16px;
+  margin: 0;
+  accent-color: var(--aw-accent);
+}
+
+.aw-supplement-table-wrap {
+  max-width: 100%;
+  max-height: max(300px, calc(100vh - 520px));
+  overflow: auto;
+  overscroll-behavior-x: contain;
+}
+
+.aw-supplement-table {
+  width: 100%;
+  min-width: 980px;
+  border-collapse: collapse;
+  table-layout: fixed;
+  color: var(--aw-ink-2);
+  font-size: var(--aw-font-size-sm);
+}
+
+.aw-supplement-table th,
+.aw-supplement-table td {
+  border-bottom: 1px solid var(--aw-hairline);
+  padding: 7px 12px;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.aw-supplement-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--aw-surface-muted);
+  color: var(--aw-ink-muted);
+  font-size: var(--aw-font-size-xs);
+  font-weight: var(--aw-weight-strong);
+  letter-spacing: 0.01em;
+}
+
+.aw-supplement-table tbody tr {
+  transition: background var(--aw-motion-fast) var(--aw-ease-standard);
+}
+
+.aw-supplement-table tbody tr:hover {
+  background: var(--aw-surface-muted);
+}
+
+.aw-supplement-table tbody tr.is-selected {
+  background: color-mix(in srgb, var(--aw-accent) 7%, var(--aw-surface-raised));
+}
+
+.aw-supplement-table tbody tr.is-selected:hover {
+  background: color-mix(in srgb, var(--aw-accent) 10%, var(--aw-surface-raised));
+}
+
+.aw-supplement-table th:nth-child(2) {
+  width: 27%;
+}
+
+.aw-supplement-table th:nth-child(3),
+.aw-supplement-table th:nth-child(4),
+.aw-supplement-table th:nth-child(5) {
+  width: 12%;
+}
+
+.aw-supplement-table th:nth-child(6) {
+  width: 10%;
+}
+
+.aw-supplement-table__check {
+  width: 44px;
+  text-align: center;
+}
+
+.aw-supplement-table__check input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--aw-accent);
+  cursor: pointer;
+}
+
+.aw-supplement-table__filename {
+  display: block;
+  overflow: hidden;
+  color: var(--aw-ink);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aw-supplement-table td small {
+  display: block;
+  margin-top: 3px;
+  color: var(--aw-ink-muted);
+  font-size: var(--aw-font-size-xs);
+}
+
+.aw-supplement-table__files {
+  display: flex;
+  min-width: 0;
+  margin-top: 3px;
+  gap: var(--aw-space-1);
+  overflow: hidden;
+}
+
+.aw-supplement-table__files button,
+.aw-supplement-table__delete {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  background: transparent;
+  padding: 2px 0;
+  font: inherit;
+  cursor: pointer;
+}
+
+.aw-supplement-table__files button {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--aw-accent);
+  font-size: var(--aw-font-size-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.aw-supplement-table__person {
+  color: var(--aw-ink);
+  white-space: nowrap;
+}
+
+.aw-supplement-table__money {
+  width: 112px;
+  color: var(--aw-ink);
+  text-align: right;
+  font-family: var(--aw-font-mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.aw-supplement-table__action {
+  width: 92px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.aw-supplement-table__action > span {
+  color: var(--aw-ink-muted);
+  font-size: var(--aw-font-size-xs);
+}
+
+.aw-supplement-table__delete {
+  margin-left: auto;
+  color: var(--aw-danger);
+  font-weight: var(--aw-weight-strong);
+}
+
+.aw-supplement-table__delete:hover,
+.aw-supplement-table__delete:focus-visible {
+  color: color-mix(in srgb, var(--aw-danger) 82%, var(--aw-ink));
+  text-decoration: underline;
+}
+
+.aw-supplement-console__footer {
+  justify-content: flex-end;
+  min-height: 52px;
+  padding: var(--aw-space-2) var(--aw-space-3);
+  color: var(--aw-ink-muted);
+  font-size: var(--aw-font-size-sm);
+}
+
+.aw-supplement-console__footer > span {
+  margin-right: auto;
+}
+
+.aw-supplement-console__footer > label {
+  display: flex;
+  align-items: center;
+  gap: var(--aw-space-1);
+}
+
+.aw-supplement-console__footer select {
+  min-height: 34px;
+  padding-block: 4px;
+}
+
+.aw-supplement-console__footer .aw-drive-pager {
+  margin: 0;
+}
+
+@media (max-width: 1240px) {
+  .aw-supplement-filter-bar {
+    grid-template-columns: 132px minmax(210px, 1fr) minmax(190px, 1fr) 124px;
+  }
+
+  .aw-supplement-filter-bar__dates {
+    grid-column: 1 / 4;
+  }
+
+  .aw-supplement-filter-bar__actions {
+    justify-content: flex-end;
+  }
+}
+
+@media (max-width: 760px) {
+  .aw-supplement-console__header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .aw-supplement-console__header-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .aw-supplement-filter-bar {
+    display: none;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .aw-supplement-filter-bar.is-open {
+    display: grid;
+  }
+
+  .aw-supplement-console__filter-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    min-height: 42px;
+    border: 0;
+    border-bottom: 1px solid var(--aw-hairline);
+    background: var(--aw-surface-raised);
+    color: var(--aw-ink);
+    padding: var(--aw-space-2) var(--aw-space-3);
+    font: inherit;
+    font-weight: var(--aw-weight-strong);
+  }
+
+  .aw-supplement-console__filter-toggle span:last-child {
+    color: var(--aw-accent);
+    font-size: var(--aw-font-size-xs);
+  }
+
+  .aw-supplement-filter-bar__dates,
+  .aw-supplement-filter-bar__actions {
+    grid-column: auto;
+  }
+
+  .aw-supplement-filter-bar__actions button {
+    flex: 1 1 0;
+  }
+
+  .aw-supplement-console .aw-supplement-delete-toolbar {
+    top: 64px;
+  }
+
+  .aw-supplement-console .aw-supplement-delete-toolbar .aw-secondary-button--danger {
+    margin-left: 0;
+  }
+
+  .aw-supplement-console__footer {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .aw-supplement-console__footer > span {
+    width: 100%;
+  }
+
+  .aw-supplement-console__footer .aw-drive-pager {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .aw-supplement-table-wrap {
+    max-height: none;
+    overflow-x: auto;
+    overflow-y: visible;
+  }
+}
+
 .aw-pay-slip-list {
   display: grid;
   gap: var(--aw-space-2);
@@ -4587,6 +5019,26 @@ body.aw-submission-dialog-locked {
 .aw-personnel-picker__field small,
 .aw-personnel-picker__result small {
   color: var(--aw-ink-muted);
+}
+
+.aw-personnel-picker--compact {
+  grid-column: auto;
+  gap: var(--aw-space-1);
+}
+
+.aw-personnel-picker--compact .aw-personnel-picker__field {
+  min-height: 38px;
+  gap: var(--aw-space-1);
+  padding: 3px 4px 3px var(--aw-space-2);
+}
+
+.aw-personnel-picker--compact .aw-personnel-picker__field small {
+  display: none;
+}
+
+.aw-personnel-picker--compact .aw-personnel-picker__field .aw-secondary-button {
+  min-height: 30px;
+  padding-inline: var(--aw-space-2);
 }
 
 .aw-personnel-picker__dialog {

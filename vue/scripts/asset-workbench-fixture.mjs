@@ -540,10 +540,11 @@ export const assetAuditPages = [
   {
     name: 'admin-supplements',
     path: '/supplements',
-    ready: '.aw-console-hero',
+    ready: '.aw-supplement-console',
     role: 'admin',
     prepare: async (page) => {
       await page.getByRole('checkbox', { name: '选择本页可删除记录' }).check()
+      await page.getByRole('button', { name: '删除已选 1 条' }).click()
       await page.getByPlaceholder('例如：客户端上传错文件').fill('fixture 管理员删除错传补录')
       await page.getByRole('button', { name: '确认删除 1 条' }).click()
       await page.getByText(/关联文件和补录金额已同步移除/).waitFor()

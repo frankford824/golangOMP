@@ -25,8 +25,11 @@ const orderNo = ref('')
 const status = ref('')
 const dateFrom = ref('')
 const dateTo = ref('')
+const filtersOpen = ref(false)
 const selectedIds = ref<number[]>([])
 const deleteReason = ref('')
+const deleteDialogOpen = ref(false)
+const deleteDialogMode = ref<'single' | 'batch'>('batch')
 const previewDialog = ref({
   open: false,
   title: '',
@@ -39,6 +42,7 @@ const previewDialog = ref({
 
 const deletableRows = computed(() => rows.value.filter((row) => ['draft', 'approved'].includes(row.status)))
 const selectedRows = computed(() => rows.value.filter((row) => selectedIds.value.includes(row.id)))
+const selectedAmount = computed(() => selectedRows.value.reduce((sum, row) => sum + row.gross_amount, 0))
 const allDeletableSelected = computed(() => deletableRows.value.length > 0 && deletableRows.value.every((row) => selectedIds.value.includes(row.id)))
 const canPrev = computed(() => page.value > 1)
 const canNext = computed(() => page.value * pageSize.value < total.value)
@@ -98,9 +102,30 @@ function toggleAll() {
   selectedIds.value = allDeletableSelected.value ? [] : deletableRows.value.map((row) => row.id)
 }
 
-function selectOnly(row: SettlementSupplementRow) {
+function openSingleDelete(row: SettlementSupplementRow) {
   selectedIds.value = [row.id]
   deleteReason.value = ''
+  error.value = ''
+  deleteDialogMode.value = 'single'
+  deleteDialogOpen.value = true
+}
+
+function openBatchDelete() {
+  if (!selectedIds.value.length) {
+    error.value = '请先选择要删除的补录记录'
+    return
+  }
+  deleteReason.value = ''
+  error.value = ''
+  deleteDialogMode.value = 'batch'
+  deleteDialogOpen.value = true
+}
+
+function closeDeleteDialog() {
+  if (deleting.value) return
+  deleteDialogOpen.value = false
+  deleteReason.value = ''
+  if (deleteDialogMode.value === 'single') selectedIds.value = []
 }
 
 async function deleteSelected() {
@@ -121,6 +146,7 @@ async function deleteSelected() {
     notice.value = `已删除 ${formatInt(result.deleted_ids.length)} 条补录，关联文件和补录金额已同步移除。`
     selectedIds.value = []
     deleteReason.value = ''
+    deleteDialogOpen.value = false
     await load()
   } catch (err) {
     error.value = resolveApiUserMessage(err, { fallback: '删除补录失败；本次选择没有产生部分删除。' })
@@ -161,30 +187,52 @@ onMounted(() => void load())
 </script>
 
 <template>
-  <section class="aw-page-stack">
-    <div class="aw-console-hero">
-      <div class="aw-console-hero__head">
-        <div>
-          <p class="aw-eyebrow">补录模块</p>
-          <h1 class="aw-console-hero__title">补录查询与删除</h1>
-          <p class="aw-copy">按人员、日期、文件名和状态查询；删除时同步移除关联文件与未结算补录金额。</p>
-        </div>
-        <button class="aw-console-button" type="button" :disabled="loading" @click="load()">
-          <RefreshCw :size="16" aria-hidden="true" />
-          刷新
+  <section class="aw-page-stack aw-supplement-console">
+    <header class="aw-supplement-console__header">
+      <div>
+        <h1>补录查询与删除</h1>
+      </div>
+      <div class="aw-supplement-console__header-actions">
+        <span>{{ formatInt(total) }} 条记录</span>
+        <button class="aw-secondary-button" type="button" :disabled="loading" @click="load()">
+          <RefreshCw :size="15" aria-hidden="true" />
+          {{ loading ? '刷新中' : '刷新' }}
         </button>
       </div>
-    </div>
+    </header>
 
     <SettlementHubTabs />
 
-    <div class="aw-data-surface">
-      <div class="aw-form-grid">
-        <label>结算月<input v-model="businessMonth" type="month" /></label>
-        <PersonnelPicker v-model="payeeUserId" label="补录人员" hint="可按姓名或人员编码查找" @selected="load(true)" />
-        <label>文件/作品名称<input v-model="orderNo" placeholder="精确文件名" @keyup.enter="load(true)" /></label>
+    <div class="aw-supplement-console__workbench">
+      <button
+        class="aw-supplement-console__filter-toggle"
+        type="button"
+        :aria-expanded="filtersOpen"
+        @click="filtersOpen = !filtersOpen"
+      >
+        <span>筛选条件</span>
+        <span>{{ filtersOpen ? '收起' : '展开' }}</span>
+      </button>
+      <form class="aw-supplement-filter-bar" :class="{ 'is-open': filtersOpen }" @submit.prevent="load(true)">
         <label>
-          状态
+          <span>结算月</span>
+          <input v-model="businessMonth" type="month" />
+        </label>
+        <PersonnelPicker
+          v-model="payeeUserId"
+          label="补录人员"
+          hint="姓名或人员编码"
+          clearable
+          compact
+          @selected="load(true)"
+          @cleared="load(true)"
+        />
+        <label class="aw-supplement-filter-bar__name">
+          <span>文件/作品名称</span>
+          <input v-model="orderNo" placeholder="输入文件名" />
+        </label>
+        <label>
+          <span>状态</span>
           <select v-model="status">
             <option value="">全部状态</option>
             <option value="draft">草稿</option>
@@ -194,87 +242,143 @@ onMounted(() => void load())
             <option value="voided">已作废</option>
           </select>
         </label>
-        <label>补录日期起<input v-model="dateFrom" type="date" /></label>
-        <label>补录日期止<input v-model="dateTo" type="date" /></label>
-      </div>
-      <div class="aw-inline-actions">
-        <button class="aw-primary-button" type="button" :disabled="loading" @click="load(true)">查询</button>
-        <button class="aw-secondary-button" type="button" :disabled="loading" @click="resetQuery">重置</button>
-        <span class="aw-chip aw-chip--neutral">共 {{ formatInt(total) }} 条</span>
-      </div>
-    </div>
+        <fieldset class="aw-supplement-filter-bar__dates">
+          <legend>补录日期</legend>
+          <input v-model="dateFrom" type="date" aria-label="补录日期起" />
+          <span>至</span>
+          <input v-model="dateTo" type="date" aria-label="补录日期止" />
+        </fieldset>
+        <div class="aw-supplement-filter-bar__actions">
+          <button class="aw-primary-button" type="submit" :disabled="loading">查询</button>
+          <button class="aw-secondary-button" type="button" :disabled="loading" @click="resetQuery">重置</button>
+        </div>
+      </form>
 
-    <p v-if="error" class="aw-inline-alert aw-inline-alert--error" role="alert">{{ error }}</p>
-    <p v-if="notice" class="aw-inline-alert" role="status">{{ notice }}</p>
+      <p v-if="error" class="aw-inline-alert aw-inline-alert--error" role="alert">{{ error }}</p>
+      <p v-if="notice" class="aw-inline-alert" role="status">{{ notice }}</p>
 
-    <div class="aw-data-surface">
-      <div class="aw-grid-toolbar">
+      <div class="aw-grid-toolbar aw-supplement-delete-toolbar">
         <label class="aw-inline-check">
           <input type="checkbox" :checked="allDeletableSelected" :disabled="!deletableRows.length" @change="toggleAll" />
           选择本页可删除记录
         </label>
         <span>已选 {{ formatInt(selectedIds.length) }} 条</span>
+        <button
+          v-if="selectedIds.length"
+          class="aw-secondary-button aw-secondary-button--danger"
+          type="button"
+          @click="openBatchDelete"
+        >
+          <Trash2 :size="15" aria-hidden="true" />
+          删除已选 {{ formatInt(selectedIds.length) }} 条
+        </button>
       </div>
 
-      <div v-if="rows.length" class="aw-simple-income__list">
-        <article v-for="row in rows" :key="row.id" class="aw-simple-income__row">
-          <header class="aw-simple-income__month">
-            <label class="aw-inline-check aw-supplement-row__main">
-              <input
-                type="checkbox"
-                :checked="selectedIds.includes(row.id)"
-                :disabled="!['draft', 'approved'].includes(row.status)"
-                @change="toggleRow(row)"
-              />
-              <span>
-                <strong>{{ row.order_no }}</strong>
-                <small>人员 {{ row.payee_user_id }} · {{ row.supplement_date || '未填写日期' }} · {{ row.difficulty_class }}类 · {{ formatInt(row.page_count) }} 张</small>
-              </span>
-            </label>
-            <div class="aw-supplement-row__summary">
-              <span :class="chipClass(supplementStatusMeta(row.status).tone)">{{ supplementStatusMeta(row.status).label }}</span>
-              <b class="aw-cell-money">{{ formatMoney(row.gross_amount) }}</b>
-            </div>
-          </header>
-          <div v-if="row.files?.length" class="aw-inline-actions">
-            <button v-for="file in row.files" :key="file.id" class="aw-secondary-button" type="button" @click="openPreview(row, file)">
-              <Eye :size="15" aria-hidden="true" />
-              {{ file.display_name || file.original_filename }}
-            </button>
-          </div>
-          <p v-else class="aw-copy">手工补录，无关联文件</p>
-          <button
-            v-if="['draft', 'approved'].includes(row.status)"
-            class="aw-secondary-button"
-            type="button"
-            @click="selectOnly(row)"
-          >
-            <Trash2 :size="15" aria-hidden="true" />
-            删除此条
-          </button>
-        </article>
+      <div class="aw-supplement-table-wrap">
+        <table class="aw-supplement-table">
+          <thead>
+            <tr>
+              <th class="aw-supplement-table__check"><span class="aw-sr-only">选择</span></th>
+              <th>文件 / 作品</th>
+              <th>补录人员</th>
+              <th>补录日期</th>
+              <th>分类 / 张数</th>
+              <th>状态</th>
+              <th class="aw-supplement-table__money">金额</th>
+              <th class="aw-supplement-table__action">操作</th>
+            </tr>
+          </thead>
+          <tbody v-if="rows.length">
+            <tr v-for="row in rows" :key="row.id" :class="{ 'is-selected': selectedIds.includes(row.id) }">
+              <td class="aw-supplement-table__check">
+                <input
+                  type="checkbox"
+                  :aria-label="`选择补录 ${row.order_no}`"
+                  :checked="selectedIds.includes(row.id)"
+                  :disabled="!['draft', 'approved'].includes(row.status)"
+                  @change="toggleRow(row)"
+                />
+              </td>
+              <td>
+                <strong class="aw-supplement-table__filename">{{ row.order_no }}</strong>
+                <div v-if="row.files?.length" class="aw-supplement-table__files">
+                  <button v-for="file in row.files" :key="file.id" type="button" @click="openPreview(row, file)">
+                    <Eye :size="13" aria-hidden="true" />
+                    {{ file.display_name || file.original_filename }}
+                  </button>
+                </div>
+                <small v-else>手工补录，无关联文件</small>
+              </td>
+              <td><span class="aw-supplement-table__person">人员 {{ row.payee_user_id }}</span></td>
+              <td>{{ row.supplement_date || '未填写' }}</td>
+              <td>{{ row.difficulty_class }} 类 · {{ formatInt(row.page_count) }} 张</td>
+              <td><span :class="chipClass(supplementStatusMeta(row.status).tone)">{{ supplementStatusMeta(row.status).label }}</span></td>
+              <td class="aw-supplement-table__money"><strong>{{ formatMoney(row.gross_amount) }}</strong></td>
+              <td class="aw-supplement-table__action">
+                <button
+                  v-if="['draft', 'approved'].includes(row.status)"
+                  class="aw-supplement-table__delete"
+                  type="button"
+                  :aria-label="`删除补录 ${row.order_no}`"
+                  @click="openSingleDelete(row)"
+                >
+                  <Trash2 :size="14" aria-hidden="true" />
+                  删除
+                </button>
+                <span v-else>不可删除</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <div v-if="!rows.length" class="aw-empty-state">
+          <h3>没有匹配的补录记录</h3>
+          <p>调整查询条件后重试。</p>
+        </div>
       </div>
-      <div v-else class="aw-empty-state"><h3>没有匹配的补录记录</h3><p>调整查询条件后重试。</p></div>
 
-      <div v-if="total > 0" class="aw-drive-pager">
-        <button class="aw-secondary-button" type="button" :disabled="!canPrev || loading" @click="changePage(-1)">上一页</button>
-        <span>第 {{ formatInt(page) }} 页</span>
-        <button class="aw-secondary-button" type="button" :disabled="!canNext || loading" @click="changePage(1)">下一页</button>
-      </div>
+      <footer v-if="total > 0" class="aw-supplement-console__footer">
+        <span>共 {{ formatInt(total) }} 条</span>
+        <label>
+          每页
+          <select v-model.number="pageSize" @change="load(true)">
+            <option :value="20">20 条</option>
+            <option :value="50">50 条</option>
+            <option :value="100">100 条</option>
+          </select>
+        </label>
+        <div class="aw-drive-pager">
+          <button class="aw-secondary-button" type="button" :disabled="!canPrev || loading" @click="changePage(-1)">上一页</button>
+          <span>第 {{ formatInt(page) }} 页</span>
+          <button class="aw-secondary-button" type="button" :disabled="!canNext || loading" @click="changePage(1)">下一页</button>
+        </div>
+      </footer>
     </div>
 
-    <div v-if="selectedRows.length" class="aw-data-surface">
-      <div class="aw-panel__head">
-        <div><h3>删除选中的补录</h3><p class="aw-copy">此操作会同步删除关联文件，并从未结算补录金额中移除。</p></div>
-        <span class="aw-chip aw-chip--warn">{{ formatInt(selectedRows.length) }} 条</span>
-      </div>
-      <label class="aw-field"><span>删除原因</span><input v-model="deleteReason" placeholder="例如：客户端上传错文件" /></label>
-      <div class="aw-inline-actions">
-        <button class="aw-primary-button" type="button" :disabled="deleting" @click="deleteSelected">
-          {{ deleting ? '删除中' : `确认删除 ${formatInt(selectedRows.length)} 条` }}
-        </button>
-        <button class="aw-secondary-button" type="button" :disabled="deleting" @click="selectedIds = []">取消选择</button>
-      </div>
+    <div v-if="deleteDialogOpen" class="aw-dialog-backdrop" role="presentation" @click.self="closeDeleteDialog">
+      <section class="aw-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="admin-supplement-delete-title" @keydown.esc.prevent="closeDeleteDialog">
+        <div>
+          <p class="aw-eyebrow">删除补录</p>
+          <h3 id="admin-supplement-delete-title">确认删除{{ deleteDialogMode === 'single' ? '这条' : '选中的' }}补录？</h3>
+          <p class="aw-copy">关联补录文件会同步删除，补录金额会从未结算金额中移除。此操作不能撤销。</p>
+        </div>
+        <div class="aw-confirm-dialog__summary">
+          <div><span>记录数量</span><strong>{{ formatInt(selectedRows.length) }} 条</strong></div>
+          <div><span>移除金额</span><strong>{{ formatMoney(selectedAmount) }}</strong></div>
+        </div>
+        <label class="aw-field"><span>删除原因</span><input v-model="deleteReason" autofocus placeholder="例如：客户端上传错文件" /></label>
+        <div class="aw-inline-actions">
+          <button
+            class="aw-secondary-button aw-secondary-button--danger"
+            type="button"
+            :disabled="deleting || !deleteReason.trim()"
+            @click="deleteSelected"
+          >
+            <Trash2 :size="15" aria-hidden="true" />
+            {{ deleting ? '删除中' : `确认删除 ${formatInt(selectedRows.length)} 条` }}
+          </button>
+          <button class="aw-secondary-button" type="button" :disabled="deleting" @click="closeDeleteDialog">取消</button>
+        </div>
+      </section>
     </div>
 
     <WorkbenchPreviewDialog

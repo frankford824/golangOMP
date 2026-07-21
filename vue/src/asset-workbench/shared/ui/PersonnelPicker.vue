@@ -9,9 +9,11 @@ const props = withDefaults(defineProps<{
   label: string
   hint?: string
   clearable?: boolean
+  compact?: boolean
 }>(), {
   hint: '按姓名或人员编号查找',
   clearable: false,
+  compact: false,
 })
 
 const emit = defineEmits<{
@@ -87,7 +89,7 @@ function clearSelection() {
 </script>
 
 <template>
-  <div class="aw-personnel-picker">
+  <div class="aw-personnel-picker" :class="{ 'aw-personnel-picker--compact': compact }">
     <span class="aw-personnel-picker__label">{{ label }}</span>
     <div class="aw-personnel-picker__field" :class="{ 'aw-personnel-picker__field--selected': modelValue > 0 }">
       <span>
