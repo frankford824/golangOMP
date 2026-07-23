@@ -1,10 +1,10 @@
-# V1 API 速查表(238 path · 一行一条)
+# V1 API 速查表(239 path · 一行一条)
 
 > Revision: V8 current contract (2026-07-20)
 > Source: docs/api/openapi.yaml
 
 > 本表一行对应一个 `/v1` path；同一路径多 method 合并到 `Methods` 列。
-> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 238 个 `/v1` path。
+> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 239 个 `/v1` path。
 > 新前端只接本表列出的当前 V8 路径。
 
 | Methods | Path | Summary | RBAC | family doc |
@@ -55,6 +55,7 @@
 | GET | `/v1/tasks/{id}/resource-bundle` | Read task, SKU and retouch resource groups | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/resource-groups` | Search the current working and finalized resource-group read model | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/resource-groups/{id}` | Read one resource group and its current revisions | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/resource-groups/{id}/revisions` | List every historical revision of one resource group | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/resource-groups/batch-download` | Expand finalized revision items into an ordered download manifest | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/tasks/sku-planning/image-upload-sessions` | Stage one planning-SKU product image before task creation | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/tasks/sku-planning/image-upload-sessions/{session_id}` | Read a planning-SKU image staging session | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |

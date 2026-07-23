@@ -46,8 +46,11 @@ function bundle(): ResourceBundle {
         group_id: 9,
         revision_no: 1,
         status: 'submitted',
-        mode: 'single',
-        source_stage: 'design',
+      mode: 'single',
+	      source_stage: 'design',
+	      created_by: 7,
+	      legacy_migration: false,
+	      created_at: '2026-07-22T08:00:00Z',
         source_file: { task_asset_id: 101, file_name: 'design.psd' },
         items: [{
           id: 31,

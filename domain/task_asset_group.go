@@ -106,12 +106,30 @@ type TaskAssetGroupRevision struct {
 	SourceFile        *TaskResourceFile                 `json:"source_file,omitempty"`
 	SourceStage       TaskAssetSourceStage              `json:"source_stage"`
 	CreatedBy         int64                             `json:"created_by"`
+	CreatedByName     string                            `json:"created_by_name,omitempty"`
 	Reason            string                            `json:"reason,omitempty"`
+	LegacyMigration   bool                              `json:"legacy_migration"`
+	EvidenceSummary   *ResourceGroupRevisionEvidence    `json:"evidence_summary,omitempty"`
 	Items             []TaskAssetGroupRevisionItem      `json:"items"`
 	References        []TaskAssetGroupRevisionReference `json:"references"`
 	SubmittedAt       *time.Time                        `json:"submitted_at,omitempty"`
 	FinalizedAt       *time.Time                        `json:"finalized_at,omitempty"`
 	CreatedAt         time.Time                         `json:"created_at"`
+}
+
+// ResourceGroupRevisionEvidence is a parsed, read-only projection of the
+// versioned metadata stored in a migrated revision's reason. It never contains
+// event payloads, object-storage addresses, or inferred upload sessions.
+type ResourceGroupRevisionEvidence struct {
+	SchemaVersion       string    `json:"schema_version"`
+	ManifestSHA256      string    `json:"manifest_sha256"`
+	Confidence          string    `json:"confidence"`
+	ConfirmedBy         int64     `json:"confirmed_by"`
+	ConfirmedAt         time.Time `json:"confirmed_at"`
+	EvidenceEventIDs    []string  `json:"evidence_event_ids"`
+	UploadSessionIDs    []string  `json:"upload_session_ids"`
+	UploadSessionsKnown bool      `json:"upload_sessions_known"`
+	BusinessReason      string    `json:"business_reason,omitempty"`
 }
 
 type TaskAssetGroupRevisionItem struct {
@@ -220,6 +238,20 @@ type ResourceGroupListResult struct {
 	Page      int                `json:"page"`
 	PageSize  int                `json:"page_size"`
 	Total     int64              `json:"total"`
+}
+
+type ResourceGroupRevisionListParams struct {
+	Page     int
+	PageSize int
+}
+
+type ResourceGroupRevisionListResult struct {
+	Items               []TaskAssetGroupRevision `json:"items"`
+	WorkingRevisionID   *int64                   `json:"working_revision_id,omitempty"`
+	FinalizedRevisionID *int64                   `json:"finalized_revision_id,omitempty"`
+	Page                int                      `json:"page"`
+	PageSize            int                      `json:"page_size"`
+	Total               int64                    `json:"total"`
 }
 
 type ResourceGroupBatchDownloadRequest struct {

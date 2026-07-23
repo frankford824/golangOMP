@@ -83,6 +83,29 @@ func TestV8AssetDeleteRegistrationUsesExplicitAssetManageCapability(t *testing.T
 	}
 }
 
+func TestResourceGroupRevisionRegistrationMatchesAssetViewDetailContract(t *testing.T) {
+	raw, err := os.ReadFile("http.go")
+	if err != nil {
+		t.Fatalf("read http.go: %v", err)
+	}
+	var registration string
+	for _, line := range strings.Split(string(raw), "\n") {
+		if strings.Contains(line, `resourceGroups.GET("/:id/revisions"`) {
+			registration = strings.TrimSpace(line)
+			break
+		}
+	}
+	if registration == "" {
+		t.Fatal("GET /v1/resource-groups/:id/revisions registration not found")
+	}
+	if !strings.Contains(registration, "domain.PermissionAssetView") {
+		t.Fatalf("revision registration missing asset.view: %s", registration)
+	}
+	if strings.Contains(registration, "domain.PermissionTaskView") {
+		t.Fatalf("revision registration widens the resource detail contract to task.view: %s", registration)
+	}
+}
+
 func TestV8AssetWorkbenchUsesNarrowCapabilitiesForHighRiskSurfaces(t *testing.T) {
 	tests := []struct {
 		method string

@@ -2,7 +2,10 @@ package mysqlrepo
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -68,7 +71,12 @@ func TestReindexTaskSearchDocumentRefreshesAssetDocumentsForTaskMetadata(t *test
 				return fmt.Errorf("group concat SQL unexpected: %s", normalized)
 			}
 		case "task-doc-upsert":
-			for _, fragment := range []string{"INSERT INTO task_search_documents", "GROUP_CONCAT", "ON DUPLICATE KEY UPDATE"} {
+			for _, fragment := range []string{
+				"INSERT INTO task_search_documents",
+				"ORDER BY id SEPARATOR ' '",
+				"ORDER BY tsi.id, revision.id SEPARATOR ' '",
+				"ON DUPLICATE KEY UPDATE",
+			} {
 				if !strings.Contains(normalized, fragment) {
 					return fmt.Errorf("task document SQL missing %q: %s", fragment, normalized)
 				}
@@ -128,6 +136,141 @@ func TestReindexTaskSearchDocumentRefreshesAssetDocumentsForTaskMetadata(t *test
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatalf("unmet sql expectations: %v", err)
+	}
+}
+
+func TestRebuildAllTaskSearchDocumentProjectionsUsesCanonicalUpsert(t *testing.T) {
+	mysqlSchemaPresenceCache = sync.Map{}
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	mock.ExpectQuery(`information_schema\.tables`).WithArgs("task_search_documents").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM tasks`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(2))
+	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM task_search_documents`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectQuery(`SELECT id FROM tasks ORDER BY id`).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(11).AddRow(22))
+	mock.ExpectExec(`SET SESSION group_concat_max_len`).WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(`information_schema\.columns`).WithArgs("task_assets", "deleted_at").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectQuery(`information_schema\.columns`).WithArgs("task_assets", "cleaned_at").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectExec(`DELETE FROM task_search_documents`).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`INSERT INTO task_search_documents[\s\S]+ORDER BY id SEPARATOR ' '[\s\S]+ORDER BY tsi.id, revision.id SEPARATOR ' '`).
+		WithArgs(int64(11), int64(11), int64(11)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`INSERT INTO task_search_documents[\s\S]+ORDER BY id SEPARATOR ' '[\s\S]+ORDER BY tsi.id, revision.id SEPARATOR ' '`).
+		WithArgs(int64(22), int64(22), int64(22)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM task_search_documents`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(2))
+	mock.ExpectQuery(`SELECT[\s\S]+LEFT JOIN task_search_documents[\s\S]+LEFT JOIN tasks`).
+		WillReturnRows(sqlmock.NewRows([]string{"missing_or_orphan"}).AddRow(0))
+	mock.ExpectCommit()
+
+	result, err := RebuildAllTaskSearchDocumentProjections(context.Background(), db, false)
+	if err != nil {
+		t.Fatalf("RebuildAllTaskSearchDocumentProjections() error = %v", err)
+	}
+	if result.SourceRows != 2 || result.BeforeRows != 1 || result.AfterRows != 2 || !result.Changed {
+		t.Fatalf("unexpected rebuild result: %+v", result)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRebuildAllTaskSearchDocumentProjectionsDryRunDoesNotWrite(t *testing.T) {
+	mysqlSchemaPresenceCache = sync.Map{}
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectQuery(`information_schema\.tables`).WithArgs("task_search_documents").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM tasks`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(3))
+	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM task_search_documents`).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(2))
+
+	result, err := RebuildAllTaskSearchDocumentProjections(context.Background(), db, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.SourceRows != 3 || result.BeforeRows != 2 || result.AfterRows != 0 || result.Changed {
+		t.Fatalf("unexpected dry-run result: %+v", result)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRebuildAllTaskSearchDocumentProjectionsFailsClosedOnSchemaInspectionError(t *testing.T) {
+	mysqlSchemaPresenceCache = sync.Map{}
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectQuery(`information_schema\.tables`).WithArgs("task_search_documents").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM tasks`).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectQuery(`SELECT COUNT\(\*\) FROM task_search_documents`).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectQuery(`SELECT id FROM tasks ORDER BY id`).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(11))
+	mock.ExpectExec(`SET SESSION group_concat_max_len`).WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(`information_schema\.columns`).WithArgs("task_assets", "deleted_at").
+		WillReturnError(errors.New("schema permission denied"))
+	mock.ExpectRollback()
+
+	_, err = RebuildAllTaskSearchDocumentProjections(context.Background(), db, false)
+	if err == nil || !strings.Contains(err.Error(), "inspect task_assets.deleted_at") {
+		t.Fatalf("expected fail-closed schema inspection error, got %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTaskSearchCanonicalUpsertIntegration(t *testing.T) {
+	dsn := strings.TrimSpace(os.Getenv("TEST_MYSQL_DSN"))
+	if dsn == "" {
+		t.Skip("TEST_MYSQL_DSN is not set")
+	}
+	db, err := sql.Open("mysql", dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	var taskID int64
+	if err := tx.QueryRowContext(ctx, `SELECT id FROM tasks ORDER BY id LIMIT 1`).Scan(&taskID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.ExecContext(ctx, `SET SESSION group_concat_max_len = 1048576`); err != nil {
+		t.Fatal(err)
+	}
+	activeAssetWhere := taskAssetsActiveSQL(ctx, tx, "")
+	if err := upsertTaskSearchDocumentProjection(ctx, tx, taskID, activeAssetWhere); err != nil {
+		t.Fatalf("canonical task projection SQL failed: %v", err)
+	}
+	var rows int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM task_search_documents WHERE task_id=?`, taskID).Scan(&rows); err != nil {
+		t.Fatal(err)
+	}
+	if rows != 1 {
+		t.Fatalf("task search projection rows=%d, want 1", rows)
 	}
 }
 

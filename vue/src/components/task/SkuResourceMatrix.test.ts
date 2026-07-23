@@ -25,6 +25,9 @@ const bundle: ResourceBundle = {
       status: 'finalized',
       mode: 'set',
       source_stage: 'audit',
+      created_by: 7,
+      legacy_migration: false,
+      created_at: '2026-07-22T08:00:00Z',
       source_file: { task_asset_id: 100, file_name: 'living-room.psd', file_size: 10485760, download_url: '/source' },
       references: [{ id: 1, reference_file_ref_id: 2, sort_order: 0, ref_id: 'ref-1', file_name: 'direction.jpg', preview_url: '/reference' }],
       items: [
@@ -64,5 +67,15 @@ describe('SkuResourceMatrix', () => {
     expect(wrapper.get('.reference-grid .tile-fallback').text()).toBe('JPG')
     expect(wrapper.findAll('.final-gallery img')).toHaveLength(1)
     expect(wrapper.get('.final-gallery .tile-fallback').text()).toBe('PNG')
+  })
+
+  it('opens revision history only when the task detail enables it', async () => {
+    const wrapper = mount(SkuResourceMatrix, {
+      props: { bundle, enableRevisionHistory: true },
+      global: { stubs: { Teleport: true, ResourceRevisionDrawer: { props: ['group'], template: '<aside class="revision-drawer-stub">历史修订 {{ group.sku_code }}</aside>' } } },
+    })
+    expect(wrapper.find('.revision-drawer-stub').exists()).toBe(false)
+    await wrapper.get('.revision-history-button').trigger('click')
+    expect(wrapper.get('.revision-drawer-stub').text()).toContain('SKU-009')
   })
 })

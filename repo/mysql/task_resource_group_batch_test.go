@@ -20,11 +20,11 @@ func TestHydrateResourceGroupRevisionsUsesOneBatchPerRelation(t *testing.T) {
 	repository := NewTaskResourceGroupRepo(New(db))
 	now := time.Now().UTC()
 
-	mock.ExpectQuery(regexp.QuoteMeta("FROM task_asset_group_revisions\n\t\tWHERE id IN (?,?)")).
+	mock.ExpectQuery(regexp.QuoteMeta("FROM task_asset_group_revisions r\n\t\tLEFT JOIN users u ON u.id = r.created_by\n\t\tWHERE r.id IN (?,?)")).
 		WithArgs(int64(101), int64(102)).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "group_id", "revision_no", "status", "mode", "source_task_asset_id", "source_stage", "created_by", "reason", "submitted_at", "finalized_at", "created_at"}).
-			AddRow(101, 1, 1, "finalized", "single", 201, "design", 9, "", now, now, now).
-			AddRow(102, 2, 1, "finalized", "set", 202, "audit", 9, "", now, now, now))
+		WillReturnRows(sqlmock.NewRows([]string{"id", "group_id", "revision_no", "status", "mode", "source_task_asset_id", "source_stage", "created_by", "created_by_name", "reason", "submitted_at", "finalized_at", "created_at"}).
+			AddRow(101, 1, 1, "finalized", "single", 201, "design", 9, "审核员", "", now, now, now).
+			AddRow(102, 2, 1, "finalized", "set", 202, "audit", 9, "审核员", "", now, now, now))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM task_asset_group_revision_items\n\t\tWHERE revision_id IN (?,?)")).
 		WithArgs(int64(101), int64(102)).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "revision_id", "task_asset_id", "sort_order", "item_name", "created_at"}).

@@ -500,6 +500,62 @@ func (r *TaskResourceGroupRepo) GetResourceGroup(ctx context.Context, groupID in
 	return &groups[0], nil
 }
 
+func (r *TaskResourceGroupRepo) ListResourceGroupRevisions(ctx context.Context, groupID int64, page, pageSize int) ([]domain.TaskAssetGroupRevision, int64, error) {
+	var total int64
+	if err := r.db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM task_asset_group_revisions WHERE group_id = ?`, groupID).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 50
+	}
+	if pageSize > 200 {
+		pageSize = 200
+	}
+	rows, err := r.db.db.QueryContext(ctx, `
+		SELECT id
+		FROM task_asset_group_revisions
+		WHERE group_id = ?
+		ORDER BY revision_no DESC, id DESC LIMIT ? OFFSET ?`, groupID, pageSize, (page-1)*pageSize)
+	if err != nil {
+		return nil, 0, err
+	}
+	revisionIDs := make([]int64, 0, pageSize)
+	for rows.Next() {
+		var revisionID int64
+		if err := rows.Scan(&revisionID); err != nil {
+			rows.Close()
+			return nil, 0, err
+		}
+		revisionIDs = append(revisionIDs, revisionID)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, 0, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, 0, err
+	}
+	if len(revisionIDs) == 0 {
+		return []domain.TaskAssetGroupRevision{}, total, nil
+	}
+	revisions, err := r.loadResourceGroupRevisions(ctx, revisionIDs)
+	if err != nil {
+		return nil, 0, err
+	}
+	items := make([]domain.TaskAssetGroupRevision, 0, len(revisionIDs))
+	for _, revisionID := range revisionIDs {
+		revision := revisions[revisionID]
+		if revision == nil {
+			return nil, 0, fmt.Errorf("list resource group revisions: revision %d was not hydrated", revisionID)
+		}
+		items = append(items, *revision)
+	}
+	return items, total, nil
+}
+
 func (r *TaskResourceGroupRepo) GetTaskAccessSubject(ctx context.Context, taskID int64) (domain.TaskAccessSubject, error) {
 	var item domain.TaskAccessSubject
 	var requesterID, designerID, handlerID, departmentID, teamID sql.NullInt64
@@ -535,7 +591,35 @@ func scanTaskResourceGroup(scanner resourceGroupScanner) (*domain.TaskAssetGroup
 	return &item, nil
 }
 
+func (r *TaskResourceGroupRepo) loadResourceGroupRevisions(ctx context.Context, revisionIDs []int64) (map[int64]*domain.TaskAssetGroupRevision, error) {
+	revisionIDs = uniquePositiveInt64s(revisionIDs)
+	groups := make([]domain.TaskAssetGroup, len(revisionIDs))
+	for index, revisionID := range revisionIDs {
+		id := revisionID
+		groups[index].WorkingRevisionID = &id
+	}
+	if err := r.hydrateHistoricalResourceGroupRevisions(ctx, groups); err != nil {
+		return nil, err
+	}
+	revisions := make(map[int64]*domain.TaskAssetGroupRevision, len(groups))
+	for index, group := range groups {
+		if group.WorkingRevision == nil {
+			return nil, fmt.Errorf("load resource group revisions: revision %d was not hydrated", revisionIDs[index])
+		}
+		revisions[group.WorkingRevision.ID] = group.WorkingRevision
+	}
+	return revisions, nil
+}
+
 func (r *TaskResourceGroupRepo) hydrateResourceGroupRevisions(ctx context.Context, groups []domain.TaskAssetGroup) error {
+	return r.hydrateResourceGroupRevisionsWithPolicy(ctx, groups, false)
+}
+
+func (r *TaskResourceGroupRepo) hydrateHistoricalResourceGroupRevisions(ctx context.Context, groups []domain.TaskAssetGroup) error {
+	return r.hydrateResourceGroupRevisionsWithPolicy(ctx, groups, true)
+}
+
+func (r *TaskResourceGroupRepo) hydrateResourceGroupRevisionsWithPolicy(ctx context.Context, groups []domain.TaskAssetGroup, allowMissingFiles bool) error {
 	revisionIDs := make([]int64, 0, len(groups)*2)
 	for index := range groups {
 		if groups[index].WorkingRevisionID != nil {
@@ -555,10 +639,12 @@ func (r *TaskResourceGroupRepo) hydrateResourceGroupRevisions(ctx context.Contex
 	}
 	revisions := make(map[int64]*domain.TaskAssetGroupRevision, len(revisionIDs))
 	rows, err := r.db.db.QueryContext(ctx, `
-		SELECT id, group_id, revision_no, status, mode, source_task_asset_id, source_stage,
-		       created_by, reason, submitted_at, finalized_at, created_at
-		FROM task_asset_group_revisions
-		WHERE id IN (`+resourceGroupPlaceholders(len(revisionIDs))+`)`, revisionArgs...)
+		SELECT r.id, r.group_id, r.revision_no, r.status, r.mode, r.source_task_asset_id, r.source_stage,
+		       r.created_by, COALESCE(NULLIF(u.display_name, ''), NULLIF(u.username, ''), ''),
+		       r.reason, r.submitted_at, r.finalized_at, r.created_at
+		FROM task_asset_group_revisions r
+		LEFT JOIN users u ON u.id = r.created_by
+		WHERE r.id IN (`+resourceGroupPlaceholders(len(revisionIDs))+`)`, revisionArgs...)
 	if err != nil {
 		return err
 	}
@@ -567,7 +653,7 @@ func (r *TaskResourceGroupRepo) hydrateResourceGroupRevisions(ctx context.Contex
 		var sourceID sql.NullInt64
 		var submittedAt, finalizedAt sql.NullTime
 		if err := rows.Scan(&item.ID, &item.GroupID, &item.RevisionNo, &item.Status, &item.Mode, &sourceID, &item.SourceStage,
-			&item.CreatedBy, &item.Reason, &submittedAt, &finalizedAt, &item.CreatedAt); err != nil {
+			&item.CreatedBy, &item.CreatedByName, &item.Reason, &submittedAt, &finalizedAt, &item.CreatedAt); err != nil {
 			rows.Close()
 			return err
 		}
@@ -695,9 +781,12 @@ func (r *TaskResourceGroupRepo) hydrateResourceGroupRevisions(ctx context.Contex
 		if err := fileRows.Close(); err != nil {
 			return err
 		}
-		if len(files) != len(assetIDs) {
-			return fmt.Errorf("hydrate resource group files: expected %d rows, got %d", len(assetIDs), len(files))
+		if !allowMissingFiles && len(files) != len(assetIDs) {
+			return fmt.Errorf("hydrate current resource group files: expected %d active bound files, got %d", len(assetIDs), len(files))
 		}
+		// A historical page may retain revision metadata for legacy rows whose
+		// files were already unavailable before V8. Current working/finalized
+		// hydration never uses this tolerance.
 	}
 	for _, revision := range revisions {
 		if revision.SourceTaskAssetID != nil {

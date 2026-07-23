@@ -407,6 +407,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/resource-groups/{id}/revisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List every historical revision of one resource group
+         * @description Returns all revision states newest first (`revision_no DESC`, then `id DESC`) within the
+         *     caller's effective `asset.view` scope, matching the resource-group detail contract. Responses use
+         *     controlled task-asset preview URLs, and download URLs are present only when the caller also
+         *     has scoped `asset.download`. Both capabilities use controlled `/v1/assets/{id}/preview|download`
+         *     access-service paths; this endpoint never returns raw object-storage addresses or signed URLs.
+         *     Reference URLs are omitted unless the snapshot has a formal task-asset id.
+         *     The working/finalized revision ids are returned from the authoritative resource-group pointers.
+         */
+        get: operations["listTaskResourceGroupRevisions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/resource-groups/batch-download": {
         parameters: {
             query?: never;
@@ -20739,6 +20765,22 @@ export interface components {
             item_name?: string;
             file?: components["schemas"]["TaskResourceFile"];
         };
+        /** @description Parsed fail-safe projection of versioned legacy-migration metadata. Event payloads and raw storage addresses are never returned. When upload_sessions_known is false, upload_session_ids is empty because the stored migration reason did not prove that association. */
+        ResourceGroupRevisionEvidence: {
+            /** @enum {string} */
+            schema_version: "migration_v2";
+            manifest_sha256: string;
+            /** @enum {string} */
+            confidence: "confirmed_auto" | "proposed_review" | "hard_blocked";
+            /** Format: int64 */
+            confirmed_by: number;
+            /** Format: date-time */
+            confirmed_at: string;
+            evidence_event_ids: string[];
+            upload_session_ids: string[];
+            upload_sessions_known: boolean;
+            business_reason?: string;
+        };
         TaskAssetGroupRevision: {
             /** Format: int64 */
             id: number;
@@ -20756,7 +20798,10 @@ export interface components {
             source_stage: "design" | "audit" | "retouch" | "migration" | "reopen";
             /** Format: int64 */
             created_by: number;
+            created_by_name?: string;
             reason?: string;
+            legacy_migration: boolean;
+            evidence_summary?: components["schemas"]["ResourceGroupRevisionEvidence"] | null;
             items: components["schemas"]["TaskAssetGroupRevisionItem"][];
             references: components["schemas"]["TaskAssetGroupRevisionReference"][];
             /** Format: date-time */
@@ -20765,6 +20810,17 @@ export interface components {
             finalized_at?: string | null;
             /** Format: date-time */
             created_at: string;
+        };
+        ResourceGroupRevisionListResult: {
+            items: components["schemas"]["TaskAssetGroupRevision"][];
+            /** Format: int64 */
+            working_revision_id?: number | null;
+            /** Format: int64 */
+            finalized_revision_id?: number | null;
+            page: number;
+            page_size: number;
+            /** Format: int64 */
+            total: number;
         };
         TaskAssetGroup: {
             /** Format: int64 */
@@ -21842,6 +21898,36 @@ export interface operations {
                     };
                 };
             };
+            403: components["responses"]["V8Forbidden"];
+            404: components["responses"]["V8NotFound"];
+        };
+    };
+    listTaskResourceGroupRevisions: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+            };
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Scoped historical resource-group revisions. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["ResourceGroupRevisionListResult"];
+                    };
+                };
+            };
+            400: components["responses"]["V8BadRequest"];
             403: components["responses"]["V8Forbidden"];
             404: components["responses"]["V8NotFound"];
         };

@@ -26,6 +26,7 @@ type TaskResourceGroupRepository interface {
 	ListResourceGroups(ctx context.Context, params domain.ResourceGroupListParams) ([]domain.TaskAssetGroup, int64, error)
 	ListFlatResourceItems(ctx context.Context, params domain.ResourceGroupListParams) ([]domain.FlatResourceItem, int64, error)
 	GetResourceGroup(ctx context.Context, groupID int64) (*domain.TaskAssetGroup, error)
+	ListResourceGroupRevisions(ctx context.Context, groupID int64, page, pageSize int) ([]domain.TaskAssetGroupRevision, int64, error)
 	GetTaskAccessSubject(ctx context.Context, taskID int64) (domain.TaskAccessSubject, error)
 	ListGroupsForUpdate(ctx context.Context, tx repo.Tx, taskID int64) ([]domain.TaskAssetGroup, error)
 	LockGroup(ctx context.Context, tx repo.Tx, taskID, groupID, expectedVersion int64) (*domain.TaskAssetGroup, error)
@@ -49,6 +50,7 @@ type TaskResourceWorkflowService interface {
 	ResourceBundle(ctx context.Context, taskID int64, actor domain.RequestActor) (*domain.ResourceBundle, *domain.AppError)
 	ListResourceGroups(ctx context.Context, actor domain.RequestActor, params domain.ResourceGroupListParams) (*domain.ResourceGroupListResult, *domain.AppError)
 	ResourceGroup(ctx context.Context, actor domain.RequestActor, groupID int64) (*domain.TaskAssetGroup, *domain.AppError)
+	ResourceGroupRevisions(ctx context.Context, actor domain.RequestActor, groupID int64, page, pageSize int) (*domain.ResourceGroupRevisionListResult, *domain.AppError)
 	BatchDownloadResourceGroups(ctx context.Context, actor domain.RequestActor, request domain.ResourceGroupBatchDownloadRequest) (*domain.ResourceGroupBatchDownloadManifest, *domain.AppError)
 	SubmitDesign(ctx context.Context, taskID int64, actor domain.RequestActor, request domain.SubmitDesignV2Request) (*domain.ResourceBundle, *domain.AppError)
 	AuditDecision(ctx context.Context, taskID int64, actor domain.RequestActor, request domain.AuditDecisionRequest) (*domain.ResourceBundle, *domain.AppError)
@@ -233,6 +235,41 @@ func (s *taskResourceWorkflowService) ResourceGroup(ctx context.Context, actor d
 	return &items[0], nil
 }
 
+func (s *taskResourceWorkflowService) ResourceGroupRevisions(ctx context.Context, actor domain.RequestActor, groupID int64, page, pageSize int) (*domain.ResourceGroupRevisionListResult, *domain.AppError) {
+	if actor.ID <= 0 || !domain.ActorHasPermission(actor, domain.PermissionAssetView) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "asset.view is required", nil)
+	}
+	if groupID <= 0 {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "resource group id must be positive", nil)
+	}
+	if page <= 0 || pageSize <= 0 || pageSize > 200 {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "page must be positive and page_size must be between 1 and 200", map[string]interface{}{"page_size_limit": 200})
+	}
+	group, err := s.repo.GetResourceGroup(ctx, groupID)
+	if errors.Is(err, repo.ErrNotFound) {
+		return nil, domain.ErrNotFound
+	}
+	if err != nil {
+		return nil, infraError("get resource group for revision history", err)
+	}
+	subject, err := s.repo.GetTaskAccessSubject(ctx, group.TaskID)
+	if err != nil {
+		return nil, infraError("resolve resource group revision scope", err)
+	}
+	scopedAssetView := domain.EffectiveAccessAllowsTask(actor, domain.PermissionAssetView, subject)
+	if !scopedAssetView {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "resource group is outside the effective data scope", nil)
+	}
+	revisions, total, err := s.repo.ListResourceGroupRevisions(ctx, groupID, page, pageSize)
+	if err != nil {
+		return nil, infraError("list resource group revisions", err)
+	}
+	hydrateHistoricalRevisionEvidence(revisions)
+	canDownload := domain.ActorHasPermission(actor, domain.PermissionAssetDownload) && domain.EffectiveAccessAllowsTask(actor, domain.PermissionAssetDownload, subject)
+	s.hydrateHistoricalRevisionURLs(revisions, true, canDownload)
+	return &domain.ResourceGroupRevisionListResult{Items: revisions, WorkingRevisionID: group.WorkingRevisionID, FinalizedRevisionID: group.FinalizedRevisionID, Page: page, PageSize: pageSize, Total: total}, nil
+}
+
 func (s *taskResourceWorkflowService) hydrateSKUProfiles(ctx context.Context, groups []domain.TaskAssetGroup) {
 	if s.profiles == nil || len(groups) == 0 {
 		return
@@ -373,6 +410,163 @@ func (s *taskResourceWorkflowService) hydrateResourceGroupURLs(groups []domain.T
 			}
 		}
 	}
+}
+
+func (s *taskResourceWorkflowService) hydrateHistoricalRevisionURLs(revisions []domain.TaskAssetGroupRevision, canPreview, canDownload bool) {
+	for revisionIndex := range revisions {
+		revision := &revisions[revisionIndex]
+		s.hydrateHistoricalResourceFileURL(revision.SourceFile, canPreview, canDownload)
+		for itemIndex := range revision.Items {
+			s.hydrateHistoricalResourceFileURL(revision.Items[itemIndex].File, canPreview, canDownload)
+		}
+		for referenceIndex := range revision.References {
+			reference := &revision.References[referenceIndex]
+			reference.DownloadURL = ""
+			reference.PreviewURL = ""
+			if reference.FormalTaskAssetID != nil && *reference.FormalTaskAssetID > 0 {
+				if canPreview {
+					reference.PreviewURL = controlledTaskAssetURL(*reference.FormalTaskAssetID, "preview")
+				}
+				if canDownload {
+					reference.DownloadURL = controlledTaskAssetURL(*reference.FormalTaskAssetID, "download")
+				}
+			}
+		}
+	}
+}
+
+func hydrateHistoricalRevisionEvidence(revisions []domain.TaskAssetGroupRevision) {
+	for index := range revisions {
+		summary, marked := parseLegacyMigrationEvidence(revisions[index].Reason)
+		revisions[index].LegacyMigration = marked
+		revisions[index].EvidenceSummary = summary
+	}
+}
+
+func parseLegacyMigrationEvidence(reason string) (*domain.ResourceGroupRevisionEvidence, bool) {
+	trimmed := strings.TrimSpace(reason)
+	const marker = "[migration_v2 "
+	markerIndex := strings.LastIndex(trimmed, marker)
+	if markerIndex < 0 || !strings.HasSuffix(trimmed, "]") {
+		return nil, false
+	}
+	body := strings.TrimSuffix(trimmed[markerIndex+len(marker):], "]")
+	fields := map[string]string{}
+	for _, token := range strings.Fields(body) {
+		parts := strings.SplitN(token, "=", 2)
+		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+			return nil, true
+		}
+		switch parts[0] {
+		case "manifest", "confidence", "confirmed_by", "confirmed_at", "evidence", "upload_sessions":
+		default:
+			return nil, true
+		}
+		if _, duplicate := fields[parts[0]]; duplicate {
+			return nil, true
+		}
+		fields[parts[0]] = parts[1]
+	}
+	for _, required := range []string{"manifest", "confidence", "confirmed_by", "confirmed_at", "evidence"} {
+		if fields[required] == "" {
+			return nil, true
+		}
+	}
+	if len(fields["manifest"]) != sha256.Size*2 {
+		return nil, true
+	}
+	if _, err := hex.DecodeString(fields["manifest"]); err != nil || strings.ToLower(fields["manifest"]) != fields["manifest"] {
+		return nil, true
+	}
+	switch fields["confidence"] {
+	case "confirmed_auto", "proposed_review", "hard_blocked":
+	default:
+		return nil, true
+	}
+	confirmedBy, err := strconv.ParseInt(fields["confirmed_by"], 10, 64)
+	if err != nil || confirmedBy <= 0 {
+		return nil, true
+	}
+	confirmedAt, err := time.Parse(time.RFC3339, fields["confirmed_at"])
+	if err != nil {
+		return nil, true
+	}
+	evidenceIDs, ok := parseMigrationEvidenceIDs(fields["evidence"])
+	if !ok || len(evidenceIDs) == 0 {
+		return nil, true
+	}
+	uploadSessionIDs := []string{}
+	uploadSessionsKnown := false
+	if raw, exists := fields["upload_sessions"]; exists {
+		uploadSessionsKnown = true
+		uploadSessionIDs, ok = parseOpaqueEvidenceIDs(raw)
+		if !ok {
+			return nil, true
+		}
+	}
+	return &domain.ResourceGroupRevisionEvidence{
+		SchemaVersion:       "migration_v2",
+		ManifestSHA256:      fields["manifest"],
+		Confidence:          fields["confidence"],
+		ConfirmedBy:         confirmedBy,
+		ConfirmedAt:         confirmedAt,
+		EvidenceEventIDs:    evidenceIDs,
+		UploadSessionIDs:    uploadSessionIDs,
+		UploadSessionsKnown: uploadSessionsKnown,
+		BusinessReason:      strings.TrimSpace(trimmed[:markerIndex]),
+	}, true
+}
+
+func parseMigrationEvidenceIDs(raw string) ([]string, bool) {
+	values, ok := parseOpaqueEvidenceIDs(raw)
+	if !ok {
+		return nil, false
+	}
+	for _, value := range values {
+		parts := strings.SplitN(value, ":", 2)
+		if len(parts) != 2 || parts[1] == "" || (parts[0] != "task_event_log" && parts[0] != "task_module_event") {
+			return nil, false
+		}
+	}
+	return values, true
+}
+
+func parseOpaqueEvidenceIDs(raw string) ([]string, bool) {
+	if raw == "" {
+		return []string{}, true
+	}
+	values := strings.Split(raw, ",")
+	seen := make(map[string]struct{}, len(values))
+	for index := range values {
+		values[index] = strings.TrimSpace(values[index])
+		if values[index] == "" || strings.ContainsAny(values[index], " []\t\r\n") {
+			return nil, false
+		}
+		if _, duplicate := seen[values[index]]; duplicate {
+			return nil, false
+		}
+		seen[values[index]] = struct{}{}
+	}
+	return values, true
+}
+
+func (s *taskResourceWorkflowService) hydrateHistoricalResourceFileURL(file *domain.TaskResourceFile, canPreview, canDownload bool) {
+	if file == nil {
+		return
+	}
+	file.DownloadURL = ""
+	file.PreviewURL = ""
+	file.DownloadExpiry = nil
+	if canPreview && file.TaskAssetID > 0 {
+		file.PreviewURL = controlledTaskAssetURL(file.TaskAssetID, "preview")
+	}
+	if canDownload && file.TaskAssetID > 0 {
+		file.DownloadURL = controlledTaskAssetURL(file.TaskAssetID, "download")
+	}
+}
+
+func controlledTaskAssetURL(taskAssetID int64, action string) string {
+	return "/v1/assets/" + strconv.FormatInt(taskAssetID, 10) + "/" + action
 }
 
 func (s *taskResourceWorkflowService) hydrateFlatResourceItemURLs(items []domain.FlatResourceItem) {

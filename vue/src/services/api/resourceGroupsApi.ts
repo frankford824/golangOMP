@@ -10,6 +10,7 @@ export interface ResourceFile {
   file_size?: number | null
   download_url?: string
   preview_url?: string
+  download_expires_at?: string | null
 }
 
 export interface ResourceRevisionItem {
@@ -25,6 +26,7 @@ export interface ResourceReference {
   id?: number
   revision_id?: number
   reference_file_ref_id?: number
+  formal_task_asset_id?: number | null
   sort_order?: number
   ref_id?: string
   file_name?: string
@@ -41,10 +43,31 @@ export interface ResourceRevision {
   revision_no: number
   status: 'draft' | 'submitted' | 'finalized' | 'rejected' | 'superseded'
   mode: ResourceMode
+  source_task_asset_id?: number | null
   source_stage: 'design' | 'audit' | 'retouch' | 'migration' | 'reopen'
+  created_by: number
+  created_by_name?: string
+  reason?: string
+  legacy_migration: boolean
+  evidence_summary?: ResourceRevisionEvidence | null
   source_file?: ResourceFile | null
   items: ResourceRevisionItem[]
   references: ResourceReference[]
+  submitted_at?: string | null
+  finalized_at?: string | null
+  created_at: string
+}
+
+export interface ResourceRevisionEvidence {
+  schema_version: 'migration_v2'
+  manifest_sha256: string
+  confidence: 'confirmed_auto' | 'proposed_review' | 'hard_blocked'
+  confirmed_by: number
+  confirmed_at: string
+  evidence_event_ids: string[]
+  upload_session_ids: string[]
+  upload_sessions_known: boolean
+  business_reason?: string
 }
 
 export interface ResourceSKUProfile {
@@ -92,6 +115,8 @@ export interface ResourceGroup {
   scope_kind: 'task' | 'sku' | 'retouch_requirement'
   task_sku_item_id?: number | null
   retouch_requirement_id?: number | null
+  working_revision_id?: number | null
+  finalized_revision_id?: number | null
   lock_version: number
   migration_incomplete: boolean
   migration_issue?: string
@@ -128,6 +153,15 @@ export interface ResourceGroupListResult {
   items: ResourceGroup[]
   flat_items?: FlatResourceItem[]
   view_mode?: 'group' | 'flat'
+  page: number
+  page_size: number
+  total: number
+}
+
+export interface ResourceRevisionListResult {
+  items: ResourceRevision[]
+  working_revision_id?: number | null
+  finalized_revision_id?: number | null
   page: number
   page_size: number
   total: number
@@ -180,6 +214,9 @@ export const resourceGroupsApi = {
   },
   async get(id: number): Promise<ResourceGroup> {
     return unwrap(await http.get(`/v1/resource-groups/${id}`))
+  },
+  async revisions(id: number, params: { page?: number; page_size?: number } = {}): Promise<ResourceRevisionListResult> {
+    return unwrap(await http.get(`/v1/resource-groups/${id}/revisions`, { params }))
   },
   async batchDownload(groupIds: number[]): Promise<{ items: ResourceGroupDownloadItem[] }> {
     return unwrap(await http.post('/v1/resource-groups/batch-download', { group_ids: groupIds }))

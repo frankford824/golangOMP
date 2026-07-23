@@ -1,0 +1,141 @@
+map $http_x_forwarded_proto $ab_forwarded_proto {
+    default $scheme;
+    http http;
+    https https;
+}
+
+server {
+    listen 8080;
+    server_name _;
+
+    root /srv/front;
+    index index.html;
+
+    client_max_body_size 1g;
+    client_body_timeout 300s;
+
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header X-AB-Edge-Identity "${EDGE_IDENTITY}" always;
+    add_header X-AB-Frontend-Fingerprint "${FRONTEND_FINGERPRINT}" always;
+    add_header X-AB-Backend-Fingerprint "${BACKEND_FINGERPRINT}" always;
+    add_header X-AB-Fixture-Identity "${FIXTURE_IDENTITY}" always;
+
+    location = /__ab/identity {
+        default_type application/json;
+        add_header Cache-Control "no-store" always;
+        return 200 '{"edge":"${EDGE_IDENTITY}","frontend_sha256":"${FRONTEND_FINGERPRINT}","backend_sha256":"${BACKEND_FINGERPRINT}","fixture_identity":"${FIXTURE_IDENTITY}"}';
+    }
+
+    location = /index.html {
+        add_header Cache-Control "no-cache, no-store, must-revalidate";
+    }
+
+    # Backend-authorized external byte stream. Only X-Accel-Redirect can enter.
+    location ^~ /_protected/external-alist/p/ {
+        internal;
+        proxy_pass ${EXTERNAL_FILE_ORIGIN}/p/;
+        proxy_http_version 1.1;
+        proxy_ssl_server_name on;
+        proxy_ssl_name $proxy_host;
+        proxy_set_header Host $proxy_host;
+        proxy_set_header Range $http_range;
+        proxy_set_header If-Range $http_if_range;
+        proxy_force_ranges on;
+        proxy_buffering off;
+        proxy_request_buffering off;
+        proxy_connect_timeout 15s;
+        proxy_send_timeout 1h;
+        proxy_read_timeout 1h;
+    }
+
+    # Business file paths may end in static-looking extensions; keep this before
+    # the static-asset regex so authorization remains backend-owned.
+    location ^~ /v1/assets/files/ {
+        proxy_pass ${BACKEND_ORIGIN};
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $ab_forwarded_proto;
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 300s;
+        proxy_read_timeout 300s;
+        proxy_request_buffering off;
+    }
+
+    location = /health {
+        proxy_pass ${BACKEND_ORIGIN}/health;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $ab_forwarded_proto;
+    }
+
+    location = /ping {
+        proxy_pass ${BACKEND_ORIGIN}/ping;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $ab_forwarded_proto;
+    }
+
+    location /v1/ {
+        proxy_pass ${BACKEND_ORIGIN};
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $ab_forwarded_proto;
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 300s;
+        proxy_read_timeout 300s;
+        proxy_request_buffering off;
+    }
+
+    location = /v1 {
+        return 301 /v1/;
+    }
+
+    location ^~ /ws/ {
+        proxy_pass ${BACKEND_ORIGIN};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $ab_forwarded_proto;
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 300s;
+        proxy_read_timeout 300s;
+        proxy_request_buffering off;
+    }
+
+    location ^~ /upload/ {
+        proxy_pass ${UPLOAD_ORIGIN};
+        proxy_http_version 1.1;
+        proxy_ssl_server_name on;
+        proxy_ssl_name $proxy_host;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $ab_forwarded_proto;
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 300s;
+        proxy_read_timeout 300s;
+        proxy_request_buffering off;
+    }
+
+    location = /upload {
+        return 301 /upload/;
+    }
+
+    location ~* \.(?:js|mjs|css|png|jpg|jpeg|gif|ico|svg|webp|woff2?|ttf|eot|map)$ {
+        try_files $uri =404;
+        expires 30d;
+        add_header Cache-Control "public, max-age=2592000, immutable";
+    }
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}

@@ -293,6 +293,7 @@ func NewRouter(
 		resourceGroups := v1.Group("/resource-groups")
 		resourceGroups.GET("", capabilityAccess(resourceGroups, http.MethodGet, "", domain.APIReadinessReadyForFrontend, domain.PermissionAssetView), taskResourceWorkflowH.ListResourceGroups)
 		resourceGroups.GET("/:id", capabilityAccess(resourceGroups, http.MethodGet, "/:id", domain.APIReadinessReadyForFrontend, domain.PermissionAssetView), taskResourceWorkflowH.ResourceGroup)
+		resourceGroups.GET("/:id/revisions", capabilityAccess(resourceGroups, http.MethodGet, "/:id/revisions", domain.APIReadinessReadyForFrontend, domain.PermissionAssetView), taskResourceWorkflowH.ResourceGroupRevisions)
 		resourceGroups.POST("/batch-download", capabilityAccess(resourceGroups, http.MethodPost, "/batch-download", domain.APIReadinessReadyForFrontend, domain.PermissionAssetDownload), taskResourceWorkflowH.BatchDownloadResourceGroups)
 	}
 

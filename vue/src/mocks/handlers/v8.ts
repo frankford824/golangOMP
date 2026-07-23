@@ -37,6 +37,8 @@ function resourceGroup(id: number) {
     },
     lock_version: 1,
     migration_incomplete: false,
+    working_revision_id: 5000 + id,
+    finalized_revision_id: 5000 + id,
     finalized_revision: {
       id: 5000 + id,
       group_id: id,
@@ -44,6 +46,10 @@ function resourceGroup(id: number) {
       status: 'finalized',
       mode: id % 4 === 0 ? 'set' : 'single',
       source_stage: 'audit',
+      created_by: 3,
+      created_by_name: '审核员',
+      legacy_migration: false,
+      created_at: '2026-07-18T08:00:00Z',
       source_file: { task_asset_id: 7000 + id, file_name: `source-${id}.psd` },
       items: Array.from({ length: id % 4 === 0 ? 2 : 1 }, (_, index) => ({
         id: 8000 + id * 10 + index,
@@ -81,6 +87,20 @@ export const v8Handler: MockHandler = (request) => {
     const start = (page - 1) * pageSize
     const items = Array.from({ length: Math.max(0, Math.min(pageSize, total - start)) }, (_, index) => resourceGroup(start + index + 1))
     return { status: 200, data: { data: { items, page, page_size: pageSize, total } } }
+  }
+  const revisionMatch = request.path.match(/^\/v1\/resource-groups\/(\d+)\/revisions$/)
+  if (request.method === 'GET' && revisionMatch) {
+    const groupID = Number(revisionMatch[1])
+    const page = Math.max(1, Number(request.query.page ?? 1))
+    const pageSize = Math.min(200, Math.max(1, Number(request.query.page_size ?? 50)))
+    const current = resourceGroup(groupID).finalized_revision
+    const all = [
+      { ...current, revision_no: 3, status: 'finalized', reason: '审核确认并定稿', finalized_at: '2026-07-18T08:30:00Z' },
+      { ...current, id: current.id - 1, revision_no: 2, status: 'rejected', reason: '成品细节需要调整', finalized_at: null, created_at: '2026-07-17T09:00:00Z' },
+      { ...current, id: current.id - 2, revision_no: 1, status: 'superseded', source_stage: 'design', reason: '设计首次提交', finalized_at: null, created_at: '2026-07-16T09:00:00Z' },
+    ]
+    const start = (page - 1) * pageSize
+    return { status: 200, data: { data: { items: all.slice(start, start + pageSize), page, page_size: pageSize, total: all.length } } }
   }
   const groupMatch = request.path.match(/^\/v1\/resource-groups\/(\d+)$/)
   if (request.method === 'GET' && groupMatch) return { status: 200, data: { data: resourceGroup(Number(groupMatch[1])) } }

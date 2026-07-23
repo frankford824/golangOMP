@@ -1,0 +1,426 @@
+name: ${AB_COMPOSE_PROJECT:?set AB_COMPOSE_PROJECT to a run-scoped name}
+
+x-backend-common: &backend-common
+  restart: "no"
+  extra_hosts:
+    - host.docker.internal:host-gateway
+  environment: &backend-environment
+    SERVER_PORT: "8080"
+    PORT: "8080"
+    AUTH_SETTINGS_FILE: /run/ab/auth_identity.json
+    AUTH_ALLOW_INSECURE_BOOTSTRAP_CREDENTIALS: "false"
+    AUTH_ALLOW_EMBEDDED_SETTINGS: "false"
+    UPLOAD_SERVICE_ENABLED: "true"
+    UPLOAD_SERVICE_BROWSER_MULTIPART_BASE_URL: /
+    UPLOAD_SERVICE_BROWSER_DOWNLOAD_BASE_URL: ""
+    ERP_SYNC_ENABLED: "false"
+    WEB_PUSH_ENABLED: "false"
+    EXPERIENCE_WORKER_ENABLED: "false"
+    EXPERIENCE_CAPTURE_ENABLED: "false"
+    AI_RETRIEVAL_WORKER_ENABLED: "false"
+    ASSET_CLEANUP_ENABLED: "false"
+    EXTERNAL_ASSETS_FULL_SYNC_ENABLED: "false"
+    ASSET_WORKBENCH_PREVIEW_WORKER_ENABLED: "false"
+    ASSET_WORKBENCH_BATCH_JOB_WORKER_ENABLED: "false"
+    ASSET_WORKBENCH_UPLOAD_EXPIRY_WORKER_ENABLED: "false"
+    ENABLE_CRON_WAREHOUSE_AUTO_RELEASE: "false"
+    ENABLE_CRON_REPORT_L1_DAILY: "false"
+    ENABLE_CRON_OSS_365: "false"
+
+x-edge-common: &edge-common
+  image: ${AB_NGINX_IMAGE:?set AB_NGINX_IMAGE explicitly}
+  restart: "no"
+  extra_hosts:
+    - host.docker.internal:host-gateway
+  environment:
+    NGINX_ENVSUBST_FILTER: ^(BACKEND_ORIGIN|UPLOAD_ORIGIN|EXTERNAL_FILE_ORIGIN|EDGE_IDENTITY|FRONTEND_FINGERPRINT|BACKEND_FINGERPRINT|FIXTURE_IDENTITY)$$
+  volumes:
+    - ./nginx/edge.conf.template:/etc/nginx/templates/default.conf.template:ro
+
+x-clone-ready-common: &clone-ready-common
+  image: ${AB_MYSQL_IMAGE:?set AB_MYSQL_IMAGE explicitly}
+  restart: "no"
+  entrypoint: ["/bin/sh", "-ec"]
+  command:
+    - |
+      receipt_hash="$$(sha256sum /run/ab/import-receipt.json | awk '{print $$1}')"
+      marker_hash="$$(tr -d '[:space:]' </run/ab/ready-marker.sha256)"
+      test "$$receipt_hash" = "$$EXPECTED_RECEIPT_SHA256"
+      test "$$marker_hash" = "$$EXPECTED_RECEIPT_SHA256"
+      table_count="$$(mysql --host="$$MYSQL_HOST" --user="$$MYSQL_USER" --password="$$MYSQL_PASSWORD" --batch --skip-column-names "$$MYSQL_DATABASE" -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_type='BASE TABLE'")"
+      task_count="$$(mysql --host="$$MYSQL_HOST" --user="$$MYSQL_USER" --password="$$MYSQL_PASSWORD" --batch --skip-column-names "$$MYSQL_DATABASE" -e "SELECT COUNT(*) FROM tasks")"
+      test "$$table_count" -gt 0
+      test "$$task_count" = "$$EXPECTED_TASK_COUNT"
+      if test "$$REQUIRE_READ_ONLY" = "true"; then
+        grants="$$(mysql --host="$$MYSQL_HOST" --user="$$MYSQL_USER" --password="$$MYSQL_PASSWORD" --batch --skip-column-names -e "SHOW GRANTS FOR CURRENT_USER")"
+        printf '%s\n' "$$grants" | grep -Eqi 'GRANT .*SELECT.* ON'
+        if printf '%s\n' "$$grants" | grep -Eqi 'ALL PRIVILEGES|INSERT|UPDATE|DELETE|CREATE|DROP|ALTER|TRIGGER|REFERENCES|INDEX|EXECUTE|GRANT OPTION'; then
+          echo "A_ui backend account is not read-only" >&2
+          exit 1
+        fi
+      fi
+
+x-fixture-ready-common: &fixture-ready-common
+  image: ${AB_PROBE_IMAGE:?set an immutable curl probe image}
+  restart: "no"
+  entrypoint: ["/bin/sh", "-ec"]
+  command:
+    - |
+      attempt=0
+      until curl --fail --silent --show-error --max-time 2 "$$UPLOAD_ORIGIN/health" >/dev/null && curl --fail --silent --show-error --max-time 2 "$$OBJECT_ORIGIN/health" >/dev/null; do
+        attempt=$$((attempt + 1))
+        test "$$attempt" -lt 30
+        sleep 1
+      done
+      test "$$(curl --fail --silent --show-error --max-time 10 "$$UPLOAD_ORIGIN/identity")" = "$$UPLOAD_IDENTITY"
+      test "$$(curl --fail --silent --show-error --max-time 10 "$$OBJECT_ORIGIN/identity")" = "$$OBJECT_IDENTITY"
+  extra_hosts:
+    - host.docker.internal:host-gateway
+
+x-local-fixture-common: &local-fixture-common
+  image: ${AB_FIXTURE_IMAGE:?set an immutable Python fixture image}
+  restart: "no"
+
+services:
+  mysql-a:
+    image: ${AB_MYSQL_IMAGE:?set AB_MYSQL_IMAGE explicitly}
+    restart: "no"
+    networks:
+      - ab_a_private
+    environment:
+      MYSQL_ROOT_PASSWORD: ${AB_MYSQL_ROOT_PASSWORD:?set an isolated clone root password}
+      MYSQL_DATABASE: ${AB_MYSQL_A_DATABASE:?set the A clone database name}
+      MYSQL_USER: ${AB_MYSQL_APP_USER:?set the isolated clone app user}
+      MYSQL_PASSWORD: ${AB_MYSQL_APP_PASSWORD:?set the isolated clone app password}
+    healthcheck:
+      test: [CMD-SHELL, 'mysqladmin ping -h 127.0.0.1 -uroot -p"$${MYSQL_ROOT_PASSWORD}" --silent']
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    volumes:
+      - mysql_a_data:/var/lib/mysql
+
+  mysql-b:
+    image: ${AB_MYSQL_IMAGE:?set AB_MYSQL_IMAGE explicitly}
+    restart: "no"
+    networks:
+      - ab_b_private
+    environment:
+      MYSQL_ROOT_PASSWORD: ${AB_MYSQL_ROOT_PASSWORD:?set an isolated clone root password}
+      MYSQL_DATABASE: ${AB_MYSQL_B_DATABASE:?set the B clone database name}
+      MYSQL_USER: ${AB_MYSQL_APP_USER:?set the isolated clone app user}
+      MYSQL_PASSWORD: ${AB_MYSQL_APP_PASSWORD:?set the isolated clone app password}
+    healthcheck:
+      test: [CMD-SHELL, 'mysqladmin ping -h 127.0.0.1 -uroot -p"$${MYSQL_ROOT_PASSWORD}" --silent']
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    volumes:
+      - mysql_b_data:/var/lib/mysql
+
+  redis-a:
+    image: ${AB_REDIS_IMAGE:?set AB_REDIS_IMAGE explicitly}
+    restart: "no"
+    command: [redis-server, --appendonly, "yes", --requirepass, "${AB_REDIS_PASSWORD:?set an isolated Redis password}"]
+    networks:
+      - ab_a_private
+    healthcheck:
+      test: [CMD-SHELL, 'redis-cli -a "$${REDIS_PASSWORD}" ping | grep -q PONG']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    environment:
+      REDIS_PASSWORD: ${AB_REDIS_PASSWORD:?set an isolated Redis password}
+    volumes:
+      - redis_a_data:/data
+
+  redis-b:
+    image: ${AB_REDIS_IMAGE:?set AB_REDIS_IMAGE explicitly}
+    restart: "no"
+    command: [redis-server, --appendonly, "yes", --requirepass, "${AB_REDIS_PASSWORD:?set an isolated Redis password}"]
+    networks:
+      - ab_b_private
+    healthcheck:
+      test: [CMD-SHELL, 'redis-cli -a "$${REDIS_PASSWORD}" ping | grep -q PONG']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    environment:
+      REDIS_PASSWORD: ${AB_REDIS_PASSWORD:?set an isolated Redis password}
+    volumes:
+      - redis_b_data:/data
+
+  clone-ready-a:
+    <<: *clone-ready-common
+    depends_on:
+      mysql-a:
+        condition: service_healthy
+    networks:
+      - ab_a_private
+    environment:
+      MYSQL_HOST: mysql-a
+      MYSQL_USER: ${AB_MYSQL_A_READONLY_USER}
+      MYSQL_PASSWORD: ${AB_MYSQL_A_READONLY_PASSWORD}
+      MYSQL_DATABASE: ${AB_MYSQL_A_DATABASE}
+      EXPECTED_RECEIPT_SHA256: ${AB_A_UI_IMPORT_RECEIPT_SHA256:?set the attested A_ui import receipt hash}
+      EXPECTED_TASK_COUNT: ${AB_A_UI_EXPECTED_TASK_COUNT:?set the attested A_ui task count}
+      REQUIRE_READ_ONLY: "true"
+    volumes:
+      - ${AB_A_UI_IMPORT_RECEIPT_FILE:?set the A_ui import receipt path}:/run/ab/import-receipt.json:ro
+      - ${AB_A_UI_READY_MARKER_FILE:?set the A_ui ready marker path}:/run/ab/ready-marker.sha256:ro
+
+  clone-ready-b:
+    <<: *clone-ready-common
+    depends_on:
+      mysql-b:
+        condition: service_healthy
+    networks:
+      - ab_b_private
+    environment:
+      MYSQL_HOST: mysql-b
+      MYSQL_USER: ${AB_MYSQL_APP_USER}
+      MYSQL_PASSWORD: ${AB_MYSQL_APP_PASSWORD}
+      MYSQL_DATABASE: ${AB_MYSQL_B_DATABASE}
+      EXPECTED_RECEIPT_SHA256: ${AB_B_UI_IMPORT_RECEIPT_SHA256:?set the attested B_ui import receipt hash}
+      EXPECTED_TASK_COUNT: ${AB_B_UI_EXPECTED_TASK_COUNT:?set the attested B_ui task count}
+      REQUIRE_READ_ONLY: "false"
+    volumes:
+      - ${AB_B_UI_IMPORT_RECEIPT_FILE:?set the B_ui import receipt path}:/run/ab/import-receipt.json:ro
+      - ${AB_B_UI_READY_MARKER_FILE:?set the B_ui ready marker path}:/run/ab/ready-marker.sha256:ro
+
+  fixture-upload-a:
+    <<: *local-fixture-common
+    command:
+      - --mode=upload
+      - --read-only
+      - --root=/run/ab/root
+      - --seed-root=/run/ab/seed
+      - --identity=${AB_UPLOAD_A_IDENTITY}
+      - --port=${AB_UPLOAD_A_PORT}
+      - --public-base-url=${AB_UPLOAD_A_ORIGIN}
+    networks:
+      - ab_a_ingress
+    volumes:
+      - ${AB_UPLOAD_A_ROOT:?set the run-scoped A upload root}:/run/ab/root:ro
+      - ${AB_UPLOAD_A_SEED_ROOT:?set the frozen A upload seed root}:/run/ab/seed:ro
+
+  fixture-object-a:
+    <<: *local-fixture-common
+    command:
+      - --mode=object
+      - --read-only
+      - --root=/run/ab/root
+      - --seed-root=/run/ab/seed
+      - --identity=${AB_OBJECT_A_IDENTITY}
+      - --port=${AB_OBJECT_A_PORT}
+    networks:
+      - ab_a_ingress
+    volumes:
+      - ${AB_OBJECT_A_ROOT:?set the run-scoped A object root}:/run/ab/root:ro
+      - ${AB_OBJECT_A_SEED_ROOT:?set the frozen A object seed root}:/run/ab/seed:ro
+
+  fixture-upload-b:
+    <<: *local-fixture-common
+    command:
+      - --mode=upload
+      - --root=/run/ab/root
+      - --seed-root=/run/ab/seed
+      - --identity=${AB_UPLOAD_B_IDENTITY}
+      - --port=${AB_UPLOAD_B_PORT}
+      - --public-base-url=${AB_UPLOAD_B_ORIGIN}
+    networks:
+      - ab_b_ingress
+    volumes:
+      - ${AB_UPLOAD_B_ROOT:?set the run-scoped writable B upload root}:/run/ab/root
+      - ${AB_UPLOAD_B_SEED_ROOT:?set the frozen B upload seed root}:/run/ab/seed:ro
+
+  fixture-object-b:
+    <<: *local-fixture-common
+    command:
+      - --mode=object
+      - --read-only
+      - --root=/run/ab/root
+      - --seed-root=/run/ab/seed
+      - --identity=${AB_OBJECT_B_IDENTITY}
+      - --port=${AB_OBJECT_B_PORT}
+    networks:
+      - ab_b_ingress
+    volumes:
+      - ${AB_OBJECT_B_ROOT:?set the run-scoped B object root}:/run/ab/root:ro
+      - ${AB_OBJECT_B_SEED_ROOT:?set the frozen B object seed root}:/run/ab/seed:ro
+
+  fixture-ready-a:
+    <<: *fixture-ready-common
+    depends_on:
+      - fixture-upload-a
+      - fixture-object-a
+    networks:
+      - ab_a_ingress
+    environment:
+      UPLOAD_ORIGIN: ${AB_UPLOAD_A_ORIGIN}
+      UPLOAD_IDENTITY: ${AB_UPLOAD_A_IDENTITY:?set the A upload fixture identity}
+      OBJECT_ORIGIN: ${AB_EXTERNAL_FILE_A_ORIGIN}
+      OBJECT_IDENTITY: ${AB_OBJECT_A_IDENTITY:?set the A object fixture identity}
+
+  fixture-ready-b:
+    <<: *fixture-ready-common
+    depends_on:
+      - fixture-upload-b
+      - fixture-object-b
+    networks:
+      - ab_b_ingress
+    environment:
+      UPLOAD_ORIGIN: ${AB_UPLOAD_B_ORIGIN}
+      UPLOAD_IDENTITY: ${AB_UPLOAD_B_IDENTITY:?set the B upload fixture identity}
+      OBJECT_ORIGIN: ${AB_EXTERNAL_FILE_B_ORIGIN}
+      OBJECT_IDENTITY: ${AB_OBJECT_B_IDENTITY:?set the B object fixture identity}
+
+  backend-a:
+    <<: *backend-common
+    image: ${AB_EXTERNAL_BACKEND_IMAGE:?set the frozen external backend image explicitly}
+    depends_on:
+      mysql-a:
+        condition: service_healthy
+      redis-a:
+        condition: service_healthy
+      clone-ready-a:
+        condition: service_completed_successfully
+      fixture-ready-a:
+        condition: service_completed_successfully
+    networks:
+      - ab_a_private
+      - ab_a_ingress
+    environment:
+      <<: *backend-environment
+      MYSQL_DSN: ${AB_MYSQL_A_READONLY_USER}:${AB_MYSQL_A_READONLY_PASSWORD}@tcp(mysql-a:3306)/${AB_MYSQL_A_DATABASE}?charset=utf8mb4&parseTime=true&multiStatements=true
+      REDIS_ADDR: redis-a:6379
+      REDIS_PASSWORD: ${AB_REDIS_PASSWORD}
+      REDIS_DB: "0"
+      UPLOAD_SERVICE_BASE_URL: ${AB_UPLOAD_A_ORIGIN:?set the isolated A upload-service origin}
+      EXTERNAL_ASSETS_ENABLED: ${AB_EXTERNAL_ASSETS_ENABLED:-false}
+    volumes:
+      - ${AB_AUTH_SETTINGS_A_FILE:?set an absolute A auth settings path}:/run/ab/auth_identity.json:ro
+
+  backend-b:
+    <<: *backend-common
+    image: ${AB_DEVPLUS_BACKEND_IMAGE:?set the frozen dev-plus backend image explicitly}
+    depends_on:
+      mysql-b:
+        condition: service_healthy
+      redis-b:
+        condition: service_healthy
+      clone-ready-b:
+        condition: service_completed_successfully
+      fixture-ready-b:
+        condition: service_completed_successfully
+    networks:
+      - ab_b_private
+      - ab_b_ingress
+    environment:
+      <<: *backend-environment
+      MYSQL_DSN: ${AB_MYSQL_APP_USER}:${AB_MYSQL_APP_PASSWORD}@tcp(mysql-b:3306)/${AB_MYSQL_B_DATABASE}?charset=utf8mb4&parseTime=true&multiStatements=true
+      REDIS_ADDR: redis-b:6379
+      REDIS_PASSWORD: ${AB_REDIS_PASSWORD}
+      REDIS_DB: "0"
+      UPLOAD_SERVICE_BASE_URL: ${AB_UPLOAD_B_ORIGIN:?set the isolated B upload-service origin}
+      EXTERNAL_ASSETS_ENABLED: ${AB_EXTERNAL_ASSETS_ENABLED:-false}
+    volumes:
+      - ${AB_AUTH_SETTINGS_B_FILE:?set an absolute B auth settings path}:/run/ab/auth_identity.json:ro
+
+  edge-external-external:
+    <<: *edge-common
+    depends_on:
+      - backend-a
+    ports:
+      - 127.0.0.1:${AB_EDGE_EXTERNAL_EXTERNAL_PORT:?set edge port}:8080
+    networks:
+      - ab_a_ingress
+    environment:
+      NGINX_ENVSUBST_FILTER: ^(BACKEND_ORIGIN|UPLOAD_ORIGIN|EXTERNAL_FILE_ORIGIN|EDGE_IDENTITY|FRONTEND_FINGERPRINT|BACKEND_FINGERPRINT|FIXTURE_IDENTITY)$$
+      BACKEND_ORIGIN: http://backend-a:8080
+      UPLOAD_ORIGIN: ${AB_UPLOAD_A_ORIGIN}
+      EXTERNAL_FILE_ORIGIN: ${AB_EXTERNAL_FILE_A_ORIGIN:?set the read-only A external-file origin}
+      EDGE_IDENTITY: external-external
+      FRONTEND_FINGERPRINT: ${AB_EXTERNAL_FRONTEND_SHA256}
+      BACKEND_FINGERPRINT: ${AB_EXTERNAL_BACKEND_SHA256}
+      FIXTURE_IDENTITY: ${AB_UPLOAD_A_IDENTITY}:${AB_OBJECT_A_IDENTITY}
+    volumes:
+      - ./nginx/edge.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ${AB_EXTERNAL_FRONT_DIR:?set the absolute frozen external frontend directory}:/srv/front:ro
+
+  edge-devplus-devplus:
+    <<: *edge-common
+    depends_on:
+      - backend-b
+    ports:
+      - 127.0.0.1:${AB_EDGE_DEVPLUS_DEVPLUS_PORT:?set edge port}:8080
+    networks:
+      - ab_b_ingress
+    environment:
+      NGINX_ENVSUBST_FILTER: ^(BACKEND_ORIGIN|UPLOAD_ORIGIN|EXTERNAL_FILE_ORIGIN|EDGE_IDENTITY|FRONTEND_FINGERPRINT|BACKEND_FINGERPRINT|FIXTURE_IDENTITY)$$
+      BACKEND_ORIGIN: http://backend-b:8080
+      UPLOAD_ORIGIN: ${AB_UPLOAD_B_ORIGIN}
+      EXTERNAL_FILE_ORIGIN: ${AB_EXTERNAL_FILE_B_ORIGIN:?set the read-only B external-file origin}
+      EDGE_IDENTITY: devplus-devplus
+      FRONTEND_FINGERPRINT: ${AB_DEVPLUS_FRONTEND_SHA256}
+      BACKEND_FINGERPRINT: ${AB_DEVPLUS_BACKEND_SHA256}
+      FIXTURE_IDENTITY: ${AB_UPLOAD_B_IDENTITY}:${AB_OBJECT_B_IDENTITY}
+    volumes:
+      - ./nginx/edge.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ${AB_DEVPLUS_FRONT_DIR:?set the absolute frozen dev-plus frontend directory}:/srv/front:ro
+
+  edge-external-devplus:
+    <<: *edge-common
+    depends_on:
+      - backend-b
+    ports:
+      - 127.0.0.1:${AB_EDGE_EXTERNAL_DEVPLUS_PORT:?set edge port}:8080
+    networks:
+      - ab_b_ingress
+    environment:
+      NGINX_ENVSUBST_FILTER: ^(BACKEND_ORIGIN|UPLOAD_ORIGIN|EXTERNAL_FILE_ORIGIN|EDGE_IDENTITY|FRONTEND_FINGERPRINT|BACKEND_FINGERPRINT|FIXTURE_IDENTITY)$$
+      BACKEND_ORIGIN: http://backend-b:8080
+      UPLOAD_ORIGIN: ${AB_UPLOAD_B_ORIGIN}
+      EXTERNAL_FILE_ORIGIN: ${AB_EXTERNAL_FILE_B_ORIGIN}
+      EDGE_IDENTITY: external-devplus
+      FRONTEND_FINGERPRINT: ${AB_EXTERNAL_FRONTEND_SHA256}
+      BACKEND_FINGERPRINT: ${AB_DEVPLUS_BACKEND_SHA256}
+      FIXTURE_IDENTITY: ${AB_UPLOAD_B_IDENTITY}:${AB_OBJECT_B_IDENTITY}
+    volumes:
+      - ./nginx/edge.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ${AB_EXTERNAL_FRONT_DIR}:/srv/front:ro
+
+  edge-devplus-external:
+    <<: *edge-common
+    depends_on:
+      - backend-a
+    ports:
+      - 127.0.0.1:${AB_EDGE_DEVPLUS_EXTERNAL_PORT:?set edge port}:8080
+    networks:
+      - ab_a_ingress
+    environment:
+      NGINX_ENVSUBST_FILTER: ^(BACKEND_ORIGIN|UPLOAD_ORIGIN|EXTERNAL_FILE_ORIGIN|EDGE_IDENTITY|FRONTEND_FINGERPRINT|BACKEND_FINGERPRINT|FIXTURE_IDENTITY)$$
+      BACKEND_ORIGIN: http://backend-a:8080
+      UPLOAD_ORIGIN: ${AB_UPLOAD_A_ORIGIN}
+      EXTERNAL_FILE_ORIGIN: ${AB_EXTERNAL_FILE_A_ORIGIN}
+      EDGE_IDENTITY: devplus-external
+      FRONTEND_FINGERPRINT: ${AB_DEVPLUS_FRONTEND_SHA256}
+      BACKEND_FINGERPRINT: ${AB_EXTERNAL_BACKEND_SHA256}
+      FIXTURE_IDENTITY: ${AB_UPLOAD_A_IDENTITY}:${AB_OBJECT_A_IDENTITY}
+    volumes:
+      - ./nginx/edge.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ${AB_DEVPLUS_FRONT_DIR}:/srv/front:ro
+
+networks:
+  ab_a_private:
+    internal: true
+  ab_b_private:
+    internal: true
+  ab_a_ingress: {}
+  ab_b_ingress: {}
+
+volumes:
+  mysql_a_data: {}
+  mysql_b_data: {}
+  redis_a_data: {}
+  redis_b_data: {}

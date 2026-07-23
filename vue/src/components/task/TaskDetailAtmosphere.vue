@@ -33,14 +33,12 @@ void main() {
   float time = u_time * 0.08;
   vec2 a = vec2(0.18 + sin(time) * 0.05, 0.70 + cos(time * 0.7) * 0.08);
   vec2 b = vec2(0.72 + cos(time * 0.8) * 0.08, 0.38 + sin(time * 0.6) * 0.07);
-  float light = glow(uv, a, 0.62) * 0.74 + glow(uv, b, 0.55) * 0.58;
-  float line = sin((uv.x * 1.55 + uv.y * 0.65 + time) * 7.0) * 0.5 + 0.5;
-  vec3 navy = vec3(0.035, 0.090, 0.185);
-  vec3 blue = vec3(0.055, 0.310, 0.760);
-  vec3 cyan = vec3(0.120, 0.560, 0.780);
-  vec3 color = mix(navy, blue, clamp(light, 0.0, 1.0));
-  color = mix(color, cyan, line * light * 0.12);
-  outColor = vec4(color, 0.92);
+  float light = glow(uv, a, 0.78) * 0.42 + glow(uv, b, 0.74) * 0.30;
+  float veil = smoothstep(0.05, 0.62, light);
+  vec3 base = vec3(0.130, 0.220, 0.320);
+  vec3 lift = vec3(0.160, 0.300, 0.400);
+  vec3 color = mix(base, lift, veil * 0.38);
+  outColor = vec4(color, 0.94);
 }
 `
 
@@ -109,6 +107,6 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.task-atmosphere,.task-atmosphere canvas,.fallback-glow{position:absolute;inset:0}.task-atmosphere{overflow:hidden;pointer-events:none}.task-atmosphere canvas{width:100%;height:100%;opacity:.9}.fallback-glow{background:radial-gradient(circle at 18% 70%,rgb(var(--yb-brand-bright)/.2),transparent 44%),radial-gradient(circle at 76% 30%,rgb(var(--yb-brand-accent)/.16),transparent 42%)}
+.task-atmosphere,.task-atmosphere canvas,.fallback-glow{position:absolute;inset:0}.task-atmosphere{overflow:hidden;pointer-events:none}.task-atmosphere canvas{display:block;width:100%;height:100%;min-height:100%;block-size:100%;min-block-size:100%;opacity:.9}.fallback-glow{background:radial-gradient(circle at 18% 52%,rgb(var(--yb-brand-bright)/.07),transparent 62%),radial-gradient(circle at 82% 28%,rgb(var(--yb-brand-accent)/.045),transparent 58%)}
 @media(prefers-reduced-motion:reduce){.task-atmosphere canvas{display:none}}
 </style>

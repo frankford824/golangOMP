@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -168,8 +169,8 @@ func TestPlanningPreflightRejectsNonPurchaseAndMissingTasksBeforeJournal(t *test
 		name     string
 		taskRows *sqlmock.Rows
 	}{
-		{name: "non purchase", taskRows: sqlmock.NewRows([]string{"task_type"}).AddRow("normal")},
-		{name: "missing", taskRows: sqlmock.NewRows([]string{"task_type"})},
+		{name: "non purchase", taskRows: sqlmock.NewRows([]string{"task_type", "task_status"}).AddRow("normal", "InProgress")},
+		{name: "missing", taskRows: sqlmock.NewRows([]string{"task_type", "task_status"})},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -181,7 +182,7 @@ func TestPlanningPreflightRejectsNonPurchaseAndMissingTasksBeforeJournal(t *test
 			mock.ExpectQuery("SELECT subject_type,subject_id,reason").WillReturnRows(sqlmock.NewRows([]string{"subject_type", "subject_id", "reason"}))
 			mock.ExpectQuery("SELECT ur.user_id,ur.role").WillReturnRows(sqlmock.NewRows([]string{"user_id", "role"}))
 			mock.ExpectQuery("SELECT id,task_type,task_status").WillReturnRows(sqlmock.NewRows([]string{"id", "task_type", "task_status"}))
-			mock.ExpectQuery("SELECT task_type FROM tasks WHERE id=\\?").WithArgs(int64(55)).WillReturnRows(tt.taskRows)
+			mock.ExpectQuery("SELECT task_type,task_status FROM tasks WHERE id=\\?").WithArgs(int64(55)).WillReturnRows(tt.taskRows)
 			mock.ExpectQuery("SELECT id,task_id,scope_kind,scope_ref_id").WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "scope_kind", "scope_ref_id"}))
 			mapping := mappingFile{Planning: []planningMapping{{
 				TaskID: 55, CodeRuleRevisionID: 56, CreatedBy: 57,
@@ -211,21 +212,21 @@ func TestExistingPlanningTaskRequiresCompleteSameMappingBeforeJournal(t *testing
 		{
 			name: "missing settings",
 			expectState: func(mock sqlmock.Sqlmock) {
-				mock.ExpectQuery("SELECT t.task_type,s.code_rule_revision_id,s.created_by").WithArgs(int64(70)).WillReturnRows(sqlmock.NewRows([]string{"task_type", "code_rule_revision_id", "created_by"}))
+				mock.ExpectQuery("SELECT t.task_type,t.task_status,s.code_rule_revision_id,s.created_by").WithArgs(int64(70)).WillReturnRows(sqlmock.NewRows([]string{"task_type", "task_status", "code_rule_revision_id", "created_by"}))
 			},
 			wantBlocked: true,
 		},
 		{
 			name: "different settings",
 			expectState: func(mock sqlmock.Sqlmock) {
-				mock.ExpectQuery("SELECT t.task_type,s.code_rule_revision_id,s.created_by").WithArgs(int64(70)).WillReturnRows(sqlmock.NewRows([]string{"task_type", "code_rule_revision_id", "created_by"}).AddRow("sku_planning", 999, 72))
+				mock.ExpectQuery("SELECT t.task_type,t.task_status,s.code_rule_revision_id,s.created_by").WithArgs(int64(70)).WillReturnRows(sqlmock.NewRows([]string{"task_type", "task_status", "code_rule_revision_id", "created_by"}).AddRow("sku_planning", "Completed", 999, 72))
 			},
 			wantBlocked: true,
 		},
 		{
 			name: "different revision fields",
 			expectState: func(mock sqlmock.Sqlmock) {
-				mock.ExpectQuery("SELECT t.task_type,s.code_rule_revision_id,s.created_by").WithArgs(int64(70)).WillReturnRows(sqlmock.NewRows([]string{"task_type", "code_rule_revision_id", "created_by"}).AddRow("sku_planning", 71, 72))
+				mock.ExpectQuery("SELECT t.task_type,t.task_status,s.code_rule_revision_id,s.created_by").WithArgs(int64(70)).WillReturnRows(sqlmock.NewRows([]string{"task_type", "task_status", "code_rule_revision_id", "created_by"}).AddRow("sku_planning", "Completed", 71, 72))
 				mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM task_sku_items").WithArgs(int64(70)).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 				mock.ExpectQuery("SELECT r.description_spec,r.quantity").WithArgs(int64(70), int64(73)).WillReturnRows(planningRevisionRows().AddRow("different", 1, nil, "", "", "", "", nil))
 			},
@@ -234,7 +235,7 @@ func TestExistingPlanningTaskRequiresCompleteSameMappingBeforeJournal(t *testing
 		{
 			name: "different image",
 			expectState: func(mock sqlmock.Sqlmock) {
-				mock.ExpectQuery("SELECT t.task_type,s.code_rule_revision_id,s.created_by").WithArgs(int64(70)).WillReturnRows(sqlmock.NewRows([]string{"task_type", "code_rule_revision_id", "created_by"}).AddRow("sku_planning", 71, 72))
+				mock.ExpectQuery("SELECT t.task_type,t.task_status,s.code_rule_revision_id,s.created_by").WithArgs(int64(70)).WillReturnRows(sqlmock.NewRows([]string{"task_type", "task_status", "code_rule_revision_id", "created_by"}).AddRow("sku_planning", "Completed", 71, 72))
 				mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM task_sku_items").WithArgs(int64(70)).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 				mock.ExpectQuery("SELECT r.description_spec,r.quantity").WithArgs(int64(70), int64(73)).WillReturnRows(planningRevisionRows().AddRow("规格", 1, nil, "", "", "", "", "storage-other"))
 			},
@@ -243,7 +244,7 @@ func TestExistingPlanningTaskRequiresCompleteSameMappingBeforeJournal(t *testing
 		{
 			name: "exact mapping",
 			expectState: func(mock sqlmock.Sqlmock) {
-				mock.ExpectQuery("SELECT t.task_type,s.code_rule_revision_id,s.created_by").WithArgs(int64(70)).WillReturnRows(sqlmock.NewRows([]string{"task_type", "code_rule_revision_id", "created_by"}).AddRow("sku_planning", 71, 72))
+				mock.ExpectQuery("SELECT t.task_type,t.task_status,s.code_rule_revision_id,s.created_by").WithArgs(int64(70)).WillReturnRows(sqlmock.NewRows([]string{"task_type", "task_status", "code_rule_revision_id", "created_by"}).AddRow("sku_planning", "Completed", 71, 72))
 				mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM task_sku_items").WithArgs(int64(70)).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 				mock.ExpectQuery("SELECT r.description_spec,r.quantity").WithArgs(int64(70), int64(73)).WillReturnRows(planningRevisionRows().AddRow("规格", 1, nil, "", "", "", "", nil))
 			},
@@ -260,12 +261,12 @@ func TestExistingPlanningTaskRequiresCompleteSameMappingBeforeJournal(t *testing
 			mock.ExpectQuery("SELECT subject_type,subject_id,reason").WillReturnRows(sqlmock.NewRows([]string{"subject_type", "subject_id", "reason"}))
 			mock.ExpectQuery("SELECT ur.user_id,ur.role").WillReturnRows(sqlmock.NewRows([]string{"user_id", "role"}))
 			mock.ExpectQuery("SELECT id,task_type,task_status").WillReturnRows(sqlmock.NewRows([]string{"id", "task_type", "task_status"}))
-			mock.ExpectQuery("SELECT task_type FROM tasks WHERE id=\\?").WithArgs(int64(70)).WillReturnRows(sqlmock.NewRows([]string{"task_type"}).AddRow("sku_planning"))
+			mock.ExpectQuery("SELECT task_type,task_status FROM tasks WHERE id=\\?").WithArgs(int64(70)).WillReturnRows(sqlmock.NewRows([]string{"task_type", "task_status"}).AddRow("sku_planning", "Completed"))
 			mock.ExpectQuery("SELECT id FROM task_sku_items WHERE task_id=\\?").WithArgs(int64(70)).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(73))
 			tt.expectState(mock)
 			mock.ExpectQuery("SELECT id,task_id,scope_kind,scope_ref_id").WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "scope_kind", "scope_ref_id"}))
 			mapping := mappingFile{Planning: []planningMapping{{
-				TaskID: 70, CodeRuleRevisionID: 71, CreatedBy: 72,
+				TaskID: 70, TargetTaskStatus: "Completed", CodeRuleRevisionID: 71, CreatedBy: 72,
 				Items: []planningItemMapping{{TaskSKUItemID: 73, DescriptionSpec: "规格", Quantity: 1}},
 			}}}
 			blockers, err := queryCutoverBlockers(context.Background(), db, mapping)
@@ -359,6 +360,25 @@ func TestSnapshotIntegrityDatabaseAndMappingAreBound(t *testing.T) {
 	}
 	if _, err := readSnapshot(path, "unit_test", mapping); err == nil || !strings.Contains(err.Error(), "integrity") {
 		t.Fatalf("expected integrity failure, got %v", err)
+	}
+}
+
+func TestExactFileDigestBindsRawMappingBytes(t *testing.T) {
+	raw := []byte("{\"version\":2}\n")
+	path := filepath.Join(t.TempDir(), "mapping.json")
+	if err := os.WriteFile(path, raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	want := fmt.Sprintf("%x", sha256.Sum256(raw))
+	got, err := exactFileDigest(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("exact file digest = %q, want %q", got, want)
+	}
+	if got, err := exactFileDigest(""); err != nil || got != "" {
+		t.Fatalf("empty mapping digest = %q, %v", got, err)
 	}
 }
 
@@ -633,7 +653,7 @@ func TestValidateCutoverStateRejectsPlanningTasksWithResourceGroups(t *testing.T
 	mock.ExpectQuery("SELECT ur.user_id,ur.role").WillReturnRows(sqlmock.NewRows([]string{"user_id", "role"}))
 	mock.ExpectQuery("SELECT id,task_type,task_status").WillReturnRows(sqlmock.NewRows([]string{"id", "task_type", "task_status"}))
 	mock.ExpectQuery("SELECT id,task_id,scope_kind,scope_ref_id").WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "scope_kind", "scope_ref_id"}))
-	for i := 0; i < 4; i++ {
+	for i := 0; i < 5; i++ {
 		mock.ExpectQuery("SELECT COUNT\\(\\*\\)").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 	}
 	mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM tasks t JOIN task_asset_groups").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
@@ -691,10 +711,11 @@ func TestApplyPlanningRejectsInconsistentRerunBeforeMutation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	mock.ExpectQuery("SELECT task_type,task_status FROM tasks").WithArgs(int64(10)).WillReturnRows(sqlmock.NewRows([]string{"task_type", "task_status"}).AddRow("sku_planning", "Completed"))
 	mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM task_planning_settings").WithArgs(int64(10)).WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
-	mock.ExpectQuery("SELECT t.task_type,s.code_rule_revision_id,s.created_by").WithArgs(int64(10)).WillReturnRows(sqlmock.NewRows([]string{"task_type", "code_rule_revision_id", "created_by"}).AddRow("sku_planning", int64(999), int64(7)))
+	mock.ExpectQuery("SELECT t.task_type,t.task_status,s.code_rule_revision_id,s.created_by").WithArgs(int64(10)).WillReturnRows(sqlmock.NewRows([]string{"task_type", "task_status", "code_rule_revision_id", "created_by"}).AddRow("sku_planning", "Completed", int64(999), int64(7)))
 	inserted, err := applyPlanning(context.Background(), tx, planningMapping{
-		TaskID: 10, CodeRuleRevisionID: 20, CreatedBy: 7,
+		TaskID: 10, TargetTaskStatus: "Completed", CodeRuleRevisionID: 20, CreatedBy: 7,
 		Items: []planningItemMapping{{TaskSKUItemID: 30, DescriptionSpec: "规格", Quantity: 1}},
 	})
 	if err == nil || inserted || !strings.Contains(err.Error(), "settings differ") {
@@ -706,5 +727,18 @@ func TestApplyPlanningRejectsInconsistentRerunBeforeMutation(t *testing.T) {
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestPlanningTargetStatusPreservesTerminalAndAllowsExplicitActiveStates(t *testing.T) {
+	for _, status := range []string{"PendingAssign", "Completed", "Cancelled", "Archived"} {
+		if err := validatePlanningTargetTransition(status, status); err != nil {
+			t.Fatalf("preserve %s: %v", status, err)
+		}
+	}
+	for _, terminal := range []string{"Cancelled", "Archived"} {
+		if err := validatePlanningTargetTransition(terminal, "Completed"); err == nil || !strings.Contains(err.Error(), "must be preserved") {
+			t.Fatalf("terminal %s transition error = %v", terminal, err)
+		}
 	}
 }

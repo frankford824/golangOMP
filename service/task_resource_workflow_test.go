@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"reflect"
+	"strings"
 	"testing"
 
 	"workflow/domain"
@@ -11,16 +13,18 @@ import (
 
 type resourceWorkflowRepoStub struct {
 	TaskResourceGroupRepository
-	workflow      *domain.TaskWorkflowLock
-	groups        []domain.TaskAssetGroup
-	expected      int64
-	listFn        func(domain.ResourceGroupListParams) ([]domain.TaskAssetGroup, int64)
-	flatListFn    func(domain.ResourceGroupListParams) ([]domain.FlatResourceItem, int64)
-	staged        map[int64]domain.StagedTaskAssetBinding
-	workflowReads int
-	groupReads    int
-	groupByID     map[int64]*domain.TaskAssetGroup
-	subjectByTask map[int64]domain.TaskAccessSubject
+	workflow             *domain.TaskWorkflowLock
+	groups               []domain.TaskAssetGroup
+	expected             int64
+	listFn               func(domain.ResourceGroupListParams) ([]domain.TaskAssetGroup, int64)
+	flatListFn           func(domain.ResourceGroupListParams) ([]domain.FlatResourceItem, int64)
+	staged               map[int64]domain.StagedTaskAssetBinding
+	workflowReads        int
+	groupReads           int
+	groupByID            map[int64]*domain.TaskAssetGroup
+	subjectByTask        map[int64]domain.TaskAccessSubject
+	revisionsByGroup     map[int64][]domain.TaskAssetGroupRevision
+	revisionTotalByGroup map[int64]int64
 }
 
 type taskResourceProfileProviderStub struct {
@@ -77,6 +81,11 @@ func (s *resourceWorkflowRepoStub) GetTaskAccessSubject(_ context.Context, taskI
 		return domain.TaskAccessSubject{}, repo.ErrNotFound
 	}
 	return subject, nil
+}
+
+func (s *resourceWorkflowRepoStub) ListResourceGroupRevisions(_ context.Context, groupID int64, page, pageSize int) ([]domain.TaskAssetGroupRevision, int64, error) {
+	items := append([]domain.TaskAssetGroupRevision(nil), s.revisionsByGroup[groupID]...)
+	return items, s.revisionTotalByGroup[groupID], nil
 }
 
 func TestResourceBundleIsPureReadAndReturnsStableGroupIDs(t *testing.T) {
@@ -181,6 +190,163 @@ func TestListResourceGroupsKeepsGroupsWhenProfilesAreUnavailable(t *testing.T) {
 	if result.Items[0].SKUProfile != nil {
 		t.Fatalf("sku profile = %+v", result.Items[0].SKUProfile)
 	}
+}
+
+func TestResourceGroupRevisionsUsesPreferredScopedPermissionAndSafeURLs(t *testing.T) {
+	departmentID, otherDepartmentID := int64(101), int64(202)
+	workingID, finalizedID := int64(31), int64(30)
+	group := &domain.TaskAssetGroup{ID: 10, TaskID: 20, WorkingRevisionID: &workingID, FinalizedRevisionID: &finalizedID}
+	revisions := []domain.TaskAssetGroupRevision{{
+		ID: 30, GroupID: group.ID, RevisionNo: 2, Status: domain.TaskAssetGroupRevisionFinalized,
+		CreatedBy: 9, CreatedByName: "审核员",
+		Reason:     "审核确认 [migration_v2 manifest=" + strings.Repeat("a", 64) + " confidence=confirmed_auto confirmed_by=9 confirmed_at=2026-07-22T08:00:00Z evidence=task_event_log:event-1,task_module_event:42 upload_sessions=session-a,session-b]",
+		SourceFile: &domain.TaskResourceFile{TaskAssetID: 40, FileName: "source.psd", StorageKey: "tasks/20/source.psd"},
+		Items:      []domain.TaskAssetGroupRevisionItem{{ID: 50, TaskAssetID: 60, File: &domain.TaskResourceFile{TaskAssetID: 60, FileName: "final.png", StorageKey: "tasks/20/final.png"}}},
+		References: []domain.TaskAssetGroupRevisionReference{
+			{ID: 70, FormalTaskAssetID: int64PtrForResourceWorkflowTest(80), FileNameSnapshot: "reference.jpg", StorageKey: "tasks/20/reference.jpg"},
+			{ID: 71, FileNameSnapshot: "snapshot-only.jpg", StorageKey: "objects/reference/snapshot-only.jpg"},
+		},
+	}}
+	repository := &resourceWorkflowRepoStub{
+		groupByID:            map[int64]*domain.TaskAssetGroup{group.ID: group},
+		subjectByTask:        map[int64]domain.TaskAccessSubject{group.TaskID: {TaskID: group.TaskID, OwnerDepartmentID: &departmentID}},
+		revisionsByGroup:     map[int64][]domain.TaskAssetGroupRevision{group.ID: revisions},
+		revisionTotalByGroup: map[int64]int64{group.ID: 1},
+	}
+	svc := NewTaskResourceWorkflowService(repository, nil, nil)
+
+	t.Run("asset view gets controlled previews without download urls", func(t *testing.T) {
+		actor := multiCapabilityActor(7, &departmentID,
+			capabilityScope{permission: domain.PermissionAssetView, scope: domain.AccessScopeOwnDepartment},
+			capabilityScope{permission: domain.PermissionTaskView, scope: domain.AccessScopeGlobal},
+		)
+		result, appErr := svc.ResourceGroupRevisions(context.Background(), actor, group.ID, 1, 20)
+		if appErr != nil {
+			t.Fatalf("ResourceGroupRevisions() error = %+v", appErr)
+		}
+		revision := result.Items[0]
+		if revision.SourceFile.PreviewURL != "/v1/assets/40/preview" || revision.SourceFile.DownloadURL != "" {
+			t.Fatalf("source urls = preview %q download %q", revision.SourceFile.PreviewURL, revision.SourceFile.DownloadURL)
+		}
+		if revision.Items[0].File.PreviewURL != "/v1/assets/60/preview" || revision.Items[0].File.DownloadURL != "" {
+			t.Fatalf("item urls = %+v", revision.Items[0].File)
+		}
+		if revision.References[0].PreviewURL != "/v1/assets/80/preview" || revision.References[0].DownloadURL != "" {
+			t.Fatalf("reference urls = %+v", revision.References[0])
+		}
+		if revision.References[1].PreviewURL != "" || revision.References[1].DownloadURL != "" {
+			t.Fatalf("snapshot-only reference leaked urls = %+v", revision.References[1])
+		}
+		if !revision.LegacyMigration || revision.EvidenceSummary == nil || revision.EvidenceSummary.BusinessReason != "审核确认" || revision.EvidenceSummary.ManifestSHA256 != strings.Repeat("a", 64) {
+			t.Fatalf("migration evidence summary = %+v", revision.EvidenceSummary)
+		}
+		if !revision.EvidenceSummary.UploadSessionsKnown || !reflect.DeepEqual(revision.EvidenceSummary.UploadSessionIDs, []string{"session-a", "session-b"}) {
+			t.Fatalf("upload session evidence = %+v", revision.EvidenceSummary)
+		}
+	})
+
+	t.Run("broader task view cannot override narrow asset scope", func(t *testing.T) {
+		actor := multiCapabilityActor(7, &otherDepartmentID,
+			capabilityScope{permission: domain.PermissionAssetView, scope: domain.AccessScopeOwnDepartment},
+			capabilityScope{permission: domain.PermissionTaskView, scope: domain.AccessScopeGlobal},
+		)
+		result, appErr := svc.ResourceGroupRevisions(context.Background(), actor, group.ID, 1, 20)
+		if result != nil || appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
+			t.Fatalf("combined scope result/error = %+v/%+v", result, appErr)
+		}
+	})
+
+	t.Run("pure task view cannot read asset revision metadata", func(t *testing.T) {
+		actor := multiCapabilityActor(7, nil, capabilityScope{permission: domain.PermissionTaskView, scope: domain.AccessScopeGlobal})
+		result, appErr := svc.ResourceGroupRevisions(context.Background(), actor, group.ID, 1, 20)
+		if result != nil || appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
+			t.Fatalf("task-view-only result/error = %+v/%+v", result, appErr)
+		}
+	})
+
+	t.Run("scoped asset download adds download urls", func(t *testing.T) {
+		actor := multiCapabilityActor(7, &departmentID,
+			capabilityScope{permission: domain.PermissionAssetView, scope: domain.AccessScopeOwnDepartment},
+			capabilityScope{permission: domain.PermissionAssetDownload, scope: domain.AccessScopeOwnDepartment},
+		)
+		result, appErr := svc.ResourceGroupRevisions(context.Background(), actor, group.ID, 1, 20)
+		if appErr != nil {
+			t.Fatalf("ResourceGroupRevisions() error = %+v", appErr)
+		}
+		if result.Items[0].SourceFile.DownloadURL != "/v1/assets/40/download" || result.Items[0].References[0].DownloadURL != "/v1/assets/80/download" {
+			t.Fatalf("download-capable response omitted urls: %+v", result.Items[0])
+		}
+		if result.Items[0].References[1].DownloadURL != "" || result.Items[0].References[1].PreviewURL != "" {
+			t.Fatalf("snapshot-only reference leaked authorized urls: %+v", result.Items[0].References[1])
+		}
+	})
+}
+
+func TestParseLegacyMigrationEvidenceFailsSafe(t *testing.T) {
+	tests := []struct {
+		name       string
+		reason     string
+		wantMarked bool
+		wantParsed bool
+		wantKnown  bool
+	}{
+		{name: "ordinary reason", reason: "普通审核通过"},
+		{name: "malformed marked reason", reason: "旧数据 [migration_v2 manifest=bad]", wantMarked: true},
+		{
+			name:       "legacy metadata without upload proof",
+			reason:     "历史迁移 [migration_v2 manifest=" + strings.Repeat("b", 64) + " confidence=confirmed_auto confirmed_by=7 confirmed_at=2026-07-22T08:00:00Z evidence=task_event_log:event-7]",
+			wantMarked: true,
+			wantParsed: true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			summary, marked := parseLegacyMigrationEvidence(test.reason)
+			if marked != test.wantMarked || (summary != nil) != test.wantParsed {
+				t.Fatalf("parseLegacyMigrationEvidence() = %+v/%v", summary, marked)
+			}
+			if summary != nil && summary.UploadSessionsKnown != test.wantKnown {
+				t.Fatalf("upload sessions known = %v", summary.UploadSessionsKnown)
+			}
+		})
+	}
+}
+
+func TestResourceGroupRevisionsRejectsInvalidPagination(t *testing.T) {
+	group := &domain.TaskAssetGroup{ID: 10, TaskID: 20}
+	repository := &resourceWorkflowRepoStub{
+		groupByID:        map[int64]*domain.TaskAssetGroup{group.ID: group},
+		subjectByTask:    map[int64]domain.TaskAccessSubject{group.TaskID: {TaskID: group.TaskID}},
+		revisionsByGroup: map[int64][]domain.TaskAssetGroupRevision{group.ID: {}},
+	}
+	svc := NewTaskResourceWorkflowService(repository, nil, nil)
+	actor := multiCapabilityActor(7, nil, capabilityScope{permission: domain.PermissionAssetView, scope: domain.AccessScopeGlobal})
+
+	result, appErr := svc.ResourceGroupRevisions(context.Background(), actor, group.ID, 0, 50)
+	if result != nil || appErr == nil || appErr.Code != domain.ErrCodeInvalidRequest {
+		t.Fatalf("invalid page result/error = %+v/%+v", result, appErr)
+	}
+	result, appErr = svc.ResourceGroupRevisions(context.Background(), actor, group.ID, 2, 201)
+	if result != nil || appErr == nil || appErr.Code != domain.ErrCodeInvalidRequest {
+		t.Fatalf("oversized page result/error = %+v/%+v", result, appErr)
+	}
+}
+
+type capabilityScope struct {
+	permission domain.PermissionCode
+	scope      domain.AccessScopeMode
+}
+
+func multiCapabilityActor(id int64, departmentID *int64, capabilities ...capabilityScope) domain.RequestActor {
+	view := &domain.EffectiveAccess{UserID: id}
+	for index, capability := range capabilities {
+		roleID := int64(index + 1)
+		assignment := domain.AccessAssignment{ID: roleID, UserID: id, RoleID: roleID, ScopeMode: capability.scope, SourceType: "org_policy"}
+		view.Permissions = append(view.Permissions, capability.permission)
+		view.Assignments = append(view.Assignments, assignment)
+		view.Sources = append(view.Sources, domain.EffectiveAccessNote{Permission: capability.permission, RoleID: roleID, SourceType: assignment.SourceType, ScopeMode: capability.scope})
+	}
+	return domain.RequestActor{ID: id, DepartmentID: departmentID, Permissions: view.Permissions, EffectiveAccess: view}
 }
 
 func TestListResourceGroupsUsesFileLevelPaginationForFlatMode(t *testing.T) {

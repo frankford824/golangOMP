@@ -3,7 +3,7 @@
     <div v-if="loading && !task" class="state">正在打开任务…</div>
     <div v-else-if="error && !task" class="state error" role="alert">{{ error }}</div>
     <template v-else-if="task">
-      <section class="task-hero">
+      <section class="task-hero" :class="{ 'is-terminal': isTerminal }">
         <TaskDetailAtmosphere />
         <div class="hero-content">
           <nav class="hero-nav" aria-label="页面位置">
@@ -124,7 +124,7 @@
             />
           </div>
 
-          <div v-else-if="workspaceMode === 'resources' && bundle" class="workspace-body"><SkuResourceMatrix :bundle="bundle" /></div>
+          <div v-else-if="workspaceMode === 'resources' && bundle" class="workspace-body"><SkuResourceMatrix :bundle="bundle" :enable-revision-history="can('asset.view')" /></div>
 
           <div v-else-if="workspaceMode === 'attachments'" class="workspace-body attachment-body">
             <TaskAttachmentWorkspace :files="referenceFiles" :can-upload="canManageReferences" :uploading="referenceUploading" @upload="referenceInput?.click()" />
@@ -214,6 +214,7 @@ import { tasksApi } from '@/services/api/tasksApi'
 import { resourceGroupsApi, type ResourceBundle } from '@/services/api/resourceGroupsApi'
 import { mergeDetailEnvelopeIntoTaskRaw } from '@/domain/mappers/task-detail-envelope'
 import { useDesignerOptions } from '@/composables/useDesignerOptions'
+import { usePermission } from '@/composables/usePermission'
 import WorkflowProgress from '@/components/task/WorkflowProgress.vue'
 import TaskStatusTag from '@/components/task/TaskStatusTag.vue'
 import SkuResourceMatrix from '@/components/task/SkuResourceMatrix.vue'
@@ -238,6 +239,7 @@ type WorkspaceMode = 'workflow' | 'resources' | 'attachments' | 'details' | 'his
 
 const route = useRoute()
 const router = useRouter()
+const { can } = usePermission()
 const task = ref<V8Task | null>(null)
 const aggregate = ref<Record<string, unknown>>({})
 const bundle = ref<ResourceBundle | null>(null)
@@ -668,11 +670,13 @@ onBeforeUnmount(()=>{window.removeEventListener('beforeunload',warnBeforeUnload)
 <style scoped>
 /* Premium task workstation visual system — restrained, legible and state-led. */
 .task-page{max-width:none;margin:0;padding:0 0 30px;gap:14px}
-.task-hero{min-height:184px;border:1px solid rgb(var(--yb-text-inverse)/.1);border-radius:18px;background:rgb(var(--yb-text-night));box-shadow:0 10px 28px rgb(var(--yb-shadow)/.14)}
+.task-hero{min-height:184px;border:1px solid rgb(var(--yb-text-inverse)/.12);border-radius:18px;background:color-mix(in srgb,rgb(var(--yb-text-navy)) 80%,rgb(var(--yb-brand-accent)) 20%);box-shadow:0 12px 30px rgb(var(--yb-shadow)/.14),inset 0 1px rgb(var(--yb-text-inverse)/.045)}
+.task-hero::after{position:absolute;inset:0;z-index:0;border-radius:inherit;background:rgb(var(--yb-text-inverse)/.012);content:"";pointer-events:none}
+.task-hero.is-terminal::after{background:radial-gradient(circle at 91% 18%,rgb(var(--yb-success-bright)/.06),transparent 48%)}
 .hero-content{min-height:184px;row-gap:12px;padding:16px 20px 14px}
 .hero-nav{align-items:center}
-.back-button,.hero-actions button{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:36px;padding:0 12px;border-color:rgb(var(--yb-text-inverse)/.2);border-radius:9px;background:rgb(var(--yb-text-night)/.2);font-size:12px;font-weight:750}
-.back-button:hover,.hero-actions button:hover{border-color:rgb(var(--yb-text-inverse)/.38);background:rgb(var(--yb-text-inverse)/.08)}
+.back-button,.hero-actions button{display:inline-flex;align-items:center;justify-content:center;gap:7px;min-height:36px;padding:0 12px;border-color:rgb(var(--yb-text-inverse)/.17);border-radius:9px;background:rgb(var(--yb-text-inverse)/.055);box-shadow:inset 0 1px rgb(var(--yb-text-inverse)/.04);font-size:12px;font-weight:750;backdrop-filter:blur(10px)}
+.back-button:hover,.hero-actions button:hover{border-color:rgb(var(--yb-text-inverse)/.3);background:rgb(var(--yb-text-inverse)/.09)}
 .refresh-button:disabled svg{animation:task-refresh-spin 1s linear infinite}
 .hero-main{align-items:center;gap:28px}
 .hero-identity{min-width:0;display:grid;align-content:center}
@@ -680,14 +684,14 @@ onBeforeUnmount(()=>{window.removeEventListener('beforeunload',warnBeforeUnload)
 .task-number{display:flex;align-items:center;gap:9px;margin:8px 0 0;color:rgb(var(--yb-text-inverse)/.74);font-size:12px;letter-spacing:.015em}
 .task-number i{width:3px;height:3px;border-radius:50%;background:rgb(var(--yb-text-inverse)/.38)}
 .identity-badges{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}
-.identity-badge{display:inline-flex;align-items:center;gap:6px;min-height:28px;padding:0 9px;border:1px solid rgb(var(--yb-text-inverse)/.18);border-radius:8px;background:rgb(var(--yb-text-inverse)/.07);color:rgb(var(--yb-text-inverse)/.88);font-size:11px;font-weight:750}
-.identity-badge.lane{border-color:rgb(var(--yb-brand-bright)/.34);background:rgb(var(--yb-brand)/.2);color:rgb(var(--yb-text-inverse))}
-.identity-badge.lane.customization{border-color:rgb(var(--yb-purple-border-strong)/.55);background:rgb(var(--yb-purple)/.2)}
-.hero-facts{flex:0 0 min(460px,42vw);grid-template-columns:repeat(4,minmax(92px,1fr));border-radius:11px;background:rgb(var(--yb-text-inverse)/.16)}
-.hero-facts div{padding:10px;background:rgb(var(--yb-text-night)/.38)}
-.hero-facts dt{font-size:10px;font-weight:650}
-.hero-facts dd{font-size:12px;font-weight:760}
-.hero-progress{padding-top:12px}
+.identity-badge{display:inline-flex;align-items:center;gap:6px;min-height:28px;padding:0 9px;border:1px solid rgb(var(--yb-text-inverse)/.15);border-radius:8px;background:rgb(var(--yb-text-inverse)/.055);color:rgb(var(--yb-text-inverse)/.88);font-size:11px;font-weight:750;backdrop-filter:blur(8px)}
+.identity-badge.lane{border-color:rgb(var(--yb-brand-accent)/.3);background:rgb(var(--yb-brand)/.13);color:rgb(var(--yb-text-inverse))}
+.identity-badge.lane.customization{border-color:rgb(var(--yb-purple-border-strong)/.44);background:rgb(var(--yb-purple)/.14)}
+.hero-facts{flex:0 0 min(460px,42vw);grid-template-columns:repeat(4,minmax(92px,1fr));gap:0;border-color:rgb(var(--yb-text-inverse)/.15);border-radius:11px;background:rgb(var(--yb-text-inverse)/.085);box-shadow:inset 0 1px rgb(var(--yb-text-inverse)/.04);backdrop-filter:blur(14px)}
+.hero-facts div{padding:10px;background:transparent}.hero-facts div+div{border-left:1px solid rgb(var(--yb-text-inverse)/.1)}
+.hero-facts dt{font-size:10px;font-weight:650;color:rgb(var(--yb-text-inverse)/.62)}
+.hero-facts dd{font-size:12px;font-weight:760;color:rgb(var(--yb-text-inverse)/.96)}
+.hero-progress{padding-top:12px;border-top-color:rgb(var(--yb-text-inverse)/.11)}
 .command-strip,.brief-card,.resource-story{border-radius:15px;box-shadow:0 5px 18px rgb(var(--yb-shadow)/.045)}
 .command-strip{min-height:78px;padding:12px 14px}
 .stage-summary{gap:11px}

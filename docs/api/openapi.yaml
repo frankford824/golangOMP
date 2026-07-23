@@ -5486,9 +5486,27 @@ components:
         sort_order: { type: integer }
         item_name: { type: string }
         file: { $ref: '#/components/schemas/TaskResourceFile' }
+    ResourceGroupRevisionEvidence:
+      type: object
+      required: [schema_version, manifest_sha256, confidence, confirmed_by, confirmed_at, evidence_event_ids, upload_session_ids, upload_sessions_known]
+      description: Parsed fail-safe projection of versioned legacy-migration metadata. Event payloads and raw storage addresses are never returned. When upload_sessions_known is false, upload_session_ids is empty because the stored migration reason did not prove that association.
+      properties:
+        schema_version: { type: string, enum: [migration_v2] }
+        manifest_sha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+        confidence: { type: string, enum: [confirmed_auto, proposed_review, hard_blocked] }
+        confirmed_by: { type: integer, format: int64 }
+        confirmed_at: { type: string, format: date-time }
+        evidence_event_ids:
+          type: array
+          items: { type: string }
+        upload_session_ids:
+          type: array
+          items: { type: string }
+        upload_sessions_known: { type: boolean }
+        business_reason: { type: string }
     TaskAssetGroupRevision:
       type: object
-      required: [id, group_id, revision_no, status, mode, source_stage, created_by, items, references, created_at]
+      required: [id, group_id, revision_no, status, mode, source_stage, created_by, legacy_migration, items, references, created_at]
       properties:
         id: { type: integer, format: int64 }
         group_id: { type: integer, format: int64 }
@@ -5499,7 +5517,12 @@ components:
         source_file: { $ref: '#/components/schemas/TaskResourceFile' }
         source_stage: { type: string, enum: [design, audit, retouch, migration, reopen] }
         created_by: { type: integer, format: int64 }
+        created_by_name: { type: string }
         reason: { type: string }
+        legacy_migration: { type: boolean }
+        evidence_summary:
+          allOf: [{ $ref: '#/components/schemas/ResourceGroupRevisionEvidence' }]
+          nullable: true
         items:
           type: array
           items: { $ref: '#/components/schemas/TaskAssetGroupRevisionItem' }
@@ -5509,6 +5532,18 @@ components:
         submitted_at: { type: string, format: date-time, nullable: true }
         finalized_at: { type: string, format: date-time, nullable: true }
         created_at: { type: string, format: date-time }
+    ResourceGroupRevisionListResult:
+      type: object
+      required: [items, page, page_size, total]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/TaskAssetGroupRevision' }
+        working_revision_id: { type: integer, format: int64, nullable: true }
+        finalized_revision_id: { type: integer, format: int64, nullable: true }
+        page: { type: integer, minimum: 1 }
+        page_size: { type: integer, minimum: 1, maximum: 200 }
+        total: { type: integer, format: int64, minimum: 0 }
     TaskAssetGroup:
       type: object
       required: [id, task_id, scope_kind, lock_version, migration_incomplete, created_at, updated_at]
@@ -6417,6 +6452,37 @@ paths:
                 required: [data]
                 properties:
                   data: { $ref: '#/components/schemas/TaskAssetGroup' }
+        '403': { $ref: '#/components/responses/V8Forbidden' }
+        '404': { $ref: '#/components/responses/V8NotFound' }
+  /v1/resource-groups/{id}/revisions:
+    get:
+      operationId: listTaskResourceGroupRevisions
+      tags: [TaskResourceWorkflow]
+      summary: List every historical revision of one resource group
+      description: |
+        Returns all revision states newest first (`revision_no DESC`, then `id DESC`) within the
+        caller's effective `asset.view` scope, matching the resource-group detail contract. Responses use
+        controlled task-asset preview URLs, and download URLs are present only when the caller also
+        has scoped `asset.download`. Both capabilities use controlled `/v1/assets/{id}/preview|download`
+        access-service paths; this endpoint never returns raw object-storage addresses or signed URLs.
+        Reference URLs are omitted unless the snapshot has a formal task-asset id.
+        The working/finalized revision ids are returned from the authoritative resource-group pointers.
+      x-api-readiness: ready_for_frontend
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, format: int64 } }
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: page_size, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200':
+          description: Scoped historical resource-group revisions.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/ResourceGroupRevisionListResult' }
+        '400': { $ref: '#/components/responses/V8BadRequest' }
         '403': { $ref: '#/components/responses/V8Forbidden' }
         '404': { $ref: '#/components/responses/V8NotFound' }
   /v1/resource-groups/batch-download:

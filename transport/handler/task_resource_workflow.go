@@ -62,6 +62,26 @@ func (h *TaskResourceWorkflowHandler) ResourceGroup(c *gin.Context) {
 	respondOK(c, result)
 }
 
+func (h *TaskResourceWorkflowHandler) ResourceGroupRevisions(c *gin.Context) {
+	groupID, err := parseID(c)
+	if err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid resource group id", nil))
+		return
+	}
+	page, pageErr := strconv.Atoi(c.DefaultQuery("page", "1"))
+	pageSize, pageSizeErr := strconv.Atoi(c.DefaultQuery("page_size", "50"))
+	if pageErr != nil || pageSizeErr != nil || page <= 0 || pageSize <= 0 || pageSize > 200 {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "page must be positive and page_size must be between 1 and 200", map[string]interface{}{"page_size_limit": 200}))
+		return
+	}
+	result, appErr := h.svc.ResourceGroupRevisions(c.Request.Context(), requestActor(c), groupID, page, pageSize)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
 func (h *TaskResourceWorkflowHandler) BatchDownloadResourceGroups(c *gin.Context) {
 	var request domain.ResourceGroupBatchDownloadRequest
 	if err := c.ShouldBindJSON(&request); err != nil {
