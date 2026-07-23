@@ -142,16 +142,25 @@ type TaskAssetGroupRevisionItem struct {
 	CreatedAt   time.Time         `json:"created_at"`
 }
 
+type TaskResourceFileAvailability string
+
+const (
+	TaskResourceFileAvailable             TaskResourceFileAvailability = "available"
+	TaskResourceFileHistoricalUnavailable TaskResourceFileAvailability = "historical_unavailable"
+)
+
 type TaskResourceFile struct {
-	RevisionItemID int64      `json:"revision_item_id,omitempty"`
-	TaskAssetID    int64      `json:"task_asset_id"`
-	FileName       string     `json:"file_name"`
-	MimeType       string     `json:"mime_type,omitempty"`
-	FileSize       *int64     `json:"file_size,omitempty"`
-	StorageKey     string     `json:"-"`
-	DownloadURL    string     `json:"download_url,omitempty"`
-	PreviewURL     string     `json:"preview_url,omitempty"`
-	DownloadExpiry *time.Time `json:"download_expires_at,omitempty"`
+	RevisionItemID    int64                        `json:"revision_item_id,omitempty"`
+	TaskAssetID       int64                        `json:"task_asset_id"`
+	FileName          string                       `json:"file_name"`
+	MimeType          string                       `json:"mime_type,omitempty"`
+	FileSize          *int64                       `json:"file_size,omitempty"`
+	Availability      TaskResourceFileAvailability `json:"availability,omitempty"`
+	UnavailableReason string                       `json:"unavailable_reason,omitempty"`
+	StorageKey        string                       `json:"-"`
+	DownloadURL       string                       `json:"download_url,omitempty"`
+	PreviewURL        string                       `json:"preview_url,omitempty"`
+	DownloadExpiry    *time.Time                   `json:"download_expires_at,omitempty"`
 }
 
 type ResourceRoleFilter string
@@ -172,20 +181,22 @@ func (r ResourceRoleFilter) Valid() bool {
 }
 
 type TaskAssetGroupRevisionReference struct {
-	ID                 int64     `json:"id"`
-	RevisionID         int64     `json:"revision_id"`
-	ReferenceFileRefID int64     `json:"reference_file_ref_id"`
-	FormalTaskAssetID  *int64    `json:"formal_task_asset_id,omitempty"`
-	SortOrder          int       `json:"sort_order"`
-	RefIDSnapshot      string    `json:"ref_id"`
-	FileNameSnapshot   string    `json:"file_name,omitempty"`
-	ScopeSnapshot      string    `json:"scope,omitempty"`
-	MimeType           string    `json:"mime_type,omitempty"`
-	FileSize           *int64    `json:"file_size,omitempty"`
-	StorageKey         string    `json:"-"`
-	DownloadURL        string    `json:"download_url,omitempty"`
-	PreviewURL         string    `json:"preview_url,omitempty"`
-	CreatedAt          time.Time `json:"created_at"`
+	ID                 int64                        `json:"id"`
+	RevisionID         int64                        `json:"revision_id"`
+	ReferenceFileRefID int64                        `json:"reference_file_ref_id"`
+	FormalTaskAssetID  *int64                       `json:"formal_task_asset_id,omitempty"`
+	SortOrder          int                          `json:"sort_order"`
+	RefIDSnapshot      string                       `json:"ref_id"`
+	FileNameSnapshot   string                       `json:"file_name,omitempty"`
+	ScopeSnapshot      string                       `json:"scope,omitempty"`
+	MimeType           string                       `json:"mime_type,omitempty"`
+	FileSize           *int64                       `json:"file_size,omitempty"`
+	Availability       TaskResourceFileAvailability `json:"availability,omitempty"`
+	UnavailableReason  string                       `json:"unavailable_reason,omitempty"`
+	StorageKey         string                       `json:"-"`
+	DownloadURL        string                       `json:"download_url,omitempty"`
+	PreviewURL         string                       `json:"preview_url,omitempty"`
+	CreatedAt          time.Time                    `json:"created_at"`
 }
 
 type ResourceBundle struct {

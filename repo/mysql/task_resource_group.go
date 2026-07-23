@@ -704,26 +704,56 @@ func (r *TaskResourceGroupRepo) hydrateResourceGroupRevisionsWithPolicy(ctx cont
 		       rr.ref_id_snapshot, rr.file_name_snapshot, rr.scope_snapshot,
 		       COALESCE(asr.mime_type, ''), asr.file_size,
 		       CASE WHEN COALESCE(asr.is_placeholder, 1) = 0 THEN COALESCE(asr.ref_key, '') ELSE '' END,
+		       COALESCE(asr.status, ''),
+		       COALESCE(formal_asr.status, ''),
+		       CASE
+		         WHEN rr.formal_task_asset_id IS NULL THEN 1
+		         WHEN formal_ta.id IS NOT NULL
+		              AND formal_ta.binding_state = 'bound'
+		              AND formal_ta.deleted_at IS NULL
+		              AND formal_ta.cleaned_at IS NULL
+		              AND formal_ta.access_revoked_at IS NULL
+		              AND formal_ta.object_deleted_at IS NULL
+		           THEN 1
+		         ELSE 0
+		       END,
 		       rr.created_at
 		FROM task_asset_group_revision_references rr
 		LEFT JOIN asset_storage_refs asr ON asr.ref_id = rr.ref_id_snapshot
+		LEFT JOIN task_assets formal_ta ON formal_ta.id = rr.formal_task_asset_id
+		LEFT JOIN asset_storage_refs formal_asr ON formal_asr.ref_id = formal_ta.storage_ref_id
 		WHERE rr.revision_id IN (`+resourceGroupPlaceholders(len(revisionIDs))+`)
 		ORDER BY rr.revision_id, rr.sort_order, rr.id`, revisionArgs...)
 	if err != nil {
 		return err
 	}
+	unavailableReferenceCount := 0
 	for refRows.Next() {
 		var child domain.TaskAssetGroupRevisionReference
 		var formalID sql.NullInt64
 		var fileSize sql.NullInt64
+		var snapshotStatus, formalStatus sql.NullString
+		var formalTaskAssetActive bool
 		if err := refRows.Scan(&child.ID, &child.RevisionID, &child.ReferenceFileRefID, &formalID, &child.SortOrder,
 			&child.RefIDSnapshot, &child.FileNameSnapshot, &child.ScopeSnapshot, &child.MimeType, &fileSize,
-			&child.StorageKey, &child.CreatedAt); err != nil {
+			&child.StorageKey, &snapshotStatus, &formalStatus, &formalTaskAssetActive, &child.CreatedAt); err != nil {
 			refRows.Close()
 			return err
 		}
 		child.FormalTaskAssetID = fromNullInt64(formalID)
 		child.FileSize = fromNullInt64(fileSize)
+		if child.FormalTaskAssetID != nil && !formalTaskAssetActive {
+			refRows.Close()
+			return fmt.Errorf("hydrate resource group references: formal task asset %d is missing or inactive", *child.FormalTaskAssetID)
+		}
+		child.Availability = domain.TaskResourceFileAvailable
+		if domain.AssetStorageRefStatus(snapshotStatus.String) == domain.AssetStorageRefStatusHistoricalUnavailable ||
+			domain.AssetStorageRefStatus(formalStatus.String) == domain.AssetStorageRefStatusHistoricalUnavailable {
+			child.Availability = domain.TaskResourceFileHistoricalUnavailable
+			child.UnavailableReason = "legacy_original_object_missing"
+			child.StorageKey = ""
+			unavailableReferenceCount++
+		}
 		if revision := revisions[child.RevisionID]; revision != nil {
 			revision.References = append(revision.References, child)
 		}
@@ -735,6 +765,9 @@ func (r *TaskResourceGroupRepo) hydrateResourceGroupRevisionsWithPolicy(ctx cont
 	if err := refRows.Close(); err != nil {
 		return err
 	}
+	if !allowMissingFiles && unavailableReferenceCount > 0 {
+		return fmt.Errorf("hydrate current resource group references: expected every reference to be available, got %d historical-unavailable rows", unavailableReferenceCount)
+	}
 	for _, revision := range revisions {
 		if revision.SourceTaskAssetID != nil {
 			assetIDs = append(assetIDs, *revision.SourceTaskAssetID)
@@ -742,6 +775,7 @@ func (r *TaskResourceGroupRepo) hydrateResourceGroupRevisionsWithPolicy(ctx cont
 	}
 	assetIDs = uniquePositiveInt64s(assetIDs)
 	files := make(map[int64]*domain.TaskResourceFile, len(assetIDs))
+	unavailableFileCount := 0
 	if len(assetIDs) > 0 {
 		assetArgs := make([]interface{}, len(assetIDs))
 		for index, id := range assetIDs {
@@ -749,7 +783,8 @@ func (r *TaskResourceGroupRepo) hydrateResourceGroupRevisionsWithPolicy(ctx cont
 		}
 		fileRows, err := r.db.db.QueryContext(ctx, `
 			SELECT ta.id, ta.file_name, ta.mime_type, ta.file_size,
-			       COALESCE(NULLIF(ta.storage_key, ''), NULLIF(asr.ref_key, ''))
+			       COALESCE(NULLIF(ta.storage_key, ''), NULLIF(asr.ref_key, '')),
+			       COALESCE(asr.status, '')
 			FROM task_assets ta
 			LEFT JOIN asset_storage_refs asr ON asr.ref_id = ta.storage_ref_id
 			WHERE ta.id IN (`+resourceGroupPlaceholders(len(assetIDs))+`)
@@ -763,15 +798,22 @@ func (r *TaskResourceGroupRepo) hydrateResourceGroupRevisionsWithPolicy(ctx cont
 		}
 		for fileRows.Next() {
 			file := &domain.TaskResourceFile{}
-			var mimeType, storageKey sql.NullString
+			var mimeType, storageKey, storageRefStatus sql.NullString
 			var fileSize sql.NullInt64
-			if err := fileRows.Scan(&file.TaskAssetID, &file.FileName, &mimeType, &fileSize, &storageKey); err != nil {
+			if err := fileRows.Scan(&file.TaskAssetID, &file.FileName, &mimeType, &fileSize, &storageKey, &storageRefStatus); err != nil {
 				fileRows.Close()
 				return err
 			}
 			file.MimeType = mimeType.String
 			file.FileSize = fromNullInt64(fileSize)
 			file.StorageKey = storageKey.String
+			file.Availability = domain.TaskResourceFileAvailable
+			if domain.AssetStorageRefStatus(storageRefStatus.String) == domain.AssetStorageRefStatusHistoricalUnavailable {
+				file.Availability = domain.TaskResourceFileHistoricalUnavailable
+				file.UnavailableReason = "legacy_original_object_missing"
+				file.StorageKey = ""
+				unavailableFileCount++
+			}
 			files[file.TaskAssetID] = file
 		}
 		if err := fileRows.Err(); err != nil {
@@ -781,12 +823,15 @@ func (r *TaskResourceGroupRepo) hydrateResourceGroupRevisionsWithPolicy(ctx cont
 		if err := fileRows.Close(); err != nil {
 			return err
 		}
-		if !allowMissingFiles && len(files) != len(assetIDs) {
-			return fmt.Errorf("hydrate current resource group files: expected %d active bound files, got %d", len(assetIDs), len(files))
+		if len(files) != len(assetIDs) {
+			return fmt.Errorf("hydrate resource group files: expected %d explicit active bound rows, got %d", len(assetIDs), len(files))
 		}
-		// A historical page may retain revision metadata for legacy rows whose
-		// files were already unavailable before V8. Current working/finalized
-		// hydration never uses this tolerance.
+		if !allowMissingFiles && unavailableFileCount > 0 {
+			return fmt.Errorf("hydrate current resource group files: expected all %d files to be available, got %d historical-unavailable rows", len(assetIDs), unavailableFileCount)
+		}
+		// Historical pages tolerate only explicit historical-unavailable
+		// tombstones. Any absent/inactive row remains a fail-closed integrity
+		// error, and current working/finalized hydration rejects tombstones.
 	}
 	for _, revision := range revisions {
 		if revision.SourceTaskAssetID != nil {

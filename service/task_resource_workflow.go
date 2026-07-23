@@ -399,10 +399,12 @@ func (s *taskResourceWorkflowService) hydrateResourceGroupURLs(groups []domain.T
 			for referenceIndex := range revision.References {
 				reference := &revision.References[referenceIndex]
 				file := &domain.TaskResourceFile{
-					FileName:   reference.FileNameSnapshot,
-					MimeType:   reference.MimeType,
-					FileSize:   reference.FileSize,
-					StorageKey: reference.StorageKey,
+					FileName:          reference.FileNameSnapshot,
+					MimeType:          reference.MimeType,
+					FileSize:          reference.FileSize,
+					Availability:      reference.Availability,
+					UnavailableReason: reference.UnavailableReason,
+					StorageKey:        reference.StorageKey,
 				}
 				s.hydrateResourceFileURL(file)
 				reference.DownloadURL = file.DownloadURL
@@ -423,6 +425,9 @@ func (s *taskResourceWorkflowService) hydrateHistoricalRevisionURLs(revisions []
 			reference := &revision.References[referenceIndex]
 			reference.DownloadURL = ""
 			reference.PreviewURL = ""
+			if reference.Availability == domain.TaskResourceFileHistoricalUnavailable {
+				continue
+			}
 			if reference.FormalTaskAssetID != nil && *reference.FormalTaskAssetID > 0 {
 				if canPreview {
 					reference.PreviewURL = controlledTaskAssetURL(*reference.FormalTaskAssetID, "preview")
@@ -557,6 +562,9 @@ func (s *taskResourceWorkflowService) hydrateHistoricalResourceFileURL(file *dom
 	file.DownloadURL = ""
 	file.PreviewURL = ""
 	file.DownloadExpiry = nil
+	if file.Availability == domain.TaskResourceFileHistoricalUnavailable {
+		return
+	}
 	if canPreview && file.TaskAssetID > 0 {
 		file.PreviewURL = controlledTaskAssetURL(file.TaskAssetID, "preview")
 	}
@@ -566,7 +574,7 @@ func (s *taskResourceWorkflowService) hydrateHistoricalResourceFileURL(file *dom
 }
 
 func controlledTaskAssetURL(taskAssetID int64, action string) string {
-	return "/v1/assets/" + strconv.FormatInt(taskAssetID, 10) + "/" + action
+	return "/v1/task-assets/" + strconv.FormatInt(taskAssetID, 10) + "/" + action
 }
 
 func (s *taskResourceWorkflowService) hydrateFlatResourceItemURLs(items []domain.FlatResourceItem) {
@@ -583,7 +591,9 @@ func (s *taskResourceWorkflowService) hydrateFlatResourceItemURLs(items []domain
 }
 
 func (s *taskResourceWorkflowService) hydrateResourceFileURL(file *domain.TaskResourceFile) {
-	if file == nil || strings.TrimSpace(file.StorageKey) == "" {
+	if file == nil ||
+		file.Availability == domain.TaskResourceFileHistoricalUnavailable ||
+		strings.TrimSpace(file.StorageKey) == "" {
 		return
 	}
 	if s.ossDirect != nil && s.ossDirect.Enabled() {

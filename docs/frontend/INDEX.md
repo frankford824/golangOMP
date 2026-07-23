@@ -75,7 +75,7 @@
 | 当前用户 | [V1_API_ME.md](V1_API_ME.md) | 6 |
 | 用户与管理审计 | [V1_API_USERS.md](V1_API_USERS.md) | 6 |
 | 组织架构 | [V1_API_ORG.md](V1_API_ORG.md) | 7 |
-| 任务主流程 | [V1_API_TASKS.md](V1_API_TASKS.md) | 166 |
+| 任务主流程 | [V1_API_TASKS.md](V1_API_TASKS.md) | 168 |
 | 任务资产中心 | [V1_API_TASK_ASSETS.md](V1_API_TASK_ASSETS.md) | 1 |
 | 资产资源库 | [V1_API_ASSETS.md](V1_API_ASSETS.md) | 10 |
 | 任务草稿 | [V1_API_DRAFTS.md](V1_API_DRAFTS.md) | 2 |
@@ -84,7 +84,7 @@
 | ERP 与业务字典 | [V1_API_ERP.md](V1_API_ERP.md) | 23 |
 | 搜索 | [V1_API_SEARCH.md](V1_API_SEARCH.md) | 2 |
 | WebSocket | [V1_API_WS.md](V1_API_WS.md) | 0 个 `/v1` path + `/ws/v1` |
-| 全量速查 | [V1_API_CHEATSHEET.md](V1_API_CHEATSHEET.md) | 239 |
+| 全量速查 | [V1_API_CHEATSHEET.md](V1_API_CHEATSHEET.md) | 241 |
 
 ## §6 联调硬门
 

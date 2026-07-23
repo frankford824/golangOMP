@@ -138,6 +138,41 @@ func (r *taskAssetRepo) GetByID(ctx context.Context, id int64) (*domain.TaskAsse
 	return scanTaskAsset(row)
 }
 
+// GetBoundRevisionTaskAssetByID resolves a task_assets identity only when it is
+// still an active, bound member of at least one immutable resource-group
+// revision. It is intentionally separate from design_assets identity and is
+// used by the controlled historical preview/download routes.
+func (r *taskAssetRepo) GetBoundRevisionTaskAssetByID(ctx context.Context, id int64) (*domain.TaskAsset, error) {
+	row := r.db.db.QueryRowContext(ctx, `
+		SELECT `+taskAssetSelectCols+`
+		FROM task_assets ta
+		LEFT JOIN asset_storage_refs asr ON asr.ref_id = ta.storage_ref_id
+		WHERE ta.id = ?
+		  AND ta.binding_state = 'bound'
+		  AND ta.deleted_at IS NULL
+		  AND ta.cleaned_at IS NULL
+		  AND ta.access_revoked_at IS NULL
+		  AND ta.object_deleted_at IS NULL
+		  AND (
+		    EXISTS (
+		      SELECT 1
+		      FROM task_asset_group_revisions revision
+		      WHERE revision.source_task_asset_id = ta.id
+		    )
+		    OR EXISTS (
+		      SELECT 1
+		      FROM task_asset_group_revision_items item
+		      WHERE item.task_asset_id = ta.id
+		    )
+		    OR EXISTS (
+		      SELECT 1
+		      FROM task_asset_group_revision_references reference
+		      WHERE reference.formal_task_asset_id = ta.id
+		    )
+		  )`, id)
+	return scanTaskAsset(row)
+}
+
 // GetByIDForUpdate returns one version while holding its task_assets row lock.
 // State-sensitive services discover this capability through a local optional
 // interface so the broad TaskAssetRepo contract does not need to grow.

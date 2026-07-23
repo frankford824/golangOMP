@@ -75,6 +75,8 @@ func httpStatusFromCode(code string) int {
 		return http.StatusBadRequest
 	case domain.ErrCodeUploadEndpointDeprecated:
 		return http.StatusGone
+	case domain.ErrCodeAssetHistoricallyUnavailable:
+		return http.StatusGone
 	default:
 		return http.StatusInternalServerError
 	}

@@ -155,6 +155,7 @@ type step04TaskAssetRepo struct {
 	nextID              int64
 	assets              map[int64]*domain.TaskAsset
 	stagedPreviewByRoot map[int64]*domain.StagedTaskAssetPreviewAccess
+	boundRevisionAssets map[int64]bool
 	approvedRuns        int
 	rejectedRuns        int
 }
@@ -164,6 +165,7 @@ func newStep04TaskAssetRepo() *step04TaskAssetRepo {
 		nextID:              1,
 		assets:              map[int64]*domain.TaskAsset{},
 		stagedPreviewByRoot: map[int64]*domain.StagedTaskAssetPreviewAccess{},
+		boundRevisionAssets: map[int64]bool{},
 	}
 }
 
@@ -175,6 +177,13 @@ func (r *step04TaskAssetRepo) Create(_ context.Context, _ repo.Tx, asset *domain
 }
 
 func (r *step04TaskAssetRepo) GetByID(_ context.Context, id int64) (*domain.TaskAsset, error) {
+	return r.assets[id], nil
+}
+
+func (r *step04TaskAssetRepo) GetBoundRevisionTaskAssetByID(_ context.Context, id int64) (*domain.TaskAsset, error) {
+	if !r.boundRevisionAssets[id] {
+		return nil, nil
+	}
 	return r.assets[id], nil
 }
 

@@ -419,9 +419,11 @@ export interface paths {
          * @description Returns all revision states newest first (`revision_no DESC`, then `id DESC`) within the
          *     caller's effective `asset.view` scope, matching the resource-group detail contract. Responses use
          *     controlled task-asset preview URLs, and download URLs are present only when the caller also
-         *     has scoped `asset.download`. Both capabilities use controlled `/v1/assets/{id}/preview|download`
+         *     has scoped `asset.download`. Both capabilities use controlled `/v1/task-assets/{task_asset_id}/preview|download`
          *     access-service paths; this endpoint never returns raw object-storage addresses or signed URLs.
-         *     Reference URLs are omitted unless the snapshot has a formal task-asset id.
+         *     Reference URLs are omitted unless the snapshot has a formal task-asset id. A reference whose
+         *     snapshot storage ref or formal task-asset storage ref is `historical_unavailable` keeps immutable
+         *     metadata but omits both URLs.
          *     The working/finalized revision ids are returned from the authoritative resource-group pointers.
          */
         get: operations["listTaskResourceGroupRevisions"];
@@ -4310,6 +4312,52 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/task-assets/{task_asset_id}/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get controlled download metadata for one immutable task-asset version
+         * @description Resolves `task_asset_id` against `task_assets.id`, not `design_assets.id`.
+         *     The row must remain active, bound, and referenced by at least one resource-group revision.
+         *     Authorization requires scoped `asset.download` for the owning task. Raw object-storage
+         *     addresses are never returned. An explicit historical-unavailable tombstone returns 410.
+         */
+        get: operations["downloadTaskAssetRevisionFile"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/task-assets/{task_asset_id}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get controlled preview metadata for one immutable task-asset version
+         * @description Resolves `task_asset_id` against `task_assets.id`, not `design_assets.id`.
+         *     The row must remain active, bound, and referenced by at least one resource-group revision.
+         *     Bound files require scoped `asset.view`. A derived preview must match this exact source version and never
+         *     masks an explicit historical-unavailable tombstone on the original.
+         */
+        get: operations["previewTaskAssetRevisionFile"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/assets/{asset_id}": {
         parameters: {
             query?: never;
@@ -4455,6 +4503,15 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content?: never;
+                };
+                /** @description Asset metadata exists but the object is no longer available */
+                410: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
                 };
             };
         };
@@ -4610,6 +4667,15 @@ export interface paths {
                 };
                 /** @description Preview metadata not available for current asset state */
                 409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
+                /** @description Asset metadata exists but the object is no longer available */
+                410: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -18530,7 +18596,7 @@ export interface components {
         /** @enum {string} */
         AssetStorageRefType: "task_asset_object" | "export_result" | "generic_object";
         /** @enum {string} */
-        AssetStorageRefStatus: "recorded" | "superseded" | "archived";
+        AssetStorageRefStatus: "recorded" | "superseded" | "archived" | "historical_unavailable";
         /**
          * @description Cross-center adapter-boundary mode. The same term is reused across export, integration, and storage/upload, but each center may support only a subset of values.
          * @enum {string}
@@ -20728,6 +20794,16 @@ export interface components {
             mime_type?: string;
             /** Format: int64 */
             file_size?: number | null;
+            /**
+             * @description historical_unavailable preserves immutable revision metadata for an object proven missing before V8 migration; preview and download URLs are omitted.
+             * @enum {string}
+             */
+            availability?: "available" | "historical_unavailable";
+            /**
+             * @description Stable reason code when availability is historical_unavailable; clients localize the user-facing explanation.
+             * @enum {string}
+             */
+            unavailable_reason?: "legacy_original_object_missing";
             download_url?: string;
             preview_url?: string;
             /** Format: date-time */
@@ -20749,6 +20825,13 @@ export interface components {
             mime_type?: string;
             /** Format: int64 */
             file_size?: number | null;
+            /**
+             * @description historical_unavailable preserves the immutable reference snapshot but suppresses preview and download URLs.
+             * @enum {string}
+             */
+            availability?: "available" | "historical_unavailable";
+            /** @enum {string} */
+            unavailable_reason?: "legacy_original_object_missing";
             download_url?: string;
             preview_url?: string;
             /** Format: date-time */
@@ -22274,6 +22357,85 @@ export interface operations {
                 };
             };
             403: components["responses"]["V8Forbidden"];
+        };
+    };
+    downloadTaskAssetRevisionFile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_asset_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Authorized task-asset version download metadata. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["AssetDownloadInfo"];
+                    };
+                };
+            };
+            403: components["responses"]["V8Forbidden"];
+            404: components["responses"]["V8NotFound"];
+            /** @description Immutable task-asset metadata exists but the original object is historically unavailable. */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    previewTaskAssetRevisionFile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_asset_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Authorized task-asset version preview metadata. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["AssetDownloadInfo"];
+                    };
+                };
+            };
+            403: components["responses"]["V8Forbidden"];
+            404: components["responses"]["V8NotFound"];
+            /** @description Preview metadata is not available for this exact task-asset version. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Immutable task-asset metadata exists but the original object is historically unavailable. */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     listTasksV8: {

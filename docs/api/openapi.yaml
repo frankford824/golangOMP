@@ -2353,7 +2353,7 @@ components:
       enum: [task_asset_object, export_result, generic_object]
     AssetStorageRefStatus:
       type: string
-      enum: [recorded, superseded, archived]
+      enum: [recorded, superseded, archived, historical_unavailable]
     AdapterMode:
       type: string
       description: Cross-center adapter-boundary mode. The same term is reused across export, integration, and storage/upload, but each center may support only a subset of values.
@@ -5456,6 +5456,14 @@ components:
         file_name: { type: string }
         mime_type: { type: string }
         file_size: { type: integer, format: int64, nullable: true }
+        availability:
+          type: string
+          enum: [available, historical_unavailable]
+          description: historical_unavailable preserves immutable revision metadata for an object proven missing before V8 migration; preview and download URLs are omitted.
+        unavailable_reason:
+          type: string
+          enum: [legacy_original_object_missing]
+          description: Stable reason code when availability is historical_unavailable; clients localize the user-facing explanation.
         download_url: { type: string }
         preview_url: { type: string }
         download_expires_at: { type: string, format: date-time, nullable: true }
@@ -5473,6 +5481,13 @@ components:
         scope: { type: string }
         mime_type: { type: string }
         file_size: { type: integer, format: int64, nullable: true }
+        availability:
+          type: string
+          enum: [available, historical_unavailable]
+          description: historical_unavailable preserves the immutable reference snapshot but suppresses preview and download URLs.
+        unavailable_reason:
+          type: string
+          enum: [legacy_original_object_missing]
         download_url: { type: string }
         preview_url: { type: string }
         created_at: { type: string, format: date-time }
@@ -6463,9 +6478,11 @@ paths:
         Returns all revision states newest first (`revision_no DESC`, then `id DESC`) within the
         caller's effective `asset.view` scope, matching the resource-group detail contract. Responses use
         controlled task-asset preview URLs, and download URLs are present only when the caller also
-        has scoped `asset.download`. Both capabilities use controlled `/v1/assets/{id}/preview|download`
+        has scoped `asset.download`. Both capabilities use controlled `/v1/task-assets/{task_asset_id}/preview|download`
         access-service paths; this endpoint never returns raw object-storage addresses or signed URLs.
-        Reference URLs are omitted unless the snapshot has a formal task-asset id.
+        Reference URLs are omitted unless the snapshot has a formal task-asset id. A reference whose
+        snapshot storage ref or formal task-asset storage ref is `historical_unavailable` keeps immutable
+        metadata but omits both URLs.
         The working/finalized revision ids are returned from the authoritative resource-group pointers.
       x-api-readiness: ready_for_frontend
       parameters:
@@ -9172,6 +9189,79 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+  /v1/task-assets/{task_asset_id}/download:
+    get:
+      operationId: downloadTaskAssetRevisionFile
+      tags: [TaskResourceWorkflow]
+      summary: Get controlled download metadata for one immutable task-asset version
+      description: |
+        Resolves `task_asset_id` against `task_assets.id`, not `design_assets.id`.
+        The row must remain active, bound, and referenced by at least one resource-group revision.
+        Authorization requires scoped `asset.download` for the owning task. Raw object-storage
+        addresses are never returned. An explicit historical-unavailable tombstone returns 410.
+      x-api-readiness: ready_for_frontend
+      x-permissions: [asset.download]
+      parameters:
+        - in: path
+          name: task_asset_id
+          required: true
+          schema: { type: integer, format: int64, minimum: 1 }
+      responses:
+        '200':
+          description: Authorized task-asset version download metadata.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/AssetDownloadInfo' }
+        '403': { $ref: '#/components/responses/V8Forbidden' }
+        '404': { $ref: '#/components/responses/V8NotFound' }
+        '410':
+          description: Immutable task-asset metadata exists but the original object is historically unavailable.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /v1/task-assets/{task_asset_id}/preview:
+    get:
+      operationId: previewTaskAssetRevisionFile
+      tags: [TaskResourceWorkflow]
+      summary: Get controlled preview metadata for one immutable task-asset version
+      description: |
+        Resolves `task_asset_id` against `task_assets.id`, not `design_assets.id`.
+        The row must remain active, bound, and referenced by at least one resource-group revision.
+        Bound files require scoped `asset.view`. A derived preview must match this exact source version and never
+        masks an explicit historical-unavailable tombstone on the original.
+      x-api-readiness: ready_for_frontend
+      x-permissions: [asset.view]
+      parameters:
+        - in: path
+          name: task_asset_id
+          required: true
+          schema: { type: integer, format: int64, minimum: 1 }
+      responses:
+        '200':
+          description: Authorized task-asset version preview metadata.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/AssetDownloadInfo' }
+        '403': { $ref: '#/components/responses/V8Forbidden' }
+        '404': { $ref: '#/components/responses/V8NotFound' }
+        '409':
+          description: Preview metadata is not available for this exact task-asset version.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        '410':
+          description: Immutable task-asset metadata exists but the original object is historically unavailable.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /v1/assets/{asset_id}:
     get:
       summary: Get asset
@@ -9280,6 +9370,12 @@ paths:
                     $ref: '#/components/schemas/AssetDownloadInfo'
         '404':
           description: Asset not found
+        '410':
+          description: Asset metadata exists but the object is no longer available
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
   /v1/assets/{asset_id}/content:
     get:
       summary: Stream external netdisk asset content
@@ -9364,6 +9460,12 @@ paths:
                 $ref: '#/components/schemas/ErrorResponse'
         '409':
           description: Preview metadata not available for current asset state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '410':
+          description: Asset metadata exists but the object is no longer available
           content:
             application/json:
               schema:

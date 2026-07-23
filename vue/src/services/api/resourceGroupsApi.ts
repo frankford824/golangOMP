@@ -8,6 +8,8 @@ export interface ResourceFile {
   file_name: string
   mime_type?: string
   file_size?: number | null
+  availability?: 'available' | 'historical_unavailable'
+  unavailable_reason?: 'legacy_original_object_missing'
   download_url?: string
   preview_url?: string
   download_expires_at?: string | null
@@ -33,6 +35,8 @@ export interface ResourceReference {
   scope?: string
   mime_type?: string
   file_size?: number | null
+  availability?: 'available' | 'historical_unavailable'
+  unavailable_reason?: 'legacy_original_object_missing'
   download_url?: string
   preview_url?: string
 }

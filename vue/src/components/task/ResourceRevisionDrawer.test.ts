@@ -8,7 +8,7 @@ vi.mock('@/services/api/resourceGroupsApi', async (loadOriginal) => ({
   ...(await loadOriginal<typeof import('@/services/api/resourceGroupsApi')>()),
   resourceGroupsApi: { revisions: mocks.revisions },
 }))
-vi.mock('@/domain/asset-access', () => ({ fetchAssetPreviewMeta: mocks.fetchPreview }))
+vi.mock('@/domain/asset-access', () => ({ fetchTaskAssetPreviewMeta: mocks.fetchPreview }))
 vi.mock('@/domain/asset-preview-image', () => ({ materializePreviewImageUrl: mocks.materialize, revokeMaterializedPreviewImage: mocks.revoke }))
 vi.mock('@/utils/assetFileDownload', () => ({ downloadAssetFileWithOriginalFilename: mocks.download }))
 
@@ -35,9 +35,9 @@ describe('ResourceRevisionDrawer', () => {
           confirmed_at: '2026-07-22T08:00:00Z', evidence_event_ids: ['task_event_log:event-1'], upload_session_ids: [], upload_sessions_known: false,
           business_reason: '审核确认',
         },
-        source_file: { task_asset_id: 100, file_name: 'source.psd', preview_url: '/v1/assets/100/preview' },
-        references: [{ id: 4, reference_file_ref_id: 5, formal_task_asset_id: 102, file_name: 'direction.jpg', preview_url: '/v1/assets/102/preview' }],
-        items: [{ id: 1, revision_id: 71, task_asset_id: 101, sort_order: 0, file: { task_asset_id: 101, file_name: 'final.png', preview_url: '/v1/assets/101/preview' } }],
+        source_file: { task_asset_id: 100, file_name: 'source.psd', preview_url: '/v1/task-assets/100/preview' },
+        references: [{ id: 4, reference_file_ref_id: 5, formal_task_asset_id: 102, file_name: 'direction.jpg', preview_url: '/v1/task-assets/102/preview' }],
+        items: [{ id: 1, revision_id: 71, task_asset_id: 101, sort_order: 0, file: { task_asset_id: 101, file_name: 'final.png', preview_url: '/v1/task-assets/101/preview' } }],
       }],
       working_revision_id: 72, finalized_revision_id: 71, page: 1, page_size: 20, total: 21,
     })
@@ -108,6 +108,35 @@ describe('ResourceRevisionDrawer', () => {
     expect(wrapper.text()).toContain('Legacy import')
     expect(wrapper.text()).not.toContain('[migration_v2 bad]')
     expect(wrapper.find('.evidence-warning').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('shows historical missing metadata without preview or download actions', async () => {
+    mocks.revisions.mockResolvedValueOnce({
+      items: [{
+        id: 73, group_id: 8, revision_no: 1, status: 'superseded', mode: 'single', source_stage: 'migration',
+        created_by: 1, legacy_migration: true, created_at: '2026-07-22T08:00:00Z',
+        references: [{
+          id: 10,
+          formal_task_asset_id: 12324,
+          file_name: 'lost-reference.png',
+          availability: 'historical_unavailable',
+          unavailable_reason: 'legacy_original_object_missing',
+        }],
+        source_file: {
+          task_asset_id: 12323,
+          file_name: 'lost.psd',
+          availability: 'historical_unavailable',
+          unavailable_reason: 'legacy_original_object_missing',
+        },
+        items: [],
+      }],
+      page: 1, page_size: 20, total: 1,
+    })
+    const wrapper = mount(ResourceRevisionDrawer, { props: { group }, global: { stubs: { Teleport: true } } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('历史文件不可用（原始对象已缺失）')
+    expect(wrapper.findAll('button').some((button) => ['预览', '下载'].includes(button.text()))).toBe(false)
     wrapper.unmount()
   })
 })

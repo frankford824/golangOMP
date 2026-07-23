@@ -83,6 +83,8 @@ type TaskAssetCenterService interface {
 	ListVersions(ctx context.Context, taskID, assetID int64) ([]*domain.DesignAssetVersion, *domain.AppError)
 	GetAssetDownloadInfoByID(ctx context.Context, assetID int64) (*domain.AssetDownloadInfo, *domain.AppError)
 	GetAssetPreviewInfoByID(ctx context.Context, assetID int64) (*domain.AssetDownloadInfo, *domain.AppError)
+	GetTaskAssetDownloadInfoByID(ctx context.Context, taskAssetID int64) (*domain.AssetDownloadInfo, *domain.AppError)
+	GetTaskAssetPreviewInfoByID(ctx context.Context, taskAssetID int64) (*domain.AssetDownloadInfo, *domain.AppError)
 	GetAssetDownloadInfo(ctx context.Context, taskID, assetID int64) (*domain.AssetDownloadInfo, *domain.AppError)
 	GetVersionDownloadInfo(ctx context.Context, taskID, assetID, versionID int64) (*domain.AssetDownloadInfo, *domain.AppError)
 	GetUploadSessionByID(ctx context.Context, sessionID string) (*domain.UploadSession, *domain.AppError)
@@ -143,6 +145,10 @@ type taskAssetBindingStagingRepo interface {
 
 type stagedTaskAssetPreviewAccessRepo interface {
 	GetStagedPreviewAccessByDesignAssetID(ctx context.Context, assetID int64) (*domain.StagedTaskAssetPreviewAccess, error)
+}
+
+type boundRevisionTaskAssetRepo interface {
+	GetBoundRevisionTaskAssetByID(ctx context.Context, taskAssetID int64) (*domain.TaskAsset, error)
 }
 
 type uploadRequestForUpdateRepo interface {
@@ -417,6 +423,9 @@ func (s *taskAssetCenterService) GetAssetPreviewInfoByID(ctx context.Context, as
 	if asset.CurrentVersion == nil {
 		return nil, domain.ErrNotFound
 	}
+	if appErr := validateAssetVersionObjectAvailable(asset.CurrentVersion); appErr != nil {
+		return nil, appErr
+	}
 	if !asset.AssetType.IsPreview() && !asset.AssetType.IsDesignThumb() {
 		info, resolveErr := s.resolveDerivedPreviewInfo(ctx, asset)
 		if resolveErr != nil {
@@ -442,6 +451,204 @@ func (s *taskAssetCenterService) GetAssetPreviewInfoByID(ctx context.Context, as
 		return nil, appErr
 	}
 	return buildAssetPreviewInfoWithOSS(asset.CurrentVersion, s.uploadClient, s.ossDirectService), nil
+}
+
+func (s *taskAssetCenterService) GetTaskAssetDownloadInfoByID(ctx context.Context, taskAssetID int64) (*domain.AssetDownloadInfo, *domain.AppError) {
+	record, task, appErr := s.requireBoundRevisionTaskAsset(ctx, taskAssetID)
+	if appErr != nil {
+		return nil, appErr
+	}
+	actor, ok := domain.RequestActorFromContext(ctx)
+	if !ok || actor.ID <= 0 || !domain.EffectiveAccessAllowsTask(actor, domain.PermissionAssetDownload, task.AccessSubject()) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "task asset download is outside the actor's explicit data scope", map[string]interface{}{
+			"deny_code": "task_asset_download_scope_denied",
+		})
+	}
+	version := s.buildBoundTaskAssetVersion(record, task)
+	if version == nil {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidStateTransition, "task asset version identity is incomplete", map[string]interface{}{
+			"task_asset_id": taskAssetID,
+		})
+	}
+	if appErr := validateAssetVersionObjectAvailable(version); appErr != nil {
+		return nil, appErr
+	}
+	return buildAssetDownloadInfoWithOSS(version, s.uploadClient, s.ossDirectService), nil
+}
+
+func (s *taskAssetCenterService) GetTaskAssetPreviewInfoByID(ctx context.Context, taskAssetID int64) (*domain.AssetDownloadInfo, *domain.AppError) {
+	record, task, appErr := s.requireBoundRevisionTaskAsset(ctx, taskAssetID)
+	if appErr != nil {
+		return nil, appErr
+	}
+	if appErr := authorizeV8TaskAssetPreview(ctx, task, nil); appErr != nil {
+		return nil, appErr
+	}
+	version := s.buildBoundTaskAssetVersion(record, task)
+	if version == nil {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidStateTransition, "task asset version identity is incomplete", map[string]interface{}{
+			"task_asset_id": taskAssetID,
+		})
+	}
+	// The original revision member is authoritative. A derived preview must
+	// never mask a tombstoned original object.
+	if appErr := validateAssetVersionObjectAvailable(version); appErr != nil {
+		return nil, appErr
+	}
+	if version.PreviewAvailable {
+		return buildAssetPreviewInfoWithOSS(version, s.uploadClient, s.ossDirectService), nil
+	}
+	info, resolveErr := s.resolveTaskAssetDerivedPreviewInfo(ctx, record, task)
+	if resolveErr != nil {
+		return nil, resolveErr
+	}
+	if info != nil {
+		return info, nil
+	}
+	return nil, domain.NewAppError(domain.ErrCodeInvalidStateTransition, "task asset preview is not available", map[string]interface{}{
+		"task_asset_id": taskAssetID,
+	})
+}
+
+func (s *taskAssetCenterService) requireBoundRevisionTaskAsset(ctx context.Context, taskAssetID int64) (*domain.TaskAsset, *domain.Task, *domain.AppError) {
+	if taskAssetID <= 0 {
+		return nil, nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "task_asset_id must be positive", nil)
+	}
+	accessRepo, ok := s.taskAssetRepo.(boundRevisionTaskAssetRepo)
+	if !ok {
+		return nil, nil, domain.NewAppError(domain.ErrCodeInternalError, "task asset revision access repository is not configured", nil)
+	}
+	record, err := accessRepo.GetBoundRevisionTaskAssetByID(ctx, taskAssetID)
+	if err != nil {
+		return nil, nil, infraError("load bound revision task asset", err)
+	}
+	if record == nil {
+		return nil, nil, domain.ErrNotFound
+	}
+	task, appErr := s.requireTask(ctx, record.TaskID)
+	if appErr != nil {
+		return nil, nil, appErr
+	}
+	return record, task, nil
+}
+
+func (s *taskAssetCenterService) buildBoundTaskAssetVersion(record *domain.TaskAsset, task *domain.Task) *domain.DesignAssetVersion {
+	if record == nil {
+		return nil
+	}
+	version := domain.BuildDesignAssetVersion(record)
+	if version == nil {
+		// Legacy task_assets rows may predate design_assets identity/version
+		// backfill. The controlled route is keyed by task_assets.id and must not
+		// accidentally make design_assets identity a prerequisite.
+		assetID := int64(0)
+		if record.AssetID != nil {
+			assetID = *record.AssetID
+		}
+		assetVersionNo := record.VersionNo
+		if record.AssetVersionNo != nil {
+			assetVersionNo = *record.AssetVersionNo
+		}
+		originalFilename := strings.TrimSpace(record.FileName)
+		originalNameExplicit := false
+		if record.OriginalName != nil && strings.TrimSpace(*record.OriginalName) != "" {
+			originalFilename = strings.TrimSpace(*record.OriginalName)
+			originalNameExplicit = true
+		}
+		storageKey := strings.TrimSpace(valueOrEmpty(record.StorageKey))
+		storageRefStatus := domain.AssetStorageRefStatus("")
+		if record.StorageRef != nil {
+			storageRefStatus = record.StorageRef.Status
+			if storageKey == "" {
+				storageKey = strings.TrimSpace(record.StorageRef.RefKey)
+			}
+		}
+		if storageRefStatus == domain.AssetStorageRefStatusArchived ||
+			storageRefStatus == domain.AssetStorageRefStatusHistoricalUnavailable {
+			storageKey = ""
+		}
+		uploadStatus := domain.DesignAssetUploadStatusPending
+		if record.UploadStatus != nil && domain.DesignAssetUploadStatus(*record.UploadStatus).Valid() {
+			uploadStatus = domain.DesignAssetUploadStatus(*record.UploadStatus)
+		}
+		previewStatus := domain.DesignAssetPreviewStatusPending
+		if record.PreviewStatus != nil && domain.DesignAssetPreviewStatus(*record.PreviewStatus).Valid() {
+			previewStatus = domain.DesignAssetPreviewStatus(*record.PreviewStatus)
+		}
+		uploadMode := domain.DesignAssetUploadModeSmall
+		if record.UploadMode != nil && domain.DesignAssetUploadMode(*record.UploadMode).Valid() {
+			uploadMode = domain.DesignAssetUploadMode(*record.UploadMode)
+		}
+		version = &domain.DesignAssetVersion{
+			ID:                   record.ID,
+			TaskID:               record.TaskID,
+			AssetID:              assetID,
+			AssetType:            domain.NormalizeTaskAssetType(record.AssetType),
+			VersionNo:            assetVersionNo,
+			TimelineVersionNo:    record.VersionNo,
+			UploadMode:           uploadMode,
+			FileName:             record.FileName,
+			OriginalFilename:     originalFilename,
+			OriginalNameExplicit: originalNameExplicit,
+			HasOriginalFilename:  originalNameExplicit,
+			RemoteFileID:         record.RemoteFileID,
+			StorageKey:           storageKey,
+			FileSize:             record.FileSize,
+			FileHash:             record.WholeHash,
+			MimeType:             strings.TrimSpace(valueOrEmpty(record.MimeType)),
+			UploadStatus:         uploadStatus,
+			PreviewStatus:        previewStatus,
+			UploadedBy:           record.UploadedBy,
+			UploadedAt:           record.UploadedAt,
+			Remark:               record.Remark,
+			UploadSessionID:      record.UploadRequestID,
+			StorageRefStatus:     storageRefStatus,
+			FlowReviewStatus:     domain.NormalizeTaskAssetFlowReviewStatus(record.FlowReviewStatus, record.AssetType),
+			UsableState:          domain.DeriveTaskAssetUsableState(*record),
+			SourceAssetVersionID: record.SourceAssetVersionID,
+		}
+		if record.ScopeSKUCode != nil {
+			version.ScopeSKUCode = strings.TrimSpace(*record.ScopeSKUCode)
+		}
+		version.RetouchRequirementID = record.RetouchRequirementID
+	}
+	asset := &domain.DesignAsset{
+		ID:        version.AssetID,
+		TaskID:    record.TaskID,
+		AssetType: record.AssetType,
+	}
+	// This mirrors the stable read-model derivation without consulting or
+	// mutating design_assets.current_version_id.
+	s.applyDesignAssetVersionDerivedFields(task, asset, version)
+	return version
+}
+
+func (s *taskAssetCenterService) resolveTaskAssetDerivedPreviewInfo(ctx context.Context, source *domain.TaskAsset, task *domain.Task) (*domain.AssetDownloadInfo, *domain.AppError) {
+	if source == nil {
+		return nil, nil
+	}
+	records, err := s.taskAssetRepo.ListByTaskID(ctx, source.TaskID)
+	if err != nil {
+		return nil, infraError("list task asset derived previews", err)
+	}
+	for _, candidateType := range []domain.TaskAssetType{domain.TaskAssetTypePreview, domain.TaskAssetTypeDesignThumb} {
+		for _, candidate := range records {
+			if candidate == nil || candidate.SourceAssetVersionID == nil || *candidate.SourceAssetVersionID != source.ID ||
+				domain.NormalizeTaskAssetType(candidate.AssetType) != candidateType ||
+				candidate.DeletedAt != nil || candidate.CleanedAt != nil {
+				continue
+			}
+			version := s.buildBoundTaskAssetVersion(candidate, task)
+			if version == nil || !version.PreviewAvailable {
+				continue
+			}
+			if appErr := validateAssetVersionObjectAvailable(version); appErr != nil {
+				continue
+			}
+			return buildAssetPreviewInfoWithOSS(version, s.uploadClient, s.ossDirectService), nil
+		}
+	}
+	return nil, nil
 }
 
 func authorizeV8TaskAssetPreview(ctx context.Context, task *domain.Task, staged *domain.StagedTaskAssetPreviewAccess) *domain.AppError {
@@ -1822,6 +2029,9 @@ func (s *taskAssetCenterService) canFinalizeOSSDirectUpload(params CompleteTaskA
 func validateAssetVersionObjectAvailable(version *domain.DesignAssetVersion) *domain.AppError {
 	if version == nil {
 		return nil
+	}
+	if version.StorageRefStatus == domain.AssetStorageRefStatusHistoricalUnavailable {
+		return domain.ErrAssetHistoricallyUnavailable
 	}
 	if version.StorageRefStatus == domain.AssetStorageRefStatusArchived {
 		return domain.ErrAssetMissing

@@ -214,6 +214,7 @@ curl -X DELETE https://api.example.com/v1/assets/<asset_id> \
 | HTTP | code | deny_code | 说明 |
 |---|---|---|---|
 | 404 | 见 `error.code` | 见 `deny_code` | Asset not found |
+| 410 | 见 `error.code` | 见 `deny_code` | Asset metadata exists but the object is no longer available |
 
 ### curl 示例
 ```bash
@@ -324,6 +325,7 @@ curl -X GET https://api.example.com/v1/assets/<asset_id>/content \
 | 404 | 见 `error.code` | 见 `deny_code` | Asset not found |
 | 403 | 见 `error.code` | 见 `deny_code` | Actor lacks preview capability or stable task scope |
 | 409 | 见 `error.code` | 见 `deny_code` | Preview metadata not available for current asset state |
+| 410 | 见 `error.code` | 见 `deny_code` | Asset metadata exists but the object is no longer available |
 
 ### curl 示例
 ```bash

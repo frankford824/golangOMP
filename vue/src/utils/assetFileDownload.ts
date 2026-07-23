@@ -2,11 +2,12 @@
  * Single-file download with original upload filename.
  * Reuses naming sanitization aligned with batch zip downloads.
  */
-import { fetchAssetDownloadMetaResolved } from '@/domain/asset-access'
+import { fetchAssetDownloadMetaResolved, fetchTaskAssetDownloadMetaResolved } from '@/domain/asset-access'
 import { sanitizeZipEntryName } from '@/utils/batchZipDownload'
 
 export interface DownloadAssetFileOptions {
   assetId?: string
+  taskAssetId?: string
   downloadUrl?: string
   /** reference_file_refs.filename or source original_filename */
   preferredFilename?: string
@@ -68,11 +69,14 @@ export async function downloadAssetFileWithOriginalFilename(
   options: DownloadAssetFileOptions,
 ): Promise<DownloadAssetFileResult> {
   const numericAssetId = parseNumericAssetId(options.assetId)
+  const numericTaskAssetId = parseNumericAssetId(options.taskAssetId)
   const preferredFilename = String(options.preferredFilename ?? '').trim()
   const fallbackUrl = String(options.downloadUrl ?? '').trim()
 
-  if (numericAssetId) {
-    const meta = await fetchAssetDownloadMetaResolved(numericAssetId, options.signal)
+  if (numericTaskAssetId || numericAssetId) {
+    const meta = numericTaskAssetId
+      ? await fetchTaskAssetDownloadMetaResolved(numericTaskAssetId, options.signal)
+      : await fetchAssetDownloadMetaResolved(numericAssetId!, options.signal)
     if (meta.status === 'not_found') return { ok: false, message: '资源不存在' }
     if (meta.status === 'forbidden') return { ok: false, message: '无权限下载该资源' }
     if (meta.status !== 'ok' || !meta.downloadUrl) {

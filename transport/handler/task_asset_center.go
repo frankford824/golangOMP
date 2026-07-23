@@ -399,6 +399,34 @@ func (h *TaskAssetCenterHandler) PreviewAssetResource(c *gin.Context) {
 	respondOK(c, info)
 }
 
+func (h *TaskAssetCenterHandler) DownloadTaskAssetResource(c *gin.Context) {
+	taskAssetID, err := parseInt64(strings.TrimSpace(c.Param("task_asset_id")))
+	if err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid task asset id", nil))
+		return
+	}
+	info, appErr := h.svc.GetTaskAssetDownloadInfoByID(c.Request.Context(), taskAssetID)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, info)
+}
+
+func (h *TaskAssetCenterHandler) PreviewTaskAssetResource(c *gin.Context) {
+	taskAssetID, err := parseInt64(strings.TrimSpace(c.Param("task_asset_id")))
+	if err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid task asset id", nil))
+		return
+	}
+	info, appErr := h.svc.GetTaskAssetPreviewInfoByID(c.Request.Context(), taskAssetID)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, info)
+}
+
 func (h *TaskAssetCenterHandler) DownloadVersion(c *gin.Context) {
 	taskID, err := parseID(c)
 	if err != nil {

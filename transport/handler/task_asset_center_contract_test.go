@@ -128,6 +128,48 @@ func TestTaskAssetCenterHandlerCreateAssetUploadSessionReturnsCanonicalEndpoints
 	}
 }
 
+func TestTaskAssetCenterHandlerUsesTaskAssetIdentityRoutes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	url := "/v1/assets/files/tasks/T-3100/final.png"
+	svc := &taskAssetCenterServiceStub{
+		taskAssetInfo: &domain.AssetDownloadInfo{Filename: "final.png", DownloadURL: &url},
+	}
+	h := NewTaskAssetCenterHandler(svc)
+	router.GET("/v1/task-assets/:task_asset_id/preview", h.PreviewTaskAssetResource)
+	router.GET("/v1/task-assets/:task_asset_id/download", h.DownloadTaskAssetResource)
+
+	for _, path := range []string{
+		"/v1/task-assets/9901/preview",
+		"/v1/task-assets/9901/download",
+	} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("GET %s code = %d body=%s", path, rec.Code, rec.Body.String())
+		}
+	}
+	if svc.lastTaskAssetPreviewID != 9901 || svc.lastTaskAssetDownloadID != 9901 {
+		t.Fatalf("task asset ids = preview:%d download:%d", svc.lastTaskAssetPreviewID, svc.lastTaskAssetDownloadID)
+	}
+}
+
+func TestTaskAssetCenterHandlerReturns410ForHistoricalUnavailableTaskAsset(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	svc := &taskAssetCenterServiceStub{taskAssetErr: domain.ErrAssetHistoricallyUnavailable}
+	h := NewTaskAssetCenterHandler(svc)
+	router.GET("/v1/task-assets/:task_asset_id/preview", h.PreviewTaskAssetResource)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/task-assets/12323/preview", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusGone || !strings.Contains(rec.Body.String(), string(domain.ErrCodeAssetHistoricallyUnavailable)) {
+		t.Fatalf("historical unavailable response code/body = %d/%s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestTaskAssetCenterHandlerCreateAssetUploadSessionAcceptsNumericStringIDs(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
@@ -210,11 +252,15 @@ func taskAssetCenterRequestWithSessionActor(req *http.Request, actorID int64) *h
 }
 
 type taskAssetCenterServiceStub struct {
-	createResult         *service.CreateTaskAssetUploadSessionResult
-	createCalls          int
-	createSmallCalls     int
-	createMultipartCalls int
-	lastCreateParams     service.CreateTaskAssetUploadSessionParams
+	createResult            *service.CreateTaskAssetUploadSessionResult
+	createCalls             int
+	createSmallCalls        int
+	createMultipartCalls    int
+	lastCreateParams        service.CreateTaskAssetUploadSessionParams
+	taskAssetInfo           *domain.AssetDownloadInfo
+	taskAssetErr            *domain.AppError
+	lastTaskAssetPreviewID  int64
+	lastTaskAssetDownloadID int64
 }
 
 func (s *taskAssetCenterServiceStub) ListAssetResources(context.Context, service.ListAssetResourcesParams) ([]*domain.DesignAsset, *domain.AppError) {
@@ -234,6 +280,14 @@ func (s *taskAssetCenterServiceStub) GetAssetDownloadInfoByID(context.Context, i
 }
 func (s *taskAssetCenterServiceStub) GetAssetPreviewInfoByID(context.Context, int64) (*domain.AssetDownloadInfo, *domain.AppError) {
 	return nil, nil
+}
+func (s *taskAssetCenterServiceStub) GetTaskAssetDownloadInfoByID(_ context.Context, id int64) (*domain.AssetDownloadInfo, *domain.AppError) {
+	s.lastTaskAssetDownloadID = id
+	return s.taskAssetInfo, s.taskAssetErr
+}
+func (s *taskAssetCenterServiceStub) GetTaskAssetPreviewInfoByID(_ context.Context, id int64) (*domain.AssetDownloadInfo, *domain.AppError) {
+	s.lastTaskAssetPreviewID = id
+	return s.taskAssetInfo, s.taskAssetErr
 }
 func (s *taskAssetCenterServiceStub) GetAssetDownloadInfo(context.Context, int64, int64) (*domain.AssetDownloadInfo, *domain.AppError) {
 	return nil, nil

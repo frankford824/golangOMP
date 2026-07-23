@@ -60,6 +60,97 @@ func taskAssetPreviewTestContext(actorID int64, permission domain.PermissionCode
 	return domain.WithRequestActor(context.Background(), domain.RequestActor{ID: actorID, Permissions: effective.Permissions, EffectiveAccess: effective})
 }
 
+func TestTaskAssetCenterServiceControlledTaskAssetIdentityAndTombstone(t *testing.T) {
+	const (
+		taskID        = int64(3100)
+		taskAssetID   = int64(9901)
+		designAssetID = int64(71)
+	)
+	taskRepo := newStep04TaskRepo(&domain.Task{ID: taskID, TaskNo: "T-3100", TaskStatus: domain.TaskStatusCompleted})
+	taskAssetRepo := newStep04TaskAssetRepo()
+	assetVersionNo := 3
+	mimeType := "image/png"
+	storageKey := "tasks/T-3100/assets/AST-0071/v3/final.png"
+	taskAssetRepo.assets[taskAssetID] = &domain.TaskAsset{
+		ID:             taskAssetID,
+		TaskID:         taskID,
+		AssetID:        uploadRequestInt64Ptr(designAssetID),
+		AssetType:      domain.TaskAssetTypeDelivery,
+		VersionNo:      9,
+		AssetVersionNo: &assetVersionNo,
+		FileName:       "final.png",
+		MimeType:       &mimeType,
+		StorageKey:     &storageKey,
+		UploadStatus:   strPtr(string(domain.DesignAssetUploadStatusUploaded)),
+		PreviewStatus:  strPtr(string(domain.DesignAssetPreviewStatusNotApplicable)),
+		StorageRef: &domain.AssetStorageRef{
+			RefID:  "ref-task-asset-9901",
+			RefKey: storageKey,
+			Status: domain.AssetStorageRefStatusRecorded,
+		},
+	}
+	taskAssetRepo.boundRevisionAssets[taskAssetID] = true
+	svc := NewTaskAssetCenterService(
+		taskRepo,
+		newStep67DesignAssetRepo(),
+		taskAssetRepo,
+		newStep37UploadRequestRepo(),
+		newStep37AssetStorageRefRepo(),
+		&step04TaskEventRepo{},
+		step04TxRunner{},
+		newStubUploadServiceClient(),
+	).(*taskAssetCenterService)
+
+	previewInfo, appErr := svc.GetTaskAssetPreviewInfoByID(
+		taskAssetPreviewTestContext(7001, domain.PermissionAssetView, domain.AccessScopeGlobal),
+		taskAssetID,
+	)
+	if appErr != nil || previewInfo == nil || previewInfo.DownloadURL == nil {
+		t.Fatalf("GetTaskAssetPreviewInfoByID() = %+v/%+v", previewInfo, appErr)
+	}
+	downloadInfo, appErr := svc.GetTaskAssetDownloadInfoByID(
+		taskAssetPreviewTestContext(7002, domain.PermissionAssetDownload, domain.AccessScopeGlobal),
+		taskAssetID,
+	)
+	if appErr != nil || downloadInfo == nil || downloadInfo.DownloadURL == nil || downloadInfo.Filename != "final.png" {
+		t.Fatalf("GetTaskAssetDownloadInfoByID() = %+v/%+v", downloadInfo, appErr)
+	}
+	taskAssetRepo.assets[taskAssetID].AssetID = nil
+	taskAssetRepo.assets[taskAssetID].AssetVersionNo = nil
+	if legacyInfo, legacyErr := svc.GetTaskAssetDownloadInfoByID(
+		taskAssetPreviewTestContext(7002, domain.PermissionAssetDownload, domain.AccessScopeGlobal),
+		taskAssetID,
+	); legacyErr != nil || legacyInfo == nil || legacyInfo.Filename != "final.png" {
+		t.Fatalf("legacy task-asset-only identity download = %+v/%+v", legacyInfo, legacyErr)
+	}
+	if _, appErr := svc.GetAssetPreviewInfoByID(
+		taskAssetPreviewTestContext(7001, domain.PermissionAssetView, domain.AccessScopeGlobal),
+		taskAssetID,
+	); appErr == nil || appErr.Code != domain.ErrCodeNotFound {
+		t.Fatalf("design-assets route accepted task_assets.id %d: %+v", taskAssetID, appErr)
+	}
+	if _, appErr := svc.GetTaskAssetDownloadInfoByID(
+		taskAssetPreviewTestContext(7003, domain.PermissionAssetView, domain.AccessScopeGlobal),
+		taskAssetID,
+	); appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
+		t.Fatalf("download without asset.download error = %+v", appErr)
+	}
+
+	taskAssetRepo.assets[taskAssetID].StorageRef.Status = domain.AssetStorageRefStatusHistoricalUnavailable
+	if _, appErr := svc.GetTaskAssetPreviewInfoByID(
+		taskAssetPreviewTestContext(7001, domain.PermissionAssetView, domain.AccessScopeGlobal),
+		taskAssetID,
+	); appErr == nil || appErr.Code != domain.ErrCodeAssetHistoricallyUnavailable {
+		t.Fatalf("tombstoned task asset preview error = %+v", appErr)
+	}
+	if _, appErr := svc.GetTaskAssetDownloadInfoByID(
+		taskAssetPreviewTestContext(7002, domain.PermissionAssetDownload, domain.AccessScopeGlobal),
+		taskAssetID,
+	); appErr == nil || appErr.Code != domain.ErrCodeAssetHistoricallyUnavailable {
+		t.Fatalf("tombstoned task asset download error = %+v", appErr)
+	}
+}
+
 func TestTaskAssetCenterServiceCreateAndCompleteMultipartUploadSession(t *testing.T) {
 	taskRepo := newStep04TaskRepo(&domain.Task{ID: 2001, TaskStatus: domain.TaskStatusInProgress})
 	designAssetRepo := newStep67DesignAssetRepo()
@@ -1795,6 +1886,16 @@ func TestTaskAssetCenterServiceRepairMissingObjectArchivesStorageRef(t *testing.
 	}
 }
 
+func TestValidateAssetVersionObjectAvailableRejectsHistoricalUnavailable(t *testing.T) {
+	version := &domain.DesignAssetVersion{
+		StorageRefStatus: domain.AssetStorageRefStatusHistoricalUnavailable,
+	}
+	appErr := validateAssetVersionObjectAvailable(version)
+	if appErr == nil || appErr.Code != domain.ErrCodeAssetHistoricallyUnavailable {
+		t.Fatalf("validateAssetVersionObjectAvailable() error = %+v", appErr)
+	}
+}
+
 func TestResolveCompletedUploadMeta_OSSDirectFinalizeSkipsUploadServiceComplete(t *testing.T) {
 	uploadClient := newStubUploadServiceClient().(*stubUploadServiceClient)
 	svc := &taskAssetCenterService{
@@ -2239,6 +2340,14 @@ func TestTaskAssetCenterServiceSourcePreviewFallsBackToDerivedPreviewAsset(t *te
 	}
 	if !strings.Contains(*info.DownloadURL, "objects/design-assets/source-preview.png") {
 		t.Fatalf("preview url = %q, want derived preview storage key", *info.DownloadURL)
+	}
+
+	taskAssetRepo.assets[sourceVersionID].StorageRef = &domain.AssetStorageRef{
+		Status: domain.AssetStorageRefStatusHistoricalUnavailable,
+	}
+	if _, appErr := svc.GetAssetPreviewInfoByID(taskAssetMutationTestContext(), sourceAssetID); appErr == nil ||
+		appErr.Code != domain.ErrCodeAssetHistoricallyUnavailable {
+		t.Fatalf("tombstoned source preview error = %+v", appErr)
 	}
 }
 

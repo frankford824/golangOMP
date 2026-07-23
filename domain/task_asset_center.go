@@ -269,7 +269,8 @@ func BuildDesignAssetVersion(taskAsset *TaskAsset) *DesignAssetVersion {
 	storageRefStatus := AssetStorageRefStatus("")
 	if taskAsset.StorageRef != nil {
 		storageRefStatus = taskAsset.StorageRef.Status
-		if storageRefStatus == AssetStorageRefStatusArchived {
+		if storageRefStatus == AssetStorageRefStatusArchived ||
+			storageRefStatus == AssetStorageRefStatusHistoricalUnavailable {
 			storageKey = ""
 		}
 	}

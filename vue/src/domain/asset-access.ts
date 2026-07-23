@@ -6,6 +6,7 @@ import axios from 'axios'
 import type { BackendAsset, BackendAssetVersion } from '@/services/apiTypes'
 import type { AssetDownloadMeta } from '@/services/api/assetsApi'
 import { assetsApi } from '@/services/api/assetsApi'
+import http from '@/services/http'
 import { invalidateMaterializedPreviewImagesForAsset, normalizePreviewAssetId } from '@/domain/asset-preview-image'
 import { toRelativeAssetUrl } from '@/utils/url'
 
@@ -198,6 +199,36 @@ export async function fetchAssetPreviewMeta(
   return p
 }
 
+/** Immutable resource-group revision member; id is task_assets.id, not design_assets.id. */
+export async function fetchTaskAssetPreviewMeta(
+  taskAssetId: string,
+  signal?: AbortSignal,
+): Promise<AssetPreviewMetaResult> {
+  const id = normalizePreviewAssetId(taskAssetId)
+  if (!id) return { status: 'error', message: '缺少任务资产 id' }
+  const cacheID = `task-asset:${id}`
+  const cached = readPreviewMetaCache(cacheID)
+  if (cached) return cached
+  try {
+    const res = await http.get(`/v1/task-assets/${encodeURIComponent(id)}/preview`, { signal })
+    const meta = unwrapDownloadPayload(res.data)
+    const url = normalizeDisplayUrl(pickMetaUrl(meta))
+    if (!url) return { status: 'unavailable', message: '预览地址为空' }
+    const out: AssetPreviewMetaResult = { status: 'ok', displayUrl: url, downloadUrl: url }
+    writePreviewMetaCache(cacheID, out)
+    return out
+  } catch (e) {
+    if (axios.isAxiosError(e)) {
+      const st = e.response?.status
+      if (st === 404) return { status: 'not_found', message: '历史任务资产不存在' }
+      if (st === 403) return { status: 'error', message: '无权限预览该历史任务资产' }
+      if (st === 409) return { status: 'preparing', message: '该历史版本没有可用预览' }
+      if (st === 410) return { status: 'unavailable', message: '历史文件不可用（原始对象已缺失）' }
+    }
+    return { status: 'error', message: e instanceof Error ? e.message : '加载历史任务资产预览失败' }
+  }
+}
+
 function buildDownloadMetaResult(meta: AssetDownloadMeta | undefined): AssetDownloadMetaResult {
   const downloadUrl = normalizeDisplayUrl(pickMetaUrl(meta))
   if (!downloadUrl) {
@@ -254,6 +285,32 @@ export async function fetchAssetDownloadMetaResolved(
 
   downloadMetaInflight.set(id, p)
   return p
+}
+
+/** Immutable resource-group revision member; id is task_assets.id, not design_assets.id. */
+export async function fetchTaskAssetDownloadMetaResolved(
+  taskAssetId: string,
+  signal?: AbortSignal,
+): Promise<AssetDownloadMetaResult> {
+  const id = taskAssetId.trim()
+  if (!/^\d+$/.test(id) || Number(id) <= 0) return { status: 'error', message: '缺少任务资产 id' }
+  const cacheID = `task-asset:${id}`
+  const cached = readDownloadCache(cacheID)
+  if (cached) return cached
+  try {
+    const res = await http.get(`/v1/task-assets/${encodeURIComponent(id)}/download`, { signal })
+    const out = buildDownloadMetaResult(unwrapDownloadPayload(res.data))
+    if (out.status === 'ok') writeDownloadCache(cacheID, out)
+    return out
+  } catch (e) {
+    if (axios.isAxiosError(e)) {
+      const st = e.response?.status
+      if (st === 404) return { status: 'not_found', message: '历史任务资产不存在' }
+      if (st === 403) return { status: 'forbidden', message: '无权限下载该历史任务资产' }
+      if (st === 410) return { status: 'error', message: '历史文件不可用（原始对象已缺失）' }
+    }
+    return { status: 'error', message: e instanceof Error ? e.message : '获取历史任务资产下载地址失败' }
+  }
 }
 
 /** GET /v1/assets/{id}/download → download_url（代理字节流入口） */

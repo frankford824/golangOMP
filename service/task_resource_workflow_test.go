@@ -225,13 +225,13 @@ func TestResourceGroupRevisionsUsesPreferredScopedPermissionAndSafeURLs(t *testi
 			t.Fatalf("ResourceGroupRevisions() error = %+v", appErr)
 		}
 		revision := result.Items[0]
-		if revision.SourceFile.PreviewURL != "/v1/assets/40/preview" || revision.SourceFile.DownloadURL != "" {
+		if revision.SourceFile.PreviewURL != "/v1/task-assets/40/preview" || revision.SourceFile.DownloadURL != "" {
 			t.Fatalf("source urls = preview %q download %q", revision.SourceFile.PreviewURL, revision.SourceFile.DownloadURL)
 		}
-		if revision.Items[0].File.PreviewURL != "/v1/assets/60/preview" || revision.Items[0].File.DownloadURL != "" {
+		if revision.Items[0].File.PreviewURL != "/v1/task-assets/60/preview" || revision.Items[0].File.DownloadURL != "" {
 			t.Fatalf("item urls = %+v", revision.Items[0].File)
 		}
-		if revision.References[0].PreviewURL != "/v1/assets/80/preview" || revision.References[0].DownloadURL != "" {
+		if revision.References[0].PreviewURL != "/v1/task-assets/80/preview" || revision.References[0].DownloadURL != "" {
 			t.Fatalf("reference urls = %+v", revision.References[0])
 		}
 		if revision.References[1].PreviewURL != "" || revision.References[1].DownloadURL != "" {
@@ -273,13 +273,61 @@ func TestResourceGroupRevisionsUsesPreferredScopedPermissionAndSafeURLs(t *testi
 		if appErr != nil {
 			t.Fatalf("ResourceGroupRevisions() error = %+v", appErr)
 		}
-		if result.Items[0].SourceFile.DownloadURL != "/v1/assets/40/download" || result.Items[0].References[0].DownloadURL != "/v1/assets/80/download" {
+		if result.Items[0].SourceFile.DownloadURL != "/v1/task-assets/40/download" || result.Items[0].References[0].DownloadURL != "/v1/task-assets/80/download" {
 			t.Fatalf("download-capable response omitted urls: %+v", result.Items[0])
 		}
 		if result.Items[0].References[1].DownloadURL != "" || result.Items[0].References[1].PreviewURL != "" {
 			t.Fatalf("snapshot-only reference leaked authorized urls: %+v", result.Items[0].References[1])
 		}
 	})
+}
+
+func TestResourceGroupRevisionsDoesNotExposeURLsForHistoricalUnavailableFile(t *testing.T) {
+	group := &domain.TaskAssetGroup{ID: 10, TaskID: 20}
+	repository := &resourceWorkflowRepoStub{
+		groupByID:     map[int64]*domain.TaskAssetGroup{group.ID: group},
+		subjectByTask: map[int64]domain.TaskAccessSubject{group.TaskID: {TaskID: group.TaskID}},
+		revisionsByGroup: map[int64][]domain.TaskAssetGroupRevision{group.ID: {{
+			ID: 30, GroupID: group.ID, RevisionNo: 1, Status: domain.TaskAssetGroupRevisionSuperseded,
+			Items: []domain.TaskAssetGroupRevisionItem{{
+				ID: 50,
+				File: &domain.TaskResourceFile{
+					TaskAssetID:       12323,
+					FileName:          "lost.psd",
+					Availability:      domain.TaskResourceFileHistoricalUnavailable,
+					UnavailableReason: "original object was unavailable before V8 migration",
+				},
+			}},
+			References: []domain.TaskAssetGroupRevisionReference{{
+				ID:                51,
+				FormalTaskAssetID: int64PtrForResourceWorkflowTest(12324),
+				FileNameSnapshot:  "lost-reference.png",
+				Availability:      domain.TaskResourceFileHistoricalUnavailable,
+				UnavailableReason: "legacy_original_object_missing",
+			}},
+		}}},
+		revisionTotalByGroup: map[int64]int64{group.ID: 1},
+	}
+	svc := NewTaskResourceWorkflowService(repository, nil, nil)
+	actor := multiCapabilityActor(7, nil,
+		capabilityScope{permission: domain.PermissionAssetView, scope: domain.AccessScopeGlobal},
+		capabilityScope{permission: domain.PermissionAssetDownload, scope: domain.AccessScopeGlobal},
+	)
+
+	result, appErr := svc.ResourceGroupRevisions(context.Background(), actor, group.ID, 1, 20)
+	if appErr != nil {
+		t.Fatalf("ResourceGroupRevisions() error = %+v", appErr)
+	}
+	file := result.Items[0].Items[0].File
+	if file == nil || file.PreviewURL != "" || file.DownloadURL != "" ||
+		file.Availability != domain.TaskResourceFileHistoricalUnavailable {
+		t.Fatalf("historical unavailable file = %+v", file)
+	}
+	reference := result.Items[0].References[0]
+	if reference.PreviewURL != "" || reference.DownloadURL != "" ||
+		reference.Availability != domain.TaskResourceFileHistoricalUnavailable {
+		t.Fatalf("historical unavailable reference = %+v", reference)
+	}
 }
 
 func TestParseLegacyMigrationEvidenceFailsSafe(t *testing.T) {

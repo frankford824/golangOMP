@@ -97,14 +97,18 @@ func (a UploadRequestAdvanceAction) Valid() bool {
 type AssetStorageRefStatus string
 
 const (
-	AssetStorageRefStatusRecorded   AssetStorageRefStatus = "recorded"
-	AssetStorageRefStatusSuperseded AssetStorageRefStatus = "superseded"
-	AssetStorageRefStatusArchived   AssetStorageRefStatus = "archived"
+	AssetStorageRefStatusRecorded              AssetStorageRefStatus = "recorded"
+	AssetStorageRefStatusSuperseded            AssetStorageRefStatus = "superseded"
+	AssetStorageRefStatusArchived              AssetStorageRefStatus = "archived"
+	AssetStorageRefStatusHistoricalUnavailable AssetStorageRefStatus = "historical_unavailable"
 )
 
 func (s AssetStorageRefStatus) Valid() bool {
 	switch s {
-	case AssetStorageRefStatusRecorded, AssetStorageRefStatusSuperseded, AssetStorageRefStatusArchived:
+	case AssetStorageRefStatusRecorded,
+		AssetStorageRefStatusSuperseded,
+		AssetStorageRefStatusArchived,
+		AssetStorageRefStatusHistoricalUnavailable:
 		return true
 	default:
 		return false

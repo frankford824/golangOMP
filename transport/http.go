@@ -314,6 +314,13 @@ func NewRouter(
 		// cookie; header-based sessions pass through.
 		assetGroup.GET("/files/*path", withAssetFileTokenFallback(actorResolver), capabilityAccess(assetGroup, http.MethodGet, "/files/*path", domain.APIReadinessReadyForFrontend, domain.PermissionAssetDownload), assetFilesH.ServeFile)
 	}
+	taskAssetGroup := v1.Group("/task-assets")
+	{
+		// task-assets identifies one immutable task_assets row. It is distinct
+		// from /v1/assets, whose numeric id is a design_assets resource id.
+		taskAssetGroup.GET("/:task_asset_id/download", capabilityAccess(taskAssetGroup, http.MethodGet, "/:task_asset_id/download", domain.APIReadinessReadyForFrontend, domain.PermissionAssetDownload), taskAssetCenterH.DownloadTaskAssetResource)
+		taskAssetGroup.GET("/:task_asset_id/preview", capabilityAccess(taskAssetGroup, http.MethodGet, "/:task_asset_id/preview", domain.APIReadinessReadyForFrontend, domain.PermissionAssetView), taskAssetCenterH.PreviewTaskAssetResource)
+	}
 
 	// Current operations dashboard snapshot.
 	taskBoardGroup := v1.Group("/task-board")
