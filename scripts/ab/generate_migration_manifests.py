@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import datetime as dt
 import hashlib
 import ipaddress
 import json
@@ -24,6 +25,7 @@ WAREHOUSE_REOPEN_EVENTS = {"task.warehouse.rejected"}
 SUPPLEMENT_EVENTS = {"task.audit.supplement_uploaded"}
 UPLOAD_SESSION_COMPLETED_EVENTS = {"task.asset.upload_session.completed"}
 BATCH_SUBMIT_POLICY = "legacy_multi_sku_atomic_batch_submit_v1"
+AUDIT_STAGE_FINAL_SNAPSHOT_POLICY = "legacy_audit_stage_final_snapshot_v1"
 EXPLICIT_EVENT_REPLAY_POLICY = "explicit_event_replay"
 DELIVERY_SOURCE_ALIAS_POLICY = "delivery_source_alias"
 REJECTED_HISTORY_POLICY = "rejected_history"
@@ -31,6 +33,13 @@ REOPEN_POLICY = "reopen"
 POST_CLOSE_REPLACEMENT_POLICY = "legacy_post_close_replacement_v1"
 RETOUCH_SOURCE_OPTIONAL_POLICY = "retouch_source_optional"
 RETOUCH_TERMINAL_SUBMIT_POLICY = "legacy_retouch_terminal_submit_v1"
+RETOUCH_UNSCOPED_ATOMIC_BATCH_POLICY = "legacy_retouch_unscoped_atomic_batch_v1"
+RETOUCH_PREMATURE_TERMINAL_PARTIAL_POLICY = (
+    "legacy_retouch_premature_terminal_partial_v1"
+)
+RETOUCH_VISUAL_SCOPE_TASK2533_POLICY = (
+    "legacy_retouch_visual_scope_task2533_v1"
+)
 LEGACY_PURCHASE_TO_PLANNING_POLICY = "legacy_purchase_to_sku_planning_v1"
 FROZEN_PLANNING_RULE_POLICY = "frozen_sku_planning_rule_revision_9_v1"
 PRODUCT_NAME_DESCRIPTION_FALLBACK_POLICY = "product_name_snapshot_description_fallback_v1"
@@ -42,6 +51,18 @@ WAREHOUSE_NO_GRANT_POLICY = "retired_warehouse_no_new_grant_v1"
 EXISTING_ACCESS_PRESERVED_POLICY = "existing_access_assignment_preserved_v1"
 OUTSOURCE_ACCESS_DECISION_POLICY = "legacy_outsource_access_decision_v1"
 ORG_ADMIN_ACCESS_DECISION_POLICY = "legacy_org_admin_access_decision_v1"
+UAT_ORPHAN_ORG_POLICY = "legacy_uat_orphan_org_to_unassigned_v1"
+INCOMPLETE_UAT_PLANNING_TOMBSTONE_POLICY = (
+    "legacy_incomplete_uat_planning_tombstone_v1"
+)
+WAREHOUSE_REOPEN_STATE_POLICY = "legacy_warehouse_reopen_state_v1"
+CUSTOMIZATION_TERMINAL_WITHOUT_ASSETS_POLICY = (
+    "legacy_customization_terminal_without_assets_to_inprogress_v1"
+)
+DELETED_ASSET_RECOVERY_POLICY = "legacy_deleted_asset_recovery_v1"
+HISTORICAL_ASSET_UNAVAILABLE_POLICY = (
+    "legacy_historical_asset_unavailable_v1"
+)
 REVIEW_POLICY_ORDER = (
     EXPLICIT_EVENT_REPLAY_POLICY,
     DELIVERY_SOURCE_ALIAS_POLICY,
@@ -50,8 +71,13 @@ REVIEW_POLICY_ORDER = (
     POST_CLOSE_REPLACEMENT_POLICY,
     RETOUCH_SOURCE_OPTIONAL_POLICY,
     RETOUCH_TERMINAL_SUBMIT_POLICY,
+    RETOUCH_UNSCOPED_ATOMIC_BATCH_POLICY,
+    RETOUCH_PREMATURE_TERMINAL_PARTIAL_POLICY,
+    RETOUCH_VISUAL_SCOPE_TASK2533_POLICY,
     BATCH_SUBMIT_POLICY,
+    AUDIT_STAGE_FINAL_SNAPSHOT_POLICY,
     LEGACY_PURCHASE_TO_PLANNING_POLICY,
+    INCOMPLETE_UAT_PLANNING_TOMBSTONE_POLICY,
     FROZEN_PLANNING_RULE_POLICY,
     PRODUCT_NAME_DESCRIPTION_FALLBACK_POLICY,
     RETIRED_PLANNING_STATUS_POLICY,
@@ -62,6 +88,11 @@ REVIEW_POLICY_ORDER = (
     EXISTING_ACCESS_PRESERVED_POLICY,
     OUTSOURCE_ACCESS_DECISION_POLICY,
     ORG_ADMIN_ACCESS_DECISION_POLICY,
+    UAT_ORPHAN_ORG_POLICY,
+    WAREHOUSE_REOPEN_STATE_POLICY,
+    CUSTOMIZATION_TERMINAL_WITHOUT_ASSETS_POLICY,
+    DELETED_ASSET_RECOVERY_POLICY,
+    HISTORICAL_ASSET_UNAVAILABLE_POLICY,
 )
 ZERO_TIME = "0001-01-01T00:00:00Z"
 LEGACY_PLANNING_RULE_REVISION_ID = 9
@@ -79,6 +110,161 @@ CURRENT_PLANNING_STATUSES = {
     "Archived",
     "Blocked",
     "Cancelled",
+}
+
+# These rows are not a heuristic. They are a frozen, independently reviewed
+# exception list for legacy retouch submissions whose delivery files omitted
+# retouch_requirement_id. A candidate is emitted only when the complete task
+# scope, complete delivery set, upload-completion events, and sole terminal
+# submit still match this snapshot exactly.
+LEGACY_RETOUCH_UNSCOPED_ATOMIC_FINALS = {
+    1562: {69: [7900, 7901, 7902], 70: [7903, 7904, 7905]},
+    1773: {88: [8622, 8623], 89: [8624, 8625], 90: [8626, 8627]},
+    1938: {
+        98: [10845, 10846, 10847, 10848, 10849],
+        99: [10850, 10851, 10852],
+        100: [10853, 10854, 10855],
+    },
+    1986: {103: [10385, 10386, 10387], 104: [10388]},
+    2003: {
+        107: [
+            11397,
+            11398,
+            11399,
+            11400,
+            11401,
+            11402,
+            11403,
+            11404,
+            11405,
+            11406,
+        ],
+        108: [11407, 11408, 11409, 11410],
+    },
+    2495: {
+        176: [22936, 22937, 22938, 22939, 22940, 22941, 22942, 22943, 22944],
+        177: [22945, 22946, 22947, 22948, 22949, 22950, 22951, 22952, 22953],
+    },
+    2672: {209: [23109, 23110, 23111, 23112, 23113], 210: [23114]},
+    2825: {226: [23900], 227: [23901]},
+}
+
+# These five legacy tasks reached Completed after only a partial, task-wide
+# retouch submit. The only scope assignments accepted below are the ones
+# proven by the frozen filename/order evidence. An empty list intentionally
+# means "preserve an editable draft; do not assign the unscoped delivery".
+LEGACY_RETOUCH_PREMATURE_PARTIAL_FINALS = {
+    981: {8: [2763], 9: [], 10: [], 11: [], 12: [], 13: [], 14: [], 15: [], 16: [], 17: []},
+    1035: {21: [3859], 22: [], 23: [], 24: [], 25: []},
+    1045: {26: [], 27: [], 28: []},
+    1052: {30: [], 31: [], 32: []},
+    1214: {43: [5769], 44: []},
+}
+
+# Only these assignments are strong enough to retain an immutable finalized
+# snapshot. Task 1214/requirement 43 is a partial draft, not a finalized scope.
+LEGACY_RETOUCH_PREMATURE_FINALIZED_SCOPES = {(981, 8), (1035, 21)}
+
+# This is the single legacy retouch task whose unscoped delivery membership
+# was resolved by read-only visual comparison of the production task page.
+# The sixth delivery is deliberately retained as an unassigned legacy asset:
+# its silver/black content does not match any of requirements 183..187.
+LEGACY_RETOUCH_VISUAL_SCOPE_TASK2533 = {
+    183: {"source": 19299, "final": 19789, "references": [3211, 3212]},
+    184: {"source": 19301, "final": 19790, "references": [3213]},
+    185: {"source": 19304, "final": 19791, "references": [3214, 3215]},
+    186: {"source": 19306, "final": 19800, "references": [3216]},
+    187: {"source": 19308, "final": 19802, "references": [3217]},
+}
+LEGACY_RETOUCH_VISUAL_UNASSIGNED_TASK2533 = [19803]
+UAT_ORPHAN_ORG_TARGETS = {
+    463: (3, 14),
+    464: (3, 14),
+}
+INCOMPLETE_UAT_PLANNING_TOMBSTONES = {
+    497: {
+        "task_sku_item_ids": (380,),
+        "target_task_status": "Cancelled",
+    },
+}
+
+# These six frozen rows crossed the retired customization-review boundary into
+# PendingWarehouseReceive without a complete final asset snapshot.  They must
+# become editable V8 drafts rather than fabricated Completed revisions.  The
+# exact scope and the sole proven source member are part of the policy
+# contract; any snapshot drift falls back to the ordinary hard-blocked replay.
+LEGACY_CUSTOMIZATION_TERMINAL_WITHOUT_ASSETS = {
+    449: {("task", 0): []},
+    450: {("task", 0): []},
+    451: {("task", 0): []},
+    452: {("task", 0): [207]},
+    756: {("sku", 578): []},
+    757: {("sku", 579): [], ("sku", 580): []},
+}
+
+# These are evidence contracts, not permission to copy bytes.  The three
+# task-2807 pairs have identical file size and independently generated preview
+# plus design-thumb hashes.  Task asset 12323 deliberately has no source:
+# same-root successors 14510/14514 have different byte sizes and therefore
+# cannot be substituted.  The Go migrator accepts all rows only as candidates:
+# recoverable rows still need a run-scoped Clone B object plus rollback-complete
+# storage registration, while 12323 needs an explicit historical-unavailable
+# API/UI/gate contract that never claims the original object exists.
+LEGACY_DELETED_ASSET_RECOVERY_EVIDENCE = {
+    23989: {
+        "task_id": 2807,
+        "recovery_source_task_asset_id": 24034,
+        "original_storage_ref_id": "f511c5d4-507f-4a69-bf10-70bae369429d",
+        "recovery_source_storage_ref_id": "983a746c-c674-4f5c-8812-073be989b194",
+        "expected_file_size": 683001,
+        "preview_whole_hash": "471739776f4c230a80ae5514e83e92fd3f1e104d203ced3ac793c65c25a525e4",
+        "design_thumb_whole_hash": "3442c0ac91eb61371d4057d6c0de232f8ba4f3c25cb6b68cff63142aa155e6ef",
+        "rejected_source_task_asset_ids": [],
+        "controlled_read_protocol": "controlled-asset-read-v1",
+        "controlled_read_evidence_sha256": "b39e0d9d26e6fdd35941b195bdc413eb12dd6795e23276a48c9b9bd49f829b08",
+        "recovery_source_sha256": "d0558b1a9d4a7afed5a03b6b97d4a765d34050866686e396ab0acf9f08f0dec5",
+    },
+    23990: {
+        "task_id": 2807,
+        "recovery_source_task_asset_id": 24033,
+        "original_storage_ref_id": "ca292dff-6824-4fe9-89cf-e439254f4383",
+        "recovery_source_storage_ref_id": "85c01c4c-0e27-4df4-a851-4b888f54a837",
+        "expected_file_size": 689291,
+        "preview_whole_hash": "311d508fde06f4b7ae73ebfb915abda67c316f02d6356f052731d818d5e0ca47",
+        "design_thumb_whole_hash": "7d38a5ff3cc65aa89aa15476e479a5eb0af611c4c60f145bbec40497a00cb62c",
+        "rejected_source_task_asset_ids": [],
+        "controlled_read_protocol": "controlled-asset-read-v1",
+        "controlled_read_evidence_sha256": "b39e0d9d26e6fdd35941b195bdc413eb12dd6795e23276a48c9b9bd49f829b08",
+        "recovery_source_sha256": "64cdfed11adc778fb6ede7f03c49f7c70e8655870236bdcd92a8207e41a8dfb8",
+    },
+    23991: {
+        "task_id": 2807,
+        "recovery_source_task_asset_id": 24040,
+        "original_storage_ref_id": "107bbca3-b716-4043-b036-54dab1d52b0d",
+        "recovery_source_storage_ref_id": "769e687f-fd71-4f37-930c-fd3f566350e6",
+        "expected_file_size": 686447,
+        "preview_whole_hash": "e4d8c77d270fb03cbcce3b8285b3373779a231605a09af515d3e2697118370a3",
+        "design_thumb_whole_hash": "fd4a43d2b1e8cf2013c84a37a948538cc102f28a1a886f6662c50bdc08c5234d",
+        "rejected_source_task_asset_ids": [],
+        "controlled_read_protocol": "controlled-asset-read-v1",
+        "controlled_read_evidence_sha256": "b39e0d9d26e6fdd35941b195bdc413eb12dd6795e23276a48c9b9bd49f829b08",
+        "recovery_source_sha256": "ebfecf3407e05c576bcddf74673d2e7568207ecc27855aa0e08c453d5a0d119a",
+    },
+    12323: {
+        "task_id": 2199,
+        "recovery_source_task_asset_id": 0,
+        "original_storage_ref_id": "c0a135a1-080f-46a0-a41a-461aef0ea0fb",
+        "recovery_source_storage_ref_id": "",
+        "expected_file_size": 17755216,
+        "preview_whole_hash": "82b35a045540d27f9656d6d02c99eb2814a62e9d048d33b20823fb8c0017aa4c",
+        "design_thumb_whole_hash": "54dbf569874243a212c11c3e83e80f19944c2581f12c9473a793bc273ec666a3",
+        "rejected_source_task_asset_ids": [14510, 14514],
+        "object_probe_result": "not_found",
+        "object_probe_input_manifest_sha256": "3f17b37296d2670235ca9bfcfd4388823b81adecf8fbac0826e6f241923579c7",
+        "object_probe_evidence_hash": "f1c78819e1f3d5f4e7a4b25ff3d173368574a5639f4c6df45c8aae5482d047b8",
+        "object_probe_object_key_sha256": "e732f6cd269a93d6bac168b0852dbcf8480af8966847278cb073cd6905b0efdd",
+        "object_probe_read_only_get_count": 1,
+    },
 }
 
 
@@ -135,8 +321,25 @@ def revision_review_policy_ids(
         f"policy {RETOUCH_TERMINAL_SUBMIT_POLICY}:"
     ):
         policies.append(RETOUCH_TERMINAL_SUBMIT_POLICY)
+    if revision.get("reason", "").startswith(
+        f"policy {RETOUCH_UNSCOPED_ATOMIC_BATCH_POLICY}:"
+    ):
+        policies.append(RETOUCH_UNSCOPED_ATOMIC_BATCH_POLICY)
+    if revision.get("reason", "").startswith(
+        f"policy {RETOUCH_PREMATURE_TERMINAL_PARTIAL_POLICY}:"
+    ):
+        policies.append(RETOUCH_PREMATURE_TERMINAL_PARTIAL_POLICY)
+    if revision.get("reason", "").startswith(
+        f"policy {RETOUCH_VISUAL_SCOPE_TASK2533_POLICY}:"
+    ):
+        policies.append(RETOUCH_VISUAL_SCOPE_TASK2533_POLICY)
     if revision.get("reason", "").startswith(f"policy {BATCH_SUBMIT_POLICY}:"):
         policies.append(BATCH_SUBMIT_POLICY)
+    if revision.get("reason", "").startswith(
+        f"policy {CUSTOMIZATION_TERMINAL_WITHOUT_ASSETS_POLICY}:"
+    ):
+        policies.append(CUSTOMIZATION_TERMINAL_WITHOUT_ASSETS_POLICY)
+    policies.extend(revision.get("_review_policy_ids") or [])
     return ordered_review_policy_ids(policies)
 
 
@@ -433,14 +636,30 @@ def make_revision(
     else:
         source_id = int(sources[0]["id"]) if len(sources) == 1 else None
         source_alias_id = None
+        batch_membership = (
+            event.get("_batch_scope_memberships") or {}
+        ).get(str(scope.get("sku_code") or ""))
+        if (
+            not sources
+            and isinstance(batch_membership, dict)
+            and batch_membership.get("source_alias_asset_version_id")
+        ):
+            source_alias_id = int(
+                batch_membership["source_alias_asset_version_id"]
+            )
         final_ids = [int(a["id"]) for a in finals]
         reference_ids = [int(r["id"]) for r in scoped_references(scope, references, event["created_at"])]
     policy = str(event.get("_migration_policy") or "").strip()
     reason = "candidate reconstructed from explicit legacy workflow boundaries; human confirmation remains required"
-    if policy:
+    if policy == BATCH_SUBMIT_POLICY:
         reason = (
             f"policy {policy}: the last scoped submit triggers the task-level "
             "atomic transition after independently proven full SKU coverage; "
+            "human confirmation remains required"
+        )
+    elif policy:
+        reason = (
+            f"policy {policy}: frozen exception-list facts matched exactly; "
             "human confirmation remains required"
         )
     revision = {
@@ -517,6 +736,42 @@ def nested_number(payload: dict[str, Any], key: str) -> int | None:
         return None
 
 
+def event_precedes_boundary(
+    candidate: dict[str, Any],
+    boundary: dict[str, Any],
+) -> bool:
+    """Use immutable task-event sequence when a repaired timestamp drifted."""
+    if (
+        event_payload(boundary).get("repair_reason")
+        and candidate.get("namespace") == "task_event_log"
+        and boundary.get("namespace") == "task_event_log"
+        and int(candidate.get("task_id") or 0)
+        == int(boundary.get("task_id") or 0)
+        and int(candidate.get("sequence") or 0) > 0
+        and int(boundary.get("sequence") or 0) > 0
+    ):
+        return int(candidate["sequence"]) <= int(boundary["sequence"])
+    return str(candidate.get("created_at") or "") <= str(
+        boundary.get("created_at") or ""
+    )
+
+
+def boundary_membership_time(
+    boundary: dict[str, Any],
+    completion: dict[str, Any],
+) -> str:
+    payload = event_payload(boundary)
+    if (
+        payload.get("repair_reason")
+        and event_precedes_boundary(completion, boundary)
+    ):
+        return max(
+            str(boundary.get("created_at") or ""),
+            str(completion.get("created_at") or ""),
+        )
+    return str(boundary.get("created_at") or "")
+
+
 def payload_asset_version_ids(payload: dict[str, Any], *extra_keys: str) -> list[int]:
     # asset_id is a design-asset/root identifier in the real legacy payload;
     # only asset_version_id identifies task_assets.id.
@@ -541,16 +796,50 @@ def expected_submit_modules(scope: dict[str, Any], event: dict[str, Any]) -> set
 
 
 def resolve_submission_assets(scope, submit_event, all_events, assets):
+    retouch_memberships = submit_event.get("_retouch_scope_memberships")
+    if isinstance(retouch_memberships, dict):
+        membership = retouch_memberships.get(str(scope.get("scope_ref_id") or ""))
+        if not isinstance(membership, dict):
+            return [], [], [
+                f"{submit_event.get('_migration_policy')}: no reviewed membership "
+                "exists for this retouch requirement"
+            ]
+        asset_by_id = {int(asset["id"]): asset for asset in assets}
+        selected = []
+        for asset_id in membership.get("asset_version_ids") or []:
+            asset = asset_by_id.get(int(asset_id))
+            if asset is None:
+                return [], [], [
+                    f"{submit_event.get('_migration_policy')}: asset_version_id "
+                    f"{asset_id} no longer resolves"
+                ]
+            selected.append(asset)
+        return (
+            selected,
+            list(membership.get("completion_event_ids") or []),
+            [],
+        )
+
     batch_memberships = submit_event.get("_batch_scope_memberships")
     if isinstance(batch_memberships, dict):
         membership = batch_memberships.get(str(scope.get("sku_code") or ""))
         if not isinstance(membership, dict):
             return [], [], [f"{BATCH_SUBMIT_POLICY}: no reviewed membership exists for this SKU scope"]
-        asset_id = int(membership["asset_version_id"])
-        asset = next((candidate for candidate in assets if int(candidate["id"]) == asset_id), None)
-        if asset is None:
-            return [], [], [f"{BATCH_SUBMIT_POLICY}: asset_version_id {asset_id} no longer resolves"]
-        return [asset], [str(membership["completion_event_id"])], []
+        asset_by_id = {int(candidate["id"]): candidate for candidate in assets}
+        selected = []
+        for asset_id in membership.get("asset_version_ids") or []:
+            asset = asset_by_id.get(int(asset_id))
+            if asset is None:
+                return [], [], [
+                    f"{BATCH_SUBMIT_POLICY}: asset_version_id {asset_id} "
+                    "no longer resolves"
+                ]
+            selected.append(asset)
+        return (
+            selected,
+            [str(value) for value in membership.get("completion_event_ids") or []],
+            [],
+        )
 
     payload = event_payload(submit_event)
     session_id = str(payload.get("upload_session_id") or "").strip()
@@ -561,7 +850,7 @@ def resolve_submission_assets(scope, submit_event, all_events, assets):
     for event in all_events:
         if str(event.get("event_type") or "").lower() not in UPLOAD_SESSION_COMPLETED_EVENTS:
             continue
-        if event.get("created_at", "") > submit_event["created_at"]:
+        if not event_precedes_boundary(event, submit_event):
             continue
         completion_payload = event_payload(event)
         if str(completion_payload.get("upload_session_id") or "").strip() == session_id:
@@ -587,10 +876,13 @@ def resolve_submission_assets(scope, submit_event, all_events, assets):
             if int(asset["task_id"]) != int(scope["task_id"]) or not scope_matches(scope, asset):
                 blockers.append(f"asset_version_id {version_id} is outside the submitted task/scope")
                 continue
-            if not at_or_before(asset, submit_event["created_at"]):
+            membership_time = boundary_membership_time(submit_event, completion)
+            if not at_or_before(asset, membership_time):
                 blockers.append(f"asset_version_id {version_id} was created after the submission boundary")
                 continue
-            eligible, reason = revision_asset_eligible(asset, expected_modules, submit_event["created_at"])
+            eligible, reason = revision_asset_eligible(
+                asset, expected_modules, membership_time
+            )
             if not eligible:
                 blockers.append(f"asset_version_id {version_id}: {reason}")
                 continue
@@ -610,6 +902,19 @@ def is_legacy_retouch_terminal_submit(
     selection_blockers,
 ):
     """Recognize a legacy retouch submit that terminally completed its task."""
+    if submit_event.get("_migration_policy") == RETOUCH_UNSCOPED_ATOMIC_BATCH_POLICY:
+        membership = (
+            submit_event.get("_retouch_scope_memberships") or {}
+        ).get(str(scope.get("scope_ref_id") or ""))
+        return bool(
+            scope.get("scope_kind") == "retouch_requirement"
+            and str(scope.get("task_status") or "") == "Completed"
+            and isinstance(membership, dict)
+            and membership.get("asset_version_ids")
+            and [int(asset["id"]) for asset in selected_assets]
+            == [int(value) for value in membership["asset_version_ids"]]
+            and not selection_blockers
+        )
     if (
         scope.get("scope_kind") != "retouch_requirement"
         or str(scope.get("task_status") or "") != "Completed"
@@ -690,7 +995,12 @@ def apply_explicit_audit_change(scope, event, assets, revision):
     replace_final_ids = payload_ids(payload, "replace_final_asset_version_ids", "final_asset_version_ids")
     append_final_ids = payload_ids(payload, "append_asset_version_ids", "append_final_asset_version_ids")
     session_id = str(payload.get("upload_session_id") or payload.get("asset_upload_session_id") or "")
-    before, after = nested_number(payload, "before"), nested_number(payload, "after")
+    before = nested_number(payload, "before")
+    after = nested_number(payload, "after")
+    if before is None:
+        before = nested_number(payload, "audit_delivery_count_before")
+    if after is None:
+        after = nested_number(payload, "audit_delivery_count_after")
     direct_version_ids = payload_asset_version_ids(payload)
     if before is not None and after == before + 1:
         append_final_ids.extend(version_id for version_id in direct_version_ids if version_id not in append_final_ids)
@@ -806,6 +1116,180 @@ def apply_proven_successor_audit_change(scope, event, events, assets, revision):
     revision["evidence_event_ids"] = list(dict.fromkeys(
         list(revision.get("evidence_event_ids") or []) + completion_evidence
     ))
+    recompute_revision_hash(revision)
+    return True
+
+
+def parse_utc_timestamp(value: str) -> dt.datetime:
+    return dt.datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+
+
+def apply_proven_legacy_audit_stage_snapshot(
+    scope,
+    event,
+    events,
+    assets,
+    revision,
+):
+    """Apply a complete, event-linked legacy audit-stage snapshot.
+
+    Delivery approval metadata is authoritative even when the auditor uploaded
+    a batch long before clicking approve. Source-only batches inherit finals;
+    a source uploaded by another actor must be paired with a delivery from the
+    same short upload batch that the approval explicitly accepted.
+    """
+    submitted_at = str(revision.get("submitted_at") or "")
+    approval_at = str(event.get("created_at") or "")
+    actor_id = int(event.get("actor_id") or 0)
+    if not submitted_at or not approval_at or actor_id <= 0:
+        return False
+    late_assets = assets_created_between(scope, assets, submitted_at, approval_at)
+    if not late_assets or any(
+        str(asset.get("source_module_key") or "").strip().lower() != "audit"
+        for asset in late_assets
+    ):
+        return False
+    completion_evidence = []
+    completion_by_asset: dict[int, dict[str, Any]] = {}
+    for asset in late_assets:
+        asset_id = int(asset["id"])
+        completions = [
+            candidate
+            for candidate in events
+            if str(candidate.get("event_type") or "").lower()
+            in UPLOAD_SESSION_COMPLETED_EVENTS
+            and submitted_at < str(candidate.get("created_at") or "") <= approval_at
+            and candidate.get("namespace") == "task_event_log"
+            and asset_id in payload_asset_version_ids(event_payload(candidate))
+        ]
+        if len(completions) != 1:
+            return False
+        completion_by_asset[asset_id] = completions[0]
+        completion_evidence.extend(event_evidence_ids(completions[0]))
+
+    source_ids = [
+        int(asset["id"])
+        for asset in late_assets
+        if asset.get("asset_type") == "source"
+    ]
+    final_ids = [
+        int(asset["id"])
+        for asset in late_assets
+        if asset.get("asset_type") == "delivery"
+    ]
+    try:
+        approval_time = parse_utc_timestamp(approval_at)
+    except (TypeError, ValueError):
+        return False
+
+    approved_delivery_ids = set()
+    for asset_id in final_ids:
+        asset = next(asset for asset in late_assets if int(asset["id"]) == asset_id)
+        completion = completion_by_asset[asset_id]
+        approved_at = str(asset.get("approved_at") or "")
+        approved_by = int(asset.get("approved_by") or 0)
+        metadata_match = (
+            approved_by == actor_id
+            and approved_at
+            and abs(
+                (
+                    parse_utc_timestamp(approved_at) - approval_time
+                ).total_seconds()
+            )
+            <= 2
+        )
+        legacy_immediate_match = False
+        try:
+            legacy_immediate_match = (
+                int(completion.get("actor_id") or 0) == actor_id
+                and abs(
+                    (
+                        approval_time
+                        - parse_utc_timestamp(
+                            str(completion.get("created_at") or "")
+                        )
+                    ).total_seconds()
+                )
+                <= 15 * 60
+            )
+        except (TypeError, ValueError):
+            pass
+        if not metadata_match and not legacy_immediate_match:
+            return False
+        approved_delivery_ids.add(asset_id)
+
+    for source_id in source_ids:
+        source_completion = completion_by_asset[source_id]
+        source_actor = int(source_completion.get("actor_id") or 0)
+        if source_actor == actor_id:
+            continue
+        try:
+            source_time = parse_utc_timestamp(
+                str(source_completion.get("created_at") or "")
+            )
+        except (TypeError, ValueError):
+            return False
+        paired = any(
+            int(completion_by_asset[final_id].get("actor_id") or 0)
+            == source_actor
+            and abs(
+                (
+                    parse_utc_timestamp(
+                        str(
+                            completion_by_asset[final_id].get("created_at")
+                            or ""
+                        )
+                    )
+                    - source_time
+                ).total_seconds()
+            )
+            <= 15 * 60
+            for final_id in approved_delivery_ids
+        )
+        if not paired:
+            return False
+
+    if len(source_ids) > 1:
+        revision.pop("source_task_asset_id", None)
+        revision.pop("source_alias_from_task_asset_id", None)
+        add_blocker(
+            revision,
+            "multiple source assets require a reviewed deterministic ZIP bundle",
+        )
+    if source_ids:
+        if len(source_ids) == 1:
+            revision["source_task_asset_id"] = source_ids[0]
+            revision.pop("source_alias_from_task_asset_id", None)
+    elif (
+        not revision.get("source_task_asset_id")
+        and not revision.get("source_alias_from_task_asset_id")
+        and len(final_ids) == 1
+    ):
+        revision["source_alias_from_task_asset_id"] = final_ids[0]
+    if revision.get("source_task_asset_id") or revision.get(
+        "source_alias_from_task_asset_id"
+    ):
+        revision["_blockers"] = [
+            blocker
+            for blocker in revision.get("_blockers", [])
+            if blocker != "design revision has no uniquely evidenced source asset"
+        ]
+    if final_ids:
+        revision["final_task_asset_ids"] = final_ids
+        alias_id = revision.get("source_alias_from_task_asset_id")
+        if (
+            not revision.get("source_task_asset_id")
+            and alias_id not in final_ids
+        ):
+            revision["source_alias_from_task_asset_id"] = final_ids[0]
+    revision["evidence_event_ids"] = list(
+        dict.fromkeys(
+            list(revision.get("evidence_event_ids") or []) + completion_evidence
+        )
+    )
+    revision.setdefault("_review_policy_ids", []).append(
+        AUDIT_STAGE_FINAL_SNAPSHOT_POLICY
+    )
     recompute_revision_hash(revision)
     return True
 
@@ -958,6 +1442,145 @@ def replace_revision_asset_root(revision, predecessor, successor, asset_by_id):
     return changed
 
 
+def completion_events_for_asset(
+    events: list[dict[str, Any]],
+    asset_id: int,
+) -> list[dict[str, Any]]:
+    return [
+        event
+        for event in events
+        if str(event.get("event_type") or "").lower()
+        in UPLOAD_SESSION_COMPLETED_EVENTS
+        and asset_id in payload_asset_version_ids(event_payload(event))
+    ]
+
+
+def append_proven_missing_snapshot_member(
+    scope,
+    predecessor,
+    events,
+    assets,
+    revisions,
+) -> bool:
+    """Repair an omitted member before applying its proven successor edge."""
+    if predecessor.get("asset_type") != "delivery" or not scope_matches(
+        scope, predecessor
+    ):
+        return False
+    predecessor_id = int(predecessor["id"])
+    completions = completion_events_for_asset(events, predecessor_id)
+    if len(completions) != 1:
+        return False
+    completion = completions[0]
+    origin_index = None
+
+    approved_at = str(predecessor.get("approved_at") or "")
+    approved_by = int(predecessor.get("approved_by") or 0)
+    if approved_at and approved_by > 0:
+        for index, revision in enumerate(revisions):
+            finalized_at = str(revision.get("finalized_at") or "")
+            if (
+                finalized_at
+                and timestamps_within_seconds(
+                    {"created_at": approved_at},
+                    {"created_at": finalized_at},
+                    2,
+                )
+                and int(revision.get("created_by") or 0) == approved_by
+                and str(completion.get("created_at") or "") <= finalized_at
+            ):
+                eligible, _ = revision_asset_eligible(
+                    predecessor, set(), finalized_at
+                )
+                if eligible:
+                    origin_index = index
+                    break
+
+    if origin_index is None and scope.get("scope_kind") == "retouch_requirement":
+        if not scope.get("_single_requirement"):
+            return False
+        try:
+            completion_time = parse_utc_timestamp(
+                str(completion.get("created_at") or "")
+            )
+        except (TypeError, ValueError):
+            return False
+        asset_by_id = {int(asset["id"]): asset for asset in assets}
+        for index, revision in enumerate(revisions):
+            evidence = set(revision.get("evidence_event_ids") or [])
+            submit_events = [
+                event
+                for event in events
+                if event_kind(event) == "submit"
+                and stable_event_id(event) in evidence
+                and event_precedes_boundary(completion, event)
+            ]
+            if not submit_events:
+                continue
+            anchor_ids = [
+                int(value)
+                for value in revision.get("final_task_asset_ids") or []
+            ]
+            anchors = [
+                asset_by_id[value]
+                for value in anchor_ids
+                if value in asset_by_id
+                and str(
+                    asset_by_id[value].get("source_module_key") or ""
+                ).lower()
+                == "retouch"
+            ]
+            paired = False
+            for anchor in anchors:
+                anchor_completions = completion_events_for_asset(
+                    events, int(anchor["id"])
+                )
+                if len(anchor_completions) != 1:
+                    continue
+                try:
+                    anchor_time = parse_utc_timestamp(
+                        str(anchor_completions[0].get("created_at") or "")
+                    )
+                except (TypeError, ValueError):
+                    continue
+                if (
+                    int(anchor_completions[0].get("actor_id") or 0)
+                    == int(completion.get("actor_id") or 0)
+                    and abs((anchor_time - completion_time).total_seconds())
+                    <= 15 * 60
+                ):
+                    paired = True
+                    break
+            if paired:
+                origin_index = index
+                break
+
+    if origin_index is None:
+        return False
+
+    asset_by_id = {int(asset["id"]): asset for asset in assets}
+    root_id = int(predecessor.get("asset_id") or 0)
+    evidence_ids = event_evidence_ids(completion)
+    for revision in revisions[origin_index:]:
+        finals = [int(value) for value in revision.get("final_task_asset_ids") or []]
+        has_root = any(
+            int((asset_by_id.get(value) or {}).get("asset_id") or 0)
+            == root_id
+            for value in finals
+        )
+        if not has_root:
+            finals.append(predecessor_id)
+            revision["final_task_asset_ids"] = finals
+            revision["mode"] = "set" if len(finals) > 1 else "single"
+        revision["evidence_event_ids"] = list(
+            dict.fromkeys(
+                list(revision.get("evidence_event_ids") or []) + evidence_ids
+            )
+        )
+        recompute_revision_hash(revision)
+    return True
+
+
 def replay_post_close_replacements(
     scope, events, assets, references, revisions, working, finalized
 ):
@@ -993,11 +1616,46 @@ def replay_post_close_replacements(
         elif not replace_revision_asset_root(
             revision, predecessor, successor, asset_by_id
         ):
-            blocker = (
-                f"post-close successor {successor['id']} asset root is absent "
-                "from the inherited snapshot"
-            )
-        else:
+            if append_proven_missing_snapshot_member(
+                scope,
+                predecessor,
+                events,
+                assets,
+                revisions,
+            ):
+                inherited = revisions[finalized - 1]
+                revision = make_revision(
+                    scope,
+                    completion,
+                    len(revisions) + 1,
+                    "finalized",
+                    "reopen",
+                    assets,
+                    references,
+                    inherited=inherited,
+                    extra_evidence=list(
+                        inherited.get("evidence_event_ids") or []
+                    ),
+                )
+                revision["reason"] = (
+                    f"policy {POST_CLOSE_REPLACEMENT_POLICY}: post-close "
+                    "same-root replacement proven by an immutable "
+                    "asset-version edge and exact completed upload session; "
+                    "human confirmation remains required"
+                )
+                if not replace_revision_asset_root(
+                    revision, predecessor, successor, asset_by_id
+                ):
+                    blocker = (
+                        f"post-close successor {successor['id']} asset root "
+                        "is absent from the inherited snapshot"
+                    )
+            else:
+                blocker = (
+                    f"post-close successor {successor['id']} asset root is "
+                    "absent from the inherited snapshot"
+                )
+        if not blocker:
             revisions[finalized - 1]["status"] = "superseded"
             recompute_revision_hash(revisions[finalized - 1])
         if blocker:
@@ -1104,31 +1762,347 @@ def event_dedup_key(event: dict[str, Any]) -> tuple[Any, ...]:
     )
 
 
-def resolve_atomic_multi_sku_batch_submit(scopes, events, assets):
-    """Prove the legacy one-submit/many-SKU upload transaction shape.
+def is_nonfinal_customization_gate(event: dict[str, Any]) -> bool:
+    payload = event_payload(event)
+    return bool(
+        str(event.get("event_type") or "").lower()
+        == "task.customization.reviewed"
+        and event_kind(event) == "approve"
+        and str(
+            payload.get("to_task_status")
+            or payload.get("next_status")
+            or event.get("to_state")
+            or ""
+        ).lower()
+        in {
+            "pendingcustomizationproduction",
+            "pending_customization_production",
+        }
+    )
 
-    The legacy batch UI completed one explicitly SKU-scoped delivery session
-    per SKU and then advanced the task once.  The single submit event only
-    repeated the final upload session, so it cannot be copied to other SKU
-    scopes unless the complete task-wide membership is independently proven.
-    This detector deliberately returns no candidate on any ambiguity.
+
+def is_customization_rejection_reopen_side_effect(
+    event: dict[str, Any],
+) -> bool:
+    payload = event_payload(event)
+    return bool(
+        event.get("namespace") == "task_module_event"
+        and event_kind(event) == "reopen"
+        and str(payload.get("source") or "").lower()
+        == "customization_review"
+        and str(
+            payload.get("customization_review_decision") or ""
+        ).lower()
+        == "return_to_designer"
+    )
+
+
+def rejection_semantic_key(event: dict[str, Any]) -> tuple[Any, ...] | None:
+    if event_kind(event) != "reject":
+        return None
+    payload = event_payload(event)
+    event_type = str(event.get("event_type") or "").lower()
+    action = str(
+        payload.get("customization_review_decision")
+        or payload.get("action")
+        or payload.get("decision")
+        or ""
+    ).lower()
+    source = str(payload.get("source") or "").lower()
+    if action == "return_to_designer" or (
+        event_type == "rejected" and source == "customization_review"
+    ):
+        return (
+            "customization_rejected",
+            int(event.get("actor_id") or 0),
+            str(payload.get("target_sku_code") or ""),
+        )
+    return (
+        "rejected",
+        int(event.get("actor_id") or 0),
+        str(payload.get("stage") or ""),
+        str(payload.get("comment") or ""),
+        str(
+            payload.get("from_task_status")
+            or event.get("from_state")
+            or ""
+        ),
+        str(
+            payload.get("to_task_status")
+            or event.get("to_state")
+            or ""
+        ),
+    )
+
+
+def timestamps_within_seconds(
+    left: dict[str, Any],
+    right: dict[str, Any],
+    seconds: int,
+) -> bool:
+    try:
+        return abs(
+            (
+                parse_utc_timestamp(str(left.get("created_at") or ""))
+                - parse_utc_timestamp(str(right.get("created_at") or ""))
+            ).total_seconds()
+        ) <= seconds
+    except (TypeError, ValueError):
+        return False
+
+
+def resolve_atomic_multi_sku_batch_submits(scopes, events, assets):
+    """Rebuild each proven task-wide multi-SKU submission wave.
+
+    A wave may contain several source/final files per SKU. Later resubmissions
+    replace only roles with new completed uploads and inherit untouched SKU
+    roles from the preceding immutable snapshot.
     """
     sku_scopes = [scope for scope in scopes if scope.get("scope_kind") == "sku"]
     if len(sku_scopes) <= 1 or len(sku_scopes) != len(scopes):
-        return None
-    if any(str(scope.get("task_status") or "") != "PendingAuditA" for scope in sku_scopes):
-        return None
+        return []
     sku_codes = [str(scope.get("sku_code") or "").strip() for scope in sku_scopes]
     if any(not code for code in sku_codes) or len(set(sku_codes)) != len(sku_codes):
+        return []
+
+    submits = sorted(
+        (
+            dict(event)
+            for event in events
+            if event_kind(event) == "submit"
+            and event.get("namespace") == "task_event_log"
+            and int(event.get("actor_id") or 0)
+        ),
+        key=lambda event: (
+            str(event.get("created_at") or ""),
+            int(event.get("sequence") or 0),
+            str(event.get("id") or ""),
+        ),
+    )
+    if not submits:
+        return []
+
+    completions = [
+        dict(event)
+        for event in events
+        if str(event.get("event_type") or "").lower()
+        in UPLOAD_SESSION_COMPLETED_EVENTS
+        and event.get("namespace") == "task_event_log"
+    ]
+    asset_by_id = {int(asset["id"]): asset for asset in assets}
+    state: dict[str, dict[str, list[dict[str, Any]]]] = {
+        code: {"source": [], "delivery": []} for code in sku_codes
+    }
+    candidates = []
+    previous_submit = None
+    for submit in submits:
+        payload = event_payload(submit)
+        submit_session = str(payload.get("upload_session_id") or "").strip()
+        submit_sku = str(payload.get("target_sku_code") or "").strip()
+        submit_root_ids = payload_ids(payload, "asset_id")
+        if (
+            not submit_session
+            or submit_sku not in state
+            or str(payload.get("asset_type") or "").strip().lower()
+            != "delivery"
+            or len(submit_root_ids) != 1
+        ):
+            previous_submit = submit
+            continue
+
+        updates: dict[str, dict[str, list[dict[str, Any]]]] = defaultdict(
+            lambda: {"source": [], "delivery": []}
+        )
+        seen_version_ids, seen_sessions = set(), set()
+        invalid = False
+        for completion in sorted(
+            completions,
+            key=lambda event: (
+                str(event.get("created_at") or ""),
+                int(event.get("sequence") or 0),
+                str(event.get("id") or ""),
+            ),
+        ):
+            if not event_precedes_boundary(completion, submit):
+                continue
+            if previous_submit and event_precedes_boundary(
+                completion, previous_submit
+            ):
+                continue
+            completion_payload = event_payload(completion)
+            role = str(
+                completion_payload.get("asset_type") or ""
+            ).strip().lower()
+            sku_code = str(
+                completion_payload.get("target_sku_code") or ""
+            ).strip()
+            if role not in {"source", "delivery"} or sku_code not in state:
+                continue
+            version_ids = payload_asset_version_ids(completion_payload)
+            root_ids = payload_ids(completion_payload, "asset_id")
+            session_id = str(
+                completion_payload.get("upload_session_id") or ""
+            ).strip()
+            if (
+                len(version_ids) != 1
+                or len(root_ids) != 1
+                or not session_id
+                or int(completion.get("actor_id") or 0)
+                != int(submit.get("actor_id") or 0)
+            ):
+                invalid = True
+                break
+            version_id = version_ids[0]
+            asset = asset_by_id.get(version_id)
+            if (
+                asset is None
+                or version_id in seen_version_ids
+                or session_id in seen_sessions
+                or int(asset.get("task_id") or 0)
+                != int(sku_scopes[0]["task_id"])
+                or str(asset.get("scope_sku_code") or "").strip()
+                != sku_code
+                or asset.get("retouch_requirement_id")
+                or str(asset.get("asset_type") or "").lower() != role
+                or int(asset.get("asset_id") or 0) != root_ids[0]
+                or str(
+                    asset.get("upload_session_id")
+                    or asset.get("upload_request_id")
+                    or ""
+                ).strip()
+                != session_id
+            ):
+                invalid = True
+                break
+            membership_time = boundary_membership_time(submit, completion)
+            module = str(
+                asset.get("source_module_key")
+                or completion.get("module_key")
+                or ""
+            ).strip().lower()
+            if module not in {"design", "customization"}:
+                invalid = True
+                break
+            eligible, _ = revision_asset_eligible(
+                asset, {module}, membership_time
+            )
+            if not eligible or not at_or_before(asset, membership_time):
+                invalid = True
+                break
+            seen_version_ids.add(version_id)
+            seen_sessions.add(session_id)
+            updates[sku_code][role].append(
+                {
+                    "asset_version_id": version_id,
+                    "completion_event_id": stable_event_id(completion),
+                    "upload_session_id": session_id,
+                    "asset_root_id": root_ids[0],
+                    "created_at": completion["created_at"],
+                }
+            )
+        if invalid:
+            previous_submit = submit
+            continue
+
+        for sku_code, role_updates in updates.items():
+            for role in ("source", "delivery"):
+                if role_updates[role]:
+                    state[sku_code][role] = role_updates[role]
+
+        trigger_members = (
+            updates.get(submit_sku, {}).get("delivery", [])
+            if submit_sku in updates
+            else []
+        )
+        if not any(
+            member["upload_session_id"] == submit_session
+            and member["asset_root_id"] == submit_root_ids[0]
+            for member in trigger_members
+        ):
+            previous_submit = submit
+            continue
+        if any(not state[code]["delivery"] for code in sku_codes):
+            previous_submit = submit
+            continue
+
+        candidate = dict(submit)
+        candidate["_batch_scope_memberships"] = {}
+        for sku_code in sorted(sku_codes):
+            sources = state[sku_code]["source"]
+            finals = state[sku_code]["delivery"]
+            members = sources + finals
+            candidate["_batch_scope_memberships"][sku_code] = {
+                "asset_version_ids": [
+                    member["asset_version_id"] for member in members
+                ],
+                "completion_event_ids": [
+                    member["completion_event_id"] for member in members
+                ],
+                **(
+                    {
+                        "source_alias_asset_version_id": finals[0][
+                            "asset_version_id"
+                        ]
+                    }
+                    if not sources
+                    else {}
+                ),
+            }
+        candidate["_migration_policy"] = BATCH_SUBMIT_POLICY
+        candidates.append(candidate)
+        previous_submit = submit
+    return candidates
+
+
+def resolve_atomic_multi_sku_batch_submit(scopes, events, assets):
+    candidates = resolve_atomic_multi_sku_batch_submits(
+        scopes, events, assets
+    )
+    return candidates[0] if len(candidates) == 1 else None
+
+
+def _resolve_exact_retouch_terminal_submit(
+    scopes,
+    events,
+    assets,
+    expected_finals,
+    policy,
+):
+    """Return a sole legacy retouch submit only when frozen facts still match."""
+    if not scopes or any(
+        scope.get("scope_kind") != "retouch_requirement"
+        or str(scope.get("task_status") or "") != "Completed"
+        for scope in scopes
+    ):
+        return None
+    task_id = int(scopes[0]["task_id"])
+    if any(int(scope["task_id"]) != task_id for scope in scopes):
+        return None
+    scope_ids = {int(scope["scope_ref_id"]) for scope in scopes}
+    if scope_ids != set(expected_finals) or len(scope_ids) != len(scopes):
         return None
 
-    # One task state boundary only. Exact dual-write duplicates are collapsed,
-    # but a second submit/approve/reject/reopen/close/supplement is a conflict.
+    task_deliveries = {
+        int(asset["id"])
+        for asset in assets
+        if int(asset.get("task_id") or 0) == task_id
+        and str(asset.get("asset_type") or "").lower() == "delivery"
+    }
+    expected_delivery_ids = {
+        int(asset_id)
+        for asset_ids in expected_finals.values()
+        for asset_id in asset_ids
+    }
+    # Premature tasks can have one intentionally unassigned delivery; atomic
+    # completed tasks must account for every delivery exactly.
+    if task_deliveries != expected_delivery_ids:
+        return None
+
     boundaries, seen = [], set()
     for event in sorted(
         (dict(event) for event in events if event_kind(event)),
         key=lambda event: (
-            event.get("created_at", ""),
+            str(event.get("created_at") or ""),
             event.get("namespace") == "task_module_event",
             str(event.get("id") or ""),
         ),
@@ -1138,104 +2112,363 @@ def resolve_atomic_multi_sku_batch_submit(scopes, events, assets):
             continue
         seen.add(key)
         boundaries.append(event)
-    if len(boundaries) != 1 or event_kind(boundaries[0]) != "submit":
+    submits = [event for event in boundaries if event_kind(event) == "submit"]
+    if len(submits) != 1:
         return None
-    submit = boundaries[0]
-    if submit.get("namespace") != "task_event_log" or not int(submit.get("actor_id") or 0):
-        return None
-    submit_payload = event_payload(submit)
-    submit_session = str(submit_payload.get("upload_session_id") or "").strip()
-    submit_sku = str(submit_payload.get("target_sku_code") or "").strip()
-    submit_root_ids = payload_ids(submit_payload, "asset_id")
+    submit = submits[0]
     if (
-        not submit_session
-        or submit_sku not in set(sku_codes)
-        or str(submit_payload.get("asset_type") or "").strip().lower() != "delivery"
-        or len(submit_root_ids) != 1
+        submit.get("namespace") != "task_event_log"
+        or not int(submit.get("actor_id") or 0)
+        or any(
+            event_kind(event) in {"submit", "reject", "reopen"}
+            and str(event.get("created_at") or "")
+            > str(submit.get("created_at") or "")
+            for event in boundaries
+        )
     ):
         return None
 
     asset_by_id = {int(asset["id"]): asset for asset in assets}
-    memberships: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    seen_version_ids, seen_sessions = set(), set()
+    completions_by_asset: dict[int, list[dict[str, Any]]] = defaultdict(list)
     for event in events:
-        if str(event.get("event_type") or "").lower() not in UPLOAD_SESSION_COMPLETED_EVENTS:
-            continue
-        if str(event.get("created_at") or "") > str(submit.get("created_at") or ""):
-            continue
-        payload = event_payload(event)
-        role = str(payload.get("asset_type") or "").strip().lower()
-        if role not in {"source", "delivery"}:
-            continue
-        # The historical batch path submitted delivery files. A source
-        # completion in the same window is a competing membership, not a
-        # second permissible interpretation.
-        if role != "delivery":
-            return None
-        sku_code = str(payload.get("target_sku_code") or "").strip()
-        version_ids = payload_asset_version_ids(payload)
-        root_ids = payload_ids(payload, "asset_id")
-        session_id = str(payload.get("upload_session_id") or "").strip()
         if (
             event.get("namespace") != "task_event_log"
-            or sku_code not in set(sku_codes)
-            or len(version_ids) != 1
-            or len(root_ids) != 1
-            or not session_id
+            or str(event.get("event_type") or "").lower()
+            not in UPLOAD_SESSION_COMPLETED_EVENTS
+            or str(event.get("created_at") or "")
+            > str(submit.get("created_at") or "")
         ):
-            return None
-        version_id = version_ids[0]
-        asset = asset_by_id.get(version_id)
-        if asset is None:
-            return None
-        if version_id in seen_version_ids or session_id in seen_sessions:
-            return None
-        if (
-            int(asset.get("task_id") or 0) != int(sku_scopes[0]["task_id"])
-            or str(asset.get("scope_sku_code") or "").strip() != sku_code
-            or asset.get("retouch_requirement_id")
-            or str(asset.get("asset_type") or "").lower() != "delivery"
-            or int(asset.get("asset_id") or 0) != root_ids[0]
-            or str(asset.get("upload_session_id") or asset.get("upload_request_id") or "").strip() != session_id
-            or str(asset.get("created_at") or "") > str(event.get("created_at") or "")
-            or int(event.get("actor_id") or 0) != int(submit.get("actor_id") or 0)
-        ):
-            return None
-        eligible, _ = revision_asset_eligible(asset, {"design"}, str(submit["created_at"]))
-        if not eligible:
-            return None
-        seen_version_ids.add(version_id)
-        seen_sessions.add(session_id)
-        memberships[sku_code].append({
-            "asset_version_id": version_id,
-            "completion_event_id": stable_event_id(event),
-            "upload_session_id": session_id,
-            "asset_root_id": root_ids[0],
-            "created_at": event["created_at"],
-        })
+            continue
+        for asset_id in payload_asset_version_ids(event_payload(event)):
+            if asset_id in expected_delivery_ids:
+                completions_by_asset[asset_id].append(event)
 
-    if any(len(memberships.get(code, [])) != 1 for code in sku_codes):
-        return None
-    final_membership = memberships[submit_sku][0]
+    memberships: dict[str, dict[str, Any]] = {}
+    for scope_id, ordered_ids in expected_finals.items():
+        evidence_ids = []
+        for asset_id in ordered_ids:
+            asset = asset_by_id.get(int(asset_id))
+            completions = completions_by_asset.get(int(asset_id), [])
+            if asset is None or len(completions) != 1:
+                return None
+            completion = completions[0]
+            payload = event_payload(completion)
+            session_id = str(payload.get("upload_session_id") or "").strip()
+            asset_session = str(
+                asset.get("upload_session_id")
+                or asset.get("upload_request_id")
+                or ""
+            ).strip()
+            eligible, _ = revision_asset_eligible(
+                asset, {"retouch"}, str(submit["created_at"])
+            )
+            if (
+                int(asset.get("task_id") or 0) != task_id
+                or asset.get("retouch_requirement_id") not in (None, "", 0)
+                or str(asset.get("asset_type") or "").lower() != "delivery"
+                or not eligible
+                or not at_or_before(asset, str(submit["created_at"]))
+                or not session_id
+                or session_id != asset_session
+                or int(completion.get("actor_id") or 0)
+                != int(submit.get("actor_id") or 0)
+            ):
+                return None
+            evidence_ids.extend(event_evidence_ids(completion))
+        memberships[str(scope_id)] = {
+            "asset_version_ids": [int(value) for value in ordered_ids],
+            "completion_event_ids": evidence_ids,
+        }
+
+    submit_session = str(
+        event_payload(submit).get("upload_session_id") or ""
+    ).strip()
+    terminal_asset_id = max(
+        expected_delivery_ids,
+        key=lambda value: (
+            str(asset_by_id[value].get("created_at") or ""),
+            value,
+        ),
+        default=0,
+    )
+    terminal_asset = asset_by_id.get(terminal_asset_id)
     if (
-        final_membership["upload_session_id"] != submit_session
-        or final_membership["created_at"] > submit["created_at"]
-        or final_membership["asset_root_id"] != submit_root_ids[0]
+        not submit_session
+        or terminal_asset is None
+        or submit_session
+        != str(
+            terminal_asset.get("upload_session_id")
+            or terminal_asset.get("upload_request_id")
+            or ""
+        ).strip()
     ):
         return None
 
     candidate = dict(submit)
-    candidate["_batch_scope_memberships"] = {
-        code: memberships[code][0] for code in sorted(sku_codes)
-    }
-    candidate["_migration_policy"] = BATCH_SUBMIT_POLICY
+    candidate["_retouch_scope_memberships"] = memberships
+    candidate["_migration_policy"] = policy
     return candidate
+
+
+def resolve_legacy_retouch_unscoped_atomic_batch(scopes, events, assets):
+    if not scopes:
+        return None
+    expected = LEGACY_RETOUCH_UNSCOPED_ATOMIC_FINALS.get(
+        int(scopes[0]["task_id"])
+    )
+    if expected is None:
+        return None
+    return _resolve_exact_retouch_terminal_submit(
+        scopes,
+        events,
+        assets,
+        expected,
+        RETOUCH_UNSCOPED_ATOMIC_BATCH_POLICY,
+    )
+
+
+def resolve_legacy_retouch_premature_partial(scopes, events, assets):
+    if not scopes:
+        return None
+    task_id = int(scopes[0]["task_id"])
+    expected = LEGACY_RETOUCH_PREMATURE_PARTIAL_FINALS.get(task_id)
+    if expected is None:
+        return None
+    # The frozen task still has exactly one unscoped delivery even when that
+    # delivery is deliberately not assigned to any requirement.
+    actual_delivery_ids = sorted(
+        int(asset["id"])
+        for asset in assets
+        if str(asset.get("asset_type") or "").lower() == "delivery"
+    )
+    if len(actual_delivery_ids) != 1:
+        return None
+    verification_finals = {
+        scope_id: list(asset_ids)
+        for scope_id, asset_ids in expected.items()
+    }
+    if not any(verification_finals.values()):
+        verification_finals[min(verification_finals)] = actual_delivery_ids
+    else:
+        assigned = {
+            asset_id
+            for asset_ids in verification_finals.values()
+            for asset_id in asset_ids
+        }
+        if assigned != set(actual_delivery_ids):
+            return None
+    candidate = _resolve_exact_retouch_terminal_submit(
+        scopes,
+        events,
+        assets,
+        verification_finals,
+        RETOUCH_PREMATURE_TERMINAL_PARTIAL_POLICY,
+    )
+    if candidate is None:
+        return None
+    verification_evidence = [
+        evidence_id
+        for membership in candidate["_retouch_scope_memberships"].values()
+        for evidence_id in membership.get("completion_event_ids", [])
+    ]
+    candidate["_retouch_scope_memberships"] = {
+        str(scope_id): {
+            "asset_version_ids": list(asset_ids),
+            "completion_event_ids": (
+                candidate["_retouch_scope_memberships"]
+                .get(str(scope_id), {})
+                .get("completion_event_ids", [])
+            ),
+        }
+        for scope_id, asset_ids in expected.items()
+    }
+    candidate["_unassigned_delivery_ids"] = sorted(
+        set(actual_delivery_ids)
+        - {
+            asset_id
+            for asset_ids in expected.values()
+            for asset_id in asset_ids
+        }
+    )
+    candidate["_unassigned_completion_event_ids"] = verification_evidence
+    return candidate
+
+
+def resolve_legacy_retouch_visual_scope_task2533(
+    scopes, events, assets, references
+):
+    """Resolve the one visually reviewed multi-requirement retouch task."""
+    def order_key(event):
+        return (
+            str(event.get("created_at") or ""),
+            event.get("namespace") == "task_module_event",
+            int(event.get("sequence") or 0),
+            str(event.get("id") or ""),
+        )
+
+    if (
+        len(scopes) != len(LEGACY_RETOUCH_VISUAL_SCOPE_TASK2533)
+        or {int(scope.get("task_id") or 0) for scope in scopes} != {2533}
+        or {
+            int(scope.get("scope_ref_id") or 0) for scope in scopes
+        }
+        != set(LEGACY_RETOUCH_VISUAL_SCOPE_TASK2533)
+        or any(
+            scope.get("scope_kind") != "retouch_requirement"
+            or str(scope.get("task_status") or "") != "Completed"
+            for scope in scopes
+        )
+    ):
+        return None
+
+    expected_sources = {
+        int(contract["source"])
+        for contract in LEGACY_RETOUCH_VISUAL_SCOPE_TASK2533.values()
+    }
+    expected_finals = {
+        int(contract["final"])
+        for contract in LEGACY_RETOUCH_VISUAL_SCOPE_TASK2533.values()
+    }
+    expected_unassigned = set(LEGACY_RETOUCH_VISUAL_UNASSIGNED_TASK2533)
+    relevant_assets = {
+        int(asset["id"]): asset
+        for asset in assets
+        if active_asset(asset)
+        and str(asset.get("asset_type") or "") in {"source", "delivery"}
+    }
+    if set(relevant_assets) != (
+        expected_sources | expected_finals | expected_unassigned
+    ) or any(
+        relevant_assets[asset_id].get("retouch_requirement_id")
+        not in (None, "", 0)
+        for asset_id in expected_finals | expected_unassigned
+    ):
+        return None
+
+    expected_references = {
+        int(reference_id)
+        for contract in LEGACY_RETOUCH_VISUAL_SCOPE_TASK2533.values()
+        for reference_id in contract["references"]
+    }
+    actual_references = {
+        int(reference["id"])
+        for reference in references
+        if int(reference.get("task_id") or 0) == 2533
+    }
+    if actual_references != expected_references:
+        return None
+
+    completions_by_asset: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    for event in events:
+        if (
+            event.get("namespace") == "task_event_log"
+            and str(event.get("event_type") or "").lower()
+            in UPLOAD_SESSION_COMPLETED_EVENTS
+        ):
+            for asset_id in payload_asset_version_ids(event_payload(event)):
+                if asset_id in relevant_assets:
+                    completions_by_asset[asset_id].append(event)
+    if any(
+        len(completions_by_asset.get(asset_id, [])) != 1
+        for asset_id in relevant_assets
+    ):
+        return None
+
+    submits = [
+        event
+        for event in events
+        if event.get("namespace") == "task_event_log"
+        and event_kind(event) == "submit"
+    ]
+    if len(submits) != 1:
+        return None
+    submit = submits[0]
+    if (
+        int(submit.get("actor_id") or 0) != 228
+        or str(event_payload(submit).get("upload_session_id") or "").strip()
+        != str(
+            relevant_assets[LEGACY_RETOUCH_VISUAL_UNASSIGNED_TASK2533[0]].get(
+                "upload_session_id"
+            )
+            or relevant_assets[
+                LEGACY_RETOUCH_VISUAL_UNASSIGNED_TASK2533[0]
+            ].get("upload_request_id")
+            or ""
+        ).strip()
+        or any(
+            event_kind(event) in {"submit", "reject", "reopen"}
+            and order_key(event) > order_key(submit)
+            for event in events
+        )
+    ):
+        return None
+
+    scope_by_id = {
+        int(scope["scope_ref_id"]): scope for scope in scopes
+    }
+    reference_by_id = {
+        int(reference["id"]): reference for reference in references
+    }
+    by_scope = {}
+    for scope_id, contract in LEGACY_RETOUCH_VISUAL_SCOPE_TASK2533.items():
+        scope = scope_by_id[scope_id]
+        source = relevant_assets[int(contract["source"])]
+        final = relevant_assets[int(contract["final"])]
+        if (
+            str(source.get("asset_type") or "") != "source"
+            or int(source.get("retouch_requirement_id") or 0) != scope_id
+            or str(source.get("source_module_key") or "") != "retouch"
+            or str(final.get("asset_type") or "") != "delivery"
+            or final.get("retouch_requirement_id") not in (None, "", 0)
+            or str(final.get("source_module_key") or "") != "retouch"
+            or not at_or_before(source, submit["created_at"])
+            or not at_or_before(final, submit["created_at"])
+            or any(
+                int(reference_by_id[reference_id].get(
+                    "retouch_requirement_id"
+                ) or 0)
+                != scope_id
+                for reference_id in contract["references"]
+            )
+        ):
+            return None
+        for asset in (source, final):
+            completion = completions_by_asset[int(asset["id"])][0]
+            asset_session = str(
+                asset.get("upload_session_id")
+                or asset.get("upload_request_id")
+                or ""
+            ).strip()
+            if (
+                not asset_session
+                or asset_session
+                != str(
+                    event_payload(completion).get("upload_session_id") or ""
+                ).strip()
+                or not at_or_before(completion, submit["created_at"])
+            ):
+                return None
+        by_scope[scope_id] = {
+            "source": source,
+            "final": final,
+            "references": list(contract["references"]),
+            "completion_events": [
+                completions_by_asset[int(source["id"])][0],
+                completions_by_asset[int(final["id"])][0],
+            ],
+        }
+    return {"submit": submit, "by_scope": by_scope}
 
 
 def scoped_boundary_events(scope, events, assets, sku_scope_count):
     applicable = [
         dict(event) for event in events
-        if event_kind(event) and event_applies_to_scope(event, scope, events, assets, sku_scope_count)
+        if event_kind(event)
+        and not is_nonfinal_customization_gate(event)
+        and not is_customization_rejection_reopen_side_effect(event)
+        and event_applies_to_scope(
+            event, scope, events, assets, sku_scope_count
+        )
     ]
     # Prefer task_event_logs when legacy dual-write produced an equivalent
     # task_module_event. Evidence remains stable without replaying the same
@@ -1243,6 +2476,32 @@ def scoped_boundary_events(scope, events, assets, sku_scope_count):
     applicable.sort(key=lambda event: (event["created_at"], event.get("namespace") == "task_module_event", str(event["id"])))
     deduped, seen = [], {}
     for event in applicable:
+        rejection_key = rejection_semantic_key(event)
+        if rejection_key and deduped:
+            previous = deduped[-1]
+            previous_key = rejection_semantic_key(previous)
+            is_same_transition_without_resubmit = (
+                rejection_key == previous_key
+                and (
+                    event.get("namespace") == previous.get("namespace")
+                    or timestamps_within_seconds(event, previous, 2)
+                )
+            )
+            if is_same_transition_without_resubmit:
+                duplicate_ids = event_evidence_ids(previous)
+                if (
+                    previous.get("namespace") == "task_module_event"
+                    and event.get("namespace") == "task_event_log"
+                ):
+                    event.setdefault("_duplicate_evidence_ids", []).extend(
+                        duplicate_ids
+                    )
+                    deduped[-1] = event
+                else:
+                    previous.setdefault(
+                        "_duplicate_evidence_ids", []
+                    ).extend(event_evidence_ids(event))
+                continue
         key = event_dedup_key(event)
         if key in seen:
             if key and key[0] == "warehouse_rejected":
@@ -1262,6 +2521,259 @@ def review_row(scope, revision, confidence, reason):
         "candidate_source_ids": str(revision.get("source_task_asset_id", "")) if revision else "",
         "candidate_final_ids": "|".join(str(v) for v in revision["final_task_asset_ids"]) if revision else "",
         "reviewer_id": "", "reviewed_at": "", "decision": "", "review_note": "",
+    }
+
+
+def resolve_customization_terminal_without_assets(
+    task_scopes, events, assets
+):
+    if not task_scopes:
+        return None
+    task_id = int(task_scopes[0]["task_id"])
+    contract = LEGACY_CUSTOMIZATION_TERMINAL_WITHOUT_ASSETS.get(task_id)
+    if contract is None:
+        return None
+    actual_scopes = {
+        (str(scope["scope_kind"]), int(scope["scope_ref_id"]))
+        for scope in task_scopes
+    }
+    if (
+        actual_scopes != set(contract)
+        or any(
+            str(scope.get("task_status") or "") != "PendingWarehouseReceive"
+            for scope in task_scopes
+        )
+    ):
+        return None
+    approvals = []
+    for event in events:
+        payload = event_payload(event)
+        if (
+            str(event.get("event_type") or "").lower()
+            == "task.customization.reviewed"
+            and str(payload.get("customization_review_decision") or "").lower()
+            == "approved"
+            and str(payload.get("from_task_status") or "")
+            == "PendingCustomizationReview"
+            and str(payload.get("to_task_status") or "")
+            == "PendingWarehouseReceive"
+            and int(event.get("actor_id") or 0) > 0
+        ):
+            approvals.append(event)
+    if len(approvals) != 1:
+        return None
+    approval = approvals[0]
+    selected_by_scope = {}
+    for scope in task_scopes:
+        scope_key = (str(scope["scope_kind"]), int(scope["scope_ref_id"]))
+        expected_ids = contract[scope_key]
+        observed = sorted(
+            (
+                asset
+                for asset in assets
+                if scope_matches(scope, asset)
+                and active_asset(asset)
+                and at_or_before(asset, approval["created_at"])
+                and str(asset.get("asset_type") or "") in {"source", "delivery"}
+            ),
+            key=lambda asset: (asset["created_at"], int(asset["id"])),
+        )
+        if [int(asset["id"]) for asset in observed] != expected_ids:
+            return None
+        if any(str(asset.get("asset_type") or "") != "source" for asset in observed):
+            return None
+        selected_by_scope[scope_key] = observed
+    return {"event": approval, "selected_by_scope": selected_by_scope}
+
+
+def build_customization_terminal_without_assets_resource(
+    scope, candidate, assets, references
+):
+    event = candidate["event"]
+    scope_key = (str(scope["scope_kind"]), int(scope["scope_ref_id"]))
+    revision = make_revision(
+        scope,
+        event,
+        1,
+        "draft",
+        "reopen",
+        assets,
+        references,
+        selected_assets=candidate["selected_by_scope"][scope_key],
+    )
+    revision["reason"] = (
+        f"policy {CUSTOMIZATION_TERMINAL_WITHOUT_ASSETS_POLICY}: retired "
+        "customization approval reached PendingWarehouseReceive without a "
+        "complete final snapshot; preserve only the exact allowlisted source "
+        "membership and reopen an editable draft; human confirmation remains "
+        "required"
+    )
+    blockers = list(revision.pop("_blockers", []))
+    if blockers:
+        revision["blockers"] = blockers
+        revision["confidence"] = "hard_blocked"
+    revision["review_policy_ids"] = revision_review_policy_ids(scope, revision)
+    recompute_revision_hash(revision)
+    return {
+        "task_id": int(scope["task_id"]),
+        "scope_kind": str(scope["scope_kind"]),
+        "scope_ref_id": int(scope["scope_ref_id"]),
+        "history": [revision],
+        "working_revision_no": 1,
+    }
+
+
+def build_premature_retouch_resource(scope, candidate, assets, references):
+    membership = candidate["_retouch_scope_memberships"][
+        str(scope["scope_ref_id"])
+    ]
+    asset_by_id = {int(asset["id"]): asset for asset in assets}
+    selected = [
+        asset_by_id[int(asset_id)]
+        for asset_id in membership.get("asset_version_ids") or []
+    ]
+    evidence = list(membership.get("completion_event_ids") or [])
+    evidence.extend(event_evidence_ids(candidate))
+    task_scope = (int(scope["task_id"]), int(scope["scope_ref_id"]))
+    policy_reason = (
+        f"policy {RETOUCH_PREMATURE_TERMINAL_PARTIAL_POLICY}: legacy "
+        "Completed was premature; preserve only allowlisted partial membership "
+        "and reopen an editable draft; human confirmation remains required"
+    )
+
+    revisions = []
+    if task_scope in LEGACY_RETOUCH_PREMATURE_FINALIZED_SCOPES:
+        finalized = make_revision(
+            scope,
+            candidate,
+            1,
+            "finalized",
+            "retouch",
+            assets,
+            references,
+            selected_assets=selected,
+            extra_evidence=evidence,
+        )
+        finalized["reason"] = policy_reason
+        recompute_revision_hash(finalized)
+        draft = make_revision(
+            scope,
+            candidate,
+            2,
+            "draft",
+            "reopen",
+            assets,
+            references,
+            inherited=finalized,
+            extra_evidence=evidence,
+        )
+        draft["reason"] = policy_reason
+        recompute_revision_hash(draft)
+        revisions = [finalized, draft]
+        working, finalized_no = 2, 1
+    else:
+        if (
+            not selected
+            and int(scope["scope_ref_id"])
+            == min(
+                LEGACY_RETOUCH_PREMATURE_PARTIAL_FINALS[int(scope["task_id"])]
+            )
+        ):
+            # Preserve exact event coverage without claiming that the unscoped
+            # delivery belongs to this requirement.
+            evidence = list(
+                candidate.get("_unassigned_completion_event_ids") or []
+            ) + event_evidence_ids(candidate)
+        draft = make_revision(
+            scope,
+            candidate,
+            1,
+            "draft",
+            "reopen",
+            assets,
+            references,
+            selected_assets=selected,
+            extra_evidence=evidence,
+        )
+        draft["reason"] = policy_reason
+        # Task-level legacy references cannot be assigned across multiple
+        # requirements without exact range evidence.
+        draft["reference_file_ref_ids"] = []
+        recompute_revision_hash(draft)
+        revisions = [draft]
+        working, finalized_no = 1, None
+
+    for revision in revisions:
+        blockers = list(revision.pop("_blockers", []))
+        if blockers:
+            revision["blockers"] = blockers
+            revision["confidence"] = "hard_blocked"
+        revision["evidence_event_ids"] = list(
+            dict.fromkeys(revision.get("evidence_event_ids") or [])
+        )
+        revision["review_policy_ids"] = revision_review_policy_ids(
+            scope, revision
+        )
+        recompute_revision_hash(revision)
+    resource = {
+        "task_id": int(scope["task_id"]),
+        "scope_kind": "retouch_requirement",
+        "scope_ref_id": int(scope["scope_ref_id"]),
+        "history": revisions,
+        "working_revision_no": working,
+    }
+    if finalized_no is not None:
+        resource["finalized_revision_no"] = finalized_no
+    return resource
+
+
+def build_retouch_visual_scope_task2533_resource(
+    scope, candidate, assets, references
+):
+    membership = candidate["by_scope"][int(scope["scope_ref_id"])]
+    completion_evidence = sorted_evidence_ids(
+        (
+            evidence_id
+            for event in membership["completion_events"]
+            for evidence_id in event_evidence_ids(event)
+        ),
+        membership["completion_events"],
+    )
+    revision = make_revision(
+        scope,
+        candidate["submit"],
+        1,
+        "finalized",
+        "retouch",
+        assets,
+        references,
+        selected_assets=[membership["source"], membership["final"]],
+        extra_evidence=completion_evidence,
+    )
+    revision["reference_file_ref_ids"] = list(membership["references"])
+    revision["reason"] = (
+        f"policy {RETOUCH_VISUAL_SCOPE_TASK2533_POLICY}: read-only "
+        "production-page visual review binds this exact source/final/reference "
+        "membership; delivery asset 19803 remains preserved but unassigned; "
+        "human policy confirmation remains required"
+    )
+    blockers = list(revision.pop("_blockers", []))
+    if blockers:
+        revision["blockers"] = blockers
+        revision["confidence"] = "hard_blocked"
+    revision["review_policy_ids"] = revision_review_policy_ids(scope, revision)
+    revision["evidence_event_ids"] = sorted_evidence_ids(
+        revision["evidence_event_ids"],
+        membership["completion_events"] + [candidate["submit"]],
+    )
+    recompute_revision_hash(revision)
+    return {
+        "task_id": 2533,
+        "scope_kind": "retouch_requirement",
+        "scope_ref_id": int(scope["scope_ref_id"]),
+        "history": [revision],
+        "working_revision_no": 1,
+        "finalized_revision_no": 1,
     }
 
 
@@ -1380,6 +2892,11 @@ def build_organization_mappings(rows: dict[str, Any]) -> tuple[list[dict[str, An
         from_department_id = positive_or_none(row.get("department_id"))
         from_team_id = positive_or_none(row.get("team_id"))
         used_alias = False
+        uat_orphan_target = (
+            UAT_ORPHAN_ORG_TARGETS.get(subject_id)
+            if subject_type == "task"
+            else None
+        )
 
         target_department_id = from_department_id
         if target_department_id not in departments_by_id:
@@ -1405,6 +2922,21 @@ def build_organization_mappings(rows: dict[str, Any]) -> tuple[list[dict[str, An
             )
             target_team_id = int(matches[0]["id"]) if len(matches) == 1 else None
 
+        if uat_orphan_target is not None:
+            expected_department_id, expected_team_id = uat_orphan_target
+            target_team = teams_by_id.get(expected_team_id)
+            if (
+                expected_department_id not in departments_by_id
+                or target_team is None
+                or int(target_team["department_id"]) != expected_department_id
+            ):
+                raise ValueError(
+                    "frozen unassigned organization target 3/14 is unavailable "
+                    f"for UAT task {subject_id}"
+                )
+            target_department_id = expected_department_id
+            target_team_id = expected_team_id
+
         blockers: list[str] = []
         if target_department_id is None:
             blockers.append(
@@ -1416,7 +2948,9 @@ def build_organization_mappings(rows: dict[str, Any]) -> tuple[list[dict[str, An
             )
         confidence = "hard_blocked" if blockers else "proposed_review"
         policies = [
-            ORG_MANUAL_TARGET_POLICY
+            UAT_ORPHAN_ORG_POLICY
+            if uat_orphan_target is not None
+            else ORG_MANUAL_TARGET_POLICY
             if blockers
             else ORG_ALIAS_LINEAGE_POLICY
             if used_alias
@@ -1525,15 +3059,25 @@ def build_access_decisions(rows: dict[str, Any]) -> tuple[list[dict[str, Any]], 
         ):
             action = "preserve_existing"
             policies = [EXISTING_ACCESS_PRESERVED_POLICY]
+        elif legacy_role in {"Outsource", "OrgAdmin"} and evidence:
+            # Neither legacy role has a stable V8 equivalent.  The owner has
+            # approved preserving the independently-existing assignments and
+            # adding no replacement grant.  This is deliberately not
+            # ``preserve_existing``: the legacy role itself contributes no
+            # authority after cutover.
+            action = "no_new_grant"
+            policies = [EXISTING_ACCESS_PRESERVED_POLICY]
         elif legacy_role == "Outsource":
             policies = [OUTSOURCE_ACCESS_DECISION_POLICY]
             blockers.append(
-                "Outsource has no V8 role equivalent; explicit no-grant or separately provisioned replacement is required"
+                "Outsource has no V8 role equivalent and the user has no "
+                "independent V8 assignment evidence"
             )
         elif legacy_role == "OrgAdmin":
             policies = [ORG_ADMIN_ACCESS_DECISION_POLICY]
             blockers.append(
-                "OrgAdmin cannot be widened to global access_admin without an explicit administrator decision"
+                "OrgAdmin has no independent V8 assignment evidence and "
+                "cannot be widened to global access_admin"
             )
         else:
             policies = [EXISTING_ACCESS_PRESERVED_POLICY]
@@ -1579,6 +3123,209 @@ def build_access_decisions(rows: dict[str, Any]) -> tuple[list[dict[str, Any]], 
     return decisions, manual
 
 
+def build_deleted_asset_recoveries(
+    rows: dict[str, Any],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    assets_by_id = {
+        int(row["id"]): row
+        for row in rows.get("assets", [])
+        if row.get("id") is not None
+    }
+    relevant_ids = set(LEGACY_DELETED_ASSET_RECOVERY_EVIDENCE)
+    if relevant_ids.isdisjoint(assets_by_id):
+        return [], []
+    if not relevant_ids.issubset(assets_by_id):
+        missing = sorted(relevant_ids - set(assets_by_id))
+        raise ValueError(
+            f"deleted-asset recovery evidence is incomplete; missing task_assets {missing}"
+        )
+
+    recoveries = []
+    manual = []
+    for missing_id, evidence in sorted(
+        LEGACY_DELETED_ASSET_RECOVERY_EVIDENCE.items()
+    ):
+        missing = assets_by_id[missing_id]
+        if (
+            int(missing.get("task_id") or 0) != evidence["task_id"]
+            or int(missing.get("file_size") or 0)
+            != evidence["expected_file_size"]
+            or str(missing.get("storage_ref_id") or "")
+            != evidence["original_storage_ref_id"]
+        ):
+            raise ValueError(
+                f"task_asset {missing_id} differs from the frozen recovery identity"
+            )
+        source_id = evidence["recovery_source_task_asset_id"]
+        if source_id:
+            source = assets_by_id.get(source_id)
+            if source is None:
+                raise ValueError(
+                    f"task_asset {missing_id} recovery source {source_id} is absent"
+                )
+            if (
+                int(source.get("file_size") or 0)
+                != evidence["expected_file_size"]
+                or str(source.get("storage_ref_id") or "")
+                != evidence["recovery_source_storage_ref_id"]
+            ):
+                raise ValueError(
+                    f"task_asset {missing_id} source {source_id} differs from the frozen size/storage identity"
+                )
+            source_task_assets = [
+                row
+                for row in assets_by_id.values()
+                if int(row.get("task_id") or 0)
+                == int(source.get("task_id") or 0)
+            ]
+            if not any(
+                row.get("asset_type") == "preview"
+                and int(row.get("source_asset_version_id") or 0) == source_id
+                and row.get("whole_hash") == evidence["preview_whole_hash"]
+                for row in source_task_assets
+            ) or not any(
+                row.get("asset_type") == "design_thumb"
+                and int(row.get("source_asset_version_id") or 0) == source_id
+                and row.get("whole_hash")
+                == evidence["design_thumb_whole_hash"]
+                for row in source_task_assets
+            ):
+                raise ValueError(
+                    f"task_asset {missing_id} source {source_id} lacks pairwise-identical derivative hashes"
+                )
+        rejected_ids = evidence["rejected_source_task_asset_ids"]
+        if rejected_ids:
+            rejected_sizes = []
+            for rejected_id in rejected_ids:
+                rejected = assets_by_id.get(rejected_id)
+                if rejected is None:
+                    raise ValueError(
+                        f"task_asset {missing_id} rejected source {rejected_id} is absent"
+                    )
+                rejected_sizes.append(int(rejected.get("file_size") or 0))
+            if any(
+                size == evidence["expected_file_size"]
+                for size in rejected_sizes
+            ):
+                raise ValueError(
+                    f"task_asset {missing_id} rejected source unexpectedly matches the original byte size"
+                )
+
+        task_assets = [
+            row
+            for row in assets_by_id.values()
+            if int(row.get("task_id") or 0) == evidence["task_id"]
+        ]
+        if not any(
+            row.get("asset_type") == "preview"
+            and int(row.get("source_asset_version_id") or 0) == missing_id
+            and row.get("whole_hash") == evidence["preview_whole_hash"]
+            for row in task_assets
+        ) or not any(
+            row.get("asset_type") == "design_thumb"
+            and int(row.get("source_asset_version_id") or 0) == missing_id
+            and row.get("whole_hash") == evidence["design_thumb_whole_hash"]
+            for row in task_assets
+        ):
+            raise ValueError(
+                f"task_asset {missing_id} lacks the frozen preview/design-thumb evidence"
+            )
+
+        historical_unavailable = not source_id
+        recovery = {
+            "task_id": evidence["task_id"],
+            "missing_task_asset_id": missing_id,
+            "recovery_source_task_asset_id": source_id,
+            **(
+                {"rejected_source_task_asset_ids": rejected_ids}
+                if rejected_ids
+                else {}
+            ),
+            "strategy": (
+                "historical_unavailable_tombstone_v1"
+                if historical_unavailable
+                else "clone_b_prematerialized_storage_ref_v1"
+            ),
+            "original_storage_ref_id": evidence["original_storage_ref_id"],
+            **(
+                {
+                    "recovery_source_storage_ref_id":
+                    evidence["recovery_source_storage_ref_id"]
+                }
+                if evidence["recovery_source_storage_ref_id"]
+                else {}
+            ),
+            "expected_file_size": evidence["expected_file_size"],
+            "preview_whole_hash": evidence["preview_whole_hash"],
+            "design_thumb_whole_hash": evidence["design_thumb_whole_hash"],
+            **(
+                {
+                    "controlled_read_protocol":
+                        evidence["controlled_read_protocol"],
+                    "controlled_read_evidence_sha256":
+                        evidence["controlled_read_evidence_sha256"],
+                    "recovery_source_sha256":
+                        evidence["recovery_source_sha256"],
+                }
+                if not historical_unavailable
+                else {}
+            ),
+            **(
+                {
+                    "object_probe_result": evidence["object_probe_result"],
+                    "object_probe_input_manifest_sha256":
+                        evidence["object_probe_input_manifest_sha256"],
+                    "object_probe_evidence_hash":
+                        evidence["object_probe_evidence_hash"],
+                    "object_probe_object_key_sha256":
+                        evidence["object_probe_object_key_sha256"],
+                    "object_probe_read_only_get_count":
+                        evidence["object_probe_read_only_get_count"],
+                }
+                if historical_unavailable
+                else {}
+            ),
+            "confidence": "proposed_review",
+            "review_policy_ids": [
+                HISTORICAL_ASSET_UNAVAILABLE_POLICY
+                if historical_unavailable
+                else DELETED_ASSET_RECOVERY_POLICY
+            ],
+            "confirmed_by": 0,
+            "confirmed_at": ZERO_TIME,
+            "confirmation_note": "",
+        }
+        recompute_mapping_row_hash(recovery)
+        recoveries.append(recovery)
+        manual.append(
+            {
+                "task_id": evidence["task_id"],
+                "scope_kind": "asset_recovery",
+                "scope_ref_id": missing_id,
+                "revision_no": "",
+                "confidence": recovery["confidence"],
+                "reason": (
+                    "same-root successors 14510/14514 have different sizes and "
+                    "must never replace task_asset 12323"
+                    if historical_unavailable
+                    else (
+                        f"policy review required: {DELETED_ASSET_RECOVERY_POLICY}; "
+                        f"preserve task_asset {missing_id} identity and pre-materialize "
+                        f"bytes from {source_id} only inside a run-scoped Clone B root"
+                    )
+                ),
+                "evidence_event_ids": "",
+                "candidate_source_ids": str(source_id) if source_id else "14510|14514",
+                "candidate_final_ids": "",
+                "reviewer_id": "",
+                "reviewed_at": "",
+                "decision": "",
+                "review_note": "",
+            }
+        )
+    return recoveries, manual
+
+
 def generate(rows):
     assets_by_task, refs_by_task, events_by_task = defaultdict(list), defaultdict(list), defaultdict(list)
     for row in rows["assets"]:
@@ -1596,14 +3343,63 @@ def generate(rows):
             sku_scope_counts[int(scope["task_id"])] += 1
         elif scope["scope_kind"] == "retouch_requirement":
             retouch_scope_counts[int(scope["task_id"])] += 1
-    batch_submit_by_task = {
-        task_id: candidate
+    batch_submits_by_task = {
+        task_id: candidates
         for task_id, task_scopes in scopes_by_task.items()
-        if (candidate := resolve_atomic_multi_sku_batch_submit(
+        if (candidates := resolve_atomic_multi_sku_batch_submits(
             task_scopes,
             events_by_task[task_id],
             assets_by_task[task_id],
-        )) is not None
+        ))
+    }
+    retouch_atomic_submit_by_task = {
+        task_id: candidate
+        for task_id, task_scopes in scopes_by_task.items()
+        if (
+            candidate := resolve_legacy_retouch_unscoped_atomic_batch(
+                task_scopes,
+                events_by_task[task_id],
+                assets_by_task[task_id],
+            )
+        )
+        is not None
+    }
+    retouch_partial_submit_by_task = {
+        task_id: candidate
+        for task_id, task_scopes in scopes_by_task.items()
+        if (
+            candidate := resolve_legacy_retouch_premature_partial(
+                task_scopes,
+                events_by_task[task_id],
+                assets_by_task[task_id],
+            )
+        )
+        is not None
+    }
+    retouch_visual_scope_by_task = {
+        task_id: candidate
+        for task_id, task_scopes in scopes_by_task.items()
+        if (
+            candidate := resolve_legacy_retouch_visual_scope_task2533(
+                task_scopes,
+                events_by_task[task_id],
+                assets_by_task[task_id],
+                refs_by_task[task_id],
+            )
+        )
+        is not None
+    }
+    customization_terminal_without_assets_by_task = {
+        task_id: candidate
+        for task_id, task_scopes in scopes_by_task.items()
+        if (
+            candidate := resolve_customization_terminal_without_assets(
+                task_scopes,
+                events_by_task[task_id],
+                assets_by_task[task_id],
+            )
+        )
+        is not None
     }
     manual, resources = [], []
     for scope in sorted(rows["scopes"], key=lambda x: (int(x["task_id"]), x["scope_kind"], int(x["scope_ref_id"]))):
@@ -1613,14 +3409,101 @@ def generate(rows):
         scope["_single_requirement"] = (
             scope["scope_kind"] == "retouch_requirement" and retouch_scope_counts[task_id] == 1
         )
+        if (
+            scope["scope_kind"] == "retouch_requirement"
+            and task_id in retouch_visual_scope_by_task
+        ):
+            resource = build_retouch_visual_scope_task2533_resource(
+                scope,
+                retouch_visual_scope_by_task[task_id],
+                assets_by_task[task_id],
+                refs_by_task[task_id],
+            )
+            resources.append(resource)
+            revision = resource["history"][0]
+            manual.append(
+                review_row(
+                    scope,
+                    revision,
+                    revision["confidence"],
+                    revision["reason"],
+                )
+            )
+            continue
+        if task_id in customization_terminal_without_assets_by_task:
+            resource = build_customization_terminal_without_assets_resource(
+                scope,
+                customization_terminal_without_assets_by_task[task_id],
+                assets_by_task[task_id],
+                refs_by_task[task_id],
+            )
+            resources.append(resource)
+            revision = resource["history"][0]
+            manual.append(
+                review_row(
+                    scope,
+                    revision,
+                    revision["confidence"],
+                    revision["reason"],
+                )
+            )
+            continue
+        if (
+            scope["scope_kind"] == "retouch_requirement"
+            and task_id in retouch_partial_submit_by_task
+        ):
+            resource = build_premature_retouch_resource(
+                scope,
+                retouch_partial_submit_by_task[task_id],
+                assets_by_task[task_id],
+                refs_by_task[task_id],
+            )
+            resources.append(resource)
+            for revision in resource["history"]:
+                manual.append(
+                    review_row(
+                        scope,
+                        revision,
+                        revision["confidence"],
+                        revision["reason"],
+                    )
+                )
+            continue
         boundary = scoped_boundary_events(
             scope,
             events_by_task[task_id],
             assets_by_task[task_id],
             sku_scope_counts[task_id],
         )
-        if scope["scope_kind"] == "sku" and task_id in batch_submit_by_task:
-            boundary = [dict(batch_submit_by_task[task_id])]
+        if scope["scope_kind"] == "sku" and task_id in batch_submits_by_task:
+            atomic_submits = [
+                dict(candidate)
+                for candidate in batch_submits_by_task[task_id]
+            ]
+            boundary = [
+                event for event in boundary
+                if event_kind(event) != "submit"
+            ] + atomic_submits
+            boundary.sort(key=lambda event: (
+                event.get("created_at", ""),
+                event.get("namespace") == "task_module_event",
+                str(event.get("id") or ""),
+            ))
+        if (
+            scope["scope_kind"] == "retouch_requirement"
+            and task_id in retouch_atomic_submit_by_task
+        ):
+            atomic_submit = dict(retouch_atomic_submit_by_task[task_id])
+            boundary = [
+                event for event in boundary if event_kind(event) != "submit"
+            ] + [atomic_submit]
+            boundary.sort(
+                key=lambda event: (
+                    event.get("created_at", ""),
+                    event.get("namespace") == "task_module_event",
+                    str(event.get("id") or ""),
+                )
+            )
         revisions = []
         working = None
         finalized = None
@@ -1702,13 +3585,25 @@ def generate(rows):
                         recompute_revision_hash(revisions[finalized - 1])
                     current["status"] = "finalized"
                     current["finalized_at"] = current["submitted_at"]
-                    current["reason"] = (
-                        f"policy {RETOUCH_TERMINAL_SUBMIT_POLICY}: current "
-                        "retouch submit semantics complete the task directly; "
-                        "the legacy Completed task has one scope-proven final "
-                        "and a matching completed upload session; human "
-                        "confirmation remains required"
+                    retouch_policy = str(
+                        event.get("_migration_policy")
+                        or RETOUCH_TERMINAL_SUBMIT_POLICY
                     )
+                    if retouch_policy == RETOUCH_UNSCOPED_ATOMIC_BATCH_POLICY:
+                        current["reason"] = (
+                            f"policy {retouch_policy}: the sole task-level "
+                            "retouch submit follows complete allowlisted "
+                            "delivery coverage for every requirement; human "
+                            "confirmation remains required"
+                        )
+                    else:
+                        current["reason"] = (
+                            f"policy {retouch_policy}: current retouch submit "
+                            "semantics complete the task directly; the legacy "
+                            "Completed task has one scope-proven final and a "
+                            "matching completed upload session; human "
+                            "confirmation remains required"
+                        )
                     recompute_revision_hash(current)
                     working = finalized = current["revision_no"]
             elif kind in {"approve", "close"}:
@@ -1723,6 +3618,14 @@ def generate(rows):
                     if not changed:
                         changed = apply_proven_successor_audit_change(
                             scope, event, events_by_task[task_id], assets_by_task[task_id], probe,
+                        )
+                    if not changed:
+                        changed = apply_proven_legacy_audit_stage_snapshot(
+                            scope,
+                            event,
+                            events_by_task[task_id],
+                            assets_by_task[task_id],
+                            probe,
                         )
                     late_assets = assets_created_between(scope, assets_by_task[task_id], current.get("submitted_at", current["created_at"]), event["created_at"])
                     if not changed and late_assets:
@@ -1752,6 +3655,9 @@ def generate(rows):
                             "reference_file_ref_ids": list(probe["reference_file_ref_ids"]),
                             "evidence_event_ids": list(dict.fromkeys(probe["evidence_event_ids"])),
                             "_blockers": list(probe.get("_blockers", [])),
+                            "_review_policy_ids": list(
+                                probe.get("_review_policy_ids", [])
+                            ),
                         })
                         if revision.get("source_task_asset_id") is None:
                             revision.pop("source_task_asset_id", None)
@@ -1814,14 +3720,17 @@ def generate(rows):
                 elif current["status"] != "submitted":
                     current["status"] = "rejected"
                     current.pop("finalized_at", None)
-                    if stable_event_id(event) not in current["evidence_event_ids"]:
-                        current["evidence_event_ids"].append(stable_event_id(event))
+                    for evidence_id in event_evidence_ids(event):
+                        if evidence_id not in current["evidence_event_ids"]:
+                            current["evidence_event_ids"].append(evidence_id)
                     add_blocker(current, "rejection boundary has no preceding submitted revision")
                     recompute_revision_hash(current)
                 else:
                     current["status"] = "rejected"
                     current.pop("finalized_at", None)
-                    current["evidence_event_ids"].append(stable_event_id(event))
+                    for evidence_id in event_evidence_ids(event):
+                        if evidence_id not in current["evidence_event_ids"]:
+                            current["evidence_event_ids"].append(evidence_id)
                     recompute_revision_hash(current)
                 draft = make_revision(scope, event, len(revisions) + 1, "draft", "reopen", assets_by_task[task_id], refs_by_task[task_id], inherited=current)
                 revisions.append(draft)
@@ -1855,7 +3764,16 @@ def generate(rows):
                 payload = event_payload(event)
                 session_id = str(payload.get("upload_session_id") or payload.get("asset_upload_session_id") or "")
                 operation = str(payload.get("final_mode") or payload.get("asset_operation") or "").lower()
-                before, after = nested_number(payload, "before"), nested_number(payload, "after")
+                before = nested_number(payload, "before")
+                after = nested_number(payload, "after")
+                if before is None:
+                    before = nested_number(
+                        payload, "audit_delivery_count_before"
+                    )
+                if after is None:
+                    after = nested_number(
+                        payload, "audit_delivery_count_after"
+                    )
                 inferred_append = before is not None and after == before + 1
                 changed = apply_explicit_audit_change(scope, event, assets_by_task[task_id], revision)
                 if inherited is None:
@@ -1881,6 +3799,28 @@ def generate(rows):
             working,
             finalized,
         )
+        ambiguous_completed_retouch = (
+            scope["scope_kind"] == "retouch_requirement"
+            and str(scope.get("task_status") or "") == "Completed"
+            and retouch_scope_counts[task_id] > 1
+            and task_id not in retouch_atomic_submit_by_task
+            and task_id not in retouch_visual_scope_by_task
+            and any(
+                active_asset(asset)
+                and str(asset.get("asset_type") or "")
+                in {"source", "delivery"}
+                and asset.get("retouch_requirement_id") in (None, "", 0)
+                for asset in assets_by_task[task_id]
+            )
+        )
+        if ambiguous_completed_retouch:
+            for revision in revisions:
+                add_blocker(
+                    revision,
+                    "Completed multi-requirement retouch task has unscoped "
+                    "source/delivery assets without an exact reviewed "
+                    "membership policy",
+                )
         for revision in revisions:
             clear_rejected_members_from_reopen_draft(
                 revision,
@@ -1898,6 +3838,7 @@ def generate(rows):
             if blockers:
                 revision["blockers"] = blockers
             revision["review_policy_ids"] = revision_review_policy_ids(scope, revision)
+            revision.pop("_review_policy_ids", None)
             recompute_revision_hash(revision)
             reason = "; ".join(blockers) if blockers else "confirm event-to-revision semantics and ordered asset membership"
             if revision.get("reason", "").startswith(f"policy {BATCH_SUBMIT_POLICY}:"):
@@ -1913,12 +3854,171 @@ def generate(rows):
         if finalized is not None:
             resource["finalized_revision_no"] = finalized
         resources.append(resource)
+    task_state_decisions = []
+    for task_id, candidate in sorted(
+        customization_terminal_without_assets_by_task.items()
+    ):
+        evidence_event_ids = event_evidence_ids(candidate["event"])
+        decision = {
+            "task_id": task_id,
+            "from_status": "PendingWarehouseReceive",
+            "target_status": "InProgress",
+            "evidence_event_ids": evidence_event_ids,
+            "confidence": "proposed_review",
+            "review_policy_ids": [
+                CUSTOMIZATION_TERMINAL_WITHOUT_ASSETS_POLICY
+            ],
+            "confirmed_by": 0,
+            "confirmed_at": ZERO_TIME,
+            "confirmation_note": "",
+        }
+        recompute_mapping_row_hash(decision)
+        task_state_decisions.append(decision)
+        manual.append(
+            {
+                "task_id": task_id,
+                "scope_kind": "task_state_decision",
+                "scope_ref_id": 0,
+                "revision_no": "",
+                "confidence": "proposed_review",
+                "reason": (
+                    f"policy review required: "
+                    f"{CUSTOMIZATION_TERMINAL_WITHOUT_ASSETS_POLICY}; map "
+                    "the retired incomplete customization terminal to "
+                    "InProgress without inventing a final asset"
+                ),
+                "evidence_event_ids": "|".join(evidence_event_ids),
+                "candidate_source_ids": "",
+                "candidate_final_ids": "",
+                "reviewer_id": "",
+                "reviewed_at": "",
+                "decision": "",
+                "review_note": "",
+            }
+        )
+    for task_id, candidate in sorted(retouch_partial_submit_by_task.items()):
+        evidence_event_ids = list(
+            candidate.get("_unassigned_completion_event_ids") or []
+        )
+        for membership in candidate["_retouch_scope_memberships"].values():
+            evidence_event_ids.extend(
+                membership.get("completion_event_ids") or []
+            )
+        evidence_event_ids.extend(event_evidence_ids(candidate))
+        decision = {
+            "task_id": task_id,
+            "from_status": "Completed",
+            "target_status": "InProgress",
+            "evidence_event_ids": sorted_evidence_ids(
+                list(dict.fromkeys(evidence_event_ids)),
+                events_by_task[task_id],
+            ),
+            "confidence": "proposed_review",
+            "review_policy_ids": [
+                RETOUCH_PREMATURE_TERMINAL_PARTIAL_POLICY
+            ],
+            "confirmed_by": 0,
+            "confirmed_at": ZERO_TIME,
+            "confirmation_note": "",
+        }
+        recompute_mapping_row_hash(decision)
+        task_state_decisions.append(decision)
+        manual.append(
+            {
+                "task_id": task_id,
+                "scope_kind": "task_state_decision",
+                "scope_ref_id": 0,
+                "revision_no": "",
+                "confidence": "proposed_review",
+                "reason": (
+                    f"policy review required: "
+                    f"{RETOUCH_PREMATURE_TERMINAL_PARTIAL_POLICY}; map "
+                    "premature legacy Completed to InProgress without "
+                    "inventing missing requirement finals"
+                ),
+                "evidence_event_ids": "|".join(
+                    decision["evidence_event_ids"]
+                ),
+                "candidate_source_ids": "",
+                "candidate_final_ids": "",
+                "reviewer_id": "",
+                "reviewed_at": "",
+                "decision": "",
+                "review_note": "",
+            }
+        )
     planning_tasks = []
     planning_by_task = defaultdict(list)
     for row in rows.get("planning_rows", []):
         planning_by_task[int(row["task_id"])].append(row)
     for task_id, items in sorted(planning_by_task.items()):
         task_status = str(items[0].get("task_status") or "")
+        tombstone_contract = INCOMPLETE_UAT_PLANNING_TOMBSTONES.get(task_id)
+        if tombstone_contract is not None:
+            actual_item_ids = tuple(
+                sorted(
+                    int(item["task_sku_item_id"])
+                    for item in items
+                    if item.get("task_sku_item_id") is not None
+                )
+            )
+            if actual_item_ids != tombstone_contract["task_sku_item_ids"]:
+                raise ValueError(
+                    f"UAT planning tombstone task {task_id} expected SKU items "
+                    f"{tombstone_contract['task_sku_item_ids']}, got {actual_item_ids}"
+                )
+            planning = {
+                "task_id": task_id,
+                "target_task_status": tombstone_contract["target_task_status"],
+                "code_rule_revision_id": LEGACY_PLANNING_RULE_REVISION_ID,
+                "created_by": int(items[0].get("creator_id") or 0),
+                "confidence": "proposed_review",
+                "review_policy_ids": [
+                    LEGACY_PURCHASE_TO_PLANNING_POLICY,
+                    INCOMPLETE_UAT_PLANNING_TOMBSTONE_POLICY,
+                    FROZEN_PLANNING_RULE_POLICY,
+                ],
+                "confirmed_by": 0,
+                "confirmed_at": ZERO_TIME,
+                "confirmation_note": "",
+                "items": [
+                    {
+                        "task_sku_item_id": actual_item_ids[0],
+                        "description_spec": "",
+                        "quantity": 0,
+                        "target_price": None,
+                        "note": "",
+                        "reference_url": "",
+                        "erp_product_i_id": "",
+                        "erp_product_name": "",
+                        "image_storage_ref_id": "",
+                    }
+                ],
+            }
+            recompute_planning_hash(planning)
+            planning_tasks.append(planning)
+            manual.append(
+                {
+                    "task_id": task_id,
+                    "scope_kind": "planning",
+                    "scope_ref_id": 0,
+                    "revision_no": "",
+                    "confidence": "proposed_review",
+                    "reason": (
+                        f"policy review required: {INCOMPLETE_UAT_PLANNING_TOMBSTONE_POLICY}; "
+                        "preserve the existing SKU identity but create no fabricated "
+                        "planning detail or revision"
+                    ),
+                    "evidence_event_ids": "",
+                    "candidate_source_ids": "",
+                    "candidate_final_ids": "",
+                    "reviewer_id": "",
+                    "reviewed_at": "",
+                    "decision": "",
+                    "review_note": "",
+                }
+            )
+            continue
         target_status = LEGACY_PLANNING_STATUS_MAP.get(
             task_status,
             task_status if task_status in CURRENT_PLANNING_STATUSES else "",
@@ -2000,16 +4100,68 @@ def generate(rows):
         planning_tasks.append(planning)
         manual.append({"task_id": task_id, "scope_kind": "planning", "scope_ref_id": 0, "revision_no": "", "confidence": confidence, "reason": "; ".join(review_reasons), "evidence_event_ids": "", "candidate_source_ids": "", "candidate_final_ids": "", "reviewer_id": "", "reviewed_at": "", "decision": "", "review_note": ""})
     for task in rows.get("warehouse_blockers", []):
-        manual.append({"task_id": task["task_id"], "scope_kind": "task_state_decision", "scope_ref_id": 0, "revision_no": "", "confidence": "hard_blocked", "reason": "RejectedByWarehouse requires an explicit reviewed InProgress or Completed decision with warehouse evidence", "evidence_event_ids": "", "candidate_source_ids": "", "candidate_final_ids": "", "reviewer_id": "", "reviewed_at": "", "decision": "", "review_note": ""})
+        task_id = int(task["task_id"])
+        warehouse_events = [
+            event
+            for event in events_by_task[task_id]
+            if str(event.get("event_type") or "") == "task.warehouse.rejected"
+        ]
+        task_resources = [
+            resource for resource in resources if int(resource["task_id"]) == task_id
+        ]
+        reopen_complete = bool(task_resources) and all(
+            resource.get("working_revision_no") is not None
+            and any(
+                revision["revision_no"] == resource["working_revision_no"]
+                and revision["status"] == "draft"
+                and revision["source_stage"] == "reopen"
+                for revision in resource["history"]
+            )
+            for resource in task_resources
+        )
+        if task_id == 2455 and len(warehouse_events) == 1 and reopen_complete:
+            decision = {
+                "task_id": task_id,
+                "from_status": "RejectedByWarehouse",
+                "target_status": "InProgress",
+                "evidence_event_ids": [stable_event_id(warehouse_events[0])],
+                "confidence": "proposed_review",
+                "review_policy_ids": [WAREHOUSE_REOPEN_STATE_POLICY],
+                "confirmed_by": 0,
+                "confirmed_at": ZERO_TIME,
+                "confirmation_note": "",
+            }
+            recompute_mapping_row_hash(decision)
+            task_state_decisions.append(decision)
+            confidence = "proposed_review"
+            reason = (
+                f"policy review required: {WAREHOUSE_REOPEN_STATE_POLICY}; "
+                "the exact warehouse rejection has a complete reopen draft "
+                "for every resource scope"
+            )
+            evidence = decision["evidence_event_ids"][0]
+        else:
+            confidence = "hard_blocked"
+            reason = (
+                "RejectedByWarehouse requires an exact warehouse event and "
+                "a working reopen draft for every resource scope"
+            )
+            evidence = "|".join(stable_event_id(event) for event in warehouse_events)
+        manual.append({"task_id": task_id, "scope_kind": "task_state_decision", "scope_ref_id": 0, "revision_no": "", "confidence": confidence, "reason": reason, "evidence_event_ids": evidence, "candidate_source_ids": "", "candidate_final_ids": "", "reviewer_id": "", "reviewed_at": "", "decision": "", "review_note": ""})
     organization_mappings, organization_manual = build_organization_mappings(rows)
     access_decisions, access_manual = build_access_decisions(rows)
+    asset_recoveries, asset_recovery_manual = build_deleted_asset_recoveries(
+        rows
+    )
     manual.extend(organization_manual)
     manual.extend(access_manual)
+    manual.extend(asset_recovery_manual)
     return {
         "version": 2,
         "resources": resources,
         "planning_tasks": planning_tasks,
-        "task_state_decisions": [],
+        "task_state_decisions": task_state_decisions,
+        "asset_recoveries": asset_recoveries,
         "organization_mappings": organization_mappings,
         "access_decisions": access_decisions,
     }, manual, build_object_manifest(rows)
@@ -2067,7 +4219,7 @@ SELECT CONCAT('scopes\t',JSON_OBJECT('task_id',task_id,'task_status',task_status
  UNION ALL SELECT t.id,t.task_status,'sku',tsi.id,tsi.sku_code,NULL FROM tasks t JOIN task_sku_items tsi ON tsi.task_id=t.id WHERE t.task_type NOT IN ('retouch_task','purchase_task','sku_planning')
  UNION ALL SELECT t.id,t.task_status,'task',0,'',NULL FROM tasks t WHERE t.task_type NOT IN ('retouch_task','purchase_task','sku_planning') AND NOT EXISTS(SELECT 1 FROM task_sku_items si WHERE si.task_id=t.id)
 ) s ORDER BY task_id,scope_kind,scope_ref_id;
-SELECT CONCAT('assets\t',JSON_OBJECT('id',ta.id,'asset_id',ta.asset_id,'task_id',ta.task_id,'asset_type',ta.asset_type,'scope_sku_code',COALESCE(ta.scope_sku_code,''),'retouch_requirement_id',ta.retouch_requirement_id,'upload_session_id',COALESCE(ta.upload_session_id,''),'upload_request_id',COALESCE(ta.upload_request_id,''),'source_module_key',COALESCE(ta.source_module_key,''),'flow_review_status',COALESCE(ta.flow_review_status,''),'rejected_at',DATE_FORMAT(DATE_SUB(ta.rejected_at,INTERVAL 8 HOUR),'%Y-%m-%dT%H:%i:%sZ'),'superseded_by_version_id',ta.superseded_by_version_id,'superseded_at',DATE_FORMAT(DATE_SUB(ta.superseded_at,INTERVAL 8 HOUR),'%Y-%m-%dT%H:%i:%sZ'),'storage_ref_id',COALESCE(ta.storage_ref_id,''),'storage_key',COALESCE(ta.storage_key,''),'file_size',ta.file_size,'mime_type',COALESCE(ta.mime_type,''),'whole_hash',COALESCE(ta.whole_hash,''),'upload_status',COALESCE(ta.upload_status,''),'uploaded_at_legacy_raw',DATE_FORMAT(ta.uploaded_at,'%Y-%m-%d %H:%i:%s'),'created_at',DATE_FORMAT(ta.created_at,'%Y-%m-%dT%H:%i:%sZ'),'deleted_at',DATE_FORMAT(DATE_SUB(ta.deleted_at,INTERVAL 8 HOUR),'%Y-%m-%dT%H:%i:%sZ'),'cleaned_at',DATE_FORMAT(ta.cleaned_at,'%Y-%m-%dT%H:%i:%sZ'),'access_revoked_at',DATE_FORMAT(ta.access_revoked_at,'%Y-%m-%dT%H:%i:%sZ'),'object_deleted_at',DATE_FORMAT(ta.object_deleted_at,'%Y-%m-%dT%H:%i:%sZ'),'storage_adapter',COALESCE(sr.storage_adapter,''),'ref_key',COALESCE(sr.ref_key,''),'checksum_hint',COALESCE(sr.checksum_hint,''),'storage_status',COALESCE(sr.status,''),'is_placeholder',COALESCE(sr.is_placeholder,0))) FROM task_assets ta LEFT JOIN asset_storage_refs sr ON sr.ref_id=ta.storage_ref_id ORDER BY ta.task_id,ta.created_at,ta.id;
+SELECT CONCAT('assets\t',JSON_OBJECT('id',ta.id,'asset_id',ta.asset_id,'task_id',ta.task_id,'asset_type',ta.asset_type,'scope_sku_code',COALESCE(ta.scope_sku_code,''),'retouch_requirement_id',ta.retouch_requirement_id,'upload_session_id',COALESCE(ta.upload_session_id,''),'upload_request_id',COALESCE(ta.upload_request_id,''),'source_module_key',COALESCE(ta.source_module_key,''),'source_asset_version_id',ta.source_asset_version_id,'flow_review_status',COALESCE(ta.flow_review_status,''),'approved_by',ta.approved_by,'approved_at',DATE_FORMAT(DATE_SUB(ta.approved_at,INTERVAL 8 HOUR),'%Y-%m-%dT%H:%i:%sZ'),'rejected_at',DATE_FORMAT(DATE_SUB(ta.rejected_at,INTERVAL 8 HOUR),'%Y-%m-%dT%H:%i:%sZ'),'superseded_by_version_id',ta.superseded_by_version_id,'superseded_at',DATE_FORMAT(DATE_SUB(ta.superseded_at,INTERVAL 8 HOUR),'%Y-%m-%dT%H:%i:%sZ'),'storage_ref_id',COALESCE(ta.storage_ref_id,''),'storage_key',COALESCE(ta.storage_key,''),'file_size',ta.file_size,'mime_type',COALESCE(ta.mime_type,''),'whole_hash',COALESCE(ta.whole_hash,''),'upload_status',COALESCE(ta.upload_status,''),'uploaded_at_legacy_raw',DATE_FORMAT(ta.uploaded_at,'%Y-%m-%d %H:%i:%s'),'created_at',DATE_FORMAT(ta.created_at,'%Y-%m-%dT%H:%i:%sZ'),'deleted_at',DATE_FORMAT(DATE_SUB(ta.deleted_at,INTERVAL 8 HOUR),'%Y-%m-%dT%H:%i:%sZ'),'cleaned_at',DATE_FORMAT(ta.cleaned_at,'%Y-%m-%dT%H:%i:%sZ'),'access_revoked_at',DATE_FORMAT(ta.access_revoked_at,'%Y-%m-%dT%H:%i:%sZ'),'object_deleted_at',DATE_FORMAT(ta.object_deleted_at,'%Y-%m-%dT%H:%i:%sZ'),'storage_adapter',COALESCE(sr.storage_adapter,''),'ref_key',COALESCE(sr.ref_key,''),'checksum_hint',COALESCE(sr.checksum_hint,''),'storage_status',COALESCE(sr.status,''),'is_placeholder',COALESCE(sr.is_placeholder,0))) FROM task_assets ta LEFT JOIN asset_storage_refs sr ON sr.ref_id=ta.storage_ref_id ORDER BY ta.task_id,ta.created_at,ta.id;
 SELECT CONCAT('references\t',JSON_OBJECT('id',r.id,'task_id',r.task_id,'scope_sku_code',COALESCE(si.sku_code,''),'retouch_requirement_id',r.retouch_requirement_id,'attached_at',DATE_FORMAT(r.attached_at,'%Y-%m-%dT%H:%i:%sZ'),'ref_id',r.ref_id,'storage_adapter',COALESCE(sr.storage_adapter,''),'ref_key',COALESCE(sr.ref_key,''),'file_size',sr.file_size,'mime_type',COALESCE(sr.mime_type,''),'checksum_hint',COALESCE(sr.checksum_hint,''),'storage_status',COALESCE(sr.status,''),'is_placeholder',COALESCE(sr.is_placeholder,0))) FROM reference_file_refs r LEFT JOIN task_sku_items si ON si.id=r.sku_item_id LEFT JOIN asset_storage_refs sr ON sr.ref_id=r.ref_id ORDER BY r.task_id,r.attached_at,r.id;
 SELECT CONCAT('events\t',JSON_OBJECT('namespace','task_event_log','id',e.id,'task_id',e.task_id,'sequence',e.sequence,'event_type',e.event_type,'actor_id',e.operator_id,'payload',e.payload,'module_key',COALESCE(JSON_UNQUOTE(JSON_EXTRACT(e.payload,'$.module_key')),''),'from_state',COALESCE(JSON_UNQUOTE(JSON_EXTRACT(e.payload,'$.from')),''),'to_state',COALESCE(JSON_UNQUOTE(JSON_EXTRACT(e.payload,'$.to')),''),'created_at',DATE_FORMAT(DATE_SUB(e.created_at,INTERVAL 8 HOUR),'%Y-%m-%dT%H:%i:%sZ'))) FROM task_event_logs e UNION ALL SELECT CONCAT('events\t',JSON_OBJECT('namespace','task_module_event','id',e.id,'task_id',m.task_id,'sequence',e.id,'event_type',e.event_type,'actor_id',e.actor_id,'payload',e.payload,'module_key',m.module_key,'from_state',COALESCE(e.from_state,''),'to_state',COALESCE(e.to_state,''),'created_at',DATE_FORMAT(e.created_at,'%Y-%m-%dT%H:%i:%sZ'))) FROM task_module_events e JOIN task_modules m ON m.id=e.task_module_id;
 SELECT CONCAT('planning_rows\t',JSON_OBJECT('task_id',t.id,'task_status',t.task_status,'creator_id',t.creator_id,'task_sku_item_id',si.id,'description_spec',COALESCE(si.design_requirement,''),'quantity',si.quantity,'target_price',si.base_sale_price,'erp_product_i_id',COALESCE(si.product_i_id,''),'erp_product_name',COALESCE(si.product_name_snapshot,''),'reference_file_refs_json',COALESCE(si.reference_file_refs_json,'[]'))) FROM tasks t LEFT JOIN task_sku_items si ON si.task_id=t.id WHERE t.task_type='purchase_task' ORDER BY t.id,si.id;

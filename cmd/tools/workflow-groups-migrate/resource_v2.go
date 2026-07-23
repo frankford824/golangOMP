@@ -132,6 +132,19 @@ type evidenceEventMetadata struct {
 	Payload   string
 }
 
+func isCustomizationTerminalEvidence(event evidenceEventMetadata) bool {
+	if !strings.EqualFold(event.EventType, "task.customization.reviewed") {
+		return false
+	}
+	var payload map[string]any
+	if json.Unmarshal([]byte(event.Payload), &payload) != nil {
+		return false
+	}
+	return strings.EqualFold(fmt.Sprint(payload["customization_review_decision"]), "approved") &&
+		fmt.Sprint(payload["from_task_status"]) == "PendingCustomizationReview" &&
+		fmt.Sprint(payload["to_task_status"]) == "PendingWarehouseReceive"
+}
+
 func validateRevisionEvidence(ctx context.Context, q snapshotQueryer, taskID int64, revision resourceRevisionMapping) error {
 	metadata, err := loadEvidenceEventMetadata(ctx, q, taskID, revision.EvidenceEventIDs)
 	if err != nil {
@@ -280,7 +293,8 @@ func validateRevisionEventSemantics(revision resourceRevisionMapping, metadata [
 		}
 	case "finalized":
 		legacyRetouchTerminal := (revision.SourceStage == "retouch" || revision.SourceStage == "reopen") && hasSubmit &&
-			containsString(revision.ReviewPolicyIDs, reviewPolicyLegacyRetouchTerminalSubmit)
+			(containsString(revision.ReviewPolicyIDs, reviewPolicyLegacyRetouchTerminalSubmit) ||
+				containsString(revision.ReviewPolicyIDs, reviewPolicyLegacyRetouchVisualScopeTask2533))
 		postCloseReplacement := revision.SourceStage == "reopen" && hasUploadCompletion &&
 			containsString(revision.ReviewPolicyIDs, reviewPolicyLegacyPostCloseReplacement) &&
 			strings.HasPrefix(revision.Reason, "policy legacy_post_close_replacement_v1:")
@@ -315,35 +329,59 @@ func validateTaskStateDecisionPreflight(ctx context.Context, q snapshotQueryer, 
 	issue := func(format string, args ...interface{}) *taskMigrationIssue {
 		return &taskMigrationIssue{TaskID: decision.TaskID, Reason: fmt.Sprintf(format, args...)}
 	}
-	var currentStatus string
-	if err := q.QueryRowContext(ctx, `SELECT task_status FROM tasks WHERE id=?`, decision.TaskID).Scan(&currentStatus); errors.Is(err, sql.ErrNoRows) {
-		return issue("reviewed warehouse decision references a missing task")
+	var taskType, currentStatus string
+	if err := q.QueryRowContext(ctx, `SELECT task_type,task_status FROM tasks WHERE id=?`, decision.TaskID).Scan(&taskType, &currentStatus); errors.Is(err, sql.ErrNoRows) {
+		return issue("reviewed task state decision references a missing task")
 	} else if err != nil {
-		return issue("validate reviewed warehouse decision task: %v", err)
+		return issue("validate reviewed task state decision task: %v", err)
 	}
 	if currentStatus != decision.FromStatus && currentStatus != decision.TargetStatus {
-		return issue("reviewed warehouse decision expects status %s or idempotent target %s but database has %s", decision.FromStatus, decision.TargetStatus, currentStatus)
+		return issue("reviewed task state decision expects status %s or idempotent target %s but database has %s", decision.FromStatus, decision.TargetStatus, currentStatus)
+	}
+	retouchDecision := containsString(decision.ReviewPolicyIDs, reviewPolicyLegacyRetouchPrematurePartial)
+	customizationTerminalDecision := containsString(
+		decision.ReviewPolicyIDs,
+		reviewPolicyLegacyCustomizationTerminalNoAssets,
+	)
+	if retouchDecision && taskType != "retouch_task" {
+		return issue("premature terminal policy requires task_type=retouch_task, got %s", taskType)
+	}
+	if customizationTerminalDecision {
+		expectedTaskType := "original_product_development"
+		if decision.TaskID == 756 || decision.TaskID == 757 {
+			expectedTaskType = "new_product_development"
+		}
+		if taskType != expectedTaskType {
+			return issue("customization terminal policy requires task_type=%s, got %s", expectedTaskType, taskType)
+		}
 	}
 	var actorCount int
 	if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM users WHERE id=?`, decision.ConfirmedBy).Scan(&actorCount); err != nil {
-		return issue("validate reviewed warehouse decision actor: %v", err)
+		return issue("validate reviewed task state decision actor: %v", err)
 	}
 	if actorCount != 1 {
-		return issue("reviewed warehouse decision actor %d does not exist", decision.ConfirmedBy)
+		return issue("reviewed task state decision actor %d does not exist", decision.ConfirmedBy)
 	}
 	metadata, err := loadEvidenceEventMetadata(ctx, q, decision.TaskID, decision.EvidenceEventIDs)
 	if err != nil {
-		return issue("reviewed warehouse decision evidence invalid: %v", err)
+		return issue("reviewed task state decision evidence invalid: %v", err)
 	}
-	warehouseEvidence := false
+	policyEvidence := false
 	for _, event := range metadata {
 		combined := strings.ToLower(event.EventType + " " + event.Payload)
-		if strings.Contains(combined, "warehouse") || strings.Contains(combined, "rejectedbywarehouse") {
-			warehouseEvidence = true
+		if (customizationTerminalDecision && isCustomizationTerminalEvidence(event)) ||
+			(!retouchDecision && !customizationTerminalDecision && (strings.Contains(combined, "warehouse") || strings.Contains(combined, "rejectedbywarehouse"))) ||
+			(retouchDecision && (strings.Contains(combined, "upload_session.completed") || strings.Contains(combined, "design.submitted"))) {
+			policyEvidence = true
 			break
 		}
 	}
-	if !warehouseEvidence {
+	if !policyEvidence {
+		if customizationTerminalDecision {
+			return issue("reviewed customization terminal decision lacks the exact approved PendingCustomizationReview -> PendingWarehouseReceive evidence")
+		} else if retouchDecision {
+			return issue("reviewed retouch state decision lacks submit or completed-upload evidence")
+		}
 		return issue("reviewed warehouse decision lacks warehouse-rejection evidence")
 	}
 	taskResources := []resourceMapping{}
@@ -353,17 +391,31 @@ func validateTaskStateDecisionPreflight(ctx context.Context, q snapshotQueryer, 
 		}
 	}
 	if len(taskResources) == 0 {
-		return issue("reviewed warehouse decision has no reviewed resource mappings")
+		return issue("reviewed task state decision has no reviewed resource mappings")
+	}
+	if customizationTerminalDecision {
+		expectedScopeCount := 1
+		if decision.TaskID == 757 {
+			expectedScopeCount = 2
+		}
+		if len(taskResources) != expectedScopeCount {
+			return issue("customization terminal policy requires exactly %d allowlisted resource scopes", expectedScopeCount)
+		}
+		for _, resource := range taskResources {
+			if _, allowed := legacyCustomizationTerminalExpectedSource(resource.TaskID, resource.ScopeKind, resource.ScopeRefID); !allowed {
+				return issue("customization terminal policy includes unexpected resource scope %s/%d", resource.ScopeKind, resource.ScopeRefID)
+			}
+		}
 	}
 	for _, resource := range taskResources {
 		switch decision.TargetStatus {
 		case "InProgress":
 			if resource.WorkingRevisionNo == nil {
-				return issue("InProgress warehouse decision requires a working reopen draft for every resource scope")
+				return issue("InProgress task state decision requires a working reopen draft for every resource scope")
 			}
 			working := resource.revisionByNo(*resource.WorkingRevisionNo)
 			if working == nil || working.Status != "draft" || working.SourceStage != "reopen" {
-				return issue("InProgress warehouse decision scope %s/%d does not point to a reopen draft", resource.ScopeKind, resource.ScopeRefID)
+				return issue("InProgress task state decision scope %s/%d does not point to a reopen draft", resource.ScopeKind, resource.ScopeRefID)
 			}
 		case "Completed":
 			if resource.FinalizedRevisionNo == nil {
@@ -380,7 +432,7 @@ func validateTaskStateDecisionPreflight(ctx context.Context, q snapshotQueryer, 
 
 func validateRevisionAssets(ctx context.Context, q snapshotQueryer, mapping resourceMapping, revision resourceRevisionMapping) error {
 	if revision.SourceAssetID != nil {
-		if err := validateMappedAsset(ctx, q, mapping, *revision.SourceAssetID, "source", ""); err != nil {
+		if err := validateMappedAsset(ctx, q, mapping, *revision.SourceAssetID, "source", "", false); err != nil {
 			return err
 		}
 		if err := validateMappedAssetRevisionLifecycle(ctx, q, mapping, revision, *revision.SourceAssetID); err != nil {
@@ -389,7 +441,7 @@ func validateRevisionAssets(ctx context.Context, q snapshotQueryer, mapping reso
 	}
 	if revision.SourceBundle != nil {
 		bundle := revision.SourceBundle
-		if err := validateMappedAsset(ctx, q, mapping, bundle.TaskAssetID, "source", bundle.BundleSHA256); err != nil {
+		if err := validateMappedAsset(ctx, q, mapping, bundle.TaskAssetID, "source", bundle.BundleSHA256, false); err != nil {
 			return fmt.Errorf("source bundle: %w", err)
 		}
 		if err := validateMappedAssetRevisionLifecycle(ctx, q, mapping, revision, bundle.TaskAssetID); err != nil {
@@ -403,7 +455,7 @@ func validateRevisionAssets(ctx context.Context, q snapshotQueryer, mapping reso
 			return fmt.Errorf("source bundle task asset %d is not a ZIP", bundle.TaskAssetID)
 		}
 		for _, member := range bundle.Members {
-			if err := validateMappedAsset(ctx, q, mapping, member.TaskAssetID, "source", member.SHA256); err != nil {
+			if err := validateMappedAsset(ctx, q, mapping, member.TaskAssetID, "source", member.SHA256, false); err != nil {
 				return fmt.Errorf("source bundle member %d: %w", member.TaskAssetID, err)
 			}
 			if err := validateMappedAssetRevisionLifecycle(ctx, q, mapping, revision, member.TaskAssetID); err != nil {
@@ -415,7 +467,7 @@ func validateRevisionAssets(ctx context.Context, q snapshotQueryer, mapping reso
 		if !containsInt64(revision.FinalAssetIDs, *revision.SourceAliasFrom) {
 			return fmt.Errorf("source alias origin %d must remain a final asset", *revision.SourceAliasFrom)
 		}
-		if err := validateMappedAsset(ctx, q, mapping, *revision.SourceAliasFrom, "final", ""); err != nil {
+		if err := validateMappedAsset(ctx, q, mapping, *revision.SourceAliasFrom, "final", "", false); err != nil {
 			return fmt.Errorf("source alias origin: %w", err)
 		}
 		if err := validateMappedAssetRevisionLifecycle(ctx, q, mapping, revision, *revision.SourceAliasFrom); err != nil {
@@ -423,7 +475,11 @@ func validateRevisionAssets(ctx context.Context, q snapshotQueryer, mapping reso
 		}
 	}
 	for _, assetID := range revision.FinalAssetIDs {
-		if err := validateMappedAsset(ctx, q, mapping, assetID, "final", ""); err != nil {
+		allowVisualScope := containsString(
+			revision.ReviewPolicyIDs,
+			reviewPolicyLegacyRetouchVisualScopeTask2533,
+		)
+		if err := validateMappedAsset(ctx, q, mapping, assetID, "final", "", allowVisualScope); err != nil {
 			return err
 		}
 		if err := validateMappedAssetRevisionLifecycle(ctx, q, mapping, revision, assetID); err != nil {
@@ -493,7 +549,7 @@ func validateRevisionLifecycleState(mapping resourceMapping, revision resourceRe
 	return nil
 }
 
-func validateMappedAsset(ctx context.Context, q snapshotQueryer, mapping resourceMapping, assetID int64, role, expectedHash string) error {
+func validateMappedAsset(ctx context.Context, q snapshotQueryer, mapping resourceMapping, assetID int64, role, expectedHash string, allowVisualScope bool) error {
 	state, err := loadMappedAssetState(ctx, q, assetID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("task asset %d is missing", assetID)
@@ -514,7 +570,7 @@ func validateMappedAsset(ctx context.Context, q snapshotQueryer, mapping resourc
 	if expectedHash != "" && !strings.EqualFold(state.WholeHash, expectedHash) {
 		return fmt.Errorf("task asset %d whole_hash does not match reviewed sha256", assetID)
 	}
-	if err := validateMappedAssetScope(ctx, q, mapping, state); err != nil {
+	if err := validateMappedAssetScope(ctx, q, mapping, state, allowVisualScope); err != nil {
 		return fmt.Errorf("task asset %d: %w", assetID, err)
 	}
 	return nil
@@ -536,7 +592,7 @@ func loadMappedAssetState(ctx context.Context, q snapshotQueryer, assetID int64)
 	return state, err
 }
 
-func validateMappedAssetScope(ctx context.Context, q snapshotQueryer, mapping resourceMapping, state mappedAssetState) error {
+func validateMappedAssetScope(ctx context.Context, q snapshotQueryer, mapping resourceMapping, state mappedAssetState, allowVisualScope bool) error {
 	switch mapping.ScopeKind {
 	case "task":
 		if strings.TrimSpace(state.ScopeSKUCode) != "" || state.RetouchRequirementID.Valid {
@@ -568,6 +624,9 @@ func validateMappedAssetScope(ctx context.Context, q snapshotQueryer, mapping re
 			return fmt.Errorf("asset retouch scope does not match requirement %d", mapping.ScopeRefID)
 		}
 		if !state.RetouchRequirementID.Valid {
+			if expected, allowed := legacyRetouchVisualExpected(mapping.TaskID, mapping.ScopeKind, mapping.ScopeRefID); allowVisualScope && allowed && state.ID == expected.finalID {
+				return nil
+			}
 			var count int
 			var soleID sql.NullInt64
 			if err := q.QueryRowContext(ctx, `SELECT COUNT(*),MAX(id) FROM task_retouch_requirements WHERE task_id=?`, mapping.TaskID).Scan(&count, &soleID); err != nil {

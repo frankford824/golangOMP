@@ -21,27 +21,38 @@ const (
 
 var sha256Pattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 var reviewPolicyIDPattern = regexp.MustCompile(`^[a-z][a-z0-9_]{2,127}$`)
+var recoveryRunIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{2,80}$`)
 
 const (
-	reviewPolicyExplicitEventReplay              = "explicit_event_replay"
-	reviewPolicyDeliverySourceAlias              = "delivery_source_alias"
-	reviewPolicyRejectedHistory                  = "rejected_history"
-	reviewPolicyReopen                           = "reopen"
-	reviewPolicyLegacyPostCloseReplacement       = "legacy_post_close_replacement_v1"
-	reviewPolicyRetouchSourceOptional            = "retouch_source_optional"
-	reviewPolicyLegacyRetouchTerminalSubmit      = "legacy_retouch_terminal_submit_v1"
-	reviewPolicyLegacyMultiSKUAtomicBatchSubmit  = "legacy_multi_sku_atomic_batch_submit_v1"
-	reviewPolicyLegacyPurchaseToSKUPlanning      = "legacy_purchase_to_sku_planning_v1"
-	reviewPolicyFrozenSKUPlanningRuleRevision9   = "frozen_sku_planning_rule_revision_9_v1"
-	reviewPolicyProductNameDescriptionFallback   = "product_name_snapshot_description_fallback_v1"
-	reviewPolicyRetiredPlanningStatusToCompleted = "retired_planning_status_to_completed_v1"
-	reviewPolicyLegacyOrgUniqueStableMatch       = "legacy_org_unique_stable_match_v1"
-	reviewPolicyLegacyOrgAliasLineage            = "legacy_org_alias_lineage_v1"
-	reviewPolicyLegacyOrgManualTarget            = "legacy_org_manual_target_required_v1"
-	reviewPolicyRetiredWarehouseNoGrant          = "retired_warehouse_no_new_grant_v1"
-	reviewPolicyExistingAccessPreserved          = "existing_access_assignment_preserved_v1"
-	reviewPolicyLegacyOutsourceAccessDecision    = "legacy_outsource_access_decision_v1"
-	reviewPolicyLegacyOrgAdminAccessDecision     = "legacy_org_admin_access_decision_v1"
+	reviewPolicyExplicitEventReplay                  = "explicit_event_replay"
+	reviewPolicyDeliverySourceAlias                  = "delivery_source_alias"
+	reviewPolicyRejectedHistory                      = "rejected_history"
+	reviewPolicyReopen                               = "reopen"
+	reviewPolicyLegacyPostCloseReplacement           = "legacy_post_close_replacement_v1"
+	reviewPolicyRetouchSourceOptional                = "retouch_source_optional"
+	reviewPolicyLegacyRetouchTerminalSubmit          = "legacy_retouch_terminal_submit_v1"
+	reviewPolicyLegacyRetouchUnscopedAtomicBatch     = "legacy_retouch_unscoped_atomic_batch_v1"
+	reviewPolicyLegacyRetouchPrematurePartial        = "legacy_retouch_premature_terminal_partial_v1"
+	reviewPolicyLegacyRetouchVisualScopeTask2533     = "legacy_retouch_visual_scope_task2533_v1"
+	reviewPolicyLegacyMultiSKUAtomicBatchSubmit      = "legacy_multi_sku_atomic_batch_submit_v1"
+	reviewPolicyLegacyAuditStageFinalSnapshot        = "legacy_audit_stage_final_snapshot_v1"
+	reviewPolicyLegacyPurchaseToSKUPlanning          = "legacy_purchase_to_sku_planning_v1"
+	reviewPolicyLegacyIncompleteUATPlanningTombstone = "legacy_incomplete_uat_planning_tombstone_v1"
+	reviewPolicyFrozenSKUPlanningRuleRevision9       = "frozen_sku_planning_rule_revision_9_v1"
+	reviewPolicyProductNameDescriptionFallback       = "product_name_snapshot_description_fallback_v1"
+	reviewPolicyRetiredPlanningStatusToCompleted     = "retired_planning_status_to_completed_v1"
+	reviewPolicyLegacyOrgUniqueStableMatch           = "legacy_org_unique_stable_match_v1"
+	reviewPolicyLegacyOrgAliasLineage                = "legacy_org_alias_lineage_v1"
+	reviewPolicyLegacyOrgManualTarget                = "legacy_org_manual_target_required_v1"
+	reviewPolicyRetiredWarehouseNoGrant              = "retired_warehouse_no_new_grant_v1"
+	reviewPolicyExistingAccessPreserved              = "existing_access_assignment_preserved_v1"
+	reviewPolicyLegacyOutsourceAccessDecision        = "legacy_outsource_access_decision_v1"
+	reviewPolicyLegacyOrgAdminAccessDecision         = "legacy_org_admin_access_decision_v1"
+	reviewPolicyLegacyUATOrphanOrgToUnassigned       = "legacy_uat_orphan_org_to_unassigned_v1"
+	reviewPolicyLegacyWarehouseReopenState           = "legacy_warehouse_reopen_state_v1"
+	reviewPolicyLegacyCustomizationTerminalNoAssets  = "legacy_customization_terminal_without_assets_to_inprogress_v1"
+	reviewPolicyLegacyDeletedAssetRecovery           = "legacy_deleted_asset_recovery_v1"
+	reviewPolicyLegacyHistoricalAssetUnavailable     = "legacy_historical_asset_unavailable_v1"
 )
 
 var knownReviewPolicyIDs = []string{
@@ -52,8 +63,13 @@ var knownReviewPolicyIDs = []string{
 	reviewPolicyLegacyPostCloseReplacement,
 	reviewPolicyRetouchSourceOptional,
 	reviewPolicyLegacyRetouchTerminalSubmit,
+	reviewPolicyLegacyRetouchUnscopedAtomicBatch,
+	reviewPolicyLegacyRetouchPrematurePartial,
+	reviewPolicyLegacyRetouchVisualScopeTask2533,
 	reviewPolicyLegacyMultiSKUAtomicBatchSubmit,
+	reviewPolicyLegacyAuditStageFinalSnapshot,
 	reviewPolicyLegacyPurchaseToSKUPlanning,
+	reviewPolicyLegacyIncompleteUATPlanningTombstone,
 	reviewPolicyFrozenSKUPlanningRuleRevision9,
 	reviewPolicyProductNameDescriptionFallback,
 	reviewPolicyRetiredPlanningStatusToCompleted,
@@ -64,6 +80,73 @@ var knownReviewPolicyIDs = []string{
 	reviewPolicyExistingAccessPreserved,
 	reviewPolicyLegacyOutsourceAccessDecision,
 	reviewPolicyLegacyOrgAdminAccessDecision,
+	reviewPolicyLegacyUATOrphanOrgToUnassigned,
+	reviewPolicyLegacyWarehouseReopenState,
+	reviewPolicyLegacyCustomizationTerminalNoAssets,
+	reviewPolicyLegacyDeletedAssetRecovery,
+	reviewPolicyLegacyHistoricalAssetUnavailable,
+}
+
+type legacyRetouchVisualMembership struct {
+	sourceID     int64
+	finalID      int64
+	referenceIDs []int64
+}
+
+var legacyRetouchVisualTask2533 = map[int64]legacyRetouchVisualMembership{
+	183: {sourceID: 19299, finalID: 19789, referenceIDs: []int64{3211, 3212}},
+	184: {sourceID: 19301, finalID: 19790, referenceIDs: []int64{3213}},
+	185: {sourceID: 19304, finalID: 19791, referenceIDs: []int64{3214, 3215}},
+	186: {sourceID: 19306, finalID: 19800, referenceIDs: []int64{3216}},
+	187: {sourceID: 19308, finalID: 19802, referenceIDs: []int64{3217}},
+}
+
+func legacyRetouchVisualExpected(taskID int64, scopeKind string, scopeRefID int64) (legacyRetouchVisualMembership, bool) {
+	if taskID != 2533 || scopeKind != "retouch_requirement" {
+		return legacyRetouchVisualMembership{}, false
+	}
+	membership, ok := legacyRetouchVisualTask2533[scopeRefID]
+	return membership, ok
+}
+
+func legacyCustomizationTerminalExpectedSource(taskID int64, scopeKind string, scopeRefID int64) (*int64, bool) {
+	key := fmt.Sprintf("%d/%s/%d", taskID, scopeKind, scopeRefID)
+	switch key {
+	case "449/task/0", "450/task/0", "451/task/0", "756/sku/578", "757/sku/579", "757/sku/580":
+		return nil, true
+	case "452/task/0":
+		sourceID := int64(207)
+		return &sourceID, true
+	default:
+		return nil, false
+	}
+}
+
+func isLegacyCustomizationTerminalTask(taskID int64) bool {
+	return containsInt64([]int64{449, 450, 451, 452, 756, 757}, taskID)
+}
+
+func isIncompleteUATPlanningTombstone(planning planningMapping) bool {
+	if planning.TaskID != 497 ||
+		planning.TargetTaskStatus != "Cancelled" ||
+		planning.CodeRuleRevisionID != 9 ||
+		len(planning.ReviewPolicyIDs) != 3 ||
+		planning.ReviewPolicyIDs[0] != reviewPolicyLegacyPurchaseToSKUPlanning ||
+		planning.ReviewPolicyIDs[1] != reviewPolicyLegacyIncompleteUATPlanningTombstone ||
+		planning.ReviewPolicyIDs[2] != reviewPolicyFrozenSKUPlanningRuleRevision9 ||
+		len(planning.Items) != 1 {
+		return false
+	}
+	item := planning.Items[0]
+	return item.TaskSKUItemID == 380 &&
+		strings.TrimSpace(item.DescriptionSpec) == "" &&
+		item.Quantity == 0 &&
+		item.TargetPrice == nil &&
+		strings.TrimSpace(item.Note) == "" &&
+		strings.TrimSpace(item.ReferenceURL) == "" &&
+		strings.TrimSpace(item.ERPProductIID) == "" &&
+		strings.TrimSpace(item.ERPProductName) == "" &&
+		strings.TrimSpace(item.ImageStorageRef) == ""
 }
 
 type resourceRevisionMapping struct {
@@ -113,10 +196,41 @@ type taskStateDecisionMapping struct {
 	FromStatus       string    `json:"from_status"`
 	TargetStatus     string    `json:"target_status"`
 	EvidenceEventIDs []string  `json:"evidence_event_ids"`
+	Confidence       string    `json:"confidence"`
+	ReviewPolicyIDs  []string  `json:"review_policy_ids"`
+	Blockers         []string  `json:"blockers,omitempty"`
 	ConfirmedBy      int64     `json:"confirmed_by"`
 	ConfirmedAt      time.Time `json:"confirmed_at"`
 	ConfirmationNote string    `json:"confirmation_note"`
 	ManifestRowHash  string    `json:"manifest_row_hash,omitempty"`
+}
+
+type assetRecoveryMapping struct {
+	TaskID                     int64     `json:"task_id"`
+	MissingTaskAssetID         int64     `json:"missing_task_asset_id"`
+	RecoverySourceTaskAssetID  int64     `json:"recovery_source_task_asset_id"`
+	RejectedSourceTaskAssetIDs []int64   `json:"rejected_source_task_asset_ids,omitempty"`
+	Strategy                   string    `json:"strategy"`
+	OriginalStorageRefID       string    `json:"original_storage_ref_id"`
+	RecoverySourceStorageRefID string    `json:"recovery_source_storage_ref_id,omitempty"`
+	ExpectedFileSize           int64     `json:"expected_file_size"`
+	PreviewWholeHash           string    `json:"preview_whole_hash"`
+	DesignThumbWholeHash       string    `json:"design_thumb_whole_hash"`
+	ObjectProbeResult          string    `json:"object_probe_result,omitempty"`
+	ObjectProbeInputSHA256     string    `json:"object_probe_input_manifest_sha256,omitempty"`
+	ObjectProbeEvidenceHash    string    `json:"object_probe_evidence_hash,omitempty"`
+	ObjectProbeObjectKeySHA256 string    `json:"object_probe_object_key_sha256,omitempty"`
+	ObjectProbeReadOnlyGETs    int       `json:"object_probe_read_only_get_count,omitempty"`
+	ControlledReadProtocol     string    `json:"controlled_read_protocol,omitempty"`
+	ControlledReadEvidenceHash string    `json:"controlled_read_evidence_sha256,omitempty"`
+	RecoverySourceSHA256       string    `json:"recovery_source_sha256,omitempty"`
+	Confidence                 string    `json:"confidence"`
+	ReviewPolicyIDs            []string  `json:"review_policy_ids"`
+	Blockers                   []string  `json:"blockers,omitempty"`
+	ConfirmedBy                int64     `json:"confirmed_by"`
+	ConfirmedAt                time.Time `json:"confirmed_at"`
+	ConfirmationNote           string    `json:"confirmation_note"`
+	ManifestRowHash            string    `json:"manifest_row_hash,omitempty"`
 }
 
 type organizationMapping struct {
@@ -306,6 +420,65 @@ func validateResourceMappingV2Mode(index int, r resourceMapping, allowCandidateC
 			return fmt.Errorf("resources[%d]: shell history cannot declare working/finalized pointers", index)
 		}
 		return nil
+	}
+	customizationTerminalPolicy := false
+	for _, revision := range r.History {
+		customizationTerminalPolicy = customizationTerminalPolicy ||
+			containsString(revision.ReviewPolicyIDs, reviewPolicyLegacyCustomizationTerminalNoAssets)
+	}
+	if customizationTerminalPolicy {
+		expectedSource, allowed := legacyCustomizationTerminalExpectedSource(r.TaskID, r.ScopeKind, r.ScopeRefID)
+		if !allowed || len(r.History) != 1 || r.WorkingRevisionNo == nil || *r.WorkingRevisionNo != 1 || r.FinalizedRevisionNo != nil {
+			return fmt.Errorf("resources[%d]: customization terminal policy requires one exact allowlisted working draft and no finalized pointer", index)
+		}
+		revision := r.History[0]
+		expectedPolicies := []string{
+			reviewPolicyExplicitEventReplay,
+			reviewPolicyReopen,
+			reviewPolicyLegacyCustomizationTerminalNoAssets,
+		}
+		if revision.Status != "draft" ||
+			revision.SourceStage != "reopen" ||
+			!equalInt64Pointers(revision.SourceAssetID, expectedSource) ||
+			revision.SourceAliasFrom != nil ||
+			revision.SourceBundle != nil ||
+			len(revision.FinalAssetIDs) != 0 ||
+			!equalStringSlices(revision.ReviewPolicyIDs, expectedPolicies) ||
+			!strings.HasPrefix(revision.Reason, "policy "+reviewPolicyLegacyCustomizationTerminalNoAssets+":") {
+			return fmt.Errorf("resources[%d]: customization terminal policy draft does not match the frozen source/final contract", index)
+		}
+	}
+	retouchVisualPolicy := false
+	for _, revision := range r.History {
+		retouchVisualPolicy = retouchVisualPolicy ||
+			containsString(revision.ReviewPolicyIDs, reviewPolicyLegacyRetouchVisualScopeTask2533)
+	}
+	if retouchVisualPolicy {
+		expected, allowed := legacyRetouchVisualExpected(r.TaskID, r.ScopeKind, r.ScopeRefID)
+		if !allowed ||
+			len(r.History) != 1 ||
+			r.WorkingRevisionNo == nil || *r.WorkingRevisionNo != 1 ||
+			r.FinalizedRevisionNo == nil || *r.FinalizedRevisionNo != 1 {
+			return fmt.Errorf("resources[%d]: retouch visual-scope policy requires one exact allowlisted finalized task 2533 revision", index)
+		}
+		revision := r.History[0]
+		expectedPolicies := []string{
+			reviewPolicyExplicitEventReplay,
+			reviewPolicyLegacyRetouchVisualScopeTask2533,
+		}
+		if revision.Status != "finalized" ||
+			revision.SourceStage != "retouch" ||
+			revision.Mode != "single" ||
+			revision.SourceAssetID == nil ||
+			*revision.SourceAssetID != expected.sourceID ||
+			revision.SourceAliasFrom != nil ||
+			revision.SourceBundle != nil ||
+			!equalInt64Slices(revision.FinalAssetIDs, []int64{expected.finalID}) ||
+			!equalInt64Slices(revision.ReferenceIDs, expected.referenceIDs) ||
+			!equalStringSlices(revision.ReviewPolicyIDs, expectedPolicies) ||
+			!strings.HasPrefix(revision.Reason, "policy "+reviewPolicyLegacyRetouchVisualScopeTask2533+":") {
+			return fmt.Errorf("resources[%d]: retouch visual-scope policy does not match the exact task 2533 source/final/reference contract", index)
+		}
 	}
 	seenAssets := map[int64]string{}
 	seenEvidence := map[string]int{}
@@ -566,6 +739,23 @@ func containsInt64(values []int64, target int64) bool {
 	return false
 }
 
+func equalInt64Pointers(left, right *int64) bool {
+	return (left == nil && right == nil) ||
+		(left != nil && right != nil && *left == *right)
+}
+
+func equalStringSlices(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
+}
+
 func validateRevisionTransition(path string, previous, current resourceRevisionMapping) error {
 	if current.CreatedAt.Before(previous.CreatedAt) {
 		return fmt.Errorf("%s: created_at cannot precede revision %d", path, previous.RevisionNo)
@@ -600,7 +790,7 @@ func validateEvidenceIDs(path string, evidenceIDs []string) error {
 	return nil
 }
 
-func validateTaskStateDecisions(m mappingFile) error {
+func validateTaskStateDecisions(m mappingFile, allowCandidateConfidence bool) error {
 	if len(m.TaskDecisions) == 0 {
 		return nil
 	}
@@ -610,15 +800,47 @@ func validateTaskStateDecisions(m mappingFile) error {
 	seen := map[int64]struct{}{}
 	for index, decision := range m.TaskDecisions {
 		path := fmt.Sprintf("task_state_decisions[%d]", index)
-		if decision.TaskID <= 0 || decision.FromStatus != "RejectedByWarehouse" || (decision.TargetStatus != "InProgress" && decision.TargetStatus != "Completed") {
-			return fmt.Errorf("%s: task_id, from_status=RejectedByWarehouse and target_status=InProgress|Completed are required", path)
+		if decision.TaskID <= 0 {
+			return fmt.Errorf("%s: task_id is required", path)
+		}
+		if err := validateReviewPolicyIDs(path, decision.ReviewPolicyIDs); err != nil {
+			return err
+		}
+		warehouseDecision := decision.FromStatus == "RejectedByWarehouse" &&
+			(decision.TargetStatus == "InProgress" || decision.TargetStatus == "Completed") &&
+			containsString(decision.ReviewPolicyIDs, reviewPolicyLegacyWarehouseReopenState)
+		retouchDecision := decision.FromStatus == "Completed" &&
+			decision.TargetStatus == "InProgress" &&
+			containsString(decision.ReviewPolicyIDs, reviewPolicyLegacyRetouchPrematurePartial) &&
+			containsInt64([]int64{981, 1035, 1045, 1052, 1214}, decision.TaskID)
+		customizationTerminalDecision := decision.FromStatus == "PendingWarehouseReceive" &&
+			decision.TargetStatus == "InProgress" &&
+			isLegacyCustomizationTerminalTask(decision.TaskID) &&
+			equalStringSlices(
+				decision.ReviewPolicyIDs,
+				[]string{reviewPolicyLegacyCustomizationTerminalNoAssets},
+			)
+		if !warehouseDecision && !retouchDecision && !customizationTerminalDecision {
+			return fmt.Errorf("%s: unsupported or insufficiently policy-bound task state transition", path)
 		}
 		if _, duplicate := seen[decision.TaskID]; duplicate {
 			return fmt.Errorf("%s: duplicate task_id", path)
 		}
 		seen[decision.TaskID] = struct{}{}
-		if decision.ConfirmedBy <= 0 || decision.ConfirmedAt.IsZero() || strings.TrimSpace(decision.ConfirmationNote) == "" {
-			return fmt.Errorf("%s: complete human confirmation metadata is required", path)
+		switch decision.Confidence {
+		case "confirmed_auto":
+			if len(decision.Blockers) != 0 || decision.ConfirmedBy <= 0 || decision.ConfirmedAt.IsZero() || strings.TrimSpace(decision.ConfirmationNote) == "" {
+				return fmt.Errorf("%s: confirmed decision requires no blockers and complete human confirmation metadata", path)
+			}
+		case "proposed_review", "hard_blocked":
+			if !allowCandidateConfidence {
+				return fmt.Errorf("%s: confidence=%s cannot be applied", path, decision.Confidence)
+			}
+			if decision.Confidence == "hard_blocked" && len(decision.Blockers) == 0 {
+				return fmt.Errorf("%s: hard_blocked decision requires blockers", path)
+			}
+		default:
+			return fmt.Errorf("%s: confidence must be confirmed_auto, proposed_review, or hard_blocked", path)
 		}
 		if len(decision.EvidenceEventIDs) == 0 {
 			return fmt.Errorf("%s: evidence_event_ids are required", path)
@@ -632,6 +854,177 @@ func validateTaskStateDecisions(m mappingFile) error {
 		}
 		if !sha256Pattern.MatchString(decision.ManifestRowHash) || decision.ManifestRowHash != expected {
 			return fmt.Errorf("%s: manifest_row_hash does not match canonical decision content", path)
+		}
+	}
+	return nil
+}
+
+type frozenAssetRecoveryEvidence struct {
+	TaskID                     int64
+	SourceTaskAssetID          int64
+	OriginalStorageRefID       string
+	SourceStorageRefID         string
+	FileSize                   int64
+	PreviewWholeHash           string
+	DesignThumbWholeHash       string
+	RejectedSourceTaskAssetIDs []int64
+	RootAssetID                int64
+	OriginalStorageRefKey      string
+	ObjectProbeResult          string
+	ObjectProbeInputSHA256     string
+	ObjectProbeEvidenceHash    string
+	ObjectProbeObjectKeySHA256 string
+	ObjectProbeReadOnlyGETs    int
+	RecoverySourceSHA256       string
+}
+
+var frozenAssetRecoveryEvidenceByMissingID = map[int64]frozenAssetRecoveryEvidence{
+	23989: {
+		TaskID: 2807, SourceTaskAssetID: 24034,
+		OriginalStorageRefID: "f511c5d4-507f-4a69-bf10-70bae369429d",
+		SourceStorageRefID:   "983a746c-c674-4f5c-8812-073be989b194",
+		FileSize:             683001,
+		PreviewWholeHash:     "471739776f4c230a80ae5514e83e92fd3f1e104d203ced3ac793c65c25a525e4",
+		DesignThumbWholeHash: "3442c0ac91eb61371d4057d6c0de232f8ba4f3c25cb6b68cff63142aa155e6ef",
+		RecoverySourceSHA256: "d0558b1a9d4a7afed5a03b6b97d4a765d34050866686e396ab0acf9f08f0dec5",
+	},
+	23990: {
+		TaskID: 2807, SourceTaskAssetID: 24033,
+		OriginalStorageRefID: "ca292dff-6824-4fe9-89cf-e439254f4383",
+		SourceStorageRefID:   "85c01c4c-0e27-4df4-a851-4b888f54a837",
+		FileSize:             689291,
+		PreviewWholeHash:     "311d508fde06f4b7ae73ebfb915abda67c316f02d6356f052731d818d5e0ca47",
+		DesignThumbWholeHash: "7d38a5ff3cc65aa89aa15476e479a5eb0af611c4c60f145bbec40497a00cb62c",
+		RecoverySourceSHA256: "64cdfed11adc778fb6ede7f03c49f7c70e8655870236bdcd92a8207e41a8dfb8",
+	},
+	23991: {
+		TaskID: 2807, SourceTaskAssetID: 24040,
+		OriginalStorageRefID: "107bbca3-b716-4043-b036-54dab1d52b0d",
+		SourceStorageRefID:   "769e687f-fd71-4f37-930c-fd3f566350e6",
+		FileSize:             686447,
+		PreviewWholeHash:     "e4d8c77d270fb03cbcce3b8285b3373779a231605a09af515d3e2697118370a3",
+		DesignThumbWholeHash: "fd4a43d2b1e8cf2013c84a37a948538cc102f28a1a886f6662c50bdc08c5234d",
+		RecoverySourceSHA256: "ebfecf3407e05c576bcddf74673d2e7568207ecc27855aa0e08c453d5a0d119a",
+	},
+	12323: {
+		TaskID: 2199, SourceTaskAssetID: 0,
+		OriginalStorageRefID:       "c0a135a1-080f-46a0-a41a-461aef0ea0fb",
+		FileSize:                   17755216,
+		PreviewWholeHash:           "82b35a045540d27f9656d6d02c99eb2814a62e9d048d33b20823fb8c0017aa4c",
+		DesignThumbWholeHash:       "54dbf569874243a212c11c3e83e80f19944c2581f12c9473a793bc273ec666a3",
+		RejectedSourceTaskAssetIDs: []int64{14510, 14514},
+		RootAssetID:                12401,
+		OriginalStorageRefKey:      "tasks/RW-20260709-A-002196/assets/AST-0002/v1/delivery/1783575756672661314_d97ed925.psd",
+		ObjectProbeResult:          "not_found",
+		ObjectProbeInputSHA256:     "3f17b37296d2670235ca9bfcfd4388823b81adecf8fbac0826e6f241923579c7",
+		ObjectProbeEvidenceHash:    "f1c78819e1f3d5f4e7a4b25ff3d173368574a5639f4c6df45c8aae5482d047b8",
+		ObjectProbeObjectKeySHA256: "e732f6cd269a93d6bac168b0852dbcf8480af8966847278cb073cd6905b0efdd",
+		ObjectProbeReadOnlyGETs:    1,
+	},
+}
+
+func validateAssetRecoveries(m mappingFile, allowCandidateConfidence bool) error {
+	if len(m.AssetRecoveries) == 0 {
+		return nil
+	}
+	if mappingVersion(m) != workflowGroupsMappingV2 {
+		return fmt.Errorf("asset_recoveries require mapping version 2")
+	}
+	seen := map[int64]struct{}{}
+	for index, recovery := range m.AssetRecoveries {
+		path := fmt.Sprintf("asset_recoveries[%d]", index)
+		if _, duplicate := seen[recovery.MissingTaskAssetID]; duplicate {
+			return fmt.Errorf("%s: duplicate missing_task_asset_id", path)
+		}
+		seen[recovery.MissingTaskAssetID] = struct{}{}
+		expected, known := frozenAssetRecoveryEvidenceByMissingID[recovery.MissingTaskAssetID]
+		if !known {
+			return fmt.Errorf("%s: missing task asset is outside the frozen recovery evidence set", path)
+		}
+		expectedStrategy := "clone_b_prematerialized_storage_ref_v1"
+		expectedPolicy := reviewPolicyLegacyDeletedAssetRecovery
+		if recovery.MissingTaskAssetID == 12323 {
+			expectedStrategy = "historical_unavailable_tombstone_v1"
+			expectedPolicy = reviewPolicyLegacyHistoricalAssetUnavailable
+		}
+		if recovery.MissingTaskAssetID != 12323 && recovery.Confidence == "confirmed_auto" {
+			if recovery.ControlledReadProtocol != "controlled-asset-read-v1" ||
+				recovery.ControlledReadEvidenceHash != "b39e0d9d26e6fdd35941b195bdc413eb12dd6795e23276a48c9b9bd49f829b08" ||
+				recovery.RecoverySourceSHA256 != expected.RecoverySourceSHA256 {
+				return fmt.Errorf("%s: controlled-read evidence is incomplete or differs from the frozen recovery contract", path)
+			}
+		}
+		if recovery.TaskID != expected.TaskID ||
+			recovery.RecoverySourceTaskAssetID != expected.SourceTaskAssetID ||
+			recovery.Strategy != expectedStrategy ||
+			recovery.OriginalStorageRefID != expected.OriginalStorageRefID ||
+			recovery.RecoverySourceStorageRefID != expected.SourceStorageRefID ||
+			recovery.ExpectedFileSize != expected.FileSize ||
+			recovery.PreviewWholeHash != expected.PreviewWholeHash ||
+			recovery.DesignThumbWholeHash != expected.DesignThumbWholeHash ||
+			!equalInt64Slices(recovery.RejectedSourceTaskAssetIDs, expected.RejectedSourceTaskAssetIDs) {
+			return fmt.Errorf("%s: recovery evidence differs from the frozen size/derivative-hash contract", path)
+		}
+		if recovery.MissingTaskAssetID == 12323 &&
+			(recovery.ObjectProbeResult != expected.ObjectProbeResult ||
+				recovery.ObjectProbeInputSHA256 != expected.ObjectProbeInputSHA256 ||
+				recovery.ObjectProbeEvidenceHash != expected.ObjectProbeEvidenceHash ||
+				recovery.ObjectProbeObjectKeySHA256 != expected.ObjectProbeObjectKeySHA256 ||
+				recovery.ObjectProbeReadOnlyGETs != expected.ObjectProbeReadOnlyGETs) {
+			return fmt.Errorf("%s: historical-unavailable tombstone lacks the frozen read-only object-absence probe binding", path)
+		}
+		if recovery.MissingTaskAssetID == 12323 {
+			objectKeyHash := sha256.Sum256([]byte(expected.OriginalStorageRefKey))
+			if hex.EncodeToString(objectKeyHash[:]) != recovery.ObjectProbeObjectKeySHA256 {
+				return fmt.Errorf("%s: object probe key hash does not identify the frozen original storage ref key", path)
+			}
+		}
+		if !equalStringSlices(recovery.ReviewPolicyIDs, []string{expectedPolicy}) {
+			return fmt.Errorf("%s: review_policy_ids must contain only %s", path, expectedPolicy)
+		}
+		if err := validateReviewPolicyIDs(path, recovery.ReviewPolicyIDs); err != nil {
+			return err
+		}
+		if recovery.MissingTaskAssetID == 12323 {
+			switch recovery.Confidence {
+			case "proposed_review":
+				if !allowCandidateConfidence || len(recovery.Blockers) != 0 {
+					return fmt.Errorf("%s: proposed historical-unavailable tombstone requires candidate mode and no synthetic blockers", path)
+				}
+			case "confirmed_auto":
+				if len(recovery.Blockers) != 0 ||
+					recovery.ConfirmedBy <= 0 ||
+					recovery.ConfirmedAt.IsZero() ||
+					strings.TrimSpace(recovery.ConfirmationNote) == "" {
+					return fmt.Errorf("%s: confirmed historical-unavailable tombstone requires no blockers and complete human confirmation metadata", path)
+				}
+			default:
+				return fmt.Errorf("%s: task asset 12323 must be proposed_review or confirmed_auto; size-mismatched successors 14510/14514 are evidence, not recovery sources", path)
+			}
+		} else if recovery.Confidence == "hard_blocked" && len(recovery.Blockers) == 0 {
+			return fmt.Errorf("%s: hard_blocked recovery requires blockers", path)
+		}
+		switch recovery.Confidence {
+		case "proposed_review", "hard_blocked":
+			if !allowCandidateConfidence {
+				return fmt.Errorf("%s: confidence=%s cannot be applied; pre-materialize bytes under a run-scoped Clone B object root, register rollback-complete storage state, then extend this fail-closed tool", path, recovery.Confidence)
+			}
+		case "confirmed_auto":
+			if len(recovery.Blockers) != 0 ||
+				recovery.ConfirmedBy <= 0 ||
+				recovery.ConfirmedAt.IsZero() ||
+				strings.TrimSpace(recovery.ConfirmationNote) == "" {
+				return fmt.Errorf("%s: confirmed recovery requires no blockers and complete human confirmation metadata", path)
+			}
+		default:
+			return fmt.Errorf("%s: confidence must be confirmed_auto, proposed_review, or hard_blocked", path)
+		}
+		expectedHash, err := assetRecoveryManifestRowHash(recovery)
+		if err != nil {
+			return fmt.Errorf("%s: compute manifest_row_hash: %w", path, err)
+		}
+		if !sha256Pattern.MatchString(recovery.ManifestRowHash) || recovery.ManifestRowHash != expectedHash {
+			return fmt.Errorf("%s: manifest_row_hash does not match canonical recovery content", path)
 		}
 	}
 	return nil
@@ -660,6 +1053,13 @@ func validateOrganizationMappings(m mappingFile, allowCandidateConfidence bool) 
 		seen[key] = struct{}{}
 		if err := validateReviewPolicyIDs(path, item.ReviewPolicyIDs); err != nil {
 			return err
+		}
+		if containsString(item.ReviewPolicyIDs, reviewPolicyLegacyUATOrphanOrgToUnassigned) &&
+			(item.SubjectType != "task" ||
+				(item.SubjectID != 463 && item.SubjectID != 464) ||
+				item.TargetDepartmentID != 3 ||
+				item.TargetTeamID != 14) {
+			return fmt.Errorf("%s: %s is restricted to tasks 463/464 and target department/team 3/14", path, reviewPolicyLegacyUATOrphanOrgToUnassigned)
 		}
 		hardCandidate := allowCandidateConfidence && item.Confidence == "hard_blocked"
 		if !hardCandidate && (item.TargetDepartmentID <= 0 || item.TargetTeamID <= 0) {
@@ -817,6 +1217,16 @@ func taskStateDecisionManifestHash(decision taskStateDecisionMapping) (string, e
 	return hex.EncodeToString(sum[:]), nil
 }
 
+func assetRecoveryManifestRowHash(recovery assetRecoveryMapping) (string, error) {
+	recovery.ManifestRowHash = ""
+	raw, err := canonicalMappingJSON(recovery)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:]), nil
+}
+
 func validateSourceBundle(path string, bundle *sourceBundleMapping) error {
 	if bundle == nil || bundle.TaskAssetID <= 0 || bundle.Format != "zip" || !sha256Pattern.MatchString(bundle.BundleSHA256) || bundle.ConfirmedBy <= 0 || bundle.ConfirmedAt.IsZero() || strings.TrimSpace(bundle.Confirmation) == "" {
 		return fmt.Errorf("%s: task_asset_id, format=zip, and confirmation metadata are required", path)
@@ -902,13 +1312,17 @@ func persistedRevisionReason(revision resourceRevisionMapping) (string, error) {
 	evidence := append([]string(nil), revision.EvidenceEventIDs...)
 	sort.Strings(evidence)
 	metadata := fmt.Sprintf(
-		"[migration_v2 manifest=%s confidence=%s confirmed_by=%d confirmed_at=%s evidence=%s]",
+		"[migration_v2 manifest=%s confidence=%s confirmed_by=%d confirmed_at=%s evidence_count=%d",
 		revision.ManifestRowHash,
 		revision.Confidence,
 		revision.ConfirmedBy,
 		revision.ConfirmedAt.UTC().Format(time.RFC3339),
-		strings.Join(evidence, ","),
+		len(evidence),
 	)
+	if len(evidence) > 0 {
+		metadata += " first_evidence=" + evidence[0]
+	}
+	metadata += "]"
 	reason := strings.TrimSpace(strings.TrimSpace(revision.Reason) + " " + metadata)
 	if utf8.RuneCountInString(reason) > revisionReasonMaxRunes {
 		return "", fmt.Errorf("revision evidence cannot fit task_asset_group_revisions.reason; retain the mapping artifact and resolve this blocker without truncation")

@@ -123,6 +123,38 @@ func TestMappedPurchaseTaskIsNotAPreflightBlocker(t *testing.T) {
 	}
 }
 
+func TestMappedIncompleteUATPlanningTombstoneIsNotAPreflightBlocker(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectQuery("SELECT subject_type,subject_id,reason").
+		WillReturnRows(sqlmock.NewRows([]string{"subject_type", "subject_id", "reason"}))
+	mock.ExpectQuery("SELECT ur.user_id,ur.role").
+		WillReturnRows(sqlmock.NewRows([]string{"user_id", "role"}))
+	mock.ExpectQuery("SELECT id,task_type,task_status").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_type", "task_status"}).
+			AddRow(497, "purchase_task", "InProgress"))
+	mock.ExpectQuery("SELECT id FROM task_sku_items WHERE task_id=\\?").WithArgs(int64(497)).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(380))
+	mock.ExpectQuery("SELECT id,task_id,scope_kind,scope_ref_id").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "scope_kind", "scope_ref_id"}))
+	blockers, err := queryCutoverBlockers(context.Background(), db, mappingFile{
+		Version:  workflowGroupsMappingV2,
+		Planning: []planningMapping{validIncompleteUATPlanningTombstone(t)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !blockers.Empty() {
+		t.Fatalf("reviewed UAT planning tombstone should not be blocked: %+v", blockers)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestPurchasePlanningPreflightRejectsPartialDuplicateAndCrossTaskSKUIdsBeforeJournal(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -670,6 +702,62 @@ func TestValidateCutoverStateRejectsPlanningTasksWithResourceGroups(t *testing.T
 	}
 }
 
+func TestValidateCutoverStateAcceptsOnlyVerifiedPlanningTombstoneException(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectBegin()
+	tx, err := db.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mapping := mappingFile{
+		Version:  workflowGroupsMappingV2,
+		Planning: []planningMapping{validIncompleteUATPlanningTombstone(t)},
+	}
+
+	mock.ExpectQuery("SELECT subject_type,subject_id,reason").
+		WillReturnRows(sqlmock.NewRows([]string{"subject_type", "subject_id", "reason"}))
+	mock.ExpectQuery("SELECT ur.user_id,ur.role").
+		WillReturnRows(sqlmock.NewRows([]string{"user_id", "role"}))
+	mock.ExpectQuery("SELECT id,task_type,task_status").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_type", "task_status"}))
+	mock.ExpectQuery("SELECT task_type,task_status FROM tasks WHERE id=\\?").WithArgs(int64(497)).
+		WillReturnRows(sqlmock.NewRows([]string{"task_type", "task_status"}).AddRow("sku_planning", "Cancelled"))
+	mock.ExpectQuery("SELECT id FROM task_sku_items WHERE task_id=\\?").WithArgs(int64(497)).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(380))
+	expectPlanningTombstoneVerification(mock)
+	mock.ExpectQuery("SELECT id,task_id,scope_kind,scope_ref_id").
+		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "scope_kind", "scope_ref_id"}))
+
+	expectPlanningTombstoneVerification(mock)
+	mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM task_asset_groups WHERE migration_incomplete=1").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM tasks WHERE task_type='purchase_task'").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM tasks WHERE task_status IN").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectQuery("WHERE t.task_type='sku_planning' AND t.id <> 497 AND").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectQuery("WITH expected_scopes AS").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM tasks t JOIN task_asset_groups").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+
+	if err := validateCutoverState(context.Background(), tx, mapping); err != nil {
+		t.Fatalf("validateCutoverState() error = %v", err)
+	}
+	mock.ExpectRollback()
+	if err := tx.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestValidateCutoverStateBlocksUnmappedPurchaseTaskBeforeCommit(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -730,6 +818,94 @@ func TestApplyPlanningRejectsInconsistentRerunBeforeMutation(t *testing.T) {
 	}
 }
 
+func TestApplyPlanningTombstoneCreatesNoRevisionAndRerunsIdempotently(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectBegin()
+	tx, err := db.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mapping := validIncompleteUATPlanningTombstone(t)
+
+	mock.ExpectQuery("SELECT task_type,task_status FROM tasks").WithArgs(int64(497)).
+		WillReturnRows(sqlmock.NewRows([]string{"task_type", "task_status"}).AddRow("purchase_task", "InProgress"))
+	mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM task_planning_settings").WithArgs(int64(497)).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectExec("INSERT INTO task_planning_settings").WithArgs(int64(497), int64(9), "migration-497", int64(1)).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectExec("UPDATE tasks SET task_type='sku_planning'").WithArgs("Cancelled", int64(497)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("UPDATE task_sku_items SET sku_origin='legacy_migration'").WithArgs(int64(497)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	inserted, err := applyPlanning(context.Background(), tx, mapping)
+	if err != nil || !inserted {
+		t.Fatalf("initial applyPlanning() inserted/error = %v/%v", inserted, err)
+	}
+
+	mock.ExpectQuery("SELECT task_type,task_status FROM tasks").WithArgs(int64(497)).
+		WillReturnRows(sqlmock.NewRows([]string{"task_type", "task_status"}).AddRow("sku_planning", "Cancelled"))
+	mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM task_planning_settings").WithArgs(int64(497)).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	expectPlanningTombstoneVerification(mock)
+	inserted, err = applyPlanning(context.Background(), tx, mapping)
+	if err != nil || inserted {
+		t.Fatalf("rerun applyPlanning() inserted/error = %v/%v", inserted, err)
+	}
+
+	mock.ExpectRollback()
+	if err := tx.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPlanningTombstoneRollbackJournalTracksOnlyCreatedSettings(t *testing.T) {
+	created := diffPlanningCreated(
+		[]planningStateSnapshot{{
+			TaskID:           497,
+			SettingsExists:   false,
+			Details:          []planningDetailSnapshot{},
+			RevisionIDs:      []int64{},
+			ImageRevisionIDs: []int64{},
+		}},
+		[]planningStateSnapshot{{
+			TaskID:           497,
+			SettingsExists:   true,
+			Details:          []planningDetailSnapshot{},
+			RevisionIDs:      []int64{},
+			ImageRevisionIDs: []int64{},
+		}},
+	)
+	if len(created) != 1 || !created[0].SettingsCreated ||
+		len(created[0].DetailIDs) != 0 ||
+		len(created[0].RevisionIDs) != 0 ||
+		len(created[0].ImageRevisionIDs) != 0 {
+		t.Fatalf("diffPlanningCreated() = %+v", created)
+	}
+}
+
+func expectPlanningTombstoneVerification(mock sqlmock.Sqlmock) {
+	mock.ExpectQuery("SELECT t.task_type,t.task_status,s.code_rule_revision_id,s.created_by").WithArgs(int64(497)).
+		WillReturnRows(sqlmock.NewRows([]string{"task_type", "task_status", "code_rule_revision_id", "created_by"}).
+			AddRow("sku_planning", "Cancelled", int64(9), int64(1)))
+	mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM task_sku_items WHERE task_id=\\?").WithArgs(int64(497)).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM task_sku_items WHERE task_id=\\? AND id=\\?").WithArgs(int64(497), int64(380)).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM task_planning_sku_details").WithArgs(int64(497)).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM task_planning_sku_revisions").WithArgs(int64(497)).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM task_planning_sku_revision_images").WithArgs(int64(497)).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+}
+
 func TestPlanningTargetStatusPreservesTerminalAndAllowsExplicitActiveStates(t *testing.T) {
 	for _, status := range []string{"PendingAssign", "Completed", "Cancelled", "Archived"} {
 		if err := validatePlanningTargetTransition(status, status); err != nil {
@@ -741,4 +917,356 @@ func TestPlanningTargetStatusPreservesTerminalAndAllowsExplicitActiveStates(t *t
 			t.Fatalf("terminal %s transition error = %v", terminal, err)
 		}
 	}
+}
+
+func TestApplyHistoricalUnavailableRecoveryIsExactAndPointerSafe(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectBegin()
+	tx, err := db.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recovery := historicalUnavailableRecoveryFixture()
+	expectHistoricalUnavailableRecoveryEvidence(mock, recovery, 0, "recorded")
+	mock.ExpectExec("UPDATE asset_storage_refs").
+		WithArgs(recovery.OriginalStorageRefID).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	if err := applyAssetRecoveries(context.Background(), tx, []assetRecoveryMapping{recovery}); err != nil {
+		t.Fatalf("applyAssetRecoveries() error = %v", err)
+	}
+	mock.ExpectRollback()
+	if err := tx.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestApplyPrematerializedRecoveryOnlyValidatesExecutorAfterState(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectBegin()
+	tx, err := db.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recovery := prematerializedRecoveryFixture()
+	expectPrematerializedRecoveryEvidence(mock, recovery, false)
+	if err := applyAssetRecoveries(context.Background(), tx, []assetRecoveryMapping{recovery}); err != nil {
+		t.Fatalf("applyAssetRecoveries() error = %v", err)
+	}
+	mock.ExpectRollback()
+	if err := tx.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPrematerializedRecoveryRejectsUploadBindingDrift(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	recovery := prematerializedRecoveryFixture()
+	expectPrematerializedRecoveryEvidence(mock, recovery, true)
+	if err := validatePrematerializedAssetRecoveryEvidence(context.Background(), db, recovery); err == nil || !strings.Contains(err.Error(), "upload request") {
+		t.Fatalf("validatePrematerializedAssetRecoveryEvidence() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func expectPrematerializedRecoveryEvidence(mock sqlmock.Sqlmock, recovery assetRecoveryMapping, driftUpload bool) {
+	const runID = "recovery-materialization-20260723-25"
+	const targetRef = "11111111-1111-5111-8111-111111111111"
+	const uploadRequestID = int64(777)
+	objectKey := "v8-ab/" + runID + "/recovered/task-2807/task-asset-23989/" + recovery.RecoverySourceSHA256 + ".bin"
+	mock.ExpectQuery("SELECT environment,run_id,plan_sha256").
+		WillReturnRows(sqlmock.NewRows([]string{"environment", "run_id", "plan_sha256"}).
+			AddRow("clone_b", runID, strings.Repeat("a", 64)))
+	mock.ExpectQuery("SELECT task_id,asset_id,file_size,upload_request_id").
+		WithArgs(int64(23989)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"task_id", "asset_id", "file_size", "upload_request_id",
+			"storage_ref_id", "storage_key", "whole_hash", "upload_status", "access_revoked_reason",
+			"deleted_at", "cleaned_at", "object_deleted_at", "access_revoked_at",
+		}).AddRow(
+			int64(2807), int64(22001), int64(683001), uploadRequestID,
+			targetRef, objectKey, recovery.RecoverySourceSHA256, "uploaded", "",
+			nil, nil, nil, nil,
+		))
+	mock.ExpectQuery("SELECT asset_id,owner_type,owner_id,upload_request_id,storage_adapter,ref_type").
+		WithArgs(targetRef).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"asset_id", "owner_type", "owner_id", "upload_request_id", "storage_adapter", "ref_type",
+			"ref_key", "file_size", "is_placeholder", "checksum_hint", "status",
+		}).AddRow(
+			int64(22001), "task_asset", int64(23989), uploadRequestID, "local", "task_asset_object",
+			objectKey, int64(683001), int64(0), recovery.RecoverySourceSHA256, "recorded",
+		))
+	boundRef := targetRef
+	if driftUpload {
+		boundRef = "wrong-ref"
+	}
+	mock.ExpectQuery("SELECT request_id,COALESCE\\(bound_ref_id,''\\),COALESCE\\(checksum_hint,''\\)").
+		WithArgs(uploadRequestID).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"request_id", "bound_ref_id", "checksum_hint", "file_size", "status", "session_status",
+		}).AddRow(uploadRequestID, boundRef, recovery.RecoverySourceSHA256, int64(683001), "bound", "completed"))
+}
+
+func expectHistoricalUnavailableRecoveryEvidence(mock sqlmock.Sqlmock, recovery assetRecoveryMapping, currentReferences int, storageStatus string) {
+	mock.ExpectQuery("SELECT id,task_id,asset_id,file_size,COALESCE\\(storage_ref_id,''\\)").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "task_id", "asset_id", "file_size", "storage_ref_id",
+			"superseded_by_version_id", "upload_status", "deleted_at", "cleaned_at", "object_deleted_at",
+		}).
+			AddRow(int64(12323), int64(2199), int64(12401), int64(17755216), recovery.OriginalStorageRefID, int64(14510), "uploaded", nil, nil, nil).
+			AddRow(int64(14510), int64(2199), int64(12401), int64(17595421), "58aebabe-355c-4d24-814a-d6dca306b73d", int64(14514), "uploaded", nil, nil, nil).
+			AddRow(int64(14514), int64(2199), int64(12401), int64(11275123), "6e6cd051-f261-424d-8b55-49dd6868be9a", nil, "uploaded", nil, nil, nil))
+	mock.ExpectQuery("SELECT COUNT\\(\\*\\).*FROM task_assets.*WHERE task_id=\\? AND asset_id=\\?").
+		WithArgs(int64(2199), int64(12401)).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(3))
+	mock.ExpectQuery("SELECT asset_id,owner_type,owner_id,ref_key,status,file_size").
+		WithArgs(recovery.OriginalStorageRefID).
+		WillReturnRows(sqlmock.NewRows([]string{"asset_id", "owner_type", "owner_id", "ref_key", "status", "file_size"}).
+			AddRow(int64(12323), "task_asset", int64(12323),
+				"tasks/RW-20260709-A-002196/assets/AST-0002/v1/delivery/1783575756672661314_d97ed925.psd",
+				storageStatus, int64(17755216)))
+	mock.ExpectQuery("SELECT task_id,file_size,COALESCE\\(storage_ref_id,''\\),COALESCE\\(upload_status,''\\)").
+		WithArgs(int64(12323)).
+		WillReturnRows(sqlmock.NewRows([]string{"task_id", "file_size", "storage_ref_id", "upload_status", "deleted_at", "cleaned_at", "object_deleted_at"}).
+			AddRow(int64(2199), int64(17755216), recovery.OriginalStorageRefID, "uploaded", nil, nil, nil))
+	for _, derivative := range []struct {
+		assetType string
+		wholeHash string
+	}{
+		{"preview", recovery.PreviewWholeHash},
+		{"design_thumb", recovery.DesignThumbWholeHash},
+	} {
+		mock.ExpectQuery("SELECT COUNT\\(\\*\\).*FROM task_assets").
+			WithArgs(int64(2199), int64(12323), derivative.assetType, derivative.wholeHash).
+			WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
+	}
+	mock.ExpectQuery("WITH RECURSIVE asset_lineage").
+		WithArgs(int64(12323), int64(12323)).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(currentReferences))
+}
+
+func prematerializedRecoveryFixture() assetRecoveryMapping {
+	recovery := assetRecoveryMapping{
+		TaskID:                     2807,
+		MissingTaskAssetID:         23989,
+		RecoverySourceTaskAssetID:  24034,
+		Strategy:                   "clone_b_prematerialized_storage_ref_v1",
+		OriginalStorageRefID:       "f511c5d4-507f-4a69-bf10-70bae369429d",
+		RecoverySourceStorageRefID: "983a746c-c674-4f5c-8812-073be989b194",
+		ExpectedFileSize:           683001,
+		PreviewWholeHash:           "471739776f4c230a80ae5514e83e92fd3f1e104d203ced3ac793c65c25a525e4",
+		DesignThumbWholeHash:       "3442c0ac91eb61371d4057d6c0de232f8ba4f3c25cb6b68cff63142aa155e6ef",
+		ControlledReadProtocol:     "controlled-asset-read-v1",
+		ControlledReadEvidenceHash: "b39e0d9d26e6fdd35941b195bdc413eb12dd6795e23276a48c9b9bd49f829b08",
+		RecoverySourceSHA256:       "d0558b1a9d4a7afed5a03b6b97d4a765d34050866686e396ab0acf9f08f0dec5",
+		Confidence:                 "confirmed_auto",
+		ReviewPolicyIDs:            []string{reviewPolicyLegacyDeletedAssetRecovery},
+		ConfirmedBy:                1,
+		ConfirmedAt:                time.Date(2026, 7, 23, 10, 0, 0, 0, time.UTC),
+		ConfirmationNote:           "reviewed controlled read receipt and Clone B recovery executor after-state",
+	}
+	recovery.ManifestRowHash, _ = assetRecoveryManifestRowHash(recovery)
+	return recovery
+}
+
+func TestApplyHistoricalUnavailableRecoveryRejectsCurrentPointer(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectBegin()
+	tx, err := db.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recovery := historicalUnavailableRecoveryFixture()
+	expectHistoricalUnavailableRecoveryEvidence(mock, recovery, 1, "recorded")
+	if err := applyAssetRecoveries(context.Background(), tx, []assetRecoveryMapping{recovery}); err == nil || !strings.Contains(err.Error(), "current working/finalized") {
+		t.Fatalf("applyAssetRecoveries() error = %v", err)
+	}
+	mock.ExpectRollback()
+	if err := tx.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCurrentPointerAssetReferenceQueryCoversEveryIndirectPath(t *testing.T) {
+	for _, fragment := range []string{
+		"source_asset_version_id=parent.id",
+		"v8-source-alias:group=",
+		"r.source_task_asset_id",
+		"task_asset_group_revision_items",
+		"rr.formal_task_asset_id",
+		"reference_file_refs",
+		"rr.ref_id_snapshot",
+		"task_reference_asset_bindings",
+		"live_ref.owner_type='task_asset'",
+		"frozen_ref.owner_type='task_asset'",
+	} {
+		if !strings.Contains(currentPointerAssetReferencesSQL, fragment) {
+			t.Fatalf("current pointer query does not cover %q", fragment)
+		}
+	}
+}
+
+func TestHistoricalUnavailablePostApplyEvidenceAcceptsOnlyTombstoneStatus(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	recovery := historicalUnavailableRecoveryFixture()
+	expectHistoricalUnavailableRecoveryEvidence(mock, recovery, 0, "historical_unavailable")
+	if err := validateHistoricalUnavailableRecoveryEvidence(
+		context.Background(), db, recovery, "historical_unavailable",
+	); err != nil {
+		t.Fatalf("validateHistoricalUnavailableRecoveryEvidence() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestApplyHistoricalUnavailableRecoveryRejectsLineageDrift(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectBegin()
+	tx, err := db.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recovery := historicalUnavailableRecoveryFixture()
+	mock.ExpectQuery("SELECT id,task_id,asset_id,file_size,COALESCE\\(storage_ref_id,''\\)").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "task_id", "asset_id", "file_size", "storage_ref_id",
+			"superseded_by_version_id", "upload_status", "deleted_at", "cleaned_at", "object_deleted_at",
+		}).
+			AddRow(int64(12323), int64(2199), int64(12401), int64(17755216), recovery.OriginalStorageRefID, int64(14514), "uploaded", nil, nil, nil).
+			AddRow(int64(14510), int64(2199), int64(12401), int64(17595421), "58aebabe-355c-4d24-814a-d6dca306b73d", int64(14514), "uploaded", nil, nil, nil).
+			AddRow(int64(14514), int64(2199), int64(12401), int64(11275123), "6e6cd051-f261-424d-8b55-49dd6868be9a", nil, "uploaded", nil, nil, nil))
+	if err := applyAssetRecoveries(context.Background(), tx, []assetRecoveryMapping{recovery}); err == nil || !strings.Contains(err.Error(), "lineage row 12323") {
+		t.Fatalf("applyAssetRecoveries() error = %v", err)
+	}
+	mock.ExpectRollback()
+	if err := tx.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestApplyHistoricalUnavailableRecoveryRejectsStorageRefIdentityDrift(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectBegin()
+	tx, err := db.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recovery := historicalUnavailableRecoveryFixture()
+	mock.ExpectQuery("SELECT id,task_id,asset_id,file_size,COALESCE\\(storage_ref_id,''\\)").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "task_id", "asset_id", "file_size", "storage_ref_id",
+			"superseded_by_version_id", "upload_status", "deleted_at", "cleaned_at", "object_deleted_at",
+		}).
+			AddRow(int64(12323), int64(2199), int64(12401), int64(17755216), recovery.OriginalStorageRefID, int64(14510), "uploaded", nil, nil, nil).
+			AddRow(int64(14510), int64(2199), int64(12401), int64(17595421), "58aebabe-355c-4d24-814a-d6dca306b73d", int64(14514), "uploaded", nil, nil, nil).
+			AddRow(int64(14514), int64(2199), int64(12401), int64(11275123), "6e6cd051-f261-424d-8b55-49dd6868be9a", nil, "uploaded", nil, nil, nil))
+	mock.ExpectQuery("SELECT COUNT\\(\\*\\).*FROM task_assets.*WHERE task_id=\\? AND asset_id=\\?").
+		WithArgs(int64(2199), int64(12401)).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(3))
+	mock.ExpectQuery("SELECT asset_id,owner_type,owner_id,ref_key,status,file_size").
+		WithArgs(recovery.OriginalStorageRefID).
+		WillReturnRows(sqlmock.NewRows([]string{"asset_id", "owner_type", "owner_id", "ref_key", "status", "file_size"}).
+			AddRow(int64(12323), "task_asset", int64(12323), "wrong/key.psd", "recorded", int64(17755216)))
+	if err := applyAssetRecoveries(context.Background(), tx, []assetRecoveryMapping{recovery}); err == nil || !strings.Contains(err.Error(), "storage ref identity") {
+		t.Fatalf("applyAssetRecoveries() error = %v", err)
+	}
+	mock.ExpectRollback()
+	if err := tx.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRestoreAssetStorageRefStatesRestoresExactStatus(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectBegin()
+	tx, err := db.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mock.ExpectExec("UPDATE asset_storage_refs SET status=\\? WHERE ref_id=\\?").
+		WithArgs("recorded", "ref-original").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	if err := restoreAssetStorageRefStates(context.Background(), tx, []assetStorageRefStatusSnapshot{{
+		RefID:  "ref-original",
+		Status: "recorded",
+	}}); err != nil {
+		t.Fatalf("restoreAssetStorageRefStates() error = %v", err)
+	}
+	mock.ExpectRollback()
+	if err := tx.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func historicalUnavailableRecoveryFixture() assetRecoveryMapping {
+	recovery := assetRecoveryMapping{
+		TaskID:                     2199,
+		MissingTaskAssetID:         12323,
+		RejectedSourceTaskAssetIDs: []int64{14510, 14514},
+		Strategy:                   "historical_unavailable_tombstone_v1",
+		OriginalStorageRefID:       "c0a135a1-080f-46a0-a41a-461aef0ea0fb",
+		ExpectedFileSize:           17755216,
+		PreviewWholeHash:           "82b35a045540d27f9656d6d02c99eb2814a62e9d048d33b20823fb8c0017aa4c",
+		DesignThumbWholeHash:       "54dbf569874243a212c11c3e83e80f19944c2581f12c9473a793bc273ec666a3",
+		ObjectProbeResult:          "not_found",
+		ObjectProbeInputSHA256:     "3f17b37296d2670235ca9bfcfd4388823b81adecf8fbac0826e6f241923579c7",
+		ObjectProbeEvidenceHash:    "f1c78819e1f3d5f4e7a4b25ff3d173368574a5639f4c6df45c8aae5482d047b8",
+		ObjectProbeObjectKeySHA256: "e732f6cd269a93d6bac168b0852dbcf8480af8966847278cb073cd6905b0efdd",
+		ObjectProbeReadOnlyGETs:    1,
+	}
+	recovery.ManifestRowHash, _ = assetRecoveryManifestRowHash(recovery)
+	return recovery
 }

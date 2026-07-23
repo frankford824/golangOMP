@@ -22,9 +22,11 @@ import (
 )
 
 const (
-	workflowGroupsSnapshotVersion = 3
-	workflowGroupsToolVersion     = "workflow-groups-migrate/v8.3"
+	workflowGroupsSnapshotVersion = 4
+	workflowGroupsToolVersion     = "workflow-groups-migrate/v8.4"
 	workflowGroupsSchemaVersion   = "124-126"
+	previousSnapshotVersion       = 3
+	previousToolVersion           = "workflow-groups-migrate/v8.3"
 	legacySnapshotVersion         = 2
 	legacyToolVersion             = "workflow-groups-migrate/v8.2"
 )
@@ -46,6 +48,7 @@ type mappingFile struct {
 	Resources            []resourceMapping          `json:"resources"`
 	Planning             []planningMapping          `json:"planning_tasks"`
 	TaskDecisions        []taskStateDecisionMapping `json:"task_state_decisions,omitempty"`
+	AssetRecoveries      []assetRecoveryMapping     `json:"asset_recoveries,omitempty"`
 	OrganizationMappings []organizationMapping      `json:"organization_mappings,omitempty"`
 	AccessDecisions      []accessDecisionMapping    `json:"access_decisions,omitempty"`
 }
@@ -230,34 +233,42 @@ type accessStateSnapshot struct {
 	Assignments []accessAssignmentEvidence `json:"assignments"`
 }
 
+type assetStorageRefStatusSnapshot struct {
+	RefID   string `json:"ref_id"`
+	AssetID *int64 `json:"asset_id,omitempty"`
+	Status  string `json:"status"`
+}
+
 type snapshot struct {
-	Version             int                         `json:"version"`
-	ToolVersion         string                      `json:"tool_version"`
-	SchemaVersion       string                      `json:"schema_version"`
-	Database            string                      `json:"database"`
-	MappingSHA256       string                      `json:"mapping_sha256"`
-	IntegritySHA256     string                      `json:"integrity_sha256"`
-	ApplyState          string                      `json:"apply_state"`
-	CreatedAt           time.Time                   `json:"created_at"`
-	AppliedAt           *time.Time                  `json:"applied_at"`
-	Tasks               []taskSnapshot              `json:"tasks_before"`
-	AfterTasks          []taskSnapshot              `json:"tasks_after"`
-	ResourceGroups      []resourceGroupSnapshot     `json:"resource_groups_before"`
-	AfterResourceGroups []resourceGroupSnapshot     `json:"resource_groups_after"`
-	AssetBindings       []assetBindingSnapshot      `json:"asset_bindings_before"`
-	AfterAssetBindings  []assetBindingSnapshot      `json:"asset_bindings_after"`
-	SKUOrigins          []skuOriginSnapshot         `json:"sku_origins_before"`
-	AfterSKUOrigins     []skuOriginSnapshot         `json:"sku_origins_after"`
-	PlanningBefore      []planningStateSnapshot     `json:"planning_before"`
-	PlanningAfter       []planningStateSnapshot     `json:"planning_after"`
-	PlanningCreated     []planningCreatedSnapshot   `json:"planning_created"`
-	OrganizationBefore  []organizationStateSnapshot `json:"organization_before,omitempty"`
-	OrganizationAfter   []organizationStateSnapshot `json:"organization_after,omitempty"`
-	AccessBefore        []accessStateSnapshot       `json:"access_before,omitempty"`
-	AccessAfter         []accessStateSnapshot       `json:"access_after,omitempty"`
-	InsertedGroupIDs    []int64                     `json:"inserted_group_ids"`
-	AppliedRevisionIDs  []int64                     `json:"applied_revision_ids"`
-	InsertedAliasIDs    []int64                     `json:"inserted_alias_asset_ids,omitempty"`
+	Version             int                             `json:"version"`
+	ToolVersion         string                          `json:"tool_version"`
+	SchemaVersion       string                          `json:"schema_version"`
+	Database            string                          `json:"database"`
+	MappingSHA256       string                          `json:"mapping_sha256"`
+	IntegritySHA256     string                          `json:"integrity_sha256"`
+	ApplyState          string                          `json:"apply_state"`
+	CreatedAt           time.Time                       `json:"created_at"`
+	AppliedAt           *time.Time                      `json:"applied_at"`
+	Tasks               []taskSnapshot                  `json:"tasks_before"`
+	AfterTasks          []taskSnapshot                  `json:"tasks_after"`
+	ResourceGroups      []resourceGroupSnapshot         `json:"resource_groups_before"`
+	AfterResourceGroups []resourceGroupSnapshot         `json:"resource_groups_after"`
+	AssetBindings       []assetBindingSnapshot          `json:"asset_bindings_before"`
+	AfterAssetBindings  []assetBindingSnapshot          `json:"asset_bindings_after"`
+	SKUOrigins          []skuOriginSnapshot             `json:"sku_origins_before"`
+	AfterSKUOrigins     []skuOriginSnapshot             `json:"sku_origins_after"`
+	PlanningBefore      []planningStateSnapshot         `json:"planning_before"`
+	PlanningAfter       []planningStateSnapshot         `json:"planning_after"`
+	PlanningCreated     []planningCreatedSnapshot       `json:"planning_created"`
+	OrganizationBefore  []organizationStateSnapshot     `json:"organization_before,omitempty"`
+	OrganizationAfter   []organizationStateSnapshot     `json:"organization_after,omitempty"`
+	AccessBefore        []accessStateSnapshot           `json:"access_before,omitempty"`
+	AccessAfter         []accessStateSnapshot           `json:"access_after,omitempty"`
+	StorageRefsBefore   []assetStorageRefStatusSnapshot `json:"asset_storage_refs_before,omitempty"`
+	StorageRefsAfter    []assetStorageRefStatusSnapshot `json:"asset_storage_refs_after,omitempty"`
+	InsertedGroupIDs    []int64                         `json:"inserted_group_ids"`
+	AppliedRevisionIDs  []int64                         `json:"applied_revision_ids"`
+	InsertedAliasIDs    []int64                         `json:"inserted_alias_asset_ids,omitempty"`
 }
 
 type report struct {
@@ -386,6 +397,11 @@ func run(ctx context.Context, o options) error {
 			return v1migrate.NewHardAbort(v1migrate.ExitCodeHardAbort, "%v", err)
 		}
 	}
+	if !o.Rollback {
+		if err := validatePrematerializedAssetRecoveries(ctx, db, mapping.AssetRecoveries); err != nil {
+			return v1migrate.NewHardAbort(v1migrate.ExitCodeHardAbort, "Clone B recovery preflight failed: %v", err)
+		}
+	}
 
 	switch {
 	case o.Rollback:
@@ -467,7 +483,10 @@ func validateMappingMode(m mappingFile, allowCandidateConfidence bool) error {
 	if mappingVersion(m) != workflowGroupsMappingV1 && mappingVersion(m) != workflowGroupsMappingV2 {
 		return fmt.Errorf("mapping version must be 1 or 2")
 	}
-	if err := validateTaskStateDecisions(m); err != nil {
+	if err := validateTaskStateDecisions(m, allowCandidateConfidence); err != nil {
+		return err
+	}
+	if err := validateAssetRecoveries(m, allowCandidateConfidence); err != nil {
 		return err
 	}
 	if err := validateOrganizationMappings(m, allowCandidateConfidence); err != nil {
@@ -478,6 +497,7 @@ func validateMappingMode(m mappingFile, allowCandidateConfidence bool) error {
 	}
 	seenResource := map[string]struct{}{}
 	resourceTasks := map[int64]struct{}{}
+	retouchVisualTask2533Scopes := map[int64]struct{}{}
 	for i, r := range m.Resources {
 		if mappingVersion(m) == workflowGroupsMappingV2 {
 			r.V2Declared = true
@@ -497,6 +517,11 @@ func validateMappingMode(m mappingFile, allowCandidateConfidence bool) error {
 			}
 			seenResource[key] = struct{}{}
 			resourceTasks[r.TaskID] = struct{}{}
+			for _, revision := range r.History {
+				if containsString(revision.ReviewPolicyIDs, reviewPolicyLegacyRetouchVisualScopeTask2533) {
+					retouchVisualTask2533Scopes[r.ScopeRefID] = struct{}{}
+				}
+			}
 			continue
 		}
 		if r.TaskID <= 0 || r.CreatedBy <= 0 {
@@ -541,6 +566,16 @@ func validateMappingMode(m mappingFile, allowCandidateConfidence bool) error {
 		seenResource[key] = struct{}{}
 		resourceTasks[r.TaskID] = struct{}{}
 	}
+	if len(retouchVisualTask2533Scopes) != 0 {
+		if len(retouchVisualTask2533Scopes) != len(legacyRetouchVisualTask2533) {
+			return fmt.Errorf("%s requires all five exact task 2533 requirement scopes", reviewPolicyLegacyRetouchVisualScopeTask2533)
+		}
+		for scopeID := range legacyRetouchVisualTask2533 {
+			if _, exists := retouchVisualTask2533Scopes[scopeID]; !exists {
+				return fmt.Errorf("%s is missing task 2533 requirement %d", reviewPolicyLegacyRetouchVisualScopeTask2533, scopeID)
+			}
+		}
+	}
 	seenPlanning := map[int64]struct{}{}
 	for i, p := range m.Planning {
 		if p.TaskID <= 0 {
@@ -561,6 +596,12 @@ func validateMappingMode(m mappingFile, allowCandidateConfidence bool) error {
 			}
 			if p.CodeRuleRevisionID != 9 {
 				return fmt.Errorf("%s: %s requires code_rule_revision_id=9", path, reviewPolicyFrozenSKUPlanningRuleRevision9)
+			}
+			tombstonePolicy := containsString(p.ReviewPolicyIDs, reviewPolicyLegacyIncompleteUATPlanningTombstone)
+			if tombstonePolicy {
+				if !isIncompleteUATPlanningTombstone(p) {
+					return fmt.Errorf("%s: %s is restricted to task_id=497, target_task_status=Cancelled, rule revision 9, exact SKU item 380, and zero inferred planning fields", path, reviewPolicyLegacyIncompleteUATPlanningTombstone)
+				}
 			}
 			expectedHash, err := planningManifestRowHash(p)
 			if err != nil {
@@ -599,7 +640,7 @@ func validateMappingMode(m mappingFile, allowCandidateConfidence bool) error {
 		}
 		seenPlanning[p.TaskID] = struct{}{}
 		for j, item := range p.Items {
-			if item.TaskSKUItemID <= 0 || (!allowCandidateConfidence && (strings.TrimSpace(item.DescriptionSpec) == "" || item.Quantity <= 0)) {
+			if item.TaskSKUItemID <= 0 || (!isIncompleteUATPlanningTombstone(p) && !allowCandidateConfidence && (strings.TrimSpace(item.DescriptionSpec) == "" || item.Quantity <= 0)) {
 				return fmt.Errorf("planning_tasks[%d].items[%d]: item id, description and positive quantity are required", i, j)
 			}
 		}
@@ -724,6 +765,39 @@ func collectMappingCandidateIssues(m mappingFile) []mappingCandidateIssue {
 			Blockers: append([]string(nil), planning.Blockers...),
 		})
 	}
+	for _, decision := range m.TaskDecisions {
+		if decision.Confidence != "proposed_review" && decision.Confidence != "hard_blocked" {
+			continue
+		}
+		issues = append(issues, mappingCandidateIssue{
+			TaskID: decision.TaskID, ScopeKind: "task_state_decision",
+			Confidence: decision.Confidence,
+			Reason:     fmt.Sprintf("task state transition %s -> %s requires explicit review", decision.FromStatus, decision.TargetStatus),
+			Blockers:   append([]string(nil), decision.Blockers...),
+		})
+	}
+	for _, recovery := range m.AssetRecoveries {
+		if recovery.Confidence != "proposed_review" && recovery.Confidence != "hard_blocked" {
+			continue
+		}
+		reason := fmt.Sprintf(
+			"task asset %d recovery identity requires isolated Clone B pre-materialization and explicit review",
+			recovery.MissingTaskAssetID,
+		)
+		if recovery.Strategy == "historical_unavailable_tombstone_v1" {
+			reason = fmt.Sprintf(
+				"task asset %d is proven historically unavailable; API/UI and object-integrity gates must expose the tombstone without claiming original bytes exist",
+				recovery.MissingTaskAssetID,
+			)
+		}
+		issues = append(issues, mappingCandidateIssue{
+			TaskID: recovery.TaskID, ScopeKind: "asset_recovery",
+			ScopeRefID: recovery.MissingTaskAssetID,
+			Confidence: recovery.Confidence,
+			Reason:     reason,
+			Blockers:   append([]string(nil), recovery.Blockers...),
+		})
+	}
 	return issues
 }
 
@@ -787,6 +861,9 @@ func queryCutoverBlockers(ctx context.Context, q snapshotQueryer, m mappingFile)
 	}
 	reviewedTaskDecisions := map[int64]taskStateDecisionMapping{}
 	for _, decision := range m.TaskDecisions {
+		if mappingVersion(m) == workflowGroupsMappingV2 && decision.Confidence != "confirmed_auto" {
+			continue
+		}
 		reviewedTaskDecisions[decision.TaskID] = decision
 		if issue := validateTaskStateDecisionPreflight(ctx, q, decision, m.Resources); issue != nil {
 			blockers.Tasks = append(blockers.Tasks, *issue)
@@ -1476,6 +1553,9 @@ func lockCutoverTargets(ctx context.Context, tx *sql.Tx, m mappingFile) error {
 	for _, item := range m.TaskDecisions {
 		taskIDs = append(taskIDs, item.TaskID)
 	}
+	for _, item := range m.AssetRecoveries {
+		taskIDs = append(taskIDs, item.TaskID)
+	}
 	taskIDs = uniqueSortedInt64(taskIDs)
 	for _, taskID := range taskIDs {
 		if _, err := lockInt64Rows(ctx, tx, `SELECT id FROM tasks WHERE id=? FOR UPDATE`, taskID); err != nil {
@@ -1534,6 +1614,14 @@ func lockCutoverTargets(ctx context.Context, tx *sql.Tx, m mappingFile) error {
 	}
 	for _, assetID := range uniqueSortedInt64(assetIDs) {
 		if _, err := lockInt64Rows(ctx, tx, `SELECT id FROM task_assets WHERE id=? FOR UPDATE`, assetID); err != nil {
+			return err
+		}
+	}
+	for _, recovery := range m.AssetRecoveries {
+		if recovery.Strategy == "clone_b_prematerialized_storage_ref_v1" {
+			continue
+		}
+		if _, err := queryStringIDs(ctx, tx, `SELECT ref_id FROM asset_storage_refs WHERE ref_id=? FOR UPDATE`, recovery.OriginalStorageRefID); err != nil {
 			return err
 		}
 	}
@@ -1805,6 +1893,49 @@ func captureAssetBindingsForTasks(ctx context.Context, q snapshotQueryer, taskID
 	return items, nil
 }
 
+func loadAssetStorageRefStatusSnapshot(ctx context.Context, q snapshotQueryer, refID string) (assetStorageRefStatusSnapshot, error) {
+	var item assetStorageRefStatusSnapshot
+	var assetID sql.NullInt64
+	if err := q.QueryRowContext(ctx, `
+		SELECT ref_id,asset_id,status
+		FROM asset_storage_refs
+		WHERE ref_id=?`, refID).Scan(&item.RefID, &assetID, &item.Status); err != nil {
+		return item, err
+	}
+	item.AssetID = nullInt64Pointer(assetID)
+	return item, nil
+}
+
+func captureAssetStorageRefStates(ctx context.Context, q snapshotQueryer, recoveries []assetRecoveryMapping) ([]assetStorageRefStatusSnapshot, error) {
+	if len(recoveries) == 0 {
+		return nil, nil
+	}
+	byRefID := make(map[string]assetStorageRefStatusSnapshot, len(recoveries))
+	for _, recovery := range recoveries {
+		if recovery.Strategy == "clone_b_prematerialized_storage_ref_v1" {
+			continue
+		}
+		refID := strings.TrimSpace(recovery.OriginalStorageRefID)
+		if refID == "" {
+			return nil, fmt.Errorf("asset recovery %d has no original storage ref id", recovery.MissingTaskAssetID)
+		}
+		if _, exists := byRefID[refID]; exists {
+			continue
+		}
+		item, err := loadAssetStorageRefStatusSnapshot(ctx, q, refID)
+		if err != nil {
+			return nil, fmt.Errorf("load asset storage ref %s: %w", refID, err)
+		}
+		byRefID[refID] = item
+	}
+	items := make([]assetStorageRefStatusSnapshot, 0, len(byRefID))
+	for _, item := range byRefID {
+		items = append(items, item)
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].RefID < items[j].RefID })
+	return items, nil
+}
+
 func populateAfterSnapshot(ctx context.Context, tx *sql.Tx, s *snapshot, m mappingFile) error {
 	s.AfterTasks = make([]taskSnapshot, 0, len(s.Tasks))
 	for _, before := range s.Tasks {
@@ -1840,6 +1971,10 @@ func populateAfterSnapshot(ctx context.Context, tx *sql.Tx, s *snapshot, m mappi
 		return err
 	}
 	s.AccessAfter, err = captureAccessStates(ctx, tx, m.AccessDecisions)
+	if err != nil {
+		return err
+	}
+	s.StorageRefsAfter, err = captureAssetStorageRefStates(ctx, tx, m.AssetRecoveries)
 	if err != nil {
 		return err
 	}
@@ -1993,6 +2128,9 @@ func apply(ctx context.Context, db *sql.DB, database string, o options, m mappin
 		}
 		_ = inserted
 	}
+	if err := applyAssetRecoveries(ctx, tx, m.AssetRecoveries); err != nil {
+		return err
+	}
 	if err := validateCutoverState(ctx, tx, m); err != nil {
 		return err
 	}
@@ -2087,6 +2225,408 @@ func applyOrganizationMappings(ctx context.Context, tx *sql.Tx, mappings []organ
 	return nil
 }
 
+const currentPointerAssetReferencesSQL = `
+		WITH RECURSIVE asset_lineage AS (
+		  SELECT id,storage_ref_id
+		  FROM task_assets seed
+		  LEFT JOIN task_asset_groups seed_group ON seed_group.id=seed.bound_group_id
+		  WHERE seed.id=?
+		     OR (
+		       seed.source_module_key='migration'
+		       AND seed.bound_role='source'
+		       AND seed.remark=CONCAT('v8-source-alias:group=',seed_group.id,':origin=',?)
+		     )
+		  UNION DISTINCT
+		  SELECT ta.id,ta.storage_ref_id
+		  FROM task_assets ta
+		  JOIN asset_lineage parent ON ta.source_asset_version_id=parent.id
+		)
+		SELECT COUNT(DISTINCT r.id)
+		FROM task_asset_groups g
+		JOIN task_asset_group_revisions r
+		  ON r.id=g.working_revision_id OR r.id=g.finalized_revision_id
+		WHERE EXISTS (
+		        SELECT 1 FROM asset_lineage lineage
+		        WHERE lineage.id=r.source_task_asset_id
+		      )
+		   OR EXISTS (
+		        SELECT 1
+		        FROM task_asset_group_revision_items i
+		        JOIN asset_lineage lineage ON lineage.id=i.task_asset_id
+		        WHERE i.revision_id=r.id
+		      )
+		   OR EXISTS (
+		        SELECT 1
+		        FROM task_asset_group_revision_references rr
+		        LEFT JOIN reference_file_refs rfr ON rfr.id=rr.reference_file_ref_id
+		        LEFT JOIN asset_storage_refs live_ref ON live_ref.ref_id=rfr.ref_id
+		        LEFT JOIN asset_storage_refs frozen_ref ON frozen_ref.ref_id=rr.ref_id_snapshot
+		        LEFT JOIN task_reference_asset_bindings binding
+		          ON binding.task_id=g.task_id
+		         AND binding.ref_id COLLATE utf8mb4_0900_ai_ci=rfr.ref_id
+		        JOIN asset_lineage lineage
+		          ON lineage.id=rr.formal_task_asset_id
+		          OR lineage.id=live_ref.asset_id
+		          OR (live_ref.owner_type='task_asset' AND lineage.id=live_ref.owner_id)
+		          OR lineage.id=frozen_ref.asset_id
+		          OR (frozen_ref.owner_type='task_asset' AND lineage.id=frozen_ref.owner_id)
+		          OR lineage.id=binding.task_asset_id
+		        WHERE rr.revision_id=r.id
+		      )`
+
+func countCurrentPointerAssetReferences(ctx context.Context, q snapshotQueryer, taskAssetID int64) (int, error) {
+	var count int
+	err := q.QueryRowContext(ctx, currentPointerAssetReferencesSQL, taskAssetID, taskAssetID).Scan(&count)
+	return count, err
+}
+
+func validateHistoricalUnavailableRecoveryEvidence(
+	ctx context.Context,
+	q snapshotQueryer,
+	recovery assetRecoveryMapping,
+	expectedStorageStatus string,
+) error {
+	expected, known := frozenAssetRecoveryEvidenceByMissingID[recovery.MissingTaskAssetID]
+	if !known || recovery.MissingTaskAssetID != 12323 {
+		return fmt.Errorf("task asset %d is outside the frozen historical-unavailable evidence set", recovery.MissingTaskAssetID)
+	}
+	expectedRowHash, err := assetRecoveryManifestRowHash(recovery)
+	if err != nil {
+		return fmt.Errorf("compute task asset %d recovery manifest row hash: %w", recovery.MissingTaskAssetID, err)
+	}
+	if recovery.ManifestRowHash != expectedRowHash ||
+		recovery.ObjectProbeResult != expected.ObjectProbeResult ||
+		recovery.ObjectProbeInputSHA256 != expected.ObjectProbeInputSHA256 ||
+		recovery.ObjectProbeEvidenceHash != expected.ObjectProbeEvidenceHash ||
+		recovery.ObjectProbeObjectKeySHA256 != expected.ObjectProbeObjectKeySHA256 ||
+		recovery.ObjectProbeReadOnlyGETs != expected.ObjectProbeReadOnlyGETs {
+		return fmt.Errorf("task asset %d historical-unavailable mapping is not bound to the frozen object-absence evidence", recovery.MissingTaskAssetID)
+	}
+
+	type lineageRow struct {
+		id             int64
+		taskID         int64
+		rootAssetID    int64
+		fileSize       int64
+		storageRefID   string
+		supersededByID sql.NullInt64
+		uploadStatus   string
+		deletedAt      sql.NullTime
+		cleanedAt      sql.NullTime
+		objectDeleted  sql.NullTime
+	}
+	rows, err := q.QueryContext(ctx, `
+		SELECT id,task_id,asset_id,file_size,COALESCE(storage_ref_id,''),
+		       superseded_by_version_id,COALESCE(upload_status,''),
+		       deleted_at,cleaned_at,object_deleted_at
+		FROM task_assets
+		WHERE id IN (12323,14510,14514)
+		ORDER BY id`)
+	if err != nil {
+		return fmt.Errorf("load historical-unavailable lineage: %w", err)
+	}
+	defer rows.Close()
+	var lineage []lineageRow
+	for rows.Next() {
+		var item lineageRow
+		if err := rows.Scan(
+			&item.id, &item.taskID, &item.rootAssetID, &item.fileSize, &item.storageRefID,
+			&item.supersededByID, &item.uploadStatus,
+			&item.deletedAt, &item.cleanedAt, &item.objectDeleted,
+		); err != nil {
+			return fmt.Errorf("scan historical-unavailable lineage: %w", err)
+		}
+		lineage = append(lineage, item)
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	expectedLineage := []struct {
+		id           int64
+		fileSize     int64
+		storageRefID string
+		supersededBy int64
+		hasSuccessor bool
+	}{
+		{id: 12323, fileSize: 17755216, storageRefID: recovery.OriginalStorageRefID, supersededBy: 14510, hasSuccessor: true},
+		{id: 14510, fileSize: 17595421, storageRefID: "58aebabe-355c-4d24-814a-d6dca306b73d", supersededBy: 14514, hasSuccessor: true},
+		{id: 14514, fileSize: 11275123, storageRefID: "6e6cd051-f261-424d-8b55-49dd6868be9a"},
+	}
+	if len(lineage) != len(expectedLineage) {
+		return fmt.Errorf("task asset 12323 lineage requires exactly 12323->14510->14514; got %d rows", len(lineage))
+	}
+	for index, wanted := range expectedLineage {
+		got := lineage[index]
+		if got.id != wanted.id ||
+			got.taskID != recovery.TaskID ||
+			got.rootAssetID != expected.RootAssetID ||
+			got.fileSize != wanted.fileSize ||
+			got.storageRefID != wanted.storageRefID ||
+			got.supersededByID.Valid != wanted.hasSuccessor ||
+			(wanted.hasSuccessor && got.supersededByID.Int64 != wanted.supersededBy) ||
+			got.uploadStatus != "uploaded" ||
+			got.deletedAt.Valid ||
+			got.cleanedAt.Valid ||
+			got.objectDeleted.Valid {
+			return fmt.Errorf("task asset 12323 lineage row %d no longer matches frozen 12323->14510->14514 evidence", wanted.id)
+		}
+	}
+	var rootRowCount int
+	if err := q.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM task_assets
+		WHERE task_id=? AND asset_id=?`,
+		recovery.TaskID, expected.RootAssetID,
+	).Scan(&rootRowCount); err != nil {
+		return err
+	}
+	if rootRowCount != len(expectedLineage) {
+		return fmt.Errorf("task asset 12323 root %d contains %d rows; frozen lineage requires exactly 3", expected.RootAssetID, rootRowCount)
+	}
+
+	var storageAssetID sql.NullInt64
+	var storageOwnerType, storageRefKey, storageStatus string
+	var storageOwnerID, storageFileSize int64
+	if err := q.QueryRowContext(ctx, `
+		SELECT asset_id,owner_type,owner_id,ref_key,status,file_size
+		FROM asset_storage_refs
+		WHERE ref_id=?`, recovery.OriginalStorageRefID).
+		Scan(&storageAssetID, &storageOwnerType, &storageOwnerID, &storageRefKey, &storageStatus, &storageFileSize); err != nil {
+		return fmt.Errorf("load historical-unavailable storage ref %s: %w", recovery.OriginalStorageRefID, err)
+	}
+	if !storageAssetID.Valid ||
+		storageAssetID.Int64 != recovery.MissingTaskAssetID ||
+		storageOwnerType != "task_asset" ||
+		storageOwnerID != recovery.MissingTaskAssetID ||
+		storageRefKey != expected.OriginalStorageRefKey ||
+		storageStatus != expectedStorageStatus ||
+		storageFileSize != recovery.ExpectedFileSize {
+		return fmt.Errorf("task asset 12323 original storage ref identity no longer matches frozen evidence")
+	}
+
+	var taskID, fileSize int64
+	var storageRefID, uploadStatus string
+	var deletedAt, cleanedAt, objectDeletedAt sql.NullTime
+	if err := q.QueryRowContext(ctx, `
+		SELECT task_id,file_size,COALESCE(storage_ref_id,''),COALESCE(upload_status,''),
+		       deleted_at,cleaned_at,object_deleted_at
+		FROM task_assets
+		WHERE id=?`, recovery.MissingTaskAssetID).
+		Scan(&taskID, &fileSize, &storageRefID, &uploadStatus, &deletedAt, &cleanedAt, &objectDeletedAt); err != nil {
+		return fmt.Errorf("load historical-unavailable task asset %d: %w", recovery.MissingTaskAssetID, err)
+	}
+	if taskID != recovery.TaskID ||
+		fileSize != recovery.ExpectedFileSize ||
+		storageRefID != recovery.OriginalStorageRefID ||
+		uploadStatus != "uploaded" ||
+		deletedAt.Valid ||
+		cleanedAt.Valid ||
+		objectDeletedAt.Valid {
+		return fmt.Errorf("task asset %d no longer matches the frozen historical-unavailable before state", recovery.MissingTaskAssetID)
+	}
+	derivatives := []struct {
+		assetType string
+		wholeHash string
+	}{
+		{assetType: "preview", wholeHash: recovery.PreviewWholeHash},
+		{assetType: "design_thumb", wholeHash: recovery.DesignThumbWholeHash},
+	}
+	for _, derivative := range derivatives {
+		var count int
+		if err := q.QueryRowContext(ctx, `
+			SELECT COUNT(*)
+			FROM task_assets
+			WHERE task_id=?
+			  AND source_asset_version_id=?
+			  AND asset_type=?
+			  AND whole_hash=?
+			  AND deleted_at IS NULL
+			  AND cleaned_at IS NULL
+			  AND object_deleted_at IS NULL`,
+			recovery.TaskID, recovery.MissingTaskAssetID, derivative.assetType, derivative.wholeHash).Scan(&count); err != nil {
+			return err
+		}
+		if count != 1 {
+			return fmt.Errorf("task asset %d requires exactly one %s derivative matching frozen lineage/hash; got %d", recovery.MissingTaskAssetID, derivative.assetType, count)
+		}
+	}
+	currentReferences, err := countCurrentPointerAssetReferences(ctx, q, recovery.MissingTaskAssetID)
+	if err != nil {
+		return err
+	}
+	if currentReferences != 0 {
+		return fmt.Errorf("task asset %d is historical-unavailable but is referenced by %d current working/finalized rows", recovery.MissingTaskAssetID, currentReferences)
+	}
+	return nil
+}
+
+func applyAssetRecoveries(ctx context.Context, tx *sql.Tx, recoveries []assetRecoveryMapping) error {
+	for _, recovery := range recoveries {
+		if recovery.Strategy == "clone_b_prematerialized_storage_ref_v1" {
+			if err := validatePrematerializedAssetRecoveryEvidence(ctx, tx, recovery); err != nil {
+				return err
+			}
+			continue
+		}
+		if recovery.Strategy != "historical_unavailable_tombstone_v1" || recovery.MissingTaskAssetID != 12323 {
+			return fmt.Errorf("asset recovery %d has an unsupported apply strategy", recovery.MissingTaskAssetID)
+		}
+		if err := validateHistoricalUnavailableRecoveryEvidence(ctx, tx, recovery, "recorded"); err != nil {
+			return err
+		}
+		result, err := tx.ExecContext(ctx, `
+			UPDATE asset_storage_refs
+			SET status='historical_unavailable'
+			WHERE ref_id=? AND status='recorded'`, recovery.OriginalStorageRefID)
+		if err != nil {
+			return err
+		}
+		affected, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if affected != 1 {
+			return fmt.Errorf("asset recovery %d did not update exactly one recorded storage ref", recovery.MissingTaskAssetID)
+		}
+	}
+	return nil
+}
+
+func validatePrematerializedAssetRecoveries(ctx context.Context, q snapshotQueryer, recoveries []assetRecoveryMapping) error {
+	for _, recovery := range recoveries {
+		if recovery.Confidence != "confirmed_auto" || recovery.Strategy != "clone_b_prematerialized_storage_ref_v1" {
+			continue
+		}
+		if err := validatePrematerializedAssetRecoveryEvidence(ctx, q, recovery); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validatePrematerializedAssetRecoveryEvidence(ctx context.Context, q snapshotQueryer, recovery assetRecoveryMapping) error {
+	expected, ok := frozenAssetRecoveryEvidenceByMissingID[recovery.MissingTaskAssetID]
+	if !ok || recovery.MissingTaskAssetID == 12323 || recovery.TaskID != 2807 {
+		return fmt.Errorf("task asset %d is outside the exact prematerialized recovery allowlist", recovery.MissingTaskAssetID)
+	}
+	expectedRowHash, err := assetRecoveryManifestRowHash(recovery)
+	if err != nil {
+		return err
+	}
+	if recovery.ManifestRowHash != expectedRowHash ||
+		recovery.RecoverySourceSHA256 != expected.RecoverySourceSHA256 ||
+		recovery.ControlledReadProtocol != "controlled-asset-read-v1" ||
+		recovery.ControlledReadEvidenceHash != "b39e0d9d26e6fdd35941b195bdc413eb12dd6795e23276a48c9b9bd49f829b08" {
+		return fmt.Errorf("task asset %d mapping is not bound to the frozen controlled-read evidence", recovery.MissingTaskAssetID)
+	}
+
+	var guardEnvironment, guardRunID, guardPlanSHA string
+	if err := q.QueryRowContext(ctx, `
+		SELECT environment,run_id,plan_sha256
+		FROM v8_ab_clone_guard
+		WHERE singleton_id=1`).Scan(&guardEnvironment, &guardRunID, &guardPlanSHA); err != nil {
+		return fmt.Errorf("read Clone B recovery guard: %w", err)
+	}
+	if guardEnvironment != "clone_b" ||
+		!recoveryRunIDPattern.MatchString(guardRunID) ||
+		!sha256Pattern.MatchString(guardPlanSHA) {
+		return fmt.Errorf("task asset %d recovery guard does not identify a valid Clone B executor run", recovery.MissingTaskAssetID)
+	}
+	expectedObjectKey := fmt.Sprintf(
+		"v8-ab/%s/recovered/task-%d/task-asset-%d/%s.bin",
+		guardRunID, recovery.TaskID, recovery.MissingTaskAssetID, recovery.RecoverySourceSHA256,
+	)
+
+	var taskID, rootAssetID, fileSize, uploadRequestID int64
+	var storageRefID, storageKey, wholeHash, uploadStatus, accessRevokedReason string
+	var deletedAt, cleanedAt, objectDeletedAt, accessRevokedAt sql.NullTime
+	if err := q.QueryRowContext(ctx, `
+		SELECT task_id,asset_id,file_size,upload_request_id,
+		       COALESCE(storage_ref_id,''),COALESCE(storage_key,''),COALESCE(whole_hash,''),
+		       COALESCE(upload_status,''),COALESCE(access_revoked_reason,''),
+		       deleted_at,cleaned_at,object_deleted_at,access_revoked_at
+		FROM task_assets
+		WHERE id=?`, recovery.MissingTaskAssetID).Scan(
+		&taskID, &rootAssetID, &fileSize, &uploadRequestID,
+		&storageRefID, &storageKey, &wholeHash, &uploadStatus, &accessRevokedReason,
+		&deletedAt, &cleanedAt, &objectDeletedAt, &accessRevokedAt,
+	); err != nil {
+		return fmt.Errorf("read recovered task asset %d: %w", recovery.MissingTaskAssetID, err)
+	}
+	if taskID != recovery.TaskID ||
+		fileSize != recovery.ExpectedFileSize ||
+		storageRefID == "" ||
+		storageKey != expectedObjectKey ||
+		wholeHash != recovery.RecoverySourceSHA256 ||
+		uploadStatus != "uploaded" ||
+		accessRevokedReason != "" ||
+		deletedAt.Valid || cleanedAt.Valid || objectDeletedAt.Valid || accessRevokedAt.Valid {
+		return fmt.Errorf("task asset %d does not match the exact recovered after-state", recovery.MissingTaskAssetID)
+	}
+
+	var storageAssetID sql.NullInt64
+	var ownerType, storageAdapter, refType, refKey, checksumHint, storageStatus string
+	var ownerID, storageUploadRequestID, storageFileSize, isPlaceholder int64
+	if err := q.QueryRowContext(ctx, `
+		SELECT asset_id,owner_type,owner_id,upload_request_id,storage_adapter,ref_type,
+		       ref_key,file_size,is_placeholder,COALESCE(checksum_hint,''),status
+		FROM asset_storage_refs
+		WHERE ref_id=?`, storageRefID).Scan(
+		&storageAssetID, &ownerType, &ownerID, &storageUploadRequestID,
+		&storageAdapter, &refType, &refKey, &storageFileSize, &isPlaceholder,
+		&checksumHint, &storageStatus,
+	); err != nil {
+		return fmt.Errorf("read recovered storage ref %s: %w", storageRefID, err)
+	}
+	if !storageAssetID.Valid || storageAssetID.Int64 != rootAssetID ||
+		ownerType != "task_asset" || ownerID != recovery.MissingTaskAssetID ||
+		storageUploadRequestID != uploadRequestID ||
+		storageAdapter != "local" || refType != "task_asset_object" ||
+		refKey != expectedObjectKey || storageFileSize != recovery.ExpectedFileSize ||
+		isPlaceholder != 0 || checksumHint != recovery.RecoverySourceSHA256 ||
+		storageStatus != "recorded" {
+		return fmt.Errorf("task asset %d target storage ref does not match the exact recovered after-state", recovery.MissingTaskAssetID)
+	}
+
+	var requestID int64
+	var boundRefID, uploadChecksum, requestStatus, sessionStatus string
+	var uploadFileSize int64
+	if err := q.QueryRowContext(ctx, `
+		SELECT request_id,COALESCE(bound_ref_id,''),COALESCE(checksum_hint,''),
+		       file_size,status,session_status
+		FROM upload_requests
+		WHERE request_id=?`, uploadRequestID).Scan(
+		&requestID, &boundRefID, &uploadChecksum, &uploadFileSize, &requestStatus, &sessionStatus,
+	); err != nil {
+		return fmt.Errorf("read recovered upload request %d: %w", uploadRequestID, err)
+	}
+	if requestID != uploadRequestID ||
+		boundRefID != storageRefID ||
+		uploadChecksum != recovery.RecoverySourceSHA256 ||
+		uploadFileSize != recovery.ExpectedFileSize ||
+		requestStatus != "bound" || sessionStatus != "completed" {
+		return fmt.Errorf("task asset %d upload request does not match the exact recovered after-state", recovery.MissingTaskAssetID)
+	}
+	return nil
+}
+
+func restoreAssetStorageRefStates(ctx context.Context, tx *sql.Tx, states []assetStorageRefStatusSnapshot) error {
+	for _, storageRef := range states {
+		result, err := tx.ExecContext(ctx, `UPDATE asset_storage_refs SET status=? WHERE ref_id=?`, storageRef.Status, storageRef.RefID)
+		if err != nil {
+			return err
+		}
+		affected, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if affected != 1 {
+			return fmt.Errorf("rollback storage ref %s did not update exactly one row", storageRef.RefID)
+		}
+	}
+	return nil
+}
+
 func recoverExistingApply(ctx context.Context, db *sql.DB, database, path string, m mappingFile) (bool, error) {
 	s, err := readSnapshot(path, database, m)
 	if err != nil {
@@ -2143,6 +2683,9 @@ func captureSnapshot(ctx context.Context, q snapshotQueryer, database string, m 
 	}
 	for _, decision := range m.TaskDecisions {
 		ids[decision.TaskID] = struct{}{}
+	}
+	for _, recovery := range m.AssetRecoveries {
+		ids[recovery.TaskID] = struct{}{}
 	}
 	rows, err := q.QueryContext(ctx, `SELECT id, task_type, task_status, workflow_revision, current_handler_id FROM tasks WHERE task_status IN ('PendingAuditA','PendingAuditB','RejectedByAuditA','RejectedByAuditB','PendingCustomizationReview','PendingCustomizationProduction','PendingEffectReview','PendingEffectRevision','PendingProductionTransfer','PendingWarehouseQC','PendingWarehouseReceive','PendingClose','PendingOutsource','Outsourcing','PendingOutsourceReview') OR task_type='purchase_task' ORDER BY id`)
 	if err != nil {
@@ -2224,6 +2767,10 @@ func captureSnapshot(ctx context.Context, q snapshotQueryer, database string, m 
 		return s, err
 	}
 	s.AccessBefore, err = captureAccessStates(ctx, q, m.AccessDecisions)
+	if err != nil {
+		return s, err
+	}
+	s.StorageRefsBefore, err = captureAssetStorageRefStates(ctx, q, m.AssetRecoveries)
 	if err != nil {
 		return s, err
 	}
@@ -2533,21 +3080,23 @@ func applyPlanning(ctx context.Context, tx *sql.Tx, m planningMapping) (bool, er
 	if _, err := tx.ExecContext(ctx, `INSERT INTO task_planning_settings (task_id,erp_sync_mode,code_rule_revision_id,client_create_id,created_by) VALUES (?,'none',?,?,?)`, m.TaskID, m.CodeRuleRevisionID, fmt.Sprintf("migration-%d", m.TaskID), m.CreatedBy); err != nil {
 		return false, err
 	}
-	for _, item := range m.Items {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO task_planning_sku_details (task_sku_item_id) VALUES (?)`, item.TaskSKUItemID); err != nil {
-			return false, err
-		}
-		res, err := tx.ExecContext(ctx, `INSERT INTO task_planning_sku_revisions (task_sku_item_id,version_no,description_spec,quantity,target_price,currency,note,reference_url,erp_product_i_id,erp_product_name,reason,created_by) VALUES (?,1,?,?,?,'CNY',?,?,?,?,'confirmed legacy planning migration',?)`, item.TaskSKUItemID, item.DescriptionSpec, item.Quantity, item.TargetPrice, item.Note, item.ReferenceURL, item.ERPProductIID, item.ERPProductName, m.CreatedBy)
-		if err != nil {
-			return false, err
-		}
-		revisionID, _ := res.LastInsertId()
-		if _, err = tx.ExecContext(ctx, `UPDATE task_planning_sku_details SET current_revision_id=? WHERE task_sku_item_id=?`, revisionID, item.TaskSKUItemID); err != nil {
-			return false, err
-		}
-		if item.ImageStorageRef != "" {
-			if _, err = tx.ExecContext(ctx, `INSERT INTO task_planning_sku_revision_images (revision_id,storage_ref_id) VALUES (?,?)`, revisionID, item.ImageStorageRef); err != nil {
+	if !isIncompleteUATPlanningTombstone(m) {
+		for _, item := range m.Items {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO task_planning_sku_details (task_sku_item_id) VALUES (?)`, item.TaskSKUItemID); err != nil {
 				return false, err
+			}
+			res, err := tx.ExecContext(ctx, `INSERT INTO task_planning_sku_revisions (task_sku_item_id,version_no,description_spec,quantity,target_price,currency,note,reference_url,erp_product_i_id,erp_product_name,reason,created_by) VALUES (?,1,?,?,?,'CNY',?,?,?,?,'confirmed legacy planning migration',?)`, item.TaskSKUItemID, item.DescriptionSpec, item.Quantity, item.TargetPrice, item.Note, item.ReferenceURL, item.ERPProductIID, item.ERPProductName, m.CreatedBy)
+			if err != nil {
+				return false, err
+			}
+			revisionID, _ := res.LastInsertId()
+			if _, err = tx.ExecContext(ctx, `UPDATE task_planning_sku_details SET current_revision_id=? WHERE task_sku_item_id=?`, revisionID, item.TaskSKUItemID); err != nil {
+				return false, err
+			}
+			if item.ImageStorageRef != "" {
+				if _, err = tx.ExecContext(ctx, `INSERT INTO task_planning_sku_revision_images (revision_id,storage_ref_id) VALUES (?,?)`, revisionID, item.ImageStorageRef); err != nil {
+					return false, err
+				}
 			}
 		}
 	}
@@ -2589,6 +3138,33 @@ func verifyPlanningMappingQuery(ctx context.Context, q snapshotQueryer, m planni
 	if itemCount != len(m.Items) {
 		return fmt.Errorf("planning task %d has %d SKU rows but mapping has %d", m.TaskID, itemCount, len(m.Items))
 	}
+	if isIncompleteUATPlanningTombstone(m) {
+		var exactItemCount int
+		if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM task_sku_items WHERE task_id=? AND id=?`, m.TaskID, int64(380)).Scan(&exactItemCount); err != nil {
+			return err
+		}
+		if exactItemCount != 1 {
+			return fmt.Errorf("planning tombstone task %d must preserve exact SKU item 380", m.TaskID)
+		}
+		zeroChecks := []struct {
+			name  string
+			query string
+		}{
+			{name: "details", query: `SELECT COUNT(*) FROM task_planning_sku_details d JOIN task_sku_items si ON si.id=d.task_sku_item_id WHERE si.task_id=?`},
+			{name: "revisions", query: `SELECT COUNT(*) FROM task_planning_sku_revisions r JOIN task_sku_items si ON si.id=r.task_sku_item_id WHERE si.task_id=?`},
+			{name: "images", query: `SELECT COUNT(*) FROM task_planning_sku_revision_images img JOIN task_planning_sku_revisions r ON r.id=img.revision_id JOIN task_sku_items si ON si.id=r.task_sku_item_id WHERE si.task_id=?`},
+		}
+		for _, check := range zeroChecks {
+			var count int
+			if err := q.QueryRowContext(ctx, check.query, m.TaskID).Scan(&count); err != nil {
+				return err
+			}
+			if count != 0 {
+				return fmt.Errorf("planning tombstone task %d has %d %s; expected zero", m.TaskID, count, check.name)
+			}
+		}
+		return nil
+	}
 	for _, item := range m.Items {
 		var description string
 		var quantity int64
@@ -2622,6 +3198,15 @@ func validateCutoverState(ctx context.Context, tx *sql.Tx, m mappingFile) error 
 	if err := requireNoCutoverBlockers(blockers); err != nil {
 		return err
 	}
+	planningTombstoneExclusion := ""
+	for _, planning := range m.Planning {
+		if planning.Confidence == "confirmed_auto" && isIncompleteUATPlanningTombstone(planning) {
+			if err := verifyPlanningMappingQuery(ctx, tx, planning); err != nil {
+				return fmt.Errorf("cutover blocked: verified planning tombstone differs from mapping: %w", err)
+			}
+			planningTombstoneExclusion = "AND t.id <> 497"
+		}
+	}
 	checks := []struct {
 		name  string
 		query string
@@ -2629,9 +3214,9 @@ func validateCutoverState(ctx context.Context, tx *sql.Tx, m mappingFile) error 
 		{name: "resource groups still migration-incomplete", query: `SELECT COUNT(*) FROM task_asset_groups WHERE migration_incomplete=1`},
 		{name: "legacy purchase_task rows remain", query: `SELECT COUNT(*) FROM tasks WHERE task_type='purchase_task'`},
 		{name: "retired active task statuses remain", query: `SELECT COUNT(*) FROM tasks WHERE task_status IN ('PendingAuditA','PendingAuditB','RejectedByAuditA','RejectedByAuditB','PendingCustomizationReview','PendingCustomizationProduction','PendingEffectReview','PendingEffectRevision','PendingProductionTransfer','PendingWarehouseQC','PendingWarehouseReceive','PendingClose','PendingOutsource','Outsourcing','PendingOutsourceReview','RejectedByWarehouse')`},
-		{name: "planning settings/detail/current revision parity failures", query: `
+		{name: "planning settings/detail/current revision parity failures", query: fmt.Sprintf(`
 			SELECT COUNT(*) FROM tasks t
-			WHERE t.task_type='sku_planning' AND (
+			WHERE t.task_type='sku_planning' %s AND (
 			  NOT EXISTS (SELECT 1 FROM task_planning_settings s WHERE s.task_id=t.id)
 			  OR EXISTS (
 			    SELECT 1 FROM task_sku_items si
@@ -2640,7 +3225,7 @@ func validateCutoverState(ctx context.Context, tx *sql.Tx, m mappingFile) error 
 			    WHERE si.task_id=t.id AND (d.task_sku_item_id IS NULL OR d.current_revision_id IS NULL OR r.id IS NULL)
 			  )
 			  OR NOT EXISTS (SELECT 1 FROM task_sku_items si WHERE si.task_id=t.id)
-			)`},
+			)`, planningTombstoneExclusion)},
 		{name: "task resource-group scope set differs from the exact expected set", query: `
 			WITH expected_scopes AS (
 			  SELECT t.id AS task_id,'retouch_requirement' AS scope_kind,trr.id AS scope_ref_id
@@ -2676,6 +3261,24 @@ func validateCutoverState(ctx context.Context, tx *sql.Tx, m mappingFile) error 
 		}
 		if count != 0 {
 			return fmt.Errorf("cutover blocked: %s (%d)", check.name, count)
+		}
+	}
+	for _, recovery := range m.AssetRecoveries {
+		if recovery.Strategy == "clone_b_prematerialized_storage_ref_v1" {
+			if err := validatePrematerializedAssetRecoveryEvidence(ctx, tx, recovery); err != nil {
+				return fmt.Errorf("cutover blocked: prematerialized recovery evidence drifted: %w", err)
+			}
+			continue
+		}
+		if err := validateHistoricalUnavailableRecoveryEvidence(ctx, tx, recovery, "historical_unavailable"); err != nil {
+			return fmt.Errorf("cutover blocked: historical-unavailable recovery evidence drifted: %w", err)
+		}
+		var status string
+		if err := tx.QueryRowContext(ctx, `SELECT status FROM asset_storage_refs WHERE ref_id=?`, recovery.OriginalStorageRefID).Scan(&status); err != nil {
+			return err
+		}
+		if status != "historical_unavailable" {
+			return fmt.Errorf("cutover blocked: asset recovery %d storage ref status=%q", recovery.MissingTaskAssetID, status)
 		}
 	}
 	return nil
@@ -2784,6 +3387,9 @@ func rollback(ctx context.Context, db *sql.DB, database string, o options, m map
 		if _, err = tx.ExecContext(ctx, `UPDATE task_sku_items SET sku_origin=? WHERE id=?`, nullableStringPointer(origin.Origin), origin.ID); err != nil {
 			return err
 		}
+	}
+	if err := restoreAssetStorageRefStates(ctx, tx, s.StorageRefsBefore); err != nil {
+		return err
 	}
 	for _, asset := range s.AssetBindings {
 		if _, err = tx.ExecContext(ctx, `
@@ -2951,6 +3557,24 @@ func lockRollbackTargets(ctx context.Context, tx *sql.Tx, s snapshot) error {
 			return err
 		}
 	}
+	storageRefIDs := make([]string, 0, len(s.StorageRefsBefore)+len(s.StorageRefsAfter))
+	for _, item := range s.StorageRefsBefore {
+		storageRefIDs = append(storageRefIDs, item.RefID)
+	}
+	for _, item := range s.StorageRefsAfter {
+		storageRefIDs = append(storageRefIDs, item.RefID)
+	}
+	sort.Strings(storageRefIDs)
+	previousStorageRefID := ""
+	for _, refID := range storageRefIDs {
+		if refID == previousStorageRefID {
+			continue
+		}
+		if _, err := queryStringIDs(ctx, tx, `SELECT ref_id FROM asset_storage_refs WHERE ref_id=? FOR UPDATE`, refID); err != nil {
+			return err
+		}
+		previousStorageRefID = refID
+	}
 	planningTaskIDs := []int64{}
 	for _, item := range s.PlanningBefore {
 		planningTaskIDs = append(planningTaskIDs, item.TaskID)
@@ -3006,6 +3630,7 @@ func snapshotStateMatches(ctx context.Context, q snapshotQueryer, s snapshot, af
 	planning := s.PlanningBefore
 	organizations := s.OrganizationBefore
 	access := s.AccessBefore
+	storageRefs := s.StorageRefsBefore
 	if after {
 		tasks = s.AfterTasks
 		groups = s.AfterResourceGroups
@@ -3014,6 +3639,7 @@ func snapshotStateMatches(ctx context.Context, q snapshotQueryer, s snapshot, af
 		planning = s.PlanningAfter
 		organizations = s.OrganizationAfter
 		access = s.AccessAfter
+		storageRefs = s.StorageRefsAfter
 	}
 	for _, expected := range tasks {
 		actual, err := loadTaskSnapshot(ctx, q, expected.ID)
@@ -3123,7 +3749,24 @@ func snapshotStateMatches(ctx context.Context, q snapshotQueryer, s snapshot, af
 		}
 		actualAccess = append(actualAccess, accessStateSnapshot{UserID: expected.UserID, Assignments: assignments})
 	}
-	return reflect.DeepEqual(actualAccess, access), nil
+	if !reflect.DeepEqual(actualAccess, access) {
+		return false, nil
+	}
+	var actualStorageRefs []assetStorageRefStatusSnapshot
+	if len(storageRefs) > 0 {
+		actualStorageRefs = make([]assetStorageRefStatusSnapshot, 0, len(storageRefs))
+	}
+	for _, expected := range storageRefs {
+		actual, err := loadAssetStorageRefStatusSnapshot(ctx, q, expected.RefID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		actualStorageRefs = append(actualStorageRefs, actual)
+	}
+	return reflect.DeepEqual(actualStorageRefs, storageRefs), nil
 }
 
 func clearAssetValidationState(items []assetBindingSnapshot) {
@@ -3224,8 +3867,9 @@ func readSnapshot(path, database string, m mappingFile) (snapshot, error) {
 		return snapshot{}, err
 	}
 	currentSnapshot := s.Version == workflowGroupsSnapshotVersion && s.ToolVersion == workflowGroupsToolVersion && s.SchemaVersion == workflowGroupsSchemaVersion
+	previousSnapshot := s.Version == previousSnapshotVersion && s.ToolVersion == previousToolVersion && s.SchemaVersion == workflowGroupsSchemaVersion
 	legacySnapshot := s.Version == legacySnapshotVersion && s.ToolVersion == legacyToolVersion && s.SchemaVersion == workflowGroupsSchemaVersion
-	if !currentSnapshot && !legacySnapshot {
+	if !currentSnapshot && !previousSnapshot && !legacySnapshot {
 		return snapshot{}, v1migrate.NewHardAbort(v1migrate.ExitCodeHardAbort, "snapshot tool/schema version mismatch")
 	}
 	if s.Database != database {

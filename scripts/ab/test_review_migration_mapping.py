@@ -154,11 +154,118 @@ def access(
     return value
 
 
+def task_state(*, task_id=981, confidence="proposed_review", blockers=None):
+    value = {
+        "task_id": task_id,
+        "from_status": "Completed",
+        "target_status": "InProgress",
+        "evidence_event_ids": ["task_event_log:submit-981"],
+        "confidence": confidence,
+        "review_policy_ids": [
+            "legacy_retouch_premature_terminal_partial_v1"
+        ],
+        "confirmed_by": 0,
+        "confirmed_at": review.ZERO_TIME,
+        "confirmation_note": "",
+    }
+    if blockers is not None:
+        value["blockers"] = blockers
+    value["manifest_row_hash"] = review.canonical_mapping_row_hash(value)
+    return value
+
+
+def asset_recovery(
+    *,
+    missing_task_asset_id=12323,
+    confidence="proposed_review",
+    blockers=None,
+):
+    if missing_task_asset_id == 12323:
+        value = {
+            "task_id": 2199,
+            "missing_task_asset_id": 12323,
+            "recovery_source_task_asset_id": 0,
+            "rejected_source_task_asset_ids": [14510, 14514],
+            "strategy": "historical_unavailable_tombstone_v1",
+            "original_storage_ref_id": (
+                "c0a135a1-080f-46a0-a41a-461aef0ea0fb"
+            ),
+            "expected_file_size": 17755216,
+            "preview_whole_hash": (
+                "82b35a045540d27f9656d6d02c99eb2814a62e9d048d33b20823fb8c0017aa4c"
+            ),
+            "design_thumb_whole_hash": (
+                "54dbf569874243a212c11c3e83e80f19944c2581f12c9473a793bc273ec666a3"
+            ),
+            "object_probe_result": "not_found",
+            "object_probe_input_manifest_sha256": (
+                "3f17b37296d2670235ca9bfcfd4388823b81adecf8fbac0826e6f241923579c7"
+            ),
+            "object_probe_evidence_hash": (
+                "f1c78819e1f3d5f4e7a4b25ff3d173368574a5639f4c6df45c8aae5482d047b8"
+            ),
+            "object_probe_object_key_sha256": (
+                "e732f6cd269a93d6bac168b0852dbcf8480af8966847278cb073cd6905b0efdd"
+            ),
+            "object_probe_read_only_get_count": 1,
+            "review_policy_ids": [
+                "legacy_historical_asset_unavailable_v1"
+            ],
+        }
+    else:
+        source_sha256 = {
+            23989: (
+                "d0558b1a9d4a7afed5a03b6b97d4a765d34050866686e396ab0acf9f08f0dec5"
+            ),
+            23990: (
+                "64cdfed11adc778fb6ede7f03c49f7c70e8655870236bdcd92a8207e41a8dfb8"
+            ),
+            23991: (
+                "ebfecf3407e05c576bcddf74673d2e7568207ecc27855aa0e08c453d5a0d119a"
+            ),
+        }[missing_task_asset_id]
+        value = {
+            "task_id": 2807,
+            "missing_task_asset_id": missing_task_asset_id,
+            "recovery_source_task_asset_id": {
+                23989: 24034,
+                23990: 24033,
+                23991: 24040,
+            }[missing_task_asset_id],
+            "rejected_source_task_asset_ids": [],
+            "strategy": "clone_b_prematerialized_storage_ref_v1",
+            "original_storage_ref_id": f"missing-{missing_task_asset_id}",
+            "expected_file_size": 683000,
+            "preview_whole_hash": "",
+            "design_thumb_whole_hash": "",
+            "review_policy_ids": ["legacy_deleted_asset_recovery_v1"],
+            "controlled_read_protocol": "controlled-asset-read-v1",
+            "controlled_read_evidence_sha256": (
+                "b39e0d9d26e6fdd35941b195bdc413eb12dd6795e23276a48c9b9bd49f829b08"
+            ),
+            "recovery_source_sha256": source_sha256,
+        }
+    value.update(
+        {
+            "confidence": confidence,
+            "confirmed_by": 0,
+            "confirmed_at": review.ZERO_TIME,
+            "confirmation_note": "",
+        }
+    )
+    if blockers is not None:
+        value["blockers"] = blockers
+    value["manifest_row_hash"] = review.canonical_mapping_row_hash(value)
+    return value
+
+
 def mapping(
     resources=None,
     planning_tasks=None,
+    task_state_decisions=None,
     organization_mappings=None,
     access_decisions=None,
+    asset_recoveries=None,
 ):
     return {
         "version": 2,
@@ -175,9 +282,10 @@ def mapping(
             }
         ],
         "planning_tasks": planning_tasks or [],
-        "task_state_decisions": [],
+        "task_state_decisions": task_state_decisions or [],
         "organization_mappings": organization_mappings or [],
         "access_decisions": access_decisions or [],
+        "asset_recoveries": asset_recoveries or [],
     }
 
 
@@ -639,6 +747,162 @@ class ReviewMigrationMappingTest(unittest.TestCase):
         self.decision.write_text(json.dumps(decision), encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "explicitly"):
             self.apply()
+
+    def test_task_state_decision_is_policy_bound_and_promoted(self):
+        self.write_candidate(mapping(task_state_decisions=[task_state()]))
+        self.prepare()
+        self.approve(["legacy_retouch_premature_terminal_partial_v1"])
+        self.apply()
+        reviewed = json.loads(self.output.read_text(encoding="utf-8"))
+        decision = reviewed["task_state_decisions"][0]
+        self.assertEqual(decision["confidence"], "confirmed_auto")
+        self.assertEqual(decision["confirmed_by"], 88)
+        self.assertEqual(
+            decision["manifest_row_hash"],
+            review.canonical_mapping_row_hash(decision),
+        )
+        evidence = json.loads(self.apply_evidence.read_text(encoding="utf-8"))
+        self.assertEqual(evidence["promoted_task_state_count"], 1)
+
+    def test_historical_unavailable_asset_recovery_is_policy_bound_and_promoted(self):
+        candidate = asset_recovery()
+        self.write_candidate(mapping(resources=[], asset_recoveries=[candidate]))
+        self.prepare()
+        ledger = json.loads(self.ledger.read_text(encoding="utf-8"))
+        self.assertEqual(ledger["summary"]["asset_recovery"]["row_count"], 1)
+        self.assertEqual(
+            ledger["summary"]["asset_recovery"]["eligible_count"], 1
+        )
+        self.assertEqual(
+            ledger["summary"]["asset_recovery"]["eligible_policy_counts"][
+                "legacy_historical_asset_unavailable_v1"
+            ],
+            1,
+        )
+        self.assertEqual(ledger["rows"][0]["row_type"], "asset_recovery")
+
+        self.approve(["legacy_historical_asset_unavailable_v1"])
+        self.apply()
+        reviewed = json.loads(self.output.read_text(encoding="utf-8"))
+        confirmed = reviewed["asset_recoveries"][0]
+        self.assertEqual(confirmed["confidence"], "confirmed_auto")
+        self.assertEqual(confirmed["confirmed_by"], 88)
+        self.assertEqual(
+            confirmed["manifest_row_hash"],
+            review.canonical_mapping_row_hash(confirmed),
+        )
+        evidence = json.loads(self.apply_evidence.read_text(encoding="utf-8"))
+        self.assertEqual(evidence["promoted_asset_recovery_count"], 1)
+
+    def test_clone_b_asset_recovery_is_eligible_after_controlled_read(self):
+        candidate = asset_recovery(missing_task_asset_id=23989)
+        self.write_candidate(mapping(resources=[], asset_recoveries=[candidate]))
+        self.prepare()
+        ledger = json.loads(self.ledger.read_text(encoding="utf-8"))
+        self.assertEqual(
+            ledger["summary"]["asset_recovery"]["eligible_count"], 1
+        )
+        self.assertEqual(
+            ledger["summary"]["asset_recovery"]["excluded_count"], 0
+        )
+        self.approve(["legacy_deleted_asset_recovery_v1"])
+        self.apply()
+        reviewed = json.loads(self.output.read_text(encoding="utf-8"))
+        self.assertEqual(
+            reviewed["asset_recoveries"][0]["confidence"], "confirmed_auto"
+        )
+
+    def test_task2533_visual_scope_policy_is_exact_and_promotable(self):
+        resources = []
+        for scope_id, (source_id, final_id, reference_ids) in (
+            review.RETOUCH_VISUAL_TASK2533.items()
+        ):
+            value = revision(
+                stage="retouch",
+                alias=None,
+                policies=[
+                    "explicit_event_replay",
+                    "legacy_retouch_visual_scope_task2533_v1",
+                ],
+                reason=(
+                    "policy legacy_retouch_visual_scope_task2533_v1: "
+                    "exact visually reviewed membership"
+                ),
+            )
+            value["source_task_asset_id"] = source_id
+            value["final_task_asset_ids"] = [final_id]
+            value["reference_file_ref_ids"] = reference_ids
+            value["manifest_row_hash"] = review.canonical_revision_hash(value)
+            resources.append({
+                "task_id": 2533,
+                "scope_kind": "retouch_requirement",
+                "scope_ref_id": scope_id,
+                "history": [value],
+                "working_revision_no": 1,
+                "finalized_revision_no": 1,
+            })
+        self.write_candidate(mapping(resources=resources))
+        self.prepare()
+        self.approve(
+            [
+                "explicit_event_replay",
+                "legacy_retouch_visual_scope_task2533_v1",
+            ]
+        )
+        self.apply()
+        reviewed = json.loads(self.output.read_text(encoding="utf-8"))
+        self.assertTrue(
+            all(
+                resource["history"][0]["confidence"] == "confirmed_auto"
+                for resource in reviewed["resources"]
+            )
+        )
+
+        resources[0]["history"][0]["final_task_asset_ids"] = [19803]
+        resources[0]["history"][0]["manifest_row_hash"] = (
+            review.canonical_revision_hash(resources[0]["history"][0])
+        )
+        self.write_candidate(mapping(resources=resources))
+        with self.assertRaisesRegex(ValueError, "exact task 2533"):
+            self.prepare()
+
+    def test_incomplete_customization_terminal_state_is_exactly_allowlisted(self):
+        candidate = task_state(task_id=452)
+        candidate.update(
+            {
+                "from_status": "PendingWarehouseReceive",
+                "target_status": "InProgress",
+                "evidence_event_ids": [
+                    "task_event_log:customization-approved"
+                ],
+                "review_policy_ids": [
+                    "legacy_customization_terminal_without_assets_to_inprogress_v1"
+                ],
+            }
+        )
+        candidate["manifest_row_hash"] = review.canonical_mapping_row_hash(
+            candidate
+        )
+        self.write_candidate(
+            mapping(resources=[], task_state_decisions=[candidate])
+        )
+        self.prepare()
+        ledger = json.loads(self.ledger.read_text(encoding="utf-8"))
+        self.assertEqual(
+            ledger["rows"][0]["required_policies"],
+            [
+                "legacy_customization_terminal_without_assets_to_inprogress_v1"
+            ],
+        )
+        candidate["task_id"] = 453
+        candidate["manifest_row_hash"] = review.canonical_mapping_row_hash(
+            candidate
+        )
+        self.write_candidate(
+            mapping(resources=[], task_state_decisions=[candidate])
+        )
+        with self.assertRaisesRegex(ValueError, "unsupported policy-bound"):
+            self.prepare()
 
     def test_invalid_candidate_manifest_hash_fails_closed(self):
         candidate = mapping()
