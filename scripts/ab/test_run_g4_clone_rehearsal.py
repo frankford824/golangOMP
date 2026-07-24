@@ -1,9 +1,12 @@
 import importlib.util
 import hashlib
 import json
+import os
 import pathlib
+import socket
 import sys
 import tempfile
+import time
 import types
 import unittest
 from unittest import mock
@@ -140,6 +143,107 @@ output.write_bytes(
 
 
 class RunG4CloneRehearsalTest(unittest.TestCase):
+    @unittest.skipUnless(
+        sys.platform.startswith("linux"),
+        "process-group quiescence evidence requires Linux /proc",
+    )
+    def test_execute_step_timeout_releases_ignoring_descendant_socket(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = pathlib.Path(raw)
+            clone_root = root / "clone"
+            run_dir = clone_root / "run"
+            run_dir.mkdir(parents=True)
+            child_port = root / "child.port"
+            helper = root / "timeout_parent.py"
+            helper.write_text(
+                "import pathlib,subprocess,sys,time\n"
+                "child=subprocess.Popen([sys.executable,'-c',"
+                "'import pathlib,signal,socket,sys,time;"
+                "signal.signal(signal.SIGTERM,signal.SIG_IGN);"
+                "sock=socket.socket();sock.bind((\"127.0.0.1\",0));sock.listen();"
+                "pathlib.Path(sys.argv[1]).write_text(str(sock.getsockname()[1]),encoding=\"utf-8\");"
+                "time.sleep(60)',sys.argv[1]])\n"
+                "deadline=time.monotonic()+2\n"
+                "while not pathlib.Path(sys.argv[1]).exists():\n"
+                "  if time.monotonic()>deadline: raise RuntimeError('child socket not ready')\n"
+                "  time.sleep(.01)\n"
+                "time.sleep(60)\n",
+                encoding="utf-8",
+            )
+            with (
+                mock.patch.object(
+                    MODULE, "PROCESS_GROUP_TERM_GRACE_SECONDS", 0.1
+                ),
+                mock.patch.object(
+                    MODULE, "PROCESS_GROUP_KILL_GRACE_SECONDS", 1.0
+                ),
+            ):
+                record = MODULE.execute_step(
+                    step="timeout_probe",
+                    phase="apply",
+                    argv=[sys.executable, str(helper), str(child_port)],
+                    expected_artifacts=[],
+                    run_dir=run_dir,
+                    clone_root=clone_root,
+                    repo_root=root,
+                    env=dict(os.environ),
+                    timeout_seconds=0.5,
+                )
+            self.assertEqual(record["exit_code"], 124)
+            port = int(child_port.read_text(encoding="utf-8"))
+            with socket.socket() as probe:
+                probe.settimeout(0.2)
+                self.assertNotEqual(probe.connect_ex(("127.0.0.1", port)), 0)
+            self.assertIn(
+                "verified zero non-zombie process-group members before rollback",
+                (run_dir / "timeout_probe.stderr").read_text(encoding="utf-8"),
+            )
+
+    @unittest.skipUnless(
+        sys.platform.startswith("linux"),
+        "process-group quiescence evidence requires Linux /proc",
+    )
+    def test_execute_step_timeout_releases_ignoring_direct_child_socket(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = pathlib.Path(raw)
+            clone_root = root / "clone"
+            run_dir = clone_root / "run"
+            run_dir.mkdir(parents=True)
+            port_file = root / "direct.port"
+            helper = root / "timeout_direct.py"
+            helper.write_text(
+                "import pathlib,signal,socket,sys,time\n"
+                "signal.signal(signal.SIGTERM,signal.SIG_IGN)\n"
+                "sock=socket.socket();sock.bind(('127.0.0.1',0));sock.listen()\n"
+                "pathlib.Path(sys.argv[1]).write_text(str(sock.getsockname()[1]),encoding='utf-8')\n"
+                "time.sleep(60)\n",
+                encoding="utf-8",
+            )
+            with (
+                mock.patch.object(
+                    MODULE, "PROCESS_GROUP_TERM_GRACE_SECONDS", 0.1
+                ),
+                mock.patch.object(
+                    MODULE, "PROCESS_GROUP_KILL_GRACE_SECONDS", 1.0
+                ),
+            ):
+                record = MODULE.execute_step(
+                    step="timeout_direct_probe",
+                    phase="apply",
+                    argv=[sys.executable, str(helper), str(port_file)],
+                    expected_artifacts=[],
+                    run_dir=run_dir,
+                    clone_root=clone_root,
+                    repo_root=root,
+                    env=dict(os.environ),
+                    timeout_seconds=0.5,
+                )
+            self.assertEqual(record["exit_code"], 124)
+            port = int(port_file.read_text(encoding="utf-8"))
+            with socket.socket() as probe:
+                probe.settimeout(0.2)
+                self.assertNotEqual(probe.connect_ex(("127.0.0.1", port)), 0)
+
     def test_repository_example_plan_matches_full_hook_contract(self):
         example = pathlib.Path(__file__).with_name(
             "g4-command-plan.example.json"

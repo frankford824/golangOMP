@@ -17,6 +17,7 @@ import os
 import pathlib
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -46,6 +47,9 @@ HOOKS = {
     "recovery_rollback",
     "validate_after_rollback_fingerprint",
 }
+PROCESS_GROUP_TERM_GRACE_SECONDS = 5.0
+PROCESS_GROUP_KILL_GRACE_SECONDS = 5.0
+PROCESS_GROUP_POLL_SECONDS = 0.05
 WORKFLOW_STEPS = {
     "dry_run_before",
     "workflow_apply",
@@ -73,6 +77,74 @@ def canonical_bytes(value: Any) -> bytes:
         )
         + "\n"
     ).encode("utf-8")
+
+
+def linux_non_zombie_process_group_members(process_group_id: int) -> list[int]:
+    if not sys.platform.startswith("linux"):
+        raise RuntimeError(
+            "G4 timeout cleanup requires Linux /proc process-group evidence"
+        )
+    members: list[int] = []
+    for candidate in pathlib.Path("/proc").iterdir():
+        if not candidate.name.isdigit():
+            continue
+        try:
+            raw = (candidate / "stat").read_text(encoding="utf-8")
+            fields = raw[raw.rfind(")") + 2 :].split()
+            state = fields[0]
+            process_group = int(fields[2])
+        except (FileNotFoundError, IndexError, PermissionError, ValueError):
+            continue
+        if process_group == process_group_id and state != "Z":
+            members.append(int(candidate.name))
+    return sorted(members)
+
+
+def terminate_process_group(
+    process: subprocess.Popen[bytes],
+    *,
+    term_grace_seconds: float | None = None,
+    kill_grace_seconds: float | None = None,
+) -> tuple[bool, list[int], str | None]:
+    if term_grace_seconds is None:
+        term_grace_seconds = PROCESS_GROUP_TERM_GRACE_SECONDS
+    if kill_grace_seconds is None:
+        kill_grace_seconds = PROCESS_GROUP_KILL_GRACE_SECONDS
+    process_group_id = process.pid
+    last_members: list[int] = []
+    for signal_value, grace_seconds in (
+        (signal.SIGTERM, term_grace_seconds),
+        (signal.SIGKILL, kill_grace_seconds),
+    ):
+        try:
+            os.killpg(process_group_id, signal_value)
+        except ProcessLookupError:
+            pass
+        except OSError as exc:
+            return False, last_members, f"signal {signal_value.name}: {exc}"
+        deadline = time.monotonic() + grace_seconds
+        while True:
+            process.poll()
+            try:
+                last_members = linux_non_zombie_process_group_members(
+                    process_group_id
+                )
+            except RuntimeError as exc:
+                return False, last_members, str(exc)
+            if not last_members:
+                if process.poll() is None:
+                    try:
+                        process.wait(timeout=PROCESS_GROUP_POLL_SECONDS)
+                    except subprocess.TimeoutExpired:
+                        last_members = [process.pid]
+                    else:
+                        return True, [], None
+                else:
+                    return True, [], None
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(PROCESS_GROUP_POLL_SECONDS)
+    return False, last_members, "non-zombie process-group members remain"
 
 
 def sha256_file(path: pathlib.Path) -> str:
@@ -297,19 +369,33 @@ def execute_step(
     started = time.monotonic()
     code = 0
     with stdout.open("wb") as out_handle, stderr.open("wb") as err_handle:
+        process = subprocess.Popen(
+            argv,
+            cwd=repo_root,
+            env=env,
+            stdout=out_handle,
+            stderr=err_handle,
+            start_new_session=True,
+        )
         try:
-            completed = subprocess.run(
-                argv,
-                cwd=repo_root,
-                env=env,
-                stdout=out_handle,
-                stderr=err_handle,
-                timeout=timeout_seconds,
-                check=False,
-            )
-            code = completed.returncode
+            code = process.wait(timeout=timeout_seconds)
         except subprocess.TimeoutExpired:
             code = 124
+            quiescent, remaining, cleanup_error = terminate_process_group(process)
+            if quiescent:
+                message = (
+                    f"\nstep timed out after {timeout_seconds:.3f}s; "
+                    "verified zero non-zombie process-group members "
+                    "before rollback\n"
+                )
+            else:
+                code = 121
+                message = (
+                    f"\nstep timed out after {timeout_seconds:.3f}s; "
+                    "process-group cleanup could not prove quiescence; "
+                    f"remaining={remaining!r}; error={cleanup_error}\n"
+                )
+            err_handle.write(message.encode())
     elapsed = time.monotonic() - started
     evidence = [
         evidence_ref(stdout, run_dir, clone_root),
