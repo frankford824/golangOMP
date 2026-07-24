@@ -1,0 +1,162 @@
+{
+  "schema_version": 1,
+  "workflow_base_argv": [
+    "go",
+    "run",
+    "./cmd/tools/workflow-groups-migrate"
+  ],
+  "hooks": {
+    "capture_baseline_fingerprint": {
+      "argv": [
+        "python3",
+        "{repo_root}/scripts/ab/capture_and_compare_rollback_fingerprint.py",
+        "--capture-baseline",
+        "--database",
+        "{database}",
+        "--output",
+        "{baseline_fingerprint}"
+      ],
+      "expected_artifacts": [
+        "{baseline_fingerprint}"
+      ]
+    },
+    "recovery_apply": {
+      "argv": [
+        "python3",
+        "{repo_root}/scripts/ab/prepare_asset_recovery.py",
+        "--mapping",
+        "{mapping_file}",
+        "--evidence",
+        "{clone_root}/recovery-evidence.json",
+        "--output",
+        "{run_dir}/recovery-materialization-plan.json",
+        "--materialize",
+        "--fixture-root",
+        "{clone_root}/fixture-upload-b"
+      ],
+      "expected_artifacts": [
+        "{run_dir}/recovery-materialization-plan.json"
+      ]
+    },
+    "bundle_apply": {
+      "argv": [
+        "python3",
+        "{repo_root}/scripts/ab/run_scoped_bundle_materializer.py",
+        "materialize",
+        "--run-root",
+        "{clone_root}",
+        "--source-root",
+        "{clone_root}/bundle-source-seed",
+        "--b-root",
+        "{clone_root}/fixture-upload-b",
+        "--manifest",
+        "{clone_root}/source-bundle-admin-decision.json",
+        "--report",
+        "{run_dir}/bundle-materialize-report.json",
+        "--registry",
+        "{run_dir}/bundle-registry.json",
+        "--execute"
+      ],
+      "expected_artifacts": [
+        "{run_dir}/bundle-materialize-report.json",
+        "{run_dir}/bundle-registry.json"
+      ]
+    },
+    "search_reindex": {
+      "argv": [
+        "go",
+        "run",
+        "./cmd/tools/search-reindex",
+        "--tasks=true",
+        "--assets=true",
+        "--products=true",
+        "--dry-run=false",
+        "--timeout=10m"
+      ],
+      "expected_artifacts": []
+    },
+    "search_snapshot": {
+      "argv": [
+        "python3",
+        "{repo_root}/scripts/ab/capture_search_documents_snapshot.py",
+        "--database",
+        "{database}",
+        "--archive",
+        "{search_snapshot_archive}",
+        "--output",
+        "{search_snapshot}"
+      ],
+      "expected_artifacts": [
+        "{search_snapshot}",
+        "{search_snapshot_archive}"
+      ]
+    },
+    "bundle_rollback": {
+      "argv": [
+        "python3",
+        "{repo_root}/scripts/ab/run_scoped_bundle_materializer.py",
+        "rollback",
+        "--run-root",
+        "{clone_root}",
+        "--b-root",
+        "{clone_root}/fixture-upload-b",
+        "--registry",
+        "{run_dir}/bundle-registry.json",
+        "--report",
+        "{run_dir}/bundle-rollback-report.json",
+        "--execute"
+      ],
+      "expected_artifacts": [
+        "{run_dir}/bundle-rollback-report.json"
+      ]
+    },
+    "search_rollback": {
+      "argv": [
+        "python3",
+        "{repo_root}/scripts/ab/restore_search_documents_snapshot.py",
+        "--database",
+        "{database}",
+        "--snapshot",
+        "{search_snapshot}",
+        "--archive",
+        "{search_snapshot_archive}",
+        "--output",
+        "{search_rollback}"
+      ],
+      "expected_artifacts": [
+        "{search_rollback}"
+      ]
+    },
+    "recovery_rollback": {
+      "argv": [
+        "python3",
+        "{repo_root}/scripts/ab/rollback_asset_recovery_materialization.py",
+        "--plan",
+        "{run_dir}/recovery-materialization-plan.json",
+        "--fixture-root",
+        "{clone_root}/fixture-upload-b",
+        "--report",
+        "{run_dir}/recovery-rollback-report.json",
+        "--execute"
+      ],
+      "expected_artifacts": [
+        "{run_dir}/recovery-rollback-report.json"
+      ]
+    },
+    "validate_after_rollback_fingerprint": {
+      "argv": [
+        "python3",
+        "{repo_root}/scripts/ab/capture_and_compare_rollback_fingerprint.py",
+        "--baseline",
+        "{baseline_fingerprint}",
+        "--database",
+        "{database}",
+        "--output",
+        "{rollback_fingerprint}"
+      ],
+      "expected_artifacts": [
+        "{rollback_fingerprint}"
+      ]
+    }
+  }
+}

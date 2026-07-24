@@ -227,6 +227,44 @@ class ComparatorTest(unittest.TestCase):
             {v["violation_code"] for v in evidence["violations"]},
         )
 
+    def test_candidate_permission_tightening_is_not_mislabeled_as_widening(self) -> None:
+        def requester(base, path, headers):
+            if path.endswith("/preview"):
+                # Both B combinations deny while both A combinations allow.
+                return result(
+                    403 if base.endswith(("8102", "8103")) else 200,
+                    {"ok": True},
+                )
+            return self.requester(base, path, headers)
+
+        evidence = self.run_compare(requester)
+        codes = {v["violation_code"] for v in evidence["violations"]}
+        self.assertNotIn("api.permission_widened", codes)
+        # Tightening is still an unexplained compatibility difference until an
+        # exact approved status rule exists.
+        self.assertIn("api.asset_lost", codes)
+
+    def test_permission_widening_is_detected_when_a_is_right_in_pair_order(self) -> None:
+        def requester(base, path, headers):
+            if path.endswith("/preview"):
+                if base.endswith("8104"):  # dev frontend + external backend + A
+                    return result(403, {"ok": False})
+                return result(200, {"ok": True})
+            return self.requester(base, path, headers)
+
+        evidence = self.run_compare(requester)
+        widening = [
+            violation
+            for violation in evidence["violations"]
+            if violation["violation_code"] == "api.permission_widened"
+        ]
+        self.assertTrue(
+            any(
+                "dev_external_a->dev_dev_b 403->200" in violation["detail"]
+                for violation in widening
+            )
+        )
+
     def test_asset_404_is_hard_failure(self) -> None:
         def requester(base, path, headers):
             if base.endswith("8102") and path.endswith("/download"):

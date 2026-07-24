@@ -73,7 +73,12 @@ class ComputerUseEvidenceValidatorTest(unittest.TestCase):
         task_id: int,
     ) -> dict[str, object]:
         case_slug = f"{scenario['id']}__{combination}__{viewport}"
-        revision_ids = [task_id * 10 + 1, task_id * 10 + 2]
+        requirements = validator._requirements_for(scenario, combination)
+        revision_ids = (
+            [task_id * 10 + 1, task_id * 10 + 2]
+            if requirements["requires_revision_ids"]
+            else []
+        )
         assertions: dict[str, object] = {
             "allowed_actions": [
                 {
@@ -90,13 +95,13 @@ class ComputerUseEvidenceValidatorTest(unittest.TestCase):
                     "expected_status": status,
                     "actual_status": status,
                 }
-                for status in scenario["required_http_statuses"]
+                for status in requirements["required_http_statuses"]
             ],
         }
-        for assertion_name in scenario["required_assertions"]:
+        for assertion_name in requirements["required_assertions"]:
             if assertion_name != "allowed_actions_exact":
                 assertions[assertion_name] = True
-        if scenario["requires_history_drawer"]:
+        if requirements["requires_history_drawer"]:
             assertions["history_drawer"] = {
                 "opened": True,
                 "revision_ids": revision_ids,
@@ -308,7 +313,12 @@ class ComputerUseEvidenceValidatorTest(unittest.TestCase):
 
     def test_history_and_allowed_actions_must_match_both_sources(self) -> None:
         browser = copy.deepcopy(self.browser_document)
-        record = browser["records"][0]
+        record = next(
+            item
+            for item in browser["records"]
+            if item["scenario_id"] == "baseline_four_edge_readonly"
+            and item["combination"] == "devplus_devplus"
+        )
         record["assertions"]["history_drawer"]["opened"] = False
         record["assertions"]["allowed_actions"][0]["observed"] = ["preview"]
         self._rehash(record)
@@ -321,6 +331,109 @@ class ComputerUseEvidenceValidatorTest(unittest.TestCase):
         self.assertIn("allowed_actions", codes)
         self.assertIn("pair_history", codes)
         self.assertIn("pair_allowed_actions", codes)
+
+    def test_baseline_requirements_are_conditional_per_combination(self) -> None:
+        baseline = [
+            record
+            for record in self.browser_document["records"]
+            if record["scenario_id"] == "baseline_four_edge_readonly"
+        ]
+        self.assertEqual(8, len(baseline))
+        for record in baseline:
+            with self.subTest(
+                combination=record["combination"],
+                viewport=record["viewport"],
+            ):
+                assertions = record["assertions"]
+                self.assertTrue(assertions["page_matches_manifest"])
+                self.assertTrue(assertions["assets_match"])
+                self.assertTrue(assertions["allowed_actions"])
+                if record["combination"] == "devplus_devplus":
+                    self.assertTrue(record["revision_ids"])
+                    self.assertIn("history_drawer", assertions)
+                else:
+                    self.assertEqual([], record["revision_ids"])
+                    self.assertNotIn("history_drawer", assertions)
+        self.assertEqual("PASS", self._validate()["status"])
+
+    def test_non_v8_baseline_still_requires_page_assets_and_actions(self) -> None:
+        browser = copy.deepcopy(self.browser_document)
+        record = next(
+            item
+            for item in browser["records"]
+            if item["scenario_id"] == "baseline_four_edge_readonly"
+            and item["combination"] == "external_external"
+        )
+        record["assertions"]["assets_match"] = False
+        self._rehash(record)
+
+        report = self._validate(browser_document=browser)
+
+        self.assertEqual("FAIL", report["status"])
+        self.assertIn(
+            "required_assertion",
+            {failure["code"] for failure in report["failures"]},
+        )
+
+    def test_devplus_baseline_still_requires_revision_history(self) -> None:
+        browser = copy.deepcopy(self.browser_document)
+        record = next(
+            item
+            for item in browser["records"]
+            if item["scenario_id"] == "baseline_four_edge_readonly"
+            and item["combination"] == "devplus_devplus"
+        )
+        record["revision_ids"] = []
+        record["assertions"].pop("history_drawer")
+        self._rehash(record)
+
+        report = self._validate(browser_document=browser)
+        codes = {failure["code"] for failure in report["failures"]}
+
+        self.assertEqual("FAIL", report["status"])
+        self.assertIn("revision_ids", codes)
+        self.assertIn("history_drawer", codes)
+
+    def test_other_scenarios_keep_their_revision_history_contract(self) -> None:
+        browser = copy.deepcopy(self.browser_document)
+        record = next(
+            item
+            for item in browser["records"]
+            if item["scenario_id"] == "design_first_submit_audit"
+        )
+        record["revision_ids"] = []
+        record["assertions"].pop("history_drawer")
+        self._rehash(record)
+
+        report = self._validate(browser_document=browser)
+        codes = {failure["code"] for failure in report["failures"]}
+
+        self.assertEqual("FAIL", report["status"])
+        self.assertIn("revision_ids", codes)
+        self.assertIn("history_drawer", codes)
+
+    def test_catalog_conditional_contract_cannot_weaken_core_assertions(self) -> None:
+        catalog = copy.deepcopy(self.catalog)
+        baseline = catalog["scenarios"][0]
+        baseline["requirements_by_combination"]["external_external"][
+            "required_assertions"
+        ] = ["page_matches_manifest", "allowed_actions_exact"]
+
+        with self.assertRaisesRegex(
+            validator.ValidationInputError,
+            "cannot weaken assertions",
+        ):
+            validator._validate_catalog(catalog)
+
+        catalog = copy.deepcopy(self.catalog)
+        del catalog["scenarios"][0]["requirements_by_combination"][
+            "devplus_external"
+        ]
+        with self.assertRaisesRegex(
+            validator.ValidationInputError,
+            "every and only required combination",
+        ):
+            validator._validate_catalog(catalog)
 
     def test_artifact_bytes_and_source_paths_are_bound(self) -> None:
         browser = copy.deepcopy(self.browser_document)

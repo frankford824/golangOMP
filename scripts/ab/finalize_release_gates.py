@@ -28,6 +28,37 @@ REQUIRED_ROLES = {
     "release_commander",
 }
 EMPTY_SHA256 = hashlib.sha256(b"").hexdigest()
+SQL_GATE_NAMES = (
+    "00_snapshot_fingerprint",
+    "01_task_state_parity",
+    "02_group_coverage",
+    "03_revision_chain",
+    "04_asset_role_scope",
+    "05_reference_integrity",
+    "06_storage_integrity",
+    "07_event_history_checksum",
+    "08_planning_retouch",
+    "09_search_publish_outbox",
+    "10_negative_assertions",
+    "11_manifest_state",
+    "12_legacy_timestamp_contract",
+)
+MANIFEST_DATABASE_GATES = {
+    "G01",
+    "G02",
+    "G03",
+    "G04",
+    "G05",
+    "G07",
+    "G08",
+    "G09",
+}
+API_COMBINATIONS = {
+    "external_external_a": ("external", "external", "A"),
+    "dev_dev_b": ("dev-plus", "dev-plus", "B"),
+    "external_dev_b": ("external", "dev-plus", "B"),
+    "dev_external_a": ("dev-plus", "external", "A"),
+}
 
 
 def canonical_bytes(value: Any) -> bytes:
@@ -87,6 +118,164 @@ def require_hash(value: Any, label: str) -> str:
     return text
 
 
+def is_int(value: Any, *, minimum: int = 0) -> bool:
+    return (
+        isinstance(value, int)
+        and not isinstance(value, bool)
+        and value >= minimum
+    )
+
+
+def exact_fields(
+    payload: dict[str, Any], expected: set[str], label: str
+) -> list[str]:
+    actual = set(payload)
+    if actual == expected:
+        return []
+    return [
+        f"{label} field contract differs: "
+        f"missing={sorted(expected - actual)},unexpected={sorted(actual - expected)}"
+    ]
+
+
+def valid_violation_rows(value: Any) -> bool:
+    return isinstance(value, list) and all(
+        isinstance(row, dict)
+        and set(row) >= {"violation_code", "entity_key", "detail"}
+        and all(
+            isinstance(row.get(field), str)
+            for field in ("violation_code", "entity_key", "detail")
+        )
+        for row in value
+    )
+
+
+def validate_common_envelope(
+    payload: dict[str, Any],
+    *,
+    label: str,
+    run_id_required: bool = True,
+) -> list[str]:
+    violations: list[str] = []
+    if payload.get("schema_version") != 1:
+        violations.append(f"{label} schema_version must be 1")
+    if run_id_required and not RUN_ID.fullmatch(str(payload.get("run_id") or "")):
+        violations.append(f"{label} run_id is invalid")
+    if payload.get("status") != "PASS":
+        violations.append(f"{label} status must be PASS")
+    count = payload.get("violation_count")
+    rows = payload.get("violations")
+    if not is_int(count) or not valid_violation_rows(rows):
+        violations.append(f"{label} violation envelope is invalid")
+    elif count != len(rows) or count != 0:
+        violations.append(f"{label} violation count is not an exact empty set")
+    return violations
+
+
+def validate_self_hash(
+    payload: dict[str, Any],
+    *,
+    field: str,
+    label: str,
+    newline: bool,
+) -> list[str]:
+    value = str(payload.get(field) or "")
+    if not SHA256.fullmatch(value):
+        return [f"{label} {field} is invalid"]
+    unsigned = {key: item for key, item in payload.items() if key != field}
+    encoded = (
+        canonical_bytes(unsigned)
+        if newline
+        else json.dumps(
+            unsigned,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    )
+    if hashlib.sha256(encoded).hexdigest() != value:
+        return [f"{label} {field} does not bind the artifact contents"]
+    return []
+
+
+def validate_g1(payload: dict[str, Any]) -> list[str]:
+    fields = {
+        "schema_version",
+        "run_id",
+        "status",
+        "violation_count",
+        "violations",
+        "snapshot_sha256",
+        "baseline_fingerprint_sha256",
+        "source_attestation_sha256",
+        "target_attestation_sha256",
+        "evidence_sha256",
+    }
+    violations = exact_fields(payload, fields, "G1")
+    violations.extend(validate_common_envelope(payload, label="G1"))
+    for field in (
+        "snapshot_sha256",
+        "baseline_fingerprint_sha256",
+        "source_attestation_sha256",
+        "target_attestation_sha256",
+    ):
+        try:
+            require_hash(payload.get(field), f"G1.{field}")
+        except ValueError as exc:
+            violations.append(str(exc))
+    violations.extend(
+        validate_self_hash(
+            payload,
+            field="evidence_sha256",
+            label="G1",
+            newline=True,
+        )
+    )
+    return violations
+
+
+def validate_g2(payload: dict[str, Any]) -> list[str]:
+    fields = {
+        "schema_version",
+        "run_id",
+        "status",
+        "violation_count",
+        "violations",
+        "expected_entities",
+        "observed_entities",
+        "manifest_sha256",
+        "observations_sha256",
+        "required_gates",
+        "evidence_sha256",
+    }
+    violations = exact_fields(payload, fields, "G2")
+    violations.extend(validate_common_envelope(payload, label="G2"))
+    expected = payload.get("expected_entities")
+    observed = payload.get("observed_entities")
+    if (
+        not is_int(expected, minimum=1)
+        or not is_int(observed, minimum=1)
+        or expected != observed
+    ):
+        violations.append("G2 expected/observed entity counts are invalid or differ")
+    if payload.get("required_gates") != sorted(MANIFEST_DATABASE_GATES):
+        violations.append("G2 required_gates is not the fixed database gate set")
+    for field in ("manifest_sha256", "observations_sha256"):
+        try:
+            require_hash(payload.get(field), f"G2.{field}")
+        except ValueError as exc:
+            violations.append(str(exc))
+    violations.extend(
+        validate_self_hash(
+            payload,
+            field="evidence_sha256",
+            label="G2",
+            newline=True,
+        )
+    )
+    return violations
+
+
 def validate_environment(payload: dict[str, Any]) -> list[str]:
     violations: list[str] = []
     candidate = payload.get("candidate")
@@ -133,39 +322,679 @@ def validate_g3(payload: dict[str, Any]) -> list[str]:
     return violations
 
 
-def validate_g4(payload: dict[str, Any]) -> list[str]:
+def validate_g4(
+    payload: dict[str, Any], run_dir: pathlib.Path | None = None
+) -> list[str]:
     violations: list[str] = []
-    required_steps = {
-        "dry_run_before",
-        "apply",
-        "idempotent_apply",
-        "validate_after_apply",
-        "rollback",
-        "validate_after_rollback",
-    }
+    required_steps = (
+        ("dry_run_before", "validate"),
+        ("capture_baseline_fingerprint", "validate"),
+        ("recovery_apply", "apply"),
+        ("bundle_apply", "apply"),
+        ("workflow_apply", "apply"),
+        ("idempotent_apply", "apply"),
+        ("validate_after_apply", "validate"),
+        ("search_snapshot", "apply"),
+        ("search_reindex", "apply"),
+        ("workflow_rollback", "rollback"),
+        ("search_rollback", "rollback"),
+        ("bundle_rollback", "rollback"),
+        ("recovery_rollback", "rollback"),
+        ("validate_after_rollback_fingerprint", "rollback"),
+    )
+    exit_code = payload.get("exit_code")
+    elapsed = payload.get("elapsed_seconds")
+    if isinstance(exit_code, bool) or not isinstance(exit_code, int) or exit_code != 0:
+        violations.append("G4 exit_code is not numeric zero")
+    if (
+        isinstance(elapsed, bool)
+        or not isinstance(elapsed, (int, float))
+        or elapsed < 0
+    ):
+        violations.append("G4 elapsed_seconds is invalid")
     steps = payload.get("steps")
     if not isinstance(steps, list):
         return ["G4 steps are missing"]
-    names = {
-        str(row.get("step") or "")
-        for row in steps
-        if isinstance(row, dict) and row.get("exit_code") == 0
-    }
-    if names != required_steps:
-        violations.append(
-            f"G4 successful step set differs: {sorted(names)}"
+    actual: list[tuple[str, str]] = []
+    for index, row in enumerate(steps):
+        if not isinstance(row, dict):
+            violations.append(f"G4 step[{index}] is not an object")
+            continue
+        actual.append(
+            (str(row.get("step") or ""), str(row.get("phase") or ""))
         )
+        row_exit = row.get("exit_code")
+        row_elapsed = row.get("elapsed_seconds")
+        if (
+            row.get("status") != "PASS"
+            or isinstance(row_exit, bool)
+            or not isinstance(row_exit, int)
+            or row_exit != 0
+        ):
+            violations.append(f"G4 step[{index}] did not pass with numeric zero")
+        if (
+            isinstance(row_elapsed, bool)
+            or not isinstance(row_elapsed, (int, float))
+            or row_elapsed < 0
+        ):
+            violations.append(f"G4 step[{index}] elapsed_seconds is invalid")
+        if not SHA256.fullmatch(str(row.get("command_sha256") or "")):
+            violations.append(f"G4 step[{index}] command hash is missing")
+    if actual != list(required_steps):
+        violations.append(f"G4 ordered step sequence differs: {actual}")
+    baseline_fingerprint = payload.get("baseline_fingerprint")
+    baseline_artifact_sha = str(
+        payload.get("baseline_fingerprint_artifact_sha256") or ""
+    )
+    baseline_internal_sha = ""
+    if not isinstance(baseline_fingerprint, dict):
+        violations.append("G4 baseline fingerprint is missing")
+    else:
+        baseline_tables = baseline_fingerprint.get("tables")
+        baseline_internal_sha = str(
+            baseline_fingerprint.get("fingerprint_sha256") or ""
+        )
+        if (
+            baseline_fingerprint.get("schema_version") != 1
+            or baseline_fingerprint.get("kind")
+            != "clone-b-baseline-fingerprint"
+            or not isinstance(baseline_tables, dict)
+            or not baseline_tables
+            or baseline_internal_sha
+            != hashlib.sha256(canonical_bytes(baseline_tables)).hexdigest()
+            or not SHA256.fullmatch(baseline_artifact_sha)
+            or baseline_artifact_sha
+            != hashlib.sha256(
+                canonical_bytes(baseline_fingerprint)
+            ).hexdigest()
+        ):
+            violations.append("G4 baseline fingerprint envelope is invalid")
+    fingerprint = payload.get("rollback_fingerprint")
+    if not isinstance(fingerprint, dict):
+        violations.append("G4 rollback fingerprint is missing")
+    else:
+        baseline = str(fingerprint.get("baseline_fingerprint_sha256") or "")
+        rollback = str(fingerprint.get("rollback_fingerprint_sha256") or "")
+        if (
+            fingerprint.get("schema_version") != 1
+            or fingerprint.get("status") != "PASS"
+            or fingerprint.get("violation_count") != 0
+            or not SHA256.fullmatch(baseline)
+            or rollback != baseline
+            or baseline != baseline_internal_sha
+            or fingerprint.get("baseline_artifact_sha256")
+            != baseline_artifact_sha
+        ):
+            violations.append("G4 rollback fingerprint is not equal/PASS")
+    if not SHA256.fullmatch(
+        str(payload.get("rollback_fingerprint_sha256") or "")
+    ):
+        violations.append("G4 rollback fingerprint evidence hash is missing")
+    search_restore = payload.get("search_restore")
+    if not isinstance(search_restore, dict) or set(search_restore) != {
+        "snapshot",
+        "rollback",
+    }:
+        violations.append("G4 search restore evidence is missing")
+    else:
+        snapshot = search_restore["snapshot"]
+        rollback = search_restore["rollback"]
+        tables = snapshot.get("tables") if isinstance(snapshot, dict) else None
+        table_names = {
+            "task_search_documents",
+            "task_asset_group_search_documents",
+            "product_search_documents",
+        }
+        valid_tables = isinstance(tables, dict) and set(tables) == table_names
+        if valid_tables:
+            for value in tables.values():
+                if (
+                    not isinstance(value, dict)
+                    or set(value) != {"row_count", "content_sha256"}
+                    or isinstance(value["row_count"], bool)
+                    or not isinstance(value["row_count"], int)
+                    or value["row_count"] < 0
+                    or not SHA256.fullmatch(str(value["content_sha256"] or ""))
+                ):
+                    valid_tables = False
+                    break
+        archive = snapshot.get("archive") if isinstance(snapshot, dict) else None
+        valid_archive = (
+            isinstance(archive, dict)
+            and set(archive) == {"format", "sha256", "size"}
+            and archive.get("format") == "deterministic-jsonl-v1"
+            and SHA256.fullmatch(str(archive.get("sha256") or "")) is not None
+            and not isinstance(archive.get("size"), bool)
+            and isinstance(archive.get("size"), int)
+            and archive["size"] >= 0
+        )
+        snapshot_sha = (
+            hashlib.sha256(canonical_bytes(tables)).hexdigest()
+            if valid_tables
+            else ""
+        )
+        if (
+            not isinstance(snapshot, dict)
+            or snapshot.get("schema_version") != 1
+            or snapshot.get("status") != "CAPTURED"
+            or snapshot.get("violation_count") != 0
+            or snapshot.get("snapshot_sha256") != snapshot_sha
+            or not isinstance(rollback, dict)
+            or rollback.get("schema_version") != 1
+            or rollback.get("status") != "PASS"
+            or rollback.get("violation_count") != 0
+            or rollback.get("snapshot_sha256") != snapshot_sha
+            or rollback.get("restored_snapshot_sha256") != snapshot_sha
+            or rollback.get("restored_tables") != tables
+            or not valid_archive
+            or (
+                valid_archive
+                and payload.get("search_snapshot_archive_sha256")
+                != archive["sha256"]
+            )
+            or rollback.get("source_archive_sha256") != archive["sha256"]
+        ):
+            violations.append("G4 search rollback is not an exact snapshot restore")
+    for field in (
+        "search_snapshot_sha256",
+        "search_snapshot_archive_sha256",
+        "search_rollback_sha256",
+    ):
+        if not SHA256.fullmatch(str(payload.get(field) or "")):
+            violations.append(f"G4 {field} is missing")
+    inputs = payload.get("input_sha256")
+    if not isinstance(inputs, dict) or set(inputs) != {
+        "command_plan",
+        "mapping",
+    }:
+        violations.append("G4 input hash binding is incomplete")
+    else:
+        for name, value in inputs.items():
+            if not SHA256.fullmatch(str(value or "")):
+                violations.append(f"G4 {name} input hash is invalid")
+    inventory = payload.get("evidence_inventory")
+    if not isinstance(inventory, list) or not inventory:
+        violations.append("G4 evidence inventory is missing")
+    elif run_dir is None:
+        violations.append("G4 evidence inventory has no finalizer run root")
+    else:
+        seen_paths: set[str] = set()
+        inventory_hashes: set[str] = set()
+        for index, record in enumerate(inventory):
+            try:
+                if not isinstance(record, dict) or set(record) != {
+                    "path",
+                    "sha256",
+                }:
+                    raise ValueError("record shape is invalid")
+                relative = str(record["path"])
+                if relative in seen_paths:
+                    raise ValueError("record path is duplicated")
+                seen_paths.add(relative)
+                expected = require_hash(
+                    record["sha256"], f"G4.evidence_inventory[{index}].sha256"
+                )
+                actual = sha256_file(safe_artifact_path(run_dir, relative))
+                if actual != expected:
+                    raise ValueError(
+                        f"hash mismatch expected={expected} actual={actual}"
+                    )
+                inventory_hashes.add(actual)
+            except (OSError, ValueError) as exc:
+                violations.append(f"G4 evidence[{index}] is invalid: {exc}")
+        required_hashes: dict[str, Any] = {
+            "baseline_fingerprint": payload.get(
+                "baseline_fingerprint_artifact_sha256"
+            ),
+            "rollback_fingerprint": payload.get(
+                "rollback_fingerprint_sha256"
+            ),
+            "search_snapshot": payload.get("search_snapshot_sha256"),
+            "search_snapshot_archive": payload.get(
+                "search_snapshot_archive_sha256"
+            ),
+            "search_rollback": payload.get("search_rollback_sha256"),
+        }
+        if isinstance(inputs, dict):
+            required_hashes.update(inputs)
+        for name, value in required_hashes.items():
+            if SHA256.fullmatch(str(value or "")):
+                if value not in inventory_hashes:
+                    violations.append(
+                        f"G4 {name} bytes are absent from evidence inventory"
+                    )
+    violations.extend(validate_g10(payload))
+    return violations
+
+
+def validate_g5(payload: dict[str, Any]) -> list[str]:
+    fields = {
+        "schema_version",
+        "run_id",
+        "status",
+        "violation_count",
+        "violations",
+        "gates",
+        "immutable_event_parity",
+    }
+    violations = exact_fields(payload, fields, "G5")
+    violations.extend(validate_common_envelope(payload, label="G5"))
+    gates = payload.get("gates")
+    if not isinstance(gates, list) or len(gates) != len(SQL_GATE_NAMES):
+        violations.append("G5 must contain exactly the 00-12 SQL gates")
+    else:
+        actual_names: list[str] = []
+        for index, row in enumerate(gates):
+            expected_fields = {
+                "gate",
+                "a_assessment",
+                "b_assessment",
+                "a_violation_count",
+                "b_violation_count",
+                "a_json_sha256",
+                "b_json_sha256",
+            }
+            if not isinstance(row, dict) or set(row) != expected_fields:
+                violations.append(f"G5 gate[{index}] field contract differs")
+                continue
+            actual_names.append(str(row["gate"]))
+            if (
+                row["a_assessment"] != "baseline_or_immutable_parity"
+                or row["b_assessment"] != "approved_manifest_and_v8_invariants"
+            ):
+                violations.append(f"G5 gate[{index}] assessment contract differs")
+            for side in ("a", "b"):
+                if row[f"{side}_violation_count"] != 0:
+                    violations.append(
+                        f"G5 gate[{index}] {side.upper()} violation count is not zero"
+                    )
+                try:
+                    require_hash(
+                        row[f"{side}_json_sha256"],
+                        f"G5.gates[{index}].{side}_json_sha256",
+                    )
+                except ValueError as exc:
+                    violations.append(str(exc))
+        if actual_names != list(SQL_GATE_NAMES):
+            violations.append(
+                f"G5 SQL gate order/set differs: {actual_names}"
+            )
+    parity = payload.get("immutable_event_parity")
+    parity_fields = {
+        "schema_version",
+        "gate",
+        "status",
+        "violation_count",
+        "violations",
+        "source_evidence_sha256",
+        "target_evidence_sha256",
+    }
+    if not isinstance(parity, dict) or set(parity) != parity_fields:
+        violations.append("G5 immutable event parity field contract differs")
+    else:
+        violations.extend(
+            validate_common_envelope(
+                parity,
+                label="G5 immutable event parity",
+                run_id_required=False,
+            )
+        )
+        if parity.get("gate") != "07_event_history_checksum":
+            violations.append("G5 immutable event parity gate is not 07")
+        source_hash = str(parity.get("source_evidence_sha256") or "")
+        target_hash = str(parity.get("target_evidence_sha256") or "")
+        if (
+            not SHA256.fullmatch(source_hash)
+            or not SHA256.fullmatch(target_hash)
+            or source_hash != target_hash
+        ):
+            violations.append("G5 immutable event parity hashes are invalid or differ")
+    return violations
+
+
+def validate_g6(payload: dict[str, Any]) -> list[str]:
+    fields = {
+        "schema_version",
+        "run_id",
+        "status",
+        "task_count",
+        "group_count",
+        "task_asset_count",
+        "request_count",
+        "combination_matrix",
+        "identities",
+        "task_ids_sha256",
+        "matrix_sha256",
+        "rules_sha256",
+        "manifest_sha256",
+        "used_rule_ids",
+        "unused_rule_ids",
+        "observations",
+        "violation_count",
+        "violations",
+        "evidence_sha256",
+    }
+    violations = exact_fields(payload, fields, "G6")
+    violations.extend(validate_common_envelope(payload, label="G6"))
+    for field in ("task_count", "request_count"):
+        if not is_int(payload.get(field), minimum=1):
+            violations.append(f"G6 {field} must be a positive integer")
+    for field in ("group_count", "task_asset_count"):
+        if not is_int(payload.get(field)):
+            violations.append(f"G6 {field} must be a nonnegative integer")
+    matrix = payload.get("combination_matrix")
+    actual_matrix: dict[str, tuple[Any, Any, Any]] = {}
+    if not isinstance(matrix, list) or len(matrix) != 4:
+        violations.append("G6 combination matrix does not contain four rows")
+    else:
+        for index, row in enumerate(matrix):
+            if not isinstance(row, dict) or set(row) != {
+                "id",
+                "frontend",
+                "backend",
+                "data",
+            }:
+                violations.append(f"G6 combination[{index}] field contract differs")
+                continue
+            combo_id = str(row["id"])
+            if combo_id in actual_matrix:
+                violations.append(f"G6 combination id is duplicated: {combo_id}")
+            actual_matrix[combo_id] = (
+                row["frontend"],
+                row["backend"],
+                row["data"],
+            )
+        if actual_matrix != API_COMBINATIONS:
+            violations.append("G6 combination matrix differs from the fixed four edges")
+    identities = payload.get("identities")
+    identity_ids: set[str] = set()
+    if not isinstance(identities, list) or not identities:
+        violations.append("G6 identities must be a non-empty array")
+    else:
+        for index, row in enumerate(identities):
+            if (
+                not isinstance(row, dict)
+                or set(row) != {"id", "role"}
+                or not str(row.get("id") or "").strip()
+                or not str(row.get("role") or "").strip()
+                or row["id"] in identity_ids
+            ):
+                violations.append(f"G6 identity[{index}] is invalid or duplicated")
+                continue
+            identity_ids.add(row["id"])
+    observations = payload.get("observations")
+    if not isinstance(observations, list):
+        violations.append("G6 observations must be an array")
+    else:
+        if payload.get("request_count") != len(observations):
+            violations.append("G6 request_count differs from observations length")
+        observation_keys: set[tuple[str, str, str, str]] = set()
+        observed_combinations: set[str] = set()
+        observed_identities: set[str] = set()
+        for index, row in enumerate(observations):
+            if not isinstance(row, dict) or set(row) != {
+                "combination",
+                "identity",
+                "route",
+                "entity_key",
+                "status",
+                "body_sha256",
+                "raw_sha256",
+                "body_bytes",
+            }:
+                violations.append(f"G6 observation[{index}] field contract differs")
+                continue
+            key = (
+                str(row["combination"]),
+                str(row["identity"]),
+                str(row["route"]),
+                str(row["entity_key"]),
+            )
+            if (
+                key in observation_keys
+                or key[0] not in API_COMBINATIONS
+                or key[1] not in identity_ids
+                or not key[2].startswith("/v1/")
+                or not key[3]
+                or not is_int(row["status"], minimum=100)
+                or row["status"] > 599
+                or not is_int(row["body_bytes"])
+                or not SHA256.fullmatch(str(row["body_sha256"] or ""))
+                or not SHA256.fullmatch(str(row["raw_sha256"] or ""))
+            ):
+                violations.append(f"G6 observation[{index}] is invalid or duplicated")
+            observation_keys.add(key)
+            observed_combinations.add(key[0])
+            observed_identities.add(key[1])
+        if observed_combinations != set(API_COMBINATIONS):
+            violations.append("G6 observations do not cover all four combinations")
+        if observed_identities != identity_ids:
+            violations.append("G6 observations do not cover every declared identity")
+    for field in (
+        "task_ids_sha256",
+        "matrix_sha256",
+        "rules_sha256",
+        "manifest_sha256",
+    ):
+        try:
+            require_hash(payload.get(field), f"G6.{field}")
+        except ValueError as exc:
+            violations.append(str(exc))
+    used = payload.get("used_rule_ids")
+    unused = payload.get("unused_rule_ids")
+    if (
+        not isinstance(used, list)
+        or not isinstance(unused, list)
+        or any(not isinstance(item, str) or not item for item in used + unused)
+        or len(set(used)) != len(used)
+        or len(set(unused)) != len(unused)
+        or set(used) & set(unused)
+        or used != sorted(used)
+        or unused != sorted(unused)
+    ):
+        violations.append("G6 used/unused normalization rule sets are invalid")
+    violations.extend(
+        validate_self_hash(
+            payload,
+            field="evidence_sha256",
+            label="G6",
+            newline=False,
+        )
+    )
     return violations
 
 
 def validate_g7(payload: dict[str, Any]) -> list[str]:
-    violations: list[str] = []
-    if payload.get("critical_scenario_pass_rate") not in {1, 1.0, "100%"}:
-        violations.append("critical Computer Use scenario pass rate is not 100%")
-    if payload.get("browser_surface") not in {"in_app_browser", "computer_use"}:
-        violations.append("real browser surface is not recorded")
-    if not payload.get("screenshot_evidence_sha256"):
-        violations.append("screenshot evidence hash is missing")
+    fields = {
+        "schema_version",
+        "gate",
+        "status",
+        "run_id",
+        "scenario_catalog_sha256",
+        "browser_evidence_sha256",
+        "playwright_evidence_sha256",
+        "required_case_count",
+        "passed_case_count",
+        "failed_case_count",
+        "critical_pass_rate",
+        "source_kinds",
+        "failures",
+        "cases",
+        "generated_at",
+    }
+    violations = exact_fields(payload, fields, "G7")
+    if payload.get("schema_version") != 1:
+        violations.append("G7 schema_version must be 1")
+    if payload.get("gate") != "G7":
+        violations.append("G7 gate marker differs")
+    if payload.get("status") != "PASS":
+        violations.append("G7 status must be PASS")
+    if not RUN_ID.fullmatch(str(payload.get("run_id") or "")):
+        violations.append("G7 run_id is invalid")
+    for field in (
+        "scenario_catalog_sha256",
+        "browser_evidence_sha256",
+        "playwright_evidence_sha256",
+    ):
+        try:
+            require_hash(payload.get(field), f"G7.{field}")
+        except ValueError as exc:
+            violations.append(str(exc))
+    required = payload.get("required_case_count")
+    passed = payload.get("passed_case_count")
+    failed = payload.get("failed_case_count")
+    rate = payload.get("critical_pass_rate")
+    cases = payload.get("cases")
+    if (
+        not is_int(required, minimum=1)
+        or not is_int(passed)
+        or not is_int(failed)
+        or passed != required
+        or failed != 0
+        or isinstance(rate, bool)
+        or not isinstance(rate, (int, float))
+        or rate != 1.0
+        or not isinstance(cases, list)
+        or len(cases) != required
+    ):
+        violations.append("G7 case counts or critical pass rate are not exact")
+    if payload.get("source_kinds") != [
+        "browser_computer_use",
+        "playwright",
+    ]:
+        violations.append("G7 source_kinds is not the fixed independent pair")
+    failures = payload.get("failures")
+    if not isinstance(failures, list) or failures:
+        violations.append("G7 failures must be an empty array")
+    case_keys: set[tuple[str, str, str]] = set()
+    if isinstance(cases, list):
+        observed_combinations: set[str] = set()
+        observed_viewports: set[str] = set()
+        for index, row in enumerate(cases):
+            if not isinstance(row, dict) or set(row) != {
+                "scenario_id",
+                "combination",
+                "viewport",
+                "status",
+                "browser_record_sha256",
+                "playwright_record_sha256",
+                "pair_sha256",
+            }:
+                violations.append(f"G7 case[{index}] field contract differs")
+                continue
+            key = (
+                str(row["scenario_id"]),
+                str(row["combination"]),
+                str(row["viewport"]),
+            )
+            if (
+                not key[0]
+                or key[1]
+                not in {
+                    "external_external",
+                    "devplus_devplus",
+                    "external_devplus",
+                    "devplus_external",
+                }
+                or key[2] not in {"desktop", "mobile"}
+                or key in case_keys
+                or row["status"] != "PASS"
+            ):
+                violations.append(f"G7 case[{index}] identity/status is invalid")
+            case_keys.add(key)
+            observed_combinations.add(key[1])
+            observed_viewports.add(key[2])
+            for field in (
+                "browser_record_sha256",
+                "playwright_record_sha256",
+                "pair_sha256",
+            ):
+                if not SHA256.fullmatch(str(row.get(field) or "")):
+                    violations.append(f"G7 case[{index}] {field} is invalid")
+            if all(
+                SHA256.fullmatch(str(row.get(field) or ""))
+                for field in (
+                    "browser_record_sha256",
+                    "playwright_record_sha256",
+                    "pair_sha256",
+                )
+            ) and SHA256.fullmatch(
+                str(payload.get("scenario_catalog_sha256") or "")
+            ):
+                expected_pair = hashlib.sha256(
+                    json.dumps(
+                        {
+                            "browser_record_sha256": row[
+                                "browser_record_sha256"
+                            ],
+                            "case_key": list(key),
+                            "playwright_record_sha256": row[
+                                "playwright_record_sha256"
+                            ],
+                            "scenario_catalog_sha256": payload.get(
+                                "scenario_catalog_sha256"
+                            ),
+                        },
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode("utf-8")
+                ).hexdigest()
+                if row["pair_sha256"] != expected_pair:
+                    violations.append(
+                        f"G7 case[{index}] pair_sha256 does not bind the pair"
+                    )
+        if observed_combinations != {
+            "external_external",
+            "devplus_devplus",
+            "external_devplus",
+            "devplus_external",
+        }:
+            violations.append("G7 cases do not cover all four combinations")
+        if observed_viewports != {"desktop", "mobile"}:
+            violations.append("G7 cases do not cover desktop and mobile viewports")
+    generated_at = str(payload.get("generated_at") or "")
+    try:
+        parsed = dt.datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            raise ValueError
+    except ValueError:
+        violations.append("G7 generated_at is not timezone-aware RFC3339")
+    return violations
+
+
+def validate_g8(payload: dict[str, Any]) -> list[str]:
+    fields = {
+        "schema_version",
+        "status",
+        "violation_count",
+        "checked_count",
+        "manifest_sha256",
+        "violations",
+        "evidence_hash",
+    }
+    violations = exact_fields(payload, fields, "G8")
+    violations.extend(
+        validate_common_envelope(
+            payload,
+            label="G8",
+            run_id_required=False,
+        )
+    )
+    if not is_int(payload.get("checked_count"), minimum=1):
+        violations.append("G8 checked_count must be a positive integer")
+    try:
+        require_hash(payload.get("manifest_sha256"), "G8.manifest_sha256")
+    except ValueError as exc:
+        violations.append(str(exc))
+    violations.extend(
+        validate_self_hash(
+            payload,
+            field="evidence_hash",
+            label="G8",
+            newline=False,
+        )
+    )
     return violations
 
 
@@ -204,9 +1033,14 @@ def validate_g10(payload: dict[str, Any]) -> list[str]:
 
 VALIDATORS = {
     "G0": validate_environment,
+    "G1": validate_g1,
+    "G2": validate_g2,
     "G3": validate_g3,
     "G4": validate_g4,
+    "G5": validate_g5,
+    "G6": validate_g6,
     "G7": validate_g7,
+    "G8": validate_g8,
     "G9": validate_g9,
     "G10": validate_g10,
 }
@@ -253,7 +1087,10 @@ def validate_index(
             validator = VALIDATORS.get(gate)
             if validator is not None:
                 try:
-                    violations.extend(validator(payload))
+                    if gate == "G4":
+                        violations.extend(validate_g4(payload, run_dir))
+                    else:
+                        violations.extend(validator(payload))
                 except ValueError as exc:
                     violations.append(str(exc))
         executor = str(record.get("executor") or "").strip()

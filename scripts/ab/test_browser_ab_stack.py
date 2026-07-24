@@ -23,7 +23,10 @@ def file_sha256(path: pathlib.Path) -> str:
 
 def tree_sha256(path: pathlib.Path) -> str:
     digest = hashlib.sha256()
-    for item in sorted(candidate for candidate in path.rglob("*") if candidate.is_file()):
+    for item in sorted(
+        (candidate for candidate in path.rglob("*") if candidate.is_file()),
+        key=lambda candidate: candidate.relative_to(path).as_posix().encode("utf-8"),
+    ):
         relative = item.relative_to(path).as_posix().encode("utf-8")
         digest.update(len(relative).to_bytes(8, "big"))
         digest.update(relative)
@@ -143,6 +146,21 @@ def replace_env(env: pathlib.Path, key: str, value: str) -> None:
 
 
 class BrowserABStackTest(unittest.TestCase):
+    def test_frontend_tree_hash_uses_posix_relative_byte_order(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tree = pathlib.Path(tmp)
+            (tree / "z.txt").write_bytes(b"z")
+            (tree / "A.txt").write_bytes(b"A")
+            expected = hashlib.sha256()
+            for relative in ("A.txt", "z.txt"):
+                payload = relative.encode("utf-8")
+                body = (tree / relative).read_bytes()
+                expected.update(len(payload).to_bytes(8, "big"))
+                expected.update(payload)
+                expected.update(len(body).to_bytes(8, "big"))
+                expected.update(body)
+            self.assertEqual(expected.hexdigest(), tree_sha256(tree))
+
     def test_valid_stack_and_plan_only_tunnel(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)

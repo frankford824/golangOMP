@@ -745,11 +745,34 @@ class Runner:
         left = self.results[(left_combo, identity, route, entity)]
         right = self.results[(right_combo, identity, route, entity)]
         direction = f"{left_combo}->{right_combo}"
-        if left.status in {401, 403} and right.status not in {401, 403}:
+        # Permission widening is directional from the frozen A baseline to the
+        # migrated B candidate, regardless of the pair iteration order.  The
+        # four-combination matrix also contains B->A and same-data comparisons;
+        # treating those lexical directions as authorization transitions would
+        # misclassify candidate permission tightening as widening.
+        left_data = "A" if left_combo.endswith("_a") else "B"
+        right_data = "A" if right_combo.endswith("_a") else "B"
+        if left_data != right_data:
+            if left_data == "A":
+                baseline_combo, baseline = left_combo, left
+                candidate_combo, candidate = right_combo, right
+            else:
+                baseline_combo, baseline = right_combo, right
+                candidate_combo, candidate = left_combo, left
+        else:
+            baseline_combo = candidate_combo = ""
+            baseline = candidate = None
+        if (
+            baseline is not None
+            and candidate is not None
+            and baseline.status in {401, 403}
+            and candidate.status not in {401, 403}
+        ):
             self.violation(
                 "api.permission_widened",
                 entity,
-                f"{identity} {direction} {left.status}->{right.status}",
+                f"{identity} {baseline_combo}->{candidate_combo} "
+                f"{baseline.status}->{candidate.status}",
             )
             return
         if route in self.retired_routes:

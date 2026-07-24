@@ -23,6 +23,36 @@
       "requires_history_drawer": true,
       "required_http_statuses": [],
       "required_assertions": ["page_matches_manifest", "assets_match", "allowed_actions_exact"],
+      "requirements_by_combination": {
+        "external_external": {
+          "requires_task_id": true,
+          "requires_revision_ids": false,
+          "requires_history_drawer": false,
+          "required_http_statuses": [],
+          "required_assertions": ["page_matches_manifest", "assets_match", "allowed_actions_exact"]
+        },
+        "devplus_devplus": {
+          "requires_task_id": true,
+          "requires_revision_ids": true,
+          "requires_history_drawer": true,
+          "required_http_statuses": [],
+          "required_assertions": ["page_matches_manifest", "assets_match", "allowed_actions_exact"]
+        },
+        "external_devplus": {
+          "requires_task_id": true,
+          "requires_revision_ids": false,
+          "requires_history_drawer": false,
+          "required_http_statuses": [],
+          "required_assertions": ["page_matches_manifest", "assets_match", "allowed_actions_exact"]
+        },
+        "devplus_external": {
+          "requires_task_id": true,
+          "requires_revision_ids": false,
+          "requires_history_drawer": false,
+          "required_http_statuses": [],
+          "required_assertions": ["page_matches_manifest", "assets_match", "allowed_actions_exact"]
+        }
+      },
       "coverage_tags": ["four_combinations", "history_drawer", "url_task_revision"]
     },
     {

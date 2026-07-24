@@ -171,7 +171,13 @@ def sha256_file(path: pathlib.Path) -> str:
 
 def sha256_tree(path: pathlib.Path) -> str:
     digest = hashlib.sha256()
-    files = sorted(item for item in path.rglob("*") if item.is_file())
+    # Native pathlib ordering follows host path semantics (notably Windows
+    # case folding). Sort exact POSIX relative-path bytes so identical frozen
+    # frontend trees have one fingerprint in Windows and WSL.
+    files = sorted(
+        (item for item in path.rglob("*") if item.is_file()),
+        key=lambda item: item.relative_to(path).as_posix().encode("utf-8"),
+    )
     if not files:
         raise ValueError(f"frontend artifact directory is empty: {path}")
     for item in files:

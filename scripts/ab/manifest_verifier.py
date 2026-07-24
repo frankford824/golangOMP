@@ -7,9 +7,23 @@ import hashlib
 import json
 import pathlib
 import re
+from typing import Any
 
 OBS_RE = re.compile(r"^evidence\.manifest_state\.(G(?:01|02|03|04|05|07|08|09))$")
 REQUIRED_GATES = {"G01", "G02", "G03", "G04", "G05", "G07", "G08", "G09"}
+
+
+def canonical_bytes(value: Any) -> bytes:
+    return (
+        json.dumps(
+            value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        )
+        + "\n"
+    ).encode("utf-8")
+
+
+def sha256_file(path: pathlib.Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def load_manifest(path: pathlib.Path, run_id: str) -> dict[tuple[str, str], str]:
@@ -77,8 +91,20 @@ def verify(manifest: pathlib.Path, observations: pathlib.Path, run_id: str) -> d
     for key in sorted(expected.keys() & observed.keys()):
         if expected[key] != observed[key]:
             violations.append({"violation_code": "manifest.entity_hash_mismatch", "entity_key": f"{key[0]}:{key[1]}", "detail": f"expected={expected[key]},actual={observed[key]}"})
-    return {"violation_count": len(violations), "violations": violations,
-            "expected_entities": len(expected), "observed_entities": len(observed)}
+    result = {
+        "schema_version": 1,
+        "run_id": run_id,
+        "status": "PASS" if not violations else "FAIL",
+        "violation_count": len(violations),
+        "violations": violations,
+        "expected_entities": len(expected),
+        "observed_entities": len(observed),
+        "manifest_sha256": sha256_file(manifest),
+        "observations_sha256": sha256_file(observations),
+        "required_gates": sorted(REQUIRED_GATES),
+    }
+    result["evidence_sha256"] = hashlib.sha256(canonical_bytes(result)).hexdigest()
+    return result
 
 
 def main() -> None:
@@ -91,8 +117,21 @@ def main() -> None:
     try:
         result = verify(args.manifest, args.observations, args.run_id)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
-        result = {"violation_count": 1, "violations": [{"violation_code": "manifest.verification_error", "entity_key": "*", "detail": str(exc)}]}
-    args.output.write_text(json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
+        result = {
+            "schema_version": 1,
+            "run_id": args.run_id,
+            "status": "FAIL",
+            "violation_count": 1,
+            "violations": [
+                {
+                    "violation_code": "manifest.verification_error",
+                    "entity_key": "*",
+                    "detail": str(exc),
+                }
+            ],
+        }
+        result["evidence_sha256"] = hashlib.sha256(canonical_bytes(result)).hexdigest()
+    args.output.write_bytes(canonical_bytes(result))
     raise SystemExit(0 if result["violation_count"] == 0 else 1)
 
 

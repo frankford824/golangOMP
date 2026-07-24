@@ -50,6 +50,13 @@ REQUIRED_COVERAGE_TAGS = {
     "cross_generation",
 }
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+REQUIREMENT_FIELDS = (
+    "requires_task_id",
+    "requires_revision_ids",
+    "requires_history_drawer",
+    "required_http_statuses",
+    "required_assertions",
+)
 
 
 class ValidationInputError(ValueError):
@@ -150,6 +157,53 @@ def _case_key_text(key: tuple[str, str, str]) -> str:
     return "/".join(key)
 
 
+def _validate_requirement_block(value: Any, label: str) -> dict[str, Any]:
+    if not isinstance(value, dict) or set(value) != set(REQUIREMENT_FIELDS):
+        raise ValidationInputError(
+            f"{label} must declare the exact conditional requirement fields"
+        )
+    for flag in (
+        "requires_task_id",
+        "requires_revision_ids",
+        "requires_history_drawer",
+    ):
+        if not isinstance(value.get(flag), bool):
+            raise ValidationInputError(f"{label} has invalid {flag}")
+    if value["requires_history_drawer"] and not value["requires_revision_ids"]:
+        raise ValidationInputError(
+            f"{label} cannot require history_drawer without revision_ids"
+        )
+    statuses = value.get("required_http_statuses")
+    assertions = value.get("required_assertions")
+    if (
+        not isinstance(statuses, list)
+        or any(
+            not _is_nonnegative_int(status) or status < 100 or status > 599
+            for status in statuses
+        )
+        or len(statuses) != len(set(statuses))
+    ):
+        raise ValidationInputError(f"{label} has invalid required_http_statuses")
+    if (
+        not isinstance(assertions, list)
+        or not assertions
+        or any(not _is_nonempty_string(name) for name in assertions)
+        or len(assertions) != len(set(assertions))
+    ):
+        raise ValidationInputError(f"{label} has invalid required_assertions")
+    return value
+
+
+def _requirements_for(
+    scenario: dict[str, Any],
+    combination: str,
+) -> dict[str, Any]:
+    conditional = scenario.get("requirements_by_combination")
+    if isinstance(conditional, dict) and combination in conditional:
+        return conditional[combination]
+    return {field: scenario[field] for field in REQUIREMENT_FIELDS}
+
+
 def _validate_catalog(catalog: dict[str, Any]) -> list[dict[str, Any]]:
     if catalog.get("schema_version") != SCHEMA_VERSION:
         raise ValidationInputError("scenario catalog schema_version must be 1")
@@ -212,36 +266,43 @@ def _validate_catalog(catalog: dict[str, Any]) -> list[dict[str, Any]]:
             raise ValidationInputError(
                 f"scenario {scenario_id} has invalid required_viewports"
             )
-        for flag in (
-            "requires_task_id",
-            "requires_revision_ids",
-            "requires_history_drawer",
-        ):
-            if not isinstance(scenario.get(flag), bool):
-                raise ValidationInputError(f"scenario {scenario_id} has invalid {flag}")
-        statuses = scenario.get("required_http_statuses")
-        assertions = scenario.get("required_assertions")
+        base_requirements = _validate_requirement_block(
+            {field: scenario.get(field) for field in REQUIREMENT_FIELDS},
+            f"scenario {scenario_id}",
+        )
+        statuses = base_requirements["required_http_statuses"]
+        assertions = base_requirements["required_assertions"]
         tags = scenario.get("coverage_tags")
-        if (
-            not isinstance(statuses, list)
-            or any(
-                not _is_nonnegative_int(status) or status < 100 or status > 599
-                for status in statuses
-            )
-            or len(statuses) != len(set(statuses))
-        ):
-            raise ValidationInputError(
-                f"scenario {scenario_id} has invalid required_http_statuses"
-            )
-        if (
-            not isinstance(assertions, list)
-            or not assertions
-            or any(not _is_nonempty_string(name) for name in assertions)
-            or len(assertions) != len(set(assertions))
-        ):
-            raise ValidationInputError(
-                f"scenario {scenario_id} has invalid required_assertions"
-            )
+        conditional = scenario.get("requirements_by_combination")
+        if conditional is not None:
+            if (
+                not isinstance(conditional, dict)
+                or set(conditional) != set(required_combinations)
+            ):
+                raise ValidationInputError(
+                    f"scenario {scenario_id} requirements_by_combination must "
+                    "declare every and only required combination"
+                )
+            for combination in required_combinations:
+                requirements = _validate_requirement_block(
+                    conditional[combination],
+                    f"scenario {scenario_id}/{combination}",
+                )
+                # Conditional contracts may vary only the V8 revision/history
+                # requirements.  Core page, task, asset/action assertions and
+                # HTTP status checks cannot be weakened per edge.
+                if requirements["requires_task_id"] != base_requirements["requires_task_id"]:
+                    raise ValidationInputError(
+                        f"scenario {scenario_id}/{combination} cannot change requires_task_id"
+                    )
+                if set(requirements["required_http_statuses"]) != set(statuses):
+                    raise ValidationInputError(
+                        f"scenario {scenario_id}/{combination} cannot weaken HTTP statuses"
+                    )
+                if set(requirements["required_assertions"]) != set(assertions):
+                    raise ValidationInputError(
+                        f"scenario {scenario_id}/{combination} cannot weaken assertions"
+                    )
         if (
             not isinstance(tags, list)
             or not tags
@@ -496,6 +557,7 @@ def _validate_record(
     failures: list[dict[str, str]],
     seen_paths: set[tuple[str, str]],
 ) -> None:
+    requirements = _requirements_for(scenario, key[1])
     if record.get("schema_version") != SCHEMA_VERSION:
         _add_failure(failures, "record_schema", f"{source_kind}: schema_version != 1", key)
     if record.get("status") != "PASS":
@@ -536,7 +598,7 @@ def _validate_record(
         _add_failure(failures, "url", f"{source_kind}: URL is invalid or unsafe", key)
 
     task_id = record.get("task_id")
-    if scenario["requires_task_id"] and not _is_positive_int(task_id):
+    if requirements["requires_task_id"] and not _is_positive_int(task_id):
         _add_failure(
             failures,
             "task_id",
@@ -568,7 +630,7 @@ def _validate_record(
             f"{source_kind}: revision_ids contain duplicates",
             key,
         )
-    if scenario["requires_revision_ids"] and not revision_ids:
+    if requirements["requires_revision_ids"] and not revision_ids:
         _add_failure(
             failures,
             "revision_ids",
@@ -585,7 +647,7 @@ def _validate_record(
             key,
         )
         assertions = {}
-    for assertion_name in scenario["required_assertions"]:
+    for assertion_name in requirements["required_assertions"]:
         if assertion_name == "allowed_actions_exact":
             if _normalized_allowed_actions(assertions) is None:
                 _add_failure(
@@ -617,7 +679,7 @@ def _validate_record(
         )
 
     history = assertions.get("history_drawer")
-    if scenario["requires_history_drawer"]:
+    if requirements["requires_history_drawer"]:
         if not isinstance(history, dict):
             _add_failure(
                 failures,
@@ -689,7 +751,7 @@ def _validate_record(
                 key,
             )
         matched_statuses.add(actual)
-    for required_status in scenario["required_http_statuses"]:
+    for required_status in requirements["required_http_statuses"]:
         if required_status not in matched_statuses:
             _add_failure(
                 failures,
