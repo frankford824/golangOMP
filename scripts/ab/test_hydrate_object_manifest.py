@@ -10,6 +10,7 @@ import threading
 import unittest
 import urllib.error
 import urllib.request
+from concurrent.futures.thread import BrokenThreadPool
 from unittest import mock
 
 
@@ -101,6 +102,24 @@ class FakeParallelAdapter:
     def close(self):
         with self.state["lock"]:
             self.state["closed"] += 1
+
+
+class BrokenParallelAdapter:
+    def __init__(self, *, clone=False):
+        self.base_url = "broken-parallel-origin"
+        self.use_head = False
+        self.is_clone = clone
+
+    def origin_fingerprint(self):
+        if self.is_clone:
+            raise BrokenThreadPool("worker adapter could not initialize")
+        return hashlib.sha256(b"broken-parallel-origin").hexdigest()
+
+    def clone(self):
+        return BrokenParallelAdapter(clone=True)
+
+    def close(self):
+        pass
 
 
 class FeedStream:
@@ -433,6 +452,22 @@ class HydrateObjectManifestTest(unittest.TestCase):
         self.assertEqual(4, adapter.state["closed"])
         self.assertEqual(4, len(adapter.state["threads"]))
 
+    def test_broken_parallel_initializer_finishes_as_interrupted(self):
+        rows = [self.row(10, "tasks/7/a.bin")]
+        with tempfile.TemporaryDirectory() as root:
+            root_path = pathlib.Path(root)
+            result = MODULE.hydrate_manifest(
+                self.write_manifest(root, rows),
+                root_path / "hydrated.jsonl",
+                root_path / "checkpoint.json",
+                VERIFIER.VerifierConfig(upload=BrokenParallelAdapter()),
+                workers=2,
+            )
+
+        self.assertEqual(result["status"], "INTERRUPTED")
+        self.assertEqual(result["failure_count"], 0)
+        self.assertEqual(result["read_only_get_count"], 0)
+
     def test_interrupt_flushes_checkpoint_and_resume_skips_completed_get(self):
         objects = {
             "tasks/7/a.bin": (b"a", "application/octet-stream"),
@@ -531,6 +566,74 @@ class HydrateObjectManifestTest(unittest.TestCase):
         self.assertEqual(second["resumed_failure_target_count"], 1)
         self.assertEqual(second["read_only_get_count"], 1)
         self.assertEqual(second_adapter.requests, [("GET", "tasks/7/b.bin")])
+        self.assertEqual(second["failures"][0]["detail"], "http_status=404")
+
+    def test_explicit_retry_rehydrates_checkpointed_timeout(self):
+        rows = [self.row(10, "tasks/7/a.bin")]
+        with tempfile.TemporaryDirectory() as root:
+            root_path = pathlib.Path(root)
+            manifest = self.write_manifest(root, rows)
+            output = root_path / "hydrated.jsonl"
+            checkpoint = root_path / "checkpoint.json"
+            first = MODULE.hydrate_manifest(
+                manifest,
+                output,
+                checkpoint,
+                VERIFIER.VerifierConfig(
+                    upload=FakeAdapter({"tasks/7/a.bin": TimeoutError()})
+                ),
+            )
+            second_adapter = FakeAdapter({
+                "tasks/7/a.bin": (b"a", "application/octet-stream"),
+            })
+            second = MODULE.hydrate_manifest(
+                manifest,
+                output,
+                checkpoint,
+                VERIFIER.VerifierConfig(upload=second_adapter),
+                retry_transient_failures=True,
+            )
+
+        self.assertEqual(first["status"], "BLOCKED")
+        self.assertEqual(first["failures"][0]["detail"], "timeout")
+        self.assertEqual(second["status"], "PASS")
+        self.assertEqual(second["retried_transient_failure_target_count"], 1)
+        self.assertEqual(second["resumed_failure_target_count"], 0)
+        self.assertEqual(second_adapter.requests, [("GET", "tasks/7/a.bin")])
+
+    def test_explicit_retry_keeps_http_failure_sticky(self):
+        missing = urllib.error.HTTPError(
+            "https://secret.invalid", 404, "missing", {}, None
+        )
+        rows = [self.row(10, "tasks/7/a.bin")]
+        with tempfile.TemporaryDirectory() as root:
+            root_path = pathlib.Path(root)
+            manifest = self.write_manifest(root, rows)
+            output = root_path / "hydrated.jsonl"
+            checkpoint = root_path / "checkpoint.json"
+            MODULE.hydrate_manifest(
+                manifest,
+                output,
+                checkpoint,
+                VERIFIER.VerifierConfig(
+                    upload=FakeAdapter({"tasks/7/a.bin": missing})
+                ),
+            )
+            second_adapter = FakeAdapter({
+                "tasks/7/a.bin": (b"a", "application/octet-stream"),
+            })
+            second = MODULE.hydrate_manifest(
+                manifest,
+                output,
+                checkpoint,
+                VERIFIER.VerifierConfig(upload=second_adapter),
+                retry_transient_failures=True,
+            )
+
+        self.assertEqual(second["status"], "BLOCKED")
+        self.assertEqual(second["retried_transient_failure_target_count"], 0)
+        self.assertEqual(second["resumed_failure_target_count"], 1)
+        self.assertEqual(second_adapter.requests, [])
         self.assertEqual(second["failures"][0]["detail"], "http_status=404")
 
     def test_checkpoint_every_counts_failures_before_ungraceful_abort(self):

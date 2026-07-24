@@ -55,6 +55,12 @@ SAFE_CHECKPOINT_FAILURE_DETAILS = {
     "non_identity_content_encoding",
     "content_length_differs_from_stream",
 }
+RETRYABLE_TRANSIENT_FAILURE_DETAILS = {
+    "timeout",
+    "tls_error",
+    "connection_error",
+    "read_error",
+}
 SAFE_CHECKPOINT_FAILURE_CODE = re.compile(r"^object_manifest\.[a-z0-9_]+$")
 SAFE_HTTP_STATUS_DETAIL = re.compile(r"^http_status=[1-5][0-9]{2}$")
 
@@ -1428,6 +1434,7 @@ def result_document(
     unique_targets: int,
     resumed_targets: int,
     resumed_failure_targets: int,
+    retried_transient_failure_targets: int,
     get_count: int,
     hydrated_rows: int,
     failures: list[dict[str, Any]],
@@ -1445,6 +1452,9 @@ def result_document(
         "unique_target_count": unique_targets,
         "resumed_target_count": resumed_targets,
         "resumed_failure_target_count": resumed_failure_targets,
+        "retried_transient_failure_target_count": (
+            retried_transient_failure_targets
+        ),
         "read_only_get_count": get_count,
         "hydrated_row_count": hydrated_rows,
         "deduplicated_get_count": max(0, target_row_count - unique_targets),
@@ -1472,6 +1482,7 @@ def hydrate_manifest(
     checkpoint_every: int = DEFAULT_CHECKPOINT_EVERY,
     max_object_bytes: int = DEFAULT_MAX_OBJECT_BYTES,
     workers: int = 1,
+    retry_transient_failures: bool = False,
 ) -> dict[str, Any]:
     if checkpoint_every <= 0:
         raise ValueError("checkpoint_every must be positive")
@@ -1513,13 +1524,28 @@ def hydrate_manifest(
         target["entities"].append(row["entity_key"])
         target["row_indexes"].append(index)
 
-    applicable_completed = {key for key in targets if key in completed}
-    applicable_failed = {key for key in targets if key in failed_targets}
     unknown_checkpoint_results = (set(completed) | set(failed_targets)) - set(targets)
     if unknown_checkpoint_results:
         raise ValueError("checkpoint contains an object outside the current hydration targets")
+    retryable_failed = {
+        key
+        for key in targets
+        if (
+            key in failed_targets
+            and failed_targets[key]["detail"]
+            in RETRYABLE_TRANSIENT_FAILURE_DETAILS
+        )
+    }
+    if retry_transient_failures:
+        for key in retryable_failed:
+            del failed_targets[key]
+    else:
+        retryable_failed = set()
+    applicable_completed = {key for key in targets if key in completed}
+    applicable_failed = {key for key in targets if key in failed_targets}
     resumed_targets = len(applicable_completed)
     resumed_failure_targets = len(applicable_failed)
+    retried_transient_failure_targets = len(retryable_failed)
     target_row_count = sum(len(target["row_indexes"]) for target in targets.values())
     for key in sorted(applicable_failed):
         record = failed_targets[key]
@@ -1642,8 +1668,18 @@ def hydrate_manifest(
                 key = futures[future]
                 try:
                     metadata = future.result()
+                except concurrent.futures.CancelledError:
+                    interrupted = True
+                    for pending in futures:
+                        pending.cancel()
+                    break
                 except HydrationFailure as exc:
                     record_failure(key, exc)
+                except concurrent.futures.BrokenExecutor:
+                    interrupted = True
+                    for pending in futures:
+                        pending.cancel()
+                    break
                 else:
                     record_success(key, metadata)
         except KeyboardInterrupt:
@@ -1688,6 +1724,9 @@ def hydrate_manifest(
         unique_targets=len(targets),
         resumed_targets=resumed_targets,
         resumed_failure_targets=resumed_failure_targets,
+        retried_transient_failure_targets=(
+            retried_transient_failure_targets
+        ),
         get_count=get_count,
         hydrated_rows=hydrated_rows,
         failures=failures,
@@ -1715,6 +1754,15 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--timeout-seconds", type=float, default=30.0)
     parser.add_argument("--checkpoint-every", type=int, default=DEFAULT_CHECKPOINT_EVERY)
     parser.add_argument("--workers", type=int, default=1)
+    parser.add_argument(
+        "--retry-transient-failures",
+        action="store_true",
+        help=(
+            "re-read only checkpointed timeout, TLS, connection, and transport "
+            "read failures; HTTP and content-integrity failures remain sticky "
+            "blockers"
+        ),
+    )
     parser.add_argument("--max-object-bytes", type=int, default=DEFAULT_MAX_OBJECT_BYTES)
     args = parser.parse_args(argv)
     if args.timeout_seconds <= 0 or args.timeout_seconds > 3600:
@@ -1801,6 +1849,7 @@ def main(argv: list[str] | None = None) -> int:
             checkpoint_every=args.checkpoint_every,
             max_object_bytes=args.max_object_bytes,
             workers=args.workers,
+            retry_transient_failures=args.retry_transient_failures,
         )
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         input_sha = verifier.sha256_file(manifest) if manifest.is_file() else ZERO_SHA256
@@ -1816,6 +1865,7 @@ def main(argv: list[str] | None = None) -> int:
             checkpoint_sha=verifier.sha256_file(checkpoint) if checkpoint.is_file() else ZERO_SHA256,
             row_count=0, already_complete=0, missing_rows=0, target_row_count=0, unique_targets=0,
             resumed_targets=0, resumed_failure_targets=0,
+            retried_transient_failure_targets=0,
             get_count=0, hydrated_rows=0, failures=[failure],
         )
     finally:
