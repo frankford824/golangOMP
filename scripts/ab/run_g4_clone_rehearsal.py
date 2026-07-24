@@ -609,6 +609,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "search": False,
     }
     failed = False
+    clone_db_quiescent = True
     started = time.monotonic()
 
     for step in APPLY_SEQUENCE:
@@ -648,16 +649,41 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             timeout_seconds=args.max_step_seconds,
         )
         records.append(record)
+        if record["exit_code"] == 121:
+            clone_db_quiescent = False
         failed = record["exit_code"] != 0
 
     rollback_specs = (
-        ("workflow_rollback", "workflow"),
         ("search_rollback", "search"),
+        ("workflow_rollback", "workflow"),
         ("bundle_rollback", "bundle"),
         ("recovery_rollback", "recovery"),
     )
+    failed_rollback_prerequisite: str | None = None
     for step, component in rollback_specs:
         phase = "rollback"
+        if not clone_db_quiescent:
+            records.append(
+                skipped_record(
+                    step,
+                    phase,
+                    run_dir,
+                    "blocked because a timed-out process group could not be "
+                    "proven quiescent",
+                )
+            )
+            continue
+        if failed_rollback_prerequisite is not None:
+            records.append(
+                skipped_record(
+                    step,
+                    phase,
+                    run_dir,
+                    "blocked because rollback prerequisite "
+                    f"{failed_rollback_prerequisite} failed",
+                )
+            )
+            continue
         if not attempted[component]:
             records.append(
                 skipped_record(
@@ -688,20 +714,33 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         )
         records.append(record)
         failed = failed or record["exit_code"] != 0
+        if record["exit_code"] == 121:
+            clone_db_quiescent = False
+        if record["exit_code"] != 0:
+            failed_rollback_prerequisite = step
 
     step = "validate_after_rollback_fingerprint"
-    argv, expected = hooks[step]
-    record = execute_step(
-        step=step,
-        phase="rollback",
-        argv=argv,
-        expected_artifacts=expected,
-        run_dir=run_dir,
-        clone_root=clone_root,
-        repo_root=repo_root,
-        env=env,
-        timeout_seconds=args.max_step_seconds,
-    )
+    if clone_db_quiescent:
+        argv, expected = hooks[step]
+        record = execute_step(
+            step=step,
+            phase="rollback",
+            argv=argv,
+            expected_artifacts=expected,
+            run_dir=run_dir,
+            clone_root=clone_root,
+            repo_root=repo_root,
+            env=env,
+            timeout_seconds=args.max_step_seconds,
+        )
+    else:
+        record = skipped_record(
+            step,
+            "rollback",
+            run_dir,
+            "blocked because a timed-out process group could not be proven "
+            "quiescent",
+        )
     records.append(record)
     failed = failed or record["exit_code"] != 0
     total_seconds = time.monotonic() - started

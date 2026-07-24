@@ -64,6 +64,10 @@ for name in (
 mode = sys.argv[1]
 if mode == "workflow":
     args = sys.argv[2:]
+    if "--unsafe-workflow-rollback" in args and "--rollback" in args:
+        raise SystemExit(121)
+    if "--fail-workflow-rollback" in args and "--rollback" in args:
+        raise SystemExit(7)
     if "--report-file" in args:
         report = pathlib.Path(args[args.index("--report-file") + 1])
         report.write_text(json.dumps({"status": "PASS"}) + "\n", encoding="utf-8")
@@ -71,6 +75,8 @@ if mode == "workflow":
 name, output = sys.argv[2], pathlib.Path(sys.argv[3])
 if "--fail" in sys.argv:
     raise SystemExit(7)
+if "--unsafe-timeout" in sys.argv:
+    raise SystemExit(121)
 if name == "capture_baseline_fingerprint":
     tables = {
         "tasks": {
@@ -279,7 +285,16 @@ class RunG4CloneRehearsalTest(unittest.TestCase):
             plan["workflow_base_argv"],
         )
 
-    def make_inputs(self, root, *, fail_hook=None, dsn_host="127.0.0.1"):
+    def make_inputs(
+        self,
+        root,
+        *,
+        fail_hook=None,
+        fail_workflow_rollback=False,
+        unsafe_hook=None,
+        unsafe_workflow_rollback=False,
+        dsn_host="127.0.0.1",
+    ):
         root = pathlib.Path(root)
         clone_root = root / "formal-test-run"
         clone_root.mkdir()
@@ -341,6 +356,8 @@ class RunG4CloneRehearsalTest(unittest.TestCase):
                 argv.append("{search_snapshot_archive}")
             if name == fail_hook:
                 argv.append("--fail")
+            if name == unsafe_hook:
+                argv.append("--unsafe-timeout")
             hooks[name] = {
                 "argv": argv,
                 "expected_artifacts": (
@@ -358,7 +375,17 @@ class RunG4CloneRehearsalTest(unittest.TestCase):
                         sys.executable,
                         str(helper),
                         "workflow",
-                    ],
+                    ]
+                    + (
+                        ["--fail-workflow-rollback"]
+                        if fail_workflow_rollback
+                        else []
+                    )
+                    + (
+                        ["--unsafe-workflow-rollback"]
+                        if unsafe_workflow_rollback
+                        else []
+                    ),
                     "hooks": hooks,
                 }
             )
@@ -482,7 +509,7 @@ class RunG4CloneRehearsalTest(unittest.TestCase):
                 by_name["validate_after_rollback_fingerprint"]["exit_code"], 0
             )
 
-    def test_failed_reindex_runs_exact_search_restore_after_workflow_rollback(self):
+    def test_failed_reindex_restores_search_before_workflow_rollback(self):
         with tempfile.TemporaryDirectory() as raw:
             args = self.make_inputs(raw, fail_hook="search_reindex")
             report = MODULE.run(args)
@@ -494,11 +521,82 @@ class RunG4CloneRehearsalTest(unittest.TestCase):
             self.assertEqual(by_name["search_rollback"]["exit_code"], 0)
             names = [row["step"] for row in report["steps"]]
             self.assertLess(
-                names.index("workflow_rollback"), names.index("search_rollback")
+                names.index("search_rollback"), names.index("workflow_rollback")
             )
             self.assertLess(
-                names.index("search_rollback"), names.index("bundle_rollback")
+                names.index("workflow_rollback"), names.index("bundle_rollback")
             )
+
+    def test_failed_search_rollback_skips_dependent_cleanup(self):
+        with tempfile.TemporaryDirectory() as raw:
+            args = self.make_inputs(raw, fail_hook="search_rollback")
+            report = MODULE.run(args)
+            by_name = {row["step"]: row for row in report["steps"]}
+            self.assertEqual(by_name["search_rollback"]["exit_code"], 7)
+            for step in (
+                "workflow_rollback",
+                "bundle_rollback",
+                "recovery_rollback",
+            ):
+                self.assertEqual(by_name[step]["exit_code"], 125)
+            self.assertEqual(
+                by_name["validate_after_rollback_fingerprint"]["exit_code"], 0
+            )
+
+    def test_failed_workflow_rollback_skips_bundle_and_recovery(self):
+        with tempfile.TemporaryDirectory() as raw:
+            args = self.make_inputs(raw, fail_workflow_rollback=True)
+            report = MODULE.run(args)
+            by_name = {row["step"]: row for row in report["steps"]}
+            self.assertEqual(by_name["search_rollback"]["exit_code"], 0)
+            self.assertEqual(by_name["workflow_rollback"]["exit_code"], 7)
+            self.assertEqual(by_name["bundle_rollback"]["exit_code"], 125)
+            self.assertEqual(by_name["recovery_rollback"]["exit_code"], 125)
+            self.assertEqual(
+                by_name["validate_after_rollback_fingerprint"]["exit_code"], 0
+            )
+
+    def test_failed_bundle_rollback_skips_recovery(self):
+        with tempfile.TemporaryDirectory() as raw:
+            args = self.make_inputs(raw, fail_hook="bundle_rollback")
+            report = MODULE.run(args)
+            by_name = {row["step"]: row for row in report["steps"]}
+            self.assertEqual(by_name["search_rollback"]["exit_code"], 0)
+            self.assertEqual(by_name["workflow_rollback"]["exit_code"], 0)
+            self.assertEqual(by_name["bundle_rollback"]["exit_code"], 7)
+            self.assertEqual(by_name["recovery_rollback"]["exit_code"], 125)
+            self.assertEqual(
+                by_name["validate_after_rollback_fingerprint"]["exit_code"], 0
+            )
+
+    def test_unquiesced_apply_timeout_skips_all_database_cleanup(self):
+        with tempfile.TemporaryDirectory() as raw:
+            args = self.make_inputs(raw, unsafe_hook="search_reindex")
+            report = MODULE.run(args)
+            by_name = {row["step"]: row for row in report["steps"]}
+            self.assertEqual(by_name["search_reindex"]["exit_code"], 121)
+            for step in (
+                "search_rollback",
+                "workflow_rollback",
+                "bundle_rollback",
+                "recovery_rollback",
+                "validate_after_rollback_fingerprint",
+            ):
+                self.assertEqual(by_name[step]["exit_code"], 125)
+
+    def test_unquiesced_rollback_timeout_skips_remaining_database_work(self):
+        with tempfile.TemporaryDirectory() as raw:
+            args = self.make_inputs(raw, unsafe_workflow_rollback=True)
+            report = MODULE.run(args)
+            by_name = {row["step"]: row for row in report["steps"]}
+            self.assertEqual(by_name["search_rollback"]["exit_code"], 0)
+            self.assertEqual(by_name["workflow_rollback"]["exit_code"], 121)
+            for step in (
+                "bundle_rollback",
+                "recovery_rollback",
+                "validate_after_rollback_fingerprint",
+            ):
+                self.assertEqual(by_name[step]["exit_code"], 125)
 
     def test_nonlocal_dsn_is_rejected_before_run_directory_exists(self):
         with tempfile.TemporaryDirectory() as raw:
