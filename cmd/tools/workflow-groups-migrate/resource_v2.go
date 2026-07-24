@@ -460,7 +460,7 @@ func validateTaskStateDecisionPreflight(ctx context.Context, q snapshotQueryer, 
 
 func validateRevisionAssets(ctx context.Context, q snapshotQueryer, mapping resourceMapping, revision resourceRevisionMapping) error {
 	if revision.SourceAssetID != nil {
-		if err := validateMappedAsset(ctx, q, mapping, *revision.SourceAssetID, "source", "", false); err != nil {
+		if err := validateMappedAsset(ctx, q, mapping, *revision.SourceAssetID, "source", "", false, false); err != nil {
 			return err
 		}
 		if err := validateMappedAssetRevisionLifecycle(ctx, q, mapping, revision, *revision.SourceAssetID); err != nil {
@@ -469,7 +469,7 @@ func validateRevisionAssets(ctx context.Context, q snapshotQueryer, mapping reso
 	}
 	if revision.SourceBundle != nil {
 		bundle := revision.SourceBundle
-		if err := validateMappedAsset(ctx, q, mapping, bundle.TaskAssetID, "source", bundle.BundleSHA256, false); err != nil {
+		if err := validateMappedAsset(ctx, q, mapping, bundle.TaskAssetID, "source", bundle.BundleSHA256, false, false); err != nil {
 			return fmt.Errorf("source bundle: %w", err)
 		}
 		if err := validateMappedAssetRevisionLifecycle(ctx, q, mapping, revision, bundle.TaskAssetID); err != nil {
@@ -483,7 +483,7 @@ func validateRevisionAssets(ctx context.Context, q snapshotQueryer, mapping reso
 			return fmt.Errorf("source bundle task asset %d is not a ZIP", bundle.TaskAssetID)
 		}
 		for _, member := range bundle.Members {
-			if err := validateMappedAsset(ctx, q, mapping, member.TaskAssetID, "source", member.SHA256, false); err != nil {
+			if err := validateMappedAsset(ctx, q, mapping, member.TaskAssetID, "source", member.SHA256, false, false); err != nil {
 				return fmt.Errorf("source bundle member %d: %w", member.TaskAssetID, err)
 			}
 			if err := validateMappedAssetRevisionLifecycle(ctx, q, mapping, revision, member.TaskAssetID); err != nil {
@@ -495,7 +495,7 @@ func validateRevisionAssets(ctx context.Context, q snapshotQueryer, mapping reso
 		if !containsInt64(revision.FinalAssetIDs, *revision.SourceAliasFrom) {
 			return fmt.Errorf("source alias origin %d must remain a final asset", *revision.SourceAliasFrom)
 		}
-		if err := validateMappedAsset(ctx, q, mapping, *revision.SourceAliasFrom, "final", "", false); err != nil {
+		if err := validateMappedAsset(ctx, q, mapping, *revision.SourceAliasFrom, "final", "", false, false); err != nil {
 			return fmt.Errorf("source alias origin: %w", err)
 		}
 		if err := validateMappedAssetRevisionLifecycle(ctx, q, mapping, revision, *revision.SourceAliasFrom); err != nil {
@@ -507,7 +507,11 @@ func validateRevisionAssets(ctx context.Context, q snapshotQueryer, mapping reso
 			revision.ReviewPolicyIDs,
 			reviewPolicyLegacyRetouchVisualScopeTask2533,
 		)
-		if err := validateMappedAsset(ctx, q, mapping, assetID, "final", "", allowVisualScope); err != nil {
+		allowUnscopedRetouch := hasBoundPolicyReason(
+			revision,
+			reviewPolicyLegacyRetouchUnscopedAtomicBatch,
+		)
+		if err := validateMappedAsset(ctx, q, mapping, assetID, "final", "", allowVisualScope, allowUnscopedRetouch); err != nil {
 			return err
 		}
 		if err := validateMappedAssetRevisionLifecycle(ctx, q, mapping, revision, assetID); err != nil {
@@ -599,7 +603,7 @@ func revisionContainsAsset(revision resourceRevisionMapping, assetID int64) bool
 		containsInt64(revision.FinalAssetIDs, assetID)
 }
 
-func validateMappedAsset(ctx context.Context, q snapshotQueryer, mapping resourceMapping, assetID int64, role, expectedHash string, allowVisualScope bool) error {
+func validateMappedAsset(ctx context.Context, q snapshotQueryer, mapping resourceMapping, assetID int64, role, expectedHash string, allowVisualScope, allowUnscopedRetouch bool) error {
 	state, err := loadMappedAssetState(ctx, q, assetID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("task asset %d is missing", assetID)
@@ -620,7 +624,7 @@ func validateMappedAsset(ctx context.Context, q snapshotQueryer, mapping resourc
 	if expectedHash != "" && !strings.EqualFold(state.WholeHash, expectedHash) {
 		return fmt.Errorf("task asset %d whole_hash does not match reviewed sha256", assetID)
 	}
-	if err := validateMappedAssetScope(ctx, q, mapping, state, allowVisualScope); err != nil {
+	if err := validateMappedAssetScope(ctx, q, mapping, state, allowVisualScope, allowUnscopedRetouch); err != nil {
 		return fmt.Errorf("task asset %d: %w", assetID, err)
 	}
 	return nil
@@ -642,7 +646,7 @@ func loadMappedAssetState(ctx context.Context, q snapshotQueryer, assetID int64)
 	return state, err
 }
 
-func validateMappedAssetScope(ctx context.Context, q snapshotQueryer, mapping resourceMapping, state mappedAssetState, allowVisualScope bool) error {
+func validateMappedAssetScope(ctx context.Context, q snapshotQueryer, mapping resourceMapping, state mappedAssetState, allowVisualScope, allowUnscopedRetouch bool) error {
 	switch mapping.ScopeKind {
 	case "task":
 		if strings.TrimSpace(state.ScopeSKUCode) != "" || state.RetouchRequirementID.Valid {
@@ -675,6 +679,9 @@ func validateMappedAssetScope(ctx context.Context, q snapshotQueryer, mapping re
 		}
 		if !state.RetouchRequirementID.Valid {
 			if expected, allowed := legacyRetouchVisualExpected(mapping.TaskID, mapping.ScopeKind, mapping.ScopeRefID); allowVisualScope && allowed && state.ID == expected.finalID {
+				return nil
+			}
+			if allowUnscopedRetouch {
 				return nil
 			}
 			var count int

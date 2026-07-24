@@ -732,7 +732,7 @@ func TestRetouchVisualTask2533ScopeExceptionAllowsOnlyExactFinal(t *testing.T) {
 		ScopeRefID: 183,
 	}
 	exact := mappedAssetState{ID: 19789}
-	if err := validateMappedAssetScope(context.Background(), db, mapping, exact, true); err != nil {
+	if err := validateMappedAssetScope(context.Background(), db, mapping, exact, true, false); err != nil {
 		t.Fatalf("exact visually reviewed final scope: %v", err)
 	}
 
@@ -745,8 +745,36 @@ func TestRetouchVisualTask2533ScopeExceptionAllowsOnlyExactFinal(t *testing.T) {
 		mapping,
 		mappedAssetState{ID: 19803},
 		true,
+		false,
 	); err == nil || !strings.Contains(err.Error(), "does not match") {
 		t.Fatalf("unassigned visual asset scope error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRetouchUnscopedAtomicBatchScopeRequiresExplicitOverride(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mapping := resourceMapping{
+		TaskID:     2672,
+		ScopeKind:  "retouch_requirement",
+		ScopeRefID: 209,
+	}
+	state := mappedAssetState{ID: 23109}
+	if err := validateMappedAssetScope(context.Background(), db, mapping, state, false, true); err != nil {
+		t.Fatalf("approved unscoped atomic final: %v", err)
+	}
+
+	mock.ExpectQuery("SELECT COUNT\\(\\*\\),MAX\\(id\\) FROM task_retouch_requirements").
+		WithArgs(int64(2672)).
+		WillReturnRows(sqlmock.NewRows([]string{"count", "max"}).AddRow(2, 210))
+	if err := validateMappedAssetScope(context.Background(), db, mapping, state, false, false); err == nil || !strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("unapproved unscoped atomic final error = %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
@@ -1002,7 +1030,7 @@ func TestValidateMappedAssetRejectsRoleScopeAndLifecycleDrift(t *testing.T) {
 				"deleted_at", "cleaned_at", "access_revoked_at", "object_deleted_at",
 			}).AddRow(12, 7, tt.assetType, tt.scopeSKU, nil, "image/png", strings.Repeat("d", 64), tt.uploadStatus,
 				"not_applicable", nil, nil, nil, nil, nil, nil, nil))
-			err = validateMappedAsset(context.Background(), db, resourceMapping{TaskID: 7, ScopeKind: "task"}, 12, "final", "", false)
+			err = validateMappedAsset(context.Background(), db, resourceMapping{TaskID: 7, ScopeKind: "task"}, 12, "final", "", false, false)
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("validateMappedAsset() error = %v", err)
 			}

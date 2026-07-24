@@ -88,6 +88,15 @@ func TestValidateRevisionEventSemanticsAllowsApprovedLegacyRetouchExceptions(t *
 	if err := validateRevisionEventSemantics(2672, unscoped, submit); err != nil {
 		t.Fatalf("approved unscoped atomic batch: %v", err)
 	}
+	unscoped.ReviewPolicyIDs = nil
+	if err := validateRevisionEventSemantics(2672, unscoped, submit); err == nil {
+		t.Fatal("expected unscoped atomic batch without policy to fail")
+	}
+	unscoped.ReviewPolicyIDs = []string{reviewPolicyLegacyRetouchUnscopedAtomicBatch}
+	unscoped.Reason = "unbound atomic membership"
+	if err := validateRevisionEventSemantics(2672, unscoped, submit); err == nil {
+		t.Fatal("expected unscoped atomic batch without policy reason to fail")
+	}
 
 	partial := resourceRevisionMapping{
 		Status:          "finalized",
@@ -206,5 +215,16 @@ func TestValidateRevisionLifecycleStateAllowsRejectedSnapshotInheritanceIntoReop
 	current.ReviewPolicyIDs = nil
 	if err := validateRevisionLifecycleState(mapping, current, state); err == nil {
 		t.Fatal("expected inherited superseded asset without reopen policy to fail")
+	}
+	current.ReviewPolicyIDs = []string{reviewPolicyReopen}
+	mapping.History[0].Status = "finalized"
+	if err := validateRevisionLifecycleState(mapping, current, state); err == nil {
+		t.Fatal("expected inheritance from a non-rejected revision to fail")
+	}
+	mapping.History[0].Status = "rejected"
+	mapping.History[0].FinalAssetIDs = []int64{23917}
+	mapping.History[0].SourceAliasFrom = nil
+	if err := validateRevisionLifecycleState(mapping, current, state); err == nil {
+		t.Fatal("expected inheritance of a different asset to fail")
 	}
 }
