@@ -22,14 +22,25 @@ import (
 )
 
 const (
-	workflowGroupsSnapshotVersion = 4
-	workflowGroupsToolVersion     = "workflow-groups-migrate/v8.4"
+	workflowGroupsSnapshotVersion = 5
+	workflowGroupsToolVersion     = "workflow-groups-migrate/v8.5"
 	workflowGroupsSchemaVersion   = "124-126"
-	previousSnapshotVersion       = 3
-	previousToolVersion           = "workflow-groups-migrate/v8.3"
+	previousSnapshotVersion       = 4
+	previousToolVersion           = "workflow-groups-migrate/v8.4"
+	olderSnapshotVersion          = 3
+	olderToolVersion              = "workflow-groups-migrate/v8.3"
 	legacySnapshotVersion         = 2
 	legacyToolVersion             = "workflow-groups-migrate/v8.2"
 )
+
+var workflowGroupsAutoIncrementTables = []string{
+	"task_assets",
+	"task_asset_groups",
+	"task_asset_group_revisions",
+	"task_asset_group_revision_items",
+	"task_asset_group_revision_references",
+	"task_planning_sku_revisions",
+}
 
 type options struct {
 	DSN         string
@@ -98,13 +109,14 @@ type planningItemMapping struct {
 }
 
 type taskSnapshot struct {
-	ID               int64    `json:"id"`
-	TaskType         string   `json:"task_type"`
-	TaskStatus       string   `json:"task_status"`
-	WorkflowRevision int64    `json:"workflow_revision"`
-	CurrentHandlerID *int64   `json:"current_handler_id"`
-	EventIDs         []string `json:"event_ids"`
-	ModuleEventIDs   []int64  `json:"module_event_ids,omitempty"`
+	ID               int64     `json:"id"`
+	TaskType         string    `json:"task_type"`
+	TaskStatus       string    `json:"task_status"`
+	WorkflowRevision int64     `json:"workflow_revision"`
+	CurrentHandlerID *int64    `json:"current_handler_id"`
+	UpdatedAt        time.Time `json:"updated_at"`
+	EventIDs         []string  `json:"event_ids"`
+	ModuleEventIDs   []int64   `json:"module_event_ids,omitempty"`
 }
 
 type resourceGroupSnapshot struct {
@@ -115,6 +127,7 @@ type resourceGroupSnapshot struct {
 	LockVersion         int64                      `json:"lock_version"`
 	MigrationIncomplete bool                       `json:"migration_incomplete"`
 	MigrationIssue      string                     `json:"migration_issue"`
+	UpdatedAt           time.Time                  `json:"updated_at"`
 	RevisionIDs         []int64                    `json:"revision_ids"`
 	Revisions           []resourceRevisionSnapshot `json:"revisions,omitempty"`
 }
@@ -173,7 +186,7 @@ type assetBindingSnapshot struct {
 	AccessRevokedReason        string     `json:"access_revoked_reason"`
 	ObjectDeletedAt            *time.Time `json:"object_deleted_at,omitempty"`
 	AssetType                  string     `json:"asset_type,omitempty"`
-	ScopeSKUCode               string     `json:"scope_sku_code,omitempty"`
+	ScopeSKUCode               *string    `json:"scope_sku_code"`
 	RetouchRequirementID       *int64     `json:"retouch_requirement_id,omitempty"`
 	MimeType                   string     `json:"mime_type,omitempty"`
 	WholeHash                  string     `json:"whole_hash,omitempty"`
@@ -182,15 +195,17 @@ type assetBindingSnapshot struct {
 }
 
 type skuOriginSnapshot struct {
-	ID     int64   `json:"id"`
-	TaskID int64   `json:"task_id"`
-	Origin *string `json:"sku_origin"`
+	ID        int64     `json:"id"`
+	TaskID    int64     `json:"task_id"`
+	Origin    *string   `json:"sku_origin"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type planningDetailSnapshot struct {
-	TaskSKUItemID     int64  `json:"task_sku_item_id"`
-	CurrentRevisionID *int64 `json:"current_revision_id"`
-	LockVersion       int64  `json:"lock_version"`
+	TaskSKUItemID     int64     `json:"task_sku_item_id"`
+	CurrentRevisionID *int64    `json:"current_revision_id"`
+	LockVersion       int64     `json:"lock_version"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 type planningImageSnapshot struct {
@@ -220,12 +235,13 @@ type planningCreatedSnapshot struct {
 }
 
 type organizationStateSnapshot struct {
-	SubjectType      string `json:"subject_type"`
-	SubjectID        int64  `json:"subject_id"`
-	LegacyDepartment string `json:"legacy_department"`
-	LegacyTeam       string `json:"legacy_team"`
-	DepartmentID     *int64 `json:"department_id"`
-	TeamID           *int64 `json:"team_id"`
+	SubjectType      string    `json:"subject_type"`
+	SubjectID        int64     `json:"subject_id"`
+	LegacyDepartment string    `json:"legacy_department"`
+	LegacyTeam       string    `json:"legacy_team"`
+	DepartmentID     *int64    `json:"department_id"`
+	TeamID           *int64    `json:"team_id"`
+	UpdatedAt        time.Time `json:"updated_at"`
 }
 
 type accessStateSnapshot struct {
@@ -239,36 +255,44 @@ type assetStorageRefStatusSnapshot struct {
 	Status  string `json:"status"`
 }
 
+type autoIncrementSnapshot struct {
+	Table     string `json:"table"`
+	NextValue int64  `json:"next_value"`
+}
+
 type snapshot struct {
-	Version             int                             `json:"version"`
-	ToolVersion         string                          `json:"tool_version"`
-	SchemaVersion       string                          `json:"schema_version"`
-	Database            string                          `json:"database"`
-	MappingSHA256       string                          `json:"mapping_sha256"`
-	IntegritySHA256     string                          `json:"integrity_sha256"`
-	ApplyState          string                          `json:"apply_state"`
-	CreatedAt           time.Time                       `json:"created_at"`
-	AppliedAt           *time.Time                      `json:"applied_at"`
-	Tasks               []taskSnapshot                  `json:"tasks_before"`
-	AfterTasks          []taskSnapshot                  `json:"tasks_after"`
-	ResourceGroups      []resourceGroupSnapshot         `json:"resource_groups_before"`
-	AfterResourceGroups []resourceGroupSnapshot         `json:"resource_groups_after"`
-	AssetBindings       []assetBindingSnapshot          `json:"asset_bindings_before"`
-	AfterAssetBindings  []assetBindingSnapshot          `json:"asset_bindings_after"`
-	SKUOrigins          []skuOriginSnapshot             `json:"sku_origins_before"`
-	AfterSKUOrigins     []skuOriginSnapshot             `json:"sku_origins_after"`
-	PlanningBefore      []planningStateSnapshot         `json:"planning_before"`
-	PlanningAfter       []planningStateSnapshot         `json:"planning_after"`
-	PlanningCreated     []planningCreatedSnapshot       `json:"planning_created"`
-	OrganizationBefore  []organizationStateSnapshot     `json:"organization_before,omitempty"`
-	OrganizationAfter   []organizationStateSnapshot     `json:"organization_after,omitempty"`
-	AccessBefore        []accessStateSnapshot           `json:"access_before,omitempty"`
-	AccessAfter         []accessStateSnapshot           `json:"access_after,omitempty"`
-	StorageRefsBefore   []assetStorageRefStatusSnapshot `json:"asset_storage_refs_before,omitempty"`
-	StorageRefsAfter    []assetStorageRefStatusSnapshot `json:"asset_storage_refs_after,omitempty"`
-	InsertedGroupIDs    []int64                         `json:"inserted_group_ids"`
-	AppliedRevisionIDs  []int64                         `json:"applied_revision_ids"`
-	InsertedAliasIDs    []int64                         `json:"inserted_alias_asset_ids,omitempty"`
+	Version                       int                             `json:"version"`
+	ToolVersion                   string                          `json:"tool_version"`
+	SchemaVersion                 string                          `json:"schema_version"`
+	Database                      string                          `json:"database"`
+	MappingSHA256                 string                          `json:"mapping_sha256"`
+	IntegritySHA256               string                          `json:"integrity_sha256"`
+	ApplyState                    string                          `json:"apply_state"`
+	CreatedAt                     time.Time                       `json:"created_at"`
+	AppliedAt                     *time.Time                      `json:"applied_at"`
+	Tasks                         []taskSnapshot                  `json:"tasks_before"`
+	AfterTasks                    []taskSnapshot                  `json:"tasks_after"`
+	ResourceGroups                []resourceGroupSnapshot         `json:"resource_groups_before"`
+	AfterResourceGroups           []resourceGroupSnapshot         `json:"resource_groups_after"`
+	AssetBindings                 []assetBindingSnapshot          `json:"asset_bindings_before"`
+	AfterAssetBindings            []assetBindingSnapshot          `json:"asset_bindings_after"`
+	SKUOrigins                    []skuOriginSnapshot             `json:"sku_origins_before"`
+	AfterSKUOrigins               []skuOriginSnapshot             `json:"sku_origins_after"`
+	PlanningBefore                []planningStateSnapshot         `json:"planning_before"`
+	PlanningAfter                 []planningStateSnapshot         `json:"planning_after"`
+	PlanningCreated               []planningCreatedSnapshot       `json:"planning_created"`
+	OrganizationBefore            []organizationStateSnapshot     `json:"organization_before,omitempty"`
+	OrganizationAfter             []organizationStateSnapshot     `json:"organization_after,omitempty"`
+	AccessBefore                  []accessStateSnapshot           `json:"access_before,omitempty"`
+	AccessAfter                   []accessStateSnapshot           `json:"access_after,omitempty"`
+	StorageRefsBefore             []assetStorageRefStatusSnapshot `json:"asset_storage_refs_before,omitempty"`
+	StorageRefsAfter              []assetStorageRefStatusSnapshot `json:"asset_storage_refs_after,omitempty"`
+	AutoIncrementsBefore          []autoIncrementSnapshot         `json:"auto_increments_before"`
+	AutoIncrementsAfter           []autoIncrementSnapshot         `json:"auto_increments_after"`
+	AutoIncrementRecoveryCeilings []autoIncrementSnapshot         `json:"auto_increment_recovery_ceilings"`
+	InsertedGroupIDs              []int64                         `json:"inserted_group_ids"`
+	AppliedRevisionIDs            []int64                         `json:"applied_revision_ids"`
+	InsertedAliasIDs              []int64                         `json:"inserted_alias_asset_ids,omitempty"`
 }
 
 type report struct {
@@ -364,6 +388,14 @@ func run(ctx context.Context, o options) error {
 		return err
 	}
 	defer db.Close()
+	// information_schema.TABLES is cached by MySQL unless the session expiry is
+	// disabled. This tool snapshots and restores AUTO_INCREMENT exactly, so all
+	// queries and transactions must share the configured session.
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+	if _, err := db.ExecContext(ctx, "SET SESSION information_schema_stats_expiry = 0"); err != nil {
+		return fmt.Errorf("configure exact information_schema metadata: %w", err)
+	}
 
 	database, err := currentDatabase(ctx, db)
 	if err != nil {
@@ -1377,14 +1409,14 @@ func loadOrganizationState(ctx context.Context, q snapshotQueryer, subjectType s
 		err = q.QueryRowContext(ctx, `
 			SELECT COALESCE(owner_department,''),
 			       COALESCE(NULLIF(TRIM(owner_org_team),''),NULLIF(TRIM(owner_team),''),''),
-			       owner_department_id,owner_team_id
+			       owner_department_id,owner_team_id,updated_at
 			FROM tasks WHERE id=?`, subjectID).
-			Scan(&item.LegacyDepartment, &item.LegacyTeam, &departmentID, &teamID)
+			Scan(&item.LegacyDepartment, &item.LegacyTeam, &departmentID, &teamID, &item.UpdatedAt)
 	case "user":
 		err = q.QueryRowContext(ctx, `
-			SELECT COALESCE(department,''),COALESCE(team,''),department_id,team_id
+			SELECT COALESCE(department,''),COALESCE(team,''),department_id,team_id,updated_at
 			FROM users WHERE id=?`, subjectID).
-			Scan(&item.LegacyDepartment, &item.LegacyTeam, &departmentID, &teamID)
+			Scan(&item.LegacyDepartment, &item.LegacyTeam, &departmentID, &teamID, &item.UpdatedAt)
 	default:
 		return item, fmt.Errorf("unsupported organization subject_type %q", subjectType)
 	}
@@ -1456,6 +1488,260 @@ func queryIDs(ctx context.Context, db *sql.DB, query string) ([]int64, error) {
 type snapshotQueryer interface {
 	QueryContext(context.Context, string, ...interface{}) (*sql.Rows, error)
 	QueryRowContext(context.Context, string, ...interface{}) *sql.Row
+}
+
+func loadAutoIncrementState(ctx context.Context, q snapshotQueryer, table string) (autoIncrementSnapshot, error) {
+	if !isWorkflowGroupsAutoIncrementTable(table) {
+		return autoIncrementSnapshot{}, fmt.Errorf("unsupported auto-increment table %q", table)
+	}
+	var metadataExpiry, increment, offset int64
+	var next sql.NullInt64
+	if err := q.QueryRowContext(ctx, `
+		SELECT @@SESSION.information_schema_stats_expiry,
+		       @@SESSION.auto_increment_increment,
+		       @@SESSION.auto_increment_offset,
+		       AUTO_INCREMENT
+		FROM information_schema.TABLES
+		WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=?`, table).Scan(&metadataExpiry, &increment, &offset, &next); err != nil {
+		return autoIncrementSnapshot{}, err
+	}
+	if metadataExpiry != 0 {
+		return autoIncrementSnapshot{}, fmt.Errorf("information_schema_stats_expiry=%d; exact auto-increment metadata requires 0", metadataExpiry)
+	}
+	if increment != 1 || offset != 1 {
+		return autoIncrementSnapshot{}, fmt.Errorf("auto-increment session requires increment=1 and offset=1, got increment=%d offset=%d", increment, offset)
+	}
+	if !next.Valid || next.Int64 <= 0 {
+		return autoIncrementSnapshot{}, fmt.Errorf("auto-increment table %s has invalid next value", table)
+	}
+	return autoIncrementSnapshot{Table: table, NextValue: next.Int64}, nil
+}
+
+func captureAutoIncrementStates(ctx context.Context, q snapshotQueryer) ([]autoIncrementSnapshot, error) {
+	states := make([]autoIncrementSnapshot, 0, len(workflowGroupsAutoIncrementTables))
+	for _, table := range workflowGroupsAutoIncrementTables {
+		state, err := loadAutoIncrementState(ctx, q, table)
+		if err != nil {
+			return nil, err
+		}
+		states = append(states, state)
+	}
+	return states, nil
+}
+
+func isWorkflowGroupsAutoIncrementTable(table string) bool {
+	for _, allowed := range workflowGroupsAutoIncrementTables {
+		if table == allowed {
+			return true
+		}
+	}
+	return false
+}
+
+func validateAutoIncrementStates(states []autoIncrementSnapshot) error {
+	if len(states) != len(workflowGroupsAutoIncrementTables) {
+		return fmt.Errorf("auto-increment snapshot table count is %d, expected %d", len(states), len(workflowGroupsAutoIncrementTables))
+	}
+	for index, expected := range workflowGroupsAutoIncrementTables {
+		state := states[index]
+		if state.Table != expected {
+			return fmt.Errorf("auto-increment snapshot table %d is %q, expected %q", index, state.Table, expected)
+		}
+		if state.NextValue <= 0 {
+			return fmt.Errorf("auto-increment snapshot table %s has invalid next value %d", state.Table, state.NextValue)
+		}
+	}
+	return nil
+}
+
+func autoIncrementStatesMatch(ctx context.Context, q snapshotQueryer, expected []autoIncrementSnapshot) (bool, error) {
+	if err := validateAutoIncrementStates(expected); err != nil {
+		return false, err
+	}
+	actual, err := captureAutoIncrementStates(ctx, q)
+	if err != nil {
+		return false, err
+	}
+	return reflect.DeepEqual(actual, expected), nil
+}
+
+func needsPreCommitAutoIncrementRecovery(applyState string, beforeRowsMatch, beforeCountersMatch bool) bool {
+	return (applyState == "prepared" || applyState == "commit_pending") &&
+		beforeRowsMatch &&
+		!beforeCountersMatch
+}
+
+func autoIncrementRecoveryCeilings(before []autoIncrementSnapshot, m mappingFile) ([]autoIncrementSnapshot, error) {
+	if err := validateAutoIncrementStates(before); err != nil {
+		return nil, err
+	}
+	increments := map[string]int64{}
+	for _, resource := range m.Resources {
+		increments["task_asset_groups"]++
+		if resource.isV2() {
+			for _, revision := range resource.History {
+				increments["task_asset_group_revisions"]++
+				increments["task_asset_group_revision_items"] += int64(len(revision.FinalAssetIDs))
+				increments["task_asset_group_revision_references"] += int64(len(revision.ReferenceIDs))
+				if revision.SourceAliasFrom != nil {
+					increments["task_assets"]++
+				}
+			}
+			continue
+		}
+		if resource.TargetStatus != "shell" {
+			increments["task_asset_group_revisions"]++
+			increments["task_asset_group_revision_items"] += int64(len(resource.FinalAssetIDs))
+			increments["task_asset_group_revision_references"] += int64(len(resource.ReferenceIDs))
+		}
+	}
+	for _, planning := range m.Planning {
+		increments["task_planning_sku_revisions"] += int64(len(planning.Items))
+	}
+	ceilings := make([]autoIncrementSnapshot, 0, len(before))
+	for _, state := range before {
+		increment := increments[state.Table]
+		if increment < 0 || state.NextValue > int64(^uint64(0)>>1)-increment {
+			return nil, fmt.Errorf("auto-increment recovery ceiling overflow for %s", state.Table)
+		}
+		ceilings = append(ceilings, autoIncrementSnapshot{
+			Table:     state.Table,
+			NextValue: state.NextValue + increment,
+		})
+	}
+	return ceilings, nil
+}
+
+func restoreAutoIncrementStatesWithinRecoveryCeilings(
+	ctx context.Context,
+	db *sql.DB,
+	before []autoIncrementSnapshot,
+	ceilings []autoIncrementSnapshot,
+) error {
+	if err := validateAutoIncrementStates(before); err != nil {
+		return err
+	}
+	if err := validateAutoIncrementStates(ceilings); err != nil {
+		return err
+	}
+	for index, target := range before {
+		ceiling := ceilings[index]
+		if target.Table != ceiling.Table || ceiling.NextValue < target.NextValue {
+			return fmt.Errorf("invalid auto-increment recovery ceiling for %s", target.Table)
+		}
+		current, err := loadAutoIncrementState(ctx, db, target.Table)
+		if err != nil {
+			return err
+		}
+		if current.NextValue == target.NextValue {
+			continue
+		}
+		if current.NextValue < target.NextValue || current.NextValue > ceiling.NextValue {
+			return v1migrate.NewHardAbort(
+				v1migrate.ExitCodeHardAbort,
+				"pre-commit auto-increment recovery refused for %s: current=%d before=%d ceiling=%d",
+				target.Table,
+				current.NextValue,
+				target.NextValue,
+				ceiling.NextValue,
+			)
+		}
+		var maxID int64
+		query := fmt.Sprintf("SELECT COALESCE(MAX(id),0) FROM `%s`", target.Table)
+		if err := db.QueryRowContext(ctx, query).Scan(&maxID); err != nil {
+			return err
+		}
+		if maxID >= target.NextValue {
+			return v1migrate.NewHardAbort(
+				v1migrate.ExitCodeHardAbort,
+				"pre-commit auto-increment recovery refused for %s: max id %d reaches target next value %d",
+				target.Table,
+				maxID,
+				target.NextValue,
+			)
+		}
+		statement := fmt.Sprintf("ALTER TABLE `%s` AUTO_INCREMENT = %d", target.Table, target.NextValue)
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			return err
+		}
+	}
+	matches, err := autoIncrementStatesMatch(ctx, db, before)
+	if err != nil {
+		return err
+	}
+	if !matches {
+		return v1migrate.NewHardAbort(v1migrate.ExitCodeHardAbort, "pre-commit auto-increment recovery verification failed")
+	}
+	return nil
+}
+
+func restoreAutoIncrementStates(
+	ctx context.Context,
+	db *sql.DB,
+	before []autoIncrementSnapshot,
+	after []autoIncrementSnapshot,
+) error {
+	if err := validateAutoIncrementStates(before); err != nil {
+		return err
+	}
+	if err := validateAutoIncrementStates(after); err != nil {
+		return err
+	}
+	for index, target := range before {
+		recordedAfter := after[index]
+		if target.Table != recordedAfter.Table {
+			return fmt.Errorf("auto-increment before/after table order drifted")
+		}
+		current, err := loadAutoIncrementState(ctx, db, target.Table)
+		if err != nil {
+			return err
+		}
+		if current.NextValue == target.NextValue {
+			continue
+		}
+		if current.NextValue != recordedAfter.NextValue {
+			return v1migrate.NewHardAbort(
+				v1migrate.ExitCodeHardAbort,
+				"auto-increment rollback refused for %s: current=%d before=%d after=%d",
+				target.Table,
+				current.NextValue,
+				target.NextValue,
+				recordedAfter.NextValue,
+			)
+		}
+		var maxID int64
+		query := fmt.Sprintf("SELECT COALESCE(MAX(id),0) FROM `%s`", target.Table)
+		if err := db.QueryRowContext(ctx, query).Scan(&maxID); err != nil {
+			return err
+		}
+		if maxID >= target.NextValue {
+			return v1migrate.NewHardAbort(
+				v1migrate.ExitCodeHardAbort,
+				"auto-increment rollback refused for %s: max id %d reaches target next value %d",
+				target.Table,
+				maxID,
+				target.NextValue,
+			)
+		}
+		statement := fmt.Sprintf("ALTER TABLE `%s` AUTO_INCREMENT = %d", target.Table, target.NextValue)
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			return err
+		}
+		restored, err := loadAutoIncrementState(ctx, db, target.Table)
+		if err != nil {
+			return err
+		}
+		if restored.NextValue != target.NextValue {
+			return v1migrate.NewHardAbort(
+				v1migrate.ExitCodeHardAbort,
+				"auto-increment rollback verification failed for %s: got %d expected %d",
+				target.Table,
+				restored.NextValue,
+				target.NextValue,
+			)
+		}
+	}
+	return nil
 }
 
 func queryInt64IDs(ctx context.Context, q snapshotQueryer, query string, args ...interface{}) ([]int64, error) {
@@ -1686,14 +1972,14 @@ func lockCutoverTargets(ctx context.Context, tx *sql.Tx, m mappingFile) error {
 func captureSKUOrigins(ctx context.Context, q snapshotQueryer, taskIDs []int64) ([]skuOriginSnapshot, error) {
 	items := []skuOriginSnapshot{}
 	for _, taskID := range taskIDs {
-		rows, err := q.QueryContext(ctx, `SELECT id,task_id,sku_origin FROM task_sku_items WHERE task_id=? ORDER BY id`, taskID)
+		rows, err := q.QueryContext(ctx, `SELECT id,task_id,sku_origin,updated_at FROM task_sku_items WHERE task_id=? ORDER BY id`, taskID)
 		if err != nil {
 			return nil, err
 		}
 		for rows.Next() {
 			var item skuOriginSnapshot
 			var origin sql.NullString
-			if err := rows.Scan(&item.ID, &item.TaskID, &origin); err != nil {
+			if err := rows.Scan(&item.ID, &item.TaskID, &origin, &item.UpdatedAt); err != nil {
 				rows.Close()
 				return nil, err
 			}
@@ -1724,7 +2010,7 @@ func capturePlanningStates(ctx context.Context, q snapshotQueryer, taskIDs []int
 			state.SettingsExists = true
 		}
 		rows, err := q.QueryContext(ctx, `
-			SELECT d.task_sku_item_id,d.current_revision_id,d.lock_version
+			SELECT d.task_sku_item_id,d.current_revision_id,d.lock_version,d.updated_at
 			FROM task_planning_sku_details d
 			JOIN task_sku_items si ON si.id=d.task_sku_item_id
 			WHERE si.task_id=? ORDER BY d.task_sku_item_id`, taskID)
@@ -1734,7 +2020,7 @@ func capturePlanningStates(ctx context.Context, q snapshotQueryer, taskIDs []int
 		for rows.Next() {
 			var detail planningDetailSnapshot
 			var revisionID sql.NullInt64
-			if err := rows.Scan(&detail.TaskSKUItemID, &revisionID, &detail.LockVersion); err != nil {
+			if err := rows.Scan(&detail.TaskSKUItemID, &revisionID, &detail.LockVersion, &detail.UpdatedAt); err != nil {
 				rows.Close()
 				return nil, err
 			}
@@ -1775,8 +2061,8 @@ func capturePlanningStates(ctx context.Context, q snapshotQueryer, taskIDs []int
 func loadTaskSnapshot(ctx context.Context, q snapshotQueryer, id int64) (taskSnapshot, error) {
 	var item taskSnapshot
 	var handlerID sql.NullInt64
-	if err := q.QueryRowContext(ctx, `SELECT id,task_type,task_status,workflow_revision,current_handler_id FROM tasks WHERE id=?`, id).
-		Scan(&item.ID, &item.TaskType, &item.TaskStatus, &item.WorkflowRevision, &handlerID); err != nil {
+	if err := q.QueryRowContext(ctx, `SELECT id,task_type,task_status,workflow_revision,current_handler_id,updated_at FROM tasks WHERE id=?`, id).
+		Scan(&item.ID, &item.TaskType, &item.TaskStatus, &item.WorkflowRevision, &handlerID, &item.UpdatedAt); err != nil {
 		return item, err
 	}
 	if handlerID.Valid {
@@ -1800,8 +2086,8 @@ func loadTaskSnapshot(ctx context.Context, q snapshotQueryer, id int64) (taskSna
 func loadResourceGroupSnapshot(ctx context.Context, q snapshotQueryer, id int64) (resourceGroupSnapshot, error) {
 	var item resourceGroupSnapshot
 	var workingID, finalizedID sql.NullInt64
-	if err := q.QueryRowContext(ctx, `SELECT id,task_id,working_revision_id,finalized_revision_id,lock_version,migration_incomplete,migration_issue FROM task_asset_groups WHERE id=?`, id).
-		Scan(&item.ID, &item.TaskID, &workingID, &finalizedID, &item.LockVersion, &item.MigrationIncomplete, &item.MigrationIssue); err != nil {
+	if err := q.QueryRowContext(ctx, `SELECT id,task_id,working_revision_id,finalized_revision_id,lock_version,migration_incomplete,migration_issue,updated_at FROM task_asset_groups WHERE id=?`, id).
+		Scan(&item.ID, &item.TaskID, &workingID, &finalizedID, &item.LockVersion, &item.MigrationIncomplete, &item.MigrationIssue, &item.UpdatedAt); err != nil {
 		return item, err
 	}
 	if workingID.Valid {
@@ -1843,19 +2129,19 @@ func captureResourceGroupsForTasks(ctx context.Context, q snapshotQueryer, taskI
 func loadAssetBindingSnapshot(ctx context.Context, q snapshotQueryer, id int64) (assetBindingSnapshot, error) {
 	var item assetBindingSnapshot
 	var boundGroupID, stagedSKUItemID, stagedRetouchID, stagedBy sql.NullInt64
-	var boundRole, stagedRole, uploadSessionID sql.NullString
+	var boundRole, stagedRole, uploadSessionID, scopeSKUCode sql.NullString
 	var retouchRequirementID sql.NullInt64
 	var stagedExpiresAt, revokedAt, objectDeletedAt, deletedAt, cleanedAt sql.NullTime
 	if err := q.QueryRowContext(ctx, `
 		SELECT id,task_id,binding_state,bound_group_id,bound_role,
 		       staged_task_sku_item_id,staged_retouch_requirement_id,staged_role,staged_by,upload_session_id,staged_expires_at,
 		       access_revoked_at,access_revoked_reason,object_deleted_at,
-		       asset_type,COALESCE(scope_sku_code,''),retouch_requirement_id,COALESCE(mime_type,''),COALESCE(whole_hash,''),deleted_at,cleaned_at
+		       asset_type,scope_sku_code,retouch_requirement_id,COALESCE(mime_type,''),COALESCE(whole_hash,''),deleted_at,cleaned_at
 		FROM task_assets WHERE id=?`, id).
 		Scan(&item.ID, &item.TaskID, &item.BindingState, &boundGroupID, &boundRole,
 			&stagedSKUItemID, &stagedRetouchID, &stagedRole, &stagedBy, &uploadSessionID, &stagedExpiresAt,
 			&revokedAt, &item.AccessRevokedReason, &objectDeletedAt,
-			&item.AssetType, &item.ScopeSKUCode, &retouchRequirementID, &item.MimeType, &item.WholeHash, &deletedAt, &cleanedAt); err != nil {
+			&item.AssetType, &scopeSKUCode, &retouchRequirementID, &item.MimeType, &item.WholeHash, &deletedAt, &cleanedAt); err != nil {
 		return item, err
 	}
 	item.BoundGroupID = nullInt64Pointer(boundGroupID)
@@ -1868,6 +2154,7 @@ func loadAssetBindingSnapshot(ctx context.Context, q snapshotQueryer, id int64) 
 	item.StagedExpiresAt = nullTimePointer(stagedExpiresAt)
 	item.AccessRevokedAt = nullTimePointer(revokedAt)
 	item.ObjectDeletedAt = nullTimePointer(objectDeletedAt)
+	item.ScopeSKUCode = nullStringPointer(scopeSKUCode)
 	item.RetouchRequirementID = nullInt64Pointer(retouchRequirementID)
 	item.DeletedAt = nullTimePointer(deletedAt)
 	item.CleanedAt = nullTimePointer(cleanedAt)
@@ -1975,6 +2262,10 @@ func populateAfterSnapshot(ctx context.Context, tx *sql.Tx, s *snapshot, m mappi
 		return err
 	}
 	s.StorageRefsAfter, err = captureAssetStorageRefStates(ctx, tx, m.AssetRecoveries)
+	if err != nil {
+		return err
+	}
+	s.AutoIncrementsAfter, err = captureAutoIncrementStates(ctx, tx)
 	if err != nil {
 		return err
 	}
@@ -2717,6 +3008,13 @@ func recoverExistingApply(ctx context.Context, db *sql.DB, database, path string
 	if err != nil {
 		return false, err
 	}
+	if s.Version != workflowGroupsSnapshotVersion {
+		return false, v1migrate.NewHardAbort(
+			v1migrate.ExitCodeHardAbort,
+			"apply recovery refused: snapshot v%d predates lossless timestamp and nullable-scope recovery; use a fresh snapshot directory",
+			s.Version,
+		)
+	}
 	tx, err := db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
 		return false, err
@@ -2729,23 +3027,48 @@ func recoverExistingApply(ctx context.Context, db *sql.DB, database, path string
 	if err != nil {
 		return false, err
 	}
+	autoBeforeMatches, err := autoIncrementStatesMatch(ctx, tx, s.AutoIncrementsBefore)
+	if err != nil {
+		return false, err
+	}
 	afterMatches := false
+	autoAfterMatches := false
 	if s.AppliedAt != nil && s.AfterTasks != nil {
 		afterMatches, err = snapshotStateMatches(ctx, tx, s, true)
 		if err != nil {
 			return false, err
 		}
+		autoAfterMatches, err = autoIncrementStatesMatch(ctx, tx, s.AutoIncrementsAfter)
+		if err != nil {
+			return false, err
+		}
 	}
 	switch {
-	case s.ApplyState == "applied" && afterMatches:
+	case s.ApplyState == "applied" && afterMatches && autoAfterMatches:
 		return false, tx.Commit()
-	case s.ApplyState == "commit_pending" && afterMatches:
+	case s.ApplyState == "commit_pending" && afterMatches && autoAfterMatches:
 		if err := tx.Commit(); err != nil {
 			return false, err
 		}
 		s.ApplyState = "applied"
 		return false, writeSnapshot(path, s)
-	case (s.ApplyState == "prepared" || s.ApplyState == "commit_pending" || s.ApplyState == "rolled_back") && beforeMatches:
+	case needsPreCommitAutoIncrementRecovery(s.ApplyState, beforeMatches, autoBeforeMatches):
+		if err := tx.Commit(); err != nil {
+			return false, err
+		}
+		if err := restoreAutoIncrementStatesWithinRecoveryCeilings(
+			ctx,
+			db,
+			s.AutoIncrementsBefore,
+			s.AutoIncrementRecoveryCeilings,
+		); err != nil {
+			return false, err
+		}
+		if err := removeSnapshot(path); err != nil {
+			return false, err
+		}
+		return true, nil
+	case (s.ApplyState == "prepared" || s.ApplyState == "commit_pending" || s.ApplyState == "rolled_back") && beforeMatches && autoBeforeMatches:
 		if err := tx.Commit(); err != nil {
 			return false, err
 		}
@@ -2753,6 +3076,8 @@ func recoverExistingApply(ctx context.Context, db *sql.DB, database, path string
 			return false, err
 		}
 		return true, nil
+	case s.ApplyState == "rollback_dml_pending" || s.ApplyState == "rollback_autoincrement_pending":
+		return false, v1migrate.NewHardAbort(v1migrate.ExitCodeHardAbort, "apply recovery refused: rollback state %q must be completed with --rollback", s.ApplyState)
 	default:
 		return false, v1migrate.NewHardAbort(v1migrate.ExitCodeHardAbort, "apply recovery refused: manifest state %q does not match the current database before/after state", s.ApplyState)
 	}
@@ -2772,7 +3097,7 @@ func captureSnapshot(ctx context.Context, q snapshotQueryer, database string, m 
 	for _, recovery := range m.AssetRecoveries {
 		ids[recovery.TaskID] = struct{}{}
 	}
-	rows, err := q.QueryContext(ctx, `SELECT id, task_type, task_status, workflow_revision, current_handler_id FROM tasks WHERE task_status IN ('PendingAuditA','PendingAuditB','RejectedByAuditA','RejectedByAuditB','PendingCustomizationReview','PendingCustomizationProduction','PendingEffectReview','PendingEffectRevision','PendingProductionTransfer','PendingWarehouseQC','PendingWarehouseReceive','PendingClose','PendingOutsource','Outsourcing','PendingOutsourceReview') OR task_type='purchase_task' ORDER BY id`)
+	rows, err := q.QueryContext(ctx, `SELECT id, task_type, task_status, workflow_revision, current_handler_id, updated_at FROM tasks WHERE task_status IN ('PendingAuditA','PendingAuditB','RejectedByAuditA','RejectedByAuditB','PendingCustomizationReview','PendingCustomizationProduction','PendingEffectReview','PendingEffectRevision','PendingProductionTransfer','PendingWarehouseQC','PendingWarehouseReceive','PendingClose','PendingOutsource','Outsourcing','PendingOutsourceReview') OR task_type='purchase_task' ORDER BY id`)
 	if err != nil {
 		return snapshot{}, err
 	}
@@ -2784,7 +3109,7 @@ func captureSnapshot(ctx context.Context, q snapshotQueryer, database string, m 
 	for rows.Next() {
 		var t taskSnapshot
 		var handlerID sql.NullInt64
-		if err := rows.Scan(&t.ID, &t.TaskType, &t.TaskStatus, &t.WorkflowRevision, &handlerID); err != nil {
+		if err := rows.Scan(&t.ID, &t.TaskType, &t.TaskStatus, &t.WorkflowRevision, &handlerID, &t.UpdatedAt); err != nil {
 			return s, err
 		}
 		if handlerID.Valid {
@@ -2800,7 +3125,7 @@ func captureSnapshot(ctx context.Context, q snapshotQueryer, database string, m 
 	for id := range ids {
 		var t taskSnapshot
 		var handlerID sql.NullInt64
-		if err := q.QueryRowContext(ctx, `SELECT id, task_type, task_status, workflow_revision, current_handler_id FROM tasks WHERE id=?`, id).Scan(&t.ID, &t.TaskType, &t.TaskStatus, &t.WorkflowRevision, &handlerID); err != nil {
+		if err := q.QueryRowContext(ctx, `SELECT id, task_type, task_status, workflow_revision, current_handler_id, updated_at FROM tasks WHERE id=?`, id).Scan(&t.ID, &t.TaskType, &t.TaskStatus, &t.WorkflowRevision, &handlerID, &t.UpdatedAt); err != nil {
 			return s, err
 		}
 		if handlerID.Valid {
@@ -2856,6 +3181,14 @@ func captureSnapshot(ctx context.Context, q snapshotQueryer, database string, m 
 		return s, err
 	}
 	s.StorageRefsBefore, err = captureAssetStorageRefStates(ctx, q, m.AssetRecoveries)
+	if err != nil {
+		return s, err
+	}
+	s.AutoIncrementsBefore, err = captureAutoIncrementStates(ctx, q)
+	if err != nil {
+		return s, err
+	}
+	s.AutoIncrementRecoveryCeilings, err = autoIncrementRecoveryCeilings(s.AutoIncrementsBefore, m)
 	if err != nil {
 		return s, err
 	}
@@ -3395,6 +3728,13 @@ func rollback(ctx context.Context, db *sql.DB, database string, o options, m map
 	if err != nil {
 		return err
 	}
+	if s.Version != workflowGroupsSnapshotVersion {
+		return v1migrate.NewHardAbort(
+			v1migrate.ExitCodeHardAbort,
+			"rollback refused: snapshot v%d predates lossless timestamp and nullable-scope recovery; rerun with the matching historical tool or prepare a reviewed recovery",
+			s.Version,
+		)
+	}
 	tx, err := db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
 		return err
@@ -3407,31 +3747,78 @@ func rollback(ctx context.Context, db *sql.DB, database string, o options, m map
 	if err != nil {
 		return err
 	}
+	autoBeforeMatches, err := autoIncrementStatesMatch(ctx, tx, s.AutoIncrementsBefore)
+	if err != nil {
+		return err
+	}
 	afterMatches := false
+	autoAfterMatches := false
 	if s.AppliedAt != nil && s.AfterTasks != nil {
 		afterMatches, err = snapshotStateMatches(ctx, tx, s, true)
 		if err != nil {
 			return err
 		}
+		autoAfterMatches, err = autoIncrementStatesMatch(ctx, tx, s.AutoIncrementsAfter)
+		if err != nil {
+			return err
+		}
 	}
 	if s.ApplyState == "rolled_back" {
-		if !beforeMatches {
+		if !beforeMatches || !autoBeforeMatches {
 			return v1migrate.NewHardAbort(v1migrate.ExitCodeHardAbort, "rollback refused: manifest is rolled_back but database no longer matches the before state")
 		}
 		return tx.Commit()
+	}
+	if s.ApplyState == "rollback_autoincrement_pending" {
+		if !beforeMatches {
+			return v1migrate.NewHardAbort(v1migrate.ExitCodeHardAbort, "rollback refused: auto-increment recovery requires the exact before row state")
+		}
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+		return completeAutoIncrementRollback(ctx, db, path, &s)
+	}
+	if s.ApplyState == "rollback_dml_pending" && beforeMatches {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+		s.ApplyState = "rollback_autoincrement_pending"
+		if err := writeSnapshot(path, s); err != nil {
+			return err
+		}
+		return completeAutoIncrementRollback(ctx, db, path, &s)
 	}
 	if !afterMatches {
 		if (s.ApplyState == "prepared" || s.ApplyState == "commit_pending") && beforeMatches {
 			if err := tx.Commit(); err != nil {
 				return err
 			}
+			if needsPreCommitAutoIncrementRecovery(s.ApplyState, beforeMatches, autoBeforeMatches) {
+				if err := restoreAutoIncrementStatesWithinRecoveryCeilings(
+					ctx,
+					db,
+					s.AutoIncrementsBefore,
+					s.AutoIncrementRecoveryCeilings,
+				); err != nil {
+					return err
+				}
+			}
 			s.ApplyState = "rolled_back"
 			return writeSnapshot(path, s)
 		}
 		return v1migrate.NewHardAbort(v1migrate.ExitCodeHardAbort, "rollback refused: current database differs from both the recorded before and apply-after states; preserve forward writes and investigate")
 	}
-	if s.ApplyState != "applied" && s.ApplyState != "commit_pending" {
+	if !autoAfterMatches {
+		return v1migrate.NewHardAbort(v1migrate.ExitCodeHardAbort, "rollback refused: auto-increment state differs from the recorded apply-after state")
+	}
+	if s.ApplyState != "applied" && s.ApplyState != "commit_pending" && s.ApplyState != "rollback_dml_pending" {
 		return v1migrate.NewHardAbort(v1migrate.ExitCodeHardAbort, "rollback refused: unsupported manifest apply_state %q", s.ApplyState)
+	}
+	if s.ApplyState != "rollback_dml_pending" {
+		s.ApplyState = "rollback_dml_pending"
+		if err := writeSnapshot(path, s); err != nil {
+			return err
+		}
 	}
 	for _, created := range s.PlanningCreated {
 		beforeDetails := map[int64]planningDetailSnapshot{}
@@ -3449,7 +3836,7 @@ func rollback(ctx context.Context, db *sql.DB, database string, o options, m map
 			}
 		}
 		for detailID, detail := range beforeDetails {
-			if _, err = tx.ExecContext(ctx, `UPDATE task_planning_sku_details SET current_revision_id=?,lock_version=? WHERE task_sku_item_id=?`, nullableInt64Pointer(detail.CurrentRevisionID), detail.LockVersion, detailID); err != nil {
+			if _, err = tx.ExecContext(ctx, `UPDATE task_planning_sku_details SET current_revision_id=?,lock_version=?,updated_at=? WHERE task_sku_item_id=?`, nullableInt64Pointer(detail.CurrentRevisionID), detail.LockVersion, detail.UpdatedAt, detailID); err != nil {
 				return err
 			}
 		}
@@ -3475,7 +3862,7 @@ func rollback(ctx context.Context, db *sql.DB, database string, o options, m map
 		}
 	}
 	for _, origin := range s.SKUOrigins {
-		if _, err = tx.ExecContext(ctx, `UPDATE task_sku_items SET sku_origin=? WHERE id=?`, nullableStringPointer(origin.Origin), origin.ID); err != nil {
+		if _, err = tx.ExecContext(ctx, `UPDATE task_sku_items SET sku_origin=?,updated_at=? WHERE id=?`, nullableStringPointer(origin.Origin), origin.UpdatedAt, origin.ID); err != nil {
 			return err
 		}
 	}
@@ -3487,19 +3874,19 @@ func rollback(ctx context.Context, db *sql.DB, database string, o options, m map
 			UPDATE task_assets
 			SET binding_state=?,bound_group_id=?,bound_role=?,
 			    staged_task_sku_item_id=?,staged_retouch_requirement_id=?,staged_role=?,staged_by=?,upload_session_id=?,staged_expires_at=?,
-			    access_revoked_at=?,access_revoked_reason=?,object_deleted_at=?,scope_sku_code=NULLIF(?,''),retouch_requirement_id=?
+			    access_revoked_at=?,access_revoked_reason=?,object_deleted_at=?,scope_sku_code=?,retouch_requirement_id=?
 			WHERE id=?`,
 			asset.BindingState, nullableInt64Pointer(asset.BoundGroupID), nullableStringPointer(asset.BoundRole),
 			nullableInt64Pointer(asset.StagedTaskSKUItemID), nullableInt64Pointer(asset.StagedRetouchRequirementID), nullableStringPointer(asset.StagedRole), nullableInt64Pointer(asset.StagedBy), nullableStringPointer(asset.UploadSessionID), nullableTimePointer(asset.StagedExpiresAt),
-			nullableTimePointer(asset.AccessRevokedAt), asset.AccessRevokedReason, nullableTimePointer(asset.ObjectDeletedAt), asset.ScopeSKUCode, nullableInt64Pointer(asset.RetouchRequirementID), asset.ID); err != nil {
+			nullableTimePointer(asset.AccessRevokedAt), asset.AccessRevokedReason, nullableTimePointer(asset.ObjectDeletedAt), nullableStringPointer(asset.ScopeSKUCode), nullableInt64Pointer(asset.RetouchRequirementID), asset.ID); err != nil {
 			return err
 		}
 	}
 	for _, group := range s.ResourceGroups {
 		if _, err = tx.ExecContext(ctx, `
 			UPDATE task_asset_groups
-			SET working_revision_id=?,finalized_revision_id=?,lock_version=?,migration_incomplete=?,migration_issue=?
-			WHERE id=?`, nullableInt64Pointer(group.WorkingRevisionID), nullableInt64Pointer(group.FinalizedRevisionID), group.LockVersion, group.MigrationIncomplete, group.MigrationIssue, group.ID); err != nil {
+			SET working_revision_id=?,finalized_revision_id=?,lock_version=?,migration_incomplete=?,migration_issue=?,updated_at=?
+			WHERE id=?`, nullableInt64Pointer(group.WorkingRevisionID), nullableInt64Pointer(group.FinalizedRevisionID), group.LockVersion, group.MigrationIncomplete, group.MigrationIssue, group.UpdatedAt, group.ID); err != nil {
 			return err
 		}
 	}
@@ -3530,18 +3917,18 @@ func rollback(ctx context.Context, db *sql.DB, database string, o options, m map
 		}
 	}
 	for _, t := range s.Tasks {
-		if _, err = tx.ExecContext(ctx, `UPDATE tasks SET task_type=?,task_status=?,workflow_revision=?,current_handler_id=? WHERE id=?`, t.TaskType, t.TaskStatus, t.WorkflowRevision, nullableInt64Pointer(t.CurrentHandlerID), t.ID); err != nil {
+		if _, err = tx.ExecContext(ctx, `UPDATE tasks SET task_type=?,task_status=?,workflow_revision=?,current_handler_id=?,updated_at=? WHERE id=?`, t.TaskType, t.TaskStatus, t.WorkflowRevision, nullableInt64Pointer(t.CurrentHandlerID), t.UpdatedAt, t.ID); err != nil {
 			return err
 		}
 	}
 	for _, item := range s.OrganizationBefore {
 		switch item.SubjectType {
 		case "task":
-			_, err = tx.ExecContext(ctx, `UPDATE tasks SET owner_department_id=?,owner_team_id=? WHERE id=?`,
-				nullableInt64Pointer(item.DepartmentID), nullableInt64Pointer(item.TeamID), item.SubjectID)
+			_, err = tx.ExecContext(ctx, `UPDATE tasks SET owner_department_id=?,owner_team_id=?,updated_at=? WHERE id=?`,
+				nullableInt64Pointer(item.DepartmentID), nullableInt64Pointer(item.TeamID), item.UpdatedAt, item.SubjectID)
 		case "user":
-			_, err = tx.ExecContext(ctx, `UPDATE users SET department_id=?,team_id=? WHERE id=?`,
-				nullableInt64Pointer(item.DepartmentID), nullableInt64Pointer(item.TeamID), item.SubjectID)
+			_, err = tx.ExecContext(ctx, `UPDATE users SET department_id=?,team_id=?,updated_at=? WHERE id=?`,
+				nullableInt64Pointer(item.DepartmentID), nullableInt64Pointer(item.TeamID), item.UpdatedAt, item.SubjectID)
 		default:
 			err = fmt.Errorf("rollback unsupported organization subject_type %q", item.SubjectType)
 		}
@@ -3559,8 +3946,41 @@ func rollback(ctx context.Context, db *sql.DB, database string, o options, m map
 	if err := tx.Commit(); err != nil {
 		return err
 	}
+	s.ApplyState = "rollback_autoincrement_pending"
+	if err := writeSnapshot(path, s); err != nil {
+		return err
+	}
+	return completeAutoIncrementRollback(ctx, db, path, &s)
+}
+
+func completeAutoIncrementRollback(ctx context.Context, db *sql.DB, path string, s *snapshot) error {
+	if err := restoreAutoIncrementStates(ctx, db, s.AutoIncrementsBefore, s.AutoIncrementsAfter); err != nil {
+		return err
+	}
+	tx, err := db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := lockRollbackTargets(ctx, tx, *s); err != nil {
+		return err
+	}
+	rowsMatch, err := snapshotStateMatches(ctx, tx, *s, false)
+	if err != nil {
+		return err
+	}
+	autoIncrementsMatch, err := autoIncrementStatesMatch(ctx, tx, s.AutoIncrementsBefore)
+	if err != nil {
+		return err
+	}
+	if !rowsMatch || !autoIncrementsMatch {
+		return v1migrate.NewHardAbort(v1migrate.ExitCodeHardAbort, "rollback verification failed after auto-increment recovery")
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
 	s.ApplyState = "rolled_back"
-	return writeSnapshot(path, s)
+	return writeSnapshot(path, *s)
 }
 
 func lockRollbackTargets(ctx context.Context, tx *sql.Tx, s snapshot) error {
@@ -3863,7 +4283,7 @@ func snapshotStateMatches(ctx context.Context, q snapshotQueryer, s snapshot, af
 func clearAssetValidationState(items []assetBindingSnapshot) {
 	for i := range items {
 		items[i].AssetType = ""
-		items[i].ScopeSKUCode = ""
+		items[i].ScopeSKUCode = nil
 		items[i].RetouchRequirementID = nil
 		items[i].MimeType = ""
 		items[i].WholeHash = ""
@@ -3953,15 +4373,33 @@ func readSnapshot(path, database string, m mappingFile) (snapshot, error) {
 	if err != nil {
 		return snapshot{}, err
 	}
+	var header struct {
+		Version       int    `json:"version"`
+		ToolVersion   string `json:"tool_version"`
+		SchemaVersion string `json:"schema_version"`
+	}
+	if err := json.Unmarshal(raw, &header); err != nil {
+		return snapshot{}, err
+	}
+	currentSnapshot := header.Version == workflowGroupsSnapshotVersion &&
+		header.ToolVersion == workflowGroupsToolVersion &&
+		header.SchemaVersion == workflowGroupsSchemaVersion
+	knownHistoricalSnapshot := (header.Version == previousSnapshotVersion && header.ToolVersion == previousToolVersion) ||
+		(header.Version == olderSnapshotVersion && header.ToolVersion == olderToolVersion) ||
+		(header.Version == legacySnapshotVersion && header.ToolVersion == legacyToolVersion)
+	if knownHistoricalSnapshot && header.SchemaVersion == workflowGroupsSchemaVersion {
+		return snapshot{}, v1migrate.NewHardAbort(
+			v1migrate.ExitCodeHardAbort,
+			"snapshot v%d predates lossless v5 rollback; use the matching historical tool or prepare a reviewed recovery",
+			header.Version,
+		)
+	}
+	if !currentSnapshot {
+		return snapshot{}, v1migrate.NewHardAbort(v1migrate.ExitCodeHardAbort, "snapshot tool/schema version mismatch")
+	}
 	var s snapshot
 	if err := json.Unmarshal(raw, &s); err != nil {
 		return snapshot{}, err
-	}
-	currentSnapshot := s.Version == workflowGroupsSnapshotVersion && s.ToolVersion == workflowGroupsToolVersion && s.SchemaVersion == workflowGroupsSchemaVersion
-	previousSnapshot := s.Version == previousSnapshotVersion && s.ToolVersion == previousToolVersion && s.SchemaVersion == workflowGroupsSchemaVersion
-	legacySnapshot := s.Version == legacySnapshotVersion && s.ToolVersion == legacyToolVersion && s.SchemaVersion == workflowGroupsSchemaVersion
-	if !currentSnapshot && !previousSnapshot && !legacySnapshot {
-		return snapshot{}, v1migrate.NewHardAbort(v1migrate.ExitCodeHardAbort, "snapshot tool/schema version mismatch")
 	}
 	if s.Database != database {
 		return snapshot{}, v1migrate.NewHardAbort(v1migrate.ExitCodeHardAbort, "snapshot database %q does not match %q", s.Database, database)

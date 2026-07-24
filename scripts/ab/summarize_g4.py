@@ -166,6 +166,7 @@ def validate_fingerprint(
                 "content_sha256",
                 "schema_sha256",
                 "content_fingerprint_algorithm",
+                "auto_increment",
             }
             and not isinstance(value["row_count"], bool)
             and isinstance(value["row_count"], int)
@@ -174,6 +175,14 @@ def validate_fingerprint(
             and SHA256.fullmatch(str(value["schema_sha256"] or ""))
             and value["content_fingerprint_algorithm"]
             == ROW_FINGERPRINT_ALGORITHM
+            and (
+                value["auto_increment"] is None
+                or (
+                    not isinstance(value["auto_increment"], bool)
+                    and isinstance(value["auto_increment"], int)
+                    and value["auto_increment"] > 0
+                )
+            )
             for name, value in (
                 baseline_tables.items()
                 if isinstance(baseline_tables, dict)

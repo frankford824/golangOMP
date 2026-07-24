@@ -259,6 +259,7 @@ def _schema_query(only_tables: Iterable[str] | None) -> str:
             "'" + name + "'" for name in names
         ) + ")"
     return f"""
+SET SESSION information_schema_stats_expiry=0;
 SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ;
 SET SESSION TRANSACTION READ ONLY;
 START TRANSACTION WITH CONSISTENT SNAPSHOT;
@@ -365,8 +366,13 @@ def validate_search_schema(
                 )
 
 
-def _capture_sql(schema: dict[str, list[dict[str, Any]]]) -> str:
+def _capture_sql(
+    schema: dict[str, list[dict[str, Any]]],
+    *,
+    include_table_metadata: bool = False,
+) -> str:
     statements = [
+        "SET SESSION information_schema_stats_expiry=0",
         "SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ",
         "SET SESSION TRANSACTION READ ONLY",
         "START TRANSACTION WITH CONSISTENT SNAPSHOT",
@@ -392,6 +398,16 @@ def _capture_sql(schema: dict[str, list[dict[str, Any]]]) -> str:
                 + " WHERE table_schema=DATABASE()"
                 + f" AND table_name='{table}'"
                 + f" AND ordinal_position={int(row['ordinal'])}"
+            )
+        if include_table_metadata:
+            statements.append(
+                "SELECT JSON_OBJECT("
+                + "'kind','table_metadata',"
+                + f"'table','{table}',"
+                + "'auto_increment',AUTO_INCREMENT)"
+                + " FROM information_schema.tables"
+                + " WHERE table_schema=DATABASE()"
+                + f" AND table_name='{table}'"
             )
         cells = ",".join(
             "IF("
@@ -584,6 +600,7 @@ def capture_fingerprint(
     captured_schema: dict[str, list[dict[str, Any]]] = {
         table: [] for table in schema
     }
+    captured_table_metadata: dict[str, int | None] = {}
     summaries: dict[str, dict[str, Any]] = {}
     current_table: str | None = None
     spool: _RowDigestSpool | None = None
@@ -602,11 +619,19 @@ def capture_fingerprint(
             summary["schema_sha256"] = sha256_bytes(
                 canonical_bytes(captured_schema[current_table])
             )
+            if current_table not in captured_table_metadata:
+                raise RuntimeError(
+                    f"capture omitted table metadata for {current_table}"
+                )
+            summary["auto_increment"] = captured_table_metadata[current_table]
             summaries[current_table] = summary
             spool = None
 
         for line_number, raw in enumerate(
-            connection.iter_output_lines(_capture_sql(schema)), 1
+            connection.iter_output_lines(
+                _capture_sql(schema, include_table_metadata=True)
+            ),
+            1,
         ):
             if not raw.strip():
                 continue
@@ -634,6 +659,24 @@ def capture_fingerprint(
                         merge_fan_in=merge_fan_in,
                     )
                 captured_schema[table].append(record)
+                continue
+            if kind == "table_metadata":
+                if table != current_table or spool is None:
+                    raise RuntimeError(
+                        "capture returned table metadata outside its boundary"
+                    )
+                value = record.get("auto_increment")
+                if value is not None and (
+                    not isinstance(value, int) or value <= 0
+                ):
+                    raise RuntimeError(
+                        f"{table} returned an invalid auto_increment"
+                    )
+                if table in captured_table_metadata:
+                    raise RuntimeError(
+                        f"{table} returned duplicate table metadata"
+                    )
+                captured_table_metadata[table] = value
                 continue
             if kind != "row" or table != current_table or spool is None:
                 raise RuntimeError(

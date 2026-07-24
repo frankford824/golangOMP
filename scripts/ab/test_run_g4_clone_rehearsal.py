@@ -38,6 +38,29 @@ if os.environ.get("AB_CONFIRMED_CLONE_SIDE") != "B":
     raise SystemExit(31)
 if not os.environ.get("MYSQL_DSN", "").find("@tcp(127.0.0.1:") >= 0:
     raise SystemExit(32)
+auth_path = pathlib.Path(os.environ.get("AUTH_SETTINGS_FILE", ""))
+frontend_access_path = pathlib.Path(
+    os.environ.get("FRONTEND_ACCESS_SETTINGS_FILE", "")
+)
+if (
+    not auth_path.is_file()
+    or auth_path.name != "auth_identity.clone-b.json"
+    or not frontend_access_path.is_file()
+    or frontend_access_path.name != "frontend_access.json"
+):
+    raise SystemExit(33)
+for name in (
+    "AUTH_ALLOW_EMBEDDED_SETTINGS",
+    "AUTH_ALLOW_INSECURE_BOOTSTRAP_CREDENTIALS",
+    "WEB_PUSH_ENABLED",
+    "AI_AGENT_ENABLED",
+    "AI_CHAT_ENABLED",
+    "AI_EMBEDDING_ENABLED",
+    "VECTOR_SEARCH_ENABLED",
+    "AI_RETRIEVAL_WORKER_ENABLED",
+):
+    if os.environ.get(name) != "false":
+        raise SystemExit(34)
 mode = sys.argv[1]
 if mode == "workflow":
     args = sys.argv[2:]
@@ -54,6 +77,7 @@ if name == "capture_baseline_fingerprint":
             "row_count": 2,
             "content_sha256": "4" * 64,
             "schema_sha256": "5" * 64,
+            "auto_increment": 3,
             "content_fingerprint_algorithm": (
                 "sha256(sorted(sha256(canonical-json-cells-v1)),"
                 "duplicates-preserved)-v1"
@@ -259,6 +283,26 @@ class RunG4CloneRehearsalTest(unittest.TestCase):
         root = pathlib.Path(root)
         clone_root = root / "formal-test-run"
         clone_root.mkdir()
+        auth_settings = clone_root / "auth_identity.clone-b.seed.json"
+        auth_settings.write_text(
+            json.dumps(
+                {
+                    "departments": MODULE.CLONE_B_AUTH_DEPARTMENTS,
+                    "department_teams": MODULE.CLONE_B_AUTH_DEPARTMENT_TEAMS,
+                    "phone_unique": True,
+                    "department_admin_keys": {},
+                    "super_admins": [],
+                    "unassigned_pool_enabled": True,
+                    "configured_user_assignments": [],
+                    "task_team_mappings": {},
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        auth_settings.chmod(0o440)
         helper = root / "helper.py"
         helper.write_text(HELPER, encoding="utf-8")
         mapping = root / "mapping.json"
@@ -329,6 +373,7 @@ class RunG4CloneRehearsalTest(unittest.TestCase):
             dsn_file=dsn,
             mapping_file=mapping,
             command_plan=plan,
+            auth_settings_file=auth_settings.resolve(),
             execute_clone_writes=True,
             max_step_seconds=30.0,
             max_phase_seconds=600.0,
@@ -369,11 +414,57 @@ class RunG4CloneRehearsalTest(unittest.TestCase):
             )
             self.assertEqual(evidence["status"], "PASS")
             self.assertEqual(evidence["database_host_class"], "local")
+            self.assertEqual(
+                evidence["auth_settings_sha256"],
+                report["input_sha256"]["auth_settings"],
+            )
+            self.assertEqual(
+                evidence["frontend_access_settings_sha256"],
+                report["input_sha256"]["frontend_access_settings"],
+            )
+            self.assertEqual(
+                report["auth_settings_attestation"]["super_admin_count"], 0
+            )
+            self.assertTrue(report["auth_settings_attestation"]["read_only"])
             self.assertGreater(len(evidence["raw_evidence"]), 22)
             self.assertNotIn(
                 "secret",
                 (args.run_dir / "commands.jsonl").read_text(encoding="utf-8"),
             )
+
+    def test_auth_settings_must_match_frozen_zero_secret_policy(self):
+        with tempfile.TemporaryDirectory() as raw:
+            args = self.make_inputs(raw)
+            payload = json.loads(
+                args.auth_settings_file.read_text(encoding="utf-8")
+            )
+            payload["super_admins"] = ["unexpected"]
+            args.auth_settings_file.chmod(0o640)
+            args.auth_settings_file.write_text(
+                json.dumps(payload, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+            args.auth_settings_file.chmod(0o440)
+            with self.assertRaisesRegex(ValueError, "zero-secret"):
+                MODULE.run(args)
+            self.assertFalse(args.run_dir.exists())
+
+    def test_auth_settings_rejects_numeric_boolean_confusion(self):
+        with tempfile.TemporaryDirectory() as raw:
+            args = self.make_inputs(raw)
+            payload = json.loads(
+                args.auth_settings_file.read_text(encoding="utf-8")
+            )
+            payload["phone_unique"] = 1
+            args.auth_settings_file.chmod(0o640)
+            args.auth_settings_file.write_text(
+                json.dumps(payload, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+            args.auth_settings_file.chmod(0o440)
+            with self.assertRaisesRegex(ValueError, "zero-secret"):
+                MODULE.run(args)
+            self.assertFalse(args.run_dir.exists())
 
     def test_failed_apply_runs_reverse_cleanup_and_blocks(self):
         with tempfile.TemporaryDirectory() as raw:

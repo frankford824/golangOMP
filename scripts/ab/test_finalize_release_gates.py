@@ -121,11 +121,30 @@ class FinalizeReleaseGatesTest(unittest.TestCase):
                 g4_command_plan.write_bytes(b"command plan\n")
                 g4_mapping = run_dir / "g4-mapping.json"
                 g4_mapping.write_bytes(b"mapping\n")
+                g4_inputs = run_dir / "g4-run" / "inputs"
+                g4_inputs.mkdir(parents=True)
+                g4_auth_settings = (
+                    g4_inputs / "auth_identity.clone-b.json"
+                )
+                g4_auth_settings.write_text(
+                    json.dumps(
+                        MODULE.clone_b_auth_policy.POLICY,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+                g4_auth_settings.chmod(0o440)
+                g4_frontend_access = g4_inputs / "frontend_access.json"
+                g4_frontend_access.write_bytes(b'{"roles":[]}\n')
+                g4_frontend_access.chmod(0o440)
                 baseline_tables = {
                     "tasks": {
                         "row_count": 2,
                         "content_sha256": "7" * 64,
                         "schema_sha256": "8" * 64,
+                        "auto_increment": 3,
                         "content_fingerprint_algorithm": (
                             "sha256(sorted(sha256(canonical-json-cells-v1)),"
                             "duplicates-preserved)-v1"
@@ -297,6 +316,21 @@ class FinalizeReleaseGatesTest(unittest.TestCase):
                         "input_sha256": {
                             "command_plan": MODULE.sha256_file(g4_command_plan),
                             "mapping": MODULE.sha256_file(g4_mapping),
+                            "auth_settings": MODULE.sha256_file(g4_auth_settings),
+                            "frontend_access_settings": MODULE.sha256_file(
+                                g4_frontend_access
+                            ),
+                        },
+                        "auth_settings_attestation": {
+                            "frozen_input_path": g4_auth_settings.relative_to(
+                                run_dir
+                            ).as_posix(),
+                            "byte_count": g4_auth_settings.stat().st_size,
+                            "sha256": MODULE.sha256_file(g4_auth_settings),
+                            "read_only": True,
+                            "super_admin_count": 0,
+                            "department_admin_key_count": 0,
+                            "configured_user_assignment_count": 0,
                         },
                         "evidence_inventory": [
                             {
@@ -310,6 +344,20 @@ class FinalizeReleaseGatesTest(unittest.TestCase):
                             {
                                 "path": g4_mapping.name,
                                 "sha256": MODULE.sha256_file(g4_mapping),
+                            },
+                            {
+                                "path": g4_auth_settings.relative_to(
+                                    run_dir
+                                ).as_posix(),
+                                "sha256": MODULE.sha256_file(g4_auth_settings),
+                            },
+                            {
+                                "path": g4_frontend_access.relative_to(
+                                    run_dir
+                                ).as_posix(),
+                                "sha256": MODULE.sha256_file(
+                                    g4_frontend_access
+                                ),
                             },
                             {
                                 "path": baseline_path.name,
@@ -615,6 +663,70 @@ class FinalizeReleaseGatesTest(unittest.TestCase):
             self.assertTrue(
                 any("ordered step sequence differs" in item for item in violations),
                 violations,
+            )
+
+    def test_g4_requires_hash_bound_zero_secret_clone_b_auth_settings(self):
+        with tempfile.TemporaryDirectory() as raw:
+            run_dir, index_path = self.make_run(raw)
+            index = json.loads(index_path.read_text(encoding="utf-8"))
+            g4_path = run_dir / index["gates"]["G4"]["path"]
+            g4 = json.loads(g4_path.read_text(encoding="utf-8"))
+            del g4["input_sha256"]["auth_settings"]
+            g4["auth_settings_attestation"]["super_admin_count"] = 1
+            index["gates"]["G4"]["sha256"] = write_json(g4_path, g4)
+            index["signatures"] = []
+            write_json(index_path, index)
+
+            _, report = MODULE.validate_index(run_dir, index_path)
+
+            self.assertEqual(report["decision"], "NO-GO")
+            violations = report["gates"]["G4"]["violations"]
+            self.assertIn("G4 input hash binding is incomplete", violations)
+            self.assertIn(
+                "G4 Clone B auth settings attestation is invalid",
+                violations,
+            )
+
+    def test_g4_rejects_hash_consistent_nonzero_auth_payload(self):
+        with tempfile.TemporaryDirectory() as raw:
+            run_dir, index_path = self.make_run(raw)
+            index = json.loads(index_path.read_text(encoding="utf-8"))
+            g4_path = run_dir / index["gates"]["G4"]["path"]
+            g4 = json.loads(g4_path.read_text(encoding="utf-8"))
+            auth_relative = g4["auth_settings_attestation"][
+                "frozen_input_path"
+            ]
+            auth_path = run_dir / auth_relative
+            payload = json.loads(auth_path.read_text(encoding="utf-8"))
+            payload["super_admins"] = [{"username": "forged"}]
+            auth_path.chmod(0o640)
+            auth_path.write_text(
+                json.dumps(payload, ensure_ascii=False, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
+            auth_path.chmod(0o440)
+            forged_sha = MODULE.sha256_file(auth_path)
+            g4["input_sha256"]["auth_settings"] = forged_sha
+            g4["auth_settings_attestation"]["sha256"] = forged_sha
+            g4["auth_settings_attestation"]["byte_count"] = (
+                auth_path.stat().st_size
+            )
+            for row in g4["evidence_inventory"]:
+                if row["path"] == auth_relative:
+                    row["sha256"] = forged_sha
+            index["gates"]["G4"]["sha256"] = write_json(g4_path, g4)
+            index["signatures"] = []
+            write_json(index_path, index)
+
+            _, report = MODULE.validate_index(run_dir, index_path)
+
+            self.assertEqual(report["decision"], "NO-GO")
+            self.assertTrue(
+                any(
+                    "auth settings evidence is invalid" in item
+                    for item in report["gates"]["G4"]["violations"]
+                ),
+                report["gates"]["G4"]["violations"],
             )
 
     def test_g4_raw_evidence_hash_drift_is_blocked(self):

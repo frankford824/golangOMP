@@ -18,6 +18,11 @@ import pathlib
 import re
 from typing import Any
 
+try:
+    from scripts.ab import clone_b_auth_policy
+except ModuleNotFoundError:
+    import clone_b_auth_policy
+
 
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 G4_ROW_FINGERPRINT_ALGORITHM = (
@@ -692,6 +697,7 @@ def validate_g4(
                 "content_sha256",
                 "schema_sha256",
                 "content_fingerprint_algorithm",
+                "auto_increment",
             }
             and not isinstance(value["row_count"], bool)
             and isinstance(value["row_count"], int)
@@ -700,6 +706,14 @@ def validate_g4(
             and SHA256.fullmatch(str(value["schema_sha256"] or ""))
             and value["content_fingerprint_algorithm"]
             == G4_ROW_FINGERPRINT_ALGORITHM
+            and (
+                value["auto_increment"] is None
+                or (
+                    not isinstance(value["auto_increment"], bool)
+                    and isinstance(value["auto_increment"], int)
+                    and value["auto_increment"] > 0
+                )
+            )
             for name, value in (
                 baseline_tables.items()
                 if isinstance(baseline_tables, dict)
@@ -821,12 +835,44 @@ def validate_g4(
     if not isinstance(inputs, dict) or set(inputs) != {
         "command_plan",
         "mapping",
+        "auth_settings",
+        "frontend_access_settings",
     }:
         violations.append("G4 input hash binding is incomplete")
     else:
         for name, value in inputs.items():
             if not SHA256.fullmatch(str(value or "")):
                 violations.append(f"G4 {name} input hash is invalid")
+    auth_attestation = payload.get("auth_settings_attestation")
+    expected_auth_attestation_fields = {
+        "frozen_input_path",
+        "byte_count",
+        "sha256",
+        "read_only",
+        "super_admin_count",
+        "department_admin_key_count",
+        "configured_user_assignment_count",
+    }
+    if (
+        not isinstance(auth_attestation, dict)
+        or set(auth_attestation) != expected_auth_attestation_fields
+    ):
+        violations.append("G4 Clone B auth settings attestation is incomplete")
+    elif (
+        auth_attestation.get("sha256")
+        != (inputs or {}).get("auth_settings")
+        or auth_attestation.get("read_only") is not True
+        or type(auth_attestation.get("byte_count")) is not int
+        or auth_attestation.get("byte_count", 0) <= 0
+        or type(auth_attestation.get("super_admin_count")) is not int
+        or auth_attestation.get("super_admin_count") != 0
+        or type(auth_attestation.get("department_admin_key_count")) is not int
+        or auth_attestation.get("department_admin_key_count") != 0
+        or type(auth_attestation.get("configured_user_assignment_count"))
+        is not int
+        or auth_attestation.get("configured_user_assignment_count") != 0
+    ):
+        violations.append("G4 Clone B auth settings attestation is invalid")
     inventory = payload.get("evidence_inventory")
     if not isinstance(inventory, list) or not inventory:
         violations.append("G4 evidence inventory is missing")
@@ -835,6 +881,7 @@ def validate_g4(
     else:
         seen_paths: set[str] = set()
         inventory_hashes: set[str] = set()
+        inventory_hashes_by_path: dict[str, str] = {}
         inventory_paths: dict[str, pathlib.Path] = {}
         for index, record in enumerate(inventory):
             try:
@@ -856,6 +903,7 @@ def validate_g4(
                         f"hash mismatch expected={expected} actual={actual}"
                     )
                 inventory_hashes.add(actual)
+                inventory_hashes_by_path[relative] = actual
                 basename = pathlib.PurePosixPath(relative).name
                 if basename in inventory_paths:
                     raise ValueError(
@@ -866,6 +914,48 @@ def validate_g4(
                 )
             except (OSError, ValueError) as exc:
                 violations.append(f"G4 evidence[{index}] is invalid: {exc}")
+        if isinstance(auth_attestation, dict):
+            try:
+                auth_relative = str(auth_attestation["frozen_input_path"])
+                pure_auth_relative = pathlib.PurePosixPath(auth_relative)
+                if (
+                    pure_auth_relative.is_absolute()
+                    or ".." in pure_auth_relative.parts
+                    or pure_auth_relative.parts[-2:]
+                    != ("inputs", "auth_identity.clone-b.json")
+                ):
+                    raise ValueError("frozen auth path is not run-scoped")
+                frozen_auth_path = safe_artifact_path(run_dir, auth_relative)
+                if frozen_auth_path.is_symlink() or not frozen_auth_path.is_file():
+                    raise ValueError("frozen auth file is not a regular file")
+                if frozen_auth_path.stat().st_mode & 0o222:
+                    raise ValueError("frozen auth file is writable")
+                raw_auth = frozen_auth_path.read_bytes()
+                clone_b_auth_policy.validate(raw_auth)
+                actual_auth_hash = hashlib.sha256(raw_auth).hexdigest()
+                if (
+                    len(raw_auth) != auth_attestation["byte_count"]
+                    or actual_auth_hash != auth_attestation["sha256"]
+                    or inventory_hashes_by_path.get(auth_relative)
+                    != actual_auth_hash
+                ):
+                    raise ValueError(
+                        "frozen auth bytes, attestation, and inventory differ"
+                    )
+                frontend_relative = (
+                    pure_auth_relative.parent / "frontend_access.json"
+                ).as_posix()
+                if (
+                    inventory_hashes_by_path.get(frontend_relative)
+                    != (inputs or {}).get("frontend_access_settings")
+                ):
+                    raise ValueError(
+                        "frozen frontend access config is not exactly inventory-bound"
+                    )
+            except (KeyError, OSError, TypeError, ValueError) as exc:
+                violations.append(
+                    f"G4 Clone B auth settings evidence is invalid: {exc}"
+                )
         required_hashes: dict[str, Any] = {
             "baseline_fingerprint": payload.get(
                 "baseline_fingerprint_artifact_sha256"
@@ -878,6 +968,7 @@ def validate_g4(
                 "search_snapshot_archive_sha256"
             ),
             "search_rollback": payload.get("search_rollback_sha256"),
+            "auth_settings": (inputs or {}).get("auth_settings"),
         }
         if isinstance(inputs, dict):
             required_hashes.update(inputs)

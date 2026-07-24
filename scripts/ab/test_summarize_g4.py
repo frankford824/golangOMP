@@ -58,6 +58,7 @@ class SummarizeG4Test(unittest.TestCase):
                 "row_count": 2,
                 "content_sha256": "4" * 64,
                 "schema_sha256": "5" * 64,
+                "auto_increment": 3,
                 "content_fingerprint_algorithm": (
                     MODULE.ROW_FINGERPRINT_ALGORITHM
                 ),

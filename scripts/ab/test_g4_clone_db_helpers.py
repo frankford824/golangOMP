@@ -36,10 +36,13 @@ def schema_for(columns_by_table):
 
 
 class FakeConnection:
-    def __init__(self, schema, rows):
+    def __init__(self, schema, rows, auto_increments=None):
         self.database = "ab_formal_b_ui"
         self.schema = schema
         self.rows = rows
+        self.auto_increments = auto_increments or {
+            table: None for table in schema
+        }
         self.executed = []
 
     def execute(self, sql):
@@ -51,6 +54,13 @@ class FakeConnection:
         for table in sorted(self.schema):
             for column in self.schema[table]:
                 yield db.canonical_bytes(column)
+            yield db.canonical_bytes(
+                {
+                    "kind": "table_metadata",
+                    "table": table,
+                    "auto_increment": self.auto_increments[table],
+                }
+            )
             for cells in self.rows[table]:
                 yield db.canonical_bytes(
                     {"kind": "row", "table": table, "cells": cells}
@@ -113,6 +123,13 @@ class G4CloneDBHelpersTest(unittest.TestCase):
         self.assertNotIn("asset_search_documents", sql)
 
     def test_full_fingerprint_is_order_independent_and_preserves_duplicates(self):
+        self.assertIn(
+            "SET SESSION information_schema_stats_expiry=0;",
+            db._capture_sql(
+                schema_for({"probe": ("id",)}),
+                include_table_metadata=True,
+            ),
+        )
         schema = schema_for(
             {
                 "blob_without_primary_key": ("payload", "label"),
@@ -153,6 +170,7 @@ class G4CloneDBHelpersTest(unittest.TestCase):
             first["blob_without_primary_key"]["row_count"], 4
         )
         self.assertEqual(first["empty_table"]["row_count"], 0)
+        self.assertIsNone(first["empty_table"]["auto_increment"])
         self.assertEqual(
             first["blob_without_primary_key"][
                 "content_fingerprint_algorithm"

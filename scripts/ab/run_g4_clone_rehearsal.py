@@ -24,8 +24,9 @@ import time
 from typing import Any
 
 try:
-    from scripts.ab import summarize_g4
+    from scripts.ab import clone_b_auth_policy, summarize_g4
 except ModuleNotFoundError:
+    import clone_b_auth_policy
     import summarize_g4
 
 
@@ -68,6 +69,34 @@ APPLY_SEQUENCE = (
     "search_snapshot",
     "search_reindex",
 )
+
+CLONE_B_AUTH_DEPARTMENTS = clone_b_auth_policy.POLICY["departments"]
+CLONE_B_AUTH_DEPARTMENT_TEAMS = clone_b_auth_policy.POLICY["department_teams"]
+
+
+def validate_clone_b_auth_settings(
+    path: pathlib.Path, clone_root: pathlib.Path
+) -> tuple[bytes, dict[str, Any]]:
+    if not path.is_absolute() or path.is_symlink() or not path.is_file():
+        raise ValueError(
+            "auth-settings-file must be an existing absolute regular non-symlink file"
+        )
+    resolved = path.resolve()
+    resolved_root = clone_root.resolve()
+    if resolved_root not in resolved.parents:
+        raise ValueError("auth-settings-file must be contained by clone-root")
+    if resolved.stat().st_mode & 0o222:
+        raise ValueError("auth-settings-file must be read-only")
+    raw = resolved.read_bytes()
+    clone_b_auth_policy.validate(raw)
+    return raw, {
+        "byte_count": len(raw),
+        "sha256": hashlib.sha256(raw).hexdigest(),
+        "read_only": True,
+        "super_admin_count": 0,
+        "department_admin_key_count": 0,
+        "configured_user_assignment_count": 0,
+    }
 
 
 def canonical_bytes(value: Any) -> bytes:
@@ -441,6 +470,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         raise ValueError("clone-root must be an existing absolute non-symlink directory")
     if clone_root.name != args.run_id:
         raise ValueError("clone-root directory name must equal run-id")
+    auth_settings_raw, auth_settings_attestation = (
+        validate_clone_b_auth_settings(args.auth_settings_file, clone_root)
+    )
     run_parent = run_dir.parent.resolve()
     if run_parent != clone_root.resolve() and clone_root.resolve() not in run_parent.parents:
         raise ValueError("run-dir must be a new descendant of clone-root")
@@ -448,6 +480,14 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     if mapping.is_symlink() or not mapping.is_file():
         raise ValueError("mapping-file must be an existing non-symlink file")
     repo_root = pathlib.Path(__file__).resolve().parents[2]
+    frontend_access_settings = repo_root / "config" / "frontend_access.json"
+    if (
+        frontend_access_settings.is_symlink()
+        or not frontend_access_settings.is_file()
+    ):
+        raise ValueError(
+            "tracked config/frontend_access.json must be an existing non-symlink file"
+        )
     plan = validate_plan(args.command_plan)
     dsn = parse_local_clone_dsn(args.dsn_file, args.confirm_clone_database)
 
@@ -531,11 +571,36 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         args.command_plan.read_bytes()
     )
     (run_dir / "inputs" / "mapping.json").write_bytes(mapping.read_bytes())
+    frozen_auth_settings = run_dir / "inputs" / "auth_identity.clone-b.json"
+    frozen_auth_settings.write_bytes(auth_settings_raw)
+    frozen_auth_settings.chmod(0o440)
+    frozen_frontend_access_settings = (
+        run_dir / "inputs" / "frontend_access.json"
+    )
+    frozen_frontend_access_settings.write_bytes(
+        frontend_access_settings.read_bytes()
+    )
+    frozen_frontend_access_settings.chmod(0o440)
 
     env = dict(os.environ)
     env["MYSQL_DSN"] = dsn
     env["AB_CONFIRMED_CLONE_DATABASE"] = args.confirm_clone_database
     env["AB_CONFIRMED_CLONE_SIDE"] = "B"
+    env["AUTH_SETTINGS_FILE"] = str(frozen_auth_settings.resolve())
+    env["FRONTEND_ACCESS_SETTINGS_FILE"] = str(
+        frozen_frontend_access_settings.resolve()
+    )
+    env["AUTH_ALLOW_EMBEDDED_SETTINGS"] = "false"
+    env["AUTH_ALLOW_INSECURE_BOOTSTRAP_CREDENTIALS"] = "false"
+    for feature_flag in (
+        "WEB_PUSH_ENABLED",
+        "AI_AGENT_ENABLED",
+        "AI_CHAT_ENABLED",
+        "AI_EMBEDDING_ENABLED",
+        "VECTOR_SEARCH_ENABLED",
+        "AI_RETRIEVAL_WORKER_ENABLED",
+    ):
+        env[feature_flag] = "false"
     records: list[dict[str, Any]] = []
     attempted = {
         "recovery": False,
@@ -663,6 +728,16 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     report["input_sha256"] = {
         "command_plan": sha256_file(args.command_plan),
         "mapping": sha256_file(mapping),
+        "auth_settings": sha256_file(frozen_auth_settings),
+        "frontend_access_settings": sha256_file(
+            frozen_frontend_access_settings
+        ),
+    }
+    report["auth_settings_attestation"] = {
+        **auth_settings_attestation,
+        "frozen_input_path": frozen_auth_settings.resolve()
+        .relative_to(clone_root.resolve())
+        .as_posix(),
     }
     report["evidence_inventory"] = [
         {
@@ -681,6 +756,10 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "status": report["status"],
         "command_plan_sha256": sha256_file(args.command_plan),
         "mapping_sha256": sha256_file(mapping),
+        "auth_settings_sha256": sha256_file(frozen_auth_settings),
+        "frontend_access_settings_sha256": sha256_file(
+            frozen_frontend_access_settings
+        ),
         "steps_sha256": sha256_file(steps_path),
         "g4_report_sha256": sha256_file(run_dir / "g4-report.json"),
         "commands_sha256": sha256_file(run_dir / "commands.jsonl"),
@@ -706,6 +785,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--dsn-file", type=pathlib.Path, required=True)
     parser.add_argument("--mapping-file", type=pathlib.Path, required=True)
     parser.add_argument("--command-plan", type=pathlib.Path, required=True)
+    parser.add_argument("--auth-settings-file", type=pathlib.Path, required=True)
     parser.add_argument("--execute-clone-writes", action="store_true")
     parser.add_argument("--max-step-seconds", type=float, default=600)
     parser.add_argument("--max-phase-seconds", type=float, default=600)

@@ -105,6 +105,7 @@ func TestApplyOrganizationMappingsUsesReviewedCASAndIsIdempotent(t *testing.T) {
 	user.TargetDepartmentID = 14
 	user.TargetTeamID = 31
 	user.ManifestRowHash, _ = organizationManifestRowHash(user)
+	snapshotAt := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
 
 	mock.ExpectBegin()
 	tx, err := db.BeginTx(context.Background(), &sql.TxOptions{})
@@ -127,16 +128,16 @@ func TestApplyOrganizationMappingsUsesReviewedCASAndIsIdempotent(t *testing.T) {
 	mock.ExpectQuery("SELECT COALESCE\\(owner_department").
 		WithArgs(int64(7)).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"owner_department", "owner_team", "owner_department_id", "owner_team_id",
-		}).AddRow("运营部", "拼多多池州组", 6, 30))
+			"owner_department", "owner_team", "owner_department_id", "owner_team_id", "updated_at",
+		}).AddRow("运营部", "拼多多池州组", 6, 30, snapshotAt))
 	mock.ExpectExec("UPDATE users").
 		WithArgs(int64(14), int64(31), int64(9), nil, nil).
 		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectQuery("SELECT COALESCE\\(department").
 		WithArgs(int64(9)).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"department", "team", "department_id", "team_id",
-		}).AddRow("设计研发部", "默认组", 14, 31))
+			"department", "team", "department_id", "team_id", "updated_at",
+		}).AddRow("设计研发部", "默认组", 14, 31, snapshotAt))
 	if err := applyOrganizationMappings(context.Background(), tx, []organizationMapping{task, user}); err != nil {
 		t.Fatalf("idempotent apply: %v", err)
 	}
@@ -157,11 +158,12 @@ func TestOrganizationAndAccessPreflightRejectEvidenceDrift(t *testing.T) {
 		}
 		defer db.Close()
 		item := validOrganizationMapping(t, "confirmed_auto")
+		snapshotAt := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
 		mock.ExpectQuery("SELECT COALESCE\\(owner_department").
 			WithArgs(int64(7)).
 			WillReturnRows(sqlmock.NewRows([]string{
-				"owner_department", "owner_team", "owner_department_id", "owner_team_id",
-			}).AddRow("运营部", "拼多多池州组", nil, nil))
+				"owner_department", "owner_team", "owner_department_id", "owner_team_id", "updated_at",
+			}).AddRow("运营部", "拼多多池州组", nil, nil, snapshotAt))
 		mock.ExpectQuery("SELECT COUNT\\(\\*\\)").
 			WithArgs(int64(6), int64(30)).
 			WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
@@ -215,10 +217,12 @@ func TestSnapshotStateMatchesIncludesOrganizationAndExactAccessEvidence(t *testi
 				t.Fatal(err)
 			}
 			defer db.Close()
+			snapshotAt := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
 
 			before := organizationStateSnapshot{
 				SubjectType: "task", SubjectID: 7,
 				LegacyDepartment: "运营部", LegacyTeam: "拼多多池州组",
+				UpdatedAt: snapshotAt,
 			}
 			departmentID, teamID := int64(6), int64(30)
 			after := before
@@ -248,8 +252,8 @@ func TestSnapshotStateMatchesIncludesOrganizationAndExactAccessEvidence(t *testi
 			mock.ExpectQuery("SELECT COALESCE\\(owner_department").
 				WithArgs(int64(7)).
 				WillReturnRows(sqlmock.NewRows([]string{
-					"owner_department", "owner_team", "owner_department_id", "owner_team_id",
-				}).AddRow("运营部", "拼多多池州组", tt.departmentID, tt.teamID))
+					"owner_department", "owner_team", "owner_department_id", "owner_team_id", "updated_at",
+				}).AddRow("运营部", "拼多多池州组", tt.departmentID, tt.teamID, snapshotAt))
 			mock.ExpectQuery("SELECT r.code,a.scope_mode,a.source_type,a.source_ref_id").
 				WithArgs(int64(31)).
 				WillReturnRows(sqlmock.NewRows([]string{
