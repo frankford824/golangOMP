@@ -27,6 +27,100 @@ func TestValidateOptions(t *testing.T) {
 	}
 }
 
+func TestMigrateStatesAppliesReviewedDecisionBeforeGenericLegacyMapping(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectBegin()
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+
+	mock.ExpectExec("UPDATE tasks\\s+SET task_status=\\?,workflow_revision=workflow_revision\\+1\\s+WHERE id=\\? AND task_status=\\?").
+		WithArgs("InProgress", int64(449), "PendingWarehouseReceive").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("UPDATE tasks SET task_status=CASE").
+		WillReturnResult(sqlmock.NewResult(0, 10))
+
+	mapping := mappingFile{TaskDecisions: []taskStateDecisionMapping{{
+		TaskID: 449, FromStatus: "PendingWarehouseReceive", TargetStatus: "InProgress",
+	}}}
+	if err := migrateStates(context.Background(), tx, mapping); err != nil {
+		t.Fatalf("migrateStates() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMigrateStatesTreatsReviewedTargetAsIdempotentNoOp(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectBegin()
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+
+	mock.ExpectExec("UPDATE tasks\\s+SET task_status=\\?,workflow_revision=workflow_revision\\+1\\s+WHERE id=\\? AND task_status=\\?").
+		WithArgs("InProgress", int64(449), "PendingWarehouseReceive").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery("SELECT task_status FROM tasks WHERE id=\\? FOR UPDATE").
+		WithArgs(int64(449)).
+		WillReturnRows(sqlmock.NewRows([]string{"task_status"}).AddRow("InProgress"))
+	mock.ExpectExec("UPDATE tasks SET task_status=CASE").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+
+	mapping := mappingFile{TaskDecisions: []taskStateDecisionMapping{{
+		TaskID: 449, FromStatus: "PendingWarehouseReceive", TargetStatus: "InProgress",
+	}}}
+	if err := migrateStates(context.Background(), tx, mapping); err != nil {
+		t.Fatalf("migrateStates() idempotent target error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMigrateStatesRejectsUnexpectedReviewedDecisionDrift(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectBegin()
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+
+	mock.ExpectExec("UPDATE tasks\\s+SET task_status=\\?,workflow_revision=workflow_revision\\+1\\s+WHERE id=\\? AND task_status=\\?").
+		WithArgs("InProgress", int64(449), "PendingWarehouseReceive").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery("SELECT task_status FROM tasks WHERE id=\\? FOR UPDATE").
+		WithArgs(int64(449)).
+		WillReturnRows(sqlmock.NewRows([]string{"task_status"}).AddRow("Completed"))
+
+	mapping := mappingFile{TaskDecisions: []taskStateDecisionMapping{{
+		TaskID: 449, FromStatus: "PendingWarehouseReceive", TargetStatus: "InProgress",
+	}}}
+	if err := migrateStates(context.Background(), tx, mapping); err == nil || !strings.Contains(err.Error(), "no longer matches reviewed state decision") {
+		t.Fatalf("unexpected drift error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestApplyHardAbortsBeforeJournalForEveryPreflightBlocker(t *testing.T) {
 	tests := []struct {
 		name       string

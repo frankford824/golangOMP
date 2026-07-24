@@ -2778,15 +2778,6 @@ func captureSnapshot(ctx context.Context, q snapshotQueryer, database string, m 
 }
 
 func migrateStates(ctx context.Context, tx *sql.Tx, m mappingFile) error {
-	if _, err := tx.ExecContext(ctx, `UPDATE tasks SET task_status=CASE
-		WHEN task_status IN ('PendingAuditA','PendingAuditB','PendingCustomizationReview','PendingOutsourceReview','PendingEffectReview') THEN 'PendingAudit'
-		WHEN task_status IN ('RejectedByAuditA','RejectedByAuditB','PendingCustomizationProduction','PendingEffectRevision','PendingOutsource','Outsourcing') THEN 'InProgress'
-		WHEN task_status IN ('PendingWarehouseQC','PendingWarehouseReceive','PendingProductionTransfer','PendingClose') THEN 'Completed'
-		ELSE task_status END,
-		workflow_revision=workflow_revision+1
-	WHERE task_status IN ('PendingAuditA','PendingAuditB','PendingCustomizationReview','PendingOutsourceReview','PendingEffectReview','RejectedByAuditA','RejectedByAuditB','PendingCustomizationProduction','PendingEffectRevision','PendingOutsource','Outsourcing','PendingWarehouseQC','PendingWarehouseReceive','PendingProductionTransfer','PendingClose')`); err != nil {
-		return err
-	}
 	for _, decision := range m.TaskDecisions {
 		result, err := tx.ExecContext(ctx, `
 			UPDATE tasks
@@ -2796,8 +2787,23 @@ func migrateStates(ctx context.Context, tx *sql.Tx, m mappingFile) error {
 			return err
 		}
 		if rows, _ := result.RowsAffected(); rows != 1 {
-			return fmt.Errorf("task %d no longer matches reviewed state decision %s -> %s", decision.TaskID, decision.FromStatus, decision.TargetStatus)
+			var currentStatus string
+			if err := tx.QueryRowContext(ctx, `SELECT task_status FROM tasks WHERE id=? FOR UPDATE`, decision.TaskID).Scan(&currentStatus); err != nil {
+				return fmt.Errorf("load task %d after reviewed state decision miss: %w", decision.TaskID, err)
+			}
+			if currentStatus != decision.TargetStatus {
+				return fmt.Errorf("task %d no longer matches reviewed state decision %s -> %s", decision.TaskID, decision.FromStatus, decision.TargetStatus)
+			}
 		}
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE tasks SET task_status=CASE
+		WHEN task_status IN ('PendingAuditA','PendingAuditB','PendingCustomizationReview','PendingOutsourceReview','PendingEffectReview') THEN 'PendingAudit'
+		WHEN task_status IN ('RejectedByAuditA','RejectedByAuditB','PendingCustomizationProduction','PendingEffectRevision','PendingOutsource','Outsourcing') THEN 'InProgress'
+		WHEN task_status IN ('PendingWarehouseQC','PendingWarehouseReceive','PendingProductionTransfer','PendingClose') THEN 'Completed'
+		ELSE task_status END,
+		workflow_revision=workflow_revision+1
+	WHERE task_status IN ('PendingAuditA','PendingAuditB','PendingCustomizationReview','PendingOutsourceReview','PendingEffectReview','RejectedByAuditA','RejectedByAuditB','PendingCustomizationProduction','PendingEffectRevision','PendingOutsource','Outsourcing','PendingWarehouseQC','PendingWarehouseReceive','PendingProductionTransfer','PendingClose')`); err != nil {
+		return err
 	}
 	return nil
 }
