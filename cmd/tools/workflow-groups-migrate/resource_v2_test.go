@@ -118,40 +118,138 @@ func TestValidateRevisionEventSemanticsAllowsApprovedLegacyRetouchExceptions(t *
 }
 
 func TestAllowsLegacyUnscopedRetouchFinalRequiresFrozenPolicyBoundary(t *testing.T) {
-	mapping := resourceMapping{TaskID: 981}
-	partial := resourceRevisionMapping{
-		ReviewPolicyIDs: []string{reviewPolicyLegacyRetouchPrematurePartial},
-		Reason:          "policy legacy_retouch_premature_terminal_partial_v1: reviewed partial membership",
+	partialReason := "policy legacy_retouch_premature_terminal_partial_v1: reviewed partial membership"
+	partialPolicy := []string{reviewPolicyLegacyRetouchPrematurePartial}
+	approved := []struct {
+		mapping  resourceMapping
+		revision resourceRevisionMapping
+		assetID  int64
+	}{
+		{
+			mapping: resourceMapping{TaskID: 981, ScopeKind: "retouch_requirement", ScopeRefID: 8},
+			revision: resourceRevisionMapping{
+				RevisionNo: 1, Status: "finalized", SourceStage: "retouch",
+				ReviewPolicyIDs: partialPolicy, Reason: partialReason,
+			},
+			assetID: 2763,
+		},
+		{
+			mapping: resourceMapping{TaskID: 981, ScopeKind: "retouch_requirement", ScopeRefID: 8},
+			revision: resourceRevisionMapping{
+				RevisionNo: 2, Status: "draft", SourceStage: "reopen",
+				ReviewPolicyIDs: partialPolicy, Reason: partialReason,
+			},
+			assetID: 2763,
+		},
+		{
+			mapping: resourceMapping{TaskID: 1035, ScopeKind: "retouch_requirement", ScopeRefID: 21},
+			revision: resourceRevisionMapping{
+				RevisionNo: 1, Status: "finalized", SourceStage: "retouch",
+				ReviewPolicyIDs: partialPolicy, Reason: partialReason,
+			},
+			assetID: 3859,
+		},
+		{
+			mapping: resourceMapping{TaskID: 1035, ScopeKind: "retouch_requirement", ScopeRefID: 21},
+			revision: resourceRevisionMapping{
+				RevisionNo: 2, Status: "draft", SourceStage: "reopen",
+				ReviewPolicyIDs: partialPolicy, Reason: partialReason,
+			},
+			assetID: 3859,
+		},
+		{
+			mapping: resourceMapping{TaskID: 1214, ScopeKind: "retouch_requirement", ScopeRefID: 43},
+			revision: resourceRevisionMapping{
+				RevisionNo: 1, Status: "draft", SourceStage: "reopen",
+				ReviewPolicyIDs: partialPolicy, Reason: partialReason,
+			},
+			assetID: 5769,
+		},
 	}
-	if !allowsLegacyUnscopedRetouchFinal(mapping, partial) {
-		t.Fatal("expected exact approved premature-partial task and reason to allow its unscoped final")
+	for _, test := range approved {
+		if !allowsLegacyUnscopedRetouchFinal(test.mapping, test.revision, test.assetID) {
+			t.Fatalf("expected exact approved tuple to allow task=%d scope=%d revision=%d asset=%d",
+				test.mapping.TaskID, test.mapping.ScopeRefID, test.revision.RevisionNo, test.assetID)
+		}
 	}
 
-	partial.ReviewPolicyIDs = nil
-	if allowsLegacyUnscopedRetouchFinal(mapping, partial) {
-		t.Fatal("unexpected premature-partial scope override without approved policy")
+	base := approved[0]
+	base.revision.ReviewPolicyIDs = nil
+	if allowsLegacyUnscopedRetouchFinal(base.mapping, base.revision, base.assetID) {
+		t.Fatal("unexpected scope override without approved policy")
 	}
-	partial.ReviewPolicyIDs = []string{reviewPolicyLegacyRetouchPrematurePartial}
-	partial.Reason = "unbound partial membership"
-	if allowsLegacyUnscopedRetouchFinal(mapping, partial) {
-		t.Fatal("unexpected premature-partial scope override without policy-bound reason")
+	base = approved[0]
+	base.revision.Reason = "unbound partial membership"
+	if allowsLegacyUnscopedRetouchFinal(base.mapping, base.revision, base.assetID) {
+		t.Fatal("unexpected scope override without policy-bound reason")
 	}
-	partial.Reason = "policy legacy_retouch_premature_terminal_partial_v1: reviewed partial membership"
-	mapping.TaskID = 982
-	if allowsLegacyUnscopedRetouchFinal(mapping, partial) {
-		t.Fatal("unexpected premature-partial scope override outside frozen task allowlist")
+
+	negativeTuples := []struct {
+		name     string
+		mapping  resourceMapping
+		revision resourceRevisionMapping
+		assetID  int64
+	}{
+		{"wrong requirement", resourceMapping{TaskID: 981, ScopeKind: "retouch_requirement", ScopeRefID: 9}, approved[0].revision, 2763},
+		{"wrong scope kind", resourceMapping{TaskID: 981, ScopeKind: "task", ScopeRefID: 8}, approved[0].revision, 2763},
+		{"wrong task", resourceMapping{TaskID: 982, ScopeKind: "retouch_requirement", ScopeRefID: 8}, approved[0].revision, 2763},
+		{"wrong asset", approved[0].mapping, approved[0].revision, 2764},
+		{"wrong revision", approved[0].mapping, resourceRevisionMapping{
+			RevisionNo: 3, Status: "draft", SourceStage: "reopen",
+			ReviewPolicyIDs: partialPolicy, Reason: partialReason,
+		}, 2763},
+		{"wrong status", approved[0].mapping, resourceRevisionMapping{
+			RevisionNo: 1, Status: "draft", SourceStage: "retouch",
+			ReviewPolicyIDs: partialPolicy, Reason: partialReason,
+		}, 2763},
+		{"wrong stage", approved[0].mapping, resourceRevisionMapping{
+			RevisionNo: 1, Status: "finalized", SourceStage: "reopen",
+			ReviewPolicyIDs: partialPolicy, Reason: partialReason,
+		}, 2763},
+		{"task 1045 unassigned asset", resourceMapping{TaskID: 1045, ScopeKind: "retouch_requirement", ScopeRefID: 26}, resourceRevisionMapping{
+			RevisionNo: 1, Status: "finalized", SourceStage: "retouch",
+			ReviewPolicyIDs: partialPolicy, Reason: partialReason,
+		}, 3956},
+		{"task 1052 unassigned asset", resourceMapping{TaskID: 1052, ScopeKind: "retouch_requirement", ScopeRefID: 30}, resourceRevisionMapping{
+			RevisionNo: 1, Status: "finalized", SourceStage: "retouch",
+			ReviewPolicyIDs: partialPolicy, Reason: partialReason,
+		}, 8359},
+	}
+	for _, test := range negativeTuples {
+		if allowsLegacyUnscopedRetouchFinal(test.mapping, test.revision, test.assetID) {
+			t.Fatalf("unexpected scope override for %s", test.name)
+		}
 	}
 
 	atomic := resourceRevisionMapping{
 		ReviewPolicyIDs: []string{reviewPolicyLegacyRetouchUnscopedAtomicBatch},
 		Reason:          "policy legacy_retouch_unscoped_atomic_batch_v1: reviewed atomic membership",
 	}
-	if !allowsLegacyUnscopedRetouchFinal(resourceMapping{TaskID: 2672}, atomic) {
+	if !allowsLegacyUnscopedRetouchFinal(resourceMapping{TaskID: 2672}, atomic, 23109) {
 		t.Fatal("expected exact approved atomic policy and reason to allow its unscoped final")
 	}
 	atomic.Reason = "unbound atomic membership"
-	if allowsLegacyUnscopedRetouchFinal(resourceMapping{TaskID: 2672}, atomic) {
+	if allowsLegacyUnscopedRetouchFinal(resourceMapping{TaskID: 2672}, atomic, 23109) {
 		t.Fatal("unexpected atomic scope override without policy-bound reason")
+	}
+}
+
+func TestRetouchScopeOverrideCannotReplaceExplicitDifferentRequirement(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mapping := resourceMapping{TaskID: 981, ScopeKind: "retouch_requirement", ScopeRefID: 8}
+	state := mappedAssetState{
+		ID:                   2763,
+		RetouchRequirementID: sql.NullInt64{Int64: 9, Valid: true},
+	}
+	if err := validateMappedAssetScope(context.Background(), db, mapping, state, false, true); err == nil {
+		t.Fatal("expected explicit different requirement binding to reject even with a reviewed override")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }
 

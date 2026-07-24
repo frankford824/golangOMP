@@ -507,7 +507,7 @@ func validateRevisionAssets(ctx context.Context, q snapshotQueryer, mapping reso
 			revision.ReviewPolicyIDs,
 			reviewPolicyLegacyRetouchVisualScopeTask2533,
 		)
-		allowUnscopedRetouch := allowsLegacyUnscopedRetouchFinal(mapping, revision)
+		allowUnscopedRetouch := allowsLegacyUnscopedRetouchFinal(mapping, revision, assetID)
 		if err := validateMappedAsset(ctx, q, mapping, assetID, "final", "", allowVisualScope, allowUnscopedRetouch); err != nil {
 			return err
 		}
@@ -699,9 +699,40 @@ func validateMappedAssetScope(ctx context.Context, q snapshotQueryer, mapping re
 	return nil
 }
 
-func allowsLegacyUnscopedRetouchFinal(mapping resourceMapping, revision resourceRevisionMapping) bool {
-	return hasBoundPolicyReason(revision, reviewPolicyLegacyRetouchUnscopedAtomicBatch) ||
-		isLegacyRetouchPrematurePartialRevision(mapping.TaskID, revision)
+type legacyRetouchPrematurePartialFinalKey struct {
+	taskID      int64
+	scopeRefID  int64
+	revisionNo  int
+	status      string
+	sourceStage string
+	assetID     int64
+}
+
+var legacyRetouchPrematurePartialFinalAllowlist = map[legacyRetouchPrematurePartialFinalKey]struct{}{
+	{taskID: 981, scopeRefID: 8, revisionNo: 1, status: "finalized", sourceStage: "retouch", assetID: 2763}:   {},
+	{taskID: 981, scopeRefID: 8, revisionNo: 2, status: "draft", sourceStage: "reopen", assetID: 2763}:        {},
+	{taskID: 1035, scopeRefID: 21, revisionNo: 1, status: "finalized", sourceStage: "retouch", assetID: 3859}: {},
+	{taskID: 1035, scopeRefID: 21, revisionNo: 2, status: "draft", sourceStage: "reopen", assetID: 3859}:      {},
+	{taskID: 1214, scopeRefID: 43, revisionNo: 1, status: "draft", sourceStage: "reopen", assetID: 5769}:      {},
+}
+
+func allowsLegacyUnscopedRetouchFinal(mapping resourceMapping, revision resourceRevisionMapping, assetID int64) bool {
+	if hasBoundPolicyReason(revision, reviewPolicyLegacyRetouchUnscopedAtomicBatch) {
+		return true
+	}
+	if mapping.ScopeKind != "retouch_requirement" ||
+		!isLegacyRetouchPrematurePartialRevision(mapping.TaskID, revision) {
+		return false
+	}
+	_, allowed := legacyRetouchPrematurePartialFinalAllowlist[legacyRetouchPrematurePartialFinalKey{
+		taskID:      mapping.TaskID,
+		scopeRefID:  mapping.ScopeRefID,
+		revisionNo:  revision.RevisionNo,
+		status:      revision.Status,
+		sourceStage: revision.SourceStage,
+		assetID:     assetID,
+	}]
+	return allowed
 }
 
 func mappedAssetScopeValues(ctx context.Context, q snapshotQueryer, mapping resourceMapping) (interface{}, interface{}, error) {
