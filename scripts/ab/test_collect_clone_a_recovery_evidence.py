@@ -89,7 +89,13 @@ class CloneARecoveryEvidenceCollectorTest(unittest.TestCase):
                 "manifest_row_hash": "",
             }
             row["manifest_row_hash"] = hashlib.sha256(
-                MODULE.canonical_bytes(row)
+                MODULE.canonical_bytes(
+                    {
+                        key: value
+                        for key, value in row.items()
+                        if key != "manifest_row_hash"
+                    }
+                )
             ).hexdigest()
             mapping_rows.append(row)
             object_key = f"surviving/{source_id}.jpg"

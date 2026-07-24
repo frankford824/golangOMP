@@ -118,8 +118,11 @@ def validate_confirmed_row(row: dict[str, Any]) -> tuple[int, int, int]:
     expected_hash = row.get("manifest_row_hash")
     if not isinstance(expected_hash, str) or not SHA256.fullmatch(expected_hash):
         raise ValueError("confirmed row manifest hash is invalid")
-    unhashed = dict(row)
-    unhashed["manifest_row_hash"] = ""
+    unhashed = {
+        key: value
+        for key, value in row.items()
+        if key != "manifest_row_hash"
+    }
     if sha256_bytes(canonical_bytes(unhashed)) != expected_hash:
         raise ValueError("confirmed row manifest hash does not match content")
     return task_id, source_id, size

@@ -41,7 +41,13 @@ class PrepareAssetRecoveryTest(unittest.TestCase):
                 "manifest_row_hash": "",
             }
             row["manifest_row_hash"] = MODULE.sha256_bytes(
-                MODULE.canonical_bytes(row)
+                MODULE.canonical_bytes(
+                    {
+                        key: value
+                        for key, value in row.items()
+                        if key != "manifest_row_hash"
+                    }
+                )
             )
             rows.append(row)
             missing_before = {

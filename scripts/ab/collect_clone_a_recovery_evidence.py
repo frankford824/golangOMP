@@ -98,8 +98,11 @@ def validate_mapping(path: pathlib.Path) -> tuple[dict[int, dict[str, Any]], str
         ):
             raise ValueError(f"mapping recovery {missing_id} drifted from allowlist")
         manifest_hash = str(row.get("manifest_row_hash") or "")
-        unhashed = dict(row)
-        unhashed["manifest_row_hash"] = ""
+        unhashed = {
+            key: value
+            for key, value in row.items()
+            if key != "manifest_row_hash"
+        }
         if (
             not SHA256.fullmatch(manifest_hash)
             or hashlib.sha256(canonical_bytes(unhashed)).hexdigest()
