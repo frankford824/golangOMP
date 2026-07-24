@@ -130,9 +130,13 @@ class ForceObjectReverificationTest(unittest.TestCase):
                 "entity_key": EXCEPTION.ENTITY_KEY,
                 "owner_id": EXCEPTION.TASK_ASSET_ID,
                 "task_id": EXCEPTION.TASK_ID,
-                "storage_ref_id": "ref-12323",
-                "object_key": "tasks/2199/historical/12323.psd",
-                "status": "historical_unavailable",
+                "storage_ref_id": EXCEPTION.EXPECTED_STORAGE_REF_ID,
+                "storage_adapter": EXCEPTION.EXPECTED_STORAGE_ADAPTER,
+                "object_key": EXCEPTION.EXPECTED_OBJECT_KEY,
+                "size": EXCEPTION.EXPECTED_SIZE,
+                "mime_type": EXCEPTION.EXPECTED_MIME_TYPE,
+                "sha256": "",
+                "status": EXCEPTION.EXPECTED_STATUS,
             }
         )
         rows = [exception_row, row(3)]
@@ -148,7 +152,19 @@ class ForceObjectReverificationTest(unittest.TestCase):
             "confirmed_at": "2026-07-23T12:00:00Z",
             "confirmation_note": "confirmed historical tombstone",
             "recovery_source_task_asset_id": 0,
-            "original_storage_ref_id": "ref-12323",
+            "original_storage_ref_id": EXCEPTION.EXPECTED_STORAGE_REF_ID,
+            "expected_file_size": EXCEPTION.EXPECTED_SIZE,
+            "object_probe_result": EXCEPTION.EXPECTED_PROBE_RESULT,
+            "object_probe_read_only_get_count": (
+                EXCEPTION.EXPECTED_PROBE_READ_ONLY_GET_COUNT
+            ),
+            "object_probe_evidence_hash": EXCEPTION.EXPECTED_PROBE_EVIDENCE_HASH,
+            "object_probe_input_manifest_sha256": (
+                EXCEPTION.EXPECTED_PROBE_INPUT_MANIFEST_SHA256
+            ),
+            "object_probe_object_key_sha256": (
+                EXCEPTION.EXPECTED_PROBE_OBJECT_KEY_SHA256
+            ),
             "blockers": [],
         }
         mapping_row["manifest_row_hash"] = EXCEPTION.canonical_hash(mapping_row)
@@ -355,7 +371,7 @@ class ForceObjectReverificationTest(unittest.TestCase):
         self.assertEqual(1, result["exception_count"])
         self.assertEqual(EXCEPTION.ENTITY_KEY, result["exceptions"][0]["entity_key"])
 
-    def test_clearing_exception_fingerprint_blocks(self):
+    def test_inventing_exception_fingerprint_blocks(self):
         with tempfile.TemporaryDirectory() as raw:
             reviewed, force, hydrated, evidence, exception, _rows = (
                 self.make_exception_documents(pathlib.Path(raw))
@@ -364,14 +380,14 @@ class ForceObjectReverificationTest(unittest.TestCase):
                 json.loads(line)
                 for line in force.read_text(encoding="utf-8").splitlines()
             ]
-            forced_rows[0]["sha256"] = ""
+            forced_rows[0]["sha256"] = "6" * 64
             write_jsonl(force, forced_rows)
             result = VERIFY.verify(
                 reviewed, force, hydrated, evidence, exception
             )
         self.assertEqual("BLOCKED", result["status"])
         self.assertEqual(
-            "force_reverify.exception_fingerprint_cleared",
+            "force_reverify.force_invalid",
             result["violations"][0]["violation_code"],
         )
 

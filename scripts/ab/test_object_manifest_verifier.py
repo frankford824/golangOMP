@@ -86,9 +86,13 @@ class ObjectManifestVerifierTest(unittest.TestCase):
             "entity_key": EXCEPTION.ENTITY_KEY,
             "owner_id": EXCEPTION.TASK_ASSET_ID,
             "task_id": EXCEPTION.TASK_ID,
-            "storage_ref_id": "ref-12323",
-            "object_key": "tasks/2199/historical/12323.psd",
-            "status": "historical_unavailable",
+            "storage_ref_id": EXCEPTION.EXPECTED_STORAGE_REF_ID,
+            "storage_adapter": EXCEPTION.EXPECTED_STORAGE_ADAPTER,
+            "object_key": EXCEPTION.EXPECTED_OBJECT_KEY,
+            "size": EXCEPTION.EXPECTED_SIZE,
+            "mime_type": EXCEPTION.EXPECTED_MIME_TYPE,
+            "sha256": "",
+            "status": EXCEPTION.EXPECTED_STATUS,
         })
         return row
 
@@ -104,7 +108,19 @@ class ObjectManifestVerifierTest(unittest.TestCase):
             "confirmed_at": "2026-07-23T12:00:00Z",
             "confirmation_note": "confirmed historical tombstone",
             "recovery_source_task_asset_id": 0,
-            "original_storage_ref_id": "ref-12323",
+            "original_storage_ref_id": EXCEPTION.EXPECTED_STORAGE_REF_ID,
+            "expected_file_size": EXCEPTION.EXPECTED_SIZE,
+            "object_probe_result": EXCEPTION.EXPECTED_PROBE_RESULT,
+            "object_probe_read_only_get_count": (
+                EXCEPTION.EXPECTED_PROBE_READ_ONLY_GET_COUNT
+            ),
+            "object_probe_evidence_hash": EXCEPTION.EXPECTED_PROBE_EVIDENCE_HASH,
+            "object_probe_input_manifest_sha256": (
+                EXCEPTION.EXPECTED_PROBE_INPUT_MANIFEST_SHA256
+            ),
+            "object_probe_object_key_sha256": (
+                EXCEPTION.EXPECTED_PROBE_OBJECT_KEY_SHA256
+            ),
             "blockers": [],
         }
         mapping_row["manifest_row_hash"] = EXCEPTION.canonical_hash(mapping_row)
@@ -181,6 +197,63 @@ class ObjectManifestVerifierTest(unittest.TestCase):
             result = MODULE.verify(path, config)
         self.assertEqual(result["status"], "PASS")
         self.assertEqual([item[0] for item in server.requests], ["HEAD", "GET"])
+
+    def test_clone_b_bundle_local_adapter_verifies_exact_bytes(self):
+        body = b"PK\x03\x04deterministic bundle"
+        with tempfile.TemporaryDirectory() as raw:
+            root = pathlib.Path(raw)
+            object_path = root / "fixture" / "task-7" / "source-bundle.zip"
+            object_path.parent.mkdir(parents=True)
+            object_path.write_bytes(body)
+            row = self.valid_row(body, "clone_b_bundle")
+            row.update(
+                {
+                    "object_key": "fixture/task-7/source-bundle.zip",
+                    "mime_type": "application/zip",
+                }
+            )
+            config = MODULE.VerifierConfig(
+                clone_b_bundle=MODULE.LocalReadAdapter.from_root(root)
+            )
+            result = MODULE.verify(self.write_manifest(root, row), config)
+        self.assertEqual("PASS", result["status"])
+        self.assertEqual(1, result["checked_count"])
+
+    def test_clone_b_bundle_local_adapter_rejects_symlink_escape(self):
+        body = b"outside"
+        with tempfile.TemporaryDirectory() as raw:
+            base = pathlib.Path(raw)
+            root = base / "root"
+            root.mkdir()
+            outside = base / "outside.zip"
+            outside.write_bytes(body)
+            link = root / "escaped.zip"
+            try:
+                link.symlink_to(outside)
+            except (OSError, NotImplementedError):
+                self.skipTest("symlinks are unavailable")
+            row = self.valid_row(body, "clone_b_bundle")
+            row.update(
+                {
+                    "object_key": "escaped.zip",
+                    "mime_type": "application/zip",
+                }
+            )
+            config = MODULE.VerifierConfig(
+                clone_b_bundle=MODULE.LocalReadAdapter.from_root(root)
+            )
+            result = MODULE.verify(self.write_manifest(base, row), config)
+        self.assertEqual("BLOCKED", result["status"])
+        self.assertEqual(
+            "object_manifest.unreadable",
+            result["violations"][0]["violation_code"],
+        )
+
+    def test_clone_b_bundle_root_must_be_existing_non_symlink_directory(self):
+        with tempfile.TemporaryDirectory() as raw:
+            missing = pathlib.Path(raw) / "missing"
+            with self.assertRaisesRegex(ValueError, "bundle root"):
+                MODULE.LocalReadAdapter.from_root(missing)
 
     def test_sha_mismatch_is_fail_even_when_etag_is_present(self):
         body = b"actual"
@@ -261,6 +334,9 @@ class ObjectManifestVerifierTest(unittest.TestCase):
             )
         self.assertNotEqual("PASS", result["status"])
         self.assertEqual(0, result["exception_count"])
+        self.assertEqual(
+            "object_manifest.invalid", result["violations"][0]["violation_code"]
+        )
 
     def test_tampered_attestation_blocks_before_network_read(self):
         with ObjectServer(status=410) as server, tempfile.TemporaryDirectory() as root:

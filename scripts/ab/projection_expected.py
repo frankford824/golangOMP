@@ -20,6 +20,11 @@ import sys
 from collections import defaultdict
 from typing import Any, Iterable
 
+try:
+    from scripts.ab import apply_bundle_registry_to_mapping as bundle_registry
+except ModuleNotFoundError:
+    import apply_bundle_registry_to_mapping as bundle_registry
+
 
 STATE_MAP = {
     "PendingAuditA": "PendingAudit", "PendingAuditB": "PendingAudit",
@@ -39,7 +44,7 @@ def confirmed_time(value: Any) -> bool:
     return isinstance(value, str) and bool(value) and not value.startswith("0001-01-01T00:00:00")
 
 ALGORITHM_SPEC = {
-    "version": 1,
+    "version": 2,
     "authority": [
         "repo/mysql/task_search_document.go:reindexTaskSearchDocumentProjection",
         "cmd/tools/search-reindex/main.go:assetReindexSQL",
@@ -114,8 +119,9 @@ LEFT JOIN users handler ON handler.id=t.current_handler_id
 ORDER BY t.id;
 SELECT CONCAT('asset\t',JSON_OBJECT(
   'id',id,'task_id',task_id,'asset_type',asset_type,'file_name',file_name,
-  'original_filename',original_filename,'storage_key',storage_key,'source_module_key',source_module_key))
-FROM task_assets WHERE COALESCE(deleted_at,cleaned_at) IS NULL ORDER BY task_id,id;
+  'original_filename',original_filename,'storage_key',storage_key,'source_module_key',source_module_key,
+  'deleted_at',deleted_at,'cleaned_at',cleaned_at))
+FROM task_assets ORDER BY task_id,id;
 SELECT CONCAT('sku\t',JSON_OBJECT('id',id,'task_id',task_id,'sku_code',sku_code))
 FROM task_sku_items ORDER BY task_id,id;
 SELECT CONCAT('reference\t',JSON_OBJECT('id',r.id,'task_id',r.task_id,'file_name',COALESCE(s.file_name,'')))
@@ -234,6 +240,142 @@ def require_reviewed_mapping(mapping: dict[str, Any]) -> None:
             raise ValueError("all task state decisions require reviewer metadata")
 
 
+def read_json_object(path_value: str, label: str) -> tuple[dict[str, Any], str]:
+    path = pathlib.Path(path_value)
+    raw = path.read_bytes()
+    value = json.loads(raw.decode("utf-8"))
+    if not isinstance(value, dict):
+        raise ValueError(f"{label} must contain a JSON object")
+    return value, sha256_bytes(raw)
+
+
+def materialized_bundle_assets(
+    mapping: dict[str, Any],
+    mapping_sha: str,
+    manifest_path_value: str | None,
+    registry_path_value: str | None,
+) -> tuple[list[dict[str, Any]], dict[str, str]]:
+    if bool(manifest_path_value) != bool(registry_path_value):
+        raise ValueError("bundle manifest and registry must be supplied together")
+    if not manifest_path_value:
+        return [], {}
+    manifest, manifest_sha = read_json_object(
+        manifest_path_value, "source bundle manifest"
+    )
+    confirmed, run_id = bundle_registry.validate_manifest(manifest, mapping_sha)
+    registry, registry_sha = read_json_object(
+        str(registry_path_value), "source bundle registry"
+    )
+    normalized = bundle_registry.validate_registry(
+        registry, manifest_sha, run_id, confirmed
+    )
+    mapped: dict[tuple[int, str, int, int], dict[str, Any]] = {}
+    for resource in mapping.get("resources", []):
+        for revision in resource.get("history", []):
+            source_bundle = revision.get("source_bundle")
+            if source_bundle:
+                key = (
+                    int(resource["task_id"]),
+                    str(resource["scope_kind"]),
+                    int(resource["scope_ref_id"]),
+                    int(revision["revision_no"]),
+                )
+                mapped[key] = source_bundle
+    if set(mapped) != set(normalized):
+        raise ValueError("reviewed mapping and bundle registry scopes differ")
+    for key, expected in normalized.items():
+        if mapped[key] != expected:
+            raise ValueError(f"reviewed mapping source bundle drifted for {key}")
+    assets: list[dict[str, Any]] = []
+    seen: set[int] = set()
+    for entry in registry["entries"]:
+        candidate = entry["task_asset_candidate"]
+        asset_id = int(candidate["id"])
+        if asset_id in seen:
+            raise ValueError(f"duplicate materialized bundle task asset {asset_id}")
+        seen.add(asset_id)
+        assets.append(
+            {
+                "id": asset_id,
+                "task_id": int(candidate["task_id"]),
+                "asset_type": "source",
+                "file_name": "source-bundle.zip",
+                "original_filename": "source-bundle.zip",
+                "storage_key": str(candidate["storage_key"]),
+                "source_module_key": "migration",
+                "deleted_at": None,
+                "cleaned_at": None,
+            }
+        )
+    return assets, {
+        "source_bundle_manifest_sha256": manifest_sha,
+        "source_bundle_registry_sha256": registry_sha,
+    }
+
+
+def apply_recovery_plan(
+    mapping: dict[str, Any],
+    mapping_sha: str,
+    assets: dict[int, dict[str, Any]],
+    plan_path_value: str | None,
+) -> dict[str, str]:
+    expected = {
+        int(row["missing_task_asset_id"]): row
+        for row in mapping.get("asset_recoveries", [])
+        if row.get("strategy") == "clone_b_prematerialized_storage_ref_v1"
+    }
+    if not plan_path_value:
+        if expected:
+            raise ValueError("reviewed asset recoveries require --recovery-plan")
+        return {}
+    plan, plan_sha = read_json_object(plan_path_value, "recovery plan")
+    if (
+        plan.get("version") != 1
+        or plan.get("status") != "MATERIALIZED"
+        or plan.get("mapping_sha256") != mapping_sha
+        or plan.get("production_writes_executed") is not False
+        or plan.get("database_writes_executed") is not False
+        or not isinstance(plan.get("run_id"), str)
+        or not plan["run_id"].strip()
+        or not isinstance(plan.get("entries"), list)
+    ):
+        raise ValueError("recovery plan contract or mapping binding differs")
+    actual: set[int] = set()
+    for entry in plan["entries"]:
+        if not isinstance(entry, dict):
+            raise ValueError("recovery plan entry must be an object")
+        asset_id = int(entry.get("missing_task_asset_id") or 0)
+        if asset_id in actual or asset_id not in expected:
+            raise ValueError(f"unexpected or duplicate recovered task asset {asset_id}")
+        actual.add(asset_id)
+        mapping_row = expected[asset_id]
+        asset = assets.get(asset_id)
+        update = (entry.get("db_apply_plan") or {}).get("update_task_asset") or {}
+        update_set = update.get("set") or {}
+        if (
+            asset is None
+            or int(asset.get("task_id") or 0) != int(mapping_row["task_id"])
+            or entry.get("source_sha256") != mapping_row["recovery_source_sha256"]
+            or entry.get("source_size") != mapping_row["expected_file_size"]
+            or update.get("where") != {"id": asset_id}
+            or update_set.get("storage_key") != entry.get("target_object_key")
+            or update_set.get("whole_hash") != entry.get("source_sha256")
+            or update_set.get("deleted_at") is not None
+            or update_set.get("cleaned_at") is not None
+        ):
+            raise ValueError(f"recovery plan entry {asset_id} drifted")
+        asset["storage_key"] = str(entry["target_object_key"])
+        asset["deleted_at"] = None
+        asset["cleaned_at"] = None
+    if actual != set(expected):
+        raise ValueError("recovery plan does not cover the reviewed recovery set")
+    return {"recovery_plan_sha256": plan_sha}
+
+
+def is_active_asset(row: dict[str, Any]) -> bool:
+    return row.get("deleted_at") is None and row.get("cleaned_at") is None
+
+
 def blocked_entity(entity_key: str, blockers: list[str], detail: dict[str, Any]) -> dict[str, Any]:
     return {"gate_name": "G09", "entity_key": entity_key, "expected_state": "blocked",
             "review_state": "hard_blocked", "derivation_method": "independent_projection",
@@ -258,25 +400,54 @@ def build_expected(args: argparse.Namespace) -> None:
                   "snapshot_sha256": args.snapshot_sha256, "algorithm_sha256": algorithm_sha}
 
     tasks = {int(row["id"]): dict(row) for row in frozen["task"]}
-    assets = {int(row["id"]): row for row in frozen["asset"]}
+    assets = {int(row["id"]): dict(row) for row in frozen["asset"]}
+    bundle_assets, bundle_provenance = materialized_bundle_assets(
+        mapping,
+        mapping_sha,
+        getattr(args, "source_bundle_manifest", None),
+        getattr(args, "source_bundle_registry", None),
+    )
+    for row in bundle_assets:
+        asset_id = int(row["id"])
+        if asset_id in assets:
+            raise ValueError(f"materialized bundle task asset {asset_id} already exists")
+        assets[asset_id] = row
+    recovery_provenance = apply_recovery_plan(
+        mapping,
+        mapping_sha,
+        assets,
+        getattr(args, "recovery_plan", None),
+    )
+    provenance.update(bundle_provenance)
+    provenance.update(recovery_provenance)
     assets_by_task: dict[int, list[dict[str, Any]]] = defaultdict(list)
-    for row in frozen["asset"]:
-        assets_by_task[int(row["task_id"])].append(row)
+    for row in assets.values():
+        if is_active_asset(row):
+            assets_by_task[int(row["task_id"])].append(row)
     skus = {int(row["id"]): row for row in frozen["sku"]}
     refs = {int(row["id"]): row for row in frozen["reference"]}
     planning_by_task: dict[int, list[dict[str, Any]]] = defaultdict(list)
     for row in frozen["planning"]:
         planning_by_task[int(row["task_id"])].append(row)
 
-    for task in tasks.values():
-        task["task_status"] = STATE_MAP.get(str(task.get("task_status") or ""), task.get("task_status") or "")
+    reviewed_decisions: dict[int, dict[str, Any]] = {}
     for decision in mapping.get("task_state_decisions", []):
-        task = tasks.get(int(decision["task_id"]))
+        task_id = int(decision["task_id"])
+        if task_id in reviewed_decisions:
+            raise ValueError(f"duplicate state decision for task {task_id}")
+        reviewed_decisions[task_id] = decision
+        task = tasks.get(task_id)
         if task is None:
             raise ValueError(f"state decision task {decision['task_id']} is absent from frozen A")
-        if task["task_status"] != decision["from_status"]:
+        if str(task.get("task_status") or "") != decision["from_status"]:
             raise ValueError(f"state decision task {decision['task_id']} no longer matches from_status")
         task["task_status"] = decision["target_status"]
+    for task_id, task in tasks.items():
+        if task_id not in reviewed_decisions:
+            task["task_status"] = STATE_MAP.get(
+                str(task.get("task_status") or ""),
+                task.get("task_status") or "",
+            )
 
     # A source alias is one extra task_assets row per natural group/origin.
     aliases_by_task: dict[int, list[dict[str, Any]]] = defaultdict(list)
@@ -447,6 +618,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     freeze.add_argument("--snapshot-sha256", required=True); freeze.add_argument("--output", required=True)
     build = sub.add_parser("build")
     build.add_argument("--mapping", required=True); build.add_argument("--frozen-a", required=True)
+    build.add_argument("--source-bundle-manifest")
+    build.add_argument("--source-bundle-registry")
+    build.add_argument("--recovery-plan")
     build.add_argument("--snapshot-sha256", required=True); build.add_argument("--output", required=True)
     return parser.parse_args(argv)
 

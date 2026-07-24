@@ -170,11 +170,19 @@ def read_jsonl(
                 f"{label} manifest row {line_no} is invalid JSON",
             ) from exc
         is_exception = (
-            allow_empty_sha
-            and isinstance(row, dict)
-            and row.get("entity_key") == exception_entity
+            isinstance(row, dict) and row.get("entity_key") == exception_entity
         )
-        if allow_empty_sha and isinstance(row, dict) and row.get("sha256") == "":
+        if is_exception:
+            try:
+                historical_exception.validate_exception_object_row(row)
+                problems = []
+            except historical_exception.ExceptionContractError:
+                problems = [
+                    {
+                        "violation_code": "object_manifest.exception_row_invalid"
+                    }
+                ]
+        elif allow_empty_sha and isinstance(row, dict) and row.get("sha256") == "":
             candidate = dict(row)
             candidate["sha256"] = "1" * 64
             problems = verifier.validate_contract(candidate, line_no)
@@ -196,12 +204,16 @@ def read_jsonl(
                 "force_reverify.sha_not_cleared",
                 f"{label} manifest row {line_no} retains a fingerprint",
             )
-        if is_exception and row["sha256"] in {"", ZERO_SHA256}:
+        if is_exception and row["sha256"] != "":
             raise VerificationError(
-                "force_reverify.exception_fingerprint_cleared",
-                f"{label} manifest exception row {line_no} lost its frozen fingerprint",
+                "force_reverify.exception_fingerprint_present",
+                f"{label} manifest exception row {line_no} invented a fingerprint",
             )
-        if not allow_empty_sha and row["sha256"] == ZERO_SHA256:
+        if (
+            not allow_empty_sha
+            and not is_exception
+            and row["sha256"] in {"", ZERO_SHA256}
+        ):
             raise VerificationError(
                 "force_reverify.fingerprint_missing",
                 f"{label} manifest row {line_no} has no usable fingerprint",
@@ -299,9 +311,6 @@ def verify(
     mapping_row_hash = ZERO_SHA256
     exception: dict[str, Any] | None = None
     try:
-        reviewed, manifest_sha = read_jsonl(
-            reviewed_path, label="reviewed", allow_empty_sha=False
-        )
         if exception_path is not None:
             attestation, exception, exception_evidence_sha = (
                 historical_exception.load_attestation(
@@ -310,6 +319,12 @@ def verify(
             )
             mapping_sha = attestation["mapping_sha256"]
             mapping_row_hash = attestation["mapping_row_hash"]
+        reviewed, manifest_sha = read_jsonl(
+            reviewed_path,
+            label="reviewed",
+            allow_empty_sha=False,
+            exception_entity=exception["entity_key"] if exception else None,
+        )
         forced, force_sha = read_jsonl(
             force_path,
             label="force",
@@ -317,7 +332,10 @@ def verify(
             exception_entity=exception["entity_key"] if exception else None,
         )
         hydrated, hydrated_sha = read_jsonl(
-            hydrated_path, label="hydrated", allow_empty_sha=False
+            hydrated_path,
+            label="hydrated",
+            allow_empty_sha=False,
+            exception_entity=exception["entity_key"] if exception else None,
         )
         hydration, hydration_evidence_sha = load_hydration_evidence(
             hydration_evidence_path

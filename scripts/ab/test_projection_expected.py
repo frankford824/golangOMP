@@ -6,8 +6,18 @@ import json
 import pathlib
 import tempfile
 import unittest
+from unittest import mock
 
-from projection_expected import ALGORITHM_SPEC, build_expected, canonical_json, mysql_concat_ws, require_reviewed_mapping, sha256_text
+from projection_expected import (
+    ALGORITHM_SPEC,
+    apply_recovery_plan,
+    build_expected,
+    canonical_json,
+    materialized_bundle_assets,
+    mysql_concat_ws,
+    require_reviewed_mapping,
+    sha256_text,
+)
 
 
 class ProjectionExpectedTest(unittest.TestCase):
@@ -79,6 +89,45 @@ class ProjectionExpectedTest(unittest.TestCase):
             self.assertEqual(task["review_state"], "pass")
             self.assertEqual(task["detail"]["projection_kind"], "task_search")
 
+    def test_reviewed_state_decision_precedes_generic_legacy_mapping(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            frozen, mapping_path = self.write_inputs(root)
+            frozen_rows = [
+                json.loads(line)
+                for line in frozen.read_text(encoding="utf-8").splitlines()
+            ]
+            task = next(row["value"] for row in frozen_rows if row["kind"] == "task")
+            task["task_status"] = "PendingWarehouseReceive"
+            frozen.write_text(
+                "".join(canonical_json(row) + "\n" for row in frozen_rows),
+                encoding="utf-8",
+            )
+            mapping = json.loads(mapping_path.read_text(encoding="utf-8"))
+            mapping["task_state_decisions"] = [{
+                "task_id": 10,
+                "from_status": "PendingWarehouseReceive",
+                "target_status": "InProgress",
+                "confirmed_by": 1,
+                "confirmed_at": "2026-07-24T00:00:00Z",
+                "confirmation_note": "reviewed exception",
+                "manifest_row_hash": "c" * 64,
+            }]
+            mapping_path.write_text(canonical_json(mapping), encoding="utf-8")
+            output = root / "expected.jsonl"
+            build_expected(argparse.Namespace(
+                mapping=str(mapping_path),
+                frozen_a=str(frozen),
+                snapshot_sha256=self.snapshot,
+                output=str(output),
+            ))
+            task_projection = next(
+                json.loads(line)
+                for line in output.read_text(encoding="utf-8").splitlines()
+                if '"task-search:10"' in line
+            )
+            self.assertEqual(task_projection["components"][2], "InProgress")
+
     def test_missing_group_projection_input_is_entity_blocker(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             rows = self.run_build(pathlib.Path(tmp), missing_source=True)
@@ -111,6 +160,126 @@ class ProjectionExpectedTest(unittest.TestCase):
 
     def test_mysql_concat_ws_skips_null_but_keeps_empty(self) -> None:
         self.assertEqual(mysql_concat_ws(["a", None, "", 2]), "a  2")
+
+    def test_recovery_plan_activates_only_hash_bound_deleted_asset(self) -> None:
+        mapping = {
+            "asset_recoveries": [
+                {
+                    "task_id": 10,
+                    "missing_task_asset_id": 200,
+                    "strategy": "clone_b_prematerialized_storage_ref_v1",
+                    "recovery_source_sha256": "1" * 64,
+                    "expected_file_size": 4,
+                }
+            ]
+        }
+        mapping_sha = "2" * 64
+        assets = {
+            200: {
+                "id": 200,
+                "task_id": 10,
+                "storage_key": None,
+                "deleted_at": "2026-01-01",
+                "cleaned_at": None,
+            }
+        }
+        plan = {
+            "version": 1,
+            "status": "MATERIALIZED",
+            "mapping_sha256": mapping_sha,
+            "production_writes_executed": False,
+            "database_writes_executed": False,
+            "run_id": "test-run",
+            "entries": [
+                {
+                    "missing_task_asset_id": 200,
+                    "source_sha256": "1" * 64,
+                    "source_size": 4,
+                    "target_object_key": "recovered/200.bin",
+                    "db_apply_plan": {
+                        "update_task_asset": {
+                            "where": {"id": 200},
+                            "set": {
+                                "storage_key": "recovered/200.bin",
+                                "whole_hash": "1" * 64,
+                                "deleted_at": None,
+                                "cleaned_at": None,
+                            },
+                        }
+                    },
+                }
+            ],
+        }
+        with tempfile.TemporaryDirectory() as raw:
+            path = pathlib.Path(raw) / "plan.json"
+            path.write_text(canonical_json(plan), encoding="utf-8")
+            provenance = apply_recovery_plan(
+                mapping, mapping_sha, assets, str(path)
+            )
+        self.assertRegex(provenance["recovery_plan_sha256"], r"^[0-9a-f]{64}$")
+        self.assertIsNone(assets[200]["deleted_at"])
+        self.assertEqual("recovered/200.bin", assets[200]["storage_key"])
+
+    def test_bundle_projection_uses_only_validated_registry_candidate(self) -> None:
+        key = (10, "task", 0, 1)
+        normalized = {
+            "task_asset_id": 300,
+            "format": "zip",
+            "bundle_sha256": "3" * 64,
+            "manifest_sha256": "4" * 64,
+            "members": [],
+            "confirmed_by": 1,
+            "confirmed_at": "2026-01-01T00:00:00Z",
+            "confirmation_note": "reviewed",
+        }
+        mapping = {
+            "resources": [
+                {
+                    "task_id": 10,
+                    "scope_kind": "task",
+                    "scope_ref_id": 0,
+                    "history": [
+                        {"revision_no": 1, "source_bundle": normalized}
+                    ],
+                }
+            ]
+        }
+        manifest = {"status": "CONFIRMED"}
+        registry = {
+            "entries": [
+                {
+                    "task_asset_candidate": {
+                        "id": 300,
+                        "task_id": 10,
+                        "storage_key": "fixture/run/source-bundle.zip",
+                    }
+                }
+            ]
+        }
+        with tempfile.TemporaryDirectory() as raw:
+            root = pathlib.Path(raw)
+            manifest_path = root / "manifest.json"
+            registry_path = root / "registry.json"
+            manifest_path.write_text(canonical_json(manifest), encoding="utf-8")
+            registry_path.write_text(canonical_json(registry), encoding="utf-8")
+            with mock.patch(
+                "projection_expected.bundle_registry.validate_manifest",
+                return_value=({key: {}}, "run"),
+            ), mock.patch(
+                "projection_expected.bundle_registry.validate_registry",
+                return_value={key: normalized},
+            ):
+                rows, provenance = materialized_bundle_assets(
+                    mapping,
+                    "5" * 64,
+                    str(manifest_path),
+                    str(registry_path),
+                )
+        self.assertEqual("source-bundle.zip", rows[0]["original_filename"])
+        self.assertEqual("migration", rows[0]["source_module_key"])
+        self.assertRegex(
+            provenance["source_bundle_registry_sha256"], r"^[0-9a-f]{64}$"
+        )
 
     def test_unreviewed_mapping_is_rejected(self) -> None:
         with self.assertRaisesRegex(ValueError, "confirmed_auto"):

@@ -371,20 +371,28 @@ def build_entities(
         extra = sorted(mapping_scopes - set(groups_by_scope))[:5]
         raise ValueError(f"resource mapping/frozen group coverage differs: unmapped={missing}, missing_in_a={extra}")
 
+    decisions_by_task: dict[int, dict[str, Any]] = {}
+    for decision in mapping.get("task_state_decisions", []):
+        task_id = int(decision["task_id"])
+        if task_id in decisions_by_task:
+            raise ValueError(f"duplicate task state decision {task_id}")
+        decisions_by_task[task_id] = decision
+
     status_by_task: dict[int, str] = {}
     revision_by_task: dict[int, int] = {}
     type_by_task: dict[int, str] = {}
     for task_id, row in tasks.items():
         old = str(row["task_status"])
-        status_by_task[task_id] = STATE_MAP.get(old, old)
-        revision_by_task[task_id] = int(row["workflow_revision"]) + (1 if old in STATE_MAP else 0)
+        decision = decisions_by_task.get(task_id)
+        if decision is not None:
+            if old != str(decision["from_status"]):
+                raise ValueError(f"task state decision {task_id} no longer matches its from_status")
+            status_by_task[task_id] = str(decision["target_status"])
+            revision_by_task[task_id] = int(row["workflow_revision"]) + 1
+        else:
+            status_by_task[task_id] = STATE_MAP.get(old, old)
+            revision_by_task[task_id] = int(row["workflow_revision"]) + (1 if old in STATE_MAP else 0)
         type_by_task[task_id] = str(row["task_type"])
-    for decision in mapping.get("task_state_decisions", []):
-        task_id = int(decision["task_id"])
-        if task_id not in tasks or status_by_task[task_id] != str(decision["from_status"]):
-            raise ValueError(f"task state decision {task_id} no longer matches its from_status")
-        status_by_task[task_id] = str(decision["target_status"])
-        revision_by_task[task_id] += 1
     existing_planning = {int(row["task_id"]) for row in rows["planning_setting"]}
     for planning in mapping.get("planning_tasks", []):
         task_id = int(planning["task_id"])

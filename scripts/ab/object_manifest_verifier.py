@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import mimetypes
 import os
 import pathlib
 import re
@@ -36,6 +37,7 @@ REQUIRED_FIELDS = {
 }
 UPLOAD_ADAPTERS = {"upload_service", "upload-service", "oss_upload_service"}
 OSS_ADAPTERS = {"oss", "aliyun_oss"}
+CLONE_B_BUNDLE_ADAPTERS = {"clone_b_bundle"}
 FORBIDDEN_HEADERS = {"host", "content-length", "transfer-encoding", "connection"}
 SCHEMA_VERSION = 1
 CHUNK_SIZE = 1024 * 1024
@@ -150,17 +152,73 @@ class HTTPReadAdapter:
         return opener.open(request, timeout=self.timeout_seconds)
 
 
+class LocalReadResponse:
+    def __init__(self, path: pathlib.Path, *, include_body: bool):
+        self._handle = path.open("rb") if include_body else None
+        mime = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        self.headers = {
+            "Content-Length": str(path.stat().st_size),
+            "Content-Type": mime,
+        }
+
+    def read(self, size: int = -1) -> bytes:
+        if self._handle is None:
+            return b""
+        return self._handle.read(size)
+
+    def __enter__(self) -> "LocalReadResponse":
+        return self
+
+    def __exit__(self, *_args: Any) -> None:
+        if self._handle is not None:
+            self._handle.close()
+
+
+@dataclass(frozen=True)
+class LocalReadAdapter:
+    root: pathlib.Path
+    use_head: bool = True
+
+    @classmethod
+    def from_root(cls, root: pathlib.Path) -> "LocalReadAdapter":
+        if root.is_symlink() or not root.is_dir():
+            raise ValueError("Clone B bundle root must be an existing non-symlink directory")
+        return cls(root=root.resolve(strict=True))
+
+    def request(self, method: str, object_key: str) -> LocalReadResponse:
+        if method not in {"GET", "HEAD"} or not valid_object_key(object_key):
+            raise OSError("invalid local bundle read request")
+        current = self.root
+        for segment in object_key.split("/"):
+            current = current / segment
+            if current.is_symlink():
+                raise OSError("local bundle path contains a symlink")
+        try:
+            resolved = current.resolve(strict=True)
+            resolved.relative_to(self.root)
+        except (FileNotFoundError, RuntimeError, ValueError) as exc:
+            raise OSError("local bundle object is missing or outside its root") from exc
+        if not resolved.is_file():
+            raise OSError("local bundle object is not a regular file")
+        return LocalReadResponse(resolved, include_body=method == "GET")
+
+
 @dataclass(frozen=True)
 class VerifierConfig:
     upload: HTTPReadAdapter | None = None
     oss: HTTPReadAdapter | None = None
+    clone_b_bundle: LocalReadAdapter | None = None
 
-    def adapter_for(self, storage_adapter: str) -> HTTPReadAdapter | None:
+    def adapter_for(
+        self, storage_adapter: str
+    ) -> HTTPReadAdapter | LocalReadAdapter | None:
         name = storage_adapter.strip().lower()
         if name in UPLOAD_ADAPTERS:
             return self.upload
         if name in OSS_ADAPTERS:
             return self.oss
+        if name in CLONE_B_BUNDLE_ADAPTERS:
+            return self.clone_b_bundle
         return None
 
 
@@ -213,7 +271,9 @@ def stream_sha256(body: BinaryIO, expected_size: int) -> tuple[int, str, bool]:
     return total, digest.hexdigest(), exceeded
 
 
-def verify_object(row: dict[str, Any], adapter: HTTPReadAdapter) -> tuple[bool, list[dict[str, Any]]]:
+def verify_object(
+    row: dict[str, Any], adapter: HTTPReadAdapter | LocalReadAdapter
+) -> tuple[bool, list[dict[str, Any]]]:
     entity = row["entity_key"]
     head_size: int | None = None
     head_mime = ""
@@ -396,7 +456,26 @@ def verify(
                 except json.JSONDecodeError:
                     problems.append(violation("object_manifest.invalid", str(line_no), "invalid JSON", blocked=True))
                     continue
-                row_problems = validate_contract(row, line_no)
+                is_attested_exception = (
+                    exception is not None
+                    and isinstance(row, dict)
+                    and row.get("entity_key") == exception["entity_key"]
+                )
+                if is_attested_exception:
+                    try:
+                        historical_exception.validate_exception_object_row(row)
+                        row_problems = []
+                    except historical_exception.ExceptionContractError as exc:
+                        row_problems = [
+                            violation(
+                                "object_manifest.exception_row_invalid",
+                                historical_exception.ENTITY_KEY,
+                                str(exc),
+                                blocked=True,
+                            )
+                        ]
+                else:
+                    row_problems = validate_contract(row, line_no)
                 if not row_problems and row["entity_key"] in seen_entities:
                     row_problems.append(violation(
                         "object_manifest.duplicate", row["entity_key"],
@@ -500,6 +579,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--upload-headers-file", help="JSON headers file; may use AB_UPLOAD_READ_HEADERS_FILE")
     parser.add_argument("--oss-base-url", help="read-only OSS/gateway URL prefix; may use AB_OSS_READ_BASE_URL")
     parser.add_argument("--oss-headers-file", help="JSON headers file; may use AB_OSS_READ_HEADERS_FILE")
+    parser.add_argument(
+        "--clone-b-bundle-root",
+        help="read-only root containing materialized Clone B source bundles",
+    )
     parser.add_argument("--timeout-seconds", type=float, default=30.0)
     parser.add_argument(
         "--historical-unavailable-exception",
@@ -533,7 +616,15 @@ def main(argv: list[str] | None = None) -> int:
     except OSError:
         pass
     try:
-        config = VerifierConfig(upload=adapter_from_args("upload", args), oss=adapter_from_args("oss", args))
+        config = VerifierConfig(
+            upload=adapter_from_args("upload", args),
+            oss=adapter_from_args("oss", args),
+            clone_b_bundle=(
+                LocalReadAdapter.from_root(pathlib.Path(args.clone_b_bundle_root))
+                if args.clone_b_bundle_root
+                else None
+            ),
+        )
         result = verify(
             manifest,
             config,

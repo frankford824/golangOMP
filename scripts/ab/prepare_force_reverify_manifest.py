@@ -109,7 +109,10 @@ def evidence_document(
     return result
 
 
-def load_reviewed_rows(path: pathlib.Path) -> tuple[list[dict[str, Any]], str]:
+def load_reviewed_rows(
+    path: pathlib.Path,
+    exception: dict[str, Any] | None = None,
+) -> tuple[list[dict[str, Any]], str]:
     if path.is_symlink() or not path.is_file():
         raise ManifestError("force_reverify.source_missing", "source manifest is missing")
     source_sha = sha256_file(path)
@@ -136,7 +139,23 @@ def load_reviewed_rows(path: pathlib.Path) -> tuple[list[dict[str, Any]], str]:
                 "force_reverify.source_invalid",
                 f"source manifest row {line_no} is invalid JSON",
             ) from exc
-        problems = verifier.validate_contract(row, line_no)
+        is_attested_exception = (
+            exception is not None
+            and isinstance(row, dict)
+            and row.get("entity_key") == exception["entity_key"]
+        )
+        if is_attested_exception:
+            try:
+                historical_exception.validate_exception_object_row(row)
+                problems = []
+            except historical_exception.ExceptionContractError:
+                problems = [
+                    {
+                        "violation_code": "object_manifest.exception_row_invalid"
+                    }
+                ]
+        else:
+            problems = verifier.validate_contract(row, line_no)
         if problems:
             code = problems[0]["violation_code"]
             if code == "object_manifest.placeholder":
@@ -148,7 +167,7 @@ def load_reviewed_rows(path: pathlib.Path) -> tuple[list[dict[str, Any]], str]:
                 "force_reverify.source_invalid",
                 f"source manifest row {line_no} violates the object contract",
             )
-        if row["sha256"] == ZERO_SHA256:
+        if not is_attested_exception and row["sha256"] in {"", ZERO_SHA256}:
             raise ManifestError(
                 "force_reverify.fingerprint_missing",
                 f"source manifest row {line_no} has no reviewed fingerprint",
@@ -183,7 +202,6 @@ def prepare(
             "force_reverify.path_collision",
             "source, exception, and force-reverify manifest paths must differ",
         )
-    rows, source_sha = load_reviewed_rows(source_path)
     exception: dict[str, Any] | None = None
     exception_sha = ZERO_SHA256
     mapping_sha = ZERO_SHA256
@@ -194,6 +212,7 @@ def prepare(
         )
         mapping_sha = attestation["mapping_sha256"]
         mapping_row_hash = attestation["mapping_row_hash"]
+    rows, source_sha = load_reviewed_rows(source_path, exception)
     forced_rows: list[dict[str, Any]] = []
     for row in rows:
         forced = dict(row)

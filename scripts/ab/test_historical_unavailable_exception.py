@@ -23,7 +23,19 @@ class HistoricalUnavailableExceptionTest(unittest.TestCase):
             "confirmed_at": "2026-07-23T12:00:00Z",
             "confirmation_note": "admin confirmed historical tombstone",
             "recovery_source_task_asset_id": 0,
-            "original_storage_ref_id": "ref-12323",
+            "original_storage_ref_id": MODULE.EXPECTED_STORAGE_REF_ID,
+            "expected_file_size": MODULE.EXPECTED_SIZE,
+            "object_probe_result": MODULE.EXPECTED_PROBE_RESULT,
+            "object_probe_read_only_get_count": (
+                MODULE.EXPECTED_PROBE_READ_ONLY_GET_COUNT
+            ),
+            "object_probe_evidence_hash": MODULE.EXPECTED_PROBE_EVIDENCE_HASH,
+            "object_probe_input_manifest_sha256": (
+                MODULE.EXPECTED_PROBE_INPUT_MANIFEST_SHA256
+            ),
+            "object_probe_object_key_sha256": (
+                MODULE.EXPECTED_PROBE_OBJECT_KEY_SHA256
+            ),
             "blockers": [],
         }
         mapping_row["manifest_row_hash"] = MODULE.canonical_hash(mapping_row)
@@ -36,13 +48,13 @@ class HistoricalUnavailableExceptionTest(unittest.TestCase):
             "owner_kind": "task_asset",
             "owner_id": MODULE.TASK_ASSET_ID,
             "task_id": MODULE.TASK_ID,
-            "storage_ref_id": "ref-12323",
-            "storage_adapter": "upload_service",
-            "object_key": "tasks/2199/historical/12323.psd",
-            "size": 128,
-            "mime_type": "image/vnd.adobe.photoshop",
-            "sha256": "1" * 64,
-            "status": "historical_unavailable",
+            "storage_ref_id": MODULE.EXPECTED_STORAGE_REF_ID,
+            "storage_adapter": MODULE.EXPECTED_STORAGE_ADAPTER,
+            "object_key": MODULE.EXPECTED_OBJECT_KEY,
+            "size": MODULE.EXPECTED_SIZE,
+            "mime_type": MODULE.EXPECTED_MIME_TYPE,
+            "sha256": "",
+            "status": MODULE.EXPECTED_STATUS,
             "is_placeholder": False,
         }
         manifest_path = root / "objects.jsonl"
@@ -129,6 +141,52 @@ class HistoricalUnavailableExceptionTest(unittest.TestCase):
             ):
                 self.build(paths)
 
+    def test_wrong_size_or_probe_binding_is_rejected(self):
+        for field, value in (
+            ("expected_file_size", MODULE.EXPECTED_SIZE - 1),
+            ("object_probe_result", "unknown"),
+            ("object_probe_read_only_get_count", 0),
+            ("object_probe_evidence_hash", "9" * 64),
+            ("object_probe_input_manifest_sha256", "8" * 64),
+            ("object_probe_object_key_sha256", "7" * 64),
+        ):
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as raw:
+                paths = self.fixture(pathlib.Path(raw))
+                mapping = json.loads(paths["mapping"].read_text(encoding="utf-8"))
+                row = mapping["asset_recoveries"][0]
+                row[field] = value
+                row["manifest_row_hash"] = MODULE.canonical_hash(
+                    {
+                        key: item
+                        for key, item in row.items()
+                        if key != "manifest_row_hash"
+                    }
+                )
+                self.write_json(paths["mapping"], mapping)
+                with self.assertRaisesRegex(
+                    MODULE.ExceptionContractError, "not final-reviewed"
+                ):
+                    self.build(paths)
+
+    def test_original_object_row_must_keep_exact_blank_digest_contract(self):
+        for field, value in (
+            ("size", MODULE.EXPECTED_SIZE - 1),
+            ("object_key", "tasks/2199/thumbnail.png"),
+            ("sha256", "5" * 64),
+        ):
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as raw:
+                paths = self.fixture(pathlib.Path(raw))
+                row = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+                row[field] = value
+                paths["manifest"].write_text(
+                    MODULE.canonical_json(row) + "\n", encoding="utf-8"
+                )
+                with self.assertRaisesRegex(
+                    MODULE.ExceptionContractError,
+                    "historical-unavailable object contract",
+                ):
+                    self.build(paths)
+
     def test_stale_mapping_row_hash_is_rejected(self):
         with tempfile.TemporaryDirectory() as raw:
             paths = self.fixture(pathlib.Path(raw))
@@ -171,6 +229,21 @@ class HistoricalUnavailableExceptionTest(unittest.TestCase):
             )
             with self.assertRaisesRegex(
                 MODULE.ExceptionContractError, "object identity differs"
+            ):
+                self.build(paths)
+
+    def test_empty_digest_is_allowed_only_for_exact_tombstone_contract(self):
+        with tempfile.TemporaryDirectory() as raw:
+            paths = self.fixture(pathlib.Path(raw))
+            self.build(paths)
+            row = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+            row["owner_id"] = 12324
+            paths["manifest"].write_text(
+                MODULE.canonical_json(row) + "\n", encoding="utf-8"
+            )
+            with self.assertRaisesRegex(
+                MODULE.ExceptionContractError,
+                "object identity differs",
             ):
                 self.build(paths)
 

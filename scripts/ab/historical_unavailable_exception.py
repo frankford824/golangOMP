@@ -26,9 +26,43 @@ ENTITY_KEY = "task_asset:12323"
 STRATEGY = "historical_unavailable_tombstone_v1"
 POLICY_ID = "legacy_historical_asset_unavailable_v1"
 EXPECTED_HTTP_STATUS = 410
+EXPECTED_SIZE = 17755216
+EXPECTED_STORAGE_REF_ID = "c0a135a1-080f-46a0-a41a-461aef0ea0fb"
+EXPECTED_STORAGE_ADAPTER = "oss_upload_service"
+EXPECTED_OBJECT_KEY = (
+    "tasks/RW-20260709-A-002196/assets/AST-0002/v1/delivery/"
+    "1783575756672661314_d97ed925.psd"
+)
+EXPECTED_MIME_TYPE = "image/vnd.adobe.photoshop"
+EXPECTED_STATUS = "recorded"
+EXPECTED_PROBE_RESULT = "not_found"
+EXPECTED_PROBE_READ_ONLY_GET_COUNT = 1
+EXPECTED_PROBE_EVIDENCE_HASH = (
+    "f1c78819e1f3d5f4e7a4b25ff3d173368574a5639f4c6df45c8aae5482d047b8"
+)
+EXPECTED_PROBE_INPUT_MANIFEST_SHA256 = (
+    "3f17b37296d2670235ca9bfcfd4388823b81adecf8fbac0826e6f241923579c7"
+)
+EXPECTED_PROBE_OBJECT_KEY_SHA256 = (
+    "e732f6cd269a93d6bac168b0852dbcf8480af8966847278cb073cd6905b0efdd"
+)
 ZERO_TIME = "0001-01-01T00:00:00Z"
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 CLONE_B_DATABASE = re.compile(r"^ab_[A-Za-z0-9_]*_b(?:_|$)[A-Za-z0-9_]*$")
+OBJECT_FIELDS = {
+    "entity_key",
+    "owner_kind",
+    "owner_id",
+    "task_id",
+    "storage_ref_id",
+    "storage_adapter",
+    "object_key",
+    "size",
+    "mime_type",
+    "sha256",
+    "status",
+    "is_placeholder",
+}
 
 SQL_FIELDS = {
     "schema_version",
@@ -69,6 +103,12 @@ EXCEPTION_FIELDS = {
     "storage_ref_id",
     "object_row_sha256",
     "mapping_row_hash",
+    "expected_file_size",
+    "object_probe_result",
+    "object_probe_read_only_get_count",
+    "object_probe_evidence_hash",
+    "object_probe_input_manifest_sha256",
+    "object_probe_object_key_sha256",
     "working_reference_count",
     "finalized_reference_count",
 }
@@ -160,7 +200,16 @@ def validate_mapping(path: pathlib.Path) -> tuple[str, str, dict[str, Any]]:
         or not str(row.get("confirmation_note") or "").strip()
         or row.get("recovery_source_task_asset_id") != 0
         or row.get("blockers")
-        or not str(row.get("original_storage_ref_id") or "").strip()
+        or row.get("original_storage_ref_id") != EXPECTED_STORAGE_REF_ID
+        or row.get("expected_file_size") != EXPECTED_SIZE
+        or row.get("object_probe_result") != EXPECTED_PROBE_RESULT
+        or row.get("object_probe_read_only_get_count")
+        != EXPECTED_PROBE_READ_ONLY_GET_COUNT
+        or row.get("object_probe_evidence_hash") != EXPECTED_PROBE_EVIDENCE_HASH
+        or row.get("object_probe_input_manifest_sha256")
+        != EXPECTED_PROBE_INPUT_MANIFEST_SHA256
+        or row.get("object_probe_object_key_sha256")
+        != EXPECTED_PROBE_OBJECT_KEY_SHA256
     ):
         raise ExceptionContractError("historical-unavailable mapping row is not final-reviewed")
     row_hash = require_sha(row.get("manifest_row_hash"), "mapping row hash")
@@ -172,14 +221,43 @@ def validate_mapping(path: pathlib.Path) -> tuple[str, str, dict[str, Any]]:
     return sha256_file(path), row_hash, row
 
 
+def validate_exception_object_row(row: Any) -> None:
+    """Validate the one tombstone row without requiring an unavailable digest."""
+    valid_key = (
+        isinstance(row, dict)
+        and isinstance(row.get("object_key"), str)
+        and bool(row["object_key"])
+        and not row["object_key"].startswith("/")
+        and "\\" not in row["object_key"]
+        and "\x00" not in row["object_key"]
+        and all(part not in {"", ".", ".."} for part in row["object_key"].split("/"))
+    )
+    digest = row.get("sha256") if isinstance(row, dict) else None
+    if (
+        not isinstance(row, dict)
+        or set(row) != OBJECT_FIELDS
+        or row.get("entity_key") != ENTITY_KEY
+        or row.get("owner_kind") != "task_asset"
+        or row.get("owner_id") != TASK_ASSET_ID
+        or row.get("task_id") != TASK_ID
+        or row.get("storage_ref_id") != EXPECTED_STORAGE_REF_ID
+        or row.get("storage_adapter") != EXPECTED_STORAGE_ADAPTER
+        or not valid_key
+        or row.get("object_key") != EXPECTED_OBJECT_KEY
+        or row.get("size") != EXPECTED_SIZE
+        or row.get("mime_type") != EXPECTED_MIME_TYPE
+        or digest != ""
+        or row.get("status") != EXPECTED_STATUS
+        or row.get("is_placeholder") is not False
+    ):
+        raise ExceptionContractError(
+            "task_asset:12323 violates the historical-unavailable object contract"
+        )
+
+
 def read_manifest_row(
     path: pathlib.Path, storage_ref_id: str
 ) -> tuple[str, str, dict[str, Any]]:
-    try:
-        from scripts.ab import object_manifest_verifier as object_verifier
-    except ModuleNotFoundError:
-        import object_manifest_verifier as object_verifier
-
     if path.is_symlink() or not path.is_file():
         raise ExceptionContractError("object manifest must be an existing non-symlink file")
     matches: list[dict[str, Any]] = []
@@ -201,9 +279,6 @@ def read_manifest_row(
     if len(matches) != 1:
         raise ExceptionContractError("object manifest must contain exactly task_asset:12323")
     row = matches[0]
-    problems = object_verifier.validate_contract(row, 1)
-    if problems:
-        raise ExceptionContractError("task_asset:12323 violates the object manifest contract")
     if (
         row.get("owner_kind") != "task_asset"
         or row.get("owner_id") != TASK_ASSET_ID
@@ -211,6 +286,7 @@ def read_manifest_row(
         or row.get("storage_ref_id") != storage_ref_id
     ):
         raise ExceptionContractError("task_asset:12323 object identity differs from mapping")
+    validate_exception_object_row(row)
     return sha256_file(path), canonical_hash(row), row
 
 
@@ -307,6 +383,18 @@ def build(
         "storage_ref_id": mapping_row["original_storage_ref_id"],
         "object_row_sha256": object_row_hash,
         "mapping_row_hash": row_hash,
+        "expected_file_size": mapping_row["expected_file_size"],
+        "object_probe_result": mapping_row["object_probe_result"],
+        "object_probe_read_only_get_count": mapping_row[
+            "object_probe_read_only_get_count"
+        ],
+        "object_probe_evidence_hash": mapping_row["object_probe_evidence_hash"],
+        "object_probe_input_manifest_sha256": mapping_row[
+            "object_probe_input_manifest_sha256"
+        ],
+        "object_probe_object_key_sha256": mapping_row[
+            "object_probe_object_key_sha256"
+        ],
         "working_reference_count": 0,
         "finalized_reference_count": 0,
     }
@@ -363,6 +451,16 @@ def validate_attestation(
         or exception.get("policy_id") != POLICY_ID
         or exception.get("expected_http_status") != EXPECTED_HTTP_STATUS
         or exception.get("mapping_row_hash") != value["mapping_row_hash"]
+        or exception.get("expected_file_size") != EXPECTED_SIZE
+        or exception.get("object_probe_result") != EXPECTED_PROBE_RESULT
+        or exception.get("object_probe_read_only_get_count")
+        != EXPECTED_PROBE_READ_ONLY_GET_COUNT
+        or exception.get("object_probe_evidence_hash")
+        != EXPECTED_PROBE_EVIDENCE_HASH
+        or exception.get("object_probe_input_manifest_sha256")
+        != EXPECTED_PROBE_INPUT_MANIFEST_SHA256
+        or exception.get("object_probe_object_key_sha256")
+        != EXPECTED_PROBE_OBJECT_KEY_SHA256
         or exception.get("working_reference_count") != 0
         or exception.get("finalized_reference_count") != 0
         or not str(exception.get("storage_ref_id") or "").strip()

@@ -123,6 +123,29 @@ class CanonicalEntitiesTest(unittest.TestCase):
         source = next(row for row in entities if row["entity_key"].startswith("revision-source:"))
         self.assertEqual(source["components"][:3], ["500", "source", "d" * 64])
 
+    def test_reviewed_state_decision_precedes_generic_legacy_mapping(self):
+        mapping = self.mapping()
+        mapping["task_state_decisions"] = [{
+            "task_id": 10,
+            "from_status": "PendingAuditA",
+            "target_status": "InProgress",
+            "confidence": "confirmed_auto",
+            "confirmed_by": 1,
+            "confirmed_at": "2026-07-24T00:00:00Z",
+            "confirmation_note": "reviewed exception",
+            "manifest_row_hash": "d" * 64,
+        }]
+        entities = build_entities(
+            mapping,
+            self.rows(),
+            "a" * 64,
+            self.projection(),
+            {"decision": "confirmed"},
+            {"status": "PASS", "violation_count": 0},
+        )
+        task = next(row for row in entities if row["entity_key"] == "task:10")
+        self.assertEqual(task["components"], ["10", "design_task", "InProgress", "7", "4"])
+
     def test_existing_revision_and_coverage_drift_fail_closed(self):
         rows = self.rows()
         rows["meta"][0]["revision_count"] = 1
