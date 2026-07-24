@@ -6,6 +6,7 @@ import pathlib
 import struct
 import sys
 import tempfile
+import threading
 import unittest
 import urllib.error
 import urllib.request
@@ -63,6 +64,43 @@ class FakeAdapter:
             return FakeResponse(body, mime)
         body, mime, declared_size = value
         return FakeResponse(body, mime, declared_size)
+
+
+class FakeParallelAdapter:
+    def __init__(self, objects, state=None):
+        self.objects = objects
+        self.base_url = "parallel-origin"
+        self.use_head = False
+        self.state = state or {
+            "barrier": threading.Barrier(len(objects)),
+            "clones": 0,
+            "threads": set(),
+            "closed": 0,
+            "lock": threading.Lock(),
+        }
+
+    def origin_fingerprint(self):
+        return hashlib.sha256(b"parallel-origin").hexdigest()
+
+    def clone(self):
+        with self.state["lock"]:
+            self.state["clones"] += 1
+        return FakeParallelAdapter(self.objects, self.state)
+
+    def get_metadata(self, object_key, _max_object_bytes):
+        with self.state["lock"]:
+            self.state["threads"].add(threading.current_thread().name)
+        self.state["barrier"].wait(timeout=5)
+        body, mime = self.objects[object_key]
+        return MODULE.ObjectMetadata(
+            size=len(body),
+            mime_type=mime,
+            sha256=hashlib.sha256(body).hexdigest(),
+        )
+
+    def close(self):
+        with self.state["lock"]:
+            self.state["closed"] += 1
 
 
 class FeedStream:
@@ -365,6 +403,35 @@ class HydrateObjectManifestTest(unittest.TestCase):
             self.assertEqual(row["mime_type"], "image/vnd.adobe.photoshop")
         self.assertEqual(hydrated[2], rows[2])
         self.assertEqual(len(checkpoint_value["completed"]), 1)
+
+    def test_parallel_cloneable_adapter_hashes_with_independent_workers(self):
+        objects = {
+            f"tasks/7/{name}.bin": (name.encode(), "application/octet-stream")
+            for name in ("a", "b", "c", "d")
+        }
+        adapter = FakeParallelAdapter(objects)
+        rows = [
+            self.row(index + 10, object_key)
+            for index, object_key in enumerate(objects)
+        ]
+        with tempfile.TemporaryDirectory() as root:
+            root_path = pathlib.Path(root)
+            manifest = self.write_manifest(root, rows)
+            output = root_path / "hydrated.jsonl"
+            checkpoint = root_path / "checkpoint.json"
+            result = MODULE.hydrate_manifest(
+                manifest,
+                output,
+                checkpoint,
+                VERIFIER.VerifierConfig(upload=adapter),
+                checkpoint_every=1,
+                workers=4,
+            )
+        self.assertEqual("PASS", result["status"])
+        self.assertEqual(4, result["read_only_get_count"])
+        self.assertEqual(4, adapter.state["clones"])
+        self.assertEqual(4, adapter.state["closed"])
+        self.assertEqual(4, len(adapter.state["threads"]))
 
     def test_interrupt_flushes_checkpoint_and_resume_skips_completed_get(self):
         objects = {

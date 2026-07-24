@@ -10,6 +10,7 @@ request/response headers, or response bodies.
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import hashlib
 import http.client
 import json
@@ -21,6 +22,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import threading
 import urllib.error
 import urllib.parse
 from dataclasses import dataclass
@@ -934,6 +936,15 @@ class PersistentSSHDirectOSSAdapter:
         ))
         return hashlib.sha256(source.encode("utf-8")).hexdigest()
 
+    def clone(self) -> "PersistentSSHDirectOSSAdapter":
+        """Create an independent framed SSH session for parallel hashing."""
+        return PersistentSSHDirectOSSAdapter(
+            self.host,
+            self.env_path,
+            self.timeout_seconds,
+            process_factory=self.process_factory,
+        )
+
     def get_metadata(
         self,
         object_key: str,
@@ -1460,11 +1471,14 @@ def hydrate_manifest(
     *,
     checkpoint_every: int = DEFAULT_CHECKPOINT_EVERY,
     max_object_bytes: int = DEFAULT_MAX_OBJECT_BYTES,
+    workers: int = 1,
 ) -> dict[str, Any]:
     if checkpoint_every <= 0:
         raise ValueError("checkpoint_every must be positive")
     if max_object_bytes <= 0:
         raise ValueError("max_object_bytes must be positive")
+    if workers <= 0 or workers > 16:
+        raise ValueError("workers must be in [1, 16]")
 
     rows, input_sha = read_manifest(manifest_path)
     fingerprints = adapter_fingerprints(config)
@@ -1517,48 +1531,132 @@ def hydrate_manifest(
     pending_since_checkpoint = 0
     get_count = 0
     interrupted = False
-    for key in sorted(targets):
-        if key in completed or key in failed_targets:
-            continue
+
+    def checkpoint_if_needed() -> None:
+        nonlocal pending_since_checkpoint
+        if pending_since_checkpoint < checkpoint_every:
+            return
+        atomic_write_json(
+            checkpoint_path,
+            checkpoint_document(
+                input_sha, fingerprints, completed, failed_targets
+            ),
+        )
+        pending_since_checkpoint = 0
+
+    def record_failure(key: str, exc: HydrationFailure) -> None:
+        nonlocal pending_since_checkpoint
         target = targets[key]
-        get_count += 1
-        try:
-            metadata = get_object_metadata(
-                target["adapter"], target["object_key"], max_object_bytes
-            )
-        except KeyboardInterrupt:
-            interrupted = True
-            break
-        except HydrationFailure as exc:
-            failed_targets[key] = checkpoint_failure_record(
-                target["adapter_kind"], target["object_key"], exc.code, exc.detail,
-            )
-            failures.append(safe_failure(
-                target["adapter_kind"], target["object_key"], target["entities"],
-                exc.code, exc.detail,
-            ))
-            pending_since_checkpoint += 1
-            if pending_since_checkpoint >= checkpoint_every:
-                atomic_write_json(
-                    checkpoint_path,
-                    checkpoint_document(
-                        input_sha, fingerprints, completed, failed_targets
-                    ),
-                )
-                pending_since_checkpoint = 0
-            continue
+        failed_targets[key] = checkpoint_failure_record(
+            target["adapter_kind"], target["object_key"], exc.code, exc.detail,
+        )
+        failures.append(safe_failure(
+            target["adapter_kind"], target["object_key"], target["entities"],
+            exc.code, exc.detail,
+        ))
+        pending_since_checkpoint += 1
+        checkpoint_if_needed()
+
+    def record_success(key: str, metadata: ObjectMetadata) -> None:
+        nonlocal pending_since_checkpoint
+        target = targets[key]
         completed[key] = checkpoint_record(
             target["adapter_kind"], target["object_key"], metadata
         )
         pending_since_checkpoint += 1
-        if pending_since_checkpoint >= checkpoint_every:
-            atomic_write_json(
-                checkpoint_path,
-                checkpoint_document(
-                    input_sha, fingerprints, completed, failed_targets
-                ),
+        checkpoint_if_needed()
+
+    pending_keys = [
+        key
+        for key in sorted(targets)
+        if key not in completed and key not in failed_targets
+    ]
+    if workers == 1:
+        for key in pending_keys:
+            target = targets[key]
+            get_count += 1
+            try:
+                metadata = get_object_metadata(
+                    target["adapter"], target["object_key"], max_object_bytes
+                )
+            except KeyboardInterrupt:
+                interrupted = True
+                break
+            except HydrationFailure as exc:
+                record_failure(key, exc)
+                continue
+            record_success(key, metadata)
+    elif pending_keys:
+        adapters = {
+            id(targets[key]["adapter"]): targets[key]["adapter"]
+            for key in pending_keys
+        }
+        if len(adapters) != 1:
+            raise ValueError(
+                "parallel hydration requires one configured adapter origin"
             )
-            pending_since_checkpoint = 0
+        base_adapter = next(iter(adapters.values()))
+        clone_adapter = getattr(base_adapter, "clone", None)
+        if not callable(clone_adapter):
+            raise ValueError(
+                "parallel hydration requires a cloneable read adapter"
+            )
+        expected_fingerprint = next(iter(fingerprints.values()))
+        thread_state = threading.local()
+        worker_adapters: list[Any] = []
+        worker_adapters_lock = threading.Lock()
+        attempted: set[str] = set()
+        attempted_lock = threading.Lock()
+
+        def initialize_worker() -> None:
+            adapter = clone_adapter()
+            fingerprint_reader = getattr(adapter, "origin_fingerprint", None)
+            if (
+                not callable(fingerprint_reader)
+                or fingerprint_reader() != expected_fingerprint
+            ):
+                close = getattr(adapter, "close", None)
+                if callable(close):
+                    close()
+                raise ValueError("parallel adapter origin fingerprint differs")
+            thread_state.adapter = adapter
+            with worker_adapters_lock:
+                worker_adapters.append(adapter)
+
+        def fetch(key: str) -> ObjectMetadata:
+            with attempted_lock:
+                attempted.add(key)
+            target = targets[key]
+            return get_object_metadata(
+                thread_state.adapter, target["object_key"], max_object_bytes
+            )
+
+        executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=workers,
+            initializer=initialize_worker,
+            thread_name_prefix="object-hydration",
+        )
+        futures = {executor.submit(fetch, key): key for key in pending_keys}
+        try:
+            for future in concurrent.futures.as_completed(futures):
+                key = futures[future]
+                try:
+                    metadata = future.result()
+                except HydrationFailure as exc:
+                    record_failure(key, exc)
+                else:
+                    record_success(key, metadata)
+        except KeyboardInterrupt:
+            interrupted = True
+            for future in futures:
+                future.cancel()
+        finally:
+            executor.shutdown(wait=True, cancel_futures=interrupted)
+            for adapter in worker_adapters:
+                close = getattr(adapter, "close", None)
+                if callable(close):
+                    close()
+        get_count = len(attempted)
 
     # Flush all successful work on normal exit, failure, or Ctrl-C.
     atomic_write_json(
@@ -1616,12 +1714,15 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.add_argument("--timeout-seconds", type=float, default=30.0)
     parser.add_argument("--checkpoint-every", type=int, default=DEFAULT_CHECKPOINT_EVERY)
+    parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--max-object-bytes", type=int, default=DEFAULT_MAX_OBJECT_BYTES)
     args = parser.parse_args(argv)
     if args.timeout_seconds <= 0 or args.timeout_seconds > 3600:
         parser.error("--timeout-seconds must be in (0, 3600]")
     if args.checkpoint_every <= 0:
         parser.error("--checkpoint-every must be positive")
+    if args.workers <= 0 or args.workers > 16:
+        parser.error("--workers must be in [1, 16]")
     if args.max_object_bytes <= 0:
         parser.error("--max-object-bytes must be positive")
     return args
@@ -1699,6 +1800,7 @@ def main(argv: list[str] | None = None) -> int:
             manifest, output, checkpoint, config,
             checkpoint_every=args.checkpoint_every,
             max_object_bytes=args.max_object_bytes,
+            workers=args.workers,
         )
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         input_sha = verifier.sha256_file(manifest) if manifest.is_file() else ZERO_SHA256
