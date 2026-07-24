@@ -137,6 +137,8 @@ class FinalizeG06VerdictTest(unittest.TestCase):
             "resumed_target_count": 0,
             "resumed_failure_target_count": 0,
             "retried_transient_failure_target_count": 0,
+            "retried_authorized_failure_target_count": 0,
+            "failure_retry_authorization_sha256": MODULE.ZERO_SHA256,
             "read_only_get_count": 1,
             "hydrated_row_count": 1,
             "deduplicated_get_count": 0,
@@ -375,6 +377,76 @@ class FinalizeG06VerdictTest(unittest.TestCase):
             "g06.hydration_coverage",
             result["violations"][0]["violation_code"],
         )
+
+    def test_zero_authorization_hash_requires_zero_authorized_retries(self):
+        with tempfile.TemporaryDirectory() as raw:
+            paths = self.fixture(pathlib.Path(raw))
+            evidence = json.loads(
+                paths["hydration_evidence"].read_text(encoding="utf-8")
+            )
+            evidence["retried_authorized_failure_target_count"] = 1
+            evidence["evidence_hash"] = MODULE.sha256_bytes(
+                MODULE.canonical_json(
+                    {
+                        key: value
+                        for key, value in evidence.items()
+                        if key != "evidence_hash"
+                    }
+                ).encode("utf-8")
+            )
+            self.write_json(paths["hydration_evidence"], evidence)
+            result = self.adjudicate(paths)
+        self.assertEqual("BLOCKED", result["status"])
+        self.assertEqual(
+            "g06.hydration_authorization",
+            result["violations"][0]["violation_code"],
+        )
+
+    def test_nonzero_authorization_hash_requires_authorized_retry(self):
+        with tempfile.TemporaryDirectory() as raw:
+            paths = self.fixture(pathlib.Path(raw))
+            evidence = json.loads(
+                paths["hydration_evidence"].read_text(encoding="utf-8")
+            )
+            evidence["failure_retry_authorization_sha256"] = "f" * 64
+            evidence["evidence_hash"] = MODULE.sha256_bytes(
+                MODULE.canonical_json(
+                    {
+                        key: value
+                        for key, value in evidence.items()
+                        if key != "evidence_hash"
+                    }
+                ).encode("utf-8")
+            )
+            self.write_json(paths["hydration_evidence"], evidence)
+            result = self.adjudicate(paths)
+        self.assertEqual("BLOCKED", result["status"])
+        self.assertEqual(
+            "g06.hydration_authorization",
+            result["violations"][0]["violation_code"],
+        )
+
+    def test_nonzero_authorization_hash_with_retry_is_accepted(self):
+        with tempfile.TemporaryDirectory() as raw:
+            paths = self.fixture(pathlib.Path(raw))
+            evidence = json.loads(
+                paths["hydration_evidence"].read_text(encoding="utf-8")
+            )
+            evidence["retried_authorized_failure_target_count"] = 1
+            evidence["failure_retry_authorization_sha256"] = "f" * 64
+            evidence["evidence_hash"] = MODULE.sha256_bytes(
+                MODULE.canonical_json(
+                    {
+                        key: value
+                        for key, value in evidence.items()
+                        if key != "evidence_hash"
+                    }
+                ).encode("utf-8")
+            )
+            self.write_json(paths["hydration_evidence"], evidence)
+            result = self.adjudicate(paths)
+        self.assertEqual("PASS", result["status"])
+        self.assertEqual(0, result["violation_count"])
 
     def test_bundle_verdict_cannot_be_rebound_to_another_manifest(self):
         with tempfile.TemporaryDirectory() as raw:

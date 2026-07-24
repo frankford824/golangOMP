@@ -390,6 +390,59 @@ class HydrateObjectManifestTest(unittest.TestCase):
         )
         return result, output, checkpoint
 
+    def write_retry_authorization(
+        self,
+        root,
+        manifest,
+        checkpoint,
+        failure_record,
+        row,
+        body=b"reprobe-stable",
+    ):
+        root_path = pathlib.Path(root)
+        reprobes = []
+        for index in (1, 2):
+            output = root_path / f"reprobe-{index}.jsonl"
+            evidence_path = root_path / f"reprobe-{index}.evidence.json"
+            result = MODULE.hydrate_manifest(
+                manifest,
+                output,
+                root_path / f"reprobe-{index}.checkpoint.json",
+                VERIFIER.VerifierConfig(
+                    upload=FakeAdapter({
+                        row["object_key"]: (body, "application/octet-stream"),
+                    })
+                ),
+            )
+            self.assertEqual(result["status"], "PASS")
+            MODULE.atomic_write_json(evidence_path, result)
+            reprobes.append({
+                "evidence_path": evidence_path.name,
+                "evidence_sha256": VERIFIER.sha256_file(evidence_path),
+                "artifact_path": output.name,
+                "artifact_sha256": VERIFIER.sha256_file(output),
+            })
+        payload = {
+            "schema_version": MODULE.FAILURE_RETRY_AUTHORIZATION_SCHEMA_VERSION,
+            "authorization_type": MODULE.FAILURE_RETRY_AUTHORIZATION_TYPE,
+            "input_manifest_sha256": VERIFIER.sha256_file(manifest),
+            "checkpoint_sha256": VERIFIER.sha256_file(checkpoint),
+            "failure_retries": [{
+                "failure_record_sha256": (
+                    MODULE.checkpoint_failure_record_sha256(failure_record)
+                ),
+                "reprobes": reprobes,
+            }],
+        }
+        authorization_sha = hashlib.sha256(
+            VERIFIER.canonical_json(payload).encode("utf-8")
+        ).hexdigest()
+        authorization = dict(payload)
+        authorization["authorization_sha256"] = authorization_sha
+        path = root_path / "failure-retry-authorization.json"
+        MODULE.atomic_write_json(path, authorization)
+        return path, authorization_sha
+
     def test_streams_missing_hash_and_deduplicates_object_key(self):
         body = b"real bytes"
         adapter = FakeAdapter({"tasks/7/a.psd": (body, "image/vnd.adobe.photoshop")})
@@ -518,7 +571,8 @@ class HydrateObjectManifestTest(unittest.TestCase):
 
     def test_http_failure_is_secret_free_and_does_not_emit_partial_manifest(self):
         error = urllib.error.HTTPError(
-            "https://secret.invalid/body-secret", 404, "body-secret", {}, None
+            "https://secret.invalid/body-secret", 404, "body-secret", {},
+            io.BytesIO(),
         )
         adapter = FakeAdapter({"tasks/7/missing.bin": error})
         with tempfile.TemporaryDirectory() as root:
@@ -537,7 +591,9 @@ class HydrateObjectManifestTest(unittest.TestCase):
         self.assertFalse(output.exists())
 
     def test_failure_then_interrupt_is_checkpointed_and_skipped_on_resume(self):
-        missing = urllib.error.HTTPError("https://secret.invalid", 404, "missing", {}, None)
+        missing = urllib.error.HTTPError(
+            "https://secret.invalid", 404, "missing", {}, io.BytesIO()
+        )
         rows = [self.row(10, "tasks/7/a.bin"), self.row(11, "tasks/7/b.bin")]
         with tempfile.TemporaryDirectory() as root:
             root_path = pathlib.Path(root)
@@ -603,7 +659,7 @@ class HydrateObjectManifestTest(unittest.TestCase):
 
     def test_explicit_retry_keeps_http_failure_sticky(self):
         missing = urllib.error.HTTPError(
-            "https://secret.invalid", 404, "missing", {}, None
+            "https://secret.invalid", 404, "missing", {}, io.BytesIO()
         )
         rows = [self.row(10, "tasks/7/a.bin")]
         with tempfile.TemporaryDirectory() as root:
@@ -636,8 +692,289 @@ class HydrateObjectManifestTest(unittest.TestCase):
         self.assertEqual(second_adapter.requests, [])
         self.assertEqual(second["failures"][0]["detail"], "http_status=404")
 
+    def test_content_failure_stays_sticky_without_exact_authorization(self):
+        rows = [self.row(10, "tasks/7/a.bin")]
+        with tempfile.TemporaryDirectory() as root:
+            root_path = pathlib.Path(root)
+            manifest = self.write_manifest(root, rows)
+            output = root_path / "hydrated.jsonl"
+            checkpoint = root_path / "checkpoint.json"
+            first = MODULE.hydrate_manifest(
+                manifest,
+                output,
+                checkpoint,
+                VERIFIER.VerifierConfig(
+                    upload=FakeAdapter({
+                        "tasks/7/a.bin": (
+                            b"short",
+                            "application/octet-stream",
+                            100,
+                        ),
+                    })
+                ),
+            )
+            second_adapter = FakeAdapter({
+                "tasks/7/a.bin": (b"stable", "application/octet-stream"),
+            })
+            second = MODULE.hydrate_manifest(
+                manifest,
+                output,
+                checkpoint,
+                VERIFIER.VerifierConfig(upload=second_adapter),
+                retry_transient_failures=True,
+            )
+
+        self.assertEqual(first["status"], "BLOCKED")
+        self.assertEqual(
+            first["failures"][0]["detail"],
+            "content_length_differs_from_stream",
+        )
+        self.assertEqual(second["status"], "BLOCKED")
+        self.assertEqual(second["retried_authorized_failure_target_count"], 0)
+        self.assertEqual(
+            second["failure_retry_authorization_sha256"],
+            MODULE.ZERO_SHA256,
+        )
+        self.assertEqual(second_adapter.requests, [])
+
+    def test_exact_authorization_retries_one_content_failure_after_two_reprobes(self):
+        rows = [self.row(10, "tasks/7/a.bin")]
+        with tempfile.TemporaryDirectory() as root:
+            root_path = pathlib.Path(root)
+            manifest = self.write_manifest(root, rows)
+            output = root_path / "hydrated.jsonl"
+            checkpoint = root_path / "checkpoint.json"
+            MODULE.hydrate_manifest(
+                manifest,
+                output,
+                checkpoint,
+                VERIFIER.VerifierConfig(
+                    upload=FakeAdapter({
+                        "tasks/7/a.bin": (
+                            b"short",
+                            "application/octet-stream",
+                            100,
+                        ),
+                    })
+                ),
+            )
+            failure_record = json.loads(
+                checkpoint.read_text(encoding="utf-8")
+            )["failed"][0]
+            authorization, authorization_sha = self.write_retry_authorization(
+                root, manifest, checkpoint, failure_record, rows[0]
+            )
+            second_adapter = FakeAdapter({
+                "tasks/7/a.bin": (
+                    b"reprobe-stable",
+                    "application/octet-stream",
+                ),
+            })
+            second = MODULE.hydrate_manifest(
+                manifest,
+                output,
+                checkpoint,
+                VERIFIER.VerifierConfig(upload=second_adapter),
+                failure_retry_authorization_path=authorization,
+            )
+
+        self.assertEqual(second["status"], "PASS")
+        self.assertEqual(second["retried_authorized_failure_target_count"], 1)
+        self.assertEqual(
+            second["failure_retry_authorization_sha256"],
+            authorization_sha,
+        )
+        self.assertEqual(second["resumed_failure_target_count"], 0)
+        self.assertEqual(second_adapter.requests, [("GET", "tasks/7/a.bin")])
+
+    def test_authorization_rejects_wrong_self_hash_before_any_get(self):
+        rows = [self.row(10, "tasks/7/a.bin")]
+        with tempfile.TemporaryDirectory() as root:
+            root_path = pathlib.Path(root)
+            manifest = self.write_manifest(root, rows)
+            output = root_path / "hydrated.jsonl"
+            checkpoint = root_path / "checkpoint.json"
+            MODULE.hydrate_manifest(
+                manifest,
+                output,
+                checkpoint,
+                VERIFIER.VerifierConfig(
+                    upload=FakeAdapter({
+                        "tasks/7/a.bin": (
+                            b"short",
+                            "application/octet-stream",
+                            100,
+                        ),
+                    })
+                ),
+            )
+            failure_record = json.loads(
+                checkpoint.read_text(encoding="utf-8")
+            )["failed"][0]
+            authorization, _authorization_sha = self.write_retry_authorization(
+                root, manifest, checkpoint, failure_record, rows[0]
+            )
+            value = json.loads(authorization.read_text(encoding="utf-8"))
+            value["authorization_sha256"] = "f" * 64
+            MODULE.atomic_write_json(authorization, value)
+            adapter = FakeAdapter({
+                "tasks/7/a.bin": (b"reprobe-stable", "application/octet-stream"),
+            })
+            with self.assertRaisesRegex(ValueError, "self-hash mismatch"):
+                MODULE.hydrate_manifest(
+                    manifest,
+                    output,
+                    checkpoint,
+                    VERIFIER.VerifierConfig(upload=adapter),
+                    failure_retry_authorization_path=authorization,
+                )
+
+        self.assertEqual(adapter.requests, [])
+
+    def test_authorization_is_bound_to_exact_checkpoint_bytes(self):
+        rows = [self.row(10, "tasks/7/a.bin")]
+        with tempfile.TemporaryDirectory() as root:
+            root_path = pathlib.Path(root)
+            manifest = self.write_manifest(root, rows)
+            output = root_path / "hydrated.jsonl"
+            checkpoint = root_path / "checkpoint.json"
+            MODULE.hydrate_manifest(
+                manifest,
+                output,
+                checkpoint,
+                VERIFIER.VerifierConfig(
+                    upload=FakeAdapter({
+                        "tasks/7/a.bin": (
+                            b"short",
+                            "application/octet-stream",
+                            100,
+                        ),
+                    })
+                ),
+            )
+            failure_record = json.loads(
+                checkpoint.read_text(encoding="utf-8")
+            )["failed"][0]
+            authorization, _authorization_sha = self.write_retry_authorization(
+                root, manifest, checkpoint, failure_record, rows[0]
+            )
+            checkpoint.write_text(
+                checkpoint.read_text(encoding="utf-8") + " ",
+                encoding="utf-8",
+            )
+            adapter = FakeAdapter({
+                "tasks/7/a.bin": (b"reprobe-stable", "application/octet-stream"),
+            })
+            with self.assertRaisesRegex(ValueError, "checkpoint mismatch"):
+                MODULE.hydrate_manifest(
+                    manifest,
+                    output,
+                    checkpoint,
+                    VERIFIER.VerifierConfig(upload=adapter),
+                    failure_retry_authorization_path=authorization,
+                )
+
+        self.assertEqual(adapter.requests, [])
+
+    def test_authorization_rejects_changed_reprobe_artifact(self):
+        rows = [self.row(10, "tasks/7/a.bin")]
+        with tempfile.TemporaryDirectory() as root:
+            root_path = pathlib.Path(root)
+            manifest = self.write_manifest(root, rows)
+            output = root_path / "hydrated.jsonl"
+            checkpoint = root_path / "checkpoint.json"
+            MODULE.hydrate_manifest(
+                manifest,
+                output,
+                checkpoint,
+                VERIFIER.VerifierConfig(
+                    upload=FakeAdapter({
+                        "tasks/7/a.bin": (
+                            b"short",
+                            "application/octet-stream",
+                            100,
+                        ),
+                    })
+                ),
+            )
+            failure_record = json.loads(
+                checkpoint.read_text(encoding="utf-8")
+            )["failed"][0]
+            authorization, _authorization_sha = self.write_retry_authorization(
+                root, manifest, checkpoint, failure_record, rows[0]
+            )
+            (root_path / "reprobe-2.jsonl").write_text(
+                "{}\n", encoding="utf-8"
+            )
+            adapter = FakeAdapter({
+                "tasks/7/a.bin": (b"reprobe-stable", "application/octet-stream"),
+            })
+            with self.assertRaisesRegex(ValueError, "artifact hash mismatch"):
+                MODULE.hydrate_manifest(
+                    manifest,
+                    output,
+                    checkpoint,
+                    VERIFIER.VerifierConfig(upload=adapter),
+                    failure_retry_authorization_path=authorization,
+                )
+
+        self.assertEqual(adapter.requests, [])
+
+    def test_authorized_retry_failure_replaces_checkpoint_failure(self):
+        rows = [self.row(10, "tasks/7/a.bin")]
+        with tempfile.TemporaryDirectory() as root:
+            root_path = pathlib.Path(root)
+            manifest = self.write_manifest(root, rows)
+            output = root_path / "hydrated.jsonl"
+            checkpoint = root_path / "checkpoint.json"
+            MODULE.hydrate_manifest(
+                manifest,
+                output,
+                checkpoint,
+                VERIFIER.VerifierConfig(
+                    upload=FakeAdapter({
+                        "tasks/7/a.bin": (
+                            b"short",
+                            "application/octet-stream",
+                            100,
+                        ),
+                    })
+                ),
+            )
+            old_failure = json.loads(
+                checkpoint.read_text(encoding="utf-8")
+            )["failed"][0]
+            authorization, authorization_sha = self.write_retry_authorization(
+                root, manifest, checkpoint, old_failure, rows[0]
+            )
+            adapter = FakeAdapter({
+                "tasks/7/a.bin": TimeoutError(),
+            })
+            result = MODULE.hydrate_manifest(
+                manifest,
+                output,
+                checkpoint,
+                VERIFIER.VerifierConfig(upload=adapter),
+                failure_retry_authorization_path=authorization,
+            )
+            new_failure = json.loads(
+                checkpoint.read_text(encoding="utf-8")
+            )["failed"][0]
+
+        self.assertEqual(result["status"], "BLOCKED")
+        self.assertEqual(result["retried_authorized_failure_target_count"], 1)
+        self.assertEqual(
+            result["failure_retry_authorization_sha256"],
+            authorization_sha,
+        )
+        self.assertEqual(adapter.requests, [("GET", "tasks/7/a.bin")])
+        self.assertEqual(new_failure["detail"], "timeout")
+        self.assertNotEqual(new_failure, old_failure)
+
     def test_checkpoint_every_counts_failures_before_ungraceful_abort(self):
-        missing = urllib.error.HTTPError("https://secret.invalid", 410, "gone", {}, None)
+        missing = urllib.error.HTTPError(
+            "https://secret.invalid", 410, "gone", {}, io.BytesIO()
+        )
         rows = [self.row(10, "tasks/7/a.bin"), self.row(11, "tasks/7/b.bin")]
         with tempfile.TemporaryDirectory() as root:
             root_path = pathlib.Path(root)

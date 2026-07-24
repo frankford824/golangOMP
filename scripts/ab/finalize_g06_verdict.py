@@ -52,6 +52,8 @@ HYDRATION_FIELDS = {
     "resumed_target_count",
     "resumed_failure_target_count",
     "retried_transient_failure_target_count",
+    "retried_authorized_failure_target_count",
+    "failure_retry_authorization_sha256",
     "read_only_get_count",
     "hydrated_row_count",
     "deduplicated_get_count",
@@ -397,17 +399,33 @@ def verify_remote_hydration(
     resumed = evidence.get("resumed_target_count")
     read_gets = evidence.get("read_only_get_count")
     retried = evidence.get("retried_transient_failure_target_count")
+    retried_authorized = evidence.get(
+        "retried_authorized_failure_target_count"
+    )
     if any(
         not isinstance(value, int) or isinstance(value, bool) or value < 0
-        for value in (resumed, read_gets, retried)
+        for value in (resumed, read_gets, retried, retried_authorized)
     ):
         raise AdjudicationError(
             "g06.hydration_count", "hydration execution counts are invalid"
         )
-    if resumed + read_gets != len(unique_targets) or retried > read_gets:
+    if (
+        resumed + read_gets != len(unique_targets)
+        or retried + retried_authorized > read_gets
+    ):
         raise AdjudicationError(
             "g06.hydration_coverage",
             "checkpoint resumes and read-only GETs do not cover every remote target",
+        )
+    authorization_sha = require_sha(
+        evidence.get("failure_retry_authorization_sha256"),
+        "failure retry authorization",
+        nonzero=False,
+    )
+    if (authorization_sha == ZERO_SHA256) != (retried_authorized == 0):
+        raise AdjudicationError(
+            "g06.hydration_authorization",
+            "authorized retry count and authorization hash disagree",
         )
     if evidence.get("failures") != []:
         raise AdjudicationError(

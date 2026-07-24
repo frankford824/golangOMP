@@ -13,6 +13,7 @@ import argparse
 import concurrent.futures
 import hashlib
 import http.client
+import io
 import json
 import os
 import pathlib
@@ -36,6 +37,8 @@ except ModuleNotFoundError:  # Direct execution from scripts/ab.
 
 SCHEMA_VERSION = 1
 CHECKPOINT_SCHEMA_VERSION = 2
+FAILURE_RETRY_AUTHORIZATION_SCHEMA_VERSION = 1
+FAILURE_RETRY_AUTHORIZATION_TYPE = "g06_checkpoint_failure_retry_v1"
 DEFAULT_CHECKPOINT_EVERY = 50
 DEFAULT_MAX_OBJECT_BYTES = 20 * 1024 * 1024 * 1024
 ZERO_SHA256 = "0" * 64
@@ -793,7 +796,11 @@ class PersistentSSHReadAdapter:
                 self.mark_broken()
                 raise SSHProtocolError("invalid ssh error response")
             raise urllib.error.HTTPError(
-                "ssh-object://redacted", header["status"], "remote read failed", {}, None
+                "ssh-object://redacted",
+                header["status"],
+                "remote read failed",
+                {},
+                io.BytesIO(),
             )
         if not verifier.normalize_mime(header["mime"]):
             self.mark_broken()
@@ -1231,6 +1238,227 @@ def checkpoint_failure_record(
     }
 
 
+def checkpoint_failure_record_sha256(record: dict[str, Any]) -> str:
+    return hashlib.sha256(
+        verifier.canonical_json(record).encode("utf-8")
+    ).hexdigest()
+
+
+def _authorization_artifact_path(
+    authorization_path: pathlib.Path,
+    value: str,
+) -> pathlib.Path:
+    candidate = pathlib.Path(value)
+    if not candidate.is_absolute():
+        candidate = authorization_path.parent / candidate
+    return candidate.resolve()
+
+
+def _load_json_without_duplicate_keys(path: pathlib.Path) -> Any:
+    def build_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("JSON contains a duplicate object key")
+            result[key] = value
+        return result
+
+    return json.loads(
+        path.read_text(encoding="utf-8"),
+        object_pairs_hook=build_object,
+    )
+
+
+def _validate_reprobe(
+    *,
+    authorization_path: pathlib.Path,
+    reprobe: Any,
+    expected_key: str,
+    config: verifier.VerifierConfig,
+) -> tuple[tuple[int, str, str], pathlib.Path, pathlib.Path]:
+    expected_fields = {
+        "evidence_path",
+        "evidence_sha256",
+        "artifact_path",
+        "artifact_sha256",
+    }
+    if (
+        not isinstance(reprobe, dict)
+        or set(reprobe) != expected_fields
+        or not isinstance(reprobe["evidence_path"], str)
+        or not reprobe["evidence_path"]
+        or not isinstance(reprobe["artifact_path"], str)
+        or not reprobe["artifact_path"]
+        or not isinstance(reprobe["evidence_sha256"], str)
+        or not verifier.SHA256.fullmatch(reprobe["evidence_sha256"])
+        or not isinstance(reprobe["artifact_sha256"], str)
+        or not verifier.SHA256.fullmatch(reprobe["artifact_sha256"])
+    ):
+        raise ValueError("invalid failure retry authorization reprobe")
+
+    evidence_path = _authorization_artifact_path(
+        authorization_path, reprobe["evidence_path"]
+    )
+    artifact_path = _authorization_artifact_path(
+        authorization_path, reprobe["artifact_path"]
+    )
+    if evidence_path == artifact_path:
+        raise ValueError("failure retry reprobe evidence and artifact paths must differ")
+    if (
+        not evidence_path.is_file()
+        or verifier.sha256_file(evidence_path) != reprobe["evidence_sha256"]
+        or not artifact_path.is_file()
+        or verifier.sha256_file(artifact_path) != reprobe["artifact_sha256"]
+    ):
+        raise ValueError("failure retry reprobe artifact hash mismatch")
+
+    evidence = _load_json_without_duplicate_keys(evidence_path)
+    evidence_without_hash = (
+        {key: value for key, value in evidence.items() if key != "evidence_hash"}
+        if isinstance(evidence, dict)
+        else {}
+    )
+    evidence_hash = hashlib.sha256(
+        verifier.canonical_json(evidence_without_hash).encode("utf-8")
+    ).hexdigest()
+    if (
+        not isinstance(evidence, dict)
+        or evidence.get("status") != "PASS"
+        or evidence.get("failure_count") != 0
+        or evidence.get("configured_target_row_count") != 1
+        or evidence.get("unique_target_count") != 1
+        or evidence.get("read_only_get_count") != 1
+        or evidence.get("hydrated_row_count") != 1
+        or evidence.get("hydrated_manifest_sha256") != reprobe["artifact_sha256"]
+        or evidence.get("evidence_hash") != evidence_hash
+    ):
+        raise ValueError("failure retry reprobe evidence is not a one-target PASS")
+
+    try:
+        artifact_lines = artifact_path.read_text(encoding="utf-8").splitlines()
+    except UnicodeDecodeError as exc:
+        raise ValueError("failure retry reprobe artifact is not UTF-8") from exc
+    if len(artifact_lines) != 1:
+        raise ValueError("failure retry reprobe artifact must contain one row")
+    try:
+        row = _load_json_without_duplicate_keys(artifact_path)
+    except json.JSONDecodeError as exc:
+        raise ValueError("failure retry reprobe artifact is invalid JSONL") from exc
+    validate_hydration_row(row, 1)
+    resolved = adapter_kind(config, row["storage_adapter"])
+    if resolved is None:
+        raise ValueError("failure retry reprobe adapter is not configured")
+    kind, _adapter = resolved
+    if checkpoint_key(kind, row["object_key"]) != expected_key:
+        raise ValueError("failure retry reprobe targets a different object")
+    if not row["sha256"]:
+        raise ValueError("failure retry reprobe artifact is not hydrated")
+    return (
+        (row["size"], verifier.normalize_mime(row["mime_type"]), row["sha256"]),
+        evidence_path,
+        artifact_path,
+    )
+
+
+def load_failure_retry_authorization(
+    path: pathlib.Path | None,
+    *,
+    input_sha: str,
+    checkpoint_sha: str,
+    failed_targets: dict[str, dict[str, Any]],
+    config: verifier.VerifierConfig,
+) -> tuple[set[str], str]:
+    if path is None:
+        return set(), ZERO_SHA256
+    if checkpoint_sha == ZERO_SHA256:
+        raise ValueError("failure retry authorization requires an existing checkpoint")
+    raw = _load_json_without_duplicate_keys(path)
+    expected_fields = {
+        "schema_version",
+        "authorization_type",
+        "input_manifest_sha256",
+        "checkpoint_sha256",
+        "failure_retries",
+        "authorization_sha256",
+    }
+    valid_header = (
+        isinstance(raw, dict)
+        and set(raw) == expected_fields
+        and raw.get("schema_version") == FAILURE_RETRY_AUTHORIZATION_SCHEMA_VERSION
+        and raw.get("authorization_type") == FAILURE_RETRY_AUTHORIZATION_TYPE
+        and isinstance(raw.get("input_manifest_sha256"), str)
+        and bool(verifier.SHA256.fullmatch(raw["input_manifest_sha256"]))
+        and isinstance(raw.get("checkpoint_sha256"), str)
+        and bool(verifier.SHA256.fullmatch(raw["checkpoint_sha256"]))
+        and isinstance(raw.get("failure_retries"), list)
+        and bool(raw["failure_retries"])
+        and isinstance(raw.get("authorization_sha256"), str)
+        and bool(verifier.SHA256.fullmatch(raw["authorization_sha256"]))
+    )
+    if not valid_header:
+        raise ValueError("invalid failure retry authorization schema")
+    payload = {
+        key: value for key, value in raw.items() if key != "authorization_sha256"
+    }
+    authorization_sha = hashlib.sha256(
+        verifier.canonical_json(payload).encode("utf-8")
+    ).hexdigest()
+    if raw["authorization_sha256"] != authorization_sha:
+        raise ValueError("failure retry authorization self-hash mismatch")
+    if raw["input_manifest_sha256"] != input_sha:
+        raise ValueError("failure retry authorization input manifest mismatch")
+    if raw["checkpoint_sha256"] != checkpoint_sha:
+        raise ValueError("failure retry authorization checkpoint mismatch")
+
+    failed_by_sha: dict[str, str] = {}
+    for key, record in failed_targets.items():
+        record_sha = checkpoint_failure_record_sha256(record)
+        if record_sha in failed_by_sha:
+            raise ValueError("checkpoint failure record hash collision")
+        failed_by_sha[record_sha] = key
+
+    authorized: set[str] = set()
+    previous_failure_sha = ""
+    for item in raw["failure_retries"]:
+        if (
+            not isinstance(item, dict)
+            or set(item) != {"failure_record_sha256", "reprobes"}
+            or not isinstance(item["failure_record_sha256"], str)
+            or not verifier.SHA256.fullmatch(item["failure_record_sha256"])
+            or not isinstance(item["reprobes"], list)
+            or len(item["reprobes"]) != 2
+        ):
+            raise ValueError("invalid failure retry authorization entry")
+        failure_sha = item["failure_record_sha256"]
+        if failure_sha <= previous_failure_sha:
+            raise ValueError(
+                "failure retry authorization entries must be unique and sorted"
+            )
+        previous_failure_sha = failure_sha
+        key = failed_by_sha.get(failure_sha)
+        if key is None:
+            raise ValueError(
+                "failure retry authorization does not match a checkpoint failure"
+            )
+        validated_reprobes = [
+            _validate_reprobe(
+                authorization_path=path,
+                reprobe=reprobe,
+                expected_key=key,
+                config=config,
+            )
+            for reprobe in item["reprobes"]
+        ]
+        metadata = [value[0] for value in validated_reprobes]
+        reprobe_paths = [(value[1], value[2]) for value in validated_reprobes]
+        if len(set(reprobe_paths)) != 2:
+            raise ValueError("failure retry authorization requires two reprobe files")
+        if metadata[0] != metadata[1]:
+            raise ValueError("failure retry reprobes do not agree")
+        authorized.add(key)
+    return authorized, authorization_sha
+
+
 def checkpoint_document(
     input_sha: str,
     fingerprints: dict[str, str],
@@ -1435,6 +1663,8 @@ def result_document(
     resumed_targets: int,
     resumed_failure_targets: int,
     retried_transient_failure_targets: int,
+    retried_authorized_failure_targets: int,
+    failure_retry_authorization_sha: str,
     get_count: int,
     hydrated_rows: int,
     failures: list[dict[str, Any]],
@@ -1454,6 +1684,12 @@ def result_document(
         "resumed_failure_target_count": resumed_failure_targets,
         "retried_transient_failure_target_count": (
             retried_transient_failure_targets
+        ),
+        "retried_authorized_failure_target_count": (
+            retried_authorized_failure_targets
+        ),
+        "failure_retry_authorization_sha256": (
+            failure_retry_authorization_sha
         ),
         "read_only_get_count": get_count,
         "hydrated_row_count": hydrated_rows,
@@ -1483,6 +1719,7 @@ def hydrate_manifest(
     max_object_bytes: int = DEFAULT_MAX_OBJECT_BYTES,
     workers: int = 1,
     retry_transient_failures: bool = False,
+    failure_retry_authorization_path: pathlib.Path | None = None,
 ) -> dict[str, Any]:
     if checkpoint_every <= 0:
         raise ValueError("checkpoint_every must be positive")
@@ -1493,6 +1730,11 @@ def hydrate_manifest(
 
     rows, input_sha = read_manifest(manifest_path)
     fingerprints = adapter_fingerprints(config)
+    checkpoint_input_sha = (
+        verifier.sha256_file(checkpoint_path)
+        if checkpoint_path.is_file()
+        else ZERO_SHA256
+    )
     completed, failed_targets = load_checkpoint(checkpoint_path, input_sha, fingerprints)
     targets: dict[str, dict[str, Any]] = {}
     row_targets: dict[int, str] = {}
@@ -1527,6 +1769,15 @@ def hydrate_manifest(
     unknown_checkpoint_results = (set(completed) | set(failed_targets)) - set(targets)
     if unknown_checkpoint_results:
         raise ValueError("checkpoint contains an object outside the current hydration targets")
+    authorized_retry_failed, failure_retry_authorization_sha = (
+        load_failure_retry_authorization(
+            failure_retry_authorization_path,
+            input_sha=input_sha,
+            checkpoint_sha=checkpoint_input_sha,
+            failed_targets=failed_targets,
+            config=config,
+        )
+    )
     retryable_failed = {
         key
         for key in targets
@@ -1534,6 +1785,7 @@ def hydrate_manifest(
             key in failed_targets
             and failed_targets[key]["detail"]
             in RETRYABLE_TRANSIENT_FAILURE_DETAILS
+            and key not in authorized_retry_failed
         )
     }
     if retry_transient_failures:
@@ -1541,11 +1793,14 @@ def hydrate_manifest(
             del failed_targets[key]
     else:
         retryable_failed = set()
+    for key in authorized_retry_failed:
+        del failed_targets[key]
     applicable_completed = {key for key in targets if key in completed}
     applicable_failed = {key for key in targets if key in failed_targets}
     resumed_targets = len(applicable_completed)
     resumed_failure_targets = len(applicable_failed)
     retried_transient_failure_targets = len(retryable_failed)
+    retried_authorized_failure_targets = len(authorized_retry_failed)
     target_row_count = sum(len(target["row_indexes"]) for target in targets.values())
     for key in sorted(applicable_failed):
         record = failed_targets[key]
@@ -1727,6 +1982,12 @@ def hydrate_manifest(
         retried_transient_failure_targets=(
             retried_transient_failure_targets
         ),
+        retried_authorized_failure_targets=(
+            retried_authorized_failure_targets
+        ),
+        failure_retry_authorization_sha=(
+            failure_retry_authorization_sha
+        ),
         get_count=get_count,
         hydrated_rows=hydrated_rows,
         failures=failures,
@@ -1761,6 +2022,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
             "re-read only checkpointed timeout, TLS, connection, and transport "
             "read failures; HTTP and content-integrity failures remain sticky "
             "blockers"
+        ),
+    )
+    parser.add_argument(
+        "--failure-retry-authorization",
+        help=(
+            "exact self-hashed authorization JSON for individually identified "
+            "sticky checkpoint failures with two matching one-target reprobes"
         ),
     )
     parser.add_argument("--max-object-bytes", type=int, default=DEFAULT_MAX_OBJECT_BYTES)
@@ -1829,6 +2097,11 @@ def main(argv: list[str] | None = None) -> int:
     output = pathlib.Path(args.hydrated_manifest_jsonl)
     evidence_path = pathlib.Path(args.evidence_json)
     checkpoint = pathlib.Path(args.checkpoint)
+    failure_retry_authorization = (
+        pathlib.Path(args.failure_retry_authorization)
+        if args.failure_retry_authorization
+        else None
+    )
     upload_adapter: (
         verifier.HTTPReadAdapter
         | PersistentSSHReadAdapter
@@ -1836,9 +2109,17 @@ def main(argv: list[str] | None = None) -> int:
         | None
     ) = None
     try:
-        resolved = [item.resolve() for item in (manifest, output, evidence_path, checkpoint)]
+        resolved = [
+            item.resolve()
+            for item in (manifest, output, evidence_path, checkpoint)
+        ]
+        if failure_retry_authorization is not None:
+            resolved.append(failure_retry_authorization.resolve())
         if len(set(resolved)) != len(resolved):
-            raise ValueError("manifest, output, evidence, and checkpoint paths must differ")
+            raise ValueError(
+                "manifest, output, evidence, checkpoint, and authorization paths "
+                "must differ"
+            )
         upload_adapter = upload_adapter_from_args(args)
         config = verifier.VerifierConfig(
             upload=upload_adapter,
@@ -1850,6 +2131,7 @@ def main(argv: list[str] | None = None) -> int:
             max_object_bytes=args.max_object_bytes,
             workers=args.workers,
             retry_transient_failures=args.retry_transient_failures,
+            failure_retry_authorization_path=failure_retry_authorization,
         )
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         input_sha = verifier.sha256_file(manifest) if manifest.is_file() else ZERO_SHA256
@@ -1866,6 +2148,8 @@ def main(argv: list[str] | None = None) -> int:
             row_count=0, already_complete=0, missing_rows=0, target_row_count=0, unique_targets=0,
             resumed_targets=0, resumed_failure_targets=0,
             retried_transient_failure_targets=0,
+            retried_authorized_failure_targets=0,
+            failure_retry_authorization_sha=ZERO_SHA256,
             get_count=0, hydrated_rows=0, failures=[failure],
         )
     finally:
