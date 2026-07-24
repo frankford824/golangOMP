@@ -605,6 +605,29 @@ class RunG4CloneRehearsalTest(unittest.TestCase):
                 MODULE.run(args)
             self.assertFalse(args.run_dir.exists())
 
+    def test_dsn_without_parse_time_is_rejected_before_run_directory_exists(self):
+        with tempfile.TemporaryDirectory() as raw:
+            args = self.make_inputs(raw)
+            args.dsn_file.write_text(
+                "user:secret@tcp(127.0.0.1:3307)/ab_formal_b_ui\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "parseTime=true"):
+                MODULE.run(args)
+            self.assertFalse(args.run_dir.exists())
+
+    def test_dsn_with_disabled_parse_time_is_rejected(self):
+        with tempfile.TemporaryDirectory() as raw:
+            args = self.make_inputs(raw)
+            args.dsn_file.write_text(
+                "user:secret@tcp(127.0.0.1:3307)/ab_formal_b_ui"
+                "?parseTime=false\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "parseTime=true"):
+                MODULE.run(args)
+            self.assertFalse(args.run_dir.exists())
+
     def test_missing_go_fails_before_creating_run_evidence(self):
         with tempfile.TemporaryDirectory() as raw:
             args = self.make_inputs(raw)

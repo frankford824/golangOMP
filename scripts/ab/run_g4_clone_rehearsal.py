@@ -21,6 +21,7 @@ import signal
 import subprocess
 import sys
 import time
+import urllib.parse
 from typing import Any
 
 try:
@@ -217,6 +218,18 @@ def parse_local_clone_dsn(path: pathlib.Path, expected_database: str) -> str:
         raise ValueError("DSN database differs from --confirm-clone-database")
     if not CLONE_B_DB.fullmatch(database):
         raise ValueError("confirmed database must be an ab_*_b* Clone B name")
+    query_suffix = raw[match.end(3):]
+    query = urllib.parse.parse_qs(
+        urllib.parse.urlsplit(
+            f"mysql://placeholder/{database}{query_suffix}"
+        ).query,
+        keep_blank_values=True,
+    )
+    parse_time_values = query.get("parseTime", [])
+    if len(parse_time_values) != 1 or parse_time_values[0].lower() != "true":
+        raise ValueError(
+            "DSN must set parseTime=true for deterministic timestamp scans"
+        )
     return raw
 
 
