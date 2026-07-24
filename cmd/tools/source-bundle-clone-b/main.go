@@ -724,7 +724,7 @@ func lockAndValidateMembers(ctx context.Context, tx transaction, entry validated
 		); err != nil {
 			return nil, err
 		}
-		if !storageAssetID.Valid || storageAssetID.Int64 != expected.AssetID ||
+		if !storageAssetID.Valid || storageAssetID.Int64 != expected.TaskAssetID ||
 			ownerType != "task_asset" || ownerID != expected.TaskAssetID ||
 			strings.TrimSpace(refKey) == "" || status != "recorded" {
 			return nil, fmt.Errorf("member task_asset %d storage identity drifted", expected.TaskAssetID)
@@ -837,7 +837,7 @@ func lockBundleState(ctx context.Context, tx transaction, entry validatedEntry, 
 	if err != nil && !refAbsent {
 		return bundleAbsent, err
 	}
-	if !refAbsent && (!refAssetID.Valid || refAssetID.Int64 != entry.manifest.BundleAssetID ||
+	if !refAbsent && (!refAssetID.Valid || refAssetID.Int64 != entry.registry.TaskAssetCandidate.ID ||
 		ownerType != "task_asset" || ownerID != entry.registry.TaskAssetCandidate.ID ||
 		adapter != "oss_upload_service" || refType != "task_asset_object" ||
 		refKey != entry.registry.ObjectKey || refFile != "source-bundle.zip" ||
@@ -987,7 +987,7 @@ func insertBundleRows(ctx context.Context, tx transaction, entry validatedEntry,
 		   ref_key,file_name,mime_type,file_size,is_placeholder,checksum_hint,status,created_at)
 		VALUES (?,?,'task_asset',?,NULL,'oss_upload_service','task_asset_object',
 		        ?,'source-bundle.zip','application/zip',?,0,?,'recorded',?)`,
-		entry.registry.AssetStorageRefCandidate.RefID, entry.manifest.BundleAssetID,
+		entry.registry.AssetStorageRefCandidate.RefID, entry.registry.TaskAssetCandidate.ID,
 		entry.registry.TaskAssetCandidate.ID, entry.registry.ObjectKey, entry.registry.Size,
 		entry.registry.BundleSHA256, createdAt,
 	); err != nil {

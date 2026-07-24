@@ -456,7 +456,7 @@ func expectMembers(mock sqlmock.Sqlmock, entry validatedEntry, applied bool) {
 		mock.ExpectQuery("SELECT asset_id,owner_type,owner_id,ref_key,status").
 			WithArgs(member.StorageRefID).
 			WillReturnRows(sqlmock.NewRows([]string{"asset_id", "owner_type", "owner_id", "ref_key", "status"}).
-				AddRow(member.AssetID, "task_asset", member.TaskAssetID, "legacy/source.psd", "recorded"))
+				AddRow(member.TaskAssetID, "task_asset", member.TaskAssetID, "legacy/source.psd", "recorded"))
 	}
 }
 
@@ -505,7 +505,7 @@ func expectBundleState(mock sqlmock.Sqlmock, entry validatedEntry, reviewer int6
 			"asset_id", "owner_type", "owner_id", "storage_adapter", "ref_type", "ref_key",
 			"file_name", "mime_type", "file_size", "is_placeholder", "checksum_hint", "status",
 		}).AddRow(
-			entry.manifest.BundleAssetID, "task_asset", entry.registry.TaskAssetCandidate.ID,
+			entry.registry.TaskAssetCandidate.ID, "task_asset", entry.registry.TaskAssetCandidate.ID,
 			"oss_upload_service", "task_asset_object", entry.registry.ObjectKey,
 			"source-bundle.zip", "application/zip", entry.registry.Size, 0,
 			entry.registry.BundleSHA256, "recorded",

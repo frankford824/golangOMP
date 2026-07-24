@@ -690,7 +690,8 @@ func updateTaskAsset(ctx context.Context, tx transaction, mutation rowMutation) 
 func updateUpload(ctx context.Context, tx transaction, mutation rowMutation) error {
 	result, err := tx.ExecContext(ctx, `
 		UPDATE upload_requests
-		SET bound_ref_id=?,checksum_hint=?,file_size=?,status=?,session_status=?
+		SET bound_ref_id=?,checksum_hint=?,file_size=?,status=?,session_status=?,
+		    updated_at=updated_at
 		WHERE request_id=?`,
 		mutation.Set["bound_ref_id"], mutation.Set["checksum_hint"], mutation.Set["file_size"],
 		mutation.Set["status"], mutation.Set["session_status"], mutation.Where["request_id"])

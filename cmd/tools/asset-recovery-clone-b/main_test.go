@@ -126,6 +126,44 @@ func testEntry(t *testing.T, root string) recoveryEntry {
 	return entry
 }
 
+func TestUpdateUploadPreservesUpdatedAt(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectBegin()
+	tx, err := db.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mutation := rowMutation{
+		Where: map[string]any{"request_id": "request-1"},
+		Set: map[string]any{
+			"bound_ref_id":   "ref-1",
+			"checksum_hint":  "hash-1",
+			"file_size":      float64(123),
+			"status":         "bound",
+			"session_status": "completed",
+		},
+	}
+	mock.ExpectExec(
+		`UPDATE upload_requests\s+SET bound_ref_id=\?,checksum_hint=\?,file_size=\?,status=\?,session_status=\?,\s+updated_at=updated_at\s+WHERE request_id=\?`,
+	).WithArgs(
+		"ref-1", "hash-1", float64(123), "bound", "completed", "request-1",
+	).WillReturnResult(sqlmock.NewResult(0, 1))
+	if err := updateUpload(context.Background(), tx, mutation); err != nil {
+		t.Fatal(err)
+	}
+	mock.ExpectRollback()
+	if err := tx.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func testExactEntry(t *testing.T, root string, missingID int64, exact exactRecovery) recoveryEntry {
 	t.Helper()
 	entry := testEntry(t, filepath.Join(root, fmt.Sprintf("seed-%d", missingID)))
