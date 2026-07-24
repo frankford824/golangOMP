@@ -1821,7 +1821,7 @@ func lockInt64Rows(ctx context.Context, tx *sql.Tx, query string, args ...interf
 	return ids, rows.Err()
 }
 
-func lockCutoverTargets(ctx context.Context, tx *sql.Tx, m mappingFile) error {
+func lockCutoverTargetsLegacy(ctx context.Context, tx *sql.Tx, m mappingFile) error {
 	taskIDs, err := lockInt64Rows(ctx, tx, `
 		SELECT id FROM tasks
 		WHERE task_status IN ('PendingAuditA','PendingAuditB','RejectedByAuditA','RejectedByAuditB','PendingCustomizationReview','PendingCustomizationProduction','PendingEffectReview','PendingEffectRevision','PendingProductionTransfer','PendingWarehouseQC','PendingWarehouseReceive','PendingClose','PendingOutsource','Outsourcing','PendingOutsourceReview')
@@ -2107,7 +2107,7 @@ func loadResourceGroupSnapshot(ctx context.Context, q snapshotQueryer, id int64)
 	return item, err
 }
 
-func captureResourceGroupsForTasks(ctx context.Context, q snapshotQueryer, taskIDs []int64) ([]resourceGroupSnapshot, error) {
+func captureResourceGroupsForTasksLegacy(ctx context.Context, q snapshotQueryer, taskIDs []int64) ([]resourceGroupSnapshot, error) {
 	items := []resourceGroupSnapshot{}
 	for _, taskID := range uniqueSortedInt64(taskIDs) {
 		groupIDs, err := queryInt64IDs(ctx, q, `SELECT id FROM task_asset_groups WHERE task_id=? ORDER BY id`, taskID)
@@ -2161,7 +2161,7 @@ func loadAssetBindingSnapshot(ctx context.Context, q snapshotQueryer, id int64) 
 	return item, nil
 }
 
-func captureAssetBindingsForTasks(ctx context.Context, q snapshotQueryer, taskIDs []int64) ([]assetBindingSnapshot, error) {
+func captureAssetBindingsForTasksLegacy(ctx context.Context, q snapshotQueryer, taskIDs []int64) ([]assetBindingSnapshot, error) {
 	items := []assetBindingSnapshot{}
 	for _, taskID := range uniqueSortedInt64(taskIDs) {
 		assetIDs, err := queryInt64IDs(ctx, q, `SELECT id FROM task_assets WHERE task_id=? ORDER BY id`, taskID)
@@ -2224,19 +2224,15 @@ func captureAssetStorageRefStates(ctx context.Context, q snapshotQueryer, recove
 }
 
 func populateAfterSnapshot(ctx context.Context, tx *sql.Tx, s *snapshot, m mappingFile) error {
-	s.AfterTasks = make([]taskSnapshot, 0, len(s.Tasks))
-	for _, before := range s.Tasks {
-		item, err := loadTaskSnapshot(ctx, tx, before.ID)
-		if err != nil {
-			return err
-		}
-		s.AfterTasks = append(s.AfterTasks, item)
-	}
 	taskIDs := make([]int64, 0, len(s.Tasks))
 	for _, task := range s.Tasks {
 		taskIDs = append(taskIDs, task.ID)
 	}
 	var err error
+	s.AfterTasks, err = captureTaskSnapshotsBulk(ctx, tx, taskIDs)
+	if err != nil {
+		return err
+	}
 	s.AfterResourceGroups, err = captureResourceGroupsForTasks(ctx, tx, taskIDs)
 	if err != nil {
 		return err
@@ -2322,11 +2318,38 @@ func differenceInt64(after, before []int64) []int64 {
 	return result
 }
 
+type applyPhaseLogger struct {
+	startedAt time.Time
+	phaseAt   time.Time
+}
+
+func newApplyPhaseLogger() *applyPhaseLogger {
+	now := time.Now()
+	return &applyPhaseLogger{startedAt: now, phaseAt: now}
+}
+
+func (l *applyPhaseLogger) mark(phase string) {
+	now := time.Now()
+	payload := map[string]interface{}{
+		"event":                 "workflow_groups_migrate_phase",
+		"phase":                 phase,
+		"phase_elapsed_seconds": now.Sub(l.phaseAt).Seconds(),
+		"total_elapsed_seconds": now.Sub(l.startedAt).Seconds(),
+	}
+	encoded, err := json.Marshal(payload)
+	if err == nil {
+		_, _ = fmt.Fprintln(os.Stderr, string(encoded))
+	}
+	l.phaseAt = now
+}
+
 func apply(ctx context.Context, db *sql.DB, database string, o options, m mappingFile) error {
+	phases := newApplyPhaseLogger()
 	m = normalizeMapping(m)
 	if err := validateMapping(m); err != nil {
 		return v1migrate.NewHardAbort(v1migrate.ExitCodeHardAbort, "invalid reviewed mapping: %v", err)
 	}
+	phases.mark("mapping_validated")
 	blockers, err := queryCutoverBlockers(ctx, db, m)
 	if err != nil {
 		return err
@@ -2334,6 +2357,7 @@ func apply(ctx context.Context, db *sql.DB, database string, o options, m mappin
 	if err := requireNoCutoverBlockers(blockers); err != nil {
 		return err
 	}
+	phases.mark("unlocked_preflight_passed")
 	if err := os.MkdirAll(o.SnapshotDir, 0o750); err != nil {
 		return err
 	}
@@ -2361,9 +2385,11 @@ func apply(ctx context.Context, db *sql.DB, database string, o options, m mappin
 	if err := lockCutoverTargets(ctx, tx, m); err != nil {
 		return err
 	}
+	phases.mark("cutover_targets_locked")
 	if err := lockPreflightRows(ctx, tx); err != nil {
 		return err
 	}
+	phases.mark("preflight_rows_locked")
 	blockers, err = queryCutoverBlockers(ctx, tx, m)
 	if err != nil {
 		return err
@@ -2371,21 +2397,26 @@ func apply(ctx context.Context, db *sql.DB, database string, o options, m mappin
 	if err := requireNoCutoverBlockers(blockers); err != nil {
 		return err
 	}
+	phases.mark("authoritative_preflight_passed")
 	snap, err := captureSnapshot(ctx, tx, database, m)
 	if err != nil {
 		return err
 	}
 	snap.MappingSHA256 = mappingSHA256
 	snap.ApplyState = "prepared"
+	phases.mark("before_snapshot_captured")
 	if err := writeSnapshot(path, snap); err != nil {
 		return err
 	}
+	phases.mark("prepared_journal_written")
 	if err := applyOrganizationMappings(ctx, tx, m.OrganizationMappings); err != nil {
 		return err
 	}
+	phases.mark("organization_mappings_applied")
 	if err := migrateStates(ctx, tx, m); err != nil {
 		return err
 	}
+	phases.mark("task_states_migrated")
 	for _, item := range m.Resources {
 		if item.isV2() {
 			id, revisionIDs, aliasIDs, inserted, applied, err := applyResourceV2(ctx, tx, item)
@@ -2412,6 +2443,7 @@ func apply(ctx context.Context, db *sql.DB, database string, o options, m mappin
 			snap.AppliedRevisionIDs = append(snap.AppliedRevisionIDs, revisionID)
 		}
 	}
+	phases.mark("resource_histories_applied")
 	for _, item := range m.Planning {
 		inserted, err := applyPlanning(ctx, tx, item)
 		if err != nil {
@@ -2419,26 +2451,33 @@ func apply(ctx context.Context, db *sql.DB, database string, o options, m mappin
 		}
 		_ = inserted
 	}
+	phases.mark("planning_applied")
 	if err := applyAssetRecoveries(ctx, tx, m.AssetRecoveries); err != nil {
 		return err
 	}
+	phases.mark("asset_recoveries_applied")
 	if err := validateCutoverState(ctx, tx, m); err != nil {
 		return err
 	}
+	phases.mark("cutover_state_validated")
 	if err := populateAfterSnapshot(ctx, tx, &snap, m); err != nil {
 		return err
 	}
+	phases.mark("after_snapshot_captured")
 	snap.ApplyState = "commit_pending"
 	if err := writeSnapshot(path, snap); err != nil {
 		return err
 	}
+	phases.mark("commit_pending_journal_written")
 	if err := tx.Commit(); err != nil {
 		return err
 	}
+	phases.mark("database_committed")
 	snap.ApplyState = "applied"
 	if err := writeSnapshot(path, snap); err != nil {
 		return fmt.Errorf("database apply committed but final manifest marker failed; preserve commit_pending manifest and recover before continuing: %w", err)
 	}
+	phases.mark("applied_journal_written")
 	return nil
 }
 
@@ -3135,26 +3174,13 @@ func captureSnapshot(ctx context.Context, q snapshotQueryer, database string, m 
 		s.Tasks = append(s.Tasks, t)
 	}
 	sort.Slice(s.Tasks, func(i, j int) bool { return s.Tasks[i].ID < s.Tasks[j].ID })
-	for i := range s.Tasks {
-		eventIDs, err := queryStringIDs(ctx, q, `SELECT id FROM task_event_logs WHERE task_id=? ORDER BY sequence,id`, s.Tasks[i].ID)
-		if err != nil {
-			return s, err
-		}
-		s.Tasks[i].EventIDs = eventIDs
-		moduleEventIDs, err := queryInt64IDs(ctx, q, `
-			SELECT e.id
-			FROM task_module_events e
-			JOIN task_modules tm ON tm.id=e.task_module_id
-			WHERE tm.task_id=?
-			ORDER BY e.id`, s.Tasks[i].ID)
-		if err != nil {
-			return s, err
-		}
-		s.Tasks[i].ModuleEventIDs = moduleEventIDs
-	}
 	taskIDs := make([]int64, 0, len(s.Tasks))
 	for _, task := range s.Tasks {
 		taskIDs = append(taskIDs, task.ID)
+	}
+	s.Tasks, err = captureTaskSnapshotsBulk(ctx, q, taskIDs)
+	if err != nil {
+		return s, err
 	}
 	s.ResourceGroups, err = captureResourceGroupsForTasks(ctx, q, taskIDs)
 	if err != nil {
@@ -4152,31 +4178,32 @@ func snapshotStateMatches(ctx context.Context, q snapshotQueryer, s snapshot, af
 		access = s.AccessAfter
 		storageRefs = s.StorageRefsAfter
 	}
-	for _, expected := range tasks {
-		actual, err := loadTaskSnapshot(ctx, q, expected.ID)
-		if errors.Is(err, sql.ErrNoRows) {
-			return false, nil
-		}
-		if err != nil {
-			return false, err
-		}
-		if s.Version == legacySnapshotVersion {
-			actual.ModuleEventIDs = nil
-			expected.ModuleEventIDs = nil
-		}
-		if len(actual.ModuleEventIDs) == 0 {
-			actual.ModuleEventIDs = nil
-		}
-		if len(expected.ModuleEventIDs) == 0 {
-			expected.ModuleEventIDs = nil
-		}
-		if !reflect.DeepEqual(actual, expected) {
-			return false, nil
-		}
-	}
 	taskIDsForGroups := make([]int64, 0, len(tasks))
 	for _, item := range tasks {
 		taskIDsForGroups = append(taskIDsForGroups, item.ID)
+	}
+	actualTasks, err := captureTaskSnapshotsBulk(ctx, q, taskIDsForGroups)
+	if errors.Is(err, errBulkSnapshotMissingRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	expectedTasks := append([]taskSnapshot(nil), tasks...)
+	for index := range actualTasks {
+		if s.Version == legacySnapshotVersion {
+			actualTasks[index].ModuleEventIDs = nil
+			expectedTasks[index].ModuleEventIDs = nil
+		}
+		if len(actualTasks[index].ModuleEventIDs) == 0 {
+			actualTasks[index].ModuleEventIDs = nil
+		}
+		if len(expectedTasks[index].ModuleEventIDs) == 0 {
+			expectedTasks[index].ModuleEventIDs = nil
+		}
+	}
+	if len(tasks) > 0 && !reflect.DeepEqual(actualTasks, expectedTasks) {
+		return false, nil
 	}
 	actualGroups, err := captureResourceGroupsForTasks(ctx, q, taskIDsForGroups)
 	if err != nil {
