@@ -2537,8 +2537,8 @@ func validatePrematerializedAssetRecoveryEvidence(ctx context.Context, q snapsho
 		guardRunID, recovery.TaskID, recovery.MissingTaskAssetID, recovery.RecoverySourceSHA256,
 	)
 
-	var taskID, rootAssetID, fileSize, uploadRequestID int64
-	var storageRefID, storageKey, wholeHash, uploadStatus, accessRevokedReason string
+	var taskID, rootAssetID, fileSize int64
+	var uploadRequestID, storageRefID, storageKey, wholeHash, uploadStatus, accessRevokedReason string
 	var deletedAt, cleanedAt, objectDeletedAt, accessRevokedAt sql.NullTime
 	if err := q.QueryRowContext(ctx, `
 		SELECT task_id,asset_id,file_size,upload_request_id,
@@ -2565,8 +2565,8 @@ func validatePrematerializedAssetRecoveryEvidence(ctx context.Context, q snapsho
 	}
 
 	var storageAssetID sql.NullInt64
-	var ownerType, storageAdapter, refType, refKey, checksumHint, storageStatus string
-	var ownerID, storageUploadRequestID, storageFileSize, isPlaceholder int64
+	var ownerType, storageUploadRequestID, storageAdapter, refType, refKey, checksumHint, storageStatus string
+	var ownerID, storageFileSize, isPlaceholder int64
 	if err := q.QueryRowContext(ctx, `
 		SELECT asset_id,owner_type,owner_id,upload_request_id,storage_adapter,ref_type,
 		       ref_key,file_size,is_placeholder,COALESCE(checksum_hint,''),status
@@ -2588,7 +2588,7 @@ func validatePrematerializedAssetRecoveryEvidence(ctx context.Context, q snapsho
 		return fmt.Errorf("task asset %d target storage ref does not match the exact recovered after-state", recovery.MissingTaskAssetID)
 	}
 
-	var requestID int64
+	var requestID string
 	var boundRefID, uploadChecksum, requestStatus, sessionStatus string
 	var uploadFileSize int64
 	if err := q.QueryRowContext(ctx, `
@@ -2598,7 +2598,7 @@ func validatePrematerializedAssetRecoveryEvidence(ctx context.Context, q snapsho
 		WHERE request_id=?`, uploadRequestID).Scan(
 		&requestID, &boundRefID, &uploadChecksum, &uploadFileSize, &requestStatus, &sessionStatus,
 	); err != nil {
-		return fmt.Errorf("read recovered upload request %d: %w", uploadRequestID, err)
+		return fmt.Errorf("read recovered upload request %s: %w", uploadRequestID, err)
 	}
 	if requestID != uploadRequestID ||
 		boundRefID != storageRefID ||

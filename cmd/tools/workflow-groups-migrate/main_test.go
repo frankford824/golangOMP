@@ -991,7 +991,7 @@ func TestPrematerializedRecoveryRejectsUploadBindingDrift(t *testing.T) {
 func expectPrematerializedRecoveryEvidence(mock sqlmock.Sqlmock, recovery assetRecoveryMapping, driftUpload bool) {
 	const runID = "recovery-materialization-20260723-25"
 	const targetRef = "11111111-1111-5111-8111-111111111111"
-	const uploadRequestID = int64(777)
+	const uploadRequestID = "e79e96b2-e2bf-48ed-bb66-a29e17b72018"
 	objectKey := "v8-ab/" + runID + "/recovered/task-2807/task-asset-23989/" + recovery.RecoverySourceSHA256 + ".bin"
 	mock.ExpectQuery("SELECT environment,run_id,plan_sha256").
 		WillReturnRows(sqlmock.NewRows([]string{"environment", "run_id", "plan_sha256"}).
