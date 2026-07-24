@@ -1224,6 +1224,7 @@ func TestApplyHistoricalUnavailableRecoveryRejectsCurrentPointer(t *testing.T) {
 
 func TestCurrentPointerAssetReferenceQueryCoversEveryIndirectPath(t *testing.T) {
 	for _, fragment := range []string{
+		"SELECT seed.id,seed.storage_ref_id",
 		"source_asset_version_id=parent.id",
 		"v8-source-alias:group=",
 		"r.source_task_asset_id",

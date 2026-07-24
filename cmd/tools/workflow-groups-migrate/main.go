@@ -2227,7 +2227,7 @@ func applyOrganizationMappings(ctx context.Context, tx *sql.Tx, mappings []organ
 
 const currentPointerAssetReferencesSQL = `
 		WITH RECURSIVE asset_lineage AS (
-		  SELECT id,storage_ref_id
+		  SELECT seed.id,seed.storage_ref_id
 		  FROM task_assets seed
 		  LEFT JOIN task_asset_groups seed_group ON seed_group.id=seed.bound_group_id
 		  WHERE seed.id=?
@@ -2277,7 +2277,10 @@ const currentPointerAssetReferencesSQL = `
 func countCurrentPointerAssetReferences(ctx context.Context, q snapshotQueryer, taskAssetID int64) (int, error) {
 	var count int
 	err := q.QueryRowContext(ctx, currentPointerAssetReferencesSQL, taskAssetID, taskAssetID).Scan(&count)
-	return count, err
+	if err != nil {
+		return 0, fmt.Errorf("count current pointer references for task asset %d: %w", taskAssetID, err)
+	}
+	return count, nil
 }
 
 func validateHistoricalUnavailableRecoveryEvidence(
