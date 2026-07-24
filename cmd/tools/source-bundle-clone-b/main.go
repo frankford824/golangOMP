@@ -441,6 +441,51 @@ type validatedEntry struct {
 	manifestSHA  string
 }
 
+func validateFixtureBoundary(fixtureRoot, recordedRoot, runID string) (string, error) {
+	if !filepath.IsAbs(fixtureRoot) {
+		return "", errors.New("--fixture-root must be absolute")
+	}
+	root, err := filepath.Abs(fixtureRoot)
+	if err != nil {
+		return "", err
+	}
+	recorded, err := filepath.Abs(recordedRoot)
+	if err != nil || root != recorded {
+		return "", errors.New("--fixture-root must exactly match registry.b_root")
+	}
+	info, err := os.Lstat(root)
+	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		return "", errors.New("--fixture-root must be an existing non-symlink directory")
+	}
+	resolved, err := filepath.EvalSymlinks(root)
+	if err != nil || filepath.Clean(resolved) != filepath.Clean(root) {
+		return "", errors.New("--fixture-root and its ancestors must not use symlinks")
+	}
+	if filepath.Base(root) != "fixture-upload-b" {
+		return "", errors.New("--fixture-root must end in fixture-upload-b")
+	}
+	runRoot := filepath.Dir(root)
+	if filepath.Base(runRoot) != runID {
+		return "", errors.New("--fixture-root parent must exactly match run_id")
+	}
+	trustedAncestor := false
+	for cursor := filepath.Dir(runRoot); ; {
+		parent := filepath.Dir(cursor)
+		if filepath.Base(cursor) == "v8-ab" && filepath.Base(parent) == "tmp" {
+			trustedAncestor = true
+			break
+		}
+		if parent == cursor {
+			break
+		}
+		cursor = parent
+	}
+	if !trustedAncestor {
+		return "", errors.New("fixture root must be below a trusted tmp/v8-ab ancestor")
+	}
+	return root, nil
+}
+
 func validateDocuments(reg registry, manifest confirmedManifest, o options, manifestSHA string) ([]validatedEntry, error) {
 	if reg.SchemaVersion != 1 || reg.Status != "MATERIALIZED" || reg.DatabaseWritePerformed {
 		return nil, errors.New("registry must be an un-applied schema_version=1 MATERIALIZED document")
@@ -458,21 +503,9 @@ func validateDocuments(reg registry, manifest confirmedManifest, o options, mani
 	if err != nil {
 		return nil, errors.New("manifest.confirmed_at must be RFC3339")
 	}
-	root, err := filepath.Abs(o.FixtureRoot)
+	root, err := validateFixtureBoundary(o.FixtureRoot, reg.BRoot, reg.RunID)
 	if err != nil {
 		return nil, err
-	}
-	recordedRoot, err := filepath.Abs(reg.BRoot)
-	if err != nil || root != recordedRoot || !filepath.IsAbs(o.FixtureRoot) {
-		return nil, errors.New("--fixture-root must exactly match registry.b_root")
-	}
-	rootParts := strings.Split(filepath.ToSlash(filepath.Clean(root)), "/")
-	if len(rootParts) < 4 ||
-		rootParts[len(rootParts)-1] != "fixture-upload-b" ||
-		rootParts[len(rootParts)-2] != reg.RunID ||
-		rootParts[len(rootParts)-3] != "v8-ab" ||
-		rootParts[len(rootParts)-4] != "tmp" {
-		return nil, errors.New("fixture root must be exactly below a tmp/v8-ab/<run_id>/fixture-upload-b boundary")
 	}
 	if len(reg.Entries) != len(exactScopes) || len(manifest.Bundles) != len(exactScopes) {
 		return nil, errors.New("registry/manifest must contain the seven exact bundle scopes")

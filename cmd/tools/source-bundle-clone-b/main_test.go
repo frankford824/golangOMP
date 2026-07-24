@@ -50,7 +50,10 @@ func TestValidateOptionsRejectsNonCloneOrNonLoopback(t *testing.T) {
 func TestValidateDocumentsRequiresExactSevenScopesAndBytes(t *testing.T) {
 	root := t.TempDir()
 	runID := "formal-bundle-run"
-	bRoot := filepath.Join(root, "tmp", "v8-ab", runID, "fixture-upload-b")
+	bRoot := filepath.Join(
+		root, "tmp", "v8-ab", "formal-20260723-01", "g4-canonical",
+		runID, "fixture-upload-b",
+	)
 	if err := os.MkdirAll(filepath.Join(bRoot, "objects"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -164,6 +167,41 @@ func TestValidateDocumentsRequiresExactSevenScopesAndBytes(t *testing.T) {
 	drifted.Entries[0].SourceBundle.Members[0].TaskAssetID++
 	if _, err := validateDocuments(drifted, manifest, o, reg.ManifestSHA256); err == nil || !strings.Contains(err.Error(), "member") {
 		t.Fatalf("member drift error = %v", err)
+	}
+}
+
+func TestValidateFixtureBoundaryAllowsNestedFormalRootAndRejectsEscapeOrSymlink(t *testing.T) {
+	base := t.TempDir()
+	runID := "bundle-materialization-20260723-29"
+	nested := filepath.Join(
+		base, "tmp", "v8-ab", "formal-20260723-01", "g4-canonical",
+		runID, "fixture-upload-b",
+	)
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := validateFixtureBoundary(nested, nested, runID); err != nil || got != nested {
+		t.Fatalf("nested formal root = %q, %v", got, err)
+	}
+
+	outside := filepath.Join(base, "untrusted", runID, "fixture-upload-b")
+	if err := os.MkdirAll(outside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := validateFixtureBoundary(outside, outside, runID); err == nil ||
+		!strings.Contains(err.Error(), "trusted tmp/v8-ab") {
+		t.Fatalf("untrusted ancestor error = %v", err)
+	}
+
+	realRunRoot := filepath.Dir(nested)
+	aliasRunRoot := filepath.Join(base, "tmp", "v8-ab", runID)
+	if err := os.Symlink(realRunRoot, aliasRunRoot); err != nil {
+		t.Skipf("symlink setup unavailable: %v", err)
+	}
+	aliased := filepath.Join(aliasRunRoot, "fixture-upload-b")
+	if _, err := validateFixtureBoundary(aliased, aliased, runID); err == nil ||
+		!strings.Contains(err.Error(), "symlinks") {
+		t.Fatalf("symlink ancestor error = %v", err)
 	}
 }
 

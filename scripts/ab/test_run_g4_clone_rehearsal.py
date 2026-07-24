@@ -248,6 +248,15 @@ class RunG4CloneRehearsalTest(unittest.TestCase):
                 names.index("capture_baseline_fingerprint"),
                 names.index("recovery_apply"),
             )
+            self.assertLess(
+                names.index("recovery_apply"), names.index("bundle_apply")
+            )
+            self.assertLess(
+                names.index("bundle_apply"), names.index("dry_run_before")
+            )
+            self.assertLess(
+                names.index("dry_run_before"), names.index("workflow_apply")
+            )
             evidence = json.loads(
                 (args.run_dir / "evidence.sha256.json").read_text(
                     encoding="utf-8"
@@ -268,6 +277,7 @@ class RunG4CloneRehearsalTest(unittest.TestCase):
             self.assertEqual(report["status"], "BLOCKED")
             by_name = {row["step"]: row for row in report["steps"]}
             self.assertEqual(by_name["bundle_apply"]["exit_code"], 7)
+            self.assertEqual(by_name["dry_run_before"]["exit_code"], 125)
             self.assertEqual(by_name["workflow_apply"]["exit_code"], 125)
             self.assertEqual(by_name["workflow_rollback"]["exit_code"], 125)
             self.assertEqual(by_name["bundle_rollback"]["exit_code"], 0)
@@ -339,6 +349,7 @@ class RunG4CloneRehearsalTest(unittest.TestCase):
             for name in (
                 "recovery_apply",
                 "bundle_apply",
+                "dry_run_before",
                 "workflow_apply",
                 "idempotent_apply",
                 "search_reindex",

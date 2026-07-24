@@ -53,10 +53,10 @@ WORKFLOW_STEPS = {
     "workflow_rollback",
 }
 APPLY_SEQUENCE = (
-    "dry_run_before",
     "capture_baseline_fingerprint",
     "recovery_apply",
     "bundle_apply",
+    "dry_run_before",
     "workflow_apply",
     "idempotent_apply",
     "validate_after_apply",

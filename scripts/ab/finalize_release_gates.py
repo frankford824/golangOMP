@@ -615,10 +615,10 @@ def validate_g4(
 ) -> list[str]:
     violations: list[str] = []
     required_steps = (
-        ("dry_run_before", "validate"),
         ("capture_baseline_fingerprint", "validate"),
         ("recovery_apply", "apply"),
         ("bundle_apply", "apply"),
+        ("dry_run_before", "validate"),
         ("workflow_apply", "apply"),
         ("idempotent_apply", "apply"),
         ("validate_after_apply", "validate"),
