@@ -2229,50 +2229,84 @@ const currentPointerAssetReferencesSQL = `
 		WITH RECURSIVE asset_lineage AS (
 		  SELECT seed.id,seed.storage_ref_id
 		  FROM task_assets seed
-		  LEFT JOIN task_asset_groups seed_group ON seed_group.id=seed.bound_group_id
 		  WHERE seed.id=?
-		     OR (
-		       seed.source_module_key='migration'
-		       AND seed.bound_role='source'
-		       AND seed.remark=CONCAT('v8-source-alias:group=',seed_group.id,':origin=',?)
-		     )
+		  UNION DISTINCT
+		  SELECT seed.id,seed.storage_ref_id
+		  FROM task_assets seed
+		  LEFT JOIN task_asset_groups seed_group ON seed_group.id=seed.bound_group_id
+		  WHERE seed.source_module_key='migration'
+		    AND seed.bound_role='source'
+		    AND seed.remark=CONCAT('v8-source-alias:group=',seed_group.id,':origin=',?)
 		  UNION DISTINCT
 		  SELECT ta.id,ta.storage_ref_id
 		  FROM task_assets ta
 		  JOIN asset_lineage parent ON ta.source_asset_version_id=parent.id
+		),
+		current_revisions AS (
+		  SELECT task_id,working_revision_id AS revision_id
+		  FROM task_asset_groups
+		  WHERE working_revision_id IS NOT NULL
+		  UNION DISTINCT
+		  SELECT task_id,finalized_revision_id AS revision_id
+		  FROM task_asset_groups
+		  WHERE finalized_revision_id IS NOT NULL
+		),
+		referenced_revisions AS (
+		  SELECT current.revision_id
+		  FROM current_revisions current
+		  JOIN task_asset_group_revisions r ON r.id=current.revision_id
+		  JOIN asset_lineage lineage ON lineage.id=r.source_task_asset_id
+		  UNION DISTINCT
+		  SELECT current.revision_id
+		  FROM current_revisions current
+		  JOIN task_asset_group_revision_items i ON i.revision_id=current.revision_id
+		  JOIN asset_lineage lineage ON lineage.id=i.task_asset_id
+		  UNION DISTINCT
+		  SELECT current.revision_id
+		  FROM current_revisions current
+		  JOIN task_asset_group_revision_references rr ON rr.revision_id=current.revision_id
+		  JOIN asset_lineage lineage ON lineage.id=rr.formal_task_asset_id
+		  UNION DISTINCT
+		  SELECT current.revision_id
+		  FROM current_revisions current
+		  JOIN task_asset_group_revision_references rr ON rr.revision_id=current.revision_id
+		  JOIN reference_file_refs rfr ON rfr.id=rr.reference_file_ref_id
+		  JOIN asset_storage_refs live_ref ON live_ref.ref_id=rfr.ref_id
+		  JOIN asset_lineage lineage ON lineage.id=live_ref.asset_id
+		  UNION DISTINCT
+		  SELECT current.revision_id
+		  FROM current_revisions current
+		  JOIN task_asset_group_revision_references rr ON rr.revision_id=current.revision_id
+		  JOIN reference_file_refs rfr ON rfr.id=rr.reference_file_ref_id
+		  JOIN asset_storage_refs live_ref
+		    ON live_ref.ref_id=rfr.ref_id
+		   AND live_ref.owner_type='task_asset'
+		  JOIN asset_lineage lineage ON lineage.id=live_ref.owner_id
+		  UNION DISTINCT
+		  SELECT current.revision_id
+		  FROM current_revisions current
+		  JOIN task_asset_group_revision_references rr ON rr.revision_id=current.revision_id
+		  JOIN asset_storage_refs frozen_ref ON frozen_ref.ref_id=rr.ref_id_snapshot
+		  JOIN asset_lineage lineage ON lineage.id=frozen_ref.asset_id
+		  UNION DISTINCT
+		  SELECT current.revision_id
+		  FROM current_revisions current
+		  JOIN task_asset_group_revision_references rr ON rr.revision_id=current.revision_id
+		  JOIN asset_storage_refs frozen_ref
+		    ON frozen_ref.ref_id=rr.ref_id_snapshot
+		   AND frozen_ref.owner_type='task_asset'
+		  JOIN asset_lineage lineage ON lineage.id=frozen_ref.owner_id
+		  UNION DISTINCT
+		  SELECT current.revision_id
+		  FROM current_revisions current
+		  JOIN task_asset_group_revision_references rr ON rr.revision_id=current.revision_id
+		  JOIN reference_file_refs rfr ON rfr.id=rr.reference_file_ref_id
+		  JOIN task_reference_asset_bindings binding
+		    ON binding.task_id=current.task_id
+		   AND binding.ref_id COLLATE utf8mb4_0900_ai_ci=rfr.ref_id
+		  JOIN asset_lineage lineage ON lineage.id=binding.task_asset_id
 		)
-		SELECT COUNT(DISTINCT r.id)
-		FROM task_asset_groups g
-		JOIN task_asset_group_revisions r
-		  ON r.id=g.working_revision_id OR r.id=g.finalized_revision_id
-		WHERE EXISTS (
-		        SELECT 1 FROM asset_lineage lineage
-		        WHERE lineage.id=r.source_task_asset_id
-		      )
-		   OR EXISTS (
-		        SELECT 1
-		        FROM task_asset_group_revision_items i
-		        JOIN asset_lineage lineage ON lineage.id=i.task_asset_id
-		        WHERE i.revision_id=r.id
-		      )
-		   OR EXISTS (
-		        SELECT 1
-		        FROM task_asset_group_revision_references rr
-		        LEFT JOIN reference_file_refs rfr ON rfr.id=rr.reference_file_ref_id
-		        LEFT JOIN asset_storage_refs live_ref ON live_ref.ref_id=rfr.ref_id
-		        LEFT JOIN asset_storage_refs frozen_ref ON frozen_ref.ref_id=rr.ref_id_snapshot
-		        LEFT JOIN task_reference_asset_bindings binding
-		          ON binding.task_id=g.task_id
-		         AND binding.ref_id COLLATE utf8mb4_0900_ai_ci=rfr.ref_id
-		        JOIN asset_lineage lineage
-		          ON lineage.id=rr.formal_task_asset_id
-		          OR lineage.id=live_ref.asset_id
-		          OR (live_ref.owner_type='task_asset' AND lineage.id=live_ref.owner_id)
-		          OR lineage.id=frozen_ref.asset_id
-		          OR (frozen_ref.owner_type='task_asset' AND lineage.id=frozen_ref.owner_id)
-		          OR lineage.id=binding.task_asset_id
-		        WHERE rr.revision_id=r.id
-		      )`
+		SELECT COUNT(*) FROM referenced_revisions`
 
 func countCurrentPointerAssetReferences(ctx context.Context, q snapshotQueryer, taskAssetID int64) (int, error) {
 	var count int

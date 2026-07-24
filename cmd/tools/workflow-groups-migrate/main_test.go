@@ -1231,7 +1231,10 @@ func TestCurrentPointerAssetReferenceQueryCoversEveryIndirectPath(t *testing.T) 
 		"task_asset_group_revision_items",
 		"rr.formal_task_asset_id",
 		"reference_file_refs",
-		"rr.ref_id_snapshot",
+		"live_ref.asset_id",
+		"live_ref.owner_id",
+		"frozen_ref.asset_id",
+		"frozen_ref.owner_id",
 		"task_reference_asset_bindings",
 		"live_ref.owner_type='task_asset'",
 		"frozen_ref.owner_type='task_asset'",
@@ -1239,6 +1242,21 @@ func TestCurrentPointerAssetReferenceQueryCoversEveryIndirectPath(t *testing.T) 
 		if !strings.Contains(currentPointerAssetReferencesSQL, fragment) {
 			t.Fatalf("current pointer query does not cover %q", fragment)
 		}
+	}
+}
+
+func TestCurrentPointerAssetReferenceQueryAvoidsOptimizerHostileORJoins(t *testing.T) {
+	for _, fragment := range []string{
+		"ON r.id=g.working_revision_id OR r.id=g.finalized_revision_id",
+		"ON lineage.id=rr.formal_task_asset_id\n\t\t          OR",
+		"WHERE seed.id=?\n\t\t     OR",
+	} {
+		if strings.Contains(currentPointerAssetReferencesSQL, fragment) {
+			t.Fatalf("current pointer query retained optimizer-hostile fragment %q", fragment)
+		}
+	}
+	if count := strings.Count(currentPointerAssetReferencesSQL, "SELECT current.revision_id"); count != 8 {
+		t.Fatalf("current pointer query has %d explicit reference paths; want 8", count)
 	}
 }
 
