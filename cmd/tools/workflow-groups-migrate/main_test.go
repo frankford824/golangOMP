@@ -1133,6 +1133,7 @@ func expectHistoricalUnavailableRecoveryEvidence(mock sqlmock.Sqlmock, recovery 
 	mock.ExpectQuery("SELECT COUNT\\(\\*\\).*FROM task_assets.*WHERE task_id=\\? AND asset_id=\\?").
 		WithArgs(int64(2199), int64(12401)).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(3))
+	expectHistoricalUnavailableSourceAliases(mock, nil)
 	mock.ExpectQuery("SELECT asset_id,owner_type,owner_id,ref_key,status,file_size").
 		WithArgs(recovery.OriginalStorageRefID).
 		WillReturnRows(sqlmock.NewRows([]string{"asset_id", "owner_type", "owner_id", "ref_key", "status", "file_size"}).
@@ -1157,6 +1158,19 @@ func expectHistoricalUnavailableRecoveryEvidence(mock sqlmock.Sqlmock, recovery 
 	mock.ExpectQuery("WITH RECURSIVE asset_lineage").
 		WithArgs(int64(12323), int64(12323)).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(currentReferences))
+}
+
+func expectHistoricalUnavailableSourceAliases(mock sqlmock.Sqlmock, extraOrigins []int64) {
+	rows := sqlmock.NewRows([]string{"id", "bound_group_id", "bound_role", "binding_state", "remark"}).
+		AddRow(int64(25564), int64(3101), "source", "bound", sourceAliasRemark(3101, 12323)).
+		AddRow(int64(25565), int64(3101), "source", "bound", sourceAliasRemark(3101, 14510)).
+		AddRow(int64(25566), int64(3101), "source", "bound", sourceAliasRemark(3101, 14514))
+	for index, originID := range extraOrigins {
+		rows.AddRow(int64(25567+index), int64(3101), "source", "bound", sourceAliasRemark(3101, originID))
+	}
+	mock.ExpectQuery("SELECT id,bound_group_id,COALESCE\\(bound_role,''\\),COALESCE\\(binding_state,''\\),remark").
+		WithArgs(int64(2199), int64(12401)).
+		WillReturnRows(rows)
 }
 
 func prematerializedRecoveryFixture() assetRecoveryMapping {
@@ -1245,6 +1259,35 @@ func TestHistoricalUnavailablePostApplyEvidenceAcceptsOnlyTombstoneStatus(t *tes
 	}
 }
 
+func TestHistoricalUnavailableRecoveryRejectsUnexpectedMigrationAlias(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	recovery := historicalUnavailableRecoveryFixture()
+	mock.ExpectQuery("SELECT id,task_id,asset_id,file_size,COALESCE\\(storage_ref_id,''\\)").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "task_id", "asset_id", "file_size", "storage_ref_id",
+			"superseded_by_version_id", "upload_status", "deleted_at", "cleaned_at", "object_deleted_at",
+		}).
+			AddRow(int64(12323), int64(2199), int64(12401), int64(17755216), recovery.OriginalStorageRefID, int64(14510), "uploaded", nil, nil, nil).
+			AddRow(int64(14510), int64(2199), int64(12401), int64(17595421), "58aebabe-355c-4d24-814a-d6dca306b73d", int64(14514), "uploaded", nil, nil, nil).
+			AddRow(int64(14514), int64(2199), int64(12401), int64(11275123), "6e6cd051-f261-424d-8b55-49dd6868be9a", nil, "uploaded", nil, nil, nil))
+	mock.ExpectQuery("SELECT COUNT\\(\\*\\).*FROM task_assets.*WHERE task_id=\\? AND asset_id=\\?").
+		WithArgs(int64(2199), int64(12401)).
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(3))
+	expectHistoricalUnavailableSourceAliases(mock, []int64{99999})
+	if err := validateHistoricalUnavailableRecoveryEvidence(
+		context.Background(), db, recovery, "recorded",
+	); err == nil || !strings.Contains(err.Error(), "outside the frozen") {
+		t.Fatalf("unexpected migration alias error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestApplyHistoricalUnavailableRecoveryRejectsLineageDrift(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
@@ -1300,6 +1343,7 @@ func TestApplyHistoricalUnavailableRecoveryRejectsStorageRefIdentityDrift(t *tes
 	mock.ExpectQuery("SELECT COUNT\\(\\*\\).*FROM task_assets.*WHERE task_id=\\? AND asset_id=\\?").
 		WithArgs(int64(2199), int64(12401)).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(3))
+	expectHistoricalUnavailableSourceAliases(mock, nil)
 	mock.ExpectQuery("SELECT asset_id,owner_type,owner_id,ref_key,status,file_size").
 		WithArgs(recovery.OriginalStorageRefID).
 		WillReturnRows(sqlmock.NewRows([]string{"asset_id", "owner_type", "owner_id", "ref_key", "status", "file_size"}).

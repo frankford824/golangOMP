@@ -2375,13 +2375,61 @@ func validateHistoricalUnavailableRecoveryEvidence(
 	if err := q.QueryRowContext(ctx, `
 		SELECT COUNT(*)
 		FROM task_assets
-		WHERE task_id=? AND asset_id=?`,
+		WHERE task_id=? AND asset_id=?
+		  AND NOT (
+		    asset_type='source'
+		    AND source_module_key='migration'
+		    AND remark LIKE 'v8-source-alias:%'
+		  )`,
 		recovery.TaskID, expected.RootAssetID,
 	).Scan(&rootRowCount); err != nil {
 		return err
 	}
 	if rootRowCount != len(expectedLineage) {
-		return fmt.Errorf("task asset 12323 root %d contains %d rows; frozen lineage requires exactly 3", expected.RootAssetID, rootRowCount)
+		return fmt.Errorf("task asset 12323 root %d contains %d non-alias rows; frozen delivery lineage requires exactly 3", expected.RootAssetID, rootRowCount)
+	}
+	aliasRows, err := q.QueryContext(ctx, `
+		SELECT id,bound_group_id,COALESCE(bound_role,''),COALESCE(binding_state,''),remark
+		FROM task_assets
+		WHERE task_id=? AND asset_id=?
+		  AND asset_type='source'
+		  AND source_module_key='migration'
+		ORDER BY id`,
+		recovery.TaskID, expected.RootAssetID,
+	)
+	if err != nil {
+		return fmt.Errorf("load task asset 12323 migration source aliases: %w", err)
+	}
+	defer aliasRows.Close()
+	expectedAliasOrigins := map[int64]bool{12323: false, 14510: false, 14514: false}
+	aliasCount := 0
+	for aliasRows.Next() {
+		var aliasID int64
+		var boundGroupID sql.NullInt64
+		var boundRole, bindingState, remark string
+		if err := aliasRows.Scan(&aliasID, &boundGroupID, &boundRole, &bindingState, &remark); err != nil {
+			return fmt.Errorf("scan task asset 12323 migration source alias: %w", err)
+		}
+		aliasCount++
+		matchedOrigin := int64(0)
+		if boundGroupID.Valid && boundGroupID.Int64 > 0 && boundRole == "source" && bindingState == "bound" {
+			for originID := range expectedAliasOrigins {
+				if remark == sourceAliasRemark(boundGroupID.Int64, originID) {
+					matchedOrigin = originID
+					break
+				}
+			}
+		}
+		if matchedOrigin == 0 || expectedAliasOrigins[matchedOrigin] {
+			return fmt.Errorf("task asset 12323 migration source alias %d is outside the frozen 12323/14510/14514 alias set", aliasID)
+		}
+		expectedAliasOrigins[matchedOrigin] = true
+	}
+	if err := aliasRows.Close(); err != nil {
+		return err
+	}
+	if aliasCount != len(expectedAliasOrigins) {
+		return fmt.Errorf("task asset 12323 root %d has %d migration source aliases; frozen mapping requires exactly 3", expected.RootAssetID, aliasCount)
 	}
 
 	var storageAssetID sql.NullInt64
