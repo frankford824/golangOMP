@@ -1323,9 +1323,28 @@ func persistedRevisionReason(revision resourceRevisionMapping) (string, error) {
 		metadata += " first_evidence=" + evidence[0]
 	}
 	metadata += "]"
-	reason := strings.TrimSpace(strings.TrimSpace(revision.Reason) + " " + metadata)
-	if utf8.RuneCountInString(reason) > revisionReasonMaxRunes {
+	originalReason := strings.TrimSpace(revision.Reason)
+	reason := strings.TrimSpace(originalReason + " " + metadata)
+	if utf8.RuneCountInString(reason) <= revisionReasonMaxRunes {
+		return reason, nil
+	}
+
+	reasonSum := sha256.Sum256([]byte(originalReason))
+	compactMetadata := fmt.Sprintf(
+		"[migration_v2 manifest=%s reason_sha256=%s confidence=%s confirmed_by=%d confirmed_at=%s evidence_count=%d",
+		revision.ManifestRowHash,
+		hex.EncodeToString(reasonSum[:]),
+		revision.Confidence,
+		revision.ConfirmedBy,
+		revision.ConfirmedAt.UTC().Format(time.RFC3339),
+		len(evidence),
+	)
+	if len(evidence) > 0 {
+		compactMetadata += " first_evidence=" + evidence[0]
+	}
+	compactMetadata += "]"
+	if utf8.RuneCountInString(compactMetadata) > revisionReasonMaxRunes {
 		return "", fmt.Errorf("revision evidence cannot fit task_asset_group_revisions.reason; retain the mapping artifact and resolve this blocker without truncation")
 	}
-	return reason, nil
+	return compactMetadata, nil
 }

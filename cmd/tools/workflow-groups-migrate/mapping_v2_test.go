@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 	"testing"
 	"time"
@@ -936,6 +938,42 @@ func TestPersistedRevisionReasonBindsFullEvidenceWithoutInliningEveryEvent(t *te
 	}
 	if strings.Contains(got, "00000000-0000-0000-0000-000000000002") {
 		t.Fatalf("persistedRevisionReason() unexpectedly inlined the full evidence list: %q", got)
+	}
+}
+
+func TestPersistedRevisionReasonHashBindsOversizedReasonWithoutTruncation(t *testing.T) {
+	originalReason := strings.Repeat("reviewed historical evidence ", 40)
+	revision := resourceRevisionMapping{
+		ManifestRowHash: strings.Repeat("b", 64),
+		Confidence:      "confirmed_auto",
+		ConfirmedBy:     1,
+		ConfirmedAt:     time.Date(2026, 7, 23, 6, 4, 15, 0, time.UTC),
+		Reason:          originalReason,
+		EvidenceEventIDs: []string{
+			"task_event_log:00000000-0000-0000-0000-000000000001",
+		},
+	}
+
+	got, err := persistedRevisionReason(revision)
+	if err != nil {
+		t.Fatalf("persistedRevisionReason() error = %v", err)
+	}
+	if len([]rune(got)) > revisionReasonMaxRunes {
+		t.Fatalf("persistedRevisionReason() length = %d, want <= %d", len([]rune(got)), revisionReasonMaxRunes)
+	}
+	sum := sha256.Sum256([]byte(strings.TrimSpace(originalReason)))
+	for _, want := range []string{
+		"manifest=" + strings.Repeat("b", 64),
+		"reason_sha256=" + hex.EncodeToString(sum[:]),
+		"evidence_count=1",
+		"first_evidence=task_event_log:00000000-0000-0000-0000-000000000001",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("persistedRevisionReason() = %q, want %q", got, want)
+		}
+	}
+	if strings.Contains(got, strings.TrimSpace(originalReason)) {
+		t.Fatalf("persistedRevisionReason() unexpectedly persisted oversized prose: %q", got)
 	}
 }
 
