@@ -151,10 +151,11 @@ def build(plan_path: pathlib.Path, output_path: pathlib.Path) -> dict:
         {"task_asset_id": member["task_asset_id"], "sha256": member["sha256"], "confirmed": True}
         for member in members
     ]
-    # Match Go encoding/json field order in sourceBundleManifestHash.
-    mapping_manifest = json.dumps(
-        {"format": "zip", "members": mapping_members}, ensure_ascii=False, separators=(",", ":")
-    ).encode("utf-8")
+    # Match the recursive key sorting used by Go canonicalMappingJSON and the
+    # registry bridge. Field insertion order must not affect this contract.
+    mapping_manifest = canonical_json(
+        {"format": "zip", "members": mapping_members}
+    )
     return {
         "status": "PASS",
         "violation_count": 0,

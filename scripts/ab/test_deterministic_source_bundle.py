@@ -52,6 +52,16 @@ class DeterministicSourceBundleTest(unittest.TestCase):
             self.assertEqual((root / "one.zip").read_bytes(), (root / "two.zip").read_bytes())
             self.assertEqual(first["status"], "PASS")
             self.assertEqual(first["violation_count"], 0)
+            expected_mapping_manifest = MODULE.canonical_json(
+                {
+                    "format": "zip",
+                    "members": first["source_bundle"]["members"],
+                }
+            )
+            self.assertEqual(
+                first["source_bundle"]["manifest_sha256"],
+                hashlib.sha256(expected_mapping_manifest).hexdigest(),
+            )
             with zipfile.ZipFile(root / "one.zip") as bundle:
                 self.assertEqual(bundle.namelist(), ["manifest.json", "001_31_first_source.psd", "002_32_second.ai"])
                 manifest = json.loads(bundle.read("manifest.json"))
