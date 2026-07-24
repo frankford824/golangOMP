@@ -145,15 +145,43 @@ describe('TaskDetailV8View business context', () => {
   })
 
   it('shows retouch requirements and the same resource authority', async () => {
-    const retouchTask = { ...baseTask, task_type: 'retouch_task', task_status: 'InProgress', allowed_actions: [] }
+    const retouchTask = { ...baseTask, task_type: 'retouch_task', task_status: 'InProgress', allowed_actions: [], reference_file_refs: [] }
     mocks.getById.mockResolvedValue({ data: { data: retouchTask } })
     mocks.getDetail.mockResolvedValue({ data: { data: { task: retouchTask, task_detail: { design_requirement: '去除背景杂物。' }, reference_file_refs: [], retouch_requirements: [{ id: 91, description: '清理主图背景', remark: '保留产品阴影' }] } } })
+    mocks.taskBundle.mockResolvedValue({
+      task_id: 41,
+      workflow_revision: 3,
+      groups: [{
+        id: 91,
+        task_id: 41,
+        scope_kind: 'retouch_requirement',
+        retouch_requirement_id: 91,
+        lock_version: 1,
+        migration_incomplete: false,
+        finalized_revision: {
+          id: 191,
+          group_id: 91,
+          revision_no: 1,
+          status: 'finalized',
+          mode: 'single',
+          source_stage: 'retouch',
+          created_by: 1,
+          legacy_migration: true,
+          created_at: '2026-07-16T08:00:00Z',
+          references: [{ id: 291, reference_file_ref_id: 391, ref_id: 'requirement-ref', file_name: '需求参考图.jpg' }],
+          items: [],
+        },
+      }],
+    })
     const wrapper = mountView()
     await flushPromises()
     expect(wrapper.text()).toContain('修图任务')
     expect(wrapper.text()).toContain('修图要求')
     expect(wrapper.text()).toContain('去除背景杂物')
     expect(wrapper.text()).not.toContain('提交修图成品')
+    expect(wrapper.get('.resource-rail .rail-column.references').text()).toContain('1 个附件')
+    expect(wrapper.get('.references-card').text()).toContain('0 个任务级附件')
+    expect(wrapper.get('.references-card').text()).toContain('暂无任务级参考附件')
     await wrapper.findAll('button').find((item) => item.text() === '完整任务信息')?.trigger('click')
     expect(dialog().textContent).toContain('清理主图背景')
     expect(dialog().textContent).toContain('保留产品阴影')
@@ -263,11 +291,30 @@ describe('TaskDetailV8View business context', () => {
 
     ;(dialog().querySelector<HTMLButtonElement>('.close-button'))?.click()
     await flushPromises()
-    await wrapper.findAll('button').find((item) => item.text() === '查看参考附件')?.trigger('click')
-    expect(dialog().getAttribute('aria-label')).toBe('参考附件')
+    await wrapper.findAll('button').find((item) => item.text() === '查看任务级参考附件')?.trigger('click')
+    expect(dialog().getAttribute('aria-label')).toBe('任务级参考附件')
     expect(dialog().textContent).toContain('下载文件')
     expect(dialog().textContent).toContain('参考.jpg')
     expect(dialog().textContent).not.toContain('人员与组织')
+  })
+
+  it('labels task.reopen as reopening and updated_at only as the latest update', async () => {
+    const reopenTask = {
+      ...baseTask,
+      task_type: 'retouch_task',
+      task_status: 'Completed',
+      allowed_actions: ['task.reopen'],
+      updated_at: '2026-07-24T10:00:00Z',
+    }
+    mocks.getById.mockResolvedValue({ data: { data: reopenTask } })
+    mocks.getDetail.mockResolvedValue({ data: { data: { task: reopenTask, task_detail: {}, reference_file_refs: [] } } })
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.findAll('button').some((item) => item.text() === '重开任务')).toBe(true)
+    expect(wrapper.text()).not.toContain('提交修图成品')
+    expect(wrapper.get('.hero-facts').text()).toContain('最近更新')
+    expect(wrapper.get('.hero-facts').text()).not.toContain('完成时间')
   })
 
   it('places the authoritative file chain before the current-stage command area', async () => {

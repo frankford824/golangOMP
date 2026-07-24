@@ -105,6 +105,69 @@ func TestResourceBundleIsPureReadAndReturnsStableGroupIDs(t *testing.T) {
 	}
 }
 
+func TestCurrentResourceGroupReadsHydrateMigrationEvidence(t *testing.T) {
+	const (
+		taskID  = int64(1264)
+		groupID = int64(45)
+	)
+	reason := "reviewed retouch reopen [migration_v2 manifest=" + strings.Repeat("a", 64) +
+		" confidence=confirmed_auto confirmed_by=1 confirmed_at=2026-07-23T06:04:15Z" +
+		" evidence_count=3 first_evidence=task_event_log:2ced77db-2d6d-40e3-bd56-208d259bbe51]"
+	newGroup := func() *domain.TaskAssetGroup {
+		working := &domain.TaskAssetGroupRevision{
+			ID: 12312, GroupID: groupID, RevisionNo: 2,
+			Status: domain.TaskAssetGroupRevisionFinalized, Reason: reason,
+		}
+		finalized := *working
+		return &domain.TaskAssetGroup{
+			ID: groupID, TaskID: taskID,
+			WorkingRevision: working, FinalizedRevision: &finalized,
+		}
+	}
+	bundleGroup := newGroup()
+	detailGroup := newGroup()
+	repository := &resourceWorkflowRepoStub{
+		workflow:      &domain.TaskWorkflowLock{TaskID: taskID, TaskType: domain.TaskTypeRetouchTask, Status: domain.TaskStatusCompleted, CreatorID: 1},
+		expected:      1,
+		groups:        []domain.TaskAssetGroup{*bundleGroup},
+		groupByID:     map[int64]*domain.TaskAssetGroup{groupID: detailGroup},
+		subjectByTask: map[int64]domain.TaskAccessSubject{taskID: {TaskID: taskID}},
+	}
+	svc := NewTaskResourceWorkflowService(repository, nil, nil)
+	actor := globalCapabilityActor(1, domain.PermissionAssetView)
+	assertEvidence := func(t *testing.T, group domain.TaskAssetGroup) {
+		t.Helper()
+		for label, revision := range map[string]*domain.TaskAssetGroupRevision{
+			"working": group.WorkingRevision, "finalized": group.FinalizedRevision,
+		} {
+			if revision == nil || !revision.LegacyMigration || revision.EvidenceSummary == nil {
+				t.Fatalf("%s revision evidence = %+v", label, revision)
+			}
+			if revision.EvidenceSummary.Confidence != "confirmed_auto" ||
+				revision.EvidenceSummary.EvidenceEventCount != 3 ||
+				revision.EvidenceSummary.EvidenceEventIDsComplete ||
+				!reflect.DeepEqual(revision.EvidenceSummary.EvidenceEventIDs, []string{"task_event_log:2ced77db-2d6d-40e3-bd56-208d259bbe51"}) {
+				t.Fatalf("%s evidence summary = %+v", label, revision.EvidenceSummary)
+			}
+		}
+	}
+
+	bundle, appErr := svc.ResourceBundle(context.Background(), taskID, actor)
+	if appErr != nil {
+		t.Fatalf("ResourceBundle() error = %+v", appErr)
+	}
+	if len(bundle.Groups) != 1 {
+		t.Fatalf("ResourceBundle() groups = %+v", bundle.Groups)
+	}
+	assertEvidence(t, bundle.Groups[0])
+
+	group, appErr := svc.ResourceGroup(context.Background(), actor, groupID)
+	if appErr != nil {
+		t.Fatalf("ResourceGroup() error = %+v", appErr)
+	}
+	assertEvidence(t, *group)
+}
+
 func TestResourceBundleRejectsHistoricalMissingGroupWithoutWriting(t *testing.T) {
 	workflow := &domain.TaskWorkflowLock{TaskID: 10, TaskType: domain.TaskTypeNewProductDevelopment, Status: domain.TaskStatusInProgress, CreatorID: 7}
 	repository := &resourceWorkflowRepoStub{workflow: workflow, expected: 2, groups: []domain.TaskAssetGroup{{ID: 101, TaskID: 10}}}
@@ -199,7 +262,7 @@ func TestResourceGroupRevisionsUsesPreferredScopedPermissionAndSafeURLs(t *testi
 	revisions := []domain.TaskAssetGroupRevision{{
 		ID: 30, GroupID: group.ID, RevisionNo: 2, Status: domain.TaskAssetGroupRevisionFinalized,
 		CreatedBy: 9, CreatedByName: "审核员",
-		Reason:     "审核确认 [migration_v2 manifest=" + strings.Repeat("a", 64) + " confidence=confirmed_auto confirmed_by=9 confirmed_at=2026-07-22T08:00:00Z evidence=task_event_log:event-1,task_module_event:42 upload_sessions=session-a,session-b]",
+		Reason:     "审核确认 [migration_v2 manifest=" + strings.Repeat("a", 64) + " confidence=confirmed_auto confirmed_by=9 confirmed_at=2026-07-22T08:00:00Z evidence=task_event_log:00000000-0000-0000-0000-000000000001,task_module_event:42 upload_sessions=session-a,session-b]",
 		SourceFile: &domain.TaskResourceFile{TaskAssetID: 40, FileName: "source.psd", StorageKey: "tasks/20/source.psd"},
 		Items:      []domain.TaskAssetGroupRevisionItem{{ID: 50, TaskAssetID: 60, File: &domain.TaskResourceFile{TaskAssetID: 60, FileName: "final.png", StorageKey: "tasks/20/final.png"}}},
 		References: []domain.TaskAssetGroupRevisionReference{
@@ -242,6 +305,10 @@ func TestResourceGroupRevisionsUsesPreferredScopedPermissionAndSafeURLs(t *testi
 		}
 		if !revision.EvidenceSummary.UploadSessionsKnown || !reflect.DeepEqual(revision.EvidenceSummary.UploadSessionIDs, []string{"session-a", "session-b"}) {
 			t.Fatalf("upload session evidence = %+v", revision.EvidenceSummary)
+		}
+		if revision.EvidenceSummary.EvidenceEventCount != 2 || !revision.EvidenceSummary.EvidenceEventIDsComplete ||
+			len(revision.EvidenceSummary.EvidenceEventIDs) != 2 {
+			t.Fatalf("full evidence completeness = %+v", revision.EvidenceSummary)
 		}
 	})
 
@@ -332,29 +399,79 @@ func TestResourceGroupRevisionsDoesNotExposeURLsForHistoricalUnavailableFile(t *
 
 func TestParseLegacyMigrationEvidenceFailsSafe(t *testing.T) {
 	tests := []struct {
-		name       string
-		reason     string
-		wantMarked bool
-		wantParsed bool
-		wantKnown  bool
+		name             string
+		reason           string
+		wantMarked       bool
+		wantParsed       bool
+		wantKnown        bool
+		wantConfidence   string
+		wantCount        int64
+		wantIDs          []string
+		wantIDsComplete  bool
+		wantReasonSHA256 string
 	}{
-		{name: "ordinary reason", reason: "普通审核通过"},
-		{name: "malformed marked reason", reason: "旧数据 [migration_v2 manifest=bad]", wantMarked: true},
+		{name: "ordinary reason", reason: "ordinary review"},
+		{name: "malformed marked reason", reason: "legacy [migration_v2 manifest=bad]", wantMarked: true},
 		{
-			name:       "legacy metadata without upload proof",
-			reason:     "历史迁移 [migration_v2 manifest=" + strings.Repeat("b", 64) + " confidence=confirmed_auto confirmed_by=7 confirmed_at=2026-07-22T08:00:00Z evidence=task_event_log:event-7]",
-			wantMarked: true,
-			wantParsed: true,
+			name:            "legacy full metadata without upload proof",
+			reason:          "legacy [migration_v2 manifest=" + strings.Repeat("b", 64) + " confidence=confirmed_auto confirmed_by=7 confirmed_at=2026-07-22T08:00:00Z evidence=task_event_log:00000000-0000-0000-0000-000000000007]",
+			wantMarked:      true,
+			wantParsed:      true,
+			wantConfidence:  "confirmed_auto",
+			wantCount:       1,
+			wantIDs:         []string{"task_event_log:00000000-0000-0000-0000-000000000007"},
+			wantIDsComplete: true,
 		},
+		{
+			name:            "compact metadata exposes partial ids",
+			reason:          "legacy [migration_v2 manifest=" + strings.Repeat("c", 64) + " confidence=confirmed_auto confirmed_by=7 confirmed_at=2026-07-22T08:00:00Z evidence_count=3 first_evidence=task_event_log:00000000-0000-0000-0000-000000000007]",
+			wantMarked:      true,
+			wantParsed:      true,
+			wantConfidence:  "confirmed_auto",
+			wantCount:       3,
+			wantIDs:         []string{"task_event_log:00000000-0000-0000-0000-000000000007"},
+			wantIDsComplete: false,
+		},
+		{
+			name:             "oversized compact metadata exposes reason hash and hard blocker",
+			reason:           "[migration_v2 manifest=" + strings.Repeat("d", 64) + " reason_sha256=" + strings.Repeat("e", 64) + " confidence=hard_blocked confirmed_by=7 confirmed_at=2026-07-22T08:00:00Z evidence_count=1 first_evidence=task_module_event:42]",
+			wantMarked:       true,
+			wantParsed:       true,
+			wantConfidence:   "hard_blocked",
+			wantCount:        1,
+			wantIDs:          []string{"task_module_event:42"},
+			wantIDsComplete:  true,
+			wantReasonSHA256: strings.Repeat("e", 64),
+		},
+		{name: "reject mixed full and compact evidence", reason: "[migration_v2 manifest=" + strings.Repeat("f", 64) + " confidence=confirmed_auto confirmed_by=7 confirmed_at=2026-07-22T08:00:00Z evidence=task_module_event:42 evidence_count=1 first_evidence=task_module_event:42]", wantMarked: true},
+		{name: "reject compact count without first id", reason: "[migration_v2 manifest=" + strings.Repeat("a", 64) + " confidence=confirmed_auto confirmed_by=7 confirmed_at=2026-07-22T08:00:00Z evidence_count=2]", wantMarked: true},
+		{name: "reject compact first id with zero count", reason: "[migration_v2 manifest=" + strings.Repeat("a", 64) + " confidence=confirmed_auto confirmed_by=7 confirmed_at=2026-07-22T08:00:00Z evidence_count=0 first_evidence=task_module_event:42]", wantMarked: true},
+		{name: "reject compact zero count without first id", reason: "[migration_v2 manifest=" + strings.Repeat("a", 64) + " confidence=confirmed_auto confirmed_by=7 confirmed_at=2026-07-22T08:00:00Z evidence_count=0]", wantMarked: true},
+		{name: "reject noncanonical count", reason: "[migration_v2 manifest=" + strings.Repeat("a", 64) + " confidence=confirmed_auto confirmed_by=7 confirmed_at=2026-07-22T08:00:00Z evidence_count=01 first_evidence=task_module_event:42]", wantMarked: true},
+		{name: "reject malformed task event id", reason: "[migration_v2 manifest=" + strings.Repeat("a", 64) + " confidence=confirmed_auto confirmed_by=7 confirmed_at=2026-07-22T08:00:00Z evidence_count=1 first_evidence=task_event_log:event-7]", wantMarked: true},
+		{name: "reject uppercase task event id", reason: "[migration_v2 manifest=" + strings.Repeat("a", 64) + " confidence=confirmed_auto confirmed_by=7 confirmed_at=2026-07-22T08:00:00Z evidence_count=1 first_evidence=task_event_log:00000000-0000-0000-0000-00000000000A]", wantMarked: true},
+		{name: "reject malformed module event id", reason: "[migration_v2 manifest=" + strings.Repeat("a", 64) + " confidence=confirmed_auto confirmed_by=7 confirmed_at=2026-07-22T08:00:00Z evidence_count=1 first_evidence=task_module_event:0042]", wantMarked: true},
+		{name: "reject uppercase hash", reason: "[migration_v2 manifest=" + strings.Repeat("A", 64) + " confidence=confirmed_auto confirmed_by=7 confirmed_at=2026-07-22T08:00:00Z evidence_count=1 first_evidence=task_module_event:42]", wantMarked: true},
+		{name: "reject malformed reason hash", reason: "[migration_v2 manifest=" + strings.Repeat("a", 64) + " reason_sha256=bad confidence=confirmed_auto confirmed_by=7 confirmed_at=2026-07-22T08:00:00Z evidence_count=1 first_evidence=task_module_event:42]", wantMarked: true},
+		{name: "reject hashed reason with inline prose", reason: "inline [migration_v2 manifest=" + strings.Repeat("a", 64) + " reason_sha256=" + strings.Repeat("b", 64) + " confidence=confirmed_auto confirmed_by=7 confirmed_at=2026-07-22T08:00:00Z evidence_count=1 first_evidence=task_module_event:42]", wantMarked: true},
+		{name: "reject duplicate token", reason: "[migration_v2 manifest=" + strings.Repeat("a", 64) + " confidence=confirmed_auto confidence=hard_blocked confirmed_by=7 confirmed_at=2026-07-22T08:00:00Z evidence_count=1 first_evidence=task_module_event:42]", wantMarked: true},
+		{name: "reject unknown token", reason: "[migration_v2 manifest=" + strings.Repeat("a", 64) + " confidence=confirmed_auto confirmed_by=7 confirmed_at=2026-07-22T08:00:00Z evidence_count=1 first_evidence=task_module_event:42 extra=x]", wantMarked: true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			summary, marked := parseLegacyMigrationEvidence(test.reason)
+			summary, marked := ParseLegacyMigrationEvidence(test.reason)
 			if marked != test.wantMarked || (summary != nil) != test.wantParsed {
-				t.Fatalf("parseLegacyMigrationEvidence() = %+v/%v", summary, marked)
+				t.Fatalf("ParseLegacyMigrationEvidence() = %+v/%v", summary, marked)
 			}
 			if summary != nil && summary.UploadSessionsKnown != test.wantKnown {
 				t.Fatalf("upload sessions known = %v", summary.UploadSessionsKnown)
+			}
+			if summary != nil && (summary.Confidence != test.wantConfidence ||
+				summary.EvidenceEventCount != test.wantCount ||
+				!reflect.DeepEqual(summary.EvidenceEventIDs, test.wantIDs) ||
+				summary.EvidenceEventIDsComplete != test.wantIDsComplete ||
+				summary.BusinessReasonSHA256 != test.wantReasonSHA256) {
+				t.Fatalf("migration evidence = %+v", summary)
 			}
 		})
 	}

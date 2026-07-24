@@ -32,7 +32,7 @@ describe('ResourceRevisionDrawer', () => {
         reason: '审核确认 [migration_v2 metadata]', legacy_migration: true, created_at: '2026-07-22T08:00:00Z',
         evidence_summary: {
           schema_version: 'migration_v2', manifest_sha256: 'a'.repeat(64), confidence: 'confirmed_auto', confirmed_by: 7,
-          confirmed_at: '2026-07-22T08:00:00Z', evidence_event_ids: ['task_event_log:event-1'], upload_session_ids: [], upload_sessions_known: false,
+          confirmed_at: '2026-07-22T08:00:00Z', evidence_event_count: 3, evidence_event_ids: ['task_event_log:event-1'], evidence_event_ids_complete: false, upload_session_ids: [], upload_sessions_known: false,
           business_reason: '审核确认',
         },
         source_file: { task_asset_id: 100, file_name: 'source.psd', preview_url: '/v1/task-assets/100/preview' },
@@ -52,6 +52,9 @@ describe('ResourceRevisionDrawer', () => {
     expect(wrapper.text()).toContain('审核员')
     expect(wrapper.text()).toContain('历史迁移证据')
     expect(wrapper.text()).toContain('旧证据未记录')
+    expect(wrapper.text()).toContain('事件证据共 3 条')
+    expect(wrapper.text()).toContain('当前仅保留首条 task_event_log:event-1')
+    expect(wrapper.text()).toContain('查询迁移清单')
     expect(wrapper.text()).not.toContain('[migration_v2 metadata]')
     expect(wrapper.find('a').exists()).toBe(false)
     expect(wrapper.find('img').exists()).toBe(false)
@@ -94,6 +97,16 @@ describe('ResourceRevisionDrawer', () => {
     trigger.remove()
   })
 
+  it('renders above the task workspace and below the global loading overlay', async () => {
+    const wrapper = mount(ResourceRevisionDrawer, { props: { group }, global: { stubs: { Teleport: true } } })
+    await flushPromises()
+
+    const drawerZIndex = Number(getComputedStyle(wrapper.get('.revision-drawer-backdrop').element).zIndex)
+    expect(drawerZIndex).toBeGreaterThan(7400)
+    expect(drawerZIndex).toBeLessThan(7600)
+    wrapper.unmount()
+  })
+
   it('does not expose malformed migration metadata in the business reason', async () => {
     mocks.revisions.mockResolvedValueOnce({
       items: [{
@@ -108,6 +121,100 @@ describe('ResourceRevisionDrawer', () => {
     expect(wrapper.text()).toContain('Legacy import')
     expect(wrapper.text()).not.toContain('[migration_v2 bad]')
     expect(wrapper.find('.evidence-warning').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('shows every evidence id only when the backend marks the list complete', async () => {
+    mocks.revisions.mockResolvedValueOnce({
+      items: [{
+        id: 74, group_id: 8, revision_no: 4, status: 'finalized', mode: 'single', source_stage: 'migration',
+        created_by: 1, legacy_migration: true, created_at: '2026-07-22T08:00:00Z', references: [], items: [],
+        evidence_summary: {
+          schema_version: 'migration_v2', manifest_sha256: 'b'.repeat(64), confidence: 'confirmed_auto', confirmed_by: 1,
+          confirmed_at: '2026-07-22T08:00:00Z', evidence_event_count: 2,
+          evidence_event_ids: ['task_event_log:event-1', 'task_event_log:event-2'], evidence_event_ids_complete: true,
+          upload_session_ids: [], upload_sessions_known: true,
+        },
+      }],
+      page: 1, page_size: 20, total: 1,
+    })
+    const wrapper = mount(ResourceRevisionDrawer, { props: { group }, global: { stubs: { Teleport: true } } })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('事件证据（完整 2 条）：task_event_log:event-1、task_event_log:event-2')
+    expect(wrapper.text()).not.toContain('当前仅保留首条')
+    wrapper.unmount()
+  })
+
+  it('removes the stale human-review candidate phrase only from confirmed evidence', async () => {
+    mocks.revisions.mockResolvedValueOnce({
+      items: [{
+        id: 75, group_id: 8, revision_no: 2, status: 'finalized', mode: 'single', source_stage: 'reopen',
+        created_by: 1,
+        reason: 'policy legacy_retouch_terminal_submit_v1: task 1264 completed; human confirmation remains required [migration_v2 compact]',
+        legacy_migration: true, created_at: '2026-07-22T08:00:00Z', references: [], items: [],
+        evidence_summary: {
+          schema_version: 'migration_v2', manifest_sha256: 'c'.repeat(64), confidence: 'confirmed_auto', confirmed_by: 1,
+          confirmed_at: '2026-07-23T06:04:15Z', evidence_event_count: 1,
+          evidence_event_ids: ['task_event_log:event-1'], evidence_event_ids_complete: true,
+          upload_session_ids: [], upload_sessions_known: true,
+          business_reason: 'policy legacy_retouch_terminal_submit_v1: task 1264 completed; human confirmation remains required',
+        },
+      }],
+      page: 1, page_size: 20, total: 1,
+    })
+    const wrapper = mount(ResourceRevisionDrawer, { props: { group }, global: { stubs: { Teleport: true } } })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('policy legacy_retouch_terminal_submit_v1: task 1264 completed')
+    expect(wrapper.text()).not.toContain('human confirmation remains required')
+    expect(wrapper.text()).toContain('用户 1')
+    wrapper.unmount()
+  })
+
+  it('preserves the human-review phrase for evidence that is not confirmed', async () => {
+    mocks.revisions.mockResolvedValueOnce({
+      items: [{
+        id: 76, group_id: 8, revision_no: 2, status: 'submitted', mode: 'single', source_stage: 'migration',
+        created_by: 1,
+        reason: 'candidate remains pending; human confirmation remains required',
+        legacy_migration: true, created_at: '2026-07-22T08:00:00Z', references: [], items: [],
+        evidence_summary: {
+          schema_version: 'migration_v2', manifest_sha256: 'd'.repeat(64), confidence: 'proposed_review', confirmed_by: 1,
+          confirmed_at: '2026-07-23T06:04:15Z', evidence_event_count: 1,
+          evidence_event_ids: ['task_event_log:event-1'], evidence_event_ids_complete: true,
+          upload_session_ids: [], upload_sessions_known: true,
+        },
+      }],
+      page: 1, page_size: 20, total: 1,
+    })
+    const wrapper = mount(ResourceRevisionDrawer, { props: { group }, global: { stubs: { Teleport: true } } })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('human confirmation remains required')
+    wrapper.unmount()
+  })
+
+  it('shows a business reason digest when the bounded reason text is absent', async () => {
+    mocks.revisions.mockResolvedValueOnce({
+      items: [{
+        id: 77, group_id: 8, revision_no: 2, status: 'finalized', mode: 'single', source_stage: 'migration',
+        created_by: 1, legacy_migration: true, created_at: '2026-07-22T08:00:00Z', references: [], items: [],
+        evidence_summary: {
+          schema_version: 'migration_v2', manifest_sha256: 'e'.repeat(64), confidence: 'confirmed_auto', confirmed_by: 1,
+          confirmed_at: '2026-07-23T06:04:15Z', evidence_event_count: 1,
+          evidence_event_ids: ['task_event_log:event-1'], evidence_event_ids_complete: true,
+          upload_session_ids: [], upload_sessions_known: true,
+          business_reason_sha256: '0123456789abcdef'.repeat(4),
+        },
+      }],
+      page: 1, page_size: 20, total: 1,
+    })
+    const wrapper = mount(ResourceRevisionDrawer, { props: { group }, global: { stubs: { Teleport: true } } })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('业务理由摘要')
+    expect(wrapper.text()).toContain('01234567…89abcdef')
     wrapper.unmount()
   })
 

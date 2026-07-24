@@ -36,11 +36,9 @@
       <TaskResourceRail
         v-if="bundle"
         :bundle="bundle"
-        :references="referenceFiles"
         :task-status="task.task_status"
         :can-operate="canOperateResources"
         :action-label="workflowButtonLabel"
-        @open-attachments="openWorkspace('attachments')"
         @open-resources="openWorkspace('resources')"
         @open-workflow="openWorkspace('workflow')"
       />
@@ -57,7 +55,7 @@
         <div class="command-actions">
           <button v-if="isPlanning" class="primary-button" :disabled="planningExporting" @click="downloadPlanningResult"><Download :size="16" aria-hidden="true" />{{ planningExporting ? '正在导出…' : '导出策划结果' }}</button>
           <button v-else-if="canOperateResources" class="primary-button" @click="openWorkspace('workflow')"><PanelTopOpen :size="16" aria-hidden="true" />{{ workflowButtonLabel }}</button>
-          <button v-if="referenceFiles.length" class="secondary-button" @click="openWorkspace('attachments')"><Paperclip :size="16" aria-hidden="true" />查看参考附件</button>
+          <button v-if="referenceFiles.length" class="secondary-button" @click="openWorkspace('attachments')"><Paperclip :size="16" aria-hidden="true" />查看任务级参考附件</button>
           <button class="secondary-button" @click="openWorkspace('details')"><FileText :size="16" aria-hidden="true" />完整任务信息</button>
         </div>
       </section>
@@ -73,7 +71,7 @@
         </article>
 
         <article class="brief-card references-card">
-          <header><div class="card-heading"><span class="heading-icon"><Paperclip :size="18" aria-hidden="true" /></span><div><h2>参考资料</h2><p>{{ referenceFiles.length }} 个附件</p></div></div><div class="card-actions"><button @click="openWorkspace('attachments')"><ExternalLink :size="15" aria-hidden="true" />查看附件</button><button v-if="canManageReferences" class="upload-button" :disabled="referenceUploading" @click="referenceInput?.click()"><Plus :size="15" aria-hidden="true" />{{ referenceUploading ? '上传中…' : '补充附件' }}</button></div></header>
+          <header><div class="card-heading"><span class="heading-icon"><Paperclip :size="18" aria-hidden="true" /></span><div><h2>任务级参考附件</h2><p>{{ referenceFiles.length }} 个任务级附件</p></div></div><div class="card-actions"><button @click="openWorkspace('attachments')"><ExternalLink :size="15" aria-hidden="true" />查看任务级附件</button><button v-if="canManageReferences" class="upload-button" :disabled="referenceUploading" @click="referenceInput?.click()"><Plus :size="15" aria-hidden="true" />{{ referenceUploading ? '上传中…' : '补充附件' }}</button></div></header>
           <div v-if="referenceFiles.length" class="reference-preview">
             <a v-for="(file,index) in referenceFiles.slice(0,4)" :key="referenceKey(file,index)" :href="referenceUrl(file)" target="_blank" rel="noreferrer">
               <img v-if="isPreviewable(file) && referencePreviewUrl(file) && !brokenReferences.has(referenceKey(file,index))" :src="referencePreviewUrl(file)" :alt="referenceName(file)" @error="markReferenceBroken(file,index)" />
@@ -81,7 +79,7 @@
               <small>{{ referenceName(file) }}</small>
             </a>
           </div>
-          <p v-else class="muted-copy">暂无参考附件。</p>
+          <p v-else class="muted-copy">暂无任务级参考附件。</p>
         </article>
 
         <article class="brief-card collaboration-card">
@@ -131,7 +129,7 @@
           </div>
 
           <div v-else-if="workspaceMode === 'details'" class="workspace-body detail-sections">
-            <section class="detail-summary-strip"><div><span>当前状态</span><strong>{{ currentStageTitle }}</strong></div><div><span>任务类型</span><strong>{{ taskTypeLabel }} · {{ businessLaneLabel }}</strong></div><div><span>当前指派</span><strong>{{ currentOwner }}</strong></div><div><span>附件</span><strong>{{ referenceFiles.length }} 个</strong></div><div><span>最近更新</span><strong>{{ displayDate(task.updated_at) }}</strong></div></section>
+            <section class="detail-summary-strip"><div><span>当前状态</span><strong>{{ currentStageTitle }}</strong></div><div><span>任务类型</span><strong>{{ taskTypeLabel }} · {{ businessLaneLabel }}</strong></div><div><span>当前指派</span><strong>{{ currentOwner }}</strong></div><div><span>任务级附件</span><strong>{{ referenceFiles.length }} 个</strong></div><div><span>最近更新</span><strong>{{ displayDate(task.updated_at) }}</strong></div></section>
             <section class="detail-requirement"><p class="eyebrow">需求与运营交代</p><div class="detail-copy-grid"><div><h3>{{ requirementHeading }}</h3><p class="long-copy">{{ requirementText }}</p></div><aside><h3>运营备注</h3><p class="long-copy">{{ operationNote }}</p></aside></div></section>
             <section><p class="eyebrow">人员与组织</p><dl class="detail-list"><div><dt>创建人</dt><dd>{{ task.creator_name || '—' }}</dd></div><div><dt>设计人员</dt><dd>{{ task.designer_name || '—' }}</dd></div><div><dt>当前处理人</dt><dd>{{ currentOwner }}</dd></div><div><dt>归属组织</dt><dd>{{ ownerOrg }}</dd></div></dl></section>
             <section><p class="eyebrow">产品与规格</p><dl class="detail-list"><div><dt>主 SKU</dt><dd>{{ task.primary_sku_code || task.sku_code || '—' }}</dd></div><div><dt>产品名称</dt><dd>{{ task.product_name_snapshot || '—' }}</dd></div><div><dt>规格</dt><dd>{{ detailValue('spec_text') }}</dd></div><div><dt>尺寸</dt><dd>{{ detailValue('size_text') }}</dd></div><div><dt>材质</dt><dd>{{ detailValue('material') }}</dd></div><div><dt>工艺</dt><dd>{{ detailValue('craft_text') }}</dd></div></dl></section>
@@ -139,7 +137,7 @@
             <section><p class="eyebrow">业务与时效</p><dl class="detail-list"><div v-for="item in businessDetailItems" :key="item.label"><dt>{{ item.label }}</dt><dd>{{ item.value }}</dd></div></dl></section>
             <section><p class="eyebrow">文案与同步</p><dl class="detail-list"><div v-for="item in contentDetailItems" :key="item.label"><dt>{{ item.label }}</dt><dd>{{ item.value }}</dd></div></dl></section>
             <section v-if="retouchRequirements.length"><p class="eyebrow">逐项修图要求</p><ol class="retouch-requirement-list"><li v-for="(item,index) in retouchRequirements" :key="String(item.id || index)"><span>{{ index + 1 }}</span><div><strong>{{ item.description || item.requirement || `修图要求 ${index + 1}` }}</strong><p v-if="item.remark || item.note">{{ item.remark || item.note }}</p></div></li></ol></section>
-            <section class="reference-summary"><p class="eyebrow">参考附件</p><div><strong>{{ referenceFiles.length }} 个文件</strong><p>参考资料已集中到独立附件工作台，可预览并下载，不再与完整任务信息混在一起。</p><button type="button" @click="openWorkspace('attachments')">打开附件工作台</button></div></section>
+            <section class="reference-summary"><p class="eyebrow">任务级参考附件</p><div><strong>{{ referenceFiles.length }} 个文件</strong><p>任务级参考资料已集中到独立附件工作台；SKU 或修图需求范围的参考图仍以资源组版本为准。</p><button type="button" @click="openWorkspace('attachments')">打开任务级附件工作台</button></div></section>
             <section v-if="skuItems.length"><p class="eyebrow">SKU 清单</p><div class="sku-list"><span v-for="item in skuItems" :key="String(item.id || item.sku_code)">{{ item.sku_code || `子项 ${item.sequence_no || ''}` }}<em v-if="item.set_mode_hint || item.setModeHint">运营建议套装 · 设计可调整</em></span></div></section>
           </div>
 
@@ -328,14 +326,14 @@ const heroFacts = computed<Array<{ label: string; value: string; tone?: 'empty' 
   if (isPlanning.value) return [
     { label: 'SKU 数量', value: skuCount.value ? `${skuCount.value} 个` : '—' },
     { label: '创建人', value: String(task.value?.creator_name || '—') },
-    { label: isTerminal.value ? '完成时间' : '最近更新', value: displayDate(task.value?.updated_at) },
+    { label: '最近更新', value: displayDate(task.value?.updated_at) },
     { label: '归属组织', value: ownerOrg.value },
   ]
   return [
     { label: '当前处理人', value: currentOwner.value, tone: !hasOwner.value && !isTerminal.value ? 'empty' : undefined },
     { label: '截止时间', value: dueAtText.value, tone: dueSoonOrOverdue.value ? 'danger' : undefined },
     { label: '归属组织', value: ownerOrg.value },
-    { label: isTerminal.value ? '完成时间' : '最近更新', value: displayDate(task.value?.updated_at) },
+    { label: '最近更新', value: displayDate(task.value?.updated_at) },
   ]
 })
 const sortedEvents = computed(() => [...events.value].sort((left, right) => {
@@ -407,11 +405,17 @@ const currentStageDescription = computed(() => {
   if (isRetouch.value && task.value?.task_status === 'InProgress') return '修图人员提交最终成品后，任务直接结单。'
   return '在这里查看任务全貌、资源与最新处理动态。'
 })
-const workflowButtonLabel = computed(() => task.value?.task_status === 'PendingAudit' ? '进入审核工作台' : isRetouch.value ? '提交修图成品' : task.value?.task_status === 'Completed' ? '查看结单资源' : '进入设计提交')
-const workspaceTitle = computed(() => ({ workflow: currentStageTitle.value, resources: '任务文件总览', attachments: '参考附件', details: '完整任务信息', history: '全部任务动态', collaboration: '审核交班与接手' }[workspaceMode.value || 'details']))
+const workflowButtonLabel = computed(() => {
+  if (actionSet.value.has('task.reopen')) return '重开任务'
+  if (task.value?.task_status === 'PendingAudit') return '进入审核工作台'
+  if (isRetouch.value) return '提交修图成品'
+  if (task.value?.task_status === 'Completed') return '查看结单资源'
+  return '进入设计提交'
+})
+const workspaceTitle = computed(() => ({ workflow: currentStageTitle.value, resources: '任务文件总览', attachments: '任务级参考附件', details: '完整任务信息', history: '全部任务动态', collaboration: '审核交班与接手' }[workspaceMode.value || 'details']))
 const workspaceSubtitle = computed(() => {
   if (workspaceMode.value === 'workflow') return currentStageDescription.value
-  if (workspaceMode.value === 'attachments') return '集中预览和下载运营提供的参考图片与文件。'
+  if (workspaceMode.value === 'attachments') return '集中预览和下载运营提供的任务级参考图片与文件。'
   return '看完点右上角关闭，页面还停在这张任务上。'
 })
 

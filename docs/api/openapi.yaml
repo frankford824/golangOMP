@@ -5503,8 +5503,16 @@ components:
         file: { $ref: '#/components/schemas/TaskResourceFile' }
     ResourceGroupRevisionEvidence:
       type: object
-      required: [schema_version, manifest_sha256, confidence, confirmed_by, confirmed_at, evidence_event_ids, upload_session_ids, upload_sessions_known]
-      description: Parsed fail-safe projection of versioned legacy-migration metadata. Event payloads and raw storage addresses are never returned. When upload_sessions_known is false, upload_session_ids is empty because the stored migration reason did not prove that association.
+      required: [schema_version, manifest_sha256, confidence, confirmed_by, confirmed_at, evidence_event_count, evidence_event_ids, evidence_event_ids_complete, upload_session_ids, upload_sessions_known]
+      description: |
+        Parsed fail-safe projection of versioned legacy-migration metadata. Event payloads and raw storage
+        addresses are never returned. Legacy full markers expose every validated evidence id with
+        `evidence_event_ids_complete=true`. Compact writer markers expose the validated total in
+        `evidence_event_count` and only the stored first id; the list is incomplete when the count is greater
+        than one. Clients must not treat `evidence_event_ids` as complete unless
+        `evidence_event_ids_complete=true`. When `upload_sessions_known` is false, `upload_session_ids` is empty
+        because the stored migration reason did not prove that association. `confidence` remains authoritative
+        for distinguishing reviewed `confirmed_auto` rows from `hard_blocked` rows.
       properties:
         schema_version: { type: string, enum: [migration_v2] }
         manifest_sha256: { type: string, pattern: '^[0-9a-f]{64}$' }
@@ -5513,12 +5521,25 @@ components:
         confirmed_at: { type: string, format: date-time }
         evidence_event_ids:
           type: array
+          description: Validated evidence ids stored in the marker. For compact markers this contains only the first id.
           items: { type: string }
+        evidence_event_count:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Total validated evidence-id count asserted by the marker.
+        evidence_event_ids_complete:
+          type: boolean
+          description: True only when evidence_event_ids contains the complete asserted evidence set.
         upload_session_ids:
           type: array
           items: { type: string }
         upload_sessions_known: { type: boolean }
         business_reason: { type: string }
+        business_reason_sha256:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+          description: Lower-case SHA-256 of an oversized business reason that could not fit beside the marker.
     TaskAssetGroupRevision:
       type: object
       required: [id, group_id, revision_no, status, mode, source_stage, created_by, legacy_migration, items, references, created_at]

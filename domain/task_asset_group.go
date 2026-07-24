@@ -121,15 +121,18 @@ type TaskAssetGroupRevision struct {
 // versioned metadata stored in a migrated revision's reason. It never contains
 // event payloads, object-storage addresses, or inferred upload sessions.
 type ResourceGroupRevisionEvidence struct {
-	SchemaVersion       string    `json:"schema_version"`
-	ManifestSHA256      string    `json:"manifest_sha256"`
-	Confidence          string    `json:"confidence"`
-	ConfirmedBy         int64     `json:"confirmed_by"`
-	ConfirmedAt         time.Time `json:"confirmed_at"`
-	EvidenceEventIDs    []string  `json:"evidence_event_ids"`
-	UploadSessionIDs    []string  `json:"upload_session_ids"`
-	UploadSessionsKnown bool      `json:"upload_sessions_known"`
-	BusinessReason      string    `json:"business_reason,omitempty"`
+	SchemaVersion            string    `json:"schema_version"`
+	ManifestSHA256           string    `json:"manifest_sha256"`
+	Confidence               string    `json:"confidence"`
+	ConfirmedBy              int64     `json:"confirmed_by"`
+	ConfirmedAt              time.Time `json:"confirmed_at"`
+	EvidenceEventCount       int64     `json:"evidence_event_count"`
+	EvidenceEventIDs         []string  `json:"evidence_event_ids"`
+	EvidenceEventIDsComplete bool      `json:"evidence_event_ids_complete"`
+	UploadSessionIDs         []string  `json:"upload_session_ids"`
+	UploadSessionsKnown      bool      `json:"upload_sessions_known"`
+	BusinessReason           string    `json:"business_reason,omitempty"`
+	BusinessReasonSHA256     string    `json:"business_reason_sha256,omitempty"`
 }
 
 type TaskAssetGroupRevisionItem struct {

@@ -6,9 +6,9 @@
     </header>
     <div class="rail-grid">
       <article class="rail-column references">
-        <div class="column-head"><span>01</span><div><strong>运营参考图</strong><small>{{ references.length }} 个附件</small></div><button type="button" @click="$emit('openAttachments')">预览全部</button></div>
-        <div v-if="references.length" class="media-strip">
-          <button v-for="(file,index) in references.slice(0,4)" :key="referenceKey(file,index)" type="button" @click="$emit('openAttachments')">
+        <div class="column-head"><span>01</span><div><strong>运营参考图</strong><small>{{ resourceReferences.length }} 个附件</small></div><button type="button" @click="$emit('openResources')">预览全部</button></div>
+        <div v-if="resourceReferences.length" class="media-strip">
+          <button v-for="(file,index) in resourceReferences.slice(0,4)" :key="referenceKey(file,index)" type="button" @click="$emit('openResources')">
             <img v-if="referencePreviewable(file) && referencePreview(file) && !brokenReferences.has(referenceKey(file,index))" :src="referencePreview(file)" :alt="referenceName(file)" @error="markReferenceBroken(file,index)" />
             <FileText v-else :size="23" aria-hidden="true" />
             <span>{{ referenceName(file) }}</span>
@@ -49,15 +49,32 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { ArrowRight, FileArchive, FileText, Images, LockKeyhole } from 'lucide-vue-next'
-import type { ResourceBundle, ResourceFile, ResourceRevisionItem } from '@/services/api/resourceGroupsApi'
+import type { ResourceBundle, ResourceFile, ResourceReference, ResourceRevisionItem } from '@/services/api/resourceGroupsApi'
 
-interface ReferenceFile extends Record<string, unknown> { id?: number; asset_id?: string; file_name?: string; filename?: string; mime_type?: string; preview_url?: string; download_url?: string; url?: string }
 type SourceWithStage = ResourceFile & { stage: string }
-const props = defineProps<{ bundle: ResourceBundle; references: ReferenceFile[]; taskStatus: string; canOperate?: boolean; actionLabel?: string }>()
-defineEmits<{ openAttachments: []; openResources: []; openWorkflow: [] }>()
+const props = defineProps<{ bundle: ResourceBundle; taskStatus: string; canOperate?: boolean; actionLabel?: string }>()
+defineEmits<{ openResources: []; openWorkflow: [] }>()
 const groups = computed(() => props.bundle.groups || [])
 const brokenReferences = ref(new Set<string>())
 const brokenFinals = ref(new Set<number>())
+const resourceReferences = computed<ResourceReference[]>(() => {
+  const seen = new Set<string>()
+  const references: ResourceReference[] = []
+  groups.value.forEach((group, groupIndex) => {
+    const revision = group.finalized_revision || group.working_revision
+    const ordered = [...(revision?.references || [])].sort((left, right) =>
+      Number(left.sort_order || 0) - Number(right.sort_order || 0)
+      || Number(left.id || 0) - Number(right.id || 0),
+    )
+    ordered.forEach((reference, referenceIndex) => {
+      const identity = referenceIdentity(reference, groupIndex, referenceIndex)
+      if (seen.has(identity)) return
+      seen.add(identity)
+      references.push(reference)
+    })
+  })
+  return references
+})
 const sources = computed<SourceWithStage[]>(() => groups.value.flatMap((group) => {
   const revision = group.finalized_revision || group.working_revision
   return revision?.source_file ? [{ ...revision.source_file, stage: revision.source_stage }] : []
@@ -68,11 +85,18 @@ const setCount = computed(() => groups.value.filter((group) => (group.finalized_
 const finalLocked = computed(() => props.taskStatus === 'InProgress' && !finalCount.value)
 const actionHint = computed(() => props.taskStatus === 'PendingAudit' ? '审核人员在这里确认模式、上传成品并决定是否替换源文件。' : '设计人员先判定单图或套装，再为每个 SKU 提交可编辑源文件。')
 
-function referenceName(file: ReferenceFile) { return String(file.filename || file.file_name || file.asset_id || '参考附件') }
-function referencePreview(file: ReferenceFile) { return String(file.preview_url || file.url || file.download_url || '') }
-function referenceKey(file: ReferenceFile, index: number) { return String(file.id || file.asset_id || `${referenceName(file)}-${index}`) }
-function referencePreviewable(file: ReferenceFile) { return String(file.mime_type || '').startsWith('image/') || /\.(png|jpe?g|webp|gif)$/i.test(referenceName(file)) }
-function markReferenceBroken(file: ReferenceFile, index: number) { brokenReferences.value = new Set(brokenReferences.value).add(referenceKey(file,index)) }
+function referenceIdentity(file: ResourceReference, groupIndex: number, referenceIndex: number) {
+  if (file.reference_file_ref_id != null) return `reference-file-ref:${file.reference_file_ref_id}`
+  if (file.ref_id) return `ref:${file.ref_id}`
+  if (file.formal_task_asset_id != null) return `task-asset:${file.formal_task_asset_id}`
+  if (file.id != null) return `revision-reference:${file.id}`
+  return `fallback:${groupIndex}:${referenceIndex}:${file.file_name || ''}`
+}
+function referenceName(file: ResourceReference) { return String(file.file_name || file.ref_id || '参考附件') }
+function referencePreview(file: ResourceReference) { return String(file.preview_url || file.download_url || '') }
+function referenceKey(file: ResourceReference, index: number) { return referenceIdentity(file, 0, index) }
+function referencePreviewable(file: ResourceReference) { return String(file.mime_type || '').startsWith('image/') || /\.(png|jpe?g|webp|gif)$/i.test(referenceName(file)) }
+function markReferenceBroken(file: ResourceReference, index: number) { brokenReferences.value = new Set(brokenReferences.value).add(referenceKey(file,index)) }
 function finalPreview(item: ResourceRevisionItem) { return String(item.file?.preview_url || item.file?.download_url || '') }
 function finalPreviewable(item: ResourceRevisionItem) { return String(item.file?.mime_type || '').startsWith('image/') || /\.(png|jpe?g|webp|gif)$/i.test(item.file?.file_name || item.item_name || '') }
 function markFinalBroken(id: number) { brokenFinals.value = new Set(brokenFinals.value).add(id) }

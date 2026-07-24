@@ -146,6 +146,7 @@ func (s *taskResourceWorkflowService) ResourceBundle(ctx context.Context, taskID
 		}
 	}
 	s.hydrateSKUProfiles(ctx, groups)
+	hydrateCurrentResourceGroupEvidence(groups)
 	s.hydrateResourceGroupURLs(groups)
 	return &domain.ResourceBundle{TaskID: taskID, WorkflowRevision: task.WorkflowRevision, Groups: groups}, nil
 }
@@ -180,6 +181,7 @@ func (s *taskResourceWorkflowService) ListResourceGroups(ctx context.Context, ac
 		return nil, infraError("list resource groups", err)
 	}
 	s.hydrateSKUProfiles(ctx, items)
+	hydrateCurrentResourceGroupEvidence(items)
 	s.hydrateResourceGroupURLs(items)
 	return &domain.ResourceGroupListResult{Items: items, FlatItems: []domain.FlatResourceItem{}, Page: params.Page, PageSize: params.PageSize, Total: total, ViewMode: "group"}, nil
 }
@@ -231,6 +233,7 @@ func (s *taskResourceWorkflowService) ResourceGroup(ctx context.Context, actor d
 	}
 	items := []domain.TaskAssetGroup{*group}
 	s.hydrateSKUProfiles(ctx, items)
+	hydrateCurrentResourceGroupEvidence(items)
 	s.hydrateResourceGroupURLs(items)
 	return &items[0], nil
 }
@@ -442,13 +445,30 @@ func (s *taskResourceWorkflowService) hydrateHistoricalRevisionURLs(revisions []
 
 func hydrateHistoricalRevisionEvidence(revisions []domain.TaskAssetGroupRevision) {
 	for index := range revisions {
-		summary, marked := parseLegacyMigrationEvidence(revisions[index].Reason)
-		revisions[index].LegacyMigration = marked
-		revisions[index].EvidenceSummary = summary
+		hydrateResourceGroupRevisionEvidence(&revisions[index])
 	}
 }
 
-func parseLegacyMigrationEvidence(reason string) (*domain.ResourceGroupRevisionEvidence, bool) {
+func hydrateCurrentResourceGroupEvidence(groups []domain.TaskAssetGroup) {
+	for index := range groups {
+		hydrateResourceGroupRevisionEvidence(groups[index].WorkingRevision)
+		hydrateResourceGroupRevisionEvidence(groups[index].FinalizedRevision)
+	}
+}
+
+func hydrateResourceGroupRevisionEvidence(revision *domain.TaskAssetGroupRevision) {
+	if revision == nil {
+		return
+	}
+	summary, marked := ParseLegacyMigrationEvidence(revision.Reason)
+	revision.LegacyMigration = marked
+	revision.EvidenceSummary = summary
+}
+
+// ParseLegacyMigrationEvidence parses the versioned marker emitted by the V8
+// migration writer. A marked but malformed reason returns (nil, true), so
+// readers never project unvalidated migration metadata.
+func ParseLegacyMigrationEvidence(reason string) (*domain.ResourceGroupRevisionEvidence, bool) {
 	trimmed := strings.TrimSpace(reason)
 	const marker = "[migration_v2 "
 	markerIndex := strings.LastIndex(trimmed, marker)
@@ -463,7 +483,8 @@ func parseLegacyMigrationEvidence(reason string) (*domain.ResourceGroupRevisionE
 			return nil, true
 		}
 		switch parts[0] {
-		case "manifest", "confidence", "confirmed_by", "confirmed_at", "evidence", "upload_sessions":
+		case "manifest", "reason_sha256", "confidence", "confirmed_by", "confirmed_at",
+			"evidence", "evidence_count", "first_evidence", "upload_sessions":
 		default:
 			return nil, true
 		}
@@ -472,16 +493,20 @@ func parseLegacyMigrationEvidence(reason string) (*domain.ResourceGroupRevisionE
 		}
 		fields[parts[0]] = parts[1]
 	}
-	for _, required := range []string{"manifest", "confidence", "confirmed_by", "confirmed_at", "evidence"} {
+	for _, required := range []string{"manifest", "confidence", "confirmed_by", "confirmed_at"} {
 		if fields[required] == "" {
 			return nil, true
 		}
 	}
-	if len(fields["manifest"]) != sha256.Size*2 {
+	if !validLowerSHA256(fields["manifest"]) {
 		return nil, true
 	}
-	if _, err := hex.DecodeString(fields["manifest"]); err != nil || strings.ToLower(fields["manifest"]) != fields["manifest"] {
-		return nil, true
+	businessReason := strings.TrimSpace(trimmed[:markerIndex])
+	businessReasonSHA256 := fields["reason_sha256"]
+	if businessReasonSHA256 != "" {
+		if businessReason != "" || !validLowerSHA256(businessReasonSHA256) {
+			return nil, true
+		}
 	}
 	switch fields["confidence"] {
 	case "confirmed_auto", "proposed_review", "hard_blocked":
@@ -496,30 +521,76 @@ func parseLegacyMigrationEvidence(reason string) (*domain.ResourceGroupRevisionE
 	if err != nil {
 		return nil, true
 	}
-	evidenceIDs, ok := parseMigrationEvidenceIDs(fields["evidence"])
-	if !ok || len(evidenceIDs) == 0 {
+	fullEvidenceRaw, hasFullEvidence := fields["evidence"]
+	compactCountRaw, hasCompactEvidence := fields["evidence_count"]
+	if hasFullEvidence == hasCompactEvidence {
 		return nil, true
+	}
+	evidenceIDs := []string{}
+	var evidenceCount int64
+	evidenceIDsComplete := false
+	if hasFullEvidence {
+		if fields["first_evidence"] != "" || fields["reason_sha256"] != "" {
+			return nil, true
+		}
+		var ok bool
+		evidenceIDs, ok = parseMigrationEvidenceIDs(fullEvidenceRaw)
+		if !ok || len(evidenceIDs) == 0 {
+			return nil, true
+		}
+		evidenceCount = int64(len(evidenceIDs))
+		evidenceIDsComplete = true
+	} else {
+		parsedCount, err := strconv.ParseInt(compactCountRaw, 10, 64)
+		if err != nil || parsedCount <= 0 || strconv.FormatInt(parsedCount, 10) != compactCountRaw {
+			return nil, true
+		}
+		evidenceCount = parsedCount
+		firstEvidence, hasFirstEvidence := fields["first_evidence"]
+		if !hasFirstEvidence {
+			return nil, true
+		}
+		parsedFirst, ok := parseMigrationEvidenceIDs(firstEvidence)
+		if !ok || len(parsedFirst) != 1 {
+			return nil, true
+		}
+		evidenceIDs = parsedFirst
+		// first_evidence is a compact sample. It is complete only when the
+		// validated total proves the sample is the sole evidence id.
+		evidenceIDsComplete = evidenceCount == 1
 	}
 	uploadSessionIDs := []string{}
 	uploadSessionsKnown := false
 	if raw, exists := fields["upload_sessions"]; exists {
 		uploadSessionsKnown = true
-		uploadSessionIDs, ok = parseOpaqueEvidenceIDs(raw)
-		if !ok {
+		parsedUploadSessionIDs, parsedOK := parseOpaqueEvidenceIDs(raw)
+		if !parsedOK {
 			return nil, true
 		}
+		uploadSessionIDs = parsedUploadSessionIDs
 	}
 	return &domain.ResourceGroupRevisionEvidence{
-		SchemaVersion:       "migration_v2",
-		ManifestSHA256:      fields["manifest"],
-		Confidence:          fields["confidence"],
-		ConfirmedBy:         confirmedBy,
-		ConfirmedAt:         confirmedAt,
-		EvidenceEventIDs:    evidenceIDs,
-		UploadSessionIDs:    uploadSessionIDs,
-		UploadSessionsKnown: uploadSessionsKnown,
-		BusinessReason:      strings.TrimSpace(trimmed[:markerIndex]),
+		SchemaVersion:            "migration_v2",
+		ManifestSHA256:           fields["manifest"],
+		Confidence:               fields["confidence"],
+		ConfirmedBy:              confirmedBy,
+		ConfirmedAt:              confirmedAt,
+		EvidenceEventCount:       evidenceCount,
+		EvidenceEventIDs:         evidenceIDs,
+		EvidenceEventIDsComplete: evidenceIDsComplete,
+		UploadSessionIDs:         uploadSessionIDs,
+		UploadSessionsKnown:      uploadSessionsKnown,
+		BusinessReason:           businessReason,
+		BusinessReasonSHA256:     businessReasonSHA256,
 	}, true
+}
+
+func validLowerSHA256(value string) bool {
+	if len(value) != sha256.Size*2 || strings.ToLower(value) != value {
+		return false
+	}
+	_, err := hex.DecodeString(value)
+	return err == nil
 }
 
 func parseMigrationEvidenceIDs(raw string) ([]string, bool) {
@@ -529,11 +600,38 @@ func parseMigrationEvidenceIDs(raw string) ([]string, bool) {
 	}
 	for _, value := range values {
 		parts := strings.SplitN(value, ":", 2)
-		if len(parts) != 2 || parts[1] == "" || (parts[0] != "task_event_log" && parts[0] != "task_module_event") {
+		if len(parts) != 2 || !validMigrationEvidenceID(parts[0], parts[1]) {
 			return nil, false
 		}
 	}
 	return values, true
+}
+
+func validMigrationEvidenceID(kind, id string) bool {
+	switch kind {
+	case "task_event_log":
+		if len(id) != 36 {
+			return false
+		}
+		for index, char := range id {
+			switch index {
+			case 8, 13, 18, 23:
+				if char != '-' {
+					return false
+				}
+			default:
+				if !((char >= '0' && char <= '9') || (char >= 'a' && char <= 'f')) {
+					return false
+				}
+			}
+		}
+		return true
+	case "task_module_event":
+		value, err := strconv.ParseInt(id, 10, 64)
+		return err == nil && value > 0 && strconv.FormatInt(value, 10) == id
+	default:
+		return false
+	}
 }
 
 func parseOpaqueEvidenceIDs(raw string) ([]string, bool) {

@@ -219,13 +219,13 @@ const canAudit = computed(() => canReturnToDesign.value || canApprove.value)
 const canReopen = computed(() => actionSet.value.has('reopen') || actionSet.value.has('task.reopen'))
 const isRetouch = computed(() => ['retouch', 'retouch_task'].includes(props.taskType.toLowerCase()))
 const isDesignStage = computed(() => canSubmit.value && !isRetouch.value)
-const isRetouchStage = computed(() => canSubmit.value && isRetouch.value)
+const isRetouchStage = computed(() => canSubmit.value && isRetouch.value && !canReopen.value)
 const isAuditStage = computed(() => canAudit.value)
-const phase = computed(() => isAuditStage.value ? 'audit' : isDesignStage.value ? 'design' : isRetouch.value && canSubmit.value ? 'retouch' : 'read')
-const showEditor = computed(() => isDesignStage.value || isAuditStage.value || (isRetouch.value && canSubmit.value))
-const canChooseMode = computed(() => isDesignStage.value || (isRetouch.value && canSubmit.value))
+const phase = computed(() => isAuditStage.value ? 'audit' : isDesignStage.value ? 'design' : isRetouchStage.value ? 'retouch' : 'read')
+const showEditor = computed(() => isDesignStage.value || isAuditStage.value || isRetouchStage.value)
+const canChooseMode = computed(() => isDesignStage.value || isRetouchStage.value)
 const sourceRequired = computed(() => !isRetouch.value)
-const heading = computed(() => isAuditStage.value ? '审核定稿' : isDesignStage.value ? '设计提交' : isRetouch.value && canSubmit.value ? '提交修图成品' : canReopen.value ? '重开任务' : '任务资源')
+const heading = computed(() => isAuditStage.value ? '审核定稿' : isDesignStage.value ? '设计提交' : canReopen.value ? '重开任务' : isRetouchStage.value ? '提交修图成品' : '任务资源')
 const headingHint = computed(() => isAuditStage.value ? '审核人员依据设计判定上传最终成品，必要时替换源文件。' : isDesignStage.value ? '先确定每个 SKU 的单图或套装模式，再提交一份可编辑源文件。' : '参考图、有效源文件与最终成品保持在同一资源链中。')
 const finalStageHint = computed(() => isDesignStage.value ? '审核人员上传最终成品' : isAuditStage.value ? '按设计判定上传定稿' : '最终资源')
 const displayReferenceCount = computed(() => {
@@ -310,7 +310,7 @@ function toggleSourceReplacement(row: EditorRow) {
   replaceSourceGroups.value = next
   markChanged(row.group.id)
 }
-function canUploadSource(row: EditorRow) { return isDesignStage.value || (isRetouch.value && canSubmit.value) || replaceSourceGroups.value.has(row.group.id) }
+function canUploadSource(row: EditorRow) { return isDesignStage.value || isRetouchStage.value || replaceSourceGroups.value.has(row.group.id) }
 function finalRequirement(row: EditorRow) { return row.mode === 'set' ? '套装至少 2 张，可拖拽排序' : '单图恰好 1 张' }
 function assetVersionId(uploaded: Awaited<ReturnType<typeof uploadTaskFileViaAssetSession>>): number {
   const raw = uploaded.version?.id || uploaded.version?.version_id
@@ -351,7 +351,7 @@ const validDesign = computed(() => rows.value.length > 0 && rows.value.every((ro
 const validAudit = computed(() => rows.value.length > 0 && rows.value.every((row) => Boolean(row.source) && validFinals(row)) && !rows.value.some((row) => row.uploading))
 const validRetouch = computed(() => rows.value.length > 0 && rows.value.every((row) => validFinals(row)) && !rows.value.some((row) => row.uploading))
 function submission(row: EditorRow): ResourceGroupSubmission {
-  const includeFinals = isAuditStage.value || (isRetouch.value && canSubmit.value)
+  const includeFinals = isAuditStage.value || isRetouchStage.value
   const result: ResourceGroupSubmission = { group_id: row.group.id, expected_group_lock_version: row.group.lock_version, mode: row.mode, final_task_asset_ids: includeFinals ? row.finals.map((file) => file.id) : [] }
   if (row.source && (!isAuditStage.value || replaceSourceGroups.value.has(row.group.id))) result.source_task_asset_id = row.source.id
   return result

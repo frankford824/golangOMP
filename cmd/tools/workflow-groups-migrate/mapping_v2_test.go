@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
+
+	"workflow/service"
 )
 
 func validV2Revision(t *testing.T) resourceRevisionMapping {
@@ -967,6 +969,39 @@ func TestPersistedRevisionReasonBindsFullEvidenceWithoutInliningEveryEvent(t *te
 	if strings.Contains(got, "00000000-0000-0000-0000-000000000002") {
 		t.Fatalf("persistedRevisionReason() unexpectedly inlined the full evidence list: %q", got)
 	}
+	summary, marked := service.ParseLegacyMigrationEvidence(got)
+	if !marked || summary == nil {
+		t.Fatalf("persistedRevisionReason() was not readable: summary=%+v marked=%v reason=%q", summary, marked, got)
+	}
+	if summary.Confidence != "confirmed_auto" || summary.EvidenceEventCount != 7 ||
+		summary.EvidenceEventIDsComplete ||
+		len(summary.EvidenceEventIDs) != 1 ||
+		summary.EvidenceEventIDs[0] != "task_event_log:00000000-0000-0000-0000-000000000001" {
+		t.Fatalf("persisted compact evidence = %+v", summary)
+	}
+}
+
+func TestPersistedRevisionReasonPreservesHardBlockedConfidence(t *testing.T) {
+	revision := resourceRevisionMapping{
+		ManifestRowHash: strings.Repeat("c", 64),
+		Confidence:      "hard_blocked",
+		ConfirmedBy:     1,
+		ConfirmedAt:     time.Date(2026, 7, 23, 6, 4, 15, 0, time.UTC),
+		Reason:          "candidate remains blocked",
+		EvidenceEventIDs: []string{
+			"task_module_event:42",
+		},
+	}
+
+	got, err := persistedRevisionReason(revision)
+	if err != nil {
+		t.Fatalf("persistedRevisionReason() error = %v", err)
+	}
+	summary, marked := service.ParseLegacyMigrationEvidence(got)
+	if !marked || summary == nil || summary.Confidence != "hard_blocked" ||
+		summary.EvidenceEventCount != 1 || !summary.EvidenceEventIDsComplete {
+		t.Fatalf("hard-blocked persisted evidence = %+v marked=%v reason=%q", summary, marked, got)
+	}
 }
 
 func TestPersistedRevisionReasonHashBindsOversizedReasonWithoutTruncation(t *testing.T) {
@@ -1002,6 +1037,16 @@ func TestPersistedRevisionReasonHashBindsOversizedReasonWithoutTruncation(t *tes
 	}
 	if strings.Contains(got, strings.TrimSpace(originalReason)) {
 		t.Fatalf("persistedRevisionReason() unexpectedly persisted oversized prose: %q", got)
+	}
+	summary, marked := service.ParseLegacyMigrationEvidence(got)
+	if !marked || summary == nil {
+		t.Fatalf("oversized persistedRevisionReason() was not readable: summary=%+v marked=%v reason=%q", summary, marked, got)
+	}
+	if summary.BusinessReason != "" ||
+		summary.BusinessReasonSHA256 != hex.EncodeToString(sum[:]) ||
+		summary.EvidenceEventCount != 1 ||
+		!summary.EvidenceEventIDsComplete {
+		t.Fatalf("oversized persisted evidence = %+v", summary)
 	}
 }
 

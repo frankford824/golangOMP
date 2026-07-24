@@ -68,10 +68,13 @@ export interface ResourceRevisionEvidence {
   confidence: 'confirmed_auto' | 'proposed_review' | 'hard_blocked'
   confirmed_by: number
   confirmed_at: string
+  evidence_event_count: number
   evidence_event_ids: string[]
+  evidence_event_ids_complete: boolean
   upload_session_ids: string[]
   upload_sessions_known: boolean
   business_reason?: string
+  business_reason_sha256?: string
 }
 
 export interface ResourceSKUProfile {

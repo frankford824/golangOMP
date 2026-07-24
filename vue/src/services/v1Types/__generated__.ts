@@ -20848,7 +20848,16 @@ export interface components {
             item_name?: string;
             file?: components["schemas"]["TaskResourceFile"];
         };
-        /** @description Parsed fail-safe projection of versioned legacy-migration metadata. Event payloads and raw storage addresses are never returned. When upload_sessions_known is false, upload_session_ids is empty because the stored migration reason did not prove that association. */
+        /**
+         * @description Parsed fail-safe projection of versioned legacy-migration metadata. Event payloads and raw storage
+         *     addresses are never returned. Legacy full markers expose every validated evidence id with
+         *     `evidence_event_ids_complete=true`. Compact writer markers expose the validated total in
+         *     `evidence_event_count` and only the stored first id; the list is incomplete when the count is greater
+         *     than one. Clients must not treat `evidence_event_ids` as complete unless
+         *     `evidence_event_ids_complete=true`. When `upload_sessions_known` is false, `upload_session_ids` is empty
+         *     because the stored migration reason did not prove that association. `confidence` remains authoritative
+         *     for distinguishing reviewed `confirmed_auto` rows from `hard_blocked` rows.
+         */
         ResourceGroupRevisionEvidence: {
             /** @enum {string} */
             schema_version: "migration_v2";
@@ -20859,10 +20868,20 @@ export interface components {
             confirmed_by: number;
             /** Format: date-time */
             confirmed_at: string;
+            /** @description Validated evidence ids stored in the marker. For compact markers this contains only the first id. */
             evidence_event_ids: string[];
+            /**
+             * Format: int64
+             * @description Total validated evidence-id count asserted by the marker.
+             */
+            evidence_event_count: number;
+            /** @description True only when evidence_event_ids contains the complete asserted evidence set. */
+            evidence_event_ids_complete: boolean;
             upload_session_ids: string[];
             upload_sessions_known: boolean;
             business_reason?: string;
+            /** @description Lower-case SHA-256 of an oversized business reason that could not fit beside the marker. */
+            business_reason_sha256?: string;
         };
         TaskAssetGroupRevision: {
             /** Format: int64 */

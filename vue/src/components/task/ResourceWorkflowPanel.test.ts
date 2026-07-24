@@ -138,6 +138,22 @@ describe('ResourceWorkflowPanel action contract', () => {
     wrapper.unmount()
   })
 
+  it('makes task.reopen authoritative when stale retouch submit permission is also present', () => {
+    const wrapper = mount(ResourceWorkflowPanel, {
+      props: {
+        taskId: 41,
+        taskType: 'retouch_task',
+        bundle: bundle(),
+        allowedActions: ['task.design.submit', 'task.reopen'],
+      },
+    })
+
+    expect(wrapper.get('.workspace-head h2').text()).toBe('重开任务')
+    expect(wrapper.find('.reopen-dock').exists()).toBe(true)
+    expect(wrapper.find('.command-dock:not(.reopen-dock):not(.audit-dock)').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('提交修图成品')
+  })
+
   it('shows the operations set suggestion without changing the design decision', () => {
     const wrapper = mount(ResourceWorkflowPanel, {
       props: {
