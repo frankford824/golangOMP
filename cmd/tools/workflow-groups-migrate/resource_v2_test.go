@@ -117,6 +117,44 @@ func TestValidateRevisionEventSemanticsAllowsApprovedLegacyRetouchExceptions(t *
 	}
 }
 
+func TestAllowsLegacyUnscopedRetouchFinalRequiresFrozenPolicyBoundary(t *testing.T) {
+	mapping := resourceMapping{TaskID: 981}
+	partial := resourceRevisionMapping{
+		ReviewPolicyIDs: []string{reviewPolicyLegacyRetouchPrematurePartial},
+		Reason:          "policy legacy_retouch_premature_terminal_partial_v1: reviewed partial membership",
+	}
+	if !allowsLegacyUnscopedRetouchFinal(mapping, partial) {
+		t.Fatal("expected exact approved premature-partial task and reason to allow its unscoped final")
+	}
+
+	partial.ReviewPolicyIDs = nil
+	if allowsLegacyUnscopedRetouchFinal(mapping, partial) {
+		t.Fatal("unexpected premature-partial scope override without approved policy")
+	}
+	partial.ReviewPolicyIDs = []string{reviewPolicyLegacyRetouchPrematurePartial}
+	partial.Reason = "unbound partial membership"
+	if allowsLegacyUnscopedRetouchFinal(mapping, partial) {
+		t.Fatal("unexpected premature-partial scope override without policy-bound reason")
+	}
+	partial.Reason = "policy legacy_retouch_premature_terminal_partial_v1: reviewed partial membership"
+	mapping.TaskID = 982
+	if allowsLegacyUnscopedRetouchFinal(mapping, partial) {
+		t.Fatal("unexpected premature-partial scope override outside frozen task allowlist")
+	}
+
+	atomic := resourceRevisionMapping{
+		ReviewPolicyIDs: []string{reviewPolicyLegacyRetouchUnscopedAtomicBatch},
+		Reason:          "policy legacy_retouch_unscoped_atomic_batch_v1: reviewed atomic membership",
+	}
+	if !allowsLegacyUnscopedRetouchFinal(resourceMapping{TaskID: 2672}, atomic) {
+		t.Fatal("expected exact approved atomic policy and reason to allow its unscoped final")
+	}
+	atomic.Reason = "unbound atomic membership"
+	if allowsLegacyUnscopedRetouchFinal(resourceMapping{TaskID: 2672}, atomic) {
+		t.Fatal("unexpected atomic scope override without policy-bound reason")
+	}
+}
+
 func TestLoadEvidenceEventMetadataCanonicalizesDatabaseSequence(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

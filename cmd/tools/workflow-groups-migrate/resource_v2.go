@@ -507,10 +507,7 @@ func validateRevisionAssets(ctx context.Context, q snapshotQueryer, mapping reso
 			revision.ReviewPolicyIDs,
 			reviewPolicyLegacyRetouchVisualScopeTask2533,
 		)
-		allowUnscopedRetouch := hasBoundPolicyReason(
-			revision,
-			reviewPolicyLegacyRetouchUnscopedAtomicBatch,
-		)
+		allowUnscopedRetouch := allowsLegacyUnscopedRetouchFinal(mapping, revision)
 		if err := validateMappedAsset(ctx, q, mapping, assetID, "final", "", allowVisualScope, allowUnscopedRetouch); err != nil {
 			return err
 		}
@@ -700,6 +697,11 @@ func validateMappedAssetScope(ctx context.Context, q snapshotQueryer, mapping re
 		return fmt.Errorf("invalid resource scope")
 	}
 	return nil
+}
+
+func allowsLegacyUnscopedRetouchFinal(mapping resourceMapping, revision resourceRevisionMapping) bool {
+	return hasBoundPolicyReason(revision, reviewPolicyLegacyRetouchUnscopedAtomicBatch) ||
+		isLegacyRetouchPrematurePartialRevision(mapping.TaskID, revision)
 }
 
 func mappedAssetScopeValues(ctx context.Context, q snapshotQueryer, mapping resourceMapping) (interface{}, interface{}, error) {
