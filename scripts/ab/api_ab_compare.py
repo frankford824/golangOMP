@@ -14,11 +14,12 @@ import json
 import os
 import pathlib
 import re
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
 from collections.abc import Callable, Iterable
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from typing import Any
 
 COMBINATION_IDS = (
@@ -46,6 +47,7 @@ ALL_ROUTE_TEMPLATES = frozenset((*CORE_ROUTES, *GROUP_ROUTES, *ASSET_ROUTES))
 MAX_BODY_BYTES = 4 * 1024 * 1024
 ID_RE = re.compile(r"[1-9][0-9]*")
 SHA256_RE = re.compile(r"[0-9a-f]{64}")
+REQUEST_CACHE_POLICY_VERSION = "exact_base_url_identity_path_v1"
 
 
 def canonical(value: object) -> bytes:
@@ -595,9 +597,12 @@ class Runner:
         retired_routes: list[str],
         requester: Callable[[str, str, dict[str, str]], HttpResult],
     ):
-        self.urls = urls
-        self.identities = identities
-        self.resolved_headers = resolved_headers
+        self.urls = dict(urls)
+        self.identities = [dict(identity) for identity in identities]
+        self.resolved_headers = {
+            identity: dict(headers)
+            for identity, headers in resolved_headers.items()
+        }
         self.rules = rules
         self.retired_routes = frozenset(retired_routes)
         self.requester = requester
@@ -605,11 +610,76 @@ class Runner:
         self.results: dict[tuple[str, str, str, str], HttpResult] = {}
         self.violations: list[dict[str, str]] = []
         self.used_rules: set[str] = set()
+        self._state_lock = threading.RLock()
+        self._requests: dict[tuple[str, str, str], Future[HttpResult]] = {}
+        self.logical_request_count = 0
+        self.physical_request_count = 0
+
+    def request(
+        self,
+        combination: str,
+        identity: str,
+        path: str,
+    ) -> HttpResult:
+        """Return one immutable result per exact origin/identity/path.
+
+        The Future provides single-flight behavior: one worker owns the
+        physical GET while every concurrent logical caller waits for and
+        receives the same frozen HttpResult, or the same exception. Identity
+        IDs deliberately remain in the key even when resolved headers happen
+        to be byte-for-byte equal.
+        """
+        key = (self.urls[combination], identity, path)
+        with self._state_lock:
+            self.logical_request_count += 1
+            future = self._requests.get(key)
+            owner = future is None
+            if owner:
+                future = Future()
+                self._requests[key] = future
+                self.physical_request_count += 1
+        assert future is not None
+        if owner:
+            try:
+                result = self.requester(
+                    self.urls[combination],
+                    path,
+                    dict(self.resolved_headers[identity]),
+                )
+                if not isinstance(result, HttpResult):
+                    raise TypeError("requester must return HttpResult")
+            except BaseException as exc:
+                future.set_exception(exc)
+            else:
+                future.set_result(result)
+        return future.result()
+
+    def observation(
+        self,
+        combination: str,
+        identity: str,
+        route: str,
+        entity: str,
+        result: HttpResult,
+    ) -> None:
+        row = {
+            "combination": combination,
+            "identity": identity,
+            "route": route,
+            "entity_key": entity,
+            "status": result.status,
+            "body_sha256": sha256(canonical(result.body)),
+            "raw_sha256": result.raw_sha256,
+            "body_bytes": result.body_bytes,
+        }
+        with self._state_lock:
+            self.observations.append(row)
 
     def violation(self, code: str, entity: str, detail: str) -> None:
-        self.violations.append(
-            {"violation_code": code, "entity_key": entity, "detail": detail}
-        )
+        with self._state_lock:
+            self.violations.append(
+                {"violation_code": code, "entity_key": entity, "detail": detail}
+            )
 
     def fetch(
         self,
@@ -619,22 +689,10 @@ class Runner:
         path: str,
         entity: str,
     ) -> HttpResult:
-        result = self.requester(
-            self.urls[combination], path, self.resolved_headers[identity]
-        )
-        self.results[(combination, identity, route, entity)] = result
-        self.observations.append(
-            {
-                "combination": combination,
-                "identity": identity,
-                "route": route,
-                "entity_key": entity,
-                "status": result.status,
-                "body_sha256": sha256(canonical(result.body)),
-                "raw_sha256": result.raw_sha256,
-                "body_bytes": result.body_bytes,
-            }
-        )
+        result = self.request(combination, identity, path)
+        with self._state_lock:
+            self.results[(combination, identity, route, entity)] = result
+        self.observation(combination, identity, route, entity, result)
         if result.status >= 500:
             self.violation(
                 "api.server_error", entity, f"{combination}/{identity} returned {result.status}"
@@ -651,20 +709,13 @@ class Runner:
                 f"/v1/resource-groups/{group_id}/revisions"
                 f"?page={page}&page_size=200"
             )
-            result = self.requester(
-                self.urls[combination], path, self.resolved_headers[identity]
-            )
-            self.observations.append(
-                {
-                    "combination": combination,
-                    "identity": identity,
-                    "route": GROUP_ROUTES[1],
-                    "entity_key": f"{entity}:page:{page}",
-                    "status": result.status,
-                    "body_sha256": sha256(canonical(result.body)),
-                    "raw_sha256": result.raw_sha256,
-                    "body_bytes": result.body_bytes,
-                }
+            result = self.request(combination, identity, path)
+            self.observation(
+                combination,
+                identity,
+                GROUP_ROUTES[1],
+                f"{entity}:page:{page}",
+                result,
             )
             if result.status >= 500:
                 self.violation(
@@ -695,7 +746,8 @@ class Runner:
             page += 1
             if page > 10000:
                 raise ValueError(f"history pagination did not terminate for group {group_id}")
-        self.results[(combination, identity, GROUP_ROUTES[1], entity)] = final
+        with self._state_lock:
+            self.results[(combination, identity, GROUP_ROUTES[1], entity)] = final
         if final.status == 200:
             numbers = [
                 item.get("revision_no")
@@ -794,7 +846,8 @@ class Runner:
         left_body, right_body = left.body, right.body
         different = left.status != right.status or canonical(left_body) != canonical(right_body)
         if rule is not None and different:
-            self.used_rules.add(rule["rule_id"])
+            with self._state_lock:
+                self.used_rules.add(rule["rule_id"])
             try:
                 left_body, right_body = apply_rule(left_body, right_body, rule)
             except ValueError as exc:
@@ -850,9 +903,12 @@ def compare(
     run_id: str,
     requester: Callable[[str, str, dict[str, str]], HttpResult] = http_get,
     workers: int = 16,
+    request_metrics: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if not isinstance(workers, int) or isinstance(workers, bool) or not 1 <= workers <= 64:
         raise ValueError("workers must be an integer between 1 and 64")
+    if request_metrics is not None:
+        request_metrics.clear()
     urls, combinations, resolved, retired_routes = load_matrix(matrix_path)
     identities = [
         {"id": identity_id, "role": next(
@@ -1023,6 +1079,30 @@ def compare(
         "violations": violations,
     }
     result["evidence_sha256"] = sha256(canonical(result))
+    if request_metrics is not None:
+        logical_count = runner.logical_request_count
+        physical_count = runner.physical_request_count
+        if (
+            logical_count != result["request_count"]
+            or physical_count < 0
+            or physical_count > logical_count
+        ):
+            raise ValueError("request counters differ from logical observations")
+        metrics: dict[str, Any] = {
+            "schema_version": 1,
+            "run_id": run_id,
+            "cache_policy_version": REQUEST_CACHE_POLICY_VERSION,
+            "logical_request_count": logical_count,
+            "physical_request_count": physical_count,
+            "deduplicated_request_count": logical_count - physical_count,
+            "api_evidence_sha256": result["evidence_sha256"],
+            "task_ids_sha256": result["task_ids_sha256"],
+            "matrix_sha256": result["matrix_sha256"],
+            "rules_sha256": result["rules_sha256"],
+            "manifest_sha256": result["manifest_sha256"],
+        }
+        metrics["evidence_sha256"] = sha256(canonical(metrics))
+        request_metrics.update(metrics)
     return result
 
 
@@ -1034,9 +1114,23 @@ def main() -> None:
     parser.add_argument("--manifest", type=pathlib.Path, required=True)
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--output", type=pathlib.Path, required=True)
+    parser.add_argument(
+        "--request-metrics-output",
+        type=pathlib.Path,
+        help=(
+            "optional hash-bound request-count sidecar; the primary G6 "
+            "evidence contract remains unchanged"
+        ),
+    )
     parser.add_argument("--workers", type=int, default=16)
     args = parser.parse_args()
+    if (
+        args.request_metrics_output
+        and args.request_metrics_output.resolve() == args.output.resolve()
+    ):
+        parser.error("request metrics output must differ from API evidence output")
     try:
+        request_metrics: dict[str, Any] = {}
         result = compare(
             matrix_path=args.matrix,
             task_ids_path=args.task_ids,
@@ -1044,6 +1138,7 @@ def main() -> None:
             manifest_path=args.manifest,
             run_id=args.run_id,
             workers=args.workers,
+            request_metrics=request_metrics,
         )
     except (OSError, ValueError, json.JSONDecodeError, urllib.error.URLError) as exc:
         result = {
@@ -1062,6 +1157,9 @@ def main() -> None:
         result["evidence_sha256"] = sha256(canonical(result))
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_bytes(canonical(result) + b"\n")
+    if args.request_metrics_output and request_metrics:
+        args.request_metrics_output.parent.mkdir(parents=True, exist_ok=True)
+        args.request_metrics_output.write_bytes(canonical(request_metrics) + b"\n")
     raise SystemExit(0 if result["violation_count"] == 0 else 1)
 
 

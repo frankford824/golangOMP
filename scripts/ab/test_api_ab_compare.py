@@ -1,14 +1,20 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import importlib.util
+import io
 import json
 import os
 import pathlib
 import sys
 import tempfile
+import threading
 import unittest
+from concurrent.futures import ThreadPoolExecutor
+
+from scripts.ab import finalize_release_gates as RELEASE
 
 MODULE_PATH = pathlib.Path(__file__).with_name("api_ab_compare.py")
 SPEC = importlib.util.spec_from_file_location("api_ab_compare", MODULE_PATH)
@@ -170,7 +176,7 @@ class ComparatorTest(unittest.TestCase):
             )
         return result(200, {"id": 1, "allowed_actions": ["view"]})
 
-    def run_compare(self, requester=None) -> dict:
+    def run_compare(self, requester=None, request_metrics=None, workers=16) -> dict:
         return api.compare(
             matrix_path=self.matrix,
             task_ids_path=self.tasks,
@@ -178,6 +184,8 @@ class ComparatorTest(unittest.TestCase):
             manifest_path=self.manifest,
             run_id=self.run_id,
             requester=requester or self.requester,
+            workers=workers,
+            request_metrics=request_metrics,
         )
 
     def test_four_combo_get_only_pass_and_secret_not_in_evidence(self) -> None:
@@ -487,8 +495,221 @@ class ComparatorTest(unittest.TestCase):
         value["combinations"][2]["base_url"] = value["combinations"][1]["base_url"]
         value["combinations"][3]["base_url"] = value["combinations"][0]["base_url"]
         self.matrix.write_text(json.dumps(value), encoding="utf-8")
-        evidence = self.run_compare()
+        metrics: dict = {}
+        evidence = self.run_compare(request_metrics=metrics)
         self.assertEqual("PASS", evidence["status"])
+        self.assertEqual([], RELEASE.validate_g6(evidence))
+        self.assertEqual(evidence["request_count"], metrics["logical_request_count"])
+        self.assertEqual(
+            metrics["logical_request_count"] // 2,
+            metrics["physical_request_count"],
+        )
+        self.assertEqual(
+            metrics["logical_request_count"] - metrics["physical_request_count"],
+            metrics["deduplicated_request_count"],
+        )
+        self.assertEqual(
+            api.REQUEST_CACHE_POLICY_VERSION,
+            metrics["cache_policy_version"],
+        )
+        self.assertEqual(evidence["evidence_sha256"], metrics["api_evidence_sha256"])
+        for field in (
+            "task_ids_sha256",
+            "matrix_sha256",
+            "rules_sha256",
+            "manifest_sha256",
+        ):
+            self.assertEqual(evidence[field], metrics[field])
+        self.assertEqual(
+            metrics["evidence_sha256"],
+            digest(
+                api.canonical(
+                    {
+                        key: value
+                        for key, value in metrics.items()
+                        if key != "evidence_sha256"
+                    }
+                )
+            ),
+        )
+
+    def test_unique_urls_make_physical_and_logical_counts_equal(self) -> None:
+        metrics: dict = {}
+        evidence = self.run_compare(request_metrics=metrics)
+        self.assertEqual(evidence["request_count"], metrics["logical_request_count"])
+        self.assertEqual(
+            metrics["logical_request_count"],
+            metrics["physical_request_count"],
+        )
+
+    def test_request_metrics_are_deterministic(self) -> None:
+        value = json.loads(self.matrix.read_text(encoding="utf-8"))
+        value["combinations"][2]["base_url"] = value["combinations"][1]["base_url"]
+        value["combinations"][3]["base_url"] = value["combinations"][0]["base_url"]
+        self.matrix.write_text(json.dumps(value), encoding="utf-8")
+        first: dict = {}
+        second: dict = {}
+        self.run_compare(request_metrics=first, workers=32)
+        self.run_compare(request_metrics=second, workers=2)
+        self.assertEqual(api.canonical(first), api.canonical(second))
+
+    def test_cli_rejects_same_primary_and_metrics_output_before_requests(self) -> None:
+        output = self.root / "same-output.json"
+        argv = [
+            str(api.MODULE_PATH) if hasattr(api, "MODULE_PATH") else "api_ab_compare.py",
+            "--matrix",
+            str(self.matrix),
+            "--task-ids",
+            str(self.tasks),
+            "--rules",
+            str(self.rules),
+            "--manifest",
+            str(self.manifest),
+            "--run-id",
+            self.run_id,
+            "--output",
+            str(output),
+            "--request-metrics-output",
+            str(output),
+        ]
+        original = sys.argv
+        try:
+            sys.argv = argv
+            with contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(SystemExit) as raised:
+                    api.main()
+        finally:
+            sys.argv = original
+        self.assertEqual(2, raised.exception.code)
+        self.assertFalse(output.exists())
+
+    def test_cache_key_never_merges_different_url_identity_or_path(self) -> None:
+        calls: list[tuple[str, str, tuple[tuple[str, str], ...]]] = []
+
+        def requester(base, path, headers):
+            calls.append((base, path, tuple(sorted(headers.items()))))
+            return result(200, {"base": base, "path": path})
+
+        urls = {
+            "external_external_a": "http://127.0.0.1:8101",
+            "dev_dev_b": "http://127.0.0.1:8101",
+            "external_dev_b": "http://127.0.0.1:8102",
+            "dev_external_a": "http://127.0.0.1:8101",
+        }
+        runner = api.Runner(
+            urls,
+            [
+                {"id": "admin", "role": "admin"},
+                {"id": "reviewer", "role": "reviewer"},
+            ],
+            {
+                "admin": {"Authorization": "same"},
+                "reviewer": {"Authorization": "same"},
+            },
+            [],
+            [],
+            requester,
+        )
+        first = runner.request("external_external_a", "admin", "/same")
+        reused = runner.request("dev_dev_b", "admin", "/same")
+        runner.request("external_dev_b", "admin", "/same")
+        runner.request("external_external_a", "reviewer", "/same")
+        runner.request("external_external_a", "admin", "/different")
+        self.assertIs(first, reused)
+        self.assertEqual(5, runner.logical_request_count)
+        self.assertEqual(4, runner.physical_request_count)
+        self.assertEqual(4, len(calls))
+
+    def test_concurrent_duplicate_exception_is_single_flight_and_shared(self) -> None:
+        calls = 0
+        calls_lock = threading.Lock()
+        entered = threading.Event()
+        release = threading.Event()
+        failure = RuntimeError("fixture requester failed")
+
+        def requester(base, path, headers):
+            nonlocal calls
+            with calls_lock:
+                calls += 1
+            entered.set()
+            self.assertTrue(release.wait(5))
+            raise failure
+
+        urls = {
+            combination: "http://127.0.0.1:8101"
+            for combination in api.COMBINATION_IDS
+        }
+        runner = api.Runner(
+            urls,
+            [{"id": "admin", "role": "admin"}],
+            {"admin": {"Authorization": "fixture"}},
+            [],
+            [],
+            requester,
+        )
+
+        def invoke(index):
+            try:
+                runner.request(
+                    api.COMBINATION_IDS[index % len(api.COMBINATION_IDS)],
+                    "admin",
+                    "/same",
+                )
+            except RuntimeError as exc:
+                return id(exc)
+            self.fail("request unexpectedly succeeded")
+
+        with ThreadPoolExecutor(max_workers=16) as executor:
+            futures = [executor.submit(invoke, index) for index in range(64)]
+            self.assertTrue(entered.wait(5))
+            release.set()
+            exception_ids = [future.result() for future in futures]
+        self.assertEqual(1, calls)
+        self.assertEqual(64, runner.logical_request_count)
+        self.assertEqual(1, runner.physical_request_count)
+        self.assertEqual({id(failure)}, set(exception_ids))
+
+    def test_concurrent_shared_runner_records_every_logical_observation(self) -> None:
+        calls = 0
+        calls_lock = threading.Lock()
+        shared_result = result(200, {"id": 1})
+
+        def requester(base, path, headers):
+            nonlocal calls
+            with calls_lock:
+                calls += 1
+            return shared_result
+
+        urls = {
+            combination: "http://127.0.0.1:8101"
+            for combination in api.COMBINATION_IDS
+        }
+        runner = api.Runner(
+            urls,
+            [{"id": "admin", "role": "admin"}],
+            {"admin": {"Authorization": "fixture"}},
+            [],
+            [],
+            requester,
+        )
+
+        def fetch(index):
+            return runner.fetch(
+                api.COMBINATION_IDS[index % len(api.COMBINATION_IDS)],
+                "admin",
+                api.CORE_ROUTES[0],
+                "/v1/tasks/1",
+                f"task:1:logical:{index}",
+            )
+
+        with ThreadPoolExecutor(max_workers=32) as executor:
+            observed = list(executor.map(fetch, range(500)))
+        self.assertEqual(1, calls)
+        self.assertEqual(500, runner.logical_request_count)
+        self.assertEqual(1, runner.physical_request_count)
+        self.assertEqual(500, len(runner.observations))
+        self.assertEqual(500, len(runner.results))
+        self.assertTrue(all(item is shared_result for item in observed))
 
 
 if __name__ == "__main__":
