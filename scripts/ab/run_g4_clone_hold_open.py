@@ -247,6 +247,7 @@ def current_input_identity(
         "dsn": file_identity(args.dsn_file),
         "auth_settings": file_identity(args.auth_settings_file),
         "frontend_access_settings": file_identity(frontend_access),
+        "expected_baseline": file_identity(args.expected_baseline_file),
     }
 
 
@@ -268,13 +269,16 @@ def initialize_session(
         "mapping": run_dir / "inputs" / "mapping.json",
         "auth_settings": run_dir / "inputs" / "auth_identity.clone-b.json",
         "frontend_access_settings": run_dir / "inputs" / "frontend_access.json",
+        "expected_baseline": run_dir / "inputs" / "expected-baseline.json",
     }
     frozen["command_plan"].write_bytes(args.command_plan.read_bytes())
     frozen["mapping"].write_bytes(args.mapping_file.read_bytes())
     frozen["auth_settings"].write_bytes(auth_raw)
     frozen["frontend_access_settings"].write_bytes(frontend_access.read_bytes())
+    frozen["expected_baseline"].write_bytes(args.expected_baseline_file.read_bytes())
     frozen["auth_settings"].chmod(0o440)
     frozen["frontend_access_settings"].chmod(0o440)
+    frozen["expected_baseline"].chmod(0o440)
     session = write_hashed_json(
         run_dir.joinpath(*SESSION_PATH.parts),
         {
@@ -321,6 +325,7 @@ def validate_session(
         "mapping",
         "auth_settings",
         "frontend_access_settings",
+        "expected_baseline",
     }:
         raise ValueError("hold-open frozen input inventory is invalid")
     for name, item in frozen.items():
@@ -702,8 +707,26 @@ def verify_baseline_database(context: Context) -> None:
     baseline = g4.read_object(
         context.run_dir / "baseline-fingerprint.json", "baseline fingerprint"
     )
-    if baseline.get("database") != context.database:
-        raise ValueError("baseline fingerprint belongs to another database")
+    expected = g4.read_object(
+        context.run_dir / "inputs" / "expected-baseline.json",
+        "expected baseline fingerprint",
+    )
+    for label, value in (("captured", baseline), ("expected", expected)):
+        tables = value.get("tables")
+        if (
+            value.get("schema_version") != 1
+            or value.get("kind") != "clone-b-baseline-fingerprint"
+            or value.get("database") != context.database
+            or not isinstance(value.get("fingerprint_algorithm"), str)
+            or not value["fingerprint_algorithm"]
+            or not isinstance(tables, dict)
+            or value.get("fingerprint_sha256") != canonical_hash(tables)
+        ):
+            raise ValueError(f"{label} baseline fingerprint is invalid")
+    if baseline != expected:
+        raise ValueError(
+            "captured Clone B baseline differs from the frozen expected baseline"
+        )
 
 
 def publish_ready(
@@ -1067,6 +1090,8 @@ def run_apply_and_hold(args: argparse.Namespace) -> dict[str, Any]:
             },
         )
         return continue_rollback(context, authorization, failure_exit_code=1)
+    if records and records[0].get("step") == "capture_baseline_fingerprint":
+        verify_baseline_database(context)
     for ordinal in range(len(records) + 1, len(APPLY_SEQUENCE) + 1):
         step = APPLY_SEQUENCE[ordinal - 1]
         record, prior_hash = execute_checkpointed_step(
@@ -1083,6 +1108,8 @@ def run_apply_and_hold(args: argparse.Namespace) -> dict[str, Any]:
                 "exit_code": 1,
                 "blocker": f"process group is not quiescent after {step}",
             }
+        if step == "capture_baseline_fingerprint" and record["exit_code"] == 0:
+            verify_baseline_database(context)
         if record["exit_code"] != 0:
             rotate_commands(context, APPLY_COMMANDS_PATH)
             authorization = authorize_rollback(
@@ -1159,6 +1186,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--mapping-file", type=pathlib.Path, required=True)
     parser.add_argument("--command-plan", type=pathlib.Path, required=True)
     parser.add_argument("--auth-settings-file", type=pathlib.Path, required=True)
+    parser.add_argument(
+        "--expected-baseline-file", type=pathlib.Path, required=True
+    )
     parser.add_argument("--g5-evidence-manifest", type=pathlib.Path)
     parser.add_argument("--g6-evidence-manifest", type=pathlib.Path)
     parser.add_argument("--execute-clone-writes", action="store_true")

@@ -45,6 +45,20 @@ class HoldOpenCoordinatorTest(unittest.TestCase):
         auth.chmod(0o440)
         mapping = root / "mapping.json"
         mapping.write_text('{"version":2}\n', encoding="utf-8")
+        baseline_tables = {"tasks": {"row_count": 1, "content_sha256": "b" * 64}}
+        baseline = root / "expected-baseline.json"
+        baseline.write_bytes(
+            MODULE.g4.canonical_bytes(
+                {
+                    "schema_version": 1,
+                    "kind": "clone-b-baseline-fingerprint",
+                    "database": "ab_formal_b_ui",
+                    "fingerprint_algorithm": "test-fingerprint-v1",
+                    "tables": baseline_tables,
+                    "fingerprint_sha256": MODULE.canonical_hash(baseline_tables),
+                }
+            )
+        )
         dsn = root / "clone-b.dsn"
         dsn.write_text(
             "user:secret@tcp(127.0.0.1:3306)/ab_formal_b_ui"
@@ -99,6 +113,7 @@ class HoldOpenCoordinatorTest(unittest.TestCase):
             mapping_file=mapping.resolve(),
             command_plan=plan.resolve(),
             auth_settings_file=auth.resolve(),
+            expected_baseline_file=baseline.resolve(),
             g5_evidence_manifest=None,
             g6_evidence_manifest=None,
             execute_clone_writes=True,
@@ -150,10 +165,19 @@ class HoldOpenCoordinatorTest(unittest.TestCase):
                 for path in expected_artifacts:
                     path.parent.mkdir(parents=True, exist_ok=True)
                     if path.name == "baseline-fingerprint.json":
+                        tables = {
+                            "tasks": {
+                                "row_count": 1,
+                                "content_sha256": "b" * 64,
+                            }
+                        }
                         value = {
                             "schema_version": 1,
+                            "kind": "clone-b-baseline-fingerprint",
                             "database": "ab_formal_b_ui",
-                            "fingerprint_sha256": "a" * 64,
+                            "fingerprint_algorithm": "test-fingerprint-v1",
+                            "tables": tables,
+                            "fingerprint_sha256": MODULE.canonical_hash(tables),
                         }
                         path.write_bytes(MODULE.g4.canonical_bytes(value))
                     elif path.name == "rollback-fingerprint.json":
@@ -658,6 +682,37 @@ class HoldOpenCoordinatorTest(unittest.TestCase):
                 ):
                     MODULE.run(args)
             self.assertEqual(calls, [])
+
+    def test_expected_baseline_drift_blocks_before_clone_write(self):
+        with tempfile.TemporaryDirectory() as raw:
+            args = self.make_inputs(raw)
+            expected = json.loads(
+                args.expected_baseline_file.read_text(encoding="utf-8")
+            )
+            expected["tables"]["tasks"]["row_count"] = 2
+            expected["fingerprint_sha256"] = MODULE.canonical_hash(
+                expected["tables"]
+            )
+            args.expected_baseline_file.write_bytes(
+                MODULE.g4.canonical_bytes(expected)
+            )
+            calls: list[str] = []
+            with (
+                mock.patch.object(MODULE, "repo_head", return_value="a" * 64),
+                mock.patch.object(
+                    MODULE.shutil, "which", return_value="/usr/bin/go"
+                ),
+                mock.patch.object(
+                    MODULE.g4,
+                    "execute_step",
+                    side_effect=self.fake_execute(calls),
+                ),
+            ):
+                with self.assertRaisesRegex(
+                    ValueError, "differs from the frozen expected baseline"
+                ):
+                    MODULE.run(args)
+            self.assertEqual(calls, ["capture_baseline_fingerprint"])
 
 
 if __name__ == "__main__":
