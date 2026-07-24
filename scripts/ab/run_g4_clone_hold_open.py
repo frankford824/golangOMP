@@ -23,6 +23,7 @@ import hashlib
 import json
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -46,6 +47,7 @@ APPLY_COMMANDS_PATH = pathlib.PurePosixPath("apply-commands.jsonl")
 ROLLBACK_COMMANDS_PATH = pathlib.PurePosixPath("rollback-commands.jsonl")
 DOCUMENT_HASH_FIELD = "document_sha256"
 EVIDENCE_HASH_FIELD = "evidence_sha256"
+GIT_OBJECT_ID = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 APPLY_SEQUENCE = tuple(g4.APPLY_SEQUENCE)
 ROLLBACK_COMPONENT_ORDER = (
     ("search_rollback", "search"),
@@ -133,7 +135,7 @@ def repo_head(repo_root: pathlib.Path) -> str:
         timeout=30,
     )
     value = result.stdout.strip()
-    if result.returncode != 0 or not g4.SHA256.fullmatch(value):
+    if result.returncode != 0 or not GIT_OBJECT_ID.fullmatch(value):
         raise ValueError("unable to bind coordinator to a Git HEAD")
     status = subprocess.run(
         ["git", "status", "--porcelain=v1", "--untracked-files=all"],

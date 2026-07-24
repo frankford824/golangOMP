@@ -505,7 +505,7 @@ class HoldOpenCoordinatorTest(unittest.TestCase):
             self.assertEqual(calls, [])
 
     def test_repo_head_rejects_a_dirty_worktree(self):
-        head = mock.Mock(returncode=0, stdout="f" * 64 + "\n")
+        head = mock.Mock(returncode=0, stdout="f" * 40 + "\n")
         dirty = mock.Mock(
             returncode=0,
             stdout=" M scripts/ab/api_ab_compare.py\n",
