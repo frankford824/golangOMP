@@ -251,18 +251,35 @@ def read_json_object(path_value: str, label: str) -> tuple[dict[str, Any], str]:
 
 def materialized_bundle_assets(
     mapping: dict[str, Any],
-    mapping_sha: str,
+    bundle_mapping_path_value: str | None,
     manifest_path_value: str | None,
     registry_path_value: str | None,
 ) -> tuple[list[dict[str, Any]], dict[str, str]]:
-    if bool(manifest_path_value) != bool(registry_path_value):
-        raise ValueError("bundle manifest and registry must be supplied together")
+    supplied = [
+        bool(bundle_mapping_path_value),
+        bool(manifest_path_value),
+        bool(registry_path_value),
+    ]
+    if any(supplied) and not all(supplied):
+        raise ValueError(
+            "bundle base mapping, manifest, and registry must be supplied together"
+        )
     if not manifest_path_value:
         return [], {}
+    bundle_mapping, bundle_mapping_sha = read_json_object(
+        str(bundle_mapping_path_value), "source bundle base mapping"
+    )
+    if (
+        bundle_mapping.get("version") != 2
+        or not isinstance(bundle_mapping.get("resources"), list)
+    ):
+        raise ValueError("source bundle base mapping must be a V2 mapping")
     manifest, manifest_sha = read_json_object(
         manifest_path_value, "source bundle manifest"
     )
-    confirmed, run_id = bundle_registry.validate_manifest(manifest, mapping_sha)
+    confirmed, run_id = bundle_registry.validate_manifest(
+        manifest, bundle_mapping_sha
+    )
     registry, registry_sha = read_json_object(
         str(registry_path_value), "source bundle registry"
     )
@@ -308,6 +325,7 @@ def materialized_bundle_assets(
             }
         )
     return assets, {
+        "source_bundle_base_mapping_sha256": bundle_mapping_sha,
         "source_bundle_manifest_sha256": manifest_sha,
         "source_bundle_registry_sha256": registry_sha,
     }
@@ -403,7 +421,7 @@ def build_expected(args: argparse.Namespace) -> None:
     assets = {int(row["id"]): dict(row) for row in frozen["asset"]}
     bundle_assets, bundle_provenance = materialized_bundle_assets(
         mapping,
-        mapping_sha,
+        getattr(args, "source_bundle_mapping", None),
         getattr(args, "source_bundle_manifest", None),
         getattr(args, "source_bundle_registry", None),
     )
@@ -618,6 +636,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     freeze.add_argument("--snapshot-sha256", required=True); freeze.add_argument("--output", required=True)
     build = sub.add_parser("build")
     build.add_argument("--mapping", required=True); build.add_argument("--frozen-a", required=True)
+    build.add_argument("--source-bundle-mapping")
     build.add_argument("--source-bundle-manifest")
     build.add_argument("--source-bundle-registry")
     build.add_argument("--recovery-plan")

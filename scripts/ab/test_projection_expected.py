@@ -260,8 +260,13 @@ class ProjectionExpectedTest(unittest.TestCase):
             root = pathlib.Path(raw)
             manifest_path = root / "manifest.json"
             registry_path = root / "registry.json"
+            bundle_mapping_path = root / "bundle-mapping.json"
             manifest_path.write_text(canonical_json(manifest), encoding="utf-8")
             registry_path.write_text(canonical_json(registry), encoding="utf-8")
+            bundle_mapping_path.write_text(
+                canonical_json({"version": 2, "resources": []}),
+                encoding="utf-8",
+            )
             with mock.patch(
                 "projection_expected.bundle_registry.validate_manifest",
                 return_value=({key: {}}, "run"),
@@ -271,7 +276,7 @@ class ProjectionExpectedTest(unittest.TestCase):
             ):
                 rows, provenance = materialized_bundle_assets(
                     mapping,
-                    "5" * 64,
+                    str(bundle_mapping_path),
                     str(manifest_path),
                     str(registry_path),
                 )
