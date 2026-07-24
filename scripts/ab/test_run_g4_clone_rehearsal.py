@@ -6,6 +6,7 @@ import sys
 import tempfile
 import types
 import unittest
+from unittest import mock
 
 
 PATH = pathlib.Path(__file__).with_name("run_g4_clone_rehearsal.py")
@@ -309,6 +310,14 @@ class RunG4CloneRehearsalTest(unittest.TestCase):
             args = self.make_inputs(raw, dsn_host="prod.example.com")
             with self.assertRaisesRegex(ValueError, "DSN must use"):
                 MODULE.run(args)
+            self.assertFalse(args.run_dir.exists())
+
+    def test_missing_go_fails_before_creating_run_evidence(self):
+        with tempfile.TemporaryDirectory() as raw:
+            args = self.make_inputs(raw)
+            with mock.patch.object(MODULE.shutil, "which", return_value=None):
+                with self.assertRaisesRegex(ValueError, "go executable"):
+                    MODULE.run(args)
             self.assertFalse(args.run_dir.exists())
 
     def test_command_plan_cannot_embed_a_dsn(self):

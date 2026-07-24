@@ -119,6 +119,23 @@ def recovery_report(
     }
 
 
+def bundle_report(*, changed, already):
+    return {
+        "schema_version": 1,
+        "mode": "rollback",
+        "status": "PASS",
+        "run_id": "formal-test",
+        "database": "ab_formal_b_ui",
+        "host": "127.0.0.1",
+        "candidate_sha256": "a" * 64,
+        "registry_sha256": "b" * 64,
+        "manifest_sha256": "c" * 64,
+        "changed_bundle_count": changed,
+        "already_applied_bundle_count": already,
+        "database_transaction_committed": True,
+    }
+
+
 def write_component_chain_fixture(
     run_dir,
     *,
@@ -578,10 +595,25 @@ class CloneBMaterializationComponentTest(unittest.TestCase):
                     )
                 elif label == "recovery database idempotent apply":
                     raise component.ComponentError("injected failure")
+                elif label == "recovery apply compensation database rollback":
+                    plan = component_dir / "recovery-materialization-plan.json"
+                    pathlib.Path(
+                        argv[argv.index("--report-file") + 1]
+                    ).write_text(
+                        json.dumps(
+                            recovery_report(
+                                mode="rollback",
+                                run_id="formal-test",
+                                plan_sha=component.sha256_file(plan),
+                                changed=3,
+                                already=0,
+                            )
+                        )
+                        + "\n",
+                        encoding="utf-8",
+                    )
                 elif "compensation" in label:
-                    pathlib.Path(argv[argv.index("--report-file") + 1]).write_text(
-                        "{}\n", encoding="utf-8"
-                    ) if "--report-file" in argv else pathlib.Path(
+                    pathlib.Path(
                         argv[argv.index("--report") + 1]
                     ).write_text("{}\n", encoding="utf-8")
 
@@ -677,6 +709,110 @@ class CloneBMaterializationComponentTest(unittest.TestCase):
                     plan_sha256="a" * 64,
                     changed=3,
                     already=0,
+                )
+
+    def test_rollback_report_accepts_only_atomic_extremes_when_resuming(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            report = root / "report.json"
+            for changed, already in ((3, 0), (0, 3)):
+                report.write_text(
+                    json.dumps(
+                        recovery_report(
+                            mode="rollback",
+                            run_id="formal-test",
+                            plan_sha="a" * 64,
+                            changed=changed,
+                            already=already,
+                        )
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+                component.validate_recovery_report(
+                    report,
+                    mode="rollback",
+                    run_id="formal-test",
+                    database="ab_formal_b_ui",
+                    host="127.0.0.1",
+                    plan_sha256="a" * 64,
+                    changed=3,
+                    already=0,
+                    allowed_counts={(3, 0), (0, 3)},
+                )
+
+            report.write_text(
+                json.dumps(
+                    recovery_report(
+                        mode="rollback",
+                        run_id="formal-test",
+                        plan_sha="a" * 64,
+                        changed=1,
+                        already=2,
+                    )
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                component.ComponentError, "report contract"
+            ):
+                component.validate_recovery_report(
+                    report,
+                    mode="rollback",
+                    run_id="formal-test",
+                    database="ab_formal_b_ui",
+                    host="127.0.0.1",
+                    plan_sha256="a" * 64,
+                    changed=3,
+                    already=0,
+                    allowed_counts={(3, 0), (0, 3)},
+                )
+
+    def test_bundle_rollback_accepts_only_atomic_extremes_when_resuming(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            report = pathlib.Path(temporary) / "report.json"
+            for changed, already in ((7, 0), (0, 7)):
+                report.write_text(
+                    json.dumps(
+                        bundle_report(changed=changed, already=already)
+                    )
+                    + "\n",
+                    encoding="utf-8",
+                )
+                component.validate_bundle_report(
+                    report,
+                    mode="rollback",
+                    run_id="formal-test",
+                    database="ab_formal_b_ui",
+                    host="127.0.0.1",
+                    candidate_sha256="a" * 64,
+                    registry_sha256="b" * 64,
+                    manifest_sha256="c" * 64,
+                    changed=7,
+                    already=0,
+                    allowed_counts={(7, 0), (0, 7)},
+                )
+
+            report.write_text(
+                json.dumps(bundle_report(changed=2, already=5)) + "\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                component.ComponentError, "report contract"
+            ):
+                component.validate_bundle_report(
+                    report,
+                    mode="rollback",
+                    run_id="formal-test",
+                    database="ab_formal_b_ui",
+                    host="127.0.0.1",
+                    candidate_sha256="a" * 64,
+                    registry_sha256="b" * 64,
+                    manifest_sha256="c" * 64,
+                    changed=7,
+                    already=0,
+                    allowed_counts={(7, 0), (0, 7)},
                 )
 
 

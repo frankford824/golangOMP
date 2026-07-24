@@ -16,6 +16,7 @@ import json
 import os
 import pathlib
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -340,6 +341,8 @@ def execute_step(
 def run(args: argparse.Namespace) -> dict[str, Any]:
     if not RUN_ID.fullmatch(args.run_id):
         raise ValueError("run-id is invalid")
+    if shutil.which("go") is None:
+        raise ValueError("go executable is required before creating run evidence")
     run_dir = args.run_dir.resolve()
     if run_dir.exists():
         raise FileExistsError("run-dir must not already exist")

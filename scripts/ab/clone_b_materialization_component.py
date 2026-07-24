@@ -26,6 +26,7 @@ import json
 import os
 import pathlib
 import re
+import shutil
 import subprocess
 import sys
 from typing import Any
@@ -541,8 +542,14 @@ def validate_recovery_report(
     plan_sha256: str,
     changed: int,
     already: int,
+    allowed_counts: set[tuple[int, int]] | None = None,
 ) -> dict[str, Any]:
     value = read_object(path, f"recovery-db-{mode}")
+    counts = (
+        value.get("changed_entries"),
+        value.get("already_in_target_state_entries"),
+    )
+    expected_counts = allowed_counts or {(changed, already)}
     if (
         value.get("version") != 1
         or value.get("mode") != mode
@@ -550,8 +557,7 @@ def validate_recovery_report(
         or value.get("database") != database
         or value.get("host") != host
         or value.get("plan_sha256") != plan_sha256
-        or value.get("changed_entries") != changed
-        or value.get("already_in_target_state_entries") != already
+        or counts not in expected_counts
         or value.get("database_transaction_committed") is not True
         or value.get("object_storage_writes_executed") is not False
     ):
@@ -571,8 +577,14 @@ def validate_bundle_report(
     manifest_sha256: str,
     changed: int,
     already: int,
+    allowed_counts: set[tuple[int, int]] | None = None,
 ) -> dict[str, Any]:
     value = read_object(path, f"bundle-db-{mode}")
+    counts = (
+        value.get("changed_bundle_count"),
+        value.get("already_applied_bundle_count"),
+    )
+    expected_counts = allowed_counts or {(changed, already)}
     if (
         value.get("schema_version") != 1
         or value.get("mode") != mode
@@ -583,8 +595,7 @@ def validate_bundle_report(
         or value.get("candidate_sha256") != candidate_sha256
         or value.get("registry_sha256") != registry_sha256
         or value.get("manifest_sha256") != manifest_sha256
-        or value.get("changed_bundle_count") != changed
-        or value.get("already_applied_bundle_count") != already
+        or counts not in expected_counts
         or value.get("database_transaction_committed") is not True
     ):
         raise ComponentError(f"bundle {mode} report contract failed")
@@ -822,6 +833,17 @@ def recovery_apply(
                     env=go_env(),
                     label="recovery apply compensation database rollback",
                 )
+                validate_recovery_report(
+                    db_rollback,
+                    mode="rollback",
+                    run_id=args.run_id,
+                    database=connection.database,
+                    host=connection.host,
+                    plan_sha256=plan_sha,
+                    changed=3,
+                    already=0,
+                    allowed_counts={(3, 0), (0, 3)},
+                )
                 compensation.append("database_restored")
             except Exception as exc:
                 database_safe = False
@@ -877,6 +899,9 @@ def recovery_rollback(
     plan = component_dir / "recovery-materialization-plan.json"
     guard_before = component_dir / "recovery-guard-before.json"
     db_rollback = component_dir / "recovery-db-rollback.json"
+    db_rollback_recheck = (
+        component_dir / "recovery-db-rollback-recheck.json"
+    )
     guard_restore = component_dir / "recovery-guard-restore.json"
     file_rollback = component_dir / "recovery-file-rollback.json"
     report = component_dir / "recovery-component-rollback.json"
@@ -889,12 +914,29 @@ def recovery_rollback(
         run_id=args.run_id,
         primary_sha256=plan_sha,
     )
+    rollback_artifacts = [db_rollback]
+    if db_rollback.is_file():
+        validate_recovery_report(
+            db_rollback,
+            mode="rollback",
+            run_id=args.run_id,
+            database=connection.database,
+            host=connection.host,
+            plan_sha256=plan_sha,
+            changed=3,
+            already=0,
+            allowed_counts={(3, 0), (0, 3)},
+        )
+        rollback_target = db_rollback_recheck
+        rollback_artifacts.append(db_rollback_recheck)
+    else:
+        rollback_target = db_rollback
     run_command(
         go_recovery_argv(
             mode="rollback",
             plan=plan,
             fixture_root=args.fixture_root,
-            report=db_rollback,
+            report=rollback_target,
             connection=connection,
             run_id=args.run_id,
         ),
@@ -903,14 +945,19 @@ def recovery_rollback(
         label="recovery database rollback",
     )
     validate_recovery_report(
-        db_rollback,
+        rollback_target,
         mode="rollback",
         run_id=args.run_id,
         database=connection.database,
         host=connection.host,
         plan_sha256=plan_sha,
-        changed=3,
-        already=0,
+        changed=0 if rollback_target == db_rollback_recheck else 3,
+        already=3 if rollback_target == db_rollback_recheck else 0,
+        allowed_counts=(
+            None
+            if rollback_target == db_rollback_recheck
+            else {(3, 0), (0, 3)}
+        ),
     )
     restore_guard(
         connection,
@@ -950,7 +997,7 @@ def recovery_rollback(
         action="rollback",
         args=args,
         connection=connection,
-        files=[db_rollback, guard_restore, file_rollback],
+        files=[*rollback_artifacts, guard_restore, file_rollback],
     )
     write_document(report, payload)
     return payload
@@ -1120,6 +1167,19 @@ def bundle_apply(
                         env=go_env(),
                         label="bundle apply compensation database rollback",
                     )
+                    validate_bundle_report(
+                        compensation_report,
+                        mode="rollback",
+                        run_id=args.run_id,
+                        database=connection.database,
+                        host=connection.host,
+                        candidate_sha256=candidate,
+                        registry_sha256=registry_sha,
+                        manifest_sha256=manifest_sha,
+                        changed=7,
+                        already=0,
+                        allowed_counts={(7, 0), (0, 7)},
+                    )
                     compensation.append("database_restored")
                 except Exception as exc:
                     database_safe = False
@@ -1198,6 +1258,7 @@ def bundle_rollback(
     guard_before = component_dir / "bundle-guard-before.json"
     db_apply = component_dir / "bundle-db-apply.json"
     db_rollback = component_dir / "bundle-db-rollback.json"
+    db_rollback_recheck = component_dir / "bundle-db-rollback-recheck.json"
     guard_restore = component_dir / "bundle-guard-restore.json"
     file_rollback = component_dir / "bundle-file-rollback.json"
     report = component_dir / "bundle-component-rollback.json"
@@ -1218,13 +1279,32 @@ def bundle_rollback(
         primary_sha256=candidate,
         secondary_sha256=registry_sha,
     )
+    rollback_artifacts = [db_rollback]
+    if db_rollback.is_file():
+        validate_bundle_report(
+            db_rollback,
+            mode="rollback",
+            run_id=args.run_id,
+            database=connection.database,
+            host=connection.host,
+            candidate_sha256=candidate,
+            registry_sha256=registry_sha,
+            manifest_sha256=manifest_sha,
+            changed=7,
+            already=0,
+            allowed_counts={(7, 0), (0, 7)},
+        )
+        rollback_target = db_rollback_recheck
+        rollback_artifacts.append(db_rollback_recheck)
+    else:
+        rollback_target = db_rollback
     run_command(
         go_bundle_argv(
             mode="rollback",
             registry=registry,
             manifest=args.manifest,
             fixture_root=args.fixture_root,
-            report=db_rollback,
+            report=rollback_target,
             connection=connection,
             run_id=args.run_id,
             candidate_sha256=candidate,
@@ -1235,7 +1315,7 @@ def bundle_rollback(
         label="bundle database rollback",
     )
     validate_bundle_report(
-        db_rollback,
+        rollback_target,
         mode="rollback",
         run_id=args.run_id,
         database=connection.database,
@@ -1243,8 +1323,13 @@ def bundle_rollback(
         candidate_sha256=candidate,
         registry_sha256=registry_sha,
         manifest_sha256=manifest_sha,
-        changed=7,
-        already=0,
+        changed=0 if rollback_target == db_rollback_recheck else 7,
+        already=7 if rollback_target == db_rollback_recheck else 0,
+        allowed_counts=(
+            None
+            if rollback_target == db_rollback_recheck
+            else {(7, 0), (0, 7)}
+        ),
     )
     restore_guard(
         connection,
@@ -1283,7 +1368,7 @@ def bundle_rollback(
         action="rollback",
         args=args,
         connection=connection,
-        files=[db_rollback, guard_restore, file_rollback],
+        files=[*rollback_artifacts, guard_restore, file_rollback],
     )
     write_document(report, payload)
     return payload
@@ -1315,6 +1400,8 @@ def parse_args() -> argparse.Namespace:
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
     run_root, component_dir = validate_root(args)
+    if shutil.which("go") is None:
+        raise ComponentError("go executable is required before clone writes")
     connection = clone_db.Connection.confirmed_clone_b(
         args.database, args.mysql
     )
