@@ -376,6 +376,7 @@ def execute_step(
     repo_root: pathlib.Path,
     env: dict[str, str],
     timeout_seconds: float,
+    require_quiescence: bool = False,
 ) -> dict[str, Any]:
     for path in expected_artifacts:
         resolved = path.resolve(strict=False)
@@ -397,6 +398,7 @@ def execute_step(
     stderr = run_dir / f"{step}.stderr"
     started = time.monotonic()
     code = 0
+    process_group_quiescent: bool | None = None
     with stdout.open("wb") as out_handle, stderr.open("wb") as err_handle:
         process = subprocess.Popen(
             argv,
@@ -411,6 +413,7 @@ def execute_step(
         except subprocess.TimeoutExpired:
             code = 124
             quiescent, remaining, cleanup_error = terminate_process_group(process)
+            process_group_quiescent = quiescent
             if quiescent:
                 message = (
                     f"\nstep timed out after {timeout_seconds:.3f}s; "
@@ -425,6 +428,32 @@ def execute_step(
                     f"remaining={remaining!r}; error={cleanup_error}\n"
                 )
             err_handle.write(message.encode())
+        else:
+            if require_quiescence:
+                members = linux_non_zombie_process_group_members(process.pid)
+                if not members:
+                    process_group_quiescent = True
+                else:
+                    quiescent, remaining, cleanup_error = terminate_process_group(
+                        process
+                    )
+                    process_group_quiescent = quiescent
+                    if quiescent:
+                        if code == 0:
+                            code = 122
+                        message = (
+                            "\nstep leader exited while non-zombie process-group "
+                            "members remained; descendants were terminated before "
+                            "continuation\n"
+                        )
+                    else:
+                        code = 121
+                        message = (
+                            "\nstep leader exited while process-group members "
+                            "remained and cleanup could not prove quiescence; "
+                            f"remaining={remaining!r}; error={cleanup_error}\n"
+                        )
+                    err_handle.write(message.encode())
     elapsed = time.monotonic() - started
     evidence = [
         evidence_ref(stdout, run_dir, clone_root),
@@ -443,7 +472,7 @@ def execute_step(
                     f"post-command evidence validation failed: {exc}\n".encode()
                 )
             evidence[1] = evidence_ref(stderr, run_dir, clone_root)
-    return {
+    record = {
         "step": step,
         "phase": phase,
         "exit_code": int(code),
@@ -451,6 +480,9 @@ def execute_step(
         "command_sha256": command_sha,
         "evidence": evidence,
     }
+    if require_quiescence:
+        record["process_group_quiescent"] = process_group_quiescent is True
+    return record
 
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
