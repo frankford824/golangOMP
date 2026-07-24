@@ -8,6 +8,8 @@ import sys
 import tempfile
 import unittest
 
+from scripts.ab import historical_unavailable_exception as EXCEPTION
+
 
 ROOT = pathlib.Path(__file__).parent
 
@@ -64,7 +66,9 @@ def hydration_evidence(
     unique_targets: int,
     get_count: int | None = None,
     resumed_count: int = 0,
+    exception_count: int = 0,
 ) -> dict:
+    available_count = row_count - exception_count
     value = {
         "schema_version": 1,
         "status": "PASS",
@@ -72,17 +76,17 @@ def hydration_evidence(
         "hydrated_manifest_sha256": PREPARE.sha256_file(hydrated),
         "checkpoint_sha256": hashlib.sha256(b"checkpoint").hexdigest(),
         "row_count": row_count,
-        "already_complete_count": 0,
-        "missing_sha256_count": row_count,
-        "configured_target_row_count": row_count,
+        "already_complete_count": exception_count,
+        "missing_sha256_count": available_count,
+        "configured_target_row_count": available_count,
         "unique_target_count": unique_targets,
         "resumed_target_count": resumed_count,
         "resumed_failure_target_count": 0,
         "read_only_get_count": (
             unique_targets if get_count is None else get_count
         ),
-        "hydrated_row_count": row_count,
-        "deduplicated_get_count": row_count - unique_targets,
+        "hydrated_row_count": available_count,
+        "deduplicated_get_count": available_count - unique_targets,
         "failure_count": 0,
         "failures": [],
     }
@@ -114,6 +118,98 @@ class ForceObjectReverificationTest(unittest.TestCase):
             VERIFY.canonical_json(payload) + "\n", encoding="utf-8"
         )
         return reviewed, force, hydrated, evidence, rows
+
+    def make_exception_documents(self, root: pathlib.Path):
+        reviewed = root / "reviewed.jsonl"
+        force = root / "force.jsonl"
+        hydrated = root / "hydrated.jsonl"
+        evidence = root / "hydration.json"
+        exception_row = row(EXCEPTION.TASK_ASSET_ID)
+        exception_row.update(
+            {
+                "entity_key": EXCEPTION.ENTITY_KEY,
+                "owner_id": EXCEPTION.TASK_ASSET_ID,
+                "task_id": EXCEPTION.TASK_ID,
+                "storage_ref_id": "ref-12323",
+                "object_key": "tasks/2199/historical/12323.psd",
+                "status": "historical_unavailable",
+            }
+        )
+        rows = [exception_row, row(3)]
+        write_jsonl(reviewed, rows)
+
+        mapping_row = {
+            "task_id": EXCEPTION.TASK_ID,
+            "missing_task_asset_id": EXCEPTION.TASK_ASSET_ID,
+            "strategy": EXCEPTION.STRATEGY,
+            "review_policy_ids": [EXCEPTION.POLICY_ID],
+            "confidence": "confirmed_auto",
+            "confirmed_by": 1,
+            "confirmed_at": "2026-07-23T12:00:00Z",
+            "confirmation_note": "confirmed historical tombstone",
+            "recovery_source_task_asset_id": 0,
+            "original_storage_ref_id": "ref-12323",
+            "blockers": [],
+        }
+        mapping_row["manifest_row_hash"] = EXCEPTION.canonical_hash(mapping_row)
+        mapping = {"version": 2, "asset_recoveries": [mapping_row]}
+        mapping_path = root / "mapping.json"
+        mapping_path.write_text(EXCEPTION.canonical_json(mapping) + "\n", encoding="utf-8")
+        mapping_sha = EXCEPTION.sha256_file(mapping_path)
+        sql = {
+            "schema_version": 1,
+            "status": "PASS",
+            "mapping_sha256": mapping_sha,
+            "mapping_row_hash": mapping_row["manifest_row_hash"],
+            "database": "ab_test_b",
+            "transaction": "consistent_read_only",
+            "task_id": EXCEPTION.TASK_ID,
+            "missing_task_asset_id": EXCEPTION.TASK_ASSET_ID,
+            "working_reference_count": 0,
+            "finalized_reference_count": 0,
+            "query_sha256": "2" * 64,
+        }
+        sql["evidence_hash"] = EXCEPTION.self_hash(sql)
+        sql_path = root / "sql.json"
+        sql_path.write_text(EXCEPTION.canonical_json(sql) + "\n", encoding="utf-8")
+        api = {
+            "schema_version": 1,
+            "status": "PASS",
+            "mapping_sha256": mapping_sha,
+            "mapping_row_hash": mapping_row["manifest_row_hash"],
+            "task_id": EXCEPTION.TASK_ID,
+            "task_asset_id": EXCEPTION.TASK_ASSET_ID,
+            "method": "GET",
+            "request_path": "/v1/task-assets/12323/preview",
+            "http_status": 410,
+            "error_code": "asset_historically_unavailable",
+        }
+        api["evidence_hash"] = EXCEPTION.self_hash(api)
+        api_path = root / "api.json"
+        api_path.write_text(EXCEPTION.canonical_json(api) + "\n", encoding="utf-8")
+        exception_path = root / "exception.json"
+        exception_path.write_text(
+            EXCEPTION.canonical_json(
+                EXCEPTION.build(mapping_path, reviewed, sql_path, api_path)
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        prepared = PREPARE.prepare(reviewed, force, exception_path)
+        self.assertEqual("PASS", prepared["status"])
+        self.assertEqual(1, prepared["exception_count"])
+        write_jsonl(hydrated, rows)
+        payload = hydration_evidence(
+            force,
+            hydrated,
+            row_count=2,
+            unique_targets=1,
+            exception_count=1,
+        )
+        evidence.write_text(
+            VERIFY.canonical_json(payload) + "\n", encoding="utf-8"
+        )
+        return reviewed, force, hydrated, evidence, exception_path, rows
 
     def test_pass_requires_every_unique_object_to_be_fetched(self):
         with tempfile.TemporaryDirectory() as raw:
@@ -239,6 +335,75 @@ class ForceObjectReverificationTest(unittest.TestCase):
                 "force_reverify.force_manifest_tampered",
                 result["violations"][0]["violation_code"],
             )
+
+    def test_exact_exception_is_preserved_and_consumed_transparently(self):
+        with tempfile.TemporaryDirectory() as raw:
+            reviewed, force, hydrated, evidence, exception, rows = (
+                self.make_exception_documents(pathlib.Path(raw))
+            )
+            forced_rows = [
+                json.loads(line)
+                for line in force.read_text(encoding="utf-8").splitlines()
+            ]
+            result = VERIFY.verify(
+                reviewed, force, hydrated, evidence, exception
+            )
+        self.assertEqual(rows[0]["sha256"], forced_rows[0]["sha256"])
+        self.assertEqual("", forced_rows[1]["sha256"])
+        self.assertEqual("PASS", result["status"])
+        self.assertEqual(2, result["checked_count"])
+        self.assertEqual(1, result["exception_count"])
+        self.assertEqual(EXCEPTION.ENTITY_KEY, result["exceptions"][0]["entity_key"])
+
+    def test_clearing_exception_fingerprint_blocks(self):
+        with tempfile.TemporaryDirectory() as raw:
+            reviewed, force, hydrated, evidence, exception, _rows = (
+                self.make_exception_documents(pathlib.Path(raw))
+            )
+            forced_rows = [
+                json.loads(line)
+                for line in force.read_text(encoding="utf-8").splitlines()
+            ]
+            forced_rows[0]["sha256"] = ""
+            write_jsonl(force, forced_rows)
+            result = VERIFY.verify(
+                reviewed, force, hydrated, evidence, exception
+            )
+        self.assertEqual("BLOCKED", result["status"])
+        self.assertEqual(
+            "force_reverify.exception_fingerprint_cleared",
+            result["violations"][0]["violation_code"],
+        )
+
+    def test_tampered_exception_attestation_blocks(self):
+        with tempfile.TemporaryDirectory() as raw:
+            reviewed, force, hydrated, evidence, exception, _rows = (
+                self.make_exception_documents(pathlib.Path(raw))
+            )
+            payload = json.loads(exception.read_text(encoding="utf-8"))
+            payload["mapping_sha256"] = "9" * 64
+            exception.write_text(
+                VERIFY.canonical_json(payload) + "\n", encoding="utf-8"
+            )
+            result = VERIFY.verify(
+                reviewed, force, hydrated, evidence, exception
+            )
+        self.assertEqual("BLOCKED", result["status"])
+        self.assertEqual(
+            "force_reverify.exception_invalid",
+            result["violations"][0]["violation_code"],
+        )
+
+    def test_prepare_never_overwrites_exception_attestation(self):
+        with tempfile.TemporaryDirectory() as raw:
+            reviewed, _force, _hydrated, _evidence, exception, _rows = (
+                self.make_exception_documents(pathlib.Path(raw))
+            )
+            original = exception.read_bytes()
+            with self.assertRaises(PREPARE.ManifestError) as caught:
+                PREPARE.prepare(reviewed, exception, exception)
+            self.assertEqual("force_reverify.path_collision", caught.exception.code)
+            self.assertEqual(original, exception.read_bytes())
 
 
 if __name__ == "__main__":

@@ -283,7 +283,61 @@ func run(ctx context.Context, o options) error {
 	}
 	report.Committed = true
 	report.ExecutedAt = time.Now().UTC()
-	return writeNewJSON(o.ReportFile, report)
+	if err := writeNewJSON(o.ReportFile, report); err != nil {
+		if o.Mode == "apply" && report.ChangedBundleCount > 0 {
+			compensationErr := compensateCommittedApply(
+				ctx, db, reg, manifest, registrySHA, entries, report,
+			)
+			if compensationErr != nil {
+				return fmt.Errorf(
+					"write apply report: %v; committed bundle apply compensation failed: %w",
+					err, compensationErr,
+				)
+			}
+			return fmt.Errorf(
+				"write apply report: %w; committed bundle apply was compensated",
+				err,
+			)
+		}
+		return err
+	}
+	return nil
+}
+
+func compensateCommittedApply(
+	ctx context.Context,
+	db *sql.DB,
+	reg registry,
+	manifest confirmedManifest,
+	registrySHA string,
+	entries []validatedEntry,
+	report executionReport,
+) error {
+	tx, err := db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := validateGuard(
+		ctx,
+		tx,
+		reg.RunID,
+		manifest.SourceCandidateSHA256,
+		registrySHA,
+	); err != nil {
+		return err
+	}
+	changed, already, err := rollbackAll(ctx, tx, entries, report)
+	if err != nil {
+		return err
+	}
+	if changed != len(entries) || already != 0 {
+		return fmt.Errorf(
+			"bundle apply compensation changed=%d already=%d expected=%d/0",
+			changed, already, len(entries),
+		)
+	}
+	return tx.Commit()
 }
 
 func validateOptions(o options) (*mysql.Config, string, error) {

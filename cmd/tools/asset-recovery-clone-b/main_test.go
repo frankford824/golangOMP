@@ -368,6 +368,46 @@ func TestCloneGuardRequiresExactBinding(t *testing.T) {
 	}
 }
 
+func TestCommittedApplyReportFailureCompensationRestoresDatabase(t *testing.T) {
+	entry := testEntry(t, t.TempDir())
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectBegin()
+	mock.ExpectQuery("SELECT environment,run_id,plan_sha256").
+		WillReturnRows(
+			sqlmock.NewRows(
+				[]string{"environment", "run_id", "plan_sha256"},
+			).AddRow("clone_b", "run-test", "plan-sha"),
+		)
+	expectLockedState(t, mock, entry, expectedAfter(entry))
+	mock.ExpectExec("UPDATE task_assets").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("UPDATE upload_requests").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(
+		regexp.QuoteMeta(
+			`DELETE FROM asset_storage_refs WHERE ref_id=?`,
+		),
+	).WithArgs(entry.TargetStorageRefID).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	if err := compensateCommittedApply(
+		context.Background(),
+		db,
+		"run-test",
+		"plan-sha",
+		[]recoveryEntry{entry},
+	); err != nil {
+		t.Fatalf("compensateCommittedApply() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func cloneMap(value map[string]any) map[string]any {
 	result := make(map[string]any, len(value))
 	for key, item := range value {

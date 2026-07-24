@@ -363,6 +363,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     dsn = parse_local_clone_dsn(args.dsn_file, args.confirm_clone_database)
 
     placeholders = {
+        "run_id": args.run_id,
         "run_dir": str(run_dir.resolve()),
         "clone_root": str(clone_root.resolve()),
         "repo_root": str(repo_root),

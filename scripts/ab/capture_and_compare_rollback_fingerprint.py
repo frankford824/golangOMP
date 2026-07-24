@@ -14,14 +14,12 @@ except ModuleNotFoundError:
 
 def capture_document(connection: db.Connection) -> dict:
     schema = db.discover_schema(connection)
-    captured_schema, rows = db.capture(connection, schema)
-    tables = db.table_summaries(
-        captured_schema, rows, include_schema=True
-    )
+    _, tables = db.capture_fingerprint(connection, schema)
     return {
         "schema_version": 1,
         "kind": "clone-b-baseline-fingerprint",
         "database": connection.database,
+        "fingerprint_algorithm": db.ROW_FINGERPRINT_ALGORITHM,
         "tables": tables,
         "fingerprint_sha256": db.sha256_bytes(db.canonical_bytes(tables)),
     }
@@ -40,6 +38,8 @@ def run(args: argparse.Namespace) -> dict:
         baseline.get("schema_version") != 1
         or baseline.get("kind") != "clone-b-baseline-fingerprint"
         or baseline.get("database") != args.database
+        or baseline.get("fingerprint_algorithm")
+        != db.ROW_FINGERPRINT_ALGORITHM
         or not isinstance(baseline.get("tables"), dict)
         or baseline.get("fingerprint_sha256")
         != db.sha256_bytes(db.canonical_bytes(baseline["tables"]))

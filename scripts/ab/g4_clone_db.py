@@ -11,11 +11,14 @@ from __future__ import annotations
 
 import dataclasses
 import hashlib
+import heapq
 import json
 import os
 import pathlib
 import re
 import subprocess
+import tempfile
+from collections.abc import Iterator
 from typing import Any, Iterable
 
 
@@ -73,6 +76,14 @@ SEARCH_COLUMNS = {
         "updated_at",
     ),
 }
+ROW_FINGERPRINT_ALGORITHM = (
+    "sha256(sorted(sha256(canonical-json-cells-v1)),duplicates-preserved)-v1"
+)
+ROW_DIGEST_DOMAIN = b"g4-canonical-json-cells-v1\0"
+TABLE_DIGEST_DOMAIN = b"g4-row-multiset-sha256-v1\0"
+ROW_DIGEST_SIZE = hashlib.sha256().digest_size
+DEFAULT_FINGERPRINT_CHUNK_ROWS = 32768
+DEFAULT_FINGERPRINT_MERGE_FAN_IN = 32
 
 
 def canonical_bytes(value: Any) -> bytes:
@@ -150,10 +161,10 @@ class Connection:
         command = [
             self.mysql,
             "--protocol=TCP",
-            f"--host={self.host}",
-            f"--port={self.port}",
-            f"--user={self.user}",
-            f"--database={self.database}",
+            f"-h{self.host}",
+            f"-P{self.port}",
+            f"-u{self.user}",
+            f"-D{self.database}",
             "--batch",
             "--raw",
             "--skip-column-names",
@@ -177,6 +188,59 @@ class Connection:
                 f"{detail}"
             )
         return completed.stdout
+
+    def iter_output_lines(self, sql: str) -> Iterator[bytes]:
+        """Stream mysql output without retaining the result set in memory."""
+
+        command = [
+            self.mysql,
+            "--protocol=TCP",
+            f"-h{self.host}",
+            f"-P{self.port}",
+            f"-u{self.user}",
+            f"-D{self.database}",
+            "--batch",
+            "--raw",
+            "--skip-column-names",
+            "--quick",
+            "--default-character-set=utf8mb4",
+        ]
+        env = dict(os.environ)
+        env["MYSQL_PWD"] = self.password
+        with (
+            tempfile.TemporaryFile() as stdin,
+            tempfile.TemporaryFile() as stderr,
+        ):
+            stdin.write(sql.encode("utf-8"))
+            stdin.seek(0)
+            process = subprocess.Popen(
+                command,
+                stdin=stdin,
+                stdout=subprocess.PIPE,
+                stderr=stderr,
+                env=env,
+            )
+            assert process.stdout is not None
+            try:
+                for line in process.stdout:
+                    yield line
+                returncode = process.wait()
+                if returncode != 0:
+                    stderr.seek(0)
+                    detail = stderr.read().decode(
+                        "utf-8", errors="replace"
+                    ).strip()
+                    raise RuntimeError(
+                        "local Clone B mysql command failed "
+                        f"({returncode}): {detail}"
+                    )
+            except BaseException:
+                if process.poll() is None:
+                    process.kill()
+                process.wait()
+                raise
+            finally:
+                process.stdout.close()
 
 
 def quote_identifier(value: str) -> str:
@@ -237,6 +301,20 @@ def _read_json_lines(raw: str) -> list[dict[str, Any]]:
             )
         result.append(value)
     return result
+
+
+def _read_json_line(raw: bytes, line_number: int) -> dict[str, Any]:
+    try:
+        value = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError(
+            f"unexpected MySQL JSON output at line {line_number}"
+        ) from exc
+    if not isinstance(value, dict):
+        raise RuntimeError(
+            f"MySQL JSON output line {line_number} is not an object"
+        )
+    return value
 
 
 def discover_schema(
@@ -375,6 +453,216 @@ def capture(
     for table in rows:
         rows[table].sort(key=canonical_bytes)
     return captured_schema, rows
+
+
+def _iter_fixed_digests(path: pathlib.Path) -> Iterator[bytes]:
+    with path.open("rb") as handle:
+        while True:
+            value = handle.read(ROW_DIGEST_SIZE)
+            if not value:
+                return
+            if len(value) != ROW_DIGEST_SIZE:
+                raise RuntimeError(f"truncated row digest spool: {path}")
+            yield value
+
+
+class _RowDigestSpool:
+    """Bounded-memory external sorter for fixed-size per-row digests."""
+
+    def __init__(
+        self,
+        root: pathlib.Path,
+        table: str,
+        *,
+        chunk_rows: int,
+        merge_fan_in: int,
+    ) -> None:
+        if chunk_rows < 1:
+            raise ValueError("fingerprint chunk_rows must be positive")
+        if merge_fan_in < 2:
+            raise ValueError("fingerprint merge_fan_in must be at least 2")
+        self.root = root
+        self.table = table
+        self.chunk_rows = chunk_rows
+        self.merge_fan_in = merge_fan_in
+        self.buffer: list[bytes] = []
+        self.chunk_paths: list[pathlib.Path] = []
+        self.row_count = 0
+        self.max_buffered_digests = 0
+        self._sequence = 0
+
+    def add(self, cells: list[str | None]) -> None:
+        digest = hashlib.sha256(
+            ROW_DIGEST_DOMAIN + canonical_bytes(cells)
+        ).digest()
+        self.buffer.append(digest)
+        self.row_count += 1
+        self.max_buffered_digests = max(
+            self.max_buffered_digests, len(self.buffer)
+        )
+        if len(self.buffer) >= self.chunk_rows:
+            self._flush()
+
+    def _next_path(self, label: str) -> pathlib.Path:
+        self._sequence += 1
+        return self.root / f"{self.table}.{label}.{self._sequence:08d}.bin"
+
+    def _flush(self) -> None:
+        if not self.buffer:
+            return
+        path = self._next_path("chunk")
+        self.buffer.sort()
+        with path.open("wb") as handle:
+            for value in self.buffer:
+                handle.write(value)
+        self.chunk_paths.append(path)
+        self.buffer.clear()
+
+    def _merge_group(
+        self, sources: list[pathlib.Path], destination: pathlib.Path
+    ) -> None:
+        iterators = [_iter_fixed_digests(path) for path in sources]
+        with destination.open("wb") as handle:
+            for value in heapq.merge(*iterators):
+                handle.write(value)
+        for source in sources:
+            source.unlink()
+
+    def _reduce_chunks(self) -> pathlib.Path:
+        paths = self.chunk_paths
+        while len(paths) > 1:
+            merged: list[pathlib.Path] = []
+            for offset in range(0, len(paths), self.merge_fan_in):
+                sources = paths[offset : offset + self.merge_fan_in]
+                destination = self._next_path("merge")
+                self._merge_group(sources, destination)
+                merged.append(destination)
+            paths = merged
+        return paths[0]
+
+    def finish(self) -> dict[str, Any]:
+        hasher = hashlib.sha256()
+        hasher.update(TABLE_DIGEST_DOMAIN)
+        if self.chunk_paths:
+            self._flush()
+            final_path = self._reduce_chunks()
+            for value in _iter_fixed_digests(final_path):
+                hasher.update(value)
+            final_path.unlink()
+        else:
+            self.buffer.sort()
+            for value in self.buffer:
+                hasher.update(value)
+            self.buffer.clear()
+        return {
+            "row_count": self.row_count,
+            "content_sha256": hasher.hexdigest(),
+            "content_fingerprint_algorithm": ROW_FINGERPRINT_ALGORITHM,
+        }
+
+
+def capture_fingerprint(
+    connection: Connection,
+    schema: dict[str, list[dict[str, Any]]],
+    *,
+    temporary_directory: pathlib.Path | None = None,
+    chunk_rows: int = DEFAULT_FINGERPRINT_CHUNK_ROWS,
+    merge_fan_in: int = DEFAULT_FINGERPRINT_MERGE_FAN_IN,
+) -> tuple[
+    dict[str, list[dict[str, Any]]],
+    dict[str, dict[str, Any]],
+]:
+    """Capture a deterministic full-schema fingerprint with bounded memory.
+
+    Rows are represented by SHA-256 digests of the same canonical cell arrays
+    used by the recoverable search snapshot.  Fixed-size digests are sorted via
+    bounded external merge sort, so tables without keys, duplicate rows, and
+    arbitrarily large BLOB/TEXT values do not depend on physical row order.
+    """
+
+    expected_tables = sorted(schema)
+    captured_schema: dict[str, list[dict[str, Any]]] = {
+        table: [] for table in schema
+    }
+    summaries: dict[str, dict[str, Any]] = {}
+    current_table: str | None = None
+    spool: _RowDigestSpool | None = None
+
+    with tempfile.TemporaryDirectory(
+        prefix="g4-fingerprint-",
+        dir=temporary_directory,
+    ) as temporary:
+        root = pathlib.Path(temporary)
+
+        def finish_current() -> None:
+            nonlocal spool
+            if current_table is None or spool is None:
+                return
+            summary = spool.finish()
+            summary["schema_sha256"] = sha256_bytes(
+                canonical_bytes(captured_schema[current_table])
+            )
+            summaries[current_table] = summary
+            spool = None
+
+        for line_number, raw in enumerate(
+            connection.iter_output_lines(_capture_sql(schema)), 1
+        ):
+            if not raw.strip():
+                continue
+            record = _read_json_line(raw, line_number)
+            table = str(record.get("table") or "")
+            if table not in schema:
+                raise RuntimeError("capture returned an unexpected table")
+            kind = record.get("kind")
+            if kind == "column":
+                if table != current_table:
+                    finish_current()
+                    expected_index = len(summaries)
+                    if (
+                        expected_index >= len(expected_tables)
+                        or table != expected_tables[expected_index]
+                    ):
+                        raise RuntimeError(
+                            "capture table order is incomplete or unstable"
+                        )
+                    current_table = table
+                    spool = _RowDigestSpool(
+                        root,
+                        table,
+                        chunk_rows=chunk_rows,
+                        merge_fan_in=merge_fan_in,
+                    )
+                captured_schema[table].append(record)
+                continue
+            if kind != "row" or table != current_table or spool is None:
+                raise RuntimeError(
+                    "capture returned a row outside its table boundary"
+                )
+            cells = record.get("cells")
+            if (
+                not isinstance(cells, list)
+                or len(cells) != len(schema[table])
+                or any(
+                    value is not None
+                    and (
+                        not isinstance(value, str)
+                        or not re.fullmatch(r"(?:[0-9A-F]{2})*", value)
+                    )
+                    for value in cells
+                )
+            ):
+                raise RuntimeError(f"{table} returned an invalid row encoding")
+            spool.add(cells)
+        finish_current()
+
+    if set(summaries) != set(schema):
+        raise RuntimeError("capture omitted one or more base tables")
+    if captured_schema != schema:
+        raise RuntimeError("database schema drifted during capture")
+    return captured_schema, {
+        table: summaries[table] for table in sorted(summaries)
+    }
 
 
 def table_summaries(

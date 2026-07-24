@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Fail-closed proof that every reviewed object was fetched and re-fingerprinted."""
+"""Fail-closed proof that every available reviewed object was re-fingerprinted.
+
+The sole task-2199/asset-12323 historical-unavailable row is counted
+transparently as an exception only when a valid attestation binds its mapping
+row, object row, zero-current-reference SQL evidence, and exact HTTP 410 API
+evidence.  Every other row remains subject to forced byte rehydration.
+"""
 from __future__ import annotations
 
 import argparse
@@ -12,8 +18,10 @@ from typing import Any
 
 try:
     from scripts.ab import object_manifest_verifier as verifier
+    from scripts.ab import historical_unavailable_exception as historical_exception
 except ModuleNotFoundError:  # Direct execution from scripts/ab.
     import object_manifest_verifier as verifier
+    import historical_unavailable_exception as historical_exception
 
 
 SCHEMA_VERSION = 1
@@ -96,6 +104,11 @@ def checked_result(
     hydrated_sha: str,
     hydration_evidence_sha: str,
     violations: list[dict[str, str]],
+    exception_count: int = 0,
+    exception_evidence_sha256: str = ZERO_SHA256,
+    mapping_sha256: str = ZERO_SHA256,
+    mapping_row_hash: str = ZERO_SHA256,
+    exceptions: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     result: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
@@ -106,6 +119,11 @@ def checked_result(
         "manifest_sha256": manifest_sha,
         "hydrated_manifest_sha256": hydrated_sha,
         "hydration_evidence_sha256": hydration_evidence_sha,
+        "exception_count": exception_count,
+        "exception_evidence_sha256": exception_evidence_sha256,
+        "mapping_sha256": mapping_sha256,
+        "mapping_row_hash": mapping_row_hash,
+        "exceptions": exceptions or [],
     }
     result["evidence_hash"] = hashlib.sha256(
         canonical_json(result).encode("utf-8")
@@ -118,6 +136,7 @@ def read_jsonl(
     *,
     label: str,
     allow_empty_sha: bool,
+    exception_entity: str | None = None,
 ) -> tuple[list[dict[str, Any]], str]:
     if path.is_symlink() or not path.is_file():
         raise VerificationError(
@@ -150,6 +169,11 @@ def read_jsonl(
                 f"force_reverify.{label}_invalid",
                 f"{label} manifest row {line_no} is invalid JSON",
             ) from exc
+        is_exception = (
+            allow_empty_sha
+            and isinstance(row, dict)
+            and row.get("entity_key") == exception_entity
+        )
         if allow_empty_sha and isinstance(row, dict) and row.get("sha256") == "":
             candidate = dict(row)
             candidate["sha256"] = "1" * 64
@@ -167,10 +191,15 @@ def read_jsonl(
                 f"force_reverify.{label}_invalid",
                 f"{label} manifest row {line_no} violates the object contract",
             )
-        if allow_empty_sha and row["sha256"] != "":
+        if allow_empty_sha and not is_exception and row["sha256"] != "":
             raise VerificationError(
                 "force_reverify.sha_not_cleared",
                 f"{label} manifest row {line_no} retains a fingerprint",
+            )
+        if is_exception and row["sha256"] in {"", ZERO_SHA256}:
+            raise VerificationError(
+                "force_reverify.exception_fingerprint_cleared",
+                f"{label} manifest exception row {line_no} lost its frozen fingerprint",
             )
         if not allow_empty_sha and row["sha256"] == ZERO_SHA256:
             raise VerificationError(
@@ -260,16 +289,32 @@ def verify(
     force_path: pathlib.Path,
     hydrated_path: pathlib.Path,
     hydration_evidence_path: pathlib.Path,
+    exception_path: pathlib.Path | None = None,
 ) -> dict[str, Any]:
     manifest_sha = ZERO_SHA256
     hydrated_sha = ZERO_SHA256
     hydration_evidence_sha = ZERO_SHA256
+    exception_evidence_sha = ZERO_SHA256
+    mapping_sha = ZERO_SHA256
+    mapping_row_hash = ZERO_SHA256
+    exception: dict[str, Any] | None = None
     try:
         reviewed, manifest_sha = read_jsonl(
             reviewed_path, label="reviewed", allow_empty_sha=False
         )
+        if exception_path is not None:
+            attestation, exception, exception_evidence_sha = (
+                historical_exception.load_attestation(
+                    exception_path, manifest_path=reviewed_path
+                )
+            )
+            mapping_sha = attestation["mapping_sha256"]
+            mapping_row_hash = attestation["mapping_row_hash"]
         forced, force_sha = read_jsonl(
-            force_path, label="force", allow_empty_sha=True
+            force_path,
+            label="force",
+            allow_empty_sha=True,
+            exception_entity=exception["entity_key"] if exception else None,
         )
         hydrated, hydrated_sha = read_jsonl(
             hydrated_path, label="hydrated", allow_empty_sha=False
@@ -287,7 +332,8 @@ def verify(
             zip(reviewed, forced, hydrated), 1
         ):
             expected_force = dict(source)
-            expected_force["sha256"] = ""
+            if exception is None or source["entity_key"] != exception["entity_key"]:
+                expected_force["sha256"] = ""
             if force != expected_force:
                 raise VerificationError(
                     "force_reverify.force_manifest_tampered",
@@ -302,8 +348,11 @@ def verify(
         unique_targets = {
             (target_kind(row["storage_adapter"]), row["object_key"])
             for row in reviewed
+            if exception is None or row["entity_key"] != exception["entity_key"]
         }
         row_count = len(reviewed)
+        exception_count = 1 if exception is not None else 0
+        available_count = row_count - exception_count
         target_count = len(unique_targets)
         if hydration.get("schema_version") != 1:
             raise VerificationError(
@@ -337,13 +386,13 @@ def verify(
             )
         expected_counts = {
             "row_count": row_count,
-            "already_complete_count": 0,
-            "missing_sha256_count": row_count,
-            "configured_target_row_count": row_count,
+            "already_complete_count": exception_count,
+            "missing_sha256_count": available_count,
+            "configured_target_row_count": available_count,
             "unique_target_count": target_count,
             "resumed_failure_target_count": 0,
-            "hydrated_row_count": row_count,
-            "deduplicated_get_count": row_count - target_count,
+            "hydrated_row_count": available_count,
+            "deduplicated_get_count": available_count - target_count,
             "failure_count": 0,
         }
         for field, expected in expected_counts.items():
@@ -360,6 +409,21 @@ def verify(
                 "force_reverify.hydration_failures",
                 "hydration evidence contains failures",
             )
+        accepted_exceptions = []
+        if exception is not None:
+            accepted_exceptions.append(
+                {
+                    "entity_key": exception["entity_key"],
+                    "task_id": exception["task_id"],
+                    "missing_task_asset_id": exception["missing_task_asset_id"],
+                    "expected_http_status": historical_exception.EXPECTED_HTTP_STATUS,
+                    "observed_http_status": historical_exception.EXPECTED_HTTP_STATUS,
+                    "mapping_row_hash": exception["mapping_row_hash"],
+                    "object_row_sha256": exception["object_row_sha256"],
+                    "working_reference_count": 0,
+                    "finalized_reference_count": 0,
+                }
+            )
         return checked_result(
             status="PASS",
             checked_count=row_count,
@@ -367,10 +431,21 @@ def verify(
             hydrated_sha=hydrated_sha,
             hydration_evidence_sha=hydration_evidence_sha,
             violations=[],
+            exception_count=exception_count,
+            exception_evidence_sha256=exception_evidence_sha,
+            mapping_sha256=mapping_sha,
+            mapping_row_hash=mapping_row_hash,
+            exceptions=accepted_exceptions,
         )
-    except (VerificationError, OSError) as exc:
+    except (
+        VerificationError,
+        OSError,
+        historical_exception.ExceptionContractError,
+    ) as exc:
         if isinstance(exc, VerificationError):
             code, detail = exc.code, exc.detail
+        elif isinstance(exc, historical_exception.ExceptionContractError):
+            code, detail = "force_reverify.exception_invalid", str(exc)
         else:
             code, detail = "force_reverify.io_error", "verification I/O failed"
         return checked_result(
@@ -386,6 +461,9 @@ def verify(
                     "detail": detail,
                 }
             ],
+            exception_evidence_sha256=exception_evidence_sha,
+            mapping_sha256=mapping_sha,
+            mapping_row_hash=mapping_row_hash,
         )
 
 
@@ -396,17 +474,27 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("hydrated_manifest_jsonl", type=pathlib.Path)
     parser.add_argument("hydration_evidence_json", type=pathlib.Path)
     parser.add_argument("output_evidence_json", type=pathlib.Path)
+    parser.add_argument(
+        "--historical-unavailable-exception",
+        type=pathlib.Path,
+        help="hash-bound task 2199 / asset 12323 exception attestation",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    paths = (
-        args.reviewed_manifest_jsonl,
-        args.force_reverify_manifest_jsonl,
-        args.hydrated_manifest_jsonl,
-        args.hydration_evidence_json,
-        args.output_evidence_json,
+    paths = tuple(
+        path
+        for path in (
+            args.reviewed_manifest_jsonl,
+            args.force_reverify_manifest_jsonl,
+            args.hydrated_manifest_jsonl,
+            args.hydration_evidence_json,
+            args.output_evidence_json,
+            args.historical_unavailable_exception,
+        )
+        if path is not None
     )
     if len({path.resolve() for path in paths}) != len(paths):
         result = checked_result(
@@ -429,6 +517,7 @@ def main(argv: list[str] | None = None) -> int:
             args.force_reverify_manifest_jsonl,
             args.hydrated_manifest_jsonl,
             args.hydration_evidence_json,
+            args.historical_unavailable_exception,
         )
     atomic_write_bytes(
         args.output_evidence_json,

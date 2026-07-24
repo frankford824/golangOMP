@@ -19,6 +19,9 @@ from typing import Any
 
 
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
+ROW_FINGERPRINT_ALGORITHM = (
+    "sha256(sorted(sha256(canonical-json-cells-v1)),duplicates-preserved)-v1"
+)
 REQUIRED_STEPS = (
     ("dry_run_before", "validate"),
     ("capture_baseline_fingerprint", "validate"),
@@ -39,6 +42,33 @@ SEARCH_TABLES = {
     "task_search_documents",
     "task_asset_group_search_documents",
     "product_search_documents",
+}
+COMPONENT_ARTIFACTS = {
+    ("recovery", "apply"): {
+        "recovery-materialization-plan.json",
+        "recovery-guard-before.json",
+        "recovery-guard-provision.json",
+        "recovery-db-apply.json",
+        "recovery-db-idempotent.json",
+    },
+    ("recovery", "rollback"): {
+        "recovery-db-rollback.json",
+        "recovery-guard-restore.json",
+        "recovery-file-rollback.json",
+    },
+    ("bundle", "apply"): {
+        "bundle-materialize-report.json",
+        "bundle-registry.json",
+        "bundle-guard-before.json",
+        "bundle-guard-provision.json",
+        "bundle-db-apply.json",
+        "bundle-db-idempotent.json",
+    },
+    ("bundle", "rollback"): {
+        "bundle-db-rollback.json",
+        "bundle-guard-restore.json",
+        "bundle-file-rollback.json",
+    },
 }
 
 
@@ -126,12 +156,39 @@ def validate_fingerprint(
             baseline_payload.get("fingerprint_sha256") or ""
         )
         baseline_artifact = sha256_file(baseline_path)
+        table_contract_valid = all(
+            isinstance(name, str)
+            and bool(name)
+            and isinstance(value, dict)
+            and set(value)
+            == {
+                "row_count",
+                "content_sha256",
+                "schema_sha256",
+                "content_fingerprint_algorithm",
+            }
+            and not isinstance(value["row_count"], bool)
+            and isinstance(value["row_count"], int)
+            and value["row_count"] >= 0
+            and SHA256.fullmatch(str(value["content_sha256"] or ""))
+            and SHA256.fullmatch(str(value["schema_sha256"] or ""))
+            and value["content_fingerprint_algorithm"]
+            == ROW_FINGERPRINT_ALGORITHM
+            for name, value in (
+                baseline_tables.items()
+                if isinstance(baseline_tables, dict)
+                else ()
+            )
+        )
         if (
             baseline_payload.get("schema_version") != 1
             or baseline_payload.get("kind")
             != "clone-b-baseline-fingerprint"
+            or baseline_payload.get("fingerprint_algorithm")
+            != ROW_FINGERPRINT_ALGORITHM
             or not isinstance(baseline_tables, dict)
             or not baseline_tables
+            or not table_contract_valid
             or baseline_internal
             != hashlib.sha256(canonical_bytes(baseline_tables)).hexdigest()
             or baseline_artifact
@@ -239,6 +296,231 @@ def validate_search_restore(
             }
         )
     return snapshot, rollback, violations
+
+
+def _read_object(path: pathlib.Path, label: str) -> dict[str, Any]:
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise ValueError(f"{label} is not an object")
+    return value
+
+
+def _validate_self_hash(value: dict[str, Any], label: str) -> None:
+    expected = str(value.get("evidence_sha256") or "")
+    unhashed = dict(value)
+    unhashed.pop("evidence_sha256", None)
+    if (
+        not SHA256.fullmatch(expected)
+        or hashlib.sha256(canonical_bytes(unhashed)).hexdigest() != expected
+    ):
+        raise ValueError(f"{label} self hash is stale")
+
+
+def validate_component_chain(
+    run_dir: pathlib.Path, run_id: str
+) -> tuple[dict[str, Any], list[dict[str, str]]]:
+    violations: list[dict[str, str]] = []
+    chain: dict[str, Any] = {}
+    database: str | None = None
+    host: str | None = None
+    for component in ("recovery", "bundle"):
+        chain[component] = {}
+        for action in ("apply", "rollback"):
+            label = f"{component}-{action}"
+            report_path = run_dir / f"{component}-component-{action}.json"
+            try:
+                report = _read_object(report_path, label)
+                _validate_self_hash(report, label)
+                expected_status = (
+                    "APPLIED" if action == "apply" else "ROLLED_BACK"
+                )
+                if (
+                    report.get("schema_version") != 1
+                    or report.get("status") != expected_status
+                    or report.get("component") != component
+                    or report.get("action") != action
+                    or report.get("run_id") != run_id
+                    or report.get("database_writes_executed") is not True
+                    or report.get("production_writes_executed") is not False
+                    or report.get("guard_retained_for_rollback")
+                    is not (action == "apply")
+                    or report.get("guard_exactly_restored")
+                    is not (action == "rollback")
+                ):
+                    raise ValueError(f"{label} envelope is invalid")
+                if database is None:
+                    database = str(report.get("database") or "")
+                    host = str(report.get("host") or "")
+                if (
+                    report.get("database") != database
+                    or report.get("host") != host
+                    or not database
+                    or host not in {"127.0.0.1", "localhost"}
+                ):
+                    raise ValueError(f"{label} database/host binding differs")
+                artifacts = report.get("artifacts")
+                if not isinstance(artifacts, list):
+                    raise ValueError(f"{label} artifacts are missing")
+                actual_names: set[str] = set()
+                artifact_values: dict[str, dict[str, Any]] = {}
+                for item in artifacts:
+                    if (
+                        not isinstance(item, dict)
+                        or set(item) != {"path", "sha256", "size"}
+                    ):
+                        raise ValueError(f"{label} artifact shape is invalid")
+                    name = str(item["path"])
+                    if (
+                        pathlib.PurePosixPath(name).name != name
+                        or name in actual_names
+                        or not SHA256.fullmatch(str(item["sha256"] or ""))
+                        or isinstance(item["size"], bool)
+                        or not isinstance(item["size"], int)
+                        or item["size"] < 0
+                    ):
+                        raise ValueError(f"{label} artifact identity is invalid")
+                    target = run_dir / name
+                    if (
+                        target.is_symlink()
+                        or not target.is_file()
+                        or target.stat().st_size != item["size"]
+                        or sha256_file(target) != item["sha256"]
+                    ):
+                        raise ValueError(f"{label} artifact {name} drifted")
+                    actual_names.add(name)
+                    artifact_values[name] = _read_object(target, name)
+                if actual_names != COMPONENT_ARTIFACTS[(component, action)]:
+                    raise ValueError(f"{label} artifact set differs")
+
+                db_name = f"{component}-db-{action}.json"
+                db_report = artifact_values[db_name]
+                changed_field = (
+                    "changed_entries"
+                    if component == "recovery"
+                    else "changed_bundle_count"
+                )
+                already_field = (
+                    "already_in_target_state_entries"
+                    if component == "recovery"
+                    else "already_applied_bundle_count"
+                )
+                expected_changed = 3 if component == "recovery" else 7
+                if (
+                    db_report.get("mode") != action
+                    or db_report.get("run_id") != run_id
+                    or db_report.get("database") != database
+                    or db_report.get("host") != host
+                    or db_report.get(changed_field) != expected_changed
+                    or db_report.get(already_field) != 0
+                    or db_report.get("database_transaction_committed")
+                    is not True
+                ):
+                    raise ValueError(f"{label} DB report is invalid")
+                if component == "recovery" and (
+                    db_report.get("version") != 1
+                    or db_report.get("object_storage_writes_executed")
+                    is not False
+                ):
+                    raise ValueError("recovery DB report contract is invalid")
+                if component == "bundle" and (
+                    db_report.get("schema_version") != 1
+                    or db_report.get("status") != "PASS"
+                ):
+                    raise ValueError("bundle DB report contract is invalid")
+
+                guard_before = artifact_values.get(
+                    f"{component}-guard-before.json"
+                )
+                if guard_before is not None:
+                    _validate_self_hash(guard_before, f"{label} guard-before")
+                    if (
+                        guard_before.get("kind") != "clone-b-guard-state"
+                        or guard_before.get("component") != component
+                        or guard_before.get("database") != database
+                        or not isinstance(guard_before.get("rows"), list)
+                        or not isinstance(guard_before.get("schema"), list)
+                    ):
+                        raise ValueError(f"{label} guard baseline is invalid")
+                    provision = artifact_values[
+                        f"{component}-guard-provision.json"
+                    ]
+                    _validate_self_hash(provision, f"{label} guard-provision")
+                    if (
+                        provision.get("status") != "PROVISIONED"
+                        or provision.get("component") != component
+                        or provision.get("database") != database
+                        or provision.get("before_artifact_sha256")
+                        != artifact_values_hash(
+                            artifacts, f"{component}-guard-before.json"
+                        )
+                        or not isinstance(provision.get("binding"), dict)
+                    ):
+                        raise ValueError(f"{label} guard provision is invalid")
+                    idempotent = artifact_values[
+                        f"{component}-db-idempotent.json"
+                    ]
+                    if (
+                        idempotent.get("mode") != "apply"
+                        or idempotent.get("run_id") != run_id
+                        or idempotent.get("database") != database
+                        or idempotent.get("host") != host
+                        or idempotent.get(changed_field) != 0
+                        or idempotent.get(already_field) != expected_changed
+                        or idempotent.get("database_transaction_committed")
+                        is not True
+                    ):
+                        raise ValueError(
+                            f"{label} idempotent DB report is invalid"
+                        )
+                else:
+                    restore = artifact_values[
+                        f"{component}-guard-restore.json"
+                    ]
+                    _validate_self_hash(restore, f"{label} guard-restore")
+                    if (
+                        restore.get("status") != "RESTORED"
+                        or restore.get("component") != component
+                        or restore.get("database") != database
+                        or restore.get("exact") is not True
+                    ):
+                        raise ValueError(f"{label} guard restore is invalid")
+                    file_report = artifact_values[
+                        f"{component}-file-rollback.json"
+                    ]
+                    if (
+                        file_report.get("status") != "ROLLED_BACK"
+                        or file_report.get("database_write_performed")
+                        is not False
+                    ):
+                        raise ValueError(f"{label} file rollback is invalid")
+                chain[component][action] = report
+                chain[component][action]["artifact_sha256"] = sha256_file(
+                    report_path
+                )
+            except (
+                OSError,
+                UnicodeError,
+                json.JSONDecodeError,
+                ValueError,
+            ) as exc:
+                violations.append(
+                    {
+                        "violation_code": "g4.component_chain_invalid",
+                        "entity_key": label,
+                        "detail": str(exc),
+                    }
+                )
+                chain[component][action] = {}
+    return chain, violations
+
+
+def artifact_values_hash(
+    artifacts: list[dict[str, Any]], name: str
+) -> str:
+    for item in artifacts:
+        if item.get("path") == name:
+            return str(item.get("sha256") or "")
+    return ""
 
 
 def summarize(
@@ -384,6 +666,10 @@ def summarize(
         search_rollback_path,
     )
     violations.extend(search_violations)
+    component_chain, component_violations = validate_component_chain(
+        run_dir, run_id
+    )
+    violations.extend(component_violations)
     status = "PASS" if not violations else "BLOCKED"
     return {
         "schema_version": 2,
@@ -412,6 +698,7 @@ def summarize(
             "snapshot": search_snapshot,
             "rollback": search_rollback,
         },
+        "component_chain": component_chain,
         "search_snapshot_sha256": (
             sha256_file(search_snapshot_path)
             if search_snapshot_path.is_file()

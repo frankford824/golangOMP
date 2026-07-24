@@ -4,7 +4,9 @@
 The reviewed input must already contain a complete, non-placeholder fingerprint
 for every unique entity.  The output preserves every field and row position
 except that ``sha256`` is cleared, forcing ``hydrate_object_manifest.py`` to
-stream every unique object instead of trusting the reviewed digest.
+stream every unique object instead of trusting the reviewed digest.  The sole
+task-2199/asset-12323 historical-unavailable row may retain its frozen digest
+only when a valid hash-bound exception attestation is supplied.
 """
 from __future__ import annotations
 
@@ -18,8 +20,10 @@ from typing import Any
 
 try:
     from scripts.ab import object_manifest_verifier as verifier
+    from scripts.ab import historical_unavailable_exception as historical_exception
 except ModuleNotFoundError:  # Direct execution from scripts/ab.
     import object_manifest_verifier as verifier
+    import historical_unavailable_exception as historical_exception
 
 
 SCHEMA_VERSION = 1
@@ -81,6 +85,10 @@ def evidence_document(
     output_sha: str,
     row_count: int,
     violations: list[dict[str, str]],
+    exception_count: int = 0,
+    exception_evidence_sha256: str = ZERO_SHA256,
+    mapping_sha256: str = ZERO_SHA256,
+    mapping_row_hash: str = ZERO_SHA256,
 ) -> dict[str, Any]:
     result: dict[str, Any] = {
         "schema_version": SCHEMA_VERSION,
@@ -90,6 +98,10 @@ def evidence_document(
         "row_count": row_count,
         "source_manifest_sha256": source_sha,
         "force_reverify_manifest_sha256": output_sha,
+        "exception_count": exception_count,
+        "exception_evidence_sha256": exception_evidence_sha256,
+        "mapping_sha256": mapping_sha256,
+        "mapping_row_hash": mapping_row_hash,
     }
     result["evidence_hash"] = hashlib.sha256(
         canonical_json(result).encode("utf-8")
@@ -161,17 +173,32 @@ def load_reviewed_rows(path: pathlib.Path) -> tuple[list[dict[str, Any]], str]:
 def prepare(
     source_path: pathlib.Path,
     output_path: pathlib.Path,
+    exception_path: pathlib.Path | None = None,
 ) -> dict[str, Any]:
-    if source_path.resolve() == output_path.resolve():
+    resolved_inputs = {source_path.resolve()}
+    if exception_path is not None:
+        resolved_inputs.add(exception_path.resolve())
+    if output_path.resolve() in resolved_inputs:
         raise ManifestError(
             "force_reverify.path_collision",
-            "source and force-reverify manifest paths must differ",
+            "source, exception, and force-reverify manifest paths must differ",
         )
     rows, source_sha = load_reviewed_rows(source_path)
+    exception: dict[str, Any] | None = None
+    exception_sha = ZERO_SHA256
+    mapping_sha = ZERO_SHA256
+    mapping_row_hash = ZERO_SHA256
+    if exception_path is not None:
+        attestation, exception, exception_sha = historical_exception.load_attestation(
+            exception_path, manifest_path=source_path
+        )
+        mapping_sha = attestation["mapping_sha256"]
+        mapping_row_hash = attestation["mapping_row_hash"]
     forced_rows: list[dict[str, Any]] = []
     for row in rows:
         forced = dict(row)
-        forced["sha256"] = ""
+        if exception is None or row["entity_key"] != exception["entity_key"]:
+            forced["sha256"] = ""
         forced_rows.append(forced)
     payload = "".join(canonical_json(row) + "\n" for row in forced_rows).encode(
         "utf-8"
@@ -184,12 +211,16 @@ def prepare(
         output_sha=output_sha,
         row_count=len(rows),
         violations=[],
+        exception_count=1 if exception is not None else 0,
+        exception_evidence_sha256=exception_sha,
+        mapping_sha256=mapping_sha,
+        mapping_row_hash=mapping_row_hash,
     )
 
 
 def blocked_result(
     source_path: pathlib.Path,
-    error: ManifestError | OSError,
+    error: ManifestError | historical_exception.ExceptionContractError | OSError,
 ) -> dict[str, Any]:
     source_sha = (
         sha256_file(source_path)
@@ -198,6 +229,8 @@ def blocked_result(
     )
     if isinstance(error, ManifestError):
         code, detail = error.code, error.detail
+    elif isinstance(error, historical_exception.ExceptionContractError):
+        code, detail = "force_reverify.exception_invalid", str(error)
     else:
         code, detail = "force_reverify.io_error", "manifest I/O failed"
     return evidence_document(
@@ -220,6 +253,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("reviewed_manifest_jsonl", type=pathlib.Path)
     parser.add_argument("force_reverify_manifest_jsonl", type=pathlib.Path)
     parser.add_argument("evidence_json", type=pathlib.Path)
+    parser.add_argument(
+        "--historical-unavailable-exception",
+        type=pathlib.Path,
+        help="hash-bound task 2199 / asset 12323 exception attestation",
+    )
     return parser.parse_args(argv)
 
 
@@ -232,7 +270,9 @@ def main(argv: list[str] | None = None) -> int:
                 args.reviewed_manifest_jsonl,
                 args.force_reverify_manifest_jsonl,
                 args.evidence_json,
+                args.historical_unavailable_exception,
             )
+            if item is not None
         ]
         if len(set(resolved)) != len(resolved):
             raise ManifestError(
@@ -242,8 +282,13 @@ def main(argv: list[str] | None = None) -> int:
         result = prepare(
             args.reviewed_manifest_jsonl,
             args.force_reverify_manifest_jsonl,
+            args.historical_unavailable_exception,
         )
-    except (ManifestError, OSError) as exc:
+    except (
+        ManifestError,
+        OSError,
+        historical_exception.ExceptionContractError,
+    ) as exc:
         result = blocked_result(args.reviewed_manifest_jsonl, exc)
     atomic_write_bytes(
         args.evidence_json, (canonical_json(result) + "\n").encode("utf-8")

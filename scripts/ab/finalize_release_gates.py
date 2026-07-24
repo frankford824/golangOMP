@@ -20,6 +20,9 @@ from typing import Any
 
 
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
+G4_ROW_FINGERPRINT_ALGORITHM = (
+    "sha256(sorted(sha256(canonical-json-cells-v1)),duplicates-preserved)-v1"
+)
 RUN_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{2,63}$")
 GATES = tuple(f"G{index}" for index in range(11))
 REQUIRED_ROLES = {
@@ -322,6 +325,291 @@ def validate_g3(payload: dict[str, Any]) -> list[str]:
     return violations
 
 
+def validate_g4_component_chain(
+    payload: dict[str, Any],
+    run_dir: pathlib.Path,
+    inventory_paths: dict[str, pathlib.Path],
+) -> tuple[list[str], dict[str, str]]:
+    violations: list[str] = []
+    required_hashes: dict[str, str] = {}
+    chain = payload.get("component_chain")
+    if not isinstance(chain, dict) or set(chain) != {"recovery", "bundle"}:
+        return ["G4 component chain is missing"], required_hashes
+    expected_artifacts = {
+        ("recovery", "apply"): {
+            "recovery-materialization-plan.json",
+            "recovery-guard-before.json",
+            "recovery-guard-provision.json",
+            "recovery-db-apply.json",
+            "recovery-db-idempotent.json",
+        },
+        ("recovery", "rollback"): {
+            "recovery-db-rollback.json",
+            "recovery-guard-restore.json",
+            "recovery-file-rollback.json",
+        },
+        ("bundle", "apply"): {
+            "bundle-materialize-report.json",
+            "bundle-registry.json",
+            "bundle-guard-before.json",
+            "bundle-guard-provision.json",
+            "bundle-db-apply.json",
+            "bundle-db-idempotent.json",
+        },
+        ("bundle", "rollback"): {
+            "bundle-db-rollback.json",
+            "bundle-guard-restore.json",
+            "bundle-file-rollback.json",
+        },
+    }
+    run_id = str(payload.get("run_id") or "")
+    database: str | None = None
+    host: str | None = None
+    loaded: dict[tuple[str, str], dict[str, dict[str, Any]]] = {}
+    artifact_hashes: dict[tuple[str, str], dict[str, str]] = {}
+    for component in ("recovery", "bundle"):
+        value = chain.get(component)
+        if not isinstance(value, dict) or set(value) != {"apply", "rollback"}:
+            violations.append(f"G4 {component} component actions are missing")
+            continue
+        for action in ("apply", "rollback"):
+            label = f"{component}-{action}"
+            report = value.get(action)
+            try:
+                if not isinstance(report, dict):
+                    raise ValueError("component report is not an object")
+                report_sha = require_hash(
+                    report.get("artifact_sha256"),
+                    f"G4 {label} report artifact_sha256",
+                )
+                report_name = f"{component}-component-{action}.json"
+                report_path = inventory_paths.get(report_name)
+                if (
+                    report_path is None
+                    or sha256_file(report_path) != report_sha
+                ):
+                    raise ValueError("component report bytes are absent/drifted")
+                encoded_report = json.loads(
+                    report_path.read_text(encoding="utf-8")
+                )
+                encoded_report["artifact_sha256"] = report_sha
+                if encoded_report != report:
+                    raise ValueError("embedded component report differs from bytes")
+                self_hash = str(report.get("evidence_sha256") or "")
+                unhashed = dict(report)
+                unhashed.pop("artifact_sha256", None)
+                unhashed.pop("evidence_sha256", None)
+                if (
+                    not SHA256.fullmatch(self_hash)
+                    or hashlib.sha256(canonical_bytes(unhashed)).hexdigest()
+                    != self_hash
+                ):
+                    raise ValueError("component report self hash is stale")
+                expected_status = (
+                    "APPLIED" if action == "apply" else "ROLLED_BACK"
+                )
+                if (
+                    report.get("schema_version") != 1
+                    or report.get("status") != expected_status
+                    or report.get("component") != component
+                    or report.get("action") != action
+                    or report.get("run_id") != run_id
+                    or report.get("database_writes_executed") is not True
+                    or report.get("production_writes_executed") is not False
+                    or report.get("guard_retained_for_rollback")
+                    is not (action == "apply")
+                    or report.get("guard_exactly_restored")
+                    is not (action == "rollback")
+                ):
+                    raise ValueError("component report envelope is invalid")
+                if database is None:
+                    database = str(report.get("database") or "")
+                    host = str(report.get("host") or "")
+                if (
+                    report.get("database") != database
+                    or report.get("host") != host
+                    or not database
+                    or host not in {"127.0.0.1", "localhost"}
+                ):
+                    raise ValueError("component database/host binding differs")
+                artifacts = report.get("artifacts")
+                if not isinstance(artifacts, list):
+                    raise ValueError("component artifacts are missing")
+                names: set[str] = set()
+                values: dict[str, dict[str, Any]] = {}
+                hashes: dict[str, str] = {}
+                for item in artifacts:
+                    if (
+                        not isinstance(item, dict)
+                        or set(item) != {"path", "sha256", "size"}
+                    ):
+                        raise ValueError("component artifact shape is invalid")
+                    name = str(item["path"])
+                    digest = require_hash(
+                        item["sha256"], f"G4 {label} {name}"
+                    )
+                    path = inventory_paths.get(name)
+                    if (
+                        pathlib.PurePosixPath(name).name != name
+                        or name in names
+                        or path is None
+                        or path.is_symlink()
+                        or not path.is_file()
+                        or isinstance(item["size"], bool)
+                        or not isinstance(item["size"], int)
+                        or item["size"] < 0
+                        or path.stat().st_size != item["size"]
+                        or sha256_file(path) != digest
+                    ):
+                        raise ValueError(f"component artifact {name} drifted")
+                    names.add(name)
+                    hashes[name] = digest
+                    document = json.loads(path.read_text(encoding="utf-8"))
+                    if not isinstance(document, dict):
+                        raise ValueError(f"component artifact {name} is not an object")
+                    values[name] = document
+                    required_hashes[f"{label}:{name}"] = digest
+                if names != expected_artifacts[(component, action)]:
+                    raise ValueError("component artifact set differs")
+                loaded[(component, action)] = values
+                artifact_hashes[(component, action)] = hashes
+                required_hashes[f"{label}:report"] = report_sha
+            except (
+                OSError,
+                UnicodeError,
+                json.JSONDecodeError,
+                ValueError,
+            ) as exc:
+                violations.append(f"G4 {label} component is invalid: {exc}")
+
+    for component, expected_changed in (("recovery", 3), ("bundle", 7)):
+        try:
+            apply = loaded[(component, "apply")]
+            rollback = loaded[(component, "rollback")]
+            changed_field = (
+                "changed_entries"
+                if component == "recovery"
+                else "changed_bundle_count"
+            )
+            already_field = (
+                "already_in_target_state_entries"
+                if component == "recovery"
+                else "already_applied_bundle_count"
+            )
+            db_apply = apply[f"{component}-db-apply.json"]
+            db_idempotent = apply[f"{component}-db-idempotent.json"]
+            db_rollback = rollback[f"{component}-db-rollback.json"]
+            for mode, document, changed, already in (
+                ("apply", db_apply, expected_changed, 0),
+                ("apply", db_idempotent, 0, expected_changed),
+                ("rollback", db_rollback, expected_changed, 0),
+            ):
+                if (
+                    document.get("mode") != mode
+                    or document.get("run_id") != run_id
+                    or document.get("database") != database
+                    or document.get("host") != host
+                    or document.get(changed_field) != changed
+                    or document.get(already_field) != already
+                    or document.get("database_transaction_committed")
+                    is not True
+                ):
+                    raise ValueError(
+                        f"{component} {mode} database report is invalid"
+                    )
+            if component == "recovery":
+                plan_hash = artifact_hashes[(component, "apply")][
+                    "recovery-materialization-plan.json"
+                ]
+                if (
+                    db_apply.get("version") != 1
+                    or db_apply.get("object_storage_writes_executed")
+                    is not False
+                    or db_idempotent.get("plan_sha256") != plan_hash
+                    or db_apply.get("plan_sha256") != plan_hash
+                    or db_rollback.get("plan_sha256") != plan_hash
+                ):
+                    raise ValueError("recovery plan/report hash binding differs")
+            else:
+                for document in (db_apply, db_idempotent, db_rollback):
+                    if (
+                        document.get("schema_version") != 1
+                        or document.get("status") != "PASS"
+                    ):
+                        raise ValueError("bundle DB report envelope is invalid")
+                for field in (
+                    "candidate_sha256",
+                    "registry_sha256",
+                    "manifest_sha256",
+                ):
+                    if (
+                        not SHA256.fullmatch(str(db_apply.get(field) or ""))
+                        or db_idempotent.get(field) != db_apply.get(field)
+                        or db_rollback.get(field) != db_apply.get(field)
+                    ):
+                        raise ValueError(f"bundle {field} binding differs")
+                if (
+                    db_apply.get("registry_sha256")
+                    != artifact_hashes[(component, "apply")][
+                        "bundle-registry.json"
+                    ]
+                ):
+                    raise ValueError("bundle registry hash binding differs")
+            before = apply[f"{component}-guard-before.json"]
+            provision = apply[f"{component}-guard-provision.json"]
+            restore = rollback[f"{component}-guard-restore.json"]
+            before_hash = artifact_hashes[(component, "apply")][
+                f"{component}-guard-before.json"
+            ]
+            for label, document in (
+                ("before", before),
+                ("provision", provision),
+                ("restore", restore),
+            ):
+                evidence_sha = str(document.get("evidence_sha256") or "")
+                unhashed = dict(document)
+                unhashed.pop("evidence_sha256", None)
+                if (
+                    not SHA256.fullmatch(evidence_sha)
+                    or hashlib.sha256(canonical_bytes(unhashed)).hexdigest()
+                    != evidence_sha
+                ):
+                    raise ValueError(f"{component} guard {label} hash is stale")
+            if (
+                before.get("kind") != "clone-b-guard-state"
+                or before.get("component") != component
+                or before.get("database") != database
+                or provision.get("status") != "PROVISIONED"
+                or provision.get("before_artifact_sha256") != before_hash
+                or restore.get("status") != "RESTORED"
+                or restore.get("before_artifact_sha256") != before_hash
+                or restore.get("exact") is not True
+            ):
+                raise ValueError(f"{component} guard lifecycle is invalid")
+            binding = provision.get("binding")
+            if not isinstance(binding, dict):
+                raise ValueError(f"{component} guard binding is missing")
+            if component == "recovery":
+                if binding.get("plan_sha256") != db_apply.get("plan_sha256"):
+                    raise ValueError("recovery guard plan binding differs")
+            elif (
+                binding.get("candidate_sha256")
+                != db_apply.get("candidate_sha256")
+                or binding.get("registry_sha256")
+                != db_apply.get("registry_sha256")
+            ):
+                raise ValueError("bundle guard hash binding differs")
+            file_report = rollback[f"{component}-file-rollback.json"]
+            if (
+                file_report.get("status") != "ROLLED_BACK"
+                or file_report.get("database_write_performed") is not False
+            ):
+                raise ValueError(f"{component} file rollback is invalid")
+        except (KeyError, TypeError, ValueError) as exc:
+            violations.append(f"G4 {component} component linkage is invalid: {exc}")
+    return violations, required_hashes
+
+
 def validate_g4(
     payload: dict[str, Any], run_dir: pathlib.Path | None = None
 ) -> list[str]:
@@ -394,12 +682,39 @@ def validate_g4(
         baseline_internal_sha = str(
             baseline_fingerprint.get("fingerprint_sha256") or ""
         )
+        valid_baseline_tables = all(
+            isinstance(name, str)
+            and bool(name)
+            and isinstance(value, dict)
+            and set(value)
+            == {
+                "row_count",
+                "content_sha256",
+                "schema_sha256",
+                "content_fingerprint_algorithm",
+            }
+            and not isinstance(value["row_count"], bool)
+            and isinstance(value["row_count"], int)
+            and value["row_count"] >= 0
+            and SHA256.fullmatch(str(value["content_sha256"] or ""))
+            and SHA256.fullmatch(str(value["schema_sha256"] or ""))
+            and value["content_fingerprint_algorithm"]
+            == G4_ROW_FINGERPRINT_ALGORITHM
+            for name, value in (
+                baseline_tables.items()
+                if isinstance(baseline_tables, dict)
+                else ()
+            )
+        )
         if (
             baseline_fingerprint.get("schema_version") != 1
             or baseline_fingerprint.get("kind")
             != "clone-b-baseline-fingerprint"
+            or baseline_fingerprint.get("fingerprint_algorithm")
+            != G4_ROW_FINGERPRINT_ALGORITHM
             or not isinstance(baseline_tables, dict)
             or not baseline_tables
+            or not valid_baseline_tables
             or baseline_internal_sha
             != hashlib.sha256(canonical_bytes(baseline_tables)).hexdigest()
             or not SHA256.fullmatch(baseline_artifact_sha)
@@ -520,6 +835,7 @@ def validate_g4(
     else:
         seen_paths: set[str] = set()
         inventory_hashes: set[str] = set()
+        inventory_paths: dict[str, pathlib.Path] = {}
         for index, record in enumerate(inventory):
             try:
                 if not isinstance(record, dict) or set(record) != {
@@ -540,6 +856,14 @@ def validate_g4(
                         f"hash mismatch expected={expected} actual={actual}"
                     )
                 inventory_hashes.add(actual)
+                basename = pathlib.PurePosixPath(relative).name
+                if basename in inventory_paths:
+                    raise ValueError(
+                        f"record basename is duplicated: {basename}"
+                    )
+                inventory_paths[basename] = safe_artifact_path(
+                    run_dir, relative
+                )
             except (OSError, ValueError) as exc:
                 violations.append(f"G4 evidence[{index}] is invalid: {exc}")
         required_hashes: dict[str, Any] = {
@@ -557,6 +881,11 @@ def validate_g4(
         }
         if isinstance(inputs, dict):
             required_hashes.update(inputs)
+        component_violations, component_hashes = validate_g4_component_chain(
+            payload, run_dir, inventory_paths
+        )
+        violations.extend(component_violations)
+        required_hashes.update(component_hashes)
         for name, value in required_hashes.items():
             if SHA256.fullmatch(str(value or "")):
                 if value not in inventory_hashes:
@@ -970,6 +1299,11 @@ def validate_g8(payload: dict[str, Any]) -> list[str]:
         "violation_count",
         "checked_count",
         "manifest_sha256",
+        "exception_count",
+        "exception_evidence_sha256",
+        "mapping_sha256",
+        "mapping_row_hash",
+        "exceptions",
         "violations",
         "evidence_hash",
     }
@@ -987,6 +1321,63 @@ def validate_g8(payload: dict[str, Any]) -> list[str]:
         require_hash(payload.get("manifest_sha256"), "G8.manifest_sha256")
     except ValueError as exc:
         violations.append(str(exc))
+    if payload.get("exception_count") != 1:
+        violations.append("G8 exception_count must be exactly 1")
+    for field in (
+        "exception_evidence_sha256",
+        "mapping_sha256",
+        "mapping_row_hash",
+    ):
+        try:
+            value = require_hash(payload.get(field), f"G8.{field}")
+            if value == "0" * 64:
+                violations.append(f"G8.{field} must not be the zero hash")
+        except ValueError as exc:
+            violations.append(str(exc))
+    exceptions = payload.get("exceptions")
+    exception_fields = {
+        "entity_key",
+        "task_id",
+        "missing_task_asset_id",
+        "expected_http_status",
+        "observed_http_status",
+        "mapping_row_hash",
+        "object_row_sha256",
+        "working_reference_count",
+        "finalized_reference_count",
+    }
+    if not isinstance(exceptions, list) or len(exceptions) != 1:
+        violations.append("G8 exceptions must contain exactly one record")
+    else:
+        exception = exceptions[0]
+        if not isinstance(exception, dict) or set(exception) != exception_fields:
+            violations.append("G8 exception field contract differs")
+        else:
+            if (
+                exception.get("entity_key") != "task_asset:12323"
+                or exception.get("task_id") != 2199
+                or exception.get("missing_task_asset_id") != 12323
+            ):
+                violations.append("G8 exception entity must be task 2199 asset 12323")
+            if (
+                exception.get("expected_http_status") != 410
+                or exception.get("observed_http_status") != 410
+            ):
+                violations.append("G8 exception must prove exact HTTP 410")
+            if exception.get("mapping_row_hash") != payload.get("mapping_row_hash"):
+                violations.append("G8 exception mapping row hash differs")
+            try:
+                require_hash(
+                    exception.get("object_row_sha256"),
+                    "G8.exception.object_row_sha256",
+                )
+            except ValueError as exc:
+                violations.append(str(exc))
+            if (
+                exception.get("working_reference_count") != 0
+                or exception.get("finalized_reference_count") != 0
+            ):
+                violations.append("G8 exception has a current revision reference")
     violations.extend(
         validate_self_hash(
             payload,

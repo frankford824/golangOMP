@@ -6,6 +6,9 @@ import sys
 import tempfile
 import unittest
 
+from scripts.ab.test_clone_b_materialization_component import (
+    write_component_chain_fixture,
+)
 
 PATH = pathlib.Path(__file__).with_name("summarize_g4.py")
 SPEC = importlib.util.spec_from_file_location("summarize_g4", PATH)
@@ -55,6 +58,9 @@ class SummarizeG4Test(unittest.TestCase):
                 "row_count": 2,
                 "content_sha256": "4" * 64,
                 "schema_sha256": "5" * 64,
+                "content_fingerprint_algorithm": (
+                    MODULE.ROW_FINGERPRINT_ALGORITHM
+                ),
             }
         }
         baseline = run_dir / "baseline-fingerprint.json"
@@ -64,6 +70,9 @@ class SummarizeG4Test(unittest.TestCase):
                     "schema_version": 1,
                     "kind": "clone-b-baseline-fingerprint",
                     "database": "ab_formal_b_ui",
+                    "fingerprint_algorithm": (
+                        MODULE.ROW_FINGERPRINT_ALGORITHM
+                    ),
                     "tables": baseline_tables,
                     "fingerprint_sha256": hashlib.sha256(
                         MODULE.canonical_bytes(baseline_tables)
@@ -144,6 +153,7 @@ class SummarizeG4Test(unittest.TestCase):
             + "\n",
             encoding="utf-8",
         )
+        write_component_chain_fixture(run_dir, run_id="formal-test")
         return run_dir, clone_root, steps, fingerprint, rows
 
     def summarize(self, root):
@@ -210,6 +220,40 @@ class SummarizeG4Test(unittest.TestCase):
             self.assertTrue(
                 any(
                     item["violation_code"] == "g4.step_failed"
+                    for item in result["violations"]
+                )
+            )
+
+    def test_component_database_report_tamper_is_blocked(self):
+        with tempfile.TemporaryDirectory() as root:
+            run_dir, clone_root, steps, fingerprint, _ = self.make_evidence(
+                root
+            )
+            target = run_dir / "bundle-db-idempotent.json"
+            payload = json.loads(target.read_text(encoding="utf-8"))
+            payload["already_applied_bundle_count"] = 6
+            target.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+            result = MODULE.summarize(
+                run_id="formal-test",
+                run_dir=run_dir,
+                clone_root=clone_root,
+                steps_path=steps,
+                baseline_fingerprint_path=run_dir
+                / "baseline-fingerprint.json",
+                rollback_fingerprint_path=fingerprint,
+                search_snapshot_path=run_dir / "search-snapshot.json",
+                search_snapshot_archive_path=run_dir
+                / "search-documents-snapshot.jsonl",
+                search_rollback_path=run_dir / "search-rollback.json",
+                total_seconds=10,
+                max_step=600,
+                max_phase=600,
+                max_total=1800,
+            )
+            self.assertEqual(result["status"], "BLOCKED")
+            self.assertTrue(
+                any(
+                    item["violation_code"] == "g4.component_chain_invalid"
                     for item in result["violations"]
                 )
             )

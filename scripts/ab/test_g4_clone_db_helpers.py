@@ -46,6 +46,16 @@ class FakeConnection:
         self.executed.append(sql)
         return ""
 
+    def iter_output_lines(self, sql):
+        self.executed.append(sql)
+        for table in sorted(self.schema):
+            for column in self.schema[table]:
+                yield db.canonical_bytes(column)
+            for cells in self.rows[table]:
+                yield db.canonical_bytes(
+                    {"kind": "row", "table": table, "cells": cells}
+                )
+
 
 class G4CloneDBHelpersTest(unittest.TestCase):
     def test_connection_requires_all_three_clone_b_bindings(self):
@@ -101,6 +111,102 @@ class G4CloneDBHelpersTest(unittest.TestCase):
             self.assertIn(f"DELETE FROM `{table}`", sql)
             self.assertIn(f"INSERT INTO `{table}`", sql)
         self.assertNotIn("asset_search_documents", sql)
+
+    def test_full_fingerprint_is_order_independent_and_preserves_duplicates(self):
+        schema = schema_for(
+            {
+                "blob_without_primary_key": ("payload", "label"),
+                "empty_table": ("value",),
+            }
+        )
+        blob = "AB" * (1024 * 1024)
+        rows = {
+            "blob_without_primary_key": [
+                [blob, "42"],
+                ["00FF", None],
+                [blob, "42"],
+                ["", "41"],
+            ],
+            "empty_table": [],
+        }
+        reversed_rows = {
+            table: list(reversed(values)) for table, values in rows.items()
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            _, first = db.capture_fingerprint(
+                FakeConnection(schema, rows),
+                schema,
+                temporary_directory=root,
+                chunk_rows=2,
+                merge_fan_in=2,
+            )
+            _, second = db.capture_fingerprint(
+                FakeConnection(schema, reversed_rows),
+                schema,
+                temporary_directory=root,
+                chunk_rows=2,
+                merge_fan_in=2,
+            )
+        self.assertEqual(first, second)
+        self.assertEqual(
+            first["blob_without_primary_key"]["row_count"], 4
+        )
+        self.assertEqual(first["empty_table"]["row_count"], 0)
+        self.assertEqual(
+            first["blob_without_primary_key"][
+                "content_fingerprint_algorithm"
+            ],
+            db.ROW_FINGERPRINT_ALGORITHM,
+        )
+
+        without_duplicate = {
+            **rows,
+            "blob_without_primary_key": rows["blob_without_primary_key"][:-1],
+        }
+        _, third = db.capture_fingerprint(
+            FakeConnection(schema, without_duplicate),
+            schema,
+            chunk_rows=2,
+            merge_fan_in=2,
+        )
+        self.assertNotEqual(
+            first["blob_without_primary_key"]["content_sha256"],
+            third["blob_without_primary_key"]["content_sha256"],
+        )
+
+    def test_row_digest_spool_has_strict_buffer_and_merge_fan_in_bounds(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            spool = db._RowDigestSpool(
+                root,
+                "large_fixture",
+                chunk_rows=7,
+                merge_fan_in=3,
+            )
+            for value in range(10_003):
+                spool.add([f"{value:08X}"])
+            summary = spool.finish()
+            self.assertEqual(summary["row_count"], 10_003)
+            self.assertLessEqual(spool.max_buffered_digests, 7)
+            self.assertEqual(list(root.iterdir()), [])
+
+    def test_full_fingerprint_rejects_schema_drift_and_missing_table(self):
+        expected = schema_for({"one": ("id",), "two": ("id",)})
+        drifted = schema_for({"one": ("changed",), "two": ("id",)})
+        with self.assertRaisesRegex(RuntimeError, "schema drifted"):
+            db.capture_fingerprint(
+                FakeConnection(drifted, {"one": [], "two": []}),
+                expected,
+                chunk_rows=2,
+            )
+
+        incomplete = FakeConnection(
+            {"one": expected["one"]},
+            {"one": []},
+        )
+        with self.assertRaisesRegex(RuntimeError, "omitted"):
+            db.capture_fingerprint(incomplete, expected, chunk_rows=2)
 
     @mock.patch.object(db, "capture")
     @mock.patch.object(db, "discover_schema")
@@ -200,6 +306,7 @@ class G4CloneDBHelpersTest(unittest.TestCase):
             "schema_version": 1,
             "kind": "clone-b-baseline-fingerprint",
             "database": "ab_formal_b_ui",
+            "fingerprint_algorithm": db.ROW_FINGERPRINT_ALGORITHM,
             "tables": baseline_tables,
             "fingerprint_sha256": db.sha256_bytes(
                 db.canonical_bytes(baseline_tables)

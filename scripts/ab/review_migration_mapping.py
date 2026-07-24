@@ -173,15 +173,17 @@ POLICY_CATALOG = {
     ),
     "legacy_deleted_asset_recovery_v1": (
         "Record the frozen size and pairwise preview/design-thumb evidence for "
-        "a missing legacy object. This row remains review-ineligible until "
-        "bytes are pre-materialized under a run-scoped Clone B object root "
-        "and storage-binding rollback is complete."
+        "a missing legacy object. Approval establishes only the semantic "
+        "recovery decision; it does not prove Clone B byte materialization, "
+        "database apply, object verification, or rollback, which remain "
+        "mandatory later G4/G8 gates."
     ),
     "legacy_historical_asset_unavailable_v1": (
         "Record an irrecoverable superseded historical asset without claiming "
-        "that its original bytes exist. This remains review-ineligible until "
-        "the API, UI, SQL gates, and Go/No-Go policy expose historical "
-        "unavailability explicitly instead of passing object-integrity G8."
+        "that its original bytes exist. Approval establishes only the semantic "
+        "tombstone decision; it does not prove zero current references, exact "
+        "HTTP 410 behavior, UI disclosure, or object-integrity G8, which remain "
+        "mandatory later gates."
     ),
 }
 VERIFICATION_BOUNDARY = (

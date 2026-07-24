@@ -6,6 +6,9 @@ import sys
 import tempfile
 import unittest
 
+from scripts.ab.test_clone_b_materialization_component import (
+    write_component_chain_fixture,
+)
 
 PATH = pathlib.Path(__file__).with_name("finalize_release_gates.py")
 SPEC = importlib.util.spec_from_file_location("finalize_release_gates", PATH)
@@ -123,12 +126,20 @@ class FinalizeReleaseGatesTest(unittest.TestCase):
                         "row_count": 2,
                         "content_sha256": "7" * 64,
                         "schema_sha256": "8" * 64,
+                        "content_fingerprint_algorithm": (
+                            "sha256(sorted(sha256(canonical-json-cells-v1)),"
+                            "duplicates-preserved)-v1"
+                        ),
                     }
                 }
                 baseline_payload = {
                     "schema_version": 1,
                     "kind": "clone-b-baseline-fingerprint",
                     "database": "ab_formal_b_ui",
+                    "fingerprint_algorithm": (
+                        "sha256(sorted(sha256(canonical-json-cells-v1)),"
+                        "duplicates-preserved)-v1"
+                    ),
                     "tables": baseline_tables,
                     "fingerprint_sha256": hashlib.sha256(
                         MODULE.canonical_bytes(baseline_tables)
@@ -221,6 +232,33 @@ class FinalizeReleaseGatesTest(unittest.TestCase):
                     ("recovery_rollback", "rollback"),
                     ("validate_after_rollback_fingerprint", "rollback"),
                 )
+                write_component_chain_fixture(
+                    run_dir,
+                    run_id=run_id,
+                    database="ab_formal_b_ui",
+                )
+                component_chain = {}
+                for component_name in ("recovery", "bundle"):
+                    component_chain[component_name] = {}
+                    for action in ("apply", "rollback"):
+                        component_path = (
+                            run_dir
+                            / f"{component_name}-component-{action}.json"
+                        )
+                        component_value = json.loads(
+                            component_path.read_text(encoding="utf-8")
+                        )
+                        component_value["artifact_sha256"] = (
+                            MODULE.sha256_file(component_path)
+                        )
+                        component_chain[component_name][action] = (
+                            component_value
+                        )
+                component_files = sorted(
+                    path
+                    for path in run_dir.iterdir()
+                    if path.name.startswith(("recovery-", "bundle-"))
+                )
                 payload.update(
                     {
                         "exit_code": 0,
@@ -252,6 +290,7 @@ class FinalizeReleaseGatesTest(unittest.TestCase):
                             "snapshot": search_snapshot,
                             "rollback": search_rollback,
                         },
+                        "component_chain": component_chain,
                         "search_snapshot_sha256": search_snapshot_file_sha,
                         "search_snapshot_archive_sha256": search_archive_sha,
                         "search_rollback_sha256": search_rollback_file_sha,
@@ -292,6 +331,13 @@ class FinalizeReleaseGatesTest(unittest.TestCase):
                                 "path": search_archive_path.name,
                                 "sha256": search_archive_sha,
                             },
+                        ]
+                        + [
+                            {
+                                "path": path.name,
+                                "sha256": MODULE.sha256_file(path),
+                            }
+                            for path in component_files
                         ],
                     }
                 )
@@ -418,6 +464,23 @@ class FinalizeReleaseGatesTest(unittest.TestCase):
                     "violation_count": 0,
                     "checked_count": 1,
                     "manifest_sha256": "7" * 64,
+                    "exception_count": 1,
+                    "exception_evidence_sha256": "8" * 64,
+                    "mapping_sha256": "9" * 64,
+                    "mapping_row_hash": "a" * 64,
+                    "exceptions": [
+                        {
+                            "entity_key": "task_asset:12323",
+                            "task_id": 2199,
+                            "missing_task_asset_id": 12323,
+                            "expected_http_status": 410,
+                            "observed_http_status": 410,
+                            "mapping_row_hash": "a" * 64,
+                            "object_row_sha256": "b" * 64,
+                            "working_reference_count": 0,
+                            "finalized_reference_count": 0,
+                        }
+                    ],
                     "violations": [],
                 }
                 payload["evidence_hash"] = hashlib.sha256(
@@ -599,6 +662,19 @@ class FinalizeReleaseGatesTest(unittest.TestCase):
                 report["gates"]["G4"]["violations"],
             )
 
+    def test_g4_rejects_unbound_full_fingerprint_algorithm(self):
+        with tempfile.TemporaryDirectory() as raw:
+            run_dir, index_path = self.make_run(raw)
+            index = json.loads(index_path.read_text(encoding="utf-8"))
+            g4_path = run_dir / index["gates"]["G4"]["path"]
+            g4 = json.loads(g4_path.read_text(encoding="utf-8"))
+            g4["baseline_fingerprint"]["fingerprint_algorithm"] = "legacy"
+            violations = MODULE.validate_g4(g4, run_dir)
+            self.assertIn(
+                "G4 baseline fingerprint envelope is invalid",
+                violations,
+            )
+
     def test_g4_search_restore_mismatch_is_blocked(self):
         with tempfile.TemporaryDirectory() as raw:
             run_dir, index_path = self.make_run(raw)
@@ -654,8 +730,10 @@ class FinalizeReleaseGatesTest(unittest.TestCase):
             ),
             (
                 "G8",
-                lambda payload: payload.__setitem__("checked_count", 2),
-                "does not bind",
+                lambda payload: payload["exceptions"][0].__setitem__(
+                    "observed_http_status", 404
+                ),
+                "exact HTTP 410",
             ),
         )
         for gate, mutate, expected in cases:
@@ -678,6 +756,70 @@ class FinalizeReleaseGatesTest(unittest.TestCase):
                         for item in report["gates"][gate]["violations"]
                     ),
                     report["gates"][gate]["violations"],
+                )
+
+    def test_g8_semantic_exception_mutations_fail_even_with_fresh_self_hash(self):
+        cases = (
+            (
+                lambda payload: payload.__setitem__("exception_count", 0),
+                "exception_count must be exactly 1",
+            ),
+            (
+                lambda payload: payload["exceptions"][0].__setitem__(
+                    "entity_key", "task_asset:12324"
+                ),
+                "entity must be task 2199 asset 12323",
+            ),
+            (
+                lambda payload: payload["exceptions"][0].__setitem__(
+                    "observed_http_status", 404
+                ),
+                "exact HTTP 410",
+            ),
+            (
+                lambda payload: payload["exceptions"][0].__setitem__(
+                    "working_reference_count", 1
+                ),
+                "current revision reference",
+            ),
+            (
+                lambda payload: payload.__setitem__("mapping_row_hash", "c" * 64),
+                "mapping row hash differs",
+            ),
+        )
+        for mutate, expected in cases:
+            with self.subTest(expected=expected), tempfile.TemporaryDirectory() as raw:
+                run_dir, index_path = self.make_run(raw)
+                index = json.loads(index_path.read_text(encoding="utf-8"))
+                artifact = run_dir / index["gates"]["G8"]["path"]
+                payload = json.loads(artifact.read_text(encoding="utf-8"))
+                mutate(payload)
+                unsigned = {
+                    key: value
+                    for key, value in payload.items()
+                    if key != "evidence_hash"
+                }
+                payload["evidence_hash"] = hashlib.sha256(
+                    json.dumps(
+                        unsigned,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode("utf-8")
+                ).hexdigest()
+                index["gates"]["G8"]["sha256"] = write_json(artifact, payload)
+                index["signatures"] = []
+                write_json(index_path, index)
+
+                _, report = MODULE.validate_index(run_dir, index_path)
+
+                self.assertEqual("NO-GO", report["decision"])
+                self.assertTrue(
+                    any(
+                        expected in item
+                        for item in report["gates"]["G8"]["violations"]
+                    ),
+                    report["gates"]["G8"]["violations"],
                 )
 
     def test_real_executor_gate_envelopes_reject_unexpected_fields(self):

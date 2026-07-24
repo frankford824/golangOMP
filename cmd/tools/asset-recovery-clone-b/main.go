@@ -208,7 +208,59 @@ func run(ctx context.Context, o options) error {
 		DatabaseTransactionCommitted: true,
 		ObjectStorageWritesExecuted:  false,
 	}
-	return writeNewJSON(o.ReportFile, report)
+	if err := writeNewJSON(o.ReportFile, report); err != nil {
+		if o.Mode == "apply" && changed > 0 {
+			compensationErr := compensateCommittedApply(
+				ctx, db, plan.RunID, planSHA, plan.Entries,
+			)
+			if compensationErr != nil {
+				return fmt.Errorf(
+					"write apply report: %v; committed database apply compensation failed: %w",
+					err, compensationErr,
+				)
+			}
+			return fmt.Errorf(
+				"write apply report: %w; committed database apply was compensated",
+				err,
+			)
+		}
+		return err
+	}
+	return nil
+}
+
+func compensateCommittedApply(
+	ctx context.Context,
+	db *sql.DB,
+	runID string,
+	planSHA string,
+	entries []recoveryEntry,
+) error {
+	tx, err := db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := validateCloneGuard(ctx, tx, runID, planSHA); err != nil {
+		return err
+	}
+	for index := len(entries) - 1; index >= 0; index-- {
+		changed, err := rollbackEntry(ctx, tx, entries[index])
+		if err != nil {
+			return fmt.Errorf(
+				"task_asset %d compensation: %w",
+				entries[index].MissingTaskAssetID,
+				err,
+			)
+		}
+		if !changed {
+			return fmt.Errorf(
+				"task_asset %d compensation found no committed apply",
+				entries[index].MissingTaskAssetID,
+			)
+		}
+	}
+	return tx.Commit()
 }
 
 func validateOptions(o options) (*mysql.Config, string, error) {

@@ -291,6 +291,84 @@ func TestApplyIsExactIdempotentAndRollbackRestoresMemberHashes(t *testing.T) {
 	})
 }
 
+func TestCommittedApplyReportFailureCompensationRestoresDatabase(t *testing.T) {
+	entry, manifest := sqlFixture()
+	manifest.SourceCandidateSHA256 = strings.Repeat("a", 64)
+	registrySHA := strings.Repeat("b", 64)
+	reg := registry{RunID: "run-1"}
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectBegin()
+	mock.ExpectQuery(
+		"SELECT environment,run_id,candidate_sha256,registry_sha256",
+	).WillReturnRows(
+		sqlmock.NewRows(
+			[]string{
+				"environment",
+				"run_id",
+				"candidate_sha256",
+				"registry_sha256",
+			},
+		).AddRow(
+			"clone_b",
+			reg.RunID,
+			manifest.SourceCandidateSHA256,
+			registrySHA,
+		),
+	)
+	expectScope(mock, entry)
+	expectMembers(mock, entry, true)
+	expectBundleState(mock, entry, manifest.ConfirmedBy, true)
+	mock.ExpectQuery("SELECT.*task_asset_group_revisions").
+		WithArgs(
+			entry.registry.TaskAssetCandidate.ID,
+			entry.registry.TaskAssetCandidate.ID,
+		).
+		WillReturnRows(sqlmock.NewRows([]string{"references"}).AddRow(0))
+	mock.ExpectExec("DELETE FROM asset_storage_refs").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("DELETE FROM task_assets").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("DELETE FROM design_assets").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	for _, member := range entry.manifest.OrderedMembers {
+		mock.ExpectExec("UPDATE task_assets SET whole_hash=NULL").
+			WithArgs(member.TaskAssetID, member.SHA256).
+			WillReturnResult(sqlmock.NewResult(0, 1))
+	}
+	mock.ExpectCommit()
+	report := executionReport{
+		ChangedBundleCount: 1,
+		MemberBefore: []memberBefore{
+			{
+				TaskAssetID:   293,
+				RecoveredHash: entry.manifest.OrderedMembers[0].SHA256,
+			},
+			{
+				TaskAssetID:   297,
+				RecoveredHash: entry.manifest.OrderedMembers[1].SHA256,
+			},
+		},
+	}
+	if err := compensateCommittedApply(
+		context.Background(),
+		db,
+		reg,
+		manifest,
+		registrySHA,
+		[]validatedEntry{entry},
+		report,
+	); err != nil {
+		t.Fatalf("compensateCommittedApply() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func sqlFixture() (validatedEntry, confirmedManifest) {
 	hashA := strings.Repeat("a", 64)
 	hashB := strings.Repeat("b", 64)

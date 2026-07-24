@@ -10,6 +10,8 @@ import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest import mock
 
+from scripts.ab import historical_unavailable_exception as EXCEPTION
+
 
 PATH = pathlib.Path(__file__).with_name("object_manifest_verifier.py")
 SPEC = importlib.util.spec_from_file_location("object_manifest_verifier", PATH)
@@ -78,6 +80,79 @@ class ObjectManifestVerifierTest(unittest.TestCase):
         path.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
         return path
 
+    def historical_row(self):
+        row = self.valid_row()
+        row.update({
+            "entity_key": EXCEPTION.ENTITY_KEY,
+            "owner_id": EXCEPTION.TASK_ASSET_ID,
+            "task_id": EXCEPTION.TASK_ID,
+            "storage_ref_id": "ref-12323",
+            "object_key": "tasks/2199/historical/12323.psd",
+            "status": "historical_unavailable",
+        })
+        return row
+
+    def write_exception(self, root, manifest):
+        root = pathlib.Path(root)
+        mapping_row = {
+            "task_id": EXCEPTION.TASK_ID,
+            "missing_task_asset_id": EXCEPTION.TASK_ASSET_ID,
+            "strategy": EXCEPTION.STRATEGY,
+            "review_policy_ids": [EXCEPTION.POLICY_ID],
+            "confidence": "confirmed_auto",
+            "confirmed_by": 1,
+            "confirmed_at": "2026-07-23T12:00:00Z",
+            "confirmation_note": "confirmed historical tombstone",
+            "recovery_source_task_asset_id": 0,
+            "original_storage_ref_id": "ref-12323",
+            "blockers": [],
+        }
+        mapping_row["manifest_row_hash"] = EXCEPTION.canonical_hash(mapping_row)
+        mapping = {"version": 2, "asset_recoveries": [mapping_row]}
+        mapping_path = root / "mapping.json"
+        mapping_path.write_text(EXCEPTION.canonical_json(mapping) + "\n", encoding="utf-8")
+        mapping_sha = EXCEPTION.sha256_file(mapping_path)
+        sql = {
+            "schema_version": 1,
+            "status": "PASS",
+            "mapping_sha256": mapping_sha,
+            "mapping_row_hash": mapping_row["manifest_row_hash"],
+            "database": "ab_test_b",
+            "transaction": "consistent_read_only",
+            "task_id": EXCEPTION.TASK_ID,
+            "missing_task_asset_id": EXCEPTION.TASK_ASSET_ID,
+            "working_reference_count": 0,
+            "finalized_reference_count": 0,
+            "query_sha256": "2" * 64,
+        }
+        sql["evidence_hash"] = EXCEPTION.self_hash(sql)
+        sql_path = root / "sql.json"
+        sql_path.write_text(EXCEPTION.canonical_json(sql) + "\n", encoding="utf-8")
+        api = {
+            "schema_version": 1,
+            "status": "PASS",
+            "mapping_sha256": mapping_sha,
+            "mapping_row_hash": mapping_row["manifest_row_hash"],
+            "task_id": EXCEPTION.TASK_ID,
+            "task_asset_id": EXCEPTION.TASK_ASSET_ID,
+            "method": "GET",
+            "request_path": "/v1/task-assets/12323/preview",
+            "http_status": 410,
+            "error_code": "asset_historically_unavailable",
+        }
+        api["evidence_hash"] = EXCEPTION.self_hash(api)
+        api_path = root / "api.json"
+        api_path.write_text(EXCEPTION.canonical_json(api) + "\n", encoding="utf-8")
+        exception_path = root / "exception.json"
+        exception_path.write_text(
+            EXCEPTION.canonical_json(
+                EXCEPTION.build(mapping_path, manifest, sql_path, api_path)
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        return exception_path
+
     def test_valid_contract_remains_adapter_blocked(self):
         with tempfile.TemporaryDirectory() as root:
             result = MODULE.verify(self.write_manifest(root, self.valid_row()))
@@ -139,6 +214,73 @@ class ObjectManifestVerifierTest(unittest.TestCase):
         self.assertNotIn(server.url, encoded)
         self.assertEqual(result["violations"][0]["violation_code"], "object_manifest.missing")
         self.assertEqual(result["violations"][0]["detail"], "http_status=404")
+
+    def test_exact_attested_historical_unavailable_http_410_passes(self):
+        with ObjectServer(status=410) as server, tempfile.TemporaryDirectory() as root:
+            manifest = self.write_manifest(root, self.historical_row())
+            exception = self.write_exception(root, manifest)
+            adapter = MODULE.HTTPReadAdapter(server.url, {}, 5)
+            result = MODULE.verify(
+                manifest,
+                MODULE.VerifierConfig(upload=adapter),
+                exception,
+            )
+        self.assertEqual("PASS", result["status"])
+        self.assertEqual(0, result["violation_count"])
+        self.assertEqual(1, result["checked_count"])
+        self.assertEqual(1, result["exception_count"])
+        self.assertEqual(EXCEPTION.ENTITY_KEY, result["exceptions"][0]["entity_key"])
+        self.assertEqual(410, result["exceptions"][0]["observed_http_status"])
+        self.assertEqual(
+            result["mapping_row_hash"],
+            result["exceptions"][0]["mapping_row_hash"],
+        )
+
+    def test_attestation_does_not_relax_http_404(self):
+        with ObjectServer(status=404) as server, tempfile.TemporaryDirectory() as root:
+            manifest = self.write_manifest(root, self.historical_row())
+            exception = self.write_exception(root, manifest)
+            adapter = MODULE.HTTPReadAdapter(server.url, {}, 5)
+            result = MODULE.verify(
+                manifest,
+                MODULE.VerifierConfig(upload=adapter),
+                exception,
+            )
+        self.assertEqual("FAIL", result["status"])
+        self.assertEqual(0, result["exception_count"])
+        self.assertEqual(
+            "object_manifest.missing", result["violations"][0]["violation_code"]
+        )
+
+    def test_unattested_http_410_does_not_pass(self):
+        with ObjectServer(status=410) as server, tempfile.TemporaryDirectory() as root:
+            manifest = self.write_manifest(root, self.historical_row())
+            adapter = MODULE.HTTPReadAdapter(server.url, {}, 5)
+            result = MODULE.verify(
+                manifest, MODULE.VerifierConfig(upload=adapter)
+            )
+        self.assertNotEqual("PASS", result["status"])
+        self.assertEqual(0, result["exception_count"])
+
+    def test_tampered_attestation_blocks_before_network_read(self):
+        with ObjectServer(status=410) as server, tempfile.TemporaryDirectory() as root:
+            manifest = self.write_manifest(root, self.historical_row())
+            exception = self.write_exception(root, manifest)
+            payload = json.loads(exception.read_text(encoding="utf-8"))
+            payload["mapping_row_hash"] = "9" * 64
+            exception.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+            adapter = MODULE.HTTPReadAdapter(server.url, {}, 5)
+            result = MODULE.verify(
+                manifest,
+                MODULE.VerifierConfig(upload=adapter),
+                exception,
+            )
+        self.assertEqual("BLOCKED", result["status"])
+        self.assertEqual([], server.requests)
+        self.assertEqual(
+            "object_manifest.exception_invalid",
+            result["violations"][0]["violation_code"],
+        )
 
     def test_redirect_is_not_followed(self):
         with ObjectServer(redirect=True) as server, tempfile.TemporaryDirectory() as root:

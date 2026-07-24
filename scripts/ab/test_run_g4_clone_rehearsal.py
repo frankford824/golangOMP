@@ -50,12 +50,20 @@ if name == "capture_baseline_fingerprint":
             "row_count": 2,
             "content_sha256": "4" * 64,
             "schema_sha256": "5" * 64,
+            "content_fingerprint_algorithm": (
+                "sha256(sorted(sha256(canonical-json-cells-v1)),"
+                "duplicates-preserved)-v1"
+            ),
         }
     }
     value = {
         "schema_version": 1,
         "kind": "clone-b-baseline-fingerprint",
         "database": "ab_formal_b_ui",
+        "fingerprint_algorithm": (
+            "sha256(sorted(sha256(canonical-json-cells-v1)),"
+            "duplicates-preserved)-v1"
+        ),
         "tables": tables,
         "fingerprint_sha256": hashlib.sha256(
             (json.dumps(tables, sort_keys=True, separators=(",", ":")) + "\n").encode()
@@ -109,6 +117,17 @@ elif name == "validate_after_rollback_fingerprint":
         "baseline_fingerprint_sha256": baseline["fingerprint_sha256"],
         "rollback_fingerprint_sha256": baseline["fingerprint_sha256"],
     }
+elif name == "recovery_apply":
+    sys.path.insert(0, os.getcwd())
+    from scripts.ab.test_clone_b_materialization_component import (
+        write_component_chain_fixture,
+    )
+    write_component_chain_fixture(
+        output.parent,
+        run_id="formal-test-run",
+        database="ab_formal_b_ui",
+    )
+    value = {"schema_version": 1, "status": "PASS", "step": name}
 else:
     value = {"schema_version": 1, "status": "PASS", "step": name}
 output.write_bytes(

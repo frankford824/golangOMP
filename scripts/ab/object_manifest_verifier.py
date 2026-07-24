@@ -22,6 +22,11 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any, BinaryIO
 
+try:
+    from scripts.ab import historical_unavailable_exception as historical_exception
+except ModuleNotFoundError:
+    import historical_unavailable_exception as historical_exception
+
 
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 REQUIRED_FIELDS = {
@@ -263,8 +268,20 @@ def validate_row(row: Any, line_no: int) -> list[dict[str, Any]]:
     )]
 
 
-def finalize_result(manifest_sha: str, checked: int, violations: list[dict[str, Any]]) -> dict[str, Any]:
+def finalize_result(
+    manifest_sha: str,
+    checked: int,
+    violations: list[dict[str, Any]],
+    *,
+    exception_evidence_sha256: str = "0" * 64,
+    mapping_sha256: str = "0" * 64,
+    mapping_row_hash: str = "0" * 64,
+    exceptions: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
     ordered = sorted(violations, key=lambda item: (item["entity_key"], item["violation_code"], item["detail"]))
+    exceptions = sorted(
+        exceptions or [], key=lambda item: (item["entity_key"], item["observed_http_status"])
+    )
     if any(item["hard_blocked"] for item in ordered):
         status = "BLOCKED"
     elif ordered:
@@ -277,17 +294,93 @@ def finalize_result(manifest_sha: str, checked: int, violations: list[dict[str, 
         "violation_count": len(ordered),
         "checked_count": checked,
         "manifest_sha256": manifest_sha,
+        "exception_count": len(exceptions),
+        "exception_evidence_sha256": exception_evidence_sha256,
+        "mapping_sha256": mapping_sha256,
+        "mapping_row_hash": mapping_row_hash,
+        "exceptions": exceptions,
         "violations": ordered,
     }
     evidence["evidence_hash"] = hashlib.sha256(canonical_json(evidence).encode("utf-8")).hexdigest()
     return evidence
 
 
-def verify(path: pathlib.Path, config: VerifierConfig | None = None) -> dict[str, Any]:
+def expected_unavailable_record(
+    row: dict[str, Any],
+    adapter: HTTPReadAdapter,
+    exception: dict[str, Any],
+) -> tuple[bool, dict[str, Any] | None, list[dict[str, Any]]]:
+    entity = row["entity_key"]
+    try:
+        with adapter.request("GET", row["object_key"]):
+            pass
+    except urllib.error.HTTPError as exc:
+        status = exc.code
+        exc.close()
+        if status == historical_exception.EXPECTED_HTTP_STATUS:
+            return True, {
+                "entity_key": entity,
+                "task_id": exception["task_id"],
+                "missing_task_asset_id": exception["missing_task_asset_id"],
+                "expected_http_status": historical_exception.EXPECTED_HTTP_STATUS,
+                "observed_http_status": status,
+                "mapping_row_hash": exception["mapping_row_hash"],
+                "object_row_sha256": exception["object_row_sha256"],
+                "working_reference_count": exception["working_reference_count"],
+                "finalized_reference_count": exception[
+                    "finalized_reference_count"
+                ],
+            }, []
+        return False, None, [
+            http_failure_violation(exc, entity)
+        ]
+    except (OSError, TimeoutError, urllib.error.URLError) as exc:
+        return False, None, [http_failure_violation(exc, entity)]
+    return False, None, [
+        violation(
+            "object_manifest.expected_unavailable_present",
+            entity,
+            "expected HTTP 410 but object read succeeded",
+            blocked=False,
+        )
+    ]
+
+
+def verify(
+    path: pathlib.Path,
+    config: VerifierConfig | None = None,
+    exception_path: pathlib.Path | None = None,
+) -> dict[str, Any]:
     config = config or VerifierConfig()
     if not path.is_file():
         return finalize_result("0" * 64, 0, [violation("object_manifest.missing", "*", "manifest file is missing", blocked=True)])
     manifest_sha = sha256_file(path)
+    exception_evidence_sha = "0" * 64
+    exception_mapping_sha = "0" * 64
+    exception_mapping_row_hash = "0" * 64
+    exception: dict[str, Any] | None = None
+    if exception_path is not None:
+        try:
+            attestation, exception, exception_evidence_sha = (
+                historical_exception.load_attestation(
+                    exception_path, manifest_path=path
+                )
+            )
+            exception_mapping_sha = attestation["mapping_sha256"]
+            exception_mapping_row_hash = attestation["mapping_row_hash"]
+        except (OSError, historical_exception.ExceptionContractError) as exc:
+            return finalize_result(
+                manifest_sha,
+                0,
+                [
+                    violation(
+                        "object_manifest.exception_invalid",
+                        historical_exception.ENTITY_KEY,
+                        str(exc),
+                        blocked=True,
+                    )
+                ],
+            )
     rows: list[dict[str, Any]] = []
     problems: list[dict[str, Any]] = []
     seen_entities: set[str] = set()
@@ -320,6 +413,8 @@ def verify(path: pathlib.Path, config: VerifierConfig | None = None) -> dict[str
         return finalize_result(manifest_sha, 0, [violation("object_manifest.empty", "*", "manifest contains no objects", blocked=True)])
 
     checked = 0
+    accepted_exceptions: list[dict[str, Any]] = []
+    exception_seen = False
     verified_cache: dict[tuple[Any, ...], list[tuple[str, str, bool]]] = {}
     for row in sorted(rows, key=lambda item: (item["entity_key"], item["object_key"])):
         adapter = config.adapter_for(row["storage_adapter"])
@@ -328,6 +423,16 @@ def verify(path: pathlib.Path, config: VerifierConfig | None = None) -> dict[str
                 "object_manifest.adapter_not_configured", row["entity_key"],
                 f'adapter class {row["storage_adapter"].strip().lower()} is not configured', blocked=True,
             ))
+            continue
+        if exception is not None and row["entity_key"] == exception["entity_key"]:
+            exception_seen = True
+            complete, accepted, row_problems = expected_unavailable_record(
+                row, adapter, exception
+            )
+            if complete and accepted is not None:
+                checked += 1
+                accepted_exceptions.append(accepted)
+            problems.extend(row_problems)
             continue
         cache_key = (
             id(adapter), row["object_key"], row["size"],
@@ -350,7 +455,24 @@ def verify(path: pathlib.Path, config: VerifierConfig | None = None) -> dict[str
         if complete:
             checked += 1
         problems.extend(row_problems)
-    return finalize_result(manifest_sha, checked, problems)
+    if exception is not None and not exception_seen:
+        problems.append(
+            violation(
+                "object_manifest.exception_entity_missing",
+                exception["entity_key"],
+                "attested exception entity is absent from the manifest",
+                blocked=True,
+            )
+        )
+    return finalize_result(
+        manifest_sha,
+        checked,
+        problems,
+        exception_evidence_sha256=exception_evidence_sha,
+        mapping_sha256=exception_mapping_sha,
+        mapping_row_hash=exception_mapping_row_hash,
+        exceptions=accepted_exceptions,
+    )
 
 
 def adapter_from_args(kind: str, args: argparse.Namespace) -> HTTPReadAdapter | None:
@@ -379,6 +501,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--oss-base-url", help="read-only OSS/gateway URL prefix; may use AB_OSS_READ_BASE_URL")
     parser.add_argument("--oss-headers-file", help="JSON headers file; may use AB_OSS_READ_HEADERS_FILE")
     parser.add_argument("--timeout-seconds", type=float, default=30.0)
+    parser.add_argument(
+        "--historical-unavailable-exception",
+        help="hash-bound task 2199 / asset 12323 exception attestation",
+    )
     args = parser.parse_args(argv)
     if args.timeout_seconds <= 0 or args.timeout_seconds > 3600:
         parser.error("--timeout-seconds must be in (0, 3600]")
@@ -389,15 +515,30 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(sys.argv[1:] if argv is None else argv)
     output = pathlib.Path(args.out_json)
     manifest = pathlib.Path(args.manifest_jsonl)
+    exception_path = (
+        pathlib.Path(args.historical_unavailable_exception)
+        if args.historical_unavailable_exception
+        else None
+    )
     try:
-        if manifest.resolve() == output.resolve():
-            print("manifest and output paths must differ", file=sys.stderr)
+        input_paths = {manifest.resolve()}
+        if exception_path is not None:
+            input_paths.add(exception_path.resolve())
+        if output.resolve() in input_paths:
+            print(
+                "manifest, exception, and output paths must differ",
+                file=sys.stderr,
+            )
             return 2
     except OSError:
         pass
     try:
         config = VerifierConfig(upload=adapter_from_args("upload", args), oss=adapter_from_args("oss", args))
-        result = verify(manifest, config)
+        result = verify(
+            manifest,
+            config,
+            exception_path,
+        )
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         # Configuration failures are intentionally secret-free and still produce a gate artifact.
         manifest_sha = sha256_file(manifest) if manifest.is_file() else "0" * 64
