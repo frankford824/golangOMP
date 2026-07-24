@@ -3641,19 +3641,18 @@ func verifyPlanningMappingQuery(ctx context.Context, q snapshotQueryer, m planni
 }
 
 func validateCutoverState(ctx context.Context, tx *sql.Tx, m mappingFile) error {
-	blockers, err := queryCutoverBlockers(ctx, tx, m)
-	if err != nil {
-		return err
-	}
-	if err := requireNoCutoverBlockers(blockers); err != nil {
-		return err
-	}
+	// The complete mapping preflight already ran twice before mutation, with the
+	// second pass protected by the cutover locks. Keep this function focused on
+	// post-cutover invariants instead of repeating the expensive before-state scan.
 	planningTombstoneExclusion := ""
 	for _, planning := range m.Planning {
-		if planning.Confidence == "confirmed_auto" && isIncompleteUATPlanningTombstone(planning) {
-			if err := verifyPlanningMappingQuery(ctx, tx, planning); err != nil {
-				return fmt.Errorf("cutover blocked: verified planning tombstone differs from mapping: %w", err)
-			}
+		if planning.Confidence != "confirmed_auto" {
+			continue
+		}
+		if err := verifyPlanningMappingQuery(ctx, tx, planning); err != nil {
+			return fmt.Errorf("cutover blocked: verified planning state differs from mapping: %w", err)
+		}
+		if isIncompleteUATPlanningTombstone(planning) {
 			planningTombstoneExclusion = "AND t.id <> 497"
 		}
 	}

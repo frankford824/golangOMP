@@ -775,10 +775,6 @@ func TestValidateCutoverStateRejectsPlanningTasksWithResourceGroups(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	mock.ExpectQuery("SELECT subject_type,subject_id,reason").WillReturnRows(sqlmock.NewRows([]string{"subject_type", "subject_id", "reason"}))
-	mock.ExpectQuery("SELECT ur.user_id,ur.role").WillReturnRows(sqlmock.NewRows([]string{"user_id", "role"}))
-	mock.ExpectQuery("SELECT id,task_type,task_status").WillReturnRows(sqlmock.NewRows([]string{"id", "task_type", "task_status"}))
-	mock.ExpectQuery("SELECT id,task_id,scope_kind,scope_ref_id").WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "scope_kind", "scope_ref_id"}))
 	for i := 0; i < 5; i++ {
 		mock.ExpectQuery("SELECT COUNT\\(\\*\\)").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 	}
@@ -790,6 +786,41 @@ func TestValidateCutoverStateRejectsPlanningTasksWithResourceGroups(t *testing.T
 	mock.ExpectRollback()
 	if err := tx.Rollback(); err != nil {
 		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestValidateCutoverStateVerifiesEveryConfirmedPlanningMapping(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectBegin()
+	tx, err := db.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mapping := mappingFile{
+		Version: workflowGroupsMappingV2,
+		Planning: []planningMapping{{
+			TaskID:     123,
+			Confidence: "confirmed_auto",
+		}},
+	}
+	mock.ExpectQuery("SELECT t.task_type,t.task_status,s.code_rule_revision_id,s.created_by").
+		WithArgs(int64(123)).
+		WillReturnError(fmt.Errorf("postcondition drift"))
+
+	err = validateCutoverState(context.Background(), tx, mapping)
+	if err == nil || !strings.Contains(err.Error(), "verified planning state differs from mapping") {
+		t.Fatalf("validateCutoverState() error = %v", err)
+	}
+	mock.ExpectRollback()
+	if rollbackErr := tx.Rollback(); rollbackErr != nil {
+		t.Fatal(rollbackErr)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
@@ -811,20 +842,6 @@ func TestValidateCutoverStateAcceptsOnlyVerifiedPlanningTombstoneException(t *te
 		Version:  workflowGroupsMappingV2,
 		Planning: []planningMapping{validIncompleteUATPlanningTombstone(t)},
 	}
-
-	mock.ExpectQuery("SELECT subject_type,subject_id,reason").
-		WillReturnRows(sqlmock.NewRows([]string{"subject_type", "subject_id", "reason"}))
-	mock.ExpectQuery("SELECT ur.user_id,ur.role").
-		WillReturnRows(sqlmock.NewRows([]string{"user_id", "role"}))
-	mock.ExpectQuery("SELECT id,task_type,task_status").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "task_type", "task_status"}))
-	mock.ExpectQuery("SELECT task_type,task_status FROM tasks WHERE id=\\?").WithArgs(int64(497)).
-		WillReturnRows(sqlmock.NewRows([]string{"task_type", "task_status"}).AddRow("sku_planning", "Cancelled"))
-	mock.ExpectQuery("SELECT id FROM task_sku_items WHERE task_id=\\?").WithArgs(int64(497)).
-		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(380))
-	expectPlanningTombstoneVerification(mock)
-	mock.ExpectQuery("SELECT id,task_id,scope_kind,scope_ref_id").
-		WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "scope_kind", "scope_ref_id"}))
 
 	expectPlanningTombstoneVerification(mock)
 	mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM task_asset_groups WHERE migration_incomplete=1").
@@ -863,10 +880,6 @@ func TestValidateCutoverStateBlocksUnmappedPurchaseTaskBeforeCommit(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	mock.ExpectQuery("SELECT subject_type,subject_id,reason").WillReturnRows(sqlmock.NewRows([]string{"subject_type", "subject_id", "reason"}))
-	mock.ExpectQuery("SELECT ur.user_id,ur.role").WillReturnRows(sqlmock.NewRows([]string{"user_id", "role"}))
-	mock.ExpectQuery("SELECT id,task_type,task_status").WillReturnRows(sqlmock.NewRows([]string{"id", "task_type", "task_status"}))
-	mock.ExpectQuery("SELECT id,task_id,scope_kind,scope_ref_id").WillReturnRows(sqlmock.NewRows([]string{"id", "task_id", "scope_kind", "scope_ref_id"}))
 	mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM task_asset_groups").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 	mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM tasks WHERE task_type='purchase_task'").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
 	err = validateCutoverState(context.Background(), tx, mappingFile{})
