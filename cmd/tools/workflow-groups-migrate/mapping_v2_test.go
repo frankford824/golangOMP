@@ -477,14 +477,14 @@ func TestValidateRevisionEventSemantics(t *testing.T) {
 	revision := validV2Revision(t)
 	revision.SourceStage = "design"
 	metadata := []evidenceEventMetadata{{EventType: "task.design.submitted"}, {EventType: "task.audit.approved"}}
-	if err := validateRevisionEventSemantics(revision, metadata); err != nil {
+	if err := validateRevisionEventSemantics(7, revision, metadata); err != nil {
 		t.Fatalf("valid finalized design semantics: %v", err)
 	}
-	if err := validateRevisionEventSemantics(revision, metadata[:1]); err == nil || !strings.Contains(err.Error(), "approval") {
+	if err := validateRevisionEventSemantics(7, revision, metadata[:1]); err == nil || !strings.Contains(err.Error(), "approval") {
 		t.Fatalf("missing approval semantics error = %v", err)
 	}
 	revision.SourceStage = "reopen"
-	if err := validateRevisionEventSemantics(revision, []evidenceEventMetadata{{EventType: "task.audit.supplement_uploaded"}}); err != nil {
+	if err := validateRevisionEventSemantics(7, revision, []evidenceEventMetadata{{EventType: "task.audit.supplement_uploaded"}}); err != nil {
 		t.Fatalf("audit supplement should finalize a reopen revision: %v", err)
 	}
 }

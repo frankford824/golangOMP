@@ -150,7 +150,7 @@ func validateRevisionEvidence(ctx context.Context, q snapshotQueryer, taskID int
 	if err != nil {
 		return err
 	}
-	if err := validateRevisionEventSemantics(revision, metadata); err != nil {
+	if err := validateRevisionEventSemantics(taskID, revision, metadata); err != nil {
 		return err
 	}
 	if revision.SourceAliasFrom != nil {
@@ -223,8 +223,12 @@ func payloadContainsAssetVersionID(raw string, target int64) bool {
 }
 
 func loadEvidenceEventMetadata(ctx context.Context, q snapshotQueryer, taskID int64, evidenceIDs []string) ([]evidenceEventMetadata, error) {
-	lastSequenceByNamespace := map[string]int64{}
-	metadata := make([]evidenceEventMetadata, 0, len(evidenceIDs))
+	type orderedEvidence struct {
+		namespace string
+		sequence  int64
+		metadata  evidenceEventMetadata
+	}
+	ordered := make([]orderedEvidence, 0, len(evidenceIDs))
 	for _, stableID := range evidenceIDs {
 		parts := strings.SplitN(stableID, ":", 2)
 		namespace, rawID := parts[0], parts[1]
@@ -263,16 +267,26 @@ func loadEvidenceEventMetadata(ctx context.Context, q snapshotQueryer, taskID in
 		default:
 			return nil, fmt.Errorf("unsupported evidence namespace %q", namespace)
 		}
-		if prior := lastSequenceByNamespace[namespace]; sequence <= prior {
-			return nil, fmt.Errorf("evidence ids in namespace %s must follow stable sequence order", namespace)
+		ordered = append(ordered, orderedEvidence{
+			namespace: namespace,
+			sequence:  sequence,
+			metadata:  evidenceEventMetadata{EventType: eventType, Payload: payload},
+		})
+	}
+	sort.SliceStable(ordered, func(i, j int) bool {
+		if ordered[i].namespace != ordered[j].namespace {
+			return ordered[i].namespace < ordered[j].namespace
 		}
-		lastSequenceByNamespace[namespace] = sequence
-		metadata = append(metadata, evidenceEventMetadata{EventType: eventType, Payload: payload})
+		return ordered[i].sequence < ordered[j].sequence
+	})
+	metadata := make([]evidenceEventMetadata, 0, len(ordered))
+	for _, item := range ordered {
+		metadata = append(metadata, item.metadata)
 	}
 	return metadata, nil
 }
 
-func validateRevisionEventSemantics(revision resourceRevisionMapping, metadata []evidenceEventMetadata) error {
+func validateRevisionEventSemantics(taskID int64, revision resourceRevisionMapping, metadata []evidenceEventMetadata) error {
 	if revision.SourceStage == "migration" {
 		return nil
 	}
@@ -294,7 +308,9 @@ func validateRevisionEventSemantics(revision resourceRevisionMapping, metadata [
 	case "finalized":
 		legacyRetouchTerminal := (revision.SourceStage == "retouch" || revision.SourceStage == "reopen") && hasSubmit &&
 			(containsString(revision.ReviewPolicyIDs, reviewPolicyLegacyRetouchTerminalSubmit) ||
-				containsString(revision.ReviewPolicyIDs, reviewPolicyLegacyRetouchVisualScopeTask2533))
+				containsString(revision.ReviewPolicyIDs, reviewPolicyLegacyRetouchVisualScopeTask2533) ||
+				hasBoundPolicyReason(revision, reviewPolicyLegacyRetouchUnscopedAtomicBatch) ||
+				isLegacyRetouchPrematurePartialRevision(taskID, revision))
 		postCloseReplacement := revision.SourceStage == "reopen" && hasUploadCompletion &&
 			containsString(revision.ReviewPolicyIDs, reviewPolicyLegacyPostCloseReplacement) &&
 			strings.HasPrefix(revision.Reason, "policy legacy_post_close_replacement_v1:")
@@ -312,7 +328,9 @@ func validateRevisionEventSemantics(revision resourceRevisionMapping, metadata [
 		postCloseDraft := revision.SourceStage == "reopen" && hasUploadCompletion &&
 			containsString(revision.ReviewPolicyIDs, reviewPolicyLegacyPostCloseReplacement) &&
 			strings.HasPrefix(revision.Reason, "policy legacy_post_close_replacement_v1:")
-		if revision.SourceStage != "reopen" || (!hasReject && !hasReopen && !postCloseDraft) {
+		prematurePartialDraft := revision.SourceStage == "reopen" &&
+			isLegacyRetouchPrematurePartialRevision(taskID, revision)
+		if revision.SourceStage != "reopen" || (!hasReject && !hasReopen && !postCloseDraft && !prematurePartialDraft) {
 			return fmt.Errorf("draft revision lacks reopen/rejection evidence")
 		}
 	}
@@ -323,6 +341,16 @@ func validateRevisionEventSemantics(revision resourceRevisionMapping, metadata [
 		return fmt.Errorf("%s revision lacks submission evidence", revision.SourceStage)
 	}
 	return nil
+}
+
+func hasBoundPolicyReason(revision resourceRevisionMapping, policy string) bool {
+	return containsString(revision.ReviewPolicyIDs, policy) &&
+		strings.HasPrefix(revision.Reason, "policy "+policy+":")
+}
+
+func isLegacyRetouchPrematurePartialRevision(taskID int64, revision resourceRevisionMapping) bool {
+	return containsInt64([]int64{981, 1035, 1045, 1052, 1214}, taskID) &&
+		hasBoundPolicyReason(revision, reviewPolicyLegacyRetouchPrematurePartial)
 }
 
 func validateTaskStateDecisionPreflight(ctx context.Context, q snapshotQueryer, decision taskStateDecisionMapping, resources []resourceMapping) *taskMigrationIssue {
@@ -525,7 +553,7 @@ func validateRevisionLifecycleState(mapping resourceMapping, revision resourceRe
 		return fmt.Errorf("task asset %d lifecycle is cleaned", state.ID)
 	}
 	if state.SupersededBy.Valid || flowStatus == "superseded" {
-		if currentPointer {
+		if currentPointer && !inheritsRejectedSnapshotIntoReopenDraft(mapping, revision, state.ID) {
 			return fmt.Errorf("task asset %d is superseded but remains on a current revision pointer", state.ID)
 		}
 		if !state.SupersededAt.Valid {
@@ -547,6 +575,28 @@ func validateRevisionLifecycleState(mapping resourceMapping, revision resourceRe
 		}
 	}
 	return nil
+}
+
+func inheritsRejectedSnapshotIntoReopenDraft(mapping resourceMapping, revision resourceRevisionMapping, assetID int64) bool {
+	if revision.Status != "draft" ||
+		revision.SourceStage != "reopen" ||
+		revision.RevisionNo <= 1 ||
+		!containsString(revision.ReviewPolicyIDs, reviewPolicyReopen) {
+		return false
+	}
+	previous := mapping.revisionByNo(revision.RevisionNo - 1)
+	if previous == nil || previous.Status != "rejected" {
+		return false
+	}
+	return revisionContainsAsset(revision, assetID) &&
+		revisionContainsAsset(*previous, assetID)
+}
+
+func revisionContainsAsset(revision resourceRevisionMapping, assetID int64) bool {
+	return (revision.SourceAssetID != nil && *revision.SourceAssetID == assetID) ||
+		(revision.SourceAliasFrom != nil && *revision.SourceAliasFrom == assetID) ||
+		(revision.SourceBundle != nil && revision.SourceBundle.TaskAssetID == assetID) ||
+		containsInt64(revision.FinalAssetIDs, assetID)
 }
 
 func validateMappedAsset(ctx context.Context, q snapshotQueryer, mapping resourceMapping, assetID int64, role, expectedHash string, allowVisualScope bool) error {
