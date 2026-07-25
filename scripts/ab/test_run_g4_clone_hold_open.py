@@ -359,7 +359,22 @@ class HoldOpenCoordinatorTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw:
             args = self.make_inputs(raw)
             calls: list[str] = []
-            execute = self.fake_execute(calls, fail_step="workflow_apply")
+            base_execute = self.fake_execute(
+                calls, fail_step="workflow_apply"
+            )
+
+            def execute(**kwargs):
+                result = base_execute(**kwargs)
+                if kwargs["step"] == "workflow_apply":
+                    snapshot = (
+                        kwargs["run_dir"]
+                        / "workflow-snapshot"
+                        / "workflow-groups-snapshot.json"
+                    )
+                    snapshot.parent.mkdir(parents=True, exist_ok=True)
+                    snapshot.write_text('{"version":8}\n', encoding="utf-8")
+                return result
+
             with (
                 mock.patch.object(MODULE, "repo_head", return_value="f" * 64),
                 mock.patch.object(
@@ -395,6 +410,42 @@ class HoldOpenCoordinatorTest(unittest.TestCase):
             )
             self.assertNotIn("search_rollback", calls)
             self.assertNotIn("idempotent_apply", calls)
+
+    def test_failed_recovery_before_mutation_only_validates_fingerprint(self):
+        with tempfile.TemporaryDirectory() as raw:
+            args = self.make_inputs(raw)
+            calls: list[str] = []
+            execute = self.fake_execute(calls, fail_step="recovery_apply")
+            with (
+                mock.patch.object(MODULE, "repo_head", return_value="f" * 64),
+                mock.patch.object(
+                    MODULE.shutil, "which", return_value="/usr/bin/go"
+                ),
+                mock.patch.object(
+                    MODULE.g4, "execute_step", side_effect=execute
+                ),
+            ):
+                result = MODULE.run(args)
+            self.assertEqual(
+                result["status"], "ROLLED_BACK_AFTER_APPLY_FAILURE"
+            )
+            self.assertEqual(
+                calls,
+                [
+                    "capture_baseline_fingerprint",
+                    "recovery_apply",
+                    "validate_after_rollback_fingerprint",
+                ],
+            )
+            authorization = MODULE.read_hashed_json(
+                args.run_dir / "state" / "rollback-authorized.json",
+                "rollback authorization",
+            )
+            self.assertEqual(authorization["attempted_components"], [])
+            self.assertEqual(
+                authorization["rollback_steps"],
+                ["validate_after_rollback_fingerprint"],
+            )
 
     def test_failed_rollback_never_advances_on_retry(self):
         with tempfile.TemporaryDirectory() as raw:

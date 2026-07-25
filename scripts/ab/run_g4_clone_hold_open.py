@@ -869,15 +869,57 @@ def attempted_components(context: Context) -> list[str]:
         path.name
         for path in (context.run_dir / "state").glob("apply-*.started.json")
     }
+    successful_steps: set[str] = set()
+    for path in (context.run_dir / "state").glob("apply-*.completed.json"):
+        checkpoint = read_hashed_json(path, "apply completion checkpoint")
+        record = checkpoint.get("record")
+        if (
+            isinstance(record, dict)
+            and record.get("exit_code") == 0
+            and isinstance(record.get("step"), str)
+        ):
+            successful_steps.add(str(record["step"]))
+
+    # A started checkpoint alone does not prove that the component crossed its
+    # mutation boundary.  Each component writes its rollback seed before its
+    # first durable change.  Require either a successful apply completion or
+    # one of those seeds before authorizing the matching rollback hook.
+    rollback_seeds = {
+        "recovery": (
+            context.run_dir / "recovery-materialization-plan.json",
+            context.run_dir / "recovery-guard-before.json",
+            context.run_dir / "recovery-db-apply.json",
+            context.run_dir / "recovery-component-apply.json",
+        ),
+        "bundle": (
+            context.run_dir / "bundle-guard-before.json",
+            context.run_dir / "bundle-materialize-report.json",
+            context.run_dir / "bundle-db-apply.json",
+            context.run_dir / "bundle-component-apply.json",
+        ),
+        "workflow": (
+            context.run_dir / "workflow-snapshot" / "workflow-groups-snapshot.json",
+            context.run_dir / "workflow-apply.json",
+        ),
+        "search": (
+            context.run_dir / "search-snapshot.json",
+            context.run_dir / "search-documents-snapshot.jsonl",
+        ),
+    }
     attempted: list[str] = []
     bindings = (
-        ("recovery", "recovery-apply"),
-        ("bundle", "bundle-apply"),
-        ("workflow", "workflow-apply"),
-        ("search", "search-reindex"),
+        ("recovery", "recovery-apply", "recovery_apply"),
+        ("bundle", "bundle-apply", "bundle_apply"),
+        ("workflow", "workflow-apply", "workflow_apply"),
+        ("search", "search-reindex", "search_reindex"),
     )
-    for component, token in bindings:
-        if any(token in name for name in starts):
+    for component, token, step in bindings:
+        started = any(token in name for name in starts)
+        crossed_boundary = step in successful_steps or any(
+            path.is_file() and not path.is_symlink()
+            for path in rollback_seeds[component]
+        )
+        if started and crossed_boundary:
             attempted.append(component)
     return attempted
 
