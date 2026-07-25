@@ -4454,9 +4454,21 @@ func snapshotStateMatches(ctx context.Context, q snapshotQueryer, s snapshot, af
 	if err != nil {
 		return false, err
 	}
-	expectedModules := s.TaskModulesBefore
+	expectedModules := append(
+		[]taskModuleSnapshot(nil),
+		s.TaskModulesBefore...,
+	)
 	if after {
-		expectedModules = s.TaskModulesAfter
+		expectedModules = append(
+			[]taskModuleSnapshot(nil),
+			s.TaskModulesAfter...,
+		)
+	}
+	if err := normalizeTaskModuleSnapshotJSON(actualModules); err != nil {
+		return false, err
+	}
+	if err := normalizeTaskModuleSnapshotJSON(expectedModules); err != nil {
+		return false, err
 	}
 	if len(actualModules) == 0 {
 		actualModules = nil

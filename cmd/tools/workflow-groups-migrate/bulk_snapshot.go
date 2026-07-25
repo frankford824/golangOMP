@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -176,9 +178,23 @@ func captureTaskModulesForTasks(ctx context.Context, q snapshotQueryer, taskIDs 
 			item.ClaimedAt = nullTimePointer(claimedAt)
 			item.TerminalAt = nullTimePointer(terminalAt)
 			if actorOrgSnapshot != nil {
-				item.ActorOrgSnapshot = append([]byte(nil), actorOrgSnapshot...)
+				item.ActorOrgSnapshot, err = compactSnapshotJSON(
+					actorOrgSnapshot,
+					"task_modules.actor_org_snapshot",
+				)
+				if err != nil {
+					rows.Close()
+					return nil, err
+				}
 			}
-			item.Data = append([]byte(nil), data...)
+			item.Data, err = compactSnapshotJSON(
+				data,
+				"task_modules.data",
+			)
+			if err != nil {
+				rows.Close()
+				return nil, err
+			}
 			items = append(items, item)
 		}
 		if err := rows.Err(); err != nil {
@@ -190,6 +206,42 @@ func captureTaskModulesForTasks(ctx context.Context, q snapshotQueryer, taskIDs 
 		}
 	}
 	return items, nil
+}
+
+func compactSnapshotJSON(raw []byte, label string) (json.RawMessage, error) {
+	if raw == nil {
+		return nil, nil
+	}
+	var compact bytes.Buffer
+	if err := json.Compact(&compact, raw); err != nil {
+		return nil, fmt.Errorf("normalize %s: %w", label, err)
+	}
+	return append(json.RawMessage(nil), compact.Bytes()...), nil
+}
+
+func normalizeTaskModuleSnapshotJSON(
+	items []taskModuleSnapshot,
+) error {
+	for index := range items {
+		var err error
+		items[index].Data, err = compactSnapshotJSON(
+			items[index].Data,
+			"task_modules.data",
+		)
+		if err != nil {
+			return err
+		}
+		if items[index].ActorOrgSnapshot != nil {
+			items[index].ActorOrgSnapshot, err = compactSnapshotJSON(
+				items[index].ActorOrgSnapshot,
+				"task_modules.actor_org_snapshot",
+			)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func captureSearchDocumentsForTasks(ctx context.Context, q snapshotQueryer, taskIDs []int64) ([]searchDocumentSnapshot, error) {

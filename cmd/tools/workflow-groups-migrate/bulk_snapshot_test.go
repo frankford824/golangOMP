@@ -609,3 +609,27 @@ func TestCaptureAssetBindingsForTasksPreservesNullAndEmptyScope(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestNormalizeTaskModuleSnapshotJSONIgnoresFormattingOnly(t *testing.T) {
+	actual := []taskModuleSnapshot{{
+		Data:             []byte("{\n  \"backfill_placeholder\": true\n}"),
+		ActorOrgSnapshot: []byte("{ \"team_id\": 7 }"),
+	}}
+	expected := []taskModuleSnapshot{{
+		Data:             []byte(`{"backfill_placeholder":true}`),
+		ActorOrgSnapshot: []byte(`{"team_id":7}`),
+	}}
+	if err := normalizeTaskModuleSnapshotJSON(actual); err != nil {
+		t.Fatal(err)
+	}
+	if err := normalizeTaskModuleSnapshotJSON(expected); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(actual, expected) {
+		t.Fatalf("semantic JSON snapshots differ: %#v != %#v", actual, expected)
+	}
+	invalid := []taskModuleSnapshot{{Data: []byte("{")}}
+	if err := normalizeTaskModuleSnapshotJSON(invalid); err == nil {
+		t.Fatal("invalid task module JSON was accepted")
+	}
+}
