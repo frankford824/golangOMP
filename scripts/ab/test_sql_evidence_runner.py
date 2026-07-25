@@ -70,6 +70,10 @@ class SQLEvidenceRunnerTest(unittest.TestCase):
             task_state,
         )
         self.assertNotIn("module_key = 'basic_info'", task_state)
+        self.assertIn(
+            "tm.state NOT IN ('completed', 'closed', 'forcibly_closed', 'closed_by_admin')",
+            task_state,
+        )
 
         asset_roles = (SQL_DIR / "04_asset_role_scope.sql").read_text(encoding="utf-8")
         self.assertIn("r.status <> 'draft'", asset_roles)

@@ -27,5 +27,9 @@ UNION ALL
 SELECT CONVERT('task_state.claim_timestamp_without_actor' USING utf8mb4) COLLATE utf8mb4_unicode_ci,
        CONVERT(CONCAT(tm.id) USING utf8mb4) COLLATE utf8mb4_unicode_ci,
        CONVERT(CONCAT('module=', tm.module_key) USING utf8mb4) COLLATE utf8mb4_unicode_ci
-FROM task_modules tm WHERE @ab_side = 'B' AND tm.claimed_at IS NOT NULL AND tm.claimed_by IS NULL
+FROM task_modules tm
+WHERE @ab_side = 'B'
+  AND tm.state NOT IN ('completed', 'closed', 'forcibly_closed', 'closed_by_admin')
+  AND tm.claimed_at IS NOT NULL
+  AND tm.claimed_by IS NULL
 ORDER BY 1, 2, 3;
