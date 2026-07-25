@@ -52,6 +52,90 @@ func TestValidateOptionsRejectsNonCloneOrNonLoopback(t *testing.T) {
 	}
 }
 
+func TestRegistryDecoderAcceptsMaterializerOwnershipReceipt(t *testing.T) {
+	unsigned := []byte(`{
+		"schema_version":1,
+		"status":"MATERIALIZED",
+		"run_id":"formal-bundle-run",
+		"manifest_sha256":"` + strings.Repeat("a", 64) + `",
+		"b_root":"/tmp/v8-ab/formal-bundle-run/fixture-upload-b",
+		"database_write_performed":false,
+		"write_ahead_sha256":"` + strings.Repeat("c", 64) + `",
+		"entries":[{
+			"task_id":1,
+			"scope_kind":"sku",
+			"scope_ref_id":2,
+			"revision_no":1,
+			"relative_object_path":"objects/source-bundle.zip",
+			"object_key":"fixture/source-bundle.zip",
+			"bundle_sha256":"` + strings.Repeat("b", 64) + `",
+			"size":1,
+			"disposition":"created",
+			"source_bundle":{},
+			"asset_storage_ref_candidate":{},
+			"task_asset_candidate":{},
+			"rollback_candidate":{
+				"task_asset_id":3,
+				"storage_ref_id":"bundle-ref",
+				"relative_object_path":"objects/source-bundle.zip",
+				"expected_sha256":"` + strings.Repeat("b", 64) + `",
+				"ownership_receipt_path":"/tmp/v8-ab/formal-bundle-run/bundle-ownership-3.json"
+			}
+		}]
+	}`)
+	var document map[string]any
+	if err := json.Unmarshal(unsigned, &document); err != nil {
+		t.Fatal(err)
+	}
+	canonicalUnsigned, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	document["evidence_sha256"] = sha256Hex(
+		append(canonicalUnsigned, '\n'),
+	)
+	raw, err := json.Marshal(document)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got registry
+	if err := decodeOne(raw, &got); err != nil {
+		t.Fatalf("decode registry with ownership receipt: %v", err)
+	}
+	if err := validateRegistryEvidence(raw, got); err != nil {
+		t.Fatalf("validate materializer registry evidence: %v", err)
+	}
+	if len(got.Entries) != 1 ||
+		got.Entries[0].RollbackCandidate.OwnershipReceiptPath !=
+			"/tmp/v8-ab/formal-bundle-run/bundle-ownership-3.json" {
+		t.Fatalf("ownership receipt was not preserved: %#v", got.Entries)
+	}
+	unknown := bytes.ReplaceAll(
+		raw,
+		[]byte(`"ownership_receipt_path"`),
+		[]byte(`"ownership_receipt_path_typo"`),
+	)
+	if err := decodeOne(unknown, &registry{}); err == nil ||
+		!strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("unknown registry field was not rejected: %v", err)
+	}
+	stale := append([]byte(nil), raw...)
+	stale = bytes.Replace(
+		stale,
+		[]byte(`"status":"MATERIALIZED"`),
+		[]byte(`"status":"MATERIALIZEd"`),
+		1,
+	)
+	var staleRegistry registry
+	if err := decodeOne(stale, &staleRegistry); err != nil {
+		t.Fatalf("decode stale registry fixture: %v", err)
+	}
+	if err := validateRegistryEvidence(stale, staleRegistry); err == nil ||
+		!strings.Contains(err.Error(), "stale") {
+		t.Fatalf("stale registry evidence was not rejected: %v", err)
+	}
+}
+
 func TestValidateDocumentsRequiresExactSevenScopesAndBytes(t *testing.T) {
 	root := t.TempDir()
 	runID := "formal-bundle-run"
@@ -106,6 +190,46 @@ func TestValidateDocumentsRequiresExactSevenScopesAndBytes(t *testing.T) {
 		if err := os.WriteFile(path, content, 0o600); err != nil {
 			t.Fatal(err)
 		}
+		targetInfo, err := os.Lstat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		device, inode, err := fileDeviceInode(targetInfo)
+		if err != nil {
+			t.Fatal(err)
+		}
+		receiptPath := filepath.Join(
+			filepath.Dir(bRoot),
+			fmt.Sprintf("bundle-ownership-%d.json", taskAssetID),
+		)
+		receipt := map[string]any{
+			"schema_version": 1,
+			"status":         "OWNED_LINK",
+			"run_id":         runID,
+			"target_path":    path,
+			"staging_path": filepath.Join(
+				filepath.Dir(receiptPath),
+				fmt.Sprintf(".bundle-stage-%d.zip", taskAssetID),
+			),
+			"device": device,
+			"inode":  inode,
+			"size":   int64(len(content)),
+			"sha256": bundleHash,
+		}
+		unsignedReceipt, err := json.Marshal(receipt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		receipt["evidence_sha256"] = sha256Hex(
+			append(unsignedReceipt, '\n'),
+		)
+		receiptRaw, err := json.Marshal(receipt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(receiptPath, receiptRaw, 0o600); err != nil {
+			t.Fatal(err)
+		}
 		var sourceMembers []bundleMember
 		var manifestMembers []manifestMember
 		for _, memberID := range memberIDs {
@@ -145,8 +269,9 @@ func TestValidateDocumentsRequiresExactSevenScopesAndBytes(t *testing.T) {
 			},
 			RollbackCandidate: rollbackCandidate{
 				TaskAssetID: taskAssetID, StorageRefID: refID,
-				RelativeObjectPath: filepath.ToSlash(filepath.Join("objects", filepath.FromSlash(objectKey))),
-				ExpectedSHA256:     bundleHash,
+				RelativeObjectPath:   filepath.ToSlash(filepath.Join("objects", filepath.FromSlash(objectKey))),
+				ExpectedSHA256:       bundleHash,
+				OwnershipReceiptPath: receiptPath,
 			},
 		})
 	}
@@ -172,6 +297,44 @@ func TestValidateDocumentsRequiresExactSevenScopesAndBytes(t *testing.T) {
 	drifted.Entries[0].SourceBundle.Members[0].TaskAssetID++
 	if _, err := validateDocuments(drifted, manifest, o, reg.ManifestSHA256); err == nil || !strings.Contains(err.Error(), "member") {
 		t.Fatalf("member drift error = %v", err)
+	}
+	firstTarget := filepath.Join(
+		bRoot,
+		filepath.FromSlash(reg.Entries[0].RelativeObjectPath),
+	)
+	firstBytes, err := os.ReadFile(firstTarget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacement := firstTarget + ".replacement"
+	if err := os.WriteFile(replacement, firstBytes, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	originalInfo, err := os.Lstat(firstTarget)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacementInfo, err := os.Lstat(replacement)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, originalInode, err := fileDeviceInode(originalInfo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, replacementInode, err := fileDeviceInode(replacementInfo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if originalInode == replacementInode {
+		t.Fatal("replacement fixture unexpectedly reused the target inode")
+	}
+	if err := os.Rename(replacement, firstTarget); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := validateDocuments(reg, manifest, o, reg.ManifestSHA256); err == nil ||
+		!strings.Contains(err.Error(), "ownership receipt identity") {
+		t.Fatalf("same-byte replacement ownership error = %v", err)
 	}
 }
 

@@ -14,6 +14,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
@@ -62,6 +63,8 @@ type registry struct {
 	BRoot                  string          `json:"b_root"`
 	DatabaseWritePerformed bool            `json:"database_write_performed"`
 	Entries                []registryEntry `json:"entries"`
+	WriteAheadSHA256       string          `json:"write_ahead_sha256"`
+	EvidenceSHA256         string          `json:"evidence_sha256"`
 }
 
 type registryEntry struct {
@@ -127,10 +130,24 @@ type taskAssetCandidate struct {
 }
 
 type rollbackCandidate struct {
-	TaskAssetID        int64  `json:"task_asset_id"`
-	StorageRefID       string `json:"storage_ref_id"`
-	RelativeObjectPath string `json:"relative_object_path"`
-	ExpectedSHA256     string `json:"expected_sha256"`
+	TaskAssetID          int64  `json:"task_asset_id"`
+	StorageRefID         string `json:"storage_ref_id"`
+	RelativeObjectPath   string `json:"relative_object_path"`
+	ExpectedSHA256       string `json:"expected_sha256"`
+	OwnershipReceiptPath string `json:"ownership_receipt_path,omitempty"`
+}
+
+type bundleOwnershipReceipt struct {
+	SchemaVersion  int    `json:"schema_version"`
+	Status         string `json:"status"`
+	RunID          string `json:"run_id"`
+	TargetPath     string `json:"target_path"`
+	StagingPath    string `json:"staging_path"`
+	Device         uint64 `json:"device"`
+	Inode          uint64 `json:"inode"`
+	Size           int64  `json:"size"`
+	SHA256         string `json:"sha256"`
+	EvidenceSHA256 string `json:"evidence_sha256"`
 }
 
 type confirmedManifest struct {
@@ -536,6 +553,9 @@ func loadAndValidateInputs(o options) ([]byte, registry, []byte, confirmedManife
 	if err := decodeOne(registryRaw, &reg); err != nil {
 		return nil, reg, nil, confirmedManifest{}, nil, fmt.Errorf("decode registry: %w", err)
 	}
+	if err := validateRegistryEvidence(registryRaw, reg); err != nil {
+		return nil, reg, nil, confirmedManifest{}, nil, err
+	}
 	var manifest confirmedManifest
 	if err := json.Unmarshal(manifestRaw, &manifest); err != nil {
 		return nil, reg, nil, manifest, nil, fmt.Errorf("decode manifest: %w", err)
@@ -555,6 +575,37 @@ func decodeOne(raw []byte, value any) error {
 	}
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return errors.New("trailing JSON values are not allowed")
+	}
+	return nil
+}
+
+func validateRegistryEvidence(raw []byte, reg registry) error {
+	if !sha256Pattern.MatchString(reg.WriteAheadSHA256) ||
+		!sha256Pattern.MatchString(reg.EvidenceSHA256) {
+		return errors.New("registry evidence hashes must be lowercase SHA-256")
+	}
+	return validatePythonSelfHash(
+		raw,
+		reg.EvidenceSHA256,
+		"registry evidence",
+	)
+}
+
+func validatePythonSelfHash(raw []byte, expected, label string) error {
+	var canonical map[string]any
+	if err := json.Unmarshal(raw, &canonical); err != nil {
+		return fmt.Errorf("decode %s: %w", label, err)
+	}
+	delete(canonical, "evidence_sha256")
+	unsigned, err := json.Marshal(canonical)
+	if err != nil {
+		return fmt.Errorf("canonicalize %s: %w", label, err)
+	}
+	// Python's canonical_bytes appends one newline after the compact,
+	// key-sorted JSON payload.
+	unsigned = append(unsigned, '\n')
+	if sha256Hex(unsigned) != expected {
+		return fmt.Errorf("%s self hash is missing or stale", label)
 	}
 	return nil
 }
@@ -682,6 +733,9 @@ func validateDocuments(reg registry, manifest confirmedManifest, o options, mani
 		if err := validateBundleBytes(root, item); err != nil {
 			return nil, fmt.Errorf("scope %s: %w", key, err)
 		}
+		if err := validateRollbackOwnership(root, item, reg.RunID); err != nil {
+			return nil, fmt.Errorf("scope %s: %w", key, err)
+		}
 		result = append(result, validatedEntry{
 			registry: item, manifest: manifestItem, confirmedAt: confirmedAt.UTC(),
 			manifestSHA: manifestSHA,
@@ -694,6 +748,124 @@ func validateDocuments(reg registry, manifest confirmedManifest, o options, mani
 		return result[i].registry.TaskAssetCandidate.ID < result[j].registry.TaskAssetCandidate.ID
 	})
 	return result, nil
+}
+
+func validateRollbackOwnership(root string, item registryEntry, runID string) error {
+	recorded := strings.TrimSpace(item.RollbackCandidate.OwnershipReceiptPath)
+	if item.Disposition == "reused_identical" {
+		if recorded == "" {
+			return nil
+		}
+		if !filepath.IsAbs(recorded) ||
+			filepath.Base(recorded) != fmt.Sprintf(
+				"bundle-ownership-%d.json",
+				item.TaskAssetCandidate.ID,
+			) {
+			return errors.New("reused bundle ownership receipt path is invalid")
+		}
+		return nil
+	}
+	if item.Disposition != "created" || !filepath.IsAbs(recorded) {
+		return errors.New("created bundle ownership receipt path is missing")
+	}
+	receiptPath := filepath.Clean(recorded)
+	if receiptPath != recorded ||
+		filepath.Base(receiptPath) != fmt.Sprintf(
+			"bundle-ownership-%d.json",
+			item.TaskAssetCandidate.ID,
+		) {
+		return errors.New("created bundle ownership receipt path differs")
+	}
+	runRoot := filepath.Dir(root)
+	relativeReceipt, err := filepath.Rel(runRoot, receiptPath)
+	if err != nil || relativeReceipt == ".." ||
+		strings.HasPrefix(relativeReceipt, ".."+string(filepath.Separator)) {
+		return errors.New("created bundle ownership receipt escapes the run root")
+	}
+	receiptInfo, err := os.Lstat(receiptPath)
+	if err != nil || !receiptInfo.Mode().IsRegular() ||
+		receiptInfo.Mode()&os.ModeSymlink != 0 {
+		return errors.New("created bundle ownership receipt is not a regular file")
+	}
+	receiptRaw, err := os.ReadFile(receiptPath)
+	if err != nil {
+		return err
+	}
+	var receipt bundleOwnershipReceipt
+	if err := decodeOne(receiptRaw, &receipt); err != nil {
+		return fmt.Errorf("decode bundle ownership receipt: %w", err)
+	}
+	if !sha256Pattern.MatchString(receipt.EvidenceSHA256) {
+		return errors.New("bundle ownership receipt evidence hash is invalid")
+	}
+	if err := validatePythonSelfHash(
+		receiptRaw,
+		receipt.EvidenceSHA256,
+		"bundle ownership receipt",
+	); err != nil {
+		return err
+	}
+	relative := filepath.FromSlash(item.RelativeObjectPath)
+	target := filepath.Clean(filepath.Join(root, relative))
+	relativeTarget, err := filepath.Rel(root, target)
+	if err != nil || relativeTarget == ".." ||
+		strings.HasPrefix(relativeTarget, ".."+string(filepath.Separator)) {
+		return errors.New("bundle target escapes fixture root")
+	}
+	targetInfo, err := os.Lstat(target)
+	if err != nil || !targetInfo.Mode().IsRegular() ||
+		targetInfo.Mode()&os.ModeSymlink != 0 {
+		return errors.New("bundle target is not a regular file")
+	}
+	device, inode, err := fileDeviceInode(targetInfo)
+	if err != nil {
+		return err
+	}
+	expectedStage := filepath.Join(
+		filepath.Dir(receiptPath),
+		fmt.Sprintf(".bundle-stage-%d.zip", item.TaskAssetCandidate.ID),
+	)
+	if receipt.SchemaVersion != 1 ||
+		receipt.Status != "OWNED_LINK" ||
+		receipt.RunID != runID ||
+		filepath.Clean(receipt.TargetPath) != target ||
+		filepath.Clean(receipt.StagingPath) != expectedStage ||
+		receipt.Device != device ||
+		receipt.Inode != inode ||
+		receipt.Size != targetInfo.Size() ||
+		receipt.Size != item.Size ||
+		receipt.SHA256 != item.BundleSHA256 {
+		return errors.New("bundle ownership receipt identity differs")
+	}
+	return nil
+}
+
+func fileDeviceInode(info os.FileInfo) (uint64, uint64, error) {
+	value := reflect.ValueOf(info.Sys())
+	if !value.IsValid() {
+		return 0, 0, errors.New("bundle file identity is unavailable")
+	}
+	if value.Kind() == reflect.Pointer {
+		if value.IsNil() {
+			return 0, 0, errors.New("bundle file identity is unavailable")
+		}
+		value = value.Elem()
+	}
+	if value.Kind() != reflect.Struct {
+		return 0, 0, errors.New("bundle file identity is unavailable")
+	}
+	device := value.FieldByName("Dev")
+	inode := value.FieldByName("Ino")
+	if !device.IsValid() || !inode.IsValid() ||
+		(device.Kind() != reflect.Uint64 &&
+			device.Kind() != reflect.Uint &&
+			device.Kind() != reflect.Uint32) ||
+		(inode.Kind() != reflect.Uint64 &&
+			inode.Kind() != reflect.Uint &&
+			inode.Kind() != reflect.Uint32) {
+		return 0, 0, errors.New("bundle file identity is unavailable")
+	}
+	return device.Uint(), inode.Uint(), nil
 }
 
 func validateEntryIdentity(item registryEntry, manifest manifestBundle, runID string, expectedMembers []int64, seen map[int64]struct{}) error {

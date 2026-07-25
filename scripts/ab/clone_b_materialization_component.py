@@ -874,6 +874,169 @@ def ownership_receipt_artifacts(
     return paths
 
 
+def validate_bundle_registry_for_apply(
+    value: dict[str, Any],
+    *,
+    registry: pathlib.Path,
+    write_ahead: pathlib.Path,
+    component_dir: pathlib.Path,
+    run_id: str,
+) -> list[pathlib.Path]:
+    verify_self_bound(value, "bundle registry")
+    if (
+        value.get("schema_version") != 1
+        or value.get("status") != "MATERIALIZED"
+        or value.get("run_id") != run_id
+        or value.get("database_write_performed") is not False
+        or value.get("write_ahead_sha256") != sha256_file(write_ahead)
+    ):
+        raise ComponentError("bundle registry apply contract differs")
+    if not registry.is_file() or registry.is_symlink():
+        raise ComponentError("bundle registry must be a regular non-symlink file")
+    entries = value.get("entries")
+    if not isinstance(entries, list) or len(entries) != 7:
+        raise ComponentError("bundle registry entries differ")
+    b_root = pathlib.Path(str(value.get("b_root") or ""))
+    if (
+        not b_root.is_absolute()
+        or not b_root.is_dir()
+        or b_root.is_symlink()
+    ):
+        raise ComponentError("bundle registry B root is invalid")
+    resolved_b_root = b_root.resolve()
+    expected_receipt_names: set[str] = set()
+    entry_by_asset_id: dict[int, dict[str, Any]] = {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise ComponentError("bundle registry entry is invalid")
+        disposition = entry.get("disposition")
+        rollback = entry.get("rollback_candidate")
+        candidate = entry.get("task_asset_candidate")
+        if not isinstance(rollback, dict) or not isinstance(candidate, dict):
+            raise ComponentError("bundle rollback candidate is invalid")
+        asset_id = candidate.get("id")
+        if (
+            not isinstance(asset_id, int)
+            or rollback.get("task_asset_id") != asset_id
+            or asset_id in entry_by_asset_id
+        ):
+            raise ComponentError("bundle rollback task asset differs")
+        entry_by_asset_id[asset_id] = entry
+        expected_receipt_names.add(
+            f"bundle-staging-ownership-{asset_id}.json"
+        )
+        expected_path = (
+            component_dir / f"bundle-ownership-{asset_id}.json"
+        ).resolve()
+        recorded_path = str(rollback.get("ownership_receipt_path") or "")
+        if disposition == "created":
+            expected_receipt_names.add(expected_path.name)
+            if recorded_path != str(expected_path):
+                raise ComponentError(
+                    "created bundle ownership receipt path differs"
+                )
+        elif disposition == "reused_identical":
+            if recorded_path and recorded_path != str(expected_path):
+                raise ComponentError(
+                    "reused bundle ownership receipt path differs"
+                )
+        else:
+            raise ComponentError("bundle disposition is invalid")
+    receipts = sorted(
+        {
+            path
+            for pattern in (
+                "bundle-ownership-*.json",
+                "bundle-staging-ownership-*.json",
+            )
+            for path in component_dir.glob(pattern)
+            if path.is_file() and not path.is_symlink()
+        },
+        key=lambda path: path.name,
+    )
+    if {path.name for path in receipts} != expected_receipt_names:
+        raise ComponentError("bundle ownership receipt artifact set differs")
+    receipt_by_name: dict[str, tuple[pathlib.Path, dict[str, Any]]] = {}
+    for path in receipts:
+        receipt = read_object(path, f"bundle receipt {path.name}")
+        verify_self_bound(receipt, f"bundle receipt {path.name}")
+        if (
+            receipt.get("schema_version") != 1
+            or receipt.get("run_id") != run_id
+        ):
+            raise ComponentError(f"bundle receipt {path.name} differs")
+        receipt_by_name[path.name] = (path, receipt)
+    for asset_id, entry in entry_by_asset_id.items():
+        relative = pathlib.PurePosixPath(
+            str(entry.get("relative_object_path") or "")
+        )
+        if (
+            relative.is_absolute()
+            or not relative.parts
+            or any(part in {"", ".", ".."} for part in relative.parts)
+        ):
+            raise ComponentError("bundle target path is invalid")
+        target_candidate = resolved_b_root.joinpath(*relative.parts)
+        if target_candidate.is_symlink():
+            raise ComponentError("bundle target path is invalid")
+        target = target_candidate.resolve()
+        try:
+            target.relative_to(resolved_b_root)
+        except ValueError:
+            raise ComponentError("bundle target escapes B root") from None
+        if (
+            not target.is_file()
+            or target.is_symlink()
+            or sha256_file(target) != entry.get("bundle_sha256")
+            or target.stat().st_size != entry.get("size")
+        ):
+            raise ComponentError("bundle target identity differs")
+        staging_name = f"bundle-staging-ownership-{asset_id}.json"
+        staging_pair = receipt_by_name.get(staging_name)
+        if staging_pair is None:
+            raise ComponentError("bundle staging ownership receipt is missing")
+        staging = staging_pair[1]
+        expected_stage = (
+            component_dir / f".bundle-stage-{asset_id}.zip"
+        ).resolve()
+        expected_private = (
+            component_dir / f".bundle-private-{asset_id}.zip"
+        ).resolve()
+        if (
+            staging.get("status") != "STAGING_OWNED"
+            or staging.get("staging_path") != str(expected_stage)
+            or staging.get("private_path") != str(expected_private)
+            or staging.get("sha256") != entry.get("bundle_sha256")
+            or staging.get("size") != entry.get("size")
+        ):
+            raise ComponentError(
+                "bundle staging ownership receipt identity differs"
+            )
+        if entry.get("disposition") != "created":
+            continue
+        ownership_name = f"bundle-ownership-{asset_id}.json"
+        pair = receipt_by_name.get(ownership_name)
+        if pair is None or pair[0].resolve() != (
+            component_dir / ownership_name
+        ).resolve():
+            raise ComponentError("created bundle ownership receipt is missing")
+        receipt = pair[1]
+        stat = target.stat()
+        if (
+            receipt.get("status") != "OWNED_LINK"
+            or receipt.get("target_path") != str(target)
+            or receipt.get("staging_path") != str(expected_stage)
+            or receipt.get("device") != stat.st_dev
+            or receipt.get("inode") != stat.st_ino
+            or receipt.get("sha256") != entry.get("bundle_sha256")
+            or receipt.get("size") != stat.st_size
+        ):
+            raise ComponentError(
+                "created bundle ownership receipt identity differs"
+            )
+    return receipts
+
+
 def recovery_apply(
     args: argparse.Namespace,
     connection: clone_db.Connection,
@@ -1321,8 +1484,13 @@ def bundle_apply(
         )
         materialized = True
         registry_value = read_object(registry, "bundle-registry")
-        if registry_value.get("run_id") != args.run_id:
-            raise ComponentError("bundle registry run_id differs")
+        receipt_artifacts = validate_bundle_registry_for_apply(
+            registry_value,
+            registry=registry,
+            write_ahead=write_ahead,
+            component_dir=component_dir,
+            run_id=args.run_id,
+        )
         registry_sha = sha256_file(registry)
         manifest_sha = sha256_file(args.manifest)
         binding = guard_binding(
@@ -1451,11 +1619,7 @@ def bundle_apply(
                 db_journal,
                 db_apply,
                 db_idempotent,
-                *ownership_receipt_artifacts(
-                    component_dir,
-                    "bundle",
-                    require_complete=True,
-                ),
+                *receipt_artifacts,
             ],
         )
         write_document(report, payload)

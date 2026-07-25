@@ -1130,6 +1130,190 @@ class CloneBMaterializationComponentTest(unittest.TestCase):
                     allowed_counts={(7, 0), (0, 7)},
                 )
 
+    def test_bundle_registry_apply_contract_is_verified_before_database(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary).resolve()
+            component_dir = root / "runs" / "hold-open"
+            component_dir.mkdir(parents=True)
+            b_root = root / "fixture-upload-b"
+            (b_root / "objects").mkdir(parents=True)
+            run_id = "bundle-materialization-formal-test"
+            write_ahead = component_dir / "bundle-file-write-ahead.json"
+            write_ahead.write_bytes(
+                component.canonical_bytes(
+                    component.self_bound(
+                        {
+                            "schema_version": 1,
+                            "status": "WRITE_AHEAD",
+                            "run_id": run_id,
+                        }
+                    )
+                )
+            )
+            entries = []
+            target_by_asset_id = {}
+            content_by_asset_id = {}
+            ownership_bytes = {}
+            for asset_id in range(25557, 25564):
+                content = f"bundle-{asset_id}".encode()
+                digest = hashlib.sha256(content).hexdigest()
+                relative = pathlib.PurePosixPath(
+                    "objects", f"bundle-{asset_id}.zip"
+                )
+                target = b_root.joinpath(*relative.parts)
+                target.write_bytes(content)
+                target_by_asset_id[asset_id] = target
+                content_by_asset_id[asset_id] = content
+                stat = target.stat()
+                expected_stage = (
+                    component_dir / f".bundle-stage-{asset_id}.zip"
+                ).resolve()
+                expected_private = (
+                    component_dir / f".bundle-private-{asset_id}.zip"
+                ).resolve()
+                ownership = component_dir / (
+                    f"bundle-ownership-{asset_id}.json"
+                )
+                ownership_value = component.self_bound(
+                    {
+                        "schema_version": 1,
+                        "status": "OWNED_LINK",
+                        "run_id": run_id,
+                        "target_path": str(target.resolve()),
+                        "staging_path": str(expected_stage),
+                        "device": stat.st_dev,
+                        "inode": stat.st_ino,
+                        "sha256": digest,
+                        "size": len(content),
+                    }
+                )
+                ownership_bytes[asset_id] = component.canonical_bytes(
+                    ownership_value
+                )
+                ownership.write_bytes(ownership_bytes[asset_id])
+                staging = component_dir / (
+                    f"bundle-staging-ownership-{asset_id}.json"
+                )
+                staging.write_bytes(
+                    component.canonical_bytes(
+                        component.self_bound(
+                            {
+                                "schema_version": 1,
+                                "status": "STAGING_OWNED",
+                                "run_id": run_id,
+                                "staging_path": str(expected_stage),
+                                "private_path": str(expected_private),
+                                "sha256": digest,
+                                "size": len(content),
+                            }
+                        )
+                    )
+                )
+                entries.append(
+                    {
+                        "disposition": "created",
+                        "bundle_sha256": digest,
+                        "size": len(content),
+                        "relative_object_path": relative.as_posix(),
+                        "task_asset_candidate": {"id": asset_id},
+                        "rollback_candidate": {
+                            "task_asset_id": asset_id,
+                            "ownership_receipt_path": str(
+                                ownership.resolve()
+                            ),
+                        },
+                    }
+                )
+            unsigned = {
+                "schema_version": 1,
+                "status": "MATERIALIZED",
+                "run_id": run_id,
+                "database_write_performed": False,
+                "b_root": str(b_root),
+                "write_ahead_sha256": component.sha256_file(write_ahead),
+                "entries": entries,
+            }
+            registry_value = component.self_bound(unsigned)
+            registry = component_dir / "bundle-registry.json"
+            registry.write_bytes(component.canonical_bytes(registry_value))
+
+            receipts = component.validate_bundle_registry_for_apply(
+                registry_value,
+                registry=registry,
+                write_ahead=write_ahead,
+                component_dir=component_dir,
+                run_id=run_id,
+            )
+            self.assertEqual(14, len(receipts))
+
+            stale = dict(registry_value)
+            stale["status"] = "MATERIALIZEd"
+            with self.assertRaisesRegex(component.ComponentError, "self hash"):
+                component.validate_bundle_registry_for_apply(
+                    stale,
+                    registry=registry,
+                    write_ahead=write_ahead,
+                    component_dir=component_dir,
+                    run_id=run_id,
+                )
+
+            for recorded in ("", str(component_dir / "outside.json")):
+                missing = json.loads(json.dumps(unsigned))
+                missing["entries"][0]["rollback_candidate"][
+                    "ownership_receipt_path"
+                ] = recorded
+                with self.assertRaisesRegex(
+                    component.ComponentError,
+                    "ownership receipt path differs",
+                ):
+                    component.validate_bundle_registry_for_apply(
+                        component.self_bound(missing),
+                        registry=registry,
+                        write_ahead=write_ahead,
+                        component_dir=component_dir,
+                        run_id=run_id,
+                    )
+
+            reused = json.loads(json.dumps(unsigned))
+            reused["entries"][0]["disposition"] = "reused_identical"
+            reused["entries"][0]["rollback_candidate"][
+                "ownership_receipt_path"
+            ] = ""
+            first_asset_id = 25557
+            first_ownership = (
+                component_dir
+                / f"bundle-ownership-{first_asset_id}.json"
+            )
+            first_ownership.unlink()
+            component.validate_bundle_registry_for_apply(
+                component.self_bound(reused),
+                registry=registry,
+                write_ahead=write_ahead,
+                component_dir=component_dir,
+                run_id=run_id,
+            )
+            first_ownership.write_bytes(ownership_bytes[first_asset_id])
+
+            first_target = target_by_asset_id[first_asset_id]
+            replacement = first_target.with_suffix(".replacement")
+            replacement.write_bytes(content_by_asset_id[first_asset_id])
+            self.assertNotEqual(
+                first_target.stat().st_ino,
+                replacement.stat().st_ino,
+            )
+            os.replace(replacement, first_target)
+            with self.assertRaisesRegex(
+                component.ComponentError,
+                "ownership receipt identity differs",
+            ):
+                component.validate_bundle_registry_for_apply(
+                    registry_value,
+                    registry=registry,
+                    write_ahead=write_ahead,
+                    component_dir=component_dir,
+                    run_id=run_id,
+                )
+
 
 if __name__ == "__main__":
     unittest.main()
