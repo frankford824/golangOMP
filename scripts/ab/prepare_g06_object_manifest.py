@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Prepare and finalize the canonical G06 object manifest.
 
-``prepare`` removes the one reviewed historical-unavailable tombstone from the
-frozen object manifest so the remaining blank fingerprints can be hydrated.
-``finalize`` proves that hydration changed only byte metadata, restores that
-tombstone, and appends the seven reviewed Clone B source-bundle objects.
+``prepare`` removes the reviewed historical-unavailable tombstone and the three
+approved original-404 recovery rows from the frozen object manifest so only
+remote-verifiable objects are hydrated. ``finalize`` proves that hydration
+changed only byte metadata, restores the tombstone, transforms the three rows
+to their hash-bound Clone B recovery targets, and appends the seven reviewed
+Clone B source-bundle objects.
 
 All outputs are canonical JSON/JSONL and are immutable once written.
 """
@@ -20,10 +22,12 @@ from typing import Any
 
 try:
     from scripts.ab import apply_bundle_registry_to_mapping as bundle_validator
+    from scripts.ab import g06_recovery_contract as recovery_contract
     from scripts.ab import hydrate_object_manifest as hydrator
     from scripts.ab import object_manifest_verifier as object_verifier
 except ModuleNotFoundError:  # Direct execution from scripts/ab.
     import apply_bundle_registry_to_mapping as bundle_validator
+    import g06_recovery_contract as recovery_contract
     import hydrate_object_manifest as hydrator
     import object_manifest_verifier as object_verifier
 
@@ -138,6 +142,7 @@ def validate_unique_entities(rows: list[dict[str, Any]], label: str) -> None:
 
 def split_source_rows(
     rows: list[dict[str, Any]],
+    original_recovery_rows: list[dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     validate_unique_entities(rows, "source manifest")
     tombstones = [row for row in rows if row.get("entity_key") == TOMBSTONE_ENTITY]
@@ -145,9 +150,28 @@ def split_source_rows(
         raise ValueError(
             "source manifest must contain the one exact task_asset:12323 tombstone"
         )
+    expected_recoveries = {
+        row["entity_key"]: row for row in original_recovery_rows
+    }
+    if set(expected_recoveries) != {
+        f"task_asset:{owner_id}" for owner_id in recovery_contract.RECOVERY_IDS
+    }:
+        raise ValueError("recovery contract did not produce exactly three rows")
+    actual_recoveries = {
+        row["entity_key"]: row
+        for row in rows
+        if row.get("entity_key") in expected_recoveries
+    }
+    if actual_recoveries != expected_recoveries:
+        raise ValueError(
+            "source manifest must contain the three exact original-404 recovery rows"
+        )
     prepared: list[dict[str, Any]] = []
     for line_no, row in enumerate(rows, 1):
-        if row["entity_key"] == TOMBSTONE_ENTITY:
+        if (
+            row["entity_key"] == TOMBSTONE_ENTITY
+            or row["entity_key"] in expected_recoveries
+        ):
             continue
         hydrator.validate_hydration_row(row, line_no)
         prepared.append(row)
@@ -157,21 +181,43 @@ def split_source_rows(
 def prepare_manifest(
     source_path: pathlib.Path,
     expected_source_sha256: str,
+    mapping_path: pathlib.Path,
+    expected_mapping_sha256: str,
+    recovery_plan_path: pathlib.Path,
+    expected_recovery_plan_sha256: str,
 ) -> tuple[bytes, dict[str, Any]]:
     source_sha = require_expected_hash(
         source_path, expected_source_sha256, "source_manifest"
     )
+    mapping_rows, plan_entries, recovery_hashes = recovery_contract.load_contract(
+        mapping_path=mapping_path,
+        expected_mapping_sha256=expected_mapping_sha256,
+        plan_path=recovery_plan_path,
+        expected_plan_sha256=expected_recovery_plan_sha256,
+    )
+    recovery_sources = recovery_contract.original_manifest_rows(
+        mapping_rows, plan_entries
+    )
     source_rows = load_jsonl(source_path, "source manifest")
-    prepared, _tombstone = split_source_rows(source_rows)
+    prepared, _tombstone = split_source_rows(source_rows, recovery_sources)
     output = canonical_jsonl(prepared)
     summary = {
         "schema_version": SCHEMA_VERSION,
         "status": "PASS",
         "operation": "prepare_g06_hydration_manifest",
         "source_manifest_sha256": source_sha,
+        **recovery_hashes,
         "source_row_count": len(source_rows),
-        "excluded_entity_key": TOMBSTONE_ENTITY,
-        "excluded_row_count": 1,
+        "excluded_entity_keys": [
+            TOMBSTONE_ENTITY,
+            *[
+                f"task_asset:{owner_id}"
+                for owner_id in recovery_contract.RECOVERY_IDS
+            ],
+        ],
+        "historical_unavailable_row_count": 1,
+        "recovery_original_404_row_count": 3,
+        "excluded_row_count": 4,
         "hydration_row_count": len(prepared),
         "hydration_manifest_sha256": sha256_bytes(output),
         "database_write_performed": False,
@@ -183,8 +229,11 @@ def prepare_manifest(
 def verify_hydrated_rows(
     source_rows: list[dict[str, Any]],
     hydrated_rows: list[dict[str, Any]],
+    original_recovery_rows: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    expected_rows, _tombstone = split_source_rows(source_rows)
+    expected_rows, _tombstone = split_source_rows(
+        source_rows, original_recovery_rows
+    )
     validate_unique_entities(hydrated_rows, "hydrated manifest")
     expected = {row["entity_key"]: row for row in expected_rows}
     actual = {row.get("entity_key"): row for row in hydrated_rows}
@@ -224,7 +273,12 @@ def bundle_rows(
     expected_manifest_sha256: str,
     registry_path: pathlib.Path,
     expected_registry_sha256: str,
-) -> tuple[list[dict[str, Any]], dict[str, str], str]:
+) -> tuple[
+    list[dict[str, Any]],
+    dict[str, str],
+    str,
+    dict[tuple[int, str, int, int], dict[str, Any]],
+]:
     hashes = {
         "bundle_mapping_sha256": require_expected_hash(
             mapping_path, expected_mapping_sha256, "bundle_mapping"
@@ -289,7 +343,71 @@ def bundle_rows(
             raise ValueError(
                 f"generated bundle row is invalid: {problems[0]['violation_code']}"
             )
-    return rows, hashes, run_id
+    return rows, hashes, run_id, materialized
+
+
+def validate_reviewed_bundle_semantics(
+    reviewed_mapping: dict[str, Any],
+    normalized: dict[tuple[int, str, int, int], dict[str, Any]],
+) -> tuple[int, str]:
+    """Bind the seven materialized bundles to the final-reviewed mapping."""
+    if (
+        reviewed_mapping.get("version") != 2
+        or not isinstance(reviewed_mapping.get("resources"), list)
+    ):
+        raise ValueError("final-reviewed mapping must be a V2 mapping")
+    mapped: dict[tuple[int, str, int, int], dict[str, Any]] = {}
+    for resource in reviewed_mapping["resources"]:
+        if not isinstance(resource, dict) or not isinstance(
+            resource.get("history"), list
+        ):
+            raise ValueError("final-reviewed mapping resource history is invalid")
+        for revision in resource["history"]:
+            if not isinstance(revision, dict):
+                raise ValueError(
+                    "final-reviewed mapping revision must be an object"
+                )
+            source_bundle = revision.get("source_bundle")
+            if source_bundle is None:
+                continue
+            key = (
+                int(resource["task_id"]),
+                str(resource["scope_kind"]),
+                int(resource["scope_ref_id"]),
+                int(revision["revision_no"]),
+            )
+            if key in mapped:
+                raise ValueError(
+                    f"final-reviewed mapping duplicates bundle scope {key}"
+                )
+            mapped[key] = source_bundle
+    expected_scopes = set(bundle_validator.EXACT_SCOPES)
+    if set(normalized) != expected_scopes:
+        raise ValueError(
+            "validated bundle registry does not contain the exact seven scopes"
+        )
+    if set(mapped) != expected_scopes:
+        raise ValueError(
+            "final-reviewed mapping and bundle registry scopes differ"
+        )
+    semantic_rows: list[dict[str, Any]] = []
+    for key in sorted(expected_scopes):
+        if mapped[key] != normalized[key]:
+            raise ValueError(
+                f"final-reviewed mapping source_bundle drifted for {key}"
+            )
+        semantic_rows.append(
+            {
+                "task_id": key[0],
+                "scope_kind": key[1],
+                "scope_ref_id": key[2],
+                "revision_no": key[3],
+                "source_bundle": mapped[key],
+            }
+        )
+    return len(semantic_rows), sha256_bytes(
+        canonical_json(semantic_rows).encode("utf-8")
+    )
 
 
 def ensure_new_bundle_identifiers(
@@ -314,12 +432,16 @@ def finalize_manifest(
     expected_source_sha256: str,
     hydrated_path: pathlib.Path,
     expected_hydrated_sha256: str,
-    mapping_path: pathlib.Path,
-    expected_mapping_sha256: str,
+    recovery_mapping_path: pathlib.Path,
+    expected_recovery_mapping_sha256: str,
+    bundle_mapping_path: pathlib.Path,
+    expected_bundle_mapping_sha256: str,
     bundle_manifest_path: pathlib.Path,
     expected_bundle_manifest_sha256: str,
     registry_path: pathlib.Path,
     expected_registry_sha256: str,
+    recovery_plan_path: pathlib.Path,
+    expected_recovery_plan_sha256: str,
 ) -> tuple[bytes, dict[str, Any]]:
     source_sha = require_expected_hash(
         source_path, expected_source_sha256, "source_manifest"
@@ -327,22 +449,51 @@ def finalize_manifest(
     hydrated_sha = require_expected_hash(
         hydrated_path, expected_hydrated_sha256, "hydrated_manifest"
     )
+    mapping_rows, plan_entries, recovery_hashes = recovery_contract.load_contract(
+        mapping_path=recovery_mapping_path,
+        expected_mapping_sha256=expected_recovery_mapping_sha256,
+        plan_path=recovery_plan_path,
+        expected_plan_sha256=expected_recovery_plan_sha256,
+    )
+    recovery_sources = recovery_contract.original_manifest_rows(
+        mapping_rows, plan_entries
+    )
     source_rows = load_jsonl(source_path, "source manifest")
     hydrated_rows = verify_hydrated_rows(
-        source_rows, load_jsonl(hydrated_path, "hydrated manifest")
+        source_rows,
+        load_jsonl(hydrated_path, "hydrated manifest"),
+        recovery_sources,
     )
-    _prepared, tombstone = split_source_rows(source_rows)
-    additions, bundle_hashes, run_id = bundle_rows(
-        mapping_path,
-        expected_mapping_sha256,
+    _prepared, tombstone = split_source_rows(source_rows, recovery_sources)
+    recovery_rows = recovery_contract.recovery_manifest_rows(
+        mapping_rows, plan_entries
+    )
+    for line_no, row in enumerate(recovery_rows, 1):
+        problems = object_verifier.validate_contract(row, line_no)
+        if problems:
+            raise ValueError(
+                "generated recovery row is invalid: "
+                f"{problems[0]['violation_code']}"
+            )
+    additions, bundle_hashes, run_id, normalized = bundle_rows(
+        bundle_mapping_path,
+        expected_bundle_mapping_sha256,
         bundle_manifest_path,
         expected_bundle_manifest_sha256,
         registry_path,
         expected_registry_sha256,
     )
+    reviewed_mapping = bundle_validator.load_object(
+        recovery_mapping_path, "final-reviewed mapping"
+    )
+    reviewed_bundle_scope_count, reviewed_bundle_semantics_sha256 = (
+        validate_reviewed_bundle_semantics(reviewed_mapping, normalized)
+    )
     base_rows = hydrated_rows + [tombstone]
-    ensure_new_bundle_identifiers(base_rows, additions)
-    final_rows = sorted(base_rows + additions, key=row_sort_key)
+    ensure_new_bundle_identifiers(base_rows, recovery_rows + additions)
+    final_rows = sorted(
+        base_rows + recovery_rows + additions, key=row_sort_key
+    )
     validate_unique_entities(final_rows, "final manifest")
     output = canonical_jsonl(final_rows)
     summary = {
@@ -351,10 +502,16 @@ def finalize_manifest(
         "operation": "finalize_g06_object_manifest",
         "source_manifest_sha256": source_sha,
         "hydrated_manifest_sha256": hydrated_sha,
+        **recovery_hashes,
         **bundle_hashes,
         "bundle_run_id": run_id,
+        "reviewed_bundle_scope_count": reviewed_bundle_scope_count,
+        "reviewed_bundle_semantics_sha256": (
+            reviewed_bundle_semantics_sha256
+        ),
         "hydrated_row_count": len(hydrated_rows),
         "historical_unavailable_row_count": 1,
+        "recovery_row_count": len(recovery_rows),
         "bundle_row_count": len(additions),
         "final_row_count": len(final_rows),
         "final_manifest_sha256": sha256_bytes(output),
@@ -400,6 +557,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     prepare = subparsers.add_parser("prepare")
     prepare.add_argument("--source-manifest", type=pathlib.Path, required=True)
     prepare.add_argument("--expected-source-sha256", required=True)
+    prepare.add_argument("--mapping", type=pathlib.Path, required=True)
+    prepare.add_argument("--expected-mapping-sha256", required=True)
+    prepare.add_argument(
+        "--recovery-plan", type=pathlib.Path, required=True
+    )
+    prepare.add_argument("--expected-recovery-plan-sha256", required=True)
     prepare.add_argument("--output", type=pathlib.Path, required=True)
     prepare.add_argument("--summary", type=pathlib.Path, required=True)
 
@@ -408,12 +571,20 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     finalize.add_argument("--expected-source-sha256", required=True)
     finalize.add_argument("--hydrated-manifest", type=pathlib.Path, required=True)
     finalize.add_argument("--expected-hydrated-sha256", required=True)
+    finalize.add_argument("--recovery-mapping", type=pathlib.Path, required=True)
+    finalize.add_argument(
+        "--expected-recovery-mapping-sha256", required=True
+    )
     finalize.add_argument("--bundle-mapping", type=pathlib.Path, required=True)
     finalize.add_argument("--expected-bundle-mapping-sha256", required=True)
     finalize.add_argument("--bundle-manifest", type=pathlib.Path, required=True)
     finalize.add_argument("--expected-bundle-manifest-sha256", required=True)
     finalize.add_argument("--bundle-registry", type=pathlib.Path, required=True)
     finalize.add_argument("--expected-bundle-registry-sha256", required=True)
+    finalize.add_argument(
+        "--recovery-plan", type=pathlib.Path, required=True
+    )
+    finalize.add_argument("--expected-recovery-plan-sha256", required=True)
     finalize.add_argument("--output", type=pathlib.Path, required=True)
     finalize.add_argument("--summary", type=pathlib.Path, required=True)
     return parser.parse_args(argv)
@@ -421,30 +592,60 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    expected_recovery_mapping_sha256 = (
+        args.expected_mapping_sha256
+        if args.command == "prepare"
+        else args.expected_recovery_mapping_sha256
+    )
+    recovery_contract.require_frozen_hashes(
+        expected_recovery_mapping_sha256,
+        args.expected_recovery_plan_sha256,
+    )
     if args.command == "prepare":
         output, summary = prepare_manifest(
-            args.source_manifest, args.expected_source_sha256
+            args.source_manifest,
+            args.expected_source_sha256,
+            args.mapping,
+            args.expected_mapping_sha256,
+            args.recovery_plan,
+            args.expected_recovery_plan_sha256,
         )
-        input_paths = {args.source_manifest.resolve()}
+        input_paths = {
+            args.source_manifest.resolve(),
+            args.mapping.resolve(),
+            args.recovery_plan.resolve(),
+        }
     else:
         output, summary = finalize_manifest(
             source_path=args.source_manifest,
             expected_source_sha256=args.expected_source_sha256,
             hydrated_path=args.hydrated_manifest,
             expected_hydrated_sha256=args.expected_hydrated_sha256,
-            mapping_path=args.bundle_mapping,
-            expected_mapping_sha256=args.expected_bundle_mapping_sha256,
+            recovery_mapping_path=args.recovery_mapping,
+            expected_recovery_mapping_sha256=(
+                args.expected_recovery_mapping_sha256
+            ),
+            bundle_mapping_path=args.bundle_mapping,
+            expected_bundle_mapping_sha256=(
+                args.expected_bundle_mapping_sha256
+            ),
             bundle_manifest_path=args.bundle_manifest,
             expected_bundle_manifest_sha256=args.expected_bundle_manifest_sha256,
             registry_path=args.bundle_registry,
             expected_registry_sha256=args.expected_bundle_registry_sha256,
+            recovery_plan_path=args.recovery_plan,
+            expected_recovery_plan_sha256=(
+                args.expected_recovery_plan_sha256
+            ),
         )
         input_paths = {
             args.source_manifest.resolve(),
             args.hydrated_manifest.resolve(),
+            args.recovery_mapping.resolve(),
             args.bundle_mapping.resolve(),
             args.bundle_manifest.resolve(),
             args.bundle_registry.resolve(),
+            args.recovery_plan.resolve(),
         }
     if args.output.resolve() in input_paths or args.summary.resolve() in input_paths:
         raise ValueError("outputs must not overwrite inputs")

@@ -2279,6 +2279,7 @@ class GeneratorTest(unittest.TestCase):
             "'rejected_at'", "'superseded_by_version_id'", "'superseded_at'",
             "DATE_FORMAT(DATE_SUB(ta.superseded_at", "'sequence',e.sequence",
             "'module_key'", "'from_state'", "'to_state'",
+            "'sku_code',COALESCE(si.sku_code,'')",
         ):
             self.assertIn(field, MODULE.SQL)
 
@@ -2288,7 +2289,8 @@ class GeneratorTest(unittest.TestCase):
                 rows = self.sample()
                 rows["planning_rows"] = [{
                     "task_id": 70, "task_status": task_status, "creator_id": 9,
-                    "task_sku_item_id": 701, "description_spec": "Blue / XL", "quantity": 12,
+                    "task_sku_item_id": 701, "sku_code": "SKU-70",
+                    "description_spec": "Blue / XL", "quantity": 12,
                     "target_price": "9.90", "erp_product_i_id": "IID-7", "erp_product_name": "Blue shirt",
                 }]
                 mapping, manual, _ = MODULE.generate(rows)
@@ -2317,6 +2319,168 @@ class GeneratorTest(unittest.TestCase):
                 planning_review = next(row for row in manual if row["scope_kind"] == "planning")
                 self.assertIn("code_rule_revision_id", planning_review["reason"])
                 self.assertNotIn("image selection", planning_review["reason"])
+
+    def test_planning_candidate_preserves_unique_exact_sku_product_image(self):
+        rows = self.sample()
+        rows["planning_rows"] = [{
+            "task_id": 70, "task_status": "PendingAssign", "creator_id": 9,
+            "task_sku_item_id": 701, "sku_code": "SKU-70",
+            "description_spec": "Blue / XL", "quantity": 12,
+            "target_price": None, "erp_product_i_id": "IID-7",
+            "erp_product_name": "Blue shirt",
+        }]
+        rows["assets"].append({
+            "id": 900, "asset_id": 901, "task_id": 70,
+            "asset_type": "erp_product_image", "scope_sku_code": "SKU-70",
+            "storage_ref_id": "ref-product-70", "upload_status": "uploaded",
+            "is_archived": False, "superseded_by_version_id": None,
+            "storage_owner_type": "task_asset", "storage_owner_id": 900,
+            "ref_key": "planning/SKU-70.png",
+            "storage_status": "recorded", "is_placeholder": False,
+            "deleted_at": None, "cleaned_at": None,
+            "access_revoked_at": None, "object_deleted_at": None,
+        })
+
+        mapping, _, _ = MODULE.generate(rows)
+
+        planning = mapping["planning_tasks"][0]
+        self.assertEqual(
+            planning["items"][0]["image_storage_ref_id"],
+            "ref-product-70",
+        )
+        self.assertEqual(planning["confidence"], "proposed_review")
+
+    def test_planning_candidate_blocks_ambiguous_exact_sku_product_images(self):
+        rows = self.sample()
+        rows["planning_rows"] = [{
+            "task_id": 70, "task_status": "PendingAssign", "creator_id": 9,
+            "task_sku_item_id": 701, "sku_code": "SKU-70",
+            "description_spec": "Blue / XL", "quantity": 12,
+            "target_price": None, "erp_product_i_id": "IID-7",
+            "erp_product_name": "Blue shirt",
+        }]
+        for asset_id, ref_id in ((900, "ref-product-a"), (901, "ref-product-b")):
+            rows["assets"].append({
+                "id": asset_id, "asset_id": asset_id + 100,
+                "task_id": 70, "asset_type": "erp_product_image",
+                "scope_sku_code": "SKU-70", "storage_ref_id": ref_id,
+                "is_archived": False, "superseded_by_version_id": None,
+                "storage_owner_type": "task_asset",
+                "storage_owner_id": asset_id,
+                "ref_key": f"planning/{asset_id}.png",
+                "upload_status": "uploaded", "storage_status": "recorded",
+                "is_placeholder": False, "deleted_at": None,
+                "cleaned_at": None, "access_revoked_at": None,
+                "object_deleted_at": None,
+            })
+
+        mapping, manual, _ = MODULE.generate(rows)
+
+        planning = mapping["planning_tasks"][0]
+        self.assertEqual(planning["confidence"], "hard_blocked")
+        self.assertEqual(planning["items"][0]["image_storage_ref_id"], "")
+        self.assertIn("900,901", planning["blockers"][0])
+        planning_review = next(row for row in manual if row["scope_kind"] == "planning")
+        self.assertEqual(planning_review["confidence"], "hard_blocked")
+
+    def test_planning_candidate_rejects_archived_superseded_or_wrong_owner_images(self):
+        base = {
+            "id": 900, "asset_id": 901, "task_id": 70,
+            "asset_type": "erp_product_image", "scope_sku_code": "SKU-70",
+            "storage_ref_id": "ref-product-70", "upload_status": "uploaded",
+            "is_archived": False, "superseded_by_version_id": None,
+            "storage_owner_type": "task_asset", "storage_owner_id": 900,
+            "ref_key": "planning/SKU-70.png",
+            "storage_status": "recorded", "is_placeholder": False,
+            "deleted_at": None, "cleaned_at": None,
+            "access_revoked_at": None, "object_deleted_at": None,
+        }
+        cases = {
+            "archived": {"is_archived": True},
+            "superseded": {"superseded_by_version_id": 901},
+            "wrong_owner_type": {"storage_owner_type": "reference"},
+            "wrong_owner_id": {"storage_owner_id": 899},
+        }
+        for name, changes in cases.items():
+            with self.subTest(name=name):
+                rows = self.sample()
+                rows["planning_rows"] = [{
+                    "task_id": 70, "task_status": "PendingAssign",
+                    "creator_id": 9, "task_sku_item_id": 701,
+                    "sku_code": "SKU-70", "description_spec": "Blue / XL",
+                    "quantity": 12, "target_price": None,
+                    "erp_product_i_id": "IID-7",
+                    "erp_product_name": "Blue shirt",
+                }]
+                rows["assets"].append({**base, **changes})
+                mapping, _, _ = MODULE.generate(rows)
+                self.assertEqual(
+                    mapping["planning_tasks"][0]["items"][0]["image_storage_ref_id"],
+                    "",
+                )
+
+    def test_planning_candidate_uses_space_trimmed_but_case_sensitive_sku_identity(self):
+        planning_row = {
+            "task_id": 70, "task_status": "PendingAssign",
+            "creator_id": 9, "task_sku_item_id": 701,
+            "sku_code": " SKU-70 ", "description_spec": "Blue / XL",
+            "quantity": 12, "target_price": None,
+            "erp_product_i_id": "IID-7", "erp_product_name": "Blue shirt",
+        }
+        asset = {
+            "id": 900, "asset_id": 901, "task_id": 70,
+            "asset_type": "erp_product_image",
+            "scope_sku_code": "SKU-70",
+            "storage_ref_id": "ref-product-70", "upload_status": "uploaded",
+            "is_archived": False, "superseded_by_version_id": None,
+            "storage_owner_type": "task_asset", "storage_owner_id": 900,
+            "ref_key": " planning/SKU-70.png ",
+            "storage_status": "recorded", "is_placeholder": False,
+            "deleted_at": None, "cleaned_at": None,
+            "access_revoked_at": None, "object_deleted_at": None,
+        }
+        rows = self.sample()
+        rows["planning_rows"] = [planning_row]
+        rows["assets"].append(asset)
+        mapping, _, _ = MODULE.generate(rows)
+        self.assertEqual(
+            mapping["planning_tasks"][0]["items"][0]["image_storage_ref_id"],
+            "ref-product-70",
+        )
+
+        rows["assets"][-1]["scope_sku_code"] = "sku-70"
+        mapping, _, _ = MODULE.generate(rows)
+        self.assertEqual(
+            mapping["planning_tasks"][0]["items"][0]["image_storage_ref_id"],
+            "",
+        )
+
+    def test_planning_candidate_rejects_case_variant_enum_values(self):
+        rows = self.sample()
+        rows["planning_rows"] = [{
+            "task_id": 70, "task_status": "PendingAssign",
+            "creator_id": 9, "task_sku_item_id": 701,
+            "sku_code": "SKU-70", "description_spec": "Blue / XL",
+            "quantity": 12, "target_price": None,
+            "erp_product_i_id": "IID-7", "erp_product_name": "Blue shirt",
+        }]
+        rows["assets"].append({
+            "id": 900, "asset_id": 901, "task_id": 70,
+            "asset_type": "ERP_PRODUCT_IMAGE",
+            "scope_sku_code": "SKU-70",
+            "storage_ref_id": "ref-product-70", "upload_status": "uploaded",
+            "is_archived": False, "superseded_by_version_id": None,
+            "storage_owner_type": "task_asset", "storage_owner_id": 900,
+            "ref_key": "planning/SKU-70.png",
+            "storage_status": "recorded", "is_placeholder": False,
+            "deleted_at": None, "cleaned_at": None,
+            "access_revoked_at": None, "object_deleted_at": None,
+        })
+        mapping, _, _ = MODULE.generate(rows)
+        self.assertEqual(
+            mapping["planning_tasks"][0]["items"][0]["image_storage_ref_id"],
+            "",
+        )
 
     def test_planning_candidate_uses_erp_product_snapshot_when_legacy_description_is_empty(self):
         rows = self.sample()

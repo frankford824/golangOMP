@@ -12,7 +12,25 @@ WHERE @ab_side = 'B' AND (a.storage_ref_id IS NULL OR a.storage_ref_id = '')
 UNION ALL
 SELECT 'storage_integrity.bound_upload_request_mismatch', CONCAT(a.id), CONCAT('asset_storage_ref=', COALESCE(a.storage_ref_id, ''), ',request_bound_ref=', COALESCE(u.bound_ref_id, ''))
 FROM task_assets a JOIN upload_requests u ON u.request_id = a.upload_request_id
-WHERE @ab_side = 'B' AND a.storage_ref_id IS NOT NULL AND u.bound_ref_id <> '' AND u.bound_ref_id <> a.storage_ref_id
+WHERE @ab_side = 'B' AND u.bound_asset_id = a.id
+  AND a.storage_ref_id IS NOT NULL AND u.bound_ref_id <> '' AND u.bound_ref_id <> a.storage_ref_id
+UNION ALL
+SELECT 'storage_integrity.upload_request_projection_object_mismatch', CONCAT(a.id),
+       CONCAT('asset_storage_ref=', COALESCE(a.storage_ref_id, ''), ',request_bound_ref=', COALESCE(u.bound_ref_id, ''))
+FROM task_assets a
+JOIN upload_requests u ON u.request_id = a.upload_request_id
+LEFT JOIN asset_storage_refs asset_ref ON asset_ref.ref_id = a.storage_ref_id
+LEFT JOIN asset_storage_refs request_ref ON request_ref.ref_id = u.bound_ref_id
+WHERE @ab_side = 'B' AND a.storage_ref_id IS NOT NULL AND u.bound_ref_id <> ''
+  AND u.bound_ref_id <> a.storage_ref_id AND NOT (
+    a.asset_type = 'reference' AND a.binding_state = 'legacy' AND u.bound_asset_id IS NULL
+    AND asset_ref.ref_id IS NOT NULL AND request_ref.ref_id IS NOT NULL
+    AND asset_ref.ref_key = request_ref.ref_key
+    AND asset_ref.storage_adapter = request_ref.storage_adapter
+    AND asset_ref.status = request_ref.status
+    AND COALESCE(asset_ref.file_size, -1) = COALESCE(request_ref.file_size, -1)
+    AND asset_ref.checksum_hint = request_ref.checksum_hint
+  )
 UNION ALL
 SELECT 'storage_integrity.storage_ref_missing_upload_request', s.ref_id, CONCAT('upload_request_id=', s.upload_request_id)
 FROM asset_storage_refs s LEFT JOIN upload_requests u ON u.request_id = s.upload_request_id

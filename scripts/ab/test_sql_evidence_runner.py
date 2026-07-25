@@ -63,6 +63,38 @@ class SQLEvidenceRunnerTest(unittest.TestCase):
         self.assertEqual(manifest_sql.count("FROM ab_manifest_entities"), 1)
         self.assertIn("CAST('G01' AS BINARY)", manifest_sql)
 
+    def test_corrected_gate_semantics_are_locked(self) -> None:
+        task_state = (SQL_DIR / "01_task_state_parity.sql").read_text(encoding="utf-8")
+        self.assertIn(
+            "'completed', 'closed', 'forcibly_closed', 'closed_by_admin'",
+            task_state,
+        )
+        self.assertNotIn("module_key = 'basic_info'", task_state)
+
+        asset_roles = (SQL_DIR / "04_asset_role_scope.sql").read_text(encoding="utf-8")
+        self.assertIn("r.status <> 'draft'", asset_roles)
+
+        storage = (SQL_DIR / "06_storage_integrity.sql").read_text(encoding="utf-8")
+        self.assertIn("u.bound_asset_id = a.id", storage)
+        self.assertIn("upload_request_projection_object_mismatch", storage)
+
+        events = (SQL_DIR / "07_event_history_checksum.sql").read_text(encoding="utf-8")
+        self.assertNotIn("workflow_trace_missing_task", events)
+
+        planning = (SQL_DIR / "08_planning_retouch.sql").read_text(encoding="utf-8")
+        for exact_tombstone_marker in (
+            "t.id = 497",
+            "s.id = 380",
+            "p.code_rule_revision_id = 9",
+            "p.client_create_id = 'migration-497'",
+        ):
+            self.assertIn(exact_tombstone_marker, planning)
+        self.assertIn("$.components[12]", planning)
+
+        negative = (SQL_DIR / "10_negative_assertions.sql").read_text(encoding="utf-8")
+        self.assertIn("negative.legacy_asset_referenced_by_v8", negative)
+        self.assertIn("negative.legacy_asset_with_bound_coordinates", negative)
+
     def test_fake_adapter_runs_two_single_sessions_and_builds_gate_report(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)

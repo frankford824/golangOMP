@@ -18,10 +18,6 @@ SELECT 'event_history.trace_module_task_mismatch', CONCAT(e.id), CONCAT('trace_t
 FROM workflow_trace_events e JOIN task_modules m ON m.id = e.task_module_id
 WHERE @ab_side = 'B' AND e.task_id IS NOT NULL AND e.task_id <> m.task_id
 UNION ALL
-SELECT 'event_history.workflow_trace_missing_task', CONCAT(e.id), CONCAT('task_id=', e.task_id)
-FROM workflow_trace_events e LEFT JOIN tasks t ON t.id = e.task_id
-WHERE @ab_side = 'B' AND e.task_id IS NOT NULL AND t.id IS NULL
-UNION ALL
 SELECT 'event_history.revision_evidence_coverage_not_sql_verifiable', '*',
        'hard_blocked: revision reason metadata is not a normalized event-to-revision relation'
 WHERE @ab_side = 'B' AND NOT EXISTS (

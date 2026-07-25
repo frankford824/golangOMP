@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 """Compose the final G06 verdict without re-reading remote object bytes.
 
-The adjudicator binds four independently produced evidence domains:
+The adjudicator binds five independently produced evidence domains:
 
 * the remote hydration input/evidence and the remote subset of the finalized
   object manifest;
 * exactly seven Clone B bundle rows and an independent local object-verifier
   PASS over their canonical JSONL subset;
+* exactly three approved Clone B recovery rows and an independent read-only
+  local verifier PASS bound to the frozen mapping and G4 recovery plan;
 * the one reviewed historical-unavailable tombstone;
 * the original read-only Clone B SQL and controlled GET/410 API evidence used
   to build the historical-unavailable attestation.
@@ -27,12 +29,16 @@ from typing import Any
 
 try:
     from scripts.ab import historical_unavailable_exception as historical
+    from scripts.ab import g06_recovery_contract as recovery_contract
     from scripts.ab import hydrate_object_manifest as hydrator
     from scripts.ab import object_manifest_verifier as object_verifier
+    from scripts.ab import verify_g06_clone_b_recoveries as recovery_verifier
 except ModuleNotFoundError:  # Direct execution from scripts/ab.
     import historical_unavailable_exception as historical
+    import g06_recovery_contract as recovery_contract
     import hydrate_object_manifest as hydrator
     import object_manifest_verifier as object_verifier
+    import verify_g06_clone_b_recoveries as recovery_verifier
 
 
 SCHEMA_VERSION = 1
@@ -247,7 +253,12 @@ def read_jsonl(
 
 def split_final_rows(
     rows: list[dict[str, Any]],
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]], dict[str, Any]]:
+) -> tuple[
+    list[dict[str, Any]],
+    list[dict[str, Any]],
+    list[dict[str, Any]],
+    dict[str, Any],
+]:
     exceptions = [
         row for row in rows if row["entity_key"] == historical.ENTITY_KEY
     ]
@@ -278,9 +289,35 @@ def split_final_rows(
                 "g06.bundle_identity",
                 f"Clone B bundle task_asset:{owner_id} identity differs",
             )
+    recoveries = [
+        row
+        for row in rows
+        if row["storage_adapter"] == recovery_contract.FINAL_STORAGE_ADAPTER
+    ]
+    recovery_ids = {int(row["owner_id"]) for row in recoveries}
+    if (
+        recovery_ids != set(recovery_contract.RECOVERY_IDS)
+        or len(recoveries) != len(recovery_contract.RECOVERY_IDS)
+    ):
+        raise AdjudicationError(
+            "g06.recovery_count",
+            "final manifest must contain exactly three approved Clone B recoveries",
+        )
+    for row in recoveries:
+        owner_id = int(row["owner_id"])
+        if (
+            row["entity_key"] != f"task_asset:{owner_id}"
+            or row["owner_kind"] != "task_asset"
+            or int(row["task_id"]) != recovery_contract.TASK_ID
+            or row["mime_type"] != "image/jpeg"
+        ):
+            raise AdjudicationError(
+                "g06.recovery_identity",
+                f"Clone B recovery task_asset:{owner_id} identity differs",
+            )
     excluded = {historical.ENTITY_KEY} | {
         str(row["entity_key"]) for row in bundles
-    }
+    } | {str(row["entity_key"]) for row in recoveries}
     remote = [row for row in rows if row["entity_key"] not in excluded]
     for row in remote:
         adapter = str(row["storage_adapter"]).strip().lower()
@@ -289,11 +326,17 @@ def split_final_rows(
                 "g06.remote_adapter",
                 "remote manifest subset contains a non-remote adapter",
             )
-    if len(rows) != len(remote) + len(BUNDLE_TASKS) + 1:
+    if (
+        len(rows)
+        != len(remote)
+        + len(BUNDLE_TASKS)
+        + len(recovery_contract.RECOVERY_IDS)
+        + 1
+    ):
         raise AdjudicationError(
             "g06.final_count", "final manifest composition count differs"
         )
-    return remote, bundles, exceptions[0]
+    return remote, bundles, recoveries, exceptions[0]
 
 
 def target_kind(storage_adapter: str) -> str:
@@ -312,7 +355,8 @@ def verify_remote_hydration(
     input_sha: str,
     remote_rows: list[dict[str, Any]],
     evidence_path: pathlib.Path,
-) -> tuple[dict[str, Any], str, str]:
+    checkpoint_path: pathlib.Path,
+) -> tuple[dict[str, Any], str, str, str]:
     evidence, evidence_sha = read_json(evidence_path, "hydration evidence")
     if set(evidence) != HYDRATION_FIELDS:
         raise AdjudicationError(
@@ -432,7 +476,61 @@ def verify_remote_hydration(
             "g06.hydration_failures", "hydration evidence contains failures"
         )
     require_sha(evidence.get("checkpoint_sha256"), "hydration checkpoint")
-    return evidence, evidence_sha, remote_sha
+    if checkpoint_path.is_symlink() or not checkpoint_path.is_file():
+        raise AdjudicationError(
+            "g06.checkpoint_missing", "rebased hydration checkpoint is missing"
+        )
+    checkpoint_sha = sha256_file(checkpoint_path)
+    if checkpoint_sha != evidence["checkpoint_sha256"]:
+        raise AdjudicationError(
+            "g06.checkpoint_hash",
+            "hydration evidence is not bound to the supplied rebased checkpoint",
+        )
+    try:
+        checkpoint_doc = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+        fingerprints = checkpoint_doc["adapter_fingerprints"]
+        completed, failed = hydrator.load_checkpoint(
+            checkpoint_path, input_sha, fingerprints
+        )
+    except (KeyError, json.JSONDecodeError, OSError, ValueError) as exc:
+        raise AdjudicationError(
+            "g06.checkpoint_contract",
+            "rebased hydration checkpoint contract differs",
+        ) from exc
+    expected_metadata: dict[str, tuple[int, str, str]] = {}
+    for source, final in zip(input_rows, remote_rows):
+        if source["sha256"]:
+            continue
+        key = hydrator.checkpoint_key(
+            target_kind(source["storage_adapter"]), source["object_key"]
+        )
+        metadata = (
+            final["size"],
+            object_verifier.normalize_mime(final["mime_type"]),
+            final["sha256"],
+        )
+        if key in expected_metadata and expected_metadata[key] != metadata:
+            raise AdjudicationError(
+                "g06.checkpoint_metadata",
+                "deduplicated hydration targets disagree on final metadata",
+            )
+        expected_metadata[key] = metadata
+    if failed or set(completed) != set(expected_metadata):
+        raise AdjudicationError(
+            "g06.checkpoint_coverage",
+            "rebased checkpoint does not exactly cover remote hydration targets",
+        )
+    for key, record in completed.items():
+        if (
+            record["size"],
+            object_verifier.normalize_mime(record["mime_type"]),
+            record["sha256"],
+        ) != expected_metadata[key]:
+            raise AdjudicationError(
+                "g06.checkpoint_metadata",
+                "rebased checkpoint metadata differs from finalized remote rows",
+            )
+    return evidence, evidence_sha, remote_sha, checkpoint_sha
 
 
 def verify_bundle_verdict(
@@ -473,6 +571,102 @@ def verify_bundle_verdict(
             "bundle verifier did not independently pass the exact seven-row subset",
         )
     return verdict_sha, bundle_sha
+
+
+def verify_recovery_verdict(
+    *,
+    recoveries: list[dict[str, Any]],
+    mapping_path: pathlib.Path,
+    expected_mapping_sha256: str,
+    plan_path: pathlib.Path,
+    expected_plan_sha256: str,
+    verdict_path: pathlib.Path,
+    db_apply_path: pathlib.Path,
+    db_idempotent_path: pathlib.Path,
+    component_apply_path: pathlib.Path,
+    require_frozen: bool,
+) -> tuple[str, str, str, str, str, str]:
+    mapping_rows, plan_entries, hashes = recovery_contract.load_contract(
+        mapping_path=mapping_path,
+        expected_mapping_sha256=expected_mapping_sha256,
+        plan_path=plan_path,
+        expected_plan_sha256=expected_plan_sha256,
+    )
+    expected_rows = recovery_contract.recovery_manifest_rows(
+        mapping_rows, plan_entries
+    )
+    if require_frozen:
+        recovery_contract.require_frozen_hashes(
+            hashes["recovery_mapping_sha256"],
+            hashes["recovery_plan_sha256"],
+        )
+    receipt_hashes = recovery_contract.validate_apply_receipts(
+        plan_path=plan_path,
+        db_apply_path=db_apply_path,
+        db_idempotent_path=db_idempotent_path,
+        component_apply_path=component_apply_path,
+        require_frozen=require_frozen,
+    )
+    if recoveries != expected_rows:
+        raise AdjudicationError(
+            "g06.recovery_rows",
+            "final recovery rows differ from the frozen mapping and G4 plan",
+        )
+    recovery_sha = sha256_bytes(canonical_jsonl(recoveries))
+    verdict, verdict_sha = read_json(
+        verdict_path, "Clone B recovery verifier verdict"
+    )
+    if set(verdict) != recovery_verifier.FIELDS:
+        raise AdjudicationError(
+            "g06.recovery_verdict_contract",
+            "Clone B recovery verifier verdict field contract differs",
+        )
+    unsigned = {
+        key: value for key, value in verdict.items()
+        if key != "evidence_hash"
+    }
+    if verdict.get("evidence_hash") != sha256_bytes(
+        canonical_json(unsigned).encode("utf-8")
+    ):
+        raise AdjudicationError(
+            "g06.recovery_verdict_self_hash",
+            "Clone B recovery verifier self-hash differs",
+        )
+    if (
+        verdict.get("schema_version") != recovery_verifier.SCHEMA_VERSION
+        or verdict.get("verdict_type") != recovery_verifier.VERDICT_TYPE
+        or verdict.get("status") != "PASS"
+        or verdict.get("violation_count") != 0
+        or verdict.get("checked_count") != 3
+        or verdict.get("read_only_local_get_count") != 3
+        or verdict.get("recovery_manifest_sha256") != recovery_sha
+        or verdict.get("mapping_sha256")
+        != hashes["recovery_mapping_sha256"]
+        or verdict.get("recovery_plan_sha256")
+        != hashes["recovery_plan_sha256"]
+        or verdict.get("recovery_db_apply_sha256")
+        != receipt_hashes["recovery_db_apply_sha256"]
+        or verdict.get("recovery_db_idempotent_sha256")
+        != receipt_hashes["recovery_db_idempotent_sha256"]
+        or verdict.get("recovery_component_apply_sha256")
+        != receipt_hashes["recovery_component_apply_sha256"]
+        or verdict.get("database") != recovery_contract.EXPECTED_DATABASE
+        or verdict.get("database_write_performed") is not False
+        or verdict.get("production_write_performed") is not False
+        or verdict.get("violations") != []
+    ):
+        raise AdjudicationError(
+            "g06.recovery_verdict",
+            "local verifier did not independently pass the exact three-row recovery subset",
+        )
+    return (
+        verdict_sha,
+        recovery_sha,
+        hashes["recovery_plan_sha256"],
+        receipt_hashes["recovery_db_apply_sha256"],
+        receipt_hashes["recovery_db_idempotent_sha256"],
+        receipt_hashes["recovery_component_apply_sha256"],
+    )
 
 
 def verify_historical_exception(
@@ -522,6 +716,7 @@ def result_document(
     hashes: dict[str, str],
     remote_row_count: int,
     bundle_row_count: int,
+    recovery_row_count: int,
     exception_count: int,
     final_row_count: int,
 ) -> dict[str, Any]:
@@ -533,6 +728,7 @@ def result_document(
         "checked_count": final_row_count if status == "PASS" else 0,
         "remote_row_count": remote_row_count,
         "bundle_row_count": bundle_row_count,
+        "recovery_row_count": recovery_row_count,
         "exception_count": exception_count,
         "final_row_count": final_row_count,
         **hashes,
@@ -648,27 +844,42 @@ def adjudicate(
     hydration_input_path: pathlib.Path,
     expected_hydration_input_sha256: str,
     hydration_evidence_path: pathlib.Path,
+    hydration_checkpoint_path: pathlib.Path,
     final_manifest_path: pathlib.Path,
     expected_final_manifest_sha256: str,
     bundle_verdict_path: pathlib.Path,
+    recovery_plan_path: pathlib.Path,
+    expected_recovery_plan_sha256: str,
+    recovery_verdict_path: pathlib.Path,
+    recovery_db_apply_path: pathlib.Path,
+    recovery_db_idempotent_path: pathlib.Path,
+    recovery_component_apply_path: pathlib.Path,
     exception_path: pathlib.Path,
     sql_path: pathlib.Path,
     api_path: pathlib.Path,
+    require_frozen: bool = False,
 ) -> dict[str, Any]:
     hashes = {
         "mapping_sha256": ZERO_SHA256,
         "hydration_input_sha256": ZERO_SHA256,
         "hydration_evidence_sha256": ZERO_SHA256,
+        "hydration_checkpoint_sha256": ZERO_SHA256,
         "remote_hydrated_manifest_sha256": ZERO_SHA256,
         "final_manifest_sha256": ZERO_SHA256,
         "bundle_manifest_sha256": ZERO_SHA256,
         "bundle_verdict_sha256": ZERO_SHA256,
+        "recovery_plan_sha256": ZERO_SHA256,
+        "recovery_manifest_sha256": ZERO_SHA256,
+        "recovery_verdict_sha256": ZERO_SHA256,
+        "recovery_db_apply_sha256": ZERO_SHA256,
+        "recovery_db_idempotent_sha256": ZERO_SHA256,
+        "recovery_component_apply_sha256": ZERO_SHA256,
         "historical_exception_sha256": ZERO_SHA256,
         "historical_sql_evidence_sha256": ZERO_SHA256,
         "historical_api_evidence_sha256": ZERO_SHA256,
         "historical_mapping_row_hash": ZERO_SHA256,
     }
-    remote_count = bundle_count = exception_count = final_count = 0
+    remote_count = bundle_count = recovery_count = exception_count = final_count = 0
     try:
         require_sha(expected_mapping_sha256, "expected mapping SHA-256")
         require_sha(
@@ -679,6 +890,10 @@ def adjudicate(
             expected_final_manifest_sha256,
             "expected final manifest SHA-256",
         )
+        require_sha(
+            expected_recovery_plan_sha256,
+            "expected recovery plan SHA-256",
+        )
         final_rows, final_sha = read_jsonl(
             final_manifest_path, "final manifest", final_manifest=True
         )
@@ -688,13 +903,25 @@ def adjudicate(
                 "g06.final_manifest_hash",
                 "final manifest SHA-256 differs from the finalized boundary",
             )
-        remote, bundles, _exception_row = split_final_rows(final_rows)
-        remote_count, bundle_count, exception_count, final_count = (
+        remote, bundles, recoveries, _exception_row = split_final_rows(final_rows)
+        remote_count, bundle_count, recovery_count, exception_count, final_count = (
             len(remote),
             len(bundles),
+            len(recoveries),
             1,
             len(final_rows),
         )
+        if require_frozen and (
+            remote_count != 29046
+            or bundle_count != 7
+            or recovery_count != 3
+            or exception_count != 1
+            or final_count != 29057
+        ):
+            raise AdjudicationError(
+                "g06.frozen_composition_count",
+                "frozen composition must be remote=29046 recovery=3 bundle=7 exception=1 final=29057",
+            )
         hydration_input, hydration_input_sha = read_jsonl(
             hydration_input_path,
             "hydration input",
@@ -706,21 +933,61 @@ def adjudicate(
                 "g06.hydration_input_hash",
                 "hydration input SHA-256 differs from the prepared boundary",
             )
-        _hydration, hydration_evidence_sha, remote_sha = (
+        _hydration, hydration_evidence_sha, remote_sha, checkpoint_sha = (
             verify_remote_hydration(
                 hydration_input,
                 hydration_input_sha,
                 remote,
                 hydration_evidence_path,
+                hydration_checkpoint_path,
             )
         )
         hashes["hydration_evidence_sha256"] = hydration_evidence_sha
         hashes["remote_hydrated_manifest_sha256"] = remote_sha
+        hashes["hydration_checkpoint_sha256"] = checkpoint_sha
+        if require_frozen and (
+            _hydration.get("missing_sha256_count") != 9867
+            or _hydration.get("configured_target_row_count") != 9867
+            or _hydration.get("unique_target_count") != 8829
+        ):
+            raise AdjudicationError(
+                "g06.frozen_hydration_count",
+                "frozen hydration must be missing=9867 and unique=8829",
+            )
         bundle_verdict_sha, bundle_manifest_sha = verify_bundle_verdict(
             bundles, bundle_verdict_path
         )
         hashes["bundle_verdict_sha256"] = bundle_verdict_sha
         hashes["bundle_manifest_sha256"] = bundle_manifest_sha
+        (
+            recovery_verdict_sha,
+            recovery_manifest_sha,
+            recovery_plan_sha,
+            recovery_db_apply_sha,
+            recovery_db_idempotent_sha,
+            recovery_component_apply_sha,
+        ) = verify_recovery_verdict(
+            recoveries=recoveries,
+            mapping_path=mapping_path,
+            expected_mapping_sha256=expected_mapping_sha256,
+            plan_path=recovery_plan_path,
+            expected_plan_sha256=expected_recovery_plan_sha256,
+            verdict_path=recovery_verdict_path,
+            db_apply_path=recovery_db_apply_path,
+            db_idempotent_path=recovery_db_idempotent_path,
+            component_apply_path=recovery_component_apply_path,
+            require_frozen=require_frozen,
+        )
+        hashes["recovery_verdict_sha256"] = recovery_verdict_sha
+        hashes["recovery_manifest_sha256"] = recovery_manifest_sha
+        hashes["recovery_plan_sha256"] = recovery_plan_sha
+        hashes["recovery_db_apply_sha256"] = recovery_db_apply_sha
+        hashes["recovery_db_idempotent_sha256"] = (
+            recovery_db_idempotent_sha
+        )
+        hashes["recovery_component_apply_sha256"] = (
+            recovery_component_apply_sha
+        )
         (
             exception_sha,
             sql_sha,
@@ -745,6 +1012,7 @@ def adjudicate(
             hashes=hashes,
             remote_row_count=remote_count,
             bundle_row_count=bundle_count,
+            recovery_row_count=recovery_count,
             exception_count=exception_count,
             final_row_count=final_count,
         )
@@ -774,6 +1042,7 @@ def adjudicate(
             hashes=hashes,
             remote_row_count=remote_count,
             bundle_row_count=bundle_count,
+            recovery_row_count=recovery_count,
             exception_count=exception_count,
             final_row_count=final_count,
         )
@@ -874,7 +1143,7 @@ def extract_bundles(
             "g06.final_manifest_hash",
             "final manifest SHA-256 differs from the finalized boundary",
         )
-    _remote, bundles, _exception = split_final_rows(rows)
+    _remote, bundles, _recoveries, _exception = split_final_rows(rows)
     return canonical_jsonl(bundles)
 
 
@@ -892,9 +1161,28 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     decide.add_argument("--hydration-input", type=pathlib.Path, required=True)
     decide.add_argument("--expected-hydration-input-sha256", required=True)
     decide.add_argument("--hydration-evidence", type=pathlib.Path, required=True)
+    decide.add_argument(
+        "--hydration-checkpoint", type=pathlib.Path, required=True
+    )
     decide.add_argument("--final-manifest", type=pathlib.Path, required=True)
     decide.add_argument("--expected-final-manifest-sha256", required=True)
     decide.add_argument("--bundle-verdict", type=pathlib.Path, required=True)
+    decide.add_argument(
+        "--recovery-plan", type=pathlib.Path, required=True
+    )
+    decide.add_argument("--expected-recovery-plan-sha256", required=True)
+    decide.add_argument(
+        "--recovery-verdict", type=pathlib.Path, required=True
+    )
+    decide.add_argument(
+        "--recovery-db-apply", type=pathlib.Path, required=True
+    )
+    decide.add_argument(
+        "--recovery-db-idempotent", type=pathlib.Path, required=True
+    )
+    decide.add_argument(
+        "--recovery-component-apply", type=pathlib.Path, required=True
+    )
     decide.add_argument(
         "--historical-unavailable-exception",
         type=pathlib.Path,
@@ -931,8 +1219,14 @@ def main(argv: list[str] | None = None) -> int:
         args.mapping.resolve(),
         args.hydration_input.resolve(),
         args.hydration_evidence.resolve(),
+        args.hydration_checkpoint.resolve(),
         args.final_manifest.resolve(),
         args.bundle_verdict.resolve(),
+        args.recovery_plan.resolve(),
+        args.recovery_verdict.resolve(),
+        args.recovery_db_apply.resolve(),
+        args.recovery_db_idempotent.resolve(),
+        args.recovery_component_apply.resolve(),
         args.historical_unavailable_exception.resolve(),
         args.historical_sql_evidence.resolve(),
         args.historical_api_evidence.resolve(),
@@ -946,12 +1240,20 @@ def main(argv: list[str] | None = None) -> int:
         hydration_input_path=args.hydration_input,
         expected_hydration_input_sha256=args.expected_hydration_input_sha256,
         hydration_evidence_path=args.hydration_evidence,
+        hydration_checkpoint_path=args.hydration_checkpoint,
         final_manifest_path=args.final_manifest,
         expected_final_manifest_sha256=args.expected_final_manifest_sha256,
         bundle_verdict_path=args.bundle_verdict,
+        recovery_plan_path=args.recovery_plan,
+        expected_recovery_plan_sha256=args.expected_recovery_plan_sha256,
+        recovery_verdict_path=args.recovery_verdict,
+        recovery_db_apply_path=args.recovery_db_apply,
+        recovery_db_idempotent_path=args.recovery_db_idempotent,
+        recovery_component_apply_path=args.recovery_component_apply,
         exception_path=args.historical_unavailable_exception,
         sql_path=args.historical_sql_evidence,
         api_path=args.historical_api_evidence,
+        require_frozen=True,
     )
     object_verdict = object_verdict_from_composition(
         composition, args.historical_unavailable_exception

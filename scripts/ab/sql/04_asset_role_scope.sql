@@ -26,8 +26,10 @@ UNION ALL
 SELECT 'asset_role_scope.mode_item_count_invalid', CONCAT(r.id), CONCAT('mode=', r.mode, ',items=', COUNT(i.id))
 FROM task_asset_group_revisions r LEFT JOIN task_asset_group_revision_items i ON i.revision_id = r.id
 WHERE @ab_side = 'B'
-GROUP BY r.id, r.mode
-HAVING (r.mode = 'single' AND COUNT(i.id) <> 1) OR (r.mode = 'set' AND COUNT(i.id) < 2)
+GROUP BY r.id, r.mode, r.status, r.source_stage
+HAVING r.status <> 'draft'
+  AND NOT (r.source_stage = 'design' AND COUNT(i.id) = 0)
+  AND ((r.mode = 'single' AND COUNT(i.id) <> 1) OR (r.mode = 'set' AND COUNT(i.id) < 2))
 UNION ALL
 SELECT 'asset_role_scope.final_sort_not_contiguous', CONCAT(i.revision_id), CONCAT('min=', MIN(i.sort_order), ',max=', MAX(i.sort_order), ',count=', COUNT(*))
 FROM task_asset_group_revision_items i

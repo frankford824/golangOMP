@@ -18,13 +18,28 @@ WITH observed AS (
   UNION ALL
   SELECT CAST('G03' AS BINARY), CAST(CONCAT('revision:', g.task_id, ':', g.scope_kind, ':', g.scope_ref_id, ':', r.revision_no) AS BINARY),
          CAST(SHA2(CONCAT_WS(CHAR(31), g.task_id, g.scope_kind, g.scope_ref_id, r.revision_no,
-           r.status, r.mode, COALESCE(r.source_task_asset_id, ''), r.source_stage,
+           r.status, r.mode,
+           CASE
+             WHEN a.id IS NULL THEN ''
+             WHEN LOWER(a.file_name) = 'source-bundle.zip' AND a.source_module_key = 'migration'
+               THEN CONCAT('bundle:', COALESCE(a.whole_hash, ''))
+             ELSE CONCAT('asset:', COALESCE(a.asset_id, ''), ':', COALESCE(a.storage_ref_id, ''))
+           END,
+           r.source_stage,
            r.created_by, r.reason, COALESCE(DATE_FORMAT(r.submitted_at, '%Y-%m-%dT%H:%i:%s.%f'), ''),
            COALESCE(DATE_FORMAT(r.finalized_at, '%Y-%m-%dT%H:%i:%s.%f'), '')), 256) AS BINARY)
   FROM task_asset_group_revisions r JOIN task_asset_groups g ON g.id = r.group_id
+  LEFT JOIN task_assets a ON a.id = r.source_task_asset_id
   UNION ALL
   SELECT CAST('G04' AS BINARY), CAST(CONCAT('revision-source:', g.task_id, ':', g.scope_kind, ':', g.scope_ref_id, ':', r.revision_no) AS BINARY),
-         CAST(SHA2(CONCAT_WS(CHAR(31), COALESCE(a.id, ''), COALESCE(a.asset_type, ''),
+         CAST(SHA2(CONCAT_WS(CHAR(31),
+           CASE
+             WHEN a.id IS NULL THEN ''
+             WHEN LOWER(a.file_name) = 'source-bundle.zip' AND a.source_module_key = 'migration'
+               THEN CONCAT('bundle:', COALESCE(a.whole_hash, ''))
+             ELSE CONCAT('asset:', COALESCE(a.asset_id, ''), ':', COALESCE(a.storage_ref_id, ''))
+           END,
+           COALESCE(a.asset_type, ''),
            COALESCE(a.whole_hash, ''), COALESCE(a.binding_state, ''),
            COALESCE(a.bound_role, ''), COALESCE(a.scope_sku_code, ''),
            COALESCE(a.retouch_requirement_id, '')), 256) AS BINARY)

@@ -1,8 +1,19 @@
 SELECT 'negative.unresolved_group_migration' AS violation_code, CONCAT(g.id) AS entity_key, g.migration_issue AS detail
 FROM task_asset_groups g WHERE @ab_side = 'B' AND g.migration_incomplete = 1
 UNION ALL
-SELECT 'negative.legacy_task_asset', CONCAT(a.id), CONCAT('task=', a.task_id, ',type=', a.asset_type)
-FROM task_assets a WHERE @ab_side = 'B' AND a.binding_state = 'legacy'
+SELECT 'negative.legacy_asset_referenced_by_v8', CONCAT(a.id), CONCAT('task=', a.task_id, ',type=', a.asset_type)
+FROM task_assets a
+WHERE @ab_side = 'B' AND a.binding_state = 'legacy' AND (
+  EXISTS (SELECT 1 FROM task_asset_group_revisions r WHERE r.source_task_asset_id = a.id)
+  OR EXISTS (SELECT 1 FROM task_asset_group_revision_items i WHERE i.task_asset_id = a.id)
+  OR EXISTS (SELECT 1 FROM task_asset_group_revision_references rr WHERE rr.formal_task_asset_id = a.id)
+)
+UNION ALL
+SELECT 'negative.legacy_asset_with_bound_coordinates', CONCAT(a.id),
+       CONCAT('group=', COALESCE(a.bound_group_id, 0), ',role=', COALESCE(a.bound_role, ''))
+FROM task_assets a
+WHERE @ab_side = 'B' AND a.binding_state = 'legacy'
+  AND (a.bound_group_id IS NOT NULL OR a.bound_role IS NOT NULL)
 UNION ALL
 SELECT 'negative.unconfirmed_revision_metadata', CONCAT(r.id), LEFT(r.reason, 240)
 FROM task_asset_group_revisions r
@@ -33,5 +44,6 @@ FROM task_assets a
 WHERE @ab_side = 'B' AND (a.access_revoked_at IS NOT NULL OR a.object_deleted_at IS NOT NULL OR a.binding_state <> 'bound') AND (
   EXISTS (SELECT 1 FROM task_asset_group_revisions r WHERE r.source_task_asset_id = a.id)
   OR EXISTS (SELECT 1 FROM task_asset_group_revision_items i WHERE i.task_asset_id = a.id)
+  OR EXISTS (SELECT 1 FROM task_asset_group_revision_references rr WHERE rr.formal_task_asset_id = a.id)
 )
 ORDER BY 1, 2, 3;

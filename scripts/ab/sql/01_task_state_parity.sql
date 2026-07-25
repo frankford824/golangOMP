@@ -21,7 +21,8 @@ SELECT CONVERT('task_state.completed_with_open_module' USING utf8mb4) COLLATE ut
        CONVERT(CONCAT(t.id) USING utf8mb4) COLLATE utf8mb4_unicode_ci,
        CONVERT(CONCAT('module=', tm.module_key, ',state=', tm.state) USING utf8mb4) COLLATE utf8mb4_unicode_ci
 FROM tasks t JOIN task_modules tm ON tm.task_id = t.id
-WHERE @ab_side = 'B' AND t.task_status = 'Completed' AND tm.state NOT IN ('completed', 'skipped')
+WHERE @ab_side = 'B' AND t.task_status = 'Completed'
+  AND tm.state NOT IN ('completed', 'closed', 'forcibly_closed', 'closed_by_admin')
 UNION ALL
 SELECT CONVERT('task_state.claim_timestamp_without_actor' USING utf8mb4) COLLATE utf8mb4_unicode_ci,
        CONVERT(CONCAT(tm.id) USING utf8mb4) COLLATE utf8mb4_unicode_ci,

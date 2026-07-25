@@ -56,6 +56,10 @@ class ManifestLoaderTest(unittest.TestCase):
             emit_sql(rows, output)
             sql = output.read_text(encoding="utf-8")
             self.assertIn("CREATE TEMPORARY TABLE ab_manifest_entities", sql)
+            self.assertIn(
+                "DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci",
+                sql,
+            )
             self.assertIn("PRIMARY KEY (gate_name, entity_key)", sql)
             self.assertIn("CAST(CONVERT(0x", sql)
 

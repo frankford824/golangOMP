@@ -140,7 +140,7 @@ def emit_sql(rows: list[dict[str, Any]], output: pathlib.Path) -> None:
         "  review_state VARCHAR(32) NOT NULL,",
         "  detail_json JSON NOT NULL,",
         "  PRIMARY KEY (gate_name, entity_key)",
-        ");",
+        ") DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;",
     ]
     for row in rows:
         values = [hex_text(row[key]) for key in ("run_id", "gate_name", "entity_key", "expected_hash", "expected_state", "review_state")]

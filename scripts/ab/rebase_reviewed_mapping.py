@@ -23,6 +23,11 @@ REVIEW_FIELDS = {
     "manifest_row_hash",
 }
 ROW_COLLECTIONS = (
+    (
+        "asset_recovery",
+        "asset_recoveries",
+        lambda row: (int(row["missing_task_asset_id"]),),
+    ),
     ("planning", "planning_tasks", lambda row: (int(row["task_id"]),)),
     (
         "organization",

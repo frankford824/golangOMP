@@ -775,7 +775,7 @@ func TestValidateCutoverStateRejectsPlanningTasksWithResourceGroups(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 6; i++ {
 		mock.ExpectQuery("SELECT COUNT\\(\\*\\)").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 	}
 	mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM tasks t JOIN task_asset_groups").WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(1))
@@ -849,6 +849,8 @@ func TestValidateCutoverStateAcceptsOnlyVerifiedPlanningTombstoneException(t *te
 	mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM tasks WHERE task_type='purchase_task'").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 	mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM tasks WHERE task_status IN").
+		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectQuery("SELECT COUNT\\(\\*\\) FROM task_modules tm JOIN tasks t").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 	mock.ExpectQuery("WHERE t.task_type='sku_planning' AND t.id <> 497 AND").
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))

@@ -495,7 +495,11 @@ def build_expected(args: argparse.Namespace) -> None:
             raise ValueError(f"planning task {task_id} is absent from frozen A")
         task["task_type"] = "sku_planning"
         task["task_status"] = planning["target_task_status"]
-        if not planning_by_task[task_id]:
+        is_tombstone = (
+            "legacy_incomplete_uat_planning_tombstone_v1"
+            in set(planning.get("review_policy_ids", []))
+        )
+        if not planning_by_task[task_id] and not is_tombstone:
             for item in planning.get("items", []):
                 sku = skus.get(int(item["task_sku_item_id"]))
                 planning_by_task[task_id].append({"task_id": task_id, "task_sku_item_id": item["task_sku_item_id"],

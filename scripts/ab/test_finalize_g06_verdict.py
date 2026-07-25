@@ -1,15 +1,20 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import pathlib
 import tempfile
 import unittest
+import uuid
 
 from scripts.ab import finalize_g06_verdict as MODULE
 from scripts.ab import finalize_release_gates as RELEASE
 from scripts.ab import historical_unavailable_exception as HISTORICAL
+from scripts.ab import g06_recovery_contract as RECOVERY
+from scripts.ab import hydrate_object_manifest as HYDRATOR
 from scripts.ab import manifest_loader as LOADER
 from scripts.ab import object_manifest_verifier as OBJECTS
+from scripts.ab import verify_g06_clone_b_recoveries as RECOVERY_VERIFIER
 
 
 class FinalizeG06VerdictTest(unittest.TestCase):
@@ -101,9 +106,258 @@ class FinalizeG06VerdictTest(unittest.TestCase):
             "blockers": [],
         }
         row["manifest_row_hash"] = HISTORICAL.canonical_hash(row)
-        return {"version": 2, "asset_recoveries": [row]}
+        recoveries = [row]
+        for missing_id in RECOVERY.RECOVERY_IDS:
+            source_id, size = RECOVERY.REQUIRED_SOURCES[missing_id]
+            recovery = {
+                "task_id": RECOVERY.TASK_ID,
+                "missing_task_asset_id": missing_id,
+                "recovery_source_task_asset_id": source_id,
+                "expected_file_size": size,
+                "strategy": RECOVERY.STRATEGY,
+                "review_policy_ids": [RECOVERY.POLICY],
+                "confidence": "confirmed_auto",
+                "confirmed_by": 1,
+                "confirmed_at": "2026-07-24T02:43:42Z",
+                "confirmation_note": "approved recovery fixture",
+                "blockers": [],
+                "original_storage_ref_id": f"original-ref-{missing_id}",
+                "recovery_source_sha256": hashlib.sha256(
+                    bytes([missing_id % 251]) * size
+                ).hexdigest(),
+                "recovery_source_storage_ref_id": f"source-ref-{missing_id}",
+                "controlled_read_protocol": "controlled-asset-read-v1",
+                "controlled_read_evidence_sha256": "e" * 64,
+            }
+            recovery["manifest_row_hash"] = RECOVERY.canonical_hash(recovery)
+            recoveries.append(recovery)
+        return {"version": 2, "asset_recoveries": recoveries}
+
+    def recovery_material(
+        self, root: pathlib.Path, mapping_path: pathlib.Path
+    ) -> dict[str, pathlib.Path | list[dict]]:
+        mapping = json.loads(mapping_path.read_text(encoding="utf-8"))
+        mapping_sha = MODULE.sha256_file(mapping_path)
+        by_id = {
+            row["missing_task_asset_id"]: row
+            for row in mapping["asset_recoveries"]
+            if row["missing_task_asset_id"] in RECOVERY.RECOVERY_IDS
+        }
+        entries = []
+        rows = []
+        run_id = "fixture-run"
+        for missing_id in RECOVERY.RECOVERY_IDS:
+            row = by_id[missing_id]
+            source_id, size = RECOVERY.REQUIRED_SOURCES[missing_id]
+            source_sha = row["recovery_source_sha256"]
+            target_ref = str(
+                uuid.uuid5(
+                    RECOVERY.RECOVERY_NAMESPACE,
+                    f"{run_id}:{mapping_sha}:{missing_id}:{source_sha}",
+                )
+            )
+            target_key = (
+                f"v8-ab/{run_id}/recovered/task-2807/"
+                f"task-asset-{missing_id}/{source_sha}.bin"
+            )
+            request_id = f"request-{missing_id}"
+            storage = {
+                "ref_id": target_ref,
+                "ref_key": target_key,
+                "owner_type": "task_asset",
+                "owner_id": missing_id,
+                "file_size": size,
+                "mime_type": "image/jpeg",
+                "checksum_hint": source_sha,
+                "status": "recorded",
+                "is_placeholder": 0,
+            }
+            entries.append(
+                {
+                    "missing_task_asset_id": missing_id,
+                    "source_task_asset_id": source_id,
+                    "source_size": size,
+                    "source_sha256": source_sha,
+                    "target_storage_ref_id": target_ref,
+                    "target_object_key": target_key,
+                    "db_apply_plan": {
+                        "insert_asset_storage_ref": storage,
+                        "update_task_asset": {
+                            "where": {"id": missing_id},
+                            "set": {
+                                "storage_ref_id": target_ref,
+                                "storage_key": target_key,
+                                "whole_hash": source_sha,
+                            },
+                        },
+                        "update_upload_request": {
+                            "where": {"request_id": request_id},
+                            "set": {
+                                "bound_ref_id": target_ref,
+                                "checksum_hint": source_sha,
+                                "file_size": size,
+                                "status": "bound",
+                                "session_status": "completed",
+                            },
+                        },
+                    },
+                    "rollback_registry": {
+                        "original_storage_ref": {
+                            "ref_id": row["original_storage_ref_id"],
+                            "ref_key": f"tasks/2807/original-{missing_id}.jpg",
+                            "storage_adapter": "oss_upload_service",
+                            "file_size": size,
+                            "mime_type": "image/jpeg",
+                            "status": "recorded",
+                            "is_placeholder": 0,
+                        },
+                        "restore_task_asset": {
+                            "id": missing_id,
+                            "task_id": RECOVERY.TASK_ID,
+                            "file_size": size,
+                            "storage_ref_id": row["original_storage_ref_id"],
+                            "upload_request_id": request_id,
+                        },
+                        "restore_upload_request": {
+                            "request_id": request_id,
+                        },
+                    },
+                }
+            )
+            rows.append(
+                {
+                    "entity_key": f"task_asset:{missing_id}",
+                    "owner_kind": "task_asset",
+                    "owner_id": missing_id,
+                    "task_id": RECOVERY.TASK_ID,
+                    "storage_ref_id": target_ref,
+                    "storage_adapter": RECOVERY.FINAL_STORAGE_ADAPTER,
+                    "object_key": target_key,
+                    "size": size,
+                    "mime_type": "image/jpeg",
+                    "sha256": source_sha,
+                    "status": "recorded",
+                    "is_placeholder": False,
+                }
+            )
+        plan_path = root / "recovery-plan.json"
+        self.write_json(
+            plan_path,
+            {
+                "version": 1,
+                "status": "MATERIALIZED",
+                "run_id": run_id,
+                "mapping_sha256": mapping_sha,
+                "database_writes_executed": False,
+                "production_writes_executed": False,
+                "entries": entries,
+            },
+        )
+        plan_sha = MODULE.sha256_file(plan_path)
+        receipt_fields = {
+            "version": 1,
+            "mode": "apply",
+            "run_id": "bundle-materialization-20260723-29",
+            "database": RECOVERY.EXPECTED_DATABASE,
+            "host": RECOVERY.EXPECTED_HOST,
+            "plan_sha256": plan_sha,
+            "database_transaction_committed": True,
+            "object_storage_writes_executed": False,
+            "executed_at": "2026-07-24T00:00:00Z",
+        }
+        apply_path = root / "recovery-db-apply.json"
+        self.write_json(
+            apply_path,
+            {
+                **receipt_fields,
+                "changed_entries": 3,
+                "already_in_target_state_entries": 0,
+            },
+        )
+        idempotent_path = root / "recovery-db-idempotent.json"
+        self.write_json(
+            idempotent_path,
+            {
+                **receipt_fields,
+                "changed_entries": 0,
+                "already_in_target_state_entries": 3,
+            },
+        )
+        artifacts = []
+        for path in (plan_path, apply_path, idempotent_path):
+            artifacts.append(
+                {
+                    "path": {
+                        plan_path: "recovery-materialization-plan.json",
+                        apply_path: "recovery-db-apply.json",
+                        idempotent_path: "recovery-db-idempotent.json",
+                    }[path],
+                    "sha256": MODULE.sha256_file(path),
+                    "size": path.stat().st_size,
+                }
+            )
+        for name in ("recovery-guard-before.json", "recovery-guard-provision.json"):
+            artifacts.append({"path": name, "sha256": "f" * 64, "size": 1})
+        component = {
+            "schema_version": 1,
+            "status": "APPLIED",
+            "component": "recovery",
+            "action": "apply",
+            "run_id": "bundle-materialization-20260723-29",
+            "database": RECOVERY.EXPECTED_DATABASE,
+            "host": RECOVERY.EXPECTED_HOST,
+            "database_writes_executed": True,
+            "production_writes_executed": False,
+            "guard_retained_for_rollback": True,
+            "guard_exactly_restored": False,
+            "artifacts": artifacts,
+        }
+        component["evidence_sha256"] = hashlib.sha256(
+            (RECOVERY.canonical_json(component) + "\n").encode("utf-8")
+        ).hexdigest()
+        component_path = root / "recovery-component-apply.json"
+        self.write_json(component_path, component)
+        subset_sha = MODULE.sha256_bytes(MODULE.canonical_jsonl(rows))
+        verdict = {
+            "schema_version": RECOVERY_VERIFIER.SCHEMA_VERSION,
+            "verdict_type": RECOVERY_VERIFIER.VERDICT_TYPE,
+            "status": "PASS",
+            "violation_count": 0,
+            "checked_count": 3,
+            "recovery_manifest_sha256": subset_sha,
+            "mapping_sha256": mapping_sha,
+            "recovery_plan_sha256": plan_sha,
+            "recovery_db_apply_sha256": MODULE.sha256_file(apply_path),
+            "recovery_db_idempotent_sha256": MODULE.sha256_file(idempotent_path),
+            "recovery_component_apply_sha256": MODULE.sha256_file(component_path),
+            "database": RECOVERY.EXPECTED_DATABASE,
+            "read_only_local_get_count": 3,
+            "database_write_performed": False,
+            "production_write_performed": False,
+            "violations": [],
+        }
+        verdict["evidence_hash"] = MODULE.sha256_bytes(
+            MODULE.canonical_json(verdict).encode()
+        )
+        verdict_path = root / "recovery-verdict.json"
+        self.write_json(verdict_path, verdict)
+        return {
+            "rows": rows,
+            "plan": plan_path,
+            "plan_sha": plan_sha,
+            "apply": apply_path,
+            "idempotent": idempotent_path,
+            "component": component_path,
+            "verdict": verdict_path,
+        }
 
     def fixture(self, root: pathlib.Path) -> dict[str, pathlib.Path | str]:
+        mapping_path = root / "mapping.json"
+        self.write_json(mapping_path, self.mapping())
+        mapping_sha, mapping_row_hash, _row = HISTORICAL.validate_mapping(
+            mapping_path
+        )
+        recovery = self.recovery_material(root, mapping_path)
         hydration_input_rows = sorted(
             [self.remote_row(1, "a" * 64), self.remote_row(2, "")],
             key=MODULE.row_sort_key,
@@ -111,7 +365,10 @@ class FinalizeG06VerdictTest(unittest.TestCase):
         final_remote_rows = [dict(row) for row in hydration_input_rows]
         final_remote_rows[1]["sha256"] = "b" * 64
         final_rows = sorted(
-            final_remote_rows + self.bundle_rows() + [self.exception_row()],
+            final_remote_rows
+            + self.bundle_rows()
+            + recovery["rows"]
+            + [self.exception_row()],
             key=MODULE.row_sort_key,
         )
         hydration_input = root / "hydration-input.jsonl"
@@ -123,12 +380,34 @@ class FinalizeG06VerdictTest(unittest.TestCase):
         remote_sha = MODULE.sha256_bytes(
             MODULE.canonical_jsonl(final_remote_rows)
         )
+        completed = HYDRATOR.checkpoint_record(
+            "upload",
+            hydration_input_rows[1]["object_key"],
+            HYDRATOR.ObjectMetadata(
+                size=final_remote_rows[1]["size"],
+                mime_type=final_remote_rows[1]["mime_type"],
+                sha256=final_remote_rows[1]["sha256"],
+            ),
+        )
+        checkpoint_doc = HYDRATOR.checkpoint_document(
+            input_sha,
+            {"upload": "a" * 64, "oss": "b" * 64},
+            {
+                HYDRATOR.checkpoint_key(
+                    "upload", hydration_input_rows[1]["object_key"]
+                ): completed
+            },
+            {},
+        )
+        checkpoint_path = root / "hydration-checkpoint.json"
+        self.write_json(checkpoint_path, checkpoint_doc)
+        checkpoint_sha = MODULE.sha256_file(checkpoint_path)
         hydration = {
             "schema_version": 1,
             "status": "PASS",
             "input_manifest_sha256": input_sha,
             "hydrated_manifest_sha256": remote_sha,
-            "checkpoint_sha256": "c" * 64,
+            "checkpoint_sha256": checkpoint_sha,
             "row_count": 2,
             "already_complete_count": 1,
             "missing_sha256_count": 1,
@@ -160,11 +439,6 @@ class FinalizeG06VerdictTest(unittest.TestCase):
         bundle_verdict_path = root / "bundle-verdict.json"
         self.write_json(bundle_verdict_path, bundle_verdict)
 
-        mapping_path = root / "mapping.json"
-        self.write_json(mapping_path, self.mapping())
-        mapping_sha, mapping_row_hash, _row = HISTORICAL.validate_mapping(
-            mapping_path
-        )
         sql = {
             "schema_version": 1,
             "status": "PASS",
@@ -207,9 +481,16 @@ class FinalizeG06VerdictTest(unittest.TestCase):
             "hydration_input": hydration_input,
             "hydration_input_sha": input_sha,
             "hydration_evidence": hydration_path,
+            "hydration_checkpoint": checkpoint_path,
             "final_manifest": final_manifest,
             "final_manifest_sha": final_sha,
             "bundle_verdict": bundle_verdict_path,
+            "recovery_plan": recovery["plan"],
+            "recovery_plan_sha": recovery["plan_sha"],
+            "recovery_verdict": recovery["verdict"],
+            "recovery_apply": recovery["apply"],
+            "recovery_idempotent": recovery["idempotent"],
+            "recovery_component": recovery["component"],
             "exception": exception_path,
             "sql": sql_path,
             "api": api_path,
@@ -222,23 +503,31 @@ class FinalizeG06VerdictTest(unittest.TestCase):
             hydration_input_path=paths["hydration_input"],
             expected_hydration_input_sha256=paths["hydration_input_sha"],
             hydration_evidence_path=paths["hydration_evidence"],
+            hydration_checkpoint_path=paths["hydration_checkpoint"],
             final_manifest_path=paths["final_manifest"],
             expected_final_manifest_sha256=paths["final_manifest_sha"],
             bundle_verdict_path=paths["bundle_verdict"],
+            recovery_plan_path=paths["recovery_plan"],
+            expected_recovery_plan_sha256=paths["recovery_plan_sha"],
+            recovery_verdict_path=paths["recovery_verdict"],
+            recovery_db_apply_path=paths["recovery_apply"],
+            recovery_db_idempotent_path=paths["recovery_idempotent"],
+            recovery_component_apply_path=paths["recovery_component"],
             exception_path=paths["exception"],
             sql_path=paths["sql"],
             api_path=paths["api"],
         )
 
-    def test_passes_only_when_all_four_evidence_domains_are_bound(self):
+    def test_passes_only_when_all_five_evidence_domains_are_bound(self):
         with tempfile.TemporaryDirectory() as raw:
             paths = self.fixture(pathlib.Path(raw))
             result = self.adjudicate(paths)
         self.assertEqual("PASS", result["status"])
         self.assertEqual(0, result["violation_count"])
-        self.assertEqual(10, result["checked_count"])
+        self.assertEqual(13, result["checked_count"])
         self.assertEqual(2, result["remote_row_count"])
         self.assertEqual(7, result["bundle_row_count"])
+        self.assertEqual(3, result["recovery_row_count"])
         self.assertEqual(1, result["exception_count"])
         self.assertRegex(result["evidence_hash"], MODULE.SHA256)
 
@@ -252,7 +541,7 @@ class FinalizeG06VerdictTest(unittest.TestCase):
         self.assertEqual(MODULE.OBJECT_VERDICT_FIELDS, set(verdict))
         self.assertEqual("PASS", verdict["status"])
         self.assertEqual(paths["final_manifest_sha"], verdict["manifest_sha256"])
-        self.assertEqual(10, verdict["checked_count"])
+        self.assertEqual(13, verdict["checked_count"])
         self.assertEqual(1, verdict["exception_count"])
         self.assertEqual(paths["mapping_sha"], verdict["mapping_sha256"])
         self.assertEqual([], RELEASE.validate_g8(verdict))
@@ -524,6 +813,139 @@ class FinalizeG06VerdictTest(unittest.TestCase):
             )
         self.assertEqual(
             verdict["manifest_sha256"], MODULE.sha256_bytes(extracted)
+        )
+
+    def test_rebased_checkpoint_hash_coverage_and_metadata_are_bound(self):
+        for mode, expected_code in (
+            ("hash", "g06.checkpoint_hash"),
+            ("coverage", "g06.checkpoint_coverage"),
+            ("metadata", "g06.checkpoint_metadata"),
+        ):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as raw:
+                paths = self.fixture(pathlib.Path(raw))
+                checkpoint = json.loads(
+                    paths["hydration_checkpoint"].read_text(encoding="utf-8")
+                )
+                if mode == "hash":
+                    checkpoint["adapter_fingerprints"]["upload"] = "f" * 64
+                elif mode == "coverage":
+                    checkpoint["completed"] = []
+                else:
+                    checkpoint["completed"][0]["sha256"] = "f" * 64
+                self.write_json(paths["hydration_checkpoint"], checkpoint)
+                if mode != "hash":
+                    evidence = json.loads(
+                        paths["hydration_evidence"].read_text(encoding="utf-8")
+                    )
+                    evidence["checkpoint_sha256"] = MODULE.sha256_file(
+                        paths["hydration_checkpoint"]
+                    )
+                    evidence["evidence_hash"] = MODULE.sha256_bytes(
+                        MODULE.canonical_json(
+                            {
+                                key: value
+                                for key, value in evidence.items()
+                                if key != "evidence_hash"
+                            }
+                        ).encode("utf-8")
+                    )
+                    self.write_json(paths["hydration_evidence"], evidence)
+                result = self.adjudicate(paths)
+            self.assertEqual("BLOCKED", result["status"])
+            self.assertEqual(
+                expected_code, result["violations"][0]["violation_code"]
+            )
+
+    def test_recovery_rows_and_verdict_are_independently_bound(self):
+        for mode, expected_code in (
+            ("row", "g06.recovery_rows"),
+            ("verdict", "g06.recovery_verdict"),
+        ):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as raw:
+                paths = self.fixture(pathlib.Path(raw))
+                if mode == "row":
+                    rows = [
+                        json.loads(line)
+                        for line in paths["final_manifest"].read_text(
+                            encoding="utf-8"
+                        ).splitlines()
+                    ]
+                    recovery = next(
+                        row for row in rows
+                        if row["storage_adapter"]
+                        == RECOVERY.FINAL_STORAGE_ADAPTER
+                    )
+                    recovery["storage_ref_id"] = "drifted-ref"
+                    paths["final_manifest"].write_bytes(
+                        MODULE.canonical_jsonl(rows)
+                    )
+                    paths["final_manifest_sha"] = MODULE.sha256_file(
+                        paths["final_manifest"]
+                    )
+                else:
+                    verdict = json.loads(
+                        paths["recovery_verdict"].read_text(encoding="utf-8")
+                    )
+                    verdict["checked_count"] = 2
+                    verdict["evidence_hash"] = MODULE.sha256_bytes(
+                        MODULE.canonical_json(
+                            {
+                                key: value
+                                for key, value in verdict.items()
+                                if key != "evidence_hash"
+                            }
+                        ).encode("utf-8")
+                    )
+                    self.write_json(paths["recovery_verdict"], verdict)
+                result = self.adjudicate(paths)
+            self.assertEqual("BLOCKED", result["status"])
+            self.assertEqual(
+                expected_code, result["violations"][0]["violation_code"]
+            )
+
+    def test_recovery_receipt_commit_drift_blocks_composition(self):
+        with tempfile.TemporaryDirectory() as raw:
+            paths = self.fixture(pathlib.Path(raw))
+            receipt = json.loads(
+                paths["recovery_apply"].read_text(encoding="utf-8")
+            )
+            receipt["database_transaction_committed"] = False
+            self.write_json(paths["recovery_apply"], receipt)
+            result = self.adjudicate(paths)
+        self.assertEqual("BLOCKED", result["status"])
+        self.assertEqual(
+            "g06.contract_error",
+            result["violations"][0]["violation_code"],
+        )
+
+    def test_frozen_composition_requires_29046_plus_3_plus_7_plus_1(self):
+        with tempfile.TemporaryDirectory() as raw:
+            paths = self.fixture(pathlib.Path(raw))
+            result = MODULE.adjudicate(
+                mapping_path=paths["mapping"],
+                expected_mapping_sha256=paths["mapping_sha"],
+                hydration_input_path=paths["hydration_input"],
+                expected_hydration_input_sha256=paths["hydration_input_sha"],
+                hydration_evidence_path=paths["hydration_evidence"],
+                hydration_checkpoint_path=paths["hydration_checkpoint"],
+                final_manifest_path=paths["final_manifest"],
+                expected_final_manifest_sha256=paths["final_manifest_sha"],
+                bundle_verdict_path=paths["bundle_verdict"],
+                recovery_plan_path=paths["recovery_plan"],
+                expected_recovery_plan_sha256=paths["recovery_plan_sha"],
+                recovery_verdict_path=paths["recovery_verdict"],
+                recovery_db_apply_path=paths["recovery_apply"],
+                recovery_db_idempotent_path=paths["recovery_idempotent"],
+                recovery_component_apply_path=paths["recovery_component"],
+                exception_path=paths["exception"],
+                sql_path=paths["sql"],
+                api_path=paths["api"],
+                require_frozen=True,
+            )
+        self.assertEqual("BLOCKED", result["status"])
+        self.assertEqual(
+            "g06.frozen_composition_count",
+            result["violations"][0]["violation_code"],
         )
 
 

@@ -54,6 +54,33 @@ connects to distinct, locally addressed A/B clones and wraps every SQL input in
 a read-only transaction. Arbitrary restore/migration SQL is deliberately
 rejected because a `USE` or qualified table name can escape a name-prefix guard.
 
+`workflow-groups-migrate/v8.8` uses snapshot version 8.  In addition to task,
+group, revision, asset, planning, organization, access, and auto-increment
+state, the snapshot records every managed `task_modules` row and the
+before/after task and resource-group search documents.  After task and planning state
+migration, every module of a task whose final status is `Completed` is closed
+with the same terminal-state contract as the runtime `CompleteModules`
+operation.  The snapshot cohort explicitly includes Completed tasks that still
+have non-terminal modules, even when they have no migrated resource group.
+Rollback first requires the exact apply-time search projection, then restores
+the exact module rows and both pre-apply search-document tables before removing
+revisions.
+This prevents either a later reindex or a search projection foreign key from
+turning a reversible revision rehearsal into a destructive partial rollback.
+
+Legacy `erp_product_image` migration is deterministic but optional.  A planning
+item inherits an image only when exactly one uploaded, unarchived,
+non-superseded, non-placeholder object-backed asset matches the same `task_id`
+and exact `scope_sku_code`; its storage row must be active/recorded and owned by
+that exact task asset. Dry-run revalidates the same candidate contract, and the
+apply transaction repeats it under row locks before writing. No match remains
+an approved empty optional image;
+multiple matches or any post-review drift are `hard_blocked`. Upload time is
+never used as a tie-breaker. G08 independently repeats the same exact
+owner/lifecycle/uniqueness predicate for every migration-created current
+planning revision; a selected image must be the one eligible storage reference,
+while an approved empty image requires zero eligible candidates.
+
 ## Evidence artifacts
 
 The default directory is `tmp/v8-ab/<run-id>/` and is ignored by Git:
@@ -341,3 +368,66 @@ The deterministic result contains `status`, `violation_count`,
 `checked_count`, `manifest_sha256`, `evidence_hash`, and the sorted violations.
 Only `status=PASS` together with `violation_count=0` satisfies the G06 manifest
 loader contract.
+
+`verify_delivery_source_alias_object_coverage.py` closes the relational half
+of G06 after Clone B apply. It enumerates every binary-exact
+`source + migration` asset without filtering remarks, verifies every approved
+delivery-source alias and revision use, and treats the seven source bundles as
+a separate exact contract. A PASS artifact binds the historical-unavailable
+attestation, the administrator decision template, the confirmed bundle
+manifest, all frozen bundle asset/storage/member allocations, the seven bundle
+object-manifest rows, and canonical hashes of the observed Clone B asset,
+group, storage, and revision-usage rows. Bundle rows are excluded from legacy
+alias counts only after this full validation succeeds.
+
+#### Frozen task-2807 recovery domain
+
+The approved task-2807 deleted-asset recovery is not a remote-object
+exception. `prepare_g06_object_manifest.py` removes exactly the three original
+HTTP-404 rows (`task_asset:23989`, `task_asset:23990`, and
+`task_asset:23991`) from remote hydration, in addition to the independent
+`task_asset:12323` historical-unavailable tombstone. It accepts only the
+final-reviewed mapping
+`725074175bb2ef15a149f87ed4c1da6fc3dc8aac143b49c178a43847d8733ce9`
+and the hold-open-004 recovery plan
+`1e3fbaabb2cad62d69473d1456a9b4e079bb3c383eff97175b92c745316d84ff`.
+No old OSS row is assigned a digest.
+
+`rebase_g06_recovery_checkpoint.py` preserves every non-target completed and
+failed checkpoint record byte-for-byte, removes only the three exact
+`object_manifest.missing/http_status=404` records, and binds the checkpoint to
+the new hydration-input hash. Any other row delta, failure result, or
+checkpoint result is rejected.
+
+At finalization, the three entities are reconstructed as
+`storage_adapter=clone_b_recovery` rows from the plan's deterministic target
+UUID, object key, size, MIME, and SHA-256. The independent
+`verify_g06_clone_b_recoveries.py` verifier performs contained, non-symlink,
+regular-file reads of those three local Clone B targets and also validates:
+
+- initial DB apply `changed=3/already=0`, committed;
+- idempotent DB apply `changed=0/already=3`, committed;
+- database `ab_r20260723_01_b`, loopback host, run ID, and plan hash;
+- component `APPLIED` receipt, artifact hashes, retained rollback guard, and
+  `production_writes_executed=false`.
+
+Finalization has two independent mapping boundaries and neither may substitute
+for the other. `--recovery-mapping` must hash to the frozen final-reviewed
+mapping above and remains bound to the recovery plan. `--bundle-mapping` must
+hash to the source mapping recorded by the confirmed source-bundle manifest;
+the confirmed manifest and materialized registry are then validated against
+that separate hash. Both expected SHA-256 values are required by the CLI and
+are emitted separately as `recovery_mapping_sha256` and
+`bundle_mapping_sha256`. Hash separation alone is insufficient: the finalizer
+also requires the final-reviewed mapping to contain exactly the seven frozen
+bundle scopes and compares each normalized `source_bundle` object, including
+ordered members, with the validated registry. The summary records
+`reviewed_bundle_scope_count=7` and
+`reviewed_bundle_semantics_sha256` over the canonical ordered scope projection.
+
+The final G06 adjudicator separately revalidates the same plan, receipts,
+recovery rows, local verifier verdict, rebased checkpoint, and hydration
+evidence. The frozen composition is exactly 29,046 remote rows, three recovery
+rows, seven bundle rows, one historical-unavailable row, and 29,057 rows total;
+the hydration boundary is exactly 9,867 missing fingerprints and 8,829 unique
+remote targets.

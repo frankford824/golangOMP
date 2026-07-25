@@ -62,7 +62,8 @@ class CanonicalEntitiesTest(unittest.TestCase):
                 {"id": 20, "task_type": "purchase_task", "task_status": "InProgress", "current_handler_id": None, "workflow_revision": 0},
             ],
             "group": [{"id": 1, "task_id": 10, "scope_kind": "task", "scope_ref_id": 0, "migration_incomplete": 1, "migration_issue": "legacy"}],
-            "asset": [{"id": 100, "task_id": 10, "asset_type": "delivery", "whole_hash": "c" * 64,
+            "asset": [{"id": 100, "asset_id": 900, "task_id": 10, "asset_type": "delivery",
+                       "storage_ref_id": "ref-100", "whole_hash": "c" * 64,
                        "binding_state": "staged", "bound_role": None, "scope_sku_code": "", "retouch_requirement_id": None}],
             "sku": [{"id": 200, "task_id": 20, "sku_code": "SKU-20"}],
             "reference": [{"id": 300, "task_id": 10, "ref_id": "ref-300", "sku_item_id": None,
@@ -97,10 +98,10 @@ class CanonicalEntitiesTest(unittest.TestCase):
         planning_task = next(row for row in first if row["entity_key"] == "task:20")
         self.assertEqual(planning_task["components"], ["20", "sku_planning", "Completed", "", "1"])
         revision = next(row for row in first if row["entity_key"] == "revision:10:task:0:1")
-        self.assertEqual(revision["components"][6], "101")
+        self.assertEqual(revision["components"][6], "asset:900:ref-100")
         self.assertTrue(revision["components"][9].endswith("first_evidence=event:1]"))
         source = next(row for row in first if row["entity_key"] == "revision-source:10:task:0:1")
-        self.assertEqual(source["components"], ["101", "source", "c" * 64, "bound", "source", "", ""])
+        self.assertEqual(source["components"], ["asset:900:ref-100", "source", "c" * 64, "bound", "source", "", ""])
         final = next(row for row in first if row["entity_key"] == "revision-final:10:task:0:1:0")
         self.assertEqual(final["components"], ["100", "0", "", "delivery", "c" * 64, "bound", "final", "", ""])
         reference = next(row for row in first if row["entity_key"] == "revision-reference:10:task:0:1:0")
@@ -121,7 +122,29 @@ class CanonicalEntitiesTest(unittest.TestCase):
         entities = build_entities(mapping, self.rows(), "a" * 64, self.projection(),
                                   {"decision": "confirmed"}, {"status": "PASS", "violation_count": 0})
         source = next(row for row in entities if row["entity_key"].startswith("revision-source:"))
-        self.assertEqual(source["components"][:3], ["500", "source", "d" * 64])
+        self.assertEqual(source["components"][:3], ["bundle:" + "d" * 64, "source", "d" * 64])
+
+    def test_recovery_hash_is_applied_to_expected_final_asset(self):
+        mapping = self.mapping()
+        mapping["asset_recoveries"] = [{
+            "task_id": 10,
+            "missing_task_asset_id": 100,
+            "strategy": "clone_b_prematerialized_storage_ref_v1",
+            "recovery_source_sha256": "e" * 64,
+        }]
+        entities = build_entities(
+            mapping,
+            self.rows(),
+            "a" * 64,
+            self.projection(),
+            {"decision": "confirmed"},
+            {"status": "PASS", "violation_count": 0},
+        )
+        final = next(
+            row for row in entities
+            if row["entity_key"] == "revision-final:10:task:0:1:0"
+        )
+        self.assertEqual(final["components"][4], "e" * 64)
 
     def test_reviewed_state_decision_precedes_generic_legacy_mapping(self):
         mapping = self.mapping()
@@ -155,9 +178,38 @@ class CanonicalEntitiesTest(unittest.TestCase):
         rows = self.rows()
         rows["group"] = []
         rows["meta"][0]["group_count"] = 0
-        with self.assertRaisesRegex(ValueError, "coverage differs"):
-            build_entities(self.mapping(), rows, "a" * 64, self.projection(),
-                           {"decision": "confirmed"}, {"status": "PASS", "violation_count": 0})
+        created = build_entities(
+            self.mapping(),
+            rows,
+            "a" * 64,
+            self.projection(),
+            {"decision": "confirmed"},
+            {"status": "PASS", "violation_count": 0},
+        )
+        self.assertTrue(
+            any(row["entity_key"] == "group:10:task:0" for row in created)
+        )
+        rows = self.rows()
+        rows["group"].append(
+            {
+                "id": 2,
+                "task_id": 20,
+                "scope_kind": "task",
+                "scope_ref_id": 0,
+                "migration_incomplete": 1,
+                "migration_issue": "unmapped",
+            }
+        )
+        rows["meta"][0]["group_count"] = 2
+        with self.assertRaisesRegex(ValueError, "unmapped"):
+            build_entities(
+                self.mapping(),
+                rows,
+                "a" * 64,
+                self.projection(),
+                {"decision": "confirmed"},
+                {"status": "PASS", "violation_count": 0},
+            )
 
     def test_unreviewed_and_nonpass_inputs_fail_closed(self):
         baseline = {"snapshot_sha256": "a" * 64, "baseline_fingerprint_sha256": "b" * 64}
@@ -174,7 +226,22 @@ class CanonicalEntitiesTest(unittest.TestCase):
     def test_time_and_reason_match_go_contract(self):
         revision = self.mapping()["resources"][0]["history"][0]
         self.assertEqual(mysql_time("2026-01-01T00:00:02.123Z"), "2026-01-01T00:00:02.123000")
+        self.assertEqual(
+            mysql_time("2026-07-23T05:58:03.45506Z"),
+            "2026-07-23T05:58:03.455060",
+        )
+        with self.assertRaisesRegex(ValueError, "RFC3339"):
+            mysql_time("2026-07-23T05:58:03.1234567Z")
         self.assertIn("confirmed_at=2026-07-23T01:02:03Z", persisted_reason(revision))
+        revision["reason"] = "审阅历史证据" * 200
+        compact = persisted_reason(revision)
+        self.assertLessEqual(len(compact), 512)
+        self.assertNotIn(revision["reason"], compact)
+        self.assertIn(
+            "reason_sha256="
+            + hashlib.sha256(revision["reason"].encode("utf-8")).hexdigest(),
+            compact,
+        )
 
     @mock.patch("build_canonical_entities.subprocess.run")
     def test_freeze_is_loopback_and_read_only(self, subprocess_run):
@@ -239,6 +306,11 @@ class CanonicalEntitiesTest(unittest.TestCase):
     def test_sql_contract_text_has_no_mutation(self):
         self.assertIn("SET SESSION TRANSACTION READ ONLY", FREEZE_SQL)
         self.assertNotRegex(FREEZE_SQL, r"\b(INSERT|UPDATE|DELETE|REPLACE)\b")
+        self.assertNotIn("i.id", FREEZE_SQL)
+        self.assertIn(
+            "ORDER BY r.task_sku_item_id,r.version_no,i.storage_ref_id",
+            FREEZE_SQL,
+        )
 
 
 if __name__ == "__main__":

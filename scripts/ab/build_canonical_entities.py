@@ -25,6 +25,11 @@ from typing import Any, Iterable
 
 
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
+RFC3339 = re.compile(
+    r"^(?P<base>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})"
+    r"(?:\.(?P<fraction>\d{1,6}))?"
+    r"(?P<zone>Z|[+-]\d{2}:\d{2})$"
+)
 STATE_MAP = {
     "PendingAuditA": "PendingAudit",
     "PendingAuditB": "PendingAudit",
@@ -70,7 +75,8 @@ SELECT CONCAT('group	',JSON_OBJECT(
   'migration_incomplete',migration_incomplete,'migration_issue',migration_issue))
 FROM task_asset_groups ORDER BY task_id,scope_kind,scope_ref_id,id;
 SELECT CONCAT('asset	',JSON_OBJECT(
-  'id',id,'task_id',task_id,'asset_type',asset_type,'whole_hash',COALESCE(whole_hash,''),
+  'id',id,'asset_id',asset_id,'task_id',task_id,'asset_type',asset_type,
+  'storage_ref_id',COALESCE(storage_ref_id,''),'whole_hash',COALESCE(whole_hash,''),
   'binding_state',binding_state,'bound_role',bound_role,'scope_sku_code',COALESCE(scope_sku_code,''),
   'retouch_requirement_id',retouch_requirement_id))
 FROM task_assets ORDER BY id;
@@ -100,7 +106,7 @@ SELECT CONCAT('planning_revision	',JSON_OBJECT(
   'image_storage_ref_id',i.storage_ref_id))
 FROM task_planning_sku_revisions r
 LEFT JOIN task_planning_sku_revision_images i ON i.revision_id=r.id
-ORDER BY r.task_sku_item_id,r.version_no,i.id;
+ORDER BY r.task_sku_item_id,r.version_no,i.storage_ref_id;
 SELECT CONCAT('planning_setting	',JSON_OBJECT('task_id',task_id))
 FROM task_planning_settings ORDER BY task_id;
 SELECT CONCAT('retouch	',JSON_OBJECT(
@@ -244,29 +250,86 @@ def run_freeze(args: argparse.Namespace) -> tuple[dict[str, list[dict[str, Any]]
     return rows, freeze_hash
 
 
+def parse_rfc3339(value: Any, label: str) -> dt.datetime:
+    if not isinstance(value, str):
+        raise ValueError(f"{label} must be an RFC3339 string")
+    match = RFC3339.fullmatch(value)
+    if match is None:
+        raise ValueError(f"{label} must be an RFC3339 string")
+    fraction = match.group("fraction")
+    normalized = match.group("base")
+    if fraction is not None:
+        normalized += "." + fraction.ljust(6, "0")
+    normalized += (
+        "+00:00" if match.group("zone") == "Z" else match.group("zone")
+    )
+    parsed = dt.datetime.fromisoformat(normalized)
+    if parsed.tzinfo is None:
+        raise ValueError(f"{label} must include a timezone")
+    return parsed
+
+
 def mysql_time(value: Any) -> str:
     if value in (None, ""):
         return ""
-    if not isinstance(value, str):
-        raise ValueError("revision time must be an RFC3339 string")
-    parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
-    if parsed.tzinfo is None:
-        raise ValueError("revision time must include a timezone")
+    parsed = parse_rfc3339(value, "revision time")
     return parsed.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")
 
 
 def persisted_reason(revision: dict[str, Any]) -> str:
     evidence = sorted(str(item) for item in revision.get("evidence_event_ids", []))
+    confirmed_at = (
+        parse_rfc3339(revision["confirmed_at"], "revision confirmed_at")
+        .astimezone(dt.timezone.utc)
+        .isoformat(timespec="seconds")
+        .replace("+00:00", "Z")
+    )
     metadata = (
         f"[migration_v2 manifest={revision['manifest_row_hash']} "
         f"confidence={revision['confidence']} confirmed_by={int(revision['confirmed_by'])} "
-        f"confirmed_at={dt.datetime.fromisoformat(str(revision['confirmed_at']).replace('Z', '+00:00')).astimezone(dt.timezone.utc).isoformat(timespec='seconds').replace('+00:00', 'Z')} "
-        f"evidence_count={len(evidence)}"
+        f"confirmed_at={confirmed_at} evidence_count={len(evidence)}"
     )
     if evidence:
         metadata += f" first_evidence={evidence[0]}"
     metadata += "]"
-    return " ".join(part for part in (str(revision.get("reason", "")).strip(), metadata) if part)
+    original_reason = str(revision.get("reason", "")).strip()
+    reason = " ".join(part for part in (original_reason, metadata) if part)
+    if len(reason) <= 512:
+        return reason
+    compact = (
+        f"[migration_v2 manifest={revision['manifest_row_hash']} "
+        f"reason_sha256={sha256_bytes(original_reason.encode('utf-8'))} "
+        f"confidence={revision['confidence']} confirmed_by={int(revision['confirmed_by'])} "
+        f"confirmed_at={confirmed_at} evidence_count={len(evidence)}"
+    )
+    if evidence:
+        compact += f" first_evidence={evidence[0]}"
+    compact += "]"
+    if len(compact) > 512:
+        raise ValueError(
+            "revision evidence cannot fit task_asset_group_revisions.reason"
+        )
+    return compact
+
+
+def stable_source_identity(
+    asset: dict[str, Any] | None,
+    bundle_sha256: str | None = None,
+) -> str:
+    """Return the source identity that survives rollback/re-apply ID drift."""
+    if bundle_sha256 is not None:
+        if not SHA256.fullmatch(bundle_sha256):
+            raise ValueError("source bundle has no valid bundle_sha256")
+        return f"bundle:{bundle_sha256}"
+    if asset is None:
+        return ""
+    asset_root = asset.get("asset_id")
+    storage_ref = str(asset.get("storage_ref_id") or "")
+    if asset_root is None or int(asset_root) <= 0 or not storage_ref:
+        raise ValueError(
+            f"source task asset {asset.get('id')} lacks stable asset/storage identity"
+        )
+    return f"asset:{int(asset_root)}:{storage_ref}"
 
 
 def entity(
@@ -354,6 +417,17 @@ def build_entities(
 
     tasks = unique_index(rows["task"], "id", "task")
     assets = unique_index(rows["asset"], "id", "asset")
+    for recovery in mapping.get("asset_recoveries", []):
+        if recovery.get("strategy") != "clone_b_prematerialized_storage_ref_v1":
+            continue
+        recovered_id = int(recovery.get("missing_task_asset_id") or 0)
+        recovered_hash = str(recovery.get("recovery_source_sha256") or "")
+        recovered = assets.get(recovered_id)
+        if recovered is None or not SHA256.fullmatch(recovered_hash):
+            raise ValueError(
+                f"asset recovery {recovered_id} lacks a frozen task asset or valid source hash"
+            )
+        recovered["whole_hash"] = recovered_hash
     skus = unique_index(rows["sku"], "id", "sku")
     references = unique_index(rows["reference"], "id", "reference")
     groups_by_scope: dict[tuple[int, str, int], dict[str, Any]] = {}
@@ -366,10 +440,12 @@ def build_entities(
         (int(group["task_id"]), str(group["scope_kind"]), int(group["scope_ref_id"]))
         for group in mapping["resources"]
     }
-    if set(groups_by_scope) != mapping_scopes:
-        missing = sorted(set(groups_by_scope) - mapping_scopes)[:5]
-        extra = sorted(mapping_scopes - set(groups_by_scope))[:5]
-        raise ValueError(f"resource mapping/frozen group coverage differs: unmapped={missing}, missing_in_a={extra}")
+    unmapped = sorted(set(groups_by_scope) - mapping_scopes)
+    if unmapped:
+        raise ValueError(
+            "resource mapping/frozen group coverage differs: "
+            f"unmapped={unmapped[:5]}"
+        )
 
     decisions_by_task: dict[int, dict[str, Any]] = {}
     for decision in mapping.get("task_state_decisions", []):
@@ -414,8 +490,10 @@ def build_entities(
             row.get("current_handler_id"), revision_by_task[task_id],
         ], freeze_hash))
 
-    # Fixed bundle IDs are registered before the migration transaction. Source
-    # aliases then consume AUTO_INCREMENT IDs in mapping/resource/history order.
+    # Generated source-alias surrogate IDs are deliberately excluded from the
+    # canonical contract. InnoDB does not rewind AUTO_INCREMENT on rollback, so
+    # a rehearsal/re-apply may assign different row IDs while preserving the
+    # exact same immutable asset root and storage ref.
     bundle_by_id: dict[int, dict[str, Any]] = {}
     for group in mapping["resources"]:
         for revision in group["history"]:
@@ -427,20 +505,6 @@ def build_entities(
                 if not SHA256.fullmatch(str(bundle.get("bundle_sha256", ""))):
                     raise ValueError(f"source bundle {bundle_id} has no valid bundle_sha256")
                 bundle_by_id[bundle_id] = bundle
-    next_alias_id = max([int(meta.get("max_task_asset_id", 0)), *bundle_by_id.keys()], default=0) + 1
-    alias_by_scope_origin: dict[tuple[tuple[int, str, int], int], int] = {}
-    for group in mapping["resources"]:
-        scope = (int(group["task_id"]), str(group["scope_kind"]), int(group["scope_ref_id"]))
-        for revision in group["history"]:
-            if revision.get("source_alias_from_task_asset_id") is not None:
-                origin = int(revision["source_alias_from_task_asset_id"])
-                key = (scope, origin)
-                if key not in alias_by_scope_origin:
-                    if origin not in assets:
-                        raise ValueError(f"source alias origin {origin} is absent from Clone A")
-                    alias_by_scope_origin[key] = next_alias_id
-                    next_alias_id += 1
-
     asset_roles: dict[int, tuple[tuple[int, str, int], str]] = {}
     for group in mapping["resources"]:
         scope = (int(group["task_id"]), str(group["scope_kind"]), int(group["scope_ref_id"]))
@@ -480,31 +544,53 @@ def build_entities(
         sku_code, retouch_id = scope_values(group, skus)
         for revision_no in sorted(by_no):
             revision = by_no[revision_no]
-            source_id: int | None = None
+            source_asset: dict[str, Any] | None = None
+            source_identity = ""
             if revision.get("source_task_asset_id") is not None:
                 source_id = int(revision["source_task_asset_id"])
+                source_asset = assets.get(source_id)
+                if not source_asset or int(source_asset["task_id"]) != task_id:
+                    raise ValueError(
+                        f"source task asset {source_id} is absent or belongs to another task"
+                    )
+                source_identity = stable_source_identity(source_asset)
             elif revision.get("source_bundle"):
-                source_id = int(revision["source_bundle"]["task_asset_id"])
+                source_identity = stable_source_identity(
+                    None, str(revision["source_bundle"]["bundle_sha256"])
+                )
             elif revision.get("source_alias_from_task_asset_id") is not None:
-                source_id = alias_by_scope_origin[(scope, int(revision["source_alias_from_task_asset_id"]))]
+                origin_id = int(revision["source_alias_from_task_asset_id"])
+                source_asset = assets.get(origin_id)
+                if not source_asset or int(source_asset["task_id"]) != task_id:
+                    raise ValueError(
+                        f"source alias origin {origin_id} is absent or belongs to another task"
+                    )
+                source_identity = stable_source_identity(source_asset)
             result.append(entity("G03", f"revision:{task_id}:{kind}:{ref}:{revision_no}", [
                 task_id, kind, ref, revision_no, revision["status"], revision["mode"],
-                source_id, revision["source_stage"], revision["created_by"], persisted_reason(revision),
+                source_identity, revision["source_stage"], revision["created_by"], persisted_reason(revision),
                 mysql_time(revision.get("submitted_at")), mysql_time(revision.get("finalized_at")),
             ], freeze_hash, {"manifest_row_hash": revision["manifest_row_hash"]}))
 
-            if source_id is None:
+            if not source_identity:
                 source_components = ["", "", "", "", "", "", ""]
             elif revision.get("source_bundle"):
-                source_components = [source_id, "source", revision["source_bundle"]["bundle_sha256"], "bound", "source", sku_code, retouch_id]
+                source_components = [
+                    source_identity, "source",
+                    revision["source_bundle"]["bundle_sha256"],
+                    "bound", "source", sku_code, retouch_id,
+                ]
             elif revision.get("source_alias_from_task_asset_id") is not None:
-                origin = assets[int(revision["source_alias_from_task_asset_id"])]
-                source_components = [source_id, "source", origin.get("whole_hash"), "bound", "source", sku_code, retouch_id]
+                source_components = [
+                    source_identity, "source", source_asset.get("whole_hash"),
+                    "bound", "source", sku_code, retouch_id,
+                ]
             else:
-                original = assets.get(source_id)
-                if not original or int(original["task_id"]) != task_id:
-                    raise ValueError(f"source task asset {source_id} is absent or belongs to another task")
-                source_components = [source_id, original["asset_type"], original.get("whole_hash"), "bound", "source", sku_code, retouch_id]
+                source_components = [
+                    source_identity, source_asset["asset_type"],
+                    source_asset.get("whole_hash"), "bound", "source",
+                    sku_code, retouch_id,
+                ]
             result.append(entity("G04", f"revision-source:{task_id}:{kind}:{ref}:{revision_no}", source_components, freeze_hash))
 
             for order, final_id_raw in enumerate(revision.get("final_task_asset_ids", [])):
@@ -572,7 +658,10 @@ def build_entities(
                 item.get("erp_product_i_id", ""), item.get("erp_product_name", ""),
                 "confirmed legacy planning migration", planning["created_by"],
                 item.get("image_storage_ref_id", ""),
-            ], freeze_hash))
+            ], freeze_hash, {
+                "migration_created": True,
+                "task_id": task_id,
+            }))
     for row in rows["retouch"]:
         result.append(entity("G08", f"retouch-requirement:{int(row['task_id'])}:{int(row['id'])}", [
             row["task_id"], row["id"], row["description"], row.get("sku_code"), row.get("spec"),

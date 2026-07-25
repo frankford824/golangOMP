@@ -430,6 +430,34 @@ def active_asset(row: dict[str, Any]) -> bool:
     )
 
 
+def planning_image_candidates(
+    rows: dict[str, list[dict[str, Any]]],
+) -> dict[tuple[int, str], list[dict[str, Any]]]:
+    """Index exact, usable legacy ERP product images by task and SKU code."""
+    indexed: dict[tuple[int, str], list[dict[str, Any]]] = defaultdict(list)
+    for asset in rows.get("assets", []):
+        sku_code = str(asset.get("scope_sku_code") or "").strip(" ")
+        storage_ref_id = str(asset.get("storage_ref_id") or "")
+        if (
+            asset.get("asset_type") != "erp_product_image"
+            or not active_asset(asset)
+            or bool(asset.get("is_archived"))
+            or asset.get("superseded_by_version_id") is not None
+            or not sku_code
+            or not storage_ref_id
+            or not str(asset.get("ref_key") or "").strip(" ")
+            or str(asset.get("storage_owner_type") or "") != "task_asset"
+            or int(asset.get("storage_owner_id") or 0) != int(asset["id"])
+            or bool(asset.get("is_placeholder"))
+            or str(asset.get("storage_status") or "") not in {"active", "recorded"}
+        ):
+            continue
+        indexed[(int(asset["task_id"]), sku_code)].append(asset)
+    for candidates in indexed.values():
+        candidates.sort(key=lambda row: int(row["id"]))
+    return indexed
+
+
 def revision_asset_eligible(row: dict[str, Any], expected_modules: set[str], when: str = "") -> tuple[bool, str]:
     if row.get("asset_type") not in {"source", "delivery"}:
         return False, "asset role is not source/delivery"
@@ -3948,6 +3976,7 @@ def generate(rows):
             }
         )
     planning_tasks = []
+    planning_images = planning_image_candidates(rows)
     planning_by_task = defaultdict(list)
     for row in rows.get("planning_rows", []):
         planning_by_task[int(row["task_id"])].append(row)
@@ -4048,6 +4077,17 @@ def generate(rows):
             if item.get("task_sku_item_id") is None:
                 blockers.append("purchase task has no task_sku_items")
                 continue
+            sku_code = str(item.get("sku_code") or "").strip(" ")
+            image_candidates = planning_images.get((task_id, sku_code), [])
+            image_storage_ref_id = ""
+            if len(image_candidates) == 1:
+                image_storage_ref_id = str(image_candidates[0]["storage_ref_id"])
+            elif len(image_candidates) > 1:
+                blockers.append(
+                    f"SKU item {item['task_sku_item_id']} has multiple active "
+                    "erp_product_image candidates: "
+                    + ",".join(str(candidate["id"]) for candidate in image_candidates)
+                )
             description = str(item.get("description_spec") or "").strip()
             if not description:
                 description = str(item.get("erp_product_name") or "").strip()
@@ -4072,7 +4112,7 @@ def generate(rows):
                 "reference_url": "",
                 "erp_product_i_id": str(item.get("erp_product_i_id") or ""),
                 "erp_product_name": str(item.get("erp_product_name") or ""),
-                "image_storage_ref_id": "",
+                "image_storage_ref_id": image_storage_ref_id,
             })
         if not target_status:
             blockers.append(f"legacy task_status {task_status or '<empty>'} requires an explicit V8 target")
@@ -4219,10 +4259,10 @@ SELECT CONCAT('scopes\t',JSON_OBJECT('task_id',task_id,'task_status',task_status
  UNION ALL SELECT t.id,t.task_status,'sku',tsi.id,tsi.sku_code,NULL FROM tasks t JOIN task_sku_items tsi ON tsi.task_id=t.id WHERE t.task_type NOT IN ('retouch_task','purchase_task','sku_planning')
  UNION ALL SELECT t.id,t.task_status,'task',0,'',NULL FROM tasks t WHERE t.task_type NOT IN ('retouch_task','purchase_task','sku_planning') AND NOT EXISTS(SELECT 1 FROM task_sku_items si WHERE si.task_id=t.id)
 ) s ORDER BY task_id,scope_kind,scope_ref_id;
-SELECT CONCAT('assets\t',JSON_OBJECT('id',ta.id,'asset_id',ta.asset_id,'task_id',ta.task_id,'asset_type',ta.asset_type,'scope_sku_code',COALESCE(ta.scope_sku_code,''),'retouch_requirement_id',ta.retouch_requirement_id,'upload_session_id',COALESCE(ta.upload_session_id,''),'upload_request_id',COALESCE(ta.upload_request_id,''),'source_module_key',COALESCE(ta.source_module_key,''),'source_asset_version_id',ta.source_asset_version_id,'flow_review_status',COALESCE(ta.flow_review_status,''),'approved_by',ta.approved_by,'approved_at',DATE_FORMAT(DATE_SUB(ta.approved_at,INTERVAL 8 HOUR),'%Y-%m-%dT%H:%i:%sZ'),'rejected_at',DATE_FORMAT(DATE_SUB(ta.rejected_at,INTERVAL 8 HOUR),'%Y-%m-%dT%H:%i:%sZ'),'superseded_by_version_id',ta.superseded_by_version_id,'superseded_at',DATE_FORMAT(DATE_SUB(ta.superseded_at,INTERVAL 8 HOUR),'%Y-%m-%dT%H:%i:%sZ'),'storage_ref_id',COALESCE(ta.storage_ref_id,''),'storage_key',COALESCE(ta.storage_key,''),'file_size',ta.file_size,'mime_type',COALESCE(ta.mime_type,''),'whole_hash',COALESCE(ta.whole_hash,''),'upload_status',COALESCE(ta.upload_status,''),'uploaded_at_legacy_raw',DATE_FORMAT(ta.uploaded_at,'%Y-%m-%d %H:%i:%s'),'created_at',DATE_FORMAT(ta.created_at,'%Y-%m-%dT%H:%i:%sZ'),'deleted_at',DATE_FORMAT(DATE_SUB(ta.deleted_at,INTERVAL 8 HOUR),'%Y-%m-%dT%H:%i:%sZ'),'cleaned_at',DATE_FORMAT(ta.cleaned_at,'%Y-%m-%dT%H:%i:%sZ'),'access_revoked_at',DATE_FORMAT(ta.access_revoked_at,'%Y-%m-%dT%H:%i:%sZ'),'object_deleted_at',DATE_FORMAT(ta.object_deleted_at,'%Y-%m-%dT%H:%i:%sZ'),'storage_adapter',COALESCE(sr.storage_adapter,''),'ref_key',COALESCE(sr.ref_key,''),'checksum_hint',COALESCE(sr.checksum_hint,''),'storage_status',COALESCE(sr.status,''),'is_placeholder',COALESCE(sr.is_placeholder,0))) FROM task_assets ta LEFT JOIN asset_storage_refs sr ON sr.ref_id=ta.storage_ref_id ORDER BY ta.task_id,ta.created_at,ta.id;
+SELECT CONCAT('assets\t',JSON_OBJECT('id',ta.id,'asset_id',ta.asset_id,'task_id',ta.task_id,'asset_type',ta.asset_type,'scope_sku_code',COALESCE(ta.scope_sku_code,''),'retouch_requirement_id',ta.retouch_requirement_id,'upload_session_id',COALESCE(ta.upload_session_id,''),'upload_request_id',COALESCE(ta.upload_request_id,''),'source_module_key',COALESCE(ta.source_module_key,''),'source_asset_version_id',ta.source_asset_version_id,'flow_review_status',COALESCE(ta.flow_review_status,''),'approved_by',ta.approved_by,'approved_at',DATE_FORMAT(DATE_SUB(ta.approved_at,INTERVAL 8 HOUR),'%Y-%m-%dT%H:%i:%sZ'),'rejected_at',DATE_FORMAT(DATE_SUB(ta.rejected_at,INTERVAL 8 HOUR),'%Y-%m-%dT%H:%i:%sZ'),'superseded_by_version_id',ta.superseded_by_version_id,'superseded_at',DATE_FORMAT(DATE_SUB(ta.superseded_at,INTERVAL 8 HOUR),'%Y-%m-%dT%H:%i:%sZ'),'storage_ref_id',COALESCE(ta.storage_ref_id,''),'storage_key',COALESCE(ta.storage_key,''),'file_size',ta.file_size,'mime_type',COALESCE(ta.mime_type,''),'whole_hash',COALESCE(ta.whole_hash,''),'upload_status',COALESCE(ta.upload_status,''),'is_archived',COALESCE(ta.is_archived,0),'uploaded_at_legacy_raw',DATE_FORMAT(ta.uploaded_at,'%Y-%m-%d %H:%i:%s'),'created_at',DATE_FORMAT(ta.created_at,'%Y-%m-%dT%H:%i:%sZ'),'deleted_at',DATE_FORMAT(DATE_SUB(ta.deleted_at,INTERVAL 8 HOUR),'%Y-%m-%dT%H:%i:%sZ'),'cleaned_at',DATE_FORMAT(ta.cleaned_at,'%Y-%m-%dT%H:%i:%sZ'),'access_revoked_at',DATE_FORMAT(ta.access_revoked_at,'%Y-%m-%dT%H:%i:%sZ'),'object_deleted_at',DATE_FORMAT(ta.object_deleted_at,'%Y-%m-%dT%H:%i:%sZ'),'storage_owner_type',COALESCE(sr.owner_type,''),'storage_owner_id',sr.owner_id,'storage_adapter',COALESCE(sr.storage_adapter,''),'ref_key',COALESCE(sr.ref_key,''),'checksum_hint',COALESCE(sr.checksum_hint,''),'storage_status',COALESCE(sr.status,''),'is_placeholder',COALESCE(sr.is_placeholder,0))) FROM task_assets ta LEFT JOIN asset_storage_refs sr ON sr.ref_id=ta.storage_ref_id ORDER BY ta.task_id,ta.created_at,ta.id;
 SELECT CONCAT('references\t',JSON_OBJECT('id',r.id,'task_id',r.task_id,'scope_sku_code',COALESCE(si.sku_code,''),'retouch_requirement_id',r.retouch_requirement_id,'attached_at',DATE_FORMAT(r.attached_at,'%Y-%m-%dT%H:%i:%sZ'),'ref_id',r.ref_id,'storage_adapter',COALESCE(sr.storage_adapter,''),'ref_key',COALESCE(sr.ref_key,''),'file_size',sr.file_size,'mime_type',COALESCE(sr.mime_type,''),'checksum_hint',COALESCE(sr.checksum_hint,''),'storage_status',COALESCE(sr.status,''),'is_placeholder',COALESCE(sr.is_placeholder,0))) FROM reference_file_refs r LEFT JOIN task_sku_items si ON si.id=r.sku_item_id LEFT JOIN asset_storage_refs sr ON sr.ref_id=r.ref_id ORDER BY r.task_id,r.attached_at,r.id;
 SELECT CONCAT('events\t',JSON_OBJECT('namespace','task_event_log','id',e.id,'task_id',e.task_id,'sequence',e.sequence,'event_type',e.event_type,'actor_id',e.operator_id,'payload',e.payload,'module_key',COALESCE(JSON_UNQUOTE(JSON_EXTRACT(e.payload,'$.module_key')),''),'from_state',COALESCE(JSON_UNQUOTE(JSON_EXTRACT(e.payload,'$.from')),''),'to_state',COALESCE(JSON_UNQUOTE(JSON_EXTRACT(e.payload,'$.to')),''),'created_at',DATE_FORMAT(DATE_SUB(e.created_at,INTERVAL 8 HOUR),'%Y-%m-%dT%H:%i:%sZ'))) FROM task_event_logs e UNION ALL SELECT CONCAT('events\t',JSON_OBJECT('namespace','task_module_event','id',e.id,'task_id',m.task_id,'sequence',e.id,'event_type',e.event_type,'actor_id',e.actor_id,'payload',e.payload,'module_key',m.module_key,'from_state',COALESCE(e.from_state,''),'to_state',COALESCE(e.to_state,''),'created_at',DATE_FORMAT(e.created_at,'%Y-%m-%dT%H:%i:%sZ'))) FROM task_module_events e JOIN task_modules m ON m.id=e.task_module_id;
-SELECT CONCAT('planning_rows\t',JSON_OBJECT('task_id',t.id,'task_status',t.task_status,'creator_id',t.creator_id,'task_sku_item_id',si.id,'description_spec',COALESCE(si.design_requirement,''),'quantity',si.quantity,'target_price',si.base_sale_price,'erp_product_i_id',COALESCE(si.product_i_id,''),'erp_product_name',COALESCE(si.product_name_snapshot,''),'reference_file_refs_json',COALESCE(si.reference_file_refs_json,'[]'))) FROM tasks t LEFT JOIN task_sku_items si ON si.task_id=t.id WHERE t.task_type='purchase_task' ORDER BY t.id,si.id;
+SELECT CONCAT('planning_rows\t',JSON_OBJECT('task_id',t.id,'task_status',t.task_status,'creator_id',t.creator_id,'task_sku_item_id',si.id,'sku_code',COALESCE(si.sku_code,''),'description_spec',COALESCE(si.design_requirement,''),'quantity',si.quantity,'target_price',si.base_sale_price,'erp_product_i_id',COALESCE(si.product_i_id,''),'erp_product_name',COALESCE(si.product_name_snapshot,''),'reference_file_refs_json',COALESCE(si.reference_file_refs_json,'[]'))) FROM tasks t LEFT JOIN task_sku_items si ON si.task_id=t.id WHERE t.task_type='purchase_task' ORDER BY t.id,si.id;
 SELECT CONCAT('warehouse_blockers\t',JSON_OBJECT('task_id',id)) FROM tasks WHERE task_status='RejectedByWarehouse' ORDER BY id;
 SELECT CONCAT('org_departments\t',JSON_OBJECT('id',id,'name',name,'enabled',enabled)) FROM org_departments ORDER BY id;
 SELECT CONCAT('org_teams\t',JSON_OBJECT('id',id,'department_id',department_id,'name',name,'enabled',enabled)) FROM org_teams ORDER BY id;

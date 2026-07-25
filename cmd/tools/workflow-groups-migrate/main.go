@@ -22,15 +22,15 @@ import (
 )
 
 const (
-	workflowGroupsSnapshotVersion = 5
-	workflowGroupsToolVersion     = "workflow-groups-migrate/v8.5"
+	workflowGroupsSnapshotVersion = 8
+	workflowGroupsToolVersion     = "workflow-groups-migrate/v8.8"
 	workflowGroupsSchemaVersion   = "124-126"
-	previousSnapshotVersion       = 4
-	previousToolVersion           = "workflow-groups-migrate/v8.4"
-	olderSnapshotVersion          = 3
-	olderToolVersion              = "workflow-groups-migrate/v8.3"
-	legacySnapshotVersion         = 2
-	legacyToolVersion             = "workflow-groups-migrate/v8.2"
+	previousSnapshotVersion       = 7
+	previousToolVersion           = "workflow-groups-migrate/v8.7"
+	olderSnapshotVersion          = 6
+	olderToolVersion              = "workflow-groups-migrate/v8.6"
+	legacySnapshotVersion         = 4
+	legacyToolVersion             = "workflow-groups-migrate/v8.4"
 )
 
 var workflowGroupsAutoIncrementTables = []string{
@@ -117,6 +117,59 @@ type taskSnapshot struct {
 	UpdatedAt        time.Time `json:"updated_at"`
 	EventIDs         []string  `json:"event_ids"`
 	ModuleEventIDs   []int64   `json:"module_event_ids,omitempty"`
+}
+
+type taskModuleSnapshot struct {
+	ID               int64           `json:"id"`
+	TaskID           int64           `json:"task_id"`
+	ModuleKey        string          `json:"module_key"`
+	State            string          `json:"state"`
+	PoolTeamCode     *string         `json:"pool_team_code,omitempty"`
+	ClaimedBy        *int64          `json:"claimed_by,omitempty"`
+	ClaimedTeamCode  *string         `json:"claimed_team_code,omitempty"`
+	ClaimedAt        *time.Time      `json:"claimed_at,omitempty"`
+	ActorOrgSnapshot json.RawMessage `json:"actor_org_snapshot,omitempty"`
+	EnteredAt        time.Time       `json:"entered_at"`
+	TerminalAt       *time.Time      `json:"terminal_at,omitempty"`
+	Data             json.RawMessage `json:"data"`
+	UpdatedAt        time.Time       `json:"updated_at"`
+}
+
+type searchDocumentSnapshot struct {
+	GroupID             int64     `json:"group_id"`
+	TaskID              int64     `json:"task_id"`
+	FinalizedRevisionID *int64    `json:"finalized_revision_id,omitempty"`
+	InternalText        string    `json:"internal_text"`
+	FinalText           string    `json:"final_text"`
+	UpdatedAt           time.Time `json:"updated_at"`
+}
+
+type taskSearchDocumentSnapshot struct {
+	TaskID              int64      `json:"task_id"`
+	TaskNo              string     `json:"task_no"`
+	ProductNameSnapshot string     `json:"product_name_snapshot"`
+	SKUCode             string     `json:"sku_code"`
+	PrimarySKUCode      string     `json:"primary_sku_code"`
+	ProductIID          string     `json:"product_i_id"`
+	TaskType            string     `json:"task_type"`
+	TaskStatus          string     `json:"task_status"`
+	Priority            string     `json:"priority"`
+	OwnerDepartment     string     `json:"owner_department"`
+	OwnerTeam           string     `json:"owner_team"`
+	OwnerOrgTeam        string     `json:"owner_org_team"`
+	CreatorID           *int64     `json:"creator_id,omitempty"`
+	CreatorName         string     `json:"creator_name"`
+	RequesterID         *int64     `json:"requester_id,omitempty"`
+	RequesterName       string     `json:"requester_name"`
+	DesignerID          *int64     `json:"designer_id,omitempty"`
+	DesignerName        string     `json:"designer_name"`
+	CurrentHandlerID    *int64     `json:"current_handler_id,omitempty"`
+	CurrentHandlerName  string     `json:"current_handler_name"`
+	CreatedAt           *time.Time `json:"created_at,omitempty"`
+	UpdatedAt           *time.Time `json:"updated_at,omitempty"`
+	DeadlineAt          *time.Time `json:"deadline_at,omitempty"`
+	AssetText           *string    `json:"asset_text,omitempty"`
+	SearchText          string     `json:"search_text"`
 }
 
 type resourceGroupSnapshot struct {
@@ -272,6 +325,12 @@ type snapshot struct {
 	AppliedAt                     *time.Time                      `json:"applied_at"`
 	Tasks                         []taskSnapshot                  `json:"tasks_before"`
 	AfterTasks                    []taskSnapshot                  `json:"tasks_after"`
+	TaskModulesBefore             []taskModuleSnapshot            `json:"task_modules_before"`
+	TaskModulesAfter              []taskModuleSnapshot            `json:"task_modules_after"`
+	SearchDocumentsBefore         []searchDocumentSnapshot        `json:"search_documents_before"`
+	SearchDocumentsAfter          []searchDocumentSnapshot        `json:"search_documents_after"`
+	TaskSearchDocumentsBefore     []taskSearchDocumentSnapshot    `json:"task_search_documents_before"`
+	TaskSearchDocumentsAfter      []taskSearchDocumentSnapshot    `json:"task_search_documents_after"`
 	ResourceGroups                []resourceGroupSnapshot         `json:"resource_groups_before"`
 	AfterResourceGroups           []resourceGroupSnapshot         `json:"resource_groups_after"`
 	AssetBindings                 []assetBindingSnapshot          `json:"asset_bindings_before"`
@@ -432,6 +491,9 @@ func run(ctx context.Context, o options) error {
 	if !o.Rollback {
 		if err := validatePrematerializedAssetRecoveries(ctx, db, mapping.AssetRecoveries); err != nil {
 			return v1migrate.NewHardAbort(v1migrate.ExitCodeHardAbort, "Clone B recovery preflight failed: %v", err)
+		}
+		if err := validatePlanningImages(ctx, db, mapping.Planning, false); err != nil {
+			return v1migrate.NewHardAbort(v1migrate.ExitCodeHardAbort, "planning image preflight failed: %v", err)
 		}
 	}
 
@@ -2233,6 +2295,18 @@ func populateAfterSnapshot(ctx context.Context, tx *sql.Tx, s *snapshot, m mappi
 	if err != nil {
 		return err
 	}
+	s.TaskModulesAfter, err = captureTaskModulesForTasks(ctx, tx, taskIDs)
+	if err != nil {
+		return err
+	}
+	s.SearchDocumentsAfter, err = captureSearchDocumentsForTasks(ctx, tx, taskIDs)
+	if err != nil {
+		return err
+	}
+	s.TaskSearchDocumentsAfter, err = captureTaskSearchDocumentsForTasks(ctx, tx, taskIDs)
+	if err != nil {
+		return err
+	}
 	s.AfterResourceGroups, err = captureResourceGroupsForTasks(ctx, tx, taskIDs)
 	if err != nil {
 		return err
@@ -2452,6 +2526,14 @@ func apply(ctx context.Context, db *sql.DB, database string, o options, m mappin
 		_ = inserted
 	}
 	phases.mark("planning_applied")
+	taskIDs := make([]int64, 0, len(snap.Tasks))
+	for _, task := range snap.Tasks {
+		taskIDs = append(taskIDs, task.ID)
+	}
+	if err := normalizeCompletedTaskModules(ctx, tx, taskIDs); err != nil {
+		return err
+	}
+	phases.mark("completed_task_modules_normalized")
 	if err := applyAssetRecoveries(ctx, tx, m.AssetRecoveries); err != nil {
 		return err
 	}
@@ -3136,7 +3218,17 @@ func captureSnapshot(ctx context.Context, q snapshotQueryer, database string, m 
 	for _, recovery := range m.AssetRecoveries {
 		ids[recovery.TaskID] = struct{}{}
 	}
-	rows, err := q.QueryContext(ctx, `SELECT id, task_type, task_status, workflow_revision, current_handler_id, updated_at FROM tasks WHERE task_status IN ('PendingAuditA','PendingAuditB','RejectedByAuditA','RejectedByAuditB','PendingCustomizationReview','PendingCustomizationProduction','PendingEffectReview','PendingEffectRevision','PendingProductionTransfer','PendingWarehouseQC','PendingWarehouseReceive','PendingClose','PendingOutsource','Outsourcing','PendingOutsourceReview') OR task_type='purchase_task' ORDER BY id`)
+	rows, err := q.QueryContext(ctx, `
+		SELECT id,task_type,task_status,workflow_revision,current_handler_id,updated_at
+		FROM tasks
+		WHERE task_status IN ('PendingAuditA','PendingAuditB','RejectedByAuditA','RejectedByAuditB','PendingCustomizationReview','PendingCustomizationProduction','PendingEffectReview','PendingEffectRevision','PendingProductionTransfer','PendingWarehouseQC','PendingWarehouseReceive','PendingClose','PendingOutsource','Outsourcing','PendingOutsourceReview')
+		   OR task_type='purchase_task'
+		   OR (task_status='Completed' AND EXISTS (
+		       SELECT 1 FROM task_modules tm
+		       WHERE tm.task_id=tasks.id
+		         AND tm.state NOT IN ('completed','closed','forcibly_closed','closed_by_admin')
+		   ))
+		ORDER BY id`)
 	if err != nil {
 		return snapshot{}, err
 	}
@@ -3179,6 +3271,18 @@ func captureSnapshot(ctx context.Context, q snapshotQueryer, database string, m 
 		taskIDs = append(taskIDs, task.ID)
 	}
 	s.Tasks, err = captureTaskSnapshotsBulk(ctx, q, taskIDs)
+	if err != nil {
+		return s, err
+	}
+	s.TaskModulesBefore, err = captureTaskModulesForTasks(ctx, q, taskIDs)
+	if err != nil {
+		return s, err
+	}
+	s.SearchDocumentsBefore, err = captureSearchDocumentsForTasks(ctx, q, taskIDs)
+	if err != nil {
+		return s, err
+	}
+	s.TaskSearchDocumentsBefore, err = captureTaskSearchDocumentsForTasks(ctx, q, taskIDs)
 	if err != nil {
 		return s, err
 	}
@@ -3248,6 +3352,26 @@ func migrateStates(ctx context.Context, tx *sql.Tx, m mappingFile) error {
 		workflow_revision=workflow_revision+1
 	WHERE task_status IN ('PendingAuditA','PendingAuditB','PendingCustomizationReview','PendingOutsourceReview','PendingEffectReview','RejectedByAuditA','RejectedByAuditB','PendingCustomizationProduction','PendingEffectRevision','PendingOutsource','Outsourcing','PendingWarehouseQC','PendingWarehouseReceive','PendingProductionTransfer','PendingClose')`); err != nil {
 		return err
+	}
+	return nil
+}
+
+func normalizeCompletedTaskModules(ctx context.Context, tx *sql.Tx, taskIDs []int64) error {
+	for _, chunk := range int64Chunks(taskIDs) {
+		placeholders, args := int64Placeholders(chunk)
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE task_modules tm
+			JOIN tasks t ON t.id=tm.task_id
+			SET tm.state='completed',
+			    tm.claimed_by=NULL,
+			    tm.claimed_team_code=NULL,
+			    tm.terminal_at=COALESCE(tm.terminal_at,CURRENT_TIMESTAMP)
+			WHERE tm.task_id IN (`+placeholders+`)
+			  AND t.task_status='Completed'
+			  AND tm.state NOT IN ('completed','closed','forcibly_closed','closed_by_admin')`,
+			args...); err != nil {
+			return fmt.Errorf("normalize completed task modules: %w", err)
+		}
 	}
 	return nil
 }
@@ -3663,6 +3787,7 @@ func validateCutoverState(ctx context.Context, tx *sql.Tx, m mappingFile) error 
 		{name: "resource groups still migration-incomplete", query: `SELECT COUNT(*) FROM task_asset_groups WHERE migration_incomplete=1`},
 		{name: "legacy purchase_task rows remain", query: `SELECT COUNT(*) FROM tasks WHERE task_type='purchase_task'`},
 		{name: "retired active task statuses remain", query: `SELECT COUNT(*) FROM tasks WHERE task_status IN ('PendingAuditA','PendingAuditB','RejectedByAuditA','RejectedByAuditB','PendingCustomizationReview','PendingCustomizationProduction','PendingEffectReview','PendingEffectRevision','PendingProductionTransfer','PendingWarehouseQC','PendingWarehouseReceive','PendingClose','PendingOutsource','Outsourcing','PendingOutsourceReview','RejectedByWarehouse')`},
+		{name: "completed tasks retain open modules", query: `SELECT COUNT(*) FROM task_modules tm JOIN tasks t ON t.id=tm.task_id WHERE t.task_status='Completed' AND tm.state NOT IN ('completed','closed','forcibly_closed','closed_by_admin')`},
 		{name: "planning settings/detail/current revision parity failures", query: fmt.Sprintf(`
 			SELECT COUNT(*) FROM tasks t
 			WHERE t.task_type='sku_planning' %s AND (
@@ -3745,6 +3870,95 @@ func stringPointerValue(value *string) string {
 		return *value
 	}
 	return ""
+}
+
+func restoreTaskModuleStates(ctx context.Context, tx *sql.Tx, items []taskModuleSnapshot) error {
+	for _, item := range items {
+		_, err := tx.ExecContext(ctx, `
+			UPDATE task_modules
+			SET state=?,pool_team_code=?,claimed_by=?,claimed_team_code=?,
+			    claimed_at=?,actor_org_snapshot=?,entered_at=?,terminal_at=?,
+			    data=?,updated_at=?
+			WHERE id=? AND task_id=?`,
+			item.State, nullableStringPointer(item.PoolTeamCode),
+			nullableInt64Pointer(item.ClaimedBy),
+			nullableStringPointer(item.ClaimedTeamCode),
+			nullableTimePointer(item.ClaimedAt), []byte(item.ActorOrgSnapshot),
+			item.EnteredAt, nullableTimePointer(item.TerminalAt), []byte(item.Data),
+			item.UpdatedAt, item.ID, item.TaskID)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func restoreSearchDocuments(
+	ctx context.Context,
+	tx *sql.Tx,
+	taskIDs []int64,
+	items []searchDocumentSnapshot,
+) error {
+	for _, chunk := range int64Chunks(taskIDs) {
+		placeholders, args := int64Placeholders(chunk)
+		if _, err := tx.ExecContext(ctx,
+			`DELETE FROM task_asset_group_search_documents WHERE task_id IN (`+placeholders+`)`,
+			args...); err != nil {
+			return err
+		}
+	}
+	for _, item := range items {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO task_asset_group_search_documents
+				(group_id,task_id,finalized_revision_id,internal_text,final_text,updated_at)
+			VALUES (?,?,?,?,?,?)`,
+			item.GroupID, item.TaskID,
+			nullableInt64Pointer(item.FinalizedRevisionID),
+			item.InternalText, item.FinalText, item.UpdatedAt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func restoreTaskSearchDocuments(
+	ctx context.Context,
+	tx *sql.Tx,
+	taskIDs []int64,
+	items []taskSearchDocumentSnapshot,
+) error {
+	for _, chunk := range int64Chunks(taskIDs) {
+		placeholders, args := int64Placeholders(chunk)
+		if _, err := tx.ExecContext(ctx,
+			`DELETE FROM task_search_documents WHERE task_id IN (`+placeholders+`)`,
+			args...); err != nil {
+			return err
+		}
+	}
+	for _, item := range items {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO task_search_documents
+				(task_id,task_no,product_name_snapshot,sku_code,primary_sku_code,
+				 product_i_id,task_type,task_status,priority,owner_department,
+				 owner_team,owner_org_team,creator_id,creator_name,requester_id,
+				 requester_name,designer_id,designer_name,current_handler_id,
+				 current_handler_name,created_at,updated_at,deadline_at,asset_text,
+				 search_text)
+			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			item.TaskID, item.TaskNo, item.ProductNameSnapshot, item.SKUCode,
+			item.PrimarySKUCode, item.ProductIID, item.TaskType, item.TaskStatus,
+			item.Priority, item.OwnerDepartment, item.OwnerTeam, item.OwnerOrgTeam,
+			nullableInt64Pointer(item.CreatorID), item.CreatorName,
+			nullableInt64Pointer(item.RequesterID), item.RequesterName,
+			nullableInt64Pointer(item.DesignerID), item.DesignerName,
+			nullableInt64Pointer(item.CurrentHandlerID), item.CurrentHandlerName,
+			nullableTimePointer(item.CreatedAt), nullableTimePointer(item.UpdatedAt),
+			nullableTimePointer(item.DeadlineAt), nullableStringPointer(item.AssetText),
+			item.SearchText); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func rollback(ctx context.Context, db *sql.DB, database string, o options, m mappingFile) error {
@@ -3845,6 +4059,10 @@ func rollback(ctx context.Context, db *sql.DB, database string, o options, m map
 			return err
 		}
 	}
+	rollbackTaskIDs := make([]int64, 0, len(s.Tasks))
+	for _, task := range s.Tasks {
+		rollbackTaskIDs = append(rollbackTaskIDs, task.ID)
+	}
 	for _, created := range s.PlanningCreated {
 		beforeDetails := map[int64]planningDetailSnapshot{}
 		for _, state := range s.PlanningBefore {
@@ -3885,6 +4103,22 @@ func rollback(ctx context.Context, db *sql.DB, database string, o options, m map
 				return err
 			}
 		}
+	}
+	if err := restoreSearchDocuments(
+		ctx,
+		tx,
+		rollbackTaskIDs,
+		s.SearchDocumentsBefore,
+	); err != nil {
+		return err
+	}
+	if err := restoreTaskSearchDocuments(
+		ctx,
+		tx,
+		rollbackTaskIDs,
+		s.TaskSearchDocumentsBefore,
+	); err != nil {
+		return err
 	}
 	for _, origin := range s.SKUOrigins {
 		if _, err = tx.ExecContext(ctx, `UPDATE task_sku_items SET sku_origin=?,updated_at=? WHERE id=?`, nullableStringPointer(origin.Origin), origin.UpdatedAt, origin.ID); err != nil {
@@ -3945,6 +4179,9 @@ func rollback(ctx context.Context, db *sql.DB, database string, o options, m map
 		if _, err = tx.ExecContext(ctx, `UPDATE tasks SET task_type=?,task_status=?,workflow_revision=?,current_handler_id=?,updated_at=? WHERE id=?`, t.TaskType, t.TaskStatus, t.WorkflowRevision, nullableInt64Pointer(t.CurrentHandlerID), t.UpdatedAt, t.ID); err != nil {
 			return err
 		}
+	}
+	if err := restoreTaskModuleStates(ctx, tx, s.TaskModulesBefore); err != nil {
+		return err
 	}
 	for _, item := range s.OrganizationBefore {
 		switch item.SubjectType {
@@ -4040,6 +4277,15 @@ func lockRollbackTargets(ctx context.Context, tx *sql.Tx, s snapshot) error {
 			return err
 		}
 		if _, err := lockInt64Rows(ctx, tx, `SELECT id FROM task_sku_items WHERE task_id=? ORDER BY id FOR UPDATE`, taskID); err != nil {
+			return err
+		}
+		if _, err := lockInt64Rows(ctx, tx, `SELECT id FROM task_modules WHERE task_id=? ORDER BY id FOR UPDATE`, taskID); err != nil {
+			return err
+		}
+		if _, err := lockInt64Rows(ctx, tx, `SELECT group_id FROM task_asset_group_search_documents WHERE task_id=? ORDER BY group_id FOR UPDATE`, taskID); err != nil {
+			return err
+		}
+		if _, err := lockInt64Rows(ctx, tx, `SELECT task_id FROM task_search_documents WHERE task_id=? FOR UPDATE`, taskID); err != nil {
 			return err
 		}
 	}
@@ -4202,6 +4448,55 @@ func snapshotStateMatches(ctx context.Context, q snapshotQueryer, s snapshot, af
 		}
 	}
 	if len(tasks) > 0 && !reflect.DeepEqual(actualTasks, expectedTasks) {
+		return false, nil
+	}
+	actualModules, err := captureTaskModulesForTasks(ctx, q, taskIDsForGroups)
+	if err != nil {
+		return false, err
+	}
+	expectedModules := s.TaskModulesBefore
+	if after {
+		expectedModules = s.TaskModulesAfter
+	}
+	if len(actualModules) == 0 {
+		actualModules = nil
+	}
+	if len(expectedModules) == 0 {
+		expectedModules = nil
+	}
+	if !reflect.DeepEqual(actualModules, expectedModules) {
+		return false, nil
+	}
+	expectedSearchDocuments := s.SearchDocumentsBefore
+	if after {
+		expectedSearchDocuments = s.SearchDocumentsAfter
+	}
+	searchDocumentsMatch, err := searchDocumentsMatchSnapshot(
+		ctx,
+		q,
+		taskIDsForGroups,
+		expectedSearchDocuments,
+	)
+	if err != nil {
+		return false, err
+	}
+	if !searchDocumentsMatch {
+		return false, nil
+	}
+	expectedTaskSearchDocuments := s.TaskSearchDocumentsBefore
+	if after {
+		expectedTaskSearchDocuments = s.TaskSearchDocumentsAfter
+	}
+	taskSearchDocumentsMatch, err := taskSearchDocumentsMatchSnapshot(
+		ctx,
+		q,
+		taskIDsForGroups,
+		expectedTaskSearchDocuments,
+	)
+	if err != nil {
+		return false, err
+	}
+	if !taskSearchDocumentsMatch {
 		return false, nil
 	}
 	actualGroups, err := captureResourceGroupsForTasks(ctx, q, taskIDsForGroups)
@@ -4416,7 +4711,7 @@ func readSnapshot(path, database string, m mappingFile) (snapshot, error) {
 	if knownHistoricalSnapshot && header.SchemaVersion == workflowGroupsSchemaVersion {
 		return snapshot{}, v1migrate.NewHardAbort(
 			v1migrate.ExitCodeHardAbort,
-			"snapshot v%d predates lossless v5 rollback; use the matching historical tool or prepare a reviewed recovery",
+			"snapshot v%d predates lossless v7 rollback; use the matching historical tool or prepare a reviewed recovery",
 			header.Version,
 		)
 	}

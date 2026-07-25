@@ -82,6 +82,19 @@ def candidate_mapping():
                 }
             )
         ],
+        "asset_recoveries": [
+            proposed(
+                {
+                    "task_id": 12,
+                    "missing_task_asset_id": 120,
+                    "recovery_source_task_asset_id": 121,
+                    "strategy": "clone_b_prematerialized_storage_ref_v1",
+                    "review_policy_ids": [
+                        "legacy_deleted_asset_recovery_v1"
+                    ],
+                }
+            )
+        ],
         "organization_mappings": [
             proposed(
                 {
@@ -139,6 +152,7 @@ def reviewed_baseline(candidate):
         ]
     for field in (
         "planning_tasks",
+        "asset_recoveries",
         "organization_mappings",
         "access_decisions",
         "task_state_decisions",
@@ -156,6 +170,7 @@ class ReviewRebaseTest(unittest.TestCase):
         inherited = [
             reviewed["resources"][0]["history"][0],
             reviewed["planning_tasks"][0],
+            reviewed["asset_recoveries"][0],
             reviewed["organization_mappings"][0],
             reviewed["access_decisions"][0],
             reviewed["task_state_decisions"][0],
@@ -172,6 +187,7 @@ class ReviewRebaseTest(unittest.TestCase):
         )
         self.assertEqual(evidence["counts"]["revision.inherited"], 1)
         self.assertEqual(evidence["counts"]["planning.inherited"], 1)
+        self.assertEqual(evidence["counts"]["asset_recovery.inherited"], 1)
         self.assertEqual(evidence["counts"]["organization.inherited"], 1)
         self.assertEqual(evidence["counts"]["access.inherited"], 1)
         self.assertEqual(evidence["counts"]["task_state.inherited"], 1)

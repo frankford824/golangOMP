@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
 )
@@ -67,6 +68,10 @@ func captureTaskSnapshotsBulk(ctx context.Context, q snapshotQueryer, taskIDs []
 			item.ModuleEventIDs = []int64{}
 			byID[item.ID] = &item
 		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
+		}
 		if err := rows.Close(); err != nil {
 			return nil, err
 		}
@@ -93,6 +98,10 @@ func captureTaskSnapshotsBulk(ctx context.Context, q snapshotQueryer, taskIDs []
 			}
 			byID[taskID].EventIDs = append(byID[taskID].EventIDs, eventID)
 		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
+		}
 		if err := rows.Close(); err != nil {
 			return nil, err
 		}
@@ -113,6 +122,10 @@ func captureTaskSnapshotsBulk(ctx context.Context, q snapshotQueryer, taskIDs []
 			}
 			byID[taskID].ModuleEventIDs = append(byID[taskID].ModuleEventIDs, eventID)
 		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
+		}
 		if err := rows.Close(); err != nil {
 			return nil, err
 		}
@@ -122,6 +135,199 @@ func captureTaskSnapshotsBulk(ctx context.Context, q snapshotQueryer, taskIDs []
 		result = append(result, *byID[taskID])
 	}
 	return result, nil
+}
+
+func captureTaskModulesForTasks(ctx context.Context, q snapshotQueryer, taskIDs []int64) ([]taskModuleSnapshot, error) {
+	taskIDs = uniqueSortedInt64(taskIDs)
+	if len(taskIDs) == 0 {
+		return []taskModuleSnapshot{}, nil
+	}
+	items := []taskModuleSnapshot{}
+	for _, chunk := range int64Chunks(taskIDs) {
+		placeholders, args := int64Placeholders(chunk)
+		rows, err := q.QueryContext(ctx, `
+			SELECT id,task_id,module_key,state,pool_team_code,claimed_by,
+			       claimed_team_code,claimed_at,actor_org_snapshot,entered_at,
+			       terminal_at,data,updated_at
+			FROM task_modules
+			WHERE task_id IN (`+placeholders+`)
+			ORDER BY task_id,module_key,id`, args...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var item taskModuleSnapshot
+			var poolTeamCode, claimedTeamCode sql.NullString
+			var claimedBy sql.NullInt64
+			var claimedAt, terminalAt sql.NullTime
+			var actorOrgSnapshot, data []byte
+			if err := rows.Scan(
+				&item.ID, &item.TaskID, &item.ModuleKey, &item.State,
+				&poolTeamCode, &claimedBy, &claimedTeamCode, &claimedAt,
+				&actorOrgSnapshot, &item.EnteredAt, &terminalAt, &data,
+				&item.UpdatedAt,
+			); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			item.PoolTeamCode = nullStringPointer(poolTeamCode)
+			item.ClaimedBy = nullInt64Pointer(claimedBy)
+			item.ClaimedTeamCode = nullStringPointer(claimedTeamCode)
+			item.ClaimedAt = nullTimePointer(claimedAt)
+			item.TerminalAt = nullTimePointer(terminalAt)
+			if actorOrgSnapshot != nil {
+				item.ActorOrgSnapshot = append([]byte(nil), actorOrgSnapshot...)
+			}
+			item.Data = append([]byte(nil), data...)
+			items = append(items, item)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		if err := rows.Close(); err != nil {
+			return nil, err
+		}
+	}
+	return items, nil
+}
+
+func captureSearchDocumentsForTasks(ctx context.Context, q snapshotQueryer, taskIDs []int64) ([]searchDocumentSnapshot, error) {
+	taskIDs = uniqueSortedInt64(taskIDs)
+	if len(taskIDs) == 0 {
+		return []searchDocumentSnapshot{}, nil
+	}
+	items := []searchDocumentSnapshot{}
+	for _, chunk := range int64Chunks(taskIDs) {
+		placeholders, args := int64Placeholders(chunk)
+		rows, err := q.QueryContext(ctx, `
+			SELECT group_id,task_id,finalized_revision_id,internal_text,final_text,updated_at
+			FROM task_asset_group_search_documents
+			WHERE task_id IN (`+placeholders+`)
+			ORDER BY group_id`, args...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var item searchDocumentSnapshot
+			var finalizedRevisionID sql.NullInt64
+			if err := rows.Scan(
+				&item.GroupID, &item.TaskID, &finalizedRevisionID,
+				&item.InternalText, &item.FinalText, &item.UpdatedAt,
+			); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			item.FinalizedRevisionID = nullInt64Pointer(finalizedRevisionID)
+			items = append(items, item)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		if err := rows.Close(); err != nil {
+			return nil, err
+		}
+	}
+	return items, nil
+}
+
+func searchDocumentsMatchSnapshot(
+	ctx context.Context,
+	q snapshotQueryer,
+	taskIDs []int64,
+	expected []searchDocumentSnapshot,
+) (bool, error) {
+	actual, err := captureSearchDocumentsForTasks(ctx, q, taskIDs)
+	if err != nil {
+		return false, err
+	}
+	if len(actual) == 0 {
+		actual = nil
+	}
+	if len(expected) == 0 {
+		expected = nil
+	}
+	return reflect.DeepEqual(actual, expected), nil
+}
+
+func captureTaskSearchDocumentsForTasks(ctx context.Context, q snapshotQueryer, taskIDs []int64) ([]taskSearchDocumentSnapshot, error) {
+	taskIDs = uniqueSortedInt64(taskIDs)
+	if len(taskIDs) == 0 {
+		return []taskSearchDocumentSnapshot{}, nil
+	}
+	items := []taskSearchDocumentSnapshot{}
+	for _, chunk := range int64Chunks(taskIDs) {
+		placeholders, args := int64Placeholders(chunk)
+		rows, err := q.QueryContext(ctx, `
+			SELECT task_id,task_no,product_name_snapshot,sku_code,primary_sku_code,
+			       product_i_id,task_type,task_status,priority,owner_department,
+			       owner_team,owner_org_team,creator_id,creator_name,requester_id,
+			       requester_name,designer_id,designer_name,current_handler_id,
+			       current_handler_name,created_at,updated_at,deadline_at,asset_text,
+			       search_text
+			FROM task_search_documents
+			WHERE task_id IN (`+placeholders+`)
+			ORDER BY task_id`, args...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var item taskSearchDocumentSnapshot
+			var creatorID, requesterID, designerID, currentHandlerID sql.NullInt64
+			var createdAt, updatedAt, deadlineAt sql.NullTime
+			var assetText sql.NullString
+			if err := rows.Scan(
+				&item.TaskID, &item.TaskNo, &item.ProductNameSnapshot,
+				&item.SKUCode, &item.PrimarySKUCode, &item.ProductIID,
+				&item.TaskType, &item.TaskStatus, &item.Priority,
+				&item.OwnerDepartment, &item.OwnerTeam, &item.OwnerOrgTeam,
+				&creatorID, &item.CreatorName, &requesterID,
+				&item.RequesterName, &designerID, &item.DesignerName,
+				&currentHandlerID, &item.CurrentHandlerName, &createdAt,
+				&updatedAt, &deadlineAt, &assetText, &item.SearchText,
+			); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			item.CreatorID = nullInt64Pointer(creatorID)
+			item.RequesterID = nullInt64Pointer(requesterID)
+			item.DesignerID = nullInt64Pointer(designerID)
+			item.CurrentHandlerID = nullInt64Pointer(currentHandlerID)
+			item.CreatedAt = nullTimePointer(createdAt)
+			item.UpdatedAt = nullTimePointer(updatedAt)
+			item.DeadlineAt = nullTimePointer(deadlineAt)
+			item.AssetText = nullStringPointer(assetText)
+			items = append(items, item)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		if err := rows.Close(); err != nil {
+			return nil, err
+		}
+	}
+	return items, nil
+}
+
+func taskSearchDocumentsMatchSnapshot(
+	ctx context.Context,
+	q snapshotQueryer,
+	taskIDs []int64,
+	expected []taskSearchDocumentSnapshot,
+) (bool, error) {
+	actual, err := captureTaskSearchDocumentsForTasks(ctx, q, taskIDs)
+	if err != nil {
+		return false, err
+	}
+	if len(actual) == 0 {
+		actual = nil
+	}
+	if len(expected) == 0 {
+		expected = nil
+	}
+	return reflect.DeepEqual(actual, expected), nil
 }
 
 func captureResourceGroupsForTasks(ctx context.Context, q snapshotQueryer, taskIDs []int64) ([]resourceGroupSnapshot, error) {
@@ -154,6 +360,10 @@ func captureResourceGroupsForTasks(ctx context.Context, q snapshotQueryer, taskI
 			item.Revisions = []resourceRevisionSnapshot{}
 			groupIndex[item.ID] = len(groups)
 			groups = append(groups, item)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
 		}
 		if err := rows.Close(); err != nil {
 			return nil, err
@@ -199,6 +409,10 @@ func captureResourceGroupsForTasks(ctx context.Context, q snapshotQueryer, taskI
 			revisionIndex[item.ID] = [2]int{groupPosition, revisionPosition}
 			revisionIDs = append(revisionIDs, item.ID)
 		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
+		}
 		if err := rows.Close(); err != nil {
 			return nil, err
 		}
@@ -223,6 +437,10 @@ func captureResourceGroupsForTasks(ctx context.Context, q snapshotQueryer, taskI
 			position := revisionIndex[child.RevisionID]
 			groups[position[0]].Revisions[position[1]].Items = append(groups[position[0]].Revisions[position[1]].Items, child)
 		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
+		}
 		if err := rows.Close(); err != nil {
 			return nil, err
 		}
@@ -246,6 +464,10 @@ func captureResourceGroupsForTasks(ctx context.Context, q snapshotQueryer, taskI
 			child.FormalTaskAssetID = nullInt64Pointer(formalID)
 			position := revisionIndex[child.RevisionID]
 			groups[position[0]].Revisions[position[1]].References = append(groups[position[0]].Revisions[position[1]].References, child)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
 		}
 		if err := rows.Close(); err != nil {
 			return nil, err
@@ -310,6 +532,10 @@ func captureAssetBindingsForTasks(ctx context.Context, q snapshotQueryer, taskID
 			item.CleanedAt = nullTimePointer(cleanedAt)
 			items = append(items, item)
 		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
+		}
 		if err := rows.Close(); err != nil {
 			return nil, err
 		}
@@ -333,11 +559,95 @@ func lockInt64RowsByIDs(ctx context.Context, tx *sql.Tx, table, column string, i
 	return locked, nil
 }
 
+func validatePlanningImages(
+	ctx context.Context,
+	q snapshotQueryer,
+	planning []planningMapping,
+	forUpdate bool,
+) error {
+	lockClause := ""
+	if forUpdate {
+		lockClause = " FOR UPDATE"
+	}
+	for _, mapping := range planning {
+		for _, item := range mapping.Items {
+			rows, err := q.QueryContext(ctx, `
+				SELECT ta.id,ta.storage_ref_id
+				FROM task_assets ta
+				JOIN task_sku_items si ON si.id=? AND si.task_id=?
+				JOIN asset_storage_refs sr ON sr.ref_id=ta.storage_ref_id
+				WHERE ta.task_id=?
+				  AND BINARY TRIM(ta.scope_sku_code)=BINARY TRIM(si.sku_code)
+				  AND BINARY ta.asset_type=BINARY 'erp_product_image'
+				  AND BINARY ta.upload_status=BINARY 'uploaded'
+				  AND ta.is_archived=0
+				  AND ta.superseded_by_version_id IS NULL
+				  AND ta.deleted_at IS NULL
+				  AND ta.cleaned_at IS NULL
+				  AND ta.access_revoked_at IS NULL
+				  AND ta.object_deleted_at IS NULL
+				  AND BINARY sr.owner_type=BINARY 'task_asset'
+				  AND sr.owner_id=ta.id
+				  AND BINARY sr.status IN (BINARY 'active',BINARY 'recorded')
+				  AND sr.is_placeholder=0
+				  AND BINARY COALESCE(TRIM(sr.ref_key),'')<>BINARY ''
+				ORDER BY ta.id`+lockClause,
+				item.TaskSKUItemID, mapping.TaskID, mapping.TaskID)
+			if err != nil {
+				return fmt.Errorf("lock planning image candidates for task %d SKU item %d: %w", mapping.TaskID, item.TaskSKUItemID, err)
+			}
+			type candidate struct {
+				assetID int64
+				refID   string
+			}
+			candidates := []candidate{}
+			for rows.Next() {
+				var value candidate
+				if err := rows.Scan(&value.assetID, &value.refID); err != nil {
+					rows.Close()
+					return fmt.Errorf("scan planning image candidate for task %d SKU item %d: %w", mapping.TaskID, item.TaskSKUItemID, err)
+				}
+				candidates = append(candidates, value)
+			}
+			if err := rows.Err(); err != nil {
+				rows.Close()
+				return fmt.Errorf("iterate planning image candidates for task %d SKU item %d: %w", mapping.TaskID, item.TaskSKUItemID, err)
+			}
+			if err := rows.Close(); err != nil {
+				return err
+			}
+			valid := len(candidates) == 0 && item.ImageStorageRef == ""
+			if len(candidates) == 1 && candidates[0].refID == item.ImageStorageRef {
+				valid = true
+			}
+			if !valid {
+				return fmt.Errorf(
+					"planning task %d SKU item %d image selection drifted: mapping ref=%q eligible candidates=%v",
+					mapping.TaskID,
+					item.TaskSKUItemID,
+					item.ImageStorageRef,
+					candidates,
+				)
+			}
+		}
+	}
+	return nil
+}
+
+func validateAndLockPlanningImages(ctx context.Context, tx *sql.Tx, planning []planningMapping) error {
+	return validatePlanningImages(ctx, tx, planning, true)
+}
+
 func lockCutoverTargets(ctx context.Context, tx *sql.Tx, m mappingFile) error {
 	taskIDs, err := lockInt64Rows(ctx, tx, `
 		SELECT id FROM tasks
 		WHERE task_status IN ('PendingAuditA','PendingAuditB','RejectedByAuditA','RejectedByAuditB','PendingCustomizationReview','PendingCustomizationProduction','PendingEffectReview','PendingEffectRevision','PendingProductionTransfer','PendingWarehouseQC','PendingWarehouseReceive','PendingClose','PendingOutsource','Outsourcing','PendingOutsourceReview')
 		   OR task_type='purchase_task'
+		   OR (task_status='Completed' AND EXISTS (
+		       SELECT 1 FROM task_modules tm
+		       WHERE tm.task_id=tasks.id
+		         AND tm.state NOT IN ('completed','closed','forcibly_closed','closed_by_admin')
+		   ))
 		ORDER BY id FOR UPDATE`)
 	if err != nil {
 		return err
@@ -360,6 +670,22 @@ func lockCutoverTargets(ctx context.Context, tx *sql.Tx, m mappingFile) error {
 	}
 	if _, err := lockInt64RowsByIDs(ctx, tx, "task_sku_items", "task_id", taskIDs); err != nil {
 		return err
+	}
+	if _, err := lockInt64RowsByIDs(ctx, tx, "task_modules", "task_id", taskIDs); err != nil {
+		return err
+	}
+	for _, chunk := range int64Chunks(taskIDs) {
+		placeholders, args := int64Placeholders(chunk)
+		if _, err := lockInt64Rows(ctx, tx,
+			`SELECT group_id FROM task_asset_group_search_documents WHERE task_id IN (`+placeholders+`) ORDER BY group_id FOR UPDATE`,
+			args...); err != nil {
+			return err
+		}
+		if _, err := lockInt64Rows(ctx, tx,
+			`SELECT task_id FROM task_search_documents WHERE task_id IN (`+placeholders+`) ORDER BY task_id FOR UPDATE`,
+			args...); err != nil {
+			return err
+		}
 	}
 	groupIDs, err := lockInt64Rows(ctx, tx, `SELECT id FROM task_asset_groups WHERE migration_incomplete=1 ORDER BY id FOR UPDATE`)
 	if err != nil {
@@ -438,6 +764,9 @@ func lockCutoverTargets(ctx context.Context, tx *sql.Tx, m mappingFile) error {
 			}
 		}
 	}
+	if err := validateAndLockPlanningImages(ctx, tx, m.Planning); err != nil {
+		return err
+	}
 	for _, chunk := range int64Chunks(taskIDs) {
 		placeholders, args := int64Placeholders(chunk)
 		rows, err := tx.QueryContext(ctx, `SELECT id FROM task_event_logs WHERE task_id IN (`+placeholders+`) ORDER BY task_id,sequence,id FOR UPDATE`, args...)
@@ -450,6 +779,10 @@ func lockCutoverTargets(ctx context.Context, tx *sql.Tx, m mappingFile) error {
 				rows.Close()
 				return err
 			}
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return err
 		}
 		if err := rows.Close(); err != nil {
 			return err

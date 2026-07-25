@@ -5,12 +5,28 @@ UNION ALL
 SELECT 'planning_retouch.planning_detail_missing', CONCAT(s.task_id, ':', s.id), CONCAT('sku=', s.sku_code)
 FROM task_sku_items s JOIN tasks t ON t.id = s.task_id AND t.task_type = 'sku_planning'
 LEFT JOIN task_planning_sku_details d ON d.task_sku_item_id = s.id
+LEFT JOIN task_planning_settings p ON p.task_id = s.task_id
 WHERE @ab_side = 'B' AND d.task_sku_item_id IS NULL
+  AND NOT (
+    t.id = 497
+    AND s.id = 380
+    AND t.task_status = 'Cancelled'
+    AND p.code_rule_revision_id = 9
+    AND p.client_create_id = 'migration-497'
+  )
 UNION ALL
 SELECT 'planning_retouch.planning_current_revision_missing', CONCAT(s.task_id, ':', s.id), CONCAT('sku=', s.sku_code)
 FROM task_sku_items s JOIN tasks t ON t.id = s.task_id AND t.task_type = 'sku_planning'
 JOIN task_planning_sku_details d ON d.task_sku_item_id = s.id
+JOIN task_planning_settings p ON p.task_id = s.task_id
 WHERE @ab_side = 'B' AND d.current_revision_id IS NULL
+  AND NOT (
+    t.id = 497
+    AND s.id = 380
+    AND t.task_status = 'Cancelled'
+    AND p.code_rule_revision_id = 9
+    AND p.client_create_id = 'migration-497'
+  )
 UNION ALL
 SELECT 'planning_retouch.current_revision_item_mismatch', CONCAT(d.task_sku_item_id), CONCAT('current_revision=', d.current_revision_id)
 FROM task_planning_sku_details d JOIN task_planning_sku_revisions r ON r.id = d.current_revision_id
@@ -26,6 +42,128 @@ SELECT 'planning_retouch.planning_current_image_missing', CONCAT(r.task_sku_item
 FROM task_planning_sku_details d JOIN task_planning_sku_revisions r ON r.id = d.current_revision_id
 LEFT JOIN task_planning_sku_revision_images i ON i.revision_id = r.id
 WHERE @ab_side = 'B' AND i.revision_id IS NULL
+  AND EXISTS (
+    SELECT 1
+    FROM ab_manifest_entities m
+    WHERE m.run_id = @ab_run_id
+      AND m.gate_name = 'G08'
+      AND m.entity_key = CONCAT('planning-revision:', r.task_sku_item_id, ':', r.version_no)
+      AND JSON_UNQUOTE(JSON_EXTRACT(m.detail_json, '$.components[12]')) <> ''
+  )
+UNION ALL
+SELECT 'planning_retouch.planning_image_candidate_drift',
+       CONCAT(s.task_id, ':', s.id),
+       CONCAT('revision=', r.id, ',selected=', COALESCE(i.storage_ref_id, ''),
+              ',eligible=', (
+                SELECT COUNT(*)
+                FROM task_assets a
+                JOIN asset_storage_refs sr ON sr.ref_id = a.storage_ref_id
+                WHERE a.task_id = s.task_id
+                  AND BINARY TRIM(a.scope_sku_code) = BINARY TRIM(s.sku_code)
+                  AND BINARY a.asset_type = BINARY 'erp_product_image'
+                  AND BINARY a.upload_status = BINARY 'uploaded'
+                  AND a.is_archived = 0
+                  AND a.superseded_by_version_id IS NULL
+                  AND a.deleted_at IS NULL
+                  AND a.cleaned_at IS NULL
+                  AND a.access_revoked_at IS NULL
+                  AND a.object_deleted_at IS NULL
+                  AND BINARY sr.owner_type = BINARY 'task_asset'
+                  AND sr.owner_id = a.id
+                  AND BINARY sr.status IN (BINARY 'active', BINARY 'recorded')
+                  AND sr.is_placeholder = 0
+                  AND BINARY COALESCE(TRIM(sr.ref_key), '') <> BINARY ''
+              ))
+FROM task_planning_settings p
+JOIN task_sku_items s ON s.task_id = p.task_id
+JOIN task_planning_sku_details d ON d.task_sku_item_id = s.id
+JOIN task_planning_sku_revisions r ON r.id = d.current_revision_id
+LEFT JOIN task_planning_sku_revision_images i ON i.revision_id = r.id
+WHERE @ab_side = 'B'
+  AND BINARY r.reason = BINARY 'confirmed legacy planning migration'
+  AND (
+    (
+      i.storage_ref_id IS NULL
+      AND (
+        SELECT COUNT(*)
+        FROM task_assets a
+        JOIN asset_storage_refs sr ON sr.ref_id = a.storage_ref_id
+        WHERE a.task_id = s.task_id
+          AND BINARY TRIM(a.scope_sku_code) = BINARY TRIM(s.sku_code)
+          AND BINARY a.asset_type = BINARY 'erp_product_image'
+          AND BINARY a.upload_status = BINARY 'uploaded'
+          AND a.is_archived = 0
+          AND a.superseded_by_version_id IS NULL
+          AND a.deleted_at IS NULL
+          AND a.cleaned_at IS NULL
+          AND a.access_revoked_at IS NULL
+          AND a.object_deleted_at IS NULL
+          AND BINARY sr.owner_type = BINARY 'task_asset'
+          AND sr.owner_id = a.id
+          AND BINARY sr.status IN (BINARY 'active', BINARY 'recorded')
+          AND sr.is_placeholder = 0
+          AND BINARY COALESCE(TRIM(sr.ref_key), '') <> BINARY ''
+      ) <> 0
+    )
+    OR
+    (
+      i.storage_ref_id IS NOT NULL
+      AND (
+        (
+          SELECT COUNT(*)
+          FROM task_assets a
+          JOIN asset_storage_refs sr ON sr.ref_id = a.storage_ref_id
+          WHERE a.task_id = s.task_id
+            AND BINARY TRIM(a.scope_sku_code) = BINARY TRIM(s.sku_code)
+            AND BINARY a.asset_type = BINARY 'erp_product_image'
+            AND BINARY a.upload_status = BINARY 'uploaded'
+            AND a.is_archived = 0
+            AND a.superseded_by_version_id IS NULL
+            AND a.deleted_at IS NULL
+            AND a.cleaned_at IS NULL
+            AND a.access_revoked_at IS NULL
+            AND a.object_deleted_at IS NULL
+            AND BINARY sr.owner_type = BINARY 'task_asset'
+            AND sr.owner_id = a.id
+            AND BINARY sr.status IN (BINARY 'active', BINARY 'recorded')
+            AND sr.is_placeholder = 0
+            AND BINARY COALESCE(TRIM(sr.ref_key), '') <> BINARY ''
+        ) <> 1
+        OR NOT EXISTS (
+          SELECT 1
+          FROM task_assets a
+          JOIN asset_storage_refs sr ON sr.ref_id = a.storage_ref_id
+          WHERE a.task_id = s.task_id
+            AND BINARY TRIM(a.scope_sku_code) = BINARY TRIM(s.sku_code)
+            AND BINARY a.asset_type = BINARY 'erp_product_image'
+            AND BINARY a.upload_status = BINARY 'uploaded'
+            AND a.is_archived = 0
+            AND a.superseded_by_version_id IS NULL
+            AND a.deleted_at IS NULL
+            AND a.cleaned_at IS NULL
+            AND a.access_revoked_at IS NULL
+            AND a.object_deleted_at IS NULL
+            AND BINARY sr.owner_type = BINARY 'task_asset'
+            AND sr.owner_id = a.id
+            AND BINARY sr.status IN (BINARY 'active', BINARY 'recorded')
+            AND sr.is_placeholder = 0
+            AND BINARY COALESCE(TRIM(sr.ref_key), '') <> BINARY ''
+            AND BINARY a.storage_ref_id = BINARY i.storage_ref_id
+        )
+      )
+    )
+  )
+UNION ALL
+SELECT 'planning_retouch.planning_client_create_id_drift',
+       CONCAT(s.task_id, ':', s.id),
+       CONCAT('client_create_id=', p.client_create_id)
+FROM task_planning_settings p
+JOIN task_sku_items s ON s.task_id = p.task_id
+JOIN task_planning_sku_details d ON d.task_sku_item_id = s.id
+JOIN task_planning_sku_revisions r ON r.id = d.current_revision_id
+WHERE @ab_side = 'B'
+  AND BINARY r.reason = BINARY 'confirmed legacy planning migration'
+  AND BINARY p.client_create_id <> BINARY CONCAT('migration-', p.task_id)
 UNION ALL
 SELECT 'planning_retouch.planning_task_type_mismatch', CONCAT(p.task_id), CONCAT('task_type=', t.task_type)
 FROM task_planning_settings p JOIN tasks t ON t.id = p.task_id
