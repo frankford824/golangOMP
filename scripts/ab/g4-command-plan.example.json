@@ -74,6 +74,7 @@
         "{run_dir}/bundle-registry.json",
         "{run_dir}/bundle-guard-before.json",
         "{run_dir}/bundle-guard-provision.json",
+        "{run_dir}/bundle-db-rollback-journal.json",
         "{run_dir}/bundle-db-apply.json",
         "{run_dir}/bundle-db-idempotent.json",
         "{run_dir}/bundle-component-apply.json"

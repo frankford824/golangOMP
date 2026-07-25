@@ -1,4 +1,5 @@
 import argparse
+import hashlib
 import json
 import os
 import pathlib
@@ -7,6 +8,19 @@ import unittest
 from unittest import mock
 
 from scripts.ab import clone_b_materialization_component as component
+
+
+def compact_self(value):
+    result = dict(value)
+    result["evidence_sha256"] = hashlib.sha256(
+        json.dumps(
+            result,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    return result
 
 
 class FakeConnection:
@@ -130,6 +144,8 @@ def bundle_report(*, changed, already):
         "candidate_sha256": "a" * 64,
         "registry_sha256": "b" * 64,
         "manifest_sha256": "c" * 64,
+        "rollback_journal_sha256": "d" * 64,
+        "rollback_journal_evidence_sha256": "e" * 64,
         "changed_bundle_count": changed,
         "already_applied_bundle_count": already,
         "database_transaction_committed": True,
@@ -171,7 +187,9 @@ def write_component_chain_fixture(
 
     recovery_plan = write(
         "recovery-materialization-plan.json",
-        {"version": 1, "status": "MATERIALIZED", "run_id": run_id},
+        compact_self(
+            {"version": 1, "status": "MATERIALIZED", "run_id": run_id}
+        ),
     )
     recovery_plan_sha = component.sha256_file(recovery_plan)
     recovery_before = write(
@@ -324,6 +342,52 @@ def write_component_chain_fixture(
     registry_sha = component.sha256_file(bundle_registry)
     candidate_sha = "b" * 64
     manifest_sha = "c" * 64
+    bundle_journal_value = {
+        "schema_version": 1,
+        "kind": "source-bundle-clone-b-rollback-journal",
+        "status": "PREPARED",
+        "run_id": run_id,
+        "database": database,
+        "host": host,
+        "candidate_sha256": candidate_sha,
+        "registry_sha256": registry_sha,
+        "manifest_sha256": manifest_sha,
+        "prepared_before_first_database_mutation": True,
+        "database_commit_state": "unknown",
+        "expected_bundle_count": 7,
+        "expected_member_count": 22,
+        "changed_bundle_count": 7,
+        "already_applied_bundle_count": 0,
+        "member_before": [
+            {
+                "task_asset_id": index,
+                "original_whole_hash": None,
+                "recovered_whole_hash": f"{index:064x}",
+            }
+            for index in range(1, 23)
+        ],
+        "auto_increment_before": [
+            {"table": "design_assets", "next_value": 24000},
+            {"table": "task_assets", "next_value": 25000},
+        ],
+        "auto_increment_ceilings": [
+            {"table": "design_assets", "next_value": 24000},
+            {"table": "task_assets", "next_value": 26000},
+        ],
+        "production_writes_executed": False,
+    }
+    bundle_journal_value["evidence_sha256"] = hashlib.sha256(
+        json.dumps(
+            bundle_journal_value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    bundle_journal = write(
+        "bundle-db-rollback-journal.json", bundle_journal_value
+    )
+    bundle_journal_sha = component.sha256_file(bundle_journal)
     bundle_before = write("bundle-guard-before.json", guard_before("bundle"))
     bundle_provision = write(
         "bundle-guard-provision.json",
@@ -361,6 +425,10 @@ def write_component_chain_fixture(
             "candidate_sha256": candidate_sha,
             "registry_sha256": registry_sha,
             "manifest_sha256": manifest_sha,
+            "rollback_journal_sha256": bundle_journal_sha,
+            "rollback_journal_evidence_sha256": bundle_journal_value[
+                "evidence_sha256"
+            ],
             "changed_bundle_count": changed,
             "already_applied_bundle_count": already,
             "database_transaction_committed": True,
@@ -394,6 +462,7 @@ def write_component_chain_fixture(
                         bundle_registry,
                         bundle_before,
                         bundle_provision,
+                        bundle_journal,
                         bundle_apply,
                         bundle_idempotent,
                     )
@@ -447,6 +516,7 @@ def write_component_chain_fixture(
                 "artifacts": [
                     component.artifact(path)
                     for path in (
+                        bundle_journal,
                         bundle_db_rollback,
                         bundle_restore,
                         bundle_file,
@@ -535,6 +605,7 @@ class CloneBMaterializationComponentTest(unittest.TestCase):
             connection=connection,
             run_id="formal-test",
             candidate_sha256="b" * 64,
+            rollback_journal=pathlib.Path("/tmp/rollback-journal.json"),
         )
         for argv in (recovery, bundle):
             rendered = " ".join(argv)
@@ -564,15 +635,30 @@ class CloneBMaterializationComponentTest(unittest.TestCase):
 
             def command(argv, *, repo_root, env, label):
                 labels.append(label)
-                if label == "recovery file materialization":
-                    plan = component_dir / "recovery-materialization-plan.json"
-                    plan.write_text(
+                if label == "recovery file write-ahead plan":
+                    write_ahead = (
+                        component_dir / "recovery-file-write-ahead.json"
+                    )
+                    write_ahead.write_text(
                         json.dumps(
                             {
                                 "version": 1,
-                                "status": "MATERIALIZED",
+                                "status": "PREPARED",
                                 "run_id": "formal-test",
                             }
+                        )
+                        + "\n",
+                        encoding="utf-8",
+                    )
+                elif label == "recovery file materialization":
+                    plan = component_dir / "recovery-materialization-plan.json"
+                    plan.write_text(
+                        json.dumps(
+                            compact_self({
+                                "version": 1,
+                                "status": "MATERIALIZED",
+                                "run_id": "formal-test",
+                            })
                         )
                         + "\n",
                         encoding="utf-8",
@@ -672,6 +758,7 @@ class CloneBMaterializationComponentTest(unittest.TestCase):
             self.assertEqual(
                 labels,
                 [
+                    "recovery file write-ahead plan",
                     "recovery file materialization",
                     "recovery database apply",
                     "recovery database idempotent apply",
@@ -710,6 +797,150 @@ class CloneBMaterializationComponentTest(unittest.TestCase):
                     changed=3,
                     already=0,
                 )
+
+    def test_restore_guard_is_idempotent_after_internal_compensation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            before_path = root / "guard-before.json"
+            restore_path = root / "guard-restore.json"
+            connection = FakeConnection()
+            before = component.self_bound(
+                {
+                    "schema_version": 1,
+                    "kind": "clone-b-guard-state",
+                    "component": "recovery",
+                    "database": connection.database,
+                    "table": component.RECOVERY_GUARD.table,
+                    "table_existed": False,
+                    "create_table_sql": None,
+                    "schema": [],
+                    "rows": [],
+                }
+            )
+            component.write_document(before_path, before)
+            binding = component.guard_binding(
+                component.RECOVERY_GUARD,
+                run_id="formal-test",
+                primary_sha256="a" * 64,
+            )
+            with (
+                mock.patch.object(
+                    component, "capture_guard_state", return_value=before
+                ),
+                mock.patch.object(
+                    component, "_restore_guard_to_before"
+                ) as restore,
+            ):
+                receipt = component.restore_guard(
+                    connection,
+                    component.RECOVERY_GUARD,
+                    binding,
+                    before_path,
+                    restore_path,
+                )
+            restore.assert_not_called()
+            self.assertTrue(receipt["already_restored"])
+            self.assertTrue(receipt["exact"])
+
+    def test_bundle_outer_rollback_accepts_complete_internal_compensation(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            run_root = pathlib.Path(temporary) / "formal-test"
+            component_dir = run_root / "g4"
+            fixture = run_root / "fixture-upload-b"
+            component_dir.mkdir(parents=True)
+            fixture.mkdir()
+            manifest = run_root / "manifest.json"
+            manifest.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "status": "CONFIRMED",
+                        "run_id": "formal-test",
+                        "source_candidate_sha256": "b" * 64,
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            component.write_document(
+                component_dir / "bundle-registry.json",
+                component.self_bound(
+                    {
+                        "schema_version": 1,
+                        "status": "MATERIALIZED",
+                        "run_id": "formal-test",
+                        "manifest_sha256": component.sha256_file(manifest),
+                        "entries": [{"index": index} for index in range(7)],
+                    }
+                ),
+            )
+            (component_dir / "bundle-guard-before.json").write_text(
+                "{}\n", encoding="utf-8"
+            )
+            component.write_document(
+                component_dir / "bundle-apply-compensation-state.json",
+                component.self_bound(
+                    {
+                        "schema_version": 1,
+                        "status": "COMPENSATION_COMPLETE",
+                        "component": "bundle",
+                        "run_id": "formal-test",
+                        "database": "ab_formal_b_ui",
+                        "database_safe": True,
+                        "guard_safe": True,
+                        "files_safe": True,
+                        "details": [],
+                    }
+                ),
+            )
+            args = argparse.Namespace(
+                run_id="formal-test",
+                manifest=manifest,
+                fixture_root=fixture,
+            )
+            labels: list[str] = []
+
+            def command(argv, *, repo_root, env, label):
+                labels.append(label)
+                if label == "bundle file rollback":
+                    pathlib.Path(
+                        argv[argv.index("--report") + 1]
+                    ).write_text(
+                        json.dumps(
+                            {
+                                "schema_version": 1,
+                                "status": "ROLLED_BACK",
+                                "database_write_performed": False,
+                            }
+                        )
+                        + "\n",
+                        encoding="utf-8",
+                    )
+
+            def restore(*_args):
+                path = _args[-1]
+                component.write_document(
+                    path,
+                    component.self_bound(
+                        {"schema_version": 1, "status": "RESTORED"}
+                    ),
+                )
+
+            with (
+                mock.patch.object(component, "run_command", side_effect=command),
+                mock.patch.object(
+                    component, "restore_guard", side_effect=restore
+                ),
+            ):
+                result = component.bundle_rollback(
+                    args,
+                    FakeConnection(),
+                    pathlib.Path("/repo"),
+                    run_root,
+                    component_dir,
+                )
+            self.assertEqual(result["status"], "ROLLED_BACK")
+            self.assertEqual(labels, ["bundle file rollback"])
 
     def test_rollback_report_accepts_only_atomic_extremes_when_resuming(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -789,6 +1020,8 @@ class CloneBMaterializationComponentTest(unittest.TestCase):
                     candidate_sha256="a" * 64,
                     registry_sha256="b" * 64,
                     manifest_sha256="c" * 64,
+                    rollback_journal_sha256="d" * 64,
+                    rollback_journal_evidence_sha256="e" * 64,
                     changed=7,
                     already=0,
                     allowed_counts={(7, 0), (0, 7)},
@@ -810,6 +1043,8 @@ class CloneBMaterializationComponentTest(unittest.TestCase):
                     candidate_sha256="a" * 64,
                     registry_sha256="b" * 64,
                     manifest_sha256="c" * 64,
+                    rollback_journal_sha256="d" * 64,
+                    rollback_journal_evidence_sha256="e" * 64,
                     changed=7,
                     already=0,
                     allowed_counts={(7, 0), (0, 7)},

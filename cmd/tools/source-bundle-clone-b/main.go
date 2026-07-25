@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -45,6 +46,7 @@ type options struct {
 	ManifestFile           string
 	FixtureRoot            string
 	ApplyReportFile        string
+	RollbackJournalFile    string
 	ReportFile             string
 	ConfirmDatabase        string
 	ConfirmHost            string
@@ -170,21 +172,51 @@ type memberBefore struct {
 }
 
 type executionReport struct {
-	SchemaVersion       int            `json:"schema_version"`
-	Mode                string         `json:"mode"`
-	Status              string         `json:"status"`
-	RunID               string         `json:"run_id"`
-	Database            string         `json:"database"`
-	Host                string         `json:"host"`
-	CandidateSHA256     string         `json:"candidate_sha256"`
-	RegistrySHA256      string         `json:"registry_sha256"`
-	ManifestSHA256      string         `json:"manifest_sha256"`
-	ApplyReportSHA256   string         `json:"apply_report_sha256,omitempty"`
-	ChangedBundleCount  int            `json:"changed_bundle_count"`
-	AlreadyAppliedCount int            `json:"already_applied_bundle_count"`
-	MemberBefore        []memberBefore `json:"member_before,omitempty"`
-	Committed           bool           `json:"database_transaction_committed"`
-	ExecutedAt          time.Time      `json:"executed_at"`
+	SchemaVersion                 int            `json:"schema_version"`
+	Mode                          string         `json:"mode"`
+	Status                        string         `json:"status"`
+	RunID                         string         `json:"run_id"`
+	Database                      string         `json:"database"`
+	Host                          string         `json:"host"`
+	CandidateSHA256               string         `json:"candidate_sha256"`
+	RegistrySHA256                string         `json:"registry_sha256"`
+	ManifestSHA256                string         `json:"manifest_sha256"`
+	ApplyReportSHA256             string         `json:"apply_report_sha256,omitempty"`
+	RollbackJournalSHA256         string         `json:"rollback_journal_sha256"`
+	RollbackJournalEvidenceSHA256 string         `json:"rollback_journal_evidence_sha256"`
+	ChangedBundleCount            int            `json:"changed_bundle_count"`
+	AlreadyAppliedCount           int            `json:"already_applied_bundle_count"`
+	MemberBefore                  []memberBefore `json:"member_before,omitempty"`
+	Committed                     bool           `json:"database_transaction_committed"`
+	ExecutedAt                    time.Time      `json:"executed_at"`
+}
+
+type rollbackJournal struct {
+	SchemaVersion                       int                  `json:"schema_version"`
+	Kind                                string               `json:"kind"`
+	Status                              string               `json:"status"`
+	RunID                               string               `json:"run_id"`
+	Database                            string               `json:"database"`
+	Host                                string               `json:"host"`
+	CandidateSHA256                     string               `json:"candidate_sha256"`
+	RegistrySHA256                      string               `json:"registry_sha256"`
+	ManifestSHA256                      string               `json:"manifest_sha256"`
+	PreparedBeforeFirstDatabaseMutation bool                 `json:"prepared_before_first_database_mutation"`
+	DatabaseCommitState                 string               `json:"database_commit_state"`
+	ExpectedBundleCount                 int                  `json:"expected_bundle_count"`
+	ExpectedMemberCount                 int                  `json:"expected_member_count"`
+	ChangedBundleCount                  int                  `json:"changed_bundle_count"`
+	AlreadyAppliedCount                 int                  `json:"already_applied_bundle_count"`
+	MemberBefore                        []memberBefore       `json:"member_before"`
+	AutoIncrementBefore                 []autoIncrementState `json:"auto_increment_before"`
+	AutoIncrementCeilings               []autoIncrementState `json:"auto_increment_ceilings"`
+	ProductionWritesExecuted            bool                 `json:"production_writes_executed"`
+	EvidenceSHA256                      string               `json:"evidence_sha256,omitempty"`
+}
+
+type autoIncrementState struct {
+	Table     string `json:"table"`
+	NextValue int64  `json:"next_value"`
 }
 
 type transaction interface {
@@ -201,7 +233,8 @@ func main() {
 	flag.StringVar(&o.RegistryFile, "registry", "", "materializer registry JSON")
 	flag.StringVar(&o.ManifestFile, "manifest", "", "administrator-confirmed bundle manifest")
 	flag.StringVar(&o.FixtureRoot, "fixture-root", "", "exact materializer b_root")
-	flag.StringVar(&o.ApplyReportFile, "apply-report", "", "original apply report; required for rollback")
+	flag.StringVar(&o.ApplyReportFile, "apply-report", "", "optional original apply report cross-check")
+	flag.StringVar(&o.RollbackJournalFile, "rollback-journal", "", "durable pre-commit rollback journal")
 	flag.StringVar(&o.ReportFile, "report-file", "", "new execution report path")
 	flag.StringVar(&o.ConfirmDatabase, "confirm-database", "", "exact Clone B database")
 	flag.StringVar(&o.ConfirmHost, "confirm-host", "", "exact loopback DSN host")
@@ -231,8 +264,13 @@ func run(ctx context.Context, o options) error {
 		return err
 	}
 	defer db.Close()
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
 	if err := db.PingContext(ctx); err != nil {
 		return fmt.Errorf("connect Clone B: %w", err)
+	}
+	if err := configureAutoIncrementSession(ctx, db); err != nil {
+		return err
 	}
 	var database string
 	if err := db.QueryRowContext(ctx, `SELECT DATABASE()`).Scan(&database); err != nil {
@@ -256,37 +294,108 @@ func run(ctx context.Context, o options) error {
 		Database: database, Host: host, CandidateSHA256: manifest.SourceCandidateSHA256,
 		RegistrySHA256: registrySHA, ManifestSHA256: manifestSHA,
 	}
+	var rollbackSeed executionReport
+	var rollbackJournalValue rollbackJournal
 	switch o.Mode {
 	case "apply":
-		changed, already, before, err := applyAll(ctx, tx, entries, manifest)
+		persistJournal := func(before []memberBefore) error {
+			autoBefore, err := loadBundleAutoIncrementStates(ctx, tx)
+			if err != nil {
+				return err
+			}
+			autoCeilings, err := bundleAutoIncrementCeilings(
+				autoBefore, reg,
+			)
+			if err != nil {
+				return err
+			}
+			journal, err := newRollbackJournal(
+				reg, manifest, registrySHA, manifestSHA, database, host,
+				before, autoBefore, autoCeilings,
+			)
+			if err != nil {
+				return err
+			}
+			return writeNewJSONDurable(o.RollbackJournalFile, journal)
+		}
+		changed, already, before, err := applyAll(
+			ctx, tx, entries, manifest, persistJournal,
+		)
 		if err != nil {
 			return err
 		}
 		report.ChangedBundleCount = changed
 		report.AlreadyAppliedCount = already
 		report.MemberBefore = before
+		_, journal, err := loadRollbackJournal(
+			o.RollbackJournalFile, reg, manifest, registrySHA, manifestSHA,
+			database, host,
+		)
+		if err != nil {
+			return fmt.Errorf("validate apply rollback journal: %w", err)
+		}
+		rollbackSeed = journal.executionReport()
+		rollbackJournalValue = journal
 	case "rollback":
-		applyRaw, applyReport, err := loadApplyReport(o.ApplyReportFile, reg, manifest, registrySHA)
+		journalRaw, journal, err := loadRollbackJournal(
+			o.RollbackJournalFile, reg, manifest, registrySHA, manifestSHA,
+			database, host,
+		)
 		if err != nil {
 			return err
 		}
-		report.ApplyReportSHA256 = sha256Hex(applyRaw)
-		changed, already, err := rollbackAll(ctx, tx, entries, applyReport)
+		rollbackSeed = journal.executionReport()
+		rollbackJournalValue = journal
+		if strings.TrimSpace(o.ApplyReportFile) != "" {
+			applyRaw, applyReport, err := loadApplyReport(
+				o.ApplyReportFile, reg, manifest, registrySHA,
+			)
+			if err != nil {
+				return err
+			}
+			if !sameMemberBefore(applyReport.MemberBefore, journal.MemberBefore) {
+				return errors.New("apply report differs from rollback journal")
+			}
+			if applyReport.RollbackJournalSHA256 != sha256Hex(journalRaw) ||
+				applyReport.RollbackJournalEvidenceSHA256 != journal.EvidenceSHA256 {
+				return errors.New("apply report rollback journal binding differs")
+			}
+			report.ApplyReportSHA256 = sha256Hex(applyRaw)
+		}
+		changed, already, err := rollbackAll(ctx, tx, entries, rollbackSeed)
 		if err != nil {
 			return err
 		}
 		report.ChangedBundleCount = changed
 		report.AlreadyAppliedCount = already
 	}
+	journalRaw, journal, err := loadRollbackJournal(
+		o.RollbackJournalFile, reg, manifest, registrySHA, manifestSHA,
+		database, host,
+	)
+	if err != nil {
+		return err
+	}
+	report.RollbackJournalSHA256 = sha256Hex(journalRaw)
+	report.RollbackJournalEvidenceSHA256 = journal.EvidenceSHA256
 	if err := tx.Commit(); err != nil {
 		return err
+	}
+	if o.Mode == "rollback" {
+		if err := restoreBundleAutoIncrementStates(
+			ctx, db, rollbackJournalValue.AutoIncrementBefore,
+			rollbackJournalValue.AutoIncrementCeilings,
+		); err != nil {
+			return fmt.Errorf("restore bundle auto-increment state: %w", err)
+		}
 	}
 	report.Committed = true
 	report.ExecutedAt = time.Now().UTC()
 	if err := writeNewJSON(o.ReportFile, report); err != nil {
 		if o.Mode == "apply" && report.ChangedBundleCount > 0 {
 			compensationErr := compensateCommittedApply(
-				ctx, db, reg, manifest, registrySHA, entries, report,
+				ctx, db, reg, manifest, registrySHA, entries,
+				rollbackSeed, rollbackJournalValue,
 			)
 			if compensationErr != nil {
 				return fmt.Errorf(
@@ -312,6 +421,7 @@ func compensateCommittedApply(
 	registrySHA string,
 	entries []validatedEntry,
 	report executionReport,
+	journal rollbackJournal,
 ) error {
 	tx, err := db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
@@ -337,7 +447,12 @@ func compensateCommittedApply(
 			changed, already, len(entries),
 		)
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return restoreBundleAutoIncrementStates(
+		ctx, db, journal.AutoIncrementBefore, journal.AutoIncrementCeilings,
+	)
 }
 
 func validateOptions(o options) (*mysql.Config, string, error) {
@@ -347,17 +462,28 @@ func validateOptions(o options) (*mysql.Config, string, error) {
 	required := map[string]string{
 		"--dsn/CLONE_B_MYSQL_DSN": o.DSN, "--registry": o.RegistryFile,
 		"--manifest": o.ManifestFile, "--fixture-root": o.FixtureRoot,
-		"--report-file": o.ReportFile, "--confirm-database": o.ConfirmDatabase,
+		"--rollback-journal": o.RollbackJournalFile,
+		"--report-file":      o.ReportFile, "--confirm-database": o.ConfirmDatabase,
 		"--confirm-host": o.ConfirmHost, "--confirm-run-id": o.ConfirmRunID,
 		"--confirm-candidate-sha256": o.ConfirmCandidateSHA256,
-	}
-	if o.Mode == "rollback" {
-		required["--apply-report"] = o.ApplyReportFile
 	}
 	for name, value := range required {
 		if strings.TrimSpace(value) == "" {
 			return nil, "", fmt.Errorf("%s is required", name)
 		}
+	}
+	journalPath, err := filepath.Abs(o.RollbackJournalFile)
+	if err != nil || journalPath != filepath.Clean(o.RollbackJournalFile) {
+		return nil, "", errors.New("--rollback-journal must be an absolute clean path")
+	}
+	reportPath, err := filepath.Abs(o.ReportFile)
+	if err != nil || filepath.Dir(journalPath) != filepath.Dir(reportPath) {
+		return nil, "", errors.New("--rollback-journal and --report-file must share a directory")
+	}
+	if info, err := os.Lstat(journalPath); err == nil && info.Mode()&os.ModeSymlink != 0 {
+		return nil, "", errors.New("--rollback-journal must not be a symlink")
+	} else if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, "", err
 	}
 	if !runIDPattern.MatchString(o.ConfirmRunID) || !sha256Pattern.MatchString(o.ConfirmCandidateSHA256) {
 		return nil, "", errors.New("run/candidate confirmation is invalid")
@@ -868,7 +994,13 @@ func bundleAssetNo(taskAssetID int64) string {
 	return fmt.Sprintf("MIG-BUNDLE-%d", taskAssetID)
 }
 
-func applyAll(ctx context.Context, tx transaction, entries []validatedEntry, manifest confirmedManifest) (int, int, []memberBefore, error) {
+func applyAll(
+	ctx context.Context,
+	tx transaction,
+	entries []validatedEntry,
+	manifest confirmedManifest,
+	persistBeforeMutation func([]memberBefore) error,
+) (int, int, []memberBefore, error) {
 	// Fill scope codes first while the transaction is serializable.
 	for index := range entries {
 		if err := tx.QueryRowContext(ctx, `
@@ -928,6 +1060,18 @@ func applyAll(ctx context.Context, tx transaction, entries []validatedEntry, man
 				original = &value
 			}
 			before = append(before, memberBefore{TaskAssetID: member.id, OriginalHash: original, RecoveredHash: expected})
+		}
+	}
+	sort.Slice(before, func(i, j int) bool { return before[i].TaskAssetID < before[j].TaskAssetID })
+	if persistBeforeMutation == nil {
+		return 0, 0, nil, errors.New("pre-mutation rollback journal callback is required")
+	}
+	if err := persistBeforeMutation(before); err != nil {
+		return 0, 0, nil, err
+	}
+	for _, item := range items {
+		for index, member := range item.members {
+			expected := item.entry.manifest.OrderedMembers[index].SHA256
 			result, err := tx.ExecContext(ctx, `
 				UPDATE task_assets SET whole_hash=?
 				WHERE id=? AND (whole_hash IS NULL OR whole_hash='')`, expected, member.id)
@@ -942,7 +1086,6 @@ func applyAll(ctx context.Context, tx transaction, entries []validatedEntry, man
 			return 0, 0, nil, err
 		}
 	}
-	sort.Slice(before, func(i, j int) bool { return before[i].TaskAssetID < before[j].TaskAssetID })
 	return len(items), 0, before, nil
 }
 
@@ -1012,6 +1155,7 @@ func rollbackAll(ctx context.Context, tx transaction, entries []validatedEntry, 
 		}
 		beforeByID[member.TaskAssetID] = member
 	}
+	allApplied, allBefore := true, true
 	for index := range entries {
 		if err := tx.QueryRowContext(ctx, `
 			SELECT sku_code FROM task_sku_items
@@ -1027,15 +1171,25 @@ func rollbackAll(ctx context.Context, tx transaction, entries []validatedEntry, 
 		for memberIndex, member := range members {
 			expected := entries[index].manifest.OrderedMembers[memberIndex].SHA256
 			saved, ok := beforeByID[member.id]
-			if !ok || saved.RecoveredHash != expected ||
-				!member.wholeHash.Valid || member.wholeHash.String != expected {
-				return 0, 0, fmt.Errorf("member task_asset %d is not in exact applied state", member.id)
+			if !ok || saved.RecoveredHash != expected {
+				return 0, 0, fmt.Errorf("member task_asset %d is absent from rollback journal", member.id)
 			}
+			applied := member.wholeHash.Valid && member.wholeHash.String == expected
+			before := (saved.OriginalHash == nil && !member.wholeHash.Valid) ||
+				(saved.OriginalHash != nil && member.wholeHash.Valid &&
+					member.wholeHash.String == *saved.OriginalHash)
+			allApplied = allApplied && applied
+			allBefore = allBefore && before
 		}
 		state, err := lockBundleState(ctx, tx, entries[index], entries[index].registry.SourceBundle.ConfirmedBy)
-		if err != nil || state != bundleExact {
-			return 0, 0, fmt.Errorf("bundle %d is not in exact applied state: %w",
+		if err != nil {
+			return 0, 0, fmt.Errorf("bundle %d state validation failed: %w",
 				entries[index].registry.TaskAssetCandidate.ID, err)
+		}
+		allApplied = allApplied && state == bundleExact
+		allBefore = allBefore && state == bundleAbsent
+		if state != bundleExact {
+			continue
 		}
 		var references int
 		if err := tx.QueryRowContext(ctx, `
@@ -1051,6 +1205,12 @@ func rollbackAll(ctx context.Context, tx transaction, entries []validatedEntry, 
 			return 0, 0, fmt.Errorf("bundle task_asset %d is still referenced by %d resource revision rows",
 				entries[index].registry.TaskAssetCandidate.ID, references)
 		}
+	}
+	if allBefore {
+		return 0, len(entries), nil
+	}
+	if !allApplied {
+		return 0, 0, errors.New("bundle/member rollback state is mixed, drifted, or partially applied")
 	}
 	for index := len(entries) - 1; index >= 0; index-- {
 		entry := entries[index]
@@ -1094,6 +1254,338 @@ func rollbackAll(ctx context.Context, tx transaction, entries []validatedEntry, 
 		}
 	}
 	return len(entries), 0, nil
+}
+
+type rowQueryer interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func loadBundleAutoIncrementStates(
+	ctx context.Context, queryer rowQueryer,
+) ([]autoIncrementState, error) {
+	if err := validateAutoIncrementSession(ctx, queryer); err != nil {
+		return nil, err
+	}
+	states := make([]autoIncrementState, 0, 2)
+	for _, table := range []string{"design_assets", "task_assets"} {
+		var next sql.NullInt64
+		if err := queryer.QueryRowContext(
+			ctx,
+			`SELECT AUTO_INCREMENT FROM information_schema.tables
+			 WHERE table_schema=DATABASE() AND table_name=?`,
+			table,
+		).Scan(&next); err != nil {
+			return nil, err
+		}
+		if !next.Valid || next.Int64 <= 0 {
+			return nil, fmt.Errorf("%s has no valid AUTO_INCREMENT state", table)
+		}
+		states = append(states, autoIncrementState{
+			Table: table, NextValue: next.Int64,
+		})
+	}
+	return states, nil
+}
+
+func configureAutoIncrementSession(ctx context.Context, db *sql.DB) error {
+	if _, err := db.ExecContext(
+		ctx, `SET SESSION information_schema_stats_expiry=0`,
+	); err != nil {
+		return fmt.Errorf(
+			"disable information_schema metadata caching: %w", err,
+		)
+	}
+	return validateAutoIncrementSession(ctx, db)
+}
+
+func validateAutoIncrementSession(
+	ctx context.Context, queryer rowQueryer,
+) error {
+	var expiry, increment, offset int64
+	if err := queryer.QueryRowContext(
+		ctx,
+		`SELECT @@SESSION.information_schema_stats_expiry,
+		        @@SESSION.auto_increment_increment,
+		        @@SESSION.auto_increment_offset`,
+	).Scan(&expiry, &increment, &offset); err != nil {
+		return err
+	}
+	if expiry != 0 || increment != 1 || offset != 1 {
+		return fmt.Errorf(
+			"unsafe auto-increment session settings: expiry=%d increment=%d offset=%d",
+			expiry, increment, offset,
+		)
+	}
+	return nil
+}
+
+func bundleAutoIncrementCeilings(
+	before []autoIncrementState, reg registry,
+) ([]autoIncrementState, error) {
+	if len(before) != 2 {
+		return nil, errors.New("bundle auto-increment baseline must contain two tables")
+	}
+	maxInserted := map[string]int64{}
+	for _, entry := range reg.Entries {
+		if entry.TaskAssetCandidate.ID > maxInserted["task_assets"] {
+			maxInserted["task_assets"] = entry.TaskAssetCandidate.ID
+		}
+		if entry.TaskAssetCandidate.AssetID > maxInserted["design_assets"] {
+			maxInserted["design_assets"] = entry.TaskAssetCandidate.AssetID
+		}
+	}
+	ceilings := make([]autoIncrementState, 0, len(before))
+	for _, state := range before {
+		next := state.NextValue
+		if inserted := maxInserted[state.Table]; inserted >= next {
+			if inserted == int64(^uint64(0)>>1) {
+				return nil, errors.New("bundle auto-increment ceiling overflow")
+			}
+			next = inserted + 1
+		}
+		ceilings = append(ceilings, autoIncrementState{
+			Table: state.Table, NextValue: next,
+		})
+	}
+	if err := validateBundleAutoIncrementStates(before, ceilings); err != nil {
+		return nil, err
+	}
+	return ceilings, nil
+}
+
+func validateBundleAutoIncrementStates(
+	before []autoIncrementState, ceilings []autoIncrementState,
+) error {
+	expected := []string{"design_assets", "task_assets"}
+	if len(before) != len(expected) || len(ceilings) != len(expected) {
+		return errors.New("bundle auto-increment journal must contain two tables")
+	}
+	for index, table := range expected {
+		if before[index].Table != table ||
+			ceilings[index].Table != table ||
+			before[index].NextValue <= 0 ||
+			ceilings[index].NextValue < before[index].NextValue {
+			return errors.New("bundle auto-increment journal is invalid")
+		}
+	}
+	return nil
+}
+
+func restoreBundleAutoIncrementStates(
+	ctx context.Context,
+	db *sql.DB,
+	before []autoIncrementState,
+	ceilings []autoIncrementState,
+) error {
+	if err := validateBundleAutoIncrementStates(before, ceilings); err != nil {
+		return err
+	}
+	for index, target := range before {
+		currentStates, err := loadBundleAutoIncrementStates(ctx, db)
+		if err != nil {
+			return err
+		}
+		current := currentStates[index]
+		ceiling := ceilings[index]
+		if current.NextValue == target.NextValue {
+			continue
+		}
+		if current.NextValue < target.NextValue ||
+			current.NextValue > ceiling.NextValue {
+			return fmt.Errorf(
+				"auto-increment rollback refused for %s: current=%d before=%d ceiling=%d",
+				target.Table, current.NextValue, target.NextValue,
+				ceiling.NextValue,
+			)
+		}
+		var maxID int64
+		query := fmt.Sprintf(
+			"SELECT COALESCE(MAX(id),0) FROM `%s`", target.Table,
+		)
+		if err := db.QueryRowContext(ctx, query).Scan(&maxID); err != nil {
+			return err
+		}
+		if maxID >= target.NextValue {
+			return fmt.Errorf(
+				"auto-increment rollback refused for %s: max id %d reaches before value %d",
+				target.Table, maxID, target.NextValue,
+			)
+		}
+		statement := fmt.Sprintf(
+			"ALTER TABLE `%s` AUTO_INCREMENT = %d",
+			target.Table, target.NextValue,
+		)
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			return err
+		}
+	}
+	restored, err := loadBundleAutoIncrementStates(ctx, db)
+	if err != nil {
+		return err
+	}
+	for index := range before {
+		if restored[index] != before[index] {
+			return errors.New("bundle auto-increment rollback verification failed")
+		}
+	}
+	return nil
+}
+
+func newRollbackJournal(
+	reg registry,
+	manifest confirmedManifest,
+	registrySHA string,
+	manifestSHA string,
+	database string,
+	host string,
+	before []memberBefore,
+	autoBefore []autoIncrementState,
+	autoCeilings []autoIncrementState,
+) (rollbackJournal, error) {
+	journal := rollbackJournal{
+		SchemaVersion:                       1,
+		Kind:                                "source-bundle-clone-b-rollback-journal",
+		Status:                              "PREPARED",
+		RunID:                               reg.RunID,
+		Database:                            database,
+		Host:                                host,
+		CandidateSHA256:                     manifest.SourceCandidateSHA256,
+		RegistrySHA256:                      registrySHA,
+		ManifestSHA256:                      manifestSHA,
+		PreparedBeforeFirstDatabaseMutation: true,
+		DatabaseCommitState:                 "unknown",
+		ExpectedBundleCount:                 len(reg.Entries),
+		ExpectedMemberCount:                 len(before),
+		ChangedBundleCount:                  len(reg.Entries),
+		AlreadyAppliedCount:                 0,
+		MemberBefore:                        append([]memberBefore(nil), before...),
+		AutoIncrementBefore: append(
+			[]autoIncrementState(nil), autoBefore...,
+		),
+		AutoIncrementCeilings: append(
+			[]autoIncrementState(nil), autoCeilings...,
+		),
+		ProductionWritesExecuted: false,
+	}
+	hash, err := rollbackJournalHash(journal)
+	if err != nil {
+		return rollbackJournal{}, err
+	}
+	journal.EvidenceSHA256 = hash
+	return journal, nil
+}
+
+func rollbackJournalHash(journal rollbackJournal) (string, error) {
+	raw, err := json.Marshal(journal)
+	if err != nil {
+		return "", err
+	}
+	var canonical map[string]any
+	if err := json.Unmarshal(raw, &canonical); err != nil {
+		return "", err
+	}
+	delete(canonical, "evidence_sha256")
+	raw, err = json.Marshal(canonical)
+	if err != nil {
+		return "", err
+	}
+	return sha256Hex(raw), nil
+}
+
+func (journal rollbackJournal) executionReport() executionReport {
+	return executionReport{
+		SchemaVersion:       1,
+		Mode:                "apply",
+		Status:              "PREPARED",
+		RunID:               journal.RunID,
+		Database:            journal.Database,
+		Host:                journal.Host,
+		CandidateSHA256:     journal.CandidateSHA256,
+		RegistrySHA256:      journal.RegistrySHA256,
+		ManifestSHA256:      journal.ManifestSHA256,
+		ChangedBundleCount:  journal.ChangedBundleCount,
+		AlreadyAppliedCount: journal.AlreadyAppliedCount,
+		MemberBefore:        append([]memberBefore(nil), journal.MemberBefore...),
+	}
+}
+
+func loadRollbackJournal(
+	path string,
+	reg registry,
+	manifest confirmedManifest,
+	registrySHA string,
+	manifestSHA string,
+	database string,
+	host string,
+) ([]byte, rollbackJournal, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return nil, rollbackJournal{}, err
+	}
+	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+		return nil, rollbackJournal{}, errors.New("rollback journal must be a regular non-symlink file")
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, rollbackJournal{}, err
+	}
+	var journal rollbackJournal
+	if err := decodeOne(raw, &journal); err != nil {
+		return nil, journal, fmt.Errorf("decode rollback journal: %w", err)
+	}
+	expectedHash, err := rollbackJournalHash(journal)
+	if err != nil {
+		return nil, journal, err
+	}
+	expectedMembers := 0
+	memberHashes := map[int64]string{}
+	for _, bundle := range manifest.Bundles {
+		expectedMembers += len(bundle.OrderedMembers)
+		for _, member := range bundle.OrderedMembers {
+			memberHashes[member.TaskAssetID] = member.SHA256
+		}
+	}
+	if journal.SchemaVersion != 1 ||
+		journal.Kind != "source-bundle-clone-b-rollback-journal" ||
+		journal.Status != "PREPARED" ||
+		journal.RunID != reg.RunID ||
+		journal.Database != database ||
+		journal.Host != host ||
+		journal.CandidateSHA256 != manifest.SourceCandidateSHA256 ||
+		journal.RegistrySHA256 != registrySHA ||
+		journal.ManifestSHA256 != manifestSHA ||
+		!journal.PreparedBeforeFirstDatabaseMutation ||
+		journal.DatabaseCommitState != "unknown" ||
+		journal.ExpectedBundleCount != len(reg.Entries) ||
+		journal.ExpectedMemberCount != expectedMembers ||
+		journal.ChangedBundleCount != len(reg.Entries) ||
+		journal.AlreadyAppliedCount != 0 ||
+		journal.ProductionWritesExecuted ||
+		journal.EvidenceSHA256 != expectedHash ||
+		len(journal.MemberBefore) != expectedMembers ||
+		validateBundleAutoIncrementStates(
+			journal.AutoIncrementBefore, journal.AutoIncrementCeilings,
+		) != nil {
+		return nil, journal, errors.New("rollback journal envelope or self hash is invalid")
+	}
+	var priorID int64
+	for index, member := range journal.MemberBefore {
+		expected, ok := memberHashes[member.TaskAssetID]
+		if !ok || member.RecoveredHash != expected ||
+			!sha256Pattern.MatchString(member.RecoveredHash) ||
+			(member.OriginalHash != nil && *member.OriginalHash != "") ||
+			(index > 0 && member.TaskAssetID <= priorID) {
+			return nil, journal, errors.New("rollback journal member before-images are invalid")
+		}
+		priorID = member.TaskAssetID
+	}
+	return raw, journal, nil
+}
+
+func sameMemberBefore(left, right []memberBefore) bool {
+	leftRaw, leftErr := json.Marshal(left)
+	rightRaw, rightErr := json.Marshal(right)
+	return leftErr == nil && rightErr == nil && bytes.Equal(leftRaw, rightRaw)
 }
 
 func loadApplyReport(path string, reg registry, manifest confirmedManifest, registrySHA string) ([]byte, executionReport, error) {
@@ -1144,24 +1636,100 @@ func sha256File(path string) (string, error) {
 }
 
 func writeNewJSON(path string, value any) error {
-	if _, err := os.Stat(path); err == nil {
-		return fmt.Errorf("refusing to overwrite report %s", path)
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
-		return err
-	}
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	return writeNewJSONDurable(path, value)
+}
+
+func writeNewJSONDurable(path string, value any) error {
+	raw, err := json.Marshal(value)
 	if err != nil {
 		return err
 	}
-	encoder := json.NewEncoder(file)
-	encoder.SetEscapeHTML(false)
-	encoder.SetIndent("", "  ")
-	if err := encoder.Encode(value); err != nil {
-		file.Close()
+	raw = append(raw, '\n')
+	if info, statErr := os.Lstat(path); statErr == nil {
+		if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+			return errors.New("existing rollback journal is not a regular file")
+		}
+		existing, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+		if bytes.Equal(existing, raw) {
+			if err := syncRegularFile(path); err != nil {
+				return err
+			}
+			return syncDirectory(filepath.Dir(path))
+		}
+		return fmt.Errorf("refusing to overwrite rollback journal %s", path)
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		return statErr
+	}
+	directory := filepath.Dir(path)
+	if err := os.MkdirAll(directory, 0o750); err != nil {
 		return err
 	}
-	return file.Close()
+	temporary, err := os.CreateTemp(directory, ".rollback-journal.*.tmp")
+	if err != nil {
+		return err
+	}
+	temporaryPath := temporary.Name()
+	defer os.Remove(temporaryPath)
+	if err := temporary.Chmod(0o600); err != nil {
+		temporary.Close()
+		return err
+	}
+	if _, err := temporary.Write(raw); err != nil {
+		temporary.Close()
+		return err
+	}
+	if err := temporary.Sync(); err != nil {
+		temporary.Close()
+		return err
+	}
+	if err := temporary.Close(); err != nil {
+		return err
+	}
+	if err := os.Link(temporaryPath, path); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			info, statErr := os.Lstat(path)
+			if statErr == nil && info.Mode().IsRegular() &&
+				info.Mode()&os.ModeSymlink == 0 {
+				existing, readErr := os.ReadFile(path)
+				if readErr == nil && bytes.Equal(existing, raw) {
+					if syncErr := syncRegularFile(path); syncErr != nil {
+						return syncErr
+					}
+					if removeErr := os.Remove(temporaryPath); removeErr != nil {
+						return removeErr
+					}
+					return syncDirectory(directory)
+				}
+			}
+		}
+		return err
+	}
+	if err := syncDirectory(directory); err != nil {
+		return err
+	}
+	if err := os.Remove(temporaryPath); err != nil {
+		return err
+	}
+	return syncDirectory(directory)
+}
+
+func syncDirectory(path string) error {
+	directory, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer directory.Close()
+	return directory.Sync()
+}
+
+func syncRegularFile(path string) error {
+	file, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	return file.Sync()
 }

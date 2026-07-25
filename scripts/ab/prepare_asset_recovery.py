@@ -72,6 +72,12 @@ def sha256_file(path: pathlib.Path) -> str:
     return digest.hexdigest()
 
 
+def self_bound(value: dict[str, Any]) -> dict[str, Any]:
+    result = dict(value)
+    result["evidence_sha256"] = sha256_bytes(canonical_bytes(result))
+    return result
+
+
 def read_json(path: pathlib.Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -358,36 +364,102 @@ def write_atomic_idempotent(path: pathlib.Path, data: bytes) -> None:
             temporary.unlink()
 
 
-def materialize_entry(root: pathlib.Path, entry: dict[str, Any]) -> None:
+def materialize_entry(
+    root: pathlib.Path,
+    entry: dict[str, Any],
+    *,
+    allow_existing_created: bool = False,
+) -> None:
     relative = pathlib.PurePosixPath("objects") / pathlib.PurePosixPath(
         entry["target_object_key"]
     )
     target = contained(root, relative)
+    disposition = entry.get("rollback_registry", {}).get(
+        "fixture_disposition"
+    )
+    if disposition not in {"created", "reused_identical"}:
+        raise ValueError("recovery fixture disposition is missing")
     if target.exists():
         if (
             target.stat().st_size != entry["source_size"]
             or sha256_file(target) != entry["source_sha256"]
         ):
-            raise FileExistsError(f"existing fixture object drifted: {target}")
+                raise FileExistsError(f"existing fixture object drifted: {target}")
+        if disposition != "reused_identical" and not (
+            disposition == "created" and allow_existing_created
+        ):
+            raise FileExistsError("recovery fixture appeared after write-ahead")
         return
+    if disposition != "created":
+        raise FileNotFoundError("reused recovery fixture disappeared")
     target.parent.mkdir(parents=True, exist_ok=True)
-    descriptor, name = tempfile.mkstemp(prefix=f".{target.name}.", dir=target.parent)
-    os.close(descriptor)
-    temporary = pathlib.Path(name)
+    temporary = pathlib.Path(
+        str(entry.get("rollback_registry", {}).get("staging_local_path") or "")
+    )
     try:
-        shutil.copyfile(entry["source_local_path"], temporary)
+        temporary.resolve(strict=False).relative_to(root.parent.resolve())
+    except ValueError:
+        raise ValueError("recovery staging path escapes the run root") from None
+    if not temporary.is_absolute() or temporary.exists() or temporary.is_symlink():
+        raise FileExistsError("recovery staging path is unavailable")
+    try:
+        with (
+            pathlib.Path(entry["source_local_path"]).open("rb") as source,
+            temporary.open("xb") as destination,
+        ):
+            shutil.copyfileobj(source, destination)
+            destination.flush()
+            os.fsync(destination.fileno())
         if (
             temporary.stat().st_size != entry["source_size"]
             or sha256_file(temporary) != entry["source_sha256"]
         ):
             raise ValueError("fixture copy failed post-write verification")
-        os.replace(temporary, target)
+        os.link(temporary, target)
+        target_stat = target.stat()
+        source_stat = temporary.stat()
+        if not os.path.samestat(source_stat, target_stat):
+            raise RuntimeError("recovery hard-link ownership proof failed")
+        receipt_path = pathlib.Path(
+            str(
+                entry.get("rollback_registry", {}).get(
+                    "ownership_receipt_path"
+                )
+                or ""
+            )
+        )
+        try:
+            receipt_path.resolve(strict=False).relative_to(
+                root.parent.resolve()
+            )
+        except ValueError:
+            raise ValueError(
+                "recovery ownership receipt escapes the run root"
+            ) from None
+        receipt = self_bound(
+            {
+                "schema_version": 1,
+                "status": "OWNED_LINK",
+                "run_id": entry["target_object_key"].split("/")[1],
+                "target_path": str(target.resolve()),
+                "staging_path": str(temporary.resolve()),
+                "device": target_stat.st_dev,
+                "inode": target_stat.st_ino,
+                "size": target_stat.st_size,
+                "sha256": sha256_file(target),
+            }
+        )
+        write_atomic_idempotent(
+            receipt_path, canonical_bytes(receipt) + b"\n"
+        )
+        temporary.unlink()
     finally:
-        if temporary.exists():
+        if temporary.exists() and target.exists():
             temporary.unlink()
 
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
+    existing_output = args.output.is_file() and not args.output.is_symlink()
     mapping_bytes = args.mapping.read_bytes()
     mapping_sha256 = sha256_bytes(mapping_bytes)
     mapping = json.loads(mapping_bytes)
@@ -418,7 +490,105 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         build_entry(run_id, mapping_sha256, recovery_rows[missing_id], by_missing[missing_id])
         for missing_id in sorted(ALLOWED)
     ]
-    plan = {
+    expected_write_ahead = getattr(args, "expected_write_ahead", None)
+    resumed_materialization = existing_output or expected_write_ahead is not None
+    for entry in entries:
+        staging_path = (
+            args.output.parent.resolve()
+            / (
+                ".recovery-stage-"
+                f"{entry['missing_task_asset_id']}-"
+                f"{entry['source_sha256']}.bin"
+            )
+        )
+        if (
+            (staging_path.exists() or staging_path.is_symlink())
+            and not resumed_materialization
+        ):
+            raise FileExistsError(
+                f"recovery staging path existed before write-ahead: {staging_path}"
+            )
+        entry["rollback_registry"]["staging_local_path"] = str(staging_path)
+        ownership_receipt = (
+            args.output.parent.resolve()
+            / (
+                "recovery-ownership-"
+                f"{entry['missing_task_asset_id']}.json"
+            )
+        )
+        if (
+            (ownership_receipt.exists() or ownership_receipt.is_symlink())
+            and not resumed_materialization
+        ):
+            raise FileExistsError(
+                "recovery ownership receipt existed before write-ahead"
+            )
+        entry["rollback_registry"]["ownership_receipt_path"] = str(
+            ownership_receipt
+        )
+    if args.fixture_root is not None:
+        for entry in entries:
+            target = contained(
+                args.fixture_root,
+                pathlib.PurePosixPath("objects")
+                / pathlib.PurePosixPath(entry["target_object_key"]),
+            )
+            if target.exists():
+                if (
+                    not target.is_file()
+                    or target.stat().st_size != entry["source_size"]
+                    or sha256_file(target) != entry["source_sha256"]
+                ):
+                    raise FileExistsError(
+                        f"existing fixture object drifted: {target}"
+                    )
+                disposition = "reused_identical"
+            else:
+                disposition = "created"
+            entry["rollback_registry"][
+                "fixture_disposition"
+            ] = disposition
+    def validated_plan(path: pathlib.Path, status: str) -> dict[str, Any]:
+        expected = read_json(path)
+        unsigned = dict(expected)
+        expected_hash = str(unsigned.pop("evidence_sha256", ""))
+        if (
+            expected.get("version") != 1
+            or expected.get("status") != status
+            or expected.get("run_id") != run_id
+            or expected.get("mapping_sha256") != mapping_sha256
+            or not SHA256.fullmatch(expected_hash)
+            or sha256_bytes(canonical_bytes(unsigned)) != expected_hash
+            or not isinstance(expected.get("entries"), list)
+            or len(expected["entries"]) != len(entries)
+        ):
+            raise ValueError("recovery write-ahead contract is invalid")
+        return expected
+
+    write_ahead_plan = (
+        validated_plan(expected_write_ahead, "PREPARED")
+        if expected_write_ahead is not None
+        else None
+    )
+    existing_plan = (
+        validated_plan(args.output, "MATERIALIZED")
+        if existing_output
+        else None
+    )
+    if existing_plan is not None:
+        if (
+            write_ahead_plan is not None
+            and existing_plan["entries"] != write_ahead_plan["entries"]
+        ):
+            raise ValueError("materialized recovery plan differs from write-ahead")
+        for entry, prior_entry in zip(entries, existing_plan["entries"]):
+            entry["rollback_registry"] = prior_entry["rollback_registry"]
+        if entries != existing_plan["entries"]:
+            raise ValueError("recovery state drifted after prior materialization")
+    elif write_ahead_plan is not None:
+        if entries != write_ahead_plan["entries"]:
+            raise ValueError("recovery state drifted after write-ahead")
+    plan = self_bound({
         "version": 1,
         "status": "MATERIALIZED" if args.materialize else "PREPARED",
         "run_id": run_id,
@@ -426,12 +596,16 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "database_writes_executed": False,
         "production_writes_executed": False,
         "entries": entries,
-    }
+    })
     if args.materialize:
         if args.fixture_root is None:
             raise ValueError("--materialize requires --fixture-root")
         for entry in entries:
-            materialize_entry(args.fixture_root, entry)
+            materialize_entry(
+                args.fixture_root,
+                entry,
+                allow_existing_created=existing_output,
+            )
     write_atomic_idempotent(args.output, canonical_bytes(plan) + b"\n")
     return plan
 
@@ -443,6 +617,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", type=pathlib.Path, required=True)
     parser.add_argument("--materialize", action="store_true")
     parser.add_argument("--fixture-root", type=pathlib.Path)
+    parser.add_argument("--expected-write-ahead", type=pathlib.Path)
     return parser.parse_args()
 
 

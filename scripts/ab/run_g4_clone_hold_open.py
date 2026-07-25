@@ -11,9 +11,9 @@ ledger, all apply artifacts, and caller-supplied G5/G6 evidence manifests.  It
 then performs the existing strict rollback order and final fingerprint check.
 
 The coordinator never accepts a non-local DSN, never targets a non-Clone-B
-database, and never treats an interrupted step as safe to repeat.  Started
-steps without a completion checkpoint require operator investigation instead
-of an automatic retry.
+database, and never repeats an interrupted apply step.  After the operator has
+independently proved the old process group quiescent, an explicit recovery
+confirmation can authorize seed-bound rollback and the final fingerprint.
 """
 
 from __future__ import annotations
@@ -85,6 +85,14 @@ class Context:
 
 def canonical_hash(value: Any) -> str:
     return hashlib.sha256(g4.canonical_bytes(value)).hexdigest()
+
+
+def compact_canonical_hash(value: Any) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ).encode("utf-8")
+    ).hexdigest()
 
 
 def add_self_hash(value: dict[str, Any], field: str = DOCUMENT_HASH_FIELD) -> dict[str, Any]:
@@ -246,11 +254,105 @@ def current_input_identity(
         "git_worktree_clean": True,
         "command_plan": file_identity(args.command_plan),
         "mapping": file_identity(args.mapping_file),
+        "recovery_evidence": file_identity(args.recovery_evidence_file),
+        "recovery_source_root": {
+            "path": str(args.recovery_source_root.resolve()),
+            "kind": "frozen-recovery-source-directory",
+        },
         "dsn": file_identity(args.dsn_file),
         "auth_settings": file_identity(args.auth_settings_file),
         "frontend_access_settings": file_identity(frontend_access),
         "expected_baseline": file_identity(args.expected_baseline_file),
     }
+
+
+def freeze_recovery_evidence(
+    source: pathlib.Path,
+    source_root: pathlib.Path,
+    run_dir: pathlib.Path,
+) -> dict[str, pathlib.Path]:
+    if (
+        not source_root.is_absolute()
+        or source_root.is_symlink()
+        or not source_root.is_dir()
+    ):
+        raise ValueError(
+            "recovery source root must be an absolute non-symlink directory"
+        )
+    source_root = source_root.resolve()
+    value = g4.read_object(source, "recovery evidence")
+    expected_evidence_hash = str(value.get(EVIDENCE_HASH_FIELD) or "")
+    unsigned_evidence = dict(value)
+    unsigned_evidence.pop(EVIDENCE_HASH_FIELD, None)
+    if (
+        not g4.SHA256.fullmatch(expected_evidence_hash)
+        or compact_canonical_hash(unsigned_evidence) != expected_evidence_hash
+    ):
+        raise ValueError("recovery evidence self hash is missing or stale")
+    rows = value.get("recoveries")
+    if not isinstance(rows, list) or not rows:
+        raise ValueError("recovery evidence has no recovery rows")
+    source_dir = run_dir / "inputs" / "recovery-sources"
+    source_dir.mkdir()
+    frozen: dict[str, pathlib.Path] = {}
+    rewritten_rows: list[dict[str, Any]] = []
+    seen: set[int] = set()
+    for index, item in enumerate(rows):
+        if not isinstance(item, dict):
+            raise ValueError(f"recovery evidence row {index} is invalid")
+        source_task_asset = item.get("source_task_asset")
+        if not isinstance(source_task_asset, dict):
+            source_task_asset = {}
+        task_asset_id = item.get(
+            "source_task_asset_id", source_task_asset.get("id")
+        )
+        size = item.get("source_size", source_task_asset.get("file_size"))
+        digest = str(item.get("source_sha256") or "")
+        if (
+            isinstance(task_asset_id, bool)
+            or not isinstance(task_asset_id, int)
+            or task_asset_id <= 0
+            or task_asset_id in seen
+            or isinstance(size, bool)
+            or not isinstance(size, int)
+            or size < 0
+            or not g4.SHA256.fullmatch(digest)
+        ):
+            raise ValueError(f"recovery evidence row {index} identity is invalid")
+        source_path = pathlib.Path(str(item.get("source_local_path") or ""))
+        if not source_path.is_file():
+            source_path = source_root / source_path.name
+        if (
+            not source_path.is_absolute()
+            or source_path.is_symlink()
+            or not source_path.is_file()
+            or source_path.stat().st_size != size
+            or g4.sha256_file(source_path) != digest
+        ):
+            raise ValueError(
+                f"recovery source {task_asset_id} is missing or drifted"
+            )
+        target = source_dir / f"task-asset-{task_asset_id}-{digest}.bin"
+        target.write_bytes(source_path.read_bytes())
+        target.chmod(0o440)
+        if target.stat().st_size != size or g4.sha256_file(target) != digest:
+            raise ValueError(f"frozen recovery source {task_asset_id} drifted")
+        rewritten = dict(item)
+        rewritten["source_local_path"] = str(target.resolve())
+        rewritten_rows.append(rewritten)
+        frozen[f"recovery_source_{task_asset_id}"] = target
+        seen.add(task_asset_id)
+    rewritten_evidence = dict(value)
+    rewritten_evidence.pop(EVIDENCE_HASH_FIELD, None)
+    rewritten_evidence["recoveries"] = rewritten_rows
+    rewritten_evidence[EVIDENCE_HASH_FIELD] = compact_canonical_hash(
+        rewritten_evidence
+    )
+    evidence_target = run_dir / "inputs" / "recovery-evidence.json"
+    g4.atomic_write(evidence_target, rewritten_evidence)
+    evidence_target.chmod(0o440)
+    frozen["recovery_evidence"] = evidence_target
+    return frozen
 
 
 def initialize_session(
@@ -278,6 +380,13 @@ def initialize_session(
     frozen["auth_settings"].write_bytes(auth_raw)
     frozen["frontend_access_settings"].write_bytes(frontend_access.read_bytes())
     frozen["expected_baseline"].write_bytes(args.expected_baseline_file.read_bytes())
+    frozen.update(
+        freeze_recovery_evidence(
+            args.recovery_evidence_file,
+            args.recovery_source_root,
+            run_dir,
+        )
+    )
     frozen["auth_settings"].chmod(0o440)
     frozen["frontend_access_settings"].chmod(0o440)
     frozen["expected_baseline"].chmod(0o440)
@@ -322,13 +431,25 @@ def validate_session(
     ):
         raise ValueError("hold-open session identity differs from current inputs")
     frozen = session.get("frozen_inputs")
-    if not isinstance(frozen, dict) or set(frozen) != {
+    if not isinstance(frozen, dict) or not {
         "command_plan",
         "mapping",
+        "recovery_evidence",
         "auth_settings",
         "frontend_access_settings",
         "expected_baseline",
-    }:
+    }.issubset(frozen) or not all(
+        name in {
+            "command_plan",
+            "mapping",
+            "recovery_evidence",
+            "auth_settings",
+            "frontend_access_settings",
+            "expected_baseline",
+        }
+        or name.startswith("recovery_source_")
+        for name in frozen
+    ):
         raise ValueError("hold-open frozen input inventory is invalid")
     for name, item in frozen.items():
         validate_relative_artifact(run_dir, item, f"frozen {name}")
@@ -343,6 +464,7 @@ def build_hooks(
     clone_root: pathlib.Path,
     repo_root: pathlib.Path,
     mapping: pathlib.Path,
+    recovery_evidence: pathlib.Path,
     dsn_file: pathlib.Path,
     database: str,
 ) -> tuple[list[str], dict[str, tuple[list[str], list[pathlib.Path]]]]:
@@ -352,6 +474,7 @@ def build_hooks(
         "clone_root": str(clone_root),
         "repo_root": str(repo_root),
         "mapping_file": str(mapping),
+        "recovery_evidence_file": str(recovery_evidence),
         "dsn_file": str(dsn_file.resolve()),
         "database": database,
         "rollback_fingerprint": str(run_dir / "rollback-fingerprint.json"),
@@ -438,6 +561,7 @@ def build_context(args: argparse.Namespace, *, allow_create: bool) -> Context:
         )
     frozen_plan = run_dir / "inputs" / "command-plan.json"
     frozen_mapping = run_dir / "inputs" / "mapping.json"
+    frozen_recovery_evidence = run_dir / "inputs" / "recovery-evidence.json"
     plan = g4.validate_plan(frozen_plan)
     workflow_base, hooks = build_hooks(
         plan=plan,
@@ -446,6 +570,7 @@ def build_context(args: argparse.Namespace, *, allow_create: bool) -> Context:
         clone_root=clone_root,
         repo_root=repo_root,
         mapping=frozen_mapping,
+        recovery_evidence=frozen_recovery_evidence,
         dsn_file=args.dsn_file,
         database=args.confirm_clone_database,
     )
@@ -674,12 +799,20 @@ def write_jsonl(path: pathlib.Path, rows: list[dict[str, Any]]) -> None:
     path.write_bytes(expected)
 
 
-def rotate_commands(context: Context, destination: pathlib.PurePosixPath) -> None:
+def rotate_commands(
+    context: Context,
+    destination: pathlib.PurePosixPath,
+    *,
+    allow_empty: bool = False,
+) -> None:
     source = context.run_dir / "commands.jsonl"
     target = context.run_dir.joinpath(*destination.parts)
     if target.exists():
         if source.exists():
             raise ValueError("both active and frozen command ledgers exist")
+        return
+    if allow_empty and not source.exists():
+        target.write_bytes(b"")
         return
     if not source.is_file() or source.is_symlink():
         raise ValueError("active command ledger is missing")
@@ -864,6 +997,47 @@ def validate_observed_manifest(
     }
 
 
+def rollback_seed_paths(
+    context: Context,
+) -> dict[str, tuple[pathlib.Path, ...]]:
+    recovery_ownership = tuple(
+        sorted(context.run_dir.glob("recovery-ownership-*.json"))
+    )
+    bundle_ownership = tuple(
+        sorted(context.run_dir.glob("bundle-ownership-*.json"))
+    )
+    return {
+        "recovery": (
+            context.run_dir / "recovery-file-write-ahead.json",
+            context.run_dir / "recovery-materialization-plan.json",
+            context.run_dir / "recovery-guard-before.json",
+            context.run_dir / "recovery-db-apply.json",
+            context.run_dir / "recovery-component-apply.json",
+        )
+        + recovery_ownership,
+        "bundle": (
+            context.run_dir / "bundle-staging-write-ahead.json",
+            context.run_dir / "bundle-file-write-ahead.json",
+            context.run_dir / "bundle-guard-before.json",
+            context.run_dir / "bundle-materialize-report.json",
+            context.run_dir / "bundle-db-rollback-journal.json",
+            context.run_dir / "bundle-db-apply.json",
+            context.run_dir / "bundle-component-apply.json",
+        )
+        + bundle_ownership,
+        "workflow": (
+            context.run_dir
+            / "workflow-snapshot"
+            / "workflow-groups-snapshot.json",
+            context.run_dir / "workflow-apply.json",
+        ),
+        "search": (
+            context.run_dir / "search-snapshot.json",
+            context.run_dir / "search-documents-snapshot.jsonl",
+        ),
+    }
+
+
 def attempted_components(context: Context) -> list[str]:
     starts = {
         path.name
@@ -884,28 +1058,7 @@ def attempted_components(context: Context) -> list[str]:
     # mutation boundary.  Each component writes its rollback seed before its
     # first durable change.  Require either a successful apply completion or
     # one of those seeds before authorizing the matching rollback hook.
-    rollback_seeds = {
-        "recovery": (
-            context.run_dir / "recovery-materialization-plan.json",
-            context.run_dir / "recovery-guard-before.json",
-            context.run_dir / "recovery-db-apply.json",
-            context.run_dir / "recovery-component-apply.json",
-        ),
-        "bundle": (
-            context.run_dir / "bundle-guard-before.json",
-            context.run_dir / "bundle-materialize-report.json",
-            context.run_dir / "bundle-db-apply.json",
-            context.run_dir / "bundle-component-apply.json",
-        ),
-        "workflow": (
-            context.run_dir / "workflow-snapshot" / "workflow-groups-snapshot.json",
-            context.run_dir / "workflow-apply.json",
-        ),
-        "search": (
-            context.run_dir / "search-snapshot.json",
-            context.run_dir / "search-documents-snapshot.jsonl",
-        ),
-    }
+    rollback_seeds = rollback_seed_paths(context)
     attempted: list[str] = []
     bindings = (
         ("recovery", "recovery-apply", "recovery_apply"),
@@ -945,6 +1098,7 @@ def authorize_rollback(
 ) -> dict[str, Any]:
     path = context.run_dir.joinpath(*ROLLBACK_AUTH_PATH.parts)
     components = attempted_components(context)
+    seed_paths = rollback_seed_paths(context)
     steps = rollback_steps_for(
         components, (context.run_dir / "baseline-fingerprint.json").is_file()
     )
@@ -960,6 +1114,14 @@ def authorize_rollback(
         ),
         "observed_evidence": observed,
         "attempted_components": components,
+        "rollback_seed_artifacts": {
+            component: [
+                relative_file_identity(path, context.run_dir)
+                for path in seed_paths[component]
+                if path.is_file() and not path.is_symlink()
+            ]
+            for component in components
+        },
         "rollback_steps": steps,
         "production_writes_executed": False,
     }
@@ -969,6 +1131,27 @@ def authorize_rollback(
             raise ValueError("rollback authorization cannot be changed")
         return value
     return write_hashed_json(path, expected)
+
+
+def validate_authorized_rollback_seeds(
+    context: Context, authorization: dict[str, Any]
+) -> None:
+    components = authorization.get("attempted_components")
+    inventory = authorization.get("rollback_seed_artifacts")
+    if (
+        not isinstance(components, list)
+        or not isinstance(inventory, dict)
+        or set(inventory) != set(components)
+    ):
+        raise ValueError("rollback seed authorization is invalid")
+    for component in components:
+        items = inventory.get(component)
+        if not isinstance(items, list) or not items:
+            raise ValueError(f"{component} rollback seed inventory is empty")
+        for item in items:
+            validate_relative_artifact(
+                context.run_dir, item, f"{component} rollback seed"
+            )
 
 
 def validate_final_fingerprint(context: Context) -> dict[str, Any]:
@@ -992,6 +1175,7 @@ def continue_rollback(
     *,
     failure_exit_code: int,
 ) -> dict[str, Any]:
+    validate_authorized_rollback_seeds(context, authorization)
     complete_path = context.run_dir.joinpath(*ROLLBACK_COMPLETE_PATH.parts)
     if complete_path.exists():
         complete = read_hashed_json(complete_path, "rollback completion")
@@ -1107,17 +1291,34 @@ def run_apply_and_hold(args: argparse.Namespace) -> dict[str, Any]:
         authorization = read_hashed_json(
             rollback_auth_path, "rollback authorization"
         )
-        if authorization.get("reason") != "apply-failure":
+        if authorization.get("reason") not in {
+            "apply-failure",
+            "apply-interrupted",
+        }:
             raise ValueError("apply phase cannot resume an observed rollback")
         return continue_rollback(context, authorization, failure_exit_code=1)
     records, interrupted, prior_hash = load_phase_progress(
         context, "apply", list(APPLY_SEQUENCE)
     )
     if interrupted is not None:
-        raise ValueError(
-            f"apply step {interrupted} started without a completion checkpoint; "
-            "refusing to repeat or advance"
+        if not args.confirm_interrupted_step_quiescent:
+            raise ValueError(
+                f"apply step {interrupted} started without a completion "
+                "checkpoint; pass --confirm-interrupted-step-quiescent only "
+                "after independently proving the old process group stopped"
+            )
+        rotate_commands(context, APPLY_COMMANDS_PATH, allow_empty=True)
+        authorization = authorize_rollback(
+            context,
+            reason="apply-interrupted",
+            ready=None,
+            observed=[],
+            trigger={
+                "step": interrupted,
+                "operator_confirmed_process_group_quiescent": True,
+            },
         )
+        return continue_rollback(context, authorization, failure_exit_code=1)
     failed_prior = next(
         (row for row in records if row.get("exit_code") != 0), None
     )
@@ -1228,6 +1429,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--confirm-clone-database", required=True)
     parser.add_argument("--dsn-file", type=pathlib.Path, required=True)
     parser.add_argument("--mapping-file", type=pathlib.Path, required=True)
+    parser.add_argument(
+        "--recovery-evidence-file", type=pathlib.Path, required=True
+    )
+    parser.add_argument(
+        "--recovery-source-root", type=pathlib.Path, required=True
+    )
     parser.add_argument("--command-plan", type=pathlib.Path, required=True)
     parser.add_argument("--auth-settings-file", type=pathlib.Path, required=True)
     parser.add_argument(
@@ -1236,6 +1443,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--g5-evidence-manifest", type=pathlib.Path)
     parser.add_argument("--g6-evidence-manifest", type=pathlib.Path)
     parser.add_argument("--execute-clone-writes", action="store_true")
+    parser.add_argument(
+        "--confirm-interrupted-step-quiescent", action="store_true"
+    )
     parser.add_argument("--max-step-seconds", type=float, default=600)
     return parser.parse_args(argv)
 

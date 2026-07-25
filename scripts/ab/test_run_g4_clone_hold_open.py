@@ -45,6 +45,25 @@ class HoldOpenCoordinatorTest(unittest.TestCase):
         auth.chmod(0o440)
         mapping = root / "mapping.json"
         mapping.write_text('{"version":2}\n', encoding="utf-8")
+        recovery_source = root / "recovery-source.bin"
+        recovery_source.write_bytes(b"frozen recovery bytes")
+        recovery_value = {
+            "version": 1,
+            "run_id": run_id,
+            "recoveries": [
+                {
+                    "source_task_asset_id": 24034,
+                    "source_local_path": str(recovery_source.resolve()),
+                    "source_size": recovery_source.stat().st_size,
+                    "source_sha256": MODULE.g4.sha256_file(recovery_source),
+                }
+            ],
+        }
+        recovery_value[MODULE.EVIDENCE_HASH_FIELD] = MODULE.compact_canonical_hash(
+            recovery_value
+        )
+        recovery_evidence = root / "recovery-evidence.json"
+        recovery_evidence.write_bytes(MODULE.g4.canonical_bytes(recovery_value))
         baseline_tables = {"tasks": {"row_count": 1, "content_sha256": "b" * 64}}
         baseline = root / "expected-baseline.json"
         baseline.write_bytes(
@@ -68,8 +87,16 @@ class HoldOpenCoordinatorTest(unittest.TestCase):
         hooks = {}
         expected = {
             "capture_baseline_fingerprint": ["{baseline_fingerprint}"],
-            "recovery_apply": ["{run_dir}/recovery-apply.json"],
-            "bundle_apply": ["{run_dir}/bundle-apply.json"],
+            "recovery_apply": [
+                "{run_dir}/recovery-file-write-ahead.json",
+                "{run_dir}/recovery-materialization-plan.json",
+                "{run_dir}/recovery-guard-before.json",
+            ],
+            "bundle_apply": [
+                "{run_dir}/bundle-staging-write-ahead.json",
+                "{run_dir}/bundle-file-write-ahead.json",
+                "{run_dir}/bundle-guard-before.json",
+            ],
             "search_snapshot": [
                 "{search_snapshot}",
                 "{search_snapshot_archive}",
@@ -111,12 +138,15 @@ class HoldOpenCoordinatorTest(unittest.TestCase):
             confirm_clone_database="ab_formal_b_ui",
             dsn_file=dsn.resolve(),
             mapping_file=mapping.resolve(),
+            recovery_evidence_file=recovery_evidence.resolve(),
+            recovery_source_root=recovery_source.parent.resolve(),
             command_plan=plan.resolve(),
             auth_settings_file=auth.resolve(),
             expected_baseline_file=baseline.resolve(),
             g5_evidence_manifest=None,
             g6_evidence_manifest=None,
             execute_clone_writes=True,
+            confirm_interrupted_step_quiescent=False,
             max_step_seconds=30.0,
         )
 
@@ -447,6 +477,85 @@ class HoldOpenCoordinatorTest(unittest.TestCase):
                 ["validate_after_rollback_fingerprint"],
             )
 
+    def test_interrupted_apply_requires_quiescence_confirmation_then_uses_seed(self):
+        with tempfile.TemporaryDirectory() as raw:
+            args = self.make_inputs(raw)
+            calls: list[str] = []
+            normal = self.fake_execute(calls)
+
+            def interrupt(**kwargs):
+                if kwargs["step"] != "recovery_apply":
+                    return normal(**kwargs)
+                calls.append("recovery_apply")
+                command = {"step": "recovery_apply", "argv": kwargs["argv"]}
+                with (kwargs["run_dir"] / "commands.jsonl").open("ab") as handle:
+                    handle.write(
+                        MODULE.g4.canonical_bytes(
+                            {
+                                **command,
+                                "sha256": hashlib.sha256(
+                                    MODULE.g4.canonical_bytes(command)
+                                ).hexdigest(),
+                            }
+                        )
+                    )
+                (
+                    kwargs["run_dir"] / "recovery-file-write-ahead.json"
+                ).write_text('{"status":"PREPARED"}\n', encoding="utf-8")
+                raise RuntimeError("simulated coordinator interruption")
+
+            common = (
+                mock.patch.object(MODULE, "repo_head", return_value="f" * 64),
+                mock.patch.object(
+                    MODULE.shutil, "which", return_value="/usr/bin/go"
+                ),
+            )
+            with common[0], common[1], mock.patch.object(
+                MODULE.g4, "execute_step", side_effect=interrupt
+            ):
+                with self.assertRaisesRegex(RuntimeError, "interruption"):
+                    MODULE.run(args)
+            with (
+                mock.patch.object(MODULE, "repo_head", return_value="f" * 64),
+                mock.patch.object(
+                    MODULE.shutil, "which", return_value="/usr/bin/go"
+                ),
+            ):
+                with self.assertRaisesRegex(
+                    ValueError, "confirm-interrupted-step-quiescent"
+                ):
+                    MODULE.run(args)
+            args.confirm_interrupted_step_quiescent = True
+            rollback_calls: list[str] = []
+            with (
+                mock.patch.object(MODULE, "repo_head", return_value="f" * 64),
+                mock.patch.object(
+                    MODULE.shutil, "which", return_value="/usr/bin/go"
+                ),
+                mock.patch.object(
+                    MODULE.g4,
+                    "execute_step",
+                    side_effect=self.fake_execute(rollback_calls),
+                ),
+            ):
+                result = MODULE.run(args)
+            self.assertEqual(
+                result["status"], "ROLLED_BACK_AFTER_APPLY_FAILURE"
+            )
+            self.assertEqual(
+                rollback_calls,
+                [
+                    "recovery_rollback",
+                    "validate_after_rollback_fingerprint",
+                ],
+            )
+            authorization = MODULE.read_hashed_json(
+                args.run_dir / "state" / "rollback-authorized.json",
+                "rollback authorization",
+            )
+            self.assertEqual(authorization["reason"], "apply-interrupted")
+            self.assertEqual(authorization["attempted_components"], ["recovery"])
+
     def test_failed_rollback_never_advances_on_retry(self):
         with tempfile.TemporaryDirectory() as raw:
             args = self.make_inputs(raw)
@@ -550,7 +659,7 @@ class HoldOpenCoordinatorTest(unittest.TestCase):
                 ),
             ):
                 with self.assertRaisesRegex(
-                    ValueError, "refusing to repeat or advance"
+                    ValueError, "confirm-interrupted-step-quiescent"
                 ):
                     MODULE.run(args)
             self.assertEqual(calls, [])

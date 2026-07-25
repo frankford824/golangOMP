@@ -15,6 +15,7 @@ from typing import Any
 
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 RUN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{2,80}$")
+EXACT_MISSING_IDS = {23989, 23990, 23991}
 
 
 def canonical_bytes(value: Any) -> bytes:
@@ -32,6 +33,22 @@ def sha256_file(path: pathlib.Path) -> str:
         while chunk := handle.read(1024 * 1024):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def verify_self_bound(value: dict[str, Any], label: str) -> None:
+    expected = str(value.get("evidence_sha256") or "")
+    unsigned = dict(value)
+    unsigned.pop("evidence_sha256", None)
+    actual = hashlib.sha256(
+        json.dumps(
+            unsigned,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    if not SHA256.fullmatch(expected) or actual != expected:
+        raise ValueError(f"{label} self hash is missing or stale")
 
 
 def contained(root: pathlib.Path, key: str) -> pathlib.Path:
@@ -53,20 +70,52 @@ def contained(root: pathlib.Path, key: str) -> pathlib.Path:
 
 
 def rollback(plan: dict[str, Any], fixture_root: pathlib.Path) -> dict[str, Any]:
+    expected_self_hash = str(plan.get("evidence_sha256") or "")
+    unsigned = dict(plan)
+    unsigned.pop("evidence_sha256", None)
     if (
         plan.get("version") != 1
-        or plan.get("status") != "MATERIALIZED"
+        or plan.get("status") not in {"PREPARED", "MATERIALIZED"}
         or plan.get("database_writes_executed") is not False
         or plan.get("production_writes_executed") is not False
+        or not SHA256.fullmatch(expected_self_hash)
+        or hashlib.sha256(
+            json.dumps(
+                unsigned,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        != expected_self_hash
     ):
         raise ValueError("recovery plan is not an exact file-only materialization")
     run_id = str(plan.get("run_id") or "")
     if not RUN_ID.fullmatch(run_id):
         raise ValueError("recovery plan run_id is invalid")
     entries = plan.get("entries")
-    if not isinstance(entries, list) or not entries:
+    if (
+        not isinstance(entries, list)
+        or len(entries) != len(EXACT_MISSING_IDS)
+        or {
+            entry.get("missing_task_asset_id")
+            for entry in entries
+            if isinstance(entry, dict)
+        }
+        != EXACT_MISSING_IDS
+    ):
         raise ValueError("recovery plan entries are missing")
-    targets: list[tuple[pathlib.Path, str, int, str]] = []
+    targets: list[
+        tuple[
+            pathlib.Path,
+            str,
+            int,
+            str,
+            str,
+            pathlib.Path,
+            pathlib.Path,
+        ]
+    ] = []
     seen: set[pathlib.Path] = set()
     for index, entry in enumerate(entries):
         if not isinstance(entry, dict):
@@ -76,13 +125,58 @@ def rollback(plan: dict[str, Any], fixture_root: pathlib.Path) -> dict[str, Any]
             raise ValueError(f"entries[{index}] is outside the run recovery prefix")
         digest = str(entry.get("source_sha256") or "")
         size = entry.get("source_size")
+        disposition = entry.get("rollback_registry", {}).get(
+            "fixture_disposition"
+        )
+        staging = pathlib.Path(
+            str(
+                entry.get("rollback_registry", {}).get(
+                    "staging_local_path"
+                )
+                or ""
+            )
+        )
+        ownership_receipt = pathlib.Path(
+            str(
+                entry.get("rollback_registry", {}).get(
+                    "ownership_receipt_path"
+                )
+                or ""
+            )
+        )
         if (
             not SHA256.fullmatch(digest)
             or isinstance(size, bool)
             or not isinstance(size, int)
             or size < 0
+            or disposition not in {"created", "reused_identical"}
         ):
             raise ValueError(f"entries[{index}] hash/size is invalid")
+        try:
+            staging.resolve(strict=False).relative_to(
+                fixture_root.parent.resolve()
+            )
+        except ValueError:
+            raise ValueError(
+                f"entries[{index}] staging path escapes the run root"
+            ) from None
+        if not staging.is_absolute() or staging.is_symlink():
+            raise ValueError(f"entries[{index}] staging path is invalid")
+        try:
+            ownership_receipt.resolve(strict=False).relative_to(
+                fixture_root.parent.resolve()
+            )
+        except ValueError:
+            raise ValueError(
+                f"entries[{index}] ownership receipt escapes the run root"
+            ) from None
+        if (
+            not ownership_receipt.is_absolute()
+            or ownership_receipt.is_symlink()
+        ):
+            raise ValueError(
+                f"entries[{index}] ownership receipt path is invalid"
+            )
         target = contained(fixture_root, key)
         if target in seen:
             raise ValueError("recovery plan contains duplicate object targets")
@@ -93,18 +187,115 @@ def rollback(plan: dict[str, Any], fixture_root: pathlib.Path) -> dict[str, Any]
             or sha256_file(target) != digest
         ):
             raise ValueError(f"refusing to delete drifted recovery object: {key}")
-        targets.append((target, key, size, digest))
+        if disposition == "reused_identical" and not target.exists():
+            raise ValueError(
+                f"reused recovery object is missing: {key}"
+            )
+        targets.append(
+            (
+                target,
+                key,
+                size,
+                digest,
+                disposition,
+                staging,
+                ownership_receipt,
+            )
+        )
     removed = []
-    for target, key, _, _ in targets:
-        if target.exists():
+    retained_reused = []
+    removed_staging = []
+    already_absent = 0
+    for (
+        target,
+        key,
+        size,
+        digest,
+        disposition,
+        staging,
+        ownership_receipt,
+    ) in targets:
+        if disposition == "created" and target.exists():
+            owned = False
+            if ownership_receipt.exists():
+                if not ownership_receipt.is_file():
+                    raise ValueError(
+                        f"ownership receipt is not a file: {ownership_receipt}"
+                    )
+                try:
+                    receipt = json.loads(
+                        ownership_receipt.read_text(encoding="utf-8")
+                    )
+                except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+                    raise ValueError(
+                        f"ownership receipt is unreadable: {ownership_receipt}"
+                    ) from exc
+                if not isinstance(receipt, dict):
+                    raise ValueError("ownership receipt must be an object")
+                verify_self_bound(receipt, "recovery ownership receipt")
+                stat = target.stat()
+                owned = (
+                    receipt.get("schema_version") == 1
+                    and receipt.get("status") == "OWNED_LINK"
+                    and receipt.get("run_id") == run_id
+                    and receipt.get("target_path") == str(target.resolve())
+                    and receipt.get("staging_path") == str(staging.resolve())
+                    and receipt.get("device") == stat.st_dev
+                    and receipt.get("inode") == stat.st_ino
+                    and receipt.get("size") == size == stat.st_size
+                    and receipt.get("sha256") == digest
+                )
+            if (
+                not owned
+                and staging.exists()
+                and staging.is_file()
+                and not staging.is_symlink()
+                and os.path.samestat(staging.stat(), target.stat())
+            ):
+                owned = True
+            if not owned:
+                raise ValueError(
+                    f"recovery target ownership cannot be proven: {key}"
+                )
             target.unlink()
             removed.append(key)
+        elif disposition == "created":
+            already_absent += 1
+        elif disposition == "reused_identical":
+            retained_reused.append(key)
+        if staging.exists():
+            if not staging.is_file() or staging.is_symlink():
+                raise ValueError(
+                    f"recovery staging target is unsafe: {staging}"
+                )
+            staging.unlink()
+            removed_staging.append(str(staging))
+    object_root = (fixture_root / "objects").resolve()
+    pruned_directories = []
+    for target, _, _, _, disposition, _, _ in sorted(
+        targets, key=lambda item: len(item[0].parts), reverse=True
+    ):
+        if disposition != "created":
+            continue
+        parent = target.parent
+        while parent != object_root and object_root in parent.parents:
+            try:
+                parent.rmdir()
+            except OSError:
+                break
+            pruned_directories.append(
+                parent.relative_to(fixture_root).as_posix()
+            )
+            parent = parent.parent
     return {
         "schema_version": 1,
         "status": "ROLLED_BACK",
         "run_id": run_id,
         "removed_object_keys": removed,
-        "already_absent_count": len(targets) - len(removed),
+        "already_absent_count": already_absent,
+        "retained_reused_object_keys": retained_reused,
+        "removed_staging_paths": removed_staging,
+        "pruned_empty_directories": sorted(set(pruned_directories)),
         "database_write_performed": False,
         "production_write_performed": False,
     }

@@ -3,6 +3,7 @@ import json
 import pathlib
 import tempfile
 import unittest
+from unittest import mock
 
 import run_scoped_bundle_materializer as materializer
 
@@ -91,14 +92,28 @@ class RunScopedBundleMaterializerTest(unittest.TestCase):
     def test_materialize_is_deterministic_idempotent_and_rollback_is_exact(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
-            _, source_root, b_root, manifest_path, manifest = self.fixture(root)
+            run_root, source_root, b_root, manifest_path, manifest = self.fixture(root)
             prepared = materializer.validate_manifest(manifest, source_root)
-            registry_path = root / "registry.json"
+            registry_path = run_root / "registry.json"
+            write_ahead_path = run_root / "write-ahead.json"
+            staging_write_ahead_path = run_root / "staging-write-ahead.json"
             first = materializer.materialize(
-                manifest, manifest_path, prepared, b_root.resolve(), registry_path
+                manifest,
+                manifest_path,
+                prepared,
+                b_root.resolve(),
+                registry_path,
+                write_ahead_path,
+                staging_write_ahead_path,
             )
             second = materializer.materialize(
-                manifest, manifest_path, prepared, b_root.resolve(), registry_path
+                manifest,
+                manifest_path,
+                prepared,
+                b_root.resolve(),
+                registry_path,
+                write_ahead_path,
+                staging_write_ahead_path,
             )
             self.assertEqual(first, second)
             self.assertFalse(first["database_write_performed"])
@@ -135,6 +150,8 @@ class RunScopedBundleMaterializerTest(unittest.TestCase):
                 prepared,
                 b_root.resolve(),
                 root / "registry.json",
+                root / "write-ahead.json",
+                root / "staging-write-ahead.json",
             )
             entry = registry["entries"][0]
             target = b_root / entry["relative_object_path"]
@@ -142,6 +159,217 @@ class RunScopedBundleMaterializerTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "drifted"):
                 materializer.rollback(registry, b_root.resolve())
             self.assertTrue(target.exists())
+
+    def test_write_ahead_registry_rolls_back_partial_target_without_final_registry(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            run_root, source_root, b_root, manifest_path, manifest = self.fixture(root)
+            prepared = materializer.validate_manifest(manifest, source_root)
+            registry_path = run_root / "registry.json"
+            write_ahead_path = run_root / "write-ahead.json"
+            staging_write_ahead_path = run_root / "staging-write-ahead.json"
+            registry = materializer.materialize(
+                manifest,
+                manifest_path,
+                prepared,
+                b_root.resolve(),
+                registry_path,
+                write_ahead_path,
+                staging_write_ahead_path,
+            )
+            target = b_root / registry["entries"][0]["relative_object_path"]
+            self.assertTrue(target.is_file())
+            registry_path.unlink()
+            write_ahead = json.loads(
+                write_ahead_path.read_text(encoding="utf-8")
+            )
+            result = materializer.rollback(write_ahead, b_root.resolve())
+            self.assertFalse(target.exists())
+            self.assertEqual(result["status"], "ROLLED_BACK")
+
+    def test_staging_write_ahead_cleans_seed_predecessor_without_object_targets(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            run_root, _, b_root, manifest_path, manifest = self.fixture(root)
+            stage = run_root / ".bundle-stage-301.zip"
+            seed = materializer.self_bound(
+                {
+                    "schema_version": 1,
+                    "status": "STAGING_WRITE_AHEAD",
+                    "run_id": manifest["run_id"],
+                    "manifest_sha256": materializer.sha256_file(manifest_path),
+                    "b_root": str(b_root.resolve()),
+                    "database_write_performed": False,
+                    "stage_specs": [
+                        {
+                            "path": str(stage.resolve()),
+                            "object_key": (
+                                "fixture/run-1/migration-bundles/task-7/"
+                                "sku-70/revision-1/source-bundle.zip"
+                            ),
+                        }
+                    ],
+                }
+            )
+            stage.write_bytes(b"partial staging bytes")
+            result = materializer.rollback(seed, b_root.resolve())
+            self.assertFalse(stage.exists())
+            self.assertEqual(result["removed_object_paths"], [])
+
+    def test_tampered_write_ahead_is_rejected_before_cleanup(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            run_root, source_root, b_root, manifest_path, manifest = self.fixture(root)
+            prepared = materializer.validate_manifest(manifest, source_root)
+            registry_path = run_root / "registry.json"
+            write_ahead_path = run_root / "write-ahead.json"
+            materializer.materialize(
+                manifest,
+                manifest_path,
+                prepared,
+                b_root.resolve(),
+                registry_path,
+                write_ahead_path,
+                run_root / "staging-write-ahead.json",
+            )
+            seed = json.loads(write_ahead_path.read_text(encoding="utf-8"))
+            seed["entries"] = []
+            with self.assertRaisesRegex(ValueError, "self hash"):
+                materializer.rollback(seed, b_root.resolve())
+
+    def test_atomic_promote_never_overwrites_a_racing_target(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            run_root, source_root, b_root, manifest_path, manifest = self.fixture(root)
+            prepared = materializer.validate_manifest(manifest, source_root)
+            real_link = materializer.os.link
+            raced_target = None
+
+            def inject_target(source, target):
+                nonlocal raced_target
+                raced_target = pathlib.Path(target)
+                raced_target.write_bytes(b"concurrent-unowned-target")
+                return real_link(source, target)
+
+            with mock.patch.object(
+                materializer.os, "link", side_effect=inject_target
+            ):
+                with self.assertRaisesRegex(
+                    RuntimeError, "exact compensation could not complete"
+                ):
+                    materializer.materialize(
+                        manifest,
+                        manifest_path,
+                        prepared,
+                        b_root.resolve(),
+                        run_root / "registry.json",
+                        run_root / "write-ahead.json",
+                        run_root / "staging-write-ahead.json",
+                    )
+            self.assertIsNotNone(raced_target)
+            self.assertEqual(
+                raced_target.read_bytes(), b"concurrent-unowned-target"
+            )
+
+    def test_rollback_never_deletes_an_identical_racing_target(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            run_root, source_root, b_root, manifest_path, manifest = self.fixture(root)
+            prepared = materializer.validate_manifest(manifest, source_root)
+            real_link = materializer.os.link
+            raced_target = None
+
+            def inject_identical_target(source, target):
+                nonlocal raced_target
+                raced_target = pathlib.Path(target)
+                raced_target.write_bytes(pathlib.Path(source).read_bytes())
+                return real_link(source, target)
+
+            write_ahead = run_root / "write-ahead.json"
+            with mock.patch.object(
+                materializer.os, "link", side_effect=inject_identical_target
+            ):
+                with self.assertRaisesRegex(
+                    RuntimeError, "exact compensation could not complete"
+                ):
+                    materializer.materialize(
+                        manifest,
+                        manifest_path,
+                        prepared,
+                        b_root.resolve(),
+                        run_root / "registry.json",
+                        write_ahead,
+                        run_root / "staging-write-ahead.json",
+                    )
+            seed = json.loads(write_ahead.read_text(encoding="utf-8"))
+            with self.assertRaisesRegex(ValueError, "ownership cannot be proven"):
+                materializer.rollback(seed, b_root.resolve())
+            self.assertIsNotNone(raced_target)
+            self.assertTrue(raced_target.exists())
+
+    def test_internal_compensation_never_deletes_replaced_owned_target(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            run_root, source_root, b_root, manifest_path, manifest = self.fixture(root)
+            second = json.loads(json.dumps(manifest["bundles"][0]))
+            second["task_id"] = 8
+            second["scope_ref_id"] = 80
+            second["bundle_task_asset_id"] = 302
+            second["bundle_asset_id"] = 402
+            second["bundle_storage_ref_id"] = "ref-302"
+            for index, member in enumerate(second["ordered_members"]):
+                member["task_asset_id"] = 102 + index
+                member["asset_id"] = 202 + index
+                member["task_id"] = 8
+                member["storage_ref_id"] = f"member-ref-{102 + index}"
+                member["object_key"] = f"sources/two-{index}.bin"
+                second_source = source_root / member["object_key"]
+                second_source.parent.mkdir(parents=True, exist_ok=True)
+                second_source.write_bytes(f"second-{index}".encode())
+                member["size"] = second_source.stat().st_size
+                member["sha256"] = hashlib.sha256(
+                    second_source.read_bytes()
+                ).hexdigest()
+            manifest["bundles"].append(second)
+            manifest_path.write_text(
+                json.dumps(manifest), encoding="utf-8"
+            )
+            prepared = materializer.validate_manifest(manifest, source_root)
+            real_link = materializer.os.link
+            first_target = None
+            link_count = 0
+
+            def replace_first_then_fail(source, target):
+                nonlocal first_target, link_count
+                link_count += 1
+                if link_count == 1:
+                    first_target = pathlib.Path(target)
+                    return real_link(source, target)
+                first_target.unlink()
+                first_target.write_bytes(b"concurrent-replacement")
+                raise FileExistsError("injected second promote failure")
+
+            with mock.patch.object(
+                materializer.os,
+                "link",
+                side_effect=replace_first_then_fail,
+            ):
+                with self.assertRaisesRegex(
+                    RuntimeError, "exact compensation could not complete"
+                ):
+                    materializer.materialize(
+                        manifest,
+                        manifest_path,
+                        prepared,
+                        b_root.resolve(),
+                        run_root / "registry.json",
+                        run_root / "write-ahead.json",
+                        run_root / "staging-write-ahead.json",
+                    )
+            self.assertIsNotNone(first_target)
+            self.assertEqual(
+                first_target.read_bytes(), b"concurrent-replacement"
+            )
 
     def test_rollback_preserves_reused_identical_object(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -154,6 +382,8 @@ class RunScopedBundleMaterializerTest(unittest.TestCase):
                 prepared,
                 b_root.resolve(),
                 root / "created-registry.json",
+                root / "created-write-ahead.json",
+                root / "created-staging-write-ahead.json",
             )
             target = b_root / created_registry["entries"][0][
                 "relative_object_path"
@@ -164,6 +394,8 @@ class RunScopedBundleMaterializerTest(unittest.TestCase):
                 prepared,
                 b_root.resolve(),
                 root / "reused-registry.json",
+                root / "reused-write-ahead.json",
+                root / "reused-staging-write-ahead.json",
             )
             self.assertEqual(
                 reused_registry["entries"][0]["disposition"],

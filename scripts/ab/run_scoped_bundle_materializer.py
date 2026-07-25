@@ -290,15 +290,37 @@ def atomic_write(path: pathlib.Path, value: object) -> None:
             temporary.unlink()
 
 
+def self_bound(value: dict[str, Any]) -> dict[str, Any]:
+    result = dict(value)
+    result["evidence_sha256"] = hashlib.sha256(
+        canonical_bytes(result)
+    ).hexdigest()
+    return result
+
+
+def verify_self_bound(value: dict[str, Any], label: str) -> None:
+    expected = str(value.get("evidence_sha256") or "")
+    unsigned = dict(value)
+    unsigned.pop("evidence_sha256", None)
+    if (
+        not SHA256.fullmatch(expected)
+        or hashlib.sha256(canonical_bytes(unsigned)).hexdigest() != expected
+    ):
+        raise ValueError(f"{label} self hash is missing or stale")
+
+
 def materialize(
     manifest: dict[str, Any],
     manifest_path: pathlib.Path,
     prepared: list[dict[str, Any]],
     b_root: pathlib.Path,
     registry_path: pathlib.Path,
+    write_ahead_path: pathlib.Path,
+    staging_write_ahead_path: pathlib.Path,
 ) -> dict[str, Any]:
     if registry_path.exists():
         existing = json.loads(registry_path.read_text(encoding="utf-8"))
+        verify_self_bound(existing, "existing bundle registry")
         if (
             existing.get("schema_version") != 1
             or existing.get("status") != "MATERIALIZED"
@@ -324,24 +346,62 @@ def materialize(
                     "existing registry bundle is missing or has drifted"
                 )
         return existing
+    stage_specs = [
+        {
+            "path": str(
+                (
+                    write_ahead_path.parent
+                    / (
+                        ".bundle-stage-"
+                        f"{item['builder_plan']['bundle_task_asset_id']}.zip"
+                    )
+                ).resolve()
+            ),
+            "object_key": item["object_key"],
+        }
+        for item in prepared
+    ]
+    for item in stage_specs:
+        stage = pathlib.Path(item["path"])
+        if stage.exists() or stage.is_symlink():
+            raise FileExistsError(
+                f"staging path existed before write-ahead: {stage}"
+            )
+    staging_write_ahead = self_bound(
+        {
+            "schema_version": 1,
+            "status": "STAGING_WRITE_AHEAD",
+            "run_id": manifest["run_id"],
+            "manifest_sha256": sha256_file(manifest_path),
+            "b_root": str(b_root),
+            "database_write_performed": False,
+            "stage_specs": stage_specs,
+        }
+    )
+    atomic_write(staging_write_ahead_path, staging_write_ahead)
     created_paths: list[pathlib.Path] = []
-    entries = []
+    staged_paths: list[pathlib.Path] = []
+    staged: list[
+        tuple[pathlib.Path, pathlib.Path, str, pathlib.Path]
+    ] = []
+    entries: list[dict[str, Any]] = []
     try:
         for item in prepared:
             target = contained(
                 b_root / "objects", pathlib.PurePosixPath(item["object_key"])
             )
-            target.parent.mkdir(parents=True, exist_ok=True)
             plan_bytes = canonical_bytes(item["builder_plan"])
             with tempfile.NamedTemporaryFile(
-                dir=target.parent,
+                dir=write_ahead_path.parent,
                 prefix="bundle-plan.",
                 suffix=".json",
                 delete=False,
             ) as handle:
                 plan_path = pathlib.Path(handle.name)
                 handle.write(plan_bytes)
-            temporary_zip = target.with_name(target.name + ".candidate")
+            temporary_zip = write_ahead_path.parent / (
+                f".bundle-stage-{item['builder_plan']['bundle_task_asset_id']}.zip"
+            )
             try:
                 if temporary_zip.exists():
                     raise FileExistsError(
@@ -353,19 +413,35 @@ def materialize(
                         raise FileExistsError(
                             f"existing bundle differs from reviewed bytes: {target}"
                         )
-                    temporary_zip.unlink()
                     disposition = "reused_identical"
                 else:
-                    os.replace(temporary_zip, target)
-                    created_paths.append(target)
                     disposition = "created"
             finally:
                 plan_path.unlink(missing_ok=True)
-                temporary_zip.unlink(missing_ok=True)
 
-            size = target.stat().st_size
+            size = temporary_zip.stat().st_size
+            staged_paths.append(temporary_zip)
             scope_task, scope_kind, scope_ref, revision_no = item["scope_key"]
             source_bundle = result["source_bundle"]
+            ownership_receipt_path = (
+                write_ahead_path.parent
+                / f"bundle-ownership-{source_bundle['task_asset_id']}.json"
+            ).resolve()
+            if disposition == "created" and (
+                ownership_receipt_path.exists()
+                or ownership_receipt_path.is_symlink()
+            ):
+                raise FileExistsError(
+                    "bundle ownership receipt existed before write-ahead"
+                )
+            staged.append(
+                (
+                    temporary_zip,
+                    target,
+                    disposition,
+                    ownership_receipt_path,
+                )
+            )
             entries.append(
                 {
                     "task_id": scope_task,
@@ -414,15 +490,89 @@ def materialize(
                             target.relative_to(b_root).as_posix()
                         ),
                         "expected_sha256": result["bundle_sha256"],
+                        "ownership_receipt_path": str(
+                            ownership_receipt_path
+                        ),
                     },
                 }
             )
-    except Exception:
-        for path in reversed(created_paths):
-            path.unlink(missing_ok=True)
+        write_ahead = self_bound({
+            "schema_version": 1,
+            "status": "WRITE_AHEAD",
+            "run_id": manifest["run_id"],
+            "manifest_sha256": sha256_file(manifest_path),
+            "b_root": str(b_root),
+            "database_write_performed": False,
+            "entries": entries,
+            "staging_files": [
+                {
+                    "path": str(path.resolve()),
+                    "sha256": sha256_file(path),
+                    "size": path.stat().st_size,
+                }
+                for path in staged_paths
+            ],
+        })
+        atomic_write(write_ahead_path, write_ahead)
+        for (
+            temporary_zip,
+            target,
+            disposition,
+            ownership_receipt_path,
+        ) in staged:
+            if disposition == "created":
+                if target.exists():
+                    raise FileExistsError(
+                        f"bundle target appeared after write-ahead: {target}"
+                    )
+                target.parent.mkdir(parents=True, exist_ok=True)
+                os.link(temporary_zip, target)
+                source_stat = temporary_zip.stat()
+                target_stat = target.stat()
+                if not os.path.samestat(source_stat, target_stat):
+                    raise RuntimeError("bundle hard-link ownership proof failed")
+                ownership_receipt = self_bound(
+                    {
+                        "schema_version": 1,
+                        "status": "OWNED_LINK",
+                        "run_id": manifest["run_id"],
+                        "target_path": str(target.resolve()),
+                        "staging_path": str(temporary_zip.resolve()),
+                        "device": target_stat.st_dev,
+                        "inode": target_stat.st_ino,
+                        "size": target_stat.st_size,
+                        "sha256": sha256_file(target),
+                    }
+                )
+                atomic_write(
+                    ownership_receipt_path,
+                    ownership_receipt,
+                )
+                temporary_zip.unlink()
+                created_paths.append(target)
+            else:
+                temporary_zip.unlink()
+    except Exception as original:
+        if write_ahead_path.is_file() and not write_ahead_path.is_symlink():
+            try:
+                seed = json.loads(
+                    write_ahead_path.read_text(encoding="utf-8")
+                )
+                if not isinstance(seed, dict):
+                    raise ValueError("bundle write-ahead must be an object")
+                rollback(seed, b_root)
+            except Exception as compensation:
+                raise RuntimeError(
+                    "bundle materialization failed and exact compensation "
+                    f"could not complete: {original}; "
+                    f"compensation={compensation}"
+                ) from original
+        else:
+            for path in staged_paths:
+                path.unlink(missing_ok=True)
         raise
 
-    registry = {
+    registry = self_bound({
         "schema_version": 1,
         "status": "MATERIALIZED",
         "run_id": manifest["run_id"],
@@ -430,16 +580,53 @@ def materialize(
         "b_root": str(b_root),
         "database_write_performed": False,
         "entries": entries,
-    }
+        "write_ahead_sha256": sha256_file(write_ahead_path),
+    })
     atomic_write(registry_path, registry)
     return registry
 
 
 def rollback(registry: dict[str, Any], b_root: pathlib.Path) -> dict[str, Any]:
-    if registry.get("schema_version") != 1 or registry.get("status") != "MATERIALIZED":
+    verify_self_bound(registry, "cleanup registry")
+    if (
+        registry.get("schema_version") != 1
+        or registry.get("status")
+        not in {"STAGING_WRITE_AHEAD", "WRITE_AHEAD", "MATERIALIZED"}
+    ):
         raise ValueError("cleanup registry is invalid")
     if pathlib.Path(str(registry.get("b_root") or "")).resolve() != b_root:
         raise ValueError("cleanup registry belongs to another B root")
+    if registry.get("status") == "STAGING_WRITE_AHEAD":
+        removed_staging = []
+        specs = registry.get("stage_specs")
+        if not isinstance(specs, list) or not specs:
+            raise ValueError("staging cleanup registry has no stage specs")
+        for index, item in enumerate(specs):
+            if not isinstance(item, dict):
+                raise ValueError(f"stage_specs[{index}] is invalid")
+            stage = pathlib.Path(str(item.get("path") or ""))
+            try:
+                stage.resolve(strict=False).relative_to(b_root.parent.resolve())
+            except ValueError:
+                raise ValueError("staging file escapes the run root") from None
+            if stage.is_symlink():
+                raise ValueError("symlinked staging files are forbidden")
+            if stage.exists():
+                if not stage.is_file():
+                    raise ValueError("staging cleanup target is not a file")
+                stage.unlink()
+                removed_staging.append(str(stage))
+        return {
+            "schema_version": 1,
+            "status": "ROLLED_BACK",
+            "removed_object_paths": [],
+            "pruned_empty_directories": [],
+            "already_absent_count": 0,
+            "retained_reused_object_paths": [],
+            "removed_staging_paths": removed_staging,
+            "database_cleanup_candidates": [],
+            "database_write_performed": False,
+        }
     targets = []
     retained_reused = []
     for index, entry in enumerate(registry.get("entries") or []):
@@ -462,7 +649,23 @@ def rollback(registry: dict[str, Any], b_root: pathlib.Path) -> dict[str, Any]:
                 f"refusing cleanup because bundle bytes drifted: {relative}"
             )
         if disposition == "created":
-            targets.append((relative, target, expected))
+            receipt_path = pathlib.Path(
+                str(
+                    entry.get("rollback_candidate", {}).get(
+                        "ownership_receipt_path"
+                    )
+                    or ""
+                )
+            )
+            try:
+                receipt_path.resolve(strict=False).relative_to(
+                    b_root.parent.resolve()
+                )
+            except ValueError:
+                raise ValueError("ownership receipt escapes the run root") from None
+            if not receipt_path.is_absolute() or receipt_path.is_symlink():
+                raise ValueError("ownership receipt path is invalid")
+            targets.append((relative, target, expected, receipt_path))
         else:
             if not target.exists():
                 raise ValueError(
@@ -470,20 +673,100 @@ def rollback(registry: dict[str, Any], b_root: pathlib.Path) -> dict[str, Any]:
                 )
             retained_reused.append(relative.as_posix())
     removed = []
-    for relative, target, expected in targets:
+    for relative, target, expected, receipt_path in targets:
         if target.exists():
             if not target.is_file() or sha256_file(target) != expected:
                 raise ValueError(
                     f"refusing cleanup because bundle bytes drifted: {relative}"
                 )
+            owned = False
+            if receipt_path.is_file() and not receipt_path.is_symlink():
+                receipt = json.loads(
+                    receipt_path.read_text(encoding="utf-8")
+                )
+                verify_self_bound(receipt, "bundle ownership receipt")
+                stat = target.stat()
+                owned = (
+                    receipt.get("status") == "OWNED_LINK"
+                    and receipt.get("run_id") == registry.get("run_id")
+                    and receipt.get("target_path") == str(target.resolve())
+                    and receipt.get("device") == stat.st_dev
+                    and receipt.get("inode") == stat.st_ino
+                    and receipt.get("size") == stat.st_size
+                    and receipt.get("sha256") == expected
+                )
+            if not owned:
+                matching_stage = next(
+                    (
+                        pathlib.Path(str(item.get("path") or ""))
+                        for item in registry.get("staging_files") or []
+                        if isinstance(item, dict)
+                        and pathlib.Path(str(item.get("path") or "")).exists()
+                        and os.path.samestat(
+                            pathlib.Path(str(item.get("path"))).stat(),
+                            target.stat(),
+                        )
+                    ),
+                    None,
+                )
+                owned = matching_stage is not None
+            if not owned:
+                raise ValueError(
+                    f"bundle target ownership cannot be proven: {relative}"
+                )
             target.unlink()
             removed.append(relative.as_posix())
+    object_root = (b_root / "objects").resolve()
+    pruned_directories: list[str] = []
+    for _, target, _, _ in sorted(
+        targets, key=lambda item: len(item[1].parts), reverse=True
+    ):
+        parent = target.parent
+        while parent != object_root and object_root in parent.parents:
+            try:
+                parent.rmdir()
+            except OSError:
+                break
+            pruned_directories.append(
+                parent.relative_to(b_root).as_posix()
+            )
+            parent = parent.parent
+    removed_staging = []
+    for index, item in enumerate(registry.get("staging_files") or []):
+        if not isinstance(item, dict):
+            raise ValueError(f"staging_files[{index}] is invalid")
+        stage = pathlib.Path(str(item.get("path") or ""))
+        try:
+            stage.resolve(strict=False).relative_to(b_root.parent.resolve())
+        except ValueError:
+            raise ValueError("staging file escapes the run root") from None
+        expected = str(item.get("sha256") or "")
+        size = item.get("size")
+        if (
+            stage.is_symlink()
+            or not SHA256.fullmatch(expected)
+            or isinstance(size, bool)
+            or not isinstance(size, int)
+            or size < 0
+        ):
+            raise ValueError("staging file identity is invalid")
+        if stage.exists():
+            if (
+                not stage.is_file()
+                or stage.stat().st_size != size
+                or sha256_file(stage) != expected
+            ):
+                raise ValueError("refusing cleanup because staging bytes drifted")
+            stage.unlink()
+            removed_staging.append(str(stage))
     return {
         "schema_version": 1,
         "status": "ROLLED_BACK",
         "removed_object_paths": removed,
+        "pruned_empty_directories": sorted(set(pruned_directories)),
         "already_absent_count": len(targets) - len(removed),
         "retained_reused_object_paths": retained_reused,
+        "removed_staging_paths": removed_staging,
         "database_cleanup_candidates": [
             entry["rollback_candidate"] for entry in registry["entries"]
         ],
@@ -500,6 +783,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--manifest", type=pathlib.Path)
     parser.add_argument("--report", type=pathlib.Path, required=True)
     parser.add_argument("--registry", type=pathlib.Path)
+    parser.add_argument("--write-ahead-registry", type=pathlib.Path)
+    parser.add_argument("--staging-write-ahead-registry", type=pathlib.Path)
     parser.add_argument("--execute", action="store_true")
     return parser.parse_args()
 
@@ -542,8 +827,31 @@ def main() -> int:
         raise ValueError("materialize is plan-only unless --execute is explicit")
     if args.registry is None:
         raise ValueError("--registry is required for materialize")
+    if args.write_ahead_registry is None:
+        raise ValueError("--write-ahead-registry is required for materialize")
+    if args.staging_write_ahead_registry is None:
+        raise ValueError(
+            "--staging-write-ahead-registry is required for materialize"
+        )
+    for path in (
+        args.registry,
+        args.write_ahead_registry,
+        args.staging_write_ahead_registry,
+    ):
+        try:
+            path.resolve(strict=False).relative_to(run_root)
+        except ValueError:
+            raise ValueError("bundle registry paths must be inside run_root") from None
+        if path.is_symlink():
+            raise ValueError("symlinked bundle registry paths are forbidden")
     result = materialize(
-        manifest, args.manifest, prepared, b_root, args.registry
+        manifest,
+        args.manifest,
+        prepared,
+        b_root,
+        args.registry,
+        args.write_ahead_registry,
+        args.staging_write_ahead_registry,
     )
     atomic_write(args.report, result)
     return 0

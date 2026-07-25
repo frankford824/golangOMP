@@ -167,6 +167,27 @@ class PrepareAssetRecoveryTest(unittest.TestCase):
                 path = fixture / "objects" / entry["target_object_key"]
                 self.assertEqual(MODULE.sha256_file(path), entry["source_sha256"])
 
+    def test_two_phase_write_ahead_materialization_is_idempotent(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = pathlib.Path(raw)
+            mapping, evidence = self.fixture(root)
+            fixture = root / "fixture-upload-b"
+            fixture.mkdir()
+            write_ahead = root / "recovery-write-ahead.json"
+            wal_args = self.args(
+                mapping, evidence, write_ahead, False, fixture
+            )
+            prepared = MODULE.run(wal_args)
+            final = root / "recovery-materialized.json"
+            apply_args = self.args(
+                mapping, evidence, final, True, fixture
+            )
+            apply_args.expected_write_ahead = write_ahead
+            first = MODULE.run(apply_args)
+            second = MODULE.run(apply_args)
+            self.assertEqual(prepared["entries"], first["entries"])
+            self.assertEqual(first, second)
+
     def test_rejects_unconfirmed_and_byte_drift(self):
         with tempfile.TemporaryDirectory() as raw:
             root = pathlib.Path(raw)

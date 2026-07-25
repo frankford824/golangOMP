@@ -149,6 +149,22 @@ def verify_self_bound(value: dict[str, Any], label: str) -> None:
         raise ComponentError(f"{label} self hash is missing or stale")
 
 
+def verify_compact_self_bound(value: dict[str, Any], label: str) -> None:
+    expected = str(value.get("evidence_sha256") or "")
+    unhashed = dict(value)
+    unhashed.pop("evidence_sha256", None)
+    actual = hashlib.sha256(
+        json.dumps(
+            unhashed,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    if not SHA256.fullmatch(expected) or actual != expected:
+        raise ComponentError(f"{label} self hash is missing or stale")
+
+
 def _parse_json_lines(raw: str) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for line_number, line in enumerate(raw.splitlines(), 1):
@@ -437,13 +453,21 @@ def restore_guard(
     ):
         raise ComponentError("guard-before belongs to another component/database")
     current = capture_guard_state(connection, spec)
-    if (
-        not current["table_existed"]
-        or current["rows"] != expected_provisioned_state(before, binding)
-    ):
-        raise ComponentError("guard state drifted before restoration")
-    _restore_guard_to_before(connection, spec, before)
-    restored = capture_guard_state(connection, spec)
+    current_without_hash = dict(current)
+    current_without_hash.pop("evidence_sha256", None)
+    before_without_hash = dict(before)
+    before_without_hash.pop("evidence_sha256", None)
+    already_restored = current_without_hash == before_without_hash
+    if not already_restored:
+        if (
+            not current["table_existed"]
+            or current["rows"] != expected_provisioned_state(before, binding)
+        ):
+            raise ComponentError("guard state drifted before restoration")
+        _restore_guard_to_before(connection, spec, before)
+        restored = capture_guard_state(connection, spec)
+    else:
+        restored = current
     receipt = self_bound(
         {
             "schema_version": 1,
@@ -454,6 +478,7 @@ def restore_guard(
             "before_artifact_sha256": sha256_file(before_path),
             "restored_state_sha256": restored["evidence_sha256"],
             "exact": True,
+            "already_restored": already_restored,
         }
     )
     write_document(restore_path, receipt)
@@ -575,6 +600,8 @@ def validate_bundle_report(
     candidate_sha256: str,
     registry_sha256: str,
     manifest_sha256: str,
+    rollback_journal_sha256: str,
+    rollback_journal_evidence_sha256: str,
     changed: int,
     already: int,
     allowed_counts: set[tuple[int, int]] | None = None,
@@ -595,10 +622,100 @@ def validate_bundle_report(
         or value.get("candidate_sha256") != candidate_sha256
         or value.get("registry_sha256") != registry_sha256
         or value.get("manifest_sha256") != manifest_sha256
+        or value.get("rollback_journal_sha256")
+        != rollback_journal_sha256
+        or value.get("rollback_journal_evidence_sha256")
+        != rollback_journal_evidence_sha256
         or counts not in expected_counts
         or value.get("database_transaction_committed") is not True
     ):
         raise ComponentError(f"bundle {mode} report contract failed")
+    return value
+
+
+def validate_bundle_journal(
+    path: pathlib.Path,
+    *,
+    manifest: dict[str, Any],
+    run_id: str,
+    database: str,
+    host: str,
+    candidate_sha256: str,
+    registry_sha256: str,
+    manifest_sha256: str,
+) -> dict[str, Any]:
+    value = read_object(path, "bundle rollback journal")
+    verify_compact_self_bound(value, "bundle rollback journal")
+    members = [
+        member
+        for bundle in manifest.get("bundles") or []
+        if isinstance(bundle, dict)
+        for member in bundle.get("ordered_members") or []
+        if isinstance(member, dict)
+    ]
+    before = value.get("member_before")
+    auto_before = value.get("auto_increment_before")
+    auto_ceilings = value.get("auto_increment_ceilings")
+    expected = {
+        int(member["task_asset_id"]): str(member["sha256"])
+        for member in members
+    }
+    if (
+        value.get("schema_version") != 1
+        or value.get("kind")
+        != "source-bundle-clone-b-rollback-journal"
+        or value.get("status") != "PREPARED"
+        or value.get("run_id") != run_id
+        or value.get("database") != database
+        or value.get("host") != host
+        or value.get("candidate_sha256") != candidate_sha256
+        or value.get("registry_sha256") != registry_sha256
+        or value.get("manifest_sha256") != manifest_sha256
+        or value.get("prepared_before_first_database_mutation") is not True
+        or value.get("database_commit_state") != "unknown"
+        or value.get("expected_bundle_count") != 7
+        or value.get("expected_member_count") != 22
+        or value.get("changed_bundle_count") != 7
+        or value.get("already_applied_bundle_count") != 0
+        or value.get("production_writes_executed") is not False
+        or not isinstance(before, list)
+        or len(before) != 22
+        or len(expected) != 22
+        or not isinstance(auto_before, list)
+        or not isinstance(auto_ceilings, list)
+        or [item.get("table") for item in auto_before]
+        != ["design_assets", "task_assets"]
+        or [item.get("table") for item in auto_ceilings]
+        != ["design_assets", "task_assets"]
+    ):
+        raise ComponentError("bundle rollback journal contract failed")
+    for before_state, ceiling in zip(auto_before, auto_ceilings):
+        before_value = before_state.get("next_value")
+        ceiling_value = ceiling.get("next_value")
+        if (
+            isinstance(before_value, bool)
+            or not isinstance(before_value, int)
+            or before_value <= 0
+            or isinstance(ceiling_value, bool)
+            or not isinstance(ceiling_value, int)
+            or ceiling_value < before_value
+        ):
+            raise ComponentError(
+                "bundle rollback journal auto-increment state is invalid"
+            )
+    ids = [item.get("task_asset_id") for item in before if isinstance(item, dict)]
+    if ids != sorted(expected) or len(ids) != len(set(ids)):
+        raise ComponentError("bundle rollback journal member order is invalid")
+    for item in before:
+        if (
+            not isinstance(item, dict)
+            or item.get("recovered_whole_hash")
+            != expected.get(item.get("task_asset_id"))
+            or item.get("original_whole_hash") not in {None, ""}
+        ):
+            raise ComponentError(
+                "bundle rollback journal before-images are invalid"
+            )
     return value
 
 
@@ -642,6 +759,7 @@ def go_bundle_argv(
     connection: clone_db.Connection,
     run_id: str,
     candidate_sha256: str,
+    rollback_journal: pathlib.Path,
     apply_report: pathlib.Path | None = None,
 ) -> list[str]:
     argv = [
@@ -658,6 +776,8 @@ def go_bundle_argv(
         str(fixture_root),
         "--report-file",
         str(report),
+        "--rollback-journal",
+        str(rollback_journal),
         "--confirm-database",
         connection.database,
         "--confirm-host",
@@ -679,6 +799,7 @@ def component_report(
     args: argparse.Namespace,
     connection: clone_db.Connection,
     files: list[pathlib.Path],
+    database_writes_executed: bool = True,
 ) -> dict[str, Any]:
     return self_bound(
         {
@@ -689,7 +810,7 @@ def component_report(
             "run_id": args.run_id,
             "database": connection.database,
             "host": connection.host,
-            "database_writes_executed": True,
+            "database_writes_executed": database_writes_executed,
             "production_writes_executed": False,
             "guard_retained_for_rollback": action == "apply",
             "guard_exactly_restored": action == "rollback",
@@ -705,6 +826,7 @@ def recovery_apply(
     component_dir: pathlib.Path,
 ) -> dict[str, Any]:
     plan = component_dir / "recovery-materialization-plan.json"
+    write_ahead = component_dir / "recovery-file-write-ahead.json"
     guard_before = component_dir / "recovery-guard-before.json"
     guard_provision = component_dir / "recovery-guard-provision.json"
     db_apply = component_dir / "recovery-db-apply.json"
@@ -726,10 +848,29 @@ def recovery_apply(
                 "--evidence",
                 str(args.evidence),
                 "--output",
+                str(write_ahead),
+                "--fixture-root",
+                str(args.fixture_root),
+            ],
+            repo_root=repo_root,
+            env=dict(os.environ),
+            label="recovery file write-ahead plan",
+        )
+        run_command(
+            [
+                sys.executable,
+                str(repo_root / "scripts/ab/prepare_asset_recovery.py"),
+                "--mapping",
+                str(args.mapping),
+                "--evidence",
+                str(args.evidence),
+                "--output",
                 str(plan),
                 "--materialize",
                 "--fixture-root",
                 str(args.fixture_root),
+                "--expected-write-ahead",
+                str(write_ahead),
             ],
             repo_root=repo_root,
             env=dict(os.environ),
@@ -737,6 +878,7 @@ def recovery_apply(
         )
         materialized = True
         plan_value = read_object(plan, "recovery-plan")
+        verify_compact_self_bound(plan_value, "recovery-plan")
         if plan_value.get("run_id") != args.run_id:
             raise ComponentError("recovery plan run_id differs")
         plan_sha = sha256_file(plan)
@@ -806,6 +948,7 @@ def recovery_apply(
             args=args,
             connection=connection,
             files=[
+                write_ahead,
                 plan,
                 guard_before,
                 guard_provision,
@@ -818,6 +961,8 @@ def recovery_apply(
     except Exception as original:
         compensation: list[str] = []
         database_safe = True
+        guard_safe = not guard_ready
+        files_safe = not materialized
         if guard_ready and binding is not None:
             try:
                 run_command(
@@ -858,6 +1003,7 @@ def recovery_apply(
                         guard_restore,
                     )
                     compensation.append("guard_restored")
+                    guard_safe = True
                 except Exception as exc:
                     database_safe = False
                     compensation.append(f"guard_compensation_failed:{exc}")
@@ -883,8 +1029,30 @@ def recovery_apply(
                     label="recovery apply compensation file cleanup",
                 )
                 compensation.append("files_restored")
+                files_safe = True
             except Exception as exc:
                 compensation.append(f"file_compensation_failed:{exc}")
+        compensation_state = self_bound(
+            {
+                "schema_version": 1,
+                "status": (
+                    "COMPENSATION_COMPLETE"
+                    if database_safe and guard_safe and files_safe
+                    else "ROLLBACK_REQUIRED"
+                ),
+                "component": "recovery",
+                "run_id": args.run_id,
+                "database": connection.database,
+                "database_safe": database_safe,
+                "guard_safe": guard_safe,
+                "files_safe": files_safe,
+                "details": compensation,
+            }
+        )
+        write_document(
+            component_dir / "recovery-apply-compensation-state.json",
+            compensation_state,
+        )
         raise ComponentError(
             f"recovery apply failed: {original}; compensation={compensation}"
         ) from original
@@ -897,6 +1065,7 @@ def recovery_rollback(
     component_dir: pathlib.Path,
 ) -> dict[str, Any]:
     plan = component_dir / "recovery-materialization-plan.json"
+    write_ahead = component_dir / "recovery-file-write-ahead.json"
     guard_before = component_dir / "recovery-guard-before.json"
     db_rollback = component_dir / "recovery-db-rollback.json"
     db_rollback_recheck = (
@@ -905,17 +1074,35 @@ def recovery_rollback(
     guard_restore = component_dir / "recovery-guard-restore.json"
     file_rollback = component_dir / "recovery-file-rollback.json"
     report = component_dir / "recovery-component-rollback.json"
-    plan_value = read_object(plan, "recovery-plan")
-    plan_sha = sha256_file(plan)
-    if plan_value.get("run_id") != args.run_id:
+    rollback_plan = plan if plan.is_file() else write_ahead
+    plan_value = read_object(rollback_plan, "recovery rollback plan")
+    verify_compact_self_bound(plan_value, "recovery rollback plan")
+    plan_sha = sha256_file(plan) if plan.is_file() else ""
+    entries = plan_value.get("entries")
+    if (
+        args.mapping is None
+        or plan_value.get("run_id") != args.run_id
+        or plan_value.get("mapping_sha256") != sha256_file(args.mapping)
+        or not isinstance(entries, list)
+        or {
+            entry.get("missing_task_asset_id")
+            for entry in entries
+            if isinstance(entry, dict)
+        }
+        != {23989, 23990, 23991}
+    ):
         raise ComponentError("recovery plan run_id differs")
-    binding = guard_binding(
-        RECOVERY_GUARD,
-        run_id=args.run_id,
-        primary_sha256=plan_sha,
-    )
-    rollback_artifacts = [db_rollback]
-    if db_rollback.is_file():
+    rollback_artifacts: list[pathlib.Path] = []
+    if guard_before.is_file():
+        binding = guard_binding(
+            RECOVERY_GUARD,
+            run_id=args.run_id,
+            primary_sha256=plan_sha,
+        )
+        rollback_artifacts.append(db_rollback)
+    else:
+        binding = None
+    if binding is not None and db_rollback.is_file():
         validate_recovery_report(
             db_rollback,
             mode="rollback",
@@ -929,43 +1116,45 @@ def recovery_rollback(
         )
         rollback_target = db_rollback_recheck
         rollback_artifacts.append(db_rollback_recheck)
-    else:
+    elif binding is not None:
         rollback_target = db_rollback
-    run_command(
-        go_recovery_argv(
+    if binding is not None:
+        run_command(
+            go_recovery_argv(
+                mode="rollback",
+                plan=plan,
+                fixture_root=args.fixture_root,
+                report=rollback_target,
+                connection=connection,
+                run_id=args.run_id,
+            ),
+            repo_root=repo_root,
+            env=go_env(),
+            label="recovery database rollback",
+        )
+        validate_recovery_report(
+            rollback_target,
             mode="rollback",
-            plan=plan,
-            fixture_root=args.fixture_root,
-            report=rollback_target,
-            connection=connection,
             run_id=args.run_id,
-        ),
-        repo_root=repo_root,
-        env=go_env(),
-        label="recovery database rollback",
-    )
-    validate_recovery_report(
-        rollback_target,
-        mode="rollback",
-        run_id=args.run_id,
-        database=connection.database,
-        host=connection.host,
-        plan_sha256=plan_sha,
-        changed=0 if rollback_target == db_rollback_recheck else 3,
-        already=3 if rollback_target == db_rollback_recheck else 0,
-        allowed_counts=(
-            None
-            if rollback_target == db_rollback_recheck
-            else {(3, 0), (0, 3)}
-        ),
-    )
-    restore_guard(
-        connection,
-        RECOVERY_GUARD,
-        binding,
-        guard_before,
-        guard_restore,
-    )
+            database=connection.database,
+            host=connection.host,
+            plan_sha256=plan_sha,
+            changed=0 if rollback_target == db_rollback_recheck else 3,
+            already=3 if rollback_target == db_rollback_recheck else 0,
+            allowed_counts=(
+                None
+                if rollback_target == db_rollback_recheck
+                else {(3, 0), (0, 3)}
+            ),
+        )
+        restore_guard(
+            connection,
+            RECOVERY_GUARD,
+            binding,
+            guard_before,
+            guard_restore,
+        )
+        rollback_artifacts.append(guard_restore)
     run_command(
         [
             sys.executable,
@@ -974,7 +1163,7 @@ def recovery_rollback(
                 / "scripts/ab/rollback_asset_recovery_materialization.py"
             ),
             "--plan",
-            str(plan),
+            str(rollback_plan),
             "--fixture-root",
             str(args.fixture_root),
             "--report",
@@ -997,7 +1186,8 @@ def recovery_rollback(
         action="rollback",
         args=args,
         connection=connection,
-        files=[*rollback_artifacts, guard_restore, file_rollback],
+        files=[*rollback_artifacts, file_rollback],
+        database_writes_executed=binding is not None,
     )
     write_document(report, payload)
     return payload
@@ -1012,10 +1202,15 @@ def bundle_apply(
 ) -> dict[str, Any]:
     materialize_report = component_dir / "bundle-materialize-report.json"
     registry = component_dir / "bundle-registry.json"
+    write_ahead = component_dir / "bundle-file-write-ahead.json"
+    staging_write_ahead = (
+        component_dir / "bundle-staging-write-ahead.json"
+    )
     guard_before = component_dir / "bundle-guard-before.json"
     guard_provision = component_dir / "bundle-guard-provision.json"
     db_apply = component_dir / "bundle-db-apply.json"
     db_idempotent = component_dir / "bundle-db-idempotent.json"
+    db_journal = component_dir / "bundle-db-rollback-journal.json"
     report = component_dir / "bundle-component-apply.json"
     manifest_value = read_object(args.manifest, "bundle-manifest")
     candidate = str(manifest_value.get("source_candidate_sha256") or "")
@@ -1026,6 +1221,7 @@ def bundle_apply(
         raise ComponentError("bundle manifest run/candidate binding is invalid")
     materialized = False
     guard_ready = False
+    database_apply_started = False
     binding: dict[str, Any] | None = None
     try:
         run_command(
@@ -1045,6 +1241,10 @@ def bundle_apply(
                 str(materialize_report),
                 "--registry",
                 str(registry),
+                "--write-ahead-registry",
+                str(write_ahead),
+                "--staging-write-ahead-registry",
+                str(staging_write_ahead),
                 "--execute",
             ],
             repo_root=repo_root,
@@ -1072,6 +1272,7 @@ def bundle_apply(
         )
         guard_ready = True
         env = go_env()
+        database_apply_started = True
         run_command(
             go_bundle_argv(
                 mode="apply",
@@ -1082,11 +1283,23 @@ def bundle_apply(
                 connection=connection,
                 run_id=args.run_id,
                 candidate_sha256=candidate,
+                rollback_journal=db_journal,
             ),
             repo_root=repo_root,
             env=env,
             label="bundle database apply",
         )
+        journal_value = validate_bundle_journal(
+            db_journal,
+            manifest=manifest_value,
+            run_id=args.run_id,
+            database=connection.database,
+            host=connection.host,
+            candidate_sha256=candidate,
+            registry_sha256=registry_sha,
+            manifest_sha256=manifest_sha,
+        )
+        journal_sha = sha256_file(db_journal)
         validate_bundle_report(
             db_apply,
             mode="apply",
@@ -1096,6 +1309,10 @@ def bundle_apply(
             candidate_sha256=candidate,
             registry_sha256=registry_sha,
             manifest_sha256=manifest_sha,
+            rollback_journal_sha256=journal_sha,
+            rollback_journal_evidence_sha256=journal_value[
+                "evidence_sha256"
+            ],
             changed=7,
             already=0,
         )
@@ -1109,6 +1326,7 @@ def bundle_apply(
                 connection=connection,
                 run_id=args.run_id,
                 candidate_sha256=candidate,
+                rollback_journal=db_journal,
             ),
             repo_root=repo_root,
             env=env,
@@ -1123,19 +1341,46 @@ def bundle_apply(
             candidate_sha256=candidate,
             registry_sha256=registry_sha,
             manifest_sha256=manifest_sha,
+            rollback_journal_sha256=journal_sha,
+            rollback_journal_evidence_sha256=journal_value[
+                "evidence_sha256"
+            ],
             changed=0,
             already=7,
         )
+        second_journal = validate_bundle_journal(
+            db_journal,
+            manifest=manifest_value,
+            run_id=args.run_id,
+            database=connection.database,
+            host=connection.host,
+            candidate_sha256=candidate,
+            registry_sha256=registry_sha,
+            manifest_sha256=manifest_sha,
+        )
+        if sha256_file(db_journal) != journal_sha:
+            raise ComponentError(
+                "idempotent bundle apply changed the rollback journal"
+            )
+        if second_journal["evidence_sha256"] != journal_value[
+            "evidence_sha256"
+        ]:
+            raise ComponentError(
+                "idempotent bundle apply changed journal evidence"
+            )
         payload = component_report(
             component="bundle",
             action="apply",
             args=args,
             connection=connection,
             files=[
+                staging_write_ahead,
+                write_ahead,
                 materialize_report,
                 registry,
                 guard_before,
                 guard_provision,
+                db_journal,
                 db_apply,
                 db_idempotent,
             ],
@@ -1145,8 +1390,10 @@ def bundle_apply(
     except Exception as original:
         compensation: list[str] = []
         database_safe = True
+        guard_safe = not guard_ready
+        files_safe = not materialized
         if guard_ready and binding is not None:
-            if db_apply.is_file():
+            if db_journal.is_file():
                 try:
                     compensation_report = (
                         component_dir / "bundle-apply-compensation-db.json"
@@ -1161,7 +1408,8 @@ def bundle_apply(
                             connection=connection,
                             run_id=args.run_id,
                             candidate_sha256=candidate,
-                            apply_report=db_apply,
+                            rollback_journal=db_journal,
+                            apply_report=None,
                         ),
                         repo_root=repo_root,
                         env=go_env(),
@@ -1176,6 +1424,12 @@ def bundle_apply(
                         candidate_sha256=candidate,
                         registry_sha256=registry_sha,
                         manifest_sha256=manifest_sha,
+                        rollback_journal_sha256=sha256_file(
+                            db_journal
+                        ),
+                        rollback_journal_evidence_sha256=read_object(
+                            db_journal, "bundle rollback journal"
+                        )["evidence_sha256"],
                         changed=7,
                         already=0,
                         allowed_counts={(7, 0), (0, 7)},
@@ -1187,16 +1441,14 @@ def bundle_apply(
                         f"database_compensation_failed:{exc}"
                     )
             else:
-                if "committed bundle apply compensation failed" in str(
-                    original
-                ):
+                if database_apply_started:
                     database_safe = False
                     compensation.append(
-                        "executor_database_compensation_failed_guard_retained"
+                        "rollback_journal_missing_or_invalid_guard_retained"
                     )
                 else:
                     compensation.append(
-                        "database_report_absent_executor_compensated_or_precommit"
+                        "database_apply_not_started"
                     )
             if database_safe:
                 try:
@@ -1209,6 +1461,7 @@ def bundle_apply(
                         / "bundle-apply-compensation-guard.json",
                     )
                     compensation.append("guard_restored")
+                    guard_safe = True
                 except Exception as exc:
                     database_safe = False
                     compensation.append(f"guard_compensation_failed:{exc}")
@@ -1240,8 +1493,30 @@ def bundle_apply(
                     label="bundle apply compensation file cleanup",
                 )
                 compensation.append("files_restored")
+                files_safe = True
             except Exception as exc:
                 compensation.append(f"file_compensation_failed:{exc}")
+        compensation_state = self_bound(
+            {
+                "schema_version": 1,
+                "status": (
+                    "COMPENSATION_COMPLETE"
+                    if database_safe and guard_safe and files_safe
+                    else "ROLLBACK_REQUIRED"
+                ),
+                "component": "bundle",
+                "run_id": args.run_id,
+                "database": connection.database,
+                "database_safe": database_safe,
+                "guard_safe": guard_safe,
+                "files_safe": files_safe,
+                "details": compensation,
+            }
+        )
+        write_document(
+            component_dir / "bundle-apply-compensation-state.json",
+            compensation_state,
+        )
         raise ComponentError(
             f"bundle apply failed: {original}; compensation={compensation}"
         ) from original
@@ -1255,32 +1530,85 @@ def bundle_rollback(
     component_dir: pathlib.Path,
 ) -> dict[str, Any]:
     registry = component_dir / "bundle-registry.json"
+    write_ahead = component_dir / "bundle-file-write-ahead.json"
+    staging_write_ahead = (
+        component_dir / "bundle-staging-write-ahead.json"
+    )
     guard_before = component_dir / "bundle-guard-before.json"
     db_apply = component_dir / "bundle-db-apply.json"
+    db_journal = component_dir / "bundle-db-rollback-journal.json"
     db_rollback = component_dir / "bundle-db-rollback.json"
     db_rollback_recheck = component_dir / "bundle-db-rollback-recheck.json"
     guard_restore = component_dir / "bundle-guard-restore.json"
     file_rollback = component_dir / "bundle-file-rollback.json"
     report = component_dir / "bundle-component-rollback.json"
+    compensation_state_path = (
+        component_dir / "bundle-apply-compensation-state.json"
+    )
     manifest_value = read_object(args.manifest, "bundle-manifest")
     candidate = str(manifest_value.get("source_candidate_sha256") or "")
-    registry_value = read_object(registry, "bundle-registry")
+    rollback_registry = (
+        registry
+        if registry.is_file()
+        else write_ahead
+        if write_ahead.is_file()
+        else staging_write_ahead
+    )
+    registry_value = read_object(rollback_registry, "bundle rollback registry")
+    verify_self_bound(registry_value, "bundle rollback registry")
     if (
         manifest_value.get("run_id") != args.run_id
         or registry_value.get("run_id") != args.run_id
+        or registry_value.get("manifest_sha256") != sha256_file(args.manifest)
         or not SHA256.fullmatch(candidate)
     ):
         raise ComponentError("bundle rollback input binding is invalid")
-    registry_sha = sha256_file(registry)
+    if registry_value.get("status") in {"WRITE_AHEAD", "MATERIALIZED"}:
+        entries = registry_value.get("entries")
+        if not isinstance(entries, list) or len(entries) != 7:
+            raise ComponentError("bundle rollback registry must contain seven entries")
+    registry_sha = sha256_file(registry) if registry.is_file() else ""
     manifest_sha = sha256_file(args.manifest)
-    binding = guard_binding(
-        BUNDLE_GUARD,
-        run_id=args.run_id,
-        primary_sha256=candidate,
-        secondary_sha256=registry_sha,
-    )
-    rollback_artifacts = [db_rollback]
-    if db_rollback.is_file():
+    compensation_complete = False
+    if compensation_state_path.is_file():
+        compensation_state = read_object(
+            compensation_state_path, "bundle compensation state"
+        )
+        verify_self_bound(compensation_state, "bundle compensation state")
+        compensation_complete = (
+            compensation_state.get("status") == "COMPENSATION_COMPLETE"
+            and compensation_state.get("component") == "bundle"
+            and compensation_state.get("run_id") == args.run_id
+            and compensation_state.get("database") == connection.database
+            and compensation_state.get("database_safe") is True
+            and compensation_state.get("guard_safe") is True
+            and compensation_state.get("files_safe") is True
+        )
+    rollback_artifacts: list[pathlib.Path] = []
+    if db_journal.is_file():
+        rollback_artifacts.append(db_journal)
+    if guard_before.is_file():
+        if not registry.is_file():
+            raise ComponentError("bundle guard exists without final registry")
+        binding = guard_binding(
+            BUNDLE_GUARD,
+            run_id=args.run_id,
+            primary_sha256=candidate,
+            secondary_sha256=registry_sha,
+        )
+    else:
+        binding = None
+    if (
+        binding is not None
+        and db_apply.is_file()
+        and not db_journal.is_file()
+        and not compensation_complete
+    ):
+        raise ComponentError(
+            "bundle apply report exists without rollback journal"
+        )
+    if binding is not None and db_journal.is_file() and db_rollback.is_file():
+        rollback_artifacts.append(db_rollback)
         validate_bundle_report(
             db_rollback,
             mode="rollback",
@@ -1290,54 +1618,96 @@ def bundle_rollback(
             candidate_sha256=candidate,
             registry_sha256=registry_sha,
             manifest_sha256=manifest_sha,
+            rollback_journal_sha256=sha256_file(db_journal),
+            rollback_journal_evidence_sha256=read_object(
+                db_journal, "bundle rollback journal"
+            )["evidence_sha256"],
             changed=7,
             already=0,
             allowed_counts={(7, 0), (0, 7)},
         )
         rollback_target = db_rollback_recheck
         rollback_artifacts.append(db_rollback_recheck)
-    else:
+    elif binding is not None and db_journal.is_file():
         rollback_target = db_rollback
-    run_command(
-        go_bundle_argv(
-            mode="rollback",
-            registry=registry,
-            manifest=args.manifest,
-            fixture_root=args.fixture_root,
-            report=rollback_target,
-            connection=connection,
+        rollback_artifacts.append(db_rollback)
+    if binding is not None and db_journal.is_file():
+        journal_value = validate_bundle_journal(
+            db_journal,
+            manifest=manifest_value,
             run_id=args.run_id,
+            database=connection.database,
+            host=connection.host,
             candidate_sha256=candidate,
-            apply_report=db_apply,
-        ),
-        repo_root=repo_root,
-        env=go_env(),
-        label="bundle database rollback",
-    )
-    validate_bundle_report(
-        rollback_target,
-        mode="rollback",
-        run_id=args.run_id,
-        database=connection.database,
-        host=connection.host,
-        candidate_sha256=candidate,
-        registry_sha256=registry_sha,
-        manifest_sha256=manifest_sha,
-        changed=0 if rollback_target == db_rollback_recheck else 7,
-        already=7 if rollback_target == db_rollback_recheck else 0,
-        allowed_counts=(
-            None
-            if rollback_target == db_rollback_recheck
-            else {(7, 0), (0, 7)}
-        ),
-    )
-    restore_guard(
-        connection,
-        BUNDLE_GUARD,
-        binding,
-        guard_before,
-        guard_restore,
-    )
+            registry_sha256=registry_sha,
+            manifest_sha256=manifest_sha,
+        )
+        apply_crosscheck: pathlib.Path | None = None
+        if db_apply.is_file():
+            validate_bundle_report(
+                db_apply,
+                mode="apply",
+                run_id=args.run_id,
+                database=connection.database,
+                host=connection.host,
+                candidate_sha256=candidate,
+                registry_sha256=registry_sha,
+                manifest_sha256=manifest_sha,
+                rollback_journal_sha256=sha256_file(db_journal),
+                rollback_journal_evidence_sha256=journal_value[
+                    "evidence_sha256"
+                ],
+                changed=7,
+                already=0,
+            )
+            apply_crosscheck = db_apply
+        run_command(
+            go_bundle_argv(
+                mode="rollback",
+                registry=registry,
+                manifest=args.manifest,
+                fixture_root=args.fixture_root,
+                report=rollback_target,
+                connection=connection,
+                run_id=args.run_id,
+                candidate_sha256=candidate,
+                rollback_journal=db_journal,
+                apply_report=apply_crosscheck,
+            ),
+            repo_root=repo_root,
+            env=go_env(),
+            label="bundle database rollback",
+        )
+        validate_bundle_report(
+            rollback_target,
+            mode="rollback",
+            run_id=args.run_id,
+            database=connection.database,
+            host=connection.host,
+            candidate_sha256=candidate,
+            registry_sha256=registry_sha,
+            manifest_sha256=manifest_sha,
+            rollback_journal_sha256=sha256_file(db_journal),
+            rollback_journal_evidence_sha256=read_object(
+                db_journal, "bundle rollback journal"
+            )["evidence_sha256"],
+            changed=0 if rollback_target == db_rollback_recheck else 7,
+            already=7 if rollback_target == db_rollback_recheck else 0,
+            allowed_counts=(
+                None
+                if rollback_target == db_rollback_recheck
+                else {(7, 0), (0, 7)}
+            ),
+        )
+    if binding is not None:
+        restore_guard(
+            connection,
+            BUNDLE_GUARD,
+            binding,
+            guard_before,
+            guard_restore,
+        )
+        rollback_artifacts.append(guard_restore)
     run_command(
         [
             sys.executable,
@@ -1348,7 +1718,7 @@ def bundle_rollback(
             "--b-root",
             str(args.fixture_root),
             "--registry",
-            str(registry),
+            str(rollback_registry),
             "--report",
             str(file_rollback),
             "--execute",
@@ -1368,7 +1738,10 @@ def bundle_rollback(
         action="rollback",
         args=args,
         connection=connection,
-        files=[*rollback_artifacts, guard_restore, file_rollback],
+        files=[*rollback_artifacts, file_rollback],
+        database_writes_executed=(
+            binding is not None and db_journal.is_file()
+        ),
     )
     write_document(report, payload)
     return payload
@@ -1407,10 +1780,12 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     )
     repo_root = pathlib.Path(__file__).resolve().parents[2]
     if args.action.startswith("recovery-"):
-        if args.action == "recovery-apply" and (
-            args.mapping is None or args.evidence is None
+        if args.mapping is None or (
+            args.action == "recovery-apply" and args.evidence is None
         ):
-            raise ComponentError("recovery-apply requires mapping and evidence")
+            raise ComponentError(
+                "recovery actions require mapping; apply also requires evidence"
+            )
         if args.action == "recovery-apply":
             return recovery_apply(args, connection, repo_root, component_dir)
         return recovery_rollback(args, connection, repo_root, component_dir)

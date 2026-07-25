@@ -358,10 +358,12 @@ def validate_g4_component_chain(
             "bundle-registry.json",
             "bundle-guard-before.json",
             "bundle-guard-provision.json",
+            "bundle-db-rollback-journal.json",
             "bundle-db-apply.json",
             "bundle-db-idempotent.json",
         },
         ("bundle", "rollback"): {
+            "bundle-db-rollback-journal.json",
             "bundle-db-rollback.json",
             "bundle-guard-restore.json",
             "bundle-file-rollback.json",
@@ -536,10 +538,93 @@ def validate_g4_component_chain(
                 ):
                     raise ValueError("recovery plan/report hash binding differs")
             else:
+                journal = apply["bundle-db-rollback-journal.json"]
+                rollback_journal = rollback[
+                    "bundle-db-rollback-journal.json"
+                ]
+                journal_evidence = str(
+                    journal.get("evidence_sha256") or ""
+                )
+                unhashed_journal = dict(journal)
+                unhashed_journal.pop("evidence_sha256", None)
+                compact_journal_hash = hashlib.sha256(
+                    json.dumps(
+                        unhashed_journal,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ).encode("utf-8")
+                ).hexdigest()
+                auto_before = journal.get("auto_increment_before")
+                auto_ceilings = journal.get("auto_increment_ceilings")
+                auto_tables = ["design_assets", "task_assets"]
+                if (
+                    journal.get("kind")
+                    != "source-bundle-clone-b-rollback-journal"
+                    or journal.get("status") != "PREPARED"
+                    or journal.get("run_id") != run_id
+                    or journal.get("database") != database
+                    or journal.get("host") != host
+                    or journal.get("expected_bundle_count") != 7
+                    or journal.get("expected_member_count") != 22
+                    or journal.get(
+                        "prepared_before_first_database_mutation"
+                    )
+                    is not True
+                    or journal.get("database_commit_state") != "unknown"
+                    or journal.get("production_writes_executed")
+                    is not False
+                    or not isinstance(auto_before, list)
+                    or not isinstance(auto_ceilings, list)
+                    or [
+                        item.get("table") for item in auto_before
+                        if isinstance(item, dict)
+                    ]
+                    != auto_tables
+                    or [
+                        item.get("table") for item in auto_ceilings
+                        if isinstance(item, dict)
+                    ]
+                    != auto_tables
+                    or any(
+                        isinstance(before_state.get("next_value"), bool)
+                        or not isinstance(
+                            before_state.get("next_value"), int
+                        )
+                        or before_state["next_value"] <= 0
+                        or isinstance(ceiling.get("next_value"), bool)
+                        or not isinstance(ceiling.get("next_value"), int)
+                        or ceiling["next_value"]
+                        < before_state["next_value"]
+                        for before_state, ceiling in zip(
+                            auto_before, auto_ceilings
+                        )
+                    )
+                    or not SHA256.fullmatch(journal_evidence)
+                    or compact_journal_hash != journal_evidence
+                    or rollback_journal != journal
+                    or artifact_hashes[(component, "apply")][
+                        "bundle-db-rollback-journal.json"
+                    ]
+                    != artifact_hashes[(component, "rollback")][
+                        "bundle-db-rollback-journal.json"
+                    ]
+                ):
+                    raise ValueError(
+                        "bundle rollback journal is invalid or drifted"
+                    )
                 for document in (db_apply, db_idempotent, db_rollback):
                     if (
                         document.get("schema_version") != 1
                         or document.get("status") != "PASS"
+                        or document.get("rollback_journal_sha256")
+                        != artifact_hashes[(component, "apply")][
+                            "bundle-db-rollback-journal.json"
+                        ]
+                        or document.get(
+                            "rollback_journal_evidence_sha256"
+                        )
+                        != journal_evidence
                     ):
                         raise ValueError("bundle DB report envelope is invalid")
                 for field in (

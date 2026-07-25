@@ -1,11 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -17,11 +19,14 @@ import (
 )
 
 func TestValidateOptionsRejectsNonCloneOrNonLoopback(t *testing.T) {
+	root := t.TempDir()
 	base := options{
 		DSN:  "user:pass@tcp(127.0.0.1:3312)/ab_formal_clone_b",
 		Mode: "apply", RegistryFile: "registry.json", ManifestFile: "manifest.json",
-		FixtureRoot: "/tmp/v8-ab/run/fixture-upload-b", ReportFile: "report.json",
-		ConfirmDatabase: "ab_formal_clone_b", ConfirmHost: "127.0.0.1",
+		FixtureRoot:         "/tmp/v8-ab/run/fixture-upload-b",
+		ReportFile:          filepath.Join(root, "report.json"),
+		RollbackJournalFile: filepath.Join(root, "rollback-journal.json"),
+		ConfirmDatabase:     "ab_formal_clone_b", ConfirmHost: "127.0.0.1",
 		ConfirmRunID: "formal-run-1", ConfirmCandidateSHA256: strings.Repeat("a", 64),
 	}
 	if _, _, err := validateOptions(base); err != nil {
@@ -258,9 +263,22 @@ func TestApplyIsExactIdempotentAndRollbackRestoresMemberHashes(t *testing.T) {
 		mock.ExpectExec("INSERT INTO task_assets").WillReturnResult(sqlmock.NewResult(0, 1))
 		mock.ExpectExec("INSERT INTO asset_storage_refs").
 			WillReturnResult(sqlmock.NewResult(0, 1))
-		changed, already, before, err := applyAll(context.Background(), tx, []validatedEntry{entry}, manifest)
+		journalCalled := false
+		changed, already, before, err := applyAll(
+			context.Background(), tx, []validatedEntry{entry}, manifest,
+			func(before []memberBefore) error {
+				journalCalled = true
+				if len(before) != 2 {
+					t.Fatalf("journal before count = %d", len(before))
+				}
+				return nil
+			},
+		)
 		if err != nil || changed != 1 || already != 0 || len(before) != 2 {
 			t.Fatalf("applyAll = changed=%d already=%d before=%d err=%v", changed, already, len(before), err)
+		}
+		if !journalCalled {
+			t.Fatal("journal callback was not called before mutation")
 		}
 		mock.ExpectRollback()
 		_ = tx.Rollback()
@@ -280,7 +298,13 @@ func TestApplyIsExactIdempotentAndRollbackRestoresMemberHashes(t *testing.T) {
 		expectScope(mock, entry)
 		expectMembers(mock, entry, true)
 		expectBundleState(mock, entry, manifest.ConfirmedBy, true)
-		changed, already, before, err := applyAll(context.Background(), tx, []validatedEntry{entry}, manifest)
+		changed, already, before, err := applyAll(
+			context.Background(), tx, []validatedEntry{entry}, manifest,
+			func([]memberBefore) error {
+				t.Fatal("idempotent apply must not rewrite rollback journal")
+				return nil
+			},
+		)
 		if err != nil || changed != 0 || already != 1 || len(before) != 0 {
 			t.Fatalf("idempotent apply = changed=%d already=%d before=%d err=%v", changed, already, len(before), err)
 		}
@@ -378,6 +402,9 @@ func TestCommittedApplyReportFailureCompensationRestoresDatabase(t *testing.T) {
 			WillReturnResult(sqlmock.NewResult(0, 1))
 	}
 	mock.ExpectCommit()
+	for range 3 {
+		expectAutoIncrementStates(mock, 24000, 26000)
+	}
 	report := executionReport{
 		ChangedBundleCount: 1,
 		MemberBefore: []memberBefore{
@@ -391,6 +418,10 @@ func TestCommittedApplyReportFailureCompensationRestoresDatabase(t *testing.T) {
 			},
 		},
 	}
+	autoState := []autoIncrementState{
+		{Table: "design_assets", NextValue: 24000},
+		{Table: "task_assets", NextValue: 26000},
+	}
 	if err := compensateCommittedApply(
 		context.Background(),
 		db,
@@ -399,8 +430,189 @@ func TestCommittedApplyReportFailureCompensationRestoresDatabase(t *testing.T) {
 		registrySHA,
 		[]validatedEntry{entry},
 		report,
+		rollbackJournal{
+			AutoIncrementBefore:   autoState,
+			AutoIncrementCeilings: autoState,
+		},
 	); err != nil {
 		t.Fatalf("compensateCommittedApply() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestApplyJournalFailurePrecedesEveryDatabaseMutation(t *testing.T) {
+	entry, manifest := sqlFixture()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectBegin()
+	tx, _ := db.BeginTx(context.Background(), nil)
+	expectScope(mock, entry)
+	expectMembers(mock, entry, false)
+	expectBundleState(mock, entry, manifest.ConfirmedBy, false)
+	journalErr := errors.New("injected durable journal failure")
+	changed, already, before, err := applyAll(
+		context.Background(),
+		tx,
+		[]validatedEntry{entry},
+		manifest,
+		func([]memberBefore) error { return journalErr },
+	)
+	if !errors.Is(err, journalErr) || changed != 0 || already != 0 || before != nil {
+		t.Fatalf("applyAll journal failure = %d/%d %#v %v", changed, already, before, err)
+	}
+	mock.ExpectRollback()
+	_ = tx.Rollback()
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatalf("a database mutation occurred before the journal: %v", err)
+	}
+}
+
+func TestRollbackJournalCoversPreCommitStateAndIsTamperEvident(t *testing.T) {
+	entry, manifest := sqlFixture()
+	manifest.SourceCandidateSHA256 = strings.Repeat("e", 64)
+	manifest.Bundles = []manifestBundle{entry.manifest}
+	reg := registry{RunID: "run-1", Entries: []registryEntry{entry.registry}}
+	before := []memberBefore{
+		{TaskAssetID: 293, RecoveredHash: entry.manifest.OrderedMembers[0].SHA256},
+		{TaskAssetID: 297, RecoveredHash: entry.manifest.OrderedMembers[1].SHA256},
+	}
+	journal, err := newRollbackJournal(
+		reg,
+		manifest,
+		strings.Repeat("f", 64),
+		strings.Repeat("d", 64),
+		"ab_formal_clone_b",
+		"127.0.0.1",
+		before,
+		[]autoIncrementState{
+			{Table: "design_assets", NextValue: 24000},
+			{Table: "task_assets", NextValue: 26000},
+		},
+		[]autoIncrementState{
+			{Table: "design_assets", NextValue: 24000},
+			{Table: "task_assets", NextValue: 26000},
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "rollback-journal.json")
+	if err := writeNewJSONDurable(path, journal); err != nil {
+		t.Fatal(err)
+	}
+	first, loaded, err := loadRollbackJournal(
+		path,
+		reg,
+		manifest,
+		strings.Repeat("f", 64),
+		strings.Repeat("d", 64),
+		"ab_formal_clone_b",
+		"127.0.0.1",
+	)
+	if err != nil || loaded.EvidenceSHA256 != journal.EvidenceSHA256 {
+		t.Fatalf("loadRollbackJournal() = %v, %v", loaded, err)
+	}
+	if err := writeNewJSONDurable(path, journal); err != nil {
+		t.Fatalf("identical journal reuse failed: %v", err)
+	}
+	second, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(first, second) {
+		t.Fatal("idempotent journal reuse changed durable bytes")
+	}
+	tampered := append([]byte(nil), second...)
+	tampered[0] = ' '
+	if err := os.WriteFile(path, tampered, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := loadRollbackJournal(
+		path,
+		reg,
+		manifest,
+		strings.Repeat("f", 64),
+		strings.Repeat("d", 64),
+		"ab_formal_clone_b",
+		"127.0.0.1",
+	); err == nil {
+		t.Fatal("tampered rollback journal was accepted")
+	}
+}
+
+func TestRollbackJournalIsIdempotentWhenCommitNeverHappened(t *testing.T) {
+	entry, manifest := sqlFixture()
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectBegin()
+	tx, _ := db.BeginTx(context.Background(), nil)
+	expectScope(mock, entry)
+	expectMembers(mock, entry, false)
+	expectBundleState(mock, entry, manifest.ConfirmedBy, false)
+	report := executionReport{
+		ChangedBundleCount: 1,
+		MemberBefore: []memberBefore{
+			{TaskAssetID: 293, RecoveredHash: entry.manifest.OrderedMembers[0].SHA256},
+			{TaskAssetID: 297, RecoveredHash: entry.manifest.OrderedMembers[1].SHA256},
+		},
+	}
+	changed, already, err := rollbackAll(
+		context.Background(), tx, []validatedEntry{entry}, report,
+	)
+	if err != nil || changed != 0 || already != 1 {
+		t.Fatalf("pre-commit rollback = %d/%d %v", changed, already, err)
+	}
+	mock.ExpectRollback()
+	_ = tx.Rollback()
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestBundleAutoIncrementRollbackRestoresOnlyWithinJournalCeilings(t *testing.T) {
+	before := []autoIncrementState{
+		{Table: "design_assets", NextValue: 23000},
+		{Table: "task_assets", NextValue: 25000},
+	}
+	reg := registry{Entries: []registryEntry{
+		{
+			TaskAssetCandidate: taskAssetCandidate{
+				ID: 25563, AssetID: 23995,
+			},
+		},
+	}}
+	ceilings, err := bundleAutoIncrementCeilings(before, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ceilings[0].NextValue != 23996 || ceilings[1].NextValue != 25564 {
+		t.Fatalf("ceilings = %#v", ceilings)
+	}
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	expectAutoIncrementStates(mock, 23996, 25564)
+	mock.ExpectQuery("SELECT COALESCE\\(MAX\\(id\\),0\\) FROM `design_assets`").
+		WillReturnRows(sqlmock.NewRows([]string{"max"}).AddRow(22999))
+	mock.ExpectExec("ALTER TABLE `design_assets` AUTO_INCREMENT = 23000").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	expectAutoIncrementStates(mock, 23000, 25564)
+	mock.ExpectQuery("SELECT COALESCE\\(MAX\\(id\\),0\\) FROM `task_assets`").
+		WillReturnRows(sqlmock.NewRows([]string{"max"}).AddRow(24999))
+	mock.ExpectExec("ALTER TABLE `task_assets` AUTO_INCREMENT = 25000").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	expectAutoIncrementStates(mock, 23000, 25000)
+	if err := restoreBundleAutoIncrementStates(
+		context.Background(), db, before, ceilings,
+	); err != nil {
+		t.Fatalf("restoreBundleAutoIncrementStates() error = %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
@@ -438,6 +650,28 @@ func expectScope(mock sqlmock.Sqlmock, entry validatedEntry) {
 	mock.ExpectQuery("SELECT sku_code FROM task_sku_items").
 		WithArgs(entry.registry.ScopeRefID, entry.registry.TaskID).
 		WillReturnRows(sqlmock.NewRows([]string{"sku_code"}).AddRow(entry.scopeSKUCode))
+}
+
+func expectAutoIncrementStates(
+	mock sqlmock.Sqlmock, designNext int64, taskNext int64,
+) {
+	mock.ExpectQuery("SELECT @@SESSION.information_schema_stats_expiry").
+		WillReturnRows(
+			sqlmock.NewRows(
+				[]string{
+					"information_schema_stats_expiry",
+					"auto_increment_increment",
+					"auto_increment_offset",
+				},
+			).AddRow(0, 1, 1),
+		)
+	for _, value := range []int64{designNext, taskNext} {
+		mock.ExpectQuery("SELECT AUTO_INCREMENT FROM information_schema.tables").
+			WithArgs(sqlmock.AnyArg()).
+			WillReturnRows(
+				sqlmock.NewRows([]string{"AUTO_INCREMENT"}).AddRow(value),
+			)
+	}
 }
 
 func expectMembers(mock sqlmock.Sqlmock, entry validatedEntry, applied bool) {
