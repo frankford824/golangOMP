@@ -4,6 +4,7 @@ import json
 import pathlib
 import tempfile
 import unittest
+from unittest import mock
 
 
 PATH = pathlib.Path(__file__).with_name("prepare_asset_recovery.py")
@@ -187,6 +188,60 @@ class PrepareAssetRecoveryTest(unittest.TestCase):
             second = MODULE.run(apply_args)
             self.assertEqual(prepared["entries"], first["entries"])
             self.assertEqual(first, second)
+
+    def test_staging_receipt_is_durable_before_stage_publication(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = pathlib.Path(raw)
+            mapping, evidence = self.fixture(root)
+            fixture = root / "fixture-upload-b"
+            fixture.mkdir()
+            output = root / "plan.json"
+            real_link = MODULE.os.link
+            checked = []
+
+            def inspect_publish(source, target):
+                target_path = pathlib.Path(target)
+                if target_path.name.startswith(".recovery-stage-"):
+                    missing_id = int(target_path.name.split("-")[2])
+                    receipt_path = (
+                        root
+                        / f"recovery-staging-ownership-{missing_id}.json"
+                    )
+                    self.assertTrue(receipt_path.is_file())
+                    receipt = MODULE.read_json(receipt_path)
+                    MODULE.verify_self_bound(
+                        receipt,
+                        "recovery staging ownership receipt",
+                    )
+                    self.assertEqual(
+                        receipt["staging_path"],
+                        str(target_path.resolve()),
+                    )
+                    self.assertEqual(
+                        receipt["inode"],
+                        pathlib.Path(source).stat().st_ino,
+                    )
+                    checked.append(missing_id)
+                return real_link(source, target)
+
+            with mock.patch.object(
+                MODULE.os,
+                "link",
+                side_effect=inspect_publish,
+            ):
+                MODULE.run(
+                    self.args(
+                        mapping,
+                        evidence,
+                        output,
+                        True,
+                        fixture,
+                    )
+                )
+            self.assertEqual(
+                sorted(checked),
+                [23989, 23990, 23991],
+            )
 
     def test_rejects_unconfirmed_and_byte_drift(self):
         with tempfile.TemporaryDirectory() as raw:

@@ -134,7 +134,7 @@ class RunScopedBundleMaterializerTest(unittest.TestCase):
     def test_hash_drift_and_output_drift_fail_before_cleanup(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
-            _, source_root, b_root, manifest_path, manifest = self.fixture(root)
+            run_root, source_root, b_root, manifest_path, manifest = self.fixture(root)
             source = source_root / manifest["bundles"][0]["ordered_members"][0][
                 "object_key"
             ]
@@ -149,9 +149,9 @@ class RunScopedBundleMaterializerTest(unittest.TestCase):
                 manifest_path,
                 prepared,
                 b_root.resolve(),
-                root / "registry.json",
-                root / "write-ahead.json",
-                root / "staging-write-ahead.json",
+                run_root / "registry.json",
+                run_root / "write-ahead.json",
+                run_root / "staging-write-ahead.json",
             )
             entry = registry["entries"][0]
             target = b_root / entry["relative_object_path"]
@@ -187,11 +187,12 @@ class RunScopedBundleMaterializerTest(unittest.TestCase):
             self.assertFalse(target.exists())
             self.assertEqual(result["status"], "ROLLED_BACK")
 
-    def test_staging_write_ahead_cleans_seed_predecessor_without_object_targets(self):
+    def test_staging_write_ahead_preserves_unowned_racing_file(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
             run_root, _, b_root, manifest_path, manifest = self.fixture(root)
             stage = run_root / ".bundle-stage-301.zip"
+            receipt = run_root / "bundle-staging-ownership-301.json"
             seed = materializer.self_bound(
                 {
                     "schema_version": 1,
@@ -203,6 +204,7 @@ class RunScopedBundleMaterializerTest(unittest.TestCase):
                     "stage_specs": [
                         {
                             "path": str(stage.resolve()),
+                            "ownership_receipt_path": str(receipt.resolve()),
                             "object_key": (
                                 "fixture/run-1/migration-bundles/task-7/"
                                 "sku-70/revision-1/source-bundle.zip"
@@ -212,9 +214,177 @@ class RunScopedBundleMaterializerTest(unittest.TestCase):
                 }
             )
             stage.write_bytes(b"partial staging bytes")
+            with self.assertRaisesRegex(
+                ValueError, "staging ownership cannot be proven"
+            ):
+                materializer.rollback(seed, b_root.resolve())
+            self.assertEqual(stage.read_bytes(), b"partial staging bytes")
+
+    def test_staging_write_ahead_removes_only_receipted_inode(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            run_root, _, b_root, manifest_path, manifest = self.fixture(root)
+            stage = run_root / ".bundle-stage-301.zip"
+            receipt = run_root / "bundle-staging-ownership-301.json"
+            stage.write_bytes(b"owned staging bytes")
+            materializer.atomic_write(
+                receipt,
+                materializer.staging_receipt(manifest["run_id"], stage),
+            )
+            seed = materializer.self_bound(
+                {
+                    "schema_version": 1,
+                    "status": "STAGING_WRITE_AHEAD",
+                    "run_id": manifest["run_id"],
+                    "manifest_sha256": materializer.sha256_file(manifest_path),
+                    "b_root": str(b_root.resolve()),
+                    "database_write_performed": False,
+                    "stage_specs": [
+                        {
+                            "path": str(stage.resolve()),
+                            "ownership_receipt_path": str(receipt.resolve()),
+                            "object_key": (
+                                "fixture/run-1/migration-bundles/task-7/"
+                                "sku-70/revision-1/source-bundle.zip"
+                            ),
+                        }
+                    ],
+                }
+            )
             result = materializer.rollback(seed, b_root.resolve())
             self.assertFalse(stage.exists())
             self.assertEqual(result["removed_object_paths"], [])
+
+    def test_staging_write_ahead_removes_receipted_private_before_publish(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            run_root, _, b_root, manifest_path, manifest = self.fixture(root)
+            stage = run_root / ".bundle-stage-301.zip"
+            private = run_root / ".bundle-stage-301.zip.private"
+            receipt = run_root / "bundle-staging-ownership-301.json"
+            private.write_bytes(b"private bundle bytes")
+            materializer.atomic_write(
+                receipt,
+                materializer.staging_receipt(
+                    manifest["run_id"],
+                    stage,
+                    private,
+                    private,
+                ),
+            )
+            seed = materializer.self_bound(
+                {
+                    "schema_version": 1,
+                    "status": "STAGING_WRITE_AHEAD",
+                    "run_id": manifest["run_id"],
+                    "manifest_sha256": materializer.sha256_file(manifest_path),
+                    "b_root": str(b_root.resolve()),
+                    "database_write_performed": False,
+                    "stage_specs": [
+                        {
+                            "path": str(stage.resolve()),
+                            "ownership_receipt_path": str(receipt.resolve()),
+                            "object_key": (
+                                "fixture/run-1/migration-bundles/task-7/"
+                                "sku-70/revision-1/source-bundle.zip"
+                            ),
+                        }
+                    ],
+                }
+            )
+            result = materializer.rollback(seed, b_root.resolve())
+            self.assertFalse(private.exists())
+            self.assertEqual(
+                result["removed_private_staging_paths"],
+                [str(private)],
+            )
+
+    @unittest.skipIf(
+        materializer.os.name == "nt",
+        "xattr reservation is Linux-only",
+    )
+    def test_staging_write_ahead_removes_reserved_private_before_receipt(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            run_root, _, b_root, manifest_path, manifest = self.fixture(root)
+            stage = run_root / ".bundle-stage-301.zip"
+            private = run_root / ".bundle-private-301.zip"
+            receipt = run_root / "bundle-staging-ownership-301.json"
+            token = hashlib.sha256(b"reserved-bundle-private").hexdigest()
+            private.write_bytes(b"sensitive bundle bytes")
+            materializer.os.setxattr(
+                private,
+                materializer.STAGE_TOKEN_XATTR,
+                token.encode("ascii"),
+            )
+            seed = materializer.self_bound(
+                {
+                    "schema_version": 1,
+                    "status": "STAGING_WRITE_AHEAD",
+                    "run_id": manifest["run_id"],
+                    "manifest_sha256": materializer.sha256_file(manifest_path),
+                    "b_root": str(b_root.resolve()),
+                    "database_write_performed": False,
+                    "stage_specs": [
+                        {
+                            "path": str(stage.resolve()),
+                            "private_path": str(private.resolve()),
+                            "ownership_token": token,
+                            "ownership_receipt_path": str(receipt.resolve()),
+                            "object_key": (
+                                "fixture/run-1/migration-bundles/task-7/"
+                                "sku-70/revision-1/source-bundle.zip"
+                            ),
+                        }
+                    ],
+                }
+            )
+            result = materializer.rollback(seed, b_root.resolve())
+            self.assertFalse(private.exists())
+            self.assertIn(
+                str(private),
+                result["removed_private_staging_paths"],
+            )
+
+    def test_staging_write_ahead_preserves_same_bytes_replacement(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            run_root, _, b_root, manifest_path, manifest = self.fixture(root)
+            stage = run_root / ".bundle-stage-301.zip"
+            receipt = run_root / "bundle-staging-ownership-301.json"
+            stage.write_bytes(b"same bytes")
+            materializer.atomic_write(
+                receipt,
+                materializer.staging_receipt(manifest["run_id"], stage),
+            )
+            replacement = run_root / "replacement.zip"
+            replacement.write_bytes(b"same bytes")
+            materializer.os.replace(replacement, stage)
+            seed = materializer.self_bound(
+                {
+                    "schema_version": 1,
+                    "status": "STAGING_WRITE_AHEAD",
+                    "run_id": manifest["run_id"],
+                    "manifest_sha256": materializer.sha256_file(manifest_path),
+                    "b_root": str(b_root.resolve()),
+                    "database_write_performed": False,
+                    "stage_specs": [
+                        {
+                            "path": str(stage.resolve()),
+                            "ownership_receipt_path": str(receipt.resolve()),
+                            "object_key": (
+                                "fixture/run-1/migration-bundles/task-7/"
+                                "sku-70/revision-1/source-bundle.zip"
+                            ),
+                        }
+                    ],
+                }
+            )
+            with self.assertRaisesRegex(
+                ValueError, "staging ownership cannot be proven"
+            ):
+                materializer.rollback(seed, b_root.resolve())
+            self.assertEqual(stage.read_bytes(), b"same bytes")
 
     def test_tampered_write_ahead_is_rejected_before_cleanup(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -247,7 +417,10 @@ class RunScopedBundleMaterializerTest(unittest.TestCase):
 
             def inject_target(source, target):
                 nonlocal raced_target
-                raced_target = pathlib.Path(target)
+                target_path = pathlib.Path(target)
+                if (b_root / "objects").resolve() not in target_path.parents:
+                    return real_link(source, target)
+                raced_target = target_path
                 raced_target.write_bytes(b"concurrent-unowned-target")
                 return real_link(source, target)
 
@@ -281,7 +454,10 @@ class RunScopedBundleMaterializerTest(unittest.TestCase):
 
             def inject_identical_target(source, target):
                 nonlocal raced_target
-                raced_target = pathlib.Path(target)
+                target_path = pathlib.Path(target)
+                if (b_root / "objects").resolve() not in target_path.parents:
+                    return real_link(source, target)
+                raced_target = target_path
                 raced_target.write_bytes(pathlib.Path(source).read_bytes())
                 return real_link(source, target)
 
@@ -306,6 +482,36 @@ class RunScopedBundleMaterializerTest(unittest.TestCase):
                 materializer.rollback(seed, b_root.resolve())
             self.assertIsNotNone(raced_target)
             self.assertTrue(raced_target.exists())
+
+    def test_unowned_hardlinked_stage_never_authorizes_target_delete(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            run_root, source_root, b_root, manifest_path, manifest = self.fixture(root)
+            prepared = materializer.validate_manifest(manifest, source_root)
+            write_ahead = run_root / "write-ahead.json"
+            registry = materializer.materialize(
+                manifest,
+                manifest_path,
+                prepared,
+                b_root.resolve(),
+                run_root / "registry.json",
+                write_ahead,
+                run_root / "staging-write-ahead.json",
+            )
+            entry = registry["entries"][0]
+            target = b_root / entry["relative_object_path"]
+            replacement = target.with_name("replacement.zip")
+            replacement.write_bytes(target.read_bytes())
+            materializer.os.replace(replacement, target)
+            seed = json.loads(write_ahead.read_text(encoding="utf-8"))
+            stage_item = seed["staging_files"][0]
+            stage = pathlib.Path(stage_item["path"])
+            stage.hardlink_to(target)
+            with self.assertRaisesRegex(
+                ValueError, "staging ownership cannot be proven"
+            ):
+                materializer.rollback(seed, b_root.resolve())
+            self.assertTrue(target.exists())
 
     def test_internal_compensation_never_deletes_replaced_owned_target(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -341,9 +547,12 @@ class RunScopedBundleMaterializerTest(unittest.TestCase):
 
             def replace_first_then_fail(source, target):
                 nonlocal first_target, link_count
+                target_path = pathlib.Path(target)
+                if (b_root / "objects").resolve() not in target_path.parents:
+                    return real_link(source, target)
                 link_count += 1
                 if link_count == 1:
-                    first_target = pathlib.Path(target)
+                    first_target = target_path
                     return real_link(source, target)
                 first_target.unlink()
                 first_target.write_bytes(b"concurrent-replacement")
@@ -374,16 +583,16 @@ class RunScopedBundleMaterializerTest(unittest.TestCase):
     def test_rollback_preserves_reused_identical_object(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
-            _, source_root, b_root, manifest_path, manifest = self.fixture(root)
+            run_root, source_root, b_root, manifest_path, manifest = self.fixture(root)
             prepared = materializer.validate_manifest(manifest, source_root)
             created_registry = materializer.materialize(
                 manifest,
                 manifest_path,
                 prepared,
                 b_root.resolve(),
-                root / "created-registry.json",
-                root / "created-write-ahead.json",
-                root / "created-staging-write-ahead.json",
+                run_root / "created-registry.json",
+                run_root / "created-write-ahead.json",
+                run_root / "created-staging-write-ahead.json",
             )
             target = b_root / created_registry["entries"][0][
                 "relative_object_path"
@@ -393,9 +602,9 @@ class RunScopedBundleMaterializerTest(unittest.TestCase):
                 manifest_path,
                 prepared,
                 b_root.resolve(),
-                root / "reused-registry.json",
-                root / "reused-write-ahead.json",
-                root / "reused-staging-write-ahead.json",
+                run_root / "reused" / "registry.json",
+                run_root / "reused" / "write-ahead.json",
+                run_root / "reused" / "staging-write-ahead.json",
             )
             self.assertEqual(
                 reused_registry["entries"][0]["disposition"],

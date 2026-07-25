@@ -192,6 +192,35 @@ def write_component_chain_fixture(
         ),
     )
     recovery_plan_sha = component.sha256_file(recovery_plan)
+    recovery_write_ahead = write(
+        "recovery-file-write-ahead.json",
+        component.self_bound(
+            {"version": 1, "status": "PREPARED", "run_id": run_id}
+        ),
+    )
+    recovery_receipts = [
+        write(
+            name,
+            component.self_bound(
+                {
+                    "schema_version": 1,
+                    "status": status,
+                    "run_id": run_id,
+                }
+            ),
+        )
+        for asset_id in (23989, 23990, 23991)
+        for name, status in (
+            (
+                f"recovery-ownership-{asset_id}.json",
+                "OWNED_LINK",
+            ),
+            (
+                f"recovery-staging-ownership-{asset_id}.json",
+                "STAGING_OWNED",
+            ),
+        )
+    ]
     recovery_before = write(
         "recovery-guard-before.json", guard_before("recovery")
     )
@@ -256,14 +285,17 @@ def write_component_chain_fixture(
             "production_writes_executed": False,
             "guard_retained_for_rollback": True,
             "guard_exactly_restored": False,
+            "ownership_receipt_contract_version": 1,
             "artifacts": [
                 component.artifact(path)
                 for path in (
+                    recovery_write_ahead,
                     recovery_plan,
                     recovery_before,
                     recovery_provision,
                     recovery_apply,
                     recovery_idempotent,
+                    *recovery_receipts,
                 )
             ],
         }
@@ -319,12 +351,14 @@ def write_component_chain_fixture(
                 "production_writes_executed": False,
                 "guard_retained_for_rollback": False,
                 "guard_exactly_restored": True,
+                "ownership_receipt_contract_version": 1,
                 "artifacts": [
                     component.artifact(path)
                     for path in (
                         recovery_db_rollback,
                         recovery_restore,
                         recovery_file,
+                        *recovery_receipts,
                     )
                 ],
             }
@@ -339,6 +373,46 @@ def write_component_chain_fixture(
         "bundle-registry.json",
         {"schema_version": 1, "status": "MATERIALIZED", "run_id": run_id},
     )
+    bundle_staging_write_ahead = write(
+        "bundle-staging-write-ahead.json",
+        component.self_bound(
+            {
+                "schema_version": 1,
+                "status": "STAGING_WRITE_AHEAD",
+                "run_id": run_id,
+            }
+        ),
+    )
+    bundle_write_ahead = write(
+        "bundle-file-write-ahead.json",
+        component.self_bound(
+            {
+                "schema_version": 1,
+                "status": "WRITE_AHEAD",
+                "run_id": run_id,
+            }
+        ),
+    )
+    bundle_receipts = [
+        write(
+            name,
+            component.self_bound(
+                {
+                    "schema_version": 1,
+                    "status": status,
+                    "run_id": run_id,
+                }
+            ),
+        )
+        for asset_id in range(25557, 25564)
+        for name, status in (
+            (f"bundle-ownership-{asset_id}.json", "OWNED_LINK"),
+            (
+                f"bundle-staging-ownership-{asset_id}.json",
+                "STAGING_OWNED",
+            ),
+        )
+    ]
     registry_sha = component.sha256_file(bundle_registry)
     candidate_sha = "b" * 64
     manifest_sha = "c" * 64
@@ -455,9 +529,12 @@ def write_component_chain_fixture(
                 "production_writes_executed": False,
                 "guard_retained_for_rollback": True,
                 "guard_exactly_restored": False,
+                "ownership_receipt_contract_version": 1,
                 "artifacts": [
                     component.artifact(path)
                     for path in (
+                        bundle_staging_write_ahead,
+                        bundle_write_ahead,
                         bundle_materialize,
                         bundle_registry,
                         bundle_before,
@@ -465,6 +542,7 @@ def write_component_chain_fixture(
                         bundle_journal,
                         bundle_apply,
                         bundle_idempotent,
+                        *bundle_receipts,
                     )
                 ],
             }
@@ -513,6 +591,7 @@ def write_component_chain_fixture(
                 "production_writes_executed": False,
                 "guard_retained_for_rollback": False,
                 "guard_exactly_restored": True,
+                "ownership_receipt_contract_version": 1,
                 "artifacts": [
                     component.artifact(path)
                     for path in (
@@ -520,6 +599,7 @@ def write_component_chain_fixture(
                         bundle_db_rollback,
                         bundle_restore,
                         bundle_file,
+                        *bundle_receipts,
                     )
                 ],
             }

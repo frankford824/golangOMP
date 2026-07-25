@@ -87,6 +87,31 @@ class G06RecoveryContractTest(unittest.TestCase):
                 CONTRACT.APPROVED_MAPPING_SHA256, "0" * 64
             )
 
+    def test_modern_self_bound_recovery_plan_header_is_accepted(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = pathlib.Path(raw)
+            paths = FINAL_FIXTURES.FinalizeG06VerdictTest().fixture(root)
+            plan = json.loads(paths["recovery_plan"].read_text())
+            plan["evidence_sha256"] = CONTRACT.canonical_hash(plan)
+            paths["recovery_plan"].write_text(
+                CONTRACT.canonical_json(plan) + "\n",
+                encoding="utf-8",
+            )
+            mapping_rows, plan_entries, hashes = CONTRACT.load_contract(
+                mapping_path=paths["mapping"],
+                expected_mapping_sha256=paths["mapping_sha"],
+                plan_path=paths["recovery_plan"],
+                expected_plan_sha256=CONTRACT.sha256_file(
+                    paths["recovery_plan"]
+                ),
+            )
+            self.assertEqual(set(mapping_rows), set(CONTRACT.RECOVERY_IDS))
+            self.assertEqual(set(plan_entries), set(CONTRACT.RECOVERY_IDS))
+            self.assertEqual(
+                hashes["recovery_plan_sha256"],
+                CONTRACT.sha256_file(paths["recovery_plan"]),
+            )
+
     def test_local_verifier_reads_exact_three_targets_and_binds_receipts(self):
         with tempfile.TemporaryDirectory() as raw:
             root = pathlib.Path(raw)

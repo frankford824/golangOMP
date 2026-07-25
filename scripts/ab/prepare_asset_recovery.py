@@ -52,6 +52,7 @@ CHANGED_UPLOAD_REQUEST_FIELDS = (
     "status",
     "session_status",
 )
+STAGE_TOKEN_XATTR = "user.codex_v8_stage_token"
 
 
 def canonical_bytes(value: Any) -> bytes:
@@ -76,6 +77,17 @@ def self_bound(value: dict[str, Any]) -> dict[str, Any]:
     result = dict(value)
     result["evidence_sha256"] = sha256_bytes(canonical_bytes(result))
     return result
+
+
+def verify_self_bound(value: dict[str, Any], label: str) -> None:
+    expected = str(value.get("evidence_sha256") or "")
+    unsigned = dict(value)
+    unsigned.pop("evidence_sha256", None)
+    if (
+        not SHA256.fullmatch(expected)
+        or sha256_bytes(canonical_bytes(unsigned)) != expected
+    ):
+        raise ValueError(f"{label} self hash is missing or stale")
 
 
 def read_json(path: pathlib.Path) -> Any:
@@ -346,9 +358,24 @@ def build_entry(
 
 
 def write_atomic_idempotent(path: pathlib.Path, data: bytes) -> None:
-    if path.exists():
-        if path.read_bytes() != data:
+    if path.exists() or path.is_symlink():
+        if (
+            not path.is_file()
+            or path.is_symlink()
+            or path.read_bytes() != data
+        ):
             raise FileExistsError(f"refusing to overwrite drifted artifact: {path}")
+        with path.open("r+b") as handle:
+            os.fsync(handle.fileno())
+        if os.name != "nt":
+            directory = os.open(
+                path.parent,
+                os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
+            )
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
         return
     path.parent.mkdir(parents=True, exist_ok=True)
     descriptor, name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
@@ -358,10 +385,110 @@ def write_atomic_idempotent(path: pathlib.Path, data: bytes) -> None:
             handle.write(data)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temporary, path)
+        try:
+            os.link(temporary, path)
+        except FileExistsError:
+            if (
+                path.is_file()
+                and not path.is_symlink()
+                and path.read_bytes() == data
+            ):
+                with path.open("r+b") as handle:
+                    os.fsync(handle.fileno())
+                if os.name != "nt":
+                    directory = os.open(
+                        path.parent,
+                        os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
+                    )
+                    try:
+                        os.fsync(directory)
+                    finally:
+                        os.close(directory)
+                return
+            raise FileExistsError(
+                f"refusing to overwrite racing artifact: {path}"
+            ) from None
+        if os.name != "nt":
+            directory = os.open(
+                path.parent,
+                os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
+            )
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
     finally:
         if temporary.exists():
             temporary.unlink()
+
+
+def fsync_directory(path: pathlib.Path) -> None:
+    if os.name == "nt":
+        return
+    descriptor = os.open(
+        path,
+        os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
+    )
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def fsync_directory_chain(
+    leaf: pathlib.Path,
+    root: pathlib.Path,
+) -> None:
+    current = leaf.resolve()
+    boundary = root.resolve()
+    try:
+        current.relative_to(boundary)
+    except ValueError:
+        raise ValueError("durability path escapes the fixture root") from None
+    while True:
+        fsync_directory(current)
+        if current == boundary:
+            break
+        current = current.parent
+
+
+def durable_unlink(path: pathlib.Path) -> None:
+    parent = path.parent
+    path.unlink()
+    fsync_directory(parent)
+
+
+def create_reserved_private(path: pathlib.Path, token: str) -> None:
+    descriptor = os.open(
+        path,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+        0o600,
+    )
+    try:
+        if os.name != "nt":
+            os.setxattr(
+                descriptor,
+                STAGE_TOKEN_XATTR,
+                token.encode("ascii"),
+            )
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    fsync_directory(path.parent)
+
+
+def retire_reservation_token(path: pathlib.Path, token: str) -> None:
+    if os.name == "nt":
+        return
+    try:
+        actual = os.getxattr(path, STAGE_TOKEN_XATTR).decode("ascii")
+    except (OSError, UnicodeError):
+        raise ValueError("staging reservation token is unavailable") from None
+    if actual != token:
+        raise ValueError("staging reservation token drifted")
+    os.removexattr(path, STAGE_TOKEN_XATTR)
+    with path.open("r+b") as handle:
+        os.fsync(handle.fileno())
 
 
 def materialize_entry(
@@ -393,31 +520,106 @@ def materialize_entry(
     if disposition != "created":
         raise FileNotFoundError("reused recovery fixture disappeared")
     target.parent.mkdir(parents=True, exist_ok=True)
-    temporary = pathlib.Path(
+    stage = pathlib.Path(
         str(entry.get("rollback_registry", {}).get("staging_local_path") or "")
     )
     try:
-        temporary.resolve(strict=False).relative_to(root.parent.resolve())
+        stage.resolve(strict=False).relative_to(root.parent.resolve())
     except ValueError:
         raise ValueError("recovery staging path escapes the run root") from None
-    if not temporary.is_absolute() or temporary.exists() or temporary.is_symlink():
+    if not stage.is_absolute() or stage.exists() or stage.is_symlink():
         raise FileExistsError("recovery staging path is unavailable")
+    private_temporary = pathlib.Path(
+        str(
+            entry.get("rollback_registry", {}).get(
+                "staging_private_path"
+            )
+            or ""
+        )
+    )
+    ownership_token = str(
+        entry.get("rollback_registry", {}).get(
+            "staging_ownership_token"
+        )
+        or ""
+    )
     try:
-        with (
-            pathlib.Path(entry["source_local_path"]).open("rb") as source,
-            temporary.open("xb") as destination,
-        ):
-            shutil.copyfileobj(source, destination)
-            destination.flush()
-            os.fsync(destination.fileno())
+        private_temporary.resolve(strict=False).relative_to(
+            root.parent.resolve()
+        )
+    except ValueError:
+        raise ValueError("recovery private path escapes the run root") from None
+    if (
+        not private_temporary.is_absolute()
+        or not SHA256.fullmatch(ownership_token)
+        or private_temporary.exists()
+        or private_temporary.is_symlink()
+    ):
+        raise FileExistsError("recovery private staging path is unavailable")
+    private_identity: tuple[int, int] | None = None
+    try:
+        create_reserved_private(
+            private_temporary,
+            ownership_token,
+        )
+        created_stat = private_temporary.stat()
+        private_identity = (created_stat.st_dev, created_stat.st_ino)
+        with pathlib.Path(entry["source_local_path"]).open("rb") as source:
+            with private_temporary.open("r+b") as destination:
+                shutil.copyfileobj(source, destination)
+                destination.flush()
+                os.fsync(destination.fileno())
         if (
-            temporary.stat().st_size != entry["source_size"]
-            or sha256_file(temporary) != entry["source_sha256"]
+            private_temporary.stat().st_size != entry["source_size"]
+            or sha256_file(private_temporary) != entry["source_sha256"]
         ):
             raise ValueError("fixture copy failed post-write verification")
-        os.link(temporary, target)
+        staging_receipt_path = pathlib.Path(
+            str(
+                entry.get("rollback_registry", {}).get(
+                    "staging_ownership_receipt_path"
+                )
+                or ""
+            )
+        )
+        try:
+            staging_receipt_path.resolve(strict=False).relative_to(
+                root.parent.resolve()
+            )
+        except ValueError:
+            raise ValueError(
+                "recovery staging ownership receipt escapes the run root"
+            ) from None
+        temporary_stat = private_temporary.stat()
+        staging_receipt_fields = {
+                "schema_version": 1,
+                "status": "STAGING_OWNED",
+                "run_id": entry["target_object_key"].split("/")[1],
+                "staging_path": str(stage.resolve()),
+                "device": temporary_stat.st_dev,
+                "inode": temporary_stat.st_ino,
+                "size": temporary_stat.st_size,
+                "sha256": sha256_file(private_temporary),
+        }
+        staging_receipt_fields["private_path"] = str(
+            private_temporary.resolve()
+        )
+        staging_receipt = self_bound(staging_receipt_fields)
+        write_atomic_idempotent(
+            staging_receipt_path,
+            canonical_bytes(staging_receipt) + b"\n",
+        )
+        os.link(private_temporary, stage)
+        fsync_directory(stage.parent)
+        if not os.path.samestat(private_temporary.stat(), stage.stat()):
+            raise RuntimeError("recovery staging ownership proof failed")
+        retire_reservation_token(stage, ownership_token)
+        durable_unlink(private_temporary)
+        private_identity = None
+        os.link(stage, target)
+        fsync_directory_chain(target.parent, root)
         target_stat = target.stat()
-        source_stat = temporary.stat()
+        source_stat = stage.stat()
         if not os.path.samestat(source_stat, target_stat):
             raise RuntimeError("recovery hard-link ownership proof failed")
         receipt_path = pathlib.Path(
@@ -442,7 +644,7 @@ def materialize_entry(
                 "status": "OWNED_LINK",
                 "run_id": entry["target_object_key"].split("/")[1],
                 "target_path": str(target.resolve()),
-                "staging_path": str(temporary.resolve()),
+                "staging_path": str(stage.resolve()),
                 "device": target_stat.st_dev,
                 "inode": target_stat.st_ino,
                 "size": target_stat.st_size,
@@ -452,10 +654,36 @@ def materialize_entry(
         write_atomic_idempotent(
             receipt_path, canonical_bytes(receipt) + b"\n"
         )
-        temporary.unlink()
+        durable_unlink(stage)
     finally:
-        if temporary.exists() and target.exists():
-            temporary.unlink()
+        if private_temporary.exists():
+            stat = private_temporary.stat()
+            if private_identity == (stat.st_dev, stat.st_ino):
+                durable_unlink(private_temporary)
+        if stage.exists() and target.exists():
+            staging_receipt_path = pathlib.Path(
+                str(
+                    entry.get("rollback_registry", {}).get(
+                        "staging_ownership_receipt_path"
+                    )
+                    or ""
+                )
+            )
+            if staging_receipt_path.is_file():
+                receipt = read_json(staging_receipt_path)
+                verify_self_bound(receipt, "recovery staging ownership receipt")
+                stat = stage.stat()
+                if (
+                    receipt.get("status") == "STAGING_OWNED"
+                    and receipt.get("run_id")
+                    == entry["target_object_key"].split("/")[1]
+                    and receipt.get("staging_path") == str(stage.resolve())
+                    and receipt.get("device") == stat.st_dev
+                    and receipt.get("inode") == stat.st_ino
+                    and receipt.get("size") == stat.st_size
+                    and receipt.get("sha256") == sha256_file(stage)
+                ):
+                    durable_unlink(stage)
 
 
 def run(args: argparse.Namespace) -> dict[str, Any]:
@@ -509,6 +737,50 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 f"recovery staging path existed before write-ahead: {staging_path}"
             )
         entry["rollback_registry"]["staging_local_path"] = str(staging_path)
+        private_path = (
+            args.output.parent.resolve()
+            / (
+                ".recovery-private-"
+                f"{entry['missing_task_asset_id']}-"
+                f"{entry['source_sha256']}.bin"
+            )
+        )
+        ownership_token = sha256_bytes(
+            (
+                f"{run_id}\0{mapping_sha256}\0{private_path}\0"
+                f"{entry['target_object_key']}"
+            ).encode("utf-8")
+        )
+        if (
+            (private_path.exists() or private_path.is_symlink())
+            and not resumed_materialization
+        ):
+            raise FileExistsError(
+                "recovery private staging path existed before write-ahead"
+            )
+        entry["rollback_registry"]["staging_private_path"] = str(
+            private_path
+        )
+        entry["rollback_registry"]["staging_ownership_token"] = (
+            ownership_token
+        )
+        staging_receipt = (
+            args.output.parent.resolve()
+            / (
+                "recovery-staging-ownership-"
+                f"{entry['missing_task_asset_id']}.json"
+            )
+        )
+        if (
+            (staging_receipt.exists() or staging_receipt.is_symlink())
+            and not resumed_materialization
+        ):
+            raise FileExistsError(
+                "recovery staging ownership receipt existed before write-ahead"
+            )
+        entry["rollback_registry"][
+            "staging_ownership_receipt_path"
+        ] = str(staging_receipt)
         ownership_receipt = (
             args.output.parent.resolve()
             / (

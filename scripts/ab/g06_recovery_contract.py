@@ -173,18 +173,29 @@ def _plan_entries(
     mapping_sha256: str,
     mapping_rows: dict[int, dict[str, Any]],
 ) -> dict[int, dict[str, Any]]:
+    base_fields = {
+        "version",
+        "status",
+        "run_id",
+        "mapping_sha256",
+        "database_writes_executed",
+        "production_writes_executed",
+        "entries",
+    }
+    actual_fields = set(plan)
+    if actual_fields == base_fields | {"evidence_sha256"}:
+        evidence_sha256 = str(plan.get("evidence_sha256") or "")
+        unsigned = dict(plan)
+        unsigned.pop("evidence_sha256", None)
+        if (
+            not SHA256.fullmatch(evidence_sha256)
+            or canonical_hash(unsigned) != evidence_sha256
+        ):
+            raise ValueError("recovery plan self hash is missing or stale")
+    elif actual_fields != base_fields:
+        raise ValueError("recovery plan header differs from the G4 contract")
     if (
-        set(plan)
-        != {
-            "version",
-            "status",
-            "run_id",
-            "mapping_sha256",
-            "database_writes_executed",
-            "production_writes_executed",
-            "entries",
-        }
-        or plan.get("version") != 1
+        plan.get("version") != 1
         or plan.get("status") != "MATERIALIZED"
         or plan.get("mapping_sha256") != mapping_sha256
         or plan.get("database_writes_executed") is not False
@@ -339,6 +350,8 @@ def validate_apply_receipts(
     component_apply_path: pathlib.Path,
     require_frozen: bool,
 ) -> dict[str, str]:
+    plan_value = read_json(plan_path, "recovery materialization plan")
+    modern_receipt_contract = "evidence_sha256" in plan_value
     plan_sha = sha256_file(plan_path)
     apply_sha = sha256_file(db_apply_path)
     idempotent_sha = sha256_file(db_idempotent_path)
@@ -397,9 +410,7 @@ def validate_apply_receipts(
         component_apply_path, "recovery component apply receipt"
     )
     artifacts = component.get("artifacts")
-    if (
-        set(component)
-        != {
+    expected_component_fields = {
             "schema_version",
             "status",
             "component",
@@ -413,7 +424,13 @@ def validate_apply_receipts(
             "guard_exactly_restored",
             "artifacts",
             "evidence_sha256",
-        }
+    }
+    if modern_receipt_contract:
+        expected_component_fields.add(
+            "ownership_receipt_contract_version"
+        )
+    if (
+        set(component) != expected_component_fields
         or component.get("schema_version") != 1
         or component.get("status") != "APPLIED"
         or component.get("component") != "recovery"
@@ -425,6 +442,10 @@ def validate_apply_receipts(
         or component.get("production_writes_executed") is not False
         or component.get("guard_retained_for_rollback") is not True
         or component.get("guard_exactly_restored") is not False
+        or (
+            modern_receipt_contract
+            and component.get("ownership_receipt_contract_version") != 1
+        )
         or component.get("evidence_sha256") != component_self_hash(component)
         or not isinstance(artifacts, list)
     ):
@@ -444,18 +465,30 @@ def validate_apply_receipts(
         ):
             raise ValueError("Clone B recovery component artifact is invalid")
         artifact_hashes[artifact["path"]] = artifact["sha256"]
+    expected_component_artifacts = {
+        "recovery-materialization-plan.json",
+        "recovery-guard-before.json",
+        "recovery-guard-provision.json",
+        "recovery-db-apply.json",
+        "recovery-db-idempotent.json",
+    }
+    if modern_receipt_contract:
+        expected_component_artifacts |= {
+            "recovery-file-write-ahead.json",
+            *{
+                f"recovery-ownership-{asset_id}.json"
+                for asset_id in RECOVERY_IDS
+            },
+            *{
+                f"recovery-staging-ownership-{asset_id}.json"
+                for asset_id in RECOVERY_IDS
+            },
+        }
     if (
         artifact_hashes.get("recovery-materialization-plan.json") != plan_sha
         or artifact_hashes.get("recovery-db-apply.json") != apply_sha
         or artifact_hashes.get("recovery-db-idempotent.json") != idempotent_sha
-        or set(artifact_hashes)
-        != {
-            "recovery-materialization-plan.json",
-            "recovery-guard-before.json",
-            "recovery-guard-provision.json",
-            "recovery-db-apply.json",
-            "recovery-db-idempotent.json",
-        }
+        or set(artifact_hashes) != expected_component_artifacts
     ):
         raise ValueError("Clone B recovery component artifacts are not exact")
     return {

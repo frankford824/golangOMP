@@ -340,20 +340,45 @@ def validate_g4_component_chain(
     chain = payload.get("component_chain")
     if not isinstance(chain, dict) or set(chain) != {"recovery", "bundle"}:
         return ["G4 component chain is missing"], required_hashes
+    recovery_ownership_artifacts = {
+        *{
+            f"recovery-ownership-{asset_id}.json"
+            for asset_id in (23989, 23990, 23991)
+        },
+        *{
+            f"recovery-staging-ownership-{asset_id}.json"
+            for asset_id in (23989, 23990, 23991)
+        },
+    }
+    bundle_ownership_artifacts = {
+        *{
+            f"bundle-ownership-{asset_id}.json"
+            for asset_id in range(25557, 25564)
+        },
+        *{
+            f"bundle-staging-ownership-{asset_id}.json"
+            for asset_id in range(25557, 25564)
+        },
+    }
     expected_artifacts = {
         ("recovery", "apply"): {
+            "recovery-file-write-ahead.json",
             "recovery-materialization-plan.json",
             "recovery-guard-before.json",
             "recovery-guard-provision.json",
             "recovery-db-apply.json",
             "recovery-db-idempotent.json",
-        },
+        }
+        | recovery_ownership_artifacts,
         ("recovery", "rollback"): {
             "recovery-db-rollback.json",
             "recovery-guard-restore.json",
             "recovery-file-rollback.json",
-        },
+        }
+        | recovery_ownership_artifacts,
         ("bundle", "apply"): {
+            "bundle-staging-write-ahead.json",
+            "bundle-file-write-ahead.json",
             "bundle-materialize-report.json",
             "bundle-registry.json",
             "bundle-guard-before.json",
@@ -361,13 +386,15 @@ def validate_g4_component_chain(
             "bundle-db-rollback-journal.json",
             "bundle-db-apply.json",
             "bundle-db-idempotent.json",
-        },
+        }
+        | bundle_ownership_artifacts,
         ("bundle", "rollback"): {
             "bundle-db-rollback-journal.json",
             "bundle-db-rollback.json",
             "bundle-guard-restore.json",
             "bundle-file-rollback.json",
-        },
+        }
+        | bundle_ownership_artifacts,
     }
     run_id = str(payload.get("run_id") or "")
     database: str | None = None
@@ -427,6 +454,8 @@ def validate_g4_component_chain(
                     is not (action == "apply")
                     or report.get("guard_exactly_restored")
                     is not (action == "rollback")
+                    or report.get("ownership_receipt_contract_version")
+                    != 1
                 ):
                     raise ValueError("component report envelope is invalid")
                 if database is None:

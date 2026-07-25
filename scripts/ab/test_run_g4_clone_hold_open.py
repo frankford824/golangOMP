@@ -664,6 +664,37 @@ class HoldOpenCoordinatorTest(unittest.TestCase):
                     MODULE.run(args)
             self.assertEqual(calls, [])
 
+    def test_staging_receipts_are_hash_authorized_rollback_seeds(self):
+        with tempfile.TemporaryDirectory() as raw:
+            args = self.make_inputs(raw)
+            with (
+                mock.patch.object(MODULE, "repo_head", return_value="f" * 64),
+                mock.patch.object(
+                    MODULE.shutil, "which", return_value="/usr/bin/go"
+                ),
+            ):
+                context = MODULE.build_context(args, allow_create=True)
+            names = (
+                "recovery-ownership-23989.json",
+                "recovery-staging-ownership-23989.json",
+                "bundle-ownership-25557.json",
+                "bundle-staging-ownership-25557.json",
+            )
+            for name in names:
+                (context.run_dir / name).write_text(
+                    '{"status":"owned"}\n',
+                    encoding="utf-8",
+                )
+            seeds = MODULE.rollback_seed_paths(context)
+            self.assertIn(
+                "recovery-staging-ownership-23989.json",
+                {path.name for path in seeds["recovery"]},
+            )
+            self.assertIn(
+                "bundle-staging-ownership-25557.json",
+                {path.name for path in seeds["bundle"]},
+            )
+
     def test_repo_head_rejects_a_dirty_worktree(self):
         head = mock.Mock(returncode=0, stdout="f" * 40 + "\n")
         dirty = mock.Mock(

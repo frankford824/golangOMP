@@ -814,9 +814,64 @@ def component_report(
             "production_writes_executed": False,
             "guard_retained_for_rollback": action == "apply",
             "guard_exactly_restored": action == "rollback",
+            "ownership_receipt_contract_version": 1,
             "artifacts": [artifact(path) for path in files],
         }
     )
+
+
+def ownership_receipt_artifacts(
+    component_dir: pathlib.Path,
+    component: str,
+    *,
+    require_complete: bool,
+) -> list[pathlib.Path]:
+    if component == "recovery":
+        expected = {
+            *{
+                f"recovery-ownership-{asset_id}.json"
+                for asset_id in (23989, 23990, 23991)
+            },
+            *{
+                f"recovery-staging-ownership-{asset_id}.json"
+                for asset_id in (23989, 23990, 23991)
+            },
+        }
+        patterns = (
+            "recovery-ownership-*.json",
+            "recovery-staging-ownership-*.json",
+        )
+    elif component == "bundle":
+        expected = {
+            *{
+                f"bundle-ownership-{asset_id}.json"
+                for asset_id in range(25557, 25564)
+            },
+            *{
+                f"bundle-staging-ownership-{asset_id}.json"
+                for asset_id in range(25557, 25564)
+            },
+        }
+        patterns = (
+            "bundle-ownership-*.json",
+            "bundle-staging-ownership-*.json",
+        )
+    else:
+        raise ComponentError("ownership receipt component is invalid")
+    paths = sorted(
+        {
+            path
+            for pattern in patterns
+            for path in component_dir.glob(pattern)
+            if path.is_file() and not path.is_symlink()
+        },
+        key=lambda path: path.name,
+    )
+    if require_complete and {path.name for path in paths} != expected:
+        raise ComponentError(
+            f"{component} ownership receipt artifact set differs"
+        )
+    return paths
 
 
 def recovery_apply(
@@ -954,6 +1009,11 @@ def recovery_apply(
                 guard_provision,
                 db_apply,
                 db_idempotent,
+                *ownership_receipt_artifacts(
+                    component_dir,
+                    "recovery",
+                    require_complete=True,
+                ),
             ],
         )
         write_document(report, payload)
@@ -1186,7 +1246,15 @@ def recovery_rollback(
         action="rollback",
         args=args,
         connection=connection,
-        files=[*rollback_artifacts, file_rollback],
+        files=[
+            *rollback_artifacts,
+            file_rollback,
+            *ownership_receipt_artifacts(
+                component_dir,
+                "recovery",
+                require_complete=False,
+            ),
+        ],
         database_writes_executed=binding is not None,
     )
     write_document(report, payload)
@@ -1383,6 +1451,11 @@ def bundle_apply(
                 db_journal,
                 db_apply,
                 db_idempotent,
+                *ownership_receipt_artifacts(
+                    component_dir,
+                    "bundle",
+                    require_complete=True,
+                ),
             ],
         )
         write_document(report, payload)
@@ -1738,7 +1811,15 @@ def bundle_rollback(
         action="rollback",
         args=args,
         connection=connection,
-        files=[*rollback_artifacts, file_rollback],
+        files=[
+            *rollback_artifacts,
+            file_rollback,
+            *ownership_receipt_artifacts(
+                component_dir,
+                "bundle",
+                require_complete=False,
+            ),
+        ],
         database_writes_executed=(
             binding is not None and db_journal.is_file()
         ),

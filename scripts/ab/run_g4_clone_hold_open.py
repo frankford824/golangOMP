@@ -1002,9 +1002,21 @@ def rollback_seed_paths(
 ) -> dict[str, tuple[pathlib.Path, ...]]:
     recovery_ownership = tuple(
         sorted(context.run_dir.glob("recovery-ownership-*.json"))
+    ) + tuple(
+        sorted(
+            context.run_dir.glob(
+                "recovery-staging-ownership-*.json"
+            )
+        )
     )
     bundle_ownership = tuple(
         sorted(context.run_dir.glob("bundle-ownership-*.json"))
+    ) + tuple(
+        sorted(
+            context.run_dir.glob(
+                "bundle-staging-ownership-*.json"
+            )
+        )
     )
     return {
         "recovery": (

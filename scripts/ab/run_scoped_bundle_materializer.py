@@ -31,6 +31,7 @@ SHA256 = re.compile(r"^[0-9a-f]{64}$")
 SAFE_RUN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$")
 SAFE_STORAGE_REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$")
 ALLOWED_SCOPE_KINDS = {"task", "sku", "retouch_requirement"}
+STAGE_TOKEN_XATTR = "user.codex_v8_stage_token"
 
 
 def canonical_bytes(value: object) -> bytes:
@@ -80,6 +81,101 @@ def exact_b_root(run_root: pathlib.Path, b_root: pathlib.Path) -> pathlib.Path:
     if resolved != expected:
         raise ValueError("b_root must be exactly <run-root>/fixture-upload-b")
     return resolved
+
+
+def fsync_directory(path: pathlib.Path) -> None:
+    if os.name == "nt":
+        return
+    descriptor = os.open(
+        path,
+        os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
+    )
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def fsync_directory_chain(
+    leaf: pathlib.Path,
+    root: pathlib.Path,
+) -> None:
+    current = leaf.resolve()
+    boundary = root.resolve()
+    try:
+        current.relative_to(boundary)
+    except ValueError:
+        raise ValueError("durability path escapes the configured root") from None
+    while True:
+        fsync_directory(current)
+        if current == boundary:
+            break
+        current = current.parent
+
+
+def durable_unlink(path: pathlib.Path) -> None:
+    parent = path.parent
+    path.unlink()
+    fsync_directory(parent)
+
+
+def create_reserved_private(
+    path: pathlib.Path,
+    token: str,
+) -> None:
+    descriptor = os.open(
+        path,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+        0o600,
+    )
+    try:
+        if os.name != "nt":
+            os.setxattr(
+                descriptor,
+                STAGE_TOKEN_XATTR,
+                token.encode("ascii"),
+            )
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    fsync_directory(path.parent)
+
+
+def cleanup_reserved_private(
+    private: pathlib.Path,
+    token: str,
+    run_root: pathlib.Path,
+) -> str | None:
+    try:
+        private.resolve(strict=False).relative_to(run_root.resolve())
+    except ValueError:
+        raise ValueError("reserved private path escapes the run root") from None
+    if not private.is_absolute() or private.is_symlink() or not private.exists():
+        return None
+    if not private.is_file() or os.name == "nt":
+        raise ValueError("reserved private ownership cannot be proven")
+    try:
+        actual = os.getxattr(private, STAGE_TOKEN_XATTR).decode("ascii")
+    except (OSError, UnicodeError):
+        raise ValueError("reserved private ownership cannot be proven") from None
+    if not SHA256.fullmatch(token) or actual != token:
+        raise ValueError("reserved private ownership cannot be proven")
+    durable_unlink(private)
+    return str(private)
+
+
+def retire_reservation_token(path: pathlib.Path, token: str) -> None:
+    if os.name == "nt":
+        return
+    try:
+        actual = os.getxattr(path, STAGE_TOKEN_XATTR).decode("ascii")
+    except (OSError, UnicodeError):
+        raise ValueError("staging reservation token is unavailable") from None
+    if actual != token:
+        raise ValueError("staging reservation token drifted")
+    os.removexattr(path, STAGE_TOKEN_XATTR)
+    with path.open("r+b") as handle:
+        os.fsync(handle.fileno())
 
 
 def source_path(source_root: pathlib.Path, object_key: str) -> pathlib.Path:
@@ -274,8 +370,19 @@ def prepare_document(
 def atomic_write(path: pathlib.Path, value: object) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     encoded = canonical_bytes(value)
-    if path.exists():
-        if path.read_bytes() == encoded:
+    if path.exists() or path.is_symlink():
+        if path.is_file() and not path.is_symlink() and path.read_bytes() == encoded:
+            with path.open("r+b") as handle:
+                os.fsync(handle.fileno())
+            if os.name != "nt":
+                descriptor = os.open(
+                    path.parent,
+                    os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
+                )
+                try:
+                    os.fsync(descriptor)
+                finally:
+                    os.close(descriptor)
             return
         raise FileExistsError(f"refusing to overwrite different artifact: {path}")
     with tempfile.NamedTemporaryFile(
@@ -283,8 +390,41 @@ def atomic_write(path: pathlib.Path, value: object) -> None:
     ) as handle:
         temporary = pathlib.Path(handle.name)
         handle.write(encoded)
+        handle.flush()
+        os.fsync(handle.fileno())
     try:
-        os.replace(temporary, path)
+        try:
+            os.link(temporary, path)
+        except FileExistsError:
+            if (
+                path.is_file()
+                and not path.is_symlink()
+                and path.read_bytes() == encoded
+            ):
+                with path.open("r+b") as handle:
+                    os.fsync(handle.fileno())
+                if os.name != "nt":
+                    descriptor = os.open(
+                        path.parent,
+                        os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
+                    )
+                    try:
+                        os.fsync(descriptor)
+                    finally:
+                        os.close(descriptor)
+                return
+            raise FileExistsError(
+                f"refusing to overwrite racing artifact: {path}"
+            ) from None
+        if os.name != "nt":
+            descriptor = os.open(
+                path.parent,
+                os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
+            )
+            try:
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
     finally:
         if temporary.exists():
             temporary.unlink()
@@ -307,6 +447,123 @@ def verify_self_bound(value: dict[str, Any], label: str) -> None:
         or hashlib.sha256(canonical_bytes(unsigned)).hexdigest() != expected
     ):
         raise ValueError(f"{label} self hash is missing or stale")
+
+
+def staging_receipt(
+    run_id: str,
+    stage: pathlib.Path,
+    identity_path: pathlib.Path | None = None,
+    private_path: pathlib.Path | None = None,
+) -> dict[str, Any]:
+    identity = identity_path or stage
+    stat = identity.stat()
+    receipt = {
+        "schema_version": 1,
+        "status": "STAGING_OWNED",
+        "run_id": run_id,
+        "staging_path": str(stage.resolve()),
+        "device": stat.st_dev,
+        "inode": stat.st_ino,
+        "size": stat.st_size,
+        "sha256": sha256_file(identity),
+    }
+    if private_path is not None:
+        receipt["private_path"] = str(private_path.resolve())
+    return self_bound(receipt)
+
+
+def prove_owned_staging(
+    run_id: str,
+    stage: pathlib.Path,
+    receipt_path: pathlib.Path,
+    run_root: pathlib.Path,
+    *,
+    expected_sha256: str | None = None,
+    expected_size: int | None = None,
+) -> bool:
+    try:
+        stage.resolve(strict=False).relative_to(run_root.resolve())
+        receipt_path.resolve(strict=False).relative_to(run_root.resolve())
+    except ValueError:
+        raise ValueError("staging ownership path escapes the run root") from None
+    if (
+        not stage.is_absolute()
+        or not receipt_path.is_absolute()
+        or stage.is_symlink()
+        or receipt_path.is_symlink()
+    ):
+        raise ValueError("staging ownership path is invalid")
+    if not stage.exists():
+        return False
+    if not stage.is_file():
+        raise ValueError("staging cleanup target is not a file")
+    if not receipt_path.is_file():
+        raise ValueError("staging ownership cannot be proven")
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    if not isinstance(receipt, dict):
+        raise ValueError("staging ownership receipt must be an object")
+    verify_self_bound(receipt, "staging ownership receipt")
+    stat = stage.stat()
+    actual_sha256 = sha256_file(stage)
+    owned = (
+        receipt.get("schema_version") == 1
+        and receipt.get("status") == "STAGING_OWNED"
+        and receipt.get("run_id") == run_id
+        and receipt.get("staging_path") == str(stage.resolve())
+        and receipt.get("device") == stat.st_dev
+        and receipt.get("inode") == stat.st_ino
+        and receipt.get("size") == stat.st_size
+        and receipt.get("sha256") == actual_sha256
+        and (expected_sha256 is None or actual_sha256 == expected_sha256)
+        and (expected_size is None or stat.st_size == expected_size)
+    )
+    if not owned:
+        raise ValueError("staging ownership cannot be proven")
+    return True
+
+
+def cleanup_owned_private_staging(
+    run_id: str,
+    stage: pathlib.Path,
+    receipt_path: pathlib.Path,
+    run_root: pathlib.Path,
+) -> str | None:
+    if not receipt_path.is_file() or receipt_path.is_symlink():
+        return None
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    if not isinstance(receipt, dict):
+        raise ValueError("staging ownership receipt must be an object")
+    verify_self_bound(receipt, "staging ownership receipt")
+    private_raw = receipt.get("private_path")
+    if not isinstance(private_raw, str) or not private_raw:
+        return None
+    private = pathlib.Path(private_raw)
+    try:
+        private.resolve(strict=False).relative_to(run_root.resolve())
+    except ValueError:
+        raise ValueError("private staging path escapes the run root") from None
+    if (
+        not private.is_absolute()
+        or private.is_symlink()
+        or private.resolve(strict=False) == stage.resolve(strict=False)
+        or not private.exists()
+    ):
+        return None
+    if not private.is_file():
+        raise ValueError("private staging target is not a file")
+    stat = private.stat()
+    if (
+        receipt.get("schema_version") != 1
+        or receipt.get("status") != "STAGING_OWNED"
+        or receipt.get("run_id") != run_id
+        or receipt.get("device") != stat.st_dev
+        or receipt.get("inode") != stat.st_ino
+        or receipt.get("size") != stat.st_size
+        or receipt.get("sha256") != sha256_file(private)
+    ):
+        raise ValueError("private staging ownership cannot be proven")
+    durable_unlink(private)
+    return str(private)
 
 
 def materialize(
@@ -346,33 +603,62 @@ def materialize(
                     "existing registry bundle is missing or has drifted"
                 )
         return existing
-    stage_specs = [
-        {
+    manifest_sha256 = sha256_file(manifest_path)
+    stage_specs = []
+    for item in prepared:
+        asset_id = item["builder_plan"]["bundle_task_asset_id"]
+        stage = (
+            write_ahead_path.parent
+            / f".bundle-stage-{asset_id}.zip"
+        ).resolve()
+        private = (
+            write_ahead_path.parent
+            / f".bundle-private-{asset_id}.zip"
+        ).resolve()
+        ownership_token = hashlib.sha256(
+            (
+                f"{manifest['run_id']}\0{manifest_sha256}\0"
+                f"{private}\0{item['object_key']}"
+            ).encode("utf-8")
+        ).hexdigest()
+        stage_specs.append({
             "path": str(
+                stage
+            ),
+            "private_path": str(private),
+            "ownership_token": ownership_token,
+            "object_key": item["object_key"],
+            "ownership_receipt_path": str(
                 (
                     write_ahead_path.parent
                     / (
-                        ".bundle-stage-"
-                        f"{item['builder_plan']['bundle_task_asset_id']}.zip"
+                        "bundle-staging-ownership-"
+                        f"{asset_id}.json"
                     )
                 ).resolve()
             ),
-            "object_key": item["object_key"],
-        }
-        for item in prepared
-    ]
+        })
     for item in stage_specs:
         stage = pathlib.Path(item["path"])
-        if stage.exists() or stage.is_symlink():
+        receipt = pathlib.Path(item["ownership_receipt_path"])
+        private = pathlib.Path(item["private_path"])
+        if (
+            stage.exists()
+            or stage.is_symlink()
+            or receipt.exists()
+            or receipt.is_symlink()
+            or private.exists()
+            or private.is_symlink()
+        ):
             raise FileExistsError(
-                f"staging path existed before write-ahead: {stage}"
+                f"staging path or receipt existed before write-ahead: {stage}"
             )
     staging_write_ahead = self_bound(
         {
             "schema_version": 1,
             "status": "STAGING_WRITE_AHEAD",
             "run_id": manifest["run_id"],
-            "manifest_sha256": sha256_file(manifest_path),
+            "manifest_sha256": manifest_sha256,
             "b_root": str(b_root),
             "database_write_performed": False,
             "stage_specs": stage_specs,
@@ -382,7 +668,13 @@ def materialize(
     created_paths: list[pathlib.Path] = []
     staged_paths: list[pathlib.Path] = []
     staged: list[
-        tuple[pathlib.Path, pathlib.Path, str, pathlib.Path]
+        tuple[
+            pathlib.Path,
+            pathlib.Path,
+            str,
+            pathlib.Path,
+            pathlib.Path,
+        ]
     ] = []
     entries: list[dict[str, Any]] = []
     try:
@@ -402,12 +694,47 @@ def materialize(
             temporary_zip = write_ahead_path.parent / (
                 f".bundle-stage-{item['builder_plan']['bundle_task_asset_id']}.zip"
             )
+            private_zip = write_ahead_path.parent / (
+                f".bundle-private-{item['builder_plan']['bundle_task_asset_id']}.zip"
+            )
+            staging_receipt_path = write_ahead_path.parent / (
+                "bundle-staging-ownership-"
+                f"{item['builder_plan']['bundle_task_asset_id']}.json"
+            )
             try:
-                if temporary_zip.exists():
+                if temporary_zip.exists() or temporary_zip.is_symlink():
                     raise FileExistsError(
                         f"stale bundle candidate already exists: {temporary_zip}"
                     )
-                result = bundle_builder.build(plan_path, temporary_zip)
+                stage_spec = next(
+                    spec
+                    for spec in stage_specs
+                    if pathlib.Path(spec["path"]) == temporary_zip.resolve()
+                )
+                create_reserved_private(
+                    private_zip,
+                    str(stage_spec["ownership_token"]),
+                )
+                result = bundle_builder.build_preowned(
+                    plan_path,
+                    private_zip,
+                )
+                atomic_write(
+                    staging_receipt_path,
+                    staging_receipt(
+                        manifest["run_id"],
+                        temporary_zip,
+                        private_zip,
+                        private_zip,
+                    ),
+                )
+                os.link(private_zip, temporary_zip)
+                fsync_directory(temporary_zip.parent)
+                retire_reservation_token(
+                    temporary_zip,
+                    str(stage_spec["ownership_token"]),
+                )
+                durable_unlink(private_zip)
                 if target.exists():
                     if not target.is_file() or sha256_file(target) != result["bundle_sha256"]:
                         raise FileExistsError(
@@ -440,6 +767,7 @@ def materialize(
                     target,
                     disposition,
                     ownership_receipt_path,
+                    staging_receipt_path,
                 )
             )
             entries.append(
@@ -509,6 +837,27 @@ def materialize(
                     "path": str(path.resolve()),
                     "sha256": sha256_file(path),
                     "size": path.stat().st_size,
+                    "ownership_receipt_path": str(
+                        next(
+                            receipt
+                            for stage, _, _, _, receipt in staged
+                            if stage == path
+                        ).resolve()
+                    ),
+                    "private_path": str(
+                        next(
+                            spec["private_path"]
+                            for spec in stage_specs
+                            if pathlib.Path(spec["path"]) == path.resolve()
+                        )
+                    ),
+                    "ownership_token": str(
+                        next(
+                            spec["ownership_token"]
+                            for spec in stage_specs
+                            if pathlib.Path(spec["path"]) == path.resolve()
+                        )
+                    ),
                 }
                 for path in staged_paths
             ],
@@ -519,7 +868,14 @@ def materialize(
             target,
             disposition,
             ownership_receipt_path,
+            staging_receipt_path,
         ) in staged:
+            prove_owned_staging(
+                manifest["run_id"],
+                temporary_zip,
+                staging_receipt_path,
+                b_root.parent,
+            )
             if disposition == "created":
                 if target.exists():
                     raise FileExistsError(
@@ -527,6 +883,7 @@ def materialize(
                     )
                 target.parent.mkdir(parents=True, exist_ok=True)
                 os.link(temporary_zip, target)
+                fsync_directory_chain(target.parent, b_root)
                 source_stat = temporary_zip.stat()
                 target_stat = target.stat()
                 if not os.path.samestat(source_stat, target_stat):
@@ -548,10 +905,10 @@ def materialize(
                     ownership_receipt_path,
                     ownership_receipt,
                 )
-                temporary_zip.unlink()
+                durable_unlink(temporary_zip)
                 created_paths.append(target)
             else:
-                temporary_zip.unlink()
+                durable_unlink(temporary_zip)
     except Exception as original:
         if write_ahead_path.is_file() and not write_ahead_path.is_symlink():
             try:
@@ -568,8 +925,19 @@ def materialize(
                     f"compensation={compensation}"
                 ) from original
         else:
-            for path in staged_paths:
-                path.unlink(missing_ok=True)
+            try:
+                seed = json.loads(
+                    staging_write_ahead_path.read_text(encoding="utf-8")
+                )
+                if not isinstance(seed, dict):
+                    raise ValueError("bundle staging write-ahead must be an object")
+                rollback(seed, b_root)
+            except Exception as compensation:
+                raise RuntimeError(
+                    "bundle staging failed and exact compensation "
+                    f"could not complete: {original}; "
+                    f"compensation={compensation}"
+                ) from original
         raise
 
     registry = self_bound({
@@ -598,6 +966,7 @@ def rollback(registry: dict[str, Any], b_root: pathlib.Path) -> dict[str, Any]:
         raise ValueError("cleanup registry belongs to another B root")
     if registry.get("status") == "STAGING_WRITE_AHEAD":
         removed_staging = []
+        removed_private_staging = []
         specs = registry.get("stage_specs")
         if not isinstance(specs, list) or not specs:
             raise ValueError("staging cleanup registry has no stage specs")
@@ -605,16 +974,33 @@ def rollback(registry: dict[str, Any], b_root: pathlib.Path) -> dict[str, Any]:
             if not isinstance(item, dict):
                 raise ValueError(f"stage_specs[{index}] is invalid")
             stage = pathlib.Path(str(item.get("path") or ""))
-            try:
-                stage.resolve(strict=False).relative_to(b_root.parent.resolve())
-            except ValueError:
-                raise ValueError("staging file escapes the run root") from None
-            if stage.is_symlink():
-                raise ValueError("symlinked staging files are forbidden")
+            receipt_path = pathlib.Path(
+                str(item.get("ownership_receipt_path") or "")
+            )
+            removed_private = cleanup_owned_private_staging(
+                str(registry.get("run_id") or ""),
+                stage,
+                receipt_path,
+                b_root.parent,
+            )
+            if removed_private is not None:
+                removed_private_staging.append(removed_private)
+            if item.get("private_path") or item.get("ownership_token"):
+                reserved_private = cleanup_reserved_private(
+                    pathlib.Path(str(item.get("private_path") or "")),
+                    str(item.get("ownership_token") or ""),
+                    b_root.parent,
+                )
+                if reserved_private is not None:
+                    removed_private_staging.append(reserved_private)
             if stage.exists():
-                if not stage.is_file():
-                    raise ValueError("staging cleanup target is not a file")
-                stage.unlink()
+                prove_owned_staging(
+                    str(registry.get("run_id") or ""),
+                    stage,
+                    receipt_path,
+                    b_root.parent,
+                )
+                durable_unlink(stage)
                 removed_staging.append(str(stage))
         return {
             "schema_version": 1,
@@ -624,6 +1010,7 @@ def rollback(registry: dict[str, Any], b_root: pathlib.Path) -> dict[str, Any]:
             "already_absent_count": 0,
             "retained_reused_object_paths": [],
             "removed_staging_paths": removed_staging,
+            "removed_private_staging_paths": removed_private_staging,
             "database_cleanup_candidates": [],
             "database_write_performed": False,
         }
@@ -696,25 +1083,33 @@ def rollback(registry: dict[str, Any], b_root: pathlib.Path) -> dict[str, Any]:
                     and receipt.get("sha256") == expected
                 )
             if not owned:
-                matching_stage = next(
-                    (
-                        pathlib.Path(str(item.get("path") or ""))
-                        for item in registry.get("staging_files") or []
-                        if isinstance(item, dict)
-                        and pathlib.Path(str(item.get("path") or "")).exists()
-                        and os.path.samestat(
-                            pathlib.Path(str(item.get("path"))).stat(),
-                            target.stat(),
-                        )
-                    ),
-                    None,
-                )
+                matching_stage = None
+                for item in registry.get("staging_files") or []:
+                    if not isinstance(item, dict):
+                        continue
+                    stage = pathlib.Path(str(item.get("path") or ""))
+                    if not stage.exists() or not os.path.samestat(
+                        stage.stat(), target.stat()
+                    ):
+                        continue
+                    prove_owned_staging(
+                        str(registry.get("run_id") or ""),
+                        stage,
+                        pathlib.Path(
+                            str(item.get("ownership_receipt_path") or "")
+                        ),
+                        b_root.parent,
+                        expected_sha256=expected,
+                        expected_size=target.stat().st_size,
+                    )
+                    matching_stage = stage
+                    break
                 owned = matching_stage is not None
             if not owned:
                 raise ValueError(
                     f"bundle target ownership cannot be proven: {relative}"
                 )
-            target.unlink()
+            durable_unlink(target)
             removed.append(relative.as_posix())
     object_root = (b_root / "objects").resolve()
     pruned_directories: list[str] = []
@@ -727,11 +1122,13 @@ def rollback(registry: dict[str, Any], b_root: pathlib.Path) -> dict[str, Any]:
                 parent.rmdir()
             except OSError:
                 break
+            fsync_directory_chain(parent.parent, object_root)
             pruned_directories.append(
                 parent.relative_to(b_root).as_posix()
             )
             parent = parent.parent
     removed_staging = []
+    removed_private_staging = []
     for index, item in enumerate(registry.get("staging_files") or []):
         if not isinstance(item, dict):
             raise ValueError(f"staging_files[{index}] is invalid")
@@ -742,6 +1139,25 @@ def rollback(registry: dict[str, Any], b_root: pathlib.Path) -> dict[str, Any]:
             raise ValueError("staging file escapes the run root") from None
         expected = str(item.get("sha256") or "")
         size = item.get("size")
+        receipt_path = pathlib.Path(
+            str(item.get("ownership_receipt_path") or "")
+        )
+        removed_private = cleanup_owned_private_staging(
+            str(registry.get("run_id") or ""),
+            stage,
+            receipt_path,
+            b_root.parent,
+        )
+        if removed_private is not None:
+            removed_private_staging.append(removed_private)
+        if item.get("private_path") or item.get("ownership_token"):
+            reserved_private = cleanup_reserved_private(
+                pathlib.Path(str(item.get("private_path") or "")),
+                str(item.get("ownership_token") or ""),
+                b_root.parent,
+            )
+            if reserved_private is not None:
+                removed_private_staging.append(reserved_private)
         if (
             stage.is_symlink()
             or not SHA256.fullmatch(expected)
@@ -751,13 +1167,15 @@ def rollback(registry: dict[str, Any], b_root: pathlib.Path) -> dict[str, Any]:
         ):
             raise ValueError("staging file identity is invalid")
         if stage.exists():
-            if (
-                not stage.is_file()
-                or stage.stat().st_size != size
-                or sha256_file(stage) != expected
-            ):
-                raise ValueError("refusing cleanup because staging bytes drifted")
-            stage.unlink()
+            prove_owned_staging(
+                str(registry.get("run_id") or ""),
+                stage,
+                receipt_path,
+                b_root.parent,
+                expected_sha256=expected,
+                expected_size=size,
+            )
+            durable_unlink(stage)
             removed_staging.append(str(stage))
     return {
         "schema_version": 1,
@@ -767,6 +1185,7 @@ def rollback(registry: dict[str, Any], b_root: pathlib.Path) -> dict[str, Any]:
         "already_absent_count": len(targets) - len(removed),
         "retained_reused_object_paths": retained_reused,
         "removed_staging_paths": removed_staging,
+        "removed_private_staging_paths": removed_private_staging,
         "database_cleanup_candidates": [
             entry["rollback_candidate"] for entry in registry["entries"]
         ],

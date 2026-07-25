@@ -117,12 +117,19 @@ def validate_plan(plan: dict) -> list[dict]:
     return normalized
 
 
-def build(plan_path: pathlib.Path, output_path: pathlib.Path) -> dict:
+def build(
+    plan_path: pathlib.Path,
+    output_path: pathlib.Path,
+    before_publish=None,
+) -> dict:
     if output_path.exists():
         raise FileExistsError(f"refusing to overwrite existing bundle: {output_path}")
     plan = json.loads(plan_path.read_text(encoding="utf-8"))
     members = validate_plan(plan)
-    manifest_members = [{k: v for k, v in member.items() if k != "_local_path"} for member in members]
+    manifest_members = [
+        {k: v for k, v in member.items() if k != "_local_path"}
+        for member in members
+    ]
     embedded_manifest = {
         "version": 1,
         "deterministic_profile": PROFILE,
@@ -135,18 +142,126 @@ def build(plan_path: pathlib.Path, output_path: pathlib.Path) -> dict:
     }
     manifest_bytes = canonical_json(embedded_manifest)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(prefix=output_path.name + ".", suffix=".tmp", dir=output_path.parent, delete=False) as handle:
+    with tempfile.NamedTemporaryFile(
+        prefix=output_path.name + ".",
+        suffix=".tmp",
+        dir=output_path.parent,
+        delete=False,
+    ) as handle:
         temporary = pathlib.Path(handle.name)
     try:
-        with zipfile.ZipFile(temporary, "w", compression=zipfile.ZIP_STORED, allowZip64=True) as bundle:
-            bundle.writestr(zip_info("manifest.json"), manifest_bytes)
+        with zipfile.ZipFile(
+            temporary,
+            "w",
+            compression=zipfile.ZIP_STORED,
+            allowZip64=True,
+        ) as bundle:
+            bundle.writestr(
+                zip_info("manifest.json"),
+                manifest_bytes,
+            )
             for member in members:
-                bundle.writestr(zip_info(member["archive_path"]), member["_local_path"].read_bytes())
-        os.replace(temporary, output_path)
+                bundle.writestr(
+                    zip_info(member["archive_path"]),
+                    member["_local_path"].read_bytes(),
+                )
+        with temporary.open("r+b") as handle:
+            os.fsync(handle.fileno())
+        if before_publish is not None:
+            before_publish(
+                temporary,
+                output_path,
+                temporary,
+            )
+        os.link(temporary, output_path)
+        if os.name != "nt":
+            descriptor = os.open(
+                output_path.parent,
+                os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
+            )
+            try:
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
     finally:
         if temporary.exists():
             temporary.unlink()
+            if os.name != "nt":
+                descriptor = os.open(
+                    output_path.parent,
+                    os.O_RDONLY | getattr(os, "O_DIRECTORY", 0),
+                )
+                try:
+                    os.fsync(descriptor)
+                finally:
+                    os.close(descriptor)
+    return build_result(
+        plan,
+        members,
+        manifest_bytes,
+        output_path,
+    )
 
+
+def build_preowned(
+    plan_path: pathlib.Path,
+    output_path: pathlib.Path,
+) -> dict:
+    if (
+        output_path.is_symlink()
+        or not output_path.is_file()
+        or output_path.stat().st_size != 0
+    ):
+        raise ValueError("preowned bundle output must be an empty regular file")
+    plan = json.loads(plan_path.read_text(encoding="utf-8"))
+    members = validate_plan(plan)
+    manifest_members = [
+        {k: v for k, v in member.items() if k != "_local_path"}
+        for member in members
+    ]
+    embedded_manifest = {
+        "version": 1,
+        "deterministic_profile": PROFILE,
+        "confirmation": {
+            "confirmed_by": plan["confirmed_by"],
+            "confirmed_at": plan["confirmed_at"],
+            "confirmation_note": plan["confirmation_note"],
+        },
+        "members": manifest_members,
+    }
+    manifest_bytes = canonical_json(embedded_manifest)
+    with output_path.open("r+b") as handle:
+        with zipfile.ZipFile(
+            handle,
+            "w",
+            compression=zipfile.ZIP_STORED,
+            allowZip64=True,
+        ) as bundle:
+            bundle.writestr(
+                zip_info("manifest.json"),
+                manifest_bytes,
+            )
+            for member in members:
+                bundle.writestr(
+                    zip_info(member["archive_path"]),
+                    member["_local_path"].read_bytes(),
+                )
+        handle.flush()
+        os.fsync(handle.fileno())
+    return build_result(
+        plan,
+        members,
+        manifest_bytes,
+        output_path,
+    )
+
+
+def build_result(
+    plan: dict,
+    members: list[dict],
+    manifest_bytes: bytes,
+    output_path: pathlib.Path,
+) -> dict:
     mapping_members = [
         {"task_asset_id": member["task_asset_id"], "sha256": member["sha256"], "confirmed": True}
         for member in members

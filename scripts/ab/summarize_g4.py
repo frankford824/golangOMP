@@ -43,20 +43,45 @@ SEARCH_TABLES = {
     "task_asset_group_search_documents",
     "product_search_documents",
 }
+RECOVERY_OWNERSHIP_ARTIFACTS = {
+    *{
+        f"recovery-ownership-{asset_id}.json"
+        for asset_id in (23989, 23990, 23991)
+    },
+    *{
+        f"recovery-staging-ownership-{asset_id}.json"
+        for asset_id in (23989, 23990, 23991)
+    },
+}
+BUNDLE_OWNERSHIP_ARTIFACTS = {
+    *{
+        f"bundle-ownership-{asset_id}.json"
+        for asset_id in range(25557, 25564)
+    },
+    *{
+        f"bundle-staging-ownership-{asset_id}.json"
+        for asset_id in range(25557, 25564)
+    },
+}
 COMPONENT_ARTIFACTS = {
     ("recovery", "apply"): {
+        "recovery-file-write-ahead.json",
         "recovery-materialization-plan.json",
         "recovery-guard-before.json",
         "recovery-guard-provision.json",
         "recovery-db-apply.json",
         "recovery-db-idempotent.json",
-    },
+    }
+    | RECOVERY_OWNERSHIP_ARTIFACTS,
     ("recovery", "rollback"): {
         "recovery-db-rollback.json",
         "recovery-guard-restore.json",
         "recovery-file-rollback.json",
-    },
+    }
+    | RECOVERY_OWNERSHIP_ARTIFACTS,
     ("bundle", "apply"): {
+        "bundle-staging-write-ahead.json",
+        "bundle-file-write-ahead.json",
         "bundle-materialize-report.json",
         "bundle-registry.json",
         "bundle-guard-before.json",
@@ -64,13 +89,15 @@ COMPONENT_ARTIFACTS = {
         "bundle-db-rollback-journal.json",
         "bundle-db-apply.json",
         "bundle-db-idempotent.json",
-    },
+    }
+    | BUNDLE_OWNERSHIP_ARTIFACTS,
     ("bundle", "rollback"): {
         "bundle-db-rollback-journal.json",
         "bundle-db-rollback.json",
         "bundle-guard-restore.json",
         "bundle-file-rollback.json",
-    },
+    }
+    | BUNDLE_OWNERSHIP_ARTIFACTS,
 }
 
 
@@ -357,6 +384,8 @@ def validate_component_chain(
                     is not (action == "apply")
                     or report.get("guard_exactly_restored")
                     is not (action == "rollback")
+                    or report.get("ownership_receipt_contract_version")
+                    != 1
                 ):
                     raise ValueError(f"{label} envelope is invalid")
                 if database is None:
