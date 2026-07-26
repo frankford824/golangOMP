@@ -112,6 +112,12 @@ def positive_int(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value > 0
 
 
+def canonical_positive_int(value: Any) -> int | None:
+    if not isinstance(value, str) or not re.fullmatch(r"[1-9][0-9]*", value):
+        return None
+    return int(value)
+
+
 def confirmed_time(value: Any) -> bool:
     return nonempty(value) and not str(value).startswith("0001-01-01T00:00:00")
 
@@ -345,9 +351,21 @@ def index_canonical(
         natural = (str(gate), str(key))
         if natural in indexed:
             raise InputError(f"duplicate canonical entity {gate}/{key}")
+        expected_state_by_gate = {
+            "G01": "matched",
+            "G02": "matched",
+            "G03": "matched",
+            "G04": "matched",
+            "G05": "matched",
+            "G06": "verified",
+            "G07": "matched",
+            "G08": "matched",
+            "G09": "approved",
+            "G10": "confirmed",
+        }
         if final_mode and (
             entity.get("review_state") != "pass"
-            or entity.get("expected_state") not in {"matched", "verified", "confirmed"}
+            or entity.get("expected_state") != expected_state_by_gate.get(str(gate))
         ):
             raise InputError(f"canonical entity {gate}/{key} is not a reviewed PASS")
         indexed[natural] = entity
@@ -402,9 +420,11 @@ class Facts:
         self,
         mapping: dict[str, Any],
         canonical: dict[tuple[str, str], dict[str, Any]],
+        canonical_sha256: str | None = None,
     ) -> None:
         self.mapping = mapping
         self.canonical = canonical
+        self.canonical_sha256 = canonical_sha256
         self.resources: list[dict[str, Any]] = list(mapping["resources"])
         self.by_task: dict[int, list[dict[str, Any]]] = defaultdict(list)
         self.planning_by_task: dict[int, dict[str, Any]] = {}
@@ -447,10 +467,15 @@ class Facts:
             if not isinstance(components, list):
                 raise InputError(f"canonical entity {gate}/{key} has invalid components")
             if gate == "G01" and key.startswith("task:"):
-                if len(components) < 5 or not positive_int(components[0]):
+                task_id = (
+                    canonical_positive_int(components[0])
+                    if len(components) >= 5
+                    else None
+                )
+                if task_id is None:
                     raise InputError(f"canonical task entity {key} is malformed")
-                self.tasks[int(components[0])] = {
-                    "task_id": int(components[0]),
+                self.tasks[task_id] = {
+                    "task_id": task_id,
                     "task_type": str(components[1]),
                     "task_status": str(components[2]),
                     "current_handler_id": components[3],
@@ -458,11 +483,25 @@ class Facts:
                     "entity": entity,
                 }
             elif gate == "G07" and key.startswith("task-event:"):
-                if len(components) >= 2 and positive_int(components[1]):
-                    self.events_by_task[int(components[1])].append(entity)
+                task_id = (
+                    canonical_positive_int(components[1])
+                    if len(components) >= 2
+                    else None
+                )
+                if task_id is None:
+                    raise InputError(f"canonical task event {key} is malformed")
+                self.events_by_task[task_id].append(entity)
             elif gate == "G08" and key.startswith("retouch-requirement:"):
-                if len(components) >= 2 and positive_int(components[0]):
-                    self.retouch_entities_by_task[int(components[0])].append(entity)
+                task_id = (
+                    canonical_positive_int(components[0])
+                    if len(components) >= 2
+                    else None
+                )
+                if task_id is None:
+                    raise InputError(
+                        f"canonical retouch requirement {key} is malformed"
+                    )
+                self.retouch_entities_by_task[task_id].append(entity)
 
         # Correlate every mapped revision with a canonical expected entity.
         if canonical:
@@ -504,6 +543,21 @@ class Facts:
                 entity
                 for entity in self.events_by_task.get(task_id, [])
                 if event_matches(entity, aliases)
+            ),
+            None,
+        )
+
+    def task_event_exact(
+        self,
+        task_id: int,
+        event_type: str,
+    ) -> dict[str, Any] | None:
+        return next(
+            (
+                entity
+                for entity in self.events_by_task.get(task_id, [])
+                if len(entity.get("components", [])) >= 4
+                and entity["components"][3] == event_type
             ),
             None,
         )
@@ -700,12 +754,21 @@ def choose_scenario(
         group = select_best(
             group
             for group in facts.resources
-            if "custom" in facts.task_type(int(group["task_id"]))
-            and finalized_revisions(group)
+            if finalized_revisions(group)
             and has_policy(group, "explicit_event_replay")
+            and facts.task_event_exact(
+                int(group["task_id"]),
+                "task.customization.reviewed",
+            )
         )
         if group:
-            selected, rationale = [group], "canonical task type is customization and explicit-event history includes a finalized review snapshot"
+            event = facts.task_event_exact(
+                int(group["task_id"]),
+                "task.customization.reviewed",
+            )
+            selected = [group]
+            extra = [entity_evidence(event)] if event else []
+            rationale = "immutable customization-reviewed event and explicit-event history identify a finalized customization audit snapshot"
     elif scenario_id == "retired_warehouse_receive_history":
         match = event_backed_group(
             facts,
@@ -938,6 +1001,40 @@ def choose_scenario(
             ]
             extra = [entity_evidence(facts.tasks[task_id]["entity"])]
             rationale = f"canonical G01 task status is exactly {expected}"
+        elif scenario_id == "archived_readonly":
+            archived_population = sum(
+                task["task_status"] == "Archived"
+                for task in facts.tasks.values()
+            )
+            if archived_population != 0:
+                raise InputError(
+                    "Archived fixture fallback is allowed only when canonical "
+                    "G01 Archived population is exactly zero"
+                )
+            group = base_resource(facts)
+            if group:
+                selected = [
+                    {
+                        "task_id": int(group["task_id"]),
+                        "scope_kind": "task_terminal",
+                        "scope_ref_id": 0,
+                        "history": [],
+                    }
+                ]
+                fixture = fixture_plan(
+                    scenario_id,
+                    "archived_terminal",
+                    int(group["task_id"]),
+                    group_locator(group),
+                    fixture_class="positive_contract",
+                    canonical_population=archived_population,
+                    canonical_entities_sha256=facts.canonical_sha256,
+                )
+                rationale = (
+                    "canonical G01 contains zero Archived tasks; an isolated "
+                    "Clone B positive-contract fixture verifies the runtime/UI "
+                    "terminal-state contract without claiming historical migration coverage"
+                )
     elif scenario_id == "historical_asset_unavailable_410":
         candidates = []
         for task_id, recoveries in facts.recovery_by_task.items():
@@ -1004,6 +1101,10 @@ def fixture_plan(
     fixture_kind: str,
     template_task_id: int,
     template_resource_key: str,
+    *,
+    fixture_class: str = "negative_assertion",
+    canonical_population: int | None = None,
+    canonical_entities_sha256: str | None = None,
 ) -> dict[str, Any]:
     operations = {
         "permission_denied_identity": [
@@ -1027,10 +1128,17 @@ def fixture_plan(
             "attach_fixture_asset_to_nonmatching_fixture_scope",
             "capture_fixture_task_group_revision_ids",
         ],
+        "archived_terminal": [
+            "clone_template_task_into_fixture_namespace",
+            "set_only_fixture_task_status_to_archived",
+            "close_only_fixture_task_modules",
+            "capture_fixture_task_and_module_ids",
+        ],
     }[fixture_kind]
-    return {
+    plan = {
         "schema_version": 1,
         "fixture_kind": fixture_kind,
+        "fixture_class": fixture_class,
         "environment": "isolated_clone_b_only",
         "template_task_id": template_task_id,
         "template_resource_key": template_resource_key,
@@ -1050,6 +1158,36 @@ def fixture_plan(
         ],
         "expected_scenario_id": scenario_id,
     }
+    if fixture_kind == "archived_terminal":
+        if canonical_population != 0:
+            raise InputError(
+                "archived_terminal fixture requires canonical Archived population 0"
+            )
+        if not canonical_entities_sha256 or not SHA256_RE.fullmatch(
+            canonical_entities_sha256
+        ):
+            raise InputError(
+                "archived_terminal fixture requires canonical entity document hash"
+            )
+        plan.update(
+            {
+                "canonical_archived_population": 0,
+                "canonical_entities_sha256": canonical_entities_sha256,
+                "historical_migration_coverage": (
+                    "not_applicable_zero_frozen_population"
+                ),
+                "expected_runtime": {
+                    "task_status": "Archived",
+                    "current_handler_id": None,
+                    "resource_group_count": 0,
+                    "revision_count": 0,
+                    "asset_count": 0,
+                    "allowed_actions": [],
+                    "module_state": "closed",
+                },
+            }
+        )
+    return plan
 
 
 def build_sample(
@@ -1154,6 +1292,19 @@ def build_sample(
         for combination in scenario["required_combinations"]
         for viewport in scenario["required_viewports"]
     ]
+    task_facts = {
+        "task_type": facts.tasks.get(task_id, {}).get("task_type"),
+        "task_status": facts.tasks.get(task_id, {}).get("task_status"),
+    }
+    if fixture and fixture.get("fixture_kind") == "archived_terminal":
+        task_facts = {
+            "task_type": facts.tasks.get(task_id, {}).get("task_type"),
+            "task_status": "Archived",
+            "template_task_status": facts.tasks.get(task_id, {}).get("task_status"),
+            "expected_resource_group_count": 0,
+            "expected_revision_count": 0,
+            "expected_asset_count": 0,
+        }
     sample: dict[str, Any] = {
         "scenario_id": scenario["id"],
         "status": sample_status,
@@ -1168,10 +1319,7 @@ def build_sample(
         "revision_id_derivation": (
             "workflow_groups_migrate_mapping_order_from_empty_clone_b_revision_table_v1"
         ),
-        "task_facts": {
-            "task_type": facts.tasks.get(task_id, {}).get("task_type"),
-            "task_status": facts.tasks.get(task_id, {}).get("task_status"),
-        },
+        "task_facts": task_facts,
         "policy_ids": sorted(policies),
         "revision_facts": revision_facts,
         "required_combinations": list(scenario["required_combinations"]),
@@ -1212,7 +1360,7 @@ def build_manifest(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
             mapping_hash,
             args.mode == "final",
         )
-    facts = Facts(mapping, canonical)
+    facts = Facts(mapping, canonical, canonical_hash)
 
     samples: list[dict[str, Any]] = []
     blockers: list[dict[str, Any]] = []
@@ -1284,10 +1432,22 @@ def build_manifest(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
                     for row in sample["coverage_matrix"]
                 }
             ),
-            "negative_fixture_scenarios": sorted(
+            "fixture_scenarios": sorted(
                 sample["scenario_id"]
                 for sample in samples
                 if sample["target_kind"] == "clone_b_fixture_derived"
+            ),
+            "positive_contract_fixture_scenarios": sorted(
+                sample["scenario_id"]
+                for sample in samples
+                if sample.get("fixture_plan", {}).get("fixture_class")
+                == "positive_contract"
+            ),
+            "negative_fixture_scenarios": sorted(
+                sample["scenario_id"]
+                for sample in samples
+                if sample.get("fixture_plan", {}).get("fixture_class")
+                == "negative_assertion"
             ),
         },
     }

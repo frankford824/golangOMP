@@ -576,22 +576,24 @@ func TestCaptureResourceGroupsForTasksAssemblesCompleteOrderedGraph(t *testing.T
 	}
 }
 
-func TestCaptureAssetBindingsForTasksPreservesNullAndEmptyScope(t *testing.T) {
+func TestCaptureAssetBindingsForTasksPreservesScopeAndReviewState(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	mock.ExpectQuery("SELECT id,task_id,binding_state,bound_group_id,bound_role").
+	approvedAt := time.Date(2026, time.July, 25, 1, 2, 3, 0, time.UTC)
+	mock.ExpectQuery("asset_type,scope_sku_code,retouch_requirement_id,flow_review_status,approved_at,approved_by").
 		WithArgs(int64(3)).
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "task_id", "binding_state", "bound_group_id", "bound_role",
 			"staged_task_sku_item_id", "staged_retouch_requirement_id", "staged_role", "staged_by", "upload_session_id", "staged_expires_at",
 			"access_revoked_at", "access_revoked_reason", "object_deleted_at",
-			"asset_type", "scope_sku_code", "retouch_requirement_id", "mime_type", "whole_hash", "deleted_at", "cleaned_at",
+			"asset_type", "scope_sku_code", "retouch_requirement_id", "flow_review_status", "approved_at", "approved_by",
+			"mime_type", "whole_hash", "deleted_at", "cleaned_at",
 		}).
-			AddRow(1, 3, "unbound", nil, nil, nil, nil, nil, nil, nil, nil, nil, "", nil, "delivery", nil, nil, "image/jpeg", "a", nil, nil).
-			AddRow(2, 3, "unbound", nil, nil, nil, nil, nil, nil, nil, nil, nil, "", nil, "delivery", "", nil, "image/jpeg", "b", nil, nil))
+			AddRow(1, 3, "unbound", nil, nil, nil, nil, nil, nil, nil, nil, nil, "", nil, "delivery", nil, nil, "pending_review", nil, nil, "image/jpeg", "a", nil, nil).
+			AddRow(2, 3, "unbound", nil, nil, nil, nil, nil, nil, nil, nil, nil, "", nil, "delivery", "", nil, "approved", approvedAt, int64(7), "image/jpeg", "b", nil, nil))
 	assets, err := captureAssetBindingsForTasks(context.Background(), db, []int64{3})
 	if err != nil {
 		t.Fatal(err)
@@ -604,6 +606,13 @@ func TestCaptureAssetBindingsForTasksPreservesNullAndEmptyScope(t *testing.T) {
 	}
 	if assets[1].ScopeSKUCode == nil || *assets[1].ScopeSKUCode != "" {
 		t.Fatalf("empty scope was not preserved: %#v", assets[1].ScopeSKUCode)
+	}
+	if assets[0].FlowReviewStatus != "pending_review" || assets[0].ApprovedAt != nil || assets[0].ApprovedBy != nil {
+		t.Fatalf("pending review fields were not preserved: %#v", assets[0])
+	}
+	if assets[1].FlowReviewStatus != "approved" || assets[1].ApprovedAt == nil || !assets[1].ApprovedAt.Equal(approvedAt) ||
+		assets[1].ApprovedBy == nil || *assets[1].ApprovedBy != 7 {
+		t.Fatalf("approved review fields were not preserved: %#v", assets[1])
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

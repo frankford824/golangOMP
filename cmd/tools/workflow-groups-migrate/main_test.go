@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -24,6 +25,23 @@ func TestValidateOptions(t *testing.T) {
 	}
 	if err := validateOptions(options{Apply: true, BatchSize: 500}); err == nil {
 		t.Fatal("expected snapshot/mapping error")
+	}
+}
+
+func TestReadSnapshotRejectsV88AppliedSnapshotAsHistorical(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "workflow-groups-snapshot.json")
+	raw := fmt.Sprintf(
+		`{"version":%d,"tool_version":%q,"schema_version":%q,"apply_state":"applied"}`,
+		previousSnapshotVersion,
+		previousToolVersion,
+		workflowGroupsSchemaVersion,
+	)
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := readSnapshot(path, "clone_b", mappingFile{})
+	if err == nil || !strings.Contains(err.Error(), "predates lossless v9 rollback") {
+		t.Fatalf("readSnapshot() error = %v, want historical v8.8 rejection", err)
 	}
 }
 
@@ -84,6 +102,135 @@ func TestMigrateStatesTreatsReviewedTargetAsIdempotentNoOp(t *testing.T) {
 	}}}
 	if err := migrateStates(context.Background(), tx, mapping); err != nil {
 		t.Fatalf("migrateStates() idempotent target error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMigrateStatesReopensReviewedRetouchModule(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectBegin()
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+
+	confirmedAt := time.Date(2026, 7, 25, 8, 30, 0, 0, time.UTC)
+	mock.ExpectExec("UPDATE tasks\\s+SET task_status=\\?,workflow_revision=workflow_revision\\+1\\s+WHERE id=\\? AND task_status=\\?").
+		WithArgs("InProgress", int64(981), "Completed").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("UPDATE task_modules\\s+SET state='in_progress',terminal_at=NULL,updated_at=\\?\\s+WHERE task_id=\\? AND module_key='retouch'").
+		WithArgs(confirmedAt, int64(981)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery("SELECT state,terminal_at\\s+FROM task_modules\\s+WHERE task_id=\\? AND module_key='retouch'\\s+FOR UPDATE").
+		WithArgs(int64(981)).
+		WillReturnRows(sqlmock.NewRows([]string{"state", "terminal_at"}).
+			AddRow("in_progress", nil))
+	mock.ExpectExec("UPDATE tasks SET task_status=CASE").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+
+	mapping := mappingFile{TaskDecisions: []taskStateDecisionMapping{{
+		TaskID:          981,
+		FromStatus:      "Completed",
+		TargetStatus:    "InProgress",
+		ReviewPolicyIDs: []string{reviewPolicyLegacyRetouchPrematurePartial},
+		ConfirmedAt:     confirmedAt,
+	}}}
+	if err := migrateStates(context.Background(), tx, mapping); err != nil {
+		t.Fatalf("migrateStates() reviewed retouch reopen error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMigrateStatesRejectsAmbiguousReviewedRetouchModule(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectBegin()
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+
+	confirmedAt := time.Date(2026, 7, 25, 8, 30, 0, 0, time.UTC)
+	mock.ExpectExec("UPDATE tasks\\s+SET task_status=\\?,workflow_revision=workflow_revision\\+1\\s+WHERE id=\\? AND task_status=\\?").
+		WithArgs("InProgress", int64(981), "Completed").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("UPDATE task_modules\\s+SET state='in_progress',terminal_at=NULL,updated_at=\\?\\s+WHERE task_id=\\? AND module_key='retouch'").
+		WithArgs(confirmedAt, int64(981)).
+		WillReturnResult(sqlmock.NewResult(0, 2))
+	mock.ExpectQuery("SELECT state,terminal_at\\s+FROM task_modules\\s+WHERE task_id=\\? AND module_key='retouch'\\s+FOR UPDATE").
+		WithArgs(int64(981)).
+		WillReturnRows(sqlmock.NewRows([]string{"state", "terminal_at"}).
+			AddRow("in_progress", nil).
+			AddRow("in_progress", nil))
+
+	mapping := mappingFile{TaskDecisions: []taskStateDecisionMapping{{
+		TaskID:          981,
+		FromStatus:      "Completed",
+		TargetStatus:    "InProgress",
+		ReviewPolicyIDs: []string{reviewPolicyLegacyRetouchPrematurePartial},
+		ConfirmedAt:     confirmedAt,
+	}}}
+	err = migrateStates(context.Background(), tx, mapping)
+	if err == nil || !strings.Contains(err.Error(), "requires exactly one active non-terminal retouch module") {
+		t.Fatalf("unexpected ambiguous reviewed retouch module error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMigrateStatesRejectsReviewedRetouchModuleIterationError(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectBegin()
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+
+	confirmedAt := time.Date(2026, 7, 25, 8, 30, 0, 0, time.UTC)
+	mock.ExpectExec("UPDATE tasks\\s+SET task_status=\\?,workflow_revision=workflow_revision\\+1\\s+WHERE id=\\? AND task_status=\\?").
+		WithArgs("InProgress", int64(981), "Completed").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("UPDATE task_modules\\s+SET state='in_progress',terminal_at=NULL,updated_at=\\?\\s+WHERE task_id=\\? AND module_key='retouch'").
+		WithArgs(confirmedAt, int64(981)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery("SELECT state,terminal_at\\s+FROM task_modules\\s+WHERE task_id=\\? AND module_key='retouch'\\s+FOR UPDATE").
+		WithArgs(int64(981)).
+		WillReturnRows(
+			sqlmock.NewRows([]string{"state", "terminal_at"}).
+				AddRow("in_progress", nil).
+				AddRow("in_progress", nil).
+				RowError(1, errors.New("driver iteration failed")),
+		)
+
+	mapping := mappingFile{TaskDecisions: []taskStateDecisionMapping{{
+		TaskID:          981,
+		FromStatus:      "Completed",
+		TargetStatus:    "InProgress",
+		ReviewPolicyIDs: []string{reviewPolicyLegacyRetouchPrematurePartial},
+		ConfirmedAt:     confirmedAt,
+	}}}
+	err = migrateStates(context.Background(), tx, mapping)
+	if err == nil || !strings.Contains(err.Error(), "iterate reviewed retouch module rows") {
+		t.Fatalf("unexpected iteration error = %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
@@ -1040,12 +1187,43 @@ func TestApplyHistoricalUnavailableRecoveryIsExactAndPointerSafe(t *testing.T) {
 		t.Fatal(err)
 	}
 	recovery := historicalUnavailableRecoveryFixture()
+	expectAssetStorageRefStatus(mock, recovery, "recorded")
 	expectHistoricalUnavailableRecoveryEvidence(mock, recovery, 0, "recorded")
 	mock.ExpectExec("UPDATE asset_storage_refs").
 		WithArgs(recovery.OriginalStorageRefID).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	if err := applyAssetRecoveries(context.Background(), tx, []assetRecoveryMapping{recovery}); err != nil {
 		t.Fatalf("applyAssetRecoveries() error = %v", err)
+	}
+	mock.ExpectRollback()
+	if err := tx.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestApplyHistoricalUnavailableRecoveryTreatsExactTargetAsIdempotent(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectBegin()
+	tx, err := db.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recovery := historicalUnavailableRecoveryFixture()
+	expectAssetStorageRefStatus(mock, recovery, "historical_unavailable")
+	expectHistoricalUnavailableRecoveryEvidence(
+		mock, recovery, 0, "historical_unavailable",
+	)
+	if err := applyAssetRecoveries(
+		context.Background(), tx, []assetRecoveryMapping{recovery},
+	); err != nil {
+		t.Fatalf("idempotent applyAssetRecoveries() error = %v", err)
 	}
 	mock.ExpectRollback()
 	if err := tx.Rollback(); err != nil {
@@ -1136,6 +1314,14 @@ func expectPrematerializedRecoveryEvidence(mock sqlmock.Sqlmock, recovery assetR
 		}).AddRow(uploadRequestID, boundRef, recovery.RecoverySourceSHA256, int64(683001), "bound", "completed"))
 }
 
+func expectAssetStorageRefStatus(
+	mock sqlmock.Sqlmock, recovery assetRecoveryMapping, status string,
+) {
+	mock.ExpectQuery("SELECT status\\s+FROM asset_storage_refs\\s+WHERE ref_id=\\?\\s+FOR UPDATE").
+		WithArgs(recovery.OriginalStorageRefID).
+		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow(status))
+}
+
 func expectHistoricalUnavailableRecoveryEvidence(mock sqlmock.Sqlmock, recovery assetRecoveryMapping, currentReferences int, storageStatus string) {
 	mock.ExpectQuery("SELECT id,task_id,asset_id,file_size,COALESCE\\(storage_ref_id,''\\)").
 		WillReturnRows(sqlmock.NewRows([]string{
@@ -1224,6 +1410,7 @@ func TestApplyHistoricalUnavailableRecoveryRejectsCurrentPointer(t *testing.T) {
 		t.Fatal(err)
 	}
 	recovery := historicalUnavailableRecoveryFixture()
+	expectAssetStorageRefStatus(mock, recovery, "recorded")
 	expectHistoricalUnavailableRecoveryEvidence(mock, recovery, 1, "recorded")
 	if err := applyAssetRecoveries(context.Background(), tx, []assetRecoveryMapping{recovery}); err == nil || !strings.Contains(err.Error(), "current working/finalized") {
 		t.Fatalf("applyAssetRecoveries() error = %v", err)
@@ -1334,6 +1521,7 @@ func TestApplyHistoricalUnavailableRecoveryRejectsLineageDrift(t *testing.T) {
 		t.Fatal(err)
 	}
 	recovery := historicalUnavailableRecoveryFixture()
+	expectAssetStorageRefStatus(mock, recovery, "recorded")
 	mock.ExpectQuery("SELECT id,task_id,asset_id,file_size,COALESCE\\(storage_ref_id,''\\)").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "task_id", "asset_id", "file_size", "storage_ref_id",
@@ -1366,6 +1554,7 @@ func TestApplyHistoricalUnavailableRecoveryRejectsStorageRefIdentityDrift(t *tes
 		t.Fatal(err)
 	}
 	recovery := historicalUnavailableRecoveryFixture()
+	expectAssetStorageRefStatus(mock, recovery, "recorded")
 	mock.ExpectQuery("SELECT id,task_id,asset_id,file_size,COALESCE\\(storage_ref_id,''\\)").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "task_id", "asset_id", "file_size", "storage_ref_id",

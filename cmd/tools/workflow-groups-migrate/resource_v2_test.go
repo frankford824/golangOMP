@@ -364,3 +364,48 @@ func TestValidateRevisionLifecycleStateAllowsRejectedSnapshotInheritanceIntoReop
 		t.Fatal("expected inheritance of a different asset to fail")
 	}
 }
+
+func TestApproveFinalizedRevisionAssetsIsStrictAndIdempotent(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectBegin()
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+
+	approvedAt := time.Date(2026, 7, 10, 5, 49, 38, 0, time.UTC)
+	mock.ExpectQuery("SELECT task_id,flow_review_status,approved_at,approved_by").
+		WithArgs(int64(12667)).
+		WillReturnRows(sqlmock.NewRows([]string{"task_id", "flow_review_status", "approved_at", "approved_by"}).
+			AddRow(int64(2234), "pending_review", nil, nil))
+	mock.ExpectExec("UPDATE task_assets\\s+SET flow_review_status='approved'").
+		WithArgs(approvedAt, int64(242), int64(12667), int64(2234)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery("SELECT task_id,flow_review_status,approved_at,approved_by").
+		WithArgs(int64(12668)).
+		WillReturnRows(sqlmock.NewRows([]string{"task_id", "flow_review_status", "approved_at", "approved_by"}).
+			AddRow(int64(2234), "approved", approvedAt, int64(242)))
+
+	mapping := resourceMapping{
+		TaskID: 2234,
+		History: []resourceRevisionMapping{{
+			RevisionNo:    2,
+			Status:        "finalized",
+			FinalAssetIDs: []int64{12667, 12668},
+			CreatedBy:     242,
+			CreatedAt:     approvedAt.Add(-time.Hour),
+			FinalizedAt:   &approvedAt,
+		}},
+	}
+	if err := approveFinalizedRevisionAssets(context.Background(), tx, mapping); err != nil {
+		t.Fatalf("approveFinalizedRevisionAssets() error = %v", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}

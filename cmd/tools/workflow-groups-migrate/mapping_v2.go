@@ -205,6 +205,13 @@ type taskStateDecisionMapping struct {
 	ManifestRowHash  string    `json:"manifest_row_hash,omitempty"`
 }
 
+func isReviewedRetouchReopenDecision(decision taskStateDecisionMapping) bool {
+	return decision.FromStatus == "Completed" &&
+		decision.TargetStatus == "InProgress" &&
+		containsString(decision.ReviewPolicyIDs, reviewPolicyLegacyRetouchPrematurePartial) &&
+		containsInt64([]int64{981, 1035, 1045, 1052, 1214}, decision.TaskID)
+}
+
 type assetRecoveryMapping struct {
 	TaskID                     int64     `json:"task_id"`
 	MissingTaskAssetID         int64     `json:"missing_task_asset_id"`
@@ -809,10 +816,7 @@ func validateTaskStateDecisions(m mappingFile, allowCandidateConfidence bool) er
 		warehouseDecision := decision.FromStatus == "RejectedByWarehouse" &&
 			(decision.TargetStatus == "InProgress" || decision.TargetStatus == "Completed") &&
 			containsString(decision.ReviewPolicyIDs, reviewPolicyLegacyWarehouseReopenState)
-		retouchDecision := decision.FromStatus == "Completed" &&
-			decision.TargetStatus == "InProgress" &&
-			containsString(decision.ReviewPolicyIDs, reviewPolicyLegacyRetouchPrematurePartial) &&
-			containsInt64([]int64{981, 1035, 1045, 1052, 1214}, decision.TaskID)
+		retouchDecision := isReviewedRetouchReopenDecision(decision)
 		customizationTerminalDecision := decision.FromStatus == "PendingWarehouseReceive" &&
 			decision.TargetStatus == "InProgress" &&
 			isLegacyCustomizationTerminalTask(decision.TaskID) &&

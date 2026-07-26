@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import dataclasses
+import datetime as dt
 import hashlib
 import json
 import os
@@ -43,11 +44,18 @@ ASSET_ROUTES = (
     "/v1/task-assets/{task_asset_id}/preview",
     "/v1/task-assets/{task_asset_id}/download",
 )
+ASSET_ROUTE_ALLOWED_STATUSES = {
+    "/v1/task-assets/{task_asset_id}/preview": frozenset({200, 403, 404, 409, 410}),
+    "/v1/task-assets/{task_asset_id}/download": frozenset({200, 403, 404, 410}),
+}
 ALL_ROUTE_TEMPLATES = frozenset((*CORE_ROUTES, *GROUP_ROUTES, *ASSET_ROUTES))
 MAX_BODY_BYTES = 4 * 1024 * 1024
 ID_RE = re.compile(r"[1-9][0-9]*")
 SHA256_RE = re.compile(r"[0-9a-f]{64}")
 REQUEST_CACHE_POLICY_VERSION = "exact_base_url_identity_path_v1"
+CURRENT_VERSION_ROLES = frozenset(
+    {"current_version", "approved_version", "current_approved_version"}
+)
 
 
 def canonical(value: object) -> bytes:
@@ -62,6 +70,10 @@ def sha256(value: bytes) -> str:
 
 def file_sha256(path: pathlib.Path) -> str:
     return sha256(path.read_bytes())
+
+
+def component_sha256(components: list[str]) -> str:
+    return sha256("\x1f".join(components).encode("utf-8"))
 
 
 def load_object(path: pathlib.Path, label: str) -> dict[str, Any]:
@@ -112,6 +124,502 @@ def manifest_task_ids(path: pathlib.Path, run_id: str) -> set[str]:
     if not found:
         raise ValueError("reviewed manifest has no G01 task entities")
     return found
+
+
+def load_manifest_expectations(
+    path: pathlib.Path, run_id: str
+) -> dict[str, dict[str, Any]]:
+    """Load the reviewed G01-G05 oracle used to judge the migrated B API.
+
+    The SQL gates already prove the rows against Clone B.  G6 independently
+    binds the public read model to the same immutable rows instead of treating
+    every V8 addition or retired legacy field as an arbitrary JSON exception.
+    """
+
+    output: dict[str, dict[str, Any]] = {
+        "tasks": {},
+        "groups": {},
+        "revisions": {},
+        "finals": {},
+        "sources": {},
+        "references": {},
+    }
+    seen: set[tuple[str, str]] = set()
+    for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        if not isinstance(row, dict) or row.get("run_id") != run_id:
+            continue
+        gate = row.get("gate_name")
+        if gate not in {"G01", "G02", "G03", "G04", "G05"}:
+            continue
+        if row.get("review_state") != "pass" or row.get("expected_state") != "matched":
+            raise ValueError(f"manifest line {line_no} is not a passed matched row")
+        detail = row.get("detail_json")
+        components = detail.get("components") if isinstance(detail, dict) else None
+        if not isinstance(components, list) or not all(
+            isinstance(item, str) for item in components
+        ):
+            raise ValueError(f"manifest line {line_no} lacks string components")
+        entity = str(row.get("entity_key", ""))
+        key = (str(gate), entity)
+        if key in seen:
+            raise ValueError(f"manifest line {line_no} duplicates {gate}/{entity}")
+        seen.add(key)
+        expected_hash = row.get("expected_hash")
+        if (
+            not isinstance(expected_hash, str)
+            or expected_hash != component_sha256(components)
+        ):
+            raise ValueError(f"manifest line {line_no} component hash mismatch")
+        if gate == "G01":
+            if len(components) != 5 or not entity.startswith("task:"):
+                raise ValueError(f"manifest line {line_no} has invalid G01 components")
+            task_id = entity.split(":", 1)[1]
+            output["tasks"][task_id] = {
+                "task_id": components[0],
+                "task_type": components[1],
+                "task_status": components[2],
+                "current_handler_id": components[3],
+                "workflow_revision": components[4],
+            }
+        elif gate == "G02":
+            if len(components) != 9 or not entity.startswith("group:"):
+                raise ValueError(f"manifest line {line_no} has invalid G02 components")
+            locator = ":".join(components[:3])
+            output["groups"][locator] = {
+                "task_id": components[0],
+                "scope_kind": components[1],
+                "scope_ref_id": components[2],
+                "working_revision_no": components[3],
+                "working_revision_status": components[4],
+                "finalized_revision_no": components[5],
+                "finalized_revision_status": components[6],
+                "migration_incomplete": components[7],
+                "migration_issue": components[8],
+            }
+        elif gate == "G03":
+            if len(components) != 12 or not entity.startswith("revision:"):
+                raise ValueError(f"manifest line {line_no} has invalid G03 components")
+            locator = ":".join(components[:4])
+            output["revisions"][locator] = {
+                "task_id": components[0],
+                "scope_kind": components[1],
+                "scope_ref_id": components[2],
+                "revision_no": components[3],
+                "status": components[4],
+                "mode": components[5],
+                "source_locator": components[6],
+                "source_stage": components[7],
+                "created_by": components[8],
+                "reason": components[9],
+                "submitted_at": components[10],
+                "finalized_at": components[11],
+            }
+        elif gate == "G04":
+            if entity.startswith("revision-final:"):
+                if len(components) != 9:
+                    raise ValueError(
+                        f"manifest line {line_no} has invalid G04 final components"
+                    )
+                locator = ":".join(entity.split(":")[1:5])
+                output["finals"].setdefault(locator, []).append(
+                    {
+                        "task_asset_id": components[0],
+                        "sort_order": components[1],
+                        "formal_storage_ref_id": components[2],
+                        "asset_type": components[3],
+                        "whole_hash": components[4],
+                        "binding": components[5],
+                        "role": components[6],
+                        "sku_code": components[7],
+                        "retouch_requirement_id": components[8],
+                    }
+                )
+            elif entity.startswith("revision-source:"):
+                if len(components) != 7:
+                    raise ValueError(
+                        f"manifest line {line_no} has invalid G04 source components"
+                    )
+                locator = ":".join(entity.split(":")[1:5])
+                output["sources"][locator] = {
+                    "source_locator": components[0],
+                    "role": components[1],
+                    "whole_hash": components[2],
+                    "binding": components[3],
+                    "binding_role": components[4],
+                    "sku_code": components[5],
+                    "retouch_requirement_id": components[6],
+                }
+            else:
+                raise ValueError(f"manifest line {line_no} has invalid G04 entity")
+        else:
+            if len(components) != 6 or not entity.startswith("revision-reference:"):
+                raise ValueError(f"manifest line {line_no} has invalid G05 components")
+            locator = ":".join(entity.split(":")[1:5])
+            output["references"].setdefault(locator, []).append(
+                {
+                    "reference_file_ref_id": components[0],
+                        "formal_storage_ref_id": components[1],
+                    "sort_order": components[2],
+                    "ref_id": components[3],
+                    "file_name": components[4],
+                    "scope": components[5],
+                }
+            )
+    if not output["tasks"] or not output["groups"]:
+        raise ValueError("reviewed manifest lacks G01/G02 API oracle rows")
+    if set(output["tasks"]) != {
+        value["task_id"] for value in output["tasks"].values()
+    }:
+        raise ValueError("G01 task entity and component IDs differ")
+    for collection in ("finals", "references"):
+        for rows in output[collection].values():
+            rows.sort(key=lambda item: int(item["sort_order"]))
+    return output
+
+
+def load_asset_identity_map(
+    path: pathlib.Path, run_id: str, manifest_sha256: str
+) -> dict[str, dict[str, Any]]:
+    document = load_object(path, "asset identity map")
+    if set(document) != {
+        "schema_version",
+        "oracle_kind",
+        "run_id",
+        "inputs",
+        "tasks",
+        "roots",
+        "versions",
+        "revision_roles",
+        "revision_reasons",
+        "route_expectations",
+        "evidence_sha256",
+    }:
+        raise ValueError("asset identity map has unexpected fields")
+    evidence_sha = document["evidence_sha256"]
+    unsigned = {
+        key: value for key, value in document.items() if key != "evidence_sha256"
+    }
+    if (
+        document["schema_version"] != 2
+        or document["oracle_kind"] != "non_circular_g6_v2"
+        or document["run_id"] != run_id
+        or not isinstance(evidence_sha, str)
+        or evidence_sha != sha256(canonical(unsigned))
+    ):
+        raise ValueError("asset identity map binding or evidence hash differs")
+    inputs = document["inputs"]
+    if (
+        not isinstance(inputs, dict)
+        or inputs.get("reviewed_manifest_sha256") != manifest_sha256
+        or not isinstance(inputs.get("reviewed_mapping_sha256"), str)
+        or not SHA256_RE.fullmatch(inputs["reviewed_mapping_sha256"])
+    ):
+        raise ValueError("asset identity map input bindings differ")
+    versions = document["versions"]
+    roots = document["roots"]
+    tasks = document["tasks"]
+    revision_roles = document["revision_roles"]
+    revision_reasons = document["revision_reasons"]
+    route_expectations = document["route_expectations"]
+    if (
+        not isinstance(versions, list)
+        or not isinstance(roots, list)
+        or not isinstance(tasks, list)
+        or not isinstance(revision_roles, list)
+        or not isinstance(revision_reasons, list)
+        or not isinstance(route_expectations, dict)
+    ):
+        raise ValueError(
+            "asset identity map v2 collections have invalid types"
+        )
+    task_output: dict[str, dict[str, Any]] = {}
+    for index, row in enumerate(tasks):
+        if not isinstance(row, dict) or set(row) != {
+            "task_id",
+            "task_type",
+            "task_status",
+            "current_handler_id",
+            "workflow_revision",
+            "owner_department_id",
+            "owner_team_id",
+        }:
+            raise ValueError(f"task oracle row {index} field contract differs")
+        task_id = row["task_id"]
+        if (
+            not isinstance(task_id, int)
+            or isinstance(task_id, bool)
+            or task_id <= 0
+            or any(
+                value is not None
+                and (
+                    not isinstance(value, int)
+                    or isinstance(value, bool)
+                    or value <= 0
+                )
+                for value in (
+                    row["owner_department_id"],
+                    row["owner_team_id"],
+                )
+            )
+            or str(task_id) in task_output
+        ):
+            raise ValueError(f"task oracle row {index} has invalid values")
+        task_output[str(task_id)] = dict(row)
+
+    root_required = {
+        "root_asset_id",
+        "task_id",
+        "intrinsic_asset_type",
+        "scope_sku_code",
+        "retouch_requirement_id",
+        "current_locator",
+        "approved_locator",
+        "provenance",
+    }
+    root_output: dict[str, dict[str, Any]] = {}
+    for index, row in enumerate(roots):
+        if not isinstance(row, dict) or set(row) != root_required:
+            raise ValueError(f"root oracle row {index} field contract differs")
+        root_id = row["root_asset_id"]
+        task_id = row["task_id"]
+        if (
+            not isinstance(root_id, int)
+            or isinstance(root_id, bool)
+            or root_id <= 0
+            or not isinstance(task_id, int)
+            or isinstance(task_id, bool)
+            or str(task_id) not in task_output
+            or str(root_id) in root_output
+            or not isinstance(row["intrinsic_asset_type"], str)
+            or not isinstance(row["scope_sku_code"], str)
+            or not isinstance(row["provenance"], dict)
+        ):
+            raise ValueError(f"root oracle row {index} has invalid values")
+        root_output[str(root_id)] = dict(row)
+
+    version_required = {
+        "task_asset_id",
+        "task_id",
+        "root_asset_id",
+        "stable_locator",
+        "intrinsic_asset_type",
+        "scope_sku_code",
+        "retouch_requirement_id",
+        "storage_ref_id",
+        "object_key_sha256",
+        "content_sha256",
+        "size",
+        "mime_type",
+        "upload_status",
+        "deleted_at",
+        "cleaned_at",
+        "object_deleted_at",
+        "asset_version_no",
+        "flow_review_status",
+        "approved_at",
+        "approved_by",
+        "created_at",
+        "source_asset_version_id",
+        "content_availability",
+        "expected_roles",
+        "provenance",
+    }
+    version_native: dict[str, dict[str, Any]] = {}
+    locator_output: dict[str, dict[str, Any]] = {}
+    for index, row in enumerate(versions):
+        if not isinstance(row, dict) or set(row) != version_required:
+            raise ValueError(f"asset identity row {index} field contract differs")
+        asset_id = row["task_asset_id"]
+        task_id = row["task_id"]
+        root_id = row["root_asset_id"]
+        retouch_id = row["retouch_requirement_id"]
+        if (
+            not isinstance(asset_id, int)
+            or isinstance(asset_id, bool)
+            or asset_id <= 0
+            or not isinstance(task_id, int)
+            or isinstance(task_id, bool)
+            or task_id <= 0
+            or not isinstance(root_id, int)
+            or isinstance(root_id, bool)
+            or root_id <= 0
+            or str(root_id) not in root_output
+            or root_output[str(root_id)]["task_id"] != task_id
+            or (
+                retouch_id is not None
+                and (
+                    not isinstance(retouch_id, int)
+                    or isinstance(retouch_id, bool)
+                    or retouch_id <= 0
+                )
+            )
+            or str(task_id) not in task_output
+            or not isinstance(row["stable_locator"], str)
+            or not row["stable_locator"]
+            or not isinstance(row["intrinsic_asset_type"], str)
+            or not isinstance(row["scope_sku_code"], str)
+            or not isinstance(row["storage_ref_id"], str)
+            or not isinstance(row["object_key_sha256"], str)
+            or (
+                row["object_key_sha256"]
+                and not SHA256_RE.fullmatch(row["object_key_sha256"])
+            )
+            or not isinstance(row["content_sha256"], str)
+            or (
+                row["content_sha256"]
+                and not SHA256_RE.fullmatch(row["content_sha256"])
+            )
+            or not isinstance(row["size"], int)
+            or isinstance(row["size"], bool)
+            or row["size"] < 0
+            or not isinstance(row["mime_type"], str)
+            or not isinstance(row["approved_at"], str)
+            or (
+                row["approved_by"] is not None
+                and (
+                    not isinstance(row["approved_by"], int)
+                    or isinstance(row["approved_by"], bool)
+                    or row["approved_by"] <= 0
+                )
+            )
+            or not isinstance(row["expected_roles"], list)
+            or sorted(set(row["expected_roles"])) != row["expected_roles"]
+            or not isinstance(row["provenance"], dict)
+        ):
+            raise ValueError(f"asset identity row {index} has invalid values")
+        key = str(asset_id)
+        if key in version_native or row["stable_locator"] in locator_output:
+            raise ValueError(f"asset identity row {index} duplicates {asset_id}")
+        version_native[key] = dict(row)
+        locator_output[row["stable_locator"]] = version_native[key]
+
+    expected_route_fields = {
+        "detail_visible_locators",
+        "list_root_ids",
+        "current_locators",
+        "approved_locators",
+        "historical_unavailable_locators",
+    }
+    if set(route_expectations) != expected_route_fields or not all(
+        isinstance(route_expectations[field], list)
+        and len(route_expectations[field])
+        == len(set(route_expectations[field]))
+        for field in expected_route_fields
+    ):
+        raise ValueError("asset identity map route expectations differ")
+    locator_fields = (
+        "detail_visible_locators",
+        "current_locators",
+        "approved_locators",
+        "historical_unavailable_locators",
+    )
+    for field in locator_fields:
+        if not all(
+            isinstance(locator, str) and locator in locator_output
+            for locator in route_expectations[field]
+        ):
+            raise ValueError(f"asset identity map {field} has unknown locator")
+    if sorted(route_expectations["list_root_ids"]) != sorted(
+        int(root_id)
+        for root_id, root in root_output.items()
+        if root["current_locator"] is not None
+    ):
+        raise ValueError("asset identity map list root IDs differ")
+    for root_id, root in root_output.items():
+        for pointer, field in (
+            ("current_locator", "current_locators"),
+            ("approved_locator", "approved_locators"),
+        ):
+            locator = root[pointer]
+            if locator is not None and (
+                locator not in locator_output
+                or locator_output[locator]["root_asset_id"] != int(root_id)
+                or locator not in route_expectations[field]
+            ):
+                raise ValueError(f"asset identity map root {pointer} differs")
+
+    output: dict[str, dict[str, Any]] = {}
+    detail_locators = set(route_expectations["detail_visible_locators"])
+    current_locators = set(route_expectations["current_locators"])
+    approved_locators = set(route_expectations["approved_locators"])
+    for key, row in version_native.items():
+        root = root_output[str(row["root_asset_id"])]
+        provenance = row["provenance"]
+        output[key] = {
+            **row,
+            "asset_type": row["intrinsic_asset_type"],
+            "whole_hash": row["content_sha256"],
+            "binding_state": str(provenance.get("a_binding_state", "bound")),
+            "bound_role": str(provenance.get("a_bound_role", "")),
+            "root_asset_type": root["intrinsic_asset_type"],
+            "root_scope_sku_code": root["scope_sku_code"],
+            "root_retouch_requirement_id": root["retouch_requirement_id"],
+            "detail_visible": row["stable_locator"] in detail_locators,
+            "list_current_version": row["stable_locator"] in current_locators,
+            "list_approved_version": row["stable_locator"] in approved_locators,
+        }
+
+    role_output: dict[str, dict[str, Any]] = {}
+    role_required = {
+        "revision_locator",
+        "task_id",
+        "scope_kind",
+        "scope_ref_id",
+        "revision_no",
+        "status",
+        "source_stage",
+        "source_kind",
+        "source_locator",
+        "final_locators",
+        "reference_file_ref_ids",
+        "reference_locators",
+        "is_working",
+        "is_finalized",
+    }
+    for index, row in enumerate(revision_roles):
+        if (
+            not isinstance(row, dict)
+            or set(row) != role_required
+            or not isinstance(row["revision_locator"], str)
+            or row["revision_locator"] in role_output
+            or (
+                row["source_locator"] is not None
+                and row["source_locator"] not in locator_output
+            )
+            or not isinstance(row["final_locators"], list)
+            or any(item not in locator_output for item in row["final_locators"])
+        ):
+            raise ValueError(f"revision role oracle row {index} is invalid")
+        role_output[row["revision_locator"]] = dict(row)
+    reason_output: dict[str, str] = {}
+    for index, row in enumerate(revision_reasons):
+        if (
+            not isinstance(row, dict)
+            or set(row) != {"revision_locator", "reason_sha256"}
+            or not isinstance(row["revision_locator"], str)
+            or not row["revision_locator"]
+            or not isinstance(row["reason_sha256"], str)
+            or not SHA256_RE.fullmatch(row["reason_sha256"])
+            or row["revision_locator"] in reason_output
+        ):
+            raise ValueError(
+                f"revision reason oracle row {index} is invalid"
+            )
+        reason_output[row["revision_locator"]] = row["reason_sha256"]
+    return {
+        "tasks": task_output,
+        "assets": output,
+        "roots": root_output,
+        "versions": version_native,
+        "versions_by_locator": locator_output,
+        "revision_roles": role_output,
+        "route_expectations": route_expectations,
+        "revision_reasons": reason_output,
+        "reviewed_mapping_sha256": inputs["reviewed_mapping_sha256"],
+    }
 
 
 def local_url(url: str) -> str:
@@ -210,6 +718,21 @@ def http_get(base_url: str, path: str, headers: dict[str, str]) -> HttpResult:
     return HttpResult(status, body, sha256(raw), len(raw))
 
 
+def http_download(
+    base_url: str, path: str, headers: dict[str, str]
+) -> bytes:
+    request = urllib.request.Request(
+        base_url + path, headers=headers, method="GET"
+    )
+    with urllib.request.urlopen(request, timeout=30) as response:
+        raw = response.read(MAX_BODY_BYTES + 1)
+    if len(raw) > MAX_BODY_BYTES:
+        raise ValueError(
+            f"recovery GET {path} response exceeds {MAX_BODY_BYTES} bytes"
+        )
+    return raw
+
+
 def _rule_without_hash(rule: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in rule.items() if key != "rule_sha256"}
 
@@ -282,27 +805,51 @@ def load_rules(path: pathlib.Path, retired_routes: Iterable[str]) -> list[dict[s
             path_value = operation.get("path")
             if not isinstance(path_value, str) or not path_value.startswith("/"):
                 raise ValueError(f"rule {rule_id} operation path is invalid")
+            path_tokens = _tokens(path_value)
+            protected = {
+                "allowed_actions",
+                "items",
+                "references",
+                "revision_no",
+                "sort_order",
+                "source_task_asset_id",
+                "task_asset_id",
+                "task_asset_ids",
+                "final_task_asset_id",
+                "final_task_asset_ids",
+                "formal_task_asset_id",
+                "formal_task_asset_ids",
+                "task_id",
+                "scope_kind",
+                "scope_ref_id",
+                "task_sku_item_id",
+                "retouch_requirement_id",
+            }
+            if protected & set(path_tokens):
+                verb = "remove" if operation["op"] == "remove" else "normalize"
+                raise ValueError(
+                    f"rule {rule_id} cannot {verb} an ordered, permission, "
+                    "identity, or scope field"
+                )
             if operation["op"] == "remove":
-                path_tokens = _tokens(path_value)
-                protected = {
-                    "allowed_actions",
-                    "data",
-                    "items",
-                    "references",
-                    "revision_no",
-                    "sort_order",
-                    "source_task_asset_id",
-                    "task_asset_id",
-                    "task_asset_ids",
-                    "final_task_asset_id",
-                    "final_task_asset_ids",
-                    "formal_task_asset_id",
-                    "formal_task_asset_ids",
+                removable_leaf_fields = {
+                    "access_hint",
+                    "display_name",
+                    "expires_at",
+                    "generated_at",
+                    "notes",
+                    "trace_id",
+                    "updated_at",
                 }
-                if len(path_tokens) < 2 or path_tokens[-1] in protected | {"*"}:
+                if (
+                    len(path_tokens) < 2
+                    or path_tokens[-1] not in removable_leaf_fields
+                    or "*" in path_tokens
+                    or any(token.isdigit() for token in path_tokens)
+                ):
                     raise ValueError(
-                        f"rule {rule_id} cannot remove an ordered, permission, "
-                        "identity, or top-level payload field"
+                        f"rule {rule_id} cannot remove a non-volatile or "
+                        "structural payload field"
                     )
         if (
             not isinstance(value["rule_sha256"], str)
@@ -356,10 +903,21 @@ def load_matrix(path: pathlib.Path) -> tuple[dict[str, str], list[dict[str, str]
                 "frontend": str(combination["frontend"]),
                 "backend": str(combination["backend"]),
                 "data": str(combination["data"]),
+                "origin_sha256": sha256(urls[combo_id].encode("utf-8")),
             }
         )
     if set(urls) != set(COMBINATION_IDS):
         raise ValueError("all four combination URLs must be present")
+    a_origins = {
+        urls["external_external_a"],
+        urls["dev_external_a"],
+    }
+    b_origins = {
+        urls["dev_dev_b"],
+        urls["external_dev_b"],
+    }
+    if a_origins & b_origins:
+        raise ValueError("A and B combinations must use disjoint physical origins")
     identities_value = document["identities"]
     if not isinstance(identities_value, list) or not identities_value:
         raise ValueError("matrix must contain at least one identity")
@@ -459,6 +1017,580 @@ def task_asset_ids(value: object) -> set[str]:
         for child in value:
             found.update(task_asset_ids(child))
     return found
+
+
+def normalize_transport_noise(value: object) -> object:
+    """Remove only request-instance metadata that is not an API contract.
+
+    Error trace IDs are deliberately random for every request.  Normalizing
+    that exact envelope path lets same-backend comparisons remain strict
+    without hiding business payload, permission, identity, or ordering fields.
+    """
+
+    if isinstance(value, dict):
+        output = {
+            key: normalize_transport_noise(child)
+            for key, child in value.items()
+        }
+        error = output.get("error")
+        if isinstance(error, dict):
+            error = dict(error)
+            error.pop("trace_id", None)
+            output["error"] = error
+        return output
+    if isinstance(value, list):
+        return [normalize_transport_noise(child) for child in value]
+    return value
+
+
+def unwrap_data(value: object) -> object:
+    if isinstance(value, dict) and set(value) == {"data"}:
+        return value["data"]
+    return value
+
+
+def _drop_keys(value: object, keys: frozenset[str]) -> object:
+    if isinstance(value, dict):
+        return {
+            key: _drop_keys(child, keys)
+            for key, child in value.items()
+            if key not in keys
+        }
+    if isinstance(value, list):
+        return [_drop_keys(child, keys) for child in value]
+    return value
+
+
+TASK_STABLE_FIELDS = (
+    "id",
+    "task_no",
+    "source_mode",
+    "sku_code",
+    "primary_sku_code",
+    "product_name_snapshot",
+    "assignee_id",
+    "assignee_name",
+    "creator_id",
+    "creator_name",
+    "requester_id",
+    "requester_name",
+    "designer_id",
+    "designer_name",
+    "batch_item_count",
+    "batch_mode",
+    "is_batch_task",
+    "business_lane",
+    "customization_required",
+    "owner_department",
+    "owner_org_team",
+    "owner_team",
+    "priority",
+    "deadline_at",
+    "created_at",
+    "design_requirement",
+    "reference_file_refs",
+    "retouch_requirements",
+    "sku_items",
+)
+
+
+def project_task(value: object) -> object:
+    data = unwrap_data(value)
+    if not isinstance(data, dict):
+        return data
+    normalized = _drop_keys(data, frozenset({"set_mode_hint"}))
+    assert isinstance(normalized, dict)
+    return {
+        field: {
+            "present": field in normalized,
+            "value": (
+                _drop_keys(
+                    normalized.get(field),
+                    frozenset({"updated_at"}),
+                )
+                if field == "sku_items"
+                else (
+                    project_nested_asset_versions(normalized.get(field))
+                    if field == "retouch_requirements"
+                    else normalized.get(field)
+                )
+            ),
+        }
+        for field in TASK_STABLE_FIELDS
+    }
+
+
+def project_asset_version(value: object) -> object:
+    if not isinstance(value, dict):
+        return value
+    # V8 assigns legacy task-asset versions to their reviewed SKU scope.
+    # B-side asset/task/type/scope values are checked against the hash-bound
+    # API oracle before this intrinsic A/B projection.  This is deliberately a
+    # direct-field projection: an undeclared scope field on the DesignAsset
+    # root must remain visible as a contract difference.
+    output = {
+        key: child
+        for key, child in value.items()
+        if key
+        not in {
+            "retouch_requirement_id",
+            "scope_sku_code",
+            "warehouse_ready",
+        }
+    }
+    role = output.get("current_version_role")
+    if role == "current_warehouse_ready_version":
+        output["current_version_role"] = "current_approved_version"
+    elif role == "warehouse_ready_version":
+        output["current_version_role"] = "approved_version"
+    asset_type = str(output.get("asset_type") or "reference")
+    copy_pairs = {
+        "source": {
+            "access_hint": (
+                "Use task_no={task_no} asset_no={asset_no} "
+                "version_no={version_no} object_key={storage_key} to fetch "
+                "the OSS-backed source file.",
+                "源文件属于任务 {task_no}，文件编号 {asset_no}，"
+                "第 {version_no} 版。",
+            ),
+            "notes": (
+                "Source files remain OSS-backed business assets; "
+                "no NAS-only path is required.",
+                "当前源文件由任务资源组统一管理。",
+            ),
+        },
+        "delivery": {
+            "access_hint": (
+                "Delivery assets are the business flow truth for audit "
+                "and warehouse after approval.",
+                "成品图通过审核后，作为任务当前有效成品。",
+            ),
+            "notes": (
+                "Warehouse and audit should consume the "
+                "warehouse_ready_version or approved_version based on "
+                "current task status.",
+                "当前成品图由任务资源组统一管理。",
+            ),
+        },
+        "preview": {
+            "access_hint": (
+                "Preview assets are auxiliary only and must not replace "
+                "delivery assets in business flow.",
+                "该文件仅用于预览，不替代正式成品图。",
+            ),
+            "notes": (
+                "Preview artifacts are not the formal source of truth.",
+                "预览文件不是正式业务文件。",
+            ),
+        },
+        "design_thumb": {
+            "access_hint": (
+                "Design thumb assets are lightweight preview derivatives "
+                "for list/detail rendering.",
+                "该缩略图仅用于页面预览。",
+            ),
+            "notes": (
+                "Design thumb artifacts are backend-owned derivatives "
+                "for preview rendering only.",
+                "缩略图只用于页面预览。",
+            ),
+        },
+        "reference": {
+            "access_hint": (
+                "Reference assets are task-scoped files for task creation, "
+                "design reference, and business understanding only.",
+                "参考图用于说明任务需求。",
+            ),
+            "notes": (
+                "Reference assets never enter the "
+                "warehouse_ready_version path.",
+                "参考图用于说明任务需求。",
+            ),
+        },
+    }
+    pair = copy_pairs.get(
+        "reference" if asset_type == "erp_product_image" else asset_type
+    )
+    format_values = {
+        "task_no": str(output.get("task_no") or ""),
+        "asset_no": str(output.get("asset_no") or ""),
+        "version_no": output.get("version_no", 0),
+        "storage_key": str(output.get("storage_key") or ""),
+    }
+    if pair is not None:
+        for field in ("access_hint", "notes"):
+            legacy, current = (
+                template.format(**format_values)
+                for template in pair[field]
+            )
+            if output.get(field) in {legacy, current}:
+                output[field] = f"v8_asset_copy_v1:{asset_type}:{field}"
+    return output
+
+
+def project_nested_asset_versions(value: object) -> object:
+    """Apply the asset-version projection to embedded version contracts."""
+
+    if isinstance(value, dict):
+        if (
+            isinstance(value.get("id"), int)
+            and not isinstance(value.get("id"), bool)
+            and value["id"] > 0
+            and isinstance(value.get("task_id"), int)
+            and not isinstance(value.get("task_id"), bool)
+            and value["task_id"] > 0
+            and isinstance(value.get("asset_id"), int)
+            and not isinstance(value.get("asset_id"), bool)
+            and value["asset_id"] > 0
+            and isinstance(value.get("version_no"), int)
+            and not isinstance(value.get("version_no"), bool)
+            and value["version_no"] > 0
+            and isinstance(value.get("asset_type"), str)
+        ):
+            return project_asset_version(value)
+        return {
+            key: project_nested_asset_versions(child)
+            for key, child in value.items()
+        }
+    if isinstance(value, list):
+        return [project_nested_asset_versions(child) for child in value]
+    return value
+
+
+def project_asset_resource(value: object) -> object:
+    if not isinstance(value, dict):
+        return value
+    output = {
+        key: child
+        for key, child in value.items()
+        if key
+        not in {
+            "retouch_requirement_id",
+            "scope_sku_code",
+            "warehouse_ready_version",
+            "warehouse_ready_version_id",
+        }
+    }
+    for key in ("current_version", "approved_version"):
+        if key in output:
+            output[key] = project_asset_version(output[key])
+    return output
+
+
+def project_assets(value: object) -> object:
+    data = unwrap_data(value)
+    if not isinstance(data, list):
+        return data
+    rows = [project_asset_resource(item) for item in data]
+    return sorted(
+        rows,
+        key=lambda item: (
+            item.get("id", 0) if isinstance(item, dict) else 0,
+            canonical(item),
+        ),
+    )
+
+
+def project_asset_pair(
+    baseline_value: object,
+    candidate_value: object,
+    approved_candidate_root_ids: frozenset[str],
+    asset_identity_oracle: dict[str, dict[str, Any]],
+) -> tuple[object, object]:
+    baseline_data = unwrap_data(baseline_value)
+    candidate_data = unwrap_data(candidate_value)
+    if not isinstance(baseline_data, list) or not isinstance(candidate_data, list):
+        return project_assets(baseline_value), project_assets(candidate_value)
+    baseline_root_ids = {
+        str(item.get("id"))
+        for item in baseline_data
+        if isinstance(item, dict)
+        and isinstance(item.get("id"), int)
+        and not isinstance(item.get("id"), bool)
+        and item["id"] > 0
+    }
+    candidate_without_reviewed_additions = [
+        item
+        for item in candidate_data
+        if not (
+            isinstance(item, dict)
+            and isinstance(item.get("id"), int)
+            and not isinstance(item.get("id"), bool)
+            and item["id"] > 0
+            and str(item["id"]) not in baseline_root_ids
+            and str(item["id"]) in approved_candidate_root_ids
+        )
+    ]
+    # Recovery is no longer normalized into a synthetic marker.  Candidate B
+    # must expose the exact hash-bound metadata and the comparator separately
+    # downloads recovery bytes.  Any A/B body difference remains visible here.
+    return project_assets(baseline_data), project_assets(
+        candidate_without_reviewed_additions
+    )
+
+
+def project_detail(value: object) -> object:
+    data = unwrap_data(value)
+    if not isinstance(data, dict):
+        return data
+    output: dict[str, object] = {}
+    for field in (
+        "assignee_id",
+        "assignee_name",
+        "creator_id",
+        "creator_name",
+        "current_handler_id",
+        "current_handler_name",
+        "designer_id",
+        "designer_name",
+        "reference_file_refs",
+        "requester_id",
+        "requester_name",
+        "retouch_requirements",
+        "sku_items",
+        "task_detail",
+    ):
+        field_value = _drop_keys(
+            data.get(field),
+            frozenset(
+                {
+                    "set_mode_hint",
+                    "product_channel",
+                    *(
+                        {"updated_at"}
+                        if field == "sku_items"
+                        else set()
+                    ),
+                }
+            ),
+        )
+        if field == "retouch_requirements":
+            field_value = project_nested_asset_versions(field_value)
+        output[field] = {
+            "present": field in data,
+            "value": field_value,
+        }
+    output["events"] = {
+        "present": "events" in data,
+        "value": data.get("events"),
+    }
+    output["task"] = project_task(data.get("task"))
+    modules = data.get("modules")
+    task = data.get("task")
+    terminal_task = (
+        isinstance(task, dict) and task.get("task_status") == "Completed"
+    )
+    if isinstance(modules, list):
+        output["modules"] = sorted(
+            (
+                _drop_keys(
+                    item,
+                    (
+                        frozenset(
+                            {
+                                "state",
+                                "terminal_at",
+                                "updated_at",
+                                "claimed_by",
+                                "claimed_team_code",
+                            }
+                        )
+                        if terminal_task
+                        else frozenset()
+                    ),
+                )
+                for item in modules
+            ),
+            key=lambda item: (
+                str(item.get("module_key", "")) if isinstance(item, dict) else "",
+                canonical(item),
+            ),
+        )
+    else:
+        output["modules"] = modules
+    return output
+
+
+def project_detail_pair(
+    baseline_value: object, candidate_value: object
+) -> tuple[object, object]:
+    baseline_projection = project_detail(baseline_value)
+    candidate_projection = project_detail(candidate_value)
+    baseline_data = unwrap_data(baseline_value)
+    candidate_data = unwrap_data(candidate_value)
+    baseline_task = (
+        baseline_data.get("task") if isinstance(baseline_data, dict) else None
+    )
+    candidate_task = (
+        candidate_data.get("task") if isinstance(candidate_data, dict) else None
+    )
+    if (
+        isinstance(baseline_projection, dict)
+        and isinstance(candidate_projection, dict)
+        and isinstance(baseline_task, dict)
+        and isinstance(candidate_task, dict)
+        and baseline_task.get("task_status") == "Completed"
+        and candidate_task.get("task_status") == "InProgress"
+        and baseline_task.get("task_type") == "retouch_task"
+        and candidate_task.get("task_type") == "retouch_task"
+    ):
+        candidate_projection["modules"] = _drop_keys(
+            candidate_projection.get("modules"),
+            frozenset(
+                {
+                    "state",
+                    "terminal_at",
+                    "updated_at",
+                    "claimed_by",
+                    "claimed_team_code",
+                }
+            ),
+        )
+    return baseline_projection, candidate_projection
+
+
+def expected_design_sub_status(
+    task: object, modules: object
+) -> str | None:
+    if not isinstance(task, dict):
+        return None
+    task_type = task.get("task_type")
+    task_status = task.get("task_status")
+    if task_type not in {
+        "original_product_development",
+        "new_product_development",
+        "retouch_task",
+    }:
+        return "not_required"
+    by_status = {
+        "PendingAssign": "pending_design",
+        "PendingAudit": "pending_audit",
+        "Blocked": "rework_required",
+        "Completed": "final_ready",
+        "Archived": "final_ready",
+        "Cancelled": "not_required",
+    }
+    if task_status in by_status:
+        return by_status[task_status]
+    module_key = "retouch" if task_type == "retouch_task" else "design"
+    if isinstance(modules, list):
+        by_module_state = {
+            "pending_claim": "pending_design",
+            "in_progress": "in_progress",
+            "submitted": "pending_audit",
+            "closed": "completed",
+            "completed": "completed",
+        }
+        for module in modules:
+            if (
+                isinstance(module, dict)
+                and module.get("module_key") == module_key
+                and module.get("state") in by_module_state
+            ):
+                return by_module_state[module["state"]]
+    return "in_progress" if task_status == "InProgress" else "pending_design"
+
+
+def detail_asset_versions(value: object) -> list[object] | None:
+    data = unwrap_data(value)
+    if not isinstance(data, dict) or not isinstance(data.get("asset_versions"), list):
+        return None
+    return [project_asset_version(item) for item in data["asset_versions"]]
+
+
+def normalize_manifest_time(value: str) -> str:
+    if not value:
+        return ""
+    normalized = value.replace(".000000", "").replace("+00:00", "Z")
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}", normalized):
+        # The reviewed mapping is exported from UTC MySQL DATETIME columns,
+        # while the API serializes the same instant with an explicit Z.
+        return normalized + "Z"
+    return normalized
+
+
+def is_rfc3339_datetime(value: object) -> bool:
+    if not isinstance(value, str) or not value:
+        return False
+    candidate = value[:-1] + "+00:00" if value.endswith("Z") else value
+    try:
+        parsed = dt.datetime.fromisoformat(candidate)
+    except ValueError:
+        return False
+    return parsed.tzinfo is not None
+
+
+def allowed_actions_by_path(value: object, path: str = "") -> dict[str, frozenset[str]]:
+    found: dict[str, frozenset[str]] = {}
+    if isinstance(value, dict):
+        for key, child in value.items():
+            child_path = f"{path}/{key}"
+            if key == "allowed_actions" and isinstance(child, list) and all(
+                isinstance(item, str) for item in child
+            ):
+                found[child_path] = frozenset(child)
+            found.update(allowed_actions_by_path(child, child_path))
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            found.update(allowed_actions_by_path(child, f"{path}/{index}"))
+    return found
+
+
+def expected_evidence_summary(
+    reason: str, reviewed_reason_sha256: str
+) -> dict[str, Any] | None:
+    marker = re.search(r"\[migration_v2 ([^\]]+)\]$", reason)
+    if marker is None:
+        return None
+    fields: dict[str, str] = {}
+    for token in marker.group(1).split(" "):
+        if "=" not in token:
+            raise ValueError("migration_v2 reason marker token is invalid")
+        key, value = token.split("=", 1)
+        if not key or key in fields:
+            raise ValueError("migration_v2 reason marker field is invalid")
+        fields[key] = value
+    required = {
+        "manifest",
+        "confidence",
+        "confirmed_by",
+        "confirmed_at",
+        "evidence_count",
+        "first_evidence",
+    }
+    if not required <= set(fields):
+        raise ValueError("migration_v2 reason marker lacks required evidence")
+    evidence_count = int(fields["evidence_count"])
+    confirmed_by = int(fields["confirmed_by"])
+    if evidence_count <= 0 or confirmed_by <= 0:
+        raise ValueError("migration_v2 reason marker numeric field is invalid")
+    business_reason = reason[: marker.start()].strip()
+    output: dict[str, Any] = {
+        "schema_version": "migration_v2",
+        "manifest_sha256": fields["manifest"],
+        "confidence": fields["confidence"],
+        "confirmed_by": confirmed_by,
+        "confirmed_at": normalize_manifest_time(fields["confirmed_at"]),
+        "evidence_event_count": evidence_count,
+        "evidence_event_ids": [fields["first_evidence"]],
+        "evidence_event_ids_complete": evidence_count == 1,
+        "upload_session_ids": [],
+        "upload_sessions_known": False,
+    }
+    if business_reason:
+        if sha256(business_reason.encode("utf-8")) != reviewed_reason_sha256:
+            raise ValueError(
+                "migration_v2 business reason differs from reviewed mapping"
+            )
+        output["business_reason"] = business_reason
+    reason_hash = fields.get("reason_sha256")
+    if reason_hash:
+        if reason_hash != reviewed_reason_sha256:
+            raise ValueError("migration_v2 reviewed reason hash differs")
+        output["business_reason_sha256"] = reason_hash
+    elif not business_reason and reviewed_reason_sha256 != sha256(b""):
+        raise ValueError("migration_v2 omitted reviewed reason evidence")
+    return output
 
 
 def _tokens(path: str) -> list[str]:
@@ -595,6 +1727,8 @@ class Runner:
         resolved_headers: dict[str, dict[str, str]],
         rules: list[dict[str, Any]],
         retired_routes: list[str],
+        expectations: dict[str, dict[str, Any]],
+        api_oracle: dict[str, dict[str, Any]],
         requester: Callable[[str, str, dict[str, str]], HttpResult],
     ):
         self.urls = dict(urls)
@@ -605,6 +1739,45 @@ class Runner:
         }
         self.rules = rules
         self.retired_routes = frozenset(retired_routes)
+        self.expectations = expectations
+        self.task_oracle = api_oracle["tasks"]
+        self.asset_identity_oracle = api_oracle["assets"]
+        self.root_oracle = api_oracle["roots"]
+        self.version_oracle = api_oracle["versions"]
+        self.revision_role_oracle = api_oracle["revision_roles"]
+        self.route_expectations = api_oracle["route_expectations"]
+        self.revision_reason_oracle = api_oracle["revision_reasons"]
+        if set(self.revision_reason_oracle) != set(
+            self.expectations["revisions"]
+        ):
+            raise ValueError(
+                "API oracle revision reasons do not cover reviewed revisions"
+            )
+        self.list_current_by_root: dict[str, dict[str, Any]] = {}
+        self.list_approved_by_root: dict[str, dict[str, Any]] = {}
+        for row in self.asset_identity_oracle.values():
+            root_id = str(row.get("root_asset_id") or "")
+            if row["list_current_version"]:
+                if not root_id or root_id in self.list_current_by_root:
+                    raise ValueError("API oracle current asset root is invalid")
+                self.list_current_by_root[root_id] = row
+            if row["list_approved_version"]:
+                if not root_id or root_id in self.list_approved_by_root:
+                    raise ValueError("API oracle approved asset root is invalid")
+                self.list_approved_by_root[root_id] = row
+        for root_id, approved in self.list_approved_by_root.items():
+            current = self.list_current_by_root.get(root_id)
+            if current is None or any(
+                approved[field] != current[field]
+                for field in (
+                    "task_id",
+                    "root_asset_id",
+                    "root_asset_type",
+                    "root_scope_sku_code",
+                    "root_retouch_requirement_id",
+                )
+            ):
+                raise ValueError("API oracle approved asset root differs")
         self.requester = requester
         self.observations: list[dict[str, Any]] = []
         self.results: dict[tuple[str, str, str, str], HttpResult] = {}
@@ -614,6 +1787,1667 @@ class Runner:
         self._requests: dict[tuple[str, str, str], Future[HttpResult]] = {}
         self.logical_request_count = 0
         self.physical_request_count = 0
+        self.manifest_oracle_check_count = 0
+        self.semantic_comparison_count = 0
+        self.governed_assets: dict[tuple[str, str], set[str]] = {}
+        self.task_asset_metadata: dict[
+            tuple[str, str, str], dict[str, Any]
+        ] = {}
+        self.required_oracle_identities = frozenset(
+            identity["id"]
+            for identity in identities
+            if identity.get("role") == "admin"
+        )
+        if not self.required_oracle_identities:
+            raise ValueError("G6 requires at least one admin oracle identity")
+        self.oracle_coverage: dict[
+            tuple[str, str, str], set[str]
+        ] = {}
+
+    def cover(
+        self, combination: str, identity: str, kind: str, locator: str
+    ) -> None:
+        with self._state_lock:
+            self.oracle_coverage.setdefault(
+                (combination, identity, kind), set()
+            ).add(locator)
+
+    def validate_oracle_coverage(self) -> None:
+        expected = {
+            "task": set(self.expectations["tasks"]),
+            "detail": set(self.expectations["tasks"]),
+            "bundle": set(self.expectations["tasks"]),
+            "group": set(self.expectations["groups"]),
+            "revision": set(self.expectations["revisions"]),
+            "detail_asset": {
+                asset_id
+                for asset_id, row in self.asset_identity_oracle.items()
+                if row["detail_visible"]
+            },
+            "list_asset": {
+                asset_id
+                for asset_id, row in self.asset_identity_oracle.items()
+                if row["list_current_version"]
+            },
+            "list_approved_asset": {
+                asset_id
+                for asset_id, row in self.asset_identity_oracle.items()
+                if row["list_approved_version"]
+            },
+        }
+        for combination in ("dev_dev_b", "external_dev_b"):
+            for identity in sorted(self.required_oracle_identities):
+                for kind, expected_locators in expected.items():
+                    actual = self.oracle_coverage.get(
+                        (combination, identity, kind), set()
+                    )
+                    if actual != expected_locators:
+                        self.oracle_violation(
+                            f"coverage:{kind}",
+                            f"{combination}/{identity} coverage "
+                            f"{sha256(canonical(sorted(actual)))}!="
+                            f"{sha256(canonical(sorted(expected_locators)))}",
+                        )
+
+    @staticmethod
+    def _scope_ref(group: dict[str, Any]) -> str:
+        scope = str(group.get("scope_kind", ""))
+        key = {
+            "task": None,
+            "sku": "task_sku_item_id",
+            "retouch_requirement": "retouch_requirement_id",
+        }.get(scope)
+        if scope == "task":
+            return "0"
+        value = group.get(key) if key else None
+        return str(value) if isinstance(value, int) and value > 0 else ""
+
+    def oracle_violation(self, entity: str, detail: str) -> None:
+        self.violation("api.manifest_oracle_mismatch", entity, detail)
+
+    @staticmethod
+    def _positive_int(value: object) -> bool:
+        return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+    @staticmethod
+    def _nonnegative_int(value: object) -> bool:
+        return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+
+    def validate_revision_contract_shape(
+        self,
+        combination: str,
+        identity: str,
+        entity: str,
+        revision: object,
+    ) -> None:
+        if not isinstance(revision, dict):
+            self.oracle_violation(
+                entity, f"{combination}/{identity} revision is not an object"
+            )
+            return
+        required = {
+            "id",
+            "group_id",
+            "revision_no",
+            "status",
+            "mode",
+            "source_stage",
+            "created_by",
+            "legacy_migration",
+            "items",
+            "references",
+            "created_at",
+        }
+        missing = sorted(required - revision.keys())
+        if missing:
+            self.oracle_violation(
+                entity,
+                f"{combination}/{identity} revision misses required fields "
+                f"{','.join(missing)}",
+            )
+        for field in ("id", "group_id", "revision_no", "created_by"):
+            if field in revision and not self._positive_int(revision[field]):
+                self.oracle_violation(
+                    entity,
+                    f"{combination}/{identity} revision {field} is invalid",
+                )
+        if revision.get("status") not in {
+            "draft",
+            "submitted",
+            "finalized",
+            "rejected",
+            "superseded",
+        }:
+            self.oracle_violation(
+                entity, f"{combination}/{identity} revision status is invalid"
+            )
+        if revision.get("mode") not in {"single", "set"}:
+            self.oracle_violation(
+                entity, f"{combination}/{identity} revision mode is invalid"
+            )
+        if revision.get("source_stage") not in {
+            "design",
+            "audit",
+            "retouch",
+            "migration",
+            "reopen",
+        }:
+            self.oracle_violation(
+                entity, f"{combination}/{identity} revision source_stage is invalid"
+            )
+        if not isinstance(revision.get("legacy_migration"), bool):
+            self.oracle_violation(
+                entity,
+                f"{combination}/{identity} revision legacy_migration is invalid",
+            )
+        if not isinstance(revision.get("created_at"), str) or not revision.get(
+            "created_at"
+        ):
+            self.oracle_violation(
+                entity, f"{combination}/{identity} revision created_at is invalid"
+            )
+        revision_id = revision.get("id")
+        source_id = revision.get("source_task_asset_id")
+        source_file = revision.get("source_file")
+        if source_file is not None:
+            if (
+                not isinstance(source_file, dict)
+                or not self._positive_int(source_file.get("task_asset_id"))
+                or not isinstance(source_file.get("file_name"), str)
+                or not source_file.get("file_name")
+            ):
+                self.oracle_violation(
+                    entity,
+                    f"{combination}/{identity} revision source_file is invalid",
+                )
+            elif source_file["task_asset_id"] != source_id:
+                self.oracle_violation(
+                    entity,
+                    f"{combination}/{identity} revision source_file task_asset_id differs",
+                )
+        items = revision.get("items")
+        if not isinstance(items, list):
+            self.oracle_violation(
+                entity, f"{combination}/{identity} revision items is invalid"
+            )
+        else:
+            for index, item in enumerate(items):
+                item_required = {"id", "revision_id", "task_asset_id", "sort_order"}
+                if not isinstance(item, dict):
+                    self.oracle_violation(
+                        entity,
+                        f"{combination}/{identity} revision item {index} is invalid",
+                    )
+                    continue
+                missing_item = sorted(item_required - item.keys())
+                if missing_item:
+                    self.oracle_violation(
+                        entity,
+                        f"{combination}/{identity} revision item {index} misses "
+                        f"{','.join(missing_item)}",
+                    )
+                for field in ("id", "revision_id", "task_asset_id"):
+                    if field in item and not self._positive_int(item[field]):
+                        self.oracle_violation(
+                            entity,
+                            f"{combination}/{identity} revision item {index} "
+                            f"{field} is invalid",
+                        )
+                if "sort_order" in item and not self._nonnegative_int(
+                    item["sort_order"]
+                ):
+                    self.oracle_violation(
+                        entity,
+                        f"{combination}/{identity} revision item {index} "
+                        "sort_order is invalid",
+                    )
+                if (
+                    self._positive_int(revision_id)
+                    and self._positive_int(item.get("revision_id"))
+                    and item["revision_id"] != revision_id
+                ):
+                    self.oracle_violation(
+                        entity,
+                        f"{combination}/{identity} revision item {index} "
+                        "revision_id differs",
+                    )
+                file_row = item.get("file")
+                if file_row is not None:
+                    if (
+                        not isinstance(file_row, dict)
+                        or not self._positive_int(file_row.get("task_asset_id"))
+                        or not isinstance(file_row.get("file_name"), str)
+                        or not file_row.get("file_name")
+                    ):
+                        self.oracle_violation(
+                            entity,
+                            f"{combination}/{identity} revision item {index} "
+                            "file is invalid",
+                        )
+                    elif file_row["task_asset_id"] != item.get("task_asset_id"):
+                        self.oracle_violation(
+                            entity,
+                            f"{combination}/{identity} revision item {index} "
+                            "file task_asset_id differs",
+                        )
+                    revision_item_id = file_row.get("revision_item_id")
+                    if (
+                        revision_item_id is not None
+                        and revision_item_id != item.get("id")
+                    ):
+                        self.oracle_violation(
+                            entity,
+                            f"{combination}/{identity} revision item {index} "
+                            "file revision_item_id differs",
+                        )
+        references = revision.get("references")
+        if not isinstance(references, list):
+            self.oracle_violation(
+                entity, f"{combination}/{identity} revision references is invalid"
+            )
+        else:
+            for index, reference in enumerate(references):
+                reference_required = {
+                    "id",
+                    "revision_id",
+                    "reference_file_ref_id",
+                    "sort_order",
+                    "ref_id",
+                    "created_at",
+                }
+                if not isinstance(reference, dict):
+                    self.oracle_violation(
+                        entity,
+                        f"{combination}/{identity} revision reference {index} is invalid",
+                    )
+                    continue
+                missing_reference = sorted(reference_required - reference.keys())
+                if missing_reference:
+                    self.oracle_violation(
+                        entity,
+                        f"{combination}/{identity} revision reference {index} misses "
+                        f"{','.join(missing_reference)}",
+                    )
+                for field in ("id", "revision_id", "reference_file_ref_id"):
+                    if field in reference and not self._positive_int(reference[field]):
+                        self.oracle_violation(
+                            entity,
+                            f"{combination}/{identity} revision reference {index} "
+                            f"{field} is invalid",
+                        )
+                if "sort_order" in reference and not self._nonnegative_int(
+                    reference["sort_order"]
+                ):
+                    self.oracle_violation(
+                        entity,
+                        f"{combination}/{identity} revision reference {index} "
+                        "sort_order is invalid",
+                    )
+                if not isinstance(reference.get("ref_id"), str) or not reference.get(
+                    "ref_id"
+                ):
+                    self.oracle_violation(
+                        entity,
+                        f"{combination}/{identity} revision reference {index} "
+                        "ref_id is invalid",
+                    )
+                if not isinstance(reference.get("created_at"), str) or not reference.get(
+                    "created_at"
+                ):
+                    self.oracle_violation(
+                        entity,
+                        f"{combination}/{identity} revision reference {index} "
+                        "created_at is invalid",
+                    )
+                if (
+                    self._positive_int(revision_id)
+                    and self._positive_int(reference.get("revision_id"))
+                    and reference["revision_id"] != revision_id
+                ):
+                    self.oracle_violation(
+                        entity,
+                        f"{combination}/{identity} revision reference {index} "
+                        "revision_id differs",
+                    )
+
+    @staticmethod
+    def revision_link_projection(revision: dict[str, Any]) -> dict[str, Any]:
+        source_file = revision.get("source_file")
+        raw_items = revision.get("items")
+        raw_references = revision.get("references")
+        return {
+            "id": revision.get("id"),
+            "group_id": revision.get("group_id"),
+            "revision_no": revision.get("revision_no"),
+            "status": revision.get("status"),
+            "mode": revision.get("mode"),
+            "source_task_asset_id": revision.get("source_task_asset_id"),
+            "source_file_task_asset_id": (
+                source_file.get("task_asset_id")
+                if isinstance(source_file, dict)
+                else None
+            ),
+            "source_stage": revision.get("source_stage"),
+            "created_by": revision.get("created_by"),
+            "reason": revision.get("reason"),
+            "legacy_migration": revision.get("legacy_migration"),
+            "items": (
+                [
+                    {
+                        "id": item.get("id"),
+                        "revision_id": item.get("revision_id"),
+                        "task_asset_id": item.get("task_asset_id"),
+                        "sort_order": item.get("sort_order"),
+                        "file_task_asset_id": (
+                            item["file"].get("task_asset_id")
+                            if isinstance(item.get("file"), dict)
+                            else None
+                        ),
+                    }
+                    for item in raw_items
+                    if isinstance(item, dict)
+                ]
+                if isinstance(raw_items, list)
+                else {"invalid_type": type(raw_items).__name__}
+            ),
+            "references": (
+                [
+                    {
+                        "id": reference.get("id"),
+                        "revision_id": reference.get("revision_id"),
+                        "reference_file_ref_id": reference.get(
+                            "reference_file_ref_id"
+                        ),
+                        "formal_task_asset_id": reference.get(
+                            "formal_task_asset_id"
+                        ),
+                        "sort_order": reference.get("sort_order"),
+                        "ref_id": reference.get("ref_id"),
+                    }
+                    for reference in raw_references
+                    if isinstance(reference, dict)
+                ]
+                if isinstance(raw_references, list)
+                else {"invalid_type": type(raw_references).__name__}
+            ),
+        }
+
+    @staticmethod
+    def storage_ref_from_stable_locator(value: object) -> str:
+        parts = str(value or "").split(":", 2)
+        return parts[2] if len(parts) == 3 and parts[0] == "asset" else ""
+
+    def validate_version_identity(
+        self,
+        combination: str,
+        identity: str,
+        entity: str,
+        version: object,
+        *,
+        surface: str,
+        coverage_kind: str | None = None,
+    ) -> dict[str, Any] | None:
+        if not isinstance(version, dict):
+            self.oracle_violation(
+                entity, f"{combination}/{identity} {surface} asset is invalid"
+            )
+            return None
+        asset_id = version.get("id")
+        expected = self.asset_identity_oracle.get(str(asset_id))
+        if not self._positive_int(asset_id) or expected is None:
+            self.oracle_violation(
+                entity,
+                f"{combination}/{identity} {surface} asset {asset_id} "
+                "is absent from the v2 oracle",
+            )
+            return None
+        scope_value = version.get("scope_sku_code")
+        retouch_value = version.get("retouch_requirement_id")
+        storage_key = version.get("storage_key")
+        file_hash = version.get("file_hash")
+        file_size = version.get("file_size")
+        mime_type = version.get("mime_type")
+        if surface == "list":
+            expected_type = expected["root_asset_type"]
+            expected_scope = (
+                expected["scope_sku_code"]
+                or expected["root_scope_sku_code"]
+            )
+        else:
+            expected_type = expected["intrinsic_asset_type"]
+            expected_scope = expected["scope_sku_code"]
+        actual = {
+            "task_asset_id": asset_id,
+            "task_id": version.get("task_id"),
+            "root_asset_id": version.get("asset_id"),
+            "asset_type": version.get("asset_type"),
+            "scope_sku_code": scope_value,
+            "retouch_requirement_id": retouch_value,
+            "object_key_sha256": (
+                sha256(storage_key.encode("utf-8"))
+                if isinstance(storage_key, str)
+                else None
+            ),
+            "content_sha256": file_hash,
+            "size": file_size,
+            "mime_type": mime_type,
+            "flow_review_status": str(
+                version.get("flow_review_status") or ""
+            ),
+            "approved_at": version.get("approved_at"),
+            "approved_by": version.get("approved_by"),
+        }
+        expected_projection = {
+            "task_asset_id": expected["task_asset_id"],
+            "task_id": expected["task_id"],
+            "root_asset_id": expected["root_asset_id"],
+            "asset_type": expected_type,
+            "scope_sku_code": expected_scope,
+            "retouch_requirement_id": expected["retouch_requirement_id"],
+            "object_key_sha256": expected["object_key_sha256"],
+            "content_sha256": expected["content_sha256"],
+            "size": expected["size"],
+            "mime_type": expected["mime_type"],
+            "flow_review_status": expected["flow_review_status"],
+            "approved_at": expected["approved_at"] or None,
+            "approved_by": expected["approved_by"],
+        }
+        if actual != expected_projection:
+            self.oracle_violation(
+                entity,
+                f"{combination}/{identity} {surface} asset {asset_id} "
+                f"identity differs {sha256(canonical(actual))}!="
+                f"{sha256(canonical(expected_projection))}",
+            )
+            return None
+        if coverage_kind is not None:
+            self.cover(
+                combination, identity, coverage_kind, str(asset_id)
+            )
+        key = (combination, identity, str(asset_id))
+        with self._state_lock:
+            prior = self.task_asset_metadata.get(key)
+            if prior is not None and any(
+                prior.get(field) != version.get(field)
+                for field in (
+                    "task_id",
+                    "asset_id",
+                    "asset_type",
+                    "scope_sku_code",
+                    "retouch_requirement_id",
+                    "storage_key",
+                    "file_hash",
+                    "file_size",
+                    "mime_type",
+                    "flow_review_status",
+                    "approved_at",
+                    "approved_by",
+                )
+            ):
+                self.oracle_violation(
+                    entity,
+                    f"{combination}/{identity} asset {asset_id} "
+                    "has inconsistent nested identities",
+                )
+            else:
+                self.task_asset_metadata[key] = dict(version)
+        return expected
+
+    @staticmethod
+    def nested_design_asset_versions(value: object) -> list[dict[str, Any]]:
+        found: list[dict[str, Any]] = []
+        if isinstance(value, dict):
+            if (
+                isinstance(value.get("id"), int)
+                and not isinstance(value.get("id"), bool)
+                and isinstance(value.get("task_id"), int)
+                and not isinstance(value.get("task_id"), bool)
+                and isinstance(value.get("asset_id"), int)
+                and not isinstance(value.get("asset_id"), bool)
+                and isinstance(value.get("version_no"), int)
+                and not isinstance(value.get("version_no"), bool)
+                and isinstance(value.get("asset_type"), str)
+            ):
+                found.append(value)
+            for child in value.values():
+                found.extend(Runner.nested_design_asset_versions(child))
+        elif isinstance(value, list):
+            for child in value:
+                found.extend(Runner.nested_design_asset_versions(child))
+        return found
+
+    def validate_task_oracle(
+        self, combination: str, identity: str, task_id: str, route: str, body: object
+    ) -> None:
+        if not combination.endswith("_b"):
+            return
+        if route == "/v1/tasks/{task_id}/assets":
+            self.validate_asset_list_oracle(
+                combination, identity, task_id, body
+            )
+            return
+        if route not in {
+            "/v1/tasks/{task_id}",
+            "/v1/tasks/{task_id}/detail",
+        }:
+            return
+        detail_data = unwrap_data(body)
+        data = detail_data
+        if route.endswith("/detail"):
+            data = data.get("task") if isinstance(data, dict) else None
+        expected = self.expectations["tasks"].get(task_id)
+        entity = f"task:{task_id}:{route}"
+        with self._state_lock:
+            self.manifest_oracle_check_count += 1
+        if not isinstance(data, dict) or not isinstance(expected, dict):
+            self.oracle_violation(
+                entity, f"{combination}/{identity} lacks task oracle payload"
+            )
+            return
+        self.cover(
+            combination,
+            identity,
+            "detail" if route.endswith("/detail") else "task",
+            task_id,
+        )
+        actual = {
+            "task_id": str(data.get("id", "")),
+            "task_type": str(data.get("task_type", "")),
+            "task_status": str(data.get("task_status", "")),
+            "current_handler_id": str(data.get("current_handler_id", "")),
+            "workflow_revision": str(data.get("workflow_revision", "")),
+        }
+        oracle = {
+            key: expected[key]
+            for key in (
+                "task_id",
+                "task_type",
+                "task_status",
+                "current_handler_id",
+                "workflow_revision",
+            )
+        }
+        if actual != oracle:
+            self.oracle_violation(
+                entity,
+                f"{combination}/{identity} task projection "
+                f"{sha256(canonical(actual))}!={sha256(canonical(oracle))}",
+            )
+        if data.get("workflow_contract_version") != 2:
+            self.oracle_violation(
+                entity,
+                f"{combination}/{identity} workflow_contract_version is not 2",
+            )
+        if (
+            route.endswith("/detail")
+            and isinstance(detail_data, dict)
+            and detail_data.get("current_handler_id")
+            != data.get("current_handler_id")
+        ):
+            self.oracle_violation(
+                entity,
+                f"{combination}/{identity} detail current_handler_id "
+                "differs from nested task",
+            )
+        task_row = self.task_oracle.get(task_id)
+        task_oracle = (
+            {
+                "task_id": task_row["task_id"],
+                "owner_department_id": task_row["owner_department_id"],
+                "owner_team_id": task_row["owner_team_id"],
+            }
+            if isinstance(task_row, dict)
+            else None
+        )
+        actual_org = {
+            "task_id": data.get("id"),
+            "owner_department_id": data.get("owner_department_id"),
+            "owner_team_id": data.get("owner_team_id"),
+        }
+        if task_oracle != actual_org:
+            self.oracle_violation(
+                entity,
+                f"{combination}/{identity} task organization projection "
+                f"{sha256(canonical(actual_org))}!="
+                f"{sha256(canonical(task_oracle))}",
+            )
+        actions = data.get("allowed_actions")
+        if route == "/v1/tasks/{task_id}" or actions is not None:
+            if not isinstance(actions, list) or not all(
+                isinstance(item, str) and item for item in actions
+            ) or len(actions) != len(set(actions)):
+                self.oracle_violation(
+                    entity, f"{combination}/{identity} allowed_actions is invalid"
+                )
+        if route.endswith("/detail"):
+            detail = unwrap_data(body)
+            modules = (
+                detail.get("modules") if isinstance(detail, dict) else None
+            )
+            terminal_module_states = {"completed", "closed"}
+            active_module_states = {
+                "active",
+                "pending",
+                "pending_claim",
+                "in_progress",
+                "submitted",
+            }
+            tolerated_rejected_states = {"rejected"}
+            if isinstance(modules, list):
+                for module in modules:
+                    module_id = (
+                        module.get("id")
+                        if isinstance(module, dict)
+                        else None
+                    )
+                    state = (
+                        module.get("state")
+                        if isinstance(module, dict)
+                        else None
+                    )
+                    terminal_at = (
+                        module.get("terminal_at")
+                        if isinstance(module, dict)
+                        else None
+                    )
+                    if (
+                        not isinstance(module, dict)
+                        or state
+                        not in (
+                            terminal_module_states
+                            | active_module_states
+                            | tolerated_rejected_states
+                        )
+                        or not is_rfc3339_datetime(module.get("updated_at"))
+                        or (
+                            state in terminal_module_states
+                            and not is_rfc3339_datetime(terminal_at)
+                        )
+                        or (
+                            state in active_module_states
+                            and terminal_at is not None
+                        )
+                        or (
+                            state in tolerated_rejected_states
+                            and terminal_at is not None
+                            and not is_rfc3339_datetime(terminal_at)
+                        )
+                    ):
+                        self.oracle_violation(
+                            entity,
+                            f"{combination}/{identity} task module "
+                            f"{module_id} violates lifecycle invariant",
+                        )
+            derived_sub_status = expected_design_sub_status(data, modules)
+            if (
+                not isinstance(detail, dict)
+                or detail.get("design_sub_status") != derived_sub_status
+            ):
+                self.oracle_violation(
+                    entity,
+                    f"{combination}/{identity} design_sub_status is not "
+                    "the V8 task/module derivation",
+                )
+            if (
+                expected["task_type"] == "retouch_task"
+                and expected["task_status"] == "InProgress"
+            ):
+                retouch_modules = [
+                    module
+                    for module in modules or []
+                    if isinstance(module, dict)
+                    and module.get("module_key") == "retouch"
+                ]
+                if (
+                    len(retouch_modules) != 1
+                    or retouch_modules[0].get("state") != "in_progress"
+                    or retouch_modules[0].get("terminal_at") is not None
+                ):
+                    self.oracle_violation(
+                        entity,
+                        f"{combination}/{identity} reopened retouch task "
+                        "does not expose one active non-terminal retouch module",
+                    )
+            if expected["task_status"] == "Completed":
+                if not isinstance(modules, list):
+                    self.oracle_violation(
+                        entity,
+                        f"{combination}/{identity} completed task modules "
+                        "are invalid",
+                    )
+                else:
+                    for module in modules:
+                        if (
+                            not isinstance(module, dict)
+                            or module.get("state") != "completed"
+                            or module.get("claimed_by") is not None
+                            or module.get("claimed_team_code") is not None
+                            or not is_rfc3339_datetime(module.get("terminal_at"))
+                            or not is_rfc3339_datetime(module.get("updated_at"))
+                        ):
+                            module_id = (
+                                module.get("id")
+                                if isinstance(module, dict)
+                                else None
+                            )
+                            self.oracle_violation(
+                                entity,
+                                f"{combination}/{identity} completed task "
+                                f"module {module_id} violates terminal "
+                                "migration invariant",
+                            )
+            sku_surfaces = []
+            if isinstance(data.get("sku_items"), list):
+                sku_surfaces.append(data["sku_items"])
+            if (
+                isinstance(detail_data, dict)
+                and detail_data is not data
+                and isinstance(detail_data.get("sku_items"), list)
+            ):
+                sku_surfaces.append(detail_data["sku_items"])
+            for sku_items in sku_surfaces:
+                for sku_item in sku_items:
+                    if (
+                        isinstance(sku_item, dict)
+                        and "updated_at" in sku_item
+                        and not is_rfc3339_datetime(sku_item["updated_at"])
+                    ):
+                        self.oracle_violation(
+                            entity,
+                            f"{combination}/{identity} sku item "
+                            f"{sku_item.get('id')} updated_at is not RFC3339",
+                        )
+            versions = (
+                detail.get("asset_versions") if isinstance(detail, dict) else None
+            )
+            if not isinstance(versions, list):
+                self.oracle_violation(
+                    entity, f"{combination}/{identity} asset_versions is invalid"
+                )
+            else:
+                for version in versions:
+                    asset_id = version.get("id") if isinstance(version, dict) else None
+                    if not isinstance(asset_id, int) or asset_id <= 0:
+                        self.oracle_violation(
+                            entity,
+                            f"{combination}/{identity} asset version identity is invalid",
+                        )
+                        continue
+                    if "warehouse_ready" in version:
+                        self.oracle_violation(
+                            entity,
+                            f"{combination}/{identity} asset {asset_id} "
+                            "resurrects retired warehouse_ready",
+                        )
+                    if (
+                        "current_version_role" in version
+                        and version.get("current_version_role")
+                        not in CURRENT_VERSION_ROLES
+                    ):
+                        self.oracle_violation(
+                            entity,
+                            f"{combination}/{identity} asset {asset_id} "
+                            "current_version_role is invalid",
+                        )
+                    identity_row = self.validate_version_identity(
+                        combination,
+                        identity,
+                        entity,
+                        version,
+                        surface="detail",
+                        coverage_kind="detail_asset",
+                    )
+                    if (
+                        identity_row is not None
+                        and not identity_row["detail_visible"]
+                    ):
+                        self.oracle_violation(
+                            entity,
+                            f"{combination}/{identity} asset {asset_id} "
+                            "is not detail-visible in the v2 oracle",
+                        )
+            nested_versions = self.nested_design_asset_versions(
+                detail.get("retouch_requirements")
+                if isinstance(detail, dict)
+                else None
+            )
+            seen_nested: set[int] = set()
+            for nested in nested_versions:
+                asset_id = nested["id"]
+                if asset_id in seen_nested:
+                    self.oracle_violation(
+                        entity,
+                        f"{combination}/{identity} nested retouch asset "
+                        f"{asset_id} is duplicated",
+                    )
+                    continue
+                seen_nested.add(asset_id)
+                self.validate_version_identity(
+                    combination,
+                    identity,
+                    entity,
+                    nested,
+                    surface="nested_retouch",
+                )
+
+    def validate_asset_list_oracle(
+        self,
+        combination: str,
+        identity: str,
+        task_id: str,
+        body: object,
+    ) -> None:
+        entity = f"task:{task_id}:/v1/tasks/{{task_id}}/assets"
+        data = unwrap_data(body)
+        with self._state_lock:
+            self.manifest_oracle_check_count += 1
+        if not isinstance(data, list):
+            self.oracle_violation(
+                entity, f"{combination}/{identity} asset list is invalid"
+            )
+            return
+        for asset in data:
+            if not isinstance(asset, dict):
+                self.oracle_violation(
+                    entity, f"{combination}/{identity} asset root is invalid"
+                )
+                continue
+            root_id = asset.get("id")
+            if (
+                "warehouse_ready_version" in asset
+                or "warehouse_ready_version_id" in asset
+            ):
+                self.oracle_violation(
+                    entity,
+                    f"{combination}/{identity} asset root {root_id} "
+                    "resurrects retired warehouse-ready pointer",
+                )
+            current_oracle = (
+                self.list_current_by_root.get(str(root_id))
+                if isinstance(root_id, int) and root_id > 0
+                else None
+            )
+            root_scope = asset.get("scope_sku_code")
+            root_retouch = asset.get("retouch_requirement_id")
+            root_scope_valid = root_scope is None or isinstance(root_scope, str)
+            root_retouch_valid = (
+                root_retouch is None
+                or (
+                    isinstance(root_retouch, int)
+                    and not isinstance(root_retouch, bool)
+                    and root_retouch > 0
+                )
+            )
+            root_actual = {
+                "root_id": root_id,
+                "task_id": asset.get("task_id"),
+                "asset_type": str(asset.get("asset_type") or ""),
+                "scope_sku_code": (
+                    root_scope if isinstance(root_scope, str) else ""
+                ),
+                "retouch_requirement_id": root_retouch,
+            }
+            root_expected = (
+                {
+                    "root_id": current_oracle["root_asset_id"],
+                    "task_id": current_oracle["task_id"],
+                    "asset_type": current_oracle["root_asset_type"],
+                    "scope_sku_code": current_oracle[
+                        "root_scope_sku_code"
+                    ],
+                    "retouch_requirement_id": current_oracle[
+                        "root_retouch_requirement_id"
+                    ],
+                }
+                if isinstance(current_oracle, dict)
+                else None
+            )
+            if (
+                not root_scope_valid
+                or not root_retouch_valid
+                or root_actual != root_expected
+            ):
+                self.oracle_violation(
+                    entity,
+                    f"{combination}/{identity} asset root {root_id} "
+                    "identity projection differs",
+                )
+                continue
+            versions = (
+                (
+                    "current_version",
+                    "current_version_id",
+                    current_oracle,
+                    "list_asset",
+                ),
+                (
+                    "approved_version",
+                    "approved_version_id",
+                    self.list_approved_by_root.get(str(root_id)),
+                    "list_approved_asset",
+                ),
+            )
+            approved_for_root = self.list_approved_by_root.get(str(root_id))
+            for field, pointer_field, expected_version, coverage_kind in versions:
+                version = asset.get(field)
+                pointer = asset.get(pointer_field)
+                if expected_version is None:
+                    if version is not None or pointer is not None:
+                        self.oracle_violation(
+                            entity,
+                            f"{combination}/{identity} asset root {root_id} "
+                            f"unexpectedly exposes {field}",
+                        )
+                    continue
+                if (
+                    isinstance(version, dict)
+                    and "warehouse_ready" in version
+                ):
+                    self.oracle_violation(
+                        entity,
+                        f"{combination}/{identity} asset root {root_id} "
+                        f"{field} resurrects retired warehouse_ready",
+                    )
+                identity_row = self.validate_version_identity(
+                    combination,
+                    identity,
+                    entity,
+                    version,
+                    surface="list",
+                )
+                actual_pointer = {
+                    "current_version_role": (
+                        version.get("current_version_role")
+                        if isinstance(version, dict)
+                        else None
+                    ),
+                    "pointer_id": pointer,
+                }
+                expected_pointer = {
+                    "current_version_role": (
+                        "current_approved_version"
+                        if (
+                            field == "current_version"
+                            and approved_for_root is not None
+                            and approved_for_root["task_asset_id"]
+                            == expected_version["task_asset_id"]
+                        )
+                        else (
+                            "current_version"
+                            if field == "current_version"
+                            else (
+                                "current_approved_version"
+                                if current_oracle["task_asset_id"]
+                                == expected_version["task_asset_id"]
+                                else "approved_version"
+                            )
+                        )
+                    ),
+                    "pointer_id": expected_version["task_asset_id"],
+                }
+                if identity_row is None or actual_pointer != expected_pointer:
+                    self.oracle_violation(
+                        entity,
+                        f"{combination}/{identity} asset root {root_id} "
+                        f"{field} identity projection differs",
+                    )
+                    continue
+                self.cover(
+                    combination,
+                    identity,
+                    coverage_kind,
+                    str(expected_version["task_asset_id"]),
+                )
+
+    def validate_resource_bundle_oracle(
+        self, combination: str, identity: str, task_id: str, body: object
+    ) -> None:
+        if not combination.endswith("_b"):
+            return
+        entity = f"task:{task_id}:/v1/tasks/{{task_id}}/resource-bundle"
+        data = unwrap_data(body)
+        with self._state_lock:
+            self.manifest_oracle_check_count += 1
+        if not isinstance(data, dict) or not isinstance(data.get("groups"), list):
+            self.oracle_violation(
+                entity, f"{combination}/{identity} resource bundle is invalid"
+            )
+            return
+        self.cover(combination, identity, "bundle", task_id)
+        expected_task = self.expectations["tasks"].get(task_id, {})
+        if (
+            str(data.get("task_id", "")) != task_id
+            or str(data.get("workflow_revision", ""))
+            != str(expected_task.get("workflow_revision", ""))
+        ):
+            self.oracle_violation(
+                entity,
+                f"{combination}/{identity} resource bundle task projection differs",
+            )
+        expected_groups = {
+            locator: expected
+            for locator, expected in self.expectations["groups"].items()
+            if expected["task_id"] == task_id
+        }
+        actual_groups: dict[str, dict[str, Any]] = {}
+        for group in data["groups"]:
+            if not isinstance(group, dict):
+                self.oracle_violation(
+                    entity, f"{combination}/{identity} contains a non-object group"
+                )
+                continue
+            locator = (
+                f"{group.get('task_id')}:{group.get('scope_kind')}:"
+                f"{self._scope_ref(group)}"
+            )
+            if locator in actual_groups:
+                self.oracle_violation(
+                    entity, f"{combination}/{identity} duplicates group {locator}"
+                )
+            actual_groups[locator] = group
+        if set(actual_groups) != set(expected_groups):
+            self.oracle_violation(
+                entity,
+                f"{combination}/{identity} group locators "
+                f"{sha256(canonical(sorted(actual_groups)))}!="
+                f"{sha256(canonical(sorted(expected_groups)))}",
+            )
+        for locator in sorted(set(actual_groups) & set(expected_groups)):
+            self.validate_group_oracle(
+                combination, identity, actual_groups[locator], expected_groups[locator]
+            )
+
+    def validate_group_oracle(
+        self,
+        combination: str,
+        identity: str,
+        group: dict[str, Any],
+        expected: dict[str, Any] | None = None,
+    ) -> None:
+        locator = (
+            f"{group.get('task_id')}:{group.get('scope_kind')}:"
+            f"{self._scope_ref(group)}"
+        )
+        entity = f"group:{group.get('id', '?')}"
+        expected = expected or self.expectations["groups"].get(locator)
+        with self._state_lock:
+            self.manifest_oracle_check_count += 1
+        if not isinstance(expected, dict):
+            self.oracle_violation(
+                entity, f"{combination}/{identity} unexpected group locator {locator}"
+            )
+            return
+        group_required = {
+            "id",
+            "task_id",
+            "scope_kind",
+            "lock_version",
+            "migration_incomplete",
+            "created_at",
+            "updated_at",
+        }
+        missing_group = sorted(group_required - group.keys())
+        if missing_group:
+            self.oracle_violation(
+                entity,
+                f"{combination}/{identity} group misses required fields "
+                f"{','.join(missing_group)}",
+            )
+        for field in ("id", "task_id"):
+            if field in group and not self._positive_int(group[field]):
+                self.oracle_violation(
+                    entity, f"{combination}/{identity} group {field} is invalid"
+                )
+        if "lock_version" in group and not self._nonnegative_int(
+            group["lock_version"]
+        ):
+            self.oracle_violation(
+                entity, f"{combination}/{identity} group lock_version is invalid"
+            )
+        if not isinstance(group.get("migration_incomplete"), bool):
+            self.oracle_violation(
+                entity,
+                f"{combination}/{identity} group migration_incomplete is invalid",
+            )
+        for field in ("created_at", "updated_at"):
+            if not isinstance(group.get(field), str) or not group.get(field):
+                self.oracle_violation(
+                    entity, f"{combination}/{identity} group {field} is invalid"
+                )
+        self.cover(combination, identity, "group", locator)
+        working = group.get("working_revision")
+        finalized = group.get("finalized_revision")
+        actual = {
+            "task_id": str(group.get("task_id", "")),
+            "scope_kind": str(group.get("scope_kind", "")),
+            "scope_ref_id": self._scope_ref(group),
+            "working_revision_no": (
+                str(working.get("revision_no", ""))
+                if isinstance(working, dict)
+                else ""
+            ),
+            "working_revision_status": (
+                str(working.get("status", "")) if isinstance(working, dict) else ""
+            ),
+            "finalized_revision_no": (
+                str(finalized.get("revision_no", ""))
+                if isinstance(finalized, dict)
+                else ""
+            ),
+            "finalized_revision_status": (
+                str(finalized.get("status", ""))
+                if isinstance(finalized, dict)
+                else ""
+            ),
+            "migration_incomplete": "1" if group.get("migration_incomplete") else "0",
+            "migration_issue": str(group.get("migration_issue") or ""),
+        }
+        oracle = dict(expected)
+        if actual != oracle:
+            self.oracle_violation(
+                entity,
+                f"{combination}/{identity} group projection "
+                f"{sha256(canonical(actual))}!={sha256(canonical(oracle))}",
+            )
+        for pointer_name in ("working", "finalized"):
+            revision = group.get(f"{pointer_name}_revision")
+            pointer = group.get(f"{pointer_name}_revision_id")
+            if isinstance(revision, dict):
+                self.validate_revision_contract_shape(
+                    combination, identity, entity, revision
+                )
+                if pointer != revision.get("id"):
+                    self.oracle_violation(
+                        entity,
+                        f"{combination}/{identity} {pointer_name} pointer differs",
+                    )
+                if revision.get("group_id") not in {None, group.get("id")}:
+                    self.oracle_violation(
+                        entity,
+                        f"{combination}/{identity} {pointer_name} group differs",
+                    )
+            elif pointer is not None:
+                self.oracle_violation(
+                    entity,
+                    f"{combination}/{identity} dangling {pointer_name} pointer",
+                )
+
+    def validate_history_oracle(
+        self,
+        combination: str,
+        identity: str,
+        group: dict[str, Any],
+        history: object,
+    ) -> None:
+        locator = (
+            f"{group.get('task_id')}:{group.get('scope_kind')}:"
+            f"{self._scope_ref(group)}"
+        )
+        entity = f"group:{group.get('id', '?')}"
+        expected_revisions = {
+            key: expected
+            for key, expected in self.expectations["revisions"].items()
+            if key.startswith(locator + ":")
+        }
+        rows = history_items(history)
+        pages = history if isinstance(history, list) else [history]
+        first_data = (
+            unwrap_data(pages[0])
+            if pages
+            else None
+        )
+        if not isinstance(first_data, dict):
+            self.oracle_violation(
+                entity, f"{combination}/{identity} history envelope is invalid"
+            )
+        else:
+            required_page = {"items", "page", "page_size", "total"}
+            missing_page = sorted(required_page - first_data.keys())
+            if missing_page:
+                self.oracle_violation(
+                    entity,
+                    f"{combination}/{identity} history misses required fields "
+                    f"{','.join(missing_page)}",
+                )
+            for pointer_name in ("working", "finalized"):
+                history_pointer = first_data.get(f"{pointer_name}_revision_id")
+                group_pointer = group.get(f"{pointer_name}_revision_id")
+                if history_pointer != group_pointer:
+                    self.oracle_violation(
+                        entity,
+                        f"{combination}/{identity} history {pointer_name} pointer differs",
+                    )
+        actual_revisions = {
+            f"{locator}:{row.get('revision_no')}": row
+            for row in rows
+            if isinstance(row, dict)
+        }
+        with self._state_lock:
+            self.manifest_oracle_check_count += 1
+        if len(actual_revisions) != len(rows):
+            self.oracle_violation(
+                entity,
+                f"{combination}/{identity} contains duplicate or invalid revisions",
+            )
+        if set(actual_revisions) != set(expected_revisions):
+            self.oracle_violation(
+                entity,
+                f"{combination}/{identity} revision locators "
+                f"{sha256(canonical(sorted(actual_revisions)))}!="
+                f"{sha256(canonical(sorted(expected_revisions)))}",
+            )
+        history_by_id = {
+            row.get("id"): row
+            for row in rows
+            if isinstance(row, dict) and self._positive_int(row.get("id"))
+        }
+        for pointer_name in ("working", "finalized"):
+            pointer_id = group.get(f"{pointer_name}_revision_id")
+            embedded = group.get(f"{pointer_name}_revision")
+            if pointer_id is None and embedded is None:
+                continue
+            history_row = history_by_id.get(pointer_id)
+            if (
+                not isinstance(embedded, dict)
+                or not isinstance(history_row, dict)
+                or self.revision_link_projection(embedded)
+                != self.revision_link_projection(history_row)
+            ):
+                self.oracle_violation(
+                    entity,
+                    f"{combination}/{identity} {pointer_name} revision is not "
+                    "identical to its history row",
+                )
+        for revision_locator in sorted(
+            set(actual_revisions) & set(expected_revisions)
+        ):
+            self.cover(combination, identity, "revision", revision_locator)
+            row = actual_revisions[revision_locator]
+            expected = expected_revisions[revision_locator]
+            self.validate_revision_contract_shape(
+                combination, identity, entity, row
+            )
+            source_id = row.get("source_task_asset_id")
+            expected_source = expected["source_locator"]
+            actual = {
+                "task_id": locator.split(":", 1)[0],
+                "scope_kind": locator.split(":")[1],
+                "scope_ref_id": locator.split(":")[2],
+                "revision_no": str(row.get("revision_no", "")),
+                "status": str(row.get("status", "")),
+                "mode": str(row.get("mode", "")),
+                "source_present": (
+                    "1"
+                    if isinstance(source_id, int) and source_id > 0
+                    else ""
+                ),
+                "source_stage": str(row.get("source_stage", "")),
+                "created_by": str(row.get("created_by", "")),
+                "reason": str(row.get("reason", "")),
+                "submitted_at": normalize_manifest_time(
+                    str(row.get("submitted_at", ""))
+                ),
+                "finalized_at": normalize_manifest_time(
+                    str(row.get("finalized_at", ""))
+                ),
+            }
+            oracle = {
+                **{
+                    key: expected[key]
+                    for key in (
+                        "task_id",
+                        "scope_kind",
+                        "scope_ref_id",
+                        "revision_no",
+                        "status",
+                        "mode",
+                    )
+                },
+                "source_present": "1" if expected_source else "",
+                **{
+                    key: normalize_manifest_time(expected[key])
+                    if key.endswith("_at")
+                    else expected[key]
+                    for key in (
+                        "source_stage",
+                        "created_by",
+                        "reason",
+                        "submitted_at",
+                        "finalized_at",
+                    )
+                },
+            }
+            if actual != oracle:
+                self.oracle_violation(
+                    entity,
+                    f"{combination}/{identity} revision {revision_locator} "
+                    f"{sha256(canonical(actual))}!={sha256(canonical(oracle))}",
+                )
+            role_oracle = self.revision_role_oracle.get(revision_locator)
+            actual_source_locator = (
+                self.asset_identity_oracle.get(str(source_id), {}).get(
+                    "stable_locator"
+                )
+                if self._positive_int(source_id)
+                else None
+            )
+            raw_items = row.get("items")
+            actual_final_locators = (
+                [
+                    self.asset_identity_oracle.get(
+                        str(item.get("task_asset_id")), {}
+                    ).get("stable_locator")
+                    for item in raw_items
+                    if isinstance(item, dict)
+                ]
+                if isinstance(raw_items, list)
+                else None
+            )
+            raw_refs = row.get("references")
+            actual_reference_locators = (
+                [
+                    f"reference:{item.get('reference_file_ref_id')}:"
+                    f"{item.get('ref_id')}"
+                    for item in raw_refs
+                    if isinstance(item, dict)
+                ]
+                if isinstance(raw_refs, list)
+                else None
+            )
+            role_actual = {
+                "status": row.get("status"),
+                "source_stage": row.get("source_stage"),
+                "source_locator": actual_source_locator,
+                "final_locators": actual_final_locators,
+                "reference_file_ref_ids": (
+                    [
+                        item.get("reference_file_ref_id")
+                        for item in raw_refs
+                        if isinstance(item, dict)
+                    ]
+                    if isinstance(raw_refs, list)
+                    else None
+                ),
+                "reference_locators": actual_reference_locators,
+                "is_working": (
+                    row.get("id") == group.get("working_revision_id")
+                ),
+                "is_finalized": (
+                    row.get("id") == group.get("finalized_revision_id")
+                ),
+            }
+            role_expected = (
+                {
+                    key: role_oracle[key]
+                    for key in (
+                        "status",
+                        "source_stage",
+                        "source_locator",
+                        "final_locators",
+                        "reference_file_ref_ids",
+                        "reference_locators",
+                        "is_working",
+                        "is_finalized",
+                    )
+                }
+                if isinstance(role_oracle, dict)
+                else None
+            )
+            if role_actual != role_expected:
+                self.oracle_violation(
+                    entity,
+                    f"{combination}/{identity} revision {revision_locator} "
+                    "v2 role projection differs",
+                )
+            if row.get("group_id") not in {None, group.get("id")}:
+                self.oracle_violation(
+                    entity,
+                    f"{combination}/{identity} revision {revision_locator} group differs",
+                )
+            revision_id = row.get("id")
+            if (
+                revision_id is not None
+                and (
+                    not isinstance(revision_id, int)
+                    or isinstance(revision_id, bool)
+                    or revision_id <= 0
+                )
+            ):
+                self.oracle_violation(
+                    entity,
+                    f"{combination}/{identity} revision {revision_locator} id is invalid",
+                )
+            if "[migration_v2 " in expected["reason"]:
+                evidence = row.get("evidence_summary")
+                try:
+                    expected_evidence = expected_evidence_summary(
+                        expected["reason"],
+                        self.revision_reason_oracle.get(
+                            revision_locator, ""
+                        ),
+                    )
+                except (TypeError, ValueError) as exc:
+                    self.oracle_violation(
+                        entity,
+                        f"{combination}/{identity} revision {revision_locator} "
+                        f"evidence marker invalid: {exc}",
+                    )
+                    expected_evidence = None
+                normalized_evidence = (
+                    {
+                        key: (
+                            normalize_manifest_time(str(value))
+                            if key == "confirmed_at"
+                            else value
+                        )
+                        for key, value in evidence.items()
+                    }
+                    if isinstance(evidence, dict)
+                    else evidence
+                )
+                if (
+                    row.get("legacy_migration") is not True
+                    or normalized_evidence != expected_evidence
+                ):
+                    self.oracle_violation(
+                        entity,
+                        f"{combination}/{identity} revision {revision_locator} "
+                        "legacy evidence differs",
+                    )
+            expected_source_row = self.expectations["sources"].get(
+                revision_locator
+            )
+            if not isinstance(expected_source_row, dict):
+                self.oracle_violation(
+                    entity,
+                    f"{combination}/{identity} revision {revision_locator} lacks source oracle",
+                )
+            else:
+                identity_row = (
+                    self.asset_identity_oracle.get(str(source_id))
+                    if isinstance(source_id, int) and source_id > 0
+                    else None
+                )
+                source_actual = {
+                    "source_locator": "",
+                    "role": "",
+                    "whole_hash": "",
+                    "binding": "",
+                    "binding_role": "",
+                    "sku_code": "",
+                    "retouch_requirement_id": "",
+                }
+                if isinstance(identity_row, dict):
+                    if str(identity_row.get("task_id", "")) != expected["task_id"]:
+                        self.oracle_violation(
+                            entity,
+                            f"{combination}/{identity} revision {revision_locator} "
+                            "source task differs",
+                        )
+                    source_actual = {
+                        "source_locator": str(identity_row["stable_locator"]),
+                        "role": str(identity_row["asset_type"]),
+                        "whole_hash": str(identity_row["whole_hash"]),
+                        "binding": str(identity_row["binding_state"]),
+                        "binding_role": str(identity_row["bound_role"]),
+                        "sku_code": str(identity_row["scope_sku_code"]),
+                        "retouch_requirement_id": str(
+                            identity_row["retouch_requirement_id"] or ""
+                        ),
+                    }
+                expected_source_projection = dict(expected_source_row)
+                if source_actual != expected_source_projection:
+                    self.oracle_violation(
+                        entity,
+                        f"{combination}/{identity} revision {revision_locator} source differs",
+                    )
+            expected_items = self.expectations["finals"].get(revision_locator, [])
+            items = row.get("items")
+            if isinstance(items, list) and not all(
+                isinstance(item, dict) for item in items
+            ):
+                self.oracle_violation(
+                    entity,
+                    f"{combination}/{identity} revision {revision_locator} has invalid final item",
+                )
+            actual_items = (
+                [
+                    {
+                        "task_asset_id": str(item.get("task_asset_id", "")),
+                        "sort_order": str(item.get("sort_order", "")),
+                        "formal_storage_ref_id": "",
+                        "asset_type": str(
+                            self.asset_identity_oracle.get(
+                                str(item.get("task_asset_id", "")), {}
+                            ).get("asset_type", "")
+                        ),
+                        "whole_hash": str(
+                            self.asset_identity_oracle.get(
+                                str(item.get("task_asset_id", "")), {}
+                            ).get("whole_hash")
+                            or ""
+                        ),
+                        "binding": str(
+                            self.asset_identity_oracle.get(
+                                str(item.get("task_asset_id", "")), {}
+                            ).get("binding_state", "")
+                        ),
+                        "role": str(
+                            self.asset_identity_oracle.get(
+                                str(item.get("task_asset_id", "")), {}
+                            ).get("bound_role", "")
+                        ),
+                        "sku_code": str(
+                            self.asset_identity_oracle.get(
+                                str(item.get("task_asset_id", "")), {}
+                            ).get("scope_sku_code")
+                            or ""
+                        ),
+                        "retouch_requirement_id": str(
+                            self.asset_identity_oracle.get(
+                                str(item.get("task_asset_id", "")), {}
+                            ).get("retouch_requirement_id")
+                            or ""
+                        ),
+                    }
+                    for item in items
+                    if isinstance(item, dict)
+                ]
+                if isinstance(items, list)
+                else None
+            )
+            for item in items if isinstance(items, list) else []:
+                item_oracle = self.asset_identity_oracle.get(
+                    str(item.get("task_asset_id", ""))
+                ) if isinstance(item, dict) else None
+                if (
+                    not isinstance(item_oracle, dict)
+                    or str(item_oracle.get("task_id", "")) != expected["task_id"]
+                ):
+                    self.oracle_violation(
+                        entity,
+                        f"{combination}/{identity} revision {revision_locator} "
+                        "final task differs",
+                    )
+            if actual_items != expected_items:
+                self.oracle_violation(
+                    entity,
+                    f"{combination}/{identity} revision {revision_locator} finals differ",
+                )
+            expected_refs = self.expectations["references"].get(revision_locator, [])
+            references = row.get("references")
+            if isinstance(references, list) and not all(
+                isinstance(item, dict) for item in references
+            ):
+                self.oracle_violation(
+                    entity,
+                    f"{combination}/{identity} revision {revision_locator} has invalid reference",
+                )
+            actual_refs = (
+                [
+                    {
+                        "reference_file_ref_id": str(
+                            item.get("reference_file_ref_id", "")
+                        ),
+                        "formal_storage_ref_id": (
+                            self.storage_ref_from_stable_locator(
+                                self.asset_identity_oracle.get(
+                                    str(item.get("formal_task_asset_id", "")), {}
+                                ).get("stable_locator", "")
+                            )
+                        ),
+                        "sort_order": str(item.get("sort_order", "")),
+                        "ref_id": str(item.get("ref_id", "")),
+                        "file_name": str(item.get("file_name", "")),
+                        "scope": str(item.get("scope", "")),
+                    }
+                    for item in references
+                    if isinstance(item, dict)
+                ]
+                if isinstance(references, list)
+                else None
+            )
+            for reference_index, reference in enumerate(
+                references if isinstance(references, list) else []
+            ):
+                if not isinstance(reference, dict):
+                    continue
+                formal_id = reference.get("formal_task_asset_id")
+                expected_formal_ref = (
+                    expected_refs[reference_index]["formal_storage_ref_id"]
+                    if reference_index < len(expected_refs)
+                    else None
+                )
+                if not expected_formal_ref:
+                    if formal_id is not None:
+                        self.oracle_violation(
+                            entity,
+                            f"{combination}/{identity} revision {revision_locator} "
+                            "reference unexpectedly has a formal asset",
+                        )
+                    continue
+                formal_oracle = self.asset_identity_oracle.get(str(formal_id))
+                if (
+                    not self._positive_int(formal_id)
+                    or not isinstance(formal_oracle, dict)
+                    or str(formal_oracle.get("task_id", "")) != expected["task_id"]
+                    or self.storage_ref_from_stable_locator(
+                        formal_oracle.get("stable_locator")
+                    )
+                    != expected_formal_ref
+                    or formal_oracle.get("asset_type") != "reference"
+                    or formal_oracle.get("bound_role") not in {"", "NULL"}
+                ):
+                    self.oracle_violation(
+                        entity,
+                        f"{combination}/{identity} revision {revision_locator} "
+                        "reference formal asset differs",
+                    )
+            if actual_refs != expected_refs:
+                self.oracle_violation(
+                    entity,
+                    f"{combination}/{identity} revision {revision_locator} references differ",
+                )
 
     def request(
         self,
@@ -668,7 +3502,9 @@ class Runner:
             "route": route,
             "entity_key": entity,
             "status": result.status,
-            "body_sha256": sha256(canonical(result.body)),
+            "body_sha256": sha256(
+                canonical(normalize_transport_noise(result.body))
+            ),
             "raw_sha256": result.raw_sha256,
             "body_bytes": result.body_bytes,
         }
@@ -704,6 +3540,7 @@ class Runner:
     ) -> HttpResult:
         pages: list[object] = []
         page = 1
+        declared_total: int | None = None
         while True:
             path = (
                 f"/v1/resource-groups/{group_id}/revisions"
@@ -734,12 +3571,35 @@ class Runner:
             )
             total = data.get("total", 0) if isinstance(data, dict) else 0
             rows = data.get("items", []) if isinstance(data, dict) else []
-            if not isinstance(total, int) or not isinstance(rows, list):
+            if (
+                not isinstance(total, int)
+                or isinstance(total, bool)
+                or total < 0
+                or not isinstance(rows, list)
+            ):
                 self.violation(
                     "api.invalid_pagination", entity, f"{combination}/{identity}"
                 )
                 final = HttpResult(200, pages, sha256(canonical(pages)), len(canonical(pages)))
                 break
+            if (
+                data.get("page") != page
+                or data.get("page_size") != 200
+                or len(rows) > 200
+            ):
+                self.violation(
+                    "api.invalid_pagination",
+                    entity,
+                    f"{combination}/{identity} page metadata differs",
+                )
+            if declared_total is None:
+                declared_total = total
+            elif total != declared_total:
+                self.violation(
+                    "api.invalid_pagination",
+                    entity,
+                    f"{combination}/{identity} total changed across pages",
+                )
             if page * 200 >= total or not rows:
                 final = HttpResult(200, pages, sha256(canonical(pages)), len(canonical(pages)))
                 break
@@ -749,6 +3609,12 @@ class Runner:
         with self._state_lock:
             self.results[(combination, identity, GROUP_ROUTES[1], entity)] = final
         if final.status == 200:
+            if declared_total is None or len(history_items(final.body)) != declared_total:
+                self.violation(
+                    "api.invalid_pagination",
+                    entity,
+                    f"{combination}/{identity} fetched rows differ from total",
+                )
             numbers = [
                 item.get("revision_no")
                 for item in history_items(final.body)
@@ -797,6 +3663,12 @@ class Runner:
         left = self.results[(left_combo, identity, route, entity)]
         right = self.results[(right_combo, identity, route, entity)]
         direction = f"{left_combo}->{right_combo}"
+        # Reused direct-backend URLs share the same single-flight HttpResult.
+        # Object identity therefore proves exact origin/identity/path parity;
+        # the two logical observations remain in evidence, while duplicate
+        # deep canonicalization is unnecessary.
+        if left is right:
+            return
         # Permission widening is directional from the frozen A baseline to the
         # migrated B candidate, regardless of the pair iteration order.  The
         # four-combination matrix also contains B->A and same-data comparisons;
@@ -804,6 +3676,7 @@ class Runner:
         # misclassify candidate permission tightening as widening.
         left_data = "A" if left_combo.endswith("_a") else "B"
         right_data = "A" if right_combo.endswith("_a") else "B"
+        rule = self.find_rule(route, direction, left.status, right.status)
         if left_data != right_data:
             if left_data == "A":
                 baseline_combo, baseline = left_combo, left
@@ -827,14 +3700,32 @@ class Runner:
                 f"{baseline.status}->{candidate.status}",
             )
             return
+        if baseline is not None and candidate is not None:
+            baseline_actions = allowed_actions_by_path(
+                normalize_transport_noise(baseline.body)
+            )
+            candidate_actions = allowed_actions_by_path(
+                normalize_transport_noise(candidate.body)
+            )
+            for path in sorted(set(baseline_actions) & set(candidate_actions)):
+                widened = candidate_actions[path] - baseline_actions[path]
+                if widened:
+                    self.violation(
+                        "api.allowed_actions_widened",
+                        entity,
+                        f"{identity} {baseline_combo}->{candidate_combo} "
+                        f"{path} added {sha256(canonical(sorted(widened)))}",
+                    )
+                    return
         if route in self.retired_routes:
             # Each retired route is already asserted to be exactly 404. Error
             # envelope wording is deliberately not a compatibility contract.
             return
         if route in ASSET_ROUTES:
-            if left.status not in {200, 403, 410} or right.status not in {200, 403, 410}:
+            allowed = ASSET_ROUTE_ALLOWED_STATUSES[route]
+            if left.status not in allowed or right.status not in allowed:
                 self.violation(
-                    "api.asset_status_invalid",
+                    "api.asset_contract_status_invalid",
                     entity,
                     f"{identity} {direction} {left.status}->{right.status}",
                 )
@@ -842,8 +3733,131 @@ class Runner:
             if left.status == 200 and right.status == 410:
                 # A tombstone is an asset loss unless an exact status rule approves it.
                 pass
-        rule = self.find_rule(route, direction, left.status, right.status)
-        left_body, right_body = left.body, right.body
+        if left_data != right_data and rule is None:
+            if left_data == "A":
+                a_combo, a_result = left_combo, left
+                b_combo, b_result = right_combo, right
+            else:
+                a_combo, a_result = right_combo, right
+                b_combo, b_result = left_combo, left
+            if (
+                route
+                in {
+                    "/v1/tasks/{task_id}/resource-bundle",
+                    *GROUP_ROUTES,
+                }
+                and a_result.status == 404
+                and b_result.status in {200, 403}
+            ):
+                with self._state_lock:
+                    self.semantic_comparison_count += 1
+                return
+            if route in ASSET_ROUTES and a_result.status == 404:
+                asset_id = entity.split(":", 1)[1]
+                governed_for_b = set().union(
+                    *(
+                        assets
+                        for (combo, _identity), assets in self.governed_assets.items()
+                        if combo == b_combo
+                    )
+                )
+                identity_governed = self.governed_assets.get(
+                    (b_combo, identity), set()
+                )
+                allowed_governed = (
+                    governed_for_b if b_result.status == 403 else identity_governed
+                )
+                if (
+                    asset_id in allowed_governed
+                    and b_result.status
+                    in ASSET_ROUTE_ALLOWED_STATUSES[route] - {404}
+                ):
+                    with self._state_lock:
+                        self.semantic_comparison_count += 1
+                    return
+            if (
+                left.status == right.status == 200
+                and route
+                in {
+                    "/v1/tasks/{task_id}",
+                    "/v1/tasks/{task_id}/detail",
+                    "/v1/tasks/{task_id}/assets",
+                }
+            ):
+                projector = {
+                    "/v1/tasks/{task_id}": project_task,
+                    "/v1/tasks/{task_id}/detail": project_detail,
+                    "/v1/tasks/{task_id}/assets": project_assets,
+                }[route]
+                if route == "/v1/tasks/{task_id}/assets":
+                    a_projection, b_projection = project_asset_pair(
+                        a_result.body,
+                        b_result.body,
+                        frozenset(self.list_current_by_root),
+                        self.asset_identity_oracle,
+                    )
+                elif route == "/v1/tasks/{task_id}/detail":
+                    a_projection, b_projection = project_detail_pair(
+                        a_result.body,
+                        b_result.body,
+                    )
+                else:
+                    a_projection = projector(a_result.body)
+                    b_projection = projector(b_result.body)
+                with self._state_lock:
+                    self.semantic_comparison_count += 1
+                if canonical(a_projection) != canonical(b_projection):
+                    self.violation(
+                        "api.semantic_body_mismatch",
+                        entity,
+                        f"{identity} {a_combo}->{b_combo} "
+                        f"{sha256(canonical(a_projection))}!="
+                        f"{sha256(canonical(b_projection))}",
+                    )
+                    return
+                if route == "/v1/tasks/{task_id}/detail":
+                    a_versions = detail_asset_versions(a_result.body)
+                    b_versions = detail_asset_versions(b_result.body)
+                    if (a_versions is None) != (b_versions is None):
+                        self.violation(
+                            "api.semantic_body_mismatch",
+                            entity,
+                            f"{identity} {a_combo}->{b_combo} lacks asset_versions",
+                        )
+                        return
+                    remaining = list(b_versions or [])
+                    for version in a_versions or []:
+                        try:
+                            remaining.remove(version)
+                        except ValueError:
+                            self.violation(
+                                "api.legacy_asset_not_preserved",
+                                entity,
+                                f"{identity} {a_combo}->{b_combo} "
+                                f"{sha256(canonical(version))}",
+                            )
+                    governed_for_b = set().union(
+                        *(
+                            assets
+                            for (combo, _identity), assets in self.governed_assets.items()
+                            if combo == b_combo
+                        )
+                    )
+                    for version in remaining:
+                        version_id = (
+                            str(version.get("id", ""))
+                            if isinstance(version, dict)
+                            else ""
+                        )
+                        if version_id not in governed_for_b:
+                            self.violation(
+                                "api.ungoverned_asset_added",
+                                entity,
+                                f"{identity} {a_combo}->{b_combo} asset {version_id}",
+                            )
+                return
+        left_body = normalize_transport_noise(left.body)
+        right_body = normalize_transport_noise(right.body)
         different = left.status != right.status or canonical(left_body) != canonical(right_body)
         if rule is not None and different:
             with self._state_lock:
@@ -900,13 +3914,21 @@ def compare(
     task_ids_path: pathlib.Path,
     rules_path: pathlib.Path,
     manifest_path: pathlib.Path,
+    api_oracle_path: pathlib.Path,
     run_id: str,
     requester: Callable[[str, str, dict[str, str]], HttpResult] = http_get,
+    downloader: Callable[[str, str, dict[str, str]], bytes] = http_download,
     workers: int = 16,
     request_metrics: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if not isinstance(workers, int) or isinstance(workers, bool) or not 1 <= workers <= 64:
         raise ValueError("workers must be an integer between 1 and 64")
+    comparator_path = pathlib.Path(__file__).resolve()
+    oracle_builder_path = comparator_path.with_name("build_api_oracle.py")
+    source_hashes = {
+        "comparator_sha256": file_sha256(comparator_path),
+        "build_api_oracle_sha256": file_sha256(oracle_builder_path),
+    }
     if request_metrics is not None:
         request_metrics.clear()
     urls, combinations, resolved, retired_routes = load_matrix(matrix_path)
@@ -921,30 +3943,80 @@ def compare(
     rules = load_rules(rules_path, retired_routes)
     tasks = load_tasks(task_ids_path)
     manifest_tasks = manifest_task_ids(manifest_path, run_id)
+    expectations = load_manifest_expectations(manifest_path, run_id)
+    manifest_sha = file_sha256(manifest_path)
+    api_oracle = load_asset_identity_map(
+        api_oracle_path, run_id, manifest_sha
+    )
     if set(tasks) != manifest_tasks:
         raise ValueError(
             "task list does not exactly match reviewed manifest: "
             f"list={len(tasks)},manifest={len(manifest_tasks)}"
         )
-    runner = Runner(urls, identities, resolved, rules, retired_routes, requester)
+    runner = Runner(
+        urls,
+        identities,
+        resolved,
+        rules,
+        retired_routes,
+        expectations,
+        api_oracle,
+        requester,
+    )
     dynamic_groups: dict[tuple[str, str, str], set[str]] = {}
     dynamic_assets: dict[tuple[str, str, str], set[str]] = {}
+    visible_bundle_groups: dict[tuple[str, str], set[str]] = {}
 
-    def fetch_task(job: tuple[str, str, str]) -> tuple[tuple[str, str, str], set[str], set[str]]:
+    def fetch_task(
+        job: tuple[str, str, str]
+    ) -> tuple[tuple[str, str, str], set[str], set[str], set[str]]:
         combination, identity, task_id = job
         bodies: list[object] = []
+        bundle_groups: set[str] = set()
         for route in CORE_ROUTES:
             path = route.format(task_id=task_id)
             entity = f"task:{task_id}:{route}"
             result = runner.fetch(combination, identity, route, path, entity)
-            if result.status not in {200, 403}:
+            if route == "/v1/tasks/{task_id}/resource-bundle":
+                # The four-combination matrix deliberately exercises both the
+                # additive V8 surface and the external-backend rollback
+                # counterexample.  Exact 404<->200 transitions are approved
+                # only by a hash-bound direction rule during pair comparison.
+                allowed_statuses = {200, 403, 404}
+            else:
+                allowed_statuses = {200, 403}
+            if result.status not in allowed_statuses:
                 runner.violation(
                     "api.task_status_invalid",
                     entity,
                     f"{combination}/{identity} returned {result.status}",
                 )
+            if (
+                combination.endswith("_b")
+                and identity in runner.required_oracle_identities
+                and result.status != 200
+            ):
+                runner.oracle_violation(
+                    entity,
+                    f"{combination}/{identity} required oracle route returned "
+                    f"{result.status}",
+                )
             if result.status == 200:
                 bodies.append(result.body)
+                runner.validate_task_oracle(
+                    combination, identity, task_id, route, result.body
+                )
+                if route == "/v1/tasks/{task_id}/resource-bundle":
+                    bundle_groups.update(group_ids(result.body))
+                    if allowed_actions_by_path(result.body):
+                        runner.oracle_violation(
+                            entity,
+                            f"{combination}/{identity} resource bundle exposes "
+                            "undeclared allowed_actions",
+                        )
+                    runner.validate_resource_bundle_oracle(
+                        combination, identity, task_id, result.body
+                    )
         for route in retired_routes:
             entity = f"task:{task_id}:retired:{route}"
             result = runner.fetch(
@@ -964,6 +4036,7 @@ def compare(
             job,
             set().union(*(group_ids(body) for body in bodies)),
             set().union(*(task_asset_ids(body) for body in bodies)),
+            bundle_groups,
         )
 
     identity_ids = [item["id"] for item in identities]
@@ -974,9 +4047,12 @@ def compare(
         for task_id in tasks
     ]
     with ThreadPoolExecutor(max_workers=workers) as executor:
-        for key, groups, assets in executor.map(fetch_task, task_jobs):
+        for key, groups, assets, bundle_groups in executor.map(fetch_task, task_jobs):
             dynamic_groups[key] = groups
             dynamic_assets[key] = assets
+            visible_bundle_groups.setdefault((key[0], key[1]), set()).update(
+                bundle_groups
+            )
     all_groups = sorted(
         set().union(*dynamic_groups.values()) if dynamic_groups else set(), key=int
     )
@@ -991,9 +4067,52 @@ def compare(
             entity,
         )
         assets = task_asset_ids(detail.body) if detail.status == 200 else set()
+        group = unwrap_data(detail.body)
+        if (
+            combination.endswith("_b")
+            and detail.status == 200
+            and isinstance(group, dict)
+        ):
+            if allowed_actions_by_path(detail.body):
+                runner.oracle_violation(
+                    entity,
+                    f"{combination}/{identity} group detail exposes "
+                    "undeclared allowed_actions",
+                )
+            runner.validate_group_oracle(combination, identity, group)
+        if (
+            combination.endswith("_b")
+            and group_id in visible_bundle_groups.get((combination, identity), set())
+            and detail.status != 200
+        ):
+            runner.oracle_violation(
+                entity,
+                f"{combination}/{identity} visible bundle group detail returned "
+                f"{detail.status}",
+            )
         history = runner.fetch_history(combination, identity, group_id, entity)
         if history.status == 200:
             assets.update(task_asset_ids(history.body))
+            if combination.endswith("_b") and isinstance(group, dict):
+                if allowed_actions_by_path(history.body):
+                    runner.oracle_violation(
+                        entity,
+                        f"{combination}/{identity} revision history exposes "
+                        "undeclared allowed_actions",
+                    )
+                runner.validate_history_oracle(
+                    combination, identity, group, history.body
+                )
+        if (
+            combination.endswith("_b")
+            and group_id in visible_bundle_groups.get((combination, identity), set())
+            and history.status != 200
+        ):
+            runner.oracle_violation(
+                entity,
+                f"{combination}/{identity} visible bundle group history returned "
+                f"{history.status}",
+            )
         return combination, identity, assets
 
     group_jobs = [
@@ -1002,13 +4121,24 @@ def compare(
         for identity in identity_ids
         for group_id in all_groups
     ]
-    group_assets: set[str] = set()
+    group_assets_by_combination: dict[tuple[str, str], set[str]] = {
+        (combination, identity): set()
+        for combination in COMBINATION_IDS
+        for identity in identity_ids
+    }
     with ThreadPoolExecutor(max_workers=workers) as executor:
-        for _combination, _identity, assets in executor.map(fetch_group, group_jobs):
-            group_assets.update(assets)
+        for combination, identity, assets in executor.map(fetch_group, group_jobs):
+            group_assets_by_combination[(combination, identity)].update(assets)
+    runner.governed_assets = {
+        key: set(value) for key, value in group_assets_by_combination.items()
+    }
+    runner.validate_oracle_coverage()
     all_assets = sorted(
-        (set().union(*dynamic_assets.values()) if dynamic_assets else set())
-        | group_assets,
+        (
+            set().union(*group_assets_by_combination.values())
+            if group_assets_by_combination
+            else set()
+        ),
         key=int,
     )
     def fetch_asset(job: tuple[str, str, str]) -> None:
@@ -1022,12 +4152,63 @@ def compare(
                 route.format(task_asset_id=asset_id),
                 entity,
             )
-            if result.status not in {200, 403, 410}:
+            allowed_statuses = ASSET_ROUTE_ALLOWED_STATUSES[route]
+            if result.status not in allowed_statuses:
                 runner.violation(
-                    "api.asset_status_invalid",
+                    "api.asset_contract_status_invalid",
                     entity,
                     f"{combination}/{identity} {route} returned {result.status}",
                 )
+            elif result.status == 404 and combination.endswith("_b"):
+                runner.violation(
+                    "api.expected_asset_missing",
+                    entity,
+                    f"{combination}/{identity} {route} returned 404",
+                )
+            if (
+                route == "/v1/task-assets/{task_asset_id}/download"
+                and combination.endswith("_b")
+                and identity in runner.required_oracle_identities
+                and runner.asset_identity_oracle.get(asset_id, {})
+                .get("provenance", {})
+                .get("kind")
+                == "recovery_receipt"
+            ):
+                expected = runner.asset_identity_oracle[asset_id]
+                if result.status != 200:
+                    runner.violation(
+                        "api.recovery_download_failed",
+                        entity,
+                        f"{combination}/{identity} recovery download "
+                        f"returned {result.status}",
+                    )
+                    continue
+                try:
+                    raw = downloader(
+                        runner.urls[combination],
+                        route.format(task_asset_id=asset_id),
+                        dict(runner.resolved_headers[identity]),
+                    )
+                except Exception as exc:
+                    runner.violation(
+                        "api.recovery_download_failed",
+                        entity,
+                        f"{combination}/{identity} recovery GET failed: "
+                        f"{type(exc).__name__}",
+                    )
+                    continue
+                actual_sha256 = sha256(raw) if isinstance(raw, bytes) else ""
+                actual_size = len(raw) if isinstance(raw, bytes) else -1
+                if (
+                    not isinstance(raw, bytes)
+                    or actual_size != expected["size"]
+                    or actual_sha256 != expected["content_sha256"]
+                ):
+                    runner.violation(
+                        "api.recovery_download_hash_mismatch",
+                        entity,
+                        f"{combination}/{identity} recovery bytes differ",
+                    )
 
     asset_jobs = [
         (combination, identity, asset_id)
@@ -1039,6 +4220,12 @@ def compare(
         for _ in executor.map(fetch_asset, asset_jobs):
             pass
     runner.compare_all()
+    if (
+        file_sha256(comparator_path) != source_hashes["comparator_sha256"]
+        or file_sha256(oracle_builder_path)
+        != source_hashes["build_api_oracle_sha256"]
+    ):
+        raise ValueError("G6 executable source changed during comparison")
     observations = sorted(
         runner.observations,
         key=lambda item: (
@@ -1063,13 +4250,21 @@ def compare(
         "task_count": len(tasks),
         "group_count": len(all_groups),
         "task_asset_count": len(all_assets),
+        "legacy_task_asset_count": len(
+            set().union(*dynamic_assets.values()) if dynamic_assets else set()
+        ),
+        "manifest_oracle_check_count": runner.manifest_oracle_check_count,
+        "semantic_comparison_count": runner.semantic_comparison_count,
         "request_count": len(observations),
         "combination_matrix": combinations,
         "identities": identities,
         "task_ids_sha256": sha256(canonical(tasks)),
         "matrix_sha256": file_sha256(matrix_path),
         "rules_sha256": file_sha256(rules_path),
-        "manifest_sha256": file_sha256(manifest_path),
+        "manifest_sha256": manifest_sha,
+        "api_oracle_sha256": file_sha256(api_oracle_path),
+        "api_oracle_mapping_sha256": api_oracle["reviewed_mapping_sha256"],
+        **source_hashes,
         "used_rule_ids": sorted(runner.used_rules),
         "unused_rule_ids": sorted(
             set(rule["rule_id"] for rule in rules) - runner.used_rules
@@ -1100,6 +4295,14 @@ def compare(
             "matrix_sha256": result["matrix_sha256"],
             "rules_sha256": result["rules_sha256"],
             "manifest_sha256": result["manifest_sha256"],
+            "api_oracle_sha256": result["api_oracle_sha256"],
+            "api_oracle_mapping_sha256": result[
+                "api_oracle_mapping_sha256"
+            ],
+            "comparator_sha256": result["comparator_sha256"],
+            "build_api_oracle_sha256": result[
+                "build_api_oracle_sha256"
+            ],
         }
         metrics["evidence_sha256"] = sha256(canonical(metrics))
         request_metrics.update(metrics)
@@ -1112,6 +4315,7 @@ def main() -> None:
     parser.add_argument("--task-ids", type=pathlib.Path, required=True)
     parser.add_argument("--rules", type=pathlib.Path, required=True)
     parser.add_argument("--manifest", type=pathlib.Path, required=True)
+    parser.add_argument("--api-oracle", type=pathlib.Path, required=True)
     parser.add_argument("--run-id", required=True)
     parser.add_argument("--output", type=pathlib.Path, required=True)
     parser.add_argument(
@@ -1136,6 +4340,7 @@ def main() -> None:
             task_ids_path=args.task_ids,
             rules_path=args.rules,
             manifest_path=args.manifest,
+            api_oracle_path=args.api_oracle,
             run_id=args.run_id,
             workers=args.workers,
             request_metrics=request_metrics,

@@ -649,7 +649,10 @@ func (r *TaskResourceGroupRepo) hydrateResourceGroupRevisionsWithPolicy(ctx cont
 		return err
 	}
 	for rows.Next() {
-		item := &domain.TaskAssetGroupRevision{}
+		item := &domain.TaskAssetGroupRevision{
+			Items:      []domain.TaskAssetGroupRevisionItem{},
+			References: []domain.TaskAssetGroupRevisionReference{},
+		}
 		var sourceID sql.NullInt64
 		var submittedAt, finalizedAt sql.NullTime
 		if err := rows.Scan(&item.ID, &item.GroupID, &item.RevisionNo, &item.Status, &item.Mode, &sourceID, &item.SourceStage,

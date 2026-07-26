@@ -318,7 +318,7 @@ def canonical_entity(gate: str, key: str, components: list) -> dict:
         "expected_state": "matched",
         "review_state": "pass",
         "derivation_method": "test",
-        "components": components,
+        "components": ["" if value is None else str(value) for value in components],
         "detail": {},
     }
 
@@ -385,6 +385,7 @@ def canonical_fixture(mapping: dict, mapping_hash: str) -> dict:
                 )
             )
     events = {
+        4: "task.customization.reviewed",
         5: "PendingWarehouseReceive",
         6: "PendingProductionTransfer",
         7: "PendingClose",
@@ -409,7 +410,13 @@ def canonical_fixture(mapping: dict, mapping_hash: str) -> dict:
                 )
             )
     for gate in ("G04", "G05", "G06", "G09", "G10"):
-        entities.append(canonical_entity(gate, f"{gate.lower()}-sentinel", []))
+        entity = canonical_entity(gate, f"{gate.lower()}-sentinel", [])
+        entity["expected_state"] = {
+            "G06": "verified",
+            "G09": "approved",
+            "G10": "confirmed",
+        }.get(gate, "matched")
+        entities.append(entity)
     return {
         "schema_version": 1,
         "input_sha256": {"mapping_sha256": mapping_hash},
@@ -427,6 +434,12 @@ class SelectComputerUseSamplesTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.temp.cleanup()
+
+    def test_canonical_positive_int_accepts_only_canonical_decimal_strings(self):
+        self.assertEqual(selector.canonical_positive_int("1000"), 1000)
+        for value in ("", "0", "01", "-1", "+1", " 1", 1, True, None):
+            with self.subTest(value=value):
+                self.assertIsNone(selector.canonical_positive_int(value))
 
     def write_inputs(self, mapping: dict | None = None, canonical_mutator=None):
         mapping = copy.deepcopy(mapping or mapping_fixture())
@@ -515,10 +528,15 @@ class SelectComputerUseSamplesTests(unittest.TestCase):
             sample = samples[scenario_id]
             self.assertEqual(sample["target_kind"], "clone_b_fixture_derived")
             plan = sample["fixture_plan"]
+            self.assertEqual(plan["fixture_class"], "negative_assertion")
             self.assertEqual(plan["environment"], "isolated_clone_b_only")
             self.assertIn("production_write", plan["forbidden"])
             self.assertIn("reuse_existing_malformed_production_row", plan["forbidden"])
             self.assertTrue(plan["fixture_receipt_required_before_browser_execution"])
+        self.assertEqual(
+            document["coverage"]["negative_fixture_scenarios"],
+            sorted(selector.NEGATIVE_FIXTURE_SCENARIOS),
+        )
 
     def test_baseline_manifest_scopes_revision_history_to_devplus_edge(self):
         mapping_path, canonical_path = self.write_inputs()
@@ -621,7 +639,75 @@ class SelectComputerUseSamplesTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIsNone(document)
 
-    def test_missing_exact_status_candidate_blocks_instead_of_fallback(self):
+    def test_final_rejects_approved_entity_without_pass_review(self):
+        def make_g09_pending(canonical: dict) -> None:
+            entity = next(
+                row
+                for row in canonical["entities"]
+                if row["gate_name"] == "G09"
+            )
+            entity["expected_state"] = "approved"
+            entity["review_state"] = "pending"
+
+        mapping_path, canonical_path = self.write_inputs(
+            canonical_mutator=make_g09_pending
+        )
+        code, document, _ = self.run_selector(mapping_path, canonical_path, "final")
+        self.assertEqual(code, 1)
+        self.assertIsNone(document)
+
+    def test_final_rejects_wrong_gate_specific_expected_state(self):
+        def make_g01_confirmed(canonical: dict) -> None:
+            entity = next(
+                row
+                for row in canonical["entities"]
+                if row["gate_name"] == "G01"
+            )
+            entity["expected_state"] = "confirmed"
+
+        mapping_path, canonical_path = self.write_inputs(
+            canonical_mutator=make_g01_confirmed
+        )
+        code, document, _ = self.run_selector(mapping_path, canonical_path, "final")
+        self.assertEqual(code, 1)
+        self.assertIsNone(document)
+
+    def test_customization_event_from_another_task_cannot_select_group(self):
+        def detach_customization_event(canonical: dict) -> None:
+            event = next(
+                row
+                for row in canonical["entities"]
+                if row["gate_name"] == "G07"
+                and row["entity_key"] == "task-event:4:1"
+            )
+            event["components"][3] = "task.created"
+            canonical["entities"].append(
+                canonical_entity(
+                    "G07",
+                    "task-event:17:2",
+                    [
+                        "event-17-customization",
+                        17,
+                        2,
+                        "task.customization.reviewed",
+                        1,
+                        "{}",
+                        "2026-07-23",
+                    ],
+                )
+            )
+
+        mapping_path, canonical_path = self.write_inputs(
+            canonical_mutator=detach_customization_event
+        )
+        code, document, _ = self.run_selector(mapping_path, canonical_path, "final")
+        self.assertEqual(code, 3)
+        self.assertIn(
+            "customization_submit_audit",
+            {row["scenario_id"] for row in document["blockers"]},
+        )
+
+    def test_zero_archived_population_uses_positive_contract_fixture(self):
         def remove_archived(canonical: dict) -> None:
             task = next(
                 row
@@ -634,11 +720,62 @@ class SelectComputerUseSamplesTests(unittest.TestCase):
             canonical_mutator=remove_archived
         )
         code, document, _ = self.run_selector(mapping_path, canonical_path, "final")
-        self.assertEqual(code, 3)
+        self.assertEqual(code, 0)
+        sample = next(
+            row
+            for row in document["samples"]
+            if row["scenario_id"] == "archived_readonly"
+        )
+        self.assertEqual(sample["target_kind"], "clone_b_fixture_derived")
+        plan = sample["fixture_plan"]
+        self.assertEqual(plan["fixture_kind"], "archived_terminal")
+        self.assertEqual(plan["fixture_class"], "positive_contract")
+        self.assertEqual(plan["canonical_archived_population"], 0)
+        self.assertEqual(sample["resource_ids"], [])
+        self.assertEqual(sample["revision_ids"], [])
+        self.assertEqual(sample["revision_facts"], [])
+        self.assertEqual(sample["task_facts"]["task_status"], "Archived")
+        self.assertEqual(sample["task_facts"]["expected_asset_count"], 0)
+        self.assertEqual(
+            plan["expected_runtime"],
+            {
+                "task_status": "Archived",
+                "current_handler_id": None,
+                "resource_group_count": 0,
+                "revision_count": 0,
+                "asset_count": 0,
+                "allowed_actions": [],
+                "module_state": "closed",
+            },
+        )
+        self.assertEqual(
+            plan["canonical_entities_sha256"],
+            selector.file_sha256(canonical_path),
+        )
+        self.assertEqual(
+            plan["historical_migration_coverage"],
+            "not_applicable_zero_frozen_population",
+        )
         self.assertIn(
             "archived_readonly",
-            {row["scenario_id"] for row in document["blockers"]},
+            document["coverage"]["positive_contract_fixture_scenarios"],
         )
+        self.assertNotIn(
+            "archived_readonly",
+            document["coverage"]["negative_fixture_scenarios"],
+        )
+
+    def test_real_archived_candidate_never_uses_fixture(self):
+        mapping_path, canonical_path = self.write_inputs()
+        code, document, _ = self.run_selector(mapping_path, canonical_path, "final")
+        self.assertEqual(code, 0)
+        sample = next(
+            row
+            for row in document["samples"]
+            if row["scenario_id"] == "archived_readonly"
+        )
+        self.assertEqual(sample["target_kind"], "reviewed_real_task")
+        self.assertNotIn("fixture_plan", sample)
 
     def test_revision_ids_follow_mapping_apply_order(self):
         mapping_path, canonical_path = self.write_inputs()

@@ -71,6 +71,10 @@ class FinalizeReleaseGatesTest(unittest.TestCase):
                         "migration_mapping_sha256": "2" * 64,
                         "snapshot_sha256": "3" * 64,
                         "review_manifest_sha256": "4" * 64,
+                        "api_oracle_sha256": "6" * 64,
+                        "api_rules_sha256": "5" * 64,
+                        "comparator_sha256": "7" * 64,
+                        "build_api_oracle_sha256": "8" * 64,
                     }
                 )
             elif gate == "G1":
@@ -92,7 +96,7 @@ class FinalizeReleaseGatesTest(unittest.TestCase):
                         "violations": [],
                         "expected_entities": 8,
                         "observed_entities": 8,
-                        "manifest_sha256": "5" * 64,
+                        "manifest_sha256": "4" * 64,
                         "observations_sha256": "6" * 64,
                         "required_gates": sorted(
                             MODULE.MANIFEST_DATABASE_GATES
@@ -424,6 +428,9 @@ class FinalizeReleaseGatesTest(unittest.TestCase):
                         "task_count": 1,
                         "group_count": 0,
                         "task_asset_count": 0,
+                        "legacy_task_asset_count": 0,
+                        "manifest_oracle_check_count": 1,
+                        "semantic_comparison_count": 1,
                         "request_count": 4,
                         "combination_matrix": [
                             {
@@ -431,6 +438,11 @@ class FinalizeReleaseGatesTest(unittest.TestCase):
                                 "frontend": values[0],
                                 "backend": values[1],
                                 "data": values[2],
+                                "origin_sha256": (
+                                    "a" * 64
+                                    if values[2] == "A"
+                                    else "b" * 64
+                                ),
                             }
                             for combo_id, values in MODULE.API_COMBINATIONS.items()
                         ],
@@ -438,7 +450,11 @@ class FinalizeReleaseGatesTest(unittest.TestCase):
                         "task_ids_sha256": "3" * 64,
                         "matrix_sha256": "4" * 64,
                         "rules_sha256": "5" * 64,
-                        "manifest_sha256": "6" * 64,
+                        "manifest_sha256": "4" * 64,
+                        "api_oracle_sha256": "6" * 64,
+                        "api_oracle_mapping_sha256": "2" * 64,
+                        "comparator_sha256": "7" * 64,
+                        "build_api_oracle_sha256": "8" * 64,
                         "used_rule_ids": [],
                         "unused_rule_ids": ["approved-difference"],
                         "observations": [
@@ -511,10 +527,10 @@ class FinalizeReleaseGatesTest(unittest.TestCase):
                     "status": "PASS",
                     "violation_count": 0,
                     "checked_count": 1,
-                    "manifest_sha256": "7" * 64,
+                    "manifest_sha256": "4" * 64,
                     "exception_count": 1,
                     "exception_evidence_sha256": "8" * 64,
-                    "mapping_sha256": "9" * 64,
+                    "mapping_sha256": "2" * 64,
                     "mapping_row_hash": "a" * 64,
                     "exceptions": [
                         {
@@ -625,6 +641,42 @@ class FinalizeReleaseGatesTest(unittest.TestCase):
                 "artifact hash mismatch",
                 report["gates"]["G5"]["violations"][0],
             )
+
+    def test_g6_oracle_rules_and_mapping_inputs_are_cross_gate_bound(self):
+        for field, expected_detail in (
+            ("api_oracle_sha256", "cross-gate api_oracle_sha256 binding differs"),
+            ("rules_sha256", "cross-gate api_rules_sha256 binding differs"),
+            (
+                "api_oracle_mapping_sha256",
+                "cross-gate migration mapping hash binding differs",
+            ),
+            ("comparator_sha256", "cross-gate comparator_sha256 binding differs"),
+            (
+                "build_api_oracle_sha256",
+                "cross-gate build_api_oracle_sha256 binding differs",
+            ),
+        ):
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as raw:
+                run_dir, index_path = self.make_run(raw)
+                index = json.loads(index_path.read_text(encoding="utf-8"))
+                g6_path = run_dir / index["gates"]["G6"]["path"]
+                g6 = json.loads(g6_path.read_text(encoding="utf-8"))
+                g6[field] = "9" * 64
+                g6.pop("evidence_sha256")
+                g6["evidence_sha256"] = hashlib.sha256(
+                    MODULE.canonical_bytes(g6)
+                ).hexdigest()
+                index["gates"]["G6"]["sha256"] = write_json(g6_path, g6)
+                index["signatures"] = []
+                write_json(index_path, index)
+
+                _, report = MODULE.validate_index(run_dir, index_path)
+
+                self.assertEqual("NO-GO", report["decision"])
+                self.assertIn(
+                    expected_detail,
+                    report["gates"]["G6"]["violations"],
+                )
 
     def test_dirty_candidate_is_blocked(self):
         with tempfile.TemporaryDirectory() as raw:

@@ -11,7 +11,12 @@ import (
 )
 
 func (s *taskService) loadTaskDesignAssetReadModel(ctx context.Context, task *domain.Task) ([]*domain.DesignAsset, []*domain.DesignAssetVersion, *domain.AppError) {
-	return loadTaskDesignAssetReadModel(ctx, s.taskRepo, s.designAssetRepo, s.taskAssetRepo, task)
+	assets, versions, appErr := loadTaskDesignAssetReadModel(ctx, s.taskRepo, s.designAssetRepo, s.taskAssetRepo, task)
+	if appErr != nil {
+		return nil, nil, appErr
+	}
+	enrichDesignAssetVersionUploaderNames(ctx, s.userDisplayNameResolver, versions)
+	return assets, versions, nil
 }
 
 func loadTaskDesignAssetReadModel(
@@ -129,9 +134,9 @@ func buildTaskLevelFallbackDesignAssetReadModel(task *domain.Task, records []*do
 				ScopeSKUCode:         version.ScopeSKUCode,
 				RetouchRequirementID: domain.CloneInt64Ptr(version.RetouchRequirementID),
 				AssetType:            version.AssetType,
-				CreatedBy:    version.UploadedBy,
-				CreatedAt:    fallbackTaskAssetTimestamp(record),
-				UpdatedAt:    fallbackTaskAssetTimestamp(record),
+				CreatedBy:            version.UploadedBy,
+				CreatedAt:            fallbackTaskAssetTimestamp(record),
+				UpdatedAt:            fallbackTaskAssetTimestamp(record),
 			}
 			assetsByID[assetID] = asset
 		}

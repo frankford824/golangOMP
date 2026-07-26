@@ -54,6 +54,10 @@ class FakeConnection:
         for table in sorted(self.schema):
             for column in self.schema[table]:
                 yield db.canonical_bytes(column)
+            for cells in self.rows[table]:
+                yield db.canonical_bytes(
+                    {"kind": "row", "table": table, "cells": cells}
+                )
             yield db.canonical_bytes(
                 {
                     "kind": "table_metadata",
@@ -61,9 +65,46 @@ class FakeConnection:
                     "auto_increment": self.auto_increments[table],
                 }
             )
+
+
+class LazyAutoIncrementConnection(FakeConnection):
+    def __init__(self, schema, rows, auto_increments):
+        super().__init__(schema, rows, auto_increments)
+        self.initialized = set()
+
+    def iter_output_lines(self, sql):
+        self.executed.append(sql)
+        metadata_first = sql.index("'kind','table_metadata'") < sql.index(
+            "'kind','row'"
+        )
+        for table in sorted(self.schema):
+            for column in self.schema[table]:
+                yield db.canonical_bytes(column)
+            if metadata_first:
+                yield db.canonical_bytes(
+                    {
+                        "kind": "table_metadata",
+                        "table": table,
+                        "auto_increment": self.auto_increments[table],
+                    }
+                )
             for cells in self.rows[table]:
                 yield db.canonical_bytes(
                     {"kind": "row", "table": table, "cells": cells}
+                )
+            if table not in self.initialized:
+                current = self.auto_increments[table]
+                self.auto_increments[table] = (
+                    1 if current is None else current + 1
+                )
+                self.initialized.add(table)
+            if not metadata_first:
+                yield db.canonical_bytes(
+                    {
+                        "kind": "table_metadata",
+                        "table": table,
+                        "auto_increment": self.auto_increments[table],
+                    }
                 )
 
 
@@ -123,12 +164,18 @@ class G4CloneDBHelpersTest(unittest.TestCase):
         self.assertNotIn("asset_search_documents", sql)
 
     def test_full_fingerprint_is_order_independent_and_preserves_duplicates(self):
+        capture_sql = db._capture_sql(
+            schema_for({"probe": ("id",)}),
+            include_table_metadata=True,
+        )
         self.assertIn(
             "SET SESSION information_schema_stats_expiry=0;",
-            db._capture_sql(
-                schema_for({"probe": ("id",)}),
-                include_table_metadata=True,
-            ),
+            capture_sql,
+        )
+        self.assertLess(
+            capture_sql.index("'kind','row'"),
+            capture_sql.index("'kind','table_metadata'"),
+            "AUTO_INCREMENT must be captured after the first full table scan",
         )
         schema = schema_for(
             {
@@ -192,6 +239,30 @@ class G4CloneDBHelpersTest(unittest.TestCase):
             first["blob_without_primary_key"]["content_sha256"],
             third["blob_without_primary_key"]["content_sha256"],
         )
+
+    def test_full_fingerprint_stabilizes_lazy_auto_increment_after_row_scan(self):
+        schema = schema_for(
+            {
+                "cold_empty": ("id",),
+                "cold_nonempty": ("id",),
+            }
+        )
+        connection = LazyAutoIncrementConnection(
+            schema,
+            {
+                "cold_empty": [],
+                "cold_nonempty": [["37"]],
+            },
+            {
+                "cold_empty": None,
+                "cold_nonempty": 7,
+            },
+        )
+        _, first = db.capture_fingerprint(connection, schema, chunk_rows=2)
+        _, second = db.capture_fingerprint(connection, schema, chunk_rows=2)
+        self.assertEqual(first, second)
+        self.assertEqual(first["cold_empty"]["auto_increment"], 1)
+        self.assertEqual(first["cold_nonempty"]["auto_increment"], 8)
 
     def test_row_digest_spool_has_strict_buffer_and_merge_fan_in_bounds(self):
         with tempfile.TemporaryDirectory() as temporary:

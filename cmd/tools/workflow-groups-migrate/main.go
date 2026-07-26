@@ -22,13 +22,15 @@ import (
 )
 
 const (
-	workflowGroupsSnapshotVersion = 8
-	workflowGroupsToolVersion     = "workflow-groups-migrate/v8.8"
+	workflowGroupsSnapshotVersion = 9
+	workflowGroupsToolVersion     = "workflow-groups-migrate/v8.9"
 	workflowGroupsSchemaVersion   = "124-126"
-	previousSnapshotVersion       = 7
-	previousToolVersion           = "workflow-groups-migrate/v8.7"
-	olderSnapshotVersion          = 6
-	olderToolVersion              = "workflow-groups-migrate/v8.6"
+	previousSnapshotVersion       = 8
+	previousToolVersion           = "workflow-groups-migrate/v8.8"
+	olderSnapshotVersion          = 7
+	olderToolVersion              = "workflow-groups-migrate/v8.7"
+	historicalSnapshotVersion     = 6
+	historicalToolVersion         = "workflow-groups-migrate/v8.6"
 	legacySnapshotVersion         = 4
 	legacyToolVersion             = "workflow-groups-migrate/v8.4"
 )
@@ -241,6 +243,9 @@ type assetBindingSnapshot struct {
 	AssetType                  string     `json:"asset_type,omitempty"`
 	ScopeSKUCode               *string    `json:"scope_sku_code"`
 	RetouchRequirementID       *int64     `json:"retouch_requirement_id,omitempty"`
+	FlowReviewStatus           string     `json:"flow_review_status"`
+	ApprovedAt                 *time.Time `json:"approved_at,omitempty"`
+	ApprovedBy                 *int64     `json:"approved_by,omitempty"`
 	MimeType                   string     `json:"mime_type,omitempty"`
 	WholeHash                  string     `json:"whole_hash,omitempty"`
 	DeletedAt                  *time.Time `json:"deleted_at,omitempty"`
@@ -2193,17 +2198,20 @@ func loadAssetBindingSnapshot(ctx context.Context, q snapshotQueryer, id int64) 
 	var boundGroupID, stagedSKUItemID, stagedRetouchID, stagedBy sql.NullInt64
 	var boundRole, stagedRole, uploadSessionID, scopeSKUCode sql.NullString
 	var retouchRequirementID sql.NullInt64
-	var stagedExpiresAt, revokedAt, objectDeletedAt, deletedAt, cleanedAt sql.NullTime
+	var stagedExpiresAt, revokedAt, objectDeletedAt, approvedAt, deletedAt, cleanedAt sql.NullTime
+	var approvedBy sql.NullInt64
 	if err := q.QueryRowContext(ctx, `
 		SELECT id,task_id,binding_state,bound_group_id,bound_role,
 		       staged_task_sku_item_id,staged_retouch_requirement_id,staged_role,staged_by,upload_session_id,staged_expires_at,
 		       access_revoked_at,access_revoked_reason,object_deleted_at,
-		       asset_type,scope_sku_code,retouch_requirement_id,COALESCE(mime_type,''),COALESCE(whole_hash,''),deleted_at,cleaned_at
+		       asset_type,scope_sku_code,retouch_requirement_id,flow_review_status,approved_at,approved_by,
+		       COALESCE(mime_type,''),COALESCE(whole_hash,''),deleted_at,cleaned_at
 		FROM task_assets WHERE id=?`, id).
 		Scan(&item.ID, &item.TaskID, &item.BindingState, &boundGroupID, &boundRole,
 			&stagedSKUItemID, &stagedRetouchID, &stagedRole, &stagedBy, &uploadSessionID, &stagedExpiresAt,
 			&revokedAt, &item.AccessRevokedReason, &objectDeletedAt,
-			&item.AssetType, &scopeSKUCode, &retouchRequirementID, &item.MimeType, &item.WholeHash, &deletedAt, &cleanedAt); err != nil {
+			&item.AssetType, &scopeSKUCode, &retouchRequirementID, &item.FlowReviewStatus, &approvedAt, &approvedBy,
+			&item.MimeType, &item.WholeHash, &deletedAt, &cleanedAt); err != nil {
 		return item, err
 	}
 	item.BoundGroupID = nullInt64Pointer(boundGroupID)
@@ -2218,6 +2226,8 @@ func loadAssetBindingSnapshot(ctx context.Context, q snapshotQueryer, id int64) 
 	item.ObjectDeletedAt = nullTimePointer(objectDeletedAt)
 	item.ScopeSKUCode = nullStringPointer(scopeSKUCode)
 	item.RetouchRequirementID = nullInt64Pointer(retouchRequirementID)
+	item.ApprovedAt = nullTimePointer(approvedAt)
+	item.ApprovedBy = nullInt64Pointer(approvedBy)
 	item.DeletedAt = nullTimePointer(deletedAt)
 	item.CleanedAt = nullTimePointer(cleanedAt)
 	return item, nil
@@ -2968,8 +2978,28 @@ func applyAssetRecoveries(ctx context.Context, tx *sql.Tx, recoveries []assetRec
 		if recovery.Strategy != "historical_unavailable_tombstone_v1" || recovery.MissingTaskAssetID != 12323 {
 			return fmt.Errorf("asset recovery %d has an unsupported apply strategy", recovery.MissingTaskAssetID)
 		}
-		if err := validateHistoricalUnavailableRecoveryEvidence(ctx, tx, recovery, "recorded"); err != nil {
+		var currentStatus string
+		if err := tx.QueryRowContext(ctx, `
+			SELECT status
+			FROM asset_storage_refs
+			WHERE ref_id=?
+			FOR UPDATE`, recovery.OriginalStorageRefID).Scan(&currentStatus); err != nil {
+			return fmt.Errorf(
+				"load asset recovery %d current storage ref status: %w",
+				recovery.MissingTaskAssetID, err,
+			)
+		}
+		if currentStatus != "recorded" && currentStatus != "historical_unavailable" {
+			return fmt.Errorf(
+				"asset recovery %d storage ref has unsupported current status %q",
+				recovery.MissingTaskAssetID, currentStatus,
+			)
+		}
+		if err := validateHistoricalUnavailableRecoveryEvidence(ctx, tx, recovery, currentStatus); err != nil {
 			return err
+		}
+		if currentStatus == "historical_unavailable" {
+			continue
 		}
 		result, err := tx.ExecContext(ctx, `
 			UPDATE asset_storage_refs
@@ -3341,6 +3371,50 @@ func migrateStates(ctx context.Context, tx *sql.Tx, m mappingFile) error {
 			}
 			if currentStatus != decision.TargetStatus {
 				return fmt.Errorf("task %d no longer matches reviewed state decision %s -> %s", decision.TaskID, decision.FromStatus, decision.TargetStatus)
+			}
+		}
+		if isReviewedRetouchReopenDecision(decision) {
+			if _, err := tx.ExecContext(ctx, `
+				UPDATE task_modules
+				SET state='in_progress',terminal_at=NULL,updated_at=?
+				WHERE task_id=? AND module_key='retouch'`,
+				decision.ConfirmedAt.UTC(), decision.TaskID); err != nil {
+				return fmt.Errorf("reopen reviewed retouch module for task %d: %w", decision.TaskID, err)
+			}
+			rows, err := tx.QueryContext(ctx, `
+				SELECT state,terminal_at
+				FROM task_modules
+				WHERE task_id=? AND module_key='retouch'
+				FOR UPDATE`, decision.TaskID)
+			if err != nil {
+				return fmt.Errorf("verify reviewed retouch module for task %d: %w", decision.TaskID, err)
+			}
+			moduleCount := 0
+			activeCount := 0
+			for rows.Next() {
+				var state string
+				var terminalAt sql.NullTime
+				if err := rows.Scan(&state, &terminalAt); err != nil {
+					rows.Close()
+					return fmt.Errorf("scan reviewed retouch module for task %d: %w", decision.TaskID, err)
+				}
+				moduleCount++
+				if state == "in_progress" && !terminalAt.Valid {
+					activeCount++
+				}
+			}
+			if err := rows.Err(); err != nil {
+				rows.Close()
+				return fmt.Errorf("iterate reviewed retouch module rows for task %d: %w", decision.TaskID, err)
+			}
+			if err := rows.Close(); err != nil {
+				return fmt.Errorf("close reviewed retouch module rows for task %d: %w", decision.TaskID, err)
+			}
+			if moduleCount != 1 || activeCount != 1 {
+				return fmt.Errorf(
+					"task %d reviewed retouch reopen requires exactly one active non-terminal retouch module, found modules=%d active=%d",
+					decision.TaskID, moduleCount, activeCount,
+				)
 			}
 		}
 	}
@@ -4133,11 +4207,13 @@ func rollback(ctx context.Context, db *sql.DB, database string, o options, m map
 			UPDATE task_assets
 			SET binding_state=?,bound_group_id=?,bound_role=?,
 			    staged_task_sku_item_id=?,staged_retouch_requirement_id=?,staged_role=?,staged_by=?,upload_session_id=?,staged_expires_at=?,
-			    access_revoked_at=?,access_revoked_reason=?,object_deleted_at=?,scope_sku_code=?,retouch_requirement_id=?
+			    access_revoked_at=?,access_revoked_reason=?,object_deleted_at=?,scope_sku_code=?,retouch_requirement_id=?,
+			    flow_review_status=?,approved_at=?,approved_by=?
 			WHERE id=?`,
 			asset.BindingState, nullableInt64Pointer(asset.BoundGroupID), nullableStringPointer(asset.BoundRole),
 			nullableInt64Pointer(asset.StagedTaskSKUItemID), nullableInt64Pointer(asset.StagedRetouchRequirementID), nullableStringPointer(asset.StagedRole), nullableInt64Pointer(asset.StagedBy), nullableStringPointer(asset.UploadSessionID), nullableTimePointer(asset.StagedExpiresAt),
-			nullableTimePointer(asset.AccessRevokedAt), asset.AccessRevokedReason, nullableTimePointer(asset.ObjectDeletedAt), nullableStringPointer(asset.ScopeSKUCode), nullableInt64Pointer(asset.RetouchRequirementID), asset.ID); err != nil {
+			nullableTimePointer(asset.AccessRevokedAt), asset.AccessRevokedReason, nullableTimePointer(asset.ObjectDeletedAt), nullableStringPointer(asset.ScopeSKUCode), nullableInt64Pointer(asset.RetouchRequirementID),
+			asset.FlowReviewStatus, nullableTimePointer(asset.ApprovedAt), nullableInt64Pointer(asset.ApprovedBy), asset.ID); err != nil {
 			return err
 		}
 	}
@@ -4719,11 +4795,12 @@ func readSnapshot(path, database string, m mappingFile) (snapshot, error) {
 		header.SchemaVersion == workflowGroupsSchemaVersion
 	knownHistoricalSnapshot := (header.Version == previousSnapshotVersion && header.ToolVersion == previousToolVersion) ||
 		(header.Version == olderSnapshotVersion && header.ToolVersion == olderToolVersion) ||
+		(header.Version == historicalSnapshotVersion && header.ToolVersion == historicalToolVersion) ||
 		(header.Version == legacySnapshotVersion && header.ToolVersion == legacyToolVersion)
 	if knownHistoricalSnapshot && header.SchemaVersion == workflowGroupsSchemaVersion {
 		return snapshot{}, v1migrate.NewHardAbort(
 			v1migrate.ExitCodeHardAbort,
-			"snapshot v%d predates lossless v7 rollback; use the matching historical tool or prepare a reviewed recovery",
+			"snapshot v%d predates lossless v9 rollback; use the matching historical tool or prepare a reviewed recovery",
 			header.Version,
 		)
 	}

@@ -59,6 +59,11 @@ type ReferenceFileRefFlat struct {
 	OwnerModuleKey       string    `json:"owner_module_key"`
 	Context              *string   `json:"context,omitempty"`
 	AttachedAt           time.Time `json:"attached_at"`
+	StorageKey           string    `json:"-"`
+	FileName             string    `json:"-"`
+	MimeType             string    `json:"-"`
+	FileSize             *int64    `json:"-"`
+	StorageStatus        string    `json:"-"`
 }
 
 type TaskCustomizationOrder struct {

@@ -1711,8 +1711,16 @@ func (s *taskService) loadTaskReadModel(ctx context.Context, id int64) (*domain.
 	if s.referenceFileRefFlatRepo != nil {
 		flatRefs, flatErr := s.referenceFileRefFlatRepo.ListByTask(ctx, task.ID)
 		if flatErr == nil {
+			var designAssets []*domain.DesignAsset
+			if task.TaskType == domain.TaskTypeRetouchTask {
+				assets, _, assetErr := s.loadTaskDesignAssetReadModel(ctx, task)
+				if assetErr != nil {
+					return nil, assetErr
+				}
+				designAssets = assets
+			}
 			requirements := s.listTaskRetouchRequirements(ctx, task)
-			readModel.RetouchRequirements = EnrichRetouchRequirementsReadModel(ctx, requirements, flatRefs, nil, s.referenceFileRefsEnricher)
+			readModel.RetouchRequirements = EnrichRetouchRequirementsReadModel(ctx, requirements, flatRefs, designAssets, s.referenceFileRefsEnricher)
 			readModel.ReferenceFileRefs = FilterTaskLevelReferenceFileRefs(readModel.ReferenceFileRefs, flatRefs)
 		} else {
 			readModel.RetouchRequirements = s.listTaskRetouchRequirements(ctx, task)

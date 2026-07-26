@@ -160,10 +160,30 @@ func groupRequirementReferenceFileRefs(
 		if _, ok := hasDesignRefs[reqID]; ok {
 			continue
 		}
-		out[reqID] = append(out[reqID], domain.ReferenceFileRef{
-			AssetID: flat.RefID,
-			RefID:   flat.RefID,
-		})
+		ref := domain.ReferenceFileRef{
+			AssetID:    flat.RefID,
+			RefID:      flat.RefID,
+			Filename:   strings.TrimSpace(flat.FileName),
+			MimeType:   strings.TrimSpace(flat.MimeType),
+			StorageKey: strings.TrimSpace(flat.StorageKey),
+		}
+		if flat.FileSize != nil {
+			ref.FileSize = domain.CloneInt64Ptr(flat.FileSize)
+		}
+		if domain.AssetStorageRefStatus(strings.TrimSpace(flat.StorageStatus)) ==
+			domain.AssetStorageRefStatusRecorded && ref.StorageKey != "" {
+			downloadURL := domain.BuildRelativeEscapedURLPath(
+				"/v1/assets/files",
+				ref.StorageKey,
+			)
+			ref.DownloadURL = &downloadURL
+			ref.URL = &downloadURL
+			ref.Source = domain.ReferenceFileRefSourceTaskCreateAssetCenter
+			ref.Status = domain.ReferenceFileRefStatusUploaded
+		} else {
+			ref.StorageKey = ""
+		}
+		out[reqID] = append(out[reqID], ref)
 	}
 	for reqID, refs := range out {
 		out[reqID] = domain.NormalizeReferenceFileRefs(refs)

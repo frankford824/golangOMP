@@ -37,5 +37,14 @@ func (h *TaskDetailHandler) GetByTaskID(c *gin.Context) {
 		return
 	}
 	var detail *task_aggregator.Detail = aggregate
+	if detail.Task != nil {
+		detail.Task.WorkflowContractVersion = 2
+		detail.Task.AllowedActions = v8AllowedTaskActions(
+			requestActor(c),
+			detail.Task.TaskType,
+			detail.Task.TaskStatus,
+			detail.Task.AccessSubject(),
+		)
+	}
 	respondOK(c, detail)
 }

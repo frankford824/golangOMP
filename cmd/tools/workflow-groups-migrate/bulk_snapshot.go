@@ -548,7 +548,8 @@ func captureAssetBindingsForTasks(ctx context.Context, q snapshotQueryer, taskID
 			SELECT id,task_id,binding_state,bound_group_id,bound_role,
 			       staged_task_sku_item_id,staged_retouch_requirement_id,staged_role,staged_by,upload_session_id,staged_expires_at,
 			       access_revoked_at,access_revoked_reason,object_deleted_at,
-			       asset_type,scope_sku_code,retouch_requirement_id,COALESCE(mime_type,''),COALESCE(whole_hash,''),deleted_at,cleaned_at
+			       asset_type,scope_sku_code,retouch_requirement_id,flow_review_status,approved_at,approved_by,
+			       COALESCE(mime_type,''),COALESCE(whole_hash,''),deleted_at,cleaned_at
 			FROM task_assets
 			WHERE task_id IN (`+placeholders+`)
 			ORDER BY id`, args...)
@@ -560,11 +561,13 @@ func captureAssetBindingsForTasks(ctx context.Context, q snapshotQueryer, taskID
 			var boundGroupID, stagedSKUItemID, stagedRetouchID, stagedBy sql.NullInt64
 			var boundRole, stagedRole, uploadSessionID, scopeSKUCode sql.NullString
 			var retouchRequirementID sql.NullInt64
-			var stagedExpiresAt, revokedAt, objectDeletedAt, deletedAt, cleanedAt sql.NullTime
+			var stagedExpiresAt, revokedAt, objectDeletedAt, approvedAt, deletedAt, cleanedAt sql.NullTime
+			var approvedBy sql.NullInt64
 			if err := rows.Scan(&item.ID, &item.TaskID, &item.BindingState, &boundGroupID, &boundRole,
 				&stagedSKUItemID, &stagedRetouchID, &stagedRole, &stagedBy, &uploadSessionID, &stagedExpiresAt,
 				&revokedAt, &item.AccessRevokedReason, &objectDeletedAt,
-				&item.AssetType, &scopeSKUCode, &retouchRequirementID, &item.MimeType, &item.WholeHash, &deletedAt, &cleanedAt); err != nil {
+				&item.AssetType, &scopeSKUCode, &retouchRequirementID, &item.FlowReviewStatus, &approvedAt, &approvedBy,
+				&item.MimeType, &item.WholeHash, &deletedAt, &cleanedAt); err != nil {
 				rows.Close()
 				return nil, err
 			}
@@ -580,6 +583,8 @@ func captureAssetBindingsForTasks(ctx context.Context, q snapshotQueryer, taskID
 			item.ObjectDeletedAt = nullTimePointer(objectDeletedAt)
 			item.ScopeSKUCode = nullStringPointer(scopeSKUCode)
 			item.RetouchRequirementID = nullInt64Pointer(retouchRequirementID)
+			item.ApprovedAt = nullTimePointer(approvedAt)
+			item.ApprovedBy = nullInt64Pointer(approvedBy)
 			item.DeletedAt = nullTimePointer(deletedAt)
 			item.CleanedAt = nullTimePointer(cleanedAt)
 			items = append(items, item)

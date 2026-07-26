@@ -220,6 +220,53 @@ func TestLoadTaskDesignAssetReadModelFallsBackWhenRootsMissing(t *testing.T) {
 	}
 }
 
+func TestTaskServiceLoadTaskDesignAssetReadModelEnrichesUploaderNames(t *testing.T) {
+	task := &domain.Task{ID: 15, TaskNo: "RW-15"}
+	designRepo := &designAssetReadModelStub{
+		assetsByTask: map[int64][]*domain.DesignAsset{
+			15: {
+				{
+					ID:               601,
+					TaskID:           15,
+					AssetNo:          "AST-601",
+					AssetType:        domain.TaskAssetTypeSource,
+					CurrentVersionID: int64Ptr(701),
+				},
+			},
+		},
+	}
+	taskAssetRepo := &taskAssetReadModelStub{
+		recordsByTask: map[int64][]*domain.TaskAsset{
+			15: {
+				{
+					ID:             701,
+					TaskID:         15,
+					AssetID:        int64Ptr(601),
+					AssetType:      domain.TaskAssetTypeSource,
+					AssetVersionNo: intPtr(1),
+					UploadedBy:     88,
+				},
+			},
+		},
+	}
+	svc := &taskService{
+		designAssetRepo:         designRepo,
+		taskAssetRepo:           taskAssetRepo,
+		userDisplayNameResolver: &countingUploaderNameResolver{names: map[int64]string{88: "Designer 88"}},
+	}
+
+	assets, versions, appErr := svc.loadTaskDesignAssetReadModel(context.Background(), task)
+	if appErr != nil {
+		t.Fatalf("loadTaskDesignAssetReadModel() error = %+v", appErr)
+	}
+	if len(versions) != 1 || versions[0].UploadedByName != "Designer 88" {
+		t.Fatalf("versions = %+v, want one enriched uploader", versions)
+	}
+	if len(assets) != 1 || assets[0].CurrentVersion == nil || assets[0].CurrentVersion.UploadedByName != "Designer 88" {
+		t.Fatalf("assets = %+v, want enriched current version", assets)
+	}
+}
+
 type designAssetReadModelStub struct {
 	assetsByTask    map[int64][]*domain.DesignAsset
 	listByTaskCalls int

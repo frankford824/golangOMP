@@ -303,6 +303,10 @@ def validate_environment(payload: dict[str, Any]) -> list[str]:
         "migration_mapping_sha256",
         "snapshot_sha256",
         "review_manifest_sha256",
+        "api_oracle_sha256",
+        "api_rules_sha256",
+        "comparator_sha256",
+        "build_api_oracle_sha256",
     )
     for field in required_hashes:
         value = str(payload.get(field) or "")
@@ -1194,6 +1198,9 @@ def validate_g6(payload: dict[str, Any]) -> list[str]:
         "task_count",
         "group_count",
         "task_asset_count",
+        "legacy_task_asset_count",
+        "manifest_oracle_check_count",
+        "semantic_comparison_count",
         "request_count",
         "combination_matrix",
         "identities",
@@ -1201,6 +1208,10 @@ def validate_g6(payload: dict[str, Any]) -> list[str]:
         "matrix_sha256",
         "rules_sha256",
         "manifest_sha256",
+        "api_oracle_sha256",
+        "api_oracle_mapping_sha256",
+        "comparator_sha256",
+        "build_api_oracle_sha256",
         "used_rule_ids",
         "unused_rule_ids",
         "observations",
@@ -1213,7 +1224,10 @@ def validate_g6(payload: dict[str, Any]) -> list[str]:
     for field in ("task_count", "request_count"):
         if not is_int(payload.get(field), minimum=1):
             violations.append(f"G6 {field} must be a positive integer")
-    for field in ("group_count", "task_asset_count"):
+    for field in ("manifest_oracle_check_count", "semantic_comparison_count"):
+        if not is_int(payload.get(field), minimum=1):
+            violations.append(f"G6 {field} must be a positive integer")
+    for field in ("group_count", "task_asset_count", "legacy_task_asset_count"):
         if not is_int(payload.get(field)):
             violations.append(f"G6 {field} must be a nonnegative integer")
     matrix = payload.get("combination_matrix")
@@ -1227,6 +1241,7 @@ def validate_g6(payload: dict[str, Any]) -> list[str]:
                 "frontend",
                 "backend",
                 "data",
+                "origin_sha256",
             }:
                 violations.append(f"G6 combination[{index}] field contract differs")
                 continue
@@ -1238,8 +1253,34 @@ def validate_g6(payload: dict[str, Any]) -> list[str]:
                 row["backend"],
                 row["data"],
             )
+            if not SHA256.fullmatch(str(row.get("origin_sha256") or "")):
+                violations.append(
+                    f"G6 combination[{index}] origin_sha256 is invalid"
+                )
         if actual_matrix != API_COMBINATIONS:
             violations.append("G6 combination matrix differs from the fixed four edges")
+        origin_by_id = {
+            str(row["id"]): str(row["origin_sha256"])
+            for row in matrix
+            if isinstance(row, dict)
+            and set(row) == {
+                "id",
+                "frontend",
+                "backend",
+                "data",
+                "origin_sha256",
+            }
+        }
+        a_origins = {
+            origin_by_id.get("external_external_a"),
+            origin_by_id.get("dev_external_a"),
+        }
+        b_origins = {
+            origin_by_id.get("dev_dev_b"),
+            origin_by_id.get("external_dev_b"),
+        }
+        if None in a_origins | b_origins or a_origins & b_origins:
+            violations.append("G6 A/B physical origins are missing or overlap")
     identities = payload.get("identities")
     identity_ids: set[str] = set()
     if not isinstance(identities, list) or not identities:
@@ -1309,6 +1350,10 @@ def validate_g6(payload: dict[str, Any]) -> list[str]:
         "matrix_sha256",
         "rules_sha256",
         "manifest_sha256",
+        "api_oracle_sha256",
+        "api_oracle_mapping_sha256",
+        "comparator_sha256",
+        "build_api_oracle_sha256",
     ):
         try:
             require_hash(payload.get(field), f"G6.{field}")
@@ -1656,6 +1701,7 @@ def validate_index(
         raise ValueError("evidence index must contain exactly G0-G10")
 
     gate_results: dict[str, Any] = {}
+    gate_payloads: dict[str, dict[str, Any]] = {}
     for gate in GATES:
         record = artifacts[gate]
         if not isinstance(record, dict) or set(record) != {
@@ -1676,6 +1722,7 @@ def validate_index(
             payload: dict[str, Any] = {}
         else:
             payload = read_json(path)
+            gate_payloads[gate] = payload
             if payload.get("run_id") not in {None, run_id}:
                 violations.append("artifact belongs to another run")
             if not is_pass(payload):
@@ -1701,6 +1748,64 @@ def validate_index(
             "executor": executor or None,
             "reviewer": reviewer or None,
         }
+
+    manifest_bindings = {
+        "G0": gate_payloads.get("G0", {}).get("review_manifest_sha256"),
+        "G2": gate_payloads.get("G2", {}).get("manifest_sha256"),
+        "G6": gate_payloads.get("G6", {}).get("manifest_sha256"),
+        "G8": gate_payloads.get("G8", {}).get("manifest_sha256"),
+    }
+    if len(set(manifest_bindings.values())) != 1 or not all(
+        isinstance(value, str) and SHA256.fullmatch(value)
+        for value in manifest_bindings.values()
+    ):
+        detail = "cross-gate reviewed manifest hash binding differs"
+        for gate in manifest_bindings:
+            gate_results[gate]["violations"].append(detail)
+            gate_results[gate]["status"] = "BLOCKED"
+    mapping_bindings = {
+        "G0": gate_payloads.get("G0", {}).get("migration_mapping_sha256"),
+        "G6": gate_payloads.get("G6", {}).get("api_oracle_mapping_sha256"),
+        "G8": gate_payloads.get("G8", {}).get("mapping_sha256"),
+    }
+    if len(set(mapping_bindings.values())) != 1 or not all(
+        isinstance(value, str) and SHA256.fullmatch(value)
+        for value in mapping_bindings.values()
+    ):
+        detail = "cross-gate migration mapping hash binding differs"
+        for gate in mapping_bindings:
+            gate_results[gate]["violations"].append(detail)
+            gate_results[gate]["status"] = "BLOCKED"
+    g6_input_bindings = {
+        "api_oracle_sha256": (
+            gate_payloads.get("G0", {}).get("api_oracle_sha256"),
+            gate_payloads.get("G6", {}).get("api_oracle_sha256"),
+        ),
+        "api_rules_sha256": (
+            gate_payloads.get("G0", {}).get("api_rules_sha256"),
+            gate_payloads.get("G6", {}).get("rules_sha256"),
+        ),
+        "comparator_sha256": (
+            gate_payloads.get("G0", {}).get("comparator_sha256"),
+            gate_payloads.get("G6", {}).get("comparator_sha256"),
+        ),
+        "build_api_oracle_sha256": (
+            gate_payloads.get("G0", {}).get("build_api_oracle_sha256"),
+            gate_payloads.get("G6", {}).get("build_api_oracle_sha256"),
+        ),
+    }
+    for label, values in g6_input_bindings.items():
+        if (
+            values[0] != values[1]
+            or not all(
+                isinstance(value, str) and SHA256.fullmatch(value)
+                for value in values
+            )
+        ):
+            detail = f"cross-gate {label} binding differs"
+            for gate in ("G0", "G6"):
+                gate_results[gate]["violations"].append(detail)
+                gate_results[gate]["status"] = "BLOCKED"
 
     signatures = index.get("signatures")
     signature_violations: list[str] = []

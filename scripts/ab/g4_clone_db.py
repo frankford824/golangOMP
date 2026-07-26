@@ -399,16 +399,6 @@ def _capture_sql(
                 + f" AND table_name='{table}'"
                 + f" AND ordinal_position={int(row['ordinal'])}"
             )
-        if include_table_metadata:
-            statements.append(
-                "SELECT JSON_OBJECT("
-                + "'kind','table_metadata',"
-                + f"'table','{table}',"
-                + "'auto_increment',AUTO_INCREMENT)"
-                + " FROM information_schema.tables"
-                + " WHERE table_schema=DATABASE()"
-                + f" AND table_name='{table}'"
-            )
         cells = ",".join(
             "IF("
             + quote_identifier(str(row["name"]))
@@ -422,6 +412,20 @@ def _capture_sql(
             + f"'table','{table}','cells',JSON_ARRAY({cells}))"
             + f" FROM {quote_identifier(table)}"
         )
+        # Read AUTO_INCREMENT after scanning the table. A freshly restored
+        # InnoDB table can expose a lazy pre-scan counter and advance it to
+        # MAX(id)+1 during the first row read. Capturing metadata first would
+        # make a read-only baseline differ from the next read-only capture.
+        if include_table_metadata:
+            statements.append(
+                "SELECT JSON_OBJECT("
+                + "'kind','table_metadata',"
+                + f"'table','{table}',"
+                + "'auto_increment',AUTO_INCREMENT)"
+                + " FROM information_schema.tables"
+                + " WHERE table_schema=DATABASE()"
+                + f" AND table_name='{table}'"
+            )
     statements.append("COMMIT")
     return ";\n".join(statements) + ";\n"
 

@@ -25,6 +25,8 @@ def main() -> None:
     parser.add_argument("--openapi-hash", required=True)
     parser.add_argument("--snapshot-hash", default="")
     parser.add_argument("--review-manifest-hash", default="")
+    parser.add_argument("--comparator-hash", default="")
+    parser.add_argument("--build-api-oracle-hash", default="")
     args = parser.parse_args()
 
     run_dir = pathlib.Path(args.run_dir)
@@ -46,6 +48,10 @@ def main() -> None:
         "migration_mapping_sha256": None,
         "snapshot_sha256": args.snapshot_hash or None,
         "review_manifest_sha256": args.review_manifest_hash or None,
+        "api_oracle_sha256": None,
+        "api_rules_sha256": None,
+        "comparator_sha256": args.comparator_hash or None,
+        "build_api_oracle_sha256": args.build_api_oracle_hash or None,
     }
     write_json(run_dir / "environment_manifest.json", environment)
 

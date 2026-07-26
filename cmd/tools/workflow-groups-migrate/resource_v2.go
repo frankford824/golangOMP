@@ -875,6 +875,9 @@ func applyResourceV2(ctx context.Context, tx *sql.Tx, mapping resourceMapping) (
 		if err := verifyResourceMappingV2Query(ctx, tx, groupID, mapping); err != nil {
 			return 0, nil, nil, inserted, false, err
 		}
+		if err := approveFinalizedRevisionAssets(ctx, tx, mapping); err != nil {
+			return 0, nil, nil, inserted, false, err
+		}
 		return groupID, nil, nil, inserted, false, nil
 	}
 	if len(mapping.History) == 0 {
@@ -975,10 +978,72 @@ func applyResourceV2(ctx context.Context, tx *sql.Tx, mapping resourceMapping) (
 			}
 		}
 	}
+	if err := approveFinalizedRevisionAssets(ctx, tx, mapping); err != nil {
+		return 0, nil, aliasIDs, inserted, false, err
+	}
 	if err := verifyResourceMappingV2Query(ctx, tx, groupID, mapping); err != nil {
 		return 0, nil, aliasIDs, inserted, false, err
 	}
 	return groupID, revisionIDs, aliasIDs, inserted, true, nil
+}
+
+func approveFinalizedRevisionAssets(ctx context.Context, tx *sql.Tx, mapping resourceMapping) error {
+	for _, revision := range mapping.History {
+		if revision.Status != "finalized" && revision.Status != "superseded" {
+			continue
+		}
+		approvedAt := revision.CreatedAt.UTC()
+		if revision.SubmittedAt != nil {
+			approvedAt = revision.SubmittedAt.UTC()
+		}
+		if revision.FinalizedAt != nil {
+			approvedAt = revision.FinalizedAt.UTC()
+		}
+		for _, assetID := range revision.FinalAssetIDs {
+			var ownerTaskID int64
+			var flowReviewStatus string
+			var existingApprovedAt sql.NullTime
+			var existingApprovedBy sql.NullInt64
+			if err := tx.QueryRowContext(ctx, `
+				SELECT task_id,flow_review_status,approved_at,approved_by
+				FROM task_assets
+				WHERE id=?
+				FOR UPDATE`, assetID).
+				Scan(&ownerTaskID, &flowReviewStatus, &existingApprovedAt, &existingApprovedBy); err != nil {
+				return fmt.Errorf("lock finalized task asset %d: %w", assetID, err)
+			}
+			if ownerTaskID != mapping.TaskID {
+				return fmt.Errorf(
+					"finalized task asset %d does not belong to task %d",
+					assetID, mapping.TaskID,
+				)
+			}
+			if flowReviewStatus == "approved" && existingApprovedAt.Valid && existingApprovedBy.Valid {
+				continue
+			}
+			result, err := tx.ExecContext(ctx, `
+				UPDATE task_assets
+				SET flow_review_status='approved',
+				    approved_at=COALESCE(approved_at,?),
+				    approved_by=COALESCE(approved_by,?)
+				WHERE id=? AND task_id=?`,
+				approvedAt, revision.CreatedBy, assetID, mapping.TaskID)
+			if err != nil {
+				return fmt.Errorf("approve finalized task asset %d: %w", assetID, err)
+			}
+			affected, err := result.RowsAffected()
+			if err != nil {
+				return fmt.Errorf("count approved finalized task asset %d: %w", assetID, err)
+			}
+			if affected != 1 {
+				return fmt.Errorf(
+					"finalized task asset %d approval did not update exactly one row",
+					assetID,
+				)
+			}
+		}
+	}
+	return nil
 }
 
 func sourceAliasRemark(groupID, originID int64) string {
