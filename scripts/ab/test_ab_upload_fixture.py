@@ -160,6 +160,23 @@ class ABUploadFixtureTest(unittest.TestCase):
                 finally:
                     fixture.close()
 
+    def test_seed_root_accepts_materialized_objects_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            seed = root / "seed"
+            (seed / "objects" / "v8-ab").mkdir(parents=True)
+            (seed / "objects" / "v8-ab" / "recovered.bin").write_bytes(
+                b"recovered"
+            )
+            fixture = RunningFixture(
+                root / "runtime", mode="upload", seed=seed
+            )
+            self.addCleanup(fixture.close)
+            status, _, data = fixture.request(
+                "GET", "/files/v8-ab/recovered.bin"
+            )
+            self.assertEqual((status, data), (200, b"recovered"))
+
     def test_encoded_path_traversal_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)

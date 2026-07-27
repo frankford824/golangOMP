@@ -453,6 +453,10 @@ class FinalizeReleaseGatesTest(unittest.TestCase):
                         "manifest_sha256": "4" * 64,
                         "api_oracle_sha256": "6" * 64,
                         "api_oracle_mapping_sha256": "2" * 64,
+                        "download_allowed_hosts": [],
+                        "download_allowed_hosts_sha256": hashlib.sha256(
+                            MODULE.canonical_bytes([])[:-1]
+                        ).hexdigest(),
                         "comparator_sha256": "7" * 64,
                         "build_api_oracle_sha256": "8" * 64,
                         "used_rule_ids": [],

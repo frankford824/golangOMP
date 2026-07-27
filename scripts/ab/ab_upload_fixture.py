@@ -411,7 +411,12 @@ class FixtureStore:
         relative = safe_storage_key(raw_key)
         candidates = [contained_path(self.root / "objects", relative)]
         if self.seed_root:
-            candidates.append(contained_path(self.seed_root, relative))
+            candidates.extend(
+                (
+                    contained_path(self.seed_root, relative),
+                    contained_path(self.seed_root / "objects", relative),
+                )
+            )
         for candidate in candidates:
             if candidate.is_file() and not candidate.is_symlink():
                 return candidate

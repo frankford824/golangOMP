@@ -56,6 +56,30 @@ REQUEST_CACHE_POLICY_VERSION = "exact_base_url_identity_path_v1"
 CURRENT_VERSION_ROLES = frozenset(
     {"current_version", "approved_version", "current_approved_version"}
 )
+REQUIRED_IDENTITY_ROLES = frozenset({"admin", "view_only", "no_view"})
+ORACLE_V2_INPUT_FIELDS = frozenset(
+    {
+        "reviewed_mapping_sha256",
+        "reviewed_manifest_sha256",
+        "snapshot_verdict_sha256",
+        "clone_a_attestation_sha256",
+        "a_snapshot_manifest_sha256",
+        "a_snapshot_evidence_sha256",
+        "source_snapshot_sha256",
+        "clone_a_database",
+        "bundle_receipts_sha256",
+        "recovery_receipts_sha256",
+    }
+)
+ORACLE_V3_ALIAS_INPUT_FIELDS = frozenset(
+    {
+        "source_alias_allocation_receipt_sha256",
+        "source_alias_apply_receipt_sha256",
+        "source_alias_workflow_snapshot_sha256",
+        "source_alias_workflow_snapshot_integrity_sha256",
+        "source_alias_mapping_canonical_sha256",
+    }
+)
 
 
 def canonical(value: object) -> bytes:
@@ -127,7 +151,11 @@ def manifest_task_ids(path: pathlib.Path, run_id: str) -> set[str]:
 
 
 def load_manifest_expectations(
-    path: pathlib.Path, run_id: str
+    path: pathlib.Path,
+    run_id: str,
+    *,
+    expected_mapping_sha256: str,
+    expected_baseline_attestation_sha256: str,
 ) -> dict[str, dict[str, Any]]:
     """Load the reviewed G01-G05 oracle used to judge the migrated B API.
 
@@ -136,6 +164,10 @@ def load_manifest_expectations(
     every V8 addition or retired legacy field as an arbitrary JSON exception.
     """
 
+    if not SHA256_RE.fullmatch(expected_mapping_sha256):
+        raise ValueError("expected reviewed mapping binding is not SHA-256")
+    if not SHA256_RE.fullmatch(expected_baseline_attestation_sha256):
+        raise ValueError("expected baseline attestation binding is not SHA-256")
     output: dict[str, dict[str, Any]] = {
         "tasks": {},
         "groups": {},
@@ -162,6 +194,18 @@ def load_manifest_expectations(
             isinstance(item, str) for item in components
         ):
             raise ValueError(f"manifest line {line_no} lacks string components")
+        input_hashes = detail.get("input_sha256") if isinstance(detail, dict) else None
+        if not isinstance(input_hashes, dict):
+            raise ValueError(f"manifest line {line_no} lacks input_sha256")
+        if input_hashes.get("mapping_sha256") != expected_mapping_sha256:
+            raise ValueError(f"manifest line {line_no} mapping hash differs")
+        if (
+            input_hashes.get("baseline_attestation_sha256")
+            != expected_baseline_attestation_sha256
+        ):
+            raise ValueError(
+                f"manifest line {line_no} baseline attestation hash differs"
+            )
         entity = str(row.get("entity_key", ""))
         key = (str(gate), entity)
         if key in seen:
@@ -302,22 +346,45 @@ def load_asset_identity_map(
     unsigned = {
         key: value for key, value in document.items() if key != "evidence_sha256"
     }
+    schema_version = document["schema_version"]
+    oracle_kind = document["oracle_kind"]
+    is_v2 = schema_version == 2 and oracle_kind == "non_circular_g6_v2"
+    is_v3 = schema_version == 3 and oracle_kind == "non_circular_g6_v3"
     if (
-        document["schema_version"] != 2
-        or document["oracle_kind"] != "non_circular_g6_v2"
+        not (is_v2 or is_v3)
         or document["run_id"] != run_id
         or not isinstance(evidence_sha, str)
         or evidence_sha != sha256(canonical(unsigned))
     ):
         raise ValueError("asset identity map binding or evidence hash differs")
     inputs = document["inputs"]
+    expected_v3_inputs = ORACLE_V2_INPUT_FIELDS | ORACLE_V3_ALIAS_INPUT_FIELDS
+    if not isinstance(inputs, dict):
+        raise ValueError("asset identity map input bindings differ")
+    if is_v3 and set(inputs) != expected_v3_inputs:
+        raise ValueError("asset identity map v3 input field contract differs")
     if (
-        not isinstance(inputs, dict)
-        or inputs.get("reviewed_manifest_sha256") != manifest_sha256
+        inputs.get("reviewed_manifest_sha256") != manifest_sha256
         or not isinstance(inputs.get("reviewed_mapping_sha256"), str)
         or not SHA256_RE.fullmatch(inputs["reviewed_mapping_sha256"])
+        or not isinstance(inputs.get("snapshot_verdict_sha256"), str)
+        or not SHA256_RE.fullmatch(inputs["snapshot_verdict_sha256"])
     ):
         raise ValueError("asset identity map input bindings differ")
+    if is_v3:
+        for field in sorted(expected_v3_inputs - {"clone_a_database"}):
+            if (
+                not isinstance(inputs[field], str)
+                or not SHA256_RE.fullmatch(inputs[field])
+            ):
+                raise ValueError(
+                    f"asset identity map v3 input {field} is not SHA-256"
+                )
+        if (
+            not isinstance(inputs["clone_a_database"], str)
+            or not inputs["clone_a_database"].strip()
+        ):
+            raise ValueError("asset identity map v3 clone A binding differs")
     versions = document["versions"]
     roots = document["roots"]
     tasks = document["tasks"]
@@ -333,7 +400,7 @@ def load_asset_identity_map(
         or not isinstance(route_expectations, dict)
     ):
         raise ValueError(
-            "asset identity map v2 collections have invalid types"
+            "asset identity map collections have invalid types"
         )
     task_output: dict[str, dict[str, Any]] = {}
     for index, row in enumerate(tasks):
@@ -427,6 +494,12 @@ def load_asset_identity_map(
         "expected_roles",
         "provenance",
     }
+    if is_v3:
+        version_required |= {
+            "binding_state",
+            "bound_role",
+            "bound_resource_locator",
+        }
     version_native: dict[str, dict[str, Any]] = {}
     locator_output: dict[str, dict[str, Any]] = {}
     for index, row in enumerate(versions):
@@ -488,6 +561,28 @@ def load_asset_identity_map(
             or not isinstance(row["expected_roles"], list)
             or sorted(set(row["expected_roles"])) != row["expected_roles"]
             or not isinstance(row["provenance"], dict)
+            or (
+                is_v3
+                and (
+                    not isinstance(row["binding_state"], str)
+                    or not isinstance(row["bound_role"], str)
+                    or not isinstance(row["bound_resource_locator"], str)
+                    or (
+                        row["bound_resource_locator"]
+                        and (
+                            row["binding_state"] != "bound"
+                            or row["bound_role"] not in {"source", "final"}
+                            or row["bound_role"] not in row["expected_roles"]
+                            or not re.fullmatch(
+                                r"[1-9][0-9]*:"
+                                r"(?:task:0|sku:[1-9][0-9]*|"
+                                r"retouch_requirement:[1-9][0-9]*)",
+                                row["bound_resource_locator"],
+                            )
+                        )
+                    )
+                )
+            )
         ):
             raise ValueError(f"asset identity row {index} has invalid values")
         key = str(asset_id)
@@ -495,6 +590,82 @@ def load_asset_identity_map(
             raise ValueError(f"asset identity row {index} duplicates {asset_id}")
         version_native[key] = dict(row)
         locator_output[row["stable_locator"]] = version_native[key]
+
+    if is_v3:
+        for index, row in enumerate(versions):
+            provenance = row["provenance"]
+            if provenance.get("kind") != "source_alias_apply_receipt":
+                continue
+            if set(provenance) != {
+                "kind",
+                "origin_task_asset_id",
+                "origin_locator",
+                "group_id",
+                "remark",
+            }:
+                raise ValueError(
+                    f"source-alias identity row {index} provenance differs"
+                )
+            origin_id = provenance["origin_task_asset_id"]
+            group_id = provenance["group_id"]
+            if (
+                not isinstance(origin_id, int)
+                or isinstance(origin_id, bool)
+                or origin_id <= 0
+                or not isinstance(group_id, int)
+                or isinstance(group_id, bool)
+                or group_id <= 0
+                or origin_id == row["task_asset_id"]
+            ):
+                raise ValueError(
+                    f"source-alias identity row {index} allocation differs"
+                )
+            origin = version_native.get(str(origin_id))
+            expected_locator = (
+                f"alias:v1:{row['bound_resource_locator']}:"
+                f"origin-task-asset:{origin_id}"
+            )
+            expected_remark = (
+                f"v8-source-alias:group={group_id}:origin={origin_id}"
+            )
+            immutable_fields = (
+                "task_id",
+                "root_asset_id",
+                "storage_ref_id",
+                "object_key_sha256",
+                "content_sha256",
+                "size",
+                "mime_type",
+                "upload_status",
+                "asset_version_no",
+                "content_availability",
+            )
+            if (
+                origin is None
+                or provenance["origin_locator"] != origin["stable_locator"]
+                or origin["intrinsic_asset_type"]
+                not in {
+                    "delivery",
+                    "draft",
+                    "revised",
+                    "final",
+                    "outsource_return",
+                }
+                or row["stable_locator"] != expected_locator
+                or provenance["remark"] != expected_remark
+                or row["intrinsic_asset_type"] != "source"
+                or row["binding_state"] != "bound"
+                or row["bound_role"] != "source"
+                or row["expected_roles"] != ["source"]
+                or row["flow_review_status"] != "not_applicable"
+                or row["approved_at"]
+                or row["approved_by"] is not None
+                or row["source_asset_version_id"] is not None
+                or any(row[field] != origin[field] for field in immutable_fields)
+            ):
+                raise ValueError(
+                    f"source-alias identity row {index} lineage differs"
+                )
 
     expected_route_fields = {
         "detail_visible_locators",
@@ -548,12 +719,28 @@ def load_asset_identity_map(
     for key, row in version_native.items():
         root = root_output[str(row["root_asset_id"])]
         provenance = row["provenance"]
+        manifest_locator = row["stable_locator"]
+        if is_v3:
+            manifest_locator = (
+                f"bundle:{row['content_sha256']}"
+                if provenance.get("kind") == "bundle_receipt"
+                else f"asset:{row['root_asset_id']}:{row['storage_ref_id']}"
+            )
         output[key] = {
             **row,
             "asset_type": row["intrinsic_asset_type"],
             "whole_hash": row["content_sha256"],
-            "binding_state": str(provenance.get("a_binding_state", "bound")),
-            "bound_role": str(provenance.get("a_bound_role", "")),
+            "manifest_locator": manifest_locator,
+            "binding_state": (
+                row["binding_state"]
+                if is_v3
+                else str(provenance.get("a_binding_state", "bound"))
+            ),
+            "bound_role": (
+                row["bound_role"]
+                if is_v3
+                else str(provenance.get("a_bound_role", ""))
+            ),
             "root_asset_type": root["intrinsic_asset_type"],
             "root_scope_sku_code": root["scope_sku_code"],
             "root_retouch_requirement_id": root["retouch_requirement_id"],
@@ -593,6 +780,43 @@ def load_asset_identity_map(
             or any(item not in locator_output for item in row["final_locators"])
         ):
             raise ValueError(f"revision role oracle row {index} is invalid")
+        if is_v3:
+            resource_locator = (
+                f"{row['task_id']}:{row['scope_kind']}:{row['scope_ref_id']}"
+            )
+            source = (
+                locator_output.get(row["source_locator"])
+                if row["source_locator"] is not None
+                else None
+            )
+            if source is not None and (
+                source["binding_state"] != "bound"
+                or source["bound_role"] != "source"
+                or source["bound_resource_locator"] != resource_locator
+                or "source" not in source["expected_roles"]
+            ):
+                raise ValueError(
+                    f"revision role oracle row {index} source binding differs"
+                )
+            if row["source_kind"] == "delivery_source_alias" and (
+                source is None
+                or source["provenance"].get("kind")
+                != "source_alias_apply_receipt"
+            ):
+                raise ValueError(
+                    f"revision role oracle row {index} source alias differs"
+                )
+            for final_locator in row["final_locators"]:
+                final = locator_output[final_locator]
+                if (
+                    final["binding_state"] != "bound"
+                    or final["bound_role"] != "final"
+                    or final["bound_resource_locator"] != resource_locator
+                    or "final" not in final["expected_roles"]
+                ):
+                    raise ValueError(
+                        f"revision role oracle row {index} final binding differs"
+                    )
         role_output[row["revision_locator"]] = dict(row)
     reason_output: dict[str, str] = {}
     for index, row in enumerate(revision_reasons):
@@ -619,6 +843,9 @@ def load_asset_identity_map(
         "route_expectations": route_expectations,
         "revision_reasons": reason_output,
         "reviewed_mapping_sha256": inputs["reviewed_mapping_sha256"],
+        "inputs": dict(inputs),
+        "schema_version": schema_version,
+        "oracle_kind": oracle_kind,
     }
 
 
@@ -718,13 +945,112 @@ def http_get(base_url: str, path: str, headers: dict[str, str]) -> HttpResult:
     return HttpResult(status, body, sha256(raw), len(raw))
 
 
+def _download_origin(
+    value: str,
+    *,
+    require_explicit_port: bool,
+    allow_path: bool,
+) -> str:
+    text = value.strip()
+    parsed = urllib.parse.urlsplit(text)
+    if (
+        parsed.scheme.lower() not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or (not allow_path and parsed.path not in {"", "/"})
+        or (not allow_path and (parsed.query or parsed.fragment))
+    ):
+        raise ValueError(
+            "download allowlist entries require scheme and explicit port"
+        )
+    try:
+        explicit_port = parsed.port
+    except ValueError as exc:
+        raise ValueError(
+            "download allowlist entries require scheme and explicit port"
+        ) from exc
+    if require_explicit_port and explicit_port is None:
+        raise ValueError(
+            "download allowlist entries require scheme and explicit port"
+        )
+    port = explicit_port
+    if port is None:
+        port = 443 if parsed.scheme.lower() == "https" else 80
+    hostname = parsed.hostname.lower()
+    display_host = f"[{hostname}]" if ":" in hostname else hostname
+    return f"{parsed.scheme.lower()}://{display_host}:{port}"
+
+
+def download_allowed_hosts() -> tuple[str, ...]:
+    origins = {
+        _download_origin(
+            value,
+            require_explicit_port=True,
+            allow_path=False,
+        )
+        for value in os.environ.get(
+            "AB_DOWNLOAD_ALLOWED_HOSTS", ""
+        ).split(",")
+        if value.strip()
+    }
+    return tuple(sorted(origins))
+
+
 def http_download(
     base_url: str, path: str, headers: dict[str, str]
 ) -> bytes:
-    request = urllib.request.Request(
+    metadata_request = urllib.request.Request(
         base_url + path, headers=headers, method="GET"
     )
-    with urllib.request.urlopen(request, timeout=30) as response:
+    with urllib.request.build_opener(_NoRedirect()).open(
+        metadata_request, timeout=30
+    ) as response:
+        metadata_raw = response.read(MAX_BODY_BYTES + 1)
+    if len(metadata_raw) > MAX_BODY_BYTES:
+        raise ValueError(
+            f"recovery GET {path} metadata exceeds {MAX_BODY_BYTES} bytes"
+        )
+    try:
+        metadata = unwrap_data(json.loads(metadata_raw))
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"recovery GET {path} did not return controlled download metadata"
+        ) from exc
+    download_url = (
+        metadata.get("download_url") if isinstance(metadata, dict) else None
+    )
+    if not isinstance(download_url, str) or not download_url:
+        raise ValueError(f"recovery GET {path} lacks download_url")
+    parsed = urllib.parse.urlsplit(download_url)
+    if parsed.scheme and parsed.scheme not in {"http", "https"}:
+        raise ValueError(f"recovery GET {path} returned an unsafe download URL")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError(f"recovery GET {path} returned a credentialed URL")
+    if parsed.scheme or parsed.netloc:
+        try:
+            origin = _download_origin(
+                download_url,
+                require_explicit_port=False,
+                allow_path=True,
+            )
+        except ValueError as exc:
+            raise ValueError(
+                f"recovery GET {path} returned an unsafe download URL"
+            ) from exc
+        allowed_hosts = set(download_allowed_hosts())
+        if origin not in allowed_hosts:
+            raise ValueError(
+                f"recovery GET {path} returned a non-allowlisted origin"
+            )
+    resolved_url = urllib.parse.urljoin(base_url + "/", download_url)
+    download_headers = headers if not parsed.scheme and not parsed.netloc else {}
+    request = urllib.request.Request(
+        resolved_url, headers=download_headers, method="GET"
+    )
+    with urllib.request.build_opener(_NoRedirect()).open(
+        request, timeout=30
+    ) as response:
         raw = response.read(MAX_BODY_BYTES + 1)
     if len(raw) > MAX_BODY_BYTES:
         raise ValueError(
@@ -923,6 +1249,7 @@ def load_matrix(path: pathlib.Path) -> tuple[dict[str, str], list[dict[str, str]
         raise ValueError("matrix must contain at least one identity")
     identities: list[dict[str, str]] = []
     resolved: dict[str, dict[str, str]] = {}
+    observed_roles: set[str] = set()
     for identity in identities_value:
         if not isinstance(identity, dict) or not {"id", "role"} <= set(identity):
             raise ValueError("identity must contain id and role")
@@ -940,12 +1267,17 @@ def load_matrix(path: pathlib.Path) -> tuple[dict[str, str], list[dict[str, str]
             or not isinstance(identity_id, str)
             or not identity_id
             or not isinstance(role, str)
-            or not role
+            or role not in REQUIRED_IDENTITY_ROLES
             or identity_id in resolved
         ):
             raise ValueError("identity is invalid or duplicated")
         resolved[identity_id] = resolve_headers(identity)
         identities.append({"id": identity_id, "role": role})
+        observed_roles.add(role)
+    if observed_roles != REQUIRED_IDENTITY_ROLES:
+        raise ValueError(
+            "matrix identities must contain admin, view_only, and no_view roles"
+        )
     retired = document["retired_routes"]
     if not isinstance(retired, list) or not retired:
         raise ValueError("retired_routes must be a non-empty array")
@@ -1043,6 +1375,20 @@ def normalize_transport_noise(value: object) -> object:
     return value
 
 
+def field_paths(value: object, field: str, prefix: str = "$") -> list[str]:
+    found: list[str] = []
+    if isinstance(value, dict):
+        for key, child in value.items():
+            path = f"{prefix}.{key}"
+            if key == field:
+                found.append(path)
+            found.extend(field_paths(child, field, path))
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            found.extend(field_paths(child, field, f"{prefix}[{index}]"))
+    return found
+
+
 def unwrap_data(value: object) -> object:
     if isinstance(value, dict) and set(value) == {"data"}:
         return value["data"]
@@ -1091,6 +1437,23 @@ TASK_STABLE_FIELDS = (
     "reference_file_refs",
     "retouch_requirements",
     "sku_items",
+)
+
+TERMINAL_MODULE_STATES = frozenset(
+    {"completed", "closed", "forcibly_closed", "closed_by_admin"}
+)
+ACTIVE_MODULE_STATES = frozenset(
+    {
+        "active",
+        "pending",
+        "pending_claim",
+        "in_progress",
+        "submitted",
+        "approved",
+        "preparing",
+        "received",
+        "review",
+    }
 )
 
 
@@ -1228,6 +1591,55 @@ def project_asset_version(value: object) -> object:
     return output
 
 
+def expected_asset_usable_state(expected: dict[str, Any]) -> str:
+    intrinsic_type = str(expected.get("intrinsic_asset_type") or "")
+    delivery_type = intrinsic_type in {
+        "delivery",
+        "draft",
+        "final",
+        "outsource_return",
+        "revised",
+    }
+    if expected.get("cleaned_at") or not expected.get("object_key_sha256"):
+        return "cleaned" if delivery_type else "not_applicable"
+    status = str(expected.get("flow_review_status") or "")
+    if status not in {
+        "approved",
+        "cleaned",
+        "not_applicable",
+        "pending_review",
+        "rejected",
+        "superseded",
+    }:
+        status = "pending_review" if delivery_type else "not_applicable"
+    return {
+        "approved": "ready_for_use",
+        "cleaned": "cleaned",
+        "not_applicable": "not_applicable",
+        "pending_review": "pending_review",
+        "rejected": "rejected",
+        "superseded": "history",
+    }[status]
+
+
+def effective_oracle_scope_sku_code(expected: dict[str, Any]) -> str:
+    return str(
+        expected.get("scope_sku_code")
+        or expected.get("root_scope_sku_code")
+        or ""
+    )
+
+
+def effective_oracle_retouch_requirement_id(
+    expected: dict[str, Any],
+) -> int | None:
+    value = (
+        expected.get("retouch_requirement_id")
+        or expected.get("root_retouch_requirement_id")
+    )
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
 def project_nested_asset_versions(value: object) -> object:
     """Apply the asset-version projection to embedded version contracts."""
 
@@ -1257,23 +1669,72 @@ def project_nested_asset_versions(value: object) -> object:
     return value
 
 
-def project_asset_resource(value: object) -> object:
+def project_asset_resource(
+    value: object,
+    *,
+    normalize_approval: bool = False,
+    recovery_task_asset_ids: frozenset[str] = frozenset(),
+    bundle_member_task_asset_ids: frozenset[str] = frozenset(),
+) -> object:
     if not isinstance(value, dict):
         return value
+    excluded_root_fields = {
+        "retouch_requirement_id",
+        "scope_sku_code",
+        "warehouse_ready_version",
+        "warehouse_ready_version_id",
+    }
+    if normalize_approval:
+        excluded_root_fields.update(
+            {"approved_version", "approved_version_id"}
+        )
     output = {
         key: child
         for key, child in value.items()
-        if key
-        not in {
-            "retouch_requirement_id",
-            "scope_sku_code",
-            "warehouse_ready_version",
-            "warehouse_ready_version_id",
-        }
+        if key not in excluded_root_fields
     }
     for key in ("current_version", "approved_version"):
         if key in output:
-            output[key] = project_asset_version(output[key])
+            projected = project_asset_version(output[key])
+            if isinstance(projected, dict) and normalize_approval:
+                projected = {
+                    field: child
+                    for field, child in projected.items()
+                    if field
+                    not in {
+                        "approved_at",
+                        "approved_for_flow",
+                        "approved_by",
+                        "current_version_role",
+                        "file_hash",
+                        "flow_review_status",
+                        "usable_state",
+                    }
+                }
+            if (
+                isinstance(projected, dict)
+                and str(projected.get("id")) in recovery_task_asset_ids
+            ):
+                projected = dict(projected)
+                for field in (
+                    "download_url",
+                    "file_hash",
+                    "storage_key",
+                    "usable_state",
+                ):
+                    if field in projected:
+                        projected[field] = (
+                            f"v8_recovery_receipt_v1:{field}"
+                        )
+            if (
+                isinstance(projected, dict)
+                and str(projected.get("id"))
+                in bundle_member_task_asset_ids
+            ):
+                projected["file_hash"] = (
+                    "v8_source_bundle_member_receipt_v1:file_hash"
+                )
+            output[key] = projected
     return output
 
 
@@ -1321,10 +1782,43 @@ def project_asset_pair(
             and str(item["id"]) in approved_candidate_root_ids
         )
     ]
-    # Recovery is no longer normalized into a synthetic marker.  Candidate B
-    # must expose the exact hash-bound metadata and the comparator separately
-    # downloads recovery bytes.  Any A/B body difference remains visible here.
-    return project_assets(baseline_data), project_assets(
+    recovery_task_asset_ids = frozenset(
+        asset_id
+        for asset_id, row in asset_identity_oracle.items()
+        if isinstance(row.get("provenance"), dict)
+        and row["provenance"].get("kind") == "recovery_receipt"
+    )
+    bundle_member_task_asset_ids = frozenset(
+        asset_id
+        for asset_id, row in asset_identity_oracle.items()
+        if isinstance(row.get("provenance"), dict)
+        and isinstance(row["provenance"].get("bundle_member_receipt"), str)
+        and bool(row["provenance"]["bundle_member_receipt"])
+    )
+
+    def project_pair_side(rows: list[object]) -> list[object]:
+        projected = [
+            project_asset_resource(
+                item,
+                normalize_approval=(
+                    isinstance(item, dict)
+                    and str(item.get("id"))
+                    in approved_candidate_root_ids
+                ),
+                recovery_task_asset_ids=recovery_task_asset_ids,
+                bundle_member_task_asset_ids=bundle_member_task_asset_ids,
+            )
+            for item in rows
+        ]
+        return sorted(
+            projected,
+            key=lambda item: (
+                item.get("id", 0) if isinstance(item, dict) else 0,
+                canonical(item),
+            ),
+        )
+
+    return project_pair_side(baseline_data), project_pair_side(
         candidate_without_reviewed_additions
     )
 
@@ -1445,6 +1939,27 @@ def project_detail_pair(
                     "claimed_team_code",
                 }
             ),
+        )
+    if (
+        isinstance(baseline_projection, dict)
+        and isinstance(candidate_projection, dict)
+        and isinstance(candidate_task, dict)
+        and candidate_task.get("task_status") == "Completed"
+    ):
+        terminal_only_fields = frozenset(
+            {
+                "state",
+                "terminal_at",
+                "updated_at",
+                "claimed_by",
+                "claimed_team_code",
+            }
+        )
+        baseline_projection["modules"] = _drop_keys(
+            baseline_projection.get("modules"), terminal_only_fields
+        )
+        candidate_projection["modules"] = _drop_keys(
+            candidate_projection.get("modules"), terminal_only_fields
         )
     return baseline_projection, candidate_projection
 
@@ -1733,6 +2248,9 @@ class Runner:
     ):
         self.urls = dict(urls)
         self.identities = [dict(identity) for identity in identities]
+        self.identity_roles = {
+            identity["id"]: identity["role"] for identity in self.identities
+        }
         self.resolved_headers = {
             identity: dict(headers)
             for identity, headers in resolved_headers.items()
@@ -1755,8 +2273,17 @@ class Runner:
             )
         self.list_current_by_root: dict[str, dict[str, Any]] = {}
         self.list_approved_by_root: dict[str, dict[str, Any]] = {}
+        self.migration_addition_root_ids: set[str] = set()
         for row in self.asset_identity_oracle.values():
             root_id = str(row.get("root_asset_id") or "")
+            provenance = row.get("provenance")
+            if (
+                root_id
+                and isinstance(provenance, dict)
+                and provenance.get("kind")
+                in {"bundle_receipt", "recovery_receipt"}
+            ):
+                self.migration_addition_root_ids.add(root_id)
             if row["list_current_version"]:
                 if not root_id or root_id in self.list_current_by_root:
                     raise ValueError("API oracle current asset root is invalid")
@@ -1803,6 +2330,13 @@ class Runner:
         self.oracle_coverage: dict[
             tuple[str, str, str], set[str]
         ] = {}
+        self.view_only_task_statuses: dict[
+            str, dict[int, set[str]]
+        ] = {
+            combination: {200: set(), 403: set()}
+            for combination in COMBINATION_IDS
+            if combination.endswith("_b")
+        }
 
     def cover(
         self, combination: str, identity: str, kind: str, locator: str
@@ -1849,6 +2383,46 @@ class Runner:
                             f"{sha256(canonical(sorted(expected_locators)))}",
                         )
 
+    def validate_identity_coverage(self) -> None:
+        for combination, statuses in sorted(
+            self.view_only_task_statuses.items()
+        ):
+            for status in (200, 403):
+                if not statuses[status]:
+                    self.violation(
+                        "api.view_only_scope_unproven",
+                        f"{combination}:view_only",
+                        f"no view_only task returned {status}",
+                    )
+        for combination in sorted(self.view_only_task_statuses):
+            for identity, role in sorted(self.identity_roles.items()):
+                if role != "view_only":
+                    continue
+                for task_id in sorted(self.expectations["tasks"], key=int):
+                    primary_entity = f"task:{task_id}:{CORE_ROUTES[0]}"
+                    primary = self.results.get(
+                        (
+                            combination,
+                            identity,
+                            CORE_ROUTES[0],
+                            primary_entity,
+                        )
+                    )
+                    if primary is None or primary.status != 403:
+                        continue
+                    for route in CORE_ROUTES[1:]:
+                        entity = f"task:{task_id}:{route}"
+                        sibling = self.results.get(
+                            (combination, identity, route, entity)
+                        )
+                        if sibling is not None and sibling.status == 200:
+                            self.violation(
+                                "api.view_only_scope_bypass",
+                                entity,
+                                f"{combination}/{identity} primary task is 403 "
+                                f"but {route} returned 200",
+                            )
+
     @staticmethod
     def _scope_ref(group: dict[str, Any]) -> str:
         scope = str(group.get("scope_kind", ""))
@@ -1879,6 +2453,8 @@ class Runner:
         identity: str,
         entity: str,
         revision: object,
+        *,
+        historical: bool = False,
     ) -> None:
         if not isinstance(revision, dict):
             self.oracle_violation(
@@ -1965,6 +2541,14 @@ class Runner:
                     entity,
                     f"{combination}/{identity} revision source_file task_asset_id differs",
                 )
+            if isinstance(source_file, dict):
+                self.validate_revision_file_access(
+                    combination,
+                    identity,
+                    entity,
+                    "source_file",
+                    source_file,
+                )
         items = revision.get("items")
         if not isinstance(items, list):
             self.oracle_violation(
@@ -2040,6 +2624,14 @@ class Runner:
                             f"{combination}/{identity} revision item {index} "
                             "file revision_item_id differs",
                         )
+                    if isinstance(file_row, dict):
+                        self.validate_revision_file_access(
+                            combination,
+                            identity,
+                            entity,
+                            f"item[{index}].file",
+                            file_row,
+                        )
         references = revision.get("references")
         if not isinstance(references, list):
             self.oracle_violation(
@@ -2109,6 +2701,92 @@ class Runner:
                         f"{combination}/{identity} revision reference {index} "
                         "revision_id differs",
                     )
+                self.validate_revision_file_access(
+                    combination,
+                    identity,
+                    entity,
+                    f"reference[{index}]",
+                    reference,
+                    controlled_urls=(
+                        "required"
+                        if self._positive_int(
+                            reference.get("formal_task_asset_id")
+                        )
+                        else ("forbidden" if historical else "optional")
+                    ),
+                )
+
+    def validate_revision_file_access(
+        self,
+        combination: str,
+        identity: str,
+        entity: str,
+        label: str,
+        file_row: dict[str, Any],
+        *,
+        controlled_urls: str = "required",
+    ) -> None:
+        if controlled_urls not in {"required", "forbidden", "optional"}:
+            raise ValueError("controlled_urls mode is invalid")
+        availability = file_row.get("availability")
+        unavailable_reason = file_row.get("unavailable_reason")
+        preview_url = file_row.get("preview_url")
+        download_url = file_row.get("download_url")
+        if availability not in {"available", "historical_unavailable"}:
+            self.oracle_violation(
+                entity,
+                f"{combination}/{identity} {label} availability is invalid",
+            )
+            return
+        for field, value in (
+            ("unavailable_reason", unavailable_reason),
+            ("preview_url", preview_url),
+            ("download_url", download_url),
+        ):
+            if value is not None and not isinstance(value, str):
+                self.oracle_violation(
+                    entity,
+                    f"{combination}/{identity} {label} {field} is invalid",
+                )
+                return
+        if availability == "historical_unavailable":
+            if not isinstance(unavailable_reason, str) or not unavailable_reason:
+                self.oracle_violation(
+                    entity,
+                    f"{combination}/{identity} {label} unavailable_reason is required",
+                )
+            if preview_url or download_url:
+                self.oracle_violation(
+                    entity,
+                    f"{combination}/{identity} {label} unavailable file exposes URL",
+                )
+            return
+        if unavailable_reason:
+            self.oracle_violation(
+                entity,
+                f"{combination}/{identity} {label} available file has unavailable_reason",
+            )
+        if controlled_urls == "forbidden":
+            if preview_url or download_url:
+                self.oracle_violation(
+                    entity,
+                    f"{combination}/{identity} {label} without formal task asset "
+                    "exposes controlled URL",
+                )
+            return
+        role = self.identity_roles.get(identity)
+        if role == "admin" and controlled_urls == "required":
+            if not preview_url or not download_url:
+                self.oracle_violation(
+                    entity,
+                    f"{combination}/{identity} {label} available admin file "
+                    "lacks preview or download URL",
+                )
+        elif role == "view_only" and download_url:
+            self.oracle_violation(
+                entity,
+                f"{combination}/{identity} {label} view_only file exposes download URL",
+            )
 
     @staticmethod
     def revision_link_projection(revision: dict[str, Any]) -> dict[str, Any]:
@@ -2201,21 +2879,103 @@ class Runner:
                 "is absent from the v2 oracle",
             )
             return None
-        scope_value = version.get("scope_sku_code")
+        raw_scope_value = version.get("scope_sku_code")
+        if raw_scope_value is not None and not isinstance(
+            raw_scope_value, str
+        ):
+            self.oracle_violation(
+                entity,
+                f"{combination}/{identity} {surface} asset {asset_id} "
+                "scope_sku_code is not nullable text",
+            )
+            return None
+        scope_value = str(raw_scope_value or "")
         retouch_value = version.get("retouch_requirement_id")
+        if retouch_value is not None and not self._positive_int(
+            retouch_value
+        ):
+            self.oracle_violation(
+                entity,
+                f"{combination}/{identity} {surface} asset {asset_id} "
+                "retouch_requirement_id is not a positive integer",
+            )
+            return None
         storage_key = version.get("storage_key")
-        file_hash = version.get("file_hash")
+        raw_file_hash = version.get("file_hash")
+        if raw_file_hash is not None and not isinstance(raw_file_hash, str):
+            self.oracle_violation(
+                entity,
+                f"{combination}/{identity} {surface} asset {asset_id} "
+                "file_hash is not nullable text",
+            )
+            return None
+        file_hash = str(raw_file_hash or "")
+        if file_hash and not SHA256_RE.fullmatch(file_hash):
+            self.oracle_violation(
+                entity,
+                f"{combination}/{identity} {surface} asset {asset_id} "
+                "file_hash is not SHA-256",
+            )
+            return None
         file_size = version.get("file_size")
         mime_type = version.get("mime_type")
+        approved_at = version.get("approved_at")
+        if approved_at is not None and (
+            not isinstance(approved_at, str)
+            or not is_rfc3339_datetime(approved_at)
+        ):
+            self.oracle_violation(
+                entity,
+                f"{combination}/{identity} {surface} asset {asset_id} "
+                "approved_at is not nullable RFC3339",
+            )
+            return None
+        approved_by = version.get("approved_by")
+        if approved_by is not None and not self._positive_int(approved_by):
+            self.oracle_violation(
+                entity,
+                f"{combination}/{identity} {surface} asset {asset_id} "
+                "approved_by is not a positive integer",
+            )
+            return None
+        historical_unavailable = (
+            expected.get("content_availability")
+            == "historical_unavailable"
+        )
+        if historical_unavailable and (
+            storage_key
+            or file_hash
+            or version.get("download_url")
+            or version.get("public_download_allowed") is True
+        ):
+            self.oracle_violation(
+                entity,
+                f"{combination}/{identity} {surface} asset {asset_id} "
+                "historical-unavailable metadata exposes file access",
+            )
+            return None
+        if (
+            not self._positive_int(version.get("task_id"))
+            or not self._positive_int(version.get("asset_id"))
+            or not isinstance(version.get("asset_type"), str)
+            or not isinstance(storage_key, str)
+            or not self._nonnegative_int(file_size)
+            or not isinstance(mime_type, str)
+            or not isinstance(version.get("flow_review_status"), str)
+            or not isinstance(version.get("usable_state"), str)
+        ):
+            self.oracle_violation(
+                entity,
+                f"{combination}/{identity} {surface} asset {asset_id} "
+                "identity fields have invalid types",
+            )
+            return None
         if surface == "list":
             expected_type = expected["root_asset_type"]
-            expected_scope = (
-                expected["scope_sku_code"]
-                or expected["root_scope_sku_code"]
-            )
         else:
             expected_type = expected["intrinsic_asset_type"]
-            expected_scope = expected["scope_sku_code"]
+        expected_scope = effective_oracle_scope_sku_code(expected)
+        expected_retouch = effective_oracle_retouch_requirement_id(expected)
         actual = {
             "task_asset_id": asset_id,
             "task_id": version.get("task_id"),
@@ -2234,8 +2994,12 @@ class Runner:
             "flow_review_status": str(
                 version.get("flow_review_status") or ""
             ),
-            "approved_at": version.get("approved_at"),
-            "approved_by": version.get("approved_by"),
+            "usable_state": version.get("usable_state"),
+            "approved_at": (
+                normalize_manifest_time(str(approved_at or ""))
+                or None
+            ),
+            "approved_by": approved_by,
         }
         expected_projection = {
             "task_asset_id": expected["task_asset_id"],
@@ -2243,15 +3007,26 @@ class Runner:
             "root_asset_id": expected["root_asset_id"],
             "asset_type": expected_type,
             "scope_sku_code": expected_scope,
-            "retouch_requirement_id": expected["retouch_requirement_id"],
+            "retouch_requirement_id": expected_retouch,
             "object_key_sha256": expected["object_key_sha256"],
             "content_sha256": expected["content_sha256"],
             "size": expected["size"],
             "mime_type": expected["mime_type"],
             "flow_review_status": expected["flow_review_status"],
-            "approved_at": expected["approved_at"] or None,
+            "usable_state": expected_asset_usable_state(expected),
+            "approved_at": (
+                normalize_manifest_time(str(expected["approved_at"] or ""))
+                or None
+            ),
             "approved_by": expected["approved_by"],
         }
+        if historical_unavailable:
+            # The frozen oracle retains the legacy object-key hash as evidence,
+            # while the V8 read model deliberately suppresses the unusable raw
+            # key. The access check above proves that suppression before the
+            # comparison substitutes the deterministic empty-key projection.
+            expected_projection["object_key_sha256"] = sha256(b"")
+            expected_projection["content_sha256"] = ""
         if actual != expected_projection:
             self.oracle_violation(
                 entity,
@@ -2292,6 +3067,154 @@ class Runner:
             else:
                 self.task_asset_metadata[key] = dict(version)
         return expected
+
+    @staticmethod
+    def _download_url_matches_object_key(
+        download_url: str, expected_object_key_sha256: str
+    ) -> bool:
+        if not SHA256_RE.fullmatch(expected_object_key_sha256):
+            return False
+        parsed = urllib.parse.urlsplit(download_url)
+        decoded_path = urllib.parse.unquote(parsed.path)
+        proxy_prefix = "/v1/assets/files/"
+        candidates: set[str] = set()
+        if decoded_path.startswith(proxy_prefix):
+            candidates.add(decoded_path[len(proxy_prefix) :].lstrip("/"))
+        else:
+            parts = [part for part in decoded_path.split("/") if part]
+            candidates.update(
+                "/".join(parts[index:]) for index in range(len(parts))
+            )
+        return any(
+            candidate
+            and sha256(candidate.encode("utf-8"))
+            == expected_object_key_sha256
+            for candidate in candidates
+        )
+
+    def validate_task_asset_access_oracle(
+        self,
+        combination: str,
+        identity: str,
+        requested_asset_id: str,
+        route: str,
+        body: object,
+    ) -> None:
+        if not combination.endswith("_b"):
+            return
+        entity = f"task-asset:{requested_asset_id}"
+        expected = self.asset_identity_oracle.get(requested_asset_id)
+        data = unwrap_data(body)
+        with self._state_lock:
+            self.manifest_oracle_check_count += 1
+        if not isinstance(expected, dict) or not isinstance(data, dict):
+            self.violation(
+                "api.task_asset_metadata_mismatch",
+                entity,
+                f"{combination}/{identity} {route} lacks requested asset metadata",
+            )
+            return
+        download_mode = data.get("download_mode")
+        download_url = data.get("download_url")
+        access_hint = data.get("access_hint")
+        preview_available = data.get("preview_available")
+        filename = data.get("filename")
+        file_size = data.get("file_size")
+        mime_type = data.get("mime_type")
+        expires_at = data.get("expires_at")
+        expected_mime_type = str(expected.get("mime_type") or "")
+        mime_matches = mime_type == expected_mime_type
+        if (
+            route == "/v1/task-assets/{task_asset_id}/preview"
+            and expected_mime_type.startswith("image/")
+            and mime_type == "image/jpeg"
+        ):
+            mime_matches = True
+        known = self.task_asset_metadata.get(
+            (combination, identity, requested_asset_id), {}
+        )
+        expected_filename = ""
+        if known.get("has_original_filename") is True:
+            expected_filename = str(known.get("original_filename") or "")
+        if not expected_filename:
+            expected_filename = str(
+                known.get("file_name")
+                or known.get("original_filename")
+                or ""
+            )
+        is_preview = route == "/v1/task-assets/{task_asset_id}/preview"
+        valid = (
+            download_mode in {"direct", "proxy"}
+            and isinstance(download_url, str)
+            and bool(download_url)
+            and isinstance(access_hint, str)
+            and isinstance(preview_available, bool)
+            and isinstance(filename, str)
+            and bool(filename)
+            and self._nonnegative_int(file_size)
+            and isinstance(mime_type, str)
+            and bool(mime_type)
+            and (
+                expires_at is None
+                or (
+                    isinstance(expires_at, str)
+                    and is_rfc3339_datetime(expires_at)
+                )
+            )
+            and (
+                "items" not in data
+                or data.get("items") is None
+                or data.get("items") == []
+            )
+        )
+        if is_preview:
+            # Preview metadata describes the exact-version derivative selected
+            # by the controlled task-asset preview endpoint. Its filename,
+            # size, and MIME type are not the immutable source-file metadata.
+            valid = valid and preview_available is True
+        else:
+            valid = (
+                valid
+                and file_size == expected["size"]
+                and mime_matches
+                and (
+                    not expected_filename
+                    or filename == expected_filename
+                )
+            )
+        if (
+            valid
+            and route == "/v1/task-assets/{task_asset_id}/download"
+            and not self._download_url_matches_object_key(
+                download_url, expected["object_key_sha256"]
+            )
+        ):
+            valid = False
+        if not valid:
+            actual_projection = {
+                "download_mode": download_mode,
+                "download_url_has_value": (
+                    isinstance(download_url, str) and bool(download_url)
+                ),
+                "access_hint_type": type(access_hint).__name__,
+                "preview_available": preview_available,
+                "filename": filename,
+                "file_size": file_size,
+                "mime_type": mime_type,
+                "expires_at_valid": (
+                    expires_at is None
+                    or (
+                        isinstance(expires_at, str)
+                        and is_rfc3339_datetime(expires_at)
+                    )
+                ),
+            }
+            self.violation(
+                "api.task_asset_metadata_mismatch",
+                entity,
+                f"{combination}/{identity} {route} requested asset "
+                f"metadata differs {sha256(canonical(actual_projection))}",
+            )
 
     @staticmethod
     def nested_design_asset_versions(value: object) -> list[dict[str, Any]]:
@@ -2424,14 +3347,13 @@ class Runner:
             modules = (
                 detail.get("modules") if isinstance(detail, dict) else None
             )
-            terminal_module_states = {"completed", "closed"}
-            active_module_states = {
-                "active",
-                "pending",
-                "pending_claim",
-                "in_progress",
-                "submitted",
-            }
+            # Keep this aligned with domain.ModuleState.Terminal and the
+            # migration/SQL gate contract. Retired legacy modules may remain
+            # closed or forcibly closed as immutable history; migration only
+            # normalizes modules that were still open when a task became
+            # Completed.
+            terminal_module_states = TERMINAL_MODULE_STATES
+            active_module_states = ACTIVE_MODULE_STATES
             tolerated_rejected_states = {"rejected"}
             if isinstance(modules, list):
                 for module in modules:
@@ -2519,9 +3441,8 @@ class Runner:
                     for module in modules:
                         if (
                             not isinstance(module, dict)
-                            or module.get("state") != "completed"
-                            or module.get("claimed_by") is not None
-                            or module.get("claimed_team_code") is not None
+                            or module.get("state")
+                            not in terminal_module_states
                             or not is_rfc3339_datetime(module.get("terminal_at"))
                             or not is_rfc3339_datetime(module.get("updated_at"))
                         ):
@@ -2565,14 +3486,23 @@ class Runner:
                     entity, f"{combination}/{identity} asset_versions is invalid"
                 )
             else:
+                seen_versions: set[int] = set()
                 for version in versions:
                     asset_id = version.get("id") if isinstance(version, dict) else None
-                    if not isinstance(asset_id, int) or asset_id <= 0:
+                    if not self._positive_int(asset_id):
                         self.oracle_violation(
                             entity,
                             f"{combination}/{identity} asset version identity is invalid",
                         )
                         continue
+                    if asset_id in seen_versions:
+                        self.oracle_violation(
+                            entity,
+                            f"{combination}/{identity} asset version "
+                            f"{asset_id} is duplicated",
+                        )
+                        continue
+                    seen_versions.add(asset_id)
                     if "warehouse_ready" in version:
                         self.oracle_violation(
                             entity,
@@ -2646,6 +3576,31 @@ class Runner:
                 entity, f"{combination}/{identity} asset list is invalid"
             )
             return
+        requested_task_id = (
+            int(task_id) if ID_RE.fullmatch(str(task_id)) else None
+        )
+        expected_root_ids = {
+            int(root_id)
+            for root_id, row in self.list_current_by_root.items()
+            if row["task_id"] == requested_task_id
+        }
+        actual_root_ids = [
+            asset.get("id")
+            for asset in data
+            if isinstance(asset, dict)
+            and self._positive_int(asset.get("id"))
+        ]
+        if (
+            requested_task_id is None
+            or len(actual_root_ids) != len(data)
+            or len(actual_root_ids) != len(set(actual_root_ids))
+            or set(actual_root_ids) != expected_root_ids
+        ):
+            self.oracle_violation(
+                entity,
+                f"{combination}/{identity} requested task {task_id} "
+                "asset root set differs",
+            )
         for asset in data:
             if not isinstance(asset, dict):
                 self.oracle_violation(
@@ -2653,6 +3608,12 @@ class Runner:
                 )
                 continue
             root_id = asset.get("id")
+            if asset.get("task_id") != requested_task_id:
+                self.oracle_violation(
+                    entity,
+                    f"{combination}/{identity} asset root {root_id} "
+                    f"is outside requested task {task_id}",
+                )
             if (
                 "warehouse_ready_version" in asset
                 or "warehouse_ready_version_id" in asset
@@ -2682,9 +3643,7 @@ class Runner:
                 "root_id": root_id,
                 "task_id": asset.get("task_id"),
                 "asset_type": str(asset.get("asset_type") or ""),
-                "scope_sku_code": (
-                    root_scope if isinstance(root_scope, str) else ""
-                ),
+                "scope_sku_code": str(root_scope or ""),
                 "retouch_requirement_id": root_retouch,
             }
             root_expected = (
@@ -2863,15 +3822,26 @@ class Runner:
         identity: str,
         group: dict[str, Any],
         expected: dict[str, Any] | None = None,
+        *,
+        requested_group_id: str | None = None,
     ) -> None:
         locator = (
             f"{group.get('task_id')}:{group.get('scope_kind')}:"
             f"{self._scope_ref(group)}"
         )
-        entity = f"group:{group.get('id', '?')}"
+        entity = f"group:{requested_group_id or group.get('id', '?')}"
         expected = expected or self.expectations["groups"].get(locator)
         with self._state_lock:
             self.manifest_oracle_check_count += 1
+        if (
+            requested_group_id is not None
+            and str(group.get("id", "")) != requested_group_id
+        ):
+            self.oracle_violation(
+                entity,
+                f"{combination}/{identity} requested group id "
+                f"{requested_group_id} returned {group.get('id')}",
+            )
         if not isinstance(expected, dict):
             self.oracle_violation(
                 entity, f"{combination}/{identity} unexpected group locator {locator}"
@@ -3065,7 +4035,11 @@ class Runner:
             row = actual_revisions[revision_locator]
             expected = expected_revisions[revision_locator]
             self.validate_revision_contract_shape(
-                combination, identity, entity, row
+                combination,
+                identity,
+                entity,
+                row,
+                historical=True,
             )
             source_id = row.get("source_task_asset_id")
             expected_source = expected["source_locator"]
@@ -3285,14 +4259,22 @@ class Runner:
                             "source task differs",
                         )
                     source_actual = {
-                        "source_locator": str(identity_row["stable_locator"]),
+                        "source_locator": str(
+                            identity_row.get(
+                                "manifest_locator",
+                                identity_row["stable_locator"],
+                            )
+                        ),
                         "role": str(identity_row["asset_type"]),
                         "whole_hash": str(identity_row["whole_hash"]),
                         "binding": str(identity_row["binding_state"]),
                         "binding_role": str(identity_row["bound_role"]),
-                        "sku_code": str(identity_row["scope_sku_code"]),
+                        "sku_code": effective_oracle_scope_sku_code(
+                            identity_row
+                        ),
                         "retouch_requirement_id": str(
-                            identity_row["retouch_requirement_id"] or ""
+                            effective_oracle_retouch_requirement_id(identity_row)
+                            or ""
                         ),
                     }
                 expected_source_projection = dict(expected_source_row)
@@ -3337,16 +4319,17 @@ class Runner:
                                 str(item.get("task_asset_id", "")), {}
                             ).get("bound_role", "")
                         ),
-                        "sku_code": str(
+                        "sku_code": effective_oracle_scope_sku_code(
                             self.asset_identity_oracle.get(
                                 str(item.get("task_asset_id", "")), {}
-                            ).get("scope_sku_code")
-                            or ""
+                            )
                         ),
                         "retouch_requirement_id": str(
-                            self.asset_identity_oracle.get(
-                                str(item.get("task_asset_id", "")), {}
-                            ).get("retouch_requirement_id")
+                            effective_oracle_retouch_requirement_id(
+                                self.asset_identity_oracle.get(
+                                    str(item.get("task_asset_id", "")), {}
+                                )
+                            )
                             or ""
                         ),
                     }
@@ -3510,6 +4493,53 @@ class Runner:
         }
         with self._state_lock:
             self.observations.append(row)
+            role = self.identity_roles.get(identity)
+            if (
+                combination.endswith("_b")
+                and role == "view_only"
+                and route == CORE_ROUTES[0]
+                and result.status in {200, 403}
+            ):
+                self.view_only_task_statuses[combination][result.status].add(
+                    entity
+                )
+        role = self.identity_roles.get(identity)
+        if (
+            combination.endswith("_b")
+            and role == "no_view"
+            and route in ALL_ROUTE_TEMPLATES
+            and result.status == 200
+        ):
+            self.violation(
+                "api.no_view_access_granted",
+                entity,
+                f"{combination}/{identity} {route} returned 200",
+            )
+        if (
+            combination.endswith("_b")
+            and role == "view_only"
+            and route == "/v1/task-assets/{task_asset_id}/download"
+            and result.status == 200
+        ):
+            self.violation(
+                "api.view_only_download_granted",
+                entity,
+                f"{combination}/{identity} asset download returned 200",
+            )
+        if (
+            combination.endswith("_b")
+            and role == "view_only"
+            and result.status == 200
+            and route != "/v1/task-assets/{task_asset_id}/preview"
+        ):
+            paths = field_paths(result.body, "download_url")
+            if paths:
+                self.violation(
+                    "api.view_only_download_url_exposed",
+                    entity,
+                    f"{combination}/{identity} exposes download_url at "
+                    f"{sha256(canonical(paths))}",
+                )
 
     def violation(self, code: str, entity: str, detail: str) -> None:
         with self._state_lock:
@@ -3717,6 +4747,17 @@ class Runner:
                         f"{path} added {sha256(canonical(sorted(widened)))}",
                     )
                     return
+            if (
+                baseline.status in {401, 403}
+                and candidate.status in {401, 403}
+            ):
+                # Authentication/authorization error envelope wording is not
+                # an A/B compatibility contract. Both sides denied access, and
+                # the directional widening check above still fails closed if
+                # the B candidate ever grants it.
+                with self._state_lock:
+                    self.semantic_comparison_count += 1
+                return
         if route in self.retired_routes:
             # Each retired route is already asserted to be exactly 404. Error
             # envelope wording is deliberately not a compatibility contract.
@@ -3793,7 +4834,10 @@ class Runner:
                     a_projection, b_projection = project_asset_pair(
                         a_result.body,
                         b_result.body,
-                        frozenset(self.list_current_by_root),
+                        frozenset(
+                            set(self.list_current_by_root)
+                            | self.migration_addition_root_ids
+                        ),
                         self.asset_identity_oracle,
                     )
                 elif route == "/v1/tasks/{task_id}/detail":
@@ -3825,11 +4869,20 @@ class Runner:
                             f"{identity} {a_combo}->{b_combo} lacks asset_versions",
                         )
                         return
-                    remaining = list(b_versions or [])
-                    for version in a_versions or []:
-                        try:
-                            remaining.remove(version)
-                        except ValueError:
+                    a_versions_by_id = {
+                        str(version.get("id")): version
+                        for version in a_versions or []
+                        if isinstance(version, dict)
+                        and self._positive_int(version.get("id"))
+                    }
+                    b_versions_by_id = {
+                        str(version.get("id")): version
+                        for version in b_versions or []
+                        if isinstance(version, dict)
+                        and self._positive_int(version.get("id"))
+                    }
+                    for version_id, version in a_versions_by_id.items():
+                        if version_id not in b_versions_by_id:
                             self.violation(
                                 "api.legacy_asset_not_preserved",
                                 entity,
@@ -3843,12 +4896,10 @@ class Runner:
                             if combo == b_combo
                         )
                     )
-                    for version in remaining:
-                        version_id = (
-                            str(version.get("id", ""))
-                            if isinstance(version, dict)
-                            else ""
-                        )
+                    for version_id in sorted(
+                        set(b_versions_by_id) - set(a_versions_by_id),
+                        key=int,
+                    ):
                         if version_id not in governed_for_b:
                             self.violation(
                                 "api.ungoverned_asset_added",
@@ -3929,6 +4980,7 @@ def compare(
         "comparator_sha256": file_sha256(comparator_path),
         "build_api_oracle_sha256": file_sha256(oracle_builder_path),
     }
+    frozen_download_allowed_hosts = download_allowed_hosts()
     if request_metrics is not None:
         request_metrics.clear()
     urls, combinations, resolved, retired_routes = load_matrix(matrix_path)
@@ -3943,10 +4995,19 @@ def compare(
     rules = load_rules(rules_path, retired_routes)
     tasks = load_tasks(task_ids_path)
     manifest_tasks = manifest_task_ids(manifest_path, run_id)
-    expectations = load_manifest_expectations(manifest_path, run_id)
     manifest_sha = file_sha256(manifest_path)
     api_oracle = load_asset_identity_map(
         api_oracle_path, run_id, manifest_sha
+    )
+    expectations = load_manifest_expectations(
+        manifest_path,
+        run_id,
+        expected_mapping_sha256=api_oracle["inputs"][
+            "reviewed_mapping_sha256"
+        ],
+        expected_baseline_attestation_sha256=api_oracle["inputs"][
+            "snapshot_verdict_sha256"
+        ],
     )
     if set(tasks) != manifest_tasks:
         raise ValueError(
@@ -4079,7 +5140,12 @@ def compare(
                     f"{combination}/{identity} group detail exposes "
                     "undeclared allowed_actions",
                 )
-            runner.validate_group_oracle(combination, identity, group)
+            runner.validate_group_oracle(
+                combination,
+                identity,
+                group,
+                requested_group_id=group_id,
+            )
         if (
             combination.endswith("_b")
             and group_id in visible_bundle_groups.get((combination, identity), set())
@@ -4165,6 +5231,14 @@ def compare(
                     entity,
                     f"{combination}/{identity} {route} returned 404",
                 )
+            if result.status == 200:
+                runner.validate_task_asset_access_oracle(
+                    combination,
+                    identity,
+                    asset_id,
+                    route,
+                    result.body,
+                )
             if (
                 route == "/v1/task-assets/{task_asset_id}/download"
                 and combination.endswith("_b")
@@ -4219,13 +5293,15 @@ def compare(
     with ThreadPoolExecutor(max_workers=workers) as executor:
         for _ in executor.map(fetch_asset, asset_jobs):
             pass
+    runner.validate_identity_coverage()
     runner.compare_all()
     if (
         file_sha256(comparator_path) != source_hashes["comparator_sha256"]
         or file_sha256(oracle_builder_path)
         != source_hashes["build_api_oracle_sha256"]
+        or download_allowed_hosts() != frozen_download_allowed_hosts
     ):
-        raise ValueError("G6 executable source changed during comparison")
+        raise ValueError("G6 executable source or download allowlist changed")
     observations = sorted(
         runner.observations,
         key=lambda item: (
@@ -4264,6 +5340,10 @@ def compare(
         "manifest_sha256": manifest_sha,
         "api_oracle_sha256": file_sha256(api_oracle_path),
         "api_oracle_mapping_sha256": api_oracle["reviewed_mapping_sha256"],
+        "download_allowed_hosts": list(frozen_download_allowed_hosts),
+        "download_allowed_hosts_sha256": sha256(
+            canonical(frozen_download_allowed_hosts)
+        ),
         **source_hashes,
         "used_rule_ids": sorted(runner.used_rules),
         "unused_rule_ids": sorted(

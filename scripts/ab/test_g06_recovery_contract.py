@@ -12,6 +12,14 @@ from scripts.ab import test_finalize_g06_verdict as FINAL_FIXTURES
 from scripts.ab import verify_g06_clone_b_recoveries as VERIFIER
 
 
+SUPERSEDED_MAPPING_SHA256 = (
+    "725074175bb2ef15a149f87ed4c1da6fc3dc8aac143b49c178a43847d8733ce9"
+)
+SUPERSEDED_PLAN_SHA256 = (
+    "1e3fbaabb2cad62d69473d1456a9b4e079bb3c383eff97175b92c745316d84ff"
+)
+
+
 class G06RecoveryContractTest(unittest.TestCase):
     def fixture(self, root: pathlib.Path):
         helper = FINAL_FIXTURES.FinalizeG06VerdictTest()
@@ -31,7 +39,7 @@ class G06RecoveryContractTest(unittest.TestCase):
             ).encode("utf-8")
         )
 
-    def test_real_hold_open_component_self_hash_regression(self):
+    def test_component_self_hash_regression_for_current_frozen_values(self):
         component = {
             "action": "apply",
             "artifacts": [
@@ -73,7 +81,7 @@ class G06RecoveryContractTest(unittest.TestCase):
             "status": "APPLIED",
         }
         self.assertEqual(
-            "cea060c0d1856ede5f8ddf94701975c3c32a9b64063467b9cc71a848da65d431",
+            "1b0cc56ac2f3c5e1686f4dfe20f58c4719324fc1d8e932d1fce95c5a67faa5b8",
             CONTRACT.component_self_hash(component),
         )
 
@@ -86,6 +94,43 @@ class G06RecoveryContractTest(unittest.TestCase):
             CONTRACT.require_frozen_hashes(
                 CONTRACT.APPROVED_MAPPING_SHA256, "0" * 64
             )
+
+    def test_frozen_boundary_rejects_superseded_725_candidate(self):
+        with self.assertRaisesRegex(ValueError, "frozen"):
+            CONTRACT.require_frozen_hashes(
+                SUPERSEDED_MAPPING_SHA256,
+                SUPERSEDED_PLAN_SHA256,
+            )
+
+    def test_frozen_boundary_accepts_authoritative_b19_g4_v12_candidate(self):
+        CONTRACT.require_frozen_hashes(
+            CONTRACT.APPROVED_MAPPING_SHA256,
+            CONTRACT.APPROVED_PLAN_SHA256,
+        )
+        self.assertEqual(
+            "b19d48eacbc6700536f7e3b3286d1b35f023763cebdd13329b9c8bf76f6b01f7",
+            CONTRACT.APPROVED_MAPPING_SHA256,
+        )
+        self.assertEqual(
+            "4fc60c49baa745c087872d46b98680b654e4a15c6cbdca4b7cf7c37593897c9f",
+            CONTRACT.APPROVED_PLAN_SHA256,
+        )
+        self.assertEqual(
+            "78956bb4eb00ece55a4ebacca9d6c5c39d3ac94487c6f7793e7b3a2ff1433a77",
+            CONTRACT.APPROVED_DB_APPLY_SHA256,
+        )
+        self.assertEqual(
+            "19d8b6fb7e4942e4b02be004bfe608bff03fc0d43dde27e233d688d6933d544d",
+            CONTRACT.APPROVED_DB_IDEMPOTENT_SHA256,
+        )
+        self.assertEqual(
+            "018cbc91f8dee4a7ba7b4e6c44b3d1e76d22967322ad9e928ef94475b8d2ea9b",
+            CONTRACT.APPROVED_COMPONENT_APPLY_SHA256,
+        )
+        self.assertEqual(
+            "ab_r20260723_01_v9_formal_b",
+            CONTRACT.EXPECTED_DATABASE,
+        )
 
     def test_modern_self_bound_recovery_plan_header_is_accepted(self):
         with tempfile.TemporaryDirectory() as raw:

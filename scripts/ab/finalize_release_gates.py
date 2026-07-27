@@ -1210,6 +1210,8 @@ def validate_g6(payload: dict[str, Any]) -> list[str]:
         "manifest_sha256",
         "api_oracle_sha256",
         "api_oracle_mapping_sha256",
+        "download_allowed_hosts",
+        "download_allowed_hosts_sha256",
         "comparator_sha256",
         "build_api_oracle_sha256",
         "used_rule_ids",
@@ -1352,6 +1354,7 @@ def validate_g6(payload: dict[str, Any]) -> list[str]:
         "manifest_sha256",
         "api_oracle_sha256",
         "api_oracle_mapping_sha256",
+        "download_allowed_hosts_sha256",
         "comparator_sha256",
         "build_api_oracle_sha256",
     ):
@@ -1359,6 +1362,19 @@ def validate_g6(payload: dict[str, Any]) -> list[str]:
             require_hash(payload.get(field), f"G6.{field}")
         except ValueError as exc:
             violations.append(str(exc))
+    allowed_hosts = payload.get("download_allowed_hosts")
+    if (
+        not isinstance(allowed_hosts, list)
+        or any(not isinstance(host, str) or not host for host in allowed_hosts)
+        or allowed_hosts != sorted(set(allowed_hosts))
+    ):
+        violations.append("G6 download host allowlist is invalid")
+    elif SHA256.fullmatch(
+        str(payload.get("download_allowed_hosts_sha256") or "")
+    ) and hashlib.sha256(canonical_bytes(allowed_hosts)[:-1]).hexdigest() != (
+        payload.get("download_allowed_hosts_sha256")
+    ):
+        violations.append("G6 download host allowlist hash differs")
     used = payload.get("used_rule_ids")
     unused = payload.get("unused_rule_ids")
     if (

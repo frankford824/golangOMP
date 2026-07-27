@@ -9,11 +9,12 @@ import tempfile
 import unittest
 
 from scripts.ab import build_api_oracle as oracle
+from scripts.ab import build_source_alias_receipts as alias_receipts
 from scripts.ab import export_frozen_a_oracle as frozen_export
 from scripts.ab.test_export_frozen_a_oracle import _fixture_output
 
 
-class BuildAPIOracleV2Test(unittest.TestCase):
+class BuildAPIOracleV3Test(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
         self.root = pathlib.Path(self.temp.name)
@@ -24,6 +25,8 @@ class BuildAPIOracleV2Test(unittest.TestCase):
         self.snapshot_manifest = self.snapshot_dir / "manifest.json"
         self.snapshot_verdict = self.root / "snapshot-verdict.json"
         self.clone_a_attestation = self.root / "clone-a-attestation.json"
+        self.alias_allocation_receipt = self.root / "alias-allocation.json"
+        self.alias_apply_receipt = self.root / "alias-apply.json"
         self.source_snapshot_sha256 = "7" * 64
         self.mapping_document = {
             "organization_mappings": [
@@ -349,6 +352,138 @@ class BuildAPIOracleV2Test(unittest.TestCase):
         )
         return path
 
+    def write_source_alias_receipts(
+        self, recovery_receipts: tuple[pathlib.Path, ...]
+    ) -> tuple[pathlib.Path | None, pathlib.Path | None]:
+        entries = alias_receipts.allocation_entries(
+            self.mapping_document, first_alias_id=101
+        )
+        if not entries:
+            return None, None
+        allocation_unsigned = {
+            "schema_version": 1,
+            "kind": "source_alias_allocation_v1",
+            "status": "planned",
+            "run_id": self.run_id,
+            "database": "clone_b",
+            "mapping_file_sha256": self.mapping_sha256,
+            "mapping_canonical_sha256": "b" * 64,
+            "workflow_snapshot_file_sha256": "c" * 64,
+            "workflow_snapshot_integrity_sha256": "d" * 64,
+            "task_assets_auto_increment_before": 101,
+            "entry_count": len(entries),
+            "entries": entries,
+        }
+        allocation = {
+            **allocation_unsigned,
+            "evidence_sha256": oracle.sha256(
+                oracle.canonical(allocation_unsigned)
+            ),
+        }
+        self.alias_allocation_receipt.write_bytes(
+            oracle.canonical(allocation) + b"\n"
+        )
+        asset = self.row("task_assets")
+        storage = self.row("objects")
+        identity = {
+            "root_asset_id": int(asset["asset_id"]),
+            "storage_ref_id": str(asset["storage_ref_id"] or ""),
+            "object_key_sha256": oracle.sha256(
+                str(
+                    asset["storage_key"]
+                    or (
+                        storage["ref_key"]
+                        if storage["ref_id"] == asset["storage_ref_id"]
+                        else ""
+                    )
+                ).encode()
+            )
+            if asset["storage_key"]
+            or (
+                storage["ref_id"] == asset["storage_ref_id"]
+                and storage["ref_key"]
+            )
+            else "",
+            "content_sha256": str(asset["whole_hash"] or ""),
+            "file_size": int(asset["file_size"]),
+            "mime_type": str(asset["mime_type"]),
+        }
+        for recovery_path in recovery_receipts:
+            document = json.loads(recovery_path.read_bytes())
+            for recovery in document.get("entries", []):
+                if recovery.get("missing_task_asset_id") == int(asset["id"]):
+                    identity = {
+                        "root_asset_id": int(
+                            recovery["target_root_asset_id"]
+                        ),
+                        "storage_ref_id": recovery["target_storage_ref_id"],
+                        "object_key_sha256": recovery[
+                            "target_object_key_sha256"
+                        ],
+                        "content_sha256": recovery[
+                            "target_content_sha256"
+                        ],
+                        "file_size": int(recovery["target_size"]),
+                        "mime_type": recovery["target_mime"],
+                    }
+        applied_entries = []
+        for entry in entries:
+            scope_kind = entry["scope_kind"]
+            scope_ref_id = entry["scope_ref_id"]
+            scope_sku_code = ""
+            retouch_requirement_id = None
+            if scope_kind == "sku":
+                scope_sku_code = str(self.row("skus")["sku_code"])
+            elif scope_kind == "retouch_requirement":
+                scope_sku_code = str(
+                    self.row("retouch_requirements")["sku_code"] or ""
+                )
+                retouch_requirement_id = scope_ref_id
+            alias_id = entry["expected_alias_task_asset_id"]
+            group_id = 200 + entry["sequence"]
+            applied_entries.append(
+                {
+                    **entry,
+                    "alias_task_asset_id": alias_id,
+                    "group_id": group_id,
+                    **identity,
+                    "scope_sku_code": scope_sku_code,
+                    "retouch_requirement_id": retouch_requirement_id,
+                    "asset_type": "source",
+                    "binding_state": "bound",
+                    "bound_role": "source",
+                    "flow_review_status": "not_applicable",
+                    "source_module_key": "migration",
+                    "remark": (
+                        f"v8-source-alias:group={group_id}:"
+                        f"origin={entry['origin_task_asset_id']}"
+                    ),
+                }
+            )
+        apply_unsigned = {
+            "schema_version": 1,
+            "kind": "source_alias_apply_v1",
+            "status": "verified",
+            "run_id": self.run_id,
+            "database": "clone_b",
+            "mapping_file_sha256": self.mapping_sha256,
+            "mapping_canonical_sha256": "b" * 64,
+            "workflow_snapshot_file_sha256": "c" * 64,
+            "workflow_snapshot_integrity_sha256": "d" * 64,
+            "allocation_receipt_sha256": oracle.sha256(
+                self.alias_allocation_receipt.read_bytes()
+            ),
+            "actual_aliases_tsv_sha256": "e" * 64,
+            "entry_count": len(applied_entries),
+            "entries": applied_entries,
+        }
+        apply = {
+            **apply_unsigned,
+            "evidence_sha256": oracle.sha256(oracle.canonical(apply_unsigned)),
+        }
+        self.alias_apply_receipt.write_bytes(oracle.canonical(apply) + b"\n")
+        return self.alias_allocation_receipt, self.alias_apply_receipt
+
     def build(
         self,
         *,
@@ -357,6 +492,9 @@ class BuildAPIOracleV2Test(unittest.TestCase):
         bundle_receipts: tuple[pathlib.Path, ...] = (),
         recovery_receipts: tuple[pathlib.Path, ...] = (),
     ) -> dict:
+        allocation_receipt, apply_receipt = self.write_source_alias_receipts(
+            recovery_receipts
+        )
         return oracle.build(
             run_id=self.run_id,
             manifest_path=self.manifest,
@@ -374,24 +512,54 @@ class BuildAPIOracleV2Test(unittest.TestCase):
             a_snapshot_manifest_path=self.snapshot_manifest,
             bundle_receipt_paths=bundle_receipts,
             recovery_receipt_paths=recovery_receipts,
+            source_alias_allocation_receipt_path=allocation_receipt,
+            expected_source_alias_allocation_receipt_sha256=(
+                oracle.sha256(allocation_receipt.read_bytes())
+                if allocation_receipt is not None
+                else ""
+            ),
+            source_alias_apply_receipt_path=apply_receipt,
+            expected_source_alias_apply_receipt_sha256=(
+                oracle.sha256(apply_receipt.read_bytes())
+                if apply_receipt is not None
+                else ""
+            ),
         )
 
-    def test_alias_preserves_intrinsic_delivery_and_context_roles(self) -> None:
+    def test_alias_preserves_delivery_and_creates_independent_source(self) -> None:
         result = self.build()
-        self.assertEqual("non_circular_g6_v2", result["oracle_kind"])
-        self.assertEqual("delivery", result["versions"][0]["intrinsic_asset_type"])
-        self.assertEqual(
-            ["final", "source"], result["versions"][0]["expected_roles"]
+        self.assertEqual("non_circular_g6_v3", result["oracle_kind"])
+        delivery = next(
+            row
+            for row in result["versions"]
+            if row["task_asset_id"] == 1
         )
+        alias = next(
+            row
+            for row in result["versions"]
+            if row["provenance"]["kind"] == "source_alias_apply_receipt"
+        )
+        self.assertEqual("delivery", delivery["intrinsic_asset_type"])
+        self.assertEqual(["final"], delivery["expected_roles"])
+        self.assertEqual("source", alias["intrinsic_asset_type"])
+        self.assertEqual(["source"], alias["expected_roles"])
+        self.assertEqual("bound", alias["binding_state"])
+        self.assertEqual("source", alias["bound_role"])
+        self.assertEqual("not_applicable", alias["flow_review_status"])
+        self.assertNotEqual(delivery["stable_locator"], alias["stable_locator"])
         self.assertEqual(
             "delivery_source_alias",
             result["revision_roles"][0]["source_kind"],
         )
-        self.assertEqual("approved", result["versions"][0]["flow_review_status"])
         self.assertEqual(
-            "2026-01-02T00:00:00Z", result["versions"][0]["approved_at"]
+            alias["stable_locator"],
+            result["revision_roles"][0]["source_locator"],
         )
-        self.assertEqual(1, result["versions"][0]["approved_by"])
+        self.assertEqual("approved", delivery["flow_review_status"])
+        self.assertEqual(
+            "2026-01-02T00:00:00Z", delivery["approved_at"]
+        )
+        self.assertEqual(1, delivery["approved_by"])
         self.assertEqual(
             result["inputs"]["snapshot_verdict_sha256"],
             self.snapshot_verdict_sha256,
@@ -403,6 +571,46 @@ class BuildAPIOracleV2Test(unittest.TestCase):
         self.assertNotEqual(
             self.snapshot_verdict_sha256, self.clone_a_attestation_sha256
         )
+
+    def test_source_alias_receipts_reject_stale_and_tampered_evidence(
+        self,
+    ) -> None:
+        allocation_path, apply_path = self.write_source_alias_receipts(())
+        assert allocation_path is not None
+        assert apply_path is not None
+        allocation_hash = oracle.sha256(allocation_path.read_bytes())
+        apply_hash = oracle.sha256(apply_path.read_bytes())
+        oracle.load_source_alias_receipts(
+            allocation_path=allocation_path,
+            expected_allocation_sha256=allocation_hash,
+            apply_path=apply_path,
+            expected_apply_sha256=apply_hash,
+            run_id=self.run_id,
+            mapping_sha256=self.mapping_sha256,
+        )
+        allocation = json.loads(allocation_path.read_bytes())
+        allocation["entries"][0]["task_id"] = 2
+        allocation_path.write_bytes(oracle.canonical(allocation) + b"\n")
+        with self.assertRaisesRegex(ValueError, "file hash differs"):
+            oracle.load_source_alias_receipts(
+                allocation_path=allocation_path,
+                expected_allocation_sha256=allocation_hash,
+                apply_path=apply_path,
+                expected_apply_sha256=apply_hash,
+                run_id=self.run_id,
+                mapping_sha256=self.mapping_sha256,
+            )
+        with self.assertRaisesRegex(ValueError, "evidence hash mismatch"):
+            oracle.load_source_alias_receipts(
+                allocation_path=allocation_path,
+                expected_allocation_sha256=oracle.sha256(
+                    allocation_path.read_bytes()
+                ),
+                apply_path=apply_path,
+                expected_apply_sha256=apply_hash,
+                run_id=self.run_id,
+                mapping_sha256=self.mapping_sha256,
+            )
 
     def test_complete_a_approval_metadata_is_preserved(self) -> None:
         asset = self.row("task_assets")
@@ -537,6 +745,68 @@ class BuildAPIOracleV2Test(unittest.TestCase):
                 a_snapshot_manifest_path=self.snapshot_manifest,
             )
 
+    def test_all_passed_g01_g05_rows_require_exact_input_provenance(
+        self,
+    ) -> None:
+        original_rows = [
+            json.loads(line)
+            for line in self.manifest.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        common_hashes = {
+            "mapping_sha256": self.mapping_sha256,
+            "baseline_attestation_sha256": self.snapshot_verdict_sha256,
+        }
+        original_rows.extend(
+            [
+                {
+                    "run_id": self.run_id,
+                    "gate_name": "G02",
+                    "entity_key": "group:1:task:0",
+                    "review_state": "pass",
+                    "detail_json": {
+                        "components": ["ignored"],
+                        "input_sha256": dict(common_hashes),
+                    },
+                },
+                {
+                    "run_id": self.run_id,
+                    "gate_name": "G05",
+                    "entity_key": "revision-reference:1:task:0:1:1",
+                    "review_state": "pass",
+                    "detail_json": {
+                        "components": ["ignored"],
+                        "input_sha256": dict(common_hashes),
+                    },
+                },
+            ]
+        )
+        for gate in ("G01", "G02", "G03", "G04", "G05"):
+            for field, error in (
+                ("mapping_sha256", "mapping hash differs"),
+                (
+                    "baseline_attestation_sha256",
+                    "snapshot verdict binding differs",
+                ),
+            ):
+                with self.subTest(gate=gate, field=field):
+                    rows = copy.deepcopy(original_rows)
+                    target = next(
+                        row for row in rows if row["gate_name"] == gate
+                    )
+                    target["detail_json"]["input_sha256"].pop(field)
+                    self.manifest.write_text(
+                        "".join(json.dumps(row) + "\n" for row in rows),
+                        encoding="utf-8",
+                    )
+                    with self.assertRaisesRegex(ValueError, error):
+                        oracle.load_manifest(
+                            self.manifest,
+                            self.run_id,
+                            self.mapping_sha256,
+                            self.snapshot_verdict_sha256,
+                        )
+
     def test_verdict_and_attestation_hashes_are_separate_hard_bindings(
         self,
     ) -> None:
@@ -661,6 +931,19 @@ class BuildAPIOracleV2Test(unittest.TestCase):
         )
         role = self.build()["revision_roles"][0]
         self.assertIsNotNone(role["source_locator"])
+        result = self.build()
+        alias = next(
+            row
+            for row in result["versions"]
+            if row["provenance"]["kind"] == "source_alias_apply_receipt"
+        )
+        final = next(
+            row for row in result["versions"] if row["task_asset_id"] == 1
+        )
+        self.assertEqual("SKU-1", alias["scope_sku_code"])
+        self.assertEqual("source", alias["bound_role"])
+        self.assertEqual("SKU-1", final["scope_sku_code"])
+        self.assertEqual("final", final["bound_role"])
         rows = [
             json.loads(line)
             for line in self.manifest.read_text(encoding="utf-8").splitlines()
@@ -744,6 +1027,15 @@ class BuildAPIOracleV2Test(unittest.TestCase):
             if version["provenance"]["kind"] == "bundle_receipt"
         )
         self.assertEqual(30, fallback_bundle["task_asset_id"])
+        self.assertEqual(
+            "not_applicable", fallback_bundle["flow_review_status"]
+        )
+        member = next(
+            row
+            for row in fallback_result["versions"]
+            if row["task_asset_id"] == 1
+        )
+        self.assertEqual("a" * 64, member["content_sha256"])
 
         for field, value in {
             "task_asset_id": 2,
@@ -813,7 +1105,10 @@ class BuildAPIOracleV2Test(unittest.TestCase):
             "recovery.json", "recovery_materialization_v2", [entry]
         )
         result = self.build(recovery_receipts=(receipt,))
-        self.assertEqual("target-ref", result["versions"][0]["storage_ref_id"])
+        recovered = next(
+            row for row in result["versions"] if row["task_asset_id"] == 1
+        )
+        self.assertEqual("target-ref", recovered["storage_ref_id"])
 
         entry["source_storage_ref_id"] = "wrong-owner"
         wrong = self.write_receipt(
@@ -865,10 +1160,13 @@ class BuildAPIOracleV2Test(unittest.TestCase):
             [entry],
         )
         result = self.build(recovery_receipts=(receipt,))
-        self.assertEqual("a" * 64, result["versions"][0]["content_sha256"])
+        recovered = next(
+            row for row in result["versions"] if row["task_asset_id"] == 1
+        )
+        self.assertEqual("a" * 64, recovered["content_sha256"])
         self.assertEqual(
             "recovery_receipt",
-            result["versions"][0]["provenance"]["kind"],
+            recovered["provenance"]["kind"],
         )
 
         self.row("task_assets")["whole_hash"] = "b" * 64

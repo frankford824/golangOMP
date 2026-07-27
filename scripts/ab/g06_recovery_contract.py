@@ -17,21 +17,21 @@ POLICY = "legacy_deleted_asset_recovery_v1"
 STRATEGY = "clone_b_prematerialized_storage_ref_v1"
 FINAL_STORAGE_ADAPTER = "clone_b_recovery"
 APPROVED_MAPPING_SHA256 = (
-    "725074175bb2ef15a149f87ed4c1da6fc3dc8aac143b49c178a43847d8733ce9"
+    "b19d48eacbc6700536f7e3b3286d1b35f023763cebdd13329b9c8bf76f6b01f7"
 )
 APPROVED_PLAN_SHA256 = (
-    "1e3fbaabb2cad62d69473d1456a9b4e079bb3c383eff97175b92c745316d84ff"
+    "4fc60c49baa745c087872d46b98680b654e4a15c6cbdca4b7cf7c37593897c9f"
 )
 APPROVED_DB_APPLY_SHA256 = (
-    "13f2105f2055b26a5c0d2864f11adb18f914beb52040f4886c9e0165179949f5"
+    "78956bb4eb00ece55a4ebacca9d6c5c39d3ac94487c6f7793e7b3a2ff1433a77"
 )
 APPROVED_DB_IDEMPOTENT_SHA256 = (
-    "d62de95b1942ed3d92c12d44e2736421b60f421a30698b2740e257b72228ee28"
+    "19d8b6fb7e4942e4b02be004bfe608bff03fc0d43dde27e233d688d6933d544d"
 )
 APPROVED_COMPONENT_APPLY_SHA256 = (
-    "42344aab21416711aa37fa9b025c06a3360ab4f049e23c597993941862b1c99a"
+    "018cbc91f8dee4a7ba7b4e6c44b3d1e76d22967322ad9e928ef94475b8d2ea9b"
 )
-EXPECTED_DATABASE = "ab_r20260723_01_b"
+EXPECTED_DATABASE = "ab_r20260723_01_v9_formal_b"
 EXPECTED_HOST = "127.0.0.1"
 RECOVERY_NAMESPACE = uuid.UUID("881b0034-ec6d-4b9e-95bd-8e3427b3b650")
 REQUIRED_SOURCES = {
@@ -362,7 +362,10 @@ def validate_apply_receipts(
         or idempotent_sha != APPROVED_DB_IDEMPOTENT_SHA256
         or component_sha != APPROVED_COMPONENT_APPLY_SHA256
     ):
-        raise ValueError("Clone B recovery apply receipts differ from hold-open-004")
+        raise ValueError(
+            "Clone B recovery apply receipts differ from the authoritative "
+            "b19 G4 v12 boundary"
+        )
 
     apply = read_json(db_apply_path, "recovery DB apply receipt")
     idempotent = read_json(

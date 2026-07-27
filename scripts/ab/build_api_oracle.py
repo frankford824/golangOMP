@@ -407,6 +407,9 @@ def load_manifest(
             row = json.loads(line)
             if row.get("run_id") != run_id or row.get("review_state") != "pass":
                 continue
+            gate = str(row.get("gate_name", ""))
+            if gate not in {"G01", "G02", "G03", "G04", "G05"}:
+                continue
             detail_json = row.get("detail_json")
             components = (
                 detail_json.get("components")
@@ -415,28 +418,22 @@ def load_manifest(
             )
             if not isinstance(components, list):
                 raise ValueError(f"manifest line {line_no} lacks components")
-            input_hashes = detail_json.get("input_sha256", {})
-            bound_mapping = (
-                input_hashes.get("mapping_sha256")
-                if isinstance(input_hashes, dict)
-                else None
-            )
-            if bound_mapping is not None and bound_mapping != mapping_sha256:
+            input_hashes = detail_json.get("input_sha256")
+            if not isinstance(input_hashes, dict):
+                raise ValueError(
+                    f"manifest line {line_no} lacks input_sha256"
+                )
+            bound_mapping = input_hashes.get("mapping_sha256")
+            if bound_mapping != mapping_sha256:
                 raise ValueError(f"manifest line {line_no} mapping hash differs")
-            bound_baseline = (
-                input_hashes.get("baseline_attestation_sha256")
-                if isinstance(input_hashes, dict)
-                else None
+            bound_baseline = input_hashes.get(
+                "baseline_attestation_sha256"
             )
-            if (
-                bound_baseline is not None
-                and bound_baseline != snapshot_verdict_sha256
-            ):
+            if bound_baseline != snapshot_verdict_sha256:
                 raise ValueError(
                     f"manifest line {line_no} snapshot verdict binding differs"
                 )
             entity = str(row.get("entity_key", ""))
-            gate = str(row.get("gate_name", ""))
             gate_entity = (gate, entity)
             if gate_entity in seen_entities:
                 raise ValueError(f"manifest line {line_no} duplicates {gate_entity}")
@@ -522,6 +519,204 @@ def load_receipts(
     return entries
 
 
+def load_source_alias_receipts(
+    *,
+    allocation_path: pathlib.Path,
+    expected_allocation_sha256: str,
+    apply_path: pathlib.Path,
+    expected_apply_sha256: str,
+    run_id: str,
+    mapping_sha256: str,
+) -> tuple[dict[tuple[int, str, int, int], dict[str, Any]], dict[str, str]]:
+    require_sha256(
+        expected_allocation_sha256,
+        "expected source-alias allocation receipt SHA-256",
+    )
+    require_sha256(
+        expected_apply_sha256,
+        "expected source-alias apply receipt SHA-256",
+    )
+    allocation_bytes = allocation_path.read_bytes()
+    apply_bytes = apply_path.read_bytes()
+    if sha256(allocation_bytes) != expected_allocation_sha256:
+        raise ValueError("source-alias allocation receipt file hash differs")
+    if sha256(apply_bytes) != expected_apply_sha256:
+        raise ValueError("source-alias apply receipt file hash differs")
+    allocation = json.loads(allocation_bytes)
+    apply = json.loads(apply_bytes)
+    allocation_fields = {
+        "schema_version",
+        "kind",
+        "status",
+        "run_id",
+        "database",
+        "mapping_file_sha256",
+        "mapping_canonical_sha256",
+        "workflow_snapshot_file_sha256",
+        "workflow_snapshot_integrity_sha256",
+        "task_assets_auto_increment_before",
+        "entry_count",
+        "entries",
+        "evidence_sha256",
+    }
+    apply_fields = {
+        "schema_version",
+        "kind",
+        "status",
+        "run_id",
+        "database",
+        "mapping_file_sha256",
+        "mapping_canonical_sha256",
+        "workflow_snapshot_file_sha256",
+        "workflow_snapshot_integrity_sha256",
+        "allocation_receipt_sha256",
+        "actual_aliases_tsv_sha256",
+        "entry_count",
+        "entries",
+        "evidence_sha256",
+    }
+    if not isinstance(allocation, dict) or set(allocation) != allocation_fields:
+        raise ValueError("source-alias allocation receipt field contract differs")
+    if not isinstance(apply, dict) or set(apply) != apply_fields:
+        raise ValueError("source-alias apply receipt field contract differs")
+    for label, document in (("allocation", allocation), ("apply", apply)):
+        evidence = require_sha256(
+            document["evidence_sha256"],
+            f"source-alias {label} receipt evidence",
+        )
+        unsigned = {
+            key: value
+            for key, value in document.items()
+            if key != "evidence_sha256"
+        }
+        if evidence != sha256(canonical(unsigned)):
+            raise ValueError(
+                f"source-alias {label} receipt evidence hash mismatch"
+            )
+    if (
+        allocation["schema_version"] != 1
+        or allocation["kind"] != "source_alias_allocation_v1"
+        or allocation["status"] != "planned"
+        or apply["schema_version"] != 1
+        or apply["kind"] != "source_alias_apply_v1"
+        or apply["status"] != "verified"
+        or allocation["run_id"] != run_id
+        or apply["run_id"] != run_id
+        or allocation["mapping_file_sha256"] != mapping_sha256
+        or apply["mapping_file_sha256"] != mapping_sha256
+        or apply["database"] != allocation["database"]
+        or apply["mapping_canonical_sha256"]
+        != allocation["mapping_canonical_sha256"]
+        or apply["workflow_snapshot_file_sha256"]
+        != allocation["workflow_snapshot_file_sha256"]
+        or apply["workflow_snapshot_integrity_sha256"]
+        != allocation["workflow_snapshot_integrity_sha256"]
+        or apply["allocation_receipt_sha256"] != expected_allocation_sha256
+    ):
+        raise ValueError("source-alias receipt cross-binding differs")
+    for field in (
+        "mapping_canonical_sha256",
+        "workflow_snapshot_file_sha256",
+        "workflow_snapshot_integrity_sha256",
+        "actual_aliases_tsv_sha256",
+    ):
+        source = apply if field == "actual_aliases_tsv_sha256" else allocation
+        require_sha256(source[field], f"source-alias receipt {field}")
+    planned_rows = allocation["entries"]
+    applied_rows = apply["entries"]
+    if (
+        not isinstance(planned_rows, list)
+        or not isinstance(applied_rows, list)
+        or allocation["entry_count"] != len(planned_rows)
+        or apply["entry_count"] != len(applied_rows)
+        or len(planned_rows) != len(applied_rows)
+    ):
+        raise ValueError("source-alias receipt entry count differs")
+    planned_fields = {
+        "sequence",
+        "task_id",
+        "scope_kind",
+        "scope_ref_id",
+        "origin_task_asset_id",
+        "expected_alias_task_asset_id",
+        "canonical_locator",
+    }
+    applied_fields = {
+        *planned_fields,
+        "alias_task_asset_id",
+        "group_id",
+        "root_asset_id",
+        "storage_ref_id",
+        "object_key_sha256",
+        "content_sha256",
+        "file_size",
+        "mime_type",
+        "scope_sku_code",
+        "retouch_requirement_id",
+        "asset_type",
+        "binding_state",
+        "bound_role",
+        "flow_review_status",
+        "source_module_key",
+        "remark",
+    }
+    output: dict[tuple[int, str, int, int], dict[str, Any]] = {}
+    for index, (planned, applied) in enumerate(
+        zip(planned_rows, applied_rows, strict=True)
+    ):
+        if (
+            not isinstance(planned, dict)
+            or set(planned) != planned_fields
+            or not isinstance(applied, dict)
+            or set(applied) != applied_fields
+            or {field: applied[field] for field in planned_fields} != planned
+            or planned["sequence"] != index
+            or applied["alias_task_asset_id"]
+            != planned["expected_alias_task_asset_id"]
+            or applied["asset_type"] != "source"
+            or applied["binding_state"] != "bound"
+            or applied["bound_role"] != "source"
+            or applied["flow_review_status"] != "not_applicable"
+            or applied["source_module_key"] != "migration"
+        ):
+            raise ValueError(f"source-alias receipt entry {index} differs")
+        for field in ("object_key_sha256", "content_sha256"):
+            require_sha256(
+                applied[field],
+                f"source-alias receipt entry {index} {field}",
+                allow_empty=True,
+            )
+        key = (
+            required_int(applied["task_id"], "source-alias task_id"),
+            str(applied["scope_kind"]),
+            required_int(
+                applied["scope_ref_id"],
+                "source-alias scope_ref_id",
+                minimum=0,
+            ),
+            required_int(
+                applied["origin_task_asset_id"],
+                "source-alias origin_task_asset_id",
+            ),
+        )
+        if key in output:
+            raise ValueError(f"source-alias receipt duplicates {key}")
+        output[key] = dict(applied)
+    return output, {
+        "source_alias_allocation_receipt_sha256": expected_allocation_sha256,
+        "source_alias_apply_receipt_sha256": expected_apply_sha256,
+        "source_alias_workflow_snapshot_sha256": allocation[
+            "workflow_snapshot_file_sha256"
+        ],
+        "source_alias_workflow_snapshot_integrity_sha256": allocation[
+            "workflow_snapshot_integrity_sha256"
+        ],
+        "source_alias_mapping_canonical_sha256": allocation[
+            "mapping_canonical_sha256"
+        ],
+    }
+
+
 def scope_values(
     task_id: int,
     scope_kind: str,
@@ -568,6 +763,52 @@ def version_sort_key(version: dict[str, Any]) -> tuple[int, str, int]:
     )
 
 
+def bind_version_to_resource(
+    version: dict[str, Any],
+    *,
+    role: str,
+    scope_sku_code: str,
+    retouch_requirement_id: int | None,
+    resource_locator: str,
+) -> None:
+    prior_locator = str(version.get("bound_resource_locator") or "")
+    prior_role = str(version.get("bound_role") or "")
+    if prior_locator and prior_locator != resource_locator:
+        raise ValueError(
+            f"task asset {version['task_asset_id']} is bound across resources"
+        )
+    if prior_role and prior_role != role:
+        raise ValueError(
+            f"task asset {version['task_asset_id']} changes migration role"
+        )
+    version["binding_state"] = "bound"
+    version["bound_role"] = role
+    version["bound_resource_locator"] = resource_locator
+    version["scope_sku_code"] = scope_sku_code
+    version["retouch_requirement_id"] = retouch_requirement_id
+
+
+def rekey_version(
+    version: dict[str, Any],
+    *,
+    new_locator: str,
+    versions_by_locator: dict[str, dict[str, Any]],
+    roots: dict[int, dict[str, Any]],
+) -> None:
+    old_locator = version["stable_locator"]
+    if new_locator == old_locator:
+        return
+    if new_locator in versions_by_locator:
+        raise ValueError(f"asset locator {new_locator} collides")
+    del versions_by_locator[old_locator]
+    version["stable_locator"] = new_locator
+    versions_by_locator[new_locator] = version
+    root = roots[version["root_asset_id"]]
+    for field in ("current_locator", "approved_locator"):
+        if root.get(field) == old_locator:
+            root[field] = new_locator
+
+
 def build(
     *,
     run_id: str,
@@ -581,6 +822,10 @@ def build(
     a_snapshot_manifest_path: pathlib.Path,
     bundle_receipt_paths: Iterable[pathlib.Path] = (),
     recovery_receipt_paths: Iterable[pathlib.Path] = (),
+    source_alias_allocation_receipt_path: pathlib.Path | None = None,
+    expected_source_alias_allocation_receipt_sha256: str = "",
+    source_alias_apply_receipt_path: pathlib.Path | None = None,
+    expected_source_alias_apply_receipt_sha256: str = "",
 ) -> dict[str, Any]:
     require_sha256(expected_mapping_sha256, "expected_mapping_sha256")
     require_sha256(
@@ -623,6 +868,35 @@ def build(
     mapping = json.loads(mapping_bytes)
     if not isinstance(mapping, dict):
         raise ValueError("reviewed mapping must be an object")
+    source_alias_entries: dict[
+        tuple[int, str, int, int], dict[str, Any]
+    ] = {}
+    source_alias_input_hashes: dict[str, str] = {}
+    if (
+        source_alias_allocation_receipt_path is not None
+        or source_alias_apply_receipt_path is not None
+        or expected_source_alias_allocation_receipt_sha256
+        or expected_source_alias_apply_receipt_sha256
+    ):
+        if (
+            source_alias_allocation_receipt_path is None
+            or source_alias_apply_receipt_path is None
+        ):
+            raise ValueError("source-alias receipts must be supplied together")
+        source_alias_entries, source_alias_input_hashes = (
+            load_source_alias_receipts(
+                allocation_path=source_alias_allocation_receipt_path,
+                expected_allocation_sha256=(
+                    expected_source_alias_allocation_receipt_sha256
+                ),
+                apply_path=source_alias_apply_receipt_path,
+                expected_apply_sha256=(
+                    expected_source_alias_apply_receipt_sha256
+                ),
+                run_id=run_id,
+                mapping_sha256=mapping_sha256,
+            )
+        )
 
     snapshot, snapshot_package = load_a_snapshot_package(
         a_snapshot_manifest_path
@@ -843,6 +1117,9 @@ def build(
                 and not object_row["is_placeholder"]
                 else "unverified"
             ),
+            "binding_state": str(row["binding_state"] or ""),
+            "bound_role": str(row["bound_role"] or ""),
+            "bound_resource_locator": "",
             "expected_roles": set(),
             "provenance": {
                 "kind": "a_preserved",
@@ -983,6 +1260,37 @@ def build(
                     f"bundle receipt {locator} member {member_index} is incomplete"
                 )
         bundle_by_revision[locator] = dict(entry)
+
+    for locator, entry in bundle_by_revision.items():
+        for member in entry["members"]:
+            member_id = required_int(
+                member["task_asset_id"], f"bundle {locator} member task_asset_id"
+            )
+            version = versions_by_id.get(member_id)
+            if version is None:
+                raise ValueError(
+                    f"bundle receipt member {member_id} is absent from frozen A"
+                )
+            member_hash = require_sha256(
+                member["sha256"], f"bundle {locator} member content"
+            )
+            if version["content_sha256"] and version["content_sha256"] != member_hash:
+                raise ValueError(f"bundle member differs for {locator}")
+            if not version["content_sha256"]:
+                version["content_sha256"] = member_hash
+                version["provenance"] = {
+                    **version["provenance"],
+                    "bundle_member_receipt": locator,
+                }
+                rekey_version(
+                    version,
+                    new_locator=(
+                        f"a:{member_id}:{version['storage_ref_id']}:"
+                        f"{version['object_key_sha256']}:{member_hash}"
+                    ),
+                    versions_by_locator=versions_by_locator,
+                    roots=roots,
+                )
 
     recovery_by_missing_id: dict[int, dict[str, Any]] = {}
     for index, entry in enumerate(recovery_entries):
@@ -1126,6 +1434,7 @@ def build(
     revision_roles: list[dict[str, Any]] = []
     revision_reasons: list[dict[str, str]] = []
     consumed_bundles: set[str] = set()
+    consumed_source_aliases: set[tuple[int, str, int, int]] = set()
     seen_revisions: set[str] = set()
     active_final_ids: set[int] = set()
     for resource_index, resource in enumerate(resources):
@@ -1145,6 +1454,7 @@ def build(
             skus,
             retouch_requirements,
         )
+        resource_locator = f"{task_id}:{scope_kind}:{scope_ref_id}"
         history = resource.get("history")
         if not isinstance(history, list):
             raise ValueError(f"resource {resource_index} lacks history")
@@ -1178,6 +1488,13 @@ def build(
                 source_locator = source["stable_locator"]
                 source_kind = "a_source"
                 source["expected_roles"].add("source")
+                bind_version_to_resource(
+                    source,
+                    role="source",
+                    scope_sku_code=scope_sku_code,
+                    retouch_requirement_id=retouch_requirement_id,
+                    resource_locator=resource_locator,
+                )
             elif revision.get("source_alias_from_task_asset_id") is not None:
                 source_id = required_int(
                     revision["source_alias_from_task_asset_id"],
@@ -1186,9 +1503,97 @@ def build(
                 source = versions_by_id.get(source_id)
                 if source is None or source["task_id"] != task_id:
                     raise ValueError(f"revision {locator} alias is absent from frozen A")
-                source_locator = source["stable_locator"]
+                alias_key = (
+                    task_id,
+                    scope_kind,
+                    scope_ref_id,
+                    source_id,
+                )
+                receipt = source_alias_entries.get(alias_key)
+                if receipt is None:
+                    raise ValueError(
+                        f"revision {locator} alias lacks a verified apply receipt"
+                    )
+                alias_id = required_int(
+                    receipt["alias_task_asset_id"],
+                    f"revision {locator} alias task_asset_id",
+                )
+                alias = versions_by_id.get(alias_id)
+                if alias is None:
+                    if (
+                        receipt["root_asset_id"] != source["root_asset_id"]
+                        or receipt["storage_ref_id"] != source["storage_ref_id"]
+                        or receipt["object_key_sha256"]
+                        != source["object_key_sha256"]
+                        or receipt["content_sha256"]
+                        != source["content_sha256"]
+                        or receipt["file_size"] != source["size"]
+                        or receipt["mime_type"] != source["mime_type"]
+                        or receipt["scope_sku_code"] != scope_sku_code
+                        or receipt["retouch_requirement_id"]
+                        != retouch_requirement_id
+                    ):
+                        raise ValueError(
+                            f"revision {locator} alias receipt differs from frozen A"
+                        )
+                    alias = {
+                        "stable_locator": receipt["canonical_locator"],
+                        "task_asset_id": alias_id,
+                        "task_id": task_id,
+                        "root_asset_id": source["root_asset_id"],
+                        "intrinsic_asset_type": "source",
+                        "scope_sku_code": scope_sku_code,
+                        "retouch_requirement_id": retouch_requirement_id,
+                        "storage_ref_id": source["storage_ref_id"],
+                        "object_key_sha256": source["object_key_sha256"],
+                        "content_sha256": source["content_sha256"],
+                        "size": source["size"],
+                        "mime_type": source["mime_type"],
+                        "upload_status": source["upload_status"],
+                        "deleted_at": source["deleted_at"],
+                        "cleaned_at": source["cleaned_at"],
+                        "object_deleted_at": source["object_deleted_at"],
+                        "asset_version_no": source["asset_version_no"],
+                        "flow_review_status": "not_applicable",
+                        "approved_at": "",
+                        "approved_by": None,
+                        "created_at": "",
+                        "source_asset_version_id": None,
+                        "content_availability": source[
+                            "content_availability"
+                        ],
+                        "binding_state": "bound",
+                        "bound_role": "source",
+                        "bound_resource_locator": resource_locator,
+                        "expected_roles": {"source"},
+                        "provenance": {
+                            "kind": "source_alias_apply_receipt",
+                            "origin_task_asset_id": source_id,
+                            "origin_locator": source["stable_locator"],
+                            "group_id": receipt["group_id"],
+                            "remark": receipt["remark"],
+                        },
+                    }
+                    if alias_id in versions_by_id:
+                        raise ValueError(
+                            f"revision {locator} alias ID collides with frozen A"
+                        )
+                    if alias["stable_locator"] in versions_by_locator:
+                        raise ValueError(
+                            f"revision {locator} alias locator collides"
+                        )
+                    versions_by_id[alias_id] = alias
+                    versions_by_locator[alias["stable_locator"]] = alias
+                elif (
+                    alias["provenance"].get("origin_task_asset_id") != source_id
+                    or alias["bound_resource_locator"] != resource_locator
+                ):
+                    raise ValueError(
+                        f"revision {locator} reuses an unrelated source alias"
+                    )
+                source_locator = alias["stable_locator"]
                 source_kind = "delivery_source_alias"
-                source["expected_roles"].add("source")
+                consumed_source_aliases.add(alias_key)
             elif revision.get("source_bundle") is not None:
                 bundle = revision["source_bundle"]
                 receipt = bundle_by_revision.get(locator)
@@ -1279,12 +1684,15 @@ def build(
                     "cleaned_at": "",
                     "object_deleted_at": "",
                     "asset_version_no": 1,
-                    "flow_review_status": "",
+                    "flow_review_status": "not_applicable",
                     "approved_at": "",
                     "approved_by": None,
                     "created_at": "",
                     "source_asset_version_id": None,
                     "content_availability": "available",
+                    "binding_state": "bound",
+                    "bound_role": "source",
+                    "bound_resource_locator": resource_locator,
                     "expected_roles": {"source"},
                     "provenance": {
                         "kind": "bundle_receipt",
@@ -1319,6 +1727,13 @@ def build(
                 if final is None or final["task_id"] != task_id:
                     raise ValueError(f"revision {locator} final is absent from frozen A")
                 final["expected_roles"].add("final")
+                bind_version_to_resource(
+                    final,
+                    role="final",
+                    scope_sku_code=scope_sku_code,
+                    retouch_requirement_id=retouch_requirement_id,
+                    resource_locator=resource_locator,
+                )
                 final_locators.append(final["stable_locator"])
                 if revision.get("status") in {"finalized", "superseded"} and not (
                     final["flow_review_status"] == "approved"
@@ -1440,6 +1855,8 @@ def build(
         raise ValueError("reviewed mapping revisions do not cover manifest G03")
     if consumed_bundles != set(bundle_by_revision):
         raise ValueError("one or more bundle receipts were not consumed")
+    if consumed_source_aliases != set(source_alias_entries):
+        raise ValueError("one or more source-alias receipts were not consumed")
 
     task_status = {task["task_id"]: task["task_status"] for task in tasks}
     by_root: dict[int, list[dict[str, Any]]] = {}
@@ -1498,8 +1915,8 @@ def build(
     serialized_versions.sort(key=lambda item: item["stable_locator"])
 
     unsigned: dict[str, Any] = {
-        "schema_version": 2,
-        "oracle_kind": "non_circular_g6_v2",
+        "schema_version": 3,
+        "oracle_kind": "non_circular_g6_v3",
         "run_id": run_id,
         "inputs": {
             "reviewed_mapping_sha256": mapping_sha256,
@@ -1524,6 +1941,7 @@ def build(
                     [sha256(path.read_bytes()) for path in recovery_receipt_paths]
                 )
             ),
+            **source_alias_input_hashes,
         },
         "tasks": tasks,
         "roots": sorted(roots.values(), key=lambda item: item["root_asset_id"]),
@@ -1582,6 +2000,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--recovery-receipt", type=pathlib.Path, action="append", default=[]
     )
+    parser.add_argument(
+        "--source-alias-allocation-receipt", type=pathlib.Path
+    )
+    parser.add_argument(
+        "--expected-source-alias-allocation-receipt-sha256", default=""
+    )
+    parser.add_argument("--source-alias-apply-receipt", type=pathlib.Path)
+    parser.add_argument(
+        "--expected-source-alias-apply-receipt-sha256", default=""
+    )
     parser.add_argument("--output", type=pathlib.Path, required=True)
     args = parser.parse_args(argv)
     try:
@@ -1601,6 +2029,16 @@ def main(argv: list[str] | None = None) -> int:
             a_snapshot_manifest_path=args.a_snapshot_manifest,
             bundle_receipt_paths=args.bundle_receipt,
             recovery_receipt_paths=args.recovery_receipt,
+            source_alias_allocation_receipt_path=(
+                args.source_alias_allocation_receipt
+            ),
+            expected_source_alias_allocation_receipt_sha256=(
+                args.expected_source_alias_allocation_receipt_sha256
+            ),
+            source_alias_apply_receipt_path=args.source_alias_apply_receipt,
+            expected_source_alias_apply_receipt_sha256=(
+                args.expected_source_alias_apply_receipt_sha256
+            ),
         )
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_bytes(canonical(result) + b"\n")

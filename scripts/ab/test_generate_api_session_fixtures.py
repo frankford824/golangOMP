@@ -81,6 +81,27 @@ class GenerateAPISessionFixturesTest(unittest.TestCase):
                     token_factory=lambda _size: "x" * 64,
                 )
 
+    def test_accepts_enumerated_ui_clone_suffixes(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            manifest = MODULE.build(
+                run_id="api-g06-suffixed",
+                clone_a_database="ab_formal20260723_01_a_ui_002",
+                clone_b_database="ab_formal20260723_01_b_ui_001",
+                identities=[MODULE.Identity("admin", 1, "Admin")],
+                output_dir=pathlib.Path(raw) / "suffixed",
+                now=dt.datetime.now(dt.timezone.utc),
+                token_factory=lambda _size: "x" * 64,
+            )
+
+            self.assertEqual(
+                "ab_formal20260723_01_a_ui_002",
+                manifest["clone_a_database"],
+            )
+            self.assertEqual(
+                "ab_formal20260723_01_b_ui_001",
+                manifest["clone_b_database"],
+            )
+
     def test_refuses_overwrite(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             output = pathlib.Path(raw) / "existing"

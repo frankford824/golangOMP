@@ -308,6 +308,10 @@ class BrowserABStackTest(unittest.TestCase):
         self.assertIn("location = /__ab/identity", content)
         self.assertIn("proxy_ssl_server_name on;", content)
         self.assertIn("proxy_ssl_name $proxy_host;", content)
+        ws_block = content.split("location ^~ /ws/", 1)[1].split(
+            "location ^~ /upload/", 1
+        )[0]
+        self.assertIn("proxy_set_header Host $http_host;", ws_block)
 
     def test_compose_uses_internal_database_hosts_and_a_read_only_gate(self) -> None:
         content = COMPOSE.read_text(encoding="utf-8")

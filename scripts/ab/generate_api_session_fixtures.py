@@ -26,8 +26,8 @@ SCHEMA_VERSION = 1
 IDENTITY_RE = re.compile(r"^[a-z][a-z0-9_-]{1,31}$")
 RUN_ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{2,63}$")
 DATABASE_RE = re.compile(r"^[A-Za-z0-9_]+$")
-CLONE_A_RE = re.compile(r"^ab_[A-Za-z0-9_]*_a_ui$")
-CLONE_B_RE = re.compile(r"^ab_[A-Za-z0-9_]*_b_ui$")
+CLONE_A_RE = re.compile(r"^ab_[A-Za-z0-9_]*_a_ui(?:_[A-Za-z0-9]+)*$")
+CLONE_B_RE = re.compile(r"^ab_[A-Za-z0-9_]*_b_ui(?:_[A-Za-z0-9]+)*$")
 SESSION_NAMESPACE = uuid.UUID("9c4ee974-09da-4d83-8d1a-d3929acb3486")
 
 
@@ -82,7 +82,10 @@ def quote_sql(value: str) -> str:
 
 def database_name(value: str, pattern: re.Pattern[str], label: str) -> str:
     if not DATABASE_RE.fullmatch(value) or not pattern.fullmatch(value):
-        raise ValueError(f"{label} must name an isolated *_a_ui or *_b_ui clone")
+        raise ValueError(
+            f"{label} must name an isolated *_a_ui or *_b_ui clone, "
+            "optionally followed by an alphanumeric run suffix"
+        )
     return value
 
 

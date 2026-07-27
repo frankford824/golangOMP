@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import contextlib
+import copy
 import hashlib
 import importlib.util
 import io
@@ -13,6 +14,7 @@ import tempfile
 import threading
 import unittest
 from concurrent.futures import ThreadPoolExecutor
+from unittest import mock
 
 from scripts.ab import finalize_release_gates as RELEASE
 
@@ -33,6 +35,20 @@ def result(status: int, body: object) -> api.HttpResult:
     return api.HttpResult(status, body, digest(raw), len(raw))
 
 
+class FakeHTTPResponse:
+    def __init__(self, body: bytes) -> None:
+        self.body = body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        return None
+
+    def read(self, _limit: int) -> bytes:
+        return self.body
+
+
 class ComparatorTest(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
@@ -41,6 +57,14 @@ class ComparatorTest(unittest.TestCase):
         self.tasks = self.root / "tasks.jsonl"
         self.tasks.write_text('{"task_id":1}\n', encoding="utf-8")
         self.manifest = self.root / "manifest.jsonl"
+        self.mapping_sha256 = "a" * 64
+        self.baseline_attestation_sha256 = "b" * 64
+        manifest_inputs = {
+            "mapping_sha256": self.mapping_sha256,
+            "baseline_attestation_sha256": (
+                self.baseline_attestation_sha256
+            ),
+        }
         rows = [
             {
                 "run_id": self.run_id,
@@ -49,7 +73,8 @@ class ComparatorTest(unittest.TestCase):
                 "review_state": "pass",
                 "expected_state": "matched",
                 "detail_json": {
-                    "components": ["1", "design", "PendingAudit", "", "1"]
+                    "components": ["1", "design", "PendingAudit", "", "1"],
+                    "input_sha256": manifest_inputs,
                 },
             },
             {
@@ -69,7 +94,8 @@ class ComparatorTest(unittest.TestCase):
                         "",
                         "0",
                         "",
-                    ]
+                    ],
+                    "input_sha256": manifest_inputs,
                 },
             },
         ]
@@ -95,7 +121,8 @@ class ComparatorTest(unittest.TestCase):
                             "",
                             "",
                             "",
-                        ]
+                        ],
+                        "input_sha256": manifest_inputs,
                     },
                 }
             )
@@ -106,7 +133,10 @@ class ComparatorTest(unittest.TestCase):
                     "entity_key": f"revision-source:1:task:0:{revision_no}",
                     "review_state": "pass",
                     "expected_state": "matched",
-                    "detail_json": {"components": ["", "", "", "", "", "", ""]},
+                    "detail_json": {
+                        "components": ["", "", "", "", "", "", ""],
+                        "input_sha256": manifest_inputs,
+                    },
                 }
             )
         for row in rows:
@@ -127,6 +157,9 @@ class ComparatorTest(unittest.TestCase):
                     self.manifest.read_bytes()
                 ),
                 "reviewed_mapping_sha256": "a" * 64,
+                "snapshot_verdict_sha256": (
+                    self.baseline_attestation_sha256
+                ),
             },
             "revision_reasons": [
                 {
@@ -222,8 +255,30 @@ class ComparatorTest(unittest.TestCase):
         }
         oracle["evidence_sha256"] = digest(api.canonical(oracle))
         self.api_oracle.write_text(json.dumps(oracle), encoding="utf-8")
+        self.base_api_oracle = copy.deepcopy(oracle)
         os.environ["AB_ADMIN_HEADERS"] = json.dumps(
-            {"Authorization": "Bearer TOP-SECRET"}
+            {
+                "Authorization": "Bearer TOP-SECRET",
+                "X-Test-Identity": "admin",
+            }
+        )
+        os.environ["AB_VIEW_INSIDE_HEADERS"] = json.dumps(
+            {
+                "Authorization": "Bearer TOP-SECRET",
+                "X-Test-Identity": "view-inside",
+            }
+        )
+        os.environ["AB_VIEW_OUTSIDE_HEADERS"] = json.dumps(
+            {
+                "Authorization": "Bearer TOP-SECRET",
+                "X-Test-Identity": "view-outside",
+            }
+        )
+        os.environ["AB_NO_VIEW_HEADERS"] = json.dumps(
+            {
+                "Authorization": "Bearer TOP-SECRET",
+                "X-Test-Identity": "no-view",
+            }
         )
         self.matrix = self.root / "matrix.json"
         self.matrix.write_text(
@@ -265,7 +320,22 @@ class ComparatorTest(unittest.TestCase):
                             "id": "admin",
                             "role": "admin",
                             "headers_json_env": "AB_ADMIN_HEADERS",
-                        }
+                        },
+                        {
+                            "id": "view-inside",
+                            "role": "view_only",
+                            "headers_json_env": "AB_VIEW_INSIDE_HEADERS",
+                        },
+                        {
+                            "id": "view-outside",
+                            "role": "view_only",
+                            "headers_json_env": "AB_VIEW_OUTSIDE_HEADERS",
+                        },
+                        {
+                            "id": "no-view",
+                            "role": "no_view",
+                            "headers_json_env": "AB_NO_VIEW_HEADERS",
+                        },
                     ],
                     "retired_routes": ["/v1/tasks/{task_id}/warehouse-receive"],
                 }
@@ -276,7 +346,13 @@ class ComparatorTest(unittest.TestCase):
         self.write_rules([])
 
     def tearDown(self) -> None:
-        os.environ.pop("AB_ADMIN_HEADERS", None)
+        for name in (
+            "AB_ADMIN_HEADERS",
+            "AB_VIEW_INSIDE_HEADERS",
+            "AB_VIEW_OUTSIDE_HEADERS",
+            "AB_NO_VIEW_HEADERS",
+        ):
+            os.environ.pop(name, None)
         self.temp.cleanup()
 
     def write_rules(self, rules: list[dict]) -> None:
@@ -285,10 +361,113 @@ class ComparatorTest(unittest.TestCase):
         )
 
     def rebind_api_oracle(self) -> None:
+        rows = [
+            json.loads(line)
+            for line in self.manifest.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+        for row in rows:
+            if (
+                row.get("gate_name") in {"G01", "G02", "G03", "G04", "G05"}
+                and isinstance(row.get("detail_json"), dict)
+            ):
+                row["detail_json"].setdefault(
+                    "input_sha256",
+                    {
+                        "mapping_sha256": self.mapping_sha256,
+                        "baseline_attestation_sha256": (
+                            self.baseline_attestation_sha256
+                        ),
+                    },
+                )
+        self.manifest.write_text(
+            "".join(json.dumps(row) + "\n" for row in rows),
+            encoding="utf-8",
+        )
         oracle = json.loads(self.api_oracle.read_text(encoding="utf-8"))
         oracle["inputs"]["reviewed_manifest_sha256"] = digest(
             self.manifest.read_bytes()
         )
+        oracle.pop("evidence_sha256", None)
+        oracle["evidence_sha256"] = digest(api.canonical(oracle))
+        self.api_oracle.write_text(json.dumps(oracle), encoding="utf-8")
+
+    def write_v3_alias_oracle(self) -> dict:
+        oracle = copy.deepcopy(self.base_api_oracle)
+        oracle["schema_version"] = 3
+        oracle["oracle_kind"] = "non_circular_g6_v3"
+        oracle["inputs"] = {
+            field: "b" * 64
+            for field in (
+                api.ORACLE_V2_INPUT_FIELDS
+                | api.ORACLE_V3_ALIAS_INPUT_FIELDS
+            )
+            if field != "clone_a_database"
+        }
+        oracle["inputs"]["reviewed_manifest_sha256"] = digest(
+            self.manifest.read_bytes()
+        )
+        oracle["inputs"]["reviewed_mapping_sha256"] = "a" * 64
+        oracle["inputs"]["clone_a_database"] = "clone_a"
+        origin = oracle["versions"][0]
+        origin.update(
+            {
+                "intrinsic_asset_type": "delivery",
+                "binding_state": "bound",
+                "bound_role": "final",
+                "bound_resource_locator": "1:task:0",
+                "expected_roles": ["final"],
+                "provenance": {
+                    "kind": "a_preserved",
+                    "a_binding_state": "legacy",
+                    "a_bound_role": "",
+                },
+            }
+        )
+        oracle["roots"][0]["intrinsic_asset_type"] = "delivery"
+        alias = dict(origin)
+        alias.update(
+            {
+                "task_asset_id": 21,
+                "stable_locator": (
+                    "alias:v1:1:task:0:origin-task-asset:20"
+                ),
+                "intrinsic_asset_type": "source",
+                "flow_review_status": "not_applicable",
+                "approved_at": "",
+                "approved_by": None,
+                "created_at": "",
+                "source_asset_version_id": None,
+                "binding_state": "bound",
+                "bound_role": "source",
+                "bound_resource_locator": "1:task:0",
+                "expected_roles": ["source"],
+                "provenance": {
+                    "kind": "source_alias_apply_receipt",
+                    "origin_task_asset_id": 20,
+                    "origin_locator": origin["stable_locator"],
+                    "group_id": 30,
+                    "remark": "v8-source-alias:group=30:origin=20",
+                },
+            }
+        )
+        oracle["versions"].append(alias)
+        oracle["route_expectations"]["detail_visible_locators"].append(
+            alias["stable_locator"]
+        )
+        oracle["revision_roles"][0].update(
+            {
+                "source_kind": "delivery_source_alias",
+                "source_locator": alias["stable_locator"],
+                "final_locators": [origin["stable_locator"]],
+            }
+        )
+        oracle.pop("evidence_sha256", None)
+        oracle["evidence_sha256"] = digest(api.canonical(oracle))
+        self.api_oracle.write_text(json.dumps(oracle), encoding="utf-8")
+        return oracle
+
+    def write_oracle_document(self, oracle: dict) -> None:
         oracle.pop("evidence_sha256", None)
         oracle["evidence_sha256"] = digest(api.canonical(oracle))
         self.api_oracle.write_text(json.dumps(oracle), encoding="utf-8")
@@ -467,7 +646,22 @@ class ComparatorTest(unittest.TestCase):
                 },
             )
         if "/task-assets/" in path:
-            return result(200, {"ok": True})
+            return result(
+                200,
+                {
+                    "data": {
+                        "download_mode": "proxy",
+                        "download_url": (
+                            "/v1/assets/files/tasks/RW-1/source.psd"
+                        ),
+                        "access_hint": "authenticated_proxy",
+                        "preview_available": True,
+                        "filename": "source.psd",
+                        "file_size": 10,
+                        "mime_type": "image/png",
+                    }
+                },
+            )
         if path == "/v1/resource-groups/10":
             return result(
                 200,
@@ -554,6 +748,10 @@ class ComparatorTest(unittest.TestCase):
                                 "file_hash": "a" * 64,
                                 "file_size": 10,
                                 "mime_type": "image/png",
+                                "flow_review_status": "",
+                                "usable_state": "not_applicable",
+                                "approved_at": None,
+                                "approved_by": None,
                                 "current_version_role": "current_version",
                             },
                         }
@@ -587,6 +785,10 @@ class ComparatorTest(unittest.TestCase):
                             "file_hash": "a" * 64,
                             "file_size": 10,
                             "mime_type": "image/png",
+                            "flow_review_status": "",
+                            "usable_state": "not_applicable",
+                            "approved_at": None,
+                            "approved_by": None,
                         }
                     ],
                 },
@@ -599,7 +801,26 @@ class ComparatorTest(unittest.TestCase):
         request_metrics=None,
         workers=16,
         downloader=None,
+        simulate_scope=True,
     ) -> dict:
+        provided_requester = requester or self.requester
+
+        def scoped_requester(base, path, headers):
+            if not simulate_scope:
+                return provided_requester(base, path, headers)
+            identity = headers.get("X-Test-Identity", "admin")
+            if "warehouse-receive" in path and identity != "admin":
+                return result(404, {"code": "not_found"})
+            if identity in {"view-outside", "no-view"}:
+                return result(403, {"code": "permission_denied"})
+            if (
+                identity == "view-inside"
+                and "/v1/task-assets/" in path
+                and path.endswith("/download")
+            ):
+                return result(403, {"code": "permission_denied"})
+            return provided_requester(base, path, headers)
+
         kwargs = dict(
             matrix_path=self.matrix,
             task_ids_path=self.tasks,
@@ -607,13 +828,45 @@ class ComparatorTest(unittest.TestCase):
             manifest_path=self.manifest,
             api_oracle_path=self.api_oracle,
             run_id=self.run_id,
-            requester=requester or self.requester,
+            requester=scoped_requester,
             workers=workers,
             request_metrics=request_metrics,
         )
         if downloader is not None:
             kwargs["downloader"] = downloader
         return api.compare(**kwargs)
+
+    def make_runner(self) -> api.Runner:
+        urls, _, resolved, retired = api.load_matrix(self.matrix)
+        identities = [
+            {"id": item["id"], "role": item["role"]}
+            for item in json.loads(
+                self.matrix.read_text(encoding="utf-8")
+            )["identities"]
+        ]
+        asset_oracle = api.load_asset_identity_map(
+            self.api_oracle,
+            self.run_id,
+            digest(self.manifest.read_bytes()),
+        )
+        expectations = api.load_manifest_expectations(
+            self.manifest,
+            self.run_id,
+            expected_mapping_sha256=self.mapping_sha256,
+            expected_baseline_attestation_sha256=(
+                self.baseline_attestation_sha256
+            ),
+        )
+        return api.Runner(
+            urls,
+            identities,
+            resolved,
+            [],
+            retired,
+            expectations,
+            asset_oracle,
+            self.requester,
+        )
 
     def test_four_combo_get_only_pass_and_secret_not_in_evidence(self) -> None:
         calls: list[tuple[str, str]] = []
@@ -640,6 +893,131 @@ class ComparatorTest(unittest.TestCase):
         second = self.run_compare()
         self.assertEqual(api.canonical(first), api.canonical(second))
 
+    def test_matrix_requires_all_three_permission_roles(self) -> None:
+        document = json.loads(self.matrix.read_text(encoding="utf-8"))
+        document["identities"] = [
+            item
+            for item in document["identities"]
+            if item["role"] != "no_view"
+        ]
+        self.matrix.write_text(json.dumps(document), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "admin, view_only, and no_view"):
+            api.load_matrix(self.matrix)
+
+    def test_view_only_200_recursively_rejects_download_url(self) -> None:
+        def requester(base, path, headers):
+            value = self.requester(base, path, headers)
+            if (
+                headers.get("X-Test-Identity") == "view-inside"
+                and base.endswith(("8102", "8103"))
+                and path == "/v1/tasks/1"
+            ):
+                return result(
+                    200,
+                    {"data": {"nested": [{"download_url": ""}]}},
+                )
+            return value
+
+        evidence = self.run_compare(requester)
+        self.assertIn(
+            "api.view_only_download_url_exposed",
+            {item["violation_code"] for item in evidence["violations"]},
+        )
+
+    def test_view_only_url_check_is_candidate_b_only(self) -> None:
+        runner = self.make_runner()
+        runner.observation(
+            "external_external_a",
+            "view-inside",
+            "/v1/tasks/{task_id}",
+            "task:1:/v1/tasks/{task_id}",
+            result(200, {"data": {"download_url": "/legacy/file"}}),
+        )
+        self.assertFalse(
+            any(
+                item["violation_code"]
+                == "api.view_only_download_url_exposed"
+                for item in runner.violations
+            )
+        )
+        runner.observation(
+            "dev_dev_b",
+            "view-inside",
+            "/v1/tasks/{task_id}",
+            "task:1:/v1/tasks/{task_id}",
+            result(
+                200,
+                {"data": {"download_url": "/v1/task-assets/20/download"}},
+            ),
+        )
+        self.assertTrue(
+            any(
+                item["violation_code"]
+                == "api.view_only_download_url_exposed"
+                for item in runner.violations
+            )
+        )
+
+    def test_view_only_asset_download_must_not_return_200(self) -> None:
+        evidence = self.run_compare(simulate_scope=False)
+        self.assertIn(
+            "api.view_only_download_granted",
+            {item["violation_code"] for item in evidence["violations"]},
+        )
+
+    def test_no_view_b_routes_must_not_return_200(self) -> None:
+        evidence = self.run_compare(simulate_scope=False)
+        self.assertIn(
+            "api.no_view_access_granted",
+            {item["violation_code"] for item in evidence["violations"]},
+        )
+
+    def test_view_only_requires_b_200_and_403_task_observations(self) -> None:
+        document = json.loads(self.matrix.read_text(encoding="utf-8"))
+        document["identities"] = [
+            item
+            for item in document["identities"]
+            if item["id"] != "view-outside"
+        ]
+        self.matrix.write_text(json.dumps(document), encoding="utf-8")
+        evidence = self.run_compare()
+        violations = [
+            item
+            for item in evidence["violations"]
+            if item["violation_code"] == "api.view_only_scope_unproven"
+        ]
+        self.assertEqual(2, len(violations))
+        self.assertTrue(all("returned 403" in item["detail"] for item in violations))
+
+    def test_view_only_denied_task_cannot_read_sibling_surfaces(self) -> None:
+        runner = self.make_runner()
+        task_entity = "task:1:/v1/tasks/{task_id}"
+        detail_entity = "task:1:/v1/tasks/{task_id}/detail"
+        runner.results[
+            (
+                "dev_dev_b",
+                "view-inside",
+                "/v1/tasks/{task_id}",
+                task_entity,
+            )
+        ] = result(403, {"error": {"code": "forbidden"}})
+        runner.results[
+            (
+                "dev_dev_b",
+                "view-inside",
+                "/v1/tasks/{task_id}/detail",
+                detail_entity,
+            )
+        ] = result(200, {"data": {"id": 1}})
+        runner.validate_identity_coverage()
+        self.assertTrue(
+            any(
+                item["violation_code"] == "api.view_only_scope_bypass"
+                and item["entity_key"] == detail_entity
+                for item in runner.violations
+            )
+        )
+
     def test_schema_v1_oracle_is_rejected(self) -> None:
         document = json.loads(self.api_oracle.read_text(encoding="utf-8"))
         document["schema_version"] = 1
@@ -647,6 +1025,15 @@ class ComparatorTest(unittest.TestCase):
         document["evidence_sha256"] = digest(api.canonical(document))
         self.api_oracle.write_text(json.dumps(document), encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "binding or evidence"):
+            self.run_compare()
+
+    def test_api_oracle_must_bind_baseline_provenance(self) -> None:
+        document = json.loads(self.api_oracle.read_text(encoding="utf-8"))
+        document["inputs"].pop("snapshot_verdict_sha256")
+        document.pop("evidence_sha256")
+        document["evidence_sha256"] = digest(api.canonical(document))
+        self.api_oracle.write_text(json.dumps(document), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "input bindings differ"):
             self.run_compare()
 
     def test_recovery_download_bytes_are_hash_verified(self) -> None:
@@ -672,6 +1059,10 @@ class ComparatorTest(unittest.TestCase):
                 target["file_hash"] = content_hash
                 target["file_size"] = len(raw)
                 return result(200, body)
+            if "/v1/task-assets/" in path:
+                body = json.loads(json.dumps(value.body))
+                body["data"]["file_size"] = len(raw)
+                return result(200, body)
             return value
 
         calls: list[str] = []
@@ -691,6 +1082,318 @@ class ComparatorTest(unittest.TestCase):
         self.assertIn(
             "api.recovery_download_hash_mismatch",
             {row["violation_code"] for row in blocked["violations"]},
+        )
+
+    def test_http_download_resolves_relative_controlled_metadata(self) -> None:
+        metadata = api.canonical(
+            {"data": {"download_url": "/v1/assets/files/recovered.bin"}}
+        )
+        metadata_opener = mock.Mock()
+        metadata_opener.open.return_value = FakeHTTPResponse(metadata)
+        download_opener = mock.Mock()
+        download_opener.open.return_value = FakeHTTPResponse(b"recovered")
+        headers = {"Authorization": "Bearer test"}
+        with mock.patch.object(
+            api.urllib.request,
+            "build_opener",
+            side_effect=[metadata_opener, download_opener],
+        ):
+            raw = api.http_download(
+                "http://127.0.0.1:18202",
+                "/v1/task-assets/1/download",
+                headers,
+            )
+        self.assertEqual(b"recovered", raw)
+        request = download_opener.open.call_args.args[0]
+        self.assertEqual(
+            "http://127.0.0.1:18202/v1/assets/files/recovered.bin",
+            request.full_url,
+        )
+        self.assertEqual(
+            "Bearer test", dict(request.header_items()).get("Authorization")
+        )
+
+    def test_http_download_does_not_forward_auth_to_absolute_url(self) -> None:
+        metadata = api.canonical(
+            {"data": {"download_url": "https://objects.test/recovered.bin"}}
+        )
+        metadata_opener = mock.Mock()
+        metadata_opener.open.return_value = FakeHTTPResponse(metadata)
+        download_opener = mock.Mock()
+        download_opener.open.return_value = FakeHTTPResponse(b"recovered")
+        with (
+            mock.patch.object(
+                api.urllib.request,
+                "build_opener",
+                side_effect=[metadata_opener, download_opener],
+            ),
+            mock.patch.dict(
+                os.environ,
+                {
+                    "AB_DOWNLOAD_ALLOWED_HOSTS": (
+                        "https://objects.test:443"
+                    )
+                },
+            ),
+        ):
+            raw = api.http_download(
+                "http://127.0.0.1:18202",
+                "/v1/task-assets/1/download",
+                {"Authorization": "Bearer secret"},
+            )
+        self.assertEqual(b"recovered", raw)
+        request = download_opener.open.call_args.args[0]
+        self.assertEqual(
+            "https://objects.test/recovered.bin", request.full_url
+        )
+        self.assertNotIn("Authorization", dict(request.header_items()))
+
+    def test_http_download_rejects_non_allowlisted_absolute_url(self) -> None:
+        metadata = api.canonical(
+            {"data": {"download_url": "https://objects.test/recovered.bin"}}
+        )
+        opener = mock.Mock()
+        opener.open.return_value = FakeHTTPResponse(metadata)
+        with (
+            mock.patch.object(
+                api.urllib.request, "build_opener", return_value=opener
+            ),
+            mock.patch.dict(os.environ, {}, clear=True),
+            self.assertRaisesRegex(ValueError, "non-allowlisted origin"),
+        ):
+            api.http_download(
+                "http://127.0.0.1:18202",
+                "/v1/task-assets/1/download",
+                {"Authorization": "Bearer secret"},
+            )
+
+    def test_download_allowlist_requires_scheme_and_explicit_port(self) -> None:
+        with (
+            mock.patch.dict(
+                os.environ,
+                {"AB_DOWNLOAD_ALLOWED_HOSTS": "objects.test"},
+            ),
+            self.assertRaisesRegex(ValueError, "scheme and explicit port"),
+        ):
+            api.download_allowed_hosts()
+
+    def test_http_download_rejects_allowlisted_host_on_another_port(self) -> None:
+        metadata = api.canonical(
+            {
+                "data": {
+                    "download_url": (
+                        "https://objects.test:444/recovered.bin"
+                    )
+                }
+            }
+        )
+        opener = mock.Mock()
+        opener.open.return_value = FakeHTTPResponse(metadata)
+        with (
+            mock.patch.object(
+                api.urllib.request, "build_opener", return_value=opener
+            ),
+            mock.patch.dict(
+                os.environ,
+                {"AB_DOWNLOAD_ALLOWED_HOSTS": "https://objects.test:443"},
+            ),
+            self.assertRaisesRegex(ValueError, "non-allowlisted origin"),
+        ):
+            api.http_download(
+                "http://127.0.0.1:18202",
+                "/v1/task-assets/1/download",
+                {"Authorization": "Bearer secret"},
+            )
+
+    def test_download_allowlist_is_canonical_and_auditable(self) -> None:
+        with mock.patch.dict(
+            os.environ,
+            {
+                "AB_DOWNLOAD_ALLOWED_HOSTS": (
+                    " HTTPS://B.objects.test:443,"
+                    "http://a.objects.test:8080,"
+                    "https://b.objects.test:443 "
+                )
+            },
+        ):
+            self.assertEqual(
+                (
+                    "http://a.objects.test:8080",
+                    "https://b.objects.test:443",
+                ),
+                api.download_allowed_hosts(),
+            )
+
+    def test_asset_list_is_bound_to_requested_task_and_exact_root_set(
+        self,
+    ) -> None:
+        runner = self.make_runner()
+        body = self.requester(
+            "http://127.0.0.1:8102",
+            "/v1/tasks/1/assets",
+            {"Authorization": "Bearer TOP-SECRET"},
+        ).body
+        runner.validate_asset_list_oracle(
+            "dev_dev_b", "admin", "2", body
+        )
+        runner.validate_asset_list_oracle(
+            "dev_dev_b", "admin", "1", {"data": []}
+        )
+        details = [item["detail"] for item in runner.violations]
+        self.assertTrue(
+            any("requested task" in detail for detail in details),
+            details,
+        )
+        self.assertTrue(
+            any("root set differs" in detail for detail in details),
+            details,
+        )
+
+    def test_group_detail_is_bound_to_requested_group_id(self) -> None:
+        runner = self.make_runner()
+        group = api.unwrap_data(
+            self.requester(
+                "http://127.0.0.1:8102",
+                "/v1/resource-groups/10",
+                {"Authorization": "Bearer TOP-SECRET"},
+            ).body
+        )
+        runner.validate_group_oracle(
+            "dev_dev_b",
+            "admin",
+            group,
+            requested_group_id="999",
+        )
+        self.assertTrue(
+            any(
+                "requested group id" in item["detail"]
+                for item in runner.violations
+            ),
+            runner.violations,
+        )
+
+    def test_task_asset_routes_reject_wrong_requested_asset_metadata(
+        self,
+    ) -> None:
+        def requester(base, path, headers):
+            value = self.requester(base, path, headers)
+            if (
+                base.endswith(("8102", "8103"))
+                and headers.get("X-Test-Identity") == "admin"
+                and path == "/v1/task-assets/20/download"
+            ):
+                return result(
+                    200,
+                    {
+                        "data": {
+                            "download_mode": "proxy",
+                            "download_url": (
+                                "/v1/assets/files/tasks/RW-1/other.psd"
+                            ),
+                            "access_hint": "authenticated_proxy",
+                            "preview_available": True,
+                            "filename": "other.psd",
+                            "file_size": 999,
+                            "mime_type": "application/octet-stream",
+                        }
+                    },
+                )
+            return value
+
+        evidence = self.run_compare(requester)
+        self.assertIn(
+            "api.task_asset_metadata_mismatch",
+            {item["violation_code"] for item in evidence["violations"]},
+        )
+
+    def test_preview_metadata_may_describe_exact_version_derivative(self) -> None:
+        runner = self.make_runner()
+        runner.task_asset_metadata[("dev_dev_b", "admin", "20")] = {
+            "has_original_filename": True,
+            "original_filename": "source.psd",
+        }
+        preview_body = {
+            "data": {
+                "download_mode": "proxy",
+                "download_url": "/v1/assets/files/tasks/RW-1/preview.webp",
+                "access_hint": "controlled preview",
+                "preview_available": True,
+                "filename": "preview.webp",
+                "file_size": 2,
+                "mime_type": "image/webp",
+            }
+        }
+        runner.validate_task_asset_access_oracle(
+            "dev_dev_b",
+            "admin",
+            "20",
+            "/v1/task-assets/{task_asset_id}/preview",
+            preview_body,
+        )
+        self.assertEqual([], runner.violations)
+
+        runner.validate_task_asset_access_oracle(
+            "dev_dev_b",
+            "admin",
+            "20",
+            "/v1/task-assets/{task_asset_id}/download",
+            preview_body,
+        )
+        self.assertTrue(
+            any(
+                item["violation_code"]
+                == "api.task_asset_metadata_mismatch"
+                for item in runner.violations
+            )
+        )
+
+    def test_historical_unavailable_detail_suppresses_file_access(self) -> None:
+        runner = self.make_runner()
+        runner.asset_identity_oracle["20"][
+            "content_availability"
+        ] = "historical_unavailable"
+        version = {
+            "id": 20,
+            "task_id": 1,
+            "asset_id": 101,
+            "asset_type": "source",
+            "scope_sku_code": "",
+            "retouch_requirement_id": None,
+            "storage_key": "",
+            "file_hash": "",
+            "file_size": 10,
+            "mime_type": "image/png",
+            "flow_review_status": "",
+            "usable_state": "not_applicable",
+            "approved_at": None,
+            "approved_by": None,
+            "download_url": None,
+            "public_download_allowed": False,
+        }
+        runner.validate_version_identity(
+            "dev_dev_b",
+            "admin",
+            "task:1:/v1/tasks/{task_id}/detail",
+            version,
+            surface="detail",
+        )
+        self.assertEqual([], runner.violations)
+
+        exposed = dict(version)
+        exposed["storage_key"] = "legacy/raw/object.psd"
+        runner.validate_version_identity(
+            "dev_dev_b",
+            "admin",
+            "task:1:/v1/tasks/{task_id}/detail",
+            exposed,
+            surface="detail",
+        )
+        self.assertTrue(
+            any(
+                "historical-unavailable metadata exposes file access"
+                in item["detail"]
+                for item in runner.violations
+            )
         )
 
     def test_nested_retouch_asset_identity_is_exact(self) -> None:
@@ -765,6 +1468,117 @@ class ComparatorTest(unittest.TestCase):
         # Tightening is still an unexplained compatibility difference until an
         # exact approved status rule exists.
         self.assertIn("api.asset_lost", codes)
+
+    def test_exact_rule_accepts_tightening_but_never_reverse_widening(
+        self,
+    ) -> None:
+        runner = self.make_runner()
+        runner.rules = [
+            self.rule(
+                rule_id="reviewed-org-scope-tightening",
+                route="/v1/tasks/{task_id}",
+                direction="external_external_a->dev_dev_b",
+                from_status=200,
+                to_status=403,
+                operations=[],
+                reason=(
+                    "reviewed mapping aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa approves stable org scope"
+                ),
+            )
+        ]
+        entity = "task:1:/v1/tasks/{task_id}"
+        runner.results[
+            (
+                "external_external_a",
+                "view-inside",
+                "/v1/tasks/{task_id}",
+                entity,
+            )
+        ] = result(200, {"data": {"id": 1}})
+        runner.results[
+            (
+                "dev_dev_b",
+                "view-inside",
+                "/v1/tasks/{task_id}",
+                entity,
+            )
+        ] = result(403, {"error": {"code": "forbidden"}})
+        runner.compare_result(
+            "/v1/tasks/{task_id}",
+            entity,
+            "view-inside",
+            "external_external_a",
+            "dev_dev_b",
+        )
+        self.assertEqual([], runner.violations)
+        self.assertEqual(
+            {"reviewed-org-scope-tightening"},
+            runner.used_rules,
+        )
+
+        reverse = self.make_runner()
+        reverse.rules = runner.rules
+        reverse.results[
+            (
+                "external_external_a",
+                "view-inside",
+                "/v1/tasks/{task_id}",
+                entity,
+            )
+        ] = result(403, {"error": {"code": "forbidden"}})
+        reverse.results[
+            (
+                "dev_dev_b",
+                "view-inside",
+                "/v1/tasks/{task_id}",
+                entity,
+            )
+        ] = result(200, {"data": {"id": 1}})
+        reverse.compare_result(
+            "/v1/tasks/{task_id}",
+            entity,
+            "view-inside",
+            "external_external_a",
+            "dev_dev_b",
+        )
+        self.assertTrue(
+            any(
+                item["violation_code"] == "api.permission_widened"
+                for item in reverse.violations
+            )
+        )
+
+    def test_denied_error_envelope_copy_is_not_a_business_contract(self) -> None:
+        runner = self.make_runner()
+        entity = "task:1:/v1/tasks/{task_id}"
+        runner.results[
+            (
+                "external_external_a",
+                "no-view",
+                "/v1/tasks/{task_id}",
+                entity,
+            )
+        ] = result(403, {"code": "permission_denied"})
+        runner.results[
+            (
+                "dev_dev_b",
+                "no-view",
+                "/v1/tasks/{task_id}",
+                entity,
+            )
+        ] = result(
+            403,
+            {"error": {"code": "FORBIDDEN", "message": "forbidden"}},
+        )
+        runner.compare_result(
+            "/v1/tasks/{task_id}",
+            entity,
+            "no-view",
+            "external_external_a",
+            "dev_dev_b",
+        )
+        self.assertEqual([], runner.violations)
 
     def test_permission_widening_is_detected_when_a_is_right_in_pair_order(self) -> None:
         def requester(base, path, headers):
@@ -1533,7 +2347,6 @@ class ComparatorTest(unittest.TestCase):
         self.set_manifest_task_status("Completed")
         for mutation in (
             "state",
-            "claimed_by",
             "terminal_at",
             "terminal_at_format",
             "updated_at_format",
@@ -1567,8 +2380,6 @@ class ComparatorTest(unittest.TestCase):
                         if base.endswith(("8102", "8103")):
                             if mutation == "state":
                                 module["state"] = "active"
-                            elif mutation == "claimed_by":
-                                module["claimed_by"] = 7
                             elif mutation == "terminal_at":
                                 module["terminal_at"] = None
                             elif mutation == "terminal_at_format":
@@ -1587,6 +2398,35 @@ class ComparatorTest(unittest.TestCase):
                         for item in evidence["violations"]
                     },
                 )
+
+    def test_completed_legacy_terminal_module_may_retain_claim_history(
+        self,
+    ) -> None:
+        self.set_manifest_task_status("Completed")
+
+        def requester(base, path, headers):
+            value = self.requester(base, path, headers)
+            if path not in {"/v1/tasks/1", "/v1/tasks/1/detail"}:
+                return value
+            body = json.loads(json.dumps(value.body))
+            task = body["task"] if path.endswith("/detail") else body
+            task["task_status"] = "Completed"
+            if path.endswith("/detail"):
+                body["design_sub_status"] = "not_required"
+                body["modules"] = [{
+                    "id": 30,
+                    "module_key": "design",
+                    "state": "closed",
+                    "claimed_by": 7,
+                    "claimed_team_code": "design",
+                    "claimed_at": "2026-01-01T00:00:00Z",
+                    "terminal_at": "2026-01-02T00:00:00Z",
+                    "updated_at": "2026-01-02T00:00:00Z",
+                }]
+            return result(200, body)
+
+        evidence = self.run_compare(requester)
+        self.assertEqual("PASS", evidence["status"], evidence["violations"])
 
     def test_completed_module_claimed_at_is_not_normalized(self) -> None:
         self.set_manifest_task_status("Completed")
@@ -1764,19 +2604,212 @@ class ComparatorTest(unittest.TestCase):
             baseline,
             candidate,
             frozenset(),
-            {"20": {"whole_hash": whole_hash}},
+            {
+                "20": {
+                    "whole_hash": whole_hash,
+                    "provenance": {"kind": "recovery_receipt"},
+                }
+            },
+        )
+        self.assertEqual(left, right)
+
+        ordinary = json.loads(json.dumps(candidate))
+        left, right = api.project_asset_pair(
+            baseline,
+            ordinary,
+            frozenset(),
+            {"20": {"whole_hash": whole_hash, "provenance": {"kind": "a_preserved"}}},
         )
         self.assertNotEqual(left, right)
 
-        wrong = json.loads(json.dumps(candidate))
-        wrong[0]["current_version"]["file_hash"] = "e" * 64
+    def test_reviewed_bundle_member_hash_projection_is_receipt_bound(
+        self,
+    ) -> None:
+        baseline = [{"id": 101, "current_version": {"id": 20}}]
+        candidate = [
+            {
+                "id": 101,
+                "current_version": {
+                    "id": 20,
+                    "file_hash": "d" * 64,
+                },
+            }
+        ]
         left, right = api.project_asset_pair(
             baseline,
-            wrong,
+            candidate,
             frozenset(),
-            {"20": {"whole_hash": whole_hash}},
+            {
+                "20": {
+                    "provenance": {
+                        "kind": "a_preserved",
+                        "bundle_member_receipt": "task:sku:revision",
+                    }
+                }
+            },
+        )
+        self.assertEqual(left, right)
+
+        left, right = api.project_asset_pair(
+            baseline,
+            candidate,
+            frozenset(),
+            {"20": {"provenance": {"kind": "a_preserved"}}},
         )
         self.assertNotEqual(left, right)
+
+    def test_reviewed_approval_pointer_is_normalized_after_oracle_check(
+        self,
+    ) -> None:
+        baseline = [
+            {
+                "id": 101,
+                "asset_type": "delivery",
+                "current_version_id": 20,
+                "current_version": {
+                    "id": 20,
+                    "asset_type": "delivery",
+                    "approved_for_flow": False,
+                },
+            }
+        ]
+        candidate = json.loads(json.dumps(baseline))
+        candidate[0]["current_version"]["approved_for_flow"] = True
+        candidate[0]["approved_version_id"] = 20
+        candidate[0]["approved_version"] = {
+            "id": 20,
+            "asset_type": "delivery",
+            "approved_for_flow": True,
+        }
+        left, right = api.project_asset_pair(
+            baseline,
+            candidate,
+            frozenset({"101"}),
+            {},
+        )
+        self.assertEqual(left, right)
+
+        left, right = api.project_asset_pair(
+            baseline,
+            candidate,
+            frozenset(),
+            {},
+        )
+        self.assertNotEqual(left, right)
+
+    def test_receipt_governed_candidate_root_is_removed_only_when_allowlisted(
+        self,
+    ) -> None:
+        baseline = [
+            {
+                "id": 101,
+                "asset_type": "source",
+                "current_version_id": 20,
+                "current_version": {
+                    "id": 20,
+                    "asset_type": "source",
+                },
+            }
+        ]
+        candidate = [
+            *json.loads(json.dumps(baseline)),
+            {
+                "id": 202,
+                "asset_type": "source",
+                "current_version_id": 30,
+                "current_version": {
+                    "id": 30,
+                    "asset_type": "source",
+                },
+            },
+        ]
+
+        left, right = api.project_asset_pair(
+            baseline,
+            candidate,
+            frozenset({"202"}),
+            {"30": {"provenance": {"kind": "bundle_receipt"}}},
+        )
+        self.assertEqual(left, right)
+
+        left, right = api.project_asset_pair(
+            baseline,
+            candidate,
+            frozenset(),
+            {"30": {"provenance": {"kind": "bundle_receipt"}}},
+        )
+        self.assertNotEqual(left, right)
+
+    def test_retired_terminal_module_fields_are_normalized_after_oracle_check(
+        self,
+    ) -> None:
+        baseline = {
+            "task": {"id": 1, "task_status": "PendingClose"},
+            "modules": [
+                {
+                    "id": 30,
+                    "module_key": "warehouse",
+                    "state": "submitted",
+                    "claimed_by": 7,
+                    "claimed_team_code": "warehouse",
+                    "claimed_at": "2026-01-01T00:00:00Z",
+                    "terminal_at": None,
+                    "updated_at": "2026-01-01T00:00:00Z",
+                }
+            ],
+        }
+        candidate = {
+            "task": {"id": 1, "task_status": "Completed"},
+            "modules": [
+                {
+                    "id": 30,
+                    "module_key": "warehouse",
+                    "state": "completed",
+                    "claimed_by": None,
+                    "claimed_team_code": None,
+                    "claimed_at": "2026-01-01T00:00:00Z",
+                    "terminal_at": "2026-01-02T00:00:00Z",
+                    "updated_at": "2026-01-02T00:00:00Z",
+                }
+            ],
+        }
+        left, right = api.project_detail_pair(baseline, candidate)
+        self.assertEqual(left, right)
+
+    def test_domain_terminal_module_states_are_not_treated_as_open(self) -> None:
+        self.assertEqual(
+            frozenset(
+                {"completed", "closed", "forcibly_closed", "closed_by_admin"}
+            ),
+            api.TERMINAL_MODULE_STATES,
+        )
+        self.assertTrue(
+            {
+                "active",
+                "pending",
+                "pending_claim",
+                "in_progress",
+                "submitted",
+                "approved",
+                "preparing",
+                "received",
+                "review",
+            }.issubset(api.ACTIVE_MODULE_STATES)
+        )
+
+    def test_effective_revision_scope_inherits_root_identity(self) -> None:
+        row = {
+            "scope_sku_code": "",
+            "root_scope_sku_code": "SKU-ROOT",
+            "retouch_requirement_id": None,
+            "root_retouch_requirement_id": 9,
+        }
+        self.assertEqual(
+            "SKU-ROOT", api.effective_oracle_scope_sku_code(row)
+        )
+        self.assertEqual(
+            9, api.effective_oracle_retouch_requirement_id(row)
+        )
 
     def test_approved_source_alias_uses_design_root_identity(self) -> None:
         oracle = json.loads(self.api_oracle.read_text(encoding="utf-8"))
@@ -1993,6 +3026,94 @@ class ComparatorTest(unittest.TestCase):
             {item["violation_code"] for item in evidence["violations"]},
         )
 
+    def test_asset_identity_rejects_boolean_and_invalid_contract_values(
+        self,
+    ) -> None:
+        cases = (
+            ("file_hash", False),
+            ("retouch_requirement_id", True),
+            ("usable_state", "BROKEN_NOT_ENUM"),
+            ("approved_at", "2026-01-01T00:00:00"),
+        )
+        for field, invalid in cases:
+            with self.subTest(field=field):
+                def requester(base, path, headers):
+                    value = self.requester(base, path, headers)
+                    if (
+                        base.endswith(("8102", "8103"))
+                        and path == "/v1/tasks/1/detail"
+                    ):
+                        body = json.loads(json.dumps(value.body))
+                        body["asset_versions"][0][field] = invalid
+                        return result(200, body)
+                    return value
+
+                evidence = self.run_compare(requester)
+                self.assertEqual("BLOCKED", evidence["status"])
+                self.assertIn(
+                    "api.manifest_oracle_mismatch",
+                    {
+                        item["violation_code"]
+                        for item in evidence["violations"]
+                    },
+                )
+
+    def test_duplicate_detail_asset_version_is_hard_failure(self) -> None:
+        def requester(base, path, headers):
+            value = self.requester(base, path, headers)
+            if (
+                base.endswith(("8102", "8103"))
+                and path == "/v1/tasks/1/detail"
+            ):
+                body = json.loads(json.dumps(value.body))
+                body["asset_versions"].append(
+                    dict(body["asset_versions"][0])
+                )
+                return result(200, body)
+            return value
+
+        evidence = self.run_compare(requester)
+        self.assertEqual("BLOCKED", evidence["status"])
+        self.assertTrue(
+            any(
+                item["violation_code"] == "api.manifest_oracle_mismatch"
+                and "duplicated" in item["detail"]
+                for item in evidence["violations"]
+            )
+        )
+
+    def test_nullable_identity_fields_and_root_scope_are_normalized(self) -> None:
+        oracle = json.loads(self.api_oracle.read_text(encoding="utf-8"))
+        oracle["roots"][0]["retouch_requirement_id"] = 9
+        oracle["versions"][0]["content_sha256"] = ""
+        oracle["versions"][0]["approved_at"] = "2026-01-01T00:00:00"
+        oracle.pop("evidence_sha256")
+        oracle["evidence_sha256"] = digest(api.canonical(oracle))
+        self.api_oracle.write_text(json.dumps(oracle), encoding="utf-8")
+
+        def requester(base, path, headers):
+            value = self.requester(base, path, headers)
+            body = json.loads(json.dumps(value.body))
+            if path == "/v1/tasks/1/detail":
+                version = body["asset_versions"][0]
+                version["scope_sku_code"] = None
+                version["retouch_requirement_id"] = 9
+                version["file_hash"] = None
+                version["approved_at"] = "2026-01-01T00:00:00Z"
+                return result(200, body)
+            if path == "/v1/tasks/1/assets":
+                body["data"][0]["retouch_requirement_id"] = 9
+                version = body["data"][0]["current_version"]
+                version["scope_sku_code"] = None
+                version["retouch_requirement_id"] = 9
+                version["file_hash"] = None
+                version["approved_at"] = "2026-01-01T00:00:00Z"
+                return result(200, body)
+            return value
+
+        evidence = self.run_compare(requester)
+        self.assertEqual("PASS", evidence["status"], evidence["violations"])
+
     def test_approved_version_scope_is_oracle_validated(self) -> None:
         oracle = json.loads(self.api_oracle.read_text(encoding="utf-8"))
         self.append_legacy_oracle_asset(
@@ -2103,7 +3224,14 @@ class ComparatorTest(unittest.TestCase):
         first = original.splitlines()[0]
         self.manifest.write_text(original + first + "\n", encoding="utf-8")
         with self.assertRaisesRegex(ValueError, "duplicates"):
-            api.load_manifest_expectations(self.manifest, self.run_id)
+            api.load_manifest_expectations(
+                self.manifest,
+                self.run_id,
+                expected_mapping_sha256=self.mapping_sha256,
+                expected_baseline_attestation_sha256=(
+                    self.baseline_attestation_sha256
+                ),
+            )
         rows = [json.loads(line) for line in original.splitlines()]
         rows[0]["expected_hash"] = "0" * 64
         self.manifest.write_text(
@@ -2111,7 +3239,46 @@ class ComparatorTest(unittest.TestCase):
             encoding="utf-8",
         )
         with self.assertRaisesRegex(ValueError, "component hash mismatch"):
-            api.load_manifest_expectations(self.manifest, self.run_id)
+            api.load_manifest_expectations(
+                self.manifest,
+                self.run_id,
+                expected_mapping_sha256=self.mapping_sha256,
+                expected_baseline_attestation_sha256=(
+                    self.baseline_attestation_sha256
+                ),
+            )
+
+    def test_manifest_requires_exact_mapping_and_baseline_provenance(self) -> None:
+        original = self.manifest.read_text(encoding="utf-8")
+        cases = (
+            ("mapping_sha256", "mapping hash differs"),
+            (
+                "baseline_attestation_sha256",
+                "baseline attestation hash differs",
+            ),
+        )
+        for field, error in cases:
+            with self.subTest(field=field):
+                rows = [
+                    json.loads(line)
+                    for line in original.splitlines()
+                    if line.strip()
+                ]
+                rows[0]["detail_json"]["input_sha256"].pop(field)
+                self.manifest.write_text(
+                    "".join(json.dumps(row) + "\n" for row in rows),
+                    encoding="utf-8",
+                )
+                with self.assertRaisesRegex(ValueError, error):
+                    api.load_manifest_expectations(
+                        self.manifest,
+                        self.run_id,
+                        expected_mapping_sha256=self.mapping_sha256,
+                        expected_baseline_attestation_sha256=(
+                            self.baseline_attestation_sha256
+                        ),
+                    )
+        self.manifest.write_text(original, encoding="utf-8")
 
     def test_all_b_missing_expected_group_fails_manifest_oracle(self) -> None:
         def requester(base, path, headers):
@@ -2249,6 +3416,147 @@ class ComparatorTest(unittest.TestCase):
                 item["violation_code"] == "api.manifest_oracle_mismatch"
                 and "created_at" in item["detail"]
                 for item in evidence["violations"]
+            )
+        )
+
+    def test_revision_file_access_contract_is_role_and_availability_bound(
+        self,
+    ) -> None:
+        def available_file(task_asset_id: int) -> dict:
+            return {
+                "task_asset_id": task_asset_id,
+                "file_name": f"{task_asset_id}.png",
+                "availability": "available",
+                "preview_url": f"/v1/task-assets/{task_asset_id}/preview",
+                "download_url": f"/v1/task-assets/{task_asset_id}/download",
+            }
+
+        revision = {
+            "id": 200,
+            "group_id": 10,
+            "revision_no": 2,
+            "status": "submitted",
+            "mode": "single",
+            "source_task_asset_id": 20,
+            "source_file": available_file(20),
+            "source_stage": "design",
+            "created_by": 1,
+            "legacy_migration": False,
+            "items": [
+                {
+                    "id": 300,
+                    "revision_id": 200,
+                    "task_asset_id": 21,
+                    "sort_order": 0,
+                    "file": {
+                        **available_file(21),
+                        "revision_item_id": 300,
+                    },
+                }
+            ],
+            "references": [
+                {
+                    "id": 400,
+                    "revision_id": 200,
+                    "reference_file_ref_id": 500,
+                    "sort_order": 0,
+                    "ref_id": "reference-500",
+                    "formal_task_asset_id": 22,
+                    "created_at": "2026-01-01T00:00:00Z",
+                    **available_file(22),
+                }
+            ],
+            "created_at": "2026-01-01T00:00:00Z",
+        }
+
+        admin_runner = self.make_runner()
+        admin_runner.validate_revision_contract_shape(
+            "dev_dev_b", "admin", "revision:test", revision
+        )
+        self.assertEqual([], admin_runner.violations)
+
+        legacy_reference = copy.deepcopy(revision)
+        legacy_reference["references"][0].pop("formal_task_asset_id")
+        legacy_reference["references"][0].pop("preview_url")
+        legacy_reference["references"][0].pop("download_url")
+        legacy_reference_runner = self.make_runner()
+        legacy_reference_runner.validate_revision_contract_shape(
+            "dev_dev_b",
+            "admin",
+            "revision:test",
+            legacy_reference,
+            historical=True,
+        )
+        self.assertEqual([], legacy_reference_runner.violations)
+
+        legacy_reference["references"][0]["preview_url"] = (
+            "/v1/task-assets/22/preview"
+        )
+        exposed_reference_runner = self.make_runner()
+        exposed_reference_runner.validate_revision_contract_shape(
+            "dev_dev_b",
+            "admin",
+            "revision:test",
+            legacy_reference,
+            historical=True,
+        )
+        self.assertTrue(
+            any(
+                "without formal task asset exposes controlled URL"
+                in item["detail"]
+                for item in exposed_reference_runner.violations
+            )
+        )
+
+        missing_admin_url = copy.deepcopy(revision)
+        missing_admin_url["source_file"].pop("preview_url")
+        missing_url_runner = self.make_runner()
+        missing_url_runner.validate_revision_contract_shape(
+            "dev_dev_b", "admin", "revision:test", missing_admin_url
+        )
+        self.assertTrue(
+            any(
+                "lacks preview or download URL" in item["detail"]
+                for item in missing_url_runner.violations
+            )
+        )
+
+        view_runner = self.make_runner()
+        view_runner.validate_revision_contract_shape(
+            "dev_dev_b", "view-inside", "revision:test", revision
+        )
+        self.assertEqual(
+            3,
+            sum(
+                "view_only file exposes download URL" in item["detail"]
+                for item in view_runner.violations
+            ),
+        )
+
+        unavailable = copy.deepcopy(revision)
+        unavailable["source_file"] = {
+            "task_asset_id": 20,
+            "file_name": "20.png",
+            "availability": "historical_unavailable",
+            "unavailable_reason": "legacy_object_missing",
+        }
+        unavailable_runner = self.make_runner()
+        unavailable_runner.validate_revision_contract_shape(
+            "dev_dev_b", "admin", "revision:test", unavailable
+        )
+        self.assertEqual([], unavailable_runner.violations)
+
+        unavailable["source_file"]["preview_url"] = (
+            "/v1/task-assets/20/preview"
+        )
+        bad_runner = self.make_runner()
+        bad_runner.validate_revision_contract_shape(
+            "dev_dev_b", "admin", "revision:test", unavailable
+        )
+        self.assertTrue(
+            any(
+                "unavailable file exposes URL" in item["detail"]
+                for item in bad_runner.violations
             )
         )
 
@@ -2796,7 +4104,7 @@ class ComparatorTest(unittest.TestCase):
         value["identities"].append(
             {
                 "id": "reviewer",
-                "role": "reviewer",
+                "role": "admin",
                 "headers_json_env": "AB_REVIEWER_HEADERS",
             }
         )
@@ -2812,18 +4120,26 @@ class ComparatorTest(unittest.TestCase):
             evidence = self.run_compare(requester)
         finally:
             os.environ.pop("AB_REVIEWER_HEADERS", None)
-        self.assertEqual(["admin", "reviewer"], [item["id"] for item in evidence["identities"]])
+        self.assertEqual(
+            ["admin", "no-view", "reviewer", "view-inside", "view-outside"],
+            [item["id"] for item in evidence["identities"]],
+        )
         self.assertNotIn("SECOND", json.dumps(evidence))
 
     def test_visible_bundle_group_cannot_hide_detail_or_history_by_identity(
         self,
     ) -> None:
-        os.environ["AB_VIEWER_HEADERS"] = json.dumps({"Cookie": "session=VIEWER"})
+        os.environ["AB_VIEWER_HEADERS"] = json.dumps(
+            {
+                "Cookie": "session=VIEWER",
+                "X-Test-Identity": "viewer",
+            }
+        )
         value = json.loads(self.matrix.read_text(encoding="utf-8"))
         value["identities"].append(
             {
                 "id": "viewer",
-                "role": "viewer",
+                "role": "view_only",
                 "headers_json_env": "AB_VIEWER_HEADERS",
             }
         )
@@ -2983,6 +4299,100 @@ class ComparatorTest(unittest.TestCase):
         self.assertEqual(2, raised.exception.code)
         self.assertFalse(output.exists())
 
+    def test_v3_loader_accepts_independent_source_alias_identity(self) -> None:
+        document = self.write_v3_alias_oracle()
+        loaded = api.load_asset_identity_map(
+            self.api_oracle,
+            self.run_id,
+            digest(self.manifest.read_bytes()),
+        )
+        alias = loaded["assets"]["21"]
+        self.assertEqual(3, loaded["schema_version"])
+        self.assertEqual("non_circular_g6_v3", loaded["oracle_kind"])
+        self.assertEqual(document["inputs"], loaded["inputs"])
+        self.assertEqual("bound", alias["binding_state"])
+        self.assertEqual("source", alias["bound_role"])
+        self.assertEqual("1:task:0", alias["bound_resource_locator"])
+        self.assertEqual("asset:101:ref-1", alias["manifest_locator"])
+        self.assertEqual(
+            "alias:v1:1:task:0:origin-task-asset:20",
+            loaded["revision_roles"]["1:task:0:1"]["source_locator"],
+        )
+
+    def test_v3_loader_rejects_input_and_evidence_tamper(self) -> None:
+        document = self.write_v3_alias_oracle()
+        del document["inputs"]["source_alias_apply_receipt_sha256"]
+        self.write_oracle_document(document)
+        with self.assertRaisesRegex(ValueError, "input field contract"):
+            api.load_asset_identity_map(
+                self.api_oracle,
+                self.run_id,
+                digest(self.manifest.read_bytes()),
+            )
+        document = self.write_v3_alias_oracle()
+        document["inputs"]["source_alias_apply_receipt_sha256"] = "wrong"
+        self.write_oracle_document(document)
+        with self.assertRaisesRegex(ValueError, "is not SHA-256"):
+            api.load_asset_identity_map(
+                self.api_oracle,
+                self.run_id,
+                digest(self.manifest.read_bytes()),
+            )
+        document = self.write_v3_alias_oracle()
+        document["versions"][1]["content_sha256"] = "c" * 64
+        self.api_oracle.write_text(json.dumps(document), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "evidence hash"):
+            api.load_asset_identity_map(
+                self.api_oracle,
+                self.run_id,
+                digest(self.manifest.read_bytes()),
+            )
+
+    def test_v3_loader_rejects_alias_lineage_binding_and_role_tamper(
+        self,
+    ) -> None:
+        cases = (
+            (
+                lambda document: document["versions"][1]["provenance"].update(
+                    {"origin_locator": "a:999:wrong"}
+                ),
+                "lineage differs",
+            ),
+            (
+                lambda document: document["versions"][1].update(
+                    {"bound_role": "final", "expected_roles": ["final"]}
+                ),
+                "lineage differs",
+            ),
+            (
+                lambda document: document["versions"][1].update(
+                    {"content_sha256": "c" * 64}
+                ),
+                "lineage differs",
+            ),
+            (
+                lambda document: document["revision_roles"][0].update(
+                    {
+                        "source_locator": document["versions"][0][
+                            "stable_locator"
+                        ]
+                    }
+                ),
+                "source binding differs",
+            ),
+        )
+        for mutate, error in cases:
+            with self.subTest(error=error):
+                document = self.write_v3_alias_oracle()
+                mutate(document)
+                self.write_oracle_document(document)
+                with self.assertRaisesRegex(ValueError, error):
+                    api.load_asset_identity_map(
+                        self.api_oracle,
+                        self.run_id,
+                        digest(self.manifest.read_bytes()),
+                    )
+
     def test_cache_key_never_merges_different_url_identity_or_path(self) -> None:
         calls: list[tuple[str, str, tuple[tuple[str, str], ...]]] = []
 
@@ -3008,7 +4418,14 @@ class ComparatorTest(unittest.TestCase):
             },
             [],
             [],
-            api.load_manifest_expectations(self.manifest, self.run_id),
+            api.load_manifest_expectations(
+                self.manifest,
+                self.run_id,
+                expected_mapping_sha256=self.mapping_sha256,
+                expected_baseline_attestation_sha256=(
+                    self.baseline_attestation_sha256
+                ),
+            ),
             api.load_asset_identity_map(
                 self.api_oracle, self.run_id, digest(self.manifest.read_bytes())
             ),
@@ -3049,7 +4466,14 @@ class ComparatorTest(unittest.TestCase):
             {"admin": {"Authorization": "fixture"}},
             [],
             [],
-            api.load_manifest_expectations(self.manifest, self.run_id),
+            api.load_manifest_expectations(
+                self.manifest,
+                self.run_id,
+                expected_mapping_sha256=self.mapping_sha256,
+                expected_baseline_attestation_sha256=(
+                    self.baseline_attestation_sha256
+                ),
+            ),
             api.load_asset_identity_map(
                 self.api_oracle, self.run_id, digest(self.manifest.read_bytes())
             ),
@@ -3098,7 +4522,14 @@ class ComparatorTest(unittest.TestCase):
             {"admin": {"Authorization": "fixture"}},
             [],
             [],
-            api.load_manifest_expectations(self.manifest, self.run_id),
+            api.load_manifest_expectations(
+                self.manifest,
+                self.run_id,
+                expected_mapping_sha256=self.mapping_sha256,
+                expected_baseline_attestation_sha256=(
+                    self.baseline_attestation_sha256
+                ),
+            ),
             api.load_asset_identity_map(
                 self.api_oracle, self.run_id, digest(self.manifest.read_bytes())
             ),
