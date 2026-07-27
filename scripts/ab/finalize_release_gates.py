@@ -1215,6 +1215,7 @@ def validate_g6(payload: dict[str, Any]) -> list[str]:
         "comparator_sha256",
         "build_api_oracle_sha256",
         "used_rule_ids",
+        "used_rule_applications",
         "unused_rule_ids",
         "observations",
         "violation_count",
@@ -1376,6 +1377,7 @@ def validate_g6(payload: dict[str, Any]) -> list[str]:
     ):
         violations.append("G6 download host allowlist hash differs")
     used = payload.get("used_rule_ids")
+    applications = payload.get("used_rule_applications")
     unused = payload.get("unused_rule_ids")
     if (
         not isinstance(used, list)
@@ -1388,6 +1390,76 @@ def validate_g6(payload: dict[str, Any]) -> list[str]:
         or unused != sorted(unused)
     ):
         violations.append("G6 used/unused normalization rule sets are invalid")
+    application_fields = {
+        "rule_id",
+        "rule_identity",
+        "identity",
+        "route",
+        "direction",
+        "from_status",
+        "to_status",
+    }
+    application_keys: list[tuple[Any, ...]] = []
+    application_rule_ids: set[str] = set()
+    valid_directions = {
+        f"{left}->{right}"
+        for offset, left in enumerate(API_COMBINATIONS)
+        for right in list(API_COMBINATIONS)[offset + 1 :]
+    }
+    if not isinstance(applications, list):
+        violations.append("G6 used_rule_applications must be an array")
+    else:
+        for index, row in enumerate(applications):
+            if not isinstance(row, dict) or set(row) != application_fields:
+                violations.append(
+                    f"G6 used_rule_applications[{index}] field contract differs"
+                )
+                continue
+            rule_identity = row["rule_identity"]
+            identity = row["identity"]
+            key = (
+                row["rule_id"],
+                rule_identity or "",
+                identity,
+                row["route"],
+                row["direction"],
+                row["from_status"],
+                row["to_status"],
+            )
+            if (
+                not isinstance(row["rule_id"], str)
+                or not row["rule_id"]
+                or (
+                    rule_identity is not None
+                    and (
+                        not isinstance(rule_identity, str)
+                        or rule_identity != identity
+                    )
+                )
+                or identity not in identity_ids
+                or not isinstance(row["route"], str)
+                or not row["route"].startswith("/v1/")
+                or row["direction"] not in valid_directions
+                or not is_int(row["from_status"], minimum=100)
+                or row["from_status"] > 599
+                or not is_int(row["to_status"], minimum=100)
+                or row["to_status"] > 599
+            ):
+                violations.append(
+                    f"G6 used_rule_applications[{index}] is invalid"
+                )
+            application_keys.append(key)
+            application_rule_ids.add(row["rule_id"])
+        if application_keys != sorted(application_keys) or len(
+            application_keys
+        ) != len(set(application_keys)):
+            violations.append(
+                "G6 used_rule_applications are duplicated or not sorted"
+            )
+        if isinstance(used, list) and application_rule_ids != set(used):
+            violations.append(
+                "G6 used_rule_applications do not cover used_rule_ids"
+            )
     violations.extend(
         validate_self_hash(
             payload,

@@ -584,6 +584,7 @@ class ComparatorTest(unittest.TestCase):
         to_status: int,
         operations: list[dict],
         reason: str = "approved test difference",
+        identity: str | None = None,
     ) -> dict:
         value = {
             "rule_id": rule_id,
@@ -595,6 +596,8 @@ class ComparatorTest(unittest.TestCase):
             "reason_sha256": digest(reason.encode()),
             "operations": operations,
         }
+        if identity is not None:
+            value["identity"] = identity
         value["rule_sha256"] = digest(api.canonical(value))
         return value
 
@@ -3996,6 +3999,103 @@ class ComparatorTest(unittest.TestCase):
             and "/detail" in violation["entity_key"]
         ]
         self.assertEqual([], pair)
+
+    def test_identity_scoped_rule_records_exact_application(self) -> None:
+        self.write_rules(
+            [
+                self.rule(
+                    rule_id="view-inside-status-map",
+                    identity="view-inside",
+                    route="/v1/tasks/{task_id}/detail",
+                    direction="external_external_a->dev_dev_b",
+                    from_status=200,
+                    to_status=200,
+                    operations=[
+                        {
+                            "op": "map",
+                            "path": "/status",
+                            "from": "PendingAuditA",
+                            "to": "PendingAudit",
+                        }
+                    ],
+                )
+            ]
+        )
+
+        def requester(base, path, headers):
+            if (
+                path == "/v1/tasks/1/detail"
+                and headers["X-Test-Identity"] == "view-inside"
+            ):
+                if base.endswith(("8101", "8104")):
+                    return result(200, {"status": "PendingAuditA"})
+                return result(200, {"status": "PendingAudit"})
+            return self.requester(base, path, headers)
+
+        evidence = self.run_compare(requester)
+        self.assertEqual(
+            [
+                {
+                    "rule_id": "view-inside-status-map",
+                    "rule_identity": "view-inside",
+                    "identity": "view-inside",
+                    "route": "/v1/tasks/{task_id}/detail",
+                    "direction": "external_external_a->dev_dev_b",
+                    "from_status": 200,
+                    "to_status": 200,
+                }
+            ],
+            evidence["used_rule_applications"],
+        )
+
+    def test_rule_rejects_unknown_identity(self) -> None:
+        self.write_rules(
+            [
+                self.rule(
+                    rule_id="unknown-identity",
+                    identity="not-in-matrix",
+                    route="/v1/tasks/{task_id}",
+                    direction="external_external_a->dev_dev_b",
+                    from_status=200,
+                    to_status=403,
+                    operations=[],
+                )
+            ]
+        )
+        with self.assertRaisesRegex(ValueError, "unknown identity"):
+            self.run_compare()
+
+    def test_generic_and_identity_rule_overlap_fails_closed(self) -> None:
+        generic = self.rule(
+            rule_id="generic",
+            route="/v1/tasks/{task_id}/detail",
+            direction="external_external_a->dev_dev_b",
+            from_status=200,
+            to_status=200,
+            operations=[],
+        )
+        scoped = self.rule(
+            rule_id="scoped",
+            identity="view-inside",
+            route="/v1/tasks/{task_id}/detail",
+            direction="external_external_a->dev_dev_b",
+            from_status=200,
+            to_status=200,
+            operations=[],
+        )
+        self.write_rules([generic, scoped])
+
+        def requester(base, path, headers):
+            if (
+                path == "/v1/tasks/1/detail"
+                and headers["X-Test-Identity"] == "view-inside"
+                and base.endswith("8101")
+            ):
+                return result(200, {"different": True})
+            return self.requester(base, path, headers)
+
+        with self.assertRaisesRegex(ValueError, "multiple normalization rules"):
+            self.run_compare(requester)
 
     def test_rule_reason_hash_is_mandatory(self) -> None:
         value = self.rule(

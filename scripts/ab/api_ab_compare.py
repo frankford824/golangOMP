@@ -1063,7 +1063,11 @@ def _rule_without_hash(rule: dict[str, Any]) -> dict[str, Any]:
     return {key: value for key, value in rule.items() if key != "rule_sha256"}
 
 
-def load_rules(path: pathlib.Path, retired_routes: Iterable[str]) -> list[dict[str, Any]]:
+def load_rules(
+    path: pathlib.Path,
+    retired_routes: Iterable[str],
+    known_identities: Iterable[str],
+) -> list[dict[str, Any]]:
     document = load_object(path, "rules")
     if set(document) != {"schema_version", "rules"} or document["schema_version"] != 1:
         raise ValueError("rules must contain only schema_version=1 and rules")
@@ -1071,6 +1075,7 @@ def load_rules(path: pathlib.Path, retired_routes: Iterable[str]) -> list[dict[s
     if not isinstance(rules, list):
         raise ValueError("rules.rules must be an array")
     allowed_routes = ALL_ROUTE_TEMPLATES | frozenset(retired_routes)
+    allowed_identities = frozenset(known_identities)
     seen: set[str] = set()
     output: list[dict[str, Any]] = []
     for index, value in enumerate(rules):
@@ -1087,12 +1092,19 @@ def load_rules(path: pathlib.Path, retired_routes: Iterable[str]) -> list[dict[s
             "operations",
             "rule_sha256",
         }
-        if set(value) != required:
+        fields = set(value)
+        if not required <= fields or fields - required not in (set(), {"identity"}):
             raise ValueError(f"rule {index} has unexpected or missing fields")
         rule_id = value["rule_id"]
         if not isinstance(rule_id, str) or not rule_id or rule_id in seen:
             raise ValueError(f"rule {index} has invalid or duplicate rule_id")
         seen.add(rule_id)
+        if "identity" in value and (
+            not isinstance(value["identity"], str)
+            or not value["identity"].strip()
+            or value["identity"] not in allowed_identities
+        ):
+            raise ValueError(f"rule {rule_id} binds an unknown identity")
         if value["route"] not in allowed_routes:
             raise ValueError(f"rule {rule_id} binds an unknown route")
         if value["direction"] not in {
@@ -2310,6 +2322,9 @@ class Runner:
         self.results: dict[tuple[str, str, str, str], HttpResult] = {}
         self.violations: list[dict[str, str]] = []
         self.used_rules: set[str] = set()
+        self.used_rule_applications: set[
+            tuple[str, str | None, str, str, str, int, int]
+        ] = set()
         self._state_lock = threading.RLock()
         self._requests: dict[tuple[str, str, str], Future[HttpResult]] = {}
         self.logical_request_count = 0
@@ -4665,7 +4680,12 @@ class Runner:
         return final
 
     def find_rule(
-        self, route: str, direction: str, from_status: int, to_status: int
+        self,
+        identity: str,
+        route: str,
+        direction: str,
+        from_status: int,
+        to_status: int,
     ) -> dict[str, Any] | None:
         matches = [
             rule
@@ -4674,10 +4694,14 @@ class Runner:
             and rule["direction"] == direction
             and rule["from_status"] == from_status
             and rule["to_status"] == to_status
+            and (
+                rule.get("identity") is None
+                or rule["identity"] == identity
+            )
         ]
         if len(matches) > 1:
             raise ValueError(
-                f"multiple normalization rules match {route} {direction} "
+                f"multiple normalization rules match {identity} {route} {direction} "
                 f"{from_status}->{to_status}"
             )
         return matches[0] if matches else None
@@ -4706,7 +4730,9 @@ class Runner:
         # misclassify candidate permission tightening as widening.
         left_data = "A" if left_combo.endswith("_a") else "B"
         right_data = "A" if right_combo.endswith("_a") else "B"
-        rule = self.find_rule(route, direction, left.status, right.status)
+        rule = self.find_rule(
+            identity, route, direction, left.status, right.status
+        )
         if left_data != right_data:
             if left_data == "A":
                 baseline_combo, baseline = left_combo, left
@@ -4911,13 +4937,24 @@ class Runner:
         right_body = normalize_transport_noise(right.body)
         different = left.status != right.status or canonical(left_body) != canonical(right_body)
         if rule is not None and different:
-            with self._state_lock:
-                self.used_rules.add(rule["rule_id"])
             try:
                 left_body, right_body = apply_rule(left_body, right_body, rule)
             except ValueError as exc:
                 self.violation("api.normalization_failed", entity, str(exc))
                 return
+            with self._state_lock:
+                self.used_rules.add(rule["rule_id"])
+                self.used_rule_applications.add(
+                    (
+                        rule["rule_id"],
+                        rule.get("identity"),
+                        identity,
+                        route,
+                        direction,
+                        left.status,
+                        right.status,
+                    )
+                )
         if left.status != right.status:
             if rule is None:
                 code = (
@@ -4992,7 +5029,7 @@ def compare(
         )}
         for identity_id in sorted(resolved)
     ]
-    rules = load_rules(rules_path, retired_routes)
+    rules = load_rules(rules_path, retired_routes, resolved)
     tasks = load_tasks(task_ids_path)
     manifest_tasks = manifest_task_ids(manifest_path, run_id)
     manifest_sha = file_sha256(manifest_path)
@@ -5346,6 +5383,37 @@ def compare(
         ),
         **source_hashes,
         "used_rule_ids": sorted(runner.used_rules),
+        "used_rule_applications": [
+            {
+                "rule_id": rule_id,
+                "rule_identity": rule_identity,
+                "identity": identity,
+                "route": route,
+                "direction": direction,
+                "from_status": from_status,
+                "to_status": to_status,
+            }
+            for (
+                rule_id,
+                rule_identity,
+                identity,
+                route,
+                direction,
+                from_status,
+                to_status,
+            ) in sorted(
+                runner.used_rule_applications,
+                key=lambda item: (
+                    item[0],
+                    item[1] or "",
+                    item[2],
+                    item[3],
+                    item[4],
+                    item[5],
+                    item[6],
+                ),
+            )
+        ],
         "unused_rule_ids": sorted(
             set(rule["rule_id"] for rule in rules) - runner.used_rules
         ),

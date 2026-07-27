@@ -460,6 +460,7 @@ class FinalizeReleaseGatesTest(unittest.TestCase):
                         "comparator_sha256": "7" * 64,
                         "build_api_oracle_sha256": "8" * 64,
                         "used_rule_ids": [],
+                        "used_rule_applications": [],
                         "unused_rule_ids": ["approved-difference"],
                         "observations": [
                             {
@@ -681,6 +682,52 @@ class FinalizeReleaseGatesTest(unittest.TestCase):
                     expected_detail,
                     report["gates"]["G6"]["violations"],
                 )
+
+    def test_g6_rule_application_binds_declared_identity(self):
+        with tempfile.TemporaryDirectory() as raw:
+            run_dir, index_path = self.make_run(raw)
+            index = json.loads(index_path.read_text(encoding="utf-8"))
+            g6_path = run_dir / index["gates"]["G6"]["path"]
+            g6 = json.loads(g6_path.read_text(encoding="utf-8"))
+            g6["used_rule_ids"] = ["approved-difference"]
+            g6["unused_rule_ids"] = []
+            g6["used_rule_applications"] = [
+                {
+                    "rule_id": "approved-difference",
+                    "rule_identity": "admin",
+                    "identity": "admin",
+                    "route": "/v1/tasks/{task_id}",
+                    "direction": "external_external_a->dev_dev_b",
+                    "from_status": 200,
+                    "to_status": 403,
+                }
+            ]
+            g6.pop("evidence_sha256")
+            g6["evidence_sha256"] = hashlib.sha256(
+                json.dumps(
+                    g6,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest()
+            self.assertEqual([], MODULE.validate_g6(g6))
+
+            g6["used_rule_applications"][0]["rule_identity"] = "other"
+            g6.pop("evidence_sha256")
+            g6["evidence_sha256"] = hashlib.sha256(
+                json.dumps(
+                    g6,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest()
+            violations = MODULE.validate_g6(g6)
+            self.assertTrue(
+                any("used_rule_applications[0] is invalid" in item for item in violations),
+                violations,
+            )
 
     def test_dirty_candidate_is_blocked(self):
         with tempfile.TemporaryDirectory() as raw:
