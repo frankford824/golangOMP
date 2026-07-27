@@ -10,6 +10,10 @@ process group is proven quiescent, and every apply artifact is hash-bound.
 ledger, all apply artifacts, and caller-supplied G5/G6 evidence manifests.  It
 then performs the existing strict rollback order and final fingerprint check.
 
+``abort-and-rollback`` preserves a hash-bound G5 failure, or a G5 pass followed
+by a hash-bound G6 failure, while using the same rollback authorization and
+fingerprint chain.  It returns a non-zero terminal result after safe recovery.
+
 The coordinator never accepts a non-local DSN, never targets a non-Clone-B
 database, and never repeats an interrupted apply step.  After the operator has
 independently proved the old process group quiescent, an explicit recovery
@@ -25,6 +29,7 @@ import os
 import pathlib
 import re
 import shutil
+import stat
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -128,9 +133,113 @@ def read_hashed_json(
     label: str,
     field: str = DOCUMENT_HASH_FIELD,
 ) -> dict[str, Any]:
-    value = g4.read_object(path, label)
+    value = read_strict_json(path, label)
     validate_self_hash(value, label, field)
     return value
+
+
+def read_regular_file_bytes(path: pathlib.Path, label: str) -> bytes:
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise ValueError(
+            f"{label} must be an existing non-symlink file"
+        ) from exc
+    try:
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode):
+            raise ValueError(f"{label} must be a regular file")
+        chunks: list[bytes] = []
+        while True:
+            chunk = os.read(descriptor, 1024 * 1024)
+            if not chunk:
+                break
+            chunks.append(chunk)
+        after = os.fstat(descriptor)
+    finally:
+        os.close(descriptor)
+    try:
+        current = path.lstat()
+    except OSError as exc:
+        raise ValueError(f"{label} changed while it was read") from exc
+    if (
+        before.st_dev != after.st_dev
+        or before.st_ino != after.st_ino
+        or before.st_size != after.st_size
+        or before.st_mtime_ns != after.st_mtime_ns
+        or current.st_dev != after.st_dev
+        or current.st_ino != after.st_ino
+        or not stat.S_ISREG(current.st_mode)
+    ):
+        raise ValueError(f"{label} changed while it was read")
+    data = b"".join(chunks)
+    if len(data) != after.st_size:
+        raise ValueError(f"{label} size changed while it was read")
+    return data
+
+
+def read_strict_json_bytes(data: bytes, label: str) -> dict[str, Any]:
+    def no_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        value: dict[str, Any] = {}
+        for key, item in pairs:
+            if key in value:
+                raise ValueError(f"{label} contains duplicate JSON key: {key}")
+            value[key] = item
+        return value
+
+    try:
+        value = json.loads(
+            data.decode("utf-8"),
+            object_pairs_hook=no_duplicates,
+        )
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{label} is not valid JSON: {exc}") from exc
+    if not isinstance(value, dict):
+        raise ValueError(f"{label} must be a JSON object")
+    return value
+
+
+def read_strict_json(path: pathlib.Path, label: str) -> dict[str, Any]:
+    return read_strict_json_bytes(read_regular_file_bytes(path, label), label)
+
+
+def normalize_observed_result(
+    gate: str, result: dict[str, Any]
+) -> tuple[str, int]:
+    source_status = result.get("status")
+    violation_count = result.get("violation_count")
+    violations = result.get("violations")
+    if (
+        not isinstance(violation_count, int)
+        or isinstance(violation_count, bool)
+        or violation_count < 0
+        or not isinstance(violations, list)
+        or len(violations) != violation_count
+    ):
+        raise ValueError(f"{gate} primary result count is invalid")
+    if gate == "G5":
+        allowed = {"PASS": "PASS", "FAIL": "FAIL"}
+    elif gate == "G6":
+        allowed = {"PASS": "PASS", "BLOCKED": "FAIL"}
+        signature = result.get(EVIDENCE_HASH_FIELD)
+        unsigned = dict(result)
+        unsigned.pop(EVIDENCE_HASH_FIELD, None)
+        if (
+            not g4.SHA256.fullmatch(str(signature or ""))
+            or compact_canonical_hash(unsigned) != signature
+        ):
+            raise ValueError("G6 primary result self hash is missing or stale")
+    else:
+        raise ValueError("observed gate is unsupported")
+    status = allowed.get(source_status)
+    if status is None:
+        raise ValueError(f"{gate} primary result status is invalid")
+    if (status == "PASS" and violation_count != 0) or (
+        status == "FAIL" and violation_count <= 0
+    ):
+        raise ValueError(f"{gate} primary result status/count is inconsistent")
+    return status, violation_count
 
 
 def repo_head(repo_root: pathlib.Path) -> str:
@@ -953,6 +1062,8 @@ def validate_observed_manifest(
     path: pathlib.Path,
     gate: str,
     ready_sha256: str,
+    *,
+    required_status: str = "PASS",
 ) -> dict[str, Any]:
     if not path.is_absolute():
         raise ValueError(f"{gate} evidence manifest must be absolute")
@@ -962,6 +1073,19 @@ def validate_observed_manifest(
         raise ValueError(f"{gate} evidence manifest must be inside clone-root") from None
     manifest = read_hashed_json(
         path, f"{gate} evidence manifest", EVIDENCE_HASH_FIELD
+    )
+    status = manifest.get("status")
+    violation_count = manifest.get("violation_count")
+    status_count_valid = (
+        status == "PASS"
+        and isinstance(violation_count, int)
+        and not isinstance(violation_count, bool)
+        and violation_count == 0
+    ) or (
+        status == "FAIL"
+        and isinstance(violation_count, int)
+        and not isinstance(violation_count, bool)
+        and violation_count > 0
     )
     if (
         set(manifest)
@@ -976,21 +1100,45 @@ def validate_observed_manifest(
         }
         or manifest.get("schema_version") != SCHEMA_VERSION
         or manifest.get("gate") != gate
-        or manifest.get("status") != "PASS"
-        or manifest.get("violation_count") != 0
+        or status != required_status
+        or not status_count_valid
         or manifest.get("hold_open_ledger_sha256") != ready_sha256
         or not isinstance(manifest.get("artifacts"), list)
         or not manifest["artifacts"]
     ):
         raise ValueError(f"{gate} evidence manifest envelope is invalid")
     seen: set[str] = set()
+    primary_result: pathlib.Path | None = None
+    primary_identity: dict[str, Any] | None = None
     for item in manifest["artifacts"]:
         if not isinstance(item, dict) or str(item.get("path") or "") in seen:
             raise ValueError(f"{gate} evidence artifact list is invalid")
         seen.add(str(item["path"]))
-        validate_relative_artifact(context.clone_root, item, gate)
+        target = validate_relative_artifact(context.clone_root, item, gate)
+        if primary_result is None:
+            primary_result = target
+            primary_identity = item
+    if primary_result is None or primary_identity is None:
+        raise ValueError(f"{gate} primary result artifact is missing")
+    primary_bytes = read_regular_file_bytes(
+        primary_result, f"{gate} primary result"
+    )
+    if (
+        len(primary_bytes) != primary_identity["size"]
+        or hashlib.sha256(primary_bytes).hexdigest()
+        != primary_identity["sha256"]
+    ):
+        raise ValueError(f"{gate} primary result changed while it was read")
+    source_status, source_count = normalize_observed_result(
+        gate,
+        read_strict_json_bytes(primary_bytes, f"{gate} primary result"),
+    )
+    if source_status != status or source_count != violation_count:
+        raise ValueError(f"{gate} evidence differs from its primary result")
     return {
         "gate": gate,
+        "status": status,
+        "violation_count": violation_count,
         "path": relative.as_posix(),
         "sha256": g4.sha256_file(path),
         "evidence_sha256": manifest[EVIDENCE_HASH_FIELD],
@@ -1188,11 +1336,61 @@ def continue_rollback(
     failure_exit_code: int,
 ) -> dict[str, Any]:
     validate_authorized_rollback_seeds(context, authorization)
+    status_by_reason = {
+        "observed-evidence-complete": "ROLLED_BACK",
+        "observed-evidence-failed": "ROLLED_BACK_AFTER_OBSERVED_FAILURE",
+        "apply-failure": "ROLLED_BACK_AFTER_APPLY_FAILURE",
+        "apply-interrupted": "ROLLED_BACK_AFTER_APPLY_FAILURE",
+    }
+    reason = authorization.get("reason")
+    if reason not in status_by_reason:
+        raise ValueError("rollback authorization reason is invalid")
+    status = status_by_reason[reason]
     complete_path = context.run_dir.joinpath(*ROLLBACK_COMPLETE_PATH.parts)
     if complete_path.exists():
         complete = read_hashed_json(complete_path, "rollback completion")
+        rollback_steps = context.run_dir.joinpath(*ROLLBACK_STEPS_PATH.parts)
+        if not rollback_steps.is_file() or rollback_steps.is_symlink():
+            raise ValueError("rollback completion ledger is missing")
+        fingerprint = validate_final_fingerprint(context)
+        if (
+            set(complete)
+            != {
+                "schema_version",
+                "kind",
+                "status",
+                "run_id",
+                "database",
+                "terminal_reason",
+                "trigger",
+                "authorization_sha256",
+                "rollback_steps_sha256",
+                "rollback_fingerprint_sha256",
+                "baseline_fingerprint_sha256",
+                "production_writes_executed",
+                DOCUMENT_HASH_FIELD,
+            }
+            or complete.get("schema_version") != SCHEMA_VERSION
+            or complete.get("kind")
+            != "clone-b-hold-open-rollback-complete"
+            or complete.get("status") != status
+            or complete.get("run_id") != context.run_id
+            or complete.get("database") != context.database
+            or complete.get("terminal_reason") != reason
+            or complete.get("trigger") != authorization.get("trigger")
+            or complete.get("authorization_sha256")
+            != authorization[DOCUMENT_HASH_FIELD]
+            or complete.get("rollback_steps_sha256")
+            != g4.sha256_file(rollback_steps)
+            or complete.get("rollback_fingerprint_sha256")
+            != g4.sha256_file(context.run_dir / "rollback-fingerprint.json")
+            or complete.get("baseline_fingerprint_sha256")
+            != fingerprint["baseline_fingerprint_sha256"]
+            or complete.get("production_writes_executed") is not False
+        ):
+            raise ValueError("rollback completion identity or hashes differ")
         return {
-            "status": complete["status"],
+            "status": status,
             "exit_code": failure_exit_code,
             "terminal_receipt": ROLLBACK_COMPLETE_PATH.as_posix(),
             "rollback_complete_sha256": complete[DOCUMENT_HASH_FIELD],
@@ -1253,11 +1451,6 @@ def continue_rollback(
     if not rollback_steps.exists():
         write_jsonl(rollback_steps, records)
     rotate_commands(context, ROLLBACK_COMMANDS_PATH)
-    status = (
-        "ROLLED_BACK"
-        if authorization.get("reason") == "observed-evidence-complete"
-        else "ROLLED_BACK_AFTER_APPLY_FAILURE"
-    )
     complete = write_hashed_json(
         complete_path,
         {
@@ -1412,6 +1605,47 @@ def run_resume_and_rollback(args: argparse.Namespace) -> dict[str, Any]:
     return continue_rollback(context, authorization, failure_exit_code=0)
 
 
+def run_abort_and_rollback(args: argparse.Namespace) -> dict[str, Any]:
+    context = build_context(args, allow_create=False)
+    ready = validate_ready(context)
+    ready_sha = str(ready[DOCUMENT_HASH_FIELD])
+    g5_status = (
+        "FAIL" if args.g6_evidence_manifest is None else "PASS"
+    )
+    observed = [
+        validate_observed_manifest(
+            context,
+            args.g5_evidence_manifest,
+            "G5",
+            ready_sha,
+            required_status=g5_status,
+        )
+    ]
+    failed = observed[0]
+    if args.g6_evidence_manifest is not None:
+        g6 = validate_observed_manifest(
+            context,
+            args.g6_evidence_manifest,
+            "G6",
+            ready_sha,
+            required_status="FAIL",
+        )
+        observed.append(g6)
+        failed = g6
+    authorization = authorize_rollback(
+        context,
+        reason="observed-evidence-failed",
+        ready=ready,
+        observed=observed,
+        trigger={
+            "gate": failed["gate"],
+            "status": failed["status"],
+            "violation_count": failed["violation_count"],
+        },
+    )
+    return continue_rollback(context, authorization, failure_exit_code=1)
+
+
 def run(args: argparse.Namespace) -> dict[str, Any]:
     if not args.execute_clone_writes:
         raise ValueError("--execute-clone-writes is required")
@@ -1425,6 +1659,12 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                 "resume-and-rollback requires explicit G5 and G6 evidence manifests"
             )
         return run_resume_and_rollback(args)
+    if args.phase == "abort-and-rollback":
+        if args.g5_evidence_manifest is None:
+            raise ValueError(
+                "abort-and-rollback requires an explicit G5 evidence manifest"
+            )
+        return run_abort_and_rollback(args)
     raise ValueError("unknown coordinator phase")
 
 
@@ -1432,7 +1672,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--phase",
-        choices=("apply-and-hold", "resume-and-rollback"),
+        choices=(
+            "apply-and-hold",
+            "resume-and-rollback",
+            "abort-and-rollback",
+        ),
         required=True,
     )
     parser.add_argument("--run-id", required=True)

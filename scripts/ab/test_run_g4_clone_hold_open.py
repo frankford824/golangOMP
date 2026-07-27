@@ -257,19 +257,38 @@ class HoldOpenCoordinatorTest(unittest.TestCase):
         args: argparse.Namespace,
         gate: str,
         ready_sha: str,
+        *,
+        status: str = "PASS",
+        violation_count: int = 0,
     ) -> pathlib.Path:
         evidence_root = args.clone_root / "observed"
         evidence_root.mkdir(exist_ok=True)
         report = evidence_root / f"{gate.lower()}-report.json"
-        report.write_bytes(
-            MODULE.g4.canonical_bytes(
-                {
-                    "schema_version": 1,
-                    "gate": gate,
-                    "status": "PASS",
-                    "violation_count": 0,
-                }
+        source_status = (
+            "BLOCKED" if gate == "G6" and status == "FAIL" else status
+        )
+        report_value = {
+            "schema_version": 1,
+            "gate": gate,
+            "status": source_status,
+            "violation_count": violation_count,
+            "violations": [
+                {"code": f"test-{index + 1}"}
+                for index in range(
+                    violation_count
+                    if isinstance(violation_count, int)
+                    and not isinstance(violation_count, bool)
+                    and violation_count > 0
+                    else 0
+                )
+            ],
+        }
+        if gate == "G6":
+            report_value[MODULE.EVIDENCE_HASH_FIELD] = (
+                MODULE.compact_canonical_hash(report_value)
             )
+        report.write_bytes(
+            MODULE.g4.canonical_bytes(report_value)
         )
         manifest = evidence_root / f"{gate.lower()}-manifest.json"
         MODULE.write_hashed_json(
@@ -277,8 +296,8 @@ class HoldOpenCoordinatorTest(unittest.TestCase):
             {
                 "schema_version": 1,
                 "gate": gate,
-                "status": "PASS",
-                "violation_count": 0,
+                "status": status,
+                "violation_count": violation_count,
                 "hold_open_ledger_sha256": ready_sha,
                 "artifacts": [
                     MODULE.relative_file_identity(report, args.clone_root)
@@ -384,6 +403,276 @@ class HoldOpenCoordinatorTest(unittest.TestCase):
                 first_started["prior_checkpoint_sha256"],
                 authorization[MODULE.DOCUMENT_HASH_FIELD],
             )
+
+    def test_abort_after_g5_failure_rolls_back_and_preserves_failure(self):
+        with tempfile.TemporaryDirectory() as raw:
+            args = self.make_inputs(raw)
+            with (
+                mock.patch.object(MODULE, "repo_head", return_value="f" * 64),
+                mock.patch.object(
+                    MODULE.shutil, "which", return_value="/usr/bin/go"
+                ),
+                mock.patch.object(
+                    MODULE.g4,
+                    "execute_step",
+                    side_effect=self.fake_execute([]),
+                ),
+            ):
+                ready = MODULE.run(args)
+            args.phase = "abort-and-rollback"
+            args.g5_evidence_manifest = self.observed_manifest(
+                args,
+                "G5",
+                ready["ready_ledger_sha256"],
+                status="FAIL",
+                violation_count=3,
+            )
+            rollback_calls: list[str] = []
+            with (
+                mock.patch.object(MODULE, "repo_head", return_value="f" * 64),
+                mock.patch.object(
+                    MODULE.shutil, "which", return_value="/usr/bin/go"
+                ),
+                mock.patch.object(
+                    MODULE.g4,
+                    "execute_step",
+                    side_effect=self.fake_execute(rollback_calls),
+                ),
+            ):
+                result = MODULE.run(args)
+            self.assertEqual(
+                result["status"], "ROLLED_BACK_AFTER_OBSERVED_FAILURE"
+            )
+            self.assertEqual(result["exit_code"], 1)
+            self.assertEqual(
+                rollback_calls,
+                [
+                    "search_rollback",
+                    "workflow_rollback",
+                    "bundle_rollback",
+                    "recovery_rollback",
+                    "validate_after_rollback_fingerprint",
+                ],
+            )
+            receipt = MODULE.read_hashed_json(
+                args.run_dir / "ROLLBACK_COMPLETE.json", "terminal receipt"
+            )
+            self.assertEqual(
+                receipt["trigger"],
+                {"gate": "G5", "status": "FAIL", "violation_count": 3},
+            )
+
+    def test_abort_after_g6_failure_requires_prior_g5_pass(self):
+        with tempfile.TemporaryDirectory() as raw:
+            args = self.make_inputs(raw)
+            with (
+                mock.patch.object(MODULE, "repo_head", return_value="f" * 64),
+                mock.patch.object(
+                    MODULE.shutil, "which", return_value="/usr/bin/go"
+                ),
+                mock.patch.object(
+                    MODULE.g4,
+                    "execute_step",
+                    side_effect=self.fake_execute([]),
+                ),
+            ):
+                ready = MODULE.run(args)
+            args.phase = "abort-and-rollback"
+            args.g5_evidence_manifest = self.observed_manifest(
+                args, "G5", ready["ready_ledger_sha256"]
+            )
+            args.g6_evidence_manifest = self.observed_manifest(
+                args,
+                "G6",
+                ready["ready_ledger_sha256"],
+                status="FAIL",
+                violation_count=2,
+            )
+            rollback_calls: list[str] = []
+            with (
+                mock.patch.object(MODULE, "repo_head", return_value="f" * 64),
+                mock.patch.object(
+                    MODULE.shutil, "which", return_value="/usr/bin/go"
+                ),
+                mock.patch.object(
+                    MODULE.g4,
+                    "execute_step",
+                    side_effect=self.fake_execute(rollback_calls),
+                ),
+            ):
+                result = MODULE.run(args)
+            self.assertEqual(
+                result["status"], "ROLLED_BACK_AFTER_OBSERVED_FAILURE"
+            )
+            self.assertEqual(result["exit_code"], 1)
+            receipt = MODULE.read_hashed_json(
+                args.run_dir / "ROLLBACK_COMPLETE.json", "terminal receipt"
+            )
+            self.assertEqual(
+                receipt["trigger"],
+                {"gate": "G6", "status": "FAIL", "violation_count": 2},
+            )
+
+    def test_abort_rejects_invalid_status_count_before_rollback(self):
+        invalid = (
+            ("PASS", 1),
+            ("PASS", 0.0),
+            ("FAIL", 0),
+            ("FAIL", True),
+        )
+        for status, count in invalid:
+            with self.subTest(status=status, count=count):
+                with tempfile.TemporaryDirectory() as raw:
+                    args = self.make_inputs(raw)
+                    with (
+                        mock.patch.object(
+                            MODULE, "repo_head", return_value="f" * 64
+                        ),
+                        mock.patch.object(
+                            MODULE.shutil,
+                            "which",
+                            return_value="/usr/bin/go",
+                        ),
+                        mock.patch.object(
+                            MODULE.g4,
+                            "execute_step",
+                            side_effect=self.fake_execute([]),
+                        ),
+                    ):
+                        ready = MODULE.run(args)
+                    args.phase = "abort-and-rollback"
+                    args.g5_evidence_manifest = self.observed_manifest(
+                        args,
+                        "G5",
+                        ready["ready_ledger_sha256"],
+                        status=status,
+                        violation_count=count,
+                    )
+                    calls: list[str] = []
+                    with (
+                        mock.patch.object(
+                            MODULE, "repo_head", return_value="f" * 64
+                        ),
+                        mock.patch.object(
+                            MODULE.shutil,
+                            "which",
+                            return_value="/usr/bin/go",
+                        ),
+                        mock.patch.object(
+                            MODULE.g4,
+                            "execute_step",
+                            side_effect=self.fake_execute(calls),
+                        ),
+                    ):
+                        with self.assertRaisesRegex(
+                            ValueError, "envelope is invalid"
+                        ):
+                            MODULE.run(args)
+                    self.assertEqual(calls, [])
+
+    def test_forged_existing_completion_never_bypasses_rollback(self):
+        with tempfile.TemporaryDirectory() as raw:
+            args = self.make_inputs(raw)
+            with (
+                mock.patch.object(MODULE, "repo_head", return_value="f" * 64),
+                mock.patch.object(
+                    MODULE.shutil, "which", return_value="/usr/bin/go"
+                ),
+                mock.patch.object(
+                    MODULE.g4,
+                    "execute_step",
+                    side_effect=self.fake_execute([]),
+                ),
+            ):
+                ready = MODULE.run(args)
+            args.phase = "abort-and-rollback"
+            args.g5_evidence_manifest = self.observed_manifest(
+                args,
+                "G5",
+                ready["ready_ledger_sha256"],
+                status="FAIL",
+                violation_count=1,
+            )
+            MODULE.write_hashed_json(
+                args.run_dir / "ROLLBACK_COMPLETE.json",
+                {"status": "FORGED_TERMINAL"},
+            )
+            calls: list[str] = []
+            with (
+                mock.patch.object(MODULE, "repo_head", return_value="f" * 64),
+                mock.patch.object(
+                    MODULE.shutil, "which", return_value="/usr/bin/go"
+                ),
+                mock.patch.object(
+                    MODULE.g4,
+                    "execute_step",
+                    side_effect=self.fake_execute(calls),
+                ),
+            ):
+                with self.assertRaisesRegex(
+                    ValueError, "completion ledger is missing"
+                ):
+                    MODULE.run(args)
+            self.assertEqual(calls, [])
+
+    def test_complete_receipt_with_wrong_authorization_is_rejected(self):
+        with tempfile.TemporaryDirectory() as raw:
+            args = self.make_inputs(raw)
+            with (
+                mock.patch.object(MODULE, "repo_head", return_value="f" * 64),
+                mock.patch.object(
+                    MODULE.shutil, "which", return_value="/usr/bin/go"
+                ),
+                mock.patch.object(
+                    MODULE.g4,
+                    "execute_step",
+                    side_effect=self.fake_execute([]),
+                ),
+            ):
+                ready = MODULE.run(args)
+            args.phase = "abort-and-rollback"
+            args.g5_evidence_manifest = self.observed_manifest(
+                args,
+                "G5",
+                ready["ready_ledger_sha256"],
+                status="FAIL",
+                violation_count=1,
+            )
+            with (
+                mock.patch.object(MODULE, "repo_head", return_value="f" * 64),
+                mock.patch.object(
+                    MODULE.shutil, "which", return_value="/usr/bin/go"
+                ),
+                mock.patch.object(
+                    MODULE.g4,
+                    "execute_step",
+                    side_effect=self.fake_execute([]),
+                ),
+            ):
+                MODULE.run(args)
+            receipt_path = args.run_dir / "ROLLBACK_COMPLETE.json"
+            receipt = MODULE.read_hashed_json(receipt_path, "receipt")
+            receipt.pop(MODULE.DOCUMENT_HASH_FIELD)
+            receipt["authorization_sha256"] = "0" * 64
+            receipt_path.unlink()
+            MODULE.write_hashed_json(receipt_path, receipt)
+            retry_calls: list[str] = []
+            with (
+                mock.patch.object(MODULE, "repo_head", return_value="f" * 64),
+                mock.patch.object(
+                    MODULE.shutil, "which", return_value="/usr/bin/go"
+                ),
+                mock.patch.object(
+                    MODULE.g4,
+                    "execute_step",
+                    side_effect=self.fake_execute(retry_calls),
+                ),
+            ):
+                with self.assertRaisesRegex(
+                    ValueError, "identity or hashes differ"
+                ):
+                    MODULE.run(args)
+            self.assertEqual(retry_calls, [])
 
     def test_failed_apply_automatically_rolls_back_only_attempted_components(self):
         with tempfile.TemporaryDirectory() as raw:
