@@ -50,7 +50,7 @@
           "requires_revision_ids": false,
           "requires_history_drawer": false,
           "required_http_statuses": [],
-          "required_assertions": ["page_matches_manifest", "assets_match", "allowed_actions_exact"]
+          "required_assertions": ["page_matches_manifest", "assets_match", "allowed_actions_exact", "approved_compatibility_difference_only"]
         }
       },
       "coverage_tags": ["four_combinations", "history_drawer", "url_task_revision"]
@@ -400,7 +400,7 @@
       "required_combinations": ["external_devplus"],
       "required_viewports": ["desktop", "mobile"],
       "requires_task_id": true,
-      "requires_revision_ids": true,
+      "requires_revision_ids": false,
       "requires_history_drawer": false,
       "required_http_statuses": [],
       "required_assertions": ["page_matches_manifest", "assets_match", "allowed_actions_exact", "approved_compatibility_difference_only"],

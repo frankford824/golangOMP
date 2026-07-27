@@ -12,7 +12,10 @@ import argparse
 import hashlib
 import json
 import re
+import struct
 import sys
+import zipfile
+import zlib
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -30,6 +33,16 @@ EXPECTED_COMBINATIONS = {
     "devplus_external",
 }
 EXPECTED_VIEWPORTS = {"desktop", "mobile"}
+EXPECTED_EDGE_ORIGINS = {
+    "external_external": "http://127.0.0.1:18101",
+    "devplus_devplus": "http://127.0.0.1:18102",
+    "external_devplus": "http://127.0.0.1:18103",
+    "devplus_external": "http://127.0.0.1:18104",
+}
+EXPECTED_VIEWPORT_SPECS = {
+    "desktop": {"width": 1440, "height": 900, "device_scale_factor": 1},
+    "mobile": {"width": 390, "height": 844, "device_scale_factor": 1},
+}
 REQUIRED_COVERAGE_TAGS = {
     "four_combinations",
     "history_drawer",
@@ -145,6 +158,19 @@ def _valid_url(value: Any) -> bool:
     return True
 
 
+def _url_origin(value: Any) -> str | None:
+    if not _valid_url(value):
+        return None
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except ValueError:
+        return None
+    if parsed.scheme != "http" or parsed.hostname != "127.0.0.1" or port is None:
+        return None
+    return f"http://127.0.0.1:{port}"
+
+
 def _case_key(
     scenario_id: str,
     combination: str,
@@ -155,6 +181,72 @@ def _case_key(
 
 def _case_key_text(key: tuple[str, str, str]) -> str:
     return "/".join(key)
+
+
+def _normalized_expected_allowed_actions(
+    rows: Any,
+) -> tuple[tuple[str, tuple[str, ...]], ...] | None:
+    if not isinstance(rows, list) or not rows:
+        return None
+    normalized: list[tuple[str, tuple[str, ...]]] = []
+    seen: set[str] = set()
+    for row in rows:
+        if (
+            not isinstance(row, dict)
+            or set(row) != {"checkpoint", "expected"}
+            or not _is_nonempty_string(row.get("checkpoint"))
+            or row["checkpoint"] in seen
+            or not isinstance(row.get("expected"), list)
+            or any(not _is_nonempty_string(value) for value in row["expected"])
+            or len(row["expected"]) != len(set(row["expected"]))
+        ):
+            return None
+        seen.add(row["checkpoint"])
+        normalized.append((row["checkpoint"], tuple(sorted(row["expected"]))))
+    return tuple(sorted(normalized))
+
+
+def _normalized_http_probes(
+    rows: Any,
+) -> tuple[tuple[str, str, str, int], ...] | None:
+    if not isinstance(rows, list):
+        return None
+    normalized: list[tuple[str, str, str, int]] = []
+    seen: set[str] = set()
+    for row in rows:
+        if not isinstance(row, dict) or set(row) != {
+            "kind",
+            "method",
+            "path",
+            "expected_status",
+        }:
+            return None
+        kind = row.get("kind")
+        path = row.get("path")
+        status = row.get("expected_status")
+        try:
+            parsed = urlsplit(path) if isinstance(path, str) else None
+        except ValueError:
+            return None
+        if (
+            not _is_nonempty_string(kind)
+            or kind in seen
+            or row.get("method") != "GET"
+            or parsed is None
+            or parsed.scheme
+            or parsed.netloc
+            or parsed.fragment
+            or not parsed.path.startswith("/")
+            or parsed.path.startswith("//")
+            or ".." in Path(parsed.path).parts
+            or not _is_nonnegative_int(status)
+            or status < 100
+            or status > 599
+        ):
+            return None
+        seen.add(kind)
+        normalized.append((kind, "GET", path, status))
+    return tuple(sorted(normalized))
 
 
 def _validate_requirement_block(value: Any, label: str) -> dict[str, Any]:
@@ -202,6 +294,57 @@ def _requirements_for(
     if isinstance(conditional, dict) and combination in conditional:
         return conditional[combination]
     return {field: scenario[field] for field in REQUIREMENT_FIELDS}
+
+
+def _expected_assertions_for(
+    scenario_id: str,
+    combination: str,
+    base_assertions: list[str],
+) -> set[str]:
+    expected = set(base_assertions)
+    if (
+        scenario_id == "baseline_four_edge_readonly"
+        and combination == "devplus_external"
+    ):
+        expected.add("approved_compatibility_difference_only")
+    return expected
+
+
+def _normalized_resource_oracle(
+    value: Any,
+    combination: str,
+    scenario_id: str,
+) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    if combination == "devplus_devplus":
+        expected_kind = (
+            "v8_missing_resource_group"
+            if scenario_id == "missing_resource_group_negative"
+            else "v8_resource_groups"
+        )
+        return value if value == {"kind": expected_kind} else None
+    expected_kind = {
+        "external_external": "legacy_task_snapshot",
+        "external_devplus": "legacy_frontend_task_snapshot",
+        "devplus_external": "frontend_rollback_compatibility",
+    }.get(combination)
+    expected_keys = {"kind", "task_response_sha256"}
+    if combination == "devplus_external":
+        expected_keys.add("approved_assertion")
+    if (
+        expected_kind is None
+        or set(value) != expected_keys
+        or value.get("kind") != expected_kind
+        or not SHA256_RE.fullmatch(str(value.get("task_response_sha256") or ""))
+        or (
+            combination == "devplus_external"
+            and value.get("approved_assertion")
+            != "approved_compatibility_difference_only"
+        )
+    ):
+        return None
+    return dict(value)
 
 
 def _validate_catalog(catalog: dict[str, Any]) -> list[dict[str, Any]]:
@@ -299,7 +442,11 @@ def _validate_catalog(catalog: dict[str, Any]) -> list[dict[str, Any]]:
                     raise ValidationInputError(
                         f"scenario {scenario_id}/{combination} cannot weaken HTTP statuses"
                     )
-                if set(requirements["required_assertions"]) != set(assertions):
+                if set(requirements["required_assertions"]) != _expected_assertions_for(
+                    scenario_id,
+                    combination,
+                    assertions,
+                ):
                     raise ValidationInputError(
                         f"scenario {scenario_id}/{combination} cannot weaken assertions"
                     )
@@ -322,6 +469,189 @@ def _validate_catalog(catalog: dict[str, Any]) -> list[dict[str, Any]]:
     return normalized
 
 
+def _validate_samples_manifest(
+    manifest: dict[str, Any],
+    scenarios: list[dict[str, Any]],
+    catalog_sha256: str,
+) -> tuple[
+    dict[tuple[str, str, str], tuple[dict[str, Any], dict[str, Any]]],
+    dict[str, dict[str, Any]],
+]:
+    if manifest.get("schema_version") != SCHEMA_VERSION:
+        raise ValidationInputError("samples manifest schema_version must be 1")
+    if manifest.get("gate") != GATE:
+        raise ValidationInputError("samples manifest gate must be G7")
+    if manifest.get("status") != "PASS" or manifest.get("mode") != "final":
+        raise ValidationInputError("samples manifest must be final and PASS")
+    input_hashes = manifest.get("input_sha256")
+    if (
+        not isinstance(input_hashes, dict)
+        or input_hashes.get("scenario_catalog_sha256") != catalog_sha256
+    ):
+        raise ValidationInputError("samples manifest is not bound to this scenario catalog")
+    declared_manifest_hash = manifest.get("manifest_sha256")
+    hash_payload = dict(manifest)
+    hash_payload.pop("manifest_sha256", None)
+    if (
+        not SHA256_RE.fullmatch(declared_manifest_hash or "")
+        or declared_manifest_hash != canonical_sha256(hash_payload)
+    ):
+        raise ValidationInputError("samples manifest_sha256 is invalid")
+
+    sealed_edges = manifest.get("sealed_edges")
+    if not isinstance(sealed_edges, dict) or set(sealed_edges) != EXPECTED_COMBINATIONS:
+        raise ValidationInputError("samples sealed_edges must contain exactly four combinations")
+    normalized_edges: dict[str, dict[str, Any]] = {}
+    for combination, expected_origin in EXPECTED_EDGE_ORIGINS.items():
+        edge = sealed_edges.get(combination)
+        if not isinstance(edge, dict) or set(edge) != {
+            "origin",
+            "edge",
+            "frontend_sha256",
+            "backend_sha256",
+            "fixture_identity",
+        }:
+            raise ValidationInputError(
+                f"samples sealed_edges.{combination} has an invalid shape"
+            )
+        if edge.get("origin") != expected_origin or edge.get("edge") != combination:
+            raise ValidationInputError(
+                f"samples sealed_edges.{combination} does not match the fixed origin"
+            )
+        if (
+            not SHA256_RE.fullmatch(edge.get("frontend_sha256") or "")
+            or not SHA256_RE.fullmatch(edge.get("backend_sha256") or "")
+            or not _is_nonempty_string(edge.get("fixture_identity"))
+        ):
+            raise ValidationInputError(
+                f"samples sealed_edges.{combination} has invalid fingerprints"
+            )
+        normalized_edges[combination] = edge
+
+    samples = manifest.get("samples")
+    if not isinstance(samples, list):
+        raise ValidationInputError("samples manifest samples must be an array")
+    if (
+        manifest.get("scenario_count") != len(scenarios)
+        or manifest.get("sample_count") != len(samples)
+        or len(samples) != len(scenarios)
+    ):
+        raise ValidationInputError("samples manifest counts do not match the catalog")
+
+    scenarios_by_id = {scenario["id"]: scenario for scenario in scenarios}
+    samples_by_id: dict[str, dict[str, Any]] = {}
+    expected_cases: dict[
+        tuple[str, str, str], tuple[dict[str, Any], dict[str, Any]]
+    ] = {}
+    for index, sample in enumerate(samples):
+        if not isinstance(sample, dict):
+            raise ValidationInputError(f"samples[{index}] must be an object")
+        scenario_id = sample.get("scenario_id")
+        scenario = scenarios_by_id.get(scenario_id)
+        if scenario is None or scenario_id in samples_by_id:
+            raise ValidationInputError(
+                f"samples[{index}] has an unknown or duplicate scenario_id"
+            )
+        if (
+            sample.get("status") != "READY"
+            or not SHA256_RE.fullmatch(sample.get("sample_sha256") or "")
+            or sample.get("required_combinations")
+            != scenario["required_combinations"]
+            or sample.get("required_viewports") != scenario["required_viewports"]
+        ):
+            raise ValidationInputError(
+                f"samples[{index}] does not match scenario {scenario_id}"
+            )
+        coverage = sample.get("coverage_matrix")
+        if not isinstance(coverage, list):
+            raise ValidationInputError(
+                f"samples[{index}].coverage_matrix must be an array"
+            )
+        expected_sample_keys = {
+            _case_key(scenario_id, combination, viewport)
+            for combination in scenario["required_combinations"]
+            for viewport in scenario["required_viewports"]
+        }
+        actual_sample_keys: set[tuple[str, str, str]] = set()
+        for coverage_index, row in enumerate(coverage):
+            if not isinstance(row, dict):
+                raise ValidationInputError(
+                    f"samples[{index}].coverage_matrix[{coverage_index}] is invalid"
+                )
+            combination = row.get("combination")
+            viewport = row.get("viewport")
+            if not _is_nonempty_string(combination) or not _is_nonempty_string(viewport):
+                raise ValidationInputError(
+                    f"samples[{index}].coverage_matrix[{coverage_index}] has no case key"
+                )
+            key = _case_key(scenario_id, combination, viewport)
+            if key not in expected_sample_keys or key in actual_sample_keys:
+                raise ValidationInputError(
+                    f"samples[{index}].coverage_matrix has unexpected or duplicate cases"
+                )
+            actual_sample_keys.add(key)
+            requirements = _requirements_for(scenario, combination)
+            task_id = row.get("task_id")
+            revision_ids = row.get("revision_ids")
+            resource_ids = row.get("resource_ids")
+            resource_oracle = _normalized_resource_oracle(
+                row.get("resource_oracle"),
+                str(combination),
+                str(scenario_id),
+            )
+            probes = _normalized_http_probes(row.get("http_probes"))
+            if (
+                row.get("requirements") != requirements
+                or (requirements["requires_task_id"] and not _is_positive_int(task_id))
+                or (
+                    task_id is not None
+                    and not _is_positive_int(task_id)
+                )
+                or not isinstance(revision_ids, list)
+                or any(not _is_positive_int(value) for value in revision_ids)
+                or len(revision_ids) != len(set(revision_ids))
+                or (requirements["requires_revision_ids"] and not revision_ids)
+                or not isinstance(resource_ids, list)
+                or any(not _is_nonempty_string(value) for value in resource_ids)
+                or len(resource_ids) != len(set(resource_ids))
+                or resource_oracle is None
+                or (
+                    resource_oracle["kind"] == "v8_resource_groups"
+                    and not resource_ids
+                )
+                or (
+                    resource_oracle["kind"]
+                    not in {"v8_resource_groups", "v8_missing_resource_group"}
+                    and (resource_ids or revision_ids)
+                )
+                or (
+                    resource_oracle["kind"] == "v8_missing_resource_group"
+                    and (resource_ids or revision_ids)
+                )
+                or _normalized_expected_allowed_actions(
+                    row.get("allowed_actions")
+                )
+                is None
+                or probes is None
+                or sorted(probe[3] for probe in probes)
+                != sorted(requirements["required_http_statuses"])
+                or not SHA256_RE.fullmatch(row.get("oracle_sha256") or "")
+            ):
+                raise ValidationInputError(
+                    f"samples[{index}].coverage_matrix[{coverage_index}] "
+                    "has invalid sealed identities or oracle"
+                )
+            expected_cases[key] = (sample, row)
+        if actual_sample_keys != expected_sample_keys:
+            raise ValidationInputError(
+                f"samples[{index}].coverage_matrix does not cover its scenario"
+            )
+        samples_by_id[scenario_id] = sample
+    if set(samples_by_id) != set(scenarios_by_id):
+        raise ValidationInputError("samples manifest does not cover every scenario")
+    return expected_cases, normalized_edges
+
+
 def _add_failure(
     failures: list[dict[str, str]],
     code: str,
@@ -341,6 +671,7 @@ def _validate_document_header(
     document: dict[str, Any],
     expected_source: str,
     catalog_sha256: str,
+    samples_sha256: str,
     failures: list[dict[str, str]],
 ) -> None:
     if document.get("schema_version") != SCHEMA_VERSION:
@@ -356,6 +687,12 @@ def _validate_document_header(
             failures,
             "catalog_hash",
             f"{expected_source}: scenario catalog hash does not match",
+        )
+    if document.get("samples_sha256") != samples_sha256:
+        _add_failure(
+            failures,
+            "samples_hash",
+            f"{expected_source}: runtime samples file hash does not match",
         )
     if not _is_nonempty_string(document.get("run_id")):
         _add_failure(failures, "run_id", f"{expected_source}: run_id is missing")
@@ -414,6 +751,175 @@ def _index_records(
     return indexed
 
 
+def _validate_png(path: Path, expected_spec: dict[str, int]) -> bool:
+    try:
+        payload = path.read_bytes()
+    except OSError:
+        return False
+    if not payload.startswith(b"\x89PNG\r\n\x1a\n"):
+        return False
+    cursor = 8
+    dimensions: tuple[int, int] | None = None
+    compressed = bytearray()
+    saw_iend = False
+    try:
+        while cursor + 12 <= len(payload):
+            length = struct.unpack(">I", payload[cursor : cursor + 4])[0]
+            kind = payload[cursor + 4 : cursor + 8]
+            end = cursor + 12 + length
+            if end > len(payload):
+                return False
+            data = payload[cursor + 8 : cursor + 8 + length]
+            declared_crc = struct.unpack(">I", payload[cursor + 8 + length : end])[0]
+            if zlib.crc32(kind + data) & 0xFFFFFFFF != declared_crc:
+                return False
+            if kind == b"IHDR":
+                if dimensions is not None or length != 13:
+                    return False
+                dimensions = struct.unpack(">II", data[:8])
+            elif kind == b"IDAT":
+                compressed.extend(data)
+            elif kind == b"IEND":
+                if length != 0:
+                    return False
+                saw_iend = True
+                cursor = end
+                break
+            cursor = end
+        if (
+            not saw_iend
+            or cursor != len(payload)
+            or dimensions
+            != (expected_spec["width"], expected_spec["height"])
+            or not compressed
+        ):
+            return False
+        zlib.decompress(bytes(compressed))
+    except (KeyError, struct.error, zlib.error):
+        return False
+    return True
+
+
+def _load_artifact_json(path: Path) -> dict[str, Any] | None:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _validate_console_artifact(
+    path: Path,
+    key: tuple[str, str, str],
+    source_kind: str,
+) -> bool:
+    value = _load_artifact_json(path)
+    if (
+        not isinstance(value, dict)
+        or set(value) != {
+            "schema_version",
+            "case_key",
+            "source_kind",
+            "unexpected_error_count",
+            "entries",
+        }
+        or value.get("schema_version") != SCHEMA_VERSION
+        or value.get("case_key") != _case_key_text(key)
+        or value.get("source_kind") != source_kind
+        or value.get("unexpected_error_count") != 0
+        or not isinstance(value.get("entries"), list)
+    ):
+        return False
+    for entry in value["entries"]:
+        if (
+            not isinstance(entry, dict)
+            or entry.get("level") not in {"log", "info", "warning", "error"}
+            or not isinstance(entry.get("text"), str)
+        ):
+            return False
+    return True
+
+
+def _validate_network_artifact(
+    path: Path,
+    key: tuple[str, str, str],
+    source_kind: str,
+    expected_origin: str,
+    expected_probes: tuple[tuple[str, str, str, int], ...],
+) -> bool:
+    value = _load_artifact_json(path)
+    if (
+        not isinstance(value, dict)
+        or set(value) != {
+            "schema_version",
+            "case_key",
+            "source_kind",
+            "five_xx_count",
+            "requests",
+        }
+        or value.get("schema_version") != SCHEMA_VERSION
+        or value.get("case_key") != _case_key_text(key)
+        or value.get("source_kind") != source_kind
+        or value.get("five_xx_count") != 0
+        or not isinstance(value.get("requests"), list)
+        or not value["requests"]
+    ):
+        return False
+    calculated_5xx = 0
+    observed_requests: set[tuple[str, str, int]] = set()
+    for request in value["requests"]:
+        if (
+            not isinstance(request, dict)
+            or set(request) != {"method", "url", "status"}
+            or not _is_nonempty_string(request.get("method"))
+            or request["method"] != request["method"].upper()
+            or _url_origin(request.get("url")) != expected_origin
+            or not _is_nonnegative_int(request.get("status"))
+            or request["status"] < 100
+            or request["status"] > 599
+        ):
+            return False
+        calculated_5xx += int(request["status"] >= 500)
+        observed_requests.add(
+            (
+                request["method"],
+                request["url"][len(expected_origin) :],
+                request["status"],
+            )
+        )
+    required_requests = {
+        (method, path, status)
+        for _, method, path, status in expected_probes
+    }
+    return (
+        calculated_5xx == value["five_xx_count"] == 0
+        and required_requests.issubset(observed_requests)
+    )
+
+
+def _validate_playwright_trace(path: Path) -> bool:
+    try:
+        with zipfile.ZipFile(path) as archive:
+            names = set(archive.namelist())
+            if (
+                "trace.trace" not in names
+                or "trace.network" not in names
+                or len(names) > 10000
+                or any(
+                    Path(name).is_absolute() or ".." in Path(name).parts
+                    for name in names
+                )
+                or archive.testzip() is not None
+            ):
+                return False
+            first_trace_line = archive.read("trace.trace").splitlines()[0]
+            if not isinstance(json.loads(first_trace_line), dict):
+                return False
+    except (OSError, IndexError, KeyError, UnicodeError, ValueError, zipfile.BadZipFile):
+        return False
+    return True
+
+
 def _validate_artifacts(
     record: dict[str, Any],
     key: tuple[str, str, str],
@@ -421,6 +927,9 @@ def _validate_artifacts(
     artifact_root: Path,
     failures: list[dict[str, str]],
     seen_paths: set[tuple[str, str]],
+    expected_viewport_spec: dict[str, int],
+    expected_origin: str,
+    expected_http_probes: tuple[tuple[str, str, str, int], ...],
 ) -> None:
     artifacts = record.get("artifacts")
     if not isinstance(artifacts, list):
@@ -507,6 +1016,37 @@ def _validate_artifacts(
                 f"{source_kind}: artifact[{index}] sha256 does not match file bytes",
                 key,
             )
+            continue
+        format_ok = True
+        format_code = ""
+        if kind == "screenshot":
+            format_ok = _validate_png(resolved_path, expected_viewport_spec)
+            format_code = "screenshot_png"
+        elif kind == "console":
+            format_ok = _validate_console_artifact(resolved_path, key, source_kind)
+            format_code = "console_schema"
+        elif kind == "network":
+            format_ok = _validate_network_artifact(
+                resolved_path,
+                key,
+                source_kind,
+                expected_origin,
+                expected_http_probes,
+            )
+            format_code = "network_schema"
+        elif kind == "trace":
+            format_ok = (
+                source_kind == SOURCE_PLAYWRIGHT
+                and _validate_playwright_trace(resolved_path)
+            )
+            format_code = "trace_zip"
+        if not format_ok:
+            _add_failure(
+                failures,
+                format_code,
+                f"{source_kind}: {kind} artifact content is invalid",
+                key,
+            )
     missing = sorted(required_kinds - actual_kinds)
     if missing:
         _add_failure(
@@ -551,6 +1091,10 @@ def _normalized_allowed_actions(
 def _validate_record(
     record: dict[str, Any],
     scenario: dict[str, Any],
+    sample: dict[str, Any],
+    coverage: dict[str, Any],
+    edge: dict[str, Any],
+    samples_sha256: str,
     key: tuple[str, str, str],
     source_kind: str,
     artifact_root: Path,
@@ -594,8 +1138,56 @@ def _validate_record(
             f"{source_kind}: finished_at is before started_at",
             key,
         )
-    if not _valid_url(record.get("url")):
+    expected_origin = EXPECTED_EDGE_ORIGINS[key[1]]
+    actual_origin = _url_origin(record.get("url"))
+    if actual_origin is None:
         _add_failure(failures, "url", f"{source_kind}: URL is invalid or unsafe", key)
+    elif actual_origin != expected_origin:
+        _add_failure(
+            failures,
+            "edge_origin",
+            f"{source_kind}: URL origin must be {expected_origin}",
+            key,
+        )
+
+    if record.get("samples_sha256") != samples_sha256:
+        _add_failure(
+            failures,
+            "samples_hash",
+            f"{source_kind}: record is not bound to the runtime samples file",
+            key,
+        )
+    if record.get("sample_sha256") != sample["sample_sha256"]:
+        _add_failure(
+            failures,
+            "sample_hash",
+            f"{source_kind}: sample_sha256 does not match the sealed sample",
+            key,
+        )
+    expected_edge_identity = {
+        name: edge[name]
+        for name in (
+            "edge",
+            "frontend_sha256",
+            "backend_sha256",
+            "fixture_identity",
+        )
+    }
+    if record.get("edge_identity") != expected_edge_identity:
+        _add_failure(
+            failures,
+            "edge_identity",
+            f"{source_kind}: edge_identity does not match sealed fingerprints",
+            key,
+        )
+    expected_viewport_spec = EXPECTED_VIEWPORT_SPECS[key[2]]
+    if record.get("viewport_spec") != expected_viewport_spec:
+        _add_failure(
+            failures,
+            "viewport_spec",
+            f"{source_kind}: viewport dimensions or DPR are not fixed",
+            key,
+        )
 
     task_id = record.get("task_id")
     if requirements["requires_task_id"] and not _is_positive_int(task_id):
@@ -610,6 +1202,13 @@ def _validate_record(
             failures,
             "task_id",
             f"{source_kind}: task_id must be null or a positive integer",
+            key,
+        )
+    if task_id != coverage["task_id"]:
+        _add_failure(
+            failures,
+            "sample_task_id",
+            f"{source_kind}: task_id differs from the sealed runtime sample",
             key,
         )
     revision_ids = record.get("revision_ids")
@@ -635,6 +1234,21 @@ def _validate_record(
             failures,
             "revision_ids",
             f"{source_kind}: at least one revision_id is required",
+            key,
+        )
+    if revision_ids != coverage["revision_ids"]:
+        _add_failure(
+            failures,
+            "sample_revision_ids",
+            f"{source_kind}: revision_ids differ from the sealed runtime sample",
+            key,
+        )
+    resource_ids = record.get("resource_ids")
+    if resource_ids != coverage["resource_ids"]:
+        _add_failure(
+            failures,
+            "sample_resource_ids",
+            f"{source_kind}: resource_ids differ from the sealed runtime sample",
             key,
         )
 
@@ -663,6 +1277,21 @@ def _validate_record(
                 f"{source_kind}: assertion {assertion_name} is not true",
                 key,
             )
+    observed_actions = _normalized_allowed_actions(assertions)
+    normalized_observed_expectations = (
+        tuple((checkpoint, expected) for checkpoint, expected, _ in observed_actions)
+        if observed_actions is not None
+        else None
+    )
+    if normalized_observed_expectations != _normalized_expected_allowed_actions(
+        coverage["allowed_actions"]
+    ):
+        _add_failure(
+            failures,
+            "allowed_actions_oracle",
+            f"{source_kind}: allowed_actions differ from the sealed API oracle",
+            key,
+        )
     if assertions.get("console_unexpected_error_count") != 0:
         _add_failure(
             failures,
@@ -675,6 +1304,13 @@ def _validate_record(
             failures,
             "network_5xx",
             f"{source_kind}: network 5xx count must be zero",
+            key,
+        )
+    if assertions.get("oracle_sha256") != coverage["oracle_sha256"]:
+        _add_failure(
+            failures,
+            "oracle_hash",
+            f"{source_kind}: assertions are not bound to the sealed oracle",
             key,
         )
 
@@ -716,6 +1352,8 @@ def _validate_record(
         )
         http_rows = []
     matched_statuses: set[int] = set()
+    matched_probes: set[tuple[str, int]] = set()
+    seen_probe_names: set[str] = set()
     for row in http_rows:
         if not isinstance(row, dict):
             _add_failure(
@@ -727,8 +1365,11 @@ def _validate_record(
             continue
         expected = row.get("expected_status")
         actual = row.get("actual_status")
+        name = row.get("name")
         if (
-            not _is_nonnegative_int(expected)
+            not _is_nonempty_string(name)
+            or name in seen_probe_names
+            or not _is_nonnegative_int(expected)
             or not _is_nonnegative_int(actual)
             or expected < 100
             or expected > 599
@@ -743,6 +1384,7 @@ def _validate_record(
                 key,
             )
             continue
+        seen_probe_names.add(name)
         if actual >= 500:
             _add_failure(
                 failures,
@@ -751,6 +1393,7 @@ def _validate_record(
                 key,
             )
         matched_statuses.add(actual)
+        matched_probes.add((name, actual))
     for required_status in requirements["required_http_statuses"]:
         if required_status not in matched_statuses:
             _add_failure(
@@ -759,6 +1402,19 @@ def _validate_record(
                 f"{source_kind}: required HTTP {required_status} evidence is missing",
                 key,
             )
+    expected_probe_results = {
+        (kind, status)
+        for kind, _, _, status in (
+            _normalized_http_probes(coverage["http_probes"]) or ()
+        )
+    }
+    if matched_probes != expected_probe_results:
+        _add_failure(
+            failures,
+            "http_probe_oracle",
+            f"{source_kind}: HTTP results differ from the sealed probe oracle",
+            key,
+        )
 
     declared_hash = record.get("record_sha256")
     calculated_hash = record_sha256(record)
@@ -776,6 +1432,9 @@ def _validate_record(
         artifact_root,
         failures,
         seen_paths,
+        expected_viewport_spec,
+        expected_origin,
+        _normalized_http_probes(coverage["http_probes"]) or (),
     )
 
 
@@ -813,7 +1472,16 @@ def _validate_pair(
                 "neither reviewer may be either source executor",
                 key,
             )
-    for field in ("url", "task_id", "revision_ids"):
+    for field in (
+        "url",
+        "task_id",
+        "revision_ids",
+        "resource_ids",
+        "sample_sha256",
+        "samples_sha256",
+        "edge_identity",
+        "viewport_spec",
+    ):
         if browser_record.get(field) != playwright_record.get(field):
             _add_failure(
                 failures,
@@ -824,6 +1492,15 @@ def _validate_pair(
     browser_assertions = browser_record.get("assertions")
     playwright_assertions = playwright_record.get("assertions")
     if isinstance(browser_assertions, dict) and isinstance(playwright_assertions, dict):
+        if browser_assertions.get("oracle_sha256") != playwright_assertions.get(
+            "oracle_sha256"
+        ):
+            _add_failure(
+                failures,
+                "pair_oracle",
+                "Browser/Computer Use and Playwright oracle hashes differ",
+                key,
+            )
         if _normalized_allowed_actions(browser_assertions) != _normalized_allowed_actions(
             playwright_assertions
         ):
@@ -869,11 +1546,13 @@ def _validate_pair(
 def validate_evidence(
     *,
     catalog_path: Path,
+    samples_path: Path,
     browser_evidence_path: Path,
     playwright_evidence_path: Path,
     artifact_root: Path,
 ) -> dict[str, Any]:
     catalog_path = catalog_path.resolve()
+    samples_path = samples_path.resolve()
     browser_evidence_path = browser_evidence_path.resolve()
     playwright_evidence_path = playwright_evidence_path.resolve()
     if browser_evidence_path == playwright_evidence_path:
@@ -883,9 +1562,16 @@ def validate_evidence(
 
     catalog = load_json_object(catalog_path)
     scenarios = _validate_catalog(catalog)
+    samples_manifest = load_json_object(samples_path)
     browser_document = load_json_object(browser_evidence_path)
     playwright_document = load_json_object(playwright_evidence_path)
     catalog_hash = file_sha256(catalog_path)
+    samples_hash = file_sha256(samples_path)
+    expected_samples, sealed_edges = _validate_samples_manifest(
+        samples_manifest,
+        scenarios,
+        catalog_hash,
+    )
     browser_hash = file_sha256(browser_evidence_path)
     playwright_hash = file_sha256(playwright_evidence_path)
     failures: list[dict[str, str]] = []
@@ -894,12 +1580,14 @@ def validate_evidence(
         browser_document,
         SOURCE_BROWSER,
         catalog_hash,
+        samples_hash,
         failures,
     )
     _validate_document_header(
         playwright_document,
         SOURCE_PLAYWRIGHT,
         catalog_hash,
+        samples_hash,
         failures,
     )
     browser_run_id = browser_document.get("run_id")
@@ -920,6 +1608,10 @@ def validate_evidence(
         for combination in scenario["required_combinations"]:
             for viewport in scenario["required_viewports"]:
                 expected_keys.add(_case_key(scenario["id"], combination, viewport))
+    if set(expected_samples) != expected_keys:
+        raise ValidationInputError(
+            "runtime samples cases do not exactly match the scenario catalog"
+        )
 
     browser_records = _index_records(
         browser_document,
@@ -956,10 +1648,16 @@ def validate_evidence(
                 key,
             )
         scenario = scenarios_by_id[key[0]]
+        sample, coverage = expected_samples[key]
+        edge = sealed_edges[key[1]]
         if browser_record is not None:
             _validate_record(
                 browser_record,
                 scenario,
+                sample,
+                coverage,
+                edge,
+                samples_hash,
                 key,
                 SOURCE_BROWSER,
                 artifact_root,
@@ -970,6 +1668,10 @@ def validate_evidence(
             _validate_record(
                 playwright_record,
                 scenario,
+                sample,
+                coverage,
+                edge,
+                samples_hash,
                 key,
                 SOURCE_PLAYWRIGHT,
                 artifact_root,
@@ -1001,6 +1703,7 @@ def validate_evidence(
                     "case_key": list(key),
                     "playwright_record_sha256": playwright_record_hash,
                     "scenario_catalog_sha256": catalog_hash,
+                    "samples_sha256": samples_hash,
                 }
             )
         cases.append(
@@ -1030,6 +1733,8 @@ def validate_evidence(
         "status": status,
         "run_id": browser_run_id if browser_run_id == playwright_run_id else None,
         "scenario_catalog_sha256": catalog_hash,
+        "samples_sha256": samples_hash,
+        "runtime_manifest_sha256": samples_manifest["manifest_sha256"],
         "browser_evidence_sha256": browser_hash,
         "playwright_evidence_sha256": playwright_hash,
         "required_case_count": required_case_count,
@@ -1078,6 +1783,7 @@ def _write_new_json(path: Path, value: dict[str, Any]) -> None:
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--scenarios", required=True, type=Path)
+    parser.add_argument("--samples", required=True, type=Path)
     parser.add_argument("--browser-evidence", required=True, type=Path)
     parser.add_argument("--playwright-evidence", required=True, type=Path)
     parser.add_argument("--artifact-root", required=True, type=Path)
@@ -1093,6 +1799,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         report = validate_evidence(
             catalog_path=args.scenarios,
+            samples_path=args.samples,
             browser_evidence_path=args.browser_evidence,
             playwright_evidence_path=args.playwright_evidence,
             artifact_root=args.artifact_root,

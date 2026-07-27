@@ -8,6 +8,7 @@ import unittest
 from pathlib import Path
 
 import select_computer_use_samples as selector
+import validate_computer_use_evidence as evidence_validator
 
 
 def digest(label: str) -> str:
@@ -435,6 +436,240 @@ class SelectComputerUseSamplesTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp.cleanup()
 
+    def write_edge_receipt(self, mutator=None) -> Path:
+        receipt = {
+            "schema_version": 1,
+            "gate": "G7",
+            "status": "PASS",
+            "edges": {
+                combination: {
+                    "origin": origin,
+                    "edge": combination,
+                    "frontend_sha256": digest(f"frontend:{combination}"),
+                    "backend_sha256": digest(f"backend:{combination}"),
+                    "fixture_identity": f"clone-b-{combination}",
+                }
+                for combination, origin in selector.EXPECTED_EDGE_ORIGINS.items()
+            },
+        }
+        if mutator:
+            mutator(receipt)
+        receipt["receipt_sha256"] = selector.canonical_sha256(receipt)
+        path = self.root / f"edge-receipt-{digest(json.dumps(receipt))[:8]}.json"
+        path.write_text(
+            json.dumps(receipt, ensure_ascii=False, sort_keys=True),
+            encoding="utf-8",
+        )
+        return path
+
+    def write_api_oracle(
+        self,
+        mapping_path: Path,
+        canonical_path: Path | None,
+        edge_receipt_path: Path,
+        fixture_receipt_path: Path,
+        mutator=None,
+    ) -> Path:
+        catalog = json.loads(self.catalog.read_text(encoding="utf-8"))
+        oracle = {
+            "schema_version": 1,
+            "gate": "G7",
+            "status": "PASS",
+            "source_kind": "reviewed_api_allowed_actions",
+            "reviewed_by": 1,
+            "reviewed_at": "2026-07-23T12:00:00Z",
+            "review_note": "frozen API allowed-actions oracle",
+            "input_sha256": {
+                "scenario_catalog_sha256": selector.file_sha256(self.catalog),
+                "mapping_sha256": selector.file_sha256(mapping_path),
+                "canonical_entities_sha256": (
+                    selector.file_sha256(canonical_path) if canonical_path else None
+                ),
+                "edge_receipt_sha256": selector.file_sha256(edge_receipt_path),
+                "fixture_receipt_sha256": selector.file_sha256(
+                    fixture_receipt_path
+                ),
+            },
+            "cases": [
+                {
+                    "scenario_id": scenario["id"],
+                    "combination": combination,
+                    "allowed_actions": [
+                        {
+                            "checkpoint": "task_detail",
+                            "expected": ["download", "preview"],
+                        }
+                    ],
+                    "http_probes": [
+                        {
+                            "kind": f"expected_{status}",
+                            "method": "GET",
+                            "path": (
+                                f"/oracle/{scenario['id']}/{combination}/{status}"
+                            ),
+                            "expected_status": status,
+                        }
+                        for status in selector.requirements_for(
+                            scenario,
+                            combination,
+                        )["required_http_statuses"]
+                    ],
+                    "resource_oracle": (
+                        {
+                            "kind": (
+                                "v8_missing_resource_group"
+                                if scenario["id"] == "missing_resource_group_negative"
+                                else "v8_resource_groups"
+                            )
+                        }
+                        if combination == "devplus_devplus"
+                        else {
+                            "kind": {
+                                "external_external": "legacy_task_snapshot",
+                                "external_devplus": "legacy_frontend_task_snapshot",
+                                "devplus_external": "frontend_rollback_compatibility",
+                            }[combination],
+                            "task_response_sha256": digest(
+                                f"task-response:{scenario['id']}:{combination}"
+                            ),
+                            **(
+                                {
+                                    "approved_assertion": (
+                                        "approved_compatibility_difference_only"
+                                    )
+                                }
+                                if combination == "devplus_external"
+                                else {}
+                            ),
+                        }
+                    ),
+                }
+                for scenario in catalog["scenarios"]
+                for combination in scenario["required_combinations"]
+            ],
+        }
+        if mutator:
+            mutator(oracle)
+        oracle["manifest_sha256"] = selector.canonical_sha256(oracle)
+        path = self.root / f"api-oracle-{digest(json.dumps(oracle))[:8]}.json"
+        path.write_text(
+            json.dumps(oracle, ensure_ascii=False, sort_keys=True),
+            encoding="utf-8",
+        )
+        return path
+
+    def write_fixture_receipt(
+        self,
+        mapping_path: Path,
+        canonical_path: Path,
+    ) -> Path:
+        mapping = json.loads(mapping_path.read_text(encoding="utf-8"))
+        mapping_hash = selector.file_sha256(mapping_path)
+        canonical_hash = selector.file_sha256(canonical_path)
+        canonical_document = canonical_fixture(mapping, mapping_hash)
+        canonical = selector.index_canonical(
+            canonical_document,
+            mapping_hash,
+            False,
+        )
+        facts = selector.Facts(mapping, canonical, canonical_hash)
+        catalog = json.loads(self.catalog.read_text(encoding="utf-8"))
+        plans: dict[str, dict] = {}
+        created: dict[str, dict] = {}
+        next_task = 9000
+        next_group = 9100
+        next_revision = 9200
+        for scenario in catalog["scenarios"]:
+            resources, _, _, fixture = selector.choose_scenario(
+                scenario["id"],
+                facts,
+            )
+            if not fixture:
+                continue
+            plans[scenario["id"]] = fixture
+            template_task_id = int(resources[0]["task_id"])
+            kind = fixture["fixture_kind"]
+            if kind == "permission_denied_identity":
+                created[scenario["id"]] = {
+                    "template_task_id": template_task_id,
+                    "template_task_asset_id": 9301,
+                    "fixture_user_id": 9401,
+                    "session_id": "fixture-session",
+                }
+                continue
+            next_task += 1
+            row: dict[str, object] = {
+                "task_id": next_task,
+                "group_ids": [],
+                "revision_ids": [],
+            }
+            if kind in {"missing_current_pointer", "wrong_scope_asset"}:
+                next_group += 1
+                next_revision += 1
+                row["group_ids"] = [next_group]
+                row["revision_ids"] = [next_revision]
+                if kind == "wrong_scope_asset":
+                    next_group += 1
+                    row["group_ids"].append(next_group)
+            created[scenario["id"]] = row
+        archived_entity = next(
+            row
+            for row in canonical_document["entities"]
+            if row["gate_name"] == "G01" and row["entity_key"] == "task:18"
+        )
+        archived_entity["components"][2] = "Completed"
+        no_archived = selector.index_canonical(
+            canonical_document,
+            mapping_hash,
+            False,
+        )
+        archived_facts = selector.Facts(mapping, no_archived, canonical_hash)
+        archived_scenario = next(
+            row
+            for row in catalog["scenarios"]
+            if row["id"] == "archived_readonly"
+        )
+        archived_resources, _, _, archived_fixture = selector.choose_scenario(
+            archived_scenario["id"],
+            archived_facts,
+        )
+        if archived_fixture:
+            plans["archived_readonly"] = archived_fixture
+            next_task += 1
+            created["archived_readonly"] = {
+                "task_id": next_task,
+                "group_ids": [],
+                "revision_ids": [],
+                "template_task_id": int(archived_resources[0]["task_id"]),
+            }
+        receipt: dict[str, object] = {
+            "schema_version": 2,
+            "gate": "G7",
+            "status": "APPLIED_VERIFIED_PENDING_UI_AND_CLEANUP",
+            "production_write_performed": False,
+            "clone_a_write_performed": False,
+            "template_task_mutated": False,
+            "input_sha256": {
+                "scenarios": selector.file_sha256(self.catalog),
+                "mapping": mapping_hash,
+                "canonical": canonical_hash,
+            },
+            "scenario_ids": sorted(created),
+            "created_rows": {"scenarios": created},
+            "fixture_plans": plans,
+            "nonfixture_integrity": {"status": "PASS"},
+            "template_integrity": {"status": "PASS"},
+            "row_verification": {"status": "PASS"},
+            "api_verification": {"status": "PASS"},
+        }
+        receipt["receipt_payload_sha256"] = selector.canonical_sha256(receipt)
+        path = self.root / "fixture-receipt.json"
+        path.write_text(
+            json.dumps(receipt, ensure_ascii=False, sort_keys=True),
+            encoding="utf-8",
+        )
+        return path
+
     def test_canonical_positive_int_accepts_only_canonical_decimal_strings(self):
         self.assertEqual(selector.canonical_positive_int("1000"), 1000)
         for value in ("", "0", "01", "-1", "+1", " 1", 1, True, None):
@@ -465,8 +700,22 @@ class SelectComputerUseSamplesTests(unittest.TestCase):
         canonical_path: Path | None,
         mode: str,
         output_name: str = "samples.json",
+        edge_receipt_path: Path | None = None,
+        fixture_receipt_path: Path | None = None,
+        api_oracle_path: Path | None = None,
     ):
         output = self.root / output_name
+        edge_receipt_path = edge_receipt_path or self.write_edge_receipt()
+        fixture_receipt_path = fixture_receipt_path or self.write_fixture_receipt(
+            mapping_path,
+            canonical_path,
+        )
+        api_oracle_path = api_oracle_path or self.write_api_oracle(
+            mapping_path,
+            canonical_path,
+            edge_receipt_path,
+            fixture_receipt_path,
+        )
         argv = [
             "--scenarios",
             str(self.catalog),
@@ -474,6 +723,12 @@ class SelectComputerUseSamplesTests(unittest.TestCase):
             str(mapping_path),
             "--mode",
             mode,
+            "--edge-receipt",
+            str(edge_receipt_path),
+            "--fixture-receipt",
+            str(fixture_receipt_path),
+            "--api-oracle",
+            str(api_oracle_path),
             "--output",
             str(output),
         ]
@@ -496,16 +751,210 @@ class SelectComputerUseSamplesTests(unittest.TestCase):
         )
         self.assertEqual(set(document["coverage"]["viewports"]), {"desktop", "mobile"})
         self.assertRegex(document["manifest_sha256"], r"^[0-9a-f]{64}$")
+        self.assertEqual(
+            set(document["sealed_edges"]),
+            selector.EXPECTED_COMBINATIONS,
+        )
         for sample in document["samples"]:
             self.assertGreater(sample["task_id"], 0)
             self.assertTrue(sample["coverage_matrix"])
             self.assertRegex(sample["sample_sha256"], r"^[0-9a-f]{64}$")
-            self.assertEqual(sample["resource_ids"], sample["resource_keys"])
-            self.assertEqual(
-                sample["resource_identity_kind"], "canonical_task_scope_key"
-            )
+            if sample["resource_identity_kind"] == "canonical_task_scope_key":
+                self.assertEqual(sample["resource_ids"], sample["resource_keys"])
+            else:
+                self.assertEqual(
+                    sample["resource_identity_kind"],
+                    "clone_b_runtime_group_id",
+                )
+                self.assertEqual(sample["resource_keys"], [])
             if sample["revision_facts"]:
                 self.assertTrue(sample["revision_ids"])
+            for case in sample["coverage_matrix"]:
+                self.assertRegex(case["oracle_sha256"], r"^[0-9a-f]{64}$")
+                self.assertEqual(
+                    case["allowed_actions"],
+                    [
+                        {
+                            "checkpoint": "task_detail",
+                            "expected": ["download", "preview"],
+                        }
+                    ],
+                )
+                self.assertEqual(
+                    [row["expected_status"] for row in case["http_probes"]],
+                    case["requirements"]["required_http_statuses"],
+                )
+        validated_cases, validated_edges = (
+            evidence_validator._validate_samples_manifest(
+                document,
+                evidence_validator._validate_catalog(
+                    json.loads(self.catalog.read_text(encoding="utf-8"))
+                ),
+                selector.file_sha256(self.catalog),
+            )
+        )
+        self.assertEqual(len(validated_cases), 64)
+        self.assertEqual(set(validated_edges), selector.EXPECTED_COMBINATIONS)
+
+    def test_edge_receipt_is_required_and_rejects_port_or_fingerprint_drift(self):
+        mapping_path, canonical_path = self.write_inputs()
+        edge_path = self.write_edge_receipt()
+        fixture_path = self.write_fixture_receipt(mapping_path, canonical_path)
+        api_oracle_path = self.write_api_oracle(
+            mapping_path,
+            canonical_path,
+            edge_path,
+            fixture_path,
+        )
+        with self.assertRaises(SystemExit):
+            selector.parse_args(
+                [
+                    "--scenarios",
+                    str(self.catalog),
+                    "--mapping",
+                    str(mapping_path),
+                    "--canonical-entities",
+                    str(canonical_path),
+                    "--api-oracle",
+                    str(api_oracle_path),
+                    "--fixture-receipt",
+                    str(fixture_path),
+                    "--mode",
+                    "final",
+                    "--output",
+                    str(self.root / "missing-edge.json"),
+                ]
+            )
+
+        def wrong_port(receipt: dict) -> None:
+            receipt["edges"]["external_external"]["origin"] = (
+                "http://127.0.0.1:18104"
+            )
+
+        wrong_port_path = self.write_edge_receipt(wrong_port)
+        code, document, _ = self.run_selector(
+            mapping_path,
+            canonical_path,
+            "final",
+            "wrong-port.json",
+            edge_receipt_path=wrong_port_path,
+            fixture_receipt_path=fixture_path,
+            api_oracle_path=api_oracle_path,
+        )
+        self.assertEqual(code, 1)
+        self.assertIsNone(document)
+
+        def missing_fingerprint(receipt: dict) -> None:
+            receipt["edges"]["devplus_devplus"]["backend_sha256"] = ""
+
+        missing_fingerprint_path = self.write_edge_receipt(missing_fingerprint)
+        code, document, _ = self.run_selector(
+            mapping_path,
+            canonical_path,
+            "final",
+            "missing-fingerprint.json",
+            edge_receipt_path=missing_fingerprint_path,
+            fixture_receipt_path=fixture_path,
+            api_oracle_path=api_oracle_path,
+        )
+        self.assertEqual(code, 1)
+        self.assertIsNone(document)
+
+    def test_case_oracle_is_deterministic_and_changes_with_reviewed_actions(self):
+        mapping_path, canonical_path = self.write_inputs()
+        edge_path = self.write_edge_receipt()
+        fixture_path = self.write_fixture_receipt(mapping_path, canonical_path)
+        first_oracle = self.write_api_oracle(
+            mapping_path,
+            canonical_path,
+            edge_path,
+            fixture_path,
+        )
+        first_code, first, _ = self.run_selector(
+            mapping_path,
+            canonical_path,
+            "final",
+            "oracle-first.json",
+            edge_receipt_path=edge_path,
+            fixture_receipt_path=fixture_path,
+            api_oracle_path=first_oracle,
+        )
+
+        def change_actions(oracle: dict) -> None:
+            oracle["cases"][0]["allowed_actions"][0]["expected"] = ["preview"]
+
+        second_oracle = self.write_api_oracle(
+            mapping_path,
+            canonical_path,
+            edge_path,
+            fixture_path,
+            change_actions,
+        )
+        second_code, second, _ = self.run_selector(
+            mapping_path,
+            canonical_path,
+            "final",
+            "oracle-second.json",
+            edge_receipt_path=edge_path,
+            fixture_receipt_path=fixture_path,
+            api_oracle_path=second_oracle,
+        )
+        self.assertEqual((first_code, second_code), (0, 0))
+        first_case = first["samples"][0]["coverage_matrix"][0]
+        second_case = second["samples"][0]["coverage_matrix"][0]
+        self.assertNotEqual(first_case["oracle_sha256"], second_case["oracle_sha256"])
+        self.assertNotEqual(first["manifest_sha256"], second["manifest_sha256"])
+
+    def test_api_oracle_rejects_missing_or_unsafe_http_probe(self):
+        mapping_path, canonical_path = self.write_inputs()
+        edge_path = self.write_edge_receipt()
+        fixture_path = self.write_fixture_receipt(mapping_path, canonical_path)
+
+        def remove_probe(oracle: dict) -> None:
+            row = next(case for case in oracle["cases"] if case["http_probes"])
+            row["http_probes"] = []
+
+        missing_probe = self.write_api_oracle(
+            mapping_path,
+            canonical_path,
+            edge_path,
+            fixture_path,
+            remove_probe,
+        )
+        code, document, _ = self.run_selector(
+            mapping_path,
+            canonical_path,
+            "final",
+            "missing-probe.json",
+            edge_receipt_path=edge_path,
+            fixture_receipt_path=fixture_path,
+            api_oracle_path=missing_probe,
+        )
+        self.assertEqual(code, 1)
+        self.assertIsNone(document)
+
+        def unsafe_probe(oracle: dict) -> None:
+            row = next(case for case in oracle["cases"] if case["http_probes"])
+            row["http_probes"][0]["path"] = "//evil.example/asset"
+
+        unsafe = self.write_api_oracle(
+            mapping_path,
+            canonical_path,
+            edge_path,
+            fixture_path,
+            unsafe_probe,
+        )
+        code, document, _ = self.run_selector(
+            mapping_path,
+            canonical_path,
+            "final",
+            "unsafe-probe.json",
+            edge_receipt_path=edge_path,
+            fixture_receipt_path=fixture_path,
+            api_oracle_path=unsafe,
+        )
+        self.assertEqual(code, 1)
+        self.assertIsNone(document)
 
     def test_output_is_byte_for_byte_deterministic(self):
         mapping_path, canonical_path = self.write_inputs()
@@ -555,22 +1004,42 @@ class SelectComputerUseSamplesTests(unittest.TestCase):
             ):
                 requirements = case["requirements"]
                 self.assertTrue(requirements["requires_task_id"])
+                expected_assertions = {
+                    "page_matches_manifest",
+                    "assets_match",
+                    "allowed_actions_exact",
+                }
+                if case["combination"] == "devplus_external":
+                    expected_assertions.add(
+                        "approved_compatibility_difference_only"
+                    )
                 self.assertEqual(
-                    {
-                        "page_matches_manifest",
-                        "assets_match",
-                        "allowed_actions_exact",
-                    },
+                    expected_assertions,
                     set(requirements["required_assertions"]),
                 )
                 if case["combination"] == "devplus_devplus":
                     self.assertTrue(requirements["requires_revision_ids"])
                     self.assertTrue(requirements["requires_history_drawer"])
                     self.assertEqual(baseline["revision_ids"], case["revision_ids"])
+                    self.assertEqual(
+                        {"kind": "v8_resource_groups"},
+                        case["resource_oracle"],
+                    )
+                    self.assertEqual(baseline["resource_ids"], case["resource_ids"])
                 else:
                     self.assertFalse(requirements["requires_revision_ids"])
                     self.assertFalse(requirements["requires_history_drawer"])
                     self.assertEqual([], case["revision_ids"])
+                    self.assertEqual([], case["resource_ids"])
+                    self.assertRegex(
+                        case["resource_oracle"]["task_response_sha256"],
+                        r"^[0-9a-f]{64}$",
+                    )
+                    if case["combination"] == "devplus_external":
+                        self.assertEqual(
+                            "approved_compatibility_difference_only",
+                            case["resource_oracle"]["approved_assertion"],
+                        )
 
     def test_selector_rejects_conditional_core_assertion_weakening(self):
         catalog = json.loads(self.catalog.read_text(encoding="utf-8"))

@@ -36,6 +36,12 @@ EXPECTED_COMBINATIONS = {
     "devplus_external",
 }
 EXPECTED_VIEWPORTS = {"desktop", "mobile"}
+EXPECTED_EDGE_ORIGINS = {
+    "external_external": "http://127.0.0.1:18101",
+    "devplus_devplus": "http://127.0.0.1:18102",
+    "external_devplus": "http://127.0.0.1:18103",
+    "devplus_external": "http://127.0.0.1:18104",
+}
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 REQUIREMENT_FIELDS = (
     "requires_task_id",
@@ -122,6 +128,391 @@ def confirmed_time(value: Any) -> bool:
     return nonempty(value) and not str(value).startswith("0001-01-01T00:00:00")
 
 
+def validate_manifest_hash(
+    document: dict[str, Any],
+    field: str,
+    label: str,
+) -> str:
+    declared = document.get(field)
+    payload = dict(document)
+    payload.pop(field, None)
+    if (
+        not SHA256_RE.fullmatch(str(declared or ""))
+        or declared != canonical_sha256(payload)
+    ):
+        raise InputError(f"{label} has an invalid {field}")
+    return str(declared)
+
+
+def validate_edge_receipt(receipt: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    if (
+        receipt.get("schema_version") != SCHEMA_VERSION
+        or receipt.get("gate") != "G7"
+        or receipt.get("status") != "PASS"
+    ):
+        raise InputError("edge receipt must be schema_version=1, gate=G7, status=PASS")
+    validate_manifest_hash(receipt, "receipt_sha256", "edge receipt")
+    edges = receipt.get("edges")
+    if not isinstance(edges, dict) or set(edges) != EXPECTED_COMBINATIONS:
+        raise InputError("edge receipt must contain exactly the four G7 combinations")
+    normalized: dict[str, dict[str, Any]] = {}
+    for combination, expected_origin in EXPECTED_EDGE_ORIGINS.items():
+        edge = edges.get(combination)
+        if not isinstance(edge, dict):
+            raise InputError(f"edge receipt {combination} must be an object")
+        normalized_edge = {
+            "origin": edge.get("origin"),
+            "edge": edge.get("edge"),
+            "frontend_sha256": edge.get("frontend_sha256"),
+            "backend_sha256": edge.get("backend_sha256"),
+            "fixture_identity": edge.get("fixture_identity"),
+        }
+        if (
+            normalized_edge["origin"] != expected_origin
+            or normalized_edge["edge"] != combination
+        ):
+            raise InputError(
+                f"edge receipt {combination} must use fixed origin {expected_origin}"
+            )
+        if (
+            not SHA256_RE.fullmatch(str(normalized_edge["frontend_sha256"] or ""))
+            or not SHA256_RE.fullmatch(str(normalized_edge["backend_sha256"] or ""))
+            or not nonempty(normalized_edge["fixture_identity"])
+        ):
+            raise InputError(f"edge receipt {combination} has invalid fingerprints")
+        normalized[combination] = normalized_edge
+    return normalized
+
+
+def normalize_allowed_actions(value: Any, label: str) -> list[dict[str, Any]]:
+    if not isinstance(value, list) or not value:
+        raise InputError(f"{label} allowed_actions must be a non-empty array")
+    normalized: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for index, row in enumerate(value):
+        if not isinstance(row, dict) or set(row) != {"checkpoint", "expected"}:
+            raise InputError(f"{label} allowed_actions[{index}] has an invalid shape")
+        checkpoint = row.get("checkpoint")
+        expected = row.get("expected")
+        if (
+            not nonempty(checkpoint)
+            or checkpoint in seen
+            or not isinstance(expected, list)
+            or any(not nonempty(action) for action in expected)
+            or len(expected) != len(set(expected))
+        ):
+            raise InputError(f"{label} allowed_actions[{index}] is invalid")
+        seen.add(str(checkpoint))
+        normalized.append(
+            {
+                "checkpoint": str(checkpoint),
+                "expected": sorted(str(action) for action in expected),
+            }
+        )
+    return sorted(normalized, key=lambda row: row["checkpoint"])
+
+
+def normalize_http_probes(
+    value: Any,
+    required_statuses: list[int],
+    label: str,
+) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        raise InputError(f"{label} http_probes must be an array")
+    normalized: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for index, row in enumerate(value):
+        if not isinstance(row, dict) or set(row) != {
+            "kind",
+            "method",
+            "path",
+            "expected_status",
+        }:
+            raise InputError(f"{label} http_probes[{index}] has an invalid shape")
+        kind = row.get("kind")
+        path = row.get("path")
+        status = row.get("expected_status")
+        if (
+            not nonempty(kind)
+            or kind in seen
+            or row.get("method") != "GET"
+            or not nonempty(path)
+            or not str(path).startswith("/")
+            or str(path).startswith("//")
+            or "#" in str(path)
+            or ".." in Path(str(path)).parts
+            or not isinstance(status, int)
+            or isinstance(status, bool)
+            or status < 100
+            or status > 599
+        ):
+            raise InputError(f"{label} http_probes[{index}] is invalid or unsafe")
+        seen.add(str(kind))
+        normalized.append(
+            {
+                "kind": str(kind),
+                "method": "GET",
+                "path": str(path),
+                "expected_status": status,
+            }
+        )
+    if sorted(row["expected_status"] for row in normalized) != sorted(
+        required_statuses
+    ):
+        raise InputError(f"{label} http_probes do not match required HTTP statuses")
+    return sorted(normalized, key=lambda row: row["kind"])
+
+
+def normalize_resource_oracle(
+    value: Any,
+    combination: str,
+    scenario_id: str,
+    label: str,
+) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise InputError(f"{label} resource_oracle must be an object")
+    if combination == "devplus_devplus":
+        expected_kind = (
+            "v8_missing_resource_group"
+            if scenario_id == "missing_resource_group_negative"
+            else "v8_resource_groups"
+        )
+        if value != {"kind": expected_kind}:
+            raise InputError(f"{label} must use the V8 resource-group oracle")
+        return dict(value)
+    expected_kind = {
+        "external_external": "legacy_task_snapshot",
+        "external_devplus": "legacy_frontend_task_snapshot",
+        "devplus_external": "frontend_rollback_compatibility",
+    }.get(combination)
+    expected_keys = {"kind", "task_response_sha256"}
+    if combination == "devplus_external":
+        expected_keys.add("approved_assertion")
+    if (
+        expected_kind is None
+        or set(value) != expected_keys
+        or value.get("kind") != expected_kind
+        or not SHA256_RE.fullmatch(str(value.get("task_response_sha256") or ""))
+        or (
+            combination == "devplus_external"
+            and value.get("approved_assertion")
+            != "approved_compatibility_difference_only"
+        )
+    ):
+        raise InputError(f"{label} has an invalid explicit edge resource oracle")
+    return dict(value)
+
+
+def validate_api_oracle(
+    document: dict[str, Any],
+    scenarios: list[dict[str, Any]],
+    *,
+    catalog_sha256: str,
+    mapping_sha256: str,
+    canonical_entities_sha256: str | None,
+    edge_receipt_sha256: str,
+    fixture_receipt_sha256: str,
+) -> dict[tuple[str, str], dict[str, Any]]:
+    if (
+        document.get("schema_version") != SCHEMA_VERSION
+        or document.get("gate") != "G7"
+        or document.get("status") != "PASS"
+        or document.get("source_kind") != "reviewed_api_allowed_actions"
+    ):
+        raise InputError(
+            "API oracle must be a PASS reviewed_api_allowed_actions G7 document"
+        )
+    validate_manifest_hash(document, "manifest_sha256", "API oracle")
+    if (
+        not positive_int(document.get("reviewed_by"))
+        or not confirmed_time(document.get("reviewed_at"))
+        or not nonempty(document.get("review_note"))
+    ):
+        raise InputError("API oracle review identity, time, and note are required")
+    expected_inputs = {
+        "scenario_catalog_sha256": catalog_sha256,
+        "mapping_sha256": mapping_sha256,
+        "canonical_entities_sha256": canonical_entities_sha256,
+        "edge_receipt_sha256": edge_receipt_sha256,
+        "fixture_receipt_sha256": fixture_receipt_sha256,
+    }
+    if document.get("input_sha256") != expected_inputs:
+        raise InputError("API oracle is not bound to the frozen selector inputs")
+    rows = document.get("cases")
+    if not isinstance(rows, list):
+        raise InputError("API oracle cases must be an array")
+    expected_keys = {
+        (str(scenario["id"]), str(combination))
+        for scenario in scenarios
+        for combination in scenario["required_combinations"]
+    }
+    indexed: dict[tuple[str, str], dict[str, Any]] = {}
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            raise InputError(f"API oracle cases[{index}] must be an object")
+        key = (str(row.get("scenario_id", "")), str(row.get("combination", "")))
+        if key not in expected_keys or key in indexed:
+            raise InputError("API oracle contains an unexpected or duplicate case")
+        normalized = {
+            "scenario_id": key[0],
+            "combination": key[1],
+            "allowed_actions": normalize_allowed_actions(
+                row.get("allowed_actions"),
+                f"API oracle {key[0]}/{key[1]}",
+            ),
+            "http_probes": normalize_http_probes(
+                row.get("http_probes"),
+                requirements_for(
+                    next(
+                        scenario
+                        for scenario in scenarios
+                        if scenario["id"] == key[0]
+                    ),
+                    key[1],
+                )["required_http_statuses"],
+                f"API oracle {key[0]}/{key[1]}",
+            ),
+            "resource_oracle": normalize_resource_oracle(
+                row.get("resource_oracle"),
+                key[1],
+                key[0],
+                f"API oracle {key[0]}/{key[1]}",
+            ),
+        }
+        normalized["api_oracle_case_sha256"] = canonical_sha256(normalized)
+        indexed[key] = normalized
+    if set(indexed) != expected_keys:
+        raise InputError("API oracle does not cover every scenario/combination")
+    return indexed
+
+
+def validate_fixture_receipt(
+    document: dict[str, Any],
+    *,
+    catalog_sha256: str,
+    mapping_sha256: str,
+    canonical_entities_sha256: str | None,
+) -> dict[str, dict[str, Any]]:
+    if (
+        document.get("schema_version") != 2
+        or document.get("gate") != "G7"
+        or document.get("status") != "APPLIED_VERIFIED_PENDING_UI_AND_CLEANUP"
+        or document.get("production_write_performed") is not False
+        or document.get("clone_a_write_performed") is not False
+        or document.get("template_task_mutated") is not False
+    ):
+        raise InputError("fixture receipt is not a verified Clone B-only v2 receipt")
+    validate_manifest_hash(
+        document,
+        "receipt_payload_sha256",
+        "fixture receipt",
+    )
+    inputs = document.get("input_sha256")
+    if (
+        not isinstance(inputs, dict)
+        or inputs.get("scenarios") != catalog_sha256
+        or inputs.get("mapping") != mapping_sha256
+        or inputs.get("canonical") != canonical_entities_sha256
+    ):
+        raise InputError("fixture receipt is not bound to frozen selector inputs")
+    if (
+        document.get("nonfixture_integrity", {}).get("status") != "PASS"
+        or document.get("template_integrity", {}).get("status") != "PASS"
+        or document.get("row_verification", {}).get("status") != "PASS"
+        or document.get("api_verification", {}).get("status") != "PASS"
+    ):
+        raise InputError("fixture receipt integrity or API verification is not PASS")
+    scenario_ids = document.get("scenario_ids")
+    scenarios = document.get("created_rows", {}).get("scenarios")
+    fixture_plans = document.get("fixture_plans")
+    if (
+        not isinstance(scenario_ids, list)
+        or len(scenario_ids) != len(set(scenario_ids))
+        or not isinstance(scenarios, dict)
+        or set(scenarios) != set(scenario_ids)
+        or not isinstance(fixture_plans, dict)
+        or set(fixture_plans) != set(scenario_ids)
+    ):
+        raise InputError("fixture receipt scenario coverage is invalid")
+    normalized: dict[str, dict[str, Any]] = {}
+    for scenario_id in scenario_ids:
+        row = scenarios.get(scenario_id)
+        if not isinstance(row, dict):
+            raise InputError(f"fixture receipt {scenario_id} row is invalid")
+        normalized[str(scenario_id)] = {
+            "created": row,
+            "fixture_plan": fixture_plans[scenario_id],
+        }
+    return normalized
+
+
+def resolve_fixture_selection(
+    *,
+    scenario_id: str,
+    fixture_plan: dict[str, Any],
+    fixture_receipt_row: dict[str, Any],
+    fixture_receipt_sha256: str,
+    task_id: int,
+    resource_ids: list[str],
+    revision_ids: list[int],
+    revision_facts: list[dict[str, Any]],
+) -> tuple[int, list[str], list[int], list[dict[str, Any]], dict[str, Any]]:
+    if fixture_receipt_row.get("fixture_plan") != fixture_plan:
+        raise InputError(f"fixture receipt plan drift for {scenario_id}")
+    created = fixture_receipt_row["created"]
+    kind = fixture_plan["fixture_kind"]
+    runtime_task_id = task_id
+    runtime_resource_ids = list(resource_ids)
+    runtime_revision_ids = list(revision_ids)
+    runtime_revision_facts = list(revision_facts)
+    if kind == "permission_denied_identity":
+        if (
+            created.get("template_task_id") != task_id
+            or not positive_int(created.get("template_task_asset_id"))
+            or not positive_int(created.get("fixture_user_id"))
+            or not nonempty(created.get("session_id"))
+        ):
+            raise InputError(f"fixture receipt permission identity is invalid for {scenario_id}")
+    else:
+        if not positive_int(created.get("task_id")):
+            raise InputError(f"fixture receipt task_id is invalid for {scenario_id}")
+        runtime_task_id = int(created["task_id"])
+        runtime_resource_ids = [
+            f"task_asset_group:{int(value)}"
+            for value in created.get("group_ids", [])
+            if positive_int(value)
+        ]
+        runtime_revision_ids = [
+            int(value)
+            for value in created.get("revision_ids", [])
+            if positive_int(value)
+        ]
+        if len(runtime_resource_ids) != len(created.get("group_ids", [])) or len(
+            runtime_revision_ids
+        ) != len(created.get("revision_ids", [])):
+            raise InputError(f"fixture receipt IDs are invalid for {scenario_id}")
+        runtime_revision_facts = [
+            {
+                "runtime_revision_id": revision_id,
+                "fixture_receipt_sha256": fixture_receipt_sha256,
+            }
+            for revision_id in runtime_revision_ids
+        ]
+    runtime_resolution = {
+        "source": "verified_clone_b_fixture_receipt_v2",
+        "fixture_receipt_sha256": fixture_receipt_sha256,
+        "fixture_kind": kind,
+        "created": created,
+    }
+    return (
+        runtime_task_id,
+        runtime_resource_ids,
+        runtime_revision_ids,
+        runtime_revision_facts,
+        runtime_resolution,
+    )
+
+
 def validate_requirement_block(value: Any, label: str) -> dict[str, Any]:
     if not isinstance(value, dict) or set(value) != set(REQUIREMENT_FIELDS):
         raise InputError(f"{label} must declare the exact requirement fields")
@@ -166,6 +557,20 @@ def requirements_for(
     if isinstance(conditional, dict) and combination in conditional:
         return conditional[combination]
     return {field: scenario[field] for field in REQUIREMENT_FIELDS}
+
+
+def expected_assertions_for(
+    scenario_id: str,
+    combination: str,
+    base_assertions: list[str],
+) -> set[str]:
+    expected = set(base_assertions)
+    if (
+        scenario_id == "baseline_four_edge_readonly"
+        and combination == "devplus_external"
+    ):
+        expected.add("approved_compatibility_difference_only")
+    return expected
 
 
 def validate_catalog(catalog: dict[str, Any]) -> list[dict[str, Any]]:
@@ -243,8 +648,10 @@ def validate_catalog(catalog: dict[str, Any]) -> list[dict[str, Any]]:
                     raise InputError(
                         f"scenario {scenario_id}/{combination} cannot weaken HTTP statuses"
                     )
-                if set(requirements["required_assertions"]) != set(
-                    base["required_assertions"]
+                if set(requirements["required_assertions"]) != expected_assertions_for(
+                    str(scenario_id),
+                    combination,
+                    base["required_assertions"],
                 ):
                     raise InputError(
                         f"scenario {scenario_id}/{combination} cannot weaken assertions"
@@ -1190,10 +1597,59 @@ def fixture_plan(
     return plan
 
 
+def build_case_oracle(
+    *,
+    scenario_id: str,
+    combination: str,
+    viewport: str,
+    task_id: int,
+    resource_ids: list[str],
+    revision_ids: list[int],
+    revision_facts: list[dict[str, Any]],
+    requirements: dict[str, Any],
+    allowed_actions_oracle: dict[str, Any],
+    oracle_context: dict[str, Any],
+) -> str:
+    return canonical_sha256(
+        {
+            "schema_version": SCHEMA_VERSION,
+            "scenario_id": scenario_id,
+            "combination": combination,
+            "viewport": viewport,
+            "reviewed_mapping_sha256": oracle_context["mapping_sha256"],
+            "canonical_entities_sha256": oracle_context[
+                "canonical_entities_sha256"
+            ],
+            "scenario_catalog_sha256": oracle_context[
+                "scenario_catalog_sha256"
+            ],
+            "api_oracle_sha256": oracle_context["api_oracle_sha256"],
+            "fixture_receipt_sha256": oracle_context[
+                "fixture_receipt_sha256"
+            ],
+            "api_oracle_case_sha256": allowed_actions_oracle[
+                "api_oracle_case_sha256"
+            ],
+            "task_id": task_id,
+            "resource_ids": resource_ids,
+            "revision_ids": revision_ids,
+            "revision_facts_sha256": canonical_sha256(revision_facts),
+            "requirements": requirements,
+            "allowed_actions": allowed_actions_oracle["allowed_actions"],
+            "http_probes": allowed_actions_oracle["http_probes"],
+            "resource_oracle": allowed_actions_oracle["resource_oracle"],
+        }
+    )
+
+
 def build_sample(
     scenario: dict[str, Any],
     facts: Facts,
     mode: str,
+    allowed_actions_by_case: dict[tuple[str, str], dict[str, Any]],
+    oracle_context: dict[str, Any],
+    fixture_rows: dict[str, dict[str, Any]],
+    fixture_receipt_sha256: str,
 ) -> tuple[dict[str, Any] | None, str | None]:
     resources, extra_evidence, rationale, fixture = choose_scenario(scenario["id"], facts)
     if not resources or not rationale:
@@ -1266,6 +1722,30 @@ def build_sample(
             seen_evidence.add(digest)
             deduplicated.append(row)
 
+    runtime_resolution: dict[str, Any] | None = None
+    if fixture:
+        receipt_row = fixture_rows.get(str(scenario["id"]))
+        if receipt_row is None:
+            raise InputError(
+                f"fixture receipt does not resolve scenario {scenario['id']}"
+            )
+        (
+            task_id,
+            resource_keys,
+            revision_ids,
+            revision_facts,
+            runtime_resolution,
+        ) = resolve_fixture_selection(
+            scenario_id=str(scenario["id"]),
+            fixture_plan=fixture,
+            fixture_receipt_row=receipt_row,
+            fixture_receipt_sha256=fixture_receipt_sha256,
+            task_id=task_id,
+            resource_ids=resource_keys,
+            revision_ids=revision_ids,
+            revision_facts=revision_facts,
+        )
+
     combination_requirements = [
         requirements_for(scenario, combination)
         for combination in scenario["required_combinations"]
@@ -1276,22 +1756,46 @@ def build_sample(
     ):
         return None, f"selector {scenario['id']} found no revision IDs"
     sample_status = "READY" if mode == "final" else "PENDING"
-    matrix = [
-        {
-            "combination": combination,
-            "viewport": viewport,
-            "requirements": requirements_for(scenario, combination),
-            "task_id": task_id,
-            "resource_ids": resource_keys,
-            "revision_ids": (
-                revision_ids
-                if requirements_for(scenario, combination)["requires_revision_ids"]
-                else []
-            ),
-        }
-        for combination in scenario["required_combinations"]
-        for viewport in scenario["required_viewports"]
-    ]
+    matrix: list[dict[str, Any]] = []
+    for combination in scenario["required_combinations"]:
+        requirements = requirements_for(scenario, combination)
+        actions_oracle = allowed_actions_by_case[
+            (str(scenario["id"]), str(combination))
+        ]
+        resource_oracle = actions_oracle["resource_oracle"]
+        uses_v8_groups = resource_oracle["kind"] == "v8_resource_groups"
+        case_resource_ids = resource_keys if uses_v8_groups else []
+        case_revision_ids = (
+            revision_ids
+            if uses_v8_groups and requirements["requires_revision_ids"]
+            else []
+        )
+        for viewport in scenario["required_viewports"]:
+            matrix.append(
+                {
+                    "combination": combination,
+                    "viewport": viewport,
+                    "requirements": requirements,
+                    "task_id": task_id,
+                    "resource_ids": case_resource_ids,
+                    "revision_ids": case_revision_ids,
+                    "resource_oracle": resource_oracle,
+                    "allowed_actions": actions_oracle["allowed_actions"],
+                    "http_probes": actions_oracle["http_probes"],
+                    "oracle_sha256": build_case_oracle(
+                        scenario_id=str(scenario["id"]),
+                        combination=str(combination),
+                        viewport=str(viewport),
+                        task_id=task_id,
+                        resource_ids=case_resource_ids,
+                        revision_ids=case_revision_ids,
+                        revision_facts=revision_facts,
+                        requirements=requirements,
+                        allowed_actions_oracle=actions_oracle,
+                        oracle_context=oracle_context,
+                    ),
+                }
+            )
     task_facts = {
         "task_type": facts.tasks.get(task_id, {}).get("task_type"),
         "task_status": facts.tasks.get(task_id, {}).get("task_status"),
@@ -1330,6 +1834,12 @@ def build_sample(
     }
     if fixture:
         sample["fixture_plan"] = fixture
+        sample["runtime_resolution"] = runtime_resolution
+        if fixture["fixture_kind"] != "permission_denied_identity":
+            sample["resource_identity_kind"] = "clone_b_runtime_group_id"
+            sample["resource_keys"] = []
+            sample["revision_locators"] = []
+            sample["revision_id_derivation"] = "verified_clone_b_fixture_receipt_v2"
     sample["sample_sha256"] = canonical_sha256(sample)
     return sample, None
 
@@ -1338,6 +1848,9 @@ def build_manifest(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     catalog_path = Path(args.scenarios)
     mapping_path = Path(args.mapping)
     canonical_path = Path(args.canonical_entities) if args.canonical_entities else None
+    edge_receipt_path = Path(args.edge_receipt)
+    fixture_receipt_path = Path(args.fixture_receipt)
+    api_oracle_path = Path(args.api_oracle)
     catalog = load_json(catalog_path, "scenario catalog")
     scenarios = validate_catalog(catalog)
     mapping = load_json(mapping_path, "mapping")
@@ -1351,6 +1864,7 @@ def build_manifest(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     if args.mode == "final" and canonical_path is None:
         raise InputError("final mode requires --canonical-entities")
     mapping_hash = file_sha256(mapping_path)
+    catalog_hash = file_sha256(catalog_path)
     canonical: dict[tuple[str, str], dict[str, Any]] = {}
     canonical_hash: str | None = None
     if canonical_path is not None:
@@ -1360,12 +1874,48 @@ def build_manifest(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
             mapping_hash,
             args.mode == "final",
         )
+    edge_receipt = load_json(edge_receipt_path, "edge receipt")
+    sealed_edges = validate_edge_receipt(edge_receipt)
+    edge_receipt_hash = file_sha256(edge_receipt_path)
+    fixture_receipt = load_json(fixture_receipt_path, "fixture receipt")
+    fixture_receipt_hash = file_sha256(fixture_receipt_path)
+    fixture_rows = validate_fixture_receipt(
+        fixture_receipt,
+        catalog_sha256=catalog_hash,
+        mapping_sha256=mapping_hash,
+        canonical_entities_sha256=canonical_hash,
+    )
+    api_oracle = load_json(api_oracle_path, "API oracle")
+    allowed_actions_by_case = validate_api_oracle(
+        api_oracle,
+        scenarios,
+        catalog_sha256=catalog_hash,
+        mapping_sha256=mapping_hash,
+        canonical_entities_sha256=canonical_hash,
+        edge_receipt_sha256=edge_receipt_hash,
+        fixture_receipt_sha256=fixture_receipt_hash,
+    )
+    oracle_context = {
+        "scenario_catalog_sha256": catalog_hash,
+        "mapping_sha256": mapping_hash,
+        "canonical_entities_sha256": canonical_hash,
+        "api_oracle_sha256": api_oracle["manifest_sha256"],
+        "fixture_receipt_sha256": fixture_receipt_hash,
+    }
     facts = Facts(mapping, canonical, canonical_hash)
 
     samples: list[dict[str, Any]] = []
     blockers: list[dict[str, Any]] = []
     for scenario in scenarios:
-        sample, failure = build_sample(scenario, facts, args.mode)
+        sample, failure = build_sample(
+            scenario,
+            facts,
+            args.mode,
+            allowed_actions_by_case,
+            oracle_context,
+            fixture_rows,
+            fixture_receipt_hash,
+        )
         if failure:
             blockers.append(
                 {
@@ -1397,9 +1947,22 @@ def build_manifest(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
         "mode": args.mode,
         "status": status,
         "input_sha256": {
-            "scenario_catalog_sha256": file_sha256(catalog_path),
+            "scenario_catalog_sha256": catalog_hash,
             "mapping_sha256": mapping_hash,
             "canonical_entities_sha256": canonical_hash,
+            "edge_receipt_sha256": edge_receipt_hash,
+            "fixture_receipt_sha256": fixture_receipt_hash,
+            "api_oracle_sha256": file_sha256(api_oracle_path),
+        },
+        "sealed_edges": sealed_edges,
+        "oracle_contract": {
+            "kind": "reviewed_api_allowed_actions_v1",
+            "edge_receipt_manifest_sha256": edge_receipt["receipt_sha256"],
+            "api_oracle_manifest_sha256": api_oracle["manifest_sha256"],
+            "fixture_receipt_payload_sha256": fixture_receipt[
+                "receipt_payload_sha256"
+            ],
+            "executor_supplied_oracle_forbidden": True,
         },
         "mapping_review": {
             "status": "PASS" if not review_failures else "PENDING",
@@ -1460,6 +2023,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--scenarios", required=True)
     parser.add_argument("--mapping", required=True)
     parser.add_argument("--canonical-entities")
+    parser.add_argument("--edge-receipt", required=True)
+    parser.add_argument("--fixture-receipt", required=True)
+    parser.add_argument("--api-oracle", required=True)
     parser.add_argument("--mode", choices=("final", "prepare"), required=True)
     parser.add_argument("--output", required=True)
     return parser.parse_args(argv)
