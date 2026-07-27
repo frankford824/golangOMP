@@ -527,7 +527,7 @@ class RunG4CloneRehearsalTest(unittest.TestCase):
                 names.index("workflow_rollback"), names.index("bundle_rollback")
             )
 
-    def test_failed_search_rollback_skips_dependent_cleanup(self):
+    def test_failed_search_rollback_continues_independent_cleanup(self):
         with tempfile.TemporaryDirectory() as raw:
             args = self.make_inputs(raw, fail_hook="search_rollback")
             report = MODULE.run(args)
@@ -538,25 +538,25 @@ class RunG4CloneRehearsalTest(unittest.TestCase):
                 "bundle_rollback",
                 "recovery_rollback",
             ):
-                self.assertEqual(by_name[step]["exit_code"], 125)
+                self.assertEqual(by_name[step]["exit_code"], 0)
             self.assertEqual(
                 by_name["validate_after_rollback_fingerprint"]["exit_code"], 0
             )
 
-    def test_failed_workflow_rollback_skips_bundle_and_recovery(self):
+    def test_failed_workflow_rollback_continues_bundle_and_recovery(self):
         with tempfile.TemporaryDirectory() as raw:
             args = self.make_inputs(raw, fail_workflow_rollback=True)
             report = MODULE.run(args)
             by_name = {row["step"]: row for row in report["steps"]}
             self.assertEqual(by_name["search_rollback"]["exit_code"], 0)
             self.assertEqual(by_name["workflow_rollback"]["exit_code"], 7)
-            self.assertEqual(by_name["bundle_rollback"]["exit_code"], 125)
-            self.assertEqual(by_name["recovery_rollback"]["exit_code"], 125)
+            self.assertEqual(by_name["bundle_rollback"]["exit_code"], 0)
+            self.assertEqual(by_name["recovery_rollback"]["exit_code"], 0)
             self.assertEqual(
                 by_name["validate_after_rollback_fingerprint"]["exit_code"], 0
             )
 
-    def test_failed_bundle_rollback_skips_recovery(self):
+    def test_failed_bundle_rollback_still_runs_recovery(self):
         with tempfile.TemporaryDirectory() as raw:
             args = self.make_inputs(raw, fail_hook="bundle_rollback")
             report = MODULE.run(args)
@@ -564,7 +564,7 @@ class RunG4CloneRehearsalTest(unittest.TestCase):
             self.assertEqual(by_name["search_rollback"]["exit_code"], 0)
             self.assertEqual(by_name["workflow_rollback"]["exit_code"], 0)
             self.assertEqual(by_name["bundle_rollback"]["exit_code"], 7)
-            self.assertEqual(by_name["recovery_rollback"]["exit_code"], 125)
+            self.assertEqual(by_name["recovery_rollback"]["exit_code"], 0)
             self.assertEqual(
                 by_name["validate_after_rollback_fingerprint"]["exit_code"], 0
             )

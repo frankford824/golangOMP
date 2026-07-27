@@ -704,7 +704,6 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         ("bundle_rollback", "bundle"),
         ("recovery_rollback", "recovery"),
     )
-    failed_rollback_prerequisite: str | None = None
     for step, component in rollback_specs:
         phase = "rollback"
         if not clone_db_quiescent:
@@ -715,17 +714,6 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
                     run_dir,
                     "blocked because a timed-out process group could not be "
                     "proven quiescent",
-                )
-            )
-            continue
-        if failed_rollback_prerequisite is not None:
-            records.append(
-                skipped_record(
-                    step,
-                    phase,
-                    run_dir,
-                    "blocked because rollback prerequisite "
-                    f"{failed_rollback_prerequisite} failed",
                 )
             )
             continue
@@ -761,8 +749,6 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         failed = failed or record["exit_code"] != 0
         if record["exit_code"] == 121:
             clone_db_quiescent = False
-        if record["exit_code"] != 0:
-            failed_rollback_prerequisite = step
 
     step = "validate_after_rollback_fingerprint"
     if clone_db_quiescent:
