@@ -49,6 +49,9 @@ func (s *taskEventService) ListByTaskID(ctx context.Context, taskID int64) ([]*d
 	if task == nil {
 		return nil, domain.ErrNotFound
 	}
+	if appErr := AuthorizeTaskReadDetail(ctx, task, nil); appErr != nil {
+		return nil, appErr
+	}
 
 	events, err := s.taskEventRepo.ListByTaskID(ctx, taskID)
 	if err != nil {

@@ -53,6 +53,30 @@ func TestTaskEventServiceListByTaskIDEnrichesActorNames(t *testing.T) {
 	}
 }
 
+func TestTaskEventServiceRejectsOutOfScopeActorBeforeReadingEvents(t *testing.T) {
+	eventRepo := &taskEventRepoStub{events: []*domain.TaskEvent{{ID: "sensitive-event", TaskID: 1000}}}
+	svc := NewTaskEventService(eventRepo, &taskEventTaskRepoStub{task: &domain.Task{
+		ID:         1000,
+		TaskType:   domain.TaskTypeNewProductDevelopment,
+		TaskStatus: domain.TaskStatusCompleted,
+		CreatorID:  999,
+	}})
+
+	events, appErr := svc.ListByTaskID(
+		domain.WithRequestActor(context.Background(), taskActionTestActor(231, domain.PermissionTaskView, domain.AccessScopeSelf)),
+		1000,
+	)
+	if appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
+		t.Fatalf("ListByTaskID() appErr = %+v, want PERMISSION_DENIED", appErr)
+	}
+	if events != nil {
+		t.Fatalf("ListByTaskID() events = %+v, want nil", events)
+	}
+	if eventRepo.listCalls != 0 {
+		t.Fatalf("event repo list calls = %d, want 0", eventRepo.listCalls)
+	}
+}
+
 type taskEventNameResolverStub struct {
 	names map[int64]string
 }
@@ -62,7 +86,8 @@ func (r taskEventNameResolverStub) GetDisplayName(_ context.Context, userID int6
 }
 
 type taskEventRepoStub struct {
-	events []*domain.TaskEvent
+	events    []*domain.TaskEvent
+	listCalls int
 }
 
 func (r *taskEventRepoStub) Append(context.Context, repo.Tx, int64, string, *int64, interface{}) (*domain.TaskEvent, error) {
@@ -70,6 +95,7 @@ func (r *taskEventRepoStub) Append(context.Context, repo.Tx, int64, string, *int
 }
 
 func (r *taskEventRepoStub) ListByTaskID(context.Context, int64) ([]*domain.TaskEvent, error) {
+	r.listCalls++
 	return r.events, nil
 }
 

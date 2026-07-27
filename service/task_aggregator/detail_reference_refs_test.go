@@ -190,6 +190,76 @@ func TestDetailServiceUsesSingleReadBundleWithoutFallbackQueries(t *testing.T) {
 	}
 }
 
+func TestDetailServiceEnforcesEffectiveTaskScopeBeforeHydratingBundle(t *testing.T) {
+	const (
+		taskID  = int64(1000)
+		actorID = int64(231)
+	)
+	bundle := &domain.TaskDetailReadBundle{
+		Task: &domain.Task{
+			ID:         taskID,
+			TaskType:   domain.TaskTypeNewProductDevelopment,
+			TaskStatus: domain.TaskStatusCompleted,
+			CreatorID:  999,
+		},
+		TaskDetail: &domain.TaskDetail{
+			TaskID:                taskID,
+			ReferenceFileRefsJSON: `[{"asset_id":"sensitive-ref","download_url":"https://controlled.example/ref"}]`,
+		},
+		TaskAssets: []*domain.TaskAsset{{
+			ID:         501,
+			TaskID:     taskID,
+			AssetType:  domain.TaskAssetTypeDelivery,
+			FileName:   "sensitive.png",
+			StorageKey: strPtr("tasks/1000/sensitive.png"),
+		}},
+	}
+	svc := NewDetailService(
+		bundledTaskRepoStub{detailTaskRepoStub: detailTaskRepoStub{}, bundle: bundle},
+		panicDetailModuleRepo{}, panicDetailEventRepo{}, panicDetailReferenceRepo{},
+		WithTaskAssetRepo(panicDetailAssetRepo{}),
+		WithReferenceFileRefEnricher(panicDetailReferenceEnricher{}),
+	)
+
+	detail, err := svc.Get(detailScopeContext(actorID, domain.AccessScopeSelf), taskID)
+	if detail != nil {
+		t.Fatalf("Get() detail = %+v, want nil for out-of-scope actor", detail)
+	}
+	appErr, ok := err.(*domain.AppError)
+	if !ok || appErr.Code != domain.ErrCodePermissionDenied {
+		t.Fatalf("Get() error = %#v, want PERMISSION_DENIED", err)
+	}
+
+	bundle.Task.CreatorID = actorID
+	allowedSvc := NewDetailService(
+		bundledTaskRepoStub{detailTaskRepoStub: detailTaskRepoStub{}, bundle: bundle},
+		panicDetailModuleRepo{}, panicDetailEventRepo{}, panicDetailReferenceRepo{},
+		WithTaskAssetRepo(panicDetailAssetRepo{}),
+	)
+	detail, err = allowedSvc.Get(detailScopeContext(actorID, domain.AccessScopeSelf), taskID)
+	if err != nil {
+		t.Fatalf("Get() legal self-scope error = %v", err)
+	}
+	if detail == nil || detail.Task == nil || detail.Task.ID != taskID {
+		t.Fatalf("Get() legal self-scope detail = %+v", detail)
+	}
+}
+
+func detailScopeContext(actorID int64, scope domain.AccessScopeMode) context.Context {
+	const roleID int64 = 901
+	effective := &domain.EffectiveAccess{
+		UserID:      actorID,
+		Permissions: []domain.PermissionCode{domain.PermissionTaskView},
+		Assignments: []domain.AccessAssignment{{RoleID: roleID, UserID: actorID, ScopeMode: scope}},
+		Sources:     []domain.EffectiveAccessNote{{RoleID: roleID, Permission: domain.PermissionTaskView, ScopeMode: scope}},
+	}
+	return domain.WithRequestActor(context.Background(), domain.RequestActor{
+		ID:              actorID,
+		Permissions:     effective.Permissions,
+		EffectiveAccess: effective,
+	})
+}
+
 type detailNameResolverStub struct {
 	names map[int64]string
 }
@@ -242,6 +312,12 @@ type panicDetailNameResolver struct{}
 
 func (panicDetailNameResolver) GetDisplayName(context.Context, int64) string {
 	panic("fallback user query must not run")
+}
+
+type panicDetailReferenceEnricher struct{}
+
+func (panicDetailReferenceEnricher) EnrichAll([]domain.ReferenceFileRef) []domain.ReferenceFileRef {
+	panic("out-of-scope detail must not hydrate controlled reference URLs")
 }
 
 func (r detailTaskRepoStub) GetByID(context.Context, int64) (*domain.Task, error) {

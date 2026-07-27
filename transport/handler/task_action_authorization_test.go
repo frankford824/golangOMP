@@ -14,6 +14,7 @@ import (
 	"workflow/domain"
 	"workflow/repo"
 	"workflow/service"
+	"workflow/service/task_aggregator"
 )
 
 func TestTaskActionRouteAuthorizationRegression(t *testing.T) {
@@ -56,6 +57,27 @@ func TestTaskActionRouteAuthorizationRegression(t *testing.T) {
 		if rec.Code != http.StatusForbidden {
 			t.Fatalf("legacy role-only read code=%d body=%s, want 403", rec.Code, rec.Body.String())
 		}
+	})
+
+	t.Run("aggregate_detail_rejects_out_of_scope_self_actor", func(t *testing.T) {
+		taskRepo := &routeTaskRepo{
+			tasks: map[int64]*domain.Task{
+				1000: {
+					ID:         1000,
+					TaskNo:     "T-1000",
+					TaskType:   domain.TaskTypeNewProductDevelopment,
+					TaskStatus: domain.TaskStatusCompleted,
+					CreatorID:  999,
+				},
+			},
+		}
+		h := NewTaskDetailHandler(task_aggregator.NewDetailService(taskRepo, nil, nil, nil))
+		router := gin.New()
+		router.Use(routeActor(routeCapabilityActorWithScope(231, domain.PermissionTaskView, domain.AccessScopeSelf)))
+		router.GET("/v1/tasks/:id/detail", h.GetByTaskID)
+
+		rec := performJSON(router, http.MethodGet, "/v1/tasks/1000/detail", "")
+		assertTaskPermissionDenied(t, rec, "permission_or_scope_denied")
 	})
 
 	t.Run("assign_allow_and_deny", func(t *testing.T) {
@@ -166,14 +188,18 @@ func TestTaskActionRouteAuthorizationRegression(t *testing.T) {
 }
 
 func routeCapabilityActor(id int64, permission domain.PermissionCode) domain.RequestActor {
+	return routeCapabilityActorWithScope(id, permission, domain.AccessScopeGlobal)
+}
+
+func routeCapabilityActorWithScope(id int64, permission domain.PermissionCode, scope domain.AccessScopeMode) domain.RequestActor {
 	roleID := int64(1)
 	return domain.RequestActor{
 		ID: id,
 		EffectiveAccess: &domain.EffectiveAccess{
 			UserID:      id,
 			Permissions: []domain.PermissionCode{permission},
-			Assignments: []domain.AccessAssignment{{RoleID: roleID, UserID: id, ScopeMode: domain.AccessScopeGlobal}},
-			Sources:     []domain.EffectiveAccessNote{{RoleID: roleID, Permission: permission, ScopeMode: domain.AccessScopeGlobal}},
+			Assignments: []domain.AccessAssignment{{RoleID: roleID, UserID: id, ScopeMode: scope}},
+			Sources:     []domain.EffectiveAccessNote{{RoleID: roleID, Permission: permission, ScopeMode: scope}},
 		},
 	}
 }

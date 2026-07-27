@@ -53,7 +53,12 @@ func loadTaskDesignAssetReadModel(
 		return []*domain.DesignAsset{}, []*domain.DesignAssetVersion{}, nil
 	}
 	versionsByAssetID := make(map[int64][]*domain.DesignAssetVersion, len(designAssets))
+	migrationSourceAliasIDs := make(map[int64]struct{})
 	for _, record := range records {
+		if isWorkflowMigrationSourceAlias(record) {
+			migrationSourceAliasIDs[record.ID] = struct{}{}
+			continue
+		}
 		version := buildTaskAssetVersionForReadModel(record)
 		if version == nil {
 			continue
@@ -65,6 +70,17 @@ func loadTaskDesignAssetReadModel(
 	for _, asset := range designAssets {
 		if asset == nil {
 			continue
+		}
+		if asset.CurrentVersionID != nil {
+			if _, aliasIsCurrent := migrationSourceAliasIDs[*asset.CurrentVersionID]; aliasIsCurrent {
+				return nil, nil, infraError(
+					"build task design asset read model",
+					fmt.Errorf(
+						"workflow migration source alias %d cannot be design asset %d current version",
+						*asset.CurrentVersionID, asset.ID,
+					),
+				)
+			}
 		}
 		versions := versionsByAssetID[asset.ID]
 		sort.SliceStable(versions, func(i, j int) bool {
@@ -120,6 +136,9 @@ func buildTaskLevelFallbackDesignAssetReadModel(task *domain.Task, records []*do
 	versionsByAssetID := make(map[int64][]*domain.DesignAssetVersion)
 
 	for _, record := range records {
+		if isWorkflowMigrationSourceAlias(record) {
+			continue
+		}
 		version := buildTaskAssetVersionForReadModel(record)
 		if version == nil {
 			continue

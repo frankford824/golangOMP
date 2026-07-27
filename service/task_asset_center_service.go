@@ -311,7 +311,11 @@ func (s *taskAssetCenterService) ListAssetResources(ctx context.Context, params 
 		filter.AssetType = &normalized
 	}
 	if params.TaskID != nil {
-		if _, appErr := s.requireTask(ctx, *params.TaskID); appErr != nil {
+		task, appErr := s.requireTask(ctx, *params.TaskID)
+		if appErr != nil {
+			return nil, appErr
+		}
+		if appErr := authorizeTaskAssetList(ctx, task); appErr != nil {
 			return nil, appErr
 		}
 	}
@@ -726,12 +730,9 @@ func (s *taskAssetCenterService) ListVersions(ctx context.Context, taskID, asset
 	if err != nil {
 		return nil, infraError("list design asset versions", err)
 	}
-	versions := make([]*domain.DesignAssetVersion, 0, len(records))
-	for _, record := range records {
-		if version := domain.BuildDesignAssetVersion(record); version != nil {
-			s.applyDesignAssetVersionDerivedFields(task, asset, version)
-			versions = append(versions, version)
-		}
+	versions, err := s.buildLegacyDesignAssetVersions(task, asset, records)
+	if err != nil {
+		return nil, infraError("list design asset versions", err)
 	}
 	enrichDesignAssetVersionUploaderNames(ctx, s.userDisplayNameResolver, versions)
 	s.applyDesignAssetVersionRoles(task, asset, versions)

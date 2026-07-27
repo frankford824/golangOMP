@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"errors"
+
 	"github.com/gin-gonic/gin"
 
 	"workflow/domain"
@@ -29,6 +31,11 @@ func (h *TaskDetailHandler) GetByTaskID(c *gin.Context) {
 	}
 	aggregate, err := h.r3Svc.Get(c.Request.Context(), taskID)
 	if err != nil {
+		var appErr *domain.AppError
+		if errors.As(err, &appErr) {
+			respondError(c, appErr)
+			return
+		}
 		respondError(c, domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil))
 		return
 	}

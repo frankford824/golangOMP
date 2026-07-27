@@ -27,16 +27,51 @@ func (s *taskAssetCenterService) hydrateDesignAssetReadModel(ctx context.Context
 	if err != nil {
 		return err
 	}
+	versions, err := s.buildLegacyDesignAssetVersions(task, asset, records)
+	if err != nil {
+		return err
+	}
+	enrichDesignAssetVersionUploaderNames(ctx, s.userDisplayNameResolver, versions)
+	s.applyDesignAssetVersionRoles(task, asset, versions)
+	return nil
+}
+
+func (s *taskAssetCenterService) buildLegacyDesignAssetVersions(
+	task *domain.Task,
+	asset *domain.DesignAsset,
+	records []*domain.TaskAsset,
+) ([]*domain.DesignAssetVersion, error) {
 	versions := make([]*domain.DesignAssetVersion, 0, len(records))
 	for _, record := range records {
+		if isWorkflowMigrationSourceAlias(record) {
+			if asset.CurrentVersionID != nil && *asset.CurrentVersionID == record.ID {
+				return nil, fmt.Errorf(
+					"workflow migration source alias %d cannot be design asset %d current version",
+					record.ID, asset.ID,
+				)
+			}
+			continue
+		}
 		if version := domain.BuildDesignAssetVersion(record); version != nil {
 			s.applyDesignAssetVersionDerivedFields(task, asset, version)
 			versions = append(versions, version)
 		}
 	}
-	enrichDesignAssetVersionUploaderNames(ctx, s.userDisplayNameResolver, versions)
-	s.applyDesignAssetVersionRoles(task, asset, versions)
-	return nil
+	return versions, nil
+}
+
+// isWorkflowMigrationSourceAlias identifies the synthetic source identity used
+// only by immutable V8 resource-group revisions when a legacy delivery had to
+// stand in for a missing source file. The row deliberately shares the legacy
+// design_assets root so object lineage remains intact, but it must not enter
+// that root's current/approved version projection.
+func isWorkflowMigrationSourceAlias(record *domain.TaskAsset) bool {
+	if record == nil {
+		return false
+	}
+	return domain.NormalizeTaskAssetType(record.AssetType).IsSource() &&
+		strings.TrimSpace(record.SourceModuleKey) == "migration" &&
+		strings.HasPrefix(strings.TrimSpace(record.Remark), "v8-source-alias:")
 }
 
 func (s *taskAssetCenterService) applyDesignAssetVersionDerivedFields(task *domain.Task, asset *domain.DesignAsset, version *domain.DesignAssetVersion) {

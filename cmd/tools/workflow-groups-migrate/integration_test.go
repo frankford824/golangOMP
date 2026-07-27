@@ -408,6 +408,43 @@ func TestWorkflowGroupsMigrateSourceAliasApplyRerunRollback(t *testing.T) {
 	if aliasID == finalAssetID {
 		t.Fatal("source alias must be a distinct task_assets row")
 	}
+	var (
+		aliasRootID, currentVersionID             int64
+		aliasAssetVersionNo, originAssetVersionNo int
+		aliasFlowReviewStatus                     string
+	)
+	if err := db.QueryRow(`
+		SELECT alias.asset_id,alias.asset_version_no,alias.flow_review_status,
+		       origin.asset_version_no,root.current_version_id
+		FROM task_assets alias
+		JOIN task_assets origin ON origin.id=?
+		JOIN design_assets root ON root.id=alias.asset_id
+		WHERE alias.id=?`,
+		finalAssetID, aliasID,
+	).Scan(
+		&aliasRootID, &aliasAssetVersionNo, &aliasFlowReviewStatus,
+		&originAssetVersionNo, &currentVersionID,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if aliasAssetVersionNo != originAssetVersionNo {
+		t.Fatalf(
+			"source alias asset_version_no = %d, want frozen origin version %d",
+			aliasAssetVersionNo, originAssetVersionNo,
+		)
+	}
+	if currentVersionID != finalAssetID {
+		t.Fatalf(
+			"delivery root %d current_version_id = %d, want unchanged origin %d",
+			aliasRootID, currentVersionID, finalAssetID,
+		)
+	}
+	if aliasFlowReviewStatus != "not_applicable" {
+		t.Fatalf(
+			"source alias flow_review_status = %q, want not_applicable",
+			aliasFlowReviewStatus,
+		)
+	}
 	if err := apply(context.Background(), db, database, o, mapping); err != nil {
 		t.Fatalf("idempotent alias rerun: %v", err)
 	}

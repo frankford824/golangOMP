@@ -109,6 +109,9 @@ func (s *DetailService) Get(ctx context.Context, taskID int64) (*Detail, error) 
 			if bundle == nil || bundle.Task == nil {
 				return nil, nil
 			}
+			if appErr := parentservice.AuthorizeTaskReadDetail(ctx, bundle.Task, nil); appErr != nil {
+				return nil, appErr
+			}
 			out := s.buildDetailWithNames(ctx, bundle.Task, bundle.TaskDetail, bundle.Modules, bundle.Events, bundle.ReferenceFiles, bundle.UserNames)
 			s.hydrateBundledFields(ctx, out, bundle)
 			return out, nil
@@ -120,6 +123,9 @@ func (s *DetailService) Get(ctx context.Context, taskID int64) (*Detail, error) 
 			if task == nil {
 				return nil, nil
 			}
+			if appErr := parentservice.AuthorizeTaskReadDetail(ctx, task, nil); appErr != nil {
+				return nil, appErr
+			}
 			out := s.buildDetail(ctx, task, detail, modules, events, refs)
 			if err := s.hydrateBatchAndAssetFields(ctx, out, task); err != nil {
 				return nil, err
@@ -130,6 +136,9 @@ func (s *DetailService) Get(ctx context.Context, taskID int64) (*Detail, error) 
 	task, err := s.tasks.GetByID(ctx, taskID)
 	if err != nil || task == nil {
 		return nil, err
+	}
+	if appErr := parentservice.AuthorizeTaskReadDetail(ctx, task, nil); appErr != nil {
+		return nil, appErr
 	}
 	detail, err := s.tasks.GetDetailByTaskID(ctx, taskID)
 	if err != nil {

@@ -1220,6 +1220,56 @@ func TestTaskAssetCenterServiceListAssetsAndVersions(t *testing.T) {
 	}
 }
 
+func TestTaskAssetCenterServiceListAssetsEnforcesEffectiveTaskScope(t *testing.T) {
+	const taskID int64 = 1000
+	taskRepo := newStep04TaskRepo(&domain.Task{
+		ID:         taskID,
+		TaskNo:     "T-1000",
+		TaskType:   domain.TaskTypeNewProductDevelopment,
+		TaskStatus: domain.TaskStatusCompleted,
+		CreatorID:  999,
+	})
+	svc := NewTaskAssetCenterService(
+		taskRepo,
+		newStep67DesignAssetRepo(),
+		newStep04TaskAssetRepo(),
+		newStep37UploadRequestRepo(),
+		newStep37AssetStorageRefRepo(),
+		&step04TaskEventRepo{},
+		step04TxRunner{},
+		newStubUploadServiceClient(),
+	)
+
+	outOfScope := domain.WithRequestActor(
+		context.Background(),
+		taskActionTestActor(231, domain.PermissionAssetView, domain.AccessScopeSelf),
+	)
+	assets, appErr := svc.ListAssets(outOfScope, taskID)
+	if appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
+		t.Fatalf("ListAssets() out-of-scope appErr = %+v, want PERMISSION_DENIED", appErr)
+	}
+	if assets != nil {
+		t.Fatalf("ListAssets() out-of-scope assets = %+v, want nil", assets)
+	}
+
+	taskRepo.tasks[taskID].CreatorID = 231
+	assets, appErr = svc.ListAssets(outOfScope, taskID)
+	if appErr != nil {
+		t.Fatalf("ListAssets() legal self-scope appErr = %+v", appErr)
+	}
+	if len(assets) != 0 {
+		t.Fatalf("ListAssets() legal self-scope assets = %+v, want empty", assets)
+	}
+
+	admin := domain.WithRequestActor(
+		context.Background(),
+		taskActionTestActor(1, domain.PermissionAssetView, domain.AccessScopeGlobal),
+	)
+	if _, appErr = svc.ListAssets(admin, taskID); appErr != nil {
+		t.Fatalf("ListAssets() global admin appErr = %+v", appErr)
+	}
+}
+
 func TestTaskAssetCenterServiceCreateAndCompleteMultipartUploadSessionWithTargetSKUCode(t *testing.T) {
 	taskRepo := newStep04TaskRepo(&domain.Task{ID: 2005, TaskStatus: domain.TaskStatusPendingAudit, IsBatchTask: true, BatchItemCount: 2, BatchMode: domain.TaskBatchModeMultiSKU})
 	taskRepo.skuItems = map[int64][]*domain.TaskSKUItem{
