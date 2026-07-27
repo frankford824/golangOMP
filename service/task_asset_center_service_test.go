@@ -32,6 +32,7 @@ func taskAssetMutationTestContext() context.Context {
 		domain.PermissionTaskDesignSubmit,
 		domain.PermissionTaskAuditDecision,
 		domain.PermissionAssetView,
+		domain.PermissionAssetDownload,
 		domain.PermissionAssetManage,
 	}
 	assignment := domain.AccessAssignment{ID: 1, UserID: actorID, RoleID: roleID, ScopeMode: domain.AccessScopeGlobal, SourceType: "direct"}

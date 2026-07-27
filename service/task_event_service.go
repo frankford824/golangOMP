@@ -57,7 +57,11 @@ func (s *taskEventService) ListByTaskID(ctx context.Context, taskID int64) ([]*d
 	if err != nil {
 		return nil, infraError("list task events", err)
 	}
+	events = CloneTaskEvents(events)
 	enrichTaskEventsWithActors(ctx, s.userDisplayNameResolver, task, events)
+	if !TaskAssetDownloadAllowed(ctx, task) {
+		events = RedactTaskEventDownloads(events)
+	}
 	return events, nil
 }
 

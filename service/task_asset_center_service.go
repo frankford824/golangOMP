@@ -2361,6 +2361,9 @@ func (s *taskAssetCenterService) loadAssetResource(ctx context.Context, asset *d
 		return nil, infraError("hydrate design asset resource", err)
 	}
 	s.applyDesignAssetResourceSummary(asset)
+	if !TaskAssetDownloadAllowed(ctx, task) {
+		asset = RedactDesignAssetDownload(asset)
+	}
 	return asset, nil
 }
 

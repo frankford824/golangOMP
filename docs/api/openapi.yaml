@@ -2065,7 +2065,9 @@ components:
         remote_file_id:
           type: string
           nullable: true
-        storage_key: { type: string }
+        storage_key:
+          type: string
+          description: Internal compatibility locator. Omitted from task read models when the actor lacks scoped `asset.download`.
         file_size:
           type: integer
           format: int64
@@ -2143,10 +2145,10 @@ components:
         download_url:
           type: string
           nullable: true
-          description: Canonical business file URL. New frontend integration should use this field directly; runtime prefers browser-direct OSS/download service URLs and only falls back to `/v1/assets/files/{path}` for compatibility.
+          description: Canonical business file URL. Omitted when the actor lacks scoped `asset.download`; authorized responses prefer browser-direct OSS/download service URLs and only fall back to `/v1/assets/files/{path}` for compatibility.
         public_download_allowed:
           type: boolean
-          description: Compatibility-only boolean retained for old callers. Obsolete for frontend rollout; new integration must use `download_url` and `download_mode`.
+          description: Compatibility-only boolean retained for old callers. It is false when the actor lacks scoped `asset.download`; new integration must use controlled download endpoints.
         preview_public_allowed:
           type: boolean
           description: Compatibility-only boolean retained for old callers. Obsolete for frontend rollout; frontend preview behavior should follow `preview_available` and `download_url`.

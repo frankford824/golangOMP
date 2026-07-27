@@ -1728,6 +1728,9 @@ func (s *taskService) loadTaskReadModel(ctx context.Context, id int64) (*domain.
 	} else {
 		readModel.RetouchRequirements = s.listTaskRetouchRequirements(ctx, task)
 	}
+	if !TaskAssetDownloadAllowed(ctx, task) {
+		RedactTaskReadModelDownloads(readModel)
+	}
 	return readModel, nil
 }
 

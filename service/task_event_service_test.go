@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -74,6 +75,40 @@ func TestTaskEventServiceRejectsOutOfScopeActorBeforeReadingEvents(t *testing.T)
 	}
 	if eventRepo.listCalls != 0 {
 		t.Fatalf("event repo list calls = %d, want 0", eventRepo.listCalls)
+	}
+}
+
+func TestTaskEventServiceRedactsDownloadMetadataForViewOnlyActor(t *testing.T) {
+	const (
+		taskID  int64 = 1001
+		actorID int64 = 231
+	)
+	storedPayload := json.RawMessage(`{"reference_file_refs":[{"asset_id":"ref-1","storage_key":"tasks/1001/ref.png","download_url":"https://objects.example/ref?signature=secret"}]}`)
+	eventRepo := &taskEventRepoStub{events: []*domain.TaskEvent{{
+		ID:      "asset-event",
+		TaskID:  taskID,
+		Payload: storedPayload,
+	}}}
+	svc := NewTaskEventService(eventRepo, &taskEventTaskRepoStub{task: &domain.Task{
+		ID:         taskID,
+		TaskType:   domain.TaskTypeNewProductDevelopment,
+		TaskStatus: domain.TaskStatusCompleted,
+		CreatorID:  actorID,
+	}})
+
+	events, appErr := svc.ListByTaskID(
+		domain.WithRequestActor(context.Background(), taskActionTestActor(actorID, domain.PermissionTaskView, domain.AccessScopeSelf)),
+		taskID,
+	)
+	if appErr != nil {
+		t.Fatalf("ListByTaskID() appErr = %v", appErr)
+	}
+	if len(events) != 1 || strings.Contains(string(events[0].Payload), "download_url") ||
+		strings.Contains(string(events[0].Payload), "storage_key") {
+		t.Fatalf("ListByTaskID() payload = %s, want download metadata redacted", events[0].Payload)
+	}
+	if !strings.Contains(string(eventRepo.events[0].Payload), "signature=secret") {
+		t.Fatal("ListByTaskID() mutated the stored event payload")
 	}
 }
 

@@ -114,6 +114,7 @@ func (s *DetailService) Get(ctx context.Context, taskID int64) (*Detail, error) 
 			}
 			out := s.buildDetailWithNames(ctx, bundle.Task, bundle.TaskDetail, bundle.Modules, bundle.Events, bundle.ReferenceFiles, bundle.UserNames)
 			s.hydrateBundledFields(ctx, out, bundle)
+			redactDetailDownloadsForAccess(ctx, out)
 			return out, nil
 		}
 	}
@@ -130,6 +131,7 @@ func (s *DetailService) Get(ctx context.Context, taskID int64) (*Detail, error) 
 			if err := s.hydrateBatchAndAssetFields(ctx, out, task); err != nil {
 				return nil, err
 			}
+			redactDetailDownloadsForAccess(ctx, out)
 			return out, nil
 		}
 	}
@@ -160,7 +162,100 @@ func (s *DetailService) Get(ctx context.Context, taskID int64) (*Detail, error) 
 	if err := s.hydrateBatchAndAssetFields(ctx, out, task); err != nil {
 		return nil, err
 	}
+	redactDetailDownloadsForAccess(ctx, out)
 	return out, nil
+}
+
+func redactDetailDownloadsForAccess(ctx context.Context, detail *Detail) {
+	if detail == nil || detail.Task == nil || parentservice.TaskAssetDownloadAllowed(ctx, detail.Task) {
+		return
+	}
+	detail.References = parentservice.RedactReferenceFileRefDownloads(detail.References)
+	detail.SKUItems = redactDetailSKUItemDownloads(detail.SKUItems)
+	detail.RetouchRequirements = redactDetailRetouchRequirementDownloads(detail.RetouchRequirements)
+	detail.AssetVersions = parentservice.RedactDesignAssetVersionDownloads(detail.AssetVersions)
+	if detail.TaskDetail != nil &&
+		(strings.TrimSpace(detail.TaskDetail.ReferenceFileRefsJSON) != "" ||
+			strings.TrimSpace(detail.TaskDetail.ReferenceImagesJSON) != "") {
+		cloned := *detail.TaskDetail
+		detail.TaskDetail = &cloned
+	}
+	if detail.TaskDetail != nil && strings.TrimSpace(detail.TaskDetail.ReferenceFileRefsJSON) != "" {
+		redacted := parentservice.RedactAssetDownloadJSON(json.RawMessage(detail.TaskDetail.ReferenceFileRefsJSON))
+		detail.TaskDetail.ReferenceFileRefsJSON = string(redacted)
+	}
+	if detail.TaskDetail != nil && strings.TrimSpace(detail.TaskDetail.ReferenceImagesJSON) != "" {
+		redacted := parentservice.RedactAssetDownloadJSON(json.RawMessage(detail.TaskDetail.ReferenceImagesJSON))
+		detail.TaskDetail.ReferenceImagesJSON = string(redacted)
+	}
+	detail.Modules = redactDetailModules(detail.Modules)
+	detail.Events = redactDetailModuleEvents(detail.Events)
+}
+
+func redactDetailSKUItemDownloads(items []*domain.TaskSKUItem) []*domain.TaskSKUItem {
+	if items == nil {
+		return nil
+	}
+	out := make([]*domain.TaskSKUItem, 0, len(items))
+	for _, item := range items {
+		if item == nil {
+			out = append(out, nil)
+			continue
+		}
+		cloned := *item
+		cloned.ReferenceFileRefs = parentservice.RedactReferenceFileRefDownloads(item.ReferenceFileRefs)
+		out = append(out, &cloned)
+	}
+	return out
+}
+
+func redactDetailRetouchRequirementDownloads(items []domain.TaskRetouchRequirement) []domain.TaskRetouchRequirement {
+	if items == nil {
+		return nil
+	}
+	out := make([]domain.TaskRetouchRequirement, len(items))
+	copy(out, items)
+	for index := range out {
+		out[index].ReferenceFileRefs = parentservice.RedactReferenceFileRefDownloads(items[index].ReferenceFileRefs)
+		out[index].SourceAssets = parentservice.RedactDesignAssetDownloads(items[index].SourceAssets)
+	}
+	return out
+}
+
+func redactDetailModules(items []ModuleDetail) []ModuleDetail {
+	if items == nil {
+		return nil
+	}
+	out := make([]ModuleDetail, len(items))
+	for index := range items {
+		out[index] = items[index]
+		out[index].Projection = parentservice.RedactAssetDownloadJSON(items[index].Projection)
+		if items[index].TaskModule != nil {
+			module := *items[index].TaskModule
+			module.Data = parentservice.RedactAssetDownloadJSON(items[index].TaskModule.Data)
+			module.ActorOrgSnapshot = parentservice.RedactAssetDownloadJSON(items[index].TaskModule.ActorOrgSnapshot)
+			out[index].TaskModule = &module
+		}
+	}
+	return out
+}
+
+func redactDetailModuleEvents(items []*domain.TaskModuleEvent) []*domain.TaskModuleEvent {
+	if items == nil {
+		return nil
+	}
+	out := make([]*domain.TaskModuleEvent, 0, len(items))
+	for _, item := range items {
+		if item == nil {
+			out = append(out, nil)
+			continue
+		}
+		cloned := *item
+		cloned.Payload = parentservice.RedactAssetDownloadJSON(item.Payload)
+		cloned.ActorSnapshot = parentservice.RedactAssetDownloadJSON(item.ActorSnapshot)
+		out = append(out, &cloned)
+	}
+	return out
 }
 
 func (s *DetailService) buildDetail(ctx context.Context, task *domain.Task, detail *domain.TaskDetail, modules []*domain.TaskModule, events []*domain.TaskModuleEvent, refs []*domain.ReferenceFileRefFlat) *Detail {

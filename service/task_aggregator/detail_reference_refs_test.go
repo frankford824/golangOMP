@@ -2,6 +2,7 @@ package task_aggregator
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"workflow/domain"
@@ -242,6 +243,19 @@ func TestDetailServiceEnforcesEffectiveTaskScopeBeforeHydratingBundle(t *testing
 	}
 	if detail == nil || detail.Task == nil || detail.Task.ID != taskID {
 		t.Fatalf("Get() legal self-scope detail = %+v", detail)
+	}
+	if len(detail.References) != 1 || detail.References[0].DownloadURL != nil || detail.References[0].StorageKey != "" {
+		t.Fatalf("Get() view-only references = %+v, want download fields redacted", detail.References)
+	}
+	for _, version := range detail.AssetVersions {
+		if version.DownloadURL != nil || version.StorageKey != "" || version.PublicDownloadAllowed {
+			t.Fatalf("Get() view-only asset versions = %+v, want download fields redacted", detail.AssetVersions)
+		}
+	}
+	if detail.TaskDetail != nil &&
+		(strings.Contains(detail.TaskDetail.ReferenceFileRefsJSON, "download_url") ||
+			strings.Contains(detail.TaskDetail.ReferenceFileRefsJSON, "storage_key")) {
+		t.Fatalf("Get() task_detail leaked download fields: %s", detail.TaskDetail.ReferenceFileRefsJSON)
 	}
 }
 

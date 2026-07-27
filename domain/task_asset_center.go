@@ -185,7 +185,7 @@ type DesignAssetVersion struct {
 	HasOriginalFilename   bool                        `json:"has_original_filename,omitempty"`
 	ProductNameSnapshot   string                      `json:"product_name_snapshot,omitempty"`
 	RemoteFileID          *string                     `json:"remote_file_id,omitempty"`
-	StorageKey            string                      `json:"storage_key"`
+	StorageKey            string                      `json:"storage_key,omitempty"`
 	FileSize              *int64                      `json:"file_size,omitempty"`
 	FileHash              *string                     `json:"file_hash,omitempty"`
 	MimeType              string                      `json:"mime_type,omitempty"`
@@ -219,7 +219,7 @@ type DesignAssetVersion struct {
 	SourceAssetVersionID  *int64  `json:"-"`
 	ApprovedForFlow       bool    `json:"approved_for_flow"`
 	CurrentVersionRole    string  `json:"current_version_role,omitempty"`
-	DownloadURL           *string `json:"download_url"`
+	DownloadURL           *string `json:"download_url,omitempty"`
 	PublicDownloadAllowed bool    `json:"public_download_allowed"`
 	PreviewPublicAllowed  bool    `json:"preview_public_allowed"`
 	AccessHint            string  `json:"access_hint,omitempty"`
