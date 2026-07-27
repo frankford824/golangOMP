@@ -21940,6 +21940,7 @@ export interface operations {
             };
             403: components["responses"]["V8Forbidden"];
             404: components["responses"]["V8NotFound"];
+            409: components["responses"]["V8Conflict"];
         };
     };
     listTaskResourceGroups: {
@@ -21976,6 +21977,7 @@ export interface operations {
                 };
             };
             403: components["responses"]["V8Forbidden"];
+            409: components["responses"]["V8Conflict"];
         };
     };
     getTaskResourceGroup: {
@@ -22002,6 +22004,7 @@ export interface operations {
             };
             403: components["responses"]["V8Forbidden"];
             404: components["responses"]["V8NotFound"];
+            409: components["responses"]["V8Conflict"];
         };
     };
     listTaskResourceGroupRevisions: {
@@ -22032,6 +22035,7 @@ export interface operations {
             400: components["responses"]["V8BadRequest"];
             403: components["responses"]["V8Forbidden"];
             404: components["responses"]["V8NotFound"];
+            409: components["responses"]["V8Conflict"];
         };
     };
     batchDownloadTaskResourceGroups: {
@@ -22060,6 +22064,7 @@ export interface operations {
             };
             400: components["responses"]["V8BadRequest"];
             403: components["responses"]["V8Forbidden"];
+            409: components["responses"]["V8Conflict"];
         };
     };
     createPlanningSKUImageUploadSession: {

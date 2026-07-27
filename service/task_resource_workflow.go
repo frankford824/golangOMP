@@ -123,7 +123,7 @@ func (s *taskResourceWorkflowService) ResourceBundle(ctx context.Context, taskID
 	}
 	groups, err := s.repo.ListByTaskID(ctx, taskID)
 	if err != nil {
-		return nil, infraError("list task resource groups", err)
+		return nil, mapTaskResourceReadError("list task resource groups", err)
 	}
 	expectedGroups, err := s.repo.ExpectedResourceGroupCount(ctx, taskID, task.TaskType)
 	if err != nil {
@@ -147,7 +147,12 @@ func (s *taskResourceWorkflowService) ResourceBundle(ctx context.Context, taskID
 	}
 	s.hydrateSKUProfiles(ctx, groups)
 	hydrateCurrentResourceGroupEvidence(groups)
-	s.hydrateResourceGroupURLs(groups)
+	subject := task.AccessSubject()
+	s.hydrateResourceGroupURLsForAccess(
+		groups,
+		domain.EffectiveAccessAllowsTask(actor, domain.PermissionAssetView, subject),
+		domain.EffectiveAccessAllowsTask(actor, domain.PermissionAssetDownload, subject),
+	)
 	return &domain.ResourceBundle{TaskID: taskID, WorkflowRevision: task.WorkflowRevision, Groups: groups}, nil
 }
 
@@ -168,9 +173,9 @@ func (s *taskResourceWorkflowService) ListResourceGroups(ctx context.Context, ac
 	if resourceGroupListShouldFlatten(params) {
 		items, total, err := s.repo.ListFlatResourceItems(ctx, params)
 		if err != nil {
-			return nil, infraError("list flat resource items", err)
+			return nil, mapTaskResourceReadError("list flat resource items", err)
 		}
-		s.hydrateFlatResourceItemURLs(items)
+		s.hydrateFlatResourceItemURLs(items, false)
 		return &domain.ResourceGroupListResult{
 			Items: []domain.TaskAssetGroup{}, FlatItems: items, ViewMode: "flat",
 			Page: params.Page, PageSize: params.PageSize, Total: total,
@@ -178,11 +183,14 @@ func (s *taskResourceWorkflowService) ListResourceGroups(ctx context.Context, ac
 	}
 	items, total, err := s.repo.ListResourceGroups(ctx, params)
 	if err != nil {
-		return nil, infraError("list resource groups", err)
+		return nil, mapTaskResourceReadError("list resource groups", err)
 	}
 	s.hydrateSKUProfiles(ctx, items)
 	hydrateCurrentResourceGroupEvidence(items)
-	s.hydrateResourceGroupURLs(items)
+	// The list is scoped by asset.view. Download scope can be narrower than
+	// view scope, so list responses expose previews only; exact download
+	// authorization is enforced by the group/detail and download endpoints.
+	s.hydrateResourceGroupURLsForAccess(items, true, false)
 	return &domain.ResourceGroupListResult{Items: items, FlatItems: []domain.FlatResourceItem{}, Page: params.Page, PageSize: params.PageSize, Total: total, ViewMode: "group"}, nil
 }
 
@@ -222,7 +230,7 @@ func (s *taskResourceWorkflowService) ResourceGroup(ctx context.Context, actor d
 		return nil, domain.ErrNotFound
 	}
 	if err != nil {
-		return nil, infraError("get resource group", err)
+		return nil, mapTaskResourceReadError("get resource group", err)
 	}
 	subject, err := s.repo.GetTaskAccessSubject(ctx, group.TaskID)
 	if err != nil {
@@ -234,7 +242,11 @@ func (s *taskResourceWorkflowService) ResourceGroup(ctx context.Context, actor d
 	items := []domain.TaskAssetGroup{*group}
 	s.hydrateSKUProfiles(ctx, items)
 	hydrateCurrentResourceGroupEvidence(items)
-	s.hydrateResourceGroupURLs(items)
+	s.hydrateResourceGroupURLsForAccess(
+		items,
+		domain.EffectiveAccessAllowsTask(actor, domain.PermissionAssetView, subject),
+		domain.EffectiveAccessAllowsTask(actor, domain.PermissionAssetDownload, subject),
+	)
 	return &items[0], nil
 }
 
@@ -253,7 +265,7 @@ func (s *taskResourceWorkflowService) ResourceGroupRevisions(ctx context.Context
 		return nil, domain.ErrNotFound
 	}
 	if err != nil {
-		return nil, infraError("get resource group for revision history", err)
+		return nil, mapTaskResourceReadError("get resource group for revision history", err)
 	}
 	subject, err := s.repo.GetTaskAccessSubject(ctx, group.TaskID)
 	if err != nil {
@@ -265,7 +277,7 @@ func (s *taskResourceWorkflowService) ResourceGroupRevisions(ctx context.Context
 	}
 	revisions, total, err := s.repo.ListResourceGroupRevisions(ctx, groupID, page, pageSize)
 	if err != nil {
-		return nil, infraError("list resource group revisions", err)
+		return nil, mapTaskResourceReadError("list resource group revisions", err)
 	}
 	hydrateHistoricalRevisionEvidence(revisions)
 	canDownload := domain.ActorHasPermission(actor, domain.PermissionAssetDownload) && domain.EffectiveAccessAllowsTask(actor, domain.PermissionAssetDownload, subject)
@@ -354,7 +366,7 @@ func (s *taskResourceWorkflowService) BatchDownloadResourceGroups(ctx context.Co
 			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "resource group does not exist", map[string]interface{}{"group_id": groupID})
 		}
 		if err != nil {
-			return nil, infraError("load resource group download manifest", err)
+			return nil, mapTaskResourceReadError("load resource group download manifest", err)
 		}
 		subject, err := s.repo.GetTaskAccessSubject(ctx, group.TaskID)
 		if err != nil {
@@ -390,14 +402,18 @@ func (s *taskResourceWorkflowService) BatchDownloadResourceGroups(ctx context.Co
 }
 
 func (s *taskResourceWorkflowService) hydrateResourceGroupURLs(groups []domain.TaskAssetGroup) {
+	s.hydrateResourceGroupURLsForAccess(groups, true, true)
+}
+
+func (s *taskResourceWorkflowService) hydrateResourceGroupURLsForAccess(groups []domain.TaskAssetGroup, canPreview, canDownload bool) {
 	for groupIndex := range groups {
 		for _, revision := range []*domain.TaskAssetGroupRevision{groups[groupIndex].WorkingRevision, groups[groupIndex].FinalizedRevision} {
 			if revision == nil {
 				continue
 			}
-			s.hydrateResourceFileURL(revision.SourceFile)
+			s.hydrateCurrentResourceFileURL(revision.SourceFile, canPreview, canDownload)
 			for itemIndex := range revision.Items {
-				s.hydrateResourceFileURL(revision.Items[itemIndex].File)
+				s.hydrateCurrentResourceFileURL(revision.Items[itemIndex].File, canPreview, canDownload)
 			}
 			for referenceIndex := range revision.References {
 				reference := &revision.References[referenceIndex]
@@ -409,10 +425,45 @@ func (s *taskResourceWorkflowService) hydrateResourceGroupURLs(groups []domain.T
 					UnavailableReason: reference.UnavailableReason,
 					StorageKey:        reference.StorageKey,
 				}
-				s.hydrateResourceFileURL(file)
+				if reference.FormalTaskAssetID != nil {
+					file.TaskAssetID = *reference.FormalTaskAssetID
+				}
+				s.hydrateCurrentResourceFileURL(file, canPreview, canDownload)
 				reference.DownloadURL = file.DownloadURL
 				reference.PreviewURL = file.PreviewURL
 			}
+		}
+	}
+}
+
+func (s *taskResourceWorkflowService) hydrateCurrentResourceFileURL(file *domain.TaskResourceFile, canPreview, canDownload bool) {
+	if file == nil {
+		return
+	}
+	file.DownloadURL = ""
+	file.PreviewURL = ""
+	file.DownloadExpiry = nil
+	if !canPreview && !canDownload {
+		return
+	}
+	if file.Availability == domain.TaskResourceFileHistoricalUnavailable {
+		return
+	}
+	if file.TaskAssetID > 0 {
+		if canPreview {
+			file.PreviewURL = controlledTaskAssetURL(file.TaskAssetID, "preview")
+		}
+		if canDownload {
+			file.DownloadURL = controlledTaskAssetURL(file.TaskAssetID, "download")
+		}
+		return
+	}
+	// Raw object access is guarded by asset.download. A view-only actor must
+	// not receive a preview URL that resolves through the download-only route.
+	if canDownload {
+		s.hydrateResourceFileURL(file)
+		if !canPreview {
+			file.PreviewURL = ""
 		}
 	}
 }
@@ -675,14 +726,15 @@ func controlledTaskAssetURL(taskAssetID int64, action string) string {
 	return "/v1/task-assets/" + strconv.FormatInt(taskAssetID, 10) + "/" + action
 }
 
-func (s *taskResourceWorkflowService) hydrateFlatResourceItemURLs(items []domain.FlatResourceItem) {
+func (s *taskResourceWorkflowService) hydrateFlatResourceItemURLs(items []domain.FlatResourceItem, canDownload bool) {
 	for index := range items {
 		file := &domain.TaskResourceFile{
-			FileName:   items[index].FileName,
-			MimeType:   items[index].MimeType,
-			StorageKey: items[index].StorageKey,
+			TaskAssetID: items[index].TaskAssetID,
+			FileName:    items[index].FileName,
+			MimeType:    items[index].MimeType,
+			StorageKey:  items[index].StorageKey,
 		}
-		s.hydrateResourceFileURL(file)
+		s.hydrateCurrentResourceFileURL(file, true, canDownload)
 		items[index].PreviewURL = file.PreviewURL
 		items[index].DownloadURL = file.DownloadURL
 	}
@@ -1361,4 +1413,15 @@ func mapTaskResourceError(operation string, err error) *domain.AppError {
 		return domain.ErrNotFound
 	}
 	return infraError(operation, fmt.Errorf("%w", err))
+}
+
+func mapTaskResourceReadError(operation string, err error) *domain.AppError {
+	if errors.Is(err, repo.ErrDataIntegrity) {
+		return domain.NewAppError(
+			domain.ErrCodeInvalidStateTransition,
+			"resource group read model is inconsistent",
+			map[string]interface{}{"integrity_violation": true},
+		)
+	}
+	return mapTaskResourceError(operation, err)
 }

@@ -37,6 +37,7 @@
         v-if="bundle"
         :bundle="bundle"
         :task-status="task.task_status"
+        :task-type="task.task_type"
         :can-operate="canOperateResources"
         :action-label="workflowButtonLabel"
         @open-resources="openWorkspace('resources')"
@@ -305,7 +306,10 @@ const currentDesignerId = computed(() => task.value?.designer_id != null && task
 const isTerminal = computed(() => ['Completed', 'Archived', 'Cancelled'].includes(task.value?.task_status || ''))
 const hasOwner = computed(() => Boolean(task.value?.current_handler_name || task.value?.designer_name))
 const skuCount = computed(() => skuItems.value.length || (task.value?.primary_sku_code || task.value?.sku_code ? 1 : 0))
-const skuScopeLabel = computed(() => skuCount.value > 1 ? `批量 SKU · ${skuCount.value} 项` : '单 SKU')
+const skuScopeLabel = computed(() => {
+  if (isRetouch.value) return `修图范围 · ${retouchRequirements.value.length || bundle.value?.groups?.length || 0} 项`
+  return skuCount.value > 1 ? `批量 SKU · ${skuCount.value} 项` : '单 SKU'
+})
 const dueAtRaw = computed(() => task.value?.due_at || task.value?.deadline_at || '')
 const dueAtText = computed(() => {
   if (!dueAtRaw.value) return '未设置'

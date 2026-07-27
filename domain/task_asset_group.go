@@ -227,6 +227,7 @@ type ResourceGroupListParams struct {
 type FlatResourceItem struct {
 	GroupID      int64              `json:"group_id"`
 	TaskID       int64              `json:"task_id"`
+	TaskAssetID  int64              `json:"-"`
 	TaskNo       string             `json:"task_no"`
 	SKUCode      string             `json:"sku_code,omitempty"`
 	ResourceRole ResourceRoleFilter `json:"resource_role"`

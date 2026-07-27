@@ -10,8 +10,9 @@ import (
 )
 
 var (
-	ErrConflict = errors.New("optimistic concurrency conflict")
-	ErrNotFound = errors.New("repository entity not found")
+	ErrConflict      = errors.New("optimistic concurrency conflict")
+	ErrNotFound      = errors.New("repository entity not found")
+	ErrDataIntegrity = errors.New("repository data integrity violation")
 )
 
 // Tx is a marker for a live database transaction.

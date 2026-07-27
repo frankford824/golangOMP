@@ -20,11 +20,11 @@
       <ArrowRight class="rail-arrow" :size="20" aria-hidden="true" />
 
       <article class="rail-column sources">
-        <div class="column-head"><span>02</span><div><strong>当前有效源文件</strong><small>{{ sources.length }} / {{ groups.length }} 个 SKU 已提交</small></div></div>
+        <div class="column-head"><span>02</span><div><strong>当前有效源文件</strong><small>{{ sourceSummary }}</small></div></div>
         <div v-if="sources.length" class="file-strip">
           <div v-for="source in sources.slice(0,4)" :key="source.task_asset_id"><FileArchive :size="23" aria-hidden="true" /><span><strong>{{ source.file_name }}</strong><small>{{ sourceStageLabel(source.stage) }}</small></span></div>
         </div>
-        <p v-else class="empty-copy">设计人员尚未提交源文件</p>
+        <p v-else class="empty-copy">{{ sourceEmptyCopy }}</p>
       </article>
 
       <ArrowRight class="rail-arrow" :size="20" aria-hidden="true" />
@@ -52,7 +52,7 @@ import { ArrowRight, FileArchive, FileText, Images, LockKeyhole } from 'lucide-v
 import type { ResourceBundle, ResourceFile, ResourceReference, ResourceRevisionItem } from '@/services/api/resourceGroupsApi'
 
 type SourceWithStage = ResourceFile & { stage: string }
-const props = defineProps<{ bundle: ResourceBundle; taskStatus: string; canOperate?: boolean; actionLabel?: string }>()
+const props = defineProps<{ bundle: ResourceBundle; taskStatus: string; taskType: string; canOperate?: boolean; actionLabel?: string }>()
 defineEmits<{ openResources: []; openWorkflow: [] }>()
 const groups = computed(() => props.bundle.groups || [])
 const brokenReferences = ref(new Set<string>())
@@ -79,11 +79,22 @@ const sources = computed<SourceWithStage[]>(() => groups.value.flatMap((group) =
   const revision = group.finalized_revision || group.working_revision
   return revision?.source_file ? [{ ...revision.source_file, stage: revision.source_stage }] : []
 }))
+const isRetouch = computed(() => ['retouch', 'retouch_task'].includes(props.taskType))
+const sourceSummary = computed(() => isRetouch.value
+  ? `${sources.value.length} 个源文件 · ${groups.value.length} 个修图范围`
+  : `${sources.value.length} / ${groups.value.length} 个 SKU 已提交`)
+const sourceEmptyCopy = computed(() => isRetouch.value
+  ? '修图任务无需独立源文件，以参考图与最终成品为准'
+  : '设计人员尚未提交源文件')
 const finals = computed<ResourceRevisionItem[]>(() => groups.value.flatMap((group) => group.finalized_revision?.items || []))
 const finalCount = computed(() => finals.value.length)
 const setCount = computed(() => groups.value.filter((group) => (group.finalized_revision || group.working_revision)?.mode === 'set').length)
 const finalLocked = computed(() => props.taskStatus === 'InProgress' && !finalCount.value)
-const actionHint = computed(() => props.taskStatus === 'PendingAudit' ? '审核人员在这里确认模式、上传成品并决定是否替换源文件。' : '设计人员先判定单图或套装，再为每个 SKU 提交可编辑源文件。')
+const actionHint = computed(() => {
+  if (props.taskStatus === 'PendingAudit') return '审核人员在这里确认模式、上传成品并决定是否替换源文件。'
+  if (isRetouch.value) return '修图任务以参考图为输入，按修图范围提交最终成品；独立源文件可选。'
+  return '设计人员先判定单图或套装，再为每个 SKU 提交可编辑源文件。'
+})
 
 function referenceIdentity(file: ResourceReference, groupIndex: number, referenceIndex: number) {
   if (file.reference_file_ref_id != null) return `reference-file-ref:${file.reference_file_ref_id}`

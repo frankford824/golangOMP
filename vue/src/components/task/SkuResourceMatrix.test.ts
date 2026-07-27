@@ -72,6 +72,82 @@ describe('SkuResourceMatrix', () => {
     expect(wrapper.get('.final-gallery .tile-fallback').text()).toBe('PNG')
   })
 
+  it('offers controlled downloads for non-image reference and final files', () => {
+    const fileBundle = structuredClone(bundle)
+    const revision = fileBundle.groups[0].finalized_revision!
+    revision.references = [{
+      id: 9,
+      reference_file_ref_id: 19,
+      sort_order: 0,
+      ref_id: 'ref-xls',
+      file_name: 'requirements.xls',
+      mime_type: 'application/vnd.ms-excel',
+      preview_url: '/controlled/requirements.xls',
+      download_url: '/controlled/requirements.xls?download=1',
+    }]
+    revision.items = [{
+      id: 10,
+      revision_id: 70,
+      task_asset_id: 110,
+      sort_order: 0,
+      file: {
+        task_asset_id: 110,
+        file_name: 'delivery.zip',
+        mime_type: 'application/zip',
+        preview_url: '/controlled/delivery.zip',
+        download_url: '/controlled/delivery.zip?download=1',
+      },
+    }]
+    const wrapper = mount(SkuResourceMatrix, {
+      props: { bundle: fileBundle },
+      global: { stubs: { Teleport: true } },
+    })
+
+    expect(wrapper.find('.reference-grid img').exists()).toBe(false)
+    expect(wrapper.get('.reference-grid a[download]').attributes('href')).toBe('/controlled/requirements.xls?download=1')
+    expect(wrapper.get('.reference-grid a[download]').text()).toContain('XLS')
+    expect(wrapper.find('.final-gallery img').exists()).toBe(false)
+    expect(wrapper.get('.final-gallery a[download]').attributes('href')).toBe('/controlled/delivery.zip?download=1')
+    expect(wrapper.get('.final-gallery a[download]').text()).toContain('ZIP')
+  })
+
+  it('does not promote preview-only non-image files to downloads', () => {
+    const fileBundle = structuredClone(bundle)
+    const revision = fileBundle.groups[0].finalized_revision!
+    revision.references = [{
+      id: 9,
+      reference_file_ref_id: 19,
+      sort_order: 0,
+      ref_id: 'ref-xls',
+      file_name: 'requirements.xls',
+      mime_type: 'application/vnd.ms-excel',
+      preview_url: '/controlled/requirements.xls',
+    }]
+    revision.items = [{
+      id: 10,
+      revision_id: 70,
+      task_asset_id: 110,
+      sort_order: 0,
+      file: {
+        task_asset_id: 110,
+        file_name: 'delivery.zip',
+        mime_type: 'application/zip',
+        preview_url: '/controlled/delivery.zip',
+      },
+    }]
+    const wrapper = mount(SkuResourceMatrix, {
+      props: { bundle: fileBundle },
+      global: { stubs: { Teleport: true } },
+    })
+
+    expect(wrapper.findAll('.reference-grid a[download]')).toHaveLength(0)
+    expect(wrapper.findAll('.final-gallery a[download]')).toHaveLength(0)
+    expect(wrapper.get('.reference-grid a').attributes('href')).toBe('/controlled/requirements.xls')
+    expect(wrapper.get('.reference-grid a').text()).toContain('打开')
+    expect(wrapper.get('.final-gallery a').attributes('href')).toBe('/controlled/delivery.zip')
+    expect(wrapper.get('.final-gallery a').text()).toContain('打开')
+  })
+
   it('opens revision history only when the task detail enables it', async () => {
     const wrapper = mount(SkuResourceMatrix, {
       props: { bundle, enableRevisionHistory: true },

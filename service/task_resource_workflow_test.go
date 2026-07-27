@@ -18,6 +18,11 @@ type resourceWorkflowRepoStub struct {
 	expected             int64
 	listFn               func(domain.ResourceGroupListParams) ([]domain.TaskAssetGroup, int64)
 	flatListFn           func(domain.ResourceGroupListParams) ([]domain.FlatResourceItem, int64)
+	listByTaskErr        error
+	listErr              error
+	flatListErr          error
+	groupErr             error
+	revisionsErr         error
 	staged               map[int64]domain.StagedTaskAssetBinding
 	workflowReads        int
 	groupReads           int
@@ -49,15 +54,21 @@ func (s *resourceWorkflowRepoStub) ExpectedResourceGroupCount(context.Context, i
 
 func (s *resourceWorkflowRepoStub) ListByTaskID(context.Context, int64) ([]domain.TaskAssetGroup, error) {
 	s.groupReads++
-	return append([]domain.TaskAssetGroup(nil), s.groups...), nil
+	return append([]domain.TaskAssetGroup(nil), s.groups...), s.listByTaskErr
 }
 
 func (s *resourceWorkflowRepoStub) ListResourceGroups(_ context.Context, params domain.ResourceGroupListParams) ([]domain.TaskAssetGroup, int64, error) {
+	if s.listErr != nil {
+		return nil, 0, s.listErr
+	}
 	items, total := s.listFn(params)
 	return items, total, nil
 }
 
 func (s *resourceWorkflowRepoStub) ListFlatResourceItems(_ context.Context, params domain.ResourceGroupListParams) ([]domain.FlatResourceItem, int64, error) {
+	if s.flatListErr != nil {
+		return nil, 0, s.flatListErr
+	}
 	items, total := s.flatListFn(params)
 	return items, total, nil
 }
@@ -67,6 +78,9 @@ func (s *resourceWorkflowRepoStub) ListStagedAssetsForUpdate(context.Context, re
 }
 
 func (s *resourceWorkflowRepoStub) GetResourceGroup(_ context.Context, groupID int64) (*domain.TaskAssetGroup, error) {
+	if s.groupErr != nil {
+		return nil, s.groupErr
+	}
 	group := s.groupByID[groupID]
 	if group == nil {
 		return nil, repo.ErrNotFound
@@ -85,7 +99,7 @@ func (s *resourceWorkflowRepoStub) GetTaskAccessSubject(_ context.Context, taskI
 
 func (s *resourceWorkflowRepoStub) ListResourceGroupRevisions(_ context.Context, groupID int64, page, pageSize int) ([]domain.TaskAssetGroupRevision, int64, error) {
 	items := append([]domain.TaskAssetGroupRevision(nil), s.revisionsByGroup[groupID]...)
-	return items, s.revisionTotalByGroup[groupID], nil
+	return items, s.revisionTotalByGroup[groupID], s.revisionsErr
 }
 
 func TestResourceBundleIsPureReadAndReturnsStableGroupIDs(t *testing.T) {
@@ -102,6 +116,205 @@ func TestResourceBundleIsPureReadAndReturnsStableGroupIDs(t *testing.T) {
 	}
 	if repository.workflowReads != 1 || repository.groupReads != 1 {
 		t.Fatalf("read counts workflow/groups = %d/%d", repository.workflowReads, repository.groupReads)
+	}
+}
+
+func TestCurrentResourceGroupURLsRespectScopedViewAndDownloadPermissions(t *testing.T) {
+	const (
+		taskID  = int64(10)
+		groupID = int64(101)
+	)
+	departmentID := int64(55)
+	newGroup := func() *domain.TaskAssetGroup {
+		return &domain.TaskAssetGroup{
+			ID: groupID, TaskID: taskID,
+			WorkingRevision: &domain.TaskAssetGroupRevision{
+				ID: 201, GroupID: groupID,
+				SourceFile: &domain.TaskResourceFile{
+					TaskAssetID: 301, FileName: "source.psd", StorageKey: "tasks/10/source.psd",
+				},
+				Items: []domain.TaskAssetGroupRevisionItem{{
+					ID: 401, TaskAssetID: 302,
+					File: &domain.TaskResourceFile{
+						TaskAssetID: 302, FileName: "final.png", StorageKey: "tasks/10/final.png",
+					},
+				}},
+				References: []domain.TaskAssetGroupRevisionReference{{
+					ID: 501, FormalTaskAssetID: int64PtrForResourceWorkflowTest(303),
+					FileNameSnapshot: "reference.png", StorageKey: "tasks/10/reference.png",
+				}},
+			},
+		}
+	}
+	actor := multiCapabilityActor(7, &departmentID,
+		capabilityScope{permission: domain.PermissionTaskView, scope: domain.AccessScopeOwnDepartment},
+		capabilityScope{permission: domain.PermissionAssetView, scope: domain.AccessScopeOwnDepartment},
+	)
+
+	t.Run("bundle view-only actor gets previews without download urls", func(t *testing.T) {
+		group := newGroup()
+		repository := &resourceWorkflowRepoStub{
+			workflow: &domain.TaskWorkflowLock{
+				TaskID: taskID, CreatorID: 7, OwnerDepartmentID: &departmentID,
+			},
+			expected: 1,
+			groups:   []domain.TaskAssetGroup{*group},
+		}
+		result, appErr := NewTaskResourceWorkflowService(repository, nil, nil).
+			ResourceBundle(context.Background(), taskID, actor)
+		if appErr != nil {
+			t.Fatalf("ResourceBundle() error = %+v", appErr)
+		}
+		assertCurrentResourceURLsAreViewOnly(t, result.Groups[0].WorkingRevision)
+	})
+
+	t.Run("detail view-only actor gets previews without download urls", func(t *testing.T) {
+		group := newGroup()
+		repository := &resourceWorkflowRepoStub{
+			groupByID: map[int64]*domain.TaskAssetGroup{groupID: group},
+			subjectByTask: map[int64]domain.TaskAccessSubject{taskID: {
+				TaskID: taskID, CreatorID: 7, OwnerDepartmentID: &departmentID,
+			}},
+		}
+		result, appErr := NewTaskResourceWorkflowService(repository, nil, nil).
+			ResourceGroup(context.Background(), actor, groupID)
+		if appErr != nil {
+			t.Fatalf("ResourceGroup() error = %+v", appErr)
+		}
+		assertCurrentResourceURLsAreViewOnly(t, result.WorkingRevision)
+	})
+}
+
+func assertCurrentResourceURLsAreViewOnly(t *testing.T, revision *domain.TaskAssetGroupRevision) {
+	t.Helper()
+	if revision == nil || revision.SourceFile == nil ||
+		revision.SourceFile.PreviewURL != "/v1/task-assets/301/preview" || revision.SourceFile.DownloadURL != "" {
+		t.Fatalf("source urls = %+v", revision)
+	}
+	if len(revision.Items) != 1 || revision.Items[0].File == nil ||
+		revision.Items[0].File.PreviewURL != "/v1/task-assets/302/preview" || revision.Items[0].File.DownloadURL != "" {
+		t.Fatalf("final urls = %+v", revision)
+	}
+	if len(revision.References) != 1 ||
+		revision.References[0].PreviewURL != "/v1/task-assets/303/preview" || revision.References[0].DownloadURL != "" {
+		t.Fatalf("reference urls = %+v", revision)
+	}
+}
+
+func TestCurrentResourceViewDoesNotUseDownloadOnlyRawFileRoute(t *testing.T) {
+	svc := &taskResourceWorkflowService{repo: &resourceWorkflowRepoStub{}}
+	file := &domain.TaskResourceFile{
+		FileName:   "legacy-reference.png",
+		StorageKey: "tasks/10/legacy-reference.png",
+	}
+	svc.hydrateCurrentResourceFileURL(file, true, false)
+	if file.PreviewURL != "" || file.DownloadURL != "" {
+		t.Fatalf("view-only raw file urls = preview %q download %q", file.PreviewURL, file.DownloadURL)
+	}
+	svc.hydrateCurrentResourceFileURL(file, true, true)
+	if file.PreviewURL == "" || file.DownloadURL == "" {
+		t.Fatalf("download-capable raw file urls = preview %q download %q", file.PreviewURL, file.DownloadURL)
+	}
+}
+
+func TestResourceGroupReadSurfacesMapIntegrityFailureToControlledConflict(t *testing.T) {
+	group := &domain.TaskAssetGroup{ID: 8, TaskID: 10}
+	subject := domain.TaskAccessSubject{TaskID: 10, CreatorID: 7}
+	viewActor := globalCapabilityActor(7, domain.PermissionAssetView)
+	downloadActor := globalCapabilityActor(7, domain.PermissionAssetDownload)
+
+	cases := []struct {
+		name string
+		run  func() *domain.AppError
+	}{
+		{
+			name: "resource bundle",
+			run: func() *domain.AppError {
+				repository := &resourceWorkflowRepoStub{
+					workflow:      &domain.TaskWorkflowLock{TaskID: 10},
+					listByTaskErr: repo.ErrDataIntegrity,
+				}
+				_, appErr := NewTaskResourceWorkflowService(repository, nil, nil).
+					ResourceBundle(context.Background(), 10, viewActor)
+				return appErr
+			},
+		},
+		{
+			name: "resource group list",
+			run: func() *domain.AppError {
+				repository := &resourceWorkflowRepoStub{listErr: repo.ErrDataIntegrity}
+				_, appErr := NewTaskResourceWorkflowService(repository, nil, nil).
+					ListResourceGroups(context.Background(), viewActor, domain.ResourceGroupListParams{Page: 1, PageSize: 20})
+				return appErr
+			},
+		},
+		{
+			name: "flat resource group list",
+			run: func() *domain.AppError {
+				repository := &resourceWorkflowRepoStub{flatListErr: repo.ErrDataIntegrity}
+				_, appErr := NewTaskResourceWorkflowService(repository, nil, nil).
+					ListResourceGroups(context.Background(), viewActor, domain.ResourceGroupListParams{
+						ResourceRole: domain.ResourceRoleFilterFinal,
+						Page:         1,
+						PageSize:     20,
+					})
+				return appErr
+			},
+		},
+		{
+			name: "resource group detail",
+			run: func() *domain.AppError {
+				repository := &resourceWorkflowRepoStub{groupErr: repo.ErrDataIntegrity}
+				_, appErr := NewTaskResourceWorkflowService(repository, nil, nil).
+					ResourceGroup(context.Background(), viewActor, group.ID)
+				return appErr
+			},
+		},
+		{
+			name: "resource group history current pointer",
+			run: func() *domain.AppError {
+				repository := &resourceWorkflowRepoStub{groupErr: repo.ErrDataIntegrity}
+				_, appErr := NewTaskResourceWorkflowService(repository, nil, nil).
+					ResourceGroupRevisions(context.Background(), viewActor, group.ID, 1, 20)
+				return appErr
+			},
+		},
+		{
+			name: "resource group history page",
+			run: func() *domain.AppError {
+				repository := &resourceWorkflowRepoStub{
+					groupByID:        map[int64]*domain.TaskAssetGroup{group.ID: group},
+					subjectByTask:    map[int64]domain.TaskAccessSubject{group.TaskID: subject},
+					revisionsErr:     repo.ErrDataIntegrity,
+					revisionsByGroup: map[int64][]domain.TaskAssetGroupRevision{},
+				}
+				_, appErr := NewTaskResourceWorkflowService(repository, nil, nil).
+					ResourceGroupRevisions(context.Background(), viewActor, group.ID, 1, 20)
+				return appErr
+			},
+		},
+		{
+			name: "batch download",
+			run: func() *domain.AppError {
+				repository := &resourceWorkflowRepoStub{groupErr: repo.ErrDataIntegrity}
+				_, appErr := NewTaskResourceWorkflowService(repository, nil, nil).
+					BatchDownloadResourceGroups(context.Background(), downloadActor, domain.ResourceGroupBatchDownloadRequest{GroupIDs: []int64{group.ID}})
+				return appErr
+			},
+		},
+	}
+
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			appErr := test.run()
+			if appErr == nil || appErr.Code != domain.ErrCodeInvalidStateTransition {
+				t.Fatalf("controlled integrity error = %+v", appErr)
+			}
+			details, ok := appErr.Details.(map[string]interface{})
+			if !ok || details["integrity_violation"] != true {
+				t.Fatalf("integrity details = %#v", appErr.Details)
+			}
+		})
 	}
 }
 
@@ -206,6 +419,45 @@ func TestListResourceGroupsPushesScopeBeforePagination(t *testing.T) {
 	}
 	if result.Total != 2 || len(result.Items) != 1 || result.Items[0].ID != 2 {
 		t.Fatalf("scoped page = %+v", result)
+	}
+}
+
+func TestListResourceGroupsDoesNotExposeDownloadURLsFromViewScope(t *testing.T) {
+	group := domain.TaskAssetGroup{
+		ID:     1,
+		TaskID: 11,
+		FinalizedRevision: &domain.TaskAssetGroupRevision{
+			ID:     21,
+			Status: domain.TaskAssetGroupRevisionFinalized,
+			Items: []domain.TaskAssetGroupRevisionItem{{
+				ID:          31,
+				TaskAssetID: 41,
+				File: &domain.TaskResourceFile{
+					TaskAssetID: 41,
+					FileName:    "final.png",
+					StorageKey:  "tasks/11/final.png",
+				},
+			}},
+		},
+	}
+	repository := &resourceWorkflowRepoStub{listFn: func(domain.ResourceGroupListParams) ([]domain.TaskAssetGroup, int64) {
+		return []domain.TaskAssetGroup{group}, 1
+	}}
+	svc := NewTaskResourceWorkflowService(repository, nil, nil)
+	result, appErr := svc.ListResourceGroups(
+		context.Background(),
+		globalCapabilityActor(7, domain.PermissionAssetView),
+		domain.ResourceGroupListParams{Page: 1, PageSize: 20},
+	)
+	if appErr != nil {
+		t.Fatalf("ListResourceGroups() error = %+v", appErr)
+	}
+	file := result.Items[0].FinalizedRevision.Items[0].File
+	if file.PreviewURL != "/v1/task-assets/41/preview" {
+		t.Fatalf("view-scoped list preview_url = %q", file.PreviewURL)
+	}
+	if file.DownloadURL != "" {
+		t.Fatalf("view-scoped list leaked download_url = %q", file.DownloadURL)
 	}
 }
 
@@ -529,7 +781,14 @@ func TestListResourceGroupsUsesFileLevelPaginationForFlatMode(t *testing.T) {
 			if len(params.Access.DepartmentIDs) != 1 || params.Access.DepartmentIDs[0] != departmentID {
 				t.Fatalf("flat SQL scope params = %+v", params.Access)
 			}
-			return []domain.FlatResourceItem{{GroupID: 8, FileName: "fifth.png", ResourceRole: domain.ResourceRoleFilterFinal}}, 5
+			return []domain.FlatResourceItem{{
+				GroupID:      8,
+				TaskID:       18,
+				TaskAssetID:  81,
+				FileName:     "fifth.png",
+				StorageKey:   "tasks/18/fifth.png",
+				ResourceRole: domain.ResourceRoleFilterFinal,
+			}}, 5
 		},
 	}
 	svc := NewTaskResourceWorkflowService(repository, nil, nil)
@@ -541,6 +800,12 @@ func TestListResourceGroupsUsesFileLevelPaginationForFlatMode(t *testing.T) {
 	}
 	if result.ViewMode != "flat" || result.Total != 5 || len(result.FlatItems) != 1 || len(result.Items) != 0 {
 		t.Fatalf("flat page = %+v", result)
+	}
+	if result.FlatItems[0].PreviewURL != "/v1/task-assets/81/preview" {
+		t.Fatalf("view-scoped flat list preview_url = %q", result.FlatItems[0].PreviewURL)
+	}
+	if result.FlatItems[0].DownloadURL != "" {
+		t.Fatalf("view-scoped flat list leaked download_url = %q", result.FlatItems[0].DownloadURL)
 	}
 }
 

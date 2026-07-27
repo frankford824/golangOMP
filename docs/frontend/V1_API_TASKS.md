@@ -1443,6 +1443,7 @@ curl -X POST https://api.example.com/v1/tasks/<id>/reopen \
 |---|---|---|---|
 | 403 | 见 `error.code` | 见 `deny_code` | 错误响应。 |
 | 404 | 见 `error.code` | 见 `deny_code` | 错误响应。 |
+| 409 | 见 `error.code` | 见 `deny_code` | 错误响应。 |
 
 ### curl 示例
 ```bash
@@ -1513,6 +1514,7 @@ curl -X GET https://api.example.com/v1/tasks/<id>/resource-bundle \
 | HTTP | code | deny_code | 说明 |
 |---|---|---|---|
 | 403 | 见 `error.code` | 见 `deny_code` | 错误响应。 |
+| 409 | 见 `error.code` | 见 `deny_code` | 错误响应。 |
 
 ### curl 示例
 ```bash
@@ -1575,6 +1577,7 @@ curl -X GET https://api.example.com/v1/resource-groups \
 |---|---|---|---|
 | 403 | 见 `error.code` | 见 `deny_code` | 错误响应。 |
 | 404 | 见 `error.code` | 见 `deny_code` | 错误响应。 |
+| 409 | 见 `error.code` | 见 `deny_code` | 错误响应。 |
 
 ### curl 示例
 ```bash
@@ -1640,6 +1643,7 @@ curl -X GET https://api.example.com/v1/resource-groups/<id> \
 | 400 | 见 `error.code` | 见 `deny_code` | 错误响应。 |
 | 403 | 见 `error.code` | 见 `deny_code` | 错误响应。 |
 | 404 | 见 `error.code` | 见 `deny_code` | 错误响应。 |
+| 409 | 见 `error.code` | 见 `deny_code` | 错误响应。 |
 
 ### curl 示例
 ```bash
@@ -1701,6 +1705,7 @@ Content-Type: `application/json`
 |---|---|---|---|
 | 400 | 见 `error.code` | 见 `deny_code` | 错误响应。 |
 | 403 | 见 `error.code` | 见 `deny_code` | 错误响应。 |
+| 409 | 见 `error.code` | 见 `deny_code` | 错误响应。 |
 
 ### curl 示例
 ```bash

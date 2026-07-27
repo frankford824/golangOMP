@@ -20,11 +20,11 @@ func TestHydrateResourceGroupRevisionsUsesOneBatchPerRelation(t *testing.T) {
 	repository := NewTaskResourceGroupRepo(New(db))
 	now := time.Now().UTC()
 
-	mock.ExpectQuery(regexp.QuoteMeta("FROM task_asset_group_revisions r\n\t\tLEFT JOIN users u ON u.id = r.created_by\n\t\tWHERE r.id IN (?,?)")).
+	mock.ExpectQuery(`FROM task_asset_group_revisions r[\s\S]+JOIN task_asset_groups g ON g\.id = r\.group_id[\s\S]+WHERE r\.id IN \(\?,\?\)`).
 		WithArgs(int64(101), int64(102)).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "group_id", "revision_no", "status", "mode", "source_task_asset_id", "source_stage", "created_by", "created_by_name", "reason", "submitted_at", "finalized_at", "created_at"}).
-			AddRow(101, 1, 1, "finalized", "single", 201, "design", 9, "审核员", "", now, now, now).
-			AddRow(102, 2, 1, "finalized", "set", 202, "audit", 9, "审核员", "", now, now, now))
+		WillReturnRows(sqlmock.NewRows(revisionHydrationColumns()).
+			AddRow(101, 1, 1, "finalized", "single", 201, "design", 9, "审核员", "", now, now, now, 1001, "task", nil, nil).
+			AddRow(102, 2, 1, "finalized", "set", 202, "audit", 9, "审核员", "", now, now, now, 1002, "task", nil, nil))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM task_asset_group_revision_items\n\t\tWHERE revision_id IN (?,?)")).
 		WithArgs(int64(101), int64(102)).
 		WillReturnRows(sqlmock.NewRows([]string{"id", "revision_id", "task_asset_id", "sort_order", "item_name", "created_at"}).
@@ -33,15 +33,15 @@ func TestHydrateResourceGroupRevisionsUsesOneBatchPerRelation(t *testing.T) {
 			AddRow(303, 102, 213, 1, "侧面", now))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM task_asset_group_revision_references rr")).
 		WithArgs(int64(101), int64(102)).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "revision_id", "reference_file_ref_id", "formal_task_asset_id", "sort_order", "ref_id_snapshot", "file_name_snapshot", "scope_snapshot", "mime_type", "file_size", "storage_key", "storage_ref_status", "formal_storage_ref_status", "formal_task_asset_active", "created_at"}))
+		WillReturnRows(sqlmock.NewRows(revisionReferenceHydrationColumns()))
 	mock.ExpectQuery(regexp.QuoteMeta("FROM task_assets ta\n\t\t\tLEFT JOIN asset_storage_refs asr ON asr.ref_id = ta.storage_ref_id\n\t\t\tWHERE ta.id IN (?,?,?,?,?)")).
 		WithArgs(int64(201), int64(202), int64(211), int64(212), int64(213)).
-		WillReturnRows(sqlmock.NewRows([]string{"id", "file_name", "mime_type", "file_size", "storage_key", "storage_ref_status"}).
-			AddRow(201, "A.psd", "image/vnd.adobe.photoshop", 10, "a.psd", "recorded").
-			AddRow(202, "B.psd", "image/vnd.adobe.photoshop", 10, "b.psd", "recorded").
-			AddRow(211, "A.png", "image/png", 10, "a.png", "recorded").
-			AddRow(212, "B-1.png", "image/png", 10, "b1.png", "recorded").
-			AddRow(213, "B-2.png", "image/png", 10, "b2.png", "recorded"))
+		WillReturnRows(sqlmock.NewRows(revisionFileHydrationColumns()).
+			AddRow(201, "A.psd", "image/vnd.adobe.photoshop", 10, "a.psd", "recorded", true, 1001, "source", 1, "source").
+			AddRow(202, "B.psd", "image/vnd.adobe.photoshop", 10, "b.psd", "recorded", true, 1002, "source", 2, "source").
+			AddRow(211, "A.png", "image/png", 10, "a.png", "recorded", true, 1001, "delivery", 1, "final").
+			AddRow(212, "B-1.png", "image/png", 10, "b1.png", "recorded", true, 1002, "delivery", 2, "final").
+			AddRow(213, "B-2.png", "image/png", 10, "b2.png", "recorded", true, 1002, "delivery", 2, "final"))
 
 	groups := []domain.TaskAssetGroup{
 		{ID: 1, FinalizedRevisionID: int64Ptr(101)},

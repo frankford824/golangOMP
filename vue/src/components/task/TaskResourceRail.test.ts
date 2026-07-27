@@ -52,7 +52,7 @@ const bundle: ResourceBundle = {
 
 describe('TaskResourceRail', () => {
   it('uses current scoped revision references with stable order and de-duplication', () => {
-    const wrapper = mount(TaskResourceRail, { props: { bundle, taskStatus: 'Completed' } })
+    const wrapper = mount(TaskResourceRail, { props: { bundle, taskStatus: 'Completed', taskType: 'retouch_task' } })
 
     expect(wrapper.get('.rail-column.references .column-head small').text()).toBe('2 个附件')
     expect(wrapper.findAll('.rail-column.references .media-strip button').map((item) => item.text())).toEqual([
@@ -62,12 +62,34 @@ describe('TaskResourceRail', () => {
   })
 
   it('opens the authoritative resource workspace for scoped references', async () => {
-    const wrapper = mount(TaskResourceRail, { props: { bundle, taskStatus: 'Completed' } })
+    const wrapper = mount(TaskResourceRail, { props: { bundle, taskStatus: 'Completed', taskType: 'retouch_task' } })
 
     await wrapper.get('.rail-column.references .column-head button').trigger('click')
     await wrapper.get('.rail-column.references .media-strip button').trigger('click')
 
     expect(wrapper.emitted('openResources')).toHaveLength(2)
     expect(wrapper.emitted('openAttachments')).toBeUndefined()
+  })
+
+  it('explains that retouch source files are optional instead of reporting missing SKU submissions', () => {
+    const wrapper = mount(TaskResourceRail, {
+      props: {
+        bundle,
+        taskStatus: 'Completed',
+        taskType: 'retouch_task',
+        canOperate: true,
+      },
+    })
+
+    expect(wrapper.get('.rail-column.sources .column-head small').text()).toBe('0 个源文件 · 2 个修图范围')
+    expect(wrapper.get('.rail-column.sources .empty-copy').text()).toBe('修图任务无需独立源文件，以参考图与最终成品为准')
+    expect(wrapper.get('.resource-rail > footer').text()).toContain('按修图范围提交最终成品；独立源文件可选')
+  })
+
+  it('keeps SKU submission copy for design tasks', () => {
+    const wrapper = mount(TaskResourceRail, { props: { bundle, taskStatus: 'InProgress', taskType: 'original_product_development' } })
+
+    expect(wrapper.get('.rail-column.sources .column-head small').text()).toBe('0 / 2 个 SKU 已提交')
+    expect(wrapper.get('.rail-column.sources .empty-copy').text()).toBe('设计人员尚未提交源文件')
   })
 })
