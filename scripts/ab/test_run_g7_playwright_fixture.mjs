@@ -125,14 +125,34 @@ async function probeRequester(_context, expectedUrl, requestOptions) {
     throw new Error("HTTP probe did not preserve fail-closed options");
   }
   const url = new URL(expectedUrl);
+  const token = bearerToken(requestOptions);
+  const isAdmin = token === "super-secret-cookie-admin-devplus_devplus";
+  const revisionMatch = url.pathname.match(
+    /^\/v1\/resource-groups\/(\d+)\/revisions$/,
+  );
+  if (
+    url.origin === FIXTURE_ORIGINS.devplus_devplus &&
+    revisionMatch &&
+    url.searchParams.get("page") === "1" &&
+    url.searchParams.get("page_size") === "50"
+  ) {
+    return fixtureApiResponse(
+      expectedUrl,
+      isAdmin ? 200 : 401,
+      "application/json; charset=utf-8",
+      JSON.stringify(
+        isAdmin
+          ? { data: { items: [{ id: 1 }], page: 1, page_size: 50, total: 1 } }
+          : { code: "unauthenticated" },
+      ),
+    );
+  }
   if (
     url.origin !== FIXTURE_ORIGINS.devplus_devplus ||
     !["/probe/403", "/probe/410"].includes(url.pathname)
   ) {
     throw new Error("HTTP probe used an unexpected endpoint");
   }
-  const token = bearerToken(requestOptions);
-  const isAdmin = token === "super-secret-cookie-admin-devplus_devplus";
   const isDenied = token === "super-secret-cookie-denied";
   if (url.pathname === "/probe/403") {
     if (isAdmin && process.env.G7_FIXTURE_ADMIN_403_REDIRECT === "1") {

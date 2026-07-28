@@ -2348,6 +2348,56 @@ async function probeStatuses(
   return rows;
 }
 
+async function fetchRevisionHistories(
+  groupIds,
+  context,
+  origin,
+  token,
+  cache,
+  requester,
+) {
+  for (const groupId of groupIds) {
+    const requestPath =
+      `/v1/resource-groups/${groupId}/revisions?page=1&page_size=50`;
+    const requestUrl = `${origin}${requestPath}`;
+    let response;
+    try {
+      response = await requester(context, requestUrl, {
+        headers: {
+          accept: "application/json",
+          authorization: `Bearer ${token}`,
+        },
+        failOnStatusCode: false,
+        maxRedirects: 0,
+        timeout: 15_000,
+      });
+      if (!response || response.status() !== 200) {
+        throw new Error(
+          `revision history GET returned HTTP ${response?.status() ?? "none"}`,
+        );
+      }
+      const body = await inspectDirectApiResponse(
+        response,
+        requestUrl,
+        `revision history group ${groupId}`,
+      );
+      cache.network.push({
+        method: "GET",
+        url: requestUrl,
+        status: response.status(),
+      });
+      cache.json.push({
+        path: `/v1/resource-groups/${groupId}/revisions`,
+        status: response.status(),
+        body,
+        body_sha256: bytesSha256(Buffer.from(JSON.stringify(body))),
+      });
+    } finally {
+      await response?.dispose();
+    }
+  }
+}
+
 async function writeJsonExclusive(filePath, value) {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   const handle = await fs.open(filePath, "wx", 0o600);
@@ -2454,17 +2504,14 @@ async function executeCase({
       await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
       await Promise.allSettled(cache.pending);
     } else if (coverage.requirements.requires_revision_ids) {
-      for (const groupId of selectedGroupIds) {
-        const status = await page.evaluate(async (url) => {
-          const response = await fetch(url, { credentials: "include" });
-          await response.json();
-          return response.status;
-        }, `/v1/resource-groups/${groupId}/revisions?page=1&page_size=50`);
-        if (status !== 200) {
-          throw new Error(`revision history GET returned HTTP ${status}`);
-        }
-      }
-      await Promise.allSettled(cache.pending);
+      await fetchRevisionHistories(
+        selectedGroupIds,
+        browserContext,
+        origin,
+        plan.auth_runtime_tokens.admin[coverage.combination],
+        cache,
+        probeRequester,
+      );
     }
     const observed = await visibleSnapshot(page);
     const task = taskPayload(cache, coverage.task_id);
