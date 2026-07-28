@@ -571,6 +571,9 @@ class SelectComputerUseSamplesTests(unittest.TestCase):
                             "kind": (
                                 "v8_missing_resource_group"
                                 if scenario["id"] == "missing_resource_group_negative"
+                                else "v8_expected_no_resource_groups"
+                                if scenario["id"]
+                                in selector.EXPECTED_NO_RESOURCE_GROUP_SCENARIOS
                                 else "v8_resource_groups"
                             )
                         }

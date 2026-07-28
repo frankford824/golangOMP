@@ -182,17 +182,17 @@ class ComputerUseEvidenceValidatorTest(unittest.TestCase):
                 for viewport in scenario["required_viewports"]:
                     task_id += 1
                     requirements = validator._requirements_for(scenario, combination)
-                    revision_ids = (
-                        [task_id * 10 + 1, task_id * 10 + 2]
-                        if combination == "devplus_devplus"
-                        and requirements["requires_revision_ids"]
-                        else []
-                    )
                     resource_oracle = (
                         {
                             "kind": (
                                 "v8_missing_resource_group"
                                 if scenario["id"] == "missing_resource_group_negative"
+                                else "v8_expected_no_resource_groups"
+                                if scenario["id"]
+                                in {
+                                    "archived_readonly",
+                                    "purchase_to_sku_planning",
+                                }
                                 else "v8_resource_groups"
                             )
                         }
@@ -219,6 +219,15 @@ class ComputerUseEvidenceValidatorTest(unittest.TestCase):
                             ),
                         }
                     )
+                    uses_v8_groups = (
+                        resource_oracle["kind"] == "v8_resource_groups"
+                    )
+                    revision_ids = (
+                        [task_id * 10 + 1, task_id * 10 + 2]
+                        if uses_v8_groups
+                        and requirements["requires_revision_ids"]
+                        else []
+                    )
                     coverage_matrix.append(
                         {
                             "combination": combination,
@@ -226,8 +235,7 @@ class ComputerUseEvidenceValidatorTest(unittest.TestCase):
                             "task_id": task_id,
                             "resource_ids": (
                                 [f"group:{task_id}"]
-                                if combination == "devplus_devplus"
-                                and scenario["id"] != "missing_resource_group_negative"
+                                if uses_v8_groups
                                 else []
                             ),
                             "revision_ids": revision_ids,

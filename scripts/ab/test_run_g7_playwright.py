@@ -191,6 +191,12 @@ class RunG7PlaywrightTest(unittest.TestCase):
                             "kind": (
                                 "v8_missing_resource_group"
                                 if scenario["id"] == "missing_resource_group_negative"
+                                else "v8_expected_no_resource_groups"
+                                if scenario["id"]
+                                in {
+                                    "archived_readonly",
+                                    "purchase_to_sku_planning",
+                                }
                                 else "v8_resource_groups"
                             )
                         }
@@ -227,13 +233,12 @@ class RunG7PlaywrightTest(unittest.TestCase):
                                     if is_task1264
                                     else ["task_asset_group:10"]
                                 )
-                                if combination == "devplus_devplus"
-                                and scenario["id"] != "missing_resource_group_negative"
+                                if resource_oracle["kind"] == "v8_resource_groups"
                                 else []
                             ),
                             "revision_ids": (
                                 ([635, 636] if is_task1264 else [1])
-                                if combination == "devplus_devplus"
+                                if resource_oracle["kind"] == "v8_resource_groups"
                                 and requirements["requires_revision_ids"]
                                 else []
                             ),

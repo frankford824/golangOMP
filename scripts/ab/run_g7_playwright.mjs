@@ -10,6 +10,10 @@ const GATE = "G7";
 const SOURCE_KIND = "playwright";
 const EXPECTED_SCENARIO_COUNT = 30;
 const EXPECTED_CASE_COUNT = 66;
+const EXPECTED_NO_RESOURCE_GROUP_SCENARIOS = new Set([
+  "archived_readonly",
+  "purchase_to_sku_planning",
+]);
 const COMBINATIONS = [
   "external_external",
   "devplus_devplus",
@@ -427,6 +431,8 @@ function validateResourceOracle(value, combination, scenarioId, label) {
     const expectedKind =
       scenarioId === "missing_resource_group_negative"
         ? "v8_missing_resource_group"
+        : EXPECTED_NO_RESOURCE_GROUP_SCENARIOS.has(scenarioId)
+          ? "v8_expected_no_resource_groups"
         : "v8_resource_groups";
     if (value.kind !== expectedKind) {
       throw new InputError(`${label} must use the V8 resource-group oracle`);
@@ -583,12 +589,19 @@ function validateSamples(samples, scenarios, catalogHash) {
       if (
         (resourceOracle.kind === "v8_resource_groups" &&
           row.resource_ids.length === 0) ||
-        (!["v8_resource_groups", "v8_missing_resource_group"].includes(
+        (![
+          "v8_resource_groups",
+          "v8_missing_resource_group",
+          "v8_expected_no_resource_groups",
+        ].includes(
           resourceOracle.kind,
         ) &&
           (row.resource_ids.length !== 0 || row.revision_ids.length !== 0))
         ||
-        (resourceOracle.kind === "v8_missing_resource_group" &&
+        ([
+          "v8_missing_resource_group",
+          "v8_expected_no_resource_groups",
+        ].includes(resourceOracle.kind) &&
           (row.resource_ids.length !== 0 || row.revision_ids.length !== 0))
       ) {
         throw new InputError(`${key} resource identities contradict its edge oracle`);
@@ -2126,7 +2139,10 @@ async function executeCase({
           (!coverage.requirements.requires_revision_ids ||
             canonicalJson([...coverage.revision_ids].sort((a, b) => a - b)) ===
               canonicalJson([...observedRevisionIds].sort((a, b) => a - b)))
-        : resourceOracle.kind === "v8_missing_resource_group"
+        : [
+              "v8_missing_resource_group",
+              "v8_expected_no_resource_groups",
+            ].includes(resourceOracle.kind)
           ? groupsFromBundle(bundle).length === 0 &&
             coverage.resource_ids.length === 0 &&
             coverage.revision_ids.length === 0

@@ -43,6 +43,10 @@ EXPECTED_VIEWPORT_SPECS = {
     "desktop": {"width": 1440, "height": 900, "device_scale_factor": 1},
     "mobile": {"width": 390, "height": 844, "device_scale_factor": 1},
 }
+EXPECTED_NO_RESOURCE_GROUP_SCENARIOS = {
+    "archived_readonly",
+    "purchase_to_sku_planning",
+}
 REQUIRED_COVERAGE_TAGS = {
     "four_combinations",
     "history_drawer",
@@ -321,6 +325,8 @@ def _normalized_resource_oracle(
         expected_kind = (
             "v8_missing_resource_group"
             if scenario_id == "missing_resource_group_negative"
+            else "v8_expected_no_resource_groups"
+            if scenario_id in EXPECTED_NO_RESOURCE_GROUP_SCENARIOS
             else "v8_resource_groups"
         )
         return value if value == {"kind": expected_kind} else None
@@ -621,11 +627,19 @@ def _validate_samples_manifest(
                 )
                 or (
                     resource_oracle["kind"]
-                    not in {"v8_resource_groups", "v8_missing_resource_group"}
+                    not in {
+                        "v8_resource_groups",
+                        "v8_missing_resource_group",
+                        "v8_expected_no_resource_groups",
+                    }
                     and (resource_ids or revision_ids)
                 )
                 or (
-                    resource_oracle["kind"] == "v8_missing_resource_group"
+                    resource_oracle["kind"]
+                    in {
+                        "v8_missing_resource_group",
+                        "v8_expected_no_resource_groups",
+                    }
                     and (resource_ids or revision_ids)
                 )
                 or _normalized_expected_allowed_actions(

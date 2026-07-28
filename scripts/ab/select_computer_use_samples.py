@@ -60,6 +60,10 @@ NEGATIVE_FIXTURE_SCENARIOS = {
 RETOUCH_REOPEN_TASK_ID = 1264
 RETOUCH_REOPEN_SCOPE_REF_ID = 45
 RETOUCH_REOPEN_REVISION_IDS = [635, 636]
+EXPECTED_NO_RESOURCE_GROUP_SCENARIOS = {
+    "archived_readonly",
+    "purchase_to_sku_planning",
+}
 
 
 class InputError(ValueError):
@@ -279,6 +283,8 @@ def normalize_resource_oracle(
         expected_kind = (
             "v8_missing_resource_group"
             if scenario_id == "missing_resource_group_negative"
+            else "v8_expected_no_resource_groups"
+            if scenario_id in EXPECTED_NO_RESOURCE_GROUP_SCENARIOS
             else "v8_resource_groups"
         )
         if value != {"kind": expected_kind}:

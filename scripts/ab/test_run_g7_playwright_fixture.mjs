@@ -305,17 +305,21 @@ async function installContextRoutes(context, { role }) {
     if (bundleMatch) {
       const taskId = Number(bundleMatch[1]);
       const isTask1264 = taskId === 1264;
-      const groups =
-        url.searchParams.get("scenario") === "missing_resource_group_negative"
-          ? []
-          : [
+      const scenario = url.searchParams.get("scenario");
+      const groups = [
+        "missing_resource_group_negative",
+        "archived_readonly",
+        "purchase_to_sku_planning",
+      ].includes(scenario)
+        ? []
+        : [
               {
                 id: isTask1264 ? 45 : 10,
                 task_id: taskId,
                 scope_kind: isTask1264 ? "retouch_requirement" : "sku",
                 scope_ref_id: isTask1264 ? 45 : 1,
               },
-            ];
+          ];
       await route.fulfill(
         json({
           data: {
