@@ -868,12 +868,12 @@ class RunG7PlaywrightTest(unittest.TestCase):
             (
                 "html",
                 "G7_FIXTURE_ADMIN_403_HTML",
-                "returned empty or HTML/login content",
+                "returned empty, non-JSON, or HTML/login content",
             ),
             (
                 "redirect",
                 "G7_FIXTURE_ADMIN_403_REDIRECT",
-                "redirected away from the attested endpoint",
+                "admin positive control did not return 2xx",
             ),
         ]
         for label, environment_name, expected_error in cases:

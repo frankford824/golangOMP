@@ -116,6 +116,66 @@ async function identityRequester(_context, expectedUrl, requestOptions) {
   );
 }
 
+async function probeRequester(_context, expectedUrl, requestOptions) {
+  if (
+    requestOptions.maxRedirects !== 0 ||
+    requestOptions.failOnStatusCode !== false ||
+    requestOptions.headers?.accept !== "application/json"
+  ) {
+    throw new Error("HTTP probe did not preserve fail-closed options");
+  }
+  const url = new URL(expectedUrl);
+  if (
+    url.origin !== FIXTURE_ORIGINS.devplus_devplus ||
+    !["/probe/403", "/probe/410"].includes(url.pathname)
+  ) {
+    throw new Error("HTTP probe used an unexpected endpoint");
+  }
+  const token = bearerToken(requestOptions);
+  const isAdmin = token === "super-secret-cookie-admin-devplus_devplus";
+  const isDenied = token === "super-secret-cookie-denied";
+  if (url.pathname === "/probe/403") {
+    if (isAdmin && process.env.G7_FIXTURE_ADMIN_403_REDIRECT === "1") {
+      return fixtureApiResponse(
+        expectedUrl,
+        302,
+        "application/json; charset=utf-8",
+        JSON.stringify({ code: "redirect" }),
+      );
+    }
+    if (isAdmin && process.env.G7_FIXTURE_ADMIN_403_HTML === "1") {
+      return fixtureApiResponse(
+        expectedUrl,
+        200,
+        "text/html; charset=utf-8",
+        "<!doctype html><html><body>Login</body></html>",
+      );
+    }
+    return fixtureApiResponse(
+      expectedUrl,
+      isAdmin ? 200 : isDenied ? 403 : 401,
+      "application/json; charset=utf-8",
+      JSON.stringify(
+        isAdmin
+          ? { status: "authorized" }
+          : isDenied
+            ? { code: "forbidden" }
+            : { code: "unauthenticated" },
+      ),
+    );
+  }
+  return fixtureApiResponse(
+    expectedUrl,
+    isAdmin ? 410 : 401,
+    "application/json; charset=utf-8",
+    JSON.stringify(
+      isAdmin
+        ? { code: "historical_unavailable" }
+        : { code: "unauthenticated" },
+    ),
+  );
+}
+
 function fixtureHtml(
   scenario,
   taskId,
@@ -467,6 +527,7 @@ const testHooks = {
   installContextRoutes,
   identityRequester,
   bundleVerifier,
+  probeRequester,
 };
 if (process.env.G7_FIXTURE_FAIL_TRACE_SANITIZER === "1") {
   testHooks.traceSanitizer = async () => {

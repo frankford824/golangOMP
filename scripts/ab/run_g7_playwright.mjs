@@ -2232,57 +2232,90 @@ async function verifyRuntimeIdentity(
   }
 }
 
-async function probeStatuses(coverage, adminPage, deniedPage, origin, network) {
+async function probeStatuses(
+  coverage,
+  adminContext,
+  deniedContext,
+  origin,
+  network,
+  adminToken,
+  deniedToken,
+  probeRequester,
+) {
   const rows = [];
   for (const probe of coverage.http_probes) {
-    const temporaryAdminPage = await adminPage.context().newPage();
+    const probeUrl = `${origin}${probe.path}`;
+    const requestOptions = (token) => ({
+      headers: {
+        accept: "application/json",
+        authorization: `Bearer ${token}`,
+      },
+      failOnStatusCode: false,
+      maxRedirects: 0,
+      timeout: 15_000,
+    });
     if (probe.expected_status === 403) {
-      const probeUrl = `${origin}${probe.path}`;
-      const adminResponse = await temporaryAdminPage.goto(
-        probeUrl,
-        {
-          waitUntil: "load",
-          timeout: 15_000,
-        },
-      );
-      if (
-        !adminResponse ||
-        adminResponse.status() < 200 ||
-        adminResponse.status() >= 300
-      ) {
-        throw new Error(
-          `HTTP probe ${probe.kind} admin positive control did not return 2xx`,
+      let adminResponse;
+      try {
+        adminResponse = await probeRequester(
+          adminContext,
+          probeUrl,
+          requestOptions(adminToken),
         );
+        if (
+          !adminResponse ||
+          adminResponse.status() < 200 ||
+          adminResponse.status() >= 300
+        ) {
+          throw new Error(
+            `HTTP probe ${probe.kind} admin positive control did not return 2xx`,
+          );
+        }
+        await inspectDirectApiResponse(
+          adminResponse,
+          probeUrl,
+          `HTTP probe ${probe.kind} admin positive control`,
+        );
+        network.push({
+          method: "GET",
+          url: probeUrl,
+          status: adminResponse.status(),
+        });
+      } finally {
+        await adminResponse?.dispose();
       }
-      await inspectDirectResponse(
-        adminResponse,
+    }
+    const context =
+      probe.expected_status === 403 ? deniedContext : adminContext;
+    const token = probe.expected_status === 403 ? deniedToken : adminToken;
+    let response;
+    try {
+      response = await probeRequester(
+        context,
         probeUrl,
-        `HTTP probe ${probe.kind} admin positive control`,
+        requestOptions(token),
+      );
+      if (!response) {
+        throw new Error(`HTTP probe ${probe.kind} returned no response`);
+      }
+      await inspectDirectApiResponse(
+        response,
+        probeUrl,
+        `HTTP probe ${probe.kind}`,
       );
       network.push({
         method: "GET",
         url: probeUrl,
-        status: adminResponse.status(),
+        status: response.status(),
       });
+      rows.push({
+        name: probe.kind,
+        expected_status: probe.expected_status,
+        actual_status: response.status(),
+      });
+    } finally {
+      await response?.dispose();
     }
-    const page = probe.expected_status === 403 ? deniedPage : temporaryAdminPage;
-    const probeUrl = `${origin}${probe.path}`;
-    const response = await page.goto(probeUrl, {
-      waitUntil: "load",
-      timeout: 15_000,
-    });
-    await inspectDirectResponse(response, probeUrl, `HTTP probe ${probe.kind}`);
-    network.push({
-      method: "GET",
-      url: `${origin}${probe.path}`,
-      status: response.status(),
-    });
-    rows.push({
-      name: probe.kind,
-      expected_status: probe.expected_status,
-      actual_status: response.status(),
-    });
-    await temporaryAdminPage.close();
   }
   return rows;
 }
@@ -2320,6 +2353,7 @@ async function executeCase({
   traceSanitizer,
   bundleVerifier,
   bundleVerificationCache,
+  probeRequester,
 }) {
   const { scenario, sample, coverage, key } = item;
   const origin = ORIGINS[coverage.combination];
@@ -2424,10 +2458,13 @@ async function executeCase({
     });
     const httpStatuses = await probeStatuses(
       coverage,
-      page,
-      deniedPage,
+      browserContext,
+      deniedContext,
       origin,
       cache.network,
+      plan.auth_runtime_tokens.admin[coverage.combination],
+      plan.auth_runtime_tokens.denied,
+      probeRequester,
     );
     const pageMatches =
       observed.taskPageVisible &&
@@ -2673,6 +2710,10 @@ async function executeCase({
 export async function executePlan(plan, testHooks = {}) {
   const traceSanitizer = testHooks.traceSanitizer || sanitizeTrace;
   const bundleVerifier = testHooks.bundleVerifier || verifySourceBundles;
+  const probeRequester =
+    testHooks.probeRequester ||
+    ((context, url, requestOptions) =>
+      context.request.get(url, requestOptions));
   const identityRequester =
     testHooks.identityRequester ||
     ((context, url, requestOptions) =>
@@ -2685,6 +2726,9 @@ export async function executePlan(plan, testHooks = {}) {
   }
   if (typeof bundleVerifier !== "function") {
     throw new InputError("source bundle verifier must be callable");
+  }
+  if (typeof probeRequester !== "function") {
+    throw new InputError("HTTP probe requester must be callable");
   }
   await fs.mkdir(plan.artifact_root, { recursive: true });
   await fs.mkdir(path.join(plan.artifact_root, "playwright"), { recursive: false });
@@ -2768,6 +2812,7 @@ export async function executePlan(plan, testHooks = {}) {
               traceSanitizer,
               bundleVerifier,
               bundleVerificationCache,
+              probeRequester,
             }),
           );
         }
