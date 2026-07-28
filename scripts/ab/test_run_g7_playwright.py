@@ -276,6 +276,22 @@ class RunG7PlaywrightTest(unittest.TestCase):
                 "required_viewports": scenario["required_viewports"],
                 "coverage_matrix": matrix,
             }
+            if scenario["id"] == "multi_source_zip_bundle":
+                sample["revision_facts"] = [
+                    {
+                        "resource_key": "task_asset_group:10",
+                        "predicted_revision_id": 1,
+                        "revision_no": 1,
+                        "source_bundle": {
+                            "task_asset_id": 9001,
+                            "bundle_sha256": (
+                                "6afba5980e37a4798fe3c6f75638e585"
+                                "606180002256850855df240037b61093"
+                            ),
+                            "ordered_member_task_asset_ids": [101, 102],
+                        },
+                    }
+                ]
             sample["sample_sha256"] = VALIDATOR.canonical_sha256(sample)
             samples.append(sample)
         mapping_sha256 = hashlib.sha256(b"mapping").hexdigest()

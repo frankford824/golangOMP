@@ -7,6 +7,7 @@ import {
   classifyGuardConsoleEntries,
   groupMatchesLocator,
   retiredActionsAbsent,
+  validateSourceBundleManifest,
 } from "./run_g7_playwright.mjs";
 
 const ORIGIN = "http://127.0.0.1:18102";
@@ -277,4 +278,65 @@ test("retired action assertion rejects visible text, action markers, and API act
     false,
   );
   assert.equal(retiredActionsAbsent(base, ["pending_close"]), false);
+});
+
+test("source bundle manifest requires exact frozen order and member hashes", () => {
+  const first = Buffer.from("first member");
+  const second = Buffer.from("second member");
+  const manifest = {
+    version: 1,
+    deterministic_profile: "zip-stored-fixed-1980-0644-v1",
+    members: [
+      {
+        archive_path: "001_101_first.psd",
+        task_asset_id: 101,
+        confirmed: true,
+        sha256:
+          "9827136414f46014fd5f4e2e34453684a802ec3b5752e4e2919296ebb71e1d2e",
+      },
+      {
+        archive_path: "002_102_second.psd",
+        task_asset_id: 102,
+        confirmed: true,
+        sha256:
+          "444d5b9f7a03d0847047e0600050207f5c37331b0e73d813118b60578fd911f4",
+      },
+    ],
+  };
+  const entries = {
+    "manifest.json": Buffer.from(JSON.stringify(manifest)),
+    "001_101_first.psd": first,
+    "002_102_second.psd": second,
+  };
+  const expected = { ordered_member_task_asset_ids: [101, 102] };
+  assert.equal(validateSourceBundleManifest(manifest, expected, entries), true);
+  assert.equal(
+    validateSourceBundleManifest(
+      manifest,
+      { ordered_member_task_asset_ids: [102, 101] },
+      entries,
+    ),
+    false,
+  );
+  assert.equal(
+    validateSourceBundleManifest(manifest, expected, {
+      ...entries,
+      "unexpected.txt": Buffer.from("unexpected"),
+    }),
+    false,
+  );
+  assert.equal(
+    validateSourceBundleManifest(
+      {
+        ...manifest,
+        members: [
+          manifest.members[0],
+          { ...manifest.members[1], confirmed: false },
+        ],
+      },
+      expected,
+      entries,
+    ),
+    false,
+  );
 });

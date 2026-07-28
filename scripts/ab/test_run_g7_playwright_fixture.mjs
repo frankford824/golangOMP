@@ -320,6 +320,30 @@ async function installContextRoutes(context, { role }) {
                 ...(isTask1264
                   ? { retouch_requirement_id: 45 }
                   : { task_sku_item_id: 1 }),
+                ...(scenario === "multi_source_zip_bundle"
+                  ? {
+                      working_revision: {
+                        id: 1,
+                        revision_no: 1,
+                        source_file: {
+                          task_asset_id: 9001,
+                          file_name: "source-bundle.zip",
+                          mime_type: "application/zip",
+                          file_size: 2048,
+                        },
+                      },
+                      finalized_revision: {
+                        id: 1,
+                        revision_no: 1,
+                        source_file: {
+                          task_asset_id: 9001,
+                          file_name: "source-bundle.zip",
+                          mime_type: "application/zip",
+                          file_size: 2048,
+                        },
+                      },
+                    }
+                  : {}),
               },
           ];
       await route.fulfill(
@@ -424,13 +448,38 @@ if (options.mode !== "execute") {
   throw new Error("fixture harness only supports --execute");
 }
 const plan = await buildPlan(options);
-const testHooks = { installContextRoutes, identityRequester };
+let bundleVerifierCalls = 0;
+async function bundleVerifier({ sample, coverage, bundle }) {
+  bundleVerifierCalls += 1;
+  const expected = sample?.revision_facts?.[0]?.source_bundle;
+  const group = bundle?.groups?.[0];
+  return (
+    sample?.scenario_id === "multi_source_zip_bundle" &&
+    coverage.task_id > 0 &&
+    expected?.task_asset_id === 9001 &&
+    expected?.bundle_sha256 ===
+      "6afba5980e37a4798fe3c6f75638e585606180002256850855df240037b61093" &&
+    JSON.stringify(expected?.ordered_member_task_asset_ids) ===
+      JSON.stringify([101, 102]) &&
+    group?.working_revision?.source_file?.task_asset_id === 9001
+  );
+}
+const testHooks = {
+  installContextRoutes,
+  identityRequester,
+  bundleVerifier,
+};
 if (process.env.G7_FIXTURE_FAIL_TRACE_SANITIZER === "1") {
   testHooks.traceSanitizer = async () => {
     throw new Error("fixture trace sanitizer failure");
   };
 }
 const evidence = await executePlan(plan, testHooks);
+if (bundleVerifierCalls !== 2) {
+  throw new Error(
+    `source bundle verifier call count = ${bundleVerifierCalls}, want 2`,
+  );
+}
 if (process.env.G7_FIXTURE_ASSERT_ZERO_ASSIGNMENT_SHAPE === "1") {
   if (
     identityRequests.adminAuthMe !== 8 ||

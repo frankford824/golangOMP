@@ -94,6 +94,10 @@ function textSha256(value) {
   return crypto.createHash("sha256").update(String(value)).digest("hex");
 }
 
+function bytesSha256(value) {
+  return crypto.createHash("sha256").update(value).digest("hex");
+}
+
 async function readJson(filePath, label) {
   let parsed;
   try {
@@ -1837,17 +1841,6 @@ function assertionByScenario(name, observed, coverage, cache) {
   if (name === "terminal_actions_absent") {
     return !allActions.some((action) => /create|submit|approve|reject|upload|assign|takeover/i.test(action));
   }
-  if (name === "bundle_members_match") {
-    return groups.some((group) => {
-      const revisions = [group.working_revision, group.finalized_revision].filter(Boolean);
-      return revisions.some(
-        (revision) =>
-          revision?.source_file &&
-          (Array.isArray(revision.source_file.bundle_members) ||
-            Array.isArray(revision.source_file.members)),
-      );
-    });
-  }
   if (name === "no_cross_scope_assets") {
     return groups.every(
       (group) =>
@@ -1886,6 +1879,234 @@ function assertionByScenario(name, observed, coverage, cache) {
     return observed.taskPageVisible && cache.mutatingRequests.length === 0;
   }
   return false;
+}
+
+function safeArchivePath(value) {
+  if (
+    !nonempty(value) ||
+    value.startsWith("/") ||
+    value.startsWith("\\") ||
+    value.includes("\\") ||
+    value.split("/").includes("..")
+  ) {
+    return false;
+  }
+  return !value.split("/").some((segment) => segment === "");
+}
+
+export function validateSourceBundleManifest(
+  manifest,
+  expected,
+  archiveEntryBytes,
+) {
+  if (
+    !isObject(manifest) ||
+    manifest.version !== 1 ||
+    manifest.deterministic_profile !== "zip-stored-fixed-1980-0644-v1" ||
+    !Array.isArray(manifest.members) ||
+    !isObject(expected) ||
+    !Array.isArray(expected.ordered_member_task_asset_ids) ||
+    !isObject(archiveEntryBytes)
+  ) {
+    return false;
+  }
+  const members = manifest.members;
+  if (
+    members.length < 2 ||
+    canonicalJson(members.map((member) => member?.task_asset_id)) !==
+      canonicalJson(expected.ordered_member_task_asset_ids)
+  ) {
+    return false;
+  }
+  const archivePaths = members.map((member) => member?.archive_path);
+  if (
+    new Set(archivePaths).size !== archivePaths.length ||
+    archivePaths.some((archivePath) => !safeArchivePath(archivePath))
+  ) {
+    return false;
+  }
+  const expectedEntries = ["manifest.json", ...archivePaths].sort();
+  const actualEntries = Object.keys(archiveEntryBytes).sort();
+  if (canonicalJson(actualEntries) !== canonicalJson(expectedEntries)) {
+    return false;
+  }
+  return members.every((member) => {
+    const bytes = archiveEntryBytes[member.archive_path];
+    return (
+      member.confirmed === true &&
+      SHA256_RE.test(String(member.sha256 || "")) &&
+      Buffer.isBuffer(bytes) &&
+      bytesSha256(bytes) === member.sha256
+    );
+  });
+}
+
+function expectedSourceBundles(sample) {
+  if (!Array.isArray(sample?.revision_facts)) return [];
+  return sample.revision_facts
+    .filter((fact) => isObject(fact?.source_bundle))
+    .map((fact) => ({
+      resource_key: fact.resource_key,
+      predicted_revision_id: fact.predicted_revision_id,
+      revision_no: fact.revision_no,
+      task_asset_id: fact.source_bundle.task_asset_id,
+      bundle_sha256: fact.source_bundle.bundle_sha256,
+      ordered_member_task_asset_ids:
+        fact.source_bundle.ordered_member_task_asset_ids,
+    }));
+}
+
+function sourceBundleRevision(group, expected) {
+  return [group?.working_revision, group?.finalized_revision]
+    .filter(isObject)
+    .find(
+      (revision) =>
+        revision?.source_file?.task_asset_id === expected.task_asset_id &&
+        (!positiveInt(expected.predicted_revision_id) ||
+          revision.id === expected.predicted_revision_id) &&
+        (!positiveInt(expected.revision_no) ||
+          revision.revision_no === expected.revision_no),
+    );
+}
+
+async function sourceBundleArchiveEntries(bytes) {
+  const JSZip = await importWorkspaceModule("jszip");
+  const zip = await JSZip.loadAsync(bytes, {
+    checkCRC32: true,
+    createFolders: false,
+  });
+  const fileNames = Object.keys(zip.files).filter(
+    (fileName) => !zip.files[fileName].dir,
+  );
+  const entries = {};
+  for (const fileName of fileNames) {
+    entries[fileName] = await zip.files[fileName].async("nodebuffer");
+  }
+  return entries;
+}
+
+async function verifySourceBundles({
+  browserContext,
+  origin,
+  token,
+  sample,
+  coverage,
+  bundle,
+  network,
+  verificationCache,
+}) {
+  const expectedBundles = expectedSourceBundles(sample);
+  if (expectedBundles.length === 0 || !nonempty(token)) return false;
+  const groups = groupsFromBundle(bundle);
+  for (const expected of expectedBundles) {
+    if (
+      !nonempty(expected.resource_key) ||
+      !positiveInt(expected.task_asset_id) ||
+      !SHA256_RE.test(String(expected.bundle_sha256 || "")) ||
+      !Array.isArray(expected.ordered_member_task_asset_ids) ||
+      expected.ordered_member_task_asset_ids.length < 2 ||
+      expected.ordered_member_task_asset_ids.some(
+        (taskAssetId) => !positiveInt(taskAssetId),
+      )
+    ) {
+      return false;
+    }
+    const group = groups.find((candidate) =>
+      groupMatchesLocator(candidate, expected.resource_key, coverage.task_id),
+    );
+    const revision = sourceBundleRevision(group, expected);
+    const sourceFile = revision?.source_file;
+    if (
+      !isObject(sourceFile) ||
+      sourceFile.task_asset_id !== expected.task_asset_id ||
+      sourceFile.mime_type !== "application/zip" ||
+      !String(sourceFile.file_name || "").toLowerCase().endsWith(".zip") ||
+      !positiveInt(sourceFile.file_size)
+    ) {
+      return false;
+    }
+    const cacheKey = [
+      origin,
+      expected.task_asset_id,
+      expected.bundle_sha256,
+      canonicalJson(expected.ordered_member_task_asset_ids),
+    ].join("|");
+    let verification = verificationCache.get(cacheKey);
+    if (!verification) {
+      verification = (async () => {
+        const headers = { Authorization: `Bearer ${token}` };
+        const metadataPath = `/v1/task-assets/${expected.task_asset_id}/download`;
+        const metadataUrl = `${origin}${metadataPath}`;
+        const metadataResponse = await browserContext.request.get(metadataUrl, {
+          headers,
+          maxRedirects: 0,
+        });
+        network.push({
+          method: "GET",
+          url: metadataUrl,
+          status: metadataResponse.status(),
+        });
+        if (metadataResponse.status() !== 200) return false;
+        let metadata;
+        try {
+          metadata = await metadataResponse.json();
+        } catch {
+          return false;
+        }
+        const download = metadata?.data;
+        if (
+          !isObject(download) ||
+          download.download_mode !== "proxy" ||
+          !nonempty(download.download_url) ||
+          download.filename !== sourceFile.file_name ||
+          download.mime_type !== sourceFile.mime_type ||
+          download.file_size !== sourceFile.file_size
+        ) {
+          return false;
+        }
+        let downloadPath;
+        try {
+          downloadPath = safeRelativeUrl(
+            download.download_url,
+            "source bundle download_url",
+          );
+        } catch {
+          return false;
+        }
+        const downloadUrl = `${origin}${downloadPath}`;
+        const archiveResponse = await browserContext.request.get(downloadUrl, {
+          headers,
+          maxRedirects: 0,
+        });
+        network.push({
+          method: "GET",
+          url: sanitizeUrl(downloadUrl, origin) || `${origin}/invalid-download-url`,
+          status: archiveResponse.status(),
+        });
+        if (archiveResponse.status() !== 200) return false;
+        const archiveBytes = await archiveResponse.body();
+        if (
+          archiveBytes.length !== sourceFile.file_size ||
+          bytesSha256(archiveBytes) !== expected.bundle_sha256
+        ) {
+          return false;
+        }
+        const entries = await sourceBundleArchiveEntries(archiveBytes);
+        const manifestBytes = entries["manifest.json"];
+        if (!Buffer.isBuffer(manifestBytes)) return false;
+        let manifest;
+        try {
+          manifest = JSON.parse(manifestBytes.toString("utf8"));
+        } catch {
+          return false;
+        }
+        return validateSourceBundleManifest(manifest, expected, entries);
+      })();
+      verificationCache.set(cacheKey, verification);
+    }
+    if (!(await verification)) return false;
+  }
+  return true;
 }
 
 async function inspectDirectResponse(response, expectedUrl, label, requireJson = false) {
@@ -2088,6 +2309,8 @@ async function executeCase({
   adminGuardAttempts,
   deniedGuardAttempts,
   traceSanitizer,
+  bundleVerifier,
+  bundleVerificationCache,
 }) {
   const { scenario, sample, coverage, key } = item;
   const origin = ORIGINS[coverage.combination];
@@ -2235,12 +2458,29 @@ async function executeCase({
       oracle_sha256: coverage.oracle_sha256,
       resource_oracle_kind: resourceOracle.kind,
     };
+    const bundleMembersVerified =
+      coverage.requirements.required_assertions.includes(
+        "bundle_members_match",
+      )
+        ? await bundleVerifier({
+            browserContext,
+            origin,
+            token: plan.auth_runtime_tokens.admin[coverage.combination],
+            sample,
+            coverage,
+            bundle,
+            network: cache.network,
+            verificationCache: bundleVerificationCache,
+          })
+        : null;
     for (const assertionName of coverage.requirements.required_assertions) {
       if (assertionName === "allowed_actions_exact") continue;
       if (assertionName === "page_matches_manifest") {
         assertions[assertionName] = pageMatches;
       } else if (assertionName === "assets_match") {
         assertions[assertionName] = assetsMatch;
+      } else if (assertionName === "bundle_members_match") {
+        assertions[assertionName] = bundleMembersVerified;
       } else {
         assertions[assertionName] = assertionByScenario(
           assertionName,
@@ -2418,6 +2658,7 @@ async function executeCase({
 
 export async function executePlan(plan, testHooks = {}) {
   const traceSanitizer = testHooks.traceSanitizer || sanitizeTrace;
+  const bundleVerifier = testHooks.bundleVerifier || verifySourceBundles;
   const identityRequester =
     testHooks.identityRequester ||
     ((context, url, requestOptions) =>
@@ -2427,6 +2668,9 @@ export async function executePlan(plan, testHooks = {}) {
   }
   if (typeof identityRequester !== "function") {
     throw new InputError("identity requester must be callable");
+  }
+  if (typeof bundleVerifier !== "function") {
+    throw new InputError("source bundle verifier must be callable");
   }
   await fs.mkdir(plan.artifact_root, { recursive: true });
   await fs.mkdir(path.join(plan.artifact_root, "playwright"), { recursive: false });
@@ -2440,6 +2684,7 @@ export async function executePlan(plan, testHooks = {}) {
   const playwright = await importWorkspaceModule("playwright");
   const browser = await playwright.chromium.launch({ headless: true });
   const records = [];
+  const bundleVerificationCache = new Map();
   try {
     for (const viewport of Object.keys(VIEWPORTS)) {
       const viewportSpec = VIEWPORTS[viewport];
@@ -2507,6 +2752,8 @@ export async function executePlan(plan, testHooks = {}) {
               adminGuardAttempts: guardAttempts[item.coverage.combination],
               deniedGuardAttempts,
               traceSanitizer,
+              bundleVerifier,
+              bundleVerificationCache,
             }),
           );
         }
