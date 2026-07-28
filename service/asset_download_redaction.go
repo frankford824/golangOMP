@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"net/url"
+	"strings"
 
 	"workflow/domain"
 )
@@ -151,6 +153,51 @@ func RedactAssetDownloadJSON(raw json.RawMessage) json.RawMessage {
 	return encoded
 }
 
+// RedactLegacyReferenceImagesJSON removes inline image content and object
+// locators from the retired reference_images_json []string shape. Unlike
+// ReferenceFileRef objects, these values have no typed field that can be
+// selectively cleared, so ambiguous non-string history fails closed.
+func RedactLegacyReferenceImagesJSON(raw string) string {
+	var values []string
+	if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &values); err != nil {
+		return "[]"
+	}
+	safe := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || legacyReferenceImageStringIsLocator(value) {
+			continue
+		}
+		safe = append(safe, value)
+	}
+	encoded, err := json.Marshal(safe)
+	if err != nil {
+		return "[]"
+	}
+	return string(encoded)
+}
+
+func legacyReferenceImageStringIsLocator(value string) bool {
+	normalized := strings.TrimSpace(value)
+	lower := strings.ToLower(normalized)
+	for _, prefix := range []string{
+		"http:", "https:", "ftp:", "file:", "data:", "blob:",
+		"s3:", "oss:", "gs:", "//",
+	} {
+		if strings.HasPrefix(lower, prefix) {
+			return true
+		}
+	}
+	if strings.ContainsAny(normalized, `/\?`) {
+		return true
+	}
+	decoded, err := url.PathUnescape(normalized)
+	if err != nil {
+		return true
+	}
+	return decoded != normalized && strings.ContainsAny(decoded, `/\?`)
+}
+
 func cloneRawMessage(raw json.RawMessage) json.RawMessage {
 	if raw == nil {
 		return nil
@@ -197,13 +244,28 @@ func redactAssetDownloadJSONValue(value interface{}) {
 	case map[string]interface{}:
 		_, hasDownloadURL := typed["download_url"]
 		_, hasStorageKey := typed["storage_key"]
+		_, hasFilePath := typed["file_path"]
+		_, hasObjectKey := typed["object_key"]
+		_, hasSignedURL := typed["signed_url"]
+		_, hasPresignedURL := typed["presigned_url"]
 		_, hasAssetID := typed["asset_id"]
 		_, hasRefID := typed["ref_id"]
-		isAssetObject := hasDownloadURL || hasStorageKey || hasAssetID || hasRefID
+		isAssetObject := hasDownloadURL ||
+			hasStorageKey ||
+			hasFilePath ||
+			hasObjectKey ||
+			hasSignedURL ||
+			hasPresignedURL ||
+			hasAssetID ||
+			hasRefID
 		if isAssetObject {
 			delete(typed, "download_url")
 			delete(typed, "download_url_expires_at")
 			delete(typed, "storage_key")
+			delete(typed, "file_path")
+			delete(typed, "object_key")
+			delete(typed, "signed_url")
+			delete(typed, "presigned_url")
 			if _, ok := typed["url"]; ok {
 				delete(typed, "url")
 			}

@@ -107,6 +107,10 @@ func TestRedactTaskEventDownloadsRemovesAssetFieldsOnly(t *testing.T) {
 			"reference_file_refs":[{
 				"asset_id":"ref-1",
 				"storage_key":"tasks/90/ref.png",
+				"file_path":"/mnt/private/tasks/90/ref.png",
+				"object_key":"tasks/90/ref.png",
+				"signed_url":"https://objects.example/ref?signed=secret",
+				"presigned_url":"https://objects.example/ref?presigned=secret",
 				"url":"https://objects.example/ref",
 				"download_url":"https://objects.example/ref?signature=secret",
 				"download_url_expires_at":"2026-07-27T00:00:00Z"
@@ -120,7 +124,17 @@ func TestRedactTaskEventDownloadsRemovesAssetFieldsOnly(t *testing.T) {
 		t.Fatalf("RedactTaskEventDownloads() = %+v, want a copied event", events)
 	}
 	payload := string(events[0].Payload)
-	for _, forbidden := range []string{"download_url", "storage_key", "signature=secret"} {
+	for _, forbidden := range []string{
+		"download_url",
+		"storage_key",
+		"file_path",
+		"object_key",
+		"signed_url",
+		"presigned_url",
+		"signature=secret",
+		"signed=secret",
+		"presigned=secret",
+	} {
 		if strings.Contains(payload, forbidden) {
 			t.Fatalf("redacted payload still contains %q: %s", forbidden, payload)
 		}
@@ -137,6 +151,34 @@ func TestRedactAssetDownloadJSONFailsClosedForInvalidHistory(t *testing.T) {
 	got := RedactAssetDownloadJSON(json.RawMessage(`{"download_url":"secret"`))
 	if string(got) != "{}" {
 		t.Fatalf("RedactAssetDownloadJSON(invalid) = %s, want {}", got)
+	}
+}
+
+func TestRedactLegacyReferenceImagesJSONKeepsIdentifiersAndDropsLocators(t *testing.T) {
+	got := RedactLegacyReferenceImagesJSON(`[
+		"ref-123",
+		"poster final.png",
+		"https://objects.example/tasks/90/ref.png?signature=secret",
+		"data:image/png;base64,c2VjcmV0",
+		"tasks/90/ref.png",
+		"tasks%2F90%2Fencoded.png",
+		"C:\\assets\\ref.png",
+		"/v1/assets/files/tasks/90/ref.png"
+	]`)
+	if got != `["ref-123","poster final.png"]` {
+		t.Fatalf("RedactLegacyReferenceImagesJSON() = %s, want safe identifiers only", got)
+	}
+}
+
+func TestRedactLegacyReferenceImagesJSONFailsClosedForAmbiguousShape(t *testing.T) {
+	for _, raw := range []string{
+		`{"url":"https://objects.example/ref.png"}`,
+		`[{"asset_id":"ref-1","url":"https://objects.example/ref.png"}]`,
+		`not-json`,
+	} {
+		if got := RedactLegacyReferenceImagesJSON(raw); got != "[]" {
+			t.Fatalf("RedactLegacyReferenceImagesJSON(%q) = %s, want []", raw, got)
+		}
 	}
 }
 

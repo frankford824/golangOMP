@@ -185,8 +185,7 @@ func redactDetailDownloadsForAccess(ctx context.Context, detail *Detail) {
 		detail.TaskDetail.ReferenceFileRefsJSON = string(redacted)
 	}
 	if detail.TaskDetail != nil && strings.TrimSpace(detail.TaskDetail.ReferenceImagesJSON) != "" {
-		redacted := parentservice.RedactAssetDownloadJSON(json.RawMessage(detail.TaskDetail.ReferenceImagesJSON))
-		detail.TaskDetail.ReferenceImagesJSON = string(redacted)
+		detail.TaskDetail.ReferenceImagesJSON = parentservice.RedactLegacyReferenceImagesJSON(detail.TaskDetail.ReferenceImagesJSON)
 	}
 	detail.Modules = redactDetailModules(detail.Modules)
 	detail.Events = redactDetailModuleEvents(detail.Events)

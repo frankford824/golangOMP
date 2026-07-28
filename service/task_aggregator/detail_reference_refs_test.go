@@ -206,6 +206,7 @@ func TestDetailServiceEnforcesEffectiveTaskScopeBeforeHydratingBundle(t *testing
 		TaskDetail: &domain.TaskDetail{
 			TaskID:                taskID,
 			ReferenceFileRefsJSON: `[{"asset_id":"sensitive-ref","download_url":"https://controlled.example/ref"}]`,
+			ReferenceImagesJSON:   `["legacy-ref","legacy image.png","https://controlled.example/legacy","data:image/png;base64,c2VjcmV0","tasks/1000/legacy.png"]`,
 		},
 		TaskAssets: []*domain.TaskAsset{{
 			ID:         501,
@@ -256,6 +257,13 @@ func TestDetailServiceEnforcesEffectiveTaskScopeBeforeHydratingBundle(t *testing
 		(strings.Contains(detail.TaskDetail.ReferenceFileRefsJSON, "download_url") ||
 			strings.Contains(detail.TaskDetail.ReferenceFileRefsJSON, "storage_key")) {
 		t.Fatalf("Get() task_detail leaked download fields: %s", detail.TaskDetail.ReferenceFileRefsJSON)
+	}
+	if detail.TaskDetail == nil || detail.TaskDetail.ReferenceImagesJSON != `["legacy-ref","legacy image.png"]` {
+		t.Fatalf("Get() task_detail reference_images_json = %q, want safe legacy identifiers only", detail.TaskDetail.ReferenceImagesJSON)
+	}
+	if !strings.Contains(bundle.TaskDetail.ReferenceImagesJSON, "data:image/png") ||
+		!strings.Contains(bundle.TaskDetail.ReferenceImagesJSON, "tasks/1000/legacy.png") {
+		t.Fatal("Get() mutated repository-backed reference_images_json")
 	}
 }
 
