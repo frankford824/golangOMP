@@ -1305,6 +1305,63 @@ export function classifyGuardConsoleEntries(
   return annotated;
 }
 
+export function classifyCompatibilityConsoleEntries(
+  entries,
+  network,
+  resourceOracleKind,
+  expectedOrigin,
+  taskId,
+) {
+  const approvedPaths = new Set([
+    `/v1/tasks/${taskId}/predictions`,
+    `/v1/tasks/${taskId}/audit-supplements`,
+  ]);
+  return entries.map((entry) => {
+    const annotated = {
+      ...entry,
+      expected_compatibility_observation: false,
+    };
+    if (
+      resourceOracleKind !== "legacy_frontend_task_snapshot" ||
+      entry.level !== "error" ||
+      !String(entry.text || "").includes("status of 404") ||
+      !nonempty(entry.url)
+    ) {
+      return annotated;
+    }
+    let parsed;
+    try {
+      parsed = new URL(entry.url);
+    } catch {
+      return annotated;
+    }
+    if (
+      parsed.origin !== expectedOrigin ||
+      !approvedPaths.has(parsed.pathname)
+    ) {
+      return annotated;
+    }
+    const confirmed = network.some((request) => {
+      try {
+        const requestUrl = new URL(request.url);
+        return (
+          request.method === "GET" &&
+          request.status === 404 &&
+          requestUrl.origin === expectedOrigin &&
+          requestUrl.pathname === parsed.pathname
+        );
+      } catch {
+        return false;
+      }
+    });
+    if (confirmed) {
+      annotated.expected_compatibility_observation = true;
+      annotated.expected_compatibility_route = parsed.pathname;
+    }
+    return annotated;
+  });
+}
+
 function scrubObject(value, sensitiveValues = []) {
   if (Array.isArray(value)) {
     return value.map((child) => scrubObject(child, sensitiveValues));
@@ -2192,14 +2249,22 @@ async function executeCase({
       ...deniedGuardAttempts.slice(deniedGuardStart),
     ];
     const guardClassification = classifyGuardAttempts(blockedAttempts, origin);
-    const classifiedConsoleEntries = classifyGuardConsoleEntries(
-      consoleEntries,
-      guardClassification.expected,
+    const classifiedConsoleEntries = classifyCompatibilityConsoleEntries(
+      classifyGuardConsoleEntries(
+        consoleEntries,
+        guardClassification.expected,
+        origin,
+      ),
+      cache.network,
+      resourceOracle.kind,
       origin,
+      coverage.task_id,
     );
     const unexpectedConsoleErrors = classifiedConsoleEntries.filter(
       (entry) =>
-        entry.level === "error" && !entry.expected_guard_observation,
+        entry.level === "error" &&
+        !entry.expected_guard_observation &&
+        !entry.expected_compatibility_observation,
     ).length;
     const fiveXxCount = cache.network.filter(
       (request) => request.status >= 500,

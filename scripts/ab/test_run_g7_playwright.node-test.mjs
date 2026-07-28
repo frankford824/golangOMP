@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  classifyCompatibilityConsoleEntries,
   classifyGuardAttempts,
   classifyGuardConsoleEntries,
   groupMatchesLocator,
@@ -124,6 +125,78 @@ test("canonical group locators use the real resource-bundle scope fields", () =>
       900,
     ),
     true,
+  );
+});
+
+test("only confirmed retired-route 404s are approved transition observations", () => {
+  const entries = classifyCompatibilityConsoleEntries(
+    [
+      {
+        level: "error",
+        text: "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        url: `${ORIGIN}/v1/tasks/2826/predictions?limit=5`,
+      },
+      {
+        level: "error",
+        text: "Failed to load resource: the server responded with a status of 404 (Not Found)",
+        url: `${ORIGIN}/v1/tasks/2826/unknown`,
+      },
+    ],
+    [
+      {
+        method: "GET",
+        url: `${ORIGIN}/v1/tasks/2826/predictions`,
+        status: 404,
+      },
+      {
+        method: "GET",
+        url: `${ORIGIN}/v1/tasks/2826/unknown`,
+        status: 404,
+      },
+    ],
+    "legacy_frontend_task_snapshot",
+    ORIGIN,
+    2826,
+  );
+  assert.equal(entries[0].expected_compatibility_observation, true);
+  assert.equal(
+    entries[0].expected_compatibility_route,
+    "/v1/tasks/2826/predictions",
+  );
+  assert.equal(entries[1].expected_compatibility_observation, false);
+});
+
+test("transition 404s require the exact oracle kind and network confirmation", () => {
+  const entry = {
+    level: "error",
+    text: "Failed to load resource: the server responded with a status of 404 (Not Found)",
+    url: `${ORIGIN}/v1/tasks/2826/audit-supplements`,
+  };
+  assert.equal(
+    classifyCompatibilityConsoleEntries(
+      [entry],
+      [],
+      "legacy_frontend_task_snapshot",
+      ORIGIN,
+      2826,
+    )[0].expected_compatibility_observation,
+    false,
+  );
+  assert.equal(
+    classifyCompatibilityConsoleEntries(
+      [entry],
+      [
+        {
+          method: "GET",
+          url: `${ORIGIN}/v1/tasks/2826/audit-supplements`,
+          status: 404,
+        },
+      ],
+      "v8_resource_groups",
+      ORIGIN,
+      2826,
+    )[0].expected_compatibility_observation,
+    false,
   );
 });
 
