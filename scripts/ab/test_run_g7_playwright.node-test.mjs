@@ -83,6 +83,20 @@ test("over-limit guard attempts remain forbidden and unavailable to console matc
   );
 });
 
+test("V1 realtime reconnects are bounded and remain fail-closed", () => {
+  const attempts = Array.from({ length: 9 }, () => ({
+    method: "WEBSOCKET",
+    url: "ws://127.0.0.1:18102/ws/v1",
+  }));
+  const classified = classifyGuardAttempts(attempts, ORIGIN);
+  assert.equal(classified.expected.length, 8);
+  assert.equal(classified.forbidden.length, 1);
+  assert.equal(
+    classified.forbidden[0].classification,
+    "guard_count_exceeded",
+  );
+});
+
 test("ordinary console errors are never guard observations", () => {
   const entries = classifyGuardConsoleEntries(
     [{ level: "error", text: "ordinary application failure", url: "" }],

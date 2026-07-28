@@ -43,7 +43,12 @@ const READ_ONLY_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 const EXPECTED_GUARD_ATTEMPT_LIMITS = new Map([
   ["POST /v1/auth/asset-cookie", 2],
   ["POST /v1/trace-events", 2],
-  ["WEBSOCKET /ws/v1", 2],
+  // The fail-closed WebSocket route closes the V1 realtime connection before
+  // any frame exchange. The frontend then follows its 1/2/4/8/16/30 second
+  // reconnect schedule. Eight exact same-origin attempts cover a bounded
+  // evidence case without treating that deterministic retry as a mutation;
+  // the ninth still fails the gate as a reconnect storm.
+  ["WEBSOCKET /ws/v1", 8],
 ]);
 const RETIRED_ACTION_RE =
   /(?:仓库\s*接收|仓库\s*退回|生产\s*移交|待\s*结单|\bwarehouse(?:[_\s.-]*(?:receive|accept|reject|return|handoff))?\b|\bproduction[_\s.-]*transfer\b|\bpending[_\s.-]*close\b)/iu;
@@ -96,6 +101,11 @@ function textSha256(value) {
 
 function bytesSha256(value) {
   return crypto.createHash("sha256").update(value).digest("hex");
+}
+
+function finishedAtFromMonotonic(startedEpochMs, startedMonotonicMs) {
+  const elapsedMs = Math.max(0, performance.now() - startedMonotonicMs);
+  return new Date(startedEpochMs + elapsedMs).toISOString();
 }
 
 async function readJson(filePath, label) {
@@ -2324,7 +2334,9 @@ async function executeCase({
   const consoleEntries = [];
   const adminGuardStart = adminGuardAttempts.length;
   const deniedGuardStart = deniedGuardAttempts.length;
-  const startedAt = new Date().toISOString();
+  const startedEpochMs = Date.now();
+  const startedMonotonicMs = performance.now();
+  const startedAt = new Date(startedEpochMs).toISOString();
   await browserContext.tracing.start({
     screenshots: true,
     snapshots: true,
@@ -2602,7 +2614,10 @@ async function executeCase({
       executor_id: plan.executor_id,
       reviewer_id: plan.reviewer_id,
       started_at: startedAt,
-      finished_at: new Date().toISOString(),
+      finished_at: finishedAtFromMonotonic(
+        startedEpochMs,
+        startedMonotonicMs,
+      ),
       url: page.url(),
       samples_sha256: plan.samples_sha256,
       sample_sha256: sample.sample_sha256,
