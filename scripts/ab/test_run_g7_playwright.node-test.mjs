@@ -6,6 +6,7 @@ import {
   classifyGuardAttempts,
   classifyGuardConsoleEntries,
   groupMatchesLocator,
+  negativeStateRendered,
   retiredActionsAbsent,
   validateSourceBundleManifest,
 } from "./run_g7_playwright.mjs";
@@ -316,6 +317,23 @@ test("missing-resource negative approves only its exact network-confirmed 409", 
       ORIGIN,
       2885,
     )[0].expected_compatibility_observation,
+    false,
+  );
+});
+
+test("negative state recognizes the visible conflict alert without broad text matching", () => {
+  assert.equal(
+    negativeStateRendered({
+      text: "与已有数据冲突，请更换后重试",
+      hook: null,
+    }),
+    true,
+  );
+  assert.equal(
+    negativeStateRendered({
+      text: "任务已结单，可以查看完整资料",
+      hook: null,
+    }),
     false,
   );
 });

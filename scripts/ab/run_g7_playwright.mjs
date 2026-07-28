@@ -1863,6 +1863,15 @@ export function retiredActionsAbsent(observed, allowedActions) {
   return apiActionsAbsent && domActionsAbsent;
 }
 
+export function negativeStateRendered(observed) {
+  return Boolean(
+    observed?.hook?.negative_state ||
+      observed?.text?.match(
+        /缺失|异常|不可用|未迁移|错误|冲突|missing|invalid|conflict/i,
+      ),
+  );
+}
+
 function assertionByScenario(name, observed, coverage, cache) {
   const task = taskPayload(cache, coverage.task_id);
   const bundle = bundlePayload(cache, coverage.task_id);
@@ -1907,10 +1916,7 @@ function assertionByScenario(name, observed, coverage, cache) {
     );
   }
   if (name === "negative_state_rendered") {
-    return Boolean(
-      observed.hook?.negative_state ||
-        observed.text.match(/缺失|异常|不可用|未迁移|错误|missing|invalid/i),
-    );
+    return negativeStateRendered(observed);
   }
   if (name === "approved_compatibility_difference_only") {
     return observed.taskPageVisible && cache.mutatingRequests.length === 0;
