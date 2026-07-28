@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   classifyGuardAttempts,
   classifyGuardConsoleEntries,
+  groupMatchesLocator,
   retiredActionsAbsent,
 } from "./run_g7_playwright.mjs";
 
@@ -87,6 +88,43 @@ test("ordinary console errors are never guard observations", () => {
     ORIGIN,
   );
   assert.equal(entries[0].expected_guard_observation, false);
+});
+
+test("canonical group locators use the real resource-bundle scope fields", () => {
+  assert.equal(
+    groupMatchesLocator(
+      {
+        id: 4847,
+        task_id: 2826,
+        scope_kind: "sku",
+        task_sku_item_id: 3076,
+      },
+      "group:2826:sku:3076",
+      2826,
+    ),
+    true,
+  );
+  assert.equal(
+    groupMatchesLocator(
+      {
+        id: 1264,
+        task_id: 1264,
+        scope_kind: "retouch_requirement",
+        retouch_requirement_id: 45,
+      },
+      "group:1264:retouch_requirement:45",
+      1264,
+    ),
+    true,
+  );
+  assert.equal(
+    groupMatchesLocator(
+      { id: 42, task_id: 900, scope_kind: "task" },
+      "group:900:task:0",
+      900,
+    ),
+    true,
+  );
 });
 
 test("retired action assertion requires a complete clean DOM snapshot", () => {

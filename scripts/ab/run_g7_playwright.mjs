@@ -1526,7 +1526,17 @@ function bundlePayload(cache, taskId) {
   return isObject(bundle) ? bundle : null;
 }
 
-function groupMatchesLocator(group, locator, taskId) {
+function groupScopeRefId(group) {
+  if (nonnegativeInt(group.scope_ref_id)) return group.scope_ref_id;
+  if (group.scope_kind === "task") return 0;
+  if (group.scope_kind === "sku") return group.task_sku_item_id;
+  if (group.scope_kind === "retouch_requirement") {
+    return group.retouch_requirement_id;
+  }
+  return null;
+}
+
+export function groupMatchesLocator(group, locator, taskId) {
   if (!isObject(group) || !nonempty(locator)) return false;
   const runtimeMatch = RUNTIME_GROUP_LOCATOR_RE.exec(locator);
   if (runtimeMatch) {
@@ -1540,8 +1550,8 @@ function groupMatchesLocator(group, locator, taskId) {
     ownerTask === Number(canonicalMatch[1]) &&
     nonempty(group.scope_kind) &&
     group.scope_kind === canonicalMatch[2] &&
-    nonnegativeInt(group.scope_ref_id) &&
-    group.scope_ref_id === Number(canonicalMatch[3])
+    nonnegativeInt(groupScopeRefId(group)) &&
+    groupScopeRefId(group) === Number(canonicalMatch[3])
   );
 }
 

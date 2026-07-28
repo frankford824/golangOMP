@@ -317,7 +317,9 @@ async function installContextRoutes(context, { role }) {
                 id: isTask1264 ? 45 : 10,
                 task_id: taskId,
                 scope_kind: isTask1264 ? "retouch_requirement" : "sku",
-                scope_ref_id: isTask1264 ? 45 : 1,
+                ...(isTask1264
+                  ? { retouch_requirement_id: 45 }
+                  : { task_sku_item_id: 1 }),
               },
           ];
       await route.fulfill(
