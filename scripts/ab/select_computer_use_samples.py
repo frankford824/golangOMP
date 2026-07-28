@@ -61,7 +61,6 @@ RETOUCH_REOPEN_TASK_ID = 1264
 RETOUCH_REOPEN_SCOPE_REF_ID = 45
 RETOUCH_REOPEN_REVISION_IDS = [635, 636]
 EXPECTED_NO_RESOURCE_GROUP_SCENARIOS = {
-    "archived_readonly",
     "purchase_to_sku_planning",
 }
 
@@ -1624,7 +1623,8 @@ def fixture_plan(
             "clone_template_task_into_fixture_namespace",
             "set_only_fixture_task_status_to_archived",
             "close_only_fixture_task_modules",
-            "capture_fixture_task_and_module_ids",
+            "create_empty_terminal_task_scope_group",
+            "capture_fixture_task_group_and_module_ids",
         ],
     }[fixture_kind]
     plan = {
@@ -1671,7 +1671,7 @@ def fixture_plan(
                 "expected_runtime": {
                     "task_status": "Archived",
                     "current_handler_id": None,
-                    "resource_group_count": 0,
+                    "resource_group_count": 1,
                     "revision_count": 0,
                     "asset_count": 0,
                     "allowed_actions": [],
@@ -1890,7 +1890,7 @@ def build_sample(
             "task_type": facts.tasks.get(task_id, {}).get("task_type"),
             "task_status": "Archived",
             "template_task_status": facts.tasks.get(task_id, {}).get("task_status"),
-            "expected_resource_group_count": 0,
+            "expected_resource_group_count": 1,
             "expected_revision_count": 0,
             "expected_asset_count": 0,
         }

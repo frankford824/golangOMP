@@ -691,9 +691,10 @@ class SelectComputerUseSamplesTests(unittest.TestCase):
         if archived_fixture:
             plans["archived_readonly"] = archived_fixture
             next_task += 1
+            next_group += 1
             created["archived_readonly"] = {
                 "task_id": next_task,
-                "group_ids": [],
+                "group_ids": [next_group],
                 "revision_ids": [],
                 "template_task_id": int(archived_resources[0]["task_id"]),
             }
@@ -1255,7 +1256,8 @@ class SelectComputerUseSamplesTests(unittest.TestCase):
         self.assertEqual(plan["fixture_kind"], "archived_terminal")
         self.assertEqual(plan["fixture_class"], "positive_contract")
         self.assertEqual(plan["canonical_archived_population"], 0)
-        self.assertEqual(sample["resource_ids"], [])
+        self.assertEqual(len(sample["resource_ids"]), 1)
+        self.assertRegex(sample["resource_ids"][0], r"^task_asset_group:\d+$")
         self.assertEqual(sample["revision_ids"], [])
         self.assertEqual(sample["revision_facts"], [])
         self.assertEqual(sample["task_facts"]["task_status"], "Archived")
@@ -1265,7 +1267,7 @@ class SelectComputerUseSamplesTests(unittest.TestCase):
             {
                 "task_status": "Archived",
                 "current_handler_id": None,
-                "resource_group_count": 0,
+                "resource_group_count": 1,
                 "revision_count": 0,
                 "asset_count": 0,
                 "allowed_actions": [],

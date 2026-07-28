@@ -44,7 +44,6 @@ EXPECTED_VIEWPORT_SPECS = {
     "mobile": {"width": 390, "height": 844, "device_scale_factor": 1},
 }
 EXPECTED_NO_RESOURCE_GROUP_SCENARIOS = {
-    "archived_readonly",
     "purchase_to_sku_planning",
 }
 REQUIRED_COVERAGE_TAGS = {

@@ -194,7 +194,6 @@ class RunG7PlaywrightTest(unittest.TestCase):
                                 else "v8_expected_no_resource_groups"
                                 if scenario["id"]
                                 in {
-                                    "archived_readonly",
                                     "purchase_to_sku_planning",
                                 }
                                 else "v8_resource_groups"

@@ -308,7 +308,6 @@ async function installContextRoutes(context, { role }) {
       const scenario = url.searchParams.get("scenario");
       const groups = [
         "missing_resource_group_negative",
-        "archived_readonly",
         "purchase_to_sku_planning",
       ].includes(scenario)
         ? []

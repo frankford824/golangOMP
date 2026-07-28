@@ -11,7 +11,6 @@ const SOURCE_KIND = "playwright";
 const EXPECTED_SCENARIO_COUNT = 30;
 const EXPECTED_CASE_COUNT = 66;
 const EXPECTED_NO_RESOURCE_GROUP_SCENARIOS = new Set([
-  "archived_readonly",
   "purchase_to_sku_planning",
 ]);
 const COMBINATIONS = [
