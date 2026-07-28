@@ -1,8 +1,15 @@
 // @vitest-environment jsdom
 import { mount } from '@vue/test-utils'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import TaskResourceRail from './TaskResourceRail.vue'
 import type { ResourceBundle, ResourceRevision } from '@/services/api/resourceGroupsApi'
+
+vi.mock('@/components/media/AssetPreviewMedia.vue', () => ({
+  default: {
+    props: ['taskAssetId', 'fallbackSrc', 'alt'],
+    template: '<img class="asset-preview-media-stub" :data-task-asset-id="taskAssetId || undefined" :src="fallbackSrc || undefined" :alt="alt" />',
+  },
+}))
 
 function revision(id: number, references: ResourceRevision['references']): ResourceRevision {
   return {
@@ -32,8 +39,8 @@ const bundle: ResourceBundle = {
       lock_version: 1,
       migration_incomplete: false,
       finalized_revision: revision(45, [
-        { id: 2, reference_file_ref_id: 1312, ref_id: 'ref-1312', sort_order: 1, file_name: '第二张.jpg', preview_url: '/second.jpg' },
-        { id: 1, reference_file_ref_id: 1311, ref_id: 'ref-1311', sort_order: 0, file_name: '第一张.jpg', preview_url: '/first.jpg' },
+        { id: 2, reference_file_ref_id: 1312, formal_task_asset_id: 202, ref_id: 'ref-1312', sort_order: 1, file_name: '第二张.jpg', preview_url: '/second.jpg' },
+        { id: 1, reference_file_ref_id: 1311, formal_task_asset_id: 201, ref_id: 'ref-1311', sort_order: 0, file_name: '第一张.jpg', preview_url: '/first.jpg' },
       ]),
     },
     {
@@ -69,6 +76,12 @@ describe('TaskResourceRail', () => {
 
     expect(wrapper.emitted('openResources')).toHaveLength(2)
     expect(wrapper.emitted('openAttachments')).toBeUndefined()
+  })
+
+  it('loads formal reference thumbnails through the controlled task-asset path', () => {
+    const wrapper = mount(TaskResourceRail, { props: { bundle, taskStatus: 'Completed', taskType: 'retouch_task' } })
+
+    expect(wrapper.findAll('.asset-preview-media-stub').map((item) => item.attributes('data-task-asset-id'))).toEqual(['201', '202'])
   })
 
   it('explains that retouch source files are optional instead of reporting missing SKU submissions', () => {

@@ -1,8 +1,16 @@
 // @vitest-environment jsdom
 import { mount } from '@vue/test-utils'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import SkuResourceMatrix from './SkuResourceMatrix.vue'
 import type { ResourceBundle } from '@/services/api/resourceGroupsApi'
+
+vi.mock('@/components/media/AssetPreviewMedia.vue', () => ({
+  default: {
+    props: ['taskAssetId', 'fallbackSrc', 'alt'],
+    emits: ['open-full'],
+    template: '<img class="asset-preview-media-stub" :data-task-asset-id="taskAssetId || undefined" :src="fallbackSrc || undefined" :alt="alt" @click.stop="$emit(\'open-full\', fallbackSrc)" />',
+  },
+}))
 
 const bundle: ResourceBundle = {
   task_id: 9,
@@ -29,7 +37,7 @@ const bundle: ResourceBundle = {
       legacy_migration: false,
       created_at: '2026-07-22T08:00:00Z',
       source_file: { task_asset_id: 100, file_name: 'living-room.psd', file_size: 10485760, download_url: '/source' },
-      references: [{ id: 1, reference_file_ref_id: 2, sort_order: 0, ref_id: 'ref-1', file_name: 'direction.jpg', preview_url: '/reference' }],
+      references: [{ id: 1, reference_file_ref_id: 2, formal_task_asset_id: 103, sort_order: 0, ref_id: 'ref-1', file_name: 'direction.jpg', preview_url: '/reference' }],
       items: [
         { id: 2, revision_id: 70, task_asset_id: 102, sort_order: 1, file: { task_asset_id: 102, file_name: 'detail.png', preview_url: '/detail' } },
         { id: 1, revision_id: 70, task_asset_id: 101, sort_order: 0, file: { task_asset_id: 101, file_name: 'cover.png', preview_url: '/cover' } },
@@ -51,7 +59,7 @@ describe('SkuResourceMatrix', () => {
 
   it('opens a visual preview without exposing workflow revision or group ids', async () => {
     const wrapper = mount(SkuResourceMatrix, { props: { bundle }, global: { stubs: { Teleport: true } } })
-    await wrapper.get('.reference-grid button').trigger('click')
+    await wrapper.get('.reference-grid .asset-preview-media-stub').trigger('click')
     expect(wrapper.get('.preview-layer img').attributes('src')).toBe('/reference')
     const previewZIndex = Number(getComputedStyle(wrapper.get('.preview-layer').element).zIndex)
     expect(previewZIndex).toBeGreaterThan(7400)
@@ -61,15 +69,11 @@ describe('SkuResourceMatrix', () => {
     expect(wrapper.find('.preview-layer').exists()).toBe(false)
   })
 
-  it('replaces missing snapshot images with a compact file fallback', async () => {
+  it('loads current snapshot images through immutable task-asset ids', () => {
     const wrapper = mount(SkuResourceMatrix, { props: { bundle }, global: { stubs: { Teleport: true } } })
-    await wrapper.get('.reference-grid img').trigger('error')
-    await wrapper.get('.final-gallery img').trigger('error')
 
-    expect(wrapper.find('.reference-grid img').exists()).toBe(false)
-    expect(wrapper.get('.reference-grid .tile-fallback').text()).toBe('JPG')
-    expect(wrapper.findAll('.final-gallery img')).toHaveLength(1)
-    expect(wrapper.get('.final-gallery .tile-fallback').text()).toBe('PNG')
+    expect(wrapper.get('.reference-grid .asset-preview-media-stub').attributes('data-task-asset-id')).toBe('103')
+    expect(wrapper.findAll('.final-gallery .asset-preview-media-stub').map((item) => item.attributes('data-task-asset-id'))).toEqual(['101', '102'])
   })
 
   it('offers controlled downloads for non-image reference and final files', () => {

@@ -54,7 +54,7 @@
 <script setup lang="ts">
 import { ref, watch, computed, onBeforeUnmount, onMounted, nextTick } from 'vue'
 import assetPreviewPlaceholder from '@/assets/default.png'
-import { fetchAssetPreviewMeta } from '@/domain/asset-access'
+import { fetchAssetPreviewMeta, fetchTaskAssetPreviewMeta } from '@/domain/asset-access'
 import {
   materializePreviewImageUrl,
   normalizePreviewAssetId,
@@ -68,6 +68,8 @@ const props = withDefaults(
   defineProps<{
     /** 资产根 id；缺省时仅用 fallbackSrc */
     assetId?: string | null
+    /** 不可变 task_assets 行 id；资源组历史与当前快照优先使用此受控入口 */
+    taskAssetId?: string | null
     /** 兼容某些后端实现以版本 id 作为 preview 路径参数 */
     fallbackAssetId?: string | null
     fallbackSrc?: string | null
@@ -88,6 +90,7 @@ const props = withDefaults(
   }>(),
   {
     assetId: null,
+    taskAssetId: null,
     fallbackAssetId: null,
     fallbackSrc: null,
     resolvedPreviewUrl: null,
@@ -199,8 +202,9 @@ async function runLoad() {
   }
 
   const primaryId = normalizePreviewAssetId(props.assetId)
+  const taskAssetId = normalizePreviewAssetId(props.taskAssetId)
   const secondaryId = normalizePreviewAssetId(props.fallbackAssetId)
-  const previewCacheAssetId = primaryId || secondaryId
+  const previewCacheAssetId = taskAssetId || primaryId || secondaryId
 
   const resolved = (props.resolvedPreviewUrl ?? '').trim()
   if (resolved) {
@@ -219,7 +223,7 @@ async function runLoad() {
     return
   }
 
-  if (!primaryId && !secondaryId) {
+  if (!taskAssetId && !primaryId && !secondaryId) {
     clearObjectUrl()
     const fallback = await materializeDisplaySrc((props.fallbackSrc ?? '').trim(), previewCacheAssetId)
     displaySrc.value = fallback ?? ''
@@ -229,8 +233,11 @@ async function runLoad() {
   phase.value = 'loading'
   clearObjectUrl()
   displaySrc.value = ''
-  let res = await fetchAssetPreviewMeta(primaryId || secondaryId)
+  let res = taskAssetId
+    ? await fetchTaskAssetPreviewMeta(taskAssetId)
+    : await fetchAssetPreviewMeta(primaryId || secondaryId)
   const canTrySecondary =
+    !taskAssetId &&
     Boolean(primaryId) &&
     Boolean(secondaryId) &&
     secondaryId !== primaryId &&
@@ -294,7 +301,9 @@ function useFallbackOnly() {
     if (props.fallbackSrc?.trim()) {
       const fallback = await materializeDisplaySrc(
         props.fallbackSrc.trim(),
-        normalizePreviewAssetId(props.assetId) || normalizePreviewAssetId(props.fallbackAssetId),
+        normalizePreviewAssetId(props.taskAssetId)
+          || normalizePreviewAssetId(props.assetId)
+          || normalizePreviewAssetId(props.fallbackAssetId),
       )
       if (fallback) {
         displaySrc.value = fallback
@@ -319,6 +328,7 @@ watch(
   () =>
     [
       props.assetId,
+      props.taskAssetId,
       props.fallbackAssetId,
       props.fallbackSrc,
       props.resolvedPreviewUrl,
