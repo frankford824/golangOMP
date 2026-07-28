@@ -282,6 +282,16 @@ test("missing-resource negative approves only its exact network-confirmed 409", 
     classifyCompatibilityConsoleEntries(
       [entry],
       network,
+      "v8_wrong_scope_rejected",
+      ORIGIN,
+      2885,
+    )[0].expected_compatibility_observation,
+    true,
+  );
+  assert.equal(
+    classifyCompatibilityConsoleEntries(
+      [entry],
+      network,
       "v8_resource_groups",
       ORIGIN,
       2885,

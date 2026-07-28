@@ -444,6 +444,8 @@ function validateResourceOracle(value, combination, scenarioId, label) {
     const expectedKind =
       scenarioId === "missing_resource_group_negative"
         ? "v8_missing_resource_group"
+        : scenarioId === "wrong_scope_negative"
+          ? "v8_wrong_scope_rejected"
         : EXPECTED_NO_RESOURCE_GROUP_SCENARIOS.has(scenarioId)
           ? "v8_expected_no_resource_groups"
         : "v8_resource_groups";
@@ -600,10 +602,14 @@ function validateSamples(samples, scenarios, catalogHash) {
         `${key}.resource_oracle`,
       );
       if (
-        (resourceOracle.kind === "v8_resource_groups" &&
+        ([
+          "v8_resource_groups",
+          "v8_wrong_scope_rejected",
+        ].includes(resourceOracle.kind) &&
           row.resource_ids.length === 0) ||
         (![
           "v8_resource_groups",
+          "v8_wrong_scope_rejected",
           "v8_missing_resource_group",
           "v8_expected_no_resource_groups",
         ].includes(
@@ -1339,7 +1345,10 @@ export function classifyCompatibilityConsoleEntries(
             paths: new Set([`/v1/tasks/${taskId}/resource-bundle`]),
             status: 404,
           }
-        : resourceOracleKind === "v8_missing_resource_group"
+        : [
+              "v8_missing_resource_group",
+              "v8_wrong_scope_rejected",
+            ].includes(resourceOracleKind)
           ? {
               paths: new Set([`/v1/tasks/${taskId}/resource-bundle`]),
               status: 409,
@@ -1509,6 +1518,7 @@ function collectResponse(cache, response, origin) {
       .then((bodyBytes) =>
         cache.json.push({
           path: new URL(response.url()).pathname,
+          status: response.status(),
           body: JSON.parse(bodyBytes.toString("utf8")),
           body_sha256: crypto.createHash("sha256").update(bodyBytes).digest("hex"),
         }),
@@ -1652,6 +1662,13 @@ function matchingGroupIndexes(groups, resourceIds, taskId) {
     }))
     .filter((row) => row.matches)
     .map((row) => row.index);
+}
+
+function runtimeGroupIds(resourceIds) {
+  return resourceIds
+    .map((locator) => RUNTIME_GROUP_LOCATOR_RE.exec(locator))
+    .filter(Boolean)
+    .map((match) => Number(match[1]));
 }
 
 function observedResourceLocators(groups, resourceIds, taskId) {
@@ -2421,9 +2438,13 @@ async function executeCase({
       coverage.resource_ids,
       coverage.task_id,
     );
-    const selectedGroupIds = selectedGroupIndexes
+    const selectedGroupIdsFromBundle = selectedGroupIndexes
       .map((index) => initialGroups[index]?.id)
       .filter(positiveInt);
+    const selectedGroupIds =
+      coverage.resource_oracle.kind === "v8_wrong_scope_rejected"
+        ? runtimeGroupIds(coverage.resource_ids)
+        : selectedGroupIdsFromBundle;
     let historyUi = { opened: false, uiComplete: false };
     if (coverage.requirements.requires_history_drawer) {
       historyUi = await openHistoryDrawers(page, selectedGroupIndexes);
@@ -2486,6 +2507,14 @@ async function executeCase({
       cache,
       `/v1/tasks/${coverage.task_id}`,
     );
+    const bundleResponse = newestJsonRecord(
+      cache,
+      `/v1/tasks/${coverage.task_id}/resource-bundle`,
+    );
+    const expectedRuntimeGroupIds = runtimeGroupIds(coverage.resource_ids);
+    const rejectedGroupId = Number(
+      bundleResponse?.body?.error?.details?.group_id,
+    );
     const assetsMatch =
       resourceOracle.kind === "v8_resource_groups"
         ? coverage.resource_ids.every((resourceId) =>
@@ -2494,6 +2523,13 @@ async function executeCase({
           (!coverage.requirements.requires_revision_ids ||
             canonicalJson([...coverage.revision_ids].sort((a, b) => a - b)) ===
               canonicalJson([...observedRevisionIds].sort((a, b) => a - b)))
+        : resourceOracle.kind === "v8_wrong_scope_rejected"
+          ? bundleResponse?.status === 409 &&
+            bundleResponse?.body?.error?.details?.migration_incomplete === true &&
+            expectedRuntimeGroupIds.includes(rejectedGroupId) &&
+            groupsFromBundle(bundle).length === 0 &&
+            canonicalJson([...coverage.revision_ids].sort((a, b) => a - b)) ===
+              canonicalJson([...observedRevisionIds].sort((a, b) => a - b))
         : [
               "v8_missing_resource_group",
               "v8_expected_no_resource_groups",

@@ -324,6 +324,8 @@ def _normalized_resource_oracle(
         expected_kind = (
             "v8_missing_resource_group"
             if scenario_id == "missing_resource_group_negative"
+            else "v8_wrong_scope_rejected"
+            if scenario_id == "wrong_scope_negative"
             else "v8_expected_no_resource_groups"
             if scenario_id in EXPECTED_NO_RESOURCE_GROUP_SCENARIOS
             else "v8_resource_groups"
@@ -621,13 +623,15 @@ def _validate_samples_manifest(
                 or len(resource_ids) != len(set(resource_ids))
                 or resource_oracle is None
                 or (
-                    resource_oracle["kind"] == "v8_resource_groups"
+                    resource_oracle["kind"]
+                    in {"v8_resource_groups", "v8_wrong_scope_rejected"}
                     and not resource_ids
                 )
                 or (
                     resource_oracle["kind"]
                     not in {
                         "v8_resource_groups",
+                        "v8_wrong_scope_rejected",
                         "v8_missing_resource_group",
                         "v8_expected_no_resource_groups",
                     }

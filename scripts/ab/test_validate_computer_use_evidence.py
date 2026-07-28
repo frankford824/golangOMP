@@ -187,6 +187,8 @@ class ComputerUseEvidenceValidatorTest(unittest.TestCase):
                             "kind": (
                                 "v8_missing_resource_group"
                                 if scenario["id"] == "missing_resource_group_negative"
+                                else "v8_wrong_scope_rejected"
+                                if scenario["id"] == "wrong_scope_negative"
                                 else "v8_expected_no_resource_groups"
                                 if scenario["id"]
                                 in {
@@ -218,9 +220,10 @@ class ComputerUseEvidenceValidatorTest(unittest.TestCase):
                             ),
                         }
                     )
-                    uses_v8_groups = (
-                        resource_oracle["kind"] == "v8_resource_groups"
-                    )
+                    uses_v8_groups = resource_oracle["kind"] in {
+                        "v8_resource_groups",
+                        "v8_wrong_scope_rejected",
+                    }
                     revision_ids = (
                         [task_id * 10 + 1, task_id * 10 + 2]
                         if uses_v8_groups

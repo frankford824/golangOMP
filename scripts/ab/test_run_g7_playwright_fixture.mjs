@@ -366,12 +366,30 @@ async function installContextRoutes(context, { role }) {
       const taskId = Number(bundleMatch[1]);
       const isTask1264 = taskId === 1264;
       const scenario = url.searchParams.get("scenario");
-      if (scenario === "missing_resource_group_negative") {
+      if (
+        [
+          "missing_resource_group_negative",
+          "wrong_scope_negative",
+        ].includes(scenario)
+      ) {
         await route.fulfill(
           json(
             {
-              code: "MIGRATION_INCOMPLETE",
-              message: "resource group is missing",
+              error: {
+                code: "INVALID_STATE_TRANSITION",
+                message:
+                  scenario === "wrong_scope_negative"
+                    ? "task resources require confirmed cutover mapping"
+                    : "resource group is missing",
+                details:
+                  scenario === "wrong_scope_negative"
+                    ? {
+                        group_id: 10,
+                        migration_incomplete: true,
+                        migration_issue: "fixture:asset_scope_mismatch",
+                      }
+                    : {},
+              },
             },
             409,
           ),

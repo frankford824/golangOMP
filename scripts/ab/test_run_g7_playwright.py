@@ -191,6 +191,8 @@ class RunG7PlaywrightTest(unittest.TestCase):
                             "kind": (
                                 "v8_missing_resource_group"
                                 if scenario["id"] == "missing_resource_group_negative"
+                                else "v8_wrong_scope_rejected"
+                                if scenario["id"] == "wrong_scope_negative"
                                 else "v8_expected_no_resource_groups"
                                 if scenario["id"]
                                 in {
@@ -232,12 +234,20 @@ class RunG7PlaywrightTest(unittest.TestCase):
                                     if is_task1264
                                     else ["task_asset_group:10"]
                                 )
-                                if resource_oracle["kind"] == "v8_resource_groups"
+                                if resource_oracle["kind"]
+                                in {
+                                    "v8_resource_groups",
+                                    "v8_wrong_scope_rejected",
+                                }
                                 else []
                             ),
                             "revision_ids": (
                                 ([635, 636] if is_task1264 else [1])
-                                if resource_oracle["kind"] == "v8_resource_groups"
+                                if resource_oracle["kind"]
+                                in {
+                                    "v8_resource_groups",
+                                    "v8_wrong_scope_rejected",
+                                }
                                 and requirements["requires_revision_ids"]
                                 else []
                             ),

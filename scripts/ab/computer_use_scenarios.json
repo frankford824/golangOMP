@@ -401,7 +401,7 @@
       "required_viewports": ["desktop", "mobile"],
       "requires_task_id": true,
       "requires_revision_ids": true,
-      "requires_history_drawer": true,
+      "requires_history_drawer": false,
       "required_http_statuses": [],
       "required_assertions": ["page_matches_manifest", "assets_match", "allowed_actions_exact", "negative_state_rendered", "no_cross_scope_assets"],
       "coverage_tags": ["wrong_scope", "negative"]

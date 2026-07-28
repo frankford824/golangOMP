@@ -282,6 +282,8 @@ def normalize_resource_oracle(
         expected_kind = (
             "v8_missing_resource_group"
             if scenario_id == "missing_resource_group_negative"
+            else "v8_wrong_scope_rejected"
+            if scenario_id == "wrong_scope_negative"
             else "v8_expected_no_resource_groups"
             if scenario_id in EXPECTED_NO_RESOURCE_GROUP_SCENARIOS
             else "v8_resource_groups"
@@ -1848,7 +1850,10 @@ def build_sample(
             (str(scenario["id"]), str(combination))
         ]
         resource_oracle = actions_oracle["resource_oracle"]
-        uses_v8_groups = resource_oracle["kind"] == "v8_resource_groups"
+        uses_v8_groups = resource_oracle["kind"] in {
+            "v8_resource_groups",
+            "v8_wrong_scope_rejected",
+        }
         case_resource_ids = resource_keys if uses_v8_groups else []
         case_revision_ids = (
             revision_ids
