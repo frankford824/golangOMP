@@ -1325,25 +1325,35 @@ export function classifyCompatibilityConsoleEntries(
   expectedOrigin,
   taskId,
 ) {
-  const approvedPaths = new Set(
+  const approval =
     resourceOracleKind === "legacy_frontend_task_snapshot"
-      ? [
-          `/v1/tasks/${taskId}/predictions`,
-          `/v1/tasks/${taskId}/audit-supplements`,
-        ]
+      ? {
+          paths: new Set([
+            `/v1/tasks/${taskId}/predictions`,
+            `/v1/tasks/${taskId}/audit-supplements`,
+          ]),
+          status: 404,
+        }
       : resourceOracleKind === "frontend_rollback_compatibility"
-        ? [`/v1/tasks/${taskId}/resource-bundle`]
-        : [],
-  );
+        ? {
+            paths: new Set([`/v1/tasks/${taskId}/resource-bundle`]),
+            status: 404,
+          }
+        : resourceOracleKind === "v8_missing_resource_group"
+          ? {
+              paths: new Set([`/v1/tasks/${taskId}/resource-bundle`]),
+              status: 409,
+            }
+          : null;
   return entries.map((entry) => {
     const annotated = {
       ...entry,
       expected_compatibility_observation: false,
     };
     if (
-      approvedPaths.size === 0 ||
+      !approval ||
       entry.level !== "error" ||
-      !String(entry.text || "").includes("status of 404") ||
+      !String(entry.text || "").includes(`status of ${approval.status}`) ||
       !nonempty(entry.url)
     ) {
       return annotated;
@@ -1356,7 +1366,7 @@ export function classifyCompatibilityConsoleEntries(
     }
     if (
       parsed.origin !== expectedOrigin ||
-      !approvedPaths.has(parsed.pathname)
+      !approval.paths.has(parsed.pathname)
     ) {
       return annotated;
     }
@@ -1365,7 +1375,7 @@ export function classifyCompatibilityConsoleEntries(
         const requestUrl = new URL(request.url);
         return (
           request.method === "GET" &&
-          request.status === 404 &&
+          request.status === approval.status &&
           requestUrl.origin === expectedOrigin &&
           requestUrl.pathname === parsed.pathname
         );
@@ -1376,6 +1386,7 @@ export function classifyCompatibilityConsoleEntries(
     if (confirmed) {
       annotated.expected_compatibility_observation = true;
       annotated.expected_compatibility_route = parsed.pathname;
+      annotated.expected_compatibility_status = approval.status;
     }
     return annotated;
   });

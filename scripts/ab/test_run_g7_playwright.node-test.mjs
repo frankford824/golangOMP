@@ -256,6 +256,60 @@ test("frontend rollback compatibility approves only the missing V8 bundle route"
   );
 });
 
+test("missing-resource negative approves only its exact network-confirmed 409", () => {
+  const entry = {
+    level: "error",
+    text: "Failed to load resource: the server responded with a status of 409 (Conflict)",
+    url: `${ORIGIN}/v1/tasks/2885/resource-bundle`,
+  };
+  const network = [
+    {
+      method: "GET",
+      url: `${ORIGIN}/v1/tasks/2885/resource-bundle`,
+      status: 409,
+    },
+  ];
+  const approved = classifyCompatibilityConsoleEntries(
+    [entry],
+    network,
+    "v8_missing_resource_group",
+    ORIGIN,
+    2885,
+  )[0];
+  assert.equal(approved.expected_compatibility_observation, true);
+  assert.equal(approved.expected_compatibility_status, 409);
+  assert.equal(
+    classifyCompatibilityConsoleEntries(
+      [entry],
+      network,
+      "v8_resource_groups",
+      ORIGIN,
+      2885,
+    )[0].expected_compatibility_observation,
+    false,
+  );
+  assert.equal(
+    classifyCompatibilityConsoleEntries(
+      [{ ...entry, url: `${ORIGIN}/v1/tasks/2885/unknown` }],
+      [{ ...network[0], url: `${ORIGIN}/v1/tasks/2885/unknown` }],
+      "v8_missing_resource_group",
+      ORIGIN,
+      2885,
+    )[0].expected_compatibility_observation,
+    false,
+  );
+  assert.equal(
+    classifyCompatibilityConsoleEntries(
+      [{ ...entry, text: entry.text.replace("409", "404") }],
+      [{ ...network[0], status: 404 }],
+      "v8_missing_resource_group",
+      ORIGIN,
+      2885,
+    )[0].expected_compatibility_observation,
+    false,
+  );
+});
+
 test("retired action assertion requires a complete clean DOM snapshot", () => {
   const clean = {
     actionControlSnapshotComplete: true,

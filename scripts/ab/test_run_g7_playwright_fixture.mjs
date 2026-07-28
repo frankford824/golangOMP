@@ -366,8 +366,19 @@ async function installContextRoutes(context, { role }) {
       const taskId = Number(bundleMatch[1]);
       const isTask1264 = taskId === 1264;
       const scenario = url.searchParams.get("scenario");
+      if (scenario === "missing_resource_group_negative") {
+        await route.fulfill(
+          json(
+            {
+              code: "MIGRATION_INCOMPLETE",
+              message: "resource group is missing",
+            },
+            409,
+          ),
+        );
+        return;
+      }
       const groups = [
-        "missing_resource_group_negative",
         "purchase_to_sku_planning",
       ].includes(scenario)
         ? []
