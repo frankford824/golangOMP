@@ -21,7 +21,7 @@ func TestAssetObjectDeletionOutboxProducersUseAdapterSnapshot(t *testing.T) {
 			return walkErr
 		}
 		if entry.IsDir() {
-			if entry.Name() == ".git" || entry.Name() == "node_modules" || entry.Name() == "dist" {
+			if entry.Name() == ".git" || entry.Name() == "node_modules" || entry.Name() == "dist" || entry.Name() == "tmp" {
 				return filepath.SkipDir
 			}
 			return nil
