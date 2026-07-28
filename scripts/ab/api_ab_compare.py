@@ -1401,6 +1401,209 @@ def field_paths(value: object, field: str, prefix: str = "$") -> list[str]:
     return found
 
 
+ACCESS_OMITTED_FIELDS = frozenset(
+    {
+        "access_hint",
+        "download_url",
+        "download_url_expires_at",
+        "file_path",
+        "object_key",
+        "presigned_url",
+        "signed_url",
+        "storage_key",
+    }
+)
+
+
+def _access_asset_object(value: dict[str, Any]) -> bool:
+    return bool(
+        {
+            "asset_id",
+            "download_url",
+            "file_path",
+            "object_key",
+            "presigned_url",
+            "ref_id",
+            "signed_url",
+            "storage_key",
+        }
+        & set(value)
+    )
+
+
+def _legacy_reference_image_locator(value: str) -> bool:
+    """Return whether a legacy reference-image string grants file location.
+
+    Plain identifiers and leaf filenames remain semantic data.  URLs, URI
+    schemes supported by the Go redactor, and strings with path/query
+    structure are access locators and must be absent from the candidate B
+    view-only response.  This intentionally mirrors
+    ``legacyReferenceImageStringIsLocator`` instead of generalizing URI rules.
+    """
+
+    normalized = value.strip()
+    lowered = normalized.casefold()
+    if lowered.startswith(
+        (
+            "http:",
+            "https:",
+            "ftp:",
+            "file:",
+            "data:",
+            "blob:",
+            "s3:",
+            "oss:",
+            "gs:",
+            "//",
+        )
+    ):
+        return True
+    if any(character in normalized for character in ("/", "\\", "?")):
+        return True
+    if re.search(r"%(?![0-9a-fA-F]{2})", normalized):
+        return True
+    decoded = urllib.parse.unquote_to_bytes(normalized)
+    original = normalized.encode("utf-8")
+    return decoded != original and any(
+        character in decoded for character in (b"/", b"\\", b"?")
+    )
+
+
+def _project_legacy_reference_images(value: object) -> object:
+    if not isinstance(value, str):
+        return []
+    try:
+        decoded = json.loads(value)
+    except (TypeError, ValueError):
+        return []
+    if not isinstance(decoded, list) or not all(
+        isinstance(item, str) for item in decoded
+    ):
+        return []
+    return [
+        item.strip()
+        for item in decoded
+        if item.strip() and not _legacy_reference_image_locator(item)
+    ]
+
+
+def access_restricted_projection(value: object) -> object:
+    """Project only actor-controlled file-access metadata.
+
+    V8 deliberately omits these fields from task read models when the actor
+    lacks scoped ``asset.download``.  The projection is intrinsic comparator
+    behavior, not a reviewed business normalization rule.  Immutable asset
+    identity, scope, ordering, hashes, pointers, and workflow fields remain
+    visible to the normal semantic/oracle checks.
+    """
+
+    if isinstance(value, dict):
+        asset_object = _access_asset_object(value)
+        output: dict[str, object] = {}
+        for key, child in value.items():
+            if key == "reference_images_json":
+                output[key] = _project_legacy_reference_images(child)
+                continue
+            if key == "reference_file_refs_json":
+                if not isinstance(child, str):
+                    output[key] = child
+                    continue
+                try:
+                    decoded = json.loads(child)
+                except (TypeError, ValueError):
+                    # Preserve malformed history as an explicit, stable
+                    # mismatch.  The B-side fail-closed assertion also emits a
+                    # dedicated violation before any projection is compared.
+                    output[key] = {
+                        "invalid_json_sha256": sha256(child.encode("utf-8"))
+                    }
+                else:
+                    output[key] = access_restricted_projection(decoded)
+                continue
+            if asset_object and key in ACCESS_OMITTED_FIELDS:
+                continue
+            if asset_object and key == "url":
+                continue
+            if asset_object and key == "public_download_allowed":
+                continue
+            output[key] = access_restricted_projection(child)
+        return output
+    if isinstance(value, list):
+        return [access_restricted_projection(child) for child in value]
+    return value
+
+
+def access_restricted_issues(
+    value: object, prefix: str = "$"
+) -> list[tuple[str, str]]:
+    """Return B/view-only access leaks or malformed embedded reference JSON.
+
+    Omitted locator fields are the contract.  Empty or null locator keys are
+    also rejected so a future encoder cannot silently widen the response
+    shape.  ``public_download_allowed=false`` is the sole compatibility field
+    that remains valid when explicitly present.
+    """
+
+    issues: list[tuple[str, str]] = []
+    if isinstance(value, dict):
+        asset_object = _access_asset_object(value)
+        for key, child in value.items():
+            path = f"{prefix}.{key}"
+            if key == "reference_images_json":
+                if not isinstance(child, str):
+                    issues.append((path, "invalid_reference_images_json"))
+                    continue
+                try:
+                    decoded_images = json.loads(child)
+                except (TypeError, ValueError):
+                    issues.append((path, "invalid_reference_images_json"))
+                    continue
+                if not isinstance(decoded_images, list) or not all(
+                    isinstance(item, str) for item in decoded_images
+                ):
+                    issues.append((path, "invalid_reference_images_json"))
+                    continue
+                for index, image in enumerate(decoded_images):
+                    if _legacy_reference_image_locator(image):
+                        issues.append(
+                            (
+                                f"{path}#json[{index}]",
+                                "reference_image_locator",
+                            )
+                        )
+                continue
+            if key == "reference_file_refs_json":
+                if not isinstance(child, str):
+                    issues.append((path, "invalid_reference_file_refs_json"))
+                    continue
+                try:
+                    decoded = json.loads(child)
+                except (TypeError, ValueError):
+                    issues.append((path, "invalid_reference_file_refs_json"))
+                else:
+                    issues.extend(
+                        access_restricted_issues(decoded, f"{path}#json")
+                    )
+                continue
+            if asset_object and key in ACCESS_OMITTED_FIELDS:
+                issues.append((path, key))
+            elif asset_object and key == "url":
+                issues.append((path, key))
+            elif (
+                asset_object
+                and key == "public_download_allowed"
+                and child is not False
+            ):
+                issues.append((path, key))
+            issues.extend(access_restricted_issues(child, path))
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            issues.extend(
+                access_restricted_issues(child, f"{prefix}[{index}]")
+            )
+    return issues
+
+
 def unwrap_data(value: object) -> object:
     if isinstance(value, dict) and set(value) == {"data"}:
         return value["data"]
@@ -2957,10 +3160,40 @@ class Runner:
             expected.get("content_availability")
             == "historical_unavailable"
         )
+        restricted_view = (
+            combination.endswith("_b")
+            and self.identity_roles.get(identity) == "view_only"
+        )
+        if restricted_view:
+            access_issues = access_restricted_issues(version)
+            if access_issues:
+                self.oracle_violation(
+                    entity,
+                    f"{combination}/{identity} {surface} asset {asset_id} "
+                    "exposes access metadata "
+                    f"{sha256(canonical(access_issues))}",
+                )
+                return None
+        historical_access_hint = version.get("access_hint")
         if historical_unavailable and (
             storage_key
             or file_hash
             or version.get("download_url")
+            or version.get("url")
+            or version.get("download_url_expires_at")
+            or version.get("file_path")
+            or version.get("object_key")
+            or version.get("signed_url")
+            or version.get("presigned_url")
+            or (
+                historical_access_hint is not None
+                and (
+                    not isinstance(historical_access_hint, str)
+                    or _legacy_reference_image_locator(
+                        historical_access_hint
+                    )
+                )
+            )
             or version.get("public_download_allowed") is True
         ):
             self.oracle_violation(
@@ -2973,7 +3206,13 @@ class Runner:
             not self._positive_int(version.get("task_id"))
             or not self._positive_int(version.get("asset_id"))
             or not isinstance(version.get("asset_type"), str)
-            or not isinstance(storage_key, str)
+            or (
+                not isinstance(storage_key, str)
+                and not (
+                    storage_key is None
+                    and (historical_unavailable or restricted_view)
+                )
+            )
             or not self._nonnegative_int(file_size)
             or not isinstance(mime_type, str)
             or not isinstance(version.get("flow_review_status"), str)
@@ -2998,12 +3237,6 @@ class Runner:
             "asset_type": version.get("asset_type"),
             "scope_sku_code": scope_value,
             "retouch_requirement_id": retouch_value,
-            "object_key_sha256": (
-                sha256(storage_key.encode("utf-8"))
-                if isinstance(storage_key, str)
-                else None
-            ),
-            "content_sha256": file_hash,
             "size": file_size,
             "mime_type": mime_type,
             "flow_review_status": str(
@@ -3023,8 +3256,6 @@ class Runner:
             "asset_type": expected_type,
             "scope_sku_code": expected_scope,
             "retouch_requirement_id": expected_retouch,
-            "object_key_sha256": expected["object_key_sha256"],
-            "content_sha256": expected["content_sha256"],
             "size": expected["size"],
             "mime_type": expected["mime_type"],
             "flow_review_status": expected["flow_review_status"],
@@ -3038,10 +3269,36 @@ class Runner:
         if historical_unavailable:
             # The frozen oracle retains the legacy object-key hash as evidence,
             # while the V8 read model deliberately suppresses the unusable raw
-            # key. The access check above proves that suppression before the
-            # comparison substitutes the deterministic empty-key projection.
+            # key.  Both projections explicitly prove that no object identity
+            # is exposed while retaining every visible business identity.
+            actual["object_key_sha256"] = sha256(
+                str(storage_key or "").encode("utf-8")
+            )
+            actual["content_sha256"] = file_hash
             expected_projection["object_key_sha256"] = sha256(b"")
             expected_projection["content_sha256"] = ""
+        elif restricted_view:
+            # Do not fabricate hidden values from the oracle.  A restricted
+            # response proves the immutable task/root/version identity and all
+            # visible metadata; independent object gates and authorized
+            # surfaces retain byte identity evidence.  If a content hash is
+            # actually present it remains part of the comparison.
+            if raw_file_hash is not None:
+                actual["content_sha256"] = file_hash
+                expected_projection["content_sha256"] = expected[
+                    "content_sha256"
+                ]
+        else:
+            actual["object_key_sha256"] = sha256(
+                str(storage_key).encode("utf-8")
+            )
+            actual["content_sha256"] = file_hash
+            expected_projection["object_key_sha256"] = expected[
+                "object_key_sha256"
+            ]
+            expected_projection["content_sha256"] = expected[
+                "content_sha256"
+            ]
         if actual != expected_projection:
             self.oracle_violation(
                 entity,
@@ -3055,24 +3312,29 @@ class Runner:
                 combination, identity, coverage_kind, str(asset_id)
             )
         key = (combination, identity, str(asset_id))
+        consistency_fields = (
+            "task_id",
+            "asset_id",
+            "asset_type",
+            "scope_sku_code",
+            "retouch_requirement_id",
+            "file_size",
+            "mime_type",
+            "flow_review_status",
+            "approved_at",
+            "approved_by",
+        )
+        if not historical_unavailable and not restricted_view:
+            consistency_fields = (
+                *consistency_fields,
+                "storage_key",
+                "file_hash",
+            )
         with self._state_lock:
             prior = self.task_asset_metadata.get(key)
             if prior is not None and any(
                 prior.get(field) != version.get(field)
-                for field in (
-                    "task_id",
-                    "asset_id",
-                    "asset_type",
-                    "scope_sku_code",
-                    "retouch_requirement_id",
-                    "storage_key",
-                    "file_hash",
-                    "file_size",
-                    "mime_type",
-                    "flow_review_status",
-                    "approved_at",
-                    "approved_by",
-                )
+                for field in consistency_fields
             ):
                 self.oracle_violation(
                     entity,
@@ -4547,13 +4809,51 @@ class Runner:
             and result.status == 200
             and route != "/v1/task-assets/{task_asset_id}/preview"
         ):
-            paths = field_paths(result.body, "download_url")
-            if paths:
+            access_issues = access_restricted_issues(result.body)
+            download_paths = sorted(
+                path
+                for path, kind in access_issues
+                if kind == "download_url"
+            )
+            invalid_paths = sorted(
+                path
+                for path, kind in access_issues
+                if kind
+                in {
+                    "invalid_reference_file_refs_json",
+                    "invalid_reference_images_json",
+                }
+            )
+            other_access = sorted(
+                (path, kind)
+                for path, kind in access_issues
+                if kind
+                not in {
+                    "download_url",
+                    "invalid_reference_file_refs_json",
+                    "invalid_reference_images_json",
+                }
+            )
+            if download_paths:
                 self.violation(
                     "api.view_only_download_url_exposed",
                     entity,
                     f"{combination}/{identity} exposes download_url at "
-                    f"{sha256(canonical(paths))}",
+                    f"{sha256(canonical(download_paths))}",
+                )
+            if invalid_paths:
+                self.violation(
+                    "api.view_only_access_projection_invalid",
+                    entity,
+                    f"{combination}/{identity} has invalid embedded access "
+                    f"projection at {sha256(canonical(invalid_paths))}",
+                )
+            if other_access:
+                self.violation(
+                    "api.view_only_access_metadata_exposed",
+                    entity,
+                    f"{combination}/{identity} exposes access metadata at "
+                    f"{sha256(canonical(other_access))}",
                 )
 
     def violation(self, code: str, entity: str, detail: str) -> None:
@@ -4874,6 +5174,17 @@ class Runner:
                 else:
                     a_projection = projector(a_result.body)
                     b_projection = projector(b_result.body)
+                if self.identity_roles.get(identity) == "view_only":
+                    # B-side exposure was already checked fail-closed when the
+                    # response was observed.  Only after that assertion may
+                    # the A/B business projection ignore the legacy A access
+                    # metadata that V8 correctly omits.
+                    a_projection = access_restricted_projection(
+                        a_projection
+                    )
+                    b_projection = access_restricted_projection(
+                        b_projection
+                    )
                 with self._state_lock:
                     self.semantic_comparison_count += 1
                 if canonical(a_projection) != canonical(b_projection):
@@ -4935,6 +5246,9 @@ class Runner:
                 return
         left_body = normalize_transport_noise(left.body)
         right_body = normalize_transport_noise(right.body)
+        if self.identity_roles.get(identity) == "view_only":
+            left_body = access_restricted_projection(left_body)
+            right_body = access_restricted_projection(right_body)
         different = left.status != right.status or canonical(left_body) != canonical(right_body)
         if rule is not None and different:
             try:

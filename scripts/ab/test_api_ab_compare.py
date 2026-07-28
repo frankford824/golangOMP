@@ -822,7 +822,21 @@ class ComparatorTest(unittest.TestCase):
                 and path.endswith("/download")
             ):
                 return result(403, {"code": "permission_denied"})
-            return provided_requester(base, path, headers)
+            response = provided_requester(base, path, headers)
+            if (
+                identity == "view-inside"
+                and base.endswith(("8102", "8103"))
+                and response.status == 200
+                and "/v1/task-assets/" not in path
+            ):
+                # The formal view-only fixture can read its assigned task but
+                # cannot download its files.  Keep the test matrix aligned
+                # with the real B read model before exercising A/B semantics.
+                return result(
+                    response.status,
+                    api.access_restricted_projection(response.body),
+                )
+            return response
 
         kwargs = dict(
             matrix_path=self.matrix,
@@ -921,7 +935,7 @@ class ComparatorTest(unittest.TestCase):
                 )
             return value
 
-        evidence = self.run_compare(requester)
+        evidence = self.run_compare(requester, simulate_scope=False)
         self.assertIn(
             "api.view_only_download_url_exposed",
             {item["violation_code"] for item in evidence["violations"]},
@@ -959,6 +973,255 @@ class ComparatorTest(unittest.TestCase):
                 == "api.view_only_download_url_exposed"
                 for item in runner.violations
             )
+        )
+
+    def test_view_only_rejects_locator_metadata_before_projection(self) -> None:
+        runner = self.make_runner()
+        runner.observation(
+            "dev_dev_b",
+            "view-inside",
+            "/v1/tasks/{task_id}",
+            "task:1:/v1/tasks/{task_id}",
+            result(
+                200,
+                {
+                    "data": {
+                        "asset_id": "ref-1",
+                        "storage_key": "",
+                        "public_download_allowed": False,
+                    }
+                },
+            ),
+        )
+        self.assertTrue(
+            any(
+                item["violation_code"]
+                == "api.view_only_access_metadata_exposed"
+                for item in runner.violations
+            )
+        )
+
+    def test_view_only_rejects_all_removed_asset_locator_fields(self) -> None:
+        for field in (
+            "file_path",
+            "object_key",
+            "signed_url",
+            "presigned_url",
+        ):
+            with self.subTest(field=field):
+                runner = self.make_runner()
+                runner.observation(
+                    "dev_dev_b",
+                    "view-inside",
+                    "/v1/tasks/{task_id}/detail",
+                    "task:1:/v1/tasks/{task_id}/detail",
+                    result(200, {"data": {field: ""}}),
+                )
+                self.assertTrue(
+                    any(
+                        item["violation_code"]
+                        == "api.view_only_access_metadata_exposed"
+                        for item in runner.violations
+                    )
+                )
+                self.assertNotIn(
+                    field,
+                    api.access_restricted_projection({"data": {field: ""}})[
+                        "data"
+                    ],
+                )
+
+    def test_view_only_rejects_legacy_reference_image_locators(self) -> None:
+        locators = (
+            "https://cdn.example.invalid/reference.png",
+            "ftp://cdn.example.invalid/reference.png",
+            "data:image/png;base64,AAAA",
+            "blob:https://example.invalid/id",
+            "file:///tmp/reference.png",
+            "s3://bucket/reference.png",
+            "oss://bucket/reference.png",
+            "gs://bucket/reference.png",
+            "/srv/references/reference.png",
+            r"C:\references\reference.png",
+            "../references/reference.png",
+            "references/reference.png",
+            "foo?bar",
+            "https%3A%2F%2Fcdn.example.invalid%2Fencoded.png",
+            "invalid%2",
+        )
+        for locator in locators:
+            with self.subTest(locator=locator):
+                issues = api.access_restricted_issues(
+                    {"reference_images_json": json.dumps([locator])}
+                )
+                self.assertEqual(
+                    [
+                        (
+                            "$.reference_images_json#json[0]",
+                            "reference_image_locator",
+                        )
+                    ],
+                    issues,
+                )
+                self.assertEqual(
+                    [],
+                    api.access_restricted_projection(
+                        {"reference_images_json": json.dumps([locator])}
+                    )["reference_images_json"],
+                )
+        runner = self.make_runner()
+        runner.observation(
+            "dev_dev_b",
+            "view-inside",
+            "/v1/tasks/{task_id}/detail",
+            "task:1:/v1/tasks/{task_id}/detail",
+            result(
+                200,
+                {"reference_images_json": json.dumps(list(locators))},
+            ),
+        )
+        self.assertIn(
+            "api.view_only_access_metadata_exposed",
+            {item["violation_code"] for item in runner.violations},
+        )
+
+    def test_view_only_preserves_plain_legacy_reference_identifiers(self) -> None:
+        values = [
+            "reference-asset-123",
+            "asset:123",
+            "550e8400-e29b-41d4-a716-446655440000",
+            "reference.final.png",
+            "设计参考图 01.jpg",
+            "  trimmed-identifier  ",
+            "",
+        ]
+        encoded = json.dumps(values, ensure_ascii=False)
+        projected_values = [
+            "reference-asset-123",
+            "asset:123",
+            "550e8400-e29b-41d4-a716-446655440000",
+            "reference.final.png",
+            "设计参考图 01.jpg",
+            "trimmed-identifier",
+        ]
+        self.assertEqual(
+            [],
+            api.access_restricted_issues({"reference_images_json": encoded}),
+        )
+        self.assertEqual(
+            projected_values,
+            api.access_restricted_projection(
+                {"reference_images_json": encoded}
+            )["reference_images_json"],
+        )
+        runner = self.make_runner()
+        runner.observation(
+            "dev_dev_b",
+            "view-inside",
+            "/v1/tasks/{task_id}/detail",
+            "task:1:/v1/tasks/{task_id}/detail",
+            result(200, {"reference_images_json": encoded}),
+        )
+        self.assertFalse(runner.violations)
+
+    def test_view_only_invalid_legacy_reference_images_json_fails_closed(
+        self,
+    ) -> None:
+        for value in (
+            '{"not":"an-array"}',
+            json.dumps([{"url": "hidden"}]),
+            ["not-encoded-json"],
+        ):
+            with self.subTest(value=value):
+                self.assertEqual(
+                    [
+                        (
+                            "$.reference_images_json",
+                            "invalid_reference_images_json",
+                        )
+                    ],
+                    api.access_restricted_issues(
+                        {"reference_images_json": value}
+                    ),
+                )
+                self.assertEqual(
+                    [],
+                    api.access_restricted_projection(
+                        {"reference_images_json": value}
+                    )["reference_images_json"],
+                )
+
+    def test_view_only_invalid_embedded_reference_json_fails_closed(self) -> None:
+        runner = self.make_runner()
+        runner.observation(
+            "dev_dev_b",
+            "view-inside",
+            "/v1/tasks/{task_id}/detail",
+            "task:1:/v1/tasks/{task_id}/detail",
+            result(
+                200,
+                {
+                    "data": {
+                        "task_detail": {
+                            "reference_file_refs_json": '{"asset_id":"ref-1"'
+                        }
+                    }
+                },
+            ),
+        )
+        self.assertTrue(
+            any(
+                item["violation_code"]
+                == "api.view_only_access_projection_invalid"
+                for item in runner.violations
+            )
+        )
+
+    def test_access_projection_preserves_business_identity_and_pointer(self) -> None:
+        value = {
+            "asset_id": 101,
+            "task_id": 1,
+            "current_version_id": 20,
+            "scope_sku_code": "SKU-1",
+            "file_hash": "a" * 64,
+            "storage_key": "tasks/1/source.psd",
+            "download_url": "/v1/task-assets/20/download",
+            "public_download_allowed": True,
+            "access_hint": "object_key=tasks/1/source.psd",
+            "reference_file_refs_json": json.dumps(
+                [
+                    {
+                        "asset_id": "ref-1",
+                        "storage_key": "tasks/1/reference.png",
+                        "download_url": "/v1/assets/files/reference.png",
+                        "source": "task_reference_upload",
+                    }
+                ]
+            ),
+        }
+        projected = api.access_restricted_projection(value)
+        self.assertEqual(101, projected["asset_id"])
+        self.assertEqual(20, projected["current_version_id"])
+        self.assertEqual("SKU-1", projected["scope_sku_code"])
+        self.assertEqual("a" * 64, projected["file_hash"])
+        self.assertNotIn("storage_key", projected)
+        self.assertNotIn("download_url", projected)
+        self.assertNotIn("public_download_allowed", projected)
+        self.assertNotIn("access_hint", projected)
+        self.assertEqual(
+            [
+                {
+                    "asset_id": "ref-1",
+                    "source": "task_reference_upload",
+                }
+            ],
+            projected["reference_file_refs_json"],
+        )
+        tampered = json.loads(json.dumps(value))
+        tampered["current_version_id"] = 21
+        self.assertNotEqual(
+            projected,
+            api.access_restricted_projection(tampered),
         )
 
     def test_view_only_asset_download_must_not_return_200(self) -> None:
@@ -1372,12 +1635,32 @@ class ComparatorTest(unittest.TestCase):
             "approved_by": None,
             "download_url": None,
             "public_download_allowed": False,
+            "access_hint": "historical object is unavailable",
         }
         runner.validate_version_identity(
             "dev_dev_b",
             "admin",
             "task:1:/v1/tasks/{task_id}/detail",
             version,
+            surface="detail",
+        )
+        self.assertEqual([], runner.violations)
+
+        omitted = {
+            key: child
+            for key, child in version.items()
+            if key
+            not in {
+                "download_url",
+                "file_hash",
+                "storage_key",
+            }
+        }
+        runner.validate_version_identity(
+            "dev_dev_b",
+            "admin",
+            "task:1:/v1/tasks/{task_id}/detail",
+            omitted,
             surface="detail",
         )
         self.assertEqual([], runner.violations)
@@ -1395,6 +1678,105 @@ class ComparatorTest(unittest.TestCase):
             any(
                 "historical-unavailable metadata exposes file access"
                 in item["detail"]
+                for item in runner.violations
+            )
+        )
+        runner.violations.clear()
+        exposed_hint = dict(version)
+        exposed_hint["access_hint"] = "historical path: legacy/raw/object.psd"
+        runner.validate_version_identity(
+            "dev_dev_b",
+            "admin",
+            "task:1:/v1/tasks/{task_id}/detail",
+            exposed_hint,
+            surface="detail",
+        )
+        self.assertTrue(
+            any(
+                "historical-unavailable metadata exposes file access"
+                in item["detail"]
+                for item in runner.violations
+            )
+        )
+
+    def test_view_only_redacted_version_checks_visible_oracle_identity(self) -> None:
+        runner = self.make_runner()
+        version = {
+            "id": 20,
+            "task_id": 1,
+            "asset_id": 101,
+            "asset_type": "source",
+            "scope_sku_code": "",
+            "retouch_requirement_id": None,
+            "file_hash": "a" * 64,
+            "file_size": 10,
+            "mime_type": "image/png",
+            "flow_review_status": "",
+            "usable_state": "not_applicable",
+            "approved_at": None,
+            "approved_by": None,
+            "public_download_allowed": False,
+        }
+        resolved = runner.validate_version_identity(
+            "dev_dev_b",
+            "view-inside",
+            "task:1:/v1/tasks/{task_id}/detail",
+            version,
+            surface="detail",
+            coverage_kind="detail_asset",
+        )
+        self.assertIsNotNone(resolved)
+        self.assertEqual([], runner.violations)
+        self.assertEqual(
+            {"20"},
+            runner.oracle_coverage[
+                ("dev_dev_b", "view-inside", "detail_asset")
+            ],
+        )
+
+        tampered = dict(version)
+        tampered["file_size"] = 11
+        runner.validate_version_identity(
+            "dev_dev_b",
+            "view-inside",
+            "task:1:/v1/tasks/{task_id}/detail",
+            tampered,
+            surface="detail",
+        )
+        self.assertTrue(
+            any(
+                "identity differs" in item["detail"]
+                for item in runner.violations
+            )
+        )
+
+    def test_admin_normal_asset_still_requires_storage_identity(self) -> None:
+        runner = self.make_runner()
+        version = {
+            "id": 20,
+            "task_id": 1,
+            "asset_id": 101,
+            "asset_type": "source",
+            "scope_sku_code": "",
+            "retouch_requirement_id": None,
+            "file_hash": "a" * 64,
+            "file_size": 10,
+            "mime_type": "image/png",
+            "flow_review_status": "",
+            "usable_state": "not_applicable",
+            "approved_at": None,
+            "approved_by": None,
+        }
+        runner.validate_version_identity(
+            "dev_dev_b",
+            "admin",
+            "task:1:/v1/tasks/{task_id}/detail",
+            version,
+            surface="detail",
+        )
+        self.assertTrue(
+            any(
+                "identity fields have invalid types" in item["detail"]
                 for item in runner.violations
             )
         )
