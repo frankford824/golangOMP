@@ -8,6 +8,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const SCHEMA_VERSION = 1;
 const GATE = "G7";
 const SOURCE_KIND = "playwright";
+const EXPECTED_SCENARIO_COUNT = 30;
+const EXPECTED_CASE_COUNT = 66;
 const COMBINATIONS = [
   "external_external",
   "devplus_devplus",
@@ -224,8 +226,13 @@ function validateCatalog(catalog) {
   ) {
     throw new InputError("scenario catalog must declare desktop and mobile");
   }
-  if (!Array.isArray(catalog.scenarios) || catalog.scenarios.length !== 29) {
-    throw new InputError("scenario catalog must contain exactly 29 G7 scenarios");
+  if (
+    !Array.isArray(catalog.scenarios) ||
+    catalog.scenarios.length !== EXPECTED_SCENARIO_COUNT
+  ) {
+    throw new InputError(
+      `scenario catalog must contain exactly ${EXPECTED_SCENARIO_COUNT} G7 scenarios`,
+    );
   }
   const seen = new Set();
   for (const scenario of catalog.scenarios) {
@@ -492,7 +499,9 @@ function validateSamples(samples, scenarios, catalogHash) {
     !Array.isArray(samples.samples) ||
     samples.samples.length !== scenarios.length
   ) {
-    throw new InputError("samples manifest counts do not match the 29 scenarios");
+    throw new InputError(
+      `samples manifest counts do not match the ${EXPECTED_SCENARIO_COUNT} scenarios`,
+    );
   }
   const scenarioById = new Map(scenarios.map((scenario) => [scenario.id, scenario]));
   const cases = [];
@@ -603,8 +612,13 @@ function validateSamples(samples, scenarios, catalogHash) {
       throw new InputError(`sample ${sample.scenario_id} has incomplete coverage`);
     }
   }
-  if (sampleIds.size !== scenarios.length || cases.length !== 64) {
-    throw new InputError("hardened samples must resolve exactly 64 G7 cases");
+  if (
+    sampleIds.size !== scenarios.length ||
+    cases.length !== EXPECTED_CASE_COUNT
+  ) {
+    throw new InputError(
+      `hardened samples must resolve exactly ${EXPECTED_CASE_COUNT} G7 cases`,
+    );
   }
   return { sealedEdges, cases };
 }
@@ -2409,7 +2423,11 @@ export async function executePlan(plan, testHooks = {}) {
   } finally {
     await browser.close();
   }
-  if (records.length !== 64) throw new Error("execution did not produce 64 records");
+  if (records.length !== plan.case_count) {
+    throw new Error(
+      `execution produced ${records.length} records for ${plan.case_count} planned cases`,
+    );
+  }
   const evidence = {
     schema_version: SCHEMA_VERSION,
     source_kind: SOURCE_KIND,
@@ -2504,7 +2522,7 @@ async function main() {
   if (options.mode === "dry-run") {
     await writeJsonExclusive(plan.output_path, publicPlan(plan));
     process.stdout.write(
-      `${JSON.stringify({ status: "PASS", mode: "dry-run", case_count: 64 })}\n`,
+      `${JSON.stringify({ status: "PASS", mode: "dry-run", case_count: plan.case_count })}\n`,
     );
     return;
   }

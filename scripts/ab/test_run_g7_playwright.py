@@ -185,6 +185,7 @@ class RunG7PlaywrightTest(unittest.TestCase):
                         }
                     )
                 for viewport in scenario["required_viewports"]:
+                    is_task1264 = scenario["id"] == "retouch_reopen_task1264"
                     resource_oracle = (
                         {
                             "kind": (
@@ -219,15 +220,19 @@ class RunG7PlaywrightTest(unittest.TestCase):
                             "combination": combination,
                             "viewport": viewport,
                             "requirements": requirements,
-                            "task_id": 1,
+                            "task_id": 1264 if is_task1264 else 1,
                             "resource_ids": (
-                                ["task_asset_group:10"]
+                                (
+                                    ["group:1264:retouch_requirement:45"]
+                                    if is_task1264
+                                    else ["task_asset_group:10"]
+                                )
                                 if combination == "devplus_devplus"
                                 and scenario["id"] != "missing_resource_group_negative"
                                 else []
                             ),
                             "revision_ids": (
-                                [1]
+                                ([635, 636] if is_task1264 else [1])
                                 if combination == "devplus_devplus"
                                 and requirements["requires_revision_ids"]
                                 else []
@@ -428,7 +433,7 @@ class RunG7PlaywrightTest(unittest.TestCase):
             env={**os.environ, **(env or {})},
         )
 
-    def test_dry_run_validates_64_case_plan_without_disclosing_secret_paths(self) -> None:
+    def test_dry_run_validates_66_case_plan_without_disclosing_secret_paths(self) -> None:
         artifact_root = self.root / "dry-artifacts"
         output = self.root / "dry-plan.json"
         result = self.run_command(
@@ -446,7 +451,30 @@ class RunG7PlaywrightTest(unittest.TestCase):
         )
         plan = json.loads(output.read_text(encoding="utf-8"))
         self.assertEqual(plan["status"], "PASS")
-        self.assertEqual(plan["case_count"], 64)
+        self.assertEqual(plan["case_count"], 66)
+        task1264_cases = [
+            row
+            for row in plan["cases"]
+            if row["case_key"].startswith("retouch_reopen_task1264/")
+        ]
+        self.assertEqual(len(task1264_cases), 2)
+        self.assertEqual(
+            {
+                (
+                    row["task_id"],
+                    tuple(row["resource_ids"]),
+                    tuple(row["revision_ids"]),
+                )
+                for row in task1264_cases
+            },
+            {
+                (
+                    1264,
+                    ("group:1264:retouch_requirement:45",),
+                    (635, 636),
+                )
+            },
+        )
         self.assertEqual(plan["auth_state_files_validated"], 5)
         self.assertFalse(plan["auth_state_paths_disclosed"])
         self.assertEqual(
@@ -496,7 +524,7 @@ class RunG7PlaywrightTest(unittest.TestCase):
             rejected_result.stderr,
         )
 
-    def test_execute_writes_validator_compatible_sanitized_64_case_evidence(self) -> None:
+    def test_execute_writes_validator_compatible_sanitized_66_case_evidence(self) -> None:
         artifact_root = self.root / "execute-artifacts"
         output = self.root / "playwright-evidence.json"
         result = self.run_command(
@@ -505,7 +533,7 @@ class RunG7PlaywrightTest(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         evidence = json.loads(output.read_text(encoding="utf-8"))
-        self.assertEqual(len(evidence["records"]), 64)
+        self.assertEqual(len(evidence["records"]), 66)
         self.assertEqual(
             {record["status"] for record in evidence["records"]},
             {"PASS"},
@@ -582,7 +610,7 @@ class RunG7PlaywrightTest(unittest.TestCase):
             artifact_root=artifact_root,
         )
         self.assertEqual(report["status"], "PASS", report["failures"][:5])
-        self.assertEqual(report["passed_case_count"], 64)
+        self.assertEqual(report["passed_case_count"], 66)
         self.assertEqual(report["failed_case_count"], 0)
 
         unauthorized = next(
@@ -620,7 +648,7 @@ class RunG7PlaywrightTest(unittest.TestCase):
             f"{result.stdout}\n{result.stderr}",
         )
         evidence = json.loads(output.read_text(encoding="utf-8"))
-        self.assertEqual(len(evidence["records"]), 64)
+        self.assertEqual(len(evidence["records"]), 66)
         state_documents = [
             json.loads(path.read_text(encoding="utf-8"))
             for path in [*self.admin_states.values(), self.denied_state]
@@ -681,7 +709,7 @@ class RunG7PlaywrightTest(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         evidence = json.loads(output.read_text(encoding="utf-8"))
-        self.assertEqual(len(evidence["records"]), 64)
+        self.assertEqual(len(evidence["records"]), 66)
         for record in evidence["records"]:
             guard = record["assertions"]["read_only_guard"]
             self.assertEqual(guard["expected_guard_observation_count"], 4)

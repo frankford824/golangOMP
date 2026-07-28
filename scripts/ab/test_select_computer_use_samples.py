@@ -277,6 +277,53 @@ def mapping_fixture() -> dict:
                 )
             ],
         ),
+        group(
+            20,
+            "revision-id-padding",
+            [
+                revision(
+                    f"revision-id-padding-{revision_no}",
+                    revision_no=revision_no,
+                )
+                for revision_no in range(1, 614)
+            ],
+        ),
+        group(
+            1264,
+            "retouch-reopen-task1264",
+            [
+                revision(
+                    "retouch-reopen-task1264-1",
+                    status="superseded",
+                    stage="retouch",
+                    policies=(
+                        "explicit_event_replay",
+                        "retouch_source_optional",
+                        "legacy_retouch_terminal_submit_v1",
+                    ),
+                    source_alias_from_task_asset_id=None,
+                    final_task_asset_ids=[5501],
+                    reference_file_ref_ids=[1312],
+                ),
+                revision(
+                    "retouch-reopen-task1264-2",
+                    revision_no=2,
+                    status="finalized",
+                    stage="reopen",
+                    policies=(
+                        "explicit_event_replay",
+                        "reopen",
+                        "retouch_source_optional",
+                        "legacy_retouch_terminal_submit_v1",
+                    ),
+                    source_alias_from_task_asset_id=None,
+                    final_task_asset_ids=[6316],
+                    reference_file_ref_ids=[1312],
+                ),
+            ],
+            scope_kind="retouch_requirement",
+            scope_ref_id=45,
+        ),
     ]
     return {
         "version": 2,
@@ -331,6 +378,7 @@ def canonical_fixture(mapping: dict, mapping_hash: str) -> dict:
         14: "retouch_task",
         15: "retouch_task",
         16: "sku_planning",
+        1264: "retouch_task",
     }
     statuses = {17: "Cancelled", 18: "Archived"}
     task_ids = sorted({int(row["task_id"]) for row in mapping["resources"]} | {16, 17, 18})
@@ -401,7 +449,11 @@ def canonical_fixture(mapping: dict, mapping_hash: str) -> dict:
                 [f"event-{task_id}", task_id, 1, event_type, 1, "{}", "2026-07-23"],
             )
         )
-    for task_id, requirement_ids in {14: [1401], 15: [1501, 1502]}.items():
+    for task_id, requirement_ids in {
+        14: [1401],
+        15: [1501, 1502],
+        1264: [45],
+    }.items():
         for requirement_id in requirement_ids:
             entities.append(
                 canonical_entity(
@@ -738,12 +790,12 @@ class SelectComputerUseSamplesTests(unittest.TestCase):
         document = json.loads(output.read_text(encoding="utf-8")) if output.exists() else None
         return result, document, output
 
-    def test_final_selects_all_29_with_full_matrix_and_hashes(self):
+    def test_final_selects_all_30_with_full_matrix_and_hashes(self):
         mapping_path, canonical_path = self.write_inputs()
         code, document, _ = self.run_selector(mapping_path, canonical_path, "final")
         self.assertEqual(code, 0)
         self.assertEqual(document["status"], "PASS")
-        self.assertEqual(document["sample_count"], 29)
+        self.assertEqual(document["sample_count"], 30)
         self.assertEqual(document["blocker_count"], 0)
         self.assertEqual(
             set(document["coverage"]["combinations"]),
@@ -793,7 +845,7 @@ class SelectComputerUseSamplesTests(unittest.TestCase):
                 selector.file_sha256(self.catalog),
             )
         )
-        self.assertEqual(len(validated_cases), 64)
+        self.assertEqual(len(validated_cases), 66)
         self.assertEqual(set(validated_edges), selector.EXPECTED_COMBINATIONS)
 
     def test_edge_receipt_is_required_and_rejects_port_or_fingerprint_drift(self):
@@ -1255,6 +1307,27 @@ class SelectComputerUseSamplesTests(unittest.TestCase):
         self.assertEqual(
             samples["audit_reject_redesign_resubmit"]["revision_ids"],
             [3, 4],
+        )
+        retouch_reopen = samples["retouch_reopen_task1264"]
+        self.assertEqual(retouch_reopen["task_id"], 1264)
+        self.assertEqual(
+            retouch_reopen["resource_ids"],
+            ["group:1264:retouch_requirement:45"],
+        )
+        self.assertEqual(retouch_reopen["revision_ids"], [635, 636])
+        self.assertEqual(
+            [
+                (
+                    row["predicted_revision_id"],
+                    row["status"],
+                    row["source_stage"],
+                )
+                for row in retouch_reopen["revision_facts"]
+            ],
+            [
+                (635, "superseded", "retouch"),
+                (636, "finalized", "reopen"),
+            ],
         )
         self.assertTrue(
             document["revision_id_precondition"]["runtime_receipt_must_reconfirm_ids"]

@@ -290,6 +290,19 @@
       "coverage_tags": ["retouch_multiple", "scope"]
     },
     {
+      "id": "retouch_reopen_task1264",
+      "title": "修图任务1264 reopen历史",
+      "critical": true,
+      "required_combinations": ["devplus_devplus"],
+      "required_viewports": ["desktop", "mobile"],
+      "requires_task_id": true,
+      "requires_revision_ids": true,
+      "requires_history_drawer": true,
+      "required_http_statuses": [],
+      "required_assertions": ["page_matches_manifest", "assets_match", "allowed_actions_exact"],
+      "coverage_tags": ["retouch_reopen", "task_1264", "history_drawer"]
+    },
+    {
       "id": "purchase_to_sku_planning",
       "title": "旧采购迁移SKU策划",
       "critical": true,

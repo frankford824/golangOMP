@@ -36,6 +36,7 @@ EXPECTED_COMBINATIONS = {
     "devplus_external",
 }
 EXPECTED_VIEWPORTS = {"desktop", "mobile"}
+EXPECTED_SCENARIO_COUNT = 30
 EXPECTED_EDGE_ORIGINS = {
     "external_external": "http://127.0.0.1:18101",
     "devplus_devplus": "http://127.0.0.1:18102",
@@ -56,6 +57,9 @@ NEGATIVE_FIXTURE_SCENARIOS = {
     "missing_current_pointer_negative": "missing_current_pointer",
     "wrong_scope_negative": "wrong_scope_asset",
 }
+RETOUCH_REOPEN_TASK_ID = 1264
+RETOUCH_REOPEN_SCOPE_REF_ID = 45
+RETOUCH_REOPEN_REVISION_IDS = [635, 636]
 
 
 class InputError(ValueError):
@@ -593,8 +597,14 @@ def validate_catalog(catalog: dict[str, Any]) -> list[dict[str, Any]]:
     ):
         raise InputError("scenario catalog must declare desktop and mobile")
     scenarios = catalog.get("scenarios")
-    if not isinstance(scenarios, list) or len(scenarios) != 29:
-        raise InputError("scenario catalog must contain the exact 29 G7 scenarios")
+    if (
+        not isinstance(scenarios, list)
+        or len(scenarios) != EXPECTED_SCENARIO_COUNT
+    ):
+        raise InputError(
+            f"scenario catalog must contain the exact "
+            f"{EXPECTED_SCENARIO_COUNT} G7 scenarios"
+        )
     seen: set[str] = set()
     for index, scenario in enumerate(scenarios):
         if not isinstance(scenario, dict):
@@ -1372,6 +1382,75 @@ def choose_scenario(
                 entity_evidence(entity)
                 for entity in facts.retouch_entities_by_task[int(selected[0]["task_id"])]
             )
+    elif scenario_id == "retouch_reopen_task1264":
+        group = next(
+            (
+                candidate
+                for candidate in facts.by_task.get(RETOUCH_REOPEN_TASK_ID, [])
+                if candidate.get("scope_kind") == "retouch_requirement"
+                and int(candidate.get("scope_ref_id", -1))
+                == RETOUCH_REOPEN_SCOPE_REF_ID
+                and [
+                    (
+                        int(revision.get("revision_no", 0)),
+                        revision.get("status"),
+                        revision.get("source_stage"),
+                    )
+                    for revision in candidate.get("history", [])
+                ]
+                == [
+                    (1, "superseded", "retouch"),
+                    (2, "finalized", "reopen"),
+                ]
+                and all(
+                    all(
+                        has_row_policy(revision, policy)
+                        for policy in (
+                            "explicit_event_replay",
+                            "retouch_source_optional",
+                            "legacy_retouch_terminal_submit_v1",
+                        )
+                    )
+                    for revision in candidate["history"]
+                )
+                and has_row_policy(candidate["history"][1], "reopen")
+                and candidate["history"][0].get("final_task_asset_ids") == [5501]
+                and candidate["history"][1].get("final_task_asset_ids") == [6316]
+                and all(
+                    revision.get("reference_file_ref_ids") == [1312]
+                    for revision in candidate["history"]
+                )
+                and [
+                    facts.revision_id_by_locator[
+                        revision_locator(candidate, revision)
+                    ]
+                    for revision in candidate["history"]
+                ]
+                == RETOUCH_REOPEN_REVISION_IDS
+                and any(
+                    entity.get("entity_key")
+                    == "retouch-requirement:1264:45"
+                    for entity in facts.retouch_entities_by_task[
+                        RETOUCH_REOPEN_TASK_ID
+                    ]
+                )
+            ),
+            None,
+        )
+        if group:
+            selected = [group]
+            rationale = (
+                "frozen task 1264 retouch_requirement scope 45 resolves to "
+                "Clone B revisions 635 superseded/retouch and 636 finalized/reopen"
+            )
+            extra.extend(
+                entity_evidence(entity)
+                for entity in facts.retouch_entities_by_task[
+                    RETOUCH_REOPEN_TASK_ID
+                ]
+                if entity.get("entity_key")
+                == "retouch-requirement:1264:45"
+            )
     elif scenario_id == "purchase_to_sku_planning":
         candidates = []
         for task_id, planning in facts.planning_by_task.items():
@@ -1930,7 +2009,10 @@ def build_manifest(args: argparse.Namespace) -> tuple[dict[str, Any], int]:
     selected_ids = {sample["scenario_id"] for sample in samples}
     expected_ids = {scenario["id"] for scenario in scenarios}
     if selected_ids | {row["scenario_id"] for row in blockers} != expected_ids:
-        raise InputError("selector result does not account for all 29 scenarios")
+        raise InputError(
+            f"selector result does not account for all "
+            f"{EXPECTED_SCENARIO_COUNT} scenarios"
+        )
 
     if blockers:
         status = "PENDING" if args.mode == "prepare" else "BLOCKED"

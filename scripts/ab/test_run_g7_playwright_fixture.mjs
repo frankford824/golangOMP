@@ -118,6 +118,8 @@ async function identityRequester(_context, expectedUrl, requestOptions) {
 
 function fixtureHtml(
   scenario,
+  taskId,
+  groupId,
   {
     attemptPost,
     attemptServiceWorker,
@@ -142,7 +144,7 @@ function fixtureHtml(
 </head>
 <body>
 <main class="task-detail-view">
-  <h1>Task 1</h1>
+  <h1>Task ${taskId}</h1>
   <section class="resource-rail"><header><button type="button">Resources</button></header></section>
   ${retiredDomAction ? '<section class="task-actions"><button type="button" data-action="warehouse_receive">仓库接收</button></section>' : ""}
 </main>
@@ -163,10 +165,12 @@ window.__G7_EVIDENCE__={
   negative_state: true
 };
 const scenario = ${JSON.stringify(scenario)};
+const taskId = ${JSON.stringify(taskId)};
+const groupId = ${JSON.stringify(groupId)};
 Promise.all([
-  fetch("/v1/tasks/1?scenario=" + encodeURIComponent(scenario)).then(r => r.json()),
-  fetch("/v1/tasks/1/detail?scenario=" + encodeURIComponent(scenario)).then(r => r.json()),
-  fetch("/v1/tasks/1/resource-bundle?scenario=" + encodeURIComponent(scenario)).then(r => r.json())
+  fetch("/v1/tasks/" + taskId + "?scenario=" + encodeURIComponent(scenario)).then(r => r.json()),
+  fetch("/v1/tasks/" + taskId + "/detail?scenario=" + encodeURIComponent(scenario)).then(r => r.json()),
+  fetch("/v1/tasks/" + taskId + "/resource-bundle?scenario=" + encodeURIComponent(scenario)).then(r => r.json())
 ]).then(() => document.body.dataset.ready = "true");
 ${attemptPost ? 'fetch("/forbidden-write", { method: "POST", body: "{}" }).catch(() => {});' : ""}
 ${attemptServiceWorker ? 'navigator.serviceWorker.register("/fixture-sw.js").catch(() => {});' : ""}
@@ -189,7 +193,7 @@ document.querySelector(".resource-rail button").addEventListener("click", () => 
   workspace.innerHTML = '<button class="revision-history-button" type="button">History</button>';
   document.body.appendChild(workspace);
   workspace.querySelector(".revision-history-button").addEventListener("click", async () => {
-    const response = await fetch("/v1/resource-groups/10/revisions?page=1&page_size=20");
+    const response = await fetch("/v1/resource-groups/" + groupId + "/revisions?page=1&page_size=20");
     await response.json();
     const drawer = document.createElement("aside");
     drawer.className = "revision-drawer";
@@ -271,34 +275,45 @@ async function installContextRoutes(context, { role }) {
       await route.fulfill(json({ code: "historical_unavailable" }, 410));
       return;
     }
-    if (url.pathname === "/v1/tasks/1") {
+    const taskMatch = url.pathname.match(/^\/v1\/tasks\/(\d+)$/);
+    if (taskMatch) {
+      const taskId = Number(taskMatch[1]);
+      const isTask1264 = taskId === 1264;
       await route.fulfill(
         json({
           data: {
-            id: 1,
-            task_type: "sku_planning",
+            id: taskId,
+            task_type: isTask1264 ? "retouch_task" : "sku_planning",
             allowed_actions: ["preview"],
-            planning: { revision: 1 },
+            ...(isTask1264 ? {} : { planning: { revision: 1 } }),
             access_token: "response-secret-token-must-not-survive",
           },
         }),
       );
       return;
     }
-    if (url.pathname === "/v1/tasks/1/detail") {
-      await route.fulfill(json({ data: { task: { id: 1 } } }));
+    const detailMatch = url.pathname.match(/^\/v1\/tasks\/(\d+)\/detail$/);
+    if (detailMatch) {
+      await route.fulfill(
+        json({ data: { task: { id: Number(detailMatch[1]) } } }),
+      );
       return;
     }
-    if (url.pathname === "/v1/tasks/1/resource-bundle") {
+    const bundleMatch = url.pathname.match(
+      /^\/v1\/tasks\/(\d+)\/resource-bundle$/,
+    );
+    if (bundleMatch) {
+      const taskId = Number(bundleMatch[1]);
+      const isTask1264 = taskId === 1264;
       const groups =
         url.searchParams.get("scenario") === "missing_resource_group_negative"
           ? []
           : [
               {
-                id: 10,
-                task_id: 1,
-                scope_kind: "sku",
-                scope_ref_id: 1,
+                id: isTask1264 ? 45 : 10,
+                task_id: taskId,
+                scope_kind: isTask1264 ? "retouch_requirement" : "sku",
+                scope_ref_id: isTask1264 ? 45 : 1,
               },
             ];
       await route.fulfill(
@@ -310,37 +325,69 @@ async function installContextRoutes(context, { role }) {
       );
       return;
     }
-    if (url.pathname === "/v1/resource-groups/10/revisions") {
+    const revisionsMatch = url.pathname.match(
+      /^\/v1\/resource-groups\/(\d+)\/revisions$/,
+    );
+    if (revisionsMatch) {
+      const isTask1264 = Number(revisionsMatch[1]) === 45;
       await route.fulfill(
         json({
           data: {
-            items: [
-              {
-                id: 1,
-                status: "finalized",
-                source_stage: "audit",
-                created_by: 1,
-                created_at: "2026-07-23T12:00:00Z",
-                source_file: { task_asset_id: 1 },
-                items: [{ id: 1, sort_order: 0 }],
-                references: [],
-              },
-            ],
+            items: isTask1264
+              ? [
+                  {
+                    id: 636,
+                    status: "finalized",
+                    source_stage: "reopen",
+                    created_by: 267,
+                    created_at: "2026-06-12T01:30:10Z",
+                    source_file: null,
+                    items: [{ id: 6316, sort_order: 0 }],
+                    references: [{ id: 1312 }],
+                  },
+                  {
+                    id: 635,
+                    status: "superseded",
+                    source_stage: "retouch",
+                    created_by: 267,
+                    created_at: "2026-06-09T05:33:06Z",
+                    source_file: null,
+                    items: [{ id: 5501, sort_order: 0 }],
+                    references: [{ id: 1312 }],
+                  },
+                ]
+              : [
+                  {
+                    id: 1,
+                    status: "finalized",
+                    source_stage: "audit",
+                    created_by: 1,
+                    created_at: "2026-07-23T12:00:00Z",
+                    source_file: { task_asset_id: 1 },
+                    items: [{ id: 1, sort_order: 0 }],
+                    references: [],
+                  },
+                ],
             page: 1,
             page_size: 20,
-            total: 1,
+            total: isTask1264 ? 2 : 1,
           },
         }),
       );
       return;
     }
-    if (url.pathname.startsWith("/tasks/1")) {
+    const pageMatch = url.pathname.match(/^\/tasks\/(\d+)$/);
+    if (pageMatch) {
+      const taskId = Number(pageMatch[1]);
+      const groupId = taskId === 1264 ? 45 : 10;
       const scenario = url.searchParams.get("g7_scenario") || "unknown";
       await route.fulfill({
         status: 200,
         contentType: "text/html; charset=utf-8",
         body: fixtureHtml(
           scenario,
+          taskId,
+          groupId,
           {
             attemptPost: process.env.G7_FIXTURE_ATTEMPT_POST === "1",
             attemptServiceWorker:
