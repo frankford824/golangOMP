@@ -200,6 +200,47 @@ test("transition 404s require the exact oracle kind and network confirmation", (
   );
 });
 
+test("frontend rollback compatibility approves only the missing V8 bundle route", () => {
+  const entry = {
+    level: "error",
+    text: "Failed to load resource: the server responded with a status of 404 (Not Found)",
+    url: `${ORIGIN}/v1/tasks/2826/resource-bundle`,
+  };
+  const network = [
+    {
+      method: "GET",
+      url: `${ORIGIN}/v1/tasks/2826/resource-bundle`,
+      status: 404,
+    },
+  ];
+  assert.equal(
+    classifyCompatibilityConsoleEntries(
+      [entry],
+      network,
+      "frontend_rollback_compatibility",
+      ORIGIN,
+      2826,
+    )[0].expected_compatibility_observation,
+    true,
+  );
+  assert.equal(
+    classifyCompatibilityConsoleEntries(
+      [{ ...entry, url: `${ORIGIN}/v1/tasks/2826/predictions` }],
+      [
+        {
+          method: "GET",
+          url: `${ORIGIN}/v1/tasks/2826/predictions`,
+          status: 404,
+        },
+      ],
+      "frontend_rollback_compatibility",
+      ORIGIN,
+      2826,
+    )[0].expected_compatibility_observation,
+    false,
+  );
+});
+
 test("retired action assertion requires a complete clean DOM snapshot", () => {
   const clean = {
     actionControlSnapshotComplete: true,

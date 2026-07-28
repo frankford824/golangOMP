@@ -1312,17 +1312,23 @@ export function classifyCompatibilityConsoleEntries(
   expectedOrigin,
   taskId,
 ) {
-  const approvedPaths = new Set([
-    `/v1/tasks/${taskId}/predictions`,
-    `/v1/tasks/${taskId}/audit-supplements`,
-  ]);
+  const approvedPaths = new Set(
+    resourceOracleKind === "legacy_frontend_task_snapshot"
+      ? [
+          `/v1/tasks/${taskId}/predictions`,
+          `/v1/tasks/${taskId}/audit-supplements`,
+        ]
+      : resourceOracleKind === "frontend_rollback_compatibility"
+        ? [`/v1/tasks/${taskId}/resource-bundle`]
+        : [],
+  );
   return entries.map((entry) => {
     const annotated = {
       ...entry,
       expected_compatibility_observation: false,
     };
     if (
-      resourceOracleKind !== "legacy_frontend_task_snapshot" ||
+      approvedPaths.size === 0 ||
       entry.level !== "error" ||
       !String(entry.text || "").includes("status of 404") ||
       !nonempty(entry.url)
