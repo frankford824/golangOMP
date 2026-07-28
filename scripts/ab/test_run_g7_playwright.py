@@ -708,6 +708,63 @@ class RunG7PlaywrightTest(unittest.TestCase):
                 )
             )
 
+    def test_execute_rejects_guard_console_tamper_and_ordinary_error(self) -> None:
+        cases = [
+            (
+                "guard-console-tamper",
+                {"G7_FIXTURE_GUARD_CONSOLE_TAMPER": "1"},
+                "console_errors=1",
+            ),
+            (
+                "ordinary-console-error",
+                {"G7_FIXTURE_ORDINARY_CONSOLE_ERROR": "1"},
+                "console_errors=1",
+            ),
+        ]
+        for label, environment, expected_error in cases:
+            with self.subTest(label=label):
+                artifact_root = self.root / f"{label}-artifacts"
+                output = self.root / f"{label}-evidence.json"
+                result = self.run_command(
+                    self.command("execute", artifact_root, output),
+                    timeout=60,
+                    env=environment,
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(expected_error, result.stderr)
+                self.assertFalse(output.exists())
+
+    def test_execute_rejects_expected_guard_attempt_over_limit(self) -> None:
+        artifact_root = self.root / "guard-over-limit-artifacts"
+        output = self.root / "guard-over-limit-evidence.json"
+        result = self.run_command(
+            self.command("execute", artifact_root, output),
+            timeout=60,
+            env={
+                "G7_FIXTURE_ATTEMPT_EXPECTED_INFRA": "1",
+                "G7_FIXTURE_ATTEMPT_EXPECTED_INFRA_OVER_LIMIT": "1",
+            },
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            "blocked_forbidden_requests=POST "
+            "http://127.0.0.1:18101/v1/auth/asset-cookie",
+            result.stderr,
+        )
+        self.assertFalse(output.exists())
+
+    def test_execute_rejects_visible_retired_dom_action(self) -> None:
+        artifact_root = self.root / "retired-dom-action-artifacts"
+        output = self.root / "retired-dom-action-evidence.json"
+        result = self.run_command(
+            self.command("execute", artifact_root, output),
+            timeout=180,
+            env={"G7_FIXTURE_RETIRED_DOM_ACTION": "1"},
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("assertions=retired_actions_absent", result.stderr)
+        self.assertFalse(output.exists())
+
     def test_execute_deletes_raw_trace_and_fails_when_sanitizer_fails(self) -> None:
         artifact_root = self.root / "trace-failure-artifacts"
         output = self.root / "trace-failure-evidence.json"

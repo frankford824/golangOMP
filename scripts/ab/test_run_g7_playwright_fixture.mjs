@@ -123,6 +123,10 @@ function fixtureHtml(
     attemptServiceWorker,
     attemptWebSocket,
     attemptExpectedInfrastructure,
+    attemptExpectedInfrastructureOverLimit,
+    ordinaryConsoleError,
+    guardConsoleTamper,
+    retiredDomAction,
   },
 ) {
   return `<!doctype html>
@@ -140,6 +144,7 @@ function fixtureHtml(
 <main class="task-detail-view">
   <h1>Task 1</h1>
   <section class="resource-rail"><header><button type="button">Resources</button></header></section>
+  ${retiredDomAction ? '<section class="task-actions"><button type="button" data-action="warehouse_receive">仓库接收</button></section>' : ""}
 </main>
 <script>
 window.__G7_EVIDENCE__={
@@ -174,6 +179,9 @@ try {
   new WebSocket((location.protocol === "https:" ? "wss://" : "ws://") + location.host + "/ws/v1");
 } catch {}
 ` : ""}
+${attemptExpectedInfrastructureOverLimit ? 'fetch("/v1/auth/asset-cookie", { method: "POST" }).catch(() => {});' : ""}
+${ordinaryConsoleError ? 'console.error("fixture ordinary console error");' : ""}
+${guardConsoleTamper ? 'console.error("Failed to load resource: net::ERR_BLOCKED_BY_CLIENT.Inspector");' : ""}
 document.querySelector(".resource-rail button").addEventListener("click", () => {
   if (document.querySelector(".workspace-dialog")) return;
   const workspace = document.createElement("section");
@@ -341,6 +349,14 @@ async function installContextRoutes(context, { role }) {
               process.env.G7_FIXTURE_ATTEMPT_WEBSOCKET === "1",
             attemptExpectedInfrastructure:
               process.env.G7_FIXTURE_ATTEMPT_EXPECTED_INFRA === "1",
+            attemptExpectedInfrastructureOverLimit:
+              process.env.G7_FIXTURE_ATTEMPT_EXPECTED_INFRA_OVER_LIMIT === "1",
+            ordinaryConsoleError:
+              process.env.G7_FIXTURE_ORDINARY_CONSOLE_ERROR === "1",
+            guardConsoleTamper:
+              process.env.G7_FIXTURE_GUARD_CONSOLE_TAMPER === "1",
+            retiredDomAction:
+              process.env.G7_FIXTURE_RETIRED_DOM_ACTION === "1",
           },
         ),
       });

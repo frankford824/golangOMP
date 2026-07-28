@@ -39,6 +39,8 @@ const EXPECTED_GUARD_ATTEMPT_LIMITS = new Map([
   ["POST /v1/trace-events", 2],
   ["WEBSOCKET /ws/v1", 2],
 ]);
+const RETIRED_ACTION_RE =
+  /(?:仓库\s*接收|仓库\s*退回|生产\s*移交|待\s*结单|\bwarehouse(?:[_\s.-]*(?:receive|accept|reject|return|handoff))?\b|\bproduction[_\s.-]*transfer\b|\bpending[_\s.-]*close\b)/iu;
 
 export class InputError extends Error {}
 
@@ -1210,40 +1212,70 @@ export function classifyGuardAttempts(attempts, expectedOrigin) {
       forbidden.push(attempt);
       continue;
     }
-    counts.set(key, (counts.get(key) || 0) + 1);
-    expected.push({ ...attempt, classification: "expected_guard_observation" });
-  }
-  for (const [key, count] of counts) {
-    const limit = EXPECTED_GUARD_ATTEMPT_LIMITS.get(key);
+    const count = (counts.get(key) || 0) + 1;
+    counts.set(key, count);
     if (count > limit) {
-      forbidden.push({
-        method: "GUARD_COUNT_DRIFT",
-        url: key,
-        boundary: expected[0]?.boundary || "",
-      });
+      forbidden.push({ ...attempt, classification: "guard_count_exceeded" });
+      continue;
     }
+    expected.push({ ...attempt, classification: "expected_guard_observation" });
   }
   return { expected, forbidden };
 }
 
-function expectedGuardConsoleError(entry, expectedAttempts, expectedOrigin) {
-  if (
-    entry.level !== "error" ||
-    !entry.text.includes("ERR_BLOCKED_BY_CLIENT") ||
-    !nonempty(entry.url)
-  ) {
-    return false;
+function guardConsoleEntry(entry) {
+  return (
+    entry.level === "error" &&
+    String(entry.text || "").includes("ERR_BLOCKED_BY_CLIENT")
+  );
+}
+
+export function classifyGuardConsoleEntries(
+  entries,
+  expectedAttempts,
+  expectedOrigin,
+) {
+  const annotated = entries.map((entry) => ({
+    ...entry,
+    expected_guard_observation: false,
+  }));
+  const remaining = expectedAttempts
+    .map((attempt) => ({ attempt }))
+    .filter(({ attempt }) => attempt.method === "POST");
+
+  // URL-bearing errors must consume the exact matching confirmed attempt.
+  for (const entry of annotated) {
+    if (!guardConsoleEntry(entry) || !nonempty(entry.url)) continue;
+    const entryKey = guardAttemptKey(
+      { method: "POST", url: entry.url },
+      expectedOrigin,
+    );
+    if (!entryKey) continue;
+    const matchIndex = remaining.findIndex(
+      ({ attempt }) => guardAttemptKey(attempt, expectedOrigin) === entryKey,
+    );
+    if (matchIndex < 0) continue;
+    const [{ attempt }] = remaining.splice(matchIndex, 1);
+    entry.expected_guard_observation = true;
+    entry.expected_guard_attempt = guardAttemptKey(attempt, expectedOrigin);
   }
-  const entryKey = guardAttemptKey(
-    { method: "POST", url: entry.url },
-    expectedOrigin,
-  );
-  if (!entryKey) return false;
-  return expectedAttempts.some(
-    (attempt) =>
-      attempt.method === "POST" &&
-      guardAttemptKey(attempt, expectedOrigin) === entryKey,
-  );
+
+  // Playwright sometimes omits location for Inspector-generated blocked fetch
+  // errors. Those may consume only one still-unmatched confirmed POST attempt.
+  for (const entry of annotated) {
+    if (
+      !guardConsoleEntry(entry) ||
+      nonempty(entry.url) ||
+      entry.expected_guard_observation ||
+      remaining.length === 0
+    ) {
+      continue;
+    }
+    const [{ attempt }] = remaining.splice(0, 1);
+    entry.expected_guard_observation = true;
+    entry.expected_guard_attempt = guardAttemptKey(attempt, expectedOrigin);
+  }
+  return annotated;
 }
 
 function scrubObject(value, sensitiveValues = []) {
@@ -1592,25 +1624,62 @@ async function openHistoryDrawers(page, groupIndexes) {
 
 async function visibleSnapshot(page) {
   return page.evaluate(() => {
+    const isVisible = (element) => {
+      const style = window.getComputedStyle(element);
+      return (
+        !element.hidden &&
+        element.getAttribute("aria-hidden") !== "true" &&
+        style.display !== "none" &&
+        style.visibility !== "hidden" &&
+        style.opacity !== "0" &&
+        element.getClientRects().length > 0
+      );
+    };
     const hook =
       typeof window.__G7_EVIDENCE__ === "object" && window.__G7_EVIDENCE__ !== null
         ? window.__G7_EVIDENCE__
         : null;
     const text = document.body?.innerText || "";
     const buttons = [...document.querySelectorAll("button")]
-      .filter((element) => {
-        const style = window.getComputedStyle(element);
-        return style.display !== "none" && style.visibility !== "hidden";
-      })
+      .filter(isVisible)
       .map((element) => ({
         text: element.textContent?.trim() || "",
         aria: element.getAttribute("aria-label") || "",
         disabled: element.disabled,
       }));
+    const actionControls = [
+      ...document.querySelectorAll(
+        [
+          "button",
+          '[role="button"]',
+          'input[type="button"]',
+          'input[type="submit"]',
+          "[data-action]",
+          "[data-action-key]",
+          "[data-action-id]",
+        ].join(","),
+      ),
+    ]
+      .filter(isVisible)
+      .map((element) => ({
+        tag: element.tagName.toLowerCase(),
+        text:
+          element.textContent?.trim() ||
+          (typeof element.value === "string" ? element.value.trim() : ""),
+        aria: element.getAttribute("aria-label") || "",
+        title: element.getAttribute("title") || "",
+        action: element.getAttribute("data-action") || "",
+        action_key: element.getAttribute("data-action-key") || "",
+        action_id: element.getAttribute("data-action-id") || "",
+        name: element.getAttribute("name") || "",
+        value: element.getAttribute("value") || "",
+      }));
     return {
       title: document.title,
       text: text.slice(0, 200_000),
       buttons,
+      actionControls,
+      actionControlSnapshotComplete: true,
       hook,
       taskPageVisible: Boolean(document.querySelector(".task-detail-view")),
       historyDrawerVisible: Boolean(document.querySelector(".revision-drawer")),
@@ -1623,9 +1692,37 @@ async function visibleSnapshot(page) {
   });
 }
 
+export function retiredActionsAbsent(observed, allowedActions) {
+  if (
+    observed?.actionControlSnapshotComplete !== true ||
+    !Array.isArray(observed.actionControls) ||
+    !Array.isArray(allowedActions)
+  ) {
+    return false;
+  }
+  const apiActionsAbsent = !allowedActions.some((action) =>
+    RETIRED_ACTION_RE.test(String(action)),
+  );
+  const domActionsAbsent = !observed.actionControls.some((control) =>
+    RETIRED_ACTION_RE.test(
+      [
+        control?.text,
+        control?.aria,
+        control?.title,
+        control?.action,
+        control?.action_key,
+        control?.action_id,
+        control?.name,
+        control?.value,
+      ]
+        .map((value) => String(value || ""))
+        .join(" "),
+    ),
+  );
+  return apiActionsAbsent && domActionsAbsent;
+}
+
 function assertionByScenario(name, observed, coverage, cache) {
-  const hookValue = observed.hook?.assertions?.[name];
-  if (typeof hookValue === "boolean") return hookValue;
   const task = taskPayload(cache, coverage.task_id);
   const bundle = bundlePayload(cache, coverage.task_id);
   const groups = groupsFromBundle(bundle);
@@ -1633,8 +1730,10 @@ function assertionByScenario(name, observed, coverage, cache) {
     ? task.allowed_actions.map(String)
     : [];
   if (name === "retired_actions_absent") {
-    return !allActions.some((action) => /warehouse|production_transfer|pending_close/i.test(action));
+    return retiredActionsAbsent(observed, allActions);
   }
+  const hookValue = observed.hook?.assertions?.[name];
+  if (typeof hookValue === "boolean") return hookValue;
   if (name === "terminal_actions_absent") {
     return !allActions.some((action) => /create|submit|approve|reject|upload|assign|takeover/i.test(action));
   }
@@ -2053,15 +2152,14 @@ async function executeCase({
       ...deniedGuardAttempts.slice(deniedGuardStart),
     ];
     const guardClassification = classifyGuardAttempts(blockedAttempts, origin);
-    for (const entry of consoleEntries) {
-      entry.expected_guard_observation = expectedGuardConsoleError(
-        entry,
-        guardClassification.expected,
-        origin,
-      );
-    }
-    const unexpectedConsoleErrors = consoleEntries.filter(
-      (entry) => entry.level === "error" && !entry.expected_guard_observation,
+    const classifiedConsoleEntries = classifyGuardConsoleEntries(
+      consoleEntries,
+      guardClassification.expected,
+      origin,
+    );
+    const unexpectedConsoleErrors = classifiedConsoleEntries.filter(
+      (entry) =>
+        entry.level === "error" && !entry.expected_guard_observation,
     ).length;
     const fiveXxCount = cache.network.filter(
       (request) => request.status >= 500,
@@ -2119,7 +2217,7 @@ async function executeCase({
       case_key: key,
       source_kind: SOURCE_KIND,
       unexpected_error_count: unexpectedConsoleErrors,
-      entries: consoleEntries,
+      entries: classifiedConsoleEntries,
     };
     const networkArtifact = {
       schema_version: SCHEMA_VERSION,
