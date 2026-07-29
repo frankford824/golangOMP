@@ -608,7 +608,7 @@ func (s *taskCreateReferenceUploadService) CompleteUploadSession(ctx context.Con
 
 	var meta *RemoteFileMeta
 	var err error
-	if request.SessionStatus == domain.DesignAssetSessionStatusCompleted {
+	if request.SessionStatus == domain.DesignAssetSessionStatusCompleted && strings.TrimSpace(request.RemoteFileID) != "" {
 		meta, err = s.uploadClient.GetFileMeta(ctx, RemoteGetFileMetaRequest{
 			RemoteUploadID: request.RemoteUploadID,
 			RemoteFileID:   request.RemoteFileID,

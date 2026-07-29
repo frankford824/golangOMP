@@ -124,6 +124,47 @@ func TestTaskCreateReferenceUploadServiceBindsRemotelyCompletedSession(t *testin
 	}
 }
 
+func TestTaskCreateReferenceUploadServiceFinalizesUploadedRemoteSessionWithoutFileID(t *testing.T) {
+	uploadRequestRepo := newStep37UploadRequestRepo()
+	assetStorageRefRepo := newStep37AssetStorageRefRepo()
+	uploadClient := newStubUploadServiceClient().(*stubUploadServiceClient)
+	svc := NewTaskCreateReferenceUploadService(uploadRequestRepo, assetStorageRefRepo, step04TxRunner{}, uploadClient).(*taskCreateReferenceUploadService)
+
+	created, appErr := svc.CreateUploadSession(context.Background(), CreateTaskReferenceUploadSessionParams{
+		CreatedBy:    9,
+		Filename:     "reference-uploaded-remotely.png",
+		ExpectedSize: uploadRequestInt64Ptr(1024),
+		MimeType:     "image/png",
+		FileHash:     "hash-uploaded-remotely",
+	})
+	if appErr != nil {
+		t.Fatalf("CreateUploadSession() unexpected error: %+v", appErr)
+	}
+
+	uploadClient.remoteSessionStatus = domain.DesignAssetSessionStatusCompleted
+
+	completed, appErr := svc.CompleteUploadSession(context.Background(), CompleteTaskReferenceUploadSessionParams{
+		SessionID:   created.Session.ID,
+		CompletedBy: 9,
+		FileHash:    "hash-uploaded-remotely",
+	})
+	if appErr != nil {
+		t.Fatalf("CompleteUploadSession() unexpected error: %+v", appErr)
+	}
+	if completed.Session == nil || completed.Session.SessionStatus != domain.DesignAssetSessionStatusCompleted {
+		t.Fatalf("CompleteUploadSession() session = %+v", completed.Session)
+	}
+	if completed.ReferenceFileRef == "" || completed.StorageRef == nil || completed.RefObject == nil {
+		t.Fatalf("CompleteUploadSession() result = %+v", completed)
+	}
+	if uploadClient.completeCalls != 1 {
+		t.Fatalf("CompleteUploadSession() remote complete calls = %d, want 1", uploadClient.completeCalls)
+	}
+	if uploadClient.getFileMetaCalls != 0 {
+		t.Fatalf("CompleteUploadSession() get file meta calls = %d, want 0", uploadClient.getFileMetaCalls)
+	}
+}
+
 func TestTaskCreateReferenceUploadServiceOSSDirectSessionCompletesWithoutBackendFileProxy(t *testing.T) {
 	const fileSize = int64(1024)
 	deleteCalls := 0
