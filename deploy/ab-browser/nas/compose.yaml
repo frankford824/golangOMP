@@ -145,6 +145,7 @@ services:
       private:
         aliases:
           - erp-bridge
+      ingress: {}
 
   backend:
     image: yb-v8-cloneb-backend:d9275bd88f90

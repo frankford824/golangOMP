@@ -24,7 +24,7 @@ class NASCloneBComposeTest(unittest.TestCase):
 
         self.assertEqual(bridge["image"], backend["image"])
         self.assertNotIn("ports", bridge)
-        self.assertEqual(set(bridge["networks"]), {"private"})
+        self.assertEqual(set(bridge["networks"]), {"private", "ingress"})
         self.assertEqual(bridge["environment"]["SERVER_PORT"], "8081")
         self.assertEqual(
             bridge["environment"]["ERP_REMOTE_MODE"],
