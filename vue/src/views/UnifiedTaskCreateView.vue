@@ -202,6 +202,7 @@ import { batchSkuApi, formatBatchViolationMessage, normalizeBatchPreviewRow, typ
 import { uploadReferenceFileRef } from '@/services/upload/assetUploadFlow'
 import { uploadRetouchRequirementPendingAssets } from '@/services/upload/retouchRequirementUpload'
 import { usePermission } from '@/composables/usePermission'
+import { generateActionId } from '@/utils/uuid'
 
 const route = useRoute()
 const router = useRouter()
@@ -252,7 +253,7 @@ const resultBusy = ref(false)
 const dirty = ref(false)
 const hydrating = ref(true)
 const currentDraftId = ref(String(route.query.draft_id || ''))
-const clientCreateId = ref<string>(crypto.randomUUID())
+const clientCreateId = ref<string>(generateActionId())
 const erpSearchCode = ref('')
 const erpSearching = ref(false)
 const erpSearchResults = ref<Array<Record<string, unknown>>>([])
@@ -389,7 +390,7 @@ async function addFiles(payload: { rowId: string; field: 'reference_assets' | 's
   if (!row) return
   const limit = intent.value === 'planning_sku' ? 1 : 5
   const remaining = Math.max(0, limit - row[payload.field].length)
-  const drafts = payload.files.slice(0, remaining).map<ComposeAssetDraft>((file) => ({ id: crypto.randomUUID(), file, name: file.name, preview_url: file.type.startsWith('image/') ? URL.createObjectURL(file) : undefined, status: intent.value === 'retouch' && payload.field === 'source_assets' ? 'local' : 'uploading' }))
+  const drafts = payload.files.slice(0, remaining).map<ComposeAssetDraft>((file) => ({ id: generateActionId(), file, name: file.name, preview_url: file.type.startsWith('image/') ? URL.createObjectURL(file) : undefined, status: intent.value === 'retouch' && payload.field === 'source_assets' ? 'local' : 'uploading' }))
   row[payload.field].push(...drafts)
   if (intent.value === 'retouch') {
     drafts.forEach((draft) => { draft.status = 'local' })
@@ -514,7 +515,7 @@ function unwrapBatchParsePayload(raw: unknown): { preview: BatchPreviewRow[]; vi
 
 function assetDraftFromReference(ref: Record<string, unknown>): ComposeAssetDraft {
   return {
-    id: crypto.randomUUID(),
+    id: generateActionId(),
     name: String(ref.filename ?? ref.file_name ?? 'Excel 参考图'),
     preview_url: String(ref.download_url ?? ref.preview_url ?? '') || undefined,
     upload_ref: ref,
@@ -562,7 +563,7 @@ async function importComposeExcel(event: Event) {
     const parsed = await planningSkuApi.parseExcel(file, erpSync.value)
     if (parsed.errors.length) submitError.value = parsed.errors.slice(0, 3).map((item) => `第 ${item.row} 行 ${item.field}：${item.reason}`).join('；')
     if (parsed.planning_sku_items.length) {
-      rows.value = parsed.planning_sku_items.slice(0, 200).map((item) => createComposeRow({ id: item.client_item_id || crypto.randomUUID(), description_spec: item.description_spec, quantity: item.quantity, target_price: item.target_price, note: item.note, reference_url: item.reference_url, product_i_id: item.erp_product_i_id, product_name: item.erp_product_name, reference_assets: item.image_upload_ref ? [{ id: crypto.randomUUID(), name: 'Excel 产品图片', upload_ref: item.image_upload_ref, status: 'uploaded' }] : [] }))
+      rows.value = parsed.planning_sku_items.slice(0, 200).map((item) => createComposeRow({ id: item.client_item_id || generateActionId(), description_spec: item.description_spec, quantity: item.quantity, target_price: item.target_price, note: item.note, reference_url: item.reference_url, product_i_id: item.erp_product_i_id, product_name: item.erp_product_name, reference_assets: item.image_upload_ref ? [{ id: generateActionId(), name: 'Excel 产品图片', upload_ref: item.image_upload_ref, status: 'uploaded' }] : [] }))
       selectedRowId.value = rows.value[0]?.id || ''
       gridRevision.value += 1
     }
@@ -640,7 +641,7 @@ async function retryPlanningERP() {
   finally { resultBusy.value = false }
 }
 async function exportPlanningSelection() { resultBusy.value = true; try { await planningSkuApi.exportSelection([...selectedPlanningIds.value]) } finally { resultBusy.value = false } }
-function startAnother() { result.value = false; planningResult.value = null; rows.value = [createComposeRow()]; selectedRowId.value = rows.value[0].id; clientCreateId.value = crypto.randomUUID(); gridRevision.value += 1; dirty.value = false }
+function startAnother() { result.value = false; planningResult.value = null; rows.value = [createComposeRow()]; selectedRowId.value = rows.value[0].id; clientCreateId.value = generateActionId(); gridRevision.value += 1; dirty.value = false }
 </script>
 
 <style scoped>

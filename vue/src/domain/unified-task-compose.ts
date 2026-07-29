@@ -2,6 +2,7 @@ import type { PlanningSKUInput } from '@/services/api/planningSkuApi'
 import type { Task, TaskBatchItem } from '@/domain/types'
 import { isErpProductNameTooLong } from '@/domain/erp-product-name'
 import { beijingDateTimeLocalToISO, taskInstantMs } from '@/utils/date'
+import { generateActionId } from '@/utils/uuid'
 
 export type ComposeIntent = 'modify_existing' | 'new_design' | 'retouch' | 'planning_sku'
 export type ComposePriority = 'low' | 'normal' | 'high' | 'critical'
@@ -147,7 +148,7 @@ export function composeColumns(intent: ComposeIntent): ComposeColumn[] {
 
 export function createComposeRow(seed: Partial<ComposeRow> = {}): ComposeRow {
   return {
-    id: seed.id || crypto.randomUUID(),
+    id: seed.id || generateActionId(),
     reference_assets: seed.reference_assets ? [...seed.reference_assets] : [],
     source_assets: seed.source_assets ? [...seed.source_assets] : [],
     set_mode_hint: seed.set_mode_hint ?? false,

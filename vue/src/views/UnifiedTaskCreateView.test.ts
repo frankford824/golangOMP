@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { flushPromises, mount } from '@vue/test-utils'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   route: { query: { intent: 'planning_sku' } as Record<string, string> },
@@ -38,6 +38,10 @@ vi.mock('@/composables/usePermission', () => ({ usePermission: () => ({ can: (pe
 import UnifiedTaskCreateView from './UnifiedTaskCreateView.vue'
 
 describe('UnifiedTaskCreateView', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.permissions = new Set(['task.create', 'planning_sku.create'])
@@ -48,6 +52,17 @@ describe('UnifiedTaskCreateView', () => {
       items: [{ task_sku_item_id: 1, sequence_no: 1, sku_code: 'SKU-001', erp_status: 'not_filed' }],
     })
     mocks.getIids.mockResolvedValue({ data: { data: [{ i_id: 'KT_STANDARD' }] } })
+  })
+
+  it('renders the create workbench when crypto.randomUUID is unavailable on HTTP', () => {
+    vi.stubGlobal('crypto', {})
+    const wrapper = mount(UnifiedTaskCreateView, {
+      global: { stubs: { UnifiedTaskGrid: true, IIdSelector: true, RouterLink: true } },
+    })
+
+    expect(wrapper.get('.compose-page').attributes('data-compose-intent')).toBe('planning_sku')
+    expect(wrapper.text()).toContain('创建任务')
+    wrapper.unmount()
   })
 
   it('uses the planning redirect intent, validates rows, and renders the executable result flow', async () => {
