@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   route: { query: { intent: 'planning_sku' } as Record<string, string> },
   push: vi.fn(), replace: vi.fn(),
-  create: vi.fn(), addTask: vi.fn(), parseBatch: vi.fn(), getIids: vi.fn(), getDraft: vi.fn(),
+  create: vi.fn(), addTask: vi.fn(), parseBatch: vi.fn(), getProductByCode: vi.fn(), getIids: vi.fn(), getDraft: vi.fn(),
   permissions: new Set(['task.create', 'planning_sku.create']),
 }))
 
@@ -30,7 +30,7 @@ vi.mock('@/services/api/batchSkuApi', () => ({
   normalizeBatchPreviewRow: (row: unknown) => row,
   formatBatchViolationMessage: (issue: { message?: string; code?: string }) => issue.message || issue.code || '请检查这一行',
 }))
-vi.mock('@/services/api/erpApi', () => ({ erpApi: { getProductByCode: vi.fn(), getIids: mocks.getIids } }))
+vi.mock('@/services/api/erpApi', () => ({ erpApi: { getProductByCode: mocks.getProductByCode, getIids: mocks.getIids } }))
 vi.mock('@/services/upload/assetUploadFlow', () => ({ uploadReferenceFileRef: vi.fn() }))
 vi.mock('@/services/upload/retouchRequirementUpload', () => ({ uploadRetouchRequirementPendingAssets: vi.fn() }))
 vi.mock('@/composables/usePermission', () => ({ usePermission: () => ({ can: (permission: string) => mocks.permissions.has(permission) }) }))
@@ -52,6 +52,40 @@ describe('UnifiedTaskCreateView', () => {
       items: [{ task_sku_item_id: 1, sequence_no: 1, sku_code: 'SKU-001', erp_status: 'not_filed' }],
     })
     mocks.getIids.mockResolvedValue({ data: { data: [{ i_id: 'KT_STANDARD' }] } })
+  })
+
+  it('renders the by-code ERP snapshot and clears an earlier lookup error', async () => {
+    mocks.route.query = { intent: 'modify_existing' }
+    mocks.getProductByCode
+      .mockRejectedValueOnce(new Error('服务暂时不可用，请稍后重试'))
+      .mockResolvedValueOnce({
+        data: {
+          data: {
+            code: 'CGH000018',
+            product_name: '露陈铝膜气球',
+            snapshot: {
+              product_id: 'CGH000018',
+              sku_code: 'CGH000018',
+              product_name: '露陈铝膜气球',
+            },
+          },
+        },
+      })
+    const wrapper = mount(UnifiedTaskCreateView, {
+      global: { stubs: { UnifiedTaskGrid: true, IIdSelector: true, RouterLink: true } },
+    })
+    await wrapper.get('.erp-search input').setValue('CGH000018')
+    await wrapper.get('.erp-search button').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[role="alert"]').text()).toContain('服务暂时不可用')
+
+    await wrapper.get('.erp-search button').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    expect(wrapper.get('.erp-result').text()).toContain('露陈铝膜气球')
+    expect(wrapper.get('.erp-result').text()).toContain('CGH000018')
+    wrapper.unmount()
   })
 
   it('renders the create workbench when crypto.randomUUID is unavailable on HTTP', () => {

@@ -425,11 +425,28 @@ function assetStatusText(status: ComposeAssetDraft['status']) { return ({ local:
 async function searchERP() {
   if (!erpSearchCode.value) return
   erpSearching.value = true
+  submitError.value = ''
+  erpSearchResults.value = []
   try {
     const response = await erpApi.getProductByCode(erpSearchCode.value)
     const root = response.data as Record<string, unknown>
     const data = root?.data && typeof root.data === 'object' ? root.data as Record<string, unknown> : root
-    erpSearchResults.value = Array.isArray(data?.items) ? data.items as Array<Record<string, unknown>> : Array.isArray(root) ? root as Array<Record<string, unknown>> : []
+    const snapshot = data?.snapshot && typeof data.snapshot === 'object'
+      ? data.snapshot as Record<string, unknown>
+      : {}
+    const product = {
+      ...snapshot,
+      product_id: snapshot.product_id ?? data.product_id ?? data.code,
+      sku_code: snapshot.sku_code ?? data.sku_code ?? data.code,
+      product_name: data.product_name ?? snapshot.product_name,
+    }
+    erpSearchResults.value = Array.isArray(data?.items)
+      ? data.items as Array<Record<string, unknown>>
+      : Array.isArray(root)
+        ? root as Array<Record<string, unknown>>
+        : product.product_id || product.sku_code
+          ? [product]
+          : []
   } catch (error) {
     submitError.value = error instanceof Error ? error.message : 'ERP 商品查询失败'
   } finally { erpSearching.value = false }
