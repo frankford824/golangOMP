@@ -744,6 +744,7 @@ type TaskListFilter struct {
 	DesignerID                  *int64
 	DesignerEmpty               *bool
 	Overdue                     *bool
+	OperationalBucket           domain.TaskOperationalBucket
 	CreatedFrom                 *time.Time
 	CreatedTo                   *time.Time
 	Keyword                     string

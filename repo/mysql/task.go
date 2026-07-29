@@ -1606,6 +1606,9 @@ func buildTaskListQuerySpecWithOptions(filter repo.TaskListFilter, candidateFilt
 		where = append(where, clause)
 		args = append(args, clauseArgs...)
 	}
+	if err := appendTaskOperationalBucketWhere(&where, &args, filter.OperationalBucket, time.Now().UTC()); err != nil {
+		return taskListQuerySpec{}, err
+	}
 
 	if filter.MineActorID != nil {
 		actorID := *filter.MineActorID
@@ -1743,6 +1746,51 @@ func buildTaskListQuerySpecWithOptions(filter repo.TaskListFilter, candidateFilt
 		whereSQL:     whereSQL,
 		args:         args,
 	}, nil
+}
+
+func appendTaskOperationalBucketWhere(
+	where *[]string,
+	args *[]interface{},
+	bucket domain.TaskOperationalBucket,
+	now time.Time,
+) error {
+	if bucket == "" {
+		return nil
+	}
+	if !bucket.Valid() {
+		return fmt.Errorf("invalid task operational bucket %q", bucket)
+	}
+
+	todayStart, tomorrowStart, _, _ := taskOperationalBoundaries(now, taskOperationalLocation())
+	switch bucket {
+	case domain.TaskOperationalBucketActive:
+		*where = append(*where, "t.task_status NOT IN ('Completed', 'Archived', 'Cancelled')")
+	case domain.TaskOperationalBucketDesignPending:
+		*where = append(*where, "t.task_status IN ('Draft', 'PendingAssign', 'Assigned', 'InProgress')")
+	case domain.TaskOperationalBucketPendingAudit:
+		*where = append(*where, "t.task_status = 'PendingAudit'", "t.task_type <> 'retouch_task'")
+	case domain.TaskOperationalBucketHandover:
+		*where = append(*where, "t.task_status = 'PendingAudit'", "t.current_handler_id IS NULL", "t.task_type <> 'retouch_task'")
+	case domain.TaskOperationalBucketCustomizationInProgress:
+		*where = append(*where,
+			"t.task_status NOT IN ('Completed', 'Archived', 'Cancelled')",
+			"(COALESCE(t.business_lane, '') = 'customization' OR t.customization_required = 1)",
+		)
+	case domain.TaskOperationalBucketOverdue:
+		*where = append(*where,
+			"t.task_status NOT IN ('Completed', 'Archived', 'Cancelled')",
+			"t.deadline_at IS NOT NULL",
+			"t.deadline_at < ?",
+		)
+		*args = append(*args, todayStart)
+	case domain.TaskOperationalBucketDueToday:
+		*where = append(*where, "t.deadline_at >= ?", "t.deadline_at < ?")
+		*args = append(*args, todayStart, tomorrowStart)
+	case domain.TaskOperationalBucketTodayCreated:
+		*where = append(*where, "t.created_at >= ?", "t.created_at < ?")
+		*args = append(*args, todayStart, tomorrowStart)
+	}
+	return nil
 }
 
 func taskListBaseFromSQL() string {

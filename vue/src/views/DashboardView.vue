@@ -109,7 +109,7 @@
             title="全局进行中任务"
             :value="kpiStats.pendingCount"
             hint="全局未完成、未取消任务"
-            route="/tasks"
+            route="/tasks?operational_bucket=active_tasks"
           />
         </section>
 
@@ -125,24 +125,24 @@
             title="设计待办"
             :value="summary.todayPendingCount"
             hint="待指派、设计中、审核打回等任务"
-            route="/tasks"
+            route="/tasks?operational_bucket=design_pending"
           />
           <DashboardKpiCard
             title="待审核"
             :value="summary.pendingAuditCount"
             hint="待审核任务"
-            route="/tasks?status=PendingAudit"
+            route="/tasks?operational_bucket=pending_audit"
           />
           <DashboardKpiCard
             title="需交班"
             :value="summary.handoverCount"
             hint="审核交班任务"
-            route="/tasks?status=PendingAudit"
+            route="/tasks?operational_bucket=handover"
           />
           <DashboardKpiCard
             title="今日新建"
             :value="summary.todayCreatedCount"
-            route="/tasks"
+            route="/tasks?operational_bucket=today_created"
           />
         </section>
 
@@ -449,7 +449,7 @@ const risks = computed<RiskItem[]>(() => {
       id: 'overdue-tasks',
       level: 'high',
       message: `${counts.overdue} 个进行中任务已经逾期`,
-      route: '/tasks?overdue=true',
+      route: '/tasks?operational_bucket=overdue',
     })
   }
   if (counts.due_today > 0) {
@@ -457,7 +457,7 @@ const risks = computed<RiskItem[]>(() => {
       id: 'due-today',
       level: 'medium',
       message: `${counts.due_today} 个任务今天截止`,
-      route: '/tasks',
+      route: '/tasks?operational_bucket=due_today',
     })
   }
   if (counts.customization_in_progress > 0) {
@@ -465,7 +465,7 @@ const risks = computed<RiskItem[]>(() => {
       id: 'customization-in-progress',
       level: 'medium',
       message: `${counts.customization_in_progress} 个定制任务处理中`,
-      route: '/tasks?task_category=customization',
+      route: '/tasks?operational_bucket=customization_in_progress',
     })
   }
   return list

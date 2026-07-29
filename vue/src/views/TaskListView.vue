@@ -604,6 +604,27 @@ const { can, canAccessAction } = usePermission()
 // ── 列表初始状态：只接受当前路由 query；避免登录落地页恢复旧筛选 ─────────────
 const STORAGE_KEY = 'task-list-state'
 type TaskListTab = 'all' | 'pool' | 'mine' | 'archived' | 'terminated'
+type TaskOperationalBucket =
+  | 'active_tasks'
+  | 'design_pending'
+  | 'pending_audit'
+  | 'handover'
+  | 'customization_in_progress'
+  | 'overdue'
+  | 'due_today'
+  | 'today_created'
+
+const operationalBucketLabels: Record<TaskOperationalBucket, string> = {
+  active_tasks: '全局进行中',
+  design_pending: '设计待办',
+  pending_audit: '待审核',
+  handover: '需交班',
+  customization_in_progress: '定制处理中',
+  overdue: '已逾期',
+  due_today: '今日截止',
+  today_created: '今日新建',
+}
+const operationalBucket = ref<TaskOperationalBucket | ''>(parseOperationalBucket(route.query.operational_bucket))
 
 const taskTabs: Array<{ label: string; value: TaskListTab }> = [
   { label: '全任务', value: 'all' },
@@ -881,11 +902,12 @@ const quickStatusOptions: BaseSelectOption[] = [
   { label: '阻塞', value: 'Blocked' },
   { label: '已取消', value: 'Cancelled' },
 ]
-type ActiveFilterKey = 'keyword' | keyof TaskListFilters
+type ActiveFilterKey = 'keyword' | 'operationalBucket' | keyof TaskListFilters
 const statusDisplay: Partial<Record<ActiveTaskStatus, string>> = { Draft: '草稿', PendingAssign: '待指派', Assigned: '已指派', InProgress: '进行中', PendingAudit: '待审核', Completed: '已结单', Archived: '已归档', Cancelled: '已取消', Blocked: '阻塞' }
 const activeFilterChips = computed(() => {
   const chips: Array<{ key: ActiveFilterKey; label: string }> = []
   const f = filters.value
+  if (operationalBucket.value) chips.push({ key: 'operationalBucket', label: `首页口径：${operationalBucketLabels[operationalBucket.value]}` })
   if (searchKeyword.value) chips.push({ key: 'keyword', label: `关键词：${searchKeyword.value}` })
   if (f.status.length) chips.push({ key: 'status', label: `状态：${f.status.map((item) => statusDisplay[item] || item).join('、')}` })
   if (f.taskCategory) chips.push({ key: 'taskCategory', label: `分组：${f.taskCategory === 'customization' ? '定制' : '常规'}` })
@@ -908,7 +930,8 @@ function applyQuickFilters() {
 }
 
 function removeActiveFilter(key: ActiveFilterKey) {
-  if (key === 'keyword') { searchKeyword.value = ''; quickKeyword.value = '' }
+  if (key === 'operationalBucket') operationalBucket.value = ''
+  else if (key === 'keyword') { searchKeyword.value = ''; quickKeyword.value = '' }
   else if (key === 'status') { filters.value = { ...filters.value, status: [] }; quickStatus.value = '' }
   else if (key === 'dateFrom' || key === 'dateTo') filters.value = { ...filters.value, dateFrom: '', dateTo: '' }
   else if (key === 'overdueOnly') filters.value = { ...filters.value, overdueOnly: false }
@@ -921,6 +944,7 @@ function clearAllTaskFilters() {
   searchKeyword.value = ''
   quickKeyword.value = ''
   quickStatus.value = ''
+  operationalBucket.value = ''
   filters.value = { ...defaultTaskFilters }
   page.value = 1
   void refreshList(true)
@@ -929,6 +953,7 @@ function clearAllTaskFilters() {
 const activeAdvancedFilterCount = computed(() => {
   const f = filters.value
   let count = 0
+  if (operationalBucket.value) count += 1
   if (f.taskCategory) count += 1
   if (f.status.length > 0) count += 1
   if (f.taskType) count += 1
@@ -969,6 +994,7 @@ if (typeof route.query.date_from === 'string') {
 if (typeof route.query.date_to === 'string') {
   filters.value.dateTo = route.query.date_to
 }
+filters.value.overdueOnly = parseOverdueQuery(route.query)
 if (typeof route.query.sort === 'string') {
   const raw = route.query.sort
   const direction = raw.startsWith('-') ? 'desc' : 'asc'
@@ -987,6 +1013,7 @@ quickStatus.value = filters.value.status.length === 1 ? filters.value.status[0] 
 
 function setTaskTab(tab: TaskListTab) {
   if (activeTab.value === tab) return
+  operationalBucket.value = ''
   if (filters.value.status.length > 0) {
     filters.value = { ...filters.value, status: [] }
   }
@@ -1015,6 +1042,11 @@ function parseOverdueQuery(query: Record<string, unknown>): boolean {
   return raw === 'true' || raw === '1'
 }
 
+function parseOperationalBucket(value: unknown): TaskOperationalBucket | '' {
+  const raw = queryString(value).trim()
+  return Object.prototype.hasOwnProperty.call(operationalBucketLabels, raw) ? raw as TaskOperationalBucket : ''
+}
+
 /** 方案 B：构建服务端分页 + 搜索参数 */
 function buildListParams(opt?: { page?: number; append?: boolean }): TaskListParams {
   const kw = searchKeyword.value.trim()
@@ -1023,6 +1055,7 @@ function buildListParams(opt?: { page?: number; append?: boolean }): TaskListPar
     page: opt?.page ?? page.value,
     page_size: pageSize.value,
   }
+  if (operationalBucket.value) params.operational_bucket = operationalBucket.value
   if (kw) params.keyword = kw
   if (activeTab.value === 'mine') params.filter = 'mine'
   if (activeTab.value === 'pool') {
@@ -1747,7 +1780,7 @@ watch(activeTab, () => {
 })
 
 watch(
-  () => [filters.value, searchKeyword.value, activeTab.value, sortKey.value, sortOrder.value] as const,
+  () => [filters.value, searchKeyword.value, activeTab.value, sortKey.value, sortOrder.value, operationalBucket.value] as const,
   () => {
     const q = { ...route.query } as Record<string, string | string[] | undefined>
     const kw = searchKeyword.value.trim()
@@ -1755,6 +1788,8 @@ watch(
     else delete q.q
     if (activeTab.value !== 'all') q.tab = activeTab.value
     else delete q.tab
+    if (operationalBucket.value) q.operational_bucket = operationalBucket.value
+    else delete q.operational_bucket
     if (filters.value.status.length) q.status = filters.value.status.join(',')
     else delete q.status
     if (filters.value.ownerDepartment) q.owner_department = filters.value.ownerDepartment
@@ -1792,6 +1827,7 @@ watch(
   () => route.query,
   (query) => {
     const nextTab = parseTaskTab(query.tab)
+    const nextOperationalBucket = parseOperationalBucket(query.operational_bucket)
     const nextFilters = {
       ...filters.value,
       status: parseStatusQuery(query.status),
@@ -1814,6 +1850,11 @@ watch(
     if (activeTab.value !== nextTab) {
       activeTab.value = nextTab
       changed = true
+    }
+    if (operationalBucket.value !== nextOperationalBucket) {
+      operationalBucket.value = nextOperationalBucket
+      changed = true
+      filterChanged = true
     }
     if (searchKeyword.value !== nextKeyword) {
       searchKeyword.value = nextKeyword

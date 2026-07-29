@@ -53,6 +53,7 @@ func taskFilterToRepoTaskListFilter(filter TaskFilter, page, pageSize int, scope
 		DesignerID:                filter.DesignerID,
 		DesignerEmpty:             filter.DesignerEmpty,
 		Overdue:                   filter.Overdue,
+		OperationalBucket:         filter.OperationalBucket,
 		CreatedFrom:               filter.CreatedFrom,
 		CreatedTo:                 filter.CreatedTo,
 		Keyword:                   filter.Keyword,

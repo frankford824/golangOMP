@@ -18422,6 +18422,7 @@ export interface components {
             /** @description Task product name snapshot for business download naming. */
             product_name_snapshot?: string;
             remote_file_id?: string | null;
+            /** @description Internal compatibility locator. Omitted from task read models when the actor lacks scoped `asset.download`. */
             storage_key?: string;
             /** Format: int64 */
             file_size?: number | null;
@@ -18464,9 +18465,9 @@ export interface components {
             approved_for_flow?: boolean;
             /** @enum {string|null} */
             current_version_role?: "current_version" | "approved_version" | "current_approved_version" | null;
-            /** @description Canonical business file URL. New frontend integration should use this field directly; runtime prefers browser-direct OSS/download service URLs and only falls back to `/v1/assets/files/{path}` for compatibility. */
+            /** @description Canonical business file URL. Omitted when the actor lacks scoped `asset.download`; authorized responses prefer browser-direct OSS/download service URLs and only fall back to `/v1/assets/files/{path}` for compatibility. */
             download_url?: string | null;
-            /** @description Compatibility-only boolean retained for old callers. Obsolete for frontend rollout; new integration must use `download_url` and `download_mode`. */
+            /** @description Compatibility-only boolean retained for old callers. It is false when the actor lacks scoped `asset.download`; new integration must use controlled download endpoints. */
             public_download_allowed?: boolean;
             /** @description Compatibility-only boolean retained for old callers. Obsolete for frontend rollout; frontend preview behavior should follow `preview_available` and `download_url`. */
             preview_public_allowed?: boolean;
@@ -22473,6 +22474,8 @@ export interface operations {
                 owner_team_id?: number;
                 priority?: "low" | "normal" | "high" | "critical";
                 overdue?: boolean;
+                /** @description Applies the exact task predicate used by the matching operations-dashboard count. Date buckets use Asia/Shanghai day boundaries and still respect the caller's task data scope. */
+                operational_bucket?: "active_tasks" | "design_pending" | "pending_audit" | "handover" | "customization_in_progress" | "overdue" | "due_today" | "today_created";
                 date_from?: string;
                 date_to?: string;
                 keyword?: string;

@@ -171,9 +171,11 @@ type TaskFilter struct {
 	DesignerID    *int64
 	DesignerEmpty *bool
 	Overdue       *bool
-	CreatedFrom   *time.Time
-	CreatedTo     *time.Time
-	Keyword       string
+	// OperationalBucket applies one authoritative task-board count predicate to the list.
+	OperationalBucket domain.TaskOperationalBucket
+	CreatedFrom       *time.Time
+	CreatedTo         *time.Time
+	Keyword           string
 	// Sort is an optional order token such as "-updated_at", "task_no", or "due_at".
 	Sort     string
 	Page     int

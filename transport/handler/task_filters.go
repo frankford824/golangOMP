@@ -66,6 +66,16 @@ func parseTaskFilterQuery(c *gin.Context) (service.TaskFilter, *domain.AppError)
 		}
 		filter.Overdue = &value
 	}
+	if raw := strings.TrimSpace(c.Query("operational_bucket")); raw != "" {
+		bucket := domain.TaskOperationalBucket(raw)
+		if !bucket.Valid() {
+			return service.TaskFilter{}, domain.NewAppError(domain.ErrCodeInvalidRequest, "operational_bucket_invalid", map[string]interface{}{
+				"field": "operational_bucket",
+				"value": raw,
+			})
+		}
+		filter.OperationalBucket = bucket
+	}
 	createdFrom, appErr := parseTaskCreatedDateBoundary(c.Query("date_from"), false)
 	if appErr != nil {
 		return service.TaskFilter{}, appErr

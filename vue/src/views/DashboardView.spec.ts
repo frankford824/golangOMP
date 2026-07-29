@@ -98,11 +98,11 @@ describe('DashboardView authoritative refresh', () => {
     const wrapper = mount(DashboardView, {
       global: {
         stubs: {
-          DashboardKpiCard: { template: '<div class="kpi-stub">{{ title }} {{ value }}</div>', props: ['title', 'value'] },
+          DashboardKpiCard: { template: '<div class="kpi-stub" :data-title="title" :data-route="route">{{ title }} {{ value }}</div>', props: ['title', 'value', 'route'] },
           DashboardTrendChart: true,
           DashboardTaskSnapshotTable: true,
           RecentEventStream: true,
-          RiskListCard: true,
+          RiskListCard: { template: '<div><span v-for="item in items" :key="item.id" class="risk-stub" :data-risk="item.id" :data-route="item.route" /></div>', props: ['items'] },
           StatusSkeleton: true,
         },
       },
@@ -115,6 +115,24 @@ describe('DashboardView authoritative refresh', () => {
     expect(wrapper.text()).toContain('今日结单')
     expect(wrapper.text()).not.toContain('待仓库')
     expect(wrapper.text()).not.toContain('待结单')
+    const routesByTitle = Object.fromEntries(
+      wrapper.findAll('.kpi-stub').map((card) => [card.attributes('data-title'), card.attributes('data-route')]),
+    )
+    expect(routesByTitle).toMatchObject({
+      全局进行中任务: '/tasks?operational_bucket=active_tasks',
+      设计待办: '/tasks?operational_bucket=design_pending',
+      待审核: '/tasks?operational_bucket=pending_audit',
+      需交班: '/tasks?operational_bucket=handover',
+      今日新建: '/tasks?operational_bucket=today_created',
+    })
+    const riskRoutes = Object.fromEntries(
+      wrapper.findAll('.risk-stub').map((risk) => [risk.attributes('data-risk'), risk.attributes('data-route')]),
+    )
+    expect(riskRoutes).toEqual({
+      'overdue-tasks': '/tasks?operational_bucket=overdue',
+      'due-today': '/tasks?operational_bucket=due_today',
+      'customization-in-progress': '/tasks?operational_bucket=customization_in_progress',
+    })
 
     const refreshButton = wrapper.findAll('button').find((button) => button.text().includes('立即刷新'))
     expect(refreshButton).toBeTruthy()

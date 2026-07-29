@@ -42,6 +42,79 @@ func TestBuildTaskListQuerySpecFiltersTaskCreatedAtRange(t *testing.T) {
 	}
 }
 
+func TestBuildTaskListQuerySpecOperationalBucketsMatchDashboardPredicates(t *testing.T) {
+	testCases := []struct {
+		name   string
+		bucket domain.TaskOperationalBucket
+		wants  []string
+	}{
+		{
+			name:   "active",
+			bucket: domain.TaskOperationalBucketActive,
+			wants:  []string{"t.task_status NOT IN ('Completed', 'Archived', 'Cancelled')"},
+		},
+		{
+			name:   "design pending",
+			bucket: domain.TaskOperationalBucketDesignPending,
+			wants:  []string{"t.task_status IN ('Draft', 'PendingAssign', 'Assigned', 'InProgress')"},
+		},
+		{
+			name:   "pending audit",
+			bucket: domain.TaskOperationalBucketPendingAudit,
+			wants:  []string{"t.task_status = 'PendingAudit'", "t.task_type <> 'retouch_task'"},
+		},
+		{
+			name:   "handover",
+			bucket: domain.TaskOperationalBucketHandover,
+			wants:  []string{"t.task_status = 'PendingAudit'", "t.current_handler_id IS NULL", "t.task_type <> 'retouch_task'"},
+		},
+		{
+			name:   "customization in progress",
+			bucket: domain.TaskOperationalBucketCustomizationInProgress,
+			wants: []string{
+				"t.task_status NOT IN ('Completed', 'Archived', 'Cancelled')",
+				"(COALESCE(t.business_lane, '') = 'customization' OR t.customization_required = 1)",
+			},
+		},
+		{
+			name:   "overdue",
+			bucket: domain.TaskOperationalBucketOverdue,
+			wants:  []string{"t.deadline_at IS NOT NULL", "t.deadline_at < ?"},
+		},
+		{
+			name:   "due today",
+			bucket: domain.TaskOperationalBucketDueToday,
+			wants:  []string{"t.deadline_at >= ?", "t.deadline_at < ?"},
+		},
+		{
+			name:   "today created",
+			bucket: domain.TaskOperationalBucketTodayCreated,
+			wants:  []string{"t.created_at >= ?", "t.created_at < ?"},
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			spec, err := buildTaskListQuerySpec(repo.TaskListFilter{OperationalBucket: testCase.bucket}, nil)
+			if err != nil {
+				t.Fatalf("buildTaskListQuerySpec() error = %v", err)
+			}
+			for _, want := range testCase.wants {
+				if !strings.Contains(spec.whereSQL, want) {
+					t.Fatalf("whereSQL missing %q: %s", want, spec.whereSQL)
+				}
+			}
+		})
+	}
+}
+
+func TestBuildTaskListQuerySpecRejectsInvalidOperationalBucket(t *testing.T) {
+	_, err := buildTaskListQuerySpec(repo.TaskListFilter{OperationalBucket: domain.TaskOperationalBucket("unknown")}, nil)
+	if err == nil {
+		t.Fatal("buildTaskListQuerySpec() error = nil, want invalid bucket error")
+	}
+}
+
 func TestBuildTaskListQuerySpecUsesSearchDocumentsForKeywordWhenEnabled(t *testing.T) {
 	spec, err := buildTaskListQuerySpecWithOptions(repo.TaskListFilter{Keyword: "海报"}, nil, taskListQueryBuildOptions{UseSearchDocumentKeyword: true})
 	if err != nil {

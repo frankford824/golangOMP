@@ -2,6 +2,38 @@ package domain
 
 import "time"
 
+// TaskOperationalBucket identifies one authoritative dashboard count definition.
+// Task-list drilldowns use the same predicate so the displayed total matches the
+// dashboard card for callers with the same data scope.
+type TaskOperationalBucket string
+
+const (
+	TaskOperationalBucketActive                  TaskOperationalBucket = "active_tasks"
+	TaskOperationalBucketDesignPending           TaskOperationalBucket = "design_pending"
+	TaskOperationalBucketPendingAudit            TaskOperationalBucket = "pending_audit"
+	TaskOperationalBucketHandover                TaskOperationalBucket = "handover"
+	TaskOperationalBucketCustomizationInProgress TaskOperationalBucket = "customization_in_progress"
+	TaskOperationalBucketOverdue                 TaskOperationalBucket = "overdue"
+	TaskOperationalBucketDueToday                TaskOperationalBucket = "due_today"
+	TaskOperationalBucketTodayCreated            TaskOperationalBucket = "today_created"
+)
+
+func (bucket TaskOperationalBucket) Valid() bool {
+	switch bucket {
+	case TaskOperationalBucketActive,
+		TaskOperationalBucketDesignPending,
+		TaskOperationalBucketPendingAudit,
+		TaskOperationalBucketHandover,
+		TaskOperationalBucketCustomizationInProgress,
+		TaskOperationalBucketOverdue,
+		TaskOperationalBucketDueToday,
+		TaskOperationalBucketTodayCreated:
+		return true
+	default:
+		return false
+	}
+}
+
 // TaskQueryFilterDefinition is the shared, transport-neutral filter contract
 // used by the current task list and audit handover queries.
 type TaskQueryFilterDefinition struct {

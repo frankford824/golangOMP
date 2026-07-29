@@ -3742,6 +3742,7 @@ curl -X POST https://api.example.com/v1/tasks/prepare-product-codes \
 | `owner_team_id` | query | integer | 否 | - |
 | `priority` | query | enum(low/normal/high/critical) | 否 | - |
 | `overdue` | query | boolean | 否 | - |
+| `operational_bucket` | query | enum(active_tasks/design_pending/pending_audit/handover/customization_in_progress/overdue/due_today/today_created) | 否 | Applies the exact task predicate used by the matching operations-dashboard count. Date buckets use Asia/Shanghai day boundaries and still respect the caller's task data scope. |
 | `date_from` | query | string | 否 | - |
 | `date_to` | query | string | 否 | - |
 | `keyword` | query | string | 否 | - |

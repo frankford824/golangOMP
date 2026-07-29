@@ -156,6 +156,7 @@ export interface TaskListParams {
   page?: number
   page_size?: number
   keyword?: string
+  operational_bucket?: 'active_tasks' | 'design_pending' | 'pending_audit' | 'handover' | 'customization_in_progress' | 'overdue' | 'due_today' | 'today_created'
   status?: string
   task_type?: string
   business_lane?: 'normal' | 'customization' | string

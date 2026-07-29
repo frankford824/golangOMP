@@ -7,7 +7,7 @@
         <TaskDetailAtmosphere />
         <div class="hero-content">
           <nav class="hero-nav" aria-label="页面位置">
-            <button class="back-button" @click="goBack"><ArrowLeft :size="16" :stroke-width="1.9" aria-hidden="true" /><span>返回任务中心</span></button>
+            <button class="back-button" @click="goBack"><ArrowLeft :size="16" :stroke-width="1.9" aria-hidden="true" /><span>{{ backButtonLabel }}</span></button>
             <div class="hero-actions">
               <TaskStatusTag :status="task.task_status" />
               <button class="refresh-button" :disabled="loading" aria-label="刷新任务" @click="load"><RefreshCw :size="16" :stroke-width="1.9" aria-hidden="true" /><span>刷新</span></button>
@@ -238,6 +238,12 @@ type WorkspaceMode = 'workflow' | 'resources' | 'attachments' | 'details' | 'his
 
 const route = useRoute()
 const router = useRouter()
+const backButtonLabel = computed(() => {
+  const backState = window.history.state?.back
+  return typeof backState === 'string' && backState.startsWith('/') && !backState.startsWith('/tasks')
+    ? '返回'
+    : '返回任务中心'
+})
 const { can } = usePermission()
 const task = ref<V8Task | null>(null)
 const aggregate = ref<Record<string, unknown>>({})

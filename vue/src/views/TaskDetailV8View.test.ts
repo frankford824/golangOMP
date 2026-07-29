@@ -5,7 +5,7 @@ import { createPinia, setActivePinia } from 'pinia'
 
 const mocks = vi.hoisted(() => ({
   getById: vi.fn(), getDetail: vi.fn(), listTaskEvents: vi.fn(), listAuditHandovers: vi.fn(), auditHandover: vi.fn(), auditTakeover: vi.fn(),
-  taskBundle: vi.fn(), uploadReference: vi.fn(), downloadPlanning: vi.fn(), push: vi.fn(), route: { params: { id: '41' } },
+  taskBundle: vi.fn(), uploadReference: vi.fn(), downloadPlanning: vi.fn(), push: vi.fn(), back: vi.fn(), route: { params: { id: '41' } },
 }))
 vi.mock('@/services/api/tasksApi', () => ({ tasksApi: mocks }))
 vi.mock('@/services/api/resourceGroupsApi', async (loadOriginal) => ({
@@ -14,7 +14,7 @@ vi.mock('@/services/api/resourceGroupsApi', async (loadOriginal) => ({
 }))
 vi.mock('vue-router', () => ({
   useRoute: () => mocks.route,
-  useRouter: () => ({ push: mocks.push }),
+  useRouter: () => ({ push: mocks.push, back: mocks.back }),
   onBeforeRouteLeave: vi.fn(),
   onBeforeRouteUpdate: vi.fn(),
 }))
@@ -72,6 +72,7 @@ describe('TaskDetailV8View business context', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()
+    window.history.replaceState({}, '')
     mocks.getById.mockResolvedValue({ data: { data: baseTask } })
     mocks.taskBundle.mockResolvedValue(bundle)
     mocks.listTaskEvents.mockResolvedValue({ data: { data: { items: [{ id: 1, event_type: 'task.updated', title: '审核已领取', created_at: '2026-07-16' }] } } })
@@ -104,6 +105,19 @@ describe('TaskDetailV8View business context', () => {
     await flushPromises()
     await wrapper.findAll('button').find((item) => item.text().includes('查看全部文件'))?.trigger('click')
     expect(bodyText()).toContain('资源矩阵')
+  })
+
+  it('uses a contextual back label when task detail was opened from the dashboard', async () => {
+    window.history.replaceState({ back: '/' }, '')
+    mocks.getDetail.mockResolvedValue({ data: { data: { task: baseTask, reference_file_refs: [], events: [] } } })
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    const backButton = wrapper.get('.back-button')
+    expect(backButton.text()).toBe('返回')
+    await backButton.trigger('click')
+    expect(mocks.back).toHaveBeenCalledOnce()
   })
 
   it('combines the full detail envelope with authoritative task allowed actions', async () => {
