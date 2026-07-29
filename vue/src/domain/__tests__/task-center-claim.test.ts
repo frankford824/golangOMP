@@ -15,19 +15,23 @@ function task(overrides: Partial<Task> = {}): Task {
 }
 
 describe('task-center-claim v8 action contract', () => {
-  it('shows claim only for the exact backend action', () => {
-    expect(canClaimTaskFromCenter(task({ allowedActions: ['task.assign'] }))).toBe(true)
-    expect(canClaimTaskFromCenter(task({ allowedActions: [] }))).toBe(false)
+  it('shows claim only when task assignment and design submission are both allowed', () => {
+    expect(canClaimTaskFromCenter(task({ allowedActions: ['task.assign'] }), true)).toBe(true)
+    expect(canClaimTaskFromCenter(task({ allowedActions: [] }), true)).toBe(false)
+  })
+
+  it('does not treat an operations assignment capability as self-claim permission', () => {
+    expect(canClaimTaskFromCenter(task({ allowedActions: ['task.assign'] }), false)).toBe(false)
   })
 
   it('does not infer claim from business lane or task state', () => {
-    expect(canClaimTaskFromCenter(task({ businessLane: 'customization' }))).toBe(false)
-    expect(canClaimTaskFromCenter(task({ status: 'InProgress' }))).toBe(false)
+    expect(canClaimTaskFromCenter(task({ businessLane: 'customization' }), true)).toBe(false)
+    expect(canClaimTaskFromCenter(task({ status: 'InProgress' }), true)).toBe(false)
   })
 
   it('hides claim when a handler is already assigned', () => {
     expect(
-      canClaimTaskFromCenter(task({ allowedActions: ['task.assign'], currentHandlerId: '42' })),
+      canClaimTaskFromCenter(task({ allowedActions: ['task.assign'], currentHandlerId: '42' }), true),
     ).toBe(false)
   })
 

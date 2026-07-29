@@ -1635,7 +1635,7 @@ function onTaskCardClick(event: MouseEvent, task: Task) {
 }
 
 function canClaimTask(task: Task): boolean {
-  return canClaimTaskFromCenter(task)
+  return canClaimTaskFromCenter(task, can('task.design.submit'))
 }
 
 async function claimTask(task: Task) {
