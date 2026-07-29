@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   push: vi.fn(), replace: vi.fn(),
   create: vi.fn(), addTask: vi.fn(), parseBatch: vi.fn(), getProductByCode: vi.fn(), getIids: vi.fn(), getDraft: vi.fn(),
   permissions: new Set(['task.create', 'planning_sku.create']),
+  uploadReferenceFileRef: vi.fn(),
 }))
 
 vi.mock('vue-router', () => ({
@@ -31,7 +32,7 @@ vi.mock('@/services/api/batchSkuApi', () => ({
   formatBatchViolationMessage: (issue: { message?: string; code?: string }) => issue.message || issue.code || '请检查这一行',
 }))
 vi.mock('@/services/api/erpApi', () => ({ erpApi: { getProductByCode: mocks.getProductByCode, getIids: mocks.getIids } }))
-vi.mock('@/services/upload/assetUploadFlow', () => ({ uploadReferenceFileRef: vi.fn() }))
+vi.mock('@/services/upload/assetUploadFlow', () => ({ uploadReferenceFileRef: mocks.uploadReferenceFileRef }))
 vi.mock('@/services/upload/retouchRequirementUpload', () => ({ uploadRetouchRequirementPendingAssets: vi.fn() }))
 vi.mock('@/composables/usePermission', () => ({ usePermission: () => ({ can: (permission: string) => mocks.permissions.has(permission) }) }))
 
@@ -52,6 +53,7 @@ describe('UnifiedTaskCreateView', () => {
       items: [{ task_sku_item_id: 1, sequence_no: 1, sku_code: 'SKU-001', erp_status: 'not_filed' }],
     })
     mocks.getIids.mockResolvedValue({ data: { data: [{ i_id: 'KT_STANDARD' }] } })
+    mocks.uploadReferenceFileRef.mockResolvedValue({ asset_id: 'reference-default' })
   })
 
   it('renders the by-code ERP snapshot and clears an earlier lookup error', async () => {
@@ -203,6 +205,36 @@ describe('UnifiedTaskCreateView', () => {
 
     expect(wrapper.get('.grid-stub').text()).toBe('A4_PRINT')
     expect(wrapper.get('.grid-stub').attributes('data-revision')).toBe('1')
+    wrapper.unmount()
+  })
+
+  it('clears the uploading violation after a reference upload completes', async () => {
+    mocks.route.query = { intent: 'modify_existing' }
+    let resolveUpload: ((value: { asset_id: string }) => void) | undefined
+    mocks.uploadReferenceFileRef.mockImplementation(() => new Promise((resolve) => {
+      resolveUpload = resolve
+    }))
+    const wrapper = mount(UnifiedTaskCreateView, {
+      global: { stubs: { UnifiedTaskGrid: true, IIdSelector: true, RouterLink: true } },
+    })
+
+    await wrapper.get('.asset-button').trigger('click')
+    const input = wrapper.get('input[aria-label="上传参考图或产品图片"]')
+    Object.defineProperty(input.element, 'files', {
+      configurable: true,
+      value: [new File(['image'], 'reference.png', { type: 'image/png' })],
+    })
+    await input.trigger('change')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('正在上传')
+    expect(wrapper.text()).toContain('仍有文件正在上传')
+
+    resolveUpload?.({ asset_id: 'reference-uploaded' })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('已上传')
+    expect(wrapper.text()).not.toContain('仍有文件正在上传')
     wrapper.unmount()
   })
 

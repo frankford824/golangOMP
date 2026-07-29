@@ -399,23 +399,38 @@ async function addFiles(payload: { rowId: string; field: 'reference_assets' | 's
   const drafts = payload.files.slice(0, remaining).map<ComposeAssetDraft>((file) => ({ id: generateActionId(), file, name: file.name, preview_url: file.type.startsWith('image/') ? URL.createObjectURL(file) : undefined, status: intent.value === 'retouch' && payload.field === 'source_assets' ? 'local' : 'uploading' }))
   row[payload.field].push(...drafts)
   if (intent.value === 'retouch') {
-    drafts.forEach((draft) => { draft.status = 'local' })
+    drafts.forEach((draft) => patchAssetDraft(payload.rowId, payload.field, draft.id, { status: 'local' }))
     gridRevision.value += 1
     return
   }
   for (const draft of drafts) {
     try {
       if (!draft.file) continue
-      draft.upload_ref = intent.value === 'planning_sku'
+      const uploadRef = intent.value === 'planning_sku'
         ? await planningSkuApi.uploadImage(draft.file, clientCreateId.value, row.id)
         : await uploadReferenceFileRef(draft.file)
-      draft.status = 'uploaded'
+      patchAssetDraft(payload.rowId, payload.field, draft.id, { upload_ref: uploadRef, status: 'uploaded' })
     } catch (error) {
-      draft.status = 'failed'
-      draft.error = error instanceof Error ? error.message : '上传失败'
+      patchAssetDraft(payload.rowId, payload.field, draft.id, {
+        status: 'failed',
+        error: error instanceof Error ? error.message : '上传失败',
+      })
     }
   }
   gridRevision.value += 1
+}
+
+function patchAssetDraft(
+  rowId: string,
+  field: 'reference_assets' | 'source_assets',
+  assetId: string,
+  patch: Partial<ComposeAssetDraft>,
+) {
+  const currentRow = rows.value.find((item) => item.id === rowId)
+  if (!currentRow) return
+  const index = currentRow[field].findIndex((item) => item.id === assetId)
+  if (index < 0) return
+  currentRow[field][index] = { ...currentRow[field][index], ...patch }
 }
 
 function removeAsset(rowId: string, field: 'reference_assets' | 'source_assets', assetId: string) {
