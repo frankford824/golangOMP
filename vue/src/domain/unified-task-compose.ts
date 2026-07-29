@@ -267,7 +267,10 @@ export function buildTaskSubmissionUnits(intent: Exclude<ComposeIntent, 'plannin
       task: {
         ...shared,
         taskType: 'ORIGINAL_PRODUCT_DEV',
-        productId: row.erp_product_id ?? null,
+        // The by-code ERP lookup exposes an external product code, not a local
+        // products.id. Keep the external identity in the ERP snapshot so the
+        // backend can resolve or create the local binding safely.
+        productId: null,
         sku: row.erp_sku ?? null,
         productName: row.product_name ?? '',
         erpProductSnapshot: row.erp_product_snapshot,

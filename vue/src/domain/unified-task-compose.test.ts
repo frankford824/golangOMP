@@ -39,6 +39,31 @@ describe('unified task compose domain', () => {
     expect(unit.task.dueAt).toBe('2026-07-20T10:00:00.000Z')
   })
 
+  it('keeps numeric ERP product codes out of the local product_id field', () => {
+    const erpSnapshot = {
+      product_id: '12324546567',
+      sku_code: '12324546567',
+      product_name: '数字编码 ERP 商品',
+    }
+    const row = createComposeRow({
+      id: 'existing-erp-product',
+      erp_product_id: '12324546567',
+      erp_sku: '12324546567',
+      erp_product_snapshot: erpSnapshot,
+      product_name: '数字编码 ERP 商品',
+      design_requirement: '更换图案',
+    })
+
+    const [unit] = buildTaskSubmissionUnits('modify_existing', common, [row])
+
+    expect(unit.task).toMatchObject({
+      taskType: 'ORIGINAL_PRODUCT_DEV',
+      productId: null,
+      sku: '12324546567',
+      erpProductSnapshot: erpSnapshot,
+    })
+  })
+
   it('flags non-numeric text typed into number columns', () => {
     const row = createComposeRow({ id: 'n1', product_i_id: 'KT_STANDARD', product_name: '桌牌', design_requirement: '需求', width: Number.NaN, area: Number.NaN })
     const issues = validateCompose('new_design', common, [row], new Date('2026-07-16T00:00:00Z'))
