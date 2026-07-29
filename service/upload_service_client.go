@@ -1178,7 +1178,10 @@ func isPrivateNetworkHost(host string) bool {
 	}
 	ip := net.ParseIP(host)
 	if ip == nil {
-		return false
+		// Docker Compose and similar service-discovery hosts are commonly
+		// single-label names (for example "fixture-upload"). They are valid
+		// inside the backend network but cannot be resolved by a user's browser.
+		return !strings.Contains(host, ".")
 	}
 	if ip.IsLoopback() || ip.IsPrivate() {
 		return true
