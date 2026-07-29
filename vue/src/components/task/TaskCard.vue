@@ -22,6 +22,9 @@
       <span class="tc-no tc-copy-zone" data-card-copy-zone>{{ task.taskNo }}</span>
       <span class="tc-eyebrow-spacer"></span>
       <div class="tc-tags">
+        <span class="tc-priority" :class="`tc-priority--${priorityMeta.tone}`">
+          {{ priorityMeta.label }}
+        </span>
         <span class="tc-tag" :class="categoryKind === 'custom' ? 'tc-tag--custom' : 'tc-tag--brand'">
           {{ categoryLabel }}
         </span>
@@ -143,6 +146,7 @@
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import type { Task } from '@/domain/types/task'
 import TaskStatusTag from './TaskStatusTag.vue'
 import TaskTypeBadge from './TaskTypeBadge.vue'
@@ -157,7 +161,7 @@ export interface TaskCardBatchPreviewItem {
   summary: string
 }
 
-defineProps<{
+const props = defineProps<{
   task: Task
   selected: boolean
   overdue: boolean
@@ -187,6 +191,13 @@ defineProps<{
   updatedText: string
   dueText: string
 }>()
+
+const priorityMeta = computed(() => ({
+  low: { label: '低优先级', tone: 'low' },
+  normal: { label: '普通', tone: 'normal' },
+  high: { label: '高优先级', tone: 'high' },
+  critical: { label: '加急', tone: 'critical' },
+}[props.task.priority] ?? { label: '普通', tone: 'normal' }))
 
 const emit = defineEmits<{
   toggleSelect: []
@@ -316,6 +327,35 @@ const emit = defineEmits<{
   padding: 2px 7px;
   border-radius: 6px;
   line-height: 1.5;
+}
+.tc-priority {
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 2px 7px;
+  font-size: 10.5px;
+  font-weight: 750;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.tc-priority--low {
+  background: rgb(var(--yb-surface-soft));
+  border-color: rgb(var(--yb-border));
+  color: rgb(var(--yb-text-muted));
+}
+.tc-priority--normal {
+  background: rgb(var(--yb-brand) / 0.07);
+  border-color: rgb(var(--yb-brand) / 0.14);
+  color: rgb(var(--yb-brand-strong));
+}
+.tc-priority--high {
+  background: rgb(var(--yb-warning-soft));
+  border-color: rgb(var(--yb-warning-border));
+  color: rgb(var(--yb-warning-text));
+}
+.tc-priority--critical {
+  background: rgb(var(--yb-danger-soft));
+  border-color: rgb(var(--yb-danger) / 0.25);
+  color: rgb(var(--yb-danger));
 }
 
 /* 标题 */
@@ -452,7 +492,7 @@ const emit = defineEmits<{
   align-items: center;
   gap: 10px;
   margin-top: auto;
-  padding-top: 7px;
+  padding-top: 10px;
   border-top: 1px solid rgb(var(--yb-border-subtle));
 }
 .tc-footer-spacer {
@@ -461,6 +501,7 @@ const emit = defineEmits<{
 .tc-time {
   font-size: 11px;
   font-weight: 550;
+  line-height: 1.35;
   color: rgb(var(--yb-text-faint));
   white-space: nowrap;
 }

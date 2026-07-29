@@ -200,7 +200,7 @@
           :can-copy-no="canCopyTaskField(task.taskNo)"
           :can-copy-title="canCopyTaskField(taskCardTitle(task))"
           :can-copy-sku="canCopyTaskField(displaySku(task))"
-          :updated-text="formatDate(task.updatedAt)"
+          :updated-text="formatUpdatedDate(task.updatedAt)"
           :due-text="task.dueAt ? formatDate(task.dueAt) : '-'"
           @pointerdown="onTaskCardPointerDown"
           @pointermove="onTaskCardPointerMove"
@@ -416,7 +416,7 @@
                     <td>{{ candidate.primary_sku_code || candidate.sku_code || '-' }}</td>
                     <td>{{ formatAuditHandoverCandidateStatus(candidate.task_status) }}</td>
                     <td>{{ candidate.owner_org_team || '-' }}</td>
-                    <td>{{ formatDate(candidate.updated_at) }}</td>
+                    <td>{{ formatUpdatedDate(candidate.updated_at) }}</td>
                   </tr>
                 </template>
               </tbody>
@@ -583,6 +583,7 @@ import type {
 import type { TaskListParams } from '@/services/apiTypes'
 import { useDesignerOptions } from '@/composables/useDesignerOptions'
 import {
+  formatDateBeijing,
   formatTaskDueAtDisplay,
   isOverdueByTimestamp as checkOverdue,
 } from '@/utils/date'
@@ -1668,6 +1669,10 @@ async function claimTask(task: Task) {
 
 function formatDate(iso: string): string {
   return formatTaskDueAtDisplay(iso)
+}
+
+function formatUpdatedDate(iso: string): string {
+  return formatDateBeijing(iso)
 }
 
 function goCreate() {
