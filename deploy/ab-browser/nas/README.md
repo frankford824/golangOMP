@@ -45,6 +45,27 @@ Use existing Clone B test credentials shared out-of-band. Do not commit or
 message passwords. UI actions write only the NAS Clone B database and fixture
 upload root.
 
+## Isolated real-integration override
+
+The Compose defaults remain local ERP plus upload/object fixtures. A Clone B
+operator may override only the test deployment's `.env` to exercise provider
+protocols without changing production:
+
+- set `ERP_REMOTE_MODE=remote`,
+  `ERP_REMOTE_BASE_URL=https://dev-api.jushuitan.com`,
+  `ERP_REMOTE_AUTH_MODE=openweb` and sandbox-only OpenWeb credentials;
+- set `ERP_REMOTE_FALLBACK_LOCAL_ON_ERROR=false` so a failed sandbox request
+  cannot be reported as a successful local fallback;
+- set `OSS_DIRECT_ENABLED=true` and point `OSS_*` at a dedicated private test
+  bucket using a bucket-scoped RAM identity;
+- set `UPLOAD_SERVICE_ENABLED=false` and
+  `UPLOAD_ORIGIN=http://backend:8080` when validating OSS Direct so the fixture
+  upload service cannot mask a provider failure.
+
+Never commit OpenWeb tokens or OSS credentials. Keep them only in the
+mode-`0600` NAS `.env`, record a redacted configuration hash, and retain the
+fixture defaults for rollback.
+
 ## Reset boundary
 
 A reset requires a new attested dump and fixture snapshot. Never delete or
