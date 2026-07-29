@@ -102,6 +102,39 @@ services:
         aliases:
           - fixture-object
 
+  erp-bridge:
+    image: yb-v8-cloneb-backend:d9275bd88f90
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      <<: *backend-safety
+      SERVER_PORT: "8081"
+      PORT: "8081"
+      AUTH_SETTINGS_FILE: /run/ab/auth_identity.json
+      AUTH_ALLOW_INSECURE_BOOTSTRAP_CREDENTIALS: "false"
+      AUTH_ALLOW_EMBEDDED_SETTINGS: "false"
+      MYSQL_DSN: ${MYSQL_APP_USER}:${MYSQL_APP_PASSWORD}@tcp(mysql:3306)/${MYSQL_DATABASE}?charset=utf8mb4&parseTime=true&multiStatements=true
+      REDIS_ADDR: redis:6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_DB: "0"
+      ERP_REMOTE_MODE: local
+      TZ: Asia/Shanghai
+    volumes:
+      - ./config/auth-b.json:/run/ab/auth_identity.json:ro
+    healthcheck:
+      test: [CMD-SHELL, 'wget -q -O - http://127.0.0.1:8081/health >/dev/null || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    networks:
+      private:
+        aliases:
+          - erp-bridge
+
   backend:
     image: yb-v8-cloneb-backend:d9275bd88f90
     restart: unless-stopped
@@ -114,6 +147,8 @@ services:
         condition: service_healthy
       fixture-object:
         condition: service_healthy
+      erp-bridge:
+        condition: service_healthy
     environment:
       <<: *backend-safety
       SERVER_PORT: "8080"
@@ -125,6 +160,7 @@ services:
       REDIS_ADDR: redis:6379
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       REDIS_DB: "0"
+      ERP_BRIDGE_BASE_URL: http://erp-bridge:8081
       UPLOAD_SERVICE_ENABLED: "true"
       UPLOAD_SERVICE_BASE_URL: http://fixture-upload:18092
       UPLOAD_SERVICE_BROWSER_MULTIPART_BASE_URL: /

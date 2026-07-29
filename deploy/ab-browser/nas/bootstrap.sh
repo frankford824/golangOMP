@@ -228,7 +228,8 @@ start() {
   verify_database
   write_full_table_counts
 
-  "${COMPOSE[@]}" up -d backend edge
+  "${COMPOSE[@]}" up -d erp-bridge backend edge
+  wait_healthy erp-bridge
   wait_healthy edge
   probe_runtime
   write_receipt
