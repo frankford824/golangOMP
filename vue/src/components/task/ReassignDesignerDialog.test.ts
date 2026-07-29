@@ -63,4 +63,36 @@ describe('ReassignDesignerDialog', () => {
     ])
     expect(wrapper.emitted('update:modelValue')).toBeUndefined()
   })
+
+  it('allows first assignment without asking for a reassignment reason', async () => {
+    const wrapper = mount(ReassignDesignerDialog, {
+      props: {
+        modelValue: true,
+        currentAssigneeId: null,
+        currentAssigneeName: null,
+        designers: [{ id: 266, name: '张明月', role: 'designer' } as unknown as Designer],
+      },
+      attachTo: document.body,
+    })
+    const vm = wrapper.vm as unknown as { selectedId: string | number }
+    vm.selectedId = '266'
+    await nextTick()
+
+    expect(document.body.textContent ?? '').toContain('指派设计师')
+    expect(document.body.textContent ?? '').not.toContain('转派原因')
+    await clickBodyButton('下一步：确认')
+    expect(document.body.textContent ?? '').toContain('确认将该任务指派给')
+    await clickBodyButton('确认指派')
+
+    expect(wrapper.emitted('confirm')?.[0]).toEqual([
+      {
+        mode: 'reassign',
+        assigneeId: '266',
+        assigneeName: '张明月',
+        reasonCode: '',
+        reasonLabel: '',
+        reasonNote: '',
+      },
+    ])
+  })
 })
