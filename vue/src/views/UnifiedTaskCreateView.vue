@@ -371,7 +371,13 @@ function updateRowField(rowId: string, key: ComposeColumnKey, value: string) {
   if (['quantity', 'width', 'height', 'area'].includes(key)) (row as Record<string, unknown>)[key] = value.trim() ? Number(value) : undefined
   else (row as Record<string, unknown>)[key] = value
 }
-function updateSelected(key: ComposeColumnKey, value: unknown) { if (selectedRow.value) (selectedRow.value as Record<string, unknown>)[key] = value }
+function updateSelected(key: ComposeColumnKey, value: unknown) {
+  if (!selectedRow.value) return
+  ;(selectedRow.value as Record<string, unknown>)[key] = value
+  // The drawer edits the row model outside Univer. Rebuild only for this
+  // explicit parent-side change so the selected i_id is visible in the grid.
+  gridRevision.value += 1
+}
 function mobileRowTitle(row: ComposeRow) { return row.product_name || row.description_spec || row.design_requirement || row.erp_sku || '待完善' }
 
 function openFilePicker(rowId: string, field: 'reference_assets' | 'source_assets') {

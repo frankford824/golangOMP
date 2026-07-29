@@ -178,6 +178,34 @@ describe('UnifiedTaskCreateView', () => {
     expect(wrapper.text()).toContain('导入款')
   })
 
+  it('projects an i_id selected in the row drawer back into the grid model', async () => {
+    mocks.route.query = { intent: 'new_design' }
+    const wrapper = mount(UnifiedTaskCreateView, {
+      global: {
+        stubs: {
+          UnifiedTaskGrid: {
+            props: ['rows', 'revision'],
+            template: '<div class="grid-stub" :data-revision="revision">{{ rows[0].product_i_id }}</div>',
+          },
+          IIdSelector: {
+            emits: ['update:modelValue'],
+            template: '<button class="iid-select-stub" @click="$emit(\'update:modelValue\', \'A4_PRINT\')">选择款式</button>',
+          },
+          RouterLink: true,
+        },
+      },
+    })
+
+    expect(wrapper.get('.grid-stub').text()).toBe('')
+    expect(wrapper.get('.grid-stub').attributes('data-revision')).toBe('0')
+    await wrapper.get('.iid-select-stub').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('.grid-stub').text()).toBe('A4_PRINT')
+    expect(wrapper.get('.grid-stub').attributes('data-revision')).toBe('1')
+    wrapper.unmount()
+  })
+
   it('blocks restored retouch drafts until local source files are selected again', async () => {
     mocks.route.query = { intent: 'retouch', draft_id: 'draft-1' }
     mocks.getDraft.mockResolvedValue({
