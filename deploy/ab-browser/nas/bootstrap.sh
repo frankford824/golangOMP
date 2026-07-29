@@ -6,6 +6,8 @@ DOCKER="${DOCKER:-/usr/local/bin/docker}"
 COMPOSE=("$DOCKER" compose --env-file "$ROOT/.env" -f "$ROOT/compose.yaml")
 ACTION="${1:-status}"
 SOURCE_ALL_TABLE_COUNTS_SHA256="abeb6d2f74af6843474b504bd2233f7bf410afd5d5b7aac95e0e5bab0c433b01"
+SOURCE_FIXTURE_ROOT_TREE_SHA256="ad70053456c5a6503e22b08e98d97dfac92da3a54592f075296fdd7823976a45"
+SOURCE_FIXTURE_SEED_TREE_SHA256="f9e4d02c308aec2e3918ef5bed37b7c9bfb1dbccf775d50df9f90119fededd56"
 
 cd "$ROOT"
 
@@ -139,6 +141,35 @@ verify_database() {
   [[ "$failures" -eq 0 ]]
 }
 
+fixture_tree_hash() {
+  local path="$1"
+  "${COMPOSE[@]}" exec -T fixture-upload sh -c \
+    "find '$path' -type f -print0 | sort -z | xargs -0 sha256sum | sha256sum" |
+    awk '{print $1}'
+}
+
+verify_fixture_trees() {
+  local root_hash
+  local seed_hash
+  seed_hash="$(fixture_tree_hash /run/ab/seed)"
+  if [[ "$seed_hash" != "$SOURCE_FIXTURE_SEED_TREE_SHA256" ]]; then
+    echo "Fixture upload seed mismatch: expected=$SOURCE_FIXTURE_SEED_TREE_SHA256 actual=$seed_hash" >&2
+    return 1
+  fi
+  if [[ ! -f evidence/fixture-tree-hashes.txt ]]; then
+    root_hash="$(fixture_tree_hash /run/ab/root)"
+    if [[ "$root_hash" != "$SOURCE_FIXTURE_ROOT_TREE_SHA256" ]]; then
+      echo "Initial fixture upload root mismatch: expected=$SOURCE_FIXTURE_ROOT_TREE_SHA256 actual=$root_hash" >&2
+      return 1
+    fi
+    {
+      printf 'initial_fixture_upload_root_tree_sha256=%s\n' "$root_hash"
+      printf 'fixture_upload_seed_tree_sha256=%s\n' "$seed_hash"
+    } >evidence/fixture-tree-hashes.txt
+    sha256sum evidence/fixture-tree-hashes.txt >evidence/fixture-tree-hashes.sha256
+  fi
+}
+
 write_full_table_counts() {
   local actual_hash
   "${COMPOSE[@]}" exec -T -e "MYSQL_PWD=$MYSQL_ROOT_PASSWORD" mysql \
@@ -169,6 +200,7 @@ write_receipt() {
     printf 'source_frontend_sha256=%s\n' '1bdc33088b3dec096eb226a783c66f9e19c198fd4ffb6b8f137d2715e4a15ae0'
     printf 'database_dump_sha256=%s\n' "$(cat evidence/database-imported.sha256)"
     printf 'all_table_counts_sha256=%s\n' "$(awk '{print $1}' evidence/all-table-counts.sha256)"
+    printf 'fixture_tree_hashes_sha256=%s\n' "$(awk '{print $1}' evidence/fixture-tree-hashes.sha256)"
     printf 'entrypoint=%s\n' 'http://192.168.0.125:18180'
     "$DOCKER" image inspect \
       yb-v8-cloneb-backend:d9275bd88f90 \
@@ -189,6 +221,9 @@ start() {
   "${COMPOSE[@]}" up -d mysql redis fixture-upload fixture-object
   wait_healthy mysql
   wait_healthy redis
+  wait_healthy fixture-upload
+  wait_healthy fixture-object
+  verify_fixture_trees
   import_database_once
   verify_database
   write_full_table_counts
