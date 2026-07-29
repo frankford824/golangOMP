@@ -1,0 +1,176 @@
+name: yb-v8-cloneb-nas
+
+x-backend-safety: &backend-safety
+  ERP_SYNC_ENABLED: "false"
+  WEB_PUSH_ENABLED: "false"
+  EXPERIENCE_WORKER_ENABLED: "false"
+  EXPERIENCE_CAPTURE_ENABLED: "false"
+  AI_RETRIEVAL_WORKER_ENABLED: "false"
+  ASSET_CLEANUP_ENABLED: "false"
+  EXTERNAL_ASSETS_ENABLED: "false"
+  EXTERNAL_ASSETS_FULL_SYNC_ENABLED: "false"
+  ASSET_WORKBENCH_PREVIEW_WORKER_ENABLED: "false"
+  ASSET_WORKBENCH_BATCH_JOB_WORKER_ENABLED: "false"
+  ASSET_WORKBENCH_UPLOAD_EXPIRY_WORKER_ENABLED: "false"
+  ENABLE_CRON_WAREHOUSE_AUTO_RELEASE: "false"
+  ENABLE_CRON_REPORT_L1_DAILY: "false"
+  ENABLE_CRON_OSS_365: "false"
+
+services:
+  mysql:
+    image: yb-v8-cloneb-mysql:7dcddc01f13b
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?required}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:?required}
+      MYSQL_USER: ${MYSQL_APP_USER:?required}
+      MYSQL_PASSWORD: ${MYSQL_APP_PASSWORD:?required}
+      TZ: Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+    healthcheck:
+      test: [CMD-SHELL, 'mysqladmin ping -h 127.0.0.1 -uroot -p"$${MYSQL_ROOT_PASSWORD}" --silent']
+      interval: 5s
+      timeout: 5s
+      retries: 60
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - private
+
+  redis:
+    image: yb-v8-cloneb-redis:6ab0b6e73817
+    restart: unless-stopped
+    command: [redis-server, --appendonly, "yes", --requirepass, "${REDIS_PASSWORD:?required}"]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?required}
+      TZ: Asia/Shanghai
+    healthcheck:
+      test: [CMD-SHELL, 'redis-cli -a "$${REDIS_PASSWORD}" ping | grep -q PONG']
+      interval: 5s
+      timeout: 5s
+      retries: 30
+    volumes:
+      - redis_data:/data
+    networks:
+      - private
+
+  fixture-upload:
+    image: yb-v8-cloneb-fixture-upload:be4f501b1b94
+    restart: unless-stopped
+    command:
+      - --mode=upload
+      - --root=/run/ab/root
+      - --seed-root=/run/ab/seed
+      - --identity=formal-20260723-01:B_ui:upload
+      - --port=18092
+      - --public-base-url=http://fixture-upload:18092
+    volumes:
+      - ./data/fixture-upload-root:/run/ab/root
+      - ./data/fixture-upload-seed:/run/ab/seed:ro
+    healthcheck:
+      test: [CMD, python3, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:18092/health', timeout=3).read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    networks:
+      ingress:
+        aliases:
+          - fixture-upload
+
+  fixture-object:
+    image: yb-v8-cloneb-fixture-object:fd2e163c776e
+    restart: unless-stopped
+    command:
+      - --mode=object
+      - --read-only
+      - --root=/run/ab/root
+      - --seed-root=/run/ab/seed
+      - --identity=formal-20260723-01:B_ui:object
+      - --port=18094
+    volumes:
+      - ./data/fixture-object-root:/run/ab/root:ro
+      - ./data/fixture-object-seed:/run/ab/seed:ro
+    healthcheck:
+      test: [CMD, python3, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:18094/health', timeout=3).read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    networks:
+      ingress:
+        aliases:
+          - fixture-object
+
+  backend:
+    image: yb-v8-cloneb-backend:d9275bd88f90
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      fixture-upload:
+        condition: service_healthy
+      fixture-object:
+        condition: service_healthy
+    environment:
+      <<: *backend-safety
+      SERVER_PORT: "8080"
+      PORT: "8080"
+      AUTH_SETTINGS_FILE: /run/ab/auth_identity.json
+      AUTH_ALLOW_INSECURE_BOOTSTRAP_CREDENTIALS: "false"
+      AUTH_ALLOW_EMBEDDED_SETTINGS: "false"
+      MYSQL_DSN: ${MYSQL_APP_USER}:${MYSQL_APP_PASSWORD}@tcp(mysql:3306)/${MYSQL_DATABASE}?charset=utf8mb4&parseTime=true&multiStatements=true
+      REDIS_ADDR: redis:6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_DB: "0"
+      UPLOAD_SERVICE_ENABLED: "true"
+      UPLOAD_SERVICE_BASE_URL: http://fixture-upload:18092
+      UPLOAD_SERVICE_BROWSER_MULTIPART_BASE_URL: /
+      UPLOAD_SERVICE_BROWSER_DOWNLOAD_BASE_URL: ""
+      TZ: Asia/Shanghai
+    volumes:
+      - ./config/auth-b.json:/run/ab/auth_identity.json:ro
+    networks:
+      private: {}
+      ingress:
+        aliases:
+          - backend
+
+  edge:
+    image: yb-v8-cloneb-nginx:5616878291a2
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - 0.0.0.0:${WEB_PORT:-18180}:8080
+    environment:
+      NGINX_ENVSUBST_FILTER: ^(BACKEND_ORIGIN|UPLOAD_ORIGIN|EXTERNAL_FILE_ORIGIN|EDGE_IDENTITY|FRONTEND_FINGERPRINT|BACKEND_FINGERPRINT|FIXTURE_IDENTITY)$$
+      BACKEND_ORIGIN: http://backend:8080
+      UPLOAD_ORIGIN: http://fixture-upload:18092
+      EXTERNAL_FILE_ORIGIN: http://fixture-object:18094
+      EDGE_IDENTITY: devplus_devplus_nas
+      FRONTEND_FINGERPRINT: 1bdc33088b3dec096eb226a783c66f9e19c198fd4ffb6b8f137d2715e4a15ae0
+      BACKEND_FINGERPRINT: d9275bd88f90f6dbff1663f6dd42f3807b289855eb4d9fc08fbdbe79a050a574
+      FIXTURE_IDENTITY: formal-20260723-01:B_ui:upload:formal-20260723-01:B_ui:object
+      TZ: Asia/Shanghai
+    healthcheck:
+      test: [CMD-SHELL, 'wget -q -O - http://127.0.0.1:8080/health >/dev/null || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 30
+    volumes:
+      - ./config/edge.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ./front:/srv/front:ro
+    networks:
+      - ingress
+
+networks:
+  private:
+    internal: true
+  ingress: {}
+
+volumes:
+  mysql_data: {}
+  redis_data: {}
