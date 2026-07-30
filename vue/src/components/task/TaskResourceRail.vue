@@ -6,9 +6,9 @@
     </header>
     <div class="rail-grid">
       <article class="rail-column references">
-        <div class="column-head"><span>01</span><div><strong>运营参考图</strong><small>{{ resourceReferences.length }} 个附件</small></div><button type="button" @click="$emit('openResources')">预览全部</button></div>
+        <div class="column-head"><span>01</span><div><strong>运营参考图</strong><small>{{ resourceReferences.length }} 个附件</small></div><button type="button" @click="openAllReferences">预览全部</button></div>
         <div v-if="resourceReferences.length" class="media-strip">
-          <button v-for="(file,index) in resourceReferences.slice(0,4)" :key="referenceKey(file,index)" type="button" @click="$emit('openResources')">
+          <button v-for="(file,index) in resourceReferences.slice(0,4)" :key="referenceKey(file,index)" type="button" @click="openReference(file)">
             <AssetPreviewMedia
               v-if="referencePreviewable(file) && referencePreview(file)"
               class="resource-preview"
@@ -67,14 +67,23 @@ import { computed } from 'vue'
 import { ArrowRight, FileArchive, FileText, Images, LockKeyhole } from 'lucide-vue-next'
 import AssetPreviewMedia from '@/components/media/AssetPreviewMedia.vue'
 import type { ResourceBundle, ResourceFile, ResourceReference, ResourceRevisionItem } from '@/services/api/resourceGroupsApi'
+import type { ReferenceFileRef } from '@/services/api/assetsApi'
 
 type SourceWithStage = ResourceFile & { stage: string }
-const props = defineProps<{ bundle: ResourceBundle; taskStatus: string; taskType: string; canOperate?: boolean; actionLabel?: string }>()
-defineEmits<{ openResources: []; openWorkflow: [] }>()
+type RailReference = (ResourceReference | ReferenceFileRef) & { source?: 'task' | 'resource'; preview_url?: string | null }
+const props = defineProps<{ bundle: ResourceBundle; taskStatus: string; taskType: string; taskReferences?: ReferenceFileRef[]; canOperate?: boolean; actionLabel?: string }>()
+const emit = defineEmits<{ openResources: []; openAttachments: []; openWorkflow: [] }>()
 const groups = computed(() => props.bundle.groups || [])
-const resourceReferences = computed<ResourceReference[]>(() => {
+const resourceReferences = computed<RailReference[]>(() => {
   const seen = new Set<string>()
-  const references: ResourceReference[] = []
+  const references: RailReference[] = []
+  ;(props.taskReferences || []).forEach((reference, referenceIndex) => {
+    const normalized = { ...reference, source: 'task' as const }
+    const identity = referenceIdentity(normalized, -1, referenceIndex)
+    if (seen.has(identity)) return
+    seen.add(identity)
+    references.push(normalized)
+  })
   groups.value.forEach((group, groupIndex) => {
     const revision = group.finalized_revision || group.working_revision
     const ordered = [...(revision?.references || [])].sort((left, right) =>
@@ -82,10 +91,11 @@ const resourceReferences = computed<ResourceReference[]>(() => {
       || Number(left.id || 0) - Number(right.id || 0),
     )
     ordered.forEach((reference, referenceIndex) => {
-      const identity = referenceIdentity(reference, groupIndex, referenceIndex)
+      const normalized = { ...reference, source: 'resource' as const }
+      const identity = referenceIdentity(normalized, groupIndex, referenceIndex)
       if (seen.has(identity)) return
       seen.add(identity)
-      references.push(reference)
+      references.push(normalized)
     })
   })
   return references
@@ -111,18 +121,28 @@ const actionHint = computed(() => {
   return '设计人员先判定单图或套装，再为每个 SKU 提交可编辑源文件。'
 })
 
-function referenceIdentity(file: ResourceReference, groupIndex: number, referenceIndex: number) {
-  if (file.reference_file_ref_id != null) return `reference-file-ref:${file.reference_file_ref_id}`
+function referenceIdentity(file: RailReference, groupIndex: number, referenceIndex: number) {
   if (file.ref_id) return `ref:${file.ref_id}`
+  if ('asset_id' in file && file.asset_id) return `asset:${file.asset_id}`
+  if (file.reference_file_ref_id != null) return `reference-file-ref:${file.reference_file_ref_id}`
   if (file.formal_task_asset_id != null) return `task-asset:${file.formal_task_asset_id}`
   if (file.id != null) return `revision-reference:${file.id}`
-  return `fallback:${groupIndex}:${referenceIndex}:${file.file_name || ''}`
+  if ('storage_key' in file && file.storage_key) return `storage:${file.storage_key}`
+  return `fallback:${groupIndex}:${referenceIndex}:${referenceName(file)}`
 }
-function referenceName(file: ResourceReference) { return String(file.file_name || file.ref_id || '参考附件') }
-function referencePreview(file: ResourceReference) { return String(file.preview_url || file.download_url || '') }
-function taskAssetID(file: ResourceReference) { return file.formal_task_asset_id ? String(file.formal_task_asset_id) : null }
-function referenceKey(file: ResourceReference, index: number) { return referenceIdentity(file, 0, index) }
-function referencePreviewable(file: ResourceReference) { return String(file.mime_type || '').startsWith('image/') || /\.(png|jpe?g|webp|gif)$/i.test(referenceName(file)) }
+function referenceName(file: RailReference) { return String(file.file_name || ('filename' in file ? file.filename : '') || file.ref_id || '参考附件') }
+function referencePreview(file: RailReference) { return String(file.preview_url || file.download_url || '') }
+function taskAssetID(file: RailReference) { return file.formal_task_asset_id ? String(file.formal_task_asset_id) : null }
+function referenceKey(file: RailReference, index: number) { return referenceIdentity(file, 0, index) }
+function referencePreviewable(file: RailReference) { return String(file.mime_type || '').startsWith('image/') || /\.(png|jpe?g|webp|gif)$/i.test(referenceName(file)) }
+function openReference(file: RailReference) {
+  if (file.source === 'task') emit('openAttachments')
+  else emit('openResources')
+}
+function openAllReferences() {
+  if (resourceReferences.value.some((file) => file.source === 'resource')) emit('openResources')
+  else emit('openAttachments')
+}
 function finalPreview(item: ResourceRevisionItem) { return String(item.file?.preview_url || item.file?.download_url || '') }
 function finalPreviewable(item: ResourceRevisionItem) { return String(item.file?.mime_type || '').startsWith('image/') || /\.(png|jpe?g|webp|gif)$/i.test(item.file?.file_name || item.item_name || '') }
 function sourceStageLabel(stage: string) { return stage === 'audit' ? '审核确认的源文件' : stage === 'retouch' ? '修图源文件' : '设计师提交的源文件' }

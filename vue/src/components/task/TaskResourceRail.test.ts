@@ -84,6 +84,29 @@ describe('TaskResourceRail', () => {
     expect(wrapper.findAll('.asset-preview-media-stub').map((item) => item.attributes('data-task-asset-id'))).toEqual(['201', '202'])
   })
 
+  it('shows task-level operator references before the first resource revision exists', async () => {
+    const emptyBundle: ResourceBundle = { task_id: 2892, workflow_revision: 1, groups: [] }
+    const wrapper = mount(TaskResourceRail, {
+      props: {
+        bundle: emptyBundle,
+        taskStatus: 'PendingAssign',
+        taskType: 'original_product_development',
+        taskReferences: [{
+          asset_id: 'b9760c4e-495c-435e-86c1-d2e1325c64f7',
+          filename: 'image.png',
+          mime_type: 'image/png',
+          download_url: '/v1/task-assets/2892/reference',
+        }],
+      },
+    })
+
+    expect(wrapper.get('.rail-column.references .column-head small').text()).toBe('1 个附件')
+    expect(wrapper.get('.rail-column.references .media-strip button').text()).toBe('image.png')
+
+    await wrapper.get('.rail-column.references .media-strip button').trigger('click')
+    expect(wrapper.emitted('openAttachments')).toHaveLength(1)
+  })
+
   it('explains that retouch source files are optional instead of reporting missing SKU submissions', () => {
     const wrapper = mount(TaskResourceRail, {
       props: {

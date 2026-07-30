@@ -38,9 +38,11 @@
         :bundle="bundle"
         :task-status="task.task_status"
         :task-type="task.task_type"
+        :task-references="referenceFiles"
         :can-operate="canOperateResources"
         :action-label="workflowButtonLabel"
         @open-resources="openWorkspace('resources')"
+        @open-attachments="openWorkspace('attachments')"
         @open-workflow="openWorkspace('workflow')"
       />
 
