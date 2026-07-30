@@ -1,4 +1,5 @@
 import http from '@/services/http'
+import { generateActionId } from '@/utils/uuid'
 
 export type ResourceMode = 'single' | 'set'
 
@@ -231,7 +232,7 @@ export const resourceGroupsApi = {
   async submitDesign(taskId: number, bundle: ResourceBundle, groups: ResourceGroupSubmission[]): Promise<ResourceBundle> {
     return unwrap(await http.post(`/v1/tasks/${taskId}/submit-design`, {
       expected_workflow_revision: bundle.workflow_revision,
-      idempotency_key: crypto.randomUUID(),
+      idempotency_key: generateActionId(),
       groups,
     }))
   },
@@ -240,7 +241,7 @@ export const resourceGroupsApi = {
       decision,
       reason,
       expected_workflow_revision: bundle.workflow_revision,
-      idempotency_key: crypto.randomUUID(),
+      idempotency_key: generateActionId(),
       groups,
     }))
   },
@@ -249,7 +250,7 @@ export const resourceGroupsApi = {
       target,
       reason,
       expected_workflow_revision: bundle.workflow_revision,
-      idempotency_key: crypto.randomUUID(),
+      idempotency_key: generateActionId(),
     }))
   },
 }
