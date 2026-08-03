@@ -2233,8 +2233,9 @@ func authorizeV8TaskAssetMutation(ctx context.Context, task *domain.Task, assetT
 	permissions := []domain.PermissionCode{domain.PermissionAssetManage}
 	if assetType.IsReference() {
 		// Operational reference attachments are a task-maintenance action. They are
-		// intentionally not implied by design/audit capabilities.
-		permissions = append([]domain.PermissionCode{domain.PermissionTaskCreate}, permissions...)
+		// intentionally not implied by design/audit capabilities. A task.create
+		// grant only authorizes the creator's own task; broader maintenance requires
+		// asset.manage within the task's data scope.
 		switch task.TaskStatus {
 		case domain.TaskStatusDraft, domain.TaskStatusPendingAssign, domain.TaskStatusAssigned, domain.TaskStatusInProgress, domain.TaskStatusPendingAudit:
 		default:
@@ -2260,6 +2261,10 @@ func authorizeV8TaskAssetMutation(ctx context.Context, task *domain.Task, assetT
 	}
 
 	subject := task.AccessSubject()
+	if assetType.IsReference() && actor.ID == task.CreatorID &&
+		domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskCreate, subject) {
+		return nil
+	}
 	for _, permission := range permissions {
 		if domain.EffectiveAccessAllowsTask(actor, permission, subject) {
 			return nil

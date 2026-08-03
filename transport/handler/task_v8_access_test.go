@@ -30,7 +30,7 @@ func TestV8AllowedTaskActionsUsesHydratedDepartmentScope(t *testing.T) {
 
 func TestV8AllowedTaskActionsUsesSeparateTaskOperations(t *testing.T) {
 	departmentID := int64(101)
-	subject := domain.TaskAccessSubject{TaskID: 2, CreatorID: 7, OwnerDepartmentID: &departmentID}
+	subject := domain.TaskAccessSubject{TaskID: 2, CreatorID: 9, OwnerDepartmentID: &departmentID}
 	actorFor := func(permissions ...domain.PermissionCode) domain.RequestActor {
 		assignment := domain.AccessAssignment{ID: 9, RoleID: 8, ScopeMode: domain.AccessScopeOwnDepartment}
 		sources := make([]domain.EffectiveAccessNote, 0, len(permissions))
@@ -51,6 +51,16 @@ func TestV8AllowedTaskActionsUsesSeparateTaskOperations(t *testing.T) {
 	managed := v8AllowedTaskActions(actorFor(domain.PermissionTaskCreate, domain.PermissionTaskAssign), domain.TaskTypeOriginalProductDevelopment, domain.TaskStatusInProgress, subject)
 	if !slices.Contains(managed, "task.reference.append") || !slices.Contains(managed, "task.assign") || slices.Contains(managed, "task.design.submit") {
 		t.Fatalf("task create/assign actions = %v", managed)
+	}
+	otherCreatorsTask := subject
+	otherCreatorsTask.CreatorID = 7
+	ordinaryOperations := v8AllowedTaskActions(actorFor(domain.PermissionTaskCreate), domain.TaskTypeOriginalProductDevelopment, domain.TaskStatusInProgress, otherCreatorsTask)
+	if slices.Contains(ordinaryOperations, "task.reference.append") {
+		t.Fatalf("same-department non-creator actions = %v, want no task.reference.append", ordinaryOperations)
+	}
+	assetManager := v8AllowedTaskActions(actorFor(domain.PermissionAssetManage), domain.TaskTypeOriginalProductDevelopment, domain.TaskStatusInProgress, otherCreatorsTask)
+	if !slices.Contains(assetManager, "task.reference.append") {
+		t.Fatalf("asset manager actions = %v, want task.reference.append", assetManager)
 	}
 	pendingAssign := v8AllowedTaskActions(actorFor(domain.PermissionTaskAssign), domain.TaskTypeOriginalProductDevelopment, domain.TaskStatusPendingAssign, subject)
 	if !slices.Contains(pendingAssign, "task.assign") {

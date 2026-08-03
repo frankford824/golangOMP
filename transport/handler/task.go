@@ -1014,10 +1014,12 @@ func v8AllowedTaskActions(actor domain.RequestActor, taskType domain.TaskType, s
 		}
 		return actions
 	}
+	creatorMayAppendReference := actor.ID == subject.CreatorID &&
+		domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskCreate, subject)
+	assetManagerMayAppendReference := domain.EffectiveAccessAllowsTask(actor, domain.PermissionAssetManage, subject)
 	if (status == domain.TaskStatusDraft || status == domain.TaskStatusPendingAssign || status == domain.TaskStatusAssigned ||
 		status == domain.TaskStatusInProgress || status == domain.TaskStatusPendingAudit) &&
-		(domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskCreate, subject) ||
-			domain.EffectiveAccessAllowsTask(actor, domain.PermissionAssetManage, subject)) {
+		(creatorMayAppendReference || assetManagerMayAppendReference) {
 		actions = append(actions, "task.reference.append")
 	}
 	if (status == domain.TaskStatusPendingAssign || status == domain.TaskStatusInProgress) &&

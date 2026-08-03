@@ -357,7 +357,7 @@ func TestTaskAssetCenterServiceCompletedTaskRequiresReopenBeforeAnyResourceRepla
 func TestAuthorizeV8TaskAssetMutationUsesCapabilityAndStableScope(t *testing.T) {
 	const actorID = int64(610)
 	departmentID, otherDepartmentID := int64(41), int64(42)
-	task := &domain.Task{ID: 2100, TaskStatus: domain.TaskStatusInProgress, OwnerDepartmentID: &departmentID}
+	task := &domain.Task{ID: 2100, CreatorID: actorID, TaskStatus: domain.TaskStatusInProgress, OwnerDepartmentID: &departmentID}
 
 	legacyOnly := domain.WithRequestActor(taskAssetMutationTestContext(), domain.RequestActor{ID: actorID, Roles: []domain.Role{domain.RoleAdmin, domain.RoleAuditA}})
 	if appErr := authorizeV8TaskAssetMutation(legacyOnly, task, domain.TaskAssetTypeSource); appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
@@ -388,10 +388,18 @@ func TestAuthorizeV8TaskAssetMutationUsesCapabilityAndStableScope(t *testing.T) 
 	manageActor := scopedCapabilityActor(actorID, domain.PermissionTaskCreate, domain.AccessScopeOwnDepartment, &departmentID, nil, nil)
 	manageCtx := domain.WithRequestActor(taskAssetMutationTestContext(), manageActor)
 	if appErr := authorizeV8TaskAssetMutation(manageCtx, task, domain.TaskAssetTypeReference); appErr != nil {
-		t.Fatalf("in-scope task.create reference mutation rejected: %+v", appErr)
+		t.Fatalf("creator task.create reference mutation rejected: %+v", appErr)
 	}
 	if appErr := authorizeV8TaskAssetMutation(manageCtx, task, domain.TaskAssetTypeSource); appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
 		t.Fatalf("task.create unexpectedly authorized source upload: %+v", appErr)
+	}
+	task.CreatorID = actorID + 1
+	if appErr := authorizeV8TaskAssetMutation(manageCtx, task, domain.TaskAssetTypeReference); appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
+		t.Fatalf("same-department non-creator reference mutation = %+v, want permission denied", appErr)
+	}
+	assetManager := scopedCapabilityActor(actorID, domain.PermissionAssetManage, domain.AccessScopeOwnDepartment, &departmentID, nil, nil)
+	if appErr := authorizeV8TaskAssetMutation(domain.WithRequestActor(taskAssetMutationTestContext(), assetManager), task, domain.TaskAssetTypeReference); appErr != nil {
+		t.Fatalf("in-scope asset manager reference mutation rejected: %+v", appErr)
 	}
 }
 
