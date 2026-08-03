@@ -2,10 +2,12 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
+import { DataScopeEnum, RoleEnum } from '@/types'
+import { usePermissionsStore } from '@/stores/permissions'
 
 const mocks = vi.hoisted(() => ({
   getById: vi.fn(), getDetail: vi.fn(), listTaskEvents: vi.fn(), listAuditHandovers: vi.fn(), auditHandover: vi.fn(), auditTakeover: vi.fn(),
-  taskBundle: vi.fn(), uploadReference: vi.fn(), downloadPlanning: vi.fn(), push: vi.fn(), back: vi.fn(), route: { params: { id: '41' } },
+  taskBundle: vi.fn(), uploadReference: vi.fn(), downloadPlanning: vi.fn(), getDesigners: vi.fn(), push: vi.fn(), back: vi.fn(), route: { params: { id: '41' } },
 }))
 vi.mock('@/services/api/tasksApi', () => ({ tasksApi: mocks }))
 vi.mock('@/services/api/resourceGroupsApi', async (loadOriginal) => ({
@@ -20,6 +22,7 @@ vi.mock('vue-router', () => ({
 }))
 vi.mock('@/services/upload/assetUploadFlow', () => ({ uploadReferenceFileRef: mocks.uploadReference }))
 vi.mock('@/services/api/planningSkuApi', () => ({ planningSkuApi: { downloadTask: mocks.downloadPlanning } }))
+vi.mock('@/services/api/usersApi', () => ({ usersApi: { getDesigners: mocks.getDesigners } }))
 
 import TaskDetailV8View from './TaskDetailV8View.vue'
 
@@ -81,6 +84,7 @@ describe('TaskDetailV8View business context', () => {
     mocks.auditTakeover.mockResolvedValue({})
     mocks.uploadReference.mockResolvedValue({ asset_id: 'ref-2', filename: '补充.png' })
     mocks.downloadPlanning.mockResolvedValue(undefined)
+    mocks.getDesigners.mockResolvedValue({ data: { data: [{ id: 99, display_name: '定制设计师' }] } })
   })
 
   afterEach(() => {
@@ -362,6 +366,37 @@ describe('TaskDetailV8View business context', () => {
     const secondWrapper = mountView()
     await flushPromises()
     expect(secondWrapper.findAll('button').some((item) => item.text() === '指派设计')).toBe(false)
+  })
+
+  it('loads the customization candidate pool when assigning a customization task', async () => {
+    const permissions = usePermissionsStore()
+    permissions.setCurrentUser({
+      id: '9',
+      name: '运营管理员',
+      role: RoleEnum.OPS,
+      departmentId: '',
+      groupId: '',
+      dataScope: DataScopeEnum.GLOBAL,
+      permissions: [],
+    })
+    permissions.actions = ['task.assign']
+    const customizationTask = {
+      ...baseTask,
+      task_type: 'regular_customization',
+      business_lane: 'customization',
+      task_status: 'PendingAssign',
+      allowed_actions: ['task.assign'],
+    }
+    mocks.getById.mockResolvedValue({ data: { data: customizationTask } })
+    mocks.getDetail.mockResolvedValue({ data: { data: { task: customizationTask, task_detail: {}, reference_file_refs: [] } } })
+
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.findAll('button').find((item) => item.text() === '指派设计')?.trigger('click')
+    await flushPromises()
+
+    expect(mocks.getDesigners).toHaveBeenCalledWith({ workflowLane: 'customization' })
+    wrapper.unmount()
   })
 
   it('passes the task-level set suggestion to original-product resource groups', async () => {

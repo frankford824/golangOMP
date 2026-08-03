@@ -232,6 +232,7 @@ const backButtonLabel = computed(() => {
 })
 const { can } = usePermission()
 const task = ref<V8Task | null>(null)
+const isCustomization = computed(() => task.value?.business_lane === 'customization' || ['regular_customization', 'customer_customization'].includes(task.value?.task_type || ''))
 const aggregate = ref<Record<string, unknown>>({})
 const bundle = ref<ResourceBundle | null>(null)
 const loading = ref(false)
@@ -251,7 +252,12 @@ const {
   designers: assignDesigners,
   loading: assignDesignersLoading,
   loadDesigners: loadAssignDesigners,
-} = useDesignerOptions({ includeEmpty: false, autoLoad: false, requiredActions: ['task.assign', 'task.assign.team', 'task.assign.department'] })
+} = useDesignerOptions({
+  includeEmpty: false,
+  autoLoad: false,
+  workflowLane: computed(() => isCustomization.value ? 'customization' : undefined),
+  requiredActions: ['task.assign', 'task.assign.team', 'task.assign.department'],
+})
 const {
   designers: auditorCandidates,
   loading: auditorsLoading,
@@ -266,7 +272,6 @@ const taskId = computed(() => Number(route.params.id))
 const isPlanning = computed(() => task.value?.task_type === 'sku_planning')
 const isRetouch = computed(() => ['retouch', 'retouch_task'].includes(task.value?.task_type || ''))
 const taskTypeLabel = computed(() => ({ original_product_development: '原品开发', new_product_development: '新品开发', retouch_task: '修图任务', sku_planning: '策划 SKU', regular_customization: '常规定制', customer_customization: '客户定制' }[task.value?.task_type || ''] || '其他任务'))
-const isCustomization = computed(() => task.value?.business_lane === 'customization' || ['regular_customization', 'customer_customization'].includes(task.value?.task_type || ''))
 const businessLaneLabel = computed(() => isCustomization.value ? '定制' : '常规')
 const requirementHeading = computed(() => isPlanning.value ? '策划说明' : isRetouch.value ? '修图要求' : isCustomization.value ? '定制需求' : '设计需求')
 const requirementText = computed(() => task.value?.design_requirement || task.value?.change_request || task.value?.requirement_description || task.value?.description || '未填写需求说明。')
