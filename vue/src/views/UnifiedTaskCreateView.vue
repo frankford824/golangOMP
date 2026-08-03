@@ -96,9 +96,13 @@
         <div><h2>{{ currentMeta.title }}明细</h2><p>{{ rows.length }} 行 · {{ rowCountHint }}</p></div>
         <div class="toolbar-actions">
           <label v-if="intent === 'planning_sku' || intent === 'new_design'" class="secondary-button file-button">{{ intent === 'planning_sku' ? '导入策划 Excel' : '导入新款 Excel' }}<input type="file" accept=".xlsx,.xls,.csv" @change="importComposeExcel" /></label>
+          <button v-if="intent === 'modify_existing'" class="secondary-button" type="button" :disabled="batchERPResolving" @click="resolveCurrentERPRows">
+            <PackageSearch :size="16" />{{ batchERPResolving ? '正在批量查询…' : '批量查询已填 SKU' }}
+          </button>
           <button class="secondary-button" type="button" :disabled="rows.length >= maxRows" @click="addRow"><Plus :size="16" />添加一行</button>
           <button class="secondary-button" type="button" :disabled="!selectedRowIds.length || rows.length === 1" @click="removeSelectedRows"><Trash2 :size="16" />删除选中行<span v-if="selectedRowIds.length > 1">（{{ selectedRowIds.length }}）</span></button>
         </div>
+        <p v-if="batchERPFeedback" class="toolbar-feedback" role="status">{{ batchERPFeedback }}</p>
       </header>
 
       <div class="workspace-layout" :class="{ 'has-drawer': Boolean(selectedRow) }">
@@ -259,6 +263,8 @@ const clientCreateId = ref<string>(generateActionId())
 const erpSearchCode = ref('')
 const erpSearching = ref(false)
 const erpSearchResults = ref<Array<Record<string, unknown>>>([])
+const batchERPResolving = ref(false)
+const batchERPFeedback = ref('')
 
 const currentMeta = computed(() => COMPOSE_INTENT_META[intent.value])
 const columns = computed(() => composeColumns(intent.value))
@@ -478,36 +484,113 @@ async function searchERP() {
   erpSearchResults.value = []
   try {
     const response = await erpApi.getProductByCode(erpSearchCode.value)
-    const root = response.data as Record<string, unknown>
-    const data = root?.data && typeof root.data === 'object' ? root.data as Record<string, unknown> : root
-    const snapshot = data?.snapshot && typeof data.snapshot === 'object'
-      ? data.snapshot as Record<string, unknown>
-      : {}
-    const product = {
-      ...snapshot,
-      product_id: snapshot.product_id ?? data.product_id ?? data.code,
-      sku_code: snapshot.sku_code ?? data.sku_code ?? data.code,
-      product_name: data.product_name ?? snapshot.product_name,
-    }
-    erpSearchResults.value = Array.isArray(data?.items)
-      ? data.items as Array<Record<string, unknown>>
-      : Array.isArray(root)
-        ? root as Array<Record<string, unknown>>
-        : product.product_id || product.sku_code
-          ? [product]
-          : []
+    erpSearchResults.value = normalizeERPProducts(response.data)
   } catch (error) {
     submitError.value = error instanceof Error ? error.message : 'ERP 商品查询失败'
   } finally { erpSearching.value = false }
 }
 function chooseERP(item: Record<string, unknown>) {
   if (!selectedRow.value) return
-  selectedRow.value.erp_product_id = String(item.product_id ?? item.id ?? '')
-  selectedRow.value.erp_sku = String(item.sku_code ?? item.sku ?? item.product_code ?? item.product_id ?? '')
-  selectedRow.value.product_name = String(item.product_name ?? item.name ?? '')
-  selectedRow.value.erp_product_snapshot = item
+  applyERPProduct(selectedRow.value, item)
   erpSearchResults.value = []
   gridRevision.value += 1
+}
+
+function normalizeERPProducts(raw: unknown): Array<Record<string, unknown>> {
+  const root = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {}
+  const data = root.data && typeof root.data === 'object' ? root.data : root
+  if (Array.isArray(data)) return data as Array<Record<string, unknown>>
+  if (!data || typeof data !== 'object') return []
+  const record = data as Record<string, unknown>
+  if (Array.isArray(record.items)) return record.items as Array<Record<string, unknown>>
+  const snapshot = record.snapshot && typeof record.snapshot === 'object'
+    ? record.snapshot as Record<string, unknown>
+    : {}
+  const product = {
+    ...snapshot,
+    product_id: snapshot.product_id ?? record.product_id ?? record.code,
+    sku_code: snapshot.sku_code ?? record.sku_code ?? record.code,
+    product_name: record.product_name ?? snapshot.product_name,
+  }
+  return product.product_id || product.sku_code ? [product] : []
+}
+
+function erpProductCode(item: Record<string, unknown>): string {
+  return String(item.sku_code ?? item.sku ?? item.product_code ?? item.product_id ?? item.id ?? '').trim()
+}
+
+function applyERPProduct(row: ComposeRow, item: Record<string, unknown>) {
+  row.erp_product_id = String(item.product_id ?? item.id ?? item.sku_code ?? item.product_code ?? '')
+  row.erp_sku = erpProductCode(item)
+  row.product_name = String(item.product_name ?? item.name ?? '')
+  row.erp_product_snapshot = item
+}
+
+async function lookupERPProduct(code: string): Promise<Record<string, unknown> | undefined> {
+  const response = await erpApi.getProductByCode(code)
+  const products = normalizeERPProducts(response.data)
+  return products.find((item) => erpProductCode(item).toLowerCase() === code.toLowerCase()) ?? products[0]
+}
+
+async function resolveERPBindings(candidates: ComposeRow[]): Promise<ComposeViolation[]> {
+  const unresolved = candidates.filter((row) => row.erp_sku?.trim() && !row.erp_product_id)
+  if (!unresolved.length) return []
+  const codes = [...new Set(unresolved.map((row) => row.erp_sku!.trim()))]
+  const results = new Map<string, Record<string, unknown> | Error>()
+  let cursor = 0
+  const worker = async () => {
+    while (cursor < codes.length) {
+      const code = codes[cursor++]
+      try {
+        const product = await lookupERPProduct(code)
+        results.set(code, product ?? new Error(`ERP 中未找到商品 ${code}`))
+      } catch (error) {
+        results.set(code, error instanceof Error ? error : new Error(`ERP 商品 ${code} 查询失败`))
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(6, codes.length) }, () => worker()))
+  const issues: ComposeViolation[] = []
+  for (const row of unresolved) {
+    const code = row.erp_sku!.trim()
+    const product = results.get(code)
+    if (product instanceof Error || !product) {
+      issues.push({
+        row_id: row.id,
+        row_index: rows.value.indexOf(row),
+        field: 'erp_sku',
+        message: product?.message || `ERP 商品 ${code} 查询失败`,
+      })
+      continue
+    }
+    applyERPProduct(row, product)
+  }
+  gridRevision.value += 1
+  return issues
+}
+
+async function resolveCurrentERPRows() {
+  gridRef.value?.readRowsFromWorkbook?.()
+  await Promise.resolve()
+  batchERPResolving.value = true
+  batchERPFeedback.value = ''
+  submitError.value = ''
+  remoteViolations.value = []
+  try {
+    const pendingCount = rows.value.filter((row) => row.erp_sku?.trim() && !row.erp_product_id).length
+    if (!pendingCount) {
+      batchERPFeedback.value = '没有需要查询的 SKU；可先从 Excel / WPS 粘贴多行编码。'
+      return
+    }
+    remoteViolations.value = await resolveERPBindings(rows.value)
+    const resolvedCount = pendingCount - remoteViolations.value.length
+    batchERPFeedback.value = remoteViolations.value.length
+      ? `已匹配 ${resolvedCount} 行，${remoteViolations.value.length} 行需要检查。`
+      : `已匹配并回填 ${resolvedCount} 行 ERP 商品。`
+    if (remoteViolations.value[0]) locateViolation(remoteViolations.value[0])
+  } finally {
+    batchERPResolving.value = false
+  }
 }
 
 function locateViolation(issue: ComposeViolation) {
@@ -520,11 +603,20 @@ function locateViolation(issue: ComposeViolation) {
 }
 
 async function submit(retryOnly: boolean) {
-  gridRef.value?.readRowsFromWorkbook()
+  gridRef.value?.readRowsFromWorkbook?.()
   await Promise.resolve()
   submitError.value = ''
   const candidates = retryOnly ? rows.value.filter((row) => row.status === 'failed') : rows.value
   remoteViolations.value = []
+  if (intent.value === 'modify_existing') {
+    batchERPResolving.value = true
+    try {
+      remoteViolations.value = await resolveERPBindings(candidates)
+    } finally {
+      batchERPResolving.value = false
+    }
+    if (remoteViolations.value.length) { locateViolation(remoteViolations.value[0]); return }
+  }
   const currentViolations = validateCompose(intent.value, common, candidates)
   if (currentViolations.length) { locateViolation(currentViolations[0]); return }
   validatingIIDs.value = true
@@ -713,6 +805,7 @@ function startAnother() { result.value = false; planningResult.value = null; row
 <style scoped>
 .compose-page{max-width:1600px;margin:0 auto;padding:1.5rem;display:grid;gap:1rem}.compose-hero,.workspace-toolbar,.result-heading,.result-actions,.toolbar-actions,.hero-actions{display:flex;align-items:center;justify-content:space-between;gap:1rem}.compose-hero h1{margin:.1rem 0;font-size:clamp(2rem,4vw,3.2rem);letter-spacing:-.045em}.compose-hero p,.workspace-toolbar p,.result-heading p{margin:0;color:rgb(var(--yb-text-secondary))}.eyebrow{margin:0;color:rgb(var(--yb-brand));font-size:.68rem;font-weight:850;letter-spacing:.15em;text-transform:uppercase}.hero-actions,.toolbar-actions,.result-actions{justify-content:flex-end;flex-wrap:wrap}.primary-button,.secondary-button{display:inline-flex;align-items:center;justify-content:center;gap:.45rem;min-height:2.65rem;padding:0 .95rem;border-radius:.78rem;font-weight:760;text-decoration:none;cursor:pointer}.primary-button{border:1px solid rgb(var(--yb-brand));background:rgb(var(--yb-brand));color:rgb(var(--yb-text-inverse))}.secondary-button{border:1px solid rgb(var(--yb-border-context));background:rgb(var(--yb-surface));color:rgb(var(--yb-text-primary))}.primary-button:disabled,.secondary-button:disabled{opacity:.48;cursor:not-allowed}.intent-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.8rem}.intent-card{position:relative;display:grid;grid-template-columns:auto 1fr;gap:.75rem;text-align:left;min-height:7.5rem;padding:1.15rem;border:1px solid rgb(var(--yb-border-context));border-radius:1rem;background:rgb(var(--yb-surface));color:rgb(var(--yb-text-primary));box-shadow:0 .7rem 1.8rem rgb(var(--yb-shadow)/.045);cursor:pointer}.intent-card:hover,.intent-card.is-active{border-color:rgb(var(--yb-brand));box-shadow:0 1rem 2.4rem rgb(var(--yb-shadow)/.08)}.intent-icon{display:grid;place-items:center;width:2.65rem;height:2.65rem;border-radius:.75rem;background:rgb(var(--yb-brand-soft));color:rgb(var(--yb-brand-deep))}.intent-copy{display:grid;align-content:start;gap:.35rem}.intent-copy strong{font-size:1.05rem}.intent-copy small{line-height:1.45;color:rgb(var(--yb-text-secondary))}.intent-badge{grid-column:1/-1;align-self:end;width:max-content;padding:.25rem .5rem;border-radius:999px;background:rgb(var(--yb-surface-app-muted));color:rgb(var(--yb-text-secondary));font-size:.7rem}.intent-check{position:absolute;top:.85rem;right:.85rem;color:rgb(var(--yb-brand))}.common-ribbon{display:flex;flex-wrap:wrap;gap:.85rem 1.4rem;align-items:flex-start;padding:1rem 1.15rem;border:1px solid rgb(var(--yb-border-context));border-radius:1rem;background:rgb(var(--yb-surface));box-shadow:0 .8rem 2rem rgb(var(--yb-shadow)/.04)}.common-ribbon .field{display:grid;gap:.4rem;align-content:start}.field-name{font-size:.74rem;font-weight:780;color:rgb(var(--yb-text-secondary))}.common-ribbon .field>small{font-size:.7rem;font-weight:500;color:rgb(var(--yb-text-secondary))}.common-ribbon input:not([type=checkbox]),.common-ribbon select,.erp-search input{min-width:0;height:2.45rem;padding:0 .7rem;border:1px solid rgb(var(--yb-border-context));border-radius:.65rem;background:rgb(var(--yb-surface));color:rgb(var(--yb-text-primary))}.common-ribbon input[type=datetime-local]{width:13rem}.common-ribbon select{width:8.5rem}.note-field{flex:1 1 260px;min-width:260px}.lane-toggle{display:inline-flex;gap:.2rem;padding:.22rem;border:1px solid rgb(var(--yb-border-context));border-radius:.72rem;background:rgb(var(--yb-surface-app-muted))}.lane-toggle button{min-width:4.2rem;min-height:1.95rem;border:0;border-radius:.52rem;background:transparent;color:rgb(var(--yb-text-secondary));font-weight:760;cursor:pointer}.lane-toggle button.active{background:rgb(var(--yb-brand));color:rgb(var(--yb-text-inverse));box-shadow:0 .25rem .7rem rgb(var(--yb-brand)/.28)}.switch-row{display:flex;align-items:center;gap:.5rem;min-height:2.45rem}.switch-row input{width:1.15rem;height:1.15rem;accent-color:rgb(var(--yb-brand))}.switch-row small{font-weight:500;color:rgb(var(--yb-text-secondary))}.workspace-card,.result-board{border:1px solid rgb(var(--yb-border-context));border-radius:1.15rem;background:rgb(var(--yb-surface));box-shadow:0 1.2rem 3rem rgb(var(--yb-shadow)/.065);overflow:hidden}.workspace-toolbar{padding:1rem 1.15rem;border-bottom:1px solid rgb(var(--yb-border-context))}.workspace-toolbar h2,.result-heading h2{margin:0}.file-button input{display:none}.workspace-layout{display:grid;grid-template-columns:minmax(0,1fr)}.workspace-layout.has-drawer{grid-template-columns:minmax(0,1fr) 22rem}.grid-column{min-width:0;padding:1rem}.row-drawer{border-left:1px solid rgb(var(--yb-border-context));background:rgb(var(--yb-surface-app-muted));min-width:0}.row-drawer>header{display:flex;justify-content:space-between;align-items:center;padding:1rem;border-bottom:1px solid rgb(var(--yb-border-context))}.row-drawer h3,.row-drawer h4{margin:0}.row-drawer header button,.asset-list button,.mobile-row-card header button{border:0;background:transparent;color:rgb(var(--yb-text-secondary));cursor:pointer}.drawer-section{display:grid;gap:.7rem;padding:1rem;border-bottom:1px solid rgb(var(--yb-border-context))}.drawer-section p{margin:0;color:rgb(var(--yb-text-secondary));font-size:.78rem;line-height:1.5}.hint-section{grid-template-columns:1fr auto;align-items:center}.hint-section input{width:2.5rem;height:1.4rem}.erp-search{display:grid;grid-template-columns:1fr auto;gap:.4rem}.erp-search button,.erp-result,.asset-button{min-height:2.45rem;border:1px solid rgb(var(--yb-border-context));border-radius:.65rem;background:rgb(var(--yb-surface));color:rgb(var(--yb-text-primary));cursor:pointer}.erp-result{display:grid;text-align:left;padding:.65rem}.erp-result span,.selected-erp{font-size:.75rem;color:rgb(var(--yb-text-secondary))}.asset-list{display:grid;gap:.45rem}.asset-list article{display:grid;grid-template-columns:2.8rem 1fr auto;gap:.6rem;align-items:center;padding:.5rem;border:1px solid rgb(var(--yb-border-context));border-radius:.65rem;background:rgb(var(--yb-surface))}.asset-list img{width:2.8rem;height:2.8rem;object-fit:cover;border-radius:.45rem}.asset-list div{display:grid;min-width:0}.asset-list strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:.78rem}.asset-list span{font-size:.68rem;color:rgb(var(--yb-text-secondary))}.asset-button{display:flex;align-items:center;justify-content:center;gap:.35rem;padding:.55rem}.drawer-errors{margin:0;padding-left:1rem;color:rgb(var(--yb-danger));font-size:.76rem}.drawer-section .drawer-ok{display:flex;align-items:center;gap:.35rem;color:rgb(var(--yb-success))}.validation-dock{position:sticky;bottom:0;z-index:3;display:grid;grid-template-columns:minmax(240px,.7fr) minmax(0,1.4fr) auto;gap:1rem;align-items:center;padding:.9rem 1rem;border-top:1px solid rgb(var(--yb-border-context));background:color-mix(in srgb,rgb(var(--yb-surface)) 94%,transparent);backdrop-filter:blur(18px)}.validation-summary{display:flex;align-items:center;gap:.65rem;color:rgb(var(--yb-danger))}.validation-summary.valid{color:rgb(var(--yb-success))}.validation-summary div{display:grid}.validation-summary span{font-size:.72rem;color:rgb(var(--yb-text-secondary))}.validation-items{display:flex;gap:.45rem;overflow:auto}.validation-items button{display:grid;min-width:12rem;text-align:left;padding:.5rem .7rem;border:1px solid rgb(var(--yb-danger-border));border-radius:.65rem;background:rgb(var(--yb-danger-soft));color:rgb(var(--yb-danger));font-size:.72rem;cursor:pointer}.validation-items span{font-weight:800}.dock-actions{display:flex;align-items:center;gap:.7rem}.dock-actions p{max-width:25rem;margin:0;color:rgb(var(--yb-danger));font-size:.76rem}.result-board{padding:1.2rem;display:grid;gap:1rem}.task-result-grid,.sku-result-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:.65rem}.task-result,.sku-result{display:grid;grid-template-columns:auto 1fr auto;gap:.6rem;align-items:center;padding:.8rem;border:1px solid rgb(var(--yb-border-context));border-radius:.75rem}.task-result>div{display:grid}.task-result small,.sku-result small{color:rgb(var(--yb-text-secondary))}.task-result.is-created{color:rgb(var(--yb-success))}.task-result.is-failed,.sku-result.failed{color:rgb(var(--yb-danger));border-color:rgb(var(--yb-danger-border));background:rgb(var(--yb-danger-soft))}.result-filter{display:flex;gap:.5rem}.result-filter button{padding:.45rem .75rem;border:1px solid rgb(var(--yb-border-context));border-radius:999px;background:rgb(var(--yb-surface));cursor:pointer}.result-filter button.active{border-color:rgb(var(--yb-brand));color:rgb(var(--yb-brand-deep));background:rgb(var(--yb-brand-soft))}.sku-result{grid-template-columns:auto auto 1fr auto}.retry-failed{grid-column:1/-1}.mobile-row-list{display:none}.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}
 .hero-copy p{max-width:56rem}.compose-hero h1{margin:.35rem 0 .55rem}.result-heading-actions{display:flex;gap:.6rem;flex-wrap:wrap}
+.workspace-toolbar{position:relative}.toolbar-feedback{position:absolute;right:1.15rem;bottom:.18rem;font-size:.7rem;color:rgb(var(--yb-text-secondary))}
 .compose-confirm-backdrop{position:fixed;inset:0;z-index:8600;display:grid;place-items:center;padding:1.2rem;background:rgb(var(--yb-overlay-night)/.5);backdrop-filter:blur(6px)}
 .compose-confirm{width:min(26rem,100%);display:grid;gap:.55rem;padding:1.4rem;border:1px solid rgb(var(--yb-border-context));border-radius:1.1rem;background:rgb(var(--yb-surface));box-shadow:0 1.6rem 4rem rgb(var(--yb-shadow)/.28)}
 .compose-confirm .confirm-icon{display:grid;place-items:center;width:2.6rem;height:2.6rem;border-radius:.8rem;background:rgb(var(--yb-warning-soft));color:rgb(var(--yb-warning-strong))}

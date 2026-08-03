@@ -208,6 +208,47 @@ describe('UnifiedTaskCreateView', () => {
     wrapper.unmount()
   })
 
+  it('batch resolves ERP bindings pasted into multiple rows and projects product names into the grid', async () => {
+    mocks.route.query = { intent: 'modify_existing' }
+    mocks.getProductByCode.mockImplementation(async (code: string) => ({
+      data: {
+        data: {
+          code,
+          product_name: `商品-${code}`,
+          snapshot: { product_id: `product-${code}`, sku_code: code },
+        },
+      },
+    }))
+    const wrapper = mount(UnifiedTaskCreateView, {
+      global: {
+        stubs: {
+          UnifiedTaskGrid: {
+            props: ['rows', 'revision'],
+            emits: ['update:rows'],
+            template: `
+              <div class="grid-stub">
+                <button class="paste-two" @click="$emit('update:rows', rows.map((row, index) => ({ ...row, erp_sku: 'SKU-00' + (index + 1), product_name: '', design_requirement: '换图' })))">粘贴</button>
+                <span class="grid-values">{{ rows.map((row) => row.product_name).join('|') }}</span>
+              </div>
+            `,
+          },
+          IIdSelector: true,
+          RouterLink: true,
+        },
+      },
+    })
+    const addButton = wrapper.findAll('button').find((button) => button.text().includes('添加一行'))
+    await addButton?.trigger('click')
+    await wrapper.get('.paste-two').trigger('click')
+    await wrapper.findAll('button').find((button) => button.text().includes('批量查询已填 SKU'))?.trigger('click')
+    await flushPromises()
+
+    expect(mocks.getProductByCode).toHaveBeenCalledTimes(2)
+    expect(wrapper.get('.grid-values').text()).toBe('商品-SKU-001|商品-SKU-002')
+    expect(wrapper.get('[role="status"]').text()).toContain('已匹配并回填 2 行')
+    wrapper.unmount()
+  })
+
   it('deletes a multi-row Univer selection in one operation and keeps one editable row', async () => {
     const wrapper = mount(UnifiedTaskCreateView, {
       global: {
