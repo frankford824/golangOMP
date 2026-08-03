@@ -78,6 +78,8 @@ export async function uploadRetouchRequirementPendingAssets(
         await uploadReferenceFileRef(file, {
           taskId,
           retouchRequirementId: requirementId,
+          ownerModuleKey: 'basic_info',
+          uploadPolicy: 'append_only',
           signal: options?.signal,
         })
         referenceUploaded += 1

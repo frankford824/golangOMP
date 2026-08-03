@@ -2166,6 +2166,13 @@ func validateTaskStageUploadAssetType(task *domain.Task, assetType domain.TaskAs
 			"allowed_reference_owner_module_key": string(domain.ModuleKeyBasicInfo),
 		})
 	}
+	if task.TaskType == domain.TaskTypeRetouchTask &&
+		normalized == domain.TaskAssetTypeSource &&
+		(task.TaskStatus == domain.TaskStatusPendingAssign ||
+			task.TaskStatus == domain.TaskStatusAssigned ||
+			task.TaskStatus == domain.TaskStatusInProgress) {
+		return nil
+	}
 	if task.TaskStatus == domain.TaskStatusInProgress {
 		if task.TaskType == domain.TaskTypeRetouchTask {
 			if normalized == domain.TaskAssetTypeSource || normalized == domain.TaskAssetTypeDelivery {
@@ -2262,6 +2269,12 @@ func authorizeV8TaskAssetMutation(ctx context.Context, task *domain.Task, assetT
 
 	subject := task.AccessSubject()
 	if assetType.IsReference() && actor.ID == task.CreatorID &&
+		domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskCreate, subject) {
+		return nil
+	}
+	if task.TaskType == domain.TaskTypeRetouchTask &&
+		assetType.IsSource() &&
+		actor.ID == task.CreatorID &&
 		domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskCreate, subject) {
 		return nil
 	}

@@ -393,6 +393,13 @@ func TestAuthorizeV8TaskAssetMutationUsesCapabilityAndStableScope(t *testing.T) 
 	if appErr := authorizeV8TaskAssetMutation(manageCtx, task, domain.TaskAssetTypeSource); appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
 		t.Fatalf("task.create unexpectedly authorized source upload: %+v", appErr)
 	}
+	task.TaskType = domain.TaskTypeRetouchTask
+	task.TaskStatus = domain.TaskStatusPendingAssign
+	if appErr := authorizeV8TaskAssetMutation(manageCtx, task, domain.TaskAssetTypeSource); appErr != nil {
+		t.Fatalf("retouch creator source upload rejected: %+v", appErr)
+	}
+	task.TaskType = domain.TaskTypeNewProductDevelopment
+	task.TaskStatus = domain.TaskStatusInProgress
 	task.CreatorID = actorID + 1
 	if appErr := authorizeV8TaskAssetMutation(manageCtx, task, domain.TaskAssetTypeReference); appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
 		t.Fatalf("same-department non-creator reference mutation = %+v, want permission denied", appErr)
@@ -3657,6 +3664,10 @@ func TestTaskStageUploadPolicySeparatesDesignSourceFromAuditFinals(t *testing.T)
 	retouchTask := &domain.Task{TaskType: domain.TaskTypeRetouchTask, TaskStatus: domain.TaskStatusInProgress}
 	if appErr := validateTaskStageUploadAssetType(retouchTask, domain.TaskAssetTypeDelivery, "retouch", nil); appErr != nil {
 		t.Fatalf("retouch final output rejected: %+v", appErr)
+	}
+	retouchTask.TaskStatus = domain.TaskStatusPendingAssign
+	if appErr := validateTaskStageUploadAssetType(retouchTask, domain.TaskAssetTypeSource, "retouch", nil); appErr != nil {
+		t.Fatalf("retouch creator source rejected before assignment: %+v", appErr)
 	}
 }
 
