@@ -133,6 +133,18 @@
               </div>
               <div class="sku-list"><span v-for="item in skuItems" :key="String(item.id || item.sku_code)">{{ item.sku_code || `子项 ${item.sequence_no || ''}` }}<em v-if="item.set_mode_hint || item.setModeHint">运营建议套装 · 设计可调整</em></span></div>
               <TaskSkuItemEditor :task-id="task.id" :items="skuItems" :can-edit="canEditSKUItems" @saved="load" />
+              <div class="sku-cost-preview-list">
+                <CostExplanationPanel
+                  v-for="item in skuItems"
+                  :key="`cost-${String(item.id || item.sku_code || item.sequence_no)}`"
+                  :title="`${String(item.sku_code || `子项 ${item.sequence_no || ''}`)} 成本规则试算与解释`"
+                  :seed="skuCostPreviewSeed(item)"
+                  :task-id="task.id"
+                  :task-sku-item-id="numberValue(item.id)"
+                  :sku-code="String(item.sku_code || '')"
+                  :resource-id="String(item.id || item.sku_code || '')"
+                />
+              </div>
             </section>
           </div>
 
@@ -210,6 +222,7 @@ import TaskAttachmentWorkspace from '@/components/task/TaskAttachmentWorkspace.v
 import TaskResourceRail from '@/components/task/TaskResourceRail.vue'
 import TaskDetailAtmosphere from '@/components/task/TaskDetailAtmosphere.vue'
 import TaskSkuItemEditor from '@/components/task/TaskSkuItemEditor.vue'
+import CostExplanationPanel from '@/components/cost/CostExplanationPanel.vue'
 import ReassignDesignerDialog from '@/components/task/ReassignDesignerDialog.vue'
 import { uploadReferenceFileRef } from '@/services/upload/assetUploadFlow'
 import { planningSkuApi } from '@/services/api/planningSkuApi'
@@ -321,6 +334,46 @@ const dueSoonOrOverdue = computed(() => {
   const dueMs = new Date(String(dueAtRaw.value)).getTime()
   return Number.isFinite(dueMs) && dueMs - Date.now() < 24 * 60 * 60 * 1000
 })
+
+function itemVariant(item: Record<string, unknown>): Record<string, unknown> {
+  if (item.variant_json && typeof item.variant_json === 'object') return item.variant_json as Record<string, unknown>
+  if (typeof item.variant_json !== 'string' || !item.variant_json.trim()) return {}
+  try {
+    const parsed = JSON.parse(item.variant_json) as unknown
+    return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : {}
+  } catch {
+    return {}
+  }
+}
+
+function itemValue(item: Record<string, unknown>, key: string) {
+  const direct = item[key]
+  return direct == null || direct === '' ? itemVariant(item)[key] : direct
+}
+
+function numberValue(value: unknown) {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : undefined
+}
+
+function skuCostPreviewSeed(item: Record<string, unknown>) {
+  const trace = item.cost_trace && typeof item.cost_trace === 'object' ? item.cost_trace as Record<string, unknown> : {}
+  return {
+    categoryCode: String(itemValue(item, 'category_code') || itemValue(item, 'rule_group') || ''),
+    productIID: String(item.product_i_id || ''),
+    erpIID: String(item.erp_i_id || ''),
+    width: itemValue(item, 'width') as number | string | null,
+    height: itemValue(item, 'height') as number | string | null,
+    area: itemValue(item, 'area') as number | string | null,
+    quantity: item.quantity as number | string | null,
+    process: String(itemValue(item, 'process') || itemValue(item, 'craft_text') || ''),
+    notes: String(item.design_requirement || itemValue(item, 'spec_text') || ''),
+    currentCost: numberValue(item.cost_price),
+    currentRuleName: String(item.cost_rule_name || trace.rule_name || ''),
+    currentRuleVersion: numberValue(item.matched_rule_version || trace.matched_rule_version),
+    requiresManualReview: Boolean(item.requires_manual_review || trace.requires_manual_review),
+  }
+}
 const canOperateResources = computed(() => !isPlanning.value && (actionSet.value.has('task.design.submit') || actionSet.value.has('task.audit.approve') || actionSet.value.has('task.audit.decision') || actionSet.value.has('task.reopen')))
 const currentOwner = computed(() => task.value?.current_handler_name || task.value?.designer_name || (isTerminal.value ? '已结单' : '等待指派'))
 const ownerOrg = computed(() => [task.value?.owner_department, task.value?.owner_org_team].filter(Boolean).join(' · ') || '未设置')

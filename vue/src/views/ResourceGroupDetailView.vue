@@ -35,6 +35,17 @@
       </div>
     </section>
 
+    <CostExplanationPanel
+      v-if="group"
+      title="当前 SKU 成本规则试算与解释"
+      :seed="costPreviewSeed"
+      :task-id="group.task_id"
+      :task-sku-item-id="group.task_sku_item_id || undefined"
+      :asset-id="group.id"
+      :resource-id="String(group.id)"
+      :sku-code="displaySKU"
+    />
+
     <div v-if="error" class="state-card error" role="alert">{{ error }}</div>
     <div v-if="loading && !group" class="state-card">正在加载当前有效资源…</div>
     <SkuResourceMatrix v-else-if="group" :bundle="{ task_id: group.task_id, workflow_revision: 0, groups: [group] }" />
@@ -45,6 +56,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import SkuResourceMatrix from '@/components/task/SkuResourceMatrix.vue'
+import CostExplanationPanel from '@/components/cost/CostExplanationPanel.vue'
 import { resourceGroupsApi, type ResourceGroup } from '@/services/api/resourceGroupsApi'
 
 const route = useRoute()
@@ -70,6 +82,20 @@ const dimensionDetail = computed(() => {
 })
 const syncLabel = computed(() => ({ synced: 'ERP 已同步', queued: '等待同步', syncing: '正在同步', failed: '同步失败', cooling_down: '稍后重试', pending_sync: '待同步' }[profile.value?.erp_sync_status || ''] || 'ERP 待关联'))
 const syncTone = computed(() => profile.value?.erp_sync_status === 'synced' ? 'is-synced' : profile.value?.erp_sync_status === 'failed' ? 'is-failed' : 'is-pending')
+const costPreviewSeed = computed(() => ({
+  categoryCode: profile.value?.category_name || '',
+  productIID: profile.value?.product_i_id || '',
+  erpIID: profile.value?.erp_i_id || '',
+  width: profile.value?.area_trace?.width_m,
+  height: profile.value?.area_trace?.height_m,
+  area: profile.value?.area_trace?.area_m2,
+  quantity: profile.value?.area_trace?.quantity,
+  notes: [profile.value?.spec_text, profile.value?.size_text].filter(Boolean).join(' '),
+  currentCost: profile.value?.cost_price,
+  currentRuleName: profile.value?.cost_trace?.rule_name,
+  currentRuleVersion: profile.value?.cost_trace?.matched_rule_version,
+  requiresManualReview: profile.value?.cost_trace?.requires_manual_review,
+}))
 
 async function load() {
   loading.value = true

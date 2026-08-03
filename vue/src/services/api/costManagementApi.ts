@@ -248,6 +248,7 @@ export interface SyncCostRecalculationRunERPResponse {
 }
 
 export interface CostRulePreviewRequest {
+  category_id?: number | null
   category_code?: string
   rule_group?: string
   width?: number | null
@@ -256,9 +257,20 @@ export interface CostRulePreviewRequest {
   quantity?: number | null
   process?: string
   notes?: string
+  erp_i_id?: string
+  product_i_id?: string
 }
 
 export interface CostRulePreviewResponse {
+  matched_rule?: {
+    rule_id?: number
+    rule_name?: string
+    rule_version?: number
+    rule_type?: string
+    priority?: number
+    source?: string
+    governance_status?: string
+  } | null
   matched_rule_id?: number | null
   matched_rule_version?: number | null
   estimated_cost?: number | null
@@ -266,7 +278,13 @@ export interface CostRulePreviewResponse {
   governance_status?: string
   requires_manual_review?: boolean
   explanation?: string
-  applied_rules?: Array<{ rule_id?: number; rule_name?: string; rule_version?: number; rule_type?: string }>
+  match_mode?: 'binding_erp_i_id' | 'binding_product_i_id' | 'legacy_alias' | 'no_match' | string
+  erp_i_id?: string
+  product_i_id?: string
+  normalized_i_id?: string
+  rule_group?: string
+  legacy_alias_fallback?: boolean
+  applied_rules?: Array<{ rule_id?: number; rule_name?: string; rule_version?: number; rule_type?: string; priority?: number; source?: string; governance_status?: string }>
 }
 
 export const costManagementApi = {

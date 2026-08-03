@@ -81,6 +81,26 @@ func TestTaskAssetUploadSessionHTTPRegistrationsDoNotUseLegacyRoleAccess(t *test
 	}
 }
 
+func TestCostRulePreviewUsesAuthenticatedAccountCapability(t *testing.T) {
+	raw, err := os.ReadFile("http.go")
+	if err != nil {
+		t.Fatalf("read http.go: %v", err)
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		if !strings.Contains(line, `costRuleGroup.POST("/preview"`) {
+			continue
+		}
+		if !strings.Contains(line, "domain.PermissionAccountUse") {
+			t.Fatalf("cost rule preview must be available to authenticated accounts: %s", strings.TrimSpace(line))
+		}
+		if strings.Contains(line, "domain.PermissionCatalogManage") {
+			t.Fatalf("read-only cost rule preview must not require catalog management: %s", strings.TrimSpace(line))
+		}
+		return
+	}
+	t.Fatal("cost rule preview registration not found")
+}
+
 type effectiveAccessResolverStub struct {
 	view  *domain.EffectiveAccess
 	calls *int

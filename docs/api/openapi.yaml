@@ -3480,6 +3480,12 @@ components:
           nullable: true
         process: { type: string }
         notes: { type: string }
+        erp_i_id:
+          type: string
+          description: ERP item identifier used for exact governed-rule binding.
+        product_i_id:
+          type: string
+          description: Product item identifier used for exact governed-rule binding when ERP i_id is absent.
     CostRulePreviewMatch:
       type: object
       properties:
@@ -8984,10 +8990,10 @@ paths:
   /v1/cost-rules/preview:
     post:
       summary: Preview cost rule estimate
-      description: Minimal preview contract for the governed cost-rule skeleton. Fixed price, area-threshold surcharge, minimum billable area, and special-process surcharge can return estimates. `manual_quote`, missing required size or area inputs, and unsupported size-based formulas return `requires_manual_review=true`. The response includes `matched_rule_id`, `matched_rule_version`, `rule_source`, and `governance_status`. `PATCH /v1/tasks/{id}/business-info` reuses the same pricing semantics for persisted task-side prefill snapshots.
+      description: Read-only preview contract available to every authenticated account so task and asset viewers can verify the governed calculation without changing rules or persisted business data. Fixed price, area-threshold surcharge, minimum billable area, and special-process surcharge can return estimates. `manual_quote`, missing required size or area inputs, and unsupported size-based formulas return `requires_manual_review=true`. The response includes `matched_rule_id`, `matched_rule_version`, `rule_source`, and `governance_status`. `PATCH /v1/tasks/{id}/business-info` reuses the same pricing semantics for persisted task-side prefill snapshots.
       tags: [CostRules, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
-      x-permissions: [catalog.view]
+      x-permissions: [account.use]
       x-rbac-placeholder:
         auth_mode: session_token_capability_enforced
       requestBody:

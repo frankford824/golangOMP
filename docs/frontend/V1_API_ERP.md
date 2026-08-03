@@ -1843,7 +1843,7 @@ curl -X GET https://api.example.com/v1/cost-rules/<id>/history \
 ### 简介
 支持方法: POST。
 
-- `POST`: Minimal preview contract for the governed cost-rule skeleton. Fixed price, area-threshold surcharge, minimum billable area, and special-process surcharge can return estimates. `manual_quote`, missing required size or area inputs, and unsupported size-based formulas return `requires_manual_review=true`. The response includes `matched_rule_id`, `matched_rule_version`, `rule_source`, and `governance_status`. `PATCH /v1/tasks/{id}/business-info` reuses the same pricing semantics for persisted task-side prefill snapshots.
+- `POST`: Read-only preview contract available to every authenticated account so task and asset viewers can verify the governed calculation without changing rules or persisted business data. Fixed price, area-threshold surcharge, minimum billable area, and special-process surcharge can return estimates. `manual_quote`, missing required size or area inputs, and unsupported size-based formulas return `requires_manual_review=true`. The response includes `matched_rule_id`, `matched_rule_version`, `rule_source`, and `governance_status`. `PATCH /v1/tasks/{id}/business-info` reuses the same pricing semantics for persisted task-side prefill snapshots.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -1867,6 +1867,8 @@ Content-Type: `application/json`
 | `quantity` | integer | 否 | - |
 | `process` | string | 否 | - |
 | `notes` | string | 否 | - |
+| `erp_i_id` | string | 否 | ERP item identifier used for exact governed-rule binding. |
+| `product_i_id` | string | 否 | Product item identifier used for exact governed-rule binding when ERP i_id is absent. |
 
 ### 响应体 schema
 成功响应: `200 application/json`

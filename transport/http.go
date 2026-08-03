@@ -200,7 +200,7 @@ func NewRouter(
 		costRuleGroup.GET("/:id/history", capabilityAccess(costRuleGroup, http.MethodGet, "/:id/history", domain.APIReadinessReadyForFrontend, domain.PermissionCatalogView), costRuleH.GetHistory)
 		costRuleGroup.POST("", capabilityAccess(costRuleGroup, http.MethodPost, "", domain.APIReadinessReadyForFrontend, domain.PermissionCatalogManage), costRuleH.Create)
 		costRuleGroup.PATCH("/:id", capabilityAccess(costRuleGroup, http.MethodPatch, "/:id", domain.APIReadinessReadyForFrontend, domain.PermissionCatalogManage), costRuleH.Patch)
-		costRuleGroup.POST("/preview", capabilityAccess(costRuleGroup, http.MethodPost, "/preview", domain.APIReadinessReadyForFrontend, domain.PermissionCatalogView), costRuleH.Preview)
+		costRuleGroup.POST("/preview", capabilityAccess(costRuleGroup, http.MethodPost, "/preview", domain.APIReadinessReadyForFrontend, domain.PermissionAccountUse), costRuleH.Preview)
 	}
 
 	if costRuleBindingH != nil {

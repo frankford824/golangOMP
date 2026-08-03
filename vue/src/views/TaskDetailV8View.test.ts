@@ -272,6 +272,7 @@ describe('TaskDetailV8View business context', () => {
     expect(dialog().textContent).toContain('不锈钢')
     expect(dialog().textContent).toContain('SKU-041-A')
     expect(dialog().textContent).toContain('运营建议套装 · 设计可调整')
+    expect(dialog().textContent).toContain('SKU-041-A 成本规则试算与解释')
   })
 
   it('lets catalog managers update one batch SKU specification and manual cost with an audit reason', async () => {
