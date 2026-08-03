@@ -4215,7 +4215,7 @@ curl -X PATCH https://api.example.com/v1/tasks/<id>/cost-info \
 ### 简介
 支持方法: PATCH。
 
-- `PATCH`: Updates row-scoped batch SKU fields such as product name, ERP product i_id, design requirement, and reference images. Supplying or changing `product_i_id` writes it into the row `variant_json` and triggers ERP filing evaluation.
+- `PATCH`: Updates row-scoped batch SKU fields such as product name, ERP product i_id, specification, dimensions, quantity, design requirement, and reference images. Supplying or changing `product_i_id` writes it into the row `variant_json` and triggers ERP filing evaluation.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -4238,6 +4238,12 @@ Content-Type: `application/json`
 | `product_name` | string | 否 | - |
 | `i_id` | string | 否 | - |
 | `product_i_id` | string | 否 | - |
+| `spec_text` | string | 否 | - |
+| `size_text` | string | 否 | - |
+| `width` | number | 否 | - |
+| `height` | number | 否 | - |
+| `area` | number | 否 | - |
+| `quantity` | integer | 否 | - |
 | `design_requirement` | string | 否 | - |
 | `reference_file_refs` | array<ReferenceFileRef> | 否 | - |
 | `trigger_filing` | boolean | 否 | - |

@@ -10017,7 +10017,7 @@ paths:
   /v1/tasks/{id}/sku-items/{sku_item_id}:
     patch:
       summary: Patch one batch SKU item
-      description: Updates row-scoped batch SKU fields such as product name, ERP product i_id, design requirement, and reference images. Supplying or changing `product_i_id` writes it into the row `variant_json` and triggers ERP filing evaluation.
+      description: Updates row-scoped batch SKU fields such as product name, ERP product i_id, specification, dimensions, quantity, design requirement, and reference images. Supplying or changing `product_i_id` writes it into the row `variant_json` and triggers ERP filing evaluation.
       tags: [Tasks, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
       x-permissions: [catalog.manage]
@@ -10043,6 +10043,12 @@ paths:
                 product_name: { type: string, nullable: true }
                 i_id: { type: string, nullable: true }
                 product_i_id: { type: string, nullable: true }
+                spec_text: { type: string, nullable: true }
+                size_text: { type: string, nullable: true }
+                width: { type: number, format: double, nullable: true }
+                height: { type: number, format: double, nullable: true }
+                area: { type: number, format: double, nullable: true }
+                quantity: { type: integer, format: int64, nullable: true }
                 design_requirement: { type: string, nullable: true }
                 reference_file_refs:
                   type: array

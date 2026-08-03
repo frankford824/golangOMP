@@ -6,7 +6,7 @@ import { DataScopeEnum, RoleEnum } from '@/types'
 import { usePermissionsStore } from '@/stores/permissions'
 
 const mocks = vi.hoisted(() => ({
-  getById: vi.fn(), getDetail: vi.fn(), listTaskEvents: vi.fn(), listAuditHandovers: vi.fn(), auditHandover: vi.fn(), auditTakeover: vi.fn(),
+  getById: vi.fn(), getDetail: vi.fn(), listTaskEvents: vi.fn(), listAuditHandovers: vi.fn(), auditHandover: vi.fn(), auditTakeover: vi.fn(), patchSkuItem: vi.fn(), patchSkuItemCostInfo: vi.fn(),
   taskBundle: vi.fn(), uploadReference: vi.fn(), downloadPlanning: vi.fn(), getDesigners: vi.fn(), push: vi.fn(), back: vi.fn(), route: { params: { id: '41' } },
 }))
 vi.mock('@/services/api/tasksApi', () => ({ tasksApi: mocks }))
@@ -82,6 +82,8 @@ describe('TaskDetailV8View business context', () => {
     mocks.listAuditHandovers.mockResolvedValue({ data: { data: { items: [{ id: 9, handover_no: 'HO-9', status: 'pending_takeover', allowed_actions: ['task.audit.takeover'] }] } } })
     mocks.auditHandover.mockResolvedValue({})
     mocks.auditTakeover.mockResolvedValue({})
+    mocks.patchSkuItem.mockResolvedValue({})
+    mocks.patchSkuItemCostInfo.mockResolvedValue({})
     mocks.uploadReference.mockResolvedValue({ asset_id: 'ref-2', filename: '补充.png' })
     mocks.downloadPlanning.mockResolvedValue(undefined)
     mocks.getDesigners.mockResolvedValue({ data: { data: [{ id: 99, display_name: '定制设计师' }] } })
@@ -270,6 +272,58 @@ describe('TaskDetailV8View business context', () => {
     expect(dialog().textContent).toContain('不锈钢')
     expect(dialog().textContent).toContain('SKU-041-A')
     expect(dialog().textContent).toContain('运营建议套装 · 设计可调整')
+  })
+
+  it('lets catalog managers update one batch SKU specification and manual cost with an audit reason', async () => {
+    const permissions = usePermissionsStore()
+    permissions.setCurrentUser({
+      id: '9',
+      name: '运营管理员',
+      role: RoleEnum.OPS,
+      departmentId: '',
+      groupId: '',
+      dataScope: DataScopeEnum.GLOBAL,
+      permissions: [],
+    })
+    permissions.actions = ['catalog.manage']
+    const skuItem = {
+      id: 51,
+      sku_code: 'SKU-041-A',
+      product_name_snapshot: '子项水杯',
+      product_i_id: 'ERP-041-A',
+      quantity: 20,
+      cost_price: 12.5,
+      variant_json: { spec_text: '旧规格', size_text: '10×20cm', width: 10, height: 20, area: 200 },
+    }
+    mocks.getDetail.mockResolvedValue({ data: { data: { task: baseTask, task_detail: {}, reference_file_refs: [], sku_items: [skuItem] } } })
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.findAll('button').find((item) => item.text() === '完整任务信息')?.trigger('click')
+
+    const activeDialog = dialog()
+    const labels = [...activeDialog.querySelectorAll('label')]
+    const inputFor = (name: string) => labels.find((label) => label.textContent?.includes(name))?.querySelector<HTMLInputElement>('input')
+    const specInput = inputFor('规格')
+    const costInput = inputFor('当前/人工成本')
+    const reasonInput = inputFor('成本调整原因')
+    expect(specInput?.value).toBe('旧规格')
+    if (specInput) specInput.value = '新规格'
+    specInput?.dispatchEvent(new Event('input', { bubbles: true }))
+    if (costInput) costInput.value = '15.8'
+    costInput?.dispatchEvent(new Event('input', { bubbles: true }))
+    if (reasonInput) reasonInput.value = '供应商报价调整'
+    reasonInput?.dispatchEvent(new Event('input', { bubbles: true }))
+    const saveButton = [...activeDialog.querySelectorAll('button')].find((button) => button.textContent?.includes('保存该 SKU'))
+    expect(saveButton).toBeDefined()
+    saveButton?.click()
+    await flushPromises()
+
+    expect(mocks.patchSkuItem).toHaveBeenCalledWith('41', 51, expect.objectContaining({ spec_text: '新规格', quantity: 20 }))
+    expect(mocks.patchSkuItemCostInfo).toHaveBeenCalledWith('41', 51, expect.objectContaining({
+      cost_price: 15.8,
+      manual_cost_override: true,
+      manual_cost_override_reason: '供应商报价调整',
+    }))
   })
 
   it('keeps operational timing, cost, copy, and ERP context in the complete-information workspace', async () => {
