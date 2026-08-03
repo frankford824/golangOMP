@@ -97,7 +97,7 @@
         <div class="toolbar-actions">
           <label v-if="intent === 'planning_sku' || intent === 'new_design'" class="secondary-button file-button">{{ intent === 'planning_sku' ? '导入策划 Excel' : '导入新款 Excel' }}<input type="file" accept=".xlsx,.xls,.csv" @change="importComposeExcel" /></label>
           <button class="secondary-button" type="button" :disabled="rows.length >= maxRows" @click="addRow"><Plus :size="16" />添加一行</button>
-          <button class="secondary-button" type="button" :disabled="rows.length === 1" @click="removeSelectedRow"><Trash2 :size="16" />删除当前行</button>
+          <button class="secondary-button" type="button" :disabled="!selectedRowIds.length || rows.length === 1" @click="removeSelectedRows"><Trash2 :size="16" />删除选中行<span v-if="selectedRowIds.length > 1">（{{ selectedRowIds.length }}）</span></button>
         </div>
       </header>
 
@@ -111,6 +111,7 @@
             :violations="violations"
             @update:rows="replaceRows"
             @select="selectRow"
+            @selection="selectRows"
             @files="addFiles"
           />
 
@@ -234,6 +235,7 @@ const intent = ref<ComposeIntent>(initialIntent())
 const common = reactive<ComposeCommonInfo>({ due_at: defaultDueAt(), priority: 'normal', note: '', customization_required: false, customization_source_type: undefined, erp_sync_mode: 'none' })
 const rows = ref<ComposeRow[]>([createComposeRow()])
 const selectedRowId = ref(rows.value[0].id)
+const selectedRowIds = ref<string[]>([rows.value[0].id])
 const gridRevision = ref(0)
 const gridRef = ref<InstanceType<typeof UnifiedTaskGrid> | null>(null)
 const referenceInput = ref<HTMLInputElement | null>(null)
@@ -333,7 +335,7 @@ async function selectIntent(next: ComposeIntent) {
   common.customization_source_type = undefined
   common.erp_sync_mode = 'none'
   rows.value = [createComposeRow()]
-  selectedRowId.value = rows.value[0].id
+  selectRow(rows.value[0].id)
   gridRevision.value += 1
   dirty.value = false
   void router.replace({ query: { ...route.query, intent: next } })
@@ -351,19 +353,45 @@ function addRow() {
   if (rows.value.length >= maxRows.value) return
   const row = createComposeRow()
   rows.value.push(row)
-  selectedRowId.value = row.id
+  selectRow(row.id)
   gridRevision.value += 1
 }
 function removeRow(rowId: string) {
   if (rows.value.length === 1) return
   const index = rows.value.findIndex((row) => row.id === rowId)
   rows.value = rows.value.filter((row) => row.id !== rowId)
-  selectedRowId.value = rows.value[Math.min(index, rows.value.length - 1)]?.id || ''
+  const nextRowId = rows.value[Math.min(index, rows.value.length - 1)]?.id || ''
+  if (nextRowId) selectRow(nextRowId)
+  else {
+    selectedRowId.value = ''
+    selectedRowIds.value = []
+  }
   gridRevision.value += 1
 }
-function removeSelectedRow() { if (selectedRowId.value) removeRow(selectedRowId.value) }
-function selectRow(rowId: string) { selectedRowId.value = rowId }
-function replaceRows(next: ComposeRow[]) { rows.value = next }
+function removeSelectedRows() {
+  const selected = new Set(selectedRowIds.value.length ? selectedRowIds.value : [selectedRowId.value].filter(Boolean))
+  if (!selected.size || rows.value.length === 1) return
+  const firstSelectedIndex = rows.value.findIndex((row) => selected.has(row.id))
+  const remaining = rows.value.filter((row) => !selected.has(row.id))
+  rows.value = remaining.length ? remaining : [createComposeRow()]
+  selectRow(rows.value[Math.min(Math.max(0, firstSelectedIndex), rows.value.length - 1)].id)
+  gridRevision.value += 1
+}
+function selectRows(rowIds: string[]) {
+  const valid = [...new Set(rowIds)].filter((rowId) => rows.value.some((row) => row.id === rowId))
+  selectedRowIds.value = valid
+  selectedRowId.value = valid[valid.length - 1] || ''
+}
+function selectRow(rowId: string) {
+  selectedRowId.value = rowId
+  selectedRowIds.value = rowId ? [rowId] : []
+}
+function replaceRows(next: ComposeRow[]) {
+  rows.value = next
+  const validSelection = selectedRowIds.value.filter((rowId) => next.some((row) => row.id === rowId))
+  if (validSelection.length) selectRows(validSelection)
+  else if (next[0]) selectRow(next[0].id)
+}
 function longTextColumn(key: ComposeColumnKey) { return key === 'design_requirement' || key === 'description_spec' || key === 'note' || key === 'special_note' }
 function updateRowField(rowId: string, key: ComposeColumnKey, value: string) {
   const row = rows.value.find((item) => item.id === rowId)
@@ -483,7 +511,7 @@ function chooseERP(item: Record<string, unknown>) {
 }
 
 function locateViolation(issue: ComposeViolation) {
-  if (issue.row_id) selectedRowId.value = issue.row_id
+  if (issue.row_id) selectRow(issue.row_id)
   if (issue.row_index != null) {
     gridRef.value?.focusCell(issue.row_index, String(issue.field))
     return
@@ -591,7 +619,7 @@ async function importComposeExcel(event: Event) {
           const row = rows.value[sourceIndex >= 0 ? sourceIndex : Math.max(0, issue.row - 2)]
           if (row && issue.code === 'invalid_i_id') row.product_i_id = ''
         }
-        selectedRowId.value = rows.value[0]?.id || ''
+        if (rows.value[0]) selectRow(rows.value[0].id)
         gridRevision.value += 1
       }
       if (parsed.violations.length) submitError.value = parsed.violations.slice(0, 3).map((item) => `第 ${item.row} 行：${formatBatchViolationMessage(item)}`).join('；')
@@ -602,7 +630,7 @@ async function importComposeExcel(event: Event) {
     if (parsed.errors.length) submitError.value = parsed.errors.slice(0, 3).map((item) => `第 ${item.row} 行 ${item.field}：${item.reason}`).join('；')
     if (parsed.planning_sku_items.length) {
       rows.value = parsed.planning_sku_items.slice(0, 200).map((item) => createComposeRow({ id: item.client_item_id || generateActionId(), description_spec: item.description_spec, quantity: item.quantity, target_price: item.target_price, note: item.note, reference_url: item.reference_url, product_i_id: item.erp_product_i_id, product_name: item.erp_product_name, reference_assets: item.image_upload_ref ? [{ id: generateActionId(), name: 'Excel 产品图片', upload_ref: item.image_upload_ref, status: 'uploaded' }] : [] }))
-      selectedRowId.value = rows.value[0]?.id || ''
+      if (rows.value[0]) selectRow(rows.value[0].id)
       gridRevision.value += 1
     }
   } catch (error) { submitError.value = error instanceof Error ? error.message : 'Excel 解析失败' }
@@ -665,7 +693,7 @@ async function restoreDraft(id: string) {
       })
     }
     if (typeof payload.client_create_id === 'string') clientCreateId.value = payload.client_create_id
-    selectedRowId.value = rows.value[0]?.id || ''
+    if (rows.value[0]) selectRow(rows.value[0].id)
     gridRevision.value += 1
   } catch (error) { submitError.value = error instanceof Error ? error.message : '草稿读取失败' }
 }
@@ -679,7 +707,7 @@ async function retryPlanningERP() {
   finally { resultBusy.value = false }
 }
 async function exportPlanningSelection() { resultBusy.value = true; try { await planningSkuApi.exportSelection([...selectedPlanningIds.value]) } finally { resultBusy.value = false } }
-function startAnother() { result.value = false; planningResult.value = null; rows.value = [createComposeRow()]; selectedRowId.value = rows.value[0].id; clientCreateId.value = generateActionId(); gridRevision.value += 1; dirty.value = false }
+function startAnother() { result.value = false; planningResult.value = null; rows.value = [createComposeRow()]; selectRow(rows.value[0].id); clientCreateId.value = generateActionId(); gridRevision.value += 1; dirty.value = false }
 </script>
 
 <style scoped>

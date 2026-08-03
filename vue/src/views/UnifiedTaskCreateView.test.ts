@@ -208,6 +208,35 @@ describe('UnifiedTaskCreateView', () => {
     wrapper.unmount()
   })
 
+  it('deletes a multi-row Univer selection in one operation and keeps one editable row', async () => {
+    const wrapper = mount(UnifiedTaskCreateView, {
+      global: {
+        stubs: {
+          UnifiedTaskGrid: {
+            props: ['rows'],
+            emits: ['selection'],
+            template: '<button class="select-two-rows" @click="$emit(\'selection\', rows.slice(0, 2).map((row) => row.id))">选择两行</button>',
+          },
+          IIdSelector: true,
+          RouterLink: true,
+        },
+      },
+    })
+    const addButton = wrapper.findAll('button').find((button) => button.text().includes('添加一行'))
+    await addButton?.trigger('click')
+    await addButton?.trigger('click')
+    expect(wrapper.get('.compose-page').attributes('data-row-count')).toBe('3')
+
+    await wrapper.get('.select-two-rows').trigger('click')
+    const deleteButton = wrapper.findAll('button').find((button) => button.text().includes('删除选中行'))
+    expect(deleteButton?.text()).toContain('（2）')
+    await deleteButton?.trigger('click')
+
+    expect(wrapper.get('.compose-page').attributes('data-row-count')).toBe('1')
+    expect(deleteButton?.attributes('disabled')).toBeDefined()
+    wrapper.unmount()
+  })
+
   it('clears the uploading violation after a reference upload completes', async () => {
     mocks.route.query = { intent: 'modify_existing' }
     let resolveUpload: ((value: { asset_id: string }) => void) | undefined

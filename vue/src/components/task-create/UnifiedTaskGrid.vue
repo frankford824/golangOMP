@@ -6,6 +6,7 @@ import { AlertTriangle, ImagePlus, LoaderCircle, Table2 } from 'lucide-vue-next'
 import type { ComposeColumn, ComposeIntent, ComposeRow, ComposeViolation } from '@/domain/unified-task-compose'
 import { composeColumns, createComposeRow } from '@/domain/unified-task-compose'
 import { bindComposeGridImageCells, type ComposeGridCellPosition } from './compose-grid-image-cell'
+import { composeRowIdsFromSelection } from './compose-grid-selection'
 
 const props = defineProps<{
   intent: ComposeIntent
@@ -17,6 +18,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   'update:rows': [ComposeRow[]]
   select: [rowId: string]
+  selection: [rowIds: string[]]
   files: [payload: { rowId: string; field: 'reference_assets' | 'source_assets'; files: File[] }]
 }>()
 
@@ -254,6 +256,14 @@ async function boot() {
         emit('select', row.id)
       }
     }))
+    if (facade.Event.SelectionChanged) {
+      eventDisposables.push(facade.addEvent(facade.Event.SelectionChanged, (params) => {
+        const rowIds = composeRowIdsFromSelection(props.rows, params)
+        if (!rowIds.length) return
+        activeRowId.value = rowIds[rowIds.length - 1]
+        emit('selection', rowIds)
+      }))
+    }
     imageBinding = bindComposeGridImageCells({
       element: canvasRef.value,
       columns: columns.value,
@@ -412,7 +422,7 @@ defineExpose({ readRowsFromWorkbook, boot, focusCell })
 <template>
   <section ref="rootRef" class="compose-grid" aria-label="任务明细表格">
     <div class="compose-grid__head">
-      <div><p>可以直接从 Excel / WPS 复制粘贴</p><span>填写或粘贴后会立刻自动检查；图片直接拖进“{{ intent === 'planning_sku' ? '产品图片' : '参考图' }}”一列就能上传。</span></div>
+      <div><p>可以直接从 Excel / WPS 复制粘贴</p><span>支持拖拽选区、Ctrl/Cmd+C/V/Z；选中连续多行后可在上方一次删除。图片可直接拖进“{{ intent === 'planning_sku' ? '产品图片' : '参考图' }}”列。</span></div>
       <span class="compose-grid__engine"><Table2 :size="15" aria-hidden="true" />{{ compactViewport ? '卡片填写' : '在线表格' }}</span>
     </div>
     <div v-if="!compactViewport" class="compose-grid__canvas-shell">
