@@ -187,7 +187,7 @@
         :has-design-output-hint="Boolean(bundle?.groups.some((group) => group.working_revision || group.finalized_revision))"
         @confirm="submitAssign"
       />
-      <input ref="referenceInput" class="sr-only" type="file" accept="image/*,.pdf,.zip" multiple aria-label="补充任务参考附件" @change="uploadReferenceFiles" />
+      <input v-if="canManageReferences" ref="referenceInput" class="sr-only" type="file" accept="image/*,.pdf,.zip" multiple aria-label="补充任务参考附件" @change="uploadReferenceFiles" />
     </template>
   </main>
 </template>

@@ -232,7 +232,7 @@ describe('TaskDetailV8View business context', () => {
     mocks.getDetail.mockResolvedValue({ data: { data: { task: designTask, task_detail: {}, reference_file_refs: [] } } })
     const wrapper = mountView()
     await flushPromises()
-    expect(wrapper.find('input[aria-label="补充任务参考附件"]').exists()).toBe(true)
+    expect(wrapper.find('input[aria-label="补充任务参考附件"]').exists()).toBe(false)
     expect(wrapper.findAll('button').some((item) => item.text().includes('补充附件'))).toBe(false)
   })
 
