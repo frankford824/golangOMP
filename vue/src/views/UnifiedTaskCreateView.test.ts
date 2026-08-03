@@ -329,6 +329,28 @@ describe('UnifiedTaskCreateView', () => {
     wrapper.unmount()
   })
 
+  it('clears common and transient fields after confirming an intent switch', async () => {
+    const wrapper = mount(UnifiedTaskCreateView, {
+      attachTo: document.body,
+      global: { stubs: { UnifiedTaskGrid: true, IIdSelector: true, RouterLink: true } },
+    })
+    await wrapper.get('.common-ribbon select').setValue('critical')
+    await wrapper.get('.note-field input').setValue('不应带到下一个流程')
+    const retouch = wrapper.findAll('.intent-card').find((item) => item.text().includes('只修图'))
+    if (!retouch) throw new Error('missing retouch intent')
+    await retouch.trigger('click')
+    await flushPromises()
+    const confirm = Array.from(document.querySelectorAll<HTMLButtonElement>('.compose-confirm button'))
+      .find((button) => button.textContent?.includes('清空并切换'))
+    confirm?.click()
+    await flushPromises()
+
+    expect(wrapper.get('.compose-page').attributes('data-compose-intent')).toBe('retouch')
+    expect((wrapper.get('.common-ribbon select').element as HTMLSelectElement).value).toBe('normal')
+    expect((wrapper.get('.note-field input').element as HTMLInputElement).value).toBe('')
+    wrapper.unmount()
+  })
+
   it('clears the uploading violation after a reference upload completes', async () => {
     mocks.route.query = { intent: 'modify_existing' }
     let resolveUpload: ((value: { asset_id: string }) => void) | undefined

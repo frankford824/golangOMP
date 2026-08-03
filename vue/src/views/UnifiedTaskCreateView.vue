@@ -345,14 +345,32 @@ async function selectIntent(next: ComposeIntent) {
   if (next === intent.value) return
   if (dirty.value && !(await askConfirm('切换创建类型？', '切换后当前已填写的行会被清空，可先点右上角「保存草稿」留底。', '清空并切换'))) return
   intent.value = next
+  resetComposeState()
+  void router.replace({ query: { ...route.query, intent: next } })
+}
+
+function resetComposeState() {
+  common.due_at = defaultDueAt()
+  common.priority = 'normal'
+  common.note = ''
   common.customization_required = false
   common.customization_source_type = undefined
   common.erp_sync_mode = 'none'
+  common.designer_id = undefined
   rows.value = [createComposeRow()]
   selectRow(rows.value[0].id)
+  remoteViolations.value = []
+  submitError.value = ''
+  batchERPFeedback.value = ''
+  erpSearchCode.value = ''
+  erpSearchResults.value = []
+  result.value = false
+  planningResult.value = null
+  selectedPlanningIds.value = new Set()
+  resultFilter.value = 'all'
+  clientCreateId.value = generateActionId()
   gridRevision.value += 1
   dirty.value = false
-  void router.replace({ query: { ...route.query, intent: next } })
 }
 
 function syncCustomizationSource() {
@@ -869,7 +887,7 @@ async function retryPlanningERP() {
   finally { resultBusy.value = false }
 }
 async function exportPlanningSelection() { resultBusy.value = true; try { await planningSkuApi.exportSelection([...selectedPlanningIds.value]) } finally { resultBusy.value = false } }
-function startAnother() { result.value = false; planningResult.value = null; rows.value = [createComposeRow()]; selectRow(rows.value[0].id); clientCreateId.value = generateActionId(); gridRevision.value += 1; dirty.value = false }
+function startAnother() { resetComposeState() }
 </script>
 
 <style scoped>
