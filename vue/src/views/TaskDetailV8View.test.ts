@@ -106,13 +106,13 @@ describe('TaskDetailV8View business context', () => {
     expect(wrapper.text()).not.toContain('完整资料')
     expect(wrapper.text()).not.toContain('人员与组织')
     expect(wrapper.text()).toContain('审核已领取')
-    await wrapper.get('.collaboration-fab').trigger('click')
+    await wrapper.findAll('button').find((item) => item.text() === '审核协作')?.trigger('click')
     expect(bodyText()).toContain('HO-9')
     expect(document.body.querySelector('.handover-form')).not.toBeNull()
     expect(bodyText()).toContain('接手')
     ;(dialog().querySelector<HTMLButtonElement>('.close-button'))?.click()
     await flushPromises()
-    await wrapper.findAll('button').find((item) => item.text().includes('查看全部文件'))?.trigger('click')
+    await wrapper.findAll('button').find((item) => item.text().includes('SKU 资源总览'))?.trigger('click')
     expect(bodyText()).toContain('资源矩阵')
   })
 
@@ -147,7 +147,7 @@ describe('TaskDetailV8View business context', () => {
     const wrapper = mountView()
     await flushPromises()
 
-    await wrapper.get('.collaboration-fab').trigger('click')
+    await wrapper.findAll('button').find((item) => item.text() === '审核协作')?.trigger('click')
     expect(bodyText()).toContain('HO-9')
     expect([...document.body.querySelectorAll('button')].some((item) => item.textContent?.trim() === '接手')).toBe(false)
     expect(document.body.querySelector('.handover-form')).toBeNull()
@@ -367,7 +367,7 @@ describe('TaskDetailV8View business context', () => {
 
     ;(dialog().querySelector<HTMLButtonElement>('.close-button'))?.click()
     await flushPromises()
-    await wrapper.findAll('button').find((item) => item.text() === '查看任务级参考附件')?.trigger('click')
+    await wrapper.findAll('button').find((item) => item.text() === '参考资料总览')?.trigger('click')
     expect(dialog().getAttribute('aria-label')).toBe('任务级参考附件')
     expect(dialog().textContent).toContain('下载文件')
     expect(dialog().textContent).toContain('参考.jpg')
@@ -403,6 +403,19 @@ describe('TaskDetailV8View business context', () => {
     const commandStrip = wrapper.get('.command-strip').element
     expect(resourceRail.compareDocumentPosition(commandStrip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(wrapper.text()).toContain('设计阶段不上传成品')
+  })
+
+  it('keeps one primary entry for each task-detail operation', async () => {
+    mocks.getDetail.mockResolvedValue({ data: { data: { task: baseTask, task_detail: {}, reference_file_refs: baseTask.reference_file_refs } } })
+    const wrapper = mountView()
+    await flushPromises()
+
+    const labels = wrapper.findAll('button').map((button) => button.text().trim())
+    expect(labels.filter((label) => label === '进入审核工作台')).toHaveLength(1)
+    expect(labels.filter((label) => label === '审核协作')).toHaveLength(1)
+    expect(labels.filter((label) => label === '完整任务信息')).toHaveLength(1)
+    expect(labels.filter((label) => label.includes('SKU 资源总览'))).toHaveLength(1)
+    expect(labels).not.toContain('查看任务级参考附件')
   })
 
   it('shows assignment only from the exact backend task action', async () => {

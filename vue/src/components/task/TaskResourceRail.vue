@@ -2,11 +2,11 @@
   <section class="resource-rail" aria-label="任务资源链路">
     <header>
       <div><p>任务资源链路</p><h2>参考图、有效源文件与最终成品</h2></div>
-      <button type="button" @click="$emit('openResources')">查看全部文件 <ArrowRight :size="15" aria-hidden="true" /></button>
+      <button type="button" @click="$emit('openResources')">SKU 资源总览 <ArrowRight :size="15" aria-hidden="true" /></button>
     </header>
     <div class="rail-grid">
       <article class="rail-column references">
-        <div class="column-head"><span>01</span><div><strong>运营参考图</strong><small>{{ resourceReferences.length }} 个附件</small></div><button type="button" @click="openAllReferences">预览全部</button></div>
+        <div class="column-head"><span>01</span><div><strong>运营参考图</strong><small>{{ resourceReferences.length }} 个附件</small></div><button type="button" @click="openAllReferences">参考资料总览</button></div>
         <div v-if="resourceReferences.length" class="media-strip">
           <button v-for="(file,index) in resourceReferences.slice(0,4)" :key="referenceKey(file,index)" type="button" @click="openReference(file)">
             <AssetPreviewMedia
