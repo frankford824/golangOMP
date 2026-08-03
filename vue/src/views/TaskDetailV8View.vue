@@ -65,24 +65,12 @@
 
       <section class="overview-grid" aria-label="任务关键信息">
         <article class="brief-card mission-card">
-          <header><div class="card-heading"><span class="heading-icon"><ClipboardList :size="18" aria-hidden="true" /></span><div><h2>{{ requirementHeading }}</h2><p>需求与运营交代</p></div></div><button @click="openWorkspace('details')"><FileText :size="15" aria-hidden="true" />完整资料</button></header>
+          <header><div class="card-heading"><span class="heading-icon"><ClipboardList :size="18" aria-hidden="true" /></span><div><h2>{{ requirementHeading }}</h2><p>需求与运营交代</p></div></div></header>
           <div class="mission-copy">
             <section><span class="section-label">需求说明</span><p class="clamped-copy">{{ requirementText }}</p></section>
             <aside><span class="section-label">运营备注</span><p class="clamped-copy">{{ operationNote }}</p></aside>
           </div>
           <div v-if="specSummary.length" class="detail-chips"><span v-for="item in specSummary" :key="item">{{ item }}</span></div>
-        </article>
-
-        <article class="brief-card references-card">
-          <header><div class="card-heading"><span class="heading-icon"><Paperclip :size="18" aria-hidden="true" /></span><div><h2>任务级参考附件</h2><p>{{ referenceFiles.length }} 个任务级附件</p></div></div><div class="card-actions"><button @click="openWorkspace('attachments')"><ExternalLink :size="15" aria-hidden="true" />查看任务级附件</button><button v-if="canManageReferences" class="upload-button" :disabled="referenceUploading" @click="referenceInput?.click()"><Plus :size="15" aria-hidden="true" />{{ referenceUploading ? '上传中…' : '补充附件' }}</button></div></header>
-          <div v-if="referenceFiles.length" class="reference-preview">
-            <a v-for="(file,index) in referenceFiles.slice(0,4)" :key="referenceKey(file,index)" :href="referenceUrl(file)" target="_blank" rel="noreferrer">
-              <img v-if="isPreviewable(file) && referencePreviewUrl(file) && !brokenReferences.has(referenceKey(file,index))" :src="referencePreviewUrl(file)" :alt="referenceName(file)" @error="markReferenceBroken(file,index)" />
-              <span v-else class="file-glyph" aria-hidden="true">{{ fileExtension(file) }}</span>
-              <small>{{ referenceName(file) }}</small>
-            </a>
-          </div>
-          <p v-else class="muted-copy">暂无任务级参考附件。</p>
         </article>
 
         <article class="brief-card collaboration-card">
@@ -97,7 +85,6 @@
           </div>
           <p v-else class="muted-copy">任务刚刚创建，等待首次处理。</p>
           <div class="collaboration-actions">
-            <button @click="openWorkspace('details')"><UserRound :size="15" aria-hidden="true" />人员与组织</button>
             <button v-if="canAssignDesigner" @click="openAssignDialog">{{ task.designer_name ? '改派设计' : '指派设计' }}</button>
             <button v-if="supportsAuditCollaboration" @click="openWorkspace('collaboration')">审核协作</button>
           </div>
@@ -200,16 +187,13 @@ import {
   CheckCircle2,
   ClipboardList,
   Download,
-  ExternalLink,
   FileText,
   History,
   Layers3,
   PanelTopOpen,
   Paperclip,
-  Plus,
   RefreshCw,
   Tag,
-  UserRound,
 } from 'lucide-vue-next'
 import { tasksApi } from '@/services/api/tasksApi'
 import { resourceGroupsApi, type ResourceBundle } from '@/services/api/resourceGroupsApi'
@@ -261,7 +245,6 @@ const assignDialogOpen = ref(false)
 const assignSubmitting = ref(false)
 const referenceInput = ref<HTMLInputElement | null>(null)
 const referenceUploading = ref(false)
-const brokenReferences = ref(new Set<string>())
 const planningExporting = ref(false)
 const assignError = ref('')
 const {
@@ -447,13 +430,6 @@ function unwrapCollection<T>(response: { data?: unknown } | null, fallback: T[] 
 function displayDate(value: unknown) { if (!value) return '刚刚'; const date = new Date(String(value)); return Number.isNaN(date.getTime()) ? String(value) : new Intl.DateTimeFormat('zh-CN',{ month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit' }).format(date) }
 function detailValue(key: string) { return taskDetailDisplayValue(key, task.value?.[key]) }
 function formatMoney(value: unknown) { const amount = Number(value); return Number.isFinite(amount) ? `¥${amount.toFixed(2)}` : '—' }
-function referenceName(file: ReferenceFile) { return String(file.filename || file.file_name || file.asset_id || '参考附件') }
-function referenceUrl(file: ReferenceFile) { return String(file.download_url || file.preview_url || file.url || '') }
-function referencePreviewUrl(file: ReferenceFile) { return String(file.preview_url || file.url || file.download_url || '') }
-function referenceKey(file: ReferenceFile,index: number) { return String(file.id || file.asset_id || `${referenceName(file)}-${index}`) }
-function markReferenceBroken(file: ReferenceFile,index: number) { brokenReferences.value = new Set(brokenReferences.value).add(referenceKey(file,index)) }
-function fileExtension(file: ReferenceFile) { const name = referenceName(file); const suffix = name.includes('.') ? name.split('.').pop() : 'FILE'; return String(suffix || 'FILE').slice(0,4).toUpperCase() }
-function isPreviewable(file: ReferenceFile) { return String(file.mime_type || '').startsWith('image/') || /\.(png|jpe?g|webp|gif)$/i.test(referenceName(file)) }
 function eventKey(item: TaskEvent) { return String(item.id || `${item.event_type}-${item.created_at}`) }
 const friendlyEventTitles: Record<string, string> = {
   'task.created': '任务已创建',
@@ -662,7 +638,6 @@ onBeforeUnmount(()=>{window.removeEventListener('beforeunload',warnBeforeUnload)
 .overview-grid{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(250px,.8fr) minmax(285px,1fr);align-items:start;gap:12px}.brief-card{min-width:0;padding:16px;display:grid;align-content:start;gap:12px}.brief-card header{align-items:start}.brief-card header button{min-height:30px;padding:0 9px}
 .mission-copy{display:grid;grid-template-columns:1.15fr .85fr;gap:10px}.mission-copy>section,.mission-copy>aside{min-width:0;padding:12px;border-radius:12px;background:rgb(var(--yb-surface-soft))}.mission-copy>aside{border-left:3px solid rgb(var(--yb-brand));background:rgb(var(--yb-brand-soft))}.section-label{display:block;margin-bottom:5px;color:rgb(var(--yb-text-muted));font-size:10px;font-weight:800;letter-spacing:.08em}
 .clamped-copy{display:-webkit-box;margin:0;overflow:hidden;color:rgb(var(--yb-text-body));line-height:1.65;-webkit-box-orient:vertical;-webkit-line-clamp:3}.detail-chips,.sku-list{display:flex;gap:6px;flex-wrap:wrap}.detail-chips span,.sku-list span{display:inline-flex;align-items:center;gap:6px;padding:5px 8px;border-radius:999px;background:rgb(var(--yb-surface-muted));font-size:11px}.sku-list em{padding:2px 6px;border-radius:999px;background:rgb(var(--yb-warning-soft));color:rgb(var(--yb-warning-strong));font-size:10px;font-style:normal;font-weight:750}
-.reference-preview{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}.reference-preview a{min-width:0;display:grid;grid-template-columns:44px 1fr;align-items:center;gap:7px;padding:6px;border:1px solid rgb(var(--yb-border));border-radius:10px;color:rgb(var(--yb-text));text-decoration:none}.reference-preview img,.file-glyph{width:44px;height:42px;border-radius:8px;object-fit:cover;background:rgb(var(--yb-surface-preview))}.file-glyph{display:grid;place-items:center;color:rgb(var(--yb-brand));font:700 10px var(--yb-font-data)}.reference-preview small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .assignment-snapshot{display:grid;grid-template-columns:42px 1fr;align-items:center;gap:10px;padding:10px;border-radius:12px;background:rgb(var(--yb-surface-soft))}.person-avatar{width:42px;height:42px;display:grid;place-items:center;border-radius:13px;background:rgb(var(--yb-text-night));color:rgb(var(--yb-text-inverse));font-weight:850}.assignment-snapshot small,.current-event small{color:rgb(var(--yb-text-muted));font-size:10px}.assignment-snapshot strong,.current-event strong{display:block;margin-top:2px}.assignment-snapshot p,.current-event p{margin:2px 0 0;color:rgb(var(--yb-text-muted));font-size:11px}
 .current-event{display:grid;grid-template-columns:13px 1fr;gap:8px;padding-top:10px;border-top:1px solid rgb(var(--yb-border))}.collaboration-actions{display:flex;gap:7px;margin-top:auto}.collaboration-actions button{min-height:32px;flex:1;padding:0 8px;font-size:12px}
 .event-dot{width:9px;height:9px;margin-top:5px;border:2px solid rgb(var(--yb-surface));border-radius:50%;background:rgb(var(--yb-brand));box-shadow:0 0 0 2px rgb(var(--yb-brand-soft))}.activity-list,.full-timeline{display:grid;gap:12px;margin:0;padding:0;list-style:none}.full-timeline li{display:grid;grid-template-columns:14px 1fr;gap:9px}.full-timeline p,.full-timeline small{margin:2px 0 0;color:rgb(var(--yb-text-muted));font-size:12px}.muted-copy{margin:0;color:rgb(var(--yb-text-muted))}
@@ -674,8 +649,8 @@ onBeforeUnmount(()=>{window.removeEventListener('beforeunload',warnBeforeUnload)
 .collaboration-body{display:grid;grid-template-columns:minmax(280px,.75fr) 1.25fr;gap:16px}.handover-form,.handover-list,.handover-side{display:grid;align-content:start;gap:12px}.handover-form{padding:18px;border:1px solid rgb(var(--yb-border));border-radius:16px}.handover-form label{display:grid;gap:6px;font-weight:700;font-size:13px}.handover-form input,.handover-form textarea,.handover-form select{min-height:40px;padding:9px 11px;border:1px solid rgb(var(--yb-border));border-radius:10px;background:rgb(var(--yb-surface));color:rgb(var(--yb-text));font-weight:500}
 .event-count{margin-left:6px;padding:1px 7px;border-radius:999px;background:rgb(var(--yb-surface-muted));color:rgb(var(--yb-text-muted));font-size:11px;font-style:normal;font-weight:750}.handover-list article{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px;border-radius:12px;background:rgb(var(--yb-surface-soft))}.handover-list p{margin:3px 0 0;color:rgb(var(--yb-text-muted))}.collaboration-fab{position:fixed;right:24px;bottom:24px;z-index:20;min-height:48px;padding:0 18px;border:0;border-radius:999px;background:rgb(var(--yb-text-night));color:rgb(var(--yb-text-inverse));box-shadow:0 14px 36px rgb(var(--yb-shadow)/.24);cursor:pointer}.collaboration-fab span{margin-left:8px;padding:2px 6px;border-radius:999px;background:rgb(var(--yb-brand))}.message,.state{padding:18px;border-radius:14px;background:rgb(var(--yb-surface-muted))}.error{background:rgb(var(--yb-danger-soft));color:rgb(var(--yb-danger-text))}
 @media(max-width:1160px){.hero-main{align-items:start;flex-direction:column}.hero-facts{width:100%}.command-strip{align-items:flex-start;flex-direction:column}.stage-summary{width:100%;flex-wrap:wrap}.stage-context{width:100%;grid-template-columns:repeat(2,minmax(0,1fr))}.command-actions{width:100%;justify-content:flex-start;flex-wrap:wrap}.overview-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.mission-card{grid-column:1/-1}.resource-story{grid-template-columns:1fr}}
-@media(max-width:760px){.task-page{padding:10px}.task-hero{min-height:248px;border-radius:19px}.hero-content{min-height:248px;padding:12px}.hero-nav,.command-strip,.workspace-head{align-items:flex-start}.hero-actions{flex-wrap:wrap}.hero-main{gap:8px}.hero-main h1{font-size:27px;line-height:1.02}.hero-facts{grid-template-columns:repeat(2,minmax(0,1fr))}.hero-facts div{min-width:0;padding:7px}.hero-facts dd{overflow:hidden;font-size:11px;line-height:1.35;text-overflow:ellipsis}.overview-grid{grid-template-columns:1fr}.mission-card{grid-column:auto}.mission-copy,.detail-copy-grid{grid-template-columns:1fr}.command-strip{align-items:flex-start;flex-direction:column}.stage-summary{width:100%;display:grid;grid-template-columns:34px 1fr;align-items:start}.stage-orb{width:34px;height:34px}.stage-copy{min-width:0}.stage-context{grid-column:1/-1;width:100%;display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.stage-context dd{max-width:none}.command-actions{width:100%;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.command-actions>*{min-width:0}.command-actions>.primary-button{grid-column:1/-1}.resource-story{display:block}.resource-steps{grid-template-columns:1fr;margin-top:12px}.resource-steps i{transform:rotate(90deg);justify-self:center}.workspace-backdrop{padding:0}.workspace-dialog{height:100dvh;border:0;border-radius:0}.workspace-head{padding:13px}.workspace-body{padding:12px}.detail-sections,.collaboration-body{grid-template-columns:1fr}.detail-summary-strip,.detail-requirement{grid-column:auto}.detail-summary-strip{grid-template-columns:repeat(2,minmax(0,1fr))}.detail-list,.reference-detail-grid{grid-template-columns:1fr}.reference-preview{grid-template-columns:repeat(2,minmax(0,1fr))}.collaboration-fab{right:12px;bottom:12px}.hero-progress{overflow:auto}}
-@media(max-width:420px){.reference-preview{grid-template-columns:1fr}.command-actions>*{flex-basis:100%}}
+@media(max-width:760px){.task-page{padding:10px}.task-hero{min-height:248px;border-radius:19px}.hero-content{min-height:248px;padding:12px}.hero-nav,.command-strip,.workspace-head{align-items:flex-start}.hero-actions{flex-wrap:wrap}.hero-main{gap:8px}.hero-main h1{font-size:27px;line-height:1.02}.hero-facts{grid-template-columns:repeat(2,minmax(0,1fr))}.hero-facts div{min-width:0;padding:7px}.hero-facts dd{overflow:hidden;font-size:11px;line-height:1.35;text-overflow:ellipsis}.overview-grid{grid-template-columns:1fr}.mission-card{grid-column:auto}.mission-copy,.detail-copy-grid{grid-template-columns:1fr}.command-strip{align-items:flex-start;flex-direction:column}.stage-summary{width:100%;display:grid;grid-template-columns:34px 1fr;align-items:start}.stage-orb{width:34px;height:34px}.stage-copy{min-width:0}.stage-context{grid-column:1/-1;width:100%;display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.stage-context dd{max-width:none}.command-actions{width:100%;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.command-actions>*{min-width:0}.command-actions>.primary-button{grid-column:1/-1}.resource-story{display:block}.resource-steps{grid-template-columns:1fr;margin-top:12px}.resource-steps i{transform:rotate(90deg);justify-self:center}.workspace-backdrop{padding:0}.workspace-dialog{height:100dvh;border:0;border-radius:0}.workspace-head{padding:13px}.workspace-body{padding:12px}.detail-sections,.collaboration-body{grid-template-columns:1fr}.detail-summary-strip,.detail-requirement{grid-column:auto}.detail-summary-strip{grid-template-columns:repeat(2,minmax(0,1fr))}.detail-list,.reference-detail-grid{grid-template-columns:1fr}.collaboration-fab{right:12px;bottom:12px}.hero-progress{overflow:auto}}
+@media(max-width:420px){.command-actions>*{flex-basis:100%}}
 @media(prefers-reduced-motion:reduce){.workspace-backdrop{backdrop-filter:none}}
 </style>
 
@@ -731,7 +706,6 @@ onBeforeUnmount(()=>{window.removeEventListener('beforeunload',warnBeforeUnload)
 .card-heading p{margin:3px 0 0;color:rgb(var(--yb-text-muted));font-size:10px}
 .mission-copy{gap:9px}
 .mission-copy>section,.mission-copy>aside{padding:11px;border-radius:10px}
-.reference-preview a{border-radius:9px}
 .assignment-snapshot{border-radius:10px}
 .collaboration-actions button{min-height:31px}
 .resource-story{padding:13px 15px}
