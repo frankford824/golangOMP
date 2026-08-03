@@ -24,6 +24,8 @@ export const API_ERROR_CODE_ZH: Record<string, string> = {
   RESOURCE_EXHAUSTED: '系统繁忙，请稍后再试',
   ABORTED: '操作被中断，请重试',
   INVALID_REQUEST: '请求参数有误，请检查填写内容',
+  ERP_PRODUCT_NOT_FOUND: 'ERP 测试环境未找到该商品编码，请核对编码或选择测试环境内已有商品',
+  ERP_UPSTREAM_FAILURE: 'ERP 测试环境暂时不可用，请稍后重试',
 }
 
 /** 后端 deny_code → 前端降级/提示文案。 */
