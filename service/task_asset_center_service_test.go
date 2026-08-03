@@ -425,7 +425,13 @@ func (*capturingReferenceFileRefRepo) DeleteByTaskAndRef(context.Context, repo.T
 
 func TestTaskAssetCenterServiceCompletingTaskReferencePersistsFlatRelation(t *testing.T) {
 	const taskID = int64(2104)
-	taskRepo := newStep04TaskRepo(&domain.Task{ID: taskID, TaskNo: "T-2104", TaskStatus: domain.TaskStatusInProgress})
+	const actorID = int64(610)
+	taskRepo := newStep04TaskRepo(&domain.Task{
+		ID:         taskID,
+		TaskNo:     "T-2104",
+		TaskStatus: domain.TaskStatusInProgress,
+		CreatorID:  actorID,
+	})
 	referenceRepo := &capturingReferenceFileRefRepo{}
 	uploadClient := newStubUploadServiceClient().(*stubUploadServiceClient)
 	uploadClient.remoteSessionStatus = domain.DesignAssetSessionStatusCompleted
@@ -440,7 +446,7 @@ func TestTaskAssetCenterServiceCompletingTaskReferencePersistsFlatRelation(t *te
 		uploadClient,
 		WithTaskAssetCenterReferenceFileRefFlatRepo(referenceRepo),
 	).(*taskAssetCenterService)
-	actor := scopedCapabilityActor(610, domain.PermissionTaskCreate, domain.AccessScopeGlobal, nil, nil, nil)
+	actor := scopedCapabilityActor(actorID, domain.PermissionTaskCreate, domain.AccessScopeGlobal, nil, nil, nil)
 	ctx := domain.WithRequestActor(context.Background(), actor)
 
 	created, appErr := svc.CreateUploadSession(ctx, CreateTaskAssetUploadSessionParams{
