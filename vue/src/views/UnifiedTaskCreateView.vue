@@ -87,7 +87,7 @@
           <div><strong>{{ row.product_name || row.description_spec || row.design_requirement || '任务明细' }}</strong><small>{{ row.status === 'created' ? `任务 #${row.result_task_id}` : row.error }}</small></div>
           <RouterLink v-if="row.result_task_id" :to="`/tasks/${row.result_task_id}`">查看</RouterLink>
         </article>
-        <button v-if="failedRows.length" class="secondary-button retry-failed" type="button" @click="submit(true)">只重试失败行</button>
+        <button v-if="failedRows.length" class="secondary-button retry-failed" type="button" @click="submit(true)">{{ intent === 'retouch' ? '只重试失败附件' : '只重试失败行' }}</button>
       </div>
     </section>
 
@@ -281,8 +281,16 @@ const failedRows = computed(() => rows.value.filter((row) => row.status === 'fai
 const submitLabel = computed(() => intent.value === 'planning_sku' ? `生成 ${rows.value.length} 个 SKU 并结单` : intent.value === 'modify_existing' ? `创建 ${rows.value.length} 张任务单` : '创建任务')
 const failedPlanningItems = computed(() => planningResult.value?.items.filter((item) => planningFailed(item.erp_status)) ?? [])
 const visiblePlanningItems = computed(() => planningResult.value?.items.filter((item) => resultFilter.value === 'all' || planningFailed(item.erp_status)) ?? [])
-const resultTitle = computed(() => planningResult.value?.task_no || (failedRows.value.length ? '部分任务创建失败' : '任务创建完成'))
-const resultSummary = computed(() => planningResult.value ? `已生成 ${planningResult.value.items.length} 个 SKU，任务已经结单。` : `${rows.value.filter((row) => row.status === 'created').length} 行创建成功，${failedRows.value.length} 行失败。`)
+const resultTitle = computed(() => {
+  if (planningResult.value) return planningResult.value.task_no
+  if (intent.value === 'retouch' && failedRows.value.some((row) => row.result_task_id)) return '任务已创建，部分附件上传失败'
+  return failedRows.value.length ? '部分任务创建失败' : '任务创建完成'
+})
+const resultSummary = computed(() => {
+  if (planningResult.value) return `已生成 ${planningResult.value.items.length} 个 SKU，任务已经结单。`
+  if (intent.value === 'retouch' && failedRows.value.some((row) => row.result_task_id)) return '任务不会重复创建；可在下方安全重试尚未上传成功的附件。'
+  return `${rows.value.filter((row) => row.status === 'created').length} 行创建成功，${failedRows.value.length} 行失败。`
+})
 
 watch([intent, common, rows], () => {
   remoteViolations.value = []
@@ -636,6 +644,12 @@ async function submit(retryOnly: boolean) {
       dirty.value = false
       return
     }
+    if (intent.value === 'retouch' && retryOnly && candidates.some((row) => row.result_task_id)) {
+      await retryRetouchUploads(candidates)
+      result.value = true
+      dirty.value = false
+      return
+    }
     const units = buildTaskSubmissionUnits(intent.value, common, candidates)
     for (const unit of units) {
       const unitRows = rows.value.filter((row) => unit.row_ids.includes(row.id))
@@ -647,6 +661,7 @@ async function submit(retryOnly: boolean) {
           const loaded = tasksStore.getById(created.id) ?? created
           const drafts = unit.task.retouchRequirements ?? []
           const uploadResult = await uploadRetouchRequirementPendingAssets(created.id, loaded.retouchRequirements ?? [], drafts)
+          applyRetouchUploadResult(unitRows, uploadResult)
           if (uploadResult.failures.length) {
             unitRows.forEach((row) => { row.status = 'failed'; row.error = uploadResult.failures.map((failure) => failure.message).join('；') })
           }
@@ -660,6 +675,61 @@ async function submit(retryOnly: boolean) {
     result.value = true
     dirty.value = false
   } finally { submitting.value = false }
+}
+
+function applyRetouchUploadResult(
+  unitRows: ComposeRow[],
+  uploadResult: Awaited<ReturnType<typeof uploadRetouchRequirementPendingAssets>>,
+) {
+  unitRows.forEach((row, requirementIndex) => {
+    const failedReferenceNames = new Set(uploadResult.failures
+      .filter((failure) => failure.requirementIndex === requirementIndex && failure.kind === 'reference')
+      .map((failure) => failure.fileName))
+    const failedSourceNames = new Set(uploadResult.failures
+      .filter((failure) => failure.requirementIndex === requirementIndex && failure.kind === 'source')
+      .map((failure) => failure.fileName))
+    row.reference_assets = row.reference_assets.map((asset) => asset.file
+      ? failedReferenceNames.has(asset.name)
+        ? { ...asset, status: 'local', error: undefined }
+        : { ...asset, status: 'uploaded', file: undefined, error: undefined }
+      : asset)
+    row.source_assets = row.source_assets.map((asset) => asset.file
+      ? failedSourceNames.has(asset.name)
+        ? { ...asset, status: 'local', error: undefined }
+        : { ...asset, status: 'uploaded', file: undefined, error: undefined }
+      : asset)
+  })
+}
+
+async function retryRetouchUploads(candidates: ComposeRow[]) {
+  const byTask = new Map<string, ComposeRow[]>()
+  for (const row of candidates) {
+    if (!row.result_task_id) continue
+    byTask.set(row.result_task_id, [...(byTask.get(row.result_task_id) ?? []), row])
+  }
+  for (const [taskId, taskRows] of byTask) {
+    taskRows.forEach((row) => { row.status = 'submitting'; row.error = '' })
+    try {
+      const loaded = tasksStore.getById(taskId)
+      if (!loaded) throw new Error('任务已创建，但本地未找到任务详情，请进入详情页补传附件')
+      const unit = buildTaskSubmissionUnits('retouch', common, taskRows)[0]
+      const drafts = unit.task.retouchRequirements ?? []
+      const uploadResult = await uploadRetouchRequirementPendingAssets(taskId, loaded.retouchRequirements ?? [], drafts)
+      applyRetouchUploadResult(taskRows, uploadResult)
+      if (uploadResult.failures.length) {
+        const message = uploadResult.failures.map((failure) => failure.message).join('；')
+        taskRows.forEach((row) => { row.status = 'failed'; row.error = message })
+      } else {
+        taskRows.forEach((row) => { row.status = 'created'; row.error = '' })
+      }
+    } catch (error) {
+      taskRows.forEach((row) => {
+        row.status = 'failed'
+        row.error = error instanceof Error ? error.message : '附件重试失败'
+      })
+    }
+  }
+  gridRevision.value += 1
 }
 
 function unwrapBatchParsePayload(raw: unknown): { preview: BatchPreviewRow[]; violations: BatchViolation[] } {

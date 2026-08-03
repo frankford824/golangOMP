@@ -5,9 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   route: { query: { intent: 'planning_sku' } as Record<string, string> },
   push: vi.fn(), replace: vi.fn(),
-  create: vi.fn(), addTask: vi.fn(), parseBatch: vi.fn(), getProductByCode: vi.fn(), getIids: vi.fn(), getDraft: vi.fn(),
+  create: vi.fn(), addTask: vi.fn(), getTaskById: vi.fn(), parseBatch: vi.fn(), getProductByCode: vi.fn(), getIids: vi.fn(), getDraft: vi.fn(),
   permissions: new Set(['task.create', 'planning_sku.create']),
   uploadReferenceFileRef: vi.fn(),
+  uploadRetouchRequirementPendingAssets: vi.fn(),
 }))
 
 vi.mock('vue-router', () => ({
@@ -18,7 +19,7 @@ vi.mock('vue-router', () => ({
 vi.mock('@/composables/useTaskDraft', () => ({
   useTaskDraft: () => ({ save: vi.fn(), update: vi.fn(), getById: mocks.getDraft, saving: false }),
 }))
-vi.mock('@/stores/tasks', () => ({ useTasksStore: () => ({ addTask: mocks.addTask, getById: vi.fn() }) }))
+vi.mock('@/stores/tasks', () => ({ useTasksStore: () => ({ addTask: mocks.addTask, getById: mocks.getTaskById }) }))
 vi.mock('@/services/api/planningSkuApi', () => ({
   planningSkuApi: {
     create: mocks.create,
@@ -33,7 +34,7 @@ vi.mock('@/services/api/batchSkuApi', () => ({
 }))
 vi.mock('@/services/api/erpApi', () => ({ erpApi: { getProductByCode: mocks.getProductByCode, getIids: mocks.getIids } }))
 vi.mock('@/services/upload/assetUploadFlow', () => ({ uploadReferenceFileRef: mocks.uploadReferenceFileRef }))
-vi.mock('@/services/upload/retouchRequirementUpload', () => ({ uploadRetouchRequirementPendingAssets: vi.fn() }))
+vi.mock('@/services/upload/retouchRequirementUpload', () => ({ uploadRetouchRequirementPendingAssets: mocks.uploadRetouchRequirementPendingAssets }))
 vi.mock('@/composables/usePermission', () => ({ usePermission: () => ({ can: (permission: string) => mocks.permissions.has(permission) }) }))
 
 import UnifiedTaskCreateView from './UnifiedTaskCreateView.vue'
@@ -54,6 +55,9 @@ describe('UnifiedTaskCreateView', () => {
     })
     mocks.getIids.mockResolvedValue({ data: { data: [{ i_id: 'KT_STANDARD' }] } })
     mocks.uploadReferenceFileRef.mockResolvedValue({ asset_id: 'reference-default' })
+    mocks.addTask.mockResolvedValue({ id: 'task-default', retouchRequirements: [] })
+    mocks.getTaskById.mockReturnValue({ id: 'task-default', retouchRequirements: [] })
+    mocks.uploadRetouchRequirementPendingAssets.mockResolvedValue({ failures: [], referenceUploaded: 0, sourceUploaded: 0 })
   })
 
   it('renders the by-code ERP snapshot and clears an earlier lookup error', async () => {
@@ -275,6 +279,53 @@ describe('UnifiedTaskCreateView', () => {
 
     expect(wrapper.get('.compose-page').attributes('data-row-count')).toBe('1')
     expect(deleteButton?.attributes('disabled')).toBeDefined()
+    wrapper.unmount()
+  })
+
+  it('retries failed retouch attachments without creating a duplicate task', async () => {
+    mocks.route.query = { intent: 'retouch' }
+    const created = {
+      id: 'task-retouch',
+      retouchRequirements: [{ id: 41, taskId: 1, description: '清理背景', sortOrder: 1 }],
+    }
+    mocks.addTask.mockResolvedValue(created)
+    mocks.getTaskById.mockReturnValue(created)
+    mocks.uploadRetouchRequirementPendingAssets
+      .mockResolvedValueOnce({
+        failures: [{ requirementIndex: 0, kind: 'source', fileName: 'source.psd', message: '素材上传失败' }],
+        referenceUploaded: 0,
+        sourceUploaded: 0,
+      })
+      .mockResolvedValueOnce({ failures: [], referenceUploaded: 0, sourceUploaded: 1 })
+    const wrapper = mount(UnifiedTaskCreateView, {
+      global: {
+        stubs: {
+          UnifiedTaskGrid: { template: '<div />', methods: { readRowsFromWorkbook() {} } },
+          IIdSelector: true,
+          RouterLink: { template: '<a><slot /></a>' },
+        },
+      },
+    })
+    await wrapper.get('[data-row-index="0"] textarea').setValue('清理背景')
+    await wrapper.get('[data-row-index="0"] .asset-button').trigger('click')
+    const input = wrapper.get('input[aria-label="上传待修素材文件"]')
+    Object.defineProperty(input.element, 'files', {
+      configurable: true,
+      value: [new File(['psd'], 'source.psd', { type: 'application/octet-stream' })],
+    })
+    await input.trigger('change')
+    await flushPromises()
+    await wrapper.get('.validation-dock .primary-button').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('任务已创建，部分附件上传失败')
+    expect(wrapper.text()).toContain('只重试失败附件')
+    await wrapper.get('.retry-failed').trigger('click')
+    await flushPromises()
+
+    expect(mocks.addTask).toHaveBeenCalledTimes(1)
+    expect(mocks.uploadRetouchRequirementPendingAssets).toHaveBeenCalledTimes(2)
+    expect(wrapper.text()).toContain('任务创建完成')
     wrapper.unmount()
   })
 
