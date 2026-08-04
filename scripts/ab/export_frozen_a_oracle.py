@@ -150,7 +150,7 @@ DATASETS: tuple[DatasetSpec, ...] = (
             "cost_rule_source", "matched_rule_version", "prefill_source",
             "prefill_at", "requires_manual_review", "manual_cost_override",
             "manual_cost_override_reason", "override_actor", "override_at",
-            "design_requirement", "variant_json",
+            "design_requirement", "set_mode_hint", "variant_json",
             "reference_file_refs_json", "dedupe_key", "sku_code_type",
             "created_at", "updated_at",
         ),

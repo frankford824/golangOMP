@@ -198,6 +198,10 @@ class FrozenAOracleTests(unittest.TestCase):
             sku_line = json.loads((output_dir / "skus.ndjson").read_bytes())
             self.assertEqual(sku_line["row"]["base_sale_price"], "12.300")
             self.assertEqual(
+                sku_line["row"]["set_mode_hint"],
+                "value:set_mode_hint",
+            )
+            self.assertEqual(
                 sku_line["row"]["reference_file_refs_json"],
                 [{"ref_id": "r-2"}, {"ref_id": "r-1"}],
             )
