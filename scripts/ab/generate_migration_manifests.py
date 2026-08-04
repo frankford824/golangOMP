@@ -1051,47 +1051,53 @@ def is_legacy_retouch_terminal_submit(
     final_assets = [
         asset for asset in selected_assets if asset.get("asset_type") == "delivery"
     ]
-    if len(selected_assets) != 1 or len(final_assets) != 1:
+    if (
+        not final_assets
+        or any(
+            asset.get("asset_type") not in {"source", "delivery"}
+            for asset in selected_assets
+        )
+    ):
         return False
-    final_asset = final_assets[0]
-    requirement_id = int(final_asset.get("retouch_requirement_id") or 0)
-    if requirement_id:
-        if requirement_id != int(scope["scope_ref_id"]):
+    for asset in selected_assets:
+        requirement_id = int(asset.get("retouch_requirement_id") or 0)
+        if requirement_id:
+            if requirement_id != int(scope["scope_ref_id"]):
+                return False
+        elif not scope.get("_single_requirement"):
+            # Legacy retouch rows omitted requirement scope. That omission is
+            # unambiguous only when the task has exactly one requirement.
             return False
-    elif not scope.get("_single_requirement"):
-        # Legacy retouch delivery rows omitted requirement scope. That omission
-        # is unambiguous only when the task has exactly one requirement.
-        return False
 
-    submit_payload = event_payload(submit_event)
-    session_id = str(submit_payload.get("upload_session_id") or "").strip()
-    asset_session_id = str(
-        final_asset.get("upload_session_id")
-        or final_asset.get("upload_request_id")
-        or ""
-    ).strip()
-    if not session_id or asset_session_id != session_id:
-        return False
-
-    completions = []
-    for event in all_events:
+        asset_session_id = str(
+            asset.get("upload_session_id")
+            or asset.get("upload_request_id")
+            or ""
+        ).strip()
+        if not asset_session_id:
+            return False
+        completions = []
+        for event in all_events:
+            if (
+                str(event.get("event_type") or "").lower()
+                not in UPLOAD_SESSION_COMPLETED_EVENTS
+                or not event_precedes_boundary(event, submit_event)
+            ):
+                continue
+            payload = event_payload(event)
+            if (
+                str(payload.get("upload_session_id") or "").strip()
+                == asset_session_id
+                and int(asset["id"])
+                in payload_asset_version_ids(payload)
+            ):
+                completions.append(event)
         if (
-            str(event.get("event_type") or "").lower()
-            not in UPLOAD_SESSION_COMPLETED_EVENTS
-            or str(event.get("created_at") or "")
-            > str(submit_event.get("created_at") or "")
+            len(completions) != 1
+            or int(completions[0].get("actor_id") or 0)
+            != int(submit_event["actor_id"])
         ):
-            continue
-        payload = event_payload(event)
-        if str(payload.get("upload_session_id") or "").strip() == session_id:
-            completions.append(event)
-    if len(completions) != 1:
-        return False
-    completion = completions[0]
-    if payload_asset_version_ids(event_payload(completion)) != [int(final_asset["id"])]:
-        return False
-    if int(completion.get("actor_id") or 0) != int(submit_event["actor_id"]):
-        return False
+            return False
 
     submit_index = next(
         (
@@ -2672,6 +2678,148 @@ def resolve_legacy_retouch_premature_partial(scopes, events, assets):
     return candidate
 
 
+def resolve_legacy_retouch_unscoped_ambiguous_terminal(
+    scopes, events, assets
+):
+    """Conservatively reopen an unscoped multi-requirement terminal batch.
+
+    The upload and submit boundary prove that files were delivered, but no
+    immutable fact assigns those files to individual requirements. V8 must not
+    invent that membership. Preserve the legacy assets outside revision
+    membership and move the task back to InProgress with empty requirement
+    shells.
+    """
+    if (
+        len(scopes) < 2
+        or any(
+            scope.get("scope_kind") != "retouch_requirement"
+            or str(scope.get("task_status") or "") != "Completed"
+            for scope in scopes
+        )
+    ):
+        return None
+    relevant = [
+        asset
+        for asset in assets
+        if active_asset(asset)
+        and str(asset.get("asset_type") or "") in {"source", "delivery"}
+    ]
+    if not relevant:
+        return None
+    scope_ids = {int(scope["scope_ref_id"]) for scope in scopes}
+    if any(
+        (
+            asset.get("asset_type") == "delivery"
+            and asset.get("retouch_requirement_id") not in (None, "", 0)
+        )
+        or (
+            asset.get("asset_type") == "source"
+            and int(asset.get("retouch_requirement_id") or 0)
+            not in scope_ids
+        )
+        for asset in relevant
+    ):
+        return None
+    submits = sorted(
+        (
+            event
+            for event in events
+            if event.get("namespace") == "task_event_log"
+            and event_kind(event) == "submit"
+        ),
+        key=lambda event: (
+            str(event.get("created_at") or ""),
+            int(event.get("sequence") or 0),
+            str(event.get("id") or ""),
+        ),
+    )
+    if len(submits) != 1 or not int(submits[0].get("actor_id") or 0):
+        return None
+    submit = submits[0]
+    if any(
+        event_kind(event) in {"submit", "reject", "reopen"}
+        and (
+            str(event.get("created_at") or ""),
+            int(event.get("sequence") or 0),
+            str(event.get("id") or ""),
+        )
+        > (
+            str(submit.get("created_at") or ""),
+            int(submit.get("sequence") or 0),
+            str(submit.get("id") or ""),
+        )
+        for event in events
+    ):
+        return None
+
+    completion_by_asset = {}
+    for asset in relevant:
+        if not at_or_before(asset, submit["created_at"]):
+            return None
+        asset_session = str(
+            asset.get("upload_session_id")
+            or asset.get("upload_request_id")
+            or ""
+        ).strip()
+        completions = [
+            event
+            for event in events
+            if (
+                event.get("namespace") == "task_event_log"
+                and str(event.get("event_type") or "").lower()
+                in UPLOAD_SESSION_COMPLETED_EVENTS
+                and event_precedes_boundary(event, submit)
+                and str(
+                    event_payload(event).get("upload_session_id") or ""
+                ).strip()
+                == asset_session
+                and int(asset["id"])
+                in payload_asset_version_ids(event_payload(event))
+            )
+        ]
+        if not asset_session or len(completions) != 1:
+            return None
+        completion_by_asset[int(asset["id"])] = event_evidence_ids(
+            completions[0]
+        )
+    candidate = dict(submit)
+    candidate["_migration_policy"] = (
+        RETOUCH_PREMATURE_TERMINAL_PARTIAL_POLICY
+    )
+    candidate["_retouch_scope_memberships"] = {
+        str(scope_id): {
+            "asset_version_ids": [
+                int(asset["id"])
+                for asset in relevant
+                if asset.get("asset_type") == "source"
+                and int(asset.get("retouch_requirement_id") or 0)
+                == scope_id
+            ],
+            "completion_event_ids": list(dict.fromkeys(
+                evidence_id
+                for asset in relevant
+                if asset.get("asset_type") == "source"
+                and int(asset.get("retouch_requirement_id") or 0)
+                == scope_id
+                for evidence_id in completion_by_asset[int(asset["id"])]
+            )),
+        }
+        for scope_id in sorted(scope_ids)
+    }
+    candidate["_unassigned_delivery_ids"] = [
+        int(asset["id"])
+        for asset in relevant
+        if asset.get("asset_type") == "delivery"
+    ]
+    candidate["_unassigned_completion_event_ids"] = list(dict.fromkeys(
+        evidence_id
+        for asset in relevant
+        if asset.get("asset_type") == "delivery"
+        for evidence_id in completion_by_asset[int(asset["id"])]
+    ))
+    return candidate
+
+
 def resolve_legacy_retouch_visual_scope_task2533(
     scopes, events, assets, references
 ):
@@ -3054,7 +3202,10 @@ def build_premature_retouch_resource(scope, candidate, assets, references):
             not selected
             and int(scope["scope_ref_id"])
             == min(
-                LEGACY_RETOUCH_PREMATURE_PARTIAL_FINALS[int(scope["task_id"])]
+                int(value)
+                for value in candidate[
+                    "_retouch_scope_memberships"
+                ]
             )
         ):
             # Preserve exact event coverage without claiming that the unscoped
@@ -3776,6 +3927,26 @@ def generate(rows):
         )
         is not None
     }
+    retouch_unscoped_ambiguous_by_task = {
+        task_id: candidate
+        for task_id, task_scopes in scopes_by_task.items()
+        if (
+            task_id not in LEGACY_RETOUCH_UNSCOPED_ATOMIC_FINALS
+            and task_id not in LEGACY_RETOUCH_PREMATURE_PARTIAL_FINALS
+            and task_id != 2533
+            and task_id not in retouch_atomic_submit_by_task
+            and task_id not in retouch_partial_submit_by_task
+            and (
+                candidate :=
+                resolve_legacy_retouch_unscoped_ambiguous_terminal(
+                    task_scopes,
+                    events_by_task[task_id],
+                    assets_by_task[task_id],
+                )
+            )
+            is not None
+        )
+    }
     retouch_visual_scope_by_task = {
         task_id: candidate
         for task_id, task_scopes in scopes_by_task.items()
@@ -3850,11 +4021,18 @@ def generate(rows):
             continue
         if (
             scope["scope_kind"] == "retouch_requirement"
-            and task_id in retouch_partial_submit_by_task
+            and (
+                task_id in retouch_partial_submit_by_task
+                or task_id in retouch_unscoped_ambiguous_by_task
+            )
         ):
+            candidate = (
+                retouch_partial_submit_by_task.get(task_id)
+                or retouch_unscoped_ambiguous_by_task[task_id]
+            )
             resource = build_premature_retouch_resource(
                 scope,
-                retouch_partial_submit_by_task[task_id],
+                candidate,
                 assets_by_task[task_id],
                 refs_by_task[task_id],
             )
@@ -3909,7 +4087,23 @@ def generate(rows):
         finalized = None
         if not boundary:
             status = effective_v8_status(str(scope.get("task_status") or ""))
-            if status in {"PendingAudit", "Completed"}:
+            if task_id in retouch_unscoped_ambiguous_by_task:
+                manual.append(
+                    review_row(
+                        scope,
+                        None,
+                        "proposed_review",
+                        (
+                            f"policy "
+                            f"{RETOUCH_PREMATURE_TERMINAL_PARTIAL_POLICY}: "
+                            "the task-level terminal upload is proven, but "
+                            "multi-requirement membership is absent; preserve "
+                            "unscoped assets and reopen an empty requirement "
+                            "shell"
+                        ),
+                    )
+                )
+            elif status in {"PendingAudit", "Completed"}:
                 manual.append(review_row(scope, None, "hard_blocked", "no revision boundary event exists for this scope"))
             else:
                 manual.append(review_row(
@@ -4341,6 +4535,63 @@ def generate(rows):
                     f"{RETOUCH_PREMATURE_TERMINAL_PARTIAL_POLICY}; map "
                     "premature legacy Completed to InProgress without "
                     "inventing missing requirement finals"
+                ),
+                "evidence_event_ids": "|".join(
+                    decision["evidence_event_ids"]
+                ),
+                "candidate_source_ids": "",
+                "candidate_final_ids": "",
+                "reviewer_id": "",
+                "reviewed_at": "",
+                "decision": "",
+                "review_note": "",
+            }
+        )
+    for task_id, candidate in sorted(
+        retouch_unscoped_ambiguous_by_task.items()
+    ):
+        evidence_event_ids = list(
+            candidate.get("_unassigned_completion_event_ids") or []
+        )
+        for membership in candidate[
+            "_retouch_scope_memberships"
+        ].values():
+            evidence_event_ids.extend(
+                membership.get("completion_event_ids") or []
+            )
+        evidence_event_ids.extend(event_evidence_ids(candidate))
+        decision = {
+            "task_id": task_id,
+            "from_status": "Completed",
+            "target_status": "InProgress",
+            "evidence_event_ids": sorted_evidence_ids(
+                list(dict.fromkeys(evidence_event_ids)),
+                events_by_task[task_id],
+            ),
+            "confidence": "proposed_review",
+            "review_policy_ids": [
+                RETOUCH_PREMATURE_TERMINAL_PARTIAL_POLICY
+            ],
+            "confirmed_by": 0,
+            "confirmed_at": ZERO_TIME,
+            "confirmation_note": "",
+        }
+        recompute_mapping_row_hash(decision)
+        task_state_decisions.append(decision)
+        manual.append(
+            {
+                "task_id": task_id,
+                "scope_kind": "task_state_decision",
+                "scope_ref_id": 0,
+                "revision_no": "",
+                "confidence": "proposed_review",
+                "reason": (
+                    f"policy review required: "
+                    f"{RETOUCH_PREMATURE_TERMINAL_PARTIAL_POLICY}; "
+                    "the task-level terminal upload is real, but assigning "
+                    "unscoped files across multiple retouch requirements "
+                    "would be fabricated; preserve files and map to "
+                    "InProgress"
                 ),
                 "evidence_event_ids": "|".join(
                     decision["evidence_event_ids"]

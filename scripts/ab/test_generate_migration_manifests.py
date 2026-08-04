@@ -1776,6 +1776,48 @@ class GeneratorTest(unittest.TestCase):
         mapping, _, _ = MODULE.generate(rows)
         self.assertEqual(mapping["task_state_decisions"], [])
 
+    def test_unscoped_multi_requirement_terminal_reopens_without_guessing(self):
+        rows = self.terminal_retouch_sample()
+        rows["scopes"] = [
+            {
+                **rows["scopes"][0],
+                "scope_ref_id": requirement_id,
+            }
+            for requirement_id in (31, 32)
+        ]
+        rows["assets"] = [rows["assets"][1]]
+
+        mapping, manual, _ = MODULE.generate(rows)
+
+        self.assertEqual(
+            [
+                (
+                    resource["scope_ref_id"],
+                    resource["history"][0]["status"],
+                    resource["history"][0]["final_task_asset_ids"],
+                )
+                for resource in mapping["resources"]
+            ],
+            [(31, "draft", []), (32, "draft", [])],
+        )
+        decision = mapping["task_state_decisions"][0]
+        self.assertEqual(
+            (decision["from_status"], decision["target_status"]),
+            ("Completed", "InProgress"),
+        )
+        self.assertEqual(
+            decision["review_policy_ids"],
+            [MODULE.RETOUCH_PREMATURE_TERMINAL_PARTIAL_POLICY],
+        )
+        self.assertNotIn(
+            "hard_blocked",
+            {
+                row["confidence"]
+                for row in manual
+                if row["task_id"] == 7
+            },
+        )
+
     def test_completed_retouch_terminal_submit_is_a_finalized_policy_candidate(self):
         rows = self.terminal_retouch_sample()
         self.assertNotIn("group_id", rows["scopes"][0])
@@ -1797,6 +1839,45 @@ class GeneratorTest(unittest.TestCase):
             ],
         )
         self.assertEqual(manual[0]["confidence"], "proposed_review")
+
+    def test_completed_retouch_atomic_multi_file_submit_is_finalized(self):
+        rows = self.terminal_retouch_sample()
+        rows["assets"].append({
+            **rows["assets"][1],
+            "id": 12,
+            "asset_id": 102,
+            "upload_request_id": "retouch-2",
+            "created_at": "2026-01-01T07:59:00Z",
+            "uploaded_at": "2026-01-01T07:59:00Z",
+        })
+        rows["events"].insert(0, {
+            "namespace": "task_event_log",
+            "id": "retouch-upload-2",
+            "task_id": 7,
+            "sequence": 0,
+            "event_type": "task.asset.upload_session.completed",
+            "actor_id": 3,
+            "module_key": "retouch",
+            "payload": {
+                "upload_session_id": "retouch-2",
+                "asset_version_ids": [12],
+            },
+            "created_at": "2026-01-01T07:59:00Z",
+        })
+        rows["events"][2]["created_at"] = "2026-01-01T08:01:00Z"
+
+        mapping, _, _ = MODULE.generate(rows)
+        resource = mapping["resources"][0]
+        revision = resource["history"][0]
+
+        self.assertEqual(revision["status"], "finalized")
+        self.assertEqual(revision["final_task_asset_ids"], [11, 12])
+        self.assertEqual(resource["working_revision_no"], 1)
+        self.assertEqual(resource["finalized_revision_no"], 1)
+        self.assertIn(
+            MODULE.RETOUCH_TERMINAL_SUBMIT_POLICY,
+            revision["review_policy_ids"],
+        )
 
     def test_retouch_terminal_submit_with_later_reject_is_not_finalized(self):
         rows = self.terminal_retouch_sample()
