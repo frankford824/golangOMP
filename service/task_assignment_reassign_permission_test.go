@@ -62,3 +62,27 @@ func TestTaskAssignmentServiceExplicitScopeMismatchCannotReassign(t *testing.T) 
 		t.Fatalf("Assign() error = %+v, want scope mismatch denial", appErr)
 	}
 }
+
+func TestTaskAssignmentServiceCurrentAssigneeCanDelegateAcrossOwnerDepartment(t *testing.T) {
+	actorDepartmentID := int64(14)
+	taskDepartmentID := int64(6)
+	currentDesignerID := int64(343)
+	taskRepo := newStep04TaskRepo(&domain.Task{
+		ID: 2888, CreatorID: 341, TaskType: domain.TaskTypeNewProductDevelopment,
+		TaskStatus: domain.TaskStatusInProgress, OwnerDepartmentID: &taskDepartmentID,
+		DesignerID: &currentDesignerID, CurrentHandlerID: &currentDesignerID,
+	})
+	svc := NewTaskAssignmentService(taskRepo, &step04TaskEventRepo{}, step04TxRunner{})
+	actor := taskActionTestActor(currentDesignerID, domain.PermissionTaskReassign, domain.AccessScopeOwnDepartment)
+	actor.DepartmentID = &actorDepartmentID
+
+	updated, appErr := svc.Assign(domain.WithRequestActor(context.Background(), actor), AssignTaskParams{
+		TaskID: 2888, DesignerID: authzInt64Ptr(344), AssignedBy: actor.ID,
+	})
+	if appErr != nil {
+		t.Fatalf("Assign() unexpected error: %+v", appErr)
+	}
+	if updated.DesignerID == nil || *updated.DesignerID != 344 || updated.CurrentHandlerID == nil || *updated.CurrentHandlerID != 344 {
+		t.Fatalf("assignment = designer:%v handler:%v, want 344/344", updated.DesignerID, updated.CurrentHandlerID)
+	}
+}

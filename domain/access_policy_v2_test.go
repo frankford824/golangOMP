@@ -25,6 +25,71 @@ func TestAccessTaskTypeValidRejectsRetiredPurchaseTask(t *testing.T) {
 	}
 }
 
+func TestEffectiveAccessAllowsCurrentAssigneeToReassignAcrossOwnerDepartment(t *testing.T) {
+	actorDepartmentID := int64(14)
+	ownerDepartmentID := int64(6)
+	actor := reassignActor(343, AccessScopeOwnDepartment, &actorDepartmentID, nil)
+	subject := TaskAccessSubject{
+		TaskID:            2888,
+		TaskType:          TaskTypeNewProductDevelopment,
+		CreatorID:         341,
+		DesignerID:        int64Pointer(343),
+		CurrentHandlerID:  int64Pointer(343),
+		OwnerDepartmentID: &ownerDepartmentID,
+	}
+
+	if EffectiveAccessAllowsTask(actor, PermissionTaskReassign, subject) {
+		t.Fatal("ordinary organization scope unexpectedly matched a cross-department task")
+	}
+	if !EffectiveAccessAllowsTaskReassign(actor, subject) {
+		t.Fatal("current assignee with task.reassign grant could not delegate the task")
+	}
+
+	subject.DesignerID = int64Pointer(344)
+	subject.CurrentHandlerID = int64Pointer(344)
+	if EffectiveAccessAllowsTaskReassign(actor, subject) {
+		t.Fatal("unrelated actor unexpectedly delegated a cross-department task")
+	}
+}
+
+func TestEffectiveAccessCurrentAssigneeReassignHonorsTaskTypeRestriction(t *testing.T) {
+	actor := reassignActor(343, AccessScopeOwnDepartment, nil, []string{string(TaskTypeRegularCustomization)})
+	subject := TaskAccessSubject{
+		TaskID:           2888,
+		TaskType:         TaskTypeNewProductDevelopment,
+		CreatorID:        341,
+		DesignerID:       int64Pointer(343),
+		CurrentHandlerID: int64Pointer(343),
+	}
+	if EffectiveAccessAllowsTaskReassign(actor, subject) {
+		t.Fatal("current-assignee delegation ignored the grant task-type restriction")
+	}
+}
+
+func reassignActor(actorID int64, scope AccessScopeMode, departmentID *int64, taskTypes []string) RequestActor {
+	const roleID int64 = 14
+	assignment := AccessAssignment{
+		ID: roleID, UserID: actorID, RoleID: roleID, RoleCode: "design_director",
+		ScopeMode: scope, SourceType: "direct",
+	}
+	effective := &EffectiveAccess{
+		UserID: actorID, Permissions: []PermissionCode{PermissionTaskReassign},
+		Assignments: []AccessAssignment{assignment},
+		Sources: []EffectiveAccessNote{{
+			Permission: PermissionTaskReassign, RoleID: roleID, RoleCode: assignment.RoleCode,
+			ScopeMode: scope, SourceType: assignment.SourceType, TaskTypes: taskTypes,
+		}},
+	}
+	return RequestActor{
+		ID: actorID, DepartmentID: departmentID,
+		Permissions: effective.Permissions, EffectiveAccess: effective,
+	}
+}
+
+func int64Pointer(value int64) *int64 {
+	return &value
+}
+
 func taskTypeRestrictedActor(taskType TaskType) RequestActor {
 	const actorID int64 = 41
 	assignment := AccessAssignment{ID: 9, UserID: actorID, RoleID: 7, RoleCode: "creator", ScopeMode: AccessScopeGlobal, SourceType: "direct"}

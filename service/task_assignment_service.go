@@ -281,11 +281,20 @@ func explicitTaskAssignmentDecision(ctx context.Context, actor domain.RequestAct
 		decision.StatusReason = decision.DenyReason
 		return decision
 	}
-	if domain.EffectiveAccessAllowsTask(actor, taskAssignmentPermission(operation), task.AccessSubject()) {
+	subject := task.AccessSubject()
+	allowed := domain.EffectiveAccessAllowsTask(actor, taskAssignmentPermission(operation), subject)
+	scopeSource := "explicit_access"
+	if operation.Action == TaskActionReassign {
+		allowed = domain.EffectiveAccessAllowsTaskReassign(actor, subject)
+		if allowed && !domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskReassign, subject) {
+			scopeSource = "current_assignment"
+		}
+	}
+	if allowed {
 		decision.Allowed = true
 		decision.DenyCode = ""
 		decision.DenyReason = ""
-		decision.ScopeSource = "explicit_access"
+		decision.ScopeSource = scopeSource
 	}
 	return decision
 }

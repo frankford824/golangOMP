@@ -215,6 +215,36 @@ func EffectiveAccessAllowsTask(actor RequestActor, permission PermissionCode, su
 	return false
 }
 
+// EffectiveAccessAllowsTaskReassign preserves stable organization scope as the
+// default while also allowing the explicitly assigned current designer/handler
+// to delegate an in-progress task when that actor owns a task.reassign grant.
+// The grant's task-type restriction still applies; legacy roles and display
+// organization names never participate.
+func EffectiveAccessAllowsTaskReassign(actor RequestActor, subject TaskAccessSubject) bool {
+	if EffectiveAccessAllowsTask(actor, PermissionTaskReassign, subject) {
+		return true
+	}
+	if actor.EffectiveAccess == nil || !actor.EffectiveAccess.Has(PermissionTaskReassign) {
+		return false
+	}
+	if !pointerEqualsActor(subject.DesignerID, actor.ID) && !pointerEqualsActor(subject.CurrentHandlerID, actor.ID) {
+		return false
+	}
+	assignmentsByRole := make(map[int64]struct{}, len(actor.EffectiveAccess.Assignments))
+	for _, assignment := range actor.EffectiveAccess.Assignments {
+		assignmentsByRole[assignment.RoleID] = struct{}{}
+	}
+	for _, source := range actor.EffectiveAccess.Sources {
+		if source.Permission != PermissionTaskReassign || !sourceAllowsTaskType(source, subject.TaskType) {
+			continue
+		}
+		if _, ok := assignmentsByRole[source.RoleID]; ok {
+			return true
+		}
+	}
+	return false
+}
+
 func sourceAllowsTaskType(source EffectiveAccessNote, taskType TaskType) bool {
 	if !PermissionSupportsTaskTypes(source.Permission) || len(source.TaskTypes) == 0 {
 		return true

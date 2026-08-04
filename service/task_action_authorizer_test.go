@@ -63,6 +63,24 @@ func TestTaskActionAuthorizerSeparatesAssignAndReassignState(t *testing.T) {
 	}
 }
 
+func TestTaskActionAuthorizerAllowsCurrentAssigneeDelegationAcrossDepartment(t *testing.T) {
+	actorDepartmentID := int64(14)
+	ownerDepartmentID := int64(6)
+	actor := taskActionTestActor(343, domain.PermissionTaskReassign, domain.AccessScopeOwnDepartment)
+	actor.DepartmentID = &actorDepartmentID
+	ctx := domain.WithRequestActor(context.Background(), actor)
+	task := &domain.Task{
+		ID: 2888, CreatorID: 341, TaskType: domain.TaskTypeNewProductDevelopment,
+		TaskStatus: domain.TaskStatusInProgress, OwnerDepartmentID: &ownerDepartmentID,
+		DesignerID: authzInt64Ptr(343), CurrentHandlerID: authzInt64Ptr(343),
+	}
+
+	decision := newTaskActionAuthorizer().EvaluateTaskActionPolicy(ctx, TaskActionReassign, task, "", "")
+	if !decision.Allowed || decision.ScopeSource != "current_assignment" {
+		t.Fatalf("decision = %+v, want current-assignment delegation", decision)
+	}
+}
+
 func TestTaskActionAuthorizerRequiresCatalogManageForBusinessInfo(t *testing.T) {
 	task := &domain.Task{ID: 15, TaskStatus: domain.TaskStatusInProgress, CreatorID: 51}
 	viewActor := taskActionTestActor(51, domain.PermissionTaskView, domain.AccessScopeGlobal)

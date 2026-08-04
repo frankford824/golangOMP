@@ -10384,9 +10384,12 @@ paths:
       summary: Assign task to designer
       description: |
         Assigns an active Designer to a `PendingAssign` task or reassigns an `InProgress` task.
-        Authorization requires explicit `task.assign` for first assignment or `task.reassign` for reassignment,
-        intersected with the task's stable organization-ID scope;
-        legacy roles and department/team names never grant access. The action is exposed to clients as
+        Authorization requires explicit `task.assign` for first assignment or `task.reassign` for reassignment.
+        First assignment and ordinary management reassignment are intersected with the task's stable
+        organization-ID scope. The explicitly assigned current designer/handler may also delegate an
+        `InProgress` task when their active `task.reassign` grant allows the task type; this narrow
+        relationship does not authorize unassigned pool work. Legacy roles and department/team names
+        never grant access. The action is exposed to clients as
         `task.assign` in the task's `allowed_actions`. `PendingAudit`, `Completed`, `Archived`, `Cancelled`,
         and `Blocked` are rejected.
       tags: [Tasks, ReadyForFrontend]
@@ -10416,7 +10419,7 @@ paths:
                   data:
                     $ref: '#/components/schemas/Task'
         '403':
-          description: "`PERMISSION_DENIED` when the exact assign/reassign capability is missing or the task is outside the actor's stable organization-ID scope."
+          description: "`PERMISSION_DENIED` when the exact assign/reassign capability is missing, or when neither stable organization-ID scope nor the current-assignee delegation rule matches."
         '404':
           description: Task not found
         '409':

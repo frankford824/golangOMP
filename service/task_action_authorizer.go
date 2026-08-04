@@ -101,13 +101,21 @@ func (a *taskActionAuthorizer) EvaluateTaskActionPolicy(ctx context.Context, act
 		decision.DenyReason = "task creation requires stable organization scope"
 		return decision
 	}
-	if !domain.EffectiveAccessAllowsTask(actor, permission, task.AccessSubject()) {
+	subject := task.AccessSubject()
+	allowed := domain.EffectiveAccessAllowsTask(actor, permission, subject)
+	if action == TaskActionReassign {
+		allowed = domain.EffectiveAccessAllowsTaskReassign(actor, subject)
+	}
+	if !allowed {
 		decision.DenyCode = "permission_or_scope_denied"
 		decision.DenyReason = "task permission is outside the effective data scope"
 		return decision
 	}
 	decision.Allowed = true
 	decision.ScopeSource = "explicit_access"
+	if action == TaskActionReassign && !domain.EffectiveAccessAllowsTask(actor, permission, subject) {
+		decision.ScopeSource = "current_assignment"
+	}
 	return decision
 }
 

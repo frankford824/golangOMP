@@ -48,9 +48,9 @@ func TestV8AllowedTaskActionsUsesSeparateTaskOperations(t *testing.T) {
 		}
 	}
 
-	managed := v8AllowedTaskActions(actorFor(domain.PermissionTaskCreate, domain.PermissionTaskAssign), domain.TaskTypeOriginalProductDevelopment, domain.TaskStatusInProgress, subject)
+	managed := v8AllowedTaskActions(actorFor(domain.PermissionTaskCreate, domain.PermissionTaskReassign), domain.TaskTypeOriginalProductDevelopment, domain.TaskStatusInProgress, subject)
 	if !slices.Contains(managed, "task.reference.append") || !slices.Contains(managed, "task.assign") || slices.Contains(managed, "task.design.submit") {
-		t.Fatalf("task create/assign actions = %v", managed)
+		t.Fatalf("task create/reassign actions = %v", managed)
 	}
 	otherCreatorsTask := subject
 	otherCreatorsTask.CreatorID = 7
@@ -78,4 +78,46 @@ func TestV8AllowedTaskActionsUsesSeparateTaskOperations(t *testing.T) {
 	if slices.Contains(blocked, "task.reference.append") || slices.Contains(blocked, "task.assign") {
 		t.Fatalf("blocked actions = %v", blocked)
 	}
+}
+
+func TestV8AllowedTaskActionsExposesCurrentAssigneeDelegation(t *testing.T) {
+	actorDepartmentID := int64(14)
+	ownerDepartmentID := int64(6)
+	const roleID int64 = 14
+	assignment := domain.AccessAssignment{
+		ID: roleID, UserID: 343, RoleID: roleID, RoleCode: "design_director",
+		ScopeMode: domain.AccessScopeOwnDepartment, SourceType: "direct",
+	}
+	actor := domain.RequestActor{
+		ID: 343,
+		EffectiveAccess: &domain.EffectiveAccess{
+			UserID: 343, Permissions: []domain.PermissionCode{domain.PermissionTaskReassign},
+			Assignments: []domain.AccessAssignment{assignment},
+			Sources: []domain.EffectiveAccessNote{{
+				Permission: domain.PermissionTaskReassign, RoleID: roleID, RoleCode: assignment.RoleCode,
+				ScopeMode: assignment.ScopeMode, SourceType: assignment.SourceType,
+			}},
+		},
+	}
+	actor.DepartmentID = &actorDepartmentID
+	subject := domain.TaskAccessSubject{
+		TaskID: 2888, CreatorID: 341, DesignerID: handlerInt64Ptr(343),
+		CurrentHandlerID: handlerInt64Ptr(343), OwnerDepartmentID: &ownerDepartmentID,
+	}
+
+	actions := v8AllowedTaskActions(actor, domain.TaskTypeNewProductDevelopment, domain.TaskStatusInProgress, subject)
+	if !slices.Contains(actions, "task.assign") {
+		t.Fatalf("allowed actions = %v, want task.assign for current-assignee delegation", actions)
+	}
+
+	subject.DesignerID = handlerInt64Ptr(344)
+	subject.CurrentHandlerID = handlerInt64Ptr(344)
+	actions = v8AllowedTaskActions(actor, domain.TaskTypeNewProductDevelopment, domain.TaskStatusInProgress, subject)
+	if slices.Contains(actions, "task.assign") {
+		t.Fatalf("allowed actions = %v, want no cross-department delegation for unrelated actor", actions)
+	}
+}
+
+func handlerInt64Ptr(value int64) *int64 {
+	return &value
 }

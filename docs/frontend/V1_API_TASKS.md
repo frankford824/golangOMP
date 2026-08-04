@@ -4861,7 +4861,7 @@ curl -X GET https://api.example.com/v1/tasks/<id>/cost-overrides \
 ### 简介
 支持方法: POST。
 
-- `POST`: Assigns an active Designer to a `PendingAssign` task or reassigns an `InProgress` task. Authorization requires explicit `task.assign` for first assignment or `task.reassign` for reassignment, intersected with the task's stable organization-ID scope; legacy roles and department/team names never grant access. The action is exposed to clients as `task.assign` in the task's `allowed_actions`. `PendingAudit`, `Completed`, `Archived`, `Cancelled`, and `Blocked` are rejected.
+- `POST`: Assigns an active Designer to a `PendingAssign` task or reassigns an `InProgress` task. Authorization requires explicit `task.assign` for first assignment or `task.reassign` for reassignment. First assignment and ordinary management reassignment are intersected with the task's stable organization-ID scope. The explicitly assigned current designer/handler may also delegate an `InProgress` task when their active `task.reassign` grant allows the task type; this narrow relationship does not authorize unassigned pool work. Legacy roles and department/team names never grant access. The action is exposed to clients as `task.assign` in the task's `allowed_actions`. `PendingAudit`, `Completed`, `Archived`, `Cancelled`, and `Blocked` are rejected.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
@@ -4908,7 +4908,7 @@ Content-Type: `application/json`
 ### 错误码
 | HTTP | code | deny_code | 说明 |
 |---|---|---|---|
-| 403 | 见 `error.code` | 见 `deny_code` | `PERMISSION_DENIED` when the exact assign/reassign capability is missing or the task is outside the actor's stable organization-ID scope. |
+| 403 | 见 `error.code` | 见 `deny_code` | `PERMISSION_DENIED` when the exact assign/reassign capability is missing, or when neither stable organization-ID scope nor the current-assignee delegation rule matches. |
 | 404 | 见 `error.code` | 见 `deny_code` | Task not found |
 | 409 | 见 `error.code` | 见 `deny_code` | Task state or workflow revision conflict |
 
