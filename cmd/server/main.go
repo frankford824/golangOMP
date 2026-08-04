@@ -485,7 +485,14 @@ func main() {
 		PreviewWorkerMaxAttempts: cfg.AssetWorkbench.PreviewWorkerMaxAttempts,
 		BatchJobWorkerLeaseTTL:   cfg.AssetWorkbench.BatchJobWorkerLeaseTTL,
 	}, assetWorkbenchOptions...)
-	planningSKUSvc := service.NewPlanningSKUService(planningSKURepo, taskRepo, taskEventRepo, mdb, service.NewTaskFinalizer(taskResourceGroupRepo, taskEventRepo))
+	planningSKUSvc := service.NewPlanningSKUService(
+		planningSKURepo,
+		taskRepo,
+		taskEventRepo,
+		mdb,
+		service.NewTaskFinalizer(taskResourceGroupRepo, taskEventRepo),
+		service.WithPlanningSKUAssets(assetStorageRefRepo, service.NewStorageStreamOpener(ossDirectSvc, uploadClient), ossDirectSvc),
+	)
 	taskERPOutboxProcessor := service.NewTaskERPOutboxProcessor(taskSvc, productManagementSvc, erpBridgeSvc, assetStorageRefRepo, ossDirectSvc)
 
 	authH := handler.NewAuthHandler(identitySvc, cfg.AssetWorkbench.CookieDomain)

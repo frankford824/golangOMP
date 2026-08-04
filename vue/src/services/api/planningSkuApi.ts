@@ -21,6 +21,18 @@ export interface PlanningSKUResultItem {
   sku_code: string
   quantity: number
   erp_status?: string
+  revision?: {
+    id: number
+    version_no: number
+    description_spec: string
+    quantity: number
+    target_price?: string
+    note?: string
+    reference_url?: string
+    product_image_ref_id?: string
+    product_image_url?: string
+    product_image_name?: string
+  }
 }
 
 export interface PlanningSKUCreateResult {
@@ -58,6 +70,9 @@ export const planningSkuApi = {
       erp_sync_mode: erpSyncMode,
       planning_sku_items: items,
     }, { headers: { 'Idempotency-Key': clientCreateId } }))
+  },
+  async getTask(taskId: number): Promise<PlanningSKUCreateResult> {
+    return unwrap(await http.get(`/v1/tasks/${taskId}/planning-skus`))
   },
   templateURL(erp = false): string {
     return `/v1/tasks/sku-planning/template.xlsx${erp ? '?erp=true' : ''}`

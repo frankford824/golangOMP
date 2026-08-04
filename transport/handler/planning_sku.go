@@ -75,6 +75,20 @@ func (h *PlanningSKUHandler) Update(c *gin.Context) {
 	respondOK(c, result)
 }
 
+func (h *PlanningSKUHandler) GetResult(c *gin.Context) {
+	taskID, err := parseID(c)
+	if err != nil {
+		respondError(c, domain.NewAppError(domain.ErrCodeInvalidRequest, "invalid task id", nil))
+		return
+	}
+	result, appErr := h.svc.GetResult(c.Request.Context(), requestActor(c), taskID)
+	if appErr != nil {
+		respondError(c, appErr)
+		return
+	}
+	respondOK(c, result)
+}
+
 func (h *PlanningSKUHandler) ExportTask(c *gin.Context) {
 	taskID, err := parseID(c)
 	if err != nil {

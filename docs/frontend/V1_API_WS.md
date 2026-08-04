@@ -16,7 +16,7 @@
 ## GET /ws/v1
 
 ### 简介
-当前 OpenAPI 实际挂载的 WebSocket path 是 `/ws/v1`，不是 `/v1/ws/v1`。本文按 OpenAPI 真实路径记录；`/v1` path 统计为 241。
+当前 OpenAPI 实际挂载的 WebSocket path 是 `/ws/v1`，不是 `/v1/ws/v1`。本文按 OpenAPI 真实路径记录；`/v1` path 统计为 242。
 
 ### 鉴权与 RBAC
 - 需要 Bearer token，推荐通过协议约定或查询参数传递，具体以 transport 实现和前端联调环境为准。

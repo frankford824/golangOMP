@@ -1,10 +1,10 @@
-# V1 API 速查表(241 path · 一行一条)
+# V1 API 速查表(242 path · 一行一条)
 
 > Revision: V8 current contract (2026-07-20)
 > Source: docs/api/openapi.yaml
 
 > 本表一行对应一个 `/v1` path；同一路径多 method 合并到 `Methods` 列。
-> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 241 个 `/v1` path。
+> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 242 个 `/v1` path。
 > 新前端只接本表列出的当前 V8 路径。
 
 | Methods | Path | Summary | RBAC | family doc |
@@ -64,6 +64,7 @@
 | GET | `/v1/tasks/sku-planning/template.xlsx` | Download the standard or ERP planning-SKU import template | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/tasks/sku-planning/parse-excel` | Parse and validate an import workbook without creating a task | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | PATCH | `/v1/tasks/{id}/planning-skus/{item_id}` | Create an immutable correction revision for a completed planning SKU | PATCH:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
+| GET | `/v1/tasks/{id}/planning-skus` | Get the current planning-SKU rows and private product-image previews for one task | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | GET | `/v1/tasks/{id}/planning-skus/export.xlsx` | Export all planning SKUs for one task | GET:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/planning-skus/export.xlsx` | Export up to 5000 selected planning-SKU rows | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |
 | POST | `/v1/tasks/{id}/planning-skus/erp-retry` | Queue retry for failed planning-SKU ERP projections | POST:已登录 / scope-aware | [V1_API_TASKS.md](V1_API_TASKS.md) |

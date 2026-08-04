@@ -62,6 +62,40 @@
         </div>
       </section>
 
+      <section v-if="isPlanning" class="planning-results" aria-label="策划 SKU 明细">
+        <header>
+          <div>
+            <p class="eyebrow">策划结果</p>
+            <h2>SKU 明细与产品图片</h2>
+            <p>产品图片属于策划 SKU 修订，不会重复记入普通任务附件。</p>
+          </div>
+          <strong>{{ planningItems.length }} 个 SKU</strong>
+        </header>
+        <div v-if="planningItems.length" class="planning-result-grid">
+          <article v-for="item in planningItems" :key="item.task_sku_item_id">
+            <div class="planning-image">
+              <img
+                v-if="item.revision?.product_image_url"
+                :src="item.revision.product_image_url"
+                :alt="item.revision.product_image_name || `${item.sku_code} 产品图片`"
+              >
+              <span v-else>未上传产品图片</span>
+            </div>
+            <div class="planning-result-copy">
+              <p>第 {{ item.sequence_no }} 项</p>
+              <h3>{{ item.sku_code }}</h3>
+              <strong>{{ item.revision?.description_spec || '未填写产品描述' }}</strong>
+              <dl>
+                <div><dt>数量</dt><dd>{{ item.quantity }}</dd></div>
+                <div><dt>目标价</dt><dd>{{ item.revision?.target_price ? `¥${item.revision.target_price}` : '—' }}</dd></div>
+                <div><dt>图片</dt><dd>{{ item.revision?.product_image_name || '无' }}</dd></div>
+              </dl>
+            </div>
+          </article>
+        </div>
+        <p v-else class="muted-copy">当前任务没有可展示的策划 SKU 明细。</p>
+      </section>
+
       <section class="overview-grid" aria-label="任务关键信息">
         <article class="brief-card mission-card">
           <header><div class="card-heading"><span class="heading-icon"><ClipboardList :size="18" aria-hidden="true" /></span><div><h2>{{ requirementHeading }}</h2><p>需求与运营交代</p></div></div></header>
@@ -121,6 +155,16 @@
           <div v-else-if="workspaceMode === 'details'" class="workspace-body detail-sections">
             <TaskBusinessInfoEditor v-if="canEditTaskBusinessInfo" :task-id="task.id" :task="task" @saved="load" />
             <section class="detail-summary-strip"><div><span>当前状态</span><strong>{{ currentStageTitle }}</strong></div><div><span>任务类型</span><strong>{{ taskTypeLabel }} · {{ businessLaneLabel }}</strong></div><div><span>当前指派</span><strong>{{ currentOwner }}</strong></div><div><span>{{ isRetouch ? '运营参考图' : '任务级附件' }}</span><strong>{{ displayReferenceFiles.length }} 个</strong></div><div><span>最近更新</span><strong>{{ displayDate(task.updated_at) }}</strong></div></section>
+            <section v-if="isPlanning" class="planning-detail-section">
+              <p class="eyebrow">策划 SKU 明细</p>
+              <div class="planning-detail-list">
+                <article v-for="item in planningItems" :key="item.task_sku_item_id">
+                  <img v-if="item.revision?.product_image_url" :src="item.revision.product_image_url" :alt="item.revision.product_image_name || `${item.sku_code} 产品图片`">
+                  <span v-else class="planning-image-empty">无图片</span>
+                  <div><strong>{{ item.sku_code }}</strong><p>{{ item.revision?.description_spec || '未填写产品描述' }}</p><small>数量 {{ item.quantity }} · 图片 {{ item.revision?.product_image_name || '无' }}</small></div>
+                </article>
+              </div>
+            </section>
             <section class="detail-requirement"><p class="eyebrow">需求与运营交代</p><div class="detail-copy-grid"><div><h3>{{ requirementHeading }}</h3><p class="long-copy">{{ requirementText }}</p></div><aside><h3>运营备注</h3><p class="long-copy">{{ operationNote }}</p></aside></div></section>
             <section><p class="eyebrow">人员与组织</p><dl class="detail-list"><div><dt>创建人</dt><dd>{{ task.creator_name || '—' }}</dd></div><div><dt>设计人员</dt><dd>{{ task.designer_name || '—' }}</dd></div><div><dt>当前处理人</dt><dd>{{ currentOwner }}</dd></div><div><dt>归属组织</dt><dd>{{ ownerOrg }}</dd></div></dl></section>
             <section><p class="eyebrow">产品与规格</p><dl class="detail-list"><div><dt>主 SKU</dt><dd>{{ task.primary_sku_code || task.sku_code || '—' }}</dd></div><div><dt>产品名称</dt><dd>{{ task.product_name_snapshot || '—' }}</dd></div><div><dt>规格</dt><dd>{{ detailValue('spec_text') }}</dd></div><div><dt>尺寸</dt><dd>{{ detailValue('size_text') }}</dd></div><div><dt>材质</dt><dd>{{ detailValue('material') }}</dd></div><div><dt>工艺</dt><dd>{{ detailValue('craft_text') }}</dd></div></dl></section>
@@ -231,7 +275,7 @@ import TaskBusinessInfoEditor from '@/components/task/TaskBusinessInfoEditor.vue
 import CostExplanationPanel from '@/components/cost/CostExplanationPanel.vue'
 import ReassignDesignerDialog from '@/components/task/ReassignDesignerDialog.vue'
 import { uploadReferenceFileRef } from '@/services/upload/assetUploadFlow'
-import { planningSkuApi } from '@/services/api/planningSkuApi'
+import { planningSkuApi, type PlanningSKUCreateResult } from '@/services/api/planningSkuApi'
 import { handoverStatusLabel, taskDetailDisplayValue } from '@/domain/task-detail-display'
 import { dedupeReferenceFileRefs } from '@/domain/mappers/reference-file-refs'
 
@@ -271,6 +315,7 @@ const assignSubmitting = ref(false)
 const referenceInput = ref<HTMLInputElement | null>(null)
 const referenceUploading = ref(false)
 const planningExporting = ref(false)
+const planningResult = ref<PlanningSKUCreateResult | null>(null)
 const assignError = ref('')
 const {
   designers: assignDesigners,
@@ -294,6 +339,7 @@ const workspaceReturnFocus = ref<HTMLElement | null>(null)
 let previousBodyOverflow = ''
 const taskId = computed(() => Number(route.params.id))
 const isPlanning = computed(() => task.value?.task_type === 'sku_planning')
+const planningItems = computed(() => planningResult.value?.items || [])
 const isRetouch = computed(() => ['retouch', 'retouch_task'].includes(task.value?.task_type || ''))
 const taskTypeLabel = computed(() => ({ original_product_development: '原品开发', new_product_development: '新品开发', retouch_task: '修图任务', sku_planning: '策划 SKU', regular_customization: '常规定制', customer_customization: '客户定制' }[task.value?.task_type || ''] || '其他任务'))
 const businessLaneLabel = computed(() => isCustomization.value ? '定制' : '常规')
@@ -549,6 +595,7 @@ function eventActor(item: TaskEvent) { return item.operator_name || item.actor_n
 async function load() {
   if (!Number.isInteger(taskId.value) || taskId.value <= 0) { error.value = '任务 ID 无效。'; return }
   loading.value = true; error.value = ''
+  planningResult.value = null
   try {
     const [detailResponse, taskResponse] = await Promise.all([
       tasksApi.getDetail(String(taskId.value)),
@@ -563,12 +610,14 @@ async function load() {
     }
     task.value = merged as V8Task
     const aggregateEvents = Array.isArray(envelope.events) ? envelope.events as TaskEvent[] : []
-    const [nextBundle,eventResponse,handoverResponse] = await Promise.all([
+    const [nextBundle,eventResponse,handoverResponse,nextPlanningResult] = await Promise.all([
       task.value.task_type === 'sku_planning' ? Promise.resolve(null) : resourceGroupsApi.taskBundle(taskId.value),
       tasksApi.listTaskEvents(String(taskId.value)).catch(() => null),
       supportsAuditCollaboration.value ? tasksApi.listAuditHandovers(String(taskId.value)).catch(() => null) : Promise.resolve(null),
+      task.value.task_type === 'sku_planning' ? planningSkuApi.getTask(taskId.value) : Promise.resolve(null),
     ])
     bundle.value = nextBundle
+    planningResult.value = nextPlanningResult
     events.value = unwrapCollection<TaskEvent>(eventResponse, aggregateEvents)
     handovers.value = unwrapCollection<AuditHandover>(handoverResponse)
   } catch (cause) { error.value = cause instanceof Error ? cause.message : '任务加载失败。' }
@@ -729,6 +778,7 @@ onBeforeUnmount(()=>{window.removeEventListener('beforeunload',warnBeforeUnload)
 .stage-context{display:grid;grid-template-columns:repeat(2,minmax(120px,1fr));gap:1px;margin:0;overflow:hidden;border:1px solid rgb(var(--yb-border));border-radius:11px;background:rgb(var(--yb-border))}.stage-context div{padding:8px 10px;background:rgb(var(--yb-surface-soft))}.stage-context dt{font-size:10px;color:rgb(var(--yb-text-muted))}.stage-context dd{max-width:180px;margin:2px 0 0;overflow:hidden;font-size:12px;font-weight:750;text-overflow:ellipsis;white-space:nowrap}
 .primary-button,.secondary-button,.brief-card header button,.resource-story header button,.collaboration-actions button{min-height:38px;padding:0 14px;border-radius:10px;font-weight:750;text-decoration:none;cursor:pointer}
 .primary-button{border:0;background:rgb(var(--yb-brand));color:rgb(var(--yb-text-inverse));box-shadow:0 8px 18px rgb(var(--yb-brand)/.16)}
+.planning-results{display:grid;gap:14px;padding:16px;border:1px solid rgb(var(--yb-border));border-radius:18px;background:rgb(var(--yb-surface));box-shadow:0 12px 30px rgb(var(--yb-shadow)/.05)}.planning-results>header{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}.planning-results>header h2{margin:3px 0}.planning-results>header p:last-child{margin:4px 0 0;color:rgb(var(--yb-text-muted))}.planning-results>header>strong{padding:6px 10px;border-radius:999px;background:rgb(var(--yb-brand-soft));color:rgb(var(--yb-brand-deep));white-space:nowrap}.planning-result-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px}.planning-result-grid>article{display:grid;grid-template-columns:112px minmax(0,1fr);gap:12px;padding:10px;border:1px solid rgb(var(--yb-border));border-radius:14px;background:rgb(var(--yb-surface-soft))}.planning-image{width:112px;height:112px;display:grid;place-items:center;overflow:hidden;border-radius:11px;background:rgb(var(--yb-surface-muted));color:rgb(var(--yb-text-muted));font-size:11px;text-align:center}.planning-image img{width:100%;height:100%;object-fit:cover}.planning-result-copy{min-width:0}.planning-result-copy>p{margin:2px 0;color:rgb(var(--yb-text-muted));font-size:10px}.planning-result-copy h3{margin:2px 0 7px}.planning-result-copy>strong{display:-webkit-box;overflow:hidden;font-size:12px;line-height:1.5;-webkit-box-orient:vertical;-webkit-line-clamp:2}.planning-result-copy dl{display:grid;gap:3px;margin:9px 0 0}.planning-result-copy dl div{display:grid;grid-template-columns:45px minmax(0,1fr);gap:4px}.planning-result-copy dt{color:rgb(var(--yb-text-muted));font-size:10px}.planning-result-copy dd{margin:0;overflow:hidden;font-size:10px;text-overflow:ellipsis;white-space:nowrap}
 .retouch-requirement-list{display:grid;gap:10px;margin:12px 0 0;padding:0;list-style:none}.retouch-requirement-list li{display:grid;grid-template-columns:30px 1fr;gap:10px;padding:12px;border:1px solid rgb(var(--yb-border));border-radius:12px;background:rgb(var(--yb-surface-soft))}.retouch-requirement-list li>span{display:grid;width:26px;height:26px;place-items:center;border-radius:9px;background:rgb(var(--yb-brand-soft));color:rgb(var(--yb-brand));font-weight:800}.retouch-requirement-list strong{display:block}.retouch-requirement-list p{margin:4px 0 0;color:rgb(var(--yb-text-muted))}
 .secondary-button,.brief-card header button,.resource-story header button,.collaboration-actions button{border:1px solid rgb(var(--yb-border));background:rgb(var(--yb-surface));color:rgb(var(--yb-text))}
 .overview-grid{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(250px,.8fr) minmax(285px,1fr);align-items:start;gap:12px}.brief-card{min-width:0;padding:16px;display:grid;align-content:start;gap:12px}.brief-card header{align-items:start}.brief-card header button{min-height:30px;padding:0 9px}
@@ -739,7 +789,7 @@ onBeforeUnmount(()=>{window.removeEventListener('beforeunload',warnBeforeUnload)
 .event-dot{width:9px;height:9px;margin-top:5px;border:2px solid rgb(var(--yb-surface));border-radius:50%;background:rgb(var(--yb-brand));box-shadow:0 0 0 2px rgb(var(--yb-brand-soft))}.activity-list,.full-timeline{display:grid;gap:12px;margin:0;padding:0;list-style:none}.full-timeline li{display:grid;grid-template-columns:14px 1fr;gap:9px}.full-timeline p,.full-timeline small{margin:2px 0 0;color:rgb(var(--yb-text-muted));font-size:12px}.muted-copy{margin:0;color:rgb(var(--yb-text-muted))}
 .resource-story{display:grid;grid-template-columns:minmax(260px,.7fr) 1.3fr;align-items:center;gap:16px;padding:13px 16px}.resource-story header{align-items:start}.resource-steps{display:grid;grid-template-columns:1fr auto 1fr auto 1fr;align-items:center;gap:9px}.resource-steps>div{display:grid;grid-template-columns:auto 1fr;gap:1px 8px;padding:10px;border-radius:11px;background:rgb(var(--yb-surface-soft))}.resource-steps span{grid-row:1/3;font:800 17px var(--yb-font-data);color:rgb(var(--yb-brand))}.resource-steps small{color:rgb(var(--yb-text-muted));font-size:11px}.resource-steps i{color:rgb(var(--yb-text-faint));font-style:normal}
 .workspace-backdrop{position:fixed;inset:0;z-index:7400;padding:20px;background:rgb(var(--yb-overlay-night)/.56);backdrop-filter:blur(8px)}.workspace-dialog{width:min(1420px,100%);height:calc(100dvh - 40px);margin:0 auto;display:grid;grid-template-rows:auto minmax(0,1fr);overflow:hidden;border:1px solid rgb(var(--yb-border));border-radius:22px;background:rgb(var(--yb-surface));box-shadow:0 32px 90px rgb(var(--yb-shadow)/.3)}.workspace-dialog:focus{outline:none}.workspace-head{padding:16px 20px;border-bottom:1px solid rgb(var(--yb-border));background:rgb(var(--yb-surface-soft))}.close-button{width:40px;height:40px;border:1px solid rgb(var(--yb-border));border-radius:11px;background:rgb(var(--yb-surface));font-size:24px;cursor:pointer}.workspace-body{min-height:0;overflow:auto;padding:18px}.workflow-body{padding:12px}
-.detail-sections{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-rows:max-content;align-content:start;gap:13px}.detail-sections>section{padding:16px;border:1px solid rgb(var(--yb-border));border-radius:15px}.detail-summary-strip,.detail-requirement,.sku-item-section{grid-column:1/-1}.detail-sections>.detail-summary-strip{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:1px;padding:0;overflow:hidden;background:rgb(var(--yb-border))}.detail-summary-strip div{padding:13px;background:rgb(var(--yb-surface-soft))}.detail-summary-strip span{display:block;color:rgb(var(--yb-text-muted));font-size:10px}.detail-summary-strip strong{display:block;margin-top:3px}.detail-copy-grid{display:grid;grid-template-columns:1.15fr .85fr;gap:13px}.detail-copy-grid>aside{padding:13px;border-radius:12px;background:rgb(var(--yb-brand-soft))}.detail-sections h3{margin:9px 0 5px}.sku-item-heading{display:flex;align-items:flex-end;justify-content:space-between;gap:12px}.sku-item-heading h3{margin:3px 0 0}.sku-item-heading>span{color:rgb(var(--yb-text-muted));font-size:11px}.long-copy{margin:0;white-space:pre-wrap;color:rgb(var(--yb-text-body));line-height:1.75}.detail-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1px;margin:10px 0 0;overflow:hidden;border:1px solid rgb(var(--yb-border));border-radius:11px;background:rgb(var(--yb-border))}.detail-list div{padding:10px;background:rgb(var(--yb-surface))}.detail-list dt{font-size:10px;color:rgb(var(--yb-text-muted))}.detail-list dd{margin:3px 0 0}
+.detail-sections{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-auto-rows:max-content;align-content:start;gap:13px}.detail-sections>section{padding:16px;border:1px solid rgb(var(--yb-border));border-radius:15px}.detail-summary-strip,.detail-requirement,.sku-item-section,.planning-detail-section{grid-column:1/-1}.planning-detail-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:9px;margin-top:10px}.planning-detail-list article{display:grid;grid-template-columns:64px minmax(0,1fr);gap:10px;padding:9px;border:1px solid rgb(var(--yb-border));border-radius:11px;background:rgb(var(--yb-surface-soft))}.planning-detail-list img,.planning-image-empty{width:64px;height:64px;border-radius:9px;object-fit:cover}.planning-image-empty{display:grid;place-items:center;background:rgb(var(--yb-surface-muted));color:rgb(var(--yb-text-muted));font-size:10px}.planning-detail-list p{margin:4px 0;color:rgb(var(--yb-text-body))}.planning-detail-list small{color:rgb(var(--yb-text-muted))}.detail-sections>.detail-summary-strip{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:1px;padding:0;overflow:hidden;background:rgb(var(--yb-border))}.detail-summary-strip div{padding:13px;background:rgb(var(--yb-surface-soft))}.detail-summary-strip span{display:block;color:rgb(var(--yb-text-muted));font-size:10px}.detail-summary-strip strong{display:block;margin-top:3px}.detail-copy-grid{display:grid;grid-template-columns:1.15fr .85fr;gap:13px}.detail-copy-grid>aside{padding:13px;border-radius:12px;background:rgb(var(--yb-brand-soft))}.detail-sections h3{margin:9px 0 5px}.sku-item-heading{display:flex;align-items:flex-end;justify-content:space-between;gap:12px}.sku-item-heading h3{margin:3px 0 0}.sku-item-heading>span{color:rgb(var(--yb-text-muted));font-size:11px}.long-copy{margin:0;white-space:pre-wrap;color:rgb(var(--yb-text-body));line-height:1.75}.detail-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1px;margin:10px 0 0;overflow:hidden;border:1px solid rgb(var(--yb-border));border-radius:11px;background:rgb(var(--yb-border))}.detail-list div{padding:10px;background:rgb(var(--yb-surface))}.detail-list dt{font-size:10px;color:rgb(var(--yb-text-muted))}.detail-list dd{margin:3px 0 0}
 .reference-detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:10px}.reference-detail-grid a{min-width:0;display:grid;grid-template-columns:48px 1fr;align-items:center;gap:8px;padding:8px;border:1px solid rgb(var(--yb-border));border-radius:11px;color:rgb(var(--yb-text));text-decoration:none}.reference-detail-grid img{width:48px;height:48px;border-radius:8px;object-fit:cover}.reference-detail-grid strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .history-body{max-width:880px;width:100%;margin:0 auto}.history-now{display:grid;grid-template-columns:18px 1fr;gap:12px;padding:16px;border-radius:15px;background:rgb(var(--yb-brand-soft))}.history-now h3,.history-now p{margin:3px 0}.history-heading{display:flex;align-items:end;justify-content:space-between;margin:22px 0 16px}.history-heading h3{margin:3px 0 0}.history-heading span{color:rgb(var(--yb-text-muted));font-size:12px}.full-timeline{gap:0}.full-timeline li{position:relative;padding:0 0 22px}.full-timeline li:not(:last-child)::before{content:"";position:absolute;left:5px;top:14px;bottom:0;width:1px;background:rgb(var(--yb-border))}
 .collaboration-body{display:grid;grid-template-columns:minmax(280px,.75fr) 1.25fr;gap:16px}.handover-form,.handover-list,.handover-side{display:grid;align-content:start;gap:12px}.handover-form{padding:18px;border:1px solid rgb(var(--yb-border));border-radius:16px}.handover-form label{display:grid;gap:6px;font-weight:700;font-size:13px}.handover-form input,.handover-form textarea,.handover-form select{min-height:40px;padding:9px 11px;border:1px solid rgb(var(--yb-border));border-radius:10px;background:rgb(var(--yb-surface));color:rgb(var(--yb-text));font-weight:500}

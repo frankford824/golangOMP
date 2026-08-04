@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/url"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -37,6 +39,7 @@ type PlanningSKURepository interface {
 
 type PlanningSKUService interface {
 	Create(ctx context.Context, actor domain.RequestActor, request domain.CreatePlanningSKUTaskRequest) (*domain.PlanningSKUCreateResult, *domain.AppError)
+	GetResult(ctx context.Context, actor domain.RequestActor, taskID int64) (*domain.PlanningSKUCreateResult, *domain.AppError)
 	Update(ctx context.Context, actor domain.RequestActor, taskID, itemID int64, request domain.UpdatePlanningSKURequest) (*domain.PlanningSKURevision, *domain.AppError)
 	Template(ctx context.Context, includeERP bool) ([]byte, *domain.AppError)
 	ParseExcel(ctx context.Context, reader io.Reader, includeERP bool) (*domain.PlanningSKUExcelParseResult, *domain.AppError)
@@ -45,16 +48,35 @@ type PlanningSKUService interface {
 }
 
 type planningSKUService struct {
-	repo      PlanningSKURepository
-	taskRepo  repo.TaskRepo
-	eventRepo repo.TaskEventRepo
-	txRunner  repo.TxRunner
-	finalizer *TaskFinalizer
-	now       func() time.Time
+	repo        PlanningSKURepository
+	taskRepo    repo.TaskRepo
+	eventRepo   repo.TaskEventRepo
+	txRunner    repo.TxRunner
+	finalizer   *TaskFinalizer
+	storageRefs repo.AssetStorageRefRepo
+	streams     StorageStreamOpener
+	ossDirect   *OSSDirectService
+	now         func() time.Time
 }
 
-func NewPlanningSKUService(repository PlanningSKURepository, taskRepo repo.TaskRepo, eventRepo repo.TaskEventRepo, txRunner repo.TxRunner, finalizer *TaskFinalizer) PlanningSKUService {
-	return &planningSKUService{repo: repository, taskRepo: taskRepo, eventRepo: eventRepo, txRunner: txRunner, finalizer: finalizer, now: time.Now}
+type PlanningSKUOption func(*planningSKUService)
+
+func WithPlanningSKUAssets(storageRefs repo.AssetStorageRefRepo, streams StorageStreamOpener, ossDirect *OSSDirectService) PlanningSKUOption {
+	return func(service *planningSKUService) {
+		service.storageRefs = storageRefs
+		service.streams = streams
+		service.ossDirect = ossDirect
+	}
+}
+
+func NewPlanningSKUService(repository PlanningSKURepository, taskRepo repo.TaskRepo, eventRepo repo.TaskEventRepo, txRunner repo.TxRunner, finalizer *TaskFinalizer, opts ...PlanningSKUOption) PlanningSKUService {
+	service := &planningSKUService{repo: repository, taskRepo: taskRepo, eventRepo: eventRepo, txRunner: txRunner, finalizer: finalizer, now: time.Now}
+	for _, option := range opts {
+		if option != nil {
+			option(service)
+		}
+	}
+	return service
 }
 
 func (s *planningSKUService) Create(ctx context.Context, actor domain.RequestActor, request domain.CreatePlanningSKUTaskRequest) (*domain.PlanningSKUCreateResult, *domain.AppError) {
@@ -203,6 +225,46 @@ func (s *planningSKUService) Create(ctx context.Context, actor domain.RequestAct
 		return nil, infraError("load planning SKU result", err)
 	}
 	result.WorkflowRevision = completedRevision
+	return result, nil
+}
+
+func (s *planningSKUService) GetResult(ctx context.Context, actor domain.RequestActor, taskID int64) (*domain.PlanningSKUCreateResult, *domain.AppError) {
+	if actor.ID <= 0 || !domain.ActorHasPermission(actor, domain.PermissionPlanningSKUView) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "planning_sku.view is required", nil)
+	}
+	if taskID <= 0 {
+		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "task id is required", nil)
+	}
+	subject, err := s.repo.GetTaskAccessSubject(ctx, taskID)
+	if err != nil {
+		return nil, mapTaskResourceError("load planning SKU result scope", err)
+	}
+	if !domain.EffectiveAccessAllowsTask(actor, domain.PermissionPlanningSKUView, subject) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "planning_sku.view is outside the effective data scope", nil)
+	}
+	result, err := s.repo.LoadCreateResult(ctx, taskID)
+	if err != nil {
+		return nil, mapTaskResourceError("load planning SKU result", err)
+	}
+	if result == nil {
+		return nil, domain.ErrNotFound
+	}
+	for index := range result.Items {
+		revision := result.Items[index].Revision
+		if revision == nil || strings.TrimSpace(revision.ProductImageRefID) == "" {
+			continue
+		}
+		storageRef, refErr := s.loadPlanningImageRef(ctx, revision.ProductImageRefID)
+		if refErr != nil {
+			return nil, infraError("load planning SKU image", refErr)
+		}
+		revision.ProductImageName = storageRef.FileName
+		if s.ossDirect != nil && s.ossDirect.Enabled() {
+			if signed := s.ossDirect.PresignPreviewURL(storageRef.RefKey); signed != nil {
+				revision.ProductImageURL = signed.DownloadURL
+			}
+		}
+	}
 	return result, nil
 }
 
@@ -383,6 +445,7 @@ func (s *planningSKUService) Export(ctx context.Context, actor domain.RequestAct
 		return nil, "", domain.NewAppError(domain.ErrCodePermissionDenied, "planning_sku.export is outside the effective data scope", nil)
 	}
 	f := excelize.NewFile()
+	defer f.Close()
 	sheet := "策划SKU"
 	_ = f.SetSheetName(f.GetSheetName(0), sheet)
 	headers := []string{"任务号", "序号", "SKU", "图片", "产品描述/规格", "数量", "目标价", "备注", "参考链接", "ERP状态", "创建人", "结单时间"}
@@ -390,7 +453,6 @@ func (s *planningSKUService) Export(ctx context.Context, actor domain.RequestAct
 		cell, _ := excelize.CoordinatesToCellName(column+1, 1)
 		_ = f.SetCellValue(sheet, cell, header)
 	}
-	notes := []string{}
 	for index, row := range rows {
 		price := ""
 		if row.TargetPrice != nil {
@@ -400,7 +462,7 @@ func (s *planningSKUService) Export(ctx context.Context, actor domain.RequestAct
 		if row.CompletedAt != nil {
 			completed = row.CompletedAt.Format(time.RFC3339)
 		}
-		values := []interface{}{row.TaskNo, row.SequenceNo, row.SKUCode, row.ImageRefID, row.DescriptionSpec, row.Quantity, price, row.Note, row.ReferenceURL, row.ERPStatus, row.CreatorName, completed}
+		values := []interface{}{row.TaskNo, row.SequenceNo, row.SKUCode, "", row.DescriptionSpec, row.Quantity, price, row.Note, row.ReferenceURL, row.ERPStatus, row.CreatorName, completed}
 		for column, value := range values {
 			if text, ok := value.(string); ok {
 				value = safeExcelText(text)
@@ -409,20 +471,19 @@ func (s *planningSKUService) Export(ctx context.Context, actor domain.RequestAct
 			_ = f.SetCellValue(sheet, cell, value)
 		}
 		if row.ImageRefID != "" {
-			notes = append(notes, fmt.Sprintf("任务 %s / SKU %s：图片引用 %s 未嵌入，需由对象存储导出 worker 补齐", row.TaskNo, row.SKUCode, row.ImageRefID))
+			cell, _ := excelize.CoordinatesToCellName(4, index+2)
+			if err := s.embedPlanningImage(ctx, f, sheet, cell, row); err != nil {
+				return nil, "", infraError("embed planning SKU image", err)
+			}
+			_ = f.SetRowHeight(sheet, index+2, 80)
 		}
 	}
 	noteSheet := "导出说明"
 	_, _ = f.NewSheet(noteSheet)
 	_ = f.SetCellValue(noteSheet, "A1", "说明")
-	if len(notes) == 0 {
-		_ = f.SetCellValue(noteSheet, "A2", "无")
-	} else {
-		for index, note := range notes {
-			_ = f.SetCellValue(noteSheet, fmt.Sprintf("A%d", index+2), safeExcelText(note))
-		}
-	}
+	_ = f.SetCellValue(noteSheet, "A2", "策划 SKU 产品图片已嵌入主表；无图片的行保持为空。")
 	_ = f.SetColWidth(sheet, "A", "L", 18)
+	_ = f.SetColWidth(sheet, "D", "D", 18)
 	_ = f.SetColWidth(sheet, "E", "E", 50)
 	buffer := bytes.NewBuffer(nil)
 	if err := f.Write(buffer); err != nil {
@@ -430,6 +491,94 @@ func (s *planningSKUService) Export(ctx context.Context, actor domain.RequestAct
 	}
 	filename := "策划SKU_" + s.now().Format("20060102_150405") + ".xlsx"
 	return buffer.Bytes(), filename, nil
+}
+
+const maxPlanningImageExportBytes = 30 * 1024 * 1024
+
+func (s *planningSKUService) loadPlanningImageRef(ctx context.Context, refID string) (*domain.AssetStorageRef, error) {
+	if s.storageRefs == nil {
+		return nil, fmt.Errorf("planning SKU storage reference repository is not configured")
+	}
+	storageRef, err := s.storageRefs.GetByRefID(ctx, strings.TrimSpace(refID))
+	if err != nil {
+		return nil, err
+	}
+	if storageRef == nil ||
+		storageRef.OwnerType != domain.AssetOwnerTypePlanningSKURevision ||
+		storageRef.Status != domain.AssetStorageRefStatusRecorded ||
+		storageRef.IsPlaceholder ||
+		strings.TrimSpace(storageRef.RefKey) == "" {
+		return nil, fmt.Errorf("planning SKU image reference %q is not readable", refID)
+	}
+	return storageRef, nil
+}
+
+func (s *planningSKUService) embedPlanningImage(ctx context.Context, workbook *excelize.File, sheet, cell string, row domain.PlanningSKUExportRow) error {
+	if s.streams == nil {
+		return fmt.Errorf("planning SKU image stream opener is not configured")
+	}
+	storageRef, err := s.loadPlanningImageRef(ctx, row.ImageRefID)
+	if err != nil {
+		return err
+	}
+	if storageRef.FileSize != nil && *storageRef.FileSize > maxPlanningImageExportBytes {
+		return fmt.Errorf("planning SKU image %q exceeds the %d byte export limit", storageRef.FileName, maxPlanningImageExportBytes)
+	}
+	reader, err := s.streams.Open(ctx, storageRef.RefKey)
+	if err != nil {
+		return err
+	}
+	defer reader.Close()
+	payload, err := io.ReadAll(io.LimitReader(reader, maxPlanningImageExportBytes+1))
+	if err != nil {
+		return err
+	}
+	if len(payload) > maxPlanningImageExportBytes {
+		return fmt.Errorf("planning SKU image %q exceeds the %d byte export limit", storageRef.FileName, maxPlanningImageExportBytes)
+	}
+	extension, err := planningImageExtension(storageRef.FileName, storageRef.MimeType)
+	if err != nil {
+		return err
+	}
+	return workbook.AddPictureFromBytes(sheet, cell, &excelize.Picture{
+		Extension: extension,
+		File:      payload,
+		Format: &excelize.GraphicOptions{
+			AltText:         "策划 SKU 产品图片 " + row.SKUCode,
+			AutoFit:         true,
+			LockAspectRatio: true,
+		},
+	})
+}
+
+func planningImageExtension(fileName, mimeType string) (string, error) {
+	extension := strings.ToLower(filepath.Ext(strings.TrimSpace(fileName)))
+	if extension == ".jpeg" {
+		extension = ".jpg"
+	}
+	if planningImageExtensionAllowed(extension) {
+		return extension, nil
+	}
+	candidates, _ := mime.ExtensionsByType(strings.TrimSpace(mimeType))
+	for _, candidate := range candidates {
+		candidate = strings.ToLower(candidate)
+		if candidate == ".jpeg" {
+			candidate = ".jpg"
+		}
+		if planningImageExtensionAllowed(candidate) {
+			return candidate, nil
+		}
+	}
+	return "", fmt.Errorf("planning SKU image %q has unsupported type %q", fileName, mimeType)
+}
+
+func planningImageExtensionAllowed(extension string) bool {
+	switch extension {
+	case ".jpg", ".png", ".gif", ".svg", ".tif", ".tiff":
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *planningSKUService) RequestERP(ctx context.Context, actor domain.RequestActor, taskID int64, resync bool) (int, *domain.AppError) {

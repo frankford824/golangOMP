@@ -56,6 +56,8 @@ type PlanningSKURevision struct {
 	ERPProductIID     string    `json:"erp_product_i_id,omitempty"`
 	ERPProductName    string    `json:"erp_product_name,omitempty"`
 	ProductImageRefID string    `json:"product_image_ref_id,omitempty"`
+	ProductImageURL   string    `json:"product_image_url,omitempty"`
+	ProductImageName  string    `json:"product_image_name,omitempty"`
 	Reason            string    `json:"reason"`
 	CreatedBy         int64     `json:"created_by"`
 	CreatedAt         time.Time `json:"created_at"`

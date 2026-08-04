@@ -268,6 +268,7 @@ func NewRouter(
 		if planningSKUH != nil {
 			taskGroup.GET("/sku-planning/template.xlsx", capabilityAccess(taskGroup, http.MethodGet, "/sku-planning/template.xlsx", domain.APIReadinessReadyForFrontend, domain.PermissionPlanningSKUCreate), planningSKUH.Template)
 			taskGroup.POST("/sku-planning/parse-excel", capabilityAccess(taskGroup, http.MethodPost, "/sku-planning/parse-excel", domain.APIReadinessReadyForFrontend, domain.PermissionPlanningSKUCreate), planningSKUH.ParseExcel)
+			taskGroup.GET("/:id/planning-skus", capabilityAccess(taskGroup, http.MethodGet, "/:id/planning-skus", domain.APIReadinessReadyForFrontend, domain.PermissionPlanningSKUView), planningSKUH.GetResult)
 			taskGroup.PATCH("/:id/planning-skus/:item_id", capabilityAccess(taskGroup, http.MethodPatch, "/:id/planning-skus/:item_id", domain.APIReadinessReadyForFrontend, domain.PermissionPlanningSKUEdit), planningSKUH.Update)
 			taskGroup.GET("/:id/planning-skus/export.xlsx", capabilityAccess(taskGroup, http.MethodGet, "/:id/planning-skus/export.xlsx", domain.APIReadinessReadyForFrontend, domain.PermissionPlanningSKUExport), planningSKUH.ExportTask)
 			taskGroup.POST("/:id/planning-skus/erp-retry", capabilityAccess(taskGroup, http.MethodPost, "/:id/planning-skus/erp-retry", domain.APIReadinessReadyForFrontend, domain.PermissionPlanningSKURetry), planningSKUH.ERPRetry)

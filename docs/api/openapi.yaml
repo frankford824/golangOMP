@@ -5742,6 +5742,11 @@ components:
         erp_product_i_id: { type: string }
         erp_product_name: { type: string }
         product_image_ref_id: { type: string }
+        product_image_url:
+          type: string
+          format: uri
+          description: Short-lived private preview URL for the planning SKU product image.
+        product_image_name: { type: string }
         reason: { type: string }
         created_by: { type: integer, format: int64 }
         created_at: { type: string, format: date-time }
@@ -6732,6 +6737,27 @@ paths:
         '400': { $ref: '#/components/responses/V8BadRequest' }
         '403': { $ref: '#/components/responses/V8Forbidden' }
         '409': { $ref: '#/components/responses/V8Conflict' }
+  /v1/tasks/{id}/planning-skus:
+    get:
+      operationId: getTaskPlanningSKUs
+      tags: [PlanningSKU]
+      summary: Get the current planning-SKU rows and private product-image previews for one task
+      description: Product images remain planning-SKU revision resources and are not projected as task resource-group attachments.
+      x-api-readiness: ready_for_frontend
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: integer, format: int64 } }
+      responses:
+        '200':
+          description: Current planning-SKU result.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data: { $ref: '#/components/schemas/PlanningSKUCreateResult' }
+        '403': { $ref: '#/components/responses/V8Forbidden' }
+        '404': { $ref: '#/components/responses/V8NotFound' }
   /v1/tasks/{id}/planning-skus/export.xlsx:
     get:
       operationId: exportTaskPlanningSKUs

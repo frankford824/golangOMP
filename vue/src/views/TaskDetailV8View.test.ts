@@ -7,7 +7,7 @@ import { usePermissionsStore } from '@/stores/permissions'
 
 const mocks = vi.hoisted(() => ({
   getById: vi.fn(), getDetail: vi.fn(), listTaskEvents: vi.fn(), listAuditHandovers: vi.fn(), auditHandover: vi.fn(), auditTakeover: vi.fn(), patchBusinessInfo: vi.fn(), patchSkuItem: vi.fn(), patchSkuItemCostInfo: vi.fn(),
-  taskBundle: vi.fn(), uploadReference: vi.fn(), downloadPlanning: vi.fn(), getDesigners: vi.fn(), push: vi.fn(), back: vi.fn(), route: { params: { id: '41' } },
+  taskBundle: vi.fn(), uploadReference: vi.fn(), getPlanning: vi.fn(), downloadPlanning: vi.fn(), getDesigners: vi.fn(), push: vi.fn(), back: vi.fn(), route: { params: { id: '41' } },
 }))
 vi.mock('@/services/api/tasksApi', () => ({ tasksApi: mocks }))
 vi.mock('@/services/api/resourceGroupsApi', async (loadOriginal) => ({
@@ -21,7 +21,7 @@ vi.mock('vue-router', () => ({
   onBeforeRouteUpdate: vi.fn(),
 }))
 vi.mock('@/services/upload/assetUploadFlow', () => ({ uploadReferenceFileRef: mocks.uploadReference }))
-vi.mock('@/services/api/planningSkuApi', () => ({ planningSkuApi: { downloadTask: mocks.downloadPlanning } }))
+vi.mock('@/services/api/planningSkuApi', () => ({ planningSkuApi: { getTask: mocks.getPlanning, downloadTask: mocks.downloadPlanning } }))
 vi.mock('@/services/api/usersApi', () => ({ usersApi: { getDesigners: mocks.getDesigners } }))
 
 import TaskDetailV8View from './TaskDetailV8View.vue'
@@ -86,6 +86,7 @@ describe('TaskDetailV8View business context', () => {
     mocks.patchSkuItem.mockResolvedValue({})
     mocks.patchSkuItemCostInfo.mockResolvedValue({})
     mocks.uploadReference.mockResolvedValue({ asset_id: 'ref-2', filename: '补充.png' })
+    mocks.getPlanning.mockResolvedValue({ task_id: 41, task_no: 'RW-041', task_status: 'Completed', workflow_revision: 3, items: [] })
     mocks.downloadPlanning.mockResolvedValue(undefined)
     mocks.getDesigners.mockResolvedValue({ data: { data: [{ id: 99, display_name: '定制设计师' }] } })
   })
@@ -261,9 +262,33 @@ describe('TaskDetailV8View business context', () => {
 
   it('renders planning-SKU results without treating planning images as design assets', async () => {
     mocks.getDetail.mockResolvedValue({ data: { data: { task: { ...baseTask, task_type: 'sku_planning', task_status: 'Completed', allowed_actions: [] }, task_detail: { design_requirement: '生成三款杯子 SKU。' }, reference_file_refs: [] } } })
+    mocks.getPlanning.mockResolvedValue({
+      task_id: 41,
+      task_no: 'RW-041',
+      task_status: 'Completed',
+      workflow_revision: 3,
+      items: [{
+        task_sku_item_id: 501,
+        sequence_no: 1,
+        sku_code: 'PLAN-001',
+        quantity: 20,
+        revision: {
+          id: 51,
+          version_no: 1,
+          description_spec: '红色礼盒',
+          quantity: 20,
+          product_image_name: '礼盒.jpg',
+          product_image_url: 'https://cloneb-oss.example/plan-001.jpg',
+        },
+      }],
+    })
     const wrapper = mountView()
     await flushPromises()
     expect(wrapper.text()).toContain('SKU 与策划信息已经生成')
+    expect(wrapper.text()).toContain('PLAN-001')
+    expect(wrapper.text()).toContain('红色礼盒')
+    expect(wrapper.get('.planning-image img').attributes('src')).toBe('https://cloneb-oss.example/plan-001.jpg')
+    expect(mocks.getPlanning).toHaveBeenCalledWith(41)
     const exportButton = wrapper.findAll('button').find((item) => item.text() === '导出策划结果')
     expect(exportButton).toBeDefined()
     await exportButton?.trigger('click')
