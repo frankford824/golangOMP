@@ -115,7 +115,6 @@ if [[ "$EXECUTE_READONLY" == true ]]; then
   [[ "$SNAPSHOT_SHA256" =~ ^[0-9a-f]{64}$ ]] || die "--snapshot-sha256 is required for formal SQL execution"
   [[ -n "$MANIFEST_JSONL" ]] || die "reviewed manifest is required for formal SQL execution"
   [[ "$SOURCE_HOST:$SOURCE_PORT/$SOURCE_DB" != "$TARGET_HOST:$TARGET_PORT/$TARGET_DB" ]] || die "source and target clones must be distinct"
-  [[ "$SOURCE_DB" != "$TARGET_DB" ]] || die "source and target clone database names must differ"
   case "$SOURCE_HOST" in 127.0.0.1|localhost|host.docker.internal) ;; *) die "source clone host must be local" ;; esac
   case "$TARGET_HOST" in 127.0.0.1|localhost|host.docker.internal) ;; *) die "target clone host must be local" ;; esac
 fi

@@ -153,6 +153,31 @@ for gate in re.findall(r\"SELECT '__AB_GATE__([^']+)' AS ab_gate_marker\", data)
                 self.assertEqual(len(list((run_dir / "sql" / side).glob("??_*.csv"))), 13)
                 self.assertEqual(len(list((run_dir / "sql" / side).glob("??_*.sha256"))), 13)
 
+    def test_same_database_name_is_allowed_on_distinct_local_origins(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            run_id = "sql-distinct-origin"
+            manifest, manifest_sha = write_manifest(root, run_id)
+            adapter = root / "fake-mysql.py"
+            adapter.write_text("""#!/usr/bin/env python3
+import re, sys
+data=sys.stdin.read()
+for gate in re.findall(r"SELECT '__AB_GATE__([^']+)' AS ab_gate_marker", data):
+ print('ab_gate_marker'); print('__AB_GATE__'+gate)
+ if gate.startswith('00_'): print('metric\\tvalue'); print('fake\\t1')
+ else: print('violation_code\\tentity_key\\tdetail')
+""", encoding="utf-8")
+            adapter.chmod(0o700)
+            result = subprocess.run([
+                "bash", str(RUNNER), "--mode", "clone", "--run-id", run_id,
+                "--source-db", "jst_erp", "--target-db", "jst_erp",
+                "--source-port", "3332", "--target-port", "3331",
+                "--evidence-root", str(root / "evidence"), "--mysql-bin", str(adapter),
+                "--snapshot-sha256", "b" * 64, "--manifest-jsonl", str(manifest),
+                "--manifest-sha256", manifest_sha, "--execute-readonly",
+            ], cwd=ROOT, text=True, capture_output=True, check=False)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_adapter_failure_is_nonzero_and_fail_closed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp); run_id = "sql-runner-fail"
