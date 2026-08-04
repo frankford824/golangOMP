@@ -38,6 +38,7 @@ STATE_MAP = {
 }
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 GROUP_CONCAT_MAX_LEN = 1048576
+PRODUCTION_RECOVERY_TASK_ASSET_IDS = {23989, 23990, 23991}
 
 
 def confirmed_time(value: Any) -> bool:
@@ -341,6 +342,7 @@ def apply_recovery_plan(
     mapping_sha: str,
     assets: dict[int, dict[str, Any]],
     plan_path_value: str | None,
+    apply_report_path_value: str | None = None,
 ) -> dict[str, str]:
     expected = {
         int(row["missing_task_asset_id"]): row
@@ -348,20 +350,99 @@ def apply_recovery_plan(
         if row.get("strategy") == "verified_oss_recovery_v1"
     }
     if not plan_path_value:
+        if apply_report_path_value:
+            raise ValueError("--recovery-apply-report requires --recovery-plan")
         if expected:
             raise ValueError("reviewed asset recoveries require --recovery-plan")
         return {}
     plan, plan_sha = read_json_object(plan_path_value, "recovery plan")
-    if (
-        plan.get("version") != 1
-        or plan.get("status") != "MATERIALIZED"
-        or plan.get("mapping_sha256") != mapping_sha
-        or plan.get("production_writes_executed") is not False
-        or plan.get("database_writes_executed") is not False
-        or not isinstance(plan.get("run_id"), str)
-        or not plan["run_id"].strip()
-        or not isinstance(plan.get("entries"), list)
-    ):
+    status = plan.get("status")
+    common_contract_valid = (
+        plan.get("version") == 1
+        and plan.get("production_writes_executed") is False
+        and plan.get("database_writes_executed") is False
+        and isinstance(plan.get("run_id"), str)
+        and bool(plan["run_id"].strip())
+        and isinstance(plan.get("entries"), list)
+    )
+    if not common_contract_valid:
+        raise ValueError("recovery plan contract or mapping binding differs")
+    report_sha = ""
+    strict_production_recovery = status == "PREPARED"
+    if status == "MATERIALIZED":
+        if plan.get("mapping_sha256") != mapping_sha:
+            raise ValueError("recovery plan contract or mapping binding differs")
+        if apply_report_path_value:
+            raise ValueError(
+                "--recovery-apply-report is only accepted for a PREPARED production plan"
+            )
+    elif strict_production_recovery:
+        if not apply_report_path_value:
+            raise ValueError(
+                "PREPARED production recovery requires --recovery-apply-report"
+            )
+        unsigned_plan = dict(plan)
+        plan_evidence_sha = str(unsigned_plan.pop("evidence_sha256", ""))
+        if (
+            plan.get("target_environment") != "production"
+            or not isinstance(plan.get("production_release"), str)
+            or not plan["production_release"].strip()
+            or not SHA256.fullmatch(str(plan.get("mapping_sha256") or ""))
+            or not SHA256.fullmatch(plan_evidence_sha)
+            or sha256_text(canonical_json(unsigned_plan)) != plan_evidence_sha
+            or len(expected) != 3
+            or len(plan["entries"]) != 3
+        ):
+            raise ValueError("PREPARED production recovery plan evidence differs")
+        apply_report, report_sha = read_json_object(
+            apply_report_path_value, "recovery apply report"
+        )
+        expected_report_fields = {
+            "version",
+            "mode",
+            "environment",
+            "release",
+            "run_id",
+            "database",
+            "host",
+            "approved_commit",
+            "plan_sha256",
+            "executed_at",
+            "changed_entries",
+            "already_in_target_state_entries",
+            "database_transaction_committed",
+            "object_storage_writes_executed",
+            "object_storage_deletes_executed",
+        }
+        if (
+            set(apply_report) != expected_report_fields
+            or apply_report.get("version") != 1
+            or apply_report.get("mode") != "apply"
+            or apply_report.get("environment") != "production"
+            or apply_report.get("release") != plan.get("production_release")
+            or apply_report.get("run_id") != plan.get("run_id")
+            or apply_report.get("database") != "jst_erp"
+            or apply_report.get("host") != "127.0.0.1"
+            or not re.fullmatch(
+                r"[0-9a-f]{40}", str(apply_report.get("approved_commit") or "")
+            )
+            or apply_report.get("plan_sha256") != plan_sha
+            or not isinstance(apply_report.get("executed_at"), str)
+            or not re.fullmatch(
+                r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}"
+                r"(?:\.\d{1,9})?Z",
+                apply_report["executed_at"],
+            )
+            or apply_report.get("changed_entries") != 3
+            or apply_report.get("already_in_target_state_entries") != 0
+            or apply_report.get("database_transaction_committed") is not True
+            or apply_report.get("object_storage_writes_executed") is not True
+            or apply_report.get("object_storage_deletes_executed") is not False
+        ):
+            raise ValueError(
+                "recovery apply report is not bound to the committed production plan"
+            )
+    else:
         raise ValueError("recovery plan contract or mapping binding differs")
     actual: set[int] = set()
     for entry in plan["entries"]:
@@ -375,6 +456,18 @@ def apply_recovery_plan(
         asset = assets.get(asset_id)
         update = (entry.get("db_apply_plan") or {}).get("update_task_asset") or {}
         update_set = update.get("set") or {}
+        insert_ref = (
+            (entry.get("db_apply_plan") or {}).get("insert_asset_storage_ref")
+            or {}
+        )
+        rollback_registry = entry.get("rollback_registry") or {}
+        original_ref = rollback_registry.get("original_storage_ref") or {}
+        derivative_lineage = entry.get("derivative_lineage") or {}
+        expected_target_key = (
+            f"v8-production/{plan.get('production_release')}/"
+            f"{plan.get('run_id')}/recovered/task-2807/"
+            f"task-asset-{asset_id}/{entry.get('source_sha256')}.bin"
+        )
         if (
             asset is None
             or int(asset.get("task_id") or 0) != int(mapping_row["task_id"])
@@ -387,12 +480,46 @@ def apply_recovery_plan(
             or update_set.get("cleaned_at") is not None
         ):
             raise ValueError(f"recovery plan entry {asset_id} drifted")
+        if strict_production_recovery and (
+            set(expected) != PRODUCTION_RECOVERY_TASK_ASSET_IDS
+            or int(mapping_row["task_id"]) != 2807
+            or int(entry.get("source_task_asset_id") or 0)
+            != int(mapping_row["recovery_source_task_asset_id"])
+            or entry.get("target_object_key") != expected_target_key
+            or original_ref.get("ref_id")
+            != mapping_row["original_storage_ref_id"]
+            or derivative_lineage.get("preview")
+            != mapping_row["preview_whole_hash"]
+            or derivative_lineage.get("design_thumb")
+            != mapping_row["design_thumb_whole_hash"]
+            or not isinstance(entry.get("target_storage_ref_id"), str)
+            or not entry["target_storage_ref_id"]
+            or update_set.get("storage_ref_id")
+            != entry["target_storage_ref_id"]
+            or insert_ref.get("ref_id") != entry["target_storage_ref_id"]
+            or insert_ref.get("ref_key") != entry.get("target_object_key")
+            or insert_ref.get("checksum_hint") != entry.get("source_sha256")
+            or insert_ref.get("file_size") != entry.get("source_size")
+            or rollback_registry.get("delete_created_storage_ref_id")
+            != entry["target_storage_ref_id"]
+            or rollback_registry.get("delete_fixture_object_key")
+            != entry.get("target_object_key")
+            or rollback_registry.get("expected_fixture_sha256")
+            != entry.get("source_sha256")
+        ):
+            raise ValueError(
+                f"PREPARED production recovery entry {asset_id} "
+                "differs from the current reviewed mapping"
+            )
         asset["storage_key"] = str(entry["target_object_key"])
         asset["deleted_at"] = None
         asset["cleaned_at"] = None
     if actual != set(expected):
         raise ValueError("recovery plan does not cover the reviewed recovery set")
-    return {"recovery_plan_sha256": plan_sha}
+    provenance = {"recovery_plan_sha256": plan_sha}
+    if report_sha:
+        provenance["recovery_apply_report_sha256"] = report_sha
+    return provenance
 
 
 def is_active_asset(row: dict[str, Any]) -> bool:
@@ -440,6 +567,7 @@ def build_expected(args: argparse.Namespace) -> None:
         mapping_sha,
         assets,
         getattr(args, "recovery_plan", None),
+        getattr(args, "recovery_apply_report", None),
     )
     provenance.update(bundle_provenance)
     provenance.update(recovery_provenance)
@@ -649,6 +777,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     build.add_argument("--source-bundle-manifest")
     build.add_argument("--source-bundle-registry")
     build.add_argument("--recovery-plan")
+    build.add_argument("--recovery-apply-report")
     build.add_argument("--snapshot-sha256", required=True); build.add_argument("--output", required=True)
     return parser.parse_args(argv)
 
