@@ -601,11 +601,12 @@ func validatePythonSelfHash(raw []byte, expected, label string) error {
 }
 
 type validatedEntry struct {
-	registry     registryEntry
-	manifest     manifestBundle
-	scopeSKUCode string
-	confirmedAt  time.Time
-	manifestSHA  string
+	registry                  registryEntry
+	manifest                  manifestBundle
+	scopeSKUCode              string
+	scopeRetouchRequirementID sql.NullInt64
+	confirmedAt               time.Time
+	manifestSHA               string
 }
 
 func validateFixtureBoundary(fixtureRoot, recordedRoot, runID string) (string, error) {
@@ -684,8 +685,9 @@ func validateDocuments(reg registry, manifest confirmedManifest, o options, mani
 			return nil, fmt.Errorf("duplicate manifest bundle scope %s", key)
 		}
 		if item.TaskID <= 0 || item.RevisionNo <= 0 ||
-			(item.ScopeKind != "sku" && item.ScopeKind != "task") ||
-			(item.ScopeKind == "sku" && item.ScopeRefID <= 0) ||
+			(item.ScopeKind != "sku" && item.ScopeKind != "task" &&
+				item.ScopeKind != "retouch_requirement") ||
+			(item.ScopeKind != "task" && item.ScopeRefID <= 0) ||
 			(item.ScopeKind == "task" && item.ScopeRefID != 0) ||
 			len(item.OrderedMembers) < 2 {
 			return nil, fmt.Errorf("manifest bundle scope %s is invalid", key)
@@ -1078,11 +1080,14 @@ func lockBundleState(ctx context.Context, tx transaction, entry validatedEntry, 
 		return bundleAbsent, errors.New("bundle storage ref_key collision")
 	}
 	var taskID, currentVersionID, createdBy int64
+	var designRetouchRequirementID sql.NullInt64
 	var assetNo, assetType, scopeSKU string
 	err := tx.QueryRowContext(ctx, `
-		SELECT task_id,asset_no,COALESCE(scope_sku_code,''),asset_type,current_version_id,created_by
+		SELECT task_id,asset_no,COALESCE(scope_sku_code,''),retouch_requirement_id,
+		       asset_type,current_version_id,created_by
 		FROM design_assets WHERE id=? FOR UPDATE`, entry.manifest.BundleAssetID).Scan(
-		&taskID, &assetNo, &scopeSKU, &assetType, &currentVersionID, &createdBy,
+		&taskID, &assetNo, &scopeSKU, &designRetouchRequirementID,
+		&assetType, &currentVersionID, &createdBy,
 	)
 	designAbsent := errors.Is(err, sql.ErrNoRows)
 	if err != nil && !designAbsent {
@@ -1090,20 +1095,28 @@ func lockBundleState(ctx context.Context, tx transaction, entry validatedEntry, 
 	}
 	if !designAbsent && (taskID != entry.registry.TaskID ||
 		assetNo != bundleAssetNo(entry.registry.TaskAssetCandidate.ID) ||
-		scopeSKU != entry.scopeSKUCode || assetType != "source" ||
+		scopeSKU != entry.scopeSKUCode ||
+		!sameNullableInt64(
+			designRetouchRequirementID,
+			entry.scopeRetouchRequirementID,
+		) ||
+		assetType != "source" ||
 		currentVersionID != entry.registry.TaskAssetCandidate.ID || createdBy != reviewer) {
 		return bundleAbsent, errors.New("bundle design_asset id collision or drift")
 	}
 
 	var taTaskID, taAssetID, versionNo, assetVersionNo, uploadedBy, fileSize int64
+	var taskRetouchRequirementID sql.NullInt64
 	var taScope, taType, bindingState, storageRefID, fileName, mimeType, storageKey, wholeHash, uploadStatus, previewStatus, sourceModule, remark string
 	err = tx.QueryRowContext(ctx, `
-		SELECT task_id,asset_id,COALESCE(scope_sku_code,''),asset_type,binding_state,
+		SELECT task_id,asset_id,COALESCE(scope_sku_code,''),retouch_requirement_id,
+		       asset_type,binding_state,
 		       version_no,asset_version_no,COALESCE(storage_ref_id,''),file_name,COALESCE(mime_type,''),
 		       file_size,COALESCE(storage_key,''),COALESCE(whole_hash,''),COALESCE(upload_status,''),
 		       COALESCE(preview_status,''),uploaded_by,source_module_key,remark
 		FROM task_assets WHERE id=? FOR UPDATE`, entry.registry.TaskAssetCandidate.ID).Scan(
-		&taTaskID, &taAssetID, &taScope, &taType, &bindingState, &versionNo, &assetVersionNo,
+		&taTaskID, &taAssetID, &taScope, &taskRetouchRequirementID,
+		&taType, &bindingState, &versionNo, &assetVersionNo,
 		&storageRefID, &fileName, &mimeType, &fileSize, &storageKey, &wholeHash,
 		&uploadStatus, &previewStatus, &uploadedBy, &sourceModule, &remark,
 	)
@@ -1113,7 +1126,12 @@ func lockBundleState(ctx context.Context, tx transaction, entry validatedEntry, 
 	}
 	expectedRemark := bundleRemark(entry.registry, entry.manifestSHA)
 	if !taskAbsent && (taTaskID != entry.registry.TaskID || taAssetID != entry.manifest.BundleAssetID ||
-		taScope != entry.scopeSKUCode || taType != "source" || bindingState != "legacy" ||
+		taScope != entry.scopeSKUCode ||
+		!sameNullableInt64(
+			taskRetouchRequirementID,
+			entry.scopeRetouchRequirementID,
+		) ||
+		taType != "source" || bindingState != "legacy" ||
 		versionNo != entry.registry.TaskAssetCandidate.ID || assetVersionNo != 1 ||
 		storageRefID != entry.registry.AssetStorageRefCandidate.RefID ||
 		fileName != "source-bundle.zip" || mimeType != "application/zip" ||
@@ -1259,12 +1277,13 @@ func applyAll(
 }
 
 func loadScopeSKUCode(ctx context.Context, tx transaction, entry *validatedEntry) error {
+	entry.scopeSKUCode = ""
+	entry.scopeRetouchRequirementID = sql.NullInt64{}
 	switch entry.registry.ScopeKind {
 	case "task":
 		if entry.registry.ScopeRefID != 0 {
 			return errors.New("task bundle scope_ref_id must be zero")
 		}
-		entry.scopeSKUCode = ""
 		return nil
 	case "sku":
 		if err := tx.QueryRowContext(ctx, `
@@ -1278,16 +1297,46 @@ func loadScopeSKUCode(ctx context.Context, tx transaction, entry *validatedEntry
 			return errors.New("bundle SKU code is empty")
 		}
 		return nil
+	case "retouch_requirement":
+		var requirementID int64
+		if err := tx.QueryRowContext(ctx, `
+			SELECT id FROM task_retouch_requirements
+			WHERE id=? AND task_id=? AND deleted_at IS NULL FOR UPDATE`,
+			entry.registry.ScopeRefID,
+			entry.registry.TaskID,
+		).Scan(&requirementID); err != nil {
+			return err
+		}
+		if requirementID != entry.registry.ScopeRefID {
+			return errors.New("bundle retouch requirement identity drifted")
+		}
+		entry.scopeRetouchRequirementID = sql.NullInt64{
+			Int64: requirementID,
+			Valid: true,
+		}
+		return nil
 	default:
 		return fmt.Errorf("unsupported bundle scope_kind %q", entry.registry.ScopeKind)
 	}
 }
 
 func scopeSKUValue(entry validatedEntry) any {
-	if entry.registry.ScopeKind == "task" {
+	if entry.registry.ScopeKind != "sku" {
 		return nil
 	}
 	return entry.scopeSKUCode
+}
+
+func scopeRetouchRequirementValue(entry validatedEntry) any {
+	if !entry.scopeRetouchRequirementID.Valid {
+		return nil
+	}
+	return entry.scopeRetouchRequirementID.Int64
+}
+
+func sameNullableInt64(left, right sql.NullInt64) bool {
+	return left.Valid == right.Valid &&
+		(!left.Valid || left.Int64 == right.Int64)
 }
 
 func insertBundleRows(ctx context.Context, tx transaction, entry validatedEntry, manifest confirmedManifest) error {
@@ -1296,9 +1345,10 @@ func insertBundleRows(ctx context.Context, tx transaction, entry validatedEntry,
 		INSERT INTO design_assets
 		  (id,task_id,asset_no,source_asset_id,scope_sku_code,retouch_requirement_id,
 		   asset_type,current_version_id,created_by,created_at,updated_at)
-		VALUES (?,?,?,?,?,NULL,'source',?,?,?,?)`,
+		VALUES (?,?,?,?,?,?,'source',?,?,?,?)`,
 		entry.manifest.BundleAssetID, entry.registry.TaskID,
-		bundleAssetNo(entry.registry.TaskAssetCandidate.ID), nil, scopeSKUValue(entry),
+		bundleAssetNo(entry.registry.TaskAssetCandidate.ID), nil,
+		scopeSKUValue(entry), scopeRetouchRequirementValue(entry),
 		entry.registry.TaskAssetCandidate.ID, manifest.ConfirmedBy, createdAt, createdAt,
 	); err != nil {
 		return err
@@ -1312,11 +1362,12 @@ func insertBundleRows(ctx context.Context, tx transaction, entry validatedEntry,
 		   file_name,original_filename,mime_type,file_size,storage_key,whole_hash,
 		   upload_status,preview_status,uploaded_by,uploaded_at,remark,source_module_key,
 		   is_archived,flow_review_status,created_at)
-		VALUES (?,?,?,?,NULL,'source','legacy',?,1,'migration',NULL,?,
+		VALUES (?,?,?,?,?,'source','legacy',?,1,'migration',NULL,?,
 		        'source-bundle.zip','source-bundle.zip','application/zip',?,?,?,
 		        'uploaded','not_applicable',?,?,?,'migration',0,'not_applicable',?)`,
 		entry.registry.TaskAssetCandidate.ID, entry.registry.TaskID, entry.manifest.BundleAssetID,
-		scopeSKUValue(entry), entry.registry.TaskAssetCandidate.ID,
+		scopeSKUValue(entry), scopeRetouchRequirementValue(entry),
+		entry.registry.TaskAssetCandidate.ID,
 		entry.registry.AssetStorageRefCandidate.RefID, entry.registry.Size,
 		entry.registry.ObjectKey, entry.registry.BundleSHA256, manifest.ConfirmedBy,
 		createdAt, bundleRemark(entry.registry, entry.manifestSHA), createdAt,

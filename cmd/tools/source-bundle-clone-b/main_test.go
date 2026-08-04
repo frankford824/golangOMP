@@ -157,16 +157,17 @@ func TestValidateDocumentsRequiresConfirmedDynamicScopesAndBytes(t *testing.T) {
 	}
 	bundleIndex := int64(0)
 	testScopes := map[string][]int64{
-		"485/sku/365/1":   {293, 297},
-		"523/sku/398/1":   {402, 403, 404, 405},
-		"523/sku/400/1":   {358, 359, 360, 361},
-		"2234/sku/2401/2": {12672, 12673},
-		"2251/sku/2417/2": {13103, 13104, 13105, 13106, 13107},
-		"2477/sku/2725/2": {18989, 18991, 18993},
-		"2598/sku/2869/2": {20799, 20802},
+		"485/sku/365/1":                   {293, 297},
+		"523/sku/398/1":                   {402, 403, 404, 405},
+		"523/sku/400/1":                   {358, 359, 360, 361},
+		"2234/sku/2401/2":                 {12672, 12673},
+		"2251/sku/2417/2":                 {13103, 13104, 13105, 13106, 13107},
+		"2477/sku/2725/2":                 {18989, 18991, 18993},
+		"2598/retouch_requirement/2869/2": {20799, 20802},
 	}
 	for key, memberIDs := range testScopes {
 		parts := strings.Split(key, "/")
+		scopeKind := parts[1]
 		var taskID, scopeRef int64
 		var revision int
 		if len(parts) != 4 {
@@ -186,8 +187,8 @@ func TestValidateDocumentsRequiresConfirmedDynamicScopesAndBytes(t *testing.T) {
 		assetID := int64(91000) + bundleIndex
 		refID := fmt.Sprintf("bundle-ref-%d", bundleIndex)
 		objectKey := fmt.Sprintf(
-			"fixture/%s/migration-bundles/task-%d/sku-%d/revision-%d/source-bundle.zip",
-			runID, taskID, scopeRef, revision,
+			"fixture/%s/migration-bundles/task-%d/%s-%d/revision-%d/source-bundle.zip",
+			runID, taskID, scopeKind, scopeRef, revision,
 		)
 		content := []byte(fmt.Sprintf("bundle-%d", bundleIndex))
 		sum := sha256.Sum256(content)
@@ -250,12 +251,12 @@ func TestValidateDocumentsRequiresConfirmedDynamicScopesAndBytes(t *testing.T) {
 			})
 		}
 		manifest.Bundles = append(manifest.Bundles, manifestBundle{
-			TaskID: taskID, ScopeKind: "sku", ScopeRefID: scopeRef, RevisionNo: revision,
+			TaskID: taskID, ScopeKind: scopeKind, ScopeRefID: scopeRef, RevisionNo: revision,
 			BundleTaskAssetID: taskAssetID, BundleAssetID: assetID,
 			BundleStorageRefID: refID, Confirmed: true, OrderedMembers: manifestMembers,
 		})
 		reg.Entries = append(reg.Entries, registryEntry{
-			TaskID: taskID, ScopeKind: "sku", ScopeRefID: scopeRef, RevisionNo: revision,
+			TaskID: taskID, ScopeKind: scopeKind, ScopeRefID: scopeRef, RevisionNo: revision,
 			RelativeObjectPath: filepath.ToSlash(filepath.Join("objects", filepath.FromSlash(objectKey))),
 			ObjectKey:          objectKey, BundleSHA256: bundleHash, Size: int64(len(content)), Disposition: "created",
 			SourceBundle: sourceBundle{
@@ -271,7 +272,7 @@ func TestValidateDocumentsRequiresConfirmedDynamicScopesAndBytes(t *testing.T) {
 			},
 			TaskAssetCandidate: taskAssetCandidate{
 				ID: taskAssetID, TaskID: taskID, AssetID: assetID, AssetType: "source",
-				ScopeKind: "sku", ScopeRefID: scopeRef, StorageRefID: refID,
+				ScopeKind: scopeKind, ScopeRefID: scopeRef, StorageRefID: refID,
 				FileName: "source-bundle.zip", MIMEType: "application/zip",
 				FileSize: int64(len(content)), StorageKey: objectKey, WholeHash: bundleHash,
 				UploadStatus: "uploaded", SourceModuleKey: "migration",
@@ -344,6 +345,42 @@ func TestValidateDocumentsRequiresConfirmedDynamicScopesAndBytes(t *testing.T) {
 	if _, err := validateDocuments(reg, manifest, o, reg.ManifestSHA256); err == nil ||
 		!strings.Contains(err.Error(), "ownership receipt identity") {
 		t.Fatalf("same-byte replacement ownership error = %v", err)
+	}
+}
+
+func TestLoadScopeIdentitySupportsRetouchRequirement(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	mock.ExpectBegin()
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	mock.ExpectQuery(`SELECT id FROM task_retouch_requirements`).
+		WithArgs(int64(189), int64(2559)).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(189)))
+	entry := validatedEntry{registry: registryEntry{
+		TaskID: 2559, ScopeKind: "retouch_requirement", ScopeRefID: 189,
+	}}
+	if err := loadScopeSKUCode(context.Background(), tx, &entry); err != nil {
+		t.Fatalf("load retouch scope: %v", err)
+	}
+	if entry.scopeSKUCode != "" ||
+		!entry.scopeRetouchRequirementID.Valid ||
+		entry.scopeRetouchRequirementID.Int64 != 189 ||
+		scopeSKUValue(entry) != nil ||
+		scopeRetouchRequirementValue(entry) != int64(189) {
+		t.Fatalf("unexpected retouch scope identity: %#v", entry)
+	}
+	mock.ExpectRollback()
+	if err := tx.Rollback(); err != nil {
+		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -877,29 +914,33 @@ func expectBundleState(mock sqlmock.Sqlmock, entry validatedEntry, reviewer int6
 		WithArgs(entry.registry.ObjectKey, entry.registry.AssetStorageRefCandidate.RefID).
 		WillReturnRows(sqlmock.NewRows([]string{"count"}).AddRow(0))
 	if !exact {
-		mock.ExpectQuery("SELECT task_id,asset_no,COALESCE\\(scope_sku_code,''\\),asset_type,current_version_id,created_by").
+		mock.ExpectQuery("SELECT task_id,asset_no,COALESCE\\(scope_sku_code,''\\),retouch_requirement_id,").
 			WithArgs(entry.manifest.BundleAssetID).WillReturnError(sql.ErrNoRows)
-		mock.ExpectQuery("SELECT task_id,asset_id,COALESCE\\(scope_sku_code,''\\),asset_type,binding_state").
+		mock.ExpectQuery("SELECT task_id,asset_id,COALESCE\\(scope_sku_code,''\\),retouch_requirement_id,").
 			WithArgs(entry.registry.TaskAssetCandidate.ID).WillReturnError(sql.ErrNoRows)
 		mock.ExpectQuery("SELECT asset_id,owner_type,owner_id,storage_adapter,ref_type,ref_key,file_name").
 			WithArgs(entry.registry.AssetStorageRefCandidate.RefID).WillReturnError(sql.ErrNoRows)
 		return
 	}
-	mock.ExpectQuery("SELECT task_id,asset_no,COALESCE\\(scope_sku_code,''\\),asset_type,current_version_id,created_by").
+	mock.ExpectQuery("SELECT task_id,asset_no,COALESCE\\(scope_sku_code,''\\),retouch_requirement_id,").
 		WithArgs(entry.manifest.BundleAssetID).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"task_id", "asset_no", "scope_sku_code", "asset_type", "current_version_id", "created_by",
+			"task_id", "asset_no", "scope_sku_code", "retouch_requirement_id",
+			"asset_type", "current_version_id", "created_by",
 		}).AddRow(entry.registry.TaskID, bundleAssetNo(entry.registry.TaskAssetCandidate.ID),
-			entry.scopeSKUCode, "source", entry.registry.TaskAssetCandidate.ID, reviewer))
-	mock.ExpectQuery("SELECT task_id,asset_id,COALESCE\\(scope_sku_code,''\\),asset_type,binding_state").
+			entry.scopeSKUCode, scopeRetouchRequirementValue(entry), "source",
+			entry.registry.TaskAssetCandidate.ID, reviewer))
+	mock.ExpectQuery("SELECT task_id,asset_id,COALESCE\\(scope_sku_code,''\\),retouch_requirement_id,").
 		WithArgs(entry.registry.TaskAssetCandidate.ID).
 		WillReturnRows(sqlmock.NewRows([]string{
-			"task_id", "asset_id", "scope_sku_code", "asset_type", "binding_state",
+			"task_id", "asset_id", "scope_sku_code", "retouch_requirement_id",
+			"asset_type", "binding_state",
 			"version_no", "asset_version_no", "storage_ref_id", "file_name", "mime_type",
 			"file_size", "storage_key", "whole_hash", "upload_status", "preview_status",
 			"uploaded_by", "source_module_key", "remark",
 		}).AddRow(
-			entry.registry.TaskID, entry.manifest.BundleAssetID, entry.scopeSKUCode, "source", "legacy",
+			entry.registry.TaskID, entry.manifest.BundleAssetID, entry.scopeSKUCode,
+			scopeRetouchRequirementValue(entry), "source", "legacy",
 			entry.registry.TaskAssetCandidate.ID, 1, entry.registry.AssetStorageRefCandidate.RefID,
 			"source-bundle.zip", "application/zip", entry.registry.Size, entry.registry.ObjectKey,
 			entry.registry.BundleSHA256, "uploaded", "not_applicable", reviewer, "migration",
