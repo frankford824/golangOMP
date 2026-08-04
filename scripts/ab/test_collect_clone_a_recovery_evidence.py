@@ -249,6 +249,72 @@ class CloneARecoveryEvidenceCollectorTest(unittest.TestCase):
         )
         return args, rows_path, trace
 
+    def enable_physical_clone_a(self, args, rows_path, root, *, dsn_port=3332):
+        root = pathlib.Path(root)
+        args.run_id = "physical-test"
+        args.confirm_clone_a_database = "jst_erp"
+        args.clone_a_dsn_file.write_text(
+            f"reader:top-secret@tcp(127.0.0.1:{dsn_port})/"
+            "jst_erp?parseTime=true\n",
+            encoding="utf-8",
+        )
+        rows = json.loads(rows_path.read_text(encoding="utf-8"))
+        rows[0]["database"] = "jst_erp"
+        rows_path.write_text(json.dumps(rows), encoding="utf-8")
+
+        snapshot_sha = "1" * 64
+        baseline_sha = "2" * 64
+        attestation = {
+            "schema_version": 2,
+            "run_id": args.run_id,
+            "clone_label": "A",
+            "clone_database": "jst_erp",
+            "snapshot_sha256": snapshot_sha,
+            "source_coordinates": {
+                "snapshot_sha256": snapshot_sha,
+                "binlog_file": "binlog.000001",
+                "binlog_position": 123,
+            },
+            "baseline_fingerprint_sha256": baseline_sha,
+            "import_receipt_sha256": "3" * 64,
+            "clone_side": "A",
+            "isolation_kind": "docker_published_port_v1",
+            "database_host": "127.0.0.1",
+            "database_port": 3332,
+            "container_port": 3306,
+            "container_name": "codex-v1295-prebundle-a-mysql",
+            "container_id": "4" * 64,
+            "container_image_digest": f"sha256:{'5' * 64}",
+            "container_inspect_sha256": "6" * 64,
+            "source_compound_snapshot_sha256": snapshot_sha,
+            "production_write_performed": False,
+        }
+        attestation_path = root / "clone-a-attestation.json"
+        attestation_path.write_bytes(
+            MODULE.snapshot_contract.canonical_bytes(attestation)
+        )
+        attestation_sha = MODULE.sha256_file(attestation_path)
+        verdict = {
+            "baseline_fingerprint_sha256": baseline_sha,
+            "run_id": args.run_id,
+            "schema_version": 2,
+            "snapshot_sha256": snapshot_sha,
+            "source_attestation_sha256": attestation_sha,
+            "status": "PASS",
+            "target_attestation_sha256": "7" * 64,
+            "violation_count": 0,
+            "violations": [],
+        }
+        verdict["evidence_sha256"] = hashlib.sha256(
+            MODULE.canonical_bytes(verdict) + b"\n"
+        ).hexdigest()
+        verdict_path = root / "snapshot-verdict.json"
+        verdict_path.write_bytes(MODULE.canonical_bytes(verdict) + b"\n")
+        args.clone_a_attestation = attestation_path
+        args.expected_clone_a_attestation_sha256 = attestation_sha
+        args.snapshot_verdict = verdict_path
+        args.expected_snapshot_verdict_sha256 = MODULE.sha256_file(verdict_path)
+
     def test_collects_prepare_compatible_exact_evidence_read_only(self):
         with tempfile.TemporaryDirectory() as raw:
             args, rows_path, trace = self.make_inputs(raw)
@@ -305,6 +371,55 @@ class CloneARecoveryEvidenceCollectorTest(unittest.TestCase):
                 encoding="utf-8",
             )
             with self.assertRaisesRegex(ValueError, "loopback"):
+                MODULE.run(args)
+            self.assertFalse(trace.exists())
+
+    def test_schema2_attested_physical_clone_a_is_accepted(self):
+        with tempfile.TemporaryDirectory() as raw:
+            args, rows_path, trace = self.make_inputs(raw)
+            self.enable_physical_clone_a(args, rows_path, raw)
+            with mock.patch.dict(
+                os.environ,
+                {
+                    "FAKE_MYSQL_ROWS": str(rows_path),
+                    "FAKE_MYSQL_TRACE": str(trace),
+                },
+            ):
+                evidence = MODULE.run(args)
+            self.assertEqual(evidence["status"], "PASS")
+            self.assertEqual(evidence["source"]["database"], "jst_erp")
+            self.assertTrue(trace.exists())
+
+    def test_physical_clone_a_without_attestation_fails_before_query(self):
+        with tempfile.TemporaryDirectory() as raw:
+            args, rows_path, trace = self.make_inputs(raw)
+            args.confirm_clone_a_database = "jst_erp"
+            args.clone_a_dsn_file.write_text(
+                "reader:secret@tcp(127.0.0.1:3332)/jst_erp\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(
+                ValueError, "requires hash-bound schema2"
+            ):
+                MODULE.run(args)
+            self.assertFalse(trace.exists())
+
+    def test_physical_clone_a_port_must_match_attestation_and_not_3306(self):
+        with tempfile.TemporaryDirectory() as raw:
+            args, rows_path, trace = self.make_inputs(raw)
+            self.enable_physical_clone_a(args, rows_path, raw, dsn_port=3333)
+            with self.assertRaisesRegex(
+                ValueError, "attestation differs"
+            ):
+                MODULE.run(args)
+            self.assertFalse(trace.exists())
+
+        with tempfile.TemporaryDirectory() as raw:
+            args, rows_path, trace = self.make_inputs(raw)
+            self.enable_physical_clone_a(args, rows_path, raw, dsn_port=3306)
+            with self.assertRaisesRegex(
+                ValueError, "confirmed Clone A database"
+            ):
                 MODULE.run(args)
             self.assertFalse(trace.exists())
 

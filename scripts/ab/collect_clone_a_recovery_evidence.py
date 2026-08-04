@@ -19,6 +19,11 @@ import subprocess
 import tempfile
 from typing import Any
 
+try:
+    from scripts.ab import snapshot_attestation as snapshot_contract
+except ModuleNotFoundError:
+    import snapshot_attestation as snapshot_contract
+
 
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 RUN_ID = re.compile(r"^[a-z0-9][a-z0-9_-]{2,63}$")
@@ -174,7 +179,12 @@ def validate_receipts(
     return result
 
 
-def parse_dsn(path: pathlib.Path, expected_database: str) -> dict[str, Any]:
+def parse_dsn(
+    path: pathlib.Path,
+    expected_database: str,
+    *,
+    allow_physical_jst_erp: bool = False,
+) -> dict[str, Any]:
     if path.is_symlink() or not path.is_file():
         raise ValueError("Clone A DSN file must be an existing non-symlink file")
     match = DSN.fullmatch(path.read_text(encoding="utf-8").strip())
@@ -184,7 +194,16 @@ def parse_dsn(path: pathlib.Path, expected_database: str) -> dict[str, Any]:
     database = match.group("database")
     if not 1 <= port <= 65535:
         raise ValueError("Clone A DSN port is invalid")
-    if database != expected_database or not CLONE_A_DB.fullmatch(database):
+    logical_clone = bool(CLONE_A_DB.fullmatch(database))
+    physical_clone = (
+        allow_physical_jst_erp
+        and database == snapshot_contract.PHYSICAL_DATABASE
+        and port != 3306
+    )
+    if (
+        database != expected_database
+        or not (logical_clone or physical_clone)
+    ):
         raise ValueError("DSN database is not the confirmed Clone A database")
     return {
         "user": match.group("user"),
@@ -193,6 +212,94 @@ def parse_dsn(path: pathlib.Path, expected_database: str) -> dict[str, Any]:
         "port": port,
         "database": database,
     }
+
+
+def validate_physical_clone_a_evidence(
+    args: argparse.Namespace,
+    connection: dict[str, Any],
+) -> None:
+    verdict_path = getattr(args, "snapshot_verdict", None)
+    verdict_hash = str(
+        getattr(args, "expected_snapshot_verdict_sha256", "") or ""
+    )
+    attestation_path = getattr(args, "clone_a_attestation", None)
+    attestation_hash = str(
+        getattr(args, "expected_clone_a_attestation_sha256", "") or ""
+    )
+    if (
+        not isinstance(verdict_path, pathlib.Path)
+        or not isinstance(attestation_path, pathlib.Path)
+        or not SHA256.fullmatch(verdict_hash)
+        or not SHA256.fullmatch(attestation_hash)
+    ):
+        raise ValueError(
+            "physical Clone A requires hash-bound schema2 verdict and attestation"
+        )
+    if (
+        connection["database"] != snapshot_contract.PHYSICAL_DATABASE
+        or connection["host"] not in {"127.0.0.1", "localhost"}
+        or connection["port"] == 3306
+    ):
+        raise ValueError("physical Clone A DSN boundary is invalid")
+    if (
+        sha256_file(verdict_path) != verdict_hash
+        or sha256_file(attestation_path) != attestation_hash
+    ):
+        raise ValueError("physical Clone A evidence file hash differs")
+
+    verdict = load_object(verdict_path, "snapshot verdict")
+    verdict_fields = {
+        "baseline_fingerprint_sha256",
+        "evidence_sha256",
+        "run_id",
+        "schema_version",
+        "snapshot_sha256",
+        "source_attestation_sha256",
+        "status",
+        "target_attestation_sha256",
+        "violation_count",
+        "violations",
+    }
+    unsigned_verdict = {
+        key: value
+        for key, value in verdict.items()
+        if key != "evidence_sha256"
+    }
+    if (
+        set(verdict) != verdict_fields
+        or verdict.get("schema_version") != 2
+        or verdict.get("run_id") != args.run_id
+        or verdict.get("status") != "PASS"
+        or verdict.get("source_attestation_sha256") != attestation_hash
+        or verdict.get("violation_count") != 0
+        or verdict.get("violations") != []
+        or verdict.get("evidence_sha256")
+        != hashlib.sha256(canonical_bytes(unsigned_verdict) + b"\n").hexdigest()
+    ):
+        raise ValueError("physical Clone A snapshot verdict differs")
+
+    attestation = load_object(attestation_path, "Clone A attestation")
+    violations = snapshot_contract.validate_attestation(
+        attestation,
+        label="A",
+        expected_run_id=args.run_id,
+        expected_clone_label="A",
+    )
+    if (
+        set(attestation) != snapshot_contract.ATTESTATION_FIELDS_V2
+        or violations
+        or attestation.get("schema_version") != 2
+        or attestation.get("clone_database")
+        != snapshot_contract.PHYSICAL_DATABASE
+        or attestation.get("database_host") != "127.0.0.1"
+        or attestation.get("database_port") != connection["port"]
+        or attestation.get("snapshot_sha256")
+        != verdict.get("snapshot_sha256")
+        or attestation.get("baseline_fingerprint_sha256")
+        != verdict.get("baseline_fingerprint_sha256")
+        or attestation.get("production_write_performed") is not False
+    ):
+        raise ValueError("physical Clone A attestation differs")
 
 
 def query_sql() -> str:
@@ -439,7 +546,16 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         raise ValueError("run-id is invalid")
     mapping, mapping_sha = validate_mapping(args.mapping)
     receipts = validate_receipts(args.controlled_read_receipts, mapping)
-    connection = parse_dsn(args.clone_a_dsn_file, args.confirm_clone_a_database)
+    physical_clone = (
+        args.confirm_clone_a_database == snapshot_contract.PHYSICAL_DATABASE
+    )
+    connection = parse_dsn(
+        args.clone_a_dsn_file,
+        args.confirm_clone_a_database,
+        allow_physical_jst_erp=physical_clone,
+    )
+    if physical_clone:
+        validate_physical_clone_a_evidence(args, connection)
     rows = query_clone(args.mysql_bin, connection, args.timeout_seconds)
     recoveries = validate_rows(
         rows, connection["database"], mapping, receipts
@@ -478,6 +594,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--controlled-read-receipts", type=pathlib.Path, required=True
     )
+    parser.add_argument("--snapshot-verdict", type=pathlib.Path)
+    parser.add_argument("--expected-snapshot-verdict-sha256")
+    parser.add_argument("--clone-a-attestation", type=pathlib.Path)
+    parser.add_argument("--expected-clone-a-attestation-sha256")
     parser.add_argument("--output", type=pathlib.Path, required=True)
     parser.add_argument("--mysql-bin", default="mysql")
     parser.add_argument("--timeout-seconds", type=int, default=120)
