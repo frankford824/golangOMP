@@ -458,6 +458,101 @@ class GeneratorTest(unittest.TestCase):
         mapping, manual, _ = MODULE.generate(rows)
         self.assertEqual(mapping["resources"][0]["history"][0]["confidence"], "hard_blocked"); self.assertIn("ZIP", manual[0]["reason"])
 
+    def test_atomic_submit_never_pulls_a_future_upload_into_the_snapshot(self):
+        rows = self.sample()
+        rows["assets"].append({
+            **rows["assets"][1],
+            "id": 12,
+            "asset_id": 102,
+            "created_at": "2026-01-01T12:10:00Z",
+            "uploaded_at": "2026-01-01T12:10:00Z",
+        })
+        rows["events"].append({
+            "namespace": "task_event_log",
+            "id": "future-upload",
+            "task_id": 7,
+            "sequence": 4,
+            "event_type": "task.asset.upload_session.completed",
+            "actor_id": 3,
+            "module_key": "design",
+            "payload": {
+                "upload_session_id": "design-2",
+                "asset_version_id": 12,
+            },
+            "created_at": "2026-01-01T12:10:00Z",
+        })
+
+        selected, evidence, blockers = MODULE.resolve_submission_assets(
+            rows["scopes"][0],
+            rows["events"][0],
+            rows["events"],
+            rows["assets"],
+        )
+
+        self.assertEqual([asset["id"] for asset in selected], [10, 11])
+        self.assertEqual(evidence, ["task_event_log:upload"])
+        self.assertEqual(blockers, [])
+        self.assertNotIn("_atomic_upload_batch", rows["events"][0])
+
+    def test_successor_replay_deduplicates_same_root_final_members(self):
+        scope = self.sample()["scopes"][0]
+        old = {
+            **self.sample()["assets"][1],
+            "id": 11,
+            "asset_id": 101,
+            "flow_review_status": "superseded",
+            "superseded_by_version_id": 12,
+            "superseded_at": "2026-01-02T00:00:00Z",
+        }
+        successor = {
+            **old,
+            "id": 12,
+            "flow_review_status": "approved",
+            "superseded_by_version_id": None,
+            "superseded_at": "",
+            "created_at": "2026-01-02T00:00:00Z",
+        }
+        completion = {
+            "namespace": "task_event_log",
+            "id": "replacement-upload",
+            "task_id": 7,
+            "sequence": 4,
+            "event_type": "task.asset.upload_session.completed",
+            "actor_id": 4,
+            "payload": {"asset_version_id": 12},
+            "created_at": "2026-01-02T00:00:00Z",
+        }
+        approval = {
+            "namespace": "task_event_log",
+            "id": "approval",
+            "task_id": 7,
+            "sequence": 5,
+            "event_type": "task.audit.approved",
+            "actor_id": 4,
+            "created_at": "2026-01-03T00:00:00Z",
+        }
+        revision = {
+            "source_alias_from_task_asset_id": 11,
+            "final_task_asset_ids": [11, 12],
+            "evidence_event_ids": [],
+            "mode": "set",
+            "manifest_row_hash": "",
+            "_blockers": [],
+        }
+
+        changed = MODULE.apply_proven_successor_audit_change(
+            scope,
+            approval,
+            [completion, approval],
+            [old, successor],
+            revision,
+        )
+
+        self.assertTrue(changed)
+        self.assertEqual(revision["source_alias_from_task_asset_id"], 12)
+        self.assertEqual(revision["final_task_asset_ids"], [12])
+        self.assertEqual(revision["mode"], "single")
+
     def test_rejection_clones_draft_and_resubmit_mutates_that_draft(self):
         rows = self.sample()
         rows["events"] = [rows["events"][0],

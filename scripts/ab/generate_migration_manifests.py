@@ -930,6 +930,7 @@ def resolve_submission_assets(scope, submit_event, all_events, assets):
                 not in UPLOAD_SESSION_COMPLETED_EVENTS
                 or int(sibling.get("actor_id") or 0) != submit_actor
                 or stable_event_id(sibling) in explicit_completion_ids
+                or not event_precedes_boundary(sibling, submit_event)
             ):
                 continue
             try:
@@ -1263,7 +1264,10 @@ def apply_proven_successor_audit_change(scope, event, events, assets, revision):
         revision["source_task_asset_id"] = replacements[int(revision["source_task_asset_id"])]
     if revision.get("source_alias_from_task_asset_id") in replacements:
         revision["source_alias_from_task_asset_id"] = replacements[int(revision["source_alias_from_task_asset_id"])]
-    revision["final_task_asset_ids"] = [replacements.get(int(asset_id), int(asset_id)) for asset_id in revision["final_task_asset_ids"]]
+    revision["final_task_asset_ids"] = list(dict.fromkeys(
+        replacements.get(int(asset_id), int(asset_id))
+        for asset_id in revision["final_task_asset_ids"]
+    ))
     revision["evidence_event_ids"] = list(dict.fromkeys(
         list(revision.get("evidence_event_ids") or []) + completion_evidence
     ))
