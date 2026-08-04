@@ -1,5 +1,8 @@
 package main
 
+// The same migration engine is exercised for both Clone B and production
+// modes; environment-specific guards are tested explicitly below.
+
 import (
 	"bytes"
 	"context"
@@ -28,6 +31,7 @@ func TestValidateOptionsRejectsNonCloneOrNonLoopback(t *testing.T) {
 		RollbackJournalFile: filepath.Join(root, "rollback-journal.json"),
 		ConfirmDatabase:     "ab_formal_clone_b", ConfirmHost: "127.0.0.1",
 		ConfirmRunID: "formal-run-1", ConfirmCandidateSHA256: strings.Repeat("a", 64),
+		TargetEnvironment: "clone_b",
 	}
 	if _, _, err := validateOptions(base); err != nil {
 		t.Fatalf("valid clone options: %v", err)
@@ -41,7 +45,7 @@ func TestValidateOptionsRejectsNonCloneOrNonLoopback(t *testing.T) {
 	production := base
 	production.DSN = "user:pass@tcp(127.0.0.1:3306)/jst_erp"
 	production.ConfirmDatabase = "jst_erp"
-	if _, _, err := validateOptions(production); err == nil || !strings.Contains(err.Error(), "ab_*_b") {
+	if _, _, err := validateOptions(production); err == nil || !strings.Contains(err.Error(), "clone_b") {
 		t.Fatalf("production DB error = %v", err)
 	}
 	formal := base
@@ -49,6 +53,44 @@ func TestValidateOptionsRejectsNonCloneOrNonLoopback(t *testing.T) {
 	formal.ConfirmDatabase = "ab_r20260723_01_b"
 	if _, _, err := validateOptions(formal); err != nil {
 		t.Fatalf("formal ab_*_b database should be accepted: %v", err)
+	}
+}
+
+func TestValidateOptionsAcceptsExactProductionMarker(t *testing.T) {
+	root := t.TempDir()
+	commit := strings.Repeat("a", 40)
+	marker := filepath.Join(root, "v8-cutover-approved.env")
+	if err := os.WriteFile(
+		marker,
+		[]byte("APPROVED_COMMIT="+commit+"\n"),
+		0o600,
+	); err != nil {
+		t.Fatal(err)
+	}
+	value := options{
+		DSN:                    "user:pass@tcp(10.0.0.2:3306)/jst_erp",
+		Mode:                   "apply",
+		RegistryFile:           "registry.json",
+		ManifestFile:           "manifest.json",
+		FixtureRoot:            "/tmp/v8-ab/run/fixture-upload-b",
+		ReportFile:             filepath.Join(root, "report.json"),
+		RollbackJournalFile:    filepath.Join(root, "rollback-journal.json"),
+		ConfirmDatabase:        "jst_erp",
+		ConfirmHost:            "10.0.0.2",
+		ConfirmRunID:           "formal-run-1",
+		ConfirmCandidateSHA256: strings.Repeat("b", 64),
+		TargetEnvironment:      "production",
+		ProductionMarker:       marker,
+		ApprovedCommit:         commit,
+	}
+	if _, _, err := validateOptions(value); err != nil {
+		t.Fatalf("valid production options: %v", err)
+	}
+
+	value.ApprovedCommit = strings.Repeat("c", 40)
+	if _, _, err := validateOptions(value); err == nil ||
+		!strings.Contains(err.Error(), "does not exactly approve") {
+		t.Fatalf("marker mismatch error = %v", err)
 	}
 }
 
@@ -433,13 +475,13 @@ func TestValidateGuardRequiresExactBinding(t *testing.T) {
 	mock.ExpectQuery("SELECT environment,run_id,candidate_sha256,registry_sha256").
 		WillReturnRows(sqlmock.NewRows([]string{"environment", "run_id", "candidate_sha256", "registry_sha256"}).
 			AddRow("clone_b", "run-1", strings.Repeat("a", 64), strings.Repeat("b", 64)))
-	if err := validateGuard(context.Background(), tx, "run-1", strings.Repeat("a", 64), strings.Repeat("b", 64)); err != nil {
+	if err := validateGuard(context.Background(), tx, "clone_b", "run-1", strings.Repeat("a", 64), strings.Repeat("b", 64)); err != nil {
 		t.Fatalf("validateGuard() error = %v", err)
 	}
 	mock.ExpectQuery("SELECT environment,run_id,candidate_sha256,registry_sha256").
 		WillReturnRows(sqlmock.NewRows([]string{"environment", "run_id", "candidate_sha256", "registry_sha256"}).
 			AddRow("production", "run-1", strings.Repeat("a", 64), strings.Repeat("b", 64)))
-	if err := validateGuard(context.Background(), tx, "run-1", strings.Repeat("a", 64), strings.Repeat("b", 64)); err == nil {
+	if err := validateGuard(context.Background(), tx, "clone_b", "run-1", strings.Repeat("a", 64), strings.Repeat("b", 64)); err == nil {
 		t.Fatal("production guard unexpectedly accepted")
 	}
 	mock.ExpectRollback()
@@ -634,6 +676,7 @@ func TestCommittedApplyReportFailureCompensationRestoresDatabase(t *testing.T) {
 	if err := compensateCommittedApply(
 		context.Background(),
 		db,
+		"clone_b",
 		reg,
 		manifest,
 		registrySHA,

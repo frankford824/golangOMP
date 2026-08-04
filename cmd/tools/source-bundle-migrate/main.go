@@ -23,11 +23,12 @@ import (
 	"github.com/go-sql-driver/mysql"
 )
 
-const guardEnvironment = "clone_b"
+const cloneGuardEnvironment = "clone_b"
 
 var (
-	sha256Pattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
-	runIDPattern  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$`)
+	sha256Pattern    = regexp.MustCompile(`^[0-9a-f]{64}$`)
+	runIDPattern     = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{2,127}$`)
+	gitCommitPattern = regexp.MustCompile(`^[0-9a-f]{40}$`)
 )
 
 type options struct {
@@ -43,6 +44,9 @@ type options struct {
 	ConfirmHost            string
 	ConfirmRunID           string
 	ConfirmCandidateSHA256 string
+	TargetEnvironment      string
+	ProductionMarker       string
+	ApprovedCommit         string
 }
 
 type registry struct {
@@ -235,7 +239,7 @@ type transaction interface {
 
 func main() {
 	var o options
-	flag.StringVar(&o.DSN, "dsn", os.Getenv("CLONE_B_MYSQL_DSN"), "Clone B MySQL DSN")
+	flag.StringVar(&o.DSN, "dsn", os.Getenv("MYSQL_DSN"), "target MySQL DSN")
 	flag.StringVar(&o.Mode, "mode", "", "apply or rollback")
 	flag.StringVar(&o.RegistryFile, "registry", "", "materializer registry JSON")
 	flag.StringVar(&o.ManifestFile, "manifest", "", "administrator-confirmed bundle manifest")
@@ -243,10 +247,13 @@ func main() {
 	flag.StringVar(&o.ApplyReportFile, "apply-report", "", "optional original apply report cross-check")
 	flag.StringVar(&o.RollbackJournalFile, "rollback-journal", "", "durable pre-commit rollback journal")
 	flag.StringVar(&o.ReportFile, "report-file", "", "new execution report path")
-	flag.StringVar(&o.ConfirmDatabase, "confirm-database", "", "exact Clone B database")
-	flag.StringVar(&o.ConfirmHost, "confirm-host", "", "exact loopback DSN host")
+	flag.StringVar(&o.ConfirmDatabase, "confirm-database", "", "exact target database")
+	flag.StringVar(&o.ConfirmHost, "confirm-host", "", "exact target DSN host")
 	flag.StringVar(&o.ConfirmRunID, "confirm-run-id", "", "exact materializer run id")
 	flag.StringVar(&o.ConfirmCandidateSHA256, "confirm-candidate-sha256", "", "exact reviewed candidate SHA-256")
+	flag.StringVar(&o.TargetEnvironment, "target-environment", "", "clone_b or production")
+	flag.StringVar(&o.ProductionMarker, "production-marker", "", "production cutover marker file")
+	flag.StringVar(&o.ApprovedCommit, "approved-commit", "", "exact production-approved Git commit")
 	flag.Parse()
 	if err := run(context.Background(), o); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -274,7 +281,7 @@ func run(ctx context.Context, o options) error {
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 	if err := db.PingContext(ctx); err != nil {
-		return fmt.Errorf("connect Clone B: %w", err)
+		return fmt.Errorf("connect target database: %w", err)
 	}
 	if err := configureAutoIncrementSession(ctx, db); err != nil {
 		return err
@@ -292,7 +299,14 @@ func run(ctx context.Context, o options) error {
 		return err
 	}
 	defer tx.Rollback()
-	if err := validateGuard(ctx, tx, reg.RunID, manifest.SourceCandidateSHA256, registrySHA); err != nil {
+	if err := validateGuard(
+		ctx,
+		tx,
+		o.TargetEnvironment,
+		reg.RunID,
+		manifest.SourceCandidateSHA256,
+		registrySHA,
+	); err != nil {
 		return err
 	}
 
@@ -401,7 +415,7 @@ func run(ctx context.Context, o options) error {
 	if err := writeNewJSON(o.ReportFile, report); err != nil {
 		if o.Mode == "apply" && report.ChangedBundleCount > 0 {
 			compensationErr := compensateCommittedApply(
-				ctx, db, reg, manifest, registrySHA, entries,
+				ctx, db, o.TargetEnvironment, reg, manifest, registrySHA, entries,
 				rollbackSeed, rollbackJournalValue,
 			)
 			if compensationErr != nil {
@@ -423,6 +437,7 @@ func run(ctx context.Context, o options) error {
 func compensateCommittedApply(
 	ctx context.Context,
 	db *sql.DB,
+	targetEnvironment string,
 	reg registry,
 	manifest confirmedManifest,
 	registrySHA string,
@@ -438,6 +453,7 @@ func compensateCommittedApply(
 	if err := validateGuard(
 		ctx,
 		tx,
+		targetEnvironment,
 		reg.RunID,
 		manifest.SourceCandidateSHA256,
 		registrySHA,
@@ -467,12 +483,13 @@ func validateOptions(o options) (*mysql.Config, string, error) {
 		return nil, "", errors.New("--mode must be apply or rollback")
 	}
 	required := map[string]string{
-		"--dsn/CLONE_B_MYSQL_DSN": o.DSN, "--registry": o.RegistryFile,
+		"--dsn/MYSQL_DSN": o.DSN, "--registry": o.RegistryFile,
 		"--manifest": o.ManifestFile, "--fixture-root": o.FixtureRoot,
 		"--rollback-journal": o.RollbackJournalFile,
 		"--report-file":      o.ReportFile, "--confirm-database": o.ConfirmDatabase,
 		"--confirm-host": o.ConfirmHost, "--confirm-run-id": o.ConfirmRunID,
 		"--confirm-candidate-sha256": o.ConfirmCandidateSHA256,
+		"--target-environment":       o.TargetEnvironment,
 	}
 	for name, value := range required {
 		if strings.TrimSpace(value) == "" {
@@ -503,18 +520,66 @@ func validateOptions(o options) (*mysql.Config, string, error) {
 		return nil, "", errors.New("only a TCP DSN is accepted")
 	}
 	host, _, err := net.SplitHostPort(cfg.Addr)
-	if err != nil || !isLoopback(host) {
-		return nil, "", fmt.Errorf("Clone B DSN must use an explicit loopback host and port")
+	if err != nil {
+		return nil, "", errors.New("DSN must use an explicit TCP host and port")
 	}
 	if host != o.ConfirmHost {
 		return nil, "", errors.New("DSN host does not match --confirm-host")
 	}
-	if cfg.DBName != o.ConfirmDatabase || !isSafeCloneBDatabaseName(cfg.DBName) {
-		return nil, "", fmt.Errorf("database must exactly match --confirm-database and follow ab_*_b Clone B naming")
+	if cfg.DBName != o.ConfirmDatabase {
+		return nil, "", errors.New("database must exactly match --confirm-database")
+	}
+	switch o.TargetEnvironment {
+	case "clone_b":
+		if !isLoopback(host) || !isSafeCloneBDatabaseName(cfg.DBName) {
+			return nil, "", errors.New("clone_b requires loopback and an ab_*_b database")
+		}
+	case "production":
+		if isSafeCloneBDatabaseName(cfg.DBName) {
+			return nil, "", errors.New("production cannot target a Clone B database")
+		}
+		if err := validateProductionMarker(
+			o.ProductionMarker,
+			o.ApprovedCommit,
+		); err != nil {
+			return nil, "", err
+		}
+	default:
+		return nil, "", errors.New("--target-environment must be clone_b or production")
 	}
 	cfg.ParseTime = true
 	cfg.MultiStatements = false
 	return cfg, host, nil
+}
+
+func validateProductionMarker(path, approvedCommit string) error {
+	if strings.TrimSpace(path) == "" {
+		return errors.New("--production-marker is required for production")
+	}
+	if !gitCommitPattern.MatchString(approvedCommit) {
+		return errors.New("--approved-commit must be an exact 40-character Git SHA")
+	}
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return fmt.Errorf("resolve production marker: %w", err)
+	}
+	info, err := os.Lstat(absolute)
+	if err != nil {
+		return fmt.Errorf("read production marker: %w", err)
+	}
+	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 ||
+		info.Size() <= 0 || info.Size() > 1024 {
+		return errors.New("production marker must be a small regular non-symlink file")
+	}
+	raw, err := os.ReadFile(absolute)
+	if err != nil {
+		return fmt.Errorf("read production marker: %w", err)
+	}
+	expected := "APPROVED_COMMIT=" + approvedCommit + "\n"
+	if string(raw) != expected {
+		return errors.New("production marker does not exactly approve the requested commit")
+	}
+	return nil
 }
 
 func isLoopback(host string) bool {
@@ -964,7 +1029,17 @@ func scopeKey(taskID int64, kind string, refID int64, revision int) string {
 	return fmt.Sprintf("%d/%s/%d/%d", taskID, kind, refID, revision)
 }
 
-func validateGuard(ctx context.Context, tx transaction, runID, candidateSHA, registrySHA string) error {
+func validateGuard(
+	ctx context.Context,
+	tx transaction,
+	targetEnvironment string,
+	runID string,
+	candidateSHA string,
+	registrySHA string,
+) error {
+	if targetEnvironment == "production" {
+		return nil
+	}
 	// Provisioned by the Clone-B runner, never by this tool:
 	// CREATE TABLE v8_ab_source_bundle_guard (
 	//   singleton_id TINYINT PRIMARY KEY,
@@ -981,7 +1056,7 @@ func validateGuard(ctx context.Context, tx transaction, runID, candidateSHA, reg
 		FOR UPDATE`).Scan(&environment, &guardedRun, &guardedCandidate, &guardedRegistry); err != nil {
 		return fmt.Errorf("source bundle Clone-B guard missing or unreadable: %w", err)
 	}
-	if environment != guardEnvironment || guardedRun != runID ||
+	if environment != cloneGuardEnvironment || guardedRun != runID ||
 		guardedCandidate != candidateSHA || guardedRegistry != registrySHA {
 		return errors.New("source bundle guard does not exactly bind clone_b/run/candidate/registry")
 	}
