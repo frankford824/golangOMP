@@ -1859,6 +1859,7 @@ def bundle_rollback(
     registry_sha = sha256_file(registry) if registry.is_file() else ""
     manifest_sha = sha256_file(args.manifest)
     compensation_complete = False
+    compensation_state: dict[str, Any] | None = None
     if compensation_state_path.is_file():
         compensation_state = read_object(
             compensation_state_path, "bundle compensation state"
@@ -1896,6 +1897,50 @@ def bundle_rollback(
         raise ComponentError(
             "bundle apply report exists without rollback journal"
         )
+    if (
+        binding is not None
+        and not db_journal.is_file()
+        and not compensation_complete
+    ):
+        if (
+            not isinstance(compensation_state, dict)
+            or compensation_state.get("status") != "ROLLBACK_REQUIRED"
+            or compensation_state.get("component") != "bundle"
+            or compensation_state.get("run_id") != args.run_id
+            or compensation_state.get("database") != connection.database
+            or compensation_state.get("details")
+            != ["rollback_journal_missing_or_invalid_guard_retained"]
+            or db_apply.exists()
+        ):
+            raise ComponentError(
+                "bundle rollback journal is absent without an exact "
+                "pre-mutation failure attestation"
+            )
+        # The Go executor persists its rollback journal before the first
+        # business-row mutation. No journal plus no apply report therefore
+        # proves that database rollback is not required. Emit a typed receipt
+        # so the outer G4 command plan can complete cleanup and continue with
+        # recovery rollback instead of stopping on an intentionally absent
+        # database artifact.
+        write_document(
+            db_rollback,
+            self_bound(
+                {
+                    "schema_version": 1,
+                    "status": "NOT_REQUIRED",
+                    "reason": "rollback_journal_precedes_database_mutation",
+                    "run_id": args.run_id,
+                    "database": connection.database,
+                    "host": connection.host,
+                    "candidate_sha256": candidate,
+                    "registry_sha256": registry_sha,
+                    "manifest_sha256": manifest_sha,
+                    "bundle_count": bundle_count,
+                    "database_writes_executed": False,
+                }
+            ),
+        )
+        rollback_artifacts.append(db_rollback)
     if binding is not None and db_journal.is_file() and db_rollback.is_file():
         rollback_artifacts.append(db_rollback)
         validate_bundle_report(
