@@ -894,12 +894,21 @@ func validateTaskStateDecisions(m mappingFile, allowCandidateConfidence bool) er
 		retouchDecision := isReviewedRetouchReopenDecision(decision)
 		customizationTerminalFromStatus := decision.FromStatus == "PendingWarehouseReceive" ||
 			(decision.TaskID == 3091 && decision.FromStatus == "Completed")
+		customizationTerminalPolicies := []string{
+			reviewPolicyLegacyCustomizationTerminalNoAssets,
+		}
+		if decision.TaskID == 3091 && decision.FromStatus == "Completed" {
+			customizationTerminalPolicies = append(
+				customizationTerminalPolicies,
+				reviewPolicyLegacyHistoricalAssetUnavailable,
+			)
+		}
 		customizationTerminalDecision := customizationTerminalFromStatus &&
 			decision.TargetStatus == "InProgress" &&
 			isLegacyCustomizationTerminalTask(decision.TaskID) &&
 			equalStringSlices(
 				decision.ReviewPolicyIDs,
-				[]string{reviewPolicyLegacyCustomizationTerminalNoAssets},
+				customizationTerminalPolicies,
 			)
 		if !warehouseDecision && !retouchDecision && !customizationTerminalDecision {
 			return fmt.Errorf("%s: unsupported or insufficiently policy-bound task state transition", path)

@@ -766,7 +766,10 @@ func TestCompletedCustomizationMissingFinalDecisionIsExactAndEvidenceBound(t *te
 		TargetStatus:     "InProgress",
 		EvidenceEventIDs: []string{"task_event_log:post-close-upload"},
 		Confidence:       "confirmed_auto",
-		ReviewPolicyIDs:  []string{reviewPolicyLegacyCustomizationTerminalNoAssets},
+		ReviewPolicyIDs: []string{
+			reviewPolicyLegacyCustomizationTerminalNoAssets,
+			reviewPolicyLegacyHistoricalAssetUnavailable,
+		},
 		ConfirmedBy:      1,
 		ConfirmedAt:      confirmedAt,
 		ConfirmationNote: "automatic exact missing-final decision",
@@ -777,6 +780,17 @@ func TestCompletedCustomizationMissingFinalDecisionIsExactAndEvidenceBound(t *te
 		false,
 	); err != nil {
 		t.Fatalf("validate task 3091 decision: %v", err)
+	}
+	incompletePolicyDecision := decision
+	incompletePolicyDecision.ReviewPolicyIDs = []string{
+		reviewPolicyLegacyCustomizationTerminalNoAssets,
+	}
+	incompletePolicyDecision.ManifestRowHash, _ = taskStateDecisionManifestHash(incompletePolicyDecision)
+	if err := validateTaskStateDecisions(
+		mappingFile{Version: 2, TaskDecisions: []taskStateDecisionMapping{incompletePolicyDecision}},
+		false,
+	); err == nil {
+		t.Fatal("expected task 3091 decision without historical-unavailable policy to fail")
 	}
 
 	db, mock, err := sqlmock.New()
