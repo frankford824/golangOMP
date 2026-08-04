@@ -34,7 +34,7 @@ EXPECTED_OBJECT_KEY = (
     "1783575756672661314_d97ed925.psd"
 )
 EXPECTED_MIME_TYPE = "image/vnd.adobe.photoshop"
-EXPECTED_STATUS = "recorded"
+EXPECTED_STATUS = "historical_unavailable"
 EXPECTED_PROBE_RESULT = "not_found"
 EXPECTED_PROBE_READ_ONLY_GET_COUNT = 1
 EXPECTED_PROBE_EVIDENCE_HASH = (
@@ -49,6 +49,15 @@ EXPECTED_PROBE_OBJECT_KEY_SHA256 = (
 ZERO_TIME = "0001-01-01T00:00:00Z"
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 CLONE_B_DATABASE = re.compile(r"^ab_[A-Za-z0-9_]*_b(?:_|$)[A-Za-z0-9_]*$")
+PHYSICAL_CLONE_DATABASE = "jst_erp"
+PHYSICAL_CLONE_ISOLATION_KIND = "docker_published_port_v1"
+CONTAINER_NAME = re.compile(
+    r"^(?=.{1,128}$)[A-Za-z0-9]"
+    r"(?=[A-Za-z0-9_.-]*clone[-_]?b)"
+    r"[A-Za-z0-9_.-]*$"
+)
+CONTAINER_ID = re.compile(r"^[0-9a-f]{64}$")
+IMAGE_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 OBJECT_FIELDS = {
     "entity_key",
     "owner_kind",
@@ -77,6 +86,19 @@ SQL_FIELDS = {
     "finalized_reference_count",
     "query_sha256",
     "evidence_hash",
+}
+PHYSICAL_CLONE_SQL_FIELDS = {
+    "clone_side",
+    "isolation_kind",
+    "database_host",
+    "database_port",
+    "container_port",
+    "container_name",
+    "container_id",
+    "container_image_digest",
+    "container_inspect_sha256",
+    "source_snapshot_sha256",
+    "production_write_performed",
 }
 API_FIELDS = {
     "schema_version",
@@ -315,9 +337,18 @@ def validate_bound_evidence(
 def validate_sql_evidence(
     value: dict[str, Any], mapping_sha: str, row_hash: str
 ) -> None:
+    database = str(value.get("database") or "")
+    if CLONE_B_DATABASE.fullmatch(database):
+        expected_fields = SQL_FIELDS
+    elif database == PHYSICAL_CLONE_DATABASE:
+        expected_fields = SQL_FIELDS | PHYSICAL_CLONE_SQL_FIELDS
+    else:
+        raise ExceptionContractError(
+            "SQL evidence database is not an isolated Clone B target"
+        )
     validate_bound_evidence(
         value,
-        expected_fields=SQL_FIELDS,
+        expected_fields=expected_fields,
         label="SQL evidence",
         mapping_sha=mapping_sha,
         row_hash=row_hash,
@@ -327,9 +358,40 @@ def validate_sql_evidence(
         or value.get("working_reference_count") != 0
         or value.get("finalized_reference_count") != 0
         or value.get("transaction") != "consistent_read_only"
-        or not CLONE_B_DATABASE.fullmatch(str(value.get("database") or ""))
     ):
         raise ExceptionContractError("SQL evidence does not prove zero current references")
+    if database == PHYSICAL_CLONE_DATABASE:
+        port = value.get("database_port")
+        if (
+            value.get("clone_side") != "B"
+            or value.get("isolation_kind") != PHYSICAL_CLONE_ISOLATION_KIND
+            or value.get("database_host") != "127.0.0.1"
+            or isinstance(port, bool)
+            or not isinstance(port, int)
+            or port < 1024
+            or port > 65535
+            or port == 3306
+            or value.get("container_port") != 3306
+            or value.get("production_write_performed") is not False
+            or not CONTAINER_NAME.fullmatch(
+                str(value.get("container_name") or "")
+            )
+            or not CONTAINER_ID.fullmatch(str(value.get("container_id") or ""))
+            or not IMAGE_DIGEST.fullmatch(
+                str(value.get("container_image_digest") or "")
+            )
+        ):
+            raise ExceptionContractError(
+                "SQL evidence does not prove a loopback-published physical Clone B"
+            )
+        require_sha(
+            value.get("container_inspect_sha256"),
+            "SQL evidence container_inspect_sha256",
+        )
+        require_sha(
+            value.get("source_snapshot_sha256"),
+            "SQL evidence source_snapshot_sha256",
+        )
     require_sha(value.get("query_sha256"), "SQL evidence query_sha256")
 
 

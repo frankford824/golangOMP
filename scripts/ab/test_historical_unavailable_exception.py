@@ -173,6 +173,7 @@ class HistoricalUnavailableExceptionTest(unittest.TestCase):
             ("size", MODULE.EXPECTED_SIZE - 1),
             ("object_key", "tasks/2199/thumbnail.png"),
             ("sha256", "5" * 64),
+            ("status", "recorded"),
         ):
             with self.subTest(field=field), tempfile.TemporaryDirectory() as raw:
                 paths = self.fixture(pathlib.Path(raw))
@@ -186,6 +187,100 @@ class HistoricalUnavailableExceptionTest(unittest.TestCase):
                     "historical-unavailable object contract",
                 ):
                     self.build(paths)
+
+    def test_accepts_exact_loopback_published_physical_clone_b(self):
+        with tempfile.TemporaryDirectory() as raw:
+            paths = self.fixture(pathlib.Path(raw))
+            sql = json.loads(paths["sql"].read_text(encoding="utf-8"))
+            sql.update(
+                {
+                    "database": MODULE.PHYSICAL_CLONE_DATABASE,
+                    "clone_side": "B",
+                    "isolation_kind": MODULE.PHYSICAL_CLONE_ISOLATION_KIND,
+                    "database_host": "127.0.0.1",
+                    "database_port": 3330,
+                    "container_port": 3306,
+                    "container_name": "codex-yongbo-v1295-clone-b-mysql",
+                    "container_id": "3" * 64,
+                    "container_image_digest": "sha256:" + "4" * 64,
+                    "container_inspect_sha256": "5" * 64,
+                    "source_snapshot_sha256": "6" * 64,
+                    "production_write_performed": False,
+                }
+            )
+            sql["evidence_hash"] = MODULE.self_hash(sql)
+            self.write_json(paths["sql"], sql)
+            result = self.build(paths)
+        self.assertEqual("PASS", result["status"])
+
+    def test_physical_clone_b_requires_exact_isolation_attestation(self):
+        cases = (
+            ("database_host", "10.0.0.12"),
+            ("database_port", 3306),
+            ("database_port", True),
+            ("container_port", 3307),
+            ("clone_side", "A"),
+            ("isolation_kind", "docker"),
+            ("container_name", "production-mysql"),
+            ("container_name", "production-b-mysql"),
+            ("container_id", "3" * 63),
+            ("container_image_digest", "4" * 64),
+            ("container_inspect_sha256", "5" * 63),
+            ("source_snapshot_sha256", "6" * 63),
+            ("production_write_performed", True),
+        )
+        for field, invalid in cases:
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as raw:
+                paths = self.fixture(pathlib.Path(raw))
+                sql = json.loads(paths["sql"].read_text(encoding="utf-8"))
+                sql.update(
+                    {
+                        "database": MODULE.PHYSICAL_CLONE_DATABASE,
+                        "clone_side": "B",
+                        "isolation_kind": MODULE.PHYSICAL_CLONE_ISOLATION_KIND,
+                        "database_host": "127.0.0.1",
+                        "database_port": 3330,
+                        "container_port": 3306,
+                        "container_name": "codex-yongbo-v1295-clone-b-mysql",
+                        "container_id": "3" * 64,
+                        "container_image_digest": "sha256:" + "4" * 64,
+                        "container_inspect_sha256": "5" * 64,
+                        "source_snapshot_sha256": "6" * 64,
+                        "production_write_performed": False,
+                    }
+                )
+                sql[field] = invalid
+                sql["evidence_hash"] = MODULE.self_hash(sql)
+                self.write_json(paths["sql"], sql)
+                with self.assertRaisesRegex(
+                    MODULE.ExceptionContractError,
+                    "physical Clone B|lowercase SHA-256",
+                ):
+                    self.build(paths)
+
+    def test_jst_erp_without_physical_clone_fields_is_rejected(self):
+        with tempfile.TemporaryDirectory() as raw:
+            paths = self.fixture(pathlib.Path(raw))
+            sql = json.loads(paths["sql"].read_text(encoding="utf-8"))
+            sql["database"] = MODULE.PHYSICAL_CLONE_DATABASE
+            sql["evidence_hash"] = MODULE.self_hash(sql)
+            self.write_json(paths["sql"], sql)
+            with self.assertRaisesRegex(
+                MODULE.ExceptionContractError, "field contract differs"
+            ):
+                self.build(paths)
+
+    def test_arbitrary_database_is_rejected(self):
+        with tempfile.TemporaryDirectory() as raw:
+            paths = self.fixture(pathlib.Path(raw))
+            sql = json.loads(paths["sql"].read_text(encoding="utf-8"))
+            sql["database"] = "production"
+            sql["evidence_hash"] = MODULE.self_hash(sql)
+            self.write_json(paths["sql"], sql)
+            with self.assertRaisesRegex(
+                MODULE.ExceptionContractError, "not an isolated Clone B target"
+            ):
+                self.build(paths)
 
     def test_stale_mapping_row_hash_is_rejected(self):
         with tempfile.TemporaryDirectory() as raw:
