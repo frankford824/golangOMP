@@ -26,6 +26,27 @@ func TestValidateOptions(t *testing.T) {
 	if err := validateOptions(options{Apply: true, BatchSize: 500}); err == nil {
 		t.Fatal("expected snapshot/mapping error")
 	}
+	commit := strings.Repeat("a", 40)
+	marker := filepath.Join(t.TempDir(), "production-approved.env")
+	if err := os.WriteFile(marker, []byte("APPROVED_COMMIT="+commit+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	production := options{
+		DryRun:                true,
+		BatchSize:             500,
+		TargetEnvironment:     "production",
+		ProductionMarker:      marker,
+		ApprovedCommit:        commit,
+		ProductionRecoveryRun: "v1295-recovery-evidence-20260804",
+		ProductionRelease:     "v1.295",
+	}
+	if err := validateOptions(production); err != nil {
+		t.Fatalf("production dry-run: %v", err)
+	}
+	production.ApprovedCommit = strings.Repeat("b", 40)
+	if err := validateOptions(production); err == nil {
+		t.Fatal("expected mismatched production marker rejection")
+	}
 }
 
 func TestReadSnapshotRejectsV88AppliedSnapshotAsHistorical(t *testing.T) {

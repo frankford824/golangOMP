@@ -45,15 +45,26 @@ var workflowGroupsAutoIncrementTables = []string{
 }
 
 type options struct {
-	DSN         string
-	DryRun      bool
-	Apply       bool
-	Rollback    bool
-	SnapshotDir string
-	BatchSize   int
-	MappingFile string
-	ReportFile  string
-	ConfirmDB   string
+	DSN                   string
+	DryRun                bool
+	Apply                 bool
+	Rollback              bool
+	SnapshotDir           string
+	BatchSize             int
+	MappingFile           string
+	ReportFile            string
+	ConfirmDB             string
+	TargetEnvironment     string
+	ProductionMarker      string
+	ApprovedCommit        string
+	ProductionRecoveryRun string
+	ProductionRelease     string
+}
+
+type recoveryEvidenceTarget struct {
+	Environment string
+	RunID       string
+	Release     string
 }
 
 type mappingFile struct {
@@ -435,6 +446,11 @@ func main() {
 	flag.StringVar(&o.MappingFile, "mapping-file", "", "JSON file containing only manually confirmed resource/planning mappings")
 	flag.StringVar(&o.ReportFile, "report-file", "", "optional JSON report path")
 	flag.StringVar(&o.ConfirmDB, "confirm-database", "", "required for writes and must exactly match SELECT DATABASE()")
+	flag.StringVar(&o.TargetEnvironment, "target-environment", "clone_b", "clone_b or production")
+	flag.StringVar(&o.ProductionMarker, "production-marker", "", "exact production cutover marker file")
+	flag.StringVar(&o.ApprovedCommit, "approved-commit", "", "exact production-approved Git commit")
+	flag.StringVar(&o.ProductionRecoveryRun, "production-recovery-run-id", "", "exact production asset recovery run id")
+	flag.StringVar(&o.ProductionRelease, "production-release", "", "exact production release name")
 	flag.Parse()
 
 	if err := run(context.Background(), o); err != nil {
@@ -468,6 +484,13 @@ func run(ctx context.Context, o options) error {
 	if (o.Apply || o.Rollback) && o.ConfirmDB != database {
 		return v1migrate.NewHardAbort(v1migrate.ExitCodeHardAbort, "write guard: --confirm-database=%q does not match %q", o.ConfirmDB, database)
 	}
+	if o.TargetEnvironment == "production" && isCloneBDatabaseName(database) {
+		return v1migrate.NewHardAbort(v1migrate.ExitCodeHardAbort, "production target cannot use Clone B database %q", database)
+	}
+	recoveryTarget, err := recoveryEvidenceTargetFromOptions(o)
+	if err != nil {
+		return err
+	}
 
 	mapping, err := readMapping(o.MappingFile)
 	if err != nil {
@@ -494,8 +517,8 @@ func run(ctx context.Context, o options) error {
 		}
 	}
 	if !o.Rollback {
-		if err := validatePrematerializedAssetRecoveries(ctx, db, mapping.AssetRecoveries); err != nil {
-			return v1migrate.NewHardAbort(v1migrate.ExitCodeHardAbort, "Clone B recovery preflight failed: %v", err)
+		if err := validatePrematerializedAssetRecoveries(ctx, db, mapping.AssetRecoveries, recoveryTarget); err != nil {
+			return v1migrate.NewHardAbort(v1migrate.ExitCodeHardAbort, "%s recovery preflight failed: %v", recoveryTarget.Environment, err)
 		}
 		if err := validatePlanningImages(ctx, db, mapping.Planning, false); err != nil {
 			return v1migrate.NewHardAbort(v1migrate.ExitCodeHardAbort, "planning image preflight failed: %v", err)
@@ -542,7 +565,79 @@ func validateOptions(o options) error {
 	if (o.Apply || o.Rollback) && strings.TrimSpace(o.MappingFile) == "" {
 		return fmt.Errorf("--mapping-file is required for apply/rollback so the journal stays bound to the reviewed mapping")
 	}
+	if _, err := recoveryEvidenceTargetFromOptions(o); err != nil {
+		return err
+	}
 	return nil
+}
+
+func recoveryEvidenceTargetFromOptions(o options) (recoveryEvidenceTarget, error) {
+	switch o.TargetEnvironment {
+	case "", "clone_b":
+		return recoveryEvidenceTarget{Environment: "clone_b"}, nil
+	case "production":
+		if err := validateWorkflowProductionMarker(o.ProductionMarker, o.ApprovedCommit); err != nil {
+			return recoveryEvidenceTarget{}, err
+		}
+		if !recoveryRunIDPattern.MatchString(o.ProductionRecoveryRun) {
+			return recoveryEvidenceTarget{}, errors.New("--production-recovery-run-id is invalid")
+		}
+		if !recoveryRunIDPattern.MatchString(o.ProductionRelease) ||
+			!strings.HasPrefix(o.ProductionRelease, "v") {
+			return recoveryEvidenceTarget{}, errors.New("--production-release is invalid")
+		}
+		return recoveryEvidenceTarget{
+			Environment: "production",
+			RunID:       o.ProductionRecoveryRun,
+			Release:     o.ProductionRelease,
+		}, nil
+	default:
+		return recoveryEvidenceTarget{}, errors.New("--target-environment must be clone_b or production")
+	}
+}
+
+func recoveryEvidenceTargetOrClone(targets []recoveryEvidenceTarget) recoveryEvidenceTarget {
+	if len(targets) == 1 {
+		return targets[0]
+	}
+	return recoveryEvidenceTarget{Environment: "clone_b"}
+}
+
+func validateWorkflowProductionMarker(path, approvedCommit string) error {
+	if strings.TrimSpace(path) == "" {
+		return errors.New("--production-marker is required for production")
+	}
+	if len(approvedCommit) != 40 {
+		return errors.New("--approved-commit must be an exact 40-character Git SHA")
+	}
+	if _, err := hex.DecodeString(approvedCommit); err != nil {
+		return errors.New("--approved-commit must be an exact 40-character Git SHA")
+	}
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return fmt.Errorf("resolve production marker: %w", err)
+	}
+	info, err := os.Lstat(absolute)
+	if err != nil {
+		return fmt.Errorf("read production marker: %w", err)
+	}
+	if !info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 ||
+		info.Size() <= 0 || info.Size() > 1024 {
+		return errors.New("production marker must be a small regular non-symlink file")
+	}
+	raw, err := os.ReadFile(absolute)
+	if err != nil {
+		return fmt.Errorf("read production marker: %w", err)
+	}
+	if string(raw) != "APPROVED_COMMIT="+approvedCommit+"\n" {
+		return errors.New("production marker does not exactly approve the requested commit")
+	}
+	return nil
+}
+
+func isCloneBDatabaseName(database string) bool {
+	value := strings.ToLower(strings.TrimSpace(database))
+	return strings.HasPrefix(value, "ab_") && strings.HasSuffix(value, "_b")
 }
 
 func readMapping(path string) (mappingFile, error) {
@@ -2429,6 +2524,10 @@ func (l *applyPhaseLogger) mark(phase string) {
 
 func apply(ctx context.Context, db *sql.DB, database string, o options, m mappingFile) error {
 	phases := newApplyPhaseLogger()
+	recoveryTarget, err := recoveryEvidenceTargetFromOptions(o)
+	if err != nil {
+		return err
+	}
 	m = normalizeMapping(m)
 	if err := validateMapping(m); err != nil {
 		return v1migrate.NewHardAbort(v1migrate.ExitCodeHardAbort, "invalid reviewed mapping: %v", err)
@@ -2544,11 +2643,11 @@ func apply(ctx context.Context, db *sql.DB, database string, o options, m mappin
 		return err
 	}
 	phases.mark("completed_task_modules_normalized")
-	if err := applyAssetRecoveries(ctx, tx, m.AssetRecoveries); err != nil {
+	if err := applyAssetRecoveries(ctx, tx, m.AssetRecoveries, recoveryTarget); err != nil {
 		return err
 	}
 	phases.mark("asset_recoveries_applied")
-	if err := validateCutoverState(ctx, tx, m); err != nil {
+	if err := validateCutoverState(ctx, tx, m, recoveryTarget); err != nil {
 		return err
 	}
 	phases.mark("cutover_state_validated")
@@ -2967,10 +3066,16 @@ func validateHistoricalUnavailableRecoveryEvidence(
 	return nil
 }
 
-func applyAssetRecoveries(ctx context.Context, tx *sql.Tx, recoveries []assetRecoveryMapping) error {
+func applyAssetRecoveries(
+	ctx context.Context,
+	tx *sql.Tx,
+	recoveries []assetRecoveryMapping,
+	targets ...recoveryEvidenceTarget,
+) error {
+	target := recoveryEvidenceTargetOrClone(targets)
 	for _, recovery := range recoveries {
 		if recovery.Strategy == "verified_oss_recovery_v1" {
-			if err := validatePrematerializedAssetRecoveryEvidence(ctx, tx, recovery); err != nil {
+			if err := validatePrematerializedAssetRecoveryEvidence(ctx, tx, recovery, target); err != nil {
 				return err
 			}
 			continue
@@ -3019,19 +3124,31 @@ func applyAssetRecoveries(ctx context.Context, tx *sql.Tx, recoveries []assetRec
 	return nil
 }
 
-func validatePrematerializedAssetRecoveries(ctx context.Context, q snapshotQueryer, recoveries []assetRecoveryMapping) error {
+func validatePrematerializedAssetRecoveries(
+	ctx context.Context,
+	q snapshotQueryer,
+	recoveries []assetRecoveryMapping,
+	targets ...recoveryEvidenceTarget,
+) error {
+	target := recoveryEvidenceTargetOrClone(targets)
 	for _, recovery := range recoveries {
 		if recovery.Confidence != "confirmed_auto" || recovery.Strategy != "verified_oss_recovery_v1" {
 			continue
 		}
-		if err := validatePrematerializedAssetRecoveryEvidence(ctx, q, recovery); err != nil {
+		if err := validatePrematerializedAssetRecoveryEvidence(ctx, q, recovery, target); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func validatePrematerializedAssetRecoveryEvidence(ctx context.Context, q snapshotQueryer, recovery assetRecoveryMapping) error {
+func validatePrematerializedAssetRecoveryEvidence(
+	ctx context.Context,
+	q snapshotQueryer,
+	recovery assetRecoveryMapping,
+	targets ...recoveryEvidenceTarget,
+) error {
+	target := recoveryEvidenceTargetOrClone(targets)
 	expected, ok := frozenAssetRecoveryEvidenceByMissingID[recovery.MissingTaskAssetID]
 	if !ok || recovery.MissingTaskAssetID == 12323 || recovery.TaskID != 2807 {
 		return fmt.Errorf("task asset %d is outside the exact prematerialized recovery allowlist", recovery.MissingTaskAssetID)
@@ -3047,22 +3164,36 @@ func validatePrematerializedAssetRecoveryEvidence(ctx context.Context, q snapsho
 		return fmt.Errorf("task asset %d mapping is not bound to the frozen controlled-read evidence", recovery.MissingTaskAssetID)
 	}
 
-	var guardEnvironment, guardRunID, guardPlanSHA string
-	if err := q.QueryRowContext(ctx, `
-		SELECT environment,run_id,plan_sha256
-		FROM v8_ab_clone_guard
-		WHERE singleton_id=1`).Scan(&guardEnvironment, &guardRunID, &guardPlanSHA); err != nil {
-		return fmt.Errorf("read Clone B recovery guard: %w", err)
+	var expectedObjectKey, expectedStorageAdapter string
+	switch target.Environment {
+	case "clone_b":
+		var guardEnvironment, guardRunID, guardPlanSHA string
+		if err := q.QueryRowContext(ctx, `
+			SELECT environment,run_id,plan_sha256
+			FROM v8_ab_clone_guard
+			WHERE singleton_id=1`).Scan(&guardEnvironment, &guardRunID, &guardPlanSHA); err != nil {
+			return fmt.Errorf("read Clone B recovery guard: %w", err)
+		}
+		if guardEnvironment != "clone_b" ||
+			!recoveryRunIDPattern.MatchString(guardRunID) ||
+			!sha256Pattern.MatchString(guardPlanSHA) {
+			return fmt.Errorf("task asset %d recovery guard does not identify a valid Clone B executor run", recovery.MissingTaskAssetID)
+		}
+		expectedObjectKey = fmt.Sprintf(
+			"v8-ab/%s/recovered/task-%d/task-asset-%d/%s.bin",
+			guardRunID, recovery.TaskID, recovery.MissingTaskAssetID, recovery.RecoverySourceSHA256,
+		)
+		expectedStorageAdapter = "local"
+	case "production":
+		expectedObjectKey = fmt.Sprintf(
+			"v8-production/%s/%s/recovered/task-%d/task-asset-%d/%s.bin",
+			target.Release, target.RunID, recovery.TaskID, recovery.MissingTaskAssetID,
+			recovery.RecoverySourceSHA256,
+		)
+		expectedStorageAdapter = "oss_upload_service"
+	default:
+		return fmt.Errorf("task asset %d recovery target environment is invalid", recovery.MissingTaskAssetID)
 	}
-	if guardEnvironment != "clone_b" ||
-		!recoveryRunIDPattern.MatchString(guardRunID) ||
-		!sha256Pattern.MatchString(guardPlanSHA) {
-		return fmt.Errorf("task asset %d recovery guard does not identify a valid Clone B executor run", recovery.MissingTaskAssetID)
-	}
-	expectedObjectKey := fmt.Sprintf(
-		"v8-ab/%s/recovered/task-%d/task-asset-%d/%s.bin",
-		guardRunID, recovery.TaskID, recovery.MissingTaskAssetID, recovery.RecoverySourceSHA256,
-	)
 
 	var taskID, rootAssetID, fileSize int64
 	var uploadRequestID, storageRefID, storageKey, wholeHash, uploadStatus, accessRevokedReason string
@@ -3108,7 +3239,7 @@ func validatePrematerializedAssetRecoveryEvidence(ctx context.Context, q snapsho
 	if !storageAssetID.Valid || storageAssetID.Int64 != rootAssetID ||
 		ownerType != "task_asset" || ownerID != recovery.MissingTaskAssetID ||
 		storageUploadRequestID != uploadRequestID ||
-		storageAdapter != "local" || refType != "task_asset_object" ||
+		storageAdapter != expectedStorageAdapter || refType != "task_asset_object" ||
 		refKey != expectedObjectKey || storageFileSize != recovery.ExpectedFileSize ||
 		isPlaceholder != 0 || checksumHint != recovery.RecoverySourceSHA256 ||
 		storageStatus != "recorded" {
@@ -3838,7 +3969,13 @@ func verifyPlanningMappingQuery(ctx context.Context, q snapshotQueryer, m planni
 	return nil
 }
 
-func validateCutoverState(ctx context.Context, tx *sql.Tx, m mappingFile) error {
+func validateCutoverState(
+	ctx context.Context,
+	tx *sql.Tx,
+	m mappingFile,
+	targets ...recoveryEvidenceTarget,
+) error {
+	target := recoveryEvidenceTargetOrClone(targets)
 	// The complete mapping preflight already ran twice before mutation, with the
 	// second pass protected by the cutover locks. Keep this function focused on
 	// post-cutover invariants instead of repeating the expensive before-state scan.
@@ -3913,7 +4050,7 @@ func validateCutoverState(ctx context.Context, tx *sql.Tx, m mappingFile) error 
 	}
 	for _, recovery := range m.AssetRecoveries {
 		if recovery.Strategy == "verified_oss_recovery_v1" {
-			if err := validatePrematerializedAssetRecoveryEvidence(ctx, tx, recovery); err != nil {
+			if err := validatePrematerializedAssetRecoveryEvidence(ctx, tx, recovery, target); err != nil {
 				return fmt.Errorf("cutover blocked: prematerialized recovery evidence drifted: %w", err)
 			}
 			continue
