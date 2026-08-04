@@ -655,11 +655,15 @@ async function submit(retryOnly: boolean) {
   submitting.value = true
   try {
     if (intent.value === 'planning_sku') {
-      planningResult.value = await planningSkuApi.create(buildPlanningInputs(candidates), common.erp_sync_mode, clientCreateId.value)
-      selectedPlanningIds.value = new Set(planningResult.value.items.map((item) => item.task_sku_item_id))
-      candidates.forEach((row, index) => { row.status = 'created'; row.result_task_id = String(planningResult.value?.task_id || ''); row.result_sku_code = planningResult.value?.items[index]?.sku_code })
-      result.value = true
-      dirty.value = false
+      try {
+        planningResult.value = await planningSkuApi.create(buildPlanningInputs(candidates), common.erp_sync_mode, clientCreateId.value)
+        selectedPlanningIds.value = new Set(planningResult.value.items.map((item) => item.task_sku_item_id))
+        candidates.forEach((row, index) => { row.status = 'created'; row.result_task_id = String(planningResult.value?.task_id || ''); row.result_sku_code = planningResult.value?.items[index]?.sku_code })
+        result.value = true
+        dirty.value = false
+      } catch (error) {
+        submitError.value = error instanceof Error ? error.message : 'SKU 编码生成失败'
+      }
       return
     }
     if (intent.value === 'retouch' && retryOnly && candidates.some((row) => row.result_task_id)) {

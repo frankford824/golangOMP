@@ -135,6 +135,28 @@ describe('UnifiedTaskCreateView', () => {
     wrapper.unmount()
   })
 
+  it('surfaces a planning rule configuration error without leaving the workbench', async () => {
+    mocks.create.mockRejectedValueOnce(new Error('唯一启用的策划 SKU 编号规则尚未配置'))
+    const wrapper = mount(UnifiedTaskCreateView, {
+      global: {
+        stubs: {
+          UnifiedTaskGrid: { template: '<div class="grid-stub" />', methods: { readRowsFromWorkbook() {} } },
+          IIdSelector: { template: '<div class="iid-stub" />' },
+          RouterLink: true,
+        },
+      },
+    })
+    await wrapper.get('[data-row-index="0"] textarea').setValue('亚克力立牌 20cm')
+    await wrapper.get('[data-row-index="0"] input[type="number"]').setValue('1')
+    await wrapper.get('.validation-dock .primary-button').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[role="alert"]').text()).toContain('唯一启用的策划 SKU 编号规则尚未配置')
+    expect(wrapper.get('.compose-page').attributes('data-compose-intent')).toBe('planning_sku')
+    expect(wrapper.text()).not.toContain('创建成功')
+    wrapper.unmount()
+  })
+
   it('keeps the legacy planning URL as one workbench intent instead of a second page', () => {
     const wrapper = mount(UnifiedTaskCreateView, {
       global: { stubs: { UnifiedTaskGrid: true, IIdSelector: true, RouterLink: true } },
