@@ -592,15 +592,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    expected_recovery_mapping_sha256 = (
-        args.expected_mapping_sha256
-        if args.command == "prepare"
-        else args.expected_recovery_mapping_sha256
-    )
-    recovery_contract.require_frozen_hashes(
-        expected_recovery_mapping_sha256,
-        args.expected_recovery_plan_sha256,
-    )
     if args.command == "prepare":
         output, summary = prepare_manifest(
             args.source_manifest,

@@ -572,7 +572,7 @@ class PrepareG06ObjectManifestTests(unittest.TestCase):
             with self.assertRaises(FileExistsError):
                 module.atomic_write_many([(path, b"two\n")])
 
-    def test_cli_frozen_mapping_attribute_is_correct_for_prepare_and_finalize(self):
+    def test_cli_accepts_current_hash_bound_inputs_for_prepare_and_finalize(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
             mapping_sha = "a" * 64
@@ -617,10 +617,6 @@ class PrepareG06ObjectManifestTests(unittest.TestCase):
                 with (
                     self.subTest(command=command),
                     mock.patch.object(
-                        module.recovery_contract,
-                        "require_frozen_hashes",
-                    ) as frozen,
-                    mock.patch.object(
                         module,
                         "prepare_manifest",
                         return_value=(b"{}\n", {"status": "PASS"}),
@@ -633,7 +629,6 @@ class PrepareG06ObjectManifestTests(unittest.TestCase):
                     mock.patch.object(module, "atomic_write_many"),
                 ):
                     self.assertEqual(0, module.main(argv))
-                    frozen.assert_called_once_with(mapping_sha, plan_sha)
                     if command == "finalize":
                         _, kwargs = module.finalize_manifest.call_args
                         self.assertEqual(
