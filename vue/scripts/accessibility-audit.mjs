@@ -73,7 +73,7 @@ const pages = [
     path: '/tasks/1002',
     ready: '.task-detail-view',
     prepare: async (page) => {
-      await page.getByLabel('当前阶段操作').getByRole('button', { name: '进入审核工作台' }).click()
+      await page.getByRole('button', { name: '进入审核工作台' }).click()
       await page.waitForSelector('.workspace-dialog[role="dialog"]', { state: 'visible' })
       await page.getByRole('button', { name: '确认定稿并结单' }).click()
       await page.waitForSelector('.confirm-dialog[role="dialog"][aria-modal="true"]', { state: 'visible' })
