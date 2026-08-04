@@ -3586,8 +3586,14 @@ def build_access_decisions(
         team_id = positive_or_none(user.get("team_id")) or resolved_team_id
         is_issue = (
             legacy_role not in KNOWN_ACCESS_ROLES
-            or (legacy_role in {"DepartmentAdmin", "DesignDirector"} and department_id is None)
-            or (legacy_role == "TeamLead" and team_id is None)
+            or (
+                legacy_role in {"DepartmentAdmin", "DesignDirector"}
+                and positive_or_none(user.get("department_id")) is None
+            )
+            or (
+                legacy_role == "TeamLead"
+                and positive_or_none(user.get("team_id")) is None
+            )
         )
         if not is_issue:
             continue
@@ -3599,6 +3605,17 @@ def build_access_decisions(
         if legacy_role == "Warehouse":
             action = "no_new_grant"
             policies = [WAREHOUSE_NO_GRANT_POLICY]
+        elif (
+            legacy_role in {"DepartmentAdmin", "DesignDirector"}
+            and department_id is not None
+        ) or (legacy_role == "TeamLead" and team_id is not None):
+            # The separately reviewed organization mapping supplies the
+            # missing stable legacy scope. This access decision acknowledges
+            # the pre-cutover raw issue but contributes no additional grant;
+            # normal legacy-role migration remains responsible for the
+            # scoped V8 assignment.
+            action = "no_new_grant"
+            policies = [EXISTING_ACCESS_PRESERVED_POLICY]
         elif legacy_role == "OrgAdmin" and any(
             row["role_code"] in {"super_admin", "access_admin"}
             and row["scope_mode"] == "global"

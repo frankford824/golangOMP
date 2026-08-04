@@ -246,6 +246,43 @@ class GeneratorTest(unittest.TestCase):
                 ),
             )
 
+    def test_access_decision_accepts_separately_reviewed_org_scope(self):
+        rows = {
+            "users_org": [{
+                "id": 340,
+                "status": "active",
+                "department_id": None,
+                "team_id": None,
+            }],
+            "legacy_roles": [{
+                "user_id": 340,
+                "role": "DepartmentAdmin",
+            }],
+            "access_assignments": [],
+        }
+        organization_mappings = [{
+            "subject_type": "user",
+            "subject_id": 340,
+            "target_department_id": 12,
+            "target_team_id": 38,
+            "confidence": "confirmed_auto",
+        }]
+
+        decisions, manual = MODULE.build_access_decisions(
+            rows,
+            organization_mappings,
+        )
+
+        self.assertEqual(len(decisions), 1)
+        self.assertEqual(decisions[0]["action"], "no_new_grant")
+        self.assertEqual(
+            decisions[0]["review_policy_ids"],
+            [MODULE.EXISTING_ACCESS_PRESERVED_POLICY],
+        )
+        self.assertEqual(decisions[0]["required_existing_assignments"], [])
+        self.assertEqual(decisions[0]["confidence"], "proposed_review")
+        self.assertEqual(len(manual), 1)
+
     def test_access_decisions_use_reviewable_stable_org_and_allow_empty_no_grant(self):
         rows = {
             "users_org": [
@@ -289,8 +326,16 @@ class GeneratorTest(unittest.TestCase):
             rows, organization_mappings
         )
 
-        self.assertEqual(len(decisions), 1)
-        warehouse = decisions[0]
+        self.assertEqual(len(decisions), 2)
+        by_role = {
+            (decision["user_id"], decision["legacy_role"]): decision
+            for decision in decisions
+        }
+        department_admin = by_role[(340, "DepartmentAdmin")]
+        self.assertEqual(department_admin["action"], "no_new_grant")
+        self.assertEqual(department_admin["confidence"], "proposed_review")
+        self.assertNotIn("blockers", department_admin)
+        warehouse = by_role[(341, "Warehouse")]
         self.assertEqual(
             (warehouse["user_id"], warehouse["legacy_role"]),
             (341, "Warehouse"),
