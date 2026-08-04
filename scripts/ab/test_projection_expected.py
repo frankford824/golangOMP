@@ -268,6 +268,9 @@ class ProjectionExpectedTest(unittest.TestCase):
                 encoding="utf-8",
             )
             with mock.patch(
+                "projection_expected.bundle_registry.mapping_bundle_scopes",
+                return_value={key: ()},
+            ), mock.patch(
                 "projection_expected.bundle_registry.validate_manifest",
                 return_value=({key: {}}, "run"),
             ), mock.patch(

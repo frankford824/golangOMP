@@ -277,14 +277,19 @@ def materialized_bundle_assets(
     manifest, manifest_sha = read_json_object(
         manifest_path_value, "source bundle manifest"
     )
+    expected_scopes = bundle_registry.mapping_bundle_scopes(bundle_mapping)
     confirmed, run_id = bundle_registry.validate_manifest(
-        manifest, bundle_mapping_sha
+        manifest, bundle_mapping_sha, expected_scopes
     )
     registry, registry_sha = read_json_object(
         str(registry_path_value), "source bundle registry"
     )
     normalized = bundle_registry.validate_registry(
-        registry, manifest_sha, run_id, confirmed
+        registry,
+        manifest_sha,
+        run_id,
+        confirmed,
+        expected_scopes,
     )
     mapped: dict[tuple[int, str, int, int], dict[str, Any]] = {}
     for resource in mapping.get("resources", []):
