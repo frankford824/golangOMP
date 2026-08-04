@@ -1684,6 +1684,30 @@ def replace_revision_asset_root(revision, predecessor, successor, asset_by_id):
     return changed
 
 
+def revision_contains_asset_root(revision, asset, asset_by_id):
+    target_id = int(asset["id"])
+    root_id = int(asset.get("asset_id") or 0)
+    asset_type = asset.get("asset_type")
+    member_ids = [
+        int(revision.get("source_task_asset_id") or 0),
+        int(revision.get("source_alias_from_task_asset_id") or 0),
+        *[
+            int(value)
+            for value in revision.get("final_task_asset_ids") or []
+        ],
+    ]
+    for member_id in member_ids:
+        member = asset_by_id.get(member_id)
+        if member_id == target_id or (
+            member is not None
+            and root_id > 0
+            and int(member.get("asset_id") or 0) == root_id
+            and member.get("asset_type") == asset_type
+        ):
+            return True
+    return False
+
+
 def completion_events_for_asset(
     events: list[dict[str, Any]],
     asset_id: int,
@@ -1830,6 +1854,114 @@ def replay_post_close_replacements(
     for completion, predecessor, successor in direct_post_close_replacements(
         scope, events, assets
     ):
+        try:
+            completion_time = parse_utc_timestamp(completion["created_at"])
+            latest_revision_time = max(
+                parse_utc_timestamp(revision["created_at"])
+                for revision in revisions
+            )
+        except (KeyError, TypeError, ValueError):
+            completion_time = None
+            latest_revision_time = None
+
+        # A replacement may be followed by later audit supplements. Insert it
+        # at its real business boundary, then carry the replacement forward
+        # through the later immutable snapshots. Appending it after those
+        # supplements would both reverse time and make the replacement snapshot
+        # contain files that did not exist yet.
+        if (
+            completion_time is not None
+            and latest_revision_time is not None
+            and completion_time < latest_revision_time
+        ):
+            anchor_index = None
+            for index in range(len(revisions) - 1, -1, -1):
+                try:
+                    revision_time = parse_utc_timestamp(
+                        revisions[index]["created_at"]
+                    )
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if (
+                    revision_time <= completion_time
+                    and revision_contains_asset_root(
+                        revisions[index], predecessor, asset_by_id
+                    )
+                ):
+                    anchor_index = index
+                    break
+            if anchor_index is not None:
+                current_working = (
+                    revisions[working - 1] if working else None
+                )
+                current_finalized = (
+                    revisions[finalized - 1] if finalized else None
+                )
+                inherited = revisions[anchor_index]
+                revision = make_revision(
+                    scope,
+                    completion,
+                    anchor_index + 2,
+                    "finalized",
+                    "reopen",
+                    assets,
+                    references,
+                    inherited=inherited,
+                    extra_evidence=list(
+                        inherited.get("evidence_event_ids") or []
+                    ),
+                )
+                revision["reason"] = (
+                    f"policy {POST_CLOSE_REPLACEMENT_POLICY}: post-close "
+                    "same-root replacement proven by an immutable "
+                    "asset-version edge and exact completed upload session; "
+                    "human confirmation remains required"
+                )
+                if not replace_revision_asset_root(
+                    revision, predecessor, successor, asset_by_id
+                ):
+                    add_blocker(
+                        revision,
+                        f"post-close successor {successor['id']} asset root "
+                        "is absent from the inherited snapshot",
+                    )
+                else:
+                    revision["status"] = "superseded"
+                    evidence_ids = event_evidence_ids(completion)
+                    for later in revisions[anchor_index + 1 :]:
+                        if replace_revision_asset_root(
+                            later, predecessor, successor, asset_by_id
+                        ) or revision_contains_asset_root(
+                            later, successor, asset_by_id
+                        ):
+                            later["evidence_event_ids"] = list(
+                                dict.fromkeys(
+                                    list(
+                                        later.get("evidence_event_ids") or []
+                                    )
+                                    + evidence_ids
+                                )
+                            )
+                            later.setdefault(
+                                "_review_policy_ids", []
+                            ).append(POST_CLOSE_REPLACEMENT_POLICY)
+                            recompute_revision_hash(later)
+                    revisions.insert(anchor_index + 1, revision)
+                    for index, item in enumerate(revisions, start=1):
+                        item["revision_no"] = index
+                        recompute_revision_hash(item)
+                    working = (
+                        revisions.index(current_working) + 1
+                        if current_working is not None
+                        else 0
+                    )
+                    finalized = (
+                        revisions.index(current_finalized) + 1
+                        if current_finalized is not None
+                        else 0
+                    )
+                    continue
+
         inherited = revisions[finalized - 1] if finalized else None
         revision = make_revision(
             scope,

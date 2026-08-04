@@ -1928,6 +1928,109 @@ class GeneratorTest(unittest.TestCase):
             for revision in resource["history"][1:]
         ))
 
+    def test_post_close_replacement_is_inserted_before_later_supplements(self):
+        rows = self.sample()
+        rows["events"].append({
+            "namespace": "task_event_log", "id": "close", "task_id": 7,
+            "sequence": 4, "event_type": "task.closed", "actor_id": 4,
+            "payload": {}, "created_at": "2026-01-04T00:00:00Z",
+        })
+        rows["assets"][0].update({
+            "flow_review_status": "superseded",
+            "superseded_by_version_id": 13,
+            "superseded_at": "2026-01-05T12:00:00Z",
+        })
+        rows["assets"].extend([
+            {
+                **rows["assets"][1], "id": 12, "asset_id": 102,
+                "source_module_key": "audit",
+                "created_at": "2026-01-05T00:00:00Z",
+            },
+            {
+                **rows["assets"][0], "id": 13, "asset_id": 100,
+                "flow_review_status": "approved",
+                "superseded_by_version_id": None, "superseded_at": "",
+                "upload_request_id": "replace-source",
+                "created_at": "2026-01-05T12:00:00Z",
+            },
+            {
+                **rows["assets"][1], "id": 14, "asset_id": 103,
+                "source_module_key": "audit",
+                "created_at": "2026-01-06T00:00:00Z",
+            },
+        ])
+        rows["events"].extend([
+            {
+                "namespace": "task_event_log", "id": "supplement-1",
+                "task_id": 7, "sequence": 5,
+                "event_type": "task.audit.supplement_uploaded",
+                "actor_id": 4,
+                "payload": {
+                    "append_asset_version_ids": [12],
+                    "upload_session_id": "supplement-1",
+                    "asset_operation": "append",
+                },
+                "created_at": "2026-01-05T00:00:00Z",
+            },
+            {
+                "namespace": "task_event_log", "id": "replace-source",
+                "task_id": 7, "sequence": 6,
+                "event_type": "task.asset.upload_session.completed",
+                "actor_id": 4,
+                "payload": {
+                    "upload_session_id": "replace-source",
+                    "asset_version_id": 13,
+                },
+                "created_at": "2026-01-05T12:00:00Z",
+            },
+            {
+                "namespace": "task_event_log", "id": "supplement-2",
+                "task_id": 7, "sequence": 7,
+                "event_type": "task.audit.supplement_uploaded",
+                "actor_id": 4,
+                "payload": {
+                    "append_asset_version_ids": [14],
+                    "upload_session_id": "supplement-2",
+                    "asset_operation": "append",
+                },
+                "created_at": "2026-01-06T00:00:00Z",
+            },
+        ])
+
+        mapping, _, _ = MODULE.generate(rows)
+        resource = mapping["resources"][0]
+        self.assertEqual(
+            [revision["created_at"] for revision in resource["history"]],
+            [
+                "2026-01-01T12:00:00Z",
+                "2026-01-05T00:00:00Z",
+                "2026-01-05T12:00:00Z",
+                "2026-01-06T00:00:00Z",
+            ],
+        )
+        self.assertEqual(
+            [revision.get("source_task_asset_id") for revision in resource["history"]],
+            [10, 10, 13, 13],
+        )
+        self.assertEqual(
+            [revision["final_task_asset_ids"] for revision in resource["history"]],
+            [[11], [11, 12], [11, 12], [11, 12, 14]],
+        )
+        self.assertEqual(resource["working_revision_no"], 4)
+        self.assertEqual(resource["finalized_revision_no"], 4)
+        self.assertEqual(
+            [revision["status"] for revision in resource["history"]],
+            ["superseded", "superseded", "superseded", "finalized"],
+        )
+        self.assertIn(
+            MODULE.POST_CLOSE_REPLACEMENT_POLICY,
+            resource["history"][3]["review_policy_ids"],
+        )
+        self.assertIn(
+            "task_event_log:replace-source",
+            resource["history"][3]["evidence_event_ids"],
+        )
+
     def test_resubmit_completion_before_final_close_is_not_post_close(self):
         rows = self.sample()
         rows["assets"][1].update({
