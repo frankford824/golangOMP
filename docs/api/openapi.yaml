@@ -10023,10 +10023,10 @@ paths:
   /v1/tasks/{id}/sku-items/{sku_item_id}:
     patch:
       summary: Patch one batch SKU item
-      description: Updates row-scoped batch SKU fields such as product name, ERP product i_id, specification, dimensions, quantity, design requirement, and reference images. Supplying or changing `product_i_id` writes it into the row `variant_json` and triggers ERP filing evaluation.
+      description: Updates row-scoped batch SKU fields such as product name, ERP product i_id, specification, dimensions, quantity, design requirement, and reference images. `catalog.manage` may update rows within its stable data scope; `task.create` may update only rows belonging to a task created by the current actor. Supplying or changing `product_i_id` writes it into the row `variant_json` and triggers ERP filing evaluation. Per-SKU cost remains governed by the separate `cost-info` endpoint and still requires `catalog.manage`.
       tags: [Tasks, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
-      x-permissions: [catalog.manage]
+      x-permissions: [catalog.manage, task.create]
       x-rbac-placeholder:
         auth_mode: session_token_capability_enforced
       parameters:

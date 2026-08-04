@@ -327,6 +327,79 @@ describe('TaskDetailV8View business context', () => {
     }))
   })
 
+  it('lets the creator update only business fields on their own batch task', async () => {
+    const permissions = usePermissionsStore()
+    permissions.setCurrentUser({
+      id: '240',
+      name: '运营创建者',
+      role: RoleEnum.OPS,
+      departmentId: '',
+      groupId: '',
+      dataScope: DataScopeEnum.SELF,
+      permissions: [],
+    })
+    permissions.actions = ['task.create']
+    const ownTask = {
+      ...baseTask,
+      creator_id: 240,
+      task_type: 'new_product_development',
+      task_status: 'InProgress',
+      allowed_actions: [],
+    }
+    mocks.getById.mockResolvedValue({ data: { data: ownTask } })
+    mocks.getDetail.mockResolvedValue({ data: { data: {
+      task: ownTask,
+      task_detail: {},
+      reference_file_refs: [],
+      sku_items: [{ id: 52, sku_code: 'SKU-OWN', product_name_snapshot: '自己创建的子项', cost_price: 19.9 }],
+    } } })
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.findAll('button').find((item) => item.text() === '完整任务信息')?.trigger('click')
+
+    expect(dialog().textContent).toContain('自己创建的任务，可修改业务字段；成本只读')
+    const costInput = [...dialog().querySelectorAll('label')]
+      .find((label) => label.textContent?.includes('当前/人工成本'))
+      ?.querySelector<HTMLInputElement>('input')
+    expect(costInput?.disabled).toBe(true)
+    const productInput = dialog().querySelector<HTMLInputElement>('input')
+    expect(productInput?.disabled).toBe(false)
+  })
+
+  it('keeps another creator task read-only for a task.create-only account', async () => {
+    const permissions = usePermissionsStore()
+    permissions.setCurrentUser({
+      id: '241',
+      name: '运营成员',
+      role: RoleEnum.OPS,
+      departmentId: '',
+      groupId: '',
+      dataScope: DataScopeEnum.SELF,
+      permissions: [],
+    })
+    permissions.actions = ['task.create']
+    const otherTask = {
+      ...baseTask,
+      creator_id: 240,
+      task_type: 'new_product_development',
+      task_status: 'InProgress',
+      allowed_actions: [],
+    }
+    mocks.getById.mockResolvedValue({ data: { data: otherTask } })
+    mocks.getDetail.mockResolvedValue({ data: { data: {
+      task: otherTask,
+      task_detail: {},
+      reference_file_refs: [],
+      sku_items: [{ id: 53, sku_code: 'SKU-OTHER', product_name_snapshot: '他人创建的子项', cost_price: 21 }],
+    } } })
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.findAll('button').find((item) => item.text() === '完整任务信息')?.trigger('click')
+
+    expect(dialog().textContent).toContain('当前账号只读')
+    expect([...dialog().querySelectorAll<HTMLInputElement>('.sku-editor input')].every((input) => input.disabled)).toBe(true)
+  })
+
   it('keeps operational timing, cost, copy, and ERP context in the complete-information workspace', async () => {
     const enrichedTask = {
       ...baseTask,

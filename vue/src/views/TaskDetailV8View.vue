@@ -129,10 +129,10 @@
             <section v-if="skuItems.length" class="sku-item-section">
               <div class="sku-item-heading">
                 <div><p class="eyebrow">逐 SKU 运营信息</p><h3>规格、数量、修改要求与成本</h3></div>
-                <span>{{ canEditSKUItems ? '具备目录维护权限，可逐项修改' : '当前账号只读' }}</span>
+                <span>{{ skuEditAccessLabel }}</span>
               </div>
               <div class="sku-list"><span v-for="item in skuItems" :key="String(item.id || item.sku_code)">{{ item.sku_code || `子项 ${item.sequence_no || ''}` }}<em v-if="item.set_mode_hint || item.setModeHint">运营建议套装 · 设计可调整</em></span></div>
-              <TaskSkuItemEditor :task-id="task.id" :items="skuItems" :can-edit="canEditSKUItems" @saved="load" />
+              <TaskSkuItemEditor :task-id="task.id" :items="skuItems" :can-edit="canEditSKUItems" :can-edit-cost="canEditSKUCosts" @saved="load" />
               <div class="sku-cost-preview-list">
                 <CostExplanationPanel
                   v-for="item in skuItems"
@@ -214,6 +214,7 @@ import { resourceGroupsApi, type ResourceBundle } from '@/services/api/resourceG
 import { mergeDetailEnvelopeIntoTaskRaw } from '@/domain/mappers/task-detail-envelope'
 import { useDesignerOptions } from '@/composables/useDesignerOptions'
 import { usePermission } from '@/composables/usePermission'
+import { usePermissionsStore } from '@/stores/permissions'
 import WorkflowProgress from '@/components/task/WorkflowProgress.vue'
 import TaskStatusTag from '@/components/task/TaskStatusTag.vue'
 import SkuResourceMatrix from '@/components/task/SkuResourceMatrix.vue'
@@ -230,7 +231,7 @@ import { handoverStatusLabel, taskDetailDisplayValue } from '@/domain/task-detai
 
 interface V8Task extends Record<string, unknown> {
   id: number; task_no: string; task_type: string; task_status: string; workflow_revision: number; workflow_contract_version: 2; allowed_actions: string[]
-  sku_code?: string; primary_sku_code?: string; product_name_snapshot?: string; current_handler_name?: string; designer_id?: number | string | null; designer_name?: string; creator_name?: string; owner_department?: string; owner_org_team?: string; business_lane?: string
+  sku_code?: string; primary_sku_code?: string; product_name_snapshot?: string; current_handler_name?: string; designer_id?: number | string | null; designer_name?: string; creator_id?: number | string; creator_name?: string; owner_department?: string; owner_org_team?: string; business_lane?: string
   requirement_description?: string; description?: string; design_requirement?: string; change_request?: string; note?: string; remark?: string; operation_note?: string; reference_file_refs?: ReferenceFile[]; updated_at?: string; due_at?: string; deadline_at?: string
 }
 interface ReferenceFile extends Record<string, unknown> { id?: number; asset_id?: string; file_name?: string; filename?: string; mime_type?: string; download_url?: string; preview_url?: string; url?: string }
@@ -247,6 +248,7 @@ const backButtonLabel = computed(() => {
     : '返回任务中心'
 })
 const { can } = usePermission()
+const permissionsStore = usePermissionsStore()
 const task = ref<V8Task | null>(null)
 const isCustomization = computed(() => task.value?.business_lane === 'customization' || ['regular_customization', 'customer_customization'].includes(task.value?.task_type || ''))
 const aggregate = ref<Record<string, unknown>>({})
@@ -307,7 +309,19 @@ const skuModeHints = computed<Record<string, boolean>>(() => {
 })
 const actionSet = computed(() => new Set(task.value?.allowed_actions || []))
 const canManageReferences = computed(() => actionSet.value.has('task.reference.append'))
-const canEditSKUItems = computed(() => can('catalog.manage') && !isTerminal.value)
+const isOwnCreatedTask = computed(() => {
+  const actorID = permissionsStore.currentUser?.id
+  const creatorID = task.value?.creator_id
+  return actorID != null && creatorID != null && String(actorID) === String(creatorID)
+})
+const canEditOwnSKUItems = computed(() => can('task.create') && isOwnCreatedTask.value)
+const canEditSKUCosts = computed(() => can('catalog.manage') && !isTerminal.value)
+const canEditSKUItems = computed(() => (canEditSKUCosts.value || canEditOwnSKUItems.value) && !isTerminal.value)
+const skuEditAccessLabel = computed(() => {
+  if (canEditSKUCosts.value) return '具备目录维护权限，可修改业务字段与成本'
+  if (canEditOwnSKUItems.value) return '自己创建的任务，可修改业务字段；成本只读'
+  return '当前账号只读'
+})
 const canHandover = computed(() => actionSet.value.has('task.audit.handover'))
 const supportsAuditCollaboration = computed(() => task.value?.task_status === 'PendingAudit' && !isPlanning.value && !isRetouch.value)
 const canAssignDesigner = computed(() => {

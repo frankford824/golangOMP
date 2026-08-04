@@ -2488,7 +2488,7 @@ func (s *taskService) UpdateSKUItemInfo(ctx context.Context, p UpdateTaskSKUItem
 	if !isBatchNewProductTask(task) {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidStateTransition, "sku item edit is only supported for batch new-product tasks", nil)
 	}
-	if appErr := s.taskActionAuthorizer().AuthorizeTaskAction(ctx, TaskActionUpdateBusinessInfo, task); appErr != nil {
+	if appErr := authorizeTaskSKUItemBusinessInfoUpdate(ctx, task); appErr != nil {
 		return nil, appErr
 	}
 	detail, err := s.taskRepo.GetDetailByTaskID(ctx, p.TaskID)

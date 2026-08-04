@@ -17,6 +17,7 @@ describe('TaskSkuItemEditor', () => {
       props: {
         taskId: 2915,
         canEdit: false,
+        canEditCost: false,
         items: [
           {
             id: 3136,
@@ -53,5 +54,31 @@ describe('TaskSkuItemEditor', () => {
     expect(rows[1].text()).toContain('DZK000218')
     expect(rows[1].text()).toContain('50x70-reference.jpg')
     expect(rows[1].find('img').attributes('src')).toBe('/v1/assets/files/ref-b')
+  })
+
+  it('lets a task creator save business fields without sending a cost override', async () => {
+    const { tasksApi } = await import('@/services/api/tasksApi')
+    const wrapper = mount(TaskSkuItemEditor, {
+      props: {
+        taskId: 2915,
+        canEdit: true,
+        canEditCost: false,
+        items: [{
+          id: 3136,
+          sku_code: 'DZK000217',
+          product_name_snapshot: '旧名称',
+          cost_price: 18.8,
+        }],
+      },
+    })
+
+    await wrapper.get('input').setValue('创建者修改后的名称')
+    await wrapper.get('form').trigger('submit')
+
+    expect(tasksApi.patchSkuItem).toHaveBeenCalledWith('2915', 3136, expect.objectContaining({
+      product_name: '创建者修改后的名称',
+    }))
+    expect(tasksApi.patchSkuItemCostInfo).not.toHaveBeenCalled()
+    expect(wrapper.findAll('input').find((input) => input.element.value === '18.8')?.attributes('disabled')).toBeDefined()
   })
 })

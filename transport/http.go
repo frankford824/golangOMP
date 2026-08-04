@@ -243,7 +243,7 @@ func NewRouter(
 		taskGroup.PATCH("/:id/product-info", capabilityAccess(taskGroup, http.MethodPatch, "/:id/product-info", domain.APIReadinessReadyForFrontend, domain.PermissionCatalogManage), taskH.PatchProductInfo)
 		taskGroup.GET("/:id/cost-info", capabilityAccess(taskGroup, http.MethodGet, "/:id/cost-info", domain.APIReadinessReadyForFrontend, domain.PermissionTaskView), taskH.GetCostInfo)
 		taskGroup.PATCH("/:id/cost-info", capabilityAccess(taskGroup, http.MethodPatch, "/:id/cost-info", domain.APIReadinessReadyForFrontend, domain.PermissionCatalogManage), taskH.PatchCostInfo)
-		taskGroup.PATCH("/:id/sku-items/:sku_item_id", capabilityAccess(taskGroup, http.MethodPatch, "/:id/sku-items/:sku_item_id", domain.APIReadinessReadyForFrontend, domain.PermissionCatalogManage), taskH.PatchSKUItemInfo)
+		taskGroup.PATCH("/:id/sku-items/:sku_item_id", capabilityAccess(taskGroup, http.MethodPatch, "/:id/sku-items/:sku_item_id", domain.APIReadinessReadyForFrontend, domain.PermissionCatalogManage, domain.PermissionTaskCreate), taskH.PatchSKUItemInfo)
 		taskGroup.PATCH("/:id/sku-items/:sku_item_id/cost-info", capabilityAccess(taskGroup, http.MethodPatch, "/:id/sku-items/:sku_item_id/cost-info", domain.APIReadinessReadyForFrontend, domain.PermissionCatalogManage), taskH.PatchSKUItemCostInfo)
 		taskGroup.POST("/:id/cost-quote/preview", capabilityAccess(taskGroup, http.MethodPost, "/:id/cost-quote/preview", domain.APIReadinessReadyForFrontend, domain.PermissionCatalogView), taskH.PreviewCostQuote)
 		// Business information remains editable, while filing is asynchronous and

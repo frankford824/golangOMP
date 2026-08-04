@@ -4215,7 +4215,7 @@ curl -X PATCH https://api.example.com/v1/tasks/<id>/cost-info \
 ### 简介
 支持方法: PATCH。
 
-- `PATCH`: Updates row-scoped batch SKU fields such as product name, ERP product i_id, specification, dimensions, quantity, design requirement, and reference images. Supplying or changing `product_i_id` writes it into the row `variant_json` and triggers ERP filing evaluation.
+- `PATCH`: Updates row-scoped batch SKU fields such as product name, ERP product i_id, specification, dimensions, quantity, design requirement, and reference images. `catalog.manage` may update rows within its stable data scope; `task.create` may update only rows belonging to a task created by the current actor. Supplying or changing `product_i_id` writes it into the row `variant_json` and triggers ERP filing evaluation. Per-SKU cost remains governed by the separate `cost-info` endpoint and still requires `catalog.manage`.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。

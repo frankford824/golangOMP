@@ -19,6 +19,7 @@ func TestV8BusinessRoutePermissionsCoverActiveTaskAssetAndERPSurfaces(t *testing
 		{http.MethodGet, "/v1/tasks/8/product-info", domain.PermissionTaskView},
 		{http.MethodPatch, "/v1/tasks/8/product-info", domain.PermissionCatalogManage},
 		{http.MethodPatch, "/v1/tasks/8/sku-items/4", domain.PermissionCatalogManage},
+		{http.MethodPatch, "/v1/tasks/8/sku-items/4", domain.PermissionTaskCreate},
 		{http.MethodPost, "/v1/tasks/8/modules/design/claim", domain.PermissionTaskUploadSource},
 		{http.MethodGet, "/v1/tasks/audit/handover-candidates", domain.PermissionTaskAuditHandover},
 		{http.MethodPost, "/v1/tasks/audit/handover-batch", domain.PermissionTaskAuditHandover},
