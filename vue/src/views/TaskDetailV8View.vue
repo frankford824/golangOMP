@@ -38,7 +38,7 @@
         :bundle="bundle"
         :task-status="task.task_status"
         :task-type="task.task_type"
-        :task-references="referenceFiles"
+        :task-references="displayReferenceFiles"
         :can-operate="canOperateResources"
         :action-label="workflowButtonLabel"
         @open-resources="openWorkspace('resources')"
@@ -102,7 +102,7 @@
               :task-id="task.id"
               :task-type="task.task_type"
               :bundle="bundle"
-              :reference-count="referenceFiles.length"
+              :reference-count="displayReferenceFiles.length"
               :sku-mode-hints="skuModeHints"
               :allowed-actions="task.allowed_actions || []"
               @updated="onWorkflowUpdated"
@@ -113,11 +113,11 @@
           <div v-else-if="workspaceMode === 'resources' && bundle" class="workspace-body"><SkuResourceMatrix :bundle="bundle" :enable-revision-history="can('asset.view')" /></div>
 
           <div v-else-if="workspaceMode === 'attachments'" class="workspace-body attachment-body">
-            <TaskAttachmentWorkspace :files="referenceFiles" :can-upload="canManageReferences" :uploading="referenceUploading" @upload="referenceInput?.click()" />
+            <TaskAttachmentWorkspace :files="displayReferenceFiles" :can-upload="canManageReferences" :uploading="referenceUploading" @upload="referenceInput?.click()" />
           </div>
 
           <div v-else-if="workspaceMode === 'details'" class="workspace-body detail-sections">
-            <section class="detail-summary-strip"><div><span>当前状态</span><strong>{{ currentStageTitle }}</strong></div><div><span>任务类型</span><strong>{{ taskTypeLabel }} · {{ businessLaneLabel }}</strong></div><div><span>当前指派</span><strong>{{ currentOwner }}</strong></div><div><span>任务级附件</span><strong>{{ referenceFiles.length }} 个</strong></div><div><span>最近更新</span><strong>{{ displayDate(task.updated_at) }}</strong></div></section>
+            <section class="detail-summary-strip"><div><span>当前状态</span><strong>{{ currentStageTitle }}</strong></div><div><span>任务类型</span><strong>{{ taskTypeLabel }} · {{ businessLaneLabel }}</strong></div><div><span>当前指派</span><strong>{{ currentOwner }}</strong></div><div><span>{{ isRetouch ? '运营参考图' : '任务级附件' }}</span><strong>{{ displayReferenceFiles.length }} 个</strong></div><div><span>最近更新</span><strong>{{ displayDate(task.updated_at) }}</strong></div></section>
             <section class="detail-requirement"><p class="eyebrow">需求与运营交代</p><div class="detail-copy-grid"><div><h3>{{ requirementHeading }}</h3><p class="long-copy">{{ requirementText }}</p></div><aside><h3>运营备注</h3><p class="long-copy">{{ operationNote }}</p></aside></div></section>
             <section><p class="eyebrow">人员与组织</p><dl class="detail-list"><div><dt>创建人</dt><dd>{{ task.creator_name || '—' }}</dd></div><div><dt>设计人员</dt><dd>{{ task.designer_name || '—' }}</dd></div><div><dt>当前处理人</dt><dd>{{ currentOwner }}</dd></div><div><dt>归属组织</dt><dd>{{ ownerOrg }}</dd></div></dl></section>
             <section><p class="eyebrow">产品与规格</p><dl class="detail-list"><div><dt>主 SKU</dt><dd>{{ task.primary_sku_code || task.sku_code || '—' }}</dd></div><div><dt>产品名称</dt><dd>{{ task.product_name_snapshot || '—' }}</dd></div><div><dt>规格</dt><dd>{{ detailValue('spec_text') }}</dd></div><div><dt>尺寸</dt><dd>{{ detailValue('size_text') }}</dd></div><div><dt>材质</dt><dd>{{ detailValue('material') }}</dd></div><div><dt>工艺</dt><dd>{{ detailValue('craft_text') }}</dd></div></dl></section>
@@ -125,7 +125,7 @@
             <section><p class="eyebrow">业务与时效</p><dl class="detail-list"><div v-for="item in businessDetailItems" :key="item.label"><dt>{{ item.label }}</dt><dd>{{ item.value }}</dd></div></dl></section>
             <section><p class="eyebrow">文案与同步</p><dl class="detail-list"><div v-for="item in contentDetailItems" :key="item.label"><dt>{{ item.label }}</dt><dd>{{ item.value }}</dd></div></dl></section>
             <section v-if="retouchRequirements.length"><p class="eyebrow">逐项修图要求</p><ol class="retouch-requirement-list"><li v-for="(item,index) in retouchRequirements" :key="String(item.id || index)"><span>{{ index + 1 }}</span><div><strong>{{ item.description || item.requirement || `修图要求 ${index + 1}` }}</strong><p v-if="item.remark || item.note">{{ item.remark || item.note }}</p></div></li></ol></section>
-            <section class="reference-summary"><p class="eyebrow">任务级参考附件</p><div><strong>{{ referenceFiles.length }} 个文件</strong><p>任务级参考资料已集中到独立附件工作台；SKU 或修图需求范围的参考图仍以资源组版本为准。</p><button type="button" @click="openWorkspace('attachments')">打开任务级附件工作台</button></div></section>
+            <section class="reference-summary"><p class="eyebrow">{{ isRetouch ? '运营参考图' : '任务级参考附件' }}</p><div><strong>{{ displayReferenceFiles.length }} 个文件</strong><p>{{ isRetouch ? '集中展示任务级附件与逐项修图需求所绑定的参考图。' : '任务级参考资料已集中到独立附件工作台；SKU 范围的参考图仍以资源组版本为准。' }}</p><button type="button" @click="openWorkspace('attachments')">{{ isRetouch ? '打开运营参考图' : '打开任务级附件工作台' }}</button></div></section>
             <section v-if="skuItems.length" class="sku-item-section">
               <div class="sku-item-heading">
                 <div><p class="eyebrow">逐 SKU 运营信息</p><h3>规格、数量、修改要求与成本</h3></div>
@@ -228,6 +228,7 @@ import ReassignDesignerDialog from '@/components/task/ReassignDesignerDialog.vue
 import { uploadReferenceFileRef } from '@/services/upload/assetUploadFlow'
 import { planningSkuApi } from '@/services/api/planningSkuApi'
 import { handoverStatusLabel, taskDetailDisplayValue } from '@/domain/task-detail-display'
+import { dedupeReferenceFileRefs } from '@/domain/mappers/reference-file-refs'
 
 interface V8Task extends Record<string, unknown> {
   id: number; task_no: string; task_type: string; task_status: string; workflow_revision: number; workflow_contract_version: 2; allowed_actions: string[]
@@ -297,6 +298,13 @@ const operationNote = computed(() => task.value?.note || task.value?.operation_n
 const referenceFiles = computed(() => (task.value?.reference_file_refs || []) as ReferenceFile[])
 const skuItems = computed(() => (aggregate.value.sku_items || aggregate.value.skuItems || []) as Array<Record<string, unknown>>)
 const retouchRequirements = computed(() => (aggregate.value.retouch_requirements || aggregate.value.retouchRequirements || []) as Array<Record<string, unknown>>)
+const retouchReferenceFiles = computed(() => retouchRequirements.value.flatMap((item) => {
+  const raw = item.reference_file_refs ?? item.referenceFileRefs
+  return Array.isArray(raw) ? raw as ReferenceFile[] : []
+}))
+const displayReferenceFiles = computed(() => dedupeReferenceFileRefs(
+  [...referenceFiles.value, ...retouchReferenceFiles.value],
+) as ReferenceFile[])
 const skuModeHints = computed<Record<string, boolean>>(() => {
   const hints = Object.fromEntries(
     skuItems.value
@@ -483,10 +491,12 @@ const workflowButtonLabel = computed(() => {
   if (task.value?.task_status === 'Completed') return '查看结单资源'
   return '进入设计提交'
 })
-const workspaceTitle = computed(() => ({ workflow: currentStageTitle.value, resources: '任务文件总览', attachments: '任务级参考附件', details: '完整任务信息', history: '全部任务动态', collaboration: '审核交班与接手' }[workspaceMode.value || 'details']))
+const workspaceTitle = computed(() => ({ workflow: currentStageTitle.value, resources: '任务文件总览', attachments: isRetouch.value ? '运营参考图' : '任务级参考附件', details: '完整任务信息', history: '全部任务动态', collaboration: '审核交班与接手' }[workspaceMode.value || 'details']))
 const workspaceSubtitle = computed(() => {
   if (workspaceMode.value === 'workflow') return currentStageDescription.value
-  if (workspaceMode.value === 'attachments') return '集中预览和下载运营提供的任务级参考图片与文件。'
+  if (workspaceMode.value === 'attachments') return isRetouch.value
+    ? '集中预览和下载任务级附件与逐项修图需求所绑定的参考图。'
+    : '集中预览和下载运营提供的任务级参考图片与文件。'
   return '看完点右上角关闭，页面还停在这张任务上。'
 })
 

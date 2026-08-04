@@ -170,7 +170,12 @@ describe('TaskDetailV8View business context', () => {
   it('shows retouch requirements and the same resource authority', async () => {
     const retouchTask = { ...baseTask, task_type: 'retouch_task', task_status: 'InProgress', allowed_actions: [], reference_file_refs: [] }
     mocks.getById.mockResolvedValue({ data: { data: retouchTask } })
-    mocks.getDetail.mockResolvedValue({ data: { data: { task: retouchTask, task_detail: { design_requirement: '去除背景杂物。' }, reference_file_refs: [], retouch_requirements: [{ id: 91, description: '清理主图背景', remark: '保留产品阴影' }] } } })
+    mocks.getDetail.mockResolvedValue({ data: { data: { task: retouchTask, task_detail: { design_requirement: '去除背景杂物。' }, reference_file_refs: [], retouch_requirements: [{
+      id: 91,
+      description: '清理主图背景',
+      remark: '保留产品阴影',
+      reference_file_refs: [{ ref_id: 'requirement-ref', filename: '需求参考图.jpg', mime_type: 'image/jpeg', download_url: 'https://files/requirement-ref' }],
+    }] } } })
     mocks.taskBundle.mockResolvedValue({
       task_id: 41,
       workflow_revision: 3,
@@ -191,7 +196,7 @@ describe('TaskDetailV8View business context', () => {
           created_by: 1,
           legacy_migration: true,
           created_at: '2026-07-16T08:00:00Z',
-          references: [{ id: 291, reference_file_ref_id: 391, ref_id: 'requirement-ref', file_name: '需求参考图.jpg' }],
+          references: [],
           items: [],
         },
       }],
@@ -206,6 +211,11 @@ describe('TaskDetailV8View business context', () => {
     expect(wrapper.text()).not.toContain('提交修图成品')
     expect(wrapper.get('.resource-rail .rail-column.references').text()).toContain('1 个附件')
     expect(wrapper.find('.references-card').exists()).toBe(false)
+    await wrapper.findAll('button').find((item) => item.text() === '参考资料总览')?.trigger('click')
+    expect(dialog().getAttribute('aria-label')).toBe('运营参考图')
+    expect(dialog().textContent).toContain('需求参考图.jpg')
+    ;(dialog().querySelector<HTMLButtonElement>('.close-button'))?.click()
+    await flushPromises()
     await wrapper.findAll('button').find((item) => item.text() === '完整任务信息')?.trigger('click')
     expect(dialog().textContent).toContain('清理主图背景')
     expect(dialog().textContent).toContain('保留产品阴影')
