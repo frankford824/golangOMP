@@ -3359,6 +3359,38 @@ class GeneratorTest(unittest.TestCase):
         )
         self.assertEqual(len(manual), 4)
 
+        for missing_id, evidence in (
+            MODULE.LEGACY_DELETED_ASSET_RECOVERY_EVIDENCE.items()
+        ):
+            if missing_id == 12323:
+                continue
+            missing = next(row for row in assets if row["id"] == missing_id)
+            missing.update({
+                "storage_ref_id": evidence["production_storage_ref_id"],
+                "storage_key": evidence["production_object_key"],
+                "whole_hash": evidence["recovery_source_sha256"],
+                "upload_status": "uploaded",
+                "storage_owner_type": "task_asset",
+                "storage_owner_id": missing_id,
+                "storage_adapter": "oss_upload_service",
+                "ref_key": evidence["production_object_key"],
+                "checksum_hint": evidence["recovery_source_sha256"],
+                "storage_status": "recorded",
+                "is_placeholder": 0,
+                "deleted_at": None,
+                "cleaned_at": None,
+                "object_deleted_at": None,
+                "access_revoked_at": None,
+            })
+        materialized, materialized_manual = (
+            MODULE.build_deleted_asset_recoveries({"assets": assets})
+        )
+        self.assertEqual(
+            [row["missing_task_asset_id"] for row in materialized],
+            [12323, 23989, 23990, 23991],
+        )
+        self.assertEqual(len(materialized_manual), 4)
+
         source_preview = next(
             row
             for row in assets

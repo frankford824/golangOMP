@@ -241,6 +241,8 @@ LEGACY_DELETED_ASSET_RECOVERY_EVIDENCE = {
         "controlled_read_protocol": "controlled-asset-read-v1",
         "controlled_read_evidence_sha256": "b39e0d9d26e6fdd35941b195bdc413eb12dd6795e23276a48c9b9bd49f829b08",
         "recovery_source_sha256": "d0558b1a9d4a7afed5a03b6b97d4a765d34050866686e396ab0acf9f08f0dec5",
+        "production_storage_ref_id": "35ee0d67-8f33-535b-b9ad-13cc3288cf59",
+        "production_object_key": "v8-production/v1.295/v1295-recovery-evidence-20260804/recovered/task-2807/task-asset-23989/d0558b1a9d4a7afed5a03b6b97d4a765d34050866686e396ab0acf9f08f0dec5.bin",
     },
     23990: {
         "task_id": 2807,
@@ -254,6 +256,8 @@ LEGACY_DELETED_ASSET_RECOVERY_EVIDENCE = {
         "controlled_read_protocol": "controlled-asset-read-v1",
         "controlled_read_evidence_sha256": "b39e0d9d26e6fdd35941b195bdc413eb12dd6795e23276a48c9b9bd49f829b08",
         "recovery_source_sha256": "64cdfed11adc778fb6ede7f03c49f7c70e8655870236bdcd92a8207e41a8dfb8",
+        "production_storage_ref_id": "8f6c891c-375f-5d0d-a5b6-6d9edfeba7a2",
+        "production_object_key": "v8-production/v1.295/v1295-recovery-evidence-20260804/recovered/task-2807/task-asset-23990/64cdfed11adc778fb6ede7f03c49f7c70e8655870236bdcd92a8207e41a8dfb8.bin",
     },
     23991: {
         "task_id": 2807,
@@ -267,6 +271,8 @@ LEGACY_DELETED_ASSET_RECOVERY_EVIDENCE = {
         "controlled_read_protocol": "controlled-asset-read-v1",
         "controlled_read_evidence_sha256": "b39e0d9d26e6fdd35941b195bdc413eb12dd6795e23276a48c9b9bd49f829b08",
         "recovery_source_sha256": "ebfecf3407e05c576bcddf74673d2e7568207ecc27855aa0e08c453d5a0d119a",
+        "production_storage_ref_id": "39d25058-297c-53db-9b32-40cab80759d2",
+        "production_object_key": "v8-production/v1.295/v1295-recovery-evidence-20260804/recovered/task-2807/task-asset-23991/ebfecf3407e05c576bcddf74673d2e7568207ecc27855aa0e08c453d5a0d119a.bin",
     },
     12323: {
         "task_id": 2199,
@@ -3938,12 +3944,39 @@ def build_deleted_asset_recoveries(
         LEGACY_DELETED_ASSET_RECOVERY_EVIDENCE.items()
     ):
         missing = assets_by_id[missing_id]
+        legacy_storage_identity = (
+            str(missing.get("storage_ref_id") or "")
+            == evidence["original_storage_ref_id"]
+        )
+        production_storage_identity = (
+            bool(evidence.get("production_storage_ref_id"))
+            and str(missing.get("storage_ref_id") or "")
+            == evidence["production_storage_ref_id"]
+            and str(missing.get("storage_key") or "")
+            == evidence["production_object_key"]
+            and str(missing.get("whole_hash") or "")
+            == evidence["recovery_source_sha256"]
+            and str(missing.get("upload_status") or "") == "uploaded"
+            and str(missing.get("storage_owner_type") or "") == "task_asset"
+            and int(missing.get("storage_owner_id") or 0) == missing_id
+            and str(missing.get("storage_adapter") or "")
+            == "oss_upload_service"
+            and str(missing.get("ref_key") or "")
+            == evidence["production_object_key"]
+            and str(missing.get("checksum_hint") or "")
+            == evidence["recovery_source_sha256"]
+            and str(missing.get("storage_status") or "") == "recorded"
+            and not bool(missing.get("is_placeholder"))
+            and not missing.get("deleted_at")
+            and not missing.get("cleaned_at")
+            and not missing.get("object_deleted_at")
+            and not missing.get("access_revoked_at")
+        )
         if (
             int(missing.get("task_id") or 0) != evidence["task_id"]
             or int(missing.get("file_size") or 0)
             != evidence["expected_file_size"]
-            or str(missing.get("storage_ref_id") or "")
-            != evidence["original_storage_ref_id"]
+            or not (legacy_storage_identity or production_storage_identity)
         ):
             raise ValueError(
                 f"task_asset {missing_id} differs from the frozen recovery identity"
