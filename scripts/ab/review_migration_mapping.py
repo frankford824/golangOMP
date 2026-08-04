@@ -570,10 +570,10 @@ def validate_candidate(candidate: dict[str, Any]) -> None:
             raise ValueError(f"{path}.confidence is invalid")
         policies = validate_policy_ids(item.get("review_policy_ids"), path)
         retouch_decision = (
-            task_id in {981, 1035, 1045, 1052, 1214}
-            and item.get("from_status") == "Completed"
+            item.get("from_status") == "Completed"
             and item.get("target_status") == "InProgress"
-            and "legacy_retouch_premature_terminal_partial_v1" in policies
+            and policies
+            == ["legacy_retouch_premature_terminal_partial_v1"]
         )
         warehouse_decision = (
             item.get("from_status") == "RejectedByWarehouse"

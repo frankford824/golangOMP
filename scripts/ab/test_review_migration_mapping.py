@@ -763,7 +763,10 @@ class ReviewMigrationMappingTest(unittest.TestCase):
             self.apply()
 
     def test_task_state_decision_is_policy_bound_and_promoted(self):
-        self.write_candidate(mapping(task_state_decisions=[task_state()]))
+        decision = task_state()
+        decision["task_id"] = 2559
+        decision["manifest_row_hash"] = review.canonical_mapping_row_hash(decision)
+        self.write_candidate(mapping(task_state_decisions=[decision]))
         self.prepare()
         self.approve(["legacy_retouch_premature_terminal_partial_v1"])
         self.apply()
