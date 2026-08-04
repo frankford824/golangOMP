@@ -317,6 +317,43 @@ func TestValidateRevisionLifecycleStateAllowsOnlyHistoricalLaterTransition(t *te
 	}
 }
 
+func TestLoadMappedAssetStateParsesLegacyShanghaiWallClockIndependentlyOfDSNLocation(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	mock.ExpectQuery("DATE_FORMAT\\(rejected_at").
+		WithArgs(int64(4529)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"id", "task_id", "asset_type", "scope_sku_code", "retouch_requirement_id",
+			"mime_type", "whole_hash", "upload_status", "flow_review_status",
+			"rejected_at", "superseded_by_version_id", "superseded_at",
+			"deleted_at", "cleaned_at", "access_revoked_at", "object_deleted_at",
+		}).AddRow(
+			int64(4529), int64(1137), "delivery", "", nil,
+			"image/jpeg", "abc", "uploaded", "rejected",
+			"2026-06-05 17:20:31.000000", nil, nil,
+			nil, nil, nil, nil,
+		))
+
+	state, err := loadMappedAssetState(context.Background(), db, 4529)
+	if err != nil {
+		t.Fatalf("loadMappedAssetState() error = %v", err)
+	}
+	want := time.Date(2026, 6, 5, 9, 20, 31, 0, time.UTC)
+	if !state.RejectedAt.Valid || !state.RejectedAt.Time.Equal(want) {
+		t.Fatalf("rejected_at = %#v, want %s", state.RejectedAt, want)
+	}
+	if state.SupersededAt.Valid || state.DeletedAt.Valid {
+		t.Fatalf("nullable lifecycle timestamps = %#v / %#v", state.SupersededAt, state.DeletedAt)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestValidateRevisionLifecycleStateUsesDeletionBoundary(t *testing.T) {
 	created := time.Date(2026, 7, 27, 9, 22, 25, 0, time.UTC)
 	deleted := created.Add(9 * time.Minute)

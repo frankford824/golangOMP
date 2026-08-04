@@ -660,19 +660,54 @@ func validateMappedAsset(ctx context.Context, q snapshotQueryer, mapping resourc
 
 func loadMappedAssetState(ctx context.Context, q snapshotQueryer, assetID int64) (mappedAssetState, error) {
 	var state mappedAssetState
+	var rejectedAt, supersededAt, deletedAt, cleanedAt, accessRevokedAt, objectDeletedAt sql.NullString
 	err := q.QueryRowContext(ctx, `
 		SELECT id,task_id,asset_type,COALESCE(scope_sku_code,''),retouch_requirement_id,
 		       COALESCE(mime_type,''),COALESCE(whole_hash,''),COALESCE(upload_status,''),
-		       COALESCE(flow_review_status,''),DATE_SUB(rejected_at,INTERVAL 8 HOUR),
-		       superseded_by_version_id,DATE_SUB(superseded_at,INTERVAL 8 HOUR),
-		       DATE_SUB(deleted_at,INTERVAL 8 HOUR),DATE_SUB(cleaned_at,INTERVAL 8 HOUR),
-		       DATE_SUB(access_revoked_at,INTERVAL 8 HOUR),DATE_SUB(object_deleted_at,INTERVAL 8 HOUR)
+		       COALESCE(flow_review_status,''),DATE_FORMAT(rejected_at,'%Y-%m-%d %H:%i:%s.%f'),
+		       superseded_by_version_id,DATE_FORMAT(superseded_at,'%Y-%m-%d %H:%i:%s.%f'),
+		       DATE_FORMAT(deleted_at,'%Y-%m-%d %H:%i:%s.%f'),DATE_FORMAT(cleaned_at,'%Y-%m-%d %H:%i:%s.%f'),
+		       DATE_FORMAT(access_revoked_at,'%Y-%m-%d %H:%i:%s.%f'),DATE_FORMAT(object_deleted_at,'%Y-%m-%d %H:%i:%s.%f')
 		FROM task_assets WHERE id=?`, assetID).
 		Scan(&state.ID, &state.TaskID, &state.AssetType, &state.ScopeSKUCode, &state.RetouchRequirementID,
 			&state.MimeType, &state.WholeHash, &state.UploadStatus,
-			&state.FlowReviewStatus, &state.RejectedAt, &state.SupersededBy, &state.SupersededAt,
-			&state.DeletedAt, &state.CleanedAt, &state.AccessRevokedAt, &state.ObjectDeletedAt)
-	return state, err
+			&state.FlowReviewStatus, &rejectedAt, &state.SupersededBy, &supersededAt,
+			&deletedAt, &cleanedAt, &accessRevokedAt, &objectDeletedAt)
+	if err != nil {
+		return state, err
+	}
+	for _, item := range []struct {
+		name   string
+		source sql.NullString
+		target *sql.NullTime
+	}{
+		{name: "rejected_at", source: rejectedAt, target: &state.RejectedAt},
+		{name: "superseded_at", source: supersededAt, target: &state.SupersededAt},
+		{name: "deleted_at", source: deletedAt, target: &state.DeletedAt},
+		{name: "cleaned_at", source: cleanedAt, target: &state.CleanedAt},
+		{name: "access_revoked_at", source: accessRevokedAt, target: &state.AccessRevokedAt},
+		{name: "object_deleted_at", source: objectDeletedAt, target: &state.ObjectDeletedAt},
+	} {
+		parsed, err := parseLegacyShanghaiTime(item.source)
+		if err != nil {
+			return state, fmt.Errorf("parse task asset %d %s: %w", assetID, item.name, err)
+		}
+		*item.target = parsed
+	}
+	return state, nil
+}
+
+func parseLegacyShanghaiTime(value sql.NullString) (sql.NullTime, error) {
+	if !value.Valid || strings.TrimSpace(value.String) == "" {
+		return sql.NullTime{}, nil
+	}
+	const layout = "2006-01-02 15:04:05.999999"
+	shanghai := time.FixedZone("Asia/Shanghai", 8*60*60)
+	parsed, err := time.ParseInLocation(layout, value.String, shanghai)
+	if err != nil {
+		return sql.NullTime{}, err
+	}
+	return sql.NullTime{Time: parsed.UTC(), Valid: true}, nil
 }
 
 func validateMappedAssetScope(ctx context.Context, q snapshotQueryer, mapping resourceMapping, state mappedAssetState, allowVisualScope, allowUnscopedRetouch bool) error {
