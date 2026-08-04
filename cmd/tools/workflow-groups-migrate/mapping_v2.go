@@ -35,6 +35,7 @@ const (
 	reviewPolicyLegacyRetouchPrematurePartial        = "legacy_retouch_premature_terminal_partial_v1"
 	reviewPolicyLegacyRetouchVisualScopeTask2533     = "legacy_retouch_visual_scope_task2533_v1"
 	reviewPolicyLegacyMultiSKUAtomicBatchSubmit      = "legacy_multi_sku_atomic_batch_submit_v1"
+	reviewPolicyLegacyAtomicUploadBatchSubmit        = "legacy_atomic_upload_batch_submit_v1"
 	reviewPolicyLegacyAuditStageFinalSnapshot        = "legacy_audit_stage_final_snapshot_v1"
 	reviewPolicyLegacyPurchaseToSKUPlanning          = "legacy_purchase_to_sku_planning_v1"
 	reviewPolicyLegacyIncompleteUATPlanningTombstone = "legacy_incomplete_uat_planning_tombstone_v1"
@@ -67,6 +68,7 @@ var knownReviewPolicyIDs = []string{
 	reviewPolicyLegacyRetouchPrematurePartial,
 	reviewPolicyLegacyRetouchVisualScopeTask2533,
 	reviewPolicyLegacyMultiSKUAtomicBatchSubmit,
+	reviewPolicyLegacyAtomicUploadBatchSubmit,
 	reviewPolicyLegacyAuditStageFinalSnapshot,
 	reviewPolicyLegacyPurchaseToSKUPlanning,
 	reviewPolicyLegacyIncompleteUATPlanningTombstone,

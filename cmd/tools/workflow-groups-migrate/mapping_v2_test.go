@@ -122,6 +122,12 @@ func TestValidateResourceMappingV2AcceptsConfirmedHistory(t *testing.T) {
 	if err := validateResourceMappingV2(0, validV2Resource(t)); err != nil {
 		t.Fatalf("validateResourceMappingV2() error = %v", err)
 	}
+	if err := validateReviewPolicyIDs(
+		"revision",
+		[]string{reviewPolicyLegacyAtomicUploadBatchSubmit},
+	); err != nil {
+		t.Fatalf("atomic upload batch policy must be recognized: %v", err)
+	}
 }
 
 func TestV2ReviewPolicyIDsFailClosed(t *testing.T) {
