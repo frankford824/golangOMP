@@ -6,7 +6,7 @@ import { DataScopeEnum, RoleEnum } from '@/types'
 import { usePermissionsStore } from '@/stores/permissions'
 
 const mocks = vi.hoisted(() => ({
-  getById: vi.fn(), getDetail: vi.fn(), listTaskEvents: vi.fn(), listAuditHandovers: vi.fn(), auditHandover: vi.fn(), auditTakeover: vi.fn(), patchSkuItem: vi.fn(), patchSkuItemCostInfo: vi.fn(),
+  getById: vi.fn(), getDetail: vi.fn(), listTaskEvents: vi.fn(), listAuditHandovers: vi.fn(), auditHandover: vi.fn(), auditTakeover: vi.fn(), patchBusinessInfo: vi.fn(), patchSkuItem: vi.fn(), patchSkuItemCostInfo: vi.fn(),
   taskBundle: vi.fn(), uploadReference: vi.fn(), downloadPlanning: vi.fn(), getDesigners: vi.fn(), push: vi.fn(), back: vi.fn(), route: { params: { id: '41' } },
 }))
 vi.mock('@/services/api/tasksApi', () => ({ tasksApi: mocks }))
@@ -82,6 +82,7 @@ describe('TaskDetailV8View business context', () => {
     mocks.listAuditHandovers.mockResolvedValue({ data: { data: { items: [{ id: 9, handover_no: 'HO-9', status: 'pending_takeover', allowed_actions: ['task.audit.takeover'] }] } } })
     mocks.auditHandover.mockResolvedValue({})
     mocks.auditTakeover.mockResolvedValue({})
+    mocks.patchBusinessInfo.mockResolvedValue({})
     mocks.patchSkuItem.mockResolvedValue({})
     mocks.patchSkuItemCostInfo.mockResolvedValue({})
     mocks.uploadReference.mockResolvedValue({ asset_id: 'ref-2', filename: '补充.png' })
@@ -312,7 +313,7 @@ describe('TaskDetailV8View business context', () => {
     await wrapper.findAll('button').find((item) => item.text() === '完整任务信息')?.trigger('click')
 
     const activeDialog = dialog()
-    const labels = [...activeDialog.querySelectorAll('label')]
+    const labels = [...activeDialog.querySelectorAll('.sku-editor label')]
     const inputFor = (name: string) => labels.find((label) => label.textContent?.includes(name))?.querySelector<HTMLInputElement>('input')
     const specInput = inputFor('规格')
     const costInput = inputFor('当前/人工成本')
@@ -365,8 +366,11 @@ describe('TaskDetailV8View business context', () => {
     } } })
     const wrapper = mountView()
     await flushPromises()
-    await wrapper.findAll('button').find((item) => item.text() === '完整任务信息')?.trigger('click')
+    const editButton = wrapper.findAll('button').find((item) => item.text() === '编辑任务信息')
+    expect(editButton).toBeDefined()
+    await editButton?.trigger('click')
 
+    expect(dialog().querySelector('.task-business-editor')).not.toBeNull()
     expect(dialog().textContent).toContain('自己创建的任务，可修改业务字段；成本只读')
     const costInput = [...dialog().querySelectorAll('label')]
       .find((label) => label.textContent?.includes('当前/人工成本'))
@@ -374,6 +378,22 @@ describe('TaskDetailV8View business context', () => {
     expect(costInput?.disabled).toBe(true)
     const productInput = dialog().querySelector<HTMLInputElement>('input')
     expect(productInput?.disabled).toBe(false)
+
+    if (!productInput) throw new Error('expected task product input')
+    productInput.value = '更新后的整单名称'
+    productInput.dispatchEvent(new Event('input', { bubbles: true }))
+    const requirementInput = [...dialog().querySelectorAll<HTMLTextAreaElement>('.task-business-editor textarea')][0]
+    requirementInput.value = '更新整张任务单的设计要求'
+    requirementInput.dispatchEvent(new Event('input', { bubbles: true }))
+    await wrapper.vm.$nextTick()
+    ;([...dialog().querySelectorAll<HTMLButtonElement>('button')].find((item) => item.textContent?.trim() === '保存任务信息'))?.click()
+    await flushPromises()
+
+    expect(mocks.patchBusinessInfo).toHaveBeenCalledWith('41', expect.objectContaining({
+      product_name: '更新后的整单名称',
+      design_requirement: '更新整张任务单的设计要求',
+      remark: '创建人编辑整张任务单',
+    }))
   })
 
   it('keeps another creator task read-only for a task.create-only account', async () => {
@@ -406,8 +426,39 @@ describe('TaskDetailV8View business context', () => {
     await flushPromises()
     await wrapper.findAll('button').find((item) => item.text() === '完整任务信息')?.trigger('click')
 
+    expect(wrapper.findAll('button').some((item) => item.text() === '编辑任务信息')).toBe(false)
+    expect(dialog().querySelector('.task-business-editor')).toBeNull()
     expect(dialog().textContent).toContain('当前账号只读')
     expect([...dialog().querySelectorAll<HTMLInputElement>('.sku-editor input')].every((input) => input.disabled)).toBe(true)
+  })
+
+  it('keeps creator-owned terminal tasks immutable', async () => {
+    const permissions = usePermissionsStore()
+    permissions.setCurrentUser({
+      id: '240',
+      name: '运营创建者',
+      role: RoleEnum.OPS,
+      departmentId: '',
+      groupId: '',
+      dataScope: DataScopeEnum.SELF,
+      permissions: [],
+    })
+    permissions.actions = ['task.create']
+    const completedTask = {
+      ...baseTask,
+      creator_id: 240,
+      task_status: 'Completed',
+      allowed_actions: [],
+    }
+    mocks.getById.mockResolvedValue({ data: { data: completedTask } })
+    mocks.getDetail.mockResolvedValue({ data: { data: { task: completedTask, task_detail: {}, reference_file_refs: [] } } })
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.findAll('button').some((item) => item.text() === '编辑任务信息')).toBe(false)
+    await wrapper.findAll('button').find((item) => item.text() === '完整任务信息')?.trigger('click')
+    expect(dialog().querySelector('.task-business-editor')).toBeNull()
   })
 
   it('keeps operational timing, cost, copy, and ERP context in the complete-information workspace', async () => {

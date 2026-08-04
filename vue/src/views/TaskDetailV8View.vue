@@ -57,6 +57,7 @@
         </div>
         <div class="command-actions">
           <button v-if="isPlanning" class="primary-button" :disabled="planningExporting" @click="downloadPlanningResult"><Download :size="16" aria-hidden="true" />{{ planningExporting ? '正在导出…' : '导出策划结果' }}</button>
+          <button v-if="canEditTaskBusinessInfo" class="primary-button" @click="openTaskEditor"><PencilLine :size="16" aria-hidden="true" />编辑任务信息</button>
           <button class="secondary-button" @click="openWorkspace('details')"><FileText :size="16" aria-hidden="true" />完整任务信息</button>
         </div>
       </section>
@@ -118,6 +119,7 @@
           </div>
 
           <div v-else-if="workspaceMode === 'details'" class="workspace-body detail-sections">
+            <TaskBusinessInfoEditor v-if="canEditTaskBusinessInfo" :task-id="task.id" :task="task" @saved="load" />
             <section class="detail-summary-strip"><div><span>当前状态</span><strong>{{ currentStageTitle }}</strong></div><div><span>任务类型</span><strong>{{ taskTypeLabel }} · {{ businessLaneLabel }}</strong></div><div><span>当前指派</span><strong>{{ currentOwner }}</strong></div><div><span>{{ isRetouch ? '运营参考图' : '任务级附件' }}</span><strong>{{ displayReferenceFiles.length }} 个</strong></div><div><span>最近更新</span><strong>{{ displayDate(task.updated_at) }}</strong></div></section>
             <section class="detail-requirement"><p class="eyebrow">需求与运营交代</p><div class="detail-copy-grid"><div><h3>{{ requirementHeading }}</h3><p class="long-copy">{{ requirementText }}</p></div><aside><h3>运营备注</h3><p class="long-copy">{{ operationNote }}</p></aside></div></section>
             <section><p class="eyebrow">人员与组织</p><dl class="detail-list"><div><dt>创建人</dt><dd>{{ task.creator_name || '—' }}</dd></div><div><dt>设计人员</dt><dd>{{ task.designer_name || '—' }}</dd></div><div><dt>当前处理人</dt><dd>{{ currentOwner }}</dd></div><div><dt>归属组织</dt><dd>{{ ownerOrg }}</dd></div></dl></section>
@@ -207,6 +209,7 @@ import {
   History,
   Layers3,
   PanelTopOpen,
+  PencilLine,
   RefreshCw,
   Tag,
 } from 'lucide-vue-next'
@@ -224,6 +227,7 @@ import TaskAttachmentWorkspace from '@/components/task/TaskAttachmentWorkspace.v
 import TaskResourceRail from '@/components/task/TaskResourceRail.vue'
 import TaskDetailAtmosphere from '@/components/task/TaskDetailAtmosphere.vue'
 import TaskSkuItemEditor from '@/components/task/TaskSkuItemEditor.vue'
+import TaskBusinessInfoEditor from '@/components/task/TaskBusinessInfoEditor.vue'
 import CostExplanationPanel from '@/components/cost/CostExplanationPanel.vue'
 import ReassignDesignerDialog from '@/components/task/ReassignDesignerDialog.vue'
 import { uploadReferenceFileRef } from '@/services/upload/assetUploadFlow'
@@ -324,6 +328,7 @@ const isOwnCreatedTask = computed(() => {
   return actorID != null && creatorID != null && String(actorID) === String(creatorID)
 })
 const canEditOwnSKUItems = computed(() => can('task.create') && isOwnCreatedTask.value)
+const canEditTaskBusinessInfo = computed(() => (can('catalog.manage') || (can('task.create') && isOwnCreatedTask.value)) && !isTerminal.value)
 const canEditSKUCosts = computed(() => can('catalog.manage') && !isTerminal.value)
 const canEditSKUItems = computed(() => (canEditSKUCosts.value || canEditOwnSKUItems.value) && !isTerminal.value)
 const skuEditAccessLabel = computed(() => {
@@ -579,6 +584,10 @@ function openWorkspace(mode: WorkspaceMode) {
   workspaceMode.value = mode
   if (mode === 'collaboration' && canHandover.value && !auditorCandidates.value.length) void loadAuditorCandidates()
   void nextTick(() => focusWorkspaceInitial())
+}
+function openTaskEditor() {
+  openWorkspace('details')
+  void nextTick(() => workspaceDialog.value?.querySelector<HTMLElement>('.task-business-editor input, .task-business-editor textarea, .task-business-editor select')?.focus())
 }
 function focusWorkspaceInitial() {
   const closeButton = workspaceDialog.value?.querySelector<HTMLElement>('.close-button')

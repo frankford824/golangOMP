@@ -41,6 +41,13 @@ func taskActionStatusAllowed(action TaskAction, task *domain.Task) bool {
 		return action == TaskActionCreate
 	}
 	switch action {
+	case TaskActionUpdateBusinessInfo:
+		switch task.TaskStatus {
+		case domain.TaskStatusCompleted, domain.TaskStatusArchived, domain.TaskStatusCancelled:
+			return false
+		default:
+			return true
+		}
 	case TaskActionAssign:
 		return task.TaskStatus == domain.TaskStatusPendingAssign
 	case TaskActionReassign:

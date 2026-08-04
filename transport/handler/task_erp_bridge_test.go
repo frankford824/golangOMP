@@ -191,6 +191,7 @@ func TestTaskHandlerUpdateBusinessInfoBindsDeadlineAndPreservesAggregate(t *test
 	body := map[string]interface{}{
 		"operator_id": 1,
 		"deadline_at": "2026-06-12T10:00:00Z",
+		"note":        "updated operation note",
 	}
 	raw, err := json.Marshal(body)
 	if err != nil {
@@ -217,6 +218,42 @@ func TestTaskHandlerUpdateBusinessInfoBindsDeadlineAndPreservesAggregate(t *test
 	}
 	if params.FiledAt != nil {
 		t.Fatalf("filed_at = %+v, want nil when request omits filed_at", params.FiledAt)
+	}
+	if !params.NoteSet || params.Note != "updated operation note" {
+		t.Fatalf("note params = set:%t value:%q", params.NoteSet, params.Note)
+	}
+	if params.GovernedFieldsRequested {
+		t.Fatal("ordinary business-info fields unexpectedly marked as governed")
+	}
+}
+
+func TestTaskHandlerUpdateBusinessInfoMarksGovernedFieldsFromRequestBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	taskSvc := &taskServiceCaptureStub{}
+	handler := NewTaskHandler(taskSvc, nil, nil)
+	router.PATCH("/v1/tasks/:id/business-info", handler.UpdateBusinessInfo)
+
+	body := map[string]interface{}{
+		"operator_id":          1,
+		"cost_price":           15.8,
+		"manual_cost_override": true,
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPatch, "/v1/tasks/9108/business-info", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PATCH /v1/tasks/:id/business-info code = %d, want 200 body=%s", rec.Code, rec.Body.String())
+	}
+	if !taskSvc.updateBusinessInfoParams.GovernedFieldsRequested {
+		t.Fatal("governed cost fields were not detected from request body")
 	}
 }
 

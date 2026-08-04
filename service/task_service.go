@@ -132,6 +132,7 @@ type UpdateTaskBusinessInfoParams struct {
 	Process                  string
 	ProductSelection         *domain.TaskProductSelectionContext
 	Note                     string
+	NoteSet                  bool
 	ChangeRequest            string
 	DesignRequirement        string
 	ReferenceFileRefs        []domain.ReferenceFileRef
@@ -160,6 +161,10 @@ type UpdateTaskBusinessInfoParams struct {
 	BatchDisplayNameOnly bool
 	Priority             domain.TaskPriority
 	PrioritySet          bool
+	// GovernedFieldsRequested is true when the caller explicitly supplied
+	// manual cost, cost-rule, or forced filing controls. Task creators may edit
+	// their own ordinary task fields but may not escalate into these controls.
+	GovernedFieldsRequested bool
 }
 
 // TaskFilter for list queries.
@@ -1744,8 +1749,17 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 	if task == nil {
 		return nil, domain.ErrNotFound
 	}
-	if appErr := s.taskActionAuthorizer().AuthorizeTaskAction(ctx, TaskActionUpdateBusinessInfo, task); appErr != nil {
+	access, appErr := authorizeTaskBusinessInfoUpdate(ctx, task)
+	if appErr != nil {
 		return nil, appErr
+	}
+	if p.GovernedFieldsRequested && !access.CanManageGovernedFields {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "catalog.manage is required for cost-rule, manual-cost, or forced-filing fields", map[string]interface{}{
+			"action":    string(TaskActionUpdateBusinessInfo),
+			"deny_code": "governed_business_fields_require_catalog_manage",
+			"task_id":   task.ID,
+			"actor_id":  p.OperatorID,
+		})
 	}
 
 	detail, err := s.taskRepo.GetDetailByTaskID(ctx, p.TaskID)
@@ -1902,7 +1916,7 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 		detail.SizeText = p.SizeText
 		textMayContainCostDimensions = true
 	}
-	if strings.TrimSpace(p.Note) != "" {
+	if p.NoteSet || strings.TrimSpace(p.Note) != "" {
 		detail.Note = strings.TrimSpace(p.Note)
 		textMayContainCostDimensions = true
 	}

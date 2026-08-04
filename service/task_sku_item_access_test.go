@@ -33,3 +33,12 @@ func TestAuthorizeTaskSKUItemBusinessInfoUpdateKeepsCatalogManagerAccess(t *test
 		t.Fatalf("catalog manager unexpectedly denied: %+v", appErr)
 	}
 }
+
+func TestAuthorizeTaskSKUItemBusinessInfoUpdateRejectsTerminalTask(t *testing.T) {
+	task := &domain.Task{ID: 74, CreatorID: 806, TaskStatus: domain.TaskStatusCompleted}
+	actor := taskActionTestActor(806, domain.PermissionTaskCreate, domain.AccessScopeGlobal)
+
+	if appErr := authorizeTaskSKUItemBusinessInfoUpdate(domain.WithRequestActor(context.Background(), actor), task); appErr == nil {
+		t.Fatal("creator unexpectedly authorized completed task")
+	}
+}

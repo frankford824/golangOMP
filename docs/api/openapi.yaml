@@ -3154,6 +3154,10 @@ components:
       type: object
       description: |
         `operator_id` is optional. When omitted, the backend uses the current authenticated actor.
+        `catalog.manage` may update ordinary and governed fields within its stable data scope.
+        `task.create` may update ordinary business fields only when the current actor created the
+        task and the task is not completed, archived, or cancelled. Task creators cannot submit
+        manual-cost, cost-rule, `trigger_filing`, or `filed_at` controls.
         Existing-product rebinding may pass `product_selection.erp_product` so the backend can
         cache or bind the chosen ERP Bridge product while preserving external id, sku, image,
         and price snapshot data under task-side `product_selection`.
@@ -3190,6 +3194,12 @@ components:
         change_request:
           type: string
           description: Editable original-product change request. For `new_product_development` and `retouch_task`, this is accepted as a compatibility alias of `design_requirement`.
+        note:
+          type: string
+          description: Editable operation note. An explicit empty string clears the existing note.
+        operation_note:
+          type: string
+          description: Compatibility alias for `note`.
         craft_text: { type: string }
         width:
           type: number
@@ -10161,7 +10171,11 @@ paths:
     patch:
       summary: Update task business-info and generic cost fields
       description: |
-        Maintains the task's category, specification, cost, and ERP filing information. When category plus minimal
+        Maintains the task's editable business information. `catalog.manage` may update tasks in its
+        stable data scope. `task.create` may update ordinary fields only for a task created by the
+        current actor. Completed, archived, and cancelled tasks are immutable through this endpoint.
+        Manual cost, cost-rule selection, and forced filing controls remain restricted to
+        `catalog.manage`. When category plus minimal
         width/height/area/quantity/process inputs are present, the backend also triggers skeleton
         cost preview and persists `estimated_cost`, rule provenance, governed
         `matched_rule_version`, and manual-review state. Existing-product tasks may also persist or
@@ -10179,7 +10193,7 @@ paths:
         recalculation runs handle explicit refreshes.
       tags: [Tasks, ReadyForFrontend]
       x-api-readiness: ready_for_frontend
-      x-permissions: [catalog.manage]
+      x-permissions: [catalog.manage, task.create]
       x-rbac-placeholder:
         auth_mode: session_token_capability_enforced
       parameters:

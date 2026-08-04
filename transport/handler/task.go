@@ -228,6 +228,8 @@ type updateTaskBusinessInfoReq struct {
 	SizeText                 string                   `json:"size_text"`
 	DesignRequirement        string                   `json:"design_requirement"`
 	ChangeRequest            string                   `json:"change_request"`
+	Note                     *string                  `json:"note"`
+	OperationNote            *string                  `json:"operation_note"`
 	CraftText                string                   `json:"craft_text"`
 	Width                    *float64                 `json:"width"`
 	Height                   *float64                 `json:"height"`
@@ -1091,6 +1093,7 @@ func (h *TaskHandler) UpdateBusinessInfo(c *gin.Context) {
 	updateParams := base
 	updateParams.TaskID = taskID
 	updateParams.OperatorID = operatorID
+	updateParams.GovernedFieldsRequested = businessInfoGovernedFieldsRequested(c)
 	if productName := firstNonEmptyTrimmed(req.ProductName, req.ProductNameSnapshot); productName != "" {
 		updateParams.ProductName = productName
 	}
@@ -1142,6 +1145,13 @@ func (h *TaskHandler) UpdateBusinessInfo(c *gin.Context) {
 	}
 	if strings.TrimSpace(req.DesignRequirement) != "" {
 		updateParams.DesignRequirement = req.DesignRequirement
+	}
+	if req.Note != nil {
+		updateParams.Note = *req.Note
+		updateParams.NoteSet = true
+	} else if req.OperationNote != nil {
+		updateParams.Note = *req.OperationNote
+		updateParams.NoteSet = true
 	}
 	if req.CostPrice != nil {
 		updateParams.CostPrice = req.CostPrice
@@ -1224,6 +1234,36 @@ func parseBusinessInfoDeadline(c *gin.Context) (*time.Time, bool, *domain.AppErr
 		return &parsed, true, nil
 	}
 	return nil, false, nil
+}
+
+func businessInfoGovernedFieldsRequested(c *gin.Context) bool {
+	rawBodyValue, ok := c.Get(gin.BodyBytesKey)
+	if !ok {
+		return false
+	}
+	rawBody, ok := rawBodyValue.([]byte)
+	if !ok || len(rawBody) == 0 {
+		return false
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(rawBody, &fields); err != nil {
+		return false
+	}
+	for _, name := range []string{
+		"cost_price",
+		"cost_rule_id",
+		"cost_rule_name",
+		"cost_rule_source",
+		"manual_cost_override",
+		"manual_cost_override_reason",
+		"trigger_filing",
+		"filed_at",
+	} {
+		if _, exists := fields[name]; exists {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *TaskHandler) GetFilingStatus(c *gin.Context) {

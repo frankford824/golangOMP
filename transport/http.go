@@ -248,7 +248,7 @@ func NewRouter(
 		taskGroup.POST("/:id/cost-quote/preview", capabilityAccess(taskGroup, http.MethodPost, "/:id/cost-quote/preview", domain.APIReadinessReadyForFrontend, domain.PermissionCatalogView), taskH.PreviewCostQuote)
 		// Business information remains editable, while filing is asynchronous and
 		// never acts as a task-completion gate in the v8 workflow.
-		taskGroup.PATCH("/:id/business-info", capabilityAccess(taskGroup, http.MethodPatch, "/:id/business-info", domain.APIReadinessReadyForFrontend, domain.PermissionCatalogManage), taskH.UpdateBusinessInfo)
+		taskGroup.PATCH("/:id/business-info", capabilityAccess(taskGroup, http.MethodPatch, "/:id/business-info", domain.APIReadinessReadyForFrontend, domain.PermissionCatalogManage, domain.PermissionTaskCreate), taskH.UpdateBusinessInfo)
 		taskGroup.GET("/:id/filing-status", capabilityAccess(taskGroup, http.MethodGet, "/:id/filing-status", domain.APIReadinessReadyForFrontend, domain.PermissionTaskView), taskH.GetFilingStatus)
 		taskGroup.POST("/:id/filing/retry", capabilityAccess(taskGroup, http.MethodPost, "/:id/filing/retry", domain.APIReadinessReadyForFrontend, domain.PermissionERPManage), taskH.RetryFiling)
 		taskGroup.GET("/:id/detail", capabilityAccess(taskGroup, http.MethodGet, "/:id/detail", domain.APIReadinessReadyForFrontend, domain.PermissionTaskView), taskDetailH.GetByTaskID)
