@@ -89,6 +89,29 @@ func TestOrganizationAndAccessCandidatesAreReportableButCannotApply(t *testing.T
 	}
 }
 
+func TestNoNewGrantMayHaveNoExistingAssignmentButPreserveExistingMayNot(t *testing.T) {
+	noGrant := validAccessDecision(t, "confirmed_auto")
+	noGrant.RequiredExistingAssignments = nil
+	noGrant.ManifestRowHash, _ = accessDecisionManifestRowHash(noGrant)
+	if err := validateMapping(mappingFile{
+		Version:         workflowGroupsMappingV2,
+		AccessDecisions: []accessDecisionMapping{noGrant},
+	}); err != nil {
+		t.Fatalf("no_new_grant without an existing assignment must remain valid: %v", err)
+	}
+
+	preserve := noGrant
+	preserve.Action = "preserve_existing"
+	preserve.ReviewPolicyIDs = []string{reviewPolicyExistingAccessPreserved}
+	preserve.ManifestRowHash, _ = accessDecisionManifestRowHash(preserve)
+	if err := validateMapping(mappingFile{
+		Version:         workflowGroupsMappingV2,
+		AccessDecisions: []accessDecisionMapping{preserve},
+	}); err == nil || !strings.Contains(err.Error(), "preserve_existing") {
+		t.Fatalf("preserve_existing without evidence error = %v", err)
+	}
+}
+
 func TestApplyOrganizationMappingsUsesReviewedCASAndIsIdempotent(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	if err != nil {

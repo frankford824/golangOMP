@@ -1142,8 +1142,9 @@ func validateAccessDecisions(m mappingFile, allowCandidateConfidence bool) error
 			seenEvidence[evidenceKey] = struct{}{}
 			previous = evidenceKey
 		}
-		if !hardCandidate && len(item.RequiredExistingAssignments) == 0 {
-			return fmt.Errorf("%s: confirmed/proposed access decisions require assignment evidence", path)
+		if !hardCandidate && item.Action == "preserve_existing" &&
+			len(item.RequiredExistingAssignments) == 0 {
+			return fmt.Errorf("%s: preserve_existing access decisions require assignment evidence", path)
 		}
 		switch item.Confidence {
 		case "confirmed_auto":
