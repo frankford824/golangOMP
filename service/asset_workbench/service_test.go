@@ -1515,9 +1515,18 @@ type externalMaterialProviderStub struct {
 	details       map[int64]*assetcenter.AssetDetail
 	downloadInfo  *domain.AssetDownloadInfo
 	previewInfo   *domain.AssetDownloadInfo
+	searchDelay   time.Duration
+	searchProbe   *searchConcurrencyProbe
 }
 
 func (s *externalMaterialProviderStub) Search(_ context.Context, query domain.AssetSearchQuery) (*assetcenter.SearchResult, *domain.AppError) {
+	if s.searchProbe != nil {
+		s.searchProbe.enter()
+		defer s.searchProbe.leave()
+	}
+	if s.searchDelay > 0 {
+		time.Sleep(s.searchDelay)
+	}
 	s.searchCalls++
 	s.searchQueries = append(s.searchQueries, query)
 	if query.BusinessLane.Valid() && query.Source == domain.AssetResourceSourceExternal {
@@ -1550,11 +1559,20 @@ func (s *externalMaterialProviderStub) Search(_ context.Context, query domain.As
 }
 
 type resourceGroupMaterialProviderStub struct {
-	items   []domain.TaskAssetGroup
-	queries []domain.ResourceGroupListParams
+	items       []domain.TaskAssetGroup
+	queries     []domain.ResourceGroupListParams
+	searchDelay time.Duration
+	searchProbe *searchConcurrencyProbe
 }
 
 func (s *resourceGroupMaterialProviderStub) ListResourceGroups(_ context.Context, _ domain.RequestActor, params domain.ResourceGroupListParams) (*domain.ResourceGroupListResult, *domain.AppError) {
+	if s.searchProbe != nil {
+		s.searchProbe.enter()
+		defer s.searchProbe.leave()
+	}
+	if s.searchDelay > 0 {
+		time.Sleep(s.searchDelay)
+	}
 	s.queries = append(s.queries, params)
 	items := append([]domain.TaskAssetGroup(nil), s.items...)
 	if params.BusinessLane.Valid() {
@@ -1587,6 +1605,33 @@ func (s *resourceGroupMaterialProviderStub) ListResourceGroups(_ context.Context
 		Items: append([]domain.TaskAssetGroup(nil), items[start:end]...),
 		Page:  params.Page, PageSize: params.PageSize, Total: int64(len(items)),
 	}, nil
+}
+
+type searchConcurrencyProbe struct {
+	mu        sync.Mutex
+	active    int
+	maxActive int
+}
+
+func (p *searchConcurrencyProbe) enter() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.active++
+	if p.active > p.maxActive {
+		p.maxActive = p.active
+	}
+}
+
+func (p *searchConcurrencyProbe) leave() {
+	p.mu.Lock()
+	p.active--
+	p.mu.Unlock()
+}
+
+func (p *searchConcurrencyProbe) maximum() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.maxActive
 }
 
 func testResourceGroupMatchesFormat(item domain.TaskAssetGroup, category domain.AssetFormatCategoryFilter) bool {
@@ -5496,6 +5541,21 @@ func TestSystemSearchAllSourcesKeepsSystemAndVisibleExternalAssets(t *testing.T)
 	}
 	if len(provider.searchQueries) != 1 || provider.searchQueries[0].Source != domain.AssetResourceSourceExternal {
 		t.Fatalf("search queries = %+v, want external-only union branch", provider.searchQueries)
+	}
+}
+
+func TestSystemSearchAllSourcesUsesTwoBoundedProviders(t *testing.T) {
+	probe := &searchConcurrencyProbe{}
+	groups := &resourceGroupMaterialProviderStub{searchDelay: 30 * time.Millisecond, searchProbe: probe}
+	external := &externalMaterialProviderStub{searchDelay: 30 * time.Millisecond, searchProbe: probe}
+	svc := NewService(Config{Timezone: "Asia/Shanghai"}, WithSystemAssetSearcher(external), WithResourceGroupMaterialSearcher(groups))
+	actor := assetCapabilityActor(1, domain.PermissionAssetView)
+
+	if _, appErr := svc.SystemSearch(context.Background(), actor, "", 1, 50, "all", "all", ""); appErr != nil {
+		t.Fatalf("SystemSearch() error = %+v", appErr)
+	}
+	if got := probe.maximum(); got != 2 {
+		t.Fatalf("provider concurrency = %d, want exactly 2", got)
 	}
 }
 

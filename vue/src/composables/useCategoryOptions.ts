@@ -8,30 +8,17 @@ import { categoriesApi } from '@/services/api/categoriesApi'
 import type { BaseSelectOption } from '@/components/base/BaseSelect.vue'
 import { usePermissionsStore } from '@/stores/permissions'
 
-/**
- * 后端 `GET /v1/categories/search` 的守卫白名单（Ops/Warehouse/Admin）。
- * 其他角色（CustomizationOperator/DepartmentAdmin/Member/Designer/Auditor 等）
- * 必定 403；前端在发起前先短路，保留空下拉即可。
- */
-const CATEGORY_SEARCH_ALLOWED_ROLES = [
-  'Ops',
-  'Warehouse',
-  'Admin',
-  'HRAdmin',
-  'SuperAdmin',
-] as const
-
 export type UseCategoryOptionsOpts = {
   /** false：不在挂载时请求，由调用方在首次需要时调用 load()（任务详情补全区等） */
   eager?: boolean
   /**
    * 可选更严格门禁：调用方声明「只有持有以下任一 action 才需要分类下拉」。
-   * 与角色白名单是 AND 关系；未传时仅走角色短路。
+   * 与分类查看能力是 AND 关系。
    */
   requiredActions?: readonly string[]
   /**
    * 可选更严格门禁：调用方声明「只有能访问以下任一 page 才需要分类下拉」。
-   * 与角色白名单是 AND 关系；未传时仅走角色短路。
+   * 与分类查看能力是 AND 关系。
    */
   requiredPages?: readonly string[]
 }
@@ -46,7 +33,7 @@ export function useCategoryOptions(opts?: UseCategoryOptionsOpts) {
   const error = ref<string | null>(null)
 
   function canLoad(): boolean {
-    if (!permissionsStore.hasAnyRole(CATEGORY_SEARCH_ALLOWED_ROLES)) return false
+    if (!permissionsStore.hasPermission(['catalog.view', 'catalog.manage'])) return false
     if (requiredActions?.length && !requiredActions.some((a) => permissionsStore.hasAction(a))) {
       return false
     }

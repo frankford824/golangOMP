@@ -21,13 +21,10 @@ func NewSearchHandler(svc *searchsvc.Service) *SearchHandler {
 func (h *SearchHandler) Search(c *gin.Context) {
 	limit, _ := strconv.Atoi(c.Query("limit"))
 	actor, _ := domain.RequestActorFromContext(c.Request.Context())
-	result, appErr := h.svc.Search(c.Request.Context(), actor, c.Query("q"), strings.TrimSpace(c.Query("scope")), limit)
+	result, retrieval, appErr := h.svc.SearchWithMode(c.Request.Context(), actor, c.Query("q"), strings.TrimSpace(c.Query("scope")), limit, c.Query("mode"))
 	if appErr != nil {
 		respondError(c, appErr)
 		return
 	}
-	c.JSON(200, gin.H{
-		"query":   strings.TrimSpace(c.Query("q")),
-		"results": result,
-	})
+	c.JSON(200, gin.H{"query": strings.TrimSpace(c.Query("q")), "results": result, "retrieval": retrieval})
 }

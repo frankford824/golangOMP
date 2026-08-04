@@ -387,9 +387,6 @@ function normalizeBackendTask(raw: Record<string, unknown>): Task {
   const costUnitRaw = raw.cost_unit_price ?? raw.costUnitPrice
   let newProductCostUnitPrice: number | undefined =
     typeof costUnitRaw === 'number' && Number.isFinite(costUnitRaw) ? costUnitRaw : undefined
-  const chRaw = raw.product_channel ?? raw.productChannel
-  const productChannel =
-    typeof chRaw === 'string' && String(chRaw).trim() !== '' ? String(chRaw) : undefined
   const specTr = raw.spec_text ?? raw.specText
   const specText =
     typeof specTr === 'string' && String(specTr).trim() !== '' ? String(specTr).trim() : undefined
@@ -528,6 +525,7 @@ function normalizeBackendTask(raw: Record<string, unknown>): Task {
           width: itemWidth,
           height: itemHeight,
           area: itemArea,
+          setModeHint: Boolean(o.set_mode_hint ?? o.setModeHint),
           ...(variantJson !== undefined ? { variantJson } : {}),
           filing_status: typeof o.filing_status === 'string' ? o.filing_status : undefined,
           erp_sync_status: typeof o.erp_sync_status === 'string' ? o.erp_sync_status : undefined,
@@ -583,7 +581,6 @@ function normalizeBackendTask(raw: Record<string, unknown>): Task {
     productReferenceUrl,
     newProductQuantity,
     newProductCostUnitPrice,
-    productChannel,
     ...(specText != null ? { specText } : {}),
     ...(sizeText != null ? { sizeText } : {}),
     status,
@@ -644,11 +641,6 @@ function normalizeBackendTask(raw: Record<string, unknown>): Task {
       String(raw.owner_org_team ?? raw.ownerOrgTeam).trim() !== ''
         ? String(raw.owner_org_team ?? raw.ownerOrgTeam).trim()
         : undefined,
-    workflowLane:
-      typeof (raw.workflow_lane ?? raw.workflowLane) === 'string' &&
-      String(raw.workflow_lane ?? raw.workflowLane).trim() !== ''
-        ? (String(raw.workflow_lane ?? raw.workflowLane).trim() as Task['workflowLane'])
-        : undefined,
     businessLane: normalizeTaskLane(raw.business_lane ?? raw.businessLane),
     sourceDepartment:
       typeof (raw.source_department ?? raw.sourceDepartment) === 'string' &&
@@ -677,6 +669,7 @@ function normalizeBackendTask(raw: Record<string, unknown>): Task {
       (raw.note as string | undefined)?.trim() ||
       (raw.remark as string | undefined)?.trim() ||
       undefined,
+    setModeHint: Boolean(raw.set_mode_hint ?? raw.setModeHint),
     dueAt: (raw.due_at ?? raw.deadline_at ?? raw.dueAt) as string | null ?? null,
     priority: normalizePriorityFromApi(raw.priority as string | undefined),
     customizationRequired:
@@ -985,7 +978,7 @@ export const useTasksStore = defineStore('tasks', () => {
   const fullListReplaceGeneration = ref(0)
   /** 服务端分页：当前查询条件下的总条数（来自 pagination.total） */
   const listTotal = ref(0)
-  /** 任务中心最近一次列表请求参数（含 page/page_size），供导出中心等复用筛选条件 */
+  /** 任务中心最近一次列表请求参数（含 page/page_size）。 */
   const lastListQueryParams = ref<TaskListParams | null>(null)
   const getById = (id: string) => items.value.find((t) => t.id === id)
 
@@ -1170,11 +1163,6 @@ export const useTasksStore = defineStore('tasks', () => {
             : parsed.requesterName,
         designSubStatus: mergeDesignSubStatusOnLoad(parsed, existing),
         assetVersions: parsed.assetVersions,
-        // `GET /v1/tasks/{id}` 详情响应不保证回传 workflow_lane；
-        // 若详情缺字段，必须回落到列表缓存的 lane，否则审核工作台按 lane 过滤
-        // （AuditQueuePanel.matchesLane）会在详情刷入后把 `undefined` 当作
-        // `'normal'` 处理，导致已选中的定制任务从定制 Tab 中瞬间消失。
-        workflowLane: parsed.workflowLane ?? existing?.workflowLane,
         businessLane: parsed.businessLane ?? existing?.businessLane,
         moduleSummaries: moduleSummaries ?? existing?.moduleSummaries,
       }
@@ -1229,12 +1217,12 @@ export const useTasksStore = defineStore('tasks', () => {
     const isOriginal = frontendTaskType === 'ORIGINAL_PRODUCT_DEV'
     const isRetouch = frontendTaskType === 'RETOUCH_TASK'
     const businessLane =
-      normalizeTaskLane(t.businessLane ?? t.workflowLane) ??
+      normalizeTaskLane(t.businessLane) ??
       (Boolean(t.customizationRequired ?? task.customizationRequired) ? 'customization' : 'normal')
     const normalizedLaneSkuCodeType = businessLane === 'customization' ? 'customization' : 'regular'
     const skuModeRaw = (t.skuMode ?? 'single') as string
-	    const isBatchMode = skuModeRaw === 'multiple' && !isOriginal && !isRetouch
-	    const skuCodeType = normalizedLaneSkuCodeType
+    const isBatchMode = skuModeRaw === 'multiple' && !isOriginal && !isRetouch
+    const skuCodeType = normalizedLaneSkuCodeType
 
     const ownerTeam = t.groupId ?? task.groupId ?? ''
     const ownerDepartment =
@@ -1274,22 +1262,19 @@ export const useTasksStore = defineStore('tasks', () => {
       requester_name: t.requesterName ?? task.requesterName ?? '',
       owner_department: ownerDepartment || undefined,
       owner_org_team: ownerOrgTeam || undefined,
-      // Legacy compatibility: keep owner_team for old backend branches.
+      // `owner_team` 仅承载历史数据库展示标签；授权始终使用稳定组织 ID。
       owner_team: ownerTeam,
       deadline_at: t.dueAt ?? task.dueAt ?? null,
-	      priority,
-	      business_lane: businessLane,
-	      workflow_lane: businessLane,
-	      sku_code_type: skuCodeType,
-	      customization_required:
+      priority,
+      business_lane: businessLane,
+      sku_code_type: skuCodeType,
+      customization_required:
           businessLane === 'customization' ||
           Boolean(t.customizationRequired ?? task.customizationRequired ?? false),
       customization_source_type:
         (t.customizationRequired ?? task.customizationRequired)
           ? (t.customizationSourceType ?? task.customizationSourceType ?? undefined)
           : undefined,
-      // 兼容字段保留，不再由前端新逻辑驱动。
-      is_outsource: false,
       reference_file_refs: referenceFileRefs,
       ...(isOriginal || isRetouch || isBatchMode
         ? {}
@@ -1297,6 +1282,10 @@ export const useTasksStore = defineStore('tasks', () => {
       copy_content: t.copyContent ?? task.copyContent ?? undefined,
       style_keywords: t.styleKeywords ?? task.styleKeywords ?? undefined,
       remark: t.note ?? task.note ?? undefined,
+      width: t.width ?? task.width ?? undefined,
+      height: t.height ?? task.height ?? undefined,
+      area: t.area ?? task.area ?? undefined,
+      set_mode_hint: Boolean(t.setModeHint ?? task.setModeHint),
     }
     if (taskType === 'new_product_development') {
       payload.sync_erp_on_create = t.syncErpOnCreate !== false
@@ -1404,6 +1393,7 @@ export const useTasksStore = defineStore('tasks', () => {
         if (item.variantJson && typeof item.variantJson === 'object') {
           baseItem.variant_json = item.variantJson
         }
+        baseItem.set_mode_hint = Boolean(item.setModeHint)
         return baseItem
       })
     }
@@ -1494,10 +1484,9 @@ export const useTasksStore = defineStore('tasks', () => {
     // - 单个模式：必须有顶层 category_code（当前端点尚未切 i_id 字段名）
     // - 批量模式：每个 batch_items[i] 必须有 category_code
 	    const preparePayload: Record<string, unknown> = { task_type: payloadTaskType }
-	    const businessLane = normalizeTaskLane(payload.business_lane ?? payload.workflow_lane) ?? 'normal'
+	    const businessLane = normalizeTaskLane(payload.business_lane) ?? 'normal'
 	    const skuCodeType = businessLane === 'customization' ? 'customization' : 'regular'
 	    preparePayload.business_lane = businessLane
-	    preparePayload.workflow_lane = businessLane
 	    preparePayload.sku_code_type = skuCodeType
     const rawBatchItems = Array.isArray((task as Record<string, unknown>).batchItems)
       ? ((task as Record<string, unknown>).batchItems as Array<Record<string, unknown>>)
@@ -1671,14 +1660,6 @@ export const useTasksStore = defineStore('tasks', () => {
     await loadTaskById(taskId)
   }
 
-  /** 定制美工模块领取：POST /v1/tasks/{id}/modules/customization/claim */
-  async function claimCustomizationModule(taskId: string) {
-    const task = getById(taskId)
-    if (!task) throw new Error('任务不存在')
-    await tasksApi.claimModule(taskId, 'customization')
-    await loadTaskById(taskId)
-  }
-
   /** retouch_task 完成动作：POST /v1/tasks/{id}/modules/retouch/actions/submit */
   async function submitRetouch(taskId: string) {
     const task = getById(taskId)
@@ -1781,7 +1762,6 @@ export const useTasksStore = defineStore('tasks', () => {
     clearDesignerAssignee,
     submitDesign,
     claimRetouchModule,
-    claimCustomizationModule,
     submitRetouch,
     handoverAudit,
     listAuditHandovers,

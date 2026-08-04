@@ -54,6 +54,9 @@ func WithOrgRepo(orgRepo repo.OrgRepo) IdentityServiceOption {
 }
 
 func (s *identityService) CreateDepartment(ctx context.Context, p CreateOrgDepartmentParams) (*domain.OrgDepartment, *domain.AppError) {
+	if appErr := authorizeGlobalAccessManage(ctx); appErr != nil {
+		return nil, appErr
+	}
 	if s.orgRepo == nil {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidStateTransition, "org master backend is not configured", nil)
 	}
@@ -83,6 +86,9 @@ func (s *identityService) CreateDepartment(ctx context.Context, p CreateOrgDepar
 }
 
 func (s *identityService) UpdateDepartment(ctx context.Context, p UpdateOrgDepartmentParams) (*domain.OrgDepartment, *domain.AppError) {
+	if appErr := authorizeGlobalAccessManage(ctx); appErr != nil {
+		return nil, appErr
+	}
 	if s.orgRepo == nil {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidStateTransition, "org master backend is not configured", nil)
 	}
@@ -157,6 +163,9 @@ func (s *identityService) UpdateDepartment(ctx context.Context, p UpdateOrgDepar
 }
 
 func (s *identityService) CreateTeam(ctx context.Context, p CreateOrgTeamParams) (*domain.OrgTeam, *domain.AppError) {
+	if appErr := authorizeGlobalAccessManage(ctx); appErr != nil {
+		return nil, appErr
+	}
 	if s.orgRepo == nil {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidStateTransition, "org master backend is not configured", nil)
 	}
@@ -198,6 +207,9 @@ func (s *identityService) CreateTeam(ctx context.Context, p CreateOrgTeamParams)
 }
 
 func (s *identityService) UpdateTeam(ctx context.Context, p UpdateOrgTeamParams) (*domain.OrgTeam, *domain.AppError) {
+	if appErr := authorizeGlobalAccessManage(ctx); appErr != nil {
+		return nil, appErr
+	}
 	if s.orgRepo == nil {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidStateTransition, "org master backend is not configured", nil)
 	}
@@ -293,6 +305,9 @@ func (s *identityService) UpdateTeam(ctx context.Context, p UpdateOrgTeamParams)
 // Members whose team has no enabled same-name team under the target become
 // ungrouped inside the target department.
 func (s *identityService) MergeDepartment(ctx context.Context, p MergeOrgDepartmentParams) (*domain.OrgDepartment, *domain.AppError) {
+	if appErr := authorizeGlobalAccessManage(ctx); appErr != nil {
+		return nil, appErr
+	}
 	if s.orgRepo == nil {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidStateTransition, "org master backend is not configured", nil)
 	}
@@ -382,6 +397,9 @@ func (s *identityService) MergeDepartment(ctx context.Context, p MergeOrgDepartm
 // MergeTeam moves every member of the source team into the target team, then
 // disables the source team. Managed-scope team references follow the rename.
 func (s *identityService) MergeTeam(ctx context.Context, p MergeOrgTeamParams) (*domain.OrgTeam, *domain.AppError) {
+	if appErr := authorizeGlobalAccessManage(ctx); appErr != nil {
+		return nil, appErr
+	}
 	if s.orgRepo == nil {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidStateTransition, "org master backend is not configured", nil)
 	}
@@ -446,6 +464,9 @@ func (s *identityService) MergeTeam(ctx context.Context, p MergeOrgTeamParams) (
 // child teams. Assigned users are moved to the system unassigned pool first, so
 // organization cleanup never depends on manual member migration.
 func (s *identityService) DeleteDepartment(ctx context.Context, id int64) *domain.AppError {
+	if appErr := authorizeGlobalAccessManage(ctx); appErr != nil {
+		return appErr
+	}
 	if s.orgRepo == nil {
 		return domain.NewAppError(domain.ErrCodeInvalidStateTransition, "org master backend is not configured", nil)
 	}
@@ -482,6 +503,9 @@ func (s *identityService) DeleteDepartment(ctx context.Context, id int64) *domai
 // system unassigned pool first, so organization cleanup never depends on manual
 // member migration.
 func (s *identityService) DeleteTeam(ctx context.Context, id int64) *domain.AppError {
+	if appErr := authorizeGlobalAccessManage(ctx); appErr != nil {
+		return appErr
+	}
 	if s.orgRepo == nil {
 		return domain.NewAppError(domain.ErrCodeInvalidStateTransition, "org master backend is not configured", nil)
 	}
@@ -1044,7 +1068,6 @@ func (s *identityService) buildOrgOptions(ctx context.Context, includeDisabled b
 	options := &domain.OrgOptions{
 		Departments:           make([]domain.DepartmentOption, 0, len(departments)),
 		TeamsByDepartment:     make(map[string][]string, len(departments)),
-		RoleCatalogSummary:    s.ListRoles(ctx),
 		UnassignedPoolEnabled: s.authSettings.UnassignedPoolEnabled,
 		ConfiguredAssignments: append([]domain.ConfiguredUserAssignment{}, s.authSettings.ConfiguredAssignments...),
 	}
@@ -1123,7 +1146,6 @@ func (s *identityService) buildConfigBackedOrgOptions(ctx context.Context) *doma
 	options := &domain.OrgOptions{
 		Departments:           make([]domain.DepartmentOption, 0, len(s.authSettings.Departments)),
 		TeamsByDepartment:     make(map[string][]string, len(s.authSettings.DepartmentTeams)),
-		RoleCatalogSummary:    s.ListRoles(ctx),
 		UnassignedPoolEnabled: s.authSettings.UnassignedPoolEnabled,
 		ConfiguredAssignments: append([]domain.ConfiguredUserAssignment{}, s.authSettings.ConfiguredAssignments...),
 	}

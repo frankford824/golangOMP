@@ -30,28 +30,23 @@ func (s *ScopesFlex) UnmarshalJSON(data []byte) error {
 }
 
 const (
-	PermissionActionRouteAccess                     = "route_access"
-	PermissionActionRegister                        = "register"
-	PermissionActionLogin                           = "login"
-	PermissionActionLoginFailed                     = "login_failed"
-	PermissionActionUserCreated                     = "user_created"
-	PermissionActionRoleAssigned                    = "role_assigned"
-	PermissionActionRoleRemoved                     = "role_removed"
-	PermissionActionPasswordChanged                 = "password_changed"
-	PermissionActionPasswordReset                   = "password_reset"
-	PermissionActionUserUpdated                     = "user_updated"
-	PermissionActionUserStatusChanged               = "user_status_changed"
-	PermissionActionUserActivated                   = "user_activated"
-	PermissionActionUserDeactivated                 = "user_deactivated"
-	PermissionActionUserDeleted                     = "user_deleted"
-	PermissionActionUserOrgChanged                  = "user_org_changed"
-	PermissionActionUserDepartmentChangedByAdmin    = "user_department_changed_by_admin"
-	PermissionActionUserDepartmentChangedViaOrgMove = "user_department_changed_via_org_move"
-	PermissionActionUserScopeChanged                = "user_scope_changed"
-	PermissionActionPoolAssigned                    = "user_pool_assigned"
-	PermissionActionOrgMoveRequested                = "org_move_requested"
-	PermissionActionOrgMoveApproved                 = "org_move_approved"
-	PermissionActionOrgMoveRejected                 = "org_move_rejected"
+	PermissionActionRouteAccess                  = "route_access"
+	PermissionActionRegister                     = "register"
+	PermissionActionLogin                        = "login"
+	PermissionActionLoginFailed                  = "login_failed"
+	PermissionActionUserCreated                  = "user_created"
+	PermissionActionRoleAssigned                 = "role_assigned"
+	PermissionActionRoleRemoved                  = "role_removed"
+	PermissionActionPasswordChanged              = "password_changed"
+	PermissionActionPasswordReset                = "password_reset"
+	PermissionActionUserUpdated                  = "user_updated"
+	PermissionActionUserStatusChanged            = "user_status_changed"
+	PermissionActionUserActivated                = "user_activated"
+	PermissionActionUserDeactivated              = "user_deactivated"
+	PermissionActionUserOrgChanged               = "user_org_changed"
+	PermissionActionUserDepartmentChangedByAdmin = "user_department_changed_by_admin"
+	PermissionActionUserScopeChanged             = "user_scope_changed"
+	PermissionActionPoolAssigned                 = "user_pool_assigned"
 )
 
 type FrontendAccessView struct {
@@ -200,79 +195,26 @@ func BuildFrontendAccess(user *User, settings FrontendAccessSettings) FrontendAc
 	pages := newStringSet()
 	actions := newStringSet()
 	modules := newStringSet()
-	managedDepartments := newStringSet()
-	managedTeams := newStringSet()
-	departmentCodes := newStringSet()
-	teamCodes := newStringSet()
 
 	view.Department = string(user.Department)
 	view.Team = user.Team
 
 	roleNames.Add(frontendRoleName(RoleMember))
 	scopes.Add("authenticated")
-	if user.Department != "" {
-		scopes.Add("department:" + string(user.Department))
-		departmentCodes.Add(string(user.Department))
-	}
-	if user.Team != "" {
-		scopes.Add("team:" + user.Team)
-		teamCodes.Add(user.Team)
-	}
-	managedDepartments.AddAll(user.ManagedDepartments...)
-	managedTeams.AddAll(user.ManagedTeams...)
 
 	applyFrontendSpec(roleNames, scopes, menus, pages, actions, modules, settings.Defaults.AllAuthenticated)
-	applyFrontendSpec(roleNames, scopes, menus, pages, actions, modules, derivedFrontendSpec(RoleMember))
 
 	for _, role := range roleValues {
 		roleNames.Add(frontendRoleName(role))
-		if role == RoleSuperAdmin || role == RoleHRAdmin {
-			view.IsSuperAdmin = true
-			view.ViewAll = true
-			roleNames.Add(frontendRoleName(RoleSuperAdmin))
-		}
-		if role == RoleAdmin {
-			view.ViewAll = true
-		}
 		if role == RoleDeptAdmin {
 			view.IsDepartmentAdmin = true
 		}
-		applyManagedScope(role, user, managedDepartments, managedTeams)
-		applyFrontendSpec(roleNames, scopes, menus, pages, actions, modules, derivedFrontendSpec(role))
-		applyFrontendSpec(roleNames, scopes, menus, pages, actions, modules, settings.Roles[string(role)])
 	}
 
-	if user.Department != "" {
-		dept := settings.Departments[string(user.Department)]
-		scopes.AddAll(dept.FrontendAccessSpec.normalizedScopes()...)
-		if view.IsDepartmentAdmin {
-			applyFrontendSpec(roleNames, scopes, menus, pages, actions, modules, dept.FrontendAccessSpec)
-		}
-	}
-
-	if view.IsDepartmentAdmin {
-		applyFrontendSpec(roleNames, scopes, menus, pages, actions, modules, settings.Identities["department_admin"])
-	}
-
-	if view.IsSuperAdmin {
-		applyFrontendSpec(roleNames, scopes, menus, pages, actions, modules, collectAllFrontendAccess(settings))
-		applyFrontendSpec(roleNames, scopes, menus, pages, actions, modules, settings.Identities["super_admin"])
-		scopes.Add("super_admin")
-	}
-
-	for _, department := range managedDepartments.SortedValues() {
-		scopes.Add("managed_department:" + department)
-		departmentCodes.Add(department)
-	}
-	for _, team := range managedTeams.SortedValues() {
-		scopes.Add("managed_team:" + team)
-		teamCodes.Add(team)
-	}
-
-	view.ManagedDepartments = managedDepartments.SortedValues()
-	view.ManagedTeams = managedTeams.SortedValues()
-	view.DepartmentCodes = departmentCodes.SortedValues()
-	view.TeamCodes = teamCodes.SortedValues()
+	view.ManagedDepartments = nil
+	view.ManagedTeams = nil
+	view.DepartmentCodes = nil
+	view.TeamCodes = nil
 	view.Roles = roleNames.SortedValues()
 	view.Scopes = scopes.SortedValues()
 	view.Menus = menus.SortedValues()
@@ -286,6 +228,85 @@ func BuildFrontendAccess(user *User, settings FrontendAccessSettings) FrontendAc
 	view.PermissionFlags = append([]string{}, view.Actions...)
 	view.ModuleKeys = append([]string{}, view.Modules...)
 	return view
+}
+
+// MergeEffectiveAccessIntoFrontendAccess derives active menus and actions only
+// from the explicit v8 capability model. Legacy role names remain presentation
+// metadata and never grant a business action.
+func MergeEffectiveAccessIntoFrontendAccess(view FrontendAccessView, effective *EffectiveAccess) FrontendAccessView {
+	if effective == nil {
+		return view
+	}
+	actions := newStringSet()
+	actions.AddAll(view.Actions...)
+	menus := newStringSet()
+	menus.AddAll(view.Menus...)
+	pages := newStringSet()
+	pages.AddAll(view.Pages...)
+	for _, permission := range effective.Permissions {
+		code := string(permission)
+		actions.Add(code)
+		for _, alias := range frontendActionAliasesForPermission(permission) {
+			actions.Add(alias)
+		}
+		switch permission {
+		case PermissionAccessView, PermissionAccessManage:
+			menus.Add("user_admin")
+			pages.Add("user_admin")
+		case PermissionTaskView, PermissionTaskCreate, PermissionTaskAssign, PermissionTaskReassign, PermissionTaskTerminate, PermissionTaskUploadSource, PermissionTaskAudit, PermissionTaskAuditHandover, PermissionTaskReopen,
+			PermissionPlanningSKUView, PermissionPlanningSKUCreate, PermissionPlanningSKUEdit, PermissionPlanningSKUExport, PermissionPlanningSKUSync, PermissionPlanningSKURetry:
+			menus.Add("task_list")
+			pages.Add("task_list")
+		case PermissionAssetView, PermissionAssetDownload, PermissionAssetExport, PermissionAssetPublish, PermissionAssetManage:
+			menus.Add("resource_management")
+			pages.Add("resource_management")
+		case PermissionCatalogView, PermissionCatalogManage:
+			menus.Add("cost_rules")
+			pages.Add("cost_rules")
+		case PermissionAssetWorkbenchUse, PermissionAssetWorkbenchSubmit, PermissionAssetWorkbenchMembers,
+			PermissionAssetWorkbenchProfiles, PermissionAssetWorkbenchGroups, PermissionAssetWorkbenchDrive,
+			PermissionAssetWorkbenchBatch, PermissionAssetWorkbenchTemplates, PermissionAssetWorkbenchQC,
+			PermissionAssetWorkbenchSettlement, PermissionAssetWorkbenchAuditView:
+			menus.Add("asset_workbench")
+			pages.Add("asset_workbench")
+		case PermissionReportView:
+			menus.Add("report_center")
+			pages.Add("data_center")
+		}
+	}
+	for _, source := range effective.Sources {
+		if source.RoleCode == "super_admin" {
+			view.IsSuperAdmin = true
+			view.ViewAll = true
+			break
+		}
+	}
+	view.Actions = actions.SortedValues()
+	view.Menus = menus.SortedValues()
+	view.Pages = pages.SortedValues()
+	view.PermissionFlags = append([]string{}, view.Actions...)
+	view.MenuKeys = append([]string{}, view.Menus...)
+	view.PageKeys = append([]string{}, view.Pages...)
+	return view
+}
+
+func frontendActionAliasesForPermission(code PermissionCode) []string {
+	switch code {
+	case PermissionTaskUploadSource:
+		return []string{"task.design.submit"}
+	case PermissionTaskAudit:
+		return []string{"task.audit.decision", "task.audit"}
+	case PermissionTaskAuditHandover:
+		return []string{"task.audit.handover"}
+	case PermissionTaskAssign, PermissionTaskReassign, PermissionTaskTerminate:
+		return []string{"task.manage", "task.assign"}
+	case PermissionAccessManage:
+		return []string{"access_policy.manage"}
+	case PermissionAccessView:
+		return []string{"access_policy.view"}
+	default:
+		return nil
+	}
 }
 
 func frontendRoleName(role Role) string {
@@ -339,260 +360,6 @@ func frontendRoleName(role Role) string {
 	default:
 		return string(role)
 	}
-}
-
-func derivedFrontendSpec(role Role) FrontendAccessSpec {
-	switch role {
-	case RoleSuperAdmin:
-		return FrontendAccessSpec{
-			Roles:   []string{"super_admin"},
-			Scopes:  []string{"view_all", "identity_admin", "organization_admin", "role_admin"},
-			Menus:   []string{"user_admin", "org_admin", "role_admin", "logs_center", "product_management"},
-			Pages:   []string{"admin_users", "admin_roles", "admin_permission_logs", "admin_operation_logs", "org_options", "product_management"},
-			Actions: []string{"user.manage", "org.manage", "role.assign", "role.remove", "permission_logs.read", "operation_logs.read", "product.cost.read", "product.cost.binding.manage", "product.cost.recalculate", "product.cost.erp_sync"},
-		}
-	case RoleHRAdmin:
-		return FrontendAccessSpec{
-			Roles:   []string{"hr_admin"},
-			Scopes:  []string{"view_all", "hr_admin", "unassigned_pool.manage"},
-			Menus:   []string{"user_admin", "org_admin", "role_admin", "logs_center"},
-			Pages:   []string{"admin_users", "admin_roles", "admin_permission_logs", "admin_operation_logs", "org_options"},
-			Actions: []string{"user.manage", "org.assign", "org.manage", "role.assign", "role.read", "permission_logs.read", "operation_logs.read"},
-		}
-	case RoleOrgAdmin:
-		return FrontendAccessSpec{
-			Roles:   []string{"org_admin"},
-			Scopes:  []string{"org_admin"},
-			Menus:   []string{"user_admin"},
-			Pages:   []string{"admin_users"},
-			Actions: []string{"user.org.assign"},
-		}
-	case RoleRoleAdmin:
-		return FrontendAccessSpec{
-			Roles:   []string{"role_admin"},
-			Scopes:  []string{"role_admin"},
-			Menus:   []string{"role_admin", "user_admin"},
-			Pages:   []string{"admin_users", "admin_roles"},
-			Actions: []string{"role.read"},
-		}
-	case RoleDeptAdmin:
-		// Round B convergence: DepartmentAdmin is department-scoped and must not
-		// surface the org-wide "组织与权限" menu (`org_admin`) nor the
-		// org-options page. Org-wide menus belong to HRAdmin and SuperAdmin only.
-		return FrontendAccessSpec{
-			Roles:  []string{"department_admin"},
-			Scopes: []string{"department_scope"},
-			Menus:  []string{"user_admin"},
-			Pages:  []string{"department_users"},
-			Actions: []string{
-				"department.manage",
-				"department.users.read",
-				"department.users.create",
-				"department.users.move_team",
-				"department.users.disable",
-				"department.users.reset_password",
-				"department.users.assign_from_unassigned",
-				"task.reassign.department",
-			},
-		}
-	case RoleTeamLead:
-		// Round C convergence: TeamLead must surface a usable workbench that
-		// matches SOT capabilities ("可看本部门全部任务", "只能操作本组任务",
-		// "管理本组成员"). `task_list` menu covers department-scoped task
-		// visibility, `user_admin` + `team_users` covers own-team member
-		// management, and `task.reassign.team` / `team.manage` backs the
-		// own-team reassignment policy.
-		return FrontendAccessSpec{
-			Roles:   []string{"team_lead"},
-			Scopes:  []string{"team_scope"},
-			Menus:   []string{"task_list", "user_admin"},
-			Pages:   []string{"team_users", "task_list", "my_tasks"},
-			Actions: []string{"team.users.read", "team.manage", "task.reassign.team", "task.list"},
-		}
-	case RoleDesignDirector:
-		return FrontendAccessSpec{
-			Roles:   []string{"design_director"},
-			Scopes:  []string{"design_department_scope"},
-			Menus:   []string{"design_workspace", "task_list", "customization_management", "warehouse_receive", "warehouse_processing", "resource_management", "product_management", "user_admin"},
-			Pages:   []string{"design_workspace", "task_list", "department_users", "task_assets", "asset_detail", "assets_index", "product_management", "customization_jobs", "customization_job_detail", "warehouse_receive", "warehouse_processing"},
-			Actions: []string{"design.review.read", "department.users.read", "task.list"},
-		}
-	case RoleDesignReviewer:
-		return FrontendAccessSpec{
-			Roles:   []string{"design_reviewer"},
-			Scopes:  []string{"design_review_scope"},
-			Menus:   []string{"design_workspace"},
-			Pages:   []string{"design_workspace", "audit_workspace"},
-			Actions: []string{"design.review", "task.audit.review"},
-		}
-	case RoleCustomizationReviewer:
-		return FrontendAccessSpec{
-			Roles:   []string{"customization_reviewer"},
-			Scopes:  []string{"customization_review_scope", "department:审核部"},
-			Menus:   []string{"task_list", "customization_management", "audit_queue", "resource_management", "product_management"},
-			Pages:   []string{"customization_jobs", "customization_job_detail", "task_assets", "asset_detail", "assets_index", "product_management", "audit_workspace"},
-			Actions: []string{"task.customization.review", "task.customization.effect_review", "task.customization.review.asset_upload", "task.list", "warehouse_lane_filter"},
-		}
-	case RoleCustomizationOperator:
-		return FrontendAccessSpec{
-			Roles:   []string{"customization_operator"},
-			Scopes:  []string{"customization_workspace", "department:定制美工部"},
-			Menus:   []string{"design_workspace", "task_list", "resource_management", "product_management"},
-			Pages:   []string{"design_workspace", "task_list", "my_tasks", "task_assets", "asset_detail", "assets_index", "product_management"},
-			Actions: []string{"task.customization.submit", "task.customization.transfer", "task.asset_upload", "task.list", "warehouse_lane_filter"},
-		}
-	case RoleMember:
-		return FrontendAccessSpec{
-			Roles:   []string{"member"},
-			Scopes:  []string{"self_only"},
-			Menus:   []string{"dashboard"},
-			Pages:   []string{"dashboard"},
-			Actions: []string{"profile.view"},
-		}
-	// Round C convergence: explicit defense-in-depth branches for the eight
-	// business roles. Each branch mirrors the corresponding entry in
-	// config/frontend_access.json so that even when the JSON fails to load,
-	// role coverage is preserved. Content must be kept in sync with the JSON.
-	case RoleAdmin:
-		// Legacy Admin compatibility role. It keeps broad read/manage
-		// compatibility, but must not inherit SuperAdmin role-assignment
-		// actions.
-		return FrontendAccessSpec{
-			Roles:   []string{"admin"},
-			Scopes:  []string{"view_all", "identity_admin"},
-			Menus:   []string{"user_admin", "logs_center", "product_management"},
-			Pages:   []string{"admin_users", "admin_permission_logs", "admin_operation_logs", "product_management"},
-			Actions: []string{"user.manage", "org.manage", "permission_logs.read", "operation_logs.read", "product.cost.read", "product.cost.binding.manage", "product.cost.recalculate", "product.cost.erp_sync"},
-		}
-	case RoleOps:
-		return FrontendAccessSpec{
-			Roles:   []string{"ops"},
-			Scopes:  []string{"workflow_ops"},
-			Menus:   []string{"task_create", "business_info", "task_board", "task_list", "warehouse_receive", "warehouse_processing", "resource_management", "product_management", "customization_management"},
-			Pages:   []string{"task_board", "task_list", "task_create", "assets_index", "task_assets", "asset_detail", "product_management", "customization_jobs", "customization_job_detail"},
-			Actions: []string{"task.create", "task.business_info", "task.list", "warehouse.prepare", "task.close", "product.cost.read", "product.cost.binding.manage", "product.cost.recalculate", "product.cost.erp_sync"},
-		}
-	case RoleDesigner:
-		return FrontendAccessSpec{
-			Roles:   []string{"designer"},
-			Scopes:  []string{"design_workspace"},
-			Menus:   []string{"design_workspace", "task_list", "resource_management", "product_management"},
-			Pages:   []string{"design_workspace", "task_list", "my_tasks", "design_submit", "design_rework", "assets_index", "task_assets", "asset_detail", "product_management"},
-			Actions: []string{"task.design_submit", "task.asset_upload", "task.list"},
-		}
-	case RoleAuditA:
-		return FrontendAccessSpec{
-			Roles:   []string{"audit_a"},
-			Scopes:  []string{"audit_workspace"},
-			Menus:   []string{"audit_queue", "task_board", "task_list", "resource_management", "product_management"},
-			Pages:   []string{"task_board", "task_list", "audit_workspace", "assets_index", "task_assets", "asset_detail", "product_management"},
-			Actions: []string{"task.audit.claim", "task.audit.review", "task.audit.takeover", "task.asset_upload", "task.list"},
-		}
-	case RoleAuditB:
-		return FrontendAccessSpec{
-			Roles:   []string{"audit_b"},
-			Scopes:  []string{"audit_workspace"},
-			Menus:   []string{"audit_queue", "task_board", "task_list", "resource_management", "product_management"},
-			Pages:   []string{"task_board", "task_list", "audit_workspace", "assets_index", "task_assets", "asset_detail", "product_management"},
-			Actions: []string{"task.audit.claim", "task.audit.review", "task.audit.takeover", "task.asset_upload", "task.list"},
-		}
-	case RoleWarehouse:
-		return FrontendAccessSpec{
-			Roles:   []string{"warehouse"},
-			Scopes:  []string{"warehouse_workspace"},
-			Menus:   []string{"warehouse_receive", "warehouse_processing", "resource_management", "product_management", "export_center"},
-			Pages:   []string{"warehouse_receive", "warehouse_processing", "task_list", "task_board", "export_jobs", "assets_index", "task_assets", "asset_detail", "product_management"},
-			Actions: []string{"warehouse.receive", "warehouse.reject", "warehouse.complete", "task.list"},
-		}
-	case RoleAssetSubmitter:
-		return FrontendAccessSpec{
-			Roles:   []string{"asset_submitter"},
-			Scopes:  []string{"asset_workbench"},
-			Menus:   []string{"asset_workbench"},
-			Pages:   []string{"asset_workbench_upload", "asset_workbench_materials", "asset_workbench_submissions", "asset_workbench_profile"},
-			Actions: []string{"asset.workbench.bootstrap", "asset.workbench.submit", "asset.workbench.profile", "asset.workbench.material.download"},
-		}
-	case RoleAssetManager:
-		return FrontendAccessSpec{
-			Roles:   []string{"asset_manager"},
-			Scopes:  []string{"asset_workbench", "asset_workbench.manage"},
-			Menus:   []string{"asset_workbench"},
-			Pages:   []string{"asset_workbench_materials", "asset_workbench_submissions", "asset_workbench_qc", "asset_workbench_logs"},
-			Actions: []string{"asset.workbench.bootstrap", "asset.workbench.manage", "asset.workbench.system_search", "asset.workbench.download"},
-		}
-	case RoleAssetTemplateAdmin:
-		return FrontendAccessSpec{
-			Roles:   []string{"asset_template_admin"},
-			Scopes:  []string{"asset_workbench", "asset_workbench.cost_center"},
-			Menus:   []string{"asset_workbench"},
-			Pages:   []string{"asset_workbench_cost_center"},
-			Actions: []string{"asset.workbench.bootstrap", "asset.workbench.cost_center.manage"},
-		}
-	case RoleAssetSettlement:
-		return FrontendAccessSpec{
-			Roles:   []string{"asset_settlement"},
-			Scopes:  []string{"asset_workbench", "asset_workbench.settlement"},
-			Menus:   []string{"asset_workbench"},
-			Pages:   []string{"asset_workbench_settlement", "asset_workbench_reports", "asset_workbench_supplements"},
-			Actions: []string{"asset.workbench.bootstrap", "asset.workbench.settlement", "asset.workbench.export"},
-		}
-	case RoleOutsource:
-		return FrontendAccessSpec{
-			Roles:   []string{"outsource"},
-			Scopes:  []string{"compatibility_legacy"},
-			Menus:   []string{},
-			Pages:   []string{},
-			Actions: []string{},
-		}
-	case RoleERP:
-		return FrontendAccessSpec{
-			Roles:   []string{"erp"},
-			Scopes:  []string{"erp_internal"},
-			Menus:   []string{"integration_center", "product_management"},
-			Pages:   []string{"erp_sync_console", "product_management"},
-			Actions: []string{"erp.sync", "product.cost.read", "product.cost.binding.manage", "product.cost.recalculate", "product.cost.erp_sync"},
-		}
-	default:
-		return FrontendAccessSpec{}
-	}
-}
-
-func applyManagedScope(role Role, user *User, managedDepartments, managedTeams stringSet) {
-	if user == nil {
-		return
-	}
-	switch role {
-	case RoleDeptAdmin, RoleDesignDirector:
-		if len(user.ManagedDepartments) == 0 && user.Department != "" {
-			managedDepartments.Add(string(user.Department))
-		}
-	case RoleTeamLead:
-		if len(user.ManagedTeams) == 0 && user.Team != "" {
-			managedTeams.Add(user.Team)
-		}
-	}
-}
-
-func collectAllFrontendAccess(settings FrontendAccessSettings) FrontendAccessSpec {
-	all := FrontendAccessSpec{}
-	appendSpec := func(spec FrontendAccessSpec) {
-		all.Roles = append(all.Roles, spec.normalizedRoles()...)
-		all.Scopes = append(all.Scopes, spec.normalizedScopes()...)
-		all.Menus = append(all.Menus, spec.normalizedMenus()...)
-		all.Pages = append(all.Pages, spec.normalizedPages()...)
-		all.Actions = append(all.Actions, spec.normalizedActions()...)
-		all.Modules = append(all.Modules, spec.normalizedModules()...)
-	}
-
-	appendSpec(settings.Defaults.AllAuthenticated)
-	for _, spec := range settings.Roles {
-		appendSpec(spec)
-	}
-	for _, entry := range settings.Departments {
-		appendSpec(entry.FrontendAccessSpec)
-	}
-	appendSpec(settings.Identities["department_admin"])
-	return all
 }
 
 func applyFrontendSpec(roleNames, scopes, menus, pages, actions, modules stringSet, spec FrontendAccessSpec) {

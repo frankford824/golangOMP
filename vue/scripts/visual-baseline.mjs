@@ -45,48 +45,54 @@ const pages = [
     },
   },
   { name: 'task-list', path: '/tasks', ready: '.task-list-view' },
-  { name: 'task-create-modal', path: '/tasks/create', ready: '.create-task-modal-panel' },
+  { name: 'task-create-workbench', path: '/tasks/create', ready: '.compose-page' },
   {
-    name: 'base-select-open',
-    path: '/tasks/create',
-    ready: '.create-task-modal-panel',
+    name: 'task-create-planning-intent',
+    path: '/tasks/create?intent=planning_sku',
+    ready: '.compose-page[data-compose-intent="planning_sku"]',
     prepare: async (page) => {
-      const priorityTrigger = page
-        .locator('.create-task-modal-panel label:has-text("优先级") + div button')
-        .first()
-      await priorityTrigger.click()
-      await page.waitForSelector('.base-select-panel', { state: 'visible' })
+      await page.getByRole('button', { name: /添加一行/ }).click()
+      await page.waitForFunction(() => document.querySelector('.compose-page')?.getAttribute('data-row-count') === '2')
       await page.waitForTimeout(200)
     },
   },
   {
-    name: 'close-draft-confirm-modal',
+    name: 'task-create-row-drawer',
     path: '/tasks/create',
-    ready: '.create-task-modal-panel',
+    ready: '.compose-page',
     prepare: async (page) => {
-      await page.getByRole('button', { name: '新款单 SKU' }).click()
-      await page.locator('.create-task-modal-panel .modal-close-btn').click()
-      await page.waitForSelector('.close-draft-confirm-panel', { state: 'visible' })
+      await page.waitForSelector('.row-drawer', { state: 'visible' })
       await page.waitForTimeout(200)
     },
   },
   { name: 'task-detail', path: '/tasks/1002', ready: '.task-detail-view' },
   { name: 'task-assets', path: '/tasks/1002/assets?asset_id=1001', ready: '.task-resources-page' },
-  { name: 'resource-group-detail', path: '/asset-center/1', ready: '.group-detail' },
+  { name: 'resource-group-detail', path: '/asset-center/1', ready: '.detail-page' },
   {
     name: 'audit-confirmation-dialog',
     path: '/tasks/1002',
     ready: '.task-detail-view',
     prepare: async (page) => {
-      await page.getByRole('button', { name: '通过并结单' }).click()
-      await page.waitForSelector('[role="dialog"][aria-modal="true"]', { state: 'visible' })
+      await page.getByLabel('当前阶段操作').getByRole('button', { name: '进入审核工作台' }).click()
+      await page.waitForSelector('.workspace-dialog[role="dialog"]', { state: 'visible' })
+      await page.getByRole('button', { name: '确认定稿并结单' }).click()
+      await page.waitForSelector('.confirm-dialog[role="dialog"][aria-modal="true"]', { state: 'visible' })
       await page.waitForTimeout(200)
     },
   },
   { name: 'assets-index', path: '/asset-center', ready: '.assets-index-view' },
-  { name: 'access-policy', path: '/access-policy', ready: '.access-page' },
-  { name: 'planning-sku', path: '/tasks/sku-planning', ready: '.planning-page' },
-  { name: 'product-management', path: '/products', ready: '.product-management-view' },
+  {
+    name: 'user-management-org-role-modal',
+    path: '/users',
+    ready: '.user-management-view',
+    prepare: async (page) => {
+      await page.getByRole('button', { name: '设置部门默认角色' }).first().click()
+      await page.waitForSelector('.org-policy-modal .role-check', { state: 'visible' })
+      await page.waitForTimeout(200)
+    },
+  },
+  { name: 'planning-sku', path: '/tasks/sku-planning', ready: '.compose-page[data-compose-intent="planning_sku"]' },
+  { name: 'cost-rules', path: '/cost-rules', ready: '.cost-manager-page' },
   {
     name: 'user-management-role-modal',
     path: '/users',
@@ -99,15 +105,12 @@ const pages = [
     },
   },
   {
-    name: 'product-management-cost-tooltip',
-    path: '/products',
-    ready: '.product-management-view',
+    name: 'cost-rule-editor',
+    path: '/cost-rules',
+    ready: '.cost-manager-page',
     prepare: async (page) => {
-      if ((await page.locator('.pm-detail-help').count()) === 0) {
-        await page.locator('.pm-combo-header').first().click()
-      }
-      await page.waitForSelector('.pm-detail-help', { state: 'visible' })
-      await page.locator('.pm-detail-help').first().focus()
+      await page.getByRole('button', { name: '新增规则' }).click()
+      await page.waitForSelector('.modal-card form, form.modal-card', { state: 'visible' })
       await page.waitForTimeout(200)
     },
   },

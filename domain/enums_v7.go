@@ -219,7 +219,7 @@ func (t TaskType) RequiresAudit() bool {
 
 func (t TaskType) Valid() bool {
 	switch t {
-	case TaskTypeOriginalProductDevelopment, TaskTypeNewProductDevelopment, TaskTypeSKUPlanning, TaskTypePurchaseTask:
+	case TaskTypeOriginalProductDevelopment, TaskTypeNewProductDevelopment, TaskTypeSKUPlanning:
 		return true
 	case TaskTypeRetouchTask, TaskTypeCustomerCustomization, TaskTypeRegularCustomization:
 		return true
@@ -232,7 +232,7 @@ func (t TaskType) DefaultSourceMode() (TaskSourceMode, bool) {
 	switch t {
 	case TaskTypeOriginalProductDevelopment:
 		return TaskSourceModeExistingProduct, true
-	case TaskTypeNewProductDevelopment, TaskTypeSKUPlanning, TaskTypePurchaseTask, TaskTypeRetouchTask, TaskTypeCustomerCustomization, TaskTypeRegularCustomization:
+	case TaskTypeNewProductDevelopment, TaskTypeSKUPlanning, TaskTypeRetouchTask, TaskTypeCustomerCustomization, TaskTypeRegularCustomization:
 		return TaskSourceModeNewProduct, true
 	default:
 		return "", false
@@ -243,29 +243,6 @@ func (s ProcurementStatus) Valid() bool {
 	switch s {
 	case ProcurementStatusDraft, ProcurementStatusPrepared, ProcurementStatusInProgress, ProcurementStatusCompleted:
 		return true
-	default:
-		return false
-	}
-}
-
-func (s ProcurementStatus) AllowsWarehousePrepare() bool {
-	return s == ProcurementStatusCompleted
-}
-
-func (s ProcurementStatus) AllowsClose() bool {
-	return s == ProcurementStatusCompleted
-}
-
-func (s ProcurementStatus) CanTransit(action ProcurementAction) bool {
-	switch action {
-	case ProcurementActionPrepare:
-		return s == ProcurementStatusDraft
-	case ProcurementActionStart:
-		return s == ProcurementStatusPrepared
-	case ProcurementActionComplete:
-		return s == ProcurementStatusPrepared || s == ProcurementStatusInProgress
-	case ProcurementActionReopen:
-		return s == ProcurementStatusPrepared || s == ProcurementStatusInProgress || s == ProcurementStatusCompleted
 	default:
 		return false
 	}

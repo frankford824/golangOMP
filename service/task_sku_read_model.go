@@ -58,6 +58,7 @@ func synthesizeTaskSKUItems(task *domain.Task, detail *domain.TaskDetail) []*dom
 		if task.TaskType != domain.TaskTypeOriginalProductDevelopment {
 			item.DesignRequirement = detail.DesignRequirement
 		}
+		item.SetModeHint = detail.SetModeHint
 		item.ReferenceFileRefs = domain.ParseReferenceFileRefsJSON(detail.ReferenceFileRefsJSON)
 		if len(item.ReferenceFileRefs) == 0 {
 			item.ReferenceFileRefs = domain.ParseReferenceFileRefsJSON(detail.ReferenceImagesJSON)

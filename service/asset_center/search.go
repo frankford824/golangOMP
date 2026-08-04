@@ -7,6 +7,7 @@ import (
 	pathpkg "path"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -21,12 +22,21 @@ const materialSystemRoot = "/系统资源"
 const assetSearchTotalCacheTTL = 30 * time.Second
 
 type Service struct {
-	searchRepo   repo.TaskAssetSearchRepo
-	presigner    DownloadPresigner
-	urlBuilder   BrowserURLBuilder
-	streamOpener baseservice.StorageStreamOpener
-	externalSvc  *externalassets.Service
-	cache        AssetCenterCache
+	searchRepo    repo.TaskAssetSearchRepo
+	presigner     DownloadPresigner
+	urlBuilder    BrowserURLBuilder
+	streamOpener  baseservice.StorageStreamOpener
+	externalSvc   *externalassets.Service
+	cache         AssetCenterCache
+	flightMu      sync.Mutex
+	searchFlights map[string]*assetSearchFlight
+}
+
+type assetSearchFlight struct {
+	done  chan struct{}
+	rows  []*repo.TaskAssetSearchRow
+	total int64
+	err   error
 }
 
 type Option func(*Service)
@@ -82,21 +92,41 @@ func (s *Service) Search(ctx context.Context, query domain.AssetSearchQuery) (*S
 	if query.Source == domain.AssetResourceSourceExternal {
 		return s.searchExternal(ctx, query)
 	}
-	rows, total, err := s.searchSystemRows(ctx, query)
-	if err != nil {
-		return nil, domain.NewAppError(domain.ErrCodeInternalError, err.Error(), nil)
+	includeExternal := query.Source == domain.AssetResourceSourceAll &&
+		!assetSearchHasSystemOnlyFilters(query) &&
+		s.externalSvc != nil && s.externalSvc.Enabled()
+	var rows []*repo.TaskAssetSearchRow
+	var total int64
+	var systemErr error
+	var external []*AssetDetail
+	var externalTotal int64
+	var externalAppErr *domain.AppError
+	if includeExternal {
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			rows, total, systemErr = s.searchSystemRows(ctx, query)
+		}()
+		go func() {
+			defer wg.Done()
+			external, externalTotal, externalAppErr = s.searchExternalRows(ctx, query)
+		}()
+		wg.Wait()
+	} else {
+		rows, total, systemErr = s.searchSystemRows(ctx, query)
+	}
+	if systemErr != nil {
+		return nil, domain.NewAppError(domain.ErrCodeInternalError, systemErr.Error(), nil)
+	}
+	if externalAppErr != nil {
+		return nil, externalAppErr
 	}
 	items := make([]*AssetDetail, 0, len(rows))
 	for _, row := range rows {
 		items = append(items, s.buildAssetDetail(row, nil))
 	}
-	if query.Source == domain.AssetResourceSourceAll &&
-		!assetSearchHasSystemOnlyFilters(query) &&
-		s.externalSvc != nil && s.externalSvc.Enabled() {
-		external, externalTotal, appErr := s.searchExternalRows(ctx, query)
-		if appErr != nil {
-			return nil, appErr
-		}
+	if includeExternal {
 		items = append(items, external...)
 		if len(items) > query.Size {
 			items = items[:query.Size]
@@ -117,11 +147,38 @@ func (s *Service) searchSystemRows(ctx context.Context, query domain.AssetSearch
 			return rows, total, err
 		}
 	}
-	rows, total, err := s.searchRepo.Search(ctx, query)
+	rows, total, err := s.searchSystemRowsSingleflight(ctx, query)
 	if err == nil {
 		s.setAssetSearchTotalCache(ctx, query, total)
 	}
 	return rows, total, err
+}
+
+func (s *Service) searchSystemRowsSingleflight(ctx context.Context, query domain.AssetSearchQuery) ([]*repo.TaskAssetSearchRow, int64, error) {
+	key := assetSearchTotalCacheKey(query) + ":" + strconv.Itoa(query.Page) + ":" + strconv.Itoa(query.Size)
+	s.flightMu.Lock()
+	if s.searchFlights == nil {
+		s.searchFlights = make(map[string]*assetSearchFlight)
+	}
+	if existing := s.searchFlights[key]; existing != nil {
+		s.flightMu.Unlock()
+		select {
+		case <-ctx.Done():
+			return nil, 0, ctx.Err()
+		case <-existing.done:
+			return existing.rows, existing.total, existing.err
+		}
+	}
+	flight := &assetSearchFlight{done: make(chan struct{})}
+	s.searchFlights[key] = flight
+	s.flightMu.Unlock()
+
+	flight.rows, flight.total, flight.err = s.searchRepo.Search(ctx, query)
+	s.flightMu.Lock()
+	delete(s.searchFlights, key)
+	close(flight.done)
+	s.flightMu.Unlock()
+	return flight.rows, flight.total, flight.err
 }
 
 func (s *Service) getAssetSearchTotalCache(ctx context.Context, query domain.AssetSearchQuery) (int64, bool) {
@@ -153,6 +210,7 @@ func assetSearchTotalCacheKey(query domain.AssetSearchQuery) string {
 		source = domain.AssetResourceSourceSystem
 	}
 	parts := []string{
+		strings.TrimSpace(query.AccessScopeKey),
 		strings.TrimSpace(query.Keyword),
 		strings.TrimSpace(query.ModuleKey),
 		strings.TrimSpace(query.OwnerTeamCode),

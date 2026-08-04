@@ -78,7 +78,7 @@ func main() {
 	}
 
 	mdb := mysqlrepo.New(db)
-	repo := mysqlrepo.NewExternalAssetRepo(mdb)
+	repo := mysqlrepo.NewExternalAssetRepoWithAIRetrieval(mdb, cfg.VectorSearch.EmbeddingVersion)
 	ossDirect := service.NewOSSDirectService(service.OSSDirectConfig{
 		Enabled:         cfg.OSSDirect.Enabled,
 		Endpoint:        cfg.OSSDirect.Endpoint,

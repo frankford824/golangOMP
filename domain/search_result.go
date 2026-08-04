@@ -9,6 +9,14 @@ type SearchResultGroup struct {
 	Users    []SearchUser    `json:"users"`
 }
 
+type SearchRetrievalMeta struct {
+	RequestedMode string `json:"requested_mode"`
+	Mode          string `json:"mode"`
+	Degraded      bool   `json:"degraded"`
+	Candidates    int    `json:"candidates"`
+	Reason        string `json:"reason,omitempty"`
+}
+
 type SearchTask struct {
 	ID              int64      `json:"id"`
 	TaskNo          string     `json:"task_no"`

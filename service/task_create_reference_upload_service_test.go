@@ -75,6 +75,96 @@ func TestTaskCreateReferenceUploadServiceCreateAndComplete(t *testing.T) {
 	}
 }
 
+func TestTaskCreateReferenceUploadServiceBindsRemotelyCompletedSession(t *testing.T) {
+	uploadRequestRepo := newStep37UploadRequestRepo()
+	assetStorageRefRepo := newStep37AssetStorageRefRepo()
+	uploadClient := newStubUploadServiceClient().(*stubUploadServiceClient)
+	svc := NewTaskCreateReferenceUploadService(uploadRequestRepo, assetStorageRefRepo, step04TxRunner{}, uploadClient).(*taskCreateReferenceUploadService)
+
+	created, appErr := svc.CreateUploadSession(context.Background(), CreateTaskReferenceUploadSessionParams{
+		CreatedBy:    9,
+		Filename:     "reference-completed-remotely.png",
+		ExpectedSize: uploadRequestInt64Ptr(1024),
+		MimeType:     "image/png",
+		FileHash:     "hash-completed-remotely",
+	})
+	if appErr != nil {
+		t.Fatalf("CreateUploadSession() unexpected error: %+v", appErr)
+	}
+
+	uploadClient.remoteSessionStatus = domain.DesignAssetSessionStatusCompleted
+	uploadClient.remoteSessionFileID = "file-completed-remotely"
+	uploadClient.lastCompletedSize = 1024
+	uploadClient.lastCompletedHash = "hash-completed-remotely"
+	uploadClient.failComplete = true
+
+	completed, appErr := svc.CompleteUploadSession(context.Background(), CompleteTaskReferenceUploadSessionParams{
+		SessionID:   created.Session.ID,
+		CompletedBy: 9,
+		FileHash:    "hash-completed-remotely",
+	})
+	if appErr != nil {
+		t.Fatalf("CompleteUploadSession() unexpected error: %+v", appErr)
+	}
+	if completed.Session == nil || completed.Session.SessionStatus != domain.DesignAssetSessionStatusCompleted {
+		t.Fatalf("CompleteUploadSession() session = %+v", completed.Session)
+	}
+	if completed.ReferenceFileRef == "" || completed.StorageRef == nil || completed.RefObject == nil {
+		t.Fatalf("CompleteUploadSession() result = %+v", completed)
+	}
+	if uploadClient.completeCalls != 0 {
+		t.Fatalf("CompleteUploadSession() remote complete calls = %d, want 0", uploadClient.completeCalls)
+	}
+	if uploadClient.getFileMetaCalls != 1 {
+		t.Fatalf("CompleteUploadSession() get file meta calls = %d, want 1", uploadClient.getFileMetaCalls)
+	}
+	request := uploadRequestRepo.requests[created.Session.ID]
+	if request.Status != domain.UploadRequestStatusBound || request.BoundRefID != completed.ReferenceFileRef {
+		t.Fatalf("upload request = %+v", request)
+	}
+}
+
+func TestTaskCreateReferenceUploadServiceFinalizesUploadedRemoteSessionWithoutFileID(t *testing.T) {
+	uploadRequestRepo := newStep37UploadRequestRepo()
+	assetStorageRefRepo := newStep37AssetStorageRefRepo()
+	uploadClient := newStubUploadServiceClient().(*stubUploadServiceClient)
+	svc := NewTaskCreateReferenceUploadService(uploadRequestRepo, assetStorageRefRepo, step04TxRunner{}, uploadClient).(*taskCreateReferenceUploadService)
+
+	created, appErr := svc.CreateUploadSession(context.Background(), CreateTaskReferenceUploadSessionParams{
+		CreatedBy:    9,
+		Filename:     "reference-uploaded-remotely.png",
+		ExpectedSize: uploadRequestInt64Ptr(1024),
+		MimeType:     "image/png",
+		FileHash:     "hash-uploaded-remotely",
+	})
+	if appErr != nil {
+		t.Fatalf("CreateUploadSession() unexpected error: %+v", appErr)
+	}
+
+	uploadClient.remoteSessionStatus = domain.DesignAssetSessionStatusCompleted
+
+	completed, appErr := svc.CompleteUploadSession(context.Background(), CompleteTaskReferenceUploadSessionParams{
+		SessionID:   created.Session.ID,
+		CompletedBy: 9,
+		FileHash:    "hash-uploaded-remotely",
+	})
+	if appErr != nil {
+		t.Fatalf("CompleteUploadSession() unexpected error: %+v", appErr)
+	}
+	if completed.Session == nil || completed.Session.SessionStatus != domain.DesignAssetSessionStatusCompleted {
+		t.Fatalf("CompleteUploadSession() session = %+v", completed.Session)
+	}
+	if completed.ReferenceFileRef == "" || completed.StorageRef == nil || completed.RefObject == nil {
+		t.Fatalf("CompleteUploadSession() result = %+v", completed)
+	}
+	if uploadClient.completeCalls != 1 {
+		t.Fatalf("CompleteUploadSession() remote complete calls = %d, want 1", uploadClient.completeCalls)
+	}
+	if uploadClient.getFileMetaCalls != 0 {
+		t.Fatalf("CompleteUploadSession() get file meta calls = %d, want 0", uploadClient.getFileMetaCalls)
+	}
+}
+
 func TestTaskCreateReferenceUploadServiceOSSDirectSessionCompletesWithoutBackendFileProxy(t *testing.T) {
 	const fileSize = int64(1024)
 	deleteCalls := 0

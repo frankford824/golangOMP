@@ -20,9 +20,8 @@ func (r *customizationJobRepo) Create(ctx context.Context, tx repo.Tx, job *doma
 		INSERT INTO customization_jobs
 		  (task_id, order_no, source_asset_id, current_asset_id, customization_level_code, customization_level_name,
 		   review_reference_unit_price, review_reference_weight_factor, unit_price, weight_factor,
-		   note, customization_review_decision, decision_type,
-		   assigned_operator_id, last_operator_id, pricing_worker_type, status, warehouse_reject_reason, warehouse_reject_category)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		   note, assigned_operator_id, last_operator_id, pricing_worker_type, status)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		job.TaskID,
 		job.OrderNo,
 		toNullInt64(job.SourceAssetID),
@@ -34,14 +33,10 @@ func (r *customizationJobRepo) Create(ctx context.Context, tx repo.Tx, job *doma
 		toNullFloat64(job.UnitPrice),
 		toNullFloat64(job.WeightFactor),
 		job.Note,
-		string(job.ReviewDecision),
-		string(job.DecisionType),
 		toNullInt64(job.AssignedOperatorID),
 		toNullInt64(job.LastOperatorID),
 		string(job.PricingWorkerType),
 		string(job.Status),
-		job.WarehouseRejectReason,
-		job.WarehouseRejectCategory,
 	)
 	if err != nil {
 		return 0, fmt.Errorf("insert customization_job: %w", err)
@@ -160,14 +155,10 @@ func (r *customizationJobRepo) Update(ctx context.Context, tx repo.Tx, job *doma
 		    unit_price = ?,
 		    weight_factor = ?,
 		    note = ?,
-		    customization_review_decision = ?,
-		    decision_type = ?,
 		    assigned_operator_id = ?,
 		    last_operator_id = ?,
 		    pricing_worker_type = ?,
 		    status = ?,
-		    warehouse_reject_reason = ?,
-		    warehouse_reject_category = ?,
 		    updated_at = CURRENT_TIMESTAMP
 		WHERE id = ?`,
 		toNullInt64(job.SourceAssetID),
@@ -180,14 +171,10 @@ func (r *customizationJobRepo) Update(ctx context.Context, tx repo.Tx, job *doma
 		toNullFloat64(job.UnitPrice),
 		toNullFloat64(job.WeightFactor),
 		job.Note,
-		string(job.ReviewDecision),
-		string(job.DecisionType),
 		toNullInt64(job.AssignedOperatorID),
 		toNullInt64(job.LastOperatorID),
 		string(job.PricingWorkerType),
 		string(job.Status),
-		job.WarehouseRejectReason,
-		job.WarehouseRejectCategory,
 		job.ID,
 	)
 	if err != nil {
@@ -214,14 +201,14 @@ func scanCustomizationJob(scanner interface{ Scan(...interface{}) error }) (*dom
 		&unitPrice,
 		&weightFactor,
 		&item.Note,
-		&item.ReviewDecision,
-		&item.DecisionType,
+		&item.LegacyReviewDecision,
+		&item.LegacyDecisionType,
 		&assignedOperatorID,
 		&lastOperatorID,
 		&item.PricingWorkerType,
 		&item.Status,
-		&item.WarehouseRejectReason,
-		&item.WarehouseRejectCategory,
+		&item.LegacyWarehouseRejectReason,
+		&item.LegacyWarehouseRejectType,
 		&item.CreatedAt,
 		&item.UpdatedAt,
 	)

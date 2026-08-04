@@ -24,6 +24,8 @@ export const API_ERROR_CODE_ZH: Record<string, string> = {
   RESOURCE_EXHAUSTED: '系统繁忙，请稍后再试',
   ABORTED: '操作被中断，请重试',
   INVALID_REQUEST: '请求参数有误，请检查填写内容',
+  ERP_PRODUCT_NOT_FOUND: 'ERP 测试环境未找到该商品编码，请核对编码或选择测试环境内已有商品',
+  ERP_UPSTREAM_FAILURE: 'ERP 测试环境暂时不可用，请稍后重试',
 }
 
 /** 后端 deny_code → 前端降级/提示文案。 */
@@ -41,9 +43,7 @@ export const API_DENY_CODE_ZH: Record<string, string> = {
   user_update_field_denied_by_scope: '当前组织范围无权修改该用户字段',
   role_assignment_denied_by_scope: '当前组织范围无权调整该角色',
   management_access_required: '需要管理权限',
-  reports_super_admin_only: '报表仅超级管理员可见',
   asset_version_race_retry: '资产版本发生并发更新，请刷新后重试',
-  audit_log_access_denied: '无权查看该审计日志',
   workflow_lane_unsupported: '当前工作流通道不支持该操作',
   old_password_mismatch: '旧密码不正确',
   password_confirmation_required: '请确认新密码',

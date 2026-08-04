@@ -261,7 +261,7 @@ import { usersApi } from '@/services/api/usersApi'
 import { useNotificationsStore, type NotificationItem } from '@/stores/notifications.store'
 import { usePermissionsStore } from '@/stores/permissions'
 import { useWebPushStore } from '@/stores/webPush.store'
-import { RoleEnum } from '@/types'
+import { PermissionEnum } from '@/types'
 import { formatDateTimeBeijing, taskInstantMs } from '@/utils/date'
 
 type FilterMode = 'all' | 'unread'
@@ -307,20 +307,8 @@ const visibleItems = computed(() =>
   filter.value === 'unread' ? notificationsStore.unreadItems : items.value,
 )
 const emptyText = computed(() => (filter.value === 'unread' ? '暂无未读通知' : '暂无通知'))
-const canBroadcast = computed(() =>
-  permissionsStore.hasAnyRole([
-    RoleEnum.SUPER_ADMIN,
-    RoleEnum.HR_ADMIN,
-    RoleEnum.DEPT_ADMIN,
-    'SuperAdmin',
-    'Admin',
-    'HRAdmin',
-    'DepartmentAdmin',
-  ]),
-)
-const canBroadcastAll = computed(() =>
-  permissionsStore.hasAnyRole([RoleEnum.SUPER_ADMIN, RoleEnum.HR_ADMIN, 'SuperAdmin', 'Admin', 'HRAdmin']),
-)
+const canBroadcast = computed(() => permissionsStore.hasAction(PermissionEnum.SYSTEM_MANAGE))
+const canBroadcastAll = canBroadcast
 const selectedUsers = computed(() => {
   const byID = new Map(userOptions.value.map((user) => [normalizeUserID(user.id), user]))
   return selectedUserIds.value.map((id) => byID.get(id) ?? ({ id, display_name: `用户 ${id}` } as DirectoryUser))

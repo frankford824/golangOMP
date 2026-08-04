@@ -12,18 +12,18 @@
     </div>
     <template v-else-if="hasBusinessAccess">
       <div
-        class="board dashboard-workbench mx-auto w-full min-w-0 max-w-[min(100%,90rem)] space-y-4 px-3 pb-8 pt-4 sm:space-y-5 sm:px-4 sm:pt-5 md:space-y-6 md:px-6 md:pt-6 lg:px-8"
+        class="board dashboard-workbench w-full min-w-0 space-y-4 pb-8 sm:space-y-5 md:space-y-6"
       >
         <!-- 顶栏 -->
         <header
-          class="board-header rounded-xl bg-[rgb(var(--yb-surface))] p-4 shadow-sm shadow-[rgb(var(--yb-shadow)/0.04)] ring-1 ring-[rgb(var(--yb-border)/0.6)] sm:p-5"
+          class="board-header yb-page-surface yb-page-header-row"
+          data-page-header="dashboard"
         >
-          <div class="board-header-content">
-            <p class="board-header-kicker">运营工作台</p>
-            <h1 class="board-header-title">
+          <div class="board-header-content yb-page-heading-copy">
+            <h1 class="board-header-title yb-page-title">
               任务运营主页总览
             </h1>
-            <p class="board-header-subtitle">
+            <p class="board-header-subtitle yb-page-subtitle">
               先看今日是否正常，再判断队列积压、质量风险和下一步处理入口。
             </p>
           </div>
@@ -85,9 +85,9 @@
           </BaseButton>
         </div>
 
-        <!-- KPI 详情（需权限，沿用原统计口径） -->
+        <!-- 任务经营指标与任务看板共用 task.view 权限。 -->
         <section
-          v-if="can('kpi.view')"
+          v-if="can('task.view')"
           class="kpi kpi--quality grid grid-cols-1 gap-3 min-[400px]:grid-cols-2 lg:grid-cols-4 lg:gap-4"
         >
           <DashboardKpiCard
@@ -109,7 +109,7 @@
             title="全局进行中任务"
             :value="kpiStats.pendingCount"
             hint="全局未完成、未取消任务"
-            route="/tasks"
+            route="/tasks?operational_bucket=active_tasks"
           />
         </section>
 
@@ -125,24 +125,24 @@
             title="设计待办"
             :value="summary.todayPendingCount"
             hint="待指派、设计中、审核打回等任务"
-            route="/tasks"
+            route="/tasks?operational_bucket=design_pending"
           />
           <DashboardKpiCard
             title="待审核"
             :value="summary.pendingAuditCount"
             hint="待审核任务"
-            route="/tasks?status=PendingAudit"
+            route="/tasks?operational_bucket=pending_audit"
           />
           <DashboardKpiCard
             title="需交班"
             :value="summary.handoverCount"
             hint="审核交班任务"
-            route="/tasks?status=PendingAudit"
+            route="/tasks?operational_bucket=handover"
           />
           <DashboardKpiCard
             title="今日新建"
             :value="summary.todayCreatedCount"
-            route="/tasks"
+            route="/tasks?operational_bucket=today_created"
           />
         </section>
 
@@ -449,7 +449,7 @@ const risks = computed<RiskItem[]>(() => {
       id: 'overdue-tasks',
       level: 'high',
       message: `${counts.overdue} 个进行中任务已经逾期`,
-      route: '/tasks?overdue=true',
+      route: '/tasks?operational_bucket=overdue',
     })
   }
   if (counts.due_today > 0) {
@@ -457,7 +457,7 @@ const risks = computed<RiskItem[]>(() => {
       id: 'due-today',
       level: 'medium',
       message: `${counts.due_today} 个任务今天截止`,
-      route: '/tasks',
+      route: '/tasks?operational_bucket=due_today',
     })
   }
   if (counts.customization_in_progress > 0) {
@@ -465,7 +465,7 @@ const risks = computed<RiskItem[]>(() => {
       id: 'customization-in-progress',
       level: 'medium',
       message: `${counts.customization_in_progress} 个定制任务处理中`,
-      route: '/tasks?workflow_lane=customization',
+      route: '/tasks?operational_bucket=customization_in_progress',
     })
   }
   return list
@@ -801,8 +801,7 @@ onBeforeUnmount(stopRefreshLoop)
 }
 
 .dashboard-workbench {
-  padding-left: clamp(1rem, 1.65vw, 2rem);
-  padding-right: clamp(1rem, 1.65vw, 2rem);
+  padding-inline: 0;
 }
 
 .board::before,
@@ -838,14 +837,6 @@ onBeforeUnmount(stopRefreshLoop)
 
 .board-header-content {
   min-width: 0;
-}
-
-.board-header-kicker {
-  margin: 0 0 0.3rem;
-  color: rgb(var(--yb-text-muted));
-  font-size: 0.6875rem;
-  font-weight: 600;
-  letter-spacing: 0.04em;
 }
 
 .board-header-title,

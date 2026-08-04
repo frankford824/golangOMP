@@ -9,6 +9,7 @@ import { addMillisecondsToNowISO, getBeijingDateCompactString, nowISO } from '@/
 const MOCK_ACTOR = 'ops_demo'
 const MOCK_ACTOR_ID = 1
 const MOCK_ACTOR_TEAM = 'ungrouped'
+const MOCK_REFERENCE_PREVIEW = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="320" height="220" viewBox="0 0 320 220"%3E%3Crect width="320" height="220" rx="20" fill="%23eef3fb"/%3E%3Cpath d="M72 161l56-58 39 37 31-29 50 50H72z" fill="%2394a9c8"/%3E%3Ccircle cx="220" cy="70" r="24" fill="%23f6c66d"/%3E%3Ctext x="160" y="194" text-anchor="middle" font-family="sans-serif" font-size="15" fill="%23435b7d"%3E%E8%BF%90%E8%90%A5%E5%8F%82%E8%80%83%E5%9B%BE%3C/text%3E%3C/svg%3E'
 const LARGE_SURFACE_AUDIT_TOTAL = Number(import.meta.env.VITE_LARGE_SURFACE_TOTAL ?? 5000)
 const LARGE_SURFACE_AUDIT_PAGE_SIZE = Number(import.meta.env.VITE_LARGE_SURFACE_PAGE_SIZE ?? 100)
 
@@ -64,6 +65,26 @@ function parseTaskIdFromRoot(path: string): string | null {
   return match?.[1] ?? null
 }
 
+function v8NumericTaskContract(task: MockTask, taskId: string) {
+  return {
+    ...task,
+    id: Number(taskId),
+    task_status: task.status === 'completed' ? 'Completed' : 'PendingAudit',
+    workflow_revision: 3,
+    workflow_contract_version: 2,
+    business_lane: task.task_type === 'customer_customization' ? 'customization' : 'normal',
+    allowed_actions: ['task.audit.approve', 'task.audit.return_to_design', 'task.audit.handover'],
+    product_name_snapshot: task.title,
+    primary_sku_code: 'SKU-MOCK-1002',
+    current_handler_name: '审核演示',
+    owner_department: '设计部',
+    owner_org_team: '主图组',
+    requirement_description: '完成主图设计并核对套装顺序。',
+    operation_note: '请在审核通过前检查全部最终成品。',
+    reference_file_refs: [{ id: 1, file_name: '参考图.png', download_url: '/mock-assets/reference.png' }],
+  }
+}
+
 function filterTasks(
   q: Record<string, unknown>,
 ): { items: MockTask[]; total: number; page: number; page_size: number } {
@@ -80,7 +101,7 @@ function filterTasks(
   const filterMine = filter === 'mine'
   const filterPool = filter === 'pool' || filter === 'module_pool'
   const actorTeam = String(q.pool_team_code ?? MOCK_ACTOR_TEAM).trim()
-  const workflowLane = String(q.workflow_lane ?? '')
+  const businessLane = String(q.business_lane ?? '')
   const dateFrom = String(q.date_from ?? '').trim()
   const dateTo = String(q.date_to ?? '').trim()
   const sort = String(q.sort ?? '-updated_at').trim()
@@ -96,11 +117,11 @@ function filterTasks(
     const poolTaskIds = new Set(poolRows(actorTeam).map((row) => row.id))
     items = items.filter((t) => poolTaskIds.has(t.id))
   }
-  if (workflowLane === 'normal') {
+  if (businessLane === 'normal') {
     items = items.filter(
       (t) => t.task_type !== 'customer_customization' && t.task_type !== 'regular_customization',
     )
-  } else if (workflowLane === 'customization') {
+  } else if (businessLane === 'customization') {
     items = items.filter(
       (t) => t.task_type === 'customer_customization' || t.task_type === 'regular_customization',
     )
@@ -182,12 +203,6 @@ function poolRows(actorTeam: string = MOCK_ACTOR_TEAM): Array<MockTask & { modul
     }
   }
   return rows
-}
-
-function retouchWorkflowCodeFromModuleState(state: string | undefined): string {
-  const s = String(state ?? 'pending_claim').toLowerCase().replace(/-/g, '_')
-  if (s === 'closed') return 'completed'
-  return s
 }
 
 function applyDesignerAssignToMockTask(
@@ -367,28 +382,6 @@ export const tasksHandler: MockHandler = (request) => {
     }
   }
 
-  if (request.method === 'GET' && request.path === '/v1/tasks/pool') {
-    const page = Math.max(1, Number(request.query.page ?? 1))
-    const pageSize = Math.min(100, Math.max(1, Number(request.query.page_size ?? 20)))
-    const actorTeam = String(request.query.pool_team_code ?? MOCK_ACTOR_TEAM).trim()
-    let items = poolRows(actorTeam)
-    const moduleKey = String(request.query.module_key ?? '')
-    if (moduleKey && moduleKey !== 'any') {
-      items = items.filter((item) => item.module_key === moduleKey)
-    }
-    const total = items.length
-    const start = (page - 1) * pageSize
-    return {
-      status: 200,
-      data: {
-        items: items.slice(start, start + pageSize),
-        total,
-        page,
-        page_size: pageSize,
-      },
-    }
-  }
-
   if (request.method === 'GET' && request.path.match(/^\/v1\/tasks\/[^/]+\/events$/)) {
     const taskId = request.path.split('/')[3] ?? ''
     const items = mockTaskEvents
@@ -399,9 +392,10 @@ export const tasksHandler: MockHandler = (request) => {
 
   if (request.method === 'GET' && request.path.match(/^\/v1\/tasks\/[^/]+\/detail$/)) {
     const taskId = request.path.split('/')[3] ?? ''
-    const task = mockTasks.find((item) => item.id === taskId)
-    if (!task) return { status: 404, data: { message: 'task not found' } }
-    const modules = listTaskModules(taskId).map((m) => ({
+    const storedTask = mockTasks.find((item) => item.id === taskId || item.id === `task_${taskId}`)
+    if (!storedTask) return { status: 404, data: { message: 'task not found' } }
+    const task = /^\d+$/.test(taskId) ? v8NumericTaskContract(storedTask, taskId) : storedTask
+    const modules = listTaskModules(storedTask.id).map((m) => ({
       module_key: m.module_key,
       state: m.state,
       scope: {
@@ -411,28 +405,16 @@ export const tasksHandler: MockHandler = (request) => {
       },
       allowed_actions: { actions: m.allowed_actions ?? [] },
     }))
-    const retouchMod = listTaskModules(taskId).find((m) => m.module_key === 'retouch')
-    const rtCode =
-      task.task_type === 'retouch_task'
-        ? retouchWorkflowCodeFromModuleState(retouchMod?.state)
-        : null
-    const workflow =
-      task.task_type === 'retouch_task'
-        ? {
-            main_status: 'created',
-            sub_status: {
-              design: { code: rtCode, label: 'Retouch', source: 'retouch_module' },
-              retouch: { code: rtCode, label: 'Retouch', source: 'module' },
-              audit: { code: 'not_triggered', label: 'Not triggered', source: 'task_type' },
-              customization: { code: 'not_triggered', label: 'Not triggered', source: 'task_type' },
-            },
-          }
-        : undefined
     return {
       status: 200,
       data: {
         task,
-        ...(workflow ? { workflow } : {}),
+        design_sub_status:
+          storedTask.status === 'completed'
+            ? 'finalized'
+            : storedTask.status === 'submitted'
+              ? 'pending_audit'
+              : 'in_progress',
         task_detail: {
           category_code: 'mock_category',
           design_requirement: 'mock 设计需求',
@@ -444,7 +426,7 @@ export const tasksHandler: MockHandler = (request) => {
           {
             filename: 'mock-ref.png',
             mime_type: 'image/png',
-            download_url: '/v1/assets/files/mock/ref.png',
+            download_url: MOCK_REFERENCE_PREVIEW,
           },
         ],
         modules,
@@ -458,23 +440,7 @@ export const tasksHandler: MockHandler = (request) => {
       const task = mockTasks.find((item) => item.id === taskId || item.id === `task_${taskId}`)
       if (!task) return { status: 404, data: { message: 'task not found' } }
       if (/^\d+$/.test(taskId)) {
-        return { status: 200, data: {
-          ...task,
-          id: Number(taskId),
-          task_status: task.status === 'completed' ? 'Completed' : 'PendingAudit',
-          workflow_revision: 3,
-          workflow_contract_version: 2,
-          business_lane: task.task_type === 'customer_customization' ? 'customization' : 'normal',
-          allowed_actions: ['task.audit.approve', 'task.audit.return_to_design', 'task.audit.handover'],
-          product_name_snapshot: task.title,
-          primary_sku_code: 'SKU-MOCK-1002',
-          current_handler_name: '审核演示',
-          owner_department: '设计部',
-          owner_org_team: '主图组',
-          requirement_description: '完成主图设计并核对套装顺序。',
-          operation_note: '请在审核通过前检查全部最终成品。',
-          reference_file_refs: [{ id: 1, file_name: '参考图.png', download_url: '/mock-assets/reference.png' }],
-        } }
+        return { status: 200, data: v8NumericTaskContract(task, taskId) }
       }
       return { status: 200, data: task }
     }

@@ -1,9 +1,9 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import type { Product } from '@/types'
+import type { ERPProductOption } from '@/types'
 import { erpApi } from '@/services/api/erpApi'
 
-function normalizeErpProduct(raw: Record<string, unknown>): Product {
+function normalizeErpProduct(raw: Record<string, unknown>): ERPProductOption {
   // 兼容 product_id 为 string 或 number（后端可能返回 int64）
   const facadeProductId =
     raw.product_id != null && raw.product_id !== ''
@@ -30,7 +30,7 @@ function normalizeErpProduct(raw: Record<string, unknown>): Product {
 }
 
 export const useProductsStore = defineStore('products', () => {
-  const items = ref<Product[]>([])
+  const items = ref<ERPProductOption[]>([])
   const loading = ref(false)
   const searchError = ref<string | null>(null)
   const page = ref(1)
@@ -87,7 +87,7 @@ export const useProductsStore = defineStore('products', () => {
     }
   }
 
-  function setProducts(products: Product[]) {
+  function setProducts(products: ERPProductOption[]) {
     items.value = products
     total.value = products.length
   }

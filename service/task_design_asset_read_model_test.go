@@ -70,7 +70,7 @@ func TestLoadTaskDesignAssetReadModelUsesTaskLevelBatchVersionRead(t *testing.T)
 	task := &domain.Task{
 		ID:         11,
 		TaskNo:     "T-11",
-		TaskStatus: domain.TaskStatusPendingAuditA,
+		TaskStatus: domain.TaskStatusPendingAudit,
 	}
 	assets, versions, appErr := loadTaskDesignAssetReadModel(context.Background(), nil, designRepo, taskAssetRepo, task)
 	if appErr != nil {
@@ -90,6 +90,180 @@ func TestLoadTaskDesignAssetReadModelUsesTaskLevelBatchVersionRead(t *testing.T)
 	}
 	if versions[0].ID != 200 || versions[1].ID != 201 {
 		t.Fatalf("delivery version order = [%d,%d], want [200,201]", versions[0].ID, versions[1].ID)
+	}
+}
+
+func TestLoadTaskDesignAssetReadModelKeepsMigrationSourceAliasOutOfLegacyPointers(t *testing.T) {
+	const (
+		taskID        = int64(516)
+		rootAssetID   = int64(483)
+		originID      = int64(335)
+		sourceAliasID = int64(36019)
+	)
+	versionNo := 1
+	uploaded := "uploaded"
+	now := time.Date(2026, 4, 23, 5, 17, 2, 0, time.UTC)
+	designRepo := &designAssetReadModelStub{
+		assetsByTask: map[int64][]*domain.DesignAsset{
+			taskID: {
+				{
+					ID:               rootAssetID,
+					TaskID:           taskID,
+					AssetNo:          "AST-0001",
+					AssetType:        domain.TaskAssetTypeDelivery,
+					CurrentVersionID: int64Ptr(originID),
+				},
+			},
+		},
+	}
+	origin := &domain.TaskAsset{
+		ID:               originID,
+		TaskID:           taskID,
+		AssetID:          int64Ptr(rootAssetID),
+		AssetType:        domain.TaskAssetTypeDelivery,
+		VersionNo:        versionNo,
+		AssetVersionNo:   intPtr(versionNo),
+		FileName:         "1-35-175cm.psd",
+		UploadStatus:     &uploaded,
+		UploadedBy:       262,
+		UploadedAt:       &now,
+		FlowReviewStatus: domain.TaskAssetFlowReviewStatusPendingReview,
+	}
+	alias := *origin
+	alias.ID = sourceAliasID
+	alias.AssetType = domain.TaskAssetTypeSource
+	alias.VersionNo = 68
+	alias.SourceModuleKey = "migration"
+	alias.Remark = "v8-source-alias:group=307:origin=335"
+	alias.FlowReviewStatus = domain.TaskAssetFlowReviewStatusNotApplicable
+	taskAssetRepo := &taskAssetReadModelStub{
+		recordsByTask: map[int64][]*domain.TaskAsset{
+			taskID: {origin, &alias},
+		},
+		recordsByAsset: map[int64][]*domain.TaskAsset{
+			rootAssetID: {origin, &alias},
+		},
+	}
+	task := &domain.Task{
+		ID:         taskID,
+		TaskNo:     "RW-20260423-A-000511",
+		TaskStatus: domain.TaskStatusCompleted,
+	}
+
+	assets, versions, appErr := loadTaskDesignAssetReadModel(
+		context.Background(), nil, designRepo, taskAssetRepo, task,
+	)
+	if appErr != nil {
+		t.Fatalf("loadTaskDesignAssetReadModel() error = %+v", appErr)
+	}
+	if len(assets) != 1 || len(versions) != 1 {
+		t.Fatalf("legacy read model assets/versions = %d/%d, want 1/1", len(assets), len(versions))
+	}
+	if versions[0].ID != originID {
+		t.Fatalf("legacy version id = %d, want origin %d", versions[0].ID, originID)
+	}
+	if assets[0].CurrentVersion == nil || assets[0].CurrentVersion.ID != originID ||
+		assets[0].ApprovedVersion == nil || assets[0].ApprovedVersion.ID != originID {
+		t.Fatalf(
+			"legacy current/approved = %+v/%+v, want origin %d for both",
+			assets[0].CurrentVersion, assets[0].ApprovedVersion, originID,
+		)
+	}
+	if assets[0].CurrentVersionID == nil || *assets[0].CurrentVersionID != originID ||
+		assets[0].ApprovedVersionID == nil || *assets[0].ApprovedVersionID != originID {
+		t.Fatalf(
+			"legacy pointer ids = %v/%v, want origin %d for both",
+			assets[0].CurrentVersionID, assets[0].ApprovedVersionID, originID,
+		)
+	}
+
+	view := &taskAssetCenterService{taskAssetRepo: taskAssetRepo}
+	root := *designRepo.assetsByTask[taskID][0]
+	if err := view.hydrateDesignAssetReadModel(context.Background(), task, &root); err != nil {
+		t.Fatalf("hydrateDesignAssetReadModel() error = %v", err)
+	}
+	if root.CurrentVersion == nil || root.CurrentVersion.ID != originID ||
+		root.ApprovedVersion == nil || root.ApprovedVersion.ID != originID {
+		t.Fatalf(
+			"asset-center current/approved = %+v/%+v, want origin %d for both",
+			root.CurrentVersion, root.ApprovedVersion, originID,
+		)
+	}
+}
+
+func TestWorkflowMigrationSourceAliasMarkerIsFailClosed(t *testing.T) {
+	base := &domain.TaskAsset{
+		AssetType:       domain.TaskAssetTypeSource,
+		SourceModuleKey: "migration",
+		Remark:          "v8-source-alias:group=307:origin=335",
+	}
+	if !isWorkflowMigrationSourceAlias(base) {
+		t.Fatal("exact workflow migration source alias marker was not recognized")
+	}
+	for name, mutate := range map[string]func(*domain.TaskAsset){
+		"ordinary source": func(row *domain.TaskAsset) { row.SourceModuleKey = "design" },
+		"ordinary remark": func(row *domain.TaskAsset) { row.Remark = "source file" },
+		"delivery row":    func(row *domain.TaskAsset) { row.AssetType = domain.TaskAssetTypeDelivery },
+	} {
+		t.Run(name, func(t *testing.T) {
+			row := *base
+			mutate(&row)
+			if isWorkflowMigrationSourceAlias(&row) {
+				t.Fatalf("non-alias row was hidden: %+v", row)
+			}
+		})
+	}
+}
+
+func TestLoadTaskDesignAssetReadModelRejectsMigrationSourceAliasCurrentPointer(t *testing.T) {
+	const (
+		taskID        = int64(516)
+		rootAssetID   = int64(483)
+		sourceAliasID = int64(36019)
+	)
+	versionNo := 1
+	designRepo := &designAssetReadModelStub{
+		assetsByTask: map[int64][]*domain.DesignAsset{
+			taskID: {
+				{
+					ID:               rootAssetID,
+					TaskID:           taskID,
+					AssetType:        domain.TaskAssetTypeDelivery,
+					CurrentVersionID: int64Ptr(sourceAliasID),
+				},
+			},
+		},
+	}
+	alias := &domain.TaskAsset{
+		ID:               sourceAliasID,
+		TaskID:           taskID,
+		AssetID:          int64Ptr(rootAssetID),
+		AssetType:        domain.TaskAssetTypeSource,
+		AssetVersionNo:   intPtr(versionNo),
+		SourceModuleKey:  "migration",
+		Remark:           "v8-source-alias:group=307:origin=335",
+		FlowReviewStatus: domain.TaskAssetFlowReviewStatusNotApplicable,
+	}
+	taskAssetRepo := &taskAssetReadModelStub{
+		recordsByTask: map[int64][]*domain.TaskAsset{
+			taskID: {alias},
+		},
+		recordsByAsset: map[int64][]*domain.TaskAsset{
+			rootAssetID: {alias},
+		},
+	}
+	task := &domain.Task{ID: taskID, TaskStatus: domain.TaskStatusCompleted}
+
+	if _, _, appErr := loadTaskDesignAssetReadModel(
+		context.Background(), nil, designRepo, taskAssetRepo, task,
+	); appErr == nil {
+		t.Fatal("task read model accepted migration source alias as current version")
+	}
+
+	view := &taskAssetCenterService{taskAssetRepo: taskAssetRepo}
+	root := *designRepo.assetsByTask[taskID][0]
+	if err := view.hydrateDesignAssetReadModel(context.Background(), task, &root); err == nil {
+		t.Fatal("asset-center read model accepted migration source alias as current version")
 	}
 }
 
@@ -135,7 +309,7 @@ func TestDesignAssets_OrphanShellsAreFiltered(t *testing.T) {
 	task := &domain.Task{
 		ID:         13,
 		TaskNo:     "T-13",
-		TaskStatus: domain.TaskStatusPendingAuditA,
+		TaskStatus: domain.TaskStatusPendingAudit,
 	}
 	assets, versions, appErr := loadTaskDesignAssetReadModel(context.Background(), nil, designRepo, taskAssetRepo, task)
 	if appErr != nil {
@@ -200,7 +374,7 @@ func TestLoadTaskDesignAssetReadModelFallsBackWhenRootsMissing(t *testing.T) {
 	task := &domain.Task{
 		ID:         12,
 		TaskNo:     "T-12",
-		TaskStatus: domain.TaskStatusPendingAuditA,
+		TaskStatus: domain.TaskStatusPendingAudit,
 	}
 	assets, versions, appErr := loadTaskDesignAssetReadModel(context.Background(), nil, designRepo, taskAssetRepo, task)
 	if appErr != nil {
@@ -217,6 +391,53 @@ func TestLoadTaskDesignAssetReadModelFallsBackWhenRootsMissing(t *testing.T) {
 	}
 	if versions[0].ID != 301 || versions[1].ID != 302 {
 		t.Fatalf("fallback version order = [%d,%d], want [301,302]", versions[0].ID, versions[1].ID)
+	}
+}
+
+func TestTaskServiceLoadTaskDesignAssetReadModelEnrichesUploaderNames(t *testing.T) {
+	task := &domain.Task{ID: 15, TaskNo: "RW-15"}
+	designRepo := &designAssetReadModelStub{
+		assetsByTask: map[int64][]*domain.DesignAsset{
+			15: {
+				{
+					ID:               601,
+					TaskID:           15,
+					AssetNo:          "AST-601",
+					AssetType:        domain.TaskAssetTypeSource,
+					CurrentVersionID: int64Ptr(701),
+				},
+			},
+		},
+	}
+	taskAssetRepo := &taskAssetReadModelStub{
+		recordsByTask: map[int64][]*domain.TaskAsset{
+			15: {
+				{
+					ID:             701,
+					TaskID:         15,
+					AssetID:        int64Ptr(601),
+					AssetType:      domain.TaskAssetTypeSource,
+					AssetVersionNo: intPtr(1),
+					UploadedBy:     88,
+				},
+			},
+		},
+	}
+	svc := &taskService{
+		designAssetRepo:         designRepo,
+		taskAssetRepo:           taskAssetRepo,
+		userDisplayNameResolver: &countingUploaderNameResolver{names: map[int64]string{88: "Designer 88"}},
+	}
+
+	assets, versions, appErr := svc.loadTaskDesignAssetReadModel(context.Background(), task)
+	if appErr != nil {
+		t.Fatalf("loadTaskDesignAssetReadModel() error = %+v", appErr)
+	}
+	if len(versions) != 1 || versions[0].UploadedByName != "Designer 88" {
+		t.Fatalf("versions = %+v, want one enriched uploader", versions)
+	}
+	if len(assets) != 1 || assets[0].CurrentVersion == nil || assets[0].CurrentVersion.UploadedByName != "Designer 88" {
+		t.Fatalf("assets = %+v, want enriched current version", assets)
 	}
 }
 
@@ -250,6 +471,7 @@ func (r *designAssetReadModelStub) UpdateCurrentVersionID(context.Context, repo.
 
 type taskAssetReadModelStub struct {
 	recordsByTask    map[int64][]*domain.TaskAsset
+	recordsByAsset   map[int64][]*domain.TaskAsset
 	listByTaskCalls  int
 	listByAssetCalls int
 }
@@ -264,9 +486,9 @@ func (r *taskAssetReadModelStub) ListByTaskID(_ context.Context, taskID int64) (
 	r.listByTaskCalls++
 	return append([]*domain.TaskAsset{}, r.recordsByTask[taskID]...), nil
 }
-func (r *taskAssetReadModelStub) ListByAssetID(context.Context, int64) ([]*domain.TaskAsset, error) {
+func (r *taskAssetReadModelStub) ListByAssetID(_ context.Context, assetID int64) ([]*domain.TaskAsset, error) {
 	r.listByAssetCalls++
-	return []*domain.TaskAsset{}, nil
+	return append([]*domain.TaskAsset{}, r.recordsByAsset[assetID]...), nil
 }
 func (r *taskAssetReadModelStub) NextVersionNo(context.Context, repo.Tx, int64) (int, error) {
 	return 0, nil

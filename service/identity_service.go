@@ -67,7 +67,6 @@ type CreateManagedUserParams struct {
 	Mobile             string
 	Email              string
 	Password           string
-	Roles              []domain.Role
 	Status             *domain.UserStatus
 	EmploymentType     *domain.EmploymentType
 	ManagedDepartments *[]string
@@ -111,7 +110,6 @@ type UpdateUserParams struct {
 	DepartmentID       *int64
 	Team               *string
 	TeamID             *int64
-	Group              *string
 	Mobile             *string
 	Email              *string
 	ManagedDepartments *[]string
@@ -127,26 +125,6 @@ type UpdateMeParams struct {
 type UpdateMyAvatarParams struct {
 	AvatarURL string
 	Method    string
-}
-
-type DeleteUserParams struct {
-	UserID int64
-	Reason string
-}
-
-type SetUserRolesParams struct {
-	UserID int64
-	Roles  []domain.Role
-}
-
-type AddUserRolesParams struct {
-	UserID int64
-	Roles  []domain.Role
-}
-
-type RemoveUserRoleParams struct {
-	UserID int64
-	Role   domain.Role
 }
 
 type PermissionLogFilter struct {
@@ -192,25 +170,14 @@ type IdentityService interface {
 	// legacy roles; the /v1/access/users route guard is the sole authorization
 	// boundary and the handler returns only minimal identity fields.
 	ListAccessPolicyUsers(ctx context.Context, filter UserFilter) ([]*domain.User, domain.PaginationMeta, *domain.AppError)
-	// ListAssignableDesigners returns the full set of assignable users for the
-	// requested candidate-pool lane. It is the Round D dedicated "assignment
-	// candidate pool" service path, extended in Round N with lane-aware role
-	// filtering. It intentionally bypasses authorizeUserListFilter so that Ops
-	// (the canonical task-creator role) can look up candidates cross-department
-	// without widening management access on ListUsers. Access control for this
-	// method is enforced exclusively by the route guard mounted on
-	// `/v1/users/designers` (see transport/http.go).
+	// ListAssignableDesigners returns active task candidates projected from the
+	// explicit auth_* policy model. Legacy user_roles never select candidates.
 	ListAssignableDesigners(ctx context.Context, actor *domain.RequestActor, lane AssignableLane) ([]*domain.User, *domain.AppError)
 	GetUser(ctx context.Context, userID int64) (*domain.User, *domain.AppError)
 	UpdateUser(ctx context.Context, p UpdateUserParams) (*domain.User, *domain.AppError)
 	ActivateUser(ctx context.Context, userID int64) *domain.AppError
 	DeactivateUser(ctx context.Context, userID int64) *domain.AppError
-	DeleteUser(ctx context.Context, p DeleteUserParams) *domain.AppError
-	SetUserRoles(ctx context.Context, p SetUserRolesParams) (*domain.User, *domain.AppError)
-	AddUserRoles(ctx context.Context, p AddUserRolesParams) (*domain.User, *domain.AppError)
-	RemoveUserRole(ctx context.Context, p RemoveUserRoleParams) (*domain.User, *domain.AppError)
 	ListPermissionLogs(ctx context.Context, filter PermissionLogFilter) ([]*domain.PermissionLog, domain.PaginationMeta, *domain.AppError)
-	ListRoles(ctx context.Context) []domain.RoleCatalogEntry
 	ResolveRequestActor(ctx context.Context, bearerToken string) (*domain.RequestActor, *domain.AppError)
 	RecordRouteAccess(ctx context.Context, entry domain.PermissionLog)
 }
@@ -224,9 +191,25 @@ type IdentityAccessAssignmentWriter interface {
 	EnsureExplicitRoleAssignment(ctx context.Context, tx repo.Tx, userID int64, roleCode string, scopeMode domain.AccessScopeMode) error
 }
 
+// IdentityEffectiveAccessReader projects the explicit v8 capability model into
+// frontend_access so business pages no longer need a parallel authorization track.
+type IdentityEffectiveAccessReader interface {
+	EffectiveAccess(ctx context.Context, userID int64) (*domain.EffectiveAccess, error)
+}
+
+type IdentityEffectiveAccessBatchReader interface {
+	EffectiveAccessMany(ctx context.Context, userIDs []int64) (map[int64]*domain.EffectiveAccess, error)
+}
+
 func WithIdentityAccessAssignmentWriter(writer IdentityAccessAssignmentWriter) IdentityServiceOption {
 	return func(s *identityService) {
 		s.accessAssignmentWriter = writer
+	}
+}
+
+func WithIdentityEffectiveAccessReader(reader IdentityEffectiveAccessReader) IdentityServiceOption {
+	return func(s *identityService) {
+		s.effectiveAccessReader = reader
 	}
 }
 
@@ -257,6 +240,7 @@ type identityService struct {
 	sessionRepo            repo.UserSessionRepo
 	permissionLogRepo      repo.PermissionLogRepo
 	accessAssignmentWriter IdentityAccessAssignmentWriter
+	effectiveAccessReader  IdentityEffectiveAccessReader
 	txRunner               repo.TxRunner
 	sessionTTL             time.Duration
 	authSettings           domain.AuthSettings
@@ -1018,12 +1002,13 @@ func (s *identityService) CreateManagedUser(ctx context.Context, p CreateManaged
 		return nil, appErr
 	}
 
-	roles, appErr := validateRoleInputs(p.Roles)
-	if appErr != nil {
-		return nil, appErr
-	}
-	roles = ensureMemberRole(roles)
-	if appErr := s.authorizeCreateManagedUser(ctx, p.Department, roles); appErr != nil {
+	roles := []domain.Role{domain.RoleMember}
+	if appErr := s.authorizeCreateManagedUser(ctx, &domain.User{
+		Department:   p.Department,
+		DepartmentID: departmentID,
+		Team:         team,
+		TeamID:       teamID,
+	}); appErr != nil {
 		return nil, appErr
 	}
 	managedDepartments, appErr := s.resolveCreateManagedDepartments(p.Department, roles, p.ManagedDepartments)
@@ -1181,14 +1166,26 @@ func (s *identityService) ListUsers(ctx context.Context, filter UserFilter) ([]*
 	if appErr := s.authorizeUserListFilter(ctx, &filter); appErr != nil {
 		return nil, domain.PaginationMeta{}, appErr
 	}
+	actor, hasActor := domain.RequestActorFromContext(ctx)
+	permission := identityReadPermission(actor)
+	access := domain.ResourceGroupAccessFilterForActor(actor, permission)
+	scopeUserIDs := make([]int64, 0, 1)
+	if access.Self && actor.ID > 0 {
+		scopeUserIDs = append(scopeUserIDs, actor.ID)
+	}
 	users, total, err := s.userRepo.List(ctx, repo.UserListFilter{
-		Keyword:    filter.Keyword,
-		Status:     filter.Status,
-		Role:       filter.Role,
-		Department: filter.Department,
-		Team:       strings.TrimSpace(filter.Team),
-		Page:       filter.Page,
-		PageSize:   filter.PageSize,
+		Keyword:            filter.Keyword,
+		Status:             filter.Status,
+		Role:               filter.Role,
+		Department:         filter.Department,
+		Team:               strings.TrimSpace(filter.Team),
+		ScopeRestricted:    hasActor && actor.ID > 0,
+		ScopeGlobal:        access.Global,
+		ScopeUserIDs:       scopeUserIDs,
+		ScopeDepartmentIDs: access.DepartmentIDs,
+		ScopeTeamIDs:       access.TeamIDs,
+		Page:               filter.Page,
+		PageSize:           filter.PageSize,
 	})
 	if err != nil {
 		return nil, domain.PaginationMeta{}, infraError("list users", err)
@@ -1196,8 +1193,8 @@ func (s *identityService) ListUsers(ctx context.Context, filter UserFilter) ([]*
 	if err := s.attachRolesForUsers(ctx, users); err != nil {
 		return nil, domain.PaginationMeta{}, infraError("attach user roles", err)
 	}
-	for _, user := range users {
-		s.prepareUserForResponse(user)
+	if err := s.prepareUsersForResponse(ctx, users); err != nil {
+		return nil, domain.PaginationMeta{}, infraError("prepare user access", err)
 	}
 	return users, buildPaginationMeta(filter.Page, filter.PageSize, total), nil
 }
@@ -1219,57 +1216,25 @@ func (s *identityService) ListAccessPolicyUsers(ctx context.Context, filter User
 	if err != nil {
 		return nil, domain.PaginationMeta{}, infraError("list access policy users", err)
 	}
-	for _, user := range users {
-		s.prepareUserForResponse(user)
+	if err := s.prepareUsersForResponse(ctx, users); err != nil {
+		return nil, domain.PaginationMeta{}, infraError("prepare access policy users", err)
 	}
 	return users, buildPaginationMeta(filter.Page, filter.PageSize, total), nil
 }
 
-// ListAssignableDesigners implements the dedicated assignment candidate-pool
-// service path for `/v1/users/designers`. It returns every active user for the
-// requested lane regardless of the actor's department/team scope and is
-// intentionally NOT routed through authorizeUserListFilter — the route guard
-// mounted on `/v1/users/designers` is the sole access control for this method.
-// The method accepts no keyword/department/team/pagination filter; its only
-// implicit filter is the lane-selected role plus status=active.
+// ListAssignableDesigners implements the task candidate selector. The route
+// checks that the caller may assign, reassign, create, or hand over a task; this
+// service independently derives candidates from effective auth_* assignments.
+// Display organization names and legacy user_roles are deliberately ignored.
 func (s *identityService) ListAssignableDesigners(ctx context.Context, actor *domain.RequestActor, lane AssignableLane) ([]*domain.User, *domain.AppError) {
 	if actor == nil || actor.ID <= 0 {
 		return nil, domain.ErrUnauthorized
 	}
-	var users []*domain.User
+	if lane == "" {
+		lane = AssignableLaneNormal
+	}
 	switch lane {
-	case "", AssignableLaneNormal:
-		normalUsers, err := s.userRepo.ListActiveByRole(ctx, domain.RoleDesigner)
-		if err != nil {
-			return nil, infraError("list assignable designers", err)
-		}
-		users = normalUsers
-	case AssignableLaneCustomization:
-		customizationUsers, err := s.userRepo.ListActiveByRole(ctx, domain.RoleCustomizationOperator)
-		if err != nil {
-			return nil, infraError("list assignable customization operators", err)
-		}
-		users = customizationUsers
-	case AssignableLaneAudit:
-		regularAuditors, err := s.userRepo.ListActiveByRole(ctx, domain.RoleAuditA)
-		if err != nil {
-			return nil, infraError("list assignable regular auditors", err)
-		}
-		legacyAuditors, err := s.userRepo.ListActiveByRole(ctx, domain.RoleAuditB)
-		if err != nil {
-			return nil, infraError("list assignable legacy regular auditors", err)
-		}
-		users = dedupeAssignableUsersByID(regularAuditors, legacyAuditors)
-	case AssignableLaneAll:
-		normalUsers, err := s.userRepo.ListActiveByRole(ctx, domain.RoleDesigner)
-		if err != nil {
-			return nil, infraError("list assignable designers", err)
-		}
-		customizationUsers, err := s.userRepo.ListActiveByRole(ctx, domain.RoleCustomizationOperator)
-		if err != nil {
-			return nil, infraError("list assignable customization operators", err)
-		}
-		users = dedupeAssignableUsersByID(normalUsers, customizationUsers)
+	case AssignableLaneNormal, AssignableLaneCustomization, AssignableLaneAudit, AssignableLaneAll:
 	default:
 		return nil, domain.NewAppError(
 			domain.ErrCodeInvalidRequest,
@@ -1280,31 +1245,81 @@ func (s *identityService) ListAssignableDesigners(ctx context.Context, actor *do
 			},
 		)
 	}
-	if err := s.attachRolesForUsers(ctx, users); err != nil {
-		return nil, infraError("attach assignable designer roles", err)
+	if s.effectiveAccessReader == nil {
+		return nil, infraError("list assignable candidates", fmt.Errorf("effective access reader is not configured"))
 	}
+	status := domain.UserStatusActive
+	count, err := s.userRepo.Count(ctx)
+	if err != nil {
+		return nil, infraError("count assignable candidates", err)
+	}
+	pageSize := int(count)
+	if pageSize < 1 {
+		return []*domain.User{}, nil
+	}
+	users, _, err := s.userRepo.List(ctx, repo.UserListFilter{Status: &status, Page: 1, PageSize: pageSize})
+	if err != nil {
+		return nil, infraError("list assignable candidates", err)
+	}
+	userIDs := make([]int64, 0, len(users))
 	for _, user := range users {
-		s.prepareUserForResponse(user)
-	}
-	return users, nil
-}
-
-func dedupeAssignableUsersByID(groups ...[]*domain.User) []*domain.User {
-	seen := make(map[int64]struct{})
-	out := make([]*domain.User, 0)
-	for _, group := range groups {
-		for _, user := range group {
-			if user == nil {
-				continue
-			}
-			if _, ok := seen[user.ID]; ok {
-				continue
-			}
-			seen[user.ID] = struct{}{}
-			out = append(out, user)
+		if user != nil && user.ID > 0 {
+			userIDs = append(userIDs, user.ID)
 		}
 	}
-	return out
+	effectiveByUser := make(map[int64]*domain.EffectiveAccess, len(userIDs))
+	if batchReader, ok := s.effectiveAccessReader.(IdentityEffectiveAccessBatchReader); ok {
+		effectiveByUser, err = batchReader.EffectiveAccessMany(ctx, userIDs)
+		if err != nil {
+			return nil, infraError("load assignable candidate access", err)
+		}
+	} else {
+		for _, userID := range userIDs {
+			effective, readErr := s.effectiveAccessReader.EffectiveAccess(ctx, userID)
+			if readErr != nil {
+				return nil, infraError("load assignable candidate access", readErr)
+			}
+			effectiveByUser[userID] = effective
+		}
+	}
+	filtered := make([]*domain.User, 0, len(users))
+	for _, user := range users {
+		if user == nil || !effectiveAccessMatchesAssignableLane(effectiveByUser[user.ID], lane) {
+			continue
+		}
+		filtered = append(filtered, user)
+	}
+	if err := s.prepareUsersForResponse(ctx, filtered); err != nil {
+		return nil, infraError("prepare assignable candidate access", err)
+	}
+	return filtered, nil
+}
+
+func effectiveAccessMatchesAssignableLane(access *domain.EffectiveAccess, lane AssignableLane) bool {
+	if access == nil {
+		return false
+	}
+	for _, source := range access.Sources {
+		switch lane {
+		case AssignableLaneAudit:
+			if source.Permission == domain.PermissionTaskAudit {
+				return true
+			}
+		case AssignableLaneNormal:
+			if source.Permission == domain.PermissionTaskUploadSource && source.RoleCode == "designer" {
+				return true
+			}
+		case AssignableLaneCustomization:
+			if source.Permission == domain.PermissionTaskUploadSource && source.RoleCode == "customization_operator" {
+				return true
+			}
+		case AssignableLaneAll:
+			if source.Permission == domain.PermissionTaskUploadSource && (source.RoleCode == "designer" || source.RoleCode == "customization_operator") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (s *identityService) GetUser(ctx context.Context, userID int64) (*domain.User, *domain.AppError) {
@@ -1387,9 +1402,9 @@ func (s *identityService) UpdateUser(ctx context.Context, p UpdateUserParams) (*
 		nextDepartment = *p.Department
 	}
 
-	teamInput, teamProvided, appErr := resolveTeamPatchInput(p.Team, p.Group)
-	if appErr != nil {
-		return nil, appErr
+	teamInput, teamProvided := "", p.Team != nil
+	if teamProvided {
+		teamInput = strings.TrimSpace(*p.Team)
 	}
 	if teamProvided {
 		if strings.EqualFold(teamInput, userTeamUngroupedAlias) {
@@ -1416,7 +1431,17 @@ func (s *identityService) UpdateUser(ctx context.Context, p UpdateUserParams) (*
 	if appErr := s.validateTeam(nextDepartment, nextTeam); appErr != nil {
 		return nil, appErr
 	}
-	if appErr := s.authorizeUserUpdate(ctx, user, p, nextDepartment, nextTeam); appErr != nil {
+	nextDepartmentID := user.DepartmentID
+	nextTeamID := user.TeamID
+	if p.Department != nil || p.Team != nil || p.DepartmentID != nil || p.TeamID != nil {
+		departmentID, teamID, orgErr := s.resolveStableUserOrgIDs(ctx, p.DepartmentID, p.TeamID, nextDepartment, nextTeam)
+		if orgErr != nil {
+			return nil, orgErr
+		}
+		nextDepartmentID = departmentID
+		nextTeamID = teamID
+	}
+	if appErr := s.authorizeUserUpdate(ctx, user, nextDepartmentID, nextTeamID); appErr != nil {
 		return nil, appErr
 	}
 	if nextDepartment != user.Department {
@@ -1427,17 +1452,13 @@ func (s *identityService) UpdateUser(ctx context.Context, p UpdateUserParams) (*
 		user.Team = nextTeam
 		changes = append(changes, "team")
 	}
-	if p.DepartmentID != nil || p.TeamID != nil {
-		departmentID, teamID, orgErr := s.resolveStableUserOrgIDs(ctx, p.DepartmentID, p.TeamID, nextDepartment, nextTeam)
-		if orgErr != nil {
-			return nil, orgErr
-		}
-		if !equalOptionalInt64(user.DepartmentID, departmentID) {
-			user.DepartmentID = departmentID
+	if p.Department != nil || p.Team != nil || p.DepartmentID != nil || p.TeamID != nil {
+		if !equalOptionalInt64(user.DepartmentID, nextDepartmentID) {
+			user.DepartmentID = nextDepartmentID
 			changes = append(changes, "department_id")
 		}
-		if !equalOptionalInt64(user.TeamID, teamID) {
-			user.TeamID = teamID
+		if !equalOptionalInt64(user.TeamID, nextTeamID) {
+			user.TeamID = nextTeamID
 			changes = append(changes, "team_id")
 		}
 	}
@@ -1575,53 +1596,6 @@ func (s *identityService) DeactivateUser(ctx context.Context, userID int64) *dom
 	return s.setUserStatusFromEndpoint(ctx, userID, domain.UserStatusDisabled, domain.PermissionActionUserDeactivated, "/v1/users/:id/deactivate")
 }
 
-func (s *identityService) DeleteUser(ctx context.Context, p DeleteUserParams) *domain.AppError {
-	if p.UserID <= 0 {
-		return domain.NewAppError(domain.ErrCodeInvalidRequest, "user_id is required", nil)
-	}
-	reason := strings.TrimSpace(p.Reason)
-	if reason == "" {
-		return domain.NewAppError(domain.ErrCodeReasonRequired, "reason is required", map[string]string{"deny_code": "reason_required"})
-	}
-	actor, ok := domain.RequestActorFromContext(ctx)
-	if !ok || !identityActorHasAnyRole(actor, domain.RoleSuperAdmin) {
-		return identityPermissionDenied("module_action_role_denied", "only SuperAdmin can delete users")
-	}
-	user, err := s.userRepo.GetByID(ctx, p.UserID)
-	if err != nil {
-		return infraError("get user for delete", err)
-	}
-	if user == nil {
-		return domain.ErrNotFound
-	}
-	if err := s.attachRoles(ctx, user); err != nil {
-		return infraError("attach delete user roles", err)
-	}
-	if appErr := s.ensurePrivilegedUserStatusSafety(ctx, user, domain.UserStatusDeleted); appErr != nil {
-		return appErr
-	}
-	user.Status = domain.UserStatusDeleted
-	user.UpdatedAt = time.Now().UTC()
-	if err := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
-		if err := s.userRepo.Update(ctx, tx, user); err != nil {
-			return err
-		}
-		return s.recordPermissionActionTx(ctx, tx, domain.PermissionLog{
-			ActionType:     domain.PermissionActionUserDeleted,
-			TargetUserID:   actorIDPtr(user.ID),
-			TargetUsername: user.Username,
-			TargetRoles:    user.Roles,
-			Granted:        true,
-			Reason:         reason,
-			Method:         "DELETE",
-			RoutePath:      "/v1/users/:id",
-		})
-	}); err != nil {
-		return infraError("delete user tx", err)
-	}
-	return nil
-}
-
 func (s *identityService) setUserStatusFromEndpoint(ctx context.Context, userID int64, status domain.UserStatus, action, routePath string) *domain.AppError {
 	if userID <= 0 {
 		return domain.NewAppError(domain.ErrCodeInvalidRequest, "user_id is required", nil)
@@ -1670,41 +1644,6 @@ func (s *identityService) setUserStatusFromEndpoint(ctx context.Context, userID 
 	return nil
 }
 
-func (s *identityService) SetUserRoles(ctx context.Context, p SetUserRolesParams) (*domain.User, *domain.AppError) {
-	roles, appErr := validateRoleInputs(p.Roles)
-	if appErr != nil {
-		return nil, appErr
-	}
-	return s.applyUserRoleChange(ctx, p.UserID, roles, "PUT", "/v1/users/:id/roles")
-}
-
-func (s *identityService) AddUserRoles(ctx context.Context, p AddUserRolesParams) (*domain.User, *domain.AppError) {
-	roles, appErr := validateRoleInputs(p.Roles)
-	if appErr != nil {
-		return nil, appErr
-	}
-	user, appErr := s.GetUser(ctx, p.UserID)
-	if appErr != nil {
-		return nil, appErr
-	}
-	return s.applyUserRoleChange(ctx, p.UserID, mergeRoles(user.Roles, roles), "POST", "/v1/users/:id/roles")
-}
-
-func (s *identityService) RemoveUserRole(ctx context.Context, p RemoveUserRoleParams) (*domain.User, *domain.AppError) {
-	if p.UserID <= 0 {
-		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "user_id is required", nil)
-	}
-	role, appErr := validateSingleRole(p.Role)
-	if appErr != nil {
-		return nil, appErr
-	}
-	user, appErr := s.GetUser(ctx, p.UserID)
-	if appErr != nil {
-		return nil, appErr
-	}
-	return s.applyUserRoleChange(ctx, p.UserID, removeRole(user.Roles, role), "DELETE", "/v1/users/:id/roles/:role")
-}
-
 func (s *identityService) ListPermissionLogs(ctx context.Context, filter PermissionLogFilter) ([]*domain.PermissionLog, domain.PaginationMeta, *domain.AppError) {
 	logs, total, err := s.permissionLogRepo.List(ctx, repo.PermissionLogListFilter{
 		ActorID:        filter.ActorID,
@@ -1722,15 +1661,6 @@ func (s *identityService) ListPermissionLogs(ctx context.Context, filter Permiss
 		return nil, domain.PaginationMeta{}, infraError("list permission logs", err)
 	}
 	return logs, buildPaginationMeta(filter.Page, filter.PageSize, total), nil
-}
-
-func (s *identityService) ListRoles(ctx context.Context) []domain.RoleCatalogEntry {
-	entries := domain.DefaultRoleCatalog()
-	actor, ok := domain.RequestActorFromContext(ctx)
-	for i := range entries {
-		entries[i].AssignableByCurrentActor = ok && roleCatalogEntryAssignableByActor(actor, entries[i])
-	}
-	return entries
 }
 
 func (s *identityService) ResolveRequestActor(ctx context.Context, bearerToken string) (*domain.RequestActor, *domain.AppError) {
@@ -1983,7 +1913,6 @@ func (s *identityService) attachRolesForUsers(ctx context.Context, users []*doma
 				continue
 			}
 			user.Roles = append([]domain.Role(nil), rolesByUser[user.ID]...)
-			s.prepareUserForResponse(user)
 		}
 		return nil
 	}
@@ -2005,7 +1934,6 @@ func cloneOrgOptions(options *domain.OrgOptions) *domain.OrgOptions {
 	cloned := &domain.OrgOptions{
 		Departments:           make([]domain.DepartmentOption, 0, len(options.Departments)),
 		TeamsByDepartment:     make(map[string][]string, len(options.TeamsByDepartment)),
-		RoleCatalogSummary:    append([]domain.RoleCatalogEntry{}, options.RoleCatalogSummary...),
 		UnassignedPoolEnabled: options.UnassignedPoolEnabled,
 		ConfiguredAssignments: append([]domain.ConfiguredUserAssignment{}, options.ConfiguredAssignments...),
 	}
@@ -2034,45 +1962,6 @@ func cloneOrgOptions(options *domain.OrgOptions) *domain.OrgOptions {
 	return cloned
 }
 
-func (s *identityService) applyUserRoleChange(ctx context.Context, userID int64, roles []domain.Role, method, routePath string) (*domain.User, *domain.AppError) {
-	if userID <= 0 {
-		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "user_id is required", nil)
-	}
-	user, appErr := s.GetUser(ctx, userID)
-	if appErr != nil {
-		return nil, appErr
-	}
-	currentRoles := domain.NormalizeRoleValues(user.Roles)
-	nextRoles := domain.NormalizeRoleValues(roles)
-	if containsRole(currentRoles, domain.RoleMember) && !containsRole(nextRoles, domain.RoleMember) {
-		if method == "DELETE" {
-			return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "成员是基础身份，不能移除。", map[string]interface{}{"deny_code": "member_role_required"})
-		}
-		nextRoles = ensureMemberRole(nextRoles)
-	}
-	addedRoles, removedRoles := diffRoles(currentRoles, nextRoles)
-	if appErr := s.authorizeUserRoleChange(ctx, user, nextRoles); appErr != nil {
-		return nil, appErr
-	}
-	if appErr := authorizeAssignableRoleAdditions(ctx, user.Department, addedRoles); appErr != nil {
-		return nil, appErr
-	}
-	if appErr := s.ensureAdminRoleSafety(ctx, currentRoles, nextRoles); appErr != nil {
-		return nil, appErr
-	}
-	if err := s.txRunner.RunInTx(ctx, func(tx repo.Tx) error {
-		return s.userRepo.ReplaceRoles(ctx, tx, userID, nextRoles)
-	}); err != nil {
-		return nil, infraError("replace user roles tx", err)
-	}
-	updated, appErr := s.GetUser(ctx, userID)
-	if appErr != nil {
-		return nil, appErr
-	}
-	s.recordRoleChangeLogs(ctx, updated, addedRoles, removedRoles, method, routePath)
-	return updated, nil
-}
-
 func (s *identityService) ensureAdminRoleSafety(ctx context.Context, currentRoles, nextRoles []domain.Role) *domain.AppError {
 	currentSuperAdmin := containsRole(currentRoles, domain.RoleSuperAdmin)
 	nextSuperAdmin := containsRole(nextRoles, domain.RoleSuperAdmin)
@@ -2089,36 +1978,6 @@ func (s *identityService) ensureAdminRoleSafety(ctx context.Context, currentRole
 		})
 	}
 	return nil
-}
-
-func (s *identityService) recordRoleChangeLogs(ctx context.Context, user *domain.User, addedRoles, removedRoles []domain.Role, method, routePath string) {
-	if user == nil {
-		return
-	}
-	if len(addedRoles) > 0 {
-		s.recordPermissionAction(ctx, domain.PermissionLog{
-			ActionType:     domain.PermissionActionRoleAssigned,
-			TargetUserID:   actorIDPtr(user.ID),
-			TargetUsername: user.Username,
-			TargetRoles:    addedRoles,
-			Granted:        true,
-			Reason:         "roles assigned",
-			Method:         method,
-			RoutePath:      routePath,
-		})
-	}
-	if len(removedRoles) > 0 {
-		s.recordPermissionAction(ctx, domain.PermissionLog{
-			ActionType:     domain.PermissionActionRoleRemoved,
-			TargetUserID:   actorIDPtr(user.ID),
-			TargetUsername: user.Username,
-			TargetRoles:    removedRoles,
-			Granted:        true,
-			Reason:         "roles removed",
-			Method:         method,
-			RoutePath:      routePath,
-		})
-	}
 }
 
 func (s *identityService) recordUserUpdateLogs(ctx context.Context, user *domain.User, changes []string) {
@@ -2298,6 +2157,55 @@ func (s *identityService) prepareUserForResponse(user *domain.User) {
 	if user == nil {
 		return
 	}
+	s.prepareUserBaseResponse(user)
+	if s.effectiveAccessReader != nil && user.ID > 0 {
+		if effective, err := s.effectiveAccessReader.EffectiveAccess(context.Background(), user.ID); err == nil && effective != nil {
+			user.FrontendAccess = domain.MergeEffectiveAccessIntoFrontendAccess(user.FrontendAccess, effective)
+		}
+	}
+}
+
+func (s *identityService) prepareUsersForResponse(ctx context.Context, users []*domain.User) error {
+	userIDs := make([]int64, 0, len(users))
+	for _, user := range users {
+		if user == nil {
+			continue
+		}
+		s.prepareUserBaseResponse(user)
+		if user.ID > 0 {
+			userIDs = append(userIDs, user.ID)
+		}
+	}
+	if s.effectiveAccessReader == nil || len(userIDs) == 0 {
+		return nil
+	}
+	if batchReader, ok := s.effectiveAccessReader.(IdentityEffectiveAccessBatchReader); ok {
+		effectiveByUser, err := batchReader.EffectiveAccessMany(ctx, userIDs)
+		if err != nil {
+			return err
+		}
+		for _, user := range users {
+			if user == nil {
+				continue
+			}
+			user.FrontendAccess = domain.MergeEffectiveAccessIntoFrontendAccess(user.FrontendAccess, effectiveByUser[user.ID])
+		}
+		return nil
+	}
+	for _, user := range users {
+		if user == nil || user.ID <= 0 {
+			continue
+		}
+		effective, err := s.effectiveAccessReader.EffectiveAccess(ctx, user.ID)
+		if err != nil {
+			return err
+		}
+		user.FrontendAccess = domain.MergeEffectiveAccessIntoFrontendAccess(user.FrontendAccess, effective)
+	}
+	return nil
+}
+
+func (s *identityService) prepareUserBaseResponse(user *domain.User) {
 	if len(user.Roles) == 0 {
 		user.Roles = []domain.Role{domain.RoleMember}
 	}
@@ -2405,30 +2313,6 @@ func (s *identityService) validateTeam(department domain.Department, team string
 	})
 }
 
-func resolveTeamPatchInput(team, group *string) (string, bool, *domain.AppError) {
-	trimmedTeam := ""
-	trimmedGroup := ""
-	if team != nil {
-		trimmedTeam = strings.TrimSpace(*team)
-	}
-	if group != nil {
-		trimmedGroup = strings.TrimSpace(*group)
-	}
-	if team != nil && group != nil && trimmedTeam != trimmedGroup {
-		return "", false, domain.NewAppError(domain.ErrCodeInvalidRequest, "team and group must be the same when both are provided", map[string]interface{}{
-			"team":  trimmedTeam,
-			"group": trimmedGroup,
-		})
-	}
-	if team != nil {
-		return trimmedTeam, true, nil
-	}
-	if group != nil {
-		return trimmedGroup, true, nil
-	}
-	return "", false, nil
-}
-
 func (s *identityService) defaultUnassignedPoolTeam() (string, *domain.AppError) {
 	if s.orgRepo != nil {
 		teams, err := s.orgRepo.ListTeams(context.Background(), false)
@@ -2516,45 +2400,12 @@ func (s *identityService) authorizeUserListFilter(ctx context.Context, filter *U
 	if !ok || actor.ID <= 0 {
 		return nil
 	}
-	switch {
-	case identityActorCanManageAllUsers(actor), identityActorHasAnyRole(actor, domain.RoleOrgAdmin, domain.RoleRoleAdmin):
-		return nil
-	case identityActorHasAnyRole(actor, domain.RoleDeptAdmin):
-		department := identityActorDepartment(actor)
-		if department == "" {
-			return identityPermissionDenied("department_admin_scope_missing", "department admin scope is not configured")
-		}
-		if filter.Department != nil &&
-			!domain.OrgDepartmentsEquivalent(string(*filter.Department), department) &&
-			*filter.Department != domain.DepartmentUnassigned {
-			return identityPermissionDenied("department_scope_only", "department admin can only view users in own department")
-		}
-		if filter.Department == nil {
-			dept := domain.Department(department)
-			filter.Department = &dept
-		}
-		filter.Team = strings.TrimSpace(filter.Team)
-		return nil
-	case identityActorHasAnyRole(actor, domain.RoleTeamLead):
-		department := identityActorDepartment(actor)
-		team := identityActorTeam(actor)
-		if department == "" || team == "" {
-			return identityPermissionDenied("team_scope_missing", "team lead scope is not configured")
-		}
-		if filter.Department != nil && !domain.OrgDepartmentsEquivalent(string(*filter.Department), department) {
-			return identityPermissionDenied("team_scope_only", "team lead can only view users in own team")
-		}
-		if trimmedTeam := strings.TrimSpace(filter.Team); trimmedTeam != "" && !domain.OrgTeamsEquivalent(trimmedTeam, team) {
-			return identityPermissionDenied("team_scope_only", "team lead can only view users in own team")
-		}
-		dept := domain.Department(department)
-		filter.Department = &dept
-		filter.Team = team
-		return nil
-	default:
-		s.emitAuthorizeDefaultDenyTelemetry(ctx, "authorize_user_list_filter_denied", actor, nil)
-		return identityPermissionDenied("management_access_required", "management access is required")
+	_ = filter
+	if permission := identityReadPermission(actor); !domain.ActorHasPermission(actor, permission) {
+		s.emitAuthorizeDefaultDenyTelemetry(ctx, "authorize_user_list_filter_denied", "access_view_required", actor, nil)
+		return identityPermissionDenied("access_view_required", "access.view or access.manage is required")
 	}
+	return nil
 }
 
 func (s *identityService) authorizeUserRead(ctx context.Context, user *domain.User) *domain.AppError {
@@ -2562,25 +2413,12 @@ func (s *identityService) authorizeUserRead(ctx context.Context, user *domain.Us
 	if !ok || actor.ID <= 0 || user == nil {
 		return nil
 	}
-	switch {
-	case identityActorCanManageAllUsers(actor), identityActorHasAnyRole(actor, domain.RoleOrgAdmin, domain.RoleRoleAdmin):
-		return nil
-	case identityActorHasAnyRole(actor, domain.RoleDeptAdmin):
-		if domain.OrgDepartmentsEquivalent(identityActorDepartment(actor), string(user.Department)) ||
-			user.Department == domain.DepartmentUnassigned {
-			return nil
-		}
-		return identityPermissionDenied("department_scope_only", "department admin can only access users in own department")
-	case identityActorHasAnyRole(actor, domain.RoleTeamLead):
-		if domain.OrgDepartmentsEquivalent(identityActorDepartment(actor), string(user.Department)) &&
-			domain.OrgTeamsEquivalent(identityActorTeam(actor), user.Team) {
-			return nil
-		}
-		return identityPermissionDenied("team_scope_only", "team lead can only access users in own team")
-	default:
-		s.emitAuthorizeDefaultDenyTelemetry(ctx, "authorize_user_read_denied", actor, user)
-		return identityPermissionDenied("management_access_required", "management access is required")
+	permission := identityReadPermission(actor)
+	if !identityAccessAllowsUser(actor, permission, user) {
+		s.emitAuthorizeDefaultDenyTelemetry(ctx, "authorize_user_read_denied", "access_scope_denied", actor, user)
+		return identityPermissionDenied("access_scope_denied", "the user is outside the granted access scope")
 	}
+	return nil
 }
 
 // emitAuthorizeDefaultDenyTelemetry emits a warn-level structured log entry
@@ -2590,6 +2428,7 @@ func (s *identityService) authorizeUserRead(ctx context.Context, user *domain.Us
 func (s *identityService) emitAuthorizeDefaultDenyTelemetry(
 	ctx context.Context,
 	event string,
+	denyCode string,
 	actor domain.RequestActor,
 	targetUser *domain.User,
 ) {
@@ -2610,7 +2449,7 @@ func (s *identityService) emitAuthorizeDefaultDenyTelemetry(
 		zap.String("auth_mode", string(actor.AuthMode)),
 		zap.String("actor_department", actor.Department),
 		zap.String("actor_team", actor.Team),
-		zap.String("deny_code", "management_access_required"),
+		zap.String("deny_code", denyCode),
 	}
 	if targetUser != nil {
 		fields = append(fields,
@@ -2622,59 +2461,15 @@ func (s *identityService) emitAuthorizeDefaultDenyTelemetry(
 	s.logger.Warn(event, fields...)
 }
 
-func (s *identityService) emitAuthorizeRoleChangeDeniedTelemetry(
-	ctx context.Context,
-	actor domain.RequestActor,
-	targetUser *domain.User,
-) {
-	if s.logger == nil {
-		return
-	}
-	actorRoleStrings := make([]string, 0, len(actor.Roles))
-	for _, role := range actor.Roles {
-		actorRoleStrings = append(actorRoleStrings, string(role))
-	}
-	requiredRoles := []string{string(domain.RoleHRAdmin), string(domain.RoleSuperAdmin)}
-	fields := []zap.Field{
-		zap.String("event", "authorize_user_role_change_denied"),
-		zap.String("trace_id", domain.TraceIDFromContext(ctx)),
-		zap.Int64("actor_id", actor.ID),
-		zap.String("actor_username", actor.Username),
-		zap.Strings("actor_roles", actorRoleStrings),
-		zap.String("actor_source", actor.Source),
-		zap.String("auth_mode", string(actor.AuthMode)),
-		zap.String("actor_department", actor.Department),
-		zap.String("actor_team", actor.Team),
-		zap.String("deny_code", "role_change_not_allowed"),
-		zap.Strings("required_roles", requiredRoles),
-	}
-	if targetUser != nil {
-		fields = append(fields,
-			zap.Int64("target_user_id", targetUser.ID),
-			zap.String("target_department", string(targetUser.Department)),
-			zap.String("target_team", targetUser.Team),
-		)
-	}
-	s.logger.Warn("authorize_user_role_change_denied", fields...)
-}
-
-func (s *identityService) authorizeCreateManagedUser(ctx context.Context, department domain.Department, roles []domain.Role) *domain.AppError {
+func (s *identityService) authorizeCreateManagedUser(ctx context.Context, user *domain.User) *domain.AppError {
 	actor, ok := domain.RequestActorFromContext(ctx)
 	if !ok || actor.ID <= 0 {
 		return nil
 	}
-	switch {
-	case identityActorCanManageAllUsers(actor):
-		return authorizeAssignableRoleAdditions(ctx, department, roles)
-	case identityActorHasAnyRole(actor, domain.RoleDeptAdmin):
-		actorDepartment := identityActorDepartment(actor)
-		if actorDepartment == "" || !domain.OrgDepartmentsEquivalent(actorDepartment, string(department)) {
-			return identityPermissionDenied("department_scope_only", "department admin can only create users in own department")
-		}
-		return authorizeAssignableRoleAdditions(ctx, department, roles)
-	default:
-		return identityPermissionDenied("account_create_not_allowed", "only HRAdmin, SuperAdmin, or DepartmentAdmin can create users")
+	if !identityAccessAllowsUser(actor, domain.PermissionAccessManage, user) {
+		return identityPermissionDenied("access_scope_denied", "access.manage does not cover the new user's organization")
 	}
+	return nil
 }
 
 func (s *identityService) authorizeResetUserPassword(ctx context.Context, user *domain.User) *domain.AppError {
@@ -2682,90 +2477,27 @@ func (s *identityService) authorizeResetUserPassword(ctx context.Context, user *
 	if !ok || actor.ID <= 0 || user == nil {
 		return nil
 	}
-	switch {
-	case identityActorCanManageAllUsers(actor):
-		return nil
-	case identityActorHasAnyRole(actor, domain.RoleDeptAdmin):
-		if domain.OrgDepartmentsEquivalent(identityActorDepartment(actor), string(user.Department)) {
-			return nil
-		}
-		return identityPermissionDenied("department_scope_only", "department admin can only reset passwords in own department")
-	default:
-		return identityPermissionDenied("password_reset_not_allowed", "only HRAdmin, SuperAdmin, legacy admin compatibility, or DepartmentAdmin can reset passwords")
+	if !identityAccessAllowsUser(actor, domain.PermissionAccessManage, user) {
+		return identityPermissionDenied("access_scope_denied", "access.manage does not cover this user")
 	}
+	return nil
 }
 
-func (s *identityService) authorizeUserUpdate(ctx context.Context, current *domain.User, p UpdateUserParams, nextDepartment domain.Department, nextTeam string) *domain.AppError {
+func (s *identityService) authorizeUserUpdate(ctx context.Context, current *domain.User, nextDepartmentID, nextTeamID *int64) *domain.AppError {
 	actor, ok := domain.RequestActorFromContext(ctx)
 	if !ok || actor.ID <= 0 || current == nil {
 		return nil
 	}
-	switch {
-	case identityActorCanManageAllUsers(actor):
-		if identityActorHasAnyRole(actor, domain.RoleHRAdmin) && p.Department != nil && *p.Department != current.Department {
-			return nil
-		}
-		return nil
-	case identityActorHasAnyRole(actor, domain.RoleOrgAdmin):
-		if p.EmployeeNo != nil || p.Status != nil || p.DisplayName != nil || p.Email != nil || p.Mobile != nil || p.EmploymentType != nil {
-			return identityPermissionDenied("org_admin_scope_only", "legacy OrgAdmin compatibility is limited to organization scope updates")
-		}
-		return nil
-	case identityActorHasAnyRole(actor, domain.RoleDeptAdmin):
-		if p.EmployeeNo != nil {
-			return fieldDenied("user_update_field_denied_by_scope", "DepartmentAdmin 不能修改工号。")
-		}
-		if p.ManagedDepartments != nil || p.ManagedTeams != nil {
-			return fieldDenied("user_update_field_denied_by_scope", "department admin cannot change managed scope settings")
-		}
-		actorDepartment := identityActorDepartment(actor)
-		if actorDepartment == "" {
-			return identityPermissionDenied("department_admin_scope_missing", "department admin scope is not configured")
-		}
-		targetDepartment := string(current.Department)
-		if strings.EqualFold(targetDepartment, string(domain.DepartmentUnassigned)) {
-			if !domain.OrgDepartmentsEquivalent(string(nextDepartment), actorDepartment) {
-				return fieldDenied("user_update_field_denied_by_scope", "department admin can only assign unassigned users into own department")
-			}
-			return nil
-		}
-		if !domain.OrgDepartmentsEquivalent(targetDepartment, actorDepartment) || !domain.OrgDepartmentsEquivalent(string(nextDepartment), actorDepartment) {
-			return fieldDenied("user_update_field_denied_by_scope", "department admin can only manage users within own department")
-		}
-		return nil
-	case identityActorHasAnyRole(actor, domain.RoleTeamLead):
-		return fieldDenied("user_update_field_denied_by_scope", "team lead cannot update user fields from organization management APIs")
-	default:
-		return fieldDenied("user_update_field_denied_by_scope", "management access is required")
+	if !identityAccessAllowsUser(actor, domain.PermissionAccessManage, current) {
+		return identityPermissionDenied("access_scope_denied", "access.manage does not cover this user")
 	}
-}
-
-func (s *identityService) authorizeUserRoleChange(ctx context.Context, user *domain.User, nextRoles []domain.Role) *domain.AppError {
-	actor, ok := domain.RequestActorFromContext(ctx)
-	if !ok || actor.ID <= 0 || user == nil {
-		return nil
+	next := *current
+	next.DepartmentID = nextDepartmentID
+	next.TeamID = nextTeamID
+	if !identityAccessAllowsUser(actor, domain.PermissionAccessManage, &next) {
+		return identityPermissionDenied("access_scope_denied", "access.manage does not cover the user's new organization")
 	}
-	switch {
-	case identityActorHasAnyRole(actor, domain.RoleSuperAdmin):
-		return nil
-	case identityActorHasAnyRole(actor, domain.RoleHRAdmin):
-		if containsRole(nextRoles, domain.RoleSuperAdmin) || containsRole(nextRoles, domain.RoleAdmin) {
-			return roleDenied("role_assignment_denied_by_scope", "HRAdmin cannot assign SuperAdmin")
-		}
-		return nil
-	case identityActorHasAnyRole(actor, domain.RoleDeptAdmin):
-		if !domain.OrgDepartmentsEquivalent(identityActorDepartment(actor), string(user.Department)) {
-			return roleDenied("role_assignment_denied_by_scope", "DepartmentAdmin can only assign roles in own department")
-		}
-		for _, role := range nextRoles {
-			if containsRole([]domain.Role{domain.RoleDeptAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleAdmin}, role) {
-				return roleDenied("role_assignment_denied_by_scope", "DepartmentAdmin cannot assign admin roles")
-			}
-		}
-		return nil
-	}
-	s.emitAuthorizeRoleChangeDeniedTelemetry(ctx, actor, user)
-	return roleDenied("role_assignment_denied_by_scope", "actor cannot change user roles")
+	return nil
 }
 
 func (s *identityService) authorizeUserStatusEndpoint(ctx context.Context, user *domain.User) *domain.AppError {
@@ -2773,135 +2505,58 @@ func (s *identityService) authorizeUserStatusEndpoint(ctx context.Context, user 
 	if !ok || actor.ID <= 0 || user == nil {
 		return nil
 	}
-	switch {
-	case identityActorHasAnyRole(actor, domain.RoleSuperAdmin, domain.RoleHRAdmin, domain.RoleAdmin):
-		return nil
-	case identityActorHasAnyRole(actor, domain.RoleDeptAdmin):
-		if domain.OrgDepartmentsEquivalent(identityActorDepartment(actor), string(user.Department)) {
-			return nil
-		}
-		return fieldDenied("user_update_field_denied_by_scope", "DepartmentAdmin can only change status in own department")
-	case identityActorHasAnyRole(actor, domain.RoleTeamLead):
-		if domain.OrgDepartmentsEquivalent(identityActorDepartment(actor), string(user.Department)) && domain.OrgTeamsEquivalent(identityActorTeam(actor), user.Team) {
-			return nil
-		}
-		return fieldDenied("user_update_field_denied_by_scope", "TeamLead can only change status in own team")
-	default:
-		return fieldDenied("user_update_field_denied_by_scope", "management access is required")
+	if !identityAccessAllowsUser(actor, domain.PermissionAccessManage, user) {
+		return identityPermissionDenied("access_scope_denied", "access.manage does not cover this user")
 	}
+	return nil
 }
 
 func fieldDenied(code, message string) *domain.AppError {
 	return domain.NewAppError(domain.ErrCodePermissionDenied, message, map[string]interface{}{"deny_code": code})
 }
 
-func roleDenied(code, message string) *domain.AppError {
-	return domain.NewAppError(domain.ErrCodePermissionDenied, message, map[string]interface{}{"deny_code": code})
+func identityReadPermission(actor domain.RequestActor) domain.PermissionCode {
+	if domain.ActorHasPermission(actor, domain.PermissionAccessManage) {
+		return domain.PermissionAccessManage
+	}
+	return domain.PermissionAccessView
 }
 
-func identityActorCanManageAllUsers(actor domain.RequestActor) bool {
-	return identityActorHasAnyRole(actor, domain.RoleAdmin, domain.RoleSuperAdmin, domain.RoleHRAdmin)
-}
-
-func identityActorHasAnyRole(actor domain.RequestActor, roles ...domain.Role) bool {
-	for _, role := range actor.Roles {
-		for _, candidate := range roles {
-			if role == candidate {
-				return true
-			}
-		}
+func identityAccessAllowsUser(actor domain.RequestActor, permission domain.PermissionCode, user *domain.User) bool {
+	if user == nil || !domain.ActorHasPermission(actor, permission) {
+		return false
 	}
-	return false
-}
-
-func identityActorDepartment(actor domain.RequestActor) string {
-	department := strings.TrimSpace(actor.Department)
-	if department == "" {
-		department = strings.TrimSpace(actor.FrontendAccess.Department)
-	}
-	return department
-}
-
-func identityActorTeam(actor domain.RequestActor) string {
-	team := strings.TrimSpace(actor.Team)
-	if team == "" {
-		team = strings.TrimSpace(actor.FrontendAccess.Team)
-	}
-	if team == "" && len(actor.ManagedTeams) > 0 {
-		team = strings.TrimSpace(actor.ManagedTeams[0])
-	}
-	if team == "" && len(actor.FrontendAccess.ManagedTeams) > 0 {
-		team = strings.TrimSpace(actor.FrontendAccess.ManagedTeams[0])
-	}
-	return team
-}
-
-func departmentAdminCanAssignRole(department domain.Department, role domain.Role) bool {
-	switch role {
-	case domain.RoleMember, domain.RoleTeamLead:
+	access := domain.ResourceGroupAccessFilterForActor(actor, permission)
+	if access.Global || (access.Self && user.ID > 0 && user.ID == actor.ID) {
 		return true
 	}
-	for _, candidate := range domain.DepartmentDefaultBusinessRoles(department) {
-		if candidate == role {
+	if user.DepartmentID != nil && containsInt64(access.DepartmentIDs, *user.DepartmentID) {
+		return true
+	}
+	return user.TeamID != nil && containsInt64(access.TeamIDs, *user.TeamID)
+}
+
+func containsInt64(values []int64, target int64) bool {
+	for _, value := range values {
+		if value == target {
 			return true
 		}
 	}
 	return false
 }
 
-func authorizeAssignableRoleAdditions(ctx context.Context, department domain.Department, roles []domain.Role) *domain.AppError {
+func authorizeGlobalAccessManage(ctx context.Context) *domain.AppError {
 	actor, ok := domain.RequestActorFromContext(ctx)
 	if !ok || actor.ID <= 0 {
 		return nil
 	}
-	for _, role := range domain.NormalizeRoleValues(roles) {
-		entry := roleCatalogEntryForRole(role)
-		if roleCatalogEntryAssignableByActor(actor, entry) {
-			continue
-		}
-		return domain.NewAppError(domain.ErrCodePermissionDenied, "role is not assignable by current actor", map[string]interface{}{
-			"deny_code":  "role_not_assignable",
-			"role":       string(role),
-			"department": string(department),
-		})
+	if !domain.ActorHasPermission(actor, domain.PermissionAccessManage) {
+		return identityPermissionDenied("access_manage_required", "access.manage is required")
+	}
+	if !domain.ResourceGroupAccessFilterForActor(actor, domain.PermissionAccessManage).Global {
+		return identityPermissionDenied("global_access_manage_required", "global access.manage is required")
 	}
 	return nil
-}
-
-func roleCatalogEntryForRole(role domain.Role) domain.RoleCatalogEntry {
-	for _, entry := range domain.DefaultRoleCatalog() {
-		if entry.Role == role {
-			return entry
-		}
-	}
-	entry := domain.RoleCatalogEntry{Role: role, Name: string(role)}
-	domain.HydrateRoleCatalogEntryDefaults(&entry)
-	return entry
-}
-
-func roleCatalogEntryAssignableByActor(actor domain.RequestActor, entry domain.RoleCatalogEntry) bool {
-	if !entry.Assignable || entry.Deprecated || entry.Category == "compatibility" {
-		return false
-	}
-	switch {
-	case identityActorHasAnyRole(actor, domain.RoleSuperAdmin):
-		return true
-	case identityActorHasAnyRole(actor, domain.RoleHRAdmin):
-		switch entry.Role {
-		case domain.RoleSuperAdmin, domain.RoleHRAdmin:
-			return false
-		default:
-			return true
-		}
-	case identityActorHasAnyRole(actor, domain.RoleDeptAdmin):
-		department := identityActorDepartment(actor)
-		if department == "" {
-			return false
-		}
-		return departmentAdminCanAssignRole(domain.Department(department), entry.Role)
-	default:
-		return false
-	}
 }
 
 func identityPermissionDenied(code, message string) *domain.AppError {
@@ -3412,30 +3067,6 @@ func sameStringSlice(left, right []string) bool {
 	return true
 }
 
-func diffRoles(before, after []domain.Role) ([]domain.Role, []domain.Role) {
-	beforeSet := map[domain.Role]struct{}{}
-	afterSet := map[domain.Role]struct{}{}
-	for _, role := range domain.NormalizeRoleValues(before) {
-		beforeSet[role] = struct{}{}
-	}
-	for _, role := range domain.NormalizeRoleValues(after) {
-		afterSet[role] = struct{}{}
-	}
-	added := make([]domain.Role, 0)
-	removed := make([]domain.Role, 0)
-	for role := range afterSet {
-		if _, ok := beforeSet[role]; !ok {
-			added = append(added, role)
-		}
-	}
-	for role := range beforeSet {
-		if _, ok := afterSet[role]; !ok {
-			removed = append(removed, role)
-		}
-	}
-	return domain.NormalizeRoleValues(added), domain.NormalizeRoleValues(removed)
-}
-
 func actorIDPtr(actorID int64) *int64 {
 	if actorID <= 0 {
 		return nil
@@ -3567,80 +3198,19 @@ func defaultAuthSettings() domain.AuthSettings {
 
 func defaultFrontendAccessSettings() domain.FrontendAccessSettings {
 	return domain.FrontendAccessSettings{
-		Version: "1.1.0",
+		Version: "v8-explicit-access",
 		Defaults: domain.FrontendAccessDefaults{
 			AllAuthenticated: domain.FrontendAccessSpec{
 				Roles:   []string{"member"},
-				Scopes:  []string{"frontend_ready", "self_only"},
+				Scopes:  []string{"authenticated"},
 				Menus:   []string{"dashboard"},
-				Pages:   []string{"dashboard_home", "profile_me"},
-				Actions: []string{"auth.me.read", "profile.view"},
+				Pages:   []string{"dashboard", "profile_me"},
+				Actions: []string{string(domain.PermissionAccountUse)},
 			},
 		},
-		Identities: map[string]domain.FrontendAccessSpec{
-			"super_admin": {
-				Roles:   []string{"super_admin"},
-				Scopes:  []string{"view_all", "identity_admin", "organization_admin", "all_departments"},
-				Menus:   []string{"user_admin", "org_admin", "role_admin", "logs_center", "product_management"},
-				Pages:   []string{"admin_users", "admin_roles", "admin_permission_logs", "admin_operation_logs", "org_options", "product_management"},
-				Actions: []string{"user.manage", "org.manage", "role.assign", "role.remove", "permission_logs.read", "operation_logs.read"},
-			},
-			"department_admin": {
-				Roles:   []string{"department_admin"},
-				Scopes:  []string{"department_scope"},
-				Menus:   []string{"user_admin"},
-				Pages:   []string{"department_users"},
-				Actions: []string{"department.manage", "department.users.read"},
-			},
-			"member": {
-				Scopes: []string{"authenticated"},
-			},
-		},
-		Roles: map[string]domain.FrontendAccessSpec{
-			string(domain.RoleSuperAdmin):     {Roles: []string{"super_admin"}, Scopes: []string{"view_all", "identity_admin", "organization_admin"}, Menus: []string{"user_admin", "org_admin", "role_admin", "logs_center", "product_management"}, Pages: []string{"admin_users", "admin_roles", "admin_permission_logs", "admin_operation_logs", "org_options", "product_management"}, Actions: []string{"user.manage", "org.manage", "role.assign", "role.remove", "permission_logs.read", "operation_logs.read"}},
-			string(domain.RoleHRAdmin):        {Roles: []string{"hr_admin"}, Scopes: []string{"view_all", "hr_admin"}, Menus: []string{"user_admin", "org_admin", "role_admin", "logs_center"}, Pages: []string{"admin_users", "admin_roles", "admin_permission_logs", "admin_operation_logs", "org_options"}, Actions: []string{"user.manage", "org.assign", "org.manage", "role.assign", "role.read", "permission_logs.read", "operation_logs.read"}},
-			string(domain.RoleOrgAdmin):       {Roles: []string{"org_admin"}, Scopes: []string{"org_admin"}, Menus: []string{"user_admin"}, Pages: []string{"admin_users"}, Actions: []string{"user.org.assign"}},
-			string(domain.RoleRoleAdmin):      {Roles: []string{"role_admin"}, Scopes: []string{"role_admin"}, Menus: []string{"role_admin", "user_admin"}, Pages: []string{"admin_users", "admin_roles"}, Actions: []string{"role.read"}},
-			string(domain.RoleAdmin):          {Roles: []string{"admin"}, Scopes: []string{"workflow_admin", "identity_admin"}, Menus: []string{"user_admin", "logs_center", "product_management"}, Pages: []string{"admin_users", "admin_permission_logs", "admin_operation_logs", "product_management"}, Actions: []string{"user.manage", "org.manage", "permission_logs.read", "operation_logs.read", "task.full_access"}},
-			string(domain.RoleDeptAdmin):      {Roles: []string{"department_admin"}, Scopes: []string{"department_scope"}, Menus: []string{"user_admin"}, Pages: []string{"department_users"}, Actions: []string{"department.manage", "department.users.read"}},
-			string(domain.RoleTeamLead):       {Roles: []string{"team_lead"}, Scopes: []string{"team_scope"}, Pages: []string{"team_users"}, Actions: []string{"team.users.read"}},
-			string(domain.RoleDesignDirector): {Roles: []string{"design_director"}, Scopes: []string{"design_department_scope"}, Menus: []string{"design_workspace", "resource_management", "product_management", "user_admin"}, Pages: []string{"design_workspace", "department_users", "assets_index", "task_assets", "asset_detail", "product_management"}, Actions: []string{"design.review.read", "department.users.read"}},
-			string(domain.RoleDesignReviewer): {Roles: []string{"design_reviewer"}, Scopes: []string{"design_review_scope"}, Menus: []string{"design_workspace"}, Pages: []string{"design_workspace", "audit_workspace"}, Actions: []string{"design.review", "task.audit.review"}},
-			string(domain.RoleMember):         {Roles: []string{"member"}, Scopes: []string{"self_only"}, Actions: []string{"profile.view"}},
-			string(domain.RoleOps):            {Roles: []string{"ops"}, Scopes: []string{"workflow_ops"}, Menus: []string{"task_create", "business_info", "task_board", "task_list", "warehouse_receive", "warehouse_processing", "export_center", "resource_management", "product_management", "customization_management"}, Pages: []string{"task_board", "task_list", "task_create", "products", "categories", "cost_rules", "warehouse_receive", "warehouse_processing", "workbench", "export_jobs", "code_rules", "assets_index", "task_assets", "asset_detail", "product_management", "customization_jobs", "customization_job_detail"}, Actions: []string{"task.create", "task.business_info", "task.list", "warehouse.prepare", "task.close"}},
-			string(domain.RoleDesigner):       {Roles: []string{"designer"}, Scopes: []string{"design_workspace"}, Menus: []string{"design_workspace", "task_list", "export_center", "resource_management", "product_management"}, Pages: []string{"design_workspace", "my_tasks", "design_submit", "design_rework", "export_jobs", "assets_index", "task_assets", "asset_detail", "product_management"}, Actions: []string{"task.design_submit", "task.asset_upload", "task.list"}},
-			string(domain.RoleCustomizationOperator): {
-				Roles:   []string{"customization_operator"},
-				Scopes:  []string{"customization_workspace"},
-				Menus:   []string{"customization_management", "resource_management", "product_management", "task_list"},
-				Pages:   []string{"customization_jobs", "customization_job_detail", "task_assets", "asset_detail", "assets_index", "product_management", "task_list"},
-				Actions: []string{"task.customization.submit", "task.customization.transfer", "task.asset_upload", "task.list"},
-			},
-			string(domain.RoleAuditA):    {Roles: []string{"audit_a"}, Scopes: []string{"audit_workspace"}, Menus: []string{"audit_queue", "task_board", "task_list", "export_center", "resource_management", "product_management"}, Pages: []string{"task_board", "task_list", "audit_workspace", "export_jobs", "assets_index", "task_assets", "asset_detail", "product_management"}, Actions: []string{"task.audit.claim", "task.audit.review", "task.audit.takeover", "task.list"}},
-			string(domain.RoleAuditB):    {Roles: []string{"audit_b"}, Scopes: []string{"audit_workspace"}, Menus: []string{"audit_queue", "task_board", "task_list", "export_center", "resource_management", "product_management"}, Pages: []string{"task_board", "task_list", "audit_workspace", "export_jobs", "assets_index", "task_assets", "asset_detail", "product_management"}, Actions: []string{"task.audit.claim", "task.audit.review", "task.audit.takeover", "task.list"}},
-			string(domain.RoleWarehouse): {Roles: []string{"warehouse"}, Scopes: []string{"warehouse_workspace"}, Menus: []string{"warehouse_receive", "warehouse_processing", "task_board", "task_list", "export_center", "resource_management", "product_management"}, Pages: []string{"warehouse_receive", "warehouse_processing", "task_list", "task_board", "export_jobs", "assets_index", "task_assets", "asset_detail", "product_management"}, Actions: []string{"warehouse.receive", "warehouse.reject", "warehouse.complete", "task.list"}},
-			string(domain.RoleOutsource): {Roles: []string{"outsource"}, Scopes: []string{"compatibility_legacy"}},
-			string(domain.RoleCustomizationReviewer): {
-				Roles:   []string{"customization_reviewer"},
-				Scopes:  []string{"customization_review_scope"},
-				Menus:   []string{"customization_management", "resource_management", "product_management", "task_list"},
-				Pages:   []string{"customization_jobs", "customization_job_detail", "task_assets", "asset_detail", "assets_index", "product_management", "task_list"},
-				Actions: []string{"task.customization.review", "task.customization.effect_review", "task.customization.review.asset_upload", "task.list"},
-			},
-			string(domain.RoleERP): {Roles: []string{"erp"}, Scopes: []string{"erp_internal"}, Menus: []string{"integration_center", "product_management"}, Pages: []string{"erp_sync_console", "product_management"}, Actions: []string{"erp.sync"}},
-		},
-		Departments: map[string]domain.DepartmentAccessEntry{
-			string(domain.DepartmentHR):               {Code: "hr", FrontendAccessSpec: domain.FrontendAccessSpec{Scopes: []string{"department_hr"}}},
-			string(domain.DepartmentDesignRD):         {Code: "design_rd", FrontendAccessSpec: domain.FrontendAccessSpec{Scopes: []string{"department_design_rd"}}},
-			string(domain.DepartmentCustomizationArt): {Code: "customization_art", FrontendAccessSpec: domain.FrontendAccessSpec{Scopes: []string{"department_customization_art"}}},
-			string(domain.DepartmentAudit):            {Code: "audit", FrontendAccessSpec: domain.FrontendAccessSpec{Scopes: []string{"department_audit"}}},
-			string(domain.DepartmentOperations):       {Code: "operations", FrontendAccessSpec: domain.FrontendAccessSpec{Scopes: []string{"department_operations"}}},
-			string(domain.DepartmentCloudWarehouse):   {Code: "cloud_warehouse", FrontendAccessSpec: domain.FrontendAccessSpec{Scopes: []string{"department_cloud_warehouse"}}},
-			string(domain.DepartmentUnassigned):       {Code: "unassigned", FrontendAccessSpec: domain.FrontendAccessSpec{Scopes: []string{"department_unassigned"}}},
-			string(domain.DepartmentDesign):           {Code: "design", FrontendAccessSpec: domain.FrontendAccessSpec{Scopes: []string{"department_design"}}},
-			string(domain.DepartmentProcurement):      {Code: "procurement", FrontendAccessSpec: domain.FrontendAccessSpec{Scopes: []string{"department_procurement"}}},
-			string(domain.DepartmentWarehouse):        {Code: "warehouse", FrontendAccessSpec: domain.FrontendAccessSpec{Scopes: []string{"department_warehouse"}}},
-			string(domain.DepartmentBakeryWH):         {Code: "bakery_warehouse", FrontendAccessSpec: domain.FrontendAccessSpec{Scopes: []string{"department_bakery_warehouse"}}},
-		},
+		Departments: map[string]domain.DepartmentAccessEntry{},
+		Teams:       map[string]domain.TeamEntry{},
+		Roles:       map[string]domain.FrontendAccessSpec{},
+		Identities:  map[string]domain.FrontendAccessSpec{},
 	}
 }

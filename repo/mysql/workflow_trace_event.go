@@ -245,11 +245,6 @@ func workflowTraceBusinessOnlyWhere() string {
 		OR route_path LIKE '/v1/erp%'
 		OR route_path LIKE '/v1/products%'
 		OR route_path LIKE '/v1/sku%'
-		OR route_path LIKE '/v1/warehouse%'
-		OR route_path LIKE '/v1/audit%'
-		OR route_path LIKE '/v1/reports%'
-		OR route_path LIKE '/v1/finance%'
-		OR route_path LIKE '/v1/export%'
 	)`
 }
 

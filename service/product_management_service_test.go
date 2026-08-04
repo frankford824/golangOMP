@@ -660,13 +660,6 @@ func (s *productManagementERPBridgeCapture) ListJSTUsers(context.Context, domain
 	return nil, nil
 }
 
-func (s *productManagementERPBridgeCapture) QueryOrderActionLogs(context.Context, domain.ERPOrderActionLogFilter) (*domain.ERPOrderActionLogListResponse, *domain.AppError) {
-	return &domain.ERPOrderActionLogListResponse{
-		Items:      []*domain.ERPOrderActionLog{},
-		Pagination: domain.PaginationMeta{Page: 1, PageSize: 30, Total: 0},
-	}, nil
-}
-
 func TestProductManagementVerifyERPImageReadbackRejectsNonPublicImage(t *testing.T) {
 	previousSleeper := productManagementERPImageReadbackSleep
 	productManagementERPImageReadbackSleep = func(time.Duration) {}

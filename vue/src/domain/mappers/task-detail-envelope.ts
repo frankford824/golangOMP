@@ -68,6 +68,9 @@ export function mergeDetailEnvelopeIntoTaskRaw(
     if (typeof d.cost_price_mode === 'string' && d.cost_price_mode.trim() !== '') {
       merged.cost_price_mode = d.cost_price_mode.trim()
     }
+    if (typeof d.set_mode_hint === 'boolean') {
+      merged.set_mode_hint = d.set_mode_hint
+    }
 
     if (nonEmpty(d.category_code ?? d.categoryCode)) {
       merged.category_code = d.category_code ?? d.categoryCode
@@ -101,8 +104,17 @@ export function mergeDetailEnvelopeIntoTaskRaw(
     if (noteStr || remarkStr) {
       merged.note = noteStr || remarkStr
     }
-    if (nonEmpty(d.spec_text)) merged.spec_text = d.spec_text
-    if (nonEmpty(d.size_text)) merged.size_text = d.size_text
+    for (const k of [
+      'spec_text',
+      'size_text',
+      'material',
+      'craft_text',
+      'process',
+      'product_short_name',
+      'reference_link',
+    ] as const) {
+      if (nonEmpty(d[k])) merged[k] = d[k]
+    }
     for (const k of [
       'filing_status',
       'filing_error_message',

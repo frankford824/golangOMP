@@ -3,6 +3,7 @@ package asset_center
 import (
 	"context"
 	"strings"
+	"sync"
 	"time"
 
 	"workflow/domain"
@@ -10,15 +11,24 @@ import (
 )
 
 type assetCenterExternalRepoStub struct {
+	previewMu     sync.Mutex
 	searchRows    []*domain.ExternalAssetRecord
 	searchQueries []domain.ExternalAssetSearchQuery
 	getRows       map[int64]*domain.ExternalAssetRecord
 	previewIDs    []int64
 	ossPendingIDs []int64
 	getIDs        []int64
+	searchStarted chan<- struct{}
+	searchRelease <-chan struct{}
 }
 
 func (r *assetCenterExternalRepoStub) Search(_ context.Context, query domain.ExternalAssetSearchQuery) ([]*domain.ExternalAssetRecord, int64, error) {
+	if r.searchStarted != nil {
+		r.searchStarted <- struct{}{}
+	}
+	if r.searchRelease != nil {
+		<-r.searchRelease
+	}
 	query = query.Normalized()
 	r.searchQueries = append(r.searchQueries, query)
 	rows := make([]*domain.ExternalAssetRecord, 0, len(r.searchRows))
@@ -132,6 +142,8 @@ func (r *assetCenterExternalRepoStub) MarkOSSPendingByOriginPrefixes(context.Con
 }
 
 func (r *assetCenterExternalRepoStub) MarkPreviewPreparePending(_ context.Context, id int64) error {
+	r.previewMu.Lock()
+	defer r.previewMu.Unlock()
 	r.previewIDs = append(r.previewIDs, id)
 	return nil
 }

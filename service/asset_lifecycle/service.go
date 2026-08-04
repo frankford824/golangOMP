@@ -97,8 +97,7 @@ func lifecycleSourceModuleKey(asset *domain.TaskAsset, task *domain.Task) string
 	if asset != nil {
 		switch key := strings.TrimSpace(asset.SourceModuleKey); key {
 		case domain.ModuleKeyBasicInfo, domain.ModuleKeyDesign, domain.ModuleKeyAudit,
-			domain.ModuleKeyWarehouse, domain.ModuleKeyCustomization, domain.ModuleKeyProcurement,
-			domain.ModuleKeyRetouch:
+			domain.ModuleKeyCustomization, domain.ModuleKeyRetouch:
 			return key
 		}
 		assetType := domain.NormalizeTaskAssetType(asset.AssetType)

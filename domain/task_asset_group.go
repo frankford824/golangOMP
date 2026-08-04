@@ -37,24 +37,63 @@ const (
 	TaskAssetSourceReopen    TaskAssetSourceStage = "reopen"
 )
 
+// TaskAssetGroupSKUProfile is the deliberately narrow, read-only SKU view
+// exposed by task/resource-group APIs.  Do not replace this with
+// ProductManagementRecord: that record also carries ERP identifiers,
+// synchronization state, operator capabilities and full cost traces which are
+// not part of asset visibility.
+type TaskAssetGroupSKUProfile struct {
+	ID            int64                         `json:"id"`
+	TaskID        int64                         `json:"task_id"`
+	TaskSKUItemID *int64                        `json:"task_sku_item_id,omitempty"`
+	SKUCode       string                        `json:"sku_code"`
+	CategoryName  string                        `json:"category_name,omitempty"`
+	ProductFamily string                        `json:"product_family,omitempty"`
+	ProductName   string                        `json:"product_name,omitempty"`
+	ComboSKUCodes []string                      `json:"combo_sku_codes,omitempty"`
+	CostPrice     *float64                      `json:"cost_price,omitempty"`
+	CostTrace     *TaskAssetGroupSKUCostSummary `json:"cost_trace,omitempty"`
+	SpecText      string                        `json:"spec_text,omitempty"`
+	SizeText      string                        `json:"size_text,omitempty"`
+	AreaTrace     *TaskAssetGroupSKUAreaSummary `json:"area_trace,omitempty"`
+}
+
+type TaskAssetGroupSKUCostSummary struct {
+	RuleName             string `json:"rule_name,omitempty"`
+	RequiresManualReview bool   `json:"requires_manual_review"`
+}
+
+type TaskAssetGroupSKUAreaSummary struct {
+	WidthM      *float64 `json:"width_m,omitempty"`
+	HeightM     *float64 `json:"height_m,omitempty"`
+	Quantity    *float64 `json:"quantity,omitempty"`
+	AreaM2      *float64 `json:"area_m2,omitempty"`
+	SourceLabel string   `json:"source_label,omitempty"`
+	Warning     string   `json:"warning,omitempty"`
+}
+
 type TaskAssetGroup struct {
-	ID                   int64                   `json:"id"`
-	TaskID               int64                   `json:"task_id"`
-	ScopeKind            TaskAssetGroupScopeKind `json:"scope_kind"`
-	TaskSKUItemID        *int64                  `json:"task_sku_item_id,omitempty"`
-	RetouchRequirementID *int64                  `json:"retouch_requirement_id,omitempty"`
-	WorkingRevisionID    *int64                  `json:"working_revision_id,omitempty"`
-	FinalizedRevisionID  *int64                  `json:"finalized_revision_id,omitempty"`
-	LockVersion          int64                   `json:"lock_version"`
-	MigrationIncomplete  bool                    `json:"migration_incomplete"`
-	MigrationIssue       string                  `json:"migration_issue,omitempty"`
-	TaskNo               string                  `json:"task_no,omitempty"`
-	SKUCode              string                  `json:"sku_code,omitempty"`
-	BusinessLane         TaskBusinessLane        `json:"business_lane,omitempty"`
-	WorkingRevision      *TaskAssetGroupRevision `json:"working_revision,omitempty"`
-	FinalizedRevision    *TaskAssetGroupRevision `json:"finalized_revision,omitempty"`
-	CreatedAt            time.Time               `json:"created_at"`
-	UpdatedAt            time.Time               `json:"updated_at"`
+	ID                   int64                     `json:"id"`
+	TaskID               int64                     `json:"task_id"`
+	ScopeKind            TaskAssetGroupScopeKind   `json:"scope_kind"`
+	TaskSKUItemID        *int64                    `json:"task_sku_item_id,omitempty"`
+	RetouchRequirementID *int64                    `json:"retouch_requirement_id,omitempty"`
+	WorkingRevisionID    *int64                    `json:"working_revision_id,omitempty"`
+	FinalizedRevisionID  *int64                    `json:"finalized_revision_id,omitempty"`
+	LockVersion          int64                     `json:"lock_version"`
+	MigrationIncomplete  bool                      `json:"migration_incomplete"`
+	MigrationIssue       string                    `json:"migration_issue,omitempty"`
+	TaskNo               string                    `json:"task_no,omitempty"`
+	SKUCode              string                    `json:"sku_code,omitempty"`
+	ProductName          string                    `json:"product_name,omitempty"`
+	CreatorID            int64                     `json:"creator_id,omitempty"`
+	CreatorName          string                    `json:"creator_name,omitempty"`
+	BusinessLane         TaskBusinessLane          `json:"business_lane,omitempty"`
+	SKUProfile           *TaskAssetGroupSKUProfile `json:"sku_profile,omitempty"`
+	WorkingRevision      *TaskAssetGroupRevision   `json:"working_revision,omitempty"`
+	FinalizedRevision    *TaskAssetGroupRevision   `json:"finalized_revision,omitempty"`
+	CreatedAt            time.Time                 `json:"created_at"`
+	UpdatedAt            time.Time                 `json:"updated_at"`
 }
 
 type TaskAssetGroupRevision struct {
@@ -67,12 +106,33 @@ type TaskAssetGroupRevision struct {
 	SourceFile        *TaskResourceFile                 `json:"source_file,omitempty"`
 	SourceStage       TaskAssetSourceStage              `json:"source_stage"`
 	CreatedBy         int64                             `json:"created_by"`
+	CreatedByName     string                            `json:"created_by_name,omitempty"`
 	Reason            string                            `json:"reason,omitempty"`
+	LegacyMigration   bool                              `json:"legacy_migration"`
+	EvidenceSummary   *ResourceGroupRevisionEvidence    `json:"evidence_summary,omitempty"`
 	Items             []TaskAssetGroupRevisionItem      `json:"items"`
 	References        []TaskAssetGroupRevisionReference `json:"references"`
 	SubmittedAt       *time.Time                        `json:"submitted_at,omitempty"`
 	FinalizedAt       *time.Time                        `json:"finalized_at,omitempty"`
 	CreatedAt         time.Time                         `json:"created_at"`
+}
+
+// ResourceGroupRevisionEvidence is a parsed, read-only projection of the
+// versioned metadata stored in a migrated revision's reason. It never contains
+// event payloads, object-storage addresses, or inferred upload sessions.
+type ResourceGroupRevisionEvidence struct {
+	SchemaVersion            string    `json:"schema_version"`
+	ManifestSHA256           string    `json:"manifest_sha256"`
+	Confidence               string    `json:"confidence"`
+	ConfirmedBy              int64     `json:"confirmed_by"`
+	ConfirmedAt              time.Time `json:"confirmed_at"`
+	EvidenceEventCount       int64     `json:"evidence_event_count"`
+	EvidenceEventIDs         []string  `json:"evidence_event_ids"`
+	EvidenceEventIDsComplete bool      `json:"evidence_event_ids_complete"`
+	UploadSessionIDs         []string  `json:"upload_session_ids"`
+	UploadSessionsKnown      bool      `json:"upload_sessions_known"`
+	BusinessReason           string    `json:"business_reason,omitempty"`
+	BusinessReasonSHA256     string    `json:"business_reason_sha256,omitempty"`
 }
 
 type TaskAssetGroupRevisionItem struct {
@@ -85,27 +145,61 @@ type TaskAssetGroupRevisionItem struct {
 	CreatedAt   time.Time         `json:"created_at"`
 }
 
+type TaskResourceFileAvailability string
+
+const (
+	TaskResourceFileAvailable             TaskResourceFileAvailability = "available"
+	TaskResourceFileHistoricalUnavailable TaskResourceFileAvailability = "historical_unavailable"
+)
+
 type TaskResourceFile struct {
-	RevisionItemID int64      `json:"revision_item_id,omitempty"`
-	TaskAssetID    int64      `json:"task_asset_id"`
-	FileName       string     `json:"file_name"`
-	MimeType       string     `json:"mime_type,omitempty"`
-	FileSize       *int64     `json:"file_size,omitempty"`
-	StorageKey     string     `json:"-"`
-	DownloadURL    string     `json:"download_url,omitempty"`
-	DownloadExpiry *time.Time `json:"download_expires_at,omitempty"`
+	RevisionItemID    int64                        `json:"revision_item_id,omitempty"`
+	TaskAssetID       int64                        `json:"task_asset_id"`
+	FileName          string                       `json:"file_name"`
+	MimeType          string                       `json:"mime_type,omitempty"`
+	FileSize          *int64                       `json:"file_size,omitempty"`
+	Availability      TaskResourceFileAvailability `json:"availability,omitempty"`
+	UnavailableReason string                       `json:"unavailable_reason,omitempty"`
+	StorageKey        string                       `json:"-"`
+	DownloadURL       string                       `json:"download_url,omitempty"`
+	PreviewURL        string                       `json:"preview_url,omitempty"`
+	DownloadExpiry    *time.Time                   `json:"download_expires_at,omitempty"`
+}
+
+type ResourceRoleFilter string
+
+const (
+	ResourceRoleFilterReference ResourceRoleFilter = "reference"
+	ResourceRoleFilterSource    ResourceRoleFilter = "source"
+	ResourceRoleFilterFinal     ResourceRoleFilter = "final"
+)
+
+func (r ResourceRoleFilter) Valid() bool {
+	switch r {
+	case "", ResourceRoleFilterReference, ResourceRoleFilterSource, ResourceRoleFilterFinal:
+		return true
+	default:
+		return false
+	}
 }
 
 type TaskAssetGroupRevisionReference struct {
-	ID                 int64     `json:"id"`
-	RevisionID         int64     `json:"revision_id"`
-	ReferenceFileRefID int64     `json:"reference_file_ref_id"`
-	FormalTaskAssetID  *int64    `json:"formal_task_asset_id,omitempty"`
-	SortOrder          int       `json:"sort_order"`
-	RefIDSnapshot      string    `json:"ref_id"`
-	FileNameSnapshot   string    `json:"file_name,omitempty"`
-	ScopeSnapshot      string    `json:"scope,omitempty"`
-	CreatedAt          time.Time `json:"created_at"`
+	ID                 int64                        `json:"id"`
+	RevisionID         int64                        `json:"revision_id"`
+	ReferenceFileRefID int64                        `json:"reference_file_ref_id"`
+	FormalTaskAssetID  *int64                       `json:"formal_task_asset_id,omitempty"`
+	SortOrder          int                          `json:"sort_order"`
+	RefIDSnapshot      string                       `json:"ref_id"`
+	FileNameSnapshot   string                       `json:"file_name,omitempty"`
+	ScopeSnapshot      string                       `json:"scope,omitempty"`
+	MimeType           string                       `json:"mime_type,omitempty"`
+	FileSize           *int64                       `json:"file_size,omitempty"`
+	Availability       TaskResourceFileAvailability `json:"availability,omitempty"`
+	UnavailableReason  string                       `json:"unavailable_reason,omitempty"`
+	StorageKey         string                       `json:"-"`
+	DownloadURL        string                       `json:"download_url,omitempty"`
+	PreviewURL         string                       `json:"preview_url,omitempty"`
+	CreatedAt          time.Time                    `json:"created_at"`
 }
 
 type ResourceBundle struct {
@@ -117,12 +211,31 @@ type ResourceBundle struct {
 type ResourceGroupListParams struct {
 	TaskID         int64
 	SKUCode        string
+	TaskNo         string
+	CreatorID      *int64
+	ResourceRole   ResourceRoleFilter
 	Query          string
 	FormatCategory AssetFormatCategoryFilter
 	BusinessLane   TaskBusinessLane
 	Page           int
 	PageSize       int
 	Access         ResourceGroupAccessFilter
+}
+
+// FlatResourceItem is one cross-SKU resource row used when the asset-center
+// list is filtered by resource role or file format.
+type FlatResourceItem struct {
+	GroupID      int64              `json:"group_id"`
+	TaskID       int64              `json:"task_id"`
+	TaskAssetID  int64              `json:"-"`
+	TaskNo       string             `json:"task_no"`
+	SKUCode      string             `json:"sku_code,omitempty"`
+	ResourceRole ResourceRoleFilter `json:"resource_role"`
+	FileName     string             `json:"file_name"`
+	MimeType     string             `json:"mime_type,omitempty"`
+	PreviewURL   string             `json:"preview_url,omitempty"`
+	DownloadURL  string             `json:"download_url,omitempty"`
+	StorageKey   string             `json:"-"`
 }
 
 type ResourceGroupAccessFilter struct {
@@ -134,10 +247,26 @@ type ResourceGroupAccessFilter struct {
 }
 
 type ResourceGroupListResult struct {
-	Items    []TaskAssetGroup `json:"items"`
-	Page     int              `json:"page"`
-	PageSize int              `json:"page_size"`
-	Total    int64            `json:"total"`
+	Items     []TaskAssetGroup   `json:"items"`
+	FlatItems []FlatResourceItem `json:"flat_items,omitempty"`
+	ViewMode  string             `json:"view_mode,omitempty"` // group | flat
+	Page      int                `json:"page"`
+	PageSize  int                `json:"page_size"`
+	Total     int64              `json:"total"`
+}
+
+type ResourceGroupRevisionListParams struct {
+	Page     int
+	PageSize int
+}
+
+type ResourceGroupRevisionListResult struct {
+	Items               []TaskAssetGroupRevision `json:"items"`
+	WorkingRevisionID   *int64                   `json:"working_revision_id,omitempty"`
+	FinalizedRevisionID *int64                   `json:"finalized_revision_id,omitempty"`
+	Page                int                      `json:"page"`
+	PageSize            int                      `json:"page_size"`
+	Total               int64                    `json:"total"`
 }
 
 type ResourceGroupBatchDownloadRequest struct {
@@ -192,6 +321,7 @@ func (t TaskWorkflowLock) AccessSubject() TaskAccessSubject {
 		TaskID: t.TaskID, CreatorID: t.CreatorID, RequesterID: t.RequesterID,
 		DesignerID: t.DesignerID, CurrentHandlerID: t.CurrentHandlerID,
 		OwnerDepartmentID: t.OwnerDepartmentID, OwnerTeamID: t.OwnerTeamID,
+		TaskType: t.TaskType,
 	}
 }
 

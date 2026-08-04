@@ -11,8 +11,8 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 OPENAPI = ROOT / "docs/api/openapi.yaml"
 OUT = ROOT / "docs/frontend"
-DOC_REVISION = "V1.3-A2 i_id-first task/ERP/search integration (2026-04-27)"
-DOC_SOURCE = "docs/api/openapi.yaml (post V1.3-A2)"
+DOC_REVISION = "V8 current contract (2026-07-20)"
+DOC_SOURCE = "docs/api/openapi.yaml"
 
 METHODS = ("get", "post", "put", "patch", "delete")
 METHOD_LABEL = {
@@ -37,7 +37,6 @@ FAMILIES = OrderedDict(
         ("BATCH", ("V1_API_BATCH.md", "Excel 批量创建", "批量创建模板下载、Excel 解析与前端预览校验。")),
         ("ERP", ("V1_API_ERP.md", "ERP 与业务字典", "ERP 商品、分类、仓库、同步、类目、成本规则与兼容商品目录。")),
         ("SEARCH", ("V1_API_SEARCH.md", "搜索", "全局搜索、资产搜索与设计来源搜索。")),
-        ("REPORTS", ("V1_API_REPORTS.md", "L1 报表", "L1 卡片、吞吐与模块停留报表。")),
         ("WS", ("V1_API_WS.md", "WebSocket", "实时消息连接与事件通道。")),
     ]
 )
@@ -68,8 +67,7 @@ FAMILY_NOTES = {
         "模块动作按后端工作流状态机判定，前端不要本地推断可执行性作为最终权限。",
     ],
     "TASK_ASSETS": [
-        "新联调优先使用 `/v1/tasks/{id}/asset-center/*`。",
-        "`/v1/task-create/asset-center/*` 属兼容保留；新前端仅在回滚场景使用。",
+        "已有任务使用 `/v1/tasks/{id}/asset-center/*`；创建前参考图使用 `/v1/tasks/reference-upload-sessions*`。",
     ],
     "ASSETS": [
         "资产上传建议走 upload session；下载与预览 URL 以接口返回为准。",
@@ -100,17 +98,13 @@ FAMILY_NOTES = {
     ],
     "ERP": [
         "新联调优先使用 `/v1/erp/products*` 与 `/v1/erp/products/by-code`。",
-        "`/v1/erp/iids` 是新建/采购任务选择聚水潭 i_id 的 canonical 入口。",
+        "`/v1/erp/iids` 是新品设计与策划 SKU 选择聚水潭 i_id 的 canonical 入口。",
         "`/v1/products*` 是兼容本地缓存路径，新前端不要作为主入口。",
     ],
     "SEARCH": [
         "搜索接口是只读入口，低权限用户可能拿到空数组而不是错误。",
         "`GET /v1/search` 的任务搜索覆盖任务号、产品名、SKU、i_id、任务类型、创建人、所属组、设计师、日期与任务关联设计图/参考图文件信息。",
         "高频输入框应做前端 debounce，避免无意义请求。",
-    ],
-    "REPORTS": [
-        "L1 报表仅 super_admin 可用。",
-        "403 时重点展示 `reports_super_admin_only`。",
     ],
     "WS": [
         "WebSocket 使用 Bearer token 建连；断线后前端按指数退避重连。",
@@ -141,9 +135,7 @@ DENY_CODES = [
     "user_update_field_denied_by_scope",
     "role_assignment_denied_by_scope",
     "management_access_required",
-    "reports_super_admin_only",
     "asset_version_race_retry",
-    "audit_log_access_denied",
     "workflow_lane_unsupported",
     "old_password_mismatch",
     "password_confirmation_required",
@@ -378,8 +370,6 @@ def curl_for(path, method, op, media):
 def family_for(path):
     if path.startswith("/v1/ws"):
         return "WS"
-    if path.startswith("/v1/reports/"):
-        return "REPORTS"
     if path in ("/v1/search", "/v1/assets/search", "/v1/design-sources/search"):
         return "SEARCH"
     if path.startswith("/v1/tasks/batch-create"):
@@ -388,7 +378,7 @@ def family_for(path):
         return "NOTIFICATIONS"
     if path.startswith("/v1/task-drafts"):
         return "DRAFTS"
-    if path.startswith("/v1/tasks/{id}/asset-center") or path.startswith("/v1/task-create/asset-center") or path == "/v1/tasks/reference-upload":
+    if path.startswith("/v1/tasks/{id}/asset-center") or path == "/v1/tasks/reference-upload":
         return "TASK_ASSETS"
     if path.startswith("/v1/assets"):
         return "ASSETS"
@@ -467,7 +457,7 @@ def render_path_section(spec, path, path_item, family_key):
     out.append("### 前端最佳实践\n")
     for note in FAMILY_NOTES[family_key]:
         out.append(f"- {note}\n")
-    out.append("- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。\n")
+    out.append("- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。\n")
     out.append("- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。\n\n")
     return "".join(out)
 
@@ -508,7 +498,7 @@ def render_index(family_entries, v1_path_count):
     out = ["# V1 前端联调接口文档索引\n\n"]
     out.append(revision_header())
     out.append("当前真相入口: [V1_BACKEND_SOURCE_OF_TRUTH.md](../V1_BACKEND_SOURCE_OF_TRUTH.md)\n\n")
-    out.append("> Release: v1.21 · Backend: V1.0 + V1.1-A1 · Production detail P99 warm 32.933ms / cold 32.995ms。\n\n")
+    out.append("> Contract: V8 shared-backend，覆盖 main-ops 与 asset-workbench 当前公开接口。\n\n")
     out.append("## §0 Base URL 与鉴权\n\n")
     out.append("- 生产: `https://<prod-host>` 或联调反代地址。\n- 本地/隧道: `http://127.0.0.1:18080`。\n- 鉴权: `Authorization: Bearer <token>`。\n- 成功响应常见包装: `{\"data\": ...}`；以各接口 OpenAPI response schema 为准。\n\n")
     out.append("## §1 联调起步 6 步\n\n")
@@ -520,25 +510,14 @@ def render_index(family_entries, v1_path_count):
     out.append("\n常见 deny_code:\n\n")
     for code in DENY_CODES:
         out.append(f"- `{code}`\n")
-    out.append("\n## §3 RBAC 角色矩阵\n\n")
-    out.append("| 角色 | 主要权限点 |\n|---|---|\n")
-    roles = [
-        ("SuperAdmin", "全局管理、报表、危险操作、用户管理。"),
-        ("HRAdmin", "组织与用户管理范围内操作。"),
-        ("DepartmentAdmin", "本部门用户与任务管理。"),
-        ("TeamLead", "本组任务管理与人员协作。"),
-        ("Ops", "运营/客服任务创建、分派与跟进。"),
-        ("Designer", "设计模块领取、提交与资产处理。"),
-        ("CustomizationOperator", "定制模块处理。"),
-        ("Audit_A / Audit_B / CustomizationReviewer", "审核相关模块动作。"),
-        ("Warehouse / Member", "仓库或普通成员范围内可见任务与操作。"),
-    ]
-    for role, text in roles:
-        out.append(f"| `{role}` | {text} |\n")
+    out.append("\n## §3 显式权限模型\n\n")
+    out.append("- 业务授权只认 `auth_*` 角色、能力与稳定组织 ID 范围。\n")
+    out.append("- `Member` 是基础身份；`SuperAdmin` 是受保护角色。\n")
+    out.append("- 前端菜单和动作以后端有效能力及 `allowed_actions` 为准，不按旧角色名、部门名或状态自行推断。\n")
+    out.append("- 具体路由能力要求以各接口 OpenAPI 扩展字段和运行时 middleware 为准。\n")
     out.append("\n## §4 路由分类\n\n")
-    out.append("- Canonical: `/v1/auth/*`, `/v1/me*`, `/v1/users*`, `/v1/erp/products*`, `/v1/tasks*`, `/v1/tasks/{id}/asset-center/*`, `/v1/task-drafts*`, `/v1/me/notifications*`, `/v1/reports/l1/*`, `/ws/v1`。\n")
-    out.append("- Compatibility: `/v1/products*`, `/v1/task-create/asset-center/*`, 以及 transport 中 `withCompatibilityRoute` 标记的旧入口。\n")
-    out.append("- Deprecated: transport 中 `withDeprecatedRoute` 标记的旧入口；新前端不要接。\n\n")
+    out.append("- 当前 `/v1` 与 `/ws/v1` 路径以本次从 OpenAPI 生成的 family 索引为准。\n")
+    out.append("- 任务主流程只包含创建、设计、统一审核与结单；已退役流程不属于当前合同。\n\n")
     out.append("## §5 Family 索引\n\n")
     out.append("| Family | 文档 | path 数 |\n|---|---|---|\n")
     for key, entries in family_entries.items():
@@ -550,8 +529,9 @@ def render_index(family_entries, v1_path_count):
     out.append(f"| 全量速查 | [V1_API_CHEATSHEET.md](V1_API_CHEATSHEET.md) | {v1_path_count} |\n\n")
     out.append("## §6 联调硬门\n\n")
     out.append("- 所有请求必须走 Bearer token，公开登录/注册和公开随机资源除外。\n- 首屏详情优先使用 `GET /v1/tasks/{id}/detail`，不要并发拼旧 detail 子接口。\n- 前端必须展示后端 `error.code` 或 `deny_code`。\n- 新页面只接 canonical 路径。\n- WebSocket 只做实时提示，最终一致状态回读 HTTP。\n- Excel 批量创建以 parse preview 的 `violations` 为准，不在前端复制完整业务校验。\n\n")
-    out.append("## §7 Deprecated / Compatibility 清单\n\n")
-    out.append("- `/v1/task-create/asset-center/*`: 创建前资产上传兼容入口。\n- `/v1/products*`: 老本地缓存商品入口，新联调用 `/v1/erp/products*`。\n- `/v1/tasks/{id}/audit_a_claim`、`/v1/tasks/{id}/audit_b_claim`: 老审核领取别名。\n- 所有 `withCompatibilityRoute` / `withDeprecatedRoute` 标记路径不得作为新前端主入口。\n\n")
+    out.append("## §7 已退役业务边界\n\n")
+    out.append("- 不建设任何未启用的占位接口；当前文档仅描述已挂载且可使用的合同。\n")
+    out.append("- 历史证据只保留在明确的 archive/迁移边界，不得作为新前端或后续模型的实现依据。\n\n")
     return "".join(out)
 
 
@@ -560,7 +540,7 @@ def render_cheatsheet(spec, family_entries, v1_path_count):
     rows.append(revision_header())
     rows.append("> 本表一行对应一个 `/v1` path；同一路径多 method 合并到 `Methods` 列。\n")
     rows.append(f"> WebSocket 当前 OpenAPI 真实 path 为 `/ws/v1`，详见 `V1_API_WS.md`，不计入 {v1_path_count} 个 `/v1` path。\n")
-    rows.append("> 新前端只接 canonical 路径；compatibility/deprecated 路径仅作迁移兜底。\n\n")
+    rows.append("> 新前端只接本表列出的当前 V8 路径。\n\n")
     rows.append("| Methods | Path | Summary | RBAC | family doc |\n|---|---|---|---|---|\n")
     for key, entries in family_entries.items():
         filename, _, _ = FAMILIES[key]

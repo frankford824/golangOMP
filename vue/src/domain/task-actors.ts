@@ -1,13 +1,13 @@
 import type { Task } from '@/domain/types/task'
 
-/** v0.9 列表/导出等：空姓名统一占位 */
+/** 列表与导出中的空姓名统一占位。 */
 export function dashDisplay(name: string | null | undefined): string {
   const s = name?.trim()
   return s ? s : '-'
 }
 
 /**
- * 设计师展示名：优先 `designer_*`；仅当后端仍只返回兼容字段时回退 `assignee_*`。
+ * 设计师展示名：优先 `designer_*`；旧数据缺失时回退只读的 `assignee_*` 投影。
  */
 export function taskDesignerDisplayName(task: Task): string {
   const n = task.designerName?.trim()

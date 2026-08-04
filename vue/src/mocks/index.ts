@@ -43,9 +43,8 @@ type MockFamily =
   | 'notifications'
   | 'batch'
   | 'erp'
-  | 'product-management'
+  | 'cost-management'
   | 'search'
-  | 'reports'
 
 const DEFAULT_MOCK_FAMILIES: MockFamily[] = [
   'auth',
@@ -59,9 +58,8 @@ const DEFAULT_MOCK_FAMILIES: MockFamily[] = [
   'notifications',
   'batch',
   'erp',
-  'product-management',
+  'cost-management',
   'search',
-  'reports',
 ]
 
 function configuredMockFamilies(): Set<string> {
@@ -82,14 +80,13 @@ export function inferMockFamily(path: string): MockFamily | undefined {
     if (path.includes('/task-drafts')) return 'drafts'
     return 'me'
   }
-  if (path.startsWith('/v1/users') || path.startsWith('/v1/access/') || path === '/v1/roles' || path === '/v1/access-rules') return 'users'
+  if (path.startsWith('/v1/users') || path.startsWith('/v1/access/')) return 'users'
   if (path.startsWith('/v1/org') || path.startsWith('/v1/departments/')) return 'org'
   if (path.startsWith('/v1/task-drafts')) return 'drafts'
   if (path.includes('/batch-create/')) return 'batch'
   if (path.startsWith('/v1/erp/') || path.startsWith('/v1/products') || path.startsWith('/v1/categories')) return 'erp'
-  if (path.startsWith('/v1/product-management') || path.match(/^\/v1\/tasks\/[^/]+\/product-management$/)) return 'product-management'
+  if (path.startsWith('/v1/cost-management/') || path.startsWith('/v1/cost-rules') || path.startsWith('/v1/cost-rule-bindings')) return 'cost-management'
   if (path.startsWith('/v1/design-sources/')) return 'search'
-  if (path.startsWith('/v1/reports/')) return 'reports'
   if (path.startsWith('/v1/assets') || path.startsWith('/v1/resource-groups') || path.startsWith('/v1/tasks/reference-upload')) return 'assets'
   if (path.includes('/asset-center/')) return 'task-assets'
   if (path.startsWith('/v1/tasks/') || path === '/v1/tasks' || path.startsWith('/v1/task-board/')) return 'tasks'

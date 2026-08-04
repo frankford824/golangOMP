@@ -13,10 +13,12 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 
 	"workflow/config"
+	mysqlrepo "workflow/repo/mysql"
 )
 
 type reindexSummary struct {
 	DryRun         bool          `json:"dry_run"`
+	Tasks          *reindexTable `json:"tasks,omitempty"`
 	Assets         *reindexTable `json:"assets,omitempty"`
 	Products       *reindexTable `json:"products,omitempty"`
 	ElapsedMS      int64         `json:"elapsed_ms"`
@@ -33,11 +35,13 @@ type reindexTable struct {
 
 func main() {
 	var dsn string
+	var tasks bool
 	var assets bool
 	var products bool
 	var dryRun bool
 	var timeout time.Duration
 	flag.StringVar(&dsn, "dsn", "", "MySQL DSN; defaults to config MySQL DSN")
+	flag.BoolVar(&tasks, "tasks", false, "rebuild task_search_documents through the canonical task projection")
 	flag.BoolVar(&assets, "assets", true, "rebuild task_asset_group_search_documents")
 	flag.BoolVar(&products, "products", true, "rebuild product_search_documents")
 	flag.BoolVar(&dryRun, "dry-run", false, "count rows without rebuilding documents")
@@ -46,6 +50,7 @@ func main() {
 
 	code := run(context.Background(), runOptions{
 		DSN:      dsn,
+		Tasks:    tasks,
 		Assets:   assets,
 		Products: products,
 		DryRun:   dryRun,
@@ -56,6 +61,7 @@ func main() {
 
 type runOptions struct {
 	DSN      string
+	Tasks    bool
 	Assets   bool
 	Products bool
 	DryRun   bool
@@ -64,8 +70,8 @@ type runOptions struct {
 
 func run(parent context.Context, opts runOptions) int {
 	start := time.Now()
-	if !opts.Assets && !opts.Products {
-		writeError("at least one of --assets or --products must be true")
+	if !opts.Tasks && !opts.Assets && !opts.Products {
+		writeError("at least one of --tasks, --assets or --products must be true")
 		return 2
 	}
 	if opts.Timeout <= 0 {
@@ -106,10 +112,19 @@ func run(parent context.Context, opts runOptions) int {
 		DryRun:         opts.DryRun,
 		GeneratedAtUTC: start.UTC().Format(time.RFC3339),
 	}
+	if opts.Tasks {
+		rebuilt, err := mysqlrepo.RebuildAllTaskSearchDocumentProjections(ctx, db, opts.DryRun)
+		if err != nil {
+			writeRunError(&out, start, fmt.Sprintf("rebuild tasks: %v", err))
+			return 1
+		}
+		out.Tasks = &reindexTable{SourceRows: rebuilt.SourceRows, BeforeRows: rebuilt.BeforeRows,
+			AfterRows: rebuilt.AfterRows, Changed: rebuilt.Changed}
+	}
 	if opts.Assets {
 		table, err := rebuildAssets(ctx, db, opts.DryRun)
 		if err != nil {
-			writeError(fmt.Sprintf("rebuild assets: %v", err))
+			writeRunError(&out, start, fmt.Sprintf("rebuild assets: %v", err))
 			return 1
 		}
 		out.Assets = table
@@ -117,7 +132,7 @@ func run(parent context.Context, opts runOptions) int {
 	if opts.Products {
 		table, err := rebuildProducts(ctx, db, opts.DryRun)
 		if err != nil {
-			writeError(fmt.Sprintf("rebuild products: %v", err))
+			writeRunError(&out, start, fmt.Sprintf("rebuild products: %v", err))
 			return 1
 		}
 		out.Products = table
@@ -131,19 +146,23 @@ func run(parent context.Context, opts runOptions) int {
 }
 
 func rebuildAssets(ctx context.Context, db *sql.DB, dryRun bool) (*reindexTable, error) {
-	sourceRows, err := countRows(ctx, db, `
+	countSource := func(q rowCounter) (int64, error) {
+		return countRows(ctx, q, `
 		SELECT COUNT(*)
 		  FROM task_asset_groups g
 		 WHERE g.finalized_revision_id IS NOT NULL`)
-	if err != nil {
-		return nil, fmt.Errorf("count asset source rows: %w", err)
 	}
-	beforeRows, err := countRows(ctx, db, `SELECT COUNT(*) FROM task_asset_group_search_documents`)
-	if err != nil {
-		return nil, fmt.Errorf("count asset documents: %w", err)
-	}
-	out := &reindexTable{SourceRows: sourceRows, BeforeRows: beforeRows}
+	out := &reindexTable{}
 	if dryRun {
+		var err error
+		out.SourceRows, err = countSource(db)
+		if err != nil {
+			return nil, fmt.Errorf("count asset source rows: %w", err)
+		}
+		out.BeforeRows, err = countRows(ctx, db, `SELECT COUNT(*) FROM task_asset_group_search_documents`)
+		if err != nil {
+			return nil, fmt.Errorf("count asset documents: %w", err)
+		}
 		return out, nil
 	}
 	tx, err := db.BeginTx(ctx, nil)
@@ -151,6 +170,14 @@ func rebuildAssets(ctx context.Context, db *sql.DB, dryRun bool) (*reindexTable,
 		return nil, fmt.Errorf("begin asset transaction: %w", err)
 	}
 	defer tx.Rollback()
+	out.SourceRows, err = countSource(tx)
+	if err != nil {
+		return nil, fmt.Errorf("count asset source rows: %w", err)
+	}
+	out.BeforeRows, err = countRows(ctx, tx, `SELECT COUNT(*) FROM task_asset_group_search_documents`)
+	if err != nil {
+		return nil, fmt.Errorf("count asset documents: %w", err)
+	}
 	if _, err := tx.ExecContext(ctx, `SET SESSION group_concat_max_len = 1048576`); err != nil {
 		return nil, fmt.Errorf("set group_concat_max_len: %w", err)
 	}
@@ -164,6 +191,9 @@ func rebuildAssets(ctx context.Context, db *sql.DB, dryRun bool) (*reindexTable,
 	if err != nil {
 		return nil, fmt.Errorf("count rebuilt asset documents: %w", err)
 	}
+	if afterRows != out.SourceRows {
+		return nil, fmt.Errorf("asset document row mismatch: source=%d after=%d", out.SourceRows, afterRows)
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit asset transaction: %w", err)
 	}
@@ -173,16 +203,20 @@ func rebuildAssets(ctx context.Context, db *sql.DB, dryRun bool) (*reindexTable,
 }
 
 func rebuildProducts(ctx context.Context, db *sql.DB, dryRun bool) (*reindexTable, error) {
-	sourceRows, err := countRows(ctx, db, `SELECT COUNT(*) FROM products WHERE COALESCE(sku_code, '') <> ''`)
-	if err != nil {
-		return nil, fmt.Errorf("count product source rows: %w", err)
+	countSource := func(q rowCounter) (int64, error) {
+		return countRows(ctx, q, `SELECT COUNT(DISTINCT sku_code) FROM products WHERE COALESCE(sku_code, '') <> ''`)
 	}
-	beforeRows, err := countRows(ctx, db, `SELECT COUNT(*) FROM product_search_documents`)
-	if err != nil {
-		return nil, fmt.Errorf("count product documents: %w", err)
-	}
-	out := &reindexTable{SourceRows: sourceRows, BeforeRows: beforeRows}
+	out := &reindexTable{}
 	if dryRun {
+		var err error
+		out.SourceRows, err = countSource(db)
+		if err != nil {
+			return nil, fmt.Errorf("count product source rows: %w", err)
+		}
+		out.BeforeRows, err = countRows(ctx, db, `SELECT COUNT(*) FROM product_search_documents`)
+		if err != nil {
+			return nil, fmt.Errorf("count product documents: %w", err)
+		}
 		return out, nil
 	}
 	tx, err := db.BeginTx(ctx, nil)
@@ -190,6 +224,14 @@ func rebuildProducts(ctx context.Context, db *sql.DB, dryRun bool) (*reindexTabl
 		return nil, fmt.Errorf("begin product transaction: %w", err)
 	}
 	defer tx.Rollback()
+	out.SourceRows, err = countSource(tx)
+	if err != nil {
+		return nil, fmt.Errorf("count product source rows: %w", err)
+	}
+	out.BeforeRows, err = countRows(ctx, tx, `SELECT COUNT(*) FROM product_search_documents`)
+	if err != nil {
+		return nil, fmt.Errorf("count product documents: %w", err)
+	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM product_search_documents`); err != nil {
 		return nil, fmt.Errorf("delete product documents: %w", err)
 	}
@@ -199,6 +241,9 @@ func rebuildProducts(ctx context.Context, db *sql.DB, dryRun bool) (*reindexTabl
 	afterRows, err := countRows(ctx, tx, `SELECT COUNT(*) FROM product_search_documents`)
 	if err != nil {
 		return nil, fmt.Errorf("count rebuilt product documents: %w", err)
+	}
+	if afterRows != out.SourceRows {
+		return nil, fmt.Errorf("product document row mismatch: source=%d after=%d", out.SourceRows, afterRows)
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit product transaction: %w", err)
@@ -237,6 +282,12 @@ func writeError(message string) {
 	enc := json.NewEncoder(os.Stdout)
 	enc.SetIndent("", "  ")
 	_ = enc.Encode(out)
+}
+
+func writeRunError(out *reindexSummary, start time.Time, message string) {
+	out.ElapsedMS = time.Since(start).Milliseconds()
+	out.Message = message + "; any earlier table shown with changed=true was committed atomically and is safe to rebuild again"
+	writeJSON(*out)
 }
 
 const assetReindexSQL = `

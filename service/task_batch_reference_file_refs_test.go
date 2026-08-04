@@ -86,11 +86,9 @@ func TestTaskServiceCreateBatchMergesItemLevelReferenceFileRefsWithValidation(t 
 	taskRepo := &prdTaskRepo{}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		step04TxRunner{},
 		WithTaskReferenceFileRefValidation(uploadRequestRepo, assetStorageRefRepo),
@@ -213,11 +211,9 @@ func TestTaskServiceUpdateSKUItemInfoRefreshesBatchTaskReferenceSummary(t *testi
 	}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		step04TxRunner{},
 	)
@@ -256,10 +252,10 @@ func TestTaskReadModelReferenceFileRefsAlwaysSlice(t *testing.T) {
 	taskRepo := &prdTaskRepo{
 		tasks: map[int64]*domain.Task{
 			902: {
-				ID:         902,
-				TaskNo:     "T-902",
-				TaskType:   domain.TaskTypeNewProductDevelopment,
-				TaskStatus: domain.TaskStatusPendingAssign,
+				ID:          902,
+				TaskNo:      "T-902",
+				TaskType:    domain.TaskTypeNewProductDevelopment,
+				TaskStatus:  domain.TaskStatusPendingAssign,
 				IsBatchTask: true,
 				BatchMode:   domain.TaskBatchModeMultiSKU,
 			},
@@ -280,11 +276,9 @@ func TestTaskReadModelReferenceFileRefsAlwaysSlice(t *testing.T) {
 	}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		step04TxRunner{},
 	)

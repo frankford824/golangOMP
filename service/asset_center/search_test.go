@@ -2,6 +2,7 @@ package asset_center
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -9,6 +10,7 @@ import (
 
 	"workflow/domain"
 	"workflow/repo"
+	externalassets "workflow/service/external_assets"
 )
 
 func TestSearchUsesCachedSystemTotalWithRowsOnlyRepo(t *testing.T) {
@@ -80,21 +82,104 @@ func TestBrowseMaterialsPassesBusinessLaneToSystemSearch(t *testing.T) {
 	}
 }
 
+func TestSearchSingleflightCoalescesIdenticalColdReads(t *testing.T) {
+	repository := &assetSearchCacheRepoStub{rows: []*repo.TaskAssetSearchRow{assetSearchCacheRow()}, total: 1, delay: 30 * time.Millisecond}
+	svc := NewService(repository, nil, nil)
+	query := domain.AssetSearchQuery{Source: domain.AssetResourceSourceSystem, Page: 1, Size: 20, AccessScopeKey: "user:7:policy:3"}
+
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			result, appErr := svc.Search(context.Background(), query)
+			if appErr != nil || result == nil || result.Total != 1 {
+				t.Errorf("Search() = %+v/%+v", result, appErr)
+			}
+		}()
+	}
+	wg.Wait()
+	repository.mu.Lock()
+	calls := repository.searchCalls
+	repository.mu.Unlock()
+	if calls != 1 {
+		t.Fatalf("repository Search calls = %d, want 1", calls)
+	}
+}
+
+func TestAssetSearchTotalCacheKeyPartitionsAccessScope(t *testing.T) {
+	base := domain.AssetSearchQuery{Keyword: "SKU-1", Source: domain.AssetResourceSourceSystem}
+	first := base
+	first.AccessScopeKey = "user:1:policy:4"
+	second := base
+	second.AccessScopeKey = "user:2:policy:4"
+	if assetSearchTotalCacheKey(first) == assetSearchTotalCacheKey(second) {
+		t.Fatal("different effective access scopes must not share a cached total")
+	}
+}
+
+func TestSearchAllRunsSystemAndExternalProvidersConcurrently(t *testing.T) {
+	started := make(chan struct{}, 2)
+	release := make(chan struct{})
+	systemRepo := &assetSearchCacheRepoStub{total: 1, searchStarted: started, searchRelease: release}
+	externalRepo := &assetCenterExternalRepoStub{searchStarted: started, searchRelease: release}
+	svc := NewService(systemRepo, nil, nil)
+	svc.SetExternalAssetService(externalassets.NewService(externalRepo, externalassets.Config{
+		Enabled: true,
+		Mounts:  externalassets.ParseMounts("/p3:nas_local"),
+	}, nil))
+
+	done := make(chan *domain.AppError, 1)
+	go func() {
+		_, appErr := svc.Search(context.Background(), domain.AssetSearchQuery{Source: domain.AssetResourceSourceAll, Page: 1, Size: 20})
+		done <- appErr
+	}()
+	for range 2 {
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			close(release)
+			t.Fatal("system and external searches did not overlap")
+		}
+	}
+	close(release)
+	if appErr := <-done; appErr != nil {
+		t.Fatalf("Search() appErr = %+v", appErr)
+	}
+}
+
 type assetSearchCacheRepoStub struct {
 	rows            []*repo.TaskAssetSearchRow
 	total           int64
 	lastSearchQuery domain.AssetSearchQuery
 	searchCalls     int
 	rowsOnlyCalls   int
+	delay           time.Duration
+	mu              sync.Mutex
+	searchStarted   chan<- struct{}
+	searchRelease   <-chan struct{}
 }
 
 func (s *assetSearchCacheRepoStub) Search(_ context.Context, query domain.AssetSearchQuery) ([]*repo.TaskAssetSearchRow, int64, error) {
+	if s.searchStarted != nil {
+		s.searchStarted <- struct{}{}
+	}
+	if s.searchRelease != nil {
+		<-s.searchRelease
+	}
+	if s.delay > 0 {
+		time.Sleep(s.delay)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.searchCalls++
 	s.lastSearchQuery = query.Normalized()
 	return s.rows, s.total, nil
 }
 
 func (s *assetSearchCacheRepoStub) SearchRows(context.Context, domain.AssetSearchQuery) ([]*repo.TaskAssetSearchRow, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.rowsOnlyCalls++
 	return s.rows, nil
 }

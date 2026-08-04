@@ -7,7 +7,7 @@
           <p class="modal-subtitle">
             {{ formatEmployeeNo(user.employee_no) }} · {{ user.username }} · {{ formatUserStatusForDisplay(user.status) }}
           </p>
-          <p class="modal-subtitle">当前角色：{{ formatWorkflowRolesForDisplay(user.roles) }}</p>
+          <p class="modal-subtitle">当前角色：{{ currentRoleNames }}</p>
         </div>
         <button type="button" class="modal-close" aria-label="关闭角色管理" @click="emit('close')">
           ×
@@ -91,15 +91,17 @@
           <section class="detail-section">
             <header class="detail-section-header">
               <h4>角色权限</h4>
-              <button
-                v-if="canAssignRoles"
-                type="button"
-                class="um-btn um-btn--primary um-btn--sm"
-                :disabled="roleSubmitting"
-                @click="emit('submit-roles')"
-              >
-                {{ roleSubmitting ? '提交中...' : '保存角色' }}
-              </button>
+              <div class="detail-section-actions">
+                <button
+                  v-if="canAssignRoles"
+                  type="button"
+                  class="um-btn um-btn--primary um-btn--sm"
+                  :disabled="roleSubmitting"
+                  @click="emit('submit-roles')"
+                >
+                  {{ roleSubmitting ? '提交中...' : '保存角色' }}
+                </button>
+              </div>
             </header>
             <div v-if="lockedRoleOptions.length" class="legacy-role-box">
               <span class="legacy-role-title">{{ lockedRoleTitle }}</span>
@@ -107,7 +109,7 @@
                 v-for="role in lockedRoleOptions"
                 :key="'locked-' + role.code"
                 class="legacy-role-tag"
-                :title="lockedRoleTooltip(role)"
+                :title="role.description"
               >
                 {{ role.display }}
               </span>
@@ -121,10 +123,11 @@
                       v-model="selectedRoles"
                       type="checkbox"
                       :value="role.code"
-                      :disabled="!canAssignRoles || role.code === 'Member'"
+                      :disabled="!canAssignRoles || role.code === 'member'"
                     />
                     <span>{{ role.display }}</span>
-                    <em v-if="role.code === 'Member'">基础身份，不能移除</em>
+                    <em v-if="role.code === 'member'">基础身份，不能移除</em>
+                    <em v-else-if="role.hint">{{ role.hint }}</em>
                   </label>
                 </div>
               </section>
@@ -177,11 +180,9 @@
 
 <script setup lang="ts">
 import BaseSkeleton from '@/components/base/BaseSkeleton.vue'
-import { formatWorkflowRolesForDisplay } from '@/domain/user-workflow-roles'
 import {
   formatEmployeeNo,
   formatUserStatusForDisplay,
-  lockedRoleTooltip,
   type RoleOption,
   type RoleOptionGroup,
   type SelectOptionItem,
@@ -191,6 +192,7 @@ import {
 defineProps<{
   user: UserRow
   loading: boolean
+  currentRoleNames: string
   canEditBasicInfo: boolean
   canMoveTeam: boolean
   canClearMembership: boolean

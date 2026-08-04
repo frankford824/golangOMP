@@ -36,7 +36,7 @@ const avatarDropdownImportantBudget = Number(process.env.DESIGN_AVATAR_DROPDOWN_
 const baseModalImportantBudget = Number(process.env.DESIGN_BASE_MODAL_IMPORTANT_BUDGET ?? 0)
 const baseSelectImportantBudget = Number(process.env.DESIGN_BASE_SELECT_IMPORTANT_BUDGET ?? 0)
 const globalSearchOverlayImportantBudget = Number(process.env.DESIGN_GLOBAL_SEARCH_OVERLAY_IMPORTANT_BUDGET ?? 0)
-const taskCreateModalImportantBudget = Number(process.env.DESIGN_TASK_CREATE_MODAL_IMPORTANT_BUDGET ?? 0)
+const taskCreateWorkbenchImportantBudget = Number(process.env.DESIGN_TASK_CREATE_WORKBENCH_IMPORTANT_BUDGET ?? 0)
 const userManagementImportantBudget = Number(process.env.DESIGN_USER_MANAGEMENT_IMPORTANT_BUDGET ?? 0)
 const taskInfoEditModalImportantBudget = Number(process.env.DESIGN_TASK_INFO_EDIT_MODAL_IMPORTANT_BUDGET ?? 0)
 const closeDraftConfirmModalImportantBudget = Number(process.env.DESIGN_CLOSE_DRAFT_CONFIRM_MODAL_IMPORTANT_BUDGET ?? 0)
@@ -163,7 +163,7 @@ const baseModalImportantCount = importantByFile.get('src/components/base/BaseMod
 const baseSelectImportantCount = importantByFile.get('src/components/base/BaseSelect.vue') ?? 0
 const globalSearchOverlayImportantCount =
   importantByFile.get('src/components/global-search/GlobalSearchOverlay.vue') ?? 0
-const taskCreateModalImportantCount = importantByFile.get('src/components/task/TaskCreateModal.vue') ?? 0
+const taskCreateWorkbenchImportantCount = importantByFile.get('src/views/UnifiedTaskCreateView.vue') ?? 0
 const userManagementImportantCount = importantByFile.get('src/views/org-permission/UserManagementView.vue') ?? 0
 const taskInfoEditModalImportantCount = importantByFile.get('src/components/task-detail/TaskInfoEditModal.vue') ?? 0
 const closeDraftConfirmModalImportantCount =
@@ -249,9 +249,9 @@ if (globalSearchOverlayImportantCount > globalSearchOverlayImportantBudget) {
   )
 }
 
-if (taskCreateModalImportantCount > taskCreateModalImportantBudget) {
+if (taskCreateWorkbenchImportantCount > taskCreateWorkbenchImportantBudget) {
   failures.push(
-    `TaskCreateModal !important count ${taskCreateModalImportantCount} exceeds budget ${taskCreateModalImportantBudget}`,
+    `UnifiedTaskCreateView !important count ${taskCreateWorkbenchImportantCount} exceeds budget ${taskCreateWorkbenchImportantBudget}`,
   )
 }
 
@@ -410,7 +410,7 @@ console.log(
   `- GlobalSearchOverlay !important count: ${globalSearchOverlayImportantCount}/${globalSearchOverlayImportantBudget}`,
 )
 console.log(
-  `- TaskCreateModal !important count: ${taskCreateModalImportantCount}/${taskCreateModalImportantBudget}`,
+  `- UnifiedTaskCreateView !important count: ${taskCreateWorkbenchImportantCount}/${taskCreateWorkbenchImportantBudget}`,
 )
 console.log(`- UserManagement !important count: ${userManagementImportantCount}/${userManagementImportantBudget}`)
 console.log(

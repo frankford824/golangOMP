@@ -48,11 +48,9 @@ func TestTaskServiceCreateAcceptsValidatedReferenceFileRefsFromCompletedUpload(t
 	taskRepo := &prdTaskRepo{}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		step04TxRunner{},
 		WithTaskReferenceFileRefValidation(uploadRequestRepo, assetStorageRefRepo),
@@ -123,11 +121,9 @@ func TestTaskReadModelPrefersReferenceFileRefsJSONOverLegacyReferenceImagesJSON(
 	}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		step04TxRunner{},
 	)
@@ -164,11 +160,9 @@ func TestTaskReadModelFallsBackToLegacyReferenceImagesJSONWhenFormalFieldEmpty(t
 	}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		step04TxRunner{},
 	)
@@ -232,11 +226,9 @@ func TestTaskReadModelPresignsReferenceFileRefsAtReadTime(t *testing.T) {
 	oss := newReferenceFileRefsTestOSS(now)
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		step04TxRunner{},
 		WithTaskReferenceFileRefsOSSDirectService(oss),
@@ -281,22 +273,19 @@ func TestTaskServiceCreateRejectsReferenceImagesBeforeTx(t *testing.T) {
 	txRunner := &countingTxRunner{}
 	svc := NewTaskService(
 		&prdTaskRepo{},
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		txRunner,
 	)
 
 	_, appErr := svc.Create(context.Background(), CreateTaskParams{
-		TaskType:                domain.TaskTypePurchaseTask,
+		TaskType:                domain.TaskTypeNewProductDevelopment,
 		SourceMode:              domain.TaskSourceModeNewProduct,
 		CreatorID:               9,
 		OwnerTeam:               domain.AllValidTeams()[0],
 		DeadlineAt:              referenceImageTestTimePtr(),
-		PurchaseSKU:             "PUR-001",
 		ReferenceImagesProvided: true,
 		ReferenceImages:         []string{"data:image/png;base64,AAAA"},
 	})
@@ -328,11 +317,9 @@ func TestTaskServiceCreateRejectsReferenceImagesBeforeTx(t *testing.T) {
 func TestTaskServiceCreateRejectsInvalidReferenceFileRefs(t *testing.T) {
 	svc := NewTaskService(
 		&prdTaskRepo{},
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		step04TxRunner{},
 		WithTaskReferenceFileRefValidation(newStep37UploadRequestRepo(), newStep37AssetStorageRefRepo()),
@@ -408,11 +395,9 @@ func TestTaskServiceCreateRejectsUncompletedReferenceFileRefs(t *testing.T) {
 
 	svc := NewTaskService(
 		&prdTaskRepo{},
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		step04TxRunner{},
 		WithTaskReferenceFileRefValidation(uploadRequestRepo, assetStorageRefRepo),

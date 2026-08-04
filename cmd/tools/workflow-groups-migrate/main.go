@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -9,6 +10,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -20,10 +22,27 @@ import (
 )
 
 const (
-	workflowGroupsSnapshotVersion = 2
-	workflowGroupsToolVersion     = "workflow-groups-migrate/v8.2"
+	workflowGroupsSnapshotVersion = 9
+	workflowGroupsToolVersion     = "workflow-groups-migrate/v8.9"
 	workflowGroupsSchemaVersion   = "124-126"
+	previousSnapshotVersion       = 8
+	previousToolVersion           = "workflow-groups-migrate/v8.8"
+	olderSnapshotVersion          = 7
+	olderToolVersion              = "workflow-groups-migrate/v8.7"
+	historicalSnapshotVersion     = 6
+	historicalToolVersion         = "workflow-groups-migrate/v8.6"
+	legacySnapshotVersion         = 4
+	legacyToolVersion             = "workflow-groups-migrate/v8.4"
 )
+
+var workflowGroupsAutoIncrementTables = []string{
+	"task_assets",
+	"task_asset_groups",
+	"task_asset_group_revisions",
+	"task_asset_group_revision_items",
+	"task_asset_group_revision_references",
+	"task_planning_sku_revisions",
+}
 
 type options struct {
 	DSN         string
@@ -38,27 +57,44 @@ type options struct {
 }
 
 type mappingFile struct {
-	Resources []resourceMapping `json:"resources"`
-	Planning  []planningMapping `json:"planning_tasks"`
+	Version              int                        `json:"version,omitempty"`
+	Resources            []resourceMapping          `json:"resources"`
+	Planning             []planningMapping          `json:"planning_tasks"`
+	TaskDecisions        []taskStateDecisionMapping `json:"task_state_decisions,omitempty"`
+	AssetRecoveries      []assetRecoveryMapping     `json:"asset_recoveries,omitempty"`
+	OrganizationMappings []organizationMapping      `json:"organization_mappings,omitempty"`
+	AccessDecisions      []accessDecisionMapping    `json:"access_decisions,omitempty"`
 }
 
 type resourceMapping struct {
-	TaskID        int64   `json:"task_id"`
-	ScopeKind     string  `json:"scope_kind"`
-	ScopeRefID    int64   `json:"scope_ref_id"`
-	Mode          string  `json:"mode"`
-	SourceAssetID *int64  `json:"source_task_asset_id"`
-	FinalAssetIDs []int64 `json:"final_task_asset_ids"`
-	ReferenceIDs  []int64 `json:"reference_file_ref_ids"`
-	CreatedBy     int64   `json:"created_by"`
-	TargetStatus  string  `json:"target_status"`
-	Reason        string  `json:"reason"`
+	TaskID              int64                     `json:"task_id"`
+	ScopeKind           string                    `json:"scope_kind"`
+	ScopeRefID          int64                     `json:"scope_ref_id"`
+	Mode                string                    `json:"mode"`
+	SourceAssetID       *int64                    `json:"source_task_asset_id"`
+	FinalAssetIDs       []int64                   `json:"final_task_asset_ids"`
+	ReferenceIDs        []int64                   `json:"reference_file_ref_ids"`
+	CreatedBy           int64                     `json:"created_by"`
+	TargetStatus        string                    `json:"target_status"`
+	Reason              string                    `json:"reason"`
+	History             []resourceRevisionMapping `json:"history,omitempty"`
+	WorkingRevisionNo   *int                      `json:"working_revision_no,omitempty"`
+	FinalizedRevisionNo *int                      `json:"finalized_revision_no,omitempty"`
+	V2Declared          bool                      `json:"-"`
 }
 
 type planningMapping struct {
 	TaskID             int64                 `json:"task_id"`
+	TargetTaskStatus   string                `json:"target_task_status"`
 	CodeRuleRevisionID int64                 `json:"code_rule_revision_id"`
 	CreatedBy          int64                 `json:"created_by"`
+	Confidence         string                `json:"confidence"`
+	ReviewPolicyIDs    []string              `json:"review_policy_ids"`
+	Blockers           []string              `json:"blockers,omitempty"`
+	ConfirmedBy        int64                 `json:"confirmed_by"`
+	ConfirmedAt        time.Time             `json:"confirmed_at"`
+	ConfirmationNote   string                `json:"confirmation_note"`
+	ManifestRowHash    string                `json:"manifest_row_hash,omitempty"`
 	Items              []planningItemMapping `json:"items"`
 }
 
@@ -75,23 +111,118 @@ type planningItemMapping struct {
 }
 
 type taskSnapshot struct {
-	ID               int64    `json:"id"`
-	TaskType         string   `json:"task_type"`
-	TaskStatus       string   `json:"task_status"`
-	WorkflowRevision int64    `json:"workflow_revision"`
-	CurrentHandlerID *int64   `json:"current_handler_id"`
-	EventIDs         []string `json:"event_ids"`
+	ID               int64     `json:"id"`
+	TaskType         string    `json:"task_type"`
+	TaskStatus       string    `json:"task_status"`
+	WorkflowRevision int64     `json:"workflow_revision"`
+	CurrentHandlerID *int64    `json:"current_handler_id"`
+	UpdatedAt        time.Time `json:"updated_at"`
+	EventIDs         []string  `json:"event_ids"`
+	ModuleEventIDs   []int64   `json:"module_event_ids,omitempty"`
+}
+
+type taskModuleSnapshot struct {
+	ID               int64           `json:"id"`
+	TaskID           int64           `json:"task_id"`
+	ModuleKey        string          `json:"module_key"`
+	State            string          `json:"state"`
+	PoolTeamCode     *string         `json:"pool_team_code,omitempty"`
+	ClaimedBy        *int64          `json:"claimed_by,omitempty"`
+	ClaimedTeamCode  *string         `json:"claimed_team_code,omitempty"`
+	ClaimedAt        *time.Time      `json:"claimed_at,omitempty"`
+	ActorOrgSnapshot json.RawMessage `json:"actor_org_snapshot,omitempty"`
+	EnteredAt        time.Time       `json:"entered_at"`
+	TerminalAt       *time.Time      `json:"terminal_at,omitempty"`
+	Data             json.RawMessage `json:"data"`
+	UpdatedAt        time.Time       `json:"updated_at"`
+}
+
+type searchDocumentSnapshot struct {
+	GroupID             int64     `json:"group_id"`
+	TaskID              int64     `json:"task_id"`
+	FinalizedRevisionID *int64    `json:"finalized_revision_id,omitempty"`
+	InternalText        string    `json:"internal_text"`
+	FinalText           string    `json:"final_text"`
+	UpdatedAt           time.Time `json:"updated_at"`
+}
+
+type taskSearchDocumentSnapshot struct {
+	TaskID              int64      `json:"task_id"`
+	TaskNo              string     `json:"task_no"`
+	ProductNameSnapshot string     `json:"product_name_snapshot"`
+	SKUCode             string     `json:"sku_code"`
+	PrimarySKUCode      string     `json:"primary_sku_code"`
+	ProductIID          string     `json:"product_i_id"`
+	TaskType            string     `json:"task_type"`
+	TaskStatus          string     `json:"task_status"`
+	Priority            string     `json:"priority"`
+	OwnerDepartment     string     `json:"owner_department"`
+	OwnerTeam           string     `json:"owner_team"`
+	OwnerOrgTeam        string     `json:"owner_org_team"`
+	CreatorID           *int64     `json:"creator_id,omitempty"`
+	CreatorName         string     `json:"creator_name"`
+	RequesterID         *int64     `json:"requester_id,omitempty"`
+	RequesterName       string     `json:"requester_name"`
+	DesignerID          *int64     `json:"designer_id,omitempty"`
+	DesignerName        string     `json:"designer_name"`
+	CurrentHandlerID    *int64     `json:"current_handler_id,omitempty"`
+	CurrentHandlerName  string     `json:"current_handler_name"`
+	CreatedAt           *time.Time `json:"created_at,omitempty"`
+	UpdatedAt           *time.Time `json:"updated_at,omitempty"`
+	DeadlineAt          *time.Time `json:"deadline_at,omitempty"`
+	AssetText           *string    `json:"asset_text,omitempty"`
+	SearchText          string     `json:"search_text"`
 }
 
 type resourceGroupSnapshot struct {
-	ID                  int64   `json:"id"`
-	TaskID              int64   `json:"task_id"`
-	WorkingRevisionID   *int64  `json:"working_revision_id,omitempty"`
-	FinalizedRevisionID *int64  `json:"finalized_revision_id,omitempty"`
-	LockVersion         int64   `json:"lock_version"`
-	MigrationIncomplete bool    `json:"migration_incomplete"`
-	MigrationIssue      string  `json:"migration_issue"`
-	RevisionIDs         []int64 `json:"revision_ids"`
+	ID                  int64                      `json:"id"`
+	TaskID              int64                      `json:"task_id"`
+	WorkingRevisionID   *int64                     `json:"working_revision_id,omitempty"`
+	FinalizedRevisionID *int64                     `json:"finalized_revision_id,omitempty"`
+	LockVersion         int64                      `json:"lock_version"`
+	MigrationIncomplete bool                       `json:"migration_incomplete"`
+	MigrationIssue      string                     `json:"migration_issue"`
+	UpdatedAt           time.Time                  `json:"updated_at"`
+	RevisionIDs         []int64                    `json:"revision_ids"`
+	Revisions           []resourceRevisionSnapshot `json:"revisions,omitempty"`
+}
+
+type resourceRevisionSnapshot struct {
+	ID            int64                               `json:"id"`
+	GroupID       int64                               `json:"group_id"`
+	RevisionNo    int                                 `json:"revision_no"`
+	Status        string                              `json:"status"`
+	Mode          string                              `json:"mode"`
+	SourceAssetID *int64                              `json:"source_task_asset_id,omitempty"`
+	SourceStage   string                              `json:"source_stage"`
+	CreatedBy     int64                               `json:"created_by"`
+	Reason        string                              `json:"reason"`
+	SubmittedAt   *time.Time                          `json:"submitted_at,omitempty"`
+	FinalizedAt   *time.Time                          `json:"finalized_at,omitempty"`
+	CreatedAt     time.Time                           `json:"created_at"`
+	Items         []resourceRevisionItemSnapshot      `json:"items"`
+	References    []resourceRevisionReferenceSnapshot `json:"references"`
+}
+
+type resourceRevisionItemSnapshot struct {
+	ID          int64     `json:"id"`
+	RevisionID  int64     `json:"revision_id"`
+	TaskAssetID int64     `json:"task_asset_id"`
+	SortOrder   int       `json:"sort_order"`
+	ItemName    string    `json:"item_name"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+type resourceRevisionReferenceSnapshot struct {
+	ID                 int64     `json:"id"`
+	RevisionID         int64     `json:"revision_id"`
+	ReferenceFileRefID int64     `json:"reference_file_ref_id"`
+	FormalTaskAssetID  *int64    `json:"formal_task_asset_id,omitempty"`
+	SortOrder          int       `json:"sort_order"`
+	RefIDSnapshot      string    `json:"ref_id_snapshot"`
+	FileNameSnapshot   string    `json:"file_name_snapshot"`
+	ScopeSnapshot      string    `json:"scope_snapshot"`
+	CreatedAt          time.Time `json:"created_at"`
 }
 
 type assetBindingSnapshot struct {
@@ -109,18 +240,30 @@ type assetBindingSnapshot struct {
 	AccessRevokedAt            *time.Time `json:"access_revoked_at,omitempty"`
 	AccessRevokedReason        string     `json:"access_revoked_reason"`
 	ObjectDeletedAt            *time.Time `json:"object_deleted_at,omitempty"`
+	AssetType                  string     `json:"asset_type,omitempty"`
+	ScopeSKUCode               *string    `json:"scope_sku_code"`
+	RetouchRequirementID       *int64     `json:"retouch_requirement_id,omitempty"`
+	FlowReviewStatus           string     `json:"flow_review_status"`
+	ApprovedAt                 *time.Time `json:"approved_at,omitempty"`
+	ApprovedBy                 *int64     `json:"approved_by,omitempty"`
+	MimeType                   string     `json:"mime_type,omitempty"`
+	WholeHash                  string     `json:"whole_hash,omitempty"`
+	DeletedAt                  *time.Time `json:"deleted_at,omitempty"`
+	CleanedAt                  *time.Time `json:"cleaned_at,omitempty"`
 }
 
 type skuOriginSnapshot struct {
-	ID     int64   `json:"id"`
-	TaskID int64   `json:"task_id"`
-	Origin *string `json:"sku_origin"`
+	ID        int64     `json:"id"`
+	TaskID    int64     `json:"task_id"`
+	Origin    *string   `json:"sku_origin"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 type planningDetailSnapshot struct {
-	TaskSKUItemID     int64  `json:"task_sku_item_id"`
-	CurrentRevisionID *int64 `json:"current_revision_id"`
-	LockVersion       int64  `json:"lock_version"`
+	TaskSKUItemID     int64     `json:"task_sku_item_id"`
+	CurrentRevisionID *int64    `json:"current_revision_id"`
+	LockVersion       int64     `json:"lock_version"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 type planningImageSnapshot struct {
@@ -149,35 +292,79 @@ type planningCreatedSnapshot struct {
 	ImageRevisionIDs []int64 `json:"image_revision_ids"`
 }
 
+type organizationStateSnapshot struct {
+	SubjectType      string    `json:"subject_type"`
+	SubjectID        int64     `json:"subject_id"`
+	LegacyDepartment string    `json:"legacy_department"`
+	LegacyTeam       string    `json:"legacy_team"`
+	DepartmentID     *int64    `json:"department_id"`
+	TeamID           *int64    `json:"team_id"`
+	UpdatedAt        time.Time `json:"updated_at"`
+}
+
+type accessStateSnapshot struct {
+	UserID      int64                      `json:"user_id"`
+	Assignments []accessAssignmentEvidence `json:"assignments"`
+}
+
+type assetStorageRefStatusSnapshot struct {
+	RefID   string `json:"ref_id"`
+	AssetID *int64 `json:"asset_id,omitempty"`
+	Status  string `json:"status"`
+}
+
+type autoIncrementSnapshot struct {
+	Table     string `json:"table"`
+	NextValue int64  `json:"next_value"`
+}
+
 type snapshot struct {
-	Version             int                       `json:"version"`
-	ToolVersion         string                    `json:"tool_version"`
-	SchemaVersion       string                    `json:"schema_version"`
-	Database            string                    `json:"database"`
-	MappingSHA256       string                    `json:"mapping_sha256"`
-	IntegritySHA256     string                    `json:"integrity_sha256"`
-	ApplyState          string                    `json:"apply_state"`
-	CreatedAt           time.Time                 `json:"created_at"`
-	AppliedAt           *time.Time                `json:"applied_at"`
-	Tasks               []taskSnapshot            `json:"tasks_before"`
-	AfterTasks          []taskSnapshot            `json:"tasks_after"`
-	ResourceGroups      []resourceGroupSnapshot   `json:"resource_groups_before"`
-	AfterResourceGroups []resourceGroupSnapshot   `json:"resource_groups_after"`
-	AssetBindings       []assetBindingSnapshot    `json:"asset_bindings_before"`
-	AfterAssetBindings  []assetBindingSnapshot    `json:"asset_bindings_after"`
-	SKUOrigins          []skuOriginSnapshot       `json:"sku_origins_before"`
-	AfterSKUOrigins     []skuOriginSnapshot       `json:"sku_origins_after"`
-	PlanningBefore      []planningStateSnapshot   `json:"planning_before"`
-	PlanningAfter       []planningStateSnapshot   `json:"planning_after"`
-	PlanningCreated     []planningCreatedSnapshot `json:"planning_created"`
-	InsertedGroupIDs    []int64                   `json:"inserted_group_ids"`
-	AppliedRevisionIDs  []int64                   `json:"applied_revision_ids"`
+	Version                       int                             `json:"version"`
+	ToolVersion                   string                          `json:"tool_version"`
+	SchemaVersion                 string                          `json:"schema_version"`
+	Database                      string                          `json:"database"`
+	MappingSHA256                 string                          `json:"mapping_sha256"`
+	IntegritySHA256               string                          `json:"integrity_sha256"`
+	ApplyState                    string                          `json:"apply_state"`
+	CreatedAt                     time.Time                       `json:"created_at"`
+	AppliedAt                     *time.Time                      `json:"applied_at"`
+	Tasks                         []taskSnapshot                  `json:"tasks_before"`
+	AfterTasks                    []taskSnapshot                  `json:"tasks_after"`
+	TaskModulesBefore             []taskModuleSnapshot            `json:"task_modules_before"`
+	TaskModulesAfter              []taskModuleSnapshot            `json:"task_modules_after"`
+	SearchDocumentsBefore         []searchDocumentSnapshot        `json:"search_documents_before"`
+	SearchDocumentsAfter          []searchDocumentSnapshot        `json:"search_documents_after"`
+	TaskSearchDocumentsBefore     []taskSearchDocumentSnapshot    `json:"task_search_documents_before"`
+	TaskSearchDocumentsAfter      []taskSearchDocumentSnapshot    `json:"task_search_documents_after"`
+	ResourceGroups                []resourceGroupSnapshot         `json:"resource_groups_before"`
+	AfterResourceGroups           []resourceGroupSnapshot         `json:"resource_groups_after"`
+	AssetBindings                 []assetBindingSnapshot          `json:"asset_bindings_before"`
+	AfterAssetBindings            []assetBindingSnapshot          `json:"asset_bindings_after"`
+	SKUOrigins                    []skuOriginSnapshot             `json:"sku_origins_before"`
+	AfterSKUOrigins               []skuOriginSnapshot             `json:"sku_origins_after"`
+	PlanningBefore                []planningStateSnapshot         `json:"planning_before"`
+	PlanningAfter                 []planningStateSnapshot         `json:"planning_after"`
+	PlanningCreated               []planningCreatedSnapshot       `json:"planning_created"`
+	OrganizationBefore            []organizationStateSnapshot     `json:"organization_before,omitempty"`
+	OrganizationAfter             []organizationStateSnapshot     `json:"organization_after,omitempty"`
+	AccessBefore                  []accessStateSnapshot           `json:"access_before,omitempty"`
+	AccessAfter                   []accessStateSnapshot           `json:"access_after,omitempty"`
+	StorageRefsBefore             []assetStorageRefStatusSnapshot `json:"asset_storage_refs_before,omitempty"`
+	StorageRefsAfter              []assetStorageRefStatusSnapshot `json:"asset_storage_refs_after,omitempty"`
+	AutoIncrementsBefore          []autoIncrementSnapshot         `json:"auto_increments_before"`
+	AutoIncrementsAfter           []autoIncrementSnapshot         `json:"auto_increments_after"`
+	AutoIncrementRecoveryCeilings []autoIncrementSnapshot         `json:"auto_increment_recovery_ceilings"`
+	InsertedGroupIDs              []int64                         `json:"inserted_group_ids"`
+	AppliedRevisionIDs            []int64                         `json:"applied_revision_ids"`
+	InsertedAliasIDs              []int64                         `json:"inserted_alias_asset_ids,omitempty"`
 }
 
 type report struct {
 	Mode                   string                   `json:"mode"`
 	Database               string                   `json:"database"`
 	GeneratedAt            time.Time                `json:"generated_at"`
+	MappingFileSHA256      string                   `json:"mapping_file_sha256"`
+	MappingCanonicalSHA256 string                   `json:"mapping_canonical_sha256"`
 	Counts                 map[string]int64         `json:"counts"`
 	StateCounts            map[string]int64         `json:"state_counts"`
 	ManualTaskIDs          []int64                  `json:"manual_task_ids"`
@@ -189,7 +376,18 @@ type report struct {
 	ManualResourceIssues   []resourceMigrationIssue `json:"manual_resource_issues"`
 	MappingResourceCount   int                      `json:"mapping_resource_count"`
 	MappingPlanningCount   int                      `json:"mapping_planning_count"`
+	MappingCandidateIssues []mappingCandidateIssue  `json:"mapping_candidate_issues,omitempty"`
 	Warnings               []string                 `json:"warnings"`
+}
+
+type mappingCandidateIssue struct {
+	TaskID     int64    `json:"task_id"`
+	ScopeKind  string   `json:"scope_kind"`
+	ScopeRefID int64    `json:"scope_ref_id"`
+	RevisionNo int      `json:"revision_no"`
+	Confidence string   `json:"confidence"`
+	Reason     string   `json:"reason"`
+	Blockers   []string `json:"blockers,omitempty"`
 }
 
 type orgMigrationIssue struct {
@@ -254,6 +452,14 @@ func run(ctx context.Context, o options) error {
 		return err
 	}
 	defer db.Close()
+	// information_schema.TABLES is cached by MySQL unless the session expiry is
+	// disabled. This tool snapshots and restores AUTO_INCREMENT exactly, so all
+	// queries and transactions must share the configured session.
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+	if _, err := db.ExecContext(ctx, "SET SESSION information_schema_stats_expiry = 0"); err != nil {
+		return fmt.Errorf("configure exact information_schema metadata: %w", err)
+	}
 
 	database, err := currentDatabase(ctx, db)
 	if err != nil {
@@ -267,8 +473,33 @@ func run(ctx context.Context, o options) error {
 	if err != nil {
 		return err
 	}
-	if err := validateMapping(mapping); err != nil {
+	mappingFileSHA256, err := exactFileDigest(o.MappingFile)
+	if err != nil {
+		return fmt.Errorf("hash mapping file: %w", err)
+	}
+	mappingCanonicalSHA256, err := mappingDigest(mapping)
+	if err != nil {
+		return fmt.Errorf("hash canonical mapping: %w", err)
+	}
+	if o.Apply || o.Rollback {
+		if err := validateMapping(mapping); err != nil {
+			return err
+		}
+	} else if err := validateCandidateMapping(mapping); err != nil {
 		return err
+	}
+	if o.Apply {
+		if err := validateFormalApplyMapping(mapping); err != nil {
+			return v1migrate.NewHardAbort(v1migrate.ExitCodeHardAbort, "%v", err)
+		}
+	}
+	if !o.Rollback {
+		if err := validatePrematerializedAssetRecoveries(ctx, db, mapping.AssetRecoveries); err != nil {
+			return v1migrate.NewHardAbort(v1migrate.ExitCodeHardAbort, "Clone B recovery preflight failed: %v", err)
+		}
+		if err := validatePlanningImages(ctx, db, mapping.Planning, false); err != nil {
+			return v1migrate.NewHardAbort(v1migrate.ExitCodeHardAbort, "planning image preflight failed: %v", err)
+		}
 	}
 
 	switch {
@@ -280,7 +511,7 @@ func run(ctx context.Context, o options) error {
 		}
 	}
 
-	r, err := buildReport(ctx, db, database, mapping)
+	r, err := buildReport(ctx, db, database, mapping, mappingFileSHA256, mappingCanonicalSHA256)
 	if err != nil {
 		return err
 	}
@@ -289,7 +520,13 @@ func run(ctx context.Context, o options) error {
 	} else {
 		r.Mode = "dry-run"
 	}
-	return writeJSONReport(r, o.ReportFile)
+	if err := writeJSONReport(r, o.ReportFile); err != nil {
+		return err
+	}
+	if len(r.MappingCandidateIssues) > 0 {
+		return v1migrate.NewHardAbort(v1migrate.ExitCodeHardAbort, "dry-run completed with %d proposed/hard-blocked mapping revisions; inspect mapping_candidate_issues", len(r.MappingCandidateIssues))
+	}
+	return nil
 }
 
 func validateOptions(o options) error {
@@ -317,16 +554,75 @@ func readMapping(path string) (mappingFile, error) {
 		return mappingFile{}, err
 	}
 	var m mappingFile
-	if err := json.Unmarshal(raw, &m); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&m); err != nil {
 		return mappingFile{}, fmt.Errorf("decode mapping file: %w", err)
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return mappingFile{}, fmt.Errorf("decode mapping file: trailing JSON values are not allowed")
+	}
+	if mappingVersion(m) == workflowGroupsMappingV2 {
+		for i := range m.Resources {
+			m.Resources[i].V2Declared = true
+		}
 	}
 	return m, nil
 }
 
 func validateMapping(m mappingFile) error {
+	return validateMappingMode(m, false)
+}
+
+func validateCandidateMapping(m mappingFile) error {
+	return validateMappingMode(m, true)
+}
+
+func validateMappingMode(m mappingFile, allowCandidateConfidence bool) error {
+	if mappingVersion(m) != workflowGroupsMappingV1 && mappingVersion(m) != workflowGroupsMappingV2 {
+		return fmt.Errorf("mapping version must be 1 or 2")
+	}
+	if err := validateTaskStateDecisions(m, allowCandidateConfidence); err != nil {
+		return err
+	}
+	if err := validateAssetRecoveries(m, allowCandidateConfidence); err != nil {
+		return err
+	}
+	if err := validateOrganizationMappings(m, allowCandidateConfidence); err != nil {
+		return err
+	}
+	if err := validateAccessDecisions(m, allowCandidateConfidence); err != nil {
+		return err
+	}
 	seenResource := map[string]struct{}{}
 	resourceTasks := map[int64]struct{}{}
+	retouchVisualTask2533Scopes := map[int64]struct{}{}
 	for i, r := range m.Resources {
+		if mappingVersion(m) == workflowGroupsMappingV2 {
+			r.V2Declared = true
+			var err error
+			if allowCandidateConfidence {
+				err = validateCandidateResourceMappingV2(i, r)
+			} else {
+				err = validateResourceMappingV2(i, r)
+			}
+			if err != nil {
+				return err
+			}
+			m.Resources[i].V2Declared = true
+			key := fmt.Sprintf("%d/%s/%d", r.TaskID, r.ScopeKind, r.ScopeRefID)
+			if _, ok := seenResource[key]; ok {
+				return fmt.Errorf("resources[%d]: duplicate scope %s", i, key)
+			}
+			seenResource[key] = struct{}{}
+			resourceTasks[r.TaskID] = struct{}{}
+			for _, revision := range r.History {
+				if containsString(revision.ReviewPolicyIDs, reviewPolicyLegacyRetouchVisualScopeTask2533) {
+					retouchVisualTask2533Scopes[r.ScopeRefID] = struct{}{}
+				}
+			}
+			continue
+		}
 		if r.TaskID <= 0 || r.CreatedBy <= 0 {
 			return fmt.Errorf("resources[%d]: task_id and created_by are required", i)
 		}
@@ -369,10 +665,71 @@ func validateMapping(m mappingFile) error {
 		seenResource[key] = struct{}{}
 		resourceTasks[r.TaskID] = struct{}{}
 	}
+	if len(retouchVisualTask2533Scopes) != 0 {
+		if len(retouchVisualTask2533Scopes) != len(legacyRetouchVisualTask2533) {
+			return fmt.Errorf("%s requires all five exact task 2533 requirement scopes", reviewPolicyLegacyRetouchVisualScopeTask2533)
+		}
+		for scopeID := range legacyRetouchVisualTask2533 {
+			if _, exists := retouchVisualTask2533Scopes[scopeID]; !exists {
+				return fmt.Errorf("%s is missing task 2533 requirement %d", reviewPolicyLegacyRetouchVisualScopeTask2533, scopeID)
+			}
+		}
+	}
 	seenPlanning := map[int64]struct{}{}
 	for i, p := range m.Planning {
-		if p.TaskID <= 0 || p.CodeRuleRevisionID <= 0 || p.CreatedBy <= 0 || len(p.Items) == 0 {
-			return fmt.Errorf("planning_tasks[%d]: task/rule/creator and at least one item are required", i)
+		if p.TaskID <= 0 {
+			return fmt.Errorf("planning_tasks[%d]: task_id is required", i)
+		}
+		if mappingVersion(m) == workflowGroupsMappingV2 {
+			path := fmt.Sprintf("planning_tasks[%d]", i)
+			if err := validateReviewPolicyIDs(path, p.ReviewPolicyIDs); err != nil {
+				return err
+			}
+			for _, requiredPolicy := range []string{
+				reviewPolicyLegacyPurchaseToSKUPlanning,
+				reviewPolicyFrozenSKUPlanningRuleRevision9,
+			} {
+				if !containsString(p.ReviewPolicyIDs, requiredPolicy) {
+					return fmt.Errorf("%s: review_policy_ids must include %s", path, requiredPolicy)
+				}
+			}
+			if p.CodeRuleRevisionID != 9 {
+				return fmt.Errorf("%s: %s requires code_rule_revision_id=9", path, reviewPolicyFrozenSKUPlanningRuleRevision9)
+			}
+			tombstonePolicy := containsString(p.ReviewPolicyIDs, reviewPolicyLegacyIncompleteUATPlanningTombstone)
+			if tombstonePolicy {
+				if !isIncompleteUATPlanningTombstone(p) {
+					return fmt.Errorf("%s: %s is restricted to task_id=497, target_task_status=Cancelled, rule revision 9, exact SKU item 380, and zero inferred planning fields", path, reviewPolicyLegacyIncompleteUATPlanningTombstone)
+				}
+			}
+			expectedHash, err := planningManifestRowHash(p)
+			if err != nil {
+				return fmt.Errorf("%s: compute manifest_row_hash: %w", path, err)
+			}
+			if !sha256Pattern.MatchString(p.ManifestRowHash) || p.ManifestRowHash != expectedHash {
+				return fmt.Errorf("%s: manifest_row_hash does not match canonical planning content", path)
+			}
+			hardCandidate := allowCandidateConfidence && p.Confidence == "hard_blocked"
+			if !hardCandidate && !validPlanningTargetStatus(p.TargetTaskStatus) {
+				return fmt.Errorf("planning_tasks[%d]: target_task_status is required and must be a current task status", i)
+			}
+			switch p.Confidence {
+			case "confirmed_auto":
+				if len(p.Blockers) != 0 {
+					return fmt.Errorf("planning_tasks[%d]: confirmed mapping cannot retain candidate blockers", i)
+				}
+				if len(p.Items) == 0 || p.CodeRuleRevisionID <= 0 || p.CreatedBy <= 0 || p.ConfirmedBy <= 0 || p.ConfirmedAt.IsZero() || strings.TrimSpace(p.ConfirmationNote) == "" {
+					return fmt.Errorf("planning_tasks[%d]: confirmed mapping requires rule, creator and complete confirmation metadata", i)
+				}
+			case "proposed_review", "hard_blocked":
+				if !allowCandidateConfidence {
+					return fmt.Errorf("planning_tasks[%d]: confidence=%s cannot be applied", i, p.Confidence)
+				}
+			default:
+				return fmt.Errorf("planning_tasks[%d]: confidence must be confirmed_auto, proposed_review, or hard_blocked", i)
+			}
+		} else if p.CodeRuleRevisionID <= 0 || p.CreatedBy <= 0 {
+			return fmt.Errorf("planning_tasks[%d]: rule and creator are required", i)
 		}
 		if _, ok := seenPlanning[p.TaskID]; ok {
 			return fmt.Errorf("planning_tasks[%d]: duplicate task_id", i)
@@ -382,12 +739,21 @@ func validateMapping(m mappingFile) error {
 		}
 		seenPlanning[p.TaskID] = struct{}{}
 		for j, item := range p.Items {
-			if item.TaskSKUItemID <= 0 || strings.TrimSpace(item.DescriptionSpec) == "" || item.Quantity <= 0 {
+			if item.TaskSKUItemID <= 0 || (!isIncompleteUATPlanningTombstone(p) && !allowCandidateConfidence && (strings.TrimSpace(item.DescriptionSpec) == "" || item.Quantity <= 0)) {
 				return fmt.Errorf("planning_tasks[%d].items[%d]: item id, description and positive quantity are required", i, j)
 			}
 		}
 	}
 	return nil
+}
+
+func validPlanningTargetStatus(status string) bool {
+	switch status {
+	case "Draft", "PendingAssign", "Assigned", "InProgress", "PendingAudit", "Completed", "Archived", "Blocked", "Cancelled":
+		return true
+	default:
+		return false
+	}
 }
 
 func currentDatabase(ctx context.Context, db *sql.DB) (string, error) {
@@ -398,8 +764,13 @@ func currentDatabase(ctx context.Context, db *sql.DB) (string, error) {
 	return name, nil
 }
 
-func buildReport(ctx context.Context, db *sql.DB, database string, m mappingFile) (report, error) {
-	r := report{Database: database, GeneratedAt: time.Now().UTC(), Counts: map[string]int64{}, StateCounts: map[string]int64{}, MappingResourceCount: len(m.Resources), MappingPlanningCount: len(m.Planning)}
+func buildReport(ctx context.Context, db *sql.DB, database string, m mappingFile, mappingFileSHA256, mappingCanonicalSHA256 string) (report, error) {
+	r := report{
+		Database: database, GeneratedAt: time.Now().UTC(),
+		MappingFileSHA256: mappingFileSHA256, MappingCanonicalSHA256: mappingCanonicalSHA256,
+		Counts: map[string]int64{}, StateCounts: map[string]int64{},
+		MappingResourceCount: len(m.Resources), MappingPlanningCount: len(m.Planning),
+	}
 	queries := map[string]string{
 		"tasks":                           `SELECT COUNT(*) FROM tasks`,
 		"tasks_without_stable_department": `SELECT COUNT(*) FROM tasks WHERE owner_department_id IS NULL`,
@@ -437,6 +808,7 @@ func buildReport(ctx context.Context, db *sql.DB, database string, m mappingFile
 	r.ManualAccessIssues = blockers.Access
 	r.ManualTaskIssues = blockers.Tasks
 	r.ManualResourceIssues = blockers.Resources
+	r.MappingCandidateIssues = collectMappingCandidateIssues(m)
 	for _, item := range blockers.Tasks {
 		r.ManualTaskIDs = append(r.ManualTaskIDs, item.TaskID)
 	}
@@ -454,7 +826,7 @@ func buildReport(ctx context.Context, db *sql.DB, database string, m mappingFile
 		r.Warnings = append(r.Warnings, "manual_task_ids require explicit mapping; the tool never infers missing business facts")
 	}
 	if len(r.ManualAccessUserIDs) > 0 {
-		r.Warnings = append(r.Warnings, "manual_access_user_ids retain only Member until an administrator confirms explicit assignments")
+		r.Warnings = append(r.Warnings, "manual_access_user_ids remain blockers until an administrator confirms an exact preserve-existing or no-new-grant decision")
 	}
 	if len(r.ManualOrgIssues) > 0 {
 		r.Warnings = append(r.Warnings, "manual_org_issues block apply; stable organization ids are never inferred from ambiguous names")
@@ -462,13 +834,81 @@ func buildReport(ctx context.Context, db *sql.DB, database string, m mappingFile
 	if len(r.ManualResourceGroupIDs) > 0 {
 		r.Warnings = append(r.Warnings, "manual_resource_group_ids lack a confirmed ordered mapping; apply is blocked until every migration marker is resolved")
 	}
+	if len(r.MappingCandidateIssues) > 0 {
+		r.Warnings = append(r.Warnings, "mapping candidate contains proposed_review/hard_blocked revisions; dry-run reports all candidates but apply remains blocked")
+	}
 	return r, nil
 }
 
+func collectMappingCandidateIssues(m mappingFile) []mappingCandidateIssue {
+	var issues []mappingCandidateIssue
+	for _, resource := range m.Resources {
+		for _, revision := range resource.History {
+			if revision.Confidence != "proposed_review" && revision.Confidence != "hard_blocked" {
+				continue
+			}
+			issues = append(issues, mappingCandidateIssue{
+				TaskID: resource.TaskID, ScopeKind: resource.ScopeKind, ScopeRefID: resource.ScopeRefID,
+				RevisionNo: revision.RevisionNo, Confidence: revision.Confidence, Reason: revision.Reason,
+				Blockers: append([]string(nil), revision.Blockers...),
+			})
+		}
+	}
+	for _, planning := range m.Planning {
+		if planning.Confidence != "proposed_review" && planning.Confidence != "hard_blocked" {
+			continue
+		}
+		issues = append(issues, mappingCandidateIssue{
+			TaskID: planning.TaskID, ScopeKind: "planning", Confidence: planning.Confidence,
+			Reason:   "planning rule, creator, fields, and target status require explicit review",
+			Blockers: append([]string(nil), planning.Blockers...),
+		})
+	}
+	for _, decision := range m.TaskDecisions {
+		if decision.Confidence != "proposed_review" && decision.Confidence != "hard_blocked" {
+			continue
+		}
+		issues = append(issues, mappingCandidateIssue{
+			TaskID: decision.TaskID, ScopeKind: "task_state_decision",
+			Confidence: decision.Confidence,
+			Reason:     fmt.Sprintf("task state transition %s -> %s requires explicit review", decision.FromStatus, decision.TargetStatus),
+			Blockers:   append([]string(nil), decision.Blockers...),
+		})
+	}
+	for _, recovery := range m.AssetRecoveries {
+		if recovery.Confidence != "proposed_review" && recovery.Confidence != "hard_blocked" {
+			continue
+		}
+		reason := fmt.Sprintf(
+			"task asset %d recovery identity requires isolated Clone B pre-materialization and explicit review",
+			recovery.MissingTaskAssetID,
+		)
+		if recovery.Strategy == "historical_unavailable_tombstone_v1" {
+			reason = fmt.Sprintf(
+				"task asset %d is proven historically unavailable; API/UI and object-integrity gates must expose the tombstone without claiming original bytes exist",
+				recovery.MissingTaskAssetID,
+			)
+		}
+		issues = append(issues, mappingCandidateIssue{
+			TaskID: recovery.TaskID, ScopeKind: "asset_recovery",
+			ScopeRefID: recovery.MissingTaskAssetID,
+			Confidence: recovery.Confidence,
+			Reason:     reason,
+			Blockers:   append([]string(nil), recovery.Blockers...),
+		})
+	}
+	return issues
+}
+
 func queryCutoverBlockers(ctx context.Context, q snapshotQueryer, m mappingFile) (cutoverBlockers, error) {
+	m = normalizeMapping(m)
 	var blockers cutoverBlockers
 	var err error
-	blockers.Org, err = queryOrgMigrationIssues(ctx, q)
+	rawOrgIssues, err := queryOrgMigrationIssues(ctx, q)
+	if err != nil {
+		return blockers, err
+	}
+	blockers.Org, err = resolveOrganizationMigrationIssues(ctx, q, rawOrgIssues, m.OrganizationMappings)
 	if err != nil {
 		return blockers, err
 	}
@@ -483,6 +923,7 @@ func queryCutoverBlockers(ctx context.Context, q snapshotQueryer, m mappingFile)
 	if err != nil {
 		return blockers, err
 	}
+	rawAccessIssues := []accessMigrationIssue{}
 	for rows.Next() {
 		var item accessMigrationIssue
 		if err := rows.Scan(&item.UserID, &item.Role); err != nil {
@@ -497,19 +938,34 @@ func queryCutoverBlockers(ctx context.Context, q snapshotQueryer, m mappingFile)
 		default:
 			item.Reason = "active legacy role requires an explicit administrator-reviewed assignment before auth cutover"
 		}
-		blockers.Access = append(blockers.Access, item)
+		rawAccessIssues = append(rawAccessIssues, item)
 	}
 	if err := rows.Close(); err != nil {
+		return blockers, err
+	}
+	blockers.Access, err = resolveAccessMigrationIssues(ctx, q, rawAccessIssues, m.AccessDecisions)
+	if err != nil {
 		return blockers, err
 	}
 	mappedPlanning := map[int64]planningMapping{}
 	duplicatePlanningTasks := map[int64]bool{}
 	for _, item := range m.Planning {
-		if item.TaskID > 0 && item.CodeRuleRevisionID > 0 && item.CreatedBy > 0 && len(item.Items) > 0 {
+		confirmed := mappingVersion(m) != workflowGroupsMappingV2 || item.Confidence == "confirmed_auto"
+		if confirmed && item.TaskID > 0 && item.CodeRuleRevisionID > 0 && item.CreatedBy > 0 && len(item.Items) > 0 {
 			if _, exists := mappedPlanning[item.TaskID]; exists {
 				duplicatePlanningTasks[item.TaskID] = true
 			}
 			mappedPlanning[item.TaskID] = item
+		}
+	}
+	reviewedTaskDecisions := map[int64]taskStateDecisionMapping{}
+	for _, decision := range m.TaskDecisions {
+		if mappingVersion(m) == workflowGroupsMappingV2 && decision.Confidence != "confirmed_auto" {
+			continue
+		}
+		reviewedTaskDecisions[decision.TaskID] = decision
+		if issue := validateTaskStateDecisionPreflight(ctx, q, decision, m.Resources); issue != nil {
+			blockers.Tasks = append(blockers.Tasks, *issue)
 		}
 	}
 	rows, err = q.QueryContext(ctx, `SELECT id,task_type,task_status FROM tasks WHERE task_type='purchase_task' OR task_status='RejectedByWarehouse' ORDER BY id`)
@@ -535,13 +991,17 @@ func queryCutoverBlockers(ctx context.Context, q snapshotQueryer, m mappingFile)
 		return blockers, err
 	}
 	taskTypeByID := map[int64]string{}
+	taskStatusByID := map[int64]string{}
 	for _, candidate := range taskCandidates {
 		taskTypeByID[candidate.ID] = candidate.Type
+		taskStatusByID[candidate.ID] = candidate.Status
 	}
 	for _, candidate := range taskCandidates {
 		taskID := candidate.ID
 		if candidate.Status == "RejectedByWarehouse" {
-			blockers.Tasks = append(blockers.Tasks, taskMigrationIssue{TaskID: taskID, Reason: "warehouse rejection has no deterministic v8 state mapping"})
+			if _, reviewed := reviewedTaskDecisions[taskID]; !reviewed {
+				blockers.Tasks = append(blockers.Tasks, taskMigrationIssue{TaskID: taskID, Reason: "warehouse rejection has no reviewed v8 state decision"})
+			}
 			continue
 		}
 		if candidate.Type == "purchase_task" {
@@ -559,8 +1019,9 @@ func queryCutoverBlockers(ctx context.Context, q snapshotQueryer, m mappingFile)
 	for _, taskID := range planningTaskIDs {
 		mapping := mappedPlanning[taskID]
 		taskType, known := taskTypeByID[taskID]
+		taskStatus := taskStatusByID[taskID]
 		if !known {
-			if err := q.QueryRowContext(ctx, `SELECT task_type FROM tasks WHERE id=?`, taskID).Scan(&taskType); errors.Is(err, sql.ErrNoRows) {
+			if err := q.QueryRowContext(ctx, `SELECT task_type,task_status FROM tasks WHERE id=?`, taskID).Scan(&taskType, &taskStatus); errors.Is(err, sql.ErrNoRows) {
 				blockers.Tasks = append(blockers.Tasks, taskMigrationIssue{TaskID: taskID, Reason: "planning mapping references a missing task"})
 				continue
 			} else if err != nil {
@@ -569,6 +1030,10 @@ func queryCutoverBlockers(ctx context.Context, q snapshotQueryer, m mappingFile)
 		}
 		if taskType != "purchase_task" && taskType != "sku_planning" {
 			blockers.Tasks = append(blockers.Tasks, taskMigrationIssue{TaskID: taskID, Reason: fmt.Sprintf("planning mapping targets task_type=%s, expected purchase_task or an idempotent sku_planning rerun", taskType)})
+			continue
+		}
+		if (taskStatus == "Cancelled" || taskStatus == "Archived") && mapping.TargetTaskStatus != taskStatus {
+			blockers.Tasks = append(blockers.Tasks, taskMigrationIssue{TaskID: taskID, Reason: fmt.Sprintf("terminal planning status %s must be preserved, mapping requests %s", taskStatus, mapping.TargetTaskStatus)})
 			continue
 		}
 		databaseItemIDs, err := queryInt64IDs(ctx, q, `SELECT id FROM task_sku_items WHERE task_id=? ORDER BY id`, taskID)
@@ -632,7 +1097,13 @@ func queryCutoverBlockers(ctx context.Context, q snapshotQueryer, m mappingFile)
 		return blockers, err
 	}
 	for _, mapping := range m.Resources {
-		issue, err := validateResourceMappingPreflight(ctx, q, mapping)
+		var issue *resourceMigrationIssue
+		var err error
+		if decision, reviewed := reviewedTaskDecisions[mapping.TaskID]; reviewed && mapping.isV2() {
+			issue, err = validateResourceMappingV2PreflightForStatus(ctx, q, mapping, decision.TargetStatus)
+		} else {
+			issue, err = validateResourceMappingPreflight(ctx, q, mapping)
+		}
 		if err != nil {
 			return blockers, err
 		}
@@ -644,6 +1115,9 @@ func queryCutoverBlockers(ctx context.Context, q snapshotQueryer, m mappingFile)
 }
 
 func validateResourceMappingPreflight(ctx context.Context, q snapshotQueryer, m resourceMapping) (*resourceMigrationIssue, error) {
+	if m.isV2() {
+		return validateResourceMappingV2Preflight(ctx, q, m)
+	}
 	issue := func(groupID int64, format string, args ...interface{}) *resourceMigrationIssue {
 		return &resourceMigrationIssue{GroupID: groupID, TaskID: m.TaskID, Reason: fmt.Sprintf(format, args...)}
 	}
@@ -823,6 +1297,244 @@ func queryOrgMigrationIssues(ctx context.Context, q snapshotQueryer) ([]orgMigra
 	return issues, rows.Err()
 }
 
+func resolveOrganizationMigrationIssues(ctx context.Context, q snapshotQueryer, raw []orgMigrationIssue, mappings []organizationMapping) ([]orgMigrationIssue, error) {
+	bySubject := make(map[string]organizationMapping, len(mappings))
+	for _, item := range mappings {
+		bySubject[fmt.Sprintf("%s/%d", item.SubjectType, item.SubjectID)] = item
+	}
+	issues := make([]orgMigrationIssue, 0, len(raw))
+	rawSubjects := map[string]struct{}{}
+	for _, issue := range raw {
+		subjectKey := fmt.Sprintf("%s/%d", issue.SubjectType, issue.SubjectID)
+		rawSubjects[subjectKey] = struct{}{}
+		item, ok := bySubject[subjectKey]
+		if !ok {
+			issues = append(issues, issue)
+			continue
+		}
+		if item.Confidence != "confirmed_auto" {
+			issue.Reason = fmt.Sprintf("organization mapping is %s: %s", item.Confidence, strings.Join(item.Blockers, "; "))
+			issues = append(issues, issue)
+			continue
+		}
+		if err := validateOrganizationMappingPreflight(ctx, q, item); err != nil {
+			issue.Reason = err.Error()
+			issues = append(issues, issue)
+		}
+	}
+	for _, item := range mappings {
+		if item.Confidence != "confirmed_auto" {
+			continue
+		}
+		if _, wasRaw := rawSubjects[fmt.Sprintf("%s/%d", item.SubjectType, item.SubjectID)]; wasRaw {
+			continue
+		}
+		if err := validateOrganizationMappingPreflight(ctx, q, item); err != nil {
+			issues = append(issues, orgMigrationIssue{
+				SubjectType: item.SubjectType,
+				SubjectID:   item.SubjectID,
+				Reason:      err.Error(),
+			})
+		}
+	}
+	return issues, nil
+}
+
+func validateOrganizationMappingPreflight(ctx context.Context, q snapshotQueryer, item organizationMapping) error {
+	current, err := loadOrganizationState(ctx, q, item.SubjectType, item.SubjectID)
+	if err != nil {
+		return fmt.Errorf("organization mapping subject lookup failed: %w", err)
+	}
+	if current.LegacyDepartment != item.LegacyDepartment || current.LegacyTeam != item.LegacyTeam {
+		return fmt.Errorf("organization display evidence drifted")
+	}
+	beforeMatches := int64PointerEqual(current.DepartmentID, item.FromDepartmentID) &&
+		int64PointerEqual(current.TeamID, item.FromTeamID)
+	afterMatches := int64PointerValue(current.DepartmentID) == item.TargetDepartmentID &&
+		int64PointerValue(current.TeamID) == item.TargetTeamID
+	if !beforeMatches && !afterMatches {
+		return fmt.Errorf("organization stable ids differ from both reviewed before and target state")
+	}
+	var exists int
+	if err := q.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM org_teams ot
+		JOIN org_departments od ON od.id=ot.department_id
+		WHERE od.id=? AND ot.id=?`, item.TargetDepartmentID, item.TargetTeamID).Scan(&exists); err != nil {
+		return fmt.Errorf("organization target lookup failed: %w", err)
+	}
+	if exists != 1 {
+		return fmt.Errorf("organization target department/team pair does not exist")
+	}
+	return nil
+}
+
+func resolveAccessMigrationIssues(ctx context.Context, q snapshotQueryer, raw []accessMigrationIssue, decisions []accessDecisionMapping) ([]accessMigrationIssue, error) {
+	byRole := make(map[string]accessDecisionMapping, len(decisions))
+	for _, item := range decisions {
+		byRole[fmt.Sprintf("%d/%s", item.UserID, item.LegacyRole)] = item
+	}
+	issues := make([]accessMigrationIssue, 0, len(raw))
+	rawRoles := map[string]struct{}{}
+	for _, issue := range raw {
+		roleKey := fmt.Sprintf("%d/%s", issue.UserID, issue.Role)
+		rawRoles[roleKey] = struct{}{}
+		item, ok := byRole[roleKey]
+		if !ok {
+			issues = append(issues, issue)
+			continue
+		}
+		if item.Confidence != "confirmed_auto" {
+			issue.Reason = fmt.Sprintf("access decision is %s: %s", item.Confidence, strings.Join(item.Blockers, "; "))
+			issues = append(issues, issue)
+			continue
+		}
+		if err := validateAccessDecisionPreflight(ctx, q, item); err != nil {
+			issue.Reason = err.Error()
+			issues = append(issues, issue)
+		}
+	}
+	for _, item := range decisions {
+		if item.Confidence != "confirmed_auto" {
+			continue
+		}
+		if _, wasRaw := rawRoles[fmt.Sprintf("%d/%s", item.UserID, item.LegacyRole)]; wasRaw {
+			continue
+		}
+		if err := validateAccessDecisionPreflight(ctx, q, item); err != nil {
+			issues = append(issues, accessMigrationIssue{
+				UserID: item.UserID,
+				Role:   item.LegacyRole,
+				Reason: err.Error(),
+			})
+		}
+	}
+	return issues, nil
+}
+
+func validateAccessDecisionPreflight(ctx context.Context, q snapshotQueryer, item accessDecisionMapping) error {
+	var activeCount int
+	if err := q.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM users u
+		JOIN user_roles ur ON ur.user_id=u.id
+		WHERE u.id=? AND u.status='active' AND ur.role=?`, item.UserID, item.LegacyRole).Scan(&activeCount); err != nil {
+		return fmt.Errorf("access legacy role lookup failed: %w", err)
+	}
+	if activeCount != 1 {
+		return fmt.Errorf("reviewed active legacy role no longer exists exactly once")
+	}
+	actual, err := loadAccessAssignmentEvidence(ctx, q, item.UserID)
+	if err != nil {
+		return err
+	}
+	if !reflect.DeepEqual(actual, item.RequiredExistingAssignments) {
+		return fmt.Errorf("explicit access assignment evidence drifted")
+	}
+	return nil
+}
+
+func loadAccessAssignmentEvidence(ctx context.Context, q snapshotQueryer, userID int64) ([]accessAssignmentEvidence, error) {
+	rows, err := q.QueryContext(ctx, `
+		SELECT r.code,a.scope_mode,a.source_type,a.source_ref_id
+		FROM auth_user_role_assignments a
+		JOIN auth_roles r ON r.id=a.role_id
+		WHERE a.user_id=?
+		ORDER BY r.code,a.scope_mode,a.source_type,a.source_ref_id`, userID)
+	if err != nil {
+		return nil, fmt.Errorf("load access assignment evidence: %w", err)
+	}
+	defer rows.Close()
+	items := []accessAssignmentEvidence{}
+	for rows.Next() {
+		var item accessAssignmentEvidence
+		if err := rows.Scan(&item.RoleCode, &item.ScopeMode, &item.SourceType, &item.SourceRefID); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func int64PointerEqual(left, right *int64) bool {
+	return (left == nil && right == nil) || (left != nil && right != nil && *left == *right)
+}
+
+func int64PointerValue(value *int64) int64 {
+	if value == nil {
+		return 0
+	}
+	return *value
+}
+
+func loadOrganizationState(ctx context.Context, q snapshotQueryer, subjectType string, subjectID int64) (organizationStateSnapshot, error) {
+	item := organizationStateSnapshot{SubjectType: subjectType, SubjectID: subjectID}
+	var departmentID, teamID sql.NullInt64
+	var err error
+	switch subjectType {
+	case "task":
+		err = q.QueryRowContext(ctx, `
+			SELECT COALESCE(owner_department,''),
+			       COALESCE(NULLIF(TRIM(owner_org_team),''),NULLIF(TRIM(owner_team),''),''),
+			       owner_department_id,owner_team_id,updated_at
+			FROM tasks WHERE id=?`, subjectID).
+			Scan(&item.LegacyDepartment, &item.LegacyTeam, &departmentID, &teamID, &item.UpdatedAt)
+	case "user":
+		err = q.QueryRowContext(ctx, `
+			SELECT COALESCE(department,''),COALESCE(team,''),department_id,team_id,updated_at
+			FROM users WHERE id=?`, subjectID).
+			Scan(&item.LegacyDepartment, &item.LegacyTeam, &departmentID, &teamID, &item.UpdatedAt)
+	default:
+		return item, fmt.Errorf("unsupported organization subject_type %q", subjectType)
+	}
+	if err != nil {
+		return item, err
+	}
+	item.DepartmentID = nullInt64Pointer(departmentID)
+	item.TeamID = nullInt64Pointer(teamID)
+	return item, nil
+}
+
+func captureOrganizationStates(ctx context.Context, q snapshotQueryer, mappings []organizationMapping) ([]organizationStateSnapshot, error) {
+	if len(mappings) == 0 {
+		return nil, nil
+	}
+	items := make([]organizationStateSnapshot, 0, len(mappings))
+	for _, mapping := range mappings {
+		item, err := loadOrganizationState(ctx, q, mapping.SubjectType, mapping.SubjectID)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].SubjectType == items[j].SubjectType {
+			return items[i].SubjectID < items[j].SubjectID
+		}
+		return items[i].SubjectType < items[j].SubjectType
+	})
+	return items, nil
+}
+
+func captureAccessStates(ctx context.Context, q snapshotQueryer, decisions []accessDecisionMapping) ([]accessStateSnapshot, error) {
+	if len(decisions) == 0 {
+		return nil, nil
+	}
+	userIDs := make([]int64, 0, len(decisions))
+	for _, decision := range decisions {
+		userIDs = append(userIDs, decision.UserID)
+	}
+	items := make([]accessStateSnapshot, 0, len(userIDs))
+	for _, userID := range uniqueSortedInt64(userIDs) {
+		assignments, err := loadAccessAssignmentEvidence(ctx, q, userID)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, accessStateSnapshot{UserID: userID, Assignments: assignments})
+	}
+	return items, nil
+}
+
 func queryIDs(ctx context.Context, db *sql.DB, query string) ([]int64, error) {
 	rows, err := db.QueryContext(ctx, query)
 	if err != nil {
@@ -843,6 +1555,260 @@ func queryIDs(ctx context.Context, db *sql.DB, query string) ([]int64, error) {
 type snapshotQueryer interface {
 	QueryContext(context.Context, string, ...interface{}) (*sql.Rows, error)
 	QueryRowContext(context.Context, string, ...interface{}) *sql.Row
+}
+
+func loadAutoIncrementState(ctx context.Context, q snapshotQueryer, table string) (autoIncrementSnapshot, error) {
+	if !isWorkflowGroupsAutoIncrementTable(table) {
+		return autoIncrementSnapshot{}, fmt.Errorf("unsupported auto-increment table %q", table)
+	}
+	var metadataExpiry, increment, offset int64
+	var next sql.NullInt64
+	if err := q.QueryRowContext(ctx, `
+		SELECT @@SESSION.information_schema_stats_expiry,
+		       @@SESSION.auto_increment_increment,
+		       @@SESSION.auto_increment_offset,
+		       AUTO_INCREMENT
+		FROM information_schema.TABLES
+		WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=?`, table).Scan(&metadataExpiry, &increment, &offset, &next); err != nil {
+		return autoIncrementSnapshot{}, err
+	}
+	if metadataExpiry != 0 {
+		return autoIncrementSnapshot{}, fmt.Errorf("information_schema_stats_expiry=%d; exact auto-increment metadata requires 0", metadataExpiry)
+	}
+	if increment != 1 || offset != 1 {
+		return autoIncrementSnapshot{}, fmt.Errorf("auto-increment session requires increment=1 and offset=1, got increment=%d offset=%d", increment, offset)
+	}
+	if !next.Valid || next.Int64 <= 0 {
+		return autoIncrementSnapshot{}, fmt.Errorf("auto-increment table %s has invalid next value", table)
+	}
+	return autoIncrementSnapshot{Table: table, NextValue: next.Int64}, nil
+}
+
+func captureAutoIncrementStates(ctx context.Context, q snapshotQueryer) ([]autoIncrementSnapshot, error) {
+	states := make([]autoIncrementSnapshot, 0, len(workflowGroupsAutoIncrementTables))
+	for _, table := range workflowGroupsAutoIncrementTables {
+		state, err := loadAutoIncrementState(ctx, q, table)
+		if err != nil {
+			return nil, err
+		}
+		states = append(states, state)
+	}
+	return states, nil
+}
+
+func isWorkflowGroupsAutoIncrementTable(table string) bool {
+	for _, allowed := range workflowGroupsAutoIncrementTables {
+		if table == allowed {
+			return true
+		}
+	}
+	return false
+}
+
+func validateAutoIncrementStates(states []autoIncrementSnapshot) error {
+	if len(states) != len(workflowGroupsAutoIncrementTables) {
+		return fmt.Errorf("auto-increment snapshot table count is %d, expected %d", len(states), len(workflowGroupsAutoIncrementTables))
+	}
+	for index, expected := range workflowGroupsAutoIncrementTables {
+		state := states[index]
+		if state.Table != expected {
+			return fmt.Errorf("auto-increment snapshot table %d is %q, expected %q", index, state.Table, expected)
+		}
+		if state.NextValue <= 0 {
+			return fmt.Errorf("auto-increment snapshot table %s has invalid next value %d", state.Table, state.NextValue)
+		}
+	}
+	return nil
+}
+
+func autoIncrementStatesMatch(ctx context.Context, q snapshotQueryer, expected []autoIncrementSnapshot) (bool, error) {
+	if err := validateAutoIncrementStates(expected); err != nil {
+		return false, err
+	}
+	actual, err := captureAutoIncrementStates(ctx, q)
+	if err != nil {
+		return false, err
+	}
+	return reflect.DeepEqual(actual, expected), nil
+}
+
+func needsPreCommitAutoIncrementRecovery(applyState string, beforeRowsMatch, beforeCountersMatch bool) bool {
+	return (applyState == "prepared" || applyState == "commit_pending") &&
+		beforeRowsMatch &&
+		!beforeCountersMatch
+}
+
+func autoIncrementRecoveryCeilings(before []autoIncrementSnapshot, m mappingFile) ([]autoIncrementSnapshot, error) {
+	if err := validateAutoIncrementStates(before); err != nil {
+		return nil, err
+	}
+	increments := map[string]int64{}
+	for _, resource := range m.Resources {
+		increments["task_asset_groups"]++
+		if resource.isV2() {
+			for _, revision := range resource.History {
+				increments["task_asset_group_revisions"]++
+				increments["task_asset_group_revision_items"] += int64(len(revision.FinalAssetIDs))
+				increments["task_asset_group_revision_references"] += int64(len(revision.ReferenceIDs))
+				if revision.SourceAliasFrom != nil {
+					increments["task_assets"]++
+				}
+			}
+			continue
+		}
+		if resource.TargetStatus != "shell" {
+			increments["task_asset_group_revisions"]++
+			increments["task_asset_group_revision_items"] += int64(len(resource.FinalAssetIDs))
+			increments["task_asset_group_revision_references"] += int64(len(resource.ReferenceIDs))
+		}
+	}
+	for _, planning := range m.Planning {
+		increments["task_planning_sku_revisions"] += int64(len(planning.Items))
+	}
+	ceilings := make([]autoIncrementSnapshot, 0, len(before))
+	for _, state := range before {
+		increment := increments[state.Table]
+		if increment < 0 || state.NextValue > int64(^uint64(0)>>1)-increment {
+			return nil, fmt.Errorf("auto-increment recovery ceiling overflow for %s", state.Table)
+		}
+		ceilings = append(ceilings, autoIncrementSnapshot{
+			Table:     state.Table,
+			NextValue: state.NextValue + increment,
+		})
+	}
+	return ceilings, nil
+}
+
+func restoreAutoIncrementStatesWithinRecoveryCeilings(
+	ctx context.Context,
+	db *sql.DB,
+	before []autoIncrementSnapshot,
+	ceilings []autoIncrementSnapshot,
+) error {
+	if err := validateAutoIncrementStates(before); err != nil {
+		return err
+	}
+	if err := validateAutoIncrementStates(ceilings); err != nil {
+		return err
+	}
+	for index, target := range before {
+		ceiling := ceilings[index]
+		if target.Table != ceiling.Table || ceiling.NextValue < target.NextValue {
+			return fmt.Errorf("invalid auto-increment recovery ceiling for %s", target.Table)
+		}
+		current, err := loadAutoIncrementState(ctx, db, target.Table)
+		if err != nil {
+			return err
+		}
+		if current.NextValue == target.NextValue {
+			continue
+		}
+		if current.NextValue < target.NextValue || current.NextValue > ceiling.NextValue {
+			return v1migrate.NewHardAbort(
+				v1migrate.ExitCodeHardAbort,
+				"pre-commit auto-increment recovery refused for %s: current=%d before=%d ceiling=%d",
+				target.Table,
+				current.NextValue,
+				target.NextValue,
+				ceiling.NextValue,
+			)
+		}
+		var maxID int64
+		query := fmt.Sprintf("SELECT COALESCE(MAX(id),0) FROM `%s`", target.Table)
+		if err := db.QueryRowContext(ctx, query).Scan(&maxID); err != nil {
+			return err
+		}
+		if maxID >= target.NextValue {
+			return v1migrate.NewHardAbort(
+				v1migrate.ExitCodeHardAbort,
+				"pre-commit auto-increment recovery refused for %s: max id %d reaches target next value %d",
+				target.Table,
+				maxID,
+				target.NextValue,
+			)
+		}
+		statement := fmt.Sprintf("ALTER TABLE `%s` AUTO_INCREMENT = %d", target.Table, target.NextValue)
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			return err
+		}
+	}
+	matches, err := autoIncrementStatesMatch(ctx, db, before)
+	if err != nil {
+		return err
+	}
+	if !matches {
+		return v1migrate.NewHardAbort(v1migrate.ExitCodeHardAbort, "pre-commit auto-increment recovery verification failed")
+	}
+	return nil
+}
+
+func restoreAutoIncrementStates(
+	ctx context.Context,
+	db *sql.DB,
+	before []autoIncrementSnapshot,
+	after []autoIncrementSnapshot,
+) error {
+	if err := validateAutoIncrementStates(before); err != nil {
+		return err
+	}
+	if err := validateAutoIncrementStates(after); err != nil {
+		return err
+	}
+	for index, target := range before {
+		recordedAfter := after[index]
+		if target.Table != recordedAfter.Table {
+			return fmt.Errorf("auto-increment before/after table order drifted")
+		}
+		current, err := loadAutoIncrementState(ctx, db, target.Table)
+		if err != nil {
+			return err
+		}
+		if current.NextValue == target.NextValue {
+			continue
+		}
+		if current.NextValue != recordedAfter.NextValue {
+			return v1migrate.NewHardAbort(
+				v1migrate.ExitCodeHardAbort,
+				"auto-increment rollback refused for %s: current=%d before=%d after=%d",
+				target.Table,
+				current.NextValue,
+				target.NextValue,
+				recordedAfter.NextValue,
+			)
+		}
+		var maxID int64
+		query := fmt.Sprintf("SELECT COALESCE(MAX(id),0) FROM `%s`", target.Table)
+		if err := db.QueryRowContext(ctx, query).Scan(&maxID); err != nil {
+			return err
+		}
+		if maxID >= target.NextValue {
+			return v1migrate.NewHardAbort(
+				v1migrate.ExitCodeHardAbort,
+				"auto-increment rollback refused for %s: max id %d reaches target next value %d",
+				target.Table,
+				maxID,
+				target.NextValue,
+			)
+		}
+		statement := fmt.Sprintf("ALTER TABLE `%s` AUTO_INCREMENT = %d", target.Table, target.NextValue)
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			return err
+		}
+		restored, err := loadAutoIncrementState(ctx, db, target.Table)
+		if err != nil {
+			return err
+		}
+		if restored.NextValue != target.NextValue {
+			return v1migrate.NewHardAbort(
+				v1migrate.ExitCodeHardAbort,
+				"auto-increment rollback verification failed for %s: got %d expected %d",
+				target.Table,
+				restored.NextValue,
+				target.NextValue,
+			)
+		}
+	}
+	return nil
 }
 
 func queryInt64IDs(ctx context.Context, q snapshotQueryer, query string, args ...interface{}) ([]int64, error) {
@@ -922,7 +1888,7 @@ func lockInt64Rows(ctx context.Context, tx *sql.Tx, query string, args ...interf
 	return ids, rows.Err()
 }
 
-func lockCutoverTargets(ctx context.Context, tx *sql.Tx, m mappingFile) error {
+func lockCutoverTargetsLegacy(ctx context.Context, tx *sql.Tx, m mappingFile) error {
 	taskIDs, err := lockInt64Rows(ctx, tx, `
 		SELECT id FROM tasks
 		WHERE task_status IN ('PendingAuditA','PendingAuditB','RejectedByAuditA','RejectedByAuditB','PendingCustomizationReview','PendingCustomizationProduction','PendingEffectReview','PendingEffectRevision','PendingProductionTransfer','PendingWarehouseQC','PendingWarehouseReceive','PendingClose','PendingOutsource','Outsourcing','PendingOutsourceReview')
@@ -935,6 +1901,12 @@ func lockCutoverTargets(ctx context.Context, tx *sql.Tx, m mappingFile) error {
 		taskIDs = append(taskIDs, item.TaskID)
 	}
 	for _, item := range m.Planning {
+		taskIDs = append(taskIDs, item.TaskID)
+	}
+	for _, item := range m.TaskDecisions {
+		taskIDs = append(taskIDs, item.TaskID)
+	}
+	for _, item := range m.AssetRecoveries {
 		taskIDs = append(taskIDs, item.TaskID)
 	}
 	taskIDs = uniqueSortedInt64(taskIDs)
@@ -991,19 +1963,24 @@ func lockCutoverTargets(ctx context.Context, tx *sql.Tx, m mappingFile) error {
 		assetIDs = append(assetIDs, ids...)
 	}
 	for _, item := range resources {
-		if item.SourceAssetID != nil {
-			assetIDs = append(assetIDs, *item.SourceAssetID)
-		}
-		assetIDs = append(assetIDs, item.FinalAssetIDs...)
+		assetIDs = append(assetIDs, item.mappedAssetIDs()...)
 	}
 	for _, assetID := range uniqueSortedInt64(assetIDs) {
 		if _, err := lockInt64Rows(ctx, tx, `SELECT id FROM task_assets WHERE id=? FOR UPDATE`, assetID); err != nil {
 			return err
 		}
 	}
+	for _, recovery := range m.AssetRecoveries {
+		if recovery.Strategy == "clone_b_prematerialized_storage_ref_v1" {
+			continue
+		}
+		if _, err := queryStringIDs(ctx, tx, `SELECT ref_id FROM asset_storage_refs WHERE ref_id=? FOR UPDATE`, recovery.OriginalStorageRefID); err != nil {
+			return err
+		}
+	}
 	referenceIDs := []int64{}
 	for _, item := range resources {
-		referenceIDs = append(referenceIDs, item.ReferenceIDs...)
+		referenceIDs = append(referenceIDs, item.mappedReferenceIDs()...)
 	}
 	for _, referenceID := range uniqueSortedInt64(referenceIDs) {
 		if _, err := lockInt64Rows(ctx, tx, `SELECT id FROM reference_file_refs WHERE id=? FOR UPDATE`, referenceID); err != nil {
@@ -1038,6 +2015,23 @@ func lockCutoverTargets(ctx context.Context, tx *sql.Tx, m mappingFile) error {
 		if err := rows.Close(); err != nil {
 			return err
 		}
+		rows, err = tx.QueryContext(ctx, `
+			SELECT e.id FROM task_module_events e
+			JOIN task_modules m ON m.id=e.task_module_id
+			WHERE m.task_id=? ORDER BY e.id FOR UPDATE`, taskID)
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var id int64
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return err
+			}
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -1045,14 +2039,14 @@ func lockCutoverTargets(ctx context.Context, tx *sql.Tx, m mappingFile) error {
 func captureSKUOrigins(ctx context.Context, q snapshotQueryer, taskIDs []int64) ([]skuOriginSnapshot, error) {
 	items := []skuOriginSnapshot{}
 	for _, taskID := range taskIDs {
-		rows, err := q.QueryContext(ctx, `SELECT id,task_id,sku_origin FROM task_sku_items WHERE task_id=? ORDER BY id`, taskID)
+		rows, err := q.QueryContext(ctx, `SELECT id,task_id,sku_origin,updated_at FROM task_sku_items WHERE task_id=? ORDER BY id`, taskID)
 		if err != nil {
 			return nil, err
 		}
 		for rows.Next() {
 			var item skuOriginSnapshot
 			var origin sql.NullString
-			if err := rows.Scan(&item.ID, &item.TaskID, &origin); err != nil {
+			if err := rows.Scan(&item.ID, &item.TaskID, &origin, &item.UpdatedAt); err != nil {
 				rows.Close()
 				return nil, err
 			}
@@ -1083,7 +2077,7 @@ func capturePlanningStates(ctx context.Context, q snapshotQueryer, taskIDs []int
 			state.SettingsExists = true
 		}
 		rows, err := q.QueryContext(ctx, `
-			SELECT d.task_sku_item_id,d.current_revision_id,d.lock_version
+			SELECT d.task_sku_item_id,d.current_revision_id,d.lock_version,d.updated_at
 			FROM task_planning_sku_details d
 			JOIN task_sku_items si ON si.id=d.task_sku_item_id
 			WHERE si.task_id=? ORDER BY d.task_sku_item_id`, taskID)
@@ -1093,7 +2087,7 @@ func capturePlanningStates(ctx context.Context, q snapshotQueryer, taskIDs []int
 		for rows.Next() {
 			var detail planningDetailSnapshot
 			var revisionID sql.NullInt64
-			if err := rows.Scan(&detail.TaskSKUItemID, &revisionID, &detail.LockVersion); err != nil {
+			if err := rows.Scan(&detail.TaskSKUItemID, &revisionID, &detail.LockVersion, &detail.UpdatedAt); err != nil {
 				rows.Close()
 				return nil, err
 			}
@@ -1134,8 +2128,8 @@ func capturePlanningStates(ctx context.Context, q snapshotQueryer, taskIDs []int
 func loadTaskSnapshot(ctx context.Context, q snapshotQueryer, id int64) (taskSnapshot, error) {
 	var item taskSnapshot
 	var handlerID sql.NullInt64
-	if err := q.QueryRowContext(ctx, `SELECT id,task_type,task_status,workflow_revision,current_handler_id FROM tasks WHERE id=?`, id).
-		Scan(&item.ID, &item.TaskType, &item.TaskStatus, &item.WorkflowRevision, &handlerID); err != nil {
+	if err := q.QueryRowContext(ctx, `SELECT id,task_type,task_status,workflow_revision,current_handler_id,updated_at FROM tasks WHERE id=?`, id).
+		Scan(&item.ID, &item.TaskType, &item.TaskStatus, &item.WorkflowRevision, &handlerID, &item.UpdatedAt); err != nil {
 		return item, err
 	}
 	if handlerID.Valid {
@@ -1144,14 +2138,23 @@ func loadTaskSnapshot(ctx context.Context, q snapshotQueryer, id int64) (taskSna
 	}
 	var err error
 	item.EventIDs, err = queryStringIDs(ctx, q, `SELECT id FROM task_event_logs WHERE task_id=? ORDER BY sequence,id`, id)
+	if err != nil {
+		return item, err
+	}
+	item.ModuleEventIDs, err = queryInt64IDs(ctx, q, `
+		SELECT e.id
+		FROM task_module_events e
+		JOIN task_modules tm ON tm.id=e.task_module_id
+		WHERE tm.task_id=?
+		ORDER BY e.id`, id)
 	return item, err
 }
 
 func loadResourceGroupSnapshot(ctx context.Context, q snapshotQueryer, id int64) (resourceGroupSnapshot, error) {
 	var item resourceGroupSnapshot
 	var workingID, finalizedID sql.NullInt64
-	if err := q.QueryRowContext(ctx, `SELECT id,task_id,working_revision_id,finalized_revision_id,lock_version,migration_incomplete,migration_issue FROM task_asset_groups WHERE id=?`, id).
-		Scan(&item.ID, &item.TaskID, &workingID, &finalizedID, &item.LockVersion, &item.MigrationIncomplete, &item.MigrationIssue); err != nil {
+	if err := q.QueryRowContext(ctx, `SELECT id,task_id,working_revision_id,finalized_revision_id,lock_version,migration_incomplete,migration_issue,updated_at FROM task_asset_groups WHERE id=?`, id).
+		Scan(&item.ID, &item.TaskID, &workingID, &finalizedID, &item.LockVersion, &item.MigrationIncomplete, &item.MigrationIssue, &item.UpdatedAt); err != nil {
 		return item, err
 	}
 	if workingID.Valid {
@@ -1164,10 +2167,14 @@ func loadResourceGroupSnapshot(ctx context.Context, q snapshotQueryer, id int64)
 	}
 	var err error
 	item.RevisionIDs, err = queryInt64IDs(ctx, q, `SELECT id FROM task_asset_group_revisions WHERE group_id=? ORDER BY id`, id)
+	if err != nil {
+		return item, err
+	}
+	item.Revisions, err = loadResourceRevisionGraph(ctx, q, id)
 	return item, err
 }
 
-func captureResourceGroupsForTasks(ctx context.Context, q snapshotQueryer, taskIDs []int64) ([]resourceGroupSnapshot, error) {
+func captureResourceGroupsForTasksLegacy(ctx context.Context, q snapshotQueryer, taskIDs []int64) ([]resourceGroupSnapshot, error) {
 	items := []resourceGroupSnapshot{}
 	for _, taskID := range uniqueSortedInt64(taskIDs) {
 		groupIDs, err := queryInt64IDs(ctx, q, `SELECT id FROM task_asset_groups WHERE task_id=? ORDER BY id`, taskID)
@@ -1189,16 +2196,22 @@ func captureResourceGroupsForTasks(ctx context.Context, q snapshotQueryer, taskI
 func loadAssetBindingSnapshot(ctx context.Context, q snapshotQueryer, id int64) (assetBindingSnapshot, error) {
 	var item assetBindingSnapshot
 	var boundGroupID, stagedSKUItemID, stagedRetouchID, stagedBy sql.NullInt64
-	var boundRole, stagedRole, uploadSessionID sql.NullString
-	var stagedExpiresAt, revokedAt, objectDeletedAt sql.NullTime
+	var boundRole, stagedRole, uploadSessionID, scopeSKUCode sql.NullString
+	var retouchRequirementID sql.NullInt64
+	var stagedExpiresAt, revokedAt, objectDeletedAt, approvedAt, deletedAt, cleanedAt sql.NullTime
+	var approvedBy sql.NullInt64
 	if err := q.QueryRowContext(ctx, `
 		SELECT id,task_id,binding_state,bound_group_id,bound_role,
 		       staged_task_sku_item_id,staged_retouch_requirement_id,staged_role,staged_by,upload_session_id,staged_expires_at,
-		       access_revoked_at,access_revoked_reason,object_deleted_at
+		       access_revoked_at,access_revoked_reason,object_deleted_at,
+		       asset_type,scope_sku_code,retouch_requirement_id,flow_review_status,approved_at,approved_by,
+		       COALESCE(mime_type,''),COALESCE(whole_hash,''),deleted_at,cleaned_at
 		FROM task_assets WHERE id=?`, id).
 		Scan(&item.ID, &item.TaskID, &item.BindingState, &boundGroupID, &boundRole,
 			&stagedSKUItemID, &stagedRetouchID, &stagedRole, &stagedBy, &uploadSessionID, &stagedExpiresAt,
-			&revokedAt, &item.AccessRevokedReason, &objectDeletedAt); err != nil {
+			&revokedAt, &item.AccessRevokedReason, &objectDeletedAt,
+			&item.AssetType, &scopeSKUCode, &retouchRequirementID, &item.FlowReviewStatus, &approvedAt, &approvedBy,
+			&item.MimeType, &item.WholeHash, &deletedAt, &cleanedAt); err != nil {
 		return item, err
 	}
 	item.BoundGroupID = nullInt64Pointer(boundGroupID)
@@ -1211,10 +2224,16 @@ func loadAssetBindingSnapshot(ctx context.Context, q snapshotQueryer, id int64) 
 	item.StagedExpiresAt = nullTimePointer(stagedExpiresAt)
 	item.AccessRevokedAt = nullTimePointer(revokedAt)
 	item.ObjectDeletedAt = nullTimePointer(objectDeletedAt)
+	item.ScopeSKUCode = nullStringPointer(scopeSKUCode)
+	item.RetouchRequirementID = nullInt64Pointer(retouchRequirementID)
+	item.ApprovedAt = nullTimePointer(approvedAt)
+	item.ApprovedBy = nullInt64Pointer(approvedBy)
+	item.DeletedAt = nullTimePointer(deletedAt)
+	item.CleanedAt = nullTimePointer(cleanedAt)
 	return item, nil
 }
 
-func captureAssetBindingsForTasks(ctx context.Context, q snapshotQueryer, taskIDs []int64) ([]assetBindingSnapshot, error) {
+func captureAssetBindingsForTasksLegacy(ctx context.Context, q snapshotQueryer, taskIDs []int64) ([]assetBindingSnapshot, error) {
 	items := []assetBindingSnapshot{}
 	for _, taskID := range uniqueSortedInt64(taskIDs) {
 		assetIDs, err := queryInt64IDs(ctx, q, `SELECT id FROM task_assets WHERE task_id=? ORDER BY id`, taskID)
@@ -1233,20 +2252,71 @@ func captureAssetBindingsForTasks(ctx context.Context, q snapshotQueryer, taskID
 	return items, nil
 }
 
-func populateAfterSnapshot(ctx context.Context, tx *sql.Tx, s *snapshot, m mappingFile) error {
-	s.AfterTasks = make([]taskSnapshot, 0, len(s.Tasks))
-	for _, before := range s.Tasks {
-		item, err := loadTaskSnapshot(ctx, tx, before.ID)
-		if err != nil {
-			return err
-		}
-		s.AfterTasks = append(s.AfterTasks, item)
+func loadAssetStorageRefStatusSnapshot(ctx context.Context, q snapshotQueryer, refID string) (assetStorageRefStatusSnapshot, error) {
+	var item assetStorageRefStatusSnapshot
+	var assetID sql.NullInt64
+	if err := q.QueryRowContext(ctx, `
+		SELECT ref_id,asset_id,status
+		FROM asset_storage_refs
+		WHERE ref_id=?`, refID).Scan(&item.RefID, &assetID, &item.Status); err != nil {
+		return item, err
 	}
+	item.AssetID = nullInt64Pointer(assetID)
+	return item, nil
+}
+
+func captureAssetStorageRefStates(ctx context.Context, q snapshotQueryer, recoveries []assetRecoveryMapping) ([]assetStorageRefStatusSnapshot, error) {
+	if len(recoveries) == 0 {
+		return nil, nil
+	}
+	byRefID := make(map[string]assetStorageRefStatusSnapshot, len(recoveries))
+	for _, recovery := range recoveries {
+		if recovery.Strategy == "clone_b_prematerialized_storage_ref_v1" {
+			continue
+		}
+		refID := strings.TrimSpace(recovery.OriginalStorageRefID)
+		if refID == "" {
+			return nil, fmt.Errorf("asset recovery %d has no original storage ref id", recovery.MissingTaskAssetID)
+		}
+		if _, exists := byRefID[refID]; exists {
+			continue
+		}
+		item, err := loadAssetStorageRefStatusSnapshot(ctx, q, refID)
+		if err != nil {
+			return nil, fmt.Errorf("load asset storage ref %s: %w", refID, err)
+		}
+		byRefID[refID] = item
+	}
+	items := make([]assetStorageRefStatusSnapshot, 0, len(byRefID))
+	for _, item := range byRefID {
+		items = append(items, item)
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].RefID < items[j].RefID })
+	return items, nil
+}
+
+func populateAfterSnapshot(ctx context.Context, tx *sql.Tx, s *snapshot, m mappingFile) error {
 	taskIDs := make([]int64, 0, len(s.Tasks))
 	for _, task := range s.Tasks {
 		taskIDs = append(taskIDs, task.ID)
 	}
 	var err error
+	s.AfterTasks, err = captureTaskSnapshotsBulk(ctx, tx, taskIDs)
+	if err != nil {
+		return err
+	}
+	s.TaskModulesAfter, err = captureTaskModulesForTasks(ctx, tx, taskIDs)
+	if err != nil {
+		return err
+	}
+	s.SearchDocumentsAfter, err = captureSearchDocumentsForTasks(ctx, tx, taskIDs)
+	if err != nil {
+		return err
+	}
+	s.TaskSearchDocumentsAfter, err = captureTaskSearchDocumentsForTasks(ctx, tx, taskIDs)
+	if err != nil {
+		return err
+	}
 	s.AfterResourceGroups, err = captureResourceGroupsForTasks(ctx, tx, taskIDs)
 	if err != nil {
 		return err
@@ -1260,6 +2330,22 @@ func populateAfterSnapshot(ctx context.Context, tx *sql.Tx, s *snapshot, m mappi
 		return err
 	}
 	s.PlanningAfter, err = capturePlanningStates(ctx, tx, planningTaskIDs(m))
+	if err != nil {
+		return err
+	}
+	s.OrganizationAfter, err = captureOrganizationStates(ctx, tx, m.OrganizationMappings)
+	if err != nil {
+		return err
+	}
+	s.AccessAfter, err = captureAccessStates(ctx, tx, m.AccessDecisions)
+	if err != nil {
+		return err
+	}
+	s.StorageRefsAfter, err = captureAssetStorageRefStates(ctx, tx, m.AssetRecoveries)
+	if err != nil {
+		return err
+	}
+	s.AutoIncrementsAfter, err = captureAutoIncrementStates(ctx, tx)
 	if err != nil {
 		return err
 	}
@@ -1316,10 +2402,38 @@ func differenceInt64(after, before []int64) []int64 {
 	return result
 }
 
+type applyPhaseLogger struct {
+	startedAt time.Time
+	phaseAt   time.Time
+}
+
+func newApplyPhaseLogger() *applyPhaseLogger {
+	now := time.Now()
+	return &applyPhaseLogger{startedAt: now, phaseAt: now}
+}
+
+func (l *applyPhaseLogger) mark(phase string) {
+	now := time.Now()
+	payload := map[string]interface{}{
+		"event":                 "workflow_groups_migrate_phase",
+		"phase":                 phase,
+		"phase_elapsed_seconds": now.Sub(l.phaseAt).Seconds(),
+		"total_elapsed_seconds": now.Sub(l.startedAt).Seconds(),
+	}
+	encoded, err := json.Marshal(payload)
+	if err == nil {
+		_, _ = fmt.Fprintln(os.Stderr, string(encoded))
+	}
+	l.phaseAt = now
+}
+
 func apply(ctx context.Context, db *sql.DB, database string, o options, m mappingFile) error {
+	phases := newApplyPhaseLogger()
+	m = normalizeMapping(m)
 	if err := validateMapping(m); err != nil {
 		return v1migrate.NewHardAbort(v1migrate.ExitCodeHardAbort, "invalid reviewed mapping: %v", err)
 	}
+	phases.mark("mapping_validated")
 	blockers, err := queryCutoverBlockers(ctx, db, m)
 	if err != nil {
 		return err
@@ -1327,6 +2441,7 @@ func apply(ctx context.Context, db *sql.DB, database string, o options, m mappin
 	if err := requireNoCutoverBlockers(blockers); err != nil {
 		return err
 	}
+	phases.mark("unlocked_preflight_passed")
 	if err := os.MkdirAll(o.SnapshotDir, 0o750); err != nil {
 		return err
 	}
@@ -1354,9 +2469,11 @@ func apply(ctx context.Context, db *sql.DB, database string, o options, m mappin
 	if err := lockCutoverTargets(ctx, tx, m); err != nil {
 		return err
 	}
+	phases.mark("cutover_targets_locked")
 	if err := lockPreflightRows(ctx, tx); err != nil {
 		return err
 	}
+	phases.mark("preflight_rows_locked")
 	blockers, err = queryCutoverBlockers(ctx, tx, m)
 	if err != nil {
 		return err
@@ -1364,19 +2481,41 @@ func apply(ctx context.Context, db *sql.DB, database string, o options, m mappin
 	if err := requireNoCutoverBlockers(blockers); err != nil {
 		return err
 	}
+	phases.mark("authoritative_preflight_passed")
 	snap, err := captureSnapshot(ctx, tx, database, m)
 	if err != nil {
 		return err
 	}
 	snap.MappingSHA256 = mappingSHA256
 	snap.ApplyState = "prepared"
+	phases.mark("before_snapshot_captured")
 	if err := writeSnapshot(path, snap); err != nil {
 		return err
 	}
-	if err := migrateStates(ctx, tx); err != nil {
+	phases.mark("prepared_journal_written")
+	if err := applyOrganizationMappings(ctx, tx, m.OrganizationMappings); err != nil {
 		return err
 	}
+	phases.mark("organization_mappings_applied")
+	if err := migrateStates(ctx, tx, m); err != nil {
+		return err
+	}
+	phases.mark("task_states_migrated")
 	for _, item := range m.Resources {
+		if item.isV2() {
+			id, revisionIDs, aliasIDs, inserted, applied, err := applyResourceV2(ctx, tx, item)
+			if err != nil {
+				return err
+			}
+			if inserted {
+				snap.InsertedGroupIDs = append(snap.InsertedGroupIDs, id)
+			}
+			if applied {
+				snap.AppliedRevisionIDs = append(snap.AppliedRevisionIDs, revisionIDs...)
+			}
+			snap.InsertedAliasIDs = append(snap.InsertedAliasIDs, aliasIDs...)
+			continue
+		}
 		id, revisionID, inserted, applied, err := applyResource(ctx, tx, item)
 		if err != nil {
 			return err
@@ -1388,6 +2527,7 @@ func apply(ctx context.Context, db *sql.DB, database string, o options, m mappin
 			snap.AppliedRevisionIDs = append(snap.AppliedRevisionIDs, revisionID)
 		}
 	}
+	phases.mark("resource_histories_applied")
 	for _, item := range m.Planning {
 		inserted, err := applyPlanning(ctx, tx, item)
 		if err != nil {
@@ -1395,23 +2535,41 @@ func apply(ctx context.Context, db *sql.DB, database string, o options, m mappin
 		}
 		_ = inserted
 	}
+	phases.mark("planning_applied")
+	taskIDs := make([]int64, 0, len(snap.Tasks))
+	for _, task := range snap.Tasks {
+		taskIDs = append(taskIDs, task.ID)
+	}
+	if err := normalizeCompletedTaskModules(ctx, tx, taskIDs); err != nil {
+		return err
+	}
+	phases.mark("completed_task_modules_normalized")
+	if err := applyAssetRecoveries(ctx, tx, m.AssetRecoveries); err != nil {
+		return err
+	}
+	phases.mark("asset_recoveries_applied")
 	if err := validateCutoverState(ctx, tx, m); err != nil {
 		return err
 	}
+	phases.mark("cutover_state_validated")
 	if err := populateAfterSnapshot(ctx, tx, &snap, m); err != nil {
 		return err
 	}
+	phases.mark("after_snapshot_captured")
 	snap.ApplyState = "commit_pending"
 	if err := writeSnapshot(path, snap); err != nil {
 		return err
 	}
+	phases.mark("commit_pending_journal_written")
 	if err := tx.Commit(); err != nil {
 		return err
 	}
+	phases.mark("database_committed")
 	snap.ApplyState = "applied"
 	if err := writeSnapshot(path, snap); err != nil {
 		return fmt.Errorf("database apply committed but final manifest marker failed; preserve commit_pending manifest and recover before continuing: %w", err)
 	}
+	phases.mark("applied_journal_written")
 	return nil
 }
 
@@ -1442,10 +2600,571 @@ func lockPreflightRows(ctx context.Context, tx *sql.Tx) error {
 	return rows.Close()
 }
 
+func applyOrganizationMappings(ctx context.Context, tx *sql.Tx, mappings []organizationMapping) error {
+	for _, item := range mappings {
+		var result sql.Result
+		var err error
+		switch item.SubjectType {
+		case "task":
+			result, err = tx.ExecContext(ctx, `
+				UPDATE tasks
+				SET owner_department_id=?,owner_team_id=?
+				WHERE id=?
+				  AND owner_department_id <=> ?
+				  AND owner_team_id <=> ?`,
+				item.TargetDepartmentID, item.TargetTeamID, item.SubjectID,
+				nullableInt64Pointer(item.FromDepartmentID), nullableInt64Pointer(item.FromTeamID))
+		case "user":
+			result, err = tx.ExecContext(ctx, `
+				UPDATE users
+				SET department_id=?,team_id=?
+				WHERE id=?
+				  AND department_id <=> ?
+				  AND team_id <=> ?`,
+				item.TargetDepartmentID, item.TargetTeamID, item.SubjectID,
+				nullableInt64Pointer(item.FromDepartmentID), nullableInt64Pointer(item.FromTeamID))
+		default:
+			return fmt.Errorf("unsupported organization subject_type %q", item.SubjectType)
+		}
+		if err != nil {
+			return fmt.Errorf("apply organization mapping %s/%d: %w", item.SubjectType, item.SubjectID, err)
+		}
+		affected, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if affected == 0 {
+			current, loadErr := loadOrganizationState(ctx, tx, item.SubjectType, item.SubjectID)
+			if loadErr != nil {
+				return loadErr
+			}
+			if int64PointerValue(current.DepartmentID) != item.TargetDepartmentID ||
+				int64PointerValue(current.TeamID) != item.TargetTeamID {
+				return fmt.Errorf("organization mapping %s/%d did not update exactly one reviewed before-state row", item.SubjectType, item.SubjectID)
+			}
+		}
+	}
+	return nil
+}
+
+const currentPointerAssetReferencesSQL = `
+		WITH RECURSIVE asset_lineage AS (
+		  SELECT seed.id,seed.storage_ref_id
+		  FROM task_assets seed
+		  WHERE seed.id=?
+		  UNION DISTINCT
+		  SELECT seed.id,seed.storage_ref_id
+		  FROM task_assets seed
+		  LEFT JOIN task_asset_groups seed_group ON seed_group.id=seed.bound_group_id
+		  WHERE seed.source_module_key='migration'
+		    AND seed.bound_role='source'
+		    AND seed.remark=CONCAT('v8-source-alias:group=',seed_group.id,':origin=',?)
+		  UNION DISTINCT
+		  SELECT ta.id,ta.storage_ref_id
+		  FROM task_assets ta
+		  JOIN asset_lineage parent ON ta.source_asset_version_id=parent.id
+		),
+		current_revisions AS (
+		  SELECT task_id,working_revision_id AS revision_id
+		  FROM task_asset_groups
+		  WHERE working_revision_id IS NOT NULL
+		  UNION DISTINCT
+		  SELECT task_id,finalized_revision_id AS revision_id
+		  FROM task_asset_groups
+		  WHERE finalized_revision_id IS NOT NULL
+		),
+		referenced_revisions AS (
+		  SELECT current.revision_id
+		  FROM current_revisions current
+		  JOIN task_asset_group_revisions r ON r.id=current.revision_id
+		  JOIN asset_lineage lineage ON lineage.id=r.source_task_asset_id
+		  UNION DISTINCT
+		  SELECT current.revision_id
+		  FROM current_revisions current
+		  JOIN task_asset_group_revision_items i ON i.revision_id=current.revision_id
+		  JOIN asset_lineage lineage ON lineage.id=i.task_asset_id
+		  UNION DISTINCT
+		  SELECT current.revision_id
+		  FROM current_revisions current
+		  JOIN task_asset_group_revision_references rr ON rr.revision_id=current.revision_id
+		  JOIN asset_lineage lineage ON lineage.id=rr.formal_task_asset_id
+		  UNION DISTINCT
+		  SELECT current.revision_id
+		  FROM current_revisions current
+		  JOIN task_asset_group_revision_references rr ON rr.revision_id=current.revision_id
+		  JOIN reference_file_refs rfr ON rfr.id=rr.reference_file_ref_id
+		  JOIN asset_storage_refs live_ref ON live_ref.ref_id=rfr.ref_id
+		  JOIN asset_lineage lineage ON lineage.id=live_ref.asset_id
+		  UNION DISTINCT
+		  SELECT current.revision_id
+		  FROM current_revisions current
+		  JOIN task_asset_group_revision_references rr ON rr.revision_id=current.revision_id
+		  JOIN reference_file_refs rfr ON rfr.id=rr.reference_file_ref_id
+		  JOIN asset_storage_refs live_ref
+		    ON live_ref.ref_id=rfr.ref_id
+		   AND live_ref.owner_type='task_asset'
+		  JOIN asset_lineage lineage ON lineage.id=live_ref.owner_id
+		  UNION DISTINCT
+		  SELECT current.revision_id
+		  FROM current_revisions current
+		  JOIN task_asset_group_revision_references rr ON rr.revision_id=current.revision_id
+		  JOIN asset_storage_refs frozen_ref ON frozen_ref.ref_id=rr.ref_id_snapshot
+		  JOIN asset_lineage lineage ON lineage.id=frozen_ref.asset_id
+		  UNION DISTINCT
+		  SELECT current.revision_id
+		  FROM current_revisions current
+		  JOIN task_asset_group_revision_references rr ON rr.revision_id=current.revision_id
+		  JOIN asset_storage_refs frozen_ref
+		    ON frozen_ref.ref_id=rr.ref_id_snapshot
+		   AND frozen_ref.owner_type='task_asset'
+		  JOIN asset_lineage lineage ON lineage.id=frozen_ref.owner_id
+		  UNION DISTINCT
+		  SELECT current.revision_id
+		  FROM current_revisions current
+		  JOIN task_asset_group_revision_references rr ON rr.revision_id=current.revision_id
+		  JOIN reference_file_refs rfr ON rfr.id=rr.reference_file_ref_id
+		  JOIN task_reference_asset_bindings binding
+		    ON binding.task_id=current.task_id
+		   AND binding.ref_id COLLATE utf8mb4_0900_ai_ci=rfr.ref_id
+		  JOIN asset_lineage lineage ON lineage.id=binding.task_asset_id
+		)
+		SELECT COUNT(*) FROM referenced_revisions`
+
+func countCurrentPointerAssetReferences(ctx context.Context, q snapshotQueryer, taskAssetID int64) (int, error) {
+	var count int
+	err := q.QueryRowContext(ctx, currentPointerAssetReferencesSQL, taskAssetID, taskAssetID).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("count current pointer references for task asset %d: %w", taskAssetID, err)
+	}
+	return count, nil
+}
+
+func validateHistoricalUnavailableRecoveryEvidence(
+	ctx context.Context,
+	q snapshotQueryer,
+	recovery assetRecoveryMapping,
+	expectedStorageStatus string,
+) error {
+	expected, known := frozenAssetRecoveryEvidenceByMissingID[recovery.MissingTaskAssetID]
+	if !known || recovery.MissingTaskAssetID != 12323 {
+		return fmt.Errorf("task asset %d is outside the frozen historical-unavailable evidence set", recovery.MissingTaskAssetID)
+	}
+	expectedRowHash, err := assetRecoveryManifestRowHash(recovery)
+	if err != nil {
+		return fmt.Errorf("compute task asset %d recovery manifest row hash: %w", recovery.MissingTaskAssetID, err)
+	}
+	if recovery.ManifestRowHash != expectedRowHash ||
+		recovery.ObjectProbeResult != expected.ObjectProbeResult ||
+		recovery.ObjectProbeInputSHA256 != expected.ObjectProbeInputSHA256 ||
+		recovery.ObjectProbeEvidenceHash != expected.ObjectProbeEvidenceHash ||
+		recovery.ObjectProbeObjectKeySHA256 != expected.ObjectProbeObjectKeySHA256 ||
+		recovery.ObjectProbeReadOnlyGETs != expected.ObjectProbeReadOnlyGETs {
+		return fmt.Errorf("task asset %d historical-unavailable mapping is not bound to the frozen object-absence evidence", recovery.MissingTaskAssetID)
+	}
+
+	type lineageRow struct {
+		id             int64
+		taskID         int64
+		rootAssetID    int64
+		fileSize       int64
+		storageRefID   string
+		supersededByID sql.NullInt64
+		uploadStatus   string
+		deletedAt      sql.NullTime
+		cleanedAt      sql.NullTime
+		objectDeleted  sql.NullTime
+	}
+	rows, err := q.QueryContext(ctx, `
+		SELECT id,task_id,asset_id,file_size,COALESCE(storage_ref_id,''),
+		       superseded_by_version_id,COALESCE(upload_status,''),
+		       deleted_at,cleaned_at,object_deleted_at
+		FROM task_assets
+		WHERE id IN (12323,14510,14514)
+		ORDER BY id`)
+	if err != nil {
+		return fmt.Errorf("load historical-unavailable lineage: %w", err)
+	}
+	defer rows.Close()
+	var lineage []lineageRow
+	for rows.Next() {
+		var item lineageRow
+		if err := rows.Scan(
+			&item.id, &item.taskID, &item.rootAssetID, &item.fileSize, &item.storageRefID,
+			&item.supersededByID, &item.uploadStatus,
+			&item.deletedAt, &item.cleanedAt, &item.objectDeleted,
+		); err != nil {
+			return fmt.Errorf("scan historical-unavailable lineage: %w", err)
+		}
+		lineage = append(lineage, item)
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	expectedLineage := []struct {
+		id           int64
+		fileSize     int64
+		storageRefID string
+		supersededBy int64
+		hasSuccessor bool
+	}{
+		{id: 12323, fileSize: 17755216, storageRefID: recovery.OriginalStorageRefID, supersededBy: 14510, hasSuccessor: true},
+		{id: 14510, fileSize: 17595421, storageRefID: "58aebabe-355c-4d24-814a-d6dca306b73d", supersededBy: 14514, hasSuccessor: true},
+		{id: 14514, fileSize: 11275123, storageRefID: "6e6cd051-f261-424d-8b55-49dd6868be9a"},
+	}
+	if len(lineage) != len(expectedLineage) {
+		return fmt.Errorf("task asset 12323 lineage requires exactly 12323->14510->14514; got %d rows", len(lineage))
+	}
+	for index, wanted := range expectedLineage {
+		got := lineage[index]
+		if got.id != wanted.id ||
+			got.taskID != recovery.TaskID ||
+			got.rootAssetID != expected.RootAssetID ||
+			got.fileSize != wanted.fileSize ||
+			got.storageRefID != wanted.storageRefID ||
+			got.supersededByID.Valid != wanted.hasSuccessor ||
+			(wanted.hasSuccessor && got.supersededByID.Int64 != wanted.supersededBy) ||
+			got.uploadStatus != "uploaded" ||
+			got.deletedAt.Valid ||
+			got.cleanedAt.Valid ||
+			got.objectDeleted.Valid {
+			return fmt.Errorf("task asset 12323 lineage row %d no longer matches frozen 12323->14510->14514 evidence", wanted.id)
+		}
+	}
+	var rootRowCount int
+	if err := q.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM task_assets
+		WHERE task_id=? AND asset_id=?
+		  AND NOT (
+		    asset_type='source'
+		    AND source_module_key='migration'
+		    AND remark LIKE 'v8-source-alias:%'
+		  )`,
+		recovery.TaskID, expected.RootAssetID,
+	).Scan(&rootRowCount); err != nil {
+		return err
+	}
+	if rootRowCount != len(expectedLineage) {
+		return fmt.Errorf("task asset 12323 root %d contains %d non-alias rows; frozen delivery lineage requires exactly 3", expected.RootAssetID, rootRowCount)
+	}
+	aliasRows, err := q.QueryContext(ctx, `
+		SELECT id,bound_group_id,COALESCE(bound_role,''),COALESCE(binding_state,''),remark
+		FROM task_assets
+		WHERE task_id=? AND asset_id=?
+		  AND asset_type='source'
+		  AND source_module_key='migration'
+		ORDER BY id`,
+		recovery.TaskID, expected.RootAssetID,
+	)
+	if err != nil {
+		return fmt.Errorf("load task asset 12323 migration source aliases: %w", err)
+	}
+	defer aliasRows.Close()
+	expectedAliasOrigins := map[int64]bool{12323: false, 14510: false, 14514: false}
+	aliasCount := 0
+	for aliasRows.Next() {
+		var aliasID int64
+		var boundGroupID sql.NullInt64
+		var boundRole, bindingState, remark string
+		if err := aliasRows.Scan(&aliasID, &boundGroupID, &boundRole, &bindingState, &remark); err != nil {
+			return fmt.Errorf("scan task asset 12323 migration source alias: %w", err)
+		}
+		aliasCount++
+		matchedOrigin := int64(0)
+		if boundGroupID.Valid && boundGroupID.Int64 > 0 && boundRole == "source" && bindingState == "bound" {
+			for originID := range expectedAliasOrigins {
+				if remark == sourceAliasRemark(boundGroupID.Int64, originID) {
+					matchedOrigin = originID
+					break
+				}
+			}
+		}
+		if matchedOrigin == 0 || expectedAliasOrigins[matchedOrigin] {
+			return fmt.Errorf("task asset 12323 migration source alias %d is outside the frozen 12323/14510/14514 alias set", aliasID)
+		}
+		expectedAliasOrigins[matchedOrigin] = true
+	}
+	if err := aliasRows.Close(); err != nil {
+		return err
+	}
+	if aliasCount != len(expectedAliasOrigins) {
+		return fmt.Errorf("task asset 12323 root %d has %d migration source aliases; frozen mapping requires exactly 3", expected.RootAssetID, aliasCount)
+	}
+
+	var storageAssetID sql.NullInt64
+	var storageOwnerType, storageRefKey, storageStatus string
+	var storageOwnerID, storageFileSize int64
+	if err := q.QueryRowContext(ctx, `
+		SELECT asset_id,owner_type,owner_id,ref_key,status,file_size
+		FROM asset_storage_refs
+		WHERE ref_id=?`, recovery.OriginalStorageRefID).
+		Scan(&storageAssetID, &storageOwnerType, &storageOwnerID, &storageRefKey, &storageStatus, &storageFileSize); err != nil {
+		return fmt.Errorf("load historical-unavailable storage ref %s: %w", recovery.OriginalStorageRefID, err)
+	}
+	if !storageAssetID.Valid ||
+		storageAssetID.Int64 != recovery.MissingTaskAssetID ||
+		storageOwnerType != "task_asset" ||
+		storageOwnerID != recovery.MissingTaskAssetID ||
+		storageRefKey != expected.OriginalStorageRefKey ||
+		storageStatus != expectedStorageStatus ||
+		storageFileSize != recovery.ExpectedFileSize {
+		return fmt.Errorf("task asset 12323 original storage ref identity no longer matches frozen evidence")
+	}
+
+	var taskID, fileSize int64
+	var storageRefID, uploadStatus string
+	var deletedAt, cleanedAt, objectDeletedAt sql.NullTime
+	if err := q.QueryRowContext(ctx, `
+		SELECT task_id,file_size,COALESCE(storage_ref_id,''),COALESCE(upload_status,''),
+		       deleted_at,cleaned_at,object_deleted_at
+		FROM task_assets
+		WHERE id=?`, recovery.MissingTaskAssetID).
+		Scan(&taskID, &fileSize, &storageRefID, &uploadStatus, &deletedAt, &cleanedAt, &objectDeletedAt); err != nil {
+		return fmt.Errorf("load historical-unavailable task asset %d: %w", recovery.MissingTaskAssetID, err)
+	}
+	if taskID != recovery.TaskID ||
+		fileSize != recovery.ExpectedFileSize ||
+		storageRefID != recovery.OriginalStorageRefID ||
+		uploadStatus != "uploaded" ||
+		deletedAt.Valid ||
+		cleanedAt.Valid ||
+		objectDeletedAt.Valid {
+		return fmt.Errorf("task asset %d no longer matches the frozen historical-unavailable before state", recovery.MissingTaskAssetID)
+	}
+	derivatives := []struct {
+		assetType string
+		wholeHash string
+	}{
+		{assetType: "preview", wholeHash: recovery.PreviewWholeHash},
+		{assetType: "design_thumb", wholeHash: recovery.DesignThumbWholeHash},
+	}
+	for _, derivative := range derivatives {
+		var count int
+		if err := q.QueryRowContext(ctx, `
+			SELECT COUNT(*)
+			FROM task_assets
+			WHERE task_id=?
+			  AND source_asset_version_id=?
+			  AND asset_type=?
+			  AND whole_hash=?
+			  AND deleted_at IS NULL
+			  AND cleaned_at IS NULL
+			  AND object_deleted_at IS NULL`,
+			recovery.TaskID, recovery.MissingTaskAssetID, derivative.assetType, derivative.wholeHash).Scan(&count); err != nil {
+			return err
+		}
+		if count != 1 {
+			return fmt.Errorf("task asset %d requires exactly one %s derivative matching frozen lineage/hash; got %d", recovery.MissingTaskAssetID, derivative.assetType, count)
+		}
+	}
+	currentReferences, err := countCurrentPointerAssetReferences(ctx, q, recovery.MissingTaskAssetID)
+	if err != nil {
+		return err
+	}
+	if currentReferences != 0 {
+		return fmt.Errorf("task asset %d is historical-unavailable but is referenced by %d current working/finalized rows", recovery.MissingTaskAssetID, currentReferences)
+	}
+	return nil
+}
+
+func applyAssetRecoveries(ctx context.Context, tx *sql.Tx, recoveries []assetRecoveryMapping) error {
+	for _, recovery := range recoveries {
+		if recovery.Strategy == "clone_b_prematerialized_storage_ref_v1" {
+			if err := validatePrematerializedAssetRecoveryEvidence(ctx, tx, recovery); err != nil {
+				return err
+			}
+			continue
+		}
+		if recovery.Strategy != "historical_unavailable_tombstone_v1" || recovery.MissingTaskAssetID != 12323 {
+			return fmt.Errorf("asset recovery %d has an unsupported apply strategy", recovery.MissingTaskAssetID)
+		}
+		var currentStatus string
+		if err := tx.QueryRowContext(ctx, `
+			SELECT status
+			FROM asset_storage_refs
+			WHERE ref_id=?
+			FOR UPDATE`, recovery.OriginalStorageRefID).Scan(&currentStatus); err != nil {
+			return fmt.Errorf(
+				"load asset recovery %d current storage ref status: %w",
+				recovery.MissingTaskAssetID, err,
+			)
+		}
+		if currentStatus != "recorded" && currentStatus != "historical_unavailable" {
+			return fmt.Errorf(
+				"asset recovery %d storage ref has unsupported current status %q",
+				recovery.MissingTaskAssetID, currentStatus,
+			)
+		}
+		if err := validateHistoricalUnavailableRecoveryEvidence(ctx, tx, recovery, currentStatus); err != nil {
+			return err
+		}
+		if currentStatus == "historical_unavailable" {
+			continue
+		}
+		result, err := tx.ExecContext(ctx, `
+			UPDATE asset_storage_refs
+			SET status='historical_unavailable'
+			WHERE ref_id=? AND status='recorded'`, recovery.OriginalStorageRefID)
+		if err != nil {
+			return err
+		}
+		affected, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if affected != 1 {
+			return fmt.Errorf("asset recovery %d did not update exactly one recorded storage ref", recovery.MissingTaskAssetID)
+		}
+	}
+	return nil
+}
+
+func validatePrematerializedAssetRecoveries(ctx context.Context, q snapshotQueryer, recoveries []assetRecoveryMapping) error {
+	for _, recovery := range recoveries {
+		if recovery.Confidence != "confirmed_auto" || recovery.Strategy != "clone_b_prematerialized_storage_ref_v1" {
+			continue
+		}
+		if err := validatePrematerializedAssetRecoveryEvidence(ctx, q, recovery); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validatePrematerializedAssetRecoveryEvidence(ctx context.Context, q snapshotQueryer, recovery assetRecoveryMapping) error {
+	expected, ok := frozenAssetRecoveryEvidenceByMissingID[recovery.MissingTaskAssetID]
+	if !ok || recovery.MissingTaskAssetID == 12323 || recovery.TaskID != 2807 {
+		return fmt.Errorf("task asset %d is outside the exact prematerialized recovery allowlist", recovery.MissingTaskAssetID)
+	}
+	expectedRowHash, err := assetRecoveryManifestRowHash(recovery)
+	if err != nil {
+		return err
+	}
+	if recovery.ManifestRowHash != expectedRowHash ||
+		recovery.RecoverySourceSHA256 != expected.RecoverySourceSHA256 ||
+		recovery.ControlledReadProtocol != "controlled-asset-read-v1" ||
+		recovery.ControlledReadEvidenceHash != "b39e0d9d26e6fdd35941b195bdc413eb12dd6795e23276a48c9b9bd49f829b08" {
+		return fmt.Errorf("task asset %d mapping is not bound to the frozen controlled-read evidence", recovery.MissingTaskAssetID)
+	}
+
+	var guardEnvironment, guardRunID, guardPlanSHA string
+	if err := q.QueryRowContext(ctx, `
+		SELECT environment,run_id,plan_sha256
+		FROM v8_ab_clone_guard
+		WHERE singleton_id=1`).Scan(&guardEnvironment, &guardRunID, &guardPlanSHA); err != nil {
+		return fmt.Errorf("read Clone B recovery guard: %w", err)
+	}
+	if guardEnvironment != "clone_b" ||
+		!recoveryRunIDPattern.MatchString(guardRunID) ||
+		!sha256Pattern.MatchString(guardPlanSHA) {
+		return fmt.Errorf("task asset %d recovery guard does not identify a valid Clone B executor run", recovery.MissingTaskAssetID)
+	}
+	expectedObjectKey := fmt.Sprintf(
+		"v8-ab/%s/recovered/task-%d/task-asset-%d/%s.bin",
+		guardRunID, recovery.TaskID, recovery.MissingTaskAssetID, recovery.RecoverySourceSHA256,
+	)
+
+	var taskID, rootAssetID, fileSize int64
+	var uploadRequestID, storageRefID, storageKey, wholeHash, uploadStatus, accessRevokedReason string
+	var deletedAt, cleanedAt, objectDeletedAt, accessRevokedAt sql.NullTime
+	if err := q.QueryRowContext(ctx, `
+		SELECT task_id,asset_id,file_size,upload_request_id,
+		       COALESCE(storage_ref_id,''),COALESCE(storage_key,''),COALESCE(whole_hash,''),
+		       COALESCE(upload_status,''),COALESCE(access_revoked_reason,''),
+		       deleted_at,cleaned_at,object_deleted_at,access_revoked_at
+		FROM task_assets
+		WHERE id=?`, recovery.MissingTaskAssetID).Scan(
+		&taskID, &rootAssetID, &fileSize, &uploadRequestID,
+		&storageRefID, &storageKey, &wholeHash, &uploadStatus, &accessRevokedReason,
+		&deletedAt, &cleanedAt, &objectDeletedAt, &accessRevokedAt,
+	); err != nil {
+		return fmt.Errorf("read recovered task asset %d: %w", recovery.MissingTaskAssetID, err)
+	}
+	if taskID != recovery.TaskID ||
+		fileSize != recovery.ExpectedFileSize ||
+		storageRefID == "" ||
+		storageKey != expectedObjectKey ||
+		wholeHash != recovery.RecoverySourceSHA256 ||
+		uploadStatus != "uploaded" ||
+		accessRevokedReason != "" ||
+		deletedAt.Valid || cleanedAt.Valid || objectDeletedAt.Valid || accessRevokedAt.Valid {
+		return fmt.Errorf("task asset %d does not match the exact recovered after-state", recovery.MissingTaskAssetID)
+	}
+
+	var storageAssetID sql.NullInt64
+	var ownerType, storageUploadRequestID, storageAdapter, refType, refKey, checksumHint, storageStatus string
+	var ownerID, storageFileSize, isPlaceholder int64
+	if err := q.QueryRowContext(ctx, `
+		SELECT asset_id,owner_type,owner_id,upload_request_id,storage_adapter,ref_type,
+		       ref_key,file_size,is_placeholder,COALESCE(checksum_hint,''),status
+		FROM asset_storage_refs
+		WHERE ref_id=?`, storageRefID).Scan(
+		&storageAssetID, &ownerType, &ownerID, &storageUploadRequestID,
+		&storageAdapter, &refType, &refKey, &storageFileSize, &isPlaceholder,
+		&checksumHint, &storageStatus,
+	); err != nil {
+		return fmt.Errorf("read recovered storage ref %s: %w", storageRefID, err)
+	}
+	if !storageAssetID.Valid || storageAssetID.Int64 != rootAssetID ||
+		ownerType != "task_asset" || ownerID != recovery.MissingTaskAssetID ||
+		storageUploadRequestID != uploadRequestID ||
+		storageAdapter != "local" || refType != "task_asset_object" ||
+		refKey != expectedObjectKey || storageFileSize != recovery.ExpectedFileSize ||
+		isPlaceholder != 0 || checksumHint != recovery.RecoverySourceSHA256 ||
+		storageStatus != "recorded" {
+		return fmt.Errorf("task asset %d target storage ref does not match the exact recovered after-state", recovery.MissingTaskAssetID)
+	}
+
+	var requestID string
+	var boundRefID, uploadChecksum, requestStatus, sessionStatus string
+	var uploadFileSize int64
+	if err := q.QueryRowContext(ctx, `
+		SELECT request_id,COALESCE(bound_ref_id,''),COALESCE(checksum_hint,''),
+		       file_size,status,session_status
+		FROM upload_requests
+		WHERE request_id=?`, uploadRequestID).Scan(
+		&requestID, &boundRefID, &uploadChecksum, &uploadFileSize, &requestStatus, &sessionStatus,
+	); err != nil {
+		return fmt.Errorf("read recovered upload request %s: %w", uploadRequestID, err)
+	}
+	if requestID != uploadRequestID ||
+		boundRefID != storageRefID ||
+		uploadChecksum != recovery.RecoverySourceSHA256 ||
+		uploadFileSize != recovery.ExpectedFileSize ||
+		requestStatus != "bound" || sessionStatus != "completed" {
+		return fmt.Errorf("task asset %d upload request does not match the exact recovered after-state", recovery.MissingTaskAssetID)
+	}
+	return nil
+}
+
+func restoreAssetStorageRefStates(ctx context.Context, tx *sql.Tx, states []assetStorageRefStatusSnapshot) error {
+	for _, storageRef := range states {
+		result, err := tx.ExecContext(ctx, `UPDATE asset_storage_refs SET status=? WHERE ref_id=?`, storageRef.Status, storageRef.RefID)
+		if err != nil {
+			return err
+		}
+		affected, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if affected != 1 {
+			return fmt.Errorf("rollback storage ref %s did not update exactly one row", storageRef.RefID)
+		}
+	}
+	return nil
+}
+
 func recoverExistingApply(ctx context.Context, db *sql.DB, database, path string, m mappingFile) (bool, error) {
 	s, err := readSnapshot(path, database, m)
 	if err != nil {
 		return false, err
+	}
+	if s.Version != workflowGroupsSnapshotVersion {
+		return false, v1migrate.NewHardAbort(
+			v1migrate.ExitCodeHardAbort,
+			"apply recovery refused: snapshot v%d predates lossless timestamp and nullable-scope recovery; use a fresh snapshot directory",
+			s.Version,
+		)
 	}
 	tx, err := db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
@@ -1459,23 +3178,48 @@ func recoverExistingApply(ctx context.Context, db *sql.DB, database, path string
 	if err != nil {
 		return false, err
 	}
+	autoBeforeMatches, err := autoIncrementStatesMatch(ctx, tx, s.AutoIncrementsBefore)
+	if err != nil {
+		return false, err
+	}
 	afterMatches := false
+	autoAfterMatches := false
 	if s.AppliedAt != nil && s.AfterTasks != nil {
 		afterMatches, err = snapshotStateMatches(ctx, tx, s, true)
 		if err != nil {
 			return false, err
 		}
+		autoAfterMatches, err = autoIncrementStatesMatch(ctx, tx, s.AutoIncrementsAfter)
+		if err != nil {
+			return false, err
+		}
 	}
 	switch {
-	case s.ApplyState == "applied" && afterMatches:
+	case s.ApplyState == "applied" && afterMatches && autoAfterMatches:
 		return false, tx.Commit()
-	case s.ApplyState == "commit_pending" && afterMatches:
+	case s.ApplyState == "commit_pending" && afterMatches && autoAfterMatches:
 		if err := tx.Commit(); err != nil {
 			return false, err
 		}
 		s.ApplyState = "applied"
 		return false, writeSnapshot(path, s)
-	case (s.ApplyState == "prepared" || s.ApplyState == "commit_pending" || s.ApplyState == "rolled_back") && beforeMatches:
+	case needsPreCommitAutoIncrementRecovery(s.ApplyState, beforeMatches, autoBeforeMatches):
+		if err := tx.Commit(); err != nil {
+			return false, err
+		}
+		if err := restoreAutoIncrementStatesWithinRecoveryCeilings(
+			ctx,
+			db,
+			s.AutoIncrementsBefore,
+			s.AutoIncrementRecoveryCeilings,
+		); err != nil {
+			return false, err
+		}
+		if err := removeSnapshot(path); err != nil {
+			return false, err
+		}
+		return true, nil
+	case (s.ApplyState == "prepared" || s.ApplyState == "commit_pending" || s.ApplyState == "rolled_back") && beforeMatches && autoBeforeMatches:
 		if err := tx.Commit(); err != nil {
 			return false, err
 		}
@@ -1483,6 +3227,8 @@ func recoverExistingApply(ctx context.Context, db *sql.DB, database, path string
 			return false, err
 		}
 		return true, nil
+	case s.ApplyState == "rollback_dml_pending" || s.ApplyState == "rollback_autoincrement_pending":
+		return false, v1migrate.NewHardAbort(v1migrate.ExitCodeHardAbort, "apply recovery refused: rollback state %q must be completed with --rollback", s.ApplyState)
 	default:
 		return false, v1migrate.NewHardAbort(v1migrate.ExitCodeHardAbort, "apply recovery refused: manifest state %q does not match the current database before/after state", s.ApplyState)
 	}
@@ -1496,7 +3242,23 @@ func captureSnapshot(ctx context.Context, q snapshotQueryer, database string, m 
 	for _, p := range m.Planning {
 		ids[p.TaskID] = struct{}{}
 	}
-	rows, err := q.QueryContext(ctx, `SELECT id, task_type, task_status, workflow_revision, current_handler_id FROM tasks WHERE task_status IN ('PendingAuditA','PendingAuditB','RejectedByAuditA','RejectedByAuditB','PendingCustomizationReview','PendingCustomizationProduction','PendingEffectReview','PendingEffectRevision','PendingProductionTransfer','PendingWarehouseQC','PendingWarehouseReceive','PendingClose','PendingOutsource','Outsourcing','PendingOutsourceReview') OR task_type='purchase_task' ORDER BY id`)
+	for _, decision := range m.TaskDecisions {
+		ids[decision.TaskID] = struct{}{}
+	}
+	for _, recovery := range m.AssetRecoveries {
+		ids[recovery.TaskID] = struct{}{}
+	}
+	rows, err := q.QueryContext(ctx, `
+		SELECT id,task_type,task_status,workflow_revision,current_handler_id,updated_at
+		FROM tasks
+		WHERE task_status IN ('PendingAuditA','PendingAuditB','RejectedByAuditA','RejectedByAuditB','PendingCustomizationReview','PendingCustomizationProduction','PendingEffectReview','PendingEffectRevision','PendingProductionTransfer','PendingWarehouseQC','PendingWarehouseReceive','PendingClose','PendingOutsource','Outsourcing','PendingOutsourceReview')
+		   OR task_type='purchase_task'
+		   OR (task_status='Completed' AND EXISTS (
+		       SELECT 1 FROM task_modules tm
+		       WHERE tm.task_id=tasks.id
+		         AND tm.state NOT IN ('completed','closed','forcibly_closed','closed_by_admin')
+		   ))
+		ORDER BY id`)
 	if err != nil {
 		return snapshot{}, err
 	}
@@ -1508,7 +3270,7 @@ func captureSnapshot(ctx context.Context, q snapshotQueryer, database string, m 
 	for rows.Next() {
 		var t taskSnapshot
 		var handlerID sql.NullInt64
-		if err := rows.Scan(&t.ID, &t.TaskType, &t.TaskStatus, &t.WorkflowRevision, &handlerID); err != nil {
+		if err := rows.Scan(&t.ID, &t.TaskType, &t.TaskStatus, &t.WorkflowRevision, &handlerID, &t.UpdatedAt); err != nil {
 			return s, err
 		}
 		if handlerID.Valid {
@@ -1524,7 +3286,7 @@ func captureSnapshot(ctx context.Context, q snapshotQueryer, database string, m 
 	for id := range ids {
 		var t taskSnapshot
 		var handlerID sql.NullInt64
-		if err := q.QueryRowContext(ctx, `SELECT id, task_type, task_status, workflow_revision, current_handler_id FROM tasks WHERE id=?`, id).Scan(&t.ID, &t.TaskType, &t.TaskStatus, &t.WorkflowRevision, &handlerID); err != nil {
+		if err := q.QueryRowContext(ctx, `SELECT id, task_type, task_status, workflow_revision, current_handler_id, updated_at FROM tasks WHERE id=?`, id).Scan(&t.ID, &t.TaskType, &t.TaskStatus, &t.WorkflowRevision, &handlerID, &t.UpdatedAt); err != nil {
 			return s, err
 		}
 		if handlerID.Valid {
@@ -1534,16 +3296,25 @@ func captureSnapshot(ctx context.Context, q snapshotQueryer, database string, m 
 		s.Tasks = append(s.Tasks, t)
 	}
 	sort.Slice(s.Tasks, func(i, j int) bool { return s.Tasks[i].ID < s.Tasks[j].ID })
-	for i := range s.Tasks {
-		eventIDs, err := queryStringIDs(ctx, q, `SELECT id FROM task_event_logs WHERE task_id=? ORDER BY sequence,id`, s.Tasks[i].ID)
-		if err != nil {
-			return s, err
-		}
-		s.Tasks[i].EventIDs = eventIDs
-	}
 	taskIDs := make([]int64, 0, len(s.Tasks))
 	for _, task := range s.Tasks {
 		taskIDs = append(taskIDs, task.ID)
+	}
+	s.Tasks, err = captureTaskSnapshotsBulk(ctx, q, taskIDs)
+	if err != nil {
+		return s, err
+	}
+	s.TaskModulesBefore, err = captureTaskModulesForTasks(ctx, q, taskIDs)
+	if err != nil {
+		return s, err
+	}
+	s.SearchDocumentsBefore, err = captureSearchDocumentsForTasks(ctx, q, taskIDs)
+	if err != nil {
+		return s, err
+	}
+	s.TaskSearchDocumentsBefore, err = captureTaskSearchDocumentsForTasks(ctx, q, taskIDs)
+	if err != nil {
+		return s, err
 	}
 	s.ResourceGroups, err = captureResourceGroupsForTasks(ctx, q, taskIDs)
 	if err != nil {
@@ -1561,18 +3332,122 @@ func captureSnapshot(ctx context.Context, q snapshotQueryer, database string, m 
 	if err != nil {
 		return s, err
 	}
+	s.OrganizationBefore, err = captureOrganizationStates(ctx, q, m.OrganizationMappings)
+	if err != nil {
+		return s, err
+	}
+	s.AccessBefore, err = captureAccessStates(ctx, q, m.AccessDecisions)
+	if err != nil {
+		return s, err
+	}
+	s.StorageRefsBefore, err = captureAssetStorageRefStates(ctx, q, m.AssetRecoveries)
+	if err != nil {
+		return s, err
+	}
+	s.AutoIncrementsBefore, err = captureAutoIncrementStates(ctx, q)
+	if err != nil {
+		return s, err
+	}
+	s.AutoIncrementRecoveryCeilings, err = autoIncrementRecoveryCeilings(s.AutoIncrementsBefore, m)
+	if err != nil {
+		return s, err
+	}
 	return s, nil
 }
 
-func migrateStates(ctx context.Context, tx *sql.Tx) error {
-	_, err := tx.ExecContext(ctx, `UPDATE tasks SET task_status=CASE
+func migrateStates(ctx context.Context, tx *sql.Tx, m mappingFile) error {
+	for _, decision := range m.TaskDecisions {
+		result, err := tx.ExecContext(ctx, `
+			UPDATE tasks
+			SET task_status=?,workflow_revision=workflow_revision+1
+			WHERE id=? AND task_status=?`, decision.TargetStatus, decision.TaskID, decision.FromStatus)
+		if err != nil {
+			return err
+		}
+		if rows, _ := result.RowsAffected(); rows != 1 {
+			var currentStatus string
+			if err := tx.QueryRowContext(ctx, `SELECT task_status FROM tasks WHERE id=? FOR UPDATE`, decision.TaskID).Scan(&currentStatus); err != nil {
+				return fmt.Errorf("load task %d after reviewed state decision miss: %w", decision.TaskID, err)
+			}
+			if currentStatus != decision.TargetStatus {
+				return fmt.Errorf("task %d no longer matches reviewed state decision %s -> %s", decision.TaskID, decision.FromStatus, decision.TargetStatus)
+			}
+		}
+		if isReviewedRetouchReopenDecision(decision) {
+			if _, err := tx.ExecContext(ctx, `
+				UPDATE task_modules
+				SET state='in_progress',terminal_at=NULL,updated_at=?
+				WHERE task_id=? AND module_key='retouch'`,
+				decision.ConfirmedAt.UTC(), decision.TaskID); err != nil {
+				return fmt.Errorf("reopen reviewed retouch module for task %d: %w", decision.TaskID, err)
+			}
+			rows, err := tx.QueryContext(ctx, `
+				SELECT state,terminal_at
+				FROM task_modules
+				WHERE task_id=? AND module_key='retouch'
+				FOR UPDATE`, decision.TaskID)
+			if err != nil {
+				return fmt.Errorf("verify reviewed retouch module for task %d: %w", decision.TaskID, err)
+			}
+			moduleCount := 0
+			activeCount := 0
+			for rows.Next() {
+				var state string
+				var terminalAt sql.NullTime
+				if err := rows.Scan(&state, &terminalAt); err != nil {
+					rows.Close()
+					return fmt.Errorf("scan reviewed retouch module for task %d: %w", decision.TaskID, err)
+				}
+				moduleCount++
+				if state == "in_progress" && !terminalAt.Valid {
+					activeCount++
+				}
+			}
+			if err := rows.Err(); err != nil {
+				rows.Close()
+				return fmt.Errorf("iterate reviewed retouch module rows for task %d: %w", decision.TaskID, err)
+			}
+			if err := rows.Close(); err != nil {
+				return fmt.Errorf("close reviewed retouch module rows for task %d: %w", decision.TaskID, err)
+			}
+			if moduleCount != 1 || activeCount != 1 {
+				return fmt.Errorf(
+					"task %d reviewed retouch reopen requires exactly one active non-terminal retouch module, found modules=%d active=%d",
+					decision.TaskID, moduleCount, activeCount,
+				)
+			}
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE tasks SET task_status=CASE
 		WHEN task_status IN ('PendingAuditA','PendingAuditB','PendingCustomizationReview','PendingOutsourceReview','PendingEffectReview') THEN 'PendingAudit'
 		WHEN task_status IN ('RejectedByAuditA','RejectedByAuditB','PendingCustomizationProduction','PendingEffectRevision','PendingOutsource','Outsourcing') THEN 'InProgress'
 		WHEN task_status IN ('PendingWarehouseQC','PendingWarehouseReceive','PendingProductionTransfer','PendingClose') THEN 'Completed'
 		ELSE task_status END,
 		workflow_revision=workflow_revision+1
-	WHERE task_status IN ('PendingAuditA','PendingAuditB','PendingCustomizationReview','PendingOutsourceReview','PendingEffectReview','RejectedByAuditA','RejectedByAuditB','PendingCustomizationProduction','PendingEffectRevision','PendingOutsource','Outsourcing','PendingWarehouseQC','PendingWarehouseReceive','PendingProductionTransfer','PendingClose')`)
-	return err
+	WHERE task_status IN ('PendingAuditA','PendingAuditB','PendingCustomizationReview','PendingOutsourceReview','PendingEffectReview','RejectedByAuditA','RejectedByAuditB','PendingCustomizationProduction','PendingEffectRevision','PendingOutsource','Outsourcing','PendingWarehouseQC','PendingWarehouseReceive','PendingProductionTransfer','PendingClose')`); err != nil {
+		return err
+	}
+	return nil
+}
+
+func normalizeCompletedTaskModules(ctx context.Context, tx *sql.Tx, taskIDs []int64) error {
+	for _, chunk := range int64Chunks(taskIDs) {
+		placeholders, args := int64Placeholders(chunk)
+		if _, err := tx.ExecContext(ctx, `
+			UPDATE task_modules tm
+			JOIN tasks t ON t.id=tm.task_id
+			SET tm.state='completed',
+			    tm.claimed_by=NULL,
+			    tm.claimed_team_code=NULL,
+			    tm.terminal_at=COALESCE(tm.terminal_at,CURRENT_TIMESTAMP)
+			WHERE tm.task_id IN (`+placeholders+`)
+			  AND t.task_status='Completed'
+			  AND tm.state NOT IN ('completed','closed','forcibly_closed','closed_by_admin')`,
+			args...); err != nil {
+			return fmt.Errorf("normalize completed task modules: %w", err)
+		}
+	}
+	return nil
 }
 
 func applyResource(ctx context.Context, tx *sql.Tx, m resourceMapping) (int64, int64, bool, bool, error) {
@@ -1830,6 +3705,16 @@ func equalInt64Slices(left, right []int64) bool {
 }
 
 func applyPlanning(ctx context.Context, tx *sql.Tx, m planningMapping) (bool, error) {
+	var taskType, taskStatus string
+	if err := tx.QueryRowContext(ctx, `SELECT task_type,task_status FROM tasks WHERE id=? FOR UPDATE`, m.TaskID).Scan(&taskType, &taskStatus); err != nil {
+		return false, err
+	}
+	if taskType != "purchase_task" && taskType != "sku_planning" {
+		return false, fmt.Errorf("planning task %d has unsupported task_type=%s", m.TaskID, taskType)
+	}
+	if err := validatePlanningTargetTransition(taskStatus, m.TargetTaskStatus); err != nil {
+		return false, fmt.Errorf("planning task %d: %w", m.TaskID, err)
+	}
 	var exists int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM task_planning_settings WHERE task_id=?`, m.TaskID).Scan(&exists); err != nil {
 		return false, err
@@ -1843,25 +3728,27 @@ func applyPlanning(ctx context.Context, tx *sql.Tx, m planningMapping) (bool, er
 	if _, err := tx.ExecContext(ctx, `INSERT INTO task_planning_settings (task_id,erp_sync_mode,code_rule_revision_id,client_create_id,created_by) VALUES (?,'none',?,?,?)`, m.TaskID, m.CodeRuleRevisionID, fmt.Sprintf("migration-%d", m.TaskID), m.CreatedBy); err != nil {
 		return false, err
 	}
-	for _, item := range m.Items {
-		if _, err := tx.ExecContext(ctx, `INSERT INTO task_planning_sku_details (task_sku_item_id) VALUES (?)`, item.TaskSKUItemID); err != nil {
-			return false, err
-		}
-		res, err := tx.ExecContext(ctx, `INSERT INTO task_planning_sku_revisions (task_sku_item_id,version_no,description_spec,quantity,target_price,currency,note,reference_url,erp_product_i_id,erp_product_name,reason,created_by) VALUES (?,1,?,?,?,'CNY',?,?,?,?,'confirmed legacy planning migration',?)`, item.TaskSKUItemID, item.DescriptionSpec, item.Quantity, item.TargetPrice, item.Note, item.ReferenceURL, item.ERPProductIID, item.ERPProductName, m.CreatedBy)
-		if err != nil {
-			return false, err
-		}
-		revisionID, _ := res.LastInsertId()
-		if _, err = tx.ExecContext(ctx, `UPDATE task_planning_sku_details SET current_revision_id=? WHERE task_sku_item_id=?`, revisionID, item.TaskSKUItemID); err != nil {
-			return false, err
-		}
-		if item.ImageStorageRef != "" {
-			if _, err = tx.ExecContext(ctx, `INSERT INTO task_planning_sku_revision_images (revision_id,storage_ref_id) VALUES (?,?)`, revisionID, item.ImageStorageRef); err != nil {
+	if !isIncompleteUATPlanningTombstone(m) {
+		for _, item := range m.Items {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO task_planning_sku_details (task_sku_item_id) VALUES (?)`, item.TaskSKUItemID); err != nil {
 				return false, err
+			}
+			res, err := tx.ExecContext(ctx, `INSERT INTO task_planning_sku_revisions (task_sku_item_id,version_no,description_spec,quantity,target_price,currency,note,reference_url,erp_product_i_id,erp_product_name,reason,created_by) VALUES (?,1,?,?,?,'CNY',?,?,?,?,'confirmed legacy planning migration',?)`, item.TaskSKUItemID, item.DescriptionSpec, item.Quantity, item.TargetPrice, item.Note, item.ReferenceURL, item.ERPProductIID, item.ERPProductName, m.CreatedBy)
+			if err != nil {
+				return false, err
+			}
+			revisionID, _ := res.LastInsertId()
+			if _, err = tx.ExecContext(ctx, `UPDATE task_planning_sku_details SET current_revision_id=? WHERE task_sku_item_id=?`, revisionID, item.TaskSKUItemID); err != nil {
+				return false, err
+			}
+			if item.ImageStorageRef != "" {
+				if _, err = tx.ExecContext(ctx, `INSERT INTO task_planning_sku_revision_images (revision_id,storage_ref_id) VALUES (?,?)`, revisionID, item.ImageStorageRef); err != nil {
+					return false, err
+				}
 			}
 		}
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE tasks SET task_type='sku_planning',task_status='Completed',workflow_revision=workflow_revision+1 WHERE id=?`, m.TaskID); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE tasks SET task_type='sku_planning',task_status=?,workflow_revision=workflow_revision+1 WHERE id=?`, m.TargetTaskStatus, m.TaskID); err != nil {
 		return false, err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE task_sku_items SET sku_origin='legacy_migration' WHERE task_id=?`, m.TaskID); err != nil {
@@ -1870,16 +3757,26 @@ func applyPlanning(ctx context.Context, tx *sql.Tx, m planningMapping) (bool, er
 	return true, nil
 }
 
+func validatePlanningTargetTransition(current, target string) error {
+	if !validPlanningTargetStatus(target) {
+		return fmt.Errorf("target_task_status=%q is not a current task status", target)
+	}
+	if (current == "Cancelled" || current == "Archived") && target != current {
+		return fmt.Errorf("terminal status %s must be preserved", current)
+	}
+	return nil
+}
+
 func verifyPlanningMappingQuery(ctx context.Context, q snapshotQueryer, m planningMapping) error {
-	var taskType string
+	var taskType, taskStatus string
 	var ruleRevisionID, createdBy int64
 	if err := q.QueryRowContext(ctx, `
-		SELECT t.task_type,s.code_rule_revision_id,s.created_by
+		SELECT t.task_type,t.task_status,s.code_rule_revision_id,s.created_by
 		FROM task_planning_settings s JOIN tasks t ON t.id=s.task_id
-		WHERE s.task_id=?`, m.TaskID).Scan(&taskType, &ruleRevisionID, &createdBy); err != nil {
+		WHERE s.task_id=?`, m.TaskID).Scan(&taskType, &taskStatus, &ruleRevisionID, &createdBy); err != nil {
 		return err
 	}
-	if taskType != "sku_planning" || ruleRevisionID != m.CodeRuleRevisionID || createdBy != m.CreatedBy {
+	if taskType != "sku_planning" || taskStatus != m.TargetTaskStatus || ruleRevisionID != m.CodeRuleRevisionID || createdBy != m.CreatedBy {
 		return fmt.Errorf("planning task %d settings differ from the confirmed mapping", m.TaskID)
 	}
 	var itemCount int
@@ -1888,6 +3785,33 @@ func verifyPlanningMappingQuery(ctx context.Context, q snapshotQueryer, m planni
 	}
 	if itemCount != len(m.Items) {
 		return fmt.Errorf("planning task %d has %d SKU rows but mapping has %d", m.TaskID, itemCount, len(m.Items))
+	}
+	if isIncompleteUATPlanningTombstone(m) {
+		var exactItemCount int
+		if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM task_sku_items WHERE task_id=? AND id=?`, m.TaskID, int64(380)).Scan(&exactItemCount); err != nil {
+			return err
+		}
+		if exactItemCount != 1 {
+			return fmt.Errorf("planning tombstone task %d must preserve exact SKU item 380", m.TaskID)
+		}
+		zeroChecks := []struct {
+			name  string
+			query string
+		}{
+			{name: "details", query: `SELECT COUNT(*) FROM task_planning_sku_details d JOIN task_sku_items si ON si.id=d.task_sku_item_id WHERE si.task_id=?`},
+			{name: "revisions", query: `SELECT COUNT(*) FROM task_planning_sku_revisions r JOIN task_sku_items si ON si.id=r.task_sku_item_id WHERE si.task_id=?`},
+			{name: "images", query: `SELECT COUNT(*) FROM task_planning_sku_revision_images img JOIN task_planning_sku_revisions r ON r.id=img.revision_id JOIN task_sku_items si ON si.id=r.task_sku_item_id WHERE si.task_id=?`},
+		}
+		for _, check := range zeroChecks {
+			var count int
+			if err := q.QueryRowContext(ctx, check.query, m.TaskID).Scan(&count); err != nil {
+				return err
+			}
+			if count != 0 {
+				return fmt.Errorf("planning tombstone task %d has %d %s; expected zero", m.TaskID, count, check.name)
+			}
+		}
+		return nil
 	}
 	for _, item := range m.Items {
 		var description string
@@ -1915,12 +3839,20 @@ func verifyPlanningMappingQuery(ctx context.Context, q snapshotQueryer, m planni
 }
 
 func validateCutoverState(ctx context.Context, tx *sql.Tx, m mappingFile) error {
-	blockers, err := queryCutoverBlockers(ctx, tx, m)
-	if err != nil {
-		return err
-	}
-	if err := requireNoCutoverBlockers(blockers); err != nil {
-		return err
+	// The complete mapping preflight already ran twice before mutation, with the
+	// second pass protected by the cutover locks. Keep this function focused on
+	// post-cutover invariants instead of repeating the expensive before-state scan.
+	planningTombstoneExclusion := ""
+	for _, planning := range m.Planning {
+		if planning.Confidence != "confirmed_auto" {
+			continue
+		}
+		if err := verifyPlanningMappingQuery(ctx, tx, planning); err != nil {
+			return fmt.Errorf("cutover blocked: verified planning state differs from mapping: %w", err)
+		}
+		if isIncompleteUATPlanningTombstone(planning) {
+			planningTombstoneExclusion = "AND t.id <> 497"
+		}
 	}
 	checks := []struct {
 		name  string
@@ -1929,9 +3861,10 @@ func validateCutoverState(ctx context.Context, tx *sql.Tx, m mappingFile) error 
 		{name: "resource groups still migration-incomplete", query: `SELECT COUNT(*) FROM task_asset_groups WHERE migration_incomplete=1`},
 		{name: "legacy purchase_task rows remain", query: `SELECT COUNT(*) FROM tasks WHERE task_type='purchase_task'`},
 		{name: "retired active task statuses remain", query: `SELECT COUNT(*) FROM tasks WHERE task_status IN ('PendingAuditA','PendingAuditB','RejectedByAuditA','RejectedByAuditB','PendingCustomizationReview','PendingCustomizationProduction','PendingEffectReview','PendingEffectRevision','PendingProductionTransfer','PendingWarehouseQC','PendingWarehouseReceive','PendingClose','PendingOutsource','Outsourcing','PendingOutsourceReview','RejectedByWarehouse')`},
-		{name: "planning settings/detail/current revision parity failures", query: `
+		{name: "completed tasks retain open modules", query: `SELECT COUNT(*) FROM task_modules tm JOIN tasks t ON t.id=tm.task_id WHERE t.task_status='Completed' AND tm.state NOT IN ('completed','closed','forcibly_closed','closed_by_admin')`},
+		{name: "planning settings/detail/current revision parity failures", query: fmt.Sprintf(`
 			SELECT COUNT(*) FROM tasks t
-			WHERE t.task_type='sku_planning' AND (
+			WHERE t.task_type='sku_planning' %s AND (
 			  NOT EXISTS (SELECT 1 FROM task_planning_settings s WHERE s.task_id=t.id)
 			  OR EXISTS (
 			    SELECT 1 FROM task_sku_items si
@@ -1940,7 +3873,33 @@ func validateCutoverState(ctx context.Context, tx *sql.Tx, m mappingFile) error 
 			    WHERE si.task_id=t.id AND (d.task_sku_item_id IS NULL OR d.current_revision_id IS NULL OR r.id IS NULL)
 			  )
 			  OR NOT EXISTS (SELECT 1 FROM task_sku_items si WHERE si.task_id=t.id)
-			)`},
+			)`, planningTombstoneExclusion)},
+		{name: "task resource-group scope set differs from the exact expected set", query: `
+			WITH expected_scopes AS (
+			  SELECT t.id AS task_id,'retouch_requirement' AS scope_kind,trr.id AS scope_ref_id
+			  FROM tasks t JOIN task_retouch_requirements trr ON trr.task_id=t.id
+			  WHERE t.task_type='retouch_task'
+			  UNION ALL
+			  SELECT t.id,'sku',tsi.id
+			  FROM tasks t JOIN task_sku_items tsi ON tsi.task_id=t.id
+			  WHERE t.task_type NOT IN ('retouch_task','purchase_task','sku_planning')
+			  UNION ALL
+			  SELECT t.id,'task',0
+			  FROM tasks t
+			  WHERE t.task_type NOT IN ('retouch_task','purchase_task','sku_planning')
+			    AND NOT EXISTS (SELECT 1 FROM task_sku_items tsi WHERE tsi.task_id=t.id)
+			), scope_drift AS (
+			  SELECT e.task_id,e.scope_kind,e.scope_ref_id
+			  FROM expected_scopes e
+			  LEFT JOIN task_asset_groups g ON g.task_id=e.task_id AND g.scope_kind=e.scope_kind AND g.scope_ref_id=e.scope_ref_id
+			  WHERE g.id IS NULL
+			  UNION ALL
+			  SELECT g.task_id,g.scope_kind,g.scope_ref_id
+			  FROM task_asset_groups g JOIN tasks t ON t.id=g.task_id
+			  LEFT JOIN expected_scopes e ON e.task_id=g.task_id AND e.scope_kind=g.scope_kind AND e.scope_ref_id=g.scope_ref_id
+			  WHERE t.task_type NOT IN ('purchase_task','sku_planning') AND e.task_id IS NULL
+			)
+			SELECT COUNT(*) FROM scope_drift`},
 		{name: "sku_planning tasks still own design resource groups", query: `SELECT COUNT(*) FROM tasks t JOIN task_asset_groups g ON g.task_id=t.id WHERE t.task_type='sku_planning'`},
 	}
 	for _, check := range checks {
@@ -1950,6 +3909,24 @@ func validateCutoverState(ctx context.Context, tx *sql.Tx, m mappingFile) error 
 		}
 		if count != 0 {
 			return fmt.Errorf("cutover blocked: %s (%d)", check.name, count)
+		}
+	}
+	for _, recovery := range m.AssetRecoveries {
+		if recovery.Strategy == "clone_b_prematerialized_storage_ref_v1" {
+			if err := validatePrematerializedAssetRecoveryEvidence(ctx, tx, recovery); err != nil {
+				return fmt.Errorf("cutover blocked: prematerialized recovery evidence drifted: %w", err)
+			}
+			continue
+		}
+		if err := validateHistoricalUnavailableRecoveryEvidence(ctx, tx, recovery, "historical_unavailable"); err != nil {
+			return fmt.Errorf("cutover blocked: historical-unavailable recovery evidence drifted: %w", err)
+		}
+		var status string
+		if err := tx.QueryRowContext(ctx, `SELECT status FROM asset_storage_refs WHERE ref_id=?`, recovery.OriginalStorageRefID).Scan(&status); err != nil {
+			return err
+		}
+		if status != "historical_unavailable" {
+			return fmt.Errorf("cutover blocked: asset recovery %d storage ref status=%q", recovery.MissingTaskAssetID, status)
 		}
 	}
 	return nil
@@ -1969,11 +3946,107 @@ func stringPointerValue(value *string) string {
 	return ""
 }
 
+func restoreTaskModuleStates(ctx context.Context, tx *sql.Tx, items []taskModuleSnapshot) error {
+	for _, item := range items {
+		_, err := tx.ExecContext(ctx, `
+			UPDATE task_modules
+			SET state=?,pool_team_code=?,claimed_by=?,claimed_team_code=?,
+			    claimed_at=?,actor_org_snapshot=?,entered_at=?,terminal_at=?,
+			    data=?,updated_at=?
+			WHERE id=? AND task_id=?`,
+			item.State, nullableStringPointer(item.PoolTeamCode),
+			nullableInt64Pointer(item.ClaimedBy),
+			nullableStringPointer(item.ClaimedTeamCode),
+			nullableTimePointer(item.ClaimedAt), []byte(item.ActorOrgSnapshot),
+			item.EnteredAt, nullableTimePointer(item.TerminalAt), []byte(item.Data),
+			item.UpdatedAt, item.ID, item.TaskID)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func restoreSearchDocuments(
+	ctx context.Context,
+	tx *sql.Tx,
+	taskIDs []int64,
+	items []searchDocumentSnapshot,
+) error {
+	for _, chunk := range int64Chunks(taskIDs) {
+		placeholders, args := int64Placeholders(chunk)
+		if _, err := tx.ExecContext(ctx,
+			`DELETE FROM task_asset_group_search_documents WHERE task_id IN (`+placeholders+`)`,
+			args...); err != nil {
+			return err
+		}
+	}
+	for _, item := range items {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO task_asset_group_search_documents
+				(group_id,task_id,finalized_revision_id,internal_text,final_text,updated_at)
+			VALUES (?,?,?,?,?,?)`,
+			item.GroupID, item.TaskID,
+			nullableInt64Pointer(item.FinalizedRevisionID),
+			item.InternalText, item.FinalText, item.UpdatedAt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func restoreTaskSearchDocuments(
+	ctx context.Context,
+	tx *sql.Tx,
+	taskIDs []int64,
+	items []taskSearchDocumentSnapshot,
+) error {
+	for _, chunk := range int64Chunks(taskIDs) {
+		placeholders, args := int64Placeholders(chunk)
+		if _, err := tx.ExecContext(ctx,
+			`DELETE FROM task_search_documents WHERE task_id IN (`+placeholders+`)`,
+			args...); err != nil {
+			return err
+		}
+	}
+	for _, item := range items {
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO task_search_documents
+				(task_id,task_no,product_name_snapshot,sku_code,primary_sku_code,
+				 product_i_id,task_type,task_status,priority,owner_department,
+				 owner_team,owner_org_team,creator_id,creator_name,requester_id,
+				 requester_name,designer_id,designer_name,current_handler_id,
+				 current_handler_name,created_at,updated_at,deadline_at,asset_text,
+				 search_text)
+			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			item.TaskID, item.TaskNo, item.ProductNameSnapshot, item.SKUCode,
+			item.PrimarySKUCode, item.ProductIID, item.TaskType, item.TaskStatus,
+			item.Priority, item.OwnerDepartment, item.OwnerTeam, item.OwnerOrgTeam,
+			nullableInt64Pointer(item.CreatorID), item.CreatorName,
+			nullableInt64Pointer(item.RequesterID), item.RequesterName,
+			nullableInt64Pointer(item.DesignerID), item.DesignerName,
+			nullableInt64Pointer(item.CurrentHandlerID), item.CurrentHandlerName,
+			nullableTimePointer(item.CreatedAt), nullableTimePointer(item.UpdatedAt),
+			nullableTimePointer(item.DeadlineAt), nullableStringPointer(item.AssetText),
+			item.SearchText); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func rollback(ctx context.Context, db *sql.DB, database string, o options, m mappingFile) error {
 	path := filepath.Join(o.SnapshotDir, "workflow-groups-snapshot.json")
 	s, err := readSnapshot(path, database, m)
 	if err != nil {
 		return err
+	}
+	if s.Version != workflowGroupsSnapshotVersion {
+		return v1migrate.NewHardAbort(
+			v1migrate.ExitCodeHardAbort,
+			"rollback refused: snapshot v%d predates lossless timestamp and nullable-scope recovery; rerun with the matching historical tool or prepare a reviewed recovery",
+			s.Version,
+		)
 	}
 	tx, err := db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
@@ -1987,31 +4060,82 @@ func rollback(ctx context.Context, db *sql.DB, database string, o options, m map
 	if err != nil {
 		return err
 	}
+	autoBeforeMatches, err := autoIncrementStatesMatch(ctx, tx, s.AutoIncrementsBefore)
+	if err != nil {
+		return err
+	}
 	afterMatches := false
+	autoAfterMatches := false
 	if s.AppliedAt != nil && s.AfterTasks != nil {
 		afterMatches, err = snapshotStateMatches(ctx, tx, s, true)
 		if err != nil {
 			return err
 		}
+		autoAfterMatches, err = autoIncrementStatesMatch(ctx, tx, s.AutoIncrementsAfter)
+		if err != nil {
+			return err
+		}
 	}
 	if s.ApplyState == "rolled_back" {
-		if !beforeMatches {
+		if !beforeMatches || !autoBeforeMatches {
 			return v1migrate.NewHardAbort(v1migrate.ExitCodeHardAbort, "rollback refused: manifest is rolled_back but database no longer matches the before state")
 		}
 		return tx.Commit()
+	}
+	if s.ApplyState == "rollback_autoincrement_pending" {
+		if !beforeMatches {
+			return v1migrate.NewHardAbort(v1migrate.ExitCodeHardAbort, "rollback refused: auto-increment recovery requires the exact before row state")
+		}
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+		return completeAutoIncrementRollback(ctx, db, path, &s)
+	}
+	if s.ApplyState == "rollback_dml_pending" && beforeMatches {
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+		s.ApplyState = "rollback_autoincrement_pending"
+		if err := writeSnapshot(path, s); err != nil {
+			return err
+		}
+		return completeAutoIncrementRollback(ctx, db, path, &s)
 	}
 	if !afterMatches {
 		if (s.ApplyState == "prepared" || s.ApplyState == "commit_pending") && beforeMatches {
 			if err := tx.Commit(); err != nil {
 				return err
 			}
+			if needsPreCommitAutoIncrementRecovery(s.ApplyState, beforeMatches, autoBeforeMatches) {
+				if err := restoreAutoIncrementStatesWithinRecoveryCeilings(
+					ctx,
+					db,
+					s.AutoIncrementsBefore,
+					s.AutoIncrementRecoveryCeilings,
+				); err != nil {
+					return err
+				}
+			}
 			s.ApplyState = "rolled_back"
 			return writeSnapshot(path, s)
 		}
 		return v1migrate.NewHardAbort(v1migrate.ExitCodeHardAbort, "rollback refused: current database differs from both the recorded before and apply-after states; preserve forward writes and investigate")
 	}
-	if s.ApplyState != "applied" && s.ApplyState != "commit_pending" {
+	if !autoAfterMatches {
+		return v1migrate.NewHardAbort(v1migrate.ExitCodeHardAbort, "rollback refused: auto-increment state differs from the recorded apply-after state")
+	}
+	if s.ApplyState != "applied" && s.ApplyState != "commit_pending" && s.ApplyState != "rollback_dml_pending" {
 		return v1migrate.NewHardAbort(v1migrate.ExitCodeHardAbort, "rollback refused: unsupported manifest apply_state %q", s.ApplyState)
+	}
+	if s.ApplyState != "rollback_dml_pending" {
+		s.ApplyState = "rollback_dml_pending"
+		if err := writeSnapshot(path, s); err != nil {
+			return err
+		}
+	}
+	rollbackTaskIDs := make([]int64, 0, len(s.Tasks))
+	for _, task := range s.Tasks {
+		rollbackTaskIDs = append(rollbackTaskIDs, task.ID)
 	}
 	for _, created := range s.PlanningCreated {
 		beforeDetails := map[int64]planningDetailSnapshot{}
@@ -2029,7 +4153,7 @@ func rollback(ctx context.Context, db *sql.DB, database string, o options, m map
 			}
 		}
 		for detailID, detail := range beforeDetails {
-			if _, err = tx.ExecContext(ctx, `UPDATE task_planning_sku_details SET current_revision_id=?,lock_version=? WHERE task_sku_item_id=?`, nullableInt64Pointer(detail.CurrentRevisionID), detail.LockVersion, detailID); err != nil {
+			if _, err = tx.ExecContext(ctx, `UPDATE task_planning_sku_details SET current_revision_id=?,lock_version=?,updated_at=? WHERE task_sku_item_id=?`, nullableInt64Pointer(detail.CurrentRevisionID), detail.LockVersion, detail.UpdatedAt, detailID); err != nil {
 				return err
 			}
 		}
@@ -2054,29 +4178,50 @@ func rollback(ctx context.Context, db *sql.DB, database string, o options, m map
 			}
 		}
 	}
+	if err := restoreSearchDocuments(
+		ctx,
+		tx,
+		rollbackTaskIDs,
+		s.SearchDocumentsBefore,
+	); err != nil {
+		return err
+	}
+	if err := restoreTaskSearchDocuments(
+		ctx,
+		tx,
+		rollbackTaskIDs,
+		s.TaskSearchDocumentsBefore,
+	); err != nil {
+		return err
+	}
 	for _, origin := range s.SKUOrigins {
-		if _, err = tx.ExecContext(ctx, `UPDATE task_sku_items SET sku_origin=? WHERE id=?`, nullableStringPointer(origin.Origin), origin.ID); err != nil {
+		if _, err = tx.ExecContext(ctx, `UPDATE task_sku_items SET sku_origin=?,updated_at=? WHERE id=?`, nullableStringPointer(origin.Origin), origin.UpdatedAt, origin.ID); err != nil {
 			return err
 		}
+	}
+	if err := restoreAssetStorageRefStates(ctx, tx, s.StorageRefsBefore); err != nil {
+		return err
 	}
 	for _, asset := range s.AssetBindings {
 		if _, err = tx.ExecContext(ctx, `
 			UPDATE task_assets
 			SET binding_state=?,bound_group_id=?,bound_role=?,
 			    staged_task_sku_item_id=?,staged_retouch_requirement_id=?,staged_role=?,staged_by=?,upload_session_id=?,staged_expires_at=?,
-			    access_revoked_at=?,access_revoked_reason=?,object_deleted_at=?
+			    access_revoked_at=?,access_revoked_reason=?,object_deleted_at=?,scope_sku_code=?,retouch_requirement_id=?,
+			    flow_review_status=?,approved_at=?,approved_by=?
 			WHERE id=?`,
 			asset.BindingState, nullableInt64Pointer(asset.BoundGroupID), nullableStringPointer(asset.BoundRole),
 			nullableInt64Pointer(asset.StagedTaskSKUItemID), nullableInt64Pointer(asset.StagedRetouchRequirementID), nullableStringPointer(asset.StagedRole), nullableInt64Pointer(asset.StagedBy), nullableStringPointer(asset.UploadSessionID), nullableTimePointer(asset.StagedExpiresAt),
-			nullableTimePointer(asset.AccessRevokedAt), asset.AccessRevokedReason, nullableTimePointer(asset.ObjectDeletedAt), asset.ID); err != nil {
+			nullableTimePointer(asset.AccessRevokedAt), asset.AccessRevokedReason, nullableTimePointer(asset.ObjectDeletedAt), nullableStringPointer(asset.ScopeSKUCode), nullableInt64Pointer(asset.RetouchRequirementID),
+			asset.FlowReviewStatus, nullableTimePointer(asset.ApprovedAt), nullableInt64Pointer(asset.ApprovedBy), asset.ID); err != nil {
 			return err
 		}
 	}
 	for _, group := range s.ResourceGroups {
 		if _, err = tx.ExecContext(ctx, `
 			UPDATE task_asset_groups
-			SET working_revision_id=?,finalized_revision_id=?,lock_version=?,migration_incomplete=?,migration_issue=?
-			WHERE id=?`, nullableInt64Pointer(group.WorkingRevisionID), nullableInt64Pointer(group.FinalizedRevisionID), group.LockVersion, group.MigrationIncomplete, group.MigrationIssue, group.ID); err != nil {
+			SET working_revision_id=?,finalized_revision_id=?,lock_version=?,migration_incomplete=?,migration_issue=?,updated_at=?
+			WHERE id=?`, nullableInt64Pointer(group.WorkingRevisionID), nullableInt64Pointer(group.FinalizedRevisionID), group.LockVersion, group.MigrationIncomplete, group.MigrationIssue, group.UpdatedAt, group.ID); err != nil {
 			return err
 		}
 	}
@@ -2096,13 +4241,36 @@ func rollback(ctx context.Context, db *sql.DB, database string, o options, m map
 			return err
 		}
 	}
+	for _, aliasID := range s.InsertedAliasIDs {
+		if _, err = tx.ExecContext(ctx, `DELETE FROM task_assets WHERE id=? AND asset_type='source' AND source_module_key='migration'`, aliasID); err != nil {
+			return err
+		}
+	}
 	for _, groupID := range s.InsertedGroupIDs {
 		if _, err = tx.ExecContext(ctx, `DELETE FROM task_asset_groups WHERE id=?`, groupID); err != nil {
 			return err
 		}
 	}
 	for _, t := range s.Tasks {
-		if _, err = tx.ExecContext(ctx, `UPDATE tasks SET task_type=?,task_status=?,workflow_revision=?,current_handler_id=? WHERE id=?`, t.TaskType, t.TaskStatus, t.WorkflowRevision, nullableInt64Pointer(t.CurrentHandlerID), t.ID); err != nil {
+		if _, err = tx.ExecContext(ctx, `UPDATE tasks SET task_type=?,task_status=?,workflow_revision=?,current_handler_id=?,updated_at=? WHERE id=?`, t.TaskType, t.TaskStatus, t.WorkflowRevision, nullableInt64Pointer(t.CurrentHandlerID), t.UpdatedAt, t.ID); err != nil {
+			return err
+		}
+	}
+	if err := restoreTaskModuleStates(ctx, tx, s.TaskModulesBefore); err != nil {
+		return err
+	}
+	for _, item := range s.OrganizationBefore {
+		switch item.SubjectType {
+		case "task":
+			_, err = tx.ExecContext(ctx, `UPDATE tasks SET owner_department_id=?,owner_team_id=?,updated_at=? WHERE id=?`,
+				nullableInt64Pointer(item.DepartmentID), nullableInt64Pointer(item.TeamID), item.UpdatedAt, item.SubjectID)
+		case "user":
+			_, err = tx.ExecContext(ctx, `UPDATE users SET department_id=?,team_id=?,updated_at=? WHERE id=?`,
+				nullableInt64Pointer(item.DepartmentID), nullableInt64Pointer(item.TeamID), item.UpdatedAt, item.SubjectID)
+		default:
+			err = fmt.Errorf("rollback unsupported organization subject_type %q", item.SubjectType)
+		}
+		if err != nil {
 			return err
 		}
 	}
@@ -2116,8 +4284,41 @@ func rollback(ctx context.Context, db *sql.DB, database string, o options, m map
 	if err := tx.Commit(); err != nil {
 		return err
 	}
+	s.ApplyState = "rollback_autoincrement_pending"
+	if err := writeSnapshot(path, s); err != nil {
+		return err
+	}
+	return completeAutoIncrementRollback(ctx, db, path, &s)
+}
+
+func completeAutoIncrementRollback(ctx context.Context, db *sql.DB, path string, s *snapshot) error {
+	if err := restoreAutoIncrementStates(ctx, db, s.AutoIncrementsBefore, s.AutoIncrementsAfter); err != nil {
+		return err
+	}
+	tx, err := db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := lockRollbackTargets(ctx, tx, *s); err != nil {
+		return err
+	}
+	rowsMatch, err := snapshotStateMatches(ctx, tx, *s, false)
+	if err != nil {
+		return err
+	}
+	autoIncrementsMatch, err := autoIncrementStatesMatch(ctx, tx, s.AutoIncrementsBefore)
+	if err != nil {
+		return err
+	}
+	if !rowsMatch || !autoIncrementsMatch {
+		return v1migrate.NewHardAbort(v1migrate.ExitCodeHardAbort, "rollback verification failed after auto-increment recovery")
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
 	s.ApplyState = "rolled_back"
-	return writeSnapshot(path, s)
+	return writeSnapshot(path, *s)
 }
 
 func lockRollbackTargets(ctx context.Context, tx *sql.Tx, s snapshot) error {
@@ -2128,11 +4329,39 @@ func lockRollbackTargets(ctx context.Context, tx *sql.Tx, s snapshot) error {
 	for _, item := range s.AfterTasks {
 		taskIDs = append(taskIDs, item.ID)
 	}
+	userIDs := []int64{}
+	for _, item := range append(append([]organizationStateSnapshot{}, s.OrganizationBefore...), s.OrganizationAfter...) {
+		if item.SubjectType == "task" {
+			taskIDs = append(taskIDs, item.SubjectID)
+		} else if item.SubjectType == "user" {
+			userIDs = append(userIDs, item.SubjectID)
+		}
+	}
+	for _, item := range append(append([]accessStateSnapshot{}, s.AccessBefore...), s.AccessAfter...) {
+		userIDs = append(userIDs, item.UserID)
+	}
+	for _, userID := range uniqueSortedInt64(userIDs) {
+		if _, err := lockInt64Rows(ctx, tx, `SELECT id FROM users WHERE id=? FOR UPDATE`, userID); err != nil {
+			return err
+		}
+		if _, err := lockInt64Rows(ctx, tx, `SELECT id FROM auth_user_role_assignments WHERE user_id=? ORDER BY id FOR UPDATE`, userID); err != nil {
+			return err
+		}
+	}
 	for _, taskID := range uniqueSortedInt64(taskIDs) {
 		if _, err := lockInt64Rows(ctx, tx, `SELECT id FROM tasks WHERE id=? FOR UPDATE`, taskID); err != nil {
 			return err
 		}
 		if _, err := lockInt64Rows(ctx, tx, `SELECT id FROM task_sku_items WHERE task_id=? ORDER BY id FOR UPDATE`, taskID); err != nil {
+			return err
+		}
+		if _, err := lockInt64Rows(ctx, tx, `SELECT id FROM task_modules WHERE task_id=? ORDER BY id FOR UPDATE`, taskID); err != nil {
+			return err
+		}
+		if _, err := lockInt64Rows(ctx, tx, `SELECT group_id FROM task_asset_group_search_documents WHERE task_id=? ORDER BY group_id FOR UPDATE`, taskID); err != nil {
+			return err
+		}
+		if _, err := lockInt64Rows(ctx, tx, `SELECT task_id FROM task_search_documents WHERE task_id=? FOR UPDATE`, taskID); err != nil {
 			return err
 		}
 	}
@@ -2154,8 +4383,17 @@ func lockRollbackTargets(ctx context.Context, tx *sql.Tx, s snapshot) error {
 		if _, err := lockInt64Rows(ctx, tx, `SELECT id FROM task_asset_groups WHERE id=? FOR UPDATE`, groupID); err != nil {
 			return err
 		}
-		if _, err := lockInt64Rows(ctx, tx, `SELECT id FROM task_asset_group_revisions WHERE group_id=? ORDER BY id FOR UPDATE`, groupID); err != nil {
+		revisionIDs, err := lockInt64Rows(ctx, tx, `SELECT id FROM task_asset_group_revisions WHERE group_id=? ORDER BY id FOR UPDATE`, groupID)
+		if err != nil {
 			return err
+		}
+		for _, revisionID := range revisionIDs {
+			if _, err := lockInt64Rows(ctx, tx, `SELECT id FROM task_asset_group_revision_items WHERE revision_id=? ORDER BY id FOR UPDATE`, revisionID); err != nil {
+				return err
+			}
+			if _, err := lockInt64Rows(ctx, tx, `SELECT id FROM task_asset_group_revision_references WHERE revision_id=? ORDER BY id FOR UPDATE`, revisionID); err != nil {
+				return err
+			}
 		}
 	}
 	assetIDs := []int64{}
@@ -2176,6 +4414,24 @@ func lockRollbackTargets(ctx context.Context, tx *sql.Tx, s snapshot) error {
 		if _, err := lockInt64Rows(ctx, tx, `SELECT id FROM task_assets WHERE id=? FOR UPDATE`, assetID); err != nil {
 			return err
 		}
+	}
+	storageRefIDs := make([]string, 0, len(s.StorageRefsBefore)+len(s.StorageRefsAfter))
+	for _, item := range s.StorageRefsBefore {
+		storageRefIDs = append(storageRefIDs, item.RefID)
+	}
+	for _, item := range s.StorageRefsAfter {
+		storageRefIDs = append(storageRefIDs, item.RefID)
+	}
+	sort.Strings(storageRefIDs)
+	previousStorageRefID := ""
+	for _, refID := range storageRefIDs {
+		if refID == previousStorageRefID {
+			continue
+		}
+		if _, err := queryStringIDs(ctx, tx, `SELECT ref_id FROM asset_storage_refs WHERE ref_id=? FOR UPDATE`, refID); err != nil {
+			return err
+		}
+		previousStorageRefID = refID
 	}
 	planningTaskIDs := []int64{}
 	for _, item := range s.PlanningBefore {
@@ -2212,6 +4468,14 @@ func lockRollbackTargets(ctx context.Context, tx *sql.Tx, s snapshot) error {
 		if err := rows.Close(); err != nil {
 			return err
 		}
+		if _, err := lockInt64Rows(ctx, tx, `
+			SELECT e.id
+			FROM task_module_events e
+			JOIN task_modules tm ON tm.id=e.task_module_id
+			WHERE tm.task_id=?
+			ORDER BY e.id FOR UPDATE`, taskID); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -2222,32 +4486,128 @@ func snapshotStateMatches(ctx context.Context, q snapshotQueryer, s snapshot, af
 	assets := s.AssetBindings
 	origins := s.SKUOrigins
 	planning := s.PlanningBefore
+	organizations := s.OrganizationBefore
+	access := s.AccessBefore
+	storageRefs := s.StorageRefsBefore
 	if after {
 		tasks = s.AfterTasks
 		groups = s.AfterResourceGroups
 		assets = s.AfterAssetBindings
 		origins = s.AfterSKUOrigins
 		planning = s.PlanningAfter
-	}
-	for _, expected := range tasks {
-		actual, err := loadTaskSnapshot(ctx, q, expected.ID)
-		if errors.Is(err, sql.ErrNoRows) {
-			return false, nil
-		}
-		if err != nil {
-			return false, err
-		}
-		if !reflect.DeepEqual(actual, expected) {
-			return false, nil
-		}
+		organizations = s.OrganizationAfter
+		access = s.AccessAfter
+		storageRefs = s.StorageRefsAfter
 	}
 	taskIDsForGroups := make([]int64, 0, len(tasks))
 	for _, item := range tasks {
 		taskIDsForGroups = append(taskIDsForGroups, item.ID)
 	}
+	actualTasks, err := captureTaskSnapshotsBulk(ctx, q, taskIDsForGroups)
+	if errors.Is(err, errBulkSnapshotMissingRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	expectedTasks := append([]taskSnapshot(nil), tasks...)
+	for index := range actualTasks {
+		if s.Version == legacySnapshotVersion {
+			actualTasks[index].ModuleEventIDs = nil
+			expectedTasks[index].ModuleEventIDs = nil
+		}
+		if len(actualTasks[index].ModuleEventIDs) == 0 {
+			actualTasks[index].ModuleEventIDs = nil
+		}
+		if len(expectedTasks[index].ModuleEventIDs) == 0 {
+			expectedTasks[index].ModuleEventIDs = nil
+		}
+	}
+	if len(tasks) > 0 && !reflect.DeepEqual(actualTasks, expectedTasks) {
+		return false, nil
+	}
+	actualModules, err := captureTaskModulesForTasks(ctx, q, taskIDsForGroups)
+	if err != nil {
+		return false, err
+	}
+	expectedModules := append(
+		[]taskModuleSnapshot(nil),
+		s.TaskModulesBefore...,
+	)
+	if after {
+		expectedModules = append(
+			[]taskModuleSnapshot(nil),
+			s.TaskModulesAfter...,
+		)
+	}
+	if err := normalizeTaskModuleSnapshotJSON(actualModules); err != nil {
+		return false, err
+	}
+	if err := normalizeTaskModuleSnapshotJSON(expectedModules); err != nil {
+		return false, err
+	}
+	if len(actualModules) == 0 {
+		actualModules = nil
+	}
+	if len(expectedModules) == 0 {
+		expectedModules = nil
+	}
+	if !reflect.DeepEqual(actualModules, expectedModules) {
+		return false, nil
+	}
+	expectedSearchDocuments := s.SearchDocumentsBefore
+	if after {
+		expectedSearchDocuments = s.SearchDocumentsAfter
+	}
+	searchDocumentsMatch, err := searchDocumentsMatchSnapshot(
+		ctx,
+		q,
+		taskIDsForGroups,
+		expectedSearchDocuments,
+	)
+	if err != nil {
+		return false, err
+	}
+	if !searchDocumentsMatch {
+		return false, nil
+	}
+	expectedTaskSearchDocuments := s.TaskSearchDocumentsBefore
+	if after {
+		expectedTaskSearchDocuments = s.TaskSearchDocumentsAfter
+	}
+	taskSearchDocumentsMatch, err := taskSearchDocumentsMatchSnapshot(
+		ctx,
+		q,
+		taskIDsForGroups,
+		expectedTaskSearchDocuments,
+	)
+	if err != nil {
+		return false, err
+	}
+	if !taskSearchDocumentsMatch {
+		return false, nil
+	}
 	actualGroups, err := captureResourceGroupsForTasks(ctx, q, taskIDsForGroups)
 	if err != nil {
 		return false, err
+	}
+	if s.Version == legacySnapshotVersion {
+		for i := range actualGroups {
+			actualGroups[i].Revisions = nil
+		}
+		for i := range groups {
+			groups[i].Revisions = nil
+		}
+	}
+	for i := range actualGroups {
+		if len(actualGroups[i].Revisions) == 0 {
+			actualGroups[i].Revisions = nil
+		}
+	}
+	for i := range groups {
+		if len(groups[i].Revisions) == 0 {
+			groups[i].Revisions = nil
+		}
 	}
 	if !reflect.DeepEqual(actualGroups, groups) {
 		return false, nil
@@ -2255,6 +4615,10 @@ func snapshotStateMatches(ctx context.Context, q snapshotQueryer, s snapshot, af
 	actualAssets, err := captureAssetBindingsForTasks(ctx, q, taskIDsForGroups)
 	if err != nil {
 		return false, err
+	}
+	if s.Version == legacySnapshotVersion {
+		clearAssetValidationState(actualAssets)
+		clearAssetValidationState(assets)
 	}
 	if !reflect.DeepEqual(actualAssets, assets) {
 		return false, nil
@@ -2274,7 +4638,67 @@ func snapshotStateMatches(ctx context.Context, q snapshotQueryer, s snapshot, af
 	if err != nil {
 		return false, err
 	}
-	return reflect.DeepEqual(actualPlanning, planning), nil
+	if !reflect.DeepEqual(actualPlanning, planning) {
+		return false, nil
+	}
+	var actualOrganizations []organizationStateSnapshot
+	if len(organizations) > 0 {
+		actualOrganizations = make([]organizationStateSnapshot, 0, len(organizations))
+	}
+	for _, expected := range organizations {
+		actual, err := loadOrganizationState(ctx, q, expected.SubjectType, expected.SubjectID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		actualOrganizations = append(actualOrganizations, actual)
+	}
+	if !reflect.DeepEqual(actualOrganizations, organizations) {
+		return false, nil
+	}
+	var actualAccess []accessStateSnapshot
+	if len(access) > 0 {
+		actualAccess = make([]accessStateSnapshot, 0, len(access))
+	}
+	for _, expected := range access {
+		assignments, err := loadAccessAssignmentEvidence(ctx, q, expected.UserID)
+		if err != nil {
+			return false, err
+		}
+		actualAccess = append(actualAccess, accessStateSnapshot{UserID: expected.UserID, Assignments: assignments})
+	}
+	if !reflect.DeepEqual(actualAccess, access) {
+		return false, nil
+	}
+	var actualStorageRefs []assetStorageRefStatusSnapshot
+	if len(storageRefs) > 0 {
+		actualStorageRefs = make([]assetStorageRefStatusSnapshot, 0, len(storageRefs))
+	}
+	for _, expected := range storageRefs {
+		actual, err := loadAssetStorageRefStatusSnapshot(ctx, q, expected.RefID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		actualStorageRefs = append(actualStorageRefs, actual)
+	}
+	return reflect.DeepEqual(actualStorageRefs, storageRefs), nil
+}
+
+func clearAssetValidationState(items []assetBindingSnapshot) {
+	for i := range items {
+		items[i].AssetType = ""
+		items[i].ScopeSKUCode = nil
+		items[i].RetouchRequirementID = nil
+		items[i].MimeType = ""
+		items[i].WholeHash = ""
+		items[i].DeletedAt = nil
+		items[i].CleanedAt = nil
+	}
 }
 
 func nullableInt64Pointer(value *int64) interface{} {
@@ -2331,6 +4755,18 @@ func mappingDigest(m mappingFile) (string, error) {
 	return hex.EncodeToString(sum[:]), nil
 }
 
+func exactFileDigest(path string) (string, error) {
+	if strings.TrimSpace(path) == "" {
+		return "", nil
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:]), nil
+}
+
 func snapshotDigest(s snapshot) (string, error) {
 	s.IntegritySHA256 = ""
 	raw, err := json.Marshal(s)
@@ -2346,12 +4782,34 @@ func readSnapshot(path, database string, m mappingFile) (snapshot, error) {
 	if err != nil {
 		return snapshot{}, err
 	}
+	var header struct {
+		Version       int    `json:"version"`
+		ToolVersion   string `json:"tool_version"`
+		SchemaVersion string `json:"schema_version"`
+	}
+	if err := json.Unmarshal(raw, &header); err != nil {
+		return snapshot{}, err
+	}
+	currentSnapshot := header.Version == workflowGroupsSnapshotVersion &&
+		header.ToolVersion == workflowGroupsToolVersion &&
+		header.SchemaVersion == workflowGroupsSchemaVersion
+	knownHistoricalSnapshot := (header.Version == previousSnapshotVersion && header.ToolVersion == previousToolVersion) ||
+		(header.Version == olderSnapshotVersion && header.ToolVersion == olderToolVersion) ||
+		(header.Version == historicalSnapshotVersion && header.ToolVersion == historicalToolVersion) ||
+		(header.Version == legacySnapshotVersion && header.ToolVersion == legacyToolVersion)
+	if knownHistoricalSnapshot && header.SchemaVersion == workflowGroupsSchemaVersion {
+		return snapshot{}, v1migrate.NewHardAbort(
+			v1migrate.ExitCodeHardAbort,
+			"snapshot v%d predates lossless v9 rollback; use the matching historical tool or prepare a reviewed recovery",
+			header.Version,
+		)
+	}
+	if !currentSnapshot {
+		return snapshot{}, v1migrate.NewHardAbort(v1migrate.ExitCodeHardAbort, "snapshot tool/schema version mismatch")
+	}
 	var s snapshot
 	if err := json.Unmarshal(raw, &s); err != nil {
 		return snapshot{}, err
-	}
-	if s.Version != workflowGroupsSnapshotVersion || s.ToolVersion != workflowGroupsToolVersion || s.SchemaVersion != workflowGroupsSchemaVersion {
-		return snapshot{}, v1migrate.NewHardAbort(v1migrate.ExitCodeHardAbort, "snapshot tool/schema version mismatch")
 	}
 	if s.Database != database {
 		return snapshot{}, v1migrate.NewHardAbort(v1migrate.ExitCodeHardAbort, "snapshot database %q does not match %q", s.Database, database)

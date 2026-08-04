@@ -18,11 +18,9 @@ import (
 func TestTaskServiceCreateRejectsProductSelectionForNewProductDevelopment(t *testing.T) {
 	svc := NewTaskService(
 		&prdTaskRepo{},
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		step04TxRunner{},
 	)
@@ -59,11 +57,9 @@ func TestTaskServiceCreateRejectsProductSelectionForNewProductDevelopment(t *tes
 func TestTaskServiceCreateRejectsOriginalOnlyFieldForNewProductDevelopment(t *testing.T) {
 	svc := NewTaskService(
 		&prdTaskRepo{},
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		step04TxRunner{},
 	)
@@ -90,87 +86,6 @@ func TestTaskServiceCreateRejectsOriginalOnlyFieldForNewProductDevelopment(t *te
 	}
 	if !strings.Contains(appErr.Message, "task_type field whitelist validation failed") {
 		t.Fatalf("Create() error message = %q", appErr.Message)
-	}
-}
-
-func legacyTaskServiceCreateAllowsCategoryCodeForPurchaseTask(t *testing.T) {
-	svc := NewTaskService(
-		&prdTaskRepo{},
-		&prdProcurementRepo{},
-		&prdTaskAssetRepo{},
-		&prdTaskEventRepo{},
-		nil,
-		&prdWarehouseRepo{},
-		prdCodeRuleService{},
-		step04TxRunner{},
-	)
-
-	task, appErr := svc.Create(context.Background(), CreateTaskParams{
-		TaskType:            domain.TaskTypePurchaseTask,
-		SourceMode:          domain.TaskSourceModeNewProduct,
-		CreatorID:           9,
-		OwnerTeam:           domain.AllValidTeams()[0],
-		DeadlineAt:          timePtr(),
-		PurchaseSKU:         "PUR-001",
-		ProductNameSnapshot: "Accessory Pack",
-		CostPriceMode:       string(domain.CostPriceModeTemplate),
-		Quantity:            int64Ptr(100),
-		BaseSalePrice:       float64Ptr(12.5),
-		CategoryCode:        "LIGHTBOX",
-	})
-	if appErr != nil {
-		t.Fatalf("Create() unexpected error: %+v", appErr)
-	}
-	if task == nil {
-		t.Fatal("Create() returned nil task")
-	}
-}
-
-// Case A: original_product_development + is_outsource (frontend alias for need_outsource).
-// Handler normalizes is_outsource/need_outsource -> IsOutsource; whitelist must not reject.
-func TestTaskServiceCreateOriginalProductWithIsOutsourceAliasPasses(t *testing.T) {
-	taskRepo := &prdTaskRepo{}
-	jobRepo := newCustomizationFlowJobRepo()
-	svc := NewTaskService(
-		taskRepo,
-		&prdProcurementRepo{},
-		&prdTaskAssetRepo{},
-		&prdTaskEventRepo{},
-		nil,
-		&prdWarehouseRepo{},
-		prdCodeRuleService{},
-		step04TxRunner{},
-		WithTaskCustomizationJobRepo(jobRepo),
-	)
-
-	task, appErr := svc.Create(context.Background(), CreateTaskParams{
-		TaskType:      domain.TaskTypeOriginalProductDevelopment,
-		SourceMode:    domain.TaskSourceModeExistingProduct,
-		CreatorID:     9,
-		OwnerTeam:     domain.AllValidTeams()[0],
-		DeadlineAt:    timePtr(),
-		ChangeRequest: "update design",
-		ProductID:     int64Ptr(88),
-		SKUCode:       "SKU-088",
-		IsOutsource:   true,
-	})
-	if appErr != nil {
-		t.Fatalf("Create() unexpected error: %+v (is_outsource alias should pass whitelist)", appErr)
-	}
-	if task.NeedOutsource != true {
-		t.Fatalf("Create() need_outsource = %v, want true", task.NeedOutsource)
-	}
-	if !task.CustomizationRequired {
-		t.Fatal("Create() customization_required = false, want true for outsource compatibility input")
-	}
-	if task.TaskStatus != domain.TaskStatusPendingCustomizationProduction {
-		t.Fatalf("Create() task_status = %s, want PendingCustomizationProduction", task.TaskStatus)
-	}
-	if task.CustomizationSourceType != domain.CustomizationSourceTypeExistingProduct {
-		t.Fatalf("Create() customization_source_type = %s, want existing_product", task.CustomizationSourceType)
-	}
-	if len(jobRepo.jobs) != 1 {
-		t.Fatalf("Create() customization jobs = %d, want 1", len(jobRepo.jobs))
 	}
 }
 
@@ -220,11 +135,9 @@ func TestTaskServiceCreateCustomizationLaneCreatesImmediateJobForNewAndExistingS
 			jobRepo := newCustomizationFlowJobRepo()
 			svc := NewTaskService(
 				taskRepo,
-				&prdProcurementRepo{},
 				&prdTaskAssetRepo{},
 				&prdTaskEventRepo{},
 				nil,
-				&prdWarehouseRepo{},
 				prdCodeRuleService{},
 				step04TxRunner{},
 				WithTaskCustomizationJobRepo(jobRepo),
@@ -251,14 +164,14 @@ func TestTaskServiceCreateCustomizationLaneCreatesImmediateJobForNewAndExistingS
 			if appErr != nil {
 				t.Fatalf("Create() unexpected error: %+v", appErr)
 			}
-			if task.TaskStatus != domain.TaskStatusPendingCustomizationProduction {
-				t.Fatalf("task_status = %s, want PendingCustomizationProduction", task.TaskStatus)
+			if task.TaskStatus != domain.TaskStatusPendingAssign {
+				t.Fatalf("task_status = %s, want PendingAssign", task.TaskStatus)
 			}
 			if !task.CustomizationRequired {
 				t.Fatal("customization_required = false, want true")
 			}
-			if !task.NeedOutsource {
-				t.Fatal("need_outsource = false, want true as derived compatibility marker")
+			if task.NeedOutsource || task.IsOutsource {
+				t.Fatal("customization task must not write retired outsource markers")
 			}
 			if task.CustomizationSourceType != tc.customizationSourceType {
 				t.Fatalf("customization_source_type = %s, want %s", task.CustomizationSourceType, tc.customizationSourceType)
@@ -288,11 +201,9 @@ func TestTaskServiceCreateNormalLaneDoesNotCreateCustomizationJob(t *testing.T) 
 	jobRepo := newCustomizationFlowJobRepo()
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		step04TxRunner{},
 		WithTaskCustomizationJobRepo(jobRepo),
@@ -324,11 +235,9 @@ func TestTaskServiceCreateCustomizationLaneHasImmediateCustomizationListVisibili
 	jobRepo := newCustomizationFlowJobRepo()
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		step04TxRunner{},
 		WithTaskCustomizationJobRepo(jobRepo),
@@ -374,11 +283,9 @@ func TestTaskServiceCreateOriginalProductWithProductSelectionDeferBindingPasses(
 	taskRepo := &prdTaskRepo{}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		step04TxRunner{},
 	)
@@ -412,11 +319,9 @@ func TestTaskServiceCreateOriginalProductWithOrgTeamCompatOwnerTeamPasses(t *tes
 	taskRepo := &prdTaskRepo{}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		step04TxRunner{},
 	)
@@ -450,11 +355,9 @@ func TestTaskServiceCreateNewProductWithOrgTeamCompatOwnerTeamPasses(t *testing.
 	taskRepo := &prdTaskRepo{}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		step04TxRunner{},
 	)
@@ -480,48 +383,13 @@ func TestTaskServiceCreateNewProductWithOrgTeamCompatOwnerTeamPasses(t *testing.
 	}
 }
 
-func legacyTaskServiceCreatePurchaseTaskWithOrgTeamCompatOwnerTeamPasses(t *testing.T) {
-	taskRepo := &prdTaskRepo{}
-	svc := NewTaskService(
-		taskRepo,
-		&prdProcurementRepo{},
-		&prdTaskAssetRepo{},
-		&prdTaskEventRepo{},
-		nil,
-		&prdWarehouseRepo{},
-		prdCodeRuleService{},
-		step04TxRunner{},
-	)
-
-	task, appErr := svc.Create(context.Background(), CreateTaskParams{
-		TaskType:            domain.TaskTypePurchaseTask,
-		SourceMode:          domain.TaskSourceModeNewProduct,
-		CreatorID:           9,
-		OwnerTeam:           "运营三组",
-		DeadlineAt:          timePtr(),
-		PurchaseSKU:         "PUR-001",
-		ProductNameSnapshot: "Accessory Pack",
-		CostPriceMode:       string(domain.CostPriceModeTemplate),
-		Quantity:            int64Ptr(100),
-		BaseSalePrice:       float64Ptr(12.5),
-	})
-	if appErr != nil {
-		t.Fatalf("Create() unexpected error: %+v", appErr)
-	}
-	if task.OwnerTeam != "内贸运营组" {
-		t.Fatalf("Create() owner_team = %q, want 内贸运营组", task.OwnerTeam)
-	}
-}
-
 func TestTaskServiceCreateLegacyOwnerTeamStillPasses(t *testing.T) {
 	taskRepo := &prdTaskRepo{}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		step04TxRunner{},
 	)
@@ -563,11 +431,9 @@ func TestTaskServiceCreateRejectsInvalidOwnerTeamInputs(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			svc := NewTaskService(
 				&prdTaskRepo{},
-				&prdProcurementRepo{},
 				&prdTaskAssetRepo{},
 				&prdTaskEventRepo{},
 				nil,
-				&prdWarehouseRepo{},
 				prdCodeRuleService{},
 				step04TxRunner{},
 			)
@@ -623,11 +489,9 @@ func TestTaskServiceCreateOriginalProductDesignRequirementAliasPasses(t *testing
 	taskRepo := &prdTaskRepo{}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		step04TxRunner{},
 	)
@@ -665,11 +529,9 @@ func TestTaskServiceCreateOriginalProductChangeRequestAndDesignRequirementAliasP
 	taskRepo := &prdTaskRepo{}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		step04TxRunner{},
 	)
@@ -707,11 +569,9 @@ func TestTaskServiceCreateTaskOriginalProductDevelopmentResponseEchoesChangeRequ
 	taskRepo := &prdTaskRepo{}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		step04TxRunner{},
 	)
@@ -753,11 +613,9 @@ func TestTaskServiceCreateTaskNewProductDevelopmentResponseEchoesDesignRequireme
 	taskRepo := &prdTaskRepo{}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		step04TxRunner{},
 	)
@@ -797,27 +655,24 @@ func TestTaskServiceCreateTaskNewProductDevelopmentResponseEchoesDesignRequireme
 func TestTaskServiceCreateOriginalProductWithIllegalFieldsReturnsInvalidFields(t *testing.T) {
 	svc := NewTaskService(
 		&prdTaskRepo{},
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		step04TxRunner{},
 	)
 
 	_, appErr := svc.Create(context.Background(), CreateTaskParams{
-		TaskType:       domain.TaskTypeOriginalProductDevelopment,
-		SourceMode:     domain.TaskSourceModeExistingProduct,
-		CreatorID:      9,
-		OwnerTeam:      domain.AllValidTeams()[0],
-		DeadlineAt:     timePtr(),
-		ChangeRequest:  "valid change",
-		ProductID:      int64Ptr(88),
-		SKUCode:        "SKU-088",
-		MaterialMode:   "preset",
-		Material:       "铝型材",
-		ProductChannel: "channel-x",
+		TaskType:      domain.TaskTypeOriginalProductDevelopment,
+		SourceMode:    domain.TaskSourceModeExistingProduct,
+		CreatorID:     9,
+		OwnerTeam:     domain.AllValidTeams()[0],
+		DeadlineAt:    timePtr(),
+		ChangeRequest: "valid change",
+		ProductID:     int64Ptr(88),
+		SKUCode:       "SKU-088",
+		MaterialMode:  "preset",
+		Material:      "铝型材",
 	})
 	if appErr == nil {
 		t.Fatal("Create() expected whitelist error for illegal fields")
@@ -852,19 +707,17 @@ func TestTaskServiceCreateOriginalProductWithIllegalFieldsReturnsInvalidFields(t
 			fieldSet[s] = true
 		}
 	}
-	if !fieldSet["material_mode"] || !fieldSet["material"] || !fieldSet["product_channel"] {
-		t.Fatalf("invalid_fields = %v, want material_mode, material, product_channel", fieldSet)
+	if !fieldSet["material_mode"] || !fieldSet["material"] {
+		t.Fatalf("invalid_fields = %v, want material_mode and material", fieldSet)
 	}
 }
 
 func TestTaskServiceCreateRejectsMisalignedTaskTypeAndSourceMode(t *testing.T) {
 	svc := NewTaskService(
 		&prdTaskRepo{},
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		step04TxRunner{},
 	)
@@ -890,11 +743,9 @@ func TestTaskServiceCreatePersistsProductSelectionContext(t *testing.T) {
 	taskRepo := &prdTaskRepo{}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		step04TxRunner{},
 	)
@@ -959,11 +810,9 @@ func TestTaskServiceCreateInitializesResourceGroupsInsideCreateTransaction(t *te
 	initializer := &resourceGroupInitializerRecorder{taskRepo: taskRepo}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		step04TxRunner{},
 		WithTaskResourceGroupInitializer(initializer),
@@ -1017,11 +866,9 @@ func TestTaskServiceCreateAutoGeneratesSKUForNewProductDevelopment(t *testing.T)
 	eventRepo := &prdTaskEventRepo{}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		eventRepo,
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		step04TxRunner{},
 	)
@@ -1055,15 +902,6 @@ func TestTaskServiceCreateAutoGeneratesSKUForNewProductDevelopment(t *testing.T)
 	if appErr != nil {
 		t.Fatalf("GetByID() unexpected error: %+v", appErr)
 	}
-	if readModel.Workflow.MainStatus != domain.TaskMainStatusCreated {
-		t.Fatalf("workflow.main_status = %s, want %s", readModel.Workflow.MainStatus, domain.TaskMainStatusCreated)
-	}
-	if readModel.Workflow.SubStatus.Design.Code != domain.TaskSubStatusPendingDesign {
-		t.Fatalf("workflow.sub_status.design = %+v", readModel.Workflow.SubStatus.Design)
-	}
-	if readModel.Workflow.SubStatus.Audit.Code != domain.TaskSubStatusNotTriggered {
-		t.Fatalf("workflow.sub_status.audit = %+v", readModel.Workflow.SubStatus.Audit)
-	}
 	if readModel.ProductSelection != nil {
 		t.Fatalf("product_selection = %+v, want nil", readModel.ProductSelection)
 	}
@@ -1079,75 +917,13 @@ func TestTaskServiceCreateAutoGeneratesSKUForNewProductDevelopment(t *testing.T)
 	}
 }
 
-func legacyTaskServiceCreateInitializesPurchaseTaskDraftProcurementReadModel(t *testing.T) {
-	taskRepo := &prdTaskRepo{}
-	procurementRepo := &prdProcurementRepo{}
-	svc := NewTaskService(
-		taskRepo,
-		procurementRepo,
-		&prdTaskAssetRepo{},
-		&prdTaskEventRepo{},
-		nil,
-		&prdWarehouseRepo{},
-		prdCodeRuleService{},
-		step04TxRunner{},
-	)
-
-	task, appErr := svc.Create(context.Background(), CreateTaskParams{
-		TaskType:            domain.TaskTypePurchaseTask,
-		CreatorID:           12,
-		OwnerTeam:           domain.AllValidTeams()[0],
-		DeadlineAt:          timePtr(),
-		PurchaseSKU:         "PUR-001",
-		ProductNameSnapshot: "Accessory Pack",
-		CostPriceMode:       string(domain.CostPriceModeTemplate),
-		Quantity:            int64Ptr(100),
-		BaseSalePrice:       float64Ptr(12.5),
-	})
-	if appErr != nil {
-		t.Fatalf("Create() unexpected error: %+v", appErr)
-	}
-	if task.SourceMode != domain.TaskSourceModeNewProduct {
-		t.Fatalf("Create() source_mode = %s, want %s", task.SourceMode, domain.TaskSourceModeNewProduct)
-	}
-	if task.SKUCode != "PUR-001" {
-		t.Fatalf("Create() sku_code = %s, want PUR-001", task.SKUCode)
-	}
-	record := procurementRepo.records[task.ID]
-	if record == nil || record.Status != domain.ProcurementStatusDraft {
-		t.Fatalf("procurement record = %+v, want draft", record)
-	}
-
-	readModel, appErr := svc.GetByID(context.Background(), task.ID)
-	if appErr != nil {
-		t.Fatalf("GetByID() unexpected error: %+v", appErr)
-	}
-	if readModel.Procurement == nil || readModel.Procurement.Status != domain.ProcurementStatusDraft {
-		t.Fatalf("read_model.procurement = %+v", readModel.Procurement)
-	}
-	if readModel.ProcurementSummary == nil || readModel.ProcurementSummary.CoordinationStatus != domain.ProcurementCoordinationStatusPreparing {
-		t.Fatalf("read_model.procurement_summary = %+v", readModel.ProcurementSummary)
-	}
-	if readModel.Workflow.SubStatus.Design.Code != domain.TaskSubStatusNotRequired {
-		t.Fatalf("workflow.sub_status.design = %+v", readModel.Workflow.SubStatus.Design)
-	}
-	if readModel.Workflow.SubStatus.Audit.Code != domain.TaskSubStatusNotTriggered {
-		t.Fatalf("workflow.sub_status.audit = %+v", readModel.Workflow.SubStatus.Audit)
-	}
-	if readModel.Workflow.SubStatus.Procurement.Code != domain.TaskSubStatusPreparing {
-		t.Fatalf("workflow.sub_status.procurement = %+v", readModel.Workflow.SubStatus.Procurement)
-	}
-}
-
 func TestTaskServiceCreateAllowsNewProductWithoutFilingRequiredFieldsAndMarksPending(t *testing.T) {
 	taskRepo := &prdTaskRepo{}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		step04TxRunner{},
 	)
@@ -1217,11 +993,9 @@ func TestTaskServiceUpdateBusinessInfoAutoPrefillsCost(t *testing.T) {
 
 	svc := NewTaskServiceWithCatalog(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		categoryRepo,
 		costRuleRepo,
 		prdCodeRuleService{},
@@ -1297,11 +1071,9 @@ func TestTaskServiceUpdateBusinessInfoExtractsCostSizeFromExistingRemark(t *test
 
 	svc := NewTaskServiceWithCatalog(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		categoryRepo,
 		costRuleRepo,
 		prdCodeRuleService{},
@@ -1374,11 +1146,9 @@ func TestTaskServiceUpdateBusinessInfoMarksMissingDimensionCostAndMirrorsSingleS
 
 	svc := NewTaskServiceWithCatalog(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		categoryRepo,
 		costRuleRepo,
 		prdCodeRuleService{},
@@ -1474,11 +1244,9 @@ func TestTaskServiceUpdateBusinessInfoResolvesChineseCategoryNameForCost(t *test
 
 	svc := NewTaskServiceWithCatalog(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		categoryRepo,
 		costRuleRepo,
 		prdCodeRuleService{},
@@ -1542,11 +1310,9 @@ func TestTaskServiceUpdateBusinessInfoMapsRegularPosterToPosterCost(t *testing.T
 
 	svc := NewTaskServiceWithCatalog(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		categoryRepo,
 		costRuleRepo,
 		prdCodeRuleService{},
@@ -1613,11 +1379,9 @@ func TestTaskServiceUpdateBusinessInfoMapsCustomPosterToPhotoClothCost(t *testin
 
 	svc := NewTaskServiceWithCatalog(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		categoryRepo,
 		costRuleRepo,
 		prdCodeRuleService{},
@@ -1713,11 +1477,9 @@ func TestTaskServiceUpdateBusinessInfoCategoryChangeRecomputesSystemCostAndSyncs
 	}
 	svc := NewTaskServiceWithCatalog(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		&prdTaskCostOverrideEventRepo{},
-		&prdWarehouseRepo{},
 		categoryRepo,
 		costRuleRepo,
 		prdCodeRuleService{},
@@ -1784,11 +1546,9 @@ func TestTaskServiceBatchSKUItemCostPrefillUsesProductIIDForSprayCloth(t *testin
 	}
 	svc := NewTaskServiceWithCatalog(
 		&prdTaskRepo{},
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		nil,
 		costRuleRepo,
 		prdCodeRuleService{},
@@ -1839,11 +1599,9 @@ func TestTaskServiceBatchSKUItemCostPrefillCanDisableTextAliasFallback(t *testin
 	}
 	svc := NewTaskServiceWithCatalog(
 		&prdTaskRepo{},
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		nil,
 		costRuleRepo,
 		prdCodeRuleService{},
@@ -1914,11 +1672,9 @@ func TestTaskServiceUpdateBusinessInfoIgnoresStaleImplicitCostRuleIDMismatch(t *
 	}
 	svc := NewTaskServiceWithCatalog(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		newCategoryRepoStub(),
 		costRuleRepo,
 		prdCodeRuleService{},
@@ -1977,11 +1733,9 @@ func TestTaskServiceUpdateBusinessInfoRejectsExplicitMismatchedCostRuleID(t *tes
 	}
 	svc := NewTaskServiceWithCatalog(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		newCategoryRepoStub(),
 		costRuleRepo,
 		prdCodeRuleService{},
@@ -2039,11 +1793,9 @@ func TestTaskServiceUpdateBusinessInfoExtractsCostSizeFromTaskProductName(t *tes
 
 	svc := NewTaskServiceWithCatalog(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		categoryRepo,
 		costRuleRepo,
 		prdCodeRuleService{},
@@ -2100,11 +1852,9 @@ func TestTaskServiceUpdateBusinessInfoSumsMultiplePosterSizes(t *testing.T) {
 
 	svc := NewTaskServiceWithCatalog(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		categoryRepo,
 		costRuleRepo,
 		prdCodeRuleService{},
@@ -2177,11 +1927,9 @@ func TestTaskServiceUpdateBusinessInfoDoesNotDoubleCountRepeatedPosterSize(t *te
 
 	svc := NewTaskServiceWithCatalog(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		categoryRepo,
 		costRuleRepo,
 		prdCodeRuleService{},
@@ -2257,11 +2005,9 @@ func TestTaskServiceUpdateBusinessInfoPrefersFlagClothOverHangingClothAlias(t *t
 
 	svc := NewTaskServiceWithCatalog(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		categoryRepo,
 		costRuleRepo,
 		prdCodeRuleService{},
@@ -2335,11 +2081,9 @@ func TestTaskServiceUpdateBusinessInfoAppliesSmallAreaSurchargeAsUnitPriceIncrea
 
 	svc := NewTaskServiceWithCatalog(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		categoryRepo,
 		costRuleRepo,
 		prdCodeRuleService{},
@@ -2419,11 +2163,9 @@ func TestTaskServiceUpdateBusinessInfoRefreshesStoredDimensionsWhenSpecSizeChang
 
 	svc := NewTaskServiceWithCatalog(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		categoryRepo,
 		costRuleRepo,
 		prdCodeRuleService{},
@@ -2466,11 +2208,9 @@ func TestTaskServiceUpdateBusinessInfoRebindsExistingProductSelection(t *testing
 	eventRepo := &prdTaskEventRepo{}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		eventRepo,
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		step04TxRunner{},
 	)
@@ -2534,11 +2274,9 @@ func TestTaskServiceGetByIDBuildsLegacyExistingProductSelectionFallback(t *testi
 	}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		step04TxRunner{},
 	)
@@ -2576,11 +2314,9 @@ func TestTaskServiceGetByIDDoesNotExposeProductSelectionForNewProductTask(t *tes
 	}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		step04TxRunner{},
 	)
@@ -2616,11 +2352,9 @@ func TestTaskServiceGetByIDOriginalProductDevelopmentChangeRequestEchoedBoth(t *
 	}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		step04TxRunner{},
 	)
@@ -2664,11 +2398,9 @@ func TestTaskServiceGetByIDNewProductDevelopmentChangeRequestOmitted(t *testing.
 	}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		step04TxRunner{},
 	)
@@ -2728,11 +2460,9 @@ func TestTaskServiceUpdateBusinessInfoSeparatesManualOverrideFromEstimatedCost(t
 
 	svc := NewTaskServiceWithCatalog(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		overrideAuditRepo,
-		&prdWarehouseRepo{},
 		categoryRepo,
 		costRuleRepo,
 		prdCodeRuleService{},
@@ -2791,11 +2521,9 @@ func TestTaskServiceUpdateBusinessInfoAcceptsExternalCategoryDisplayValue(t *tes
 
 	svc := NewTaskServiceWithCatalog(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		categoryRepo,
 		newCostRuleRepoStub(),
 		prdCodeRuleService{},
@@ -2837,11 +2565,9 @@ func TestTaskServiceUpdateBusinessInfoPatchesProductNameAndIID(t *testing.T) {
 
 	svc := NewTaskServiceWithCatalog(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		newCategoryRepoStub(),
 		newCostRuleRepoStub(),
 		prdCodeRuleService{},
@@ -2883,11 +2609,9 @@ func TestTaskServiceUpdateBusinessInfoEventKeepsExistingProductIID(t *testing.T)
 	eventRepo := &prdTaskEventRepo{}
 	svc := NewTaskServiceWithCatalog(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		eventRepo,
 		nil,
-		&prdWarehouseRepo{},
 		newCategoryRepoStub(),
 		newCostRuleRepoStub(),
 		prdCodeRuleService{},
@@ -2939,11 +2663,9 @@ func TestTaskServiceUpdateBusinessInfoPatchesDemandTextByTaskType(t *testing.T) 
 	}
 	svc := NewTaskServiceWithCatalog(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		newCategoryRepoStub(),
 		newCostRuleRepoStub(),
 		prdCodeRuleService{},
@@ -3010,11 +2732,9 @@ func TestTaskServiceUpdateBusinessInfoMarksManualReviewForManualQuote(t *testing
 
 	svc := NewTaskServiceWithCatalog(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		categoryRepo,
 		costRuleRepo,
 		prdCodeRuleService{},
@@ -3046,402 +2766,14 @@ func TestTaskServiceUpdateBusinessInfoMarksManualReviewForManualQuote(t *testing
 	}
 }
 
-func TestTaskServiceGetByIDReturnsProcurementSummaryCostSignals(t *testing.T) {
-	overrideAt := time.Now().UTC()
-	taskRepo := &prdTaskRepo{
-		tasks: map[int64]*domain.Task{
-			104: {
-				ID:                  104,
-				SourceMode:          domain.TaskSourceModeExistingProduct,
-				ProductID:           int64Ptr(904),
-				SKUCode:             "SKU-904",
-				ProductNameSnapshot: "KT Custom Product",
-				TaskType:            domain.TaskTypePurchaseTask,
-				TaskStatus:          domain.TaskStatusPendingAssign,
-			},
-		},
-		details: map[int64]*domain.TaskDetail{
-			104: {
-				TaskID:                   104,
-				Category:                 "KT Custom",
-				CategoryCode:             "KT_CUSTOM",
-				CategoryName:             "KT Custom",
-				SpecText:                 "board",
-				CostPrice:                float64Ptr(25),
-				EstimatedCost:            float64Ptr(16),
-				CostRuleID:               int64Ptr(2),
-				CostRuleName:             "KT Custom Base",
-				CostRuleSource:           "phase_021_test",
-				MatchedRuleVersion:       intPtr(3),
-				PrefillSource:            taskCostPrefillSourcePreview,
-				PrefillAt:                timePtr(),
-				RequiresManualReview:     true,
-				ManualCostOverride:       true,
-				ManualCostOverrideReason: "supplier special case",
-				OverrideActor:            "operator:9",
-				OverrideAt:               &overrideAt,
-				SourceProductID:          int64Ptr(904),
-				SourceProductName:        "KT Custom Product",
-				SourceSearchEntryCode:    "KT_STANDARD",
-				SourceMatchType:          taskProductSelectionMatchMapped,
-				SourceMatchRule:          "KT",
-				MatchedCategoryCode:      "KT_CUSTOM",
-				MatchedSearchEntryCode:   "KT_STANDARD",
-				FiledAt:                  timePtr(),
-			},
-		},
-	}
-	costRuleRepo := newCostRuleRepoStub()
-	costRuleRepo.rules = []*domain.CostRule{
-		{
-			RuleID:       1,
-			RuleVersion:  2,
-			RuleName:     "KT Custom Base V2",
-			CategoryCode: "KT_CUSTOM",
-			RuleType:     domain.CostRuleTypeFixedUnitPrice,
-			BasePrice:    float64Ptr(14),
-			Priority:     10,
-			IsActive:     true,
-			Source:       "phase_021_test",
-		},
-		{
-			RuleID:           2,
-			RuleVersion:      3,
-			RuleName:         "KT Custom Base V3",
-			CategoryCode:     "KT_CUSTOM",
-			RuleType:         domain.CostRuleTypeFixedUnitPrice,
-			BasePrice:        float64Ptr(16),
-			Priority:         10,
-			IsActive:         true,
-			SupersedesRuleID: int64Ptr(1),
-			Source:           "phase_021_test",
-		},
-		{
-			RuleID:           3,
-			RuleVersion:      4,
-			RuleName:         "KT Custom Base V4",
-			CategoryCode:     "KT_CUSTOM",
-			RuleType:         domain.CostRuleTypeFixedUnitPrice,
-			BasePrice:        float64Ptr(18),
-			Priority:         10,
-			IsActive:         true,
-			SupersedesRuleID: int64Ptr(2),
-			Source:           "phase_041_test",
-		},
-	}
-	payload, _ := json.Marshal(map[string]interface{}{
-		"cost_price":                  25.0,
-		"manual_cost_override":        true,
-		"manual_cost_override_reason": "supplier special case",
-		"override_actor":              "operator:9",
-		"override_at":                 overrideAt,
-	})
-	eventRepo := &prdTaskEventRepo{
-		events: []*domain.TaskEvent{
-			{
-				ID:        "evt-104-1",
-				TaskID:    104,
-				Sequence:  1,
-				EventType: domain.TaskEventBusinessInfoUpdated,
-				Payload:   payload,
-				CreatedAt: overrideAt,
-			},
-		},
-	}
-	overrideAuditRepo := &prdTaskCostOverrideEventRepo{
-		events: map[int64][]*domain.TaskCostOverrideAuditEvent{
-			104: {
-				{
-					EventID:               "cov-104-1",
-					TaskID:                104,
-					Sequence:              1,
-					EventType:             domain.TaskCostOverrideAuditEventApplied,
-					CategoryCode:          "KT_CUSTOM",
-					MatchedRuleID:         int64Ptr(2),
-					MatchedRuleVersion:    intPtr(3),
-					MatchedRuleSource:     "phase_021_test",
-					GovernanceStatus:      domain.CostRuleGovernanceStatusEffective,
-					PreviousEstimatedCost: float64Ptr(16),
-					PreviousCostPrice:     float64Ptr(16),
-					OverrideCost:          float64Ptr(25),
-					ResultCostPrice:       float64Ptr(25),
-					OverrideReason:        "supplier special case",
-					OverrideActor:         "operator:9",
-					OverrideAt:            overrideAt,
-					Source:                taskCostOverrideAuditSourceBusinessInfo,
-					Note:                  "manual special case",
-					CreatedAt:             overrideAt,
-				},
-			},
-		},
-	}
-	procurementRepo := &prdProcurementRepo{
-		records: map[int64]*domain.ProcurementRecord{
-			104: {
-				TaskID:           104,
-				Status:           domain.ProcurementStatusCompleted,
-				ProcurementPrice: float64Ptr(18),
-				Quantity:         int64Ptr(3),
-				SupplierName:     "Vendor Z",
-			},
-		},
-	}
-
-	svc := NewTaskServiceWithCatalog(
-		taskRepo,
-		procurementRepo,
-		&prdTaskAssetRepo{},
-		eventRepo,
-		overrideAuditRepo,
-		&prdWarehouseRepo{},
-		nil,
-		costRuleRepo,
-		prdCodeRuleService{},
-		step04TxRunner{},
-	)
-
-	readModel, appErr := svc.GetByID(context.Background(), 104)
-	if appErr != nil {
-		t.Fatalf("GetByID() unexpected error: %+v", appErr)
-	}
-	if readModel.ProcurementSummary == nil {
-		t.Fatal("procurement_summary = nil")
-	}
-	if readModel.ProcurementSummary.CostRuleSource != "phase_021_test" || !readModel.ProcurementSummary.ManualCostOverride {
-		t.Fatalf("procurement_summary = %+v", readModel.ProcurementSummary)
-	}
-	if readModel.ProcurementSummary.MatchedRuleVersion == nil || *readModel.ProcurementSummary.MatchedRuleVersion != 3 {
-		t.Fatalf("procurement_summary matched_rule_version = %+v, want 3", readModel.ProcurementSummary.MatchedRuleVersion)
-	}
-	if readModel.ProcurementSummary.PrefillSource != taskCostPrefillSourcePreview || readModel.ProcurementSummary.PrefillAt == nil {
-		t.Fatalf("procurement_summary prefill trace = %s / %+v", readModel.ProcurementSummary.PrefillSource, readModel.ProcurementSummary.PrefillAt)
-	}
-	if readModel.ProcurementSummary.OverrideActor != "operator:9" || readModel.ProcurementSummary.OverrideAt == nil {
-		t.Fatalf("procurement_summary override trace = %s / %+v", readModel.ProcurementSummary.OverrideActor, readModel.ProcurementSummary.OverrideAt)
-	}
-	if readModel.ProcurementSummary.CategoryCode != "KT_CUSTOM" || readModel.ProcurementSummary.EstimatedCost == nil || *readModel.ProcurementSummary.EstimatedCost != 16 {
-		t.Fatalf("procurement_summary cost signals = %+v", readModel.ProcurementSummary)
-	}
-	if readModel.ProcurementSummary.ProductSelection == nil {
-		t.Fatal("procurement_summary.product_selection = nil")
-	}
-	if readModel.ProcurementSummary.ProductSelection.SelectedProductSKUCode != "SKU-904" || readModel.ProcurementSummary.ProductSelection.SourceMatchRule != "KT" {
-		t.Fatalf("procurement_summary.product_selection = %+v", readModel.ProcurementSummary.ProductSelection)
-	}
-	if readModel.MatchedRuleGovernance == nil || readModel.MatchedRuleGovernance.MatchedRule == nil {
-		t.Fatalf("matched_rule_governance = %+v", readModel.MatchedRuleGovernance)
-	}
-	if !readModel.MatchedRuleGovernance.IsRuleOutdated || readModel.MatchedRuleGovernance.CurrentRule == nil || readModel.MatchedRuleGovernance.CurrentRule.RuleID != 3 {
-		t.Fatalf("matched_rule_governance current/outdated = %+v", readModel.MatchedRuleGovernance)
-	}
-	if readModel.MatchedRuleGovernance.VersionChainSummary == nil || readModel.MatchedRuleGovernance.VersionChainSummary.TotalVersions != 3 {
-		t.Fatalf("matched_rule_governance summary = %+v", readModel.MatchedRuleGovernance.VersionChainSummary)
-	}
-	if readModel.MatchedRuleGovernance.CurrentRuleVersionHint == nil || *readModel.MatchedRuleGovernance.CurrentRuleVersionHint != 4 {
-		t.Fatalf("matched_rule_governance current_rule_version_hint = %+v", readModel.MatchedRuleGovernance.CurrentRuleVersionHint)
-	}
-	if readModel.OverrideSummary == nil || !readModel.OverrideSummary.CurrentOverrideActive || readModel.OverrideSummary.OverrideEventCount != 1 {
-		t.Fatalf("override_summary = %+v", readModel.OverrideSummary)
-	}
-	if readModel.OverrideSummary.HistorySource != taskCostOverrideAuditHistorySource {
-		t.Fatalf("override_summary.history_source = %s, want %s", readModel.OverrideSummary.HistorySource, taskCostOverrideAuditHistorySource)
-	}
-	if readModel.OverrideSummary.LatestOverrideEvent == nil || readModel.OverrideSummary.LatestOverrideEvent.Actor != "operator:9" {
-		t.Fatalf("latest_override_event = %+v", readModel.OverrideSummary.LatestOverrideEvent)
-	}
-	if readModel.OverrideSummary.LatestOverrideEvent.MatchedRuleVersion == nil || *readModel.OverrideSummary.LatestOverrideEvent.MatchedRuleVersion != 3 {
-		t.Fatalf("latest_override_event matched_rule_version = %+v", readModel.OverrideSummary.LatestOverrideEvent)
-	}
-	if readModel.GovernanceAuditSummary == nil || readModel.GovernanceAuditSummary.EventCount != 1 {
-		t.Fatalf("governance_audit_summary = %+v", readModel.GovernanceAuditSummary)
-	}
-	if readModel.ProcurementSummary.MatchedRuleGovernance == nil || !readModel.ProcurementSummary.MatchedRuleGovernance.IsRuleOutdated {
-		t.Fatalf("procurement_summary.matched_rule_governance = %+v", readModel.ProcurementSummary.MatchedRuleGovernance)
-	}
-	if readModel.ProcurementSummary.OverrideSummary == nil || readModel.ProcurementSummary.OverrideSummary.OverrideEventCount != 1 {
-		t.Fatalf("procurement_summary.override_summary = %+v", readModel.ProcurementSummary.OverrideSummary)
-	}
-	if readModel.ProcurementSummary.GovernanceAuditSummary == nil || readModel.ProcurementSummary.GovernanceAuditSummary.LatestEventID != "cov-104-1" {
-		t.Fatalf("procurement_summary.governance_audit_summary = %+v", readModel.ProcurementSummary.GovernanceAuditSummary)
-	}
-}
-
-func TestTaskServiceListBuildsWorkflowFilterAndProcurementSummary(t *testing.T) {
-	taskRepo := &prdTaskRepo{
-		listItems: []*domain.TaskListItem{
-			{
-				ID:                     8,
-				TaskNo:                 "RW-008",
-				ProductID:              int64Ptr(508),
-				SKUCode:                "SKU-008",
-				ProductNameSnapshot:    "Accessory Product",
-				TaskType:               domain.TaskTypePurchaseTask,
-				SourceMode:             domain.TaskSourceModeExistingProduct,
-				CreatorID:              1,
-				TaskStatus:             domain.TaskStatusPendingAssign,
-				Category:               "Accessory",
-				CategoryCode:           "ACC",
-				CategoryName:           "Accessory",
-				SourceProductID:        int64Ptr(508),
-				SourceProductName:      "Accessory Product",
-				SourceSearchEntryCode:  "ACC",
-				SourceMatchType:        taskProductSelectionMatchMapped,
-				SourceMatchRule:        "accessory",
-				MatchedCategoryCode:    "ACC",
-				MatchedSearchEntryCode: "ACC",
-				SpecText:               "Spec-C",
-				CostPrice:              float64Ptr(5.5),
-				FiledAt:                timePtr(),
-				ProcurementStatus:      procurementStatusPtr(domain.ProcurementStatusCompleted),
-				ProcurementPrice:       float64Ptr(11.2),
-				ProcurementQuantity:    int64Ptr(12),
-				SupplierName:           "Vendor C",
-			},
-		},
-	}
-	svc := NewTaskService(
-		taskRepo,
-		&prdProcurementRepo{},
-		&prdTaskAssetRepo{},
-		&prdTaskEventRepo{},
-		nil,
-		&prdWarehouseRepo{},
-		prdCodeRuleService{},
-		step04TxRunner{},
-	)
-
-	items, _, appErr := svc.List(context.Background(), TaskFilter{
-		TaskQueryFilterDefinition: domain.TaskQueryFilterDefinition{
-			MainStatuses: []domain.TaskMainStatus{domain.TaskMainStatusFiled},
-			SubStatusCodes: []domain.TaskSubStatusCode{
-				domain.TaskSubStatusReady,
-			},
-			SubStatusScope: func() *domain.TaskSubStatusScope {
-				scope := domain.TaskSubStatusScopeProcurement
-				return &scope
-			}(),
-		},
-	})
-	if appErr != nil {
-		t.Fatalf("List() unexpected error: %+v", appErr)
-	}
-	if len(taskRepo.lastListFilter.MainStatuses) != 1 || taskRepo.lastListFilter.MainStatuses[0] != domain.TaskMainStatusFiled {
-		t.Fatalf("List() main_statuses filter = %+v", taskRepo.lastListFilter.MainStatuses)
-	}
-	if len(taskRepo.lastListFilter.SubStatusCodes) != 1 || taskRepo.lastListFilter.SubStatusCodes[0] != domain.TaskSubStatusReady {
-		t.Fatalf("List() sub_status_codes filter = %+v", taskRepo.lastListFilter.SubStatusCodes)
-	}
-	if taskRepo.lastListFilter.SubStatusScope == nil || *taskRepo.lastListFilter.SubStatusScope != domain.TaskSubStatusScopeProcurement {
-		t.Fatalf("List() sub_status_scope = %+v", taskRepo.lastListFilter.SubStatusScope)
-	}
-	if len(items) != 1 || items[0].ProcurementSummary == nil || items[0].ProcurementSummary.SupplierName != "Vendor C" {
-		t.Fatalf("List() items = %+v", items)
-	}
-	if items[0].ProductSelection == nil {
-		t.Fatal("List() product_selection = nil")
-	}
-	if items[0].ProductSelection.SelectedProductID == nil || *items[0].ProductSelection.SelectedProductID != 508 {
-		t.Fatalf("List() product_selection.selected_product_id = %+v", items[0].ProductSelection)
-	}
-	if items[0].ProcurementSummary.ProductSelection == nil || items[0].ProcurementSummary.ProductSelection.SourceSearchEntryCode != "ACC" {
-		t.Fatalf("List() procurement_summary.product_selection = %+v", items[0].ProcurementSummary.ProductSelection)
-	}
-	if items[0].ProcurementSummary.CoordinationStatus != domain.ProcurementCoordinationStatusReadyForWarehouse {
-		t.Fatalf("List() coordination_status = %s, want %s", items[0].ProcurementSummary.CoordinationStatus, domain.ProcurementCoordinationStatusReadyForWarehouse)
-	}
-	if !items[0].ProcurementSummary.WarehousePrepareReady {
-		t.Fatalf("List() warehouse_prepare_ready = false, want true")
-	}
-}
-
-func TestTaskServiceListSupportsDerivedBoardFilters(t *testing.T) {
-	taskRepo := &prdTaskRepo{
-		listItems: []*domain.TaskListItem{
-			{
-				ID:                  21,
-				TaskNo:              "RW-021",
-				SKUCode:             "SKU-021",
-				TaskType:            domain.TaskTypePurchaseTask,
-				SourceMode:          domain.TaskSourceModeExistingProduct,
-				CreatorID:           1,
-				TaskStatus:          domain.TaskStatusPendingAssign,
-				UpdatedAt:           *timePtr(),
-				Category:            "Accessory",
-				SpecText:            "Spec-A",
-				CostPrice:           float64Ptr(8.8),
-				FiledAt:             timePtr(),
-				ProcurementStatus:   procurementStatusPtr(domain.ProcurementStatusCompleted),
-				ProcurementPrice:    float64Ptr(5.5),
-				ProcurementQuantity: int64Ptr(10),
-				SupplierName:        "Vendor A",
-			},
-			{
-				ID:                  22,
-				TaskNo:              "RW-022",
-				SKUCode:             "SKU-022",
-				TaskType:            domain.TaskTypePurchaseTask,
-				SourceMode:          domain.TaskSourceModeExistingProduct,
-				CreatorID:           1,
-				TaskStatus:          domain.TaskStatusPendingAssign,
-				UpdatedAt:           *timePtr(),
-				Category:            "Accessory",
-				SpecText:            "Spec-B",
-				CostPrice:           float64Ptr(7.7),
-				FiledAt:             timePtr(),
-				ProcurementStatus:   procurementStatusPtr(domain.ProcurementStatusInProgress),
-				ProcurementPrice:    float64Ptr(5.5),
-				ProcurementQuantity: int64Ptr(10),
-				SupplierName:        "Vendor B",
-			},
-		},
-	}
-	svc := NewTaskService(
-		taskRepo,
-		&prdProcurementRepo{},
-		&prdTaskAssetRepo{},
-		&prdTaskEventRepo{},
-		nil,
-		&prdWarehouseRepo{},
-		prdCodeRuleService{},
-		step04TxRunner{},
-	)
-
-	trueValue := true
-	items, pagination, appErr := svc.List(context.Background(), TaskFilter{
-		TaskQueryFilterDefinition: domain.TaskQueryFilterDefinition{
-			TaskTypes: []domain.TaskType{
-				domain.TaskTypePurchaseTask,
-			},
-			CoordinationStatuses: []domain.ProcurementCoordinationStatus{
-				domain.ProcurementCoordinationStatusReadyForWarehouse,
-			},
-			WarehousePrepareReady: &trueValue,
-		},
-	})
-	if appErr != nil {
-		t.Fatalf("List() unexpected error: %+v", appErr)
-	}
-	if pagination.Total != 1 {
-		t.Fatalf("List() pagination.total = %d, want 1", pagination.Total)
-	}
-	if len(items) != 1 || items[0].ID != 21 {
-		t.Fatalf("List() derived filter items = %+v", items)
-	}
-	if taskRepo.listCalls != 1 {
-		t.Fatalf("List() repo calls = %d, want 1", taskRepo.listCalls)
-	}
-}
-
 func TestTaskServiceCreateBatchNewProductDevelopmentSucceeds(t *testing.T) {
 	taskRepo := &prdTaskRepo{}
 	eventRepo := &prdTaskEventRepo{}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		eventRepo,
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		step04TxRunner{},
 	)
@@ -3532,11 +2864,9 @@ func TestTaskServiceCreateBatchNewProductInfersCategoryWhenProductIIDMissing(t *
 	taskRepo := &prdTaskRepo{}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		step04TxRunner{},
 	)
@@ -3579,69 +2909,12 @@ func TestTaskServiceCreateBatchNewProductInfersCategoryWhenProductIIDMissing(t *
 	}
 }
 
-func legacyTaskServiceCreateBatchPurchaseTaskSucceeds(t *testing.T) {
-	taskRepo := &prdTaskRepo{}
-	procurementRepo := &prdProcurementRepo{}
-	svc := NewTaskService(
-		taskRepo,
-		procurementRepo,
-		&prdTaskAssetRepo{},
-		&prdTaskEventRepo{},
-		nil,
-		&prdWarehouseRepo{},
-		prdCodeRuleService{},
-		step04TxRunner{},
-	)
-
-	task, appErr := svc.Create(context.Background(), CreateTaskParams{
-		TaskType:     domain.TaskTypePurchaseTask,
-		SourceMode:   domain.TaskSourceModeNewProduct,
-		CreatorID:    9,
-		OwnerTeam:    domain.AllValidTeams()[0],
-		DeadlineAt:   timePtr(),
-		BatchSKUMode: "multiple",
-		BatchItems: []CreateTaskBatchSKUItemParams{
-			{
-				ProductName:   "Purchase Pack A",
-				CategoryCode:  "KT",
-				PurchaseSKU:   "BATCH-PUR-001",
-				CostPriceMode: string(domain.CostPriceModeTemplate),
-				Quantity:      int64Ptr(5),
-				BaseSalePrice: float64Ptr(19.5),
-			},
-			{
-				ProductName:   "Purchase Pack B",
-				CategoryCode:  "KT",
-				PurchaseSKU:   "BATCH-PUR-002",
-				CostPriceMode: string(domain.CostPriceModeManual),
-				Quantity:      int64Ptr(6),
-				BaseSalePrice: float64Ptr(29.5),
-				VariantJSON:   json.RawMessage(`{"size":"L"}`),
-			},
-		},
-	})
-	if appErr != nil {
-		t.Fatalf("Create() unexpected error: %+v", appErr)
-	}
-	if !task.IsBatchTask || task.BatchItemCount != 2 {
-		t.Fatalf("task batch meta = %+v", task)
-	}
-	if procurementRepo.records == nil || procurementRepo.records[task.ID] == nil {
-		t.Fatal("procurement record not initialized")
-	}
-	if len(procurementRepo.items[task.ID]) != 2 {
-		t.Fatalf("procurement items len = %d, want 2", len(procurementRepo.items[task.ID]))
-	}
-}
-
 func TestTaskServiceCreateBatchRejectsOriginalProductDevelopment(t *testing.T) {
 	svc := NewTaskService(
 		&prdTaskRepo{},
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		step04TxRunner{},
 	)
@@ -3669,11 +2942,9 @@ func TestTaskServiceCreateBatchRejectsOriginalProductDevelopment(t *testing.T) {
 func TestTaskServiceCreateBatchRejectsEmptyBatchItems(t *testing.T) {
 	svc := NewTaskService(
 		&prdTaskRepo{},
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		step04TxRunner{},
 	)
@@ -3694,11 +2965,9 @@ func TestTaskServiceCreateBatchRejectsEmptyBatchItems(t *testing.T) {
 func TestTaskServiceCreateBatchRejectsDuplicateDedupeKey(t *testing.T) {
 	svc := NewTaskService(
 		&prdTaskRepo{},
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		step04TxRunner{},
 	)
@@ -3740,11 +3009,9 @@ func TestTaskServiceCreateBatchAllowsSameStyleWithDifferentDesignRequirement(t *
 	taskRepo := &prdTaskRepo{}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		step04TxRunner{},
 		WithERPBridgeSelectionBinding(&erpBridgeSelectionBinderStub{
@@ -3793,11 +3060,9 @@ func TestTaskServiceCreateBatchAllowsSameStyleWithDifferentDesignRequirement(t *
 func TestTaskServiceCreateBatchRejectsMixedTopLevelSingleSKUField(t *testing.T) {
 	svc := NewTaskService(
 		&prdTaskRepo{},
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		step04TxRunner{},
 	)
@@ -3820,49 +3085,13 @@ func TestTaskServiceCreateBatchRejectsMixedTopLevelSingleSKUField(t *testing.T) 
 	}
 }
 
-func TestTaskServiceCreateBatchRejectsExistingManualSKU(t *testing.T) {
-	taskRepo := &prdTaskRepo{
-		skuByCode: map[string]*domain.TaskSKUItem{
-			"DUP-SKU": {SKUCode: "DUP-SKU"},
-		},
-	}
-	svc := NewTaskService(
-		taskRepo,
-		&prdProcurementRepo{},
-		&prdTaskAssetRepo{},
-		&prdTaskEventRepo{},
-		nil,
-		&prdWarehouseRepo{},
-		prdCodeRuleService{},
-		step04TxRunner{},
-	)
-
-	_, appErr := svc.Create(context.Background(), CreateTaskParams{
-		TaskType:     domain.TaskTypePurchaseTask,
-		SourceMode:   domain.TaskSourceModeNewProduct,
-		CreatorID:    9,
-		OwnerTeam:    domain.AllValidTeams()[0],
-		DeadlineAt:   timePtr(),
-		BatchSKUMode: "multiple",
-		BatchItems: []CreateTaskBatchSKUItemParams{
-			{ProductName: "A", PurchaseSKU: "DUP-SKU", CostPriceMode: string(domain.CostPriceModeTemplate), Quantity: int64Ptr(1), BaseSalePrice: float64Ptr(1)},
-			{ProductName: "B", CostPriceMode: string(domain.CostPriceModeTemplate), Quantity: int64Ptr(1), BaseSalePrice: float64Ptr(2)},
-		},
-	})
-	if appErr == nil {
-		t.Fatal("Create() expected duplicate manual sku error")
-	}
-}
-
 func TestTaskServiceCreateBatchUniqueConflictReturnsInvalidRequest(t *testing.T) {
 	taskRepo := &batchConflictTaskRepo{prdTaskRepo: prdTaskRepo{}}
 	svc := NewTaskService(
 		taskRepo,
-		&prdProcurementRepo{},
 		&prdTaskAssetRepo{},
 		&prdTaskEventRepo{},
 		nil,
-		&prdWarehouseRepo{},
 		prdCodeRuleService{},
 		step04TxRunner{},
 	)
@@ -3896,56 +3125,6 @@ type prdTaskRepo struct {
 	lastListFilter   repo.TaskListFilter
 	listCalls        int
 	getForUpdateHook func(*domain.Task)
-}
-
-type prdProcurementRepo struct {
-	records map[int64]*domain.ProcurementRecord
-	items   map[int64][]*domain.ProcurementRecordItem
-}
-
-func (r *prdProcurementRepo) GetByTaskID(_ context.Context, taskID int64) (*domain.ProcurementRecord, error) {
-	if r.records == nil {
-		return nil, nil
-	}
-	return r.records[taskID], nil
-}
-
-func (r *prdProcurementRepo) Upsert(_ context.Context, _ repo.Tx, record *domain.ProcurementRecord) error {
-	if r.records == nil {
-		r.records = map[int64]*domain.ProcurementRecord{}
-	}
-	copied := *record
-	if copied.ID == 0 {
-		copied.ID = int64(len(r.records) + 1)
-	}
-	record.ID = copied.ID
-	r.records[record.TaskID] = &copied
-	return nil
-}
-
-func (r *prdProcurementRepo) ListItemsByTaskID(_ context.Context, taskID int64) ([]*domain.ProcurementRecordItem, error) {
-	if r.items == nil {
-		return []*domain.ProcurementRecordItem{}, nil
-	}
-	return r.items[taskID], nil
-}
-
-func (r *prdProcurementRepo) CreateItems(_ context.Context, _ repo.Tx, items []*domain.ProcurementRecordItem) error {
-	if r.items == nil {
-		r.items = map[int64][]*domain.ProcurementRecordItem{}
-	}
-	for _, item := range items {
-		if item == nil {
-			continue
-		}
-		copied := *item
-		if copied.ID == 0 {
-			copied.ID = int64(len(r.items[item.TaskID]) + 1)
-		}
-		item.ID = copied.ID
-		r.items[item.TaskID] = append(r.items[item.TaskID], &copied)
-	}
-	return nil
 }
 
 func (r *prdTaskRepo) Create(_ context.Context, _ repo.Tx, task *domain.Task, detail *domain.TaskDetail) (int64, error) {
@@ -4133,7 +3312,6 @@ func (r *prdTaskRepo) List(_ context.Context, filter repo.TaskListFilter) ([]*do
 			TaskQueryFilterDefinition: filter.TaskQueryFilterDefinition,
 			CreatorID:                 filter.CreatorID,
 			DesignerID:                filter.DesignerID,
-			NeedOutsource:             filter.NeedOutsource,
 			Overdue:                   filter.Overdue,
 			Keyword:                   filter.Keyword,
 			Page:                      filter.Page,
@@ -4145,8 +3323,6 @@ func (r *prdTaskRepo) List(_ context.Context, filter repo.TaskListFilter) ([]*do
 				continue
 			}
 			copied := *item
-			copied.Workflow = buildTaskWorkflowSnapshotFromListItem(&copied)
-			copied.ProcurementSummary = buildProcurementSummaryFromListItem(&copied)
 			if !matchesTaskFilter(&copied, taskFilter) {
 				continue
 			}
@@ -4169,47 +3345,6 @@ func (r *prdTaskRepo) List(_ context.Context, filter repo.TaskListFilter) ([]*do
 		return filtered[start:end], int64(len(filtered)), nil
 	}
 	return []*domain.TaskListItem{}, int64(len(r.tasks)), nil
-}
-
-func (r *prdTaskRepo) ListBoardCandidates(_ context.Context, filter repo.TaskBoardCandidateFilter) ([]*domain.TaskListItem, error) {
-	r.lastListFilter = filter.TaskListFilter
-	r.listCalls++
-	if r.listItems == nil {
-		return []*domain.TaskListItem{}, nil
-	}
-
-	taskFilter := TaskFilter{
-		TaskQueryFilterDefinition: filter.TaskListFilter.TaskQueryFilterDefinition,
-		CreatorID:                 filter.CreatorID,
-		DesignerID:                filter.DesignerID,
-		NeedOutsource:             filter.NeedOutsource,
-		Overdue:                   filter.Overdue,
-		Keyword:                   filter.Keyword,
-	}
-
-	filtered := make([]*domain.TaskListItem, 0, len(r.listItems))
-	for _, item := range r.listItems {
-		if item == nil {
-			continue
-		}
-		copied := *item
-		copied.Workflow = buildTaskWorkflowSnapshotFromListItem(&copied)
-		copied.ProcurementSummary = buildProcurementSummaryFromListItem(&copied)
-		if !matchesTaskFilter(&copied, taskFilter) {
-			continue
-		}
-		for _, preset := range filter.CandidateFilters {
-			effective, ok := mergeTaskBoardFilter(taskFilter, preset)
-			if !ok {
-				continue
-			}
-			if matchesTaskFilter(&copied, effective) {
-				filtered = append(filtered, &copied)
-				break
-			}
-		}
-	}
-	return filtered, nil
 }
 
 func (r *prdTaskRepo) UpdatePriority(_ context.Context, _ repo.Tx, id int64, priority domain.TaskPriority) error {
@@ -4248,22 +3383,6 @@ func (r *prdTaskRepo) UpdateDesigner(_ context.Context, _ repo.Tx, id int64, des
 
 func (r *prdTaskRepo) UpdateHandler(_ context.Context, _ repo.Tx, id int64, handlerID *int64) error {
 	r.tasks[id].CurrentHandlerID = handlerID
-	return nil
-}
-
-func (r *prdTaskRepo) UpdateNeedOutsource(_ context.Context, _ repo.Tx, id int64, needOutsource bool) error {
-	r.tasks[id].NeedOutsource = needOutsource
-	return nil
-}
-
-func (r *prdTaskRepo) UpdateCustomizationState(_ context.Context, _ repo.Tx, id int64, lastOperatorID *int64, rejectReason, rejectCategory string) error {
-	task := r.tasks[id]
-	if task == nil {
-		return nil
-	}
-	task.LastCustomizationOperatorID = lastOperatorID
-	task.WarehouseRejectReason = rejectReason
-	task.WarehouseRejectCategory = rejectCategory
 	return nil
 }
 
@@ -4390,115 +3509,6 @@ func (r *prdTaskCostOverrideEventRepo) GetByEventID(_ context.Context, eventID s
 	return nil, nil
 }
 
-type prdTaskCostOverrideReviewRepo struct {
-	records map[string]*domain.TaskCostOverrideReviewRecord
-}
-
-func (r *prdTaskCostOverrideReviewRepo) Upsert(_ context.Context, _ repo.Tx, record *domain.TaskCostOverrideReviewRecord) (*domain.TaskCostOverrideReviewRecord, error) {
-	if r.records == nil {
-		r.records = map[string]*domain.TaskCostOverrideReviewRecord{}
-	}
-	copyRecord := *record
-	if copyRecord.RecordID == 0 {
-		copyRecord.RecordID = int64(len(r.records) + 1)
-	}
-	if copyRecord.CreatedAt.IsZero() {
-		copyRecord.CreatedAt = time.Now().UTC()
-	}
-	copyRecord.UpdatedAt = time.Now().UTC()
-	r.records[copyRecord.OverrideEventID] = &copyRecord
-	return &copyRecord, nil
-}
-
-func (r *prdTaskCostOverrideReviewRepo) GetByEventID(_ context.Context, eventID string) (*domain.TaskCostOverrideReviewRecord, error) {
-	if r.records == nil {
-		return nil, nil
-	}
-	return r.records[eventID], nil
-}
-
-func (r *prdTaskCostOverrideReviewRepo) ListByTaskID(_ context.Context, taskID int64) ([]*domain.TaskCostOverrideReviewRecord, error) {
-	items := []*domain.TaskCostOverrideReviewRecord{}
-	for _, record := range r.records {
-		if record != nil && record.TaskID == taskID {
-			items = append(items, record)
-		}
-	}
-	return items, nil
-}
-
-type prdTaskCostFinanceFlagRepo struct {
-	flags map[string]*domain.TaskCostFinanceFlag
-}
-
-func (r *prdTaskCostFinanceFlagRepo) Upsert(_ context.Context, _ repo.Tx, flag *domain.TaskCostFinanceFlag) (*domain.TaskCostFinanceFlag, error) {
-	if r.flags == nil {
-		r.flags = map[string]*domain.TaskCostFinanceFlag{}
-	}
-	copyFlag := *flag
-	if copyFlag.RecordID == 0 {
-		copyFlag.RecordID = int64(len(r.flags) + 1)
-	}
-	if copyFlag.CreatedAt.IsZero() {
-		copyFlag.CreatedAt = time.Now().UTC()
-	}
-	copyFlag.UpdatedAt = time.Now().UTC()
-	r.flags[copyFlag.OverrideEventID] = &copyFlag
-	return &copyFlag, nil
-}
-
-func (r *prdTaskCostFinanceFlagRepo) GetByEventID(_ context.Context, eventID string) (*domain.TaskCostFinanceFlag, error) {
-	if r.flags == nil {
-		return nil, nil
-	}
-	return r.flags[eventID], nil
-}
-
-func (r *prdTaskCostFinanceFlagRepo) ListByTaskID(_ context.Context, taskID int64) ([]*domain.TaskCostFinanceFlag, error) {
-	items := []*domain.TaskCostFinanceFlag{}
-	for _, flag := range r.flags {
-		if flag != nil && flag.TaskID == taskID {
-			items = append(items, flag)
-		}
-	}
-	return items, nil
-}
-
-type prdWarehouseRepo struct {
-	receipts map[int64]*domain.WarehouseReceipt
-}
-
-func (r *prdWarehouseRepo) Create(_ context.Context, _ repo.Tx, receipt *domain.WarehouseReceipt) (int64, error) {
-	if r.receipts == nil {
-		r.receipts = map[int64]*domain.WarehouseReceipt{}
-	}
-	r.receipts[receipt.TaskID] = receipt
-	return int64(len(r.receipts)), nil
-}
-
-func (r *prdWarehouseRepo) GetByID(_ context.Context, _ int64) (*domain.WarehouseReceipt, error) {
-	return nil, nil
-}
-
-func (r *prdWarehouseRepo) GetByTaskID(_ context.Context, taskID int64) (*domain.WarehouseReceipt, error) {
-	if r.receipts == nil {
-		return nil, nil
-	}
-	return r.receipts[taskID], nil
-}
-
-func (r *prdWarehouseRepo) List(_ context.Context, _ repo.WarehouseListFilter) ([]*domain.WarehouseReceipt, int64, error) {
-	return []*domain.WarehouseReceipt{}, 0, nil
-}
-
-func (r *prdWarehouseRepo) Update(_ context.Context, _ repo.Tx, receipt *domain.WarehouseReceipt) error {
-	if r.receipts == nil {
-		r.receipts = map[int64]*domain.WarehouseReceipt{}
-	}
-	r.receipts[receipt.TaskID] = receipt
-	return nil
-}
-
 type prdCodeRuleService struct{}
 
 func (prdCodeRuleService) List(context.Context) ([]*domain.CodeRule, *domain.AppError) {
@@ -4514,10 +3524,6 @@ func (prdCodeRuleService) GenerateCode(_ context.Context, ruleType domain.CodeRu
 		return "", domain.NewAppError(domain.ErrCodeInvalidRequest, "legacy CodeRule new_sku is archived", nil)
 	}
 	return "RW-TEST", nil
-}
-
-func (prdCodeRuleService) GenerateSKU(context.Context, int64) (string, *domain.AppError) {
-	return "", domain.NewAppError(domain.ErrCodeInvalidRequest, "legacy CodeRule new_sku is archived", nil)
 }
 
 func int64Ptr(v int64) *int64 {

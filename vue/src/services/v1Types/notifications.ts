@@ -53,8 +53,6 @@ export interface TaskClosedPayload {
   designer_name?: string
   closed_by?: number
   closed_by_name?: string
-  warehouse_status?: string
-  auto_release?: boolean
   remark?: string
 }
 

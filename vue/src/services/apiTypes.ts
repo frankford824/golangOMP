@@ -1,6 +1,6 @@
 /**
  * V1 后端 API 数据结构类型定义
- * 对应文档：frontend/V1_API_*.md 与 docs/api/openapi.yaml。
+ * 对应权威合同：仓库根目录 docs/api/openapi.yaml 与 docs/frontend/V1_API_*.md。
  *
  * 此文件仅定义与后端交互的原始 DTO 类型，不包含前端业务逻辑类型。
  * 前端业务类型（Task、PermissionUser 等）保留在 src/domain/types/ 和 src/types/。
@@ -131,9 +131,8 @@ export interface ChangePasswordPayload {
 export interface BackendTaskSummary {
   id: string
   task_no: string
-  workflow: Record<string, unknown>
+  status?: string
   product_selection?: Record<string, unknown>
-  procurement_summary?: Record<string, unknown>
   [key: string]: unknown
 }
 
@@ -157,11 +156,12 @@ export interface TaskListParams {
   page?: number
   page_size?: number
   keyword?: string
+  operational_bucket?: 'active_tasks' | 'design_pending' | 'pending_audit' | 'handover' | 'customization_in_progress' | 'overdue' | 'due_today' | 'today_created'
   status?: string
   task_type?: string
-  workflow_lane?: 'normal' | 'customization' | string
+  business_lane?: 'normal' | 'customization' | string
   assignee_id?: string
-  /** v0.9：按设计师筛选列表（与 designer_* 读模型一致） */
+  /** 按设计师筛选列表（与 designer_* 读模型一致）。 */
   designer_id?: string
   /** 定制泳道「未指派美工」：仅 designer_id 为空（勿与 status=PendingAssign 混用） */
   designer_empty?: boolean
@@ -442,7 +442,7 @@ export interface BackendAsset {
   previous_asset_id?: string | number | null
   current_asset_id?: string | number | null
   replacement_actor_id?: string | number | null
-  workflow_lane?: 'normal' | 'customization' | string
+  business_lane?: 'normal' | 'customization' | string
   source_department?: string | null
   task_no?: string
   task_status?: string
@@ -473,43 +473,6 @@ export interface BackendAsset {
   archive_status?: 'active' | 'archived' | string
   versions?: BackendAssetVersion[]
   approved_version?: number
-  warehouse_ready_version?: number
-  [key: string]: unknown
-}
-
-export interface CustomizationJobRaw {
-  id: number | string
-  task_id?: number | string
-  source_asset_id?: number | string | null
-  previous_asset_id?: number | string | null
-  current_asset_id?: number | string | null
-  customization_level_code?: string
-  customization_level_name?: string
-  review_reference_unit_price?: number | null
-  review_reference_weight_factor?: number | null
-  unit_price?: number | null
-  weight_factor?: number | null
-  note?: string
-  customization_review_decision?: 'approved' | 'return_to_designer' | 'reviewer_fixed' | string
-  decision_type?: 'final' | 'effect_preview' | string
-  assigned_operator_id?: number | string | null
-  last_operator_id?: number | string | null
-  replacement_actor_id?: number | string | null
-  replacement_actor_name?: string | null
-  replacement_actor_username?: string | null
-  /**
-   * pricing identity（定价身份），不是权限角色。
-   * 后端可能返回 `employment_type`，也可能返回历史字段 `pricing_worker_type`。
-   */
-  employment_type?: 'full_time' | 'part_time' | string | null
-  pricing_worker_type?: 'full_time' | 'part_time' | string | null
-  workflow_lane?: 'normal' | 'customization' | string
-  source_department?: string | null
-  status?: string
-  warehouse_reject_reason?: string | null
-  warehouse_reject_category?: string | null
-  created_at?: string
-  updated_at?: string
   [key: string]: unknown
 }
 

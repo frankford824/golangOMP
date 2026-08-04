@@ -1,0 +1,193 @@
+{
+  "schema_version": 1,
+  "workflow_base_argv": [
+    "go",
+    "run",
+    "./cmd/tools/workflow-groups-migrate"
+  ],
+  "hooks": {
+    "capture_baseline_fingerprint": {
+      "argv": [
+        "python3",
+        "{repo_root}/scripts/ab/capture_and_compare_rollback_fingerprint.py",
+        "--capture-baseline",
+        "--database",
+        "{database}",
+        "--output",
+        "{baseline_fingerprint}"
+      ],
+      "expected_artifacts": [
+        "{baseline_fingerprint}"
+      ]
+    },
+    "recovery_apply": {
+      "argv": [
+        "python3",
+        "{repo_root}/scripts/ab/clone_b_materialization_component.py",
+        "recovery-apply",
+        "--database",
+        "{database}",
+        "--run-id",
+        "{run_id}",
+        "--run-root",
+        "{clone_root}",
+        "--component-dir",
+        "{run_dir}",
+        "--fixture-root",
+        "{clone_root}/fixture-upload-b",
+        "--mapping",
+        "{mapping_file}",
+        "--evidence",
+        "{clone_root}/recovery-evidence.json"
+      ],
+      "expected_artifacts": [
+        "{run_dir}/recovery-materialization-plan.json",
+        "{run_dir}/recovery-guard-before.json",
+        "{run_dir}/recovery-guard-provision.json",
+        "{run_dir}/recovery-db-apply.json",
+        "{run_dir}/recovery-db-idempotent.json",
+        "{run_dir}/recovery-component-apply.json"
+      ]
+    },
+    "bundle_apply": {
+      "argv": [
+        "python3",
+        "{repo_root}/scripts/ab/clone_b_materialization_component.py",
+        "bundle-apply",
+        "--database",
+        "{database}",
+        "--run-id",
+        "{run_id}",
+        "--run-root",
+        "{clone_root}",
+        "--component-dir",
+        "{run_dir}",
+        "--fixture-root",
+        "{clone_root}/fixture-upload-b",
+        "--source-root",
+        "{clone_root}/bundle-source-seed",
+        "--manifest",
+        "{clone_root}/source-bundle-admin-decision.json"
+      ],
+      "expected_artifacts": [
+        "{run_dir}/bundle-materialize-report.json",
+        "{run_dir}/bundle-registry.json",
+        "{run_dir}/bundle-guard-before.json",
+        "{run_dir}/bundle-guard-provision.json",
+        "{run_dir}/bundle-db-rollback-journal.json",
+        "{run_dir}/bundle-db-apply.json",
+        "{run_dir}/bundle-db-idempotent.json",
+        "{run_dir}/bundle-component-apply.json"
+      ]
+    },
+    "search_reindex": {
+      "argv": [
+        "go",
+        "run",
+        "./cmd/tools/search-reindex",
+        "--tasks=true",
+        "--assets=true",
+        "--products=true",
+        "--dry-run=false",
+        "--timeout=10m"
+      ],
+      "expected_artifacts": []
+    },
+    "search_snapshot": {
+      "argv": [
+        "python3",
+        "{repo_root}/scripts/ab/capture_search_documents_snapshot.py",
+        "--database",
+        "{database}",
+        "--archive",
+        "{search_snapshot_archive}",
+        "--output",
+        "{search_snapshot}"
+      ],
+      "expected_artifacts": [
+        "{search_snapshot}",
+        "{search_snapshot_archive}"
+      ]
+    },
+    "bundle_rollback": {
+      "argv": [
+        "python3",
+        "{repo_root}/scripts/ab/clone_b_materialization_component.py",
+        "bundle-rollback",
+        "--database",
+        "{database}",
+        "--run-id",
+        "{run_id}",
+        "--run-root",
+        "{clone_root}",
+        "--component-dir",
+        "{run_dir}",
+        "--fixture-root",
+        "{clone_root}/fixture-upload-b",
+        "--manifest",
+        "{clone_root}/source-bundle-admin-decision.json"
+      ],
+      "expected_artifacts": [
+        "{run_dir}/bundle-db-rollback.json",
+        "{run_dir}/bundle-guard-restore.json",
+        "{run_dir}/bundle-file-rollback.json",
+        "{run_dir}/bundle-component-rollback.json"
+      ]
+    },
+    "search_rollback": {
+      "argv": [
+        "python3",
+        "{repo_root}/scripts/ab/restore_search_documents_snapshot.py",
+        "--database",
+        "{database}",
+        "--snapshot",
+        "{search_snapshot}",
+        "--archive",
+        "{search_snapshot_archive}",
+        "--output",
+        "{search_rollback}"
+      ],
+      "expected_artifacts": [
+        "{search_rollback}"
+      ]
+    },
+    "recovery_rollback": {
+      "argv": [
+        "python3",
+        "{repo_root}/scripts/ab/clone_b_materialization_component.py",
+        "recovery-rollback",
+        "--database",
+        "{database}",
+        "--run-id",
+        "{run_id}",
+        "--run-root",
+        "{clone_root}",
+        "--component-dir",
+        "{run_dir}",
+        "--fixture-root",
+        "{clone_root}/fixture-upload-b"
+      ],
+      "expected_artifacts": [
+        "{run_dir}/recovery-db-rollback.json",
+        "{run_dir}/recovery-guard-restore.json",
+        "{run_dir}/recovery-file-rollback.json",
+        "{run_dir}/recovery-component-rollback.json"
+      ]
+    },
+    "validate_after_rollback_fingerprint": {
+      "argv": [
+        "python3",
+        "{repo_root}/scripts/ab/capture_and_compare_rollback_fingerprint.py",
+        "--baseline",
+        "{baseline_fingerprint}",
+        "--database",
+        "{database}",
+        "--output",
+        "{rollback_fingerprint}"
+      ],
+      "expected_artifacts": [
+        "{rollback_fingerprint}"
+      ]
+    }
+  }
+}

@@ -31,6 +31,28 @@ describe('resolveApiUserMessage', () => {
     expect(message).toBe('账号或密码不正确，请检查后重试')
   })
 
+  it('distinguishes an ERP test-catalog miss from an ERP upstream outage', () => {
+    expect(resolveApiUserMessage({
+      status: 404,
+      responseData: {
+        error: {
+          code: 'erp_product_not_found',
+          message: 'erp product not found',
+        },
+      },
+    })).toBe('ERP 测试环境未找到该商品编码，请核对编码或选择测试环境内已有商品')
+
+    expect(resolveApiUserMessage({
+      status: 502,
+      responseData: {
+        error: {
+          code: 'erp_upstream_failure',
+          message: 'erp upstream failure',
+        },
+      },
+    })).toBe('ERP 测试环境暂时不可用，请稍后重试')
+  })
+
   it('maps asset-workbench price overlap conflicts to business copy', () => {
     const message = resolveApiUserMessage({
       status: 409,

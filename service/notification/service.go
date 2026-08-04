@@ -144,8 +144,8 @@ func NewService(notifications repo.NotificationRepo, logs repo.PermissionLogRepo
 }
 
 func (s *Service) Broadcast(ctx context.Context, actor domain.RequestActor, params BroadcastParams) (*BroadcastResult, *domain.AppError) {
-	if !canBroadcastNotifications(actor) {
-		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "notification broadcast requires admin role", map[string]interface{}{
+	if !domain.ActorHasPermission(actor, domain.PermissionSystemManage) {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "notification broadcast requires system.manage", map[string]interface{}{
 			"deny_code": "notification_broadcast_forbidden",
 		})
 	}
@@ -205,11 +205,6 @@ func (s *Service) Broadcast(ctx context.Context, actor domain.RequestActor, para
 func (s *Service) resolveBroadcastRecipients(ctx context.Context, actor domain.RequestActor, params BroadcastParams) ([]int64, *domain.AppError) {
 	switch params.Audience {
 	case BroadcastAudienceAll:
-		if !canBroadcastAllNotifications(actor) {
-			return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "broadcast to all users requires super admin, admin, or HR admin", map[string]interface{}{
-				"deny_code": "notification_broadcast_all_forbidden",
-			})
-		}
 		return s.listAllActiveUserIDs(ctx)
 	case BroadcastAudienceUsers, "":
 		ids := uniquePositiveInt64s(params.UserIDs)
@@ -496,25 +491,6 @@ func (s *Service) recordDenied(ctx context.Context, actor domain.RequestActor, i
 		Reason:        fmt.Sprintf(`{"actor":%d,"notification_id":%d,"reason":"not_owner"}`, actor.ID, id),
 		CreatedAt:     now,
 	})
-}
-
-func canBroadcastNotifications(actor domain.RequestActor) bool {
-	return hasAnyBroadcastRole(actor, domain.RoleSuperAdmin, domain.RoleAdmin, domain.RoleHRAdmin, domain.RoleDeptAdmin)
-}
-
-func canBroadcastAllNotifications(actor domain.RequestActor) bool {
-	return hasAnyBroadcastRole(actor, domain.RoleSuperAdmin, domain.RoleAdmin, domain.RoleHRAdmin)
-}
-
-func hasAnyBroadcastRole(actor domain.RequestActor, allowed ...domain.Role) bool {
-	for _, role := range actor.Roles {
-		for _, candidate := range allowed {
-			if role == candidate {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func uniquePositiveInt64s(values []int64) []int64 {

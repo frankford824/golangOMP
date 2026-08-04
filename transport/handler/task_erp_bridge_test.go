@@ -191,6 +191,7 @@ func TestTaskHandlerUpdateBusinessInfoBindsDeadlineAndPreservesAggregate(t *test
 	body := map[string]interface{}{
 		"operator_id": 1,
 		"deadline_at": "2026-06-12T10:00:00Z",
+		"note":        "updated operation note",
 	}
 	raw, err := json.Marshal(body)
 	if err != nil {
@@ -217,6 +218,42 @@ func TestTaskHandlerUpdateBusinessInfoBindsDeadlineAndPreservesAggregate(t *test
 	}
 	if params.FiledAt != nil {
 		t.Fatalf("filed_at = %+v, want nil when request omits filed_at", params.FiledAt)
+	}
+	if !params.NoteSet || params.Note != "updated operation note" {
+		t.Fatalf("note params = set:%t value:%q", params.NoteSet, params.Note)
+	}
+	if params.GovernedFieldsRequested {
+		t.Fatal("ordinary business-info fields unexpectedly marked as governed")
+	}
+}
+
+func TestTaskHandlerUpdateBusinessInfoMarksGovernedFieldsFromRequestBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	taskSvc := &taskServiceCaptureStub{}
+	handler := NewTaskHandler(taskSvc, nil, nil)
+	router.PATCH("/v1/tasks/:id/business-info", handler.UpdateBusinessInfo)
+
+	body := map[string]interface{}{
+		"operator_id":          1,
+		"cost_price":           15.8,
+		"manual_cost_override": true,
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPatch, "/v1/tasks/9108/business-info", bytes.NewReader(raw))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PATCH /v1/tasks/:id/business-info code = %d, want 200 body=%s", rec.Code, rec.Body.String())
+	}
+	if !taskSvc.updateBusinessInfoParams.GovernedFieldsRequested {
+		t.Fatal("governed cost fields were not detected from request body")
 	}
 }
 
@@ -451,7 +488,6 @@ func TestTaskHandlerCreatePurchaseTaskWithoutProductSelectionIsRetired(t *testin
 		"creator_id":      9,
 		"owner_team":      "总经办组",
 		"due_at":          "2026-03-20T00:00:00Z",
-		"purchase_sku":    "PUR-001",
 		"product_name":    "Accessory Pack",
 		"cost_price_mode": "template",
 		"quantity":        100,
@@ -615,7 +651,6 @@ func TestTaskHandlerCreateCase2PurchaseTaskWithoutProductSelectionIsRetired(t *t
 		"task_type":       "purchase_task",
 		"source_mode":     "new_product",
 		"creator_id":      9,
-		"purchase_sku":    "PUR-CASE2-001",
 		"product_name":    "Case2 Purchase Product",
 		"cost_price_mode": "template",
 		"quantity":        50,
@@ -754,16 +789,12 @@ func TestTaskCreateOriginalProductDevelopmentResponseEchoesChangeRequest(t *test
 }
 
 type taskServiceCaptureStub struct {
-	createParams              service.CreateTaskParams
-	updateBusinessInfoParams  service.UpdateTaskBusinessInfoParams
-	customizationReviewParams service.SubmitCustomizationReviewParams
-	effectPreviewParams       service.SubmitCustomizationEffectPreviewParams
-	effectReviewParams        service.ReviewCustomizationEffectParams
-	productionTransferParams  service.TransferCustomizationProductionParams
-	createResult              *domain.Task
-	readResult                *domain.TaskReadModel
-	listFilter                service.TaskFilter
-	appErr                    *domain.AppError
+	createParams             service.CreateTaskParams
+	updateBusinessInfoParams service.UpdateTaskBusinessInfoParams
+	createResult             *domain.Task
+	readResult               *domain.TaskReadModel
+	listFilter               service.TaskFilter
+	appErr                   *domain.AppError
 }
 
 func (s *taskServiceCaptureStub) Create(_ context.Context, p service.CreateTaskParams) (*domain.Task, *domain.AppError) {
@@ -774,10 +805,6 @@ func (s *taskServiceCaptureStub) Create(_ context.Context, p service.CreateTaskP
 func (s *taskServiceCaptureStub) List(_ context.Context, filter service.TaskFilter) ([]*domain.TaskListItem, domain.PaginationMeta, *domain.AppError) {
 	s.listFilter = filter
 	return nil, domain.PaginationMeta{}, nil
-}
-
-func (s *taskServiceCaptureStub) ListBoardCandidates(context.Context, service.TaskFilter, []domain.TaskQueryFilterDefinition) ([]*domain.TaskListItem, *domain.AppError) {
-	return nil, nil
 }
 
 func (s *taskServiceCaptureStub) GetByID(context.Context, int64) (*domain.TaskReadModel, *domain.AppError) {
@@ -802,50 +829,6 @@ func (s *taskServiceCaptureStub) UpdateBusinessInfo(_ context.Context, p service
 }
 
 func (s *taskServiceCaptureStub) UpdateSKUItemInfo(context.Context, service.UpdateTaskSKUItemInfoParams) (*domain.TaskSKUItem, *domain.AppError) {
-	return nil, nil
-}
-
-func (s *taskServiceCaptureStub) UpdateProcurement(context.Context, service.UpdateTaskProcurementParams) (*domain.ProcurementRecord, *domain.AppError) {
-	return nil, nil
-}
-
-func (s *taskServiceCaptureStub) AdvanceProcurement(context.Context, service.AdvanceTaskProcurementParams) (*domain.ProcurementRecord, *domain.AppError) {
-	return nil, nil
-}
-
-func (s *taskServiceCaptureStub) PrepareWarehouse(context.Context, service.PrepareTaskForWarehouseParams) (*domain.Task, *domain.AppError) {
-	return nil, nil
-}
-
-func (s *taskServiceCaptureStub) Close(context.Context, service.CloseTaskParams) (*domain.TaskReadModel, *domain.AppError) {
-	return nil, nil
-}
-
-func (s *taskServiceCaptureStub) SubmitCustomizationReview(_ context.Context, p service.SubmitCustomizationReviewParams) (*domain.CustomizationJob, *domain.AppError) {
-	s.customizationReviewParams = p
-	return &domain.CustomizationJob{ID: 1, TaskID: p.TaskID}, nil
-}
-
-func (s *taskServiceCaptureStub) SubmitCustomizationEffectPreview(_ context.Context, p service.SubmitCustomizationEffectPreviewParams) (*domain.CustomizationJob, *domain.AppError) {
-	s.effectPreviewParams = p
-	return &domain.CustomizationJob{ID: p.JobID}, nil
-}
-
-func (s *taskServiceCaptureStub) ReviewCustomizationEffect(_ context.Context, p service.ReviewCustomizationEffectParams) (*domain.CustomizationJob, *domain.AppError) {
-	s.effectReviewParams = p
-	return &domain.CustomizationJob{ID: p.JobID}, nil
-}
-
-func (s *taskServiceCaptureStub) TransferCustomizationProduction(_ context.Context, p service.TransferCustomizationProductionParams) (*domain.CustomizationJob, *domain.AppError) {
-	s.productionTransferParams = p
-	return &domain.CustomizationJob{ID: p.JobID}, nil
-}
-
-func (s *taskServiceCaptureStub) ListCustomizationJobs(context.Context, service.CustomizationJobFilter) ([]*domain.CustomizationJob, domain.PaginationMeta, *domain.AppError) {
-	return nil, domain.PaginationMeta{}, nil
-}
-
-func (s *taskServiceCaptureStub) GetCustomizationJob(context.Context, int64) (*domain.CustomizationJob, *domain.AppError) {
 	return nil, nil
 }
 

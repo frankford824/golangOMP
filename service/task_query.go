@@ -15,7 +15,7 @@ func (s *taskService) listTasks(ctx context.Context, filter TaskFilter) ([]*doma
 		return nil, domain.PaginationMeta{}, appErr
 	}
 
-	repoFilter := taskFilterToRepoTaskListFilter(normalized, normalized.Page, normalized.PageSize, mainTaskReadScope())
+	repoFilter := taskFilterToRepoTaskListFilter(normalized, normalized.Page, normalized.PageSize, mainTaskReadScope(ctx))
 	items, total, err := s.taskRepo.List(ctx, repoFilter)
 	if err != nil {
 		return nil, domain.PaginationMeta{}, infraError("list tasks", err)
@@ -24,42 +24,24 @@ func (s *taskService) listTasks(ctx context.Context, filter TaskFilter) ([]*doma
 	return items, buildPaginationMeta(normalized.Page, normalized.PageSize, total), nil
 }
 
-func (s *taskService) listBoardCandidates(ctx context.Context, filter TaskFilter, presets []domain.TaskQueryFilterDefinition) ([]*domain.TaskListItem, *domain.AppError) {
-	if len(presets) == 0 {
-		return []*domain.TaskListItem{}, nil
+func mainTaskReadScope(ctx context.Context) *DataScope {
+	actor, ok := domain.RequestActorFromContext(ctx)
+	if !ok {
+		// Internal callers and repository-focused tests do not carry an HTTP
+		// identity. Public routes always inject an effective-access actor.
+		return &DataScope{ViewAll: true}
 	}
-
-	normalized, appErr := normalizeTaskFilter(filter)
-	if appErr != nil {
-		return nil, appErr
+	access := domain.ResourceGroupAccessFilterForActor(actor, domain.PermissionTaskView)
+	scope := &DataScope{ViewAll: access.Global}
+	if access.Self && actor.ID > 0 {
+		scope.UserIDs = []int64{actor.ID}
 	}
-
-	items, err := s.taskRepo.ListBoardCandidates(ctx, repo.TaskBoardCandidateFilter{
-		TaskListFilter:   taskFilterToRepoTaskListFilter(normalized, 0, 0, mainTaskReadScope()),
-		CandidateFilters: append([]domain.TaskQueryFilterDefinition(nil), presets...),
-	})
-	if err != nil {
-		return nil, infraError("list board candidates", err)
-	}
-	return hydrateTaskListItems(items), nil
-}
-
-func mainTaskReadScope() *DataScope {
-	return &DataScope{ViewAll: true}
+	scope.DepartmentIDs = append([]int64(nil), access.DepartmentIDs...)
+	scope.TeamIDs = append([]int64(nil), access.TeamIDs...)
+	return scope
 }
 
 func normalizeTaskFilter(filter TaskFilter) (TaskFilter, *domain.AppError) {
-	if filter.SubStatusScope != nil {
-		if len(filter.SubStatusCodes) == 0 {
-			return TaskFilter{}, domain.NewAppError(domain.ErrCodeInvalidRequest, "sub_status_scope requires sub_status_code", nil)
-		}
-		if !filter.SubStatusScope.Valid() {
-			return TaskFilter{}, domain.NewAppError(domain.ErrCodeInvalidRequest, "sub_status_scope must be design/audit/procurement/warehouse/customization/outsource/production", nil)
-		}
-	}
-	if len(filter.SubStatusCodes) == 0 {
-		filter.SubStatusScope = nil
-	}
 	return filter, nil
 }
 
@@ -70,11 +52,12 @@ func taskFilterToRepoTaskListFilter(filter TaskFilter, page, pageSize int, scope
 		MineActorID:               filter.MineActorID,
 		DesignerID:                filter.DesignerID,
 		DesignerEmpty:             filter.DesignerEmpty,
-		NeedOutsource:             filter.NeedOutsource,
 		Overdue:                   filter.Overdue,
+		OperationalBucket:         filter.OperationalBucket,
 		CreatedFrom:               filter.CreatedFrom,
 		CreatedTo:                 filter.CreatedTo,
 		Keyword:                   filter.Keyword,
+		Sort:                      filter.Sort,
 		Page:                      page,
 		PageSize:                  pageSize,
 	}
@@ -90,12 +73,9 @@ func hydrateTaskListItems(items []*domain.TaskListItem) []*domain.TaskListItem {
 			continue
 		}
 		applyTaskListItemReadModelOrgOwnership(item)
-		item.Workflow = buildTaskWorkflowSnapshotFromListItem(item)
 		if selection := buildTaskProductSelectionSummaryFromListItem(item); selection != nil {
 			item.ProductSelection = selection
 		}
-		item.ProcurementSummary = buildProcurementSummaryFromListItem(item)
-		domain.HydrateTaskListItemPolicy(item)
 	}
 	return items
 }
@@ -116,30 +96,8 @@ func matchesTaskFilter(item *domain.TaskListItem, filter TaskFilter) bool {
 	if len(filter.SourceModes) > 0 && !containsTaskSourceMode(filter.SourceModes, item.SourceMode) {
 		return false
 	}
-	if len(filter.WorkflowLanes) > 0 && !containsWorkflowLane(filter.WorkflowLanes, item.WorkflowLane) {
-		return false
-	}
 	if len(filter.BusinessLanes) > 0 && !containsBusinessLane(filter.BusinessLanes, item.BusinessLane) {
 		return false
-	}
-	if len(filter.MainStatuses) > 0 && !containsTaskMainStatus(filter.MainStatuses, item.Workflow.MainStatus) {
-		return false
-	}
-	if len(filter.SubStatusCodes) > 0 {
-		if filter.SubStatusScope != nil {
-			code := taskSubStatusCodeByScope(item, *filter.SubStatusScope)
-			if !containsTaskSubStatusCode(filter.SubStatusCodes, code) {
-				return false
-			}
-		} else if !matchesAnyTaskSubStatusCode(item, filter.SubStatusCodes) {
-			return false
-		}
-	}
-	if len(filter.CoordinationStatuses) > 0 {
-		status, ok := taskCoordinationStatus(item)
-		if !ok || !containsCoordinationStatus(filter.CoordinationStatuses, status) {
-			return false
-		}
 	}
 	if len(filter.OwnerDepartments) > 0 && !containsTaskOwnerDepartment(filter.OwnerDepartments, item.OwnerDepartment) {
 		return false
@@ -158,19 +116,6 @@ func matchesTaskFilter(item *domain.TaskListItem, filter TaskFilter) bool {
 	if filter.CreatedTo != nil && item.CreatedAt.After(*filter.CreatedTo) {
 		return false
 	}
-	if filter.WarehousePrepareReady != nil {
-		if item.Workflow.CanPrepareWarehouse != *filter.WarehousePrepareReady {
-			return false
-		}
-	}
-	if filter.WarehouseReceiveReady != nil {
-		if taskWarehouseReceiveReady(item) != *filter.WarehouseReceiveReady {
-			return false
-		}
-	}
-	if len(filter.WarehouseBlockingReasonCodes) > 0 && !hasAnyWorkflowReasonCode(item, filter.WarehouseBlockingReasonCodes) {
-		return false
-	}
 	return true
 }
 
@@ -187,102 +132,6 @@ func containsTaskOwnerOrgTeam(values []string, target string) bool {
 	for _, value := range values {
 		if domain.OrgTeamsEquivalent(value, target) || strings.EqualFold(strings.TrimSpace(value), strings.TrimSpace(target)) {
 			return true
-		}
-	}
-	return false
-}
-
-func taskSubStatusCodeByScope(item *domain.TaskListItem, scope domain.TaskSubStatusScope) domain.TaskSubStatusCode {
-	switch scope {
-	case domain.TaskSubStatusScopeDesign:
-		return item.Workflow.SubStatus.Design.Code
-	case domain.TaskSubStatusScopeAudit:
-		return item.Workflow.SubStatus.Audit.Code
-	case domain.TaskSubStatusScopeProcurement:
-		return item.Workflow.SubStatus.Procurement.Code
-	case domain.TaskSubStatusScopeWarehouse:
-		return item.Workflow.SubStatus.Warehouse.Code
-	case domain.TaskSubStatusScopeCustomization:
-		return item.Workflow.SubStatus.Customization.Code
-	case domain.TaskSubStatusScopeOutsource:
-		if item.Workflow.SubStatus.Customization.Code != "" {
-			return item.Workflow.SubStatus.Customization.Code
-		}
-		return item.Workflow.SubStatus.Outsource.Code
-	case domain.TaskSubStatusScopeProduction:
-		return item.Workflow.SubStatus.Production.Code
-	default:
-		return ""
-	}
-}
-
-func matchesAnyTaskSubStatusCode(item *domain.TaskListItem, codes []domain.TaskSubStatusCode) bool {
-	candidates := []domain.TaskSubStatusCode{
-		item.Workflow.SubStatus.Design.Code,
-		item.Workflow.SubStatus.Audit.Code,
-		item.Workflow.SubStatus.Procurement.Code,
-		item.Workflow.SubStatus.Warehouse.Code,
-		item.Workflow.SubStatus.Customization.Code,
-		item.Workflow.SubStatus.Outsource.Code,
-		item.Workflow.SubStatus.Production.Code,
-	}
-	for _, candidate := range candidates {
-		if containsTaskSubStatusCode(codes, candidate) {
-			return true
-		}
-	}
-	return false
-}
-
-func taskCoordinationStatus(item *domain.TaskListItem) (domain.ProcurementCoordinationStatus, bool) {
-	if item == nil || item.TaskType != domain.TaskTypePurchaseTask {
-		return "", false
-	}
-	if item.ProcurementSummary != nil {
-		return item.ProcurementSummary.CoordinationStatus, true
-	}
-	task := &domain.Task{
-		TaskType:   item.TaskType,
-		TaskStatus: item.TaskStatus,
-	}
-	var record *domain.ProcurementRecord
-	if item.ProcurementStatus != nil {
-		record = &domain.ProcurementRecord{
-			Status:             *item.ProcurementStatus,
-			ProcurementPrice:   item.ProcurementPrice,
-			Quantity:           item.ProcurementQuantity,
-			SupplierName:       item.SupplierName,
-			ExpectedDeliveryAt: item.ExpectedDeliveryAt,
-		}
-	}
-	var warehouse *domain.WarehouseReceipt
-	if item.WarehouseStatus != nil {
-		warehouse = &domain.WarehouseReceipt{Status: *item.WarehouseStatus}
-	}
-	return deriveProcurementCoordinationStatus(task, record, warehouse), true
-}
-
-func taskWarehouseReceiveReady(item *domain.TaskListItem) bool {
-	if item == nil {
-		return false
-	}
-	task := &domain.Task{
-		TaskType:   item.TaskType,
-		TaskStatus: item.TaskStatus,
-	}
-	var warehouse *domain.WarehouseReceipt
-	if item.WarehouseStatus != nil {
-		warehouse = &domain.WarehouseReceipt{Status: *item.WarehouseStatus}
-	}
-	return canReceiveInWarehouse(task, warehouse)
-}
-
-func hasAnyWorkflowReasonCode(item *domain.TaskListItem, codes []domain.WorkflowReasonCode) bool {
-	for _, code := range codes {
-		for _, reason := range item.Workflow.WarehouseBlockingReasons {
-			if reason.Code == code {
-				return true
-			}
 		}
 	}
 	return false
@@ -348,43 +197,7 @@ func containsTaskSourceMode(values []domain.TaskSourceMode, want domain.TaskSour
 	return false
 }
 
-func containsTaskMainStatus(values []domain.TaskMainStatus, want domain.TaskMainStatus) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
-}
-
-func containsWorkflowLane(values []domain.WorkflowLane, want domain.WorkflowLane) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
-}
-
 func containsBusinessLane(values []domain.TaskBusinessLane, want domain.TaskBusinessLane) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
-}
-
-func containsTaskSubStatusCode(values []domain.TaskSubStatusCode, want domain.TaskSubStatusCode) bool {
-	for _, value := range values {
-		if value == want {
-			return true
-		}
-	}
-	return false
-}
-
-func containsCoordinationStatus(values []domain.ProcurementCoordinationStatus, want domain.ProcurementCoordinationStatus) bool {
 	for _, value := range values {
 		if value == want {
 			return true

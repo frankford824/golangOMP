@@ -5829,28 +5829,46 @@ func (s *Service) SystemSearch(ctx context.Context, actor domain.RequestActor, q
 	limit := page * pageSize
 	items := make([]*assetcenter.AssetDetail, 0, limit*2)
 	var total int64
-	if sourceFilter != domain.AssetResourceSourceExternal {
+	includeGroups := sourceFilter != domain.AssetResourceSourceExternal
+	includeExternal := sourceFilter != domain.AssetResourceSourceSystem
+	if includeGroups {
 		if s.resourceGroups == nil {
 			return nil, domain.NewAppError(domain.ErrCodeInternalError, "Resource group material searcher is not configured.", nil)
 		}
-		groups, groupTotal, appErr := s.searchResourceGroupMaterials(ctx, actor, query, limit, formatCategory, laneFilter)
-		if appErr != nil {
-			return nil, appErr
-		}
-		items = append(items, groups...)
-		total += groupTotal
 	}
-	if sourceFilter != domain.AssetResourceSourceSystem {
+	if includeExternal {
 		if s.systemAssets == nil {
 			return nil, domain.NewAppError(domain.ErrCodeInternalError, "External asset searcher is not configured.", nil)
 		}
-		external, externalTotal, appErr := s.searchExternalMaterialAssets(ctx, query, limit, formatCategory, laneFilter)
-		if appErr != nil {
-			return nil, appErr
-		}
-		items = append(items, external...)
-		total += externalTotal
 	}
+	var groups, external []*assetcenter.AssetDetail
+	var groupTotal, externalTotal int64
+	var groupErr, externalErr *domain.AppError
+	jobs := make([]func() error, 0, 2)
+	if includeGroups {
+		jobs = append(jobs, func() error {
+			groups, groupTotal, groupErr = s.searchResourceGroupMaterials(ctx, actor, query, limit, formatCategory, laneFilter)
+			return nil
+		})
+	}
+	if includeExternal {
+		jobs = append(jobs, func() error {
+			external, externalTotal, externalErr = s.searchExternalMaterialAssets(ctx, query, limit, formatCategory, laneFilter)
+			return nil
+		})
+	}
+	// source=all performs the two independent authorities concurrently, while
+	// the fixed job list bounds fan-out to exactly two providers.
+	_ = runAssetWorkbenchSearchJobs(jobs...)
+	if groupErr != nil {
+		return nil, groupErr
+	}
+	if externalErr != nil {
+		return nil, externalErr
+	}
+	items = append(items, groups...)
+	items = append(items, external...)
+	total = groupTotal + externalTotal
 	sort.SliceStable(items, func(i, j int) bool {
 		if items[i].UpdatedAt.Equal(items[j].UpdatedAt) {
 			if items[i].SourceType == items[j].SourceType {

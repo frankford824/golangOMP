@@ -89,7 +89,6 @@ func loadERPShortNameRuleConfig() erpShortNameRuleConfig {
 			DefaultTemplate: "{name}-{i_id}",
 			SceneTemplates: map[string]string{
 				"new_product_development": "{name}-{i_id}",
-				"purchase_task":           "{name}-{i_id}",
 				"original_product_update": "{name}-{i_id}",
 				"item_style_update":       "{name}-{i_id}",
 			},

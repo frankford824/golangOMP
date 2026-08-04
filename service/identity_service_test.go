@@ -193,8 +193,8 @@ func TestIdentityServiceGetCurrentUserAllowsNonManagementSessionUser(t *testing.
 	if !containsRoleValue(currentUser.Roles, domain.RoleWarehouse) || !containsRoleValue(currentUser.Roles, domain.RoleMember) {
 		t.Fatalf("GetCurrentUser() roles = %+v", currentUser.Roles)
 	}
-	if !containsString(currentUser.FrontendAccess.Pages, "warehouse_receive") {
-		t.Fatalf("GetCurrentUser() frontend_access = %+v, want warehouse pages hydrated", currentUser.FrontendAccess)
+	if containsString(currentUser.FrontendAccess.Pages, "warehouse_receive") {
+		t.Fatalf("GetCurrentUser() frontend_access = %+v, retired Warehouse role must not hydrate warehouse pages", currentUser.FrontendAccess)
 	}
 }
 
@@ -440,7 +440,7 @@ func TestIdentityServiceChangePasswordAndRelogin(t *testing.T) {
 	}
 }
 
-func TestIdentityServiceCreateManagedUserSupportsInitialPasswordOrgAndRoles(t *testing.T) {
+func TestIdentityServiceCreateManagedUserSupportsInitialPasswordOrgAndMemberAccess(t *testing.T) {
 	userRepo := newIdentityUserRepo()
 	logRepo := &identityPermissionLogRepoStub{}
 	svc := NewIdentityService(userRepo, &identitySessionRepoStub{}, logRepo, identityTxRunner{})
@@ -453,13 +453,7 @@ func TestIdentityServiceCreateManagedUserSupportsInitialPasswordOrgAndRoles(t *t
 		t.Fatalf("missing operations team in options: %+v", options.Departments)
 	}
 
-	adminCtx := domain.WithRequestActor(context.Background(), domain.RequestActor{
-		ID:       1,
-		Username: "admin",
-		Roles:    []domain.Role{domain.RoleAdmin, domain.RoleHRAdmin},
-		Source:   domain.RequestActorSourceSessionToken,
-		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
-	})
+	adminCtx := identityGlobalAccessManageContext(1)
 	user, appErr := svc.CreateManagedUser(adminCtx, CreateManagedUserParams{
 		Username:    "ops_new",
 		EmployeeNo:  intPtr(1020),
@@ -469,7 +463,6 @@ func TestIdentityServiceCreateManagedUserSupportsInitialPasswordOrgAndRoles(t *t
 		Mobile:      "13800001020",
 		Email:       "ops_new@example.com",
 		Password:    "Init1234",
-		Roles:       []domain.Role{domain.RoleOps, domain.RoleWarehouse},
 	})
 	if appErr != nil {
 		t.Fatalf("CreateManagedUser() error = %+v", appErr)
@@ -480,11 +473,11 @@ func TestIdentityServiceCreateManagedUserSupportsInitialPasswordOrgAndRoles(t *t
 	if user.Department != domain.DepartmentOperations || user.Team != opsTeam {
 		t.Fatalf("CreateManagedUser() org = %+v", user)
 	}
-	if !containsRoleValue(user.Roles, domain.RoleOps) || !containsRoleValue(user.Roles, domain.RoleWarehouse) {
-		t.Fatalf("CreateManagedUser() roles = %+v", user.Roles)
+	if !slices.Equal(user.Roles, []domain.Role{domain.RoleMember}) {
+		t.Fatalf("CreateManagedUser() roles = %+v, want [Member]", user.Roles)
 	}
-	if !containsString(user.FrontendAccess.Actions, "task.create") {
-		t.Fatalf("CreateManagedUser() frontend_access = %+v", user.FrontendAccess)
+	if containsString(user.FrontendAccess.Actions, "task.create") {
+		t.Fatalf("CreateManagedUser() must not infer task.create from account creation: %+v", user.FrontendAccess)
 	}
 	if !hasPermissionAction(logRepo.logs, domain.PermissionActionUserCreated, user.ID) {
 		t.Fatalf("permission logs = %+v, want user_created entry", logRepo.logs)
@@ -510,13 +503,7 @@ func TestIdentityServiceEmployeeNoMustBeUniqueWithBusinessMessage(t *testing.T) 
 		t.Fatalf("missing operations team in options: %+v", options.Departments)
 	}
 
-	adminCtx := domain.WithRequestActor(context.Background(), domain.RequestActor{
-		ID:       1,
-		Username: "admin",
-		Roles:    []domain.Role{domain.RoleSuperAdmin},
-		Source:   domain.RequestActorSourceSessionToken,
-		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
-	})
+	adminCtx := identityGlobalAccessManageContext(1)
 	first, appErr := svc.CreateManagedUser(adminCtx, CreateManagedUserParams{
 		Username:    "employee_no_owner",
 		EmployeeNo:  intPtr(88),
@@ -525,7 +512,6 @@ func TestIdentityServiceEmployeeNoMustBeUniqueWithBusinessMessage(t *testing.T) 
 		Team:        opsTeam,
 		Mobile:      "13800001880",
 		Password:    "Init1234",
-		Roles:       []domain.Role{domain.RoleOps},
 	})
 	if appErr != nil {
 		t.Fatalf("CreateManagedUser(first) error = %+v", appErr)
@@ -539,7 +525,6 @@ func TestIdentityServiceEmployeeNoMustBeUniqueWithBusinessMessage(t *testing.T) 
 		Team:        opsTeam,
 		Mobile:      "13800001881",
 		Password:    "Init1234",
-		Roles:       []domain.Role{domain.RoleOps},
 	})
 	if appErr == nil || appErrorDenyCode(appErr) != "employee_no_conflict" {
 		t.Fatalf("CreateManagedUser(duplicate employee_no) appErr = %+v, want employee_no_conflict", appErr)
@@ -571,13 +556,7 @@ func TestIdentityServiceResetUserPasswordAllowsReloginWithNewPassword(t *testing
 		t.Fatalf("missing procurement team in options: %+v", options.Departments)
 	}
 
-	created, appErr := svc.CreateManagedUser(domain.WithRequestActor(context.Background(), domain.RequestActor{
-		ID:       1,
-		Username: "admin",
-		Roles:    []domain.Role{domain.RoleSuperAdmin},
-		Source:   domain.RequestActorSourceSessionToken,
-		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
-	}), CreateManagedUserParams{
+	created, appErr := svc.CreateManagedUser(identityGlobalAccessManageContext(1), CreateManagedUserParams{
 		Username:    "reset_user",
 		EmployeeNo:  intPtr(1021),
 		DisplayName: "Reset User",
@@ -585,19 +564,12 @@ func TestIdentityServiceResetUserPasswordAllowsReloginWithNewPassword(t *testing
 		Team:        procurementTeam,
 		Mobile:      "13800001021",
 		Password:    "Init1234",
-		Roles:       []domain.Role{domain.RoleMember},
 	})
 	if appErr != nil {
 		t.Fatalf("CreateManagedUser() error = %+v", appErr)
 	}
 
-	adminCtx := domain.WithRequestActor(context.Background(), domain.RequestActor{
-		ID:       1,
-		Username: "hr_admin",
-		Roles:    []domain.Role{domain.RoleHRAdmin},
-		Source:   domain.RequestActorSourceSessionToken,
-		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
-	})
+	adminCtx := identityGlobalAccessManageContext(1)
 	if _, appErr := svc.ResetUserPassword(adminCtx, ResetUserPasswordParams{
 		UserID:      created.ID,
 		NewPassword: "Reset1234",
@@ -639,8 +611,8 @@ func TestIdentityServiceSyncConfiguredAuthSeedsDefaultAdmin(t *testing.T) {
 	if !containsRoleValue(loginResult.User.Roles, domain.RoleSuperAdmin) || containsRoleValue(loginResult.User.Roles, domain.RoleAdmin) {
 		t.Fatalf("Login(admin) roles = %+v, want SuperAdmin without legacy Admin", loginResult.User.Roles)
 	}
-	if !loginResult.User.FrontendAccess.IsSuperAdmin {
-		t.Fatalf("Login(admin) frontend_access = %+v", loginResult.User.FrontendAccess)
+	if loginResult.User.FrontendAccess.IsSuperAdmin {
+		t.Fatalf("Login(admin) frontend_access = %+v, legacy role must not grant explicit SuperAdmin access", loginResult.User.FrontendAccess)
 	}
 	if loginResult.User.Team != "未分配池" {
 		t.Fatalf("Login(admin) team = %s", loginResult.User.Team)
@@ -682,162 +654,7 @@ func TestSeedHRAdminConfigSuperAdmin(t *testing.T) {
 	}
 }
 
-func TestIdentityServiceAddAndRemoveUserRolesWriteLogs(t *testing.T) {
-	userRepo := newIdentityUserRepo()
-	logRepo := &identityPermissionLogRepoStub{}
-	svc := NewIdentityService(userRepo, &identitySessionRepoStub{}, logRepo, identityTxRunner{})
-
-	if appErr := svc.SyncConfiguredAuth(context.Background()); appErr != nil {
-		t.Fatalf("SyncConfiguredAuth() error = %+v", appErr)
-	}
-	userResult, appErr := svc.Register(context.Background(), RegisterUserParams{
-		Username:    "member",
-		DisplayName: "普通成员",
-		Department:  domain.DepartmentProcurement,
-		Team:        "采购组",
-		Mobile:      "13800000008",
-		Password:    "Pass1234",
-	})
-	if appErr != nil {
-		t.Fatalf("Register(member) error = %+v", appErr)
-	}
-
-	adminCtx := domain.WithRequestActor(context.Background(), domain.RequestActor{
-		ID:       1,
-		Username: "hr_admin",
-		Roles:    []domain.Role{domain.RoleHRAdmin},
-		Source:   domain.RequestActorSourceSessionToken,
-		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
-	})
-	updated, appErr := svc.AddUserRoles(adminCtx, AddUserRolesParams{
-		UserID: userResult.User.ID,
-		Roles:  []domain.Role{domain.RoleOps, domain.RoleWarehouse},
-	})
-	if appErr != nil {
-		t.Fatalf("AddUserRoles() error = %+v", appErr)
-	}
-	if !containsRoleValue(updated.Roles, domain.RoleOps) || !containsRoleValue(updated.Roles, domain.RoleWarehouse) {
-		t.Fatalf("AddUserRoles() roles = %+v", updated.Roles)
-	}
-	updated, appErr = svc.RemoveUserRole(adminCtx, RemoveUserRoleParams{
-		UserID: userResult.User.ID,
-		Role:   domain.RoleWarehouse,
-	})
-	if appErr != nil {
-		t.Fatalf("RemoveUserRole() error = %+v", appErr)
-	}
-	if containsRoleValue(updated.Roles, domain.RoleWarehouse) {
-		t.Fatalf("RemoveUserRole() roles = %+v", updated.Roles)
-	}
-	if !hasPermissionLog(logRepo.logs, domain.PermissionActionRoleAssigned, userResult.User.ID, []domain.Role{domain.RoleOps, domain.RoleWarehouse}) {
-		t.Fatalf("permission logs = %+v, want role_assigned entry", logRepo.logs)
-	}
-	if !hasPermissionLog(logRepo.logs, domain.PermissionActionRoleRemoved, userResult.User.ID, []domain.Role{domain.RoleWarehouse}) {
-		t.Fatalf("permission logs = %+v, want role_removed entry", logRepo.logs)
-	}
-
-	if _, appErr := svc.RemoveUserRole(adminCtx, RemoveUserRoleParams{
-		UserID: userResult.User.ID,
-		Role:   domain.RoleMember,
-	}); appErr == nil || appErrorDenyCode(appErr) != "member_role_required" {
-		t.Fatalf("RemoveUserRole(Member) appErr = %+v, want member_role_required", appErr)
-	}
-}
-
-func TestIdentityServiceRoleWriteRejectsNonAssignableCompatibilityRoles(t *testing.T) {
-	userRepo := newIdentityUserRepo()
-	userRepo.users[42] = &domain.User{
-		ID:          42,
-		Username:    "role_target",
-		DisplayName: "Role Target",
-		Department:  domain.DepartmentOperations,
-		Team:        "运营组",
-		Status:      domain.UserStatusActive,
-	}
-	userRepo.roles[42] = []domain.Role{domain.RoleMember}
-	svc := NewIdentityService(userRepo, &identitySessionRepoStub{}, &identityPermissionLogRepoStub{}, identityTxRunner{})
-	superCtx := domain.WithRequestActor(context.Background(), domain.RequestActor{
-		ID:       1,
-		Username: "super_admin",
-		Roles:    []domain.Role{domain.RoleSuperAdmin},
-		Source:   domain.RequestActorSourceSessionToken,
-		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
-	})
-
-	if _, appErr := svc.SetUserRoles(superCtx, SetUserRolesParams{UserID: 42, Roles: []domain.Role{domain.RoleOutsource}}); appErr == nil || appErrorDenyCode(appErr) != "role_not_assignable" {
-		t.Fatalf("SetUserRoles(Outsource) appErr = %+v, want role_not_assignable", appErr)
-	}
-	if _, appErr := svc.AddUserRoles(superCtx, AddUserRolesParams{UserID: 42, Roles: []domain.Role{domain.RoleRoleAdmin}}); appErr == nil || appErrorDenyCode(appErr) != "role_not_assignable" {
-		t.Fatalf("AddUserRoles(RoleAdmin) appErr = %+v, want role_not_assignable", appErr)
-	}
-	if _, appErr := svc.AddUserRoles(superCtx, AddUserRolesParams{UserID: 42, Roles: []domain.Role{domain.RoleAuditB}}); appErr == nil || appErrorDenyCode(appErr) != "role_not_assignable" {
-		t.Fatalf("AddUserRoles(Audit_B) appErr = %+v, want role_not_assignable", appErr)
-	}
-	options, appErr := svc.GetOrgOptions(superCtx)
-	if appErr != nil {
-		t.Fatalf("GetOrgOptions() error = %+v", appErr)
-	}
-	opsTeam, ok := findDepartmentTeam(options, string(domain.DepartmentOperations))
-	if !ok {
-		t.Fatalf("missing operations team in options: %+v", options.Departments)
-	}
-	if _, appErr := svc.CreateManagedUser(superCtx, CreateManagedUserParams{
-		Username:    "legacy_admin_target",
-		EmployeeNo:  intPtr(9998),
-		DisplayName: "Legacy Admin Target",
-		Department:  domain.DepartmentOperations,
-		Team:        opsTeam,
-		Mobile:      "13800009998",
-		Password:    "Init1234",
-		Roles:       []domain.Role{domain.RoleAdmin},
-	}); appErr == nil || appErrorDenyCode(appErr) != "role_not_assignable" {
-		t.Fatalf("CreateManagedUser(Admin) appErr = %+v, want role_not_assignable", appErr)
-	}
-}
-
-func TestIdentityServiceDeleteUserProtectsLastSuperAdminAndRejectsLegacyAdmin(t *testing.T) {
-	userRepo := newIdentityUserRepo()
-	userRepo.users[1] = &domain.User{
-		ID:          1,
-		Username:    "only_super",
-		DisplayName: "Only Super",
-		Status:      domain.UserStatusActive,
-	}
-	userRepo.roles[1] = []domain.Role{domain.RoleSuperAdmin}
-	svc := NewIdentityService(userRepo, &identitySessionRepoStub{}, &identityPermissionLogRepoStub{}, identityTxRunner{})
-
-	superCtx := domain.WithRequestActor(context.Background(), domain.RequestActor{
-		ID:       1,
-		Username: "only_super",
-		Roles:    []domain.Role{domain.RoleSuperAdmin},
-		Source:   domain.RequestActorSourceSessionToken,
-		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
-	})
-	appErr := svc.DeleteUser(superCtx, DeleteUserParams{UserID: 1, Reason: "governance test"})
-	if appErr == nil {
-		t.Fatal("DeleteUser(last SuperAdmin) appErr = nil, want deny")
-	}
-	if denyCode := appErrorDenyCode(appErr); denyCode != "last_super_admin_deactivate_denied" {
-		t.Fatalf("deny_code = %q, want last_super_admin_deactivate_denied", denyCode)
-	}
-
-	adminCtx := domain.WithRequestActor(context.Background(), domain.RequestActor{
-		ID:       2,
-		Username: "legacy_admin",
-		Roles:    []domain.Role{domain.RoleAdmin},
-		Source:   domain.RequestActorSourceSessionToken,
-		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
-	})
-	appErr = svc.DeleteUser(adminCtx, DeleteUserParams{UserID: 1, Reason: "governance test"})
-	if appErr == nil {
-		t.Fatal("DeleteUser(Admin actor) appErr = nil, want deny")
-	}
-	if denyCode := appErrorDenyCode(appErr); denyCode != "module_action_role_denied" {
-		t.Fatalf("deny_code = %q, want module_action_role_denied", denyCode)
-	}
-}
-
-func TestIdentityServiceGetOrgOptionsIncludesUnassignedPoolAndCatalog(t *testing.T) {
+func TestIdentityServiceGetOrgOptionsIncludesUnassignedPool(t *testing.T) {
 	svc := NewIdentityService(newIdentityUserRepo(), &identitySessionRepoStub{}, &identityPermissionLogRepoStub{}, identityTxRunner{})
 
 	options, appErr := svc.GetOrgOptions(context.Background())
@@ -849,59 +666,6 @@ func TestIdentityServiceGetOrgOptionsIncludesUnassignedPoolAndCatalog(t *testing
 	}
 	if !containsDepartmentOption(options.Departments, "未分配", "未分配池") {
 		t.Fatalf("GetOrgOptions() departments = %+v", options.Departments)
-	}
-	if !containsRoleCatalogEntry(options.RoleCatalogSummary, domain.RoleHRAdmin) {
-		t.Fatalf("GetOrgOptions() role_catalog_summary = %+v", options.RoleCatalogSummary)
-	}
-}
-
-func TestIdentityServiceGetOrgOptionsRoleCatalogMatchesActorAssignable(t *testing.T) {
-	svc := NewIdentityService(newIdentityUserRepo(), &identitySessionRepoStub{}, &identityPermissionLogRepoStub{}, identityTxRunner{})
-
-	hrCtx := domain.WithRequestActor(context.Background(), domain.RequestActor{
-		ID:       11,
-		Username: "hr_admin",
-		Roles:    []domain.Role{domain.RoleHRAdmin},
-		Source:   domain.RequestActorSourceSessionToken,
-		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
-	})
-	hrOptions, appErr := svc.GetOrgOptions(hrCtx)
-	if appErr != nil {
-		t.Fatalf("GetOrgOptions(HRAdmin) error = %+v", appErr)
-	}
-	if roleCatalogEntryForTest(hrOptions.RoleCatalogSummary, domain.RoleHRAdmin).AssignableByCurrentActor {
-		t.Fatal("HRAdmin role assignable_by_current_actor = true for HRAdmin, want false")
-	}
-	if !roleCatalogEntryForTest(hrOptions.RoleCatalogSummary, domain.RoleCustomizationReviewer).AssignableByCurrentActor {
-		t.Fatal("CustomizationReviewer assignable_by_current_actor = false for HRAdmin, want true")
-	}
-	if roleCatalogEntryForTest(hrOptions.RoleCatalogSummary, domain.RoleOutsource).AssignableByCurrentActor {
-		t.Fatal("Outsource assignable_by_current_actor = true, want false")
-	}
-	if roleCatalogEntryForTest(hrOptions.RoleCatalogSummary, domain.RoleAuditB).AssignableByCurrentActor {
-		t.Fatal("Audit_B assignable_by_current_actor = true, want false")
-	}
-
-	deptCtx := domain.WithRequestActor(context.Background(), domain.RequestActor{
-		ID:         12,
-		Username:   "design_dept_admin",
-		Roles:      []domain.Role{domain.RoleDeptAdmin},
-		Department: string(domain.DepartmentDesign),
-		Source:     domain.RequestActorSourceSessionToken,
-		AuthMode:   domain.AuthModeSessionTokenRoleEnforced,
-	})
-	deptOptions, appErr := svc.GetOrgOptions(deptCtx)
-	if appErr != nil {
-		t.Fatalf("GetOrgOptions(DepartmentAdmin) error = %+v", appErr)
-	}
-	if !roleCatalogEntryForTest(deptOptions.RoleCatalogSummary, domain.RoleDesigner).AssignableByCurrentActor {
-		t.Fatal("Designer assignable_by_current_actor = false for design DepartmentAdmin, want true")
-	}
-	if roleCatalogEntryForTest(deptOptions.RoleCatalogSummary, domain.RoleDesignReviewer).AssignableByCurrentActor {
-		t.Fatal("DesignReviewer assignable_by_current_actor = true for DepartmentAdmin, want false")
-	}
-	if roleCatalogEntryForTest(deptOptions.RoleCatalogSummary, domain.RoleOps).AssignableByCurrentActor {
-		t.Fatal("Ops assignable_by_current_actor = true for design DepartmentAdmin, want false")
 	}
 }
 
@@ -1042,7 +806,6 @@ func TestIdentityServiceListUsersSupportsDepartmentTeamRoleAndKeywordFilters(t *
 		Team:        opsTeam,
 		Mobile:      "13800001022",
 		Password:    "Init1234",
-		Roles:       []domain.Role{domain.RoleOps},
 	}); appErr != nil {
 		t.Fatalf("CreateManagedUser(ops_filter) error = %+v", appErr)
 	}
@@ -1054,12 +817,11 @@ func TestIdentityServiceListUsersSupportsDepartmentTeamRoleAndKeywordFilters(t *
 		Team:        warehouseTeam,
 		Mobile:      "13800001023",
 		Password:    "Init1234",
-		Roles:       []domain.Role{domain.RoleWarehouse},
 	}); appErr != nil {
 		t.Fatalf("CreateManagedUser(warehouse_filter) error = %+v", appErr)
 	}
 
-	role := domain.RoleOps
+	role := domain.RoleMember
 	department := domain.DepartmentOperations
 	users, pagination, appErr := svc.ListUsers(context.Background(), UserFilter{
 		Keyword:    "ops",
@@ -1132,13 +894,7 @@ func TestIdentityServiceUpdateUserSupportsOrgAndManagedScopes(t *testing.T) {
 	team := "定制美工组"
 	managedDepartments := []string{string(domain.DepartmentDesign)}
 	managedTeams := []string{"定制美工组"}
-	adminCtx := domain.WithRequestActor(context.Background(), domain.RequestActor{
-		ID:       1,
-		Username: "admin",
-		Roles:    []domain.Role{domain.RoleAdmin, domain.RoleSuperAdmin},
-		Source:   domain.RequestActorSourceSessionToken,
-		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
-	})
+	adminCtx := identityGlobalAccessManageContext(1)
 
 	updated, appErr := svc.UpdateUser(adminCtx, UpdateUserParams{
 		UserID:             member.User.ID,
@@ -1157,8 +913,8 @@ func TestIdentityServiceUpdateUserSupportsOrgAndManagedScopes(t *testing.T) {
 	if !containsString(updated.ManagedDepartments, string(domain.DepartmentDesign)) || !containsString(updated.ManagedTeams, "定制美工组") {
 		t.Fatalf("UpdateUser() managed scopes = departments:%+v teams:%+v", updated.ManagedDepartments, updated.ManagedTeams)
 	}
-	if !containsString(updated.FrontendAccess.ManagedDepartments, string(domain.DepartmentDesign)) || !containsString(updated.FrontendAccess.ManagedTeams, "定制美工组") {
-		t.Fatalf("UpdateUser() frontend_access = %+v", updated.FrontendAccess)
+	if len(updated.FrontendAccess.ManagedDepartments) != 0 || len(updated.FrontendAccess.ManagedTeams) != 0 {
+		t.Fatalf("UpdateUser() frontend_access = %+v, legacy managed fields must not grant frontend scope", updated.FrontendAccess)
 	}
 	if !hasPermissionAction(logRepo.logs, domain.PermissionActionPoolAssigned, member.User.ID) {
 		t.Fatalf("permission logs = %+v, want user_pool_assigned entry", logRepo.logs)
@@ -1196,19 +952,12 @@ func TestIdentityServiceUpdateUserPatchKeepsUnspecifiedFields(t *testing.T) {
 		Team:        originTeams[0],
 		Mobile:      "13800001080",
 		Password:    "Init1234",
-		Roles:       []domain.Role{domain.RoleOps},
 	})
 	if appErr != nil {
 		t.Fatalf("CreateManagedUser() error = %+v", appErr)
 	}
 
-	adminCtx := domain.WithRequestActor(context.Background(), domain.RequestActor{
-		ID:       1,
-		Username: "admin",
-		Roles:    []domain.Role{domain.RoleAdmin, domain.RoleSuperAdmin},
-		Source:   domain.RequestActorSourceSessionToken,
-		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
-	})
+	adminCtx := identityGlobalAccessManageContext(1)
 	department := domain.Department(targetDepartment)
 	team := targetTeams[0]
 	updated, appErr := svc.UpdateUser(adminCtx, UpdateUserParams{
@@ -1238,7 +987,7 @@ func TestIdentityServiceUpdateUserPatchKeepsUnspecifiedFields(t *testing.T) {
 	}
 }
 
-func TestIdentityServiceUpdateUserSupportsGroupAliasAndUngrouped(t *testing.T) {
+func TestIdentityServiceUpdateUserSupportsCanonicalTeamAndUngrouped(t *testing.T) {
 	userRepo := newIdentityUserRepo()
 	logRepo := &identityPermissionLogRepoStub{}
 	svc := NewIdentityService(userRepo, &identitySessionRepoStub{}, logRepo, identityTxRunner{})
@@ -1268,30 +1017,24 @@ func TestIdentityServiceUpdateUserSupportsGroupAliasAndUngrouped(t *testing.T) {
 		t.Fatalf("Register(group_alias_user) error = %+v", appErr)
 	}
 
-	adminCtx := domain.WithRequestActor(context.Background(), domain.RequestActor{
-		ID:       1,
-		Username: "admin",
-		Roles:    []domain.Role{domain.RoleAdmin, domain.RoleSuperAdmin},
-		Source:   domain.RequestActorSourceSessionToken,
-		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
-	})
+	adminCtx := identityGlobalAccessManageContext(1)
 
-	aliasTeam := formalTeams[1]
+	selectedTeam := formalTeams[1]
 	updated, appErr := svc.UpdateUser(adminCtx, UpdateUserParams{
 		UserID: member.User.ID,
-		Group:  &aliasTeam,
+		Team:   &selectedTeam,
 	})
 	if appErr != nil {
-		t.Fatalf("UpdateUser(group alias) error = %+v", appErr)
+		t.Fatalf("UpdateUser(team) error = %+v", appErr)
 	}
-	if updated.Team != aliasTeam || updated.Group != aliasTeam {
-		t.Fatalf("UpdateUser(group alias) team/group = %q/%q, want %q", updated.Team, updated.Group, aliasTeam)
+	if updated.Team != selectedTeam {
+		t.Fatalf("UpdateUser(team) team = %q, want %q", updated.Team, selectedTeam)
 	}
 
 	ungrouped := "ungrouped"
 	updated, appErr = svc.UpdateUser(adminCtx, UpdateUserParams{
 		UserID: member.User.ID,
-		Group:  &ungrouped,
+		Team:   &ungrouped,
 	})
 	if appErr != nil {
 		t.Fatalf("UpdateUser(ungrouped) error = %+v", appErr)
@@ -1301,43 +1044,6 @@ func TestIdentityServiceUpdateUserSupportsGroupAliasAndUngrouped(t *testing.T) {
 	}
 	if !hasPermissionAction(logRepo.logs, domain.PermissionActionUserOrgChanged, member.User.ID) {
 		t.Fatalf("permission logs = %+v, want user_org_changed entry", logRepo.logs)
-	}
-}
-
-func TestIdentityServiceUpdateUserRejectsTeamGroupConflict(t *testing.T) {
-	userRepo := newIdentityUserRepo()
-	svc := NewIdentityService(userRepo, &identitySessionRepoStub{}, &identityPermissionLogRepoStub{}, identityTxRunner{})
-
-	options, appErr := svc.GetOrgOptions(context.Background())
-	if appErr != nil {
-		t.Fatalf("GetOrgOptions() error = %+v", appErr)
-	}
-	formalDepartment, formalTeams, ok := pickOrgDepartmentWithTeams(options, string(domain.DepartmentUnassigned), 1)
-	if !ok {
-		t.Fatalf("pick formal department failed: %+v", options.Departments)
-	}
-
-	member, appErr := svc.Register(context.Background(), RegisterUserParams{
-		Username:    "team_group_conflict_user",
-		DisplayName: "Team Group Conflict",
-		Department:  domain.Department(formalDepartment),
-		Team:        formalTeams[0],
-		Mobile:      "13800001010",
-		Password:    "Pass1234",
-	})
-	if appErr != nil {
-		t.Fatalf("Register(team_group_conflict_user) error = %+v", appErr)
-	}
-
-	team := formalTeams[0]
-	group := "ungrouped"
-	_, appErr = svc.UpdateUser(context.Background(), UpdateUserParams{
-		UserID: member.User.ID,
-		Team:   &team,
-		Group:  &group,
-	})
-	if appErr == nil || appErr.Message != "team and group must be the same when both are provided" {
-		t.Fatalf("UpdateUser(team/group conflict) appErr = %+v", appErr)
 	}
 }
 
@@ -1361,20 +1067,13 @@ func TestIdentityServiceUpdateUserDisableBlocksLogin(t *testing.T) {
 		Team:        designTeam,
 		Mobile:      "13800001024",
 		Password:    "Init1234",
-		Roles:       []domain.Role{domain.RoleDesigner},
 	})
 	if appErr != nil {
 		t.Fatalf("CreateManagedUser() error = %+v", appErr)
 	}
 
 	disabled := domain.UserStatusDisabled
-	adminCtx := domain.WithRequestActor(context.Background(), domain.RequestActor{
-		ID:       1,
-		Username: "admin",
-		Roles:    []domain.Role{domain.RoleAdmin},
-		Source:   domain.RequestActorSourceSessionToken,
-		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
-	})
+	adminCtx := identityGlobalAccessManageContext(1)
 	if _, appErr := svc.UpdateUser(adminCtx, UpdateUserParams{
 		UserID: user.ID,
 		Status: &disabled,
@@ -1461,7 +1160,6 @@ func TestIdentityServiceDepartmentAdminCannotCreateUserOutsideOwnDepartment(t *t
 		Team:        opsTeam,
 		Mobile:      "13800001026",
 		Password:    "Init1234",
-		Roles:       []domain.Role{domain.RoleOps},
 	})
 	if appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
 		t.Fatalf("CreateManagedUser() appErr = %+v", appErr)
@@ -1497,14 +1195,13 @@ func TestIdentityServiceTeamLeadCannotCreateManagedUser(t *testing.T) {
 		Team:        opsTeam,
 		Mobile:      "13800001027",
 		Password:    "Init1234",
-		Roles:       []domain.Role{domain.RoleOps},
 	})
 	if appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
 		t.Fatalf("CreateManagedUser() appErr = %+v", appErr)
 	}
 }
 
-func TestIdentityServiceDepartmentAdminPasswordResetAndUnassignedAssignmentBoundaries(t *testing.T) {
+func TestIdentityServiceScopedAccessPasswordResetAndCrossDepartmentBoundaries(t *testing.T) {
 	userRepo := newIdentityUserRepo()
 	sessionRepo := &identitySessionRepoStub{}
 	svc := NewIdentityService(userRepo, sessionRepo, &identityPermissionLogRepoStub{}, identityTxRunner{})
@@ -1529,7 +1226,6 @@ func TestIdentityServiceDepartmentAdminPasswordResetAndUnassignedAssignmentBound
 		Team:        opsTeam,
 		Mobile:      "13800001028",
 		Password:    "Init1234",
-		Roles:       []domain.Role{domain.RoleOps},
 	})
 	if appErr != nil {
 		t.Fatalf("CreateManagedUser(ops) error = %+v", appErr)
@@ -1542,32 +1238,17 @@ func TestIdentityServiceDepartmentAdminPasswordResetAndUnassignedAssignmentBound
 		Team:        designTeam,
 		Mobile:      "13800001029",
 		Password:    "Init1234",
-		Roles:       []domain.Role{domain.RoleDesigner},
 	})
 	if appErr != nil {
 		t.Fatalf("CreateManagedUser(design) error = %+v", appErr)
 	}
-	unassignedUser, appErr := svc.Register(context.Background(), RegisterUserParams{
-		Username:    "pool_user_for_dept_admin",
-		DisplayName: "Pool User",
-		Department:  domain.DepartmentUnassigned,
-		Team:        "未分配池",
-		Mobile:      "13800001030",
-		Password:    "Pass1234",
-	})
-	if appErr != nil {
-		t.Fatalf("Register(unassigned) error = %+v", appErr)
-	}
-
-	deptAdminCtx := domain.WithRequestActor(context.Background(), domain.RequestActor{
-		ID:         3,
-		Username:   "ops_department_admin",
-		Roles:      []domain.Role{domain.RoleDeptAdmin},
-		Department: string(domain.DepartmentOperations),
-		Team:       opsTeam,
-		Source:     domain.RequestActorSourceSessionToken,
-		AuthMode:   domain.AuthModeSessionTokenRoleEnforced,
-	})
+	opsDepartmentID := int64(101)
+	designDepartmentID := int64(102)
+	userRepo.users[opsUser.ID].DepartmentID = &opsDepartmentID
+	userRepo.users[designUser.ID].DepartmentID = &designDepartmentID
+	opsUser.DepartmentID = &opsDepartmentID
+	designUser.DepartmentID = &designDepartmentID
+	deptAdminCtx := identityDepartmentAccessManageContext(3, opsDepartmentID)
 
 	if _, appErr := svc.ResetUserPassword(deptAdminCtx, ResetUserPasswordParams{
 		UserID:      opsUser.ID,
@@ -1582,111 +1263,12 @@ func TestIdentityServiceDepartmentAdminPasswordResetAndUnassignedAssignmentBound
 		t.Fatalf("ResetUserPassword(other department) appErr = %+v", appErr)
 	}
 
-	updated, appErr := svc.UpdateUser(deptAdminCtx, UpdateUserParams{
-		UserID:     unassignedUser.User.ID,
-		Department: ptrDepartment(domain.DepartmentOperations),
-		Team:       &opsTeam,
-	})
-	if appErr != nil {
-		t.Fatalf("UpdateUser(assign unassigned) error = %+v", appErr)
-	}
-	if updated.Department != domain.DepartmentOperations || updated.Team != opsTeam {
-		t.Fatalf("UpdateUser(assign unassigned) user = %+v", updated)
-	}
-	ungroupedAlias := userTeamUngroupedAlias
-	if _, appErr := svc.UpdateUser(deptAdminCtx, UpdateUserParams{
-		UserID: opsUser.ID,
-		Team:   &ungroupedAlias,
-	}); appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
-		t.Fatalf("UpdateUser(clear own department as DeptAdmin) appErr = %+v", appErr)
-	}
 	if _, appErr := svc.UpdateUser(deptAdminCtx, UpdateUserParams{
 		UserID:     designUser.ID,
 		Department: ptrDepartment(domain.DepartmentOperations),
 		Team:       &opsTeam,
 	}); appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
 		t.Fatalf("UpdateUser(move other department) appErr = %+v", appErr)
-	}
-
-	superCtx := domain.WithRequestActor(context.Background(), domain.RequestActor{
-		ID:       4,
-		Username: "super_admin",
-		Roles:    []domain.Role{domain.RoleSuperAdmin},
-		Source:   domain.RequestActorSourceSessionToken,
-		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
-	})
-	cleared, appErr := svc.UpdateUser(superCtx, UpdateUserParams{
-		UserID: opsUser.ID,
-		Team:   &ungroupedAlias,
-	})
-	if appErr != nil {
-		t.Fatalf("UpdateUser(clear own department as SuperAdmin) error = %+v", appErr)
-	}
-	if cleared.Department != domain.DepartmentUnassigned || cleared.Team != "未分配池" {
-		t.Fatalf("UpdateUser(clear own department as SuperAdmin) user = %+v", cleared)
-	}
-}
-
-func TestIdentityServiceHRAdminAndSuperAdminCanChangeRoles(t *testing.T) {
-	userRepo := newIdentityUserRepo()
-	svc := NewIdentityService(userRepo, &identitySessionRepoStub{}, &identityPermissionLogRepoStub{}, identityTxRunner{})
-	options, appErr := svc.GetOrgOptions(context.Background())
-	if appErr != nil {
-		t.Fatalf("GetOrgOptions() error = %+v", appErr)
-	}
-	opsTeam, ok := findDepartmentTeam(options, string(domain.DepartmentOperations))
-	if !ok {
-		t.Fatalf("missing operations team in options: %+v", options.Departments)
-	}
-
-	user, appErr := svc.CreateManagedUser(context.Background(), CreateManagedUserParams{
-		Username:    "role_change_target",
-		EmployeeNo:  intPtr(1031),
-		DisplayName: "Role Change Target",
-		Department:  domain.DepartmentOperations,
-		Team:        opsTeam,
-		Mobile:      "13800001031",
-		Password:    "Init1234",
-		Roles:       []domain.Role{domain.RoleOps},
-	})
-	if appErr != nil {
-		t.Fatalf("CreateManagedUser() error = %+v", appErr)
-	}
-
-	hrCtx := domain.WithRequestActor(context.Background(), domain.RequestActor{
-		ID:       4,
-		Username: "hr_admin",
-		Roles:    []domain.Role{domain.RoleHRAdmin},
-		Source:   domain.RequestActorSourceSessionToken,
-		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
-	})
-	updated, appErr := svc.SetUserRoles(hrCtx, SetUserRolesParams{
-		UserID: user.ID,
-		Roles:  []domain.Role{domain.RoleWarehouse},
-	})
-	if appErr != nil {
-		t.Fatalf("SetUserRoles(HRAdmin) error = %+v", appErr)
-	}
-	if !containsRoleValue(updated.Roles, domain.RoleWarehouse) || !containsRoleValue(updated.Roles, domain.RoleMember) {
-		t.Fatalf("SetUserRoles(HRAdmin) roles = %+v", updated.Roles)
-	}
-
-	superCtx := domain.WithRequestActor(context.Background(), domain.RequestActor{
-		ID:       5,
-		Username: "super_admin",
-		Roles:    []domain.Role{domain.RoleSuperAdmin},
-		Source:   domain.RequestActorSourceSessionToken,
-		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
-	})
-	updated, appErr = svc.SetUserRoles(superCtx, SetUserRolesParams{
-		UserID: user.ID,
-		Roles:  []domain.Role{domain.RoleOps, domain.RoleTeamLead},
-	})
-	if appErr != nil {
-		t.Fatalf("SetUserRoles(SuperAdmin) error = %+v", appErr)
-	}
-	if !containsRoleValue(updated.Roles, domain.RoleOps) || !containsRoleValue(updated.Roles, domain.RoleTeamLead) {
-		t.Fatalf("SetUserRoles(SuperAdmin) roles = %+v", updated.Roles)
 	}
 }
 
@@ -1867,34 +1449,6 @@ func (r *identityUserRepoStub) List(_ context.Context, filter repo.UserListFilte
 	return r.listWithFilter(filter)
 }
 
-func (r *identityUserRepoStub) ListActiveByRole(_ context.Context, role domain.Role) ([]*domain.User, error) {
-	users := make([]*domain.User, 0, len(r.users))
-	for id := range r.users {
-		user, _ := r.GetByID(context.Background(), id)
-		if user == nil {
-			continue
-		}
-		if user.Status != domain.UserStatusActive {
-			continue
-		}
-		if !containsRoleValue(r.roles[id], role) {
-			continue
-		}
-		users = append(users, user)
-	}
-	slices.SortFunc(users, func(a, b *domain.User) int {
-		switch {
-		case a.ID > b.ID:
-			return -1
-		case a.ID < b.ID:
-			return 1
-		default:
-			return 0
-		}
-	})
-	return users, nil
-}
-
 func (r *identityUserRepoStub) listWithFilter(filter repo.UserListFilter) ([]*domain.User, int64, error) {
 	page, pageSize := normalizeIdentityTestPage(filter.Page, filter.PageSize)
 	keyword := strings.ToLower(strings.TrimSpace(filter.Keyword))
@@ -1903,6 +1457,18 @@ func (r *identityUserRepoStub) listWithFilter(filter repo.UserListFilter) ([]*do
 		user, _ := r.GetByID(context.Background(), id)
 		if user == nil {
 			continue
+		}
+		if filter.ScopeRestricted && !filter.ScopeGlobal {
+			inScope := slices.Contains(filter.ScopeUserIDs, user.ID)
+			if !inScope && user.DepartmentID != nil {
+				inScope = slices.Contains(filter.ScopeDepartmentIDs, *user.DepartmentID)
+			}
+			if !inScope && user.TeamID != nil {
+				inScope = slices.Contains(filter.ScopeTeamIDs, *user.TeamID)
+			}
+			if !inScope {
+				continue
+			}
 		}
 		if filter.Status != nil && user.Status != *filter.Status {
 			continue
@@ -2159,15 +1725,6 @@ func containsDepartmentOption(options []domain.DepartmentOption, department, tea
 			if current == team {
 				return true
 			}
-		}
-	}
-	return false
-}
-
-func containsRoleCatalogEntry(entries []domain.RoleCatalogEntry, role domain.Role) bool {
-	for _, entry := range entries {
-		if entry.Role == role {
-			return true
 		}
 	}
 	return false

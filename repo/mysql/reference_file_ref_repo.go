@@ -30,10 +30,16 @@ func (r *referenceFileRefFlatRepo) InsertFlat(ctx context.Context, tx repo.Tx, r
 
 func (r *referenceFileRefFlatRepo) ListByTask(ctx context.Context, taskID int64) ([]*domain.ReferenceFileRefFlat, error) {
 	rows, err := r.db.db.QueryContext(ctx, `
-		SELECT id, task_id, sku_item_id, retouch_requirement_id, ref_id, owner_module_key, context, attached_at
-		FROM reference_file_refs
-		WHERE task_id = ?
-		ORDER BY owner_module_key, attached_at ASC, id ASC`, taskID)
+		SELECT rfr.id, rfr.task_id, rfr.sku_item_id,
+		       rfr.retouch_requirement_id, rfr.ref_id,
+		       rfr.owner_module_key, rfr.context, rfr.attached_at,
+		       COALESCE(asr.ref_key, ''), COALESCE(asr.file_name, ''),
+		       COALESCE(asr.mime_type, ''), asr.file_size,
+		       COALESCE(asr.status, '')
+		FROM reference_file_refs rfr
+		LEFT JOIN asset_storage_refs asr ON asr.ref_id = rfr.ref_id
+		WHERE rfr.task_id = ?
+		ORDER BY rfr.owner_module_key, rfr.attached_at ASC, rfr.id ASC`, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("list reference_file_refs flat: %w", err)
 	}
@@ -43,12 +49,19 @@ func (r *referenceFileRefFlatRepo) ListByTask(ctx context.Context, taskID int64)
 		var ref domain.ReferenceFileRefFlat
 		var skuID, retouchRequirementID sql.NullInt64
 		var contextValue sql.NullString
-		if err := rows.Scan(&ref.ID, &ref.TaskID, &skuID, &retouchRequirementID, &ref.RefID, &ref.OwnerModuleKey, &contextValue, &ref.AttachedAt); err != nil {
+		var fileSize sql.NullInt64
+		if err := rows.Scan(
+			&ref.ID, &ref.TaskID, &skuID, &retouchRequirementID,
+			&ref.RefID, &ref.OwnerModuleKey, &contextValue,
+			&ref.AttachedAt, &ref.StorageKey, &ref.FileName,
+			&ref.MimeType, &fileSize, &ref.StorageStatus,
+		); err != nil {
 			return nil, fmt.Errorf("scan reference_file_ref flat: %w", err)
 		}
 		ref.SKUItemID = fromNullInt64(skuID)
 		ref.RetouchRequirementID = fromNullInt64(retouchRequirementID)
 		ref.Context = fromNullString(contextValue)
+		ref.FileSize = fromNullInt64(fileSize)
 		out = append(out, &ref)
 	}
 	return out, rows.Err()

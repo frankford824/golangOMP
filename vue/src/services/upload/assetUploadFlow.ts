@@ -471,32 +471,6 @@ export async function uploadTaskFileViaAssetSession(
   return uploadFileViaAssetSession(taskId, file, intent, options)
 }
 
-export async function uploadAuditSupplementFileViaAssetSession(
-  taskId: string,
-  file: File,
-  payload: { reason: string; targetSkuCode?: string },
-  options?: TaskAssetUploadFlowOptions,
-): Promise<ReturnType<typeof normalizeAssetCenterCompleteData>> {
-  const reason = payload.reason.trim()
-  return uploadFileViaAssetSession(
-    taskId,
-    file,
-    {
-      asset_kind: 'delivery',
-      target_sku_code: payload.targetSkuCode?.trim() || undefined,
-      owner_module_key: 'audit',
-      upload_policy: 'audit_post_close_supplement',
-      remark: reason,
-      reason,
-    },
-    {
-      ...options,
-      createSession: (sessionPayload, signal) =>
-        assetsApi.createAuditSupplementUploadSession(taskId, sessionPayload, signal),
-    },
-  )
-}
-
 function toReferenceFileRef(
   uploaded: ReturnType<typeof normalizeAssetCenterCompleteData>,
   fallbackFile: File,

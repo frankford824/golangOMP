@@ -1,0 +1,80 @@
+<template>
+  <section class="attachment-workspace" aria-label="参考附件">
+    <aside class="attachment-list">
+      <header>
+        <div><p>参考附件</p><strong>{{ files.length }} 个文件</strong></div>
+        <button v-if="canUpload" type="button" :disabled="uploading" @click="$emit('upload')">
+          <Plus :size="15" aria-hidden="true" />{{ uploading ? '上传中…' : '补充附件' }}
+        </button>
+      </header>
+      <div v-if="files.length" class="attachment-items">
+        <button
+          v-for="(file, index) in files"
+          :key="fileKey(file, index)"
+          type="button"
+          :class="{ selected: selectedIndex === index }"
+          @click="selectedIndex = index"
+        >
+          <span class="attachment-thumb">
+            <img v-if="previewable(file) && previewUrl(file) && !broken.has(fileKey(file, index))" :src="previewUrl(file)" :alt="fileName(file)" @error="markBroken(file, index)" />
+            <FileText v-else :size="22" aria-hidden="true" />
+          </span>
+          <span><strong>{{ fileName(file) }}</strong><small>{{ fileType(file) }}</small></span>
+        </button>
+      </div>
+      <p v-else class="empty-copy">暂无参考附件。运营人员补充后会显示在这里。</p>
+    </aside>
+
+    <article class="attachment-preview">
+      <template v-if="selectedFile">
+        <header>
+          <div><p>当前文件</p><h3>{{ fileName(selectedFile) }}</h3></div>
+          <a v-if="fileUrl(selectedFile)" :href="fileUrl(selectedFile)" target="_blank" rel="noreferrer" download>
+            <Download :size="16" aria-hidden="true" />下载文件
+          </a>
+        </header>
+        <div class="preview-stage">
+          <img v-if="previewable(selectedFile) && previewUrl(selectedFile) && !broken.has(fileKey(selectedFile, selectedIndex))" :src="previewUrl(selectedFile)" :alt="fileName(selectedFile)" @error="markBroken(selectedFile, selectedIndex)" />
+          <div v-else class="preview-fallback"><FileText :size="46" aria-hidden="true" /><strong>{{ fileType(selectedFile) }}</strong><p>该文件不支持网页内预览，可下载后查看。</p></div>
+        </div>
+        <footer><span>{{ selectedIndex + 1 }} / {{ files.length }}</span><p>参考附件仅用于理解运营需求，不会被当作最终成品。</p></footer>
+      </template>
+      <div v-else class="preview-empty"><Paperclip :size="44" aria-hidden="true" /><strong>还没有参考附件</strong><p>上传图片、PDF 或压缩包后，可在这里集中预览与下载。</p></div>
+    </article>
+  </section>
+</template>
+
+<script setup lang="ts">
+import { computed, ref, watch } from 'vue'
+import { Download, FileText, Paperclip, Plus } from 'lucide-vue-next'
+
+interface AttachmentFile extends Record<string, unknown> {
+  id?: number
+  asset_id?: string
+  file_name?: string
+  filename?: string
+  mime_type?: string
+  download_url?: string
+  preview_url?: string
+  url?: string
+}
+
+const props = defineProps<{ files: AttachmentFile[]; canUpload?: boolean; uploading?: boolean }>()
+defineEmits<{ upload: [] }>()
+const selectedIndex = ref(0)
+const broken = ref(new Set<string>())
+const selectedFile = computed(() => props.files[selectedIndex.value] || null)
+watch(() => props.files.length, (length) => { if (!length) selectedIndex.value = 0; else if (selectedIndex.value >= length) selectedIndex.value = length - 1 })
+
+function fileName(file: AttachmentFile) { return String(file.filename || file.file_name || file.asset_id || '参考附件') }
+function fileUrl(file: AttachmentFile) { return String(file.download_url || file.preview_url || file.url || '') }
+function previewUrl(file: AttachmentFile) { return String(file.preview_url || file.url || file.download_url || '') }
+function fileKey(file: AttachmentFile, index: number) { return String(file.id || file.asset_id || `${fileName(file)}-${index}`) }
+function previewable(file: AttachmentFile) { return String(file.mime_type || '').startsWith('image/') || /\.(png|jpe?g|webp|gif)$/i.test(fileName(file)) }
+function fileType(file: AttachmentFile) { const suffix = fileName(file).split('.').pop(); return String(suffix || '文件').toUpperCase() }
+function markBroken(file: AttachmentFile, index: number) { broken.value = new Set(broken.value).add(fileKey(file, index)) }
+</script>
+
+<style scoped>
+.attachment-workspace{height:100%;min-height:0;display:grid;grid-template-columns:minmax(260px,330px) minmax(0,1fr);overflow:hidden;background:rgb(var(--yb-surface-soft))}.attachment-list{min-height:0;display:grid;grid-template-rows:auto 1fr;border-right:1px solid rgb(var(--yb-border));background:rgb(var(--yb-surface))}.attachment-list>header,.attachment-preview>header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:15px;border-bottom:1px solid rgb(var(--yb-border))}.attachment-list header p,.attachment-preview header p{margin:0;color:rgb(var(--yb-text-muted));font-size:10px;font-weight:750}.attachment-list header strong{font-size:14px}.attachment-list header button,.attachment-preview header a{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:34px;border:1px solid rgb(var(--yb-border));border-radius:9px;padding:0 10px;background:rgb(var(--yb-surface));color:rgb(var(--yb-text));font-size:11px;font-weight:720;text-decoration:none;cursor:pointer}.attachment-items{min-height:0;padding:8px;overflow:auto}.attachment-items>button{width:100%;display:grid;grid-template-columns:56px minmax(0,1fr);align-items:center;gap:10px;border:1px solid transparent;border-radius:10px;padding:7px;background:transparent;color:rgb(var(--yb-text));text-align:left;cursor:pointer}.attachment-items>button:hover,.attachment-items>button.selected{border-color:rgb(var(--yb-brand-border));background:rgb(var(--yb-brand-soft))}.attachment-items button>span:last-child{min-width:0;display:grid;gap:4px}.attachment-items strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}.attachment-items small{color:rgb(var(--yb-text-muted));font-size:10px}.attachment-thumb{width:56px;height:44px;display:grid;place-items:center;overflow:hidden;border-radius:7px;background:rgb(var(--yb-surface-muted));color:rgb(var(--yb-text-muted))}.attachment-thumb img{width:100%;height:100%;object-fit:cover}.attachment-preview{min-height:0;display:grid;grid-template-rows:auto minmax(0,1fr) auto}.attachment-preview h3{max-width:60vw;margin:3px 0 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:15px}.attachment-preview header a{border-color:rgb(var(--yb-brand));background:rgb(var(--yb-brand));color:rgb(var(--yb-text-inverse))}.preview-stage{min-height:0;display:grid;place-items:center;padding:20px;overflow:auto;background:linear-gradient(45deg,rgb(var(--yb-surface-muted)) 25%,transparent 25%),linear-gradient(-45deg,rgb(var(--yb-surface-muted)) 25%,transparent 25%),linear-gradient(45deg,transparent 75%,rgb(var(--yb-surface-muted)) 75%),linear-gradient(-45deg,transparent 75%,rgb(var(--yb-surface-muted)) 75%);background-size:24px 24px;background-position:0 0,0 12px,12px -12px,-12px 0}.preview-stage>img{max-width:100%;max-height:100%;object-fit:contain;border-radius:8px;box-shadow:0 14px 40px rgb(var(--yb-shadow)/.15)}.preview-fallback,.preview-empty{display:grid;place-items:center;align-content:center;gap:8px;color:rgb(var(--yb-text-muted));text-align:center}.preview-fallback strong,.preview-empty strong{color:rgb(var(--yb-text));font-size:16px}.preview-fallback p,.preview-empty p{max-width:34ch;margin:0;font-size:12px;line-height:1.6}.attachment-preview>footer{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 15px;border-top:1px solid rgb(var(--yb-border));background:rgb(var(--yb-surface));color:rgb(var(--yb-text-muted));font-size:11px}.attachment-preview>footer p{margin:0}.empty-copy{padding:22px;color:rgb(var(--yb-text-muted));font-size:12px;line-height:1.6}@media(max-width:760px){.attachment-workspace{grid-template-columns:1fr;grid-template-rows:minmax(180px,34vh) minmax(0,1fr)}.attachment-list{border-right:0;border-bottom:1px solid rgb(var(--yb-border))}.attachment-preview h3{max-width:48vw}.attachment-preview>footer{align-items:flex-start;flex-direction:column}}
+</style>

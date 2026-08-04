@@ -27,8 +27,17 @@ func TestOrgTeamAliasesMatchRenamedOperationTeams(t *testing.T) {
 	if !OrgTeamsEquivalent("拼多多南京组", "拼多多运营部（南京）") {
 		t.Fatal("拼多多南京组 should match 拼多多运营部（南京）")
 	}
-	if !OrgTeamsEquivalent("拼多多池州组", "天猫运营一部（池州)") {
-		t.Fatal("拼多多池州组 should match 天猫运营一部（池州)")
+	if !OrgTeamsEquivalent("天猫一组", "天猫运营一部（南京）") {
+		t.Fatal("天猫一组 should match 天猫运营一部（南京）")
+	}
+	if !OrgTeamsEquivalent("天猫二组", "天猫运营一部（池州）") {
+		t.Fatal("天猫二组 should match 天猫运营一部（池州）")
+	}
+	if !OrgTeamsEquivalent("拼多多池州组", "拼多多运营二部（池州)") {
+		t.Fatal("拼多多池州组 should match 拼多多运营二部（池州)")
+	}
+	if OrgTeamsEquivalent("拼多多池州组", "天猫运营一部（池州）") {
+		t.Fatal("拼多多池州组 must not match 天猫运营一部（池州）")
 	}
 	if !OrgTeamsEquivalent("人事管理组", "人力行政组") {
 		t.Fatal("人事管理组 should match 人力行政组")

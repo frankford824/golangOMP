@@ -24,8 +24,8 @@ type CreateTaskBatchSKUItemParams struct {
 	ProductIID        string
 	MaterialMode      string
 	DesignRequirement string
+	SetModeHint       bool
 	NewSKU            string
-	PurchaseSKU       string
 	SKUCodeType       domain.TaskSKUCodeType
 	CostPriceMode     string
 	CostPrice         *float64
@@ -57,7 +57,6 @@ type CreateTaskParams struct {
 	DesignerID              *int64
 	Priority                domain.TaskPriority
 	DeadlineAt              *time.Time
-	IsOutsource             bool
 	CustomizationRequired   bool
 	CustomizationSourceType domain.CustomizationSourceType
 	ReferenceImagesProvided bool
@@ -74,6 +73,7 @@ type CreateTaskParams struct {
 
 	// New product development
 	DesignRequirement string
+	SetModeHint       bool
 	CategoryCode      string
 	ProductIID        string
 	MaterialMode      string
@@ -84,23 +84,21 @@ type CreateTaskParams struct {
 	CostPrice         *float64
 	Quantity          *int64
 	BaseSalePrice     *float64
+	Width             *float64
+	Height            *float64
+	Area              *float64
 	ReferenceLink     string
 
-	// Purchase task
-	PurchaseSKU    string
-	ProductChannel string
-
 	// Batch create
-	BatchSKUMode        string
-	BatchItems          []CreateTaskBatchSKUItemParams
-	SKUCodeType         domain.TaskSKUCodeType
-	TopLevelNewSKU      string
-	TopLevelPurchaseSKU string
-	SyncERPOnCreate     bool
-	SyncERPOnCreateSet  bool
-	ClientCreateID      string
-	CreatePayloadHash   string
-	CreateRequestJSON   string
+	BatchSKUMode       string
+	BatchItems         []CreateTaskBatchSKUItemParams
+	SKUCodeType        domain.TaskSKUCodeType
+	TopLevelNewSKU     string
+	SyncERPOnCreate    bool
+	SyncERPOnCreateSet bool
+	ClientCreateID     string
+	CreatePayloadHash  string
+	CreateRequestJSON  string
 
 	// retouch_task structured requirement lines (Phase 1A text only).
 	RetouchRequirements []domain.CreateRetouchRequirementItem
@@ -134,6 +132,7 @@ type UpdateTaskBusinessInfoParams struct {
 	Process                  string
 	ProductSelection         *domain.TaskProductSelectionContext
 	Note                     string
+	NoteSet                  bool
 	ChangeRequest            string
 	DesignRequirement        string
 	ReferenceFileRefs        []domain.ReferenceFileRef
@@ -162,87 +161,10 @@ type UpdateTaskBusinessInfoParams struct {
 	BatchDisplayNameOnly bool
 	Priority             domain.TaskPriority
 	PrioritySet          bool
-}
-
-type UpdateTaskProcurementParams struct {
-	TaskID             int64
-	OperatorID         int64
-	Status             domain.ProcurementStatus
-	ProcurementPrice   *float64
-	Quantity           *int64
-	SupplierName       string
-	PurchaseRemark     string
-	ExpectedDeliveryAt *time.Time
-	Remark             string
-}
-
-type AdvanceTaskProcurementParams struct {
-	TaskID     int64
-	OperatorID int64
-	Action     domain.ProcurementAction
-	Remark     string
-}
-
-type PrepareTaskForWarehouseParams struct {
-	TaskID     int64
-	OperatorID int64
-	Remark     string
-}
-
-type CloseTaskParams struct {
-	TaskID     int64
-	OperatorID int64
-	Remark     string
-}
-
-type SubmitCustomizationReviewParams struct {
-	TaskID                 int64
-	ReviewerID             int64
-	SourceAssetID          *int64
-	CustomizationLevelCode string
-	CustomizationLevelName string
-	CustomizationPrice     *float64
-	CustomizationWeight    *float64
-	CustomizationNote      string
-	Decision               domain.CustomizationReviewDecision
-}
-
-type SubmitCustomizationEffectPreviewParams struct {
-	JobID          int64
-	OperatorID     int64
-	OrderNo        string
-	CurrentAssetID *int64
-	DecisionType   domain.CustomizationJobDecisionType
-	Note           string
-}
-
-type ReviewCustomizationEffectParams struct {
-	JobID                  int64
-	ReviewerID             int64
-	Decision               domain.CustomizationReviewDecision
-	CurrentAssetID         *int64
-	CustomizationLevelCode string
-	CustomizationLevelName string
-	CustomizationPrice     *float64
-	CustomizationWeight    *float64
-	CustomizationNote      string
-}
-
-type TransferCustomizationProductionParams struct {
-	JobID             int64
-	OperatorID        int64
-	CurrentAssetID    *int64
-	TransferChannel   string
-	TransferReference string
-	Note              string
-}
-
-type CustomizationJobFilter struct {
-	TaskID     *int64
-	Status     *domain.CustomizationJobStatus
-	OperatorID *int64
-	Page       int
-	PageSize   int
+	// GovernedFieldsRequested is true when the caller explicitly supplied
+	// manual cost, cost-rule, or forced filing controls. Task creators may edit
+	// their own ordinary task fields but may not escalate into these controls.
+	GovernedFieldsRequested bool
 }
 
 // TaskFilter for list queries.
@@ -253,13 +175,16 @@ type TaskFilter struct {
 	MineActorID   *int64
 	DesignerID    *int64
 	DesignerEmpty *bool
-	NeedOutsource *bool
 	Overdue       *bool
-	CreatedFrom   *time.Time
-	CreatedTo     *time.Time
-	Keyword       string
-	Page          int
-	PageSize      int
+	// OperationalBucket applies one authoritative task-board count predicate to the list.
+	OperationalBucket domain.TaskOperationalBucket
+	CreatedFrom       *time.Time
+	CreatedTo         *time.Time
+	Keyword           string
+	// Sort is an optional order token such as "-updated_at", "task_no", or "due_at".
+	Sort     string
+	Page     int
+	PageSize int
 }
 
 type UpdateTaskSKUItemCostInfoParams struct {
@@ -295,7 +220,6 @@ type UpdateTaskSKUItemInfoParams struct {
 type TaskService interface {
 	Create(ctx context.Context, p CreateTaskParams) (*domain.Task, *domain.AppError)
 	List(ctx context.Context, filter TaskFilter) ([]*domain.TaskListItem, domain.PaginationMeta, *domain.AppError)
-	ListBoardCandidates(ctx context.Context, filter TaskFilter, presets []domain.TaskQueryFilterDefinition) ([]*domain.TaskListItem, *domain.AppError)
 	GetByID(ctx context.Context, id int64) (*domain.TaskReadModel, *domain.AppError)
 	GetFilingStatus(ctx context.Context, taskID int64) (*domain.TaskFilingStatusView, *domain.AppError)
 	RetryFiling(ctx context.Context, p RetryTaskFilingParams) (*domain.TaskFilingStatusView, *domain.AppError)
@@ -321,14 +245,10 @@ type taskResourceGroupInitializer interface {
 
 type taskService struct {
 	taskRepo                       repo.TaskRepo
-	procurementRepo                repo.ProcurementRepo
 	taskAssetRepo                  repo.TaskAssetRepo
 	designAssetRepo                repo.DesignAssetRepo
 	taskEventRepo                  repo.TaskEventRepo
 	costOverrideEventRepo          repo.TaskCostOverrideEventRepo
-	costOverrideReviewRepo         repo.TaskCostOverrideReviewRepo
-	costFinanceFlagRepo            repo.TaskCostFinanceFlagRepo
-	warehouseRepo                  repo.WarehouseRepo
 	customizationJobRepo           repo.CustomizationJobRepo
 	customizationPricingRuleRepo   repo.CustomizationPricingRuleRepo
 	categoryRepo                   repo.CategoryRepo
@@ -351,18 +271,11 @@ type taskService struct {
 	codeRuleSvc                    CodeRuleService
 	txRunner                       repo.TxRunner
 	userDisplayNameResolver        UserDisplayNameResolver
-	dataScopeResolver              DataScopeResolver
-	scopeUserRepo                  repo.UserRepo
-	customizationPricingUserRepo   customizationPricingUserReader
 	referenceFileRefsEnricher      *ReferenceFileRefsEnricher
 	blueprintRuleEngine            *blueprint.RuleEngine
 	productManagementCloseSyncer   ProductManagementCloseSyncer
 	notifications                  taskNotificationService
 	createFilingAsync              bool
-}
-
-type customizationPricingUserReader interface {
-	GetByID(ctx context.Context, id int64) (*domain.User, error)
 }
 
 type taskNotificationService interface {
@@ -379,13 +292,6 @@ const (
 	taskCostPrefillSourceManualRuleReference = "manual_rule_reference"
 	taskCostOverrideAuditSourceBusinessInfo  = "task_business_info_patch"
 )
-
-func WithTaskCostOverridePlaceholderRepos(reviewRepo repo.TaskCostOverrideReviewRepo, financeRepo repo.TaskCostFinanceFlagRepo) TaskServiceOption {
-	return func(s *taskService) {
-		s.costOverrideReviewRepo = reviewRepo
-		s.costFinanceFlagRepo = financeRepo
-	}
-}
 
 func WithERPBridgeSelectionBinding(erpBridgeSvc ERPBridgeService) TaskServiceOption {
 	return func(s *taskService) {
@@ -542,19 +448,6 @@ func WithUserDisplayNameResolver(resolver UserDisplayNameResolver) TaskServiceOp
 	}
 }
 
-func WithTaskDataScopeResolver(resolver DataScopeResolver) TaskServiceOption {
-	return func(s *taskService) {
-		s.dataScopeResolver = resolver
-	}
-}
-
-func WithTaskScopeUserRepo(userRepo repo.UserRepo) TaskServiceOption {
-	return func(s *taskService) {
-		s.scopeUserRepo = userRepo
-		s.customizationPricingUserRepo = userRepo
-	}
-}
-
 func WithTaskBlueprintRuleEngine(engine *blueprint.RuleEngine) TaskServiceOption {
 	return func(s *taskService) {
 		s.blueprintRuleEngine = engine
@@ -593,25 +486,21 @@ func WithTaskReferenceFileRefsOSSDirectService(ossDirect *OSSDirectService) Task
 
 func NewTaskService(
 	taskRepo repo.TaskRepo,
-	procurementRepo repo.ProcurementRepo,
 	taskAssetRepo repo.TaskAssetRepo,
 	taskEventRepo repo.TaskEventRepo,
 	costOverrideEventRepo repo.TaskCostOverrideEventRepo,
-	warehouseRepo repo.WarehouseRepo,
 	codeRuleSvc CodeRuleService,
 	txRunner repo.TxRunner,
 	opts ...TaskServiceOption,
 ) TaskService {
-	return NewTaskServiceWithCatalog(taskRepo, procurementRepo, taskAssetRepo, taskEventRepo, costOverrideEventRepo, warehouseRepo, nil, nil, codeRuleSvc, txRunner, opts...)
+	return NewTaskServiceWithCatalog(taskRepo, taskAssetRepo, taskEventRepo, costOverrideEventRepo, nil, nil, codeRuleSvc, txRunner, opts...)
 }
 
 func NewTaskServiceWithCatalog(
 	taskRepo repo.TaskRepo,
-	procurementRepo repo.ProcurementRepo,
 	taskAssetRepo repo.TaskAssetRepo,
 	taskEventRepo repo.TaskEventRepo,
 	costOverrideEventRepo repo.TaskCostOverrideEventRepo,
-	warehouseRepo repo.WarehouseRepo,
 	categoryRepo repo.CategoryRepo,
 	costRuleRepo repo.CostRuleRepo,
 	codeRuleSvc CodeRuleService,
@@ -620,16 +509,13 @@ func NewTaskServiceWithCatalog(
 ) TaskService {
 	svc := &taskService{
 		taskRepo:                       taskRepo,
-		procurementRepo:                procurementRepo,
 		taskAssetRepo:                  taskAssetRepo,
 		taskEventRepo:                  taskEventRepo,
 		costOverrideEventRepo:          costOverrideEventRepo,
-		warehouseRepo:                  warehouseRepo,
 		categoryRepo:                   categoryRepo,
 		costRuleRepo:                   costRuleRepo,
 		codeRuleSvc:                    codeRuleSvc,
 		txRunner:                       txRunner,
-		dataScopeResolver:              NewRoleBasedDataScopeResolver(),
 		costLegacyAliasFallbackEnabled: true,
 	}
 	for _, opt := range opts {
@@ -644,7 +530,7 @@ func NewTaskServiceWithCatalog(
 }
 
 func (s *taskService) taskActionAuthorizer() *taskActionAuthorizer {
-	return newTaskActionAuthorizer(s.dataScopeResolver, s.scopeUserRepo)
+	return newTaskActionAuthorizer()
 }
 
 func (s *taskService) Create(ctx context.Context, p CreateTaskParams) (created *domain.Task, appErr *domain.AppError) {
@@ -670,7 +556,7 @@ func (s *taskService) Create(ctx context.Context, p CreateTaskParams) (created *
 	p.OwnerOrgTeam = ownership.OwnerOrgTeam
 	if actor, ok := domain.RequestActorFromContext(ctx); ok && actor.EffectiveAccess != nil {
 		if !domain.EffectiveAccessAllowsTask(actor, domain.PermissionTaskCreate, domain.TaskAccessSubject{
-			CreatorID: p.CreatorID, RequesterID: p.RequesterID,
+			CreatorID: p.CreatorID, RequesterID: p.RequesterID, TaskType: p.TaskType,
 			OwnerDepartmentID: p.OwnerDepartmentID, OwnerTeamID: p.OwnerTeamID,
 		}) {
 			return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "task.create is outside the effective data scope", nil)
@@ -778,10 +664,7 @@ func (s *taskService) createSingleTask(ctx context.Context, p CreateTaskParams) 
 
 	initialStatus := domain.TaskStatusPendingAssign
 	var initialHandlerID *int64
-	if usesCustomizationProductionFlow(p.TaskType, p.CustomizationRequired) {
-		initialStatus = domain.TaskStatusPendingCustomizationProduction
-		initialHandlerID = nil
-	} else if p.DesignerID != nil && p.TaskType != domain.TaskTypePurchaseTask {
+	if p.DesignerID != nil {
 		initialStatus = domain.TaskStatusInProgress
 		initialHandlerID = cloneInt64Ptr(p.DesignerID)
 	}
@@ -806,8 +689,8 @@ func (s *taskService) createSingleTask(ctx context.Context, p CreateTaskParams) 
 		TaskStatus:                  initialStatus,
 		Priority:                    priority,
 		DeadlineAt:                  p.DeadlineAt,
-		NeedOutsource:               p.IsOutsource,
-		IsOutsource:                 p.IsOutsource,
+		NeedOutsource:               false,
+		IsOutsource:                 false,
 		BusinessLane:                p.BusinessLane,
 		CustomizationRequired:       p.CustomizationRequired,
 		CustomizationSourceType:     p.CustomizationSourceType,
@@ -820,7 +703,7 @@ func (s *taskService) createSingleTask(ctx context.Context, p CreateTaskParams) 
 		PrimarySKUCode:              p.SKUCode,
 		SKUGenerationStatus:         domain.TaskSKUGenerationStatusNotApplicable,
 	}
-	if p.TaskType == domain.TaskTypeNewProductDevelopment || p.TaskType == domain.TaskTypePurchaseTask {
+	if p.TaskType == domain.TaskTypeNewProductDevelopment {
 		task.SKUGenerationStatus = domain.TaskSKUGenerationStatusCompleted
 	}
 
@@ -847,6 +730,7 @@ func (s *taskService) createSingleTask(ctx context.Context, p CreateTaskParams) 
 		RiskFlagsJSON:         "{}",
 		ChangeRequest:         strings.TrimSpace(p.ChangeRequest),
 		DesignRequirement:     strings.TrimSpace(p.DesignRequirement),
+		SetModeHint:           p.SetModeHint,
 		ProductShortName:      defaultCreateTaskProductShortName(p),
 		MaterialMode:          strings.TrimSpace(p.MaterialMode),
 		Material:              materialValue,
@@ -854,8 +738,10 @@ func (s *taskService) createSingleTask(ctx context.Context, p CreateTaskParams) 
 		CostPriceMode:         strings.TrimSpace(p.CostPriceMode),
 		CostPrice:             p.CostPrice,
 		BaseSalePrice:         p.BaseSalePrice,
+		Width:                 cloneFloat64Ptr(p.Width),
+		Height:                cloneFloat64Ptr(p.Height),
+		Area:                  cloneFloat64Ptr(p.Area),
 		Quantity:              p.Quantity,
-		ProductChannel:        strings.TrimSpace(p.ProductChannel),
 		SKUCodeType:           p.SKUCodeType,
 		ReferenceImagesJSON:   referenceImagesJSON,
 		ReferenceFileRefsJSON: referenceFileRefsJSON,
@@ -923,10 +809,7 @@ func (s *taskService) createBatchTask(ctx context.Context, p CreateTaskParams) (
 
 	initialStatus := domain.TaskStatusPendingAssign
 	var initialHandlerID *int64
-	if usesCustomizationProductionFlow(p.TaskType, p.CustomizationRequired) {
-		initialStatus = domain.TaskStatusPendingCustomizationProduction
-		initialHandlerID = nil
-	} else if p.DesignerID != nil && p.TaskType != domain.TaskTypePurchaseTask {
+	if p.DesignerID != nil {
 		initialStatus = domain.TaskStatusInProgress
 		initialHandlerID = cloneInt64Ptr(p.DesignerID)
 	}
@@ -951,8 +834,8 @@ func (s *taskService) createBatchTask(ctx context.Context, p CreateTaskParams) (
 		TaskStatus:                  initialStatus,
 		Priority:                    priority,
 		DeadlineAt:                  p.DeadlineAt,
-		NeedOutsource:               p.IsOutsource,
-		IsOutsource:                 p.IsOutsource,
+		NeedOutsource:               false,
+		IsOutsource:                 false,
 		BusinessLane:                p.BusinessLane,
 		CustomizationRequired:       p.CustomizationRequired,
 		CustomizationSourceType:     p.CustomizationSourceType,
@@ -982,13 +865,13 @@ func (s *taskService) createBatchTask(ctx context.Context, p CreateTaskParams) (
 		Note:                  p.Note,
 		RiskFlagsJSON:         "{}",
 		DesignRequirement:     primaryItem.DesignRequirement,
+		SetModeHint:           primaryItem.SetModeHint,
 		ProductShortName:      primaryItem.ProductShortName,
 		MaterialMode:          primaryItem.MaterialMode,
 		CostPriceMode:         primaryItem.CostPriceMode,
 		CostPrice:             cloneFloat64Ptr(primaryItem.CostPrice),
 		BaseSalePrice:         cloneFloat64Ptr(primaryItem.BaseSalePrice),
 		Quantity:              cloneInt64Ptr(primaryItem.Quantity),
-		ProductChannel:        strings.TrimSpace(p.ProductChannel),
 		SKUCodeType:           primaryItem.SKUCodeType,
 		ReferenceImagesJSON:   "[]",
 		ReferenceFileRefsJSON: referenceFileRefsJSON,
@@ -1013,7 +896,7 @@ func (s *taskService) createBatchTask(ctx context.Context, p CreateTaskParams) (
 }
 
 func (s *taskService) validateBatchItemProductIIDs(ctx context.Context, p CreateTaskParams) *domain.AppError {
-	if p.TaskType != domain.TaskTypeNewProductDevelopment && p.TaskType != domain.TaskTypePurchaseTask {
+	if p.TaskType != domain.TaskTypeNewProductDevelopment {
 		return nil
 	}
 	seen := map[string]bool{}
@@ -1121,7 +1004,7 @@ func (s *taskService) resolveCreateTaskProductIID(ctx context.Context, p *Create
 	if iid == "" {
 		return nil
 	}
-	if p.TaskType != domain.TaskTypeNewProductDevelopment && p.TaskType != domain.TaskTypePurchaseTask {
+	if p.TaskType != domain.TaskTypeNewProductDevelopment {
 		return nil
 	}
 	if s.erpBridgeSvc == nil {
@@ -1228,8 +1111,6 @@ func normalizeCreateTaskParams(p CreateTaskParams) CreateTaskParams {
 	p.ProductShortName = strings.TrimSpace(p.ProductShortName)
 	p.CostPriceMode = strings.TrimSpace(p.CostPriceMode)
 	p.ReferenceLink = strings.TrimSpace(p.ReferenceLink)
-	p.PurchaseSKU = strings.TrimSpace(p.PurchaseSKU)
-	p.ProductChannel = strings.TrimSpace(p.ProductChannel)
 	for i := range p.BatchItems {
 		p.BatchItems[i].ProductName = strings.TrimSpace(p.BatchItems[i].ProductName)
 		p.BatchItems[i].ProductShortName = strings.TrimSpace(p.BatchItems[i].ProductShortName)
@@ -1238,15 +1119,10 @@ func normalizeCreateTaskParams(p CreateTaskParams) CreateTaskParams {
 		p.BatchItems[i].MaterialMode = strings.TrimSpace(p.BatchItems[i].MaterialMode)
 		p.BatchItems[i].DesignRequirement = strings.TrimSpace(p.BatchItems[i].DesignRequirement)
 		p.BatchItems[i].NewSKU = strings.TrimSpace(p.BatchItems[i].NewSKU)
-		p.BatchItems[i].PurchaseSKU = strings.TrimSpace(p.BatchItems[i].PurchaseSKU)
 		p.BatchItems[i].CostPriceMode = strings.TrimSpace(p.BatchItems[i].CostPriceMode)
 	}
 	p.ReferenceFileRefs = domain.NormalizeReferenceFileRefs(p.ReferenceFileRefs)
-	if p.IsOutsource {
-		p.CustomizationRequired = true
-	}
 	if p.CustomizationRequired {
-		p.IsOutsource = true
 		if !p.CustomizationSourceType.Valid() {
 			if p.SourceMode == domain.TaskSourceModeExistingProduct {
 				p.CustomizationSourceType = domain.CustomizationSourceTypeExistingProduct
@@ -1284,7 +1160,7 @@ func defaultCreateTaskProductShortName(p CreateTaskParams) string {
 	return strings.TrimSpace(firstNonEmptyString(p.ProductNameSnapshot, p.ProductShortName))
 }
 
-func usesCustomizationProductionFlow(taskType domain.TaskType, customizationRequired bool) bool {
+func usesCustomizationInternalJob(taskType domain.TaskType, customizationRequired bool) bool {
 	if !customizationRequired {
 		return false
 	}
@@ -1297,11 +1173,10 @@ func usesCustomizationProductionFlow(taskType domain.TaskType, customizationRequ
 }
 
 // validateProductSelectionByTaskType enforces field whitelist: product_selection is only allowed for existing_product.
-// Prevents product_selection misuse for new_product_development/purchase_task (defense in depth if handler is bypassed).
+// Prevents product_selection misuse for new_product_development (defense in depth if handler is bypassed).
 func validateProductSelectionByTaskType(p CreateTaskParams) *domain.AppError {
 	if p.TaskType != domain.TaskTypeOriginalProductDevelopment &&
-		p.TaskType != domain.TaskTypeNewProductDevelopment &&
-		p.TaskType != domain.TaskTypePurchaseTask {
+		p.TaskType != domain.TaskTypeNewProductDevelopment {
 		return nil
 	}
 	if p.SourceMode == domain.TaskSourceModeExistingProduct {
@@ -1322,7 +1197,7 @@ func validateCreateTaskEntry(ctx context.Context, p CreateTaskParams) *domain.Ap
 		return taskCreateValidationError(
 			"task_type is not supported by the active workflow",
 			p,
-			taskCreateViolation("task_type", "invalid_task_type", "task_type must be original_product_development, new_product_development, or retouch_task; use sku_planning for planning SKU tasks"),
+			taskCreateViolation("task_type", "invalid_task_type", "task_type must be one of the task types published by the current API contract"),
 		)
 	}
 	logCreateTaskOwnerTeamNormalization(ctx, p)
@@ -1438,8 +1313,6 @@ func validateCreateTaskEntry(ctx context.Context, p CreateTaskParams) *domain.Ap
 		return validateOriginalProductDevelopment(p)
 	case domain.TaskTypeNewProductDevelopment:
 		return validateNewProductDevelopment(p)
-	case domain.TaskTypePurchaseTask:
-		return validatePurchaseTask(p)
 	}
 
 	return nil
@@ -1489,43 +1362,9 @@ func validateTaskTypeFieldWhitelist(ctx context.Context, p CreateTaskParams) *do
 		if hasString(p.MaterialOther) {
 			addViolation("material_other")
 		}
-		if hasString(p.PurchaseSKU) {
-			addViolation("purchase_sku")
-		}
-		if hasString(p.ProductChannel) {
-			addViolation("product_channel")
-		}
 	case domain.TaskTypeNewProductDevelopment:
 		if hasString(p.ChangeRequest) {
 			addViolation("change_request")
-		}
-		if hasString(p.PurchaseSKU) {
-			addViolation("purchase_sku")
-		}
-		if hasString(p.ProductChannel) {
-			addViolation("product_channel")
-		}
-	case domain.TaskTypePurchaseTask:
-		if hasString(p.ChangeRequest) {
-			addViolation("change_request")
-		}
-		if hasString(p.MaterialMode) {
-			addViolation("material_mode")
-		}
-		if hasString(p.Material) {
-			addViolation("material")
-		}
-		if hasString(p.MaterialOther) {
-			addViolation("material_other")
-		}
-		if hasString(p.ProductShortName) {
-			addViolation("product_short_name")
-		}
-		if hasString(p.DesignRequirement) {
-			addViolation("design_requirement")
-		}
-		if hasString(p.ReferenceLink) {
-			addViolation("reference_link")
 		}
 	}
 
@@ -1634,25 +1473,6 @@ func validateNewProductDevelopment(p CreateTaskParams) *domain.AppError {
 	return nil
 }
 
-func validatePurchaseTask(p CreateTaskParams) *domain.AppError {
-	var violations []map[string]interface{}
-	hasManualSKU := strings.TrimSpace(p.SKUCode) != "" || strings.TrimSpace(p.PurchaseSKU) != "" || strings.TrimSpace(p.TopLevelPurchaseSKU) != ""
-	if !hasManualSKU && strings.TrimSpace(p.CategoryCode) == "" {
-		violations = append(violations, taskCreateViolation("category_code", "missing_category_code", "category_code is required for purchase_task"))
-	}
-
-	if strings.TrimSpace(p.CostPriceMode) == "" {
-		// allowed: missing cost_price_mode can enter pending_filing.
-	} else if !domain.CostPriceMode(p.CostPriceMode).Valid() {
-		violations = append(violations, taskCreateViolation("cost_price_mode", "invalid_cost_price_mode", "cost_price_mode must be manual or template"))
-	}
-
-	if len(violations) > 0 {
-		return taskCreateValidationError("purchase_task validation failed", p, violations...)
-	}
-	return nil
-}
-
 func (s *taskService) resolveCreateTaskSKU(ctx context.Context, p *CreateTaskParams) *domain.AppError {
 	if p == nil {
 		return domain.NewAppError(domain.ErrCodeInternalError, "task create parameters are missing", nil)
@@ -1663,7 +1483,7 @@ func (s *taskService) resolveCreateTaskSKU(ctx context.Context, p *CreateTaskPar
 	}
 	if strings.TrimSpace(p.SKUCode) != "" {
 		p.SKUCode = strings.TrimSpace(p.SKUCode)
-		if p.TaskType == domain.TaskTypeNewProductDevelopment || p.TaskType == domain.TaskTypePurchaseTask {
+		if p.TaskType == domain.TaskTypeNewProductDevelopment {
 			existing, err := s.taskRepo.GetSKUItemBySKUCode(ctx, p.SKUCode)
 			if err != nil {
 				return infraError("check sku uniqueness", err)
@@ -1694,7 +1514,7 @@ func (s *taskService) resolveCreateTaskSKU(ctx context.Context, p *CreateTaskPar
 	}
 
 	return domain.NewAppError(domain.ErrCodeInvalidRequest,
-		"automatic sku_code generation is only enabled for new_product_development and purchase_task",
+		"automatic sku_code generation is only enabled for new_product_development",
 		map[string]interface{}{"task_type": p.TaskType},
 	)
 }
@@ -1813,10 +1633,6 @@ func (s *taskService) ListFilterOptions(ctx context.Context) (*domain.TaskFilter
 	return options, nil
 }
 
-func (s *taskService) ListBoardCandidates(ctx context.Context, filter TaskFilter, presets []domain.TaskQueryFilterDefinition) ([]*domain.TaskListItem, *domain.AppError) {
-	return s.listBoardCandidates(ctx, filter, presets)
-}
-
 func (s *taskService) GetByID(ctx context.Context, id int64) (*domain.TaskReadModel, *domain.AppError) {
 	return s.loadTaskReadModel(ctx, id)
 }
@@ -1887,88 +1703,41 @@ func (s *taskService) loadTaskReadModel(ctx context.Context, id int64) (*domain.
 	}
 	attachTaskProductSelection(detail, task)
 	hydrateTaskDetailFilingProjection(task, detail)
-	assets, err := s.taskAssetRepo.ListByTaskID(ctx, id)
-	if err != nil {
-		return nil, infraError("list task assets for task read model", err)
-	}
-	receipt, err := s.warehouseRepo.GetByTaskID(ctx, id)
-	if err != nil {
-		return nil, infraError("get warehouse receipt for task read model", err)
-	}
-	procurement, err := s.procurementRepo.GetByTaskID(ctx, id)
-	if err != nil {
-		return nil, infraError("get procurement for task read model", err)
-	}
 	skuItems, appErr := loadTaskSKUItems(ctx, s.taskRepo, task, detail)
 	if appErr != nil {
 		return nil, appErr
 	}
-	events, err := s.taskEventRepo.ListByTaskID(ctx, id)
-	if err != nil {
-		return nil, infraError("list task events for task read model", err)
-	}
-	var overrideEvents []*domain.TaskCostOverrideAuditEvent
-	if s.costOverrideEventRepo != nil {
-		overrideEvents, err = s.costOverrideEventRepo.ListByTaskID(ctx, id)
-		if err != nil {
-			return nil, infraError("list cost override audit events for task read model", err)
-		}
-	}
-	var reviewRecords []*domain.TaskCostOverrideReviewRecord
-	if s.costOverrideReviewRepo != nil {
-		reviewRecords, err = s.costOverrideReviewRepo.ListByTaskID(ctx, id)
-		if err != nil {
-			return nil, infraError("list cost override review records for task read model", err)
-		}
-	}
-	var financeFlags []*domain.TaskCostFinanceFlag
-	if s.costFinanceFlagRepo != nil {
-		financeFlags, err = s.costFinanceFlagRepo.ListByTaskID(ctx, id)
-		if err != nil {
-			return nil, infraError("list cost finance flags for task read model", err)
-		}
-	}
-	workflow := buildTaskWorkflowSnapshot(task, detail, procurement, hasFinalTaskAsset(assets), receipt)
-	matchedRuleGovernance, overrideSummary, governanceAuditSummary, overrideBoundary, appErr := buildTaskGovernanceReadModels(ctx, s.costRuleRepo, detail, events, overrideEvents, reviewRecords, financeFlags)
-	if appErr != nil {
-		return nil, appErr
-	}
-	designAssets, assetVersions, appErr := s.loadTaskDesignAssetReadModel(ctx, task)
-	if appErr != nil {
-		return nil, appErr
-	}
-	enrichDesignAssetVersionUploaderNames(ctx, s.userDisplayNameResolver, assetVersions)
 
 	readModel := &domain.TaskReadModel{
-		DesignAssets:           designAssets,
-		AssetVersions:          assetVersions,
-		SKUItems:               skuItems,
-		Task:                   *task,
-		Workflow:               workflow,
-		Procurement:            procurement,
-		ProcurementSummary:     buildProcurementSummary(task, detail, procurement, receipt, workflow, matchedRuleGovernance, overrideSummary, governanceAuditSummary, overrideBoundary),
-		ProductSelection:       buildTaskProductSelectionContext(task, detail),
-		MatchedRuleGovernance:  matchedRuleGovernance,
-		OverrideSummary:        overrideSummary,
-		GovernanceAuditSummary: governanceAuditSummary,
-		OverrideBoundary:       overrideBoundary,
+		SKUItems:         skuItems,
+		Task:             *task,
+		ProductSelection: buildTaskProductSelectionContext(task, detail),
 	}
 	enrichTaskSKUItemReferenceFileRefs(readModel.SKUItems, s.referenceFileRefsEnricher)
 	enrichTaskReadModelDetail(ctx, s.userDisplayNameResolver, s.referenceFileRefsEnricher, readModel, task, detail)
 	if s.referenceFileRefFlatRepo != nil {
 		flatRefs, flatErr := s.referenceFileRefFlatRepo.ListByTask(ctx, task.ID)
 		if flatErr == nil {
+			var designAssets []*domain.DesignAsset
+			if task.TaskType == domain.TaskTypeRetouchTask {
+				assets, _, assetErr := s.loadTaskDesignAssetReadModel(ctx, task)
+				if assetErr != nil {
+					return nil, assetErr
+				}
+				designAssets = assets
+			}
 			requirements := s.listTaskRetouchRequirements(ctx, task)
-			readModel.RetouchRequirements = EnrichRetouchRequirementsReadModel(ctx, requirements, flatRefs, readModel.DesignAssets, s.referenceFileRefsEnricher)
+			readModel.RetouchRequirements = EnrichRetouchRequirementsReadModel(ctx, requirements, flatRefs, designAssets, s.referenceFileRefsEnricher)
 			readModel.ReferenceFileRefs = FilterTaskLevelReferenceFileRefs(readModel.ReferenceFileRefs, flatRefs)
-			readModel.DesignAssets, readModel.AssetVersions = FilterTaskLevelDesignAssetReadModel(readModel.DesignAssets, readModel.AssetVersions)
 		} else {
 			readModel.RetouchRequirements = s.listTaskRetouchRequirements(ctx, task)
 		}
 	} else {
 		readModel.RetouchRequirements = s.listTaskRetouchRequirements(ctx, task)
 	}
-	domain.HydrateTaskReadModelPolicy(readModel)
+	if !TaskAssetDownloadAllowed(ctx, task) {
+		RedactTaskReadModelDownloads(readModel)
+	}
 	return readModel, nil
 }
 
@@ -1980,8 +1749,17 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 	if task == nil {
 		return nil, domain.ErrNotFound
 	}
-	if appErr := s.taskActionAuthorizer().AuthorizeTaskAction(ctx, TaskActionUpdateBusinessInfo, task); appErr != nil {
+	access, appErr := authorizeTaskBusinessInfoUpdate(ctx, task)
+	if appErr != nil {
 		return nil, appErr
+	}
+	if p.GovernedFieldsRequested && !access.CanManageGovernedFields {
+		return nil, domain.NewAppError(domain.ErrCodePermissionDenied, "catalog.manage is required for cost-rule, manual-cost, or forced-filing fields", map[string]interface{}{
+			"action":    string(TaskActionUpdateBusinessInfo),
+			"deny_code": "governed_business_fields_require_catalog_manage",
+			"task_id":   task.ID,
+			"actor_id":  p.OperatorID,
+		})
 	}
 
 	detail, err := s.taskRepo.GetDetailByTaskID(ctx, p.TaskID)
@@ -2138,7 +1916,7 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 		detail.SizeText = p.SizeText
 		textMayContainCostDimensions = true
 	}
-	if strings.TrimSpace(p.Note) != "" {
+	if p.NoteSet || strings.TrimSpace(p.Note) != "" {
 		detail.Note = strings.TrimSpace(p.Note)
 		textMayContainCostDimensions = true
 	}
@@ -2344,7 +2122,7 @@ func (s *taskService) UpdateBusinessInfo(ctx context.Context, p UpdateTaskBusine
 		strings.TrimSpace(previousProductIID) != strings.TrimSpace(taskBusinessInfoEventProductIID(detail, p.ProductIID))
 
 	var singleItemCostProjection *domain.TaskSKUItem
-	if !task.IsBatchTask && (task.TaskType == domain.TaskTypeNewProductDevelopment || task.TaskType == domain.TaskTypePurchaseTask) {
+	if !task.IsBatchTask && task.TaskType == domain.TaskTypeNewProductDevelopment {
 		items, err := s.taskRepo.ListSKUItemsByTaskID(ctx, p.TaskID)
 		if err != nil {
 			return nil, infraError("list task sku items for business info cost projection", err)
@@ -2724,7 +2502,7 @@ func (s *taskService) UpdateSKUItemInfo(ctx context.Context, p UpdateTaskSKUItem
 	if !isBatchNewProductTask(task) {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidStateTransition, "sku item edit is only supported for batch new-product tasks", nil)
 	}
-	if appErr := s.taskActionAuthorizer().AuthorizeTaskAction(ctx, TaskActionUpdateBusinessInfo, task); appErr != nil {
+	if appErr := authorizeTaskSKUItemBusinessInfoUpdate(ctx, task); appErr != nil {
 		return nil, appErr
 	}
 	detail, err := s.taskRepo.GetDetailByTaskID(ctx, p.TaskID)
@@ -4588,7 +4366,7 @@ func (s *taskService) createERPBridgeFilingCallLog(ctx context.Context, taskID i
 	if s.integrationCallLogRepo == nil {
 		return nil, startedAt, nil
 	}
-	actor, _ := resolveWorkbenchActorScope(ctx)
+	actor, _ := domain.RequestActorFromContext(ctx)
 	log := &domain.IntegrationCallLog{
 		ConnectorKey:   domain.IntegrationConnectorKeyERPBridgeProductUpsert,
 		OperationKey:   "erp.products.upsert",

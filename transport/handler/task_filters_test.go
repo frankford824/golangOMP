@@ -56,6 +56,34 @@ func TestParseTaskFilterQueryRejectsInvertedCreatedDateRange(t *testing.T) {
 	}
 }
 
+func TestParseTaskFilterQueryOperationalBucket(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/tasks?operational_bucket=handover", nil)
+
+	filter, appErr := parseTaskFilterQuery(c)
+	if appErr != nil {
+		t.Fatalf("parseTaskFilterQuery() error = %+v", appErr)
+	}
+	if filter.OperationalBucket != domain.TaskOperationalBucketHandover {
+		t.Fatalf("OperationalBucket = %q, want %q", filter.OperationalBucket, domain.TaskOperationalBucketHandover)
+	}
+}
+
+func TestParseTaskFilterQueryRejectsUnknownOperationalBucket(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodGet, "/v1/tasks?operational_bucket=unknown", nil)
+
+	_, appErr := parseTaskFilterQuery(c)
+	if appErr == nil || appErr.Code != domain.ErrCodeInvalidRequest {
+		t.Fatalf("parseTaskFilterQuery() error = %+v, want INVALID_REQUEST", appErr)
+	}
+	if appErr.Message != "operational_bucket_invalid" {
+		t.Fatalf("AppError.Message = %q, want operational_bucket_invalid", appErr.Message)
+	}
+}
+
 func TestParseTaskFilterQueryPriorityMultiValue(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	c, _ := gin.CreateTestContext(httptest.NewRecorder())

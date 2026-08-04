@@ -7,8 +7,8 @@
  * 'field_not_allowed_for_task_type'`。
  *
  * 前端作为「UI 门禁」：
- *   1. 表单渲染层：按 task_type v-if 隔离控件（详见 TaskCreateModal /
- *      TaskCreateView / CustomizationCreateDialog），禁止收集 forbidden 字段。
+ *   1. 统一创建工作台按意图切换列模型，并在提交编排时隔离 task_type 字段；
+ *      TaskCreateView 禁止收集 forbidden 字段。
  *   2. 提交层：在调用 POST 前，`sanitizeCreateTaskPayload` 再过滤
  *      一次，防止遗留字段或回归 UI 把脏数据送出。
  *
@@ -60,8 +60,6 @@ export const TASK_TYPE_FIELD_WHITELIST = {
       'material_mode',
       'material',
       'material_other',
-      'purchase_sku',
-      'product_channel',
       'design_requirement',
     ] as readonly string[],
   },
@@ -97,8 +95,6 @@ export const TASK_TYPE_FIELD_WHITELIST = {
     ] as readonly string[],
     forbidden: [
       'change_request',
-      'purchase_sku',
-      'product_channel',
       'product_short_name',
       'material_mode',
       'material',
@@ -129,8 +125,6 @@ export const TASK_TYPE_FIELD_WHITELIST = {
       'material_mode',
       'material',
       'material_other',
-      'purchase_sku',
-      'product_channel',
       'product_short_name',
       'category_code',
       'base_sale_price',
@@ -217,9 +211,7 @@ export const TASK_CREATE_FIELD_CN_LABELS: Readonly<Record<string, string>> = Obj
   material_mode: '材料方式',
   material: '材料',
   material_other: '自定义材料',
-  purchase_sku: '采购 SKU',
   retouch_task: 'P 图任务',
-  product_channel: '产品渠道',
   design_requirement: '设计要求',
   reference_link: '参考链接',
   reference_file_refs: '参考图',

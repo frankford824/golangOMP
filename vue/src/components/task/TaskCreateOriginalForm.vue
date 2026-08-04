@@ -70,7 +70,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import type { TaskCreateFormModel } from '@/domain/types'
-import type { Product } from '@/types'
+import type { ERPProductOption } from '@/types'
 import BaseButton from '@/components/base/BaseButton.vue'
 import BaseTextarea from '@/components/base/BaseTextarea.vue'
 import ReferenceUploadPanel from '@/components/task/ReferenceUploadPanel.vue'
@@ -98,7 +98,7 @@ const referenceRefsModel = computed({
   },
 })
 
-function onProductSelect(p: Product) {
+function onProductSelect(p: ERPProductOption) {
   localForm.value.productId = p.id
   localForm.value.productName = p.name
   localForm.value.sku = p.sku

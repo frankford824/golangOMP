@@ -19,7 +19,6 @@ type DetailService struct {
 	retouchRequirementRepo repo.TaskRetouchRequirementRepo
 	refEnricher            referenceFileRefEnricher
 	nameResolver           userDisplayNameResolver
-	statusAgg              *StatusAggregator
 }
 
 type Detail struct {
@@ -30,7 +29,6 @@ type Detail struct {
 	References          []domain.ReferenceFileRef       `json:"reference_file_refs"`
 	SKUItems            []*domain.TaskSKUItem           `json:"sku_items"`
 	AssetVersions       []*domain.DesignAssetVersion    `json:"asset_versions"`
-	Workflow            domain.TaskWorkflowSnapshot     `json:"workflow"`
 	DesignSubStatus     string                          `json:"design_sub_status,omitempty"`
 	CreatorID           *int64                          `json:"creator_id,omitempty"`
 	RequesterID         *int64                          `json:"requester_id,omitempty"`
@@ -54,6 +52,10 @@ type ModuleDetail struct {
 
 type detailBundleReader interface {
 	GetTaskDetailBundle(ctx context.Context, taskID int64, eventLimit int) (*domain.Task, *domain.TaskDetail, []*domain.TaskModule, []*domain.TaskModuleEvent, []*domain.ReferenceFileRefFlat, error)
+}
+
+type detailReadBundleReader interface {
+	GetTaskDetailReadBundle(ctx context.Context, taskID int64, eventLimit int) (*domain.TaskDetailReadBundle, error)
 }
 
 type referenceFileRefEnricher interface {
@@ -91,7 +93,7 @@ func WithTaskRetouchRequirementRepo(retouchRequirementRepo repo.TaskRetouchRequi
 }
 
 func NewDetailService(tasks repo.TaskRepo, modules repo.TaskModuleRepo, events repo.TaskModuleEventRepo, refs repo.ReferenceFileRefFlatRepo, opts ...DetailServiceOption) *DetailService {
-	svc := &DetailService{tasks: tasks, modules: modules, events: events, refs: refs, statusAgg: NewStatusAggregator(modules)}
+	svc := &DetailService{tasks: tasks, modules: modules, events: events, refs: refs}
 	for _, opt := range opts {
 		if opt != nil {
 			opt(svc)
@@ -101,22 +103,44 @@ func NewDetailService(tasks repo.TaskRepo, modules repo.TaskModuleRepo, events r
 }
 
 func (s *DetailService) Get(ctx context.Context, taskID int64) (*Detail, error) {
+	if reader, ok := s.tasks.(detailReadBundleReader); ok {
+		bundle, err := reader.GetTaskDetailReadBundle(ctx, taskID, 50)
+		if err == nil {
+			if bundle == nil || bundle.Task == nil {
+				return nil, nil
+			}
+			if appErr := parentservice.AuthorizeTaskReadDetail(ctx, bundle.Task, nil); appErr != nil {
+				return nil, appErr
+			}
+			out := s.buildDetailWithNames(ctx, bundle.Task, bundle.TaskDetail, bundle.Modules, bundle.Events, bundle.ReferenceFiles, bundle.UserNames)
+			s.hydrateBundledFields(ctx, out, bundle)
+			redactDetailDownloadsForAccess(ctx, out)
+			return out, nil
+		}
+	}
 	if reader, ok := s.tasks.(detailBundleReader); ok {
 		task, detail, modules, events, refs, err := reader.GetTaskDetailBundle(ctx, taskID, 50)
 		if err == nil {
 			if task == nil {
 				return nil, nil
 			}
+			if appErr := parentservice.AuthorizeTaskReadDetail(ctx, task, nil); appErr != nil {
+				return nil, appErr
+			}
 			out := s.buildDetail(ctx, task, detail, modules, events, refs)
 			if err := s.hydrateBatchAndAssetFields(ctx, out, task); err != nil {
 				return nil, err
 			}
+			redactDetailDownloadsForAccess(ctx, out)
 			return out, nil
 		}
 	}
 	task, err := s.tasks.GetByID(ctx, taskID)
 	if err != nil || task == nil {
 		return nil, err
+	}
+	if appErr := parentservice.AuthorizeTaskReadDetail(ctx, task, nil); appErr != nil {
+		return nil, appErr
 	}
 	detail, err := s.tasks.GetDetailByTaskID(ctx, taskID)
 	if err != nil {
@@ -138,10 +162,106 @@ func (s *DetailService) Get(ctx context.Context, taskID int64) (*Detail, error) 
 	if err := s.hydrateBatchAndAssetFields(ctx, out, task); err != nil {
 		return nil, err
 	}
+	redactDetailDownloadsForAccess(ctx, out)
 	return out, nil
 }
 
+func redactDetailDownloadsForAccess(ctx context.Context, detail *Detail) {
+	if detail == nil || detail.Task == nil || parentservice.TaskAssetDownloadAllowed(ctx, detail.Task) {
+		return
+	}
+	detail.References = parentservice.RedactReferenceFileRefDownloads(detail.References)
+	detail.SKUItems = redactDetailSKUItemDownloads(detail.SKUItems)
+	detail.RetouchRequirements = redactDetailRetouchRequirementDownloads(detail.RetouchRequirements)
+	detail.AssetVersions = parentservice.RedactDesignAssetVersionDownloads(detail.AssetVersions)
+	if detail.TaskDetail != nil &&
+		(strings.TrimSpace(detail.TaskDetail.ReferenceFileRefsJSON) != "" ||
+			strings.TrimSpace(detail.TaskDetail.ReferenceImagesJSON) != "") {
+		cloned := *detail.TaskDetail
+		detail.TaskDetail = &cloned
+	}
+	if detail.TaskDetail != nil && strings.TrimSpace(detail.TaskDetail.ReferenceFileRefsJSON) != "" {
+		redacted := parentservice.RedactAssetDownloadJSON(json.RawMessage(detail.TaskDetail.ReferenceFileRefsJSON))
+		detail.TaskDetail.ReferenceFileRefsJSON = string(redacted)
+	}
+	if detail.TaskDetail != nil && strings.TrimSpace(detail.TaskDetail.ReferenceImagesJSON) != "" {
+		detail.TaskDetail.ReferenceImagesJSON = parentservice.RedactLegacyReferenceImagesJSON(detail.TaskDetail.ReferenceImagesJSON)
+	}
+	detail.Modules = redactDetailModules(detail.Modules)
+	detail.Events = redactDetailModuleEvents(detail.Events)
+}
+
+func redactDetailSKUItemDownloads(items []*domain.TaskSKUItem) []*domain.TaskSKUItem {
+	if items == nil {
+		return nil
+	}
+	out := make([]*domain.TaskSKUItem, 0, len(items))
+	for _, item := range items {
+		if item == nil {
+			out = append(out, nil)
+			continue
+		}
+		cloned := *item
+		cloned.ReferenceFileRefs = parentservice.RedactReferenceFileRefDownloads(item.ReferenceFileRefs)
+		out = append(out, &cloned)
+	}
+	return out
+}
+
+func redactDetailRetouchRequirementDownloads(items []domain.TaskRetouchRequirement) []domain.TaskRetouchRequirement {
+	if items == nil {
+		return nil
+	}
+	out := make([]domain.TaskRetouchRequirement, len(items))
+	copy(out, items)
+	for index := range out {
+		out[index].ReferenceFileRefs = parentservice.RedactReferenceFileRefDownloads(items[index].ReferenceFileRefs)
+		out[index].SourceAssets = parentservice.RedactDesignAssetDownloads(items[index].SourceAssets)
+	}
+	return out
+}
+
+func redactDetailModules(items []ModuleDetail) []ModuleDetail {
+	if items == nil {
+		return nil
+	}
+	out := make([]ModuleDetail, len(items))
+	for index := range items {
+		out[index] = items[index]
+		out[index].Projection = parentservice.RedactAssetDownloadJSON(items[index].Projection)
+		if items[index].TaskModule != nil {
+			module := *items[index].TaskModule
+			module.Data = parentservice.RedactAssetDownloadJSON(items[index].TaskModule.Data)
+			module.ActorOrgSnapshot = parentservice.RedactAssetDownloadJSON(items[index].TaskModule.ActorOrgSnapshot)
+			out[index].TaskModule = &module
+		}
+	}
+	return out
+}
+
+func redactDetailModuleEvents(items []*domain.TaskModuleEvent) []*domain.TaskModuleEvent {
+	if items == nil {
+		return nil
+	}
+	out := make([]*domain.TaskModuleEvent, 0, len(items))
+	for _, item := range items {
+		if item == nil {
+			out = append(out, nil)
+			continue
+		}
+		cloned := *item
+		cloned.Payload = parentservice.RedactAssetDownloadJSON(item.Payload)
+		cloned.ActorSnapshot = parentservice.RedactAssetDownloadJSON(item.ActorSnapshot)
+		out = append(out, &cloned)
+	}
+	return out
+}
+
 func (s *DetailService) buildDetail(ctx context.Context, task *domain.Task, detail *domain.TaskDetail, modules []*domain.TaskModule, events []*domain.TaskModuleEvent, refs []*domain.ReferenceFileRefFlat) *Detail {
+	return s.buildDetailWithNames(ctx, task, detail, modules, events, refs, nil)
+}
+
+func (s *DetailService) buildDetailWithNames(ctx context.Context, task *domain.Task, detail *domain.TaskDetail, modules []*domain.TaskModule, events []*domain.TaskModuleEvent, refs []*domain.ReferenceFileRefFlat, names map[int64]string) *Detail {
 	moduleDetails := make([]ModuleDetail, 0, len(modules))
 	for _, m := range modules {
 		moduleDetails = append(moduleDetails, ModuleDetail{TaskModule: m, Visibility: "visible", Projection: json.RawMessage(`{}`)})
@@ -158,18 +278,34 @@ func (s *DetailService) buildDetail(ctx context.Context, task *domain.Task, deta
 			detail.ReferenceFileRefsJSON = string(raw)
 		}
 	}
-	workflow, designSubStatus := buildDetailWorkflow(task, detail, modules)
+	designSubStatus := detailDesignSubStatus(task, modules)
 	out := &Detail{
 		Task:            task,
 		TaskDetail:      detail,
 		Modules:         moduleDetails,
 		Events:          events,
 		References:      references,
-		Workflow:        workflow,
-		DesignSubStatus: designSubStatus,
+		DesignSubStatus: string(designSubStatus.Code),
 	}
-	hydrateDetailActorFields(ctx, s.nameResolver, out, task)
+	hydrateDetailActorFields(ctx, s.nameResolver, out, task, names)
 	return out
+}
+
+func (s *DetailService) hydrateBundledFields(ctx context.Context, out *Detail, bundle *domain.TaskDetailReadBundle) {
+	if out == nil || bundle == nil || bundle.Task == nil {
+		return
+	}
+	out.SKUItems = bundle.SKUItems
+	out.AssetVersions = buildDetailAssetVersions(bundle.TaskAssets, bundle.Task)
+	requirements := make([]domain.TaskRetouchRequirement, 0, len(bundle.RetouchRequirements))
+	for _, item := range bundle.RetouchRequirements {
+		if item != nil {
+			requirements = append(requirements, *item)
+		}
+	}
+	designAssets := buildDetailDesignAssetsFromVersions(out.AssetVersions)
+	out.RetouchRequirements = parentservice.EnrichRetouchRequirementsReadModel(ctx, requirements, bundle.ReferenceFiles, designAssets, s.refEnricher)
+	_, out.AssetVersions = parentservice.FilterTaskLevelDesignAssetReadModel(nil, out.AssetVersions)
 }
 
 func (s *DetailService) hydrateBatchAndAssetFields(ctx context.Context, out *Detail, task *domain.Task) error {
@@ -196,7 +332,6 @@ func (s *DetailService) hydrateBatchAndAssetFields(ctx context.Context, out *Det
 	designAssets := buildDetailDesignAssetsFromVersions(out.AssetVersions)
 	out.RetouchRequirements = parentservice.EnrichRetouchRequirementsReadModel(ctx, requirements, flatRefs, designAssets, s.refEnricher)
 	_, out.AssetVersions = parentservice.FilterTaskLevelDesignAssetReadModel(nil, out.AssetVersions)
-	out.Workflow = normalizeDetailTerminalWorkflow(task, out.Workflow)
 	return nil
 }
 
@@ -240,6 +375,10 @@ func (s *DetailService) loadAssetVersions(ctx context.Context, task *domain.Task
 	if err != nil {
 		return nil, err
 	}
+	return buildDetailAssetVersions(records, task), nil
+}
+
+func buildDetailAssetVersions(records []*domain.TaskAsset, task *domain.Task) []*domain.DesignAssetVersion {
 	versions := make([]*domain.DesignAssetVersion, 0, len(records))
 	for _, record := range records {
 		version := domain.BuildDesignAssetVersion(record)
@@ -265,9 +404,9 @@ func (s *DetailService) loadAssetVersions(ctx context.Context, task *domain.Task
 		versions = append(versions, version)
 	}
 	if versions == nil {
-		return []*domain.DesignAssetVersion{}, nil
+		return []*domain.DesignAssetVersion{}
 	}
-	return versions, nil
+	return versions
 }
 
 func detailAssetVersionPreviewAvailable(version *domain.DesignAssetVersion) bool {
@@ -313,7 +452,7 @@ func detailAssetVersionAccessHint(version *domain.DesignAssetVersion) string {
 	return "Task asset is available through download_url."
 }
 
-func hydrateDetailActorFields(ctx context.Context, resolver userDisplayNameResolver, out *Detail, task *domain.Task) {
+func hydrateDetailActorFields(ctx context.Context, resolver userDisplayNameResolver, out *Detail, task *domain.Task, names map[int64]string) {
 	if out == nil || task == nil {
 		return
 	}
@@ -322,6 +461,20 @@ func hydrateDetailActorFields(ctx context.Context, resolver userDisplayNameResol
 	out.DesignerID = cloneInt64Ptr(task.DesignerID)
 	out.AssigneeID = cloneInt64Ptr(task.DesignerID)
 	out.CurrentHandlerID = cloneInt64Ptr(task.CurrentHandlerID)
+	if names != nil {
+		out.CreatorName = names[task.CreatorID]
+		if task.RequesterID != nil {
+			out.RequesterName = names[*task.RequesterID]
+		}
+		if task.DesignerID != nil {
+			out.DesignerName = names[*task.DesignerID]
+			out.AssigneeName = out.DesignerName
+		}
+		if task.CurrentHandlerID != nil {
+			out.CurrentHandlerName = names[*task.CurrentHandlerID]
+		}
+		return
+	}
 	if resolver == nil {
 		return
 	}
@@ -340,91 +493,21 @@ func hydrateDetailActorFields(ctx context.Context, resolver userDisplayNameResol
 	}
 }
 
-func buildDetailWorkflow(task *domain.Task, detail *domain.TaskDetail, modules []*domain.TaskModule) (domain.TaskWorkflowSnapshot, string) {
-	design := detailDesignSubStatus(task, modules)
-	customization := detailOutsourceSubStatus(task)
-	return domain.TaskWorkflowSnapshot{
-		MainStatus: detailMainStatus(task, detail),
-		SubStatus: domain.TaskSubStatusSnapshot{
-			Design:        design,
-			Audit:         detailAuditSubStatus(task),
-			Procurement:   detailProcurementSubStatus(task),
-			Warehouse:     detailWarehouseSubStatus(task),
-			Customization: customization,
-			Outsource:     customization,
-			Production:    detailStatusItem(domain.TaskSubStatusReserved, "Reserved", domain.TaskSubStatusSourceReserved),
-		},
-		WarehouseBlockingReasons: []domain.WorkflowReason{},
-		CannotCloseReasons:       []domain.WorkflowReason{},
-	}, string(design.Code)
-}
-
-func detailMainStatus(task *domain.Task, detail *domain.TaskDetail) domain.TaskMainStatus {
-	if task == nil {
-		return domain.TaskMainStatusDraft
-	}
-	switch task.TaskStatus {
-	case domain.TaskStatusCompleted:
-		return domain.TaskMainStatusClosed
-	case domain.TaskStatusPendingClose:
-		return domain.TaskMainStatusPendingClose
-	case domain.TaskStatusPendingWarehouseReceive:
-		return domain.TaskMainStatusPendingWarehouseReceive
-	case domain.TaskStatusPendingCustomizationReview,
-		domain.TaskStatusPendingCustomizationProduction,
-		domain.TaskStatusPendingEffectReview,
-		domain.TaskStatusPendingEffectRevision,
-		domain.TaskStatusPendingProductionTransfer,
-		domain.TaskStatusPendingWarehouseQC,
-		domain.TaskStatusRejectedByWarehouse:
-		return domain.TaskMainStatusCreated
-	}
-	if detail != nil && (detail.FilingStatus == domain.FilingStatusFiled || detail.FiledAt != nil) {
-		return domain.TaskMainStatusFiled
-	}
-	return domain.TaskMainStatusCreated
-}
-
-func normalizeDetailTerminalWorkflow(task *domain.Task, workflow domain.TaskWorkflowSnapshot) domain.TaskWorkflowSnapshot {
-	if task == nil {
-		return workflow
-	}
-	switch task.TaskStatus {
-	case domain.TaskStatusPendingClose:
-		workflow.MainStatus = domain.TaskMainStatusPendingClose
-		workflow.CanClose = true
-		workflow.Closable = true
-		workflow.CannotCloseReasons = []domain.WorkflowReason{}
-	case domain.TaskStatusCompleted:
-		workflow.MainStatus = domain.TaskMainStatusClosed
-		workflow.CanClose = false
-		workflow.Closable = false
-		workflow.CannotCloseReasons = []domain.WorkflowReason{{Code: domain.WorkflowReasonTaskAlreadyClosed, Message: "Task is already closed."}}
-	}
-	return workflow
-}
-
 func detailDesignSubStatus(task *domain.Task, modules []*domain.TaskModule) domain.TaskSubStatusItem {
 	if task == nil || !task.TaskType.RequiresDesign() {
 		return detailStatusItem(domain.TaskSubStatusNotRequired, "Not required", domain.TaskSubStatusSourceTaskType)
 	}
 	switch task.TaskStatus {
-	case domain.TaskStatusPendingCustomizationReview,
-		domain.TaskStatusPendingCustomizationProduction,
-		domain.TaskStatusPendingEffectReview,
-		domain.TaskStatusPendingEffectRevision,
-		domain.TaskStatusPendingProductionTransfer,
-		domain.TaskStatusPendingWarehouseQC,
-		domain.TaskStatusRejectedByWarehouse:
-		return detailStatusItem(domain.TaskSubStatusNotRequired, "Not required", domain.TaskSubStatusSourceTaskStatus)
 	case domain.TaskStatusPendingAssign:
 		return detailStatusItem(domain.TaskSubStatusPendingDesign, "Pending design", domain.TaskSubStatusSourceTaskStatus)
-	case domain.TaskStatusPendingAuditA, domain.TaskStatusPendingAuditB, domain.TaskStatusPendingOutsourceReview:
+	case domain.TaskStatusPendingAudit:
 		return detailStatusItem(domain.TaskSubStatusPendingAudit, "Pending audit", domain.TaskSubStatusSourceTaskStatus)
-	case domain.TaskStatusRejectedByAuditA, domain.TaskStatusRejectedByAuditB, domain.TaskStatusBlocked:
+	case domain.TaskStatusBlocked:
 		return detailStatusItem(domain.TaskSubStatusReworkRequired, "Rework required", domain.TaskSubStatusSourceTaskStatus)
-	case domain.TaskStatusPendingWarehouseReceive, domain.TaskStatusPendingClose, domain.TaskStatusCompleted:
+	case domain.TaskStatusCompleted, domain.TaskStatusArchived:
 		return detailStatusItem(domain.TaskSubStatusFinalReady, "Final ready", domain.TaskSubStatusSourceTaskStatus)
+	case domain.TaskStatusCancelled:
+		return detailStatusItem(domain.TaskSubStatusNotRequired, "Not required", domain.TaskSubStatusSourceTaskStatus)
 	}
 	for _, m := range modules {
 		if m == nil || m.ModuleKey != detailDesignModuleKey(task) {
@@ -452,85 +535,6 @@ func detailDesignModuleKey(task *domain.Task) string {
 		return domain.ModuleKeyRetouch
 	}
 	return domain.ModuleKeyDesign
-}
-
-func detailAuditSubStatus(task *domain.Task) domain.TaskSubStatusItem {
-	if task == nil || !task.TaskType.RequiresAudit() {
-		return detailStatusItem(domain.TaskSubStatusNotTriggered, "Not triggered", domain.TaskSubStatusSourceTaskType)
-	}
-	switch task.TaskStatus {
-	case domain.TaskStatusPendingAuditA, domain.TaskStatusPendingAuditB, domain.TaskStatusPendingOutsourceReview:
-		return detailStatusItem(domain.TaskSubStatusInReview, "In review", domain.TaskSubStatusSourceTaskStatus)
-	case domain.TaskStatusRejectedByAuditA, domain.TaskStatusRejectedByAuditB, domain.TaskStatusBlocked:
-		return detailStatusItem(domain.TaskSubStatusRejected, "Rejected", domain.TaskSubStatusSourceTaskStatus)
-	case domain.TaskStatusPendingOutsource, domain.TaskStatusOutsourcing:
-		return detailStatusItem(domain.TaskSubStatusOutsourced, "Outsourced", domain.TaskSubStatusSourceTaskStatus)
-	case domain.TaskStatusPendingWarehouseReceive, domain.TaskStatusPendingClose, domain.TaskStatusCompleted:
-		return detailStatusItem(domain.TaskSubStatusApproved, "Approved", domain.TaskSubStatusSourceTaskStatus)
-	default:
-		return detailStatusItem(domain.TaskSubStatusNotTriggered, "Not triggered", domain.TaskSubStatusSourceTaskStatus)
-	}
-}
-
-func detailProcurementSubStatus(task *domain.Task) domain.TaskSubStatusItem {
-	if task == nil || task.TaskType != domain.TaskTypePurchaseTask {
-		return detailStatusItem(domain.TaskSubStatusNotTriggered, "Not triggered", domain.TaskSubStatusSourceTaskType)
-	}
-	switch task.TaskStatus {
-	case domain.TaskStatusPendingClose, domain.TaskStatusCompleted:
-		return detailStatusItem(domain.TaskSubStatusCompleted, "Completed", domain.TaskSubStatusSourceTaskStatus)
-	default:
-		return detailStatusItem(domain.TaskSubStatusNotStarted, "Not started", domain.TaskSubStatusSourceTaskType)
-	}
-}
-
-func detailWarehouseSubStatus(task *domain.Task) domain.TaskSubStatusItem {
-	if task == nil {
-		return domain.TaskSubStatusItem{}
-	}
-	switch task.TaskStatus {
-	case domain.TaskStatusPendingWarehouseReceive:
-		return detailStatusItem(domain.TaskSubStatusPendingReceive, "Pending receive", domain.TaskSubStatusSourceTaskStatus)
-	case domain.TaskStatusPendingClose, domain.TaskStatusCompleted:
-		return detailStatusItem(domain.TaskSubStatusCompleted, "Completed", domain.TaskSubStatusSourceTaskStatus)
-	default:
-		return detailStatusItem(domain.TaskSubStatusNotTriggered, "Not triggered", domain.TaskSubStatusSourceTaskStatus)
-	}
-}
-
-func detailOutsourceSubStatus(task *domain.Task) domain.TaskSubStatusItem {
-	if task == nil {
-		return detailStatusItem(domain.TaskSubStatusNotTriggered, "Not triggered", domain.TaskSubStatusSourceTaskType)
-	}
-	if !task.CustomizationRequired &&
-		!task.NeedOutsource &&
-		task.TaskStatus != domain.TaskStatusPendingOutsource &&
-		task.TaskStatus != domain.TaskStatusOutsourcing &&
-		task.TaskStatus != domain.TaskStatusPendingOutsourceReview {
-		return detailStatusItem(domain.TaskSubStatusNotTriggered, "Not triggered", domain.TaskSubStatusSourceTaskType)
-	}
-	switch task.TaskStatus {
-	case domain.TaskStatusPendingCustomizationReview:
-		return detailStatusItem(domain.TaskSubStatusPendingReview, "Pending review", domain.TaskSubStatusSourceTaskStatus)
-	case domain.TaskStatusPendingCustomizationProduction, domain.TaskStatusPendingEffectRevision:
-		return detailStatusItem(domain.TaskSubStatusInProgress, "In progress", domain.TaskSubStatusSourceTaskStatus)
-	case domain.TaskStatusPendingEffectReview:
-		return detailStatusItem(domain.TaskSubStatusPendingReview, "Pending review", domain.TaskSubStatusSourceTaskStatus)
-	case domain.TaskStatusPendingProductionTransfer:
-		return detailStatusItem(domain.TaskSubStatusReady, "Ready", domain.TaskSubStatusSourceTaskStatus)
-	case domain.TaskStatusPendingWarehouseQC:
-		return detailStatusItem(domain.TaskSubStatusPendingReceive, "Pending warehouse QC", domain.TaskSubStatusSourceTaskStatus)
-	case domain.TaskStatusRejectedByWarehouse:
-		return detailStatusItem(domain.TaskSubStatusRejected, "Rejected", domain.TaskSubStatusSourceTaskStatus)
-	case domain.TaskStatusPendingOutsource, domain.TaskStatusOutsourcing:
-		return detailStatusItem(domain.TaskSubStatusInProgress, "In progress", domain.TaskSubStatusSourceTaskStatus)
-	case domain.TaskStatusPendingOutsourceReview:
-		return detailStatusItem(domain.TaskSubStatusPendingReview, "Pending review", domain.TaskSubStatusSourceTaskStatus)
-	case domain.TaskStatusPendingWarehouseReceive, domain.TaskStatusPendingClose, domain.TaskStatusCompleted:
-		return detailStatusItem(domain.TaskSubStatusCompleted, "Completed", domain.TaskSubStatusSourceTaskStatus)
-	default:
-		return detailStatusItem(domain.TaskSubStatusNotTriggered, "Not triggered", domain.TaskSubStatusSourceTaskStatus)
-	}
 }
 
 func detailStatusItem(code domain.TaskSubStatusCode, label string, source domain.TaskSubStatusSource) domain.TaskSubStatusItem {

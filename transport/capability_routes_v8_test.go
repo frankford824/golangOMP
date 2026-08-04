@@ -17,18 +17,19 @@ func TestV8BusinessRoutePermissionsCoverActiveTaskAssetAndERPSurfaces(t *testing
 		want   domain.PermissionCode
 	}{
 		{http.MethodGet, "/v1/tasks/8/product-info", domain.PermissionTaskView},
-		{http.MethodPatch, "/v1/tasks/8/product-info", domain.PermissionTaskManage},
-		{http.MethodPatch, "/v1/tasks/8/sku-items/4", domain.PermissionTaskManage},
-		{http.MethodPost, "/v1/tasks/8/modules/design/claim", domain.PermissionTaskManage},
-		{http.MethodGet, "/v1/tasks/audit/handover-candidates", domain.PermissionTaskAuditDecision},
-		{http.MethodPost, "/v1/tasks/audit/handover-batch", domain.PermissionTaskAuditDecision},
-		{http.MethodPost, "/v1/tasks/8/audit/handover", domain.PermissionTaskAuditDecision},
+		{http.MethodPatch, "/v1/tasks/8/product-info", domain.PermissionCatalogManage},
+		{http.MethodPatch, "/v1/tasks/8/sku-items/4", domain.PermissionCatalogManage},
+		{http.MethodPatch, "/v1/tasks/8/sku-items/4", domain.PermissionTaskCreate},
+		{http.MethodPost, "/v1/tasks/8/modules/design/claim", domain.PermissionTaskUploadSource},
+		{http.MethodGet, "/v1/tasks/audit/handover-candidates", domain.PermissionTaskAuditHandover},
+		{http.MethodPost, "/v1/tasks/audit/handover-batch", domain.PermissionTaskAuditHandover},
+		{http.MethodPost, "/v1/tasks/8/audit/handover", domain.PermissionTaskAuditHandover},
 		{http.MethodGet, "/v1/tasks/8/audit/handovers", domain.PermissionTaskView},
-		{http.MethodPost, "/v1/tasks/8/audit/takeover", domain.PermissionTaskAuditDecision},
+		{http.MethodPost, "/v1/tasks/8/audit/takeover", domain.PermissionTaskAuditHandover},
 		{http.MethodPost, "/v1/tasks/8/filing/retry", domain.PermissionERPManage},
 		{http.MethodGet, "/v1/tasks/8/assets", domain.PermissionAssetView},
 		{http.MethodGet, "/v1/tasks/8/assets/7/download", domain.PermissionAssetDownload},
-		{http.MethodPost, "/v1/tasks/8/assets/upload-sessions", domain.PermissionTaskDesignSubmit},
+		{http.MethodPost, "/v1/tasks/8/assets/upload-sessions", domain.PermissionTaskUploadSource},
 		{http.MethodGet, "/v1/assets/search", domain.PermissionAssetView},
 		{http.MethodDelete, "/v1/assets/77", domain.PermissionAssetManage},
 		{http.MethodPost, "/v1/assets/batch-download", domain.PermissionAssetDownload},
@@ -83,6 +84,29 @@ func TestV8AssetDeleteRegistrationUsesExplicitAssetManageCapability(t *testing.T
 	}
 }
 
+func TestResourceGroupRevisionRegistrationMatchesAssetViewDetailContract(t *testing.T) {
+	raw, err := os.ReadFile("http.go")
+	if err != nil {
+		t.Fatalf("read http.go: %v", err)
+	}
+	var registration string
+	for _, line := range strings.Split(string(raw), "\n") {
+		if strings.Contains(line, `resourceGroups.GET("/:id/revisions"`) {
+			registration = strings.TrimSpace(line)
+			break
+		}
+	}
+	if registration == "" {
+		t.Fatal("GET /v1/resource-groups/:id/revisions registration not found")
+	}
+	if !strings.Contains(registration, "domain.PermissionAssetView") {
+		t.Fatalf("revision registration missing asset.view: %s", registration)
+	}
+	if strings.Contains(registration, "domain.PermissionTaskView") {
+		t.Fatalf("revision registration widens the resource detail contract to task.view: %s", registration)
+	}
+}
+
 func TestV8AssetWorkbenchUsesNarrowCapabilitiesForHighRiskSurfaces(t *testing.T) {
 	tests := []struct {
 		method string
@@ -134,7 +158,31 @@ func TestV8AssetWorkbenchLegacyRegistrationsHaveCompleteCapabilityMapping(t *tes
 	}
 }
 
-func TestV8PlanningSKURetryAndResyncCapabilitiesAreSeparated(t *testing.T) {
+func TestV8TaskLegacyRegistrationsHaveCompleteCapabilityMapping(t *testing.T) {
+	raw, err := os.ReadFile("http.go")
+	if err != nil {
+		t.Fatalf("read routes: %v", err)
+	}
+	re := regexp.MustCompile(`access\(taskGroup, http\.(MethodGet|MethodPost|MethodPatch|MethodPut|MethodDelete), "([^"]+)", domain\.APIReadinessReadyForFrontend`)
+	matches := re.FindAllStringSubmatch(string(raw), -1)
+	for _, match := range matches {
+		method := strings.TrimPrefix(match[1], "Method")
+		path := "/v1/tasks" + match[2]
+		t.Errorf("%s %s still uses retired role middleware instead of capabilityAccess", method, path)
+	}
+}
+
+func TestV8UnmappedTaskWriteFailsClosed(t *testing.T) {
+	permissions, governed := v8BusinessRoutePermissions(http.MethodPatch, "/v1/tasks/8/unmapped-write")
+	if !governed || len(permissions) != 0 {
+		t.Fatalf("unmapped task write permissions=%v governed=%v, want governed empty sentinel input", permissions, governed)
+	}
+	if unmappedV8RoutePermission == "" {
+		t.Fatal("unmapped route sentinel must not be empty")
+	}
+}
+
+func TestV8PlanningSKURetryAndResyncUseSeparateCapabilities(t *testing.T) {
 	retry, _ := v8BusinessRoutePermissions(http.MethodPost, "/v1/tasks/7/planning-skus/erp-retry")
 	resync, _ := v8BusinessRoutePermissions(http.MethodPost, "/v1/tasks/7/planning-skus/erp-resync")
 	if !permissionListContains(retry, domain.PermissionPlanningSKURetry) || permissionListContains(retry, domain.PermissionPlanningSKUSync) {
@@ -160,7 +208,7 @@ func TestV8TaskAssetUploadSessionAliasesShareCanonicalCapabilityContract(t *test
 		"/v1/tasks/8/asset-center/upload-sessions/session-1/cancel",
 		"/v1/tasks/8/asset-center/upload-sessions/session-1/abort",
 	}
-	want := []domain.PermissionCode{domain.PermissionTaskDesignSubmit, domain.PermissionTaskAuditDecision, domain.PermissionAssetManage}
+	want := []domain.PermissionCode{domain.PermissionTaskCreate, domain.PermissionTaskDesignSubmit, domain.PermissionTaskAuditDecision, domain.PermissionAssetManage}
 	for _, path := range writes {
 		permissions, governed := v8BusinessRoutePermissions(http.MethodPost, path)
 		if !governed {

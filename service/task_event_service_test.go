@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -53,6 +54,64 @@ func TestTaskEventServiceListByTaskIDEnrichesActorNames(t *testing.T) {
 	}
 }
 
+func TestTaskEventServiceRejectsOutOfScopeActorBeforeReadingEvents(t *testing.T) {
+	eventRepo := &taskEventRepoStub{events: []*domain.TaskEvent{{ID: "sensitive-event", TaskID: 1000}}}
+	svc := NewTaskEventService(eventRepo, &taskEventTaskRepoStub{task: &domain.Task{
+		ID:         1000,
+		TaskType:   domain.TaskTypeNewProductDevelopment,
+		TaskStatus: domain.TaskStatusCompleted,
+		CreatorID:  999,
+	}})
+
+	events, appErr := svc.ListByTaskID(
+		domain.WithRequestActor(context.Background(), taskActionTestActor(231, domain.PermissionTaskView, domain.AccessScopeSelf)),
+		1000,
+	)
+	if appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
+		t.Fatalf("ListByTaskID() appErr = %+v, want PERMISSION_DENIED", appErr)
+	}
+	if events != nil {
+		t.Fatalf("ListByTaskID() events = %+v, want nil", events)
+	}
+	if eventRepo.listCalls != 0 {
+		t.Fatalf("event repo list calls = %d, want 0", eventRepo.listCalls)
+	}
+}
+
+func TestTaskEventServiceRedactsDownloadMetadataForViewOnlyActor(t *testing.T) {
+	const (
+		taskID  int64 = 1001
+		actorID int64 = 231
+	)
+	storedPayload := json.RawMessage(`{"reference_file_refs":[{"asset_id":"ref-1","storage_key":"tasks/1001/ref.png","download_url":"https://objects.example/ref?signature=secret"}]}`)
+	eventRepo := &taskEventRepoStub{events: []*domain.TaskEvent{{
+		ID:      "asset-event",
+		TaskID:  taskID,
+		Payload: storedPayload,
+	}}}
+	svc := NewTaskEventService(eventRepo, &taskEventTaskRepoStub{task: &domain.Task{
+		ID:         taskID,
+		TaskType:   domain.TaskTypeNewProductDevelopment,
+		TaskStatus: domain.TaskStatusCompleted,
+		CreatorID:  actorID,
+	}})
+
+	events, appErr := svc.ListByTaskID(
+		domain.WithRequestActor(context.Background(), taskActionTestActor(actorID, domain.PermissionTaskView, domain.AccessScopeSelf)),
+		taskID,
+	)
+	if appErr != nil {
+		t.Fatalf("ListByTaskID() appErr = %v", appErr)
+	}
+	if len(events) != 1 || strings.Contains(string(events[0].Payload), "download_url") ||
+		strings.Contains(string(events[0].Payload), "storage_key") {
+		t.Fatalf("ListByTaskID() payload = %s, want download metadata redacted", events[0].Payload)
+	}
+	if !strings.Contains(string(eventRepo.events[0].Payload), "signature=secret") {
+		t.Fatal("ListByTaskID() mutated the stored event payload")
+	}
+}
+
 type taskEventNameResolverStub struct {
 	names map[int64]string
 }
@@ -62,7 +121,8 @@ func (r taskEventNameResolverStub) GetDisplayName(_ context.Context, userID int6
 }
 
 type taskEventRepoStub struct {
-	events []*domain.TaskEvent
+	events    []*domain.TaskEvent
+	listCalls int
 }
 
 func (r *taskEventRepoStub) Append(context.Context, repo.Tx, int64, string, *int64, interface{}) (*domain.TaskEvent, error) {
@@ -70,6 +130,7 @@ func (r *taskEventRepoStub) Append(context.Context, repo.Tx, int64, string, *int
 }
 
 func (r *taskEventRepoStub) ListByTaskID(context.Context, int64) ([]*domain.TaskEvent, error) {
+	r.listCalls++
 	return r.events, nil
 }
 
@@ -106,10 +167,6 @@ func (r *taskEventTaskRepoStub) ListSKUItemsByTaskID(context.Context, int64) ([]
 }
 
 func (r *taskEventTaskRepoStub) List(context.Context, repo.TaskListFilter) ([]*domain.TaskListItem, int64, error) {
-	panic("not used")
-}
-
-func (r *taskEventTaskRepoStub) ListBoardCandidates(context.Context, repo.TaskBoardCandidateFilter) ([]*domain.TaskListItem, error) {
 	panic("not used")
 }
 

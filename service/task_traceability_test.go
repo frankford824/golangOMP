@@ -28,13 +28,6 @@ func TestTaskSourceDepartmentUsesCanonicalUpstreamDepartment(t *testing.T) {
 			},
 			want: string(domain.DepartmentCustomizationArt),
 		},
-		{
-			name: "purchase task maps to cloud warehouse",
-			task: &domain.Task{
-				TaskType: domain.TaskTypePurchaseTask,
-			},
-			want: string(domain.DepartmentCloudWarehouse),
-		},
 	}
 
 	for _, tc := range tests {
@@ -53,8 +46,11 @@ func TestTaskEventBasePayloadIncludesLaneAndSourceDepartment(t *testing.T) {
 		ProductNameSnapshot:   "Trace",
 		CustomizationRequired: true,
 	})
-	if payload["workflow_lane"] != string(domain.WorkflowLaneCustomization) {
-		t.Fatalf("workflow_lane = %v, want %q", payload["workflow_lane"], domain.WorkflowLaneCustomization)
+	if payload["business_lane"] != string(domain.TaskBusinessLaneCustomization) {
+		t.Fatalf("business_lane = %v, want %q", payload["business_lane"], domain.TaskBusinessLaneCustomization)
+	}
+	if _, ok := payload["workflow_lane"]; ok {
+		t.Fatal("retired workflow_lane must not be emitted into new task events")
 	}
 	if payload["source_department"] != string(domain.DepartmentCustomizationArt) {
 		t.Fatalf("source_department = %v, want %q", payload["source_department"], domain.DepartmentCustomizationArt)

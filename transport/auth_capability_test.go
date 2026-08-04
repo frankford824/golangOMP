@@ -27,7 +27,7 @@ func TestTaskAssetUploadSessionRoutesAcceptCapabilityOnlyAndRejectLegacyRoleOnly
 		{name: "task alias create", pattern: "/v1/tasks/:id/assets/upload-sessions", path: "/v1/tasks/8/assets/upload-sessions"},
 		{name: "asset-center alias cancel", pattern: "/v1/tasks/:id/asset-center/upload-sessions/:session_id/cancel", path: "/v1/tasks/8/asset-center/upload-sessions/session-1/cancel"},
 	}
-	required := []domain.PermissionCode{domain.PermissionTaskDesignSubmit, domain.PermissionTaskAuditDecision, domain.PermissionAssetManage}
+	required := []domain.PermissionCode{domain.PermissionTaskCreate, domain.PermissionTaskDesignSubmit, domain.PermissionTaskAuditDecision, domain.PermissionAssetManage}
 	for _, route := range routes {
 		t.Run(route.name, func(t *testing.T) {
 			for _, tc := range []struct {
@@ -79,6 +79,26 @@ func TestTaskAssetUploadSessionHTTPRegistrationsDoNotUseLegacyRoleAccess(t *test
 			t.Errorf("upload-session route retained legacy role access: %s", strings.TrimSpace(line))
 		}
 	}
+}
+
+func TestCostRulePreviewUsesAuthenticatedAccountCapability(t *testing.T) {
+	raw, err := os.ReadFile("http.go")
+	if err != nil {
+		t.Fatalf("read http.go: %v", err)
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		if !strings.Contains(line, `costRuleGroup.POST("/preview"`) {
+			continue
+		}
+		if !strings.Contains(line, "domain.PermissionAccountUse") {
+			t.Fatalf("cost rule preview must be available to authenticated accounts: %s", strings.TrimSpace(line))
+		}
+		if strings.Contains(line, "domain.PermissionCatalogManage") {
+			t.Fatalf("read-only cost rule preview must not require catalog management: %s", strings.TrimSpace(line))
+		}
+		return
+	}
+	t.Fatal("cost rule preview registration not found")
 }
 
 type effectiveAccessResolverStub struct {
@@ -266,7 +286,7 @@ func TestAssetWorkbenchMigratedRoleCapabilityParity(t *testing.T) {
 		{"settlement reads profiles", "asset_settlement", http.MethodGet, "/v1/asset-workbench/profiles", true},
 		{"settlement creates supplement upload session", "asset_settlement", http.MethodPost, "/v1/asset-workbench/upload-sessions", true},
 		{"submitter profiles denied", "asset_submitter", http.MethodGet, "/v1/asset-workbench/profiles", false},
-		{"submitter creates supplement", "asset_submitter", http.MethodPost, "/v1/asset-workbench/settlement/supplements", true},
+		{"submitter creates own supplement", "asset_submitter", http.MethodPost, "/v1/asset-workbench/settlement/supplements", true},
 		{"submitter deletes own supplement route", "asset_submitter", http.MethodDelete, "/v1/asset-workbench/settlement/supplements/3", true},
 		{"submitter batch deletes own supplements route", "asset_submitter", http.MethodPost, "/v1/asset-workbench/settlement/supplements/batch-delete", true},
 		{"submitter settlement confirm denied", "asset_submitter", http.MethodPost, "/v1/asset-workbench/settlement/batches/3/confirm", false},

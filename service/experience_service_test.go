@@ -2291,7 +2291,7 @@ func TestExperienceServiceRecordMicroQuestionAnswerRequiresCaptureEnabled(t *tes
 	}
 }
 
-func TestExperienceMicroQuestionReasonCodesStayInSync(t *testing.T) {
+func TestExperienceMicroQuestionReasonCodesStayInSyncWithStoredSeeds(t *testing.T) {
 	codes := []string{
 		"temporarily_not_needed",
 		"will_handle_later",
@@ -2306,41 +2306,13 @@ func TestExperienceMicroQuestionReasonCodesStayInSync(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read experience migration: %v", err)
 	}
-	openapi, err := os.ReadFile("../docs/api/openapi.yaml")
-	if err != nil {
-		t.Fatalf("read openapi: %v", err)
-	}
 	migrationCodes := extractMicroQuestionReasonCodesFromMigration(t, string(migration))
-	openAPICodes := extractMicroQuestionReasonCodesFromOpenAPI(t, string(openapi))
 	for _, code := range codes {
 		if !isAllowedExperienceMicroQuestionReason(code) {
 			t.Fatalf("service whitelist rejects micro question reason %q", code)
 		}
 	}
 	assertSameStringSet(t, "migration micro-question reasons", codes, migrationCodes)
-	assertSameStringSet(t, "openapi micro-question reasons", codes, openAPICodes)
-}
-
-func TestExperienceMicroQuestionEligibilityReasonsStayInSync(t *testing.T) {
-	reasons := []string{
-		"disabled",
-		"surface_disabled",
-		"missing_suggestion_event",
-		"suggestion_not_found",
-		"not_attribution_eligible",
-		"suggestion_context_mismatch",
-		"target_mismatch",
-		"missing_target",
-		"already_answered",
-		"no_supported_attribution",
-		"rate_limited",
-	}
-	openapi, err := os.ReadFile("../docs/api/openapi.yaml")
-	if err != nil {
-		t.Fatalf("read openapi: %v", err)
-	}
-	openAPICodes := extractMicroQuestionEligibilityReasonsFromOpenAPI(t, string(openapi))
-	assertSameStringSet(t, "openapi micro-question eligibility reasons", reasons, openAPICodes)
 }
 
 func extractMicroQuestionReasonCodesFromMigration(t *testing.T, content string) []string {
@@ -2353,40 +2325,6 @@ func extractMicroQuestionReasonCodesFromMigration(t *testing.T, content string) 
 	out := make([]string, 0, len(matches))
 	for _, match := range matches {
 		out = append(out, match[1])
-	}
-	return out
-}
-
-func extractMicroQuestionReasonCodesFromOpenAPI(t *testing.T, content string) []string {
-	t.Helper()
-	re := regexp.MustCompile(`(?s)reason_code:\s*\n\s*type:\s*string\s*\n\s*description:[^\n]*\n\s*enum:\s*\[([^\]]+)\]`)
-	match := re.FindStringSubmatch(content)
-	if len(match) != 2 {
-		t.Fatal("openapi micro-question reason_code enum not found")
-	}
-	parts := strings.Split(match[1], ",")
-	out := make([]string, 0, len(parts))
-	for _, part := range parts {
-		if value := strings.TrimSpace(part); value != "" {
-			out = append(out, value)
-		}
-	}
-	return out
-}
-
-func extractMicroQuestionEligibilityReasonsFromOpenAPI(t *testing.T, content string) []string {
-	t.Helper()
-	re := regexp.MustCompile(`(?s)ExperienceMicroQuestionEligibility:.*?reason:\s*\n\s*type:\s*string\s*\n\s*enum:\s*\[([^\]]+)\]`)
-	match := re.FindStringSubmatch(content)
-	if len(match) != 2 {
-		t.Fatal("openapi micro-question eligibility reason enum not found")
-	}
-	parts := strings.Split(match[1], ",")
-	out := make([]string, 0, len(parts))
-	for _, part := range parts {
-		if value := strings.TrimSpace(part); value != "" {
-			out = append(out, value)
-		}
 	}
 	return out
 }

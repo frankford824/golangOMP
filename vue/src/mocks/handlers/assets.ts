@@ -84,7 +84,7 @@ function buildMockAssetDetail(asset: MockAssetRecord) {
     primary_sku_code: 'SKU-MOCK-1002',
     scope_sku_code: 'SKU-MOCK-1002',
     product_name: '常规定制补图素材',
-    workflow_lane: 'normal',
+    business_lane: 'normal',
     source_department: '设计部',
     task_creator_name: 'ops_demo',
     created_by_name: 'designer_demo',
@@ -235,8 +235,7 @@ export const assetsHandler: MockHandler = (request) => {
 
   if (
     request.method === 'POST' &&
-    (request.path === '/v1/task-create/asset-center/upload-sessions' ||
-      request.path.match(/^\/v1\/tasks\/[^/]+\/asset-center\/upload-sessions(\/small|\/multipart)?$/))
+    request.path.match(/^\/v1\/tasks\/[^/]+\/asset-center\/upload-sessions(\/small|\/multipart)?$/)
   ) {
     const sessionId = `us_${Date.now()}`
     return {

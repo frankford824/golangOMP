@@ -5,6 +5,14 @@ import (
 	"time"
 )
 
+func cloneInt64Ptr(value *int64) *int64 {
+	if value == nil {
+		return nil
+	}
+	copyValue := *value
+	return &copyValue
+}
+
 type DesignAssetUploadMode string
 
 const (
@@ -138,26 +146,24 @@ type AssetDownloadInfo struct {
 }
 
 type DesignAsset struct {
-	ID                      int64                   `db:"id"                 json:"id"`
-	TaskID                  int64                   `db:"task_id"            json:"task_id"`
-	AssetNo                 string                  `db:"asset_no"           json:"asset_no"`
-	SourceAssetID           *int64                  `db:"source_asset_id"    json:"source_asset_id,omitempty"`
-	ScopeSKUCode            string                  `db:"scope_sku_code"           json:"scope_sku_code,omitempty"`
-	RetouchRequirementID    *int64                  `db:"retouch_requirement_id"   json:"retouch_requirement_id,omitempty"`
-	AssetType               TaskAssetType           `db:"asset_type"               json:"asset_type"`
-	CurrentVersionID        *int64                  `db:"current_version_id" json:"current_version_id,omitempty"`
-	ApprovedVersionID       *int64                  `json:"approved_version_id,omitempty"`
-	WarehouseReadyVersionID *int64                  `json:"warehouse_ready_version_id,omitempty"`
-	UploadStatus            DesignAssetUploadStatus `json:"upload_status,omitempty"`
-	ArchiveStatus           AssetArchiveStatus      `json:"archive_status,omitempty"`
-	ArchivedAt              *time.Time              `json:"archived_at,omitempty"`
-	LastAccessAt            *time.Time              `json:"last_access_at,omitempty"`
-	CreatedBy               int64                   `db:"created_by"         json:"created_by"`
-	CreatedAt               time.Time               `db:"created_at"         json:"created_at"`
-	UpdatedAt               time.Time               `db:"updated_at"         json:"updated_at"`
-	CurrentVersion          *DesignAssetVersion     `json:"current_version,omitempty"`
-	ApprovedVersion         *DesignAssetVersion     `json:"approved_version,omitempty"`
-	WarehouseReadyVersion   *DesignAssetVersion     `json:"warehouse_ready_version,omitempty"`
+	ID                   int64                   `db:"id"                 json:"id"`
+	TaskID               int64                   `db:"task_id"            json:"task_id"`
+	AssetNo              string                  `db:"asset_no"           json:"asset_no"`
+	SourceAssetID        *int64                  `db:"source_asset_id"    json:"source_asset_id,omitempty"`
+	ScopeSKUCode         string                  `db:"scope_sku_code"           json:"scope_sku_code,omitempty"`
+	RetouchRequirementID *int64                  `db:"retouch_requirement_id"   json:"retouch_requirement_id,omitempty"`
+	AssetType            TaskAssetType           `db:"asset_type"               json:"asset_type"`
+	CurrentVersionID     *int64                  `db:"current_version_id" json:"current_version_id,omitempty"`
+	ApprovedVersionID    *int64                  `json:"approved_version_id,omitempty"`
+	UploadStatus         DesignAssetUploadStatus `json:"upload_status,omitempty"`
+	ArchiveStatus        AssetArchiveStatus      `json:"archive_status,omitempty"`
+	ArchivedAt           *time.Time              `json:"archived_at,omitempty"`
+	LastAccessAt         *time.Time              `json:"last_access_at,omitempty"`
+	CreatedBy            int64                   `db:"created_by"         json:"created_by"`
+	CreatedAt            time.Time               `db:"created_at"         json:"created_at"`
+	UpdatedAt            time.Time               `db:"updated_at"         json:"updated_at"`
+	CurrentVersion       *DesignAssetVersion     `json:"current_version,omitempty"`
+	ApprovedVersion      *DesignAssetVersion     `json:"approved_version,omitempty"`
 }
 
 type DesignAssetVersion struct {
@@ -179,7 +185,7 @@ type DesignAssetVersion struct {
 	HasOriginalFilename   bool                        `json:"has_original_filename,omitempty"`
 	ProductNameSnapshot   string                      `json:"product_name_snapshot,omitempty"`
 	RemoteFileID          *string                     `json:"remote_file_id,omitempty"`
-	StorageKey            string                      `json:"storage_key"`
+	StorageKey            string                      `json:"storage_key,omitempty"`
 	FileSize              *int64                      `json:"file_size,omitempty"`
 	FileHash              *string                     `json:"file_hash,omitempty"`
 	MimeType              string                      `json:"mime_type,omitempty"`
@@ -211,10 +217,9 @@ type DesignAssetVersion struct {
 	// decide whether a preview belongs to the resource's current version, but it
 	// is intentionally excluded from the public design-asset response contract.
 	SourceAssetVersionID  *int64  `json:"-"`
-	WarehouseReady        bool    `json:"warehouse_ready"`
 	ApprovedForFlow       bool    `json:"approved_for_flow"`
 	CurrentVersionRole    string  `json:"current_version_role,omitempty"`
-	DownloadURL           *string `json:"download_url"`
+	DownloadURL           *string `json:"download_url,omitempty"`
 	PublicDownloadAllowed bool    `json:"public_download_allowed"`
 	PreviewPublicAllowed  bool    `json:"preview_public_allowed"`
 	AccessHint            string  `json:"access_hint,omitempty"`
@@ -264,7 +269,8 @@ func BuildDesignAssetVersion(taskAsset *TaskAsset) *DesignAssetVersion {
 	storageRefStatus := AssetStorageRefStatus("")
 	if taskAsset.StorageRef != nil {
 		storageRefStatus = taskAsset.StorageRef.Status
-		if storageRefStatus == AssetStorageRefStatusArchived {
+		if storageRefStatus == AssetStorageRefStatusArchived ||
+			storageRefStatus == AssetStorageRefStatusHistoricalUnavailable {
 			storageKey = ""
 		}
 	}

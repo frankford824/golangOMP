@@ -7,7 +7,7 @@
 
 import axios from 'axios'
 import http from '@/services/http'
-import type { AssetResourceSource, BackendAsset, BackendAssetVersion } from '@/services/apiTypes'
+import type { BackendAsset, BackendAssetVersion } from '@/services/apiTypes'
 
 export type AssetKind = 'reference' | 'source' | 'delivery' | 'preview' | 'design_thumb' | 'erp_product_image'
 
@@ -43,7 +43,7 @@ export interface AssetUploadSessionCreateResponse {
       upload_status?: string | null
     }
     oss_direct?: {
-      /** 与 `upload_strategy` 二选一常见；v0.9 运行时可能只返回 `mode` */
+      /** 与 `upload_strategy` 二选一；部分存量上传记录只保存 `mode`。 */
       mode?: 'single_part' | 'multipart' | string
       upload_strategy?: 'single_part' | 'multipart' | string
       upload_url?: string | null
@@ -216,72 +216,6 @@ export function formatMultipartPartsLabel(progress: AssetUploadProgress): string
   return `分片 ${c}/${progress.partsTotal}`
 }
 
-export interface AssetListQuery {
-  task_id?: string | number
-  asset_kind?: string
-  source_asset_id?: string | number
-  scope_sku_code?: string
-  page?: number
-  page_size?: number
-  size?: number
-  [key: string]: unknown
-}
-
-export interface AssetSearchQuery {
-  keyword?: string
-  source?: AssetResourceSource
-  resource_source?: AssetResourceSource
-  page?: number
-  size?: number
-  module_key?: string
-  owner_team_code?: string
-  is_archived?: 'true' | 'false' | 'all'
-  task_status?: 'open' | 'closed' | 'archived' | 'all'
-  business_lane?: 'normal' | 'customization'
-  workflow_lane?: 'normal' | 'customization'
-  asset_type?: 'delivery' | 'reference' | 'source' | 'preview' | 'design_thumb'
-  asset_kind?: 'delivery' | 'reference' | 'source' | 'preview' | 'design_thumb'
-  time_basis?: 'asset_uploaded_at' | 'task_created_at'
-  created_from?: string
-  created_to?: string
-  format_category?: 'all' | 'image' | 'design' | 'pdf' | 'video' | 'archive'
-  [key: string]: unknown
-}
-
-export interface AssetSearchResponse {
-  data: BackendAsset[]
-  total: number
-  page: number
-  size: number
-}
-
-export type AssetBatchSearchStatus = 'matched' | 'not_found' | 'error'
-
-export interface AssetBatchSearchPayload {
-  terms: string[]
-  format_filter?: 'jpg_png' | 'jpg' | 'png' | 'webp' | 'image' | 'design' | 'pdf' | 'archive' | 'all'
-  asset_kind?: 'auto' | 'all' | 'delivery' | 'reference' | 'source' | 'preview' | 'other'
-}
-
-export interface AssetBatchSearchResult {
-  term: string
-  status: AssetBatchSearchStatus
-  message: string
-  candidates: number
-  asset?: BackendAsset
-  assets?: BackendAsset[]
-}
-
-export interface AssetBatchSearchManifest {
-  results: AssetBatchSearchResult[]
-  matched_count: number
-  failed_count: number
-}
-
-export interface AssetBatchSearchResponse {
-  data?: AssetBatchSearchManifest
-}
-
 export interface AssetBatchDownloadPayload {
   asset_ids?: number[]
   resource_ids?: string[]
@@ -320,82 +254,6 @@ export interface AssetBatchDownloadManifest {
 
 export interface AssetBatchDownloadResponse {
   data?: AssetBatchDownloadManifest
-}
-
-export interface AuditSupplementItem {
-  event_id?: string
-  sequence?: number
-  task_id?: number
-  asset_id?: number
-  asset_version_id?: number
-  asset_version_no?: number
-  timeline_version?: number
-  upload_session_id?: string
-  filename?: string
-  reason?: string
-  target_sku_code?: string
-  uploaded_by?: number
-  uploaded_by_name?: string
-  audit_delivery_count_before?: number
-  audit_delivery_count_after?: number
-  design_delivery_count?: number
-  created_at?: string
-}
-
-export interface AssetExcelPackageRow {
-  row_number?: number
-  order_no: string
-  sku_code: string
-  sku_name?: string
-  quantity: number
-  address?: string
-  keyword?: string
-}
-
-export interface AssetExcelPackageItem {
-  row_number?: number
-  order_no: string
-  sku_code: string
-  sku_name?: string
-  quantity: number
-  asset_id: number
-  resource_id?: string
-  source_type?: string
-  task_id: number
-  task_no?: string
-  filename: string
-  file_size: number
-  mime_type?: string
-  download_url: string
-  address?: string
-  origin_path?: string
-  package_folder?: string
-  expires_at?: string | null
-}
-
-export interface AssetExcelPackageFailure {
-  row_number?: number
-  order_no?: string
-  sku_code?: string
-  sku_name?: string
-  quantity?: number
-  address?: string
-  reason: string
-  message: string
-}
-
-export interface AssetExcelPackageManifest {
-  items: AssetExcelPackageItem[]
-  failures?: AssetExcelPackageFailure[]
-  success_count: number
-  failure_count: number
-  total_files: number
-  total_size: number
-  expires_at?: string | null
-}
-
-export interface AssetExcelPackagePreviewResponse {
-  data?: AssetExcelPackageManifest
 }
 
 export const assetsApi = {
@@ -440,29 +298,6 @@ export const assetsApi = {
   ) => http.post<AssetCenterUploadCompleteResponse>(endpoint, payload ?? {}, { signal }),
 
   /**
-   * GET /v1/tasks/{id}/audit-supplements
-   */
-  listAuditSupplements: (taskId: string | number, signal?: AbortSignal) =>
-    http.get<{ data?: AuditSupplementItem[] } | AuditSupplementItem[]>(
-      `/v1/tasks/${taskId}/audit-supplements`,
-      { signal },
-    ),
-
-  /**
-   * POST /v1/tasks/{id}/audit-supplements/upload-sessions
-   */
-  createAuditSupplementUploadSession: (
-    taskId: string | number,
-    payload: CreateAssetUploadSessionPayload,
-    signal?: AbortSignal,
-  ) =>
-    http.post<AssetUploadSessionCreateResponse>(
-      `/v1/tasks/${taskId}/audit-supplements/upload-sessions`,
-      payload,
-      { signal },
-    ),
-
-  /**
    * POST /v1/assets/upload-sessions/{session_id}/cancel
    */
   cancelAssetUploadSession: (
@@ -471,26 +306,6 @@ export const assetsApi = {
     signal?: AbortSignal,
   ) =>
     http.post(`/v1/assets/upload-sessions/${sessionId}/cancel`, payload ?? {}, { signal }),
-
-  /**
-   * GET /v1/assets 资源检索
-   */
-  listAssets: (params?: AssetListQuery, signal?: AbortSignal) =>
-    http.get<BackendAsset[] | { data?: BackendAsset[]; items?: BackendAsset[] }>('/v1/assets', {
-      params,
-      signal,
-    }),
-
-  searchAssets: (params?: AssetSearchQuery, signal?: AbortSignal) =>
-    http.get<AssetSearchResponse>('/v1/assets/search', {
-      params,
-      signal,
-    }),
-
-  batchSearchAssets: (payload: AssetBatchSearchPayload, signal?: AbortSignal) =>
-    http.post<AssetBatchSearchResponse>('/v1/assets/search/batch', payload, {
-      signal,
-    }),
 
   batchDownload: (
     assetRefs: Array<number | string>,
@@ -517,26 +332,6 @@ export const assetsApi = {
     )
   },
 
-  excelPackagePreview: (rows: AssetExcelPackageRow[], signal?: AbortSignal) =>
-    http.post<AssetExcelPackagePreviewResponse>(
-      '/v1/assets/excel-package/preview',
-      { rows },
-      { signal },
-    ),
-
-  excelPackagePreviewFile: (file: File, signal?: AbortSignal) => {
-    const form = new FormData()
-    form.append('file', file)
-    return http.post<AssetExcelPackagePreviewResponse>(
-      '/v1/assets/excel-package/preview-file',
-      form,
-      {
-        signal,
-        headers: { 'Content-Type': 'multipart/form-data' },
-      },
-    )
-  },
-
   /** GET /v1/assets/{id} */
   getAsset: (assetId: string, signal?: AbortSignal) =>
     http.get<BackendAsset>(`/v1/assets/${assetId}`, { signal }),
@@ -550,23 +345,11 @@ export const assetsApi = {
       signal,
     }),
 
-  getAssetVersionDownloadMeta: (assetId: string, versionId: string, signal?: AbortSignal) =>
-    http.get<{ data?: AssetDownloadMeta }>(
-      `/v1/assets/${assetId}/versions/${versionId}/download`,
-      { signal },
-    ),
-
   /** GET /v1/assets/{id}/preview */
   getAssetPreviewMeta: (assetId: string, signal?: AbortSignal) =>
     http.get<{ data?: AssetDownloadMeta }>(`/v1/assets/${assetId}/preview`, {
       signal,
     }),
-
-  archiveAsset: (assetId: string, payload: { reason?: string }, signal?: AbortSignal) =>
-    http.post(`/v1/assets/${assetId}/archive`, payload, { signal }),
-
-  restoreAsset: (assetId: string, signal?: AbortSignal) =>
-    http.post(`/v1/assets/${assetId}/restore`, {}, { signal }),
 
   deleteAsset: (assetId: string, payload: { reason: string }, signal?: AbortSignal) =>
     http.delete(`/v1/assets/${assetId}`, { data: payload, signal }),

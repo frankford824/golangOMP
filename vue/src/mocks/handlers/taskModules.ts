@@ -41,62 +41,20 @@ export const taskModulesHandler: MockHandler = (request) => {
   const actionMatch = request.path.match(/^\/v1\/tasks\/([^/]+)\/modules\/([^/]+)\/actions\/([^/]+)$/)
   if (request.method === 'POST' && actionMatch) {
     const [, taskId, moduleKey, action] = actionMatch
+    if (action !== 'submit' || !['customization', 'retouch'].includes(moduleKey)) {
+      return { status: 403, data: { code: 'module_action_role_denied', message: '当前节点不支持该操作' } }
+    }
     const target = mockTaskModules.find(
       (item) => item.task_id === taskId && item.module_key === moduleKey,
     )
     if (!target) return { status: 404, data: { message: 'module not found' } }
-    if (action === 'submit') target.state = 'submitted'
-    if (action === 'approve') target.state = 'approved'
-    if (action === 'reject') target.state = 'rejected'
-    if (action === 'update_reference_files') {
-      // reference files updated; state unchanged
-    }
+    target.state = 'submitted'
     target.updated_at = nowISO()
     pushTaskEvent({
       task_id: taskId,
       module_key: moduleKey,
       event_type: `module.${action}`,
       payload: withMockEventPayload({ actor: MOCK_ACTOR }),
-    })
-    return { status: 200, data: target }
-  }
-
-  const reassignMatch = request.path.match(/^\/v1\/tasks\/([^/]+)\/modules\/([^/]+)\/reassign$/)
-  if (request.method === 'POST' && reassignMatch) {
-    const [, taskId, moduleKey] = reassignMatch
-    const target = mockTaskModules.find(
-      (item) => item.task_id === taskId && item.module_key === moduleKey,
-    )
-    if (!target) return { status: 404, data: { message: 'module not found' } }
-    target.claimed_by = String(request.body?.assignee_id ?? request.body?.to_user_id ?? 'mock_actor')
-    target.updated_at = nowISO()
-    pushTaskEvent({
-      task_id: taskId,
-      module_key: moduleKey,
-      event_type: 'module.reassigned',
-      payload: withMockEventPayload({ actor: MOCK_ACTOR, assignee_id: target.claimed_by }),
-    })
-    return { status: 200, data: target }
-  }
-
-  const poolReassignMatch = request.path.match(/^\/v1\/tasks\/([^/]+)\/modules\/([^/]+)\/pool-reassign$/)
-  if (request.method === 'POST' && poolReassignMatch) {
-    const [, taskId, moduleKey] = poolReassignMatch
-    const target = mockTaskModules.find(
-      (item) => item.task_id === taskId && item.module_key === moduleKey,
-    )
-    if (!target) return { status: 404, data: { message: 'module not found' } }
-    target.claimed_by = undefined
-    target.state = 'pending_claim'
-    target.updated_at = nowISO()
-    pushTaskEvent({
-      task_id: taskId,
-      module_key: moduleKey,
-      event_type: 'module.pool_reassigned',
-      payload: withMockEventPayload({
-        actor: MOCK_ACTOR,
-        pool_team_code: request.body?.pool_team_code,
-      }),
     })
     return { status: 200, data: target }
   }

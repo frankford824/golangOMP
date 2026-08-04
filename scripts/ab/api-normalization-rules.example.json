@@ -1,0 +1,41 @@
+{
+  "allowed_status_pairs": {
+    "/v1/resource-groups/{group_id}/revisions": [[404, 200]]
+  },
+  "compatibility_counterexample_rules": [
+    {
+      "combination": "external-devplus",
+      "direction": "external_frontend_to_devplus_backend",
+      "route": "/v1/resource-groups/{group_id}/revisions",
+      "expected_status_pair": [404, 200],
+      "reason": "The external artifact does not call the V8-only history route; direct probing records the additive backend-first surface.",
+      "approved_by": "replace-with-reviewer-id",
+      "approved_at": "replace-with-rfc3339"
+    },
+    {
+      "combination": "devplus-external",
+      "direction": "devplus_frontend_to_external_backend",
+      "route": "/v1/resource-groups/{group_id}/revisions",
+      "expected_status_pair": [200, 404],
+      "reason": "The rollback counterexample must render a controlled unsupported-route state, never a 5xx or silent success.",
+      "approved_by": "replace-with-reviewer-id",
+      "approved_at": "replace-with-rfc3339"
+    }
+  ],
+  "ignore_paths": [
+    ".*/created_at",
+    ".*/updated_at",
+    ".*/revision_id",
+    ".*/working_revision_id",
+    ".*/finalized_revision_id"
+  ],
+  "value_maps": [
+    {
+      "path_regex": ".*/task_status",
+      "map": {
+        "PendingAuditA": "PendingAudit",
+        "PendingCustomizationReview": "PendingAudit"
+      }
+    }
+  ]
+}

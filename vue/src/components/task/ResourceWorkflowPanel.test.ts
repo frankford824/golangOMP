@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   auditDecision: vi.fn(),
   reopen: vi.fn(),
   submitDesign: vi.fn(),
+  triggerModuleAction: vi.fn(),
   upload: vi.fn(),
 }))
 
@@ -24,6 +25,12 @@ vi.mock('@/services/api/resourceGroupsApi', async (loadOriginal) => {
 
 vi.mock('@/services/upload/assetUploadFlow', () => ({
   uploadTaskFileViaAssetSession: mocks.upload,
+}))
+
+vi.mock('@/services/api/tasksApi', () => ({
+  tasksApi: {
+    triggerModuleAction: mocks.triggerModuleAction,
+  },
 }))
 
 import ResourceWorkflowPanel from './ResourceWorkflowPanel.vue'
@@ -46,8 +53,11 @@ function bundle(): ResourceBundle {
         group_id: 9,
         revision_no: 1,
         status: 'submitted',
-        mode: 'single',
-        source_stage: 'design',
+      mode: 'single',
+	      source_stage: 'design',
+	      created_by: 7,
+	      legacy_migration: false,
+	      created_at: '2026-07-22T08:00:00Z',
         source_file: { task_asset_id: 101, file_name: 'design.psd' },
         items: [{
           id: 31,
@@ -99,6 +109,7 @@ describe('ResourceWorkflowPanel action contract', () => {
     mocks.auditDecision.mockResolvedValue(bundle())
     mocks.reopen.mockResolvedValue(bundle())
     mocks.submitDesign.mockResolvedValue(bundle())
+    mocks.triggerModuleAction.mockResolvedValue({ data: { data: { task_id: 41 } } })
     mocks.upload.mockResolvedValue({ version: { id: 201 } })
   })
 
@@ -106,26 +117,26 @@ describe('ResourceWorkflowPanel action contract', () => {
     {
       name: 'approve only',
       actions: ['task.audit.approve'],
-      visible: ['上传修改后通过', '通过并结单'],
+      visible: ['上传最终成品图', '确认定稿并结单'],
       hidden: ['打回设计'],
     },
     {
       name: 'return only',
       actions: ['task.audit.return_to_design'],
       visible: ['打回设计'],
-      hidden: ['上传修改后通过', '通过并结单'],
+      hidden: ['确认定稿并结单'],
     },
     {
       name: 'aggregate decision',
       actions: ['task.audit.decision'],
-      visible: ['打回设计', '上传修改后通过', '通过并结单'],
+      visible: ['打回设计', '上传最终成品图', '确认定稿并结单'],
       hidden: [],
     },
     {
       name: 'empty actions',
       actions: [],
       visible: [],
-      hidden: ['打回设计', '上传修改后通过', '通过并结单'],
+      hidden: ['打回设计', '确认定稿并结单'],
     },
   ])('renders the $name matrix without exposing unauthorized calls', async ({ actions, visible, hidden }) => {
     const wrapper = mountPanel(actions)
@@ -135,6 +146,78 @@ describe('ResourceWorkflowPanel action contract', () => {
     wrapper.unmount()
   })
 
+  it('makes task.reopen authoritative when stale retouch submit permission is also present', () => {
+    const wrapper = mount(ResourceWorkflowPanel, {
+      props: {
+        taskId: 41,
+        taskType: 'retouch_task',
+        bundle: bundle(),
+        allowedActions: ['task.design.submit', 'task.reopen'],
+      },
+    })
+
+    expect(wrapper.get('.workspace-head h2').text()).toBe('重开任务')
+    expect(wrapper.find('.reopen-dock').exists()).toBe(true)
+    expect(wrapper.find('.command-dock:not(.reopen-dock):not(.audit-dock)').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('提交修图成品')
+  })
+
+  it('shows the operations set suggestion without changing the design decision', () => {
+    const wrapper = mount(ResourceWorkflowPanel, {
+      props: {
+        taskId: 41,
+        taskType: 'design',
+        bundle: bundle(),
+        skuModeHints: { 'SKU-001': true },
+        allowedActions: ['task.design.submit'],
+      },
+    })
+    expect(wrapper.text()).toContain('运营建议套装 · 最终由设计判定')
+    expect(wrapper.get('.mode-control button.selected').text()).toBe('单图')
+  })
+
+  it('prepares the customization module only after submit-design reports it is not ready', async () => {
+    mocks.submitDesign
+      .mockRejectedValueOnce(new Error('定制任务尚未完成设计准备'))
+      .mockResolvedValueOnce(bundle())
+    const wrapper = mount(ResourceWorkflowPanel, {
+      props: {
+        taskId: 41,
+        taskType: 'new_product_development',
+        businessLane: 'customization',
+        bundle: bundle(),
+        allowedActions: ['task.design.submit'],
+      },
+    })
+
+    await button(wrapper as ReturnType<typeof mountPanel>, '确认模式并提交源文件').trigger('click')
+    await flushPromises()
+
+    expect(mocks.triggerModuleAction).toHaveBeenCalledWith('41', 'customization', 'submit')
+    expect(mocks.submitDesign).toHaveBeenCalledTimes(2)
+    expect(wrapper.text()).toContain('设计源文件与模式已提交审核。')
+    wrapper.unmount()
+  })
+
+  it('uses task references before the first resource revision and reports missing files honestly', () => {
+    const emptySourceBundle = bundle()
+    if (emptySourceBundle.groups[0].working_revision) {
+      emptySourceBundle.groups[0].working_revision.source_file = undefined
+    }
+    const wrapper = mount(ResourceWorkflowPanel, {
+      props: {
+        taskId: 41,
+        taskType: 'design',
+        bundle: emptySourceBundle,
+        referenceCount: 3,
+        allowedActions: ['task.design.submit'],
+      },
+    })
+    expect(wrapper.text()).toContain('3 份参考资料')
+    expect(wrapper.text()).toContain('还需上传 1 份设计源文件')
+    expect(wrapper.text()).not.toContain('模式与源文件已就绪')
+  })
+
   it('requires a reason before return, cancels safely, and confirms only once', async () => {
     let resolveDecision: ((value: ResourceBundle) => void) | undefined
     mocks.auditDecision.mockReturnValue(new Promise<ResourceBundle>((resolve) => { resolveDecision = resolve }))
@@ -142,10 +225,10 @@ describe('ResourceWorkflowPanel action contract', () => {
     const returnButton = button(wrapper, '打回设计')
     expect(returnButton.attributes('disabled')).toBeDefined()
 
-    await wrapper.get('.audit-bar input').setValue('需要补充主视图')
+    await wrapper.get('.audit-dock input').setValue('需要补充主视图')
     await returnButton.trigger('click')
     await flushPromises()
-    expect(wrapper.get('[role="dialog"]').text()).toContain('任务将回到设计处理中')
+    expect(wrapper.get('[role="dialog"]').text()).toContain('任务回到设计处理中')
 
     await button(wrapper, '取消').trigger('click')
     expect(mocks.auditDecision).not.toHaveBeenCalled()
@@ -162,18 +245,19 @@ describe('ResourceWorkflowPanel action contract', () => {
     wrapper.unmount()
   })
 
-  it('sends changed groups when an approver uploads a replacement final', async () => {
+  it('uses the designer mode and sends a newly staged final when approving', async () => {
     const wrapper = mountPanel(['task.audit.approve'])
-    await button(wrapper, '上传修改后通过').trigger('click')
-    const fileInput = wrapper.findAll('input[type="file"]')[1]
+    expect(wrapper.get('.mode-control button.selected').text()).toBe('单图')
+    expect(wrapper.get('.mode-control button.selected').attributes('disabled')).toBeDefined()
+    const fileInput = wrapper.get('.final-drop input[type="file"]')
     const replacement = new File(['png'], 'reviewed.png', { type: 'image/png' })
     Object.defineProperty(fileInput.element, 'files', { configurable: true, value: [replacement] })
     await fileInput.trigger('change')
     await flushPromises()
 
-    await button(wrapper, '通过并结单').trigger('click')
-    expect(wrapper.get('[role="dialog"]').text()).toContain('审核上传的源文件和成品将替换当前提交')
-    await button(wrapper, '确认执行').trigger('click')
+    await button(wrapper, '确认定稿并结单').trigger('click')
+    expect(wrapper.get('[role="dialog"]').text()).toContain('本次定稿成为最终成品')
+    await button(wrapper, '确认通过并结单').trigger('click')
     await flushPromises()
 
     expect(mocks.auditDecision).toHaveBeenCalledWith(
@@ -185,7 +269,6 @@ describe('ResourceWorkflowPanel action contract', () => {
         group_id: 9,
         expected_group_lock_version: 3,
         mode: 'single',
-        source_task_asset_id: 101,
         final_task_asset_ids: [201],
       }],
     )
@@ -194,16 +277,20 @@ describe('ResourceWorkflowPanel action contract', () => {
 
   it('supports Escape, focus containment, and focus restoration', async () => {
     const wrapper = mountPanel(['task.audit.approve'])
-    const trigger = button(wrapper, '通过并结单')
+    const fileInput = wrapper.get('.final-drop input[type="file"]')
+    Object.defineProperty(fileInput.element, 'files', { configurable: true, value: [new File(['png'], 'reviewed.png', { type: 'image/png' })] })
+    await fileInput.trigger('change')
+    await flushPromises()
+    const trigger = button(wrapper, '确认定稿并结单')
     ;(trigger.element as HTMLButtonElement).focus()
     await trigger.trigger('click')
     await flushPromises()
     expect((document.activeElement as HTMLElement)?.textContent).toBe('取消')
 
-    const confirm = button(wrapper, '确认执行')
+    const confirm = button(wrapper, '确认通过并结单')
     ;(confirm.element as HTMLButtonElement).focus()
     await wrapper.get('[role="dialog"]').trigger('keydown', { key: 'Tab' })
-    expect((document.activeElement as HTMLElement)?.textContent).toBe('取消')
+    expect((document.activeElement as HTMLElement)?.textContent).toBe('×')
 
     await wrapper.get('[role="dialog"]').trigger('keydown', { key: 'Escape' })
     await flushPromises()
@@ -218,16 +305,65 @@ describe('ResourceWorkflowPanel action contract', () => {
       props: { taskId: 41, taskType: 'design', bundle: bundleWithGroups(200), allowedActions: ['task.design.submit'] },
     })
     await flushPromises()
-    expect(wrapper.findAll('.edit-card').length).toBeLessThan(10)
+    expect(wrapper.findAll('.sku-workbench').length).toBeLessThan(10)
     const viewport = wrapper.get('[data-testid="resource-editor-viewport"]')
-    ;(viewport.element as HTMLElement).scrollTop = 200 * 390
+    ;(viewport.element as HTMLElement).scrollTop = 199 * 330
     await viewport.trigger('scroll')
     await flushPromises()
     expect(wrapper.find('[data-group-index="199"]').exists()).toBe(true)
 
-    const select = wrapper.get('select')
-    await select.setValue('set')
+    const setButton = wrapper.findAll('.mode-control button').find((item) => item.text() === '套装')
+    await setButton?.trigger('click')
     expect(wrapper.emitted('dirty-change')?.some((entry) => entry[0] === true)).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('lets design choose single or set, accepts one source, and never submits finals', async () => {
+    const wrapper = mountPanel(['task.design.submit'])
+    expect(wrapper.text()).toContain('设计阶段只提交源文件')
+    expect(wrapper.text()).toContain('审核阶段上传')
+    expect(wrapper.find('.final-drop').exists()).toBe(false)
+    await wrapper.findAll('.mode-control button').find((item) => item.text() === '套装')?.trigger('click')
+    await button(wrapper, '确认模式并提交源文件').trigger('click')
+    await flushPromises()
+    expect(mocks.submitDesign).toHaveBeenCalledWith(41, expect.anything(), [{
+      group_id: 9,
+      expected_group_lock_version: 3,
+      mode: 'set',
+      source_task_asset_id: 101,
+      final_task_asset_ids: [],
+    }])
+    wrapper.unmount()
+  })
+
+  it('restores the designer source when audit replacement is cancelled', async () => {
+    mocks.upload.mockResolvedValueOnce({ version: { id: 202 } })
+    const wrapper = mountPanel(['task.audit.approve'])
+    const replacementToggle = wrapper.get('.replace-toggle input')
+    await replacementToggle.setValue(true)
+    const sourceInput = wrapper.get('.source-drop input[type="file"]')
+    Object.defineProperty(sourceInput.element, 'files', { configurable: true, value: [new File(['psd'], 'audit.psd')] })
+    await sourceInput.trigger('change')
+    await flushPromises()
+    expect(wrapper.text()).toContain('audit.psd')
+
+    await replacementToggle.setValue(false)
+    expect(wrapper.text()).toContain('design.psd')
+    expect(wrapper.text()).not.toContain('audit.psd')
+
+    const finalInput = wrapper.get('.final-drop input[type="file"]')
+    Object.defineProperty(finalInput.element, 'files', { configurable: true, value: [new File(['png'], 'reviewed.png', { type: 'image/png' })] })
+    await finalInput.trigger('change')
+    await flushPromises()
+    await button(wrapper, '确认定稿并结单').trigger('click')
+    await button(wrapper, '确认通过并结单').trigger('click')
+    await flushPromises()
+    expect(mocks.auditDecision).toHaveBeenCalledWith(41, expect.anything(), 'approve', '', [{
+      group_id: 9,
+      expected_group_lock_version: 3,
+      mode: 'single',
+      final_task_asset_ids: [201],
+    }])
     wrapper.unmount()
   })
 })

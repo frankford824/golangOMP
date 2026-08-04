@@ -34,12 +34,9 @@ func normalizeCreateTaskRequest(p CreateTaskParams) CreateTaskParams {
 		p.SKUCode = strings.TrimSpace(firstNonEmptyString(
 			p.SKUCode,
 			p.TopLevelNewSKU,
-			p.TopLevelPurchaseSKU,
-			p.PurchaseSKU,
 		))
 	}
 	p.TopLevelNewSKU = strings.TrimSpace(p.TopLevelNewSKU)
-	p.TopLevelPurchaseSKU = strings.TrimSpace(p.TopLevelPurchaseSKU)
 	for i := range p.BatchItems {
 		p.BatchItems[i].ProductName = strings.TrimSpace(p.BatchItems[i].ProductName)
 		p.BatchItems[i].ProductShortName = strings.TrimSpace(p.BatchItems[i].ProductShortName)
@@ -48,7 +45,6 @@ func normalizeCreateTaskRequest(p CreateTaskParams) CreateTaskParams {
 		p.BatchItems[i].MaterialMode = strings.TrimSpace(p.BatchItems[i].MaterialMode)
 		p.BatchItems[i].DesignRequirement = strings.TrimSpace(p.BatchItems[i].DesignRequirement)
 		p.BatchItems[i].NewSKU = strings.TrimSpace(p.BatchItems[i].NewSKU)
-		p.BatchItems[i].PurchaseSKU = strings.TrimSpace(p.BatchItems[i].PurchaseSKU)
 		p.BatchItems[i].CostPriceMode = strings.TrimSpace(p.BatchItems[i].CostPriceMode)
 		if len(p.BatchItems[i].VariantJSON) > 0 {
 			p.BatchItems[i].VariantJSON = bytes.TrimSpace(p.BatchItems[i].VariantJSON)
@@ -131,9 +127,6 @@ func ValidateBatchTaskCreateRequest(p CreateTaskParams) *domain.AppError {
 	if p.TaskType == domain.TaskTypeNewProductDevelopment && p.TopLevelNewSKU != "" {
 		addViolation("new_sku", "top_level_single_sku_not_allowed", "top-level new_sku cannot be used when batch_sku_mode=multiple")
 	}
-	if p.TaskType == domain.TaskTypePurchaseTask && p.TopLevelPurchaseSKU != "" {
-		addViolation("purchase_sku", "top_level_single_sku_not_allowed", "top-level purchase_sku cannot be used when batch_sku_mode=multiple")
-	}
 	if strings.TrimSpace(p.SKUCode) != "" {
 		addViolation("sku_code", "top_level_single_sku_not_allowed", "top-level sku_code cannot be used when batch_sku_mode=multiple")
 	}
@@ -153,9 +146,6 @@ func ValidateBatchTaskCreateRequest(p CreateTaskParams) *domain.AppError {
 			if item.DesignRequirement == "" {
 				addViolation(prefix+".design_requirement", "missing_required_field", "batch_items[].design_requirement is required")
 			}
-			if item.PurchaseSKU != "" {
-				addViolation(prefix+".purchase_sku", "field_not_allowed_for_task_type", "batch_items[].purchase_sku is not allowed for new_product_development")
-			}
 			if item.CostPriceMode != "" {
 				addViolation(prefix+".cost_price_mode", "field_not_allowed_for_task_type", "batch_items[].cost_price_mode is not allowed for new_product_development")
 			}
@@ -164,36 +154,6 @@ func ValidateBatchTaskCreateRequest(p CreateTaskParams) *domain.AppError {
 			}
 			if item.BaseSalePrice != nil {
 				addViolation(prefix+".base_sale_price", "field_not_allowed_for_task_type", "batch_items[].base_sale_price is not allowed for new_product_development")
-			}
-		case domain.TaskTypePurchaseTask:
-			if item.ProductName == "" {
-				addViolation(prefix+".product_name", "missing_required_field", "batch_items[].product_name is required")
-			}
-			if item.CategoryCode == "" {
-				addViolation(prefix+".category_code", "missing_required_field", "batch_items[].category_code is required")
-			}
-			if item.CostPriceMode == "" {
-				addViolation(prefix+".cost_price_mode", "missing_required_field", "batch_items[].cost_price_mode is required")
-			} else if !domain.CostPriceMode(item.CostPriceMode).Valid() {
-				addViolation(prefix+".cost_price_mode", "invalid_cost_price_mode", "batch_items[].cost_price_mode must be manual or template")
-			}
-			if item.Quantity == nil || *item.Quantity <= 0 {
-				addViolation(prefix+".quantity", "missing_required_field", "batch_items[].quantity is required and must be greater than 0")
-			}
-			if item.BaseSalePrice == nil {
-				addViolation(prefix+".base_sale_price", "missing_required_field", "batch_items[].base_sale_price is required")
-			}
-			if item.ProductShortName != "" {
-				addViolation(prefix+".product_short_name", "field_not_allowed_for_task_type", "batch_items[].product_short_name is not allowed for purchase_task")
-			}
-			if item.MaterialMode != "" {
-				addViolation(prefix+".material_mode", "field_not_allowed_for_task_type", "batch_items[].material_mode is not allowed for purchase_task")
-			}
-			if item.DesignRequirement != "" {
-				addViolation(prefix+".design_requirement", "field_not_allowed_for_task_type", "batch_items[].design_requirement is not allowed for purchase_task")
-			}
-			if item.NewSKU != "" {
-				addViolation(prefix+".new_sku", "field_not_allowed_for_task_type", "batch_items[].new_sku is not allowed for purchase_task")
 			}
 		}
 
@@ -209,7 +169,7 @@ func ValidateBatchTaskCreateRequest(p CreateTaskParams) *domain.AppError {
 			seenDedupe[dedupeKey] = idx
 		}
 
-		manualSKU := strings.TrimSpace(firstNonEmptyString(item.NewSKU, item.PurchaseSKU))
+		manualSKU := strings.TrimSpace(item.NewSKU)
 		if manualSKU != "" {
 			if prev, ok := seenSKU[manualSKU]; ok {
 				addViolation(prefix+".sku_code", "duplicate_batch_sku", fmt.Sprintf("sku %q duplicates batch_items[%d]", manualSKU, prev))
@@ -289,6 +249,7 @@ func (s *taskService) buildBatchTaskSkuItems(ctx context.Context, p CreateTaskPa
 			Quantity:            cloneInt64Ptr(rawItem.Quantity),
 			BaseSalePrice:       cloneFloat64Ptr(rawItem.BaseSalePrice),
 			DesignRequirement:   rawItem.DesignRequirement,
+			SetModeHint:         rawItem.SetModeHint,
 			VariantJSON:         variantJSON,
 			ReferenceFileRefs:   domain.NormalizeReferenceFileRefs(rawItem.ReferenceFileRefs),
 			DedupeKey:           dedupeKey,
@@ -302,7 +263,7 @@ func (s *taskService) buildBatchTaskSkuItems(ctx context.Context, p CreateTaskPa
 }
 
 func (s *taskService) generateOrReserveSkuForBatchItem(ctx context.Context, taskType domain.TaskType, item CreateTaskBatchSKUItemParams) (string, bool, *domain.AppError) {
-	manualSKU := strings.TrimSpace(firstNonEmptyString(item.NewSKU, item.PurchaseSKU))
+	manualSKU := strings.TrimSpace(item.NewSKU)
 	if manualSKU != "" {
 		existing, err := s.taskRepo.GetSKUItemBySKUCode(ctx, manualSKU)
 		if err != nil {
@@ -332,7 +293,7 @@ func (s *taskService) generateOrReserveSkuForBatchItem(ctx context.Context, task
 
 	return "", false, domain.NewAppError(
 		domain.ErrCodeInvalidRequest,
-		"automatic sku_code generation is only enabled for new_product_development and purchase_task",
+		"automatic sku_code generation is only enabled for new_product_development",
 		map[string]interface{}{"task_type": taskType},
 	)
 }
@@ -411,34 +372,13 @@ func (s *taskService) createTaskWithBatchSkuItemsTx(ctx context.Context, p Creat
 			}
 		}
 
-		var procurementRecord *domain.ProcurementRecord
-		if p.TaskType == domain.TaskTypePurchaseTask {
-			if s.procurementRepo == nil {
-				return fmt.Errorf("purchase task procurement repo missing")
-			}
-			procurementRecord = &domain.ProcurementRecord{
-				TaskID: newID,
-				Status: domain.ProcurementStatusDraft,
-			}
-			if err := s.procurementRepo.Upsert(ctx, tx, procurementRecord); err != nil {
-				return fmt.Errorf("initialize purchase task procurement: %w", err)
-			}
-			if procurementRecord.ID == 0 {
-				return fmt.Errorf("initialize purchase task procurement: missing procurement record id after upsert")
-			}
-			procurementItems := buildProcurementRecordItemsFromTaskSKUItems(procurementRecord.ID, newID, persistedItems)
-			if err := s.procurementRepo.CreateItems(ctx, tx, procurementItems); err != nil {
-				return fmt.Errorf("initialize purchase task procurement items: %w", err)
-			}
-		}
-		if usesCustomizationProductionFlow(task.TaskType, task.CustomizationRequired) {
+		if usesCustomizationInternalJob(task.TaskType, task.CustomizationRequired) {
 			if s.customizationJobRepo == nil {
 				return fmt.Errorf("customization job repo missing for customization task")
 			}
 			job := &domain.CustomizationJob{
-				TaskID:       newID,
-				DecisionType: domain.CustomizationJobDecisionTypeFinal,
-				Status:       domain.CustomizationJobStatusInProgress,
+				TaskID: newID,
+				Status: domain.CustomizationJobStatusInProgress,
 			}
 			customizationJobID, err = s.customizationJobRepo.Create(ctx, tx, job)
 			if err != nil {
@@ -463,7 +403,6 @@ func (s *taskService) createTaskWithBatchSkuItemsTx(ctx context.Context, p Creat
 			"note":                  detail.Note,
 			"reference_file_refs":   p.ReferenceFileRefs,
 			"product_selection":     buildTaskProductSelectionContext(task, detail),
-			"procurement_status":    procurementStatusValue(procurementRecord),
 			"batch_mode":            string(task.BatchMode),
 			"batch_item_count":      task.BatchItemCount,
 			"primary_sku_code":      task.PrimarySKUCode,
@@ -471,7 +410,7 @@ func (s *taskService) createTaskWithBatchSkuItemsTx(ctx context.Context, p Creat
 			"sku_generation_status": string(task.SKUGenerationStatus),
 			"customization_job_id":  zeroInt64ToNil(customizationJobID),
 		}
-		if p.DesignerID != nil && p.TaskType != domain.TaskTypePurchaseTask {
+		if p.DesignerID != nil {
 			eventPayload["designer_id"] = cloneInt64Ptr(p.DesignerID)
 			eventPayload["assigned_at_creation"] = true
 		}
@@ -538,29 +477,6 @@ func zeroInt64ToNil(value int64) interface{} {
 	return value
 }
 
-func buildProcurementRecordItemsFromTaskSKUItems(procurementRecordID, taskID int64, items []*domain.TaskSKUItem) []*domain.ProcurementRecordItem {
-	if len(items) == 0 {
-		return []*domain.ProcurementRecordItem{}
-	}
-	result := make([]*domain.ProcurementRecordItem, 0, len(items))
-	for _, item := range items {
-		if item == nil {
-			continue
-		}
-		result = append(result, &domain.ProcurementRecordItem{
-			ProcurementRecordID: procurementRecordID,
-			TaskID:              taskID,
-			TaskSKUItemID:       item.ID,
-			SKUCode:             item.SKUCode,
-			Status:              domain.ProcurementStatusDraft,
-			Quantity:            cloneInt64Ptr(item.Quantity),
-			CostPrice:           cloneFloat64Ptr(item.CostPrice),
-			BaseSalePrice:       cloneFloat64Ptr(item.BaseSalePrice),
-		})
-	}
-	return result
-}
-
 func buildTaskSKUItemEventSummaries(items []*domain.TaskSKUItem) []map[string]interface{} {
 	summaries := make([]map[string]interface{}, 0, len(items))
 	for _, item := range items {
@@ -580,11 +496,12 @@ func buildSingleTaskSKUItems(task *domain.Task, detail *domain.TaskDetail) []*ta
 	if task == nil || detail == nil {
 		return nil
 	}
-	if task.TaskType != domain.TaskTypeNewProductDevelopment && task.TaskType != domain.TaskTypePurchaseTask {
+	if task.TaskType != domain.TaskTypeNewProductDevelopment {
 		return nil
 	}
 	productIID := strings.TrimSpace(firstNonEmptyString(detail.CategoryName, detail.Category))
 	variantJSON, _ := mergeBatchItemProductIIDIntoVariantJSON(nil, productIID)
+	variantJSON = mergeTaskDetailDimensionsIntoVariantJSON(variantJSON, detail)
 	item := &domain.TaskSKUItem{
 		SequenceNo:               1,
 		SKUCode:                  task.SKUCode,
@@ -612,6 +529,7 @@ func buildSingleTaskSKUItems(task *domain.Task, detail *domain.TaskDetail) []*ta
 		Quantity:                 cloneInt64Ptr(detail.Quantity),
 		BaseSalePrice:            cloneFloat64Ptr(detail.BaseSalePrice),
 		DesignRequirement:        detail.DesignRequirement,
+		SetModeHint:              detail.SetModeHint,
 		VariantJSON:              variantJSON,
 		ReferenceFileRefs:        domain.ParseReferenceFileRefsJSON(detail.ReferenceFileRefsJSON),
 		DedupeKey:                buildSingleTaskDedupeKey(task, detail),
@@ -623,6 +541,26 @@ func buildSingleTaskSKUItems(task *domain.Task, detail *domain.TaskDetail) []*ta
 		item.ReferenceFileRefs = []domain.ReferenceFileRef{}
 	}
 	return []*taskBatchItemBuild{{Item: item}}
+}
+
+func mergeTaskDetailDimensionsIntoVariantJSON(raw json.RawMessage, detail *domain.TaskDetail) json.RawMessage {
+	if detail == nil || (detail.Width == nil && detail.Height == nil && detail.Area == nil) {
+		return raw
+	}
+	obj := map[string]interface{}{}
+	if len(bytes.TrimSpace(raw)) > 0 {
+		if err := json.Unmarshal(raw, &obj); err != nil {
+			return raw
+		}
+	}
+	setVariantFloatValue(obj, "width", detail.Width)
+	setVariantFloatValue(obj, "height", detail.Height)
+	setVariantFloatValue(obj, "area", detail.Area)
+	encoded, err := json.Marshal(obj)
+	if err != nil {
+		return raw
+	}
+	return json.RawMessage(encoded)
 }
 
 func buildSingleTaskDedupeKey(task *domain.Task, detail *domain.TaskDetail) string {
@@ -652,7 +590,6 @@ func computeTaskBatchItemDedupeKey(taskType domain.TaskType, item CreateTaskBatc
 		ProductIID        string          `json:"product_i_id,omitempty"`
 		MaterialMode      string          `json:"material_mode,omitempty"`
 		NewSKU            string          `json:"new_sku,omitempty"`
-		PurchaseSKU       string          `json:"purchase_sku,omitempty"`
 		CostPriceMode     string          `json:"cost_price_mode,omitempty"`
 		Quantity          *int64          `json:"quantity,omitempty"`
 		BaseSalePrice     *float64        `json:"base_sale_price,omitempty"`
@@ -666,7 +603,6 @@ func computeTaskBatchItemDedupeKey(taskType domain.TaskType, item CreateTaskBatc
 		ProductIID:        strings.TrimSpace(item.ProductIID),
 		MaterialMode:      strings.TrimSpace(item.MaterialMode),
 		NewSKU:            strings.TrimSpace(item.NewSKU),
-		PurchaseSKU:       strings.TrimSpace(item.PurchaseSKU),
 		CostPriceMode:     strings.TrimSpace(item.CostPriceMode),
 		Quantity:          cloneInt64Ptr(item.Quantity),
 		BaseSalePrice:     cloneFloat64Ptr(item.BaseSalePrice),

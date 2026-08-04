@@ -208,7 +208,12 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Atomically bind the complete resource manifest and submit for unified audit */
+        /**
+         * Submit designer-selected mode and source files for unified audit
+         * @description Ordinary/customization design tasks submit one source per group plus the designer's single/set
+         *     decision; final outputs are rejected at this stage. Retouch tasks submit final outputs here and
+         *     complete directly. Upload-session completion never advances workflow state.
+         */
         post: operations["submitTaskDesignV8"];
         delete?: never;
         options?: never;
@@ -225,7 +230,13 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Approve and finalize, or return the task to design */
+        /**
+         * Approve and finalize, or return the task to design
+         * @description Approval uploads a complete final set for every resource group using the designer-selected mode.
+         *     The auditor may replace the source file; otherwise the designer source remains effective. Approval
+         *     finalizes resources and returns only after the task is `Completed`. Return requires a reason and
+         *     restores the design stage without accepting a partial final set.
+         */
         post: operations["decideTaskAuditV8"];
         delete?: never;
         options?: never;
@@ -365,7 +376,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Search the current working and finalized resource-group read model */
+        /**
+         * Search the current working and finalized resource-group read model
+         * @description Default response uses `view_mode=group` (one SKU resource-group card).
+         *     When `resource_role` or a non-all `format_category` is supplied, the service returns `view_mode=flat` with matching `flat_items`.
+         */
         get: operations["listTaskResourceGroups"];
         put?: never;
         post?: never;
@@ -384,6 +399,34 @@ export interface paths {
         };
         /** Read one resource group and its current revisions */
         get: operations["getTaskResourceGroup"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/resource-groups/{id}/revisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List every historical revision of one resource group
+         * @description Returns all revision states newest first (`revision_no DESC`, then `id DESC`) within the
+         *     caller's effective `asset.view` scope, matching the resource-group detail contract. Responses use
+         *     controlled task-asset preview URLs, and download URLs are present only when the caller also
+         *     has scoped `asset.download`. Both capabilities use controlled `/v1/task-assets/{task_asset_id}/preview|download`
+         *     access-service paths; this endpoint never returns raw object-storage addresses or signed URLs.
+         *     Reference URLs are omitted unless the snapshot has a formal task-asset id. A reference whose
+         *     snapshot storage ref or formal task-asset storage ref is `historical_unavailable` keeps immutable
+         *     metadata but omits both URLs.
+         *     The working/finalized revision ids are returned from the authoritative resource-group pointers.
+         */
+        get: operations["listTaskResourceGroupRevisions"];
         put?: never;
         post?: never;
         delete?: never;
@@ -735,7 +778,8 @@ export interface paths {
          *     `teams_by_department` remains a deprecated compatibility mirror in v1.8 only; responses that still include it
          *     emit `Deprecation: version="v1.8"`.
          *     User responses return both `team` and compatibility alias `group` with the same value.
-         *     Read access is available to company-level managers, department managers, and legacy org/role compatibility admins.
+         *     Read access requires `access.view` or `access.manage`. Organization names are display values only;
+         *     authorization is derived from explicit assignments and stable organization IDs.
          *     The v1.0 official baseline exposed here is exactly:
          *     `人事部` -> `人事管理组`;
          *     `运营部` -> `淘系一组`, `淘系二组`, `天猫一组`, `天猫二组`, `拼多多南京组`, `拼多多池州组`;
@@ -749,7 +793,7 @@ export interface paths {
         get: {
             parameters: {
                 query?: {
-                    /** @description When `true`, returns disabled departments and teams for organization master maintenance. This expanded projection is restricted to HRAdmin/SuperAdmin level organization-maintenance access. */
+                    /** @description When `true`, returns disabled departments and teams. This expanded projection requires global `access.manage`. */
                     include_disabled?: boolean;
                 };
                 header?: never;
@@ -1461,102 +1505,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/roles": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List role catalog
-         * @description Minimal role/permission catalog for the current auth/org scope. Read access is available to management roles, including DepartmentAdmin, plus legacy org/role compatibility admins.
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Available workflow roles */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["RoleCatalogEntry"][];
-                        };
-                    };
-                };
-                /** @description Permission denied */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/access-rules": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List protected route access rules
-         * @description Super-admin or HR inspection endpoint for the current route-to-role authorization contract, including whether a route is session-only or still debug-compatible placeholder scope.
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Protected route access rules */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["RouteAccessRule"][];
-                        };
-                    };
-                };
-                /** @description Permission denied */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/users": {
         parameters: {
             query?: never;
@@ -1566,10 +1514,10 @@ export interface paths {
         };
         /**
          * List workflow users
-         * @description Management-scoped user-management read endpoint. Returns user employee number, department, team, role, and frontend access state for frontend integration, with server-side pagination and filtering.
+         * @description Explicit-scope user-management read endpoint. Returns employee number, department, team, and effective frontend access state with server-side pagination and filtering.
          *     `keyword` matches username, display name, and employee number.
-         *     `DepartmentAdmin` reads are forced to own department.
-         *     `TeamLead` reads are forced to own team inside own department.
+         *     `access.view` or `access.manage` scope is applied in SQL using stable user, department, and team IDs;
+         *     list count and rows use the same scope predicate. Legacy roles and organization names never widen visibility.
          *     Stale or disabled department/team filter values on this read endpoint are treated as no-match filters and return an empty page instead of failing the whole user-management shell; user create/update inputs still reject invalid org values.
          */
         get: {
@@ -1577,7 +1525,6 @@ export interface paths {
                 query?: {
                     keyword?: string;
                     status?: components["schemas"]["UserStatus"];
-                    role?: components["schemas"]["V7Role"];
                     /** @description Must match an enabled department from `/v1/org/options`; stale or disabled values return an empty page. */
                     department?: string;
                     /** @description Must match an enabled team under the selected department in `/v1/org/options`; stale or disabled values return an empty page. */
@@ -1608,10 +1555,10 @@ export interface paths {
         put?: never;
         /**
          * Create workflow user
-         * @description Managed user creation endpoint. Validates org fields against `/v1/org/options`, validates roles against the workflow role catalog,
-         *     requires a globally unique numeric `employee_no` in range 0-9999, sets the initial password hash, and returns the created user with `frontend_access`. If `status` is omitted the user is created as `active`.
-         *     `Member` is the base identity and is retained by the server even if omitted from the incoming role list.
-         *     `DepartmentAdmin` can create users only inside own department and only with department-compatible business roles.
+         * @description Creates one managed user after validating the selected department and team against `/v1/org/options`.
+         *     `employee_no` must be globally unique and in range 0-9999. If `status` is omitted, the account is active.
+         *     New users receive only the protected `Member` base role. Business roles and organization scopes are configured separately through the explicit access-policy endpoints after creation.
+         *     Requires `access.manage`; the target department/team stable IDs must be inside the caller's effective scope.
          */
         post: {
             parameters: {
@@ -1653,15 +1600,16 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List designers
-         * @description Returns assignment candidates for task dropdowns. The historical path is still `/users/designers`, but `workflow_lane` now selects the actual candidate pool.
-         *     Round C (v1.5) widens the route guard so Ops task creators plus HR/SuperAdmin can look up designers cross-department.
-         *     As of v1.6 (Round D), this endpoint uses a dedicated assignment-candidate-pool service path (`IdentityService.ListAssignableDesigners`) that bypasses the standard user-list authorization filter. By default it remains restricted to `role=Designer` + `status=active` and does NOT accept department/team/keyword or pagination parameters. Round N adds `workflow_lane` to select the candidate-pool lane while preserving no-parameter backward compatibility. `workflow_lane=audit` returns active regular-audit candidates (`Audit_A` plus legacy `Audit_B`) for audit handover and scoped management reassignment. The route guard listed in `x-rbac-placeholder.required_roles` is the sole access control for this method; the service path performs no additional department/team scoping. Response envelope is `{data, pagination}` where `pagination.page_size` and `pagination.total` both reflect the full returned list length (no server-side pagination).
+         * List task assignment candidates
+         * @description Returns the active candidate pool used by task assignment, design handling, and audit handover controls.
+         *     `workflow_lane=normal` selects designers, `customization` selects customization designers, `audit` selects unified auditors, and `all` returns design candidates across the active design lanes.
+         *     Candidate membership comes exclusively from active `auth_*` role assignments and capabilities; legacy `user_roles` values and organization display names are not authorization inputs.
+         *     The endpoint does not accept keyword, organization, or pagination filters. The response pagination block reports the returned candidate count.
          */
         get: {
             parameters: {
                 query?: {
-                    /** @description Selects the assignment candidate pool lane. `normal` (default, back-compat) returns active users with role=Designer. `customization` returns active users with role=CustomizationOperator. `audit` returns active users with role=Audit_A plus legacy Audit_B. `all` returns the design/customization union. */
+                    /** @description Selects the active assignment candidate pool. */
                     workflow_lane?: "normal" | "customization" | "audit" | "all";
                 };
                 header?: never;
@@ -1712,9 +1660,7 @@ export interface paths {
         };
         /**
          * Get workflow user
-         * @description Management-scoped user detail read endpoint.
-         *     `DepartmentAdmin` can read only users in own department.
-         *     `TeamLead` can read only users in own team.
+         * @description User detail read endpoint governed by `access.view` or `access.manage` and the same stable-ID scope model as the list endpoint.
          */
         get: {
             parameters: {
@@ -1749,42 +1695,7 @@ export interface paths {
         };
         put?: never;
         post?: never;
-        /**
-         * Deprecated compatibility delete workflow user
-         * @deprecated
-         * @description Compatibility-only legacy endpoint. Do not expose this operation in frontend user management.
-         *     Current business lifecycle uses `POST /v1/users/{id}/deactivate` and `POST /v1/users/{id}/activate`.
-         *     Physical deletion is intentionally not provided.
-         */
-        delete: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Legacy soft-delete compatibility path completed; prefer deactivate */
-                204: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description User not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
+        delete?: never;
         options?: never;
         head?: never;
         /**
@@ -1793,12 +1704,10 @@ export interface paths {
          *     `employee_no` can be maintained by company-level user managers. It must be a pure numeric value in range 0-9999 and globally unique.
          *     Org-field contract:
          *     - `department` + `team` are the canonical write fields.
-         *     - `group` is a compatibility alias of `team` (when both are provided they must be equal).
          *     - To remove a user from a formal group, use the unassigned-pool semantic:
          *       - set `department` to the unassigned department from `/v1/org/options`
-         *       - set `team` (or `group`) to its unassigned pool team.
-         *     - Compatibility alias: `team/group = "ungrouped"` is normalized by backend into the configured unassigned pool.
-         *     `DepartmentAdmin` can move users across teams inside own department and assign unassigned users into own department, but cannot move users across departments or mutate managed scope.
+         *       - set `team` to its unassigned pool team, or use the explicit `team = "ungrouped"` command supported by the current management UI.
+         *     Requires `access.manage`. Both the current user organization and the requested new stable department/team IDs must be inside the caller's effective scope.
          */
         patch: {
             parameters: {
@@ -1819,20 +1728,10 @@ export interface paths {
                         employment_type?: components["schemas"]["EmploymentType"];
                         department?: components["schemas"]["Department"];
                         team?: string;
-                        /** @description Compatibility alias of team. */
-                        group?: string;
                         email?: string | null;
                         mobile?: string;
-                        /** @description Backward-compatible placeholder. The current runtime ignores this field on admin user PATCH; current-user avatars are updated through `/v1/me/avatar`. */
-                        avatar?: string | null;
-                        /** @description Role assignment per V1_INFORMATION_ARCHITECTURE §5.4. DeptAdmin cannot grant SuperAdmin or DeptAdmin; HRAdmin cannot grant SuperAdmin. */
-                        roles?: components["schemas"]["V7Role"][];
                         managed_departments?: string[];
                         managed_teams?: string[];
-                        /** @description R1.7-B placeholder. v1 persists only the single `team` field plus `managed_teams[]`; multi-team membership deferred to R5+. The server accepts but currently ignores this array (no-op). IA §5.4 reference maintained for forward-compat. */
-                        team_codes?: string[];
-                        /** @description R1.7-B placeholder. v1 semantically equals the `team` field; server accepts but currently ignores this field (writes must go through `team`). Full persistence of the multi-team model is scheduled for R5+. */
-                        primary_team_code?: string | null;
                     };
                 };
             };
@@ -1848,7 +1747,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description Forbidden (field-level authorization per §5.4 denied, e.g., DeptAdmin granting DeptAdmin or SuperAdmin; TeamLead attempting role change; cross-department mutation without org-move-request) */
+                /** @description Forbidden because `access.manage` is missing or the current/new stable organization is outside the effective scope. */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -1881,7 +1780,7 @@ export interface paths {
         /**
          * Reset workflow user password
          * @description Managed password reset endpoint. Replaces the target user's local password hash and returns the user record.
-         *     `DepartmentAdmin` can reset passwords only for users in own department. `HRAdmin` / `SuperAdmin` can reset globally.
+         *     Requires `access.manage`; the target user must be inside the caller's effective stable-ID scope.
          *     Existing session tokens are not revoked by this minimal reset operation.
          */
         put: {
@@ -1919,227 +1818,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/users/{id}/roles": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /** Replace workflow user roles */
-        put: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        roles?: components["schemas"]["V7Role"][];
-                    };
-                };
-            };
-            responses: {
-                /** @description User roles replaced */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["WorkflowUser"];
-                        };
-                    };
-                };
-            };
-        };
-        /** Add workflow user roles */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        roles?: components["schemas"]["V7Role"][];
-                    };
-                };
-            };
-            responses: {
-                /** @description User roles added */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["WorkflowUser"];
-                        };
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/users/{id}/roles/{role}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post?: never;
-        /** Remove one workflow user role */
-        delete: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                    role: components["schemas"]["V7Role"];
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description User role removed */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["WorkflowUser"];
-                        };
-                    };
-                };
-            };
-        };
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/permission-logs": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List permission access logs
-         * @description Combined route-access and identity/role-change audit log. Besides route-level authorization
-         *     decisions, this endpoint also records register, login, login failure, password change, role
-         *     assignment, and role removal actions. Read access is available to super admins and HR users.
-         */
-        get: {
-            parameters: {
-                query?: {
-                    actor_id?: number;
-                    actor_username?: string;
-                    action_type?: string;
-                    target_user_id?: number;
-                    target_username?: string;
-                    granted?: boolean;
-                    method?: string;
-                    route_path?: string;
-                    page?: number;
-                    page_size?: number;
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Permission logs */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["PermissionLog"][];
-                            pagination?: components["schemas"]["PaginationMeta"];
-                        };
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/operation-logs": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List aggregated operation logs
-         * @description Aggregated operation-log query endpoint for frontend integration. Combines recent task
-         *     events, export-job events, and integration call logs into one timeline-style read model.
-         *     Product policy is `HRAdmin` and `SuperAdmin`; legacy `Admin` remains accepted as compatibility-only access.
-         */
-        get: {
-            parameters: {
-                query?: {
-                    source?: components["schemas"]["OperationLogSource"];
-                    event_type?: string;
-                    page?: number;
-                    page_size?: number;
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Aggregated operation logs */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["OperationLogEntry"][];
-                            pagination?: components["schemas"]["PaginationMeta"];
-                        };
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/trace-events": {
         parameters: {
             query?: never;
@@ -2147,66 +1825,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * List business trace events
-         * @description Query the lightweight full-chain event ledger for business tracing and AI insight use cases.
-         *     Supports filtering by people, department, task, SKU, asset, ERP/integration call, event source,
-         *     outcome, trace ID, and occurred time range.
-         */
-        get: {
-            parameters: {
-                query?: {
-                    trace_id?: string;
-                    event_source?: "api" | "frontend" | "system" | "integration";
-                    event_type?: string;
-                    action?: string;
-                    actor_id?: number;
-                    /** @description Contains match on logged-in username/display name snapshot. */
-                    actor_username?: string;
-                    /** @description Filter by actor source; business dashboards typically use session_token. */
-                    actor_source?: "session_token" | "anonymous" | "header_placeholder" | "header_roles_placeholder" | "system_fallback";
-                    actor_department?: string;
-                    actor_team?: string;
-                    route_path?: string;
-                    task_id?: number;
-                    module_key?: string;
-                    sku_code?: string;
-                    asset_id?: number;
-                    design_asset_id?: number;
-                    task_asset_id?: number;
-                    integration_call_log_id?: number;
-                    resource_type?: string;
-                    resource_id?: string;
-                    outcome?: "succeeded" | "failed";
-                    /** @description Excludes low-value technical traffic such as auth, polling, websocket, and log-center routes. */
-                    business_only?: boolean;
-                    from?: string;
-                    since?: string;
-                    to?: string;
-                    until?: string;
-                    page?: number;
-                    page_size?: number;
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Business trace events */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["WorkflowTraceEvent"][];
-                            pagination?: components["schemas"]["PaginationMeta"];
-                        };
-                    };
-                };
-            };
-        };
+        get?: never;
         put?: never;
         /**
          * Record frontend business trace event
@@ -2245,7 +1864,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/audit-logs": {
+    "/v1/cost-management/dashboard": {
         parameters: {
             query?: never;
             header?: never;
@@ -2253,315 +1872,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List audit records (cross-task)
-         * @description Cross-task audit record list for audit log view. Filters by task_no, auditor, action, start/end date.
-         *     Returns audit_records enriched with task_no and auditor_name.
-         *     Read access is limited to audit roles and management roles.
-         *     `DepartmentAdmin` results are filtered to own department.
-         *     `TeamLead` results are filtered to own team inside own department.
-         */
-        get: {
-            parameters: {
-                query?: {
-                    /** @description Contains match on task_no */
-                    taskNo?: string;
-                    /** @description Contains match on auditor display_name */
-                    auditor?: string;
-                    action?: "claim" | "approve" | "reject" | "transfer" | "handover" | "takeover";
-                    /** @description YYYY-MM-DD, records with created_at >= start 00:00:00 */
-                    start?: string;
-                    /** @description YYYY-MM-DD, records with created_at <= end 23:59:59 */
-                    end?: string;
-                    page?: number;
-                    page_size?: number;
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Audit records list */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: {
-                                id?: number;
-                                task_id?: number;
-                                task_no?: string;
-                                stage?: string;
-                                action?: string;
-                                auditor_id?: number;
-                                auditor_name?: string;
-                                comment?: string;
-                                /** Format: date-time */
-                                created_at?: string;
-                            }[];
-                        };
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/server-logs": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List server logs
-         * @description Admin-only server log query with filtering (level, keyword, since, until) and masking of sensitive data.
-         *     5xx HTTP responses are automatically recorded. Use POST /v1/server-logs/clean to purge old entries.
-         */
-        get: {
-            parameters: {
-                query?: {
-                    level?: "info" | "warn" | "error";
-                    keyword?: string;
-                    since?: string;
-                    until?: string;
-                    page?: number;
-                    page_size?: number;
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Server logs (sensitive fields masked) */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["ServerLog"][];
-                            pagination?: components["schemas"]["PaginationMeta"];
-                        };
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/server-logs/clean": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Clean old server logs
-         * @description Admin-only. Deletes server logs older than the specified hours. Reason is required.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        /** @default 24 */
-                        older_than_hours?: number;
-                        reason: string;
-                    };
-                };
-            };
-            responses: {
-                /** @description Number of deleted rows */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            deleted?: number;
-                        };
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/product-management": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List product management records
-         * @description Product-center read model for SKU-to-ERP maintenance. The record includes base data sync state,
-         *     ERP image sync state, cost trace, and the server-derived area trace used by cost assessment.
-         */
-        get: {
-            parameters: {
-                query?: {
-                    keyword?: string;
-                    display_scope?: "combo" | "single" | "all";
-                    image_source?: components["schemas"]["ProductManagementImageSource"];
-                    sync_status?: components["schemas"]["ProductManagementSyncStatus"];
-                    base_sync_status?: components["schemas"]["ProductManagementSyncStatus"];
-                    image_sync_status?: components["schemas"]["ProductManagementSyncStatus"];
-                    cost_status?: "missing" | "ready";
-                    issue_scope?: "attention" | "all";
-                    creator_id?: number;
-                    page?: number;
-                    page_size?: number;
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Product management records */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ProductManagementListResponse"];
-                    };
-                };
-                /** @description Unauthenticated */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Forbidden */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/product-management/combo-tree": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List product management records grouped by ERP combo SKU
-         * @description Product-center combo hierarchy. This endpoint does not call the ERP OpenWeb API directly; it reads local
-         *     combo-cache tables and embeds the same product management record contract as `/v1/product-management`.
-         */
-        get: {
-            parameters: {
-                query?: {
-                    keyword?: string;
-                    display_scope?: "combo" | "single" | "all";
-                    image_source?: components["schemas"]["ProductManagementImageSource"];
-                    sync_status?: components["schemas"]["ProductManagementSyncStatus"];
-                    base_sync_status?: components["schemas"]["ProductManagementSyncStatus"];
-                    image_sync_status?: components["schemas"]["ProductManagementSyncStatus"];
-                    cost_status?: "missing" | "ready";
-                    issue_scope?: "attention" | "all";
-                    creator_id?: number;
-                    page?: number;
-                    page_size?: number;
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Product management combo tree */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ProductManagementComboTreeResponse"];
-                    };
-                };
-                /** @description Unauthenticated */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Forbidden */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/product-management/cost-dashboard": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get product cost issue dashboard
-         * @description Aggregates product-center cost issues into three operator-facing buckets and six fine-grained chips. The dashboard reads the local product-management read model, latest cost snapshots, and latest ERP cost verification trace; it does not mutate costs.
+         * Get current SKU cost issue dashboard
+         * @description Aggregates task and SKU cost issues into operator-facing groups. The dashboard reads the internal SKU cost projection, latest rule snapshots, and latest ERP cost verification trace; it does not mutate costs.
          */
         get: {
             parameters: {
@@ -2572,7 +1884,7 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description Product cost issue dashboard */
+                /** @description SKU cost issue dashboard */
                 200: {
                     headers: {
                         [name: string]: unknown;
@@ -2611,14 +1923,14 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/product-management/cost-recalculation-runs": {
+    "/v1/cost-management/recalculation-runs": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** List product cost recalculation runs */
+        /** List SKU cost recalculation runs */
         get: {
             parameters: {
                 query?: {
@@ -2668,8 +1980,8 @@ export interface paths {
         };
         put?: never;
         /**
-         * Create a product cost recalculation run
-         * @description Creates a persistent cost recalculation run. Single mode previews synchronously; bulk modes may start in `previewing` and are polled through the run detail endpoint. The server re-reads product records and enforces the 300 item batch limit.
+         * Create a SKU cost recalculation run
+         * @description Creates a persistent cost recalculation run. Single mode previews synchronously; bulk modes may start in `previewing` and are polled through the run detail endpoint. The server re-reads current task/SKU cost projections and enforces the 300 item batch limit.
          */
         post: {
             parameters: {
@@ -2730,14 +2042,14 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/product-management/cost-recalculation-runs/{run_id}": {
+    "/v1/cost-management/recalculation-runs/{run_id}": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /** Get a product cost recalculation run with preview items */
+        /** Get a SKU cost recalculation run with preview items */
         get: {
             parameters: {
                 query?: {
@@ -2784,7 +2096,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/product-management/cost-recalculation-runs/{run_id}/apply": {
+    "/v1/cost-management/recalculation-runs/{run_id}/apply": {
         parameters: {
             query?: never;
             header?: never;
@@ -2794,8 +2106,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Apply a previewed product cost recalculation run
-         * @description Idempotently applies previewed run items. Rows are marked conflict when current cost drifted or another open run owns the same product record.
+         * Apply a previewed SKU cost recalculation run
+         * @description Idempotently applies previewed run items. Rows are marked conflict when current cost drifted or another open run owns the same SKU cost projection.
          */
         post: {
             parameters: {
@@ -2827,7 +2139,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/product-management/cost-recalculation-runs/{run_id}/sync-erp": {
+    "/v1/cost-management/recalculation-runs/{run_id}/sync-erp": {
         parameters: {
             query?: never;
             header?: never;
@@ -2838,7 +2150,7 @@ export interface paths {
         put?: never;
         /**
          * Queue applied recalculation items for ERP base-data sync
-         * @description Reuses the existing product-management base sync queue; run items move from `applied` to `erp_queued` and are completed by the base-sync worker callback.
+         * @description Uses the existing ERP base-data sync queue; run items move from `applied` to `erp_queued` and are completed by the base-sync worker callback.
          */
         post: {
             parameters: {
@@ -2870,7 +2182,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/product-management/cost-recalculation-runs/{run_id}/cancel": {
+    "/v1/cost-management/recalculation-runs/{run_id}/cancel": {
         parameters: {
             query?: never;
             header?: never;
@@ -2879,7 +2191,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Cancel an open product cost recalculation run */
+        /** Cancel an open SKU cost recalculation run */
         post: {
             parameters: {
                 query?: never;
@@ -2899,273 +2211,6 @@ export interface paths {
                     content: {
                         "application/json": {
                             data?: components["schemas"]["CostRecalculationRun"];
-                        };
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/product-management/{id}/reparse-image": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Reparse the managed image for one product-center record
-         * @description Re-runs the backend product-image selection logic for a product-center record and returns the updated read-model row.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Updated product management record */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["ProductManagementRecord"];
-                        };
-                    };
-                };
-                /** @description Invalid record id */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Product management record not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/product-management/{id}/image": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Set a manual image for one product-center record
-         * @description Binds an existing task asset as the managed product image and returns the updated read-model row.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        /** Format: int64 */
-                        asset_id: number;
-                    };
-                };
-            };
-            responses: {
-                /** @description Updated product management record */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["ProductManagementRecord"];
-                        };
-                    };
-                };
-                /** @description Invalid image payload */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/product-management/{id}/sync-request": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Queue full ERP sync for one product-center record
-         * @description Queues both base data and image synchronization when applicable, honoring backend cooldown and force rules.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                };
-                cookie?: never;
-            };
-            requestBody?: {
-                content: {
-                    "application/json": {
-                        force?: boolean;
-                    };
-                };
-            };
-            responses: {
-                /** @description Queued product management record */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["ProductManagementRecord"];
-                        };
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/product-management/{id}/base-sync-request": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Queue ERP base-data sync for one product-center record
-         * @description Queues only product base data synchronization, including cost price when available.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                };
-                cookie?: never;
-            };
-            requestBody?: {
-                content: {
-                    "application/json": {
-                        force?: boolean;
-                    };
-                };
-            };
-            responses: {
-                /** @description Queued product management record */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["ProductManagementRecord"];
-                        };
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/product-management/{id}/image-sync-request": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Queue ERP image sync for one product-center record
-         * @description Queues only ERP image synchronization for the managed product image.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                };
-                cookie?: never;
-            };
-            requestBody?: {
-                content: {
-                    "application/json": {
-                        force?: boolean;
-                    };
-                };
-            };
-            responses: {
-                /** @description Queued product management record */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["ProductManagementRecord"];
                         };
                     };
                 };
@@ -3719,181 +2764,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/erp/users": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List JST company users (Bridge-side, pre-wiring)
-         * @description Bridge-side query for JST getcompanyusers. Maps to `/open/webapi/userapi/company/getcompanyusers`.
-         *     Pre-wiring only: does NOT change main auth/permission logic. Admin/ERP role required.
-         */
-        get: {
-            parameters: {
-                query?: {
-                    current_page?: number;
-                    page_size?: number;
-                    page_action?: number;
-                    enabled?: boolean;
-                    version?: number;
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description JST user list */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["JSTUserListResponse"];
-                        };
-                    };
-                };
-                /** @description Bridge or upstream unavailable */
-                500: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/admin/jst-users": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List JST users (Admin, via Bridge)
-         * @description Pre-wiring. Query JST company users through Bridge. Admin only.
-         */
-        get: {
-            parameters: {
-                query?: {
-                    current_page?: number;
-                    page_size?: number;
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description JST user list */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["JSTUserListResponse"];
-                        };
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/admin/jst-users/import-preview": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Preview JST user import (Admin) */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description ok */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["JSTUserImportPreviewResult"];
-                        };
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/admin/jst-users/import": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Import JST users (Admin) */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description ok */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["JSTUserImportResult"];
-                        };
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/erp/products/upsert": {
         parameters: {
             query?: never;
@@ -4330,287 +3200,6 @@ export interface paths {
                 };
             };
         };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/internal/jst/ping": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * JST sync service ping (8082)
-         * @description Resident JST sync service health boundary.
-         *     This endpoint is owned by the long-running 8082 JST sync service and is
-         *     documented here for cross-service contract visibility; it is not served by
-         *     the 8080/8081 `cmd/server` runtime.
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description JST sync service reachable */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["JSTSyncPingResponse"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/jst/sync/inc": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Trigger JST incremental sync (8082)
-         * @description Incremental JST sync control endpoint owned by the resident 8082 service.
-         *     8081 Bridge should consume 8082 outputs/contracts when JST source sync is required.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Incremental sync accepted */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["JSTIncrementalSyncResponse"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/products/search": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Search local cached ERP products
-         * @deprecated
-         * @description Compatibility-only local-cache product search.
-         *     New integrations must use `GET /v1/erp/products`.
-         */
-        get: {
-            parameters: {
-                query?: {
-                    keyword?: string;
-                    /** @description Legacy fuzzy filter against `products.category`. Kept for compatibility. */
-                    category?: string;
-                    /** @description Resolve the selected category to its local first-level `search_entry_code`, then apply active local category-to-ERP mappings. */
-                    category_id?: number;
-                    /** @description Resolve the selected category to its local first-level `search_entry_code`, then apply active local category-to-ERP mappings. */
-                    category_code?: string;
-                    /** @description Explicit first-level search-entry code for local ERP positioning. When omitted but `category_id` or `category_code` is provided, it is derived from the category center. */
-                    search_entry_code?: string;
-                    /** @description Controls which active local mapping rules are consumed. `primary` is the default when mapped search is used; `all` allows non-primary active rules too. */
-                    mapping_match?: "primary" | "all";
-                    /** @description Optional lightweight reserved second-level mapping key. Must be paired with `secondary_value`. */
-                    secondary_key?: string;
-                    /** @description Optional lightweight reserved second-level mapping value. Must be paired with `secondary_key`. */
-                    secondary_value?: string;
-                    /** @description Optional lightweight reserved third-level mapping key. Must be paired with `tertiary_value`. */
-                    tertiary_key?: string;
-                    /** @description Optional lightweight reserved third-level mapping value. Must be paired with `tertiary_key`. */
-                    tertiary_value?: string;
-                    page?: number;
-                    page_size?: number;
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Product list */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ProductListResponse"];
-                    };
-                };
-                /** @description Invalid mapped-search query */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/products/sync/status": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get ERP sync placeholder status
-         * @description Internal placeholder endpoint for ERP sync visibility. This remains a MAIN-owned sync and runtime control surface and does not imply Bridge ownership. `source_mode=stub` means MAIN reads a local stub JSON source. The response reports the runtime-resolved stub path plus existence state so noop-vs-source-path diagnosis is explicit. Not ready for frontend. Uses current debug-header role enforcement.
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description ERP sync status */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ERPSyncStatusResponse"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/products/sync/run": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Run ERP sync placeholder manually
-         * @description Internal placeholder endpoint that synchronously reads the stub ERP source and upserts products. This remains a MAIN-owned sync and runtime control surface and does not imply Bridge ownership. Not ready for frontend. Uses current debug-header role enforcement.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description ERP sync run summary */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ERPSyncRunResponse"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/products/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get product by ID
-         * @deprecated
-         * @description Compatibility-only local-cache product detail. New integrations must use `GET /v1/erp/products/{id}`.
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Product detail */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["Product"];
-                        };
-                    };
-                };
-                /** @description Product not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -5586,251 +4175,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/task-create/asset-center/upload-sessions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Create task-create reference upload session
-         * @deprecated
-         * @description Compatibility-only pre-task reference upload flow retained for rollback-safe migration.
-         *     Obsolete for frontend rollout. New frontend integration must use `POST /v1/tasks/reference-upload-sessions`.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["CreateTaskReferenceUploadSessionRequest"];
-                };
-            };
-            responses: {
-                /** @description Task-create reference upload session created */
-                201: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["CreateTaskReferenceUploadSessionResponseData"];
-                        };
-                    };
-                };
-                /** @description Invalid request payload */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/task-create/asset-center/upload-sessions/{session_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get task-create reference upload session
-         * @deprecated
-         * @description Compatibility-only status read for the old task-create upload-session flow. Obsolete for frontend rollout; new integration must use `POST /v1/tasks/reference-upload-sessions`.
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    session_id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Upload session */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["UploadSession"];
-                        };
-                    };
-                };
-                /** @description Upload session not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/task-create/asset-center/upload-sessions/{session_id}/complete": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Complete task-create reference upload session
-         * @deprecated
-         * @description Compatibility-only completion for the old task-create upload-session flow.
-         *     Obsolete for frontend rollout. Finalizes one old pre-task reference upload session and returns both the legacy
-         *     `reference_file_ref` id and the normalized `ref_object` that can be passed into `POST /v1/tasks`.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    session_id: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["CompleteTaskReferenceUploadSessionRequest"];
-                };
-            };
-            responses: {
-                /** @description Upload session completed and reference_file_ref returned */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["CompleteTaskReferenceUploadSessionResponseData"];
-                        };
-                    };
-                };
-                /** @description Invalid request payload */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Upload session not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Upload session already terminal */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/task-create/asset-center/upload-sessions/{session_id}/abort": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Abort task-create reference upload session
-         * @deprecated
-         * @description Compatibility-only abort for the old task-create upload-session flow. Obsolete for frontend rollout; new integration must use `POST /v1/tasks/reference-upload-sessions/{session_id}/abort`.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    session_id: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["CancelTaskAssetUploadSessionRequest"];
-                };
-            };
-            responses: {
-                /** @description Upload session aborted */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["UploadSession"];
-                        };
-                    };
-                };
-                /** @description Invalid request payload */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Upload session not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Upload session is terminal, or the task is Completed and requires reopen */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/tasks/reference-upload": {
         parameters: {
             query?: never;
@@ -5905,56 +4249,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/assets": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List assets
-         * @description Canonical resource catalog for asset lookup.
-         *     Supports task-linked lookup plus minimal resource filters for task, SKU scope, archive state, and upload state.
-         *     For PSD preview flows, callers can filter by `source_asset_id` to find backend-owned preview/thumb derivatives.
-         */
-        get: {
-            parameters: {
-                query?: {
-                    task_id?: number;
-                    asset_kind?: "reference" | "source" | "delivery" | "preview" | "design_thumb";
-                    source_asset_id?: number;
-                    scope_sku_code?: string;
-                    archive_status?: string;
-                    upload_status?: string;
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Asset list */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["DesignAsset"][];
-                        };
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/assets/batch-download": {
         parameters: {
             query?: never;
@@ -6018,132 +4312,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/assets/excel-package/preview": {
+    "/v1/task-assets/{task_asset_id}/download": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get?: never;
-        put?: never;
         /**
-         * Preview Excel image package manifest
-         * @description Matches uploaded Excel rows to current JPG/PNG system assets and OSS-ready external assets, returns direct download URLs and per-row failures. Single images remain flat in the ZIP. Under `/p3/仓库素材区/徐凯`, an exact SKU-prefixed source directory with at least two indexed image files is returned as a complete set; the frontend restores that source directory in the ZIP and keeps all components together. Address summaries, missing-SKU reports, source filenames, and quantity-based copies are preserved.
+         * Get controlled download metadata for one immutable task-asset version
+         * @description Resolves `task_asset_id` against `task_assets.id`, not `design_assets.id`.
+         *     The row must remain active, bound, and referenced by at least one resource-group revision.
+         *     Authorization requires scoped `asset.download` for the owning task. Raw object-storage
+         *     addresses are never returned. An explicit historical-unavailable tombstone returns 410.
          */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["AssetExcelPackagePreviewRequest"];
-                };
-            };
-            responses: {
-                /** @description Excel image package manifest */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["AssetExcelPackageManifest"];
-                        };
-                    };
-                };
-                /** @description Invalid request */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Internal error while matching assets */
-                500: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
+        get: operations["downloadTaskAssetRevisionFile"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/v1/assets/excel-package/preview-file": {
+    "/v1/task-assets/{task_asset_id}/preview": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get?: never;
-        put?: never;
         /**
-         * Preview Excel image package manifest from uploaded file
-         * @description Uploads an Eve-compatible .xlsx or .xls template, parses order number, SKU, quantity, address, and keyword columns on the backend, then returns the same flat-single-image and complete-multi-image-set manifest as /v1/assets/excel-package/preview.
+         * Get controlled preview metadata for one immutable task-asset version
+         * @description Resolves `task_asset_id` against `task_assets.id`, not `design_assets.id`.
+         *     The row must remain active, bound, and referenced by at least one resource-group revision.
+         *     Bound files require scoped `asset.view`. A derived preview must match this exact source version and never
+         *     masks an explicit historical-unavailable tombstone on the original.
          */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "multipart/form-data": {
-                        /**
-                         * Format: binary
-                         * @description Eve-compatible .xlsx or .xls template, max 10 MiB.
-                         */
-                        file: string;
-                    };
-                };
-            };
-            responses: {
-                /** @description Excel image package manifest */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["AssetExcelPackageManifest"];
-                        };
-                    };
-                };
-                /** @description Invalid file or unsupported template */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Internal error while matching assets */
-                500: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
+        get: operations["previewTaskAssetRevisionFile"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -6296,6 +4504,15 @@ export interface paths {
                     };
                     content?: never;
                 };
+                /** @description Asset metadata exists but the object is no longer available */
+                410: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
             };
         };
         put?: never;
@@ -6402,7 +4619,7 @@ export interface paths {
          *     External resources prefer OSS-backed derived preview/original URLs or already-public provider URLs;
          *     browser-facing BFF proxy URLs are not returned as the default preview surface.
          *     A staged, unbound upload is visible only to its uploader with `asset.view`, or to an auditor whose
-         *     explicit `task.audit.decision` scope includes the task. Bound resources require `asset.view` within
+         *     explicit `task.audit` scope includes the task. Bound resources require `asset.view` within
          *     the task's stable organization-ID scope. Legacy roles and organization names do not authorize preview.
          *     When preview metadata is not currently available for the asset, runtime returns HTTP 409 with
          *     `error.code=INVALID_STATE_TRANSITION` and message `asset preview is not available`.
@@ -6457,6 +4674,15 @@ export interface paths {
                         "application/json": components["schemas"]["ErrorResponse"];
                     };
                 };
+                /** @description Asset metadata exists but the object is no longer available */
+                410: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ErrorResponse"];
+                    };
+                };
             };
         };
         put?: never;
@@ -6480,8 +4706,9 @@ export interface paths {
          * Create asset upload session
          * @description Creates a staged task-asset upload session and lets the backend choose single-part or
          *     multipart OSS upload. The task must be in an editable design or audit state. Authorization
-         *     is `task.design.submit`, `task.audit.decision`, or `asset.manage`, intersected with the
-         *     task's stable organization-ID scope. Upload completion never advances workflow state.
+         *     is `task.upload_source`, `task.audit`, or `asset.manage`, intersected with the
+         *     task's stable organization-ID scope. `task.create` may create, complete, and cancel only
+         *     `reference` uploads; it never authorizes source or final-product uploads. Upload completion never advances workflow state.
          *     Completed and Archived tasks reject upload-session access/mutations and must be reopened first. Task state
          *     is locked and checked again in every transaction that writes upload-session state.
          */
@@ -6941,77 +5168,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/tasks/{id}/predictions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get task next-action prediction suggestions
-         * @description Returns deterministic next-action suggestions for a task detail page based on current task status,
-         *     task modules, task assets, cost, and ERP filing state. This endpoint does not call the AI provider.
-         */
-        get: {
-            parameters: {
-                query?: {
-                    limit?: number;
-                };
-                header?: never;
-                path: {
-                    id: number;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Prediction suggestions */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["PredictionBundleResponse"];
-                    };
-                };
-                /** @description Invalid task id */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Unauthenticated */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Forbidden */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/tasks/{id}/product-info": {
         parameters: {
             query?: never;
@@ -7078,7 +5234,7 @@ export interface paths {
         head?: never;
         /**
          * Patch per-task product information
-         * @description Partial update of task-scoped product fields; omitted fields remain unchanged. This write path now also requires both an allowed role and a matching minimum org scope over canonical task ownership.
+         * @description Partial update of task-scoped product fields; omitted fields remain unchanged. Requires `catalog.manage`; the service also verifies the task's stable organization-ID scope.
          */
         patch: {
             parameters: {
@@ -7204,7 +5360,7 @@ export interface paths {
         head?: never;
         /**
          * Patch per-task cost information
-         * @description Partial update of task-scoped cost fields; omitted fields remain unchanged. This write path now also requires both an allowed role and a matching minimum org scope over canonical task ownership.
+         * @description Partial update of task-scoped cost fields; omitted fields remain unchanged. Requires `catalog.manage`; the service also verifies the task's stable organization-ID scope.
          */
         patch: {
             parameters: {
@@ -7454,8 +5610,7 @@ export interface paths {
         head?: never;
         /**
          * Update task business-info and generic cost fields
-         * @description Maintains PRD V2.0 front-loaded category/spec/cost/filed information used by warehouse
-         *     handoff and close-readiness checks. When category plus minimal
+         * @description Maintains the task's category, specification, cost, and ERP filing information. When category plus minimal
          *     width/height/area/quantity/process inputs are present, the backend also triggers skeleton
          *     cost preview and persists `estimated_cost`, rule provenance, governed
          *     `matched_rule_version`, and manual-review state. Existing-product tasks may also persist or
@@ -7468,12 +5623,9 @@ export interface paths {
          *     current effective internal cost, while `manual_cost_override` distinguishes business-side
          *     override from system prefill; `prefill_source`, `prefill_at`, `override_actor`, and
          *     `override_at` provide governance trace, and override state changes append a dedicated
-         *     `cost_override_events` audit record. This
-         *     remains a narrow filing/master-data boundary only, not a broad ERP docking, approval flow,
-         *     finance system, procurement/WMS integration, or raw ERP mutation API family on MAIN.
-         *     Historical tasks are not auto-recomputed by later rule changes; new rule changes affect
-         *     future preview/prefill only. Procurement preparation is maintained separately via
-         *     `/v1/tasks/{id}/procurement`.
+         *     `cost_override_events` audit record. This remains a narrow task master-data and ERP filing
+         *     boundary. Historical tasks are not silently recomputed by later rule changes; governed
+         *     recalculation runs handle explicit refreshes.
          */
         patch: {
             parameters: {
@@ -7594,7 +5746,7 @@ export interface paths {
         put?: never;
         /**
          * Retry task filing
-         * @description Forces one filing retry attempt using current task payload snapshot and updates filing status fields. This write path now also requires both an allowed role and a matching minimum org scope over canonical task ownership.
+         * @description Forces one filing retry attempt using the current task payload snapshot. Requires `erp.manage`; the service also verifies the task's stable organization-ID scope.
          */
         post: {
             parameters: {
@@ -7656,18 +5808,18 @@ export interface paths {
          * @description Returns the task aggregate produced by `task_aggregator.DetailService` fast path.
          *     Top-level `data` contains: `task`, nullable `task_detail`, `modules[]`, `events[]`
          *     (service caps recent events at 50), `reference_file_refs[]`, `sku_items[]`, and
-         *     `asset_versions[]`. For batch tasks, `sku_items[]` is present on this detail endpoint so
+         *     `asset_versions[]`, plus the flat V8 `design_sub_status`. For batch tasks, `sku_items[]` is present on this detail endpoint so
          *     frontend can render per-SKU tabs without a second read. Design upload versions preserve
          *     batch scope through `asset_versions[].scope_sku_code`, copied from upload-session
          *     `target_sku_code`. Rich snapshot sections
-         *     such as `procurement_summary`, full top-level `product_selection`, `matched_rule_governance`,
+         *     such as full top-level `product_selection`, `matched_rule_governance`,
          *     `design_assets`, and `governance_audit_summary` are not returned by this endpoint in
          *     v1.21; use dedicated routes such as
-         *     `/v1/tasks/{id}/procurement`, `/v1/tasks/{id}/asset-center/*`, and
+         *     `/v1/tasks/{id}/asset-center/*` and
          *     `/v1/tasks/{id}/cost-overrides` for those read models.
-         *     Main task-flow aggregate detail is globally visible to task-facing authenticated roles;
-         *     all mutating actions remain separately action-gated by role, status, handler/assignee,
-         *     and organization scope.
+         *     Retired workflow snapshots are not returned.
+         *     Read access requires `task.view` and its stable organization scope; every mutation is
+         *     independently governed by its explicit capability, task state, and `allowed_actions`.
          */
         get: {
             parameters: {
@@ -7717,7 +5869,7 @@ export interface paths {
         };
         /**
          * Get task cost-override governance audit timeline
-         * @description Returns the dedicated read-only cost override and governance audit timeline for one task. This timeline records override-specific audit facts such as previous estimated cost, override cost, matched rule and version context, actor and time, and release events. `override_governance_boundary` reuses the same boundary summary object exposed by task, detail, and procurement reads. `task_event_logs` remain the general task event stream and coexist with this governance-specific audit layer. This endpoint is not an approval flow, finance system, accounting contract, or ERP writeback contract.
+         * @description Returns the dedicated read-only cost override audit timeline for one task. The timeline records previous estimated cost, override cost, matched rule/version, operator, time, and release events. General task events remain available from the task timeline.
          */
         get: {
             parameters: {
@@ -7758,116 +5910,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/tasks/{id}/cost-overrides/{event_id}/review": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Upsert cost-override review placeholder boundary
-         * @description Adds or updates the approval-side placeholder boundary for one dedicated `cost_override_events` row. This is a skeleton governance handoff only; it is not a real approval workflow, identity approval chain, or permission model.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                    event_id: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["TaskCostOverrideReviewRequest"];
-                };
-            };
-            responses: {
-                /** @description Updated placeholder review boundary */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["TaskCostOverrideGovernanceBoundary"];
-                        };
-                    };
-                };
-                /** @description Task or override event not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/tasks/{id}/cost-overrides/{event_id}/finance-mark": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Upsert cost-override finance placeholder boundary
-         * @description Adds or updates the finance-side placeholder boundary for one dedicated `cost_override_events` row. This is a future finance-handoff skeleton only; it is not a real finance system, ledger, reconciliation, settlement, invoice, or ERP writeback interface.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                    event_id: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["TaskCostOverrideFinanceMarkRequest"];
-                };
-            };
-            responses: {
-                /** @description Updated placeholder finance boundary */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["TaskCostOverrideGovernanceBoundary"];
-                        };
-                    };
-                };
-                /** @description Task or override event not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/tasks/{id}/assign": {
         parameters: {
             query?: never;
@@ -7879,10 +5921,12 @@ export interface paths {
         put?: never;
         /**
          * Assign task to designer
-         * @description `POST /v1/tasks/{id}/assign` now carries bounded semantics under the same route:
-         *     - `PendingAssign` (regular lane): assign is allowed for the existing operation/management path within the allowed org scope. A Designer may also self-claim an unassigned task by sending their own user id as `designer_id`; success sets `designer_id` and `current_handler_id`, then moves the task to `InProgress`. Target user must be an active `Designer`.
-         *     - `InProgress`: the same route acts as reassign when the backend returns the corresponding allowed action.
-         *     - `PendingAudit`, `Completed`, `Archived`, `Cancelled`, and `Blocked` remain denied with machine-readable `PERMISSION_DENIED` details such as `task_not_reassignable`.
+         * @description Assigns an active Designer to a `PendingAssign` task or reassigns an `InProgress` task.
+         *     Authorization requires explicit `task.assign` for first assignment or `task.reassign` for reassignment,
+         *     intersected with the task's stable organization-ID scope;
+         *     legacy roles and department/team names never grant access. The action is exposed to clients as
+         *     `task.assign` in the task's `allowed_actions`. `PendingAudit`, `Completed`, `Archived`, `Cancelled`,
+         *     and `Blocked` are rejected.
          */
         post: {
             parameters: {
@@ -7910,7 +5954,7 @@ export interface paths {
                         };
                     };
                 };
-                /** @description `PERMISSION_DENIED` with machine-readable task-action details such as `missing_required_role`, `task_out_of_department_scope`, `task_out_of_team_scope`, `task_not_reassignable`, or `task_reassign_requires_requester_or_manager`. */
+                /** @description `PERMISSION_DENIED` when the exact assign/reassign capability is missing or the task is outside the actor's stable organization-ID scope. */
                 403: {
                     headers: {
                         [name: string]: unknown;
@@ -8024,9 +6068,8 @@ export interface paths {
         };
         /**
          * List task-linked design assets
-         * @description Canonical task-scoped design-asset list path.
-         *     Returns the same resource model as `GET /v1/assets?task_id={id}` and keeps task detail pages on
-         *     one explicit task context route while `/v1/assets` remains the canonical cross-task resource namespace.
+         * @description Task-scoped compatibility read used only to resolve staged uploads and derived previews.
+         *     Current business resources are read from `/v1/tasks/{id}/resource-bundle`.
          */
         get: {
             parameters: {
@@ -8153,1287 +6196,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/tasks/{id}/assets/timeline": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List legacy task asset timeline
-         * @deprecated
-         * @description Returns the append-only task-asset timeline ordered by `version_no ASC`. This is a compatibility-only standalone refresh view, obsolete for frontend rollout, and not the primary design-asset aggregation surface for new frontend upload integration.
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Task asset timeline */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["TaskAsset"][];
-                        };
-                    };
-                };
-                /** @description Task not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/tasks/{id}/assets/{asset_id}/versions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List versions under one design asset
-         * @deprecated
-         * @description Compatibility-only alias for `GET /v1/tasks/{id}/asset-center/assets/{asset_id}/versions`. Obsolete for frontend rollout.
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                    asset_id: number;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Design asset versions */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["DesignAssetVersion"][];
-                        };
-                    };
-                };
-                /** @description Task or asset not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/tasks/{id}/assets/{asset_id}/download": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get latest version download info for one design asset
-         * @deprecated
-         * @description Compatibility-only alias for `GET /v1/tasks/{id}/asset-center/assets/{asset_id}/download`. Obsolete for frontend rollout.
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: {
-                    "X-Network-Probe-Reachable"?: boolean;
-                    "X-Network-Probe-Method"?: string;
-                    "X-Network-Probe-URL"?: string;
-                    "X-Network-Probe-Checked-At"?: string;
-                    "X-Network-Probe-Status-Code"?: number;
-                    "X-Network-Probe-Error"?: string;
-                    "X-Network-Probe-Attestation"?: string;
-                };
-                path: {
-                    id: number;
-                    asset_id: number;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Asset download metadata */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["AssetDownloadInfo"];
-                        };
-                    };
-                };
-                /** @description Task or asset not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/tasks/{id}/assets/{asset_id}/versions/{version_id}/download": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get specific version download info for one design asset
-         * @deprecated
-         * @description Compatibility-only alias for `GET /v1/tasks/{id}/asset-center/assets/{asset_id}/versions/{version_id}/download`. Obsolete for frontend rollout.
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: {
-                    "X-Network-Probe-Reachable"?: boolean;
-                    "X-Network-Probe-Method"?: string;
-                    "X-Network-Probe-URL"?: string;
-                    "X-Network-Probe-Checked-At"?: string;
-                    "X-Network-Probe-Status-Code"?: number;
-                    "X-Network-Probe-Error"?: string;
-                    "X-Network-Probe-Attestation"?: string;
-                };
-                path: {
-                    id: number;
-                    asset_id: number;
-                    version_id: number;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Asset version download metadata */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["AssetDownloadInfo"];
-                        };
-                    };
-                };
-                /** @description Task, asset, or version not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/tasks/{id}/assets/upload-sessions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Create upload session
-         * @deprecated
-         * @description Compatibility-only alias for `POST /v1/assets/upload-sessions`.
-         *     Obsolete for frontend rollout; new integration must use the top-level asset session contract.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["CreateTaskAssetUploadSessionRequest"];
-                };
-            };
-            responses: {
-                /** @description Upload session created */
-                201: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["CreateTaskAssetUploadSessionResponseData"];
-                        };
-                    };
-                };
-                /** @description Invalid request payload */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description `PERMISSION_DENIED` with task-action `deny_code` details when the actor is outside the allowed org scope. */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Task or asset not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/tasks/{id}/assets/upload-sessions/{session_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get upload session status
-         * @deprecated
-         * @description Compatibility-only alias for `GET /v1/assets/upload-sessions/{session_id}`.
-         *     Obsolete for frontend rollout. Completed and Archived tasks require reopen because the read may synchronize
-         *     remote session state transactionally.
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                    session_id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Upload session */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["UploadSession"];
-                        };
-                    };
-                };
-                /** @description Task or upload session not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Task is Completed/Archived and requires reopen */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/tasks/{id}/assets/upload-sessions/{session_id}/complete": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Complete upload session and record asset version
-         * @deprecated
-         * @description Compatibility-only alias for `POST /v1/assets/upload-sessions/{session_id}/complete`.
-         *     Obsolete for frontend rollout.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                    session_id: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["CompleteTaskAssetUploadSessionRequest"];
-                };
-            };
-            responses: {
-                /** @description Upload session completed and asset version recorded */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["CompleteTaskAssetUploadSessionResponseData"];
-                        };
-                    };
-                };
-                /** @description Invalid request payload */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description `PERMISSION_DENIED` with task-action `deny_code` details when the actor is outside the allowed org scope. */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Task or upload session not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Upload session already terminal, asset type mismatch, or Completed task requires reopen */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/tasks/{id}/assets/upload-sessions/{session_id}/abort": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Abort upload session
-         * @deprecated
-         * @description Compatibility-only alias for `POST /v1/assets/upload-sessions/{session_id}/cancel`.
-         *     Obsolete for frontend rollout.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                    session_id: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["CancelTaskAssetUploadSessionRequest"];
-                };
-            };
-            responses: {
-                /** @description Upload session aborted */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["UploadSession"];
-                        };
-                    };
-                };
-                /** @description Invalid request payload */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description `PERMISSION_DENIED` with task-action `deny_code` details when the actor is outside the allowed org scope. */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Task or upload session not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Upload session is terminal, or the task is Completed and requires reopen */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/tasks/{id}/asset-center/assets": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List design assets in task asset center
-         * @deprecated
-         * @description Compatibility-only alias for `GET /v1/tasks/{id}/assets`.
-         *     Keep for migration safety only; new frontend integration must use the canonical
-         *     task-linked lookup path `GET /v1/tasks/{id}/assets`.
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Design asset center list */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["DesignAsset"][];
-                        };
-                    };
-                };
-                /** @description Task not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/tasks/{id}/asset-center/assets/{asset_id}/versions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List versions under one design asset
-         * @deprecated
-         * @description Compatibility-only alias for `GET /v1/tasks/{id}/assets/{asset_id}/versions`. Obsolete for frontend rollout.
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                    asset_id: number;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Design asset versions */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["DesignAssetVersion"][];
-                        };
-                    };
-                };
-                /** @description Task or asset not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/tasks/{id}/asset-center/assets/{asset_id}/download": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get latest version download info for one design asset
-         * @deprecated
-         * @description Compatibility-only alias for `GET /v1/tasks/{id}/assets/{asset_id}/download`. Obsolete for frontend rollout.
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                    asset_id: number;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Asset download metadata */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["AssetDownloadInfo"];
-                        };
-                    };
-                };
-                /** @description Task or asset not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/tasks/{id}/asset-center/assets/{asset_id}/versions/{version_id}/download": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get specific version download info for one design asset
-         * @deprecated
-         * @description Compatibility-only alias for `GET /v1/tasks/{id}/assets/{asset_id}/versions/{version_id}/download`. Obsolete for frontend rollout.
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                    asset_id: number;
-                    version_id: number;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Asset version download metadata */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["AssetDownloadInfo"];
-                        };
-                    };
-                };
-                /** @description Task, asset, or version not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/tasks/{id}/asset-center/upload-sessions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Create upload session
-         * @deprecated
-         * @description Compatibility-only alias for `POST /v1/assets/upload-sessions`. Use the top-level asset session route for new frontend work.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["CreateTaskAssetUploadSessionRequest"];
-                };
-            };
-            responses: {
-                /** @description Upload session created */
-                201: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["CreateTaskAssetUploadSessionResponseData"];
-                        };
-                    };
-                };
-                /** @description Invalid request payload */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description `PERMISSION_DENIED` with task-action `deny_code` details when the actor is outside the allowed org scope. */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Task or asset not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/tasks/{id}/asset-center/upload-sessions/small": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Create small-file upload session
-         * @deprecated
-         * @description Compatibility-only alias for `POST /v1/assets/upload-sessions`. Use the top-level asset session route for new frontend work.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["CreateTaskAssetUploadSessionRequest"];
-                };
-            };
-            responses: {
-                /** @description Upload session created */
-                201: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["CreateTaskAssetUploadSessionResponseData"];
-                        };
-                    };
-                };
-                /** @description Invalid request payload */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description `PERMISSION_DENIED` with task-action `deny_code` details when the actor is outside the allowed org scope. */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Task or asset not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/tasks/{id}/asset-center/upload-sessions/multipart": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Create multipart upload session
-         * @deprecated
-         * @description Compatibility-only alias for `POST /v1/assets/upload-sessions`. Use the top-level asset session route for new frontend work.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["CreateTaskAssetUploadSessionRequest"];
-                };
-            };
-            responses: {
-                /** @description Multipart upload session created */
-                201: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["CreateTaskAssetUploadSessionResponseData"];
-                        };
-                    };
-                };
-                /** @description Invalid request payload */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description `PERMISSION_DENIED` with task-action `deny_code` details when the actor is outside the allowed org scope. */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Task or asset not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/tasks/{id}/asset-center/upload-sessions/{session_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get upload session status
-         * @deprecated
-         * @description Compatibility-only alias for `GET /v1/assets/upload-sessions/{session_id}`. Returns the MAIN-side upload-session business view. Completed and Archived tasks require reopen because the read may synchronize remote session state transactionally.
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                    session_id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Upload session */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["UploadSession"];
-                        };
-                    };
-                };
-                /** @description Task or upload session not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Task is Completed/Archived and requires reopen */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/tasks/{id}/asset-center/upload-sessions/{session_id}/complete": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Complete upload session and record asset version
-         * @deprecated
-         * @description Compatibility-only alias for `POST /v1/assets/upload-sessions/{session_id}/complete`.
-         *     For multi-SKU batch delivery submissions, whole-task status does not advance on the first successful bucket.
-         *     Workflow state never advances from upload completion; submit-design performs the atomic transition to `PendingAudit`.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                    session_id: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["CompleteTaskAssetUploadSessionRequest"];
-                };
-            };
-            responses: {
-                /** @description Upload session completed and asset version recorded */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["CompleteTaskAssetUploadSessionResponseData"];
-                        };
-                    };
-                };
-                /** @description Invalid request payload */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description `PERMISSION_DENIED` with task-action `deny_code` details when the actor is outside the allowed org scope. */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Task or upload session not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Upload session already terminal, asset type mismatch, or Completed task requires reopen */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/tasks/{id}/asset-center/upload-sessions/{session_id}/cancel": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Cancel upload session
-         * @deprecated
-         * @description Compatibility-only alias for `POST /v1/assets/upload-sessions/{session_id}/cancel`. Cancels the MAIN business session and aborts the remote OSS upload session when needed.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                    session_id: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["CancelTaskAssetUploadSessionRequest"];
-                };
-            };
-            responses: {
-                /** @description Upload session cancelled */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["UploadSession"];
-                        };
-                    };
-                };
-                /** @description Invalid request payload */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description `PERMISSION_DENIED` with task-action `deny_code` details when the actor is outside the allowed org scope. */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Task or upload session not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Upload session is terminal, or the task is Completed and requires reopen */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/tasks/{id}/asset-center/upload-sessions/{session_id}/abort": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Abort upload session
-         * @deprecated
-         * @description Compatibility-only alias for `POST /v1/assets/upload-sessions/{session_id}/cancel`. Obsolete for frontend rollout.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                    session_id: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["CancelTaskAssetUploadSessionRequest"];
-                };
-            };
-            responses: {
-                /** @description Upload session aborted */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["UploadSession"];
-                        };
-                    };
-                };
-                /** @description Invalid request payload */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description `PERMISSION_DENIED` with task-action `deny_code` details when the actor is outside the allowed org scope. */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Task or upload session not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Upload session is terminal, or the task is Completed and requires reopen */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/tasks/{id}/assets/mock-upload": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Mock upload task asset
-         * @description Creates a `task_assets` record without changing task status. Intended for prototype reference or attachment areas. This route can optionally bind a placeholder `upload_request_id` and emit structured `storage_ref` metadata, but it remains mock or placeholder only and is not a stable real-upload contract.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["MockUploadTaskAssetRequest"];
-                };
-            };
-            responses: {
-                /** @description Task asset created */
-                201: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["TaskAsset"];
-                        };
-                    };
-                };
-                /** @description Invalid request */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Task not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/assets/files/{path}": {
         parameters: {
             query?: never;
@@ -9496,226 +6258,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/assets/upload-requests": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List asset upload requests
-         * @description Internal placeholder management view for upload requests. Supports paginated filtering by
-         *     owner boundary, task-asset type, and lifecycle status so upload/storage placeholder records
-         *     can be inspected without introducing a real upload allocator, signed-URL session, or object
-         *     storage/NAS integration.
-         */
-        get: {
-            parameters: {
-                query?: {
-                    owner_type?: components["schemas"]["AssetOwnerType"];
-                    owner_id?: number;
-                    task_asset_type?: "reference" | "source" | "delivery" | "preview" | "design_thumb";
-                    status?: components["schemas"]["UploadRequestStatus"];
-                    page?: number;
-                    page_size?: number;
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Paginated upload requests */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["UploadRequest"][];
-                            pagination?: components["schemas"]["PaginationMeta"];
-                        };
-                    };
-                };
-                /** @description Invalid filter values */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        put?: never;
-        /**
-         * Create asset upload request
-         * @description Internal placeholder upload-intent boundary for task assets. This endpoint does not upload file bytes,
-         *     does not return signed URLs, and does not connect to NAS/object storage. It only records one placeholder
-         *     upload request that later task-asset write actions may bind into a `storage_ref`. Shared
-         *     `adapter_mode`, `dispatch_mode`, `storage_mode`, `adapter_ref_summary`, and
-         *     `handoff_ref_summary` fields keep storage and upload language aligned with export and integration.
-         *     Lifecycle advancement remains a separate internal placeholder route.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["CreateUploadRequestRequest"];
-                };
-            };
-            responses: {
-                /** @description Upload request created */
-                201: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["UploadRequest"];
-                        };
-                    };
-                };
-                /** @description Invalid request payload or unsupported owner boundary */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Owner not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/assets/upload-requests/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get asset upload request
-         * @description Returns one persisted placeholder upload request. `can_bind`, `can_cancel`, and `can_expire` expose internal placeholder lifecycle readiness while the payload remains storage and upload metadata only.
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Upload request */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["UploadRequest"];
-                        };
-                    };
-                };
-                /** @description Upload request not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/assets/upload-requests/{id}/advance": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Advance asset upload request
-         * @description Internal placeholder lifecycle action for upload requests. Supports `cancel` and `expire`
-         *     while keeping `bound` reserved for later task-asset binding. This endpoint does not upload bytes,
-         *     does not allocate storage, and does not replace task-asset writes as the actual binding path.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["AdvanceUploadRequestRequest"];
-                };
-            };
-            responses: {
-                /** @description Upload request advanced */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["UploadRequest"];
-                        };
-                    };
-                };
-                /** @description Invalid request payload or invalid upload-request lifecycle transition */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Upload request not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/task-board/overview": {
         parameters: {
             query?: never;
@@ -9727,9 +6269,9 @@ export interface paths {
          * Get the main operations dashboard overview
          * @description Returns an uncached, database-aggregated snapshot for the main operations dashboard.
          *     All counts use the globally visible main task-flow scope. Calendar-day and current-week
-         *     boundaries use `Asia/Shanghai`. Completion counts and duration prefer explicit
-         *     `task.closed` or terminal retouch `task.design.submitted` events; legacy completed tasks
-         *     without a completion event use `updated_at` only as an explicitly measured fallback.
+         *     boundaries use `Asia/Shanghai`. Completion counts and duration prefer the explicit
+         *     `task.closed` event; completed records without that event use `updated_at` only as an
+         *     explicitly measured fallback.
          *     The response always contains seven trend days and all five mutually exclusive status buckets.
          */
         get: {
@@ -9757,290 +6299,12 @@ export interface paths {
                     };
                     content?: never;
                 };
-                /** @description Caller is not a task-facing authenticated role */
+                /** @description Caller lacks `task.view` or is outside the effective task scope */
                 403: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content?: never;
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/task-board/summary": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get task-board queue summary
-         * @description Frontend-ready aggregate entry for role-based workbenches. Returns preset queues with queue identifiers, queue conditions, counts, sample tasks, `normalized_filters`, `/v1/tasks`-ready `query_template` metadata, and lightweight ownership-hint fields built on top of projected `workflow`, task-item `product_selection` summary, and `procurement_summary.coordination_status`. Queue aggregation uses a shared board-level candidate pool and preserves the stable external queue contract. Ownership hints are advisory only and do not introduce enforced queue ownership persistence.
-         */
-        get: {
-            parameters: {
-                query?: {
-                    /** @description Restricts the response to one role-oriented board. Defaults to `all`. */
-                    board_view?: components["schemas"]["TaskBoardView"];
-                    /** @description When present, returns only one preset queue inside the board summary. */
-                    queue_key?: string;
-                    keyword?: string;
-                    /** @description Applies the same task-list filter semantics as `/v1/tasks`. Supports comma-separated multi-value queries. */
-                    task_type?: ("original_product_development" | "new_product_development" | "retouch_task" | "sku_planning")[];
-                    /** @description Applies the same task-list filter semantics as `/v1/tasks`. Supports comma-separated multi-value queries. */
-                    source_mode?: ("existing_product" | "new_product")[];
-                    /** @description Applies the same task-list filter semantics as `/v1/tasks`. Supports comma-separated multi-value queries. */
-                    status?: string[];
-                    /** @description Applies the same task-list filter semantics as `/v1/tasks`. Supports comma-separated multi-value queries. */
-                    main_status?: components["schemas"]["TaskMainStatus"][];
-                    /** @description Applies the same task-list filter semantics as `/v1/tasks`. Supports comma-separated multi-value queries. */
-                    sub_status_code?: components["schemas"]["TaskSubStatusCode"][];
-                    /** @description Applies the same task-list filter semantics as `/v1/tasks`. */
-                    sub_status_scope?: components["schemas"]["TaskSubStatusScope"];
-                    /** @description Applies the same task-list filter semantics as `/v1/tasks`. Supports comma-separated multi-value queries. */
-                    coordination_status?: components["schemas"]["ProcurementCoordinationStatus"][];
-                    creator_id?: number;
-                    designer_id?: number;
-                    need_outsource?: boolean;
-                    overdue?: boolean;
-                    warehouse_prepare_ready?: boolean;
-                    warehouse_receive_ready?: boolean;
-                    /** @description Applies the same task-list filter semantics as `/v1/tasks`. Supports comma-separated multi-value queries. */
-                    warehouse_blocking_reason_code?: string[];
-                    /** @description Number of sample tasks per queue. Defaults to `3`, max `10`. */
-                    preview_size?: number;
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Task-board queue summary */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["TaskBoardSummaryResponse"];
-                    };
-                };
-                /** @description Invalid board query */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/task-board/queues": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get task-board queue tasks
-         * @description Frontend-ready aggregate queue endpoint. Returns preset queues with queue conditions, total counts, paginated task lists, `normalized_filters`, `/v1/tasks`-ready `query_template` metadata, and lightweight ownership-hint fields so workbenches can render inbox or task-board columns directly and drill into list view without rebuilding queue logic. Task items in these queues carry the same `product_selection` summary used by `/v1/tasks`, while detail endpoints keep the full provenance object. Queue aggregation uses a shared board-level candidate pool and preserves the stable external queue contract. Ownership hints are advisory only and do not introduce enforced queue ownership persistence.
-         */
-        get: {
-            parameters: {
-                query?: {
-                    /** @description Restricts the response to one role-oriented board. Defaults to `all`. */
-                    board_view?: components["schemas"]["TaskBoardView"];
-                    /** @description When present, returns only one preset queue. */
-                    queue_key?: string;
-                    keyword?: string;
-                    /** @description Applies the same task-list filter semantics as `/v1/tasks`. Supports comma-separated multi-value queries. */
-                    task_type?: ("original_product_development" | "new_product_development" | "retouch_task" | "sku_planning")[];
-                    /** @description Applies the same task-list filter semantics as `/v1/tasks`. Supports comma-separated multi-value queries. */
-                    source_mode?: ("existing_product" | "new_product")[];
-                    /** @description Applies the same task-list filter semantics as `/v1/tasks`. Supports comma-separated multi-value queries. */
-                    status?: string[];
-                    /** @description Applies the same task-list filter semantics as `/v1/tasks`. Supports comma-separated multi-value queries. */
-                    main_status?: components["schemas"]["TaskMainStatus"][];
-                    /** @description Applies the same task-list filter semantics as `/v1/tasks`. Supports comma-separated multi-value queries. */
-                    sub_status_code?: components["schemas"]["TaskSubStatusCode"][];
-                    /** @description Applies the same task-list filter semantics as `/v1/tasks`. */
-                    sub_status_scope?: components["schemas"]["TaskSubStatusScope"];
-                    /** @description Applies the same task-list filter semantics as `/v1/tasks`. Supports comma-separated multi-value queries. */
-                    coordination_status?: components["schemas"]["ProcurementCoordinationStatus"][];
-                    creator_id?: number;
-                    designer_id?: number;
-                    need_outsource?: boolean;
-                    overdue?: boolean;
-                    warehouse_prepare_ready?: boolean;
-                    warehouse_receive_ready?: boolean;
-                    /** @description Applies the same task-list filter semantics as `/v1/tasks`. Supports comma-separated multi-value queries. */
-                    warehouse_blocking_reason_code?: string[];
-                    page?: number;
-                    page_size?: number;
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Task-board queue tasks */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["TaskBoardQueuesAPIResponse"];
-                    };
-                };
-                /** @description Invalid board query */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/workbench/preferences": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get saved workbench preferences
-         * @description Returns user-scoped saved workbench preferences plus frontend bootstrap config for preset queues. This frontend-ready route now requires a bearer session.
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Workbench preferences and config */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["WorkbenchPreferencesResponse"];
-                    };
-                };
-                /** @description Session-backed user required */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        /**
-         * Save workbench preferences
-         * @description Saves lightweight workbench preferences for the current session-backed user. This persists queue/default-filter/page-size/sort hints only and does not introduce full inbox ownership persistence.
-         */
-        patch: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["WorkbenchPreferencesPatch"];
-                };
-            };
-            responses: {
-                /** @description Updated workbench preferences and config */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["WorkbenchPreferencesResponse"];
-                    };
-                };
-                /** @description Invalid preference payload */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Session-backed user required */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        trace?: never;
-    };
-    "/v1/export-templates": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List export templates
-         * @description Returns the static export-template catalog for the current export-center skeleton. These templates only describe placeholder export intent over stable read models; they do not imply a real template engine or file-generation pipeline.
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Export template catalog */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ExportTemplateListResponse"];
-                    };
                 };
             };
         };
@@ -10110,1223 +6374,6 @@ export interface paths {
                 };
                 /** @description Event application or OSS queueing failed */
                 500: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/integration/connectors": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List integration connectors
-         * @description Returns the static connector catalog for the current integration-center boundary. Most connectors remain placeholder-only. `erp_bridge_product_upsert` represents the narrow task business-info filing trace.
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Integration connector catalog */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["IntegrationConnectorListResponse"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/integration/call-logs": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List integration call logs
-         * @description Returns internal integration call logs plus latest execution summaries for troubleshooting. The payload exposes `retry_count`, `replay_count`, latest retry or replay action summaries, and separate retryability or replayability reasons so retry and replay remain distinguishable on the same execution boundary. This route also serves narrow ERP filing traces; admins can filter task filing traces with `connector_key=erp_bridge_product_upsert` and `resource_type=task_erp_filing`.
-         */
-        get: {
-            parameters: {
-                query?: {
-                    connector_key?: components["schemas"]["IntegrationConnectorKey"];
-                    status?: components["schemas"]["IntegrationCallStatus"];
-                    resource_type?: string;
-                    resource_id?: number;
-                    page?: number;
-                    page_size?: number;
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Integration call log list */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["IntegrationCallLogListResponse"];
-                    };
-                };
-                /** @description Invalid integration call log query */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        put?: never;
-        /**
-         * Create integration call log
-         * @description Persists one internal integration call log as the business/request envelope above later execution attempts. This is still mainly a placeholder/internal troubleshooting surface; it does not provide a general ERP executor, retry queue, or callback platform.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["CreateIntegrationCallLogRequest"];
-                };
-            };
-            responses: {
-                /** @description Integration call log created */
-                201: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["IntegrationCallLogResponse"];
-                    };
-                };
-                /** @description Invalid integration call log payload */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/integration/call-logs/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get integration call log
-         * @description Returns one internal integration call log record with request/response payload snapshots, layered lifecycle timestamps, latest execution summary, separate retry/replay admission hints, latest retry/replay action summaries, and shared adapter/handoff summaries. This remains an internal trace surface, not a general integration execution platform.
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Integration call log */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["IntegrationCallLogResponse"];
-                    };
-                };
-                /** @description Integration call log not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/integration/call-logs/{id}/executions": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List integration executions
-         * @description Internal or admin placeholder execution inspection route. Returns execution attempts beneath one call log so request-envelope lifecycle and execution lifecycle stay visibly separate. Each execution record includes the shared adapter and handoff summaries used in export and storage. This is not a real external worker timeline, callback stream, or retry queue.
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Integration execution history */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["IntegrationExecutionListResponse"];
-                    };
-                };
-                /** @description Integration call log not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        put?: never;
-        /**
-         * Create integration execution
-         * @description Internal/admin placeholder execution-start boundary beneath one call log. This formalizes a manual execution attempt without introducing a real ERP/HTTP/SDK executor, callback processor, or async platform.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["CreateIntegrationExecutionRequest"];
-                };
-            };
-            responses: {
-                /** @description Integration execution created */
-                201: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["IntegrationExecutionResponse"];
-                    };
-                };
-                /** @description Invalid integration execution payload or invalid call-log state */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Integration call log not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/integration/call-logs/{id}/retry": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Retry integration call log
-         * @description Internal/admin placeholder retry route. `retry` is allowed only when the latest visible outcome is a retryable failed execution and creates a new execution attempt beneath the same call log. It does not introduce a real retry scheduler, queue, callback, or external executor.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["IntegrationExecutionActionRequest"];
-                };
-            };
-            responses: {
-                /** @description Integration call log retried */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["IntegrationCallLogResponse"];
-                    };
-                };
-                /** @description Invalid integration retry payload or invalid call-log state */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Integration call log not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/integration/call-logs/{id}/replay": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Replay integration call log
-         * @description Internal or admin placeholder replay route. `replay` re-drives the existing call-log envelope through a new execution attempt for troubleshooting or controlled redelivery semantics, including previously succeeded or cancelled logs. This is not a real external replay engine.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["IntegrationExecutionActionRequest"];
-                };
-            };
-            responses: {
-                /** @description Integration call log replayed */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["IntegrationCallLogResponse"];
-                    };
-                };
-                /** @description Invalid integration replay payload or invalid call-log state */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Integration call log not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/integration/call-logs/{id}/executions/{execution_id}/advance": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Advance integration execution
-         * @description Internal/admin placeholder execution-state advancement route. This advances one persisted execution through `prepared|dispatched|received|completed|failed|cancelled` while synchronizing the parent call-log lifecycle summary. It still does not introduce a real external executor, callback processor, or retry scheduler.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                    execution_id: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["AdvanceIntegrationExecutionRequest"];
-                };
-            };
-            responses: {
-                /** @description Integration execution advanced */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["IntegrationExecutionResponse"];
-                    };
-                };
-                /** @description Invalid integration execution payload or transition */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Integration execution not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/integration/call-logs/{id}/advance": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Advance integration call log
-         * @description Backward-compatible internal or admin call-log lifecycle advancement route. `queued` requeues the parent call log directly, while `sent`, `succeeded`, `failed`, and `cancelled` reuse the explicit execution boundary so call-log lifecycle and execution lifecycle remain layered. This route does not introduce a real integration worker, callback, or retry engine. It is compatibility-only and should not be treated as the preferred execution API.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["AdvanceIntegrationCallLogRequest"];
-                };
-            };
-            responses: {
-                /** @description Integration call log advanced */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["IntegrationCallLogResponse"];
-                    };
-                };
-                /** @description Invalid integration call log payload or transition */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Integration call log not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/export-jobs": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List export jobs
-         * @description Returns persisted export jobs for the current export-center skeleton. List items expose lifecycle read fields such as `progress_hint`, `latest_status_at`, `download_ready`, `can_start`, `can_attempt`, `can_retry`, `can_dispatch`, `can_redispatch`, admission reason fields (`can_*_reason`, `dispatchability_reason`, `attemptability_reason`, `latest_admission_decision`), `start_mode`, `execution_mode`, `adapter_mode`, `dispatch_mode`, `storage_mode`, `delivery_mode`, `execution_boundary`, `storage_boundary`, `delivery_boundary`, `is_expired`, and `can_refresh`, plus shared `adapter_ref_summary`, `resource_ref_summary`, and `handoff_ref_summary`, placeholder dispatch visibility through `dispatch_count` and `latest_dispatch`, placeholder execution-attempt visibility through `attempt_count` and `latest_attempt`, and lightweight audit summaries through `event_count`, `latest_event`, `latest_dispatch_event`, and `latest_runner_event`. `result_ref` remains placeholder handoff metadata only.
-         */
-        get: {
-            parameters: {
-                query?: {
-                    status?: components["schemas"]["ExportJobStatus"];
-                    source_query_type?: components["schemas"]["ExportSourceQueryType"];
-                    requested_by_id?: number;
-                    page?: number;
-                    page_size?: number;
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Export job list */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ExportJobListResponse"];
-                    };
-                };
-                /** @description Invalid export job query */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        put?: never;
-        /**
-         * Create export job
-         * @description Persists a minimal export job over an existing stable read model. This endpoint does not generate a real file yet; it only records export intent, source filters, initial `queued` status, and structured placeholder download-handoff metadata in `result_ref`. For task-query-derived exports, frontend should pass the current `query_template` and can optionally include `normalized_filters` from task-board handoff payloads.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["CreateExportJobRequest"];
-                };
-            };
-            responses: {
-                /** @description Export job created */
-                201: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ExportJobResponse"];
-                    };
-                };
-                /** @description Invalid export job payload */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/export-jobs/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get export job
-         * @description Returns one persisted export job skeleton with full placeholder download-handoff metadata plus lightweight lifecycle-audit summaries. Detail payloads also expose `can_start`, `can_attempt`, `can_retry`, `can_dispatch`, `can_redispatch`, admission reason fields (`can_*_reason`, `dispatchability_reason`, `attemptability_reason`, `latest_admission_decision`), `start_mode`, `execution_mode`, `adapter_mode`, `dispatch_mode`, `storage_mode`, `delivery_mode`, `adapter_ref_summary`, `resource_ref_summary`, `handoff_ref_summary`, `execution_boundary`, `storage_boundary`, `delivery_boundary`, `dispatch_count`, `latest_dispatch`, `attempt_count`, `latest_attempt`, `latest_dispatch_event`, `latest_runner_event`, `is_expired`, and `can_refresh` so frontend or internal tools can distinguish export-job lifecycle from dispatch handoff state, placeholder execution-attempt state, placeholder storage representation, and placeholder delivery handoff state. `result_ref` is not a real file location, signed URL, or storage integration.
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Export job */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ExportJobResponse"];
-                    };
-                };
-                /** @description Export job not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/export-jobs/{id}/dispatches": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List export job dispatches
-         * @description Internal/admin placeholder adapter-dispatch inspection route for export jobs. This endpoint
-         *     returns persisted dispatch handoff records such as trigger source, adapter key, submitted /
-         *     received / rejected / expired / not-executed status, additive dispatch-level start-admission
-         *     hints (`start_admissible`, `start_admission_reason`), and placeholder notes so the dispatch
-         *     boundary is explicit without pretending a real scheduler queue or worker platform exists.
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Export job dispatch history */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ExportJobDispatchListResponse"];
-                    };
-                };
-                /** @description Export job not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        put?: never;
-        /**
-         * Submit export job dispatch
-         * @description Internal/admin placeholder adapter-dispatch submit boundary for queued export jobs. This
-         *     route persists one explicit dispatch handoff and appends `export_job.dispatch_submitted`
-         *     audit context without creating a real scheduler queue item, worker lease, or background
-         *     execution. Submission admission is now explicitly surfaced on export-job read models through
-         *     `can_dispatch` and `can_dispatch_reason`; only one unresolved submitted/received dispatch is
-         *     allowed at a time.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["CreateExportJobDispatchRequest"];
-                };
-            };
-            responses: {
-                /** @description Export job dispatch submitted */
-                201: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["ExportJobDispatch"];
-                        };
-                    };
-                };
-                /** @description Invalid dispatch payload or invalid dispatch state */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Export job not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Export job is not in a dispatchable queued state */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/export-jobs/{id}/dispatches/{dispatch_id}/advance": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Advance export job dispatch
-         * @description Internal/admin placeholder dispatch-state advancement route. This endpoint advances one
-         *     persisted dispatch handoff to `received`, `rejected`, `expired`, or `not_executed` without
-         *     introducing a real scheduler callback or worker lifecycle. Dispatch state stays separate
-         *     from both export-job lifecycle and execution-attempt lifecycle.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                    dispatch_id: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["AdvanceExportJobDispatchRequest"];
-                };
-            };
-            responses: {
-                /** @description Export job dispatch advanced */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["ExportJobDispatch"];
-                        };
-                    };
-                };
-                /** @description Invalid dispatch payload or invalid dispatch transition */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Export job or dispatch not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Export job dispatch is not in an advanceable placeholder state */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/export-jobs/{id}/attempts": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List export job attempts
-         * @description Internal/admin placeholder execution-attempt inspection route for export jobs. This endpoint
-         *     returns persisted attempt records such as trigger source, execution mode, adapter key, and
-         *     terminal attempt status, plus additive attempt-level admission hints (`blocks_new_attempt`,
-         *     `next_attempt_admission_reason`) so current placeholder runner-adapter boundary behavior is
-         *     visible without pretending a real scheduler, worker lease, or distributed runner platform exists.
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Export job attempt history */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ExportJobAttemptListResponse"];
-                    };
-                };
-                /** @description Export job not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/export-jobs/{id}/events": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List export job events
-         * @description Returns the export-job lifecycle audit timeline ordered oldest to newest. Event payload is audit context only and must not be interpreted as a full runner log stream or proof of real file generation/download delivery.
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Export job lifecycle audit timeline */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ExportJobEventListResponse"];
-                    };
-                };
-                /** @description Export job not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/export-jobs/{id}/claim-download": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Claim export job download handoff
-         * @description Claims placeholder download handoff for a ready export job. This does not start a real file
-         *     transfer and does not return file bytes; it records a handoff-claim audit event and returns
-         *     structured placeholder handoff metadata for frontend consumption. This action is allowed only
-         *     when the export job is `ready` and the current placeholder handoff is not expired. Expired
-         *     ready handoff returns a placeholder-expired invalid-state response and requires refresh.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Placeholder download handoff claimed */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ExportJobDownloadHandoffResponse"];
-                    };
-                };
-                /** @description Export job not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Export job is not in a claimable placeholder-download state, including expired ready handoff */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/export-jobs/{id}/download": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Read export job download handoff
-         * @description Reads structured placeholder download handoff metadata for a ready export job. This endpoint
-         *     is the current read boundary only: it does not return real file bytes, signed URLs, NAS paths,
-         *     or object-storage references. A `download_read` audit event is appended to the existing export-job
-         *     event chain each time this handoff metadata is read. This action is allowed only when the export
-         *     job is `ready` and the current placeholder handoff is not expired. Expired ready handoff requires refresh.
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Placeholder download handoff metadata */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ExportJobDownloadHandoffResponse"];
-                    };
-                };
-                /** @description Export job not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Export job is not in a readable placeholder-download state, including expired ready handoff */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/export-jobs/{id}/refresh-download": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Refresh export job download handoff
-         * @description Refreshes expired placeholder download handoff for a ready export job. Refresh rotates the
-         *     placeholder `result_ref.ref_key`, extends `expires_at`, appends `result_ref_updated` and
-         *     `download_refreshed` audit events, and returns refreshed handoff metadata. This endpoint is
-         *     placeholder-only and does not mint signed URLs, return file bytes, re-run export generation,
-         *     or connect to NAS/object storage.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Placeholder download handoff refreshed */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ExportJobDownloadHandoffResponse"];
-                    };
-                };
-                /** @description Export job not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Export job is not in a refreshable placeholder-download state */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/export-jobs/{id}/start": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Start export job placeholder runner
-         * @description Internal/admin placeholder runner-initiation boundary for export jobs. This route formalizes
-         *     the `queued -> running` start contract without introducing a real async runner, scheduler,
-         *     file generator, NAS integration, or object storage. It is allowed only when the current export
-         *     job status is `queued`, and a latest `submitted` dispatch blocks start until it is received
-         *     or otherwise resolved. Admission reasons are exposed through `can_start_reason` and
-         *     `can_attempt_reason`. Successful start creates or consumes one placeholder dispatch handoff:
-         *     if latest dispatch is `received`, start consumes it; if no startable dispatch exists, start
-         *     may auto-create one placeholder submitted and received dispatch when no startable dispatch exists
-         *     before creating the new attempt. This remains a skeleton only and does not imply a real
-         *     scheduler or asynchronous dispatch platform.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Export job placeholder runner initiated */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ExportJobResponse"];
-                    };
-                };
-                /** @description Export job not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Export job is not in a startable queued state */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/export-jobs/{id}/advance": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Advance export job lifecycle
-         * @description Internal or admin skeleton endpoint for manually advancing export-job lifecycle state. This endpoint updates placeholder lifecycle, execution-attempt visibility, and download-handoff metadata while writing audit-trace events. `action=start` remains available for compatibility, but `POST /v1/export-jobs/{id}/start` is the preferred explicit placeholder runner-initiation boundary.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["AdvanceExportJobRequest"];
-                };
-            };
-            responses: {
-                /** @description Export job lifecycle advanced */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ExportJobResponse"];
-                    };
-                };
-                /** @description Invalid advance payload or lifecycle transition */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Export job not found */
-                404: {
                     headers: {
                         [name: string]: unknown;
                     };
@@ -11472,775 +6519,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/code-rules/generate-sku": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * [ARCHIVED] Legacy CodeRule SKU generation
-         * @deprecated
-         * @description Archived. Legacy CodeRule new_sku generation is disabled. Use POST /v1/tasks/prepare-product-codes or task creation default product-code allocation instead.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        rule_id: number;
-                    };
-                };
-            };
-            responses: {
-                /** @description Legacy new_sku CodeRule is archived */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/sku/preview_code": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** [V6] Preview SKU code */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description ok */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/sku/list": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** [V6] List SKUs */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description ok */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["SKU"][];
-                        };
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/sku": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** [V6] Create SKU */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description ok */
-                201: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["SKU"];
-                        };
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/sku/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** [V6] Get SKU by ID */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description ok */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["SKU"];
-                        };
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/sku/{id}/sync_status": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** [V6] Frontend sequence-gap recovery */
-        get: {
-            parameters: {
-                query?: {
-                    since_sequence?: number;
-                };
-                header?: never;
-                path: {
-                    id: number;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description ok */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["SKUSyncStatusResult"];
-                        };
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/agent/sync": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** [V6] NAS agent sync */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description ok */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["AgentSyncResult"];
-                        };
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/agent/pull_job": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** [V6] Agent pull job */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description ok */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["PullJobResult"];
-                        };
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/agent/heartbeat": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** [V6] Agent heartbeat */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description ok */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["HeartbeatResult"];
-                        };
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/agent/ack_job": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** [V6] Agent ack job */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description ok */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/incidents": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** [V6] List incidents */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description ok */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["Incident"][];
-                        };
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/incidents/{id}/assign": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** [V6] Assign incident */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        assignee_id: number;
-                        reason: string;
-                    };
-                };
-            };
-            responses: {
-                /** @description ok */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/incidents/{id}/resolve": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** [V6] Resolve incident */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        reason: string;
-                    };
-                };
-            };
-            responses: {
-                /** @description ok */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/policies": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** [V6] List policies */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description ok */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["SystemPolicy"][];
-                        };
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/policies/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /** [V6] Update policy */
-        put: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": {
-                        value: string;
-                        reason: string;
-                    };
-                };
-            };
-            responses: {
-                /** @description ok */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/rule-templates": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** [V6] List rule templates */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Rule templates */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["RuleTemplate"][];
-                        };
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/rule-templates/{type}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * [V6] Get rule template by type
-         * @description Compatibility endpoint. `type=cost-pricing` is deprecated; product cost governance uses `/v1/cost-rule-bindings` and `/v1/cost-rules` instead.
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    type: "cost-pricing" | "product-code" | "short-name";
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Rule template */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["RuleTemplate"];
-                        };
-                    };
-                };
-            };
-        };
-        /**
-         * [V6] Upsert rule template by type
-         * @description Compatibility endpoint. `type=cost-pricing` is deprecated; product cost governance uses `/v1/cost-rule-bindings` and `/v1/cost-rules` instead.
-         */
-        put: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    type: "cost-pricing" | "product-code" | "short-name";
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": string;
-                };
-            };
-            responses: {
-                /** @description Rule template */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["RuleTemplate"];
-                        };
-                    };
-                };
-            };
-        };
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/tasks/pool": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List task pool entries
-         * @description Lists R3 module-pool entries generated from `task_modules` rows in `pending_claim` state.
-         *     This is a module claim pool, not the generic assignment/unassigned task list; use
-         *     `GET /v1/tasks` filters for `PendingAssign` / unassigned-pool task assignment views.
-         *     Response `data` is always an array; empty pools return `[]`.
-         */
-        get: {
-            parameters: {
-                query?: {
-                    module_key?: string;
-                    pool_team_code?: string;
-                    page?: number;
-                    page_size?: number;
-                    /** @description Compatibility offset-pagination size. Prefer `page_size`. */
-                    limit?: number;
-                    /** @description Compatibility offset. Prefer `page`. */
-                    offset?: number;
-                    sort?: "created_at" | "-created_at" | "updated_at" | "-updated_at";
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description ok */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data: {
-                                /** Format: int64 */
-                                task_id: number;
-                                module_key: string;
-                                pool_team_code: string;
-                                priority: string;
-                                /** Format: date-time */
-                                created_at: string;
-                                /** Format: date-time */
-                                updated_at: string;
-                                task_type: string;
-                                task_no: string;
-                                title: string;
-                                product_code: string;
-                            }[];
-                            pagination: components["schemas"]["PaginationMeta"];
-                        };
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/tasks/{id}/modules/{module_key}/claim": {
         parameters: {
             query?: never;
@@ -12250,7 +6528,10 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Claim a task module */
+        /**
+         * Claim a task module
+         * @description Requires `task.upload_source` for design-side modules or `task.audit` for the audit module; the service validates stable task scope and current state.
+         */
         post: {
             parameters: {
                 query?: never;
@@ -12298,11 +6579,11 @@ export interface paths {
         put?: never;
         /**
          * Trigger a task module action
-         * @description Requires one of the code-owned capabilities `task.design.submit`, `task.audit.decision`,
-         *     or `task.manage`; the service then applies the exact module/state/scope rule. For a
-         *     customization `submit`, the caller must have `task.design.submit` in the task's stable
-         *     organization scope. The action marks the internal customization job `ready_for_submit`
-         *     but does not advance the main task; only `/submit-design` can enter `PendingAudit`.
+         * @description This endpoint only accepts `submit` for the current customization or retouch internal
+         *     node. The caller must be the current module handler and have `task.upload_source` in
+         *     the task's stable organization scope. Customization submission marks the internal job
+         *     `ready_for_submit` without advancing the main task; only `/submit-design` can enter
+         *     `PendingAudit`.
          */
         post: {
             parameters: {
@@ -12359,98 +6640,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/tasks/{id}/modules/{module_key}/reassign": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Reassign a task module within team scope */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                    module_key: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Reassign accepted */
-                202: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Reassign denied */
-                "4XX": {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/tasks/{id}/modules/{module_key}/pool-reassign": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Reassign a task module between pools */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                    module_key: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Pool reassign accepted */
-                202: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Pool reassign denied */
-                "4XX": {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/tasks/{id}/cancel": {
         parameters: {
             query?: never;
@@ -12460,7 +6649,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Cancel or close a task */
+        /** Cancel a task */
         post: {
             parameters: {
                 query?: never;
@@ -13070,327 +7259,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/assets/search": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Search assets across tasks
-         * @description Cross-task asset search for the asset management center. Source V1_ASSET_OWNERSHIP §5.2 / §5.3.
-         */
-        get: {
-            parameters: {
-                query?: {
-                    /** @description Fuzzy match system asset fields and indexed external resource paths/names. */
-                    keyword?: string;
-                    /** @description Resource source bucket. `all` returns system + external; external resources are read-only and prepared for preview/download on demand. */
-                    source?: "all" | "system" | "external";
-                    /** @description Business origin filter for system task-owned assets. UI labels this as the asset production stage, e.g. `design` = 设计提交, `audit` = 常规审核修订, `customization` = 定制链路上传, `basic_info` = 基础信息参考, `retouch` = 精修需求素材. External resources are excluded when this filter is set. */
-                    module_key?: "basic_info" | "design" | "audit" | "warehouse" | "customization" | "procurement" | "retouch";
-                    /** @description Restrict to one owner team. */
-                    owner_team_code?: string;
-                    /** @description Archive filter. Default `false`. `all` returns active + archived. */
-                    is_archived?: "true" | "false" | "all";
-                    /** @description Task lifecycle filter. */
-                    task_status?: "open" | "closed" | "archived" | "all";
-                    /** @description System task lane filter for task-owned assets. `normal` includes legacy rows whose lane is empty; external resources are excluded when this filter is set. */
-                    business_lane?: "normal" | "customization";
-                    /** @description System asset file-type filter. Use `delivery` for product images, `reference` for reference/material images, and `source` for source files; use `module_key` to distinguish which workflow stage produced the file. External resources are excluded when this filter is set. */
-                    asset_type?: "delivery" | "reference" | "source" | "preview" | "design_thumb";
-                    /** @description Time field used by `created_from` / `created_to`. Default `asset_uploaded_at` filters by the current asset version upload/ingest time; `task_created_at` filters by the owning task creation time. */
-                    time_basis?: "asset_uploaded_at" | "task_created_at";
-                    /** @description Inclusive lower bound for the selected `time_basis`. */
-                    created_from?: string;
-                    /** @description Inclusive upper bound for the selected `time_basis`. */
-                    created_to?: string;
-                    page?: number;
-                    size?: number;
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Asset search results */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["Asset"][];
-                            total?: number;
-                            page?: number;
-                            size?: number;
-                        };
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/assets/search/batch": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Batch search assets by SKU or task number
-         * @description Batch asset search for the asset management bulk-download dialog. It returns ranked system and external resource candidates per input term and avoids issuing one HTTP request per SKU/task number.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["AssetBatchSearchRequest"];
-                };
-            };
-            responses: {
-                /** @description Batch asset search results */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["AssetBatchSearchResponse"];
-                        };
-                    };
-                };
-                /** @description Invalid request */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Authentication required */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Permission denied */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/assets/{asset_id}/versions/{version_id}/download": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Download a specific asset version
-         * @description Returns presigned download metadata for a specific historical version. Returns 410 GONE when the version has been auto-cleaned (V1_ASSET_OWNERSHIP §7.4); 404 when the asset itself is soft-deleted.
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    asset_id: number;
-                    version_id: number;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Asset version download metadata */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["AssetDownloadInfo"];
-                        };
-                    };
-                };
-                /** @description Asset deleted or not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Asset version auto-cleaned (V1_ASSET_OWNERSHIP §7.4) */
-                410: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/assets/{asset_id}/archive": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Archive an asset
-         * @description Archive asset (is_archived=1, OSS retained). SuperAdmin only; reason required. Source V1_ASSET_OWNERSHIP §7.3.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    asset_id: number;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["AssetReasonRequest"];
-                };
-            };
-            responses: {
-                /** @description Asset archive accepted */
-                202: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Not SuperAdmin */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Asset not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/assets/{asset_id}/restore": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Restore an archived asset
-         * @description Un-archive asset (is_archived=0). SuperAdmin only. Source V1_ASSET_OWNERSHIP §7.3.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    asset_id: number;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Asset restore accepted */
-                202: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Not SuperAdmin */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Asset not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/erp/products/by-code": {
         parameters: {
             query?: never;
@@ -13524,6 +7392,116 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/ai/chat/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get the current data-assistant capability contract */
+        get: operations["getAIChatConfig"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ai/chat/conversations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List the caller's active conversations */
+        get: operations["listAIConversations"];
+        put?: never;
+        /** Create an owner-scoped conversation retained for 90 days */
+        post: operations["createAIConversation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ai/chat/conversations/{conversation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        /** Read one owner-scoped conversation and its evidence citations */
+        get: operations["getAIConversation"];
+        put?: never;
+        post?: never;
+        /** Hide a conversation immediately and hard-delete its body within 24 hours */
+        delete: operations["deleteAIConversation"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ai/chat/conversations/{conversation_id}/messages:stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stream a read-only evidence-backed answer
+         * @description Emits `meta`, `status`, `retrieval`, `delta`, `done`, and `error` SSE events with a heartbeat at least every 15 seconds.
+         *     The client_message_id is an idempotency key within the conversation. Cancellation persists any partial answer as cancelled.
+         */
+        post: operations["streamAIChatMessage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ai/chat/admin/conversations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List conversation metadata across users */
+        get: operations["adminListAIConversations"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ai/chat/admin/conversations/{conversation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Review one cross-user conversation and write a metadata-only audit event */
+        get: operations["adminGetAIConversation"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/search": {
         parameters: {
             query?: never;
@@ -13547,6 +7525,8 @@ export interface paths {
                     scope?: "all" | "tasks" | "assets" | "products" | "users";
                     /** @description Max items per result array. Default 20 (IA §4.2). */
                     limit?: number;
+                    /** @description Auto keeps identifier-like input exact and uses hybrid retrieval only for natural language. */
+                    mode?: "auto" | "exact" | "hybrid";
                 };
                 header?: never;
                 path?: never;
@@ -13563,6 +7543,7 @@ export interface paths {
                         "application/json": {
                             query: string;
                             results: components["schemas"]["SearchResultGroup"];
+                            retrieval: components["schemas"]["SearchRetrievalMeta"];
                         };
                     };
                 };
@@ -13579,1018 +7560,6 @@ export interface paths {
         };
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/predictions/search": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get global-search prediction suggestions
-         * @description Returns deterministic suggestions for the global search overlay. Empty `q` returns recent personal
-         *     workflow trace suggestions; non-empty `q` returns task / asset / product suggestions. This endpoint
-         *     uses existing OMP data only and does not call the AI provider.
-         */
-        get: {
-            parameters: {
-                query?: {
-                    /** @description Optional keyword. When omitted, returns recent personal suggestions. */
-                    q?: string;
-                    scope?: "all" | "tasks" | "assets" | "products" | "users";
-                    limit?: number;
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Prediction suggestions */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["PredictionBundleResponse"];
-                    };
-                };
-                /** @description Unauthenticated */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Forbidden */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/predictions/task-create": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get task-create form prediction suggestions
-         * @description Returns deterministic form-fill suggestions from historical task detail fields. This endpoint is
-         *     lightweight and does not call the AI provider.
-         */
-        get: {
-            parameters: {
-                query?: {
-                    /** @description Optional form context keyword. Alias `q` is also accepted by the backend. */
-                    keyword?: string;
-                    /** @description Compatibility alias for `keyword`. */
-                    q?: string;
-                    /** @description Optional task type filter. */
-                    task_type?: string;
-                    limit?: number;
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Prediction suggestions */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["PredictionBundleResponse"];
-                    };
-                };
-                /** @description Unauthenticated */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Forbidden */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/predictions/assets": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get asset-center prediction suggestions
-         * @description Returns deterministic asset suggestions sorted by asset usable state and recency. This endpoint uses
-         *     task asset records only and does not call the AI provider.
-         */
-        get: {
-            parameters: {
-                query?: {
-                    /** @description Optional keyword. Alias `keyword` is also accepted by the backend. */
-                    q?: string;
-                    /** @description Compatibility alias for `q`. */
-                    keyword?: string;
-                    limit?: number;
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Prediction suggestions */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["PredictionBundleResponse"];
-                    };
-                };
-                /** @description Unauthenticated */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Forbidden */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/predictions/management": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get management prediction suggestions
-         * @description Returns deterministic management attention points for the KPI/data-center page. This endpoint does
-         *     not call the AI provider; it aggregates tasks, task details, and task assets.
-         */
-        get: {
-            parameters: {
-                query?: {
-                    /** @description Start date, inclusive. Defaults to seven days before now. */
-                    from?: string;
-                    /** @description End date, inclusive. Defaults to now. */
-                    to?: string;
-                    limit?: number;
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Prediction suggestions */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["PredictionBundleResponse"];
-                    };
-                };
-                /** @description Invalid date range */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Unauthenticated */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Forbidden */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/experience/config": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get experience learning runtime flags
-         * @description Returns the current feature flags for the stable-first experience learning half-loop.
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Runtime flags */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data: components["schemas"]["ExperienceRuntimeFlags"];
-                        };
-                    };
-                };
-                /** @description Unauthenticated */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Forbidden */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/experience/client-config": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get client-safe experience learning flags
-         * @description Login-user-readable configuration for lightweight feedback, behavior capture, and micro-question UI. This response is a separate DTO from the SuperAdmin runtime config.
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Client-safe experience config */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data: components["schemas"]["ExperienceClientConfig"];
-                        };
-                    };
-                };
-                /** @description Unauthenticated */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/experience/reason-tags": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List client-safe experience reason tags
-         * @description Returns enabled reason tags for the client whitelist scenes only. The response omits management metadata such as severity, version, enabled, deleted_at, and timestamps.
-         */
-        get: {
-            parameters: {
-                query?: {
-                    /** @description Optional client tag scene filter. Unknown scenes return an empty list. */
-                    scene?: "ai_suggestion_feedback" | "ai_suggestion_micro_question";
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Reason tags */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data: components["schemas"]["ExperienceClientReasonTag"][];
-                        };
-                    };
-                };
-                /** @description Unauthenticated */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Forbidden */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/experience/behavior-events:batch": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Record client experience behavior events
-         * @description Best-effort side-channel capture for suggestion impressions, clicks, refreshes, and related actions. Events are idempotent by actor plus client_event_id and never block business workflows.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["ExperienceBehaviorBatchRequest"];
-                };
-            };
-            responses: {
-                /** @description Behavior batch accepted */
-                201: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data: components["schemas"]["ExperienceBehaviorBatchResult"];
-                        };
-                    };
-                };
-                /** @description Invalid request */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Unauthenticated */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Forbidden */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/experience/micro-question-eligibility": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Check whether a micro-question can be shown
-         * @description Non-consuming eligibility check for low-interruption experience micro-questions. This side-channel never mutates task, asset, ERP, audit, cost, or permission state.
-         */
-        get: {
-            parameters: {
-                query?: {
-                    /** @description Single-display suggestion id. Required for server-side suggestion lookup. */
-                    suggestion_event_id?: string;
-                    suggestion_stable_key?: string;
-                    surface?: string;
-                    target_type?: string;
-                    target_id?: string;
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Eligibility result */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data: components["schemas"]["ExperienceMicroQuestionEligibility"];
-                        };
-                    };
-                };
-                /** @description Unauthenticated */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Forbidden */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/experience/micro-question-answers": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Record a micro-question answer
-         * @description Records a side-channel answer for a low-interruption micro-question. Answers are separate from formal AI suggestion feedback and do not affect adoption-rate metrics directly.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["ExperienceMicroQuestionAnswerRequest"];
-                };
-            };
-            responses: {
-                /** @description Answer recorded or already idempotently present */
-                201: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data: components["schemas"]["ExperienceMicroQuestionAnswer"];
-                        };
-                    };
-                };
-                /** @description Invalid request or daily micro-question quota exhausted */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Unauthenticated */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Forbidden */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/reports/experience/stats": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get experience learning observation metrics
-         * @description SuperAdmin-only read model for capture success, outbox backlog, dead-letter count, tag coverage, AI feedback rate, profile generation, and asset quality labels.
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Experience observation metrics */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data: components["schemas"]["ExperienceStats"];
-                        };
-                    };
-                };
-                /** @description Unauthenticated */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Forbidden */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/reports/experience/samples": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List experience event samples
-         * @description SuperAdmin-only sample pool. The query reads `experience_events`, side-channel `ai_suggestion_events`, latest append-only feedback, and experience profile/quality side tables to derive L0-L4 evidence.
-         */
-        get: {
-            parameters: {
-                query?: {
-                    source_type?: string;
-                    source_id?: string;
-                    task_id?: number;
-                    action?: string;
-                    outcome?: string;
-                    /** @description Minimum evidence level to return. L2+ is the default frontend view for feedback and side-channel candidates. */
-                    min_evidence_level?: "L0" | "L1" | "L2" | "L3" | "L4";
-                    /** @description ISO date or RFC3339 timestamp, inclusive. */
-                    from?: string;
-                    /** @description ISO date or RFC3339 timestamp, inclusive. */
-                    to?: string;
-                    page?: number;
-                    page_size?: number;
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Experience event samples */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data: components["schemas"]["ExperienceEvent"][];
-                            pagination: components["schemas"]["PaginationMeta"];
-                        };
-                    };
-                };
-                /** @description Invalid query */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Unauthenticated */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Forbidden */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/reports/experience/review-items": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List experience attribution review items
-         * @description SuperAdmin-only review queue for side-channel attribution candidates. The queue is for diagnostic approval, rejection, or needs-more-data decisions only and never mutates core business state.
-         */
-        get: {
-            parameters: {
-                query?: {
-                    status?: "open" | "approved" | "rejected" | "needs_more_data";
-                    item_type?: "attribution_candidate";
-                    page?: number;
-                    page_size?: number;
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Review queue items */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data: components["schemas"]["ExperienceReviewItem"][];
-                            pagination: components["schemas"]["PaginationMeta"];
-                        };
-                    };
-                };
-                /** @description Unauthenticated */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Forbidden */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/reports/experience/review-items/{item_key}/decision": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Record an experience attribution review decision
-         * @description SuperAdmin-only side-channel decision for an attribution candidate. Decisions update experience review status; approved task/asset candidates may materialize side-channel L4 candidate profiles or quality labels, but never mutate task, asset, ERP, audit, cost, or permission state.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    item_key: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["ExperienceReviewDecisionRequest"];
-                };
-            };
-            responses: {
-                /** @description Review decision recorded */
-                201: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data: components["schemas"]["ExperienceReviewDecision"];
-                        };
-                    };
-                };
-                /** @description Invalid request */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Unauthenticated */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Forbidden */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Review item not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/ai-suggestions/{suggestion_event_id}/feedback": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Record AI suggestion feedback
-         * @description Records human feedback for an AI or rule suggestion into the side-channel feedback table. This endpoint never executes a business action and returns 403 when the AI feedback flag is off.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    suggestion_event_id: string;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["AISuggestionFeedbackRequest"];
-                };
-            };
-            responses: {
-                /** @description Feedback recorded */
-                201: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data: components["schemas"]["AISuggestionFeedback"];
-                        };
-                    };
-                };
-                /** @description Invalid request */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Unauthenticated */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Forbidden or experience AI feedback disabled */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
         delete?: never;
         options?: never;
         head?: never;
@@ -15451,8 +8420,8 @@ export interface paths {
         /**
          * Broadcast a notification to one, many, or all users
          * @description Creates persistent `system_broadcast` notifications for active recipients. Selected-user
-         *     broadcasts are available to Admin, SuperAdmin, HRAdmin, and DepartmentAdmin. Full-system
-         *     broadcasts are restricted to Admin, SuperAdmin, and HRAdmin.
+         *     and full-system broadcasts require the explicit high-risk `system.manage` capability.
+         *     Legacy role names do not grant this operation.
          */
         post: {
             parameters: {
@@ -15864,8 +8833,7 @@ export interface paths {
         put?: never;
         /**
          * Activate a workflow user
-         * @description Enable the target user's account. Source: V1_INFORMATION_ARCHITECTURE §5.3 / §5.4 (`is_active` field).
-         *     `TeamLead` may activate only members of own team; `DeptAdmin` only users in own department; `Admin` / `HRAdmin` / `SuperAdmin` global.
+         * @description Enables the target account. Requires `access.manage`; the target user must be inside the caller's effective stable-ID scope.
          */
         post: {
             parameters: {
@@ -15922,7 +8890,7 @@ export interface paths {
         put?: never;
         /**
          * Deactivate a workflow user
-         * @description Disable the target user's account. Scope rules identical to `activate`; self-deactivation is rejected. Source: V1_INFORMATION_ARCHITECTURE §5.3 / §5.4.
+         * @description Disables the target account. Scope rules are identical to `activate`; self-deactivation is rejected.
          */
         post: {
             parameters: {
@@ -15962,556 +8930,6 @@ export interface paths {
                 };
             };
         };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/departments/{id}/org-move-requests": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Create an org move request
-         * @description DeptAdmin in the source department initiates a cross-department user move. The request is created in state `pending_super_admin_confirm`. Source: V1_INFORMATION_ARCHITECTURE §5.2.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    /** @description Source department ID. Must match the user's current department and the caller's managed department (for DeptAdmin). */
-                    id: number;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["CreateOrgMoveRequestPayload"];
-                };
-            };
-            responses: {
-                /** @description Org move request created */
-                201: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["OrgMoveRequest"];
-                        };
-                    };
-                };
-                /** @description Validation failed */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Forbidden (caller is not DeptAdmin of source department, or the target user does not belong to the source department) */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Department or user not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/org-move-requests": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List org move requests
-         * @description Lists org-move-requests for the SuperAdmin review queue. Source: V1_INFORMATION_ARCHITECTURE §5.2.
-         */
-        get: {
-            parameters: {
-                query?: {
-                    /** @description Filter by request state. Omit to list all states. */
-                    state?: components["schemas"]["OrgMoveRequestState"];
-                    /** @description Filter by target user. */
-                    user_id?: number;
-                    /** @description Filter by source department. DeptAdmin callers are server-side forced to own managed department; this parameter is a safe filter hint and not a bypass. */
-                    source_department_id?: number;
-                    page?: number;
-                    page_size?: number;
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Org move requests */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data?: components["schemas"]["OrgMoveRequest"][];
-                            pagination?: components["schemas"]["PaginationMeta"];
-                        };
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/org-move-requests/{id}/approve": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Approve an org move request
-         * @description SuperAdmin confirms a pending org-move-request. On approval the target user's `department` / `team` are updated and audit event `user_department_changed_by_admin` is emitted. Source: V1_INFORMATION_ARCHITECTURE §5.2.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Org move request approved */
-                204: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Forbidden (caller is not SuperAdmin) */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Request not found or not in `pending_super_admin_confirm` state */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Request already decided (approved or rejected) */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/org-move-requests/{id}/reject": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Reject an org move request
-         * @description SuperAdmin rejects a pending org-move-request with a required reason. The target user remains in the source department. Source: V1_INFORMATION_ARCHITECTURE §5.2.
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    id: number;
-                };
-                cookie?: never;
-            };
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["RejectReasonRequest"];
-                };
-            };
-            responses: {
-                /** @description Org move request rejected */
-                204: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Validation failed (reason missing) */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Forbidden (caller is not SuperAdmin) */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Request not found or not in `pending_super_admin_confirm` state */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Request already decided (approved or rejected) */
-                409: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/reports/l1/cards": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get L1 report cards
-         * @description Source: V1_INFORMATION_ARCHITECTURE §1 一级菜单「报表」. Returns the top-row report cards
-         *     (task counts, throughput delta, etc.). RBAC (R1.7-D Q5=E1): super_admin only.
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Report cards */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data: components["schemas"]["L1Card"][];
-                        };
-                    };
-                };
-                /** @description Unauthenticated */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Forbidden. `deny_code=reports_super_admin_only` when the caller role is not `super_admin`. */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/reports/l1/throughput": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get L1 throughput report
-         * @description Source: V1_INFORMATION_ARCHITECTURE §1 一级菜单「报表」 + V1_MODULE_ARCHITECTURE §12.
-         *     Daily task throughput (created / completed / archived counts) within a [from, to] window.
-         *     RBAC (R1.7-D Q5=E1): super_admin only.
-         *     Backend (R1.7-D Q6=C1): v1 直查 `task_module_events` + `tasks`,不建物化表。
-         */
-        get: {
-            parameters: {
-                query: {
-                    /** @description Start of the report window (inclusive, ISO 8601 date). */
-                    from: string;
-                    /** @description End of the report window (inclusive, ISO 8601 date). */
-                    to: string;
-                    /** @description Optional filter by owning department. */
-                    department_id?: number;
-                    /** @description Optional filter by task type key. */
-                    task_type?: string;
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Throughput report */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data: {
-                                /** Format: date */
-                                date: string;
-                                created: number;
-                                completed: number;
-                                archived: number;
-                            }[];
-                        };
-                    };
-                };
-                /** @description Unauthenticated */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Forbidden. `deny_code=reports_super_admin_only`. */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/reports/l1/module-dwell": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get L1 module dwell report
-         * @description Source: V1_INFORMATION_ARCHITECTURE §1 一级菜单「报表」 + V1_MODULE_ARCHITECTURE §12.
-         *     Average and P95 dwell time per module (computed from `task_module_events`) within [from, to].
-         *     RBAC (R1.7-D Q5=E1): super_admin only.
-         */
-        get: {
-            parameters: {
-                query: {
-                    from: string;
-                    to: string;
-                    /** @description Optional filter by owning department. */
-                    department_id?: number;
-                    /** @description Optional filter by task type key. */
-                    task_type?: string;
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Module dwell report */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data: {
-                                /** @enum {string} */
-                                module_key: "task_detail" | "design" | "audit" | "customization" | "warehouse";
-                                avg_dwell_seconds: number;
-                                p95_dwell_seconds: number;
-                                /** @description Number of dwell samples used for the aggregation. */
-                                samples: number;
-                            }[];
-                        };
-                    };
-                };
-                /** @description Unauthenticated */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Forbidden. `deny_code=reports_super_admin_only`. */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/reports/l1/kpi-events": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get enriched KPI task events
-         * @description Returns task workflow events enriched with task priority, status and deadline for the KPI/data-center page.
-         *     RBAC: super_admin only. This endpoint is read-only and does not perform AI analysis.
-         */
-        get: {
-            parameters: {
-                query: {
-                    /** @description Start of the report window (inclusive, ISO 8601 date). */
-                    from: string;
-                    /** @description End of the report window (inclusive, ISO 8601 date). */
-                    to: string;
-                    /** @description Maximum number of events to return. Defaults to 2000. */
-                    limit?: number;
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Enriched KPI task events */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": {
-                            data: components["schemas"]["KPIAnalysisEvent"][];
-                        };
-                    };
-                };
-                /** @description Unauthenticated */
-                401: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-                /** @description Forbidden. `deny_code=reports_super_admin_only`. */
-                403: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ErrorResponse"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -24587,11 +17005,8 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        /**
-         * @description Current assignable business roles plus compatibility-only historical roles. `Audit_B` is a legacy regular-audit code kept only so existing accounts can keep operating during migration; new regular-audit assignment must use `Audit_A`. `Admin`, `OrgAdmin`, `RoleAdmin`, `DesignDirector`, `DesignReviewer`, `Outsource`, and `ERP` are also compatibility entries and must not be newly assigned unless a future contract explicitly reclassifies them.
-         * @enum {string}
-         */
-        V7Role: "Member" | "SuperAdmin" | "HRAdmin" | "OrgAdmin" | "RoleAdmin" | "TeamLead" | "DesignDirector" | "DesignReviewer" | "Ops" | "Designer" | "Audit_A" | "Audit_B" | "Warehouse" | "Outsource" | "ERP" | "Admin" | "DepartmentAdmin" | "CustomizationReviewer" | "CustomizationOperator" | "AssetSubmitter" | "AssetManager" | "AssetTemplateAdmin" | "AssetSettlement";
+        /** @description Read-only identity label returned for account display. It never grants V8 capabilities; authorization is managed only through `/v1/access/*` assignments and stable organization-ID scopes. */
+        IdentityRoleCode: string;
         AssetWorkbenchProfile: {
             /** Format: int64 */
             id: number;
@@ -24677,539 +17092,10 @@ export interface components {
             };
             profile: components["schemas"]["AssetWorkbenchProfile"];
         };
-        /** @description Dynamic backend org-master department name. Values come from enabled `org_departments` rows exposed by default from `/v1/org/options`; this is no longer a fixed frontend enum. v1.0 business baseline is exactly `人事部`, `运营部`, `设计研发部`, `定制美工部`, `审核部`, `云仓部` (plus the system bucket `未分配`). Legacy names (`设计部`, `采购部`, `仓储部`, `烘焙仓储部`) remain only as disabled compatibility rows for historical integrity; they are hidden from the default `/v1/org/options` projection and are not accepted by registration / user admin / task create inputs. Organization master maintenance clients may request `/v1/org/options?include_disabled=true` to display and restore disabled rows when authorized. */
+        /** @description Display name from the organization master. Authorization and data scope use stable department/team IDs only; names are never permission conditions. */
         Department: string;
         /** @enum {string} */
         PlaceholderAuthMode: "debug_header_role_enforced" | "session_token_role_enforced";
-        RequestActor: {
-            id?: number;
-            username?: string;
-            roles?: components["schemas"]["V7Role"][];
-            source?: string;
-            auth_mode?: components["schemas"]["PlaceholderAuthMode"];
-        };
-        RouteAccessRule: {
-            method?: string;
-            path?: string;
-            readiness?: components["schemas"]["APIReadiness"];
-            required_roles?: components["schemas"]["V7Role"][];
-            /** @description Code-owned effective capabilities required by active v8 business routes. When present, legacy roles do not authorize the request. */
-            required_permissions?: components["schemas"]["V8PermissionCode"][];
-            auth_mode?: components["schemas"]["PlaceholderAuthMode"];
-            session_required?: boolean;
-            debug_compatible?: boolean;
-        };
-        /** @description Deterministic user-operation suggestion generated from existing workflow traces, tasks, assets, products, or KPI data. This response does not consume AI provider quota. */
-        PredictionSuggestion: {
-            id: string;
-            /** @description Stable display event id used by `/v1/ai-suggestions/{suggestion_event_id}/feedback`. */
-            suggestion_event_id?: string;
-            /** @description Backend-generated stable chain key across refreshed displays. Frontends must not construct this value. */
-            suggestion_stable_key?: string;
-            /** @description Whether this suggestion can enter outcome attribution. Management suggestions are observation-only in Phase 2. */
-            attribution_eligible?: boolean;
-            /** @description Suggestion category such as `recent`, `search`, `asset`, `task_create`, `task_next_action`, or `management`. */
-            type: string;
-            title: string;
-            detail?: string;
-            action_label?: string;
-            action_type?: string;
-            /** @description Frontend navigation target such as `task`, `asset`, `product`, `task_center`, `data_center`, or `logs`. */
-            target_type?: string;
-            target_id?: string;
-            /** @enum {string} */
-            confidence?: "high" | "medium" | "low";
-            source?: string;
-            metadata?: {
-                [key: string]: string;
-            };
-        };
-        PredictionBundle: {
-            suggestions: components["schemas"]["PredictionSuggestion"][];
-            /** Format: date-time */
-            generated_at: string;
-        };
-        PredictionBundleResponse: {
-            data: components["schemas"]["PredictionBundle"];
-        };
-        ExperienceRuntimeFlags: {
-            ui_enabled: boolean;
-            capture_enabled: boolean;
-            ai_feedback_enabled: boolean;
-            worker_enabled: boolean;
-            behavior_capture_enabled: boolean;
-            micro_question_enabled: boolean;
-            /** @description Whether SuperAdmin review approvals may materialize side-channel L4 profiles or asset quality labels. Keep false during shadow observation. */
-            review_materialization_enabled: boolean;
-            /** Format: double */
-            behavior_sample_rate: number;
-            /** @description Whether the optional runtime flag override file was loaded successfully for this response. */
-            runtime_config_loaded?: boolean;
-            /** @description SuperAdmin-only diagnostic error when the optional runtime flag override file is configured but cannot be read or parsed. */
-            runtime_config_error?: string;
-        };
-        ExperienceClientConfig: {
-            ai_feedback_enabled: boolean;
-            behavior_capture_enabled: boolean;
-            micro_question_enabled: boolean;
-            /** Format: double */
-            behavior_sample_rate: number;
-            enabled_surfaces: string[];
-        };
-        ExperienceReasonTag: {
-            /** Format: int64 */
-            id?: number;
-            scene?: string;
-            code?: string;
-            name?: string;
-            group?: string;
-            severity?: string;
-            version?: number;
-            enabled?: boolean;
-            /** Format: date-time */
-            deleted_at?: string | null;
-            sort_order?: number;
-            /** Format: date-time */
-            created_at?: string;
-            /** Format: date-time */
-            updated_at?: string;
-        };
-        ExperienceClientReasonTag: {
-            /** @enum {string} */
-            scene: "ai_suggestion_feedback" | "ai_suggestion_micro_question";
-            code: string;
-            name: string;
-            group: string;
-            sort_order: number;
-        };
-        ExperienceEvent: {
-            /** Format: int64 */
-            id?: number;
-            event_key?: string;
-            schema_version?: number;
-            /** Format: date-time */
-            event_time?: string;
-            source_type?: string;
-            source_id?: string;
-            /** Format: int64 */
-            task_id?: number | null;
-            target_type?: string;
-            target_id?: string;
-            source_watermark?: string;
-            observed_from?: string;
-            observed_id?: string;
-            action?: string;
-            outcome?: string;
-            actor_snapshot?: {
-                [key: string]: unknown;
-            } | null;
-            business_snapshot?: {
-                [key: string]: unknown;
-            } | null;
-            payload?: {
-                [key: string]: unknown;
-            } | null;
-            data_classification?: string;
-            ground_truth_status?: string;
-            /**
-             * @description L0 displayed, L1 locatable, L2 feedback, L3 tagged, L4 side-channel candidate.
-             * @enum {string}
-             */
-            evidence_level?: "L0" | "L1" | "L2" | "L3" | "L4";
-            /** @enum {string} */
-            feedback_value?: "accepted" | "rejected" | "partially_accepted";
-            feedback_reason_code?: string;
-            /** Format: date-time */
-            feedback_created_at?: string | null;
-            missing_signals?: string[];
-            /** Format: date-time */
-            created_at?: string;
-        };
-        ExperienceStats: {
-            flags: components["schemas"]["ExperienceRuntimeFlags"];
-            /** Format: int64 */
-            total_events: number;
-            /** Format: int64 */
-            sample_total?: number;
-            /** Format: int64 */
-            displayed_events?: number;
-            /** Format: int64 */
-            locatable_samples?: number;
-            /**
-             * Format: int64
-             * @description Displayed AI suggestion events that carry a target_type and target_id; use this for the L0 to L1 health funnel.
-             */
-            locatable_displayed_events?: number;
-            /** Format: int64 */
-            feedback_samples?: number;
-            /** Format: int64 */
-            reasoned_feedback_samples?: number;
-            /** Format: int64 */
-            reusable_samples?: number;
-            /** Format: int64 */
-            feedback_accepted?: number;
-            /** Format: int64 */
-            feedback_partially_accepted?: number;
-            /** Format: int64 */
-            feedback_rejected?: number;
-            /** Format: double */
-            reason_coverage_rate?: number;
-            /** Format: double */
-            reusable_rate?: number;
-            /** Format: int64 */
-            outbox_queued: number;
-            /** Format: int64 */
-            outbox_processing: number;
-            /** Format: int64 */
-            outbox_processed_24h?: number;
-            /** Format: int64 */
-            outbox_failed_24h?: number;
-            /** Format: int64 */
-            outbox_dead_letter: number;
-            /** Format: double */
-            capture_success_rate_24h?: number;
-            /** Format: double */
-            capture_failure_rate_24h?: number;
-            /** Format: int64 */
-            tag_total?: number;
-            /** Format: int64 */
-            tag_enabled?: number;
-            /** Format: double */
-            tag_coverage_rate?: number;
-            /** Format: int64 */
-            ai_suggestion_events?: number;
-            /** Format: int64 */
-            ai_feedback_events?: number;
-            /** Format: double */
-            ai_feedback_rate?: number;
-            /**
-             * Format: int64
-             * @description Total shadow attribution candidates computed from suggestions, behavior, feedback, and outcomes.
-             */
-            attribution_total?: number;
-            /** Format: int64 */
-            attribution_positive?: number;
-            /** Format: int64 */
-            attribution_weak?: number;
-            /** Format: int64 */
-            attribution_rejected?: number;
-            /**
-             * Format: int64
-             * @description Open SuperAdmin review items generated from attribution candidates.
-             */
-            review_items_open?: number;
-            /** Format: int64 */
-            review_items_approved?: number;
-            /** Format: int64 */
-            review_items_rejected?: number;
-            /** Format: int64 */
-            review_items_needs_more_data?: number;
-            /**
-             * Format: int64
-             * @description Total micro-question answers stored separately from explicit feedback.
-             */
-            micro_question_answers?: number;
-            /** Format: int64 */
-            micro_question_answered?: number;
-            /** Format: int64 */
-            micro_question_dismissed?: number;
-            /**
-             * Format: int64
-             * @description Current daily micro-question rate-limit buckets at or over the configured limit.
-             */
-            micro_question_rate_limited?: number;
-            /** Format: int64 */
-            task_profiles?: number;
-            /** Format: int64 */
-            asset_quality_labels?: number;
-            /** @description Recent durable experience worker runs, newest first, used to distinguish no data from worker failure or lag. */
-            worker_last_runs?: components["schemas"]["ExperienceWorkerRunRecord"][];
-            /** Format: date-time */
-            latest_profile_rebuilt_at?: string | null;
-            /** Format: date-time */
-            generated_at: string;
-        };
-        ExperienceWorkerRunRecord: {
-            /** Format: int64 */
-            id?: number;
-            worker_name?: string;
-            source_name?: string;
-            /** Format: date-time */
-            started_at?: string;
-            /** Format: date-time */
-            finished_at?: string | null;
-            /** @enum {string} */
-            status?: "success" | "partial" | "failed" | "locked";
-            scanned_count?: number;
-            enqueued_count?: number;
-            skipped_count?: number;
-            failed_count?: number;
-            last_error?: string;
-            metadata?: {
-                [key: string]: unknown;
-            } | null;
-            /** Format: date-time */
-            created_at?: string;
-        };
-        AISuggestionFeedbackRequest: {
-            /** @description Optional when supplied by the path parameter. */
-            suggestion_event_id?: string;
-            /** @enum {string} */
-            feedback_value: "accepted" | "rejected" | "partially_accepted";
-            reason_code?: string;
-            reason_note?: string;
-            outcome_source_type?: string;
-            outcome_source_id?: string;
-            payload?: {
-                [key: string]: unknown;
-            };
-        };
-        ExperienceBehaviorEventRequest: {
-            client_event_id: string;
-            page_instance_id?: string;
-            surface?: string;
-            /** @enum {string} */
-            action: "impression" | "visible" | "expand" | "click" | "jump" | "dismiss" | "refresh" | "copy" | "related_action_done" | "ignored_after_timeout";
-            target_type?: string;
-            target_id?: string;
-            /** Format: int64 */
-            task_id?: number | null;
-            suggestion_event_id?: string;
-            suggestion_stable_key?: string;
-            /** Format: date-time */
-            occurred_at?: string;
-            route_name?: string;
-            component?: string;
-            dwell_ms?: number;
-            payload?: {
-                [key: string]: unknown;
-            };
-        };
-        ExperienceBehaviorBatchRequest: {
-            events: components["schemas"]["ExperienceBehaviorEventRequest"][];
-        };
-        ExperienceBehaviorBatchResult: {
-            received: number;
-            inserted: number;
-        };
-        ExperienceMicroQuestionEligibility: {
-            eligible: boolean;
-            /**
-             * @description Machine-readable non-eligible reason.
-             * @enum {string}
-             */
-            reason?: "disabled" | "surface_disabled" | "missing_suggestion_event" | "suggestion_not_found" | "not_attribution_eligible" | "suggestion_context_mismatch" | "target_mismatch" | "missing_target" | "already_answered" | "no_supported_attribution" | "rate_limited";
-            /** @description Stable idempotency key to send back when answering the micro-question. */
-            answer_event_key?: string;
-            /** @description Remaining Beijing-day quota for this actor. Eligibility reads do not consume quota. */
-            remaining_daily: number;
-            reason_tags?: components["schemas"]["ExperienceClientReasonTag"][];
-        };
-        /** @description Micro-question answers are side-channel diagnostics, separate from formal suggestion feedback. When `answer_value` is `answered`, clients must send a `reason_code`; dismissed answers may omit it. */
-        ExperienceMicroQuestionAnswerRequest: {
-            /** @description Optional idempotency key returned by eligibility. If omitted, the backend derives one. */
-            answer_event_key?: string;
-            suggestion_event_id: string;
-            suggestion_stable_key?: string;
-            surface: string;
-            target_type: string;
-            target_id: string;
-            /** @enum {string} */
-            answer_value: "answered" | "dismissed";
-            /**
-             * @description Required when `answer_value` is `answered`; optional when dismissed.
-             * @enum {string}
-             */
-            reason_code?: "temporarily_not_needed" | "will_handle_later" | "already_handled" | "not_relevant" | "missing_context" | "stage_not_applicable" | "customer_special_case" | "suggestion_outdated";
-            /** @description For approve, clients must include review_confirmation: true; this only materializes side-channel experience candidates and never mutates core business state. */
-            payload?: {
-                [key: string]: unknown;
-            };
-        };
-        ExperienceMicroQuestionAnswer: {
-            /** Format: int64 */
-            id?: number;
-            answer_event_key?: string;
-            suggestion_event_id?: string;
-            suggestion_stable_key?: string;
-            /** Format: int64 */
-            actor_id?: number | null;
-            surface?: string;
-            target_type?: string;
-            target_id?: string;
-            /** @enum {string} */
-            answer_value?: "answered" | "dismissed";
-            reason_code?: string;
-            payload?: {
-                [key: string]: unknown;
-            } | null;
-            /** Format: date-time */
-            created_at?: string;
-        };
-        ExperienceReviewItem: {
-            /** Format: int64 */
-            id?: number;
-            item_key?: string;
-            /** @enum {string} */
-            item_type?: "attribution_candidate";
-            /** @enum {string} */
-            status?: "open" | "approved" | "rejected" | "needs_more_data";
-            /** @enum {string} */
-            priority?: "high" | "medium" | "low";
-            evidence_summary?: {
-                [key: string]: unknown;
-            } | null;
-            /** Format: date-time */
-            created_at?: string;
-            /** Format: date-time */
-            updated_at?: string;
-        };
-        ExperienceReviewDecisionRequest: {
-            /** @enum {string} */
-            decision: "approve" | "reject" | "needs_more_data";
-            reason_code?: string;
-            payload?: {
-                [key: string]: unknown;
-            };
-        };
-        ExperienceReviewDecision: {
-            /** Format: int64 */
-            id?: number;
-            review_item_key?: string;
-            /** @enum {string} */
-            decision?: "approve" | "reject" | "needs_more_data";
-            reason_code?: string;
-            /** Format: int64 */
-            actor_id?: number | null;
-            payload?: {
-                [key: string]: unknown;
-            } | null;
-            /** Format: date-time */
-            created_at?: string;
-        };
-        AISuggestionFeedback: {
-            /** Format: int64 */
-            id?: number;
-            suggestion_event_id?: string;
-            /** @enum {string} */
-            feedback_value?: "accepted" | "rejected" | "partially_accepted";
-            reason_code?: string;
-            reason_note?: string;
-            outcome_source_type?: string;
-            outcome_source_id?: string;
-            /** Format: int64 */
-            actor_id?: number | null;
-            payload?: {
-                [key: string]: unknown;
-            } | null;
-            /** Format: date-time */
-            created_at?: string;
-        };
-        RuleTemplate: {
-            id?: number;
-            /** @enum {string} */
-            template_type?: "cost-pricing" | "product-code" | "short-name";
-            config_json?: string;
-            /** Format: date-time */
-            created_at?: string;
-            /** Format: date-time */
-            updated_at?: string;
-        };
-        Incident: {
-            id?: number;
-            sku_id?: number;
-            job_id?: number | null;
-            status?: string;
-            reason?: string;
-            assignee_id?: number | null;
-            resolved_by?: number | null;
-            /** Format: date-time */
-            resolved_at?: string | null;
-            closed_by?: number | null;
-            /** Format: date-time */
-            closed_at?: string | null;
-            close_reason?: string | null;
-            /** Format: date-time */
-            created_at?: string;
-            /** Format: date-time */
-            updated_at?: string;
-        };
-        SystemPolicy: {
-            id?: number;
-            key?: string;
-            value?: string;
-            version?: number;
-            updated_by?: number;
-            /** Format: date-time */
-            updated_at?: string;
-        };
-        SKU: {
-            id?: number;
-            sku_code?: string;
-            name?: string;
-            workflow_status?: string;
-            current_ver_id?: number | null;
-            /** Format: date-time */
-            created_at?: string;
-            /** Format: date-time */
-            updated_at?: string;
-        };
-        SKUSyncStatusResult: {
-            sku?: components["schemas"]["SKU"];
-            latest_sequence?: number;
-            events?: {
-                [key: string]: unknown;
-            }[];
-        };
-        JSTUserImportResult: {
-            fetched_count?: number;
-            created_count?: number;
-            updated_count?: number;
-            disabled_count?: number;
-            mapping_failed_count?: number;
-            trace_updated_count?: number;
-            roles_written?: number;
-            errors?: string[];
-        };
-        JSTUserImportPreviewResult: {
-            fetched_count?: number;
-            matched_count?: number;
-            to_create_count?: number;
-            to_update_count?: number;
-            org_mapping_missed?: {
-                [key: string]: unknown;
-            }[];
-            role_mapping_missed?: {
-                [key: string]: unknown;
-            }[];
-            risks?: {
-                [key: string]: unknown;
-            }[];
-            preview_items?: {
-                [key: string]: unknown;
-            }[];
-        };
-        AgentSyncResult: {
-            asset_version_id?: number | null;
-        };
-        PullJobResult: {
-            attempt_id?: number | null;
-            job?: {
-                [key: string]: unknown;
-            };
-            /** Format: date-time */
-            lease_expires_at?: string | null;
-        };
-        HeartbeatResult: {
-            /** Format: date-time */
-            lease_expires_at?: string | null;
-        };
-        AuditSubmitResult: {
-            action?: string;
-            jobs?: {
-                [key: string]: unknown;
-            }[];
-        };
         BatchTaskActionResult: {
             batch_request_id?: string;
             total?: number;
@@ -25223,33 +17109,6 @@ export interface components {
         UserStatus: "active" | "disabled";
         /** @enum {string} */
         EmploymentType: "full_time" | "part_time";
-        /** @description JST getcompanyusers item. Source: domain.JSTUser. */
-        JSTUser: {
-            u_id?: number;
-            name?: string;
-            loginId?: string;
-            enabled?: boolean;
-            created?: string;
-            modified?: string;
-            last_login_time?: string;
-            pwd_modified?: string;
-            remark?: string;
-            role_ids?: string;
-            roles?: string;
-            ug_ids?: string;
-            ug_names?: string[];
-            creator?: string;
-            modifier?: string;
-            empId?: string;
-        };
-        /** @description ERP-style JST getcompanyusers response. Source: domain.JSTUserListResponse. */
-        JSTUserListResponse: {
-            current_page?: string;
-            page_size?: string;
-            count?: string;
-            pages?: string;
-            datas?: components["schemas"]["JSTUser"][];
-        };
         WorkflowUser: {
             id?: number;
             username?: string;
@@ -25282,7 +17141,7 @@ export interface components {
             managed_teams?: string[];
             status?: components["schemas"]["UserStatus"];
             employment_type?: components["schemas"]["EmploymentType"];
-            roles?: components["schemas"]["V7Role"][];
+            roles?: components["schemas"]["IdentityRoleCode"][];
             /** Format: date-time */
             last_login_at?: string | null;
             jst_u_id?: number | null;
@@ -25294,25 +17153,16 @@ export interface components {
         };
         CreateManagedUserRequest: {
             username: string;
-            /** @description Compatibility alias of username. */
-            account?: string;
             /** @description 管理员维护的员工工号；纯数字，范围 0-9999，全局唯一。重复时服务端返回中文业务提示。 */
             employee_no: number;
             display_name: string;
-            /** @description Compatibility alias of display_name. */
-            name?: string;
             /** @description Must match one enabled department from backend org master exposed by `/v1/org/options`. */
             department: string;
             /** @description Must match one enabled team under the selected department in backend org master exposed by `/v1/org/options`. */
             team: string;
-            /** @description Compatibility alias of team. */
-            group?: string;
             mobile: string;
-            /** @description Compatibility alias of mobile. */
-            phone?: string;
             email?: string | null;
             password: string;
-            roles?: components["schemas"]["V7Role"][];
             status?: components["schemas"]["UserStatus"];
             employment_type?: components["schemas"]["EmploymentType"];
         };
@@ -25429,7 +17279,7 @@ export interface components {
             display_name?: string | null;
             department?: components["schemas"]["Department"];
             team?: string;
-            roles?: components["schemas"]["V7Role"][];
+            roles?: components["schemas"]["IdentityRoleCode"][];
             managed_departments?: string[];
             managed_teams?: string[];
             status?: components["schemas"]["UserStatus"];
@@ -25445,7 +17295,6 @@ export interface components {
             teams_by_department?: {
                 [key: string]: string[];
             };
-            role_catalog_summary?: components["schemas"]["RoleCatalogEntry"][];
             unassigned_pool_enabled?: boolean;
             configured_assignments?: components["schemas"]["ConfiguredUserAssignment"][];
         };
@@ -25461,62 +17310,6 @@ export interface components {
             user?: components["schemas"]["WorkflowUser"];
             session?: components["schemas"]["AuthSession"];
         };
-        RoleCatalogEntry: {
-            role?: components["schemas"]["V7Role"];
-            name?: string;
-            description?: string;
-            capabilities?: string[];
-            /** @enum {string} */
-            category?: "management" | "business" | "asset_workbench" | "compatibility";
-            /** @description Whether this role is allowed to be newly assigned by service policy. Compatibility roles such as `Audit_B` and `Outsource` always return `false`. */
-            assignable?: boolean;
-            /** @description Whether the current authenticated actor may newly assign this role. */
-            assignable_by_current_actor?: boolean;
-            deprecated?: boolean;
-            /** @description Whether clients should hide the role from normal role-picking UI unless already held historically. */
-            hidden_by_default?: boolean;
-            /** @description Optional user-facing reason explaining assignment restrictions. */
-            assignment_note?: string;
-        };
-        PermissionLog: {
-            id?: number;
-            actor_id?: number | null;
-            actor_username?: string;
-            actor_source?: string;
-            auth_mode?: components["schemas"]["PlaceholderAuthMode"];
-            readiness?: components["schemas"]["APIReadiness"];
-            session_required?: boolean;
-            debug_compatible?: boolean;
-            action_type?: string;
-            actor_roles?: components["schemas"]["V7Role"][];
-            target_user_id?: number | null;
-            target_username?: string;
-            target_roles?: components["schemas"]["V7Role"][];
-            method?: string;
-            route_path?: string;
-            required_roles?: components["schemas"]["V7Role"][];
-            granted?: boolean;
-            reason?: string;
-            /** Format: date-time */
-            created_at?: string;
-        };
-        /** @enum {string} */
-        OperationLogSource: "task_event" | "export_event" | "integration_call";
-        OperationLogEntry: {
-            source?: components["schemas"]["OperationLogSource"];
-            log_id?: string;
-            reference_type?: string;
-            reference_id?: string;
-            event_type?: string;
-            summary?: string;
-            actor_id?: number | null;
-            actor_username?: string;
-            actor_type?: string;
-            status?: string;
-            payload?: unknown;
-            /** Format: date-time */
-            created_at?: string;
-        };
         /** @description Lightweight business trace event used by the business tracing and AI insight page. */
         WorkflowTraceEvent: {
             id?: number;
@@ -25531,7 +17324,7 @@ export interface components {
             actor_username?: string;
             actor_source?: string;
             actor_auth_mode?: components["schemas"]["PlaceholderAuthMode"];
-            actor_roles?: components["schemas"]["V7Role"][];
+            actor_roles?: components["schemas"]["IdentityRoleCode"][];
             actor_department?: string;
             actor_team?: string;
             route_method?: string;
@@ -25588,170 +17381,10 @@ export interface components {
             /** Format: date-time */
             occurred_at?: string;
         };
-        /**
-         * @description Policy scaffolding mode.
-         *     Indicates route-role visibility scaffolding only.
-         *     This does not imply an identity provider, org sync, or full RBAC/ABAC engine.
-         * @enum {string}
-         */
-        PolicyMode: "route_role_visibility_scaffolding";
-        /**
-         * @description Endpoint exposure classification used by policy scaffolding action summaries.
-         * @enum {string}
-         */
-        PolicyAPISurface: "frontend_ready" | "internal" | "admin" | "mock_placeholder";
-        /** @description Default action-level policy summary for scaffolding only. */
-        ActionPolicySummary: {
-            action_key?: string;
-            allowed_roles?: components["schemas"]["V7Role"][];
-            api_surface?: components["schemas"]["PolicyAPISurface"];
-            note?: string;
-        };
-        /** @description Default resource-level policy summary for scaffolding only. */
-        ResourceAccessPolicy: {
-            resource_key?: string;
-            visible_to_roles?: components["schemas"]["V7Role"][];
-            action_roles?: components["schemas"]["ActionPolicySummary"][];
-            policy_mode?: components["schemas"]["PolicyMode"];
-        };
-        /** @description Cross-center policy scaffolding envelope. Not a real auth/org system. */
-        PolicyScopeSummary: {
-            scope_key?: string;
-            scope_name?: string;
-            auth_mode?: components["schemas"]["PlaceholderAuthMode"];
-            policy_mode?: components["schemas"]["PolicyMode"];
-            resource_access_policy?: components["schemas"]["ResourceAccessPolicy"];
-            is_placeholder?: boolean;
-            note?: string;
-        };
-        /**
-         * @description Platform-entry boundary mode placeholder.
-         *     This does not imply a BI platform, finance/accounting system, or report engine.
-         * @enum {string}
-         */
-        PlatformEntryMode: "scaffolding_only";
-        /**
-         * @description Entry-readiness status for one platform-entry placeholder lane.
-         * @enum {string}
-         */
-        PlatformEntryStatus: "candidate" | "conditional" | "not_applicable";
-        /** @description Placeholder KPI entry summary for future KPI docking. Not a real KPI computation module. */
-        KPIEntrySummary: {
-            entry_status?: components["schemas"]["PlatformEntryStatus"];
-            eligible_now?: boolean;
-            source_read_model_fields?: string[];
-            placeholder_fields?: string[];
-            future_metric_hints?: string[];
-            is_placeholder?: boolean;
-            not_ready_blocking_reason?: string;
-            note?: string;
-        };
-        /** @description Placeholder finance entry summary for future finance docking. Not a real accounting/reconciliation/settlement/invoice system. */
-        FinanceEntrySummary: {
-            entry_status?: components["schemas"]["PlatformEntryStatus"];
-            eligible_now?: boolean;
-            source_read_model_fields?: string[];
-            placeholder_fields?: string[];
-            future_finance_scope_hints?: string[];
-            is_placeholder?: boolean;
-            not_ready_blocking_reason?: string;
-            note?: string;
-        };
-        /** @description Placeholder report/export entry summary for future report-platform docking. Not a real report-generation engine. */
-        ReportEntrySummary: {
-            entry_status?: components["schemas"]["PlatformEntryStatus"];
-            eligible_now?: boolean;
-            source_read_model_fields?: string[];
-            placeholder_fields?: string[];
-            future_report_scope_hints?: string[];
-            is_placeholder?: boolean;
-            not_ready_blocking_reason?: string;
-            note?: string;
-        };
-        /** @description Unified platform-entry boundary envelope reused across task, procurement, cost-governance, and export read models. */
-        PlatformEntryBoundary: {
-            entry_mode?: components["schemas"]["PlatformEntryMode"];
-            scope_key?: string;
-            scope_name?: string;
-            source_object?: string;
-            source_layer?: string;
-            kpi_entry_summary?: components["schemas"]["KPIEntrySummary"] | null;
-            finance_entry_summary?: components["schemas"]["FinanceEntrySummary"] | null;
-            report_entry_summary?: components["schemas"]["ReportEntrySummary"] | null;
-            is_placeholder?: boolean;
-            note?: string;
-        };
         PaginationMeta: {
             page?: number;
             page_size?: number;
             total?: number;
-        };
-        ServerLog: {
-            id?: number;
-            level?: string;
-            msg?: string;
-            details?: Record<string, never>;
-            /** Format: date-time */
-            created_at?: string;
-        };
-        /** @enum {string} */
-        TaskBoardView: "all" | "ops" | "designer" | "audit" | "procurement" | "warehouse";
-        /** @enum {string} */
-        TaskMainStatus: "draft" | "created" | "filed" | "pending_warehouse_receive" | "warehouse_processing" | "pending_close" | "closed";
-        /** @enum {string} */
-        TaskSubStatusCode: "not_required" | "not_triggered" | "not_started" | "pending_design" | "designing" | "rework_required" | "pending_audit" | "in_review" | "rejected" | "outsourcing" | "outsourced" | "preparing" | "ready" | "in_progress" | "pending_inbound" | "pending_receive" | "received" | "completed" | "pending_review" | "final_ready" | "approved" | "reserved";
-        /** @enum {string} */
-        TaskSubStatusSource: "task_type" | "task_status" | "task_asset" | "warehouse_receipt" | "procurement_record" | "reserved";
-        TaskSubStatusItem: {
-            code: components["schemas"]["TaskSubStatusCode"];
-            label: string;
-            source: components["schemas"]["TaskSubStatusSource"];
-        };
-        TaskSubStatusSnapshot: {
-            design?: components["schemas"]["TaskSubStatusItem"];
-            audit?: components["schemas"]["TaskSubStatusItem"];
-            procurement?: components["schemas"]["TaskSubStatusItem"];
-            warehouse?: components["schemas"]["TaskSubStatusItem"];
-            customization?: components["schemas"]["TaskSubStatusItem"];
-            /** @description Compatibility alias of `customization` for legacy sub-status consumers. */
-            outsource?: components["schemas"]["TaskSubStatusItem"];
-            production?: components["schemas"]["TaskSubStatusItem"];
-        };
-        /**
-         * @description Canonical customization scope is `customization`; `outsource` remains a compatibility alias.
-         * @enum {string}
-         */
-        TaskSubStatusScope: "design" | "audit" | "procurement" | "warehouse" | "customization" | "outsource" | "production";
-        WorkflowReason: {
-            /** @enum {string} */
-            code: "task_not_found" | "task_detail_missing" | "task_already_pending_warehouse" | "task_already_closed" | "task_awaiting_close" | "task_blocked" | "warehouse_already_received" | "warehouse_already_completed" | "missing_final_design_asset" | "audit_not_approved" | "missing_task_no" | "missing_sku" | "warehouse_not_received" | "warehouse_rejected_pending_resolution" | "warehouse_not_completed" | "pending_exception_resolution" | "filed_at_missing" | "category_missing" | "spec_text_missing" | "cost_price_missing" | "procurement_record_missing" | "procurement_price_missing" | "procurement_quantity_missing" | "procurement_not_ready" | "not_pending_close";
-            message: string;
-        };
-        TaskWorkflowSnapshot: {
-            main_status?: components["schemas"]["TaskMainStatus"];
-            sub_status?: components["schemas"]["TaskSubStatusSnapshot"];
-            can_prepare_warehouse?: boolean;
-            warehouse_blocking_reasons?: components["schemas"]["WorkflowReason"][];
-            can_close?: boolean;
-            closable?: boolean;
-            cannot_close_reasons?: components["schemas"]["WorkflowReason"][];
-        };
-        Product: {
-            id?: number;
-            erp_product_id?: string;
-            sku_code?: string;
-            product_name?: string;
-            category?: string;
-            spec_json?: string;
-            status?: string;
-            /** Format: date-time */
-            source_updated_at?: string | null;
-            /** Format: date-time */
-            sync_time?: string | null;
-            /** Format: date-time */
-            created_at?: string;
-            /** Format: date-time */
-            updated_at?: string;
         };
         ProductSearchMatchedMapping: {
             mapping_id?: number;
@@ -25766,14 +17399,7 @@ export interface components {
             is_primary?: boolean;
             priority?: number;
         };
-        ProductSearchResult: components["schemas"]["Product"] & {
-            /** @description Category code of the mapping rule that matched this local ERP product. */
-            matched_category_code?: string;
-            /** @description First-level search-entry code used to position this local ERP product. */
-            matched_search_entry_code?: string;
-            matched_mapping_rule?: components["schemas"]["ProductSearchMatchedMapping"];
-        };
-        /** @description Lightweight original-product provenance summary for task list, task-board, and procurement-summary consumption. Local mapped-search provenance remains supported, and an additive ERP Bridge snapshot may be included for the selected external product. */
+        /** @description Lightweight original-product provenance summary for task list and task-board consumption. Local mapped-search provenance remains supported, and an additive ERP Bridge snapshot may be included for the selected external product. */
         TaskProductSelectionSummary: {
             selected_product_id?: number | null;
             selected_product_name?: string;
@@ -26148,15 +17774,6 @@ export interface components {
             status?: string;
             message?: string;
         };
-        JSTSyncPingResponse: {
-            status?: string;
-            service?: string;
-        };
-        JSTIncrementalSyncResponse: {
-            status?: string;
-            run_id?: string;
-            message?: string;
-        };
         /** @enum {string} */
         CategoryType: "coded_style" | "board" | "paper" | "print" | "cloth" | "material" | "custom" | "manual_quote" | "other";
         Category: {
@@ -26363,13 +17980,14 @@ export interface components {
             product_selection?: components["schemas"]["TaskProductSelectionContext"] | null;
             change_request?: string;
             design_requirement?: string;
+            /** @description Operations suggestion captured at task creation. It never overrides the design-stage `single|set` resource revision mode. */
+            set_mode_hint?: boolean;
             product_short_name?: string;
             material_mode?: string;
             material_other?: string;
             cost_price_mode?: string;
             /** Format: double */
             base_sale_price?: number | null;
-            product_channel?: string;
             /**
              * @description Automatic SKU code type used for generated task SKUs. Historical rows may omit it and should be treated as `regular`.
              * @enum {string}
@@ -26446,7 +18064,7 @@ export interface components {
             id?: number;
             task_id?: number;
             /** @enum {string} */
-            module_key?: "basic_info" | "design" | "audit" | "warehouse" | "customization" | "procurement" | "retouch";
+            module_key?: "basic_info" | "design" | "audit" | "customization" | "retouch";
             state?: components["schemas"]["TaskModuleState"];
             pool_team_code?: string | null;
             claimed_by?: number | null;
@@ -26490,22 +18108,6 @@ export interface components {
             /** Format: date-time */
             created_at?: string;
         };
-        /** @description Flat task reference-file relation returned by V1.1-A1 detail fast path. */
-        ReferenceFileRefFlat: {
-            id?: number;
-            task_id?: number;
-            sku_item_id?: number | null;
-            /**
-             * Format: int64
-             * @description When set, this reference index row belongs to one `task_retouch_requirements` line. NULL means task-level or legacy scope.
-             */
-            retouch_requirement_id?: number | null;
-            ref_id?: string;
-            owner_module_key?: string;
-            context?: string | null;
-            /** Format: date-time */
-            attached_at?: string;
-        };
         /** @description One structured demand line for `task_type=retouch_task`. Phase 1B adds per-requirement `reference_file_refs` and `source_assets` on read models. */
         TaskRetouchRequirement: {
             /** Format: int64 */
@@ -26530,14 +18132,6 @@ export interface components {
             /** @description Requirement-scoped source/material files (`asset_type=source`) for this line. Always present on read models and may be empty. */
             source_assets?: components["schemas"]["DesignAsset"][];
         };
-        /** @description Create-time input for one retouch demand line. Only accepted when `task_type=retouch_task`. */
-        CreateTaskRetouchRequirementItem: {
-            description: string;
-            sku_code?: string;
-            spec?: string;
-            remark?: string;
-            sort_order?: number;
-        };
         /** @description V1.1-A1 fast-path task aggregate detail. Batch tasks include `sku_items`; design uploads include `asset_versions` with `scope_sku_code` for per-SKU grouping. */
         TaskAggregateDetailV2: {
             task?: components["schemas"]["Task"];
@@ -26547,7 +18141,6 @@ export interface components {
             reference_file_refs?: components["schemas"]["ReferenceFileRef"][];
             sku_items?: components["schemas"]["TaskSKUItem"][];
             asset_versions?: components["schemas"]["DesignAssetVersion"][];
-            workflow?: components["schemas"]["TaskWorkflowSnapshot"];
             design_sub_status?: string;
             creator_id?: number | null;
             requester_id?: number | null;
@@ -26563,254 +18156,7 @@ export interface components {
             retouch_requirements?: components["schemas"]["TaskRetouchRequirement"][];
         };
         /** @enum {string} */
-        ProcurementStatus: "draft" | "prepared" | "in_progress" | "completed";
-        /** @enum {string} */
-        ProcurementAction: "prepare" | "start" | "complete" | "reopen";
-        /** @enum {string} */
-        ProcurementCoordinationStatus: "preparing" | "awaiting_arrival" | "ready_for_warehouse" | "handed_to_warehouse" | "warehouse_completed";
-        ProcurementRecord: {
-            id?: number;
-            task_id?: number;
-            status?: components["schemas"]["ProcurementStatus"];
-            /** Format: double */
-            procurement_price?: number | null;
-            /** Format: int64 */
-            quantity?: number | null;
-            supplier_name?: string;
-            purchase_remark?: string;
-            /** Format: date-time */
-            expected_delivery_at?: string | null;
-            /** Format: date-time */
-            created_at?: string;
-            /** Format: date-time */
-            updated_at?: string;
-        };
-        ProcurementSummary: {
-            status?: components["schemas"]["ProcurementStatus"];
-            coordination_status?: components["schemas"]["ProcurementCoordinationStatus"];
-            coordination_label?: string;
-            warehouse_status?: ("received" | "rejected" | "completed") | null;
-            warehouse_prepare_ready?: boolean;
-            warehouse_receive_ready?: boolean;
-            category_code?: string;
-            category_name?: string;
-            /** Format: double */
-            procurement_price?: number | null;
-            /** Format: double */
-            cost_price?: number | null;
-            /** Format: double */
-            estimated_cost?: number | null;
-            cost_rule_id?: number | null;
-            cost_rule_name?: string;
-            cost_rule_source?: string;
-            matched_rule_version?: number | null;
-            prefill_source?: string;
-            /** Format: date-time */
-            prefill_at?: string | null;
-            requires_manual_review?: boolean;
-            manual_cost_override?: boolean;
-            manual_cost_override_reason?: string;
-            override_actor?: string;
-            /** Format: date-time */
-            override_at?: string | null;
-            /** Format: int64 */
-            quantity?: number | null;
-            supplier_name?: string;
-            /** Format: date-time */
-            expected_delivery_at?: string | null;
-            product_selection?: components["schemas"]["TaskProductSelectionSummary"] | null;
-            matched_rule_governance?: components["schemas"]["TaskMatchedRuleGovernance"] | null;
-            override_summary?: components["schemas"]["TaskCostOverrideSummary"] | null;
-            governance_audit_summary?: components["schemas"]["TaskGovernanceAuditSummary"] | null;
-            override_governance_boundary?: components["schemas"]["TaskCostOverrideGovernanceBoundary"] | null;
-            policy_mode?: components["schemas"]["PolicyMode"];
-            visible_to_roles?: components["schemas"]["V7Role"][];
-            action_roles?: components["schemas"]["ActionPolicySummary"][];
-            policy_scope_summary?: components["schemas"]["PolicyScopeSummary"];
-            platform_entry_boundary?: components["schemas"]["PlatformEntryBoundary"] | null;
-            /** @enum {string|null} */
-            filing_status?: "not_filed" | "pending_filing" | "filing" | "filed" | "filing_failed" | null;
-            filing_error_message?: string | null;
-            filing_trigger_source?: string | null;
-            /** Format: date-time */
-            last_filing_attempt_at?: string | null;
-            /** Format: date-time */
-            last_filed_at?: string | null;
-            erp_sync_required?: boolean;
-            /** Format: int64 */
-            erp_sync_version?: number;
-            missing_fields?: string[] | null;
-            missing_fields_summary_cn?: string | null;
-            /** Format: date-time */
-            filed_at?: string | null;
-        };
-        TaskMatchedRuleSnapshot: {
-            rule_id?: number;
-            rule_name?: string;
-            rule_version?: number;
-            rule_source?: string;
-            governance_status?: components["schemas"]["CostRuleGovernanceStatus"];
-            prefill_source?: string;
-            /** Format: date-time */
-            prefill_at?: string | null;
-            requires_manual_review?: boolean;
-            is_current_rule?: boolean;
-        };
-        TaskMatchedRuleGovernance: {
-            matched_rule?: components["schemas"]["TaskMatchedRuleSnapshot"] | null;
-            current_rule?: components["schemas"]["CostRuleVersionRef"] | null;
-            version_chain_summary?: components["schemas"]["CostRuleVersionChainSummary"] | null;
-            is_rule_outdated?: boolean;
-            current_rule_version_hint?: number | null;
-        };
-        /** @enum {string} */
         TaskCostOverrideAuditEventType: "override_applied" | "override_updated" | "override_released";
-        /** @enum {string} */
-        TaskCostOverrideReviewStatus: "not_required" | "pending" | "approved" | "rejected";
-        /** @enum {string} */
-        TaskCostOverrideFinanceStatus: "not_required" | "pending" | "ready_for_view" | "marked_for_view";
-        /** @description Ready-for-frontend lightweight placeholder-boundary action summary. This is not a real approval or finance workflow event stream. */
-        TaskCostOverrideBoundaryActionSummary: {
-            action_type?: string;
-            status?: string;
-            /** @description Lightweight placeholder actor only. This is not a real identity or approver model. */
-            actor?: string;
-            /** Format: date-time */
-            acted_at?: string | null;
-            note?: string;
-            /** @description Current source is either the persisted placeholder table or a derived fallback summary. */
-            source?: string;
-        };
-        /** @description Ready-for-frontend approval-placeholder summary layered above `cost_override_events`. This is not a real approval workflow. */
-        TaskCostOverrideApprovalPlaceholderSummary: {
-            override_event_id?: string;
-            task_id?: number;
-            review_record_id?: number | null;
-            review_required?: boolean;
-            review_status?: components["schemas"]["TaskCostOverrideReviewStatus"];
-            approval_placeholder_status?: components["schemas"]["TaskCostOverrideReviewStatus"];
-            review_note?: string;
-            /** @description Lightweight placeholder actor only. This is not a real identity or approver model. */
-            review_actor?: string;
-            /** Format: date-time */
-            reviewed_at?: string | null;
-            latest_review_action?: components["schemas"]["TaskCostOverrideBoundaryActionSummary"] | null;
-            source?: string;
-            is_placeholder_boundary_only?: boolean;
-        };
-        /** @description Ready-for-frontend finance-placeholder summary layered above `cost_override_events`. This is not a real finance, accounting, or settlement system. */
-        TaskCostOverrideFinancePlaceholderSummary: {
-            override_event_id?: string;
-            task_id?: number;
-            finance_record_id?: number | null;
-            finance_required?: boolean;
-            finance_status?: components["schemas"]["TaskCostOverrideFinanceStatus"];
-            finance_placeholder_status?: components["schemas"]["TaskCostOverrideFinanceStatus"];
-            finance_note?: string;
-            /** @description Lightweight placeholder actor only. This is not a real finance identity system. */
-            finance_marked_by?: string;
-            /** Format: date-time */
-            finance_marked_at?: string | null;
-            /** @description Placeholder-only indicator that the override may enter the future finance-facing layer. This is not a ledger-posted state. */
-            finance_view_ready?: boolean;
-            latest_finance_action?: components["schemas"]["TaskCostOverrideBoundaryActionSummary"] | null;
-            source?: string;
-            is_placeholder_boundary_only?: boolean;
-        };
-        /** @description Ready-for-frontend unified governance-boundary summary reused across task/detail/procurement/timeline reads. This is not a real approval or finance system. */
-        TaskCostOverrideGovernanceBoundarySummary: {
-            review_required?: boolean;
-            review_status?: components["schemas"]["TaskCostOverrideReviewStatus"];
-            finance_required?: boolean;
-            finance_status?: components["schemas"]["TaskCostOverrideFinanceStatus"];
-            finance_view_ready?: boolean;
-            latest_review_action?: components["schemas"]["TaskCostOverrideBoundaryActionSummary"] | null;
-            latest_finance_action?: components["schemas"]["TaskCostOverrideBoundaryActionSummary"] | null;
-            latest_boundary_actor?: string;
-            /** Format: date-time */
-            latest_boundary_at?: string | null;
-            is_placeholder_boundary_only?: boolean;
-        };
-        /** @description Unified ready-for-frontend governance boundary layered above `cost_override_events`. It consolidates approval placeholder, finance placeholder, and latest-action summary reads without introducing a real approval workflow, finance system, or ERP writeback contract. */
-        TaskCostOverrideGovernanceBoundary: {
-            override_event_id?: string;
-            task_id?: number;
-            review_record_id?: number | null;
-            finance_record_id?: number | null;
-            review_required?: boolean;
-            review_status?: components["schemas"]["TaskCostOverrideReviewStatus"];
-            approval_placeholder_status?: components["schemas"]["TaskCostOverrideReviewStatus"];
-            review_note?: string;
-            /** @description Lightweight placeholder actor only. This is not a real identity or approver model. */
-            review_actor?: string;
-            /** Format: date-time */
-            reviewed_at?: string | null;
-            finance_required?: boolean;
-            finance_status?: components["schemas"]["TaskCostOverrideFinanceStatus"];
-            finance_placeholder_status?: components["schemas"]["TaskCostOverrideFinanceStatus"];
-            finance_note?: string;
-            /** @description Lightweight placeholder actor only. This is not a real finance identity system. */
-            finance_marked_by?: string;
-            /** Format: date-time */
-            finance_marked_at?: string | null;
-            /** @description Placeholder-only indicator that the override may enter the future finance-facing layer. This is not a ledger-posted state. */
-            finance_view_ready?: boolean;
-            latest_review_action?: components["schemas"]["TaskCostOverrideBoundaryActionSummary"] | null;
-            latest_finance_action?: components["schemas"]["TaskCostOverrideBoundaryActionSummary"] | null;
-            latest_boundary_actor?: string;
-            /** Format: date-time */
-            latest_boundary_at?: string | null;
-            governance_boundary_summary?: components["schemas"]["TaskCostOverrideGovernanceBoundarySummary"] | null;
-            approval_placeholder_summary?: components["schemas"]["TaskCostOverrideApprovalPlaceholderSummary"] | null;
-            finance_placeholder_summary?: components["schemas"]["TaskCostOverrideFinancePlaceholderSummary"] | null;
-            is_placeholder_boundary_only?: boolean;
-            policy_mode?: components["schemas"]["PolicyMode"];
-            visible_to_roles?: components["schemas"]["V7Role"][];
-            action_roles?: components["schemas"]["ActionPolicySummary"][];
-            policy_scope_summary?: components["schemas"]["PolicyScopeSummary"];
-            platform_entry_boundary?: components["schemas"]["PlatformEntryBoundary"] | null;
-        };
-        TaskCostOverrideEventSummary: {
-            event_id?: string;
-            sequence?: number;
-            event_type?: components["schemas"]["TaskCostOverrideAuditEventType"];
-            /** Format: double */
-            cost_price?: number | null;
-            /** Format: double */
-            previous_estimated_cost?: number | null;
-            /** Format: double */
-            previous_cost_price?: number | null;
-            /** Format: double */
-            override_cost?: number | null;
-            /** Format: double */
-            result_cost_price?: number | null;
-            category_code?: string;
-            matched_rule_id?: number | null;
-            matched_rule_version?: number | null;
-            matched_rule_source?: string;
-            governance_status?: components["schemas"]["CostRuleGovernanceStatus"];
-            reason?: string;
-            actor?: string;
-            source?: string;
-            note?: string;
-            /** Format: date-time */
-            occurred_at?: string;
-        };
-        TaskCostOverrideSummary: {
-            current_override_active?: boolean;
-            current_override_reason?: string;
-            current_override_actor?: string;
-            /** Format: date-time */
-            current_override_at?: string | null;
-            /** Format: double */
-            current_cost_price?: number | null;
-            override_event_count?: number;
-            latest_override_event?: components["schemas"]["TaskCostOverrideEventSummary"] | null;
-            latest_release_event?: components["schemas"]["TaskCostOverrideEventSummary"] | null;
-            latest_audit_event?: components["schemas"]["TaskCostOverrideEventSummary"] | null;
-            /** @description Current summary source. This is a governance-audit skeleton only, not a dedicated approval flow. */
-            history_source?: string;
-        };
         TaskGovernanceAuditSummary: {
             audit_layer?: string;
             general_event_layer?: string;
@@ -26848,33 +18194,11 @@ export interface components {
             note?: string;
             /** Format: date-time */
             created_at?: string;
-            override_governance_boundary?: components["schemas"]["TaskCostOverrideGovernanceBoundary"] | null;
         };
         TaskCostOverrideAuditTimeline: {
             task_id?: number;
             events?: components["schemas"]["TaskCostOverrideAuditEvent"][];
             governance_audit_summary?: components["schemas"]["TaskGovernanceAuditSummary"] | null;
-            override_governance_boundary?: components["schemas"]["TaskCostOverrideGovernanceBoundary"] | null;
-        };
-        /** @description Placeholder-only review boundary update. This does not create a real approval workflow or identity approval chain. */
-        TaskCostOverrideReviewRequest: {
-            review_required?: boolean | null;
-            review_status?: components["schemas"]["TaskCostOverrideReviewStatus"] | null;
-            review_note?: string;
-            /** @description Optional explicit placeholder actor. When omitted, the debug-header actor placeholder may be used. */
-            review_actor?: string;
-            /** Format: date-time */
-            reviewed_at?: string | null;
-        };
-        /** @description Placeholder-only finance-boundary update. This does not create a real finance, accounting, reconciliation, settlement, or invoice system. */
-        TaskCostOverrideFinanceMarkRequest: {
-            finance_required?: boolean | null;
-            finance_status?: components["schemas"]["TaskCostOverrideFinanceStatus"] | null;
-            finance_note?: string;
-            /** @description Optional explicit placeholder actor. When omitted, the debug-header actor placeholder may be used. */
-            finance_marked_by?: string;
-            /** Format: date-time */
-            finance_marked_at?: string | null;
         };
         AuditHandover: {
             id?: number;
@@ -26958,58 +18282,6 @@ export interface components {
             success_count: number;
             failure_count: number;
             results: components["schemas"]["BatchAuditHandoverResultItem"][];
-        };
-        CustomizationJob: {
-            id?: number;
-            task_id?: number;
-            source_asset_id?: number | null;
-            current_asset_id?: number | null;
-            order_no?: string | null;
-            customization_level_code?: string;
-            customization_level_name?: string;
-            /**
-             * Format: double
-             * @description Business-entered review reference unit price for the current phase. This is not the frozen settlement snapshot.
-             */
-            review_reference_unit_price?: number | null;
-            /**
-             * Format: double
-             * @description Business-entered review reference weight factor for the current phase. This is not the frozen settlement snapshot.
-             */
-            review_reference_weight_factor?: number | null;
-            /**
-             * Format: double
-             * @description Execution-stage frozen settlement unit price snapshot resolved at the pricing freeze point.
-             */
-            unit_price?: number | null;
-            /**
-             * Format: double
-             * @description Execution-stage frozen settlement weight factor snapshot resolved at the pricing freeze point.
-             */
-            weight_factor?: number | null;
-            note?: string;
-            /**
-             * @description Empty before the first customization review decision is submitted.
-             * @enum {string}
-             */
-            customization_review_decision?: "" | "approved" | "return_to_designer" | "reviewer_fixed";
-            /** @enum {string} */
-            decision_type?: "final" | "effect_preview";
-            assigned_operator_id?: number | null;
-            last_operator_id?: number | null;
-            /** @description Execution-stage frozen settlement worker employment type captured at the pricing freeze point. */
-            pricing_worker_type?: components["schemas"]["EmploymentType"] | null;
-            /**
-             * @description Active v8 customization work uses in_progress and ready_for_submit. Remaining values are legacy read-only history until cleanup.
-             * @enum {string}
-             */
-            status?: "in_progress" | "ready_for_submit" | "pending_customization_review" | "pending_customization_production" | "pending_effect_review" | "pending_effect_revision" | "pending_production_transfer" | "pending_warehouse_qc" | "rejected_by_warehouse" | "completed";
-            warehouse_reject_reason?: string | null;
-            warehouse_reject_category?: string | null;
-            /** Format: date-time */
-            created_at?: string;
-            /** Format: date-time */
-            updated_at?: string;
         };
         /** @description General task event stream. Payloads may include action-specific before/after task status, handler, and result context for business audit and troubleshooting. */
         TaskEvent: {
@@ -27150,6 +18422,7 @@ export interface components {
             /** @description Task product name snapshot for business download naming. */
             product_name_snapshot?: string;
             remote_file_id?: string | null;
+            /** @description Internal compatibility locator. Omitted from task read models when the actor lacks scoped `asset.download`. */
             storage_key?: string;
             /** Format: int64 */
             file_size?: number | null;
@@ -27189,13 +18462,12 @@ export interface components {
             superseded_at?: string | null;
             /** Format: date-time */
             cleanup_after_at?: string | null;
-            warehouse_ready?: boolean;
             approved_for_flow?: boolean;
             /** @enum {string|null} */
-            current_version_role?: "current_version" | "approved_version" | "warehouse_ready_version" | "current_approved_version" | "current_warehouse_ready_version" | null;
-            /** @description Canonical business file URL. New frontend integration should use this field directly; runtime prefers browser-direct OSS/download service URLs and only falls back to `/v1/assets/files/{path}` for compatibility. */
+            current_version_role?: "current_version" | "approved_version" | "current_approved_version" | null;
+            /** @description Canonical business file URL. Omitted when the actor lacks scoped `asset.download`; authorized responses prefer browser-direct OSS/download service URLs and only fall back to `/v1/assets/files/{path}` for compatibility. */
             download_url?: string | null;
-            /** @description Compatibility-only boolean retained for old callers. Obsolete for frontend rollout; new integration must use `download_url` and `download_mode`. */
+            /** @description Compatibility-only boolean retained for old callers. It is false when the actor lacks scoped `asset.download`; new integration must use controlled download endpoints. */
             public_download_allowed?: boolean;
             /** @description Compatibility-only boolean retained for old callers. Obsolete for frontend rollout; frontend preview behavior should follow `preview_available` and `download_url`. */
             preview_public_allowed?: boolean;
@@ -27219,7 +18491,6 @@ export interface components {
             asset_type?: "reference" | "source" | "delivery" | "preview" | "design_thumb";
             current_version_id?: number | null;
             approved_version_id?: number | null;
-            warehouse_ready_version_id?: number | null;
             upload_status?: components["schemas"]["DesignAssetUploadStatus"];
             /** @enum {string} */
             archive_status?: "active" | "archived";
@@ -27234,7 +18505,6 @@ export interface components {
             updated_at?: string;
             current_version?: components["schemas"]["DesignAssetVersion"] | null;
             approved_version?: components["schemas"]["DesignAssetVersion"] | null;
-            warehouse_ready_version?: components["schemas"]["DesignAssetVersion"] | null;
         };
         UploadSession: {
             id?: string;
@@ -27321,27 +18591,18 @@ export interface components {
             required_upload_content_type: string;
         };
         /** @enum {string} */
-        AssetOwnerType: "task" | "task_asset" | "export_job" | "outsource_order" | "warehouse_receipt";
+        AssetOwnerType: "task" | "task_asset" | "task_create_reference" | "planning_sku_create" | "planning_sku_revision_image" | "export_job";
         /** @enum {string} */
         AssetStorageAdapter: "mock_upload" | "placeholder_storage" | "export_placeholder" | "oss_upload_service";
         /** @enum {string} */
         AssetStorageRefType: "task_asset_object" | "export_result" | "generic_object";
         /** @enum {string} */
-        UploadRequestStatus: "requested" | "bound" | "expired" | "cancelled";
-        /** @enum {string} */
-        UploadRequestAdvanceAction: "cancel" | "expire";
-        /** @enum {string} */
-        AssetStorageRefStatus: "recorded" | "superseded" | "archived";
+        AssetStorageRefStatus: "recorded" | "superseded" | "archived" | "historical_unavailable";
         /**
          * @description Cross-center adapter-boundary mode. The same term is reused across export, integration, and storage/upload, but each center may support only a subset of values.
          * @enum {string}
          */
         AdapterMode: "dispatch_then_attempt" | "call_log_then_execution" | "upload_request_then_storage_ref";
-        /**
-         * @description Cross-center handoff/disposition mode. Reused across export dispatches, integration executions, and upload-request binding without implying one shared table or one shared worker.
-         * @enum {string}
-         */
-        DispatchMode: "dispatch_record" | "execution_progress" | "upload_request_binding";
         /**
          * @description Cross-center storage-side mode. Reused to express placeholder storage semantics without forcing export and asset storage to share one persistence model.
          * @enum {string}
@@ -27363,22 +18624,6 @@ export interface components {
             /** Format: int64 */
             file_size?: number | null;
             checksum_hint?: string;
-            /** Format: date-time */
-            expires_at?: string | null;
-            is_placeholder?: boolean;
-            note?: string;
-        };
-        /** @description Minimal shared handoff summary reused by export dispatches, integration executions, and upload requests. It unifies reference language for cross-boundary handoff state without merging those center-specific lifecycles. */
-        HandoffRefSummary: {
-            ref_type?: string;
-            ref_key?: string;
-            status?: string;
-            /** Format: date-time */
-            requested_at?: string | null;
-            /** Format: date-time */
-            received_at?: string | null;
-            /** Format: date-time */
-            finished_at?: string | null;
             /** Format: date-time */
             expires_at?: string | null;
             is_placeholder?: boolean;
@@ -27407,80 +18652,6 @@ export interface components {
             resource_ref_summary?: components["schemas"]["ResourceRefSummary"];
             /** Format: date-time */
             created_at?: string;
-        };
-        /** @description Placeholder upload-intent contract only. Upload requests are storage/upload handoff records aligned with shared export and integration boundary language, with lifecycle readiness hints for `requested -> bound|expired|cancelled`. Creating or advancing an upload request does not upload bytes and does not allocate a real object-storage or NAS location. */
-        UploadRequest: {
-            request_id?: string;
-            client_create_id?: string;
-            client_item_id?: string;
-            owner_type?: components["schemas"]["AssetOwnerType"];
-            owner_id?: number;
-            task_id?: number;
-            target_sku_code?: string | null;
-            /**
-             * Format: int64
-             * @description Optional P图需求明细 scope captured when the upload request was created.
-             */
-            retouch_requirement_id?: number | null;
-            asset_id?: number | null;
-            source_asset_id?: number | null;
-            /** @enum {string|null} */
-            task_asset_type?: "reference" | "source" | "delivery" | "preview" | "design_thumb" | null;
-            storage_adapter?: components["schemas"]["AssetStorageAdapter"];
-            /** @description Compatibility-only upload-mode snapshot on upload-request records. */
-            upload_mode?: components["schemas"]["DesignAssetUploadMode"];
-            ref_type?: components["schemas"]["AssetStorageRefType"];
-            storage_provider?: components["schemas"]["DesignAssetStorageProvider"];
-            file_name?: string;
-            mime_type?: string;
-            /** Format: int64 */
-            file_size?: number | null;
-            /** Format: int64 */
-            expected_size?: number | null;
-            checksum_hint?: string;
-            status?: components["schemas"]["UploadRequestStatus"];
-            session_status?: components["schemas"]["DesignAssetSessionStatus"];
-            remote_upload_id?: string;
-            remote_file_id?: string;
-            is_placeholder?: boolean;
-            adapter_mode?: components["schemas"]["AdapterMode"];
-            dispatch_mode?: components["schemas"]["DispatchMode"];
-            storage_mode?: components["schemas"]["BoundaryStorageMode"];
-            adapter_ref_summary?: components["schemas"]["AdapterRefSummary"];
-            handoff_ref_summary?: components["schemas"]["HandoffRefSummary"];
-            can_bind?: boolean;
-            can_cancel?: boolean;
-            can_expire?: boolean;
-            bound_asset_id?: number | null;
-            bound_ref_id?: string;
-            created_by?: number;
-            /** Format: date-time */
-            expires_at?: string | null;
-            /** Format: date-time */
-            last_synced_at?: string | null;
-            policy_mode?: components["schemas"]["PolicyMode"];
-            visible_to_roles?: components["schemas"]["V7Role"][];
-            action_roles?: components["schemas"]["ActionPolicySummary"][];
-            policy_scope_summary?: components["schemas"]["PolicyScopeSummary"];
-            remark?: string;
-            /** Format: date-time */
-            created_at?: string;
-            /** Format: date-time */
-            updated_at?: string;
-        };
-        CreateUploadRequestRequest: {
-            owner_type: components["schemas"]["AssetOwnerType"];
-            owner_id: number;
-            /** @enum {string} */
-            task_asset_type?: "reference" | "source" | "delivery" | "preview" | "design_thumb";
-            storage_adapter?: components["schemas"]["AssetStorageAdapter"];
-            ref_type?: components["schemas"]["AssetStorageRefType"];
-            file_name: string;
-            mime_type?: string;
-            /** Format: int64 */
-            file_size?: number | null;
-            checksum_hint?: string;
-            remark?: string;
         };
         /**
          * @description `task_id` is required on the top-level `/v1/assets/upload-sessions` route and ignored on task-scoped compatibility routes.
@@ -27593,55 +18764,6 @@ export interface components {
             /** @description Optional reason override for audit post-close supplement completion. When omitted, the reason captured during create-session is used. */
             reason?: string;
         };
-        AuditSupplementUploadSessionCreateRequest: components["schemas"]["CreateTaskAssetUploadSessionRequest"] & ({
-            /** @description Why this delivery asset is being appended after task completion. */
-            reason: string;
-            /**
-             * @description Audit supplements append delivery assets only.
-             * @enum {string}
-             */
-            asset_kind?: "delivery";
-            /**
-             * @description Compatibility alias of `asset_kind`.
-             * @enum {string}
-             */
-            asset_type?: "delivery";
-            /** @enum {string} */
-            owner_module_key?: "audit";
-            /** @enum {string} */
-            upload_policy?: "audit_post_close_supplement";
-            /** @description Required when the completed task is a multi-SKU batch task. */
-            target_sku_code?: string;
-        } | unknown | unknown);
-        AuditSupplementUploadSessionCompleteRequest: components["schemas"]["CompleteTaskAssetUploadSessionRequest"] & {
-            /** @description Optional reason override. The create-session reason is retained when this is empty. */
-            reason?: string;
-        };
-        AuditSupplementItem: {
-            event_id?: string;
-            /** Format: int64 */
-            sequence?: number;
-            /** Format: int64 */
-            task_id?: number;
-            /** Format: int64 */
-            asset_id?: number;
-            /** Format: int64 */
-            asset_version_id?: number;
-            asset_version_no?: number;
-            timeline_version?: number;
-            upload_session_id?: string;
-            filename?: string;
-            reason?: string;
-            target_sku_code?: string;
-            /** Format: int64 */
-            uploaded_by?: number;
-            uploaded_by_name?: string;
-            audit_delivery_count_before?: number;
-            audit_delivery_count_after?: number;
-            design_delivery_count?: number;
-            /** Format: date-time */
-            created_at?: string;
-        };
         CompleteTaskAssetUploadSessionResponseData: {
             session?: components["schemas"]["UploadSession"];
             asset?: components["schemas"]["DesignAsset"];
@@ -27727,10 +18849,6 @@ export interface components {
             source: "task_reference_upload" | "task_create_asset_center";
             /** @enum {string} */
             status?: "uploaded";
-        };
-        AdvanceUploadRequestRequest: {
-            action: components["schemas"]["UploadRequestAdvanceAction"];
-            remark?: string;
         };
         TaskFilterActorOption: {
             id: number;
@@ -27882,6 +19000,8 @@ export interface components {
             base_sale_price?: number | null;
             /** @description Per-SKU design requirement. For `original_product_development`, this is a compatibility alias carrying the same value as `change_request`. */
             design_requirement?: string | null;
+            /** @description Operations suggestion only. The authoritative final resource mode is selected by design and stored on the resource-group revision. */
+            set_mode_hint?: boolean;
             /** @description Optional per-SKU change request derived from task detail. Emitted for `original_product_development`; omitted for `new_product_development`. */
             change_request?: string | null;
             variant_json?: {
@@ -27972,6 +19092,11 @@ export interface components {
             product_name_snapshot?: string;
             product_selection?: components["schemas"]["TaskProductSelectionContext"] | null;
             change_request?: string;
+            /**
+             * @description Operations may suggest that this SKU is a set. Design remains the final authority and may choose either `single` or `set`.
+             * @default false
+             */
+            set_mode_hint: boolean;
             category_code?: string;
             i_id?: string;
             /** @enum {string} */
@@ -27984,6 +19109,21 @@ export interface components {
             size?: string;
             /** Format: int64 */
             quantity?: number | null;
+            /**
+             * Format: double
+             * @description Optional width captured by operations for the single-SKU task.
+             */
+            width?: number | null;
+            /**
+             * Format: double
+             * @description Optional height captured by operations for the single-SKU task.
+             */
+            height?: number | null;
+            /**
+             * Format: double
+             * @description Optional area captured by operations for the single-SKU task.
+             */
+            area?: number | null;
         };
         CreateTaskBatchItem: {
             client_item_id?: string;
@@ -27994,6 +19134,11 @@ export interface components {
             /** @enum {string} */
             material_mode?: "preset" | "other";
             design_requirement: string;
+            /**
+             * @description Per-SKU operations suggestion only; it does not pre-finalize the resource-group mode.
+             * @default false
+             */
+            set_mode_hint: boolean;
             color?: string;
             size?: string;
             /** Format: int64 */
@@ -28011,11 +19156,6 @@ export interface components {
              * @enum {string}
              */
             business_lane?: "normal" | "customization";
-            /**
-             * @description Compatibility alias of `business_lane`.
-             * @enum {string}
-             */
-            workflow_lane?: "normal" | "customization";
             /** @description Required when `batch_items` is omitted. */
             category_code?: string;
             /**
@@ -28056,50 +19196,6 @@ export interface components {
             /** @description Optional override for compatibility. Defaults to the current authenticated actor. */
             assigned_by?: number;
             remark?: string;
-        };
-        /**
-         * @description `uploaded_by` is optional. When omitted, the backend uses the current authenticated actor.
-         *     This contract supports two modes:
-         *     1) compatibility single-asset submit (`asset_type` + `file_name`)
-         *     2) batch submit (`assets[]`) that completes multiple upload sessions in one action.
-         *     For batch multi-SKU delivery submits, each delivery item in `assets[]` must provide
-         *     `target_sku_code`, and the value must match the upload session's captured `target_sku_code`.
-         */
-        SubmitDesignRequest: {
-            /** @description Optional override for compatibility. Defaults to the current authenticated actor. */
-            uploaded_by?: number;
-            /** @enum {string} */
-            asset_type?: "source" | "delivery";
-            upload_request_id?: string;
-            file_name?: string;
-            mime_type?: string;
-            /** Format: int64 */
-            file_size?: number | null;
-            file_path?: string | null;
-            whole_hash?: string | null;
-            remark?: string;
-            assets?: components["schemas"]["SubmitDesignBatchAssetItem"][];
-        };
-        SubmitDesignBatchAssetItem: {
-            upload_session_id: string;
-            /** @enum {string} */
-            asset_type?: "source" | "delivery";
-            /**
-             * @description Canonical alias for `asset_type`.
-             * @enum {string}
-             */
-            asset_kind?: "source" | "delivery";
-            /** @description Required for delivery assets when the task is multi-SKU batch. */
-            target_sku_code?: string;
-            file_hash?: string;
-            upload_content_type?: string;
-            remark?: string;
-            oss_parts?: components["schemas"]["OSSCompletePart"][];
-            oss_upload_id?: string;
-            oss_object_key?: string;
-        };
-        SubmitDesignBatchResult: {
-            submitted_assets?: components["schemas"]["CompleteTaskAssetUploadSessionResponseData"][];
         };
         /**
          * @description `operator_id` is optional. When omitted, the backend uses the current authenticated actor.
@@ -28418,56 +19514,6 @@ export interface components {
             /** Format: date-time */
             expires_at?: string | null;
         };
-        AssetExcelPackageRow: {
-            /** @description Original Excel row number, used in failure reports. */
-            row_number?: number;
-            /** @description Order number retained for address metadata and flat-file disambiguation. */
-            order_no: string;
-            /** @description SKU code for asset matching. */
-            sku_code?: string;
-            /** @description Optional SKU/product name for secondary matching. */
-            sku_name?: string;
-            /** @description Number of copies for each matched image component. A multi-image XuKai SKU set expands every component by this quantity. */
-            quantity: number;
-            /** @description Optional recipient/address column copied into the ZIP address summary by the frontend builder. */
-            address?: string;
-            /** @description Optional filename/product keyword for disambiguation. */
-            keyword?: string;
-        };
-        AssetExcelPackagePreviewRequest: {
-            rows: components["schemas"]["AssetExcelPackageRow"][];
-        };
-        AssetExcelPackageItem: {
-            row_number?: number;
-            order_no: string;
-            sku_code: string;
-            sku_name?: string;
-            quantity: number;
-            /** @description Numeric source record ID. For external resources this is the external asset record ID. */
-            asset_id: number;
-            /** @description Stable mixed resource ID. System resources use the numeric asset ID; external resources use `ext-{id}`. */
-            resource_id?: string;
-            /** @enum {string} */
-            source_type?: "system" | "external";
-            task_id: number;
-            task_no?: string;
-            filename: string;
-            /** Format: int64 */
-            file_size: number;
-            mime_type?: string;
-            /**
-             * Format: uri
-             * @description Direct download URL for a matched JPG/PNG asset. System resources use OSS presign; external resources are returned only when OSS-ready.
-             */
-            download_url: string;
-            address?: string;
-            /** @description External asset origin path when the match comes from an external source. */
-            origin_path?: string;
-            /** @description Non-empty only for a complete multi-image set. The frontend must place all items from the same input row and this folder value under one ZIP directory. */
-            package_folder?: string;
-            /** Format: date-time */
-            expires_at?: string | null;
-        };
         /** @description Reserved for future filters. Send `{}` for now. */
         TaskReferenceBatchDownloadRequest: Record<string, never>;
         TaskReferenceBatchDownloadItem: {
@@ -28507,33 +19553,6 @@ export interface components {
             /** Format: date-time */
             expires_at?: string | null;
         };
-        AssetExcelPackageFailure: {
-            row_number?: number;
-            order_no?: string;
-            sku_code?: string;
-            sku_name?: string;
-            quantity?: number;
-            address?: string;
-            reason: string;
-            message: string;
-        };
-        AssetExcelPackageManifest: {
-            items: components["schemas"]["AssetExcelPackageItem"][];
-            failures?: components["schemas"]["AssetExcelPackageFailure"][];
-            /** @description Successful input-row count. A multi-image set still counts as one successful row. */
-            success_count: number;
-            /** @description Failed input-row count. */
-            failure_count: number;
-            /** @description Expanded image count after applying row quantities and multi-image set components. */
-            total_files: number;
-            /**
-             * Format: int64
-             * @description Expanded byte size after applying row quantities.
-             */
-            total_size: number;
-            /** Format: date-time */
-            expires_at?: string | null;
-        };
         ValidationViolation: {
             field?: string;
             code?: string;
@@ -28550,59 +19569,6 @@ export interface components {
                 violations?: components["schemas"]["ValidationViolation"][];
                 trace_id?: string;
             };
-        };
-        /** @description `operator_id` is optional. When omitted, the backend uses the current authenticated actor. */
-        UpdateTaskProcurementRequest: {
-            /** @description Optional override for compatibility. Defaults to the current authenticated actor. */
-            operator_id?: number;
-            status: components["schemas"]["ProcurementStatus"];
-            /** Format: double */
-            procurement_price?: number | null;
-            /** Format: int64 */
-            quantity?: number | null;
-            supplier_name?: string;
-            purchase_remark?: string;
-            /** Format: date-time */
-            expected_delivery_at?: string | null;
-            remark?: string;
-        };
-        /** @description `operator_id` is optional. When omitted, the backend uses the current authenticated actor. */
-        AdvanceTaskProcurementRequest: {
-            /** @description Optional override for compatibility. Defaults to the current authenticated actor. */
-            operator_id?: number;
-            action: components["schemas"]["ProcurementAction"];
-            remark?: string;
-        };
-        /** @description `operator_id` is optional. When omitted, the backend uses the current authenticated actor. */
-        PrepareWarehouseRequest: {
-            /** @description Optional override for compatibility. Defaults to the current authenticated actor. */
-            operator_id?: number;
-            remark?: string;
-        };
-        /** @description `operator_id` is optional. When omitted, the backend uses the current authenticated actor. */
-        CloseTaskRequest: {
-            /** @description Optional override for compatibility. Defaults to the current authenticated actor. */
-            operator_id?: number;
-            remark?: string;
-        };
-        /** @description `uploaded_by` is optional. When omitted, the backend uses the current authenticated actor. */
-        MockUploadTaskAssetRequest: {
-            /** @description Optional override for compatibility. Defaults to the current authenticated actor. */
-            uploaded_by?: number;
-            /** @enum {string} */
-            asset_type: "reference" | "source" | "delivery" | "preview" | "design_thumb";
-            upload_request_id?: string;
-            file_name: string;
-            mime_type?: string;
-            /** Format: int64 */
-            file_size?: number | null;
-            file_path?: string | null;
-            whole_hash?: string | null;
-            remark?: string;
-        };
-        ProductListResponse: {
-            data?: components["schemas"]["ProductSearchResult"][];
-            pagination?: components["schemas"]["PaginationMeta"];
         };
         /** @enum {string} */
         ProductManagementSyncStatus: "pending_sync" | "queued" | "syncing" | "synced" | "failed" | "cooling_down" | "waiting_image";
@@ -28643,6 +19609,7 @@ export interface components {
             confidence?: "high" | "medium" | "low";
             warning?: string;
         };
+        /** @description Internal SKU business profile embedded in resource groups and cost operations; it is not a standalone product-center page contract. */
         ProductManagementRecord: {
             /** Format: int64 */
             id?: number;
@@ -28660,6 +19627,8 @@ export interface components {
             category_name?: string;
             product_family?: string;
             product_name?: string;
+            /** @description Combination SKU codes that currently include this child SKU. */
+            combo_sku_codes?: string[];
             /** Format: double */
             cost_price?: number | null;
             cost_trace?: components["schemas"]["ProductManagementCostTrace"] | null;
@@ -28709,24 +19678,6 @@ export interface components {
             created_at?: string;
             /** Format: date-time */
             updated_at?: string;
-        };
-        ProductManagementListResponse: {
-            data?: components["schemas"]["ProductManagementRecord"][];
-            pagination?: components["schemas"]["PaginationMeta"];
-        };
-        ProductManagementComboTreeResponse: {
-            /** @description Combo or single-SKU groups. Each group embeds its current product-management child records; use `/v1/product-management` for the authoritative child record field contract. */
-            groups?: {
-                [key: string]: unknown;
-            }[];
-            /** @description Flattened current-page product-management records, using the same record shape as `/v1/product-management`. */
-            data?: {
-                [key: string]: unknown;
-            }[];
-            pagination?: components["schemas"]["PaginationMeta"];
-            combo_sync_summary?: {
-                [key: string]: unknown;
-            };
         };
         CostRuleBinding: {
             /** Format: int64 */
@@ -28958,143 +19909,9 @@ export interface components {
             run?: components["schemas"]["CostRecalculationRun"];
             summary?: components["schemas"]["CostRecalculationRunSummary"];
         };
-        ERPSyncRun: {
-            id?: number;
-            /** @enum {string} */
-            trigger_mode?: "manual" | "scheduled";
-            /** @enum {string} */
-            source_mode?: "stub";
-            /** @enum {string} */
-            status?: "success" | "noop" | "failed";
-            total_received?: number;
-            total_upserted?: number;
-            error_message?: string | null;
-            /** Format: date-time */
-            started_at?: string;
-            /** Format: date-time */
-            finished_at?: string;
-            /** Format: date-time */
-            created_at?: string;
-        };
-        ERPSyncRunResult: {
-            /** @enum {string} */
-            trigger_mode?: "manual" | "scheduled";
-            /** @enum {string} */
-            source_mode?: "stub";
-            /** @enum {string} */
-            status?: "success" | "noop" | "failed";
-            total_received?: number;
-            total_upserted?: number;
-            error_message?: string | null;
-            /** Format: date-time */
-            started_at?: string;
-            /** Format: date-time */
-            finished_at?: string;
-        };
-        ERPSyncStatus: {
-            placeholder?: boolean;
-            scheduler_enabled?: boolean;
-            interval_seconds?: number;
-            /** @enum {string} */
-            source_mode?: "stub";
-            /** @description Configured ERP sync source path as provided by runtime config. The current supported source is a local stub JSON input, not Bridge query ownership or formal external ERP connectivity. */
-            stub_file?: string;
-            /** @description Runtime-resolved stub path after applying the current process working directory. */
-            resolved_stub_file?: string;
-            /** @description Whether `resolved_stub_file` currently exists as a readable file. */
-            stub_file_exists?: boolean;
-            latest_run?: components["schemas"]["ERPSyncRun"] | null;
-        };
-        ERPSyncRunResponse: {
-            data?: components["schemas"]["ERPSyncRunResult"];
-        };
-        ERPSyncStatusResponse: {
-            data?: components["schemas"]["ERPSyncStatus"];
-        };
         TaskListResponse: {
             data?: components["schemas"]["TaskListItem"][];
             pagination?: components["schemas"]["PaginationMeta"];
-        };
-        /** @description Shared board/list filter contract. Queue `normalized_filters` map directly to `/v1/tasks` query semantics. */
-        TaskQueryFilterDefinition: {
-            statuses?: string[];
-            task_types?: ("original_product_development" | "new_product_development" | "retouch_task" | "sku_planning")[];
-            source_modes?: ("existing_product" | "new_product")[];
-            main_statuses?: components["schemas"]["TaskMainStatus"][];
-            sub_status_scope?: components["schemas"]["TaskSubStatusScope"];
-            sub_status_codes?: components["schemas"]["TaskSubStatusCode"][];
-            coordination_statuses?: components["schemas"]["ProcurementCoordinationStatus"][];
-            warehouse_prepare_ready?: boolean;
-            warehouse_receive_ready?: boolean;
-            warehouse_blocking_reason_codes?: ("task_not_found" | "task_detail_missing" | "task_already_pending_warehouse" | "task_already_closed" | "task_awaiting_close" | "task_blocked" | "warehouse_already_received" | "warehouse_already_completed" | "missing_final_design_asset" | "audit_not_approved" | "missing_task_no" | "missing_sku" | "warehouse_not_received" | "warehouse_rejected_pending_resolution" | "warehouse_not_completed" | "pending_exception_resolution" | "filed_at_missing" | "category_missing" | "spec_text_missing" | "cost_price_missing" | "procurement_record_missing" | "procurement_price_missing" | "procurement_quantity_missing" | "procurement_not_ready" | "not_pending_close")[];
-            owner_departments?: string[];
-            owner_org_teams?: string[];
-        };
-        /** @description Direct board-to-list query template for `/v1/tasks`. Multi-value fields use comma-separated values. */
-        TaskQueryTemplate: {
-            status?: string;
-            task_type?: string;
-            source_mode?: string;
-            workflow_lane?: string;
-            main_status?: string;
-            sub_status_code?: string;
-            sub_status_scope?: components["schemas"]["TaskSubStatusScope"];
-            coordination_status?: string;
-            warehouse_blocking_reason_code?: string;
-            keyword?: string;
-            owner_department?: string;
-            owner_org_team?: string;
-            creator_id?: number;
-            designer_id?: number;
-            need_outsource?: boolean;
-            overdue?: boolean;
-            warehouse_prepare_ready?: boolean;
-            warehouse_receive_ready?: boolean;
-        };
-        TaskBoardFiltersSchema: {
-            board_views?: components["schemas"]["TaskBoardView"][];
-            supported_global_filters?: string[];
-            queue_condition_fields?: string[];
-            task_list_endpoint?: string;
-            task_list_passthrough_fields?: string[];
-        };
-        TaskBoardQueueSummary: {
-            queue_key?: string;
-            queue_name?: string;
-            queue_description?: string;
-            board_view?: components["schemas"]["TaskBoardView"];
-            /** @description Hint only. Suggested placeholder roles that usually operate this queue. */
-            suggested_roles?: components["schemas"]["V7Role"][];
-            /** @description Hint only. Does not enforce actor identity or assignment. */
-            suggested_actor_type?: string;
-            /** @description Hint only. Frontend presentation default, not a permission boundary. */
-            default_visibility?: string;
-            /** @description Hint only. Human-readable ownership guidance for workbench UX. */
-            ownership_hint?: string;
-            filters?: components["schemas"]["TaskQueryFilterDefinition"];
-            normalized_filters?: components["schemas"]["TaskQueryFilterDefinition"];
-            query_template?: components["schemas"]["TaskQueryTemplate"];
-            count?: number;
-            sample_tasks?: components["schemas"]["TaskListItem"][];
-            policy_mode?: components["schemas"]["PolicyMode"];
-            visible_to_roles?: components["schemas"]["V7Role"][];
-            action_roles?: components["schemas"]["ActionPolicySummary"][];
-            policy_scope_summary?: components["schemas"]["PolicyScopeSummary"];
-        };
-        TaskBoardSummary: {
-            board_view?: components["schemas"]["TaskBoardView"];
-            board_name?: string;
-            /** Format: date-time */
-            generated_at?: string;
-            filters_schema?: components["schemas"]["TaskBoardFiltersSchema"];
-            queues?: components["schemas"]["TaskBoardQueueSummary"][];
-            policy_mode?: components["schemas"]["PolicyMode"];
-            visible_to_roles?: components["schemas"]["V7Role"][];
-            action_roles?: components["schemas"]["ActionPolicySummary"][];
-            policy_scope_summary?: components["schemas"]["PolicyScopeSummary"];
-        };
-        TaskBoardSummaryResponse: {
-            data?: components["schemas"]["TaskBoardSummary"];
         };
         TaskOperationalCounts: {
             /** Format: int64 */
@@ -29209,443 +20026,6 @@ export interface components {
         TaskOperationalOverviewResponse: {
             data: components["schemas"]["TaskOperationalOverview"];
         };
-        TaskBoardQueue: {
-            queue_key?: string;
-            queue_name?: string;
-            queue_description?: string;
-            board_view?: components["schemas"]["TaskBoardView"];
-            /** @description Hint only. Suggested placeholder roles that usually operate this queue. */
-            suggested_roles?: components["schemas"]["V7Role"][];
-            /** @description Hint only. Does not enforce actor identity or assignment. */
-            suggested_actor_type?: string;
-            /** @description Hint only. Frontend presentation default, not a permission boundary. */
-            default_visibility?: string;
-            /** @description Hint only. Human-readable ownership guidance for workbench UX. */
-            ownership_hint?: string;
-            filters?: components["schemas"]["TaskQueryFilterDefinition"];
-            normalized_filters?: components["schemas"]["TaskQueryFilterDefinition"];
-            query_template?: components["schemas"]["TaskQueryTemplate"];
-            count?: number;
-            tasks?: components["schemas"]["TaskListItem"][];
-            pagination?: components["schemas"]["PaginationMeta"];
-            policy_mode?: components["schemas"]["PolicyMode"];
-            visible_to_roles?: components["schemas"]["V7Role"][];
-            action_roles?: components["schemas"]["ActionPolicySummary"][];
-            policy_scope_summary?: components["schemas"]["PolicyScopeSummary"];
-        };
-        TaskBoardQueuesResponse: {
-            board_view?: components["schemas"]["TaskBoardView"];
-            board_name?: string;
-            /** Format: date-time */
-            generated_at?: string;
-            filters_schema?: components["schemas"]["TaskBoardFiltersSchema"];
-            queues?: components["schemas"]["TaskBoardQueue"][];
-            policy_mode?: components["schemas"]["PolicyMode"];
-            visible_to_roles?: components["schemas"]["V7Role"][];
-            action_roles?: components["schemas"]["ActionPolicySummary"][];
-            policy_scope_summary?: components["schemas"]["PolicyScopeSummary"];
-        };
-        TaskBoardQueuesAPIResponse: {
-            data?: components["schemas"]["TaskBoardQueuesResponse"];
-        };
-        /** @enum {string} */
-        WorkbenchSortKey: "updated_at_desc";
-        /** @description Effective saved workbench preferences resolved for the current session-backed user. */
-        WorkbenchPreferences: {
-            /** @description Optional preset queue to restore by default. */
-            default_queue_key?: string;
-            pinned_queue_keys?: string[];
-            default_filters?: components["schemas"]["TaskQueryTemplate"];
-            /** @description Effective page size for workbench queues. The response resolves the current default if no explicit value was saved. */
-            default_page_size?: number;
-            default_sort?: components["schemas"]["WorkbenchSortKey"];
-        };
-        /** @description Partial update payload for lightweight user-scoped saved workbench preferences. Empty string or `0` clears the saved queue/sort/page-size back to the current default. */
-        WorkbenchPreferencesPatch: {
-            default_queue_key?: string;
-            pinned_queue_keys?: string[];
-            default_filters?: components["schemas"]["TaskQueryTemplate"];
-            /** @enum {integer} */
-            default_page_size?: 0 | 10 | 20 | 50 | 100;
-            /** @enum {string} */
-            default_sort?: "" | "updated_at_desc";
-        };
-        WorkbenchQueueConfig: {
-            queue_key?: string;
-            queue_name?: string;
-            queue_description?: string;
-            board_view?: components["schemas"]["TaskBoardView"];
-            /** @description Hint only. Suggested placeholder roles that usually operate this queue. */
-            suggested_roles?: components["schemas"]["V7Role"][];
-            /** @description Hint only. Does not enforce actor identity or assignment. */
-            suggested_actor_type?: string;
-            /** @description Hint only. Frontend presentation default, not a permission boundary. */
-            default_visibility?: string;
-            /** @description Hint only. Human-readable ownership guidance for workbench UX. */
-            ownership_hint?: string;
-            filters?: components["schemas"]["TaskQueryFilterDefinition"];
-            normalized_filters?: components["schemas"]["TaskQueryFilterDefinition"];
-            query_template?: components["schemas"]["TaskQueryTemplate"];
-        };
-        WorkbenchConfig: {
-            filters_schema?: components["schemas"]["TaskBoardFiltersSchema"];
-            supported_sorts?: components["schemas"]["WorkbenchSortKey"][];
-            supported_page_sizes?: number[];
-            queues?: components["schemas"]["WorkbenchQueueConfig"][];
-        };
-        WorkbenchPreferencesEnvelope: {
-            actor?: components["schemas"]["RequestActor"];
-            preferences?: components["schemas"]["WorkbenchPreferences"];
-            workbench_config?: components["schemas"]["WorkbenchConfig"];
-        };
-        WorkbenchPreferencesResponse: {
-            data?: components["schemas"]["WorkbenchPreferencesEnvelope"];
-        };
-        /** @enum {string} */
-        ExportType: "task_list" | "task_board_queue" | "procurement_summary" | "warehouse_receipts";
-        /** @enum {string} */
-        ExportSourceQueryType: "task_query" | "task_board_queue" | "procurement_summary" | "warehouse_receipts";
-        /** @enum {string} */
-        ExportJobStatus: "queued" | "running" | "ready" | "failed" | "cancelled";
-        /** @enum {string} */
-        ExportJobProgressHint: "created" | "processing" | "download_ready" | "failed" | "cancelled";
-        /**
-         * @description Current placeholder start-boundary mode for export jobs. This does not imply a real async runner platform.
-         * @enum {string}
-         */
-        ExportJobStartMode: "explicit_internal_start";
-        /**
-         * @description Current placeholder execution mode. Future real runners should replace this layer without changing handoff APIs.
-         * @enum {string}
-         */
-        ExportJobExecutionMode: "manual_placeholder_runner";
-        /**
-         * @description Current planning-only delivery mode behind claim/read/refresh handoff APIs.
-         * @enum {string}
-         */
-        ExportJobDeliveryMode: "claim_read_refresh_handoff";
-        /** @description Planning-only execution-boundary read model. Clarifies which current layer starts execution, hands off dispatch, records attempts, and mints placeholder result state before any real runner platform is introduced. */
-        ExportJobExecutionBoundary: {
-            boundary_key?: string;
-            start_layer?: string;
-            dispatch_layer?: string;
-            attempt_layer?: string;
-            result_generation_layer?: string;
-            future_runner_replace_layer?: string;
-            placeholder?: boolean;
-            note?: string;
-        };
-        /** @description Planning-only storage-boundary read model. Clarifies that current ready-state output is represented by `result_ref` metadata only, not real file persistence. */
-        ExportJobStorageBoundary: {
-            boundary_key?: string;
-            result_source_layer?: string;
-            storage_layer?: string;
-            storage_ref_field?: string;
-            future_storage_replace_layer?: string;
-            placeholder?: boolean;
-            note?: string;
-        };
-        /** @description Planning-only delivery-boundary read model. Clarifies that claim/read/refresh currently deliver handoff metadata only and are the future replacement seam for a real download service. */
-        ExportJobDeliveryBoundary: {
-            boundary_key?: string;
-            delivery_layer?: string;
-            delivery_ref_field?: string;
-            claim_action?: string;
-            read_action?: string;
-            refresh_action?: string;
-            future_delivery_replace_layer?: string;
-            placeholder?: boolean;
-            note?: string;
-        };
-        /**
-         * @description Current placeholder runner-adapter identity. Future real scheduler/runner integration should replace this layer rather than the export-job lifecycle contract.
-         * @enum {string}
-         */
-        ExportJobRunnerAdapterKey: "manual_placeholder_adapter";
-        /**
-         * @description Status of one concrete export-job execution attempt, separate from the export job lifecycle.
-         * @enum {string}
-         */
-        ExportJobAttemptStatus: "running" | "succeeded" | "failed" | "cancelled";
-        /**
-         * @description Status of one placeholder adapter-dispatch handoff, separate from both export job lifecycle and attempt lifecycle.
-         * @enum {string}
-         */
-        ExportJobDispatchStatus: "submitted" | "received" | "rejected" | "expired" | "not_executed";
-        /** @enum {string} */
-        ExportJobAdvanceAction: "start" | "mark_ready" | "fail" | "cancel" | "requeue";
-        ExportSourceFilters: {
-            /** @description Required for `task_board_queue` export jobs so the persisted job can point back to one stable board queue definition. */
-            queue_key?: string;
-            board_view?: components["schemas"]["TaskBoardView"];
-            task_id?: number | null;
-            receiver_id?: number | null;
-            /** @description Warehouse-receipt status filter when `source_query_type=warehouse_receipts`. */
-            status?: string;
-        };
-        /** @description Structured placeholder download-handoff metadata only. This is not a real NAS path, signed URL, or storage integration. Its semantics align with task-asset `storage_ref` metadata, but the models remain separate. */
-        ExportResultRef: {
-            ref_type?: string;
-            ref_key?: string;
-            file_name?: string;
-            mime_type?: string;
-            /**
-             * Format: date-time
-             * @description Placeholder handoff expiry timestamp. Before expiry it can gate claim/read; after expiry refresh is required.
-             */
-            expires_at?: string | null;
-            is_placeholder?: boolean;
-            note?: string;
-        };
-        ExportJobEventSummary: {
-            event_id?: string;
-            export_job_id?: number;
-            sequence?: number;
-            /**
-             * @description Export-job audit event type. Current runner-boundary events include
-             *     `export_job.runner_initiated`, `export_job.started`, and attempt-result events
-             *     such as `export_job.attempt_succeeded`, but event payload remains audit context
-             *     only rather than a full runner log stream.
-             */
-            event_type?: string;
-            from_status?: components["schemas"]["ExportJobStatus"];
-            to_status?: components["schemas"]["ExportJobStatus"];
-            actor_id?: number;
-            /** @description Placeholder actor source/type for the current phase. */
-            actor_type?: string;
-            note?: string;
-            /** Format: date-time */
-            created_at?: string;
-        };
-        ExportJobEvent: components["schemas"]["ExportJobEventSummary"] & {
-            /** @description Freeform audit context only. This is not a full runner log stream. */
-            payload?: unknown;
-        };
-        /**
-         * @description Structured placeholder download-handoff response for ready export jobs. This is not a real
-         *     file-download service and does not return bytes, signed URLs, NAS paths, or object-storage handles.
-         *     `is_expired` and `can_refresh` describe placeholder handoff lifecycle only.
-         */
-        ExportJobDownloadHandoff: {
-            export_job_id?: number;
-            status?: components["schemas"]["ExportJobStatus"];
-            download_ready?: boolean;
-            /** @description Whether placeholder download handoff can currently be claimed. */
-            claim_available?: boolean;
-            /** @description Whether placeholder download handoff can currently be read. */
-            read_available?: boolean;
-            /** @description Whether the current placeholder handoff is expired. */
-            is_expired?: boolean;
-            /** @description Whether the current placeholder handoff can be refreshed in this phase. */
-            can_refresh?: boolean;
-            result_ref?: components["schemas"]["ExportResultRef"];
-            file_name?: string;
-            mime_type?: string;
-            is_placeholder?: boolean;
-            /** Format: date-time */
-            expires_at?: string | null;
-            note?: string;
-            /** Format: date-time */
-            claimed_at?: string | null;
-            claimed_by_actor_id?: number | null;
-            claimed_by_actor_type?: string;
-            /** Format: date-time */
-            last_read_at?: string | null;
-            last_read_by_actor_id?: number | null;
-            last_read_by_actor_type?: string;
-        };
-        ExportJobDownloadHandoffResponse: {
-            data?: components["schemas"]["ExportJobDownloadHandoff"];
-        };
-        /**
-         * @description One placeholder execution attempt for an export job. This is not a real worker lease,
-         *     scheduler callback, or distributed runner telemetry stream. It exists so export-job
-         *     lifecycle and per-attempt execution state remain separately visible.
-         */
-        ExportJobAttempt: {
-            attempt_id?: string;
-            export_job_id?: number;
-            /** @description Placeholder dispatch handoff consumed by this attempt, when available. */
-            dispatch_id?: string;
-            attempt_no?: number;
-            /** @description Current trigger source for this start attempt, such as explicit `/start` or backward-compatible `advance action=start`. */
-            trigger_source?: string;
-            execution_mode?: components["schemas"]["ExportJobExecutionMode"];
-            adapter_key?: components["schemas"]["ExportJobRunnerAdapterKey"];
-            status?: components["schemas"]["ExportJobAttemptStatus"];
-            /** Format: date-time */
-            started_at?: string;
-            /** Format: date-time */
-            finished_at?: string | null;
-            error_message?: string;
-            /** @description Placeholder adapter-side note only. This is not full runner telemetry. */
-            adapter_note?: string;
-            /** @description Lightweight hint derived from this attempt status only. It does not replace job-level start/attempt admission. */
-            blocks_new_attempt?: boolean;
-            /** @description Lightweight reason hint derived from this attempt status only. */
-            next_attempt_admission_reason?: string;
-            /** Format: date-time */
-            created_at?: string;
-            /** Format: date-time */
-            updated_at?: string;
-        };
-        /**
-         * @description One placeholder adapter-dispatch handoff for an export job. This is not a real scheduler
-         *     queue item, lease, worker callback, or distributed delivery contract; it only makes the
-         *     dispatch boundary explicit ahead of any future real runner platform.
-         */
-        ExportJobDispatch: {
-            dispatch_id?: string;
-            export_job_id?: number;
-            dispatch_no?: number;
-            trigger_source?: string;
-            execution_mode?: components["schemas"]["ExportJobExecutionMode"];
-            adapter_key?: components["schemas"]["ExportJobRunnerAdapterKey"];
-            status?: components["schemas"]["ExportJobDispatchStatus"];
-            /** Format: date-time */
-            submitted_at?: string;
-            /** Format: date-time */
-            received_at?: string | null;
-            /** Format: date-time */
-            finished_at?: string | null;
-            /** Format: date-time */
-            expires_at?: string | null;
-            status_reason?: string;
-            adapter_note?: string;
-            /** @description Whether this dispatch status itself can be consumed directly by `/start`. */
-            start_admissible?: boolean;
-            /** @description Dispatch-level start-admission reason derived from dispatch status. */
-            start_admission_reason?: string;
-            /** Format: date-time */
-            created_at?: string;
-            /** Format: date-time */
-            updated_at?: string;
-        };
-        ExportJobDispatchListResponse: {
-            data?: components["schemas"]["ExportJobDispatch"][];
-        };
-        ExportJobAttemptListResponse: {
-            data?: components["schemas"]["ExportJobAttempt"][];
-        };
-        ExportTemplate: {
-            key?: string;
-            name?: string;
-            description?: string;
-            export_type?: components["schemas"]["ExportType"];
-            supported_source_query_types?: components["schemas"]["ExportSourceQueryType"][];
-            result_format?: string;
-            placeholder_only?: boolean;
-        };
-        /**
-         * @description Lightweight latest admission decision summary on export-job read models.
-         *     This is a read-model interpretation only and not a persisted independent event stream.
-         */
-        ExportJobAdmissionDecision: {
-            /** @enum {string} */
-            decision_type?: "dispatch" | "redispatch" | "start" | "attempt";
-            allowed?: boolean;
-            reason?: string;
-            job_status?: components["schemas"]["ExportJobStatus"];
-            latest_dispatch_status?: components["schemas"]["ExportJobDispatchStatus"];
-            latest_attempt_status?: components["schemas"]["ExportJobAttemptStatus"];
-        };
-        ExportJob: {
-            export_job_id?: number;
-            template_key?: string;
-            export_type?: components["schemas"]["ExportType"];
-            source_query_type?: components["schemas"]["ExportSourceQueryType"];
-            source_filters?: components["schemas"]["ExportSourceFilters"];
-            normalized_filters?: components["schemas"]["TaskQueryFilterDefinition"];
-            query_template?: components["schemas"]["TaskQueryTemplate"];
-            requested_by?: components["schemas"]["RequestActor"];
-            status?: components["schemas"]["ExportJobStatus"];
-            progress_hint?: components["schemas"]["ExportJobProgressHint"];
-            /** Format: date-time */
-            latest_status_at?: string;
-            download_ready?: boolean;
-            /** @description Whether the export job can currently cross the explicit placeholder runner-initiation boundary, including dispatch-side blocking checks. */
-            can_start?: boolean;
-            /** @description Machine-readable reason for current `can_start` admission decision. */
-            can_start_reason?: string;
-            /** @description Whether a new placeholder attempt can currently be created through the start boundary. */
-            can_attempt?: boolean;
-            /** @description Machine-readable reason for current `can_attempt` decision. */
-            can_attempt_reason?: string;
-            /** @description Whether the export job has previous attempts and is currently back in `queued`, meaning a new placeholder retry attempt can be started now. */
-            can_retry?: boolean;
-            /** @description Whether a new placeholder adapter-dispatch handoff can currently be submitted. */
-            can_dispatch?: boolean;
-            /** @description Machine-readable reason for current `can_dispatch` admission decision. */
-            can_dispatch_reason?: string;
-            /** @description Whether the export job already has historical dispatches and can submit another one now. */
-            can_redispatch?: boolean;
-            /** @description Machine-readable reason for current `can_redispatch` admission decision. */
-            can_redispatch_reason?: string;
-            /** @description Current dispatch-side admission reason alias for list/detail filtering and troubleshooting. */
-            dispatchability_reason?: string;
-            /** @description Current attempt-side admission reason alias for list/detail filtering and troubleshooting. */
-            attemptability_reason?: string;
-            latest_admission_decision?: components["schemas"]["ExportJobAdmissionDecision"];
-            start_mode?: components["schemas"]["ExportJobStartMode"];
-            execution_mode?: components["schemas"]["ExportJobExecutionMode"];
-            adapter_mode?: components["schemas"]["AdapterMode"];
-            dispatch_mode?: components["schemas"]["DispatchMode"];
-            storage_mode?: components["schemas"]["BoundaryStorageMode"];
-            delivery_mode?: components["schemas"]["ExportJobDeliveryMode"];
-            adapter_ref_summary?: components["schemas"]["AdapterRefSummary"];
-            resource_ref_summary?: components["schemas"]["ResourceRefSummary"];
-            handoff_ref_summary?: components["schemas"]["HandoffRefSummary"];
-            execution_boundary?: components["schemas"]["ExportJobExecutionBoundary"];
-            storage_boundary?: components["schemas"]["ExportJobStorageBoundary"];
-            delivery_boundary?: components["schemas"]["ExportJobDeliveryBoundary"];
-            /** @description Whether the current placeholder handoff is expired. */
-            is_expired?: boolean;
-            /** @description Whether the current placeholder handoff can be refreshed in this phase. */
-            can_refresh?: boolean;
-            result_ref?: components["schemas"]["ExportResultRef"];
-            /** @description Number of persisted placeholder dispatch handoffs for this export job. */
-            dispatch_count?: number;
-            latest_dispatch?: components["schemas"]["ExportJobDispatch"];
-            /** @description Number of persisted execution attempts for this export job. */
-            attempt_count?: number;
-            latest_attempt?: components["schemas"]["ExportJobAttempt"];
-            /** @description Lightweight lifecycle-audit summary count for the export job. */
-            event_count?: number;
-            latest_event?: components["schemas"]["ExportJobEventSummary"];
-            latest_dispatch_event?: components["schemas"]["ExportJobEventSummary"];
-            latest_runner_event?: components["schemas"]["ExportJobEventSummary"];
-            policy_mode?: components["schemas"]["PolicyMode"];
-            visible_to_roles?: components["schemas"]["V7Role"][];
-            action_roles?: components["schemas"]["ActionPolicySummary"][];
-            policy_scope_summary?: components["schemas"]["PolicyScopeSummary"];
-            platform_entry_boundary?: components["schemas"]["PlatformEntryBoundary"] | null;
-            remark?: string;
-            /** Format: date-time */
-            created_at?: string;
-            /** Format: date-time */
-            finished_at?: string | null;
-            /** Format: date-time */
-            updated_at?: string;
-        };
-        /**
-         * @description Creates a minimal export job skeleton. For task-query-derived exports, frontend should pass the current stable
-         *     `query_template` from `/v1/tasks` or the board queue handoff, optionally with `normalized_filters`. For
-         *     `task_board_queue` exports, `source_filters.queue_key` is required. For `warehouse_receipts`, use
-         *     `source_filters.task_id` / `receiver_id` / `status` instead of task-query fields.
-         */
-        CreateExportJobRequest: {
-            export_type: components["schemas"]["ExportType"];
-            /** @description Optional static template key. When omitted, the backend chooses the default skeleton template for the selected `export_type`. */
-            template_key?: string;
-            source_query_type: components["schemas"]["ExportSourceQueryType"];
-            source_filters?: components["schemas"]["ExportSourceFilters"];
-            normalized_filters?: components["schemas"]["TaskQueryFilterDefinition"];
-            query_template?: components["schemas"]["TaskQueryTemplate"];
-            remark?: string;
-        };
-        ExportTemplateListResponse: {
-            data?: components["schemas"]["ExportTemplate"][];
-        };
         /** @enum {string} */
         ExternalAssetFilesystemEventType: "upsert" | "delete";
         ExternalAssetFilesystemEvent: {
@@ -29683,216 +20063,10 @@ export interface components {
         ExternalAssetFilesystemEventResponse: {
             data: components["schemas"]["ExternalAssetFilesystemEventResult"];
         };
-        /** @enum {string} */
-        IntegrationConnectorKey: "erp_product_stub" | "erp_bridge_product_upsert" | "export_adapter_bridge";
-        /** @enum {string} */
-        IntegrationCallDirection: "outbound" | "inbound";
-        /** @enum {string} */
-        IntegrationCallStatus: "queued" | "sent" | "succeeded" | "failed" | "cancelled";
-        /** @enum {string} */
-        IntegrationCallProgressHint: "queued" | "in_flight" | "succeeded" | "failed" | "cancelled";
-        /** @enum {string} */
-        IntegrationExecutionMode: "manual_placeholder_adapter";
-        /** @enum {string} */
-        IntegrationExecutionStatus: "prepared" | "dispatched" | "received" | "completed" | "failed" | "cancelled";
-        /** @enum {string} */
-        IntegrationExecutionActionType: "start" | "retry" | "replay" | "compat";
-        IntegrationConnector: {
-            key?: components["schemas"]["IntegrationConnectorKey"];
-            name?: string;
-            description?: string;
-            direction?: components["schemas"]["IntegrationCallDirection"];
-            placeholder_only?: boolean;
-        };
-        IntegrationConnectorListResponse: {
-            data?: components["schemas"]["IntegrationConnector"][];
-        };
-        /** @description Internal integration call log. It records the request envelope above execution attempts, exposes retry/replay admission hints, and is also used for the narrow ERP Bridge product-filing trace under connector `erp_bridge_product_upsert`. */
-        IntegrationCallLog: {
-            call_log_id?: number;
-            connector_key?: components["schemas"]["IntegrationConnectorKey"];
-            operation_key?: string;
-            direction?: components["schemas"]["IntegrationCallDirection"];
-            resource_type?: string;
-            resource_id?: number | null;
-            status?: components["schemas"]["IntegrationCallStatus"];
-            progress_hint?: components["schemas"]["IntegrationCallProgressHint"];
-            adapter_mode?: components["schemas"]["AdapterMode"];
-            dispatch_mode?: components["schemas"]["DispatchMode"];
-            requested_by?: components["schemas"]["RequestActor"];
-            /** @description Placeholder request payload snapshot only. */
-            request_payload?: unknown;
-            /** @description Placeholder response payload snapshot only. */
-            response_payload?: unknown;
-            error_message?: string;
-            /** Format: date-time */
-            latest_status_at?: string;
-            /** Format: date-time */
-            started_at?: string | null;
-            /** Format: date-time */
-            finished_at?: string | null;
-            execution_count?: number;
-            latest_execution?: components["schemas"]["IntegrationExecution"];
-            can_retry?: boolean;
-            can_replay?: boolean;
-            retry_count?: number;
-            replay_count?: number;
-            latest_retry_action?: components["schemas"]["IntegrationExecutionActionSummary"];
-            latest_replay_action?: components["schemas"]["IntegrationExecutionActionSummary"];
-            retryability_reason?: string;
-            replayability_reason?: string;
-            adapter_ref_summary?: components["schemas"]["AdapterRefSummary"];
-            handoff_ref_summary?: components["schemas"]["HandoffRefSummary"];
-            policy_mode?: components["schemas"]["PolicyMode"];
-            visible_to_roles?: components["schemas"]["V7Role"][];
-            action_roles?: components["schemas"]["ActionPolicySummary"][];
-            policy_scope_summary?: components["schemas"]["PolicyScopeSummary"];
-            remark?: string;
-            /** Format: date-time */
-            created_at?: string;
-            /** Format: date-time */
-            updated_at?: string;
-        };
-        IntegrationCallLogResponse: {
-            data?: components["schemas"]["IntegrationCallLog"];
-        };
-        IntegrationCallLogListResponse: {
-            data?: components["schemas"]["IntegrationCallLog"][];
-            pagination?: components["schemas"]["PaginationMeta"];
-        };
-        /** @description One placeholder integration execution attempt beneath one call log. `action_type` distinguishes manual start, retry, replay, and compatibility actions on the same execution boundary. This is not an external worker, callback stream, or retry platform. */
-        IntegrationExecution: {
-            execution_id?: string;
-            call_log_id?: number;
-            connector_key?: components["schemas"]["IntegrationConnectorKey"];
-            execution_no?: number;
-            execution_mode?: components["schemas"]["IntegrationExecutionMode"];
-            action_type?: components["schemas"]["IntegrationExecutionActionType"];
-            adapter_mode?: components["schemas"]["AdapterMode"];
-            dispatch_mode?: components["schemas"]["DispatchMode"];
-            trigger_source?: string;
-            status?: components["schemas"]["IntegrationExecutionStatus"];
-            /** Format: date-time */
-            latest_status_at?: string;
-            /** Format: date-time */
-            started_at?: string;
-            /** Format: date-time */
-            finished_at?: string | null;
-            error_message?: string;
-            adapter_note?: string;
-            retryable?: boolean;
-            adapter_ref_summary?: components["schemas"]["AdapterRefSummary"];
-            handoff_ref_summary?: components["schemas"]["HandoffRefSummary"];
-            policy_mode?: components["schemas"]["PolicyMode"];
-            visible_to_roles?: components["schemas"]["V7Role"][];
-            action_roles?: components["schemas"]["ActionPolicySummary"][];
-            policy_scope_summary?: components["schemas"]["PolicyScopeSummary"];
-            /** Format: date-time */
-            created_at?: string;
-            /** Format: date-time */
-            updated_at?: string;
-        };
-        /** @description Latest retry/replay action summary derived from persisted execution attempts. It reuses the execution boundary instead of introducing a second action-history subsystem. */
-        IntegrationExecutionActionSummary: {
-            action_type?: components["schemas"]["IntegrationExecutionActionType"];
-            execution_id?: string;
-            execution_no?: number;
-            trigger_source?: string;
-            status?: components["schemas"]["IntegrationExecutionStatus"];
-            retryable?: boolean;
-            /** Format: date-time */
-            latest_status_at?: string;
-            /** Format: date-time */
-            finished_at?: string | null;
-        };
-        IntegrationExecutionResponse: {
-            data?: components["schemas"]["IntegrationExecution"];
-        };
-        IntegrationExecutionListResponse: {
-            data?: components["schemas"]["IntegrationExecution"][];
-        };
-        CreateIntegrationCallLogRequest: {
-            connector_key: components["schemas"]["IntegrationConnectorKey"];
-            operation_key: string;
-            direction: components["schemas"]["IntegrationCallDirection"];
-            resource_type?: string;
-            resource_id?: number | null;
-            request_payload?: unknown;
-            remark?: string;
-        };
-        AdvanceIntegrationCallLogRequest: {
-            status: components["schemas"]["IntegrationCallStatus"];
-            response_payload?: unknown;
-            error_message?: string;
-            remark?: string;
-        };
-        CreateIntegrationExecutionRequest: {
-            execution_mode?: components["schemas"]["IntegrationExecutionMode"];
-            trigger_source?: string;
-            adapter_note?: string;
-        };
-        AdvanceIntegrationExecutionRequest: {
-            status: components["schemas"]["IntegrationExecutionStatus"];
-            response_payload?: unknown;
-            error_message?: string;
-            adapter_note?: string;
-            retryable?: boolean;
-        };
-        IntegrationExecutionActionRequest: {
-            execution_mode?: components["schemas"]["IntegrationExecutionMode"];
-            adapter_note?: string;
-        };
-        CreateExportJobDispatchRequest: {
-            /** @description Optional placeholder handoff source. Defaults to a manual internal dispatch source. */
-            trigger_source?: string;
-            /**
-             * Format: date-time
-             * @description Optional placeholder dispatch expiry timestamp.
-             */
-            expires_at?: string | null;
-            remark?: string;
-        };
-        AdvanceExportJobDispatchRequest: {
-            /** @enum {string} */
-            action: "receive" | "reject" | "expire" | "mark_not_executed";
-            reason?: string;
-            remark?: string;
-        };
-        ExportJobResponse: {
-            data?: components["schemas"]["ExportJob"];
-        };
-        ExportJobListResponse: {
-            data?: components["schemas"]["ExportJob"][];
-            pagination?: components["schemas"]["PaginationMeta"];
-        };
-        ExportJobEventListResponse: {
-            data?: components["schemas"]["ExportJobEvent"][];
-        };
-        /**
-         * @description Internal/admin lifecycle-advance skeleton for export jobs. This endpoint is for manual lifecycle progression only
-         *     and is not a real async runner, scheduler, or file-generation platform. `action=start` remains
-         *     supported for backward compatibility, but `POST /v1/export-jobs/{id}/start` is now the formal
-         *     placeholder runner-initiation boundary.
-         */
-        AdvanceExportJobRequest: {
-            action: components["schemas"]["ExportJobAdvanceAction"];
-            /** @description Optional placeholder handoff file name override used when `action=mark_ready`. */
-            result_file_name?: string;
-            /** @description Optional placeholder MIME type override used when `action=mark_ready`. */
-            result_mime_type?: string;
-            /**
-             * Format: date-time
-             * @description Optional placeholder download-handoff expiry used when `action=mark_ready`.
-             */
-            expires_at?: string;
-            /** @description Optional failure note used when `action=fail`. */
-            failure_reason?: string;
-            remark?: string;
-        };
         CodeRule: {
             id?: number;
             /** @enum {string} */
-            rule_type?: "task_no" | "new_sku" | "outsource_no" | "handover_no";
+            rule_type?: "task_no" | "task_product_code" | "sku_planning" | "handover_no";
             rule_name?: string;
             prefix?: string;
             date_format?: string;
@@ -29913,22 +20087,16 @@ export interface components {
             preview?: string;
             is_preview?: boolean;
         };
-        /** @enum {string} */
-        APIReadiness: "ready_for_frontend" | "internal_placeholder" | "mock_placeholder_only";
-        OSSCompletePart: {
-            part_number?: number;
-            etag?: string;
-        };
         /**
          * @description Source: V1_MODULE_ARCHITECTURE §3 / §7 / V1_CUSTOMIZATION_WORKFLOW §2.
          * @enum {string}
          */
         TaskModuleState: "active" | "pending_claim" | "in_progress" | "submitted" | "approved" | "rejected" | "closed" | "forcibly_closed" | "pending" | "preparing" | "received" | "completed";
         /**
-         * @description Source: V1_MODULE_ARCHITECTURE §6 Layer 3 / R1 prompt §1.2.
+         * @description Current internal-node action. Public design submission and audit decisions use their dedicated endpoints.
          * @enum {string}
          */
-        TaskModuleAction: "claim" | "submit" | "approve" | "reject" | "reassign" | "pool_reassign" | "asset_upload_session_create" | "update_reference_files" | "update_basic_info" | "update_deadline" | "update_priority" | "close_task" | "cancel_task";
+        TaskModuleAction: "submit";
         /**
          * @description Minimum deny-code registry frozen in R1. Source: V1_MODULE_ARCHITECTURE §6.2 / R1 prompt §1.3.
          * @enum {string}
@@ -29974,7 +20142,6 @@ export interface components {
             material_mode?: "preset" | "other";
             design_requirement?: string;
             new_sku?: string;
-            purchase_sku?: string;
             /** @enum {string} */
             sku_code_type?: "regular" | "customization";
             /** @enum {string} */
@@ -30109,11 +20276,100 @@ export interface components {
             /** Format: date-time */
             created_at?: string;
         };
+        AIChatConfig: {
+            enabled: boolean;
+            hybrid_search_enabled: boolean;
+            max_input_chars: number;
+            retention_days: number;
+            max_concurrent_user: number;
+            can_review_all: boolean;
+        };
+        AIMessageSource: {
+            /** @example S1 */
+            source_id: string;
+            /** @enum {string} */
+            entity_type: "task" | "task_resource_group" | "external_asset" | "business_trend" | "experience_summary";
+            entity_id: string;
+            title: string;
+            internal_route?: string;
+            evidence_excerpt: string;
+            source_version?: string;
+            rank: number;
+        };
+        AIMessage: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            conversation_id: string;
+            /** Format: uuid */
+            reply_to_message_id?: string;
+            client_message_id?: string;
+            /** @enum {string} */
+            role: "user" | "assistant";
+            content: string;
+            /** @enum {string} */
+            status: "streaming" | "completed" | "cancelled" | "failed";
+            provider?: string;
+            model?: string;
+            /** Format: int64 */
+            input_tokens?: number;
+            /** Format: int64 */
+            output_tokens?: number;
+            finish_reason?: string;
+            error_code?: string;
+            /** Format: date-time */
+            started_at?: string;
+            /** Format: date-time */
+            completed_at?: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            sources?: components["schemas"]["AIMessageSource"][];
+        };
+        AIConversation: {
+            /** Format: uuid */
+            id: string;
+            /** Format: int64 */
+            owner_user_id: number;
+            owner_name?: string;
+            title: string;
+            /** @enum {string} */
+            status: "active" | "deleted";
+            /** Format: int64 */
+            lock_version: number;
+            /** Format: date-time */
+            expires_at: string;
+            /** Format: date-time */
+            deleted_at?: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            messages?: components["schemas"]["AIMessage"][];
+        };
+        AIConversationList: {
+            items: components["schemas"]["AIConversation"][];
+            /** Format: int64 */
+            total: number;
+            page: number;
+            page_size: number;
+            total_pages: number;
+        };
+        SearchRetrievalMeta: {
+            /** @enum {string} */
+            requested_mode: "auto" | "exact" | "hybrid";
+            /** @enum {string} */
+            mode: "exact" | "hybrid";
+            degraded: boolean;
+            candidates: number;
+            reason?: string;
+        };
         /**
-         * @description Source: V1_INFORMATION_ARCHITECTURE §4.2.
-         *     Decision (R1.7-D): all four arrays are item-schema fixed; `users[]` is always
-         *     `[]` for callers other than super_admin / hr_admin regardless of match count
-         *     (IA §4.3 row-level policy; R1.7-D Q1=A1 + Q2=U1).
+         * @description All four arrays use fixed item schemas. Each branch is fail-closed by its
+         *     explicit capability and stable-ID data scope. `users[]` is returned only
+         *     when the caller has `access.view` or `access.manage`; legacy role names do
+         *     not grant search visibility.
          */
         SearchResultGroup: {
             tasks?: {
@@ -30219,8 +20475,7 @@ export interface components {
          *     - `task_pending_audit`: `task_id`, `module_key`, `pool_team_code`; optional
          *       `task_no`, `task_type`, `submitted_by`, `submitted_by_name`.
          *     - `task_closed`: `task_id`; optional `task_no`, `creator_id`, `creator_name`,
-         *       `designer_id`, `designer_name`, `closed_by`, `closed_by_name`,
-         *       `warehouse_status`, `auto_release`, `remark`.
+         *       `designer_id`, `designer_name`, `closed_by`, `closed_by_name`, `remark`.
          *     - `claim_conflict`: `task_id`, `module_key`; optional `task_no`, `winner_user_id`,
          *       `winner_user_name`.
          *     - `pool_reassigned`: `task_id`, `module_key`; optional `task_no`, `team_code`,
@@ -30303,25 +20558,6 @@ export interface components {
             queued?: boolean;
             message?: string;
         };
-        /**
-         * @description Source: V1_INFORMATION_ARCHITECTURE §5.2.
-         * @enum {string}
-         */
-        OrgMoveRequestState: "pending_super_admin_confirm" | "approved" | "rejected";
-        /** @description Source: V1_INFORMATION_ARCHITECTURE §5.2. */
-        OrgMoveRequest: {
-            id?: number;
-            user_id?: number;
-            source_department_id?: number;
-            target_department_id?: number | null;
-            state?: components["schemas"]["OrgMoveRequestState"];
-            reason?: string | null;
-            reject_reason?: string | null;
-            /** Format: date-time */
-            created_at?: string;
-            /** Format: date-time */
-            updated_at?: string;
-        };
         /** @description Source: V1_INFORMATION_ARCHITECTURE §7.2 (我的组织 · 只读). R4-SA-B. */
         MyOrgProfile: {
             /** @description Canonical department name from `/v1/org/options`. */
@@ -30332,7 +20568,7 @@ export interface components {
             managed_departments?: string[];
             /** @description Teams this user manages (populated for TeamLead / DeptAdmin managed scope). */
             managed_teams?: string[];
-            roles?: components["schemas"]["V7Role"][];
+            roles?: components["schemas"]["IdentityRoleCode"][];
         };
         /** @description Source: V1_INFORMATION_ARCHITECTURE §7.2 (账户信息 · 编辑). R4-SA-B. All fields optional; server applies PATCH semantics. Profile save only updates display_name/mobile/email; avatar changes must use POST/DELETE /v1/me/avatar. */
         UpdateMyProfileRequest: {
@@ -30351,61 +20587,6 @@ export interface components {
              * @description Backward-compatible alias for `confirm`.
              */
             password_confirmation?: string;
-        };
-        /** @description Source: V1_INFORMATION_ARCHITECTURE §5.2 (DeptAdmin 发起跨部门移出). R4-SA-B. */
-        CreateOrgMoveRequestPayload: {
-            /** @description The user being moved. Must currently belong to the source department identified in the path. */
-            user_id: number;
-            /** @description Destination department; nullable means unassigned-pool. */
-            target_department_id: number | null;
-            reason: string;
-        };
-        /** @description Source: V1_INFORMATION_ARCHITECTURE §5.2 (SuperAdmin 驳回 org-move-request). R4-SA-B. */
-        RejectReasonRequest: {
-            reason: string;
-        };
-        /**
-         * @description Source: V1_INFORMATION_ARCHITECTURE §1 一级菜单「报表」 + V1_MODULE_ARCHITECTURE §12 U 表.
-         *     R1.7-D decision (Q6=C1): v1 直查 `task_module_events` + `tasks`,不建物化表;
-         *     R6+ 视性能再升级到汇总表。
-         */
-        L1Card: {
-            /** @description Stable card key (e.g. `tasks_in_progress`, `tasks_completed_today`). */
-            key?: string;
-            title?: string;
-            value?: number;
-            unit?: string | null;
-            /** @description Change vs previous period; null when no baseline available. */
-            delta?: number | null;
-        };
-        /** @description Enriched task workflow event used by the data-center KPI page. The event actor remains the actual operator; assignment target ids are carried in payload. */
-        KPIAnalysisEvent: {
-            id?: string;
-            /** Format: int64 */
-            task_id?: number;
-            task_no?: string;
-            sku_code?: string;
-            product_name?: string;
-            task_type?: string;
-            business_lane?: string;
-            category_name?: string;
-            task_status?: string;
-            /** @enum {string} */
-            priority?: "low" | "normal" | "high" | "critical";
-            /** Format: date-time */
-            deadline_at?: string | null;
-            /** @enum {string} */
-            event_type?: "task.created" | "task.batch_items_created" | "task.assigned" | "task.reassigned" | "task.batch_assigned" | "task.design.submitted" | "task.audit.approved" | "task.audit.rejected";
-            /** Format: int64 */
-            operator_id?: number | null;
-            operator_name?: string;
-            operator_department?: string;
-            operator_team?: string;
-            payload?: {
-                [key: string]: unknown;
-            };
-            /** Format: date-time */
-            created_at?: string;
         };
         /** @description Source: V1_ASSET_OWNERSHIP §5.4 (delete) / §7.3 (archive). R4-SA-A. */
         AssetReasonRequest: {
@@ -30486,41 +20667,16 @@ export interface components {
             /** Format: date-time */
             deleted_at?: string | null;
         };
-        AssetBatchSearchRequest: {
-            /** @description SKU codes, task numbers, or external-resource filename/path keywords, one logical search term per item. */
-            terms: string[];
-            /**
-             * @description UI-facing format filter. The server maps this to a coarse DB format category first, then applies exact extension/MIME filtering.
-             * @default jpg_png
-             * @enum {string}
-             */
-            format_filter: "jpg_png" | "jpg" | "png" | "webp" | "image" | "design" | "pdf" | "archive" | "all";
-            /**
-             * @description UI-facing asset role filter. System resources use task asset roles; external resources do not have system roles and are included for auto/all/delivery/source searches by filename/path format.
-             * @default delivery
-             * @enum {string}
-             */
-            asset_kind: "auto" | "all" | "delivery" | "reference" | "source" | "preview" | "other";
+        /**
+         * @description Code-owned business operations used by the v8 access-policy matrix. Legacy roles and organization display names are not authorization sources.
+         * @enum {string}
+         */
+        V8PermissionCode: "task.view" | "task.create" | "task.assign" | "task.reassign" | "task.terminate" | "task.upload_source" | "task.audit" | "task.audit_handover" | "task.reopen" | "planning_sku.view" | "planning_sku.create" | "planning_sku.edit" | "planning_sku.export" | "planning_sku.erp_sync" | "planning_sku.erp_retry" | "asset.view" | "asset.download" | "asset.export" | "asset.publish" | "asset.manage" | "asset_workbench.use" | "asset_workbench.submit" | "asset_workbench.members.manage" | "asset_workbench.profiles.manage" | "asset_workbench.groups.manage" | "asset_workbench.drive.manage" | "asset_workbench.batch.manage" | "asset_workbench.templates.manage" | "asset_workbench.qc.manage" | "asset_workbench.settlement.manage" | "asset_workbench.audit.view" | "catalog.view" | "catalog.manage" | "erp.manage" | "account.use" | "report.view" | "system.manage" | "access.view" | "access.manage";
+        /** @description One role operation grant. Empty task_types means all task types are allowed. */
+        AccessRolePermission: {
+            code: components["schemas"]["V8PermissionCode"];
+            task_types?: ("original_product_development" | "new_product_development" | "retouch_task" | "sku_planning" | "customer_customization" | "regular_customization")[];
         };
-        AssetBatchSearchResult: {
-            term: string;
-            /** @enum {string} */
-            status: "matched" | "not_found" | "error";
-            message: string;
-            /** @description Number of assets matching the requested format and role filters for this term. */
-            candidates: number;
-            /** @description First ranked asset retained for compatibility. New bulk-download clients should consume `assets`. */
-            asset?: components["schemas"]["AssetDetail"];
-            /** @description All system and external resources matching the requested term, format filter, and asset role filter, ordered by the same ranking used by `asset`. */
-            assets?: components["schemas"]["AssetDetail"][];
-        };
-        AssetBatchSearchResponse: {
-            results: components["schemas"]["AssetBatchSearchResult"][];
-            matched_count: number;
-            failed_count: number;
-        };
-        /** @enum {string} */
-        V8PermissionCode: "task.view" | "task.create" | "task.design.submit" | "task.audit.decision" | "task.reopen" | "task.manage" | "planning_sku.view" | "planning_sku.create" | "planning_sku.edit" | "planning_sku.export" | "planning_sku.erp_sync" | "planning_sku.erp_retry" | "asset.view" | "asset.download" | "asset.export" | "asset.publish" | "asset.manage" | "asset_workbench.use" | "asset_workbench.submit" | "asset_workbench.members.manage" | "asset_workbench.profiles.manage" | "asset_workbench.groups.manage" | "asset_workbench.drive.manage" | "asset_workbench.batch.manage" | "asset_workbench.templates.manage" | "asset_workbench.qc.manage" | "asset_workbench.settlement.manage" | "asset_workbench.audit.view" | "catalog.view" | "catalog.manage" | "erp.manage" | "account.use" | "report.view" | "system.manage" | "access_policy.view" | "access_policy.manage";
         AccessPermission: {
             code: components["schemas"]["V8PermissionCode"];
             module: string;
@@ -30581,7 +20737,7 @@ export interface components {
             archived_at?: string | null;
             /** Format: int64 */
             version: number;
-            permissions: components["schemas"]["V8PermissionCode"][];
+            permissions: components["schemas"]["AccessRolePermission"][];
         };
         EffectiveAccess: {
             /** Format: int64 */
@@ -30598,6 +20754,7 @@ export interface components {
                 source_type: string;
                 /** @enum {string} */
                 scope_mode: "self" | "own_department" | "own_team" | "selected_org" | "global";
+                task_types?: ("original_product_development" | "new_product_development" | "retouch_task" | "sku_planning")[];
             }[];
         };
         AccessOrgPolicy: {
@@ -30638,9 +20795,48 @@ export interface components {
             mime_type?: string;
             /** Format: int64 */
             file_size?: number | null;
+            /**
+             * @description historical_unavailable preserves immutable revision metadata for an object proven missing before V8 migration; preview and download URLs are omitted.
+             * @enum {string}
+             */
+            availability?: "available" | "historical_unavailable";
+            /**
+             * @description Stable reason code when availability is historical_unavailable; clients localize the user-facing explanation.
+             * @enum {string}
+             */
+            unavailable_reason?: "legacy_original_object_missing";
             download_url?: string;
+            preview_url?: string;
             /** Format: date-time */
             download_expires_at?: string | null;
+        };
+        TaskAssetGroupRevisionReference: {
+            /** Format: int64 */
+            id: number;
+            /** Format: int64 */
+            revision_id: number;
+            /** Format: int64 */
+            reference_file_ref_id: number;
+            /** Format: int64 */
+            formal_task_asset_id?: number | null;
+            sort_order: number;
+            ref_id: string;
+            file_name?: string;
+            scope?: string;
+            mime_type?: string;
+            /** Format: int64 */
+            file_size?: number | null;
+            /**
+             * @description historical_unavailable preserves the immutable reference snapshot but suppresses preview and download URLs.
+             * @enum {string}
+             */
+            availability?: "available" | "historical_unavailable";
+            /** @enum {string} */
+            unavailable_reason?: "legacy_original_object_missing";
+            download_url?: string;
+            preview_url?: string;
+            /** Format: date-time */
+            created_at: string;
         };
         TaskAssetGroupRevisionItem: {
             /** Format: int64 */
@@ -30652,6 +20848,41 @@ export interface components {
             sort_order: number;
             item_name?: string;
             file?: components["schemas"]["TaskResourceFile"];
+        };
+        /**
+         * @description Parsed fail-safe projection of versioned legacy-migration metadata. Event payloads and raw storage
+         *     addresses are never returned. Legacy full markers expose every validated evidence id with
+         *     `evidence_event_ids_complete=true`. Compact writer markers expose the validated total in
+         *     `evidence_event_count` and only the stored first id; the list is incomplete when the count is greater
+         *     than one. Clients must not treat `evidence_event_ids` as complete unless
+         *     `evidence_event_ids_complete=true`. When `upload_sessions_known` is false, `upload_session_ids` is empty
+         *     because the stored migration reason did not prove that association. `confidence` remains authoritative
+         *     for distinguishing reviewed `confirmed_auto` rows from `hard_blocked` rows.
+         */
+        ResourceGroupRevisionEvidence: {
+            /** @enum {string} */
+            schema_version: "migration_v2";
+            manifest_sha256: string;
+            /** @enum {string} */
+            confidence: "confirmed_auto" | "proposed_review" | "hard_blocked";
+            /** Format: int64 */
+            confirmed_by: number;
+            /** Format: date-time */
+            confirmed_at: string;
+            /** @description Validated evidence ids stored in the marker. For compact markers this contains only the first id. */
+            evidence_event_ids: string[];
+            /**
+             * Format: int64
+             * @description Total validated evidence-id count asserted by the marker.
+             */
+            evidence_event_count: number;
+            /** @description True only when evidence_event_ids contains the complete asserted evidence set. */
+            evidence_event_ids_complete: boolean;
+            upload_session_ids: string[];
+            upload_sessions_known: boolean;
+            business_reason?: string;
+            /** @description Lower-case SHA-256 of an oversized business reason that could not fit beside the marker. */
+            business_reason_sha256?: string;
         };
         TaskAssetGroupRevision: {
             /** Format: int64 */
@@ -30670,17 +20901,29 @@ export interface components {
             source_stage: "design" | "audit" | "retouch" | "migration" | "reopen";
             /** Format: int64 */
             created_by: number;
+            created_by_name?: string;
             reason?: string;
+            legacy_migration: boolean;
+            evidence_summary?: components["schemas"]["ResourceGroupRevisionEvidence"] | null;
             items: components["schemas"]["TaskAssetGroupRevisionItem"][];
-            references: {
-                [key: string]: unknown;
-            }[];
+            references: components["schemas"]["TaskAssetGroupRevisionReference"][];
             /** Format: date-time */
             submitted_at?: string | null;
             /** Format: date-time */
             finalized_at?: string | null;
             /** Format: date-time */
             created_at: string;
+        };
+        ResourceGroupRevisionListResult: {
+            items: components["schemas"]["TaskAssetGroupRevision"][];
+            /** Format: int64 */
+            working_revision_id?: number | null;
+            /** Format: int64 */
+            finalized_revision_id?: number | null;
+            page: number;
+            page_size: number;
+            /** Format: int64 */
+            total: number;
         };
         TaskAssetGroup: {
             /** Format: int64 */
@@ -30703,8 +20946,14 @@ export interface components {
             migration_issue?: string;
             task_no?: string;
             sku_code?: string;
+            product_name?: string;
+            /** Format: int64 */
+            creator_id?: number;
+            creator_name?: string;
             /** @enum {string} */
             business_lane?: "normal" | "customization";
+            /** @description Current SKU business projection used by the asset center for specifications, dimensions, cost trace, combination codes, and ERP synchronization state. */
+            sku_profile?: components["schemas"]["ProductManagementRecord"] | null;
             working_revision?: components["schemas"]["TaskAssetGroupRevision"];
             finalized_revision?: components["schemas"]["TaskAssetGroupRevision"];
             /** Format: date-time */
@@ -30719,24 +20968,50 @@ export interface components {
             workflow_revision: number;
             groups: components["schemas"]["TaskAssetGroup"][];
         };
+        /**
+         * @description One complete resource-group input. For ordinary and customization tasks, the designer selects
+         *     `mode` and submits exactly one editable source while `final_task_asset_ids` MUST be empty.
+         *     During audit, `mode` MUST equal the designer-selected mode; each group supplies a newly staged
+         *     complete final set (`single` exactly one, `set` at least two in array order). Omitting
+         *     `source_task_asset_id` during audit inherits the designer source; supplying it replaces that source.
+         *     Retouch submissions provide final files directly and may omit the source.
+         */
         SubmitResourceGroupInput: {
             /** Format: int64 */
             group_id: number;
             /** Format: int64 */
             expected_group_lock_version: number;
-            /** @enum {string} */
+            /**
+             * @description Selected by the designer for ordinary/customization tasks and read-only during audit.
+             * @enum {string}
+             */
             mode: "single" | "set";
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Required for ordinary/customization design submission. During audit omission inherits the submitted designer source.
+             */
             source_task_asset_id?: number | null;
+            /** @description Empty during ordinary/customization design submission; complete ordered final output set during audit or retouch submission. */
             final_task_asset_ids: number[];
             reference_file_ref_ids?: number[];
         };
+        /**
+         * @description Atomically covers every task resource group. Ordinary/customization design submissions declare
+         *     each group's single/set mode and editable source only, then enter `PendingAudit`. Retouch submissions
+         *     include complete final outputs and complete the task directly.
+         */
         SubmitDesignV2Request: {
             /** Format: int64 */
             expected_workflow_revision: number;
             idempotency_key: string;
             groups: components["schemas"]["SubmitResourceGroupInput"][];
         };
+        /**
+         * @description `approve` requires a complete `groups` array covering every resource group. Final files must be
+         *     newly staged by the current auditor and match the designer-selected mode. The auditor may replace
+         *     the source, but cannot change single/set; an incorrect mode must be returned to design.
+         *     `return_to_design` requires `reason` and does not accept partial resource replacement.
+         */
         AuditDecisionV2Request: {
             /** @enum {string} */
             decision: "approve" | "return_to_design";
@@ -30744,6 +21019,7 @@ export interface components {
             expected_workflow_revision: number;
             idempotency_key: string;
             reason?: string;
+            /** @description Required and complete for approve; omitted or empty for return_to_design. */
             groups?: components["schemas"]["SubmitResourceGroupInput"][];
         };
         ReopenTaskV2Request: {
@@ -30867,7 +21143,7 @@ export interface components {
             code: string;
             name: string;
             description?: string;
-            permissions?: components["schemas"]["V8PermissionCode"][];
+            permissions?: components["schemas"]["AccessRolePermission"][];
             reason: string;
             /** Format: int64 */
             expected_policy_revision: number;
@@ -30889,7 +21165,7 @@ export interface components {
             expected_policy_revision: number;
         };
         ReplaceRolePermissionsRequest: {
-            permissions: components["schemas"]["V8PermissionCode"][];
+            permissions: components["schemas"]["AccessRolePermission"][];
             /** Format: int64 */
             expected_role_version: number;
             reason: string;
@@ -30922,8 +21198,29 @@ export interface components {
             /** Format: date-time */
             created_at: string;
         };
+        /** @description One matched resource row used when asset-center list filters by resource_role or format_category. */
+        FlatResourceItem: {
+            /** Format: int64 */
+            group_id: number;
+            /** Format: int64 */
+            task_id: number;
+            task_no?: string;
+            sku_code?: string;
+            /** @enum {string} */
+            resource_role: "reference" | "source" | "final";
+            file_name: string;
+            mime_type?: string;
+            preview_url?: string;
+            download_url?: string;
+        };
         ResourceGroupListResult: {
             items: components["schemas"]["TaskAssetGroup"][];
+            flat_items?: components["schemas"]["FlatResourceItem"][];
+            /**
+             * @description group keeps one SKU summary card per resource group; flat returns matched resource rows.
+             * @enum {string}
+             */
+            view_mode?: "group" | "flat";
             page: number;
             page_size: number;
             /** Format: int64 */
@@ -31644,6 +21941,7 @@ export interface operations {
             };
             403: components["responses"]["V8Forbidden"];
             404: components["responses"]["V8NotFound"];
+            409: components["responses"]["V8Conflict"];
         };
     };
     listTaskResourceGroups: {
@@ -31651,9 +21949,13 @@ export interface operations {
             query?: {
                 task_id?: number;
                 sku_code?: string;
+                task_no?: string;
+                creator_id?: number;
+                resource_role?: "reference" | "source" | "final";
                 /** @description Searches task number */
                 q?: string;
-                format_category?: "all" | "image" | "design" | "pdf" | "video" | "archive";
+                /** @description document is accepted as an alias of pdf. */
+                format_category?: "all" | "image" | "design" | "pdf" | "document" | "video" | "archive";
                 business_lane?: "normal" | "customization";
                 page?: number;
                 page_size?: number;
@@ -31676,6 +21978,7 @@ export interface operations {
                 };
             };
             403: components["responses"]["V8Forbidden"];
+            409: components["responses"]["V8Conflict"];
         };
     };
     getTaskResourceGroup: {
@@ -31702,6 +22005,38 @@ export interface operations {
             };
             403: components["responses"]["V8Forbidden"];
             404: components["responses"]["V8NotFound"];
+            409: components["responses"]["V8Conflict"];
+        };
+    };
+    listTaskResourceGroupRevisions: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+            };
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Scoped historical resource-group revisions. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["ResourceGroupRevisionListResult"];
+                    };
+                };
+            };
+            400: components["responses"]["V8BadRequest"];
+            403: components["responses"]["V8Forbidden"];
+            404: components["responses"]["V8NotFound"];
+            409: components["responses"]["V8Conflict"];
         };
     };
     batchDownloadTaskResourceGroups: {
@@ -31730,6 +22065,7 @@ export interface operations {
             };
             400: components["responses"]["V8BadRequest"];
             403: components["responses"]["V8Forbidden"];
+            409: components["responses"]["V8Conflict"];
         };
     };
     createPlanningSKUImageUploadSession: {
@@ -32048,6 +22384,85 @@ export interface operations {
             403: components["responses"]["V8Forbidden"];
         };
     };
+    downloadTaskAssetRevisionFile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_asset_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Authorized task-asset version download metadata. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["AssetDownloadInfo"];
+                    };
+                };
+            };
+            403: components["responses"]["V8Forbidden"];
+            404: components["responses"]["V8NotFound"];
+            /** @description Immutable task-asset metadata exists but the original object is historically unavailable. */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    previewTaskAssetRevisionFile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_asset_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Authorized task-asset version preview metadata. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data: components["schemas"]["AssetDownloadInfo"];
+                    };
+                };
+            };
+            403: components["responses"]["V8Forbidden"];
+            404: components["responses"]["V8NotFound"];
+            /** @description Preview metadata is not available for this exact task-asset version. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Immutable task-asset metadata exists but the original object is historically unavailable. */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
     listTasksV8: {
         parameters: {
             query?: {
@@ -32059,9 +22474,12 @@ export interface operations {
                 owner_team_id?: number;
                 priority?: "low" | "normal" | "high" | "critical";
                 overdue?: boolean;
+                /** @description Applies the exact task predicate used by the matching operations-dashboard count. Date buckets use Asia/Shanghai day boundaries and still respect the caller's task data scope. */
+                operational_bucket?: "active_tasks" | "design_pending" | "pending_audit" | "handover" | "customization_in_progress" | "overdue" | "due_today" | "today_created";
                 date_from?: string;
                 date_to?: string;
                 keyword?: string;
+                sort?: "created_at" | "-created_at" | "updated_at" | "-updated_at" | "due_at" | "-due_at" | "task_no" | "-task_no";
                 page?: number;
                 page_size?: number;
             };
@@ -32081,6 +22499,305 @@ export interface operations {
                 };
             };
             403: components["responses"]["V8Forbidden"];
+        };
+    };
+    getAIChatConfig: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Safe public configuration without provider secrets or internal endpoints. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: components["schemas"]["AIChatConfig"];
+                    };
+                };
+            };
+            /** @description Unauthenticated */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing report.view */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    listAIConversations: {
+        parameters: {
+            query?: {
+                page?: number;
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Owner-scoped conversation list. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: components["schemas"]["AIConversationList"];
+                    };
+                };
+            };
+            /** @description Unauthenticated */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Missing report.view */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    createAIConversation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    title?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Created conversation. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: components["schemas"]["AIConversation"];
+                    };
+                };
+            };
+            /** @description Missing report.view */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Data assistant disabled */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    getAIConversation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Conversation body. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: components["schemas"]["AIConversation"];
+                    };
+                };
+            };
+            /** @description Not found or not owned by caller */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    deleteAIConversation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Conversation scheduled for purge */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not found or not owned by caller */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    streamAIChatMessage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    client_message_id: string;
+                    content: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Server-sent event stream. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
+            /** @description Identical client message is still streaming */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Global or per-user stream concurrency limit reached */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Provider */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    adminListAIConversations: {
+        parameters: {
+            query?: {
+                owner_user_id?: number;
+                status?: "active" | "deleted";
+                from?: string;
+                to?: string;
+                page?: number;
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Cross-user metadata list. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: components["schemas"]["AIConversationList"];
+                    };
+                };
+            };
+            /** @description Only a protected SuperAdmin may review all conversations */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    adminGetAIConversation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Audited conversation body. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        data?: components["schemas"]["AIConversation"];
+                    };
+                };
+            };
+            /** @description Only a protected SuperAdmin may review all conversations */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Conversation not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
         };
     };
 }

@@ -45,109 +45,63 @@ func (r *scopedModuleRepo) InsertPlaceholder(context.Context, repo.Tx, int64, st
 
 func customizationPendingClaimModule() *domain.TaskModule {
 	pool := domain.TeamCustomizationArt
-	return &domain.TaskModule{
-		ID:           2,
-		TaskID:       778,
-		ModuleKey:    domain.ModuleKeyCustomization,
-		State:        domain.ModuleStatePendingClaim,
-		PoolTeamCode: &pool,
-	}
+	return &domain.TaskModule{ID: 2, TaskID: 778, ModuleKey: domain.ModuleKeyCustomization, State: domain.ModuleStatePendingClaim, PoolTeamCode: &pool}
 }
 
-func customizationProductionTask() *domain.Task {
+func customizationInProgressTask() *domain.Task {
 	return &domain.Task{
-		ID:                    778,
-		TaskType:              domain.TaskTypeNewProductDevelopment,
-		TaskStatus:            domain.TaskStatusPendingCustomizationProduction,
-		CustomizationRequired: true,
-		BusinessLane:          domain.TaskBusinessLaneCustomization,
+		ID: 778, TaskType: domain.TaskTypeNewProductDevelopment, TaskStatus: domain.TaskStatusInProgress,
+		CustomizationRequired: true, BusinessLane: domain.TaskBusinessLaneCustomization,
 	}
 }
 
-func TestCustomizationOperatorClaimWritesDesignerAndKeepsProductionStatus(t *testing.T) {
-	taskRepo := &fakeTaskRepo{task: customizationProductionTask()}
-	modRepo := &scopedModuleRepo{module: customizationPendingClaimModule()}
-	svc := NewClaimService(taskRepo, modRepo, &fakeEventRepo{}, fakeTxRunner{})
+func TestCustomizationClaimUsesExplicitDesignCapability(t *testing.T) {
+	taskRepo := &fakeTaskRepo{task: customizationInProgressTask()}
+	svc := NewClaimService(taskRepo, &scopedModuleRepo{module: customizationPendingClaimModule()}, &fakeEventRepo{}, fakeTxRunner{})
+	actor := claimCapabilityActor(213, domain.PermissionTaskDesignSubmit, domain.AccessScopeGlobal)
 
-	actor := domain.RequestActor{
-		ID:         213,
-		Department: string(domain.DepartmentCustomizationArt),
-		Team:       "默认组",
-		Roles:      []domain.Role{domain.RoleCustomizationOperator, domain.RoleMember},
-	}
 	dec := svc.Claim(context.Background(), actor, 778, domain.ModuleKeyCustomization, domain.TeamCustomizationArt)
 	if !dec.OK {
 		t.Fatalf("claim failed: code=%s message=%s", dec.DenyCode, dec.Message)
 	}
-	if taskRepo.task.TaskStatus != domain.TaskStatusPendingCustomizationProduction {
-		t.Fatalf("task_status = %s, want PendingCustomizationProduction", taskRepo.task.TaskStatus)
-	}
-	if taskRepo.task.DesignerID == nil || *taskRepo.task.DesignerID != 213 {
-		t.Fatalf("designer_id = %+v, want 213", taskRepo.task.DesignerID)
-	}
-	if taskRepo.task.CurrentHandlerID == nil || *taskRepo.task.CurrentHandlerID != 213 {
-		t.Fatalf("current_handler_id = %+v, want 213", taskRepo.task.CurrentHandlerID)
+	if taskRepo.task.TaskStatus != domain.TaskStatusInProgress || taskRepo.task.DesignerID == nil || *taskRepo.task.DesignerID != actor.ID || taskRepo.task.CurrentHandlerID == nil || *taskRepo.task.CurrentHandlerID != actor.ID {
+		t.Fatalf("claimed task = %+v", taskRepo.task)
 	}
 }
 
-func TestPureDesignerCannotClaimCustomizationModule(t *testing.T) {
-	taskRepo := &fakeTaskRepo{task: customizationProductionTask()}
-	modRepo := &scopedModuleRepo{module: customizationPendingClaimModule()}
-	svc := NewClaimService(taskRepo, modRepo, &fakeEventRepo{}, fakeTxRunner{})
+func TestCustomizationClaimRejectsLegacyRoleWithoutCapability(t *testing.T) {
+	taskRepo := &fakeTaskRepo{task: customizationInProgressTask()}
+	svc := NewClaimService(taskRepo, &scopedModuleRepo{module: customizationPendingClaimModule()}, &fakeEventRepo{}, fakeTxRunner{})
+	actor := domain.RequestActor{ID: 303, Roles: []domain.Role{domain.RoleCustomizationOperator, domain.RoleAdmin}}
 
-	dec := svc.Claim(context.Background(), domain.RequestActor{
-		ID:    303,
-		Team:  domain.TeamDesignStandard,
-		Roles: []domain.Role{domain.RoleDesigner, domain.RoleMember},
-	}, 778, domain.ModuleKeyCustomization, domain.TeamCustomizationArt)
-	if dec.OK || dec.DenyCode != domain.DenyModuleActionRoleDenied {
-		t.Fatalf("claim decision = ok:%t code:%s, want module_action_role_denied", dec.OK, dec.DenyCode)
-	}
-	if taskRepo.task.DesignerID != nil {
-		t.Fatalf("designer_id = %+v, want unchanged nil", taskRepo.task.DesignerID)
+	dec := svc.Claim(context.Background(), actor, 778, domain.ModuleKeyCustomization, domain.TeamCustomizationArt)
+	if dec.OK || dec.DenyCode != domain.ErrCodePermissionDenied {
+		t.Fatalf("claim decision = ok:%t code:%s", dec.OK, dec.DenyCode)
 	}
 }
 
-func TestAdminCanClaimCustomizationWithoutMatchingPoolTeam(t *testing.T) {
-	taskRepo := &fakeTaskRepo{task: customizationProductionTask()}
-	modRepo := &scopedModuleRepo{module: customizationPendingClaimModule()}
-	svc := NewClaimService(taskRepo, modRepo, &fakeEventRepo{}, fakeTxRunner{})
+func TestCustomizationClaimAllowsProspectiveSelfScope(t *testing.T) {
+	taskRepo := &fakeTaskRepo{task: customizationInProgressTask()}
+	svc := NewClaimService(taskRepo, &scopedModuleRepo{module: customizationPendingClaimModule()}, &fakeEventRepo{}, fakeTxRunner{})
+	actor := claimCapabilityActor(304, domain.PermissionTaskDesignSubmit, domain.AccessScopeSelf)
 
-	dec := svc.Claim(context.Background(), domain.RequestActor{
-		ID:         1,
-		Department: string(domain.DepartmentOperations),
-		Team:       "淘系一组",
-		Roles:      []domain.Role{domain.RoleAdmin},
-	}, 778, domain.ModuleKeyCustomization, domain.TeamCustomizationArt)
+	dec := svc.Claim(context.Background(), actor, 778, domain.ModuleKeyCustomization, domain.TeamCustomizationArt)
 	if !dec.OK {
-		t.Fatalf("admin claim failed: code=%s message=%s", dec.DenyCode, dec.Message)
-	}
-	if taskRepo.task.DesignerID == nil || *taskRepo.task.DesignerID != 1 {
-		t.Fatalf("designer_id = %+v, want 1", taskRepo.task.DesignerID)
+		t.Fatalf("self-scope claim failed: code=%s message=%s", dec.DenyCode, dec.Message)
 	}
 }
 
-func TestDesignModuleClaimStillTransitionsPendingAssignToInProgress(t *testing.T) {
+func TestDesignModuleClaimTransitionsPendingAssignToInProgress(t *testing.T) {
 	fakeGlobalClaimed.Store(false)
-	taskRepo := &fakeTaskRepo{task: &domain.Task{
-		ID:         1,
-		TaskStatus: domain.TaskStatusPendingAssign,
-		TaskType:   domain.TaskTypeOriginalProductDevelopment,
-	}}
+	taskRepo := &fakeTaskRepo{task: &domain.Task{ID: 1, TaskStatus: domain.TaskStatusPendingAssign, TaskType: domain.TaskTypeOriginalProductDevelopment}}
 	svc := NewClaimService(taskRepo, &fakeModuleRepo{}, &fakeEventRepo{}, fakeTxRunner{})
+	actor := claimCapabilityActor(10, domain.PermissionTaskDesignSubmit, domain.AccessScopeGlobal)
 
-	dec := svc.Claim(context.Background(), domain.RequestActor{
-		ID:    10,
-		Team:  domain.TeamDesignStandard,
-		Roles: []domain.Role{domain.RoleDesigner, domain.RoleMember},
-	}, 1, domain.ModuleKeyDesign, domain.TeamDesignStandard)
+	dec := svc.Claim(context.Background(), actor, 1, domain.ModuleKeyDesign, domain.TeamDesignStandard)
 	if !dec.OK {
 		t.Fatalf("design claim failed: code=%s message=%s", dec.DenyCode, dec.Message)
 	}
-	if taskRepo.task.TaskStatus != domain.TaskStatusInProgress {
-		t.Fatalf("task_status = %s, want InProgress", taskRepo.task.TaskStatus)
-	}
-	if taskRepo.task.DesignerID == nil || *taskRepo.task.DesignerID != 10 {
-		t.Fatalf("designer_id = %+v, want 10", taskRepo.task.DesignerID)
+	if taskRepo.task.TaskStatus != domain.TaskStatusInProgress || taskRepo.task.DesignerID == nil || *taskRepo.task.DesignerID != actor.ID {
+		t.Fatalf("claimed task = %+v", taskRepo.task)
 	}
 }

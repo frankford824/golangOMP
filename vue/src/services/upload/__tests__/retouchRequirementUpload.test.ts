@@ -45,6 +45,8 @@ describe('uploadRetouchRequirementPendingAssets', () => {
     expect(uploadReferenceFileRef).toHaveBeenCalledWith(refFile, {
       taskId: 'task-1',
       retouchRequirementId: 10,
+      ownerModuleKey: 'basic_info',
+      uploadPolicy: 'append_only',
       signal: undefined,
     })
     expect(uploadTaskFileViaAssetSession).toHaveBeenCalledWith(

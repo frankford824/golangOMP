@@ -31,14 +31,10 @@ func TestCustomizationJobRepoUpdatePersistsPricingWorkerType(t *testing.T) {
 			sqlmock.AnyArg(), // unit_price
 			sqlmock.AnyArg(), // weight_factor
 			"",
-			"approved",
-			"final",
 			sqlmock.AnyArg(), // assigned_operator_id
 			sqlmock.AnyArg(), // last_operator_id
 			"part_time",
-			"pending_effect_review",
-			"",
-			"",
+			"in_progress",
 			int64(9),
 		).
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -59,10 +55,8 @@ func TestCustomizationJobRepoUpdatePersistsPricingWorkerType(t *testing.T) {
 			ReviewReferenceWeightFactor: &reviewReferenceWeightFactor,
 			UnitPrice:                   &unitPrice,
 			WeightFactor:                &weightFactor,
-			ReviewDecision:              domain.CustomizationReviewDecisionApproved,
-			DecisionType:                domain.CustomizationJobDecisionTypeFinal,
 			PricingWorkerType:           domain.EmploymentTypePartTime,
-			Status:                      domain.CustomizationJobStatusPendingEffectReview,
+			Status:                      domain.CustomizationJobStatusInProgress,
 		})
 	})
 	if appErr != nil {

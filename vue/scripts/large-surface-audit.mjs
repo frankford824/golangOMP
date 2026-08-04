@@ -32,19 +32,19 @@ const pages = [
     maxReadyMs: defaultMaxReadyMs,
   },
   {
-    name: 'product-management',
-    path: '/products',
-    ready: '.product-management-view',
-    countSelector: '.pm-combo-group',
+    name: 'cost-rules',
+    path: '/cost-rules',
+    ready: '.cost-manager-page',
+    countSelector: '.rule-card',
     minItems: 80,
     maxNodes: 24_000,
     maxReadyMs: defaultMaxReadyMs,
   },
   {
     name: 'planning-sku-200',
-    path: '/tasks/sku-planning',
-    ready: '.planning-page',
-    countSelector: '[data-testid="planning-row"]',
+    path: '/tasks/create?intent=planning_sku',
+    ready: '.compose-page[data-compose-intent="planning_sku"]',
+    countSelector: '.compose-grid__canvas-shell',
     minItems: 1,
     maxItems: 60,
     maxNodes: 25_000,
@@ -466,58 +466,45 @@ async function preparePlanningSkuScenario(page) {
     if (!(button instanceof HTMLButtonElement)) throw new Error('planning SKU add-row control is missing')
     for (let index = 1; index < 200; index += 1) button.click()
   })
-  await page.waitForFunction(() => document.querySelector('[data-testid="virtual-total"]')?.textContent?.includes('当前 200 行'))
+  await page.waitForFunction(() => document.querySelector('.compose-page')?.getAttribute('data-row-count') === '200')
 
-  const viewport = page.locator('.virtual-list')
-  const firstDescription = page.locator('[data-row-index="0"] textarea').first()
-  await firstDescription.fill('首行保持值 001')
-
-  await viewport.evaluate((element) => {
-    element.scrollTop = element.scrollHeight
-    element.dispatchEvent(new Event('scroll'))
+  await page.evaluate(() => {
+    const setValue = (index, value) => {
+      const control = document.querySelector(`[data-testid="compose-row"][data-row-index="${index}"] textarea`)
+      if (!(control instanceof HTMLTextAreaElement)) throw new Error(`planning row ${index} is missing`)
+      control.value = value
+      control.dispatchEvent(new Event('input', { bubbles: true }))
+    }
+    setValue(0, '首行保持值 001')
+    setValue(199, '末行保持值 200')
   })
-  await page.waitForSelector('[data-row-index="199"]', { state: 'visible' })
-  const lastDescription = page.locator('[data-row-index="199"] textarea').first()
-  await lastDescription.fill('末行保持值 200')
-  const bottomOrder = await page.locator('[data-testid="planning-row"]').evaluateAll((rows) => rows.map((row) => Number(row.getAttribute('data-row-index'))))
-
-  await viewport.evaluate((element) => {
-    element.scrollTop = 0
-    element.dispatchEvent(new Event('scroll'))
-  })
-  await page.waitForSelector('[data-row-index="0"]', { state: 'visible' })
+  const rowOrder = await page.locator('[data-testid="compose-row"]').evaluateAll((rows) => rows.map((row) => Number(row.getAttribute('data-row-index'))))
   const firstValuePreserved = await page.locator('[data-row-index="0"] textarea').first().inputValue() === '首行保持值 001'
-
-  await viewport.evaluate((element) => {
-    element.scrollTop = element.scrollHeight
-    element.dispatchEvent(new Event('scroll'))
-  })
-  await page.waitForSelector('[data-row-index="199"]', { state: 'visible' })
   const lastValuePreserved = await page.locator('[data-row-index="199"] textarea').first().inputValue() === '末行保持值 200'
-  const footer = page.locator('.editor-footer')
+  const footer = page.locator('.validation-dock')
   await footer.scrollIntoViewIfNeeded()
   const layout = await page.evaluate(() => {
-    const footerElement = document.querySelector('.editor-footer')
-    const lastRow = document.querySelector('[data-row-index="199"]')
-    if (!(footerElement instanceof HTMLElement) || !(lastRow instanceof HTMLElement)) {
-      throw new Error('planning SKU footer or last row is missing')
+    const footerElement = document.querySelector('.validation-dock')
+    const gridElement = document.querySelector('.compose-grid__canvas-shell')
+    if (!(footerElement instanceof HTMLElement) || !(gridElement instanceof HTMLElement)) {
+      throw new Error('planning SKU validation dock or grid is missing')
     }
     const footerRect = footerElement.getBoundingClientRect()
-    const lastRowRect = lastRow.getBoundingClientRect()
+    const gridRect = gridElement.getBoundingClientRect()
     return {
       footerVisible: footerRect.top >= 0 && footerRect.bottom <= window.innerHeight,
-      footerOverlapsLast: footerRect.top < lastRowRect.bottom && footerRect.bottom > lastRowRect.top,
+      footerOverlapsLast: footerRect.top < gridRect.bottom && footerRect.bottom > gridRect.top,
     }
   })
 
   return {
     rowCount: 200,
-    visibleRowCount: await page.locator('[data-testid="planning-row"]').count(),
+    visibleRowCount: await page.locator('.compose-grid__canvas-shell:visible').count(),
     firstValuePreserved,
     lastValuePreserved,
-    orderPreserved: bottomOrder.length > 0
-      && bottomOrder.at(-1) === 199
-      && bottomOrder.every((value, index) => index === 0 || value === bottomOrder[index - 1] + 1),
+    orderPreserved: rowOrder.length === 200
+      && rowOrder.at(-1) === 199
+      && rowOrder.every((value, index) => value === index),
     ...layout,
   }
 }

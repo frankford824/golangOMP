@@ -22,7 +22,6 @@ func TestTaskDetailModulesVisibleIntegration(t *testing.T) {
 		{Key: domain.ModuleKeyBasicInfo, State: string(domain.ModuleStateActive)},
 		{Key: domain.ModuleKeyDesign, State: string(domain.ModuleStatePendingClaim), PoolTeamCode: r35.StrPtr(domain.TeamDesignStandard)},
 		{Key: domain.ModuleKeyAudit, State: string(domain.ModuleStatePending)},
-		{Key: domain.ModuleKeyWarehouse, State: string(domain.ModuleStatePending)},
 	})
 	defer r35.CleanupTaskIDs(t, db, taskID)
 

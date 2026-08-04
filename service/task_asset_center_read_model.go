@@ -27,16 +27,51 @@ func (s *taskAssetCenterService) hydrateDesignAssetReadModel(ctx context.Context
 	if err != nil {
 		return err
 	}
+	versions, err := s.buildLegacyDesignAssetVersions(task, asset, records)
+	if err != nil {
+		return err
+	}
+	enrichDesignAssetVersionUploaderNames(ctx, s.userDisplayNameResolver, versions)
+	s.applyDesignAssetVersionRoles(task, asset, versions)
+	return nil
+}
+
+func (s *taskAssetCenterService) buildLegacyDesignAssetVersions(
+	task *domain.Task,
+	asset *domain.DesignAsset,
+	records []*domain.TaskAsset,
+) ([]*domain.DesignAssetVersion, error) {
 	versions := make([]*domain.DesignAssetVersion, 0, len(records))
 	for _, record := range records {
+		if isWorkflowMigrationSourceAlias(record) {
+			if asset.CurrentVersionID != nil && *asset.CurrentVersionID == record.ID {
+				return nil, fmt.Errorf(
+					"workflow migration source alias %d cannot be design asset %d current version",
+					record.ID, asset.ID,
+				)
+			}
+			continue
+		}
 		if version := domain.BuildDesignAssetVersion(record); version != nil {
 			s.applyDesignAssetVersionDerivedFields(task, asset, version)
 			versions = append(versions, version)
 		}
 	}
-	enrichDesignAssetVersionUploaderNames(ctx, s.userDisplayNameResolver, versions)
-	s.applyDesignAssetVersionRoles(task, asset, versions)
-	return nil
+	return versions, nil
+}
+
+// isWorkflowMigrationSourceAlias identifies the synthetic source identity used
+// only by immutable V8 resource-group revisions when a legacy delivery had to
+// stand in for a missing source file. The row deliberately shares the legacy
+// design_assets root so object lineage remains intact, but it must not enter
+// that root's current/approved version projection.
+func isWorkflowMigrationSourceAlias(record *domain.TaskAsset) bool {
+	if record == nil {
+		return false
+	}
+	return domain.NormalizeTaskAssetType(record.AssetType).IsSource() &&
+		strings.TrimSpace(record.SourceModuleKey) == "migration" &&
+		strings.HasPrefix(strings.TrimSpace(record.Remark), "v8-source-alias:")
 }
 
 func (s *taskAssetCenterService) applyDesignAssetVersionDerivedFields(task *domain.Task, asset *domain.DesignAsset, version *domain.DesignAssetVersion) {
@@ -104,22 +139,18 @@ func (s *taskAssetCenterService) applyDesignAssetVersionRoles(task *domain.Task,
 		asset.CurrentVersionID = &current.ID
 	}
 	approved := findApprovedDesignAssetVersion(task, versions)
-	warehouseReady := findWarehouseReadyDesignAssetVersion(task, versions)
 
 	asset.CurrentVersion = current
 	asset.ApprovedVersion = approved
-	asset.WarehouseReadyVersion = warehouseReady
 	asset.AssetType = domain.NormalizeTaskAssetType(asset.AssetType)
 	asset.ApprovedVersionID = designAssetVersionIDPtr(approved)
-	asset.WarehouseReadyVersionID = designAssetVersionIDPtr(warehouseReady)
 
 	for _, version := range versions {
 		if version == nil {
 			continue
 		}
 		version.ApprovedForFlow = approved != nil && version.ID == approved.ID
-		version.WarehouseReady = warehouseReady != nil && version.ID == warehouseReady.ID
-		version.CurrentVersionRole = buildCurrentVersionRole(current, approved, warehouseReady, version)
+		version.CurrentVersionRole = buildCurrentVersionRole(current, approved, version)
 	}
 }
 
@@ -141,7 +172,7 @@ func findApprovedDesignAssetVersion(task *domain.Task, versions []*domain.Design
 			return version
 		}
 	}
-	if !taskHasApprovedDelivery(task) {
+	if task == nil || task.TaskStatus != domain.TaskStatusCompleted {
 		return nil
 	}
 	for i := len(versions) - 1; i >= 0; i-- {
@@ -151,34 +182,6 @@ func findApprovedDesignAssetVersion(task *domain.Task, versions []*domain.Design
 		}
 	}
 	return nil
-}
-
-func findWarehouseReadyDesignAssetVersion(task *domain.Task, versions []*domain.DesignAssetVersion) *domain.DesignAssetVersion {
-	if approved := findApprovedDesignAssetVersion(task, versions); approved != nil {
-		return approved
-	}
-	if !taskHasApprovedDelivery(task) {
-		return nil
-	}
-	for i := len(versions) - 1; i >= 0; i-- {
-		version := versions[i]
-		if version != nil && version.IsDeliveryFile {
-			return version
-		}
-	}
-	return nil
-}
-
-func taskHasApprovedDelivery(task *domain.Task) bool {
-	if task == nil {
-		return false
-	}
-	switch task.TaskStatus {
-	case domain.TaskStatusPendingWarehouseReceive, domain.TaskStatusPendingClose, domain.TaskStatusCompleted:
-		return true
-	default:
-		return false
-	}
 }
 
 func designAssetVersionIDPtr(version *domain.DesignAssetVersion) *int64 {
@@ -189,21 +192,16 @@ func designAssetVersionIDPtr(version *domain.DesignAssetVersion) *int64 {
 	return &id
 }
 
-func buildCurrentVersionRole(current, approved, warehouseReady, version *domain.DesignAssetVersion) string {
+func buildCurrentVersionRole(current, approved, version *domain.DesignAssetVersion) string {
 	if version == nil {
 		return ""
 	}
 	isCurrent := current != nil && current.ID == version.ID
 	isApproved := approved != nil && approved.ID == version.ID
-	isWarehouseReady := warehouseReady != nil && warehouseReady.ID == version.ID
 
 	switch {
-	case isCurrent && isWarehouseReady:
-		return "current_warehouse_ready_version"
 	case isCurrent && isApproved:
 		return "current_approved_version"
-	case isWarehouseReady:
-		return "warehouse_ready_version"
 	case isApproved:
 		return "approved_version"
 	case isCurrent:
@@ -254,18 +252,18 @@ func buildDesignAssetAccessHint(version *domain.DesignAssetVersion) string {
 		return ""
 	}
 	if version.IsSourceFile {
-		return fmt.Sprintf("Use task_no=%s asset_no=%s version_no=%d object_key=%s to fetch the OSS-backed source file.", version.TaskNo, version.AssetNo, version.VersionNo, version.StorageKey)
+		return fmt.Sprintf("源文件属于任务 %s，文件编号 %s，第 %d 版。", version.TaskNo, version.AssetNo, version.VersionNo)
 	}
 	if version.IsDeliveryFile {
-		return "Delivery assets are the business flow truth for audit and warehouse after approval."
+		return "成品图通过审核后，作为任务当前有效成品。"
 	}
 	if version.IsPreviewFile {
-		return "Preview assets are auxiliary only and must not replace delivery assets in business flow."
+		return "该文件仅用于预览，不替代正式成品图。"
 	}
 	if version.IsDesignThumb {
-		return "Design thumb assets are lightweight preview derivatives for list/detail rendering."
+		return "该缩略图仅用于页面预览。"
 	}
-	return "Reference assets are task-scoped files for task creation, design reference, and business understanding only."
+	return "参考图用于说明任务需求。"
 }
 
 func buildDesignAssetNotes(version *domain.DesignAssetVersion) string {
@@ -274,14 +272,14 @@ func buildDesignAssetNotes(version *domain.DesignAssetVersion) string {
 	}
 	switch {
 	case version.IsSourceFile:
-		return "Source files remain OSS-backed business assets; no NAS-only path is required."
+		return "当前源文件由任务资源组统一管理。"
 	case version.IsDeliveryFile:
-		return "Warehouse and audit should consume the warehouse_ready_version or approved_version based on current task status."
+		return "当前成品图由任务资源组统一管理。"
 	case version.IsPreviewFile:
-		return "Preview artifacts are not the formal source of truth."
+		return "预览文件不是正式业务文件。"
 	case version.IsDesignThumb:
-		return "Design thumb artifacts are backend-owned derivatives for preview rendering only."
+		return "缩略图只用于页面预览。"
 	default:
-		return "Reference assets never enter the warehouse_ready_version path."
+		return "参考图用于说明任务需求。"
 	}
 }

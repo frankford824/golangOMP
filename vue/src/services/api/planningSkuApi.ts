@@ -21,6 +21,18 @@ export interface PlanningSKUResultItem {
   sku_code: string
   quantity: number
   erp_status?: string
+  revision?: {
+    id: number
+    version_no: number
+    description_spec: string
+    quantity: number
+    target_price?: string
+    note?: string
+    reference_url?: string
+    product_image_ref_id?: string
+    product_image_url?: string
+    product_image_name?: string
+  }
 }
 
 export interface PlanningSKUCreateResult {
@@ -36,6 +48,20 @@ const unwrap = <T>(response: { data?: { data?: T } | T }): T => {
   return body && typeof body === 'object' && 'data' in body ? (body.data as T) : (body as T)
 }
 
+function downloadPlanningWorkbook(data: unknown, filename: string): void {
+  const blob = data instanceof Blob
+    ? data
+    : new Blob([data as BlobPart], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+  const objectURL = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = objectURL
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+  URL.revokeObjectURL(objectURL)
+}
+
 export const planningSkuApi = {
   async create(items: PlanningSKUInput[], erpSyncMode: 'none' | 'async', clientCreateId: string): Promise<PlanningSKUCreateResult> {
     return unwrap(await http.post('/v1/tasks', {
@@ -44,6 +70,9 @@ export const planningSkuApi = {
       erp_sync_mode: erpSyncMode,
       planning_sku_items: items,
     }, { headers: { 'Idempotency-Key': clientCreateId } }))
+  },
+  async getTask(taskId: number): Promise<PlanningSKUCreateResult> {
+    return unwrap(await http.get(`/v1/tasks/${taskId}/planning-skus`))
   },
   templateURL(erp = false): string {
     return `/v1/tasks/sku-planning/template.xlsx${erp ? '?erp=true' : ''}`
@@ -105,6 +134,10 @@ export const planningSkuApi = {
   exportTaskURL(taskId: number): string {
     return `/v1/tasks/${taskId}/planning-skus/export.xlsx`
   },
+  async downloadTask(taskId: number): Promise<void> {
+    const response = await http.get(`/v1/tasks/${taskId}/planning-skus/export.xlsx`, { responseType: 'blob' })
+    downloadPlanningWorkbook(response.data, `策划SKU_任务_${taskId}.xlsx`)
+  },
   async retryFailedERP(taskId: number): Promise<{ queued: number; resync: false }> {
     return unwrap(await http.post(`/v1/tasks/${taskId}/planning-skus/erp-retry`, {}))
   },
@@ -112,16 +145,6 @@ export const planningSkuApi = {
     const response = await http.post('/v1/planning-skus/export.xlsx', {
       task_sku_item_ids: taskSkuItemIds,
     }, { responseType: 'blob' })
-    const blob = response.data instanceof Blob
-      ? response.data
-      : new Blob([response.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
-    const objectURL = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = objectURL
-    link.download = `策划SKU_勾选结果_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}.xlsx`
-    document.body.appendChild(link)
-    link.click()
-    link.remove()
-    URL.revokeObjectURL(objectURL)
+    downloadPlanningWorkbook(response.data, `策划SKU_勾选结果_${new Date().toISOString().slice(0, 10).replace(/-/g, '')}.xlsx`)
   },
 }

@@ -9,7 +9,7 @@ import (
 
 // TaskEventService provides read access to task_event_logs (V7 §8).
 // Write access is performed directly via TaskEventRepo inside service transactions
-// (audit, outsource, etc.) to guarantee atomicity with business state changes.
+// (audit, assignment, etc.) to guarantee atomicity with business state changes.
 type TaskEventService interface {
 	ListByTaskID(ctx context.Context, taskID int64) ([]*domain.TaskEvent, *domain.AppError)
 }
@@ -49,12 +49,19 @@ func (s *taskEventService) ListByTaskID(ctx context.Context, taskID int64) ([]*d
 	if task == nil {
 		return nil, domain.ErrNotFound
 	}
+	if appErr := AuthorizeTaskReadDetail(ctx, task, nil); appErr != nil {
+		return nil, appErr
+	}
 
 	events, err := s.taskEventRepo.ListByTaskID(ctx, taskID)
 	if err != nil {
 		return nil, infraError("list task events", err)
 	}
+	events = CloneTaskEvents(events)
 	enrichTaskEventsWithActors(ctx, s.userDisplayNameResolver, task, events)
+	if !TaskAssetDownloadAllowed(ctx, task) {
+		events = RedactTaskEventDownloads(events)
+	}
 	return events, nil
 }
 

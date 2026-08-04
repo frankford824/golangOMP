@@ -245,6 +245,218 @@ func TestWorkflowGroupsMigratePrecreatedShellApplyRerunRollback(t *testing.T) {
 	}
 }
 
+func TestWorkflowGroupsMigrateV2HistoryApplyRerunRollback(t *testing.T) {
+	db := workflowGroupsIntegrationDB(t)
+	const taskID = int64(970011)
+	legacy, groupID, sourceAssetID, finalAssetID, replacementSourceAssetID := createResourceMigrationFixture(t, db, taskID)
+	hashes := map[int64]string{
+		sourceAssetID:            strings.Repeat("a", 64),
+		finalAssetID:             strings.Repeat("b", 64),
+		replacementSourceAssetID: strings.Repeat("c", 64),
+	}
+	for assetID, hash := range hashes {
+		if _, err := db.Exec(`UPDATE task_assets SET upload_status='uploaded',whole_hash=? WHERE id=?`, hash, assetID); err != nil {
+			t.Fatalf("prepare task asset %d: %v", assetID, err)
+		}
+	}
+	if _, err := db.Exec(`UPDATE task_assets SET asset_type='source' WHERE id IN (?,?)`, sourceAssetID, replacementSourceAssetID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE task_assets SET asset_type='delivery' WHERE id=?`, finalAssetID); err != nil {
+		t.Fatal(err)
+	}
+	created := time.Date(2026, 7, 1, 4, 0, 0, 0, time.UTC)
+	eventIDs := []string{fmt.Sprintf("mig-v2-%d-1", taskID), fmt.Sprintf("mig-v2-%d-2", taskID)}
+	eventTypes := []string{"task.design.submitted", "task.reopened"}
+	for index, eventID := range eventIDs {
+		if _, err := db.Exec(`
+			INSERT INTO task_event_logs (id,task_id,sequence,event_type,operator_id,payload,created_at)
+			VALUES (?,?,?,?,10001,JSON_OBJECT('reviewed',TRUE),?)`,
+			eventID, taskID, index+1, eventTypes[index], time.Date(2026, 7, 1, index+1, 0, 0, 0, time.UTC)); err != nil {
+			t.Fatalf("insert evidence event %d: %v", index, err)
+		}
+	}
+	var moduleID int64
+	if err := db.QueryRow(`SELECT id FROM task_modules WHERE task_id=? ORDER BY id LIMIT 1`, taskID).Scan(&moduleID); err != nil {
+		t.Fatalf("find fixture task module: %v", err)
+	}
+	moduleEventResult, err := db.Exec(`
+		INSERT INTO task_module_events (task_module_id,event_type,actor_id,payload,created_at)
+		VALUES (?,'migration.fixture.snapshot',10001,JSON_OBJECT('preserve',TRUE),?)`, moduleID, created.Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("insert module-event snapshot fixture: %v", err)
+	}
+	moduleEventID, _ := moduleEventResult.LastInsertId()
+	submitted := created.Add(time.Hour)
+	history := []resourceRevisionMapping{
+		{
+			RevisionNo: 1, Status: "superseded", Mode: "single", SourceStage: "design",
+			SourceAssetID: &sourceAssetID, FinalAssetIDs: []int64{finalAssetID}, ReferenceIDs: legacy.Resources[0].ReferenceIDs,
+			EvidenceEventIDs: []string{"task_event_log:" + eventIDs[0]}, Confidence: "confirmed_auto",
+			ReviewPolicyIDs: []string{reviewPolicyExplicitEventReplay},
+			ConfirmedBy:     10001, ConfirmedAt: created, ConfirmationNote: "reviewed legacy design submission",
+			Reason: "legacy design submission", CreatedBy: 10001, CreatedAt: created, SubmittedAt: &submitted,
+		},
+		{
+			RevisionNo: 2, Status: "draft", Mode: "single", SourceStage: "reopen",
+			SourceAssetID: &replacementSourceAssetID, FinalAssetIDs: []int64{finalAssetID}, ReferenceIDs: legacy.Resources[0].ReferenceIDs,
+			EvidenceEventIDs: []string{"task_event_log:" + eventIDs[1]}, Confidence: "confirmed_auto",
+			ReviewPolicyIDs: []string{reviewPolicyExplicitEventReplay, reviewPolicyReopen},
+			ConfirmedBy:     10001, ConfirmedAt: created.Add(2 * time.Hour), ConfirmationNote: "reviewed reopened working revision",
+			Reason: "legacy reopened revision", CreatedBy: 10001, CreatedAt: created.Add(2 * time.Hour),
+		},
+	}
+	for index := range history {
+		hash, err := revisionManifestRowHash(history[index])
+		if err != nil {
+			t.Fatal(err)
+		}
+		history[index].ManifestRowHash = hash
+	}
+	workingRevisionNo := 2
+	mapping := mappingFile{Version: workflowGroupsMappingV2, Resources: []resourceMapping{{
+		TaskID: taskID, ScopeKind: "sku", ScopeRefID: legacy.Resources[0].ScopeRefID,
+		History: history, WorkingRevisionNo: &workingRevisionNo,
+	}}}
+	if err := validateMapping(mapping); err != nil {
+		t.Fatalf("validate v2 mapping: %v", err)
+	}
+	assertNoUnrelatedIntegrationBlockers(t, db, mapping)
+	database, _ := currentDatabase(context.Background(), db)
+	o := options{SnapshotDir: t.TempDir()}
+	if err := apply(context.Background(), db, database, o, mapping); err != nil {
+		t.Fatalf("apply v2 history: %v", err)
+	}
+	var historicalBinding, historicalRole string
+	var historicalGroupID sql.NullInt64
+	if err := db.QueryRow(`SELECT binding_state,bound_group_id,COALESCE(bound_role,'') FROM task_assets WHERE id=?`, sourceAssetID).Scan(&historicalBinding, &historicalGroupID, &historicalRole); err != nil || historicalBinding != "bound" || !historicalGroupID.Valid || historicalGroupID.Int64 != groupID || historicalRole != "source" {
+		t.Fatalf("superseded-only historical source binding = %s/%v/%s/%v", historicalBinding, historicalGroupID, historicalRole, err)
+	}
+	var revisionCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM task_asset_group_revisions WHERE group_id=?`, groupID).Scan(&revisionCount); err != nil || revisionCount != 2 {
+		t.Fatalf("v2 revision count = %d/%v, want 2", revisionCount, err)
+	}
+	if err := apply(context.Background(), db, database, o, mapping); err != nil {
+		t.Fatalf("idempotent v2 apply rerun: %v", err)
+	}
+	if err := rollback(context.Background(), db, database, o, mapping); err != nil {
+		t.Fatalf("rollback v2 history: %v", err)
+	}
+	var marker bool
+	var workingRevisionID sql.NullInt64
+	if err := db.QueryRow(`SELECT migration_incomplete,working_revision_id FROM task_asset_groups WHERE id=?`, groupID).Scan(&marker, &workingRevisionID); err != nil || !marker || workingRevisionID.Valid {
+		t.Fatalf("rolled-back v2 shell marker/pointer/error = %v/%v/%v", marker, workingRevisionID, err)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM task_asset_group_revisions WHERE group_id=?`, groupID).Scan(&revisionCount); err != nil || revisionCount != 0 {
+		t.Fatalf("rolled-back v2 revision count = %d/%v, want 0", revisionCount, err)
+	}
+	var preservedModuleEvent int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM task_module_events WHERE id=? AND task_module_id=?`, moduleEventID, moduleID).Scan(&preservedModuleEvent); err != nil || preservedModuleEvent != 1 {
+		t.Fatalf("rolled-back module-event snapshot = %d/%v, want preserved", preservedModuleEvent, err)
+	}
+}
+
+func TestWorkflowGroupsMigrateSourceAliasApplyRerunRollback(t *testing.T) {
+	db := workflowGroupsIntegrationDB(t)
+	const taskID = int64(970041)
+	legacy, groupID, _, finalAssetID, _ := createResourceMigrationFixture(t, db, taskID)
+	if _, err := db.Exec(`UPDATE task_assets SET upload_status='uploaded',whole_hash=? WHERE id=?`, strings.Repeat("d", 64), finalAssetID); err != nil {
+		t.Fatal(err)
+	}
+	created := time.Date(2026, 7, 2, 1, 0, 0, 0, time.UTC)
+	events := []struct {
+		id, eventType, payload string
+	}{
+		{fmt.Sprintf("alias-%d-upload", taskID), "task.asset.upload_session.completed", fmt.Sprintf(`{"upload_session_id":"alias-session","asset_version_id":%d}`, finalAssetID)},
+		{fmt.Sprintf("alias-%d-submit", taskID), "task.design.submitted", `{"upload_session_id":"alias-session"}`},
+		{fmt.Sprintf("alias-%d-approve", taskID), "task.audit.approved", `{}`},
+	}
+	for index, event := range events {
+		if _, err := db.Exec(`INSERT INTO task_event_logs (id,task_id,sequence,event_type,operator_id,payload,created_at) VALUES (?,?,?,?,10001,?,?)`, event.id, taskID, index+1, event.eventType, event.payload, created.Add(time.Duration(index)*time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	submitted, finalized := created.Add(time.Hour), created.Add(2*time.Hour)
+	revision := resourceRevisionMapping{
+		RevisionNo: 1, Status: "finalized", Mode: "single", SourceStage: "design",
+		SourceAliasFrom: &finalAssetID, FinalAssetIDs: []int64{finalAssetID}, ReferenceIDs: legacy.Resources[0].ReferenceIDs,
+		EvidenceEventIDs: []string{"task_event_log:" + events[0].id, "task_event_log:" + events[1].id, "task_event_log:" + events[2].id},
+		Confidence:       "confirmed_auto", ConfirmedBy: 10001, ConfirmedAt: finalized,
+		ReviewPolicyIDs:  []string{reviewPolicyExplicitEventReplay, reviewPolicyDeliverySourceAlias},
+		ConfirmationNote: "reviewed delivery-only PSD submission and approval", Reason: "legacy source alias",
+		CreatedBy: 10001, CreatedAt: submitted, SubmittedAt: &submitted, FinalizedAt: &finalized,
+	}
+	revision.ManifestRowHash, _ = revisionManifestRowHash(revision)
+	pointer := 1
+	mapping := mappingFile{Version: workflowGroupsMappingV2, Resources: []resourceMapping{{
+		TaskID: taskID, ScopeKind: "sku", ScopeRefID: legacy.Resources[0].ScopeRefID,
+		History: []resourceRevisionMapping{revision}, WorkingRevisionNo: &pointer, FinalizedRevisionNo: &pointer,
+	}}}
+	if err := validateMapping(mapping); err != nil {
+		t.Fatal(err)
+	}
+	assertNoUnrelatedIntegrationBlockers(t, db, mapping)
+	database, _ := currentDatabase(context.Background(), db)
+	o := options{SnapshotDir: t.TempDir()}
+	if err := apply(context.Background(), db, database, o, mapping); err != nil {
+		t.Fatal(err)
+	}
+	var aliasID int64
+	if err := db.QueryRow(`SELECT id FROM task_assets WHERE task_id=? AND bound_group_id=? AND asset_type='source' AND source_module_key='migration'`, taskID, groupID).Scan(&aliasID); err != nil {
+		t.Fatal(err)
+	}
+	if aliasID == finalAssetID {
+		t.Fatal("source alias must be a distinct task_assets row")
+	}
+	var (
+		aliasRootID, currentVersionID             int64
+		aliasAssetVersionNo, originAssetVersionNo int
+		aliasFlowReviewStatus                     string
+	)
+	if err := db.QueryRow(`
+		SELECT alias.asset_id,alias.asset_version_no,alias.flow_review_status,
+		       origin.asset_version_no,root.current_version_id
+		FROM task_assets alias
+		JOIN task_assets origin ON origin.id=?
+		JOIN design_assets root ON root.id=alias.asset_id
+		WHERE alias.id=?`,
+		finalAssetID, aliasID,
+	).Scan(
+		&aliasRootID, &aliasAssetVersionNo, &aliasFlowReviewStatus,
+		&originAssetVersionNo, &currentVersionID,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if aliasAssetVersionNo != originAssetVersionNo {
+		t.Fatalf(
+			"source alias asset_version_no = %d, want frozen origin version %d",
+			aliasAssetVersionNo, originAssetVersionNo,
+		)
+	}
+	if currentVersionID != finalAssetID {
+		t.Fatalf(
+			"delivery root %d current_version_id = %d, want unchanged origin %d",
+			aliasRootID, currentVersionID, finalAssetID,
+		)
+	}
+	if aliasFlowReviewStatus != "not_applicable" {
+		t.Fatalf(
+			"source alias flow_review_status = %q, want not_applicable",
+			aliasFlowReviewStatus,
+		)
+	}
+	if err := apply(context.Background(), db, database, o, mapping); err != nil {
+		t.Fatalf("idempotent alias rerun: %v", err)
+	}
+	if err := rollback(context.Background(), db, database, o, mapping); err != nil {
+		t.Fatalf("alias rollback: %v", err)
+	}
+	var aliases int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM task_assets WHERE id=?`, aliasID).Scan(&aliases); err != nil || aliases != 0 {
+		t.Fatalf("rolled-back alias count = %d/%v", aliases, err)
+	}
+}
+
 func TestWorkflowGroupsMigratedReferenceSnapshotsPreserveEveryScope(t *testing.T) {
 	db := workflowGroupsIntegrationDB(t)
 	const taskID = int64(970051)
@@ -585,7 +797,7 @@ func createResourceMigrationFixture(t *testing.T, db *sql.DB, taskID int64) (map
 	t.Helper()
 	cleanupWorkflowGroupFixture(t, db, taskID)
 	t.Cleanup(func() { cleanupWorkflowGroupFixture(t, db, taskID) })
-	r35.InsertTaskWithModules(t, db, taskID, string(domain.TaskTypeOriginalProductDevelopment), "normal", nil)
+	r35.InsertTaskWithModules(t, db, taskID, string(domain.TaskTypeOriginalProductDevelopment), "normal", []r35.ModuleFixture{{Key: "design", State: "in_progress"}})
 	if _, err := db.Exec(`UPDATE tasks SET owner_department='',owner_team='',owner_org_team='',owner_department_id=NULL,owner_team_id=NULL,workflow_revision=0,current_handler_id=NULL WHERE id=?`, taskID); err != nil {
 		t.Fatal(err)
 	}
@@ -658,7 +870,7 @@ func createPlanningMigrationFixture(t *testing.T, db *sql.DB, taskID int64) (map
 		t.Fatalf("planning rule revision: %v", err)
 	}
 	mapping := mappingFile{Planning: []planningMapping{{
-		TaskID: taskID, CodeRuleRevisionID: ruleRevisionID, CreatedBy: 10001,
+		TaskID: taskID, TargetTaskStatus: "Completed", CodeRuleRevisionID: ruleRevisionID, CreatedBy: 10001,
 		Items: []planningItemMapping{{TaskSKUItemID: skuItemID, DescriptionSpec: "迁移规格", Quantity: 2}},
 	}}}
 	return mapping, skuItemID

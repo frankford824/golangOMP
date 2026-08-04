@@ -24,15 +24,9 @@ interface HomeRouteCandidate {
 const HOME_ROUTE_CANDIDATES: HomeRouteCandidate[] = [
   { name: 'Dashboard', menuKey: 'dashboard' },
   { name: 'TaskList', menuKey: 'task_list' },
-  { name: 'ProductManagement', menuKey: 'product_management' },
+  { name: 'CostRules', menuKey: 'cost_rules' },
   { name: 'AssetsIndex', menuKey: 'resource_management' },
   { name: 'DataCenter', menuKey: 'report_center' },
-  { name: 'DataCenter', menuKey: 'export_center' },
-  { name: 'AuditLog', menuKey: 'audit_log' },
-  { name: 'DataCenter', menuKey: 'logs_center' },
-  { name: 'Finance', menuKey: 'finance' },
-  { name: 'DataCenter', menuKey: 'kpi' },
-  { name: 'RuleConfig', menuKey: 'rules' },
   { name: 'UserManagement', menuKey: 'user_admin' },
 ]
 
@@ -46,7 +40,6 @@ const TASK_LIST_LANDING_QUERY_KEYS = [
   'creator_id',
   'owner_department',
   'owner_org_team',
-  'warehouse_status',
   'date_from',
   'date_to',
   'overdue',

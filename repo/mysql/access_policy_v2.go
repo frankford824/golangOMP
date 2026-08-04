@@ -43,12 +43,9 @@ func (r *AccessPolicyRepo) ListRoles(ctx context.Context, includeArchived bool) 
 		where = ""
 	}
 	rows, err := r.db.db.QueryContext(ctx, `
-		SELECT r.id, r.code, r.name, r.description, r.system_protected, r.archived_at, r.version,
-		       COALESCE(GROUP_CONCAT(rp.permission_code ORDER BY rp.permission_code SEPARATOR ','), '')
+		SELECT r.id, r.code, r.name, r.description, r.system_protected, r.archived_at, r.version
 		FROM auth_roles r
-		LEFT JOIN auth_role_permissions rp ON rp.role_id = r.id
 		`+where+`
-		GROUP BY r.id, r.code, r.name, r.description, r.system_protected, r.archived_at, r.version
 		ORDER BY r.system_protected DESC, r.name, r.id`)
 	if err != nil {
 		return nil, fmt.Errorf("list auth roles: %w", err)
@@ -56,10 +53,15 @@ func (r *AccessPolicyRepo) ListRoles(ctx context.Context, includeArchived bool) 
 	defer rows.Close()
 	out := make([]domain.AccessRole, 0)
 	for rows.Next() {
-		item, err := scanAccessRole(rows)
+		item, err := scanAccessRoleHeader(rows)
 		if err != nil {
 			return nil, err
 		}
+		permissions, err := r.listRolePermissions(ctx, item.ID)
+		if err != nil {
+			return nil, err
+		}
+		item.Permissions = permissions
 		out = append(out, *item)
 	}
 	return out, rows.Err()
@@ -67,47 +69,109 @@ func (r *AccessPolicyRepo) ListRoles(ctx context.Context, includeArchived bool) 
 
 func (r *AccessPolicyRepo) GetRole(ctx context.Context, id int64) (*domain.AccessRole, error) {
 	row := r.db.db.QueryRowContext(ctx, `
-		SELECT r.id, r.code, r.name, r.description, r.system_protected, r.archived_at, r.version,
-		       COALESCE(GROUP_CONCAT(rp.permission_code ORDER BY rp.permission_code SEPARATOR ','), '')
+		SELECT r.id, r.code, r.name, r.description, r.system_protected, r.archived_at, r.version
 		FROM auth_roles r
-		LEFT JOIN auth_role_permissions rp ON rp.role_id = r.id
-		WHERE r.id = ?
-		GROUP BY r.id, r.code, r.name, r.description, r.system_protected, r.archived_at, r.version`, id)
-	item, err := scanAccessRole(row)
+		WHERE r.id = ?`, id)
+	item, err := scanAccessRoleHeader(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, repo.ErrNotFound
 	}
-	return item, err
+	if err != nil {
+		return nil, err
+	}
+	permissions, err := r.listRolePermissions(ctx, item.ID)
+	if err != nil {
+		return nil, err
+	}
+	item.Permissions = permissions
+	return item, nil
 }
 
 type accessRoleScanner interface{ Scan(...interface{}) error }
 
-func scanAccessRole(row accessRoleScanner) (*domain.AccessRole, error) {
+func scanAccessRoleHeader(row accessRoleScanner) (*domain.AccessRole, error) {
 	var item domain.AccessRole
 	var archived sql.NullTime
-	var permissions string
-	if err := row.Scan(&item.ID, &item.Code, &item.Name, &item.Description, &item.SystemProtected, &archived, &item.Version, &permissions); err != nil {
+	if err := row.Scan(&item.ID, &item.Code, &item.Name, &item.Description, &item.SystemProtected, &archived, &item.Version); err != nil {
 		return nil, err
 	}
 	if archived.Valid {
 		item.ArchivedAt = &archived.Time
 	}
-	item.Permissions = splitPermissionCodes(permissions)
+	item.Permissions = []domain.AccessRolePermission{}
 	return &item, nil
 }
 
-func splitPermissionCodes(raw string) []domain.PermissionCode {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return []domain.PermissionCode{}
+func (r *AccessPolicyRepo) listRolePermissions(ctx context.Context, roleID int64) ([]domain.AccessRolePermission, error) {
+	rows, err := r.db.db.QueryContext(ctx, `
+		SELECT permission_code, task_types
+		FROM auth_role_permissions
+		WHERE role_id = ?
+		ORDER BY permission_code`, roleID)
+	if err != nil {
+		return nil, fmt.Errorf("list role permissions: %w", err)
 	}
-	parts := strings.Split(raw, ",")
-	out := make([]domain.PermissionCode, 0, len(parts))
-	for _, part := range parts {
-		if value := strings.TrimSpace(part); value != "" {
-			out = append(out, domain.PermissionCode(value))
+	defer rows.Close()
+	out := make([]domain.AccessRolePermission, 0)
+	for rows.Next() {
+		var item domain.AccessRolePermission
+		var taskTypes []byte
+		if err := rows.Scan(&item.Code, &taskTypes); err != nil {
+			return nil, err
+		}
+		item.TaskTypes, err = decodeTaskTypesJSON(taskTypes)
+		if err != nil {
+			return nil, fmt.Errorf("decode task types for role %d permission %s: %w", roleID, item.Code, err)
+		}
+		out = append(out, item)
+	}
+	return out, rows.Err()
+}
+
+func decodeTaskTypesJSON(raw []byte) ([]string, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil, nil
+	}
+	var out []string
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, err
+	}
+	normalized := normalizeTaskTypeStrings(out)
+	for _, item := range normalized {
+		if !domain.AccessTaskTypeValid(domain.TaskType(item)) {
+			return nil, fmt.Errorf("invalid task type %q", item)
 		}
 	}
+	return normalized, nil
+}
+
+func encodeTaskTypesJSON(items []string) interface{} {
+	normalized := normalizeTaskTypeStrings(items)
+	if len(normalized) == 0 {
+		return nil
+	}
+	raw, err := json.Marshal(normalized)
+	if err != nil {
+		return nil
+	}
+	return raw
+}
+
+func normalizeTaskTypeStrings(items []string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if _, ok := seen[item]; ok {
+			continue
+		}
+		seen[item] = struct{}{}
+		out = append(out, item)
+	}
+	sort.Strings(out)
 	return out
 }
 
@@ -194,15 +258,19 @@ func (r *AccessPolicyRepo) ArchiveRole(ctx context.Context, tx repo.Tx, roleID, 
 	return count == 1, err
 }
 
-func (r *AccessPolicyRepo) ReplaceRolePermissions(ctx context.Context, tx repo.Tx, roleID int64, permissions []domain.PermissionCode) error {
+func (r *AccessPolicyRepo) ReplaceRolePermissions(ctx context.Context, tx repo.Tx, roleID int64, permissions []domain.AccessRolePermission) error {
 	if _, err := Unwrap(tx).ExecContext(ctx, `DELETE FROM auth_role_permissions WHERE role_id = ?`, roleID); err != nil {
 		return fmt.Errorf("delete role permissions: %w", err)
 	}
 	for _, permission := range permissions {
+		taskTypes := encodeTaskTypesJSON(permission.TaskTypes)
+		if !domain.PermissionSupportsTaskTypes(permission.Code) {
+			taskTypes = nil
+		}
 		if _, err := Unwrap(tx).ExecContext(ctx, `
-			INSERT INTO auth_role_permissions (role_id, permission_code)
-			SELECT ?, code FROM auth_permissions WHERE code = ? AND enabled = 1`, roleID, permission); err != nil {
-			return fmt.Errorf("insert role permission %s: %w", permission, err)
+			INSERT INTO auth_role_permissions (role_id, permission_code, task_types)
+			SELECT ?, code, ? FROM auth_permissions WHERE code = ? AND enabled = 1`, roleID, taskTypes, permission.Code); err != nil {
+			return fmt.Errorf("insert role permission %s: %w", permission.Code, err)
 		}
 	}
 	return nil
@@ -343,6 +411,154 @@ func (r *AccessPolicyRepo) EffectiveAccess(ctx context.Context, userID int64) (*
 	return &domain.EffectiveAccess{UserID: userID, PolicyRevision: revision, Permissions: permissions, Assignments: assignments, Sources: notes}, nil
 }
 
+func (r *AccessPolicyRepo) EffectiveAccessMany(ctx context.Context, userIDs []int64) (map[int64]*domain.EffectiveAccess, error) {
+	userIDs = uniquePositiveInt64s(userIDs)
+	out := make(map[int64]*domain.EffectiveAccess, len(userIDs))
+	if len(userIDs) == 0 {
+		return out, nil
+	}
+	revision, err := r.GetPolicyRevision(ctx)
+	if err != nil {
+		return nil, err
+	}
+	marks := resourceGroupPlaceholders(len(userIDs))
+	args := make([]interface{}, 0, len(userIDs)*3)
+	for range 3 {
+		for _, userID := range userIDs {
+			args = append(args, userID)
+		}
+	}
+	rows, err := r.db.db.QueryContext(ctx, `
+		WITH effective_assignments AS (
+		  SELECT a.id AS assignment_id, a.user_id, r.id AS role_id, r.code AS role_code, r.name AS role_name,
+		         a.scope_mode, a.source_type, a.source_ref_id, a.version,
+		         NULL AS policy_subject_type, NULL AS policy_subject_id
+		  FROM auth_user_role_assignments a
+		  JOIN auth_roles r ON r.id = a.role_id AND r.archived_at IS NULL
+		  WHERE a.user_id IN (`+marks+`)
+		  UNION ALL
+		  SELECT 0, u.id, r.id, r.code, r.name, p.scope_mode, 'org_policy', p.id, p.version,
+		         p.subject_type, p.subject_id
+		  FROM users u
+		  JOIN auth_org_role_policies p ON p.enabled = 1 AND (
+		    (p.subject_type = 'department' AND p.subject_id = u.department_id)
+		    OR (p.subject_type = 'team' AND p.subject_id = u.team_id)
+		  )
+		  JOIN auth_roles r ON r.id = p.role_id AND r.archived_at IS NULL
+		  WHERE u.id IN (`+marks+`)
+		)
+		SELECT u.id,
+		       ea.assignment_id, ea.role_id, ea.role_code, ea.role_name, ea.scope_mode,
+		       ea.source_type, ea.source_ref_id, ea.version,
+		       COALESCE(scope_subject.subject_type, ea.policy_subject_type) AS subject_type,
+		       COALESCE(scope_subject.subject_id, ea.policy_subject_id) AS subject_id,
+		       COALESCE(department.name, team.name) AS subject_name,
+		       rp.permission_code, rp.task_types
+		FROM users u
+		LEFT JOIN effective_assignments ea ON ea.user_id = u.id
+		LEFT JOIN auth_assignment_scope_subjects scope_subject
+		  ON ea.assignment_id > 0 AND ea.scope_mode = 'selected_org' AND scope_subject.assignment_id = ea.assignment_id
+		LEFT JOIN org_departments department
+		  ON COALESCE(scope_subject.subject_type, ea.policy_subject_type) = 'department'
+		 AND department.id = COALESCE(scope_subject.subject_id, ea.policy_subject_id)
+		LEFT JOIN org_teams team
+		  ON COALESCE(scope_subject.subject_type, ea.policy_subject_type) = 'team'
+		 AND team.id = COALESCE(scope_subject.subject_id, ea.policy_subject_id)
+		LEFT JOIN (
+		  SELECT role_permission.role_id, role_permission.permission_code, role_permission.task_types
+		  FROM auth_role_permissions role_permission
+		  JOIN auth_permissions permission ON permission.code = role_permission.permission_code AND permission.enabled = 1
+		) rp ON rp.role_id = ea.role_id
+		WHERE u.id IN (`+marks+`)
+		ORDER BY u.id, ea.role_id, ea.source_type, ea.source_ref_id, ea.assignment_id, subject_type, subject_id, rp.permission_code`, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list effective access for users: %w", err)
+	}
+	defer rows.Close()
+	for _, userID := range userIDs {
+		out[userID] = &domain.EffectiveAccess{
+			UserID: userID, PolicyRevision: revision,
+			Permissions: []domain.PermissionCode{}, Assignments: []domain.AccessAssignment{}, Sources: []domain.EffectiveAccessNote{},
+		}
+	}
+	assignmentIndexes := make(map[string]int)
+	subjectSeen := make(map[string]struct{})
+	permissionSeen := make(map[int64]map[domain.PermissionCode]struct{})
+	noteSeen := make(map[string]struct{})
+	for rows.Next() {
+		var userID int64
+		var assignmentID, roleID, sourceRef, version sql.NullInt64
+		var roleCode, roleName, scopeMode, sourceType sql.NullString
+		var subjectType, subjectName sql.NullString
+		var subjectID sql.NullInt64
+		var permission sql.NullString
+		var taskTypesRaw []byte
+		if err := rows.Scan(&userID, &assignmentID, &roleID, &roleCode, &roleName, &scopeMode,
+			&sourceType, &sourceRef, &version, &subjectType, &subjectID, &subjectName, &permission, &taskTypesRaw); err != nil {
+			return nil, fmt.Errorf("scan effective access for users: %w", err)
+		}
+		effective := out[userID]
+		if effective == nil || !roleID.Valid {
+			continue
+		}
+		assignmentKey := fmt.Sprintf("%d:%d:%d:%s:%d", userID, assignmentID.Int64, roleID.Int64, sourceType.String, sourceRef.Int64)
+		assignmentIndex, exists := assignmentIndexes[assignmentKey]
+		if !exists {
+			assignment := domain.AccessAssignment{
+				ID: assignmentID.Int64, UserID: userID, RoleID: roleID.Int64,
+				RoleCode: roleCode.String, RoleName: roleName.String,
+				ScopeMode: domain.AccessScopeMode(scopeMode.String), SourceType: sourceType.String,
+				Version: version.Int64, Subjects: []domain.AccessScopeSubject{},
+			}
+			if sourceRef.Valid {
+				assignment.SourceRef = &sourceRef.Int64
+			}
+			effective.Assignments = append(effective.Assignments, assignment)
+			assignmentIndex = len(effective.Assignments) - 1
+			assignmentIndexes[assignmentKey] = assignmentIndex
+		}
+		if effective.Assignments[assignmentIndex].ScopeMode == domain.AccessScopeSelectedOrg && subjectType.Valid && subjectID.Valid {
+			key := fmt.Sprintf("%s:%s:%d", assignmentKey, subjectType.String, subjectID.Int64)
+			if _, seen := subjectSeen[key]; !seen {
+				subjectSeen[key] = struct{}{}
+				effective.Assignments[assignmentIndex].Subjects = append(effective.Assignments[assignmentIndex].Subjects, domain.AccessScopeSubject{
+					SubjectType: domain.AccessSubjectType(subjectType.String), SubjectID: subjectID.Int64, SubjectName: subjectName.String,
+				})
+			}
+		}
+		if !permission.Valid {
+			continue
+		}
+		taskTypes, decodeErr := decodeTaskTypesJSON(taskTypesRaw)
+		if decodeErr != nil {
+			return nil, fmt.Errorf("decode effective task types for user %d role %d permission %s: %w", userID, roleID.Int64, permission.String, decodeErr)
+		}
+		permissionCode := domain.PermissionCode(permission.String)
+		if permissionSeen[userID] == nil {
+			permissionSeen[userID] = make(map[domain.PermissionCode]struct{})
+		}
+		if _, seen := permissionSeen[userID][permissionCode]; !seen {
+			permissionSeen[userID][permissionCode] = struct{}{}
+			effective.Permissions = append(effective.Permissions, permissionCode)
+		}
+		noteKey := fmt.Sprintf("%s:%s:%s", assignmentKey, permissionCode, strings.Join(taskTypes, ","))
+		if _, seen := noteSeen[noteKey]; !seen {
+			noteSeen[noteKey] = struct{}{}
+			effective.Sources = append(effective.Sources, domain.EffectiveAccessNote{
+				Permission: permissionCode, RoleID: roleID.Int64, RoleCode: roleCode.String,
+				SourceType: sourceType.String, ScopeMode: domain.AccessScopeMode(scopeMode.String), TaskTypes: taskTypes,
+			})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for _, effective := range out {
+		sort.Slice(effective.Permissions, func(i, j int) bool { return effective.Permissions[i] < effective.Permissions[j] })
+	}
+	return out, nil
+}
+
 func (r *AccessPolicyRepo) listAssignmentSubjects(ctx context.Context, assignmentID int64) ([]domain.AccessScopeSubject, error) {
 	rows, err := r.db.db.QueryContext(ctx, `
 		SELECT s.subject_type, s.subject_id,
@@ -377,7 +593,7 @@ func (r *AccessPolicyRepo) permissionsForRoles(ctx context.Context, roleIDs []in
 		args = append(args, id)
 	}
 	rows, err := r.db.db.QueryContext(ctx, `
-		SELECT rp.role_id, rp.permission_code
+		SELECT rp.role_id, rp.permission_code, rp.task_types
 		FROM auth_role_permissions rp
 		JOIN auth_permissions p ON p.code = rp.permission_code AND p.enabled = 1
 		WHERE rp.role_id IN (`+placeholders+`)
@@ -396,11 +612,19 @@ func (r *AccessPolicyRepo) permissionsForRoles(ctx context.Context, roleIDs []in
 	for rows.Next() {
 		var roleID int64
 		var permission domain.PermissionCode
-		if err := rows.Scan(&roleID, &permission); err != nil {
+		var taskTypesRaw []byte
+		if err := rows.Scan(&roleID, &permission, &taskTypesRaw); err != nil {
 			return nil, nil, err
 		}
+		taskTypes, err := decodeTaskTypesJSON(taskTypesRaw)
+		if err != nil {
+			return nil, nil, fmt.Errorf("decode effective task types for role %d permission %s: %w", roleID, permission, err)
+		}
 		for _, assignment := range assignmentsByRole[roleID] {
-			notes = append(notes, domain.EffectiveAccessNote{Permission: permission, RoleID: roleID, RoleCode: assignment.RoleCode, SourceType: assignment.SourceType, ScopeMode: assignment.ScopeMode})
+			notes = append(notes, domain.EffectiveAccessNote{
+				Permission: permission, RoleID: roleID, RoleCode: assignment.RoleCode,
+				SourceType: assignment.SourceType, ScopeMode: assignment.ScopeMode, TaskTypes: taskTypes,
+			})
 		}
 		if _, ok := seen[permission]; !ok {
 			seen[permission] = struct{}{}

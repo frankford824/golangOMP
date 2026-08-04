@@ -131,10 +131,7 @@ function uploaderIdString(o: Record<string, unknown>): string {
   return s ?? ''
 }
 
-/**
- * 将后端扁平 asset_versions / design_assets 内嵌版本映射为前端 AssetVersionType。
- * 交付流：asset_type=delivery 且 warehouse_ready / approved_for_flow 为定稿（仓库/审核可读）。
- */
+/** 将后端扁平 asset_versions / design_assets 内嵌版本映射为前端 AssetVersionType。 */
 function inferAssetVersionType(o: Record<string, unknown>): AssetVersionType {
   const fromApi =
     pickString(o, ['version_type', 'versionType', 'asset_version_type', 'assetVersionType']) ??
@@ -151,18 +148,12 @@ function inferAssetVersionType(o: Record<string, unknown>): AssetVersionType {
   const role = (pickString(o, ['current_version_role', 'currentVersionRole']) ?? '').toLowerCase()
   const assetType = (pickString(o, ['asset_type', 'assetType']) ?? '').toLowerCase()
   const isDeliveryFile = pickBoolean(o, ['is_delivery_file', 'isDeliveryFile']) === true
-  const warehouseReady = pickBoolean(o, ['warehouse_ready', 'warehouseReady']) === true
   const approvedForFlow = pickBoolean(o, ['approved_for_flow', 'approvedForFlow']) === true
 
   const isDelivery = assetType === 'delivery' || isDeliveryFile
-  if (isDelivery && (warehouseReady || approvedForFlow)) return 'final'
+  if (isDelivery && approvedForFlow) return 'final'
 
-  if (
-    isDelivery &&
-    (role.includes('warehouse_ready') ||
-      role.includes('approved') ||
-      role === 'current_warehouse_ready_version')
-  ) {
+  if (isDelivery && role.includes('approved')) {
     return 'final'
   }
 
@@ -371,7 +362,6 @@ function extractRootInfoFromDesignAssets(
       timelineSortKey(
         asRecord(o.current_version ?? o.currentVersion) ??
           asRecord(o.approved_version ?? o.approvedVersion) ??
-          asRecord(o.warehouse_ready_version ?? o.warehouseReadyVersion) ??
           o,
       )
 
@@ -437,7 +427,6 @@ function collectVersionRowsFromDesignAssets(raw: unknown): Record<string, unknow
       continue
     }
     const embeddedPreferred =
-      asRecord(o.warehouse_ready_version ?? o.warehouseReadyVersion) ??
       asRecord(o.approved_version ?? o.approvedVersion) ??
       asRecord(o.current_version ?? o.currentVersion)
     if (embeddedPreferred) {

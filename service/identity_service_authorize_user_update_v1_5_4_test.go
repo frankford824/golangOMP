@@ -7,110 +7,97 @@ import (
 	"workflow/domain"
 )
 
-func TestIdentityServiceAuthorizeUserUpdateV154Matrix(t *testing.T) {
-	svc := NewIdentityService(newIdentityUserRepo(), &identitySessionRepoStub{}, &identityPermissionLogRepoStub{}, identityTxRunner{}).(*identityService)
+func TestIdentityServiceAuthorizeUserMutationUsesExplicitStableScope(t *testing.T) {
+	departmentID := int64(41)
+	teamID := int64(51)
+	otherDepartmentID := int64(42)
 	target := &domain.User{
-		ID:         30001,
-		Department: domain.DepartmentOperations,
-		Team:       "淘系一组",
-		Roles:      []domain.Role{domain.RoleMember},
+		ID:           30001,
+		Department:   domain.DepartmentOperations,
+		DepartmentID: &departmentID,
+		Team:         "淘系一组",
+		TeamID:       &teamID,
+		Roles:        []domain.Role{domain.RoleMember},
 	}
-	roles := []struct {
-		name      string
-		role      domain.Role
-		wantAllow map[string]bool
-	}{
-		{
-			name: "SuperAdmin", role: domain.RoleSuperAdmin,
-			wantAllow: map[string]bool{"profile": true, "department": true, "team": true, "roles": true, "status": true, "employment": true, "managed_scope": true},
-		},
-		{
-			name: "HRAdmin", role: domain.RoleHRAdmin,
-			wantAllow: map[string]bool{"profile": true, "department": true, "team": true, "roles": true, "status": true, "employment": true, "managed_scope": true},
-		},
-		{
-			name: "DeptAdmin", role: domain.RoleDeptAdmin,
-			wantAllow: map[string]bool{"profile": true, "department": true, "team": true, "roles": true, "status": true, "employment": true, "managed_scope": false},
-		},
-		{
-			name: "TeamLead", role: domain.RoleTeamLead,
-			wantAllow: map[string]bool{"profile": false, "department": false, "team": false, "roles": false, "status": true, "employment": false, "managed_scope": false},
-		},
-	}
-	fields := []string{"profile", "department", "team", "roles", "status", "employment", "managed_scope"}
-	for _, roleCase := range roles {
-		for _, field := range fields {
-			t.Run(roleCase.name+"/"+field, func(t *testing.T) {
-				ctx := domain.WithRequestActor(context.Background(), domain.RequestActor{
-					ID:                 7,
-					Username:           roleCase.name,
-					Roles:              []domain.Role{roleCase.role},
-					Department:         string(domain.DepartmentOperations),
-					Team:               "淘系一组",
-					ManagedDepartments: []string{string(domain.DepartmentOperations)},
-					ManagedTeams:       []string{"淘系一组"},
-					Source:             domain.RequestActorSourceSessionToken,
-					AuthMode:           domain.AuthModeSessionTokenRoleEnforced,
-				})
-				appErr := authorizeMatrixField(ctx, svc, target, field)
-				wantAllow := roleCase.wantAllow[field]
-				if wantAllow && appErr != nil {
-					t.Fatalf("field %s denied: %+v", field, appErr)
-				}
-				if !wantAllow && appErr == nil {
-					t.Fatalf("field %s allowed, want deny", field)
-				}
-			})
-		}
-	}
-}
-
-func TestIdentityServiceAuthorizeUserUpdateV154DenyEdges(t *testing.T) {
 	svc := NewIdentityService(newIdentityUserRepo(), &identitySessionRepoStub{}, &identityPermissionLogRepoStub{}, identityTxRunner{}).(*identityService)
-	target := &domain.User{ID: 30002, Department: domain.DepartmentOperations, Team: "淘系一组", Roles: []domain.Role{domain.RoleMember}}
 
-	hrCtx := domain.WithRequestActor(context.Background(), domain.RequestActor{ID: 1, Roles: []domain.Role{domain.RoleHRAdmin}, Department: string(domain.DepartmentOperations), Team: "淘系一组", Source: domain.RequestActorSourceSessionToken, AuthMode: domain.AuthModeSessionTokenRoleEnforced})
-	if appErr := svc.authorizeUserRoleChange(hrCtx, target, []domain.Role{domain.RoleSuperAdmin}); appErr == nil || appErrorDenyCode(appErr) != "role_assignment_denied_by_scope" {
-		t.Fatalf("HRAdmin assigning SuperAdmin appErr = %+v", appErr)
+	tests := []struct {
+		name      string
+		actor     domain.RequestActor
+		nextDept  *int64
+		nextTeam  *int64
+		wantAllow bool
+		wantStatus bool
+	}{
+		{name: "global manage", actor: identityAccessActor(7, domain.PermissionAccessManage, domain.AccessScopeGlobal, nil), nextDept: &otherDepartmentID, nextTeam: &teamID, wantAllow: true, wantStatus: true},
+		{name: "selected department", actor: identityAccessActor(8, domain.PermissionAccessManage, domain.AccessScopeSelectedOrg, []domain.AccessScopeSubject{{SubjectType: domain.AccessSubjectDepartment, SubjectID: departmentID}}), nextDept: &departmentID, nextTeam: &teamID, wantAllow: true, wantStatus: true},
+		{name: "selected department cannot move outside", actor: identityAccessActor(8, domain.PermissionAccessManage, domain.AccessScopeSelectedOrg, []domain.AccessScopeSubject{{SubjectType: domain.AccessSubjectDepartment, SubjectID: departmentID}}), nextDept: &otherDepartmentID, nextTeam: &teamID, wantAllow: false, wantStatus: true},
+		{name: "view is not write", actor: identityAccessActor(9, domain.PermissionAccessView, domain.AccessScopeGlobal, nil), nextDept: &departmentID, nextTeam: &teamID, wantAllow: false, wantStatus: false},
+		{name: "legacy role alone is not authorization", actor: domain.RequestActor{ID: 10, Roles: []domain.Role{domain.RoleSuperAdmin}, Source: domain.RequestActorSourceSessionToken, AuthMode: domain.AuthModeSessionTokenRoleEnforced}, nextDept: &departmentID, nextTeam: &teamID, wantAllow: false, wantStatus: false},
 	}
 
-	deptCtx := domain.WithRequestActor(context.Background(), domain.RequestActor{ID: 2, Roles: []domain.Role{domain.RoleDeptAdmin}, Department: string(domain.DepartmentOperations), ManagedDepartments: []string{string(domain.DepartmentOperations)}, Team: "淘系一组", Source: domain.RequestActorSourceSessionToken, AuthMode: domain.AuthModeSessionTokenRoleEnforced})
-	if appErr := svc.authorizeUserRoleChange(deptCtx, target, []domain.Role{domain.RoleDeptAdmin}); appErr == nil || appErrorDenyCode(appErr) != "role_assignment_denied_by_scope" {
-		t.Fatalf("DeptAdmin assigning DeptAdmin appErr = %+v", appErr)
-	}
-	crossDept := domain.DepartmentAudit
-	if appErr := svc.authorizeUserUpdate(deptCtx, target, UpdateUserParams{Department: &crossDept}, crossDept, target.Team); appErr == nil || appErrorDenyCode(appErr) != "user_update_field_denied_by_scope" {
-		t.Fatalf("DeptAdmin cross-department update appErr = %+v", appErr)
-	}
-
-	teamCtx := domain.WithRequestActor(context.Background(), domain.RequestActor{ID: 3, Roles: []domain.Role{domain.RoleTeamLead}, Department: string(domain.DepartmentOperations), Team: "淘系二组", Source: domain.RequestActorSourceSessionToken, AuthMode: domain.AuthModeSessionTokenRoleEnforced})
-	if appErr := svc.authorizeUserStatusEndpoint(teamCtx, target); appErr == nil || appErrorDenyCode(appErr) != "user_update_field_denied_by_scope" {
-		t.Fatalf("TeamLead cross-team status appErr = %+v", appErr)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := domain.WithRequestActor(context.Background(), tc.actor)
+			updateErr := svc.authorizeUserUpdate(ctx, target, tc.nextDept, tc.nextTeam)
+			statusErr := svc.authorizeUserStatusEndpoint(ctx, target)
+			if (updateErr == nil) != tc.wantAllow {
+				t.Fatalf("update=%+v, want allow=%v", updateErr, tc.wantAllow)
+			}
+			if (statusErr == nil) != tc.wantStatus {
+				t.Fatalf("status=%+v, want allow=%v", statusErr, tc.wantStatus)
+			}
+		})
 	}
 }
 
-func authorizeMatrixField(ctx context.Context, svc *identityService, target *domain.User, field string) *domain.AppError {
-	switch field {
-	case "profile":
-		name := "New Name"
-		return svc.authorizeUserUpdate(ctx, target, UpdateUserParams{DisplayName: &name}, target.Department, target.Team)
-	case "department":
-		department := target.Department
-		return svc.authorizeUserUpdate(ctx, target, UpdateUserParams{Department: &department}, department, target.Team)
-	case "team":
-		team := "淘系二组"
-		return svc.authorizeUserUpdate(ctx, target, UpdateUserParams{Team: &team}, target.Department, team)
-	case "roles":
-		return svc.authorizeUserRoleChange(ctx, target, []domain.Role{domain.RoleOps})
-	case "status":
-		return svc.authorizeUserStatusEndpoint(ctx, target)
-	case "employment":
-		employmentType := domain.EmploymentTypePartTime
-		return svc.authorizeUserUpdate(ctx, target, UpdateUserParams{EmploymentType: &employmentType}, target.Department, target.Team)
-	case "managed_scope":
-		managed := []string{string(domain.DepartmentOperations)}
-		return svc.authorizeUserUpdate(ctx, target, UpdateUserParams{ManagedDepartments: &managed}, target.Department, target.Team)
-	default:
-		return domain.NewAppError(domain.ErrCodeInvalidRequest, "unknown field", nil)
+func TestIdentityServiceAuthorizeUserMutationOwnTeamUsesStableID(t *testing.T) {
+	departmentID := int64(41)
+	teamID := int64(51)
+	otherTeamID := int64(52)
+	target := &domain.User{ID: 30002, DepartmentID: &departmentID, TeamID: &teamID}
+	svc := NewIdentityService(newIdentityUserRepo(), &identitySessionRepoStub{}, &identityPermissionLogRepoStub{}, identityTxRunner{}).(*identityService)
+
+	actor := identityAccessActor(11, domain.PermissionAccessManage, domain.AccessScopeOwnTeam, nil)
+	actor.DepartmentID = &departmentID
+	actor.TeamID = &teamID
+	ctx := domain.WithRequestActor(context.Background(), actor)
+	if appErr := svc.authorizeUserUpdate(ctx, target, &departmentID, &teamID); appErr != nil {
+		t.Fatalf("same stable team denied: %+v", appErr)
+	}
+	if appErr := svc.authorizeUserUpdate(ctx, target, &departmentID, &otherTeamID); appErr == nil {
+		t.Fatal("move outside own stable team allowed")
+	}
+}
+
+func identityAccessActor(actorID int64, permission domain.PermissionCode, scope domain.AccessScopeMode, subjects []domain.AccessScopeSubject) domain.RequestActor {
+	roleID := actorID + 1000
+	assignment := domain.AccessAssignment{
+		ID:         roleID,
+		UserID:     actorID,
+		RoleID:     roleID,
+		RoleCode:   "access_operator",
+		ScopeMode:  scope,
+		Subjects:   subjects,
+		SourceType: "direct",
+	}
+	effective := &domain.EffectiveAccess{
+		UserID:      actorID,
+		Permissions: []domain.PermissionCode{permission},
+		Assignments: []domain.AccessAssignment{assignment},
+		Sources: []domain.EffectiveAccessNote{{
+			Permission: permission,
+			RoleID:     roleID,
+			RoleCode:   assignment.RoleCode,
+			SourceType: assignment.SourceType,
+			ScopeMode:  scope,
+		}},
+	}
+	return domain.RequestActor{
+		ID:              actorID,
+		Permissions:     effective.Permissions,
+		EffectiveAccess: effective,
+		Source:          domain.RequestActorSourceSessionToken,
+		AuthMode:        domain.AuthModeSessionTokenRoleEnforced,
 	}
 }

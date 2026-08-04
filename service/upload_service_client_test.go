@@ -271,6 +271,61 @@ func TestUploadServiceClientMultipartTargetsDropPrivateHostWhenBrowserBaseIsRela
 	}
 }
 
+func TestUploadServiceClientTargetsDropDockerServiceHostWhenBrowserBaseIsRelative(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost && r.URL.Path == "/upload/sessions" {
+			writeJSON(t, w, http.StatusCreated, map[string]interface{}{
+				"data": map[string]interface{}{
+					"session_id":    "upl-compose-1",
+					"upload_mode":   "small",
+					"upload_status": "pending",
+					"base_url":      "http://fixture-upload:18092",
+					"upload_url":    "http://fixture-upload:18092/upload/sessions/upl-compose-1/file",
+					"complete_url":  "http://fixture-upload:18092/upload/sessions/upl-compose-1/complete",
+					"abort_url":     "http://fixture-upload:18092/upload/sessions/upl-compose-1/abort",
+				},
+			})
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+
+	client := NewUploadServiceClient(UploadServiceClientConfig{
+		Enabled:                 true,
+		BaseURL:                 server.URL,
+		BrowserMultipartBaseURL: "/",
+		Timeout:                 5 * time.Second,
+		InternalToken:           "internal-token",
+		StorageProvider:         "oss",
+	})
+
+	plan, err := client.CreateUploadSession(context.Background(), RemoteCreateUploadSessionRequest{
+		TaskID:       1,
+		AssetType:    domain.TaskAssetTypeReference,
+		UploadMode:   domain.DesignAssetUploadModeSmall,
+		Filename:     "reference.png",
+		ExpectedSize: uploadRequestInt64Ptr(24),
+		MimeType:     "image/png",
+		CreatedBy:    99,
+	})
+	if err != nil {
+		t.Fatalf("CreateUploadSession() error = %v", err)
+	}
+	if plan.BaseURL != "/" {
+		t.Fatalf("plan.BaseURL = %q, want relative browser base", plan.BaseURL)
+	}
+	if plan.UploadURL != "/upload/sessions/upl-compose-1/file" {
+		t.Fatalf("plan.UploadURL = %q, want browser-safe relative upload_url", plan.UploadURL)
+	}
+	if plan.CompleteURL != "/upload/sessions/upl-compose-1/complete" {
+		t.Fatalf("plan.CompleteURL = %q", plan.CompleteURL)
+	}
+	if plan.AbortURL != "/upload/sessions/upl-compose-1/abort" {
+		t.Fatalf("plan.AbortURL = %q", plan.AbortURL)
+	}
+}
+
 func TestUploadServiceClientSinglePartTargetsDropPrivateHostWhenBrowserBaseIsRelative(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost && r.URL.Path == "/upload/sessions" {

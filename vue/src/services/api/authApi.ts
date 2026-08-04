@@ -70,10 +70,4 @@ export const authApi = {
   logout: (signal?: AbortSignal) =>
     http.post<void>('/v1/auth/logout', undefined, { signal }),
 
-  /**
-   * 路由权限目录
-   * GET /v1/access-rules
-   */
-  getAccessRules: (signal?: AbortSignal) =>
-    http.get<Record<string, unknown>>('/v1/access-rules', { signal }),
 }

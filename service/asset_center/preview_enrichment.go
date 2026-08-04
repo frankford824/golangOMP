@@ -15,6 +15,13 @@ type previewPresigner interface {
 	PresignPreviewURLWithProcess(objectKey, process string) *baseservice.OSSDirectDownloadInfo
 }
 
+func stringPtrValue(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return strings.TrimSpace(*value)
+}
+
 func (s *Service) enrichSystemAssetPreview(detail *AssetDetail, row *repo.TaskAssetSearchRow) {
 	if detail == nil || row == nil || row.Asset == nil {
 		return

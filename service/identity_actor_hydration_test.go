@@ -207,10 +207,11 @@ func TestResolveRequestActorCleanRolesEmitsNoTelemetry(t *testing.T) {
 	}
 }
 
-// TestAuthorizeUserReadDepartmentAdminSameDepartmentIsSilent covers
-// diagnostic case (c): a DepartmentAdmin reading a target in the same
-// department must succeed and must not emit authorize_user_read_denied.
-func TestAuthorizeUserReadDepartmentAdminSameDepartmentIsSilent(t *testing.T) {
+// TestAuthorizeUserReadExplicitDepartmentScopeIsSilent covers diagnostic
+// case (c): explicit access.view for a stable department ID must succeed and
+// must not emit authorize_user_read_denied. Legacy department-admin roles are
+// intentionally irrelevant to this authorization decision.
+func TestAuthorizeUserReadExplicitDepartmentScopeIsSilent(t *testing.T) {
 	userRepo := newIdentityUserRepo()
 	sessionRepo := &identitySessionRepoStub{}
 	svc, observed := newIdentityServiceWithObservedLogger(t, userRepo, sessionRepo)
@@ -228,11 +229,6 @@ func TestAuthorizeUserReadDepartmentAdminSameDepartmentIsSilent(t *testing.T) {
 	if appErr != nil {
 		t.Fatalf("Register(admin) error = %+v", appErr)
 	}
-	if err := userRepo.ReplaceRoles(context.Background(), identityTx{}, adminReg.User.ID, []domain.Role{domain.RoleMember, domain.RoleDeptAdmin}); err != nil {
-		t.Fatalf("ReplaceRoles(admin) error = %v", err)
-	}
-	userRepo.users[adminReg.User.ID].ManagedDepartments = []string{string(dept)}
-
 	targetReg, appErr := svc.Register(context.Background(), RegisterUserParams{
 		Username:    "procurement_member",
 		DisplayName: "采购成员",
@@ -245,11 +241,17 @@ func TestAuthorizeUserReadDepartmentAdminSameDepartmentIsSilent(t *testing.T) {
 		t.Fatalf("Register(target) error = %+v", appErr)
 	}
 
-	actor, appErr := svc.ResolveRequestActor(context.Background(), adminReg.Session.Token)
-	if appErr != nil {
-		t.Fatalf("ResolveRequestActor() error = %+v", appErr)
-	}
-	ctx := domain.WithRequestActor(context.Background(), *actor)
+	departmentID := int64(41)
+	teamID := int64(51)
+	userRepo.users[targetReg.User.ID].DepartmentID = &departmentID
+	userRepo.users[targetReg.User.ID].TeamID = &teamID
+	actor := identityAccessActor(adminReg.User.ID, domain.PermissionAccessView, domain.AccessScopeSelectedOrg, []domain.AccessScopeSubject{{
+		SubjectType: domain.AccessSubjectDepartment,
+		SubjectID:   departmentID,
+	}})
+	actor.DepartmentID = &departmentID
+	actor.TeamID = &teamID
+	ctx := domain.WithRequestActor(context.Background(), actor)
 
 	fetched, appErr := svc.GetUser(ctx, targetReg.User.ID)
 	if appErr != nil {
@@ -265,7 +267,7 @@ func TestAuthorizeUserReadDepartmentAdminSameDepartmentIsSilent(t *testing.T) {
 
 // TestAuthorizeUserReadNonManagementDenyEmitsTelemetry covers diagnostic
 // case (d): a non-management actor ([Warehouse, Member]) hitting
-// authorizeUserRead must receive management_access_required and emit the
+// authorizeUserRead must receive access_scope_denied and emit the
 // new default-deny telemetry with the full actor role list.
 func TestAuthorizeUserReadNonManagementDenyEmitsTelemetry(t *testing.T) {
 	userRepo := newIdentityUserRepo()
@@ -313,13 +315,13 @@ func TestAuthorizeUserReadNonManagementDenyEmitsTelemetry(t *testing.T) {
 
 	_, appErr = svc.GetUser(ctx, targetReg.User.ID)
 	if appErr == nil {
-		t.Fatal("GetUser() want management_access_required deny, got nil")
+		t.Fatal("GetUser() want access_scope_denied, got nil")
 	}
 	if appErr.Code != domain.ErrCodePermissionDenied {
 		t.Fatalf("appErr.Code = %s, want %s", appErr.Code, domain.ErrCodePermissionDenied)
 	}
-	if denyCode := appErrorDenyCode(appErr); denyCode != "management_access_required" {
-		t.Fatalf("appErr deny_code = %q, want management_access_required", denyCode)
+	if denyCode := appErrorDenyCode(appErr); denyCode != "access_scope_denied" {
+		t.Fatalf("appErr deny_code = %q, want access_scope_denied", denyCode)
 	}
 
 	entries := observed.FilterMessage("authorize_user_read_denied").All()
@@ -327,7 +329,7 @@ func TestAuthorizeUserReadNonManagementDenyEmitsTelemetry(t *testing.T) {
 		t.Fatalf("authorize_user_read_denied entries = %d, want 1 (all=%+v)", len(entries), observed.All())
 	}
 	fields := entries[0].ContextMap()
-	if fields["deny_code"] != "management_access_required" {
+	if fields["deny_code"] != "access_scope_denied" {
 		t.Fatalf("deny_code field = %v", fields["deny_code"])
 	}
 	if gotActorID, _ := fields["actor_id"].(int64); gotActorID != actor.ID {
@@ -379,8 +381,8 @@ func TestAuthorizeUserListFilterNonManagementDenyEmitsTelemetry(t *testing.T) {
 	if appErr == nil {
 		t.Fatal("ListUsers() want management_access_required deny, got nil")
 	}
-	if denyCode := appErrorDenyCode(appErr); denyCode != "management_access_required" {
-		t.Fatalf("appErr deny_code = %q, want management_access_required", denyCode)
+	if denyCode := appErrorDenyCode(appErr); denyCode != "access_view_required" {
+		t.Fatalf("appErr deny_code = %q, want access_view_required", denyCode)
 	}
 
 	entries := observed.FilterMessage("authorize_user_list_filter_denied").All()
@@ -388,7 +390,7 @@ func TestAuthorizeUserListFilterNonManagementDenyEmitsTelemetry(t *testing.T) {
 		t.Fatalf("authorize_user_list_filter_denied entries = %d, want 1 (all=%+v)", len(entries), observed.All())
 	}
 	fields := entries[0].ContextMap()
-	if fields["deny_code"] != "management_access_required" {
+	if fields["deny_code"] != "access_view_required" {
 		t.Fatalf("deny_code field = %v", fields["deny_code"])
 	}
 	if gotActorID, _ := fields["actor_id"].(int64); gotActorID != actor.ID {

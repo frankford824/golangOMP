@@ -1,9 +1,9 @@
 <template>
   <div class="task-list-view">
     <!-- 顶栏 + 搜索/过滤：统一卡片容器 -->
-    <div class="header-card">
-      <div class="page-header">
-        <h2 class="page-title task-list-page-title">任务中心</h2>
+    <div class="header-card yb-page-surface" data-page-header="task-center">
+      <div class="page-header yb-page-header-row">
+        <h2 class="page-title task-list-page-title yb-page-title">任务中心</h2>
         <div class="page-header-actions">
           <BaseButton
             size="sm"
@@ -34,18 +34,6 @@
           </BaseButton>
         </div>
       </div>
-      <div class="task-category-switch" aria-label="任务分类">
-        <BaseButton
-          v-for="option in taskCategoryOptions"
-          :key="option.value"
-          size="sm"
-          :variant="filters.taskCategory === option.value ? 'secondary' : 'ghost'"
-          :class="{ 'task-category-active': filters.taskCategory === option.value }"
-          @click="setTaskCategory(option.value)"
-        >
-          {{ option.label }}
-        </BaseButton>
-      </div>
       <div class="task-tabs" aria-label="任务中心列表范围">
         <BaseButton
           v-for="tab in taskTabs"
@@ -60,11 +48,19 @@
       </div>
       <div class="toolbar">
         <BaseInput
-          v-model="searchKeyword"
-          placeholder="搜索任务号、SKU、任务名、子项名称或设计要求"
-          class="search-input w-72"
-          @input="debouncedSearch"
+          v-model="quickKeyword"
+          class="quick-search"
+          placeholder="搜索任务号、SKU 或任务名称"
+          @keyup.enter="applyQuickFilters"
         />
+        <BaseSelect
+          v-model="quickStatus"
+          class="quick-status"
+          :options="quickStatusOptions"
+          placeholder="全部状态"
+          clearable
+        />
+        <BaseButton size="sm" variant="primary" class="quick-apply" @click="applyQuickFilters">查询</BaseButton>
         <BaseButton
           size="sm"
           variant="secondary"
@@ -72,17 +68,16 @@
           :class="{
             'advanced-filter-toggle--active': advancedFilterOpen || activeAdvancedFilterCount > 0,
           }"
-          @click="advancedFilterOpen = !advancedFilterOpen"
+          @click="advancedFilterOpen = true"
         >
           {{
-            advancedFilterOpen
-              ? '收起筛选'
-              : activeAdvancedFilterCount > 0
+            activeAdvancedFilterCount > 0
                 ? `筛选 ${activeAdvancedFilterCount}`
                 : '高级筛选'
           }}
         </BaseButton>
         <BaseButton
+          v-if="activeAdvancedFilterCount > 0 || searchKeyword"
           size="sm"
           variant="secondary"
           class="clear-all-filter-button"
@@ -91,13 +86,28 @@
           清空全部筛选
         </BaseButton>
       </div>
-      <div v-show="advancedFilterOpen" class="filter-bar-wrap">
-        <TaskFilterBar v-model:filters="filters" @update:filters="page = 1" />
+      <div v-if="activeFilterChips.length" class="active-filter-chips" aria-label="已应用筛选">
+        <button v-for="chip in activeFilterChips" :key="chip.key" type="button" @click="removeActiveFilter(chip.key)">{{ chip.label }} <span aria-hidden="true">×</span></button>
       </div>
       <p v-if="tabStatusScopeHint" class="tab-status-scope-hint" role="status">
         {{ tabStatusScopeHint }}
       </p>
     </div>
+
+    <Teleport to="body">
+      <div v-if="advancedFilterOpen" class="task-filter-drawer-layer">
+        <button class="task-filter-backdrop" aria-label="关闭高级筛选" @click="advancedFilterOpen = false" />
+        <aside class="task-filter-drawer" role="dialog" aria-modal="true" aria-label="高级筛选">
+          <TaskFilterPanel
+            :filters="filters"
+            :keyword="searchKeyword"
+            @apply="onFilterApply"
+            @reset="onFilterReset"
+            @close="advancedFilterOpen = false"
+          />
+        </aside>
+      </div>
+    </Teleport>
 
     <!-- 批量操作条（有选中时滑出） -->
     <Transition name="batch-bar-slide">
@@ -190,7 +200,7 @@
           :can-copy-no="canCopyTaskField(task.taskNo)"
           :can-copy-title="canCopyTaskField(taskCardTitle(task))"
           :can-copy-sku="canCopyTaskField(displaySku(task))"
-          :updated-text="formatDate(task.updatedAt)"
+          :updated-text="formatUpdatedDate(task.updatedAt)"
           :due-text="task.dueAt ? formatDate(task.dueAt) : '-'"
           @pointerdown="onTaskCardPointerDown"
           @pointermove="onTaskCardPointerMove"
@@ -264,13 +274,6 @@
         </div>
       </div>
     </div>
-
-    <TaskCreateModal
-      v-if="can('task.create')"
-      v-model="showCreateModal"
-      :initial-draft-id="queryString(route.query.draft_id)"
-      @created="handleTaskCreated"
-    />
 
     <!-- v0.6 批量指派弹窗 -->
     <DesignerSelectDialog
@@ -413,7 +416,7 @@
                     <td>{{ candidate.primary_sku_code || candidate.sku_code || '-' }}</td>
                     <td>{{ formatAuditHandoverCandidateStatus(candidate.task_status) }}</td>
                     <td>{{ candidate.owner_org_team || '-' }}</td>
-                    <td>{{ formatDate(candidate.updated_at) }}</td>
+                    <td>{{ formatUpdatedDate(candidate.updated_at) }}</td>
                   </tr>
                 </template>
               </tbody>
@@ -560,8 +563,8 @@ import { usePermissionsStore } from '@/stores/permissions'
 import type { ActiveTaskStatus, Task, TaskSkuItem } from '@/domain/types/task'
 import { isDoneStatus, shouldShowDesignerMetaOnTaskCenterCard } from '@/domain/task-actions'
 import { usePermission } from '@/composables/usePermission'
-import type { TaskListFilters } from '@/components/task/TaskFilterBar.vue'
-import TaskFilterBar from '@/components/task/TaskFilterBar.vue'
+import type { TaskListFilters } from '@/components/task/TaskFilterPanel.vue'
+import TaskFilterPanel from '@/components/task/TaskFilterPanel.vue'
 import TaskCard from '@/components/task/TaskCard.vue'
 import AsyncStateWrapper from '@/components/base/AsyncStateWrapper.vue'
 import BaseButton from '@/components/base/BaseButton.vue'
@@ -569,7 +572,6 @@ import BaseInput from '@/components/base/BaseInput.vue'
 import BaseModal from '@/components/base/BaseModal.vue'
 import BaseSelect, { type BaseSelectOption } from '@/components/base/BaseSelect.vue'
 import BaseTextarea from '@/components/base/BaseTextarea.vue'
-import TaskCreateModal from '@/components/task/TaskCreateModal.vue'
 import DesignerSelectDialog from '@/components/task/DesignerSelectDialog.vue'
 import { tasksApi } from '@/services/api/tasksApi'
 import type {
@@ -581,6 +583,7 @@ import type {
 import type { TaskListParams } from '@/services/apiTypes'
 import { useDesignerOptions } from '@/composables/useDesignerOptions'
 import {
+  formatTaskRecordDateBeijing,
   formatTaskDueAtDisplay,
   isOverdueByTimestamp as checkOverdue,
 } from '@/utils/date'
@@ -602,6 +605,27 @@ const { can, canAccessAction } = usePermission()
 // ── 列表初始状态：只接受当前路由 query；避免登录落地页恢复旧筛选 ─────────────
 const STORAGE_KEY = 'task-list-state'
 type TaskListTab = 'all' | 'pool' | 'mine' | 'archived' | 'terminated'
+type TaskOperationalBucket =
+  | 'active_tasks'
+  | 'design_pending'
+  | 'pending_audit'
+  | 'handover'
+  | 'customization_in_progress'
+  | 'overdue'
+  | 'due_today'
+  | 'today_created'
+
+const operationalBucketLabels: Record<TaskOperationalBucket, string> = {
+  active_tasks: '全局进行中',
+  design_pending: '设计待办',
+  pending_audit: '待审核',
+  handover: '需交班',
+  customization_in_progress: '定制处理中',
+  overdue: '已逾期',
+  due_today: '今日截止',
+  today_created: '今日新建',
+}
+const operationalBucket = ref<TaskOperationalBucket | ''>(parseOperationalBucket(route.query.operational_bucket))
 
 const taskTabs: Array<{ label: string; value: TaskListTab }> = [
   { label: '全任务', value: 'all' },
@@ -616,12 +640,6 @@ const emptyDescription = computed(() => {
   if (activeTab.value !== 'pool') return '当前筛选条件下没有任务'
   return '当前暂无可接单任务'
 })
-
-const taskCategoryOptions = [
-  { label: '全部', value: '' },
-  { label: '常规任务', value: 'normal' },
-  { label: '定制任务', value: 'customization' },
-]
 
 const pageSizeOptions: BaseSelectOption[] = [
   { value: 20, label: '20' },
@@ -674,7 +692,6 @@ const sortKey = ref<'taskNo' | 'updatedAt' | 'dueAt'>('updatedAt')
 const sortOrder = ref<'asc' | 'desc'>('desc')
 const page = ref(1)
 const pageSize = ref(20)
-const showCreateModal = ref(false)
 const showBatchAssign = ref(false)
 const showBatchAuditHandover = ref(false)
 const batchReminding = ref(false)
@@ -736,11 +753,10 @@ const {
   includeEmpty: false,
   autoLoad: false,
   workflowLane: 'audit',
-  requiredActions: ['task.audit.decision'],
+  requiredActions: ['task.audit', 'task.audit.decision'],
 })
 const listActionError = ref('')
 const listActionSuccess = ref('')
-let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null
 let listActionSuccessTimer: ReturnType<typeof setTimeout> | null = null
 let listActionSeq = 0
 const taskCardPointerState = {
@@ -755,21 +771,10 @@ const canBatchAssign = computed(
     canAccessAction('task.assign.department') ||
     canAccessAction('task.assign.team'),
 )
-const canUseBatchAuditHandover = computed(() => can('task.audit.decision'))
+const canUseBatchAuditHandover = computed(() => can('task.audit') || can('task.audit.decision'))
 const showAuditHandoverEntry = computed(
   () => canUseBatchAuditHandover.value && auditHandoverEntryEligibleCount.value > 0,
 )
-
-/** 方案 B：搜索防抖，300ms 后触发服务端检索 */
-function debouncedSearch() {
-  if (searchDebounceTimer) clearTimeout(searchDebounceTimer)
-  page.value = 1
-  saveState()
-  searchDebounceTimer = setTimeout(() => {
-    searchDebounceTimer = null
-    refreshList(true)
-  }, 300)
-}
 
 const selectedIds = reactive(new Set<string>())
 const selectedTasks = computed(() => tasksStore.list.filter((task) => selectedIds.has(task.id)))
@@ -886,20 +891,70 @@ const ARCHIVED_TAB_DEFAULT_STATUSES: ActiveTaskStatus[] = [
 const filters = ref<TaskListFilters>({
   ...defaultTaskFilters,
 })
+const quickKeyword = ref(searchKeyword.value)
+const quickStatus = ref<ActiveTaskStatus | ''>('')
+const quickStatusOptions: BaseSelectOption[] = [
+  { label: '全部状态', value: '' },
+  { label: '待指派', value: 'PendingAssign' },
+  { label: '进行中', value: 'InProgress' },
+  { label: '待审核', value: 'PendingAudit' },
+  { label: '已结单', value: 'Completed' },
+  { label: '已归档', value: 'Archived' },
+  { label: '阻塞', value: 'Blocked' },
+  { label: '已取消', value: 'Cancelled' },
+]
+type ActiveFilterKey = 'keyword' | 'operationalBucket' | keyof TaskListFilters
+const statusDisplay: Partial<Record<ActiveTaskStatus, string>> = { Draft: '草稿', PendingAssign: '待指派', Assigned: '已指派', InProgress: '进行中', PendingAudit: '待审核', Completed: '已结单', Archived: '已归档', Cancelled: '已取消', Blocked: '阻塞' }
+const activeFilterChips = computed(() => {
+  const chips: Array<{ key: ActiveFilterKey; label: string }> = []
+  const f = filters.value
+  if (operationalBucket.value) chips.push({ key: 'operationalBucket', label: `首页口径：${operationalBucketLabels[operationalBucket.value]}` })
+  if (searchKeyword.value) chips.push({ key: 'keyword', label: `关键词：${searchKeyword.value}` })
+  if (f.status.length) chips.push({ key: 'status', label: `状态：${f.status.map((item) => statusDisplay[item] || item).join('、')}` })
+  if (f.taskCategory) chips.push({ key: 'taskCategory', label: `分组：${f.taskCategory === 'customization' ? '定制' : '常规'}` })
+  if (f.taskType) chips.push({ key: 'taskType', label: `类型：${f.taskType}` })
+  if (f.priority) chips.push({ key: 'priority', label: `优先级：${f.priority}` })
+  if (f.ownerDepartment) chips.push({ key: 'ownerDepartment', label: `部门：${f.ownerDepartment}` })
+  if (f.ownerOrgTeam) chips.push({ key: 'ownerOrgTeam', label: `团队：${f.ownerOrgTeam}` })
+  if (f.creatorId) chips.push({ key: 'creatorId', label: '已选创建人' })
+  if (f.assigneeId) chips.push({ key: 'assigneeId', label: '已选执行人' })
+  if (f.dateFrom || f.dateTo) chips.push({ key: 'dateFrom', label: `时间：${f.dateFrom || '不限'} 至 ${f.dateTo || '不限'}` })
+  if (f.overdueOnly) chips.push({ key: 'overdueOnly', label: '仅逾期' })
+  return chips
+})
+
+function applyQuickFilters() {
+  searchKeyword.value = quickKeyword.value.trim()
+  filters.value = { ...filters.value, status: quickStatus.value ? [quickStatus.value] : [] }
+  page.value = 1
+  void refreshList(true)
+}
+
+function removeActiveFilter(key: ActiveFilterKey) {
+  if (key === 'operationalBucket') operationalBucket.value = ''
+  else if (key === 'keyword') { searchKeyword.value = ''; quickKeyword.value = '' }
+  else if (key === 'status') { filters.value = { ...filters.value, status: [] }; quickStatus.value = '' }
+  else if (key === 'dateFrom' || key === 'dateTo') filters.value = { ...filters.value, dateFrom: '', dateTo: '' }
+  else if (key === 'overdueOnly') filters.value = { ...filters.value, overdueOnly: false }
+  else filters.value = { ...filters.value, [key]: '' }
+  page.value = 1
+  void refreshList(true)
+}
 
 function clearAllTaskFilters() {
-  if (searchDebounceTimer) {
-    clearTimeout(searchDebounceTimer)
-    searchDebounceTimer = null
-  }
   searchKeyword.value = ''
+  quickKeyword.value = ''
+  quickStatus.value = ''
+  operationalBucket.value = ''
   filters.value = { ...defaultTaskFilters }
   page.value = 1
+  void refreshList(true)
 }
 
 const activeAdvancedFilterCount = computed(() => {
   const f = filters.value
   let count = 0
+  if (operationalBucket.value) count += 1
   if (f.taskCategory) count += 1
   if (f.status.length > 0) count += 1
   if (f.taskType) count += 1
@@ -940,6 +995,7 @@ if (typeof route.query.date_from === 'string') {
 if (typeof route.query.date_to === 'string') {
   filters.value.dateTo = route.query.date_to
 }
+filters.value.overdueOnly = parseOverdueQuery(route.query)
 if (typeof route.query.sort === 'string') {
   const raw = route.query.sort
   const direction = raw.startsWith('-') ? 'desc' : 'asc'
@@ -954,9 +1010,11 @@ if (typeof route.query.sort === 'string') {
     sortOrder.value = direction
   }
 }
+quickStatus.value = filters.value.status.length === 1 ? filters.value.status[0] : ''
 
 function setTaskTab(tab: TaskListTab) {
   if (activeTab.value === tab) return
+  operationalBucket.value = ''
   if (filters.value.status.length > 0) {
     filters.value = { ...filters.value, status: [] }
   }
@@ -985,9 +1043,9 @@ function parseOverdueQuery(query: Record<string, unknown>): boolean {
   return raw === 'true' || raw === '1'
 }
 
-function setTaskCategory(category: string) {
-  if (filters.value.taskCategory === category) return
-  filters.value = { ...filters.value, taskCategory: category }
+function parseOperationalBucket(value: unknown): TaskOperationalBucket | '' {
+  const raw = queryString(value).trim()
+  return Object.prototype.hasOwnProperty.call(operationalBucketLabels, raw) ? raw as TaskOperationalBucket : ''
 }
 
 /** 方案 B：构建服务端分页 + 搜索参数 */
@@ -998,6 +1056,7 @@ function buildListParams(opt?: { page?: number; append?: boolean }): TaskListPar
     page: opt?.page ?? page.value,
     page_size: pageSize.value,
   }
+  if (operationalBucket.value) params.operational_bucket = operationalBucket.value
   if (kw) params.keyword = kw
   if (activeTab.value === 'mine') params.filter = 'mine'
   if (activeTab.value === 'pool') {
@@ -1031,7 +1090,7 @@ function buildListParams(opt?: { page?: number; append?: boolean }): TaskListPar
   if (f.dateFrom) params.date_from = f.dateFrom
   if (f.dateTo) params.date_to = f.dateTo
   if (f.taskCategory === 'normal' || f.taskCategory === 'customization') {
-    params.workflow_lane = f.taskCategory
+    params.business_lane = f.taskCategory
   }
   const sortMap: Record<typeof sortKey.value, string> = {
     taskNo: 'task_no',
@@ -1051,16 +1110,28 @@ function ownershipPrimary(task: Task): string {
   return getTaskOwnershipDisplay(task).primary
 }
 
-/** 服务端分页 + 搜索；前端不再按已退役流程节点二次推断。 */
-const filteredList = computed(() => {
-  let list = tasksStore.list
-  const f = filters.value
-  if (f.creatorId) {
-    const creatorId = String(f.creatorId).trim()
-    list = list.filter((t) => String(t.creatorId ?? '').trim() === creatorId)
-  }
-  return list
-})
+/** 服务端分页 + 搜索；筛选条件全部由后端生效，前端不再二次过滤。 */
+const filteredList = computed(() => tasksStore.list)
+
+function onFilterApply(nextFilters: TaskListFilters, nextKeyword: string) {
+  filters.value = nextFilters
+  searchKeyword.value = nextKeyword
+  quickKeyword.value = nextKeyword
+  quickStatus.value = nextFilters.status.length === 1 ? nextFilters.status[0] : ''
+  advancedFilterOpen.value = false
+  page.value = 1
+  void refreshList(true)
+}
+
+function onFilterReset(nextFilters: TaskListFilters, nextKeyword: string) {
+  filters.value = nextFilters
+  searchKeyword.value = nextKeyword
+  quickKeyword.value = nextKeyword
+  quickStatus.value = ''
+  advancedFilterOpen.value = false
+  page.value = 1
+  void refreshList(true)
+}
 
 /** 翻页模式：每页固定展示，不追加；total 来自 listTotal */
 const totalPages = computed(() => Math.max(1, Math.ceil(tasksStore.listTotal / pageSize.value)))
@@ -1361,7 +1432,7 @@ function isOverdue(task: Task): boolean {
 }
 
 function isCustomizationTask(task: Task): boolean {
-  const lane = String(task.workflowLane ?? '').trim().toLowerCase()
+  const lane = String(task.businessLane ?? '').trim().toLowerCase()
   return task.customizationRequired === true || lane === 'customization'
 }
 
@@ -1374,7 +1445,7 @@ function taskCategoryLabel(task: Task): string {
  * 若业务标记为定制但 lane 仍为 normal 等不一致情形，仍保留短标签以免丢失信息。
  */
 function shouldShowWorkflowLaneTagOnCard(task: Task): boolean {
-  const lane = String(task.workflowLane ?? '').trim().toLowerCase()
+  const lane = String(task.businessLane ?? '').trim().toLowerCase()
   if (lane !== 'normal' && lane !== 'customization') return false
 
   const categoryIsCustomization = isCustomizationTask(task)
@@ -1565,7 +1636,7 @@ function onTaskCardClick(event: MouseEvent, task: Task) {
 }
 
 function canClaimTask(task: Task): boolean {
-  return canClaimTaskFromCenter(task)
+  return canClaimTaskFromCenter(task, can('task.design.submit'))
 }
 
 async function claimTask(task: Task) {
@@ -1600,14 +1671,14 @@ function formatDate(iso: string): string {
   return formatTaskDueAtDisplay(iso)
 }
 
+function formatUpdatedDate(iso: string): string {
+  return formatTaskRecordDateBeijing(iso)
+}
+
 function goCreate() {
   if (!can('task.create')) return
   saveState()
-  if (route.name !== 'TaskCreate') {
-    void router.push({ name: 'TaskCreate' })
-  } else {
-    showCreateModal.value = true
-  }
+  void router.push({ name: 'TaskCreate' })
 }
 
 function goDetail(task: Task) {
@@ -1667,12 +1738,6 @@ async function refreshList(_force?: boolean) {
   }
 }
 
-async function handleTaskCreated(taskId: string) {
-  // v4.2 修复：老板要求 + 创建成功后强刷全局任务列表，避免排序、统计和徽标状态滞后
-  await tasksStore.loadTaskById(taskId)
-  await refreshList(true)
-}
-
 onMounted(async () => {
   await refreshList(true)
   await loadAuditHandoverEntryCount()
@@ -1680,38 +1745,7 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   listActionSeq += 1
-  if (searchDebounceTimer) clearTimeout(searchDebounceTimer)
   if (listActionSuccessTimer) clearTimeout(listActionSuccessTimer)
-})
-
-// 根据路由控制创建任务弹窗（支持侧边栏 /tasks/create 与 ?create=1 深链接）
-watch(
-  () => [route.name, route.query.create, route.meta.openCreateModal],
-  () => {
-    const shouldOpen =
-      (route.meta.openCreateModal === true || route.query.create === '1') && can('task.create')
-    showCreateModal.value = shouldOpen
-    if (shouldOpen) {
-      page.value = 1
-    }
-  },
-  { immediate: true },
-)
-
-/** 关闭弹窗时同步路由，否则仍停留在 /tasks/create 或 ?create=1，与“已关闭”状态不一致；浏览器返回能走是因为路由变了。 */
-watch(showCreateModal, (open) => {
-  if (open) return
-  if (route.name === 'TaskCreate') {
-    const q = { ...route.query } as Record<string, string | string[] | undefined>
-    delete q.create
-    delete q.draft_id
-    void router.replace({ name: 'TaskList', query: q })
-  } else if (route.name === 'TaskList' && queryString(route.query.create) === '1') {
-    const q = { ...route.query } as Record<string, string | string[] | undefined>
-    delete q.create
-    delete q.draft_id
-    void router.replace({ path: route.path, query: q })
-  }
 })
 
 watch(showBatchAssign, (open) => {
@@ -1751,17 +1785,7 @@ watch(activeTab, () => {
 })
 
 watch(
-  filters,
-  () => {
-    page.value = 1
-    saveState()
-    refreshList(true)
-  },
-  { deep: true },
-)
-
-watch(
-  () => [filters.value, searchKeyword.value, activeTab.value, sortKey.value, sortOrder.value] as const,
+  () => [filters.value, searchKeyword.value, activeTab.value, sortKey.value, sortOrder.value, operationalBucket.value] as const,
   () => {
     const q = { ...route.query } as Record<string, string | string[] | undefined>
     const kw = searchKeyword.value.trim()
@@ -1769,6 +1793,8 @@ watch(
     else delete q.q
     if (activeTab.value !== 'all') q.tab = activeTab.value
     else delete q.tab
+    if (operationalBucket.value) q.operational_bucket = operationalBucket.value
+    else delete q.operational_bucket
     if (filters.value.status.length) q.status = filters.value.status.join(',')
     else delete q.status
     if (filters.value.ownerDepartment) q.owner_department = filters.value.ownerDepartment
@@ -1781,12 +1807,16 @@ watch(
     else delete q.task_type
     if (filters.value.creatorId) q.creator_id = filters.value.creatorId
     else delete q.creator_id
+    if (filters.value.assigneeId) q.designer_id = filters.value.assigneeId
+    else delete q.designer_id
     if (filters.value.priority) q.priority = filters.value.priority
     else delete q.priority
     if (filters.value.dateFrom) q.date_from = filters.value.dateFrom
     else delete q.date_from
     if (filters.value.dateTo) q.date_to = filters.value.dateTo
     else delete q.date_to
+    if (filters.value.overdueOnly) q.overdue = 'true'
+    else delete q.overdue
     const sortMap: Record<typeof sortKey.value, string> = {
       taskNo: 'task_no',
       updatedAt: 'updated_at',
@@ -1802,6 +1832,7 @@ watch(
   () => route.query,
   (query) => {
     const nextTab = parseTaskTab(query.tab)
+    const nextOperationalBucket = parseOperationalBucket(query.operational_bucket)
     const nextFilters = {
       ...filters.value,
       status: parseStatusQuery(query.status),
@@ -1820,13 +1851,20 @@ watch(
     }
     const nextKeyword = queryString(query.q)
     let changed = false
+    let filterChanged = false
     if (activeTab.value !== nextTab) {
       activeTab.value = nextTab
       changed = true
     }
+    if (operationalBucket.value !== nextOperationalBucket) {
+      operationalBucket.value = nextOperationalBucket
+      changed = true
+      filterChanged = true
+    }
     if (searchKeyword.value !== nextKeyword) {
       searchKeyword.value = nextKeyword
       changed = true
+      filterChanged = true
     }
     if (typeof query.sort === 'string') {
       const direction = query.sort.startsWith('-') ? 'desc' : 'asc'
@@ -1845,8 +1883,10 @@ watch(
     if (JSON.stringify(filters.value) !== JSON.stringify(nextFilters)) {
       filters.value = nextFilters
       changed = true
+      filterChanged = true
     }
     if (changed) page.value = 1
+    if (filterChanged) void refreshList(true)
   },
 )
 
@@ -2591,7 +2631,7 @@ watch(totalPages, (value) => {
   }
 
   .page-title {
-    font-size: clamp(1.75rem, 10vw, 2.35rem);
+    font-size: 1.75rem;
   }
 
   .page-header-actions {
@@ -2894,7 +2934,7 @@ watch(totalPages, (value) => {
 
 @media (max-width: 720px) {
   :global(#app .task-list-page-title) {
-    font-size: clamp(1.75rem, 10vw, 2.35rem);
+    font-size: 1.75rem;
   }
 }
 
@@ -3023,6 +3063,76 @@ watch(totalPages, (value) => {
     grid-column: 2;
     justify-self: start;
     max-width: 100%;
+  }
+}
+
+.toolbar {
+  gap: 0.55rem;
+}
+
+.quick-search {
+  flex: 1 1 18rem;
+  min-width: min(18rem, 100%);
+}
+
+.quick-status {
+  flex: 0 0 10rem;
+}
+
+.active-filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.7rem;
+}
+
+.active-filter-chips button {
+  min-height: 1.9rem;
+  padding: 0 0.65rem;
+  border: 0;
+  border-radius: 999px;
+  background: var(--tc-blue-soft);
+  color: var(--tc-blue-strong);
+  cursor: pointer;
+  font-size: 0.7rem;
+  font-weight: 760;
+}
+
+.task-filter-drawer-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 9500;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.task-filter-backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgb(var(--yb-overlay-night) / 0.44);
+}
+
+.task-filter-drawer {
+  position: relative;
+  width: min(31rem, 100vw);
+  height: 100%;
+  background: rgb(var(--yb-surface));
+  box-shadow: -1.2rem 0 3rem rgb(var(--yb-shadow) / 0.18);
+}
+
+@media (max-width: 720px) {
+  .quick-search {
+    flex-basis: 100%;
+  }
+
+  .quick-status {
+    flex: 1 1 9rem;
+  }
+
+  .quick-apply,
+  .advanced-filter-toggle {
+    flex: 1 1 auto;
   }
 }
 </style>

@@ -10,7 +10,6 @@ export interface UserRow {
   display_name?: string
   department?: string
   team?: string
-  roles: string[]
   status?: 'active' | 'disabled' | string
   frontend_access?: unknown
 }
@@ -18,6 +17,8 @@ export interface UserRow {
 export interface RoleOption {
   code: string
   display: string
+  description?: string
+  hint?: string
   category: 'management' | 'business' | 'asset_workbench' | 'compatibility' | string
   assignable: boolean
   assignableByCurrentActor: boolean
@@ -38,10 +39,9 @@ export interface CreateUserForm {
   department: string
   team: string
   mobile: string
-  email: string
-  password: string
-  roles: string[]
-  status: 'active' | 'disabled'
+	email: string
+	password: string
+	status: 'active' | 'disabled'
 }
 
 export interface SelectOptionItem {

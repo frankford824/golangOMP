@@ -56,14 +56,6 @@ type fakeLifecycleRepo struct {
 	enqueued   [][]int64
 }
 
-func (f *fakeLifecycleRepo) Archive(context.Context, repo.Tx, repo.TaskAssetLifecycleUpdate) error {
-	return nil
-}
-
-func (f *fakeLifecycleRepo) Restore(context.Context, repo.Tx, repo.TaskAssetLifecycleUpdate) error {
-	return nil
-}
-
 func (f *fakeLifecycleRepo) LockGenericDeleteGuard(context.Context, repo.Tx, int64) (*repo.TaskAssetDeleteGuard, error) {
 	return nil, nil
 }

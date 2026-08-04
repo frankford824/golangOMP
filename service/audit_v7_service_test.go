@@ -484,16 +484,6 @@ func (r *auditV7RepoStub) ListRecordsByTaskID(_ context.Context, taskID int64) (
 	return items, nil
 }
 
-func (r *auditV7RepoStub) ListRecords(_ context.Context, _ repo.AuditRecordListFilter) ([]*domain.AuditRecord, error) {
-	items := make([]*domain.AuditRecord, 0, len(r.records))
-	for _, record := range r.records {
-		if record != nil {
-			items = append(items, record)
-		}
-	}
-	return items, nil
-}
-
 func (r *auditV7RepoStub) CreateHandover(_ context.Context, _ repo.Tx, handover *domain.AuditHandover) (int64, error) {
 	copyHandover := *handover
 	copyHandover.ID = int64(len(r.handovers) + 1)

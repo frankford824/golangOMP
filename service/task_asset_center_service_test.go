@@ -32,6 +32,7 @@ func taskAssetMutationTestContext() context.Context {
 		domain.PermissionTaskDesignSubmit,
 		domain.PermissionTaskAuditDecision,
 		domain.PermissionAssetView,
+		domain.PermissionAssetDownload,
 		domain.PermissionAssetManage,
 	}
 	assignment := domain.AccessAssignment{ID: 1, UserID: actorID, RoleID: roleID, ScopeMode: domain.AccessScopeGlobal, SourceType: "direct"}
@@ -58,6 +59,97 @@ func taskAssetPreviewTestContext(actorID int64, permission domain.PermissionCode
 		}},
 	}
 	return domain.WithRequestActor(context.Background(), domain.RequestActor{ID: actorID, Permissions: effective.Permissions, EffectiveAccess: effective})
+}
+
+func TestTaskAssetCenterServiceControlledTaskAssetIdentityAndTombstone(t *testing.T) {
+	const (
+		taskID        = int64(3100)
+		taskAssetID   = int64(9901)
+		designAssetID = int64(71)
+	)
+	taskRepo := newStep04TaskRepo(&domain.Task{ID: taskID, TaskNo: "T-3100", TaskStatus: domain.TaskStatusCompleted})
+	taskAssetRepo := newStep04TaskAssetRepo()
+	assetVersionNo := 3
+	mimeType := "image/png"
+	storageKey := "tasks/T-3100/assets/AST-0071/v3/final.png"
+	taskAssetRepo.assets[taskAssetID] = &domain.TaskAsset{
+		ID:             taskAssetID,
+		TaskID:         taskID,
+		AssetID:        uploadRequestInt64Ptr(designAssetID),
+		AssetType:      domain.TaskAssetTypeDelivery,
+		VersionNo:      9,
+		AssetVersionNo: &assetVersionNo,
+		FileName:       "final.png",
+		MimeType:       &mimeType,
+		StorageKey:     &storageKey,
+		UploadStatus:   strPtr(string(domain.DesignAssetUploadStatusUploaded)),
+		PreviewStatus:  strPtr(string(domain.DesignAssetPreviewStatusNotApplicable)),
+		StorageRef: &domain.AssetStorageRef{
+			RefID:  "ref-task-asset-9901",
+			RefKey: storageKey,
+			Status: domain.AssetStorageRefStatusRecorded,
+		},
+	}
+	taskAssetRepo.boundRevisionAssets[taskAssetID] = true
+	svc := NewTaskAssetCenterService(
+		taskRepo,
+		newStep67DesignAssetRepo(),
+		taskAssetRepo,
+		newStep37UploadRequestRepo(),
+		newStep37AssetStorageRefRepo(),
+		&step04TaskEventRepo{},
+		step04TxRunner{},
+		newStubUploadServiceClient(),
+	).(*taskAssetCenterService)
+
+	previewInfo, appErr := svc.GetTaskAssetPreviewInfoByID(
+		taskAssetPreviewTestContext(7001, domain.PermissionAssetView, domain.AccessScopeGlobal),
+		taskAssetID,
+	)
+	if appErr != nil || previewInfo == nil || previewInfo.DownloadURL == nil {
+		t.Fatalf("GetTaskAssetPreviewInfoByID() = %+v/%+v", previewInfo, appErr)
+	}
+	downloadInfo, appErr := svc.GetTaskAssetDownloadInfoByID(
+		taskAssetPreviewTestContext(7002, domain.PermissionAssetDownload, domain.AccessScopeGlobal),
+		taskAssetID,
+	)
+	if appErr != nil || downloadInfo == nil || downloadInfo.DownloadURL == nil || downloadInfo.Filename != "final.png" {
+		t.Fatalf("GetTaskAssetDownloadInfoByID() = %+v/%+v", downloadInfo, appErr)
+	}
+	taskAssetRepo.assets[taskAssetID].AssetID = nil
+	taskAssetRepo.assets[taskAssetID].AssetVersionNo = nil
+	if legacyInfo, legacyErr := svc.GetTaskAssetDownloadInfoByID(
+		taskAssetPreviewTestContext(7002, domain.PermissionAssetDownload, domain.AccessScopeGlobal),
+		taskAssetID,
+	); legacyErr != nil || legacyInfo == nil || legacyInfo.Filename != "final.png" {
+		t.Fatalf("legacy task-asset-only identity download = %+v/%+v", legacyInfo, legacyErr)
+	}
+	if _, appErr := svc.GetAssetPreviewInfoByID(
+		taskAssetPreviewTestContext(7001, domain.PermissionAssetView, domain.AccessScopeGlobal),
+		taskAssetID,
+	); appErr == nil || appErr.Code != domain.ErrCodeNotFound {
+		t.Fatalf("design-assets route accepted task_assets.id %d: %+v", taskAssetID, appErr)
+	}
+	if _, appErr := svc.GetTaskAssetDownloadInfoByID(
+		taskAssetPreviewTestContext(7003, domain.PermissionAssetView, domain.AccessScopeGlobal),
+		taskAssetID,
+	); appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
+		t.Fatalf("download without asset.download error = %+v", appErr)
+	}
+
+	taskAssetRepo.assets[taskAssetID].StorageRef.Status = domain.AssetStorageRefStatusHistoricalUnavailable
+	if _, appErr := svc.GetTaskAssetPreviewInfoByID(
+		taskAssetPreviewTestContext(7001, domain.PermissionAssetView, domain.AccessScopeGlobal),
+		taskAssetID,
+	); appErr == nil || appErr.Code != domain.ErrCodeAssetHistoricallyUnavailable {
+		t.Fatalf("tombstoned task asset preview error = %+v", appErr)
+	}
+	if _, appErr := svc.GetTaskAssetDownloadInfoByID(
+		taskAssetPreviewTestContext(7002, domain.PermissionAssetDownload, domain.AccessScopeGlobal),
+		taskAssetID,
+	); appErr == nil || appErr.Code != domain.ErrCodeAssetHistoricallyUnavailable {
+		t.Fatalf("tombstoned task asset download error = %+v", appErr)
+	}
 }
 
 func TestTaskAssetCenterServiceCreateAndCompleteMultipartUploadSession(t *testing.T) {
@@ -265,31 +357,129 @@ func TestTaskAssetCenterServiceCompletedTaskRequiresReopenBeforeAnyResourceRepla
 func TestAuthorizeV8TaskAssetMutationUsesCapabilityAndStableScope(t *testing.T) {
 	const actorID = int64(610)
 	departmentID, otherDepartmentID := int64(41), int64(42)
-	task := &domain.Task{ID: 2100, TaskStatus: domain.TaskStatusInProgress, OwnerDepartmentID: &departmentID}
+	task := &domain.Task{ID: 2100, CreatorID: actorID, TaskStatus: domain.TaskStatusInProgress, OwnerDepartmentID: &departmentID}
 
 	legacyOnly := domain.WithRequestActor(taskAssetMutationTestContext(), domain.RequestActor{ID: actorID, Roles: []domain.Role{domain.RoleAdmin, domain.RoleAuditA}})
-	if appErr := authorizeV8TaskAssetMutation(legacyOnly, task); appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
+	if appErr := authorizeV8TaskAssetMutation(legacyOnly, task, domain.TaskAssetTypeSource); appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
 		t.Fatalf("legacy role-only authorization = %+v, want permission denied", appErr)
 	}
 
 	outOfScopeActor := scopedCapabilityActor(actorID, domain.PermissionTaskDesignSubmit, domain.AccessScopeOwnDepartment, &otherDepartmentID, nil, nil)
 	outOfScope := domain.WithRequestActor(taskAssetMutationTestContext(), outOfScopeActor)
-	if appErr := authorizeV8TaskAssetMutation(outOfScope, task); appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
+	if appErr := authorizeV8TaskAssetMutation(outOfScope, task, domain.TaskAssetTypeSource); appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
 		t.Fatalf("out-of-scope authorization = %+v, want permission denied", appErr)
 	}
 
 	inScopeActor := scopedCapabilityActor(actorID, domain.PermissionTaskDesignSubmit, domain.AccessScopeOwnDepartment, &departmentID, nil, nil)
-	if appErr := authorizeV8TaskAssetMutation(domain.WithRequestActor(taskAssetMutationTestContext(), inScopeActor), task); appErr != nil {
+	if appErr := authorizeV8TaskAssetMutation(domain.WithRequestActor(taskAssetMutationTestContext(), inScopeActor), task, domain.TaskAssetTypeSource); appErr != nil {
 		t.Fatalf("in-scope design capability rejected: %+v", appErr)
 	}
 
 	task.TaskStatus = domain.TaskStatusPendingAudit
 	auditActor := scopedCapabilityActor(actorID, domain.PermissionTaskAuditDecision, domain.AccessScopeOwnDepartment, &departmentID, nil, nil)
-	if appErr := authorizeV8TaskAssetMutation(domain.WithRequestActor(taskAssetMutationTestContext(), auditActor), task); appErr != nil {
+	if appErr := authorizeV8TaskAssetMutation(domain.WithRequestActor(taskAssetMutationTestContext(), auditActor), task, domain.TaskAssetTypeSource); appErr != nil {
 		t.Fatalf("in-scope audit capability rejected: %+v", appErr)
 	}
-	if appErr := authorizeV8TaskAssetMutation(domain.WithRequestActor(taskAssetMutationTestContext(), inScopeActor), task); appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
+	if appErr := authorizeV8TaskAssetMutation(domain.WithRequestActor(taskAssetMutationTestContext(), inScopeActor), task, domain.TaskAssetTypeSource); appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
 		t.Fatalf("design capability accepted during audit: %+v", appErr)
+	}
+
+	task.TaskStatus = domain.TaskStatusInProgress
+	manageActor := scopedCapabilityActor(actorID, domain.PermissionTaskCreate, domain.AccessScopeOwnDepartment, &departmentID, nil, nil)
+	manageCtx := domain.WithRequestActor(taskAssetMutationTestContext(), manageActor)
+	if appErr := authorizeV8TaskAssetMutation(manageCtx, task, domain.TaskAssetTypeReference); appErr != nil {
+		t.Fatalf("creator task.create reference mutation rejected: %+v", appErr)
+	}
+	if appErr := authorizeV8TaskAssetMutation(manageCtx, task, domain.TaskAssetTypeSource); appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
+		t.Fatalf("task.create unexpectedly authorized source upload: %+v", appErr)
+	}
+	task.TaskType = domain.TaskTypeRetouchTask
+	task.TaskStatus = domain.TaskStatusPendingAssign
+	if appErr := authorizeV8TaskAssetMutation(manageCtx, task, domain.TaskAssetTypeSource); appErr != nil {
+		t.Fatalf("retouch creator source upload rejected: %+v", appErr)
+	}
+	task.TaskType = domain.TaskTypeNewProductDevelopment
+	task.TaskStatus = domain.TaskStatusInProgress
+	task.CreatorID = actorID + 1
+	if appErr := authorizeV8TaskAssetMutation(manageCtx, task, domain.TaskAssetTypeReference); appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
+		t.Fatalf("same-department non-creator reference mutation = %+v, want permission denied", appErr)
+	}
+	assetManager := scopedCapabilityActor(actorID, domain.PermissionAssetManage, domain.AccessScopeOwnDepartment, &departmentID, nil, nil)
+	if appErr := authorizeV8TaskAssetMutation(domain.WithRequestActor(taskAssetMutationTestContext(), assetManager), task, domain.TaskAssetTypeReference); appErr != nil {
+		t.Fatalf("in-scope asset manager reference mutation rejected: %+v", appErr)
+	}
+}
+
+type capturingReferenceFileRefRepo struct {
+	inserted []*domain.ReferenceFileRefFlat
+}
+
+func (r *capturingReferenceFileRefRepo) InsertFlat(_ context.Context, _ repo.Tx, ref *domain.ReferenceFileRefFlat) (int64, error) {
+	copied := *ref
+	copied.SKUItemID = domain.CloneInt64Ptr(ref.SKUItemID)
+	copied.RetouchRequirementID = domain.CloneInt64Ptr(ref.RetouchRequirementID)
+	r.inserted = append(r.inserted, &copied)
+	return int64(len(r.inserted)), nil
+}
+
+func (*capturingReferenceFileRefRepo) ListByTask(context.Context, int64) ([]*domain.ReferenceFileRefFlat, error) {
+	return nil, nil
+}
+
+func (*capturingReferenceFileRefRepo) DeleteByTaskAndRef(context.Context, repo.Tx, int64, string) error {
+	return nil
+}
+
+func TestTaskAssetCenterServiceCompletingTaskReferencePersistsFlatRelation(t *testing.T) {
+	const taskID = int64(2104)
+	const actorID = int64(610)
+	taskRepo := newStep04TaskRepo(&domain.Task{
+		ID:         taskID,
+		TaskNo:     "T-2104",
+		TaskStatus: domain.TaskStatusInProgress,
+		CreatorID:  actorID,
+	})
+	referenceRepo := &capturingReferenceFileRefRepo{}
+	uploadClient := newStubUploadServiceClient().(*stubUploadServiceClient)
+	uploadClient.remoteSessionStatus = domain.DesignAssetSessionStatusCompleted
+	svc := NewTaskAssetCenterService(
+		taskRepo,
+		newStep67DesignAssetRepo(),
+		newStep04TaskAssetRepo(),
+		newStep37UploadRequestRepo(),
+		newStep37AssetStorageRefRepo(),
+		&step04TaskEventRepo{},
+		step04TxRunner{},
+		uploadClient,
+		WithTaskAssetCenterReferenceFileRefFlatRepo(referenceRepo),
+	).(*taskAssetCenterService)
+	actor := scopedCapabilityActor(actorID, domain.PermissionTaskCreate, domain.AccessScopeGlobal, nil, nil, nil)
+	ctx := domain.WithRequestActor(context.Background(), actor)
+
+	created, appErr := svc.CreateUploadSession(ctx, CreateTaskAssetUploadSessionParams{
+		TaskID:         taskID,
+		CreatedBy:      actor.ID,
+		AssetType:      domain.TaskAssetTypeReference,
+		Filename:       "运营参考.png",
+		ExpectedSize:   uploadRequestInt64Ptr(1024),
+		MimeType:       "image/png",
+		OwnerModuleKey: string(domain.ModuleKeyBasicInfo),
+		UploadPolicy:   "append_only",
+	})
+	if appErr != nil {
+		t.Fatalf("CreateUploadSession() error = %+v", appErr)
+	}
+	if _, appErr = svc.CompleteUploadSession(ctx, CompleteTaskAssetUploadSessionParams{
+		TaskID: taskID, SessionID: created.Session.ID, CompletedBy: actor.ID,
+	}); appErr != nil {
+		t.Fatalf("CompleteUploadSession() error = %+v", appErr)
+	}
+	if len(referenceRepo.inserted) != 1 {
+		t.Fatalf("reference rows = %+v, want one", referenceRepo.inserted)
+	}
+	ref := referenceRepo.inserted[0]
+	if ref.TaskID != taskID || ref.SKUItemID != nil || ref.RetouchRequirementID != nil || ref.RefID == "" || ref.Context == nil || *ref.Context != "task_reference" {
+		t.Fatalf("task reference relation = %+v", ref)
 	}
 }
 
@@ -414,7 +604,7 @@ func TestTaskAssetCenterServiceCreateUploadSessionRechecksCompletedStateInsideTr
 }
 
 func TestTaskAssetCenterServiceCompleteMultipartSkipsSecondRemoteCompleteAfterBrowserRemoteComplete(t *testing.T) {
-	taskRepo := newStep04TaskRepo(&domain.Task{ID: 2011, TaskStatus: domain.TaskStatusInProgress})
+	taskRepo := newStep04TaskRepo(&domain.Task{ID: 2011, TaskStatus: domain.TaskStatusPendingAudit})
 	designAssetRepo := newStep67DesignAssetRepo()
 	taskAssetRepo := newStep04TaskAssetRepo()
 	uploadRequestRepo := newStep37UploadRequestRepo()
@@ -482,7 +672,7 @@ func TestTaskAssetCenterServiceCompleteMultipartSkipsSecondRemoteCompleteAfterBr
 }
 
 func TestTaskAssetCenterServiceCompleteMultipartFallsBackToBackendRemoteComplete(t *testing.T) {
-	taskRepo := newStep04TaskRepo(&domain.Task{ID: 2013, TaskStatus: domain.TaskStatusInProgress})
+	taskRepo := newStep04TaskRepo(&domain.Task{ID: 2013, TaskStatus: domain.TaskStatusPendingAudit})
 	designAssetRepo := newStep67DesignAssetRepo()
 	taskAssetRepo := newStep04TaskAssetRepo()
 	uploadRequestRepo := newStep37UploadRequestRepo()
@@ -527,7 +717,7 @@ func TestTaskAssetCenterServiceCompleteMultipartFallsBackToBackendRemoteComplete
 }
 
 func TestTaskAssetCenterServiceCompleteUploadSessionIsIdempotentAfterFinalize(t *testing.T) {
-	taskRepo := newStep04TaskRepo(&domain.Task{ID: 2012, TaskStatus: domain.TaskStatusInProgress})
+	taskRepo := newStep04TaskRepo(&domain.Task{ID: 2012, TaskStatus: domain.TaskStatusPendingAudit})
 	uploadClient := newStubUploadServiceClient().(*stubUploadServiceClient)
 	uploadClient.remoteSessionStatus = domain.DesignAssetSessionStatusCompleted
 
@@ -535,7 +725,7 @@ func TestTaskAssetCenterServiceCompleteUploadSessionIsIdempotentAfterFinalize(t 
 	createResult, appErr := svc.CreateMultipartUploadSession(taskAssetMutationTestContext(), CreateTaskAssetUploadSessionParams{
 		TaskID:       2012,
 		CreatedBy:    512,
-		AssetType:    domain.TaskAssetTypePreview,
+		AssetType:    domain.TaskAssetTypeDelivery,
 		Filename:     "preview.png",
 		ExpectedSize: uploadRequestInt64Ptr(4096),
 		MimeType:     "image/png",
@@ -571,7 +761,7 @@ func TestTaskAssetCenterServiceCompleteOSSDirectMultipartWithoutRemoteSync(t *te
 	ossServer := newFakeOSSDirectServer(t)
 	defer ossServer.Close()
 
-	taskRepo := newStep04TaskRepo(&domain.Task{ID: 2040, TaskNo: "T-2040", TaskStatus: domain.TaskStatusInProgress})
+	taskRepo := newStep04TaskRepo(&domain.Task{ID: 2040, TaskNo: "T-2040", TaskStatus: domain.TaskStatusPendingAudit})
 	designAssetRepo := newStep67DesignAssetRepo()
 	taskAssetRepo := newStep04TaskAssetRepo()
 	uploadRequestRepo := newStep37UploadRequestRepo()
@@ -713,7 +903,7 @@ func TestTaskAssetCenterServiceCompleteOSSDirectSinglePartWithoutRemoteSync(t *t
 	})
 	ossDirect.httpClient = ossServer.Client()
 	svc := NewTaskAssetCenterService(
-		newStep04TaskRepo(&domain.Task{ID: 2041, TaskNo: "T-2041", TaskStatus: domain.TaskStatusInProgress}),
+		newStep04TaskRepo(&domain.Task{ID: 2041, TaskNo: "T-2041", TaskStatus: domain.TaskStatusPendingAudit}),
 		newStep67DesignAssetRepo(),
 		newStep04TaskAssetRepo(),
 		newStep37UploadRequestRepo(),
@@ -726,12 +916,13 @@ func TestTaskAssetCenterServiceCompleteOSSDirectSinglePartWithoutRemoteSync(t *t
 	).(*taskAssetCenterService)
 	body := []byte("small direct asset")
 	created, appErr := svc.CreateUploadSession(taskAssetMutationTestContext(), CreateTaskAssetUploadSessionParams{
-		TaskID:       2041,
-		CreatedBy:    641,
-		AssetType:    domain.TaskAssetTypeReference,
-		Filename:     "reference.png",
-		ExpectedSize: uploadRequestInt64Ptr(int64(len(body))),
-		MimeType:     "image/png",
+		TaskID:         2041,
+		CreatedBy:      641,
+		AssetType:      domain.TaskAssetTypeReference,
+		Filename:       "reference.png",
+		ExpectedSize:   uploadRequestInt64Ptr(int64(len(body))),
+		MimeType:       "image/png",
+		OwnerModuleKey: string(domain.ModuleKeyBasicInfo),
 	})
 	if appErr != nil {
 		t.Fatalf("CreateUploadSession() error = %+v", appErr)
@@ -774,7 +965,7 @@ func TestTaskAssetCenterServiceCreateOSSDirectMultipartUsesASCIIObjectKeyAndPres
 	ossServer := newFakeOSSDirectServer(t)
 	defer ossServer.Close()
 
-	taskRepo := newStep04TaskRepo(&domain.Task{ID: 2042, TaskNo: "T-2042", TaskStatus: domain.TaskStatusInProgress})
+	taskRepo := newStep04TaskRepo(&domain.Task{ID: 2042, TaskNo: "T-2042", TaskStatus: domain.TaskStatusPendingAudit})
 	designAssetRepo := newStep67DesignAssetRepo()
 	taskAssetRepo := newStep04TaskAssetRepo()
 	uploadRequestRepo := newStep37UploadRequestRepo()
@@ -891,7 +1082,7 @@ func TestTaskAssetCenterServiceCreateOSSDirectMultipartUsesASCIIObjectKeyAndPres
 }
 
 func TestTaskAssetCenterServiceCompleteUploadSessionRejectsPartialOSSDirectPayload(t *testing.T) {
-	taskRepo := newStep04TaskRepo(&domain.Task{ID: 2041, TaskStatus: domain.TaskStatusInProgress})
+	taskRepo := newStep04TaskRepo(&domain.Task{ID: 2041, TaskStatus: domain.TaskStatusPendingAudit})
 	uploadClient := newStubUploadServiceClient().(*stubUploadServiceClient)
 	svc := NewTaskAssetCenterService(
 		taskRepo,
@@ -937,7 +1128,7 @@ func TestTaskAssetCenterServiceCompleteUploadSessionRejectsPartialOSSDirectPaylo
 }
 
 func TestTaskAssetCenterServiceCreateMultipartAndCancel(t *testing.T) {
-	taskRepo := newStep04TaskRepo(&domain.Task{ID: 2002, TaskStatus: domain.TaskStatusInProgress})
+	taskRepo := newStep04TaskRepo(&domain.Task{ID: 2002, TaskStatus: domain.TaskStatusPendingAudit})
 	svc := NewTaskAssetCenterService(taskRepo, newStep67DesignAssetRepo(), newStep04TaskAssetRepo(), newStep37UploadRequestRepo(), newStep37AssetStorageRefRepo(), &step04TaskEventRepo{}, step04TxRunner{}, newStubUploadServiceClient()).(*taskAssetCenterService)
 
 	createResult, appErr := svc.CreateMultipartUploadSession(taskAssetMutationTestContext(), CreateTaskAssetUploadSessionParams{
@@ -975,59 +1166,8 @@ func TestTaskAssetCenterServiceCreateMultipartAndCancel(t *testing.T) {
 	}
 }
 
-func TestResolveRejectedDeliveryRevisionAssetIDReusesMatchingRoot(t *testing.T) {
-	const taskID = int64(2101)
-	task := &domain.Task{
-		ID:                    taskID,
-		TaskStatus:            domain.TaskStatusPendingCustomizationProduction,
-		BusinessLane:          domain.TaskBusinessLaneCustomization,
-		CustomizationRequired: true,
-	}
-	designAssetRepo := newStep67DesignAssetRepo()
-	taskAssetRepo := newStep04TaskAssetRepo()
-	assetID, err := designAssetRepo.Create(taskAssetMutationTestContext(), nil, &domain.DesignAsset{
-		TaskID:    taskID,
-		AssetNo:   "AST-0001",
-		AssetType: domain.TaskAssetTypeDelivery,
-		CreatedBy: 502,
-	})
-	if err != nil {
-		t.Fatalf("create design asset: %v", err)
-	}
-	versionNo := 1
-	originalFilename := "DZK000149.png"
-	versionID, err := taskAssetRepo.Create(taskAssetMutationTestContext(), nil, &domain.TaskAsset{
-		TaskID:           taskID,
-		AssetID:          &assetID,
-		AssetType:        domain.TaskAssetTypeDelivery,
-		AssetVersionNo:   &versionNo,
-		FileName:         originalFilename,
-		OriginalName:     &originalFilename,
-		FlowReviewStatus: domain.TaskAssetFlowReviewStatusRejected,
-	})
-	if err != nil {
-		t.Fatalf("create rejected version: %v", err)
-	}
-	if err := designAssetRepo.UpdateCurrentVersionID(taskAssetMutationTestContext(), nil, assetID, &versionID); err != nil {
-		t.Fatalf("set current version: %v", err)
-	}
-	svc := &taskAssetCenterService{designAssetRepo: designAssetRepo, taskAssetRepo: taskAssetRepo}
-
-	resolved, appErr := svc.resolveRejectedDeliveryRevisionAssetID(taskAssetMutationTestContext(), task, CreateTaskAssetUploadSessionParams{
-		TaskID:    taskID,
-		AssetType: domain.TaskAssetTypeDelivery,
-		Filename:  originalFilename,
-	})
-	if appErr != nil {
-		t.Fatalf("resolveRejectedDeliveryRevisionAssetID() appErr = %+v", appErr)
-	}
-	if resolved == nil || *resolved != assetID {
-		t.Fatalf("resolved asset id = %+v, want %d", resolved, assetID)
-	}
-}
-
 func TestTaskAssetCenterServiceAllowsSmallUploadForDeliverySourcePreview(t *testing.T) {
-	taskRepo := newStep04TaskRepo(&domain.Task{ID: 2004, TaskStatus: domain.TaskStatusInProgress})
+	taskRepo := newStep04TaskRepo(&domain.Task{ID: 2004, TaskStatus: domain.TaskStatusPendingAudit})
 	svc := NewTaskAssetCenterService(taskRepo, newStep67DesignAssetRepo(), newStep04TaskAssetRepo(), newStep37UploadRequestRepo(), newStep37AssetStorageRefRepo(), &step04TaskEventRepo{}, step04TxRunner{}, newStubUploadServiceClient()).(*taskAssetCenterService)
 
 	result, appErr := svc.CreateSmallUploadSession(taskAssetMutationTestContext(), CreateTaskAssetUploadSessionParams{
@@ -1047,7 +1187,7 @@ func TestTaskAssetCenterServiceAllowsSmallUploadForDeliverySourcePreview(t *test
 }
 
 func TestTaskAssetCenterServiceListAssetsAndVersions(t *testing.T) {
-	taskRepo := newStep04TaskRepo(&domain.Task{ID: 2003, TaskNo: "T-2003", TaskStatus: domain.TaskStatusPendingWarehouseReceive})
+	taskRepo := newStep04TaskRepo(&domain.Task{ID: 2003, TaskNo: "T-2003", TaskStatus: domain.TaskStatusCompleted})
 	designAssetRepo := newStep67DesignAssetRepo()
 	taskAssetRepo := newStep04TaskAssetRepo()
 
@@ -1084,11 +1224,11 @@ func TestTaskAssetCenterServiceListAssetsAndVersions(t *testing.T) {
 	if len(assets) != 1 || assets[0].CurrentVersion == nil {
 		t.Fatalf("ListAssets() assets = %+v", assets)
 	}
-	if assets[0].ApprovedVersion == nil || assets[0].WarehouseReadyVersion == nil {
+	if assets[0].ApprovedVersion == nil {
 		t.Fatalf("ListAssets() version pointers = %+v", assets[0])
 	}
-	if assets[0].WarehouseReadyVersion.CurrentVersionRole != "current_warehouse_ready_version" {
-		t.Fatalf("ListAssets() warehouse_ready_version = %+v", assets[0].WarehouseReadyVersion)
+	if assets[0].ApprovedVersion.CurrentVersionRole != "current_approved_version" {
+		t.Fatalf("ListAssets() approved_version = %+v", assets[0].ApprovedVersion)
 	}
 	versions, appErr := svc.ListVersions(taskAssetMutationTestContext(), 2003, assetID)
 	if appErr != nil {
@@ -1097,13 +1237,63 @@ func TestTaskAssetCenterServiceListAssetsAndVersions(t *testing.T) {
 	if len(versions) != 1 || versions[0].VersionNo != 1 {
 		t.Fatalf("ListVersions() versions = %+v", versions)
 	}
-	if !versions[0].ApprovedForFlow || !versions[0].WarehouseReady || versions[0].TaskNo != "T-2003" || versions[0].AssetNo != "AST-0001" {
+	if !versions[0].ApprovedForFlow || versions[0].TaskNo != "T-2003" || versions[0].AssetNo != "AST-0001" {
 		t.Fatalf("ListVersions() version semantics = %+v", versions[0])
 	}
 }
 
+func TestTaskAssetCenterServiceListAssetsEnforcesEffectiveTaskScope(t *testing.T) {
+	const taskID int64 = 1000
+	taskRepo := newStep04TaskRepo(&domain.Task{
+		ID:         taskID,
+		TaskNo:     "T-1000",
+		TaskType:   domain.TaskTypeNewProductDevelopment,
+		TaskStatus: domain.TaskStatusCompleted,
+		CreatorID:  999,
+	})
+	svc := NewTaskAssetCenterService(
+		taskRepo,
+		newStep67DesignAssetRepo(),
+		newStep04TaskAssetRepo(),
+		newStep37UploadRequestRepo(),
+		newStep37AssetStorageRefRepo(),
+		&step04TaskEventRepo{},
+		step04TxRunner{},
+		newStubUploadServiceClient(),
+	)
+
+	outOfScope := domain.WithRequestActor(
+		context.Background(),
+		taskActionTestActor(231, domain.PermissionAssetView, domain.AccessScopeSelf),
+	)
+	assets, appErr := svc.ListAssets(outOfScope, taskID)
+	if appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
+		t.Fatalf("ListAssets() out-of-scope appErr = %+v, want PERMISSION_DENIED", appErr)
+	}
+	if assets != nil {
+		t.Fatalf("ListAssets() out-of-scope assets = %+v, want nil", assets)
+	}
+
+	taskRepo.tasks[taskID].CreatorID = 231
+	assets, appErr = svc.ListAssets(outOfScope, taskID)
+	if appErr != nil {
+		t.Fatalf("ListAssets() legal self-scope appErr = %+v", appErr)
+	}
+	if len(assets) != 0 {
+		t.Fatalf("ListAssets() legal self-scope assets = %+v, want empty", assets)
+	}
+
+	admin := domain.WithRequestActor(
+		context.Background(),
+		taskActionTestActor(1, domain.PermissionAssetView, domain.AccessScopeGlobal),
+	)
+	if _, appErr = svc.ListAssets(admin, taskID); appErr != nil {
+		t.Fatalf("ListAssets() global admin appErr = %+v", appErr)
+	}
+}
+
 func TestTaskAssetCenterServiceCreateAndCompleteMultipartUploadSessionWithTargetSKUCode(t *testing.T) {
-	taskRepo := newStep04TaskRepo(&domain.Task{ID: 2005, TaskStatus: domain.TaskStatusInProgress, IsBatchTask: true, BatchItemCount: 2, BatchMode: domain.TaskBatchModeMultiSKU})
+	taskRepo := newStep04TaskRepo(&domain.Task{ID: 2005, TaskStatus: domain.TaskStatusPendingAudit, IsBatchTask: true, BatchItemCount: 2, BatchMode: domain.TaskBatchModeMultiSKU})
 	taskRepo.skuItems = map[int64][]*domain.TaskSKUItem{
 		2005: {
 			{ID: 1, TaskID: 2005, SequenceNo: 1, SKUCode: "BATCH-2005-A"},
@@ -1162,11 +1352,11 @@ func TestTaskAssetCenterServiceCreateAndCompleteMultipartUploadSessionWithTarget
 	}
 }
 
-func TestTaskAssetCenterServiceBatchDeliveryAdvancesOnlyAfterAllSKUCompleted(t *testing.T) {
+func TestTaskAssetCenterServiceAuditBatchUploadsNeverAdvanceWorkflow(t *testing.T) {
 	designerID := int64(530)
 	taskRepo := newStep04TaskRepo(&domain.Task{
 		ID:             2006,
-		TaskStatus:     domain.TaskStatusInProgress,
+		TaskStatus:     domain.TaskStatusPendingAudit,
 		IsBatchTask:    true,
 		BatchItemCount: 2,
 		BatchMode:      domain.TaskBatchModeMultiSKU,
@@ -1185,10 +1375,7 @@ func TestTaskAssetCenterServiceBatchDeliveryAdvancesOnlyAfterAllSKUCompleted(t *
 	storageRefRepo := newStep37AssetStorageRefRepo()
 	uploadClient := newStubUploadServiceClient().(*stubUploadServiceClient)
 	uploadClient.remoteSessionStatus = domain.DesignAssetSessionStatusCompleted
-	workflow := &step04DesignSubmissionWorkflow{}
-
-	svc := NewTaskAssetCenterService(taskRepo, designAssetRepo, taskAssetRepo, uploadRequestRepo, storageRefRepo, taskEventRepo, step04TxRunner{}, uploadClient,
-		WithTaskAssetCenterBlueprintRuleEngine(workflow)).(*taskAssetCenterService)
+	svc := NewTaskAssetCenterService(taskRepo, designAssetRepo, taskAssetRepo, uploadRequestRepo, storageRefRepo, taskEventRepo, step04TxRunner{}, uploadClient).(*taskAssetCenterService)
 
 	createA, appErr := svc.CreateMultipartUploadSession(taskAssetMutationTestContext(), CreateTaskAssetUploadSessionParams{
 		TaskID:        2006,
@@ -1209,8 +1396,8 @@ func TestTaskAssetCenterServiceBatchDeliveryAdvancesOnlyAfterAllSKUCompleted(t *
 	}); appErr != nil {
 		t.Fatalf("CompleteUploadSession(A) unexpected error: %+v", appErr)
 	}
-	if taskRepo.tasks[2006].TaskStatus != domain.TaskStatusInProgress {
-		t.Fatalf("after first SKU complete task status = %s, want InProgress", taskRepo.tasks[2006].TaskStatus)
+	if taskRepo.tasks[2006].TaskStatus != domain.TaskStatusPendingAudit {
+		t.Fatalf("after first SKU complete task status = %s, want PendingAudit", taskRepo.tasks[2006].TaskStatus)
 	}
 	if countStep04TaskEvents(taskEventRepo.events, domain.TaskEventDesignSubmitted) != 0 {
 		t.Fatalf("after first SKU complete design submitted events = %+v, want none", taskEventRepo.events)
@@ -1235,14 +1422,11 @@ func TestTaskAssetCenterServiceBatchDeliveryAdvancesOnlyAfterAllSKUCompleted(t *
 	}); appErr != nil {
 		t.Fatalf("CompleteUploadSession(B) unexpected error: %+v", appErr)
 	}
-	if taskRepo.tasks[2006].TaskStatus != domain.TaskStatusInProgress {
-		t.Fatalf("after all SKU complete task status = %s, want InProgress until submit-design", taskRepo.tasks[2006].TaskStatus)
+	if taskRepo.tasks[2006].TaskStatus != domain.TaskStatusPendingAudit {
+		t.Fatalf("after all SKU complete task status = %s, want PendingAudit until audit decision", taskRepo.tasks[2006].TaskStatus)
 	}
 	if countStep04TaskEvents(taskEventRepo.events, domain.TaskEventDesignSubmitted) != 0 {
 		t.Fatalf("design submitted events = %+v, want none before submit-design", taskEventRepo.events)
-	}
-	if len(workflow.calls) != 0 {
-		t.Fatalf("workflow calls = %+v, want none before submit-design", workflow.calls)
 	}
 }
 
@@ -1250,7 +1434,7 @@ func TestTaskAssetCenterServiceBatchCompleteAllowsLateStagedSession(t *testing.T
 	designerID := int64(932)
 	taskRepo := newStep04TaskRepo(&domain.Task{
 		ID:             2090,
-		TaskStatus:     domain.TaskStatusInProgress,
+		TaskStatus:     domain.TaskStatusPendingAudit,
 		IsBatchTask:    true,
 		BatchItemCount: 2,
 		BatchMode:      domain.TaskBatchModeMultiSKU,
@@ -1323,8 +1507,8 @@ func TestTaskAssetCenterServiceBatchCompleteAllowsLateStagedSession(t *testing.T
 	}); appErr != nil {
 		t.Fatalf("CompleteUploadSession(deliveryB) unexpected error: %+v", appErr)
 	}
-	if taskRepo.tasks[2090].TaskStatus != domain.TaskStatusInProgress {
-		t.Fatalf("task status after delivery completion = %s, want InProgress until submit-design", taskRepo.tasks[2090].TaskStatus)
+	if taskRepo.tasks[2090].TaskStatus != domain.TaskStatusPendingAudit {
+		t.Fatalf("task status after delivery completion = %s, want PendingAudit until audit decision", taskRepo.tasks[2090].TaskStatus)
 	}
 
 	lateResult, appErr := svc.CompleteUploadSession(taskAssetMutationTestContext(), CompleteTaskAssetUploadSessionParams{
@@ -1354,10 +1538,10 @@ func TestTaskAssetCenterServiceCompletePrecreatedSessionAllowedInPendingAudit(t 
 	createResult, appErr := svc.CreateMultipartUploadSession(taskAssetMutationTestContext(), CreateTaskAssetUploadSessionParams{
 		TaskID:       2091,
 		CreatedBy:    933,
-		AssetType:    domain.TaskAssetTypeDelivery,
-		Filename:     "window-proof.zip",
+		AssetType:    domain.TaskAssetTypeSource,
+		Filename:     "window-proof.psd",
 		ExpectedSize: uploadRequestInt64Ptr(512),
-		MimeType:     "application/zip",
+		MimeType:     "image/vnd.adobe.photoshop",
 	})
 	if appErr != nil {
 		t.Fatalf("CreateMultipartUploadSession() unexpected error: %+v", appErr)
@@ -1487,60 +1671,18 @@ func TestTaskAssetCenterServiceBatchDeliveryRequiresTargetSKUCode(t *testing.T) 
 	}
 }
 
-func TestTaskAssetCenterServiceCreateUploadSessionDeniesDepartmentManagerOutsideScope(t *testing.T) {
-	taskRepo := newStep04TaskRepo(&domain.Task{
-		ID:              2093,
-		TaskNo:          "T-2093",
-		TaskStatus:      domain.TaskStatusInProgress,
-		OwnerDepartment: "运营部",
-		OwnerOrgTeam:    "淘系一组",
-	})
-	userRepo := newIdentityUserRepo()
-	svc := NewTaskAssetCenterService(
-		taskRepo,
-		newStep67DesignAssetRepo(),
-		newStep04TaskAssetRepo(),
-		newStep37UploadRequestRepo(),
-		newStep37AssetStorageRefRepo(),
-		&step04TaskEventRepo{},
-		step04TxRunner{},
-		newStubUploadServiceClient(),
-		WithTaskAssetCenterDataScopeResolver(NewRoleBasedDataScopeResolver()),
-		WithTaskAssetCenterScopeUserRepo(userRepo),
-	).(*taskAssetCenterService)
-
-	ctx := domain.WithRequestActor(taskAssetMutationTestContext(), domain.RequestActor{
-		ID:         935,
-		Username:   "design_admin",
-		Roles:      []domain.Role{domain.RoleDeptAdmin},
-		Department: "设计研发部",
-		Source:     domain.RequestActorSourceSessionToken,
-		AuthMode:   domain.AuthModeSessionTokenRoleEnforced,
-	})
-	_, appErr := svc.CreateMultipartUploadSession(ctx, CreateTaskAssetUploadSessionParams{
-		TaskID:       2093,
-		CreatedBy:    935,
-		AssetType:    domain.TaskAssetTypeDelivery,
-		Filename:     "out-of-scope.zip",
-		ExpectedSize: uploadRequestInt64Ptr(1024),
-		MimeType:     "application/zip",
-	})
-	if appErr == nil || appErr.Code != domain.ErrCodePermissionDenied {
-		t.Fatalf("CreateMultipartUploadSession() appErr = %+v, want permission denied", appErr)
-	}
-}
-
 func TestTaskAssetCenterServiceCreateUploadSessionInfersModeByFileSize(t *testing.T) {
-	taskRepo := newStep04TaskRepo(&domain.Task{ID: 2008, TaskStatus: domain.TaskStatusInProgress})
+	taskRepo := newStep04TaskRepo(&domain.Task{ID: 2008, TaskStatus: domain.TaskStatusPendingAudit})
 	svc := NewTaskAssetCenterService(taskRepo, newStep67DesignAssetRepo(), newStep04TaskAssetRepo(), newStep37UploadRequestRepo(), newStep37AssetStorageRefRepo(), &step04TaskEventRepo{}, step04TxRunner{}, newStubUploadServiceClient()).(*taskAssetCenterService)
 
 	referenceResult, appErr := svc.CreateUploadSession(taskAssetMutationTestContext(), CreateTaskAssetUploadSessionParams{
-		TaskID:       2008,
-		CreatedBy:    540,
-		AssetType:    domain.TaskAssetTypeReference,
-		Filename:     "reference.png",
-		ExpectedSize: uploadRequestInt64Ptr(512),
-		MimeType:     "image/png",
+		TaskID:         2008,
+		CreatedBy:      540,
+		AssetType:      domain.TaskAssetTypeReference,
+		Filename:       "reference.png",
+		ExpectedSize:   uploadRequestInt64Ptr(512),
+		MimeType:       "image/png",
+		OwnerModuleKey: domain.ModuleKeyBasicInfo,
 	})
 	if appErr != nil {
 		t.Fatalf("CreateUploadSession(reference) unexpected error: %+v", appErr)
@@ -1602,7 +1744,7 @@ func TestTaskAssetCenterServiceResolveTaskAssetSourceModuleIDBackfillsCompletedL
 }
 
 func TestTaskAssetCenterServiceCreateUploadSessionRejectsExpectedSizeAboveLimit(t *testing.T) {
-	taskRepo := newStep04TaskRepo(&domain.Task{ID: 2031, TaskStatus: domain.TaskStatusInProgress})
+	taskRepo := newStep04TaskRepo(&domain.Task{ID: 2031, TaskStatus: domain.TaskStatusPendingAudit})
 	uploadClient := newStubUploadServiceClient().(*stubUploadServiceClient)
 	svc := NewTaskAssetCenterService(taskRepo, newStep67DesignAssetRepo(), newStep04TaskAssetRepo(), newStep37UploadRequestRepo(), newStep37AssetStorageRefRepo(), &step04TaskEventRepo{}, step04TxRunner{}, uploadClient).(*taskAssetCenterService)
 
@@ -1627,7 +1769,7 @@ func TestTaskAssetCenterServiceCreateUploadSessionRejectsExpectedSizeAboveLimit(
 }
 
 func TestTaskAssetCenterServiceUploadContentTypeContractDefaultsAndRejectsMismatch(t *testing.T) {
-	taskRepo := newStep04TaskRepo(&domain.Task{ID: 2032, TaskStatus: domain.TaskStatusInProgress})
+	taskRepo := newStep04TaskRepo(&domain.Task{ID: 2032, TaskStatus: domain.TaskStatusPendingAudit})
 	designAssetRepo := newStep67DesignAssetRepo()
 	taskAssetRepo := newStep04TaskAssetRepo()
 	uploadRequestRepo := newStep37UploadRequestRepo()
@@ -1678,7 +1820,7 @@ func TestTaskAssetCenterServiceUploadContentTypeContractDefaultsAndRejectsMismat
 }
 
 func TestTaskAssetCenterServiceCreateUploadSessionFreezesAssetIdentityBeforeUpload(t *testing.T) {
-	taskRepo := newStep04TaskRepo(&domain.Task{ID: 2030, TaskNo: "T-2030", TaskStatus: domain.TaskStatusInProgress})
+	taskRepo := newStep04TaskRepo(&domain.Task{ID: 2030, TaskNo: "T-2030", TaskStatus: domain.TaskStatusPendingAudit})
 	designAssetRepo := newStep67DesignAssetRepo()
 	taskAssetRepo := newStep04TaskAssetRepo()
 	uploadRequestRepo := newStep37UploadRequestRepo()
@@ -1813,6 +1955,16 @@ func TestTaskAssetCenterServiceRepairMissingObjectArchivesStorageRef(t *testing.
 		t.Fatal("GetAssetDownloadInfoByID() appErr = nil, want ASSET_MISSING")
 	} else if appErr.Code != domain.ErrCodeAssetMissing {
 		t.Fatalf("GetAssetDownloadInfoByID() code = %s", appErr.Code)
+	}
+}
+
+func TestValidateAssetVersionObjectAvailableRejectsHistoricalUnavailable(t *testing.T) {
+	version := &domain.DesignAssetVersion{
+		StorageRefStatus: domain.AssetStorageRefStatusHistoricalUnavailable,
+	}
+	appErr := validateAssetVersionObjectAvailable(version)
+	if appErr == nil || appErr.Code != domain.ErrCodeAssetHistoricallyUnavailable {
+		t.Fatalf("validateAssetVersionObjectAvailable() error = %+v", appErr)
 	}
 }
 
@@ -2261,6 +2413,14 @@ func TestTaskAssetCenterServiceSourcePreviewFallsBackToDerivedPreviewAsset(t *te
 	if !strings.Contains(*info.DownloadURL, "objects/design-assets/source-preview.png") {
 		t.Fatalf("preview url = %q, want derived preview storage key", *info.DownloadURL)
 	}
+
+	taskAssetRepo.assets[sourceVersionID].StorageRef = &domain.AssetStorageRef{
+		Status: domain.AssetStorageRefStatusHistoricalUnavailable,
+	}
+	if _, appErr := svc.GetAssetPreviewInfoByID(taskAssetMutationTestContext(), sourceAssetID); appErr == nil ||
+		appErr.Code != domain.ErrCodeAssetHistoricallyUnavailable {
+		t.Fatalf("tombstoned source preview error = %+v", appErr)
+	}
 }
 
 func TestTaskAssetCenterServiceCompleteSourceUploadGeneratesDerivedPreviewAssets(t *testing.T) {
@@ -2465,7 +2625,7 @@ func TestTaskAssetCenterServiceCompleteSourceThenDeliverySeriallyWithout500(t *t
 	ossServer := newFakeOSSDirectServer(t)
 	defer ossServer.Close()
 
-	taskRepo := newStep04TaskRepo(&domain.Task{ID: 2053, TaskNo: "T-2053", TaskStatus: domain.TaskStatusInProgress})
+	taskRepo := newStep04TaskRepo(&domain.Task{ID: 2053, TaskNo: "T-2053", TaskStatus: domain.TaskStatusPendingAudit})
 	designAssetRepo := newStep67DesignAssetRepo()
 	taskAssetRepo := newStep04TaskAssetRepo()
 	uploadRequestRepo := newStep37UploadRequestRepo()
@@ -2970,7 +3130,7 @@ func TestTaskAssetCenterServiceConcurrentCompletePreventsCancelOverwrite(t *test
 }
 
 func TestTaskAssetCenterServiceCompleteUploadSessionMapsTaskAssetVersionDuplicateToConflict(t *testing.T) {
-	taskRepo := newStep04TaskRepo(&domain.Task{ID: 2054, TaskStatus: domain.TaskStatusInProgress})
+	taskRepo := newStep04TaskRepo(&domain.Task{ID: 2054, TaskStatus: domain.TaskStatusPendingAudit})
 	designAssetRepo := newStep67DesignAssetRepo()
 	taskAssetRepo := &duplicateVersionTaskAssetRepo{
 		step04TaskAssetRepo: newStep04TaskAssetRepo(),
@@ -3465,13 +3625,49 @@ func rawQueryHasFlag(rawQuery, key string) bool {
 	return strings.HasPrefix(rawQuery, key+"&") || strings.Contains(rawQuery, "&"+key+"&") || strings.HasSuffix(rawQuery, "&"+key) || strings.Contains(rawQuery, "&"+key+"=")
 }
 
-func TestValidateAuditStageUploadAssetTypeNormalAuditStillAllowsDeliveryAndBasicInfoReference(t *testing.T) {
+func TestValidateTaskStageUploadAssetTypeNormalAuditStillAllowsDeliveryAndBasicInfoReference(t *testing.T) {
 	task := &domain.Task{TaskStatus: domain.TaskStatusPendingAudit}
-	if appErr := validateAuditStageUploadAssetType(task, domain.TaskAssetTypeDelivery, string(domain.ModuleKeyAudit), nil); appErr != nil {
-		t.Fatalf("validateAuditStageUploadAssetType(delivery) appErr = %+v", appErr)
+	if appErr := validateTaskStageUploadAssetType(task, domain.TaskAssetTypeDelivery, string(domain.ModuleKeyAudit), nil); appErr != nil {
+		t.Fatalf("validateTaskStageUploadAssetType(delivery) appErr = %+v", appErr)
 	}
-	if appErr := validateAuditStageUploadAssetType(task, domain.TaskAssetTypeReference, string(domain.ModuleKeyBasicInfo), nil); appErr != nil {
-		t.Fatalf("validateAuditStageUploadAssetType(basic_info reference) appErr = %+v", appErr)
+	if appErr := validateTaskStageUploadAssetType(task, domain.TaskAssetTypeReference, string(domain.ModuleKeyBasicInfo), nil); appErr != nil {
+		t.Fatalf("validateTaskStageUploadAssetType(basic_info reference) appErr = %+v", appErr)
+	}
+	frozenAssetID := int64(91)
+	if appErr := validateTaskStageUploadAssetType(task, domain.TaskAssetTypeReference, "", &frozenAssetID); appErr != nil {
+		t.Fatalf("validateTaskStageUploadAssetType(frozen reference completion) appErr = %+v", appErr)
+	}
+	if appErr := validateTaskStageUploadAssetType(task, domain.TaskAssetTypeReference, "", nil); appErr == nil {
+		t.Fatal("validateTaskStageUploadAssetType(unscoped new reference) appErr = nil, want rejection")
+	}
+}
+
+func TestTaskStageUploadPolicySeparatesDesignSourceFromAuditFinals(t *testing.T) {
+	designTask := &domain.Task{TaskType: domain.TaskTypeNewProductDevelopment, TaskStatus: domain.TaskStatusInProgress}
+	if appErr := validateTaskStageUploadAssetType(designTask, domain.TaskAssetTypeSource, "design", nil); appErr != nil {
+		t.Fatalf("design source rejected: %+v", appErr)
+	}
+	appErr := validateTaskStageUploadAssetType(designTask, domain.TaskAssetTypeDelivery, "design", nil)
+	if appErr == nil {
+		t.Fatal("design final output was accepted")
+	}
+	details, _ := appErr.Details.(map[string]interface{})
+	if details["deny_code"] != "design_stage_final_output_not_allowed" {
+		t.Fatalf("design final output error = %+v", appErr)
+	}
+
+	auditTask := &domain.Task{TaskType: domain.TaskTypeNewProductDevelopment, TaskStatus: domain.TaskStatusPendingAudit}
+	if appErr := validateTaskStageUploadAssetType(auditTask, domain.TaskAssetTypeDelivery, "audit", nil); appErr != nil {
+		t.Fatalf("audit final output rejected: %+v", appErr)
+	}
+
+	retouchTask := &domain.Task{TaskType: domain.TaskTypeRetouchTask, TaskStatus: domain.TaskStatusInProgress}
+	if appErr := validateTaskStageUploadAssetType(retouchTask, domain.TaskAssetTypeDelivery, "retouch", nil); appErr != nil {
+		t.Fatalf("retouch final output rejected: %+v", appErr)
+	}
+	retouchTask.TaskStatus = domain.TaskStatusPendingAssign
+	if appErr := validateTaskStageUploadAssetType(retouchTask, domain.TaskAssetTypeSource, "retouch", nil); appErr != nil {
+		t.Fatalf("retouch creator source rejected before assignment: %+v", appErr)
 	}
 }
 

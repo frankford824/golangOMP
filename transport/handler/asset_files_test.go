@@ -290,13 +290,7 @@ func TestAssetFilesHandlerServeFileAllowsAttachedTaskCreateReferenceViewer(t *te
 	router.GET("/v1/assets/files/*path", h.ServeFile)
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/assets/files/"+storageKey, nil)
-	req = req.WithContext(domain.WithRequestActor(req.Context(), domain.RequestActor{
-		ID:       designerID,
-		Username: "designer",
-		Roles:    []domain.Role{domain.RoleDesigner},
-		Source:   domain.RequestActorSourceSessionToken,
-		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
-	}))
+	req = req.WithContext(domain.WithRequestActor(req.Context(), assetFilesTaskViewActor(designerID, domain.AccessScopeSelf)))
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 
@@ -516,10 +510,6 @@ func (r assetFilesTaskRepoStub) List(context.Context, repo.TaskListFilter) ([]*d
 	return nil, 0, nil
 }
 
-func (r assetFilesTaskRepoStub) ListBoardCandidates(context.Context, repo.TaskBoardCandidateFilter) ([]*domain.TaskListItem, error) {
-	return nil, nil
-}
-
 func (r assetFilesTaskRepoStub) UpdateDetailBusinessInfo(context.Context, repo.Tx, *domain.TaskDetail) error {
 	return nil
 }
@@ -549,12 +539,25 @@ func (r assetFilesTaskRepoStub) UpdateCustomizationState(context.Context, repo.T
 }
 
 func assetFilesSessionActor() domain.RequestActor {
+	return assetFilesTaskViewActor(1, domain.AccessScopeGlobal)
+}
+
+func assetFilesTaskViewActor(id int64, scope domain.AccessScopeMode) domain.RequestActor {
+	assignment := domain.AccessAssignment{
+		UserID: id, RoleID: 71, RoleCode: "task_viewer", ScopeMode: scope, SourceType: "direct",
+	}
 	return domain.RequestActor{
-		ID:       1,
-		Username: "admin",
-		Roles:    []domain.Role{domain.RoleSuperAdmin},
-		Source:   domain.RequestActorSourceSessionToken,
-		AuthMode: domain.AuthModeSessionTokenRoleEnforced,
+		ID: id, Username: "task-viewer", Source: domain.RequestActorSourceSessionToken,
+		AuthMode:    domain.AuthModeSessionTokenRoleEnforced,
+		Permissions: []domain.PermissionCode{domain.PermissionTaskView},
+		EffectiveAccess: &domain.EffectiveAccess{
+			UserID: id, Permissions: []domain.PermissionCode{domain.PermissionTaskView},
+			Assignments: []domain.AccessAssignment{assignment},
+			Sources: []domain.EffectiveAccessNote{{
+				Permission: domain.PermissionTaskView, RoleID: assignment.RoleID,
+				RoleCode: assignment.RoleCode, SourceType: assignment.SourceType, ScopeMode: scope,
+			}},
+		},
 	}
 }
 

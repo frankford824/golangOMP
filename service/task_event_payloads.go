@@ -11,7 +11,6 @@ func taskEventBasePayload(task *domain.Task) map[string]interface{} {
 	payload["task_type"] = string(task.TaskType)
 	payload["source_mode"] = string(task.SourceMode)
 	payload["business_lane"] = string(domain.NormalizeTaskBusinessLane(task.BusinessLane, task.CustomizationRequired))
-	payload["workflow_lane"] = string(task.WorkflowLane())
 	payload["source_department"] = taskSourceDepartment(task)
 	payload["sku_code"] = task.SKUCode
 	payload["product_name_snapshot"] = task.ProductNameSnapshot
@@ -36,18 +35,4 @@ func mergeTaskEventPayload(base map[string]interface{}, extra map[string]interfa
 		base[key] = value
 	}
 	return base
-}
-
-func warehouseReceiptStatusValue(receipt *domain.WarehouseReceipt) interface{} {
-	if receipt == nil || receipt.Status == "" {
-		return nil
-	}
-	return string(receipt.Status)
-}
-
-func procurementStatusValue(record *domain.ProcurementRecord) interface{} {
-	if record == nil || record.Status == "" {
-		return nil
-	}
-	return string(record.Status)
 }

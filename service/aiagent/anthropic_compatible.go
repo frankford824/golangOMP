@@ -518,6 +518,7 @@ type anthropicMessageRequest struct {
 	Temperature float64                  `json:"temperature,omitempty"`
 	System      string                   `json:"system,omitempty"`
 	Thinking    *anthropicThinkingConfig `json:"thinking,omitempty"`
+	Stream      bool                     `json:"stream,omitempty"`
 	Messages    []anthropicMessage       `json:"messages"`
 }
 

@@ -32,8 +32,10 @@ type Config struct {
 	AssetWorkbench AssetWorkbenchConfig
 	AssetCleanup   AssetCleanupConfig
 	AI             AIConfig
+	AIChat         AIChatConfig
+	Embedding      AIEmbeddingConfig
+	VectorSearch   VectorSearchConfig
 	Experience     ExperienceConfig
-	BusinessTrend  BusinessTrendConfig
 	CostGovernance CostGovernanceConfig
 	WeCom          WeComConfig
 	WebPush        WebPushConfig
@@ -77,6 +79,47 @@ type AIConfig struct {
 	RateLimitMax    int
 }
 
+type AIChatConfig struct {
+	Enabled             bool
+	RetentionDays       int
+	MaxInputChars       int
+	MaxRecentTurns      int
+	MaxContextChars     int
+	MaxEvidence         int
+	MaxEvidenceChars    int
+	MaxConcurrentGlobal int
+	MaxConcurrentUser   int
+	HeartbeatInterval   time.Duration
+	ProviderTimeout     time.Duration
+	PurgeEnabled        bool
+	PurgeInterval       time.Duration
+	PurgeLimit          int
+}
+
+type AIEmbeddingConfig struct {
+	Enabled    bool
+	BaseURL    string
+	APIKey     string
+	Model      string
+	Dimensions int
+	Timeout    time.Duration
+	BatchSize  int
+}
+
+type VectorSearchConfig struct {
+	Enabled           bool
+	BaseURL           string
+	APIKey            string
+	CollectionAlias   string
+	EmbeddingVersion  string
+	Timeout           time.Duration
+	WorkerEnabled     bool
+	WorkerInterval    time.Duration
+	WorkerBatchSize   int
+	WorkerLeaseTTL    time.Duration
+	WorkerMaxAttempts int
+}
+
 type ExperienceConfig struct {
 	UIEnabled                    bool
 	CaptureEnabled               bool
@@ -93,20 +136,6 @@ type ExperienceConfig struct {
 	OutboxLeaseTTL               time.Duration
 	RuntimeConfigFile            string
 	RetentionDays                int
-}
-
-type BusinessTrendConfig struct {
-	ChinaHotURL         string
-	ApifyToken          string
-	ApifyBaseURL        string
-	ApifyDouyinHotActor string
-	ApifyDouyinActor    string
-	ApifyRedNoteActor   string
-	Apify1688Actor      string
-	ApifyTaobaoActor    string
-	Timeout             time.Duration
-	MaxExternalKeywords int
-	MaxExternalItems    int
 }
 
 type CostGovernanceConfig struct {
@@ -224,7 +253,6 @@ type ERPRemoteConfig struct {
 	GetCompanyUsersPath      string
 	SkuQueryPath             string
 	CombineSKUQueryPath      string
-	OrderActionQueryPath     string
 	OpenWebCharset           string
 	OpenWebVersion           string
 	Timeout                  time.Duration
@@ -316,7 +344,6 @@ func Load() (*Config, error) {
 			GetCompanyUsersPath:      getEnv("ERP_REMOTE_GET_COMPANY_USERS_PATH", "/open/webapi/userapi/company/getcompanyusers"),
 			SkuQueryPath:             getEnv("ERP_REMOTE_SKU_QUERY_PATH", "/open/sku/query"),
 			CombineSKUQueryPath:      getEnv("ERP_REMOTE_COMBINE_SKU_QUERY_PATH", "/open/combine/sku/query"),
-			OrderActionQueryPath:     getEnv("ERP_REMOTE_ORDER_ACTION_QUERY_PATH", "/open/order/action/query"),
 			OpenWebCharset:           getEnv("ERP_REMOTE_OPENWEB_CHARSET", "utf-8"),
 			OpenWebVersion:           getEnv("ERP_REMOTE_OPENWEB_VERSION", "2"),
 			Timeout:                  mustParseDuration(getEnv("ERP_REMOTE_TIMEOUT", "15s")),
@@ -430,6 +457,44 @@ func Load() (*Config, error) {
 			RateLimitWindow: mustParseDuration(getEnv("AI_AGENT_RATE_LIMIT_WINDOW", "5h")),
 			RateLimitMax:    mustParseInt(getEnv("AI_AGENT_RATE_LIMIT_MAX_CALLS", "800")),
 		},
+		AIChat: AIChatConfig{
+			Enabled:             mustParseBool(getEnv("AI_CHAT_ENABLED", "false")),
+			RetentionDays:       mustParseInt(getEnv("AI_CHAT_RETENTION_DAYS", "90")),
+			MaxInputChars:       mustParseInt(getEnv("AI_CHAT_MAX_INPUT_CHARS", "4000")),
+			MaxRecentTurns:      mustParseInt(getEnv("AI_CHAT_MAX_RECENT_TURNS", "8")),
+			MaxContextChars:     mustParseInt(getEnv("AI_CHAT_MAX_CONTEXT_CHARS", "12000")),
+			MaxEvidence:         mustParseInt(getEnv("AI_CHAT_MAX_EVIDENCE", "20")),
+			MaxEvidenceChars:    mustParseInt(getEnv("AI_CHAT_MAX_EVIDENCE_CHARS", "24000")),
+			MaxConcurrentGlobal: mustParseInt(getEnv("AI_CHAT_MAX_CONCURRENT_GLOBAL", "20")),
+			MaxConcurrentUser:   mustParseInt(getEnv("AI_CHAT_MAX_CONCURRENT_USER", "2")),
+			HeartbeatInterval:   mustParseDuration(getEnv("AI_CHAT_HEARTBEAT_INTERVAL", "15s")),
+			ProviderTimeout:     mustParseDuration(getEnv("AI_CHAT_PROVIDER_TIMEOUT", "90s")),
+			PurgeEnabled:        mustParseBool(getEnv("AI_CHAT_PURGE_ENABLED", "true")),
+			PurgeInterval:       mustParseDuration(getEnv("AI_CHAT_PURGE_INTERVAL", "1h")),
+			PurgeLimit:          mustParseInt(getEnv("AI_CHAT_PURGE_LIMIT", "200")),
+		},
+		Embedding: AIEmbeddingConfig{
+			Enabled:    mustParseBool(getEnv("AI_EMBEDDING_ENABLED", "false")),
+			BaseURL:    getEnv("AI_EMBEDDING_BASE_URL", ""),
+			APIKey:     getEnv("AI_EMBEDDING_API_KEY", ""),
+			Model:      getEnv("AI_EMBEDDING_MODEL", ""),
+			Dimensions: mustParseInt(getEnv("AI_EMBEDDING_DIMENSIONS", "1024")),
+			Timeout:    mustParseDuration(getEnv("AI_EMBEDDING_TIMEOUT", "20s")),
+			BatchSize:  mustParseInt(getEnv("AI_EMBEDDING_BATCH_SIZE", "32")),
+		},
+		VectorSearch: VectorSearchConfig{
+			Enabled:           mustParseBool(getEnv("VECTOR_SEARCH_ENABLED", "false")),
+			BaseURL:           getEnv("QDRANT_BASE_URL", "http://127.0.0.1:6333"),
+			APIKey:            getEnv("QDRANT_API_KEY", ""),
+			CollectionAlias:   getEnv("QDRANT_COLLECTION_ALIAS", "yongbo_retrieval_current"),
+			EmbeddingVersion:  getEnv("AI_EMBEDDING_VERSION", getEnv("AI_EMBEDDING_MODEL", "disabled")),
+			Timeout:           mustParseDuration(getEnv("QDRANT_TIMEOUT", "2s")),
+			WorkerEnabled:     mustParseBool(getEnv("AI_RETRIEVAL_WORKER_ENABLED", "false")),
+			WorkerInterval:    mustParseDuration(getEnv("AI_RETRIEVAL_WORKER_INTERVAL", "5s")),
+			WorkerBatchSize:   mustParseInt(getEnv("AI_RETRIEVAL_WORKER_BATCH_SIZE", "50")),
+			WorkerLeaseTTL:    mustParseDuration(getEnv("AI_RETRIEVAL_WORKER_LEASE_TTL", "2m")),
+			WorkerMaxAttempts: mustParseInt(getEnv("AI_RETRIEVAL_WORKER_MAX_ATTEMPTS", "5")),
+		},
 		Experience: ExperienceConfig{
 			UIEnabled:                    mustParseBool(getEnv("EXPERIENCE_UI_ENABLED", "false")),
 			CaptureEnabled:               mustParseBool(getEnv("EXPERIENCE_CAPTURE_ENABLED", "false")),
@@ -446,19 +511,6 @@ func Load() (*Config, error) {
 			OutboxLeaseTTL:               mustParseDuration(getEnv("EXPERIENCE_OUTBOX_LEASE_TTL", "5m")),
 			RuntimeConfigFile:            getEnv("EXPERIENCE_RUNTIME_CONFIG_FILE", ""),
 			RetentionDays:                mustParseInt(getEnv("EXPERIENCE_RETENTION_DAYS", "180")),
-		},
-		BusinessTrend: BusinessTrendConfig{
-			ChinaHotURL:         getEnv("BUSINESS_TREND_CHINA_HOT_URL", ""),
-			ApifyToken:          getEnv("APIFY_TOKEN", ""),
-			ApifyBaseURL:        getEnv("BUSINESS_TREND_APIFY_BASE_URL", "https://api.apify.com"),
-			ApifyDouyinHotActor: getEnv("BUSINESS_TREND_APIFY_DOUYIN_HOT_ACTOR", "zen-studio/douyin-hot-search-scraper"),
-			ApifyDouyinActor:    getEnv("BUSINESS_TREND_APIFY_DOUYIN_SEARCH_ACTOR", "zen-studio/douyin-search-scraper"),
-			ApifyRedNoteActor:   getEnv("BUSINESS_TREND_APIFY_REDNOTE_SEARCH_ACTOR", "zen-studio/rednote-search-scraper"),
-			Apify1688Actor:      getEnv("BUSINESS_TREND_APIFY_1688_ACTOR", "automation-lab/1688-scraper"),
-			ApifyTaobaoActor:    getEnv("BUSINESS_TREND_APIFY_TAOBAO_ACTOR", "zen-studio/taobao-detail-scraper"),
-			Timeout:             mustParseDuration(getEnv("BUSINESS_TREND_EXTERNAL_TIMEOUT", "20s")),
-			MaxExternalKeywords: mustParseInt(getEnv("BUSINESS_TREND_MAX_EXTERNAL_KEYWORDS", "8")),
-			MaxExternalItems:    mustParseInt(getEnv("BUSINESS_TREND_MAX_EXTERNAL_ITEMS", "24")),
 		},
 		CostGovernance: CostGovernanceConfig{
 			LegacyAliasFallbackEnabled: mustParseBool(getEnv("COST_RULE_LEGACY_ALIAS_FALLBACK_ENABLED", "true")),
@@ -506,6 +558,62 @@ func Load() (*Config, error) {
 		}
 		if len(missing) > 0 {
 			return nil, fmt.Errorf("WEB_PUSH_ENABLED=true requires %s", strings.Join(missing, ", "))
+		}
+	}
+	if cfg.AIChat.Enabled {
+		missing := make([]string, 0, 4)
+		if !cfg.AI.Enabled {
+			missing = append(missing, "AI_AGENT_ENABLED=true")
+		}
+		if strings.TrimSpace(cfg.AI.BaseURL) == "" {
+			missing = append(missing, "AI_AGENT_BASE_URL")
+		}
+		if strings.TrimSpace(cfg.AI.APIKey) == "" {
+			missing = append(missing, "AI_AGENT_API_KEY")
+		}
+		if strings.TrimSpace(cfg.AI.Model) == "" {
+			missing = append(missing, "AI_AGENT_MODEL")
+		}
+		if len(missing) > 0 {
+			return nil, fmt.Errorf("AI_CHAT_ENABLED=true requires %s", strings.Join(missing, ", "))
+		}
+		if cfg.AIChat.MaxInputChars <= 0 || cfg.AIChat.MaxInputChars > 4000 || cfg.AIChat.MaxRecentTurns <= 0 || cfg.AIChat.MaxRecentTurns > 8 ||
+			cfg.AIChat.MaxContextChars <= 0 || cfg.AIChat.MaxContextChars > 12000 || cfg.AIChat.MaxEvidence <= 0 || cfg.AIChat.MaxEvidence > 20 ||
+			cfg.AIChat.MaxEvidenceChars <= 0 || cfg.AIChat.MaxEvidenceChars > 24000 || cfg.AIChat.MaxConcurrentGlobal <= 0 || cfg.AIChat.MaxConcurrentUser <= 0 ||
+			cfg.AIChat.MaxConcurrentUser > cfg.AIChat.MaxConcurrentGlobal || cfg.AIChat.HeartbeatInterval <= 0 || cfg.AIChat.ProviderTimeout <= 0 {
+			return nil, fmt.Errorf("AI_CHAT configuration exceeds the bounded context or concurrency contract")
+		}
+	}
+	if cfg.VectorSearch.Enabled || cfg.VectorSearch.WorkerEnabled {
+		missing := make([]string, 0, 6)
+		if !cfg.Embedding.Enabled {
+			missing = append(missing, "AI_EMBEDDING_ENABLED=true")
+		}
+		if strings.TrimSpace(cfg.Embedding.BaseURL) == "" {
+			missing = append(missing, "AI_EMBEDDING_BASE_URL")
+		}
+		if strings.TrimSpace(cfg.Embedding.APIKey) == "" {
+			missing = append(missing, "AI_EMBEDDING_API_KEY")
+		}
+		if strings.TrimSpace(cfg.Embedding.Model) == "" {
+			missing = append(missing, "AI_EMBEDDING_MODEL")
+		}
+		if cfg.Embedding.Dimensions <= 0 {
+			missing = append(missing, "AI_EMBEDDING_DIMENSIONS>0")
+		}
+		if strings.TrimSpace(cfg.VectorSearch.APIKey) == "" {
+			missing = append(missing, "QDRANT_API_KEY")
+		}
+		if strings.TrimSpace(cfg.VectorSearch.EmbeddingVersion) == "" || cfg.VectorSearch.EmbeddingVersion == "disabled" {
+			missing = append(missing, "AI_EMBEDDING_VERSION")
+		}
+		if len(missing) > 0 {
+			return nil, fmt.Errorf("vector retrieval enabled requires %s", strings.Join(missing, ", "))
+		}
+		if strings.TrimSpace(cfg.VectorSearch.BaseURL) == "" || strings.TrimSpace(cfg.VectorSearch.CollectionAlias) == "" ||
+			cfg.Embedding.BatchSize <= 0 || cfg.Embedding.BatchSize > 256 || cfg.Embedding.Timeout <= 0 || cfg.VectorSearch.Timeout <= 0 ||
+			cfg.VectorSearch.WorkerBatchSize <= 0 || cfg.VectorSearch.WorkerBatchSize > 500 || cfg.VectorSearch.WorkerLeaseTTL <= 0 {
+			return nil, fmt.Errorf("vector retrieval configuration is invalid")
 		}
 	}
 	return cfg, nil

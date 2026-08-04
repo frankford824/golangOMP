@@ -1,7 +1,7 @@
 # 用户与管理审计
 
-> Revision: V1.3-A2 i_id-first task/ERP/search integration (2026-04-27)
-> Source: docs/api/openapi.yaml (post V1.3-A2)
+> Revision: V8 current contract (2026-07-20)
+> Source: docs/api/openapi.yaml
 
 > 来源: `docs/api/openapi.yaml`；业务口径参考 V1 四份权威文档。本文不覆盖 OpenAPI 契约。
 
@@ -11,132 +11,20 @@
 
 - 用户管理端点受管理范围控制，前端必须展示后端返回的 `deny_code`。
 - 角色与访问规则主要供后台管理页使用。
-- 本文件覆盖 `18` 个 `/v1` path；同一路径多 method 合并在同一节。
-
-## GET /v1/roles
-
-### 简介
-支持方法: GET。
-
-- `GET`: Minimal role/permission catalog for the current auth/org scope. Read access is available to management roles, including DepartmentAdmin, plus legacy org/role compatibility admins.
-
-### 鉴权与 RBAC
-- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `GET` 允许角色: Admin, SuperAdmin, HRAdmin, DepartmentAdmin, OrgAdmin, RoleAdmin。
-- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
-
-### 请求体 schema
-参数:
-
-无 path/query/header 参数。
-
-请求体: 无请求体。
-
-### 响应体 schema
-成功响应: `200 application/json`
-
-```json
-{
-  "data": [
-    {
-      "role": "...",
-      "name": "...",
-      "description": "...",
-      "capabilities": "..."
-    }
-  ]
-}
-```
-
-| 字段 | 类型 | 必填 | 说明 |
-|---|---|---|---|
-| `data` | array<RoleCatalogEntry> | 否 | - |
-
-### 错误码
-| HTTP | code | deny_code | 说明 |
-|---|---|---|---|
-| 403 | 见 `error.code` | 见 `deny_code` | Permission denied |
-
-### curl 示例
-```bash
-curl -X GET https://api.example.com/v1/roles \
-  -H "Authorization: Bearer $TOKEN"
-```
-
-### 前端最佳实践
-- 用户管理端点受管理范围控制，前端必须展示后端返回的 `deny_code`。
-- 角色与访问规则主要供后台管理页使用。
-- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
-- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
-
-## GET /v1/access-rules
-
-### 简介
-支持方法: GET。
-
-- `GET`: Super-admin or HR inspection endpoint for the current route-to-role authorization contract, including whether a route is session-only or still debug-compatible placeholder scope.
-
-### 鉴权与 RBAC
-- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `GET` 允许角色: 已登录 / scope-aware。
-- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
-
-### 请求体 schema
-参数:
-
-无 path/query/header 参数。
-
-请求体: 无请求体。
-
-### 响应体 schema
-成功响应: `200 application/json`
-
-```json
-{
-  "data": [
-    {
-      "method": "...",
-      "path": "...",
-      "readiness": "...",
-      "required_roles": "..."
-    }
-  ]
-}
-```
-
-| 字段 | 类型 | 必填 | 说明 |
-|---|---|---|---|
-| `data` | array<RouteAccessRule> | 否 | - |
-
-### 错误码
-| HTTP | code | deny_code | 说明 |
-|---|---|---|---|
-| 403 | 见 `error.code` | 见 `deny_code` | Permission denied |
-
-### curl 示例
-```bash
-curl -X GET https://api.example.com/v1/access-rules \
-  -H "Authorization: Bearer $TOKEN"
-```
-
-### 前端最佳实践
-- 用户管理端点受管理范围控制，前端必须展示后端返回的 `deny_code`。
-- 角色与访问规则主要供后台管理页使用。
-- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
-- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+- 本文件覆盖 `6` 个 `/v1` path；同一路径多 method 合并在同一节。
 
 ## GET /v1/users
 
 ### 简介
 支持方法: GET, POST。
 
-- `GET`: Management-scoped user-management read endpoint. Returns user employee number, department, team, role, and frontend access state for frontend integration, with server-side pagination and filtering. `keyword` matches username, display name, and employee number. `DepartmentAdmin` reads are forced to own department. `TeamLead` reads are forced to own team inside own department. Stale or disabled department/team filter values on this read endpoint are treated as no-match filters and return an empty page instead of failing the whole user-management shell; user create/update inputs still reject invalid org values.
-- `POST`: Managed user creation endpoint. Validates org fields against `/v1/org/options`, validates roles against the workflow role catalog, requires a globally unique numeric `employee_no` in range 0-9999, sets the initial password hash, and returns the created user with `frontend_access`. If `status` is omitted the user is created as `active`. `Member` is the base identity and is retained by the server even if omitted from the incoming role list. `DepartmentAdmin` can create users only inside own department and only with department-compatible business roles.
+- `GET`: Explicit-scope user-management read endpoint. Returns employee number, department, team, and effective frontend access state with server-side pagination and filtering. `keyword` matches username, display name, and employee number. `access.view` or `access.manage` scope is applied in SQL using stable user, department, and team IDs; list count and rows use the same scope predicate. Legacy roles and organization names never widen visibility. Stale or disabled department/team filter values on this read endpoint are treated as no-match filters and return an empty page instead of failing the whole user-management shell; user create/update inputs still reject invalid org values.
+- `POST`: Creates one managed user after validating the selected department and team against `/v1/org/options`. `employee_no` must be globally unique and in range 0-9999. If `status` is omitted, the account is active. New users receive only the protected `Member` base role. Business roles and organization scopes are configured separately through the explicit access-policy endpoints after creation. Requires `access.manage`; the target department/team stable IDs must be inside the caller's effective scope.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `GET` 允许角色: Admin, SuperAdmin, HRAdmin, DepartmentAdmin, TeamLead, OrgAdmin, RoleAdmin。
-- `POST` 允许角色: HRAdmin, SuperAdmin, DepartmentAdmin。
+- `GET` 允许角色: 已登录 / scope-aware。
+- `POST` 允许角色: 已登录 / scope-aware。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 #### GET 细节
@@ -148,7 +36,6 @@ curl -X GET https://api.example.com/v1/access-rules \
 |---|---|---|---|---|
 | `keyword` | query | string | 否 | - |
 | `status` | query | enum(active/disabled) | 否 | - |
-| `role` | query | enum(Member/SuperAdmin/HRAdmin/OrgAdmin/RoleAdmin/TeamLead/DesignDirector/DesignReviewer/Ops/Designer/Audit_A/Audit_B...) | 否 | - |
 | `department` | query | string | 否 | Must match an enabled department from `/v1/org/options`; stale or disabled values return an empty page. |
 | `team` | query | string | 否 | Must match an enabled team under the selected department in `/v1/org/options`; stale or disabled values return an empty page. |
 | `page` | query | integer | 否 | - |
@@ -209,18 +96,13 @@ Content-Type: `application/json`
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `username` | string | 是 | - |
-| `account` | string | 否 | Compatibility alias of username. |
 | `employee_no` | integer | 是 | 管理员维护的员工工号；纯数字，范围 0-9999，全局唯一。重复时服务端返回中文业务提示。 |
 | `display_name` | string | 是 | - |
-| `name` | string | 否 | Compatibility alias of display_name. |
 | `department` | string | 是 | Must match one enabled department from backend org master exposed by `/v1/org/options`. |
 | `team` | string | 是 | Must match one enabled team under the selected department in backend org master exposed by `/v1/org/options`. |
-| `group` | string | 否 | Compatibility alias of team. |
 | `mobile` | string | 是 | - |
-| `phone` | string | 否 | Compatibility alias of mobile. |
 | `email` | string | 否 | - |
 | `password` | string | 是 | - |
-| `roles` | array<V7Role> | 否 | - |
 | `status` | enum(active/disabled) | 否 | - |
 | `employment_type` | enum(full_time/part_time) | 否 | - |
 
@@ -262,7 +144,7 @@ curl -X POST https://api.example.com/v1/users \
 ### 前端最佳实践
 - 用户管理端点受管理范围控制，前端必须展示后端返回的 `deny_code`。
 - 角色与访问规则主要供后台管理页使用。
-- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
 
 ## GET /v1/users/designers
@@ -270,11 +152,11 @@ curl -X POST https://api.example.com/v1/users \
 ### 简介
 支持方法: GET。
 
-- `GET`: Returns assignment candidates for task dropdowns. The historical path is still `/users/designers`, but `workflow_lane` now selects the actual candidate pool. Round C (v1.5) widens the route guard so Ops task creators plus HR/SuperAdmin can look up designers cross-department. As of v1.6 (Round D), this endpoint uses a dedicated assignment-candidate-pool service path (`IdentityService.ListAssignableDesigners`) that bypasses the standard user-list authorization filter. By default it remains restricted to `role=Designer` + `status=active` and does NOT accept department/team/keyword or pagination parameters. Round N adds `workflow_lane` to select the candidate-pool lane while preserving no-parameter backward compatibility. `workflow_lane=audit` returns active regular-audit candidates (`Audit_A` plus legacy `Audit_B`) for audit handover and scoped management reassignment. The route guard listed in `x-rbac-placeholder.required_roles` is the sole access control for this method; the service path performs no additional department/team scoping. Response envelope is `{data, pagination}` where `pagination.page_size` and `pagination.total` both reflect the full returned list length (no server-side pagination).
+- `GET`: Returns the active candidate pool used by task assignment, design handling, and audit handover controls. `workflow_lane=normal` selects designers, `customization` selects customization designers, `audit` selects unified auditors, and `all` returns design candidates across the active design lanes. Candidate membership comes exclusively from active `auth_*` role assignments and capabilities; legacy `user_roles` values and organization display names are not authorization inputs. The endpoint does not accept keyword, organization, or pagination filters. The response pagination block reports the returned candidate count.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `GET` 允许角色: Ops, Designer, CustomizationOperator, Audit_A, Audit_B, Admin, HRAdmin, SuperAdmin, DepartmentAdmin, TeamLead, DesignDirector。
+- `GET` 允许角色: 已登录 / scope-aware。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -282,7 +164,7 @@ curl -X POST https://api.example.com/v1/users \
 
 | 参数 | 位置 | 类型 | 必填 | 说明 |
 |---|---|---|---|---|
-| `workflow_lane` | query | enum(normal/customization/audit/all) | 否 | Selects the assignment candidate pool lane. `normal` (default, back-compat) returns active users with role=Designer. `customization` returns active users with role=CustomizationOperator. `audit` returns active users with role=Audit_A plus legacy Audit_B. `all` returns the design/customization union. |
+| `workflow_lane` | query | enum(normal/customization/audit/all) | 否 | Selects the active assignment candidate pool. |
 
 请求体: 无请求体。
 
@@ -330,23 +212,21 @@ curl -X GET https://api.example.com/v1/users/designers \
 ### 前端最佳实践
 - 用户管理端点受管理范围控制，前端必须展示后端返回的 `deny_code`。
 - 角色与访问规则主要供后台管理页使用。
-- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
 
 ## GET /v1/users/{id}
 
 ### 简介
-支持方法: GET, PATCH, DELETE。
+支持方法: GET, PATCH。
 
-- `GET`: Management-scoped user detail read endpoint. `DepartmentAdmin` can read only users in own department. `TeamLead` can read only users in own team.
-- `PATCH`: Partial update for user profile and org affiliation. `employee_no` can be maintained by company-level user managers. It must be a pure numeric value in range 0-9999 and globally unique. Org-field contract: - `department` + `team` are the canonical write fields. - `group` is a compatibility alias of `team` (when both are provided they must be equal). - To remove a user from a formal group, use the unassigned-pool semantic: - set `department` to the unassigned department from `/v1/org/options` - set `team` (or `group`) to its unassigned pool team. - Compatibility alias: `team/group = "ungrouped"` is normalized by backend into the configured unassigned pool. `DepartmentAdmin` can move users across teams inside own department and assign unassigned users into own department, but cannot move users across departments or mutate managed scope.
-- `DELETE`: Compatibility-only legacy endpoint. Do not expose this operation in frontend user management. Current business lifecycle uses `POST /v1/users/{id}/deactivate` and `POST /v1/users/{id}/activate`. Physical deletion is intentionally not provided.
+- `GET`: User detail read endpoint governed by `access.view` or `access.manage` and the same stable-ID scope model as the list endpoint.
+- `PATCH`: Partial update for user profile and org affiliation. `employee_no` can be maintained by company-level user managers. It must be a pure numeric value in range 0-9999 and globally unique. Org-field contract: - `department` + `team` are the canonical write fields. - To remove a user from a formal group, use the unassigned-pool semantic: - set `department` to the unassigned department from `/v1/org/options` - set `team` to its unassigned pool team, or use the explicit `team = "ungrouped"` command supported by the current management UI. Requires `access.manage`. Both the current user organization and the requested new stable department/team IDs must be inside the caller's effective scope.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `GET` 允许角色: Admin, SuperAdmin, HRAdmin, DepartmentAdmin, TeamLead, OrgAdmin, RoleAdmin。
-- `PATCH` 允许角色: HRAdmin, SuperAdmin, DepartmentAdmin。
-- `DELETE` 允许角色: SuperAdmin。
+- `GET` 允许角色: 已登录 / scope-aware。
+- `PATCH` 允许角色: 已登录 / scope-aware。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 #### GET 细节
@@ -406,17 +286,12 @@ Content-Type: `application/json`
 | `display_name` | string | 否 | - |
 | `status` | enum(active/disabled) | 否 | - |
 | `employment_type` | enum(full_time/part_time) | 否 | - |
-| `department` | Department | 否 | Dynamic backend org-master department name. Values come from enabled `org_departments` rows exposed by default from `/v1/org/options`; this is no longer a fixed frontend enum. v1.0 business baseline is exactly `人事部`, `运营部`, `设计研发部`, `定制美工部`, `审核部`, `云仓部` (plus the system bucket `未分配`). Legacy names (`设计部`, `采购部`, `仓储部`, `烘焙仓储部`) remain only as disabled compatibility rows for historical integrity; they are hidden from the default `/v1/org/options` projection and are not accepted by registration / user admin / task create inputs. Organization master maintenance clients may request `/v1/org/options?include_disabled=true` to display and restore disabled rows when authorized. |
+| `department` | Department | 否 | Display name from the organization master. Authorization and data scope use stable department/team IDs only; names are never permission conditions. |
 | `team` | string | 否 | - |
-| `group` | string | 否 | Compatibility alias of team. |
 | `email` | string | 否 | - |
 | `mobile` | string | 否 | - |
-| `avatar` | string | 否 | Backward-compatible placeholder. The current runtime ignores this field on admin user PATCH; current-user avatars are updated through `/v1/me/avatar`. |
-| `roles` | array<V7Role> | 否 | Role assignment per V1_INFORMATION_ARCHITECTURE §5.4. DeptAdmin cannot grant SuperAdmin or DeptAdmin; HRAdmin cannot grant SuperAdmin. |
 | `managed_departments` | array<string> | 否 | - |
 | `managed_teams` | array<string> | 否 | - |
-| `team_codes` | array<string> | 否 | R1.7-B placeholder. v1 persists only the single `team` field plus `managed_teams[]`; multi-team membership deferred to R5+. The server accepts but currently ignores this array (no-op). IA §5.4 reference maintained for forward-compat. |
-| `primary_team_code` | string | 否 | R1.7-B placeholder. v1 semantically equals the `team` field; server accepts but currently ignores this field (writes must go through `team`). Full persistence of the multi-team model is scheduled for R5+. |
 
 ##### 响应体 schema
 成功响应: `200 application/json`
@@ -439,7 +314,7 @@ Content-Type: `application/json`
 ##### 错误码
 | HTTP | code | deny_code | 说明 |
 |---|---|---|---|
-| 403 | 见 `error.code` | 见 `deny_code` | Forbidden (field-level authorization per §5.4 denied, e.g., DeptAdmin granting DeptAdmin or SuperAdmin; TeamLead attempting role change; cross-department mutation without org-move-request) |
+| 403 | 见 `error.code` | 见 `deny_code` | Forbidden because `access.manage` is missing or the current/new stable organization is outside the effective scope. |
 | 404 | 见 `error.code` | 见 `deny_code` | User not found |
 
 ##### curl 示例
@@ -450,37 +325,10 @@ curl -X PATCH https://api.example.com/v1/users/<id> \
   -d '{"example":"value"}'
 ```
 
-#### DELETE 细节
-
-##### 请求体 schema
-参数:
-
-| 参数 | 位置 | 类型 | 必填 | 说明 |
-|---|---|---|---|---|
-| `id` | path | integer | 是 | - |
-
-请求体: 无请求体。
-
-##### 响应体 schema
-成功响应: `204`
-
-无 JSON 响应体或响应体由文件流承载。
-
-##### 错误码
-| HTTP | code | deny_code | 说明 |
-|---|---|---|---|
-| 404 | 见 `error.code` | 见 `deny_code` | User not found |
-
-##### curl 示例
-```bash
-curl -X DELETE https://api.example.com/v1/users/<id> \
-  -H "Authorization: Bearer $TOKEN"
-```
-
 ### 前端最佳实践
 - 用户管理端点受管理范围控制，前端必须展示后端返回的 `deny_code`。
 - 角色与访问规则主要供后台管理页使用。
-- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
 
 ## PUT /v1/users/{id}/password
@@ -488,11 +336,11 @@ curl -X DELETE https://api.example.com/v1/users/<id> \
 ### 简介
 支持方法: PUT。
 
-- `PUT`: Managed password reset endpoint. Replaces the target user's local password hash and returns the user record. `DepartmentAdmin` can reset passwords only for users in own department. `HRAdmin` / `SuperAdmin` can reset globally. Existing session tokens are not revoked by this minimal reset operation.
+- `PUT`: Managed password reset endpoint. Replaces the target user's local password hash and returns the user record. Requires `access.manage`; the target user must be inside the caller's effective stable-ID scope. Existing session tokens are not revoked by this minimal reset operation.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `PUT` 允许角色: HRAdmin, SuperAdmin, DepartmentAdmin。
+- `PUT` 允许角色: 已登录 / scope-aware。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -546,714 +394,7 @@ curl -X PUT https://api.example.com/v1/users/<id>/password \
 ### 前端最佳实践
 - 用户管理端点受管理范围控制，前端必须展示后端返回的 `deny_code`。
 - 角色与访问规则主要供后台管理页使用。
-- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
-- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
-
-## POST /v1/users/{id}/roles
-
-### 简介
-支持方法: POST, PUT。
-
-- `POST`: Add workflow user roles
-- `PUT`: Replace workflow user roles
-
-### 鉴权与 RBAC
-- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `POST` 允许角色: HRAdmin, SuperAdmin。
-- `PUT` 允许角色: HRAdmin, SuperAdmin。
-- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
-
-#### POST 细节
-
-##### 请求体 schema
-参数:
-
-| 参数 | 位置 | 类型 | 必填 | 说明 |
-|---|---|---|---|---|
-| `id` | path | integer | 是 | - |
-
-Content-Type: `application/json`
-
-| 字段 | 类型 | 必填 | 说明 |
-|---|---|---|---|
-| `roles` | array<V7Role> | 否 | - |
-
-##### 响应体 schema
-成功响应: `200 application/json`
-
-```json
-{
-  "data": {
-    "id": 123,
-    "username": "string",
-    "account": "string",
-    "employee_no": 123
-  }
-}
-```
-
-| 字段 | 类型 | 必填 | 说明 |
-|---|---|---|---|
-| `data` | WorkflowUser | 否 | - |
-
-##### 错误码
-| HTTP | code | deny_code | 说明 |
-|---|---|---|---|
-| 401 | UNAUTHENTICATED | - | 未登录、token 缺失或 token 过期。 |
-| 403 | PERMISSION_DENIED | 见接口返回 | 角色、组织范围、字段级授权或流程状态不允许。 |
-| 404 | NOT_FOUND | - | 资源不存在或当前用户不可见。 |
-| 409 | CONFLICT | 见接口返回 | 状态竞态、重复操作或版本冲突。 |
-| 422 | VALIDATION_ERROR | - | 请求参数或业务字段校验失败。 |
-
-##### curl 示例
-```bash
-curl -X POST https://api.example.com/v1/users/<id>/roles \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"example":"value"}'
-```
-
-#### PUT 细节
-
-##### 请求体 schema
-参数:
-
-| 参数 | 位置 | 类型 | 必填 | 说明 |
-|---|---|---|---|---|
-| `id` | path | integer | 是 | - |
-
-Content-Type: `application/json`
-
-| 字段 | 类型 | 必填 | 说明 |
-|---|---|---|---|
-| `roles` | array<V7Role> | 否 | - |
-
-##### 响应体 schema
-成功响应: `200 application/json`
-
-```json
-{
-  "data": {
-    "id": 123,
-    "username": "string",
-    "account": "string",
-    "employee_no": 123
-  }
-}
-```
-
-| 字段 | 类型 | 必填 | 说明 |
-|---|---|---|---|
-| `data` | WorkflowUser | 否 | - |
-
-##### 错误码
-| HTTP | code | deny_code | 说明 |
-|---|---|---|---|
-| 401 | UNAUTHENTICATED | - | 未登录、token 缺失或 token 过期。 |
-| 403 | PERMISSION_DENIED | 见接口返回 | 角色、组织范围、字段级授权或流程状态不允许。 |
-| 404 | NOT_FOUND | - | 资源不存在或当前用户不可见。 |
-| 409 | CONFLICT | 见接口返回 | 状态竞态、重复操作或版本冲突。 |
-| 422 | VALIDATION_ERROR | - | 请求参数或业务字段校验失败。 |
-
-##### curl 示例
-```bash
-curl -X PUT https://api.example.com/v1/users/<id>/roles \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"example":"value"}'
-```
-
-### 前端最佳实践
-- 用户管理端点受管理范围控制，前端必须展示后端返回的 `deny_code`。
-- 角色与访问规则主要供后台管理页使用。
-- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
-- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
-
-## DELETE /v1/users/{id}/roles/{role}
-
-### 简介
-支持方法: DELETE。
-
-- `DELETE`: Remove one workflow user role
-
-### 鉴权与 RBAC
-- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `DELETE` 允许角色: HRAdmin, SuperAdmin。
-- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
-
-### 请求体 schema
-参数:
-
-| 参数 | 位置 | 类型 | 必填 | 说明 |
-|---|---|---|---|---|
-| `id` | path | integer | 是 | - |
-| `role` | path | enum(Member/SuperAdmin/HRAdmin/OrgAdmin/RoleAdmin/TeamLead/DesignDirector/DesignReviewer/Ops/Designer/Audit_A/Audit_B...) | 是 | - |
-
-请求体: 无请求体。
-
-### 响应体 schema
-成功响应: `200 application/json`
-
-```json
-{
-  "data": {
-    "id": 123,
-    "username": "string",
-    "account": "string",
-    "employee_no": 123
-  }
-}
-```
-
-| 字段 | 类型 | 必填 | 说明 |
-|---|---|---|---|
-| `data` | WorkflowUser | 否 | - |
-
-### 错误码
-| HTTP | code | deny_code | 说明 |
-|---|---|---|---|
-| 401 | UNAUTHENTICATED | - | 未登录、token 缺失或 token 过期。 |
-| 403 | PERMISSION_DENIED | 见接口返回 | 角色、组织范围、字段级授权或流程状态不允许。 |
-| 404 | NOT_FOUND | - | 资源不存在或当前用户不可见。 |
-| 409 | CONFLICT | 见接口返回 | 状态竞态、重复操作或版本冲突。 |
-| 422 | VALIDATION_ERROR | - | 请求参数或业务字段校验失败。 |
-
-### curl 示例
-```bash
-curl -X DELETE https://api.example.com/v1/users/<id>/roles/<role> \
-  -H "Authorization: Bearer $TOKEN"
-```
-
-### 前端最佳实践
-- 用户管理端点受管理范围控制，前端必须展示后端返回的 `deny_code`。
-- 角色与访问规则主要供后台管理页使用。
-- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
-- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
-
-## GET /v1/permission-logs
-
-### 简介
-支持方法: GET。
-
-- `GET`: Combined route-access and identity/role-change audit log. Besides route-level authorization decisions, this endpoint also records register, login, login failure, password change, role assignment, and role removal actions. Read access is available to super admins and HR users.
-
-### 鉴权与 RBAC
-- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `GET` 允许角色: 已登录 / scope-aware。
-- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
-
-### 请求体 schema
-参数:
-
-| 参数 | 位置 | 类型 | 必填 | 说明 |
-|---|---|---|---|---|
-| `actor_id` | query | integer | 否 | - |
-| `actor_username` | query | string | 否 | - |
-| `action_type` | query | string | 否 | - |
-| `target_user_id` | query | integer | 否 | - |
-| `target_username` | query | string | 否 | - |
-| `granted` | query | boolean | 否 | - |
-| `method` | query | string | 否 | - |
-| `route_path` | query | string | 否 | - |
-| `page` | query | integer | 否 | - |
-| `page_size` | query | integer | 否 | - |
-
-请求体: 无请求体。
-
-### 响应体 schema
-成功响应: `200 application/json`
-
-```json
-{
-  "data": [
-    {
-      "id": "...",
-      "actor_id": "...",
-      "actor_username": "...",
-      "actor_source": "..."
-    }
-  ],
-  "pagination": {
-    "page": 123,
-    "page_size": 123,
-    "total": 123
-  }
-}
-```
-
-| 字段 | 类型 | 必填 | 说明 |
-|---|---|---|---|
-| `data` | array<PermissionLog> | 否 | - |
-| `pagination` | PaginationMeta | 否 | - |
-
-### 错误码
-| HTTP | code | deny_code | 说明 |
-|---|---|---|---|
-| 401 | UNAUTHENTICATED | - | 未登录、token 缺失或 token 过期。 |
-| 403 | PERMISSION_DENIED | 见接口返回 | 角色、组织范围、字段级授权或流程状态不允许。 |
-| 404 | NOT_FOUND | - | 资源不存在或当前用户不可见。 |
-| 409 | CONFLICT | 见接口返回 | 状态竞态、重复操作或版本冲突。 |
-| 422 | VALIDATION_ERROR | - | 请求参数或业务字段校验失败。 |
-
-### curl 示例
-```bash
-curl -X GET https://api.example.com/v1/permission-logs \
-  -H "Authorization: Bearer $TOKEN"
-```
-
-### 前端最佳实践
-- 用户管理端点受管理范围控制，前端必须展示后端返回的 `deny_code`。
-- 角色与访问规则主要供后台管理页使用。
-- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
-- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
-
-## GET /v1/operation-logs
-
-### 简介
-支持方法: GET。
-
-- `GET`: Aggregated operation-log query endpoint for frontend integration. Combines recent task events, export-job events, and integration call logs into one timeline-style read model. Product policy is `HRAdmin` and `SuperAdmin`; legacy `Admin` remains accepted as compatibility-only access.
-
-### 鉴权与 RBAC
-- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `GET` 允许角色: Admin, SuperAdmin, HRAdmin。
-- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
-
-### 请求体 schema
-参数:
-
-| 参数 | 位置 | 类型 | 必填 | 说明 |
-|---|---|---|---|---|
-| `source` | query | enum(task_event/export_event/integration_call) | 否 | - |
-| `event_type` | query | string | 否 | - |
-| `page` | query | integer | 否 | - |
-| `page_size` | query | integer | 否 | - |
-
-请求体: 无请求体。
-
-### 响应体 schema
-成功响应: `200 application/json`
-
-```json
-{
-  "data": [
-    {
-      "source": "...",
-      "log_id": "...",
-      "reference_type": "...",
-      "reference_id": "..."
-    }
-  ],
-  "pagination": {
-    "page": 123,
-    "page_size": 123,
-    "total": 123
-  }
-}
-```
-
-| 字段 | 类型 | 必填 | 说明 |
-|---|---|---|---|
-| `data` | array<OperationLogEntry> | 否 | - |
-| `pagination` | PaginationMeta | 否 | - |
-
-### 错误码
-| HTTP | code | deny_code | 说明 |
-|---|---|---|---|
-| 401 | UNAUTHENTICATED | - | 未登录、token 缺失或 token 过期。 |
-| 403 | PERMISSION_DENIED | 见接口返回 | 角色、组织范围、字段级授权或流程状态不允许。 |
-| 404 | NOT_FOUND | - | 资源不存在或当前用户不可见。 |
-| 409 | CONFLICT | 见接口返回 | 状态竞态、重复操作或版本冲突。 |
-| 422 | VALIDATION_ERROR | - | 请求参数或业务字段校验失败。 |
-
-### curl 示例
-```bash
-curl -X GET https://api.example.com/v1/operation-logs \
-  -H "Authorization: Bearer $TOKEN"
-```
-
-### 前端最佳实践
-- 用户管理端点受管理范围控制，前端必须展示后端返回的 `deny_code`。
-- 角色与访问规则主要供后台管理页使用。
-- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
-- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
-
-## GET /v1/audit-logs
-
-### 简介
-支持方法: GET。
-
-- `GET`: Cross-task audit record list for audit log view. Filters by task_no, auditor, action, start/end date. Returns audit_records enriched with task_no and auditor_name. Read access is limited to audit roles and management roles. `DepartmentAdmin` results are filtered to own department. `TeamLead` results are filtered to own team inside own department.
-
-### 鉴权与 RBAC
-- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `GET` 允许角色: Admin, SuperAdmin, HRAdmin, DepartmentAdmin, TeamLead, OrgAdmin, RoleAdmin, Audit_A, Audit_B, CustomizationReviewer。
-- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
-
-### 请求体 schema
-参数:
-
-| 参数 | 位置 | 类型 | 必填 | 说明 |
-|---|---|---|---|---|
-| `taskNo` | query | string | 否 | Contains match on task_no |
-| `auditor` | query | string | 否 | Contains match on auditor display_name |
-| `action` | query | enum(claim/approve/reject/transfer/handover/takeover) | 否 | - |
-| `start` | query | string | 否 | YYYY-MM-DD, records with created_at >= start 00:00:00 |
-| `end` | query | string | 否 | YYYY-MM-DD, records with created_at <= end 23:59:59 |
-| `page` | query | integer | 否 | - |
-| `page_size` | query | integer | 否 | - |
-
-请求体: 无请求体。
-
-### 响应体 schema
-成功响应: `200 application/json`
-
-```json
-{
-  "data": [
-    {
-      "id": "...",
-      "task_id": "...",
-      "task_no": "...",
-      "stage": "..."
-    }
-  ]
-}
-```
-
-| 字段 | 类型 | 必填 | 说明 |
-|---|---|---|---|
-| `data` | array<object> | 否 | - |
-
-### 错误码
-| HTTP | code | deny_code | 说明 |
-|---|---|---|---|
-| 401 | UNAUTHENTICATED | - | 未登录、token 缺失或 token 过期。 |
-| 403 | PERMISSION_DENIED | 见接口返回 | 角色、组织范围、字段级授权或流程状态不允许。 |
-| 404 | NOT_FOUND | - | 资源不存在或当前用户不可见。 |
-| 409 | CONFLICT | 见接口返回 | 状态竞态、重复操作或版本冲突。 |
-| 422 | VALIDATION_ERROR | - | 请求参数或业务字段校验失败。 |
-
-### curl 示例
-```bash
-curl -X GET https://api.example.com/v1/audit-logs \
-  -H "Authorization: Bearer $TOKEN"
-```
-
-### 前端最佳实践
-- 用户管理端点受管理范围控制，前端必须展示后端返回的 `deny_code`。
-- 角色与访问规则主要供后台管理页使用。
-- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
-- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
-
-## GET /v1/server-logs
-
-### 简介
-支持方法: GET。
-
-- `GET`: Admin-only server log query with filtering (level, keyword, since, until) and masking of sensitive data. 5xx HTTP responses are automatically recorded. Use POST /v1/server-logs/clean to purge old entries.
-
-### 鉴权与 RBAC
-- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `GET` 允许角色: 已登录 / scope-aware。
-- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
-
-### 请求体 schema
-参数:
-
-| 参数 | 位置 | 类型 | 必填 | 说明 |
-|---|---|---|---|---|
-| `level` | query | enum(info/warn/error) | 否 | - |
-| `keyword` | query | string | 否 | - |
-| `since` | query | string | 否 | - |
-| `until` | query | string | 否 | - |
-| `page` | query | integer | 否 | - |
-| `page_size` | query | integer | 否 | - |
-
-请求体: 无请求体。
-
-### 响应体 schema
-成功响应: `200 application/json`
-
-```json
-{
-  "data": [
-    {
-      "id": "...",
-      "level": "...",
-      "msg": "...",
-      "details": "..."
-    }
-  ],
-  "pagination": {
-    "page": 123,
-    "page_size": 123,
-    "total": 123
-  }
-}
-```
-
-| 字段 | 类型 | 必填 | 说明 |
-|---|---|---|---|
-| `data` | array<ServerLog> | 否 | - |
-| `pagination` | PaginationMeta | 否 | - |
-
-### 错误码
-| HTTP | code | deny_code | 说明 |
-|---|---|---|---|
-| 401 | UNAUTHENTICATED | - | 未登录、token 缺失或 token 过期。 |
-| 403 | PERMISSION_DENIED | 见接口返回 | 角色、组织范围、字段级授权或流程状态不允许。 |
-| 404 | NOT_FOUND | - | 资源不存在或当前用户不可见。 |
-| 409 | CONFLICT | 见接口返回 | 状态竞态、重复操作或版本冲突。 |
-| 422 | VALIDATION_ERROR | - | 请求参数或业务字段校验失败。 |
-
-### curl 示例
-```bash
-curl -X GET https://api.example.com/v1/server-logs \
-  -H "Authorization: Bearer $TOKEN"
-```
-
-### 前端最佳实践
-- 用户管理端点受管理范围控制，前端必须展示后端返回的 `deny_code`。
-- 角色与访问规则主要供后台管理页使用。
-- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
-- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
-
-## POST /v1/server-logs/clean
-
-### 简介
-支持方法: POST。
-
-- `POST`: Admin-only. Deletes server logs older than the specified hours. Reason is required.
-
-### 鉴权与 RBAC
-- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `POST` 允许角色: 已登录 / scope-aware。
-- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
-
-### 请求体 schema
-参数:
-
-无 path/query/header 参数。
-
-Content-Type: `application/json`
-
-| 字段 | 类型 | 必填 | 说明 |
-|---|---|---|---|
-| `older_than_hours` | integer | 否 | - |
-| `reason` | string | 是 | - |
-
-### 响应体 schema
-成功响应: `200 application/json`
-
-```json
-{
-  "deleted": 123
-}
-```
-
-| 字段 | 类型 | 必填 | 说明 |
-|---|---|---|---|
-| `deleted` | integer | 否 | - |
-
-### 错误码
-| HTTP | code | deny_code | 说明 |
-|---|---|---|---|
-| 401 | UNAUTHENTICATED | - | 未登录、token 缺失或 token 过期。 |
-| 403 | PERMISSION_DENIED | 见接口返回 | 角色、组织范围、字段级授权或流程状态不允许。 |
-| 404 | NOT_FOUND | - | 资源不存在或当前用户不可见。 |
-| 409 | CONFLICT | 见接口返回 | 状态竞态、重复操作或版本冲突。 |
-| 422 | VALIDATION_ERROR | - | 请求参数或业务字段校验失败。 |
-
-### curl 示例
-```bash
-curl -X POST https://api.example.com/v1/server-logs/clean \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"example":"value"}'
-```
-
-### 前端最佳实践
-- 用户管理端点受管理范围控制，前端必须展示后端返回的 `deny_code`。
-- 角色与访问规则主要供后台管理页使用。
-- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
-- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
-
-## GET /v1/admin/jst-users
-
-### 简介
-支持方法: GET。
-
-- `GET`: Pre-wiring. Query JST company users through Bridge. Admin only.
-
-### 鉴权与 RBAC
-- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `GET` 允许角色: 已登录 / scope-aware。
-- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
-
-### 请求体 schema
-参数:
-
-| 参数 | 位置 | 类型 | 必填 | 说明 |
-|---|---|---|---|---|
-| `current_page` | query | integer | 否 | - |
-| `page_size` | query | integer | 否 | - |
-
-请求体: 无请求体。
-
-### 响应体 schema
-成功响应: `200 application/json`
-
-```json
-{
-  "data": {
-    "current_page": "string",
-    "page_size": "string",
-    "count": "string",
-    "pages": "string"
-  }
-}
-```
-
-| 字段 | 类型 | 必填 | 说明 |
-|---|---|---|---|
-| `data` | JSTUserListResponse | 否 | ERP-style JST getcompanyusers response. Source: domain.JSTUserListResponse. |
-
-### 错误码
-| HTTP | code | deny_code | 说明 |
-|---|---|---|---|
-| 401 | UNAUTHENTICATED | - | 未登录、token 缺失或 token 过期。 |
-| 403 | PERMISSION_DENIED | 见接口返回 | 角色、组织范围、字段级授权或流程状态不允许。 |
-| 404 | NOT_FOUND | - | 资源不存在或当前用户不可见。 |
-| 409 | CONFLICT | 见接口返回 | 状态竞态、重复操作或版本冲突。 |
-| 422 | VALIDATION_ERROR | - | 请求参数或业务字段校验失败。 |
-
-### curl 示例
-```bash
-curl -X GET https://api.example.com/v1/admin/jst-users \
-  -H "Authorization: Bearer $TOKEN"
-```
-
-### 前端最佳实践
-- 用户管理端点受管理范围控制，前端必须展示后端返回的 `deny_code`。
-- 角色与访问规则主要供后台管理页使用。
-- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
-- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
-
-## POST /v1/admin/jst-users/import-preview
-
-### 简介
-支持方法: POST。
-
-- `POST`: Preview JST user import (Admin)
-
-### 鉴权与 RBAC
-- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `POST` 允许角色: 已登录 / scope-aware。
-- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
-
-### 请求体 schema
-参数:
-
-无 path/query/header 参数。
-
-请求体: 无请求体。
-
-### 响应体 schema
-成功响应: `200 application/json`
-
-```json
-{
-  "data": {
-    "fetched_count": 123,
-    "matched_count": 123,
-    "to_create_count": 123,
-    "to_update_count": 123
-  }
-}
-```
-
-| 字段 | 类型 | 必填 | 说明 |
-|---|---|---|---|
-| `data` | JSTUserImportPreviewResult | 否 | - |
-
-### 错误码
-| HTTP | code | deny_code | 说明 |
-|---|---|---|---|
-| 401 | UNAUTHENTICATED | - | 未登录、token 缺失或 token 过期。 |
-| 403 | PERMISSION_DENIED | 见接口返回 | 角色、组织范围、字段级授权或流程状态不允许。 |
-| 404 | NOT_FOUND | - | 资源不存在或当前用户不可见。 |
-| 409 | CONFLICT | 见接口返回 | 状态竞态、重复操作或版本冲突。 |
-| 422 | VALIDATION_ERROR | - | 请求参数或业务字段校验失败。 |
-
-### curl 示例
-```bash
-curl -X POST https://api.example.com/v1/admin/jst-users/import-preview \
-  -H "Authorization: Bearer $TOKEN"
-```
-
-### 前端最佳实践
-- 用户管理端点受管理范围控制，前端必须展示后端返回的 `deny_code`。
-- 角色与访问规则主要供后台管理页使用。
-- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
-- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
-
-## POST /v1/admin/jst-users/import
-
-### 简介
-支持方法: POST。
-
-- `POST`: Import JST users (Admin)
-
-### 鉴权与 RBAC
-- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `POST` 允许角色: 已登录 / scope-aware。
-- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
-
-### 请求体 schema
-参数:
-
-无 path/query/header 参数。
-
-请求体: 无请求体。
-
-### 响应体 schema
-成功响应: `200 application/json`
-
-```json
-{
-  "data": {
-    "fetched_count": 123,
-    "created_count": 123,
-    "updated_count": 123,
-    "disabled_count": 123
-  }
-}
-```
-
-| 字段 | 类型 | 必填 | 说明 |
-|---|---|---|---|
-| `data` | JSTUserImportResult | 否 | - |
-
-### 错误码
-| HTTP | code | deny_code | 说明 |
-|---|---|---|---|
-| 401 | UNAUTHENTICATED | - | 未登录、token 缺失或 token 过期。 |
-| 403 | PERMISSION_DENIED | 见接口返回 | 角色、组织范围、字段级授权或流程状态不允许。 |
-| 404 | NOT_FOUND | - | 资源不存在或当前用户不可见。 |
-| 409 | CONFLICT | 见接口返回 | 状态竞态、重复操作或版本冲突。 |
-| 422 | VALIDATION_ERROR | - | 请求参数或业务字段校验失败。 |
-
-### curl 示例
-```bash
-curl -X POST https://api.example.com/v1/admin/jst-users/import \
-  -H "Authorization: Bearer $TOKEN"
-```
-
-### 前端最佳实践
-- 用户管理端点受管理范围控制，前端必须展示后端返回的 `deny_code`。
-- 角色与访问规则主要供后台管理页使用。
-- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
 
 ## POST /v1/users/{id}/activate
@@ -1261,11 +402,11 @@ curl -X POST https://api.example.com/v1/admin/jst-users/import \
 ### 简介
 支持方法: POST。
 
-- `POST`: Enable the target user's account. Source: V1_INFORMATION_ARCHITECTURE §5.3 / §5.4 (`is_active` field). `TeamLead` may activate only members of own team; `DeptAdmin` only users in own department; `Admin` / `HRAdmin` / `SuperAdmin` global.
+- `POST`: Enables the target account. Requires `access.manage`; the target user must be inside the caller's effective stable-ID scope.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `POST` 允许角色: Admin, SuperAdmin, HRAdmin, DepartmentAdmin, TeamLead。
+- `POST` 允许角色: 已登录 / scope-aware。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -1297,7 +438,7 @@ curl -X POST https://api.example.com/v1/users/<id>/activate \
 ### 前端最佳实践
 - 用户管理端点受管理范围控制，前端必须展示后端返回的 `deny_code`。
 - 角色与访问规则主要供后台管理页使用。
-- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
 
 ## POST /v1/users/{id}/deactivate
@@ -1305,11 +446,11 @@ curl -X POST https://api.example.com/v1/users/<id>/activate \
 ### 简介
 支持方法: POST。
 
-- `POST`: Disable the target user's account. Scope rules identical to `activate`; self-deactivation is rejected. Source: V1_INFORMATION_ARCHITECTURE §5.3 / §5.4.
+- `POST`: Disables the target account. Scope rules are identical to `activate`; self-deactivation is rejected.
 
 ### 鉴权与 RBAC
 - 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `POST` 允许角色: Admin, SuperAdmin, HRAdmin, DepartmentAdmin, TeamLead。
+- `POST` 允许角色: 已登录 / scope-aware。
 - 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
 
 ### 请求体 schema
@@ -1341,6 +482,6 @@ curl -X POST https://api.example.com/v1/users/<id>/deactivate \
 ### 前端最佳实践
 - 用户管理端点受管理范围控制，前端必须展示后端返回的 `deny_code`。
 - 角色与访问规则主要供后台管理页使用。
-- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
 

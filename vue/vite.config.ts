@@ -3,6 +3,7 @@ import vue from '@vitejs/plugin-vue'
 import fs from 'node:fs'
 import path from 'path'
 import { fileURLToPath } from 'node:url'
+import { sharedManualChunks } from './vite.shared'
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), 'VITE_')
@@ -41,16 +42,7 @@ export default defineConfig(({ mode }) => {
       chunkSizeWarningLimit: 1100,
       rollupOptions: {
         output: {
-          manualChunks(id) {
-            if (!id.includes('node_modules')) return undefined
-            if (id.includes('/echarts/')) return 'charts'
-            if (id.includes('/exceljs/')) return 'excel'
-            if (id.includes('/jszip/')) return 'zip'
-            if (id.includes('/vue/') || id.includes('/vue-router/') || id.includes('/pinia/')) {
-              return 'vue-vendor'
-            }
-            return 'vendor'
-          },
+          manualChunks: sharedManualChunks,
         },
       },
     },

@@ -14,11 +14,11 @@ import (
 	"workflow/service"
 )
 
-func TestUserAdminHandlerListUsersPassesDepartmentTeamAndRoleFilters(t *testing.T) {
+func TestUserAdminHandlerListUsersPassesCurrentIdentityFilters(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	req := httptest.NewRequest(http.MethodGet, "/v1/users?keyword=ops&department=杩愯惀閮?&team=杩愯惀涓€缁?&role=Ops&page=2&page_size=5", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/users?keyword=ops&department=杩愯惀閮?&team=杩愯惀涓€缁?&page=2&page_size=5", nil)
 	c.Request = req
 
 	svc := &userAdminServiceStub{
@@ -31,7 +31,7 @@ func TestUserAdminHandlerListUsersPassesDepartmentTeamAndRoleFilters(t *testing.
 		},
 		listUsersResp: []*domain.User{{ID: 10, Username: "ops_user"}},
 	}
-	h := NewUserAdminHandler(svc, nil, nil)
+	h := NewUserAdminHandler(svc)
 
 	h.ListUsers(c)
 
@@ -47,8 +47,8 @@ func TestUserAdminHandlerListUsersPassesDepartmentTeamAndRoleFilters(t *testing.
 	if svc.lastListFilter.Team != "杩愯惀涓€缁?" {
 		t.Fatalf("ListUsers() team = %q", svc.lastListFilter.Team)
 	}
-	if svc.lastListFilter.Role == nil || *svc.lastListFilter.Role != domain.RoleOps {
-		t.Fatalf("ListUsers() role = %+v", svc.lastListFilter.Role)
+	if svc.lastListFilter.Role != nil {
+		t.Fatalf("ListUsers() legacy role filter must not be exposed, got %+v", svc.lastListFilter.Role)
 	}
 	if svc.lastListFilter.Page != 2 || svc.lastListFilter.PageSize != 5 {
 		t.Fatalf("ListUsers() pagination filter = %+v", svc.lastListFilter)
@@ -65,7 +65,7 @@ func TestUserAdminHandlerListAccessPolicyUsersUsesDedicatedMinimalSelector(t *te
 		listAccessPolicyUsersResp: []*domain.User{{ID: 12, Username: "alice", DisplayName: "Alice", Department: domain.DepartmentOperations, DepartmentID: &departmentID, Team: "T1", TeamID: &teamID, Mobile: "secret"}},
 		listAccessPolicyUsersMeta: domain.PaginationMeta{Page: 2, PageSize: 8, Total: 1},
 	}
-	NewUserAdminHandler(serviceStub, nil, nil).ListAccessPolicyUsers(c)
+	NewUserAdminHandler(serviceStub).ListAccessPolicyUsers(c)
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
@@ -87,7 +87,7 @@ func TestUserAdminHandlerCreateUserBindsManagedCreatePayload(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	body := `{"account":"new_user","employee_no":1030,"name":"New User","department":"杩愯惀閮?","group":"杩愯惀涓€缁?","phone":"13800001030","password":"Init1234","roles":["Ops"],"status":"active"}`
+	body := `{"username":"new_user","employee_no":1030,"display_name":"New User","department":"杩愯惀閮?","team":"杩愯惀涓€缁?","mobile":"13800001030","password":"Init1234","status":"active"}`
 	req := httptest.NewRequest(http.MethodPost, "/v1/users", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	c.Request = req
@@ -95,7 +95,7 @@ func TestUserAdminHandlerCreateUserBindsManagedCreatePayload(t *testing.T) {
 	svc := &userAdminServiceStub{
 		createUserResp: &domain.User{ID: 11, Username: "new_user"},
 	}
-	h := NewUserAdminHandler(svc, nil, nil)
+	h := NewUserAdminHandler(svc)
 
 	h.CreateUser(c)
 
@@ -110,9 +110,6 @@ func TestUserAdminHandlerCreateUserBindsManagedCreatePayload(t *testing.T) {
 	}
 	if svc.lastCreateParams.Team != "杩愯惀涓€缁?" || svc.lastCreateParams.Mobile != "13800001030" {
 		t.Fatalf("CreateUser() org/contact = %+v", svc.lastCreateParams)
-	}
-	if len(svc.lastCreateParams.Roles) != 1 || svc.lastCreateParams.Roles[0] != domain.RoleOps {
-		t.Fatalf("CreateUser() roles = %+v", svc.lastCreateParams.Roles)
 	}
 	if svc.lastCreateParams.Status == nil || *svc.lastCreateParams.Status != domain.UserStatusActive {
 		t.Fatalf("CreateUser() status = %+v", svc.lastCreateParams.Status)
@@ -146,7 +143,7 @@ func TestListDesignersHandler_InvokesAssignableMethod(t *testing.T) {
 			{ID: 11, Username: "designer_b", DisplayName: "设计B"},
 		},
 	}
-	h := NewUserAdminHandler(svc, nil, nil)
+	h := NewUserAdminHandler(svc)
 
 	h.ListDesigners(c)
 
@@ -215,7 +212,7 @@ func TestListDesignersHandler_ParsesWorkflowLane(t *testing.T) {
 					{ID: 20, Username: tc.username, DisplayName: "候选人"},
 				},
 			}
-			h := NewUserAdminHandler(svc, nil, nil)
+			h := NewUserAdminHandler(svc)
 
 			h.ListDesigners(c)
 
@@ -247,7 +244,7 @@ func TestListAssignableDesigners_InvalidLaneIsRejectedAtHandler(t *testing.T) {
 	c.Request = req.WithContext(ctx)
 
 	svc := &userAdminServiceStub{}
-	h := NewUserAdminHandler(svc, nil, nil)
+	h := NewUserAdminHandler(svc)
 
 	h.ListDesigners(c)
 
@@ -278,7 +275,7 @@ func TestUserAdminHandlerResetPasswordCallsService(t *testing.T) {
 	svc := &userAdminServiceStub{
 		resetPasswordResp: &domain.User{ID: 15, Username: "reset_user"},
 	}
-	h := NewUserAdminHandler(svc, nil, nil)
+	h := NewUserAdminHandler(svc)
 
 	h.ResetPassword(c)
 
@@ -316,7 +313,7 @@ func TestUserAdminHandlerGetOrgOptionsSetsDeprecationHeaderForCompatibilityShape
 			},
 		},
 	}
-	h := NewUserAdminHandler(svc, nil, nil)
+	h := NewUserAdminHandler(svc)
 
 	h.GetOrgOptions(c)
 
@@ -348,7 +345,7 @@ func TestUserAdminHandlerGetOrgOptionsIncludingDisabledRequiresOrgMasterWriteRol
 			},
 		},
 	}
-	h := NewUserAdminHandler(svc, nil, nil)
+	h := NewUserAdminHandler(svc)
 
 	h.GetOrgOptions(c)
 
@@ -360,22 +357,16 @@ func TestUserAdminHandlerGetOrgOptionsIncludingDisabledRequiresOrgMasterWriteRol
 	}
 }
 
-func TestUserAdminHandlerGetOrgOptionsIncludingDisabledCallsServiceForHRAdmin(t *testing.T) {
+func TestUserAdminHandlerGetOrgOptionsIncludingDisabledCallsServiceForGlobalAccessManager(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
 	req := httptest.NewRequest(http.MethodGet, "/v1/org/options?include_disabled=true", nil)
-	c.Request = req
+	actor := identityAccessActorForHandlerTest(3, domain.PermissionAccessManage, domain.AccessScopeGlobal)
+	c.Request = req.WithContext(domain.WithRequestActor(req.Context(), actor))
 
 	svc := &userAdminServiceStub{
-		currentUser: &domain.User{
-			ID:    3,
-			Roles: []domain.Role{domain.RoleHRAdmin},
-			FrontendAccess: domain.FrontendAccessView{
-				IsSuperAdmin: true,
-				Roles:        []string{"hr_admin"},
-			},
-		},
+		currentUser: &domain.User{ID: 3},
 		orgOptionsIncludingDisabled: &domain.OrgOptions{
 			Departments: []domain.DepartmentOption{
 				{
@@ -389,7 +380,7 @@ func TestUserAdminHandlerGetOrgOptionsIncludingDisabledCallsServiceForHRAdmin(t 
 			},
 		},
 	}
-	h := NewUserAdminHandler(svc, nil, nil)
+	h := NewUserAdminHandler(svc)
 
 	h.GetOrgOptions(c)
 
@@ -569,28 +560,8 @@ func (s *userAdminServiceStub) DeactivateUser(context.Context, int64) *domain.Ap
 	return nil
 }
 
-func (s *userAdminServiceStub) DeleteUser(context.Context, service.DeleteUserParams) *domain.AppError {
-	return nil
-}
-
-func (s *userAdminServiceStub) SetUserRoles(context.Context, service.SetUserRolesParams) (*domain.User, *domain.AppError) {
-	return nil, nil
-}
-
-func (s *userAdminServiceStub) AddUserRoles(context.Context, service.AddUserRolesParams) (*domain.User, *domain.AppError) {
-	return nil, nil
-}
-
-func (s *userAdminServiceStub) RemoveUserRole(context.Context, service.RemoveUserRoleParams) (*domain.User, *domain.AppError) {
-	return nil, nil
-}
-
 func (s *userAdminServiceStub) ListPermissionLogs(context.Context, service.PermissionLogFilter) ([]*domain.PermissionLog, domain.PaginationMeta, *domain.AppError) {
 	return nil, domain.PaginationMeta{}, nil
-}
-
-func (s *userAdminServiceStub) ListRoles(context.Context) []domain.RoleCatalogEntry {
-	return nil
 }
 
 func (s *userAdminServiceStub) ResolveRequestActor(context.Context, string) (*domain.RequestActor, *domain.AppError) {
@@ -598,3 +569,33 @@ func (s *userAdminServiceStub) ResolveRequestActor(context.Context, string) (*do
 }
 
 func (s *userAdminServiceStub) RecordRouteAccess(context.Context, domain.PermissionLog) {}
+
+func identityAccessActorForHandlerTest(id int64, permission domain.PermissionCode, scope domain.AccessScopeMode) domain.RequestActor {
+	assignment := domain.AccessAssignment{
+		ID:         id + 1000,
+		UserID:     id,
+		RoleID:     id + 1000,
+		RoleCode:   "access_operator",
+		ScopeMode:  scope,
+		SourceType: "direct",
+	}
+	effective := &domain.EffectiveAccess{
+		UserID:      id,
+		Permissions: []domain.PermissionCode{permission},
+		Assignments: []domain.AccessAssignment{assignment},
+		Sources: []domain.EffectiveAccessNote{{
+			Permission: permission,
+			RoleID:     assignment.RoleID,
+			RoleCode:   assignment.RoleCode,
+			SourceType: assignment.SourceType,
+			ScopeMode:  scope,
+		}},
+	}
+	return domain.RequestActor{
+		ID:              id,
+		Permissions:     effective.Permissions,
+		EffectiveAccess: effective,
+		Source:          domain.RequestActorSourceSessionToken,
+		AuthMode:        domain.AuthModeSessionTokenRoleEnforced,
+	}
+}

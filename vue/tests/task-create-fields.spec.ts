@@ -14,7 +14,7 @@ import {
 } from '../src/domain/task-create-fields'
 
 describe('sanitizeCreateTaskPayload — customization is orthogonal', () => {
-  it('case 2 regression: original + customization=true 必须 strip material_*/purchase_sku/product_channel/design_requirement', () => {
+  it('original + customization=true 必须 strip 不属于原品改款的设计字段', () => {
     const raw = {
       task_type: 'original_product_development',
       change_request: '把 logo 改成金色',
@@ -24,8 +24,6 @@ describe('sanitizeCreateTaskPayload — customization is orthogonal', () => {
       material_mode: 'other',
       material_other: '定制海报',
       material: '纸',
-      purchase_sku: 'PS-ABC',
-      product_channel: 'TB',
       design_requirement: '做一张海报',
       owner_department: '运营部',
       owner_org_team: '运营一组',
@@ -38,8 +36,6 @@ describe('sanitizeCreateTaskPayload — customization is orthogonal', () => {
     expect((out as Record<string, unknown>).material_mode).toBeUndefined()
     expect((out as Record<string, unknown>).material_other).toBeUndefined()
     expect((out as Record<string, unknown>).material).toBeUndefined()
-    expect((out as Record<string, unknown>).purchase_sku).toBeUndefined()
-    expect((out as Record<string, unknown>).product_channel).toBeUndefined()
     expect((out as Record<string, unknown>).design_requirement).toBeUndefined()
   })
 
@@ -75,16 +71,6 @@ describe('sanitizeCreateTaskPayload — customization is orthogonal', () => {
 
   it('new product required fields include i_id', () => {
     expect(TASK_TYPE_FIELD_WHITELIST.new_product_development.required).toContain('i_id')
-    expect('purchase_task' in TASK_TYPE_FIELD_WHITELIST).toBe(false)
-  })
-
-  it('retired task types do not receive an active sanitizer branch', () => {
-    const raw = {
-      task_type: 'purchase_task',
-      unsupported: true,
-    }
-    const out = sanitizeCreateTaskPayload(raw, 'purchase_task')
-    expect(out).toEqual(raw)
   })
 
   it('sanitizer 不修改入参（深克隆）', () => {
@@ -101,7 +87,7 @@ describe('sanitizeCreateTaskPayload — customization is orthogonal', () => {
 
   it('TASK_TYPE_FIELD_WHITELIST.original_product_development.forbidden 必须与 Round I.g 不变式一致', () => {
     expect(new Set(TASK_TYPE_FIELD_WHITELIST.original_product_development.forbidden)).toEqual(
-      new Set(['material_mode', 'material', 'material_other', 'purchase_sku', 'product_channel', 'design_requirement']),
+      new Set(['material_mode', 'material', 'material_other', 'design_requirement']),
     )
   })
 

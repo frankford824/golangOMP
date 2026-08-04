@@ -19,26 +19,17 @@ func parseTaskFilterQuery(c *gin.Context) (service.TaskFilter, *domain.AppError)
 	mineFilterEnabled := strings.EqualFold(strings.TrimSpace(c.Query("filter")), "mine")
 	filter := service.TaskFilter{
 		TaskQueryFilterDefinition: domain.TaskQueryFilterDefinition{
-			Statuses:                     parseTaskStatuses(c, "status"),
-			Priorities:                   priorities,
-			TaskTypes:                    parseTaskTypes(c, "task_type"),
-			SourceModes:                  parseTaskSourceModes(c, "source_mode"),
-			BusinessLanes:                parseTaskBusinessLanes(c, "business_lane"),
-			WorkflowLanes:                parseWorkflowLanes(c, "workflow_lane"),
-			MainStatuses:                 parseTaskMainStatuses(c, "main_status"),
-			SubStatusCodes:               parseTaskSubStatusCodes(c, "sub_status_code"),
-			CoordinationStatuses:         parseCoordinationStatuses(c, "coordination_status"),
-			OwnerDepartments:             readQueryList(c, "owner_department"),
-			OwnerOrgTeams:                readQueryList(c, "owner_org_team"),
-			WarehouseBlockingReasonCodes: parseWorkflowReasonCodes(c, "warehouse_blocking_reason_code"),
+			Statuses:         parseTaskStatuses(c, "status"),
+			Priorities:       priorities,
+			TaskTypes:        parseTaskTypes(c, "task_type"),
+			SourceModes:      parseTaskSourceModes(c, "source_mode"),
+			BusinessLanes:    parseTaskBusinessLanes(c, "business_lane"),
+			OwnerDepartments: readQueryList(c, "owner_department"),
+			OwnerOrgTeams:    readQueryList(c, "owner_org_team"),
 		},
 		Keyword: c.Query("keyword"),
 	}
 
-	if raw := c.Query("sub_status_scope"); raw != "" {
-		scope := domain.TaskSubStatusScope(raw)
-		filter.SubStatusScope = &scope
-	}
 	if raw := c.Query("creator_id"); raw != "" {
 		id, err := parseInt64(raw)
 		if err != nil {
@@ -68,19 +59,22 @@ func parseTaskFilterQuery(c *gin.Context) (service.TaskFilter, *domain.AppError)
 		}
 		filter.DesignerEmpty = &value
 	}
-	if raw := c.Query("need_outsource"); raw != "" {
-		value, err := parseBool(raw)
-		if err != nil {
-			return service.TaskFilter{}, domain.NewAppError(domain.ErrCodeInvalidRequest, "need_outsource must be true/false/1/0", nil)
-		}
-		filter.NeedOutsource = &value
-	}
 	if raw := c.Query("overdue"); raw != "" {
 		value, err := parseBool(raw)
 		if err != nil {
 			return service.TaskFilter{}, domain.NewAppError(domain.ErrCodeInvalidRequest, "overdue must be true/false/1/0", nil)
 		}
 		filter.Overdue = &value
+	}
+	if raw := strings.TrimSpace(c.Query("operational_bucket")); raw != "" {
+		bucket := domain.TaskOperationalBucket(raw)
+		if !bucket.Valid() {
+			return service.TaskFilter{}, domain.NewAppError(domain.ErrCodeInvalidRequest, "operational_bucket_invalid", map[string]interface{}{
+				"field": "operational_bucket",
+				"value": raw,
+			})
+		}
+		filter.OperationalBucket = bucket
 	}
 	createdFrom, appErr := parseTaskCreatedDateBoundary(c.Query("date_from"), false)
 	if appErr != nil {
@@ -98,20 +92,6 @@ func parseTaskFilterQuery(c *gin.Context) (service.TaskFilter, *domain.AppError)
 	}
 	filter.CreatedFrom = createdFrom
 	filter.CreatedTo = createdTo
-	if raw := c.Query("warehouse_prepare_ready"); raw != "" {
-		value, err := parseBool(raw)
-		if err != nil {
-			return service.TaskFilter{}, domain.NewAppError(domain.ErrCodeInvalidRequest, "warehouse_prepare_ready must be true/false/1/0", nil)
-		}
-		filter.WarehousePrepareReady = &value
-	}
-	if raw := c.Query("warehouse_receive_ready"); raw != "" {
-		value, err := parseBool(raw)
-		if err != nil {
-			return service.TaskFilter{}, domain.NewAppError(domain.ErrCodeInvalidRequest, "warehouse_receive_ready must be true/false/1/0", nil)
-		}
-		filter.WarehouseReceiveReady = &value
-	}
 	if raw := c.Query("page"); raw != "" {
 		page, err := parseInt(raw)
 		if err != nil {
@@ -125,6 +105,15 @@ func parseTaskFilterQuery(c *gin.Context) (service.TaskFilter, *domain.AppError)
 			return service.TaskFilter{}, domain.NewAppError(domain.ErrCodeInvalidRequest, "page_size must be an integer", nil)
 		}
 		filter.PageSize = pageSize
+	}
+	if raw := strings.TrimSpace(c.Query("sort")); raw != "" {
+		field := strings.TrimPrefix(raw, "-")
+		switch field {
+		case "updated_at", "task_no", "due_at", "created_at":
+			filter.Sort = raw
+		default:
+			return service.TaskFilter{}, domain.NewAppError(domain.ErrCodeInvalidRequest, "unsupported sort field", map[string]interface{}{"sort": raw})
+		}
 	}
 
 	return filter, nil
@@ -211,56 +200,11 @@ func parseTaskSourceModes(c *gin.Context, key string) []domain.TaskSourceMode {
 	return out
 }
 
-func parseTaskMainStatuses(c *gin.Context, key string) []domain.TaskMainStatus {
-	values := readQueryList(c, key)
-	out := make([]domain.TaskMainStatus, 0, len(values))
-	for _, value := range values {
-		out = append(out, domain.TaskMainStatus(value))
-	}
-	return out
-}
-
-func parseWorkflowLanes(c *gin.Context, key string) []domain.WorkflowLane {
-	values := readQueryList(c, key)
-	out := make([]domain.WorkflowLane, 0, len(values))
-	for _, value := range values {
-		out = append(out, domain.WorkflowLane(value))
-	}
-	return out
-}
-
 func parseTaskBusinessLanes(c *gin.Context, key string) []domain.TaskBusinessLane {
 	values := readQueryList(c, key)
 	out := make([]domain.TaskBusinessLane, 0, len(values))
 	for _, value := range values {
 		out = append(out, domain.TaskBusinessLane(value))
-	}
-	return out
-}
-
-func parseTaskSubStatusCodes(c *gin.Context, key string) []domain.TaskSubStatusCode {
-	values := readQueryList(c, key)
-	out := make([]domain.TaskSubStatusCode, 0, len(values))
-	for _, value := range values {
-		out = append(out, domain.TaskSubStatusCode(value))
-	}
-	return out
-}
-
-func parseCoordinationStatuses(c *gin.Context, key string) []domain.ProcurementCoordinationStatus {
-	values := readQueryList(c, key)
-	out := make([]domain.ProcurementCoordinationStatus, 0, len(values))
-	for _, value := range values {
-		out = append(out, domain.ProcurementCoordinationStatus(value))
-	}
-	return out
-}
-
-func parseWorkflowReasonCodes(c *gin.Context, key string) []domain.WorkflowReasonCode {
-	values := readQueryList(c, key)
-	out := make([]domain.WorkflowReasonCode, 0, len(values))
-	for _, value := range values {
-		out = append(out, domain.WorkflowReasonCode(value))
 	}
 	return out
 }

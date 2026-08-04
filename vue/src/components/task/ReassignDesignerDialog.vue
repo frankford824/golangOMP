@@ -1,14 +1,14 @@
 <template>
   <BaseModal
     :model-value="modelValue"
-    title="重新指派设计师"
+    :title="isInitialAssignment ? '指派设计师' : '重新指派设计师'"
     :show-confirm="false"
     @update:model-value="$emit('update:modelValue', $event)"
   >
     <template #default>
       <div v-if="step === 'form'" class="reassign-body space-y-4">
         <p class="intro-copy text-sm leading-relaxed">
-          这是任务级调度动作：用于在设计阶段调整负责人。确认后将由
+          {{ isInitialAssignment ? '请选择首次负责该任务的设计师。确认后将由' : '这是任务级调度动作：用于在设计阶段调整负责人。确认后将由' }}
           <strong class="intro-copy-strong">新设计师</strong>继续负责该任务。
         </p>
         <div
@@ -20,12 +20,12 @@
           <p>重新指派后，新设计师将在现有任务基础上继续处理。</p>
         </div>
 
-        <div class="field-block">
+        <div v-if="!isInitialAssignment" class="field-block">
           <span class="field-label">当前设计师</span>
           <p class="field-readonly">{{ currentAssigneeName || '—' }}</p>
         </div>
 
-        <div class="field-block">
+        <div v-if="!isInitialAssignment" class="field-block">
           <BaseSelect
             v-model="reasonCode"
             class="reassign-select"
@@ -50,7 +50,7 @@
           <BaseSelect
             v-model="selectedId"
             class="reassign-select"
-            label="新设计师"
+            :label="isInitialAssignment ? '设计师' : '新设计师'"
             :placeholder="loading ? '加载设计师列表...' : '请选择新设计师'"
             :disabled="loading"
             :options="designerSelectOptions"
@@ -69,6 +69,9 @@
           <strong>待指派</strong>
           状态吗？
         </p>
+        <p v-else-if="isInitialAssignment" class="confirm-copy-primary text-sm leading-relaxed">
+          确认将该任务指派给 <strong>{{ pendingConfirm?.assigneeName }}</strong> 吗？
+        </p>
         <p v-else class="confirm-copy-primary text-sm leading-relaxed">
           确认将该任务从 <strong>{{ currentAssigneeName || '当前负责人' }}</strong> 重新指派给
           <strong>{{ pendingConfirm?.assigneeName }}</strong> 吗？
@@ -79,8 +82,10 @@
         <p v-else-if="pendingConfirm?.mode === 'clear'" class="confirm-copy-secondary text-sm">
           清空后任务将回到待指派，需要重新指定设计负责人。
         </p>
-        <p v-else class="confirm-copy-secondary text-sm">确认后由新设计师负责后续设计推进。</p>
-        <p class="confirm-copy-secondary text-sm">
+        <p v-else class="confirm-copy-secondary text-sm">
+          {{ isInitialAssignment ? '确认后由该设计师负责后续设计推进。' : '确认后由新设计师负责后续设计推进。' }}
+        </p>
+        <p v-if="!isInitialAssignment" class="confirm-copy-secondary text-sm">
           转派原因：<span class="confirm-reason-label font-medium">{{ pendingConfirm?.reasonLabel }}</span>
           <template v-if="pendingConfirm?.reasonNote">
             · {{ pendingConfirm.reasonNote }}
@@ -108,7 +113,7 @@
         <template v-else>
           <BaseButton size="sm" variant="secondary" :disabled="submitting" @click="step = 'form'">上一步</BaseButton>
           <BaseButton size="sm" variant="primary" :loading="submitting" :disabled="submitting" @click="submitConfirm">
-            {{ pendingConfirm?.mode === 'clear' ? '确认清空指派' : '确认重新指派' }}
+            {{ pendingConfirm?.mode === 'clear' ? '确认清空指派' : isInitialAssignment ? '确认指派' : '确认重新指派' }}
           </BaseButton>
         </template>
       </footer>
@@ -186,6 +191,7 @@ const designerSelectOptions = computed(() =>
 const selectedDesigner = computed(() =>
   selectableDesigners.value.find((d) => String(d.id) === String(selectedId.value)) ?? null,
 )
+const isInitialAssignment = computed(() => !String(props.currentAssigneeId ?? '').trim())
 
 const pendingConfirm = ref<{
   mode: 'reassign' | 'clear'
@@ -218,11 +224,11 @@ function close() {
 
 function goConfirm() {
   formError.value = ''
-  if (!reasonCode.value) {
+  if (!isInitialAssignment.value && !reasonCode.value) {
     formError.value = '请选择转派原因'
     return
   }
-  if (reasonCode.value === REASON_OTHER && !reasonNote.value.trim()) {
+  if (!isInitialAssignment.value && reasonCode.value === REASON_OTHER && !reasonNote.value.trim()) {
     formError.value = '选择「其他」时请填写原因说明'
     return
   }
@@ -230,8 +236,9 @@ function goConfirm() {
     formError.value = '请选择新设计师'
     return
   }
-  const label =
-    reasonOptions.find((o) => o.value === reasonCode.value)?.label ?? reasonCode.value
+  const label = isInitialAssignment.value
+    ? ''
+    : reasonOptions.find((o) => o.value === reasonCode.value)?.label ?? reasonCode.value
   pendingConfirm.value = {
     mode: 'reassign',
     assigneeId: String(selectedDesigner.value.id),

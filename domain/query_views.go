@@ -9,163 +9,29 @@ type PaginationMeta struct {
 	Total    int64 `json:"total"`
 }
 
-// AvailableAction is a frontend-only task action suggestion derived from current aggregate state.
-// It never replaces server-side state validation.
-type AvailableAction string
-
-const (
-	AvailableActionAssign            AvailableAction = "assign"
-	AvailableActionSubmitDesign      AvailableAction = "submit_design"
-	AvailableActionPrepareWarehouse  AvailableAction = "prepare_warehouse"
-	AvailableActionClose             AvailableAction = "close"
-	AvailableActionClaimAudit        AvailableAction = "claim_audit"
-	AvailableActionApproveAudit      AvailableAction = "approve_audit"
-	AvailableActionRejectAudit       AvailableAction = "reject_audit"
-	AvailableActionHandover          AvailableAction = "handover"
-	AvailableActionCreateOutsource   AvailableAction = "create_outsource"
-	AvailableActionWarehouseReceive  AvailableAction = "warehouse_receive"
-	AvailableActionWarehouseReject   AvailableAction = "warehouse_reject"
-	AvailableActionWarehouseComplete AvailableAction = "warehouse_complete"
-)
-
-type TaskMainStatus string
-
-const (
-	TaskMainStatusDraft                   TaskMainStatus = "draft"
-	TaskMainStatusCreated                 TaskMainStatus = "created"
-	TaskMainStatusFiled                   TaskMainStatus = "filed"
-	TaskMainStatusPendingWarehouseReceive TaskMainStatus = "pending_warehouse_receive"
-	TaskMainStatusWarehouseProcessing     TaskMainStatus = "warehouse_processing"
-	TaskMainStatusPendingClose            TaskMainStatus = "pending_close"
-	TaskMainStatusClosed                  TaskMainStatus = "closed"
-)
-
-type WorkflowReasonCode string
-
-const (
-	WorkflowReasonTaskNotFound               WorkflowReasonCode = "task_not_found"
-	WorkflowReasonTaskDetailMissing          WorkflowReasonCode = "task_detail_missing"
-	WorkflowReasonTaskAlreadyPendingWH       WorkflowReasonCode = "task_already_pending_warehouse"
-	WorkflowReasonTaskAlreadyClosed          WorkflowReasonCode = "task_already_closed"
-	WorkflowReasonTaskAwaitingClose          WorkflowReasonCode = "task_awaiting_close"
-	WorkflowReasonTaskBlocked                WorkflowReasonCode = "task_blocked"
-	WorkflowReasonWarehouseAlreadyReceived   WorkflowReasonCode = "warehouse_already_received"
-	WorkflowReasonWarehouseAlreadyDone       WorkflowReasonCode = "warehouse_already_completed"
-	WorkflowReasonMissingFinalAsset          WorkflowReasonCode = "missing_final_design_asset"
-	WorkflowReasonAuditNotApproved           WorkflowReasonCode = "audit_not_approved"
-	WorkflowReasonMissingTaskNo              WorkflowReasonCode = "missing_task_no"
-	WorkflowReasonMissingSKU                 WorkflowReasonCode = "missing_sku"
-	WorkflowReasonWarehouseNotReceived       WorkflowReasonCode = "warehouse_not_received"
-	WorkflowReasonWarehouseRejected          WorkflowReasonCode = "warehouse_rejected_pending_resolution"
-	WorkflowReasonWarehouseNotCompleted      WorkflowReasonCode = "warehouse_not_completed"
-	WorkflowReasonPendingException           WorkflowReasonCode = "pending_exception_resolution"
-	WorkflowReasonFiledAtMissing             WorkflowReasonCode = "filed_at_missing"
-	WorkflowReasonCategoryMissing            WorkflowReasonCode = "category_missing"
-	WorkflowReasonSpecMissing                WorkflowReasonCode = "spec_text_missing"
-	WorkflowReasonCostPriceMissing           WorkflowReasonCode = "cost_price_missing"
-	WorkflowReasonProcurementMissing         WorkflowReasonCode = "procurement_record_missing"
-	WorkflowReasonProcurementPriceMissing    WorkflowReasonCode = "procurement_price_missing"
-	WorkflowReasonProcurementQuantityMissing WorkflowReasonCode = "procurement_quantity_missing"
-	WorkflowReasonProcurementNotReady        WorkflowReasonCode = "procurement_not_ready"
-	WorkflowReasonNotPendingClose            WorkflowReasonCode = "not_pending_close"
-)
-
-type WorkflowReason struct {
-	Code    WorkflowReasonCode `json:"code"`
-	Message string             `json:"message"`
-}
-
 type TaskSubStatusCode string
 
 const (
 	TaskSubStatusNotRequired    TaskSubStatusCode = "not_required"
-	TaskSubStatusNotTriggered   TaskSubStatusCode = "not_triggered"
-	TaskSubStatusNotStarted     TaskSubStatusCode = "not_started"
 	TaskSubStatusPendingDesign  TaskSubStatusCode = "pending_design"
-	TaskSubStatusDesigning      TaskSubStatusCode = "designing"
 	TaskSubStatusReworkRequired TaskSubStatusCode = "rework_required"
 	TaskSubStatusPendingAudit   TaskSubStatusCode = "pending_audit"
-	TaskSubStatusInReview       TaskSubStatusCode = "in_review"
-	TaskSubStatusRejected       TaskSubStatusCode = "rejected"
-	TaskSubStatusOutsourcing    TaskSubStatusCode = "outsourcing"
-	TaskSubStatusOutsourced     TaskSubStatusCode = "outsourced"
-	TaskSubStatusPreparing      TaskSubStatusCode = "preparing"
-	TaskSubStatusReady          TaskSubStatusCode = "ready"
 	TaskSubStatusInProgress     TaskSubStatusCode = "in_progress"
-	TaskSubStatusPendingInbound TaskSubStatusCode = "pending_inbound"
-	TaskSubStatusPendingReceive TaskSubStatusCode = "pending_receive"
-	TaskSubStatusReceived       TaskSubStatusCode = "received"
 	TaskSubStatusCompleted      TaskSubStatusCode = "completed"
-	TaskSubStatusPendingReview  TaskSubStatusCode = "pending_review"
 	TaskSubStatusFinalReady     TaskSubStatusCode = "final_ready"
-	TaskSubStatusApproved       TaskSubStatusCode = "approved"
-	TaskSubStatusReserved       TaskSubStatusCode = "reserved"
 )
 
 type TaskSubStatusSource string
 
 const (
-	TaskSubStatusSourceTaskType         TaskSubStatusSource = "task_type"
-	TaskSubStatusSourceTaskStatus       TaskSubStatusSource = "task_status"
-	TaskSubStatusSourceTaskAsset        TaskSubStatusSource = "task_asset"
-	TaskSubStatusSourceWarehouseReceipt TaskSubStatusSource = "warehouse_receipt"
-	TaskSubStatusSourceProcurement      TaskSubStatusSource = "procurement_record"
-	TaskSubStatusSourceReserved         TaskSubStatusSource = "reserved"
+	TaskSubStatusSourceTaskType   TaskSubStatusSource = "task_type"
+	TaskSubStatusSourceTaskStatus TaskSubStatusSource = "task_status"
 )
 
 type TaskSubStatusItem struct {
 	Code   TaskSubStatusCode   `json:"code"`
 	Label  string              `json:"label"`
 	Source TaskSubStatusSource `json:"source"`
-}
-
-type TaskSubStatusScope string
-
-const (
-	TaskSubStatusScopeDesign        TaskSubStatusScope = "design"
-	TaskSubStatusScopeAudit         TaskSubStatusScope = "audit"
-	TaskSubStatusScopeProcurement   TaskSubStatusScope = "procurement"
-	TaskSubStatusScopeWarehouse     TaskSubStatusScope = "warehouse"
-	TaskSubStatusScopeCustomization TaskSubStatusScope = "customization"
-	// TaskSubStatusScopeOutsource is a compatibility alias retained for migration safety.
-	TaskSubStatusScopeOutsource  TaskSubStatusScope = "outsource"
-	TaskSubStatusScopeProduction TaskSubStatusScope = "production"
-)
-
-func (s TaskSubStatusScope) Valid() bool {
-	switch s {
-	case TaskSubStatusScopeDesign,
-		TaskSubStatusScopeAudit,
-		TaskSubStatusScopeProcurement,
-		TaskSubStatusScopeWarehouse,
-		TaskSubStatusScopeCustomization,
-		TaskSubStatusScopeOutsource,
-		TaskSubStatusScopeProduction:
-		return true
-	default:
-		return false
-	}
-}
-
-type TaskSubStatusSnapshot struct {
-	Design        TaskSubStatusItem `json:"design"`
-	Audit         TaskSubStatusItem `json:"audit"`
-	Procurement   TaskSubStatusItem `json:"procurement"`
-	Warehouse     TaskSubStatusItem `json:"warehouse"`
-	Customization TaskSubStatusItem `json:"customization"`
-	// Outsource is a compatibility projection alias and mirrors customization lane status.
-	Outsource  TaskSubStatusItem `json:"outsource"`
-	Production TaskSubStatusItem `json:"production"`
-}
-
-type TaskWorkflowSnapshot struct {
-	MainStatus               TaskMainStatus        `json:"main_status"`
-	SubStatus                TaskSubStatusSnapshot `json:"sub_status"`
-	CanPrepareWarehouse      bool                  `json:"can_prepare_warehouse"`
-	WarehouseBlockingReasons []WorkflowReason      `json:"warehouse_blocking_reasons"`
-	CanClose                 bool                  `json:"can_close"`
-	Closable                 bool                  `json:"closable"`
-	CannotCloseReasons       []WorkflowReason      `json:"cannot_close_reasons"`
 }
 
 type TaskMatchedRuleSnapshot struct {
@@ -224,22 +90,8 @@ type TaskCostOverrideSummary struct {
 
 type TaskReadModel struct {
 	Task
-	DesignAssets           []*DesignAsset                      `json:"-"`
-	AssetVersions          []*DesignAssetVersion               `json:"-"`
-	SKUItems               []*TaskSKUItem                      `json:"sku_items"`
-	Workflow               TaskWorkflowSnapshot                `json:"-"`
-	Procurement            *ProcurementRecord                  `json:"-"`
-	ProcurementSummary     *ProcurementSummary                 `json:"-"`
-	ProductSelection       *TaskProductSelectionContext        `json:"product_selection,omitempty"`
-	MatchedRuleGovernance  *TaskMatchedRuleGovernance          `json:"-"`
-	OverrideSummary        *TaskCostOverrideSummary            `json:"-"`
-	GovernanceAuditSummary *TaskGovernanceAuditSummary         `json:"-"`
-	OverrideBoundary       *TaskCostOverrideGovernanceBoundary `json:"-"`
-	PolicyMode             PolicyMode                          `json:"-"`
-	VisibleToRoles         []Role                              `json:"-"`
-	ActionRoles            []ActionPolicySummary               `json:"-"`
-	PolicyScopeSummary     *PolicyScopeSummary                 `json:"-"`
-	PlatformEntryBoundary  *PlatformEntryBoundary              `json:"-"`
+	SKUItems         []*TaskSKUItem               `json:"sku_items"`
+	ProductSelection *TaskProductSelectionContext `json:"product_selection,omitempty"`
 	// Frontend detail fields (v0.5)
 	AssigneeID         *int64          `json:"assignee_id,omitempty"` // alias for designer_id
 	AssigneeName       string          `json:"assignee_name,omitempty"`
@@ -305,29 +157,14 @@ type TaskListItem struct {
 	CreatedAt                    time.Time                    `json:"created_at"`
 	UpdatedAt                    time.Time                    `json:"updated_at"`
 	DeadlineAt                   *time.Time                   `json:"deadline_at,omitempty"`
-	NeedOutsource                bool                         `json:"-"`
-	IsOutsource                  bool                         `json:"-"`
 	BusinessLane                 TaskBusinessLane             `json:"business_lane"`
 	CustomizationRequired        bool                         `json:"customization_required"`
 	WorkflowLane                 WorkflowLane                 `json:"-"`
-	CustomizationSourceType      CustomizationSourceType      `json:"-"`
-	LastCustomizationOperatorID  *int64                       `json:"-"`
-	WarehouseRejectReason        string                       `json:"-"`
-	WarehouseRejectCategory      string                       `json:"-"`
 	IsBatchTask                  bool                         `json:"is_batch_task"`
 	BatchItemCount               int                          `json:"batch_item_count"`
 	BatchMode                    TaskBatchMode                `json:"batch_mode"`
 	SKUItems                     []*TaskSKUItem               `json:"sku_items,omitempty"`
-	WarehouseStatus              *WarehouseReceiptStatus      `json:"-"`
-	LatestAssetType              *TaskAssetType               `json:"-"`
-	Workflow                     TaskWorkflowSnapshot         `json:"-"`
-	ProcurementSummary           *ProcurementSummary          `json:"-"`
 	ProductSelection             *TaskProductSelectionSummary `json:"product_selection,omitempty"`
-	PolicyMode                   PolicyMode                   `json:"-"`
-	VisibleToRoles               []Role                       `json:"-"`
-	ActionRoles                  []ActionPolicySummary        `json:"-"`
-	PolicyScopeSummary           *PolicyScopeSummary          `json:"-"`
-	PlatformEntryBoundary        *PlatformEntryBoundary       `json:"-"`
 	Category                     string                       `json:"-"`
 	CategoryCode                 string                       `json:"-"`
 	CategoryName                 string                       `json:"-"`
@@ -343,11 +180,6 @@ type TaskListItem struct {
 	Material                     string                       `json:"-"`
 	SizeText                     string                       `json:"-"`
 	CraftText                    string                       `json:"-"`
-	ProcurementPrice             *float64                     `json:"-"`
-	ProcurementStatus            *ProcurementStatus           `json:"-"`
-	ProcurementQuantity          *int64                       `json:"-"`
-	SupplierName                 string                       `json:"-"`
-	ExpectedDeliveryAt           *time.Time                   `json:"-"`
 	CostPrice                    *float64                     `json:"-"`
 	EstimatedCost                *float64                     `json:"-"`
 	CostRuleID                   *int64                       `json:"-"`

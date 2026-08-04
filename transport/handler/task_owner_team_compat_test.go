@@ -142,11 +142,9 @@ func TestTaskHandlerCreateInvalidOwnerTeamStillReturnsViolation(t *testing.T) {
 func newOwnerTeamCompatTaskService() service.TaskService {
 	realSvc := service.NewTaskService(
 		&ownerTeamTaskRepo{},
-		&ownerTeamProcurementRepo{},
 		&ownerTeamTaskAssetRepo{},
 		&ownerTeamTaskEventRepo{},
 		nil,
-		&ownerTeamWarehouseRepo{},
 		ownerTeamCodeRuleService{},
 		ownerTeamTxRunner{},
 	)
@@ -169,10 +167,6 @@ func (s *ownerTeamCompatTaskServiceProxy) Create(ctx context.Context, p service.
 
 func (s *ownerTeamCompatTaskServiceProxy) List(context.Context, service.TaskFilter) ([]*domain.TaskListItem, domain.PaginationMeta, *domain.AppError) {
 	return nil, domain.PaginationMeta{}, nil
-}
-
-func (s *ownerTeamCompatTaskServiceProxy) ListBoardCandidates(context.Context, service.TaskFilter, []domain.TaskQueryFilterDefinition) ([]*domain.TaskListItem, *domain.AppError) {
-	return nil, nil
 }
 
 func (s *ownerTeamCompatTaskServiceProxy) GetByID(_ context.Context, id int64) (*domain.TaskReadModel, *domain.AppError) {
@@ -199,46 +193,6 @@ func (s *ownerTeamCompatTaskServiceProxy) UpdateBusinessInfo(context.Context, se
 }
 
 func (s *ownerTeamCompatTaskServiceProxy) UpdateSKUItemInfo(context.Context, service.UpdateTaskSKUItemInfoParams) (*domain.TaskSKUItem, *domain.AppError) {
-	return nil, nil
-}
-
-func (s *ownerTeamCompatTaskServiceProxy) UpdateProcurement(context.Context, service.UpdateTaskProcurementParams) (*domain.ProcurementRecord, *domain.AppError) {
-	return nil, nil
-}
-
-func (s *ownerTeamCompatTaskServiceProxy) AdvanceProcurement(context.Context, service.AdvanceTaskProcurementParams) (*domain.ProcurementRecord, *domain.AppError) {
-	return nil, nil
-}
-
-func (s *ownerTeamCompatTaskServiceProxy) PrepareWarehouse(context.Context, service.PrepareTaskForWarehouseParams) (*domain.Task, *domain.AppError) {
-	return nil, nil
-}
-
-func (s *ownerTeamCompatTaskServiceProxy) Close(context.Context, service.CloseTaskParams) (*domain.TaskReadModel, *domain.AppError) {
-	return nil, nil
-}
-
-func (s *ownerTeamCompatTaskServiceProxy) SubmitCustomizationReview(context.Context, service.SubmitCustomizationReviewParams) (*domain.CustomizationJob, *domain.AppError) {
-	return nil, nil
-}
-
-func (s *ownerTeamCompatTaskServiceProxy) SubmitCustomizationEffectPreview(context.Context, service.SubmitCustomizationEffectPreviewParams) (*domain.CustomizationJob, *domain.AppError) {
-	return nil, nil
-}
-
-func (s *ownerTeamCompatTaskServiceProxy) ReviewCustomizationEffect(context.Context, service.ReviewCustomizationEffectParams) (*domain.CustomizationJob, *domain.AppError) {
-	return nil, nil
-}
-
-func (s *ownerTeamCompatTaskServiceProxy) TransferCustomizationProduction(context.Context, service.TransferCustomizationProductionParams) (*domain.CustomizationJob, *domain.AppError) {
-	return nil, nil
-}
-
-func (s *ownerTeamCompatTaskServiceProxy) ListCustomizationJobs(context.Context, service.CustomizationJobFilter) ([]*domain.CustomizationJob, domain.PaginationMeta, *domain.AppError) {
-	return nil, domain.PaginationMeta{}, nil
-}
-
-func (s *ownerTeamCompatTaskServiceProxy) GetCustomizationJob(context.Context, int64) (*domain.CustomizationJob, *domain.AppError) {
 	return nil, nil
 }
 
@@ -289,10 +243,6 @@ func (r *ownerTeamTaskRepo) List(context.Context, repo.TaskListFilter) ([]*domai
 	return []*domain.TaskListItem{}, 0, nil
 }
 
-func (r *ownerTeamTaskRepo) ListBoardCandidates(context.Context, repo.TaskBoardCandidateFilter) ([]*domain.TaskListItem, error) {
-	return []*domain.TaskListItem{}, nil
-}
-
 func (r *ownerTeamTaskRepo) UpdateDetailBusinessInfo(context.Context, repo.Tx, *domain.TaskDetail) error {
 	return nil
 }
@@ -318,24 +268,6 @@ func (r *ownerTeamTaskRepo) UpdateHandler(context.Context, repo.Tx, int64, *int6
 }
 
 func (r *ownerTeamTaskRepo) UpdateCustomizationState(context.Context, repo.Tx, int64, *int64, string, string) error {
-	return nil
-}
-
-type ownerTeamProcurementRepo struct{}
-
-func (r *ownerTeamProcurementRepo) GetByTaskID(context.Context, int64) (*domain.ProcurementRecord, error) {
-	return nil, nil
-}
-
-func (r *ownerTeamProcurementRepo) ListItemsByTaskID(context.Context, int64) ([]*domain.ProcurementRecordItem, error) {
-	return []*domain.ProcurementRecordItem{}, nil
-}
-
-func (r *ownerTeamProcurementRepo) Upsert(context.Context, repo.Tx, *domain.ProcurementRecord) error {
-	return nil
-}
-
-func (r *ownerTeamProcurementRepo) CreateItems(context.Context, repo.Tx, []*domain.ProcurementRecordItem) error {
 	return nil
 }
 
@@ -387,28 +319,6 @@ func (r *ownerTeamTaskEventRepo) ListRecent(context.Context, repo.TaskEventListF
 	return []*domain.TaskEvent{}, 0, nil
 }
 
-type ownerTeamWarehouseRepo struct{}
-
-func (r *ownerTeamWarehouseRepo) Create(context.Context, repo.Tx, *domain.WarehouseReceipt) (int64, error) {
-	return 0, nil
-}
-
-func (r *ownerTeamWarehouseRepo) GetByID(context.Context, int64) (*domain.WarehouseReceipt, error) {
-	return nil, nil
-}
-
-func (r *ownerTeamWarehouseRepo) GetByTaskID(context.Context, int64) (*domain.WarehouseReceipt, error) {
-	return nil, nil
-}
-
-func (r *ownerTeamWarehouseRepo) List(context.Context, repo.WarehouseListFilter) ([]*domain.WarehouseReceipt, int64, error) {
-	return []*domain.WarehouseReceipt{}, 0, nil
-}
-
-func (r *ownerTeamWarehouseRepo) Update(context.Context, repo.Tx, *domain.WarehouseReceipt) error {
-	return nil
-}
-
 type ownerTeamCodeRuleService struct{}
 
 func (ownerTeamCodeRuleService) List(context.Context) ([]*domain.CodeRule, *domain.AppError) {
@@ -424,10 +334,6 @@ func (ownerTeamCodeRuleService) GenerateCode(_ context.Context, ruleType domain.
 		return "", domain.NewAppError(domain.ErrCodeInvalidRequest, "legacy CodeRule new_sku is archived", nil)
 	}
 	return "RW-TEST", nil
-}
-
-func (ownerTeamCodeRuleService) GenerateSKU(context.Context, int64) (string, *domain.AppError) {
-	return "", domain.NewAppError(domain.ErrCodeInvalidRequest, "legacy CodeRule new_sku is archived", nil)
 }
 
 type ownerTeamTx struct{}

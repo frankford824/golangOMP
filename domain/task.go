@@ -162,6 +162,7 @@ func (t *Task) AccessSubject() TaskAccessSubject {
 		TaskID: t.ID, CreatorID: t.CreatorID, RequesterID: t.RequesterID,
 		DesignerID: t.DesignerID, CurrentHandlerID: t.CurrentHandlerID,
 		OwnerDepartmentID: t.OwnerDepartmentID, OwnerTeamID: t.OwnerTeamID,
+		TaskType: t.TaskType,
 	}
 }
 
@@ -191,12 +192,13 @@ type TaskDetail struct {
 	ProductSelection             *TaskProductSelectionContext `db:"-"         json:"product_selection,omitempty"`
 	ChangeRequest                string                       `db:"change_request"              json:"change_request"`
 	DesignRequirement            string                       `db:"design_requirement"          json:"design_requirement"`
+	SetModeHint                  bool                         `db:"set_mode_hint"                json:"set_mode_hint"`
 	ProductShortName             string                       `db:"product_short_name"          json:"product_short_name"`
 	MaterialMode                 string                       `db:"material_mode"               json:"material_mode"`
 	MaterialOther                string                       `db:"material_other"              json:"material_other"`
 	CostPriceMode                string                       `db:"cost_price_mode"             json:"cost_price_mode"`
 	BaseSalePrice                *float64                     `db:"base_sale_price"             json:"base_sale_price,omitempty"`
-	ProductChannel               string                       `db:"product_channel"             json:"product_channel"`
+	ProductChannel               string                       `db:"product_channel"             json:"-"`
 	SKUCodeType                  TaskSKUCodeType              `db:"sku_code_type"               json:"sku_code_type,omitempty"`
 	ReferenceImagesJSON          string                       `db:"reference_images_json"       json:"reference_images_json"`
 	ReferenceFileRefsJSON        string                       `db:"reference_file_refs_json"    json:"reference_file_refs_json"`

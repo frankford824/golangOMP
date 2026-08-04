@@ -1,7 +1,7 @@
 # 当前用户
 
-> Revision: V1.3-A2 i_id-first task/ERP/search integration (2026-04-27)
-> Source: docs/api/openapi.yaml (post V1.3-A2)
+> Revision: V8 current contract (2026-07-20)
+> Source: docs/api/openapi.yaml
 
 > 来源: `docs/api/openapi.yaml`；业务口径参考 V1 四份权威文档。本文不覆盖 OpenAPI 契约。
 
@@ -74,7 +74,7 @@ curl -X GET https://api.example.com/v1/me/task-drafts \
 - 当前用户 family 只面向当前 token，不应用于管理其他用户。
 - `GET /v1/me/avatar-files/{filename}` 是公开随机头像资源，浏览器可直接作为图片地址加载；头像变更仍走登录后的上传/删除接口。
 - 通知路径拆到 `V1_API_NOTIFICATIONS.md`，避免重复接入。
-- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
 
 ## GET /v1/me
@@ -183,7 +183,7 @@ curl -X PATCH https://api.example.com/v1/me \
 - 当前用户 family 只面向当前 token，不应用于管理其他用户。
 - `GET /v1/me/avatar-files/{filename}` 是公开随机头像资源，浏览器可直接作为图片地址加载；头像变更仍走登录后的上传/删除接口。
 - 通知路径拆到 `V1_API_NOTIFICATIONS.md`，避免重复接入。
-- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
 
 ## POST /v1/me/avatar
@@ -286,7 +286,7 @@ curl -X DELETE https://api.example.com/v1/me/avatar \
 - 当前用户 family 只面向当前 token，不应用于管理其他用户。
 - `GET /v1/me/avatar-files/{filename}` 是公开随机头像资源，浏览器可直接作为图片地址加载；头像变更仍走登录后的上传/删除接口。
 - 通知路径拆到 `V1_API_NOTIFICATIONS.md`，避免重复接入。
-- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
 
 ## GET /v1/me/avatar-files/{filename}
@@ -335,7 +335,7 @@ curl -X GET https://api.example.com/v1/me/avatar-files/<filename>
 - 当前用户 family 只面向当前 token，不应用于管理其他用户。
 - `GET /v1/me/avatar-files/{filename}` 是公开随机头像资源，浏览器可直接作为图片地址加载；头像变更仍走登录后的上传/删除接口。
 - 通知路径拆到 `V1_API_NOTIFICATIONS.md`，避免重复接入。
-- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
 
 ## POST /v1/me/change-password
@@ -386,7 +386,7 @@ curl -X POST https://api.example.com/v1/me/change-password \
 - 当前用户 family 只面向当前 token，不应用于管理其他用户。
 - `GET /v1/me/avatar-files/{filename}` 是公开随机头像资源，浏览器可直接作为图片地址加载；头像变更仍走登录后的上传/删除接口。
 - 通知路径拆到 `V1_API_NOTIFICATIONS.md`，避免重复接入。
-- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
 
 ## GET /v1/me/org
@@ -449,6 +449,6 @@ curl -X GET https://api.example.com/v1/me/org \
 - 当前用户 family 只面向当前 token，不应用于管理其他用户。
 - `GET /v1/me/avatar-files/{filename}` 是公开随机头像资源，浏览器可直接作为图片地址加载；头像变更仍走登录后的上传/删除接口。
 - 通知路径拆到 `V1_API_NOTIFICATIONS.md`，避免重复接入。
-- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
 

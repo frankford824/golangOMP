@@ -1,12 +1,10 @@
 <template>
   <div class="user-management-view min-h-[100dvh] bg-[rgb(var(--yb-bg-page))] text-[rgb(var(--yb-text))]">
-    <div
-      class="um-shell mx-auto w-full max-w-[min(100%,90rem)] px-3 pb-10 pt-4 sm:px-4 sm:pt-5 md:px-6 md:pt-6"
-    >
-      <header class="page-header">
-        <div>
-          <h2 class="page-title">用户与角色管理</h2>
-          <p class="page-sub">维护账号、组织归属与工作流角色</p>
+    <div class="um-shell w-full pb-10">
+      <header class="page-header yb-page-surface yb-page-header-row" data-page-header="user-management">
+        <div class="yb-page-heading-copy">
+          <h2 class="page-title yb-page-title">用户与角色管理</h2>
+          <p class="page-sub yb-page-subtitle">维护账号、组织归属与工作角色</p>
         </div>
         <div class="page-header-actions">
           <BaseButton
@@ -90,6 +88,7 @@
                 >
                   彻底删除
                 </button>
+                <button v-if="canManageAccess" type="button" class="org-icon-btn org-icon-btn--policy" @click.stop="openSelectedOrgAccess">设置默认角色</button>
               </div>
               <div v-else class="org-selected-buttons">
                 <button type="button" class="org-icon-btn" @click.stop="openEditTeam(selectedOrgTeam)">改名</button>
@@ -119,6 +118,7 @@
                 >
                   彻底删除
                 </button>
+                <button v-if="canManageAccess" type="button" class="org-icon-btn org-icon-btn--policy" @click.stop="openSelectedOrgAccess">设置默认角色</button>
               </div>
             </div>
             <OrgTreePanel
@@ -126,11 +126,13 @@
               :disabled-tree="disabledOrgTree"
               :selected-department="departmentFilter"
               :selected-team="teamFilter"
-              :show-all-entry="!isDeptScopedOnly"
+              :show-all-entry="true"
               :all-active="isAllOrgFilterActive"
+              :can-manage-policy="canManageAccess"
               @select-all="selectAllOrg"
               @select-department="selectOrgDepartment"
               @select-team="selectOrgTeam"
+              @manage-policy="openOrgAccess"
             />
             <button
               v-if="canManageOrgMaster && removableDisabledOrgCount > 0"
@@ -146,7 +148,7 @@
               <div class="list-heading-scope">
                 <h3 class="section-title">{{ orgFilterBreadcrumb || '全部用户' }}</h3>
                 <button
-                  v-if="orgFilterBreadcrumb && !isDeptScopedOnly"
+                  v-if="orgFilterBreadcrumb"
                   type="button"
                   class="org-scope-clear"
                   @click="selectAllOrg"
@@ -168,13 +170,6 @@
                 class="toolbar-field"
                 placeholder="全部状态"
                 :options="statusFilterOptions"
-                clearable
-              />
-              <BaseSelect
-                v-model="roleFilter"
-                class="toolbar-field"
-                placeholder="全部角色"
-                :options="roleFilterOptions"
                 clearable
               />
               <BaseButton type="button" variant="primary" class="toolbar-query" @click="onSearch">查询</BaseButton>
@@ -215,10 +210,11 @@
         v-if="detailUser"
         :user="detailUser"
         :loading="detailLoading"
+        :current-role-names="detailAccessRoleNames"
         :can-edit-basic-info="canEditBasicInfo"
         :can-move-team="canMoveTeam"
         :can-clear-membership="canClearMembership"
-        :can-assign-roles="canAssignRoles"
+        :can-assign-roles="canAssignAccessRoles"
         :can-reset-password="canResetPassword"
         :can-disable-user="canDisableUser"
         :basic-form="basicForm"
@@ -226,16 +222,16 @@
         :membership-department-options="membershipDepartmentOptions"
         :membership-team-options="membershipTeamOptions"
         :is-membership-dirty="isMembershipDirty"
-        :editable-role-groups="editableRoleGroups"
-        :locked-role-options="lockedDetailRoleOptions"
-        :locked-role-title="lockedDetailRoleTitle"
+        :editable-role-groups="accessRoleGroups"
+        :locked-role-options="inheritedAccessRoleOptions"
+        locked-role-title="由部门或小组自动应用"
         :basic-submitting="basicSubmitting"
         :membership-submitting="membershipSubmitting"
         :role-submitting="roleSubmitting"
         :password-submitting="passwordSubmitting"
         :status-submitting="statusSubmitting"
         :action-message="detailActionMessage"
-        v-model:selected-roles="selectedRoleCodes"
+        v-model:selected-roles="selectedAccessRoleCodes"
         v-model:new-password="resetPasswordValue"
         @close="detailUser = null"
         @submit-basic="submitBasicInfo"
@@ -252,7 +248,6 @@
         :form="createForm"
         :department-options="createDepartmentOptions"
         :team-options="createTeamOptions"
-        :editable-role-groups="editableRoleGroups"
         :error="createError"
         :submitting="createSubmitting"
         @close="showCreateModal = false"
@@ -312,6 +307,43 @@
           </footer>
         </div>
       </div>
+
+      <div v-if="orgPolicyTarget" class="modal-mask" @click.self="closeOrgPolicyEditor">
+        <div class="modal-panel um-modal org-policy-modal" role="dialog" aria-modal="true" aria-labelledby="org-policy-title">
+          <header class="modal-header">
+            <div class="modal-heading">
+              <h3 id="org-policy-title" class="section-title">{{ orgPolicyTarget.label }} · 默认角色</h3>
+              <p class="modal-subtitle">勾选后，该部门或小组内的人员会自动获得对应角色；个人已有角色不会被覆盖。</p>
+            </div>
+            <button type="button" class="modal-close" aria-label="关闭角色设置" @click="closeOrgPolicyEditor">×</button>
+          </header>
+          <div class="modal-body">
+            <div v-if="orgPolicyLoading" class="role-readonly-hint">正在读取角色设置…</div>
+            <div v-else-if="orgPolicyRoleGroups.length" class="role-groups">
+              <section v-for="group in orgPolicyRoleGroups" :key="'org-' + group.category" class="role-group">
+                <h4 class="role-group-title">{{ group.title }}</h4>
+                <div class="roles-grid">
+                  <label v-for="role in group.roles" :key="'org-' + role.code" class="role-check">
+                    <input v-model="selectedOrgPolicyRoleCodes" type="checkbox" :value="role.code" />
+                    <span>{{ role.display }}</span>
+                    <em v-if="role.hint">{{ role.hint }}</em>
+                  </label>
+                </div>
+              </section>
+            </div>
+            <p v-if="orgPolicyError" class="action-msg" role="alert">{{ orgPolicyError }}</p>
+          </div>
+          <footer class="modal-footer">
+            <span class="role-readonly-hint">仅保存本组织的勾选结果</span>
+            <div class="modal-footer-actions">
+              <button type="button" class="um-btn um-btn--ghost" @click="closeOrgPolicyEditor">取消</button>
+              <button type="button" class="um-btn um-btn--primary" :disabled="orgPolicyLoading || orgPolicySubmitting" @click="saveOrgPolicyRoles">
+                {{ orgPolicySubmitting ? '保存中…' : '保存角色' }}
+              </button>
+            </div>
+          </footer>
+        </div>
+      </div>
       </Teleport>
     </template>
     </div>
@@ -322,6 +354,15 @@
 import { ref, computed, h, onBeforeUnmount, onMounted, watch } from 'vue'
 import type { DataTableColumns, DataTableRowKey } from 'naive-ui'
 import { usersApi } from '@/services/api/usersApi'
+import {
+  accessPolicyApi,
+  type AccessAssignment,
+  type AccessRole,
+  type EffectiveAccess,
+  type OrgPolicy,
+  type ScopeMode,
+  type ScopeSubjectType,
+} from '@/services/api/accessPolicyApi'
 import {
   createOrgDepartment,
   createOrgTeam,
@@ -351,10 +392,6 @@ import {
 import { usePermissionsStore } from '@/stores/permissions'
 import { usePermission } from '@/composables/usePermission'
 import { patchUserMembership, clearUserMembership } from '@/composables/useOrgPermissionData'
-import {
-  formatWorkflowRolesForDisplay,
-  workflowRoleApiToDisplay,
-} from '@/domain/user-workflow-roles'
 import BaseButton from '@/components/base/BaseButton.vue'
 import BaseInput from '@/components/base/BaseInput.vue'
 import BaseSelect, { type BaseSelectOption } from '@/components/base/BaseSelect.vue'
@@ -362,46 +399,23 @@ import BaseEmptyState from '@/components/base/BaseEmptyState.vue'
 import BaseErrorState from '@/components/base/BaseErrorState.vue'
 import BaseDataTable from '@/components/base/BaseDataTable.vue'
 import BaseTablePager from '@/components/base/BaseTablePager.vue'
-import { RoleEnum } from '@/types'
 
 const permissionsStore = usePermissionsStore()
 const { can } = usePermission()
 
 // v1.8 对齐：用户与角色页面同时向 HRAdmin / SuperAdmin 与 DepartmentAdmin 开放。
 // 以下 gate 全部走 action key，不再使用 `|| isDeptAdmin` 之类角色名兜底。
-const canManage = computed(
-  () =>
-    can('user.manage') ||
-    can('department.manage') ||
-    can('user.org.assign') ||
-    can('role.assign') ||
-    can('role.read'),
-)
-const canCreateUser = computed(() => can('user.manage') || can('department.users.create'))
-const canMoveTeam = computed(() => can('user.manage') || can('department.users.move_team'))
-const canDisableUser = computed(() => can('user.manage') || can('department.users.disable'))
-const canResetPassword = computed(
-  () => can('user.manage') || can('department.users.reset_password'),
-)
-// Round I.f 热修复（F-1.1）：
-// 后端 `authorizeUserUpdate` 对「移出到未分配池」路径只放行 `identityActorCanManageAllUsers`
-// （Admin / SuperAdmin / HRAdmin）。DepartmentAdmin 即便持有 `department.users.move_team`，
-// 发起该 PATCH 也会被后端以 `deny_code=department_scope_only` 403 拒绝。
-// 因此按钮可见性的唯一合法门控是全局性的 `user.manage`，不得与任何 `department.*` 键析取。
-const canClearMembership = computed(() => can('user.manage'))
-// 角色写入必须同时满足 frontend_access 与 `/v1/roles.assignable_by_current_actor`。
-// Admin / RoleAdmin 即便仍是历史角色，也不能靠旧前端动作绕过服务端 assignable 合同。
-const canAssignRoles = computed(() => can('role.assign') && editableRoleOptions.value.length > 0)
-const hasOrgMasterRole = computed(
-  () =>
-    permissionsStore.hasAnyRole(['SuperAdmin', 'HRAdmin']) ||
-    permissionsStore.currentUser?.role === RoleEnum.SUPER_ADMIN ||
-    permissionsStore.currentUser?.role === RoleEnum.HR_ADMIN,
-)
-const canManageOrgMaster = computed(
-  () => can('org.manage') && hasOrgMasterRole.value,
-)
-const canEditBasicInfo = computed(() => can('user.manage'))
+const canManageDirectory = computed(() => can('access.manage') || can('access.view'))
+const canViewAccess = computed(() => can('access.manage') || can('access.view'))
+const canManageAccess = computed(() => can('access.manage'))
+const canManage = computed(() => canManageDirectory.value || canViewAccess.value)
+const canCreateUser = canManageAccess
+const canMoveTeam = canManageAccess
+const canDisableUser = canManageAccess
+const canResetPassword = canManageAccess
+const canClearMembership = canManageAccess
+const canManageOrgMaster = canManageAccess
+const canEditBasicInfo = canManageAccess
 
 type OrgActionMode =
   | 'createDepartment'
@@ -434,10 +448,20 @@ const basicSubmitting = ref(false)
 const detailActionMessage = ref('')
 const resetPasswordValue = ref('')
 const basicForm = ref<{ display_name: string; employee_no: string }>({ display_name: '', employee_no: '' })
-const selectedRoleCodes = ref<string[]>([])
+const accessRoles = ref<AccessRole[]>([])
+const accessPolicyRevision = ref(0)
+const detailEffectiveAccess = ref<EffectiveAccess | null>(null)
+const detailDirectAssignments = ref<AccessAssignment[]>([])
+const detailInheritedAssignments = ref<AccessAssignment[]>([])
+const selectedAccessRoleCodes = ref<string[]>([])
 const membershipForm = ref<{ department: string; team: string }>({ department: '', team: '' })
 const membershipSubmitting = ref(false)
-const roleOptions = ref<RoleOption[]>([])
+const orgPolicyTarget = ref<{ subjectType: ScopeSubjectType; subjectId: number; label: string } | null>(null)
+const orgPolicyRows = ref<OrgPolicy[]>([])
+const selectedOrgPolicyRoleCodes = ref<string[]>([])
+const orgPolicyLoading = ref(false)
+const orgPolicySubmitting = ref(false)
+const orgPolicyError = ref('')
 let listAbort: AbortController | null = null
 let listSeq = 0
 
@@ -452,7 +476,6 @@ const pagination = ref({ total: 0, page: 1, page_size: defaultPageSize })
 const keyword = ref('')
 const appliedKeyword = ref('')
 const statusFilter = ref('')
-const roleFilter = ref('')
 // 单一组织选中态:左侧树的选中即列表筛选,不再维护"树选中"与"下拉筛选"两套状态。
 const departmentFilter = ref('')
 const teamFilter = ref('')
@@ -468,22 +491,6 @@ const orgActionTargetId = ref('')
 const orgActionSubmitting = ref(false)
 const orgActionError = ref('')
 const orgOptionsError = ref('')
-const currentDepartmentScope = computed(() =>
-  String(
-    permissionsStore.currentUser?.departmentId ||
-      permissionsStore.managedDepartments[0] ||
-      permissionsStore.actorDepartment ||
-      '',
-  ).trim(),
-)
-const isDeptScopedOnly = computed(
-  () => !can('user.manage') && can('department.manage'),
-)
-const scopedDepartmentOptions = computed(() =>
-  isDeptScopedOnly.value
-    ? departmentOptions.value.filter((dept) => dept.value === currentDepartmentScope.value)
-    : departmentOptions.value,
-)
 const orgTree = computed<OrgTreeDepartment[]>(() => {
   if (departmentRecords.value.length) {
     return departmentRecords.value.map((dept) => ({
@@ -521,13 +528,11 @@ const orgTree = computed<OrgTreeDepartment[]>(() => {
   }))
 })
 const visibleOrgTree = computed<OrgTreeDepartment[]>(() =>
-  isDeptScopedOnly.value
-    ? orgTree.value.filter((dept) => dept.value === currentDepartmentScope.value)
-    : canManageOrgMaster.value
-      ? orgTree.value
-      : orgTree.value
-          .filter((dept) => dept.enabled)
-          .map((dept) => ({ ...dept, teams: dept.teams.filter((team) => team.enabled) })),
+  canManageOrgMaster.value
+    ? orgTree.value
+    : orgTree.value
+        .filter((dept) => dept.enabled)
+        .map((dept) => ({ ...dept, teams: dept.teams.filter((team) => team.enabled) })),
 )
 const enabledOrgTree = computed<OrgTreeDepartment[]>(() =>
   visibleOrgTree.value
@@ -555,7 +560,7 @@ const selectedOrgTeam = computed<OrgTreeTeam | null>(() => {
   return selectedOrgDepartment.value.teams.find((team) => team.value === teamFilter.value) ?? null
 })
 const hasNonOrgListFilters = computed(
-  () => appliedKeyword.value.trim() !== '' || statusFilter.value !== '' || roleFilter.value !== '',
+  () => appliedKeyword.value.trim() !== '' || statusFilter.value !== '',
 )
 const selectedOrgMemberCount = computed<number | undefined>(() => {
   const known = selectedOrgTeam.value
@@ -569,9 +574,104 @@ const selectedOrgMemberCount = computed<number | undefined>(() => {
   }
   return undefined
 })
-const isAllOrgFilterActive = computed(
-  () => !isDeptScopedOnly.value && !departmentFilter.value && !teamFilter.value,
-)
+const isAllOrgFilterActive = computed(() => !departmentFilter.value && !teamFilter.value)
+
+function orgPolicyLabel(subjectType: ScopeSubjectType, subjectId: number): string {
+  for (const department of visibleOrgTree.value) {
+    if (subjectType === 'department' && Number(department.id || 0) === subjectId) {
+      return `部门：${department.label}`
+    }
+    const team = department.teams.find((item) => Number(item.id || 0) === subjectId)
+    if (subjectType === 'team' && team) return `小组：${department.label} / ${team.label}`
+  }
+  return subjectType === 'department' ? `部门 #${subjectId}` : `小组 #${subjectId}`
+}
+
+async function openOrgAccess(subjectType: ScopeSubjectType, subjectId: number) {
+  if (!canManageAccess.value || subjectId <= 0) return
+  orgPolicyTarget.value = { subjectType, subjectId, label: orgPolicyLabel(subjectType, subjectId) }
+  orgPolicyRows.value = []
+  selectedOrgPolicyRoleCodes.value = []
+  orgPolicyError.value = ''
+  orgPolicyLoading.value = true
+  try {
+    if (!accessRoles.value.length || accessPolicyRevision.value <= 0) await loadAccessRoles()
+    const policies = await accessPolicyApi.orgPolicies(subjectType, subjectId)
+    orgPolicyRows.value = policies
+    selectedOrgPolicyRoleCodes.value = policies
+      .filter((policy) => policy.enabled)
+      .map((policy) => accessRoleByID.value.get(policy.role_id)?.code || '')
+      .filter((code) => code && !['member', 'super_admin'].includes(code))
+  } catch (cause) {
+    orgPolicyError.value = cause instanceof Error ? cause.message : '组织角色读取失败，请重试。'
+  } finally {
+    orgPolicyLoading.value = false
+  }
+}
+
+function openSelectedOrgAccess() {
+  const teamID = Number(selectedOrgTeam.value?.id || 0)
+  if (teamID > 0) {
+    void openOrgAccess('team', teamID)
+    return
+  }
+  const departmentID = Number(selectedOrgDepartment.value?.id || 0)
+  if (departmentID > 0) void openOrgAccess('department', departmentID)
+}
+
+function closeOrgPolicyEditor() {
+  if (orgPolicySubmitting.value) return
+  orgPolicyTarget.value = null
+  orgPolicyRows.value = []
+  selectedOrgPolicyRoleCodes.value = []
+  orgPolicyError.value = ''
+}
+
+async function saveOrgPolicyRoles() {
+  const target = orgPolicyTarget.value
+  if (!target || !canManageAccess.value) return
+  orgPolicySubmitting.value = true
+  orgPolicyError.value = ''
+  try {
+    const selected = new Set(selectedOrgPolicyRoleCodes.value)
+    const currentByRoleID = new Map(orgPolicyRows.value.map((policy) => [policy.role_id, policy]))
+    const policies: OrgPolicy[] = accessRoles.value
+      .filter((role) => selected.has(role.code) && !['member', 'super_admin'].includes(role.code))
+      .map((role) => {
+        const current = currentByRoleID.get(role.id)
+        return {
+          subject_type: target.subjectType,
+          subject_id: target.subjectId,
+          role_id: role.id,
+          scope_mode: current?.scope_mode ?? 'selected_org',
+          enabled: true,
+          ...(current?.version != null ? { version: current.version } : {}),
+        }
+      })
+    const result = await accessPolicyApi.replaceOrgPolicies(
+      target.subjectType,
+      target.subjectId,
+      policies,
+      accessPolicyRevision.value,
+      '在组织树中更新默认工作角色',
+    )
+    accessPolicyRevision.value = Number(result.policy_revision || accessPolicyRevision.value)
+    orgPolicyTarget.value = null
+    orgPolicyRows.value = []
+    selectedOrgPolicyRoleCodes.value = []
+  } catch (cause) {
+    const status = Number((cause as { response?: { status?: number } })?.response?.status || 0)
+    if (status === 409) {
+      await openOrgAccess(target.subjectType, target.subjectId)
+      orgPolicyError.value = '角色设置已被其他管理员更新，已重新读取，请确认后再次保存。'
+    } else {
+      orgPolicyError.value = cause instanceof Error ? cause.message : '组织角色保存失败，请重试。'
+    }
+  } finally {
+    orgPolicySubmitting.value = false
+  }
+}
+
 const orgFilterBreadcrumb = computed(() => {
   if (!departmentFilter.value) return ''
   return teamFilter.value ? `${departmentFilter.value} / ${teamFilter.value}` : departmentFilter.value
@@ -616,7 +716,6 @@ const createForm = ref<CreateUserForm>({
   mobile: '',
   email: '',
   password: 'Init1234',
-  roles: [],
   status: 'active',
 })
 
@@ -625,44 +724,54 @@ const statusFilterOptions = computed<BaseSelectOption[]>(() => [
   { value: 'active', label: '启用' },
   { value: 'disabled', label: '已禁用' },
 ])
-const roleFilterOptions = computed<BaseSelectOption[]>(() =>
-  roleOptions.value
-    .filter((role) => !role.hiddenByDefault && role.category !== 'compatibility')
-    .map((role) => ({
-      value: role.code,
-      label: role.display,
-    })),
-)
-const editableRoleOptions = computed(() =>
-  roleOptions.value.filter(
-    (role) =>
-      role.assignable &&
-      role.assignableByCurrentActor &&
-      !role.deprecated &&
-      role.category !== 'compatibility',
-  ),
-)
-const editableRoleGroups = computed<RoleOptionGroup[]>(() => groupRoleOptions(editableRoleOptions.value))
-const editableRoleCodeSet = computed(() => new Set(editableRoleOptions.value.map((role) => role.code)))
-const roleOptionByCode = computed(() => {
-  const out = new Map<string, RoleOption>()
-  for (const role of roleOptions.value) out.set(role.code, role)
-  return out
+const accessRoleByCode = computed(() => new Map(accessRoles.value.map((role) => [role.code, role])))
+const accessRoleByID = computed(() => new Map(accessRoles.value.map((role) => [role.id, role])))
+const detailDirectScopeByRoleID = computed(() => new Map(
+  detailDirectAssignments.value.map((assignment) => [assignment.role_id, assignment.scope_mode]),
+))
+const accessRoleGroups = computed<RoleOptionGroup[]>(() => groupRoleOptions(
+  accessRoles.value.map((role) => ({
+    code: role.code,
+    display: accessRoleDisplayName(role.code, role.name),
+    category: accessRoleCategory(role.code),
+    assignable: true,
+    assignableByCurrentActor: true,
+    deprecated: false,
+    hiddenByDefault: false,
+    description: accessRoleDescription(role.code, role.description),
+    hint: accessScopeLabel(detailDirectScopeByRoleID.value.get(role.id) ?? defaultAccessScope(role.code)),
+  })),
+))
+const orgPolicyRoleGroups = computed<RoleOptionGroup[]>(() => accessRoleGroups.value
+  .map((group) => ({
+    ...group,
+    roles: group.roles
+      .filter((role) => !['member', 'super_admin'].includes(role.code))
+      .map((role) => ({ ...role, hint: '本组织' })),
+  }))
+  .filter((group) => group.roles.length > 0))
+const canAssignAccessRoles = computed(() => canManageAccess.value && accessRoles.value.length > 0)
+const inheritedAccessRoleOptions = computed<RoleOption[]>(() => detailInheritedAssignments.value
+  .map((assignment) => accessRoleByID.value.get(assignment.role_id))
+  .filter((role): role is AccessRole => !!role)
+  .map((role) => ({
+    code: role.code,
+    display: accessRoleDisplayName(role.code, role.name),
+    category: accessRoleCategory(role.code),
+    assignable: false,
+    assignableByCurrentActor: false,
+    deprecated: false,
+    hiddenByDefault: false,
+    description: accessRoleDescription(role.code, role.description),
+  })))
+const detailAccessRoleNames = computed(() => {
+  const names = new Set<string>()
+  for (const assignment of [...detailDirectAssignments.value, ...detailInheritedAssignments.value]) {
+    const role = accessRoleByID.value.get(assignment.role_id)
+    if (role) names.add(accessRoleDisplayName(role.code, role.name))
+  }
+  return Array.from(names).join('、') || '成员'
 })
-const lockedDetailRoleOptions = computed<RoleOption[]>(() => {
-  const roles = detailUser.value?.roles ?? []
-  return roles
-    .filter((role) => !editableRoleCodeSet.value.has(role))
-    .map((code) => roleOptionByCode.value.get(code) ?? legacyRoleOption(code))
-})
-const lockedDetailRoleCodes = computed(() => lockedDetailRoleOptions.value.map((role) => role.code))
-const lockedDetailRoleTitle = computed(() =>
-  lockedDetailRoleOptions.value.some(
-    (role) => role.category === 'compatibility' || role.deprecated,
-  )
-    ? '历史/不可编辑角色'
-    : '不可编辑角色',
-)
 const orgActionIsDelete = computed(() =>
   orgAction.value?.mode === 'deleteDepartment' ||
   orgAction.value?.mode === 'deleteTeam' ||
@@ -862,12 +971,6 @@ const userTableColumns = computed<DataTableColumns<UserRow>>(() => [
     },
   },
   {
-    title: '角色',
-    key: 'roles',
-    minWidth: 220,
-    render: (row) => formatWorkflowRolesForDisplay(row.roles),
-  },
-  {
     title: '账号状态',
     key: 'status',
     width: 116,
@@ -895,24 +998,16 @@ const createTeamOptions = computed(() =>
     ? teamOptions.value.filter((t) =>
         teamMatchesDepartment(t, createForm.value.department, true),
       )
-    : isDeptScopedOnly.value
-      ? teamOptions.value.filter((t) =>
-          teamMatchesDepartment(t, currentDepartmentScope.value, true),
-        )
-      : [],
+    : [],
 )
-const createDepartmentOptions = computed(() => scopedDepartmentOptions.value)
-const membershipDepartmentOptions = computed(() => scopedDepartmentOptions.value)
+const createDepartmentOptions = computed(() => departmentOptions.value)
+const membershipDepartmentOptions = computed(() => departmentOptions.value)
 const membershipTeamOptions = computed(() =>
   membershipForm.value.department
     ? teamOptions.value.filter(
         (t) => teamMatchesDepartment(t, membershipForm.value.department, true),
       )
-    : isDeptScopedOnly.value
-      ? teamOptions.value.filter((t) =>
-          teamMatchesDepartment(t, currentDepartmentScope.value, true),
-        )
-      : [],
+    : [],
 )
 const isMembershipDirty = computed(() => {
   const current = detailUser.value
@@ -936,36 +1031,72 @@ function mapRawUser(raw: Record<string, unknown>): UserRow {
     display_name: typeof raw.display_name === 'string' ? raw.display_name : undefined,
     department: typeof raw.department === 'string' ? raw.department : undefined,
     team: typeof raw.team === 'string' ? raw.team : (typeof raw.group === 'string' ? raw.group : undefined),
-    roles: Array.isArray(raw.roles) ? (raw.roles as string[]) : [],
     status: typeof raw.status === 'string' ? raw.status : undefined,
     frontend_access: raw.frontend_access,
   }
 }
 
-function readBoolean(value: unknown, fallback: boolean): boolean {
-  if (typeof value === 'boolean') return value
-  if (typeof value === 'string') {
-    const normalized = value.trim().toLowerCase()
-    if (normalized === 'true') return true
-    if (normalized === 'false') return false
+function accessRoleCategory(code: string): RoleOption['category'] {
+  if (code.startsWith('asset_')) return 'asset_workbench'
+  if (['super_admin', 'access_admin', 'department_admin', 'team_lead', 'design_director'].includes(code)) {
+    return 'management'
   }
-  return fallback
+  return 'business'
 }
 
-function legacyRoleOption(code: string): RoleOption {
-  return {
-    code,
-    display: workflowRoleApiToDisplay(code),
-    category: 'compatibility',
-    assignable: false,
-    assignableByCurrentActor: false,
-    deprecated: true,
-    hiddenByDefault: true,
-  }
+const accessRoleDisplayNames: Record<string, string> = {
+  member: '成员',
+  super_admin: '超级管理员',
+  operations: '运营',
+  designer: '设计师',
+  customization_operator: '定制设计',
+  auditor: '审核员',
+  asset_submitter: '素材提交员',
+  asset_manager: '素材管理员',
+  asset_profile_admin: '素材人员管理员',
+  asset_template_admin: '素材规则管理员',
+  asset_settlement: '素材结算员',
+  department_admin: '部门管理员',
+  team_lead: '团队负责人',
+  design_director: '设计负责人',
+  erp_operator: 'ERP 操作员',
+  access_admin: '权限管理员',
 }
 
-function roleOptionFromString(code: string): RoleOption {
-  return legacyRoleOption(code)
+const accessRoleDescriptions: Record<string, string> = {
+  member: '系统默认基础角色',
+  super_admin: '系统保护的全局管理角色',
+  operations: '任务创建和运营处理',
+  designer: '设计处理和资源提交',
+  customization_operator: '定制设计内部处理',
+  auditor: '统一任务审核',
+}
+
+function accessRoleDisplayName(code: string, fallback: string): string {
+  return accessRoleDisplayNames[code] || fallback || code
+}
+
+function accessRoleDescription(code: string, fallback: string): string {
+  return accessRoleDescriptions[code] || fallback || ''
+}
+
+function defaultAccessScope(code: string): ScopeMode {
+  if (['super_admin', 'access_admin', 'operations', 'auditor', 'asset_manager', 'erp_operator'].includes(code)) {
+    return 'global'
+  }
+  if (['department_admin', 'design_director'].includes(code)) return 'own_department'
+  if (code === 'team_lead') return 'own_team'
+  return 'self'
+}
+
+function accessScopeLabel(scope: ScopeMode): string {
+  switch (scope) {
+    case 'global': return '全局'
+    case 'own_department': return '本部门'
+    case 'own_team': return '本小组'
+    case 'selected_org': return '指定组织'
+    default: return '本人相关'
+  }
 }
 
 function roleCategoryTitle(category: string): string {
@@ -1011,54 +1142,6 @@ function groupRoleOptions(roles: RoleOption[]): RoleOptionGroup[] {
     }))
 }
 
-function roleOptionFromRecord(code: string, raw: Record<string, unknown>): RoleOption {
-  const category = String(raw.category ?? '').trim() || 'business'
-  const deprecated = readBoolean(raw.deprecated, category === 'compatibility')
-  const hiddenByDefault = readBoolean(
-    raw.hidden_by_default ?? raw.hiddenByDefault,
-    deprecated || category === 'compatibility',
-  )
-  const displayRaw = String(
-    raw.display ?? raw.display_name ?? raw.label ?? raw.title ?? '',
-  ).trim()
-  const nameRaw = String(raw.name ?? '').trim()
-  const businessDisplay = workflowRoleApiToDisplay(code)
-  return {
-    code,
-    display: businessDisplay && businessDisplay !== code
-      ? businessDisplay
-      : displayRaw || (nameRaw && nameRaw !== code ? nameRaw : code),
-    category,
-    assignable: readBoolean(raw.assignable, false),
-    assignableByCurrentActor: readBoolean(
-      raw.assignable_by_current_actor ?? raw.assignableByCurrentActor,
-      false,
-    ),
-    deprecated,
-    hiddenByDefault,
-  }
-}
-
-function editableRoleCodesForUserRoles(roles: string[]): string[] {
-  const editable = editableRoleCodeSet.value
-  return roles.filter((role) => editable.has(role))
-}
-
-function mergeRoleCodes(...groups: string[][]): string[] {
-  const out = new Set<string>()
-  for (const group of groups) {
-    for (const code of group) {
-      const trimmed = String(code ?? '').trim()
-      if (trimmed) out.add(trimmed)
-    }
-  }
-  return Array.from(out)
-}
-
-function ensureMemberRoleCodes(roles: string[]): string[] {
-  return mergeRoleCodes(['Member'], roles)
-}
-
 function parseEmployeeNoInput(raw: string): number | null {
   const value = raw.trim()
   if (!value) return null
@@ -1085,8 +1168,6 @@ function teamMatchesDepartment(
   if (!department) return false
   return strictDepartment ? team.department === department : !team.department || team.department === department
 }
-
-const invalidDepartmentScopeMessage = '当前账号部门范围已停用或不存在，请联系人事管理员或超级管理员修正组织归属。'
 
 const systemDepartmentName = '未分配'
 
@@ -1121,12 +1202,6 @@ function isFilterableTeam(department: string, team: string): boolean {
   return canManageOrgMaster.value && !!findVisibleOrgTeam(department, team)
 }
 
-function resetUsersForScopeError(message: string) {
-  users.value = []
-  pagination.value = { total: 0, page: page.value, page_size: pageSize.value }
-  listError.value = message
-}
-
 function sanitizeListOrgFilters() {
   const department = departmentFilter.value.trim()
   const team = teamFilter.value.trim()
@@ -1142,21 +1217,16 @@ function sanitizeListOrgFilters() {
   }
 }
 
-function defaultCreateRoles(): string[] {
-  return editableRoleCodeSet.value.has('Member') ? ['Member'] : []
-}
-
 function emptyCreateForm() {
   return {
     username: '',
     employee_no: '',
     display_name: '',
-    department: isDeptScopedOnly.value ? currentDepartmentScope.value : '',
+    department: '',
     team: '',
     mobile: '',
     email: '',
     password: 'Init1234',
-    roles: defaultCreateRoles(),
     status: 'active' as 'active' | 'disabled',
   }
 }
@@ -1192,7 +1262,6 @@ function findVisibleOrgTeam(department: string, team: string): OrgTreeTeam | und
 }
 
 function selectAllOrg() {
-  if (isDeptScopedOnly.value) return
   departmentFilter.value = ''
   teamFilter.value = ''
 }
@@ -1254,31 +1323,6 @@ async function loadOrgOptions() {
     usePermissionsStore().hydrateOrgFromServer(hydrated.departments, hydrated.groups)
   }
   sanitizeListOrgFilters()
-  if (isDeptScopedOnly.value) {
-    if (!currentDepartmentScope.value) {
-      departmentFilter.value = ''
-      teamFilter.value = ''
-      createForm.value.department = ''
-      return
-    }
-    if (!isAssignableDepartment(currentDepartmentScope.value)) {
-      departmentFilter.value = ''
-      teamFilter.value = ''
-      createForm.value.department = ''
-      resetUsersForScopeError(invalidDepartmentScopeMessage)
-      return
-    }
-    departmentFilter.value = currentDepartmentScope.value
-    if (teamFilter.value) {
-      const ok = teamOptions.value.some(
-        (team) =>
-          team.value === teamFilter.value &&
-          teamMatchesDepartment(team, currentDepartmentScope.value, true),
-      )
-      if (!ok) teamFilter.value = ''
-    }
-    if (!createForm.value.department) createForm.value.department = currentDepartmentScope.value
-  }
 }
 
 async function retryLoadOrgOptions() {
@@ -1286,26 +1330,14 @@ async function retryLoadOrgOptions() {
   if (!orgOptionsError.value) await loadUsers()
 }
 
-async function loadRoleOptions() {
-  const res = await usersApi.listRoles()
-  const data = res?.data
-  const body = data?.data ?? data
-  const list = Array.isArray(body) ? body : []
-  roleOptions.value = list
-    .map((raw: unknown) => {
-      if (typeof raw === 'string') {
-        return roleOptionFromString(raw)
-      }
-      if (raw && typeof raw === 'object') {
-        const o = raw as Record<string, unknown>
-        const code = String(o.code ?? o.role ?? o.name ?? '').trim()
-        if (!code) return null
-        return roleOptionFromRecord(code, o)
-      }
-      return null
-    })
-    .filter((x): x is RoleOption => x != null)
-  if (!createForm.value.roles.length) createForm.value.roles = defaultCreateRoles()
+async function loadAccessRoles() {
+  if (!canViewAccess.value) return
+  accessRoles.value = (await accessPolicyApi.roles(false)).filter((role) => !role.archived_at)
+  const actorID = Number(permissionsStore.currentUser?.id || 0)
+  if (actorID > 0) {
+    const actorAccess = await accessPolicyApi.effective(actorID)
+    accessPolicyRevision.value = actorAccess.policy_revision
+  }
 }
 
 async function loadUsers() {
@@ -1317,22 +1349,10 @@ async function loadUsers() {
   listError.value = ''
   try {
     const trimmedKeyword = appliedKeyword.value.trim()
-    // 部门范围过滤：当前用户仅具备 `department.manage`（DeptAdmin）而无 `user.manage`
-    // （HRAdmin/SuperAdmin）时，前端主动带上本部门 scope，避免后端因 scope 计算偏差
-    // 泄漏跨部门列表。`user.manage` 持有者不附带 scope，保持全局视图。
-    if (isDeptScopedOnly.value && !currentDepartmentScope.value) {
-      users.value = []
-      pagination.value = { total: 0, page: page.value, page_size: pageSize.value }
-      listError.value = '当前账号缺少部门管理范围，请联系人事管理员或超级管理员修正组织归属。'
-      return
-    }
-    if (isDeptScopedOnly.value && !isAssignableDepartment(currentDepartmentScope.value)) {
-      resetUsersForScopeError(invalidDepartmentScopeMessage)
-      return
-    }
     sanitizeListOrgFilters()
-    const deptScope = isDeptScopedOnly.value ? currentDepartmentScope.value : undefined
-    const requestDepartment = deptScope || departmentFilter.value.trim()
+    // 数据范围由后端基于 access.view/access.manage 的稳定组织 ID 下推。
+    // 前端这里只提交用户主动选择的展示筛选，禁止再从旧角色或组织名称推断授权范围。
+    const requestDepartment = departmentFilter.value.trim()
     const requestTeam =
       teamFilter.value && isFilterableTeam(requestDepartment, teamFilter.value)
         ? teamFilter.value.trim()
@@ -1342,7 +1362,6 @@ async function loadUsers() {
       page_size: pageSize.value,
       ...(trimmedKeyword ? { keyword: trimmedKeyword } : {}),
       ...(statusFilter.value ? { status: statusFilter.value as 'active' | 'disabled' } : {}),
-      ...(roleFilter.value ? { role: roleFilter.value } : {}),
       ...(requestDepartment ? { department: requestDepartment } : {}),
       ...(requestTeam ? { team: requestTeam } : {}),
     }, abortController.signal)
@@ -1371,11 +1390,30 @@ async function loadUsers() {
   }
 }
 
+function hydrateDetailAccess(effective: EffectiveAccess) {
+  detailEffectiveAccess.value = effective
+  accessPolicyRevision.value = effective.policy_revision
+  detailDirectAssignments.value = effective.assignments
+    .filter((assignment) => assignment.source_type !== 'org_policy')
+    .map((assignment) => ({ ...assignment, subjects: assignment.subjects.map((subject) => ({ ...subject })) }))
+  detailInheritedAssignments.value = effective.assignments
+    .filter((assignment) => assignment.source_type === 'org_policy')
+    .map((assignment) => ({ ...assignment, subjects: assignment.subjects.map((subject) => ({ ...subject })) }))
+  const selected = detailDirectAssignments.value
+    .map((assignment) => accessRoleByID.value.get(assignment.role_id)?.code || '')
+    .filter(Boolean)
+  if (accessRoleByCode.value.has('member') && !selected.includes('member')) selected.unshift('member')
+  selectedAccessRoleCodes.value = selected
+}
+
 async function openDetail(u: UserRow) {
   detailUser.value = null
   detailActionMessage.value = ''
   resetPasswordValue.value = ''
-  selectedRoleCodes.value = []
+  selectedAccessRoleCodes.value = []
+  detailEffectiveAccess.value = null
+  detailDirectAssignments.value = []
+  detailInheritedAssignments.value = []
   detailLoading.value = true
   try {
     const res = await usersApi.getById(u.id)
@@ -1384,7 +1422,6 @@ async function openDetail(u: UserRow) {
     const raw = body && typeof body === 'object' ? (body as Record<string, unknown>) : null
     if (!raw) throw new Error('用户详情数据异常')
     detailUser.value = mapRawUser(raw)
-    selectedRoleCodes.value = editableRoleCodesForUserRoles(detailUser.value.roles)
     basicForm.value = {
       display_name: detailUser.value.display_name ?? '',
       employee_no: detailUser.value.employee_no == null ? '' : String(detailUser.value.employee_no),
@@ -1392,6 +1429,14 @@ async function openDetail(u: UserRow) {
     membershipForm.value = {
       department: detailUser.value.department ?? '',
       team: detailUser.value.team ?? '',
+    }
+    if (canViewAccess.value) {
+      try {
+        if (!accessRoles.value.length) await loadAccessRoles()
+        hydrateDetailAccess(await accessPolicyApi.effective(Number(detailUser.value.id)))
+      } catch (cause) {
+        detailActionMessage.value = cause instanceof Error ? cause.message : '角色权限读取失败'
+      }
     }
   } catch (e) {
     detailActionMessage.value = e instanceof Error ? e.message : '加载用户详情失败'
@@ -1409,26 +1454,46 @@ async function refreshDetailAndList(userId?: string) {
 }
 
 async function submitRoleReplace() {
-  if (!detailUser.value) return
+  if (!detailUser.value || !canManageAccess.value || !detailEffectiveAccess.value) return
   roleSubmitting.value = true
   detailActionMessage.value = ''
   try {
-    const selectedEditableRoles = selectedRoleCodes.value.filter((role) =>
-      editableRoleCodeSet.value.has(role),
-    )
-    const roles = ensureMemberRoleCodes(mergeRoleCodes(selectedEditableRoles, lockedDetailRoleCodes.value))
-    const res = await usersApi.replaceRoles(detailUser.value.id, { roles })
-    const data = res?.data
-    const body = data?.data ?? data
-    if (body && typeof body === 'object') {
-      const updated = mapRawUser(body as Record<string, unknown>)
-      detailUser.value = { ...detailUser.value, ...updated, roles: updated.roles }
-      selectedRoleCodes.value = editableRoleCodesForUserRoles(updated.roles)
+    const selected = new Set(selectedAccessRoleCodes.value)
+    if (accessRoleByCode.value.has('member')) selected.add('member')
+    const existingByRoleID = new Map<number, AccessAssignment>()
+    for (const assignment of detailDirectAssignments.value) {
+      const current = existingByRoleID.get(assignment.role_id)
+      if (!current || assignment.source_type === 'direct') existingByRoleID.set(assignment.role_id, assignment)
     }
-    await refreshDetailAndList(detailUser.value.id)
+    const assignments: AccessAssignment[] = accessRoles.value
+      .filter((role) => selected.has(role.code))
+      .map((role) => {
+        const existing = existingByRoleID.get(role.id)
+        return {
+          role_id: role.id,
+          scope_mode: existing?.scope_mode ?? defaultAccessScope(role.code),
+          subjects: existing?.scope_mode === 'selected_org'
+            ? existing.subjects.map((subject) => ({ subject_type: subject.subject_type, subject_id: Number(subject.subject_id) }))
+            : [],
+        }
+      })
+    await accessPolicyApi.replaceUserAssignments(
+      Number(detailUser.value.id),
+      assignments,
+      detailEffectiveAccess.value.policy_revision,
+      '在用户详情中更新工作角色',
+    )
+    hydrateDetailAccess(await accessPolicyApi.effective(Number(detailUser.value.id)))
+    await loadUsers()
     detailActionMessage.value = '角色更新成功'
-  } catch (e) {
-    detailActionMessage.value = e instanceof Error ? e.message : '角色更新失败'
+  } catch (cause) {
+    const status = Number((cause as { response?: { status?: number } })?.response?.status || 0)
+    if (status === 409 && detailUser.value) {
+      hydrateDetailAccess(await accessPolicyApi.effective(Number(detailUser.value.id)))
+      detailActionMessage.value = '角色设置已被其他管理员更新，已刷新为最新结果，请重新确认。'
+    } else {
+      detailActionMessage.value = cause instanceof Error ? cause.message : '角色更新失败'
+    }
   } finally {
     roleSubmitting.value = false
   }
@@ -1582,7 +1647,6 @@ async function createUser() {
       mobile: f.mobile.trim(),
       email: f.email.trim() || undefined,
       password: f.password,
-      roles: ensureMemberRoleCodes(f.roles.filter((role) => editableRoleCodeSet.value.has(role))),
       status: f.status,
     })
     showCreateModal.value = false
@@ -1797,7 +1861,7 @@ async function submitOrgAction() {
     resetOrgAction()
     await loadOrgOptions()
     if (departmentGone || teamGone) {
-      departmentFilter.value = isDeptScopedOnly.value ? currentDepartmentScope.value : ''
+      departmentFilter.value = ''
       teamFilter.value = ''
     }
     await loadUsers()
@@ -1838,12 +1902,12 @@ watch(departmentFilter, () => {
   const ok = teamOptions.value.some(
     (team) =>
       team.value === teamFilter.value &&
-      teamMatchesDepartment(team, departmentFilter.value, isDeptScopedOnly.value),
+      teamMatchesDepartment(team, departmentFilter.value, true),
   )
   if (!ok) teamFilter.value = ''
 })
 
-watch([statusFilter, roleFilter, departmentFilter, teamFilter], () => {
+watch([statusFilter, departmentFilter, teamFilter], () => {
   page.value = 1
   void loadUsers()
 })
@@ -1887,7 +1951,9 @@ watch(
 
 onMounted(() => {
   if (!canManage.value) return
-  void Promise.all([loadRoleOptions(), loadOrgOptions()]).then(() => {
+  const startup = [loadOrgOptions()]
+  if (canViewAccess.value) startup.push(loadAccessRoles().catch(() => undefined))
+  void Promise.all(startup).then(() => {
     void loadUsers()
   })
 })
@@ -1909,7 +1975,7 @@ onBeforeUnmount(() => {
 }
 
 .page-header {
-  margin-bottom: 1.25rem;
+  margin-bottom: 1rem;
   display: flex;
   flex-wrap: wrap;
   align-items: flex-start;
@@ -1926,18 +1992,19 @@ onBeforeUnmount(() => {
 
 .page-title {
   margin: 0;
-  font-size: 1.375rem;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  color: rgb(var(--yb-text-zinc-strong));
-  line-height: 1.25;
+  font-size: clamp(1.75rem, 1.8vw, 2.25rem);
+  font-weight: 900;
+  letter-spacing: 0;
+  color: rgb(var(--yb-text));
+  line-height: 1.04;
 }
 
 .page-sub {
-  margin: 0.35rem 0 0;
+  margin: 0.5rem 0 0;
   font-size: 0.8125rem;
-  color: rgb(var(--yb-text-zinc-soft));
+  color: rgb(var(--yb-text-muted));
   font-weight: 500;
+  line-height: 1.55;
 }
 
 /* 与工具栏行高对齐的查询按钮，不全宽 */
@@ -2211,7 +2278,7 @@ onBeforeUnmount(() => {
 
 .toolbar {
   display: grid;
-  grid-template-columns: minmax(0, 2fr) repeat(2, minmax(0, 1fr)) auto;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) auto;
   gap: 0.75rem;
   margin-bottom: 0.6rem;
   align-items: end;
@@ -2355,6 +2422,20 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 0.15rem;
+}
+
+.org-icon-btn--policy {
+  border-color: rgb(var(--yb-brand-border));
+  color: rgb(var(--yb-brand));
+}
+
+.org-policy-modal {
+  width: min(700px, calc(100vw - 2rem));
+}
+
+.org-policy-modal .modal-footer {
+  align-items: center;
+  justify-content: space-between;
 }
 
 @media (max-width: 1024px) {

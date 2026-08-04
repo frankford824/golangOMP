@@ -42,7 +42,6 @@ function task(input: Partial<Task>): Task {
     referenceFileRefs: [],
     dueAt: null,
     priority: 'normal',
-    needOutsource: false,
     assetVersions: [],
     ...input,
   } as Task

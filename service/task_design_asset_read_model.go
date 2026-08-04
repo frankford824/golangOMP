@@ -11,7 +11,12 @@ import (
 )
 
 func (s *taskService) loadTaskDesignAssetReadModel(ctx context.Context, task *domain.Task) ([]*domain.DesignAsset, []*domain.DesignAssetVersion, *domain.AppError) {
-	return loadTaskDesignAssetReadModel(ctx, s.taskRepo, s.designAssetRepo, s.taskAssetRepo, task)
+	assets, versions, appErr := loadTaskDesignAssetReadModel(ctx, s.taskRepo, s.designAssetRepo, s.taskAssetRepo, task)
+	if appErr != nil {
+		return nil, nil, appErr
+	}
+	enrichDesignAssetVersionUploaderNames(ctx, s.userDisplayNameResolver, versions)
+	return assets, versions, nil
 }
 
 func loadTaskDesignAssetReadModel(
@@ -48,7 +53,12 @@ func loadTaskDesignAssetReadModel(
 		return []*domain.DesignAsset{}, []*domain.DesignAssetVersion{}, nil
 	}
 	versionsByAssetID := make(map[int64][]*domain.DesignAssetVersion, len(designAssets))
+	migrationSourceAliasIDs := make(map[int64]struct{})
 	for _, record := range records {
+		if isWorkflowMigrationSourceAlias(record) {
+			migrationSourceAliasIDs[record.ID] = struct{}{}
+			continue
+		}
 		version := buildTaskAssetVersionForReadModel(record)
 		if version == nil {
 			continue
@@ -60,6 +70,17 @@ func loadTaskDesignAssetReadModel(
 	for _, asset := range designAssets {
 		if asset == nil {
 			continue
+		}
+		if asset.CurrentVersionID != nil {
+			if _, aliasIsCurrent := migrationSourceAliasIDs[*asset.CurrentVersionID]; aliasIsCurrent {
+				return nil, nil, infraError(
+					"build task design asset read model",
+					fmt.Errorf(
+						"workflow migration source alias %d cannot be design asset %d current version",
+						*asset.CurrentVersionID, asset.ID,
+					),
+				)
+			}
 		}
 		versions := versionsByAssetID[asset.ID]
 		sort.SliceStable(versions, func(i, j int) bool {
@@ -115,6 +136,9 @@ func buildTaskLevelFallbackDesignAssetReadModel(task *domain.Task, records []*do
 	versionsByAssetID := make(map[int64][]*domain.DesignAssetVersion)
 
 	for _, record := range records {
+		if isWorkflowMigrationSourceAlias(record) {
+			continue
+		}
 		version := buildTaskAssetVersionForReadModel(record)
 		if version == nil {
 			continue
@@ -129,9 +153,9 @@ func buildTaskLevelFallbackDesignAssetReadModel(task *domain.Task, records []*do
 				ScopeSKUCode:         version.ScopeSKUCode,
 				RetouchRequirementID: domain.CloneInt64Ptr(version.RetouchRequirementID),
 				AssetType:            version.AssetType,
-				CreatedBy:    version.UploadedBy,
-				CreatedAt:    fallbackTaskAssetTimestamp(record),
-				UpdatedAt:    fallbackTaskAssetTimestamp(record),
+				CreatedBy:            version.UploadedBy,
+				CreatedAt:            fallbackTaskAssetTimestamp(record),
+				UpdatedAt:            fallbackTaskAssetTimestamp(record),
 			}
 			assetsByID[assetID] = asset
 		}

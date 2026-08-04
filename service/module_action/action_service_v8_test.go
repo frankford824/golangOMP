@@ -91,7 +91,7 @@ func (r *actionV8CustomizationRepo) Update(_ context.Context, _ repo.Tx, job *do
 func TestCustomizationSubmitMarksReadyWithoutAdvancingTask(t *testing.T) {
 	actorID := int64(19)
 	tasks := &actionV8TaskRepo{task: &domain.Task{ID: 41, TaskStatus: domain.TaskStatusInProgress, CustomizationRequired: true, CreatorID: actorID}}
-	modules := &actionV8ModuleRepo{module: &domain.TaskModule{ID: 51, TaskID: 41, ModuleKey: domain.ModuleKeyCustomization, State: domain.ModuleStateInProgress}}
+	modules := &actionV8ModuleRepo{module: &domain.TaskModule{ID: 51, TaskID: 41, ModuleKey: domain.ModuleKeyCustomization, State: domain.ModuleStateInProgress, ClaimedBy: &actorID}}
 	events := &actionV8EventRepo{}
 	jobs := &actionV8CustomizationRepo{job: &domain.CustomizationJob{ID: 61, TaskID: 41, Status: domain.CustomizationJobStatusInProgress}}
 	runner := &actionV8TxRunner{}

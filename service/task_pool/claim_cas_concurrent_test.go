@@ -15,7 +15,7 @@ import (
 func TestClaimCAS_100Concurrent(t *testing.T) {
 	fakeGlobalClaimed.Store(false)
 	svc := NewClaimService(&fakeTaskRepo{}, &fakeModuleRepo{}, &fakeEventRepo{}, fakeTxRunner{})
-	actor := domain.RequestActor{ID: 10, Team: domain.TeamDesignStandard, Roles: []domain.Role{domain.RoleMember}}
+	actor := claimCapabilityActor(10, domain.PermissionTaskDesignSubmit, domain.AccessScopeGlobal)
 	var successCount int64
 	var conflictCount int64
 	var wg sync.WaitGroup
@@ -58,7 +58,7 @@ func (r *fakeTaskRepo) GetByID(context.Context, int64) (*domain.Task, error) {
 	if r.task != nil {
 		return r.task, nil
 	}
-	return &domain.Task{ID: 1, TaskType: domain.TaskTypeOriginalProductDevelopment, CreatorID: 2}, nil
+	return &domain.Task{ID: 1, TaskType: domain.TaskTypeOriginalProductDevelopment, TaskStatus: domain.TaskStatusPendingAssign, CreatorID: 2}, nil
 }
 
 func (r *fakeTaskRepo) UpdateDesigner(_ context.Context, _ repo.Tx, _ int64, designerID *int64) error {
@@ -132,7 +132,7 @@ func TestClaimCASDeniesTaskAssignedToOther(t *testing.T) {
 	taskRepo := &fakeTaskRepo{task: &domain.Task{ID: 1, TaskStatus: domain.TaskStatusInProgress, DesignerID: &otherID, CurrentHandlerID: &otherID}}
 	svc := NewClaimService(taskRepo, &fakeModuleRepo{}, &fakeEventRepo{}, fakeTxRunner{})
 
-	dec := svc.Claim(context.Background(), domain.RequestActor{ID: 10, Team: domain.TeamDesignStandard, Roles: []domain.Role{domain.RoleMember}}, 1, domain.ModuleKeyDesign, domain.TeamDesignStandard)
+	dec := svc.Claim(context.Background(), claimCapabilityActor(10, domain.PermissionTaskDesignSubmit, domain.AccessScopeGlobal), 1, domain.ModuleKeyDesign, domain.TeamDesignStandard)
 	if dec.OK || dec.DenyCode != domain.DenyTaskAlreadyClaimed {
 		t.Fatalf("claim decision = ok:%t code:%s, want task_already_claimed", dec.OK, dec.DenyCode)
 	}
@@ -143,7 +143,7 @@ func TestClaimCASAssignsUnassignedTaskToActor(t *testing.T) {
 	taskRepo := &fakeTaskRepo{task: &domain.Task{ID: 1, TaskStatus: domain.TaskStatusPendingAssign, TaskType: domain.TaskTypeOriginalProductDevelopment}}
 	svc := NewClaimService(taskRepo, &fakeModuleRepo{}, &fakeEventRepo{}, fakeTxRunner{})
 
-	dec := svc.Claim(context.Background(), domain.RequestActor{ID: 10, Team: domain.TeamDesignStandard, Roles: []domain.Role{domain.RoleMember}}, 1, domain.ModuleKeyDesign, domain.TeamDesignStandard)
+	dec := svc.Claim(context.Background(), claimCapabilityActor(10, domain.PermissionTaskDesignSubmit, domain.AccessScopeGlobal), 1, domain.ModuleKeyDesign, domain.TeamDesignStandard)
 	if !dec.OK {
 		t.Fatalf("claim failed: code=%s message=%s", dec.DenyCode, dec.Message)
 	}
@@ -155,5 +155,17 @@ func TestClaimCASAssignsUnassignedTaskToActor(t *testing.T) {
 	}
 	if taskRepo.task.CurrentHandlerID == nil || *taskRepo.task.CurrentHandlerID != 10 {
 		t.Fatalf("current_handler_id = %+v, want 10", taskRepo.task.CurrentHandlerID)
+	}
+}
+
+func claimCapabilityActor(id int64, permission domain.PermissionCode, scope domain.AccessScopeMode) domain.RequestActor {
+	roleID := int64(1)
+	return domain.RequestActor{
+		ID: id,
+		EffectiveAccess: &domain.EffectiveAccess{
+			UserID: id, Permissions: []domain.PermissionCode{permission},
+			Assignments: []domain.AccessAssignment{{RoleID: roleID, UserID: id, ScopeMode: scope}},
+			Sources:     []domain.EffectiveAccessNote{{RoleID: roleID, Permission: permission, ScopeMode: scope}},
+		},
 	}
 }

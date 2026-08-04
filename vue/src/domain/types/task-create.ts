@@ -23,7 +23,7 @@ export interface TaskBatchItem {
   designRequirement?: string
   newSku?: string
   skuCodeType?: TaskSkuCodeType
-  /** 预生成 SKU 所用规则 id，与 SkuRulePreviewCard 选择同步 */
+  /** 服务端编号规则修订 ID。 */
   skuRuleId?: string | null
   costPriceMode?: 'manual' | 'template'
   costUnitPrice?: number
@@ -32,9 +32,10 @@ export interface TaskBatchItem {
   basePriceAmount?: number
   baseSalePrice?: number
   productReferenceUrl?: string
-  productChannel?: string
   referenceFileRefs?: (Record<string, unknown> | string)[]
   variantJson?: Record<string, unknown>
+  /** 运营创建时的套装建议；最终 single/set 仍由设计阶段决定。 */
+  setModeHint?: boolean
   /** 相对模板是否已编辑（摘要区展示「已修改」） */
   _editedFromTemplate?: boolean
 }

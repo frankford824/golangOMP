@@ -24,14 +24,16 @@ const taskOperationalCompletionCTE = `
 		       ec.completed_at AS exact_completed_at,
 		       COALESCE(ec.completed_at, CASE WHEN t.task_status = 'Completed' THEN t.updated_at END) AS completed_at
 		  FROM tasks t
-		  LEFT JOIN exact_completion ec ON ec.task_id = t.id
+	  LEFT JOIN exact_completion ec ON ec.task_id = t.id
 	)`
 
+type taskOperationalDashboardRepo struct{ db *DB }
+
 func NewTaskOperationalDashboardRepo(db *DB) repo.TaskOperationalDashboardRepo {
-	return &reportL1Repo{db: db}
+	return &taskOperationalDashboardRepo{db: db}
 }
 
-func (r *reportL1Repo) GetTaskOperationalOverview(ctx context.Context, now time.Time) (*domain.TaskOperationalOverview, error) {
+func (r *taskOperationalDashboardRepo) GetTaskOperationalOverview(ctx context.Context, now time.Time) (*domain.TaskOperationalOverview, error) {
 	generatedAt := now.UTC()
 	location := taskOperationalLocation()
 	todayStart, tomorrowStart, weekStart, trendStart := taskOperationalBoundaries(generatedAt, location)
@@ -65,7 +67,7 @@ func (r *reportL1Repo) GetTaskOperationalOverview(ctx context.Context, now time.
 	return overview, nil
 }
 
-func (r *reportL1Repo) loadTaskOperationalRecentTasks(ctx context.Context, overview *domain.TaskOperationalOverview) error {
+func (r *taskOperationalDashboardRepo) loadTaskOperationalRecentTasks(ctx context.Context, overview *domain.TaskOperationalOverview) error {
 	query := `
 	SELECT t.id, t.task_no, COALESCE(t.product_name_snapshot, ''),
 	       COALESCE(NULLIF(designer.display_name, ''), NULLIF(designer.username, ''),
@@ -113,7 +115,7 @@ func taskOperationalBoundaries(now time.Time, location *time.Location) (todaySta
 	return localToday.UTC(), localToday.AddDate(0, 0, 1).UTC(), localToday.AddDate(0, 0, -daysSinceMonday).UTC(), localToday.AddDate(0, 0, -6).UTC()
 }
 
-func (r *reportL1Repo) loadTaskOperationalCounts(
+func (r *taskOperationalDashboardRepo) loadTaskOperationalCounts(
 	ctx context.Context,
 	overview *domain.TaskOperationalOverview,
 	todayStart, tomorrowStart, weekStart time.Time,
@@ -195,7 +197,7 @@ func (r *reportL1Repo) loadTaskOperationalCounts(
 	return nil
 }
 
-func (r *reportL1Repo) loadTaskOperationalTrend(
+func (r *taskOperationalDashboardRepo) loadTaskOperationalTrend(
 	ctx context.Context,
 	overview *domain.TaskOperationalOverview,
 	trendStart, tomorrowStart time.Time,
@@ -251,7 +253,7 @@ func (r *reportL1Repo) loadTaskOperationalTrend(
 	return nil
 }
 
-func (r *reportL1Repo) loadTaskOperationalDistribution(ctx context.Context, overview *domain.TaskOperationalOverview) error {
+func (r *taskOperationalDashboardRepo) loadTaskOperationalDistribution(ctx context.Context, overview *domain.TaskOperationalOverview) error {
 	query := `
 	SELECT bucket, COUNT(*)
 	  FROM (
@@ -301,7 +303,7 @@ func (r *reportL1Repo) loadTaskOperationalDistribution(ctx context.Context, over
 	return nil
 }
 
-func (r *reportL1Repo) loadTaskOperationalRecentEvents(ctx context.Context, overview *domain.TaskOperationalOverview) error {
+func (r *taskOperationalDashboardRepo) loadTaskOperationalRecentEvents(ctx context.Context, overview *domain.TaskOperationalOverview) error {
 	query := `
 	SELECT tel.id, tel.event_type, tel.task_id, t.task_no,
 	       COALESCE(NULLIF(operator.display_name, ''), NULLIF(operator.username, ''), NULLIF(creator.display_name, ''), NULLIF(creator.username, ''), '系统') AS actor_name,
@@ -348,7 +350,7 @@ func taskOperationalEventTitle(eventType string) string {
 		return "提交设计"
 	case domain.TaskEventAuditApproved:
 		return "审核通过"
-	case domain.TaskEventAuditRejected:
+	case domain.TaskEventAuditReturnedToDesign:
 		return "审核打回"
 	case domain.TaskEventAuditHandedOver:
 		return "审核交班"

@@ -1,7 +1,7 @@
 # 通知
 
-> Revision: V1.3-A2 i_id-first task/ERP/search integration (2026-04-27)
-> Source: docs/api/openapi.yaml (post V1.3-A2)
+> Revision: V8 current contract (2026-07-20)
+> Source: docs/api/openapi.yaml
 
 > 来源: `docs/api/openapi.yaml`；业务口径参考 V1 四份权威文档。本文不覆盖 OpenAPI 契约。
 
@@ -88,7 +88,7 @@ curl -X GET https://api.example.com/v1/me/notifications \
 - `task_cancelled` payload：必有 `task_id`、`cancel_reason`、`cancelled_by`；可能有 `task_no`、`cancelled_by_name`、`module_key`。
 - payload 允许后端携带人名、团队名等展示冗余字段，例如 `assigned_by_name`；这些字段是展示快照，前端跳转和业务定位仍以 `task_id`、用户 id、`module_key` 等稳定字段为准。
 - 未读数用于 badge，列表分页以接口返回 cursor/limit 字段为准。
-- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
 
 ## POST /v1/me/notifications/{id}/read
@@ -141,7 +141,7 @@ curl -X POST https://api.example.com/v1/me/notifications/<id>/read \
 - `task_cancelled` payload：必有 `task_id`、`cancel_reason`、`cancelled_by`；可能有 `task_no`、`cancelled_by_name`、`module_key`。
 - payload 允许后端携带人名、团队名等展示冗余字段，例如 `assigned_by_name`；这些字段是展示快照，前端跳转和业务定位仍以 `task_id`、用户 id、`module_key` 等稳定字段为准。
 - 未读数用于 badge，列表分页以接口返回 cursor/limit 字段为准。
-- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
 
 ## POST /v1/me/notifications/read-all
@@ -190,7 +190,7 @@ curl -X POST https://api.example.com/v1/me/notifications/read-all \
 - `task_cancelled` payload：必有 `task_id`、`cancel_reason`、`cancelled_by`；可能有 `task_no`、`cancelled_by_name`、`module_key`。
 - payload 允许后端携带人名、团队名等展示冗余字段，例如 `assigned_by_name`；这些字段是展示快照，前端跳转和业务定位仍以 `task_id`、用户 id、`module_key` 等稳定字段为准。
 - 未读数用于 badge，列表分页以接口返回 cursor/limit 字段为准。
-- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
 
 ## GET /v1/me/notifications/unread-count
@@ -249,7 +249,7 @@ curl -X GET https://api.example.com/v1/me/notifications/unread-count \
 - `task_cancelled` payload：必有 `task_id`、`cancel_reason`、`cancelled_by`；可能有 `task_no`、`cancelled_by_name`、`module_key`。
 - payload 允许后端携带人名、团队名等展示冗余字段，例如 `assigned_by_name`；这些字段是展示快照，前端跳转和业务定位仍以 `task_id`、用户 id、`module_key` 等稳定字段为准。
 - 未读数用于 badge，列表分页以接口返回 cursor/limit 字段为准。
-- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
 
 ## GET /v1/me/notifications/web-push/config
@@ -311,7 +311,7 @@ curl -X GET https://api.example.com/v1/me/notifications/web-push/config \
 - `task_cancelled` payload：必有 `task_id`、`cancel_reason`、`cancelled_by`；可能有 `task_no`、`cancelled_by_name`、`module_key`。
 - payload 允许后端携带人名、团队名等展示冗余字段，例如 `assigned_by_name`；这些字段是展示快照，前端跳转和业务定位仍以 `task_id`、用户 id、`module_key` 等稳定字段为准。
 - 未读数用于 badge，列表分页以接口返回 cursor/limit 字段为准。
-- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
 
 ## POST /v1/me/notifications/web-push/subscriptions
@@ -383,7 +383,7 @@ curl -X POST https://api.example.com/v1/me/notifications/web-push/subscriptions 
 - `task_cancelled` payload：必有 `task_id`、`cancel_reason`、`cancelled_by`；可能有 `task_no`、`cancelled_by_name`、`module_key`。
 - payload 允许后端携带人名、团队名等展示冗余字段，例如 `assigned_by_name`；这些字段是展示快照，前端跳转和业务定位仍以 `task_id`、用户 id、`module_key` 等稳定字段为准。
 - 未读数用于 badge，列表分页以接口返回 cursor/limit 字段为准。
-- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
 
 ## DELETE /v1/me/notifications/web-push/subscriptions/current
@@ -436,7 +436,7 @@ curl -X DELETE https://api.example.com/v1/me/notifications/web-push/subscription
 - `task_cancelled` payload：必有 `task_id`、`cancel_reason`、`cancelled_by`；可能有 `task_no`、`cancelled_by_name`、`module_key`。
 - payload 允许后端携带人名、团队名等展示冗余字段，例如 `assigned_by_name`；这些字段是展示快照，前端跳转和业务定位仍以 `task_id`、用户 id、`module_key` 等稳定字段为准。
 - 未读数用于 badge，列表分页以接口返回 cursor/limit 字段为准。
-- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
 
 ## POST /v1/me/notifications/web-push/test
@@ -498,7 +498,7 @@ curl -X POST https://api.example.com/v1/me/notifications/web-push/test \
 - `task_cancelled` payload：必有 `task_id`、`cancel_reason`、`cancelled_by`；可能有 `task_no`、`cancelled_by_name`、`module_key`。
 - payload 允许后端携带人名、团队名等展示冗余字段，例如 `assigned_by_name`；这些字段是展示快照，前端跳转和业务定位仍以 `task_id`、用户 id、`module_key` 等稳定字段为准。
 - 未读数用于 badge，列表分页以接口返回 cursor/limit 字段为准。
-- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
 
 ## GET /v1/me/notifications/preferences
@@ -608,6 +608,6 @@ curl -X PATCH https://api.example.com/v1/me/notifications/preferences \
 - `task_cancelled` payload：必有 `task_id`、`cancel_reason`、`cancelled_by`；可能有 `task_no`、`cancelled_by_name`、`module_key`。
 - payload 允许后端携带人名、团队名等展示冗余字段，例如 `assigned_by_name`；这些字段是展示快照，前端跳转和业务定位仍以 `task_id`、用户 id、`module_key` 等稳定字段为准。
 - 未读数用于 badge，列表分页以接口返回 cursor/limit 字段为准。
-- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
 

@@ -10,10 +10,13 @@ type PermissionCode string
 const (
 	PermissionTaskView                 PermissionCode = "task.view"
 	PermissionTaskCreate               PermissionCode = "task.create"
-	PermissionTaskDesignSubmit         PermissionCode = "task.design.submit"
-	PermissionTaskAuditDecision        PermissionCode = "task.audit.decision"
+	PermissionTaskAssign               PermissionCode = "task.assign"
+	PermissionTaskReassign             PermissionCode = "task.reassign"
+	PermissionTaskTerminate            PermissionCode = "task.terminate"
+	PermissionTaskUploadSource         PermissionCode = "task.upload_source"
+	PermissionTaskAudit                PermissionCode = "task.audit"
+	PermissionTaskAuditHandover        PermissionCode = "task.audit_handover"
 	PermissionTaskReopen               PermissionCode = "task.reopen"
-	PermissionTaskManage               PermissionCode = "task.manage"
 	PermissionPlanningSKUView          PermissionCode = "planning_sku.view"
 	PermissionPlanningSKUCreate        PermissionCode = "planning_sku.create"
 	PermissionPlanningSKUEdit          PermissionCode = "planning_sku.edit"
@@ -42,9 +45,39 @@ const (
 	PermissionAccountUse               PermissionCode = "account.use"
 	PermissionReportView               PermissionCode = "report.view"
 	PermissionSystemManage             PermissionCode = "system.manage"
-	PermissionAccessPolicyView         PermissionCode = "access_policy.view"
-	PermissionAccessPolicyAdmin        PermissionCode = "access_policy.manage"
+	PermissionAccessView               PermissionCode = "access.view"
+	PermissionAccessManage             PermissionCode = "access.manage"
+
+	// One-to-one aliases keep existing task/access call sites readable while the
+	// persisted capability names move to operation language.
+	PermissionTaskDesignSubmit  = PermissionTaskUploadSource
+	PermissionTaskAuditDecision = PermissionTaskAudit
+	PermissionAccessPolicyView  = PermissionAccessView
+	PermissionAccessPolicyAdmin = PermissionAccessManage
 )
+
+// PermissionSupportsTaskTypes reports whether an operation may be restricted by task type.
+func PermissionSupportsTaskTypes(code PermissionCode) bool {
+	switch code {
+	case PermissionTaskCreate, PermissionTaskAssign, PermissionTaskReassign, PermissionTaskTerminate, PermissionTaskUploadSource, PermissionTaskAudit:
+		return true
+	default:
+		return false
+	}
+}
+
+// AccessTaskTypeValid restricts new access-policy grants to task types that
+// remain writable in the current workflow. Historical task type values are
+// read-only evidence and must never be introduced by a new policy.
+func AccessTaskTypeValid(taskType TaskType) bool {
+	switch taskType {
+	case TaskTypeOriginalProductDevelopment, TaskTypeNewProductDevelopment, TaskTypeRetouchTask,
+		TaskTypeSKUPlanning, TaskTypeCustomerCustomization, TaskTypeRegularCustomization:
+		return true
+	default:
+		return false
+	}
+}
 
 type AccessScopeMode string
 
@@ -85,15 +118,30 @@ type AccessPermission struct {
 	Enabled     bool           `json:"enabled"`
 }
 
+// AccessRolePermission is one operation granted to a role, optionally limited to task types.
+// Empty TaskTypes means all task types are allowed for that operation.
+type AccessRolePermission struct {
+	Code      PermissionCode `json:"code"`
+	TaskTypes []string       `json:"task_types,omitempty"`
+}
+
 type AccessRole struct {
-	ID              int64            `json:"id"`
-	Code            string           `json:"code"`
-	Name            string           `json:"name"`
-	Description     string           `json:"description"`
-	SystemProtected bool             `json:"system_protected"`
-	ArchivedAt      *time.Time       `json:"archived_at,omitempty"`
-	Version         int64            `json:"version"`
-	Permissions     []PermissionCode `json:"permissions"`
+	ID              int64                  `json:"id"`
+	Code            string                 `json:"code"`
+	Name            string                 `json:"name"`
+	Description     string                 `json:"description"`
+	SystemProtected bool                   `json:"system_protected"`
+	ArchivedAt      *time.Time             `json:"archived_at,omitempty"`
+	Version         int64                  `json:"version"`
+	Permissions     []AccessRolePermission `json:"permissions"`
+}
+
+func (r AccessRole) PermissionCodes() []PermissionCode {
+	out := make([]PermissionCode, 0, len(r.Permissions))
+	for _, item := range r.Permissions {
+		out = append(out, item.Code)
+	}
+	return out
 }
 
 type AccessScopeSubject struct {
@@ -129,6 +177,7 @@ type EffectiveAccessNote struct {
 	RoleCode   string          `json:"role_code"`
 	SourceType string          `json:"source_type"`
 	ScopeMode  AccessScopeMode `json:"scope_mode"`
+	TaskTypes  []string        `json:"task_types,omitempty"`
 }
 
 type TaskAccessSubject struct {
@@ -139,6 +188,7 @@ type TaskAccessSubject struct {
 	CurrentHandlerID  *int64
 	OwnerDepartmentID *int64
 	OwnerTeamID       *int64
+	TaskType          TaskType
 }
 
 func EffectiveAccessAllowsTask(actor RequestActor, permission PermissionCode, subject TaskAccessSubject) bool {
@@ -153,10 +203,59 @@ func EffectiveAccessAllowsTask(actor RequestActor, permission PermissionCode, su
 		if source.Permission != permission {
 			continue
 		}
+		if !sourceAllowsTaskType(source, subject.TaskType) {
+			continue
+		}
 		for _, assignment := range assignmentsByRole[source.RoleID] {
 			if accessAssignmentAllowsTask(actor, assignment, subject) {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+// EffectiveAccessAllowsTaskReassign preserves stable organization scope as the
+// default while also allowing the explicitly assigned current designer/handler
+// to delegate an in-progress task when that actor owns a task.reassign grant.
+// The grant's task-type restriction still applies; legacy roles and display
+// organization names never participate.
+func EffectiveAccessAllowsTaskReassign(actor RequestActor, subject TaskAccessSubject) bool {
+	if EffectiveAccessAllowsTask(actor, PermissionTaskReassign, subject) {
+		return true
+	}
+	if actor.EffectiveAccess == nil || !actor.EffectiveAccess.Has(PermissionTaskReassign) {
+		return false
+	}
+	if !pointerEqualsActor(subject.DesignerID, actor.ID) && !pointerEqualsActor(subject.CurrentHandlerID, actor.ID) {
+		return false
+	}
+	assignmentsByRole := make(map[int64]struct{}, len(actor.EffectiveAccess.Assignments))
+	for _, assignment := range actor.EffectiveAccess.Assignments {
+		assignmentsByRole[assignment.RoleID] = struct{}{}
+	}
+	for _, source := range actor.EffectiveAccess.Sources {
+		if source.Permission != PermissionTaskReassign || !sourceAllowsTaskType(source, subject.TaskType) {
+			continue
+		}
+		if _, ok := assignmentsByRole[source.RoleID]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func sourceAllowsTaskType(source EffectiveAccessNote, taskType TaskType) bool {
+	if !PermissionSupportsTaskTypes(source.Permission) || len(source.TaskTypes) == 0 {
+		return true
+	}
+	if taskType == "" {
+		return false
+	}
+	wanted := string(taskType)
+	for _, candidate := range source.TaskTypes {
+		if candidate == wanted {
+			return true
 		}
 	}
 	return false

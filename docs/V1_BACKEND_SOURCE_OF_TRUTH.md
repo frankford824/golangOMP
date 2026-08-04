@@ -51,6 +51,8 @@
 - Resource read model: `/v1/tasks/{id}/resource-bundle`, `/v1/resource-groups*`
 - SKU planning: `/v1/tasks` with `task_type=sku_planning`, Excel, correction and ERP retry routes
 - Search: `/v1/search` with task-resource-group asset results
+- Data assistant: `/v1/ai/chat/*` owner-scoped conversations, evidence citations and SSE streaming;
+  cross-user body review is restricted to a protected SuperAdmin and always audited.
 - Client publication: existing `/v1/asset-workbench/client-materials*` pinned to a finalized revision
 
 The complete route list and fields are defined by `transport/http.go` and OpenAPI; this file does
@@ -67,6 +69,29 @@ not create undocumented routes.
   uses `task_asset_groups`.
 - Client publication extends `asset_workbench_client_materials`; no parallel publication table exists.
 - Asynchronous ERP and search work uses durable outboxes and idempotent dedupe keys.
+- MySQL is the only business and authorization fact source for AI retrieval. `ai_retrieval_documents`
+  is a compressed text projection, `ai_retrieval_outbox` is its rebuildable vector-delivery queue,
+  and Qdrant stores only derived vectors behind a versioned collection alias. Every dense hit is
+  re-authorized against current MySQL task/resource state and the caller's stable organization scope.
+
+## Data assistant and retrieval invariants
+
+- Chat requires effective `report.view`; source tools additionally intersect `task.view`,
+  `asset.view`, `catalog.view`, and the actor's current data scope.
+- `/v1/search?mode=auto` keeps task numbers, SKU codes and filenames on deterministic exact search;
+  natural-language input may use MySQL plus Qdrant RRF retrieval. Hybrid failure returns exact data
+  with `retrieval.degraded=true` and never blocks task or asset reads.
+- The assistant can run at most three code-owned, read-only analysis tools. Arbitrary SQL and every
+  task, asset, upload, publication or workflow mutation are prohibited.
+- Provider prompts include at most eight recent turns, 12,000 conversation characters, and twenty
+  permission-checked evidence records. Evidence is treated as untrusted text; only server-issued
+  source IDs such as `[S1]` are linkable citations.
+- API keys, provider endpoints and raw provider payloads never enter chat rows, logs or responses.
+  User-visible conversation text expires after 90 days; a user deletion hides immediately and purges
+  within 24 hours. Provider-call and cross-user-read tables retain metadata and hashes, not prompts.
+- Qdrant collection dimensions and embedding versions are immutable per versioned collection.
+  Model changes build a shadow collection and switch the stable alias only after complete indexing,
+  validation and snapshot creation.
 
 ## Cutover rule
 

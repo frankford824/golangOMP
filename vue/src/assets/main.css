@@ -294,7 +294,6 @@
   --yb-indigo-wash: 238 242 255;
   --yb-brand-wash-strong: 215 226 255;
   --yb-status-pending: 107 140 255;
-  --yb-status-warehouse: 255 209 102;
   --yb-overlay-slate: 148 163 184;
   --yb-overlay-night: 2 6 23;
   --yb-overlay-panel: 14 15 22;
@@ -588,6 +587,68 @@ body {
 #app .detail-top-taskno {
   font-family: var(--yb-font-display);
   letter-spacing: 0;
+}
+
+/*
+ * Canonical main-ops page heading surface.
+ * Task Center is the visual baseline: every primary business page starts on
+ * the same content edge and uses the same title rhythm, surface and actions.
+ */
+#app .yb-page-surface {
+  min-width: 0;
+  border: 1px solid rgb(var(--yb-border));
+  border-radius: 1rem;
+  padding: 1rem;
+  background: rgb(var(--yb-surface));
+  box-shadow: 0 1px 3px rgb(var(--yb-shadow) / 0.06);
+  background-clip: padding-box;
+}
+
+#app .yb-page-header-row {
+  display: flex;
+  min-height: 3.1rem;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+#app .yb-page-heading-copy {
+  min-width: 0;
+}
+
+#app .yb-page-title {
+  margin: 0;
+  color: rgb(var(--yb-text));
+  font-family: var(--yb-font-display);
+  font-size: clamp(1.75rem, 1.8vw, 2.25rem);
+  font-weight: 900;
+  line-height: 1.04;
+  letter-spacing: 0;
+}
+
+#app .yb-page-subtitle {
+  max-width: 52rem;
+  margin: 0.5rem 0 0;
+  color: rgb(var(--yb-text-muted));
+  font-size: 0.8125rem;
+  font-weight: 500;
+  line-height: 1.55;
+}
+
+@media (max-width: 720px) {
+  #app .yb-page-surface {
+    border-radius: 0.82rem;
+    padding: 0.72rem;
+  }
+
+  #app .yb-page-header-row {
+    flex-wrap: wrap;
+    gap: 0.65rem;
+  }
+
+  #app .yb-page-title {
+    font-size: 1.75rem;
+  }
 }
 
 #app code,

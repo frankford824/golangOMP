@@ -566,7 +566,8 @@ func (s *taskCreateReferenceUploadService) CompleteUploadSession(ctx context.Con
 	if params.OwnerType != "" && request.OwnerType != params.OwnerType {
 		return nil, domain.NewAppError(domain.ErrCodeInvalidRequest, "upload_session belongs to another upload workflow", nil)
 	}
-	if request.Status == domain.UploadRequestStatusBound || request.SessionStatus == domain.DesignAssetSessionStatusCompleted {
+	if request.Status == domain.UploadRequestStatusBound ||
+		(request.SessionStatus == domain.DesignAssetSessionStatusCompleted && strings.TrimSpace(request.BoundRefID) != "") {
 		if strings.TrimSpace(request.BoundRefID) == "" {
 			return nil, domain.NewAppError(domain.ErrCodeInvalidStateTransition, "upload_session already completed without bound reference_file_ref", nil)
 		}
@@ -605,13 +606,26 @@ func (s *taskCreateReferenceUploadService) CompleteUploadSession(ctx context.Con
 		}
 	}
 
-	meta, err := s.uploadClient.CompleteUploadSession(ctx, RemoteCompleteUploadRequest{
-		RemoteUploadID: request.RemoteUploadID,
-		Filename:       request.FileName,
-		ExpectedSize:   request.ExpectedSize,
-		MimeType:       request.MimeType,
-		ChecksumHint:   checksumHint,
-	})
+	var meta *RemoteFileMeta
+	var err error
+	if request.SessionStatus == domain.DesignAssetSessionStatusCompleted && strings.TrimSpace(request.RemoteFileID) != "" {
+		meta, err = s.uploadClient.GetFileMeta(ctx, RemoteGetFileMetaRequest{
+			RemoteUploadID: request.RemoteUploadID,
+			RemoteFileID:   request.RemoteFileID,
+			Filename:       request.FileName,
+			ExpectedSize:   request.ExpectedSize,
+			MimeType:       request.MimeType,
+			ChecksumHint:   checksumHint,
+		})
+	} else {
+		meta, err = s.uploadClient.CompleteUploadSession(ctx, RemoteCompleteUploadRequest{
+			RemoteUploadID: request.RemoteUploadID,
+			Filename:       request.FileName,
+			ExpectedSize:   request.ExpectedSize,
+			MimeType:       request.MimeType,
+			ChecksumHint:   checksumHint,
+		})
+	}
 	if err != nil {
 		return nil, infraError("complete task-create reference upload session via upload service client", err)
 	}
@@ -1069,7 +1083,8 @@ func (s *taskCreateReferenceUploadService) finalizeUploadedReference(ctx context
 		if !isPreCreateUploadOwner(request.OwnerType) || request.OwnerID != completedBy {
 			return domain.NewAppError(domain.ErrCodeInvalidRequest, "upload_session does not belong to current actor", nil)
 		}
-		if request.Status == domain.UploadRequestStatusBound || request.SessionStatus == domain.DesignAssetSessionStatusCompleted {
+		if request.Status == domain.UploadRequestStatusBound ||
+			(request.SessionStatus == domain.DesignAssetSessionStatusCompleted && strings.TrimSpace(request.BoundRefID) != "") {
 			completedRefID = strings.TrimSpace(request.BoundRefID)
 			if completedRefID == "" {
 				return domain.NewAppError(domain.ErrCodeInvalidStateTransition, "upload_session already completed without bound reference_file_ref", nil)

@@ -74,13 +74,3 @@ export function buildParallelProductRows(task: Task): TaskParallelProductRow[] {
     },
   ]
 }
-
-/** 兼容旧调用：批量任务不再前置模板行，恒为 false */
-export function prependsBatchTemplateProductRow(_task: Task): boolean {
-  return false
-}
-
-/** @deprecated 批量任务已不以「首条与主 SKU 重复」区分模板，保留导出避免大范围删改 */
-export function firstSkuItemDuplicatesPrimary(_task: Task): boolean {
-  return false
-}

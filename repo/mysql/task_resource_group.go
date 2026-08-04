@@ -76,7 +76,7 @@ func (r *TaskResourceGroupRepo) EnsureGroupShells(ctx context.Context, tx repo.T
 			SELECT trr.task_id, 'retouch_requirement', trr.id
 			FROM task_retouch_requirements trr
 			WHERE trr.task_id = ?
-			ON DUPLICATE KEY UPDATE updated_at = updated_at`, taskID)
+			ON DUPLICATE KEY UPDATE updated_at = task_asset_groups.updated_at`, taskID)
 		return err
 	default:
 		var skuCount int
@@ -89,13 +89,13 @@ func (r *TaskResourceGroupRepo) EnsureGroupShells(ctx context.Context, tx repo.T
 			SELECT tsi.task_id, 'sku', tsi.id
 			FROM task_sku_items tsi
 			WHERE tsi.task_id = ?
-			ON DUPLICATE KEY UPDATE updated_at = updated_at`, taskID)
+			ON DUPLICATE KEY UPDATE updated_at = task_asset_groups.updated_at`, taskID)
 			return err
 		}
 		_, err := sqlTx.ExecContext(ctx, `
 			INSERT INTO task_asset_groups (task_id, scope_kind)
 			VALUES (?, 'task')
-			ON DUPLICATE KEY UPDATE updated_at = updated_at`, taskID)
+			ON DUPLICATE KEY UPDATE updated_at = task_asset_groups.updated_at`, taskID)
 		return err
 	}
 }
@@ -138,10 +138,13 @@ func (r *TaskResourceGroupRepo) ListByTaskID(ctx context.Context, taskID int64) 
 		SELECT g.id, g.task_id, g.scope_kind, g.task_sku_item_id, g.retouch_requirement_id,
 		       g.working_revision_id, g.finalized_revision_id, g.lock_version,
 		       g.migration_incomplete, g.migration_issue, g.created_at, g.updated_at,
-		       t.task_no, COALESCE(tsi.sku_code, ''), t.business_lane
+		       t.task_no, COALESCE(tsi.sku_code, ''),
+		       COALESCE(NULLIF(tsi.product_short_name, ''), NULLIF(tsi.product_name_snapshot, ''), NULLIF(t.product_name_snapshot, ''), ''),
+		       t.creator_id, COALESCE(NULLIF(u.display_name, ''), NULLIF(u.username, ''), ''), t.business_lane
 		FROM task_asset_groups g
 		JOIN tasks t ON t.id = g.task_id
 		LEFT JOIN task_sku_items tsi ON tsi.id = g.task_sku_item_id
+		LEFT JOIN users u ON u.id = t.creator_id
 		WHERE g.task_id = ?
 		ORDER BY FIELD(g.scope_kind, 'task','sku','retouch_requirement'), g.scope_ref_id, g.id`, taskID)
 	if err != nil {
@@ -154,7 +157,7 @@ func (r *TaskResourceGroupRepo) ListByTaskID(ctx context.Context, taskID int64) 
 		var skuID, retouchID, workingID, finalizedID sql.NullInt64
 		if err := rows.Scan(&item.ID, &item.TaskID, &item.ScopeKind, &skuID, &retouchID, &workingID, &finalizedID,
 			&item.LockVersion, &item.MigrationIncomplete, &item.MigrationIssue, &item.CreatedAt, &item.UpdatedAt,
-			&item.TaskNo, &item.SKUCode, &item.BusinessLane); err != nil {
+			&item.TaskNo, &item.SKUCode, &item.ProductName, &item.CreatorID, &item.CreatorName, &item.BusinessLane); err != nil {
 			return nil, err
 		}
 		item.TaskSKUItemID = fromNullInt64(skuID)
@@ -166,21 +169,8 @@ func (r *TaskResourceGroupRepo) ListByTaskID(ctx context.Context, taskID int64) 
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	for i := range items {
-		if items[i].WorkingRevisionID != nil {
-			revision, err := r.getRevision(ctx, *items[i].WorkingRevisionID)
-			if err != nil {
-				return nil, err
-			}
-			items[i].WorkingRevision = revision
-		}
-		if items[i].FinalizedRevisionID != nil {
-			revision, err := r.getRevision(ctx, *items[i].FinalizedRevisionID)
-			if err != nil {
-				return nil, err
-			}
-			items[i].FinalizedRevision = revision
-		}
+	if err := r.hydrateResourceGroupRevisions(ctx, items); err != nil {
+		return nil, err
 	}
 	return items, nil
 }
@@ -195,6 +185,31 @@ func (r *TaskResourceGroupRepo) ListResourceGroups(ctx context.Context, params d
 	if value := strings.TrimSpace(params.SKUCode); value != "" {
 		where = append(where, "tsi.sku_code = ?")
 		args = append(args, value)
+	}
+	if value := strings.TrimSpace(params.TaskNo); value != "" {
+		where = append(where, "t.task_no LIKE ?")
+		args = append(args, "%"+value+"%")
+	}
+	if params.CreatorID != nil && *params.CreatorID > 0 {
+		where = append(where, "t.creator_id = ?")
+		args = append(args, *params.CreatorID)
+	}
+	switch params.ResourceRole {
+	case domain.ResourceRoleFilterReference:
+		where = append(where, `EXISTS (
+			SELECT 1 FROM task_asset_group_revision_references rr
+			WHERE rr.revision_id = g.finalized_revision_id
+		)`)
+	case domain.ResourceRoleFilterSource:
+		where = append(where, `EXISTS (
+			SELECT 1 FROM task_asset_group_revisions gr
+			WHERE gr.id = g.finalized_revision_id AND gr.source_task_asset_id IS NOT NULL
+		)`)
+	case domain.ResourceRoleFilterFinal:
+		where = append(where, `EXISTS (
+			SELECT 1 FROM task_asset_group_revision_items ri
+			WHERE ri.revision_id = g.finalized_revision_id
+		)`)
 	}
 	if value := strings.TrimSpace(params.Query); value != "" {
 		like := "%" + value + "%"
@@ -257,10 +272,13 @@ func (r *TaskResourceGroupRepo) ListResourceGroups(ctx context.Context, params d
 		SELECT g.id, g.task_id, g.scope_kind, g.task_sku_item_id, g.retouch_requirement_id,
 		       g.working_revision_id, g.finalized_revision_id, g.lock_version,
 		       g.migration_incomplete, g.migration_issue, g.created_at, g.updated_at,
-		       t.task_no, COALESCE(tsi.sku_code, ''), t.business_lane
+		       t.task_no, COALESCE(tsi.sku_code, ''),
+		       COALESCE(NULLIF(tsi.product_short_name, ''), NULLIF(tsi.product_name_snapshot, ''), NULLIF(t.product_name_snapshot, ''), ''),
+		       t.creator_id, COALESCE(NULLIF(u.display_name, ''), NULLIF(u.username, ''), ''), t.business_lane
 		FROM task_asset_groups g
 		JOIN tasks t ON t.id = g.task_id
 		LEFT JOIN task_sku_items tsi ON tsi.id = g.task_sku_item_id
+		LEFT JOIN users u ON u.id = t.creator_id
 		WHERE `+clause+`
 		ORDER BY g.updated_at DESC, g.id DESC LIMIT ? OFFSET ?`, queryArgs...)
 	if err != nil {
@@ -273,15 +291,308 @@ func (r *TaskResourceGroupRepo) ListResourceGroups(ctx context.Context, params d
 		if err != nil {
 			return nil, 0, err
 		}
-		if item.FinalizedRevisionID != nil {
-			item.FinalizedRevision, err = r.getRevision(ctx, *item.FinalizedRevisionID)
-			if err != nil {
-				return nil, 0, err
-			}
-		}
 		items = append(items, *item)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, err
+	}
+	if err := r.hydrateResourceGroupRevisions(ctx, items); err != nil {
+		return nil, 0, err
+	}
+	return items, total, nil
+}
+
+func (r *TaskResourceGroupRepo) ListFlatResourceItems(ctx context.Context, params domain.ResourceGroupListParams) ([]domain.FlatResourceItem, int64, error) {
+	baseWhere := []string{"g.finalized_revision_id IS NOT NULL"}
+	baseArgs := make([]interface{}, 0, 12)
+	if params.TaskID > 0 {
+		baseWhere = append(baseWhere, "g.task_id = ?")
+		baseArgs = append(baseArgs, params.TaskID)
+	}
+	if value := strings.TrimSpace(params.SKUCode); value != "" {
+		baseWhere = append(baseWhere, "tsi.sku_code = ?")
+		baseArgs = append(baseArgs, value)
+	}
+	if value := strings.TrimSpace(params.TaskNo); value != "" {
+		baseWhere = append(baseWhere, "t.task_no LIKE ?")
+		baseArgs = append(baseArgs, "%"+value+"%")
+	}
+	if params.CreatorID != nil && *params.CreatorID > 0 {
+		baseWhere = append(baseWhere, "t.creator_id = ?")
+		baseArgs = append(baseArgs, *params.CreatorID)
+	}
+	if params.BusinessLane.Valid() {
+		baseWhere = append(baseWhere, "t.business_lane = ?")
+		baseArgs = append(baseArgs, params.BusinessLane)
+	}
+	baseWhere, baseArgs = appendResourceGroupAccessScope(baseWhere, baseArgs, params.Access)
+	baseClause := strings.Join(baseWhere, " AND ")
+	if err := r.validateFlatResourceIntegrity(ctx, baseClause, baseArgs); err != nil {
+		return nil, 0, err
+	}
+
+	flatCTE := `WITH flat_resources AS (
+		SELECT g.id AS group_id, g.task_id, t.task_no, COALESCE(tsi.sku_code, '') AS sku_code,
+		       'reference' AS resource_role,
+		       COALESCE(NULLIF(rr.file_name_snapshot, ''), asr.file_name, '') AS file_name,
+		       COALESCE(asr.mime_type, '') AS mime_type,
+		       CASE WHEN COALESCE(asr.is_placeholder, 1) = 0 THEN COALESCE(asr.ref_key, '') ELSE '' END AS storage_key,
+		       COALESCE(formal_ta.id, 0) AS task_asset_id,
+		       g.updated_at AS group_updated_at, 1 AS role_sort, rr.sort_order AS item_sort, rr.id AS row_id
+		FROM task_asset_groups g
+		JOIN tasks t ON t.id = g.task_id
+		LEFT JOIN task_sku_items tsi ON tsi.id = g.task_sku_item_id
+		JOIN task_asset_group_revision_references rr ON rr.revision_id = g.finalized_revision_id
+		JOIN reference_file_refs f ON f.id = rr.reference_file_ref_id
+		LEFT JOIN asset_storage_refs asr ON asr.ref_id = rr.ref_id_snapshot
+		LEFT JOIN task_assets formal_ta ON formal_ta.id = rr.formal_task_asset_id
+		LEFT JOIN asset_storage_refs formal_asr ON formal_asr.ref_id = formal_ta.storage_ref_id
+		WHERE ` + baseClause + `
+		  AND f.task_id = g.task_id
+		  AND rr.ref_id_snapshot = f.ref_id
+		  AND rr.scope_snapshot = CASE
+		    WHEN f.retouch_requirement_id IS NOT NULL THEN CONCAT('retouch_requirement:', f.retouch_requirement_id)
+		    WHEN f.sku_item_id IS NOT NULL THEN CONCAT('sku:', f.sku_item_id)
+		    ELSE 'task'
+		  END
+		  AND (
+		    (f.sku_item_id IS NULL AND f.retouch_requirement_id IS NULL)
+		    OR (g.scope_kind = 'sku' AND f.sku_item_id = g.task_sku_item_id AND f.retouch_requirement_id IS NULL)
+		    OR (g.scope_kind = 'retouch_requirement' AND f.sku_item_id IS NULL AND f.retouch_requirement_id = g.retouch_requirement_id)
+		  )
+		  AND asr.ref_id IS NOT NULL
+		  AND COALESCE(asr.status, '') NOT IN ('archived', 'historical_unavailable')
+		  AND (
+		    rr.formal_task_asset_id IS NULL
+		    OR (
+		      formal_ta.id IS NOT NULL AND formal_ta.task_id = g.task_id
+		      AND formal_ta.asset_type = 'reference'
+		      AND formal_ta.binding_state = 'bound'
+		      AND (formal_ta.bound_role IS NULL OR TRIM(formal_ta.bound_role) = '')
+		      AND COALESCE(formal_ta.is_archived, 0) = 0
+		      AND formal_ta.deleted_at IS NULL AND formal_ta.cleaned_at IS NULL
+		      AND formal_ta.access_revoked_at IS NULL AND formal_ta.object_deleted_at IS NULL
+		      AND formal_ta.storage_ref_id = rr.ref_id_snapshot
+		      AND formal_asr.ref_id IS NOT NULL
+		      AND COALESCE(formal_asr.status, '') NOT IN ('archived', 'historical_unavailable')
+		    )
+		  )
+		UNION ALL
+		SELECT g.id AS group_id, g.task_id, t.task_no, COALESCE(tsi.sku_code, '') AS sku_code,
+		       'source' AS resource_role, ta.file_name, COALESCE(ta.mime_type, '') AS mime_type,
+		       COALESCE(NULLIF(ta.storage_key, ''), CASE WHEN COALESCE(asr.is_placeholder, 1) = 0 THEN NULLIF(asr.ref_key, '') END, '') AS storage_key,
+		       ta.id AS task_asset_id,
+		       g.updated_at AS group_updated_at, 2 AS role_sort, 0 AS item_sort, ta.id AS row_id
+		FROM task_asset_groups g
+		JOIN tasks t ON t.id = g.task_id
+		LEFT JOIN task_sku_items tsi ON tsi.id = g.task_sku_item_id
+		JOIN task_asset_group_revisions rev ON rev.id = g.finalized_revision_id
+		JOIN task_assets ta ON ta.id = rev.source_task_asset_id
+		LEFT JOIN asset_storage_refs asr ON asr.ref_id = ta.storage_ref_id
+		WHERE ` + baseClause + `
+		  AND ta.task_id = g.task_id AND ta.asset_type = 'source'
+		  AND ta.binding_state = 'bound' AND ta.bound_group_id = g.id AND ta.bound_role = 'source'
+		  AND COALESCE(ta.is_archived, 0) = 0
+		  AND ta.deleted_at IS NULL AND ta.cleaned_at IS NULL
+		  AND ta.access_revoked_at IS NULL AND ta.object_deleted_at IS NULL
+		  AND ta.storage_ref_id IS NOT NULL AND asr.ref_id IS NOT NULL
+		  AND COALESCE(asr.status, '') NOT IN ('archived', 'historical_unavailable')
+		UNION ALL
+		SELECT g.id AS group_id, g.task_id, t.task_no, COALESCE(tsi.sku_code, '') AS sku_code,
+		       'final' AS resource_role, ta.file_name, COALESCE(ta.mime_type, '') AS mime_type,
+		       COALESCE(NULLIF(ta.storage_key, ''), CASE WHEN COALESCE(asr.is_placeholder, 1) = 0 THEN NULLIF(asr.ref_key, '') END, '') AS storage_key,
+		       ta.id AS task_asset_id,
+		       g.updated_at AS group_updated_at, 3 AS role_sort, ri.sort_order AS item_sort, ri.id AS row_id
+		FROM task_asset_groups g
+		JOIN tasks t ON t.id = g.task_id
+		LEFT JOIN task_sku_items tsi ON tsi.id = g.task_sku_item_id
+		JOIN task_asset_group_revision_items ri ON ri.revision_id = g.finalized_revision_id
+		JOIN task_assets ta ON ta.id = ri.task_asset_id
+		LEFT JOIN asset_storage_refs asr ON asr.ref_id = ta.storage_ref_id
+		WHERE ` + baseClause + `
+		  AND ta.task_id = g.task_id AND ta.asset_type = 'delivery'
+		  AND ta.binding_state = 'bound' AND ta.bound_group_id = g.id AND ta.bound_role = 'final'
+		  AND COALESCE(ta.is_archived, 0) = 0
+		  AND ta.deleted_at IS NULL AND ta.cleaned_at IS NULL
+		  AND ta.access_revoked_at IS NULL AND ta.object_deleted_at IS NULL
+		  AND ta.storage_ref_id IS NOT NULL AND asr.ref_id IS NOT NULL
+		  AND COALESCE(asr.status, '') NOT IN ('archived', 'historical_unavailable')
+	)`
+	unionArgs := make([]interface{}, 0, len(baseArgs)*3)
+	for range 3 {
+		unionArgs = append(unionArgs, baseArgs...)
+	}
+	flatWhere := []string{"1 = 1"}
+	flatArgs := make([]interface{}, 0, 12)
+	if params.ResourceRole != "" {
+		flatWhere = append(flatWhere, "flat.resource_role = ?")
+		flatArgs = append(flatArgs, params.ResourceRole)
+	}
+	if value := strings.TrimSpace(params.Query); value != "" {
+		like := "%" + value + "%"
+		flatWhere = append(flatWhere, `(
+			flat.task_no LIKE ? OR flat.sku_code LIKE ? OR flat.file_name LIKE ?
+			OR EXISTS (
+				SELECT 1 FROM task_asset_group_search_documents doc
+				WHERE doc.group_id = flat.group_id AND (doc.internal_text LIKE ? OR doc.final_text LIKE ?)
+			)
+		)`)
+		flatArgs = append(flatArgs, like, like, like, like, like)
+	}
+	if normalizeAssetFormatCategoryForSQL(params.FormatCategory) != domain.AssetFormatCategoryAll {
+		flatWhere, flatArgs = appendAssetFormatCategoryWhere(
+			flatWhere, flatArgs,
+			[]string{"LOWER(flat.file_name)"}, "LOWER(COALESCE(flat.mime_type, ''))", params.FormatCategory,
+		)
+	}
+	flatClause := strings.Join(flatWhere, " AND ")
+	filterArgs := append(append([]interface{}{}, unionArgs...), flatArgs...)
+
+	var total int64
+	if err := r.db.db.QueryRowContext(ctx, flatCTE+`
+		SELECT COUNT(*) FROM flat_resources flat WHERE `+flatClause, filterArgs...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+	page := params.Page
+	if page <= 0 {
+		page = 1
+	}
+	pageSize := params.PageSize
+	if pageSize <= 0 {
+		pageSize = 50
+	}
+	queryArgs := append(append([]interface{}{}, filterArgs...), pageSize, (page-1)*pageSize)
+	rows, err := r.db.db.QueryContext(ctx, flatCTE+`
+		SELECT flat.group_id, flat.task_id, flat.task_no, flat.sku_code, flat.resource_role,
+		       flat.file_name, flat.mime_type, flat.storage_key, flat.task_asset_id
+		FROM flat_resources flat
+		WHERE `+flatClause+`
+		ORDER BY flat.group_updated_at DESC, flat.group_id DESC, flat.role_sort, flat.item_sort, flat.row_id
+		LIMIT ? OFFSET ?`, queryArgs...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+	items := make([]domain.FlatResourceItem, 0, pageSize)
+	for rows.Next() {
+		var item domain.FlatResourceItem
+		if err := rows.Scan(&item.GroupID, &item.TaskID, &item.TaskNo, &item.SKUCode, &item.ResourceRole,
+			&item.FileName, &item.MimeType, &item.StorageKey, &item.TaskAssetID); err != nil {
+			return nil, 0, err
+		}
+		items = append(items, item)
+	}
 	return items, total, rows.Err()
+}
+
+func (r *TaskResourceGroupRepo) validateFlatResourceIntegrity(ctx context.Context, baseClause string, baseArgs []interface{}) error {
+	query := `SELECT violation_code, entity_id
+		FROM (
+			SELECT 'source_ownership' AS violation_code, rev.id AS entity_id
+			FROM task_asset_groups g
+			JOIN tasks t ON t.id = g.task_id
+			LEFT JOIN task_sku_items tsi ON tsi.id = g.task_sku_item_id
+			JOIN task_asset_group_revisions rev ON rev.id = g.finalized_revision_id
+			LEFT JOIN task_assets ta ON ta.id = rev.source_task_asset_id
+			LEFT JOIN asset_storage_refs asr ON asr.ref_id = ta.storage_ref_id
+			WHERE ` + baseClause + `
+			  AND rev.source_task_asset_id IS NOT NULL
+			  AND (
+			    ta.id IS NULL OR ta.task_id <> g.task_id OR ta.asset_type <> 'source'
+			    OR ta.binding_state <> 'bound'
+			    OR ta.bound_group_id IS NULL OR ta.bound_group_id <> g.id
+			    OR ta.bound_role IS NULL OR ta.bound_role <> 'source'
+			    OR COALESCE(ta.is_archived, 0) <> 0
+			    OR ta.deleted_at IS NOT NULL OR ta.cleaned_at IS NOT NULL
+			    OR ta.access_revoked_at IS NOT NULL OR ta.object_deleted_at IS NOT NULL
+			    OR ta.storage_ref_id IS NULL OR asr.ref_id IS NULL
+			    OR COALESCE(asr.status, '') IN ('archived', 'historical_unavailable')
+			  )
+			UNION ALL
+			SELECT 'final_ownership' AS violation_code, ri.id AS entity_id
+			FROM task_asset_groups g
+			JOIN tasks t ON t.id = g.task_id
+			LEFT JOIN task_sku_items tsi ON tsi.id = g.task_sku_item_id
+			JOIN task_asset_group_revision_items ri ON ri.revision_id = g.finalized_revision_id
+			LEFT JOIN task_assets ta ON ta.id = ri.task_asset_id
+			LEFT JOIN asset_storage_refs asr ON asr.ref_id = ta.storage_ref_id
+			WHERE ` + baseClause + `
+			  AND (
+			    ta.id IS NULL OR ta.task_id <> g.task_id OR ta.asset_type <> 'delivery'
+			    OR ta.binding_state <> 'bound'
+			    OR ta.bound_group_id IS NULL OR ta.bound_group_id <> g.id
+			    OR ta.bound_role IS NULL OR ta.bound_role <> 'final'
+			    OR COALESCE(ta.is_archived, 0) <> 0
+			    OR ta.deleted_at IS NOT NULL OR ta.cleaned_at IS NOT NULL
+			    OR ta.access_revoked_at IS NOT NULL OR ta.object_deleted_at IS NOT NULL
+			    OR ta.storage_ref_id IS NULL OR asr.ref_id IS NULL
+			    OR COALESCE(asr.status, '') IN ('archived', 'historical_unavailable')
+			  )
+			UNION ALL
+			SELECT 'reference_ownership' AS violation_code, rr.id AS entity_id
+			FROM task_asset_groups g
+			JOIN tasks t ON t.id = g.task_id
+			LEFT JOIN task_sku_items tsi ON tsi.id = g.task_sku_item_id
+			JOIN task_asset_group_revision_references rr ON rr.revision_id = g.finalized_revision_id
+			LEFT JOIN reference_file_refs f ON f.id = rr.reference_file_ref_id
+			LEFT JOIN asset_storage_refs asr ON asr.ref_id = rr.ref_id_snapshot
+			LEFT JOIN task_assets formal_ta ON formal_ta.id = rr.formal_task_asset_id
+			LEFT JOIN asset_storage_refs formal_asr ON formal_asr.ref_id = formal_ta.storage_ref_id
+			WHERE ` + baseClause + `
+			  AND (
+			    f.id IS NULL OR f.task_id <> g.task_id OR rr.ref_id_snapshot <> f.ref_id
+			    OR rr.scope_snapshot <> CASE
+			      WHEN f.retouch_requirement_id IS NOT NULL THEN CONCAT('retouch_requirement:', f.retouch_requirement_id)
+			      WHEN f.sku_item_id IS NOT NULL THEN CONCAT('sku:', f.sku_item_id)
+			      ELSE 'task'
+			    END
+			    OR NOT (
+			      (f.sku_item_id IS NULL AND f.retouch_requirement_id IS NULL)
+			      OR (g.scope_kind = 'sku' AND f.sku_item_id = g.task_sku_item_id AND f.retouch_requirement_id IS NULL)
+			      OR (g.scope_kind = 'retouch_requirement' AND f.sku_item_id IS NULL AND f.retouch_requirement_id = g.retouch_requirement_id)
+			    )
+			    OR (
+			      rr.formal_task_asset_id IS NOT NULL
+			      AND (
+			        formal_ta.id IS NULL OR formal_ta.task_id <> g.task_id
+			        OR formal_ta.asset_type <> 'reference'
+			        OR formal_ta.binding_state <> 'bound'
+			        OR (formal_ta.bound_role IS NOT NULL AND TRIM(formal_ta.bound_role) <> '')
+			        OR COALESCE(formal_ta.is_archived, 0) <> 0
+			        OR formal_ta.deleted_at IS NOT NULL OR formal_ta.cleaned_at IS NOT NULL
+			        OR formal_ta.access_revoked_at IS NOT NULL OR formal_ta.object_deleted_at IS NOT NULL
+			        OR formal_ta.storage_ref_id IS NULL
+			        OR formal_ta.storage_ref_id <> rr.ref_id_snapshot
+			        OR formal_asr.ref_id IS NULL
+			      )
+			    )
+			    OR asr.ref_id IS NULL
+			    OR COALESCE(asr.status, '') IN ('archived', 'historical_unavailable')
+			    OR (
+			      rr.formal_task_asset_id IS NOT NULL
+			      AND COALESCE(formal_asr.status, '') IN ('archived', 'historical_unavailable')
+			    )
+			  )
+		) violations
+		ORDER BY violation_code, entity_id
+		LIMIT 1`
+	args := make([]interface{}, 0, len(baseArgs)*3)
+	for range 3 {
+		args = append(args, baseArgs...)
+	}
+	var violationCode string
+	var entityID int64
+	err := r.db.db.QueryRowContext(ctx, query, args...).Scan(&violationCode, &entityID)
+	if err == sql.ErrNoRows {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	return fmt.Errorf(
+		"%w: flat resource read model %s at entity %d",
+		repo.ErrDataIntegrity, violationCode, entityID,
+	)
 }
 
 func appendResourceGroupAccessScope(where []string, args []interface{}, access domain.ResourceGroupAccessFilter) ([]string, []interface{}) {
@@ -325,10 +636,13 @@ func (r *TaskResourceGroupRepo) GetResourceGroup(ctx context.Context, groupID in
 		SELECT g.id, g.task_id, g.scope_kind, g.task_sku_item_id, g.retouch_requirement_id,
 		       g.working_revision_id, g.finalized_revision_id, g.lock_version,
 		       g.migration_incomplete, g.migration_issue, g.created_at, g.updated_at,
-		       t.task_no, COALESCE(tsi.sku_code, ''), t.business_lane
+		       t.task_no, COALESCE(tsi.sku_code, ''),
+		       COALESCE(NULLIF(tsi.product_short_name, ''), NULLIF(tsi.product_name_snapshot, ''), NULLIF(t.product_name_snapshot, ''), ''),
+		       t.creator_id, COALESCE(NULLIF(u.display_name, ''), NULLIF(u.username, ''), ''), t.business_lane
 		FROM task_asset_groups g
 		JOIN tasks t ON t.id = g.task_id
 		LEFT JOIN task_sku_items tsi ON tsi.id = g.task_sku_item_id
+		LEFT JOIN users u ON u.id = t.creator_id
 		WHERE g.id = ?`, groupID)
 	item, err := scanTaskResourceGroup(row)
 	if err == sql.ErrNoRows {
@@ -337,19 +651,67 @@ func (r *TaskResourceGroupRepo) GetResourceGroup(ctx context.Context, groupID in
 	if err != nil {
 		return nil, err
 	}
-	if item.WorkingRevisionID != nil {
-		item.WorkingRevision, err = r.getRevision(ctx, *item.WorkingRevisionID)
-		if err != nil {
-			return nil, err
-		}
+	groups := []domain.TaskAssetGroup{*item}
+	if err := r.hydrateResourceGroupRevisions(ctx, groups); err != nil {
+		return nil, err
 	}
-	if item.FinalizedRevisionID != nil {
-		item.FinalizedRevision, err = r.getRevision(ctx, *item.FinalizedRevisionID)
-		if err != nil {
-			return nil, err
-		}
+	return &groups[0], nil
+}
+
+func (r *TaskResourceGroupRepo) ListResourceGroupRevisions(ctx context.Context, groupID int64, page, pageSize int) ([]domain.TaskAssetGroupRevision, int64, error) {
+	var total int64
+	if err := r.db.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM task_asset_group_revisions WHERE group_id = ?`, groupID).Scan(&total); err != nil {
+		return nil, 0, err
 	}
-	return item, nil
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 50
+	}
+	if pageSize > 200 {
+		pageSize = 200
+	}
+	rows, err := r.db.db.QueryContext(ctx, `
+		SELECT id
+		FROM task_asset_group_revisions
+		WHERE group_id = ?
+		ORDER BY revision_no DESC, id DESC LIMIT ? OFFSET ?`, groupID, pageSize, (page-1)*pageSize)
+	if err != nil {
+		return nil, 0, err
+	}
+	revisionIDs := make([]int64, 0, pageSize)
+	for rows.Next() {
+		var revisionID int64
+		if err := rows.Scan(&revisionID); err != nil {
+			rows.Close()
+			return nil, 0, err
+		}
+		revisionIDs = append(revisionIDs, revisionID)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, 0, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, 0, err
+	}
+	if len(revisionIDs) == 0 {
+		return []domain.TaskAssetGroupRevision{}, total, nil
+	}
+	revisions, err := r.loadResourceGroupRevisions(ctx, revisionIDs)
+	if err != nil {
+		return nil, 0, err
+	}
+	items := make([]domain.TaskAssetGroupRevision, 0, len(revisionIDs))
+	for _, revisionID := range revisionIDs {
+		revision := revisions[revisionID]
+		if revision == nil {
+			return nil, 0, fmt.Errorf("%w: list resource group revisions: revision %d was not hydrated", repo.ErrDataIntegrity, revisionID)
+		}
+		items = append(items, *revision)
+	}
+	return items, total, nil
 }
 
 func (r *TaskResourceGroupRepo) GetTaskAccessSubject(ctx context.Context, taskID int64) (domain.TaskAccessSubject, error) {
@@ -377,7 +739,7 @@ func scanTaskResourceGroup(scanner resourceGroupScanner) (*domain.TaskAssetGroup
 	var skuID, retouchID, workingID, finalizedID sql.NullInt64
 	if err := scanner.Scan(&item.ID, &item.TaskID, &item.ScopeKind, &skuID, &retouchID, &workingID, &finalizedID,
 		&item.LockVersion, &item.MigrationIncomplete, &item.MigrationIssue, &item.CreatedAt, &item.UpdatedAt,
-		&item.TaskNo, &item.SKUCode, &item.BusinessLane); err != nil {
+		&item.TaskNo, &item.SKUCode, &item.ProductName, &item.CreatorID, &item.CreatorName, &item.BusinessLane); err != nil {
 		return nil, err
 	}
 	item.TaskSKUItemID = fromNullInt64(skuID)
@@ -387,76 +749,401 @@ func scanTaskResourceGroup(scanner resourceGroupScanner) (*domain.TaskAssetGroup
 	return &item, nil
 }
 
-func (r *TaskResourceGroupRepo) getRevision(ctx context.Context, revisionID int64) (*domain.TaskAssetGroupRevision, error) {
-	var item domain.TaskAssetGroupRevision
-	var sourceID sql.NullInt64
-	var submittedAt, finalizedAt sql.NullTime
-	err := r.db.db.QueryRowContext(ctx, `
-		SELECT id, group_id, revision_no, status, mode, source_task_asset_id, source_stage,
-		       created_by, reason, submitted_at, finalized_at, created_at
-		FROM task_asset_group_revisions WHERE id = ?`, revisionID).
-		Scan(&item.ID, &item.GroupID, &item.RevisionNo, &item.Status, &item.Mode, &sourceID, &item.SourceStage,
-			&item.CreatedBy, &item.Reason, &submittedAt, &finalizedAt, &item.CreatedAt)
-	if err != nil {
+func (r *TaskResourceGroupRepo) loadResourceGroupRevisions(ctx context.Context, revisionIDs []int64) (map[int64]*domain.TaskAssetGroupRevision, error) {
+	revisionIDs = uniquePositiveInt64s(revisionIDs)
+	groups := make([]domain.TaskAssetGroup, len(revisionIDs))
+	for index, revisionID := range revisionIDs {
+		id := revisionID
+		groups[index].WorkingRevisionID = &id
+	}
+	if err := r.hydrateHistoricalResourceGroupRevisions(ctx, groups); err != nil {
 		return nil, err
 	}
-	item.SourceTaskAssetID = fromNullInt64(sourceID)
-	item.SubmittedAt = fromNullTime(submittedAt)
-	item.FinalizedAt = fromNullTime(finalizedAt)
+	revisions := make(map[int64]*domain.TaskAssetGroupRevision, len(groups))
+	for index, group := range groups {
+		if group.WorkingRevision == nil {
+			return nil, fmt.Errorf("%w: load resource group revisions: revision %d was not hydrated", repo.ErrDataIntegrity, revisionIDs[index])
+		}
+		revisions[group.WorkingRevision.ID] = group.WorkingRevision
+	}
+	return revisions, nil
+}
+
+func (r *TaskResourceGroupRepo) hydrateResourceGroupRevisions(ctx context.Context, groups []domain.TaskAssetGroup) error {
+	return r.hydrateResourceGroupRevisionsWithPolicy(ctx, groups, false)
+}
+
+func (r *TaskResourceGroupRepo) hydrateHistoricalResourceGroupRevisions(ctx context.Context, groups []domain.TaskAssetGroup) error {
+	return r.hydrateResourceGroupRevisionsWithPolicy(ctx, groups, true)
+}
+
+func (r *TaskResourceGroupRepo) hydrateResourceGroupRevisionsWithPolicy(ctx context.Context, groups []domain.TaskAssetGroup, allowMissingFiles bool) error {
+	type revisionOwner struct {
+		taskID               int64
+		scopeKind            domain.TaskAssetGroupScopeKind
+		taskSKUItemID        *int64
+		retouchRequirementID *int64
+	}
+	type assetOwnership struct {
+		taskID       int64
+		assetType    domain.TaskAssetType
+		boundGroupID *int64
+		boundRole    *string
+	}
+	revisionIDs := make([]int64, 0, len(groups)*2)
+	for index := range groups {
+		if groups[index].WorkingRevisionID != nil {
+			revisionIDs = append(revisionIDs, *groups[index].WorkingRevisionID)
+		}
+		if groups[index].FinalizedRevisionID != nil {
+			revisionIDs = append(revisionIDs, *groups[index].FinalizedRevisionID)
+		}
+	}
+	revisionIDs = uniquePositiveInt64s(revisionIDs)
+	if len(revisionIDs) == 0 {
+		return nil
+	}
+	revisionArgs := make([]interface{}, len(revisionIDs))
+	for index, id := range revisionIDs {
+		revisionArgs[index] = id
+	}
+	revisions := make(map[int64]*domain.TaskAssetGroupRevision, len(revisionIDs))
+	revisionOwners := make(map[int64]revisionOwner, len(revisionIDs))
 	rows, err := r.db.db.QueryContext(ctx, `
-		SELECT id, revision_id, task_asset_id, sort_order, item_name, created_at
-		FROM task_asset_group_revision_items WHERE revision_id = ? ORDER BY sort_order, id`, revisionID)
+		SELECT r.id, r.group_id, r.revision_no, r.status, r.mode, r.source_task_asset_id, r.source_stage,
+		       r.created_by, COALESCE(NULLIF(u.display_name, ''), NULLIF(u.username, ''), ''),
+		       r.reason, r.submitted_at, r.finalized_at, r.created_at,
+		       g.task_id, g.scope_kind, g.task_sku_item_id, g.retouch_requirement_id
+		FROM task_asset_group_revisions r
+		JOIN task_asset_groups g ON g.id = r.group_id
+		LEFT JOIN users u ON u.id = r.created_by
+		WHERE r.id IN (`+resourceGroupPlaceholders(len(revisionIDs))+`)`, revisionArgs...)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	for rows.Next() {
-		var child domain.TaskAssetGroupRevisionItem
-		if err := rows.Scan(&child.ID, &child.RevisionID, &child.TaskAssetID, &child.SortOrder, &child.ItemName, &child.CreatedAt); err != nil {
-			rows.Close()
-			return nil, err
+		item := &domain.TaskAssetGroupRevision{
+			Items:      []domain.TaskAssetGroupRevisionItem{},
+			References: []domain.TaskAssetGroupRevisionReference{},
 		}
-		item.Items = append(item.Items, child)
+		var sourceID sql.NullInt64
+		var submittedAt, finalizedAt sql.NullTime
+		var taskSKUItemID, retouchRequirementID sql.NullInt64
+		var owner revisionOwner
+		if err := rows.Scan(&item.ID, &item.GroupID, &item.RevisionNo, &item.Status, &item.Mode, &sourceID, &item.SourceStage,
+			&item.CreatedBy, &item.CreatedByName, &item.Reason, &submittedAt, &finalizedAt, &item.CreatedAt,
+			&owner.taskID, &owner.scopeKind, &taskSKUItemID, &retouchRequirementID); err != nil {
+			rows.Close()
+			return err
+		}
+		owner.taskSKUItemID = fromNullInt64(taskSKUItemID)
+		owner.retouchRequirementID = fromNullInt64(retouchRequirementID)
+		item.SourceTaskAssetID = fromNullInt64(sourceID)
+		item.SubmittedAt = fromNullTime(submittedAt)
+		item.FinalizedAt = fromNullTime(finalizedAt)
+		revisions[item.ID] = item
+		revisionOwners[item.ID] = owner
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
 	}
 	if err := rows.Close(); err != nil {
-		return nil, err
+		return err
+	}
+	if len(revisions) != len(revisionIDs) {
+		return fmt.Errorf("%w: hydrate resource group revisions: expected %d rows, got %d", repo.ErrDataIntegrity, len(revisionIDs), len(revisions))
+	}
+	assetIDs := make([]int64, 0, len(revisions)*2)
+	itemRows, err := r.db.db.QueryContext(ctx, `
+		SELECT id, revision_id, task_asset_id, sort_order, item_name, created_at
+		FROM task_asset_group_revision_items
+		WHERE revision_id IN (`+resourceGroupPlaceholders(len(revisionIDs))+`)
+		ORDER BY revision_id, sort_order, id`, revisionArgs...)
+	if err != nil {
+		return err
+	}
+	for itemRows.Next() {
+		var child domain.TaskAssetGroupRevisionItem
+		if err := itemRows.Scan(&child.ID, &child.RevisionID, &child.TaskAssetID, &child.SortOrder, &child.ItemName, &child.CreatedAt); err != nil {
+			itemRows.Close()
+			return err
+		}
+		if revision := revisions[child.RevisionID]; revision != nil {
+			revision.Items = append(revision.Items, child)
+			assetIDs = append(assetIDs, child.TaskAssetID)
+		}
+	}
+	if err := itemRows.Err(); err != nil {
+		itemRows.Close()
+		return err
+	}
+	if err := itemRows.Close(); err != nil {
+		return err
 	}
 	refRows, err := r.db.db.QueryContext(ctx, `
-		SELECT id, revision_id, reference_file_ref_id, formal_task_asset_id, sort_order,
-		       ref_id_snapshot, file_name_snapshot, scope_snapshot, created_at
-		FROM task_asset_group_revision_references WHERE revision_id = ? ORDER BY sort_order, id`, revisionID)
+		SELECT rr.id, rr.revision_id, rr.reference_file_ref_id, rr.formal_task_asset_id, rr.sort_order,
+		       rr.ref_id_snapshot, rr.file_name_snapshot, rr.scope_snapshot,
+		       COALESCE(asr.mime_type, ''), asr.file_size,
+		       CASE WHEN COALESCE(asr.is_placeholder, 1) = 0 THEN COALESCE(asr.ref_key, '') ELSE '' END,
+		       COALESCE(asr.status, ''),
+		       COALESCE(formal_asr.status, ''),
+		       CASE
+		         WHEN rr.formal_task_asset_id IS NULL THEN 1
+		         WHEN formal_ta.id IS NOT NULL
+		              AND formal_ta.binding_state = 'bound'
+		              AND COALESCE(formal_ta.is_archived, 0) = 0
+		              AND formal_ta.deleted_at IS NULL
+		              AND formal_ta.cleaned_at IS NULL
+		              AND formal_ta.access_revoked_at IS NULL
+		              AND formal_ta.object_deleted_at IS NULL
+		              AND formal_ta.storage_ref_id IS NOT NULL
+		              AND formal_asr.ref_id IS NOT NULL
+		              AND COALESCE(formal_asr.status, '') NOT IN ('archived', 'historical_unavailable')
+		           THEN 1
+		         ELSE 0
+		       END,
+		       rr.created_at,
+		       f.task_id, f.sku_item_id, f.retouch_requirement_id, f.ref_id,
+		       formal_ta.task_id, formal_ta.binding_state, formal_ta.asset_type,
+		       formal_ta.bound_role, formal_ta.storage_ref_id, asr.ref_id
+		FROM task_asset_group_revision_references rr
+		LEFT JOIN reference_file_refs f ON f.id = rr.reference_file_ref_id
+		LEFT JOIN asset_storage_refs asr ON asr.ref_id = rr.ref_id_snapshot
+		LEFT JOIN task_assets formal_ta ON formal_ta.id = rr.formal_task_asset_id
+		LEFT JOIN asset_storage_refs formal_asr ON formal_asr.ref_id = formal_ta.storage_ref_id
+		WHERE rr.revision_id IN (`+resourceGroupPlaceholders(len(revisionIDs))+`)
+		ORDER BY rr.revision_id, rr.sort_order, rr.id`, revisionArgs...)
 	if err != nil {
-		return nil, err
+		return err
 	}
+	unavailableReferenceCount := 0
 	for refRows.Next() {
 		var child domain.TaskAssetGroupRevisionReference
 		var formalID sql.NullInt64
+		var fileSize sql.NullInt64
+		var snapshotStatus, formalStatus sql.NullString
+		var formalTaskAssetActive bool
+		var referenceTaskID sql.NullInt64
+		var referenceSKUItemID, referenceRetouchRequirementID sql.NullInt64
+		var referenceRefID sql.NullString
+		var formalTaskID sql.NullInt64
+		var formalBindingState, formalAssetType, formalBoundRole sql.NullString
+		var formalStorageRefID, snapshotStorageRefID sql.NullString
 		if err := refRows.Scan(&child.ID, &child.RevisionID, &child.ReferenceFileRefID, &formalID, &child.SortOrder,
-			&child.RefIDSnapshot, &child.FileNameSnapshot, &child.ScopeSnapshot, &child.CreatedAt); err != nil {
-			return nil, err
+			&child.RefIDSnapshot, &child.FileNameSnapshot, &child.ScopeSnapshot, &child.MimeType, &fileSize,
+			&child.StorageKey, &snapshotStatus, &formalStatus, &formalTaskAssetActive, &child.CreatedAt,
+			&referenceTaskID, &referenceSKUItemID, &referenceRetouchRequirementID, &referenceRefID,
+			&formalTaskID, &formalBindingState, &formalAssetType, &formalBoundRole,
+			&formalStorageRefID, &snapshotStorageRefID); err != nil {
+			refRows.Close()
+			return err
 		}
 		child.FormalTaskAssetID = fromNullInt64(formalID)
-		item.References = append(item.References, child)
+		child.FileSize = fromNullInt64(fileSize)
+		owner, ownerExists := revisionOwners[child.RevisionID]
+		referenceScopeMatches := !referenceSKUItemID.Valid && !referenceRetouchRequirementID.Valid
+		referenceScopeSnapshot := "task"
+		if !referenceScopeMatches {
+			switch owner.scopeKind {
+			case domain.TaskAssetGroupScopeSKU:
+				referenceScopeMatches = owner.taskSKUItemID != nil &&
+					referenceSKUItemID.Valid &&
+					!referenceRetouchRequirementID.Valid &&
+					*owner.taskSKUItemID == referenceSKUItemID.Int64
+				referenceScopeSnapshot = fmt.Sprintf("sku:%d", referenceSKUItemID.Int64)
+			case domain.TaskAssetGroupScopeRetouch:
+				referenceScopeMatches = owner.retouchRequirementID != nil &&
+					!referenceSKUItemID.Valid &&
+					referenceRetouchRequirementID.Valid &&
+					*owner.retouchRequirementID == referenceRetouchRequirementID.Int64
+				referenceScopeSnapshot = fmt.Sprintf("retouch_requirement:%d", referenceRetouchRequirementID.Int64)
+			}
+		}
+		if !ownerExists ||
+			!referenceTaskID.Valid ||
+			referenceTaskID.Int64 != owner.taskID ||
+			!referenceScopeMatches ||
+			!referenceRefID.Valid ||
+			child.RefIDSnapshot != referenceRefID.String ||
+			child.ScopeSnapshot != referenceScopeSnapshot ||
+			!snapshotStorageRefID.Valid ||
+			snapshotStorageRefID.String != child.RefIDSnapshot ||
+			(child.FormalTaskAssetID != nil &&
+				(!formalTaskID.Valid ||
+					formalTaskID.Int64 != owner.taskID ||
+					!formalBindingState.Valid ||
+					formalBindingState.String != "bound" ||
+					!formalAssetType.Valid ||
+					domain.NormalizeTaskAssetType(domain.TaskAssetType(formalAssetType.String)) != domain.TaskAssetTypeReference ||
+					(formalBoundRole.Valid && strings.TrimSpace(formalBoundRole.String) != "") ||
+					!formalStorageRefID.Valid ||
+					formalStorageRefID.String != child.RefIDSnapshot)) {
+			refRows.Close()
+			return fmt.Errorf(
+				"%w: resource group reference %d is outside revision %d ownership",
+				repo.ErrDataIntegrity, child.ID, child.RevisionID,
+			)
+		}
+		child.Availability = domain.TaskResourceFileAvailable
+		snapshotUnavailable := domain.AssetStorageRefStatus(snapshotStatus.String) == domain.AssetStorageRefStatusArchived ||
+			domain.AssetStorageRefStatus(snapshotStatus.String) == domain.AssetStorageRefStatusHistoricalUnavailable
+		formalUnavailable := child.FormalTaskAssetID != nil &&
+			(!formalTaskAssetActive ||
+				domain.AssetStorageRefStatus(formalStatus.String) == domain.AssetStorageRefStatusArchived ||
+				domain.AssetStorageRefStatus(formalStatus.String) == domain.AssetStorageRefStatusHistoricalUnavailable)
+		if snapshotUnavailable || formalUnavailable {
+			child.Availability = domain.TaskResourceFileHistoricalUnavailable
+			child.UnavailableReason = "legacy_original_object_missing"
+			child.StorageKey = ""
+			unavailableReferenceCount++
+		}
+		if revision := revisions[child.RevisionID]; revision != nil {
+			revision.References = append(revision.References, child)
+		}
 	}
 	if err := refRows.Err(); err != nil {
 		refRows.Close()
-		return nil, err
+		return err
 	}
 	if err := refRows.Close(); err != nil {
-		return nil, err
+		return err
 	}
-	if item.SourceTaskAssetID != nil {
-		item.SourceFile, err = r.getResourceFile(ctx, *item.SourceTaskAssetID)
-		if err != nil {
-			return nil, err
+	if !allowMissingFiles && unavailableReferenceCount > 0 {
+		return fmt.Errorf("%w: hydrate current resource group references: expected every reference to be available, got %d historical-unavailable rows", repo.ErrDataIntegrity, unavailableReferenceCount)
+	}
+	for _, revision := range revisions {
+		if revision.SourceTaskAssetID != nil {
+			assetIDs = append(assetIDs, *revision.SourceTaskAssetID)
 		}
 	}
-	for index := range item.Items {
-		item.Items[index].File, err = r.getResourceFile(ctx, item.Items[index].TaskAssetID)
+	assetIDs = uniquePositiveInt64s(assetIDs)
+	files := make(map[int64]*domain.TaskResourceFile, len(assetIDs))
+	assetOwnerships := make(map[int64]assetOwnership, len(assetIDs))
+	unavailableFileCount := 0
+	if len(assetIDs) > 0 {
+		assetArgs := make([]interface{}, len(assetIDs))
+		for index, id := range assetIDs {
+			assetArgs[index] = id
+		}
+		fileRows, err := r.db.db.QueryContext(ctx, `
+			SELECT ta.id, ta.file_name, ta.mime_type, ta.file_size,
+			       COALESCE(NULLIF(ta.storage_key, ''), NULLIF(asr.ref_key, '')),
+			       COALESCE(asr.status, ''),
+			       CASE
+			         WHEN COALESCE(ta.is_archived, 0) = 0
+			              AND ta.deleted_at IS NULL
+			              AND ta.cleaned_at IS NULL
+			              AND ta.access_revoked_at IS NULL
+			              AND ta.object_deleted_at IS NULL
+			              AND ta.storage_ref_id IS NOT NULL
+			              AND asr.ref_id IS NOT NULL
+			              AND COALESCE(asr.status, '') NOT IN ('archived', 'historical_unavailable')
+			           THEN 1
+			         ELSE 0
+			       END,
+			       ta.task_id, ta.asset_type, ta.bound_group_id, ta.bound_role
+			FROM task_assets ta
+			LEFT JOIN asset_storage_refs asr ON asr.ref_id = ta.storage_ref_id
+			WHERE ta.id IN (`+resourceGroupPlaceholders(len(assetIDs))+`)
+			  AND ta.binding_state = 'bound'`, assetArgs...)
 		if err != nil {
-			return nil, err
+			return err
+		}
+		for fileRows.Next() {
+			file := &domain.TaskResourceFile{}
+			var mimeType, storageKey, storageRefStatus sql.NullString
+			var fileSize sql.NullInt64
+			var owner assetOwnership
+			var boundGroupID sql.NullInt64
+			var boundRole sql.NullString
+			var fileActive bool
+			if err := fileRows.Scan(&file.TaskAssetID, &file.FileName, &mimeType, &fileSize, &storageKey, &storageRefStatus, &fileActive,
+				&owner.taskID, &owner.assetType, &boundGroupID, &boundRole); err != nil {
+				fileRows.Close()
+				return err
+			}
+			owner.boundGroupID = fromNullInt64(boundGroupID)
+			if boundRole.Valid {
+				role := boundRole.String
+				owner.boundRole = &role
+			}
+			file.MimeType = mimeType.String
+			file.FileSize = fromNullInt64(fileSize)
+			file.StorageKey = storageKey.String
+			file.Availability = domain.TaskResourceFileAvailable
+			if !fileActive ||
+				domain.AssetStorageRefStatus(storageRefStatus.String) == domain.AssetStorageRefStatusArchived ||
+				domain.AssetStorageRefStatus(storageRefStatus.String) == domain.AssetStorageRefStatusHistoricalUnavailable {
+				file.Availability = domain.TaskResourceFileHistoricalUnavailable
+				file.UnavailableReason = "legacy_original_object_missing"
+				file.StorageKey = ""
+				unavailableFileCount++
+			}
+			files[file.TaskAssetID] = file
+			assetOwnerships[file.TaskAssetID] = owner
+		}
+		if err := fileRows.Err(); err != nil {
+			fileRows.Close()
+			return err
+		}
+		if err := fileRows.Close(); err != nil {
+			return err
+		}
+		if len(files) != len(assetIDs) {
+			return fmt.Errorf("%w: hydrate resource group files: expected %d explicit active bound rows, got %d", repo.ErrDataIntegrity, len(assetIDs), len(files))
+		}
+		if !allowMissingFiles && unavailableFileCount > 0 {
+			return fmt.Errorf("%w: hydrate current resource group files: expected all %d files to be available, got %d historical-unavailable rows", repo.ErrDataIntegrity, len(assetIDs), unavailableFileCount)
+		}
+		// Historical pages tolerate only explicit historical-unavailable
+		// tombstones. Any absent/inactive row remains a fail-closed integrity
+		// error, and current working/finalized hydration rejects tombstones.
+	}
+	for _, revision := range revisions {
+		owner, ownerExists := revisionOwners[revision.ID]
+		if revision.SourceTaskAssetID != nil {
+			assetOwner := assetOwnerships[*revision.SourceTaskAssetID]
+			if !ownerExists ||
+				assetOwner.taskID != owner.taskID ||
+				assetOwner.assetType != domain.TaskAssetTypeSource ||
+				assetOwner.boundGroupID == nil ||
+				*assetOwner.boundGroupID != revision.GroupID ||
+				assetOwner.boundRole == nil ||
+				*assetOwner.boundRole != "source" {
+				return fmt.Errorf(
+					"%w: resource group revision %d source asset %d has invalid ownership",
+					repo.ErrDataIntegrity, revision.ID, *revision.SourceTaskAssetID,
+				)
+			}
+			revision.SourceFile = files[*revision.SourceTaskAssetID]
+		}
+		for index := range revision.Items {
+			assetOwner := assetOwnerships[revision.Items[index].TaskAssetID]
+			if !ownerExists ||
+				assetOwner.taskID != owner.taskID ||
+				assetOwner.assetType != domain.TaskAssetTypeDelivery ||
+				assetOwner.boundGroupID == nil ||
+				*assetOwner.boundGroupID != revision.GroupID ||
+				assetOwner.boundRole == nil ||
+				*assetOwner.boundRole != "final" {
+				return fmt.Errorf(
+					"%w: resource group revision %d final asset %d has invalid ownership",
+					repo.ErrDataIntegrity, revision.ID, revision.Items[index].TaskAssetID,
+				)
+			}
+			revision.Items[index].File = files[revision.Items[index].TaskAssetID]
 		}
 	}
-	return &item, nil
+	for index := range groups {
+		if groups[index].WorkingRevisionID != nil {
+			groups[index].WorkingRevision = revisions[*groups[index].WorkingRevisionID]
+		}
+		if groups[index].FinalizedRevisionID != nil {
+			groups[index].FinalizedRevision = revisions[*groups[index].FinalizedRevisionID]
+		}
+	}
+	return nil
 }
 
 func (r *TaskResourceGroupRepo) getResourceFile(ctx context.Context, taskAssetID int64) (*domain.TaskResourceFile, error) {
@@ -737,7 +1424,19 @@ func (r *TaskResourceGroupRepo) FinalizeGroup(ctx context.Context, tx repo.Tx, g
 	sqlTx := Unwrap(tx)
 	var previousRevisionID, previousSourceID, nextSourceID sql.NullInt64
 	if err := sqlTx.QueryRowContext(ctx, `
-		SELECT g.finalized_revision_id, previous.source_task_asset_id, next_revision.source_task_asset_id
+		SELECT g.finalized_revision_id,
+		       CASE
+		         WHEN g.finalized_revision_id IS NOT NULL THEN previous.source_task_asset_id
+		         ELSE (
+		           SELECT predecessor.source_task_asset_id
+		           FROM task_asset_group_revisions predecessor
+		           WHERE predecessor.group_id = g.id
+		             AND predecessor.revision_no < next_revision.revision_no
+		           ORDER BY predecessor.revision_no DESC
+		           LIMIT 1
+		         )
+		       END AS previous_source_task_asset_id,
+		       next_revision.source_task_asset_id
 		FROM task_asset_groups g
 		JOIN task_asset_group_revisions next_revision ON next_revision.id = ? AND next_revision.group_id = g.id
 		LEFT JOIN task_asset_group_revisions previous ON previous.id = g.finalized_revision_id

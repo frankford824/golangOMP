@@ -4,7 +4,7 @@
       <header class="modal-header">
         <div class="modal-heading">
           <h3 class="section-title">新增用户</h3>
-          <p class="modal-subtitle">创建账号、组织归属与初始工作角色</p>
+          <p class="modal-subtitle">创建账号与组织归属；工作角色在用户详情中统一配置</p>
         </div>
         <button type="button" class="modal-close" aria-label="关闭新增用户" @click="emit('close')">
           ×
@@ -31,19 +31,7 @@
             <option value="disabled">已禁用</option>
           </select>
         </div>
-        <div v-if="editableRoleGroups.length" class="role-groups mt-2">
-          <section v-for="group in editableRoleGroups" :key="'create-' + group.category" class="role-group">
-            <h4 class="role-group-title">{{ group.title }}</h4>
-            <div class="roles-grid">
-              <label v-for="role in group.roles" :key="'create-' + role.code" class="role-check">
-                <input v-model="form.roles" type="checkbox" :value="role.code" :disabled="role.code === 'Member'" />
-                <span>{{ role.display }}</span>
-                <em v-if="role.code === 'Member'">基础身份，不能移除</em>
-              </label>
-            </div>
-          </section>
-        </div>
-        <p v-else class="role-readonly-hint">当前账号没有可分配角色，新用户将使用系统默认角色。</p>
+        <p class="role-readonly-hint">新用户默认获得基础成员身份。创建后可在用户详情中勾选工作角色与数据范围。</p>
         <p v-if="error" class="action-msg">{{ error }}</p>
       </div>
       <footer class="modal-footer">
@@ -59,13 +47,12 @@
 </template>
 
 <script setup lang="ts">
-import type { CreateUserForm, RoleOptionGroup, SelectOptionItem } from './userManagementTypes'
+import type { CreateUserForm, SelectOptionItem } from './userManagementTypes'
 
 defineProps<{
   form: CreateUserForm
   departmentOptions: SelectOptionItem[]
   teamOptions: SelectOptionItem[]
-  editableRoleGroups: RoleOptionGroup[]
   error: string
   submitting: boolean
 }>()

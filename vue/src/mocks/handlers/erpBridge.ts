@@ -77,9 +77,6 @@ export const erpBridgeHandler: MockHandler = (request) => {
   if (request.method === 'GET' && request.path === '/v1/erp/warehouses') {
     return { status: 200, data: { items: [{ wms_co_id: 'WMS-1', name: '演示仓' }] } }
   }
-  if (request.method === 'GET' && request.path === '/v1/erp/users') {
-    return { status: 200, data: { items: [{ id: 'erp-user-1', name: 'ERP用户' }] } }
-  }
   if (request.method === 'POST' && request.path === '/v1/erp/products/upsert') {
     return { status: 200, data: { data: { ...request.body, upserted: true } } }
   }

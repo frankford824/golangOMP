@@ -336,6 +336,54 @@ func (s *productManagementService) GetByTaskID(ctx context.Context, taskID int64
 	return items, nil
 }
 
+// GetByTaskIDs is consumed by the task-resource read model. Production uses
+// the repository batch path; the fallback keeps test doubles and alternative
+// repositories functional without turning the resource list into a hard
+// dependency on a concrete MySQL implementation.
+func (s *productManagementService) GetByTaskIDs(ctx context.Context, taskIDs []int64) ([]*domain.ProductManagementRecord, *domain.AppError) {
+	ids := uniqueProductManagementTaskIDs(taskIDs)
+	if len(ids) == 0 {
+		return []*domain.ProductManagementRecord{}, nil
+	}
+	var (
+		items []*domain.ProductManagementRecord
+		err   error
+	)
+	if batch, ok := s.records.(interface {
+		GetByTaskIDs(context.Context, []int64) ([]*domain.ProductManagementRecord, error)
+	}); ok {
+		items, err = batch.GetByTaskIDs(ctx, ids)
+	} else {
+		for _, taskID := range ids {
+			var taskItems []*domain.ProductManagementRecord
+			taskItems, err = s.records.GetByTaskID(ctx, taskID)
+			if err != nil {
+				break
+			}
+			items = append(items, taskItems...)
+		}
+	}
+	if err != nil {
+		return nil, infraAppError("list task product profiles", err)
+	}
+	return items, nil
+}
+func uniqueProductManagementTaskIDs(values []int64) []int64 {
+	seen := make(map[int64]struct{}, len(values))
+	items := make([]int64, 0, len(values))
+	for _, value := range values {
+		if value <= 0 {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		items = append(items, value)
+	}
+	return items
+}
+
 func (s *productManagementService) ListImageCandidates(ctx context.Context, actor domain.RequestActor, recordID int64) ([]*domain.ProductManagementImageCandidate, *domain.AppError) {
 	record, appErr := s.getRecord(ctx, recordID)
 	if appErr != nil {

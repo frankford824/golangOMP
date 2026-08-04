@@ -39,10 +39,12 @@
               class="org-filter-item org-filter-item--dept"
               :class="{ 'is-active': isDepartmentActive(dept.value) }"
               @click="onSelectDepartment(dept)"
+              @contextmenu.prevent="emit('manage-policy', 'department', Number(dept.id || 0))"
             >
               <span class="org-item-name">{{ dept.label }}</span>
               <span v-if="dept.memberCount != null" class="org-count-badge">{{ dept.memberCount }}</span>
             </button>
+            <button v-if="canManagePolicy && dept.id" type="button" class="org-policy-shortcut" aria-label="设置部门默认角色" title="设置默认角色" @click.stop="emit('manage-policy', 'department', Number(dept.id))">⋯</button>
           </div>
           <div v-if="dept.teams.length && isExpanded(dept.value)" class="org-filter-teams">
             <div v-for="team in dept.teams" :key="`enabled-${dept.value}-${team.value}`" class="org-filter-row">
@@ -51,10 +53,12 @@
                 class="org-filter-item org-filter-item--team"
                 :class="{ 'is-active': isTeamActive(dept.value, team.value) }"
                 @click="$emit('select-team', dept.value, team.value)"
+                @contextmenu.prevent="emit('manage-policy', 'team', Number(team.id || 0))"
               >
                 <span class="org-item-name">{{ team.label }}</span>
                 <span v-if="team.memberCount != null" class="org-count-badge">{{ team.memberCount }}</span>
               </button>
+              <button v-if="canManagePolicy && team.id" type="button" class="org-policy-shortcut" aria-label="设置小组默认角色" title="设置默认角色" @click.stop="emit('manage-policy', 'team', Number(team.id))">⋯</button>
             </div>
           </div>
         </div>
@@ -78,11 +82,13 @@
                 class="org-filter-item org-filter-item--dept"
                 :class="{ 'is-active': isDepartmentActive(dept.value), 'is-disabled': !dept.enabled }"
                 @click="onSelectDepartment(dept)"
+                @contextmenu.prevent="emit('manage-policy', 'department', Number(dept.id || 0))"
               >
                 <span class="org-item-name">{{ dept.label }}</span>
                 <span v-if="dept.memberCount != null" class="org-count-badge">{{ dept.memberCount }}</span>
                 <span v-if="!dept.enabled" class="org-state-pill org-state-pill--off">已停用</span>
               </button>
+              <button v-if="canManagePolicy && dept.id" type="button" class="org-policy-shortcut" aria-label="设置部门默认角色" title="设置默认角色" @click.stop="emit('manage-policy', 'department', Number(dept.id))">⋯</button>
             </div>
             <div v-if="dept.teams.length" class="org-filter-teams">
               <div v-for="team in dept.teams" :key="`disabled-${dept.value}-${team.value}`" class="org-filter-row">
@@ -91,11 +97,13 @@
                   class="org-filter-item org-filter-item--team"
                   :class="{ 'is-active': isTeamActive(dept.value, team.value), 'is-disabled': !team.enabled }"
                   @click="$emit('select-team', dept.value, team.value)"
+                  @contextmenu.prevent="emit('manage-policy', 'team', Number(team.id || 0))"
                 >
                   <span class="org-item-name">{{ team.label }}</span>
                   <span v-if="team.memberCount != null" class="org-count-badge">{{ team.memberCount }}</span>
                   <span v-if="!team.enabled" class="org-state-pill org-state-pill--off">已停用</span>
                 </button>
+                <button v-if="canManagePolicy && team.id" type="button" class="org-policy-shortcut" aria-label="设置小组默认角色" title="设置默认角色" @click.stop="emit('manage-policy', 'team', Number(team.id))">⋯</button>
               </div>
             </div>
           </div>
@@ -119,12 +127,14 @@ const props = defineProps<{
   selectedTeam: string
   showAllEntry: boolean
   allActive: boolean
+  canManagePolicy?: boolean
 }>()
 
 const emit = defineEmits<{
   (e: 'select-all'): void
   (e: 'select-department', department: string): void
   (e: 'select-team', department: string, team: string): void
+  (e: 'manage-policy', subjectType: 'department' | 'team', subjectId: number): void
 }>()
 
 const searchKeyword = ref('')
@@ -318,7 +328,10 @@ watch(searchKeyword, () => {
 }
 
 .org-filter-row {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+  min-width: 0;
 }
 
 .org-filter-row--dept {
@@ -326,6 +339,23 @@ watch(searchKeyword, () => {
   align-items: center;
   gap: 0.15rem;
   min-width: 0;
+}
+
+.org-policy-shortcut {
+  flex: 0 0 auto;
+  width: 1.8rem;
+  min-height: 1.8rem;
+  border: 0;
+  border-radius: 0.4rem;
+  background: transparent;
+  color: rgb(var(--yb-text-zinc-faint));
+  cursor: pointer;
+}
+
+.org-policy-shortcut:hover,
+.org-policy-shortcut:focus-visible {
+  background: rgb(var(--yb-brand-soft));
+  color: rgb(var(--yb-brand));
 }
 
 .org-tree-toggle {

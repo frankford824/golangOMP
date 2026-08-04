@@ -1,7 +1,7 @@
 # 任务草稿
 
-> Revision: V1.3-A2 i_id-first task/ERP/search integration (2026-04-27)
-> Source: docs/api/openapi.yaml (post V1.3-A2)
+> Revision: V8 current contract (2026-07-20)
+> Source: docs/api/openapi.yaml
 
 > 来源: `docs/api/openapi.yaml`；业务口径参考 V1 四份权威文档。本文不覆盖 OpenAPI 契约。
 
@@ -71,7 +71,7 @@ curl -X POST https://api.example.com/v1/task-drafts \
 ### 前端最佳实践
 - 草稿有 7 天过期与 20 条上限，前端保存失败时应提示用户清理旧草稿。
 - 草稿 payload 由后端持久化，前端不要假设旧草稿一定符合最新创建表单。
-- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
 
 ## GET /v1/task-drafts/{draft_id}
@@ -162,6 +162,6 @@ curl -X DELETE https://api.example.com/v1/task-drafts/<draft_id> \
 ### 前端最佳实践
 - 草稿有 7 天过期与 20 条上限，前端保存失败时应提示用户清理旧草稿。
 - 草稿 payload 由后端持久化，前端不要假设旧草稿一定符合最新创建表单。
-- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
 

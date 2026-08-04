@@ -2,7 +2,6 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createPinia, setActivePinia } from 'pinia'
 
 const assignMock = vi.fn<(...args: unknown[]) => Promise<unknown>>(async () => ({}))
-const reassignModuleMock = vi.fn<(...args: unknown[]) => Promise<unknown>>(async () => ({}))
 const listMock = vi.fn<(...args: unknown[]) => Promise<unknown>>(async () => ({
   data: { data: [], pagination: { total: 0 } },
 }))
@@ -12,7 +11,6 @@ const getByIdMock = vi.fn<(...args: unknown[]) => Promise<unknown>>(async () => 
 vi.mock('@/services/api/tasksApi', () => ({
   tasksApi: {
     assign: assignMock,
-    reassignModule: reassignModuleMock,
     list: listMock,
     getDetail: getDetailMock,
     getById: getByIdMock,
@@ -55,7 +53,6 @@ describe('useTasksStore assign routing', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     assignMock.mockClear()
-    reassignModuleMock.mockClear()
     listMock.mockClear()
     getDetailMock.mockClear()
     getByIdMock.mockClear()
@@ -80,7 +77,6 @@ describe('useTasksStore assign routing', () => {
       '201',
       expect.objectContaining({ designer_id: 9, designer_name: 'Alice' }),
     )
-    expect(reassignModuleMock).not.toHaveBeenCalled()
   })
 
   it('retouch_task 重新指派时调用 tasksApi.assign', async () => {
@@ -102,7 +98,6 @@ describe('useTasksStore assign routing', () => {
       '202',
       expect.objectContaining({ designer_id: 10, designer_name: 'Carol' }),
     )
-    expect(reassignModuleMock).not.toHaveBeenCalled()
   })
 
   it('retouch_task 清空指派时调用 tasksApi.assign', async () => {
@@ -124,23 +119,6 @@ describe('useTasksStore assign routing', () => {
       '203',
       expect.objectContaining({ designer_id: null, remark: '回退待指派' }),
     )
-    expect(reassignModuleMock).not.toHaveBeenCalled()
-  })
-
-  it('retouch_task 指派流程不再调用 tasksApi.reassignModule', async () => {
-    const store = useTasksStore()
-    mockListWithTask(
-      baseRawTask({
-        id: '204',
-        task_type: 'retouch_task',
-        task_status: 'PendingAssign',
-      }),
-    )
-    await store.loadTasks()
-
-    await store.assignTask('204', { assigneeId: '11', assigneeName: 'David' })
-
-    expect(reassignModuleMock).not.toHaveBeenCalled()
   })
 
   it('customization design node assignment uses tasksApi.assign', async () => {
@@ -161,7 +139,6 @@ describe('useTasksStore assign routing', () => {
       '206',
       expect.objectContaining({ designer_id: 301, designer_name: 'ArtOp' }),
     )
-    expect(reassignModuleMock).not.toHaveBeenCalled()
   })
 
   it('普通 design task 指派逻辑保持为 tasksApi.assign', async () => {
@@ -181,6 +158,5 @@ describe('useTasksStore assign routing', () => {
       '205',
       expect.objectContaining({ designer_id: 12, designer_name: 'Eve' }),
     )
-    expect(reassignModuleMock).not.toHaveBeenCalled()
   })
 })

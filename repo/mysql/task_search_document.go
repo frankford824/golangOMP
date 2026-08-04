@@ -63,14 +63,19 @@ func mysqlTableExists(ctx context.Context, q taskSearchDocumentSQL, table string
 }
 
 func mysqlColumnExists(ctx context.Context, q taskSearchDocumentSQL, table, column string) bool {
+	exists, err := mysqlColumnExistsChecked(ctx, q, table, column)
+	return err == nil && exists
+}
+
+func mysqlColumnExistsChecked(ctx context.Context, q taskSearchDocumentSQL, table, column string) (bool, error) {
 	table = strings.TrimSpace(table)
 	column = strings.TrimSpace(column)
 	if table == "" || column == "" {
-		return false
+		return false, nil
 	}
 	key := mysqlSchemaCacheKey{kind: "column", table: table, column: column}
 	if exists, ok := loadMySQLSchemaPresenceCache(key); ok {
-		return exists
+		return exists, nil
 	}
 	queryCtx, cancelQuery := mysqlReadQueryContext(ctx)
 	defer cancelQuery()
@@ -82,11 +87,11 @@ func mysqlColumnExists(ctx context.Context, q taskSearchDocumentSQL, table, colu
 		   AND table_name = ?
 		   AND column_name = ?`, table, column).Scan(&n)
 	if err != nil {
-		return false
+		return false, err
 	}
 	exists := n > 0
 	storeMySQLSchemaPresenceCache(key, exists)
-	return exists
+	return exists, nil
 }
 
 func loadMySQLSchemaPresenceCache(key mysqlSchemaCacheKey) (bool, bool) {
@@ -118,25 +123,50 @@ func storeMySQLSchemaPresenceCache(key mysqlSchemaCacheKey, exists bool) {
 }
 
 func taskAssetsActiveSQL(ctx context.Context, q taskSearchDocumentSQL, alias string) string {
+	where, err := taskAssetsActiveSQLChecked(ctx, q, alias)
+	if err != nil {
+		return "1=0"
+	}
+	return where
+}
+
+func taskAssetsActiveSQLChecked(ctx context.Context, q taskSearchDocumentSQL, alias string) (string, error) {
 	prefix := strings.TrimSpace(alias)
 	if prefix != "" {
 		prefix += "."
 	}
-	hasDeletedAt := mysqlColumnExists(ctx, q, "task_assets", "deleted_at")
-	hasCleanedAt := mysqlColumnExists(ctx, q, "task_assets", "cleaned_at")
+	hasDeletedAt, err := mysqlColumnExistsChecked(ctx, q, "task_assets", "deleted_at")
+	if err != nil {
+		return "", fmt.Errorf("inspect task_assets.deleted_at: %w", err)
+	}
+	hasCleanedAt, err := mysqlColumnExistsChecked(ctx, q, "task_assets", "cleaned_at")
+	if err != nil {
+		return "", fmt.Errorf("inspect task_assets.cleaned_at: %w", err)
+	}
 	switch {
 	case hasDeletedAt && hasCleanedAt:
-		return fmt.Sprintf("COALESCE(%sdeleted_at, %scleaned_at) IS NULL", prefix, prefix)
+		return fmt.Sprintf("COALESCE(%sdeleted_at, %scleaned_at) IS NULL", prefix, prefix), nil
 	case hasDeletedAt:
-		return fmt.Sprintf("%sdeleted_at IS NULL", prefix)
+		return fmt.Sprintf("%sdeleted_at IS NULL", prefix), nil
 	case hasCleanedAt:
-		return fmt.Sprintf("%scleaned_at IS NULL", prefix)
+		return fmt.Sprintf("%scleaned_at IS NULL", prefix), nil
 	default:
-		return "1=1"
+		return "1=1", nil
 	}
 }
 
 func reindexTaskSearchDocument(ctx context.Context, q taskSearchDocumentSQL, taskID int64) error {
+	if err := reindexTaskSearchDocumentProjection(ctx, q, taskID); err != nil {
+		return err
+	}
+	return enqueueTaskSearchReindex(ctx, q, taskID)
+}
+
+// reindexTaskSearchDocumentProjection refreshes the MySQL exact-search
+// projection without producing another search_reindex_outbox item. The async
+// outbox consumer must use this core helper to avoid recursively resetting the
+// row it is currently processing.
+func reindexTaskSearchDocumentProjection(ctx context.Context, q taskSearchDocumentSQL, taskID int64) error {
 	if taskID <= 0 {
 		return nil
 	}
@@ -146,7 +176,17 @@ func reindexTaskSearchDocument(ctx context.Context, q taskSearchDocumentSQL, tas
 	if _, err := q.ExecContext(ctx, `SET SESSION group_concat_max_len = 1048576`); err != nil {
 		return fmt.Errorf("set task search group_concat_max_len: %w", err)
 	}
-	activeAssetWhere := taskAssetsActiveSQL(ctx, q, "")
+	activeAssetWhere, err := taskAssetsActiveSQLChecked(ctx, q, "")
+	if err != nil {
+		return err
+	}
+	return upsertTaskSearchDocumentProjection(ctx, q, taskID, activeAssetWhere)
+}
+
+// upsertTaskSearchDocumentProjection is the single canonical task projection
+// implementation. Callers that rebuild a batch must set group_concat_max_len
+// and resolve activeAssetWhere once before invoking it for each task.
+func upsertTaskSearchDocumentProjection(ctx context.Context, q taskSearchDocumentSQL, taskID int64, activeAssetWhere string) error {
 	query := strings.Replace(`
 			INSERT INTO task_search_documents (
 		  task_id, task_no, product_name_snapshot, sku_code, primary_sku_code, product_i_id,
@@ -208,7 +248,7 @@ func reindexTaskSearchDocument(ctx context.Context, q taskSearchDocumentSQL, tas
 		LEFT JOIN users designer ON designer.id = t.designer_id
 		LEFT JOIN users handler ON handler.id = t.current_handler_id
 		LEFT JOIN (
-			  SELECT task_id, GROUP_CONCAT(CONCAT_WS(' ', file_name, original_filename, storage_key, source_module_key) SEPARATOR ' ') AS asset_text
+			  SELECT task_id, GROUP_CONCAT(CONCAT_WS(' ', file_name, original_filename, storage_key, source_module_key) ORDER BY id SEPARATOR ' ') AS asset_text
 			  FROM task_assets
 			  WHERE task_id = ? AND {{active_asset_where}}
 			  GROUP BY task_id
@@ -219,7 +259,8 @@ func reindexTaskSearchDocument(ctx context.Context, q taskSearchDocumentSQL, tas
 		           revision.erp_product_i_id, revision.erp_product_name,
 		           COALESCE((SELECT latest.status FROM task_erp_outbox latest
 		                     WHERE latest.task_sku_item_id = tsi.id
-		                     ORDER BY latest.generation DESC, latest.id DESC LIMIT 1), '')) SEPARATOR ' ') AS planning_text
+		                     ORDER BY latest.generation DESC, latest.id DESC LIMIT 1), ''))
+		           ORDER BY tsi.id, revision.id SEPARATOR ' ') AS planning_text
 		  FROM task_sku_items tsi
 		  JOIN task_planning_sku_details planning_detail ON planning_detail.task_sku_item_id = tsi.id
 		  JOIN task_planning_sku_revisions revision ON revision.id = planning_detail.current_revision_id
@@ -259,6 +300,128 @@ func reindexTaskSearchDocument(ctx context.Context, q taskSearchDocumentSQL, tas
 	)
 	if err != nil {
 		return fmt.Errorf("reindex task search document: %w", err)
+	}
+	return nil
+}
+
+// TaskSearchProjectionRebuild reports the exact before/after row counts for a
+// full task_search_documents rebuild.
+type TaskSearchProjectionRebuild struct {
+	SourceRows int64
+	BeforeRows int64
+	AfterRows  int64
+	Changed    bool
+}
+
+// RebuildAllTaskSearchDocumentProjections atomically rebuilds every task
+// document through the same canonical upsert used by incremental writes. It
+// deliberately does not enqueue search_reindex_outbox rows: this command is
+// rebuilding the source projection itself, not scheduling another rebuild.
+func RebuildAllTaskSearchDocumentProjections(ctx context.Context, db *sql.DB, dryRun bool) (TaskSearchProjectionRebuild, error) {
+	result := TaskSearchProjectionRebuild{}
+	if db == nil {
+		return result, fmt.Errorf("task search rebuild database is nil")
+	}
+	if !taskSearchDocumentsTableExists(ctx, db) {
+		return result, fmt.Errorf("task_search_documents table is missing")
+	}
+	if dryRun {
+		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM tasks`).Scan(&result.SourceRows); err != nil {
+			return result, fmt.Errorf("count task search source rows: %w", err)
+		}
+		if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM task_search_documents`).Scan(&result.BeforeRows); err != nil {
+			return result, fmt.Errorf("count task search documents: %w", err)
+		}
+		return result, nil
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return result, fmt.Errorf("begin task search rebuild: %w", err)
+	}
+	defer tx.Rollback()
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM tasks`).Scan(&result.SourceRows); err != nil {
+		return result, fmt.Errorf("count task search source rows: %w", err)
+	}
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM task_search_documents`).Scan(&result.BeforeRows); err != nil {
+		return result, fmt.Errorf("count task search documents: %w", err)
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT id FROM tasks ORDER BY id`)
+	if err != nil {
+		return result, fmt.Errorf("list task search source ids: %w", err)
+	}
+	taskIDs := make([]int64, 0, result.SourceRows)
+	for rows.Next() {
+		var taskID int64
+		if err := rows.Scan(&taskID); err != nil {
+			rows.Close()
+			return result, fmt.Errorf("scan task search source id: %w", err)
+		}
+		taskIDs = append(taskIDs, taskID)
+	}
+	if err := rows.Close(); err != nil {
+		return result, fmt.Errorf("close task search source ids: %w", err)
+	}
+	if err := rows.Err(); err != nil {
+		return result, fmt.Errorf("list task search source ids: %w", err)
+	}
+	if int64(len(taskIDs)) != result.SourceRows {
+		return result, fmt.Errorf("task search source count drifted: counted=%d listed=%d", result.SourceRows, len(taskIDs))
+	}
+	if _, err := tx.ExecContext(ctx, `SET SESSION group_concat_max_len = 1048576`); err != nil {
+		return result, fmt.Errorf("set task search group_concat_max_len: %w", err)
+	}
+	activeAssetWhere, err := taskAssetsActiveSQLChecked(ctx, tx, "")
+	if err != nil {
+		return result, err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM task_search_documents`); err != nil {
+		return result, fmt.Errorf("delete task search documents: %w", err)
+	}
+	for _, taskID := range taskIDs {
+		if err := upsertTaskSearchDocumentProjection(ctx, tx, taskID, activeAssetWhere); err != nil {
+			return result, fmt.Errorf("rebuild task search document %d: %w", taskID, err)
+		}
+	}
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM task_search_documents`).Scan(&result.AfterRows); err != nil {
+		return result, fmt.Errorf("count rebuilt task search documents: %w", err)
+	}
+	if result.AfterRows != result.SourceRows {
+		return result, fmt.Errorf("task search rebuild row mismatch: source=%d after=%d", result.SourceRows, result.AfterRows)
+	}
+	var missingOrOrphan int64
+	if err := tx.QueryRowContext(ctx, `
+		SELECT
+		  (SELECT COUNT(*) FROM tasks t LEFT JOIN task_search_documents d ON d.task_id=t.id WHERE d.task_id IS NULL)
+		+ (SELECT COUNT(*) FROM task_search_documents d LEFT JOIN tasks t ON t.id=d.task_id WHERE t.id IS NULL)`).Scan(&missingOrOrphan); err != nil {
+		return result, fmt.Errorf("verify rebuilt task search ids: %w", err)
+	}
+	if missingOrOrphan != 0 {
+		return result, fmt.Errorf("task search rebuild id mismatch: missing_or_orphan=%d", missingOrOrphan)
+	}
+	if err := tx.Commit(); err != nil {
+		return result, fmt.Errorf("commit task search rebuild: %w", err)
+	}
+	result.Changed = true
+	return result, nil
+}
+
+func enqueueTaskSearchReindex(ctx context.Context, q taskSearchDocumentSQL, taskID int64) error {
+	if taskID <= 0 {
+		return nil
+	}
+	result, err := q.ExecContext(ctx, `
+		INSERT IGNORE INTO search_reindex_outbox (entity_type, entity_id, dedupe_key)
+		SELECT 'task', d.task_id,
+		       CONCAT('task:', d.task_id, ':', SHA2(CONCAT_WS('|', d.task_no, d.search_text, UNIX_TIMESTAMP(d.updated_at)), 256))
+		FROM task_search_documents d
+		WHERE d.task_id = ?`, taskID)
+	if err != nil {
+		return fmt.Errorf("enqueue task search reindex: %w", err)
+	}
+	if rows, err := result.RowsAffected(); err != nil {
+		return fmt.Errorf("read task search reindex enqueue result: %w", err)
+	} else if rows > 1 {
+		return fmt.Errorf("enqueue task search reindex: unexpected affected rows %d", rows)
 	}
 	return nil
 }

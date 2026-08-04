@@ -41,7 +41,10 @@ func (r *taskEventRepo) Append(
 	}
 
 	id := uuid.New().String()
-	now := time.Now()
+	// task_event_logs historically mixed the host's local wall clock with UTC
+	// timestamps from task assets and module events. Persist UTC so new events
+	// can be ordered against those records without an implicit timezone offset.
+	now := time.Now().UTC()
 
 	_, err = sqlTx.ExecContext(ctx, `
 		INSERT INTO task_event_logs (id, task_id, sequence, event_type, operator_id, payload, created_at)

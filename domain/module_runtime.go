@@ -9,26 +9,15 @@ const (
 	ModuleKeyBasicInfo     = "basic_info"
 	ModuleKeyDesign        = "design"
 	ModuleKeyAudit         = "audit"
-	ModuleKeyWarehouse     = "warehouse"
 	ModuleKeyCustomization = "customization"
-	ModuleKeyProcurement   = "procurement"
 	ModuleKeyRetouch       = "retouch"
 )
 
 const (
-	ModuleActionClaim                    = "claim"
-	ModuleActionSubmit                   = "submit"
-	ModuleActionApprove                  = "approve"
-	ModuleActionReject                   = "reject"
-	ModuleActionReassign                 = "reassign"
-	ModuleActionPoolReassign             = "pool_reassign"
-	ModuleActionAssetUploadSessionCreate = "asset_upload_session_create"
-	ModuleActionUpdateReferenceFiles     = "update_reference_files"
-	ModuleActionUpdateBasicInfo          = "update_basic_info"
-	ModuleActionUpdateDeadline           = "update_deadline"
-	ModuleActionUpdatePriority           = "update_priority"
-	ModuleActionCloseTask                = "close_task"
-	ModuleActionCancelTask               = "cancel_task"
+	ModuleActionClaim   = "claim"
+	ModuleActionSubmit  = "submit"
+	ModuleActionApprove = "approve"
+	ModuleActionReject  = "reject"
 )
 
 type TaskModule struct {
@@ -67,9 +56,14 @@ type ReferenceFileRefFlat struct {
 	SKUItemID            *int64    `json:"sku_item_id,omitempty"`
 	RetouchRequirementID *int64    `json:"retouch_requirement_id,omitempty"`
 	RefID                string    `json:"ref_id"`
-	OwnerModuleKey string    `json:"owner_module_key"`
-	Context        *string   `json:"context,omitempty"`
-	AttachedAt     time.Time `json:"attached_at"`
+	OwnerModuleKey       string    `json:"owner_module_key"`
+	Context              *string   `json:"context,omitempty"`
+	AttachedAt           time.Time `json:"attached_at"`
+	StorageKey           string    `json:"-"`
+	FileName             string    `json:"-"`
+	MimeType             string    `json:"-"`
+	FileSize             *int64    `json:"-"`
+	StorageStatus        string    `json:"-"`
 }
 
 type TaskCustomizationOrder struct {

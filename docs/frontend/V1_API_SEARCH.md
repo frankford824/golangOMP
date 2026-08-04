@@ -1,7 +1,7 @@
 # 搜索
 
-> Revision: V1.3-A2 i_id-first task/ERP/search integration (2026-04-27)
-> Source: docs/api/openapi.yaml (post V1.3-A2)
+> Revision: V8 current contract (2026-07-20)
+> Source: docs/api/openapi.yaml
 
 > 来源: `docs/api/openapi.yaml`；业务口径参考 V1 四份权威文档。本文不覆盖 OpenAPI 契约。
 
@@ -12,83 +12,7 @@
 - 搜索接口是只读入口，低权限用户可能拿到空数组而不是错误。
 - `GET /v1/search` 的任务搜索覆盖任务号、产品名、SKU、i_id、任务类型、创建人、所属组、设计师、日期与任务关联设计图/参考图文件信息。
 - 高频输入框应做前端 debounce，避免无意义请求。
-- 本文件覆盖 `3` 个 `/v1` path；同一路径多 method 合并在同一节。
-
-## GET /v1/assets/search
-
-### 简介
-支持方法: GET。
-
-- `GET`: Cross-task asset search for the asset management center. Source V1_ASSET_OWNERSHIP §5.2 / §5.3.
-
-### 鉴权与 RBAC
-- 需要 Bearer token(`Authorization: Bearer <token>`)，除非本节标为公开。
-- `GET` 允许角色: 已登录 / scope-aware。
-- 字段级授权: 以后端返回的 `error.code` / `deny_code` 为准。
-
-### 请求体 schema
-参数:
-
-| 参数 | 位置 | 类型 | 必填 | 说明 |
-|---|---|---|---|---|
-| `keyword` | query | string | 否 | Fuzzy match system asset fields and indexed external resource paths/names. |
-| `source` | query | enum(all/system/external) | 否 | Resource source bucket. `all` returns system + external; external resources are read-only and prepared for preview/download on demand. |
-| `module_key` | query | enum(basic_info/design/audit/warehouse/customization/procurement/retouch) | 否 | Business origin filter for system task-owned assets. UI labels this as the asset production stage, e.g. `design` = 设计提交, `audit` = 常规审核修订, `customization` = 定制链路上传, `basic_info` = 基础信息参考, `retouch` = 精修需求素材. External resources are excluded when this filter is set. |
-| `owner_team_code` | query | string | 否 | Restrict to one owner team. |
-| `is_archived` | query | enum(true/false/all) | 否 | Archive filter. Default `false`. `all` returns active + archived. |
-| `task_status` | query | enum(open/closed/archived/all) | 否 | Task lifecycle filter. |
-| `business_lane` | query | enum(normal/customization) | 否 | System task lane filter for task-owned assets. `normal` includes legacy rows whose lane is empty; external resources are excluded when this filter is set. |
-| `asset_type` | query | enum(delivery/reference/source/preview/design_thumb) | 否 | System asset file-type filter. Use `delivery` for product images, `reference` for reference/material images, and `source` for source files; use `module_key` to distinguish which workflow stage produced the file. External resources are excluded when this filter is set. |
-| `time_basis` | query | enum(asset_uploaded_at/task_created_at) | 否 | Time field used by `created_from` / `created_to`. Default `asset_uploaded_at` filters by the current asset version upload/ingest time; `task_created_at` filters by the owning task creation time. |
-| `created_from` | query | string | 否 | Inclusive lower bound for the selected `time_basis`. |
-| `created_to` | query | string | 否 | Inclusive upper bound for the selected `time_basis`. |
-| `page` | query | integer | 否 | - |
-| `size` | query | integer | 否 | - |
-
-请求体: 无请求体。
-
-### 响应体 schema
-成功响应: `200 application/json`
-
-```json
-{
-  "data": [
-    {}
-  ],
-  "total": 123,
-  "page": 123,
-  "size": 123
-}
-```
-
-| 字段 | 类型 | 必填 | 说明 |
-|---|---|---|---|
-| `data` | array<Asset> | 否 | - |
-| `total` | integer | 否 | - |
-| `page` | integer | 否 | - |
-| `size` | integer | 否 | - |
-
-### 错误码
-| HTTP | code | deny_code | 说明 |
-|---|---|---|---|
-| 401 | UNAUTHENTICATED | - | 未登录、token 缺失或 token 过期。 |
-| 403 | PERMISSION_DENIED | 见接口返回 | 角色、组织范围、字段级授权或流程状态不允许。 |
-| 404 | NOT_FOUND | - | 资源不存在或当前用户不可见。 |
-| 409 | CONFLICT | 见接口返回 | 状态竞态、重复操作或版本冲突。 |
-| 422 | VALIDATION_ERROR | - | 请求参数或业务字段校验失败。 |
-
-### curl 示例
-```bash
-curl -X GET https://api.example.com/v1/assets/search \
-  -H "Authorization: Bearer $TOKEN"
-```
-
-### 前端最佳实践
-- 搜索接口是只读入口，低权限用户可能拿到空数组而不是错误。
-- `GET /v1/search` 的任务搜索覆盖任务号、产品名、SKU、i_id、任务类型、创建人、所属组、设计师、日期与任务关联设计图/参考图文件信息。
-- 高频输入框应做前端 debounce，避免无意义请求。
-- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
-- 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
+- 本文件覆盖 `2` 个 `/v1` path；同一路径多 method 合并在同一节。
 
 ## GET /v1/design-sources/search
 
@@ -154,7 +78,7 @@ curl -X GET https://api.example.com/v1/design-sources/search \
 - 搜索接口是只读入口，低权限用户可能拿到空数组而不是错误。
 - `GET /v1/search` 的任务搜索覆盖任务号、产品名、SKU、i_id、任务类型、创建人、所属组、设计师、日期与任务关联设计图/参考图文件信息。
 - 高频输入框应做前端 debounce，避免无意义请求。
-- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
 
 ## GET /v1/search
@@ -177,6 +101,7 @@ curl -X GET https://api.example.com/v1/design-sources/search \
 | `q` | query | string | 是 | - |
 | `scope` | query | enum(all/tasks/assets/products/users) | 否 | - |
 | `limit` | query | integer | 否 | Max items per result array. Default 20 (IA §4.2). |
+| `mode` | query | enum(auto/exact/hybrid) | 否 | Auto keeps identifier-like input exact and uses hybrid retrieval only for natural language. |
 
 请求体: 无请求体。
 
@@ -199,6 +124,12 @@ curl -X GET https://api.example.com/v1/design-sources/search \
     "users": [
       "..."
     ]
+  },
+  "retrieval": {
+    "requested_mode": "auto",
+    "mode": "exact",
+    "degraded": true,
+    "candidates": 123
   }
 }
 ```
@@ -206,7 +137,8 @@ curl -X GET https://api.example.com/v1/design-sources/search \
 | 字段 | 类型 | 必填 | 说明 |
 |---|---|---|---|
 | `query` | string | 是 | - |
-| `results` | SearchResultGroup | 是 | Source: V1_INFORMATION_ARCHITECTURE §4.2. Decision (R1.7-D): all four arrays are item-schema fixed; `users[]` is always `[]` for callers other than super_admin / hr_admin regardless of match count (IA §4.3 row-level policy; R1.7-D Q1=A1 + Q2=U1). |
+| `results` | SearchResultGroup | 是 | All four arrays use fixed item schemas. Each branch is fail-closed by its explicit capability and stable-ID data scope. `users[]` is returned only when the caller has `access.view` or `access.manage`; legacy role names do not grant search visibility. |
+| `retrieval` | SearchRetrievalMeta | 是 | - |
 
 ### 错误码
 | HTTP | code | deny_code | 说明 |
@@ -223,6 +155,6 @@ curl -X GET https://api.example.com/v1/search \
 - 搜索接口是只读入口，低权限用户可能拿到空数组而不是错误。
 - `GET /v1/search` 的任务搜索覆盖任务号、产品名、SKU、i_id、任务类型、创建人、所属组、设计师、日期与任务关联设计图/参考图文件信息。
 - 高频输入框应做前端 debounce，避免无意义请求。
-- 优先用 canonical 路径；兼容或 deprecated 路径仅用于迁移兜底。
+- 只使用本文列出的当前 V8 路径；已退役路径不再提供兼容入口。
 - 失败时必须展示 `error.code` 或 `deny_code`，不要只显示 HTTP 状态码。
 
