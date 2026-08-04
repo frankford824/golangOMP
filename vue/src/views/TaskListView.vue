@@ -583,7 +583,7 @@ import type {
 import type { TaskListParams } from '@/services/apiTypes'
 import { useDesignerOptions } from '@/composables/useDesignerOptions'
 import {
-  formatDateBeijing,
+  formatTaskRecordDateBeijing,
   formatTaskDueAtDisplay,
   isOverdueByTimestamp as checkOverdue,
 } from '@/utils/date'
@@ -1672,7 +1672,7 @@ function formatDate(iso: string): string {
 }
 
 function formatUpdatedDate(iso: string): string {
-  return formatDateBeijing(iso)
+  return formatTaskRecordDateBeijing(iso)
 }
 
 function goCreate() {

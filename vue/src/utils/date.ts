@@ -5,6 +5,10 @@
  * 使用 `parseBackendInstant`：去掉末尾 Z 或 ±HH(:MM)，剩余数字 **按 UTC 墙钟**，再转 **Asia/Shanghai** 展示。
  * （与后端「数字多数字段实为 UTC、后缀可能误导」的口径一致。）
  *
+ * **任务记录时间**（`created_at` / `updated_at`）：MySQL DATETIME 由北京时间数据库时钟产生，
+ * 但旧连接会把同一组数字序列化为带 `Z` 的 JSON。使用 `formatTaskRecordDateBeijing`
+ * 将数字部分按北京时间墙钟解释，不能与 UTC 存储的截止时间共用默认解析器。
+ *
  * **资产版本上传时间**（`TaskAssetVersion.uploaded_at` 等）：使用 `format*OffsetAware`：
  * 带 Z / 数值偏移时按 **标准 ISO** 解析绝对时刻，再转上海展示（`+08:00` 与钟点一致时显示为字面本地时间）。
  * 无偏移后缀时回退为与 `parseBackendInstant` 相同逻辑。
@@ -24,6 +28,18 @@ function parseBackendInstant(iso: string): Date {
   if (DATE_ONLY_RE.test(s)) return new Date(`${s}T00:00:00+08:00`)
   const core = s.replace(/[Zz]|[+-]\d{2}:?\d{2}$/g, '').trimEnd()
   return new Date((core.length ? core : s) + 'Z')
+}
+
+/**
+ * 任务 created_at / updated_at：忽略历史 JSON 中误导性的时区后缀，
+ * 将 DATETIME 数字按北京时间墙钟解析。
+ */
+function parseTaskRecordInstant(iso: string): Date {
+  const s = iso.trim()
+  if (!s) return new Date(NaN)
+  if (DATE_ONLY_RE.test(s)) return new Date(`${s}T00:00:00+08:00`)
+  const core = s.replace(/[Zz]|[+-]\d{2}:?\d{2}$/g, '').trimEnd().replace(' ', 'T')
+  return new Date(`${core}+08:00`)
 }
 
 function hasExplicitTimeZoneSuffix(s: string): boolean {
@@ -135,6 +151,24 @@ export function taskBeijingHour(iso: string | null | undefined): number | null {
 export function formatDateBeijing(iso: string | null | undefined): string {
   if (!iso) return ''
   const d = parseBackendInstant(iso)
+  return d.toLocaleString(BEIJING_LOCALE, {
+    timeZone: BEIJING_TZ,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+}
+
+/**
+ * 格式化任务 created_at / updated_at。仅用于数据库本地记录时间；
+ * 截止时间、预约时间等 UTC 业务时间仍使用 formatDateBeijing。
+ */
+export function formatTaskRecordDateBeijing(iso: string | null | undefined): string {
+  if (!iso) return ''
+  const d = parseTaskRecordInstant(iso)
+  if (Number.isNaN(d.getTime())) return ''
   return d.toLocaleString(BEIJING_LOCALE, {
     timeZone: BEIJING_TZ,
     year: 'numeric',
