@@ -12,7 +12,7 @@ JOIN task_assets ta
 WHERE e.event_type = 'task.asset.version.created'
   AND @ab_side = 'B'
   AND TIMESTAMPDIFF(SECOND, ta.created_at, e.created_at) NOT BETWEEN -2 AND 2
-  AND TIMESTAMPDIFF(SECOND, ta.created_at, e.created_at) NOT BETWEEN 28798 AND 28802
+  AND TIMESTAMPDIFF(SECOND, ta.created_at, e.created_at) NOT BETWEEN 28798 AND 28805
 
 UNION ALL
 

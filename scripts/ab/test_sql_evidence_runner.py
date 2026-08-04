@@ -99,6 +99,14 @@ class SQLEvidenceRunnerTest(unittest.TestCase):
         self.assertIn("negative.legacy_asset_referenced_by_v8", negative)
         self.assertIn("negative.legacy_asset_with_bound_coordinates", negative)
 
+        timestamp_contract = (
+            SQL_DIR / "12_legacy_timestamp_contract.sql"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            "NOT BETWEEN 28798 AND 28805",
+            timestamp_contract,
+        )
+
     def test_fake_adapter_runs_two_single_sessions_and_builds_gate_report(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)

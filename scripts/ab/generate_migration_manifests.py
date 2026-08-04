@@ -33,6 +33,7 @@ DELIVERY_SOURCE_ALIAS_POLICY = "delivery_source_alias"
 REJECTED_HISTORY_POLICY = "rejected_history"
 REOPEN_POLICY = "reopen"
 POST_CLOSE_REPLACEMENT_POLICY = "legacy_post_close_replacement_v1"
+UPLOAD_CLEANUP_GRACE_SECONDS = 90
 RETOUCH_SOURCE_OPTIONAL_POLICY = "retouch_source_optional"
 RETOUCH_TERMINAL_SUBMIT_POLICY = "legacy_retouch_terminal_submit_v1"
 RETOUCH_UNSCOPED_ATOMIC_BATCH_POLICY = "legacy_retouch_unscoped_atomic_batch_v1"
@@ -639,7 +640,8 @@ def prune_inherited_reopen_snapshot(
     event_type = str(event.get("event_type") or "").lower()
     if event_type in UPLOAD_SESSION_COMPLETED_EVENTS or event_type == "task.audit.supplement_uploaded":
         boundary = (
-            parse_utc_timestamp(boundary) + dt.timedelta(seconds=60)
+            parse_utc_timestamp(boundary)
+            + dt.timedelta(seconds=UPLOAD_CLEANUP_GRACE_SECONDS)
         ).isoformat().replace("+00:00", "Z")
     asset_by_id = {int(asset["id"]): asset for asset in assets}
     protected = {int(member_id) for member_id in protected_member_ids}

@@ -2808,6 +2808,42 @@ class GeneratorTest(unittest.TestCase):
         self.assertEqual(revision["source_alias_from_task_asset_id"], 28756)
         self.assertEqual(revision["mode"], "single")
 
+    def test_upload_reopen_includes_observed_sixty_six_second_cleanup(self):
+        revision = {
+            "status": "finalized",
+            "source_stage": "reopen",
+            "created_at": "2026-07-27T03:05:28Z",
+            "source_alias_from_task_asset_id": 27957,
+            "final_task_asset_ids": [27957, 28038],
+            "mode": "set",
+        }
+        assets = [
+            {
+                "id": 27957,
+                "asset_type": "delivery",
+                "upload_status": "uploaded",
+                "deleted_at": "2026-07-27T03:06:34Z",
+            },
+            {
+                "id": 28038,
+                "asset_type": "delivery",
+                "upload_status": "uploaded",
+                "deleted_at": None,
+            },
+        ]
+        event = {
+            "event_type": "task.asset.upload_session.completed",
+            "created_at": "2026-07-27T03:05:28Z",
+        }
+
+        MODULE.prune_inherited_reopen_snapshot(
+            revision, assets, event, "sku"
+        )
+
+        self.assertEqual(revision["final_task_asset_ids"], [28038])
+        self.assertEqual(revision["source_alias_from_task_asset_id"], 28038)
+        self.assertEqual(revision["mode"], "single")
+
     def test_non_upload_reopen_does_not_prune_future_lifecycle(self):
         revision = {
             "status": "draft",
