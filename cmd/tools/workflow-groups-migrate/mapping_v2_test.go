@@ -560,6 +560,40 @@ func TestReviewedWarehouseDecisionIsExplicitAndEvidenceBound(t *testing.T) {
 	}
 }
 
+func TestReviewedIncrementalRetouchDecisionIsPolicyBound(t *testing.T) {
+	confirmedAt := time.Date(2026, 8, 4, 11, 15, 30, 0, time.UTC)
+	decision := taskStateDecisionMapping{
+		TaskID:           2559,
+		FromStatus:       "Completed",
+		TargetStatus:     "InProgress",
+		EvidenceEventIDs: []string{"task_event_log:retouch-terminal"},
+		Confidence:       "confirmed_auto",
+		ReviewPolicyIDs:  []string{reviewPolicyLegacyRetouchPrematurePartial},
+		ConfirmedBy:      1,
+		ConfirmedAt:      confirmedAt,
+		ConfirmationNote: "reviewed frozen incremental retouch terminal",
+	}
+	decision.ManifestRowHash, _ = taskStateDecisionManifestHash(decision)
+	if err := validateTaskStateDecisions(
+		mappingFile{Version: 2, TaskDecisions: []taskStateDecisionMapping{decision}},
+		false,
+	); err != nil {
+		t.Fatalf("validate incremental retouch decision: %v", err)
+	}
+
+	decision.ReviewPolicyIDs = []string{
+		reviewPolicyLegacyRetouchPrematurePartial,
+		reviewPolicyReopen,
+	}
+	decision.ManifestRowHash, _ = taskStateDecisionManifestHash(decision)
+	if err := validateTaskStateDecisions(
+		mappingFile{Version: 2, TaskDecisions: []taskStateDecisionMapping{decision}},
+		false,
+	); err == nil {
+		t.Fatal("expected incremental retouch decision with extra policy to fail")
+	}
+}
+
 func customizationTerminalDraft(t *testing.T, taskID, sourceID int64) resourceMapping {
 	t.Helper()
 	revision := validV2Revision(t)

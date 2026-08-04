@@ -349,7 +349,7 @@ func hasBoundPolicyReason(revision resourceRevisionMapping, policy string) bool 
 }
 
 func isLegacyRetouchPrematurePartialRevision(taskID int64, revision resourceRevisionMapping) bool {
-	return containsInt64([]int64{981, 1035, 1045, 1052, 1214}, taskID) &&
+	return taskID > 0 &&
 		hasBoundPolicyReason(revision, reviewPolicyLegacyRetouchPrematurePartial)
 }
 

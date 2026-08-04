@@ -210,8 +210,10 @@ type taskStateDecisionMapping struct {
 func isReviewedRetouchReopenDecision(decision taskStateDecisionMapping) bool {
 	return decision.FromStatus == "Completed" &&
 		decision.TargetStatus == "InProgress" &&
-		containsString(decision.ReviewPolicyIDs, reviewPolicyLegacyRetouchPrematurePartial) &&
-		containsInt64([]int64{981, 1035, 1045, 1052, 1214}, decision.TaskID)
+		equalStringSlices(
+			decision.ReviewPolicyIDs,
+			[]string{reviewPolicyLegacyRetouchPrematurePartial},
+		)
 }
 
 type assetRecoveryMapping struct {

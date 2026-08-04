@@ -112,8 +112,12 @@ func TestValidateRevisionEventSemanticsAllowsApprovedLegacyRetouchExceptions(t *
 	if err := validateRevisionEventSemantics(981, partial, submit); err != nil {
 		t.Fatalf("approved premature partial draft: %v", err)
 	}
-	if err := validateRevisionEventSemantics(982, partial, submit); err == nil {
-		t.Fatal("expected premature partial policy outside frozen task allowlist to fail")
+	if err := validateRevisionEventSemantics(2559, partial, submit); err != nil {
+		t.Fatalf("approved incremental premature partial draft: %v", err)
+	}
+	partial.Reason = "unbound incremental premature partial"
+	if err := validateRevisionEventSemantics(2559, partial, submit); err == nil {
+		t.Fatal("expected incremental premature partial policy without bound reason to fail")
 	}
 }
 
